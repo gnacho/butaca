@@ -1,0 +1,20 @@
+# Butaca (fork de plx-native) - ignore provisional
+# El código real vendrá de un overlay sobre el árbol de plx-jellyfin.
+# Esto es solo para el esqueleto inicial del repo.
+
+# Build / toolchain
+pkg/*.ipk
+pkg/*.sha256
+target/
+target-*/
+Cargo.lock
+*.o
+
+# Local / secretos
+.tv-host
+.tv-mac
+src/config.local.h
+tests/manifest.local.json
+pkg/auth.json
+pkg/lab.json
+*.local.json
