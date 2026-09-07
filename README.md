@@ -1,48 +1,47 @@
 # Butaca
 
-Cliente nativo de [Jellyfin](https://jellyfin.org/) para televisores LG webOS. Nada de página
-web: la interfaz se dibuja directamente en la GPU a 60 fps y el vídeo lo decodifica el propio
-hardware de la televisión.
+A native [Jellyfin](https://jellyfin.org/) client for LG webOS televisions. Not a web page: the
+interface is drawn directly on the GPU at 60 fps, and the video is decoded by the TV's own
+hardware.
 
-Un sillón en el que sentarse a ver lo que hay en tu servidor.
+An armchair to sit in and watch whatever is on your server.
 
-## Objetivo
+## Why
 
-Sacar el máximo rendimiento posible a televisores LG **"no tan modernos"**. Los modelos con
-webOS 5.x y anteriores arrastran un Chromium viejo y lento: las apps web oficiales se quedan
-cortas justo donde no deberían, y no hay forma de que el navegador llegue a los 60 fps estables
-de una interfaz nativa.
+It's about getting the most out of LG TVs that are not exactly new. Models running webOS 5.x and
+earlier ship with a Chromium that is old and slow: the official web apps come up short exactly
+where they shouldn't, and there's no way a browser reaches the stable 60 fps of a native
+interface.
 
-Butaca ataca ese problema de raíz: tira el navegador, dibuja sobre la GPU y entrega el vídeo al
-mismo silicio que usan las apps integradas. Sin Chromium, sin JavaScript, sin web view.
+Butaca attacks that at the root: it throws the browser away, draws on the GPU, and hands the
+video to the same silicon the built-in apps use. No Chromium, no JavaScript, no web view.
 
-## Qué hay hecho
+## What's done
 
-Portado sobre [plx-native](https://github.com/GLinnik21/plx-native), sustituyendo el backend
-Plex por el de Jellyfin:
+Ported from [plx-native](https://github.com/GLinnik21/plx-native), swapping the Plex backend for
+Jellyfin:
 
-- Interfaz nativa (Rust) a 60 fps sobre la TV, con escenas de regresión que lo miden en el
-  propio televisor en vez de confiar en ello.
-- Login de Jellyfin en pantalla: URL, usuario y contraseña, sin configuración previa.
-- Navegación de librerías, detalle, perfiles y búsqueda cableadas a la API de Jellyfin.
-- Playback directo (H.264 / HEVC) por la tubería de vídeo nativa de la TV.
-- Adaptación de la identidad propia: nombre "Butaca", iconos y texto de pantalla.
+- Native (Rust) interface at 60 fps on the TV, with regression scenes that measure it on the
+  actual television instead of just trusting it.
+- On-screen Jellyfin login: URL, username and password, with no prior setup.
+- Library browsing, detail, profiles and search wired to the Jellyfin API.
+- Direct playback (H.264 / HEVC) through the TV's native video pipeline.
+- Custom identity: the name "Butaca", the icons and the on-screen text.
 
-*Trabajo en curso: se sigue iterando; cada versión se acumula en el árbol de trabajo.*
+*Work in progress: it keeps being iterated on; each release is accumulated in the working tree.*
 
-## Agradecimiento
+## Credits
 
-Este proyecto es un fork de [plx-native](https://github.com/GLinnik21/plx-native), el cliente
-nativo Plex para webOS de [Gleb Linnik](https://github.com/GLinnik21). El motor de renderizado,
-la capa de host y el pipeline de vídeo sobre los que se apoya Butaca son suyos, y la cantidad de
-horas que le habrá costado llegar hasta ahí es evidente. Le estamos profundamente agradecidos, y
-esto no existiría sin su trabajo.
+This project is a fork of [plx-native](https://github.com/GLinnik21/plx-native), the native Plex
+client for webOS by [Gleb Linnik](https://github.com/GLinnik21). The rendering engine, the host
+layer and the video pipeline Butaca builds on are his, and the hours it must have taken him to
+get there are obvious. We're deeply grateful, and this wouldn't exist without his work.
 
-## Licencia
+## License
 
-[MIT](LICENSE). El copyright original pertenece a Gleb Linnik (ver LICENSE); los cambios y
-adaptaciones de Butaca se publican bajo los mismos términos. La marca "Butaca" y el fork en sí no
-están afiliados, respaldados ni patrocinados por Jellyfin, LG ni Gleb Linnik.
+[MIT](LICENSE). The original copyright belongs to Gleb Linnik (see LICENSE); Butaca's changes and
+adaptations are published under the same terms. The "Butaca" name and the fork itself are not
+affiliated with, endorsed or sponsored by Jellyfin, LG or Gleb Linnik.
 
-**Unofficial client.** "Jellyfin", "LG" y "webOS" son marcas de sus respectivos propietarios;
-donde aparecen, identifican el servicio o la plataforma con la que trabaja la aplicación.
+**Unofficial client.** "Jellyfin", "LG" and "webOS" are trademarks of their respective owners;
+where they appear, they identify the service or platform the app works with.
