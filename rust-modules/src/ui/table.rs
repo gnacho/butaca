@@ -200,9 +200,14 @@ impl Section {
 /// between the two groups it divides — a gap between stacked blocks comes from a `space` rung, so
 /// it is the rung, not a hand-tuned number.
 const SEP_H: f32 = theme::space::MD;
-/// The list's own vertical padding: the amount an owning panel must subtract from its height to get
-/// the visible list height for [`TableView::update`]. Exposed because each popover screen was
-/// re-hardcoding `panel_h - 40.0` and would drift the moment either pad changed.
+/// The list's own vertical padding — air above the first row, air below the last.
+/// [`TableView::update`] subtracts it from the frame height it is given, so a caller never derives
+/// this number itself. It USED to be something every popover screen subtracted by hand
+/// (`panel_h - 40.0`), which is exactly the footgun this constant's own doc used to warn about and
+/// which half the callers fell into anyway — passing the raw frame height straight through, so the
+/// scroll clamp thought the viewport was `PAD_V` taller than it is and stopped short of the true
+/// bottom. Settings ▸ Privacy & data's *Delete all local data* row (last in its list) was the
+/// reported case; `legal.rs`, `onboard.rs` and both of `consent.rs`'s tables had the identical bug.
 pub const PAD_V: f32 = TOP_PAD + BOT_PAD;
 /// A plain row (label only) — mockup rowBase padding 13 + 34px label.
 ///
@@ -356,6 +361,34 @@ impl TableView {
         self.sections.iter().map(|s| s.rows.len()).sum::<usize>() as i32
     }
 
+    /// The LAST **selectable** row's global index, or `None` for a table with none.
+    ///
+    /// Not `n_rows() - 1`: [`Row::separator`] rows occupy an index but cannot be landed on, so on
+    /// a list that ends in one the last index is a row the selection can never reach. The route
+    /// family's "DOWN off the last row enters the action band" rule
+    /// ([`crate::ui::route_screen`]'s rule 2) is graded against this, so the band stays reachable
+    /// whatever the list ends with.
+    pub fn last_row(&self) -> Option<i32> {
+        (0..self.n_rows()).rev().find(|&i| !self.rows_at(i).sep)
+    }
+
+    /// Is the selection on the last selectable row? — rule 2's own predicate.
+    pub fn at_last_row(&self) -> bool {
+        self.last_row() == Some(self.sel)
+    }
+
+    /// Does the row at `i` OPEN something — i.e. does it wear the drill-in chevron?
+    ///
+    /// The route family's rule 8 (RIGHT enters nested content) is a statement about the chevron a
+    /// row already draws, so it is read off that rather than kept as a second per-screen list that
+    /// can drift from what is painted. A toggle row, which changes a value in place, answers
+    /// `false`, and RIGHT does nothing on it.
+    pub fn row_opens(&self, i: i32) -> bool {
+        i >= 0
+            && i < self.n_rows()
+            && matches!(self.rows_at(i).ticon, Some(crate::ui::icons::Icon::Chevron))
+    }
+
     /// the full drawn height of the content (headers + rows + top/bottom padding) — the owner
     /// sizes its panel to this (clamped) so the panel hugs the list, tvOS-style.
     pub fn measured_height(&self) -> f32 {
@@ -458,10 +491,13 @@ impl TableView {
         h + self.row_height(self.n_rows() - 1)
     }
 
-    pub fn update(&mut self, dt: f32, visible_h: f32) {
+    /// `frame_h` is the SAME rect height passed to [`Self::draw`]/[`Self::hit_row`] — this
+    /// function subtracts [`PAD_V`] itself, so a caller must not subtract it a second time.
+    pub fn update(&mut self, dt: f32, frame_h: f32) {
         if self.n_rows() == 0 {
             return;
         }
+        let visible_h = (frame_h - PAD_V).max(0.0);
         let top = self.row_top(self.sel);
         let rh = self.row_height(self.sel);
         // top and bottom edges spring independently → the pill stretches/morphs between rows
@@ -492,6 +528,14 @@ impl TableView {
             self.hl_bot.pos,
             self.hl_bot.vel,
         )
+    }
+
+    /// The scroll spring's settled position, in content coordinates. Test-only: this is what a
+    /// regression on the `update(dt, frame_h)` contract shows up as first — the pill motion test
+    /// above cannot see it, since a 2-row list never scrolls.
+    #[cfg(test)]
+    pub(crate) fn scroll_pos(&self) -> f32 {
+        self.scroll.pos
     }
 
     pub fn draw(&self, p: Painter, frame: Rect) {
@@ -876,6 +920,53 @@ mod tests {
     /// The shared table promises a travelling focus pill. A caller that changes `sel` but forgets
     /// to call `update` gets exactly the reported failure: new-row ink with the old pill, followed
     /// by a later jump. Pin both halves of the motion contract here — moving and genuinely resting.
+    /// **The last SELECTABLE row is not the last index.** `route_screen`'s rule 2 (DOWN off the
+    /// last row enters the action band) is graded on this, so on a list that ends in a grouping
+    /// hairline — which `move_sel` can never land on — the band would be unreachable if the
+    /// predicate were `sel == n_rows() - 1`.
+    #[test]
+    fn the_last_selectable_row_is_never_a_grouping_hairline() {
+        let mut t = TableView::new();
+        t.set_sections(
+            vec![Section::new("S")
+                .row(Row::new("a"))
+                .row(Row::new("b"))
+                .row(Row::separator())],
+            0,
+            false,
+        );
+        assert_eq!(t.n_rows(), 3);
+        assert_eq!(t.last_row(), Some(1), "the hairline is not a landable row");
+        t.sel = 1;
+        assert!(t.at_last_row());
+        t.sel = 0;
+        assert!(!t.at_last_row());
+
+        let empty = TableView::new();
+        assert_eq!(empty.last_row(), None);
+        assert!(!empty.at_last_row());
+    }
+
+    /// **A row OPENS something exactly when it wears the drill-in chevron.** `route_screen`'s
+    /// rule 8 is read off the painted affordance rather than kept as a second per-screen list.
+    #[test]
+    fn a_row_opens_something_exactly_when_it_wears_the_drill_in_chevron() {
+        let mut t = TableView::new();
+        t.set_sections(
+            vec![Section::new("S")
+                .row(Row::new("a door").chevron(true))
+                .row(Row::new("a switch").toggle(true))
+                .row(Row::new("a plain row"))],
+            0,
+            false,
+        );
+        assert!(t.row_opens(0));
+        assert!(!t.row_opens(1), "a switch changes a value in place");
+        assert!(!t.row_opens(2));
+        assert!(!t.row_opens(-1), "and an out-of-range ask answers no rather than panicking");
+        assert!(!t.row_opens(99));
+    }
+
     #[test]
     fn the_focus_pill_runs_between_rows_and_goes_quiet_at_rest() {
         let _serial = crate::testlock::serial();
@@ -910,6 +1001,44 @@ mod tests {
         assert!(
             resting.1.abs() < 0.01,
             "settled pill still reports motion: {resting:?}"
+        );
+    }
+
+    /// **Regression for the Settings ▸ Privacy & data report**: "Delete all local data" (the last
+    /// row) never scrolled fully into view. `update`'s `frame_h` is the SAME height passed to
+    /// `draw`/`hit_row` — a caller that (wrongly) subtracted [`PAD_V`] before calling `update`, or
+    /// an `update` that (wrongly) failed to subtract it internally, makes the scroll clamp believe
+    /// the viewport is `PAD_V` taller than the clipped frame it is actually drawn into, so it stops
+    /// short of the true bottom by exactly that amount — the last row settles PARTIALLY behind the
+    /// clip. This overflows a small frame on purpose and settles on the last row.
+    #[test]
+    fn scrolling_to_the_last_row_reveals_it_fully_above_the_bottom_pad() {
+        let _serial = crate::testlock::serial();
+        let mut t = TableView::new();
+        let mut sec = Section::new("S");
+        for i in 0..20 {
+            sec = sec.row(Row::new(format!("row {i}")));
+        }
+        t.set_sections(vec![sec], 0, false);
+        let content_h = t.measured_height() - PAD_V;
+        let frame_h = 300.0; // far shorter than the 20-row content, so this frame must scroll
+        assert!(content_h > frame_h, "test needs overflowing content");
+
+        t.move_sel(t.n_rows() - 1);
+        for _ in 0..300 {
+            t.update(1.0 / 60.0, frame_h);
+        }
+
+        // The frame passed to `draw` reserves TOP_PAD above row 0 and BOT_PAD below the last row —
+        // so at rest the last row's bottom (`content_h`, in content coordinates) must land exactly
+        // `BOT_PAD` above the clipped frame's bottom edge, not merely somewhere inside it.
+        let last_row_bottom_on_screen = TOP_PAD + content_h - t.scroll_pos();
+        let want = frame_h - BOT_PAD;
+        assert!(
+            (last_row_bottom_on_screen - want).abs() < 0.5,
+            "last row settled at {last_row_bottom_on_screen}, wanted {want} \
+             (frame_h={frame_h}, content_h={content_h}, scroll={})",
+            t.scroll_pos()
         );
     }
 }

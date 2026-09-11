@@ -226,11 +226,45 @@ CFLAGS       = --sysroot=$(SYSROOT) -O2 -fno-omit-frame-pointer -funwind-tables 
 # DEBUG=1 keeps DWARF in the binary so a crash PC symbolizes to file:line instead of just
 # a function name (tools/crash-report.sh / the crash-triage skill). Same codegen, bigger
 # binary — deploy it only while chasing a crash.
+# The C-side twin of RUST_REMAP below, for the exact same reason: `-g` writes the CURRENT
+# WORKING DIRECTORY (`DW_AT_comp_dir`) and every `-I`/sysroot path into DWARF, which
+# --remap-path-prefix cannot touch — that flag is rustc's, and GCC never sees it. Found on the
+# first release build that ever combined SYMBOLS=1 with ci/check-elf.sh's build-host-identity
+# scan (both existed before; this exact pairing had not): pkg/plxnative, built with SYMBOLS=1 on
+# CI, carried five `/home/runner/work/plx-native/plx-native/.webos-ndk/…/sysroot/usr/include…`
+# strings and the bare checkout root, both from GCC's DWARF, not rustc's. Same broad-then-
+# specific order as RUST_REMAP and the same reasoning: WEBOS_SDK defaults under $(HOME) but is
+# user-overridable to anywhere.
+#
+# The checkout root ($(CURDIR), where every .c file and -I path this build compiles actually
+# lives) is its OWN specific mapping rather than being left to the $(HOME) catch-all, and it goes
+# LAST for the same tie-break reason RUST_REMAP's comment gives — reproduced directly against this
+# NDK's gcc rather than assumed: a throwaway `-g` compile with two overlapping
+# -fdebug-prefix-map values showed the LAST matching one wins DW_AT_comp_dir, not the first or the
+# longest. Without this, a checkout whose path is nested under $(HOME) (true of every case measured
+# so far — this Mac, and CI's /home/runner/work/…) still has that FIXED "/build" prefix, but the
+# home-relative REMAINDER — worktree name, CI's repo-name-twice segment — still varies build to
+# build, which is exactly the gap a symbol-server upload should not have and CI's runner path
+# happening to be stable today does not guarantee tomorrow.
+#
+# KNOWN TRADEOFF, not fixed here: this makes every remapped path (this one and RUST_REMAP's three)
+# stop resolving to a real file on whatever machine later runs `sentry-cli debug-files upload
+# --include-sources` — confirmed locally: `debug-files bundle-sources` against a binary built this
+# way finds zero files, against the same command finding real ones when comp_dir is left pointing
+# at a directory that still exists. RUST_REMAP has shipped with this same property since before
+# v0.5.0; `--include-sources` in release.yml is new since v0.5.0 and had never actually run in a
+# published release as of the build that added this comment, so whether it hard-fails an empty
+# source bundle or degrades to file+line-only symbolication was NOT determined before shipping. The
+# fix, if the degradation turns out to matter, is a real directory or symlink at each remapped
+# target path, created in the CI job between the build and the upload step — not a change here.
+CFLAGS_REMAP = -fdebug-prefix-map=$(HOME)=/build -fdebug-prefix-map=$(WEBOS_SDK)=/webos-sdk \
+               -fdebug-prefix-map=$(CURDIR)=/plxnative
+
 ifeq ($(DEBUG),1)
 # -DPLX_DEBUG lets the C shim keep core dumps enabled for a post-mortem (src/crashtrace.c's
 # setrlimit(RLIMIT_CORE, 0) — a shipping build must not write 200 MB into the TV's app
 # partition). This is the only thing DEBUG=1 changes about behaviour rather than debuginfo.
-CFLAGS      += -g -DPLX_DEBUG
+CFLAGS      += -g $(CFLAGS_REMAP) -DPLX_DEBUG
 RUST_DEBUGINFO = -C debuginfo=2
 endif
 
@@ -252,7 +286,7 @@ endif
 # `rust-modules/target*` already runs to tens of gigabytes across the configurations this repo
 # keys, and where a worktree fleet multiplies that again. That is the only reason this is opt-in.
 ifeq ($(SYMBOLS),1)
-CFLAGS      += -g
+CFLAGS      += -g $(CFLAGS_REMAP)
 RUST_DEBUGINFO = -C debuginfo=2
 endif
 
@@ -396,8 +430,8 @@ RUST_TDIR      = target$(if $(RELEASE),-release,)$(if $(LAB),-lab,)$(if $(SYMBOL
 # commit leaves the whole tree at the version it just published, so every developer build after it
 # reported that exact number as its own — in X-Plex-Version, in the Sentry release, on the
 # diagnostics panel — and nothing downstream could tell a working tree from the shipped artifact.
-# `rust-modules/build.rs` reads this ONE variable: set, the binary says `0.5.0`; unset or empty, it
-# says `0.6.0-dev`, the next MINOR — trunk is where features land, so that is what is cut from it
+# `rust-modules/build.rs` reads this ONE variable: set, the binary says `0.6.0`; unset or empty, it
+# says `0.7.0-dev`, the next MINOR — trunk is where features land, so that is what is cut from it
 # next; a patch release comes off an existing minor's own line. Exported (rather than per recipe) so
 # the cross-build, `make check`, `make sim` and `make macapp` cannot answer differently — they run
 # cargo from four places, and the failure of missing one is a mislabelled artifact, not an error.
@@ -407,14 +441,26 @@ RUST_TDIR      = target$(if $(RELEASE),-release,)$(if $(LAB),-lab,)$(if $(SYMBOL
 # supported door rebuilds a DIFFERENT .a and cargo re-runs the script for it. What the stamp could
 # not have caught is somebody decoupling this from RELEASE by hand — `make PLX_RELEASE=1 deploy`
 # (a command-line variable outranks an ordinary assignment) or `make -e` with it exported — which
-# would write a binary reporting 0.5.0 into the DEV target dir, leave RUST_CFG unmoved, and let
+# would write a binary reporting 0.6.0 into the DEV target dir, leave RUST_CFG unmoved, and let
 # every later plain `make` link that stale library without a word. `override` makes the value a
 # function of RELEASE and nothing else, which is the property the stamp is relying on.
 #
 # The suffix never reaches pkg/appinfo.json or ipkroot/ctl/control — LG takes three integers and
 # nothing else, and `ci/check-package.py` asserts both that and, for the stable id, that the
 # packaged binary is not a `-dev` one.
-override export PLX_RELEASE := $(if $(RELEASE),1,)
+#
+# TWO STATEMENTS, not one — and the precise culprit is narrower than CARGO_INCREMENTAL's own
+# comment above suggests. Isolated on this Mac's make 3.81: plain `export VAR := value` and
+# `export VAR ?= value` both work, on one line, with or without `override`; what is a silent
+# no-op is `override export VAR := value` — override AND export STACKED on one line — which sets
+# the value for make's own expansions but never reaches a child process's environment. That is
+# exactly what happened here: `RELEASE=1` correctly drove `RUST_FEATFLAGS`, so the cargo
+# invocation used the right feature set, while the linked binary's `PLX_VERSION` still read
+# `0.7.0-dev` with no error from anything, because PLX_RELEASE never left make. `override` has to
+# stay on the assignment, not the export, or a command-line `PLX_RELEASE=1` could outrank this
+# derivation again.
+override PLX_RELEASE := $(if $(RELEASE),1,)
+export PLX_RELEASE
 # ...and the LINK needs its own witness, because pkg/plxnative is a path BOTH configurations
 # write. Per-dir targets keep cargo honest, but after a RELEASE=1 build the dev .a is older
 # than the release binary sitting at pkg/plxnative, so make would call the link up to date and

@@ -184,6 +184,68 @@ pub(crate) fn read(_name: &str) -> Option<String> {
     None
 }
 
+/// **Select a fake `com.webos.service.keymanager3` double** — `plxnative-keymanager=<mode>`
+/// (issue #76: `keymanager3` seals and round-trips a session envelope IN-PROCESS but the envelope
+/// never reopens on the NEXT launch). Read once at boot, like every other automation trigger, and
+/// handed to `crate::keymanager::fake`, which owns the mode grammar (`perprocess`, `healthy`,
+/// `stall`, `refuse=<code>`, `nocode`, `badoutput`, `absent`) and the in-process service it
+/// implements. Deliberately **not** in [`DIAG`]: it swaps which backend `keymanager::seal`/`open`
+/// talk to, which is exactly the kind of behaviour change every other automation trigger already
+/// suppresses the who's-watching picker for.
+#[cfg(feature = "devtriggers")]
+pub(crate) fn keymanager_fake_mode() -> Option<String> {
+    read("keymanager")
+}
+#[cfg(not(feature = "devtriggers"))]
+pub(crate) fn keymanager_fake_mode() -> Option<String> {
+    None
+}
+
+/// **Ask the LS2 hub which identity it grants this app** — `plxnative-ls2identity[=probe]`
+/// (issue #76). At boot, before anything could register for a keymanager call, try every
+/// registration shape once and log the hub's own answer to each — the name asked for, the numeric
+/// code and the `LSError` message text, which this app freed unread for a whole device session.
+/// `Some("")`/`Some("probe")` runs it; any other content is logged and ignored, so a typo cannot
+/// look like a silent refusal.
+///
+/// It exists because "which owner does this firmware's key manager see" is answerable on a set
+/// that has NO keymanager3 at all (the 2019 dev set) and on a reporter's set alike (5.6.2 through
+/// 11.2.0, all with `libAcbAPI` gone), without
+/// either of them having to reach a seal. Deliberately **not** in [`DIAG`]: it registers on the
+/// bus, which briefly takes and releases the app-id name — behaviour, not observation.
+#[cfg(feature = "devtriggers")]
+pub(crate) fn ls2_identity_probe() -> Option<String> {
+    read("ls2identity")
+}
+#[cfg(not(feature = "devtriggers"))]
+pub(crate) fn ls2_identity_probe() -> Option<String> {
+    None
+}
+
+/// **Hold the Load-returned flag** — `plxnative-holdload[=ms]`.
+///
+/// `Some(ms)` when armed (default 30000 for a bare/empty trigger, per its own `parse` fallback),
+/// else `None`. `player::threads::load_thread` sleeps this many milliseconds right after the real
+/// `sf_load` call returns and BEFORE `Shared::mark_native_load_returned` publishes that fact — so
+/// issue #74 D.1's budget (the pump's `deferring` line, then, past `NATIVE_LOAD_BUDGET`, the
+/// failure read-out) becomes observable on a real television on demand, rather than only on a
+/// k5lp set that happens to hang there for real. Deliberately NOT `DIAG`: it changes playback
+/// behaviour (a real Load attempt now waits), so arming it must suppress the who's-watching
+/// picker like every other automation trigger.
+#[cfg(feature = "devtriggers")]
+pub(crate) fn holdload_delay_ms() -> Option<u64> {
+    let raw = read("holdload")?;
+    Some(if raw.is_empty() {
+        30_000
+    } else {
+        raw.parse().unwrap_or(30_000)
+    })
+}
+#[cfg(not(feature = "devtriggers"))]
+pub(crate) fn holdload_delay_ms() -> Option<u64> {
+    None
+}
+
 /// Parse `/tmp/plxnative-server=<slot>`, the optional server half of a direct-screen trigger.
 ///
 /// A Plex `ratingKey` is only unique together with its server.  The original `plxnative-play`
@@ -940,7 +1002,13 @@ mod tests {
         // Test the exact entry rather than scanning the whole host /tmp. Developers legitimately
         // keep captured TV artifacts there, and their names are intentionally outside DIAG.
         let _g = crate::testlock::serial();
-        let d = crate::paths::in_runtime_dir("plxnative-notatrigger");
+        // Per PROCESS, not a fixed name: the runtime dir is the host's /tmp here, shared with every
+        // other `cargo test` on this Mac, and two suites running at once (a second checkout's
+        // `make check`) removed each other's entry between the create and the read_dir.
+        let d = crate::paths::in_runtime_dir(&format!(
+            "plxnative-notatrigger-{}",
+            std::process::id()
+        ));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         let entry = std::fs::read_dir(d.parent().unwrap())
