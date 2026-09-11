@@ -250,7 +250,10 @@ def scan_strings(blob: bytes, rx: re.Pattern, limit: int = 40, trim: bool = Fals
 # design -- any client that sends anything must carry them, which is why printing them here costs
 # nothing -- so recording them is what lets anybody reproduce the package byte for byte. Without
 # this row, "reproducible" would have quietly become "reproducible by the maintainer".
-SENTRY_DSN_RE = re.compile(rb"https://[0-9a-f]{8,}@[A-Za-z0-9.-]*ingest\.[a-z]{2}\.sentry\.io/\d+")
+# Any Sentry-protocol DSN host, not just sentry.io: this fork reports to a self-hosted sink
+# behind its own facade, and the old sentry.io-only pattern made the audit misreport the
+# endpoint as absent for exactly the builds that carry one.
+SENTRY_DSN_RE = re.compile(rb"https://[0-9a-f]{8,}@[A-Za-z0-9.-]+/\d+")
 POSTHOG_KEY_RE = re.compile(rb"phc_[A-Za-z0-9]{20,}")
 
 

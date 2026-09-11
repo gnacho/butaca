@@ -363,6 +363,10 @@ jobs:
           # reports as `production`, and the reason a locally built one cannot.
           PLX_SENTRY_DSN: ${{ vars.PLX_SENTRY_DSN }}
           PLX_POSTHOG_KEY: ${{ vars.PLX_POSTHOG_KEY }}
+          # This fork IS the Jellyfin client: without the feature the whole backend compiles out
+          # and the published .ipk would boot as a Plex-only app (issue #17). RUST_TDIR follows it
+          # (target-release-jellyfin), which is also what local stable builds use.
+          JELLYFIN: "1"
           # Declared EMPTY rather than merely absent. The step below refuses a release that carries
           # development credentials, and an assertion on a variable this file never names reads as
           # dead code to the next person editing it — which is how a guard gets deleted. It also
