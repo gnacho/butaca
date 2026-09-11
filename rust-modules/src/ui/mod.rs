@@ -20,7 +20,6 @@ pub mod consts;
 pub(crate) mod decision_alert;
 pub mod detail;
 pub(crate) mod document_reader;
-pub mod exit_alert; // the app's ONE decision alert: BACK at Home's root asks before it quits
 pub mod fmt; // shared duration/clock display formatters
 pub mod glassload; // dev-only backdrop-glass LOAD DIAL + the blurred-route-transition prototype
 pub mod hero_logo; // the ONE clearLogo sizing rule + its fallback-to-title band (both heroes, the compact title)
@@ -29,6 +28,7 @@ pub mod icons;
 pub mod idle; // whole-FRAME present gating: a screen with nothing moving on it stops repainting
 pub mod info_panel;
 pub mod item_menu; // press-and-hold card context menu (Go to Show / Mark as Watched / Play from Start)
+pub(crate) mod jail_repair;
 #[cfg(feature = "lab-diagnostics")]
 pub mod lab_toast; // the Lab Diagnostics upload read-out (lab builds only — see `crate::lab`)
 pub mod label;

@@ -91,6 +91,7 @@ fn props(e: DiagEvent, environment: &str) -> serde_json::Map<String, serde_json:
 fn envelope_props(
     event: &UsageEnvelope,
     environment: &str,
+    session_storage_allowed: bool,
 ) -> serde_json::Map<String, serde_json::Value> {
     let mut properties = serde_json::Map::new();
     properties.insert("environment".into(), environment.into());
@@ -114,8 +115,17 @@ fn envelope_props(
         ("hardware_revision", &context.hardware_revision),
         ("server_connection", &context.server_connection),
         ("ip_version", &context.ip_version),
+        ("rtkmem", &context.rtkmem),
+        ("install", &context.install),
     ] {
         properties.insert(key.into(), value.clone().into());
+    }
+    // `session_storage` is USAGE SCOPE 6 (issue #76): a person whose accepted usage scope trails
+    // it does not have this field yet, and the property is OMITTED rather than sent as a
+    // placeholder — a placeholder is still a new field on the wire, which is exactly what an
+    // unaccepted scope must not produce. See `consent::allows_usage_at`.
+    if session_storage_allowed {
+        properties.insert("session_storage".into(), context.session_storage.clone().into());
     }
     properties.insert("$session_id".into(), event.session_id.clone().into());
     properties.insert(ANON.into(), false.into());
@@ -123,11 +133,15 @@ fn envelope_props(
 }
 
 /// Render a durable internal event for PostHog only when it is about to leave the spool.
+/// `session_storage_allowed` is the sender's read of `consent::allows_usage_at(6)` at send time —
+/// the capture-time context always carries the live class, and this decides whether it may ride
+/// this particular delivery.
 pub(crate) fn captured(
     api_key: &str,
     distinct_id: &str,
     event: &UsageEnvelope,
     environment: &str,
+    session_storage_allowed: bool,
 ) -> Vec<u8> {
     render_captured(
         api_key,
@@ -135,6 +149,7 @@ pub(crate) fn captured(
         event,
         environment,
         &rfc3339_millis(event.occurred_at_ms),
+        session_storage_allowed,
     )
 }
 
@@ -144,18 +159,21 @@ fn render_captured(
     event: &UsageEnvelope,
     environment: &str,
     timestamp: &str,
+    session_storage_allowed: bool,
 ) -> Vec<u8> {
     let body = serde_json::json!({
         "api_key": api_key,
         "event": event.name,
         "distinct_id": distinct_id,
-        "properties": envelope_props(event, environment),
+        "properties": envelope_props(event, environment, session_storage_allowed),
         "timestamp": timestamp,
     });
     serde_json::to_vec(&body).unwrap_or_default()
 }
 
-/// The consent screen's exact sender shape, with runtime-only metadata visibly labelled.
+/// The consent screen's exact sender shape, with runtime-only metadata visibly labelled. Always
+/// shows `session_storage` — a preview is what a fully-accepted decision WOULD send, and this
+/// preview's whole purpose is disclosing that field before anyone accepts it.
 pub(crate) fn preview(
     api_key: &str,
     distinct_id: &str,
@@ -168,11 +186,20 @@ pub(crate) fn preview(
         "<random session id>",
         UsageContext::preview(),
     );
-    render_captured(api_key, distinct_id, &envelope, environment, "<event time>")
+    render_captured(
+        api_key,
+        distinct_id,
+        &envelope,
+        environment,
+        "<event time>",
+        true,
+    )
 }
 
 /// UTC RFC3339 without a clock dependency. Input is Unix milliseconds captured with the event.
-fn rfc3339_millis(epoch_ms: u64) -> String {
+/// `pub(crate)`: `sentry::envelope` reuses this for the envelope header's `sent_at`, rather than
+/// carrying a second copy of the same civil-date math.
+pub(crate) fn rfc3339_millis(epoch_ms: u64) -> String {
     let seconds = epoch_ms / 1_000;
     let millis = epoch_ms % 1_000;
     let days = (seconds / 86_400) as i64;
@@ -479,6 +506,44 @@ mod tests {
         assert_eq!(b["api_key"], "phc_k");
     }
 
+    /// **THE ONE THAT MATTERS FOR ISSUE #74.** A `playback.failed` event, put through the exact
+    /// wire body a flush would send (`captured`, off the durable envelope — never `single`, which
+    /// only the legacy tests below exercise), carries the real `FailureKind::code()` as
+    /// `properties.kind` — for a NON-DEFAULT kind, so this cannot pass by accident on the
+    /// `unspecified` fallback every under-diagnosed dev failure produces. This is the check that
+    /// would have caught `kind` never reaching a production row: every earlier assertion in this
+    /// file used the legacy `single`/`batch` helpers, which are test-only and were never what the
+    /// sender actually posts — `sender::wire_body` decodes the durable envelope and calls
+    /// [`captured`], and this is the first test in this file to go through that same function.
+    #[test]
+    fn a_playback_failed_event_carries_the_real_failure_kind_on_the_durable_wire_body() {
+        for kind in [
+            crate::player::FailureKind::TvPipeline,
+            crate::player::FailureKind::LoadTimeout,
+            crate::player::FailureKind::JailMissingRtkmem,
+        ] {
+            let event = DiagEvent::PlaybackFailed {
+                playback_id: 7,
+                mode: "direct",
+                kind: kind.code(),
+            };
+            let envelope = crate::diag::schema::UsageEnvelope::capture(event, 0, "session");
+            let body = parse(&captured("phc_k", "id1", &envelope, "test", true));
+            assert_eq!(
+                body["event"], "playback.failed",
+                "the wrong event serialised"
+            );
+            assert_eq!(
+                body["properties"]["kind"], kind.code(),
+                "the real FailureKind code did not reach the wire body for {kind:?}"
+            );
+            assert_ne!(
+                body["properties"]["kind"], "unspecified",
+                "a non-default kind must not fall back to the default code"
+            );
+        }
+    }
+
     #[test]
     fn a_durable_event_keeps_its_original_time_and_session() {
         let context = UsageContext {
@@ -491,6 +556,9 @@ mod tests {
             hardware_revision: "BOARD_PT_1ST".into(),
             server_connection: "local".into(),
             ip_version: "v4".into(),
+            rtkmem: "missing".into(),
+            install: "devmode".into(),
+            session_storage: "secure_locked".into(),
         };
         let event = UsageEnvelope::capture_with_context(
             DiagEvent::RouteEntered { screen: "detail" },
@@ -498,7 +566,7 @@ mod tests {
             "0198f00d-1234-4567-89ab-0123456789ab",
             context,
         );
-        let body = parse(&captured("phc_k", "install", &event, "test"));
+        let body = parse(&captured("phc_k", "install", &event, "test", true));
         assert_eq!(body["timestamp"], "2026-08-28T23:53:54.567Z");
         assert_eq!(
             body["properties"]["$session_id"],
@@ -509,6 +577,52 @@ mod tests {
         assert_eq!(body["properties"]["soc"], "M19_DVB");
         assert_eq!(body["properties"]["server_connection"], "local");
         assert_eq!(body["properties"]["ip_version"], "v4");
+        // issue #74: the two sandbox facts ride on every event, same as `soc`/`device_model`.
+        assert_eq!(body["properties"]["rtkmem"], "missing");
+        assert_eq!(body["properties"]["install"], "devmode");
+        // issue #76: the saved sign-in's storage class rides on every event, same as `rtkmem`/`install`.
+        assert_eq!(body["properties"]["session_storage"], "secure_locked");
         assert_eq!(body["properties"][ANON], false);
+    }
+
+    /// **Issue #76 / model stage M1: `session_storage` is usage scope 6, and an unaccepted scope
+    /// OMITS the property rather than sending a placeholder.** A placeholder is still a new field
+    /// on the wire — exactly what an unaccepted scope must not produce — so the key must be
+    /// entirely absent, not present with an empty or sentinel value.
+    #[test]
+    fn session_storage_is_omitted_when_the_scope_is_not_accepted() {
+        let context = UsageContext {
+            app_version: "0.6.0".into(),
+            webos_release: "4.10.2".into(),
+            webos_api: "4.1.0".into(),
+            webos_codename: "goldilocks2-grampians".into(),
+            device_model: "m16p3s".into(),
+            soc: "M19_DVB".into(),
+            hardware_revision: "BOARD_PT_1ST".into(),
+            server_connection: "local".into(),
+            ip_version: "v4".into(),
+            rtkmem: "missing".into(),
+            install: "devmode".into(),
+            session_storage: "secure_locked".into(),
+        };
+        let event = UsageEnvelope::capture_with_context(
+            DiagEvent::RouteEntered { screen: "detail" },
+            1_787_961_234_567,
+            "0198f00d-1234-4567-89ab-0123456789ab",
+            context,
+        );
+        let allowed = parse(&captured("phc_k", "install", &event, "test", true));
+        assert_eq!(allowed["properties"]["session_storage"], "secure_locked");
+
+        let refused = parse(&captured("phc_k", "install", &event, "test", false));
+        assert!(
+            refused["properties"].get("session_storage").is_none(),
+            "an unaccepted usage scope must OMIT the key, not send an empty/placeholder value: {:?}",
+            refused["properties"]
+        );
+        // Every other field is unaffected — this is a per-field omission, not a truncated event.
+        assert_eq!(refused["properties"]["screen"], "detail");
+        assert_eq!(refused["properties"]["rtkmem"], "missing");
+        assert_eq!(refused["properties"][ANON], false);
     }
 }

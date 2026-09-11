@@ -501,14 +501,98 @@ fn load_span(buf: &[u8]) -> Option<u64> {
                     // mistake this constant exists to have already made once.
 pub(crate) const MAX_COMPRESSED: usize = 200 * 1024;
 
+/// Attach the crash-report identifier to an event body as Sentry's `user.id` — **the one shape
+/// every Sentry-bound producer THAT CARRIES AN IDENTIFIER shares**, so the native envelope (via
+/// the SDK scope), both fallback bodies, and the two handled errors (playback and sign-in) cannot
+/// drift into different spellings. The one-off sign-in report (`signin::send_once`) passes `None`
+/// by design and so carries no `user` key at all, same as the `None` case below.
+///
+/// `user.id` and not a tag or a context, because Sentry's "users affected" count is defined as the
+/// distinct values of the promoted `sentry:user` tag, which Relay derives from `user.id` (then
+/// username, email, IP) and from nothing else. A custom tag would count in a hand-written query
+/// and nowhere in the product. And ONLY `id`: no email, username, name or address, which are the
+/// other four fields Relay treats as identity and this channel has no business carrying.
+///
+/// `None` attaches nothing — the body is left exactly as built, with no `user` key at all.
+pub(crate) fn attach_user(body: &mut serde_json::Value, errors_id: Option<&str>) {
+    if let Some(id) = errors_id.filter(|id| !id.is_empty()) {
+        body["user"] = serde_json::json!({ "id": id });
+    }
+}
+
+/// Now, in Unix milliseconds — mapped to `0` on a clock error exactly like every other `now_ms` in
+/// this crate (`signin::now_ms`, `storage::now_ms`), rather than panicking over a wall clock this
+/// codebase already knows runs skewed on at least one deployed set.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Attach the same `webos`/`hardware` sandbox contexts a NATIVE CRASH carries, to a HANDLED event
+/// this crate builds by hand.
+///
+/// A crash gets these two contexts because `sdk::start` (`telemetry/native.rs`) calls
+/// `plx_sentry_set_webos_context` once at Sentry-backend startup, which puts them on the SDK's own
+/// scope; the native backend copies that scope into every envelope the out-of-process daemon
+/// writes. A handled event — playback failure, sign-in error, storage error, and any other one
+/// this crate serialises straight to JSON — never touches that SDK scope at all, so without this
+/// function it carries none of it: issue seen live in Sentry issue PLX-NATIVE-F (event
+/// `097ae1ebb1b4afa5dc8f607e9b28aaa5`), whose Contexts section had only `User`, the event's own
+/// custom context and `Trace Details` — no `hardware`, no `webos`, no `os`.
+///
+/// One function rather than a copy per call site, so playback/sign-in/storage/future handled
+/// events cannot drift into their own spelling of "which webOS is this" — the same reasoning
+/// `attach_user` states for the identity field. Field names match `telemetry/native.rs`'s
+/// `WEBOS_FIELDS`/`HARDWARE_FIELDS` allowlists exactly, so a handled event and a crash report read
+/// identically in Sentry's Contexts UI. Merges into whatever `contexts` object the caller already
+/// built (a `playback`/`signin`/`storage` context sits beside these, not under them) rather than
+/// replacing it — and creates one if the body had none yet.
+pub(crate) fn attach_hardware_context(body: &mut serde_json::Value) {
+    let webos = crate::webos::info();
+    let hw = crate::webos::device();
+    let contexts = body
+        .as_object_mut()
+        .expect("event body is always a JSON object")
+        .entry("contexts")
+        .or_insert_with(|| serde_json::json!({}));
+    contexts["webos"] = serde_json::json!({
+        "type": "webos",
+        "name": webos.name,
+        "release": webos.release,
+        "codename": webos.codename,
+        "api": webos.api,
+    });
+    contexts["hardware"] = serde_json::json!({
+        "type": "hardware",
+        "model": hw.model,
+        "soc": hw.board,
+        "revision": hw.hw_revision,
+        "rtkmem": crate::webos::rtkmem_context(),
+        "install": crate::paths::install_kind(),
+    });
+}
+
 /// Frame one item into an envelope: an envelope header line, an item header line, then the payload.
 ///
 /// Newline-delimited, and the item header's `length` is the payload's byte length — the field this
 /// function exists to get right, since a wrong one makes the receiver parse the next line as
 /// payload and reject the whole envelope with a message about neither.
+///
+/// The envelope header also carries `sent_at` — generated HERE, as close to transmission as
+/// Sentry's own envelope spec asks for, rather than reusing the event body's own `timestamp`
+/// (which is the OCCURRENCE time, can be replayed long after the fact from `DEFERRED`, and is
+/// `0` outright on a clock at/behind the epoch — see `storage::now_ms`'s doc). `sent_at` is what
+/// lets Relay correct for a skewed device clock instead of trusting it; without it, a report from
+/// a set whose wall clock runs hours off (this repo's own dev set is one) is simply mis-dated on
+/// ingest (review finding, 2026-09-10).
 pub(crate) fn envelope(event_id: &str, item_type: &str, payload: &[u8]) -> Vec<u8> {
+    let sent_at = super::posthog::rfc3339_millis(now_ms());
     let mut out = Vec::with_capacity(payload.len() + 160);
-    out.extend_from_slice(format!("{{\"event_id\":\"{event_id}\"}}\n").as_bytes());
+    out.extend_from_slice(
+        format!("{{\"event_id\":\"{event_id}\",\"sent_at\":\"{sent_at}\"}}\n").as_bytes(),
+    );
     out.extend_from_slice(
         format!(
             "{{\"type\":\"{item_type}\",\"length\":{}}}\n",
@@ -526,6 +610,63 @@ mod tests {
     use super::*;
 
     const GOOD: &str = "https://abc123def456@o4507.ingest.de.sentry.io/1234567";
+
+    /// `user` is `{"id": …}` and nothing else, and its absence is the absence of the key — not an
+    /// empty object, which Relay would still read as a user with no identity.
+    #[test]
+    fn the_user_object_carries_exactly_the_id_or_is_absent() {
+        let mut body = serde_json::json!({"event_id": "e"});
+        attach_user(&mut body, None);
+        assert!(body.get("user").is_none());
+        attach_user(&mut body, Some(""));
+        assert!(body.get("user").is_none(), "an empty id is no id");
+        attach_user(&mut body, Some("abc"));
+        assert_eq!(body["user"], serde_json::json!({"id": "abc"}));
+        let keys: Vec<&String> = body["user"].as_object().unwrap().keys().collect();
+        assert_eq!(keys, vec!["id"]);
+    }
+
+    /// A handled event gets the same two contexts a native crash carries — this is the fix for
+    /// PLX-NATIVE-F, where a handled playback failure showed only `User`/`playback`/`Trace
+    /// Details` in Sentry's Contexts section.
+    #[test]
+    fn attach_hardware_context_matches_the_crash_schema() {
+        let mut body = serde_json::json!({"event_id": "e", "contexts": {"playback": {"type": "playback"}}});
+        attach_hardware_context(&mut body);
+        // The pre-existing per-kind context survives beside the two new ones.
+        assert_eq!(body["contexts"]["playback"]["type"], "playback");
+        let webos = body["contexts"]["webos"]
+            .as_object()
+            .expect("webos context present");
+        let mut webos_keys: Vec<&str> = webos.keys().map(String::as_str).collect();
+        webos_keys.sort_unstable();
+        assert_eq!(webos_keys, ["api", "codename", "name", "release", "type"]);
+        assert_eq!(webos["type"], "webos");
+        let hardware = body["contexts"]["hardware"]
+            .as_object()
+            .expect("hardware context present");
+        let mut hardware_keys: Vec<&str> = hardware.keys().map(String::as_str).collect();
+        hardware_keys.sort_unstable();
+        assert_eq!(
+            hardware_keys,
+            ["install", "model", "revision", "rtkmem", "soc", "type"]
+        );
+        assert_eq!(hardware["type"], "hardware");
+        // On the host these read as the empty/`n/a`/`unknown` fallbacks the probes report when
+        // there is no `/var/run/nyx/os_info.json` — still present as keys, never omitted.
+        assert!(hardware["rtkmem"].is_string());
+        assert!(hardware["install"].is_string());
+    }
+
+    /// Attaching onto a body with no `contexts` key at all still produces both contexts, so a
+    /// future handled-event builder that forgets its own context object is not silently dropped.
+    #[test]
+    fn attach_hardware_context_creates_contexts_when_absent() {
+        let mut body = serde_json::json!({"event_id": "e"});
+        attach_hardware_context(&mut body);
+        assert!(body["contexts"]["webos"].is_object());
+        assert!(body["contexts"]["hardware"].is_object());
+    }
 
     #[test]
     fn a_well_formed_dsn_parses_into_its_three_parts() {
@@ -599,9 +740,11 @@ mod tests {
         let env = envelope("0123456789abcdef0123456789abcdef", "event", payload);
         let text = String::from_utf8(env).expect("utf-8");
         let mut lines = text.split('\n');
-        assert_eq!(
-            lines.next().unwrap(),
-            r#"{"event_id":"0123456789abcdef0123456789abcdef"}"#
+        let header: serde_json::Value = serde_json::from_str(lines.next().unwrap()).unwrap();
+        assert_eq!(header["event_id"], "0123456789abcdef0123456789abcdef");
+        assert!(
+            header["sent_at"].as_str().is_some_and(|s| !s.is_empty()),
+            "the envelope header must carry sent_at for Relay's clock-drift correction: {header}"
         );
         assert_eq!(
             lines.next().unwrap(),

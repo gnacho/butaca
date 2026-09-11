@@ -9,7 +9,7 @@
 //! All network happens on spawned threads; the UI only reads snapshots through the accessors here.
 //! Tokens live in the working [`Session`] and are never logged.
 #![allow(dead_code)]
-use crate::plex::account::{AccountClient, HomeUser, Resource};
+use crate::plex::account::{AccountClient, HomeUser, PinPoll, Resource};
 use crate::plex::probe::{self, Candidate, Outcome, ProbePlan};
 use crate::plex::session::{self, ServerRef, Session, SourceRef, UserRef};
 use crate::plex::{Origin, ServerId};
@@ -67,12 +67,16 @@ fn retry_kind(phase: Phase, authorized_in_flow: bool) -> RetryKind {
 /// **Which who's-watching picker is on screen** — the one fact [`cancel`] cannot work out for
 /// itself, and the difference between an escape hatch and a privilege escalation.
 ///
-/// It is ONE screen raised from THREE places, and BACK means something different on each. From
-/// Home somebody has already identified themselves and Home is behind the picker, so backing out
-/// hands them what they were already holding. Straight after a QR sign-in they have just proved
-/// they hold the ACCOUNT, the credential a profile PIN hangs off. At BOOT neither is true — nobody
-/// has identified themselves this run, there is nothing behind the picker but the persisted
-/// session, and reinstating that is exactly the thing a PIN is there to stop.
+/// It is ONE screen raised from THREE places, and BACK means something different on each. At BOOT
+/// nobody has identified themselves this run: there is nothing behind the picker but the persisted
+/// session, and reinstating that silently is exactly the thing a PIN is there to stop — so BACK
+/// there resumes only an UNPROTECTED stored profile. The other two resume nothing at all, for two
+/// different reasons. After a QR sign-in the standing person has proved they hold the ACCOUNT, but
+/// an account credential is not a household PIN and no profile has been chosen yet. And *Change
+/// profile* DETACHES what was behind it ([`detaches_active_profile`]), which is what makes its
+/// picker a root — the paragraph that used to sit here said Home is behind it and backing out hands
+/// the user what they were already holding, and that reasoned about the person who PRESSED the
+/// control rather than the one now holding the remote.
 ///
 /// Nothing in the state below could tell them apart (all three arrive at [`Phase::Profiles`] with
 /// the same roster), so every raise site names its own kind. Two go through [`start_switch`]; the
@@ -89,18 +93,28 @@ pub enum Picker {
     /// fix, and it is what left the dev-only `/tmp/plxnative-login` boot on the wrong side of it.
     #[default]
     Boot,
-    /// Home's *Change profile*: already signed in as a profile, with Home behind the picker.
+    /// Home's *Change profile*: a profile WAS active, and raising this picker detaches it.
+    ///
+    /// **The strictest of the three, despite being raised from the most authenticated place.** Home
+    /// is no longer behind it, so there is nothing to back out to and BACK restores nothing at all
+    /// — not even an unprotected previous profile. The whole argument is on
+    /// [`detaches_active_profile`] and [`may_resume`].
     ChangeProfile,
     /// The picker the QR sign-in raises when the account turns out to have a Plex Home roster —
-    /// `login_thread`, not [`start_switch`]. Permissive for a stronger reason than *Change
-    /// profile*: whoever is standing there completed a plex.tv sign-in seconds ago. That it is
-    /// permissive AT ALL is the one open judgement here — see [`may_resume`].
+    /// `login_thread`, not [`start_switch`]. Whoever is standing there completed a plex.tv sign-in
+    /// seconds ago, but an account credential is not a household PIN and no profile has been chosen
+    /// yet, so BACK resumes nothing here either — [`may_resume`].
     SignedIn,
 }
 
 /// One "who's watching" tile.
 #[derive(Clone, Default)]
 pub struct UserTile {
+    /// This member's plex.tv account id. Nothing on screen reads it — it rides through so that
+    /// [`session::Session::household_ids`] is filled on the one path that writes the persisted
+    /// roster, which is what lets the "Shared by …" rule tell the household's own server from a
+    /// friend's share (`plex::servers::owner_credit`).
+    pub id: i64,
     pub title: String,
     pub thumb: String,
     pub uuid: String,
@@ -110,6 +124,7 @@ pub struct UserTile {
 impl UserTile {
     fn of(u: &HomeUser) -> UserTile {
         UserTile {
+            id: u.id,
             title: u.title.clone(),
             thumb: u.thumb.clone(),
             uuid: u.uuid.clone(),
@@ -119,6 +134,7 @@ impl UserTile {
     }
     fn of_ref(u: &session::HomeUserRef) -> UserTile {
         UserTile {
+            id: u.id,
             title: u.title.clone(),
             thumb: u.thumb.clone(),
             uuid: u.uuid.clone(),
@@ -128,6 +144,7 @@ impl UserTile {
     }
     fn to_ref(&self) -> session::HomeUserRef {
         session::HomeUserRef {
+            id: self.id,
             uuid: self.uuid.clone(),
             title: self.title.clone(),
             thumb: self.thumb.clone(),
@@ -150,6 +167,25 @@ pub struct ReadyCreds {
     pub tier: Option<probe::Location>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PersistenceWarningKey {
+    pub attempt: u64,
+    pub generation: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PersistenceWarningSite {
+    Discovery,
+    Final,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PersistenceWarning {
+    pub key: PersistenceWarningKey,
+    pub site: PersistenceWarningSite,
+    pub outcome: session::PersistOutcome,
+}
+
 #[derive(Default)]
 struct Ctl {
     phase: Phase,
@@ -164,15 +200,143 @@ struct Ctl {
     pin_denied: bool,
     session: Session,
     apply_pending: bool,
-    // True only after THIS QR flow yielded an account token. `start_login` loads the old session
-    // to retain its client id, so the mere presence of `session.account_token` cannot distinguish
-    // a discovery failure from a pin-create/poll failure carrying a stale credential.
+    persistence_warning: Option<PersistenceWarning>,
+    prepared_handoff: bool,
+    // True only after THIS QR flow yielded an account token, and consumed after its eventual Ready
+    // handoff. Besides choosing discovery retry, this is the one-shot authority which permits the
+    // session layer to replace an envelope this launch could not open. `start_login` loads the old
+    // session to retain its client id, so the mere presence of `session.account_token` cannot
+    // distinguish a fresh authorization from a cached credential carried through profile switch.
     authorized_in_flow: bool,
     /// True only while a user-initiated plex.tv sign-in attempt is unresolved. Stored-session
     /// discovery and profile switching deliberately never set it.
     signin_active: bool,
     // which picker `start_switch` raised — read by `cancel`, and by nothing else
     from: Picker,
+    /// Has the code on screen been replaced under the user during THIS sign-in? Set the moment a
+    /// dead pin is thrown away, so the login screen can say so rather than silently swapping the
+    /// digits somebody is in the middle of typing into their phone.
+    code_replaced: bool,
+    /// Which code the three fields above describe, from [`QR_GENERATION`]. Zero until one is
+    /// published, and never reused: it is allocated from a process-global sequence precisely so
+    /// that a `Ctl` reset cannot hand two different codes the same number.
+    qr_gen: u64,
+    /// Consecutive plex.tv pin polls (or the pin creation that opens the flow) that came back with
+    /// no usable answer. See [`LinkState`] for what this and the next two fields become on screen.
+    link_unanswered: u32,
+    /// When the CURRENT run of misses started. `None` exactly when `link_unanswered == 0` — reset
+    /// together on any real answer (Pending, Authorized, or Gone all count).
+    link_failing_since: Option<Instant>,
+    /// The most recent plex.tv call's outcome, in `net.rs`'s own words (e.g. "HTTP 429" or
+    /// "could not resolve host (curl 6)"). Refreshed on every poll regardless of its own result, so
+    /// it always names what actually happened on the wire, not what this loop inferred from it.
+    link_last_call: Option<String>,
+    /// Which automatic code (1..=[`MAX_PIN_GENERATIONS`]) [`mint_pin`] last published — written in
+    /// the same call that writes the code itself, so a failure reported any time after a code
+    /// exists names the attempt that was actually on screen. `0` until the first code is minted.
+    /// Read by [`set_error`] to build the issue #75 handled-error report's `code_generation` field.
+    code_generation: u32,
+    /// **The run of misses' duration, FROZEN the moment this flow settled into [`Phase::Error`].**
+    /// `link_failing_since.elapsed()` keeps counting up for as long as the process lives, even
+    /// though nothing is polling any more once the flow is settled — so the failed read-out's "…,
+    /// N s" would climb forever for a screen that made its last call minutes ago, and re-render
+    /// every second doing it (`ui::login::update`'s `link_detail_changed` gate wakes the settled
+    /// screen for exactly that reason). Set once, in [`set_error`], from whatever
+    /// `link_failing_since` held at that instant; `None` until then, and cleared with the rest of
+    /// `Ctl` on the next attempt.
+    link_frozen_secs: Option<u64>,
+    /// Which sign-in attempt is currently live — see [`next_attempt`]. Bumped by every flow reset
+    /// (`start_login`, `retry`/`restart`, `cancel`'s resume-stored, `sign_out`, `erase_local_state`
+    /// — every site that replaces or re-seeds `Ctl`), so [`trouble_snapshot`] can tell "this
+    /// trouble belongs to the attempt on screen right now" from "this trouble is a leftover from
+    /// the one before it".
+    attempt: u64,
+    /// **Issue #75.** This attempt's sign-in trouble, if any — set by [`set_error`] (a failed
+    /// attempt) or [`note_waiting_trouble`] (a stuck one), read once a frame by the sign-in
+    /// screen's one-off report alert. `None` for a healthy attempt, and cleared to `None` on every
+    /// flow reset like the rest of `Ctl`.
+    trouble: Option<Trouble>,
+    /// Issue #75 dev seam only (`/tmp/plxnative-signinfail`) — overrides what
+    /// [`signin_error_context`] reads as the last plex.tv call, so [`synth_signin_trouble`] can
+    /// shape a realistic report with no real network call and without reaching into `net.rs`'s
+    /// process-wide record at all. `None` on every ordinary flow.
+    dev_link_outcome: Option<crate::net::CallOutcome>,
+}
+
+/// One attempt's sign-in trouble, held for [`trouble_snapshot`]/[`send_trouble_once`].
+struct Trouble {
+    ctx: crate::telemetry::signin::SignInErrorContext,
+    /// True once this trouble has actually left the television — either automatically
+    /// ([`set_error`]'s call to `telemetry::signin::report_error`, standing consent already on) or
+    /// by the person's own "Send report" press ([`send_trouble_once`]). Either way the sign-in
+    /// screen must show "a report was sent" and never offer to send a second one for the same
+    /// trouble.
+    reported: bool,
+}
+
+/// Allocator for [`Ctl::attempt`] — process-global for the same reason [`QR_GENERATION`] is:
+/// `Ctl` is replaced or re-seeded wholesale at every flow reset, so a counter that lived only
+/// inside it could not tell "this reset began a new attempt" from "the field happened to default
+/// to the value the last one had".
+static SIGNIN_ATTEMPT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static PERSISTENCE_WARNING_GENERATION: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+fn next_attempt() -> u64 {
+    SIGNIN_ATTEMPT.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1
+}
+
+fn next_persistence_warning_key(attempt: u64) -> PersistenceWarningKey {
+    PersistenceWarningKey {
+        attempt,
+        generation: PERSISTENCE_WARNING_GENERATION
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel)
+            + 1,
+    }
+}
+
+fn warning_matches(c: &Ctl, key: PersistenceWarningKey) -> bool {
+    c.persistence_warning.is_some_and(|warning| warning.key == key)
+}
+
+pub fn pending_persistence_warning() -> Option<PersistenceWarning> {
+    with_ctl(|c| c.persistence_warning)
+}
+
+pub fn acknowledge_persistence_warning(key: PersistenceWarningKey) -> bool {
+    with_ctl(|c| {
+        if !warning_matches(c, key) {
+            return false;
+        }
+        c.persistence_warning = None;
+        true
+    })
+}
+
+pub fn persistence_warning_report_context(
+    key: PersistenceWarningKey,
+) -> Option<crate::telemetry::signin::SignInErrorContext> {
+    if !with_ctl(|c| warning_matches(c, key)) {
+        return None;
+    }
+    let ctx = storage_report_context().1;
+    with_ctl(|c| warning_matches(c, key)).then_some(ctx)
+}
+
+fn update_fresh_persistence_warning(
+    c: &mut Ctl,
+    site: PersistenceWarningSite,
+    outcome: session::PersistOutcome,
+) {
+    if outcome.persisted() {
+        c.persistence_warning = None;
+    } else {
+        c.persistence_warning = Some(PersistenceWarning {
+            key: next_persistence_warning_key(c.attempt),
+            site,
+            outcome,
+        });
+    }
 }
 
 static CTL: Mutex<Option<Ctl>> = Mutex::new(None);
@@ -182,6 +346,18 @@ static CTL: Mutex<Option<Ctl>> = Mutex::new(None);
 /// Holding the gate across check + register/write closes the check→sign-out→resurrect gap.
 static ACTIVATION_GATE: Mutex<()> = Mutex::new(());
 static AUTH_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// The ALLOCATOR for QR generations — a number that only ever goes up, handed out one per
+/// published code and then stored in [`Ctl::qr_gen`].
+///
+/// The login screen decodes the PNG once and caches it as a GL texture, so it needs one fact to
+/// know that cache has gone stale — and "the phase is `Creating`" was not it: the code is now
+/// replaced automatically when a pin expires, which is a transition INTO the same `Waiting` the
+/// screen was already in. The counter is process-global rather than per-flow because `Ctl` is
+/// reset wholesale by every flow start, and a generation that can go back to zero is a generation
+/// two different codes can share; the VALUE lives in `Ctl` so that it and the bytes it names are
+/// written, and read, under one lock ([`qr_snapshot`]).
+static QR_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// One in-flight endpoint re-probe per registry slot. Catalog retries prove that the CURRENT
 /// origin stopped answering, but a Wi-Fi/LAN transition can make another connection from the same
@@ -210,11 +386,6 @@ fn network_epoch() -> u64 {
     AUTH_EPOCH.load(std::sync::atomic::Ordering::Acquire)
 }
 
-fn cancel_network_work() {
-    let _gate = ACTIVATION_GATE.lock().unwrap_or_else(|e| e.into_inner());
-    AUTH_EPOCH.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-}
-
 /// Start a network flow as one linearization point: the previous owner is invalidated and the
 /// state the new owner will use is captured while no landing can pass its epoch check.
 fn begin_flow<R>(capture: impl FnOnce(&mut Ctl) -> R) -> (u64, R) {
@@ -222,6 +393,36 @@ fn begin_flow<R>(capture: impl FnOnce(&mut Ctl) -> R) -> (u64, R) {
     let epoch = AUTH_EPOCH.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1;
     let snapshot = with_ctl(capture);
     (epoch, snapshot)
+}
+
+/// [`begin_flow`] with a PREDICATE — one gate hold covering the decision, the invalidation and
+/// the state change, in that order.
+///
+/// It exists because a UI control is a CHECK followed by an ACTION and cannot make those one
+/// operation: the sign-in screen reads a phase in its DRAW and acts on the next key, and between
+/// them a worker can return a token and walk the flow to [`Phase::Ready`]. A restart aimed at a
+/// wait that no longer exists then replaces a sign-in that had just succeeded. Re-reading in the
+/// UI only narrows that window; deciding under the gate that the epoch bump also takes closes it.
+///
+/// **Two closures rather than one that may decline, and that is structural rather than tidy.** A
+/// single capture returning `None` would leave "decline before you write" as a CONVENTION: a
+/// future capture that mutated and then declined — or that unwound after mutating, on locks this
+/// module deliberately recovers from poisoning — would leave the old epoch live over changed
+/// state. Here the capture cannot run at all unless the predicate passed, so nothing is written on
+/// the refusal path by construction. All three steps take one hold of the gate AND one of `CTL`,
+/// so no reader can see the bump without the write or the write without the bump.
+fn begin_flow_if<R>(
+    permitted: impl FnOnce(&Ctl) -> bool,
+    capture: impl FnOnce(&mut Ctl) -> R,
+) -> Option<(u64, R)> {
+    let _gate = ACTIVATION_GATE.lock().unwrap_or_else(|e| e.into_inner());
+    with_ctl(|c| {
+        if !permitted(c) {
+            return None;
+        }
+        let epoch = AUTH_EPOCH.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1;
+        Some((epoch, capture(c)))
+    })
 }
 
 /// Invalidate the preceding network flow and read the session it finally left behind as one
@@ -238,10 +439,25 @@ fn with_live_epoch<R>(epoch: u64, f: impl FnOnce() -> R) -> Option<R> {
     (network_epoch() == epoch).then(f)
 }
 
+/// Consume the one user authorization which permits replacing an unreadable stored envelope.
+/// Kept separate from the account token: the latter remains cached across every later profile
+/// switch, while this authority belongs to exactly one PIN flow and one Ready handoff.
+fn consume_reauthentication_authority(c: &mut Ctl) -> bool {
+    std::mem::take(&mut c.authorized_in_flow)
+}
+
 // ---- accessors the UI reads each frame ----
 
 pub fn phase() -> Phase {
     with_ctl(|c| c.phase)
+}
+/// The flow's current attempt id (see `Ctl::attempt`'s own doc for what starts a new one).
+/// Exposed so a caller that captures it before starting async work OFF this flow — the
+/// storage-retry worker in `ui/login.rs` is the one caller today — can tell, once that work
+/// lands, whether the attempt it is about to act on is still the one it started against, or a
+/// later reset (a fresh sign-in, a restart) has already moved the flow on.
+pub fn current_attempt() -> u64 {
+    with_ctl(|c| c.attempt)
 }
 pub fn pin_code() -> String {
     with_ctl(|c| c.pin_code.clone())
@@ -250,8 +466,125 @@ pub fn pin_code() -> String {
 pub fn qr_png() -> Vec<u8> {
     with_ctl(|c| c.qr_png.clone())
 }
+/// Which code [`qr_png`] and [`pin_code`] are describing. Changes exactly when a new pin is
+/// published; see [`QR_GENERATION`] for why the screen cannot key its cache on the phase instead.
+pub fn qr_generation() -> u64 {
+    with_ctl(|c| c.qr_gen)
+}
+/// Has the code on screen been replaced during this sign-in? Drives the one sentence that keeps a
+/// swapped code from reading as the app losing track of itself.
+pub fn code_replaced() -> bool {
+    with_ctl(|c| c.code_replaced)
+}
+
+/// **Everything the sign-in screen draws about the current code, read under ONE lock.**
+///
+/// The digits, the QR bitmap and the number the screen caches that bitmap by are three views of
+/// one fact, and taking them separately means a frame can mix two codes: the new short code beside
+/// the old QR, or a fresh bitmap under a stale cache key. Neither lasts — the next frame corrects
+/// it — but a QR is scanned from a photograph of one frame, and "it cannot be drawn wrong" is a
+/// claim worth actually holding.
+pub struct QrCode {
+    pub generation: u64,
+    pub code: String,
+    pub png: Vec<u8>,
+    pub replaced: bool,
+}
+
+pub fn qr_snapshot() -> QrCode {
+    with_ctl(|c| QrCode {
+        generation: c.qr_gen,
+        code: c.pin_code.clone(),
+        png: c.qr_png.clone(),
+        replaced: c.code_replaced,
+    })
+}
 pub fn error() -> String {
     with_ctl(|c| c.error.clone())
+}
+
+/// **Whether plex.tv is answering during this sign-in — issue #75.** Neither the phase nor
+/// [`error`] can tell "not reachable" from "not yet scanned": both sit in [`Phase::Waiting`]
+/// drawing the same "Waiting for you to sign in…" the whole time. This is read under its own lock
+/// (mirroring [`qr_snapshot`]) rather than folded into it, because it changes every poll — roughly
+/// every 2 s — while the code on screen does not, and the two must not force each other's readers
+/// to re-derive a cache key from an unrelated field.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct LinkState {
+    /// Consecutive plex.tv pin polls (or the pin creation that opens the flow) that got no usable
+    /// answer. `0` means plex.tv answered the most recent call, whatever the answer was.
+    pub unanswered: u32,
+    /// How long plex.tv has been failing to answer. `None` exactly when `unanswered == 0`.
+    pub failing_for: Option<Duration>,
+    /// What the most recent plex.tv call did, in `net.rs`'s own words — e.g. `"couldn't resolve
+    /// host (curl 6)"` or `"HTTP 429"`. `None` before any plex.tv call has happened this process.
+    pub last_call: Option<String>,
+}
+
+/// PURE (given the `Ctl` snapshot). Shared by [`link_state`] and [`signin_error_context`], which
+/// both need the same read under whatever lock they already hold.
+fn link_state_of(c: &Ctl) -> LinkState {
+    LinkState {
+        unanswered: c.link_unanswered,
+        // A settled flow (`link_frozen_secs`, set once by `set_error`) reports the duration of the
+        // run of misses that actually happened; a live one keeps measuring against `Instant::now`.
+        failing_for: c
+            .link_frozen_secs
+            .map(Duration::from_secs)
+            .or_else(|| c.link_failing_since.map(|t| t.elapsed())),
+        last_call: c.link_last_call.clone(),
+    }
+}
+
+pub fn link_state() -> LinkState {
+    with_ctl(|c| link_state_of(c))
+}
+
+/// PURE. Is the link bad enough that the sign-in screen should stop saying "waiting for you" and
+/// start saying "check the connection"? True once two consecutive polls came back with nothing —
+/// one miss can be a blip in an otherwise healthy 2 s cadence, and reporting on it would flicker a
+/// warning at ordinary jitter. [`link_detail`] draws the same line, for the same reason.
+pub fn link_unreachable(s: &LinkState) -> bool {
+    s.unanswered >= 2
+}
+
+/// PURE. The one diagnostic sentence the sign-in screen draws under its status while it is still
+/// WAITING — `None` while plex.tv is answering, and gated at the same two-consecutive-miss
+/// threshold as [`link_unreachable`] so it cannot flicker at ordinary jitter in an otherwise
+/// healthy 2 s poll cadence.
+pub fn link_detail(s: &LinkState) -> Option<String> {
+    link_detail_at(s, 2)
+}
+
+/// PURE. The same sentence for a SETTLED read-out (`Phase::Error`), where there is no live poll
+/// left to flicker against and so no reason to wait for a second miss. **This is the one that
+/// actually reaches the screen on the dominant issue-#75 path**: pin CREATION failing records
+/// exactly one miss and then the flow is over — `login_thread` returns without polling again, and
+/// every retry starts a fresh `Ctl` with the counter back at zero — so gating this read-out at two
+/// misses meant it could never show the curl reason on that path, however many times the user
+/// pressed *Try again*.
+pub fn link_detail_settled(s: &LinkState) -> Option<String> {
+    link_detail_at(s, 1)
+}
+
+/// PURE. Shared sentence builder — bounded and identifier-free: curl's own reason (or an HTTP
+/// status), a try count, and how long the run of misses has lasted — never a URL, host, or token.
+/// The prefix distinguishes a call plex.tv genuinely never answered from one it DID answer but
+/// that the sign-in could not use (a 2xx whose body would not parse): "not answering" about a
+/// call that got HTTP 200 back reads as contradicting itself.
+fn link_detail_at(s: &LinkState, min_misses: u32) -> Option<String> {
+    if s.unanswered < min_misses {
+        return None;
+    }
+    let reason = s.last_call.as_deref().unwrap_or("no answer yet");
+    let secs = s.failing_for.unwrap_or_default().as_secs();
+    let prefix = if reason.starts_with("HTTP") {
+        "plex.tv answered but the sign-in could not use it"
+    } else {
+        "plex.tv is not answering"
+    };
+    let tries = if s.unanswered == 1 { "try" } else { "tries" };
+    Some(format!("{prefix} — {reason}, {} {tries}, {secs} s", s.unanswered))
 }
 /// Did the last profile-switch failure blame the submitted PIN? Drives the PIN pad's red-flash
 /// (vs closing so the picker's error banner can show a non-PIN failure).
@@ -261,19 +594,72 @@ pub fn pin_denied() -> bool {
 pub fn users() -> Vec<UserTile> {
     with_ctl(|c| c.users.clone())
 }
+/// The keypad closed — retire the PIN verdict with it.
+///
+/// [`pin_denied`] is a statement about a keypad that is on screen; left standing after BACK it is
+/// a verdict about a control the user has already dismissed, and the next thing to read it would
+/// be a rejection belonging to a different profile. Deliberately does NOT touch [`error`]: a
+/// PIN-blaming failure no longer writes one ([`switch_failure`]), so anything in that field now is
+/// the roster's own — offline, or no access to this server — and clearing it here would blank the
+/// read-out the pad closed in order to show.
+pub fn dismiss_pin_error() {
+    with_ctl(|c| c.pin_denied = false);
+}
+
+/// Seed the verdict [`dismiss_pin_error`] retires. Only a plex.tv round trip inside a spawned
+/// worker sets it for real, so without this the one screen that must clear it (`ui::profiles`,
+/// which owns every door out of the keypad) can only ever assert it over an ALREADY-false flag —
+/// i.e. grade nothing. Callers must hold `crate::testlock::serial()`: this is a process global.
+#[cfg(test)]
+pub(crate) fn set_pin_denied_for_test(v: bool) {
+    with_ctl(|c| c.pin_denied = v);
+}
 
 // ---- flow control ----
+
+/// The `Ctl` a fresh QR sign-in opens with — shared by [`start_login`] and `restart`'s
+/// [`Restart::Login`] branch, which is the same reset by a different door. Pure given `session`
+/// (the caller reads it from disk), so a new attempt id is the one observable effect a host test
+/// can pin without spawning the worker either caller starts next.
+fn fresh_login_ctl(session: Session) -> Ctl {
+    Ctl {
+        phase: Phase::Creating,
+        session,
+        signin_active: true,
+        attempt: next_attempt(),
+        ..Ctl::default()
+    }
+}
+
+/// The in-place reset `restart`'s [`Restart::Discovery`] branch applies — the account credential
+/// this flow already earned is kept (that is the whole point of that branch), but it is still a
+/// fresh ATTEMPT for the one-off report offer: the trouble it may have carried belonged to the
+/// failure this press is retrying, not to whatever the retry itself does.
+fn restart_discovery_ctl(c: &mut Ctl) {
+    c.error.clear();
+    c.phase = Phase::Discovering;
+    c.signin_active = true;
+    c.attempt = next_attempt();
+    c.trouble = None;
+    c.persistence_warning = None;
+    c.prepared_handoff = false;
+    // The link-health RUN belongs to the failure this press is retrying, exactly like `trouble`
+    // above — a fresh attempt must not carry a frozen `failing_for` into a retry that never fails
+    // for a link reason at all, which is otherwise readable in the next report `set_error` builds
+    // (`link_frozen_secs`'s own doc says it is "cleared with the rest of `Ctl` on the next
+    // attempt", and this reset was the one attempt-boundary that left it standing).
+    c.link_frozen_secs = None;
+    c.link_failing_since = None;
+    c.link_unanswered = 0;
+    c.link_last_call = None;
+    c.dev_link_outcome = None;
+}
 
 /// Begin the QR login: reset state, load the persisted `client_id`, and kick off the pin thread.
 pub fn start_login() {
     crate::diag::event(crate::diag::schema::DiagEvent::SignInStarted);
     let (epoch, ()) = begin_flow(|c| {
-        *c = Ctl {
-            phase: Phase::Creating,
-            session: session::load(),
-            signin_active: true,
-            ..Ctl::default()
-        };
+        *c = fresh_login_ctl(session::load());
     });
     if !crate::task::spawn_small("login", move || login_thread(epoch)) {
         // Phase::Creating is a spinner with a worker behind it. Without the worker it never ends,
@@ -282,26 +668,118 @@ pub fn start_login() {
     }
 }
 
-/// Retry after [`Phase::Error`]. Once the pin already yielded an account credential, retry only
-/// server discovery; minting another QR would throw away a successful sign-in for a network miss.
+/// Retry after [`Phase::Error`] — the explicit control on a settled read-out, which acts
+/// unconditionally because there is no live worker for it to race.
 pub fn retry() {
-    let creds = with_ctl(|c| {
-        (retry_kind(c.phase, c.authorized_in_flow) == RetryKind::Discovery)
-            .then(|| (c.session.client_id.clone(), c.session.account_token.clone()))
-    });
-    let Some((cid, token)) = creds else {
-        return start_login();
+    restart(None);
+}
+
+/// **Restart a wait the SIGN-IN SCREEN timed** — the *Try again* under a stalled spinner and the
+/// *press OK for a new code* under an unscanned QR are one operation with two deadlines.
+///
+/// `expected` is what that screen was timing: the phase AND the code. Both halves matter, and each
+/// was a live defect for one review round. The PHASE, because a worker can finish between the draw
+/// that offered the control and the key that took it, and a restart aimed at a sign-in that has
+/// just SUCCEEDED replaces it with a fresh pin. The CODE, because a wait can now be replaced
+/// automatically without the phase appearing to change at all — so a press timed against the code
+/// that expired would discard the one that replaced it a moment ago, and the person watching would
+/// see a second perfectly good code vanish.
+///
+/// Returns whether the press was acted on. `false` means the flow had already moved on, nothing
+/// was invalidated, and the caller must swallow the key.
+pub fn restart_stalled_wait(expected: (Phase, u64)) -> bool {
+    restart(Some(expected))
+}
+
+/// What a restart turns out to be — decided inside the gate, carried out after it.
+enum Restart {
+    /// Nothing has been authorized yet, so there is nothing to keep: a whole fresh pin.
+    Login,
+    /// Only server discovery failed. The account credential this flow already earned is reused;
+    /// minting another QR would make the user authorize on their phone a second time for what is
+    /// usually one unreachable server.
+    Discovery { client_id: String, token: String },
+}
+
+fn restart(expected: Option<(Phase, u64)>) -> bool {
+    let Some((epoch, (plan, fresh_attempt))) = begin_flow_if(
+        |c| restart_permitted(expected, (c.phase, c.qr_gen)),
+        |c| {
+            let plan = match retry_kind(c.phase, c.authorized_in_flow) {
+                RetryKind::Discovery => Restart::Discovery {
+                    client_id: c.session.client_id.clone(),
+                    token: c.session.account_token.clone(),
+                },
+                RetryKind::Login => Restart::Login,
+            };
+            // An attempt that is still ACTIVE has already reported its `SignInStarted`, and the
+            // schema's contract is one start bracketed by exactly one completed/failed/cancelled.
+            // Restarting a LIVE wait — which is what both of this screen's timed escapes do — is that
+            // same attempt carrying on, not a second one; only a restart from a settled state (an
+            // error read-out, whose `set_error` already reported the failure) begins a new one.
+            let fresh_attempt = restart_is_a_new_attempt(c.signin_active);
+            match plan {
+                Restart::Discovery { .. } => restart_discovery_ctl(c),
+                Restart::Login => *c = fresh_login_ctl(session::load()),
+            }
+            (plan, fresh_attempt)
+        },
+    ) else {
+        log("auth: a restart was asked for, but the sign-in had already moved on — press ignored");
+        return false;
     };
-    crate::diag::event(crate::diag::schema::DiagEvent::SignInStarted);
-    let (epoch, ()) = begin_flow(|c| {
-        c.error.clear();
-        c.phase = Phase::Discovering;
-        c.signin_active = true;
-    });
-    if !crate::task::spawn_small("rediscover", move || {
-        retry_discovery_thread(cid, token, epoch)
-    }) {
-        set_error_if_live(epoch, "Couldn't restart server discovery. Try again.");
+    if fresh_attempt {
+        crate::diag::event(crate::diag::schema::DiagEvent::SignInStarted);
+    }
+    // `Creating` and `Discovering` are spinners with a worker behind them; without one they never
+    // end, and the error read-out's own retry becomes the only way out. **The copy is per branch**
+    // — an account that authorized and then failed to reach a server has not failed to sign in,
+    // and telling its owner it did sends them back to a QR code they do not need.
+    let (spawned, refusal) = match plan {
+        Restart::Discovery { client_id, token } => {
+            log("auth: retrying server discovery with the account already authorized");
+            (
+                crate::task::spawn_small("rediscover", move || {
+                    retry_discovery_thread(client_id, token, epoch)
+                }),
+                "Couldn't restart server discovery. Try again.",
+            )
+        }
+        Restart::Login => {
+            log("auth: starting a fresh sign-in");
+            (
+                crate::task::spawn_small("login", move || login_thread(epoch)),
+                "Couldn't start sign-in. Try again.",
+            )
+        }
+    };
+    if !spawned {
+        set_error_if_live(epoch, refusal);
+    }
+    true
+}
+
+/// Does restarting this flow begin a NEW sign-in attempt, as the diagnostics count them?
+///
+/// One line, named, because the schema states a contract that a boolean inversion here would break
+/// silently: a `SignInStarted` is bracketed by exactly one completed/failed/cancelled. An attempt
+/// still marked active has already reported its start and has not yet reported a settle, so
+/// restarting it is that attempt carrying on — which is what BOTH of the sign-in screen's timed
+/// escapes do. Only a restart from a settled read-out, whose `set_error` already reported the
+/// failure, opens a new bracket.
+fn restart_is_a_new_attempt(signin_active: bool) -> bool {
+    !signin_active
+}
+
+/// May a restart act on the flow that is live right now?
+///
+/// Pure, and separate, because it is the whole of the check that closes the two races above and
+/// the alternative is proving it against plex.tv. `None` is the settled read-out's own control,
+/// which has no live wait to be wrong about.
+fn restart_permitted(expected: Option<(Phase, u64)>, live: (Phase, u64)) -> bool {
+    match expected {
+        Some(e) => e == live,
+        None => true,
     }
 }
 
@@ -321,8 +799,10 @@ pub fn retry() {
 /// two screens.
 ///
 /// **False (and no state change) when there is no usable stored session** — a first-ever sign-in,
-/// or the picker straight after a sign-out. There is genuinely nothing behind those, so the callers
-/// swallow BACK rather than stranding the user on a screen with no server.
+/// or the picker straight after a sign-out. There is genuinely nothing of this app behind those, so
+/// the press is the ROOT press: `app::key_onboarding` hands the screen to the television's Home
+/// (`webos::go_home`) and this flow keeps running behind it. Until 2026-09-03 the callers swallowed
+/// the key instead.
 ///
 /// **…and false at the BOOT picker when the stored profile is PIN-protected, which is a privilege
 /// gate and not an ergonomic one.** The paragraph above reasons only about "carry on as the profile
@@ -335,6 +815,18 @@ pub fn retry() {
 /// So a boot picker over a protected profile must be left by CHOOSING: pick a tile and enter its
 /// PIN, or take the picker's own *Sign out* pill, which is focusable with ▼ whatever the roster
 /// holds. The rule is [`may_resume`]; who is asking is [`Picker`].
+///
+/// **…and the SAME escalation reached the same place by the door that fix left open, which is now
+/// shut too.** *Change profile* was permissive on the reasoning in the paragraph above the
+/// refusals — Home is behind that picker and its user is already signed in as that profile. But
+/// that reasons about the person who PRESSED it, and *Change profile* is the one control in the app
+/// somebody presses because they are about to stop being the person holding the remote: enter a
+/// protected profile → *Change profile* → the picker appears → BACK → straight back inside the
+/// protected profile, no PIN. So that picker DETACHES now ([`detaches_active_profile`]) and is a
+/// ROOT: nothing behind it, and BACK restores nothing — deliberately not even an unprotected
+/// previous profile, since "BACK works iff the profile you left has no PIN" is a rule whose
+/// behaviour announces whether a PIN exists, and one tile press is the entire cost of the
+/// consistent version.
 ///
 /// **"Protected" also covers a session that names NO profile**, which is not a corner case but the
 /// second half of the same hole: a sign-in abandoned at the who's-watching picker persists the
@@ -350,9 +842,48 @@ pub fn retry() {
 /// the strict [`Picker`] default — no picker of its own means no `from` of its own, and the value
 /// it inherits should not be the permissive one; the practical effect is confined to the dev-only
 /// `/tmp/plxnative-login` boot, which is the one way to reach that screen over a live session.
+///
+/// **A refused BACK now changes NOTHING, and until 2026-09-03 it changed the one thing that
+/// mattered.** `cancel` opened by settling the sign-in and bumping [`AUTH_EPOCH`] — unconditionally,
+/// before it knew whether it was allowed to resume anything — and only then asked. On the two paths
+/// that refuse (a first-ever sign-in with nothing on disk, and a boot picker over a PIN-protected
+/// profile) it therefore returned `false` to a caller that swallows the key, having already retired
+/// the worker behind the screen. On the QR screen that worker is the pin poll: the code and
+/// "Waiting for you to sign in…" stayed exactly as they were, with nothing left polling. The user's
+/// phone then said *Account linked* and the television never moved, because nobody was listening —
+/// and only a relaunch, which mints a fresh pin, could recover. Issue #30.
 pub fn cancel() -> bool {
+    // The gate is held across the decision AND the invalidation, so those cannot be separated by a
+    // landing worker — every one of them passes through [`with_live_epoch`], which takes it.
+    // Reading the session before the bump is therefore not the stale-snapshot hazard
+    // [`cancel_and_load_session`] guards for its own callers: nothing may write that file, or act
+    // on an epoch, while this is held.
+    let gate = ACTIVATION_GATE.lock().unwrap_or_else(|e| e.into_inner());
+    cancel_under_gate(&gate, session::load())
+}
+
+/// [`cancel`] with the stored session NAMED and the activation gate already held.
+///
+/// Split out for the reason [`may_resume`] was: the decision that gates a credential — and now the
+/// decision that retires a live network worker — has to be gradeable on the host, and `cancel`'s
+/// own caller runs inside the SDL event loop where no test can reach it. Taking the guard by
+/// reference is how the "caller holds the gate" precondition is stated in the type system rather
+/// than in a comment.
+fn cancel_under_gate(_gate: &std::sync::MutexGuard<'_, ()>, sess: Session) -> bool {
+    let from = with_ctl(|c| c.from);
+    if !resumable(&sess, from) {
+        log_resume_refusal(from, &sess);
+        // The line that says the refusal was TOTAL. A reader of a device log has to be able to
+        // tell "BACK did nothing" from "BACK did half of something", because the second is what
+        // wedged the sign-in and the two look identical on screen.
+        log("auth: BACK refused — the sign-in already in progress keeps the flow");
+        return false;
+    }
+    // Only now is anything given up. `finish_signin_cancelled` precedes the install because
+    // `resume_stored` replaces the whole `Ctl`, `signin_active` included, and a settle that runs
+    // after it can never report.
     finish_signin_cancelled();
-    let (sess, _) = cancel_and_load_session();
+    AUTH_EPOCH.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     resume_stored(sess)
 }
 
@@ -362,9 +893,12 @@ pub fn cancel() -> bool {
 /// the host: its caller runs inside the SDL event loop, where no test can reach it.
 fn may_resume(from: Picker, stored_is_protected: bool) -> bool {
     match from {
-        // Home is behind this picker and its user is already signed in as that profile: BACK hands
-        // back exactly what they were holding when they opened it, PIN or no PIN.
-        Picker::ChangeProfile => true,
+        // **Nothing is behind this picker any more** — see [`detaches_active_profile`]. It used to
+        // answer `true` on the reasoning that Home sits behind it and its user is already signed
+        // in as that profile, so BACK hands back exactly what they were holding. That is true of
+        // the person who pressed *Change profile* and false of the next person, which is the whole
+        // point of the control: you press it when you are about to hand the remote over.
+        Picker::ChangeProfile => false,
         // The account was authorized, but nobody selected a household profile. Resuming here uses
         // the owner's server token and bypasses the profile PIN boundary entirely.
         Picker::SignedIn => false,
@@ -373,22 +907,91 @@ fn may_resume(from: Picker, stored_is_protected: bool) -> bool {
     }
 }
 
+/// Does raising this picker DETACH whatever profile was active behind it?
+///
+/// **Only *Change profile*, and it is the whole of the fix for "BACK bypasses the PIN".** The other
+/// two have nothing to detach: at BOOT nobody has been attached this run, and the picker a QR
+/// sign-in raises has authorized an ACCOUNT and never a profile.
+///
+/// Detaching is two things happening together, and neither is sufficient alone. [`may_resume`]
+/// stops BACK reinstating the credentials, and [`session::set_current(None)`](session::set_current)
+/// stops the process still ANSWERING with the profile that was active — the Home chip, the account
+/// menu's rows and `ui::search::recents`' per-profile store all read it, and a picker that has
+/// announced a profile boundary must not be standing over a process that still knows who was
+/// watching. The generation bump is what makes the second half take effect; see `session::current`.
+///
+/// **Two things are deliberately NOT detached, and the honest statement of this rule needs both.**
+///
+/// The SESSION FILE's `user` stays: that is disk state — who this device was last signed in as —
+/// and blanking it would cost `switch_thread`'s offline fast path (picking your own unprotected
+/// tile with no network), which is not a credential boundary, since that path refuses a tile CACHED
+/// as protected and every such PIN still goes to plex.tv.
+///
+/// So a RESTART re-attaches through the BOOT GATE rather than through this one, and what happens
+/// there is that gate's policy, not this one's: with a roster of more than one it raises a picker
+/// and [`Picker::Boot`]'s rule applies, and with a roster of one or none `app.rs` installs the
+/// stored profile directly, PIN or no PIN. Two known staleness/policy gaps sit behind that
+/// sentence and are deliberately NOT closed here — the single-user boot restore, and the fact that
+/// `protected` is read from a CACHED roster that plex.tv may have moved on from. Both are older
+/// than this rule, both are one owner decision about what to do with no network, and the obvious
+/// fix for the first (gating boot on [`Session::active_profile_is_protected`]) is worse than the
+/// bug: that predicate answers TRUE for an empty or unknown roster by design, so it would put a PIN
+/// screen in front of every single-account user who has no PIN at all.
+///
+/// The previous profile's per-user PMS token also stays installed in the server registry. It has to
+/// — the roster's own avatars are fetched through it (`ui::profiles`'s `Art::Thumb`), so revoking
+/// here would blank the faces on the screen doing the asking. So "detached" means *no route and no
+/// identity*, not *no credential in the process*: **no picker action routes into catalog content**
+/// — which is the precise claim, since background pumps and those avatar requests do still consume
+/// the retained client — and the only ways off the screen are choosing a tile (which re-points the
+/// registry) and *Sign out* (which revokes).
+fn detaches_active_profile(from: Picker) -> bool {
+    match from {
+        Picker::ChangeProfile => true,
+        Picker::Boot | Picker::SignedIn => false,
+    }
+}
+
+/// Is there something behind this screen that BACK may silently resume?
+///
+/// The whole of [`cancel`]'s decision, as one pure question, so that the caller can ask it BEFORE
+/// invalidating the flow rather than after — which is the difference between a swallowed key press
+/// and a dead sign-in.
+fn resumable(sess: &Session, from: Picker) -> bool {
+    sess.can_go_local() && may_resume(from, sess.active_profile_is_protected())
+}
+
+/// Why a resume was refused, for the event log — the file users send us.
+///
+/// **No profile NAME**, deliberately: the line is about the flow, not about who is behind the PIN.
+/// And no SCREEN either, because the strict [`Picker`] default means the sign-in screen's BACK can
+/// land here too. Four causes, because they read as four different bug reports — and the first
+/// exists because the *Change-profile* refusal is not about a PIN at all: the profile behind that
+/// picker is commonly UNPROTECTED, so reporting "the stored profile is PIN-protected" there sends
+/// whoever reads the log looking for a PIN that was never involved.
+fn refusal_reason(from: Picker, sess: &Session) -> &'static str {
+    match from {
+        Picker::ChangeProfile => "auth: BACK refused — the Change-profile picker is a root",
+        _ if !sess.can_go_local() => {
+            "auth: BACK refused — there is no stored session to go back to"
+        }
+        _ if sess.user.uuid.is_empty() => {
+            "auth: BACK refused — no profile has been chosen on this device yet"
+        }
+        _ => "auth: BACK refused — the stored profile is PIN-protected",
+    }
+}
+
+/// [`refusal_reason`], written to the event log.
+fn log_resume_refusal(from: Picker, sess: &Session) {
+    log(refusal_reason(from, sess));
+}
+
 /// [`cancel`] with the persisted session passed in.
 fn resume_stored(sess: Session) -> bool {
-    if !sess.can_go_local() {
-        return false;
-    }
     let from = with_ctl(|c| c.from);
-    if !may_resume(from, sess.active_profile_is_protected()) {
-        // No profile name: this file is the one users send us, and the line is about the flow, not
-        // about who is behind the PIN. Two lines because the refusal has two distinct causes that
-        // read as different bug reports — and neither names a SCREEN, because the strict default
-        // means the sign-in screen's BACK can land here too.
-        log(if sess.user.uuid.is_empty() {
-            "auth: BACK refused — no profile has been chosen on this device yet"
-        } else {
-            "auth: BACK refused — the stored profile is PIN-protected"
-        });
+    if !resumable(&sess, from) {
+        log_resume_refusal(from, &sess);
         return false;
     }
     log("auth: flow cancelled — resuming the stored session");
@@ -400,9 +1003,80 @@ fn resume_stored(sess: Session) -> bool {
             session: sess,
             apply_pending: true,
             from,
+            attempt: next_attempt(),
             ..Ctl::default()
         }
     });
+    true
+}
+
+/// **The sign-in screen's *Try again* worked: enter the app as the boot gate would have.**
+///
+/// A launch that booted with a sealed session it could not read starts the QR flow, because
+/// `session::load` had nothing to hand `app.rs`'s `can_go_local()` gate. Once
+/// `session::retry_secure_open` opens that envelope inside the same launch, the destination is
+/// not "a fresh sign-in has succeeded" — it is exactly the branch `plex_run`'s boot gate takes for
+/// a stored session, and this puts the flow there: the who's-watching picker when the account has
+/// a Plex Home roster and this is not an automated boot, otherwise `Phase::Ready`, which
+/// `take_ready` hands to the main loop's own `install_pms`/consent/Home step like every other
+/// resolved credential — `app.rs`'s generic `Route::Login`/`Route::Profiles` handling around
+/// `take_ready()` is the ONE place that runs `install_pms`, resets the nav trail and asks the
+/// first-run consent question, so both this path and a fresh QR sign-in already share it exactly.
+///
+/// **The one thing that generic handler does NOT do is `refresh_roster()`** — the boot gate's own
+/// straight-to-Home branch calls it explicitly, right after `install_pms`, because the roster it
+/// just installed came off DISK and may be stale (a share granted since the last write). This
+/// function's non-picker branch below is exactly that boot branch with the `install_pms` half
+/// deferred to `take_ready`'s caller, so it has to spend the online refresh itself, or a
+/// storage-retry resume would silently serve a staler roster than an ordinary boot would have —
+/// which review flagged this doc as promising it does not. The picker branch needs no matching
+/// call: [`start_switch`] already issues its own.
+///
+/// **Not [`cancel`]/[`resume_stored`]**, which run `resumable` first: that gate answers a
+/// different question (may BACK out of a sign-in silently reinstate a profile somebody else's PIN
+/// protects), and its `Picker::Boot` case is satisfied here by routing a multi-profile household
+/// to the picker rather than by refusing. Returns whether anything was resumed — `false` for a
+/// session the boot gate itself would not have accepted.
+pub fn resume_secure_session(sess: Session) -> bool {
+    if !sess.can_go_local() {
+        return false;
+    }
+    let picker = sess.home_users.len() > 1 && !crate::dev::any_trigger_present();
+    log(&format!(
+        "auth: the sealed session was recovered mid-launch — resuming (picker={picker})"
+    ));
+    if picker {
+        // The read client only, exactly as the boot gate installs before `start_switch`: the
+        // picker's own avatars proxy through the PMS photo transcoder, and the catalog fetch
+        // belongs to whichever profile is then chosen.
+        crate::plex::install(&sess.server.origin(), sess.pms_token());
+        session::set_current(Some(sess.user.clone()));
+        // Takes the activation gate itself (`cancel_and_load_session`), so it must not be called
+        // with the gate held.
+        start_switch(Picker::Boot);
+        return true;
+    }
+    let _gate = ACTIVATION_GATE.lock().unwrap_or_else(|e| e.into_inner());
+    // Retire the pin worker this launch started when it found no session: its poll would
+    // otherwise land a code nobody is looking at over the session just recovered.
+    AUTH_EPOCH.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+    with_ctl(|c| {
+        *c = Ctl {
+            phase: Phase::Ready,
+            session: sess,
+            apply_pending: true,
+            from: Picker::Boot,
+            attempt: next_attempt(),
+            ..Ctl::default()
+        }
+    });
+    drop(_gate);
+    // The boot gate's own online roster refresh (see the doc above) — self-contained (it reloads
+    // the session from disk and spawns its own worker), so it needs neither the just-released gate
+    // nor the `sess` this function was handed, and its ordering against the `install_pms` that
+    // `take_ready`'s caller still owes is not load-bearing: `start_switch` already fires this call
+    // before ITS OWN `install_pms` equivalent ever runs.
+    refresh_roster();
     true
 }
 
@@ -423,23 +1097,186 @@ pub fn submit_pin(index: usize, pin: &str) {
 /// here too — every path that resolves credentials passes through this one function (sign-in, a
 /// profile pick, and `cancel`'s resume of the stored session), and a share that is not in the
 /// registry is a share nothing can browse.
+///
+/// **Stage B2 (issue #76 field report case 6): the chip must not lie about who is signed in just
+/// because the disk said no.** `session::save`'s write can fail outright (every candidate path
+/// refused) — rare, but on this app's own jail model not impossible — and `session::save_locked`
+/// only publishes its in-process cache once a write actually lands, so a caller that assumed
+/// "saved" and called `set_current` regardless used to leave `peek()` answering the *default*
+/// session for the rest of this run: the chip has a user, but every OTHER reader of the session
+/// (the account surfaces, `signed_in()`) reads back signed out. This run still worked — the
+/// in-memory `Ctl` holds real credentials — so it must still BEHAVE as signed in: publish the
+/// session into the cache unconditionally (`session::publish_unpersisted`, when the write itself
+/// failed) before calling `set_current`, and say once, loudly, that the sign-in will not survive a
+/// reboot. The write failure is reported on its own (`session::save_locked`'s own
+/// `StorageStage::WriteFailed`); this is the run-facing half.
+/// **Issue #76's report lane: say what the sign-in's own save did with it, off the television.**
+///
+/// Both of the sign-in flow's saves go through here — [`finish_sign_in`]'s roster save on the
+/// discovery thread and [`take_ready`]'s on the main thread — because they are two writes of ONE
+/// sign-in and a field report that saw only the second could not tell a sign-in that never reached
+/// the disk from one that reached it and was then preserved over.
+///
+/// Two different records, deliberately, because they answer two different questions — and they no
+/// longer run from the same places:
+///
+/// * [`crate::telemetry::signin::note_storage_outcome`] is recorded on EVERY outcome, persisted or
+///   not, from BOTH saves. It does not send anything: it is what the ONE-OFF sign-in report carries
+///   if the user later presses "Send report" on this screen — the only shape that can leave a
+///   television whose storage layer could not keep the standing consent decision in the first
+///   place. That is this function.
+/// * [`crate::telemetry::storage::report_sign_in_not_persisted`] is a report in its own right,
+///   raised only when nothing reached the disk — the state that costs the user their sign-in at
+///   the next launch, which is issue #76 itself. It belongs to [`commit_sign_in_persist`] below.
+///
+/// `candidate_reads_wire()` is this launch's own read summary (never a path — see
+/// `plex::session::CandidateRead`), carried on both so the save's verdict can be read against WHICH
+/// candidate location the launch had found, which is what separates "the file system said no" from
+/// "a secure envelope was deliberately left alone".
+fn note_sign_in_persist(outcome: session::PersistOutcome) {
+    crate::telemetry::signin::note_storage_outcome(
+        Some(outcome.wire()),
+        outcome.reason_wire(),
+        Some(session::candidate_reads_wire()),
+    );
+}
+
+/// **The user-visible commit of a sign-in**: note the outcome as above, and — when nothing reached
+/// the disk — raise the report about it.
+///
+/// **Only [`take_ready`] calls this, and that is the fix** (review finding, 2026-09-11). Both of
+/// the sign-in flow's saves used to report, so one attempt raised two identical
+/// `SignInNotPersisted` events; and because `take_ready` also runs on every profile switch and on
+/// `resume_stored`, an install whose save steadily returns the same non-persisting outcome
+/// (`PreservedExistingSecure(NotProven)` on an unproven install, say) spooled another one on every
+/// switch for the life of the process. The discovery-thread save keeps its own log line and still
+/// notes the outcome for the one-off body; what it no longer does is report a sign-in the user has
+/// not finished committing.
+///
+/// The remaining repetition is deduped inside `telemetry::storage` — once per process per (save
+/// outcome, preserve reason) pair, the same "exactly once per process" rule
+/// `plex::session::report_once` already applies to every other storage report.
+fn commit_sign_in_persist(outcome: session::PersistOutcome) {
+    note_sign_in_persist(outcome);
+    if !outcome.persisted() {
+        crate::telemetry::storage::report_sign_in_not_persisted(
+            outcome.wire(),
+            outcome.reason_wire(),
+            session::candidate_reads_wire(),
+        );
+    }
+}
+
+/// Test-only door onto the DISCOVERY-thread half of the split above — see
+/// `telemetry::storage::tests::the_discovery_threads_save_notes_the_outcome_without_reporting_it`,
+/// which cannot drive `finish_sign_in` (a network flow on another thread) but must still prove
+/// that half reports nothing.
+#[cfg(test)]
+pub(crate) fn note_discovery_save_for_test(outcome: session::PersistOutcome) {
+    note_sign_in_persist(outcome);
+}
+
+/// **Arm the flow at exactly the state [`take_ready`] hands credentials out from**, and put it
+/// back afterwards ([`reset_ctl_for_test`]).
+///
+/// For the issue #76 report-lane integration tests, which cannot live in this file: the
+/// send-attempt double is a `thread_local` private to `telemetry::storage`'s own test module and
+/// the one-off body builder reads a static private to `telemetry::signin`, so the assertions have
+/// to be made over there while the thing under test — a real `take_ready` whose save cannot reach
+/// the disk — is driven from here.
+#[cfg(test)]
+pub(crate) fn arm_ready_for_test(session: session::Session) {
+    with_ctl(|c| {
+        *c = Ctl {
+            phase: Phase::Ready,
+            apply_pending: true,
+            session,
+            ..Ctl::default()
+        }
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn reset_ctl_for_test() {
+    with_ctl(|c| *c = Ctl::default());
+}
+
 pub fn take_ready() -> Option<ReadyCreds> {
     // Serialize the whole-session handoff with background roster reconciliation. In particular,
     // a picker opened from a pre-refresh snapshot must not save that snapshot over a refresh that
     // just landed, and sign-out must either precede this install or revoke it afterwards.
     let _gate = ACTIVATION_GATE.lock().unwrap_or_else(|e| e.into_inner());
     let (sources, creds) = with_ctl(|c| {
-        if c.phase == Phase::Ready && c.apply_pending {
+        if c.prepared_handoff {
+            if c.persistence_warning.is_some() {
+                return None;
+            }
+            c.prepared_handoff = false;
             c.apply_pending = false;
-            session::save(&c.session);
-            session::set_current(Some(c.session.user.clone())); // drives the Home profile chip
-            Some((
+            session::set_current(Some(c.session.user.clone()));
+            return Some((
                 c.session.sources.clone(),
                 ReadyCreds {
                     origin: c.session.server.origin(),
                     token: c.session.pms_token().to_owned(),
                     tier: c.session.server.tier,
                 },
+            ));
+        }
+        if c.phase == Phase::Ready && c.apply_pending {
+            // A discovery failure must be acknowledged before this final fresh save can replace
+            // its diagnostic snapshot. Merely polling `take_ready` performs no work.
+            if c.persistence_warning.is_some() {
+                return None;
+            }
+            // **What the save DID, not merely that it failed.** Several branches leave the file
+            // untouched on purpose (a foreign envelope, a secure file this install may not
+            // replace) and one is a genuine write failure; they read identically as a bare
+            // "not persisted", which is how the 0.6.4 loop hid — a refusal that meant "the
+            // sign-in is gone at the next launch" looked exactly like "nothing needed writing".
+            // `session::save_locked` logs the branch and its reason on its own line; this line is
+            // the run-facing half and carries the outcome word so the two can be read together.
+            let fresh = consume_reauthentication_authority(c);
+            let outcome = if fresh {
+                // Consume the authority with this handoff. A later Change-profile flow mutates this
+                // same Ctl rather than replacing it; leaving the bit set would let a cached account
+                // token masquerade as another QR authorization and downgrade readable ciphertext.
+                session::save_after_reauthentication(&c.session)
+            } else {
+                session::save(&c.session)
+            };
+            if !outcome.persisted() {
+                session::publish_unpersisted(c.session.clone());
+                log(&format!(
+                    "session: sign-in is NOT persisted on this install ({}) — it will be asked again next launch",
+                    outcome.wire()
+                ));
+            }
+            // After the run-facing line, not before it: the event log then reads save → verdict →
+            // report, in the order somebody triaging a device log wants them.
+            commit_sign_in_persist(outcome);
+            let prepared = (
+                c.session.sources.clone(),
+                ReadyCreds {
+                    origin: c.session.server.origin(),
+                    token: c.session.pms_token().to_owned(),
+                    tier: c.session.server.tier,
+                },
+            );
+            if fresh {
+                update_fresh_persistence_warning(c, PersistenceWarningSite::Final, outcome);
+                if !outcome.persisted() {
+                    // Keep `apply_pending` true: reconciliation treats that as ownership by this
+                    // not-yet-finalized snapshot and therefore cannot write around the warning.
+                    c.prepared_handoff = true;
+                    return None;
+                }
+            }
+            c.apply_pending = false;
+            session::set_current(Some(c.session.user.clone())); // drives the Home profile chip
+            Some((
+                prepared.0,
+                prepared.1,
             ))
         } else {
             None
@@ -470,6 +1307,14 @@ pub fn start_switch(from: Picker) {
     // the resumed-session path where the stored roster can go back into the registry. Idempotent,
     // and it does not touch `current` — a "Change profile" from Home lands here too, by which time
     // everything is registered already and this is a no-op.
+    if detaches_active_profile(from) {
+        // No ROUTE and no IDENTITY behind the picker from here on — which is what makes it a root,
+        // and is narrower than "nothing is signed in": the previous profile's PMS client stays
+        // registered, deliberately, because this screen's own avatars are fetched through it. See
+        // [`detaches_active_profile`] for the whole of what is and is not given up.
+        session::set_current(None);
+        log("auth: change profile — the previous profile is detached");
+    }
     install_stored_roster(&sess);
     // The SERVER roster's online refresh, beside the HOME-USER one spawned below. They are two
     // different rosters and only the second used to be refreshed here, despite this function's own
@@ -552,15 +1397,7 @@ pub fn start_switch(from: Picker) {
 /// slots are not reused, so nothing the new account registers can inherit the old one's per-server
 /// stores either.
 pub fn sign_out() {
-    // One critical section with refresh activation/persistence: if the old worker got here first,
-    // revoke what it just registered; if sign-out got here first, its epoch check refuses the old
-    // token. There is no check→revoke→re-register window.
-    let _gate = ACTIVATION_GATE.lock().unwrap_or_else(|e| e.into_inner());
-    AUTH_EPOCH.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-    session::clear();
-    crate::plex::revoke_all();
-    drop(_gate);
-    session::set_current(None);
+    forget_account();
     with_ctl(|c| *c = Ctl::default());
     // The Jellyfin flavor's sign-out retires ITS credential instead of starting a Plex PIN:
     // the config file goes (the next boot asks again), the installed client is retired (the
@@ -580,6 +1417,31 @@ pub fn sign_out() {
 /// starting the Plex PIN flow. Settings' "Delete all local data" parks on [`Phase::Deleted`]; the
 /// login screen starts a fresh flow only after an explicit OK press.
 pub fn erase_local_state() {
+    forget_account();
+    with_ctl(|c| *c = deleted_ctl());
+}
+
+/// **Everything that ends an account's tenure on this television**, shared by [`sign_out`] and
+/// [`erase_local_state`], which differ only in where the auth controller is parked afterwards.
+///
+/// One critical section with refresh activation/persistence: if the old worker got here first,
+/// revoke what it just registered; if sign-out got here first, its epoch check refuses the old
+/// token. There is no check→revoke→re-register window.
+///
+/// **The telemetry decision ends with the tenure too** (`telemetry::forget`), and it goes FIRST:
+/// its first act is publishing the unanswered decision, which is the instant every producer's gate
+/// closes and the sender stops picking up records — `PRIVACY.md` promises that no further report
+/// is picked up after a sign-out, so the reset cannot sit behind the session's file I/O, and it has to precede
+/// [`sign_out`]'s `start_login`, which emits `SignInStarted` on its first line. Consent belongs to
+/// the person who gave it; the next account to sign in is asked afresh, and nothing it causes can
+/// be reported under the departed account's identifiers. Outside the gate, because `forget` takes
+/// the spool lock and the consent lock and nothing here should nest under the activation gate that
+/// it does not have to.
+fn forget_account() {
+    crate::telemetry::forget();
+    // A sign-in event held back by an unanswered consent question belongs to the account whose
+    // attempt caused it — never to whoever signs in next (issue #75's deferral, `diag::mod.rs`).
+    crate::diag::clear_deferred();
     let _gate = ACTIVATION_GATE.lock().unwrap_or_else(|e| e.into_inner());
     AUTH_EPOCH.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     session::clear();
@@ -593,12 +1455,12 @@ pub fn erase_local_state() {
         crate::jellyfin::uninstall();
         crate::jellyfin::signin::reset();
     }
-    with_ctl(|c| *c = deleted_ctl());
 }
 
 fn deleted_ctl() -> Ctl {
     Ctl {
         phase: Phase::Deleted,
+        attempt: next_attempt(),
         ..Ctl::default()
     }
 }
@@ -607,68 +1469,72 @@ fn deleted_ctl() -> Ctl {
 
 fn login_thread(epoch: u64) {
     let cid = with_ctl(|c| c.session.client_id.clone());
+    // Issue #75/76 dev seam — `/tmp/plxnative-signinfail[=error|stall|save]`.
+    if let Some(spec) = crate::dev::read("signinfail") {
+        return synth_signin_trouble(&spec);
+    }
     let ac = AccountClient::new(&cid, None);
 
-    // 1) create a pin
-    let pin = match ac.create_pin() {
-        Some(p) if p.id != 0 && !p.code.is_empty() => p,
-        _ => return set_error_if_live(epoch, "Couldn't reach Plex — check the connection."),
-    };
-    // Neither the id nor the code may be logged. `GET /api/v2/pins/{id}` is what RETURNS the
-    // account token once the user authorizes (plex/account.rs `poll_pin`), so the id is a handle
-    // that redeems a credential, and the code is what authorizes it — and this file is the one we
-    // ask users to send us when something goes wrong. Log that we got here, not what we got.
-    log("auth: pin created (waiting for authorization)");
-    // fetch the server-rendered QR PNG (the exact QR the official apps display); public, no token.
-    let qr_url = if pin.qr.is_empty() {
-        format!("https://plex.tv/api/v2/pins/qr/{}", pin.code)
-    } else {
-        pin.qr.clone()
-    };
-    let qr_png = crate::net::https_get_public(&qr_url)
-        .filter(|r| r.ok())
-        .map(|r| r.body)
-        .unwrap_or_default();
-    log(&format!("auth: qr png {} bytes", qr_png.len()));
-    if with_live_epoch(epoch, || {
-        with_ctl(|c| {
-            c.pin_id = pin.id;
-            c.pin_code = pin.code.clone();
-            c.qr_png = qr_png;
-            c.phase = Phase::Waiting;
-        });
-    })
-    .is_none()
-    {
-        return;
-    }
-
-    // 2) poll until authorized (or the pin expires / the user cancels)
-    let token = match poll_for_token(&ac, pin.id, pin.expires_in, epoch) {
-        Some(t) => t,
-        None => return, // cancelled (silent) or timed out (poll set the error)
+    // 1) create a pin, and KEEP creating one for as long as this screen is up and the last one
+    //    ran out. A pin lives 15 minutes (plex.tv's `expiresIn: 900`); a television left on the
+    //    sign-in screen for longer than that used to sit over a code plex.tv had forgotten,
+    //    saying "Waiting for you to sign in…" at it. See [`pin_window`].
+    let mut generation: u32 = 0;
+    let token = loop {
+        generation += 1;
+        let Some(code) = mint_pin(&ac, epoch, generation) else {
+            return; // the flow was superseded, or pin creation failed and said so
+        };
+        // 2) poll until authorized (or the pin dies / the user cancels)
+        let mut watch = LivePin {
+            ac: &ac,
+            id: code.id,
+            epoch,
+            started: code.minted,
+        };
+        match poll_for_token(&mut watch, pin_window(code.expires_in)) {
+            PollEnd::Token(t) => break t,
+            PollEnd::Superseded => return, // cancelled — whoever superseded us owns the screen
+            PollEnd::Expired if another_code_allowed(generation) => {
+                log("auth: the sign-in code ran out — minting a fresh one");
+            }
+            PollEnd::Expired => {
+                log("auth: out of automatic sign-in codes — asking the user to start again");
+                return set_error_if_live(epoch, "Sign-in timed out — try again.");
+            }
+        }
     };
     log("auth: authorized — discovering server");
 
-    // 3) discover the LAN server. GUARDED, because [`cancel`] is just a phase flip and the
-    // `poll_pin` above is a network round trip: a BACK pressed while that request was in flight
+    // 3) discover the LAN server. GUARDED, because [`cancel`] is a phase flip plus an epoch bump
+    // and the poll above is a network round trip: a BACK pressed while that request was in flight
     // would otherwise be undone a second later, and — far worse — the `plex::install` below would
-    // swap the PMS client out from under the Home the user had already gone back to. Anything but
-    // Waiting means this worker is no longer the live flow, so it drops its token and exits.
-    let still_ours = with_live_epoch(epoch, || {
+    // swap the PMS client out from under the Home the user had already gone back to. A refused
+    // BACK does neither (see [`cancel`]), so reaching this arm means a real successor took over.
+    let landed = with_live_epoch(epoch, || {
         with_ctl(|c| {
             if c.phase != Phase::Waiting {
-                return false;
+                return Some(c.phase);
             }
             c.session.account_token = token.clone();
             c.authorized_in_flow = true;
             c.phase = Phase::Discovering;
-            true
+            None
         })
-    })
-    .unwrap_or(false);
-    if !still_ours {
-        return log("auth: sign-in was cancelled while the pin poll was in flight — token dropped");
+    });
+    match landed {
+        Some(None) => {}
+        // Both arms drop an account credential the user really did authorize, so each says which
+        // of the two it was: a device log that only ever showed one sentence could not separate
+        // "somebody else owns the sign-in now" from "this flow is still ours but has moved on".
+        Some(Some(phase)) => {
+            return log(&format!(
+                "auth: the sign-in left Waiting for {phase:?} while the pin poll was in flight — token dropped"
+            ))
+        }
+        None => {
+            return log("auth: a newer sign-in superseded this one while the pin poll was in flight — token dropped")
+        }
     }
     let ac = AccountClient::new(&cid, Some(&token));
     // The failure copy is per outcome, and it used to be one line — "No local Plex server found on
@@ -699,6 +1565,200 @@ fn login_thread(epoch: u64) {
     finish_sign_in(&ac, epoch);
 }
 
+/// **Issue #75/76 dev seam** — `/tmp/plxnative-signinfail[=error|stall|save]`, read once at the top of
+/// [`login_thread`]. Neither leg makes a real plex.tv call. `error` (the default — anything but
+/// exactly `stall`) fails the flow at once through the ordinary [`set_error`] path with a
+/// synthetic DNS-shaped outcome (one miss, frozen 3s), so the failed read-out and its one-off
+/// report alert are both reachable with no working network at all. `stall` instead seeds
+/// `Phase::Waiting` with three unanswered polls and a failing-since 70s in the past, so the
+/// sign-in screen's own stalled-wait escape and the trouble alert both have something to offer the
+/// moment it draws — neither actually polls plex.tv, since there is no worker behind this `Ctl`.
+/// `save` uses that same closed Waiting fixture but adds a synthetic discovery/WriteFailed warning
+/// so its presentation and Continue action can be captured without credentials, disk writes or a
+/// network request. It is UI evidence only; the real failed-write regression drives `take_ready`.
+///
+/// `Ctl::dev_link_outcome` is what lets this shape a realistic
+/// [`crate::telemetry::signin::SignInErrorContext`] without touching `net.rs`'s process-wide
+/// [`crate::net::last_plex_tv_call`] record at all — that record is real evidence about this
+/// process's actual network calls, and a synthetic trigger must not be able to plant a fake one
+/// for every OTHER caller of it to trip over.
+fn synth_signin_trouble(spec: &str) {
+    with_ctl(|c| {
+        c.dev_link_outcome = Some(crate::net::CallOutcome::Transport(6));
+        c.link_last_call = Some("couldn't resolve host (curl 6)".to_string());
+    });
+    if spec == "stall" || spec == "save" {
+        with_ctl(|c| {
+            c.phase = Phase::Waiting;
+            c.pin_code = "SIGN75".to_string();
+            c.link_unanswered = 3;
+            // `checked_sub`, not a bare `-`: `Instant` subtraction panics rather than saturating
+            // when the result would precede the monotonic clock's own origin (system boot on
+            // Linux), which a process launched within 70s of boot — plausible for an app auto-
+            // started at TV boot with this dev trigger armed — would hit on every launch.
+            c.link_failing_since = Some(
+                Instant::now()
+                    .checked_sub(Duration::from_secs(70))
+                    .unwrap_or_else(Instant::now),
+            );
+            if spec == "save" {
+                update_fresh_persistence_warning(
+                    c,
+                    PersistenceWarningSite::Discovery,
+                    session::PersistOutcome::WriteFailed,
+                );
+            }
+        });
+        return;
+    }
+    with_ctl(|c| {
+        c.link_unanswered = 1;
+        c.link_failing_since = Some(
+            Instant::now()
+                .checked_sub(Duration::from_secs(3))
+                .unwrap_or_else(Instant::now),
+        );
+    });
+    set_error("Couldn't create a sign-in code — check the connection.");
+}
+
+/// How many codes ONE visit to the sign-in screen may burn through before it gives up and offers
+/// its own *Try again*.
+///
+/// Four codes is an hour at plex.tv's 15-minute pins — long enough that walking away mid-sign-in
+/// and coming back is not punished, short enough that a television left on this screen overnight
+/// does not poll plex.tv until somebody notices. The cap is on CODES rather than on wall-clock
+/// time because the pin's own lifetime is the unit the user experiences: what runs out is the
+/// thing on screen.
+const MAX_PIN_GENERATIONS: u32 = 4;
+
+/// May a flow that has just watched its `generation`-th code run out mint another?
+///
+/// Pure, because "how many times may this happen automatically" is a policy and the alternative
+/// to grading it here is grading it against plex.tv four times. The answer at the ceiling is not a
+/// dead end: the flow lands on [`Phase::Error`], which is the one phase the sign-in screen has
+/// always drawn a *Try again* on.
+fn another_code_allowed(generation: u32) -> bool {
+    generation < MAX_PIN_GENERATIONS
+}
+
+/// Create a pin, fetch its QR, and publish both as the code on screen.
+///
+/// `generation` is 1 for the code a fresh sign-in opens with and climbs by one for each
+/// replacement. A replacement goes through [`Phase::Creating`] on its way, which is not
+/// decoration: that phase is what the login screen already keys "Connecting to Plex…" on, and it
+/// is where the dead code is cleared so no frame can draw it while its successor is being minted.
+///
+/// `None` means "stop": either the flow was superseded (silent — the successor owns the screen) or
+/// creation failed and has already said so on the error read-out.
+fn mint_pin(ac: &AccountClient, epoch: u64, generation: u32) -> Option<MintedCode> {
+    if generation > 1 {
+        with_live_epoch(epoch, || {
+            with_ctl(|c| {
+                c.phase = Phase::Creating;
+                c.pin_id = 0;
+                c.pin_code.clear();
+                c.qr_png.clear();
+                // The screen says so once a code has been swapped under the user: somebody who
+                // has just been told "Account linked" by their phone must not be handed a
+                // different code with no explanation.
+                c.code_replaced = true;
+            });
+        })?;
+    }
+    let pin = match ac.create_pin() {
+        Some(p) if p.id != 0 && !p.code.is_empty() => p,
+        _ => {
+            // Three different things can put us in this arm, and only one of them is "plex.tv is
+            // not answering". A non-2xx is a REFUSAL (rate limiting is the one seen in practice) —
+            // not fixed by checking this TV's own network, so the message stops telling the user
+            // to. A 2xx whose body did not parse is plex.tv ANSWERING with something this client
+            // could not use — also not a connectivity fault, and — since 2026-09-10 — no longer
+            // counted as a miss against the link-health run: the wire worked. Anything else —
+            // timeout, transport error, no answer at all — is the real "not answering" case, now
+            // naming plex.tv rather than "Plex" so it reads consistently with [`link_detail`]'s own
+            // sentence.
+            let outcome = crate::net::last_plex_tv_call().map(|c| c.outcome);
+            let refused_status = match outcome {
+                Some(crate::net::CallOutcome::Answered(status)) if !(200..300).contains(&status) => {
+                    Some(status)
+                }
+                _ => None,
+            };
+            let bad_body_status = match outcome {
+                Some(crate::net::CallOutcome::Answered(status)) if (200..300).contains(&status) => {
+                    Some(status)
+                }
+                _ => None,
+            };
+            let unreachable = refused_status.is_none() && bad_body_status.is_none();
+            note_link_answer(epoch, unreachable);
+            let msg = if let Some(status) = refused_status {
+                format!("plex.tv refused the sign-in request (HTTP {status}) — try again in a minute.")
+            } else if let Some(status) = bad_body_status {
+                format!(
+                    "plex.tv answered but the response could not be read (HTTP {status}) — try again in a minute."
+                )
+            } else {
+                "Couldn't reach plex.tv — check this TV's internet connection.".to_string()
+            };
+            set_error_if_live(epoch, &msg);
+            return None;
+        }
+    };
+    // **The lease starts HERE, not where the polling does.** plex.tv began counting the moment it
+    // answered, and the QR fetch below is another request on `net::API`'s 25 s deadline — so a
+    // clock started after it would let the poll run that much past the code's real death, which is
+    // the same over-run in miniature that this whole change is about.
+    let minted = Instant::now();
+    // Neither the id nor the code may be logged. `GET /api/v2/pins/{id}` is what RETURNS the
+    // account token once the user authorizes (plex/account.rs `poll_pin`), so the id is a handle
+    // that redeems a credential, and the code is what authorizes it — and this file is the one we
+    // ask users to send us when something goes wrong. Log that we got here, not what we got.
+    log(&format!(
+        "auth: pin created (code {generation} of {MAX_PIN_GENERATIONS}, {}s to authorize)",
+        pin_window(pin.expires_in).as_secs()
+    ));
+    // fetch the server-rendered QR PNG (the exact QR the official apps display); public, no token.
+    let qr_url = if pin.qr.is_empty() {
+        format!("https://plex.tv/api/v2/pins/qr/{}", pin.code)
+    } else {
+        pin.qr.clone()
+    };
+    let qr_png = crate::net::https_get_public(&qr_url)
+        .filter(|r| r.ok())
+        .map(|r| r.body)
+        .unwrap_or_default();
+    log(&format!("auth: qr png {} bytes", qr_png.len()));
+    with_live_epoch(epoch, || {
+        with_ctl(|c| {
+            c.pin_id = pin.id;
+            c.pin_code = pin.code.clone();
+            c.qr_png = qr_png;
+            // Allocated and stored inside the SAME write as the bytes it names, so no reader can
+            // see one without the other — see [`qr_snapshot`].
+            c.qr_gen = QR_GENERATION.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1;
+            c.phase = Phase::Waiting;
+            // See `Ctl::code_generation`'s doc: written in the same call that publishes the code it
+            // describes, so a later `set_error` reports the attempt that was actually on screen.
+            c.code_generation = generation;
+        });
+    })?;
+    Some(MintedCode {
+        id: pin.id,
+        expires_in: pin.expires_in,
+        minted,
+    })
+}
+
+/// What [`login_thread`] needs to know about the code it just put on screen: the handle to poll,
+/// how long plex.tv will honour it, and **when that clock started**.
+struct MintedCode {
+    id: i64,
+    expires_in: i64,
+    minted: Instant,
+}
+
 /// Finish a successful discovery. Shared by the QR flow and the discovery-only Retry path.
 fn finish_sign_in(ac: &AccountClient, epoch: u64) {
     let origin = with_ctl(|c| c.session.server.origin());
@@ -724,8 +1784,30 @@ fn finish_sign_in(ac: &AccountClient, epoch: u64) {
         // Persist NOW — the account token + server + roster are durable the moment they exist.
         // Waiting for take_ready() (a completed profile pick) meant abandoning the app at the
         // picker lost the whole sign-in; next boot resumes at the picker instead.
-        let snap = with_ctl(|c| c.session.clone());
-        session::save(&snap);
+        let (snap, reauthenticated) = with_ctl(|c| (c.session.clone(), c.authorized_in_flow));
+        // **The FIRST of a sign-in's two saves, and the one a field report used to be blind to.**
+        // `save_locked` logs `session: persist outcome=…` for both of them and nothing said which
+        // was which, so this line names the site — the discovery thread's roster save, before any
+        // profile has been picked — and `note_sign_in_persist` carries the same verdict off the
+        // television. If the app closes at the picker before `take_ready`, this is the only save
+        // that can make the account/server discovery survive the next launch.
+        // Still under this attempt's epoch gate: only the PIN poll above can set the authority,
+        // and a superseding flow cannot lend its credential to this discovery result.
+        let outcome = if reauthenticated {
+            session::save_after_reauthentication(&snap)
+        } else {
+            session::save(&snap)
+        };
+        log(&format!(
+            "auth: sign-in saved at discovery — {}",
+            outcome.wire()
+        ));
+        note_sign_in_persist(outcome);
+        if reauthenticated {
+            with_ctl(|c| {
+                update_fresh_persistence_warning(c, PersistenceWarningSite::Discovery, outcome)
+            });
+        }
         if users.len() > 1 {
             log("auth: showing who's-watching");
             // Sign-in reached a usable state. BOTH settling arms report it — this one and the
@@ -771,25 +1853,198 @@ fn retry_discovery_thread(cid: String, token: String, epoch: u64) {
     }
 }
 
-/// Poll `/pins/{id}` every 2s until `auth_token` appears, the pin expires, or the flow leaves
-/// [`Phase::Waiting`] (user pressed BACK).
-fn poll_for_token(ac: &AccountClient, id: i64, expires_in: i64, epoch: u64) -> Option<String> {
-    let iters = (expires_in.max(60) / 2).min(900); // cap ~30 min
-    for _ in 0..iters {
-        std::thread::sleep(std::time::Duration::from_secs(2));
-        if network_epoch() != epoch || with_ctl(|c| c.phase != Phase::Waiting) {
-            return None; // cancelled
+/// How one publication of a QR code ended.
+#[derive(Debug, PartialEq, Eq)]
+enum PollEnd {
+    /// The user authorized on their phone and plex.tv handed over the account token.
+    Token(String),
+    /// This code is finished — plex.tv says so, or its own lifetime ran out. There is nothing
+    /// left to wait for and the caller must mint another.
+    Expired,
+    /// A newer flow owns the sign-in, or the screen left [`Phase::Waiting`]. Say nothing.
+    Superseded,
+}
+
+/// How long one QR code may be waited on, from the pin's own `expiresIn`.
+///
+/// **A WALL-CLOCK bound, and that is the half of issue #30 no log could show.** What this replaced
+/// counted ITERATIONS — 450 of them for the `expiresIn: 900` plex.tv actually answers with — while
+/// each iteration cost a 2 s sleep PLUS one HTTPS round trip whose own deadline is `net::API`'s
+/// 25 s. So the screen said "Waiting for you to sign in…" for somewhere between 17 minutes and
+/// three and a half hours over a pin that had stopped existing after fifteen, and every poll in
+/// that tail was answered `404 {"code":1020,"message":"Code not found or expired"}` — which the
+/// old `Option<Pin>` return could not express, so it read as "not authorized yet". Counting the
+/// wait in seconds makes the window mean what its name says.
+///
+/// The floor covers a plex.tv that omits the field (or sends a nonsense one); the ceiling is this
+/// app's own patience for a single code.
+fn pin_window(expires_in: i64) -> Duration {
+    Duration::from_secs(expires_in.clamp(60, 1800) as u64)
+}
+
+/// The pause before the next poll, after `misses` consecutive answers that told us nothing.
+///
+/// A steady 2 s while plex.tv is answering — the cadence this flow has always had, and the one the
+/// user's phone tap is judged by, so a healthy sign-in is not made slower by any of this. A
+/// transport failure is a different matter: retrying it at the same rate hammers a network that
+/// has already said it is unhappy, so consecutive misses back off geometrically. The ceiling is
+/// low on purpose — the pin has a deadline, and a backoff that grew past it would spend the
+/// window asleep and miss an authorization that did arrive.
+fn poll_delay(misses: u32) -> Duration {
+    const BASE_MS: u64 = 2_000;
+    const CEILING_MS: u64 = 16_000;
+    Duration::from_millis((BASE_MS << misses.min(8)).min(CEILING_MS))
+}
+
+/// Everything [`poll_for_token`] needs from the world: one network answer, one interruptible
+/// wait, and a clock.
+///
+/// It is a trait for one reason — the loop underneath is the part of the sign-in that went wrong,
+/// and a loop built out of `thread::sleep` and `Instant::now` can only be graded by a test that
+/// waits in real time, which is to say it is never graded. A scripted implementation lets a host
+/// test run a fifteen-minute pin to its death in microseconds.
+trait PinWatch {
+    /// Ask plex.tv about this pin.
+    fn poll(&mut self) -> PinPoll;
+    /// Wait up to `d`. `false` means the flow was superseded meanwhile — stop, say nothing.
+    fn wait(&mut self, d: Duration) -> bool;
+    /// How long this code has been on screen.
+    fn elapsed(&self) -> Duration;
+}
+
+/// The real one: a live pin, the wall clock, and the flow's epoch.
+struct LivePin<'a> {
+    ac: &'a AccountClient,
+    id: i64,
+    epoch: u64,
+    started: Instant,
+}
+
+impl PinWatch for LivePin<'_> {
+    fn poll(&mut self) -> PinPoll {
+        let result = self.ac.poll_pin(self.id);
+        note_link_answer(self.epoch, matches!(result, PinPoll::Unreachable));
+        result
+    }
+    fn wait(&mut self, d: Duration) -> bool {
+        // SLICED, so a cancel is noticed within a slice however far the backoff has grown. The
+        // worker's answer would be discarded anyway, but a thread that lingers for the whole of a
+        // 16 s backoff after the user has left the screen is a thread the next flow shares the
+        // device with.
+        const SLICE: Duration = Duration::from_secs(1);
+        let deadline = Instant::now() + d;
+        loop {
+            if !flow_is_live(self.epoch) {
+                return false;
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return true;
+            }
+            std::thread::sleep((deadline - now).min(SLICE));
         }
-        if let Some(p) = ac.poll_pin(id) {
-            if let Some(t) = p.auth_token {
-                if !t.is_empty() {
-                    return Some(t);
+    }
+    fn elapsed(&self) -> Duration {
+        self.started.elapsed()
+    }
+}
+
+/// Update the [`LinkState`] after one plex.tv answer (a pin poll, or the pin-creation call that
+/// opens the flow) — `missed` is [`PinPoll::Unreachable`], or a pin-create failure that named no
+/// HTTP status. Any real answer (`Pending`, `Authorized`, `Gone`, or an `Answered` HTTP status,
+/// even a refusal) resets the run; a miss extends it and arms the failing-since clock on the
+/// first one. `link_last_call` is refreshed every time regardless, from `net.rs`'s own record of
+/// what the wire actually did — so the sentence [`link_detail`] builds always names the call that
+/// just happened, not the one before it.
+///
+/// Written under the same epoch gate as everything else this flow publishes: a superseded
+/// worker's straggling answer must not overwrite a fresher flow's link state, the same reasoning
+/// [`with_live_epoch`]'s other callers rely on.
+fn note_link_answer(epoch: u64, missed: bool) {
+    let last_call = crate::net::last_plex_tv_call().map(|c| crate::net::describe_outcome(c.outcome));
+    let _ = with_live_epoch(epoch, || {
+        with_ctl(|c| {
+            if missed {
+                c.link_unanswered = c.link_unanswered.saturating_add(1);
+                c.link_failing_since.get_or_insert_with(Instant::now);
+            } else {
+                c.link_unanswered = 0;
+                c.link_failing_since = None;
+            }
+            c.link_last_call = last_call;
+        });
+    });
+}
+
+/// Is this worker still the one the sign-in screen belongs to?
+///
+/// Both halves under ONE hold of the activation gate. Read separately, an old worker could see
+/// its own epoch as current, be superseded by a flow that also reaches [`Phase::Waiting`], and
+/// then see that `Waiting` and poll its stale pin. It could never have PUBLISHED anything —
+/// every write goes through [`with_live_epoch`] — so the cost was one wasted request and a log
+/// line attributing it to the wrong flow, which is exactly the kind of misattribution this file's
+/// logging exists to prevent.
+fn flow_is_live(epoch: u64) -> bool {
+    with_live_epoch(epoch, || with_ctl(|c| c.phase == Phase::Waiting)).unwrap_or(false)
+}
+
+/// Poll `/pins/{id}` until the user authorizes, the code dies, or the flow is superseded.
+///
+/// **A transport failure is not an ending.** It never was — the loop this replaced also carried on
+/// — but it was also never SAID, in the log or in the cadence, so "the app stopped polling" and
+/// "plex.tv stopped answering" produced identical evidence. Now a miss backs off, says so once,
+/// and says when the answers come back; and the one answer that really is an ending, a pin plex.tv
+/// no longer knows, ends the wait immediately instead of being retried for the rest of the window.
+fn poll_for_token(w: &mut impl PinWatch, window: Duration) -> PollEnd {
+    let mut misses: u32 = 0;
+    loop {
+        // **The wait never runs past the deadline, and the deadline never cancels a poll.** Both
+        // halves are one bug found in review, and it is the bug this whole change exists to stop:
+        // at t=889s a miss sets the backoff to 16s, the user authorizes at 895s and their phone
+        // says *Account linked* — and a loop that checked the clock before polling would declare
+        // expiry at 905s and throw away a token that was sitting there. So the pause is clamped to
+        // what is left of the code, and the poll after it always happens. Only plex.tv gets to say
+        // a pin is finished before we have asked it once more.
+        let pause = poll_delay(misses).min(window.saturating_sub(w.elapsed()));
+        if !w.wait(pause) {
+            return PollEnd::Superseded;
+        }
+        match w.poll() {
+            PinPoll::Authorized(t) => return PollEnd::Token(t),
+            PinPoll::Pending => {
+                if misses > 0 {
+                    log("auth: plex.tv is answering again — still waiting for authorization");
+                }
+                misses = 0;
+            }
+            PinPoll::Gone => {
+                log("auth: plex.tv no longer knows this sign-in code — expired or already used");
+                return PollEnd::Expired;
+            }
+            PinPoll::Unreachable => {
+                misses = misses.saturating_add(1);
+                // Once when it starts, and rarely after, because this line is written every two
+                // seconds by an app whose event log is truncated at every launch.
+                if misses == 1 || misses % 15 == 0 {
+                    log(&format!(
+                        "auth: sign-in poll unanswered n={misses} — still waiting, backing off"
+                    ));
                 }
             }
         }
+        // **After the poll, never before it, and exactly once.** Before it, a wait that crossed
+        // the deadline would cancel a request the code was still alive for — the token-losing bug
+        // above. Asked after it, the clock also accounts for what the REQUEST cost: a poll that
+        // starts at 899 s and runs to `net::API`'s 25 s deadline has taken us past the end, and
+        // issuing a second one (which a flag computed before the poll would have done) only delays
+        // the replacement code by another 25 s. Every pause is clamped to what is left, so exactly
+        // one poll can ever begin before the deadline and finish after it, and that one is always
+        // allowed to answer.
+        if w.elapsed() >= window {
+            log("auth: the sign-in code reached the end of its life unused");
+            return PollEnd::Expired;
+        }
     }
-    set_error_if_live(epoch, "Login timed out — try again.");
-    None
 }
 
 // ---- server discovery ----
@@ -1323,7 +2578,7 @@ fn probe_server_racing(
     Reach::At(best.candidate, best.origin)
 }
 
-fn activate_candidate(plan: &ProbePlan, c: &Candidate, origin: &Origin) {
+fn activate_candidate(plan: &ProbePlan, c: &Candidate, origin: &Origin, credit: &str) {
     let id = crate::plex::register_origin(&plan.machine_id, origin, &plan.token);
     // Registration can re-point by publishing a fresh Client. The link write must follow that
     // publication every time or the new client silently returns to UNKNOWN.
@@ -1340,12 +2595,12 @@ fn activate_candidate(plan: &ProbePlan, c: &Candidate, origin: &Origin) {
         // fact now; the per-server settlement below repeats it with the final winning tier.
         crate::plex::publish_probe_result(id, Outcome::Reachable);
     }
-    crate::plex::describe_server(
-        id,
-        &plan.name,
-        plan.source_title.as_deref().unwrap_or_default(),
-        plan.owned,
-    );
+    // The CREDIT the caller decided, never `plan.source_title`. This publication is EARLY — the
+    // first candidate to answer, before the roster settles — and it used to publish the raw handle,
+    // which is a second place the "Shared by …" rule was being written out by hand. The plan is the
+    // wrong shape to decide it (`probe::plan` carries what to DIAL), so the caller, which still has
+    // the `/api/v2/resources` row, passes the answer down.
+    crate::plex::describe_server(id, &plan.name, credit, plan.owned);
 }
 
 /// Publish a completed server race onto the already-registered slot for that machine. A newly
@@ -1457,8 +2712,11 @@ enum Resolved {
 /// takes the response and a `dial`, so a full sign-in against a two-server account is a host test
 /// rather than a screenshot — which matters because this function is the gate on the whole feature:
 /// register the wrong connection and no other unit's work is reachable, however correct it is.
+///
+/// `household` is [`session::Session::household_ids`] — see [`credit_of`].
 fn resolve_roster_using(
     resources: &[Resource],
+    household: &[i64],
     probe_one: &mut dyn FnMut(&ProbePlan) -> Reach,
     between_servers: &mut dyn FnMut(),
     observe: &mut dyn FnMut(&ProbePlan, Outcome, Option<probe::Location>),
@@ -1493,7 +2751,9 @@ fn resolve_roster_using(
                 let s = SourceRef {
                     machine_id: plan.machine_id.clone(),
                     name: plan.name.clone(),
-                    shared_by: plan.source_title.clone().unwrap_or_default(),
+                    // The CREDIT, not `sourceTitle` — `r` rather than `plan` because the rule reads
+                    // two fields (`home`, `ownerId`) that a probe plan has no business carrying.
+                    shared_by: credit_of(r, household),
                     owned: plan.owned,
                     // **The origin that ANSWERED** — `probe_server` hands back the very value it
                     // dialled, so what is written down here has been verified and not merely
@@ -1544,16 +2804,62 @@ fn resolve_roster_using(
     }
 }
 
+/// **Whom to CREDIT for one `/api/v2/resources` row** — the app's single "Shared by …" decision,
+/// applied at the boundary where a plex.tv row becomes a persisted [`SourceRef`].
+///
+/// The rule and its evidence are `plex::servers::owner_credit`; this is only the place discovery
+/// calls it, and the reason it is a named function rather than three inline expressions is that
+/// there ARE three ingest sites ([`resolve_roster_using`], [`source_from_reach`],
+/// [`refreshed_sources`]) and one of them disagreeing is exactly how the raw `sourceTitle` got onto
+/// the household's own server in the first place.
+///
+/// `household` is [`session::Session::household_ids`], captured by the caller from the live session
+/// rather than read here: these functions are pure so the whole of discovery is host-gradeable, and
+/// a worker that read the session file mid-probe would be reading it under whoever switched profile
+/// meanwhile ([`crate::plex`]'s "capture the server at the spawn site" rule, one identity up).
+fn credit_of(res: &Resource, household: &[i64]) -> String {
+    crate::plex::owner_credit(res.grant(), household).to_string()
+}
+
+/// [`credit_of`] for a machine named by a [`ProbePlan`] rather than by the row itself — the early
+/// per-candidate publication ([`activate_candidate`]) has the plan and the response, but not the
+/// pairing, and a plan deliberately carries only what is needed to DIAL.
+///
+/// An id that names no row in this response credits nobody. That is the same "absence is the safe
+/// direction" the rule itself states: the alternative is attributing a server to whoever plex.tv
+/// last mentioned, and the pairing is by `clientIdentifier`, the one identity that cannot drift.
+fn credit_for_machine(resources: &[Resource], machine_id: &str, household: &[i64]) -> String {
+    if machine_id.is_empty() {
+        return String::new();
+    }
+    resources
+        .iter()
+        .find(|r| r.is_server() && r.client_identifier == machine_id)
+        .map(|r| credit_of(r, household))
+        .unwrap_or_default()
+}
+
 /// Test seam for the pre-racing acceptance fixtures. The injected dial runs synchronously and the
 /// gap is elided; the racing coordinator has its own focused tests for completion order/refusal.
 #[cfg(test)]
-fn resolve_roster(resources: &[Resource], dial: &dyn Fn(&Origin) -> (i32, Vec<u8>)) -> Resolved {
+fn resolve_roster(
+    resources: &[Resource],
+    household: &[i64],
+    dial: &dyn Fn(&Origin) -> (i32, Vec<u8>),
+) -> Resolved {
     let mut probe_one = |plan: &ProbePlan| probe_server(plan, dial);
-    resolve_roster_using(resources, &mut probe_one, &mut || {}, &mut |_, _, _| {})
+    resolve_roster_using(
+        resources,
+        household,
+        &mut probe_one,
+        &mut || {},
+        &mut |_, _, _| {},
+    )
 }
 
 fn resolve_roster_live(
     resources: &[Resource],
+    household: &[i64],
     activate: &mut dyn FnMut(&ProbePlan, &Candidate, &Origin),
     observe: &mut dyn FnMut(&ProbePlan, Outcome, Option<probe::Location>),
 ) -> Resolved {
@@ -1564,6 +2870,7 @@ fn resolve_roster_live(
     };
     resolve_roster_using(
         resources,
+        household,
         &mut probe_one,
         &mut || std::thread::sleep(SERVER_GAP),
         observe,
@@ -1573,14 +2880,22 @@ fn resolve_roster_live(
 /// Project one verified probe winner into the persisted roster shape. A profile switch uses this
 /// without registering anything: credentials and endpoints become visible only at its atomic
 /// activation commit, never candidate-by-candidate while the previous profile is still live.
-fn source_from_reach(plan: &ProbePlan, reach: &Reach) -> Option<SourceRef> {
+///
+/// It takes the `Resource` as well as the plan because [`credit_of`] reads two fields off the wire
+/// row that the plan does not carry; the plan remains the source of everything about the CONNECTION.
+fn source_from_reach(
+    res: &Resource,
+    plan: &ProbePlan,
+    reach: &Reach,
+    household: &[i64],
+) -> Option<SourceRef> {
     let Reach::At(c, origin) = reach else {
         return None;
     };
     Some(SourceRef {
         machine_id: plan.machine_id.clone(),
         name: plan.name.clone(),
-        shared_by: plan.source_title.clone().unwrap_or_default(),
+        shared_by: credit_of(res, household),
         owned: plan.owned,
         origin_url: origin.base(),
         address: c.address.clone(),
@@ -1592,7 +2907,10 @@ fn source_from_reach(plan: &ProbePlan, reach: &Reach) -> Option<SourceRef> {
 
 /// Probe exactly one resource, with no live-registry side effect. This is the bounded critical
 /// path of a profile choice; whole-roster discovery deliberately remains a different operation.
-fn probe_profile_resource_live(resource: &Resource) -> (Option<SourceRef>, SettledProbe) {
+fn probe_profile_resource_live(
+    resource: &Resource,
+    household: &[i64],
+) -> (Option<SourceRef>, SettledProbe) {
     let plan = probe::plan(resource);
     let dial: ProbeDial = Arc::new(get_identity);
     let spawn = |_index: usize, job: ProbeJob| crate::task::spawn_small("probe", job);
@@ -1602,7 +2920,7 @@ fn probe_profile_resource_live(resource: &Resource) -> (Option<SourceRef>, Settl
         Reach::Refused => (Outcome::Unauthorized, None),
         Reach::No => (Outcome::Unreachable, None),
     };
-    let source = source_from_reach(&plan, &reach);
+    let source = source_from_reach(resource, &plan, &reach, household);
     (source, settled_probe(&plan, outcome, tier))
 }
 
@@ -1633,12 +2951,20 @@ fn discover_and_store(ac: &AccountClient, epoch: u64) -> Discovery {
         resources.iter().filter(|r| r.is_server()).count()
     ));
     let mut activate = |plan: &ProbePlan, c: &Candidate, origin: &Origin| {
-        let _ = with_live_epoch(epoch, || activate_candidate(plan, c, origin));
+        let credit = credit_for_machine(&resources, &plan.machine_id, &[]);
+        let _ = with_live_epoch(epoch, || activate_candidate(plan, c, origin, &credit));
     };
     let mut observe = |plan: &ProbePlan, outcome: Outcome, tier: Option<probe::Location>| {
         let _ = with_live_epoch(epoch, || publish_server_probe(plan, outcome, tier));
     };
-    let resolved = resolve_roster_live(&resources, &mut activate, &mut observe);
+    // **No household ids here, and that is a fact about the ORDER rather than an omission**: the
+    // Plex Home roster is fetched by `finish_sign_in`, *after* this runs, so at sign-in there is
+    // nothing to enumerate the house with — and the CTL session at this moment may still be the
+    // account that just signed out. Discovery is always performed with the ACCOUNT OWNER's token
+    // (the QR flow authorizes the account, never a managed profile), so plex.tv's own `owned`
+    // answers for their server and `home`/`ownerId` for the rest; the household refinement lands
+    // with `refresh_roster` or the first profile switch, both of which pass the real roster.
+    let resolved = resolve_roster_live(&resources, &[], &mut activate, &mut observe);
     let found = match resolved {
         Resolved::NoServers => return Discovery::NoServers,
         Resolved::None { refused: true } => return Discovery::Refused,
@@ -1720,6 +3046,7 @@ fn refreshed_sources(
     stored: &[SourceRef],
     reached: &[SourceRef],
     resources: &[Resource],
+    household: &[i64],
 ) -> Vec<SourceRef> {
     let mut grants: Vec<&Resource> = resources
         .iter()
@@ -1752,11 +3079,14 @@ fn refreshed_sources(
         if !r.name.is_empty() {
             cached.name = r.name.clone();
         }
-        if r.owned {
-            cached.shared_by.clear();
-        } else if let Some(owner) = r.source_title.as_ref().filter(|owner| !owner.is_empty()) {
-            cached.shared_by = owner.clone();
-        }
+        // **Assigned, not merged.** The credit follows the CURRENT grant unconditionally, because
+        // "no credit" is a positive answer here and not a missing one: this is the exact path a
+        // Plex Home profile switch takes, and a stored entry that already names somebody (the
+        // admin, from a build that wrote the raw `sourceTitle`) has to lose that name rather than
+        // keep it for want of a fresher one. A share whose handle plex.tv stops sending likewise
+        // stops being credited — see `plex::servers::owner_credit` on why absence is the safe way
+        // to be wrong.
+        cached.shared_by = credit_of(r, household);
         if cached.usable() {
             out.push(cached);
         }
@@ -1861,6 +3191,11 @@ pub fn refresh_roster() {
     if !sess.active_profile_is_admin() {
         return log("auth: roster refresh skipped — the account token is the owner's, and a managed profile is active");
     }
+    // The house, as of the roster this session last persisted. Captured before the worker so the
+    // rule is graded against the identity that OWNS this refresh — the same reason every other
+    // value crossing this spawn is captured here (`plex/CLAUDE.md`: capture the server at the
+    // spawn site).
+    let household = sess.household_ids();
     let _ = crate::task::spawn_small("roster-srv", move || {
         let ac = AccountClient::new(&sess.client_id, Some(&sess.account_token));
         let Some(resources) = ac.resources() else {
@@ -1868,24 +3203,29 @@ pub fn refresh_roster() {
             return;
         };
         let mut activate = |plan: &ProbePlan, c: &Candidate, origin: &Origin| {
-            let _ = with_live_epoch(epoch, || activate_candidate(plan, c, origin));
+            let credit = credit_for_machine(&resources, &plan.machine_id, &household);
+            let _ = with_live_epoch(epoch, || activate_candidate(plan, c, origin, &credit));
         };
         let mut settled = Vec::new();
-        let found =
-            match resolve_roster_live(&resources, &mut activate, &mut |plan, outcome, tier| {
+        let found = match resolve_roster_live(
+            &resources,
+            &household,
+            &mut activate,
+            &mut |plan, outcome, tier| {
                 let probe = settled_probe(plan, outcome, tier);
                 settled.push(probe.clone());
                 let _ = with_live_epoch(epoch, || publish_settled_probe(&probe));
-            }) {
-                Resolved::Reached(f) => f,
-                // "no server answered" is not evidence that the grant is gone: the friend's box may
-                // simply be off. Dropping the roster here would make an offline share un-browsable
-                // for good rather than until it comes back.
-                _ => {
-                    log("auth: roster refresh — nothing answered, keeping the stored roster");
-                    return;
-                }
-            };
+            },
+        ) {
+            Resolved::Reached(f) => f,
+            // "no server answered" is not evidence that the grant is gone: the friend's box may
+            // simply be off. Dropping the roster here would make an offline share un-browsable
+            // for good rather than until it comes back.
+            _ => {
+                log("auth: roster refresh — nothing answered, keeping the stored roster");
+                return;
+            }
+        };
         // The comparison, primary reconcile, CTL merge, registry replacement and write are one
         // auth-generation step. The resources response is the grant list; `found` is only the
         // subset that happened to answer. Preserve a cached address for a still-granted offline
@@ -1896,7 +3236,7 @@ pub fn refresh_roster() {
                 if !same_session_identity(s, &sess) {
                     return None;
                 }
-                let refreshed = refreshed_sources(&s.sources, &found, &resources);
+                let refreshed = refreshed_sources(&s.sources, &found, &resources, &household);
                 // An unauthenticated `/identity` can answer even when plex.tv supplied no usable
                 // grant token. That is not evidence to erase the last offline-capable roster.
                 let usable_refresh = !refreshed.is_empty();
@@ -2069,7 +3409,7 @@ pub(crate) fn request_endpoint_refresh(id: ServerId) {
                 id.raw()
             ));
         };
-        let (fresh, _) = probe_profile_resource_live(resource);
+        let (fresh, _) = probe_profile_resource_live(resource, &sess.household_ids());
         let Some(fresh) = fresh else {
             return;
         };
@@ -2329,8 +3669,9 @@ fn profile_sources(
     stored: &[SourceRef],
     reached: &[SourceRef],
     resources: &[Resource],
+    household: &[i64],
 ) -> Vec<SourceRef> {
-    refreshed_sources(stored, reached, resources)
+    refreshed_sources(stored, reached, resources, household)
 }
 
 fn ordered_profile_grants(resources: &[Resource]) -> Vec<usize> {
@@ -2374,7 +3715,12 @@ fn merge_profile_roster(
         if !same_session_identity(&c.session, expected) {
             return None;
         }
-        let sources = profile_sources(&c.session.sources, reached, resources);
+        let sources = profile_sources(
+            &c.session.sources,
+            reached,
+            resources,
+            &c.session.household_ids(),
+        );
         let Some(primary) = sources
             .iter()
             .find(|s| s.machine_id == c.session.server.machine_id)
@@ -2404,6 +3750,31 @@ fn merge_profile_roster(
         let next = next.clone();
         let _ =
             session::update(|disk| same_session_identity(disk, &expected).then(|| next.clone()));
+    }
+}
+
+/// Where a failed `switch_user` is SHOWN — `(roster banner, blame the PIN)`.
+///
+/// Pure, and split out of [`switch_thread`] for the reason [`may_resume`] is: its only caller runs
+/// inside a spawned worker behind a plex.tv round trip, which no host test can reach.
+/// **A PIN-blaming failure leaves the roster's band EMPTY.** The keypad already answered it — the
+/// dots flash red and the entry restarts on the same pad — and `ui::profiles::draw` paints
+/// [`error`] under the AVATAR ROW the moment the pad is closed, so a banner here reappeared under
+/// the faces as soon as BACK dismissed the keypad, blaming a PIN nobody was being asked for any
+/// more. Two surfaces, one of them asking about a PIN; the answer belongs on that one.
+///
+/// Every other failure keeps its banner, and that asymmetry is the point rather than an oversight:
+/// "no access to this server" and "check the connection" close the pad (`ui::profiles::update`)
+/// precisely so the roster can say WHY, and a picker that swallowed the choice with no read-out at
+/// all is the failure the banner was added for.
+fn switch_failure(pin_submitted: bool) -> (String, bool) {
+    if pin_submitted {
+        (String::new(), true)
+    } else {
+        (
+            "Couldn't switch profile — check the connection.".into(),
+            false,
+        )
     }
 }
 
@@ -2453,14 +3824,11 @@ fn switch_thread(index: usize, pin: Option<String>) {
                 // 401 (wrong PIN) and transport errors are indistinguishable at this layer;
                 // only blame the PIN when one was actually submitted.
                 log(&format!("auth: switch '{}' -> failed", tile.title));
+                let (error, pin_denied) = switch_failure(pin.is_some());
                 let _ = with_live_epoch(epoch, || {
                     with_ctl(|c| {
-                        c.error = if pin.is_some() {
-                            "Couldn't switch profile — check the PIN.".into()
-                        } else {
-                            "Couldn't switch profile — check the connection.".into()
-                        };
-                        c.pin_denied = pin.is_some();
+                        c.error = error;
+                        c.pin_denied = pin_denied;
                         c.phase = Phase::Profiles;
                     });
                 });
@@ -2492,6 +3860,11 @@ fn switch_thread(index: usize, pin: Option<String>) {
             return;
         }
 
+        // The house this profile belongs to, from the session that raised the picker — the
+        // switch's whole point is that `resources` is now answered ABOUT a managed user, so the
+        // admin's server arrives `owned:false` wearing the admin's handle. Without this the
+        // household's own library is credited to whoever pays for it, on every screen at once.
+        let household = stored.household_ids();
         let mut order = grants.clone();
         if let Some(pos) = order
             .iter()
@@ -2504,13 +3877,13 @@ fn switch_thread(index: usize, pin: Option<String>) {
         let mut probed = vec![false; resources.len()];
         let mut selected_mid = None;
         for &i in &order {
-            let (winner, settled) = probe_profile_resource_live(&resources[i]);
+            let (winner, settled) = probe_profile_resource_live(&resources[i], &household);
             probed[i] = true;
             probes.push(settled);
             if let Some(winner) = winner {
                 reached.push(winner);
             }
-            let roster = profile_sources(&stored.sources, &reached, &resources);
+            let roster = profile_sources(&stored.sources, &reached, &resources, &household);
             if roster
                 .iter()
                 .any(|s| s.machine_id == resources[i].client_identifier && s.usable())
@@ -2519,7 +3892,7 @@ fn switch_thread(index: usize, pin: Option<String>) {
                 break;
             }
         }
-        let initial = profile_sources(&stored.sources, &reached, &resources);
+        let initial = profile_sources(&stored.sources, &reached, &resources, &household);
         match selected_mid.and_then(|mid| initial.iter().find(|s| s.machine_id == mid).cloned()) {
             Some(primary) => {
                 log(&format!(
@@ -2564,7 +3937,7 @@ fn switch_thread(index: usize, pin: Option<String>) {
                         continue;
                     }
                     std::thread::sleep(SERVER_GAP);
-                    let (winner, settled) = probe_profile_resource_live(&resources[i]);
+                    let (winner, settled) = probe_profile_resource_live(&resources[i], &household);
                     probes.push(settled);
                     if let Some(winner) = winner {
                         reached.push(winner);
@@ -2600,22 +3973,213 @@ fn switch_thread(index: usize, pin: Option<String>) {
 
 // ---- helpers ----
 
+/// PURE (given the `Ctl` snapshot). Build the issue #75 handled-error report's context from the
+/// flow's own state — factored out of [`set_error`] so it can be exercised directly against a
+/// constructed `Ctl` in tests, with no thread, no network and no consent gate in the way.
+/// `storage` is collected by the CALLER, before `with_ctl` is entered — `plex::session::
+/// storage_class` can do a flash read (`has_refused_marker`'s candidate scan) on the cold-cache
+/// path, and this `Ctl` lock is taken by the render thread every frame, so nothing that could
+/// block may be computed while it is held (see `set_error`'s note on the same rule; found in
+/// review, issue #76).
+fn signin_error_context(
+    c: &Ctl,
+    storage: crate::telemetry::storage::SessionStorageClass,
+) -> crate::telemetry::signin::SignInErrorContext {
+    let kind = match c.phase {
+        Phase::Creating => crate::telemetry::signin::SignInFailureKind::PinCreate,
+        Phase::Waiting => crate::telemetry::signin::SignInFailureKind::Authorization,
+        Phase::Discovering => crate::telemetry::signin::SignInFailureKind::Discovery,
+        _ => crate::telemetry::signin::SignInFailureKind::Other,
+    };
+    let outcome = c
+        .dev_link_outcome
+        .or_else(|| crate::net::last_plex_tv_call().map(|l| l.outcome));
+    // issue #76: the live verdict, not a placeholder — `plex::session::storage_class` reads the
+    // same process-wide state `keymanager.rs`'s own refusal tracking and `diag::schema::
+    // UsageContext::session_storage` are wired from, so a sign-in report and a usage event agree.
+    crate::telemetry::signin::context_from(
+        kind,
+        &link_state_of(c),
+        outcome,
+        c.code_generation,
+        storage,
+    )
+}
+
 fn set_error(msg: &str) {
     log(&format!("auth: ERROR {msg}"));
-    with_ctl(|c| {
-        if c.signin_active {
+    // Only the CHEAP `Ctl` fields are collected under the lock — the phase-derived diag kind and
+    // the pure context — and both the diag event and the telemetry report are emitted AFTER the
+    // lock is released. `crate::diag::event` and `crate::telemetry::signin::report_error` both do
+    // spool I/O (a lock of their own, a disk read/write, possibly a log line), and this `Ctl` lock
+    // is also taken from the render thread every frame — nothing that could block belongs inside
+    // `with_ctl`. This used to call `diag::event` from inside the closure; found in review.
+    let storage = crate::plex::session::storage_class();
+    let report = with_ctl(|c| {
+        let ctx = if c.signin_active {
+            let ctx = signin_error_context(c, storage);
             let kind = match c.phase {
                 Phase::Creating => crate::diag::schema::SignInFailure::PinCreate,
                 Phase::Waiting => crate::diag::schema::SignInFailure::Authorization,
                 Phase::Discovering => crate::diag::schema::SignInFailure::Discovery,
                 _ => crate::diag::schema::SignInFailure::Other,
             };
-            crate::diag::event(crate::diag::schema::DiagEvent::SignInFailed { kind });
             c.signin_active = false;
-        }
+            // Captured under the SAME lock the context and kind came from — `report_error` below
+            // does spool I/O outside this closure, and a reset landing in that window bumps
+            // `c.attempt`, so the write that follows must be able to tell whether it is still
+            // installing a trouble for the attempt that is actually on screen.
+            Some((kind, ctx, c.attempt))
+        } else {
+            None
+        };
         c.error = msg.to_owned();
         c.phase = Phase::Error;
+        // Freeze the link-health clock here, at the moment nothing is polling any more — see
+        // `link_frozen_secs`'s doc. `get_or_insert` would be wrong: a second `set_error` on an
+        // already-settled flow (there isn't one today, but nothing enforces it) must not push the
+        // frozen instant forward.
+        c.link_frozen_secs = c.link_failing_since.map(|t| t.elapsed().as_secs());
+        ctx
     });
+    if let Some((kind, ctx, attempt)) = report {
+        crate::diag::event(crate::diag::schema::DiagEvent::SignInFailed { kind });
+        // Issue #75: the STANDING path — sends automatically when crash/error consent is already
+        // on. `sent` says whether it actually reached the spool, so the trouble this attempt is
+        // recorded with already knows whether the sign-in screen should offer the one-off alert
+        // or simply say "a report was sent".
+        let sent = crate::telemetry::signin::report_error(ctx);
+        with_ctl(|c| {
+            // The reset that would bump this has to land inside the disk-I/O window `report_error`
+            // just spent — a human press on the render thread, on the one frame between this
+            // attempt settling into `Phase::Error` and this write landing. Practically
+            // unreachable, but installing a stale attempt's trouble under a fresh one's id is
+            // exactly what `Ctl::attempt`'s own invariant promises never happens.
+            if c.attempt != attempt {
+                return;
+            }
+            // A one-off "Send report" press can already have reported THIS trouble while the
+            // standing report above was still in flight (`note_waiting_trouble` + a fast press,
+            // then a later `set_error` on the same attempt) — that flag must survive, or a
+            // trouble already sent loses its "was sent" note and a second call could resend it.
+            let already_reported = c.trouble.as_ref().is_some_and(|t| t.reported);
+            c.trouble = Some(Trouble {
+                ctx,
+                reported: sent || already_reported,
+            });
+        });
+    }
+}
+
+/// **Issue #75.** Build a trouble report from the LIVE link state, for the sign-in screen's one-off
+/// alert while it is stuck rather than failed — same context shape a failed sign-in reports
+/// (`kind` reads `Authorization` off the live `Phase::Waiting`), since the flow never actually
+/// reaches [`Phase::Error`] here and would otherwise have nothing to offer. Called from
+/// `ui::login::update` while the screen is in `Phase::Waiting`, the link is unreachable, and its
+/// own stalled-wait escape is already on offer.
+///
+/// **At most once per attempt.** The caller runs this every frame the screen is in that state, and
+/// the FIRST call wins — a later poll landing between two frames must not silently replace a
+/// context the person may already be reading in an open alert.
+///
+/// **Deliberately press-only, unlike [`set_error`] — it never calls `telemetry::signin::
+/// report_error` even when standing crash-report consent is already on.** A stuck sign-in has not
+/// actually failed; the flow may still recover on its own, so recording it here only sets up the
+/// one-off alert's context and leaves `reported` at `false`, and the person sees "Send report" on
+/// this screen even with the switch already on. `send_trouble_once` is the only door this trouble
+/// leaves through.
+pub fn note_waiting_trouble() {
+    // Cheap check first, under the lock the render thread also takes every frame — `storage_class`
+    // below can do a flash read, so it must run only on the one frame it is actually needed, never
+    // on every poll while a trouble is already recorded (see `signin_error_context`'s doc).
+    if with_ctl(|c| c.trouble.is_some()) {
+        return;
+    }
+    let storage = crate::plex::session::storage_class();
+    with_ctl(|c| {
+        if c.trouble.is_some() {
+            return;
+        }
+        let ctx = signin_error_context(c, storage);
+        c.trouble = Some(Trouble {
+            ctx,
+            reported: false,
+        });
+    });
+}
+
+/// This attempt's sign-in trouble, if any, plus which attempt it belongs to and whether it has
+/// already been reported — read once a frame by `ui::login`'s one-off report alert. The attempt id
+/// is what lets the screen tell "reopen for a new failure" from "already answered this one": a
+/// flow reset bumps [`Ctl::attempt`] and clears `trouble`, so a stale id can never be mistaken for
+/// the trouble on screen right now.
+pub fn trouble_snapshot() -> Option<(u64, crate::telemetry::signin::SignInErrorContext, bool)> {
+    with_ctl(|c| c.trouble.as_ref().map(|t| (c.attempt, t.ctx, t.reported)))
+}
+
+/// Build a report context for the storage Details action without inventing a failed sign-in or
+/// mutating the flow's trouble/phase. The attempt token is returned so a confirmation opened over
+/// this screen cannot report after a retry, sign-out, or a newer QR flow has taken ownership.
+pub fn storage_report_context() -> (u64, crate::telemetry::signin::SignInErrorContext) {
+    let storage = crate::plex::session::storage_class();
+    with_ctl(|c| {
+        if c.phase == Phase::Error {
+            if let Some(trouble) = c.trouble.as_ref() {
+                return (c.attempt, trouble.ctx);
+            }
+        }
+        (c.attempt, signin_error_context(c, storage))
+    })
+}
+
+/// Submit a manually requested Details report only for the attempt that supplied its context.
+/// A stale confirmation is refused before the telemetry producer is called, and a flow reset that
+/// races the producer cannot authorize a result for the newer attempt.
+pub fn send_storage_report(
+    attempt: u64,
+    ctx: crate::telemetry::signin::SignInErrorContext,
+) -> Option<String> {
+    if current_attempt() != attempt {
+        return None;
+    }
+    let event_id = crate::telemetry::signin::send_requested(
+        ctx,
+        crate::telemetry::signin::OneOffSource::StorageDetails,
+    )?;
+    (current_attempt() == attempt).then_some(event_id)
+}
+
+/// The one-off alert's "Send report" press ([`telemetry::signin::send_once`]). Takes the current
+/// attempt's trouble, sends it, and marks it reported so a second call — unreachable through the
+/// screen, since the alert dismisses on the same press, but not unreachable from a test — cannot
+/// resend it. Returns whether it was actually queued.
+pub fn send_trouble_once() -> bool {
+    send_trouble_event_once().is_some()
+}
+
+/// The explicit automatic-trouble path's event receipt, used by the shared confirmation surface
+/// when the transport accepts the record. The bool wrapper above remains for existing callers and
+/// tests that only need the legacy success predicate.
+pub fn send_trouble_event_once() -> Option<String> {
+    let (ctx, attempt) = with_ctl(|c| match &c.trouble {
+        Some(t) if !t.reported => Some((t.ctx, c.attempt)),
+        _ => None,
+    })?;
+    let event_id = crate::telemetry::signin::send_requested(
+        ctx,
+        crate::telemetry::signin::OneOffSource::SignInTrouble,
+    )?;
+    if current_attempt() != attempt {
+        return None;
+    }
+    with_ctl(|c| {
+        if c.attempt == attempt {
+            if let Some(t) = c.trouble.as_mut() {
+                t.reported = true;
+            }
+        }
+    });
+    Some(event_id)
 }
 
 fn finish_signin_cancelled() {
@@ -2645,6 +4209,83 @@ mod tests {
     use super::*;
     use crate::plex::probe::Scheme;
     use std::cell::RefCell;
+
+    /// **The next account to sign in must be asked afresh.** The maintainer's scenario (2026-09-04):
+    /// account A consents to both channels, signs out, account B signs in through the QR flow — and
+    /// B was never asked, while B's usage went out under A's consent and A's identifiers. Consent
+    /// belongs to the person who gave it, so signing out ends it: the decision returns to
+    /// *unanswered*, both identifiers are destroyed and the file is gone, exactly as a withdrawal
+    /// plus a fresh install would leave it. The scenario is graded on [`forget_account`], the tail
+    /// both sign-out paths share, because [`sign_out`] ends in `start_login`, whose worker talks to
+    /// plex.tv.
+    #[test]
+    fn signing_out_leaves_no_consent_and_no_identifier_for_the_next_account() {
+        use crate::telemetry::consent;
+        /// Every crate-global redirect this test takes, handed back on drop — so a failed
+        /// assertion cannot leave the next test writing into this one's directory.
+        struct Redirects {
+            dir: std::path::PathBuf,
+            saved: Option<consent::Consent>,
+        }
+        impl Drop for Redirects {
+            fn drop(&mut self) {
+                crate::telemetry::spool::set_test_path(None);
+                crate::telemetry::redirect_for_test(None);
+                crate::plex::session::redirect_for_test(None);
+                if let Some(c) = self.saved.take() {
+                    consent::install(c);
+                }
+                let _ = std::fs::remove_dir_all(&self.dir);
+            }
+        }
+        let _g = crate::testlock::serial();
+        let dir = std::env::temp_dir().join(format!("plxnative-signout-consent-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a writable temp dir");
+        let _redirects = Redirects {
+            dir: dir.clone(),
+            saved: consent::current(),
+        };
+        crate::plex::session::redirect_for_test(Some(dir.join("auth.json")));
+        let consent_file = dir.join("telemetry.json");
+        crate::telemetry::redirect_for_test(Some(consent_file.clone()));
+        crate::telemetry::spool::set_test_path(Some(dir.join("spool.jsonl")));
+
+        // Account A answers yes to both, which mints both identifiers and persists the decision.
+        crate::telemetry::record(consent::apply(
+            &consent::Consent::default(),
+            true,
+            true,
+            || Some("a".repeat(32)),
+        ));
+        assert!(consent::allows_usage() && consent::errors_id().is_some());
+        assert!(
+            consent_file.exists(),
+            "the decision was persisted for account A"
+        );
+
+        forget_account();
+
+        let after = consent::current().expect("a decision is always published");
+        assert!(
+            !after.answered(),
+            "account B would never be asked: A's answer survived the sign-out"
+        );
+        assert!(
+            after.install_id.is_none() && after.errors_id.is_none(),
+            "an identifier survived the sign-out and would tag B's reports as A"
+        );
+        assert!(!consent::allows_usage() && !consent::allows_errors());
+        assert!(consent::errors_id().is_none());
+        assert!(
+            consent::should_ask(&after, false),
+            "the next authorized sign-in must put the question on screen again"
+        );
+        assert!(
+            !consent_file.exists(),
+            "the consent file outlived the sign-out and would resume A's decision at the next boot"
+        );
+    }
 
     #[test]
     fn only_a_live_qr_attempt_can_settle_as_an_activation() {
@@ -2799,6 +4440,26 @@ mod tests {
             RetryKind::Discovery
         );
         assert_eq!(retry_kind(Phase::Waiting, true), RetryKind::Login);
+    }
+
+    #[test]
+    fn pin_reauthentication_authority_is_consumed_before_a_later_profile_handoff() {
+        let mut ctl = Ctl {
+            phase: Phase::Ready,
+            authorized_in_flow: true,
+            session: Session {
+                account_token: "cached-after-pin".into(),
+                ..Session::default()
+            },
+            ..Ctl::default()
+        };
+
+        assert!(consume_reauthentication_authority(&mut ctl));
+        assert!(
+            !consume_reauthentication_authority(&mut ctl),
+            "the same cached account token must not authorize a later Change-profile save"
+        );
+        assert_eq!(ctl.session.account_token, "cached-after-pin");
     }
 
     /// **A stalled DISCOVERY retries discovery, not the whole sign-in.** `ui::login` grows a
@@ -3095,6 +4756,7 @@ mod tests {
         let mut gaps = 0;
         let resolved = resolve_roster_using(
             &resources,
+            &[],
             &mut |plan| {
                 order.push(plan.machine_id.clone());
                 Reach::No
@@ -3133,6 +4795,7 @@ mod tests {
         let mut observed = Vec::new();
         let resolved = resolve_roster_using(
             &resources,
+            &[],
             &mut |plan| match plan.machine_id.as_str() {
                 "yes" => Reach::At(winner.clone(), origin.clone()),
                 "denied" => Reach::Refused,
@@ -3625,7 +5288,7 @@ mod tests {
             ("192.168.0.10", 200, identity_json("aaaa1111")),
             ("203.0.113.9", 200, identity_json("bbbb2222")),
         ]);
-        let Resolved::Reached(roster) = resolve_roster(&a_two_server_account(), &|o| d.dial(o))
+        let Resolved::Reached(roster) = resolve_roster(&a_two_server_account(), &[], &|o| d.dial(o))
         else {
             panic!("both servers answer: {:?}", d.seen())
         };
@@ -3706,7 +5369,7 @@ mod tests {
             ("plex-relay.example.net", 200, identity_json("aaaa1111")),
             ("203-0-113-9.h.plex.direct", 200, identity_json("bbbb2222")),
         ]);
-        let Resolved::Reached(roster) = resolve_roster(&a_two_server_account(), &|o| d.dial(o))
+        let Resolved::Reached(roster) = resolve_roster(&a_two_server_account(), &[], &|o| d.dial(o))
         else {
             panic!("both servers answer over TLS: {:?}", d.seen())
         };
@@ -3761,7 +5424,7 @@ mod tests {
             ("192.168.0.10", 200, identity_json("aaaa1111")),
             ("203.0.113.9", 200, identity_json("bbbb2222")),
         ]);
-        let Resolved::Reached(roster) = resolve_roster(&a_two_server_account(), &|o| d.dial(o))
+        let Resolved::Reached(roster) = resolve_roster(&a_two_server_account(), &[], &|o| d.dial(o))
         else {
             panic!("both servers answer")
         };
@@ -3792,14 +5455,14 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            resolve_roster(&players, &|_| (0, Vec::new())),
+            resolve_roster(&players, &[], &|_| (0, Vec::new())),
             Resolved::NoServers
         ));
 
         // servers that simply do not answer
         let silent = Dialled::new(vec![]);
         assert!(matches!(
-            resolve_roster(&a_two_server_account(), &|o| silent.dial(o)),
+            resolve_roster(&a_two_server_account(), &[], &|o| silent.dial(o)),
             Resolved::None { refused: false }
         ));
 
@@ -3810,14 +5473,14 @@ mod tests {
             ("203.0.113.9", 401, Vec::new()),
         ]);
         assert!(matches!(
-            resolve_roster(&a_two_server_account(), &|o| refused.dial(o)),
+            resolve_roster(&a_two_server_account(), &[], &|o| refused.dial(o)),
             Resolved::None { refused: true }
         ));
 
         // a share that answers while OUR server is off still signs in — a friend's library beats
         // "no server found" — and it becomes the primary because it is the only thing there is
         let one = Dialled::new(vec![("203.0.113.9", 200, identity_json("bbbb2222"))]);
-        let Resolved::Reached(roster) = resolve_roster(&a_two_server_account(), &|o| one.dial(o))
+        let Resolved::Reached(roster) = resolve_roster(&a_two_server_account(), &[], &|o| one.dial(o))
         else {
             panic!("the share answered")
         };
@@ -3976,7 +5639,7 @@ mod tests {
             r#"{"name":"ours","clientIdentifier":"ours","provides":"server","owned":true,
                 "accessToken":"profile-token"}"#,
         )];
-        let next = profile_sources(&[cached], &[wan], &resources);
+        let next = profile_sources(&[cached], &[wan], &resources, &[]);
 
         assert_eq!(next.len(), 1);
         assert_eq!(next[0].token, "profile-token");
@@ -4042,7 +5705,7 @@ mod tests {
                 "owned":false,"sourceTitle":"friend","accessToken":"profile-share"}"#,
         )];
 
-        let next = profile_sources(&stored, &[], &resources);
+        let next = profile_sources(&stored, &[], &resources, &[]);
 
         assert_eq!(next.len(), 1);
         assert_eq!(next[0].machine_id, "surviving-share");
@@ -4071,6 +5734,59 @@ mod tests {
         with_ctl(|c| *c = Ctl::default());
     }
 
+    /// **A Plex Home managed user's own household server must not be credited to the admin.**
+    ///
+    /// This is the reported bug ("Shared by Gleb" on the user's OWN server), reproduced at the one
+    /// layer that decides it: a profile switch re-fetches `/api/v2/resources` with the SWITCHED
+    /// user's token (`switch_thread`), and plex.tv answers about that user — so the household's
+    /// own server comes back `owned:false` with the admin's handle in `sourceTitle`. Fed straight
+    /// into `SourceRef::shared_by` that is a credit naming the person watching.
+    ///
+    /// The shape is the live 2026-09-03 `/api/v2/resources` shape with stand-in identities: an
+    /// owned server carries `sourceTitle:null`/`ownerId:null`, a share carries a handle and the
+    /// owner's plex.tv id, and `ownerId` is in the same id space as `/api/v2/home/users[].id`
+    /// (measured: the admin row's `id` equals `/api/v2/user`'s `id`).
+    #[test]
+    fn a_home_admins_server_seen_by_a_managed_profile_credits_nobody() {
+        const ADMIN_ID: i64 = 111_111;
+        const MANAGED_ID: i64 = 222_222;
+        const FRIEND_ID: i64 = 987_654;
+        let household = [ADMIN_ID, MANAGED_ID];
+
+        // What the admin's own sign-in wrote down: the household server is ours, the share is not.
+        let stored = vec![
+            source("aaaa1111", true, "own-tok"),
+            source("bbbb2222", false, "share-tok"),
+        ];
+        // What plex.tv says to the MANAGED user's token: nothing is owned, and the household
+        // server now names the admin.
+        let resources = vec![
+            resource(
+                r#"{"name":"Mac mini","clientIdentifier":"aaaa1111","provides":"server",
+                    "owned":false,"home":true,"sourceTitle":"admin","ownerId":111111,
+                    "accessToken":"kid-own"}"#,
+            ),
+            resource(
+                r#"{"name":"nas-home","clientIdentifier":"bbbb2222","provides":"server",
+                    "owned":false,"home":false,"sourceTitle":"friend","ownerId":987654,
+                    "accessToken":"kid-share"}"#,
+            ),
+        ];
+
+        let next = refreshed_sources(&stored, &[], &resources, &household);
+
+        assert!(
+            next[0].shared_by.is_empty(),
+            "the household's own server credits nobody, whichever profile is watching — got {:?}",
+            next[0].shared_by
+        );
+        assert_eq!(
+            next[1].shared_by, "friend",
+            "a person outside the household is still credited"
+        );
+        let _ = FRIEND_ID;
+    }
+
     #[test]
     fn refresh_keeps_a_still_granted_offline_share_and_drops_only_a_revoked_grant() {
         let stored = vec![
@@ -4096,7 +5812,7 @@ mod tests {
             ),
         ];
 
-        let next = refreshed_sources(&stored, &reached, &resources);
+        let next = refreshed_sources(&stored, &reached, &resources, &[]);
         assert_eq!(
             next.iter()
                 .map(|s| s.machine_id.as_str())
@@ -4335,9 +6051,12 @@ mod tests {
     /// only true of the picker Home opens.
     ///
     /// So every row of the rule is graded here, and most of them are the ones that must NOT change:
-    /// a boot picker over an unprotected profile still resumes (nothing is being bypassed), and
-    /// *Change profile* resumes the identity already active behind it; the sign-in picker requires
-    /// an explicit profile selection because an account credential is not a household PIN.
+    /// a boot picker over an unprotected profile still resumes (nothing is being bypassed), and the
+    /// sign-in picker requires an explicit profile selection because an account credential is not a
+    /// household PIN. The *Change profile* row is no longer among them — it was the SAME escalation
+    /// by the door this fix left open, and
+    /// [`change_profile_then_back_cannot_restore_the_protected_profile_it_left`] is where it is
+    /// graded now; the rows are asserted here too so a change to the table has to face both tests.
     ///
     /// The last section is the SECOND road to the same escalation, and it survived the first fix: a
     /// sign-in abandoned at the picker persists a session that names no profile, whose token is the
@@ -4350,8 +6069,8 @@ mod tests {
         // the rule itself, as a table
         assert!(!may_resume(Picker::Boot, true), "the escalation");
         assert!(may_resume(Picker::Boot, false));
-        assert!(may_resume(Picker::ChangeProfile, true));
-        assert!(may_resume(Picker::ChangeProfile, false));
+        assert!(!may_resume(Picker::ChangeProfile, true), "the same escalation");
+        assert!(!may_resume(Picker::ChangeProfile, false));
         assert!(!may_resume(Picker::SignedIn, true));
         assert!(!may_resume(Picker::SignedIn, false));
         // and the DEFAULT is the strict one: it is read only where no picker named itself, and
@@ -4394,14 +6113,6 @@ mod tests {
         assert_eq!(phase(), Phase::Ready);
         assert!(with_ctl(|c| c.apply_pending));
 
-        picker(Picker::ChangeProfile);
-        assert!(
-            resume_stored(signed_in_as("u-adult")),
-            "Home's picker backs out to the profile it was opened by"
-        );
-        assert_eq!(phase(), Phase::Ready);
-        assert!(with_ctl(|c| c.apply_pending));
-
         // the refusal that predates all of this: nothing usable behind the picker at all
         picker(Picker::ChangeProfile);
         assert!(!resume_stored(Session::default()));
@@ -4439,6 +6150,618 @@ mod tests {
         with_ctl(|c| *c = Ctl::default());
     }
 
+    /// **Change profile → BACK must not put you back inside the protected profile you left.**
+    ///
+    /// The maintainer's report, verbatim and in order: *1. Enter a PIN-protected profile. 2. Select
+    /// Change Profile. 3. The app navigates to Who's Watching. 4. Press Back. 5. The app returns
+    /// directly to the previously active protected profile without requesting its PIN.*
+    ///
+    /// That is the same escalation
+    /// [`back_out_of_the_boot_picker_refuses_a_pin_protected_profile_and_nothing_else`] closed at
+    /// the BOOT picker, arriving by the one door that fix deliberately left open. The reasoning
+    /// there was "Home is behind this picker and its user is already signed in as that profile, so
+    /// BACK hands back exactly what they were holding" — true of the person who pressed *Change
+    /// profile*, and false of the next person, because *Change profile* is the control you press
+    /// precisely when you are about to hand the remote over. It is also the only screen in the app
+    /// that ANNOUNCES a profile boundary and then declines to enforce it.
+    ///
+    /// So the rule is that *Change profile* **detaches**: the picker it raises is a ROOT, with no
+    /// route and no profile behind it. BACK there restores nothing at all — deliberately not even
+    /// an unprotected previous profile, because "BACK resumes iff the profile you left has no PIN"
+    /// is a rule whose behaviour leaks whether a PIN exists, and because one tile press is the
+    /// whole cost of the consistent version. Leaving the picker means CHOOSING: a tile (and, for a
+    /// protected one, its PIN), or the *Sign out* pill under the roster.
+    ///
+    /// The `Boot`/`SignedIn` rows are re-asserted here as the ones that must NOT move.
+    #[test]
+    fn change_profile_then_back_cannot_restore_the_protected_profile_it_left() {
+        let _g = crate::testlock::serial();
+
+        // 1. Enter a PIN-protected profile: `u-adult` carries the PIN in `signed_in_as`'s roster,
+        //    and this is the identity the running app is holding.
+        let active = signed_in_as("u-adult");
+        assert!(
+            active.active_profile_is_protected(),
+            "the profile the scenario starts inside is the protected one"
+        );
+        let restore = session::current();
+        session::set_current(Some(active.user.clone()));
+
+        // 2. Select Change Profile → 3. the app navigates to Who's Watching. The picker names its
+        //    own kind, and this kind DETACHES: nothing in the process is signed in as anybody now.
+        assert!(
+            detaches_active_profile(Picker::ChangeProfile),
+            "Change profile detaches the profile it was opened from"
+        );
+        assert!(
+            !detaches_active_profile(Picker::Boot),
+            "the boot picker has nothing to detach — no profile was ever attached this run"
+        );
+        assert!(
+            !detaches_active_profile(Picker::SignedIn),
+            "nor has the picker a fresh QR sign-in raises"
+        );
+        if detaches_active_profile(Picker::ChangeProfile) {
+            session::set_current(None);
+        }
+        let detached = session::current();
+        session::set_current(restore); // BEFORE the asserts: a failure must not leak the global
+        assert!(
+            detached.is_none(),
+            "the active-profile identity survived Change profile"
+        );
+
+        with_ctl(|c| {
+            *c = Ctl {
+                phase: Phase::Profiles,
+                from: Picker::ChangeProfile,
+                ..Ctl::default()
+            }
+        });
+
+        // 4. Press Back → 5. …and nothing is handed back. `Phase::Ready` + `apply_pending` is the
+        //    escalation, not the phase alone: that pair is what `take_ready` installs on the main
+        //    thread, per-user PMS token and all.
+        assert!(
+            !resume_stored(active),
+            "BACK out of the Change-profile picker restored the protected profile with no PIN"
+        );
+        assert_eq!(
+            phase(),
+            Phase::Profiles,
+            "the picker stays up and the key is swallowed"
+        );
+        assert!(
+            with_ctl(|c| !c.apply_pending),
+            "no credentials are armed for the main loop"
+        );
+
+        // …and an UNPROTECTED previous profile is refused by the same rule, on purpose: a picker
+        // that is a root for one profile and a door for another is not a root.
+        with_ctl(|c| {
+            *c = Ctl {
+                phase: Phase::Profiles,
+                from: Picker::ChangeProfile,
+                ..Ctl::default()
+            }
+        });
+        assert!(
+            !resume_stored(signed_in_as("u-kid")),
+            "the Change-profile picker is a root for every profile, PIN or no PIN"
+        );
+        assert!(with_ctl(|c| !c.apply_pending));
+
+        // the rule as a table, so a future edit to `may_resume` has to come through this test too
+        assert!(!may_resume(Picker::ChangeProfile, true));
+        assert!(!may_resume(Picker::ChangeProfile, false));
+
+        // …and the log line names THIS refusal rather than a PIN. The profile behind a
+        // Change-profile picker is commonly unprotected — it is in the second half of this very
+        // test — so the inherited "the stored profile is PIN-protected" would be false in exactly
+        // the case a user is most likely to report.
+        let open = signed_in_as("u-kid");
+        assert_eq!(
+            refusal_reason(Picker::ChangeProfile, &open),
+            "auth: BACK refused — the Change-profile picker is a root"
+        );
+        assert!(
+            !open.active_profile_is_protected(),
+            "…and there is no PIN anywhere in that scenario to blame"
+        );
+        assert_eq!(
+            refusal_reason(Picker::Boot, &signed_in_as("u-adult")),
+            "auth: BACK refused — the stored profile is PIN-protected",
+            "the boot picker's two reasons are unchanged"
+        );
+        let mut unchosen = signed_in_as("u-adult");
+        unchosen.user = UserRef::default();
+        assert_eq!(
+            refusal_reason(Picker::SignedIn, &unchosen),
+            "auth: BACK refused — no profile has been chosen on this device yet"
+        );
+
+        with_ctl(|c| *c = Ctl::default());
+    }
+
+    /// **A wrong PIN must not follow the user back to the roster.** Reported as a *"strange 'Switch
+    /// Profile — Check the PIN' element"* appearing on Who's Watching after a rejected PIN.
+    ///
+    /// It is `switch_thread`'s failure banner. The pad and the roster are two surfaces and only one
+    /// of them is asking about a PIN: `ui::profiles::draw` paints `auth::error()` under the avatar
+    /// row whenever the pad is closed, so the moment BACK dismissed the keypad the string the pad
+    /// had already answered with a red flash reappeared under the faces — blaming a PIN nobody was
+    /// being asked for any more, on the one screen where every profile is a candidate.
+    ///
+    /// So a PIN-blaming failure leaves NO roster banner. Everything else keeps one, because the
+    /// roster is exactly where "no access to this server" or "check the connection" belongs — the
+    /// pad closes for those (`ui::profiles::update`), and a screen that swallowed the choice with
+    /// no read-out at all is the failure this banner was added for.
+    #[test]
+    fn a_rejected_pin_leaves_no_error_on_the_who_s_watching_roster() {
+        let (banner, denied) = switch_failure(true);
+        assert!(
+            banner.is_empty(),
+            "a PIN-blaming failure must leave the roster's error band EMPTY — got {banner:?}"
+        );
+        assert!(denied, "…and must still flash the pad's dots");
+
+        let (banner, denied) = switch_failure(false);
+        assert!(
+            !banner.is_empty(),
+            "a switch that failed for any other reason still owes the roster a read-out"
+        );
+        assert!(
+            !denied,
+            "…and must not flash the pad red, which reads as a typo to retry forever"
+        );
+    }
+
+    /// Closing the keypad clears the PIN verdict with it. `pin_denied` is what
+    /// `ui::profiles::update` reads to decide a rejection flashes rather than closes the pad; left
+    /// standing after BACK it is a verdict about a keypad that is no longer on screen.
+    #[test]
+    fn dismissing_the_keypad_clears_the_pin_verdict() {
+        let _g = crate::testlock::serial();
+        with_ctl(|c| {
+            *c = Ctl {
+                phase: Phase::Profiles,
+                pin_denied: true,
+                error: "Couldn't switch profile — check the connection.".into(),
+                ..Ctl::default()
+            }
+        });
+        dismiss_pin_error();
+        assert!(!pin_denied(), "the verdict goes with the pad");
+        assert_eq!(
+            error(),
+            "Couldn't switch profile — check the connection.",
+            "…and a NON-PIN failure's roster banner is not collateral: it is the roster's own"
+        );
+        with_ctl(|c| *c = Ctl::default());
+    }
+
+    // ---- the QR sign-in that could not end (issue #30) ----
+
+    /// **A refused BACK must leave the live pin poll alone.** This is the wedge the issue
+    /// describes: the phone says *Account linked* and the television sits on "Waiting for you to
+    /// sign in…" until it is restarted.
+    ///
+    /// `cancel` opened by bumping [`AUTH_EPOCH`] and only then asked whether it was allowed to
+    /// resume anything. Both refusals — a first-ever sign-in with nothing on disk, and a boot
+    /// picker over a PIN-protected profile — therefore returned `false` to a caller that swallows
+    /// the key (`ui::login`'s BACK does exactly that, by design), having already retired the only
+    /// worker behind the screen. The QR, the short code and the spinner were all still there, so
+    /// nothing about the screen said the sign-in had been killed; and pressing BACK on a screen
+    /// that appears to ignore you is precisely what a person does more than once.
+    #[test]
+    fn a_refused_back_leaves_the_live_pin_poll_running() {
+        let _g = crate::testlock::serial();
+        let refused = |sess: Session, from: Picker| {
+            let (epoch, ()) = begin_flow(|c| {
+                *c = Ctl {
+                    phase: Phase::Waiting,
+                    signin_active: true,
+                    from,
+                    ..Ctl::default()
+                };
+            });
+            let gate = ACTIVATION_GATE.lock().unwrap_or_else(|e| e.into_inner());
+            let resumed = cancel_under_gate(&gate, sess);
+            drop(gate);
+            (epoch, resumed)
+        };
+
+        // 1. the first-ever sign-in: there is genuinely nothing behind this screen
+        let (epoch, resumed) = refused(Session::default(), Picker::Boot);
+        assert!(!resumed, "nothing to back out to");
+        assert_eq!(
+            phase(),
+            Phase::Waiting,
+            "so the QR screen stays exactly as it was"
+        );
+        assert!(
+            with_live_epoch(epoch, || ()).is_some(),
+            "…and the pin poll behind it is still the live flow"
+        );
+        assert!(
+            with_ctl(|c| c.signin_active),
+            "an unresolved sign-in must not be settled by a key press that did nothing"
+        );
+
+        // 2. the other refusal, reached over a session that DOES exist: a boot picker may not
+        //    resume a PIN-protected profile. Same rule, same requirement — the flow survives.
+        let (epoch, resumed) = refused(signed_in_as("u-adult"), Picker::Boot);
+        assert!(!resumed, "BACK must not resume behind the PIN");
+        assert!(with_live_epoch(epoch, || ()).is_some());
+
+        // …and the permitted case still does every part of a cancel, in the order that lets the
+        // diagnostic report: settle, invalidate, install.
+        let (epoch, resumed) = refused(signed_in_as("u-kid"), Picker::Boot);
+        assert!(resumed);
+        assert!(
+            with_live_epoch(epoch, || ()).is_none(),
+            "a cancel that DID something retires the worker it replaced"
+        );
+        assert_eq!(phase(), Phase::Ready);
+        assert!(with_ctl(|c| c.apply_pending));
+        with_ctl(|c| *c = Ctl::default());
+    }
+
+    /// **A press may only act on the wait the screen actually timed**, and both halves of that
+    /// identity are a defect that was live for one review round.
+    ///
+    /// The PHASE: the sign-in screen offers its escape in the DRAW and takes it on the next key,
+    /// and between those the poll can return a token and walk the flow to `Ready` — where a
+    /// restart mints a fresh pin over a sign-in that had just succeeded. Worse, the two escapes
+    /// share one clock, so a wait that moved `Waiting → Discovering` made the QR predicate false
+    /// and the STALLED-SPINNER one true, on the dead code's timer, down what used to be an
+    /// unguarded path.
+    ///
+    /// The CODE: a wait is now replaced automatically without the phase changing, so a press timed
+    /// against the code that expired would throw away the one that replaced it a moment ago.
+    #[test]
+    fn a_restart_acts_only_on_the_wait_that_earned_it() {
+        // the rule, as a table
+        let timed = (Phase::Waiting, 7u64);
+        assert!(restart_permitted(Some(timed), timed));
+        assert!(
+            !restart_permitted(Some(timed), (Phase::Ready, 7)),
+            "the sign-in succeeded between the draw and the key"
+        );
+        assert!(
+            !restart_permitted(Some(timed), (Phase::Discovering, 7)),
+            "…or merely moved on, which the OTHER escape would have accepted on this same clock"
+        );
+        assert!(
+            !restart_permitted(Some(timed), (Phase::Waiting, 8)),
+            "the code was replaced automatically while the key was in flight"
+        );
+        assert!(
+            restart_permitted(None, (Phase::Ready, 99)),
+            "the settled read-out's own control has no live wait to be wrong about"
+        );
+    }
+
+    /// …and that the guard is actually wired to the invalidation, rather than being a predicate
+    /// somebody remembered to call.
+    #[test]
+    fn a_refused_restart_invalidates_nothing() {
+        let _g = crate::testlock::serial();
+
+        let (settled, ()) = begin_flow(|c| {
+            *c = Ctl {
+                phase: Phase::Ready,
+                apply_pending: true,
+                ..Ctl::default()
+            };
+        });
+        assert!(
+            begin_flow_if(
+                |c| restart_permitted(Some((Phase::Waiting, 0)), (c.phase, c.qr_gen)),
+                |_| unreachable!("a refused restart must not reach the capture at all"),
+            )
+            .is_none(),
+            "the predicate declines"
+        );
+        assert!(
+            with_live_epoch(settled, || ()).is_some(),
+            "and declining must not invalidate the flow it declined to replace"
+        );
+        assert_eq!(phase(), Phase::Ready);
+        assert!(
+            with_ctl(|c| c.apply_pending),
+            "the credentials the main loop is about to install are untouched"
+        );
+
+        // …which is precisely what the UNGUARDED shape did. This is the contrast rather than a
+        // historical red — `begin_flow_if` did not exist — and one call is enough to show it.
+        let (_replacement, ()) = begin_flow(|_| {});
+        assert!(
+            with_live_epoch(settled, || ()).is_none(),
+            "an unconditional start retires a sign-in that had already succeeded"
+        );
+
+        // and the permitted case does invalidate, exactly once
+        let (waiting, ()) = begin_flow(|c| {
+            *c = Ctl {
+                phase: Phase::Waiting,
+                signin_active: true,
+                qr_gen: 3,
+                ..Ctl::default()
+            };
+        });
+        let taken = begin_flow_if(
+            |c| restart_permitted(Some((Phase::Waiting, 3)), (c.phase, c.qr_gen)),
+            |c| c.phase = Phase::Creating,
+        );
+        assert!(taken.is_some());
+        assert!(with_live_epoch(waiting, || ()).is_none());
+        assert_eq!(phase(), Phase::Creating);
+        with_ctl(|c| *c = Ctl::default());
+    }
+
+    /// **One `SignInStarted` per attempt**, which `diag::schema` states as a contract: a start is
+    /// bracketed by exactly one completed/failed/cancelled. Both of the sign-in screen's timed
+    /// escapes restart a wait that is still UNSETTLED, so reporting a second start against the one
+    /// settle that eventually follows would leave every stalled sign-in over-counted.
+    #[test]
+    fn restarting_a_live_wait_is_the_same_attempt_carrying_on() {
+        assert!(
+            !restart_is_a_new_attempt(true),
+            "a stalled spinner or an unscanned code is already being counted"
+        );
+        assert!(
+            restart_is_a_new_attempt(false),
+            "…while an error read-out has reported its failure and the next press opens a new \
+             bracket"
+        );
+    }
+
+    /// A scripted pin: answers from a list, and a clock that moves only when the loop waits or
+    /// polls. A fifteen-minute pin therefore runs to its death in microseconds.
+    struct ScriptedPin {
+        answers: std::collections::VecDeque<PinPoll>,
+        clock: Duration,
+        waits: Vec<Duration>,
+        /// The wait (by index) at which a newer flow takes the screen.
+        superseded_at: Option<usize>,
+        polls: usize,
+        /// What one request costs. Settable because it is the axis the old iteration count was
+        /// blind to, and because `net::API` lets one poll cost 25 s.
+        poll_cost: Duration,
+    }
+
+    impl ScriptedPin {
+        fn new(answers: Vec<PinPoll>) -> ScriptedPin {
+            ScriptedPin {
+                answers: answers.into(),
+                clock: Duration::ZERO,
+                waits: Vec::new(),
+                superseded_at: None,
+                polls: 0,
+                poll_cost: Duration::from_millis(300),
+            }
+        }
+    }
+
+    impl PinWatch for ScriptedPin {
+        fn poll(&mut self) -> PinPoll {
+            self.polls += 1;
+            // A poll costs a round trip. That cost is the whole of the second defect: the old loop
+            // counted ITERATIONS and paid this on top of every one of them, so its window was
+            // always longer than the pin it was watching — by minutes on a healthy link and by
+            // hours against `net::API`'s 25 s deadline.
+            self.clock += self.poll_cost;
+            self.answers.pop_front().unwrap_or(PinPoll::Unreachable)
+        }
+        fn wait(&mut self, d: Duration) -> bool {
+            if self.superseded_at == Some(self.waits.len()) {
+                return false;
+            }
+            self.waits.push(d);
+            self.clock += d;
+            true
+        }
+        fn elapsed(&self) -> Duration {
+            self.clock
+        }
+    }
+
+    /// **The wait ends with the pin, not some multiple of it.**
+    ///
+    /// plex.tv mints a code with `expiresIn: 900` and answers a poll of a dead one with
+    /// `404 {"code":1020,"message":"Code not found or expired"}` (both measured against the live
+    /// service, 2026-09-03). The loop this replaced was bounded at 450 ITERATIONS, each costing a
+    /// 2 s sleep plus a round trip — 1035 s at a fast 300 ms RTT, and 12150 s if every poll ran to
+    /// `net::API`'s 25 s deadline. All of that time was spent on a screen that said "Waiting for
+    /// you to sign in…" over a code nothing could ever authorize.
+    #[test]
+    fn the_wait_for_one_code_cannot_outlive_that_code() {
+        let window = pin_window(900);
+        assert_eq!(window, Duration::from_secs(900), "plex.tv's own expiresIn");
+
+        // nothing ever answers: the pathological case, and the one that used to run for hours
+        let mut w = ScriptedPin::new(Vec::new());
+        assert_eq!(poll_for_token(&mut w, window), PollEnd::Expired);
+        assert!(
+            w.clock >= window,
+            "it did wait out the code it was given, rather than giving up early"
+        );
+        assert!(
+            w.clock <= window + w.poll_cost,
+            "…and overran it by at most the ONE request that was in flight when the deadline \
+             passed — the clamped pauses land the last poll exactly on it — not by a whole \
+             backoff, and certainly not by the 1035s the iteration count allowed"
+        );
+    }
+
+    /// **Exactly one poll may cross the deadline.** The request that began before expiry is always
+    /// allowed to answer — that is the token-losing bug above — but a flag computed BEFORE the
+    /// poll cannot see what the poll itself cost, so a 25 s request starting at 899 s left the
+    /// loop believing it was still inside the window and issuing a second one. The replacement
+    /// code is then another 25 s late, on a screen whose whole complaint is waiting.
+    #[test]
+    fn a_poll_that_itself_crosses_the_deadline_is_the_last_one() {
+        let mut w = ScriptedPin::new(vec![PinPoll::Unreachable]);
+        w.poll_cost = Duration::from_secs(25); // `net::API`'s whole-transfer deadline
+        assert_eq!(
+            poll_for_token(&mut w, Duration::from_secs(20)),
+            PollEnd::Expired
+        );
+        assert_eq!(
+            w.polls, 1,
+            "the request in flight answered, and nothing was asked after it"
+        );
+
+        // …and the same crossing poll still hands over a token it was carrying.
+        let mut w = ScriptedPin::new(vec![PinPoll::Authorized("account-token".into())]);
+        w.poll_cost = Duration::from_secs(25);
+        assert_eq!(
+            poll_for_token(&mut w, Duration::from_secs(20)),
+            PollEnd::Token("account-token".into())
+        );
+    }
+
+    /// A pin plex.tv has forgotten ends the wait AT ONCE. There is nothing left to poll for, and
+    /// the code on screen is unscannable — every second spent on it is a second the user is being
+    /// asked to try something that cannot work.
+    #[test]
+    fn a_code_plex_tv_no_longer_knows_ends_the_wait_at_once() {
+        let mut w = ScriptedPin::new(vec![PinPoll::Pending, PinPoll::Pending, PinPoll::Gone]);
+        assert_eq!(poll_for_token(&mut w, pin_window(900)), PollEnd::Expired);
+        assert_eq!(w.polls, 3);
+        assert!(
+            w.clock < Duration::from_secs(30),
+            "the 404 is an ending, not another two seconds of hope"
+        );
+    }
+
+    /// **A transport failure is not an ending, and it is not a reason to hammer the network.**
+    /// The old loop carried on too — but at a flat 2 s and with nothing in the log, so a poll that
+    /// had stopped being answered and a poller that had stopped existing produced identical
+    /// evidence on the one screen where they are the whole question.
+    #[test]
+    fn a_run_of_unanswered_polls_backs_off_and_keeps_going() {
+        let mut w = ScriptedPin::new(vec![
+            PinPoll::Unreachable,
+            PinPoll::Unreachable,
+            PinPoll::Unreachable,
+            PinPoll::Unreachable,
+            PinPoll::Authorized("account-token".into()),
+        ]);
+        assert_eq!(
+            poll_for_token(&mut w, pin_window(900)),
+            PollEnd::Token("account-token".into()),
+            "the token still arrives — backing off never abandons the pin"
+        );
+        assert_eq!(
+            w.waits,
+            vec![
+                Duration::from_secs(2),
+                Duration::from_secs(4),
+                Duration::from_secs(8),
+                Duration::from_secs(16),
+                Duration::from_secs(16),
+            ],
+            "2s while healthy, doubling per consecutive miss, capped so the backoff cannot \
+             swallow what is left of the pin"
+        );
+    }
+
+    /// **The deadline may not cancel a poll, and this is the review finding that mattered.**
+    ///
+    /// Reachable, and it is the reported symptom exactly: at 889 s a miss has pushed the backoff
+    /// to 16 s; the user authorizes at 895 s and their phone says *Account linked*; the wait ends
+    /// at 905 s. A loop that consults its clock BEFORE polling declares expiry there and throws
+    /// away a token that was sitting in the very next response. So the pause is clamped to what is
+    /// left of the code and the poll after it always happens — only plex.tv gets to say a pin is
+    /// finished before we have asked once more.
+    #[test]
+    fn an_authorization_that_lands_during_the_last_backoff_is_still_collected() {
+        let window = Duration::from_secs(20);
+        let mut w = ScriptedPin::new(vec![
+            PinPoll::Unreachable, // t=2.0  -> 2.3, backoff 4
+            PinPoll::Unreachable, // t=6.3  -> 6.6, backoff 8
+            PinPoll::Unreachable, // t=14.6 -> 14.9, backoff 16 — which would end at 30.9
+            PinPoll::Authorized("account-token".into()),
+        ]);
+        assert_eq!(
+            poll_for_token(&mut w, window),
+            PollEnd::Token("account-token".into()),
+            "the uncapped 16s backoff would have overrun the window and reported Expired \
+             WITHOUT asking, dropping a token the user had already authorized"
+        );
+        assert_eq!(
+            w.waits.last(),
+            Some(&Duration::from_secs_f64(20.0 - 14.9)),
+            "the last pause is exactly what was left of the code, not the full backoff"
+        );
+        assert_eq!(w.polls, 4, "and the poll at the deadline really happened");
+    }
+
+    /// The ceiling on automatic replacement, and the fact that reaching it is not a dead end: the
+    /// flow lands on `Error`, which is the phase the sign-in screen has always drawn a retry on.
+    #[test]
+    fn automatic_replacement_is_bounded_and_ends_somewhere_with_a_way_out() {
+        assert!(another_code_allowed(1), "the code a sign-in opens with");
+        assert!(another_code_allowed(MAX_PIN_GENERATIONS - 1));
+        assert!(
+            !another_code_allowed(MAX_PIN_GENERATIONS),
+            "a television left on this screen must stop polling plex.tv eventually"
+        );
+        assert!(
+            MAX_PIN_GENERATIONS >= 2,
+            "one code is the behaviour being fixed"
+        );
+    }
+
+    /// One answer puts the cadence back. A phone tap is judged at 2 s, and a single bad moment
+    /// half an hour ago must not still be costing sixteen seconds of it.
+    #[test]
+    fn an_answer_restores_the_two_second_cadence() {
+        let mut w = ScriptedPin::new(vec![
+            PinPoll::Unreachable,
+            PinPoll::Pending,
+            PinPoll::Authorized("t".into()),
+        ]);
+        assert_eq!(
+            poll_for_token(&mut w, pin_window(900)),
+            PollEnd::Token("t".into())
+        );
+        assert_eq!(
+            w.waits,
+            vec![
+                Duration::from_secs(2),
+                Duration::from_secs(4),
+                Duration::from_secs(2)
+            ]
+        );
+    }
+
+    /// A superseded flow stops without polling and without a word: the successor owns the screen,
+    /// and two workers narrating one sign-in is how a log stops being readable.
+    #[test]
+    fn a_superseded_flow_stops_silently_and_immediately() {
+        let mut w = ScriptedPin::new(vec![PinPoll::Authorized("never-read".into())]);
+        w.superseded_at = Some(0);
+        assert_eq!(poll_for_token(&mut w, pin_window(900)), PollEnd::Superseded);
+        assert_eq!(w.polls, 0);
+    }
+
+    /// The window is the pin's own lifetime, floored against a plex.tv that omits the field and
+    /// ceilinged by this app's patience for one code.
+    #[test]
+    fn a_codes_lifetime_is_read_from_the_pin_and_clamped_at_both_ends() {
+        assert_eq!(pin_window(900), Duration::from_secs(900));
+        assert_eq!(
+            pin_window(0),
+            Duration::from_secs(60),
+            "a missing expiresIn"
+        );
+        assert_eq!(pin_window(-7), Duration::from_secs(60), "or a nonsense one");
+        assert_eq!(pin_window(86_400), Duration::from_secs(1800));
+    }
+
     #[test]
     fn local_erasure_parks_without_credentials_or_an_automatic_sign_in() {
         let c = deleted_ctl();
@@ -4448,5 +6771,666 @@ mod tests {
         assert!(!c.signin_active);
         assert!(!c.apply_pending);
         assert!(c.pin_code.is_empty());
+    }
+
+    // ---- link health (issue #75) ----
+
+    /// plex.tv answering (however it answers) is not a fact the login screen needs a sentence
+    /// for — the default, empty [`LinkState`] says nothing.
+    #[test]
+    fn link_detail_is_silent_while_healthy() {
+        assert_eq!(link_detail(&LinkState::default()), None);
+    }
+
+    /// **One miss is a blip, not a diagnosis.** The pin-poll cadence is 2 s; a single unanswered
+    /// poll is exactly the kind of thing a healthy link produces occasionally, and saying so would
+    /// make the sign-in screen flicker a warning at the ordinary jitter of the wait it has always
+    /// drawn as calm. [`link_unreachable`] draws the same line for the same reason.
+    #[test]
+    fn link_detail_is_silent_after_one_miss() {
+        let s = LinkState {
+            unanswered: 1,
+            failing_for: Some(Duration::from_secs(2)),
+            last_call: Some("timed out (curl 28)".into()),
+        };
+        assert_eq!(link_detail(&s), None);
+    }
+
+    /// Three misses is the case issue #75 needs: a bounded, identifier-free sentence naming
+    /// curl's own reason, the try count and the duration — the phone photograph this stage exists
+    /// to make legible.
+    ///
+    /// Built from [`crate::net::describe_outcome`] rather than a hand-typed string, so a wording
+    /// change in `net.rs` is caught HERE rather than leaving this pinned against a sentence the
+    /// code can no longer produce.
+    #[test]
+    fn link_detail_names_the_reason_after_repeated_misses() {
+        let reason = crate::net::describe_outcome(crate::net::CallOutcome::Transport(6));
+        assert_eq!(reason, "could not resolve host (curl 6)");
+        let s = LinkState {
+            unanswered: 3,
+            failing_for: Some(Duration::from_secs(41)),
+            last_call: Some(reason),
+        };
+        assert_eq!(
+            link_detail(&s),
+            Some("plex.tv is not answering — could not resolve host (curl 6), 3 tries, 41 s".into())
+        );
+    }
+
+    /// **A call plex.tv actually ANSWERED — refusal or otherwise — must never be read back as
+    /// "not answering".** That sentence was self-contradictory for exactly this case until
+    /// 2026-09-10 ("plex.tv is not answering — HTTP 429…"): a 429 is plex.tv answering, just not
+    /// usefully, so the sign-in screen has to say so differently from a call that never got a
+    /// response at all.
+    #[test]
+    fn link_detail_names_an_answered_refusal_without_contradicting_itself() {
+        let s = LinkState {
+            unanswered: 2,
+            failing_for: Some(Duration::from_secs(6)),
+            last_call: Some("HTTP 429".into()),
+        };
+        assert_eq!(
+            link_detail(&s),
+            Some("plex.tv answered but the sign-in could not use it — HTTP 429, 2 tries, 6 s".into())
+        );
+    }
+
+    /// The line the sign-in screen switches its own copy on: healthy and one blip both read as
+    /// "still waiting for you", two or more consecutive misses read as "check the connection".
+    #[test]
+    fn link_unreachable_needs_at_least_two_consecutive_misses() {
+        assert!(!link_unreachable(&LinkState {
+            unanswered: 0,
+            ..LinkState::default()
+        }));
+        assert!(!link_unreachable(&LinkState {
+            unanswered: 1,
+            ..LinkState::default()
+        }));
+        assert!(link_unreachable(&LinkState {
+            unanswered: 2,
+            ..LinkState::default()
+        }));
+        assert!(link_unreachable(&LinkState {
+            unanswered: 5,
+            ..LinkState::default()
+        }));
+    }
+
+    /// **Issue #75 stage E: a failure while waiting on the code builds the right report context.**
+    /// Three unanswered polls bucket to `TwoToFive`, the phase (`Waiting`) maps to `Authorization`,
+    /// and the code generation `mint_pin` last stored is carried through unchanged.
+    #[test]
+    fn signin_error_context_reports_authorization_with_the_live_flow_state() {
+        let c = Ctl {
+            phase: Phase::Waiting,
+            link_unanswered: 3,
+            link_failing_since: Some(Instant::now()),
+            code_generation: 2,
+            ..Ctl::default()
+        };
+        let ctx = signin_error_context(&c, crate::telemetry::storage::SessionStorageClass::None);
+        assert_eq!(ctx.kind, crate::telemetry::signin::SignInFailureKind::Authorization);
+        assert_eq!(ctx.unanswered, crate::telemetry::signin::UnansweredBucket::TwoToFive);
+        assert_eq!(ctx.code_generation, 2);
+    }
+
+    /// A flow that never minted a code (a pin-CREATE failure, `Phase::Creating`) reports generation
+    /// `0` clamped up to `1` by `context_from` — `Ctl::code_generation`'s documented default.
+    #[test]
+    fn signin_error_context_reports_pin_create_with_no_code_yet() {
+        let c = Ctl {
+            phase: Phase::Creating,
+            ..Ctl::default()
+        };
+        let ctx = signin_error_context(&c, crate::telemetry::storage::SessionStorageClass::None);
+        assert_eq!(ctx.kind, crate::telemetry::signin::SignInFailureKind::PinCreate);
+        assert_eq!(ctx.code_generation, 1, "0 clamps up to 1");
+    }
+
+    /// Issue #76: a sign-in trouble report carries the LIVE session storage verdict —
+    /// `signin_error_context` reads `plex::session::storage_class()`, not a placeholder. A
+    /// recognized-but-unopenable envelope always writes the cross-launch marker before this can
+    /// even be asked (see `plex::session::storage_class`'s own doc), so the class here is
+    /// `secure_refused` rather than the narrower `secure_locked`.
+    #[test]
+    fn signin_error_context_carries_the_live_session_storage_class() {
+        let _lock = crate::testlock::serial();
+        let dir = std::env::temp_dir()
+            .join(format!("plxnative-auth-storage-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a writable temp dir");
+        let file = dir.join("auth.json");
+        let sealed = crate::keymanager::Sealed {
+            backend: crate::keymanager::Backend::Keymanager3,
+            key: "plxnative.session.v1".into(),
+            iv: "AAAAAAAAAAAAAAAAAAAAAA==".into(),
+            data: "c2VjcmV0".into(),
+            identity: crate::keymanager::Identity::Anonymous,
+        };
+        let envelope = serde_json::json!({
+            "format": "plxnative-secure-session",
+            "version": 1,
+            "sealed": sealed,
+        });
+        std::fs::write(&file, serde_json::to_vec(&envelope).unwrap()).unwrap();
+        crate::plex::session::redirect_for_test(Some(file));
+        // The cross-launch marker is written only on evidence a service actually answered
+        // (`plex::session::read_locked`'s gate, issue #76 review) — a real refusal reply, not the
+        // unscripted default that stands in for a registration that never reached a service at all.
+        crate::keymanager::arm_for_test(vec![(
+            "begin",
+            Ok(serde_json::json!({
+                "returnValue": false, "errorCode": -10001, "errorText": "key not found"
+            })),
+        )]);
+        let _ = crate::plex::session::load();
+        crate::keymanager::disarm_for_test();
+
+        let c = Ctl {
+            phase: Phase::Waiting,
+            ..Ctl::default()
+        };
+        let ctx = signin_error_context(&c, crate::plex::session::storage_class());
+        assert_eq!(
+            ctx.storage,
+            crate::telemetry::storage::SessionStorageClass::SecureRefused
+        );
+
+        crate::plex::session::redirect_for_test(None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **Stage B2 item 2 (issue #76 field report case 6, ported): a save that cannot write must not
+    /// leave the RUN looking signed out.** `session::save_locked` only publishes its in-process
+    /// cache once a write actually lands, so on an install where every candidate refuses the write
+    /// (a jail-profile directory that LOOKS writable and is not — `auth_paths`'s own doc), the old
+    /// `take_ready` called `session::set_current` unconditionally right after `session::save`
+    /// regardless of whether anything was actually written — leaving the account chip showing a
+    /// user while every OTHER reader of the session (`session::peek`, `signed_in()`) answered the
+    /// default. That is exactly "the chip said *Sign in* during the run that had just signed in".
+    #[test]
+    fn field_6_a_save_that_cannot_write_leaves_the_run_looking_signed_in_anyway() {
+        use std::os::unix::fs::PermissionsExt;
+        let _lock = crate::testlock::serial();
+
+        let dir = std::env::temp_dir()
+            .join(format!("plxnative-auth-unwritable-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a writable temp dir to start from");
+        let file = dir.join("auth.json");
+        crate::plex::session::redirect_for_test(Some(file));
+        crate::keymanager::disarm_for_test(); // no key manager on this install — plain plaintext save
+        // Make the candidate's OWN directory refuse a new entry — the jail-profile shape a
+        // "writable-looking but is not" candidate takes on a real television.
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        with_ctl(|c| {
+            *c = Ctl {
+                phase: Phase::Ready,
+                apply_pending: true,
+                session: signed_in_as("u-adult"),
+                ..Ctl::default()
+            }
+        });
+        let ready = take_ready();
+
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let seen = crate::plex::session::peek().account_token;
+
+        assert!(ready.is_some(), "the run still resolved credentials in memory");
+        assert!(pending_persistence_warning().is_none(), "ordinary saves never warn");
+        assert_eq!(
+            seen, "acct",
+            "the sign-in this run just took must at least be true FOR this run — a failed \
+             persist is a reason to warn, not a reason for every other reader to see signed out"
+        );
+
+        crate::plex::session::redirect_for_test(None);
+        let _ = std::fs::remove_dir_all(&dir);
+        with_ctl(|c| *c = Ctl::default());
+    }
+
+    #[test]
+    fn fresh_failed_save_waits_for_exact_ack_then_finalizes_without_saving_twice() {
+        use std::os::unix::fs::PermissionsExt;
+        let _lock = crate::testlock::serial();
+        let dir = std::env::temp_dir()
+            .join(format!("plxnative-auth-prepared-handoff-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        crate::plex::session::redirect_for_test(Some(dir.join("auth.json")));
+        crate::keymanager::disarm_for_test();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        with_ctl(|c| {
+            *c = Ctl {
+                phase: Phase::Ready,
+                apply_pending: true,
+                authorized_in_flow: true,
+                attempt: next_attempt(),
+                session: signed_in_as("u-adult"),
+                ..Ctl::default()
+            }
+        });
+
+        assert!(take_ready().is_none(), "fresh credentials pause behind the warning");
+        let warning = pending_persistence_warning().expect("failed fresh save warning");
+        assert_eq!(warning.site, PersistenceWarningSite::Final);
+        let attempts = crate::plex::session::fresh_write_attempts();
+        assert!(!attempts.is_empty());
+        assert!(!acknowledge_persistence_warning(PersistenceWarningKey {
+            attempt: warning.key.attempt,
+            generation: warning.key.generation.wrapping_add(1),
+        }));
+        assert!(take_ready().is_none(), "a stale acknowledgement releases nothing");
+        assert_eq!(crate::plex::session::fresh_write_attempts(), attempts);
+
+        // A reconciliation may refresh the CTL snapshot while `apply_pending` deliberately keeps
+        // it off disk. Finalization must use that latest snapshot, not credentials copied before
+        // the warning was shown.
+        with_ctl(|c| c.session.user.token = "tok-reconciled".into());
+
+        assert!(acknowledge_persistence_warning(warning.key));
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let ready = take_ready().expect("Continue finalizes the prepared credentials");
+        assert_eq!(ready.token, "tok-reconciled");
+        assert_eq!(
+            crate::plex::session::fresh_write_attempts(),
+            attempts,
+            "finalization must not perform a second save"
+        );
+        assert!(take_ready().is_none(), "the prepared handoff is consumed once");
+
+        crate::plex::session::redirect_for_test(None);
+        let _ = std::fs::remove_dir_all(&dir);
+        with_ctl(|c| *c = Ctl::default());
+    }
+
+    #[test]
+    fn discovery_warning_blocks_final_save_without_consuming_fresh_authority() {
+        let _lock = crate::testlock::serial();
+        with_ctl(|c| {
+            *c = Ctl {
+                phase: Phase::Ready,
+                apply_pending: true,
+                authorized_in_flow: true,
+                attempt: next_attempt(),
+                session: signed_in_as("u-adult"),
+                ..Ctl::default()
+            };
+            update_fresh_persistence_warning(
+                c,
+                PersistenceWarningSite::Discovery,
+                session::PersistOutcome::WriteFailed,
+            );
+        });
+        let before = crate::plex::session::fresh_write_attempts();
+        assert!(take_ready().is_none());
+        assert!(with_ctl(|c| c.authorized_in_flow));
+        assert_eq!(crate::plex::session::fresh_write_attempts(), before);
+        with_ctl(|c| *c = Ctl::default());
+    }
+
+    #[test]
+    fn persistence_warning_generation_and_attempt_bound_every_ack_and_report() {
+        let _lock = crate::testlock::serial();
+        with_ctl(|c| {
+            *c = Ctl {
+                phase: Phase::Ready,
+                attempt: next_attempt(),
+                ..Ctl::default()
+            };
+            update_fresh_persistence_warning(
+                c,
+                PersistenceWarningSite::Discovery,
+                session::PersistOutcome::WriteFailed,
+            );
+        });
+        let discovery = pending_persistence_warning().unwrap();
+        assert!(persistence_warning_report_context(discovery.key).is_some());
+        assert!(acknowledge_persistence_warning(discovery.key));
+
+        with_ctl(|c| {
+            update_fresh_persistence_warning(
+                c,
+                PersistenceWarningSite::Final,
+                session::PersistOutcome::WriteFailed,
+            )
+        });
+        let final_warning = pending_persistence_warning().unwrap();
+        assert_ne!(discovery.key.generation, final_warning.key.generation);
+        assert!(!acknowledge_persistence_warning(discovery.key));
+        assert!(persistence_warning_report_context(discovery.key).is_none());
+
+        with_ctl(|c| {
+            update_fresh_persistence_warning(
+                c,
+                PersistenceWarningSite::Final,
+                session::PersistOutcome::PersistedPlaintext,
+            )
+        });
+        assert!(pending_persistence_warning().is_none(), "fresh success supersedes failure");
+
+        with_ctl(|c| {
+            update_fresh_persistence_warning(
+                c,
+                PersistenceWarningSite::Discovery,
+                session::PersistOutcome::WriteFailed,
+            );
+            restart_discovery_ctl(c);
+        });
+        assert!(pending_persistence_warning().is_none());
+        with_ctl(|c| *c = Ctl::default());
+    }
+
+    #[test]
+    fn synthetic_save_failure_only_seeds_the_warning_presentation_fixture() {
+        let _lock = crate::testlock::serial();
+        with_ctl(|c| {
+            *c = Ctl {
+                attempt: next_attempt(),
+                ..Ctl::default()
+            }
+        });
+        synth_signin_trouble("save");
+        assert_eq!(phase(), Phase::Waiting);
+        let warning = pending_persistence_warning().unwrap();
+        assert_eq!(warning.site, PersistenceWarningSite::Discovery);
+        assert_eq!(warning.outcome, session::PersistOutcome::WriteFailed);
+        assert!(!with_ctl(|c| c.authorized_in_flow));
+        assert!(acknowledge_persistence_warning(warning.key));
+        assert_eq!(phase(), Phase::Waiting, "Continue reveals the inert QR fixture");
+        with_ctl(|c| *c = Ctl::default());
+    }
+
+    /// A fresh flow starts believing plex.tv is fine — the failing state of whatever flow came
+    /// before must never leak into the next one's first frame.
+    #[test]
+    fn a_fresh_ctl_has_a_healthy_link_state() {
+        let _lock = crate::testlock::serial();
+        with_ctl(|c| *c = Ctl::default());
+        let s = link_state();
+        assert_eq!(s, LinkState::default());
+        assert_eq!(s.unanswered, 0);
+        assert!(s.failing_for.is_none());
+        assert!(s.last_call.is_none());
+    }
+
+    /// **The one thing the failed read-out actually needs (issue #75): a single recorded miss is
+    /// enough to say why, once the flow has SETTLED.** [`link_detail`]'s two-miss gate exists only
+    /// to stop the still-live WAITING screen flickering at ordinary 2 s jitter — a settled `Error`
+    /// screen has no live poll left to flicker against. This is the fix for the dominant path:
+    /// pin CREATION failing records exactly one miss (`mint_pin`'s failure branch) and the flow is
+    /// over right there, so a two-miss gate on this read-out could never be reached however many
+    /// times *Try again* was pressed.
+    #[test]
+    fn link_detail_settled_speaks_after_a_single_miss() {
+        let s = LinkState {
+            unanswered: 1,
+            failing_for: Some(Duration::from_secs(3)),
+            last_call: Some("could not resolve host (curl 6)".into()),
+        };
+        assert_eq!(link_detail(&s), None, "still gated for the live waiting screen");
+        assert_eq!(
+            link_detail_settled(&s),
+            Some("plex.tv is not answering — could not resolve host (curl 6), 1 try, 3 s".into())
+        );
+        assert_eq!(
+            link_detail_settled(&LinkState::default()),
+            None,
+            "a healthy link has nothing to settle on"
+        );
+    }
+
+    /// **The elapsed counter must STOP once the flow settles into `Phase::Error`** — otherwise a
+    /// photograph of a screen that made its last call minutes ago reads "…, 900 s" and keeps
+    /// climbing forever, waking `ui::idle`'s settled-screen gate once a second for no reason (the
+    /// sentence is compared string-for-string by `ui::login::link_detail_changed`, so a changing
+    /// duration alone was enough to keep invalidating it). Reproduced by seeding `link_failing_since`
+    /// in the past, settling through the real `set_error`, and confirming `link_state()` reports the
+    /// SAME duration on two reads taken a moment apart — a live `Instant::elapsed()` could not pass
+    /// this.
+    #[test]
+    fn the_failing_duration_freezes_once_the_flow_settles() {
+        let _lock = crate::testlock::serial();
+        with_ctl(|c| {
+            *c = Ctl::default();
+            c.signin_active = false; // set_error's diagnostics branch needs no live attempt here
+            c.link_unanswered = 3;
+            c.link_failing_since = Some(Instant::now() - Duration::from_secs(5));
+            c.link_last_call = Some("could not resolve host (curl 6)".into());
+        });
+        set_error("Couldn't reach plex.tv — check this TV's internet connection.");
+        let before = link_state().failing_for.expect("a miss was recorded");
+        assert!(
+            before.as_secs() >= 5,
+            "the snapshot must capture what had already elapsed, not restart at 0"
+        );
+        std::thread::sleep(Duration::from_millis(1100));
+        let after = link_state()
+            .failing_for
+            .expect("still frozen, not cleared");
+        assert_eq!(
+            before, after,
+            "a settled flow's duration must not keep climbing after the last real call"
+        );
+    }
+
+    // ---- issue #75: the one-off sign-in report ----
+
+    /// The raw allocator: every call hands out a new, larger id.
+    #[test]
+    fn next_attempt_only_ever_climbs() {
+        let a = next_attempt();
+        let b = next_attempt();
+        let c = next_attempt();
+        assert!(b > a);
+        assert!(c > b);
+    }
+
+    /// **Every reset SHAPE stamps a strictly newer attempt than the one before it** — a fresh
+    /// login, a discovery-only retry (which keeps the account credential but is still a new
+    /// attempt for the report offer), a resumed stored session, and a local-data erasure.
+    #[test]
+    fn attempt_id_bumps_across_every_reset_shape() {
+        let login = fresh_login_ctl(Session::default());
+
+        let mut discovery = fresh_login_ctl(Session::default());
+        // Seed a link-health run as if THIS (about-to-be-discarded) attempt had been failing —
+        // `restart_discovery_ctl` keeps the account credential, but the failure run belongs to
+        // the attempt this press is retrying, exactly like `trouble` below.
+        discovery.link_unanswered = 3;
+        discovery.link_failing_since = Some(Instant::now());
+        discovery.link_frozen_secs = Some(30);
+        discovery.link_last_call = Some("could not resolve host (curl 6)".to_string());
+        restart_discovery_ctl(&mut discovery);
+        assert!(
+            discovery.attempt > login.attempt,
+            "a discovery retry is still a fresh attempt"
+        );
+        assert!(
+            discovery.link_frozen_secs.is_none()
+                && discovery.link_failing_since.is_none()
+                && discovery.link_unanswered == 0
+                && discovery.link_last_call.is_none(),
+            "a discovery retry must not carry the previous attempt's link-health run forward — \
+             `link_frozen_secs`'s own doc says it is cleared with the rest of `Ctl` on the next \
+             attempt, and this reset is that next attempt"
+        );
+
+        let deleted = deleted_ctl();
+        assert!(
+            deleted.attempt > discovery.attempt,
+            "a local-data erasure is a fresh attempt too"
+        );
+    }
+
+    /// [`resume_stored`] (BACK out of the flow) is the one reset shape that mutates the shared
+    /// `Ctl` directly rather than through a pure constructor — tested against the live global the
+    /// way the file's other `resume_stored` tests already do.
+    #[test]
+    fn resuming_the_stored_session_stamps_a_new_attempt_and_clears_any_trouble() {
+        let _lock = crate::testlock::serial();
+        with_ctl(|c| {
+            *c = Ctl {
+                phase: Phase::Waiting,
+                from: Picker::Boot,
+                ..Ctl::default()
+            }
+        });
+        note_waiting_trouble(); // nothing was seeded, so this is a no-op — the point is the id below
+        let before = with_ctl(|c| c.attempt);
+        assert!(resume_stored(signed_in_as("u-kid")), "an unprotected profile resumes");
+        let after = with_ctl(|c| c.attempt);
+        assert!(after > before);
+        assert!(trouble_snapshot().is_none(), "a resumed session starts with no trouble");
+        with_ctl(|c| *c = Ctl::default());
+    }
+
+    /// **`note_waiting_trouble` is at most once per attempt.** A second call while the screen is
+    /// still stuck must not silently replace the context an open alert may already be showing.
+    #[test]
+    fn note_waiting_trouble_is_recorded_at_most_once_per_attempt() {
+        let _lock = crate::testlock::serial();
+        with_ctl(|c| {
+            *c = Ctl::default();
+            c.phase = Phase::Waiting;
+            c.link_unanswered = 3;
+            c.link_failing_since = Some(Instant::now());
+            c.code_generation = 1;
+        });
+        note_waiting_trouble();
+        let (attempt, first, _) = trouble_snapshot().expect("a trouble was recorded");
+        // Something the context reads changes — a real poll landing between two frames — and the
+        // SECOND call must still report the FIRST context, unchanged.
+        with_ctl(|c| c.code_generation = 4);
+        note_waiting_trouble();
+        let (attempt2, second, _) = trouble_snapshot().expect("still recorded");
+        assert_eq!(attempt, attempt2, "still the same attempt");
+        assert_eq!(
+            first.code_generation, second.code_generation,
+            "the first call's context wins — a later poll must not silently replace it"
+        );
+        with_ctl(|c| *c = Ctl::default());
+    }
+
+    /// A flow reset (a fresh login here — the shape every other reset shares) leaves the new
+    /// attempt with no trouble at all, whatever the attempt before it was carrying.
+    #[test]
+    fn a_flow_reset_clears_the_remembered_trouble() {
+        let _lock = crate::testlock::serial();
+        with_ctl(|c| {
+            *c = Ctl::default();
+            c.phase = Phase::Waiting;
+            c.link_unanswered = 2;
+            c.link_failing_since = Some(Instant::now());
+        });
+        note_waiting_trouble();
+        assert!(trouble_snapshot().is_some());
+        // The reset every top-level entry point performs, without spawning the worker behind it.
+        with_ctl(|c| *c = fresh_login_ctl(Session::default()));
+        assert!(
+            trouble_snapshot().is_none(),
+            "a fresh attempt must not inherit the trouble the one before it recorded"
+        );
+        with_ctl(|c| *c = Ctl::default());
+    }
+
+    /// **`set_error` must not clobber a trouble THIS attempt already reported.** A one-off "Send
+    /// report" press can mark the current attempt's trouble reported before the flow later
+    /// settles into `Phase::Error` for an unrelated reason (e.g. the pin-generation cap) —
+    /// `set_error` used to write `Ctl::trouble` unconditionally, silently flipping `reported`
+    /// back to `false` and losing the "a report was sent" note the person had just been shown
+    /// (and, per `send_trouble_once`'s own "at most once" doc, reopening the door to a second
+    /// send of the same trouble).
+    #[test]
+    fn set_error_preserves_an_already_reported_trouble_on_the_same_attempt() {
+        let _lock = crate::testlock::serial();
+        with_ctl(|c| {
+            *c = Ctl::default();
+            c.signin_active = true;
+            c.phase = Phase::Waiting;
+            c.link_unanswered = 2;
+            c.link_failing_since = Some(Instant::now());
+        });
+        note_waiting_trouble();
+        let (attempt, _, reported_before) =
+            trouble_snapshot().expect("a trouble was recorded");
+        assert!(!reported_before, "note_waiting_trouble never reports on its own");
+        // Stand in for a successful one-off "Send report" press, without a real Sentry endpoint.
+        with_ctl(|c| {
+            if let Some(t) = c.trouble.as_mut() {
+                t.reported = true;
+            }
+        });
+        set_error("network refused");
+        let (attempt2, _, reported_after) = trouble_snapshot().expect("still a trouble");
+        assert_eq!(attempt, attempt2, "same attempt — set_error must not have reset it");
+        assert!(
+            reported_after,
+            "an already-reported trouble must stay reported through set_error"
+        );
+        with_ctl(|c| *c = Ctl::default());
+    }
+
+    /// **`send_trouble_once` refuses a trouble already marked reported**, whether that happened
+    /// automatically (standing consent) or by an earlier press — the guard this function's whole
+    /// "at most once" promise rests on, gradeable with no real Sentry endpoint in the loop.
+    #[test]
+    fn send_trouble_once_refuses_an_already_reported_trouble() {
+        let _lock = crate::testlock::serial();
+        let ctx = signin_error_context(
+            &Ctl::default(),
+            crate::telemetry::storage::SessionStorageClass::None,
+        );
+        with_ctl(|c| {
+            *c = Ctl::default();
+            c.trouble = Some(Trouble {
+                ctx,
+                reported: true,
+            });
+        });
+        assert!(
+            !send_trouble_once(),
+            "already reported — a second press must never resend it"
+        );
+        with_ctl(|c| *c = Ctl::default());
+    }
+
+    /// With no trouble recorded at all, there is nothing to send.
+    #[test]
+    fn send_trouble_once_with_no_trouble_sends_nothing() {
+        let _lock = crate::testlock::serial();
+        with_ctl(|c| *c = Ctl::default());
+        assert!(!send_trouble_once());
+    }
+
+    #[test]
+    fn storage_report_context_on_healthy_qr_does_not_create_trouble() {
+        let _lock = crate::testlock::serial();
+        with_ctl(|c| {
+            *c = Ctl::default();
+            c.phase = Phase::Waiting;
+            c.signin_active = true;
+        });
+        let (attempt, ctx) = storage_report_context();
+        assert_eq!(ctx.kind, crate::telemetry::signin::SignInFailureKind::Authorization);
+        assert_eq!(attempt, current_attempt());
+        assert!(trouble_snapshot().is_none());
+        with_ctl(|c| *c = Ctl::default());
+    }
+
+    #[test]
+    fn stale_storage_report_attempt_is_refused_without_mutating_trouble() {
+        let _lock = crate::testlock::serial();
+        with_ctl(|c| {
+            *c = Ctl::default();
+            c.phase = Phase::Waiting;
+        });
+        let (attempt, ctx) = storage_report_context();
+        assert!(!send_storage_report(attempt.wrapping_add(1), ctx).is_some());
+        assert!(trouble_snapshot().is_none());
+        with_ctl(|c| *c = Ctl::default());
     }
 }

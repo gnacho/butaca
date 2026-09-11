@@ -132,6 +132,23 @@ pub(crate) fn flavour() -> Option<&'static str> {
     app_id().strip_prefix(STABLE_APP_ID)?.strip_prefix('.')
 }
 
+/// The closed-enum sandbox fact for every telemetry event — `devmode` / `homebrew` / `unknown` —
+/// derived from [`app_dir`]'s prefix rather than from a second read of `/proc/self/exe`. **Never
+/// the path itself**: the two real prefixes are `/media/developer/…` and `/media/cryptofs/…`, and
+/// a raw path is exactly the kind of value this app's telemetry never sends (see this module's own
+/// doc, and `diag::schema`'s "no field a caller can put a runtime string into"). `unknown` also
+/// covers the host build, where the binary sits under `target-sim/`.
+pub(crate) fn install_kind() -> &'static str {
+    let dir = app_dir();
+    if dir.starts_with("/media/developer") {
+        "devmode"
+    } else if dir.starts_with("/media/cryptofs") {
+        "homebrew"
+    } else {
+        "unknown"
+    }
+}
+
 /// The directory the running executable sits in — i.e. where the ipk's payload was installed.
 ///
 /// `std::env::current_exe` IS the `/proc/self/exe` read on Linux, so this is the same syscall the
@@ -428,7 +445,28 @@ pub(crate) fn in_runtime_dir(name: &str) -> PathBuf {
     runtime_dir().join(name)
 }
 
-/// Candidate locations for the persisted session, best first.
+/// **Which jail-visible tier one [`session_candidates`] entry is**, carried beside the path rather
+/// than re-derived from it by prefix matching.
+///
+/// The tier is a property of the SEARCH ORDER — this function builds each entry knowing exactly
+/// which location it is naming — and deriving it back out of the string afterwards is what broke:
+/// `plex::session`'s reporting lane used to test `path.starts_with(runtime_dir())`, which on a host
+/// test binary is the literal `/tmp`, so a test's own `std::env::temp_dir()` candidate came back
+/// `Runtime` on any machine whose `temp_dir()` is `/tmp` (every Linux CI runner) and `Other` on a
+/// Mac. One search order, one place that says what each entry is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SessionTier {
+    /// A steerable build's own per-instance `auth.json`, under [`runtime_dir`].
+    Runtime,
+    /// `/media/developer/<id>-auth.json` — outside the app dir, survives a reinstall.
+    Developer,
+    /// `/media/internal/.<id>-auth.json` — the retail-jail writable fallback.
+    Internal,
+    /// Inside the app install directory — `in_app_dir("auth.json")`, or the legacy migration path.
+    AppDir,
+}
+
+/// Candidate locations for the persisted session, best first, each with the [`SessionTier`] it is.
 ///
 /// Ordering rationale — the first entry must stay first: `/media/developer/<id>-auth.json` is
 /// deliberately OUTSIDE the app directory because appinstalld replaces that directory wholesale on
@@ -440,7 +478,7 @@ pub(crate) fn in_runtime_dir(name: &str) -> PathBuf {
 /// only persistent writable location there, so it is the second candidate. The app dir is third
 /// on the theory that a future layout may make it writable; the legacy in-app-dir path is last and
 /// is read-only in practice (migration).
-pub(crate) fn session_candidates() -> Vec<PathBuf> {
+pub(crate) fn session_candidates() -> Vec<(PathBuf, SessionTier)> {
     let mut v = Vec::new();
     // A steerable build gets its own identity, first. Without this every concurrent simulator
     // falls through the two `/media/…` candidates (absent off-device) into `in_app_dir`, i.e. the
@@ -450,7 +488,7 @@ pub(crate) fn session_candidates() -> Vec<PathBuf> {
     // credentials into the payload directory of a public repository. The `.gitignore` entry for
     // that path is a guard against the symptom; this is the cause.
     if ENV_STEERABLE {
-        v.push(in_runtime_dir("auth.json"));
+        v.push((in_runtime_dir("auth.json"), SessionTier::Runtime));
     }
     // Named for THIS install, so two flavours on one television do not share one sign-in. The
     // file holds the client identifier, the account token, every per-(user, server) PMS token and
@@ -461,9 +499,15 @@ pub(crate) fn session_candidates() -> Vec<PathBuf> {
     // authorized-device list once they are.
     let id = app_id();
     v.extend([
-        PathBuf::from(format!("/media/developer/{id}-auth.json")),
-        PathBuf::from(format!("/media/internal/.{id}-auth.json")),
-        in_app_dir("auth.json"),
+        (
+            PathBuf::from(format!("/media/developer/{id}-auth.json")),
+            SessionTier::Developer,
+        ),
+        (
+            PathBuf::from(format!("/media/internal/.{id}-auth.json")),
+            SessionTier::Internal,
+        ),
+        (in_app_dir("auth.json"), SessionTier::AppDir),
     ]);
     // The legacy in-app-dir path is a MIGRATION source and it names the SHIPPED install's directory
     // by literal, so only the shipped install may offer it. `session::load` takes the first
@@ -473,7 +517,10 @@ pub(crate) fn session_candidates() -> Vec<PathBuf> {
     // its own name. Exactly the sharing the three lines above exist to prevent, arriving through
     // the one entry that was not made flavour-aware with them.
     if flavour().is_none() {
-        v.push(PathBuf::from(LEGACY_APP_DIR).join("auth.json"));
+        v.push((
+            PathBuf::from(LEGACY_APP_DIR).join("auth.json"),
+            SessionTier::AppDir,
+        ));
     }
     v
 }
@@ -486,11 +533,14 @@ pub(crate) fn session_candidates() -> Vec<PathBuf> {
 /// person who had already answered, which is both worse for them and the exact pattern that makes
 /// a consent prompt feel like nagging rather than a choice.
 ///
-/// **So it outlives an uninstall, and it outlives a change of owner short of a factory reset.**
-/// webOS gives a native app no uninstall hook, so nothing can clear this on the way out. That is
-/// why the file holds a DECISION and, only after opt-in, one random identifier — and why
-/// withdrawing consent DELETES that identifier rather than merely disabling it. Recorded in
-/// `PRIVACY.md`, because a user cannot audit a file they cannot reach.
+/// **So it outlives an uninstall** — webOS gives a native app no uninstall hook, so nothing can
+/// clear this on the way out — **but not a sign-out**: the decision belongs to the account that
+/// gave it, and `auth::forget_account` unlinks every candidate here (through `telemetry::forget`)
+/// when that account signs out, so a change of owner IS a fresh question. That is also why the
+/// file holds a DECISION and, only after opt-in, one random identifier PER CHANNEL (the
+/// crash-report id and the analytics id, each owned by its own switch) — and why withdrawing a
+/// channel DELETES its identifier rather than merely disabling it. Recorded in `PRIVACY.md`,
+/// because a user cannot audit a file they cannot reach.
 ///
 /// Outside the `plxnative-` trigger namespace by construction, since it is not in the runtime root
 /// at all — so it cannot suppress the who's-watching picker the way anything in `/tmp` would.
@@ -805,7 +855,8 @@ mod tests {
             "{a:?} and {b:?} share a session file"
         );
         // …and the real list really is built that way, whichever install this binary is.
-        let real = super::session_candidates();
+        let real: Vec<std::path::PathBuf> =
+            super::session_candidates().into_iter().map(|(p, _)| p).collect();
         assert!(
             real.iter()
                 .any(|p| p.to_string_lossy().contains(super::app_id())),
@@ -832,7 +883,8 @@ mod tests {
     /// app dir wholesale on reinstall, and a session stored inside it is a silent sign-out.
     #[test]
     fn preferred_session_path_survives_a_reinstall() {
-        let c = super::session_candidates();
+        let c: Vec<std::path::PathBuf> =
+            super::session_candidates().into_iter().map(|(p, _)| p).collect();
         assert!(
             c.len() >= 2,
             "a single hardcoded path is the bug this list exists to fix"
@@ -845,5 +897,28 @@ mod tests {
             c[0].display()
         );
         assert!(c.iter().all(|p| p.is_absolute()));
+    }
+
+    /// **Every candidate's [`super::SessionTier`] is the one its own location implies** — the
+    /// property `plex::session::CandidateCategory::of` now depends on, since the reporting lane
+    /// stopped deriving the tier back out of the path string. Asserted against the path each entry
+    /// actually carries, so a reordering or a new entry that forgets its tier fails here rather
+    /// than mislabelling a candidate in a field report.
+    #[test]
+    fn every_session_candidate_carries_the_tier_its_location_implies() {
+        use super::SessionTier;
+        for (p, tier) in super::session_candidates() {
+            let s = p.to_string_lossy().into_owned();
+            let expect = if p.starts_with(super::runtime_dir()) && super::ENV_STEERABLE {
+                SessionTier::Runtime
+            } else if s.starts_with("/media/developer/") && s.ends_with("-auth.json") {
+                SessionTier::Developer
+            } else if s.starts_with("/media/internal/") {
+                SessionTier::Internal
+            } else {
+                SessionTier::AppDir
+            };
+            assert_eq!(tier, expect, "{s} is labelled {tier:?}");
+        }
     }
 }

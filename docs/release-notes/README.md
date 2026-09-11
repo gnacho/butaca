@@ -25,6 +25,8 @@ Two other readers exist — a webosbrew reviewer deciding whether to put an unsi
 
 A small standard, not a wall of mandatory sections. Sections that would add nothing are omitted; the order below is the default, and questions 3 and 4 override it.
 
+The H1 becomes the published release's title — CI lifts it out and hands it to GitHub as the release name, then strips it from the body, so it must not be repeated in the rendered body.
+
 ```markdown
 # vX.Y.Z — <short human-readable theme>
 
@@ -75,7 +77,7 @@ Five rules decide the wording, all of them from an actual disclosure this projec
 4. **Always state the residual.** A disclosure that stops at "fixed" invites the reader to treat the artefact as safe, which is how the next incident starts.
 5. **Whenever we ask the reader to send us anything, the same paragraph says what is in it.**
 
-Never a reassurance we cannot support: there is no update push here, and telemetry is opt-in and carries no identity, so *"no evidence of misuse"* and *"few users affected"* stay unsupportable — an opt-in crash count is a sample of the people who opted in, which is not a population and must never be quoted as one. The honest sentence is that we cannot tell whether this happened to you, which is why the instruction has no conditions on it.
+Never a reassurance we cannot support: there is no update push here, and telemetry is opt-in and carries no account identity (a crash report's random Crash report ID counts uninterrupted opt-ins, nothing more — it is destroyed by switching the category off and by signing out), so *"no evidence of misuse"* and *"few users affected"* stay unsupportable — an opt-in "users affected" figure is a sample of the people who opted in, which is not a population and must never be quoted as one. The honest sentence is that we cannot tell whether this happened to you, which is why the instruction has no conditions on it.
 
 No CVSS, no CVE, no severity label, no "we take security seriously", no root-cause essay. Nothing consumes this as a dependency and a score we cannot compute is theatre.
 

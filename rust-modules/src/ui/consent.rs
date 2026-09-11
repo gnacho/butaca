@@ -1,8 +1,12 @@
 //! **The consent routes** — two independent choices, asked once, changeable forever after.
 //!
 //! This is the surface every other part of the telemetry work waits on: nothing may be collected
-//! before it has been shown and answered, so until it existed `telemetry::consent`'s transition
-//! functions had no caller and carried `#[allow(dead_code)]` saying so. It is also the screen most
+//! under a STANDING decision before it has been shown and answered, so until it existed
+//! `telemetry::consent`'s transition functions had no caller and carried `#[allow(dead_code)]`
+//! saying so. Two things are collected with no standing decision at all: `diag::defer` holds the
+//! sign-in family (capped, in memory, session-only) while the question sits unanswered, and
+//! `telemetry::signin::send_once` sends the one-off sign-in report, whose consent is a single
+//! press on another screen entirely. It is also the screen most
 //! likely to decide what people think of the whole feature, which is why the wording below is
 //! argued for rather than filled in.
 //!
@@ -44,15 +48,19 @@
 //! only the one the current question is actually asking about. The two functions never run
 //! together except inside a test's own `preview()` union, which nothing on screen ever shows.
 //!
-//! # It is asked ONCE PER TELEVISION, before the profile picker
+//! # It is asked ONCE PER SIGN-IN, before the profile picker
 //!
-//! **Consent here is a DEVICE decision, not a per-viewer preference**, and the storage always said
-//! so: `telemetry_candidates()` is one file with no profile key, so whoever answers binds every
-//! profile on the set. Until 2026-09-02 it was nevertheless asked on first arrival at Home — i.e.
-//! *after* who's-watching — which put a data-protection question to whichever household member
-//! happened to be picked, up to and including a managed child profile, and made a device-wide
-//! answer look like a personal setting. It is now asked as soon as there is an authorized account
-//! and before the picker, so the person who signed the television in is the person who answers.
+//! **Consent here is the signed-in ACCOUNT's decision, not a per-viewer preference and not the
+//! television's**: `telemetry_candidates()` is one file with no profile key, so whoever answers
+//! binds every profile on the account — and `auth::forget_account` unlinks that file and destroys
+//! both identifiers when the account signs out, so the next account to sign in through the QR
+//! flow is asked afresh (until 2026-09-04 the decision outlived the sign-in, and a second account
+//! was reported under the first one's answer and identifiers). Until 2026-09-02 it was asked on
+//! first arrival at Home — i.e. *after* who's-watching — which put a data-protection question to
+//! whichever household member happened to be picked, up to and including a managed child profile,
+//! and made an account-wide answer look like a personal setting. It is now asked as soon as there
+//! is an authorized account and before the picker, so the person who signed the television in is
+//! the person who answers.
 //!
 //! # BACK navigates; it never answers
 //!
@@ -69,12 +77,14 @@
 //! `tests/run.py` injects a token and expects Home, the fps scenes grade a heartbeat on a known
 //! route, and every `sim-shot` script drives a screen it chose — a consent prompt in front of all
 //! of them would quietly re-point the entire harness at a screen nobody wrote an assertion for.
-use crate::telemetry::consent::{self, Consent};
+use crate::telemetry::consent::{self, Category, Consent};
 use crate::ui::consts::SCR_W;
 use crate::ui::decision_alert::{Choice as AlertChoice, DecisionAlert};
 use crate::ui::document_reader::DocumentReader;
 use crate::ui::popover::Popover;
-use crate::ui::route_screen::{RouteGround, RouteLayout, RoutePush};
+use crate::ui::route_screen::{
+    PressFrom, RouteFocus, RouteGround, RouteLayout, RoutePush, RouteShape, RouteStep,
+};
 use crate::ui::table::{Row, Section, TableView};
 use crate::ui::theme;
 use crate::ui::widgets::Button;
@@ -103,17 +113,23 @@ const PRODUCT_TITLE: &str = "Share product analytics?";
 /// carry runtime strings and native envelopes must pass a fixed allowlist that rejects content and
 /// identity scopes. Usage action fields remain fixed typed values; the only runtime strings are
 /// the separately allowlisted and bounded compatibility/network dimensions shown in the preview.
+// **Shortened 2026-09-10 (issue #75 review).** The version that named both sign-in reporting
+// paths in full wrapped to ~17 lines against this route's 12-line cap
+// (`route_screen::RouteLayout::draw_narrative`'s `TextView::max_lines(12)`), so the tail —
+// including the whole "no identifier of any kind" guarantee — fell off the screen with no
+// ellipsis and no MORE affordance. This says the same things in fewer words; every substring the
+// tests below pin is still here.
 #[cfg(feature = "jellyfin")]
-const CRASH_BODY: &str = "If butaca crashes, it can send technical details that help find and fix the problem. Reports may include the signal, code addresses, thread information and device compatibility details. They never include titles, Jellyfin accounts, searches, server names or addresses, passwords or tokens, subtitle text, or the product analytics identifier.";
+const CRASH_BODY: &str = "If butaca crashes, it can send technical details that help find and fix the problem: the signal, code addresses, thread and device details, plus a random crash report identifier, cleared when you turn it off or sign out. Reports never include titles, Jellyfin accounts, searches, server names or addresses, passwords or tokens, subtitle text, key material, or the product analytics identifier.";
 #[cfg(not(feature = "jellyfin"))]
-const CRASH_BODY: &str = "If PlxNative crashes, it can send technical details that help find and fix the problem. Reports may include the signal, code addresses, thread information and device compatibility details. They never include titles, Plex accounts, searches, server names or addresses, tokens, subtitle text, or the product analytics identifier.";
+const CRASH_BODY: &str = "If PlxNative crashes, it can send technical details that help find and fix the problem: the signal, code addresses, thread and device details, plus a random crash report identifier, cleared when you turn it off or sign out. It also covers a handled sign-in error report and a storage error report; even while this is off, the sign-in screen may send a one-off report with no persistent identifier. Reports never include titles, Plex accounts, searches, server names or addresses, tokens, subtitle text, key material, or the product analytics identifier.";
 #[cfg(feature = "jellyfin")]
-const PRODUCT_BODY: &str = "butaca can share which screens and features are used and broad sign-in and playback outcomes. Reports use a random installation identifier and can include the app version, webOS version, television model and SoC, and whether a selected server is local, remote or relayed. They never include titles, Jellyfin accounts, searches, server names or addresses, passwords or tokens, subtitle text, or exact viewing history.";
+const PRODUCT_BODY: &str = "butaca can share which screens and features are used and broad sign-in and playback outcomes. Reports carry a random Analytics ID, created when you turn this on and deleted when you turn it off or sign out, and can include the app version, webOS version, television model and SoC, whether a selected server is local, remote or relayed, and how the saved sign-in is stored on this television. They never include titles, Jellyfin accounts, searches, server names or addresses, passwords or tokens, subtitle text, key material, or exact viewing history.";
 #[cfg(not(feature = "jellyfin"))]
-const PRODUCT_BODY: &str = "PlxNative can share which screens and features are used and broad sign-in and playback outcomes. Reports use a random installation identifier and can include the app version, webOS version, television model and SoC, and whether a selected server is local, remote or relayed. They never include titles, Plex accounts, searches, server names or addresses, tokens, subtitle text, or exact viewing history.";
+const PRODUCT_BODY: &str = "PlxNative can share which screens and features are used and broad sign-in and playback outcomes. Reports carry a random Analytics ID, created when you turn this on and deleted when you turn it off or sign out, and can include the app version, webOS version, television model and SoC, whether a selected server is local, remote or relayed, and how the saved sign-in is stored on this television. They never include titles, Plex accounts, searches, server names or addresses, tokens, subtitle text, key material, or exact viewing history.";
 
 const ROW_ERRORS: &str = "Crash reports";
-const ROW_ERRORS_SUB: &str = "Optional technical crash reports.";
+const ROW_ERRORS_SUB: &str = "Optional technical crash and sign-in reports.";
 const ROW_USAGE: &str = "Product analytics";
 const ROW_USAGE_SUB: &str = "Optional feature and playback outcomes.";
 /// **Item 14: one row per CHANNEL, not one row for both.** A single combined preview left it
@@ -144,11 +160,16 @@ const ROW_POLICY: &str = "Privacy policy";
 /// `every_document_prints_only_the_one_contact_address` is what keeps them honest; a private copy
 /// here would sit outside that scan.
 use crate::ui::legal::CONTACT_EMAIL;
-/// The row that shows the PostHog installation identifier, and the title of the document it opens.
+/// The row that shows the PostHog analytics identifier, and the title of the document it opens.
 /// It exists so that "write to us and ask for your analytics to be deleted" is an instruction a
 /// person can actually follow: the identifier is the only handle those events have, and before this
 /// row it was minted, persisted and sent while being visible nowhere in the application.
 const DOC_TITLE_ANALYTICS_ID: &str = "Analytics ID";
+/// The crash channel's twin: the Sentry `user.id`, shown for the same reason and with the same
+/// deletion instruction. Two rows rather than one document listing both, because they are two
+/// consents with two lifetimes, and a person who turned only one of them on should find exactly
+/// one identifier here.
+const DOC_TITLE_ERRORS_ID: &str = "Crash report ID";
 const ROW_DELETE: &str = "Delete all local data";
 /// What the confirmation says under its question. The verb is accurate about what it removes and
 /// says nothing about what it cannot reach, and this is the last moment that difference can be
@@ -170,7 +191,17 @@ const SETTINGS_TITLE: &str = "Privacy & data";
 /// verb and the shortest noun that keeps the pair parallel. They read `Share Crash Reports` /
 /// `Don’t Share` while they were table ROWS, because a row has no question above it to inherit
 /// from and had to name the purpose itself.
+///
+/// **An EXTENSION asks a different question and must say so** (owner decision, 2026-09-10): this
+/// is not "turn the category on or off", it is "let the category you already agreed to also cover
+/// this new thing?" — a No here is not a withdrawal, so neither label may read as one. Nothing on
+/// this pair may say "off"/"don't"/"decline": the affirmative names what changes (`Keep on, with
+/// this`) and the negative names what stays the same (`Keep as before`), which is also literally
+/// true — `apply_extension`'s No branch changes nothing about whether the category is on.
 fn answer_labels() -> (&'static std::ffi::CStr, &'static std::ffi::CStr) {
+    if is_extension() {
+        return (c"Keep on, with this", c"Keep as before");
+    }
     if stage() == Stage::Crash {
         (c"Share reports", c"Don’t share")
     } else {
@@ -191,6 +222,8 @@ enum RowId {
     /// Item 14: the usage/analytics channel's own preview — see `DOC_TITLE_USAGE`.
     PreviewUsage,
     Policy,
+    /// The Sentry identifier and how to have those reports deleted — see [`DOC_TITLE_ERRORS_ID`].
+    ErrorsId,
     /// The PostHog identifier and how to have those events deleted — see [`DOC_TITLE_ANALYTICS_ID`].
     AnalyticsId,
     Delete,
@@ -214,6 +247,7 @@ enum PreviewKind {
     Crash,
     Usage,
     Policy,
+    ErrorsId,
     AnalyticsId,
 }
 
@@ -237,6 +271,7 @@ fn row_ids() -> Vec<RowId> {
         RowId::PreviewCrash,
         RowId::PreviewUsage,
         RowId::Policy,
+        RowId::ErrorsId,
         RowId::AnalyticsId,
         RowId::Delete,
     ]
@@ -261,6 +296,34 @@ static mut DRAFT: (bool, bool) = (false, false);
 static mut BASE: (bool, bool) = (false, false);
 static mut MODE: Mode = Mode::FirstRun;
 static mut STAGE: Stage = Stage::Crash;
+/// The `asked_version` the account carried into this ceremony — captured once, in [`open`], for
+/// [`reask_line`] to explain a re-ask against. `0` (never asked) draws nothing, exactly like
+/// [`consent::reask_note`]'s own rule; Settings never sets this at all, since Settings is not a
+/// re-ask of anything.
+static mut ASKED_VERSION: u32 = 0;
+/// **Model stage M2.** Is the ceremony currently open an EXTENSION (a category whose accepted
+/// scope has fallen behind [`consent::ERRORS_SCOPE`]/[`consent::USAGE_SCOPE`]) rather than the
+/// full two-stage first-run question? Set once, in [`open`]/[`open_settings`], and read by
+/// [`record_answer`] to choose [`consent::apply_extension`] over [`consent::apply`] — Settings
+/// always answers `false`, since Settings edits both switches freely and is never a re-ask of
+/// anything.
+static mut IS_EXTENSION: bool = false;
+/// **Model stage M2.** Which of the two stages this ceremony actually asks about —
+/// `(Crash pending, Product pending)`. A fresh first-run or a Settings ceremony carries `(true,
+/// true)`: both purposes are always in play there. An extension ceremony carries only the
+/// categories [`consent::pending_extensions`] returned at [`open`], so a person whose Crash
+/// consent is current and whose Usage consent just grew sees the Product question ALONE — no
+/// Crash stage, no crumb naming one, and Product becomes this ceremony's own root.
+static mut STAGE_ACTIVE: (bool, bool) = (true, true);
+/// The line drawn between the heading and the body for each stage, computed ONCE at [`open`] —
+/// never per frame. [`consent::extension_note`] (extension) and [`reask_line`] (the legacy
+/// monolithic re-ask, effectively dead today — see [`consent::POLICY_VERSION`]'s doc) both build
+/// a fresh owned `String` on every call and leak it to get a `'static` str for [`RouteLayout`] to
+/// borrow; calling either from the draw path, which runs every presented frame while the screen
+/// is open, would leak a new string every frame instead of once per ceremony.
+static mut NOTE_CRASH: Option<&'static str> = None;
+/// [`NOTE_CRASH`]'s Product twin.
+static mut NOTE_PRODUCT: Option<&'static str> = None;
 static mut PREVIEW_KIND: PreviewKind = PreviewKind::Crash;
 static mut DELETE_REQUESTED: bool = false;
 static mut DOCUMENT_OPEN: bool = false;
@@ -270,12 +333,14 @@ static mut DOCUMENT_MORPH: RoutePush = RoutePush::new();
 /// amount from 1 back to 0, it never relabels which stage is which. See `draw_stage`.
 static mut STAGE_PUSH: RoutePush = RoutePush::new();
 static mut READER: DocumentReader = DocumentReader::new();
-/// Whether the route's bottom action band holds focus — Settings' Done, or first run's two
-/// answers.
-static mut ACTION_FOCUSED: bool = false;
-/// Which first-run answer the ring is on. A CURSOR, not a pre-selected value: the two are equals,
-/// nothing times out onto either, and `draft()` is untouched until OK is actually pressed.
-static mut ANSWER_SHARE: bool = true;
+/// **Where focus is, in the family's shared terms** — `ui::route_screen`'s [`RouteFocus`], not a
+/// pair of private booleans. It replaced `ACTION_FOCUSED` (is the band focused) and `ANSWER_SHARE`
+/// (which answer the ring is on), which between them could express states the screen has no way to
+/// draw: an `ACTION_FOCUSED` band that the same edit had just removed was the reported
+/// "focus disappears completely". The band cursor is still a CURSOR rather than a pre-selected
+/// value — the two first-run answers are equals, nothing times out onto either, and `draft()` is
+/// untouched until OK is actually pressed.
+static mut FOCUS: RouteFocus = RouteFocus::content();
 static mut DELETE_ALERT: DecisionAlert = DecisionAlert::new();
 static mut GROUND: RouteGround = RouteGround::new();
 static mut GROUND_DRAWN: bool = false;
@@ -350,10 +415,7 @@ fn build_first_run_tables() {
 /// — the same rule [`rebuild_with_motion`]'s old first-run branch stated, kept here now that the
 /// two stages are no longer one shared table to write it onto.
 fn enter_first_run_stage() {
-    unsafe {
-        ACTION_FOCUSED = true;
-        ANSWER_SHARE = true;
-    }
+    unsafe { addr_of_mut!(FOCUS).write(RouteFocus::band()) };
     table_crash().list_focused = false;
     table_product().list_focused = false;
 }
@@ -372,6 +434,160 @@ fn reader() -> &'static mut DocumentReader {
 }
 fn delete_alert() -> &'static mut DecisionAlert {
     unsafe { &mut *addr_of_mut!(DELETE_ALERT) }
+}
+
+/// Where focus is, in the family's shared terms — see `ui::route_screen`'s rule list.
+fn focus() -> RouteFocus {
+    unsafe { *addr_of!(FOCUS) }
+}
+
+/// Which band control an in-flight press was armed on, and where the press came from — `None` for
+/// no press.
+///
+/// **Read through [`armed`], never raw.** `ui::press` is a crate-global machine that many things
+/// can cancel (a nav key, a fresh click, the lost-key-up ceiling), and none of them knows this
+/// static exists — so a local arm that outlived its press would silently judge the NEXT one. The
+/// accessor expires it against `press::is_live()`, which makes staleness impossible by
+/// construction rather than by finding every cancel site. **`is_live`, not `is_active`**: a cancel
+/// only clears the commit and leaves the press on screen for its bounce, so an arm expired against
+/// `is_active` outlives the press that owned it by ~200 ms — long enough for the next immediate
+/// activation to be judged against it (Codex review, 2026-09-04).
+static mut ARMED: Option<(PressFrom, usize)> = None;
+/// …and the delete alert's own, which is a separate door for the SDL2_ttf reason
+/// [`alert_press_at`] records.
+static mut ARMED_ALERT: Option<AlertChoice> = None;
+
+/// **Which band control is under the pointer** — pure hit-testing, no focus moved. `None` for dead
+/// space, which is the whole point: `ui::press`'s model is that focus cannot move mid-press, and
+/// the guard has to see the pointer leaving EVERYTHING, not only its arrival somewhere else.
+fn band_hit(mx: f32, my: f32) -> Option<usize> {
+    if !action_visible() {
+        return None;
+    }
+    if mode() == Mode::FirstRun {
+        unsafe { (*addr_of!(ANSWER_POP)).hit(mx, my) }
+    } else {
+        unsafe { (*addr_of!(DONE_POP)).hit(mx, my) }
+    }
+}
+
+/// The live arm, or `None` — expired against the crate-global press machine, so an arm can never
+/// outlive the press it belongs to.
+fn armed() -> Option<(PressFrom, usize)> {
+    crate::ui::press::is_live()
+        .then(|| unsafe { *addr_of!(ARMED) })
+        .flatten()
+}
+
+/// Record that a press on the focused band control has been armed from the OK KEY. `app.rs` calls
+/// it beside `press::begin_ctl`; without it a key press has no local identity at all and the very
+/// first pointer motion cancels it.
+pub(crate) fn arm_key() {
+    let i = focus().band_index();
+    unsafe { addr_of_mut!(ARMED).write(i.map(|i| (PressFrom::Key, i))) };
+}
+
+/// Whether an armed press is STILL on the thing it was armed on — `app.rs` cancels when it is not.
+/// Parks focus on the way past, so this is also the ordinary hover path.
+///
+/// **The two origins are judged differently, and that is the point** ([`PressFrom`]). A press that
+/// began under the pointer is bound to the CONTROL the pointer is over, `None` included — the
+/// first version of this guard compared the focused stop before and after, and a miss leaves focus
+/// exactly where it was, so pointer-down on `Share reports` and then sliding off every control
+/// still recorded the answer. A press that began on the OK key is bound to the FOCUS STOP, so
+/// hover onto the other answer cancels it while hover across dead space, which moves no focus,
+/// does not.
+pub(crate) fn pointer_hold(mx: f32, my: f32) -> bool {
+    if delete_alert().is_open() {
+        return false; // the alert has its own door — see `alert_hold`
+    }
+    let hit = layers_settled().then(|| band_hit(mx, my)).flatten();
+    pointer_focus(mx, my);
+    match armed() {
+        Some((PressFrom::Pointer, i)) => hit == Some(i),
+        Some((PressFrom::Key, i)) => focus().band_index() == Some(i),
+        // Nothing of ours is armed, so nothing of ours is being retracted.
+        None => true,
+    }
+}
+
+/// This route's shape, as the shared rules see it. Read from live state on every key rather than
+/// cached, because both of its interesting fields move under the screen: Settings' band appears
+/// with the first edit and vanishes when it is undone, and a pushed document replaces the whole
+/// content column with a scroller that has no rows at all.
+fn shape() -> RouteShape {
+    if preview_open() {
+        return RouteShape::document();
+    }
+    let band = if !action_visible() {
+        0
+    } else if mode() == Mode::FirstRun {
+        2 // Share / Don't share — two equals
+    } else {
+        1 // Done
+    };
+    let list = list();
+    let rows = list.n_rows() > 0;
+    RouteShape {
+        band,
+        rows,
+        at_last_row: rows && list.at_last_row(),
+        opens: rows && list.row_opens(list.sel),
+        // Rule 9's guard, stated rather than inferred. Settings holds a DRAFT that BACK discards,
+        // so LEFT may not overshoot Done into it. First run holds nothing — `on_back` records no
+        // refusal, it walks Product → Crash and is swallowed at Crash — so LEFT off the leading
+        // answer follows the crumb, which is the whole point of drawing one.
+        uncommitted: mode() == Mode::Settings && draft() != base(),
+    }
+}
+
+/// **Rule 10, applied here.** Re-settle focus against the shape the screen actually has now, then
+/// make the table's plate agree with it — the two are ONE decision (`TableView::list_focused`
+/// gates the ink as well as the pill), so a screen that writes one without the other draws two
+/// accent capsules or none.
+///
+/// First run keeps BOTH stage tables in step rather than only the current one: `STAGE_PUSH` leaves
+/// the outgoing stage's own table on screen for the whole transition, and a plate on a page that is
+/// travelling out is exactly as wrong as one on a page that is not focused.
+fn sync_focus() {
+    let mut f = focus();
+    f.settle(shape());
+    unsafe { addr_of_mut!(FOCUS).write(f) };
+    let on_list = f.on_content() && !preview_open();
+    match mode() {
+        Mode::Settings => table().list_focused = on_list,
+        Mode::FirstRun => {
+            table_crash().list_focused = on_list && stage() == Stage::Crash;
+            table_product().list_focused = on_list && stage() == Stage::Product;
+        }
+    }
+}
+
+/// Perform what a shared rule decided. The focus half has already happened; this is the screen's
+/// own half — which content column takes a vertical delta, what a row OPENS, and where BACK goes.
+fn apply_step(step: RouteStep) -> bool {
+    match step {
+        RouteStep::Wall => {}
+        RouteStep::Moved => {
+            sync_focus();
+            crate::ui::idle::invalidate();
+        }
+        RouteStep::Scroll(delta) => {
+            if preview_open() {
+                reader().move_by(delta);
+            } else {
+                list().move_sel(delta);
+            }
+            crate::ui::idle::invalidate();
+        }
+        RouteStep::Enter => {
+            on_ok();
+        }
+        RouteStep::Back => {
+            on_back();
+        }
+    }
+    true
 }
 
 fn draft() -> (bool, bool) {
@@ -398,15 +614,16 @@ fn action_visible() -> bool {
 /// `key_onboarding`-style dispatch) arms [`crate::ui::press::begin_ctl`] on OK-down exactly when
 /// this is `true`, so the control dips and rings back instead of activating flat on the key-down.
 ///
-/// Wired from `app.rs`'s consent arm (the popover chain above the route arms): OK arms the press
-/// when this is `true` and `commit_consent` runs on the spring-back; a document row still commits
-/// on its key-down.
+/// Wired from `app.rs`'s consent arm (the popover chain above the route arms) on BOTH input paths:
+/// OK arms the press when this is `true` and `commit_consent` runs on the spring-back, and a
+/// pointer-down goes through [`press_at`] to the same place. A document row still commits on its
+/// key-down, and is [`click_row`]'s on the pointer.
 pub(crate) fn focus_is_ctl() -> bool {
     menu_open()
         && !preview_open()
         && !delete_alert().is_open()
         && action_visible()
-        && unsafe { *addr_of!(ACTION_FOCUSED) }
+        && focus().band_index().is_some()
 }
 
 fn mode() -> Mode {
@@ -414,6 +631,14 @@ fn mode() -> Mode {
 }
 fn stage() -> Stage {
     unsafe { *addr_of!(STAGE) }
+}
+/// **Model stage M2.** See [`IS_EXTENSION`]'s doc.
+fn is_extension() -> bool {
+    unsafe { *addr_of!(IS_EXTENSION) }
+}
+/// **Model stage M2.** See [`STAGE_ACTIVE`]'s doc.
+fn stage_active() -> (bool, bool) {
+    unsafe { *addr_of!(STAGE_ACTIVE) }
 }
 fn title() -> &'static str {
     if stage() == Stage::Crash {
@@ -438,7 +663,7 @@ pub(crate) fn should_show(c: &Consent, automated: bool) -> bool {
     consent::should_ask(c, automated)
 }
 
-/// Put the device question on screen.
+/// Put the sign-in's question on screen.
 ///
 /// **Idempotent while it is already up, and that is load-bearing rather than defensive.** Since
 /// the ask moved ahead of the profile picker it is made from a routing site that runs every frame,
@@ -450,15 +675,55 @@ pub(crate) fn open(prev: &Consent) {
     if menu_open() && mode() == Mode::FirstRun {
         return;
     }
+    // **Model stage M2.** A fresh install (`asked_version == 0`) always gets the full two-stage
+    // question — `consent::pending_extensions` is never consulted for it, matching
+    // `consent::should_ask`'s own first branch. Otherwise this open is reached only because
+    // `pending_extensions` is non-empty (`should_show`'s second branch), so the categories it
+    // names are exactly what this ceremony asks about — the other one is answered already, either
+    // way, and is left alone.
+    let pending = consent::pending_extensions(prev);
+    let is_ext = prev.asked_version != 0 && !pending.is_empty();
+    let active = if is_ext {
+        (
+            pending.contains(&Category::Errors),
+            pending.contains(&Category::Usage),
+        )
+    } else {
+        (true, true)
+    };
+    // The ceremony's own root: Crash when it is asked at all, else Product — a Usage-only
+    // extension never visits a Crash stage nobody needs to answer.
+    let start = if active.0 {
+        Stage::Crash
+    } else {
+        Stage::Product
+    };
     unsafe {
         addr_of_mut!(MODE).write(Mode::FirstRun);
-        addr_of_mut!(STAGE).write(Stage::Crash);
+        addr_of_mut!(IS_EXTENSION).write(is_ext);
+        addr_of_mut!(STAGE_ACTIVE).write(active);
+        addr_of_mut!(STAGE).write(start);
+        addr_of_mut!(ASKED_VERSION).write(prev.asked_version);
         addr_of_mut!(BASE).write((prev.errors, prev.usage));
         addr_of_mut!(DRAFT).write((false, false));
+        // Computed once, here — see NOTE_CRASH's doc for why the draw path must never call
+        // either note builder itself.
+        addr_of_mut!(NOTE_CRASH).write(if is_ext {
+            consent::extension_note(prev, Category::Errors)
+                .map(|s| &*Box::leak(s.into_boxed_str()))
+        } else {
+            reask_line(prev.asked_version, Stage::Crash)
+        });
+        addr_of_mut!(NOTE_PRODUCT).write(if is_ext {
+            consent::extension_note(prev, Category::Usage)
+                .map(|s| &*Box::leak(s.into_boxed_str()))
+        } else {
+            reask_line(prev.asked_version, Stage::Product)
+        });
         DOCUMENT_OPEN = false;
         (*addr_of_mut!(DOCUMENT_MORPH)).jump(false);
-        (*addr_of_mut!(STAGE_PUSH)).jump(false);
-        ACTION_FOCUSED = false;
+        (*addr_of_mut!(STAGE_PUSH)).jump(start == Stage::Product);
+        addr_of_mut!(FOCUS).write(RouteFocus::content());
         (*addr_of_mut!(GROUND)).reset();
         GROUND_DRAWN = false;
     }
@@ -474,8 +739,18 @@ pub(crate) fn open(prev: &Consent) {
 ///
 /// This changes presentation state only: it neither answers nor records either choice. Keeping
 /// the harness seam here means the app cannot construct a half-valid consent draft of its own.
+///
+/// **A no-op unless Product is already part of the OPEN ceremony**
+/// (`stage_active().1`). `mode() == Mode::FirstRun` is also true of an in-progress EXTENSION
+/// ceremony (`open` sets the same `Mode` for both), and an extension can be Errors-only
+/// (`stage_active() == (true, false)`) — jumping such a ceremony to `Stage::Product` used to leave
+/// `STAGE_ACTIVE` unchanged, so `choose`/`commit` folded the operator's Product-stage press
+/// through `apply_extension(Errors, …)` instead: pressing Share there recorded an unasked
+/// WITHDRAWAL of crash reports (turning `errors` off and destroying `errors_id`) rather than the
+/// Product answer actually given. There is no answer this trigger can safely manufacture for a
+/// ceremony that never asks about Product at all, so it simply declines rather than guessing one.
 pub(crate) fn show_product_for_dev() {
-    if menu_open() && mode() == Mode::FirstRun {
+    if menu_open() && mode() == Mode::FirstRun && stage_active().1 {
         unsafe {
             addr_of_mut!(STAGE).write(Stage::Product);
             // A boot trigger lands directly on this stage rather than pressing through Crash, so
@@ -485,6 +760,10 @@ pub(crate) fn show_product_for_dev() {
         }
         enter_first_run_stage();
         crate::ui::idle::invalidate();
+    } else if menu_open() && mode() == Mode::FirstRun {
+        crate::log(
+            "consent: show_product_for_dev ignored — this ceremony has no Product stage to jump to",
+        );
     }
 }
 
@@ -493,11 +772,18 @@ pub(crate) fn show_product_for_dev() {
 pub(crate) fn open_settings(prev: &Consent) {
     unsafe {
         addr_of_mut!(MODE).write(Mode::Settings);
+        // Settings is never a re-ask of anything — it edits both switches freely — so it always
+        // resets the M2 ceremony state a previous FirstRun ceremony may have left behind, rather
+        // than inheriting a stale `IS_EXTENSION`/`STAGE_ACTIVE`.
+        addr_of_mut!(IS_EXTENSION).write(false);
+        addr_of_mut!(STAGE_ACTIVE).write((true, true));
         addr_of_mut!(BASE).write((prev.errors, prev.usage));
         addr_of_mut!(DRAFT).write((prev.errors, prev.usage));
         DOCUMENT_OPEN = false;
         (*addr_of_mut!(DOCUMENT_MORPH)).jump(false);
-        ACTION_FOCUSED = false;
+        // Settings opens on its LIST — rule 10's other half, and the reason this is written rather
+        // than inherited: `FOCUS` is a crate global, and first run parks it on the answer band.
+        addr_of_mut!(FOCUS).write(RouteFocus::content());
     }
     reader().reset();
     delete_alert().close();
@@ -571,6 +857,11 @@ fn rebuild_with_motion(sel: i32, preserve_motion: bool) {
                 .chevron(true),
         )
         .row(
+            Row::new(DOC_TITLE_ERRORS_ID)
+                .detail("The identifier on your crash reports, and how to have them deleted.")
+                .chevron(true),
+        )
+        .row(
             Row::new(DOC_TITLE_ANALYTICS_ID)
                 .detail("The identifier on your analytics, and how to have it deleted.")
                 .chevron(true),
@@ -585,28 +876,13 @@ fn rebuild_with_motion(sel: i32, preserve_motion: bool) {
             .chevron(true),
     );
     table().set_sections(vec![reporting, info, local], sel, preserve_motion);
-    // Settings opens on the LIST — `TABLE` parks `list_focused = false` while a document reader
-    // is open over it, so this restores it every rebuild rather than assuming it survived.
-    table().list_focused = true;
+    // **Rule 10 on every rebuild.** This used to assert `list_focused = true` flatly, which was
+    // right for the reason it said (a document reader parks it false) and wrong the moment the
+    // band could hold focus: it drew a plate under a focused Done. `sync_focus` answers the same
+    // question from the shape the rebuild has just produced — including the case that removed the
+    // band, which is what left focus on nothing after a toggle was undone.
+    sync_focus();
     debug_assert_eq!(row_ids().len() as i32, table().n_rows());
-}
-
-fn apply_answer_with_mint(
-    prev: &Consent,
-    errors: bool,
-    usage: bool,
-    mint: impl FnOnce() -> Option<String>,
-) -> Consent {
-    let next = consent::apply(prev, errors, usage, || mint().unwrap_or_default());
-    // Only usage analytics needs an install identity. Crash reports are deliberately anonymous,
-    // so an errors-only answer must remain valid even if randomness is unavailable. A failed usage
-    // mint, on the other hand, is not an identity: refuse that opt-in rather than inventing one
-    // from a clock or a MAC.
-    if next.usage && next.install_id.as_deref().unwrap_or("").is_empty() {
-        consent::apply(prev, errors, false, String::new)
-    } else {
-        next
-    }
 }
 
 /// Commit the completed first-run decisions or the explicit Settings action, then close.
@@ -616,14 +892,41 @@ fn commit() {
 }
 
 /// Record one explicit answer and close. BACK never reaches this function.
+///
+/// **Model stage M2: two transitions, chosen by [`is_extension`].** A fresh first-run answer goes
+/// through [`consent::apply`], which owns both channels — the whole ceremony, at once — exactly as
+/// the old monolithic screen did. An extension answer instead folds [`consent::apply_extension`]
+/// once per [`stage_active`] category: a Crash-only extension calls it for `Category::Errors`
+/// alone and leaves `Category::Usage`'s flag, identifier and scope completely untouched, whatever
+/// this person's `draft().1` happens to hold — the other purpose was never asked about this frame
+/// and must not move because of it. Either way, `consent::apply`/`apply_extension` owns the
+/// refusal of a channel whose identifier could not be minted; what is left here is saying so in the
+/// log, per channel actually asked, because the person's answer and the recorded decision differ
+/// at that moment and nothing on screen says why.
 fn record_answer(errors: bool, usage: bool) {
     let prev = consent::current().unwrap_or_default();
-    let next = apply_answer_with_mint(&prev, errors, usage, crate::telemetry::mint_install_id);
-    if usage && !next.usage {
-        crate::log(
-            "consent: no /dev/urandom — keeping error reporting choice and refusing only usage \
-             analytics rather than inventing an identifier",
-        );
+    let active = stage_active();
+    let next = if is_extension() {
+        let mut acc = prev.clone();
+        if active.0 {
+            acc = consent::apply_extension(&acc, Category::Errors, errors, crate::telemetry::mint_id);
+        }
+        if active.1 {
+            acc = consent::apply_extension(&acc, Category::Usage, usage, crate::telemetry::mint_id);
+        }
+        acc
+    } else {
+        consent::apply(&prev, errors, usage, crate::telemetry::mint_id)
+    };
+    for (asked, got, channel) in [
+        (active.0 && errors, next.errors, "crash reports"),
+        (active.1 && usage, next.usage, "usage analytics"),
+    ] {
+        if asked && !got {
+            crate::log(&format!(
+                "consent: no /dev/urandom — refusing {channel} rather than inventing an identifier"
+            ));
+        }
     }
     crate::telemetry::record(next);
     // A decision can only make sending MORE restricted or newly possible, and both want a flush:
@@ -635,12 +938,41 @@ fn record_answer(errors: bool, usage: bool) {
 }
 
 pub(crate) fn close() {
+    close_delete_and_menu(false);
+}
+
+/// The shared teardown behind [`close`] and a CONFIRMED delete. The document reader and the outer
+/// popover always end INSTANTLY here — their subject, the whole consent/Settings screen, really is
+/// gone, exactly [`Popover::close`]'s case. The delete alert is the one piece that differs: a
+/// defensive reset (`open`/`open_settings` calling `close()` before opening fresh) has never shown
+/// the alert to anyone, so hiding it instantly changes nothing a person watched happen — but a
+/// CONFIRMED delete has, and that answer must still play its own exit the way it played its entry.
+/// See `decision_alert.rs`'s module doc for the rule this keeps: every interactive answer
+/// dismisses, `close` is only for a subject that vanished with nothing to animate.
+fn close_delete_and_menu(fade_delete_alert: bool) {
     unsafe {
         DOCUMENT_OPEN = false;
-        ACTION_FOCUSED = false;
+        ARMED = None;
+        ARMED_ALERT = None;
+        addr_of_mut!(FOCUS).write(RouteFocus::content());
+        (*addr_of_mut!(ANSWER_POP)).clear();
+        (*addr_of_mut!(DONE_POP)).clear();
     }
     reader().reset();
-    delete_alert().close();
+    if fade_delete_alert {
+        delete_alert().dismiss();
+        // The confirmed answer is the one exit that changes what stands BEHIND the alert while it
+        // is still fading — `commit_consent` routes to Login the instant this call returns, but the
+        // alert's own panel is `Glass::CACHED` (`DecisionAlert::new`'s default `Popover::new()`)
+        // and, left alone, would keep serving the one snapshot it took of the SETTINGS page it
+        // opened over for the whole of its exit: a ghost of the screen that is no longer there,
+        // under text that is. Cancel and BACK never change what the alert stands on, so neither
+        // takes this — `blur_invalidate` is a global "recapture next time", and calling it when
+        // nothing changed would just spend a needless capture on the next frame.
+        crate::gfx::blur_invalidate();
+    } else {
+        delete_alert().close();
+    }
     if menu_open() {
         pop().close();
     }
@@ -651,7 +983,7 @@ pub(crate) fn close() {
 /// No first-run BACK writes [`DRAFT`] or persisted consent.
 pub(crate) fn on_back() -> bool {
     if delete_alert().is_open() {
-        delete_alert().close();
+        delete_alert().dismiss();
         return true;
     }
     if preview_open() {
@@ -662,14 +994,19 @@ pub(crate) fn on_back() -> bool {
     if menu_open() {
         if mode() == Mode::Settings {
             close();
-        } else if stage() == Stage::Product {
+        } else if stage() == Stage::Product && stage_active().0 {
+            // Crash came before Product in THIS ceremony — walk back to it. A Crash-less
+            // extension (Usage alone pending) never reaches this arm at Product: `stage_active().0`
+            // is false and Product is that ceremony's own root instead.
             unsafe { addr_of_mut!(STAGE).write(Stage::Crash) };
             enter_first_run_stage();
             crate::ui::idle::invalidate();
         }
-        // …and at Crash, BACK is SWALLOWED. There is no previous step to restore — this question
-        // is the first thing after sign-in — and letting it fall through would drop an
-        // unanswered television onto whatever route happens to be underneath.
+        // …and at the ceremony's ROOT, BACK is SWALLOWED — Crash when it is asked at all, else
+        // Product. There is no previous step to restore (a fresh first run's root sits right
+        // after sign-in; an extension's root sits right after whatever screen it interrupted) —
+        // and letting it fall through would drop an unanswered television onto whatever route
+        // happens to be underneath.
         return true;
     }
     false
@@ -678,12 +1015,17 @@ pub(crate) fn on_back() -> bool {
 fn choose(share: bool) {
     let (e, u) = draft();
     if stage() == Stage::Crash {
-        unsafe {
-            addr_of_mut!(DRAFT).write((share, u));
-            addr_of_mut!(STAGE).write(Stage::Product);
+        unsafe { addr_of_mut!(DRAFT).write((share, u)) };
+        if stage_active().1 {
+            // Product is also part of this ceremony (a fresh first run, or an extension pending
+            // on both categories) — walk on to it.
+            unsafe { addr_of_mut!(STAGE).write(Stage::Product) };
+            enter_first_run_stage();
+            crate::ui::idle::invalidate();
+        } else {
+            // A Crash-only extension: there is no Product stage in this ceremony to walk to.
+            commit();
         }
-        enter_first_run_stage();
-        crate::ui::idle::invalidate();
     } else {
         unsafe { addr_of_mut!(DRAFT).write((e, share)) };
         commit();
@@ -693,11 +1035,12 @@ fn choose(share: bool) {
 /// OK: toggle a switch, open the preview, or commit.
 pub(crate) fn on_ok() -> bool {
     if delete_alert().is_open() {
+        unsafe { ARMED_ALERT = None };
         if delete_alert().choice() == AlertChoice::Destructive {
             unsafe { addr_of_mut!(DELETE_REQUESTED).write(true) };
-            close();
+            close_delete_and_menu(true);
         } else {
-            delete_alert().close();
+            delete_alert().dismiss();
         }
         return true;
     }
@@ -709,9 +1052,11 @@ pub(crate) fn on_ok() -> bool {
     if !menu_open() {
         return false;
     }
-    if action_visible() && unsafe { *addr_of!(ACTION_FOCUSED) } {
+    if let Some(i) = focus().band_index().filter(|_| action_visible()) {
+        unsafe { ARMED = None };
         match mode() {
-            Mode::FirstRun => choose(unsafe { *addr_of!(ANSWER_SHARE) }),
+            // index 0 is Share, 1 is Don't share — the order `draw_action_row` draws them in.
+            Mode::FirstRun => choose(i == 0),
             Mode::Settings => commit(),
         }
         return true;
@@ -719,20 +1064,20 @@ pub(crate) fn on_ok() -> bool {
     let rows = row_ids();
     let sel = list().sel.clamp(0, rows.len() as i32 - 1);
     match rows[sel as usize] {
+        // **A flipped switch keeps focus.** These two arms used to park focus on Done, which was
+        // reported twice over: it took the plate off the row being edited, and undoing the edit
+        // then removed the Done the focus had been parked on and left the screen with no ring at
+        // all. `rebuild` re-settles focus (rule 10) and the row stays where the thumb is.
         RowId::Errors => {
             let (e, u) = draft();
             unsafe { addr_of_mut!(DRAFT).write((!e, u)) };
             rebuild(sel);
-            unsafe { ACTION_FOCUSED = true };
-            list().list_focused = false;
             crate::ui::idle::invalidate();
         }
         RowId::Usage => {
             let (e, u) = draft();
             unsafe { addr_of_mut!(DRAFT).write((e, !u)) };
             rebuild(sel);
-            unsafe { ACTION_FOCUSED = true };
-            list().list_focused = false;
             crate::ui::idle::invalidate();
         }
         RowId::PreviewCrash => {
@@ -759,6 +1104,14 @@ pub(crate) fn on_ok() -> bool {
             reader().reset();
             crate::ui::idle::invalidate();
         }
+        RowId::ErrorsId => {
+            unsafe {
+                PREVIEW_KIND = PreviewKind::ErrorsId;
+                DOCUMENT_OPEN = true;
+            }
+            reader().reset();
+            crate::ui::idle::invalidate();
+        }
         RowId::AnalyticsId => {
             unsafe {
                 PREVIEW_KIND = PreviewKind::AnalyticsId;
@@ -768,7 +1121,7 @@ pub(crate) fn on_ok() -> bool {
             crate::ui::idle::invalidate();
         }
         RowId::Delete => {
-            delete_alert().open_with_body(DELETE_SCOPE);
+            delete_alert().open_with_body(c"Delete all local data?", DELETE_SCOPE);
         }
     }
     true
@@ -783,61 +1136,153 @@ pub(crate) fn take_delete_request() -> bool {
     }
 }
 
+/// UP/DOWN — `route_screen`'s rules 1-4, with nothing screen-specific left in them. The action
+/// band is BELOW the list on both modes, so UP leaves it and DOWN off the last row enters it;
+/// first run opening focused on the band rather than the list is this route's one asymmetry, and
+/// it lives in `enter_first_run_stage` rather than here.
 pub(crate) fn on_updown(delta: i32) -> bool {
     if delete_alert().is_open() {
         return true;
     }
-    if preview_open() {
-        reader().move_by(delta);
+    if !menu_open() {
+        return false;
+    }
+    let mut f = focus();
+    let step = f.updown(shape(), delta);
+    unsafe { addr_of_mut!(FOCUS).write(f) };
+    apply_step(step)
+}
+
+/// LEFT/RIGHT — rules 5-9. First run's two answers are a ROW walked with these keys, and RIGHT off
+/// the trailing one now continues into the reading list instead of stopping dead; Settings answers
+/// them at all for the first time, which is what makes its Done reachable leftward and escapable
+/// rightward.
+pub(crate) fn on_left_right(delta: i32) -> bool {
+    if delete_alert().is_open() {
+        delete_alert().move_focus(delta);
         return true;
     }
-    if menu_open() {
-        // The action band is BELOW the list on both modes, so UP leaves it and DOWN off the last
-        // row enters it. First run opens focused there rather than on the list, which is the only
-        // asymmetry — its band is the answer, not a commit for edits made above it.
-        if unsafe { *addr_of!(ACTION_FOCUSED) } {
-            if delta < 0 {
-                unsafe { ACTION_FOCUSED = false };
-                list().list_focused = true;
-                crate::ui::idle::invalidate();
-            }
-            return true;
-        }
-        if action_visible() && delta > 0 && list().sel == list().n_rows() - 1 {
-            unsafe { ACTION_FOCUSED = true };
-            list().list_focused = false;
-            crate::ui::idle::invalidate();
-            return true;
-        }
-        list().move_sel(delta);
+    if !menu_open() {
+        return false;
+    }
+    let mut f = focus();
+    let s = shape();
+    let step = if delta < 0 { f.left(s) } else { f.right(s) };
+    unsafe { addr_of_mut!(FOCUS).write(f) };
+    apply_step(step)
+}
+
+/// **Is everything this route draws parked where the pointer thinks it is?** Rule 11's timing
+/// guard — see [`RoutePush::settled`]. Three transforms can be in flight here at once: the
+/// popover's own entrance, the document push, and (first run) the Crash → Product stage push. The
+/// recorded band rects and `list_frame()` are all FINAL-position, so a hit taken during any of them
+/// acts on a control the person cannot see at those coordinates — most sharply just after BACK out
+/// of a document, when the rows underneath become logically live while still travelling and nearly
+/// transparent.
+fn layers_settled() -> bool {
+    pop().appear_settled()
+        && unsafe { (*addr_of!(DOCUMENT_MORPH)).settled(preview_open()) }
+        && (mode() == Mode::Settings
+            || unsafe { (*addr_of!(STAGE_PUSH)).settled(stage() == Stage::Product) })
+}
+
+/// The frame the content column's table is drawn in — one function, so the pointer hit test and
+/// the draw cannot disagree about where the rows are. Settings' list is SECTIONED (its first
+/// label shares the narrative title's top anchor); first run's is a single headerless group.
+fn list_frame() -> Rect {
+    let l = RouteLayout::screen();
+    if mode() == Mode::Settings {
+        l.sectioned_table()
+    } else {
+        l.content
+    }
+}
+
+/// **Rule 11, this screen's half.** Park focus under the pointer and report whether it parked on
+/// anything, so a click in dead space cannot arm a press on whatever happened to be focused
+/// already. Before this existed the whole route was pointer-DEAF — `app.rs` swallowed every click
+/// over it and never routed a hover — which is the "Privacy & Data: neither hover nor click works"
+/// half of the Magic Remote report.
+pub(crate) fn pointer_focus(mx: f32, my: f32) -> bool {
+    if !menu_open() || preview_open() || delete_alert().is_open() || !layers_settled() {
+        return false;
+    }
+    let band = if mode() == Mode::FirstRun {
+        unsafe { (*addr_of!(ANSWER_POP)).hit(mx, my) }
+    } else {
+        unsafe { (*addr_of!(DONE_POP)).hit(mx, my) }
+    };
+    if let Some(i) = band.filter(|_| action_visible()) {
+        let mut f = focus();
+        f.to_band(i);
+        unsafe { addr_of_mut!(FOCUS).write(f) };
+        sync_focus();
+        crate::ui::idle::invalidate();
+        return true;
+    }
+    if let Some(row) = list().hit_row(list_frame(), mx, my) {
+        let mut f = focus();
+        f.to_content();
+        unsafe { addr_of_mut!(FOCUS).write(f) };
+        list().sel = row;
+        sync_focus();
         crate::ui::idle::invalidate();
         return true;
     }
     false
 }
 
-pub(crate) fn on_left_right(delta: i32) -> bool {
-    if delete_alert().is_open() {
-        delete_alert().move_focus(delta);
-        return true;
+/// Pointer-down on a CONTROL FACE — an answer pill or Done: park focus and report the hit, so the
+/// caller arms the tvOS press and spends it on the spring-back. A list row is not a control face
+/// and is [`click_row`]'s.
+pub(crate) fn press_at(mx: f32, my: f32) -> bool {
+    let hit = layers_settled().then(|| band_hit(mx, my)).flatten();
+    let ok = pointer_focus(mx, my) && focus_is_ctl() && hit.is_some();
+    unsafe { addr_of_mut!(ARMED).write(ok.then(|| (PressFrom::Pointer, hit.unwrap()))) };
+    ok
+}
+
+/// The delete-confirmation alert's own pointer-down, kept OUT of [`pointer_focus`] deliberately.
+///
+/// `DecisionAlert::press_at` measures its question through SDL2_ttf, which the host suite cannot
+/// link (`ui/CLAUDE.md`'s host/device boundary) — so folding it into `pointer_focus` would make
+/// every pointer test in this module a link error rather than an assertion. It is also the right
+/// layering: the alert is a modal over the route, and `app.rs` already dispatches the exit alert's
+/// pointer the same way.
+pub(crate) fn alert_press_at(mx: f32, my: f32) -> bool {
+    if !delete_alert().is_open() || !delete_alert().settled() {
+        return false;
     }
-    // First run's two answers are a ROW, so LEFT/RIGHT is their whole navigation — the same
-    // grammar the delete alert above uses, and the reason the answers had to leave the list: a
-    // column of rows can only be walked with UP/DOWN, which put them in the same gesture as the
-    // two documents beneath them.
-    if menu_open()
-        && !preview_open()
-        && mode() == Mode::FirstRun
-        && unsafe { *addr_of!(ACTION_FOCUSED) }
-    {
-        let share = delta < 0;
-        if unsafe { *addr_of!(ANSWER_SHARE) } != share {
-            unsafe { ANSWER_SHARE = share };
-            crate::ui::idle::invalidate();
-        }
-        return true;
+    let hit = delete_alert().press_at(mx, my);
+    unsafe { addr_of_mut!(ARMED_ALERT).write(hit.then(|| delete_alert().choice())) };
+    hit
+}
+
+/// The alert's half of [`pointer_hold`]. It also PARKS — `DecisionAlert::press_at` sets the choice
+/// it hit — which is the hover the alert never had: consent's ordinary pointer path refuses while
+/// it is open, so moving the cursor over `Delete` used to leave the ring on `Cancel`.
+pub(crate) fn alert_hold(mx: f32, my: f32) -> bool {
+    if !delete_alert().is_open() || !delete_alert().settled() {
+        return false;
     }
-    false
+    let hit = delete_alert().press_at(mx, my);
+    crate::ui::idle::invalidate();
+    hit && crate::ui::press::is_live()
+        && Some(delete_alert().choice()) == unsafe { *addr_of!(ARMED_ALERT) }
+}
+
+/// Is the delete confirmation the thing on screen? `app.rs` asks so it can route the pointer to the
+/// alert's door rather than the route's.
+pub(crate) fn alert_is_open() -> bool {
+    delete_alert().is_open()
+}
+
+/// Pointer-down on a table ROW: park focus and REPORT it, leaving the activation to the caller's
+/// `commit_consent` — the same function an OK key-down goes through. It has to be that one and not
+/// a local `on_ok()`: the Delete-all-local-data answer sets a request that only `commit_consent`
+/// harvests, so committing here would flip the switch and drop the sweep on the floor.
+pub(crate) fn click_row(mx: f32, my: f32) -> bool {
+    pointer_focus(mx, my) && !delete_alert().is_open() && focus().on_content()
 }
 
 pub(crate) fn update(dt: f32) {
@@ -852,18 +1297,20 @@ pub(crate) fn update(dt: f32) {
     // plate is a pair of springs and only advances here. Omitting this made Privacy the lone
     // Settings child whose text moved while its plate stayed where the screen opened.
     let layout = RouteLayout::screen();
-    let action_focused = unsafe { *addr_of!(ACTION_FOCUSED) };
+    // Rule 10 on the frame clock as well as on the key: a draft edit, a stage change or a
+    // rebuilt list can remove the control focus was on between one key and the next, and this is
+    // the one place that runs whether or not anybody pressed anything.
+    sync_focus();
+    let band = focus().band_index();
     if mode() == Mode::Settings {
         table().update(dt, layout.sectioned_table().h);
-        unsafe { (*addr_of_mut!(DONE_POP)).step(action_focused.then_some(0), dt) };
+        unsafe { (*addr_of_mut!(DONE_POP)).step(band.filter(|_| action_visible()), dt) };
     } else {
         // Both stages, not just the current one: `STAGE_PUSH` keeps the outgoing stage's own
         // table on screen (fading/sliding) for the whole transition, so both must stay warm.
         table_crash().update(dt, layout.content.h);
         table_product().update(dt, layout.content.h);
-        let on_share = unsafe { *addr_of!(ANSWER_SHARE) };
-        let focused_index = action_focused.then_some(if on_share { 0 } else { 1 });
-        unsafe { (*addr_of_mut!(ANSWER_POP)).step(focused_index, dt) };
+        unsafe { (*addr_of_mut!(ANSWER_POP)).step(band, dt) };
     }
 }
 
@@ -886,7 +1333,8 @@ pub(crate) fn preview_crash() -> String {
         "Crashes / Errors — what is actually sent to Sentry in Germany, and only when error \
          reporting is on. Random and build-specific values are placeholders; fixed classes below \
          are representative values from the closed domains in the Privacy notice. Nothing else is \
-         sent.\n\n",
+         sent. The crash report identifier is random, is created only when crash reports are \
+         enabled, and is shown here as a placeholder.\n\n",
     );
     out.push_str("Native crash report (only when error reporting is on):\n");
     let crash = crate::telemetry::native::preview_event();
@@ -914,6 +1362,31 @@ pub(crate) fn preview_crash() -> String {
     out.push_str(&handled_text);
     out.push_str("\n\n");
     out.push_str(&crate::telemetry::playback::preview_domains());
+    out.push_str("\n\nHandled sign-in error, standing form (only when error reporting is on):\n");
+    let signin = crate::telemetry::signin::preview_event();
+    let signin_text = serde_json::from_slice::<serde_json::Value>(&signin)
+        .ok()
+        .and_then(|v| serde_json::to_string_pretty(&v).ok())
+        .unwrap_or_else(|| String::from_utf8_lossy(&signin).into_owned());
+    out.push_str(&signin_text);
+    out.push_str(
+        "\n\nThe sign-in screen can also offer to send a ONE-OFF report about a specific sign-in \
+         problem, sent only by your own explicit press — regardless of whether this switch is on. \
+         It has the same shape as the sample above but with `contexts.signin.consent` and \
+         `tags[\"signin.consent\"]` read \"one_off\" instead of \"standing\", and it carries no \
+         `user` field at all: no crash report identifier and no persistent identifier. Its random \
+         one-off Report ID identifies only that event and can be quoted to ask about it. When the \
+         sign-in save or candidate-location facts are known, this one-off report may also carry \
+         those extra closed-word and small-number fields; the standing sample below shows the \
+         handled storage shape separately.",
+    );
+    out.push_str("\n\nHandled storage error (only when error reporting is on):\n");
+    let storage = crate::telemetry::storage::preview_event();
+    let storage_text = serde_json::from_slice::<serde_json::Value>(&storage)
+        .ok()
+        .and_then(|v| serde_json::to_string_pretty(&v).ok())
+        .unwrap_or_else(|| String::from_utf8_lossy(&storage).into_owned());
+    out.push_str(&storage_text);
     out
 }
 
@@ -928,7 +1401,7 @@ pub(crate) fn preview_usage() -> String {
     use crate::diag::schema::DiagEvent;
     let mut out = String::from(
         "Analytics / Usage — what is actually sent to PostHog in Germany, and only when usage \
-         reporting is on, with a random installation identifier. Random and build-specific values \
+         reporting is on, with a random Analytics ID. Random and build-specific values \
          are placeholders; fixed classes below are representative values from the closed domains \
          in the Privacy notice. Nothing else is sent. The usage identifier is random and is \
          created only when product analytics is enabled.\n\n",
@@ -1050,11 +1523,32 @@ fn analytics_id_document() -> String {
             // The account the identifier is NOT derived from is the flavour's own backend's.
             let backend = if cfg!(feature = "jellyfin") { "Jellyfin" } else { "Plex" };
             format!(
-                "YOUR ANALYTICS ID\n\n{id}\n\nWHAT IT IS\n\nA random identifier created on this television when you turned product analytics on. It is attached to analytics events so they can be counted as coming from one installation. It is not derived from your {backend} account, your television or anything about you, and it is never sent with crash reports.\n\nHOW TO HAVE THESE EVENTS DELETED\n\nWrite to {CONTACT_EMAIL} and quote the identifier above. It is the only handle these events carry, so a request without it cannot be matched to anything.\n\nHOW IT ENDS\n\nTurning product analytics off deletes this identifier, and turning analytics on again creates a different one. Delete all local data removes it as well. Events already sent keep the old identifier, which is why it is worth copying down before you turn analytics off if you intend to ask for their deletion."
+                "YOUR ANALYTICS ID\n\n{id}\n\nWHAT IT IS\n\nA random identifier created on this television when you turned product analytics on. It is attached to analytics events so they can be counted as coming from one Analytics ID: one uninterrupted opt-in on one television. It is not derived from your {backend} account, your television or anything about you, and it is never sent with crash reports, which carry a separate Crash report ID of their own.\n\nHOW TO HAVE THESE EVENTS DELETED\n\nWrite to {CONTACT_EMAIL} and quote the identifier above. It is the only handle these events carry, so a request without it cannot be matched to anything.\n\nHOW IT ENDS\n\nTurning product analytics off deletes this identifier, and turning analytics on again creates a different one. Signing out removes it as well, and the next person to sign in is asked afresh; so does Delete all local data. Events already sent keep the old identifier, which is why it is worth copying down before you turn analytics off if you intend to ask for their deletion."
             )
         }
         None => format!(
-            "NO ANALYTICS ID\n\nProduct analytics is off, so this installation has no analytics identifier and is sending no analytics events.\n\nAn identifier is created only when you turn product analytics on, and deleting it is what turning it off does. If you had analytics on before and want events from that period deleted, write to {CONTACT_EMAIL} — but note that the identifier they carry was destroyed when analytics was turned off, so it can no longer be looked up from this television.\n\nCrash reports carry no installation or analytics identifier. (Each report has its own event id, and some carry a fingerprint grouping like reports together, but neither is tied to this installation or to you.)"
+            "NO ANALYTICS ID\n\nProduct analytics is off, so this installation has no analytics identifier and is sending no analytics events.\n\nAn identifier is created only when you turn product analytics on, and deleting it is what turning it off does. If you had analytics on before and want events from that period deleted, write to {CONTACT_EMAIL} — but note that the identifier they carry was destroyed when analytics was turned off, so it can no longer be looked up from this television.\n\nCrash reports do not use this identifier. They carry a separate Crash report ID, shown on its own row while crash reports are on."
+        ),
+    }
+}
+
+/// The Crash report ID document — the crash channel's twin of [`analytics_id_document`], reading
+/// the STORED decision for the same reason: the identifier that has actually gone out on reports
+/// is the one in `consent::current`, not whatever the toggles currently show.
+///
+/// The one sentence that differs in kind from the analytics document is what the identifier is
+/// FOR: it lets Sentry count how many Crash report IDs an issue reached — one per uninterrupted
+/// opt-in on a television, since the id ends with the sign-in and with the switch — instead of
+/// how many times it fired, which is the number that decides what gets fixed first. That is said plainly because it
+/// is the reason the identifier exists, and a person deciding whether to leave the switch on is
+/// owed the reason.
+fn errors_id_document() -> String {
+    match consent::current().and_then(|c| c.errors_id).as_deref() {
+        Some(id) => format!(
+            "YOUR CRASH REPORT ID\n\n{id}\n\nWHAT IT IS\n\nA random identifier created on this television when you turned crash reports on. It is attached to every crash and error report so that repeated crashes under one Crash report ID are counted once, which is what tells a problem that hit many people apart from one television that hit it many times. It is not derived from your Plex account, your television or anything about you, and it is never sent with product analytics, which has a separate Analytics ID of its own.\n\nHOW TO HAVE THESE REPORTS DELETED\n\nWrite to {CONTACT_EMAIL} and quote the identifier above. It is the only handle these reports carry, so a request without it cannot be matched to anything.\n\nHOW IT ENDS\n\nTurning crash reports off deletes this identifier, and turning them on again creates a different one. Signing out removes it as well, and the next person to sign in is asked afresh; so does Delete all local data. Reports already sent keep the old identifier, which is why it is worth copying down before you turn crash reports off if you intend to ask for their deletion."
+        ),
+        None => format!(
+            "NO CRASH REPORT ID\n\nCrash reports are off, so this installation has no crash report identifier and is sending no crash or error reports.\n\nAn identifier is created only when you turn crash reports on, and deleting it is what turning them off does. If you had crash reports on before and want reports from that period deleted, write to {CONTACT_EMAIL} — but note that the identifier they carry was destroyed when crash reports were turned off, so it can no longer be looked up from this television."
         ),
     }
 }
@@ -1074,14 +1568,20 @@ pub(crate) fn draw_scrim() {
 }
 
 pub(crate) fn draw() {
-    if !menu_open() {
-        return;
+    if menu_open() {
+        crate::ui::profile::phase("cs.page", draw_question);
     }
-    draw_question();
-    // This alert is sourced from the completed Privacy route, so its scrim belongs immediately
-    // before it here rather than in the host-page closure (which sits under Settings' opaque wash).
-    delete_alert().draw_scrim();
-    delete_alert().draw(c"Delete all local data?", c"Cancel", c"Delete");
+    // Self-gated on their OWN `visible()`, deliberately outside the `menu_open()` guard above: a
+    // confirmed delete closes the rest of this screen at once (`close_delete_and_menu`'s outer
+    // popover close) while the alert itself only DISMISSES, so its fade still has frames left to
+    // draw once `menu_open()` has already gone false — over whatever the app shows next, exactly
+    // like a dismissed `account_menu`/`item_menu` fading over its returning host. This alert is
+    // sourced from the completed Privacy route, so its scrim belongs immediately before it here
+    // rather than in the host-page closure (which sits under Settings' opaque wash).
+    crate::ui::profile::phase("cs.alert", || {
+        delete_alert().draw_scrim();
+        delete_alert().draw(c"Cancel", c"Delete");
+    });
 }
 
 /// Where BACK goes from `which` stage, named on the crumb above the title — `None` where BACK goes
@@ -1090,10 +1590,13 @@ pub(crate) fn draw() {
 fn crumb_for(mode: Mode, which: Stage) -> Option<&'static str> {
     match (mode, which) {
         (Mode::Settings, _) => Some(CRUMB_SETTINGS),
-        // The ROOT of the ceremony: sign-in is behind it and cannot be undone, so there is
-        // nothing honest to name. See the module doc.
+        // The ROOT of the ceremony: sign-in is behind it and cannot be undone (a fresh first
+        // run), or it is this extension's only stage — either way there is nothing honest to
+        // name. See the module doc.
         (Mode::FirstRun, Stage::Crash) => None,
-        (Mode::FirstRun, Stage::Product) => Some(CRASH_TITLE),
+        // Product names Crash as where BACK goes only when THIS ceremony actually asked Crash
+        // first — a Usage-only extension never showed one, and its Product stage is the root.
+        (Mode::FirstRun, Stage::Product) => stage_active().0.then_some(CRASH_TITLE),
     }
 }
 
@@ -1114,21 +1617,25 @@ fn crumb() -> Option<&'static str> {
 /// the band is free for the thing this screen exists to collect.
 ///
 /// Settings keeps Done, and still only once a value differs from the stored one.
+/// Every control it draws also RECORDS its frame ([`crate::ui::route_screen::ActionRow::place`]),
+/// which is the whole of what makes the band hoverable and clickable (rule 11): the hit rect and
+/// the painted pill are then the same object rather than two derivations that agree by inspection.
+/// The band that is not drawn clears its frames in `draw_question`, so a Done that an undo has just
+/// removed leaves no live click target behind it.
 fn draw_action_row(p: crate::ui::Painter, layout: RouteLayout) {
     if !action_visible() {
         return;
     }
+    let band = focus().band_index();
     if mode() == Mode::Settings {
         let w = Button::pill_w(c"Done".as_ptr(), theme::size::BODY, false).min(layout.action.w);
-        Button::new(
-            c"Done".as_ptr(),
-            theme::size::BODY,
-            Rect::new(layout.action.x, layout.action.y, w, layout.action.h),
-        )
-        .focused(unsafe { *addr_of!(ACTION_FOCUSED) })
-        .scale(unsafe { (*addr_of!(DONE_POP)).scale(0) })
-        .palette(crate::ui::settings::control_palette())
-        .draw(&Env::inert(), p);
+        let r = Rect::new(layout.action.x, layout.action.y, w, layout.action.h);
+        unsafe { (*addr_of_mut!(DONE_POP)).place(0, r) };
+        Button::new(c"Done".as_ptr(), theme::size::BODY, r)
+            .focused(band == Some(0))
+            .scale(unsafe { (*addr_of!(DONE_POP)).scale(0) })
+            .palette(crate::ui::settings::control_palette())
+            .draw(&Env::inert(), p);
         return;
     }
     // Two EQUALS, so neither is measured to the other's width and neither wears a danger face:
@@ -1138,15 +1645,14 @@ fn draw_action_row(p: crate::ui::Painter, layout: RouteLayout) {
         Button::pill_w(share.as_ptr(), theme::size::BODY, false),
         Button::pill_w(decline.as_ptr(), theme::size::BODY, false),
     );
-    let focused = unsafe { *addr_of!(ACTION_FOCUSED) };
-    let on_share = unsafe { *addr_of!(ANSWER_SHARE) };
     let palette = unsafe { (*addr_of!(GROUND)).palette() };
-    for (i, (label, rect, is_share)) in [(share, share_r, true), (decline, decline_r, false)]
+    for (i, (label, rect)) in [(share, share_r), (decline, decline_r)]
         .into_iter()
         .enumerate()
     {
+        unsafe { (*addr_of_mut!(ANSWER_POP)).place(i, rect) };
         Button::new(label.as_ptr(), theme::size::BODY, rect)
-            .focused(focused && on_share == is_share)
+            .focused(band == Some(i))
             .scale(unsafe { (*addr_of!(ANSWER_POP)).scale(i) })
             .palette(palette)
             .draw(&Env::inert(), p);
@@ -1158,6 +1664,20 @@ fn draw_action_row(p: crate::ui::Painter, layout: RouteLayout) {
 /// rather than something only a captured frame sequence can show. Crash is the parent (visible
 /// while the push has not fully completed) and Product the child (visible once it has begun) —
 /// the same fixed-role split `draw_stage` draws with.
+/// The re-ask note shown between the heading and the body, or `None`. **Pure** — it does not
+/// measure a single glyph, so it is gradeable in the host suite, unlike the pixel height its
+/// caller needs. Shown on the CRASH stage alone: [`consent::REASK_CHANGES`] is a table of
+/// crash-channel changes only, and the Product question has not changed shape since it was
+/// introduced, so there is nothing to explain there. `Mode::Settings` never reaches this
+/// predicate at all — `draw_question`'s Settings arm does not call [`draw_stage`] — because
+/// Settings shows the STORED answer, not a re-ask of it.
+fn reask_line(prev_version: u32, stage: Stage) -> Option<&'static str> {
+    if stage != Stage::Crash {
+        return None;
+    }
+    consent::reask_note(prev_version)
+}
+
 fn stage_visible(which: Stage, amount: f32) -> bool {
     match which {
         Stage::Crash => amount < 0.999,
@@ -1188,7 +1708,20 @@ fn draw_stage(route_layer: crate::ui::Painter, layout: RouteLayout, which: Stage
         Stage::Crash => (CRASH_TITLE, CRASH_BODY, table_crash()),
         Stage::Product => (PRODUCT_TITLE, PRODUCT_BODY, table_product()),
     };
-    layout.draw_narrative(p, crumb_for(Mode::FirstRun, which), stage_title, stage_body, theme::size::BODY);
+    // Computed once at `open` (see NOTE_CRASH's doc) rather than called here — extension_note
+    // and reask_line both leak a fresh String, and this function runs every presented frame.
+    let note = match which {
+        Stage::Crash => unsafe { *addr_of!(NOTE_CRASH) },
+        Stage::Product => unsafe { *addr_of!(NOTE_PRODUCT) },
+    };
+    layout.draw_narrative_with_note(
+        p,
+        crumb_for(Mode::FirstRun, which),
+        stage_title,
+        note,
+        stage_body,
+        theme::size::BODY,
+    );
     stage_table.draw(p, layout.content);
     if which == stage() && !preview_open() {
         draw_action_row(p, layout);
@@ -1199,6 +1732,13 @@ fn draw_stage(route_layer: crate::ui::Painter, layout: RouteLayout, which: Stage
 fn draw_question() {
     let p0 = pop();
     let a = p0.appear();
+    // Rule 11: only a control DRAWN this frame may be hit. `draw_action_row` re-places whatever it
+    // paints immediately below, so clearing first is what retires a Done an undo has removed and
+    // the answer pills a pushed document has covered.
+    unsafe {
+        (*addr_of_mut!(DONE_POP)).clear();
+        (*addr_of_mut!(ANSWER_POP)).clear();
+    }
     if mode() == Mode::FirstRun {
         unsafe {
             // Since the ask moved ahead of the profile picker, the usual first-run host is the
@@ -1234,7 +1774,7 @@ fn draw_question() {
             },
             theme::size::LABEL,
         );
-        table().draw(route_layer, layout.sectioned_table());
+        table().draw(route_layer, list_frame());
         if !preview_open() {
             draw_action_row(route_layer, layout);
         }
@@ -1253,9 +1793,13 @@ fn draw_question() {
         // channel's own preview, and the policy — each with its own title and subtitle so the
         // reader can never mistake which document (or which channel) it is looking at.
         let (doc_title, subtitle): (&str, &str) = match kind {
+            PreviewKind::ErrorsId => (
+                DOC_TITLE_ERRORS_ID,
+                "The random identifier attached to crash and error reports from this sign-in, and how to have those reports deleted.",
+            ),
             PreviewKind::AnalyticsId => (
                 DOC_TITLE_ANALYTICS_ID,
-                "The random identifier attached to product analytics from this installation, and how to have those events deleted.",
+                "The random identifier attached to product analytics from this sign-in, and how to have those events deleted.",
             ),
             PreviewKind::Policy => (
                 ROW_POLICY,
@@ -1293,18 +1837,41 @@ fn draw_question() {
             theme::size::LABEL,
         );
         let text = match kind {
+            PreviewKind::ErrorsId => errors_id_document(),
             PreviewKind::AnalyticsId => analytics_id_document(),
             PreviewKind::Policy => privacy_policy().to_string(),
             PreviewKind::Crash => preview_crash(),
             PreviewKind::Usage => preview_usage(),
         };
-        reader().draw(dp, layout.content, None, &text);
+        // A pushed document is PLAIN TEXT, so it hangs from the title's anchor rather than the
+        // crumb's — `RouteLayout::document`, the family's one geometry rule for a text-only
+        // content column. Its crumb is never absent here (it always names the question it was
+        // opened from), but the flag is passed rather than assumed so the anchor cannot drift.
+        reader().draw(dp, layout.document(true), None, &text);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Run whatever transform is in flight to rest. Rule 11 refuses a POSITIONAL hit until the
+    /// layer it belongs to has arrived, so every pointer test here has to land its screen first.
+    /// Spring the crate-global press all the way back to idle. A test that arms one owes this to
+    /// the next test in the file: `press` is process-wide state, and `testlock::serial` orders the
+    /// tests without cleaning up after them.
+    fn end_press() {
+        crate::ui::press::cancel();
+        for i in 0..200 {
+            crate::ui::press::tick(4 + i * 16, 0.016);
+        }
+    }
+
+    fn settle() {
+        for _ in 0..600 {
+            update(1.0 / 60.0);
+        }
+    }
 
     /// **The two Privacy-policy doors must open ONE document.** This screen's Information section
     /// and `ui::legal`'s index both offer "Privacy policy", and this row's own detail line calls
@@ -1340,7 +1907,7 @@ mod tests {
     #[test]
     fn a_current_policy_answer_is_not_asked_again() {
         for (e, u) in [(false, false), (true, false), (false, true), (true, true)] {
-            let answered = consent::apply(&Consent::default(), e, u, || "id".into());
+            let answered = consent::apply(&Consent::default(), e, u, || Some("id".into()));
             assert!(
                 !should_show(&answered, false),
                 "re-asked after errors={e} usage={u}"
@@ -1348,8 +1915,14 @@ mod tests {
         }
     }
 
-    /// A material schema expansion must receive two new explicit answers. The previous choices
-    /// remain fail-closed while the first-run route asks the expanded questions again.
+    /// A stale `asked_version` with no per-category scope set (the pre-M2 shape this literal
+    /// predates `migrate_loaded` backfilling) is still shown the ceremony. **The previous choices
+    /// are NOT fail-closed any more** — since model stage M1, `allows_errors`/`allows_usage` answer
+    /// on the flag alone, at any scope, so ordinary reports keep flowing while this is pending; see
+    /// `consent::tests::a_pending_extension_still_sends_baseline_reports_but_withholds_the_new_field`
+    /// for that half. This test's own job is narrower than its old doc claimed: only that
+    /// `should_show` is still true for such a file, and that a freshly-`apply`'d current answer is
+    /// not re-shown.
     #[test]
     fn a_policy_bump_reasks_without_reusing_the_old_answer() {
         let old = Consent {
@@ -1357,25 +1930,25 @@ mod tests {
             errors: true,
             usage: true,
             install_id: Some("old-id".into()),
+            errors_id: Some("old-errors-id".into()),
+            ..Default::default()
         };
         assert!(should_show(&old, false));
-        let current = consent::apply(&Consent::default(), true, false, || "new-id".into());
+        let current = consent::apply(&Consent::default(), true, false, || Some("new-id".into()));
         assert!(!should_show(&current, false));
     }
 
+    /// **Each channel carries its own identifier now, so each is refused on its own mint.** This
+    /// used to assert that crash reporting survived a failed mint because it was anonymous; it is
+    /// not anonymous any more, and an opt-in that could not be given an identifier is recorded as
+    /// off rather than sent bare. The transition itself is `consent::apply`'s and tested there;
+    /// this pins that the screen goes through it with no second path.
     #[test]
-    fn unavailable_randomness_refuses_only_usage_and_keeps_error_reporting() {
-        let answer = apply_answer_with_mint(&Consent::default(), true, true, || None);
-        assert!(answer.answered());
-        assert!(
-            answer.errors,
-            "anonymous error reporting does not need an install id"
-        );
-        assert!(
-            !answer.usage,
-            "usage reporting cannot start without its random id"
-        );
-        assert!(answer.install_id.is_none());
+    fn unavailable_randomness_refuses_the_channel_it_failed_for() {
+        let answer = consent::apply(&Consent::default(), true, true, || None);
+        assert!(answer.answered(), "the person is not asked again");
+        assert!(!answer.errors && !answer.usage);
+        assert!(answer.install_id.is_none() && answer.errors_id.is_none());
     }
 
     /// Regression for the TV report: the row selection changed its ink, but this screen never
@@ -1503,6 +2076,39 @@ mod tests {
         }
     }
 
+    /// **The two identifier documents each name only their own channel's identifier.** The
+    /// documents read the stored decision, so this installs one with both ids and checks that
+    /// neither page prints the other's value — the cross-linking the two-id design exists to
+    /// prevent, checked at the one place a person actually reads the values.
+    #[test]
+    fn each_identifier_document_shows_only_its_own_identifier() {
+        let _g = crate::testlock::serial();
+        let saved = consent::current();
+        let errors_id = "e".repeat(32);
+        let analytics_id = "a".repeat(32);
+        let mut draws = 0;
+        consent::install(consent::apply(&Consent::default(), true, true, || {
+            draws += 1;
+            Some(if draws == 1 {
+                errors_id.clone()
+            } else {
+                analytics_id.clone()
+            })
+        }));
+        let errors_doc = errors_id_document();
+        let analytics_doc = analytics_id_document();
+        assert!(errors_doc.contains(&errors_id) && !errors_doc.contains(&analytics_id));
+        assert!(analytics_doc.contains(&analytics_id) && !analytics_doc.contains(&errors_id));
+        assert!(errors_doc.contains(CONTACT_EMAIL) && analytics_doc.contains(CONTACT_EMAIL));
+
+        consent::install(consent::apply(&Consent::default(), false, false, || None));
+        assert!(errors_id_document().starts_with("NO CRASH REPORT ID"));
+        assert!(analytics_id_document().starts_with("NO ANALYTICS ID"));
+        if let Some(c) = saved {
+            consent::install(c);
+        }
+    }
+
     /// **Item 14's whole point: the crash document carries nothing from the usage channel.** A
     /// person reading "what crash reports send" must never see a PostHog identifier or event
     /// field — that would make the split cosmetic rather than a real separation of what goes
@@ -1578,6 +2184,14 @@ mod tests {
             text.contains("<random id>"),
             "and the field itself is a placeholder"
         );
+        assert!(
+            text.contains("created only when crash reports are enabled"),
+            "the crash intro explains its placeholder"
+        );
+        assert!(
+            text.contains(crate::telemetry::native::PREVIEW_USER_ID),
+            "and the crash-report id is shown as a placeholder"
+        );
         // 32 lowercase hex in a row is what a minted id looks like; nothing here may match it.
         let bytes: Vec<char> = text.chars().collect();
         let run = bytes.windows(32).any(|w| {
@@ -1629,6 +2243,7 @@ mod tests {
                 RowId::PreviewCrash,
                 RowId::PreviewUsage,
                 RowId::Policy,
+                RowId::ErrorsId,
                 RowId::AnalyticsId,
                 RowId::Delete,
             ],
@@ -1685,7 +2300,7 @@ mod tests {
             "first run always carries its answers in the band"
         );
         assert!(
-            unsafe { *addr_of!(ACTION_FOCUSED) },
+            focus().band_index().is_some(),
             "focus opens on the answers, not on the reading list"
         );
         assert!(!list().list_focused, "so no row is plated meanwhile");
@@ -1698,11 +2313,11 @@ mod tests {
     fn moving_between_the_two_answers_decides_nothing() {
         let _g = crate::testlock::serial();
         open(&Consent::default());
-        assert!(unsafe { *addr_of!(ANSWER_SHARE) }, "opens on Share");
+        assert_eq!(focus().band_index(), Some(0), "opens on Share");
         assert!(on_left_right(1));
-        assert!(!unsafe { *addr_of!(ANSWER_SHARE) });
+        assert_eq!(focus().band_index(), Some(1));
         assert!(on_left_right(-1));
-        assert!(unsafe { *addr_of!(ANSWER_SHARE) });
+        assert_eq!(focus().band_index(), Some(0));
         assert_eq!(draft(), (false, false), "walking the row records nothing");
         assert_eq!(stage(), Stage::Crash, "and advances nothing");
         close();
@@ -1718,9 +2333,9 @@ mod tests {
         on_ok();
         assert_eq!(stage(), Stage::Product);
         assert_eq!(draft(), (false, false), "crash reports declined");
-        assert!(unsafe { *addr_of!(ACTION_FOCUSED) });
+        assert!(focus().band_index().is_some());
         assert!(
-            unsafe { *addr_of!(ANSWER_SHARE) },
+            focus().band_index() == Some(0),
             "the second question opens on Share like the first, not on the last answer given"
         );
         close();
@@ -1733,12 +2348,12 @@ mod tests {
         let _g = crate::testlock::serial();
         open(&Consent::default());
         assert!(on_updown(-1));
-        assert!(!unsafe { *addr_of!(ACTION_FOCUSED) });
+        assert!(focus().on_content());
         assert!(list().list_focused);
         list().sel = list().n_rows() - 1;
         assert!(on_updown(1));
         assert!(
-            unsafe { *addr_of!(ACTION_FOCUSED) },
+            focus().band_index().is_some(),
             "DOWN off the last row returns to the answers"
         );
         close();
@@ -1759,11 +2374,11 @@ mod tests {
             list().list_focused,
             "…and Settings has to put it back, or its focus is invisible"
         );
-        assert!(!unsafe { *addr_of!(ACTION_FOCUSED) }, "and not on a Done that is not there yet");
+        assert!(!focus().band_index().is_some(), "and not on a Done that is not there yet");
         close();
     }
 
-    /// **Opening an already-open question must not restart it.** The device question is asked
+    /// **Opening an already-open question must not restart it.** The consent question is asked
     /// from a routing site that runs EVERY FRAME while the profile picker is up — `should_show`
     /// stays true until BOTH answers are recorded, so an unguarded `open` re-seated the stage to
     /// Crash on the frame after the first answer and the second question was unreachable. The
@@ -1860,9 +2475,346 @@ mod tests {
     fn first_run_separates_crash_and_product_consent() {
         assert!(CRASH_BODY.contains("signal"));
         assert!(CRASH_BODY.contains("product analytics identifier"));
-        assert!(PRODUCT_BODY.contains("random installation identifier"));
+        assert!(
+            CRASH_BODY.contains("crash report identifier"),
+            "the crash question must disclose the identifier it now carries"
+        );
+        assert!(PRODUCT_BODY.contains("random Analytics ID"));
+        for body in [CRASH_BODY, PRODUCT_BODY] {
+            assert!(
+                body.contains("turn it off or sign out"),
+                "each question must say the identifier ends with the sign-in, not with the television"
+            );
+        }
         assert!(PRODUCT_BODY.contains("exact viewing history"));
         assert_ne!(CRASH_TITLE, PRODUCT_TITLE);
+    }
+
+    /// **Issue #75: the crash/errors question names BOTH sign-in reporting paths** — the standing
+    /// handled-error report this switch actually gates, and the separate one-off "Send report"
+    /// press the sign-in screen can offer even while this switch is off, which this text must say
+    /// is NOT gated by it and carries no persistent identifier. `ROW_ERRORS_SUB` gets the short form.
+    #[test]
+    fn crash_question_names_both_signin_reporting_paths() {
+        assert!(CRASH_BODY.contains("sign-in error report"));
+        assert!(
+            CRASH_BODY.contains("one-off report"),
+            "the text must distinguish the one-off path from the standing crash-report switch"
+        );
+        assert!(
+            CRASH_BODY.contains("no persistent identifier"),
+            "the one-off path must distinguish a receipt from a persistent identifier"
+        );
+        assert!(ROW_ERRORS_SUB.contains("sign-in"));
+    }
+
+    /// **CRASH_BODY must fit the route family's 12-line narrative cap** (`route_screen.rs`'s
+    /// `draw_narrative`, `TextView::max_lines(12)`), or its tail — the "never include" sentence —
+    /// falls off the screen silently. The version naming both sign-in paths in full wrapped to
+    /// about 17 lines; this pins the shortened one.
+    ///
+    /// **A character budget, not a measurement, and that is forced rather than lazy**: the real
+    /// wrap goes through `text::text_width`, i.e. SDL2_ttf, and a host test that reaches it does
+    /// not fail — it does not LINK (`_TTF_OpenFont` undefined for the test binary). The budget was
+    /// measured on the simulator against the 539-character version of this text, which wrapped to
+    /// 11 of the 12 lines at the narrative column's width with its last sentence intact
+    /// (`/tmp/sim-issue75f/consent.png`, 2026-09-10). **Issue #76 shortened the middle sentence to
+    /// make room for the storage-error mention and stayed under the same 560, but that specific
+    /// wrap has not been re-captured** — the number is carried forward on the strength of the
+    /// original measurement (both versions are within one character of each other), not asserted
+    /// as freshly verified. Growing the text past 560 needs a new capture, not a bigger number.
+    #[test]
+    fn crash_body_stays_inside_its_routes_line_cap() {
+        let budget = 560;
+        let n = CRASH_BODY.chars().count();
+        assert!(
+            n <= budget,
+            "CRASH_BODY is {n} characters, over the {budget} the first-run route is known to \
+             fit in 12 lines — shorten it; the privacy sentences must not fall off"
+        );
+    }
+
+    /// **PRODUCT_BODY shares the same route family and the same `TextView::max_lines(12)` cap
+    /// as CRASH_BODY** (`route_screen.rs`'s `draw_narrative`), so the same 560-character budget
+    /// applies by construction rather than by an independent measurement of this text: same
+    /// column width, same font, same rung. No simulator capture of the Product stage's narrative
+    /// specifically backs this number — it borrows CRASH_BODY's, which the comment above pins to
+    /// one real capture. Growing PRODUCT_BODY past 560 should get its own capture before the
+    /// number is trusted further.
+    #[test]
+    fn product_body_stays_inside_the_same_routes_line_cap() {
+        let budget = 560;
+        let n = PRODUCT_BODY.chars().count();
+        assert!(
+            n <= budget,
+            "PRODUCT_BODY is {n} characters, over the {budget} shared route line cap — shorten \
+             it; the privacy sentences must not fall off"
+        );
+    }
+
+    /// The Crashes/Errors preview shows the STANDING sign-in sample and describes the one-off
+    /// path in prose beside it — the person deciding this switch must see both without the
+    /// one-off path being made to look gated by the switch it is describing.
+    #[test]
+    fn preview_crash_describes_both_signin_reporting_paths() {
+        let text = preview_crash();
+        assert!(text.contains("Handled sign-in error, standing form"));
+        assert!(text.contains("ONE-OFF report"));
+        assert!(text.contains("\"standing\""));
+        assert!(text.contains("\"one_off\""));
+        assert!(text.contains("no persistent identifier"));
+        assert!(text.contains("one-off Report ID"));
+    }
+
+    /// **Issue #76: the Crashes/Errors preview also shows the handled storage-error sample.**
+    #[test]
+    fn preview_crash_shows_the_storage_error_sample() {
+        let text = preview_crash();
+        assert!(text.contains("Handled storage error"));
+        assert!(text.contains("\"StorageError\""));
+        assert!(text.contains("\"envelope_locked\""));
+        // A recoverable lock always writes the cross-launch marker before a report can even be
+        // built (`plex::session::locked`'s doc), so the real shape is `secure_refused`, never the
+        // narrower `secure_locked` — the preview must show exactly what a real report would.
+        assert!(text.contains("\"secure_refused\""));
+        // The one free-numeric field a real StorageError can carry — must actually appear in the
+        // one payload a person can inspect before consenting to send it (issue #76 review).
+        assert!(text.contains("\"service_error_code\""));
+    }
+
+    /// **Issue #76: every Analytics/Usage preview event carries the `session_storage` property.**
+    #[test]
+    fn preview_usage_shows_the_session_storage_property() {
+        let text = preview_usage();
+        assert!(text.contains("\"session_storage\""));
+    }
+
+    /// **Toggling a switch leaves focus on the switch.** Reported: "focus immediately jumps to
+    /// Done". It did — `on_ok`'s two switch arms wrote `ACTION_FOCUSED = true` on every flip — and
+    /// the cost is not only surprise: it is the first half of the disappearing-focus bug below,
+    /// and it made the row you were editing stop wearing its plate the moment you edited it.
+    #[test]
+    fn toggling_a_switch_keeps_focus_on_the_row_it_toggled() {
+        let _g = crate::testlock::serial();
+        open_settings(&Consent::default());
+        list().sel = 0;
+        assert!(on_ok(), "OK on the Crash reports switch");
+        assert_eq!(draft(), (true, false), "…flips exactly that switch");
+        assert!(
+            focus().on_content(),
+            "focus must stay on the row that was toggled, not jump to Done"
+        );
+        assert!(list().list_focused, "…and the list must still wear its plate");
+        assert_eq!(list().sel, 0, "…on the row that was edited");
+        close();
+    }
+
+    /// **The band and the list are one horizontal walk, both ways.** Reported: "from Done, Right
+    /// does not return to the table, while Up strangely does". `on_left_right` only ever answered
+    /// for first run, so in Settings mode LEFT and RIGHT were both dropped on the floor and the
+    /// band was a rightward dead end (rules 5 and 7).
+    #[test]
+    fn left_reaches_the_action_band_and_right_comes_back_out_of_it() {
+        let _g = crate::testlock::serial();
+        open_settings(&Consent::default());
+        unsafe { addr_of_mut!(DRAFT).write((true, false)) };
+        rebuild(0);
+        assert!(action_visible(), "Done is on screen once a value differs");
+        assert!(on_left_right(-1), "LEFT from the list reaches the band");
+        assert_eq!(focus().band_index(), Some(0));
+        assert!(!list().list_focused, "…and only one accent capsule is drawn");
+        assert!(on_left_right(1), "RIGHT from the band returns to the list");
+        assert!(focus().on_content());
+        assert!(list().list_focused);
+        close();
+    }
+
+    /// **No edit may leave focus on nothing.** Reported: "toggling the value back can cause focus
+    /// to disappear completely". Exactly so — the flip parked focus on Done, and toggling back made
+    /// the draft match the stored answer again, which REMOVES Done. Nothing re-seated focus, so the
+    /// screen had no ring anywhere while the keys still moved an invisible selection (rule 10).
+    #[test]
+    fn toggling_a_value_back_never_leaves_focus_on_nothing() {
+        let _g = crate::testlock::serial();
+        open_settings(&Consent::default());
+        list().sel = 0;
+        on_ok(); // Crash reports -> On, so Done appears
+        assert!(action_visible());
+        assert!(on_updown(-1) || true);
+        on_ok(); // …and back Off again, so Done goes away under whatever was focused
+        assert!(!action_visible(), "the draft matches the stored answer again");
+        assert!(
+            focus().on_content() && list().list_focused,
+            "with no Done left to hold it, focus must be back on the list rather than nowhere"
+        );
+        close();
+    }
+
+    /// **First run's two answers are not a rightward dead end.** Reported against Share Crash
+    /// Reports: "focus cannot navigate correctly from the bottom buttons back to the options on the
+    /// right". LEFT/RIGHT walked the two answers and stopped; only UP could reach the reading list
+    /// (rule 7).
+    #[test]
+    fn right_off_the_trailing_answer_reaches_the_reading_list() {
+        let _g = crate::testlock::serial();
+        open(&Consent::default());
+        assert_eq!(focus().band_index(), Some(0), "first run opens on the answers");
+        assert!(on_left_right(1), "RIGHT walks to the second answer");
+        assert_eq!(focus().band_index(), Some(1));
+        assert!(on_left_right(1), "…and RIGHT off the trailing answer reaches the list");
+        assert!(focus().on_content());
+        assert!(list().list_focused);
+        // …and LEFT walks back in, trailing control first, so the round trip is exact.
+        assert!(on_left_right(-1));
+        assert_eq!(focus().band_index(), Some(1));
+        close();
+    }
+
+    /// **Rule 11 on the route that had no pointer at all.** Hover parks the answer under the
+    /// cursor; dead space parks nothing and leaves focus where it was. The two pill frames are
+    /// `place`d here exactly as `draw_action_row` places them, since a host test cannot draw.
+    #[test]
+    fn hover_parks_an_answer_and_dead_space_parks_nothing() {
+        let _g = crate::testlock::serial();
+        open(&Consent::default());
+        settle();
+        let (share_r, decline_r) = RouteLayout::screen().action_pair(240.0, 200.0);
+        unsafe {
+            (*addr_of_mut!(ANSWER_POP)).place(0, share_r);
+            (*addr_of_mut!(ANSWER_POP)).place(1, decline_r);
+        }
+        assert!(pointer_focus(decline_r.x + 10.0, decline_r.y + 10.0));
+        assert_eq!(focus().band_index(), Some(1), "hover parks the pill under the cursor");
+        assert!(
+            !pointer_focus(4.0, 4.0),
+            "the top-left corner is not a control and not a row"
+        );
+        assert_eq!(
+            focus().band_index(),
+            Some(1),
+            "…and parking nothing must not move the ring"
+        );
+        assert!(pointer_focus(share_r.x + 10.0, share_r.y + 10.0));
+        assert_eq!(focus().band_index(), Some(0));
+        // …and a control face is `press_at`'s, not `click_row`'s, so a pill never commits flat on
+        // the button-down.
+        assert!(press_at(share_r.x + 10.0, share_r.y + 10.0));
+        assert!(!click_row(share_r.x + 10.0, share_r.y + 10.0));
+        assert_eq!(draft(), (false, false), "and hovering or arming answers nothing");
+        close();
+    }
+
+    /// **An armed press is bound to the control it was armed on.** `ui::press`'s model is that
+    /// focus cannot move mid-press, which the nav keys pay by cancelling; `app.rs` pays it for
+    /// hover through [`pointer_hold`]. On THIS screen the cost of getting it wrong is a recorded
+    /// consent decision: a pointer-down on `Share reports` plus ordinary Magic Remote jitter inside
+    /// the ~210 ms commit window would answer the other way, or — the harder half — slide off
+    /// every control and answer the ORIGINAL way anyway.
+    #[test]
+    fn an_armed_press_survives_jitter_but_not_leaving_the_control() {
+        let _g = crate::testlock::serial();
+        open(&Consent::default());
+        settle();
+        let (share_r, decline_r) = RouteLayout::screen().action_pair(240.0, 200.0);
+        unsafe {
+            (*addr_of_mut!(ANSWER_POP)).place(0, share_r);
+            (*addr_of_mut!(ANSWER_POP)).place(1, decline_r);
+        }
+        // `press_at` records what the press is FOR; `begin_ctl` is the press itself, and `armed`
+        // deliberately reads through it — so a test that omits it exercises the UN-armed path,
+        // where every hover is held by definition.
+        assert!(press_at(share_r.x + 10.0, share_r.y + 10.0), "arm on Share");
+        crate::ui::press::begin_ctl(1);
+        assert!(
+            pointer_hold(share_r.x + 12.0, share_r.y + 12.0),
+            "two pixels of jitter is still the same pill, so a real click must still commit"
+        );
+        assert!(
+            !pointer_hold(decline_r.x + 10.0, decline_r.y + 10.0),
+            "the other answer is a different control, and an armed press must not follow it"
+        );
+        // **The case the first version of this guard missed**: sliding off EVERY control. A miss
+        // leaves focus exactly where it was, so a before/after comparison of the FOCUSED stop saw
+        // no change and the press still committed the answer the pointer had left.
+        assert!(press_at(share_r.x + 10.0, share_r.y + 10.0), "re-arm on Share");
+        crate::ui::press::begin_ctl(2);
+        assert!(
+            !pointer_hold(4.0, 4.0),
+            "dead space is not the control this press was armed on"
+        );
+        // …but a KEY-origin press is bound to the FOCUS STOP rather than to a rect, so the same
+        // hover across dead space — which moves no focus — leaves a key the user is still holding
+        // alone. Same press, same coordinates, opposite answer, and that is the whole reason
+        // `PressFrom` exists (Codex review, 2026-09-04).
+        focus().to_band(0);
+        arm_key();
+        crate::ui::press::begin_ctl(3);
+        assert!(
+            pointer_hold(4.0, 4.0),
+            "dead space parks no focus, so it cannot retract a press the pointer never made"
+        );
+        assert_eq!(draft(), (false, false), "and none of this answers anything");
+        end_press();
+        close();
+    }
+
+    /// **A positional hit is refused while its layer is still travelling.** Codex review,
+    /// 2026-09-04: a key acts on the LOGICAL state and is right to — `DOCUMENT_OPEN` goes false the
+    /// instant BACK is pressed — but the rects a click is tested against are FINAL-position, so
+    /// during the reverse push the rows underneath were accepting clicks while still translated and
+    /// nearly transparent.
+    #[test]
+    fn a_pointer_hit_waits_for_its_layer_to_arrive() {
+        let _g = crate::testlock::serial();
+        open_settings(&Consent::default());
+        // The popover's own entrance is a transform too, so nothing is hittable until it lands.
+        assert!(!layers_settled(), "the modal is still appearing");
+        let f = list_frame();
+        assert!(
+            !pointer_focus(f.x + 40.0, f.y + 60.0),
+            "…and a hit taken now would act on rows that are not under the pointer yet"
+        );
+        for _ in 0..600 {
+            update(1.0 / 60.0);
+        }
+        assert!(layers_settled(), "settled once the entrance finishes");
+        let mut parked = false;
+        for i in 0..80 {
+            parked |= pointer_focus(f.x + 40.0, f.y + 10.0 + i as f32 * 12.0);
+        }
+        assert!(parked, "…and then the rows are live again");
+        close();
+    }
+
+    /// A row IS `click_row`'s, and it reports rather than committing — the delete-everything
+    /// outcome is `app.rs`'s `commit_consent` to harvest, so a local activation here would flip a
+    /// switch and drop the sweep.
+    #[test]
+    fn a_row_click_parks_the_row_and_leaves_the_commit_to_the_caller() {
+        let _g = crate::testlock::serial();
+        open_settings(&Consent::default());
+        settle();
+        let f = list_frame();
+        // Scan the column rather than guessing a row's y: the table owns its own header band and
+        // paddings, and a literal here would be a transcription of them.
+        let mut parked = std::collections::BTreeSet::new();
+        let mut a_row_y = None;
+        for i in 0..80 {
+            let y = f.y + 10.0 + i as f32 * 12.0;
+            if pointer_focus(f.x + 40.0, y) {
+                parked.insert(list().sel);
+                a_row_y.get_or_insert(y);
+            }
+        }
+        assert!(
+            parked.len() >= 2,
+            "hover must park different rows at different heights, parked {parked:?}"
+        );
+        let y = a_row_y.expect("some y in the content column is over a row");
+        assert!(click_row(f.x + 40.0, y), "a row is a click target");
+        assert_eq!(draft(), (false, false), "…and reports rather than committing");
+        assert!(!click_row(f.x + 40.0, f.y - 400.0), "dead space is not");
+        close();
     }
 
     /// BACK walks Product → Crash and then stops. **Stopping is the point**: the step behind the
@@ -1884,5 +2836,414 @@ mod tests {
         assert_eq!(stage(), Stage::Crash);
         assert_eq!(draft(), (true, false), "still recording nothing");
         close();
+    }
+
+    /// Run the delete alert's appear spring to rest before dismissing it. `is_open()` (and so the
+    /// input gate every exit path below checks) goes true the instant `open_inner` runs, so a rapid
+    /// enough press really could answer mid-ramp — this is not modelling an invariant the input
+    /// system enforces. It exists so `visible()` has real fade to lose: dismissing at `appear ==
+    /// 0.0` would still make `visible()` true immediately, because `dismiss()` sets `closing`
+    /// unconditionally — but the very next `update()` would find the spring already at rest and
+    /// clear `closing` on the spot, ending the panel in one frame with no fade actually drawn. That
+    /// passing the same assertion for the wrong reason is exactly the false confidence this test
+    /// exists to rule out.
+    fn settle_delete_alert() {
+        for _ in 0..240 {
+            delete_alert().update(1.0 / 60.0);
+        }
+    }
+
+    /// **Reported: confirming Delete Local Data has no dismissal animation.** The alert plays a
+    /// real appear animation on open; `on_ok`'s Destructive arm used to jump straight to the
+    /// module's own `close()`, which hides the alert (and the rest of the screen) INSTANTLY —
+    /// the one exit from this alert that skipped the fade every other one plays. Observed red
+    /// against the code this replaces: temporarily putting `close()` back in the Destructive arm
+    /// (in place of `close_delete_and_menu(true)`), rerunning this exact test, and watching it fail
+    /// at the `delete_alert().visible()` assertion below with "…but the panel must still be DRAWN
+    /// — a fade in flight, not an instant vanish" — a real revert-and-rerun, not a simulated one.
+    #[test]
+    fn confirming_delete_dismisses_the_alert_rather_than_closing_it_instantly() {
+        let _g = crate::testlock::serial();
+        delete_alert().open_with_body(c"Delete all local data?", DELETE_SCOPE);
+        delete_alert().set_choice(AlertChoice::Destructive);
+        settle_delete_alert();
+        assert!(on_ok(), "OK on an open delete alert must be handled here");
+        assert!(
+            !delete_alert().is_open(),
+            "input modality still ends on the press frame, same as every other popover"
+        );
+        assert!(
+            delete_alert().visible(),
+            "…but the panel must still be DRAWN — a fade in flight, not an instant vanish"
+        );
+        assert!(
+            take_delete_request(),
+            "the destructive answer must still be recorded for the caller to act on"
+        );
+        // Cancel gets the same treatment — dismiss, not close.
+        delete_alert().open_with_body(c"Delete all local data?", DELETE_SCOPE);
+        settle_delete_alert();
+        assert!(on_ok(), "OK on Cancel must also be handled here");
+        assert!(!delete_alert().is_open());
+        assert!(delete_alert().visible(), "Cancel fades too");
+        assert!(!take_delete_request(), "declining must never set the delete request");
+        // …and BACK.
+        delete_alert().open_with_body(c"Delete all local data?", DELETE_SCOPE);
+        settle_delete_alert();
+        assert!(on_back());
+        assert!(!delete_alert().is_open());
+        assert!(delete_alert().visible(), "BACK fades too");
+
+        // Drain the fade so this test leaves the shared alert at rest for whichever test runs next.
+        for _ in 0..240 {
+            delete_alert().update(1.0 / 60.0);
+        }
+        assert!(!delete_alert().visible());
+    }
+
+    // ---- Model stage M2: the extension question --------------------------------------------
+
+    /// A `Consent` shaped like a real answered account: both categories ON, both identifiers
+    /// present, `asked_version` at the frozen monolithic [`consent::POLICY_VERSION`] — and the
+    /// two ACCEPTED scopes set by the caller, so a scope below [`consent::ERRORS_SCOPE`]/
+    /// [`consent::USAGE_SCOPE`] is exactly [`consent::pending_extensions`]' definition of pending.
+    fn answered_at(errors_scope: u32, usage_scope: u32) -> Consent {
+        Consent {
+            asked_version: consent::POLICY_VERSION,
+            errors: true,
+            usage: true,
+            errors_id: Some("e".repeat(32)),
+            install_id: Some("u".repeat(32)),
+            errors_scope,
+            usage_scope,
+            ..Default::default()
+        }
+    }
+
+    /// **The extension screen's two pills must never read as turning the category off.** Owner
+    /// decision, 2026-09-10: a No there is not a withdrawal, so neither label may carry "off",
+    /// "don't" or "decline" — and the two answers change on the SAME `is_extension()` switch the
+    /// rest of the ceremony reads, never on `Stage` alone (the first-run wording still varies by
+    /// stage; the extension wording does not, on purpose — both categories are asked the identical
+    /// "keep this going" question).
+    #[test]
+    fn the_extension_pills_never_read_as_turning_the_category_off() {
+        let _g = crate::testlock::serial();
+        let saved = consent::current();
+        let prev = answered_at(4, 4);
+        consent::install(prev.clone());
+        open(&prev);
+        assert!(is_extension());
+        let (share, decline) = answer_labels();
+        let share = share.to_str().unwrap();
+        let decline = decline.to_str().unwrap();
+        for label in [share, decline] {
+            let lower = label.to_lowercase();
+            assert!(
+                !lower.contains("off") && !lower.contains("don") && !lower.contains("decline"),
+                "extension pill {label:?} reads as a withdrawal"
+            );
+        }
+        assert_eq!(share, "Keep on, with this");
+        assert_eq!(decline, "Keep as before");
+        close();
+        if let Some(c) = saved {
+            consent::install(c);
+        }
+    }
+
+    /// A fresh install is never mistaken for an extension, whatever the (irrelevant, zeroed) scope
+    /// fields say — `open`'s `is_ext` check gates on `asked_version != 0` first.
+    #[test]
+    fn a_fresh_install_is_never_treated_as_an_extension() {
+        let _g = crate::testlock::serial();
+        open(&Consent::default());
+        assert!(!is_extension());
+        assert_eq!(stage_active(), (true, true));
+        close();
+    }
+
+    /// **Both categories pending: the extension ceremony asks both stages, in the same order a
+    /// fresh run does**, and each answer is folded through [`consent::apply_extension`] alone —
+    /// accepting KEEPS the existing identifier and raises the accepted scope (not a fresh opt-in);
+    /// declining (owner decision, 2026-09-10) changes NEITHER the flag NOR the identifier NOR the
+    /// accepted scope, only recording the decline — exactly as [`consent::apply_extension`]'s own
+    /// tests pin at the transition level.
+    #[test]
+    fn a_pending_extension_on_both_categories_asks_both_stages_in_order() {
+        let _g = crate::testlock::serial();
+        let saved = consent::current();
+        let prev = answered_at(4, 4);
+        consent::install(prev.clone());
+        open(&prev);
+        assert!(is_extension());
+        assert_eq!(stage_active(), (true, true), "both categories are pending");
+        assert_eq!(stage(), Stage::Crash, "errors precedes usage, exactly like a fresh run");
+        assert_eq!(crumb(), None, "this ceremony's own root");
+        choose(true); // accept the crash/errors extension
+        assert_eq!(stage(), Stage::Product);
+        assert_eq!(crumb(), Some(CRASH_TITLE), "the second stage returns to the first");
+        choose(false); // decline the product/usage extension
+        let next = consent::current().expect("record_answer installed a decision");
+        assert!(next.errors, "the accepted extension stays on");
+        assert_eq!(next.errors_scope, consent::ERRORS_SCOPE);
+        assert_eq!(
+            next.errors_id, prev.errors_id,
+            "acceptance KEEPS the identifier — it is not a fresh opt-in"
+        );
+        assert!(next.usage, "a No to an extension is not a withdrawal — usage stays on");
+        assert_eq!(next.usage_scope, 4, "…at exactly the scope it already had");
+        assert_eq!(
+            next.usage_declined_scope,
+            consent::USAGE_SCOPE,
+            "the refusal is recorded instead"
+        );
+        assert_eq!(next.install_id, prev.install_id, "…and its identifier is untouched");
+        assert!(
+            consent::pending_extensions(&next).is_empty(),
+            "declined at the current scope — not re-asked until it grows further"
+        );
+        if let Some(c) = saved {
+            consent::install(c);
+        }
+    }
+
+    /// **Only Crash is pending: a single-stage ceremony, and Usage — never asked about — is left
+    /// exactly as it was**, whatever this person presses. That is the "the other category is not
+    /// shown" half of the spec, checked at the RECORDED decision rather than only at what draws.
+    #[test]
+    fn a_crash_only_extension_is_a_single_stage_and_leaves_usage_untouched() {
+        let _g = crate::testlock::serial();
+        let saved = consent::current();
+        let prev = answered_at(4, 6);
+        consent::install(prev.clone());
+        open(&prev);
+        assert!(is_extension());
+        assert_eq!(stage_active(), (true, false), "usage is already current");
+        assert_eq!(stage(), Stage::Crash, "this ceremony's own root");
+        assert_eq!(crumb(), None);
+        assert!(on_back(), "swallowed at the root, like every ceremony's first stage");
+        assert_eq!(stage(), Stage::Crash);
+        choose(false); // decline the only stage — no Product stage exists to walk to
+        let next = consent::current().expect("record_answer installed a decision");
+        assert!(
+            next.errors && next.errors_id == prev.errors_id,
+            "a No to an extension is not a withdrawal — errors stays on with its identifier"
+        );
+        assert_eq!(next.errors_scope, 4, "…at the scope it already had");
+        assert_eq!(
+            next.errors_declined_scope,
+            consent::ERRORS_SCOPE,
+            "the refusal is recorded instead"
+        );
+        assert!(next.usage, "usage was never part of this ceremony");
+        assert_eq!(next.usage_scope, 6, "and its accepted scope did not move");
+        assert_eq!(next.install_id, prev.install_id, "…nor did its identifier");
+        if let Some(c) = saved {
+            consent::install(c);
+        }
+    }
+
+    /// **Only Usage is pending: the ceremony starts directly on Product, with no Crash stage ever
+    /// shown** — the mirror image of the Crash-only case, and the one that would be silently wrong
+    /// if `crumb_for`/`on_back` still assumed Crash always comes first.
+    #[test]
+    fn a_usage_only_extension_starts_directly_on_product_with_no_crash_stage() {
+        let _g = crate::testlock::serial();
+        let saved = consent::current();
+        let prev = answered_at(6, 4);
+        consent::install(prev.clone());
+        open(&prev);
+        assert!(is_extension());
+        assert_eq!(stage_active(), (false, true), "errors is already current");
+        assert_eq!(
+            stage(),
+            Stage::Product,
+            "usage is the only pending category, so it is this ceremony's own root"
+        );
+        assert_eq!(crumb(), None, "no crash stage exists in this ceremony to name");
+        assert!(on_back(), "swallowed at the root");
+        assert_eq!(stage(), Stage::Product, "back does not invent a crash stage to walk to");
+        choose(true); // accept the only stage
+        let next = consent::current().expect("record_answer installed a decision");
+        assert!(next.usage);
+        assert_eq!(next.usage_scope, consent::USAGE_SCOPE);
+        assert_eq!(next.install_id, prev.install_id, "acceptance kept the existing identifier");
+        assert!(next.errors, "errors was never part of this ceremony");
+        assert_eq!(next.errors_scope, 6, "and its accepted scope did not move");
+        if let Some(c) = saved {
+            consent::install(c);
+        }
+    }
+
+    /// **Settings is never a re-ask of anything**, even right after an extension ceremony closed
+    /// without committing — `open_settings` must reset `IS_EXTENSION`/`STAGE_ACTIVE` rather than
+    /// inherit whatever a previous FirstRun ceremony left behind, or a Settings toggle taken next
+    /// would silently be folded through `apply_extension` instead of `apply`.
+    #[test]
+    fn open_settings_resets_the_extension_state_a_prior_ceremony_left_behind() {
+        let _g = crate::testlock::serial();
+        let saved = consent::current();
+        let prev = answered_at(4, 4);
+        consent::install(prev.clone());
+        open(&prev);
+        assert!(is_extension());
+        close();
+        open_settings(&prev);
+        assert!(!is_extension(), "Settings is never a re-ask of anything");
+        assert_eq!(stage_active(), (true, true));
+        close();
+        if let Some(c) = saved {
+            consent::install(c);
+        }
+    }
+
+    /// **Regression: `show_product_for_dev` on an Errors-only extension must not commit a hidden
+    /// withdrawal of crash reports.** Before the fix, jumping straight to `Stage::Product` left
+    /// `STAGE_ACTIVE` at `(true, false)` from the open Errors-only ceremony; pressing Share there
+    /// then folded through `apply_extension(Errors, false)` (because `active.0` was still true and
+    /// `draft().0` was still the initial `false`), turning crash reports off and destroying
+    /// `errors_id` — an answer to a question the trigger skipped past, not the Product answer the
+    /// caller actually gave. The fix makes the trigger a no-op on such a ceremony instead of
+    /// manufacturing an answer for a stage that was never asked about.
+    #[test]
+    fn show_product_for_dev_on_an_errors_only_extension_does_not_withdraw_crash_reports() {
+        let _g = crate::testlock::serial();
+        let saved = consent::current();
+        // errors_scope 4 (< ERRORS_SCOPE) is pending; usage_scope at USAGE_SCOPE is not — an
+        // Errors-only extension, so `open` sets `STAGE_ACTIVE = (true, false)`.
+        let prev = answered_at(4, consent::USAGE_SCOPE);
+        consent::install(prev.clone());
+        open(&prev);
+        assert_eq!(stage_active(), (true, false), "this is an errors-only extension");
+
+        show_product_for_dev();
+        assert_eq!(stage(), Stage::Crash, "no Product stage exists here — the trigger must decline");
+        assert_eq!(stage_active(), (true, false), "unchanged by the no-op");
+
+        // The real (Crash) answer still goes through cleanly and touches only errors.
+        choose(true);
+        let next = consent::current().expect("record_answer installed a decision");
+        assert!(next.errors);
+        assert_eq!(next.errors_id.as_deref(), prev.errors_id.as_deref());
+        assert!(next.usage, "usage was already accepted and untouched by this ceremony");
+        if let Some(c) = saved {
+            consent::install(c);
+        }
+    }
+
+    /// The extension note shares the reask note's small character budget — nothing reachable from
+    /// this module may measure text (SDL2_ttf is not linked into the host test binary), so this is
+    /// the same guard `the_four_to_five_reask_note_fits_a_small_character_budget` keeps below, for
+    /// the note this route actually shows a person once a category has grown.
+    ///
+    /// **The budget was 200 and is now 165.** A device capture of the errors-note-at-scope-4 case
+    /// (the largest population — every v0.6.0-shipped install) showed the note wrapping to FOUR
+    /// lines against the note block's `max_lines(3)` at the old 196-character text, i.e. this test
+    /// passing was not proof the note actually fit. `SCOPE_CHANGES`' rows 5 and 6 were shortened to
+    /// bring the worst case (this one) to 153 characters; 165 stays a real ceiling rather than 200,
+    /// which the same measurement showed had roughly 50 characters of slack nobody was using. This
+    /// is still not a pixel-exact proof — that needs a `ui-sim` capture of the Crash stage with a
+    /// scope-4 note, which a text change here should be re-verified against.
+    #[test]
+    fn the_extension_note_fits_the_same_small_character_budget_as_a_reask_note() {
+        let c = Consent {
+            asked_version: consent::POLICY_VERSION,
+            errors: true,
+            errors_scope: 4,
+            errors_id: Some("e".repeat(32)),
+            usage: false,
+            usage_scope: 0,
+            install_id: None,
+            ..Default::default()
+        };
+        let note =
+            consent::extension_note(&c, Category::Errors).expect("errors is pending against scope 4");
+        assert!(
+            note.chars().count() <= 165,
+            "the extension note is {} characters, over the 165 budget the route's narrative \
+             note line is known to fit in three lines",
+            note.chars().count()
+        );
+    }
+
+    // ---- reask_line ----------------------------------------------------------------------------
+
+    /// Never asked before: this is a first run, not a re-ask, on either stage.
+    #[test]
+    fn reask_line_is_none_for_a_fresh_install() {
+        assert_eq!(reask_line(0, Stage::Crash), None);
+        assert_eq!(reask_line(0, Stage::Product), None);
+    }
+
+    /// Already answered against the current policy: nothing to explain, on either stage.
+    #[test]
+    fn reask_line_is_none_when_already_current() {
+        assert_eq!(reask_line(consent::POLICY_VERSION, Stage::Crash), None);
+        assert_eq!(reask_line(consent::POLICY_VERSION, Stage::Product), None);
+    }
+
+    /// **Shown iff `reask_note` has something to say AND the stage is Crash** — the pure predicate
+    /// this function exists to pin, since the pixel draw that reads it cannot run in a host test.
+    #[test]
+    fn reask_line_shows_only_on_the_crash_stage() {
+        assert_eq!(
+            reask_line(4, Stage::Crash),
+            consent::reask_note(4),
+            "the Crash stage shows exactly what the pure note function returns"
+        );
+        assert_eq!(
+            reask_line(4, Stage::Product),
+            None,
+            "Product's question has not changed shape — nothing to explain there"
+        );
+    }
+
+    /// **Settings-mode consent never shows the re-ask note.** `draw_question`'s Settings arm
+    /// cannot be driven from a host test — it reaches SDL2_ttf — so this pins the STRUCTURAL fact
+    /// that makes the runtime behaviour true instead: the only two call sites of `reask_line`
+    /// (via `draw_stage`) live inside the `mode() != Mode::Settings` branch, and Settings' own
+    /// narrative call is the plain `draw_narrative` (no note parameter at all), never
+    /// `draw_narrative_with_note`. A future edit that let Settings pass a note would have to
+    /// touch one of those two calls, which is exactly what this greps for.
+    #[test]
+    fn settings_mode_consent_never_draws_a_reask_note() {
+        let src = include_str!("consent.rs");
+        let settings_arm = src
+            .find("if mode() == Mode::Settings {")
+            .expect("the Settings/FirstRun split in draw_question moved");
+        let else_arm = src[settings_arm..]
+            .find("} else {")
+            .map(|i| i + settings_arm)
+            .expect("the Settings/FirstRun split in draw_question moved");
+        let firstrun_end = src[else_arm..]
+            .find("\n\n    if t > 0.01 {")
+            .map(|i| i + else_arm)
+            .expect("draw_question's end moved");
+        let settings_block = &src[settings_arm..else_arm];
+        let firstrun_block = &src[else_arm..firstrun_end];
+        assert!(
+            !settings_block.contains("draw_stage") && !settings_block.contains("reask_line"),
+            "Settings must never reach draw_stage/reask_line"
+        );
+        assert!(
+            firstrun_block.contains("draw_stage(route_layer, layout, Stage::Crash)"),
+            "the Crash stage — the only one that can carry a note — must still be reachable \
+             from first run"
+        );
+    }
+
+    /// The 4→5 re-ask note fits a small character budget, because nothing reachable from this
+    /// module may measure text (SDL2_ttf is not linked into the host test binary) — a pixel-exact
+    /// check is the simulator capture's job, this one just keeps the sentence from growing
+    /// unnoticed into several lines.
+    #[test]
+    fn the_four_to_five_reask_note_fits_a_small_character_budget() {
+        let note = reask_line(4, Stage::Crash).expect("version 4 is a re-ask");
+        assert!(
+            note.chars().count() <= 165,
+            "the 4->5 re-ask note is {} characters, over the 165 budget",
+            note.chars().count()
+        );
     }
 }

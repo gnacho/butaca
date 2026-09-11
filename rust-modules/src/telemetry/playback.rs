@@ -75,6 +75,10 @@ fn breadcrumb(step: TraceStep) -> Value {
                 },
             )
         }
+        TraceEvent::LoadGateOpened { elapsed } => {
+            put(&mut data, "load_elapsed", elapsed.code());
+            ("load gate opened", "info")
+        }
         TraceEvent::Failed { kind } => {
             put(&mut data, "kind", kind.code());
             ("playback failed", "error")
@@ -89,11 +93,18 @@ fn breadcrumb(step: TraceStep) -> Value {
     })
 }
 
-/// Pure body builder. `dist` is passed in so the consent preview can exercise this exact
-/// serialiser without reading `/proc/self/exe` or minting an id before consent.
+/// Pure body builder. `dist` and `errors_id` are passed in so the consent preview can exercise this
+/// exact serialiser without reading `/proc/self/exe` or minting an id before consent. `errors_id`
+/// is the crash-report identifier, attached as `user.id` through the one shared
+/// [`super::sentry::attach_user`]; the SDK scope does not reach a body this module builds by hand
+/// — which is also why [`super::sentry::attach_hardware_context`] must be called here explicitly:
+/// unlike a native crash, this event never touches the scope `sdk::start` put the `webos`/
+/// `hardware` contexts on, so without that call it would carry no compatibility context at all
+/// (see that function's doc for the PLX-NATIVE-F gap this closed).
 pub(crate) fn event_body(
     event_id: &str,
     dist: &str,
+    errors_id: Option<&str>,
     kind: FailureKind,
     context: PlaybackErrorContext,
     trace: &[TraceStep],
@@ -142,27 +153,37 @@ pub(crate) fn event_body(
     if !dist.is_empty() {
         body["dist"] = Value::String(dist.to_string());
     }
+    super::sentry::attach_user(&mut body, errors_id);
+    super::sentry::attach_hardware_context(&mut body);
     serde_json::to_vec(&body).unwrap_or_default()
 }
 
 /// Queue one handled event and ask the existing background sender to flush it. No network work is
 /// performed on the render thread.
 pub(crate) fn report_error(kind: FailureKind, context: PlaybackErrorContext, trace: &[TraceStep]) {
-    if !super::consent::allows_errors() || !super::sender::has_sentry() {
+    // Playback error reports are Errors scope 4 — see `consent::allows_errors_at`'s doc.
+    if !super::consent::allows_errors_at(4) || !super::sender::has_sentry() {
         return;
     }
     let Some(event_id) = crate::diag::random_hex_id() else {
         crate::log("telemetry: no /dev/urandom — handled playback error was not queued");
         return;
     };
-    let body = event_body(&event_id, super::sentry::build_id(), kind, context, trace);
+    let body = event_body(
+        &event_id,
+        super::sentry::build_id(),
+        super::consent::errors_id().as_deref(),
+        kind,
+        context,
+        trace,
+    );
     let record = super::queue::Record {
         category: super::queue::Category::Errors,
         dest: super::queue::Dest::Sentry,
         event_id,
         body,
     };
-    match super::spool::append_if(&record, super::consent::allows_errors) {
+    match super::spool::append_if(&record, || super::consent::allows_errors_at(4)) {
         Some(true) => super::flush_soon(),
         Some(false) => {
             crate::log("telemetry: handled playback error did not fit the durable spool")
@@ -237,6 +258,7 @@ pub(crate) fn preview_event() -> Vec<u8> {
     event_body(
         "<random per-error event id>",
         "<running ELF build id>",
+        Some(super::native::PREVIEW_USER_ID),
         FailureKind::PlaybackInterrupted,
         PlaybackErrorContext {
             delivery: DeliveryClass::Hls,
@@ -466,6 +488,7 @@ mod tests {
         let v: Value = serde_json::from_slice(&event_body(
             &"a".repeat(32),
             "0123456789abcdef",
+            Some(&"e".repeat(32)),
             FailureKind::OriginalRollback,
             context(),
             &trace,
@@ -484,6 +507,33 @@ mod tests {
         assert_eq!(crumbs[1]["data"]["declared_rate"], "3-6m");
         assert_eq!(crumbs[2]["data"]["phase"], "retire_hls");
         assert_eq!(crumbs[2]["data"]["outcome"], "deadline");
+    }
+
+    /// Regression for the PLX-NATIVE-F gap: a handled playback failure must carry the same
+    /// `hardware`/`webos` sandbox contexts a native crash carries (issue #74's `rtkmem`/`install`
+    /// among them), not just its own `playback` context.
+    #[test]
+    fn handled_playback_error_carries_the_same_hardware_context_as_a_crash() {
+        let v: Value = serde_json::from_slice(&event_body(
+            &"a".repeat(32),
+            "0123456789abcdef",
+            Some(&"e".repeat(32)),
+            FailureKind::PlaybackInterrupted,
+            context(),
+            &[],
+        ))
+        .expect("handled event JSON");
+        assert!(
+            v["contexts"]["hardware"].is_object(),
+            "no hardware context: {v}"
+        );
+        assert!(v["contexts"]["hardware"]["rtkmem"].is_string());
+        assert!(v["contexts"]["hardware"]["install"].is_string());
+        assert!(v["contexts"]["hardware"]["soc"].is_string());
+        assert_eq!(v["contexts"]["webos"]["type"], "webos");
+        assert!(v["contexts"]["webos"]["release"].is_string());
+        // The playback-specific context must still be there beside the two new ones.
+        assert!(v["contexts"]["playback"].is_object());
     }
 
     #[test]
@@ -513,7 +563,9 @@ mod tests {
             "host",
             "address",
             "token",
-            "user",
+            "email",
+            "username",
+            "ip_address",
             "request",
         ] {
             assert!(
@@ -521,6 +573,26 @@ mod tests {
                 "forbidden key {forbidden}: {all:?}"
             );
         }
+        // The one identity slot is the crash-report id, as `user.id` and nothing beside it.
+        let user = v["user"].as_object().expect("user object");
+        assert_eq!(user.keys().collect::<Vec<_>>(), vec!["id"]);
+        assert_eq!(v["user"]["id"], super::super::native::PREVIEW_USER_ID);
+    }
+
+    /// With no crash-report id there is no `user` key at all — never an empty object, which
+    /// Relay would still count as a user.
+    #[test]
+    fn no_errors_id_means_no_user_key() {
+        let v: Value = serde_json::from_slice(&event_body(
+            &"a".repeat(32),
+            "0123456789abcdef",
+            None,
+            FailureKind::OriginalRollback,
+            context(),
+            &[],
+        ))
+        .expect("handled event JSON");
+        assert!(v.get("user").is_none());
     }
 
     #[test]
@@ -576,6 +648,7 @@ mod tests {
         let v: Value = serde_json::from_slice(&event_body(
             &"a".repeat(32),
             "0123456789abcdef",
+            Some(&"e".repeat(32)),
             FailureKind::OriginalRollback,
             context(),
             &trace,
@@ -600,10 +673,19 @@ mod tests {
                 "sdk",
                 "tags",
                 "transaction",
+                "user",
             ]
         );
         assert_eq!(keys(&v["sdk"]), ["name", "version"]);
-        assert_eq!(keys(&v["contexts"]), ["playback"]);
+        assert_eq!(keys(&v["contexts"]), ["hardware", "playback", "webos"]);
+        assert_eq!(
+            keys(&v["contexts"]["webos"]),
+            ["api", "codename", "name", "release", "type"]
+        );
+        assert_eq!(
+            keys(&v["contexts"]["hardware"]),
+            ["install", "model", "revision", "rtkmem", "soc", "type"]
+        );
         assert_eq!(
             keys(&v["contexts"]["playback"]),
             [

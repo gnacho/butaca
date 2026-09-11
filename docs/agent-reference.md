@@ -197,17 +197,22 @@ the pinned Sentry Native cross-build), and `sshpass` (Homebrew, for deploy/run).
   FIFO and the capture listener — see `rust-modules/src/dev.rs`). **It also decides WHICH VERSION
   THE BINARY SAYS IT IS**: the Makefile exports `PLX_RELEASE`, and `rust-modules/build.rs` publishes
   `PLX_VERSION` as the `Cargo.toml` version exactly for a release build and as the **next MINOR plus
-  `-dev`** for every other one — `0.5.0` published, `0.6.0-dev` in the tree. The minor rather than the
+  `-dev`** for every other one — `0.6.0` published, `0.7.0-dev` in the tree. The minor rather than the
   patch because development is TRUNK-BASED here: features land on main, so the next release cut from
   it is a minor (or a major, which no build script can predict); a patch is cut from an existing
-  minor's own line, where trunk's number is not the question. It also makes the semver ordering
-  mean something — `0.6.0-dev` precedes `0.6.0`. That is the string every
+  minor's own line, where trunk's number is not the question — this remains exactly true for a
+  checkout of `main` itself, with no marker file. **A checkout of a maintenance line has that
+  input now**, and `build.rs` names the next PATCH there instead: a tracked `RELEASE_LINE` marker
+  at the repo root (`X.Y`, e.g. `0.6`) says "this checkout IS that line, not trunk", so `0.6.0` in
+  `Cargo.toml` plus a present `RELEASE_LINE` reports `0.6.1-dev` rather than `0.7.0-dev`. The file's
+  absence is unconditionally the trunk behaviour above — nothing about a `main` checkout changes.
+  It also makes the semver ordering mean something — `0.7.0-dev` precedes `0.7.0`. That is the string every
   surface reports (X-Plex-Version, the Sentry release, PostHog's `app_version`, the lab snapshot, the
   photographed diagnostics panel); before it, a release commit left the whole tree claiming to BE the
   release it had just cut, and nothing downstream could separate a working tree from the shipped
   artifact. The suffix never reaches `pkg/appinfo.json` or the control file — LG takes three integers
-  and nothing else — so a developer flavour's package is labelled `0.5.0` while its binary says
-  `0.6.0-dev`, deliberately; `ci/check-package.py` grades both directions on the packaged bytes. It
+  and nothing else — so a developer flavour's package is labelled `0.6.0` while its binary says
+  `0.7.0-dev`, deliberately; `ci/check-package.py` grades both directions on the packaged bytes. It
   must be on
   EVERY invocation that produces or ships the binary (`make RELEASE=1 deploy`, **not**
   `make RELEASE=1 && make deploy`, which rebuilds as dev and ships that). `deploy`/`ipk` echo
@@ -724,8 +729,16 @@ which the linking section explains is load-bearing rather than tidy.
   no SDK hooks — both reproduced a recursive SIGSEGV through `getenv`).
   The SDK has **no HTTP transport and writes no minidump**: it launches the
   same `plxnative` binary in spool-only mode, which moves the bounded envelope into the install's
-  runtime root. A healthy launch rejects user/request scope, strips path prefixes and queues the
-  event through the existing consent-aware sender. `-fno-omit-frame-pointer` / Rust
+  runtime root. A healthy launch strips path prefixes, rejects request scope and every `user`
+  field but `id` — which it keeps ONLY when it has the 32-hex shape of the app's own crash-report
+  identifier, the `errors_id` that `sdk::start` puts on the SDK scope as `user.id` right after
+  init so the daemon's base event carries it — and queues the event through the existing
+  consent-aware sender. That id is what makes Sentry's "users affected" a count of Crash report
+  IDs — one per uninterrupted opt-in — rather than of events; it is minted on crash-report opt-in, destroyed on withdrawal
+  and on sign-out (the decision belongs to the account that gave it, so the next account is asked
+  afresh),
+  and never the PostHog analytics id (`docs/../PRIVACY.md`, and the two-identifier note in
+  `telemetry/consent.rs`). `-fno-omit-frame-pointer` / Rust
   `force-frame-pointers=yes` are therefore crash-reporting ABI, not optional debug flags.
 
   The patched ARM handler waits up to 30 seconds for that walk. The upstream 10-second budget was
@@ -1299,18 +1312,52 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   `/tmp/plxnative-autoplay` (auto-press OK for headless capture), `/tmp/plxnative-autoseek` (empty =
   one seek to 140s; else a seek script: optional `gap=<ms>` + comma steps, absolute `120` or
   tap-relative `+10`/`-10` — rapid-burst seek testing), `/tmp/plxnative-ptype` (ACB playerType
-  bisect knob), `/tmp/plxnative-marker[=intro|credits]` (once playing, seek to 5s before that
+  bisect knob), `/tmp/plxnative-holdload[=ms]` (sleep `ms` — default 30000 for a bare/empty
+  trigger — on `threads::load_thread` right after the real `sf_load` call returns and BEFORE the
+  Load-returned flag publishes, making issue #74 D.1's budget observable on demand: the pump's
+  `deferring` line, then, past `NATIVE_LOAD_BUDGET`, the failure read-out; NOT `DIAG`, since it
+  changes playback behaviour), `/tmp/plxnative-keymanager=<mode>` (select a dev-only, in-process
+  fake `com.webos.service.keymanager3` — `perprocess`/`healthy`/`stall`/`refuse=<code>`/`nocode`/
+  `badoutput`/`absent`, `rust-modules/src/keymanager.rs`'s `fake` module — so issue #76's failure
+  (seals and round-trips in-process, never reopens on the NEXT launch) is reproducible on `make
+  sim` and on a debug install pointed at a television that has no keymanager3 at all; logs
+  `keymanager: FAKE service armed mode=<mode>` at boot; NOT `DIAG`, for `holdload`'s reason — it
+  swaps which backend `seal`/`open` talk to), **`/tmp/plxnative-ls2identity[=probe]`** (issue #76's
+  other half: at BOOT — before `session::load`'s first keymanager registration and before
+  `player::acb_init` takes the app-id bus name on a webOS 4 set — try every LS2 registration shape
+  once and log the hub's own numeric code and `LSError` text for each, `ls2probe:` lines. It is the
+  same `webos::ls2::probe` the `gohome=probe` leg runs, at the only moment whose answer decides
+  anything: `keymanager` asks for `LSRegisterApplicationService(app_id, app_id)` where nothing else
+  in the process holds that name, then for the plain named `LSRegister(app_id)`, and falls back to
+  the anonymous `LSRegister(NULL)` otherwise — one
+  `keymanager: identity=<app_id|named|anonymous> (<reason>)` line per launch. **The plain named
+  shape is there because of a measurement**: on the dev set at BOOT, before ACB held anything, the
+  application-service form was refused `-1027` for the app id AND for `NULL`, while
+  `LSRegister(NULL)` registered and completed a call — a verdict on that API rather than on the
+  name, leaving the shape the role file's `allowedNames` does list never asked
+  (`docs/measurements/ls2-identity-tv-2026-09-10.md`). **Measured 2026-09-10, a second run the same
+  evening (§10.2, run 4): the hub GRANTS it, at boot, on that same set** — but no television has
+  SEALED anything under it, because the ACB gate covers BOTH named shapes, since both want the bus name
+  `AcbAPI_initialize` takes. The identity is then PINNED
+  to the file it seals — the envelope, the probe and the proven marker each record it, an open asks
+  for the identity the envelope names, and an identity this launch cannot get is the TRANSIENT
+  `identity_unavailable` stage that keeps the file rather than the refusal that downgrades the
+  install. NOT `DIAG` — it registers on
+  the bus), `/tmp/plxnative-marker[=intro|credits]` (once playing, seek to 5s before that
   server marker — the only practical way to reach the Skip Intro / Skip Credits pill, and, via a
   `final` credits marker, the whole finish → Up Next → auto-advance chain, without playing 50
   minutes of episode first),
-  `/tmp/plxnative-failtest[=verdict|audio|novideo|stream|connection|tv|none]` (force one
+  `/tmp/plxnative-failtest[=verdict|audio|novideo|stream|connection|tv|jail|none]` (force one
   variant of the full-screen **failure read-out** — the one screen that cannot be reached on
   purpose, since it needs a server that refuses, and the one most meant to be LOOKED at: it is
   shaped to survive a phone photograph in an issue thread. Live-read, so arming it mid-playback
   swaps the frame at once; `stream`, `connection`, and `tv` exercise the runtime media-source,
-  interrupted-transfer, and native-pipeline reasons; pair `audio` with
-  `/tmp/plxnative-nopass` for the PLEX PASS capsule line. It feeds the real
-  `player::error_shape`, and forces the STATE only at
+  interrupted-transfer, and native-pipeline reasons; `jail` forces the missing-`/dev/rtkmem`
+  read-out regardless of the real device probe, since most dev machines are not an affected SoC;
+  pair `audio` with
+  `/tmp/plxnative-nopass` for the PLEX PASS capsule line. Every arm but `jail` feeds the real
+  `player::error_shape` (`jail` is the one `ErrorShape` `error_shape` never produces, so it calls
+  the sibling `jail_error_shape` directly instead), and forces the STATE only at
   `player_hud::busy` — never at `player::state()`, which the pump acts on),
   `/tmp/plxnative-testpat=<spec>` — **replace the page's picture with a SYNTHETIC ground**
   (`flat:<L*>`, `ramp`, `edge`, `checker:<px>`, `lines:<px>`, `hbars:<px>`, `hue[:L*]`, `rainbow[:L*]`,
@@ -1400,11 +1447,17 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   card → **OK** opens the detail page → Play starts playback; OK toggles play/pause, LEFT/RIGHT
   scrub-seek, **BACK/Stop** returns. The strip's **last pill is Search** (a mark, not a word) — a
   peer of Home and the Library, not a page stacked over them, so BACK from it returns to Home. BACK
-  at **Home's own root** is the end of that chain and raises the app's ONE decision alert
-  (`ui/exit_alert.rs`) — *Cancel* focused, *Exit* in the destructive control face — rather than
-  quitting on the press, which is what it did until 2026-08-21. Nothing automated depended on the
-  old behaviour (`make kill`, `tests/run.py` and `tools/tv-session.sh` all close through SAM's
-  `closeByAppId`), and `/tmp/plxnative-noexitconfirm` restores it for a script that wants it. Text
+  at **Home's own root** is the end of that chain and hands the screen back to the TELEVISION
+  (`app.rs::back_at_root` → `webos::go_home`), with the app still running — which is what the
+  platform itself does at an app's entry page on this firmware, and what LG's submission rules
+  require. **The same rule covers three roots** — Home, the who's-watching picker and the QR
+  sign-in — which is what issues #16–#18 were: the latter two used to DROP a root BACK, because
+  both handed it to `auth::cancel` and ignored its `false`. **The first-run consent question is a
+  fourth and is NOT covered yet**; `app.rs`'s consent arm says why, and it is a `ui/consent.rs`
+  change rather than a BACK-arm one. BACK is no longer a quit anywhere — the remote's EXIT key
+  still is, and `closeByAppId` is still how `make kill`, `tests/run.py` and `tools/tv-session.sh`
+  close the app — so the `/tmp/plxnative-noexitconfirm` bypass went with the "Exit PlxNative?"
+  alert it existed for (both retired 2026-09-03). Text
   entry is the **television's own keyboard**, raised by plain `SDL_StartTextInput` — the backend is
   in LG's Wayland driver, not the webOS extension API, which is why `SDL_webOS.h` looks like it has
   no keyboard. The field, shelves, test seams and every trap in that path are documented in
