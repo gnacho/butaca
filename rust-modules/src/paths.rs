@@ -700,7 +700,7 @@ mod tests {
             None
         );
         assert_eq!(
-            "com.beb.plxnative.debug"
+            format!("{}.debug", super::STABLE_APP_ID)
                 .strip_prefix(super::STABLE_APP_ID)
                 .and_then(|r| r.strip_prefix('.')),
             Some("debug")

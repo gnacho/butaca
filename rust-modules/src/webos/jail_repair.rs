@@ -440,12 +440,16 @@ mod tests {
 
     #[test]
     fn command_is_fixed_and_contains_the_only_validated_install_arguments() {
-        let id = "com.beb.plxnative.debug-1";
-        let c = command(&dir(id), id).unwrap();
-        assert!(c.contains("/usr/bin/jailer -t native -p '/media/developer/apps/usr/palm/applications/com.beb.plxnative.debug-1' -i 'com.beb.plxnative.debug-1' /bin/true"));
+        // The id this build ships, derived from the same constant `valid_id` checks against: a
+        // foreign literal fails that gate and the command comes back `Unsupported`.
+        let id = format!("{}.debug-1", crate::paths::STABLE_APP_ID);
+        let c = command(&dir(&id), &id).unwrap();
+        assert!(c.contains(&format!(
+            "/usr/bin/jailer -t native -p '/media/developer/apps/usr/palm/applications/{id}' -i '{id}' /bin/true"
+        )));
         assert!(c.contains("id -u"));
         assert!(c.contains("[ ! -c /dev/rtkmem ]"));
-        assert!(c.contains("/var/palm/jail/com.beb.plxnative.debug-1/dev/rtkmem"));
+        assert!(c.contains(&format!("/var/palm/jail/{id}/dev/rtkmem")));
     }
 
     #[test]
