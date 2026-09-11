@@ -1,6 +1,6 @@
 {
   "id": "com.butaca",
-  "version": "0.6.5",
+  "version": "0.7.0",
   "vendor": "gnacho",
   "type": "native",
   "main": "plxnative",
