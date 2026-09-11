@@ -1,12 +1,12 @@
-Package: com.beb.plxnative
+Package: com.butaca
 Version: 0.6.5
 Section: misc
 Priority: optional
 Architecture: arm
 Installed-Size: 10117
 Maintainer: Gleb Linnik <support@plxnative.com>
-Homepage: https://github.com/GLinnik21/plx-native
+Homepage: https://github.com/gnacho/butaca
 License: MIT
-Description: PlxNative — unofficial native Plex client for LG webOS (not affiliated with Plex)
+Description: Butaca - unofficial native Jellyfin client for LG webOS (not affiliated with Jellyfin)
 webOS-Package-Format-Version: 2
 webOS-Packager-Version: plxnative-mkipk/1
