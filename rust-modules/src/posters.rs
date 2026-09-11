@@ -403,6 +403,19 @@ fn warn_key_refused(len: usize, cap: usize) {
 const LOGO_REQ_W: c_int = 600;
 const LOGO_REQ_H: c_int = 240;
 
+/// The clearLogo SOURCE path on `srv`'s backend, built from the rating key alone because that is
+/// the only address [`logo_key`]'s callers hold. Plex names it under `/library/metadata/{rk}` with
+/// the `clearLogo` transcode verb; Jellyfin keeps the same picture as the item's own `Logo` image
+/// type. Getting this wrong is silent — the fetch just 404s and the hero falls back to title text.
+fn logo_source_path(srv: ServerId, rk: &str) -> String {
+    #[cfg(feature = "jellyfin")]
+    if srv == crate::jellyfin::SERVER_ID {
+        return format!("/Items/{rk}/Images/Logo");
+    }
+    let _ = srv;
+    format!("/library/metadata/{rk}/clearLogo")
+}
+
 /// The ONE clearLogo store key ([`LOGO_REQ_W`]×[`LOGO_REQ_H`] transparent PNG). Its own fn because
 /// the PREFETCH must warm the exact key the draw will later resolve — `(server, path, w, h, png)`
 /// IS the store key, so a warm at a different size (or against a different server) is a different
@@ -411,7 +424,7 @@ fn logo_key(srv: ServerId, rk: &str) -> Option<[u8; 352]> {
     if rk.is_empty() {
         return None;
     }
-    let lpath = std::ffi::CString::new(format!("/library/metadata/{rk}/clearLogo")).ok()?;
+    let lpath = std::ffi::CString::new(logo_source_path(srv, rk)).ok()?;
     let mut key = [0u8; 352];
     poster_key(
         srv,
@@ -1095,6 +1108,23 @@ mod tests {
         assert!(
             logo.contains("&format=png&"),
             "the transparent flavour lost its format: {logo}"
+        );
+    }
+
+    /// The clearLogo SOURCE path is backend-specific, and a wrong one fails silently: the fetch
+    /// 404s and the hero draws title text instead of the logotype. Plex keeps the
+    /// `/library/metadata/{rk}/clearLogo` shape this store has always keyed on; Jellyfin answers
+    /// the same picture as the item's own `Logo` image type.
+    #[test]
+    fn the_logo_source_path_follows_the_backend() {
+        assert_eq!(
+            logo_source_path(ServerId::from_raw(1), "42"),
+            "/library/metadata/42/clearLogo"
+        );
+        #[cfg(feature = "jellyfin")]
+        assert_eq!(
+            logo_source_path(crate::jellyfin::SERVER_ID, "abc"),
+            "/Items/abc/Images/Logo"
         );
     }
 

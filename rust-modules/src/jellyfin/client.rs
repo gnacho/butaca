@@ -515,8 +515,14 @@ impl JfClient {
             crate::log("jellyfin: image_path called with png=1 (clearLogo path); serving JPEG box");
         }
         let token = self.token.read().unwrap().as_ref()?.token.clone();
+        // `src_path` is sometimes bare (`/Items/{id}/Images/Backdrop/0`, built by
+        // [`super::convert`]) and sometimes already query-bearing (`…/Primary?tag=…`), so the
+        // sizing/auth query hangs off whichever separator is right. Appending `&` to a path with
+        // no `?` yields `…/Backdrop/0&fillWidth=…`, which the server rejects with 400 and which
+        // left every backdrop — hero, detail page, player ground — blank.
+        let sep = if src_path.contains('?') { '&' } else { '?' };
         Some(format!(
-            "{src_path}&fillWidth={w}&fillHeight={h}&quality=90&api_key={token}"
+            "{src_path}{sep}fillWidth={w}&fillHeight={h}&quality=90&api_key={token}"
         ))
     }
 
@@ -998,6 +1004,25 @@ mod tests {
         assert_eq!(
             u,
             format!("http://127.0.0.1:{}/Videos/abc/stream?static=true&MediaSourceId=ms-9&api_key=tok-1", server.port)
+        );
+        server.finish();
+    }
+
+    #[test]
+    fn a_queryless_image_path_starts_its_own_query() {
+        let server = MockServer::start(vec![(200, AUTH_OK)]);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        client.authenticate_by_name("demo", "").unwrap();
+        // The backdrop path convert.rs builds carries no query of its own, so the sizing/auth
+        // query must OPEN with `?` — hanging it off `&` yields `…/Backdrop/0&fillWidth=…`, which
+        // the server rejects with 400 and which left every backdrop (hero, detail, player ground)
+        // blank.
+        let p = client
+            .image_path("/Items/abc/Images/Backdrop/0", 1280, 720, false)
+            .unwrap();
+        assert_eq!(
+            p,
+            "/Items/abc/Images/Backdrop/0?fillWidth=1280&fillHeight=720&quality=90&api_key=tok-1"
         );
         server.finish();
     }

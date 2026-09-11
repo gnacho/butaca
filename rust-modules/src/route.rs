@@ -6429,6 +6429,18 @@ fn build_stream_jellyfin(
                     .unwrap_or(aidx),
             );
         }
+        // The read-back half of the subtitle contract, Jellyfin flavour: the file's default
+        // subtitle comes up on a direct play exactly as it does on Plex (which reads the server's
+        // per-part selection instead — this backend has none). `apply_plan` installs it on the
+        // main thread; the client renderer takes the embedded-subtitle ordinal.
+        if let Some((ssid, ord)) = plan
+            .playing
+            .as_ref()
+            .and_then(|p| pick_dp_subtitle_default(&p.subs))
+        {
+            plan.sub_sid = ssid;
+            plan.sub_render_ordinal = Some(ord);
+        }
         // `part` carries the MediaSource id — but `convert` falls back to the ITEM id when a row
         // has no MediaSources, and passing that back as MediaSourceId would 404 the stream.
         let msid = if part == rk { "" } else { part };
@@ -6611,6 +6623,23 @@ fn pick_dp_subtitle(subs: &[crate::metadata::Stream]) -> Option<(i64, i32)> {
     // timeline report key on, so rendering a stream we cannot NAME would show a subtitle while
     // the menu says Off. (`ord < 0` is unreachable through the `!external` filter above — it is
     // kept so a change on either side degrades to "off" instead of feeding the renderer a -1.)
+    if ord < 0 || subs[i].id <= 0 {
+        return None;
+    }
+    Some((subs[i].id, ord))
+}
+
+/// The Jellyfin twin of [`pick_dp_subtitle`], and it differs for a reason the payload explains:
+/// this backend's item carries no per-part selection (`Stream.selected` is always false — see
+/// `convert_stream`), so the file's DEFAULT subtitle is what a direct play honours. That is also
+/// what the server computes as `DefaultSubtitleStreamIndex` absent a user preference (probed on
+/// the live server: it agreed with the file default). An external sidecar is skipped for the same
+/// reason as on Plex: it is not in the container, so the client renderer has nothing to show and
+/// only a burn could — which this backend deliberately does not do (parity with the Plex arm).
+#[cfg(feature = "jellyfin")]
+fn pick_dp_subtitle_default(subs: &[crate::metadata::Stream]) -> Option<(i64, i32)> {
+    let i = subs.iter().position(|s| s.default && !s.external)?;
+    let ord = crate::metadata::sub_render_ordinal(subs, i);
     if ord < 0 || subs[i].id <= 0 {
         return None;
     }
@@ -7560,6 +7589,15 @@ pub(crate) fn retranscode_for(expected: &WorkerTicket, offset_secs: i64) -> Opti
     if !is_worker_ticket_current(expected) {
         return None;
     }
+    // Jellyfin arm — a re-transcode that selects a track is a NEW PlaybackInfo POST with that
+    // stream named in the body (the server cuts the playlist with it selected), exactly the shape
+    // `jellyfin_transcode_seek` uses for a seek. The Plex machinery below resolves its client
+    // from a registry the Jellyfin slot is not in, so without this arm an audio switch to a
+    // non-direct-playable track is silently rejected on this backend.
+    #[cfg(feature = "jellyfin")]
+    if cur_sid() == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+        return jellyfin_retranscode_as(expected, offset_secs);
+    }
     if matches!(
         cur_delivery(),
         crate::plex::TranscodeDelivery::FixedHls { .. }
@@ -7570,6 +7608,101 @@ pub(crate) fn retranscode_for(expected: &WorkerTicket, offset_secs: i64) -> Opti
         }
     }
     retranscode_as(expected, offset_secs, false)
+}
+
+/// The Jellyfin arm of a mid-playback re-transcode: a fresh `POST /Items/{id}/PlaybackInfo` whose
+/// body names the chosen track (`MediaSourceId` + `AudioStreamIndex`, see
+/// [`crate::jellyfin::profile::playback_info_body_for`]) answers a `TranscodingUrl` that replaces
+/// the route. This is the server half of an audio switch; it also covers the case the item was
+/// ALREADY transcoding, where the old server session is retired in the background.
+#[cfg(feature = "jellyfin")]
+fn jellyfin_retranscode_as(expected: &WorkerTicket, offset_secs: i64) -> Option<String> {
+    let rk = cur_rk();
+    if rk.is_empty() {
+        return None;
+    }
+    let c = crate::jellyfin::client()?;
+    // The MediaSource id, derived exactly as `build_stream_jellyfin` does (`""` when the part IS
+    // the item id — a GUID item with no separate source).
+    let part = session()
+        .request
+        .as_ref()
+        .map(|r| r.part.clone())
+        .unwrap_or_default();
+    let msid = if part == rk { String::new() } else { part };
+    // The chosen track, by the stream INDEX the server selects on (`convert_stream` mirrors
+    // Jellyfin's `Index` into `Stream.id`, and `cur_audio_sid` holds the user's pick).
+    let audio_index = cur_audio_sid() as i32;
+    let body = crate::jellyfin::profile::playback_info_body_for(
+        cur_ceiling(),
+        offset_secs.max(0).saturating_mul(10_000_000),
+        &msid,
+        Some(audio_index),
+        None,
+    );
+    let info = c.playback_info(&rk, &msid, &body)?;
+    if let Some(code) = info.error_code.as_deref() {
+        crate::player::log(&format!("jellyfin retranscode: refused ({code})"));
+        return None;
+    }
+    let Some(source) = info.media_sources.first() else {
+        return None;
+    };
+    let Some(relative) = source.transcoding_url.as_deref() else {
+        crate::player::log("jellyfin retranscode: server offered no TranscodingUrl");
+        return None;
+    };
+    let url = c.transcode_url(relative)?;
+    let logical = sess();
+    let namespace = if logical.is_empty() {
+        format!("plxnative-{rk}")
+    } else {
+        logical
+    };
+    let replacement = info
+        .play_session_id
+        .clone()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| next_encoder_session(&namespace));
+    // Publish through the SAME route ownership machinery the Plex arm uses, so the teardown that
+    // follows (and a later scrobble_stop) resolves the server resource from ACTIVE_ENCODER rather
+    // than from a session field the reload already moved past.
+    if replace_active_encoder_for(expected, &replacement).is_none() {
+        let _ = c.stop_active_encodings(&replacement);
+        return None;
+    }
+    session_mut(|s| {
+        s.cur_remux = false;
+        s.tsession = replacement.clone();
+        s.url = url.clone();
+        // The profile's transcode target is pinned h264+aac in MPEG-TS HLS (see
+        // `jellyfin::profile`), so the Load payload's guess is not a guess.
+        s.stream_vcodec = "h264".to_owned();
+        s.stream_acodec = "aac".to_owned();
+        s.stream_fps = 0.0;
+        s.stream_dovi = crate::metadata::Dovi::NONE;
+        s.stream_immersive = false;
+    });
+    // Retire the previous server session off the main thread — the same backgrounded hand-off the
+    // Plex arm performs. Best-effort: Jellyfin reaps a quiet encoder on its own. Empty on the
+    // common direct-play → transcode switch, where there is no old encoder to stop.
+    let previous = expected.encoder().to_owned();
+    if !previous.is_empty() && previous != replacement {
+        let old = previous.clone();
+        if crate::task::spawn_small_keeping("jf-retranscode-stop", move || {
+            let _ = c.stop_active_encodings(&old);
+        })
+        .is_none()
+        {
+            let _ = c.stop_active_encodings(&previous);
+        }
+    }
+    // NEVER log the URL (it ends in `api_key=…`). The rk, the track and the offset are the whole
+    // diagnostic value here.
+    crate::player::log(&format!(
+        "retranscode rk={rk} audio={audio_index} offset={offset_secs} -> jellyfin transcode start"
+    ));
+    Some(url)
 }
 
 fn retranscode_as(expected: &WorkerTicket, offset_secs: i64, remux: bool) -> Option<String> {
@@ -10439,6 +10572,48 @@ mod tests {
         // report key on, so an id-less stream would render subtitles while the menu said Off.
         let subs = [server_selected(sub(0, 3, "eng", false))];
         assert_eq!(pick_dp_subtitle(&subs), None);
+    }
+
+    // ---- pick_dp_subtitle_default: the Jellyfin read-back (the file's DEFAULT subtitle) ------
+
+    /// `sub` with the file's DEFAULT flag set — the flag the Jellyfin read-back keys on, since
+    /// this backend's item carries no per-part `selected` state.
+    #[cfg(feature = "jellyfin")]
+    fn default_sub(id: i64, index: i64, lang: &str, external: bool) -> crate::metadata::Stream {
+        crate::metadata::Stream {
+            default: true,
+            ..sub(id, index, lang, external)
+        }
+    }
+
+    #[cfg(feature = "jellyfin")]
+    #[test]
+    fn the_default_subtitle_resolves_to_the_renderers_embedded_ordinal() {
+        // Same identifier space as the Plex arm: embedded streams only, sorted on `Stream.index`,
+        // so a sidecar earlier in the list does not shift the ordinal.
+        let subs = [
+            sub(10, 7, "fra", true), // sidecar — not in the container, not counted
+            default_sub(11, 3, "spa", false),
+            sub(12, 4, "eng", false),
+        ];
+        assert_eq!(pick_dp_subtitle_default(&subs), Some((11, 0)));
+    }
+
+    #[cfg(feature = "jellyfin")]
+    #[test]
+    fn a_file_with_no_default_subtitle_leaves_them_off() {
+        let subs = [sub(10, 3, "eng", false), sub(11, 4, "rus", false)];
+        assert_eq!(pick_dp_subtitle_default(&subs), None);
+        assert_eq!(pick_dp_subtitle_default(&[]), None);
+    }
+
+    #[cfg(feature = "jellyfin")]
+    #[test]
+    fn an_external_default_subtitle_is_left_off() {
+        // Not in the container: the client renderer has nothing to show and this backend does not
+        // burn (parity with the Plex arm), so it must not claim a subtitle is on.
+        let subs = [default_sub(10, 3, "eng", true)];
+        assert_eq!(pick_dp_subtitle_default(&subs), None);
     }
 
     // ---- video_direct_plays: the local codec + resolution + Dolby Vision direct-play gate ----
