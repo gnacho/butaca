@@ -4,19 +4,90 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Butaca - Cliente nativo de Jellyfin para LG webOS</title>
-<meta name="description" content="Butaca: cliente nativo de Jellyfin para televisores LG webOS, escrito en Rust. Sin Chromium, sin JavaScript: UI por GPU a 60 fps y vídeo decodificado por hardware.">
+<meta name="description" content="Butaca: cliente nativo de Jellyfin para LG webOS, en Rust. Interfaz por GPU a 60 fps y vídeo por hardware, sin Chromium ni web view.">
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
 <meta name="theme-color" content="#0E0E0E">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://butaca.cloudless.club/">
 <meta property="og:site_name" content="Butaca">
+<meta property="og:locale" content="es_ES">
+<meta property="og:locale:alternate" content="en_US">
 <meta property="og:title" content="Butaca - Cliente nativo de Jellyfin para LG webOS">
-<meta property="og:description" content="Butaca: cliente nativo de Jellyfin para televisores LG webOS, escrito en Rust. Sin Chromium, sin JavaScript: UI por GPU a 60 fps y vídeo decodificado por hardware.">
-<meta property="og:image" content="https://butaca.cloudless.club/assets/home.webp">
-<meta property="og:image:width" content="1920">
-<meta property="og:image:height" content="1080">
+<meta property="og:description" content="Butaca: cliente nativo de Jellyfin para LG webOS, en Rust. Interfaz por GPU a 60 fps y vídeo por hardware, sin Chromium ni web view.">
+<meta property="og:image" content="https://butaca.cloudless.club/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Butaca, cliente nativo de Jellyfin para LG webOS">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Butaca - Cliente nativo de Jellyfin para LG webOS">
+<meta name="twitter:description" content="Butaca: cliente nativo de Jellyfin para LG webOS, en Rust. Interfaz por GPU a 60 fps y vídeo por hardware, sin Chromium ni web view.">
+<meta name="twitter:image" content="https://butaca.cloudless.club/og.png">
 <link rel="canonical" href="https://butaca.cloudless.club/">
+<link rel="alternate" hreflang="es" href="https://butaca.cloudless.club/">
+<link rel="alternate" hreflang="en" href="https://butaca.cloudless.club/?hl=en">
+<link rel="alternate" hreflang="x-default" href="https://butaca.cloudless.club/">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230E0E0E'/%3E%3Ccircle cx='25' cy='32' r='11' fill='%23E05555'/%3E%3Ccircle cx='45' cy='32' r='6.5' fill='%23F0A030'/%3E%3C/svg%3E">
+
+<!-- Datos estructurados: sitio, aplicación y preguntas frecuentes -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": "https://butaca.cloudless.club/#website",
+      "url": "https://butaca.cloudless.club/",
+      "name": "Butaca",
+      "description": "Cliente nativo de Jellyfin para LG webOS, escrito en Rust.",
+      "inLanguage": ["es", "en"]
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://butaca.cloudless.club/#app",
+      "name": "Butaca",
+      "applicationCategory": "MultimediaApplication",
+      "operatingSystem": "webOS",
+      "url": "https://butaca.cloudless.club/",
+      "codeRepository": "https://github.com/gnacho/butaca",
+      "license": "https://opensource.org/license/mit",
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "EUR" },
+      "description": "Cliente nativo de Jellyfin para televisores LG webOS: interfaz por GPU a 60 fps y vídeo decodificado por hardware, sin Chromium ni web view."
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://butaca.cloudless.club/#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "¿Qué es Butaca?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Un cliente nativo de Jellyfin para televisores LG webOS: la interfaz se dibuja en la GPU de la tele y el vídeo lo decodifica su hardware, sin Chromium ni web view por medio." }
+        },
+        {
+          "@type": "Question",
+          "name": "¿En qué televisores funciona?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Está pensado para televisores LG con webOS 5.x y anteriores, los modelos que el software web ha ido dejando atrás." }
+        },
+        {
+          "@type": "Question",
+          "name": "¿Cuánto cuesta?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Nada. Es software libre bajo licencia MIT, sin cuentas, sin telemetría escondida y sin versiones de pago." }
+        },
+        {
+          "@type": "Question",
+          "name": "¿Necesito un servidor Jellyfin?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Sí. Butaca es solo el cliente: necesitas tu propio servidor Jellyfin 10.x o 12.x al que la televisión se conecta." }
+        },
+        {
+          "@type": "Question",
+          "name": "¿Ya puedo instalarlo?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Todavía no hay un .ipk público: falta resolver el issue #2. El progreso es público en GitHub y puedes seguirlo." }
+        }
+      ]
+    }
+  ]
+}
+</script>
 <noscript><style>.reveal{opacity:1 !important;transform:none !important}</style></noscript>
 
 <!-- Aplica el tema antes del primer pintado para evitar parpadeo -->
@@ -31,7 +102,7 @@
 /* ============================================================
    BUTACA - landing cinematográfica
    Bloques: tokens · base · fondo FX · nav · hero · secciones
-   comparativa · features · galería · roadmap · licencia · footer
+   comparativa · features · galería · roadmap · FAQ · licencia · footer
    ============================================================ */
 
 /* ---------- Tokens ---------- */
@@ -356,6 +427,26 @@ a.t-chip:hover{border-color:var(--gold)}
 .lic-cred a:hover{border-bottom-color:var(--gold)}
 .lic-disc{font-size:.88rem;color:var(--ink-faint)}
 
+/* ---------- FAQ ---------- */
+.faq-list{max-width:820px}
+.faq-item{border-top:1px solid var(--line);padding:1.05rem 0}
+.faq-item:last-child{border-bottom:1px solid var(--line)}
+.faq-item summary{
+  list-style:none;cursor:pointer;
+  display:flex;align-items:baseline;gap:.8rem;
+  font-family:var(--serif);font-weight:560;font-size:1.22rem;letter-spacing:-.01em;
+  transition:color .25s var(--ease);
+}
+.faq-item summary::-webkit-details-marker{display:none}
+.faq-item summary::before{
+  content:"+";flex:none;font-family:var(--sans);font-weight:700;
+  color:var(--gold);font-size:1.15rem;line-height:1;
+  transition:transform .25s var(--ease);
+}
+.faq-item[open] summary::before{transform:rotate(45deg)}
+.faq-item summary:hover{color:var(--accent)}
+.faq-item p{margin:.75rem 0 0 1.9rem;color:var(--ink-soft);max-width:62ch}
+
 /* ---------- Footer ---------- */
 footer{
   position:relative;z-index:2;border-top:1px solid var(--line);
@@ -423,6 +514,7 @@ footer{
       <a href="#ventajas" data-i18n="nav.feat">Ventajas</a>
       <a href="#galeria" data-i18n="nav.gal">Galería</a>
       <a href="#estado" data-i18n="nav.st">Estado</a>
+      <a href="#faq" data-i18n="nav.faq">FAQ</a>
       <a href="#licencia" data-i18n="nav.lic">Licencia</a>
     </nav>
     <div class="nav-ctl">
@@ -628,11 +720,44 @@ footer{
   </div>
 </section>
 
-<!-- ============ 05 · LICENCIA Y CRÉDITOS ============ -->
+<!-- ============ 05 · FAQ ============ -->
+<section class="block" id="faq">
+  <div class="wrap">
+    <header class="sec-head reveal">
+      <p class="sec-no" data-i18n="faq.no">Escena 05</p>
+      <h2 data-i18n="faq.title">Preguntas frecuentes</h2>
+      <p class="sec-lede" data-i18n="faq.lede">Lo que suele preguntarse antes de instalar algo en la tele.</p>
+    </header>
+    <div class="faq-list">
+      <details class="faq-item reveal">
+        <summary data-i18n="faq.q1">¿Qué es Butaca?</summary>
+        <p data-i18n="faq.a1">Un cliente nativo de Jellyfin para televisores LG webOS: la interfaz se dibuja en la GPU de la tele y el vídeo lo decodifica su hardware, sin Chromium ni web view por medio.</p>
+      </details>
+      <details class="faq-item reveal">
+        <summary data-i18n="faq.q2">¿En qué televisores funciona?</summary>
+        <p data-i18n="faq.a2">Está pensado para televisores LG con webOS 5.x y anteriores, los modelos que el software web ha ido dejando atrás.</p>
+      </details>
+      <details class="faq-item reveal">
+        <summary data-i18n="faq.q3">¿Cuánto cuesta?</summary>
+        <p data-i18n="faq.a3">Nada. Es software libre bajo licencia MIT, sin cuentas, sin telemetría escondida y sin versiones de pago.</p>
+      </details>
+      <details class="faq-item reveal">
+        <summary data-i18n="faq.q4">¿Necesito un servidor Jellyfin?</summary>
+        <p data-i18n="faq.a4">Sí. Butaca es solo el cliente: necesitas tu propio servidor Jellyfin 10.x o 12.x al que la televisión se conecta.</p>
+      </details>
+      <details class="faq-item reveal">
+        <summary data-i18n="faq.q5">¿Ya puedo instalarlo?</summary>
+        <p data-i18n-html="faq.a5">Todavía no hay un .ipk público: falta resolver el <a href="https://github.com/gnacho/butaca/issues/2" target="_blank" rel="noopener">issue #2</a>. El progreso es público en GitHub y puedes seguirlo.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 06 · LICENCIA Y CRÉDITOS ============ -->
 <section class="block" id="licencia">
   <div class="wrap">
     <header class="sec-head reveal">
-      <p class="sec-no" data-i18n="lic.no">Escena 05</p>
+      <p class="sec-no" data-i18n="lic.no">Escena 06</p>
       <h2 data-i18n="lic.title">Licencia y créditos</h2>
     </header>
     <div class="license-grid">

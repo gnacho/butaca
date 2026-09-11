@@ -8,10 +8,10 @@
 const i18n = {
 es:{
   "meta.title":"Butaca - Cliente nativo de Jellyfin para LG webOS",
-  "meta.desc":"Butaca: cliente nativo de Jellyfin para televisores LG webOS, escrito en Rust. Sin Chromium, sin JavaScript: UI por GPU a 60 fps y vídeo decodificado por hardware.",
+  "meta.desc":"Butaca: cliente nativo de Jellyfin para LG webOS, en Rust. Interfaz por GPU a 60 fps y vídeo por hardware, sin Chromium ni web view.",
   "a.skip":"Saltar al contenido",
   "nav.sections":"Secciones",
-  "nav.why":"Por qué nativo","nav.feat":"Ventajas","nav.gal":"Galería","nav.st":"Estado","nav.lic":"Licencia",
+  "nav.why":"Por qué nativo","nav.feat":"Ventajas","nav.gal":"Galería","nav.st":"Estado","nav.faq":"FAQ","nav.lic":"Licencia",
   "nav.github":"Butaca en GitHub",
   "lang.group":"Idioma",
   "theme.auto":"Tema: automático (según el sistema). Cambiar tema",
@@ -56,22 +56,29 @@ es:{
   "st.i2.t":"Primer arranque y paquete instalable","st.i2.d":"El paso que falta para el primer .ipk: experiencia de primer arranque y empaquetado listo para instalar en la TV.",
   "st.i3.t":"Backend propio de reportes","st.i3.d":"Un servicio propio para los informes de fallos opt-in, con consentimiento y logs redactados de principio a fin.",
   "st.i4.t":"Rediseño de iconos","st.i4.d":"Iconografía propia, a la altura del resto de la interfaz. Los detalles también se proyectan en pantalla grande.",
-  "lic.no":"Escena 05","lic.title":"Licencia y créditos",
+  "lic.no":"Escena 06","lic.title":"Licencia y créditos",
   "lic.gpl1":"Butaca es 100% software libre, publicado bajo la licencia MIT: puedes usarlo, estudiarlo, modificarlo y compartirlo, también con cambios, conservando el aviso de copyright.",
   "lic.gpl2":"El código completo - la app y esta misma página - está en el repositorio. Sin versiones «pro», sin telemetría escondida, sin letra pequeña.",
   "lic.gpl3":"Butaca es un fork de plx-native, MIT © Gleb Linnik; los cambios de Butaca se publican bajo la misma licencia MIT.",
   "lic.credT":"De pie sobre hombros",
   "lic.cred1":"Butaca es un fork de <a href=\"https://github.com/GLinnik21/plx-native\" target=\"_blank\" rel=\"noopener\">plx-native</a>, el cliente nativo de Plex para webOS creado por <strong>Gleb Linnik</strong>, y sigue su línea v0.6.5 cambiando el backend de Plex por Jellyfin. Este proyecto no existiría sin su trabajo: gracias.",
   "lic.disc":"Butaca es un cliente no oficial. Jellyfin, LG y webOS son marcas de sus respectivos propietarios.",
+  "faq.no":"Escena 05","faq.title":"Preguntas frecuentes",
+  "faq.lede":"Lo que suele preguntarse antes de instalar algo en la tele.",
+  "faq.q1":"¿Qué es Butaca?","faq.a1":"Un cliente nativo de Jellyfin para televisores LG webOS: la interfaz se dibuja en la GPU de la tele y el vídeo lo decodifica su hardware, sin Chromium ni web view por medio.",
+  "faq.q2":"¿En qué televisores funciona?","faq.a2":"Está pensado para televisores LG con webOS 5.x y anteriores, los modelos que el software web ha ido dejando atrás.",
+  "faq.q3":"¿Cuánto cuesta?","faq.a3":"Nada. Es software libre bajo licencia MIT, sin cuentas, sin telemetría escondida y sin versiones de pago.",
+  "faq.q4":"¿Necesito un servidor Jellyfin?","faq.a4":"Sí. Butaca es solo el cliente: necesitas tu propio servidor Jellyfin 10.x o 12.x al que la televisión se conecta.",
+  "faq.q5":"¿Ya puedo instalarlo?","faq.a5":"Todavía no hay un .ipk público: falta resolver el <a href=\"https://github.com/gnacho/butaca/issues/2\" target=\"_blank\" rel=\"noopener\">issue #2</a>. El progreso es público en GitHub y puedes seguirlo.",
   "foot.line":"Hecho con Rust y respeto por el cine en casa.",
   "foot.issues":"Issues","foot.top":"Volver arriba"
 },
 en:{
   "meta.title":"Butaca - Native Jellyfin client for LG webOS",
-  "meta.desc":"Butaca: a native Jellyfin client for LG webOS TVs, written in Rust. No Chromium, no JavaScript: GPU-drawn UI at 60 fps and hardware-decoded video.",
+  "meta.desc":"Butaca: a native Jellyfin client for LG webOS, written in Rust. GPU-drawn UI at 60 fps and hardware-decoded video, no Chromium or web view.",
   "a.skip":"Skip to content",
   "nav.sections":"Sections",
-  "nav.why":"Why native","nav.feat":"Features","nav.gal":"Gallery","nav.st":"Status","nav.lic":"License",
+  "nav.why":"Why native","nav.feat":"Features","nav.gal":"Gallery","nav.st":"Status","nav.faq":"FAQ","nav.lic":"License",
   "nav.github":"Butaca on GitHub",
   "lang.group":"Language",
   "theme.auto":"Theme: automatic (follows system). Change theme",
@@ -116,13 +123,20 @@ en:{
   "st.i2.t":"First boot and installable package","st.i2.d":"The missing step before the first .ipk: a first-boot experience and packaging ready to install on the TV.",
   "st.i3.t":"Own reporting backend","st.i3.d":"A dedicated service for opt-in crash reports, with consent and redacted logs from end to end.",
   "st.i4.t":"Icon redesign","st.i4.d":"Its own iconography, up to the standard of the rest of the interface. Details get projected on the big screen too.",
-  "lic.no":"Scene 05","lic.title":"License and credits",
+  "lic.no":"Scene 06","lic.title":"License and credits",
   "lic.gpl1":"Butaca is 100% free software, published under the MIT license: you can use it, study it, modify it and share it, including with changes, keeping the copyright notice.",
   "lic.gpl2":"The complete code - the app and this very page - is in the repository. No “pro” tiers, no hidden telemetry, no fine print.",
   "lic.gpl3":"Butaca is a fork of plx-native, MIT © Gleb Linnik; Butaca's changes are published under the same MIT license.",
   "lic.credT":"Standing on shoulders",
   "lic.cred1":"Butaca is a fork of <a href=\"https://github.com/GLinnik21/plx-native\" target=\"_blank\" rel=\"noopener\">plx-native</a>, the native Plex client for webOS created by <strong>Gleb Linnik</strong>, tracking its v0.6.5 line while swapping the Plex backend for Jellyfin. This project would not exist without his work: thank you.",
   "lic.disc":"Butaca is an unofficial client. Jellyfin, LG and webOS are trademarks of their respective owners.",
+  "faq.no":"Scene 05","faq.title":"Frequently asked questions",
+  "faq.lede":"The things people ask before installing anything on the TV.",
+  "faq.q1":"What is Butaca?","faq.a1":"A native Jellyfin client for LG webOS TVs: the interface is drawn on the TV's GPU and the video is decoded by its hardware, with no Chromium or web view in between.",
+  "faq.q2":"Which TVs does it run on?","faq.a2":"It targets LG sets running webOS 5.x and older, the models web software has been leaving behind.",
+  "faq.q3":"How much does it cost?","faq.a3":"Nothing. It is free software under the MIT license, with no accounts, no hidden telemetry and no paid tiers.",
+  "faq.q4":"Do I need a Jellyfin server?","faq.a4":"Yes. Butaca is only the client: you need your own Jellyfin 10.x or 12.x server for the TV to connect to.",
+  "faq.q5":"Can I install it yet?","faq.a5":"There is no public .ipk yet: <a href=\"https://github.com/gnacho/butaca/issues/2\" target=\"_blank\" rel=\"noopener\">issue #2</a> has to be resolved first. Progress is public on GitHub, so you can follow it.",
   "foot.line":"Made with Rust and respect for cinema at home.",
   "foot.issues":"Issues","foot.top":"Back to top"
 }
@@ -134,11 +148,15 @@ const Lang = {
   init(){
     let saved='es';
     try{ saved=localStorage.getItem('butaca-lang')||'es'; }catch(e){}
+    try{
+      const q=new URLSearchParams(location.search).get('hl');
+      if(q && i18n[q]) saved=q;
+    }catch(e){}
     this.set(i18n[saved]?saved:'es');
-    document.getElementById('lang-es').addEventListener('click',()=>this.set('es'));
-    document.getElementById('lang-en').addEventListener('click',()=>this.set('en'));
+    document.getElementById('lang-es').addEventListener('click',()=>this.set('es',true));
+    document.getElementById('lang-en').addEventListener('click',()=>this.set('en',true));
   },
-  set(lang){
+  set(lang,syncUrl){
     this.current=lang;
     const d=i18n[lang];
     document.documentElement.lang=lang;
@@ -151,6 +169,8 @@ const Lang = {
     setMeta('meta[name="description"]',d['meta.desc']);
     setMeta('meta[property="og:title"]',d['meta.title']);
     setMeta('meta[property="og:description"]',d['meta.desc']);
+    setMeta('meta[name="twitter:title"]',d['meta.title']);
+    setMeta('meta[name="twitter:description"]',d['meta.desc']);
     // Texto plano
     document.querySelectorAll('[data-i18n]').forEach(el=>{
       const v=d[el.dataset.i18n];
@@ -172,6 +192,9 @@ const Lang = {
     document.getElementById('lang-es').setAttribute('aria-pressed',String(lang==='es'));
     document.getElementById('lang-en').setAttribute('aria-pressed',String(lang==='en'));
     try{ localStorage.setItem('butaca-lang',lang); }catch(e){}
+    if(syncUrl){
+      try{ history.replaceState(null,'',location.pathname+(lang==='es'?'':'?hl='+lang)+location.hash); }catch(e){}
+    }
     Theme.refreshLabel();
   }
 };
