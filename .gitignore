@@ -153,3 +153,6 @@ rust-modules/target-sym/
 rust-modules/target-release-sym/
 pkg/plxnative.debug
 pkg/telemetry.local.json
+
+# any local-only override file (secrets, machine-specific)
+*.local.json
