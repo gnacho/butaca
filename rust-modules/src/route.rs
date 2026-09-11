@@ -14169,7 +14169,7 @@ mod tests {
             seek_req.contains("\"StartTimeTicks\":3000000000"),
             "seek must recut the playlist at the offset: {seek_req}"
         );
-        assert!(seek_req.contains("X-Emby-Token: tok-1"), "{seek_req}");
+        assert!(seek_req.contains("Authorization: MediaBrowser Token=\"tok-1\", "), "{seek_req}");
         assert!(
             new_url.contains("/videos/jf-item/master.m3u8") && new_url.contains("api_key=tok-1"),
             "new url: {new_url}"

@@ -8,7 +8,8 @@
 //!
 //! ## Where the token rides
 //!
-//! Control requests carry it as the `X-Emby-Token` HEADER; built media/image paths carry it as
+//! Control requests carry it inside the `Authorization: MediaBrowser Token=...` HEADER (the
+//! legacy `X-Emby-Token` line no longer authenticates on Jellyfin 12); built media/image paths carry it as
 //! the `api_key` query parameter, because those paths double as byte-identical cache keys and
 //! fetch paths, exactly as Plex's `X-Plex-Token`-suffixed paths do. Both spellings are on
 //! `crate::http`'s credential gate (`http::credential_carried`): plaintext is allowed only to a
@@ -105,13 +106,18 @@ impl JfClient {
         &self.origin
     }
 
-    /// The `MediaBrowser` identity header, without a token — the shape
-    /// `/Users/AuthenticateByName` wants, and also the value Jellyfin shows in its own device
-    /// list. Reuses the ONE product/version/device identity the Plex backend reports
-    /// (`plex::identity`), so an install never describes itself two ways to two servers.
+    /// The `MediaBrowser` identity, as the standard `Authorization` header the login wants, and
+    /// also the value Jellyfin shows in its own device list. Reuses the ONE product/version/
+    /// device identity the Plex backend reports (`plex::identity`), so an install never
+    /// describes itself two ways to two servers.
+    ///
+    /// Jellyfin 12 removed the legacy `X-Emby-Authorization` line this client used to send:
+    /// the login POST answers a blanket 400 to it, identity or no identity (verified against
+    /// this LAN's 12.0.0 server). The `MediaBrowser` scheme of `Authorization` was already
+    /// accepted by every 10.x server, so this is the one shape that works across the split.
     fn identity_header(&self) -> String {
         format!(
-            "X-Emby-Authorization: MediaBrowser Client=\"{}\", Device=\"{}\", DeviceId=\"{}\", Version=\"{}\"",
+            "Authorization: MediaBrowser Client=\"{}\", Device=\"{}\", DeviceId=\"{}\", Version=\"{}\"",
             crate::plex::identity::PRODUCT,
             crate::plex::identity::DEVICE,
             self.device_id,
@@ -176,16 +182,32 @@ impl JfClient {
         Ok(ok)
     }
 
-    /// The authed headers for a control request: identity + token. `None` before login — callers
-    /// are all post-auth by construction, so `None` surfaces as a failed request, which is what
-    /// the stores already do with an unreachable server.
+    /// The authed headers for a control request: token + identity in the ONE `Authorization`
+    /// header. `None` before login — callers are all post-auth by construction, so `None`
+    /// surfaces as a failed request, which is what the stores already do with an unreachable
+    /// server.
+    ///
+    /// Jellyfin 12 removed BOTH legacy carriers at once: `X-Emby-Token` and the `api_key` query
+    /// parameter no longer authenticate any control route (each answers 401; verified against
+    /// this LAN's 12.0.0 server). The token therefore rides inside the `MediaBrowser`
+    /// authorization next to the identity — accepted by 10.x and 12 alike — and the second
+    /// slot states what every one of these calls wants anyway. Media/image/stream URLs built
+    /// with `api_key=` are deliberately untouched: those routes still honour it.
     fn authed_headers(&self) -> Option<[String; 2]> {
-        let state = self.token.read().unwrap();
-        let state = state.as_ref()?;
-        Some([
-            self.identity_header(),
-            format!("X-Emby-Token: {}", state.token),
-        ])
+        let token = {
+            let state = self.token.read().unwrap();
+            state.as_ref()?.token.clone()
+        };
+        let identity = self.identity_header();
+        // identity_header is `Authorization: MediaBrowser Client=..., ...`; splice the token in
+        // as the first parameter of that same scheme rather than emitting a second
+        // Authorization line, which HTTP forbids and servers would fight over.
+        let with_token = identity.replacen(
+            "Authorization: MediaBrowser ",
+            &format!("Authorization: MediaBrowser Token=\"{token}\", "),
+            1,
+        );
+        Some([with_token, "Accept: application/json".to_string()])
     }
 
     /// One authed GET, parsed. `None` covers transport failure, non-2xx and unparseable JSON
@@ -913,7 +935,7 @@ mod tests {
         assert_eq!(ok.user_id, "u-1");
         assert_eq!(ok.server_id, "srv-1");
 
-        // A later control request must carry the token in the X-Emby-Token header.
+        // A later control request must carry the token inside the Authorization header.
         let views = client.views().expect("views parse");
         assert!(views.items.is_empty());
 
@@ -922,14 +944,14 @@ mod tests {
         let auth = &reqs[0];
         assert!(auth.starts_with("POST /Users/AuthenticateByName HTTP/1.1"));
         assert!(auth.to_ascii_lowercase().contains("content-type: application/json"));
-        assert!(auth.contains("X-Emby-Authorization: MediaBrowser Client=\"PlxNative\""));
+        assert!(auth.contains("Authorization: MediaBrowser Client=\"PlxNative\""));
         // Key order in the body is serde_json's (alphabetical without preserve_order) — assert
         // the two fields, not one literal, so the test does not hinge on serializer internals.
         assert!(auth.contains(r#""Username":"demo""#));
         assert!(auth.contains(r#""Pw":"""#));
         let views_req = &reqs[1];
         assert!(views_req.starts_with("GET /Users/u-1/Views HTTP/1.1"));
-        assert!(views_req.contains("X-Emby-Token: tok-1"));
+        assert!(views_req.contains("Authorization: MediaBrowser Token=\"tok-1\", "));
     }
 
     #[test]
@@ -1006,7 +1028,7 @@ mod tests {
         assert!(open.contains("\"PositionTicks\":600000000")); // 60 s in 100 ns ticks
         assert!(open.contains("\"IsPaused\":false"));
         assert!(open.contains("\"PlaySessionId\":\"ps-1\""));
-        assert!(open.contains("X-Emby-Token: tok-1"));
+        assert!(open.contains("Authorization: MediaBrowser Token=\"tok-1\", "));
         let tick = &reqs[2];
         assert!(tick.starts_with("POST /Sessions/Playing/Progress HTTP/1.1"));
         assert!(tick.contains("\"IsPaused\":true"));
@@ -1075,7 +1097,7 @@ mod tests {
         let reqs = server.finish();
         assert_eq!(reqs.len(), 4);
         assert!(reqs[1].starts_with("POST /Users/u-1/PlayedItems/mv-1 HTTP/1.1"));
-        assert!(reqs[1].contains("X-Emby-Token: tok-1"));
+        assert!(reqs[1].contains("Authorization: MediaBrowser Token=\"tok-1\", "));
         assert!(reqs[2].starts_with("DELETE /Users/u-1/PlayedItems/mv-1 HTTP/1.1"));
         let clear = &reqs[3];
         assert!(clear.starts_with("POST /Users/u-1/Items/mv-1/UserData HTTP/1.1"));
@@ -1126,7 +1148,7 @@ mod tests {
         ] {
             assert!(head.contains(want), "missing {want} in {head}");
         }
-        assert!(reqs[1].contains("X-Emby-Token: tok-1"));
+        assert!(reqs[1].contains("Authorization: MediaBrowser Token=\"tok-1\", "));
     }
 
     /// Genres and the server's own name ride the same authed GET path as every other read.
@@ -1178,7 +1200,7 @@ mod tests {
         assert!(people.starts_with("GET /Persons?"));
         assert!(people.contains("searchTerm=Am%C3%A9lie%20%26%20Co"));
         assert!(people.contains("UserId=u-1"));
-        assert!(reqs[1].contains("X-Emby-Token: tok-1"));
+        assert!(reqs[1].contains("Authorization: MediaBrowser Token=\"tok-1\", "));
     }
 
     /// The transcode kill is a DELETE naming the PlaySessionId, and every write here fails

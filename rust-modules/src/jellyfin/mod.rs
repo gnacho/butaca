@@ -35,8 +35,9 @@
 //! Plex's `X-Plex-Token` may ride only TLS, because every PMS is reachable through a
 //! `*.plex.direct` certificate. Jellyfin has no equivalent: a home Jellyfin server is plain HTTP
 //! on a LAN address in the overwhelming majority of installs, so `crate::http`'s credential gate
-//! was extended with a Jellyfin-only relaxation — its token shapes (`api_key=`,
-//! `X-Emby-Token`) may cross plaintext ONLY to an address that cannot route off the LAN
+//! was extended with a Jellyfin-only relaxation — its credential shapes (the
+//! `Authorization: MediaBrowser` header, and the `api_key=` query that media/image/stream
+//! URLs still carry) may cross plaintext ONLY to an address that cannot route off the LAN
 //! (`crate::http::is_lan_host`); everywhere else stays refused. That is a considered weakening of
 //! the transport floor for this backend alone, and it is why the onboarding asks for an IP
 //! literal rather than a hostname.

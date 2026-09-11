@@ -2556,6 +2556,9 @@ mod tests {
     /// [`modal_open`] first precisely so a panel standing over the screen is not backed out of by
     /// backing out of the whole sign-in. The same predicate gates the OK that arms the *Try again*
     /// pill, which is still "showing" underneath an open panel.
+    /// Plex-only: the Details panel and the root-press ladder live on the plex.tv sign-in
+    /// screen; the Jellyfin flavour's route delegates to `ui::jf_login` before any of it.
+    #[cfg(not(feature = "jellyfin"))]
     #[test]
     fn the_details_panel_claims_back_rather_than_the_routes_root_press() {
         let _g = crate::testlock::serial();

@@ -303,20 +303,30 @@ fn credential_carried(path: &str, headers: &[&str]) -> Credential {
         return Credential::Plex;
     }
     // Jellyfin accepts the access token either as the `api_key` query parameter (its SDKs' habit,
-    // and what our image/stream URLs use) or as the `X-Emby-Token` / `X-Emby-Authorization`
-    // header. The name check is deliberately EXACT: `Authorization` belongs to the Plex arm's
-    // rule (and to every bearer scheme), and substring-matching it onto `X-Emby-Authorization`
-    // would route Jellyfin's identity header through a policy written for another service.
+    // and what our image/stream URLs use) or inside the `Authorization` header under its own
+    // `MediaBrowser` scheme — since Jellyfin 12 the ONLY accepted spelling: the legacy
+    // `X-Emby-Token` / `X-Emby-Authorization` headers were removed server-side. The name check
+    // for everything else is deliberately EXACT: a bare `Authorization` belongs to the Plex
+    // arm's rule (and to every bearer scheme), and substring-matching it onto Jellyfin's old
+    // identity header would route Jellyfin's credentials through a policy written for another
+    // service.
     if lower.contains("api_key=") {
         return Credential::Jellyfin;
     }
     let mut saw = Credential::None;
     for header in headers {
-        let Some((name, _)) = header.split_once(':') else {
+        let Some((name, value)) = header.split_once(':') else {
             continue;
         };
         let name = name.trim();
         if name.eq_ignore_ascii_case("x-plex-token") || name.eq_ignore_ascii_case("authorization") {
+            // `Authorization: MediaBrowser ...` is Jellyfin's own scheme; it answers to the
+            // Jellyfin plaintext policy, not to the Plex arm a generic Authorization obeys.
+            if name.eq_ignore_ascii_case("authorization")
+                && value.trim_start().starts_with("MediaBrowser")
+            {
+                return Credential::Jellyfin;
+            }
             return Credential::Plex;
         }
         if name.eq_ignore_ascii_case("x-emby-token")

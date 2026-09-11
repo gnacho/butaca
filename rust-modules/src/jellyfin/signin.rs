@@ -94,7 +94,7 @@ pub(crate) fn start(url_raw: &str, user: &str, password: &str) -> Result<(), Fai
     if !crate::http::credential_transport_allowed(
         &origin,
         "/Users/AuthenticateByName",
-        &["X-Emby-Authorization: …"],
+        &["Authorization: MediaBrowser …"],
     ) {
         crate::log("jellyfin: sign-in refused at the gate — plaintext credentials off-LAN");
         return Err(Fail::Plaintext);
@@ -204,7 +204,7 @@ mod tests {
             !crate::http::credential_transport_allowed_by_policy(
                 &origin,
                 "/Users/AuthenticateByName",
-                &["X-Emby-Authorization: …"],
+                &["Authorization: MediaBrowser …"],
                 false,
             ),
             "a public address over http must not carry the password"
@@ -214,7 +214,7 @@ mod tests {
             crate::http::credential_transport_allowed_by_policy(
                 &lan,
                 "/Users/AuthenticateByName",
-                &["X-Emby-Authorization: …"],
+                &["Authorization: MediaBrowser …"],
                 false,
             ),
             "…while the LAN literal the PoC targets stays allowed"

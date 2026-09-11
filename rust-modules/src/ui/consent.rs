@@ -2494,6 +2494,9 @@ mod tests {
     /// handled-error report this switch actually gates, and the separate one-off "Send report"
     /// press the sign-in screen can offer even while this switch is off, which this text must say
     /// is NOT gated by it and carries no persistent identifier. `ROW_ERRORS_SUB` gets the short form.
+    /// Plex-only: both paths hang off the plex.tv sign-in machinery; the Jellyfin flavour's
+    /// CRASH_BODY deliberately carries neither sentence.
+    #[cfg(not(feature = "jellyfin"))]
     #[test]
     fn crash_question_names_both_signin_reporting_paths() {
         assert!(CRASH_BODY.contains("sign-in error report"));
