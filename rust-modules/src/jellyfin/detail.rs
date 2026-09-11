@@ -210,9 +210,9 @@ fn detail_from_dto(it: &BaseItemDto, sid: ServerId) -> Detail {
     let mut d = Detail {
         sid,
         rk: it.id.clone(),
-        source: String::new(), // one server on this backend: no attribution to draw
-        // No portable cross-server identity exists on Jellyfin; the item id fills the field so
-        // the "Also available" machinery has a well-formed non-answer and no other source to ask.
+        // One server on this backend: no attribution to draw, and no portable cross-server
+        // identity exists on Jellyfin; the item id fills the field so the "Also available"
+        // machinery has a well-formed non-answer and no other source to ask.
         guid: it.id.clone(),
         is_show,
         kind: kind.to_string(),

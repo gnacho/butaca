@@ -653,7 +653,12 @@ HOSTPATH = re.compile(rb"(?:^|[^A-Za-z0-9/_.-])(/(?:Users|home)/[A-Za-z0-9_./+-]
 # The NDK's own location cannot be removed — `--cross-prefix` must be absolute (the wrapper gcc
 # dies when invoked through PATH), so it rides in FFmpeg's recorded configure string. It is
 # identical on every CI runner, which is the reason releases must be BUILT by CI.
-ALLOWED_PATH = re.compile(rb"webos-ndk|^/home/runner/")
+# The Jellyfin arm is allowed a second, exact prefix: its credential exchange POSTs to Jellyfin's
+# own REST route `/Users/AuthenticateByName`, a fixed API path that this scan reads as a macOS
+# builder directory (and the linker can glue to the neighbouring `jellyfin` rodata tail, which is
+# how `/Users/AuthenticateByNamejellyfin` appears). Anchored to that prefix only: nothing else
+# under /Users/ passes.
+ALLOWED_PATH = re.compile(rb"webos-ndk|^/home/runner/|^/Users/AuthenticateByName")
 
 # A missing payload directory is a HARD failure, not an empty loop. `check` only ever prints for
 # something it was given, so an absent stage used to print nothing at all here — no ok, no FAIL —
