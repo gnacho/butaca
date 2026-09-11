@@ -5,7 +5,7 @@
 use crate::plex::ServerId;
 use std::os::raw::c_int;
 use std::panic::catch_unwind;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 /// Catalog rows Home holds at most, across EVERY source. A hard ceiling on the store the whole
@@ -898,6 +898,12 @@ fn lock_srcs() -> std::sync::MutexGuard<'static, Vec<Src>> {
 /// Either moving rebuilds it, which is how a share the roster layer has just registered, or a
 /// library the user has just pinned, reaches Home without anyone having to call in.
 static SEEN: AtomicU64 = AtomicU64::new(u64::MAX);
+/// Whether the roster has EVER been reconciled. SEEN starts at `u64::MAX` (a value no Plex key can
+/// equal, so the first Plex sync always runs) — but the Jellyfin flavor reports exactly `u64::MAX`
+/// once its client is installed, so an install that lands before the first `pump` would read as
+/// "already synced" and Home would never gain its source. The flag keeps the first build
+/// unconditional; the key keeps its two jobs (skip unchanged frames, rebuild on any real change).
+static SYNCED: AtomicBool = AtomicBool::new(false);
 
 /// One source's finished (or failed) off-thread fetch. `build: None` deliberately carries no data,
 /// so a failure can never be mistaken for "the server returned nothing".
@@ -1049,6 +1055,13 @@ fn home_server_sets(pins: &[(ServerId, i64, bool)]) -> (Vec<ServerId>, Vec<Serve
 /// the grant to a pin. The handle comes from the same place (`ServerFacts`), so nothing here has an
 /// opinion about who a server belongs to that the Sources list does not share.
 fn roster() -> Vec<(ServerId, String)> {
+    // The Jellyfin flavor has ONE source — the server the boot flow authenticated against —
+    // with no plex.tv registry to enumerate and no share handle to display. It is listed the
+    // moment the client exists; before that, the Plex enumeration below answers empty anyway.
+    #[cfg(feature = "jellyfin")]
+    if crate::jellyfin::client().is_some() {
+        return vec![(crate::jellyfin::SERVER_ID, String::new())];
+    }
     let (pinned, known) = home_server_sets(&library_pins_by_server());
     let mut own: Vec<(ServerId, String)> = Vec::new();
     let mut shared: Vec<(ServerId, String)> = Vec::new();
@@ -1080,6 +1093,12 @@ fn roster() -> Vec<(ServerId, String)> {
 /// here, on a path `pump` runs every loop iteration — ~60×/s including on a settled Home, which is
 /// the screen `ui::idle` was tuned down to ~1% of a core on.
 fn roster_key() -> u64 {
+    // The Jellyfin client's install is an event no plex-registry generation can see, so under
+    // the flavor it IS the high bit: boot order (sync first, install second) must still rebuild.
+    #[cfg(feature = "jellyfin")]
+    if crate::jellyfin::client().is_some() {
+        return u64::MAX;
+    }
     ((crate::plex::server_roster_gen() as u64) << 32) | crate::browse::sections_gen() as u64
 }
 
@@ -1088,7 +1107,7 @@ fn roster_key() -> u64 {
 /// picked up by the next [`pump`], and one that has left takes its shelves with it.
 fn sync_roster() {
     let k = roster_key();
-    if SEEN.swap(k, Ordering::Relaxed) == k {
+    if SYNCED.swap(true, Ordering::Relaxed) && SEEN.swap(k, Ordering::Relaxed) == k {
         return;
     }
     let want = roster();
@@ -1213,6 +1232,15 @@ fn kick(s: &mut Src) {
     if s.fetching {
         return; // one in flight already — its spinner is the honest answer
     }
+    // The Jellyfin source keeps the same single-flight / mailbox / generation discipline — only
+    // the client it fetches WITH differs. Its Landing carries no Plex client pointer: there is
+    // no registry slot to re-point under it, so there is no staleness for that pair to name.
+    // The installed-client guard matters to host tests, which register Plex fixtures at slot 0.
+    #[cfg(feature = "jellyfin")]
+    if s.sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+        kick_jellyfin(s);
+        return;
+    }
     // CAPTURE AT THE SPAWN SITE. The worker is handed this server's own `&'static Client` and its
     // slot id; it never asks which server is current, and a slot re-pointed mid-request cannot
     // redirect a fetch that is already out (`plex::servers` leaks each client precisely so that
@@ -1260,6 +1288,108 @@ fn retry_now(s: &mut Src) {
     s.retry_s = 0.0;
     kick(s);
 }
+
+// ---- Jellyfin home fetch (flavor `jellyfin`) --------------------------------------------------
+//
+// The same two-piece contract as [`fetch_source`]: `None` is a FAILED fetch (retry on the
+// ladder), `Some` with empty shelves is a server that answered with nothing on it. What Home is
+// built from is Jellyfin's own vocabulary rather than `/hubs`: Continue Watching is
+// `/Items/Resume` (the deck, server-sorted by last-played) and each movies/tvshows view
+// contributes one Recently Added shelf from `/Items/Latest`.
+
+/// [`kick`]'s Jellyfin arm — the spawn-site capture rules are [`kick`]'s own: the client
+/// reference is read HERE, on the main thread, and the worker holds it, never a static.
+#[cfg(feature = "jellyfin")]
+fn kick_jellyfin(s: &mut Src) {
+    let Some(c) = crate::jellyfin::client() else {
+        landed_fail(s); // boot raced us: no client yet, the ladder will try again
+        return;
+    };
+    s.fetching = true;
+    s.state = HubState::Loading;
+    s.retry_s = 0.0;
+    s.seq = s.seq.wrapping_add(1);
+    let (gen, seq, sid) = (HUB_GEN.load(Ordering::SeqCst), s.seq, s.sid);
+    let spawned = crate::task::spawn_small("hubs-jf", move || {
+        let build = catch_unwind(move || fetch_source_jellyfin(c, sid))
+            .ok()
+            .flatten();
+        RESULTS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(Landing {
+                gen,
+                seq,
+                sid,
+                client: None,
+                token_gen: 0,
+                build,
+            });
+    });
+    if !spawned {
+        s.fetching = false;
+        landed_fail(s);
+    } else {
+        crate::log(&format!(
+            "hubs: source {} fetching (off-thread, jellyfin)",
+            sid.raw()
+        ));
+    }
+}
+
+/// GET the Jellyfin home surface and project it into this source's [`SourceBuild`]. The
+/// converter owns every field mapping (`jellyfin::movie_from_dto`); what lives here is only the
+/// SHELVES' shape — which endpoints, in which order, under which titles.
+#[cfg(feature = "jellyfin")]
+fn fetch_source_jellyfin(c: &'static crate::jellyfin::JfClient, sid: ServerId) -> Option<SourceBuild> {
+    // A row earns its card the same way the Plex projection's `keep` decides it: a title to
+    // name it and a poster to draw. Jellyfin ids are GUIDs, so the catalog pin (`sec`) has no
+    // per-library meaning here and stays 0 — listings are scoped at query time instead.
+    let keep = |it: &crate::jellyfin::BaseItemDto| {
+        let m = crate::jellyfin::movie_from_dto(it, sid, 0)?;
+        (!m.title.is_empty() && !m.thumb.is_empty()).then_some(m)
+    };
+
+    let resume = c.resume(HUB_FETCH_COUNT)?;
+    let mut out = SourceBuild::default();
+    out.cw = resume
+        .items
+        .iter()
+        .filter_map(|it| {
+            keep(it).map(|m| CwItem {
+                // Jellyfin's resume list is already last-played ordered; the Plex merge key
+                // (`lastViewedAt`) has no counterpart on the row and 0 keeps that order intact.
+                last_viewed_at: 0,
+                m,
+            })
+        })
+        .collect();
+
+    let views = c.views()?;
+    for v in &views.items {
+        // Movies and TV shows are the app's honest scope (README's words, still true on this
+        // backend); a mixed/music/photos view is skipped rather than half-rendered.
+        if !matches!(v.collection_type.as_deref(), Some("movies") | Some("tvshows")) {
+            continue;
+        }
+        // A failed Latest fails the SHELF, not the source: Resume already committed above, and
+        // one unreadable library must not blank the deck with it.
+        let Some(latest) = c.latest(&v.id, HUB_FETCH_COUNT) else {
+            continue;
+        };
+        let items: Vec<PmsMovie> = latest.items.iter().filter_map(keep).collect();
+        if items.is_empty() {
+            continue;
+        }
+        out.shelves.push(Shelf {
+            title: format!("Recently Added — {}", v.name),
+            hub_id: format!("jf.latest.{}", v.id),
+            items,
+        });
+    }
+    Some(out)
+}
+
 
 /// The Retry control's kick: try every source again NOW, from the bottom of the ladder — a person
 /// who asks for it should never be made to sit out a 30-second automatic wait. A no-op for any

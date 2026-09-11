@@ -839,6 +839,36 @@ pub(crate) fn http_open(
         MEDIA_SEND_TIMEOUT_MS,
         None,
         false,
+        &[],
+    ))
+}
+
+/// [`http_open`] plus a request body written after the head — the shape Jellyfin's JSON control
+/// POSTs need (`http::request_post_json` is the one caller, and it adds the matching
+/// `Content-Length` itself). Every other entry point passes an empty slice and keeps the exact
+/// bytes it always sent.
+pub(crate) fn http_open_body(
+    hs: *mut HttpStream,
+    host: *const c_char,
+    port: c_int,
+    path: *const c_char,
+    extra: *const c_char,
+    method: &str,
+    req_body: &[u8],
+) -> c_int {
+    legacy_open_result(http_open_with_timeouts(
+        hs,
+        host,
+        port,
+        path,
+        extra,
+        method,
+        CONNECT_TIMEOUT_MS,
+        MEDIA_RECV_TIMEOUT_MS,
+        MEDIA_SEND_TIMEOUT_MS,
+        None,
+        false,
+        req_body,
     ))
 }
 
@@ -855,7 +885,7 @@ pub(crate) fn http_open_probe(
     timeout_ms: c_int,
 ) -> c_int {
     legacy_open_result(http_open_with_timeouts(
-        hs, host, port, path, extra, method, timeout_ms, timeout_ms, timeout_ms, None, false,
+        hs, host, port, path, extra, method, timeout_ms, timeout_ms, timeout_ms, None, false, &[],
     ))
 }
 
@@ -886,6 +916,7 @@ pub(crate) fn http_open_until_result(
         MEDIA_SEND_TIMEOUT_MS,
         Some(deadline),
         true,
+        &[],
     )
 }
 
@@ -909,6 +940,7 @@ fn http_open_with_timeouts(
     send_timeout_ms: c_int,
     open_deadline: Option<Instant>,
     restore_media_timeouts: bool,
+    req_body: &[u8],
 ) -> Result<(), HttpOpenError> {
     if hs.is_null() || host.is_null() || path.is_null() {
         return Err(HttpOpenError::Transport);
@@ -1062,6 +1094,31 @@ fn http_open_with_timeouts(
                 return Err(error);
             }
             off += w as usize;
+        }
+        // A request body (Jellyfin's JSON control POSTs — `http::request_post_json`) follows the
+        // blank line in the SAME connection, before the response is read. The caller sized it in a
+        // `Content-Length` header of its own; this loop writes exactly those bytes and no more.
+        // An empty slice is the historical shape and compiles to no second send at all.
+        let mut body_off = 0usize;
+        while body_off < req_body.len() {
+            let w = send_until(
+                fd,
+                req_body[body_off..].as_ptr() as *const c_void,
+                req_body.len() - body_off,
+                open_deadline,
+            );
+            if w <= 0 {
+                let error = if hs.interrupted() {
+                    HttpOpenError::Aborted
+                } else if w == HTTP_READ_DEADLINE as isize {
+                    HttpOpenError::Deadline
+                } else {
+                    HttpOpenError::Transport
+                };
+                close_owned(hs);
+                return Err(error);
+            }
+            body_off += w as usize;
         }
 
         // read until end of headers (\r\n\r\n), keeping any body bytes that follow

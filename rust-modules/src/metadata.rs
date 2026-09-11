@@ -1567,6 +1567,12 @@ pub(crate) struct PlayingItem {
     /// stream's rate—when deciding whether a remote connection has enough headroom to carry the
     /// original file, because the transport also has to carry audio and container overhead.
     pub(crate) bitrate: i64,
+    /// The played leaf's container short name ("mkv", "mp4", …) — the direct-play gate's
+    /// demuxer test. The Plex path once read this off the part key's EXTENSION
+    /// (`route::part_is_streamable`); a Jellyfin MediaSource id is a GUID with no extension, so
+    /// the container travels here instead, and both backends fill it from the same record the
+    /// streams came from.
+    pub(crate) container: String,
     /// The played leaf's Dolby Vision layering — the direct-play gate's other refusal, beside the
     /// frame size above and for the same reason: the smart-DP branch never asks PMS, so a file
     /// whose base layer we cannot display correctly (Profile 5, or a dual-layer Profile 7) would
@@ -1631,6 +1637,7 @@ pub(crate) fn cached_playing(sid: crate::plex::ServerId, rk: &str) -> Option<Pla
             width: d.width,
             height: d.height,
             bitrate: d.bitrate,
+            container: d.container.clone(),
             dovi: d.dovi,
             markers: d.markers.clone(),
             chapters: d.chapters.clone(),
@@ -1643,6 +1650,15 @@ pub(crate) fn cached_playing(sid: crate::plex::ServerId, rk: &str) -> Option<Pla
 pub(crate) fn fetch_playing_item(sid: crate::plex::ServerId, rk: &str) -> Option<PlayingItem> {
     if rk.is_empty() {
         return None;
+    }
+    // Jellyfin arm — same store, the other server (`jellyfin::detail::playing_item` builds the
+    // same PlayingItem off /Items + /MediaSegments). The installed-client guard is every
+    // jellyfin arm's guard: slot 0 is also a valid Plex slot in this build.
+    #[cfg(feature = "jellyfin")]
+    if sid == crate::jellyfin::SERVER_ID {
+        if let Some(c) = crate::jellyfin::client() {
+            return crate::jellyfin::detail::playing_item(c, sid, rk);
+        }
     }
     let it = crate::plex::client_for(sid).and_then(|c| c.metadata(rk));
     // Markers and chapters hang off the ITEM, streams off its first Part — so a part-less response
@@ -1661,6 +1677,11 @@ pub(crate) fn fetch_playing_item(sid: crate::plex::ServerId, rk: &str) -> Option
         .as_ref()
         .and_then(|it| it.first_part().map(|p| convert_streams(&p.stream)))
         .unwrap_or_default();
+    // the container rides the same Part the streams do (the field's doc has the why)
+    let container = it
+        .as_ref()
+        .and_then(|it| it.first_part().map(|p| p.container.clone()))
+        .unwrap_or_default();
     let (audio, subs, video_fps, dovi) = (st.audio, st.subs, st.fps, st.dovi);
     // the frame size rides the same PRIMARY version the streams come from (route.rs's
     // direct-play gate tests it against the device bound — see the field doc)
@@ -1677,6 +1698,7 @@ pub(crate) fn fetch_playing_item(sid: crate::plex::ServerId, rk: &str) -> Option
         width,
         height,
         bitrate,
+        container,
         dovi,
         markers,
         chapters,
@@ -1806,7 +1828,17 @@ fn fetch_seasons(sid: crate::plex::ServerId, rk: &str) -> Vec<Season> {
 /// NB its siblings `fetch_seasons`/`fetch_related` deliberately KEEP the degrade-to-empty: both are
 /// only ever called from `fetch_full`, which builds a Detail from nothing — there is no previous
 /// list there to protect, and neither is worth failing the whole page over.
-fn fetch_episodes(sid: crate::plex::ServerId, season_rk: &str) -> Option<Vec<Episode>> {
+fn fetch_episodes(sid: crate::plex::ServerId, series_rk: &str, season_rk: &str) -> Option<Vec<Episode>> {
+    // Jellyfin addresses a season's episodes by BOTH ids (`/Shows/{series}/Episodes?SeasonId=`),
+    // where Plex's `/children` needs the season key alone — that asymmetry is the whole reason
+    // this signature carries `series_rk`. Every caller has it in hand (the loaded show's rk).
+    #[cfg(feature = "jellyfin")]
+    if sid == crate::jellyfin::SERVER_ID {
+        return crate::jellyfin::client()
+            .and_then(|c| crate::jellyfin::detail::fetch_episodes(c, series_rk, season_rk));
+    }
+    #[cfg(not(feature = "jellyfin"))]
+    let _ = series_rk;
     let mc = crate::plex::client_for(sid)?.children(season_rk)?;
     Some(mc.metadata.iter().map(convert_episode).collect())
 }
@@ -1896,6 +1928,18 @@ fn related_rows(mc: &crate::plex::MediaContainer, sid: crate::plex::ServerId) ->
 /// installing the result is the caller's job, and on the async path that must happen on the main
 /// thread (see the DETAIL_SLOT note).
 fn fetch_full(sid: crate::plex::ServerId, rk: &str) -> Option<Detail> {
+    // Jellyfin arm — the SAME fetch over the other server: `jellyfin::detail::fetch_full`
+    // mirrors this function's sequence and failure tolerance field by field, so the page and
+    // everything downstream never learn which backend answered. The guard is the INSTALLED
+    // client, not the bare sid: slot 0 is a valid Plex slot in this same build, and an arm
+    // keyed on the sid alone would misroute Plex detail pages in a jellyfin-feature build
+    // whose config never booted (the same guard every jellyfin arm carries).
+    #[cfg(feature = "jellyfin")]
+    if sid == crate::jellyfin::SERVER_ID {
+        if let Some(c) = crate::jellyfin::client() {
+            return crate::jellyfin::detail::fetch_full(c, sid, rk);
+        }
+    }
     // `ms=` is the whole chain's wall clock. It is the exact cost `request_detail` moves off the
     // SDL loop, so it is the number to read when judging whether a call site can afford to block
     // — note the framedrop breakdown CANNOT show it (fd_pc0 starts after event handling).
@@ -1925,7 +1969,7 @@ fn fetch_full(sid: crate::plex::ServerId, rk: &str) -> Option<Detail> {
             // a first-season failure is not worth failing the whole page over — the hero, cast
             // and Related still load, and there is no previous list here to protect. It is still
             // named, because the `eps=` below cannot tell it from a season with no episodes.
-            d.episodes = fetch_episodes(sid, &s0.rk).unwrap_or_else(|| {
+            d.episodes = fetch_episodes(sid, rk, &s0.rk).unwrap_or_else(|| {
                 crate::log(&format!(
                     "detail: rk={rk} season rk={} /children did not answer — the eps= below is that refusal",
                     s0.rk));
@@ -2331,7 +2375,7 @@ pub(crate) fn load_season(idx: usize) {
         // the mailbox is filled OUTSIDE the guard so a panicking fetch still lands — as a
         // FAILURE (None), not as an empty season: a panic is not "this season has no episodes",
         // and otherwise season_loading() would report an in-flight fetch forever
-        let eps = catch_unwind(|| fetch_episodes(sid, &season_rk)).unwrap_or(None);
+        let eps = catch_unwind(|| fetch_episodes(sid, &rk, &season_rk)).unwrap_or(None);
         land_season(gen, sid, rk, idx, prev, eps);
     });
     if !spawned {
@@ -2347,8 +2391,12 @@ pub(crate) fn load_season(idx: usize) {
 /// runs. Invalidates any in-flight async fetch so a stale landing can't overwrite this one.
 pub(crate) fn load_season_now(idx: usize) {
     let _ = catch_unwind(move || {
-        let (sid, season_rk) =
-            match current().and_then(|d| d.seasons.get(idx).map(|s| (d.sid, s.rk.clone()))) {
+        let (sid, rk, season_rk) =
+            match current().and_then(|d| {
+                d.seasons
+                    .get(idx)
+                    .map(|s| (d.sid, d.rk.clone(), s.rk.clone()))
+            }) {
                 Some(t) => t,
                 None => return,
             };
@@ -2357,7 +2405,7 @@ pub(crate) fn load_season_now(idx: usize) {
         // `open_rk_season`'s chained play of `episodes[0]` launches — the WRONG season's first
         // episode under the requested season's name — and that path has no host coverage and needs
         // the full on-device suite. Deferred deliberately.
-        let eps = fetch_episodes(sid, &season_rk).unwrap_or_default();
+        let eps = fetch_episodes(sid, &rk, &season_rk).unwrap_or_default();
         supersede_season(); // drop any async fetch in flight; this synchronous list wins
         unsafe {
             if let Some(d) = (*addr_of_mut!(CURRENT)).as_mut() {

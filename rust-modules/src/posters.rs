@@ -319,6 +319,33 @@ pub(crate) fn poster_key(
     if dst.is_null() || cap == 0 {
         return;
     }
+    // The Jellyfin flavor builds the key from ITS client's image path — same discipline (the
+    // built path is the LRU key AND the fetch path, token baked in), different query vocabulary.
+    // `token_gen` is 0: a Jellyfin client has no token rotation, so the memo invalidates on
+    // (server, path, size) alone, which is exactly when the bytes could change.
+    //
+    // The arm engages only when a Jellyfin client is INSTALLED, not on the slot number alone:
+    // slot 0 is also what a host test's `register_for_test` hands out, and without the guard the
+    // flavor's own test suite would route a Plex fixture through this arm.
+    #[cfg(feature = "jellyfin")]
+    if srv == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+        unsafe {
+            let path = cstr(src_path);
+            if path.is_empty() {
+                crate::cbuf::set(dst, cap, "");
+                return;
+            }
+            let built = crate::jellyfin::client()
+                .and_then(|c| c.image_path(&path, w as i64, h as i64, png != 0))
+                .unwrap_or_default();
+            if built.len() > KEY_MAX || built.len() >= cap {
+                crate::cbuf::set(dst, cap, "");
+            } else {
+                crate::cbuf::set(dst, cap, &built);
+            }
+        }
+        return;
+    }
     let Some(c) = crate::plex::client_for(srv) else {
         unsafe { crate::cbuf::set(dst, cap, "") };
         return;
@@ -756,6 +783,33 @@ fn warn_fetch_failed(srv: ServerId, cause: ArtFail) {
 }
 
 /// BACKGROUND worker: claim a P_WANT slot, fetch+decode off-lock, publish P_DECODED.
+/// The Plex arm of the worker's fetch, factored out so the Jellyfin flavor's arm can sit beside
+/// it in `poster_worker` without a `match` nested inside a `match`. Behaviour is byte-for-byte
+/// what the inline block always did: dial the slot's server for the built path, decode what
+/// answers, and report the three empty-outcome shapes apart.
+fn plex_poster_px(srv: ServerId, key_s: &str, w: &mut i32, h: &mut i32) -> *mut c_uchar {
+    match crate::plex::client_for(srv) {
+        Some(c) => match c.fetch_built(key_s) {
+            // bytes arrived: from here on a failure is the decoder's, and `img.rs` logs it
+            Some(b) if !b.is_empty() => {
+                img::img_decode_rgba(b.as_ptr(), b.len() as c_int, w, h)
+            }
+            Some(_) => {
+                warn_fetch_failed(srv, ArtFail::Empty);
+                std::ptr::null_mut()
+            }
+            None => {
+                warn_fetch_failed(srv, ArtFail::NoResponse);
+                std::ptr::null_mut()
+            }
+        },
+        None => {
+            warn_fetch_failed(srv, ArtFail::NoServer);
+            std::ptr::null_mut()
+        }
+    }
+}
+
 fn poster_worker() {
     loop {
         let (idx, key_s, srv, gen) = {
@@ -801,26 +855,36 @@ fn poster_worker() {
         // did, and the state transition below is untouched.
         let mut w = 0i32;
         let mut h = 0i32;
-        let px = match crate::plex::client_for(srv) {
-            Some(c) => match c.fetch_built(&key_s) {
-                // bytes arrived: from here on a failure is the decoder's, and `img.rs` logs it
-                Some(b) if !b.is_empty() => {
-                    img::img_decode_rgba(b.as_ptr(), b.len() as c_int, &mut w, &mut h)
-                }
-                Some(_) => {
-                    warn_fetch_failed(srv, ArtFail::Empty);
-                    std::ptr::null_mut()
-                }
+        // The Jellyfin slot fetches through ITS client: the key was built by `image_path` and is
+        // already a complete token-bearing path, which is what `get_bytes` dials as-is. The
+        // installed-client guard is `poster_key`'s: slot 0 alone must not pick this arm (a host
+        // test's Plex fixture registers there too).
+        #[cfg(feature = "jellyfin")]
+        let px = if srv == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+            match crate::jellyfin::client() {
+                Some(c) => match c.get_bytes(&key_s) {
+                    Some(b) if !b.is_empty() => {
+                        img::img_decode_rgba(b.as_ptr(), b.len() as c_int, &mut w, &mut h)
+                    }
+                    Some(_) => {
+                        warn_fetch_failed(srv, ArtFail::Empty);
+                        std::ptr::null_mut()
+                    }
+                    None => {
+                        warn_fetch_failed(srv, ArtFail::NoResponse);
+                        std::ptr::null_mut()
+                    }
+                },
                 None => {
-                    warn_fetch_failed(srv, ArtFail::NoResponse);
+                    warn_fetch_failed(srv, ArtFail::NoServer);
                     std::ptr::null_mut()
                 }
-            },
-            None => {
-                warn_fetch_failed(srv, ArtFail::NoServer);
-                std::ptr::null_mut()
             }
+        } else {
+            plex_poster_px(srv, &key_s, &mut w, &mut h)
         };
+        #[cfg(not(feature = "jellyfin"))]
+        let px = plex_poster_px(srv, &key_s, &mut w, &mut h);
 
         let mut g = store();
         let s = &mut g.slots[idx];

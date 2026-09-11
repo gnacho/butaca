@@ -562,6 +562,17 @@ pub fn sign_out() {
     drop(_gate);
     session::set_current(None);
     with_ctl(|c| *c = Ctl::default());
+    // The Jellyfin flavor's sign-out retires ITS credential instead of starting a Plex PIN:
+    // the config file goes (the next boot asks again), the installed client is retired (the
+    // stores fail closed at once), and the form's flow resets. `Route::Login` then shows
+    // `ui::jf_login`, which drives its own flow.
+    #[cfg(feature = "jellyfin")]
+    {
+        crate::jellyfin::boot::erase_config();
+        crate::jellyfin::uninstall();
+        crate::jellyfin::signin::reset();
+    }
+    #[cfg(not(feature = "jellyfin"))]
     start_login();
 }
 
@@ -575,6 +586,13 @@ pub fn erase_local_state() {
     crate::plex::revoke_all();
     drop(_gate);
     session::set_current(None);
+    // The Jellyfin flavor's local state is its config + installed client; both go too.
+    #[cfg(feature = "jellyfin")]
+    {
+        crate::jellyfin::boot::erase_config();
+        crate::jellyfin::uninstall();
+        crate::jellyfin::signin::reset();
+    }
     with_ctl(|c| *c = deleted_ctl());
 }
 

@@ -143,6 +143,18 @@ impl Write {
         }
     }
 
+    /// The Jellyfin spelling of the three writes — the mapping (and what deck-removal costs on a
+    /// server with no hide-from-deck) is documented at `jellyfin::client`'s view-state section.
+    /// WORKER THREAD, same spawn-site capture rule as [`Write::perform`].
+    #[cfg(feature = "jellyfin")]
+    fn perform_jellyfin(self, c: &crate::jellyfin::JfClient, rk: &str) -> bool {
+        match self {
+            Write::Watched => c.mark_played(rk),
+            Write::Unwatched => c.mark_unplayed(rk),
+            Write::RemoveFromDeck => c.clear_resume(rk),
+        }
+    }
+
     fn name(self) -> &'static str {
         match self {
             Write::Watched => "watched",
@@ -174,6 +186,33 @@ struct Req {
     /// is why `app.rs` passes nothing at all rather than something close: a wrong guid does not
     /// fail, it marks a different title watched on every other source.
     guid: String,
+}
+
+/// The server a queued write goes to, resolved on the main thread at the spawn site —
+/// `pms::kick`'s rule ("capture at the spawn site") says the worker must never ask which server
+/// is current; resolving a SLOT there is that rule, and it also means a share whose registration
+/// went away while the write sat in the queue is turned away with a log line instead of being
+/// sent to whatever now occupies the slot. The Jellyfin client lives outside the Plex registry,
+/// so its arm is the same slot test plus installed-client guard the poster and hub arms use.
+enum Resolved {
+    Plex(&'static crate::plex::Client),
+    #[cfg(feature = "jellyfin")]
+    Jellyfin(&'static crate::jellyfin::JfClient),
+}
+
+/// MAIN THREAD. `client_for`, never `client()`: the item may live on a share, and a scrobble sent
+/// to the wrong machine marks a DIFFERENT film watched there (both servers number their items
+/// from 1). `None` is a slot that is not registered, where `client()` panics — a view-state write
+/// is exactly the operation to skip and log rather than take to the wrong machine.
+fn resolve(sid: ServerId) -> Option<Resolved> {
+    // The guard is load-bearing, not redundant: the jellyfin slot is 0, which test fixtures also
+    // hand to `register_for_test` Plex clients — an absent jellyfin client must fall THROUGH to
+    // the Plex registry, not shadow it.
+    #[cfg(feature = "jellyfin")]
+    if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+        return crate::jellyfin::client().map(Resolved::Jellyfin);
+    }
+    crate::plex::client_for(sid).map(Resolved::Plex)
 }
 
 /// Writes waiting for a worker. Main-thread only; drained one at a time by [`kick`].
@@ -237,11 +276,9 @@ pub(crate) fn request(
     detail: Option<String>,
     guid: &str,
 ) -> bool {
-    // `client_for`, never `client()`: the item may live on a share, and a scrobble sent to the wrong
-    // machine marks a DIFFERENT film watched there (both servers number their items from 1). None is
-    // a slot that is not registered, where `client()` panics — a view-state write is exactly the
-    // operation to skip and log rather than take to the wrong machine.
-    if crate::plex::client_for(sid).is_none() {
+    // Resolved through the same choke point the worker will use, so a press that cannot be sent
+    // is refused HERE (and says so) rather than queued toward a drop.
+    if resolve(sid).is_none() {
         crate::log(&format!(
             "viewstate: rk={rk} {} DROPPED — server {} is not registered",
             w.name(),
@@ -339,7 +376,7 @@ fn kick() {
         // stopped holding a client is a write with nowhere to go: dropping it silently would be the
         // one PMS write with no line at all, which is what the request-time check above exists to
         // prevent, so it says so here too.
-        let Some(c) = crate::plex::client_for(req.sid) else {
+        let Some(target) = resolve(req.sid) else {
             crate::log(&format!(
                 "viewstate: rk={} {} DROPPED — server {} left the registry while queued",
                 req.rk,
@@ -352,19 +389,30 @@ fn kick() {
         let spawned = crate::task::spawn_small("viewstate", move || {
             // Filled OUTSIDE the guard, so a panicking write still lands (as a failure) rather than
             // latching the queue behind a worker that will never report.
-            let done = catch_unwind(move || {
-                let ok = w.perform(c, &rk);
-                // The fan-out runs INSIDE this worker rather than beside it. The queue is drained
-                // one worker at a time precisely so two writes for one item cannot land out of
-                // order, and a second thread doing the other sources would put those copies outside
-                // that ordering — a watched/unwatched pair could then settle differently per server,
-                // which is the one thing this whole feature exists to stop.
-                let also = if w.propagates() {
-                    fan_out(c, sid, &rk, &guid, w)
-                } else {
-                    Vec::new()
-                };
-                Done { ok, also }
+            let done = catch_unwind(move || match target {
+                Resolved::Plex(c) => {
+                    let ok = w.perform(c, &rk);
+                    // The fan-out runs INSIDE this worker rather than beside it. The queue is
+                    // drained one worker at a time precisely so two writes for one item cannot
+                    // land out of order, and a second thread doing the other sources would put
+                    // those copies outside that ordering — a watched/unwatched pair could then
+                    // settle differently per server, which is the one thing this whole feature
+                    // exists to stop.
+                    let also = if w.propagates() {
+                        fan_out(c, sid, &rk, &guid, w)
+                    } else {
+                        Vec::new()
+                    };
+                    Done { ok, also }
+                }
+                // No fan-out on this backend: it walks PLEX guids across PLEX sources, and a
+                // Jellyfin item has neither — and a mixed Plex+Jellyfin install is not a build
+                // this flavor produces, so there is never a second source to propagate to.
+                #[cfg(feature = "jellyfin")]
+                Resolved::Jellyfin(jc) => Done {
+                    ok: w.perform_jellyfin(jc, &rk),
+                    also: Vec::new(),
+                },
             })
             .unwrap_or_default();
             *MAIL.lock().unwrap_or_else(|e| e.into_inner()) = Some(done);

@@ -103,7 +103,13 @@ const PRODUCT_TITLE: &str = "Share product analytics?";
 /// carry runtime strings and native envelopes must pass a fixed allowlist that rejects content and
 /// identity scopes. Usage action fields remain fixed typed values; the only runtime strings are
 /// the separately allowlisted and bounded compatibility/network dimensions shown in the preview.
+#[cfg(feature = "jellyfin")]
+const CRASH_BODY: &str = "If butaca crashes, it can send technical details that help find and fix the problem. Reports may include the signal, code addresses, thread information and device compatibility details. They never include titles, Jellyfin accounts, searches, server names or addresses, passwords or tokens, subtitle text, or the product analytics identifier.";
+#[cfg(not(feature = "jellyfin"))]
 const CRASH_BODY: &str = "If PlxNative crashes, it can send technical details that help find and fix the problem. Reports may include the signal, code addresses, thread information and device compatibility details. They never include titles, Plex accounts, searches, server names or addresses, tokens, subtitle text, or the product analytics identifier.";
+#[cfg(feature = "jellyfin")]
+const PRODUCT_BODY: &str = "butaca can share which screens and features are used and broad sign-in and playback outcomes. Reports use a random installation identifier and can include the app version, webOS version, television model and SoC, and whether a selected server is local, remote or relayed. They never include titles, Jellyfin accounts, searches, server names or addresses, passwords or tokens, subtitle text, or exact viewing history.";
+#[cfg(not(feature = "jellyfin"))]
 const PRODUCT_BODY: &str = "PlxNative can share which screens and features are used and broad sign-in and playback outcomes. Reports use a random installation identifier and can include the app version, webOS version, television model and SoC, and whether a selected server is local, remote or relayed. They never include titles, Plex accounts, searches, server names or addresses, tokens, subtitle text, or exact viewing history.";
 
 const ROW_ERRORS: &str = "Crash reports";
@@ -149,6 +155,9 @@ const ROW_DELETE: &str = "Delete all local data";
 /// stated: after the press the app signs out and the screen is gone. The four recipients are the
 /// ones the privacy policy names, in the same order, because a person who reads both should not
 /// have to reconcile two lists.
+#[cfg(feature = "jellyfin")]
+const DELETE_SCOPE: &str = "This signs out and removes butaca data stored on this television. It does not delete data already sent to your Jellyfin server, Sentry or PostHog.";
+#[cfg(not(feature = "jellyfin"))]
 const DELETE_SCOPE: &str = "This signs out and removes PlxNative data stored on this television. It does not delete data already sent to Plex, your Plex Media Servers, Sentry or PostHog.";
 /// Where BACK goes from the Settings-hosted route.
 const CRUMB_SETTINGS: &str = "Settings";
@@ -554,7 +563,11 @@ fn rebuild_with_motion(sel: i32, preserve_motion: bool) {
         )
         .row(
             Row::new(ROW_POLICY)
-                .detail("The complete PlxNative privacy policy for this build.")
+                .detail(if cfg!(feature = "jellyfin") {
+                    "The complete butaca privacy policy for this build."
+                } else {
+                    "The complete PlxNative privacy policy for this build."
+                })
                 .chevron(true),
         )
         .row(
@@ -564,7 +577,11 @@ fn rebuild_with_motion(sel: i32, preserve_motion: bool) {
         );
     let local = Section::new("On this TV").row(
         Row::new(ROW_DELETE)
-            .detail("Sign out and remove PlxNative data from this TV.")
+            .detail(if cfg!(feature = "jellyfin") {
+                "Sign out and remove butaca data from this TV."
+            } else {
+                "Sign out and remove PlxNative data from this TV."
+            })
             .chevron(true),
     );
     table().set_sections(vec![reporting, info, local], sel, preserve_motion);
@@ -1029,9 +1046,13 @@ fn preview() -> String {
 /// ever turned back on, so "off" really does mean the old handle is gone.
 fn analytics_id_document() -> String {
     match consent::current().and_then(|c| c.install_id).as_deref() {
-        Some(id) => format!(
-            "YOUR ANALYTICS ID\n\n{id}\n\nWHAT IT IS\n\nA random identifier created on this television when you turned product analytics on. It is attached to analytics events so they can be counted as coming from one installation. It is not derived from your Plex account, your television or anything about you, and it is never sent with crash reports.\n\nHOW TO HAVE THESE EVENTS DELETED\n\nWrite to {CONTACT_EMAIL} and quote the identifier above. It is the only handle these events carry, so a request without it cannot be matched to anything.\n\nHOW IT ENDS\n\nTurning product analytics off deletes this identifier, and turning analytics on again creates a different one. Delete all local data removes it as well. Events already sent keep the old identifier, which is why it is worth copying down before you turn analytics off if you intend to ask for their deletion."
-        ),
+        Some(id) => {
+            // The account the identifier is NOT derived from is the flavour's own backend's.
+            let backend = if cfg!(feature = "jellyfin") { "Jellyfin" } else { "Plex" };
+            format!(
+                "YOUR ANALYTICS ID\n\n{id}\n\nWHAT IT IS\n\nA random identifier created on this television when you turned product analytics on. It is attached to analytics events so they can be counted as coming from one installation. It is not derived from your {backend} account, your television or anything about you, and it is never sent with crash reports.\n\nHOW TO HAVE THESE EVENTS DELETED\n\nWrite to {CONTACT_EMAIL} and quote the identifier above. It is the only handle these events carry, so a request without it cannot be matched to anything.\n\nHOW IT ENDS\n\nTurning product analytics off deletes this identifier, and turning analytics on again creates a different one. Delete all local data removes it as well. Events already sent keep the old identifier, which is why it is worth copying down before you turn analytics off if you intend to ask for their deletion."
+            )
+        }
         None => format!(
             "NO ANALYTICS ID\n\nProduct analytics is off, so this installation has no analytics identifier and is sending no analytics events.\n\nAn identifier is created only when you turn product analytics on, and deleting it is what turning it off does. If you had analytics on before and want events from that period deleted, write to {CONTACT_EMAIL} — but note that the identifier they carry was destroyed when analytics was turned off, so it can no longer be looked up from this television.\n\nCrash reports carry no installation or analytics identifier. (Each report has its own event id, and some carry a fingerprint grouping like reports together, but neither is tied to this installation or to you.)"
         ),
@@ -1206,7 +1227,11 @@ fn draw_question() {
             route_layer,
             crumb(),
             SETTINGS_TITLE,
-            "Control optional reporting, review exactly what may be shared, and manage data stored by PlxNative on this television.",
+            if cfg!(feature = "jellyfin") {
+                "Control optional reporting, review exactly what may be shared, and manage data stored by butaca on this television."
+            } else {
+                "Control optional reporting, review exactly what may be shared, and manage data stored by PlxNative on this television."
+            },
             theme::size::LABEL,
         );
         table().draw(route_layer, layout.sectioned_table());
@@ -1234,7 +1259,12 @@ fn draw_question() {
             ),
             PreviewKind::Policy => (
                 ROW_POLICY,
-                "How PlxNative handles local data, Plex services and optional reporting.",
+                // The flavour's own product and backend, named.
+                if cfg!(feature = "jellyfin") {
+                    "How butaca handles local data, Jellyfin services and optional reporting."
+                } else {
+                    "How PlxNative handles local data, Plex services and optional reporting."
+                },
             ),
             // The document's TITLE is the channel alone: the row's long form ("… — what is
             // actually sent") elides to "…what is actuall…" at the route title's rung inside the

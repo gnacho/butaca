@@ -36,7 +36,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 #: The app id users install. Everything else is this plus a dotted suffix.
-STABLE_ID = "com.beb.plxnative"
+STABLE_ID = "com.butaca"
 
 #: The flavours the Makefile will accept. A typo here would mint a third registered app on the
 #: television whose only symptom is a mystery tile, which is why the Makefile whitelists too.

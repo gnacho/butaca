@@ -105,6 +105,12 @@ lab-diagnostics = []
 # (LG's SDL fork shifts SDL_KeyboardEvent; stock SDL2 does not), and the wayland/glib calls that
 # have no host equivalent. Everything else — all of `ui/`, the whole Plex data layer, the demux
 # orchestration — is compiled identically for both.
+# Jellyfin backend (PoC). ADDITIVE in the cargo sense: the `jellyfin/` module compiles either
+# way, and what the feature switches on is the WIRING — the boot-gate arm that reads
+# jellyfin.json, the home-fetch arm in `pms`, the poster arms — each a `#[cfg]` beside the Plex
+# path it parallels, so an ordinary build is byte-for-byte unaffected. `make JELLYFIN=1 …` builds
+# it; the flavor keeps its own app id so both installs can sit on one television.
+jellyfin = []
 hostsim = []
 
 # Warnings are ERRORS, for this crate, in every cargo invocation — build, check, test, clippy, the

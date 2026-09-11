@@ -35,6 +35,8 @@ pub mod label;
 pub mod legal; // Privacy / open-source / source-offer / trademarks — the LG, Plex and LGPL duties that must be readable ON the TV
 pub mod library; // the Library browse screen (poster wall + server-driven sort/filter)
 pub mod login; // sign-in screen (QR / short code) for the plex.tv account flow
+#[cfg(feature = "jellyfin")]
+pub mod jf_login; // the Jellyfin flavor's sign-in — a server/user/password form, not a QR
 pub mod more_menu; // the player's `…` overflow popover (holds the Stats for nerds toggle)
 pub mod nav; // ROUTE-level page cross-fade + the continuous-chrome rule (the tab bar rides across)
 pub mod onboard; // first-run route: which sources feed Home, asked once per PROFILE

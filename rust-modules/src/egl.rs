@@ -136,6 +136,14 @@ fn cstr(p: *const c_char) -> String {
 /// of whatever context is current **on the calling thread**, and SDL made ours current on this one.
 /// Asking EGL is what makes this a probe of the real surface rather than of a display we created.
 pub(crate) fn probe() {
+    // hostsim on a GLX desktop: `eglGetCurrentDisplay` resolves through SDL_GL_GetProcAddress to
+    // a stub whose answer is garbage, and querying a bogus display segfaults Mesa's EGL — the
+    // probe is television diagnostics, so let the simulator opt out.
+    #[cfg(feature = "hostsim")]
+    if std::env::var_os("PLXNATIVE_SKIP_EGL_PROBE").is_some() {
+        crate::log("egl: probe skipped (PLXNATIVE_SKIP_EGL_PROBE)");
+        return;
+    }
     let mut lib: Option<Handle> = None;
     let Some(get_display) = resolve("eglGetCurrentDisplay", &mut lib) else {
         // Not a fault on a desktop simulator (there is no EGL there at all) and a genuine

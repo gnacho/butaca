@@ -84,7 +84,7 @@ fn rebuild(sel: i32) {
     actions.extend([Action::Privacy, Action::Legal]);
     sections.push(
         Section::new("System").row(
-            Row::new("About PlxNative")
+            Row::new(if cfg!(feature = "jellyfin") { "About butaca" } else { "About PlxNative" })
                 .detail("Version, copyright and project information.")
                 .chevron(true),
         ),
@@ -232,7 +232,11 @@ pub(crate) fn draw() {
         p,
         None,
         "Settings",
-        "Settings apply to this Plex profile on this television. You can return here from the profile menu at any time.",
+        if cfg!(feature = "jellyfin") {
+            "Settings apply to this Jellyfin profile on this television. You can return here from the profile menu at any time."
+        } else {
+            "Settings apply to this Plex profile on this television. You can return here from the profile menu at any time."
+        },
         theme::size::LABEL,
     );
     table().draw(p, list_frame());

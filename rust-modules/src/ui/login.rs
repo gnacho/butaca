@@ -62,7 +62,20 @@ fn scene() -> &'static mut Scene {
     }
 }
 
+/// The delegation condition, as a runtime predicate rather than a bare cfg block: the four
+/// entry points below early-return through it, and a `#[cfg]`d block ending in `return` would
+/// leave the Plex bodies statically unreachable on this build — which `-D warnings` grades as
+/// an error. A function call is not analyzed, so both bodies stay live to the compiler.
+#[cfg(feature = "jellyfin")]
+fn jellyfin_flavor() -> bool {
+    true
+}
+
 pub fn init() {
+    // The Jellyfin flavor's sign-in is a different screen wearing this route — its own module,
+    // reached through every entry point below's delegation arm.
+    #[cfg(feature = "jellyfin")]
+    crate::ui::jf_login::init();
     unsafe {
         *addr_of_mut!(SCENE) = Some(Scene {
             spin_ms: 0.0,
@@ -78,6 +91,11 @@ pub fn init() {
 /// Mount the auth route without replacing the cached QR texture. A fresh auth flow invalidates the
 /// texture from [`update`] when it reaches `Creating`; this only resets the visit's visual ground.
 pub fn enter() {
+    #[cfg(feature = "jellyfin")]
+    if jellyfin_flavor() {
+        crate::ui::jf_login::enter();
+        return;
+    }
     let s = scene();
     s.ground.reset();
     // A fresh visit is a fresh wait, whatever phase the last one died in.
@@ -87,6 +105,11 @@ pub fn enter() {
 }
 
 pub fn update(dt: f32) {
+    #[cfg(feature = "jellyfin")]
+    if jellyfin_flavor() {
+        crate::ui::jf_login::update(dt);
+        return;
+    }
     let s = scene();
     s.spin_ms += dt * 1000.0;
     // Each phase gets its own clock. A flow that walks Creating → Waiting → Discovering is making
@@ -130,6 +153,11 @@ fn ensure_qr_tex(s: &mut Scene) {
 }
 
 pub fn draw() {
+    #[cfg(feature = "jellyfin")]
+    if jellyfin_flavor() {
+        crate::ui::jf_login::draw();
+        return;
+    }
     crate::gfx::frame_clear(theme::CLEAR_RGB.0, theme::CLEAR_RGB.1, theme::CLEAR_RGB.2);
     let p = Painter::root();
     let s = scene();
@@ -374,6 +402,11 @@ fn qr_layout(layout: RouteLayout) -> QrLayout {
 }
 
 pub fn key(sym: c_uint, wcode: c_uint) {
+    #[cfg(feature = "jellyfin")]
+    if jellyfin_flavor() {
+        crate::ui::jf_login::key(sym, wcode);
+        return;
+    }
     if auth::phase() == Phase::Deleted && is_ok(sym) {
         auth::start_login();
         return;

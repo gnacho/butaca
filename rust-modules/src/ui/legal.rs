@@ -49,14 +49,22 @@ impl Page {
             Self::Privacy => "Privacy policy",
             Self::OpenSource => "Open-source licences",
             Self::Ffmpeg => "FFmpeg & source offer",
-            Self::Source => "PlxNative source code",
+            Self::Source => if cfg!(feature = "jellyfin") {
+                "butaca source code"
+            } else {
+                "PlxNative source code"
+            },
             Self::Trademarks => "Trademarks & non-affiliation",
             Self::Contact => "Privacy & security contact",
         }
     }
     fn subtitle(self) -> &'static str {
         match self {
-            Self::Privacy => "How PlxNative handles local data and optional reports.",
+            Self::Privacy => if cfg!(feature = "jellyfin") {
+                "How butaca handles local data and optional reports."
+            } else {
+                "How PlxNative handles local data and optional reports."
+            },
             Self::OpenSource => "Components, copyright holders and licence texts.",
             Self::Ffmpeg => "LGPL notice, replaceability and corresponding source.",
             Self::Source => "Project source, build scripts and release materials.",
@@ -81,11 +89,32 @@ impl Page {
     }
 }
 
+// The Jellyfin flavour's policy differs in what there IS, not in tone: no central account
+// service exists to name (sign-in is the viewer's own server), and the stored secret is a
+// password in a 0600 file rather than a Plex token — both said out loud below.
+#[cfg(feature = "jellyfin")]
+const PRIVACY: &str = "RESPONSIBLE FOR BUTACA DATA\n\nbutaca’s maintainers are responsible only for data butaca stores locally and for optional reports you choose to share.\n\nYOUR JELLYFIN SERVER\n\nbutaca is an independent client for Jellyfin. There is no central Jellyfin account service: to sign you in, browse and play media, update watch progress and use server features, the app communicates directly with the Jellyfin server you name. Those requests are handled by that server and its operator. butaca’s developer does not receive them.\n\nON THIS TELEVISION\n\nbutaca stores the address of your Jellyfin server, your username and your password (in a file only the app can read), a device identifier, your Home library choices, your recent searches, your playback quality preference, and a small rotating local log. It also stores your answers to the two optional-reporting questions, the random Analytics ID if you turned product analytics on, any report waiting to be sent, and a marker recording how much of the crash log has already been read. It keeps no bookmark of its own for where you stopped watching: playback position is held by your Jellyfin server. Delete all local data in Settings signs out and removes butaca data from this television.\n\nOPTIONAL CRASH REPORTS\n\nIf enabled, technical crash details are sent to Sentry in Germany. They can include the signal, code addresses, thread information and device compatibility details. A crash report carries no installation identifier, so it cannot be linked to you or to any other report you have sent.\n\nOPTIONAL PRODUCT ANALYTICS\n\nIf enabled, screen and feature events and broad sign-in and playback outcomes are sent to PostHog in Germany with a random installation identifier. Settings shows that identifier as your Analytics ID while product analytics is on.\n\nNEVER INCLUDED\n\nTitles, Jellyfin account names, searches, server names or addresses, passwords and tokens, subtitle text and exact viewing history are not included in either optional report type. Both choices are independent and can be changed at any time in Settings.\n\nRETENTION\n\nDifferent things here have different lifetimes, so this is stated for each. Your sign-in — the stored server address, username and password — is removed when you sign out. Your answers to the two optional-reporting questions, and the Analytics ID if one exists, are kept apart from the sign-in and are NOT removed by signing out: they are meant to outlast it, so that a decision you have already made is not put to you again. A report waiting to be sent is deleted once it is sent, and a queued report of a category you switch off is deleted at that moment. The local log rotates, so its oldest lines are discarded continuously. Delete all local data removes all of it. A report that has already been sent is held by the service that received it, under that service’s own retention schedule; write to the contact below to ask what those periods currently are.\n\nYOUR CHOICES AND HOW TO ASK\n\nBoth optional reports are off until you turn them on, and either can be turned off again at any time in Settings. Delete all local data removes what butaca stored on this television; it does not reach anything already sent. To ask what product analytics holds for your installation, or to have it deleted, write to the contact below and quote your Analytics ID from Settings. Crash reports carry no installation identifier, so an individual crash report cannot be found or deleted on request; those age out under the retention schedule above.\n\nWHERE DATA IS PROCESSED\n\nOptional crash reports are processed by Sentry in Germany and optional product analytics by PostHog in Germany. A Jellyfin server you connect to may be located anywhere and is operated by whoever runs it, not by butaca’s developer.\n\nUNINSTALLING\n\nRemoving butaca removes the application, but webOS gives an application no way to run code as it is removed, so anything kept outside the application’s own directory can survive. Two things are deliberately kept there: your sign-in, so that reinstalling does not sign you out, and your optional-reporting answers together with the Analytics ID, so that a decision you have already made is not put to you again after a reinstall. Use Delete all local data BEFORE uninstalling if you want nothing of butaca left on this television.\n\nCONTACT\n\nPrivacy questions: support@plxnative.com";
+#[cfg(not(feature = "jellyfin"))]
 const PRIVACY: &str = "RESPONSIBLE FOR PLXNATIVE DATA\n\nGleb Linnik is responsible only for data PlxNative stores locally and for optional reports you choose to share.\n\nPLEX SERVICES\n\nPlxNative is an independent client for Plex. To sign you in, discover servers and provide Plex account features, the app communicates directly with Plex services. Plex processes information received by those services under Plex’s own Privacy Policy. PlxNative’s developer does not receive that information.\n\nPlex Privacy Policy: https://www.plex.tv/about/privacy-legal/\n\nPLEX MEDIA SERVERS\n\nTo browse and play media, update watch progress and use server features, PlxNative communicates directly with the Plex Media Servers you select. Those requests are handled by the selected server and its operator. PlxNative’s developer does not receive them.\n\nON THIS TELEVISION\n\nPlxNative stores your Plex account token and a separate token for each server you use, the addresses and identifiers of those servers, the profile you selected together with the profile names and pictures on your account, your Home library choices, your recent searches, your playback quality preference, and a small rotating local log. It also stores your answers to the two optional-reporting questions, the random Analytics ID if you turned product analytics on, any report waiting to be sent, and a marker recording how much of the crash log has already been read. It keeps no bookmark of its own for where you stopped watching: playback position is held by your Plex Media Server. Delete all local data in Settings signs out and removes PlxNative data from this television.\n\nOPTIONAL CRASH REPORTS\n\nIf enabled, technical crash details are sent to Sentry in Germany. They can include the signal, code addresses, thread information and device compatibility details. A crash report carries no installation identifier, so it cannot be linked to you or to any other report you have sent.\n\nOPTIONAL PRODUCT ANALYTICS\n\nIf enabled, screen and feature events and broad sign-in and playback outcomes are sent to PostHog in Germany with a random installation identifier. Settings shows that identifier as your Analytics ID while product analytics is on.\n\nNEVER INCLUDED\n\nTitles, Plex accounts, searches, server names or addresses, tokens, subtitle text and exact viewing history are not included in either optional report type. Both choices are independent and can be changed at any time in Settings.\n\nRETENTION\n\nDifferent things here have different lifetimes, so this is stated for each. Your sign-in, the servers registered with it and their tokens are removed when you sign out. Your answers to the two optional-reporting questions, and the Analytics ID if one exists, are kept apart from the sign-in and are NOT removed by signing out: they are meant to outlast it, so that a decision you have already made is not put to you again. A report waiting to be sent is deleted once it is sent, and a queued report of a category you switch off is deleted at that moment. The local log rotates, so its oldest lines are discarded continuously. Delete all local data removes all of it. A report that has already been sent is held by the service that received it, under that service’s own retention schedule; write to the contact below to ask what those periods currently are.\n\nYOUR CHOICES AND HOW TO ASK\n\nBoth optional reports are off until you turn them on, and either can be turned off again at any time in Settings. Delete all local data removes what PlxNative stored on this television; it does not reach anything already sent. To ask what product analytics holds for your installation, or to have it deleted, write to the contact below and quote your Analytics ID from Settings. Crash reports carry no installation identifier, so an individual crash report cannot be found or deleted on request; those age out under the retention schedule above.\n\nWHERE DATA IS PROCESSED\n\nOptional crash reports are processed by Sentry in Germany and optional product analytics by PostHog in Germany. Plex processes what its own services receive under Plex’s Privacy Policy. A Plex Media Server you connect to may be located anywhere and is operated by whoever runs it, not by PlxNative’s developer.\n\nUNINSTALLING\n\nRemoving PlxNative removes the application, but webOS gives an application no way to run code as it is removed, so anything kept outside the application’s own directory can survive. Two things are deliberately kept there: your sign-in, so that reinstalling does not sign you out, and your optional-reporting answers together with the Analytics ID, so that a decision you have already made is not put to you again after a reinstall. Use Delete all local data BEFORE uninstalling if you want nothing of PlxNative left on this television.\n\nCONTACT\n\nPrivacy questions: support@plxnative.com";
+#[cfg(feature = "jellyfin")]
+const OPEN_SOURCE: &str = "butaca is free software under the MIT Licence, built on the plx-native project. Copyright (c) 2026 Gleb Linnik and contributors.\n\nThe application package includes THIRD-PARTY-NOTICES.md, the complete licence texts and font notices. Included projects include libcurl, SDL2, SDL2_ttf, nanosvg, zlib, jsmpeg, Inter, Noto Sans CJK, Feather, Heroicons, Material Icons and the Rust crates used by this build.";
+#[cfg(not(feature = "jellyfin"))]
 const OPEN_SOURCE: &str = "PlxNative is free software under the MIT Licence. Copyright (c) 2026 Gleb Linnik.\n\nThe application package includes THIRD-PARTY-NOTICES.md, the complete licence texts and font notices. Included projects include libcurl, SDL2, SDL2_ttf, nanosvg, zlib, jsmpeg, Inter, Noto Sans CJK, Feather, Heroicons, Material Icons and the Rust crates used by this build.";
+#[cfg(feature = "jellyfin")]
+const FFMPEG: &str = "This software uses libraries from the FFmpeg project under the LGPLv2.1. FFmpeg is copyright (c) the FFmpeg developers; butaca does not own FFmpeg.\n\nThe FFmpeg libraries are unmodified and loaded dynamically, and may be replaced with an interface-compatible build. The complete corresponding FFmpeg 9.0 source, exact configure line and build script are published with every plx-native release.";
+#[cfg(not(feature = "jellyfin"))]
 const FFMPEG: &str = "This software uses libraries from the FFmpeg project under the LGPLv2.1. FFmpeg is copyright (c) the FFmpeg developers; PlxNative does not own FFmpeg.\n\nThe FFmpeg libraries are unmodified and loaded dynamically, and may be replaced with an interface-compatible build. The complete corresponding FFmpeg 9.0 source, exact configure line and build script are published with every PlxNative release.";
+#[cfg(feature = "jellyfin")]
+const SOURCE: &str = "butaca is built on the plx-native source code, release materials and build scripts, published at:\n\ngithub.com/GLinnik21/plx-native\n\nRelease source packages include the corresponding FFmpeg source and the script used to build it.";
+#[cfg(not(feature = "jellyfin"))]
 const SOURCE: &str = "PlxNative source code, release materials and build scripts are published at:\n\ngithub.com/GLinnik21/plx-native\n\nRelease source packages include the corresponding FFmpeg source and the script used to build it.";
+#[cfg(feature = "jellyfin")]
+const TRADEMARKS: &str = "Jellyfin is a free-software media system developed by the Jellyfin Project.\n\nLG and webOS are trademarks of LG Electronics Inc.\n\nbutaca is an independent, unofficial application. It is not produced by, endorsed by, or affiliated with the Jellyfin Project or LG Electronics Inc.";
+#[cfg(not(feature = "jellyfin"))]
 const TRADEMARKS: &str = "Plex, the Plex logo and Plex Media Server are trademarks of Plex, Inc.\n\nLG and webOS are trademarks of LG Electronics Inc.\n\nPlxNative is an independent, unofficial application. It is not produced by, endorsed by, or affiliated with Plex, Inc. or LG Electronics Inc.";
+#[cfg(feature = "jellyfin")]
+const CONTACT: &str = "Privacy questions may be sent to support@plxnative.com.\n\nSecurity vulnerabilities may be reported privately through GitHub Security Advisories for GLinnik21/plx-native. Please do not include Jellyfin passwords or tokens, server addresses or personal media information in a report.";
+#[cfg(not(feature = "jellyfin"))]
 const CONTACT: &str = "Privacy questions may be sent to support@plxnative.com.\n\nSecurity vulnerabilities may be reported privately through GitHub Security Advisories for GLinnik21/plx-native. Please do not include Plex tokens, server addresses or personal media information in a report.";
 /// The one page here that carries a NUMBER, and so the one that can go stale on its own.
 ///
@@ -98,6 +127,9 @@ const CONTACT: &str = "Privacy questions may be sent to support@plxnative.com.\n
 ///
 /// `concat!` rather than a `format!` at draw time: the whole page is a `&'static str` the reader
 /// borrows, and `env!` is a literal at expansion.
+#[cfg(feature = "jellyfin")]
+const ABOUT: &str = concat!("VERSION\n\nbutaca ", env!("PLX_VERSION"), "\n\nUPSTREAM\n\nplx-native by Gleb Linnik\n\nLICENCE\n\nMIT Licence\n\nPROJECT\n\ngithub.com/GLinnik21/plx-native\n\nbutaca is an independent, unofficial Jellyfin client built on plx-native. It is not produced by, endorsed by, or affiliated with the Jellyfin Project or LG Electronics Inc.");
+#[cfg(not(feature = "jellyfin"))]
 const ABOUT: &str = concat!("VERSION\n\nPlxNative ", env!("PLX_VERSION"), "\n\nDEVELOPER\n\nGleb Linnik\n\nLICENCE\n\nMIT Licence\n\nPROJECT\n\ngithub.com/GLinnik21/plx-native\n\nPlxNative is an independent, unofficial application. It is not produced by, endorsed by, or affiliated with Plex, Inc. or LG Electronics Inc.");
 
 static mut POP: Popover = Popover::new();
@@ -245,7 +277,7 @@ pub(crate) fn draw() {
         layout.draw_narrative(
             p,
             Some(CRUMB_SETTINGS),
-            "About PlxNative",
+            if cfg!(feature = "jellyfin") { "About butaca" } else { "About PlxNative" },
             "Version, copyright, project source and independent-client information.",
             theme::size::LABEL,
         );
@@ -259,7 +291,11 @@ pub(crate) fn draw() {
             index,
             Some(CRUMB_SETTINGS),
             INDEX_TITLE,
-            "Read the notices that apply to this build, its open-source components and its relationship with Plex and LG.",
+            if cfg!(feature = "jellyfin") {
+                "Read the notices that apply to this build, its open-source components and its relationship with the Jellyfin Project and LG."
+            } else {
+                "Read the notices that apply to this build, its open-source components and its relationship with Plex and LG."
+            },
             theme::size::LABEL,
         );
         table().draw(index, layout.sectioned_table());
@@ -358,18 +394,32 @@ mod tests {
     #[test]
     fn about_names_the_running_version() {
         let v = crate::plex::identity::VERSION;
+        let product = if cfg!(feature = "jellyfin") { "butaca" } else { "PlxNative" };
         assert!(
-            ABOUT.contains(&format!("PlxNative {v}")),
-            "About should name {v}, says: {ABOUT:?}"
+            ABOUT.contains(&format!("{product} {v}")),
+            "About should name {product} {v}, says: {ABOUT:?}"
         );
     }
 
+    #[cfg(not(feature = "jellyfin"))]
     #[test]
     fn plex_boundary_is_explicit() {
         assert!(PRIVACY.contains(
             "Plex processes information received by those services under Plex’s own Privacy Policy"
         ));
         assert!(PRIVACY.contains("https://www.plex.tv/about/privacy-legal/"));
+        assert!(!TRADEMARKS.contains("used under licence"));
+    }
+
+    /// The Jellyfin flavour's boundary duties, mirrored: there is no central Jellyfin service to
+    /// disclaim, the stored secret is named honestly, and the non-affiliation statement points at
+    /// the Jellyfin Project rather than Plex, Inc.
+    #[cfg(feature = "jellyfin")]
+    #[test]
+    fn jellyfin_boundary_is_explicit() {
+        assert!(PRIVACY.contains("no central Jellyfin account service"));
+        assert!(PRIVACY.contains("your username and your password"));
+        assert!(TRADEMARKS.contains("the Jellyfin Project"));
         assert!(!TRADEMARKS.contains("used under licence"));
     }
 }

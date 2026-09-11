@@ -6496,8 +6496,11 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
         let (wx, wy, ww_req, wh_req) = (0, 0, SCR_W, SCR_H);
         // The title is furniture a television never draws (no window manager, no decoration) and
         // the first thing a desktop shows, so the two builds spell it differently: the device keeps
-        // the process-shaped name every log, `pidof` recipe and skill already uses.
-        #[cfg(feature = "hostsim")]
+        // the process-shaped name every log, `pidof` recipe and skill already uses. The jellyfin
+        // flavour's desktop window takes its own product name.
+        #[cfg(all(feature = "hostsim", feature = "jellyfin"))]
+        let title = c"butaca";
+        #[cfg(all(feature = "hostsim", not(feature = "jellyfin")))]
         let title = c"PlxNative";
         #[cfg(not(feature = "hostsim"))]
         let title = c"plxnative";
@@ -6588,6 +6591,13 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
         // or — for automated runs only (the regression harness, headless captures) — from the
         // /tmp/plxnative-token dev trigger. The value is NEVER logged (only that one is in effect).
         let dev_token = match crate::dev::read("token") {
+            // The Jellyfin flavor has no PMS for a Plex token to open: the trigger is Plex
+            // harness vocabulary, and honoring it here would boot a Jellyfin install into a
+            // dead Home against the compiled-in shim host. Ignored, said out loud once.
+            Some(s) if !s.is_empty() && cfg!(feature = "jellyfin") => {
+                log("token: /tmp/plxnative-token ignored — no Plex server on this flavor");
+                String::new()
+            }
             Some(s) if !s.is_empty() => {
                 log("token: using /tmp/plxnative-token (test identity)");
                 s
@@ -6754,8 +6764,15 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
             crate::dev::playback_quality_override().unwrap_or_else(|| session.playback_quality()),
         );
         let boot_to = if crate::dev::flag("login") {
-            crate::auth::start_login();
-            log("boot: /tmp/plxnative-login — starting QR login");
+            // Same trigger, two flavors: Plex starts the QR flow; on Jellyfin the Login route
+            // IS the sign-in form, so there is no flow to start.
+            #[cfg(not(feature = "jellyfin"))]
+            {
+                crate::auth::start_login();
+                log("boot: /tmp/plxnative-login — starting QR login");
+            }
+            #[cfg(feature = "jellyfin")]
+            log("boot: /tmp/plxnative-login — the sign-in form");
             BootTo::Login
         } else if !dev_token.is_empty() {
             // `Origin::http` names the assumption out loud: the host and port compiled into the
@@ -6776,7 +6793,18 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                 Some(tier),
             );
             BootTo::Home
-        } else if session.can_go_local() {
+        } else if crate::jellyfin::boot::try_boot() {
+            // The Jellyfin flavor's whole boot: a config file named a server, the server took
+            // the credentials, the client is installed. On a Plex build this arm is a constant
+            // `false` (the function says so at its definition), so this chain is unchanged there.
+            activate_server();
+            log("boot: jellyfin config — signed in, to Home");
+            BootTo::Home
+        // A Plex stored session is never this flavor's to boot from: a Jellyfin install does
+        // not write one, and a legacy file left by a Plex build under the same appid must not
+        // walk this boot into a server-less Plex Home. The Jellyfin flavor reaches Home through
+        // `try_boot` above — which has already installed the client — or not at all.
+        } else if session.can_go_local() && !cfg!(feature = "jellyfin") {
             if session.home_users.len() > 1 && (!automated_boot() || pick_user.is_some()) {
                 // Who's watching first. Only the read client is installed here (the avatars proxy
                 // through the PMS photo transcoder); the catalog fetch + playback config happen in
@@ -6821,8 +6849,16 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                 BootTo::Home
             }
         } else {
-            crate::auth::start_login();
-            log("boot: no session — starting QR sign-in");
+            // The Jellyfin flavor has no plex.tv to pin against: `Route::Login` is the form
+            // (`ui::jf_login`), which drives `jellyfin::signin` itself. Starting the QR flow
+            // here would point a Jellyfin install at the wrong service entirely.
+            #[cfg(feature = "jellyfin")]
+            log("boot: no jellyfin config — the sign-in form");
+            #[cfg(not(feature = "jellyfin"))]
+            {
+                crate::auth::start_login();
+                log("boot: no session — starting QR sign-in");
+            }
             BootTo::Login
         };
         crate::player::acb_init(mt);
@@ -9484,6 +9520,19 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                 }
             }
 
+            // The Jellyfin flavor's sign-in handoff: the worker has installed the client and
+            // persisted the config; the main thread owes the route flip and the same ceremony the
+            // boot arm performs (`activate_server`, a clean trail). Plex's `take_ready` below is
+            // never fed on this build — the boot gate no longer starts the QR flow.
+            #[cfg(feature = "jellyfin")]
+            if matches!(route, Route::Login) && crate::jellyfin::signin::take_ready() {
+                crate::ui::jf_login::leave(); // the system keyboard does not follow the route
+                activate_server();
+                trail.reset();
+                maybe_ask_consent();
+                log("login: jellyfin signed in — entering Home");
+                route = Route::Home;
+            }
             // login flow: install resolved creds on the MAIN thread, then follow the flow phase →
             // route (Login while creating/waiting/discovering/error, Profiles while picking/switching).
             if matches!(route, Route::Login | Route::Profiles) {

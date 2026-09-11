@@ -36,6 +36,9 @@ use std::ptr::{addr_of, addr_of_mut};
 /// The question. One line, and it names the app rather than saying "this app" — the alert can be
 /// raised from a Home screen that fills the panel, so the only thing identifying what is about to
 /// close is this sentence.
+#[cfg(feature = "jellyfin")]
+const QUESTION: &core::ffi::CStr = c"Exit butaca?";
+#[cfg(not(feature = "jellyfin"))]
 const QUESTION: &core::ffi::CStr = c"Exit PlxNative?";
 /// The two answers, in screen order. `Cancel` first because it is the safe one and it is the one
 /// focus rests on.

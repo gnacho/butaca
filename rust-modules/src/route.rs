@@ -4106,6 +4106,11 @@ fn transcode_spec<'a>(
 
 struct ScrobbleWork {
     client: Option<&'static crate::plex::Client>,
+    /// The Jellyfin client when the playback came from the Jellyfin backend — captured at the
+    /// same spawn site and under the same "current is the origin" caveat as `client` (a jellyfin
+    /// install has exactly one server, so cur IS the origin for the life of this PoC).
+    #[cfg(feature = "jellyfin")]
+    jf_client: Option<&'static crate::jellyfin::JfClient>,
     final_report: Option<(String, i64, i64)>,
     report_th: Option<std::thread::JoinHandle<()>>,
     session: String,
@@ -4118,6 +4123,41 @@ struct ScrobbleWork {
 }
 
 impl ScrobbleWork {
+    /// The final `stopped` report, on whichever backend the playback came from. `session` is
+    /// already tsession-when-set (the capture in [`scrobble_stop`]), which on the Jellyfin side
+    /// is the PlaySessionId rule `jellyfin::profile` states.
+    fn post_stopped(&self, rk: &str, t_ms: i64, d_ms: i64) -> bool {
+        #[cfg(feature = "jellyfin")]
+        if let Some(jc) = self.jf_client {
+            return jc.session_stopped(rk, t_ms, &self.session);
+        }
+        self.client.is_some_and(|c| {
+            c.timeline(&crate::plex::TimelineReport {
+                rating_key: rk,
+                state: crate::plex::TimelineState::Stopped,
+                time_ms: t_ms,
+                duration_ms: d_ms,
+                session: &self.session,
+                play_queue_id: &self.play_queue_id,
+                play_queue_item_id: &self.play_queue_item_id,
+                audio_stream_id: self.audio_stream_id,
+                subtitle_stream_id: self.subtitle_stream_id,
+            })
+        })
+    }
+
+    /// The server-side encoder kill, on whichever backend holds the session. Jellyfin's is a
+    /// best-effort DELETE (the server reaps a quiet HLS encoder on its own); Plex's is the
+    /// transcode-session stop.
+    fn stop_encoder(&self) -> bool {
+        #[cfg(feature = "jellyfin")]
+        if let Some(jc) = self.jf_client {
+            return jc.stop_active_encodings(&self.transcode_session);
+        }
+        self.client
+            .is_some_and(|c| c.transcode_stop(&self.transcode_session))
+    }
+
     fn run(mut self) {
         // The progress reporter's last `playing` POST attempt must finish BEFORE this `stopped`
         // attempt begins. Waiting here keeps that ordering off the SDL thread; the stop generation
@@ -4129,19 +4169,7 @@ impl ScrobbleWork {
         if let Some((rk, t_ms, d_ms)) = self.final_report.take() {
             let ok = {
                 let _effect = TIMELINE_EFFECT.lock().unwrap_or_else(|e| e.into_inner());
-                self.client.is_some_and(|c| {
-                    c.timeline(&crate::plex::TimelineReport {
-                        rating_key: &rk,
-                        state: crate::plex::TimelineState::Stopped,
-                        time_ms: t_ms,
-                        duration_ms: d_ms,
-                        session: &self.session,
-                        play_queue_id: &self.play_queue_id,
-                        play_queue_item_id: &self.play_queue_item_id,
-                        audio_stream_id: self.audio_stream_id,
-                        subtitle_stream_id: self.subtitle_stream_id,
-                    })
-                })
+                self.post_stopped(&rk, t_ms, d_ms)
             };
             crate::log(&format!(
                 "timeline stopped t={}s/{}s ok={}",
@@ -4157,9 +4185,7 @@ impl ScrobbleWork {
             stop.finish();
         }
         if !self.transcode_session.is_empty() {
-            let ok = self
-                .client
-                .is_some_and(|c| c.transcode_stop(&self.transcode_session));
+            let ok = self.stop_encoder();
             crate::log(&format!("transcode stopped ok={}", ok as i32));
         }
     }
@@ -4205,6 +4231,14 @@ pub(crate) fn scrobble_stop(
     // transcode session both live there, and by the time a stop runs the user may well have walked
     // back to a different source's Home.
     let client = cur_client();
+    // The Jellyfin backend's client lives outside the Plex registry, so `cur_client` above can
+    // never resolve it; capture it under the same origin rule (one server per jellyfin install).
+    #[cfg(feature = "jellyfin")]
+    let jf_client = if cur_sid() == crate::jellyfin::SERVER_ID {
+        crate::jellyfin::client()
+    } else {
+        None
+    };
     // Serialise against a previous stop still in flight: these carry a position for a specific
     // item, and letting two race would let an older one land last. Normally free — the measured
     // baseline for a finished worker is 0 ms.
@@ -4213,6 +4247,8 @@ pub(crate) fn scrobble_stop(
         (final_report.is_some() || report_th.is_some()).then(|| TIMELINE_STOP_FENCE.announce());
     let work = std::sync::Arc::new(std::sync::Mutex::new(Some(ScrobbleWork {
         client,
+        #[cfg(feature = "jellyfin")]
+        jf_client,
         final_report,
         report_th,
         session,
@@ -4429,6 +4465,117 @@ pub(crate) fn drain_scrobble() {
     SCROBBLE_JOIN.drain();
 }
 
+/// The Jellyfin arm of a live-transcode seek. Where Plex restarts the encode through
+/// `/decision` + a fresh `-abr-N` encoder session, Jellyfin's equivalent is a NEW
+/// `POST /Items/{id}/PlaybackInfo` whose `StartTimeTicks` carries the offset: the server cuts the
+/// HLS playlist from that position and returns a fresh `TranscodingUrl` (and usually a fresh
+/// `PlaySessionId`). That URL replaces the route, the old session is retired the same way the Plex
+/// arm retires its previous encoder, and the caller re-opens the new URL from byte 0.
+#[cfg(feature = "jellyfin")]
+fn jellyfin_transcode_seek(offset_secs: i64, rk: &str) -> Option<String> {
+    if transcode_session().is_empty() || rk.is_empty() {
+        return None;
+    }
+    let c = crate::jellyfin::client()?;
+    // Reserve the same start transaction the Plex arm reserves, so a seek cannot publish a
+    // replacement beneath a Load that is already on its way.
+    let route_start = begin_route_start();
+    let reject_preparation = || {
+        if let Some(ticket) = route_start {
+            let _ = reject_route_start_preparation(ticket);
+        }
+    };
+    // Reconcile the worker-owned projection (if any) into the session before snapshotting, exactly
+    // like the Plex arm — the URL/ceiling to replace is the one live NOW, not the bootstrap one.
+    let live_hls = sync_active_hls_to_session();
+    let expected = live_hls
+        .as_ref()
+        .map(|(ticket, _)| ticket.clone())
+        .unwrap_or_else(worker_ticket);
+    let previous = expected.encoder().to_owned();
+    if previous.is_empty() {
+        reject_preparation();
+        return None;
+    }
+    // The MediaSource id the route was resolved under. `build_stream_jellyfin` derives it the same
+    // way (`msid = ""` when the part IS the item id — a GUID item with no separate source).
+    let part = session()
+        .request
+        .as_ref()
+        .map(|r| r.part.clone())
+        .unwrap_or_default();
+    let msid = if part == rk { String::new() } else { part };
+    // 1 Jellyfin tick = 100 ns, so 1 second is 10^7 ticks (the profile's units rule, outbound half).
+    let body = crate::jellyfin::profile::playback_info_body(
+        cur_ceiling(),
+        offset_secs.saturating_mul(10_000_000),
+    );
+    let Some(info) = c.playback_info(rk, &msid, &body) else {
+        reject_preparation();
+        return None;
+    };
+    if info.error_code.as_deref().is_some() {
+        reject_preparation();
+        return None;
+    }
+    let Some(source) = info.media_sources.first() else {
+        reject_preparation();
+        return None;
+    };
+    let Some(relative) = source.transcoding_url.as_deref() else {
+        reject_preparation();
+        return None;
+    };
+    let Some(url) = c.transcode_url(relative) else {
+        reject_preparation();
+        return None;
+    };
+    // The new PlaySessionId, when the server mints one for the re-cut (it usually does). Keep the
+    // current session id when it does not — the route is then the same server session re-cut.
+    let replacement = info
+        .play_session_id
+        .clone()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| previous.clone());
+    // Publish the replacement through the SAME route ownership machinery the Plex arm uses, so the
+    // teardown that follows (and a later scrobble_stop) resolves the server resource from
+    // ACTIVE_ENCODER and not from a session field the reload already moved past.
+    let replacement_published = if let Some((_, hls)) = live_hls.as_ref() {
+        replace_active_hls_for(&expected, &replacement, &url, hls.rung, None).is_some()
+    } else {
+        replace_active_encoder_for(&expected, &replacement).is_some()
+    };
+    if !replacement_published {
+        reject_preparation();
+        return None;
+    }
+    session_mut(|s| {
+        s.tsession = replacement.clone();
+        s.url = url.clone();
+    });
+    publish_applied_route_projection();
+    if let Some(ticket) = route_start {
+        if !prepare_route_start(ticket) {
+            crate::player::log("jellyfin seek: prepared route lost its start transaction");
+            return None;
+        }
+    }
+    // Retire the OLD server-side session off the main thread — the same backgrounded hand-off the
+    // Plex arm performs. Best-effort: Jellyfin reaps a quiet HLS encoder on its own.
+    if replacement != previous {
+        let old = previous.clone();
+        let jc = c; // 'static
+        if crate::task::spawn_small_keeping("jf-seek-stop", move || {
+            let _ = jc.stop_active_encodings(&old);
+        })
+        .is_none()
+        {
+            let _ = c.stop_active_encodings(&previous);
+        }
+    }
+    Some(url)
+}
+
 /// Seek within a LIVE TRANSCODE by restarting it at a time offset — a transcode has no byte-Cues,
 /// so a byte-Range seek can't work (docs/plex-api.md). Registers a fresh physical encoder, swaps
 /// the route to its delivery-matched start endpoint with `offset={secs}`, then retires the old
@@ -4442,6 +4589,15 @@ pub(crate) fn transcode_seek(offset_secs: i64) -> Option<String> {
     let rk = cur_rk();
     if rk.is_empty() {
         return None;
+    }
+    // Jellyfin arm — the seek of a Jellyfin HLS transcode is a NEW PlaybackInfo POST with the
+    // offset as `StartTimeTicks` (the server cuts the playlist from there); the Plex body below
+    // (transcode_spec + /decision + a fresh encoder session) has no meaning on that backend.
+    // Same dispatch shape as `build_stream` → `build_stream_jellyfin`: guard on the installed
+    // client, keep the Plex machinery untouched for a Plex playback.
+    #[cfg(feature = "jellyfin")]
+    if cur_sid() == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+        return jellyfin_transcode_seek(offset_secs, &rk);
     }
     let c = cur_client()?;
     // A plain seek/foreground resume has no claimed RouteAction, but it still replaces the PMS
@@ -5599,6 +5755,14 @@ pub(crate) struct Plan {
 /// the wrong authority for every id in this function. The server arrives in `env.sid` and the only
 /// client here is `client_for` of it.
 fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env: &ResolveEnv) -> Plan {
+    // Jellyfin arm — the whole resolve against the other backend, in one dedicated function so
+    // this body's Plex reasoning (playqueue, /decision handshake, ABR ladder) is never
+    // interleaved with it. Same purity contract: env in, Plan out, no statics. The guard is the
+    // INSTALLED client, as on every jellyfin arm — slot 0 is a valid Plex slot in this build.
+    #[cfg(feature = "jellyfin")]
+    if env.sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+        return build_stream_jellyfin(rk, part, vcodec, acodec, env);
+    }
     // The part id is derived from THIS call's `part`, before anything else runs, and published
     // here rather than by the caller after we return. It used to be written by play_movie /
     // play_episode *after* build_stream finished, so `put_selection` — which runs inside this
@@ -5734,7 +5898,10 @@ fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env: &ResolveE
     // gate was sending every mp4 to the transcoder, which a server without Plex Pass then failed).
     // Anything else (.mov/.avi/…) still goes to Plex for a container-only REMUX to progressive
     // MKV (copy the codecs, no re-encode — keeps 4K/HDR).
-    let streamable = part_is_streamable(part);
+    let streamable = streamable_container(
+        plan.playing.as_ref().map(|p| p.container.as_str()).unwrap_or(""),
+        part,
+    );
     // snapshot the track list on the MAIN thread and pass it by reference — the resolve worker
     // (step 7) gets an owned copy instead, and never touches the `&'static` store.
     let tracks = plan
@@ -6131,6 +6298,186 @@ fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env: &ResolveE
     plan
 }
 
+/// [`build_stream`] for the Jellyfin backend — the SAME decision (direct-play what this
+/// television decodes, transcode the rest) made against Jellyfin's two endpoints instead of
+/// Plex's playqueue + `/decision` pair:
+///
+/// - **Direct play** — `/Videos/{id}/stream?static=true`, the file's own bytes. The gate is the
+///   same `video_direct_plays` + `pick_dp_audio` ladder the Plex branch runs; the demuxer test
+///   reads the container NAME off the playing-item store where Plex reads the part key's
+///   extension (`PlayingItem::container` exists for exactly this), and the DV input is always
+///   "the server said nothing" (`jellyfin::detail`'s note), so the gate answers from codec and
+///   frame size alone.
+/// - **Transcode** — `POST /Items/{id}/PlaybackInfo` with this set's DeviceProfile
+///   (`jellyfin::profile`), then the returned HLS `TranscodingUrl`. The verdict is trusted
+///   without a local re-check, exactly like a `/decision` answer: the profile and the local
+///   gate read the same devcaps table, so they cannot disagree about the panel.
+///
+/// What this PoC arm deliberately does NOT do, each named rather than implicit: no PlayQueue
+/// (Jellyfin has none — Up Next is not wired on this backend yet), no server-side track
+/// selection PUT (that write is a Plex shape), no ABR ladder (a fixed quality rung binds only
+/// through the profile's `MaxStreamingBitrate`; Auto resolves through the same local gate),
+/// and no resume-offset on the transcode branch (`StartTimeTicks: 0` — a resume that lands on
+/// the transcode branch starts from the beginning; the DIRECT play's resume is player-side and
+/// works, and the HLS offset plumbing is a named post-validation item).
+#[cfg(feature = "jellyfin")]
+fn build_stream_jellyfin(
+    rk: &str,
+    part: &str,
+    vcodec: &str,
+    acodec: &str,
+    env: &ResolveEnv,
+) -> Plan {
+    let Some(c) = crate::jellyfin::client() else {
+        // unreachable through build_stream's guard; an early, url-less plan keeps this total anyway
+        return Plan {
+            sid: env.sid,
+            source_decodable: true,
+            ..Default::default()
+        };
+    };
+    let mut plan = Plan {
+        sid: env.sid,
+        // a Jellyfin MediaSource id is a GUID — no numeric part id exists to carry, and nothing
+        // on this backend reads part_id (it keys Plex's /library/parts selection PUTs)
+        part_id: 0,
+        src_vcodec: vcodec.to_string(),
+        src_acodec: acodec.to_string(),
+        source_decodable: true,
+        ..Default::default()
+    };
+    // The playback session id doubles as Jellyfin's PlaySessionId on a DIRECT play — the server
+    // mints one only for a transcode, so progress reporting quotes `tsession` when it is set and
+    // this one otherwise (the viewstate arm's rule).
+    plan.sess = new_sess(rk);
+    plan.playing = env
+        .cached_item
+        .clone()
+        .or_else(|| crate::metadata::fetch_playing_item(env.sid, rk));
+    let (src_w, src_h) = plan
+        .playing
+        .as_ref()
+        .map(|p| (p.width, p.height))
+        .unwrap_or((0, 0));
+    plan.src_measure = (env.src_kbps, src_w, src_h);
+    plan.transport_kbps = plan
+        .playing
+        .as_ref()
+        .map(|p| p.bitrate)
+        .filter(|&v| v > 0)
+        .unwrap_or(env.src_kbps);
+    plan.ceiling = env.quality.ceiling();
+    let dovi = plan.playing.as_ref().map(|p| p.dovi).unwrap_or_default();
+    let dv = dovi.presentation_now();
+    let video_dp = video_direct_plays(vcodec, src_w, src_h, dv, crate::devcaps::caps());
+    plan.source_decodable = video_dp;
+    let tracks = plan
+        .playing
+        .as_ref()
+        .map(|p| p.audio.as_slice())
+        .unwrap_or(&[]);
+    let audio_sel = pick_dp_audio(tracks, acodec);
+    // The demuxer's own container list, read off the store (Plex reads a part-key extension —
+    // `part_is_streamable`; a GUID has no extension, and the DTO's container name is the same
+    // fact). Anything else must come back remuxed, which on Jellyfin means the transcoder.
+    let container = plan
+        .playing
+        .as_ref()
+        .map(|p| p.container.as_str())
+        .unwrap_or("");
+    // a GUID has no extension to read — the store's container word IS the demuxer test here
+    // (`streamable_container` owns the one list, so the two backends cannot disagree)
+    let streamable = streamable_container(container, part);
+    // A fixed quality rung denies direct play exactly as on the Plex branch — the user's ceiling
+    // is an ask, and the only way to honour it is the branch where the server applies the bound.
+    let quality = quality_policy(env.quality, true, env.src_kbps, src_w, src_h);
+    let directplay = quality.direct_play && video_dp && streamable && audio_sel.is_some();
+    crate::player::log(&format!(
+        "route(jellyfin): {vcodec}/{acodec} {src_w}x{src_h} {container} — video_dp={video_dp} audio_dp={} streamable={streamable} quality_dp={} → {}",
+        audio_sel.is_some(),
+        quality.direct_play,
+        if directplay { "direct play" } else { "transcode" },
+    ));
+    if directplay {
+        // Mirror of the Plex direct-play branch: source codecs on the Load payload, fps off the
+        // store, the picked track fed by CONTAINER ordinal. Subtitles start OFF on this backend
+        // for the PoC: Jellyfin's per-item selection indexes live on the PlaybackInfo answer
+        // (DefaultSubtitleStreamIndex), which a direct play never asks for — wiring that read
+        // back is named with the track menu's writes, post-validation.
+        let (aidx, achosen, asid) = audio_sel.unwrap_or((-1, acodec.to_string(), 0));
+        plan.fps = plan.playing.as_ref().map(|p| p.video_fps).unwrap_or(0.0);
+        plan.vcodec = vcodec.to_string();
+        plan.acodec = achosen;
+        plan.dovi = dovi;
+        plan.immersive = plan
+            .playing
+            .as_ref()
+            .and_then(|p| {
+                if aidx >= 0 {
+                    p.audio.get(aidx as usize)
+                } else {
+                    p.audio.iter().find(|a| a.selected)
+                }
+            })
+            .is_some_and(|a| a.has_atmos());
+        plan.audio_sid = asid;
+        if aidx >= 0 {
+            plan.feed_audio_ordinal = Some(
+                plan.playing
+                    .as_ref()
+                    .map(|p| crate::metadata::audio_ordinal(&p.audio, aidx as usize))
+                    .unwrap_or(aidx),
+            );
+        }
+        // `part` carries the MediaSource id — but `convert` falls back to the ITEM id when a row
+        // has no MediaSources, and passing that back as MediaSourceId would 404 the stream.
+        let msid = if part == rk { "" } else { part };
+        match c.direct_stream_url(rk, msid) {
+            Some(url) => plan.url = url,
+            None => return plan, // no token — the url-less plan fails like any unresolvable one
+        }
+        return plan;
+    }
+    // ---- transcode: ask the server to decide with this set's profile -------------------------
+    let msid = if part == rk { "" } else { part };
+    // the client fills UserId itself — it owns the token state
+    let body = crate::jellyfin::profile::playback_info_body(plan.ceiling, 0);
+    let Some(info) = c.playback_info(rk, msid, &body) else {
+        return plan; // unreachable/unparseable — url-less plan, resolve_failed tells the page
+    };
+    if let Some(code) = info.error_code.as_deref() {
+        plan.verdict = Some(format!("Jellyfin refused playback ({code})"));
+        return plan;
+    }
+    let Some(source) = info.media_sources.first() else {
+        return plan;
+    };
+    match source.transcoding_url.as_deref().and_then(|t| c.transcode_url(t)) {
+        Some(url) => {
+            // The profile's transcode target is pinned h264+aac in MPEG-TS HLS (see
+            // `jellyfin::profile`), so the Load payload's guess is not a guess.
+            plan.url = url;
+            plan.vcodec = "h264".into();
+            plan.acodec = "aac".into();
+            plan.delivery = crate::plex::TranscodeDelivery::FixedHls {
+                seconds_per_segment: 6,
+            };
+            // The SERVER's session id — the transcode's kill handle and the progress quote.
+            plan.tsession = info.play_session_id.clone().unwrap_or_default();
+        }
+        None => {
+            if !source.supports_transcoding {
+                plan.verdict = Some(
+                    "Jellyfin can neither direct-play nor transcode this item for this TV".into(),
+                );
+            }
+            // else: the server said transcoding is possible but offered no URL — the url-less
+            // plan fails on the shared resolve_failed path, and the log above names the gate.
+        }
+    }
+    plan
+}
+
 /// Preferred audio language (ISO-639 code). Content is often authored with a foreign default
 /// dub (e.g. The Office ships a Russian "kubik" track flagged default); we prefer the English
 /// track when the item has one, rather than following the file's default flag.
@@ -6431,6 +6778,18 @@ fn part_is_streamable(part_key: &str) -> bool {
     let name = part_key.rsplit('/').next().unwrap_or(part_key);
     let name = name.split('?').next().unwrap_or(name);
     name.ends_with(".mkv") || name.ends_with(".mp4") || name.ends_with(".m4v")
+}
+
+/// Is the played file in a container the demuxer streams? The record's own `container` word
+/// wins when the playing-item store carries one — both backends fill it now, and a Jellyfin
+/// MediaSource id is a GUID with no extension TO read — with the part key's extension as the
+/// fallback exactly where it has always been (a store that never loaded, or a record with no
+/// container word). One list, so the two reads can never disagree about what streams.
+fn streamable_container(container: &str, part_key: &str) -> bool {
+    if !container.is_empty() {
+        return matches!(container, "mkv" | "mp4" | "m4v");
+    }
+    part_is_streamable(part_key)
 }
 
 /// Extract the numeric Part id from a Plex part key (/library/parts/{id}/…/file.mkv).
@@ -7521,6 +7880,30 @@ pub(crate) fn report_timeline(
     let Some(report) = timeline_snapshot(lease, state, t_ms, d_ms) else {
         return false;
     };
+    // The Jellyfin backend speaks its three-POST session protocol instead of /:/timeline. The
+    // snapshot's `session` already quotes the active encoder id when there is one
+    // (`timeline_snapshot` prefers it), which is exactly the PlaySessionId rule
+    // `jellyfin::profile` states — tsession when set, the logical session otherwise. The final
+    // Stopped never passes through here on EITHER backend; it is ScrobbleWork's.
+    #[cfg(feature = "jellyfin")]
+    if report.sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+        let jc = crate::jellyfin::client().unwrap();
+        let ok = jc.session_progress(
+            &report.rating_key,
+            report.time_ms,
+            report.state == crate::plex::TimelineState::Paused,
+            &report.session,
+        );
+        if !ok {
+            crate::log(&format!(
+                "jellyfin: session progress failed rk={} state={} t={}s",
+                report.rating_key,
+                report.state.as_str(),
+                report.time_ms / 1000,
+            ));
+        }
+        return true;
+    }
     let c = match crate::plex::client_for(report.sid) {
         Some(c) => c,
         None => return true,
@@ -13666,5 +14049,150 @@ mod tests {
         );
         reset_player_control_for_test();
         reset_session();
+    }
+
+    /// A live Jellyfin HLS transcode seeks by RE-POSTING PlaybackInfo with the offset as
+    /// `StartTimeTicks` and adopting the returned URL + PlaySessionId — the Jellyfin arm of
+    /// [`transcode_seek`]. The old server-side session is retired with a DELETE once the
+    /// replacement route is published.
+    #[cfg(feature = "jellyfin")]
+    #[test]
+    fn jellyfin_transcode_seek_recuts_playback_info_at_the_offset() {
+        use std::io::{Read, Write};
+        use std::time::Duration;
+
+        let _g = fresh_registry();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port() as i32;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            for i in 0..3 {
+                let (mut socket, _) = listener.accept().expect("accept jellyfin request");
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 4096];
+                let mut content_length = None::<usize>;
+                let mut head_end = None::<usize>;
+                loop {
+                    let n = socket.read(&mut chunk).expect("read");
+                    if n == 0 {
+                        break;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    if head_end.is_none() {
+                        if let Some(pos) = find(&buf, b"\r\n\r\n") {
+                            head_end = Some(pos + 4);
+                            let head = String::from_utf8_lossy(&buf[..pos]).to_lowercase();
+                            content_length = head
+                                .lines()
+                                .find_map(|l| l.strip_prefix("content-length:"))
+                                .and_then(|v| v.trim().parse().ok());
+                        }
+                    }
+                    if let (Some(he), Some(cl)) = (head_end, content_length) {
+                        if buf.len() >= he + cl {
+                            break;
+                        }
+                    } else if head_end.is_some() && content_length.is_none() {
+                        break;
+                    }
+                }
+                let raw = String::from_utf8_lossy(&buf).into_owned();
+                tx.send(raw.clone()).expect("publish request");
+                let body = match i {
+                    0 => r#"{"User":{"Id":"u-1","Name":"demo"},"AccessToken":"tok-1","ServerId":"srv-1","SessionInfo":null}"#,
+                    1 => r#"{"MediaSources":[{"Id":"ms-1","SupportsTranscoding":true,"TranscodingUrl":"/videos/jf-item/master.m3u8?SegmentContainer=ts"}],"PlaySessionId":"ps-new"}"#,
+                    _ => "",
+                };
+                let status = if i == 2 { 204 } else { 200 };
+                let reason = if status == 200 { "OK" } else { "No Content" };
+                write!(
+                    socket,
+                    "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len(),
+                )
+                .expect("response headers");
+            }
+        });
+
+        let client = crate::jellyfin::JfClient::new(
+            crate::plex::Origin::http("127.0.0.1", port),
+            "dev-1".into(),
+        );
+        client.authenticate_by_name("demo", "").expect("auth succeeds");
+        crate::jellyfin::install(client);
+        // The route must already be a Jellyfin HLS transcode: session url/tsession set, sid = the
+        // Jellyfin registry slot, and the request retained so the arm can rebuild the MediaSource id.
+        let sid = crate::jellyfin::SERVER_ID;
+        session_mut(|s| {
+            s.request = Some(PlaybackRequest {
+                sid,
+                rk: "jf-item".into(),
+                part: "ms-1".into(),
+                vcodec: "h264".into(),
+                acodec: "aac".into(),
+                title: "Jellyfin seek".into(),
+                ctx: "2026".into(),
+            });
+        });
+        apply_plan(
+            Plan {
+                sid,
+                sess: "logical-sess".into(),
+                tsession: "ps-old".into(),
+                url: "http://127.0.0.1:1/old/master.m3u8".into(),
+                delivery: crate::plex::TranscodeDelivery::FixedHls {
+                    seconds_per_segment: 6,
+                },
+                ceiling: Some(crate::abr::Rung::P720Low.ceiling()),
+                ..Default::default()
+            },
+            "jf-item",
+        );
+        restore_quality(Quality::Auto);
+        let rk_ok = crate::route::cur_sid() == sid && crate::route::cur_rk() == "jf-item";
+        assert!(rk_ok, "route must be the Jellyfin item before the seek");
+
+        let new_url = transcode_seek(300).expect("accepted jellyfin seek");
+        let info_req = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("auth request missing");
+        assert!(info_req.contains("AuthenticateByName"), "{info_req}");
+        let seek_req = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("PlaybackInfo request missing");
+        assert!(
+            seek_req.starts_with("POST /Items/jf-item/PlaybackInfo?UserId=u-1&MediaSourceId=ms-1"),
+            "{seek_req}"
+        );
+        // The offset (300 s) must travel as StartTimeTicks (1 s = 10^7 ticks), not as 0.
+        assert!(
+            seek_req.contains("\"StartTimeTicks\":3000000000"),
+            "seek must recut the playlist at the offset: {seek_req}"
+        );
+        assert!(seek_req.contains("X-Emby-Token: tok-1"), "{seek_req}");
+        assert!(
+            new_url.contains("/videos/jf-item/master.m3u8") && new_url.contains("api_key=tok-1"),
+            "new url: {new_url}"
+        );
+        assert_eq!(transcode_session(), "ps-new", "the new PlaySessionId is adopted");
+        let stop_req = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("old session was not retired");
+        assert!(
+            stop_req.starts_with("DELETE /Videos/ActiveEncodings?playSessionId=ps-old"),
+            "{stop_req}"
+        );
+        server.join().unwrap();
+
+        crate::jellyfin::uninstall();
+        restore_quality(Quality::Original);
+        reset_session();
+        install_active_encoder("");
+        reset_player_control_for_test();
+    }
+
+    #[cfg(feature = "jellyfin")]
+    fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
+        hay.windows(needle.len()).position(|w| w == needle)
     }
 }

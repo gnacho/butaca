@@ -35,6 +35,7 @@ mod http; // the ONE door out of the control plane: dispatch a Plex REST request
 #[cfg(feature = "devtriggers")]
 mod hwcnt; // direct userspace Mali r12p0 vinstr reader for the phase profiler
 mod img;
+mod jellyfin; // the Jellyfin backend: typed client + DTOs + converters into the app's own catalog rows
 mod keymanager; // public LS2 key stores: keymanager3, legacy Palm service, or unavailable
 mod lab; // Cloud Lab bridge: pinned diagnostic uploads + optional outbound command long-poll
 mod metadata; // item detail data layer (detail page): full metadata + seasons/episodes + cast + related

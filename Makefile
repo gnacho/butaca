@@ -114,7 +114,7 @@ $(if $(filter $(FLAVOR),$(FLAVORS)),,$(error unknown FLAVOR "$(FLAVOR)" — one 
 # The id users get. Also `paths::STABLE_APP_ID` in the Rust half and `STABLE_ID` in ci/flavor.py —
 # three copies of one string, each in a language that cannot see the others, and ci/flavor.py's
 # selftest is what keeps them in step.
-APPID_STABLE = com.beb.plxnative
+APPID_STABLE = com.butaca
 APPID        = $(if $(filter stable,$(FLAVOR)),$(APPID_STABLE),$(APPID_STABLE).$(FLAVOR))
 APPDIR       = /media/developer/apps/usr/palm/applications/$(APPID)
 
@@ -382,8 +382,8 @@ CARGO_INCREMENTAL ?= 0
 export CARGO_INCREMENTAL
 endif
 
-RUST_FEATFLAGS = $(if $(RELEASE),--no-default-features,)$(if $(LAB), --features lab-diagnostics,)
-RUST_TDIR      = target$(if $(RELEASE),-release,)$(if $(LAB),-lab,)$(if $(SYMBOLS),-sym,)
+RUST_FEATFLAGS = $(if $(RELEASE),--no-default-features,)$(if $(LAB), --features lab-diagnostics,)$(if $(JELLYFIN), --features jellyfin,)
+RUST_TDIR      = target$(if $(RELEASE),-release,)$(if $(LAB),-lab,)$(if $(JELLYFIN),-jellyfin,)$(if $(SYMBOLS),-sym,)
 # OVERRIDING RUST_FEATFLAGS BY HAND? PASS RUST_TDIR TOO. This dir is keyed on RELEASE, not on the
 # flag set, so `make RUST_FEATFLAGS=...` alone lands in the SAME target/ as an ordinary build:
 # cargo's staticlib looks up to date, the stamp below deletes pkg/plxnative, and make relinks the
