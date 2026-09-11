@@ -2552,7 +2552,10 @@ mod payload_tests {
     /// composed bytes here is the only gate available for it.
     #[test]
     fn the_shipped_app_composes_the_payload_it_always_did() {
-        let want = r#""appId":"com.beb.plxnative""#;
+        // The id this build actually ships, not a foreign literal: the payload is composed with
+        // `STABLE_APP_ID` just below, so pinning the upstream id would fail on any fork that
+        // renames the app (and pass vacuously if the splice ever stopped happening).
+        let want = format!(r#""appId":"{}""#, crate::paths::STABLE_APP_ID);
         for (name, p) in [
             ("PAYLOAD_V", PAYLOAD_V),
             ("PAYLOAD_AV", PAYLOAD_AV),
@@ -2560,7 +2563,7 @@ mod payload_tests {
         ] {
             let composed = p.replace("@APPID@", crate::paths::STABLE_APP_ID);
             assert!(
-                composed.contains(want),
+                composed.contains(&want),
                 "{name} no longer composes the shipped key"
             );
             // key ORDER too: `appId` stays the first key of `option`, where it has always been.
