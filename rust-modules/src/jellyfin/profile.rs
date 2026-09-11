@@ -117,6 +117,33 @@ pub(crate) fn playback_info_body(
     })
 }
 
+/// [`playback_info_body`] with an explicit track contract, for the re-transcode a mid-playback
+/// audio switch starts. `media_source_id` MUST ride the BODY for the indices to be honoured:
+/// probed against the live server, a request naming `AudioStreamIndex`/`SubtitleStreamIndex`
+/// without it comes back with the DEFAULTS in the `TranscodingUrl` (the indices are silently
+/// ignored), and a query-string spelling is ignored too. The plain builder keeps every field it
+/// always had, so the resolve path's answer is byte-for-byte what it was.
+pub(crate) fn playback_info_body_for(
+    ceiling: Option<crate::plex::Ceiling>,
+    start_ticks: i64,
+    media_source_id: &str,
+    audio_index: Option<i32>,
+    subtitle_index: Option<i32>,
+) -> serde_json::Value {
+    let mut body = playback_info_body(ceiling, start_ticks);
+    let obj = body.as_object_mut().expect("json! built an object");
+    if !media_source_id.is_empty() {
+        obj.insert("MediaSourceId".into(), media_source_id.into());
+    }
+    if let Some(i) = audio_index {
+        obj.insert("AudioStreamIndex".into(), i.into());
+    }
+    if let Some(i) = subtitle_index {
+        obj.insert("SubtitleStreamIndex".into(), i.into());
+    }
+    body
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -144,5 +171,35 @@ mod tests {
         assert_eq!(p["MaxStreamingBitrate"], 8_000_000);
         let p = device_profile(None);
         assert_eq!(p["MaxStreamingBitrate"], 120_000_000);
+    }
+
+    /// The track-selecting body is the same object the resolve path sends when no track is named,
+    /// plus the fields a mid-playback pick needs. The `MediaSourceId` half is load-bearing and
+    /// easy to lose: probed against the live server, a request naming
+    /// `AudioStreamIndex`/`SubtitleStreamIndex` WITHOUT it comes back with the DEFAULTS in the
+    /// `TranscodingUrl` — the indices are silently ignored, which is exactly the dead end this
+    /// builder exists to avoid.
+    #[test]
+    fn the_track_selecting_body_names_the_source_and_the_streams() {
+        let plain = playback_info_body(None, 0);
+        let chosen = playback_info_body_for(None, 12_000_000, "ms-1", Some(2), Some(5));
+        assert_eq!(chosen["MediaSourceId"], "ms-1");
+        assert_eq!(chosen["AudioStreamIndex"], 2);
+        assert_eq!(chosen["SubtitleStreamIndex"], 5);
+        assert_eq!(chosen["StartTimeTicks"], 12_000_000);
+        // Everything the plain builder sends is still there — the track contract is additive.
+        for key in [
+            "DeviceProfile",
+            "EnableDirectPlay",
+            "EnableDirectStream",
+            "EnableTranscoding",
+        ] {
+            assert_eq!(chosen[key], plain[key], "{key} moved");
+        }
+        // No source id → none of the three keys at all (the resolve path's shape).
+        let bare = playback_info_body_for(None, 0, "", None, None);
+        assert!(bare.get("MediaSourceId").is_none());
+        assert!(bare.get("AudioStreamIndex").is_none());
+        assert!(bare.get("SubtitleStreamIndex").is_none());
     }
 }
