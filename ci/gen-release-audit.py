@@ -46,6 +46,8 @@ import sys
 import tarfile
 from pathlib import Path
 
+import flavor
+
 ROOT = Path(__file__).resolve().parent.parent
 
 BEGIN = "<!-- BEGIN GENERATED — ci/gen-release-audit.py. Do not edit by hand. -->"
@@ -383,7 +385,7 @@ def generate(args) -> str:
     rows = [
         row("flavour", f"`{app_id}` — "
             + ("the stable id, which is what users install"
-               if app_id == "com.beb.plxnative" else "**not the stable id**")),
+               if app_id == flavor.STABLE_ID else "**not the stable id**")),
         row("cargo features", f"`{args.build_config}`" if args.build_config
             else "not recorded in the assets — the dev-trigger row below is the same property, "
                  "measured on the bytes"),
