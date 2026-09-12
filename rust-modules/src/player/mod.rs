@@ -1167,9 +1167,12 @@ fn playable_buffer_ms(
 
 impl Diag {
     pub fn vp_mode_str(&self) -> &'static str {
-        match self.vp_mode {
-            VP_EXPORTED => "exported window (webOS 5+)",
-            VP_ACB => "ACB (webOS 4)",
+        // the pick is static (i18n's pattern); NONE's dash is the panel's own "no value" mark
+        match (self.vp_mode, crate::i18n::is_es()) {
+            (VP_EXPORTED, false) => "exported window (webOS 5+)",
+            (VP_EXPORTED, true) => "ventana exportada (webOS 5+)",
+            (VP_ACB, _) => "ACB (webOS 4)",
+            _ if crate::i18n::is_es() => "NINGUNO · sin ruta de vídeo",
             _ => "NONE — no video path",
         }
     }
@@ -1202,6 +1205,16 @@ impl Diag {
     /// within `MAX_FEED_AHEAD_NS` of the presented position. The first person to see the panel in
     /// the wild asked why playback was stuck; it was not.
     pub fn feed_state_str(&self) -> &'static str {
+        if crate::i18n::is_es() {
+            return match self.feed_state {
+                1 => "aceptando",
+                2 => "BufferFull (el sink está lleno)",
+                3 => "RECHAZADO",
+                4 => "manteniendo ~1,6 s por delante",
+                5 => "cola vacía (sin datos)",
+                _ => "- aún no se ha alimentado nada",
+            };
+        }
         match self.feed_state {
             1 => "accepting",
             2 => "BufferFull (sink is full)",
