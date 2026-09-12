@@ -242,14 +242,14 @@ pub(crate) fn reask_note(previous: u32) -> Option<&'static str> {
     if previous == 0 || previous >= POLICY_VERSION {
         return None;
     }
-    let mut note = String::from("Asking again because what is collected has changed: ");
+    let mut note = String::from(crate::i18n::t("Asking again because what is collected has changed: "));
     let mut wrote_any = false;
     for &(version, what_changed) in REASK_CHANGES {
         if version > previous && version <= POLICY_VERSION {
             if wrote_any {
                 note.push(' ');
             }
-            note.push_str(what_changed);
+            note.push_str(crate::i18n::t(what_changed));
             wrote_any = true;
         }
     }
@@ -410,14 +410,14 @@ pub(crate) fn extension_note(c: &Consent, cat: Category) -> Option<String> {
         Category::Usage => c.usage_scope,
     };
     let current = current_scope(cat);
-    let mut note = String::from("Asking again because what is collected has changed: ");
+    let mut note = String::from(crate::i18n::t("Asking again because what is collected has changed: "));
     let mut wrote_any = false;
     for &(row_cat, version, what_changed) in SCOPE_CHANGES {
         if row_cat == cat && version > accepted && version <= current {
             if wrote_any {
                 note.push(' ');
             }
-            note.push_str(what_changed);
+            note.push_str(crate::i18n::t(what_changed));
             wrote_any = true;
         }
     }
