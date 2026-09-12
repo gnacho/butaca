@@ -45,6 +45,18 @@ impl Page {
         Self::Contact,
     ];
     fn title(self) -> &'static str {
+        // the Spanish titles: the pick is static, and the EN match arms below stay the tested
+        // source (legal_es carries only the bodies; titles are short enough to inline here)
+        if crate::i18n::is_es() {
+            return match self {
+                Self::Privacy => "Política de privacidad",
+                Self::OpenSource => "Licencias de código abierto",
+                Self::Ffmpeg => "FFmpeg y oferta de fuente",
+                Self::Source => "Código fuente de butaca",
+                Self::Trademarks => "Marcas y no afiliación",
+                Self::Contact => "Contacto de privacidad y seguridad",
+            };
+        }
         match self {
             Self::Privacy => "Privacy policy",
             Self::OpenSource => "Open-source licences",
@@ -59,6 +71,16 @@ impl Page {
         }
     }
     fn subtitle(self) -> &'static str {
+        if crate::i18n::is_es() {
+            return match self {
+                Self::Privacy => "Cómo gestiona butaca los datos locales y los informes opcionales.",
+                Self::OpenSource => "Componentes, titulares de copyright y textos de licencia.",
+                Self::Ffmpeg => "Aviso LGPL, sustituibilidad y fuente correspondiente.",
+                Self::Source => "Fuente del proyecto, scripts de build y materiales de release.",
+                Self::Trademarks => "Condición de cliente independiente y atribución de marcas.",
+                Self::Contact => "Cómo hacer una pregunta de privacidad o reportar una vulnerabilidad.",
+            };
+        }
         match self {
             Self::Privacy => if cfg!(feature = "jellyfin") {
                 "How butaca handles local data and optional reports."
@@ -78,6 +100,17 @@ impl Page {
     /// second literal that can drift (it had already drifted — see that module's
     /// `both_privacy_policy_doors_open_the_same_document`).
     pub(crate) fn body(self) -> &'static str {
+        // the ES bodies live in legal_es; the EN consts below stay the tested source
+        if crate::i18n::is_es() {
+            return match self {
+                Self::Privacy => super::legal_es::PRIVACY_ES,
+                Self::OpenSource => super::legal_es::OPEN_SOURCE_ES,
+                Self::Ffmpeg => super::legal_es::FFMPEG_ES,
+                Self::Source => super::legal_es::SOURCE_ES,
+                Self::Trademarks => super::legal_es::TRADEMARKS_ES,
+                Self::Contact => super::legal_es::CONTACT_ES,
+            };
+        }
         match self {
             Self::Privacy => PRIVACY,
             Self::OpenSource => OPEN_SOURCE,

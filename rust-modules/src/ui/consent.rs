@@ -200,12 +200,12 @@ const SETTINGS_TITLE: &str = "Privacy & data";
 /// true — `apply_extension`'s No branch changes nothing about whether the category is on.
 fn answer_labels() -> (&'static std::ffi::CStr, &'static std::ffi::CStr) {
     if is_extension() {
-        return (c"Keep on, with this", c"Keep as before");
+        return (c"Mantener activo, con esto", c"Dejarlo como estaba");
     }
     if stage() == Stage::Crash {
-        (c"Share reports", c"Don’t share")
+        (c"Compartir informes", c"No compartir")
     } else {
-        (c"Share analytics", c"Don’t share")
+        (c"Compartir analítica", c"No compartir")
     }
 }
 
@@ -1121,7 +1121,7 @@ pub(crate) fn on_ok() -> bool {
             crate::ui::idle::invalidate();
         }
         RowId::Delete => {
-            delete_alert().open_with_body(c"Delete all local data?", DELETE_SCOPE);
+            delete_alert().open_with_body(c"¿Borrar todos los datos locales?", DELETE_SCOPE);
         }
     }
     true
@@ -1580,7 +1580,7 @@ pub(crate) fn draw() {
     // rather than in the host-page closure (which sits under Settings' opaque wash).
     crate::ui::profile::phase("cs.alert", || {
         delete_alert().draw_scrim();
-        delete_alert().draw(c"Cancel", c"Delete");
+        delete_alert().draw(c"Cancelar", c"Delete");
     });
 }
 
@@ -1628,10 +1628,10 @@ fn draw_action_row(p: crate::ui::Painter, layout: RouteLayout) {
     }
     let band = focus().band_index();
     if mode() == Mode::Settings {
-        let w = Button::pill_w(c"Done".as_ptr(), theme::size::BODY, false).min(layout.action.w);
+        let w = Button::pill_w(c"Hecho".as_ptr(), theme::size::BODY, false).min(layout.action.w);
         let r = Rect::new(layout.action.x, layout.action.y, w, layout.action.h);
         unsafe { (*addr_of_mut!(DONE_POP)).place(0, r) };
-        Button::new(c"Done".as_ptr(), theme::size::BODY, r)
+        Button::new(c"Hecho".as_ptr(), theme::size::BODY, r)
             .focused(band == Some(0))
             .scale(unsafe { (*addr_of!(DONE_POP)).scale(0) })
             .palette(crate::ui::settings::control_palette())
@@ -2867,7 +2867,7 @@ mod tests {
     #[test]
     fn confirming_delete_dismisses_the_alert_rather_than_closing_it_instantly() {
         let _g = crate::testlock::serial();
-        delete_alert().open_with_body(c"Delete all local data?", DELETE_SCOPE);
+        delete_alert().open_with_body(c"¿Borrar todos los datos locales?", DELETE_SCOPE);
         delete_alert().set_choice(AlertChoice::Destructive);
         settle_delete_alert();
         assert!(on_ok(), "OK on an open delete alert must be handled here");
@@ -2884,14 +2884,14 @@ mod tests {
             "the destructive answer must still be recorded for the caller to act on"
         );
         // Cancel gets the same treatment — dismiss, not close.
-        delete_alert().open_with_body(c"Delete all local data?", DELETE_SCOPE);
+        delete_alert().open_with_body(c"¿Borrar todos los datos locales?", DELETE_SCOPE);
         settle_delete_alert();
         assert!(on_ok(), "OK on Cancel must also be handled here");
         assert!(!delete_alert().is_open());
         assert!(delete_alert().visible(), "Cancel fades too");
         assert!(!take_delete_request(), "declining must never set the delete request");
         // …and BACK.
-        delete_alert().open_with_body(c"Delete all local data?", DELETE_SCOPE);
+        delete_alert().open_with_body(c"¿Borrar todos los datos locales?", DELETE_SCOPE);
         settle_delete_alert();
         assert!(on_back());
         assert!(!delete_alert().is_open());
@@ -2947,8 +2947,8 @@ mod tests {
                 "extension pill {label:?} reads as a withdrawal"
             );
         }
-        assert_eq!(share, "Keep on, with this");
-        assert_eq!(decline, "Keep as before");
+        assert_eq!(share, "Mantener activo, con esto");
+        assert_eq!(decline, "Dejarlo como estaba");
         close();
         if let Some(c) = saved {
             consent::install(c);

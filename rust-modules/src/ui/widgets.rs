@@ -7188,7 +7188,8 @@ mod tests {
         assert_eq!(CircleButton::new(c"".as_ptr()).ground, ControlGround::Keyed);
         assert_eq!(TransportButton::new(0, f).ground, ControlGround::Keyed);
         assert_eq!(
-            TabPill::new(c"Info".as_ptr(), theme::size::BODY, f).ground,
+            { let mut ib = [0u8; crate::i18n::TC_MAX];
+              TabPill::new(crate::i18n::tc("Info", &mut ib).as_ptr().cast(), theme::size::BODY, f).ground },
             ControlGround::Keyed
         );
         assert_eq!(
@@ -7211,7 +7212,8 @@ mod tests {
     fn the_ground_reaches_the_standalone_pill_and_stops_at_a_segment() {
         let f = Rect::new(0.0, 0.0, 180.0, 64.0);
         let pill = |g: ControlGround, focused: bool| {
-            TabPill::new(c"Info".as_ptr(), theme::size::BODY, f)
+            { let mut ib = [0u8; crate::i18n::TC_MAX];
+                TabPill::new(crate::i18n::tc("Info", &mut ib).as_ptr().cast(), theme::size::BODY, f) }
                 .ground(g)
                 .focused(focused)
                 .face()

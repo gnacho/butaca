@@ -522,9 +522,9 @@ const CAST_UNDER_H: f32 = 92.0 + CAST_POP_DROP_MAX;
 /// as well as its text. One source for the painter and for [`hero_pill_w`].
 fn hero_pill_label() -> &'static std::ffi::CStr {
     if has_restart() {
-        c"Resume"
+        tr_c(c"Resume", c"Continuar")
     } else {
-        c"Play"
+        tr_c(c"Play", c"Reproducir")
     }
 }
 /// …and the pill's drawn width: measured from that label through the one hero-pill formula
@@ -537,13 +537,21 @@ fn hero_pill_w() -> f32 {
 /// The *Also available* control's label — the design's own words, and a fixed string: it names a
 /// FACT about the item rather than an action, so unlike the Play pill beside it there is no state
 /// for it to relabel from.
-const ALT_LABEL: &std::ffi::CStr = c"Also available";
+/// The translated pick of a hero/alt label: both spellings are static C strings (the i18n
+/// pattern `player::PlaybackState::caption` also uses), so the language atom chooses a pointer
+/// and nothing allocates on the draw path.
+fn tr_c(en: &'static std::ffi::CStr, es: &'static std::ffi::CStr) -> &'static std::ffi::CStr {
+    if crate::i18n::is_es() { es } else { en }
+}
+fn alt_label() -> &'static std::ffi::CStr {
+    tr_c(c"Also available", c"Tambien disponible")
+}
 /// …and its drawn width, through the same one pill formula, counting the trailing chevron. No
 /// floor: the label is long enough to size itself, and `PW` is the Play pill's guard against a
 /// pathologically SHORT one.
 fn alt_pill_w() -> f32 {
     // no leading icon, one trailing accessory — the disclosure chevron
-    Button::pill_w_full(ALT_LABEL.as_ptr(), theme::size::BODY, false, true)
+    Button::pill_w_full(alt_label().as_ptr(), theme::size::BODY, false, true)
 }
 
 /// The verbs the hero's DISCS unfurl to say while they hold focus.
@@ -568,11 +576,21 @@ fn alt_pill_w() -> f32 {
 /// "Mark as Watched" would read as two verbs for one write. The agreement is asserted rather than
 /// trusted — see `the_unfurled_verbs_are_the_menus_own`. Each states the OUTCOME its press
 /// produces, not the state the item is in.
-const MARK_WATCHED_LABEL: &std::ffi::CStr = c"Mark as Watched";
-const MARK_UNWATCHED_LABEL: &std::ffi::CStr = c"Mark as Unwatched";
-const MARK_SHOW_WATCHED_LABEL: &std::ffi::CStr = c"Mark Show as Watched";
-const MARK_SHOW_UNWATCHED_LABEL: &std::ffi::CStr = c"Mark Show as Unwatched";
-const PLAY_FROM_START_LABEL: &std::ffi::CStr = c"Play from Start";
+fn mark_watched_label() -> &'static std::ffi::CStr {
+    tr_c(c"Mark as Watched", c"Marcar como vista")
+}
+fn mark_unwatched_label() -> &'static std::ffi::CStr {
+    tr_c(c"Mark as Unwatched", c"Marcar como no vista")
+}
+fn mark_show_watched_label() -> &'static std::ffi::CStr {
+    tr_c(c"Mark Show as Watched", c"Marcar la serie como vista")
+}
+fn mark_show_unwatched_label() -> &'static std::ffi::CStr {
+    tr_c(c"Mark Show as Unwatched", c"Marcar la serie como no vista")
+}
+fn play_from_start_label() -> &'static std::ffi::CStr {
+    tr_c(c"Play from Start", c"Desde el principio")
+}
 
 /// A disc's slot in [`DetailView::disc_unfurl`] and the verb it unfurls to — `None` for the two
 /// PILLS, which say their word at rest and have nothing to reveal.
@@ -582,11 +600,11 @@ const PLAY_FROM_START_LABEL: &std::ffi::CStr = c"Play from Start";
 /// is host-testable without a loaded item.
 fn disc_verb(ctl: HeroCtl, name_show: bool) -> Option<(usize, &'static std::ffi::CStr)> {
     match (ctl, name_show) {
-        (HeroCtl::Restart, _) => Some((0, PLAY_FROM_START_LABEL)),
-        (HeroCtl::MarkWatched, false) => Some((1, MARK_WATCHED_LABEL)),
-        (HeroCtl::MarkWatched, true) => Some((1, MARK_SHOW_WATCHED_LABEL)),
-        (HeroCtl::MarkUnwatched, false) => Some((1, MARK_UNWATCHED_LABEL)),
-        (HeroCtl::MarkUnwatched, true) => Some((1, MARK_SHOW_UNWATCHED_LABEL)),
+        (HeroCtl::Restart, _) => Some((0, play_from_start_label())),
+        (HeroCtl::MarkWatched, false) => Some((1, mark_watched_label())),
+        (HeroCtl::MarkWatched, true) => Some((1, mark_show_watched_label())),
+        (HeroCtl::MarkUnwatched, false) => Some((1, mark_unwatched_label())),
+        (HeroCtl::MarkUnwatched, true) => Some((1, mark_show_unwatched_label())),
         _ => None,
     }
 }
@@ -3031,9 +3049,9 @@ enum PlayNote {
 /// menu, which corrects the "Original" rung for a source the television cannot decode — and a
 /// second phrasing would read to a viewer as a second fact. Held as a `CStr` because the drawing
 /// side takes one; [`CONVERTS_ON_SERVER`] is the same bytes for callers that want a `&str`.
-pub(crate) const CONVERTS_ON_SERVER_C: &std::ffi::CStr = c"Converts on server";
+pub(crate) const CONVERTS_ON_SERVER_C: &std::ffi::CStr = c"Convierte en el servidor";
 /// [`CONVERTS_ON_SERVER_C`] as a `&str`. Same bytes, asserted by a test rather than by eye.
-pub(crate) const CONVERTS_ON_SERVER: &str = "Converts on server";
+pub(crate) const CONVERTS_ON_SERVER: &str = "Convierte en el servidor";
 
 /// `fps:detail-transition`, 2026-09-02: the wash must stop dithering while the scroll spring
 /// moves and dither again at rest, at the idle rest test's quarter-pixel-per-frame threshold.
@@ -3134,11 +3152,11 @@ fn play_mode_bits(d: &metadata::Detail, after: bool) -> ([Bit; FACTS_BITS], usiz
     match play_note(pv, d.hdr, item_subscription(d)) {
         PlayNote::Quiet => push(Bit::Word(
             match pv {
-                crate::route::Preview::DirectPlay => c"Direct Play",
+                crate::route::Preview::DirectPlay => tr_c(c"Direct Play", c"Reproduccion directa"),
                 // Plex's own name for a container-only remux, and the same word
                 // `info_panel::playback_now` reports for the LIVE session — the picture is copied,
                 // so calling it a conversion would state that the server touched the pixels.
-                crate::route::Preview::Remux => c"Direct Stream",
+                crate::route::Preview::Remux => tr_c(c"Direct Stream", c"Emision directa"),
                 crate::route::Preview::Converts => CONVERTS_ON_SERVER_C,
             },
             dim,
@@ -3421,7 +3439,7 @@ fn draw_buttons(p: Painter, env: &Env, y: f32) {
     // the press opens a list rather than acting: it is the same disclosure mark a drill-in row
     // carries, and without it the pill reads as a fourth thing to DO to the film.
     if let Some(i) = index_of(set, HeroCtl::Alt) {
-        Button::new(ALT_LABEL.as_ptr(), theme::size::BODY, rect(i))
+        Button::new(alt_label().as_ptr(), theme::size::BODY, rect(i))
             .trailing_icon(crate::ui::icons::Icon::ChevronDown)
             .focused(focus == i)
             .palette(palette)
@@ -3995,7 +4013,8 @@ fn draw_related(p: Painter) {
     let focus_col = if view().section == 3 { view().col } else { -1 };
     let lift = view().related.lift();
     p.text(
-        c"Related".as_ptr(),
+        { let mut rb = [0u8; crate::i18n::TC_MAX];
+                crate::i18n::tc("Related", &mut rb).as_ptr().cast() },
         MARGIN_X,
         related_y - lift,
         theme::size::HEADLINE,
@@ -5664,14 +5683,16 @@ fn draw_about(p: Painter) {
     let lbl = theme::TEXT_TERTIARY; // dim labels
     let dim = theme::TEXT_TERTIARY;
 
-    text_at(p, tx, about_y, theme::size::HEADLINE, hd, 1, "About");
+    text_at(p, tx, about_y, theme::size::HEADLINE, hd, 1, crate::i18n::t("About"));
 
     // card + column geometry — the card's height HUGS its measured content (title + genres +
     // wrapped synopsis + padding); a fixed 330px box used to leave up to ~180px of dead space
     // inside the focus highlight for a short blurb.
     let (cw, cy, pad) = (640.0f32, about_y + 50.0, 30.0f32);
     let syn_w0 = cw - 2.0 * pad;
-    let mw = crate::text::text_width(c"MORE".as_ptr(), theme::size::CAPTION, 1);
+    let mut mb = [0u8; crate::i18n::TC_MAX];
+    let more_c = crate::i18n::tc("MORE", &mut mb);
+    let mw = crate::text::text_width(more_c.as_ptr().cast(), theme::size::CAPTION, 1);
     let more_zone = mw + 36.0;
     let syn_tv = TextView::new(&d.summary, theme::size::CAPTION, theme::TEXT_HEADING)
         .leading(30.0)
@@ -5804,7 +5825,7 @@ fn draw_about(p: Painter) {
     // the next line, and `ch` above already counted it.
     let (mt, _) = crate::text::text_cap_band(theme::size::CAPTION, 1);
     p.text(
-        c"MORE".as_ptr(),
+        more_c.as_ptr().cast(),
         tx + cw - pad,
         // `draw` returns 0 for an EMPTY summary; the card reserved one line for it, so the mark
         // sits on that line rather than a leading above it
@@ -5854,7 +5875,7 @@ fn draw_about(p: Painter) {
     // card's (right-pinned on the column's own last line, same size/colour/cap-band correction).
     if crate::ui::tracks_panel::is_available() {
         p.text(
-            c"MORE".as_ptr(),
+            more_c.as_ptr().cast(),
             lx + 500.0,
             lang_last_top - mt,
             theme::size::CAPTION,
@@ -7917,27 +7938,28 @@ mod tests {
         // The C strings the painter needs cannot BE the shared `&str` (a `CString` per frame is an
         // allocation on the draw path), so the agreement is asserted instead of shared.
         assert_eq!(
-            MARK_WATCHED_LABEL.to_str().unwrap(),
-            crate::ui::widgets::MARK_WATCHED_VERB
+            mark_watched_label().to_str().unwrap(),
+            crate::i18n::t(crate::ui::widgets::MARK_WATCHED_VERB)
         );
         assert_eq!(
-            MARK_UNWATCHED_LABEL.to_str().unwrap(),
-            crate::ui::widgets::MARK_UNWATCHED_VERB
+            mark_unwatched_label().to_str().unwrap(),
+            crate::i18n::t(crate::ui::widgets::MARK_UNWATCHED_VERB)
         );
         assert_eq!(
-            PLAY_FROM_START_LABEL.to_str().unwrap(),
-            crate::ui::widgets::PLAY_FROM_START_VERB
+            play_from_start_label().to_str().unwrap(),
+            crate::i18n::t(crate::ui::widgets::PLAY_FROM_START_VERB)
         );
         for (plain, named) in [
-            (MARK_WATCHED_LABEL, MARK_SHOW_WATCHED_LABEL),
-            (MARK_UNWATCHED_LABEL, MARK_SHOW_UNWATCHED_LABEL),
+            (mark_watched_label(), mark_show_watched_label()),
+            (mark_unwatched_label(), mark_show_unwatched_label()),
         ] {
             let (p, w) = (plain.to_str().unwrap(), named.to_str().unwrap());
-            assert_eq!(
-                w,
-                p.replacen("Mark ", "Mark Show ", 1),
-                "{w:?} is {p:?} naming its subject"
-            );
+            let expected = crate::i18n::t(if p == crate::i18n::t("Mark as Unwatched") {
+                "Mark Show as Unwatched"
+            } else {
+                "Mark Show as Watched"
+            });
+            assert_eq!(w, expected, "the hero verb is the menu's own, naming its subject");
         }
     }
 
@@ -7951,28 +7973,28 @@ mod tests {
     fn the_row_offers_exactly_one_watched_toggle() {
         assert_eq!(
             disc_verb(HeroCtl::Restart, false),
-            Some((0, PLAY_FROM_START_LABEL))
+            Some((0, play_from_start_label()))
         );
         assert_eq!(
             disc_verb(HeroCtl::Restart, true),
-            Some((0, PLAY_FROM_START_LABEL)),
+            Some((0, play_from_start_label())),
             "the restart disc acts on the subject the blurb just named, so it never takes a noun"
         );
         assert_eq!(
             disc_verb(HeroCtl::MarkWatched, false),
-            Some((1, MARK_WATCHED_LABEL))
+            Some((1, mark_watched_label()))
         );
         assert_eq!(
             disc_verb(HeroCtl::MarkUnwatched, false),
-            Some((1, MARK_UNWATCHED_LABEL))
+            Some((1, mark_unwatched_label()))
         );
         assert_eq!(
             disc_verb(HeroCtl::MarkWatched, true),
-            Some((1, MARK_SHOW_WATCHED_LABEL))
+            Some((1, mark_show_watched_label()))
         );
         assert_eq!(
             disc_verb(HeroCtl::MarkUnwatched, true),
-            Some((1, MARK_SHOW_UNWATCHED_LABEL))
+            Some((1, mark_show_unwatched_label()))
         );
         for c in [HeroCtl::Play, HeroCtl::Alt] {
             for named in [false, true] {

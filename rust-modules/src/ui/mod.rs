@@ -32,7 +32,8 @@ pub(crate) mod jail_repair;
 #[cfg(feature = "lab-diagnostics")]
 pub mod lab_toast; // the Lab Diagnostics upload read-out (lab builds only — see `crate::lab`)
 pub mod label;
-pub mod legal; // Privacy / open-source / source-offer / trademarks — the LG, Plex and LGPL duties that must be readable ON the TV
+pub mod legal;
+mod legal_es; // Privacy / open-source / source-offer / trademarks — the LG, Plex and LGPL duties that must be readable ON the TV
 pub mod library; // the Library browse screen (poster wall + server-driven sort/filter)
 pub mod login; // sign-in screen (QR / short code) for the plex.tv account flow
 #[cfg(feature = "jellyfin")]
