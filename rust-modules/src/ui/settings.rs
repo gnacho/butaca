@@ -89,7 +89,7 @@ fn rebuild(sel: i32) {
     if signed_in() {
         let n = crate::browse::pinned_count();
         sections.push(
-            Section::new("Home").row(
+            Section::new(crate::i18n::t("Home")).row(
                 Row::new("Home screen")
                     .detail("Choose which libraries contribute shelves.")
                     .value(format!(
@@ -362,7 +362,7 @@ pub(crate) fn draw() {
     RouteLayout::screen().draw_narrative(
         p,
         None,
-        "Settings",
+        crate::i18n::t("Settings"),
         if cfg!(feature = "jellyfin") {
             "Settings apply to this Jellyfin profile on this television. You can return here from the profile menu at any time."
         } else {

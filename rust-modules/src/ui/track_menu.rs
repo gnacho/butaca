@@ -290,7 +290,7 @@ fn track_name(pms: &str, container: &str, lang: &str) -> String {
 }
 
 fn build_audio() -> Section {
-    let mut sec = Section::new("Audio");
+    let mut sec = Section::new(crate::i18n::t("Audio"));
     let d = match tracks() {
         Some(t) => t,
         None => return sec,
@@ -365,8 +365,8 @@ fn channel_short(layout: &str) -> String {
 }
 
 fn build_subs() -> Section {
-    let mut sec = Section::new("Subtitles");
-    sec = sec.row(Row::new("Off").checked(active_sub() < 0));
+    let mut sec = Section::new(crate::i18n::t("Subtitles"));
+    sec = sec.row(Row::new(crate::i18n::t("Off")).checked(active_sub() < 0));
     if let Some(t) = tracks() {
         let names = crate::player::SHARED.track_names.lock().unwrap();
         for i in visible_subs() {

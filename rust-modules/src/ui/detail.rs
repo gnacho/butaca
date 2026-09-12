@@ -4051,8 +4051,11 @@ fn draw_cast(p: Painter) {
     let cast_y = 0.0; // local origin (ScrollColumn pre-translates to this section's top)
     let focus_col = if view().section == 4 { view().col } else { -1 };
     let lift = view().cast.lift();
+    // tc: t() answers a &str; the draw API eats NUL-terminated pointers (i18n's bridge)
+    let mut cast_head = [0u8; crate::i18n::TC_MAX];
+    let cast_head = crate::i18n::tc("Cast & Crew", &mut cast_head);
     p.text(
-        c"Cast & Crew".as_ptr(),
+        cast_head.as_ptr().cast(),
         MARGIN_X,
         cast_y - lift,
         theme::size::HEADLINE,

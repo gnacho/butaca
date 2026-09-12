@@ -1015,8 +1015,8 @@ pub(crate) fn tab_count() -> usize {
 }
 pub(crate) fn tab_title(t: usize) -> &'static str {
     match TAB_KINDS.get(t) {
-        Some(SecKind::Movie) => "Movies",
-        Some(SecKind::Show) => "TV Shows",
+        Some(SecKind::Movie) => crate::i18n::t("Movies"),
+        Some(SecKind::Show) => crate::i18n::t("TV Shows"),
         None => "",
     }
 }
@@ -2865,8 +2865,8 @@ pub(crate) fn seed_two_source_table_for_test() {
     append_sections(
         0,
         vec![
-            (1, "Movies".into(), SecKind::Movie),
-            (2, "TV Shows".into(), SecKind::Show),
+            (1, crate::i18n::t("Movies").to_string(), SecKind::Movie),
+            (2, crate::i18n::t("TV Shows").to_string(), SecKind::Show),
         ],
     );
     append_sections(
@@ -2923,7 +2923,7 @@ mod tests {
             source.sections_done = true;
             source.counts_done = true;
         }
-        append_sections(0, vec![(1, "Movies".into(), SecKind::Movie)]);
+        append_sections(0, vec![(1, crate::i18n::t("Movies").to_string(), SecKind::Movie)]);
         (cleanup, sid, client)
     }
 
@@ -3649,7 +3649,7 @@ mod tests {
         append_sections(
             0,
             vec![
-                (1, "Movies".into(), SecKind::Movie),
+                (1, crate::i18n::t("Movies").to_string(), SecKind::Movie),
                 (2, "Film Club".into(), SecKind::Movie),
             ],
         );
@@ -3706,8 +3706,8 @@ mod tests {
         append_sections(
             0,
             vec![
-                (1, "Movies".into(), SecKind::Movie),
-                (2, "TV Shows".into(), SecKind::Show),
+                (1, crate::i18n::t("Movies").to_string(), SecKind::Movie),
+                (2, crate::i18n::t("TV Shows").to_string(), SecKind::Show),
             ],
         );
         append_sections(1, vec![(1, "Film Club".into(), SecKind::Movie)]);
@@ -3745,8 +3745,8 @@ mod tests {
         append_sections(
             0,
             vec![
-                (1, "Movies".into(), SecKind::Movie),
-                (2, "TV Shows".into(), SecKind::Show),
+                (1, crate::i18n::t("Movies").to_string(), SecKind::Movie),
+                (2, crate::i18n::t("TV Shows").to_string(), SecKind::Show),
             ],
         );
         set_cur(1);
@@ -3842,8 +3842,8 @@ mod tests {
         append_sections(
             0,
             vec![
-                (1, "Movies".into(), SecKind::Movie),
-                (2, "TV Shows".into(), SecKind::Show),
+                (1, crate::i18n::t("Movies").to_string(), SecKind::Movie),
+                (2, crate::i18n::t("TV Shows").to_string(), SecKind::Show),
             ],
         );
         append_sections(1, vec![(1, "Film Club".into(), SecKind::Movie)]);
@@ -3963,8 +3963,8 @@ mod tests {
             append_sections(
                 0,
                 vec![
-                    (1, "Movies".into(), SecKind::Movie),
-                    (2, "TV Shows".into(), SecKind::Show),
+                    (1, crate::i18n::t("Movies").to_string(), SecKind::Movie),
+                    (2, crate::i18n::t("TV Shows").to_string(), SecKind::Show),
                 ],
             );
         };
@@ -4002,7 +4002,7 @@ mod tests {
             s.machine_id = String::new();
             s
         }]);
-        append_sections(0, vec![(1, "Movies".into(), SecKind::Movie)]);
+        append_sections(0, vec![(1, crate::i18n::t("Movies").to_string(), SecKind::Movie)]);
         assert!(
             library_pins().iter().all(|&(si, _, _)| si == 0),
             "a nameless machine joins nothing"
@@ -4033,8 +4033,8 @@ mod tests {
         append_sections(
             0,
             vec![
-                (1, "Movies".into(), SecKind::Movie),
-                (2, "TV Shows".into(), SecKind::Show),
+                (1, crate::i18n::t("Movies").to_string(), SecKind::Movie),
+                (2, crate::i18n::t("TV Shows").to_string(), SecKind::Show),
             ],
         );
         assert!(toggle_pin(1));
@@ -4108,7 +4108,7 @@ mod tests {
 
         // A single-server install is not a question at all, whoever is watching.
         seed_sources(vec![a_source("mac-mini", "", true)]);
-        append_sections(0, vec![(1, "Movies".into(), SecKind::Movie)]);
+        append_sections(0, vec![(1, crate::i18n::t("Movies").to_string(), SecKind::Movie)]);
         assert!(!first_run_asks());
         reset();
     }
@@ -4124,7 +4124,7 @@ mod tests {
             a_source("mac-mini", "", true),
             a_source("nas-home", "friend", true),
         ]);
-        append_sections(0, vec![(1, "Movies".into(), SecKind::Movie)]);
+        append_sections(0, vec![(1, crate::i18n::t("Movies").to_string(), SecKind::Movie)]);
         append_sections(
             1,
             vec![
@@ -4164,7 +4164,7 @@ mod tests {
             a_source("mac-mini", "", true),
             a_source("nas-home", "friend", true),
         ]);
-        append_sections(0, vec![(1, "Movies".into(), SecKind::Movie)]); // we own films and nothing else
+        append_sections(0, vec![(1, crate::i18n::t("Movies").to_string(), SecKind::Movie)]); // we own films and nothing else
         append_sections(
             1,
             vec![
@@ -4232,7 +4232,7 @@ mod tests {
         // We own FILMS and nothing else. The owner used to hold both types here, which made the
         // second half of this test need a third type (music) to have anything left over; with the
         // product's list down to two, the un-owned type has to be one of them.
-        append_sections(0, vec![(1, "Movies".into(), SecKind::Movie)]);
+        append_sections(0, vec![(1, crate::i18n::t("Movies").to_string(), SecKind::Movie)]);
         let alone = row();
         assert_eq!(alone, vec!["Movies", "TV Shows"]);
 
@@ -4281,8 +4281,8 @@ mod tests {
         append_sections(
             0,
             vec![
-                (1, "Movies".into(), SecKind::Movie),
-                (2, "TV Shows".into(), SecKind::Show),
+                (1, crate::i18n::t("Movies").to_string(), SecKind::Movie),
+                (2, crate::i18n::t("TV Shows").to_string(), SecKind::Show),
             ],
         );
         assert_eq!(tab_count(), 2);
@@ -4305,7 +4305,7 @@ mod tests {
             a_source("nas-home", "friend", true),
             a_source("nas-home", "friend", true),
         ]);
-        append_sections(0, vec![(1, "Movies".into(), SecKind::Movie)]);
+        append_sections(0, vec![(1, crate::i18n::t("Movies").to_string(), SecKind::Movie)]);
         let (g0, table0) = (tabs_gen(), sections_gen());
 
         // two friends' film libraries land: both fold onto your Movies pill
@@ -4348,8 +4348,8 @@ mod tests {
         append_sections(
             0,
             vec![
-                (1, "Movies".into(), SecKind::Movie),
-                (2, "TV Shows".into(), SecKind::Show),
+                (1, crate::i18n::t("Movies").to_string(), SecKind::Movie),
+                (2, crate::i18n::t("TV Shows").to_string(), SecKind::Show),
             ],
         );
         append_sections(
@@ -4402,7 +4402,7 @@ mod tests {
             a_source("mac-mini", "", true),
             a_source("nas-home", "friend", true),
         ]);
-        append_sections(0, vec![(1, "Movies".into(), SecKind::Movie)]);
+        append_sections(0, vec![(1, crate::i18n::t("Movies").to_string(), SecKind::Movie)]);
         append_sections(1, vec![(1, "Film Club".into(), SecKind::Movie)]);
         assert!(
             sources()[1].sections_done,
@@ -4632,7 +4632,7 @@ mod tests {
     fn an_empty_count_landing_does_not_latch_the_probe_off() {
         let _g = crate::testlock::serial();
         let (_cleanup, _, client) = registered_source();
-        append_sections(0, vec![(1, "Movies".into(), SecKind::Movie)]);
+        append_sections(0, vec![(1, crate::i18n::t("Movies").to_string(), SecKind::Movie)]);
         if let Some(s) = source_mut(0) {
             s.counts_done = false;
         }
@@ -4685,8 +4685,8 @@ mod tests {
         append_sections(
             0,
             vec![
-                (1, "Movies".into(), SecKind::Movie),
-                (2, "TV Shows".into(), SecKind::Show),
+                (1, crate::i18n::t("Movies").to_string(), SecKind::Movie),
+                (2, crate::i18n::t("TV Shows").to_string(), SecKind::Show),
             ],
         );
         assert_eq!(tab_count(), section_count());

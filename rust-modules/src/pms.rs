@@ -698,7 +698,7 @@ fn merge(srcs: &[Src]) -> HubBuild {
         new_hubs.push(HubRow {
             // the hub id the rest of the module matches on (hero-pool eligibility,
             // `hub_is_continue`), rather than the dedicated hub's own "continueWatching"
-            title: "Continue Watching".to_string(),
+            title: crate::i18n::t("Continue Watching").to_string(),
             hub_id: "home.continue".to_string(),
             source: String::new(),
             start: 0,
@@ -1422,7 +1422,7 @@ fn fetch_source_jellyfin(c: &'static crate::jellyfin::JfClient, sid: ServerId) -
             continue;
         }
         out.shelves.push(Shelf {
-            title: format!("Recently Added — {}", v.name),
+            title: format!("{} — {}", crate::i18n::t("Recently Added"), v.name),
             hub_id: format!("jf.latest.{}", v.id),
             items,
         });

@@ -32,6 +32,7 @@ mod gfx;
 mod gpu_timer; // async EXT_disjoint_timer_query timing; no glFinish on the timing path
 mod hls; // strict parser/auth/timeline for the measured one-variant PMS HLS shape
 mod http; // the ONE door out of the control plane: dispatch a Plex REST request on its origin's scheme (stream.rs for http, net.rs/libcurl for https)
+mod i18n; // the runtime translation layer: the system locale picks the table, English is the key and the fallback
 #[cfg(feature = "devtriggers")]
 mod hwcnt; // direct userspace Mali r12p0 vinstr reader for the phase profiler
 mod img;
