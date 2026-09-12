@@ -877,10 +877,10 @@ fn hero_credit(d: &metadata::Detail) -> Option<(&'static str, Vec<&str>)> {
             .filter(|c| c.role.contains("Writer"))
             .map(|c| c.tag.as_str())
             .collect();
-        return (!names.is_empty()).then_some(("Created by", names));
+        return (!names.is_empty()).then_some((crate::i18n::t("Created by"), names));
     }
     let names: Vec<&str> = d.directors.iter().map(|s| s.as_str()).collect();
-    (!names.is_empty()).then_some(("Directed by", names))
+    (!names.is_empty()).then_some((crate::i18n::t("Directed by"), names))
 }
 
 /// Does the hero carry its right-aligned people column at all? ONE test, because two places have to
@@ -2837,7 +2837,7 @@ fn draw_people(p: Painter, d: &metadata::Detail, btn_y: f32) {
             .take(PEOPLE_CAST)
             .map(|c| c.tag.as_str())
             .collect();
-        bottom -= people_line(p, "Starring", &names, x, bottom);
+        bottom -= people_line(p, crate::i18n::t("Starring"), &names, x, bottom);
     }
     if let Some((label, names)) = hero_credit(d) {
         people_line(p, label, &names, x, bottom);

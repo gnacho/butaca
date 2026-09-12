@@ -64,7 +64,15 @@ use crate::person::NSHELF;
 /// Headings as C-string LITERALS, not `&str` — they are drawn every frame, and `CString::new`
 /// per shelf per frame is a heap allocation the draw path does not need (the same reason
 /// `detail.rs` writes `c"Related"` / `c"Cast & Crew"`).
-const SHELF_TITLE: [&std::ffi::CStr; NSHELF] = [c"Movies", c"Shows"];
+// tc buffers: the titles translate (i18n), so they cannot stay c"" literals
+fn shelf_title(kind: usize) -> [u8; crate::i18n::TC_MAX] {
+    let mut b = [0u8; crate::i18n::TC_MAX];
+    let s = crate::i18n::t(if kind == 0 { "Movies" } else { "Shows" });
+    let n = s.len().min(crate::i18n::TC_MAX - 1);
+    b[..n].copy_from_slice(&s.as_bytes()[..n]);
+    b[n] = 0;
+    b
+}
 
 /// Portrait diameter, EXPANDED (the header holds focus) and CONDENSED (focus is in the shelves) —
 /// the v2 band's two states; the `cond` spring interpolates between them.
@@ -1172,7 +1180,7 @@ fn draw_shelf(p: Painter, person: &Person, kind: usize, sc: &Scene) {
     let hy = -row.lift();
     #[allow(unused_variables)] // `tw` is used only when the count run exists
     let tw = Label::new(
-        SHELF_TITLE[kind].as_ptr(),
+        { let t = shelf_title(kind); t.as_ptr().cast() },
         theme::size::HEADLINE,
         theme::TEXT_HEADING,
     )
@@ -1182,7 +1190,7 @@ fn draw_shelf(p: Painter, person: &Person, kind: usize, sc: &Scene) {
     if !sc.shelf_count_c[kind].as_bytes().is_empty() {
         // the count sits ON THE HEADING'S BASELINE — two sizes cap-top-aligned would leave the
         // smaller run floating above the line the eye reads
-        let tw = crate::text::text_width(SHELF_TITLE[kind].as_ptr(), theme::size::HEADLINE, 1);
+        let tw = crate::text::text_width({ let t = shelf_title(kind); t.as_ptr().cast() }, theme::size::HEADLINE, 1);
         Label::new(
             sc.shelf_count_c[kind].as_ptr(),
             theme::size::CAPTION,

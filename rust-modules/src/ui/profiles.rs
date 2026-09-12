@@ -334,7 +334,7 @@ pub fn draw() {
 
     // "Sign out" — the picker is the only surface a user who doesn't recognise these profiles
     // ever sees, so it must offer a way out of the account.
-    crate::ui::widgets::Button::new(c"Sign out".as_ptr(), theme::size::BODY, footer_rect())
+    crate::ui::widgets::Button::new(sign_out_cstr().as_ptr(), theme::size::BODY, footer_rect())
         .focused(s.footer)
         .scale(unsafe { std::ptr::addr_of!(FOOTER_POP).as_ref().unwrap().scale(0) })
         .palette(s.ground.palette())
@@ -510,8 +510,19 @@ fn pad_key_rect(r: usize, c: usize) -> Rect {
 }
 
 /// The centered "Sign out" pill under the roster — shared by draw + pointer hit-tests.
+/// The pill's label, translated once per process (i18n): two draw sites measure and draw the
+/// same string, so they must agree on one CStr rather than each holding its own buffer.
+fn sign_out_cstr() -> &'static std::ffi::CStr {
+    static S: std::sync::OnceLock<&'static std::ffi::CStr> = std::sync::OnceLock::new();
+    *S.get_or_init(|| {
+        let mut v = crate::i18n::t("Sign out").as_bytes().to_vec();
+        v.push(0);
+        std::ffi::CStr::from_bytes_with_nul(Box::leak(v.into_boxed_slice())).unwrap_or_default()
+    })
+}
+
 fn footer_rect() -> Rect {
-    let tw = crate::text::text_width(c"Sign out".as_ptr(), theme::size::BODY, 1);
+    let tw = crate::text::text_width(sign_out_cstr().as_ptr(), theme::size::BODY, 1);
     let w = tw + 76.0;
     Rect::new((SCR_W - w) * 0.5, FOOTER_Y, w, 60.0)
 }

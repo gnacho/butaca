@@ -100,7 +100,7 @@ pub(crate) const SCOPE_H: f32 = theme::size::CAPTION as f32 * 1.35;
 const SCOPE_W: f32 = FIELD.w;
 /// Drawn whenever the query has nothing readable in it, focused or not. A `CStr` literal, so the
 /// one string this module knows at compile time costs no per-frame allocation.
-const PLACEHOLDER: &CStr = c"Search your library";
+const PLACEHOLDER: &CStr = c"Busca en tu biblioteca";
 
 /// What a source is called before the roster has named it. The line still has to be a sentence —
 /// an empty run in the middle of one reads as a rendering fault, not as a missing fact — and at

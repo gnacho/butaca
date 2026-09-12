@@ -839,7 +839,7 @@ fn draw_failed_readout(p: Painter, jail_repair: crate::webos::jail_repair::State
     );
     fr_line(
         p,
-        c"Playback failed",
+        c"No se pudo reproducir",
         FR_VERDICT_TOP,
         theme::size::TITLE,
         1,
@@ -877,7 +877,7 @@ fn draw_failed_readout(p: Painter, jail_repair: crate::webos::jail_repair::State
             );
     }
     if e.no_pass {
-        let words = c"This server has no";
+        let words = c"Este servidor no tiene";
         let ww = crate::text::text_width(words.as_ptr(), theme::size::BODY, 0);
         let cw = crate::ui::widgets::pass_capsule_w();
         const GAP: f32 = 16.0;
@@ -902,25 +902,25 @@ fn draw_failed_readout(p: Painter, jail_repair: crate::webos::jail_repair::State
     match crate::ui::jail_repair::primary_action(e.kind, jail_repair) {
         crate::ui::jail_repair::PrimaryAction::Quality => draw_hint_with_keycap(
             p,
-            c"Press",
+            c"Pulsa",
             c"OK",
-            c"to choose quality or retry",
+            c"para elegir calidad o reintentar",
             FR_HINT_TOP,
         ),
         crate::ui::jail_repair::PrimaryAction::Repair => draw_hint_with_keycap(
             p,
-            c"Press",
+            c"Pulsa",
             c"OK",
-            c"to repair the sandbox",
+            c"para reparar el sandbox",
             FR_HINT_TOP,
         ),
         crate::ui::jail_repair::PrimaryAction::None => {}
     }
     draw_hint_with_keycap(
         p,
-        c"Press",
-        c"BACK",
-        c"to return",
+        c"Pulsa",
+        c"ATRÁS",
+        c"para volver",
         FR_HINT_TOP + FR_HINT_GAP,
     );
     // The support line — version · firmware · set · failure code — at CAPTION/tertiary, the couch

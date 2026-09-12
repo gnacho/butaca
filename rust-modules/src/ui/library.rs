@@ -518,10 +518,10 @@ fn view_filter_label() -> &'static str {
 fn view_filter_value() -> String {
     let genre = view_filter_label();
     match (genre, view_unwatched()) {
-        ("All", false) => "All".to_string(),
-        ("All", true) => "Unwatched".to_string(),
+        ("All", false) => crate::i18n::t("All").to_string(),
+        ("All", true) => crate::i18n::t("Unwatched").to_string(),
         (g, false) => g.to_string(),
-        (g, true) => format!("{g} \u{b7} Unwatched"),
+        (g, true) => format!("{g} \u{b7} {}", crate::i18n::t("Unwatched")),
     }
 }
 // ---- the toolbar's chip row -------------------------------------------------------------------
@@ -633,8 +633,8 @@ fn chip_value(c: Chip) -> (&'static str, String) {
             "Library",
             crate::browse::section_title(view_section()).to_string(),
         ),
-        Chip::Sort => ("Sort", view_sort_label().to_string()),
-        Chip::Filter => ("Filter", view_filter_value()),
+        Chip::Sort => (crate::i18n::t("Sort"), view_sort_label().to_string()),
+        Chip::Filter => (crate::i18n::t("Filter"), view_filter_value()),
     }
 }
 
@@ -1782,7 +1782,7 @@ fn open_sort_menu() {
 /// restart the popover's appear animation.
 fn build_sort_menu(keep: bool) {
     let sorts = crate::browse::sorts();
-    let mut sec = Section::new("Sort by");
+    let mut sec = Section::new(crate::i18n::t("Sort by"));
     if sorts.is_empty() {
         sec = sec.row(Row::new("Loading\u{2026}").dim(true));
     }
@@ -1830,7 +1830,7 @@ fn filter_rows() -> (i32, i32) {
 }
 
 fn open_filter_menu(keep: bool) {
-    let mut sec = Section::new("Filter");
+    let mut sec = Section::new(crate::i18n::t("Filter"));
     if has_unwatched() {
         // A SWITCH, not one option among several: it says what it is set to in words at the trailing
         // edge, and carries no mark at all in the leading column.

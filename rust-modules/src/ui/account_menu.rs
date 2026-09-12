@@ -60,7 +60,7 @@ pub enum Action {
 
 /// Header for a session we cannot name — signed in but no roster has landed yet (and the signed-out
 /// case, where naming an account we do not have would be the same lie in reverse).
-const HEADER_FALLBACK: &str = "Account";
+const HEADER_FALLBACK: &str = "Cuenta";
 
 /// One cached snapshot per open. The host page is deliberately frozen while this modal owns input,
 /// so a dynamic policy would repeatedly resample identical pixels during the menu's own appear
@@ -376,7 +376,7 @@ mod tests {
     #[test]
     fn signed_out_profile_menu_does_not_offer_playback_diagnostics() {
         let (name, rows) = menu(&Session::default(), None);
-        assert_eq!(name, "Account");
+        assert_eq!(name, "Cuenta");
         assert_eq!(rows, vec!["Sign in", "Settings"]);
     }
 
@@ -434,7 +434,7 @@ mod tests {
             ..Default::default()
         });
         let (name, rows) = menu(&s, Some(&UserRef::default()));
-        assert_eq!(name, "Account");
+        assert_eq!(name, "Cuenta");
         assert_eq!(rows, vec!["Change profile", "Sign out", "Settings"]);
     }
 

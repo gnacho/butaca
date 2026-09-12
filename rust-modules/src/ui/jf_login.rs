@@ -26,7 +26,13 @@ const F_USER: usize = 1;
 const F_PASS: usize = 2;
 const ROW_CONNECT: i32 = 3;
 
-const LABELS: [&str; 3] = ["Server", "User name", "Password"];
+fn labels() -> [&'static str; 3] {
+    [
+        crate::i18n::t("Server"),
+        crate::i18n::t("User name"),
+        crate::i18n::t("Password"),
+    ]
+}
 /// What an untouched field says. The server's is an example (the one thing a person must invent
 /// is also the one with a shape worth showing); the other two state their requirement.
 // The password hint is honest about the rule `connectable` actually applies: plenty of LAN
@@ -163,7 +169,7 @@ pub fn update(dt: f32) {
 fn build_rows(s: &Scene) -> Vec<Section> {
     let working = signin::phase() == Phase::Working;
     let mut fields = Section::new("");
-    for (i, label) in LABELS.iter().enumerate() {
+    for (i, label) in labels().iter().enumerate() {
         let empty = s.fields[i].is_empty();
         let value = if empty {
             HINTS[i].to_string()
@@ -175,7 +181,7 @@ fn build_rows(s: &Scene) -> Vec<Section> {
         fields = fields.row(Row::new(*label).value(value).value_dim(empty).dim(working));
     }
     let action = Section::new("").row(
-        Row::new("Connect")
+        Row::new(crate::i18n::t("Connect"))
             .chevron(true)
             .dim(working || !connectable(&s.fields)),
     );
@@ -240,7 +246,7 @@ pub fn draw() {
             .draw(p, Rect::new(nar.x, y, nar.w, theme::size::DISPLAY as f32 * 1.3));
         y += theme::size::DISPLAY as f32 * 1.6;
     }
-    TextView::new("Sign in to Jellyfin", theme::size::TITLE, theme::TEXT_HEADING)
+    TextView::new(crate::i18n::t("Sign in to Jellyfin"), theme::size::TITLE, theme::TEXT_HEADING)
         .bold()
         .draw(p, Rect::new(nar.x, y, nar.w, theme::size::TITLE as f32 * 1.4));
     y += theme::size::TITLE as f32 * 1.4 + theme::space::SM;

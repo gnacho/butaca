@@ -90,8 +90,8 @@ fn rebuild(sel: i32) {
         let n = crate::browse::pinned_count();
         sections.push(
             Section::new(crate::i18n::t("Home")).row(
-                Row::new("Home screen")
-                    .detail("Choose which libraries contribute shelves.")
+                Row::new(crate::i18n::t("Home screen"))
+                    .detail(crate::i18n::t("Choose which libraries contribute shelves."))
                     .value(format!(
                         "{n} {}",
                         if n == 1 { "library" } else { "libraries" }
@@ -104,21 +104,21 @@ fn rebuild(sel: i32) {
     sections.push(
         Section::new("Privacy")
             .row(
-                Row::new("Privacy & data")
-                    .detail("Optional reports, privacy information and local data.")
+                Row::new(crate::i18n::t("Privacy & data"))
+                    .detail(crate::i18n::t("Optional reports, privacy information and local data."))
                     .chevron(true),
             )
             .row(
-                Row::new("Legal notices")
-                    .detail("Privacy, licences, source code, trademarks and contact.")
+                Row::new(crate::i18n::t("Legal notices"))
+                    .detail(crate::i18n::t("Privacy, licences, source code, trademarks and contact."))
                     .chevron(true),
             ),
     );
     actions.extend([Action::Privacy, Action::Legal]);
     sections.push(
-        Section::new("System").row(
-            Row::new(if cfg!(feature = "jellyfin") { "About butaca" } else { "About PlxNative" })
-                .detail("Version, copyright and project information.")
+        Section::new(crate::i18n::t("System")).row(
+            Row::new(if cfg!(feature = "jellyfin") { crate::i18n::t("About butaca") } else { "About PlxNative" })
+                .detail(crate::i18n::t("Version, copyright and project information."))
                 .chevron(true),
         ),
     );

@@ -132,15 +132,26 @@ fn band(editing: bool) -> Rect {
 /// user and a straight `"` is a programmer's mark. `q` arrives already elided, so the closing quote
 /// always survives: eliding the whole line would eat it and leave a sentence that never closes.
 fn no_results_line(q: &str) -> String {
-    format!("No results for \u{201C}{q}\u{201D}")
+    format!("{} \u{201C}{q}\u{201D}", crate::i18n::t("No results for"))
 }
 
 /// The region's own name, in the caps header face — the part that survives from the populated
 /// layout, so an empty list still says what it is a list of. See the module doc's table.
 fn header_of(say: Say) -> &'static CStr {
+    // The header translates, so it cannot stay a c"" literal. There are exactly two answers,
+    // each built ONCE per process (OnceLock + a deliberate two-allocation leak): the per-draw
+    // buffer dance has no home here - the pointer must outlive the fn - and leaking two labels
+    // a process beats leaking one per frame by every measure that matters.
+    static NO_RES: std::sync::OnceLock<&'static CStr> = std::sync::OnceLock::new();
+    static RECENT: std::sync::OnceLock<&'static CStr> = std::sync::OnceLock::new();
+    fn mk(key: &'static str) -> &'static CStr {
+        let mut v = crate::i18n::t(key).as_bytes().to_vec();
+        v.push(0);
+        std::ffi::CStr::from_bytes_with_nul(Box::leak(v.into_boxed_slice())).unwrap_or_default()
+    }
     match say {
-        Say::NoResults => c"SEARCH RESULTS",
-        _ => c"RECENT SEARCHES",
+        Say::NoResults => NO_RES.get_or_init(|| mk("SEARCH RESULTS")),
+        _ => RECENT.get_or_init(|| mk("RECENT SEARCHES")),
     }
 }
 
@@ -169,10 +180,10 @@ pub(crate) fn draw(p: Painter, v: &View) {
     if say == Say::Fault {
         StatusOverlay::new(
             frame,
-            c"Search didn\u{2019}t reach the server",
+            c"La búsqueda no llegó al servidor",
             StatusKind::Failed,
         )
-        .reason(c"Your libraries are fine \u{2014} try again in a moment.")
+        .reason(c"Tus bibliotecas están bien; prueba en un momento.")
         .draw(&Env::inert(), p);
         return;
     }
@@ -195,7 +206,7 @@ pub(crate) fn draw(p: Painter, v: &View) {
         // U+2019, not an ASCII `'`, for the same reason the query is quoted with U+201C/U+201D:
         // these two statements share one type role, and a straight mark beside a curly pair is the
         // kind of mixed typography that reads as an accident.
-        _ => "Nothing searched yet".to_string(),
+        _ => crate::i18n::t("Nothing searched yet").to_string(),
     };
     // The run must outlive the draw below — `Label` borrows the pointer (`ui/CLAUDE.md`).
     let Ok(statement_c) = CString::new(statement) else {

@@ -69,6 +69,24 @@ pub(crate) fn set_for_test(es: bool) {
 /// is the Spanish rendering when the table and the language both say so, and the argument itself
 /// otherwise - never empty, never a partial. A `&'static str` in and out because every call site
 /// owns a literal; dynamic text (server titles, user names) is not passed here at all.
+/// The month abbreviation a calendar date draws (`fmt::pretty_date`'s table, moved here the
+/// day a second language arrived). `1..=12`, the caller's bounds already checked; the answer
+/// for any other month is the empty string, which `pretty_date` renders as no month rather
+/// than a panic in a format path.
+pub(crate) fn month_abbr(mo: usize) -> &'static str {
+    const ES: [&str; 12] = [
+        "ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic",
+    ];
+    const EN: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    if (1..=12).contains(&mo) {
+        if is_es() { ES[mo - 1] } else { EN[mo - 1] }
+    } else {
+        ""
+    }
+}
+
 pub(crate) fn t(s: &'static str) -> &'static str {
     if is_es() {
         es(s).unwrap_or(s)
@@ -86,16 +104,54 @@ fn es(s: &str) -> Option<&'static str> {
         // ---- Home: shelf and row titles (the data layer builds them; the literal is the key) --
         "Continue Watching" => "Seguir viendo",
         "Recently Added" => "Añadido recientemente",
-        // ---- Library sections ----
+        // ---- Home: hero pill and deck states ----
+        "Continue" => "Continuar",
+        "Play" => "Reproducir",
+        "Try Again" => "Reintentar",
+        "Refresh" => "Actualizar",
+        // ---- Library: tabs, toolbar chips, menus ----
         "Movies" => "Películas",
         "TV Shows" => "Series",
+        "Shows" => "Series",
+        "Sort" => "Orden",
+        "Filter" => "Filtro",
+        "Sort by" => "Ordenar por",
+        "All" => "Todo",
+        "Unwatched" => "No vistas",
         // ---- Settings ----
         "Settings" => "Ajustes",
         "Home" => "Inicio",
+        "Home screen" => "Pantalla de inicio",
+        "Choose which libraries contribute shelves." => "Elige qué bibliotecas aportan estanterías.",
+        "Privacy & data" => "Privacidad y datos",
+        "Optional reports, privacy information and local data." => "Informes opcionales, privacidad y datos locales.",
+        "Legal notices" => "Avisos legales",
+        "Privacy, licences, source code, trademarks and contact." => "Privacidad, licencias, código fuente, marcas y contacto.",
+        "System" => "Sistema",
+        "About butaca" => "Acerca de butaca",
+        "Version, copyright and project information." => "Versión, copyright e información del proyecto.",
         // ---- Track menu ----
         "Subtitles" => "Subtítulos",
         "Off" => "Desactivados",
+        // ---- Detail page ----
         "Cast & Crew" => "Reparto y equipo",
+        "Starring" => "Reparto",
+        "Directed by" => "Dirigida por",
+        "Created by" => "Creada por",
+        // ---- Person page ----
+        "Account" => "Cuenta",
+        "Sign out" => "Cerrar sesión",
+        // ---- Sign-in (Jellyfin) ----
+        "Sign in to Jellyfin" => "Inicia sesión en Jellyfin",
+        "Server" => "Servidor",
+        "User name" => "Usuario",
+        "Password" => "Contraseña",
+        "Connect" => "Conectar",
+        // ---- Search ----
+        "SEARCH RESULTS" => "RESULTADOS DE BÚSQUEDA",
+        "RECENT SEARCHES" => "BÚSQUEDAS RECIENTES",
+        "No results for" => "Sin resultados para",
+        "Nothing searched yet" => "Todavía no has buscado",
         _ => return None,
     })
 }
@@ -161,13 +217,46 @@ mod tests {
         for key in [
             "Continue Watching",
             "Recently Added",
+            "Continue",
+            "Play",
+            "Try Again",
+            "Refresh",
             "Movies",
             "TV Shows",
+            "Shows",
+            "Sort",
+            "Filter",
+            "Sort by",
+            "All",
+            "Unwatched",
             "Settings",
             "Home",
+            "Home screen",
+            "Choose which libraries contribute shelves.",
+            "Privacy & data",
+            "Optional reports, privacy information and local data.",
+            "Legal notices",
+            "Privacy, licences, source code, trademarks and contact.",
+            "System",
+            "About butaca",
+            "Version, copyright and project information.",
             "Subtitles",
             "Off",
             "Cast & Crew",
+            "Starring",
+            "Directed by",
+            "Created by",
+            "Account",
+            "Sign out",
+            "Sign in to Jellyfin",
+            "Server",
+            "User name",
+            "Password",
+            "Connect",
+            "SEARCH RESULTS",
+            "RECENT SEARCHES",
+            "No results for",
+            "Nothing searched yet",
         ] {
             let Some(v) = es(key) else {
                 panic!("key removed from the pin list but still asserted: {key}");

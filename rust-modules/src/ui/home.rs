@@ -1234,8 +1234,9 @@ fn hero_actions(hero: &PmsMovie, env: &Env, p: Painter, dx: f32, live: bool) {
                                                    // the pill "Continue" for a play that then began at 0. The detail page's own pill takes the
                                                    // same route for the same reason — the word has to promise what the press delivers.
     let resumes = crate::metadata::resume_ns(hero.resume_ms, hero.dur_ns / 1_000_000) > 0;
-    let plabel = if resumes { c"Continue" } else { c"Play" };
-    let pw = Button::pill_w(plabel.as_ptr(), theme::size::BODY, true); // measured from the label it carries
+    let mut lb = [0u8; crate::i18n::TC_MAX];
+    let plabel = crate::i18n::tc(if resumes { "Continue" } else { "Play" }, &mut lb);
+    let pw = Button::pill_w(plabel.as_ptr().cast(), theme::size::BODY, true); // measured from the label it carries
                                                                        // local (painter-relative) frames, and the screen-space rects that mirror them
     let pill = Rect::new(tx, pill_y, pw, cd);
     let info = Rect::new(tx + pw + cgap, pill_y, cd, cd);
@@ -1278,7 +1279,7 @@ fn hero_actions(hero: &PmsMovie, env: &Env, p: Painter, dx: f32, live: bool) {
             1.0
         }
     };
-    Button::new(plabel.as_ptr(), theme::size::BODY, pill)
+    Button::new(plabel.as_ptr().cast(), theme::size::BODY, pill)
         .icon(Icon::Play)
         .focused(hf == 0)
         .palette(palette)
@@ -2025,15 +2026,15 @@ fn status_read() -> Option<(
             if cfg!(feature = "jellyfin") {
                 c"Can't reach your Jellyfin server"
             } else {
-                c"Can't reach your Plex server"
+                c"No se puede conectar con el servidor"
             },
             StatusKind::Failed,
-            Some(c"Try Again"),
+            Some(c"Reintentar"),
         ),
         crate::pms::HubState::Ready => (
-            c"Nothing on this server yet",
+            c"Esta biblioteca todavía está vacía",
             StatusKind::Empty,
-            Some(c"Refresh"),
+            Some(c"Actualizar"),
         ),
     })
 }

@@ -50,9 +50,9 @@ use std::ptr::{addr_of, addr_of_mut};
 /// *Continue*, "a verb that says what happens next rather than one that says nothing".
 pub(crate) const TITLE: &str = "What goes on your Home?";
 const SETTINGS_TITLE: &str = "What appears on Home?";
-const ACTION: &std::ffi::CStr = c"Start watching";
-const DONE: &std::ffi::CStr = c"Done";
-const RETRY: &std::ffi::CStr = c"Try again";
+const ACTION: &std::ffi::CStr = c"Empezar a ver";
+const DONE: &std::ffi::CStr = c"Hecho";
+const RETRY: &std::ffi::CStr = c"Reintentar";
 /// Where BACK goes, named on the crumb above the title rather than as a hint in the action band.
 const CRUMB_SETTINGS: &str = "Settings";
 const CRUMB_PROFILES: &str = crate::ui::profiles::TITLE;
@@ -488,7 +488,7 @@ pub fn draw() {
         // when it is empty, which on this screen would state the opposite of the truth (there ARE
         // libraries; nobody has listed them yet) on the one screen whose whole subject is that list.
         if crate::browse::discovery_state() == crate::browse::SecFetch::Failed {
-            StatusOverlay::new(lf, c"Couldn't load libraries", StatusKind::Failed)
+            StatusOverlay::new(lf, c"No se pudieron cargar las bibliotecas", StatusKind::Failed)
                 .reason(c"Check the connection, then try again.")
                 .draw(&env, p);
         } else {
