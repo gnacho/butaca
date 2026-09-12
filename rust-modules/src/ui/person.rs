@@ -708,6 +708,7 @@ pub(crate) fn header_ok() -> bool {
     // UP that keeps it there — see [`Scene::header_marked`]. Whether or not the mark was showing
     // a frame ago, this press proves the user found the block.
     scene().header_marked = true;
+    crate::log("DIAG person: header OK opens the bio panel");
     crate::ui::person_bio::open();
     true
 }

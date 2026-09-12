@@ -247,8 +247,39 @@ pub(crate) fn start() {
                 None => "?".into(), // bind() was never called — a boot-order bug, not a TV fact
             }
         ));
+        // Trap 2's fix, at the moment it matters. The panel rises only for the window SDL's
+        // keyboard focus names, and ours is created OPENGL|FULLSCREEN without ever being handed
+        // it (the TV's compositor never sends a keyboard-enter to a set with no physical
+        // keyboard), so on device focus=0 and the IME silently never appears. The NDK's SDL
+        // fork exports `SDL_SetWindowInputFocus` (the vendored 2.0.4 header is stock and omits
+        // it); the firmware inventories do not track it, so it is resolved by dlsym rather
+        // than linked, and a firmware without it merely keeps today's behaviour.
+        if has_focus() == Some(false) {
+            give_focus();
+        }
         SDL_StartTextInput();
     }
+}
+
+/// Hand SDL's keyboard focus to our window. `dlsym` on the already-linked SDL2 (RTLD_DEFAULT is
+/// NULL on Linux), one call, best effort: the log names what happened, and a miss changes
+/// nothing - `start` still runs, exactly as it did before this existed.
+unsafe fn give_focus() {
+    unsafe extern "C" {
+        fn dlsym(handle: *mut c_void, symbol: *const std::os::raw::c_char) -> *mut c_void;
+    }
+    let name = c"SDL_SetWindowInputFocus";
+    let sym = dlsym(std::ptr::null_mut(), name.as_ptr());
+    if sym.is_null() {
+        log("keyboard: SDL_SetWindowInputFocus absent on this firmware; panel may not rise");
+        return;
+    }
+    let set: unsafe extern "C" fn(*mut c_void) = std::mem::transmute(sym);
+    set(*addr_of!(WIN));
+    log(&format!(
+        "keyboard: input focus handed to the window (now focus={})",
+        i32::from(has_focus() == Some(true))
+    ));
 }
 
 /// Dismiss it. Also idempotent.

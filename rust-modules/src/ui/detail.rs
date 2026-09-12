@@ -4486,7 +4486,14 @@ pub(crate) fn on_ok() -> bool {
         // has no file of its own. A modal over an item that is not loaded traps every key the page
         // sends it while showing nothing.
         5 => {
-            if col == 0 && metadata::current().is_some() {
+            // The About block is one unit to the reader, so ANY of its columns answers OK with
+            // the panel - a column that drew a "more" mark and answered nothing read as a dead
+            // button (reported on device). Languages (col 2) keeps its own panel while the item
+            // actually has tracks; every other column - and Languages without tracks - opens the
+            // About panel, which carries the full synopsis the card's MÁS mark promises.
+            if (col != 2 || !crate::ui::tracks_panel::is_available())
+                && metadata::current().is_some()
+            {
                 crate::ui::about_panel::open();
             } else if col == 2 && crate::ui::tracks_panel::is_available() {
                 // Opened straight from here, unlike `Alt`'s deferred request: that panel is
