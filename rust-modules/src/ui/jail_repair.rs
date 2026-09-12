@@ -6,7 +6,19 @@ use crate::ui::decision_alert::{Choice, DecisionAlert, Tone};
 use crate::webos::jail_repair::Failure;
 use crate::webos::jail_repair::State;
 
-const BODY: &str = "Use Homebrew Channel’s root access to update PlxNative’s sandbox with LG’s native profile. This requires a rooted TV. Close and reopen PlxNative afterward.";
+/// The translated pick of a fixed label (same helper `ui::detail` owns): static C strings in,
+/// one pointer out, nothing allocates on the draw path.
+fn tr_c(en: &'static std::ffi::CStr, es: &'static std::ffi::CStr) -> &'static std::ffi::CStr {
+    if crate::i18n::is_es() { es } else { en }
+}
+
+/// The repair confirmation's body, translated at draw time (the `\u{2019}` is the source's own
+/// right single quote, byte-exact with the key in the Spanish table).
+fn body() -> &'static str {
+    crate::i18n::t(
+        "Use Homebrew Channel\u{2019}s root access to update PlxNative\u{2019}s sandbox with LG\u{2019}s native profile. This requires a rooted TV. Close and reopen PlxNative afterward.",
+    )
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PrimaryAction {
@@ -75,7 +87,7 @@ impl Controller {
     pub(crate) fn open(&mut self) {
         if self.state() == State::Idle && !self.alert.visible() {
             self.alert
-                .open_with_body(c"Repair PlxNative’s sandbox?", BODY);
+                .open_with_body(tr_c(c"Repair PlxNative\u{2019}s sandbox?", c"¿Reparar el sandbox de butaca?"), body());
         }
     }
 
@@ -149,7 +161,7 @@ impl Controller {
 
     pub(crate) fn draw(&mut self) {
         self.alert.draw_scrim();
-        self.alert.draw(c"Cancel", c"Repair sandbox");
+        self.alert.draw(tr_c(c"Cancel", c"Cancelar"), tr_c(c"Repair sandbox", c"Reparar sandbox"));
     }
 }
 

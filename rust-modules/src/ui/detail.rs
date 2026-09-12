@@ -3052,11 +3052,15 @@ enum PlayNote {
 ///
 /// Two surfaces answer from the same predicate — this page's facts row and the player's quality
 /// menu, which corrects the "Original" rung for a source the television cannot decode — and a
-/// second phrasing would read to a viewer as a second fact. Held as a `CStr` because the drawing
-/// side takes one; [`CONVERTS_ON_SERVER`] is the same bytes for callers that want a `&str`.
-pub(crate) const CONVERTS_ON_SERVER_C: &std::ffi::CStr = c"Convierte en el servidor";
-/// [`CONVERTS_ON_SERVER_C`] as a `&str`. Same bytes, asserted by a test rather than by eye.
-pub(crate) const CONVERTS_ON_SERVER: &str = "Convierte en el servidor";
+/// second phrasing would read to a viewer as a second fact. Bilingual: the `CStr` form for the
+/// drawing side, the `&str` form for callers that want the same bytes as a plain string.
+pub(crate) fn converts_on_server_c() -> &'static std::ffi::CStr {
+    tr_c(c"Converts on server", c"Convierte en el servidor")
+}
+/// [`converts_on_server_c`] as a `&str`. Same bytes, asserted by a test rather than by eye.
+pub(crate) fn converts_on_server() -> &'static str {
+    crate::i18n::t("Converts on server")
+}
 
 /// `fps:detail-transition`, 2026-09-02: the wash must stop dithering while the scroll spring
 /// moves and dither again at rest, at the idle rest test's quarter-pixel-per-frame threshold.
@@ -3072,7 +3076,7 @@ fn the_backdrop_dithers_only_while_the_scroll_is_at_rest() {
 #[cfg(test)]
 #[test]
 fn the_two_spellings_of_the_conversion_notice_are_the_same_bytes() {
-    assert_eq!(CONVERTS_ON_SERVER_C.to_str().unwrap(), CONVERTS_ON_SERVER);
+    assert_eq!(converts_on_server_c().to_str().unwrap(), converts_on_server());
 }
 
 fn play_note(
@@ -3162,13 +3166,13 @@ fn play_mode_bits(d: &metadata::Detail, after: bool) -> ([Bit; FACTS_BITS], usiz
                 // `info_panel::playback_now` reports for the LIVE session — the picture is copied,
                 // so calling it a conversion would state that the server touched the pixels.
                 crate::route::Preview::Remux => tr_c(c"Direct Stream", c"Emision directa"),
-                crate::route::Preview::Converts => CONVERTS_ON_SERVER_C,
+                crate::route::Preview::Converts => converts_on_server_c(),
             },
             dim,
             0,
         )),
         PlayNote::Soft => {
-            push(Bit::Word(CONVERTS_ON_SERVER_C, dim, 0));
+            push(Bit::Word(converts_on_server_c(), dim, 0));
             // inside the fragment the air closes one rung: these clauses are one sentence, where the
             // row-level dots separate three independent facts
             push(Bit::Sep(theme::space::SM));

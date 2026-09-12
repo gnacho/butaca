@@ -268,7 +268,7 @@ pub fn draw() {
         return;
     }
 
-    if let Ok(t) = CString::new(TITLE) {
+    if let Ok(t) = CString::new(crate::i18n::t(TITLE)) {
         p.text(
             t.as_ptr(),
             SCR_W as f32 * 0.5,
@@ -413,7 +413,7 @@ fn draw_pad(p: Painter, env: &Env, s: &Scene, users: &[auth::UserTile]) {
         .get(s.pad.target)
         .map(|u| u.title.as_str())
         .unwrap_or("");
-    if let Ok(t) = CString::new(format!("Enter {name}'s PIN")) {
+    if let Ok(t) = CString::new(crate::i18n::t("Enter {name}'s PIN").replacen("{name}", name, 1)) {
         p.text(
             t.as_ptr(),
             SCR_W as f32 * 0.5,

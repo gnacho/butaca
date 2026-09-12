@@ -58,6 +58,12 @@ use crate::ui::{theme, Env, Painter, Rect};
 use crate::ui::View as _;
 use std::ffi::{CStr, CString};
 
+/// The translated pick of a fixed label (same helper `ui::detail` owns): static C strings in,
+/// one pointer out, nothing allocates on the draw path.
+fn tr_c(en: &'static CStr, es: &'static CStr) -> &'static CStr {
+    if crate::i18n::is_es() { es } else { en }
+}
+
 /// The copy column — the statement's elide budget. Wide enough for a real query at `TITLE` and
 /// deliberately far short of the 1920 the panel allows: a line that runs the full width reads as a
 /// banner, and this is a sentence.
@@ -180,10 +186,10 @@ pub(crate) fn draw(p: Painter, v: &View) {
     if say == Say::Fault {
         StatusOverlay::new(
             frame,
-            c"La búsqueda no llegó al servidor",
+            tr_c(c"Search didn't reach the server", c"La búsqueda no llegó al servidor"),
             StatusKind::Failed,
         )
-        .reason(c"Tus bibliotecas están bien; prueba en un momento.")
+        .reason(tr_c(c"Your libraries are fine \u{2014} try again in a moment.", c"Tus bibliotecas están bien; prueba en un momento."))
         .draw(&Env::inert(), p);
         return;
     }
@@ -265,7 +271,7 @@ mod tests {
         assert_eq!(header_of(Say::NotYet), c"RECENT SEARCHES");
         assert_eq!(header_of(Say::NoResults), c"SEARCH RESULTS");
         // …and it is the recents list's own header, verbatim, or the two spellings drift apart.
-        assert_eq!(header_of(Say::NotYet), super::super::recents::HDR);
+        assert_eq!(header_of(Say::NotYet), super::super::recents::hdr());
     }
 
     /// The band the pair centres in RISES with the keyboard: nothing the app owns hides behind that

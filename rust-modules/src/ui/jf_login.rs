@@ -172,7 +172,7 @@ fn build_rows(s: &Scene) -> Vec<Section> {
     for (i, label) in labels().iter().enumerate() {
         let empty = s.fields[i].is_empty();
         let value = if empty {
-            HINTS[i].to_string()
+            crate::i18n::t(HINTS[i]).to_string()
         } else if i == F_PASS {
             masked(&s.fields[i])
         } else {
@@ -193,12 +193,16 @@ fn build_rows(s: &Scene) -> Vec<Section> {
 /// retype it, or serve it over TLS / from the LAN.
 fn fail_text(f: Fail) -> &'static str {
     match f {
-        Fail::Parse => "That doesn't look like a server address — try e.g. 192.168.1.20:8096",
-        Fail::Plaintext => {
-            "That address would carry your password unprotected — use https:// or a local network address"
+        Fail::Parse => {
+            crate::i18n::t("That doesn't look like a server address \u{2014} try e.g. 192.168.1.20:8096")
         }
-        Fail::Refused => "The server didn't recognize that user name or password",
-        Fail::Unreachable => "Couldn't reach the server — check the address and that it's on",
+        Fail::Plaintext => {
+            crate::i18n::t("That address would carry your password unprotected \u{2014} use https:// or a local network address")
+        }
+        Fail::Refused => crate::i18n::t("The server didn't recognize that user name or password"),
+        Fail::Unreachable => {
+            crate::i18n::t("Couldn't reach the server \u{2014} check the address and that it's on")
+        }
     }
 }
 
@@ -251,7 +255,7 @@ pub fn draw() {
         .draw(p, Rect::new(nar.x, y, nar.w, theme::size::TITLE as f32 * 1.4));
     y += theme::size::TITLE as f32 * 1.4 + theme::space::SM;
     TextView::new(
-        "Your server's address, your user name and its password. OK opens the keyboard for a field; OK again commits it.",
+        crate::i18n::t("Your server's address, your user name and its password. OK opens the keyboard for a field; OK again commits it."),
         theme::size::LABEL,
         theme::TEXT_SECONDARY,
     )

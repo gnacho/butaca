@@ -15,6 +15,12 @@ use std::ffi::CString;
 use std::os::raw::{c_int, c_uint};
 use std::sync::atomic::Ordering::Relaxed;
 
+/// The translated pick of a fixed label (same helper `ui::detail` owns): static C strings in,
+/// one pointer out, nothing allocates on the draw path.
+fn tr_c(en: &'static std::ffi::CStr, es: &'static std::ffi::CStr) -> &'static std::ffi::CStr {
+    if crate::i18n::is_es() { es } else { en }
+}
+
 /// The HUD widgets draw purely from their own fields and ignore their Env.
 fn hud_env() -> Env {
     Env::inert()
@@ -804,13 +810,13 @@ fn draw_failed_readout(p: Painter, jail_repair: crate::webos::jail_repair::State
         use crate::webos::jail_repair::State;
         match jail_repair {
             State::Idle => (
-                "This TV’s sandbox blocks access to /dev/rtkmem",
-                "Repair needs rooted Homebrew Channel access · Help: github.com/GLinnik21/plx-native/issues/74",
+                crate::i18n::t("This TV\u{2019}s sandbox blocks access to /dev/rtkmem"),
+                crate::i18n::t("Repair needs rooted Homebrew Channel access · Help: github.com/GLinnik21/plx-native/issues/74"),
             ),
-            State::Running => ("Repairing sandbox…", ""),
+            State::Running => (crate::i18n::t("Repairing sandbox…"), ""),
             State::Repaired => (
-                "Sandbox repaired",
-                "Fully close and reopen PlxNative before trying playback again.",
+                crate::i18n::t("Sandbox repaired"),
+                crate::i18n::t("Fully close and reopen PlxNative before trying playback again."),
             ),
             State::Failed(failure) => (
                 failure.message(),
@@ -839,7 +845,7 @@ fn draw_failed_readout(p: Painter, jail_repair: crate::webos::jail_repair::State
     );
     fr_line(
         p,
-        c"No se pudo reproducir",
+        tr_c(c"Playback failed", c"No se pudo reproducir"),
         FR_VERDICT_TOP,
         theme::size::TITLE,
         1,
@@ -877,7 +883,7 @@ fn draw_failed_readout(p: Painter, jail_repair: crate::webos::jail_repair::State
             );
     }
     if e.no_pass {
-        let words = c"Este servidor no tiene";
+        let words = tr_c(c"This server has no", c"Este servidor no tiene");
         let ww = crate::text::text_width(words.as_ptr(), theme::size::BODY, 0);
         let cw = crate::ui::widgets::pass_capsule_w();
         const GAP: f32 = 16.0;
@@ -902,25 +908,25 @@ fn draw_failed_readout(p: Painter, jail_repair: crate::webos::jail_repair::State
     match crate::ui::jail_repair::primary_action(e.kind, jail_repair) {
         crate::ui::jail_repair::PrimaryAction::Quality => draw_hint_with_keycap(
             p,
-            c"Pulsa",
+            tr_c(c"Press", c"Pulsa"),
             c"OK",
-            c"para elegir calidad o reintentar",
+            tr_c(c"to choose quality or retry", c"para elegir calidad o reintentar"),
             FR_HINT_TOP,
         ),
         crate::ui::jail_repair::PrimaryAction::Repair => draw_hint_with_keycap(
             p,
-            c"Pulsa",
+            tr_c(c"Press", c"Pulsa"),
             c"OK",
-            c"para reparar el sandbox",
+            tr_c(c"to repair the sandbox", c"para reparar el sandbox"),
             FR_HINT_TOP,
         ),
         crate::ui::jail_repair::PrimaryAction::None => {}
     }
     draw_hint_with_keycap(
         p,
-        c"Pulsa",
-        c"ATRÁS",
-        c"para volver",
+        tr_c(c"Press", c"Pulsa"),
+        tr_c(c"BACK", c"ATRÁS"),
+        tr_c(c"to return", c"para volver"),
         FR_HINT_TOP + FR_HINT_GAP,
     );
     // The support line — version · firmware · set · failure code — at CAPTION/tertiary, the couch
@@ -1394,9 +1400,9 @@ pub(crate) fn draw_hud(
 
     // bottom tabs as pills — Chapters only appears when the item actually has chapters
     let tabs: &[&str] = if crate::ui::chapters_panel::has_chapters() {
-        &["Info", "Chapters"]
+        &[crate::i18n::t("Info"), crate::i18n::t("Chapters")]
     } else {
-        &["Info"]
+        &[crate::i18n::t("Info")]
     };
     // tabs match the transport control buttons' height (BTN_S), centred vertically between the
     // play bar (scrubber, at SB_Y) and the bottom edge of the screen

@@ -74,6 +74,12 @@ fn shelf_title(kind: usize) -> [u8; crate::i18n::TC_MAX] {
     b
 }
 
+/// The translated pick of a fixed label (same helper `ui::detail` owns): static C strings in,
+/// one pointer out, nothing allocates on the draw path.
+fn tr_c(en: &'static std::ffi::CStr, es: &'static std::ffi::CStr) -> &'static std::ffi::CStr {
+    if crate::i18n::is_es() { es } else { en }
+}
+
 /// Portrait diameter, EXPANDED (the header holds focus) and CONDENSED (focus is in the shelves) —
 /// the v2 band's two states; the `cond` spring interpolates between them.
 const PORTRAIT_EXP: f32 = 320.0;
@@ -468,13 +474,15 @@ fn refresh_runs(sc: &mut Scene) {
     let born = crate::ui::fmt::pretty_date(&p.born, 0);
     if !born.is_empty() {
         life.push(match p.birthplace.is_empty() {
-            true => format!("Born {born}"),
-            false => format!("Born {born}, {}", p.birthplace),
+            true => crate::i18n::t("Born {born}").replacen("{born}", &born, 1),
+            false => crate::i18n::t("Born {born}, {}")
+                .replacen("{born}", &born, 1)
+                .replacen("{}", &p.birthplace, 1),
         });
     }
     let died = crate::ui::fmt::pretty_date(&p.died, 0);
     if !died.is_empty() {
-        life.push(format!("Died {died}"));
+        life.push(crate::i18n::t("Died {died}").replacen("{died}", &died, 1));
     }
     sc.life_c = cstr_elide(&life.join(" \u{b7} "), BIO_W, theme::size::LABEL, 0);
 
@@ -1313,7 +1321,7 @@ fn draw_shelf_state(p: Painter, env: &Env, sc: &Scene) {
     // answer, not a fault, which is the distinction `StatusKind::Empty` exists to keep.
     StatusOverlay::new(
         band,
-        c"Nothing from this person is in your libraries",
+        tr_c(c"Nothing from this person is in your libraries", c"No hay nada de esta persona en tus bibliotecas"),
         StatusKind::Empty,
     )
     .draw(env, p);

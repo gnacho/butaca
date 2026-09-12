@@ -2034,15 +2034,15 @@ fn status_read() -> Option<(
             if cfg!(feature = "jellyfin") {
                 tr_c(c"Can't reach your Jellyfin server", c"No se puede conectar con tu servidor Jellyfin")
             } else {
-                c"No se puede conectar con el servidor"
+                tr_c(c"Can't reach your Plex server", c"No se puede conectar con el servidor")
             },
             StatusKind::Failed,
-            Some(c"Reintentar"),
+            Some(tr_c(c"Try Again", c"Reintentar")),
         ),
         crate::pms::HubState::Ready => (
-            c"Esta biblioteca todavía está vacía",
+            tr_c(c"Nothing on this server yet", c"Esta biblioteca todavía está vacía"),
             StatusKind::Empty,
-            Some(c"Actualizar"),
+            Some(tr_c(c"Refresh", c"Actualizar")),
         ),
     })
 }

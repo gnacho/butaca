@@ -128,11 +128,11 @@ fn rows_for() -> Vec<Action> {
 
 fn label(a: Action) -> &'static str {
     match a {
-        Action::ToggleStats => "Stats for nerds",
+        Action::ToggleStats => crate::i18n::t("Stats for nerds"),
         // the rung names itself — rate and frame in one string, because the row already carries
         // the picker's leading mark (see this module's doc)
         Action::SetQuality(q) => q.label(),
-        Action::SendDiagnostics => "Send diagnostics",
+        Action::SendDiagnostics => crate::i18n::t("Send diagnostics"),
         Action::None => "",
     }
 }
@@ -174,7 +174,7 @@ fn is_on(a: Action) -> bool {
 /// global state.
 fn quality_detail(q: crate::route::Quality, source_decodable: bool) -> &'static str {
     if q == crate::route::Quality::Original && !source_decodable {
-        crate::ui::detail::CONVERTS_ON_SERVER
+        crate::ui::detail::converts_on_server()
     } else {
         ""
     }
@@ -207,8 +207,8 @@ fn open_focused(quality: Option<crate::route::Quality>) {
     let initial = initial_selection(&rows, quality);
     // TWO sections, built in ROWS order — see `rows_for`: `TableView::sel` is one flat index over
     // both, so the split here is presentational and the ORDER is the contract.
-    let mut options = Section::new("Options");
-    let mut quality = Section::new("Quality");
+    let mut options = Section::new(crate::i18n::t("Options"));
+    let mut quality = Section::new(crate::i18n::t("Quality"));
     for a in &rows {
         match a {
             Action::SetQuality(_) => quality = quality.row(row_for(*a)),
@@ -374,7 +374,7 @@ mod tests {
         use crate::route::Quality;
         assert_eq!(
             quality_detail(Quality::Original, false),
-            crate::ui::detail::CONVERTS_ON_SERVER
+            crate::ui::detail::converts_on_server()
         );
         assert_eq!(
             quality_detail(Quality::Original, true),
@@ -399,7 +399,7 @@ mod tests {
     fn the_conversion_notice_is_the_words_the_detail_page_already_uses() {
         assert_eq!(
             quality_detail(crate::route::Quality::Original, false),
-            crate::ui::detail::CONVERTS_ON_SERVER,
+            crate::ui::detail::converts_on_server(),
         );
     }
 

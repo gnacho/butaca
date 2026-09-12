@@ -98,9 +98,11 @@ pub(crate) const SCOPE_H: f32 = theme::size::CAPTION as f32 * 1.35;
 /// [`draw_scope`]) are now on opposite sides of the memo, and a budget measured in one place and
 /// drawn in the other is how a run comes to be elided to a width nothing clips it at.
 const SCOPE_W: f32 = FIELD.w;
-/// Drawn whenever the query has nothing readable in it, focused or not. A `CStr` literal, so the
-/// one string this module knows at compile time costs no per-frame allocation.
-const PLACEHOLDER: &CStr = c"Busca en tu biblioteca";
+/// Drawn whenever the query has nothing readable in it, focused or not. Translated, so it can no
+/// longer be a `const` — the language atom picks the pointer at draw time.
+fn placeholder() -> &'static CStr {
+    tr_c(c"Search your library", c"Busca en tu biblioteca")
+}
 
 /// What a source is called before the roster has named it. The line still has to be a sentence —
 /// an empty run in the middle of one reads as a rendering fault, not as a missing fact — and at
@@ -108,6 +110,12 @@ const PLACEHOLDER: &CStr = c"Busca en tu biblioteca";
 /// a server naming itself, both of which land after the first frame this screen draws.
 const UNNAMED_OWN: &str = "your server";
 const UNNAMED_SHARE: &str = "a shared server";
+
+/// The translated pick of a fixed label (same helper `ui::detail` owns): static C strings in,
+/// one pointer out, nothing allocates on the draw path.
+fn tr_c(en: &'static std::ffi::CStr, es: &'static std::ffi::CStr) -> &'static std::ffi::CStr {
+    if crate::i18n::is_es() { es } else { en }
+}
 
 pub(crate) fn draw(p: Painter, v: &View) {
     // **Focus is carried by ink alone — permanently.** Issue 22's flat `ACCENT` plate lived here for
@@ -152,7 +160,7 @@ pub(crate) fn draw(p: Painter, v: &View) {
     // [`run_caret_w`].
     let (run_w, caret_w) = if blank {
         (
-            crate::text::text_width(PLACEHOLDER.as_ptr(), RUN_SZ, 1),
+            crate::text::text_width(placeholder().as_ptr(), RUN_SZ, 1),
             run_caret_w(true, 0.0),
         )
     } else {
@@ -202,7 +210,7 @@ pub(crate) fn draw(p: Painter, v: &View) {
     // TRIMMED string, so a lone typed space must not leave this line blank and hintless while
     // the rest of the screen says nothing has been asked.
     if blank {
-        Label::new(PLACEHOLDER.as_ptr(), RUN_SZ, hint_ink)
+        Label::new(placeholder().as_ptr(), RUN_SZ, hint_ink)
             .bold()
             .draw(p, Rect::new(inner.x + run_dx, inner.y, inner.w, inner.h));
     } else {
@@ -447,11 +455,11 @@ impl Scope<'_> {
                 // libraries here would be a rail of rooms in a sentence about scope; the person is
                 // the fact, and the Sources list is where their rooms are enumerated.
                 (_, false) => self.handle.to_string(),
-                (_, true) => UNNAMED_SHARE.to_string(),
+                (_, true) => crate::i18n::t(UNNAMED_SHARE).to_string(),
             };
         }
         if self.name.is_empty() {
-            UNNAMED_OWN.to_string()
+            crate::i18n::t(UNNAMED_OWN).to_string()
         } else {
             self.name.to_string()
         }
@@ -492,7 +500,7 @@ fn scope_text(src: &[Scope]) -> Option<String> {
     let down: Vec<&Scope> = src.iter().filter(|s| !s.live).collect();
     let live: Vec<&Scope> = src.iter().filter(|s| s.live).collect();
     if down.is_empty() {
-        let mut t = format!("Searching {}", name_set(&live));
+        let mut t = crate::i18n::t("Searching {}").replacen("{}", &name_set(&live), 1);
         // The handle attributes ONE share. With two it would have to pick a winner, and with the
         // registry's sixteen slots the line stops being a sentence anyway — `name_set` has already
         // collapsed to a count by then, so there is nothing left for a handle to qualify.
@@ -513,13 +521,13 @@ fn scope_text(src: &[Scope]) -> Option<String> {
     if live.is_empty() {
         // Every source is down. "results from … only" has nothing to name, and the bare fact is
         // the honest line — the empty state below says the rest.
-        return Some(format!("{} unreachable", name_set(&down)));
+        return Some(crate::i18n::t("{} unreachable").replacen("{}", &name_set(&down), 1));
     }
-    Some(format!(
-        "{} unreachable · results from {} only",
-        name_set(&down),
-        name_set(&live)
-    ))
+    Some(
+        crate::i18n::t("{} unreachable · results from {} only")
+            .replacen("{}", &name_set(&down), 1)
+            .replacen("{}", &name_set(&live), 1),
+    )
 }
 
 /// Name a set of sources, collapsing to a COUNT once naming them all stops being a sentence.
@@ -546,9 +554,9 @@ fn name_set(v: &[&Scope]) -> String {
         .map(|s| s.libs.iter().filter(|t| !t.is_empty()).count())
         .sum();
     let tail = if libs > 0 {
-        format!("{libs} shared libraries")
+        crate::i18n::t("{libs} shared libraries").replacen("{libs}", &libs.to_string(), 1)
     } else {
-        format!("{} shared sources", shares.len())
+        crate::i18n::t("{} shared sources").replacen("{}", &shares.len().to_string(), 1)
     };
     let mut names: Vec<String> = own.iter().map(|s| s.label()).collect();
     names.push(tail);
@@ -574,7 +582,9 @@ fn join<S: AsRef<str>>(v: &[S]) -> String {
     match v.len() {
         0 => String::new(),
         1 => v[0].to_string(),
-        n => format!("{} and {}", v[..n - 1].join(", "), v[n - 1]),
+        n => crate::i18n::t("{} and {}")
+            .replacen("{}", &v[..n - 1].join(", "), 1)
+            .replacen("{}", v[n - 1], 1),
     }
 }
 

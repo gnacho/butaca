@@ -50,9 +50,11 @@ use std::ptr::{addr_of, addr_of_mut};
 /// *Continue*, "a verb that says what happens next rather than one that says nothing".
 pub(crate) const TITLE: &str = "What goes on your Home?";
 const SETTINGS_TITLE: &str = "What appears on Home?";
-const ACTION: &std::ffi::CStr = c"Empezar a ver";
-const DONE: &std::ffi::CStr = c"Hecho";
-const RETRY: &std::ffi::CStr = c"Reintentar";
+/// The translated pick of a fixed label (same helper `ui::detail` owns): static C strings in,
+/// one pointer out, nothing allocates on the draw path.
+fn tr_c(en: &'static std::ffi::CStr, es: &'static std::ffi::CStr) -> &'static std::ffi::CStr {
+    if crate::i18n::is_es() { es } else { en }
+}
 /// Where BACK goes, named on the crumb above the title rather than as a hint in the action band.
 const CRUMB_SETTINGS: &str = "Settings";
 const CRUMB_PROFILES: &str = crate::ui::profiles::TITLE;
@@ -107,9 +109,9 @@ fn action_kind() -> ActionKind {
 impl ActionKind {
     fn label(self) -> &'static std::ffi::CStr {
         match self {
-            ActionKind::Retry => RETRY,
-            ActionKind::Done => DONE,
-            ActionKind::Start => ACTION,
+            ActionKind::Retry => tr_c(c"Try again", c"Reintentar"),
+            ActionKind::Done => tr_c(c"Done", c"Hecho"),
+            ActionKind::Start => tr_c(c"Start watching", c"Empezar a ver"),
         }
     }
 }
@@ -442,8 +444,8 @@ pub fn draw() {
     let body = body_copy();
     layout.draw_narrative(
         p,
-        Some(if hosted { CRUMB_SETTINGS } else { CRUMB_PROFILES }),
-        if hosted { SETTINGS_TITLE } else { TITLE },
+        Some(if hosted { crate::i18n::t(CRUMB_SETTINGS) } else { crate::i18n::t(CRUMB_PROFILES) }),
+        if hosted { crate::i18n::t(SETTINGS_TITLE) } else { crate::i18n::t(TITLE) },
         &body,
         theme::size::LABEL,
     );
@@ -488,8 +490,8 @@ pub fn draw() {
         // when it is empty, which on this screen would state the opposite of the truth (there ARE
         // libraries; nobody has listed them yet) on the one screen whose whole subject is that list.
         if crate::browse::discovery_state() == crate::browse::SecFetch::Failed {
-            StatusOverlay::new(lf, c"No se pudieron cargar las bibliotecas", StatusKind::Failed)
-                .reason(c"Check the connection, then try again.")
+            StatusOverlay::new(lf, tr_c(c"Couldn't load libraries", c"No se pudieron cargar las bibliotecas"), StatusKind::Failed)
+                .reason(tr_c(c"Check the connection, then try again.", c"Comprueba la conexión e inténtalo de nuevo."))
                 .draw(&env, p);
         } else {
             Spinner::new(lf.x + lf.w * 0.5, lf.y + StatusOverlay::CTRL_H, 22.0)
@@ -517,19 +519,29 @@ fn body_copy() -> String {
 }
 
 fn body_copy_for(who: &[String]) -> String {
-    let tail =
+    let tail = crate::i18n::t(
         " Pick the ones you want on your Home screen \u{2014} you can browse any of them from \
-                the Library chip whenever you like.";
+                the Library chip whenever you like.",
+    );
     match join_names(who) {
         // No owner handle says NOTHING about server count. The common one-server/two-library case
         // lands here too, so the fallback asks the screen's actual question without inventing a
         // second server or a person who shared it.
-        None => "Choose which libraries appear on your Home screen. Every available library \
-                 remains browsable from the Library chip."
-            .to_string(),
+        None => crate::i18n::t(
+            "Choose which libraries appear on your Home screen. Every available library \
+                 remains browsable from the Library chip.",
+        )
+        .to_string(),
         Some(names) => {
-            let verb = if who.len() == 1 { "has" } else { "have" };
-            format!("{names} {verb} shared libraries with you.{tail}")
+            let verb = if who.len() == 1 {
+                crate::i18n::t("has")
+            } else {
+                crate::i18n::t("have")
+            };
+            crate::i18n::t("{names} {verb} shared libraries with you.{tail}")
+                .replacen("{names}", &names, 1)
+                .replacen("{verb}", verb, 1)
+                .replacen("{tail}", tail, 1)
         }
     }
 }
@@ -540,7 +552,11 @@ fn join_names(who: &[String]) -> Option<String> {
     match who {
         [] => None,
         [a] => Some(a.clone()),
-        [rest @ .., last] => Some(format!("{} and {last}", rest.join(", "))),
+        [rest @ .., last] => Some(
+            crate::i18n::t("{} and {last}")
+                .replacen("{}", &rest.join(", "), 1)
+                .replacen("{last}", last, 1),
+        ),
     }
 }
 

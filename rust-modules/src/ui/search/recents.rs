@@ -98,15 +98,30 @@ const CAP: usize = super::MAX_RECENTS;
 // all `pub` for this caller shape. See the module doc for why these rows are drawn rather than
 // mounted, and why the numbers are borrowed rather than copied.
 
-/// Header caps, pre-uppercased. The header is a constant here (TableView's `to_uppercase` exists
-/// because its headers are runtime machine and library names).
+/// Header caps, pre-uppercased and translated. `OnceLock` rather than `const` because the language
+/// atom decides the string once and the pointer must outlive the draw; `TableView`'s `to_uppercase`
+/// exists because ITS headers are runtime machine and library names, which is not this one's job.
 /// `pub(super)` for [`super::empty`], which draws this same header over its own empty state — the
 /// list keeps its name when it has nothing in it, and two spellings of one header is exactly the
 /// drift that would make them look like two regions.
-pub(super) const HDR: &std::ffi::CStr = c"RECENT SEARCHES";
+pub(super) fn hdr() -> &'static std::ffi::CStr {
+    static HDR: std::sync::OnceLock<&'static std::ffi::CStr> = std::sync::OnceLock::new();
+    HDR.get_or_init(|| mk("RECENT SEARCHES"))
+}
 /// The Clear control's label and the air above it. A `space::MD` rung, not a hand-tuned gap: it
 /// separates two different KINDS of thing (the list, then a verb), which is exactly the rung's job.
-const CLEAR: &std::ffi::CStr = c"Clear recent searches";
+fn clear_label() -> &'static std::ffi::CStr {
+    static CLEAR: std::sync::OnceLock<&'static std::ffi::CStr> = std::sync::OnceLock::new();
+    CLEAR.get_or_init(|| mk("Clear recent searches"))
+}
+/// The translated C-string bridge for a fixed header/label: `t()` answers a `&'static str` and the
+/// draw side wants a NUL-terminated pointer that outlives the frame. Leaked once per label — two
+/// labels a process, the same trade [`super::empty`] already makes.
+fn mk(key: &'static str) -> &'static std::ffi::CStr {
+    let mut v = crate::i18n::t(key).as_bytes().to_vec();
+    v.push(0);
+    std::ffi::CStr::from_bytes_with_nul(Box::leak(v.into_boxed_slice())).unwrap_or_default()
+}
 const CLEAR_GAP: f32 = theme::space::MD;
 
 /// The block's left edge and width. `x` is the field's column; the WIDTH is its own number and no
@@ -480,13 +495,13 @@ fn clear_focused(v: &View, shown: usize) -> bool {
 
 /// The Clear pill's width, measured ONCE for the life of the app.
 ///
-/// `Button::pill_w` ends in a real `TTF_SizeUTF8`, and [`CLEAR`] is a compile-time constant — so
-/// the per-frame call was a font-engine round trip for a number that cannot change. A `const`
-/// cannot hold it: the answer comes out of the font, which does not exist until `init_text` runs,
-/// which is why this is a `OnceLock` filled on the first draw.
+/// `Button::pill_w` ends in a real `TTF_SizeUTF8`, and the label is fixed once the language atom
+/// has said so — the per-frame call was a font-engine round trip for a number that cannot change.
+/// A `const` cannot hold it: the answer comes out of the font, which does not exist until
+/// `init_text` runs, which is why this is a `OnceLock` filled on the first draw.
 fn clear_w() -> f32 {
     static W: OnceLock<f32> = OnceLock::new();
-    *W.get_or_init(|| Button::pill_w(CLEAR.as_ptr(), theme::size::BODY, false))
+    *W.get_or_init(|| Button::pill_w(clear_label().as_ptr(), theme::size::BODY, false))
 }
 
 pub(crate) fn draw(p: Painter, v: &View) {
@@ -505,7 +520,7 @@ fn draw_block(p: Painter, v: &View, rows: &[CString]) {
     }
 
     // The header: a step BELOW the rows it names, on its own fixed band.
-    Label::new(HDR.as_ptr(), theme::size::CAPTION, theme::TEXT_TERTIARY)
+    Label::new(hdr().as_ptr(), theme::size::CAPTION, theme::TEXT_TERTIARY)
         .draw(p, Rect::new(TEXT_X, super::CONTENT_TOP, 0.0, table::HDR_H));
 
     // The rows. One elided HEADLINE-bold run, cap-band-centred in the row box — TableView's own
@@ -544,7 +559,7 @@ fn draw_block(p: Painter, v: &View, rows: &[CString]) {
     // Clear sits at `MAX_RECENTS`, one past the last term it could ever follow — the index
     // `mod.rs` reserves for it whatever `shown` turns out to be.
     super::note_recent_rect(super::MAX_RECENTS, cr);
-    Button::new(CLEAR.as_ptr(), theme::size::BODY, cr)
+    Button::new(clear_label().as_ptr(), theme::size::BODY, cr)
         .focused(clear_focused(v, shown))
         .draw(&Env::inert(), p);
 }

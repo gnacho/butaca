@@ -94,7 +94,7 @@ fn rebuild(sel: i32) {
                     .detail(crate::i18n::t("Choose which libraries contribute shelves."))
                     .value(format!(
                         "{n} {}",
-                        if n == 1 { "library" } else { "libraries" }
+                        if n == 1 { crate::i18n::t("library") } else { crate::i18n::t("libraries") }
                     ))
                     .chevron(true),
             ),
@@ -102,7 +102,7 @@ fn rebuild(sel: i32) {
         actions.push(Action::Home);
     }
     sections.push(
-        Section::new("Privacy")
+        Section::new(crate::i18n::t("Privacy"))
             .row(
                 Row::new(crate::i18n::t("Privacy & data"))
                     .detail(crate::i18n::t("Optional reports, privacy information and local data."))
@@ -117,7 +117,7 @@ fn rebuild(sel: i32) {
     actions.extend([Action::Privacy, Action::Legal]);
     sections.push(
         Section::new(crate::i18n::t("System")).row(
-            Row::new(if cfg!(feature = "jellyfin") { crate::i18n::t("About butaca") } else { "About PlxNative" })
+            Row::new(if cfg!(feature = "jellyfin") { crate::i18n::t("About butaca") } else { crate::i18n::t("About PlxNative") })
                 .detail(crate::i18n::t("Version, copyright and project information."))
                 .chevron(true),
         ),
@@ -364,9 +364,9 @@ pub(crate) fn draw() {
         None,
         crate::i18n::t("Settings"),
         if cfg!(feature = "jellyfin") {
-            "Settings apply to this Jellyfin profile on this television. You can return here from the profile menu at any time."
+            crate::i18n::t("Settings apply to this Jellyfin profile on this television. You can return here from the profile menu at any time.")
         } else {
-            "Settings apply to this Plex profile on this television. You can return here from the profile menu at any time."
+            crate::i18n::t("Settings apply to this Plex profile on this television. You can return here from the profile menu at any time.")
         },
         theme::size::LABEL,
     );

@@ -170,6 +170,12 @@ pub(crate) struct Pair {
     pub(crate) value: String,
 }
 
+/// The translated pick of a fixed label: both spellings are static C strings, so the language atom
+/// chooses a pointer and nothing allocates on the draw path (the same helper `ui::detail` owns).
+fn tr_c(en: &'static std::ffi::CStr, es: &'static std::ffi::CStr) -> &'static std::ffi::CStr {
+    if crate::i18n::is_es() { es } else { en }
+}
+
 /// One track line: a name on the left, its distinguishing detail right-aligned.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub(crate) struct TrackRow {
@@ -350,7 +356,7 @@ pub(crate) fn audio_detail(s: &Stream) -> String {
         parts.push(b);
     }
     if s.selected {
-        parts.push("playing".to_string());
+        parts.push(crate::i18n::t("playing").to_string());
     }
     parts.join(" \u{b7} ")
 }
@@ -366,7 +372,7 @@ pub(crate) fn audio_rows(audio: &[Stream]) -> Vec<TrackRow> {
         .iter()
         .map(|s| TrackRow {
             name: if s.lang.trim().is_empty() {
-                "Unknown".to_string()
+                crate::i18n::t("Unknown").to_string()
             } else {
                 s.lang.clone()
             },
@@ -393,15 +399,15 @@ pub(crate) fn subtitle_rows(subs: &[Stream]) -> Vec<TrackRow> {
     let mut out: Vec<(String, String, String, usize)> = Vec::new();
     for s in subs {
         let name = if s.lang.trim().is_empty() {
-            "Unknown".to_string()
+            crate::i18n::t("Unknown").to_string()
         } else {
             s.lang.clone()
         };
         let mut head = s.codec.to_uppercase();
         for (on, tag) in [
-            (s.forced, "Forced"),
+            (s.forced, crate::i18n::t("Forced")),
             (s.sdh, "SDH"),
-            (s.external, "External"),
+            (s.external, crate::i18n::t("External")),
         ] {
             if on {
                 head = if head.is_empty() {
@@ -446,16 +452,16 @@ pub(crate) fn file_rows(d: &Detail) -> Vec<Pair> {
         }
     };
     push(
-        "Container",
+        crate::i18n::t("Container"),
         (!d.container.is_empty()).then(|| d.container.to_uppercase()),
     );
-    push("Size", fmt_size(d.size));
-    push("Total bitrate", fmt_bitrate(d.bitrate));
+    push(crate::i18n::t("Size"), fmt_size(d.size));
+    push(crate::i18n::t("Total bitrate"), fmt_bitrate(d.bitrate));
     push(
-        "Duration",
+        crate::i18n::t("Duration"),
         (d.dur_ms > 0).then(|| crate::ui::fmt::clock(d.dur_ms)),
     );
-    push("Aspect ratio", fmt_aspect(d.aspect_ratio));
+    push(crate::i18n::t("Aspect ratio"), fmt_aspect(d.aspect_ratio));
     v
 }
 
@@ -475,14 +481,14 @@ pub(crate) fn video_rows(d: &Detail) -> Vec<Pair> {
         .filter(|s| !s.is_empty())
         .unwrap_or(d.vcodec.as_str());
     let profile = vs.map(|s| s.profile.as_str()).unwrap_or("");
-    push("Codec", fmt_codec_profile(codec, profile));
-    push("Resolution", fmt_frame_size(d.width, d.height));
-    push("Frame rate", fmt_fps(d.video_fps));
+    push(crate::i18n::t("Codec"), fmt_codec_profile(codec, profile));
+    push(crate::i18n::t("Resolution"), fmt_frame_size(d.width, d.height));
+    push(crate::i18n::t("Frame rate"), fmt_fps(d.video_fps));
     // the STREAM's bitrate, not the file's — `d.bitrate` is already the FILE column's own row, and
     // repeating it here would state the same number twice under two different labels
     push("Bitrate", vs.and_then(|s| fmt_bitrate(s.bitrate)));
     push(
-        "Bit depth",
+        crate::i18n::t("Bit depth"),
         vs.and_then(|s| fmt_depth_chroma(s.bit_depth, &s.chroma)),
     );
     v
@@ -503,19 +509,22 @@ pub(crate) fn dovi_rows(d: &Detail) -> Vec<Pair> {
             v.push(Pair { label, value });
         }
     };
-    push("Profile", (dv.profile > 0).then(|| dv.profile.to_string()));
-    push("Level", (dv.level > 0).then(|| dv.level.to_string()));
-    push("Version", dv.version_str());
-    push("Base layer", dv.bl_present.then(|| "Present".to_string()));
-    push("RPU", dv.rpu_present.then(|| "Present".to_string()));
+    push(crate::i18n::t("Profile"), (dv.profile > 0).then(|| dv.profile.to_string()));
+    push(crate::i18n::t("Level"), (dv.level > 0).then(|| dv.level.to_string()));
+    push(crate::i18n::t("Version"), dv.version_str());
+    push(crate::i18n::t("Base layer"), dv.bl_present.then(|| crate::i18n::t("Present").to_string()));
+    push("RPU", dv.rpu_present.then(|| crate::i18n::t("Present").to_string()));
     v
 }
 
 /// A section head as it is drawn: `AUDIO · 8 TRACKS`. Caps, because the head names the group.
 pub(crate) fn track_head(word: &str, n: usize) -> String {
     match n {
-        1 => format!("{word} \u{b7} 1 TRACK"),
-        n => format!("{word} \u{b7} {n} TRACKS"),
+        1 => format!("{word} \u{b7} {}", crate::i18n::t("1 TRACK")),
+        n => format!(
+            "{word} \u{b7} {}",
+            crate::i18n::t("{n} TRACKS").replacen("{n}", &n.to_string(), 1)
+        ),
     }
 }
 
@@ -924,8 +933,8 @@ struct Content {
 fn content_of(d: &Detail) -> Content {
     Content {
         cols: [
-            ("FILE", file_rows(d)),
-            ("VIDEO", video_rows(d)),
+            (crate::i18n::t("FILE"), file_rows(d)),
+            (crate::i18n::t("VIDEO"), video_rows(d)),
             ("DOLBY VISION", dovi_rows(d)),
         ],
         audio: (d.audio.len(), audio_rows(&d.audio)),
@@ -981,7 +990,7 @@ fn body_flow(
     // subtitles those are different numbers — that is the whole point of grouping them, and
     // passing `rows.len()` here is how the head came to say "SUBTITLES · 3 TRACKS" over a list
     // describing nine of them.
-    for (word, (total, rows)) in [("AUDIO", &c.audio), ("SUBTITLES", &c.subs)] {
+    for (word, (total, rows)) in [("AUDIO", &c.audio), (crate::i18n::t("SUBTITLES"), &c.subs)] {
         if rows.is_empty() {
             continue;
         }
@@ -1015,7 +1024,7 @@ pub(crate) fn draw() {
     let cx = r.x + PAD;
     let cw = PANEL_W - 2.0 * PAD;
     let mut y = r.y + PAD;
-    let eyebrow = c"TRACK INFORMATION";
+    let eyebrow = tr_c(c"TRACK INFORMATION", c"INFORMACIÓN DE PISTAS");
     Label::new(eyebrow.as_ptr(), theme::size::CAPTION, theme::TEXT_TERTIARY)
         .bold()
         .v(VAlign::CapTop)
@@ -1104,7 +1113,7 @@ pub(crate) fn draw() {
     // The design's `gap:12` applies between EVERY item in this run, the label included — the loop
     // above already advances by 12, so the label takes the pen where it is rather than adding a
     // second nudge of its own (which is what made this one gap 16 while its neighbour was 12).
-    let hint = c"to scroll";
+    let hint = tr_c(c"to scroll", c"para desplazar");
     Label::new(hint.as_ptr(), theme::size::CAPTION, theme::TEXT_TERTIARY)
         .draw(p, Rect::new(gx, fy, cw, FOOTER_H));
     // right: Press [BACK] to return, RIGHT-aligned on the padding edge. The shared
@@ -1112,7 +1121,7 @@ pub(crate) fn draw() {
     // `right - width()`. (This was a local `key_cap_hint` that built its cap out of `keyline_chip`
     // — which HUGS its label's cap band, where the design's KeyCap is a fixed 82x36 with a MICRO
     // bold label. The shared cap is the fixed band, so the panels all draw one object.)
-    let back_hint = crate::ui::widgets::KeyHint::new(c"Press", c"BACK", c"to return");
+    let back_hint = crate::ui::widgets::KeyHint::new(tr_c(c"Press", c"Pulsa"), tr_c(c"BACK", c"ATRÁS"), tr_c(c"to return", c"para volver"));
     back_hint.draw(p, cx + cw - back_hint.width(), cy);
 }
 
