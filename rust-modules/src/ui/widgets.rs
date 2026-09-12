@@ -610,9 +610,13 @@ pub(crate) fn card(p: Painter, frame: Rect, art: Art, rad: f32, focused: bool, s
             }
         }
         Art::Person { sid, key, res } => {
-            let t = resolve_tex_on(sid, key, res.0, res.1, 0);
+            let (t, pw, ph) = resolve_tex_wh_on(sid, key, res.0, res.1, 0);
             if t != 0 {
-                p.tex_carded(t, r, rad, theme::TINT_WHITE, f);
+                // COVER, not stretch: a headshot arrives at the person's own aspect (portrait,
+                // square, landscape) while this tile is a circle, and the plain carded draw
+                // squashed every portrait face wide (issue #7). The true pixel size the resolver
+                // returns is the aspect the crop is taken from.
+                p.tex_carded_cover(t, r, rad, theme::TINT_WHITE, f, pw, ph);
             } else {
                 p.rrect_sheened(r, rad, theme::CARD_PLACEHOLDER);
                 // Only for a person the server has NO headshot of — an unresolved texture with a

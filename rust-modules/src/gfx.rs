@@ -1627,6 +1627,30 @@ fn uv_rect_padded(w: f32, h: f32, qw: f32, qh: f32) -> [f32; 4] {
     [0.5 - 0.5 * sx, 0.5 - 0.5 * sy, sx, sy]
 }
 
+/// The COVER sub-rect: the largest window of a `src_w` x `src_h` source whose aspect matches the
+/// `dst_w` x `dst_h` frame, centred — what "fill the frame, cropping the overflow" samples.
+/// [`draw_tex_impl`] stretches whatever window it is handed to the whole card, which is right
+/// when the aspects already agree (posters, stills) and visibly wrong for a person headshot:
+/// those arrive portrait or landscape from the server while the cast tile is a circle, and the
+/// stretch is exactly the "wider than tall" faces of issue #7. Degenerate inputs answer identity
+/// rather than NaN.
+pub(crate) fn uv_rect_cover(src_w: f32, src_h: f32, dst_w: f32, dst_h: f32) -> [f32; 4] {
+    if src_w <= 0.0 || src_h <= 0.0 || dst_w <= 0.0 || dst_h <= 0.0 {
+        return [0.0, 0.0, 1.0, 1.0];
+    }
+    let src_ar = src_w / src_h;
+    let dst_ar = dst_w / dst_h;
+    if src_ar > dst_ar {
+        // source is wider than the frame: crop the sides
+        let su = dst_ar / src_ar;
+        [0.5 - 0.5 * su, 0.0, su, 1.0]
+    } else {
+        // source is taller than the frame: crop top/bottom
+        let sv = src_ar / dst_ar;
+        [0.0, 0.5 - 0.5 * sv, 1.0, sv]
+    }
+}
+
 /// The IPROG draw, with every term already in the shader's own units: `q*` is the QUAD (shadow
 /// inflation included), `uv` the source sub-rect it samples, `ch` the CARD half-size the SDF is
 /// measured against. [`draw_tex_impl`] folds a card's parameters into these; the blur backdrop
@@ -1900,6 +1924,63 @@ pub(crate) fn draw_tex_carded(
     }
     draw_tex_impl(
         tex, x, y, w, h, radius, tint, rimw, rimcol, pad, shblur, shcol,
+    );
+}
+
+/// [`draw_tex_carded`] with a COVER window: the card is filled by CROPPING the texture to its
+/// true `src_w` x `src_h` aspect, never by stretching it. Headshots need this - they arrive
+/// portrait or landscape while the cast tile is a circle, and the stretch showed as every face
+/// "wider than tall" (issue #7). The counters and quad inflation are [`draw_tex_carded`]'s,
+/// repeated rather than shared because the shared body is seven lines and the alternative is an
+/// `uv` parameter on every card call site in the app.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw_tex_carded_cover(
+    tex: c_uint,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    radius: f32,
+    tint: *const f32,
+    rimw: f32,
+    rimcol: *const f32,
+    pad: f32,
+    shblur: f32,
+    shcol: *const f32,
+    src_w: f32,
+    src_h: f32,
+) {
+    if !blur_source_pass() {
+        CARD_CT.fetch_add(1, Ordering::Relaxed);
+    }
+    if x - pad < 0.0 || y - pad < 0.0 || x + w + pad > SCR_W || y + h + pad > SCR_H {
+        if !blur_source_pass() {
+            CARD_OFF.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    let class = if pad > 0.0 { Class::Card } else { Class::Image };
+    let (qx, qy, qw, qh) = (x - pad, y - pad, w + 2.0 * pad, h + 2.0 * pad);
+    // The padded window maps the CARD area of the inflated quad to the texture's full [0,1];
+    // composing it with the cover window maps that same card area to the cropped sub-rect
+    // instead. u(q) = cu0 + csu * (pu0 + psu * q) - one affine inside another.
+    let [pu0, pv0, psu, psv] = uv_rect_padded(w, h, qw, qh);
+    let [cu0, cv0, csu, csv] = uv_rect_cover(src_w, src_h, w, h);
+    draw_tex_core(
+        class,
+        tex,
+        qx,
+        qy,
+        qw,
+        qh,
+        [cu0 + csu * pu0, cv0 + csv * pv0, csu * psu, csv * psv],
+        radius,
+        tint,
+        rimw,
+        rimcol,
+        w * 0.5,
+        h * 0.5,
+        if shblur > 0.0 { 0.5 / shblur } else { 0.0 },
+        shcol,
     );
 }
 
@@ -4646,6 +4727,29 @@ mod tests {
         let uv = frame_cache_uv();
         assert_eq!(uv, [0.0, 1.0, 1.0, -1.0]);
         assert_eq!(uv[1] + uv[3], 0.0, "the bottom row lands at screen bottom");
+    }
+
+    /// The cover window is what kept headshot faces from being stretched wide in the circular
+    /// cast tile (issue #7): the window's aspect must equal the FRAME's, centred, and degenerate
+    /// inputs must answer identity rather than NaN - a resolver that has not reported a size yet
+    /// draws a whole texture, not a slice of one.
+    #[test]
+    fn the_cover_window_crops_to_the_frame_aspect_and_stays_centred() {
+        let assert_close = |got: [f32; 4], want: [f32; 4]| {
+            for (g, w) in got.iter().zip(want.iter()) {
+                assert!((g - w).abs() < 1e-6, "got {got:?} want {want:?}");
+            }
+        };
+        // A portrait headshot (300x450) in a square tile: the full width, the middle two thirds
+        // of the height. This is the exact case the stretched draw got wrong.
+        assert_close(uv_rect_cover(300.0, 450.0, 190.0, 190.0), [0.0, 1.0 / 6.0, 1.0, 2.0 / 3.0]);
+        // A landscape source in the same square: the middle of the width instead.
+        assert_close(uv_rect_cover(450.0, 300.0, 190.0, 190.0), [1.0 / 6.0, 0.0, 2.0 / 3.0, 1.0]);
+        // Matching aspects, square or not: identity.
+        assert_close(uv_rect_cover(190.0, 190.0, 190.0, 190.0), [0.0, 0.0, 1.0, 1.0]);
+        assert_close(uv_rect_cover(640.0, 360.0, 1280.0, 720.0), [0.0, 0.0, 1.0, 1.0]);
+        // Degenerate: no size known yet.
+        assert_close(uv_rect_cover(0.0, 0.0, 190.0, 190.0), [0.0, 0.0, 1.0, 1.0]);
     }
 
     /// Strip comments so a claim in the CODE is graded and an account of a mistake in the PROSE is

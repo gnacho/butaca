@@ -731,6 +731,40 @@ impl Painter {
             shcol.as_ptr(),
         );
     }
+    /// [`Self::tex_carded`] with a COVER window: the texture is cropped to its true
+    /// `src_w` x `src_h` aspect rather than stretched to the rect - what a headshot needs in a
+    /// circular tile ([`gfx::draw_tex_carded_cover`], issue #7).
+    pub fn tex_carded_cover(
+        self,
+        tex: u32,
+        r: Rect,
+        rad: f32,
+        tint: [f32; 4],
+        f: f32,
+        src_w: f32,
+        src_h: f32,
+    ) {
+        let t = self.c(tint);
+        let (blur, _off, sa) = card_shadow_params(r.h, f);
+        let shcol = self.c(theme::with_a(theme::CARD_SHADOW, sa));
+        let pad = blur + 1.0;
+        crate::gfx::draw_tex_carded_cover(
+            tex,
+            r.x + self.dx,
+            r.y + self.dy,
+            r.w,
+            r.h,
+            rad,
+            t.as_ptr(),
+            theme::CARD_SHEEN_W,
+            self.sheen_rim().as_ptr(),
+            pad,
+            blur,
+            shcol.as_ptr(),
+            src_w,
+            src_h,
+        );
+    }
     /// THE HERO GROUND IN ONE PASS: the backdrop art with both scrim fields evaluated on it,
     /// instead of the art and then four blended gradient quads over the same 2.78M fragments.
     /// [`crate::ui::widgets::hero_ground`] is the component — reach for that, not for this — and
