@@ -123,7 +123,12 @@ const HL_PAD_Y: f32 = 24.0;
 /// The bio's truncation mark, as a C literal — it is drawn every frame the bio is cut off, and the
 /// SAME pointer the reserved zone is measured from, so the gap and the mark can never end up being
 /// two different strings (`detail.rs`'s About card writes `c"MORE"` twice for want of one).
-const MORE: &std::ffi::CStr = c"MORE";
+/// The truncation mark, translated once per process (i18n's pick pattern): the header fades its
+/// last line and pins this word at the column edge, and the word is the one thing that must not
+/// stay English on a Spanish set.
+fn more_mark() -> &'static std::ffi::CStr {
+    if crate::i18n::is_es() { c"MÁS" } else { c"MORE" }
+}
 /// Air between the point the bio's dissolving last line has vanished and the left edge of [`MORE`].
 /// **Re-derived for this rung, not copied.** detail's About card reserves 36 px beside a
 /// `size::CAPTION` synopsis — 1.5× its own type size — and the bio is a rung larger
@@ -437,7 +442,7 @@ fn bio_view(bio: &str, a: f32) -> TextView<'_> {
 /// card's `size::CAPTION`. Only the reserve reads it: the mark is drawn right-ALIGNED on the
 /// column edge, so its own draw needs no width at all.
 fn more_w() -> f32 {
-    crate::text::text_width(MORE.as_ptr(), theme::size::BODY, 1)
+    crate::text::text_width(more_mark().as_ptr(), theme::size::BODY, 1)
 }
 
 /// Rebuild the header's cached text runs from the store — from [`update`], on the frame a store
@@ -1146,7 +1151,7 @@ fn draw_header(p: Painter, person: &Person, sc: &Scene) {
         // must condense out with it.
         if truncated {
             Label::new(
-                MORE.as_ptr(),
+                more_mark().as_ptr(),
                 theme::size::BODY,
                 theme::with_a(theme::TEXT_TERTIARY, ea),
             )

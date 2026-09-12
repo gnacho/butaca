@@ -5630,7 +5630,14 @@ fn about_rows(d: &metadata::Detail) -> &'static AboutRows {
             },
         ));
         if !d.countries.is_empty() {
-            info.push((crate::i18n::t("Regions of Origin"), d.countries.join(", ")));
+            info.push((
+                crate::i18n::t("Regions of Origin"),
+                d.countries
+                    .iter()
+                    .map(|c| crate::i18n::country(c).to_string())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ));
         }
         // Languages: an "Original Audio" pair + a wrapped "Audio" list
         let orig_audio = d.audio.first().map(|a| {
