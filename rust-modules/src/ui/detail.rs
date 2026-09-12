@@ -1819,7 +1819,7 @@ fn tabs_layout(d: &crate::metadata::Detail) -> &'static [TabLay] {
         let mut out = Vec::with_capacity(d.seasons.len());
         for (i, s) in d.seasons.iter().enumerate() {
             let label = if s.title.is_empty() {
-                format!("Season {}", s.index)
+                crate::i18n::t("Season {}").replacen("{}", &s.index.to_string(), 1)
             } else {
                 s.title.clone()
             };
@@ -1934,7 +1934,9 @@ fn hero_blurb(m: Option<&PmsMovie>) -> (String, String) {
             let title = if ep.title.is_empty() {
                 String::new()
             } else {
-                let head = format!("S{}, E{} \u{b7} ", ep.season, ep.index);
+                let head = crate::i18n::t("S{}, E{} · ")
+                    .replacen("{}", &ep.season.to_string(), 1)
+                    .replacen("{}", &ep.index.to_string(), 1);
                 let room = HERO_TEXT_W * LEAD_BUDGET
                     - crate::text::text_width(
                         CString::new(head.as_str()).unwrap_or_default().as_ptr(),
@@ -1948,7 +1950,10 @@ fn hero_blurb(m: Option<&PmsMovie>) -> (String, String) {
                 )
             };
             return (
-                format!("S{}, E{}{}:", ep.season, ep.index, title),
+                crate::i18n::t("S{}, E{}{}:")
+                    .replacen("{}", &ep.season.to_string(), 1)
+                    .replacen("{}", &ep.index.to_string(), 1)
+                    .replacen("{}", &title, 1),
                 ep.summary.clone(),
             );
         }
@@ -2577,7 +2582,7 @@ fn draw_hero(p: Painter, env: &Env, m: Option<&PmsMovie>) {
                 parts.push(&se);
             }
         } else {
-            parts.push(if d.is_show { "TV Show" } else { "Movie" });
+            parts.push(if d.is_show { crate::i18n::t("TV Show") } else { crate::i18n::t("Movie") });
             for g in d.genres.iter().take(2) {
                 parts.push(g);
             }
@@ -2914,9 +2919,9 @@ fn hero_facts(d: &metadata::Detail) -> (String, Option<String>) {
             return (date, None);
         }
         let eps: i64 = d.seasons.iter().map(|s| s.leaf_count).sum();
-        let s_word = if seasons == 1 { "season" } else { "seasons" };
+        let s_word = if seasons == 1 { crate::i18n::t("season") } else { crate::i18n::t("seasons") };
         let extent = if eps > 0 {
-            let e_word = if eps == 1 { "episode" } else { "episodes" };
+            let e_word = if eps == 1 { crate::i18n::t("episode") } else { crate::i18n::t("episodes") };
             format!("{seasons} {s_word}, {eps} {e_word}")
         } else {
             format!("{seasons} {s_word}")
@@ -3167,7 +3172,7 @@ fn play_mode_bits(d: &metadata::Detail, after: bool) -> ([Bit; FACTS_BITS], usiz
             // inside the fragment the air closes one rung: these clauses are one sentence, where the
             // row-level dots separate three independent facts
             push(Bit::Sep(theme::space::SM));
-            push(Bit::Word(c"hardware conversion needs", sec, 0));
+            push(Bit::Word(tr_c(c"hardware conversion needs", c"necesita conversión por hardware"), sec, 0));
             push(Bit::Air(theme::space::SM));
             push(Bit::Capsule);
         }
@@ -3179,7 +3184,7 @@ fn play_mode_bits(d: &metadata::Detail, after: bool) -> ([Bit; FACTS_BITS], usiz
             push(Bit::Air(theme::space::SM));
             push(Bit::Word(c"HDR \u{2192} SDR", sec, 1));
             push(Bit::Sep(theme::space::SM));
-            push(Bit::Word(c"tone-mapping needs", sec, 0));
+            push(Bit::Word(tr_c(c"tone-mapping needs", c"necesita mapeo de tono"), sec, 0));
             push(Bit::Air(theme::space::SM));
             push(Bit::Capsule);
         }
@@ -3775,7 +3780,7 @@ fn draw_episode_cell(
     if focused && erow == EpRow::Text {
         crate::ui::widgets::text_block_highlight(pe, ep_text_hl(x, ep_y, meta_h));
     }
-    if let Ok(ec) = CString::new(format!("EPISODE {}", ep.index)) {
+    if let Ok(ec) = CString::new(crate::i18n::t("EPISODE {}").replacen("{}", &ep.index.to_string(), 1)) {
         pe.text(ec.as_ptr(), x, ty, theme::size::CAPTION, dimc, 0, 1);
     }
     // title wraps to at most 2 lines (elided past that) — long titles used to run into the next card
@@ -5602,7 +5607,7 @@ fn about_rows(d: &metadata::Detail) -> &'static AboutRows {
         let mut info: Vec<(&'static str, String)> = Vec::new();
         let released = pretty_date(&d.aired, d.year);
         if !released.is_empty() {
-            info.push(("Released", released));
+            info.push((crate::i18n::t("Released"), released));
         }
         let dur = if d.dur_ms > 0 {
             d.dur_ms
@@ -5610,10 +5615,10 @@ fn about_rows(d: &metadata::Detail) -> &'static AboutRows {
             d.episodes.first().map(|e| e.dur_ms).unwrap_or(0)
         };
         if dur > 0 {
-            info.push(("Run Time", crate::ui::fmt::dur_long(dur)));
+            info.push((crate::i18n::t("Run Time"), crate::ui::fmt::dur_long(dur)));
         }
         info.push((
-            "Rated",
+            crate::i18n::t("Rated"),
             if d.rating.is_empty() {
                 "NR".to_string()
             } else {
@@ -5621,12 +5626,12 @@ fn about_rows(d: &metadata::Detail) -> &'static AboutRows {
             },
         ));
         if !d.countries.is_empty() {
-            info.push(("Regions of Origin", d.countries.join(", ")));
+            info.push((crate::i18n::t("Regions of Origin"), d.countries.join(", ")));
         }
         // Languages: an "Original Audio" pair + a wrapped "Audio" list
         let orig_audio = d.audio.first().map(|a| {
             if a.lang.is_empty() {
-                "Unknown".to_string()
+                crate::i18n::t("Unknown").to_string()
             } else {
                 a.lang.clone()
             }
@@ -5637,7 +5642,7 @@ fn about_rows(d: &metadata::Detail) -> &'static AboutRows {
             .take(8)
             .map(|a| {
                 let lang = if a.lang.is_empty() {
-                    "Unknown".to_string()
+                    crate::i18n::t("Unknown").to_string()
                 } else {
                     a.lang.clone()
                 };
@@ -5650,9 +5655,9 @@ fn about_rows(d: &metadata::Detail) -> &'static AboutRows {
         let sdh = d.subs.iter().any(|s| s.sdh);
         let ad = d.audio.iter().any(|a| a.ad);
         let acc_all: [(bool, &'static str, &'static str); 3] = [
-            (cc, "CC", "Closed captions refer to subtitles in available languages with the addition of relevant non-dialogue information."),
-            (sdh, "SDH", "Subtitles for the deaf and hard of hearing (SDH) refer to subtitles in the original language with the addition of relevant non-dialogue information."),
-            (ad, "AD", "Audio descriptions (AD) refer to a narration track describing what is happening on screen, to provide context for those who are blind or have low vision."),
+            (cc, "CC", crate::i18n::t("Closed captions refer to subtitles in available languages with the addition of relevant non-dialogue information.")),
+            (sdh, "SDH", crate::i18n::t("Subtitles for the deaf and hard of hearing (SDH) refer to subtitles in the original language with the addition of relevant non-dialogue information.")),
+            (ad, "AD", crate::i18n::t("Audio descriptions (AD) refer to a narration track describing what is happening on screen, to provide context for those who are blind or have low vision.")),
         ];
         let access = acc_all
             .iter()
@@ -5837,14 +5842,14 @@ fn draw_about(p: Painter) {
     );
 
     // ---- Information ----
-    text_at(p, tx, col_y, theme::size::HEADLINE, hd, 1, "Information");
+    text_at(p, tx, col_y, theme::size::HEADLINE, hd, 1, crate::i18n::t("Information"));
     let mut yy = col_y + 68.0;
     for (label, value) in info {
         yy += draw_pair(p, tx, yy, label, value, lbl, val);
     }
 
     // ---- Languages ----
-    text_at(p, lx, col_y, theme::size::HEADLINE, hd, 1, "Languages");
+    text_at(p, lx, col_y, theme::size::HEADLINE, hd, 1, crate::i18n::t("Languages"));
     let mut ly = col_y + 68.0;
     // The cap-top (texture-top convention, matching `syn`/`sy` above) of whatever ends up the
     // column's LAST drawn line — the anchor for its MORE, exactly like the card's. Starts at the
@@ -5854,7 +5859,7 @@ fn draw_about(p: Painter) {
     let mut lang_last_top = col_y;
     if let Some(orig) = orig_audio {
         lang_last_top = pair_last_line_cap_y(ly, orig);
-        ly += draw_pair(p, lx, ly, "Original Audio", orig, lbl, val);
+        ly += draw_pair(p, lx, ly, crate::i18n::t("Original Audio"), orig, lbl, val);
     }
     if !audio_list.is_empty() {
         text_at(p, lx, ly, theme::size::CAPTION, lbl, 0, "Audio");
@@ -5886,7 +5891,7 @@ fn draw_about(p: Painter) {
     }
 
     // ---- Accessibility ----
-    text_at(p, ax, col_y, theme::size::HEADLINE, hd, 1, "Accessibility");
+    text_at(p, ax, col_y, theme::size::HEADLINE, hd, 1, crate::i18n::t("Accessibility"));
     if access.is_empty() {
         text_at(
             p,

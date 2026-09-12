@@ -814,15 +814,15 @@ impl SecKind {
     /// falls back to when no count has landed is [`SecKind::plural`].
     pub(crate) fn noun(self) -> &'static str {
         match self {
-            SecKind::Movie => "films",
-            SecKind::Show => "shows",
+            SecKind::Movie => crate::i18n::t("films"),
+            SecKind::Show => crate::i18n::t("shows"),
         }
     }
     /// The same thing as a standalone label ("Films"), for a row whose count has not landed yet.
     pub(crate) fn plural(self) -> &'static str {
         match self {
-            SecKind::Movie => "Films",
-            SecKind::Show => "TV shows",
+            SecKind::Movie => crate::i18n::t("Films"),
+            SecKind::Show => crate::i18n::t("TV shows"),
         }
     }
 }
@@ -1802,7 +1802,7 @@ pub(crate) fn sort_label() -> &'static str {
     st.sorts
         .get(st.sort_idx)
         .map(|s| s.title.as_str())
-        .unwrap_or("Title")
+        .unwrap_or(crate::i18n::t("Title"))
 }
 /// Apply a sort-menu pick: a NEW entry switches to it at its default direction; re-picking
 /// the ACTIVE entry toggles direction. Re-queries the listing either way.
@@ -1841,7 +1841,7 @@ pub(crate) fn genre_sel() -> Option<&'static GenreEntry> {
 }
 /// Toolbar chip text: the active genre's name, else "All".
 pub(crate) fn filter_label() -> &'static str {
-    genre_sel().map(|g| g.title.as_str()).unwrap_or("All")
+    genre_sel().map(|g| g.title.as_str()).unwrap_or(crate::i18n::t("All"))
 }
 /// Apply a genre pick (None = All). Re-queries.
 pub(crate) fn set_genre(idx: Option<usize>) {

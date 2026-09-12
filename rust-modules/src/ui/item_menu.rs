@@ -283,7 +283,7 @@ fn build(m: &PmsMovie, from_deck: bool) -> (Section, Vec<Option<Action>>) {
             ));
             if !m.show_rk.is_empty() {
                 nav.push((
-                    "Go to Show",
+                    crate::i18n::t("Go to Show"),
                     Icon::Show,
                     Action::GoToShow(m.show_rk.clone(), m.season_index),
                 ));

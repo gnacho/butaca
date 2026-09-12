@@ -39,6 +39,12 @@ use std::ffi::CString;
 use std::os::raw::{c_int, c_uint};
 use std::ptr::{addr_of, addr_of_mut};
 
+/// The translated pick of a fixed C label: both spellings are static, so the language atom chooses
+/// a pointer and nothing allocates on the draw path (the same helper `ui::detail` owns).
+fn tr_c(en: &'static std::ffi::CStr, es: &'static std::ffi::CStr) -> &'static std::ffi::CStr {
+    if crate::i18n::is_es() { es } else { en }
+}
+
 // ---- geometry -------------------------------------------------------------------------------
 const COLS: usize = 6;
 /// **The A–Z rail's own band, reserved on the grid's right whether or not the rail is drawn.**
@@ -491,7 +497,7 @@ fn view_sort_label() -> &'static str {
         Pending::Sort(i) => crate::browse::sorts()
             .get(i)
             .map(|s| s.title.as_str())
-            .unwrap_or("Title"),
+            .unwrap_or(crate::i18n::t("Title")),
         _ => crate::browse::sort_label(),
     }
 }
@@ -630,7 +636,7 @@ fn chip_value(c: Chip) -> (&'static str, String) {
         // `chip_strs`), which is the one piece of source annotation the design keeps and the reason
         // the tab strip above needs none
         Chip::Source => (
-            "Library",
+            crate::i18n::t("Library"),
             crate::browse::section_title(view_section()).to_string(),
         ),
         Chip::Sort => (crate::i18n::t("Sort"), view_sort_label().to_string()),
@@ -773,10 +779,16 @@ fn dead_strs() -> &'static (String, String, CString, Option<CString>) {
         .unwrap_or(true);
     if stale {
         let (machine, owner) = source_labels();
-        let verdict = CString::new(format!("Can't reach {machine}")).unwrap_or_default();
+        let verdict = CString::new(
+            crate::i18n::t("Can't reach {machine}").replacen("{machine}", &machine, 1),
+        )
+        .unwrap_or_default();
         let reason = owner.as_ref().map(|o| {
-            CString::new(format!("Shared by {o} \u{b7} your own server is fine."))
-                .unwrap_or_default()
+            CString::new(
+                crate::i18n::t("Shared by {o} \u{b7} your own server is fine.")
+                    .replacen("{o}", o, 1),
+            )
+            .unwrap_or_default()
         });
         *cache = Some((name.to_string(), handle.to_string(), verdict, reason));
     }
@@ -801,7 +813,7 @@ fn source_labels() -> (String, Option<String>) {
     } else {
         let session = crate::plex::session::peek().server.name;
         if session.is_empty() {
-            "this server".to_string()
+            crate::i18n::t("this server").to_string()
         } else {
             session
         }
@@ -835,16 +847,18 @@ fn empty_caption() -> &'static CString {
         let s = if crate::browse::section_count() == 0 {
             // the table itself answered with nothing we browse (a music-only account) — there is no
             // section to name, and naming one would be inventing it
-            "No libraries on this server".to_string()
+            crate::i18n::t("No libraries on this server").to_string()
         } else if filtered {
-            "Nothing here matches".to_string()
+            crate::i18n::t("Nothing here matches").to_string()
         } else {
             // the TYPE's own noun — a section is one of four kinds now, so "films" is a guess
             // rather than an answer for three of them
             let noun = crate::browse::section_kind(sec)
                 .map(|k| k.noun())
-                .unwrap_or("items");
-            format!("No {noun} in {}", crate::browse::section_title(sec))
+                .unwrap_or(crate::i18n::t("items"));
+            crate::i18n::t("No {noun} in {}")
+                .replacen("{noun}", noun, 1)
+                .replacen("{}", &crate::browse::section_title(sec), 1)
         };
         *cache = Some((gen, sec, filtered, CString::new(s).unwrap_or_default()));
     }
@@ -1784,7 +1798,7 @@ fn build_sort_menu(keep: bool) {
     let sorts = crate::browse::sorts();
     let mut sec = Section::new(crate::i18n::t("Sort by"));
     if sorts.is_empty() {
-        sec = sec.row(Row::new("Loading\u{2026}").dim(true));
+        sec = sec.row(Row::new(crate::i18n::t("Loading…")).dim(true));
     }
     for (i, s) in sorts.iter().enumerate() {
         let active = i == crate::browse::sort_idx();
@@ -1834,7 +1848,7 @@ fn open_filter_menu(keep: bool) {
     if has_unwatched() {
         // A SWITCH, not one option among several: it says what it is set to in words at the trailing
         // edge, and carries no mark at all in the leading column.
-        sec = sec.row(Row::new("Unwatched only").toggle(view_unwatched()));
+        sec = sec.row(Row::new(crate::i18n::t("Unwatched only")).toggle(view_unwatched()));
     }
     let sec = sec.row(
         // "All" / "Comedy" is a READ-OUT — what this row is set to — so it belongs in the same
@@ -1843,11 +1857,11 @@ fn open_filter_menu(keep: bool) {
         // answering "what is set" in two different places; a sub-line is for a DESCRIPTION
         // (the track menu's "EAC3 · 5.1"), and it also costs the row 32px of height it was
         // spending to say one word.
-        Row::new("Genre")
+        Row::new(crate::i18n::t("Genre"))
             .value(
                 crate::browse::genre_sel()
                     .map(|g| g.title.clone())
-                    .unwrap_or_else(|| "All".into()),
+                    .unwrap_or_else(|| crate::i18n::t("All").into()),
             )
             .chevron(true),
     );
@@ -1864,9 +1878,9 @@ fn build_genre_menu(keep: bool) {
     crate::browse::kick_genres();
     let genres = crate::browse::genres();
     let selected = crate::browse::genre_sel().map(|g| g.id.clone());
-    let mut sec = Section::new("Genre").row(Row::new("All Genres").checked(selected.is_none()));
+    let mut sec = Section::new(crate::i18n::t("Genre")).row(Row::new(crate::i18n::t("All Genres")).checked(selected.is_none()));
     if genres.is_empty() {
-        sec = sec.row(Row::new("Loading\u{2026}").dim(true));
+        sec = sec.row(Row::new(crate::i18n::t("Loading…")).dim(true));
     }
     let mut sel = 0i32;
     for (i, g) in genres.iter().enumerate() {
@@ -2238,7 +2252,7 @@ pub(crate) fn draw() {
                 verdict,
                 StatusKind::Failed,
             )
-            .action(c"Try again")
+            .action(tr_c(c"Try Again", c"Reintentar"))
             .focused(area() == Area::Status && !menu_open());
             if let Some(r) = reason {
                 ov = ov.reason(r);
@@ -2356,7 +2370,7 @@ pub(crate) fn draw() {
     if tot >= 0 && read == Readout::Grid {
         let noun = crate::browse::section_kind(crate::browse::cur())
             .map(|k| k.noun())
-            .unwrap_or("items");
+            .unwrap_or(crate::i18n::t("items"));
         let cache = unsafe { &mut *addr_of_mut!(COUNT_C) };
         if cache
             .as_ref()

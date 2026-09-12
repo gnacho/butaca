@@ -1146,7 +1146,7 @@ fn hero_content(hero: &PmsMovie, source: &str, p: Painter, dx: f32) {
         let ep_title = &hero.title;
         let mut s = String::new();
         if hero.season_index > 0 {
-            s.push_str(&format!("S{} ", hero.season_index));
+            s.push_str(&crate::i18n::t("S{} ").replacen("{}", &hero.season_index.to_string(), 1));
         }
         if hero.ep_index > 0 {
             s.push_str(&format!("E{}", hero.ep_index));
@@ -1158,7 +1158,7 @@ fn hero_content(hero: &PmsMovie, source: &str, p: Painter, dx: f32) {
         s
     } else {
         let rating = &hero.rating;
-        let noun = if hero.kind == 1 { "Show" } else { "Movie" };
+        let noun = if hero.kind == 1 { crate::i18n::t("Show") } else { crate::i18n::t("Movie") };
         format!(
             "{} \u{b7} {} \u{b7} {}",
             noun,
@@ -1625,7 +1625,9 @@ fn draw_heading(p: Painter, title: &str, source: &str, x: f32, y: f32) {
 fn focused_caption(m: &PmsMovie) -> Option<CString> {
     let s = if m.kind == 3 && m.ep_index > 0 {
         if m.season_index > 0 {
-            format!("S{} \u{2022} E{}", m.season_index, m.ep_index)
+            crate::i18n::t("S{} • E{}")
+                .replacen("{}", &m.season_index.to_string(), 1)
+                .replacen("{}", &m.ep_index.to_string(), 1)
         } else {
             format!("E{}", m.ep_index)
         }
@@ -1661,9 +1663,9 @@ fn cw_caption(m: &PmsMovie) -> Option<CString> {
     } else if m.kind == 3 {
         // next-up episode: no resume point, so no bar and no time — just the "New episode" cue
         if show.is_empty() {
-            "New episode".to_string()
+            crate::i18n::t("New episode").to_string()
         } else {
-            format!("{show} \u{00b7} New episode")
+            format!("{show} \u{00b7} {}", crate::i18n::t("New episode"))
         }
     } else {
         return None;
@@ -2001,6 +2003,12 @@ pub(crate) fn top_focus() -> crate::ui::widgets::TopFocus {
 /// `home_draw` runs at dt=0, so only `home_update` can advance one.
 static mut status_ms: f32 = 0.0;
 
+/// The translated pick of a fixed label: both spellings are static C strings, so the language atom
+/// chooses a pointer and nothing allocates on the draw path (the same helper `ui::detail` owns).
+fn tr_c(en: &'static std::ffi::CStr, es: &'static std::ffi::CStr) -> &'static std::ffi::CStr {
+    if crate::i18n::is_es() { es } else { en }
+}
+
 /// Home's "there are no shelves" read-out: caption, treatment, and the label of the control under
 /// it (`None` = no control — while a fetch is in flight the spinner IS the state, and the fetch a
 /// Retry would kick is the one already running).
@@ -2019,12 +2027,12 @@ fn status_read() -> Option<(
     }
     Some(match crate::pms::hub_state() {
         crate::pms::HubState::Loading => {
-            (c"Loading your library\u{2026}", StatusKind::Working, None)
+            (tr_c(c"Loading your library\u{2026}", c"Cargando tu biblioteca\u{2026}"), StatusKind::Working, None)
         }
         crate::pms::HubState::Failed => (
             // The backend the viewer actually has, named.
             if cfg!(feature = "jellyfin") {
-                c"Can't reach your Jellyfin server"
+                tr_c(c"Can't reach your Jellyfin server", c"No se puede conectar con tu servidor Jellyfin")
             } else {
                 c"No se puede conectar con el servidor"
             },

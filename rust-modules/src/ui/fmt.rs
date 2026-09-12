@@ -7,9 +7,11 @@ pub(crate) fn dur_short(ms: i64) -> String {
     let mins = (ms / 60_000).max(0);
     let (h, m) = (mins / 60, mins % 60);
     if h > 0 {
-        format!("{h}h {m}m")
+        crate::i18n::t("{h}h {m}m")
+            .replacen("{h}", &h.to_string(), 1)
+            .replacen("{m}", &m.to_string(), 1)
     } else {
-        format!("{m}m")
+        crate::i18n::t("{m}m").replacen("{m}", &m.to_string(), 1)
     }
 }
 
@@ -45,7 +47,9 @@ pub(crate) fn dur_long(ms: i64) -> String {
     let mins = (ms / 60_000).max(0);
     let (h, m) = (mins / 60, mins % 60);
     if h > 0 {
-        format!("{h} hr {m} min")
+        crate::i18n::t("{h} hr {m} min")
+            .replacen("{h}", &h.to_string(), 1)
+            .replacen("{m}", &m.to_string(), 1)
     } else {
         format!("{m} min")
     }
@@ -57,9 +61,11 @@ pub(crate) fn time_left(remaining_ms: i64) -> String {
     let mins = ((remaining_ms + 59_999) / 60_000).max(1);
     let (h, m) = (mins / 60, mins % 60);
     if h > 0 {
-        format!("{h} hr {m} min left")
+        crate::i18n::t("{h} hr {m} min left")
+            .replacen("{h}", &h.to_string(), 1)
+            .replacen("{m}", &m.to_string(), 1)
     } else {
-        format!("{m} min left")
+        crate::i18n::t("{m} min left").replacen("{m}", &m.to_string(), 1)
     }
 }
 
@@ -81,7 +87,9 @@ pub(crate) fn clock(ms: i64) -> String {
 /// have to stay one vocabulary: a page that said "S2, E3" while the HUD said "S2E3" for the same
 /// leaf is exactly the drift this module exists to prevent, and nothing but shared code enforces it.
 pub(crate) fn episode_ordinal(season: i64, index: i64) -> String {
-    format!("S{season}, E{index}")
+    crate::i18n::t("S{season}, E{index}")
+        .replacen("{season}", &season.to_string(), 1)
+        .replacen("{index}", &index.to_string(), 1)
 }
 
 /// The source attribution — `"Shared by friend"` — or `None` when there is nobody to credit.
@@ -103,7 +111,7 @@ pub(crate) fn episode_ordinal(season: i64, index: i64) -> String {
 /// read-out. It was written twice with two different empty-handle behaviours and interpolated a
 /// third time inline — exactly the drift this module exists to prevent.
 pub(crate) fn shared_by(handle: &str) -> Option<String> {
-    (!handle.is_empty()).then(|| format!("Shared by {handle}"))
+    (!handle.is_empty()).then(|| crate::i18n::t("Shared by {handle}").replacen("{handle}", handle, 1))
 }
 
 /// The episode kicker — `"S2, E3 · Laura"`, the [`episode_ordinal`] with the episode's title after

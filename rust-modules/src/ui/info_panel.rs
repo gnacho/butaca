@@ -58,11 +58,11 @@ fn is_episode() -> bool {
 /// paid 60 times a second to learn a constant.
 fn actions() -> [&'static str; 2] {
     [
-        "From Beginning",
+        crate::i18n::t("From Beginning"),
         if is_episode() {
-            "Go to Show"
+            crate::i18n::t("Go to Show")
         } else {
-            "Go to Movie"
+            crate::i18n::t("Go to Movie")
         },
     ]
 }
@@ -223,17 +223,17 @@ pub(crate) fn playback_now(
         return None;
     }
     if !transcoding {
-        return Some("Direct Play".to_string());
+        return Some(crate::i18n::t("Direct Play").to_string());
     }
     if remux {
-        return Some("Direct Stream".to_string());
+        return Some(crate::i18n::t("Direct Stream").to_string());
     }
     let name = video_codec_name(vcodec);
     // a re-encode whose output codec we somehow do not know still converted — say that much
     Some(if name.is_empty() {
-        "Converting".to_string()
+        crate::i18n::t("Converting").to_string()
     } else {
-        format!("Converting \u{b7} {name}")
+        crate::i18n::t("Converting · {name}").replacen("{name}", &name, 1)
     })
 }
 

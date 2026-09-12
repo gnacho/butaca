@@ -5148,7 +5148,7 @@ fn with_tab_metrics<R>(f: impl FnOnce(&[std::ffi::CString], &[f32]) -> R) -> R {
     if cache.as_ref().map(|c| c.0 != gen).unwrap_or(true) {
         let nsec = crate::browse::tab_count();
         let mut labels: Vec<CString> = Vec::with_capacity(1 + nsec + 1);
-        labels.push(CString::new("Home").unwrap_or_default());
+        labels.push(CString::new(crate::i18n::t("Home")).unwrap_or_default());
         for i in 0..nsec {
             labels.push(CString::new(crate::browse::tab_title(i)).unwrap_or_default());
         }
