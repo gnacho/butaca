@@ -139,6 +139,10 @@ pub(crate) struct BaseItemDto {
     /// ISO timestamp ("1976-11-12T00:00:00.0000000Z") — only its date part is ever drawn.
     #[serde(rename = "PremiereDate")]
     pub(crate) premiere_date: Option<String>,
+    /// The other bookend, present only for finished runs: a person's death date, a series' end.
+    /// Same ISO shape; same date-part-only consumption.
+    #[serde(rename = "EndDate")]
+    pub(crate) end_date: Option<String>,
     /// Season/folder only: how many leaves it holds (Plex's `leafCount`).
     #[serde(rename = "ChildCount")]
     pub(crate) child_count: Option<i64>,

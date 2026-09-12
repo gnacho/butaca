@@ -407,6 +407,25 @@ impl JfClient {
         reply.ok().then_some(reply.body)
     }
 
+    /// A person's filmography: `/Users/{uid}/Items` scoped by `PersonIds`, one page of one kind.
+    /// `include_types` names the shelf ("Movie" or "Series" - or both, which is what the roles
+    /// worker asks, since a credit can sit on either); `fields` rides the same vocabulary every
+    /// listing uses, and is where "People" goes when the caller wants the per-item credit rows.
+    /// SortBy=SortName pins an order the shelf spring does not have to re-derive.
+    pub(crate) fn person_items(
+        &self,
+        person_id: &str,
+        include_types: &str,
+        fields: &str,
+    ) -> Option<super::dto::ItemsResult> {
+        let user_id = self.user_id()?;
+        self.get_json(&format!(
+            "/Users/{user_id}/Items?Recursive=true&PersonIds={person_id}\
+             &IncludeItemTypes={include_types}&Fields={fields}&SortBy=SortName\
+             &EnableImageTypes=Primary,Backdrop"
+        ))
+    }
+
     // ---- detail-page fetches -------------------------------------------------------------
 
     /// The fields the DETAIL page asks for, one constant for the same reason as

@@ -1058,10 +1058,15 @@ fn maybe_spawn(i: usize) {
     let guid = p.guid.clone();
     if i == F_PROFILE {
         FETCH[i].claim();
+        // WHICH provider owns the page decides which biography fetch runs - plex.tv's global
+        // record, or the Jellyfin item the credit row already named. Dispatched here rather than
+        // inside `fetch_profile` so the worker body stays the one flat closure the
+        // panic-lands-as-failure guarantee below is written against.
+        let sid = p.sid;
         let spawned = crate::task::spawn_small("person", move || {
             // filled OUTSIDE the guard so a panicking fetch still lands — as a FAILURE (None), not
             // as an empty biography
-            let prof = catch_unwind(|| fetch_profile(&arg[0])).unwrap_or(None);
+            let prof = catch_unwind(|| fetch_profile_for(sid, &arg[0])).unwrap_or(None);
             land(i, gen, Landing::Profile(prof));
         });
         if !spawned {
@@ -1070,6 +1075,38 @@ fn maybe_spawn(i: usize) {
         return;
     }
     let Some((sid, kind)) = un_fx(i) else { return };
+    // The Jellyfin slot's own answers. That backend's client lives outside the Plex registry
+    // `client_for` reads, so without this arm the fetch backs off forever and the page never
+    // fills - the "opening a cast member does nothing" of issue #8 was exactly that silence, plus
+    // a plex.tv biography a signed-out session could never fetch. K_RESOLVE is unreachable here
+    // by construction (the origin src is born resolved and no other source exists on this
+    // backend) and is spelled out anyway so a future caller of the fx space cannot turn that
+    // silence into a spawn loop.
+    #[cfg(feature = "jellyfin")]
+    if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+        if kind == K_RESOLVE {
+            return;
+        }
+        let pkey = p.key.clone();
+        FETCH[i].claim();
+        let spawned = crate::task::spawn_small("person", move || {
+            // same contract as the Plex arms: a panicking worker lands as a FAILURE, never as an
+            // empty filmography or silently-missing credit names
+            let what = match kind {
+                K_MEDIA => {
+                    Landing::Media(catch_unwind(|| person_media_jf(sid, &arg[0])).unwrap_or(None))
+                }
+                _ => Landing::Roles(
+                    catch_unwind(|| person_roles_jf(&pkey, &arg)).unwrap_or(None),
+                ),
+            };
+            land(i, gen, what);
+        });
+        if !spawned {
+            FETCH[i].release();
+        }
+        return;
+    }
     // CAPTURE AT THE SPAWN SITE — `pms::kick` states the rule and this store now needs it for the
     // same reason. The worker is handed THIS server's own `&'static Client`, never `client()`: a
     // slot re-pointed mid-request cannot redirect a fetch already out (`plex::servers` leaks each
@@ -1161,6 +1198,22 @@ fn fetch_profile(_guid: &str) -> Option<crate::plex::discover::PersonProfile> {
     None
 }
 
+/// Which provider's biography fetch a page runs: plex.tv's global record, or the Jellyfin item
+/// the credit row already named. `arg` is whichever id that provider addresses - the guid on the
+/// Plex side, the person's own item id on Jellyfin's; the cast row carries the right one for its
+/// backend in the same slot either way.
+fn fetch_profile_for(sid: ServerId, arg: &str) -> Option<crate::plex::discover::PersonProfile> {
+    #[cfg(feature = "jellyfin")]
+    {
+        if crate::jellyfin::client().is_some() && sid == crate::jellyfin::SERVER_ID {
+            return fetch_profile_jf(arg);
+        }
+    }
+    #[cfg(not(feature = "jellyfin"))]
+    let _ = sid;
+    fetch_profile(arg)
+}
+
 /// `(ratingKey, character)` for every row of a batched `/library/metadata/{csv}` response, keeping
 /// only THIS person's credit in each — the full record's `Role[]` names every cast member, and the
 /// page wants one line, "what did *this* person play in it".
@@ -1185,6 +1238,120 @@ pub(crate) fn roles_from(
             (!r.role.is_empty()).then(|| (it.rating_key.clone(), r.role.clone()))
         })
         .collect()
+}
+
+// ---- the Jellyfin backend's three answers -----------------------------------------------------
+//
+// There is no plex.tv on that side and no per-server join either: the person IS an item id the
+// credit row already carried, so the whole arm is three direct reads (profile item, filmography
+// page per shelf kind, credit rows inline on the filmography) mapped into the same landings the
+// Plex workers post. The pure halves are split out (`jf_profile_from`, `jf_shelf`, `jf_roles`)
+// because they are the parts worth grading: the date trim, the cap-vs-total split and the
+// credit-row match are each exactly the kind of off-by-one a worker test would never catch once
+// the real server answers.
+
+/// Map the person's own item record onto the profile landing. The name and headshot are
+/// deliberately NOT carried: `apply`'s Profile arm keeps the credit row's spelling and picture
+/// for exactly the mid-fetch-rename reason its comment records, and an empty `thumb` here is
+/// what leaves that untouched. Jellyfin has no departments and no birthplace on the record;
+/// both stay empty, which the header draws as absent rather than as a blank line.
+#[cfg(feature = "jellyfin")]
+fn jf_profile_from(it: &crate::jellyfin::BaseItemDto) -> crate::plex::discover::PersonProfile {
+    let date = |v: &Option<String>| {
+        v.as_deref()
+            .and_then(|s| s.split('T').next())
+            .unwrap_or_default()
+            .to_string()
+    };
+    crate::plex::discover::PersonProfile {
+        title: it.name.clone(),
+        summary: it.overview.clone().unwrap_or_default(),
+        born_at: date(&it.premiere_date),
+        died_at: date(&it.end_date),
+        birth_place: String::new(),
+        known_for: String::new(),
+        thumb: String::new(),
+        credit_types: Vec::new(),
+    }
+}
+
+/// One shelf from one filmography page: rows converted and capped to [`SHELF_MAX`], the REAL
+/// total kept beside them (a prolific actor has more credits than tiles, and the heading counts
+/// facts, not what fitted), and the roles vector pre-sized parallel with empty strings — the
+/// credit names land through their own fetch, never this one.
+#[cfg(feature = "jellyfin")]
+fn jf_shelf(
+    items: &[crate::jellyfin::BaseItemDto],
+    total: i64,
+    sid: ServerId,
+) -> Shelf {
+    let mut sh = Shelf::default();
+    sh.total = total.max(0) as usize;
+    for it in items.iter().take(SHELF_MAX) {
+        if let Some(m) = crate::jellyfin::movie_from_dto(it, sid, 0) {
+            sh.items.push(m);
+        }
+    }
+    sh.roles = vec![String::new(); sh.items.len()];
+    sh
+}
+
+/// The credit rows: for every filmography item the shelf holds, the part THIS person played in
+/// it, read off the item's own `People[]`. Items outside `keys` are skipped rather than carried —
+/// the landing is addressed to one shelf list, exactly the contract `RolesLanding`'s `keys`
+/// exists to enforce. A credit with no `Role` string (crew, or a sparse record) answers `""`,
+/// which `apply` already reads as "name no part".
+#[cfg(feature = "jellyfin")]
+fn jf_roles(
+    items: &[crate::jellyfin::BaseItemDto],
+    person_id: &str,
+    keys: &[&str],
+) -> Vec<(String, String)> {
+    items
+        .iter()
+        .filter(|it| keys.contains(&it.id.as_str()))
+        .map(|it| {
+            let role = it
+                .people
+                .iter()
+                .find(|p| p.id == person_id)
+                .and_then(|p| p.role.clone())
+                .unwrap_or_default();
+            (it.id.clone(), role)
+        })
+        .collect()
+}
+
+/// WORKER THREAD: the Jellyfin biography. The detail fetch answers the person's own record; the
+/// mapping is the whole job.
+#[cfg(feature = "jellyfin")]
+fn fetch_profile_jf(person_id: &str) -> Option<crate::plex::discover::PersonProfile> {
+    crate::jellyfin::client()?.item_detail(person_id).map(|it| jf_profile_from(&it))
+}
+
+/// WORKER THREAD: the Jellyfin filmography, both shelves. One page per kind keeps each shelf's
+/// REAL total a fact about its own answer rather than a split of a shared count.
+#[cfg(feature = "jellyfin")]
+fn person_media_jf(sid: ServerId, person_id: &str) -> Option<[Shelf; NSHELF]> {
+    let c = crate::jellyfin::client()?;
+    let movies = c.person_items(person_id, "Movie", "")?;
+    let shows = c.person_items(person_id, "Series", "")?;
+    Some([
+        jf_shelf(&movies.items, movies.total, sid),
+        jf_shelf(&shows.items, shows.total, sid),
+    ])
+}
+
+/// WORKER THREAD: the Jellyfin credit rows, off one filmography page that asks for `People`.
+#[cfg(feature = "jellyfin")]
+fn person_roles_jf(person_id: &str, keys: &[String]) -> Option<RolesLanding> {
+    let c = crate::jellyfin::client()?;
+    let res = c.person_items(person_id, "Movie,Series", "People")?;
+    let key_refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+    Some(RolesLanding {
+        keys: keys.to_vec(),
+        pairs: jf_roles(&res.items, person_id, &key_refs),
+    })
 }
 
 /// Split a `/library/people/{id}/media` container into the Movies and Shows shelves **by each
@@ -1249,6 +1416,79 @@ pub(crate) fn install_for_test(movies: Vec<PmsMovie>, shows: Vec<PmsMovie>) {
 mod tests {
     use super::*;
     use crate::plex::{Hub, MediaContainer, Metadata};
+
+    // ---- the Jellyfin arm's pure halves -----------------------------------------------------
+    //
+    // The workers are network seams; these three are the logic, graded on the same DTO fixtures
+    // the converter's own tests use.
+
+    /// A person item mapped onto the profile landing: the timestamps trim to their date part,
+    /// the overview becomes the biography, and everything this backend has no record of
+    /// (departments, birthplace) stays empty rather than invented.
+    #[cfg(feature = "jellyfin")]
+    #[test]
+    fn jf_profile_trims_dates_and_maps_the_overview() {
+        let it: crate::jellyfin::BaseItemDto = serde_json::from_str(
+            r#"{"Id":"per-1","Type":"Person","Name":"Someone","Overview":"Did things.",
+               "PremiereDate":"1976-11-12T00:00:00.0000000Z"}"#,
+        )
+        .unwrap();
+        let p = jf_profile_from(&it);
+        assert_eq!(p.title, "Someone");
+        assert_eq!(p.summary, "Did things.");
+        assert_eq!(p.born_at, "1976-11-12");
+        assert_eq!(p.died_at, "");
+        assert_eq!(p.birth_place, "");
+        assert!(p.credit_types.is_empty());
+    }
+
+    /// The shelf keeps the REAL total past the tile cap and pre-sizes the roles vector parallel
+    /// to the tiles: a heading that read the cap would be the cap masquerading as a count, and a
+    /// short roles vector would panic the first caption draw.
+    #[cfg(feature = "jellyfin")]
+    #[test]
+    fn jf_shelf_caps_tiles_but_keeps_the_real_total() {
+        let mk = |i: usize| {
+            serde_json::from_str::<crate::jellyfin::BaseItemDto>(&format!(
+                r#"{{"Name":"m{i}","Type":"Movie","Id":"id{i}",
+                    "ImageTags":{{"Primary":"t"}}}}"#
+            ))
+            .unwrap()
+        };
+        let items: Vec<_> = (0..SHELF_MAX + 5).map(mk).collect();
+        let sh = jf_shelf(&items, (SHELF_MAX + 5) as i64, S0);
+        assert_eq!(sh.items.len(), SHELF_MAX, "the tiles cap");
+        assert_eq!(sh.total, SHELF_MAX + 5, "the total does not");
+        assert_eq!(sh.roles.len(), sh.items.len(), "roles stay parallel");
+    }
+
+    /// Credit rows: only the keys the landing is addressed to, the part read off this person's
+    /// own People entry, and an empty string rather than a guess for a credit with no Role.
+    #[cfg(feature = "jellyfin")]
+    #[test]
+    fn jf_roles_read_this_persons_part_on_the_asked_keys_only() {
+        let it: crate::jellyfin::BaseItemDto = serde_json::from_str(
+            r#"{"Name":"A Film","Type":"Movie","Id":"rk-1","ImageTags":{"Primary":"t"},
+               "People":[
+                 {"Id":"per-9","Name":"Our Person","Role":"Wallace (voice)","Type":"Actor"},
+                 {"Id":"per-2","Name":"Someone Else","Role":"Not This One","Type":"Actor"}]}"#,
+        )
+        .unwrap();
+        let crew: crate::jellyfin::BaseItemDto = serde_json::from_str(
+            r#"{"Name":"A Crew Credit","Type":"Movie","Id":"rk-2","ImageTags":{"Primary":"t"},
+               "People":[{"Id":"per-9","Name":"Our Person","Type":"Director"}]}"#,
+        )
+        .unwrap();
+        let pairs = jf_roles(&[it, crew], "per-9", &["rk-1", "rk-2"]);
+        assert_eq!(
+            pairs,
+            vec![
+                ("rk-1".to_string(), "Wallace (voice)".to_string()),
+                ("rk-2".to_string(), String::new()),
+            ],
+            "our person's part, the other person's NOT, and crew answers empty"
+        );
+    }
 
     /// Slot 0 — the server every single-source test opens on. A real slot, so its mailboxes exist,
     /// but nothing is registered at it: `maybe_spawn` therefore refuses to dial (`client_for` is
