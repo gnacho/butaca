@@ -6509,7 +6509,8 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
     // does not any more (the install directory is the authority), so this line turns an unanswered
     // device question into something every single run answers for free.
     log(&format!(
-        "install: id={} flavour={} runtime={} features={} APPID_env={}",
+        "install: plxnative@{} id={} flavour={} runtime={} features={} APPID_env={}",
+        crate::plex::identity::VERSION,
         crate::paths::app_id(),
         crate::paths::flavour().unwrap_or("-"),
         crate::paths::runtime_dir().display(),
