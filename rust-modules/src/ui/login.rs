@@ -800,7 +800,7 @@ fn settle_storage_retry() {
         );
         return;
     }
-    let resumed = crate::auth::resume_secure_session(crate::plex::session::load());
+    let resumed = crate::auth::resume_secure_session(crate::plex::session::snapshot());
     STORAGE_RETRY_STATE.store(
         if resumed { RETRY_IDLE } else { RETRY_FAILED },
         Ordering::Release,
@@ -1485,6 +1485,7 @@ pub fn draw() {
         Phase::Waiting => draw_waiting(p, &env, s),
         Phase::Error => draw_failed(p, &env, s),
         Phase::Deleted => draw_deleted(p, &env, s),
+        Phase::Resetting => draw_working(p, &env, s, "Clearing local account\u{2026}"),
         Phase::Discovering => draw_working(p, &env, s, "Finding your server\u{2026}"),
         _ => draw_working(p, &env, s, "Connecting to Plex\u{2026}"),
     } }
@@ -1654,7 +1655,8 @@ pub fn note_delete_leftovers(n: usize) {
 /// not wear the danger tint — the same distinction `StatusKind::Empty` carries for a library with
 /// nothing in it. A partial one is still not a FAILURE either: what it did do, it did.
 fn draw_deleted(p: Painter, env: &Env, s: &Scene) {
-    let (verdict, reason) = deleted_readout(s.delete_leftovers);
+    let leftovers = s.delete_leftovers.max(usize::from(auth::reset_cleanup_warning()));
+    let (verdict, reason) = deleted_readout(leftovers);
     draw_readout(
         p,
         env,
@@ -1676,6 +1678,14 @@ fn draw_waiting(p: Painter, env: &Env, s: &mut Scene) {
     // not be the only one offered. See `plex::session::LOCKED_UNAVAILABLE`.
     if crate::plex::session::secure_unavailable() {
         layout.draw_narrative(p, None, STORAGE_TITLE, STORAGE_COPY, theme::size::LABEL);
+    } else if auth::reset_cleanup_warning() {
+        layout.draw_narrative(
+            p,
+            None,
+            "Signed out, with local residue",
+            "Your account and reporting choices were removed. Some obsolete local files could not be cleaned up, but you can sign in again safely.",
+            theme::size::LABEL,
+        );
     } else {
         // Rule 11, and [`ActionRow::clear`]'s own instruction: the branch that does not draw the
         // band forgets its frame, so the pill that is no longer on screen is not hit-testable
@@ -2848,6 +2858,7 @@ mod tests {
             Phase::Profiles,
             Phase::Switching,
             Phase::Ready,
+            Phase::Resetting,
             Phase::Error,
             Phase::Deleted,
         ] {

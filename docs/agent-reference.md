@@ -488,9 +488,11 @@ which the linking section explains is load-bearing rather than tidy.
   the mechanism for viewing content is that call sites do not write it, pinned by a test that greps
   the tree — see `no_log_call_site_interpolates_viewing_content`. Adding a `log(&format!(…))` that
   interpolates an item title, a search query or subtitle text will fail `make check`.
-  Identities come from `plex::session::publish_identities`, PUSHED on load/save; the scrubber must
-  never call `session::peek()` from the log path — it takes the session lock and reads files, which
-  deadlocked the whole `auth` test block and put five `read`s on every log line.
+  Identities come from `plex::session::publish_identities`, PUSHED when the persistence worker
+  loads or saves. The scrubber must never call the compatibility `session::peek()` from the log
+  path: before cold-load admission a cache miss can still cross into disk/keymanager work. That
+  historical wiring deadlocked the whole `auth` test block and put five reads on every log line;
+  production boot now owns the cold read through `start_load`, but the hot-path rule is unchanged.
 - `rust-modules/src/dynlib.rs` — the runtime library binder (`dlopen`, by SONAME candidate list or
   by absolute path). **Four** callers in a lab build and three in every other, each for its own
   reason: `net.rs` binds **curl** by candidate list because its SONAME moves between releases;
@@ -685,8 +687,11 @@ which the linking section explains is load-bearing rather than tidy.
 - **Wayland transparency** (`system.rs`)**:** the UI surface is forced to a 32-bit RGBA config and
   made non-opaque by driving the wayland proxy directly (`wl_proxy_marshal(surface, 4, NULL)` =
   set_opaque_region NULL), re-asserted each frame while playing, so the video plane shows through.
-  The TV's SDL is 2.0.4 (no transparency hint). (`sys_grab_wayland` also over-allocates the
-  `SDL_SysWMinfo` buffer — the fork writes a larger struct than the headers declare.)
+  The dev TV reports SDL 2.0.5 (no transparency hint). `sys_grab_wayland` over-allocates the
+  `SDL_SysWMinfo` buffer because the fork writes a larger struct than the headers declare.
+  Background notifications revoke the borrowed Wayland handles and block presentation and poster
+  uploads. DID foreground reacquires the handles and invalidates the UI before rendering resumes.
+  A failed or non-Wayland query leaves both handles null.
 - **Deploy uses a tmp+mv dance** (`plxnative.new` → `mv`) so scp succeeds while the old binary is
   still executing (avoids `ETXTBSY`). The TV drops to standby after a few idle minutes, so a deploy
   can die mid-scp — when scripting around `make deploy`, md5-compare local vs on-TV binary after
