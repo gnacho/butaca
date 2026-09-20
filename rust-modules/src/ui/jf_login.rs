@@ -37,7 +37,7 @@ fn labels() -> [&'static str; 3] {
 /// is also the one with a shape worth showing); the other two state their requirement.
 // The password hint is honest about the rule `connectable` actually applies: plenty of LAN
 // Jellyfin users have no password, and the field must not claim otherwise.
-const HINTS: [&str; 3] = ["e.g. 192.168.1.20:8096", "required", "may be empty"];
+const HINTS: [&str; 3] = ["e.g. jellyfin.local:8096", "required", "may be empty"];
 
 struct Scene {
     ground: RouteGround,
@@ -194,7 +194,7 @@ fn build_rows(s: &Scene) -> Vec<Section> {
 fn fail_text(f: Fail) -> &'static str {
     match f {
         Fail::Parse => {
-            crate::i18n::t("That doesn't look like a server address \u{2014} try e.g. 192.168.1.20:8096")
+            crate::i18n::t("That doesn't look like a server address \u{2014} try e.g. jellyfin.local:8096")
         }
         Fail::Plaintext => {
             crate::i18n::t("That address would carry your password unprotected \u{2014} use https:// or a local network address")
@@ -340,6 +340,27 @@ pub fn key(sym: c_uint, wcode: c_uint) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Issue #19: the cross-build artifact gate refuses a binary with a private IP baked in,
+    /// and these example strings ARE shipped in it. The example address has to stay a
+    /// non-routable shape (a .local host name), never a real LAN octet - the literals below
+    /// are the four-dot quad patterns the gate scans for.
+    #[test]
+    fn the_example_address_carries_no_private_ip_literal() {
+        let private_octets = [
+            "192.168.", "10.0.", "10.1.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.",
+            "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.",
+            "172.29.", "172.30.", "172.31.",
+        ];
+        for s in [HINTS[0], fail_text(Fail::Parse)] {
+            for octet in private_octets {
+                assert!(
+                    !s.contains(octet),
+                    "{s:?} still carries the private prefix {octet:?}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn the_password_masks_by_character_and_caps() {
