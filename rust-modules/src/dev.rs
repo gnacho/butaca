@@ -290,8 +290,7 @@ pub(crate) fn server_slot() -> Option<Result<u16, String>> {
 /// Not a feature. An INSTRUMENT for the instrument, and it exists because of the rule this repo
 /// keeps re-learning: prove the instrument can see the thing before you read its silence, and
 /// prove the recorder records before you trust an empty recording. The fallback C crash tracer is
-/// always one witness; when crash consent and a DSN are present, Sentry Native's out-of-process
-/// handler is a second witness that can safely inspect the stopped process. Until
+/// the witness, and the local crash log it writes is the recording. Until
 /// 2026-08-29 nothing had ever exercised it deliberately — which is how it went seven weeks with a
 /// re-raise that did not re-raise, silently costing every crash its `WIFSIGNALED` status — and only
 /// that: no crashd backtrace was lost, because this firmware writes no core and so produces none.

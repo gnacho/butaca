@@ -110,7 +110,7 @@
 //!    bus name is the thing the gate exists to prevent whoever wants it. Until then the open side
 //!    went straight to the hub, and the hub GRANTING the name was the bad outcome.
 //!  * An identity that cannot be obtained on this launch is [`ClientError::IdentityUnavailable`]
-//!    → `StorageStage::IdentityUnavailable`, and it is **TRANSIENT**: the envelope is kept, the
+//!    → `Stage::IdentityUnavailable`, and it is **TRANSIENT**: the envelope is kept, the
 //!    cross-launch refused marker is NOT written, and the report says which of the two it was.
 //!    Nothing was learned about the key — only about a name.
 //!  * `plex::session`'s proven marker is proof for **one identity**: an install proven as `app_id`
@@ -125,12 +125,48 @@
 //! does today. `/tmp/plxnative-ls2identity` (`webos::ls2_identity_probe_if_armed`) is how a set
 //! that has no keymanager3 at all can still answer which identity its hub grants.
 
-use crate::telemetry::storage::StorageStage;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
+
+/// Which step of a seal/open attempt a refusal, missing-field reply or local failure was seen at.
+/// A LOCAL vocabulary: it labels the cross-launch unavailable-marker JSON and the sign-in screen's
+/// storage read-out, and nothing else — there is no report this value can ride on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Stage {
+    GenerateKey,
+    BeginEncrypt,
+    FinishEncrypt,
+    BeginDecrypt,
+    FinishDecrypt,
+    RoundtripMismatch,
+    EnvelopeUnparseable,
+    EnvelopeLocked,
+    NoReply,
+    Unreachable,
+    IdentityUnavailable,
+}
+
+impl Stage {
+    /// The marker-JSON spelling, stable across releases since the file survives upgrades.
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            Self::GenerateKey => "generate_key",
+            Self::BeginEncrypt => "begin_encrypt",
+            Self::FinishEncrypt => "finish_encrypt",
+            Self::BeginDecrypt => "begin_decrypt",
+            Self::FinishDecrypt => "finish_decrypt",
+            Self::RoundtripMismatch => "roundtrip_mismatch",
+            Self::EnvelopeUnparseable => "envelope_unparseable",
+            Self::EnvelopeLocked => "envelope_locked",
+            Self::NoReply => "no_reply",
+            Self::Unreachable => "unreachable",
+            Self::IdentityUnavailable => "identity_unavailable",
+        }
+    }
+}
 
 /// Log `keymanager: FAKE service armed mode=<mode>` at boot when `plxnative-keymanager` is armed
 /// — see `fake::log_if_armed`. Called from `plex_run` before anything could touch `seal`/`open`,
@@ -189,7 +225,7 @@ pub(crate) struct Sealed {
 /// be attached to a report about a fresh one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct LastRefusal {
-    pub stage: StorageStage,
+    pub stage: Stage,
     pub error_code: Option<i64>,
 }
 
@@ -199,7 +235,7 @@ pub(crate) fn last_refusal() -> Option<LastRefusal> {
     *LAST_REFUSAL.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn set_last_refusal(stage: StorageStage, error_code: Option<i64>) {
+fn set_last_refusal(stage: Stage, error_code: Option<i64>) {
     *LAST_REFUSAL.lock().unwrap_or_else(|e| e.into_inner()) = Some(LastRefusal { stage, error_code });
 }
 
@@ -235,8 +271,8 @@ static LAST_KEY_OUTCOME: AtomicU8 = AtomicU8::new(KEY_OUTCOME_UNKNOWN);
 
 /// The most recent `generateKey` outcome THIS PROCESS has seen, or `None` when this process has
 /// never called it — including a process that has only ever opened/read (`open`/`open_checked`
-/// never call `generateKey`) or one with no key manager at all. `telemetry::storage`'s live
-/// (seal-time) reports read this right after `seal`; a CROSS-LAUNCH caller
+/// never call `generateKey`) or one with no key manager at all. A caller that wants the most
+/// recent seal-time outcome reads this right after `seal`; a CROSS-LAUNCH caller
 /// (`plex::session`'s probe/refused-marker plumbing) must never read the live value here for a
 /// report about an EARLIER launch's seal — it persists the outcome it observed at seal time
 /// instead, exactly because this is a process-global that says nothing about a prior process.
@@ -288,22 +324,6 @@ pub(crate) enum Identity {
 }
 
 impl Identity {
-    /// Every variant, for the same reason `telemetry::storage`'s `StorageStage::ALL` exists: the
-    /// vocabulary test that grades these codes has to be driven off the live enum rather than off
-    /// a hand-written literal beside it. `Named` was added on 2026-09-10 and a literal there would
-    /// have gone stale in that commit.
-    #[cfg(test)]
-    pub(crate) const ALL: &'static [Self] = &[Self::AppId, Self::Named, Self::Anonymous];
-
-    /// Adding a variant without adding it to [`Identity::ALL`] fails to compile here.
-    #[cfg(test)]
-    #[allow(dead_code)]
-    fn _assert_all_variants_covered(v: Self) {
-        match v {
-            Self::AppId | Self::Named | Self::Anonymous => {}
-        }
-    }
-
     /// The wire word, and the SAME closed vocabulary on every surface that records one — the
     /// envelope, the probe, the proven marker. Two spellings of one fact is how a later launch
     /// ends up unable to decide which owner sealed a file.
@@ -338,28 +358,6 @@ pub(crate) fn identity() -> Option<Identity> {
 /// Issue #76's "owner_hint": whether the LS2 registration this module seals through identifies
 /// itself with an application id — the **application-service** form specifically, which is what
 /// this bool has always meant and keeps meaning.
-///
-/// A PROBED fact since 2026-09-10, where it used to be the closed constant `false` — see the
-/// module doc. `false` on a process that never registered at all, and `false` for the plain named
-/// registration, which is a different owner key entirely: [`registered_with_name`] is that one.
-/// The two are derived from the same one-way latch, so they can never both be true.
-pub(crate) fn registered_with_app_id() -> bool {
-    identity() == Some(Identity::AppId)
-}
-
-/// The sibling probed fact: whether this process's keymanager registration took the app id as a
-/// plain BUS NAME (`LSRegister(app_id)`, [`Identity::Named`]) rather than as an application
-/// service.
-///
-/// It is a second field on the storage report rather than a widening of
-/// [`registered_with_app_id`] because the two are different keys of LG's ownership rule and a
-/// reporter's set may grant one and refuse the other — which is exactly the thing issue #76 needs
-/// told apart. `false` on a process that never registered, on an anonymous one, and on one that
-/// got the application-service form.
-pub(crate) fn registered_with_name() -> bool {
-    identity() == Some(Identity::Named)
-}
-
 /// Decide, ONCE for the process, which LS2 identity a keymanager connection registers under, and
 /// hand back the registration that decision produced **together with the identity it actually
 /// used**.
@@ -531,7 +529,7 @@ fn acb_withholds_required_identity(required: Identity, acb_holds_app_id: bool) -
 ///    obtained on this launch. **Transient by construction**: the envelope is intact, its key is
 ///    intact, and the only thing missing is the name — which a later launch may well get, so
 ///    nothing about this may arm the cross-launch refused marker. `plex::session` grades it as
-///    `StorageStage::IdentityUnavailable` and keeps the file.
+///    `Stage::IdentityUnavailable` and keeps the file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ClientError {
     Setup,
@@ -647,13 +645,13 @@ fn settle(identity: Identity, key: &str, reason: &str) {
 /// Map a `log_refusal`/`log_missing_field` call site's own `method` label to the telemetry stage
 /// vocabulary. `None` for a method this module does not (yet) classify — today that is nothing,
 /// since every caller passes one of these five labels.
-fn stage_for_method(method: &str) -> Option<StorageStage> {
+fn stage_for_method(method: &str) -> Option<Stage> {
     match method {
-        "generateKey" => Some(StorageStage::GenerateKey),
-        "begin(encrypt)" => Some(StorageStage::BeginEncrypt),
-        "begin(decrypt)" => Some(StorageStage::BeginDecrypt),
-        "finish(encrypt)" => Some(StorageStage::FinishEncrypt),
-        "finish(decrypt)" => Some(StorageStage::FinishDecrypt),
+        "generateKey" => Some(Stage::GenerateKey),
+        "begin(encrypt)" => Some(Stage::BeginEncrypt),
+        "begin(decrypt)" => Some(Stage::BeginDecrypt),
+        "finish(encrypt)" => Some(Stage::FinishEncrypt),
+        "finish(decrypt)" => Some(Stage::FinishDecrypt),
         _ => None,
     }
 }
@@ -666,9 +664,9 @@ fn stage_for_method(method: &str) -> Option<StorageStage> {
 /// cost — no marker, so every launch re-pays the budget, and no report, so nothing ever says so.
 fn note_unanswered(client: Option<&platform::Client>, local: &mut Option<LastRefusal>) {
     let stage = if client.is_some_and(platform::Client::is_dead) {
-        StorageStage::NoReply
+        Stage::NoReply
     } else {
-        StorageStage::Unreachable
+        Stage::Unreachable
     };
     note_stage(stage, local);
 }
@@ -677,7 +675,7 @@ fn note_unanswered(client: Option<&platform::Client>, local: &mut Option<LastRef
 /// envelope names being unobtainable on this launch ([`ClientError::IdentityUnavailable`]) is the
 /// one that is NOT a verdict on the envelope, so it must reach `local` (the caller's own,
 /// race-free copy) exactly like a refusal does rather than being flattened into `Unreachable`.
-fn note_stage(stage: StorageStage, local: &mut Option<LastRefusal>) {
+fn note_stage(stage: Stage, local: &mut Option<LastRefusal>) {
     set_last_refusal(stage, None);
     *local = Some(LastRefusal {
         stage,
@@ -691,7 +689,7 @@ fn note_stage(stage: StorageStage, local: &mut Option<LastRefusal>) {
 fn note_client_error(e: ClientError, local: &mut Option<LastRefusal>) {
     match e {
         ClientError::Setup => note_unanswered(None, local),
-        ClientError::IdentityUnavailable => note_stage(StorageStage::IdentityUnavailable, local),
+        ClientError::IdentityUnavailable => note_stage(Stage::IdentityUnavailable, local),
     }
 }
 
@@ -741,7 +739,7 @@ fn round_trips(sealed: &Sealed, plain: &[u8]) -> bool {
         // `open` returned bytes, but not the ones this call just sealed — a genuine mismatch, as
         // opposed to a service refusal `open` (via `log_refusal`/`log_missing_field`) has already
         // recorded a more specific stage and code for.
-        Some(_) => set_last_refusal(StorageStage::RoundtripMismatch, None),
+        Some(_) => set_last_refusal(Stage::RoundtripMismatch, None),
         None => {}
     }
     log(
@@ -794,7 +792,7 @@ pub(crate) fn open_checked(sealed: &Sealed) -> (Option<Vec<u8>>, Option<LastRefu
         // evidence at all".
         Backend::PalmKeymanager => {
             local = Some(LastRefusal {
-                stage: crate::telemetry::storage::StorageStage::EnvelopeLocked,
+                stage: Stage::EnvelopeLocked,
                 error_code: None,
             });
             None
@@ -808,7 +806,7 @@ pub(crate) fn open_checked(sealed: &Sealed) -> (Option<Vec<u8>>, Option<LastRefu
         Some(None) => {
             if local.is_none() {
                 local = Some(LastRefusal {
-                    stage: crate::telemetry::storage::StorageStage::FinishDecrypt,
+                    stage: Stage::FinishDecrypt,
                     error_code: None,
                 });
             }
@@ -2063,7 +2061,7 @@ pub(crate) mod fake {
     // ---- the service itself ------------------------------------------------------------------
 
     /// Is `mode` the "every call gets no reply" shape? Mirrors the real client's `is_dead()`
-    /// contract: once true, `keymanager::note_unanswered` records `StorageStage::NoReply` instead
+    /// contract: once true, `keymanager::note_unanswered` records `Stage::NoReply` instead
     /// of `Unreachable`.
     pub(crate) fn is_dead(mode: Mode) -> bool {
         matches!(mode, Mode::Stall)
@@ -2410,7 +2408,7 @@ pub(crate) mod fake {
 #[cfg(test)]
 mod tests {
     use super::{
-        b64, open, platform, remove, seal, Backend, Sealed, StorageStage, MODERN, SELECTED,
+        b64, open, platform, remove, seal, Backend, Sealed, Stage, MODERN, SELECTED,
         UNAVAILABLE, UNKNOWN,
     };
     use serde_json::json;
@@ -2527,7 +2525,7 @@ mod tests {
         assert_eq!(a.resolve(false, Ok(())), Ok("app-service"));
         assert_eq!((a.app.get(), a.anon.get()), (1, 0));
         assert_eq!(super::identity(), Some(super::Identity::AppId));
-        assert!(super::registered_with_app_id());
+        assert!(super::identity() == Some(super::Identity::AppId));
         assert!(captured()
             .iter()
             .any(|l| l == "keymanager: identity=app_id (granted by the hub)"));
@@ -2544,7 +2542,7 @@ mod tests {
         assert_eq!(a.resolve(true, Ok(())), Ok("anonymous"));
         assert_eq!((a.app.get(), a.anon.get()), (0, 1));
         assert_eq!(super::identity(), Some(super::Identity::Anonymous));
-        assert!(!super::registered_with_app_id());
+        assert!(super::identity() != Some(super::Identity::AppId));
         assert!(captured().iter().any(
             |l| l == "keymanager: identity=anonymous (libAcbAPI holds the app id on this firmware)"
         ));
@@ -2568,8 +2566,8 @@ mod tests {
             assert_eq!(a.resolve(false, Err(code)), Ok("anonymous"));
             assert_eq!((a.app.get(), a.named.get(), a.anon.get()), (1, 1, 1));
             assert_eq!(super::identity(), Some(super::Identity::Anonymous));
-            assert!(!super::registered_with_app_id());
-            assert!(!super::registered_with_name());
+            assert!(super::identity() != Some(super::Identity::AppId));
+            assert!(super::identity() != Some(super::Identity::Named));
             let expected = format!(
                 "keymanager: identity=anonymous (app-service: {reason}; named: this executable's \
                  role file does not allow the app id as a bus name (-1027))"
@@ -2594,9 +2592,9 @@ mod tests {
         assert_eq!(a.resolve_both(false, Err(-1027), Ok(())), Ok("named"));
         assert_eq!((a.app.get(), a.named.get(), a.anon.get()), (1, 1, 0));
         assert_eq!(super::identity(), Some(super::Identity::Named));
-        assert!(super::registered_with_name());
+        assert!(super::identity() == Some(super::Identity::Named));
         assert!(
-            !super::registered_with_app_id(),
+            super::identity() != Some(super::Identity::AppId),
             "`app_id` keeps meaning the application-service form and nothing else"
         );
         assert!(
@@ -2621,8 +2619,8 @@ mod tests {
         assert_eq!(a.resolve_both(false, Err(-1027), Err(-1028)), Ok("anonymous"));
         assert_eq!((a.app.get(), a.named.get(), a.anon.get()), (1, 1, 1));
         assert_eq!(super::identity(), Some(super::Identity::Anonymous));
-        assert!(!super::registered_with_app_id());
-        assert!(!super::registered_with_name());
+        assert!(super::identity() != Some(super::Identity::AppId));
+        assert!(super::identity() != Some(super::Identity::Named));
         assert!(
             captured().iter().any(|l| l
                 == "keymanager: identity=anonymous (app-service: the hub refused this \
@@ -2663,11 +2661,11 @@ mod tests {
         reset();
         let a = Attempts::new();
         assert_eq!(a.resolve_both(false, Err(-1027), Ok(())), Ok("named"));
-        assert!(super::registered_with_name());
+        assert!(super::identity() == Some(super::Identity::Named));
         assert_eq!(a.resolve_both(false, Ok(()), Err(-1028)), Ok("anonymous"));
-        assert!(!super::registered_with_name());
+        assert!(super::identity() != Some(super::Identity::Named));
         assert!(
-            !super::registered_with_app_id(),
+            super::identity() != Some(super::Identity::AppId),
             "the app-service form is not re-asked once the process is `named`"
         );
         assert_eq!(super::identity(), Some(super::Identity::Anonymous));
@@ -2696,7 +2694,7 @@ mod tests {
         assert_eq!(a.resolve_both(false, Err(-1027), Ok(())), Ok("named"));
         // …and then the name goes too — the step that leaves this process with no stable owner.
         assert_eq!(a.resolve_both(false, Err(-1027), Err(-1028)), Ok("anonymous"));
-        assert!(!super::registered_with_app_id() && !super::registered_with_name());
+        assert!(super::identity() != Some(super::Identity::AppId) && super::identity() != Some(super::Identity::Named));
         let lines: Vec<String> = captured()
             .into_iter()
             .filter(|l| l.starts_with("keymanager: identity="))
@@ -2718,7 +2716,7 @@ mod tests {
         assert_eq!(a.resolve_both(true, Ok(()), Ok(())), Ok("anonymous"));
         assert_eq!((a.app.get(), a.named.get(), a.anon.get()), (0, 0, 1));
         assert_eq!(super::identity(), Some(super::Identity::Anonymous));
-        assert!(!super::registered_with_name());
+        assert!(super::identity() != Some(super::Identity::Named));
     }
 
     /// The two report bools come off ONE latch, so no process can ever claim both owner keys.
@@ -2733,7 +2731,7 @@ mod tests {
             reset();
             let a = Attempts::new();
             let _ = a.resolve_both(false, app_answer, named_answer);
-            assert!(!(super::registered_with_app_id() && super::registered_with_name()));
+            assert!(!(super::identity() == Some(super::Identity::AppId) && super::identity() == Some(super::Identity::Named)));
         }
     }
 
@@ -2789,7 +2787,7 @@ mod tests {
         assert_eq!(
             refusal,
             Some(super::LastRefusal {
-                stage: StorageStage::IdentityUnavailable,
+                stage: Stage::IdentityUnavailable,
                 error_code: None,
             })
         );
@@ -2924,7 +2922,7 @@ mod tests {
         assert_eq!(granted.resolve(false, Ok(())), Ok("app-service"));
         assert_eq!(granted.resolve(false, Ok(())), Ok("app-service"));
         assert_eq!((granted.app.get(), granted.anon.get()), (2, 0));
-        assert!(super::registered_with_app_id());
+        assert!(super::identity() == Some(super::Identity::AppId));
         // One line, not two: the second connection re-registers under an identity nothing changed.
         assert_eq!(
             captured()
@@ -2944,9 +2942,9 @@ mod tests {
         reset();
         let a = Attempts::new();
         assert_eq!(a.resolve(false, Ok(())), Ok("app-service"));
-        assert!(super::registered_with_app_id());
+        assert!(super::identity() == Some(super::Identity::AppId));
         assert_eq!(a.resolve(false, Err(-1028)), Ok("anonymous"));
-        assert!(!super::registered_with_app_id());
+        assert!(super::identity() != Some(super::Identity::AppId));
         assert_eq!(super::identity(), Some(super::Identity::Anonymous));
         let lines: Vec<String> = captured()
             .into_iter()
@@ -2993,7 +2991,7 @@ mod tests {
         assert_eq!(
             refusal,
             Some(super::LastRefusal {
-                stage: StorageStage::IdentityUnavailable,
+                stage: Stage::IdentityUnavailable,
                 error_code: None,
             })
         );
@@ -3036,7 +3034,7 @@ mod tests {
             assert_eq!(
                 refusal,
                 Some(super::LastRefusal {
-                    stage: StorageStage::IdentityUnavailable,
+                    stage: Stage::IdentityUnavailable,
                     error_code: None,
                 }),
                 "the name is unavailable BY DESIGN here, which is transient — the envelope is \
@@ -3092,7 +3090,7 @@ mod tests {
         let _guard = crate::testlock::serial();
         reset();
         assert_eq!(super::identity(), None);
-        assert!(!super::registered_with_app_id());
+        assert!(super::identity() != Some(super::Identity::AppId));
     }
 
     /// The anonymous shape's own failure is the caller's failure: `resolve_registration` decides
@@ -3108,7 +3106,7 @@ mod tests {
             || Err("no bus"),
         );
         assert_eq!(got, Err("no bus"));
-        assert!(!super::registered_with_app_id());
+        assert!(super::identity() != Some(super::Identity::AppId));
     }
 
     #[test]
@@ -3545,7 +3543,7 @@ mod tests {
         assert_eq!(
             super::last_refusal(),
             Some(super::LastRefusal {
-                stage: StorageStage::BeginDecrypt,
+                stage: Stage::BeginDecrypt,
                 error_code: Some(-10001),
             })
         );
@@ -3571,7 +3569,7 @@ mod tests {
         assert_eq!(
             super::last_refusal(),
             Some(super::LastRefusal {
-                stage: StorageStage::FinishEncrypt,
+                stage: Stage::FinishEncrypt,
                 error_code: None,
             })
         );
@@ -3632,7 +3630,7 @@ mod tests {
         assert_eq!(
             super::last_refusal(),
             Some(super::LastRefusal {
-                stage: StorageStage::RoundtripMismatch,
+                stage: Stage::RoundtripMismatch,
                 error_code: None,
             })
         );
@@ -3664,7 +3662,7 @@ mod tests {
         assert_eq!(
             refusal,
             Some(super::LastRefusal {
-                stage: StorageStage::BeginDecrypt,
+                stage: Stage::BeginDecrypt,
                 error_code: None,
             }),
             "a codeless refusal must still be evidence, not silence"
@@ -3696,7 +3694,7 @@ mod tests {
         assert_eq!(
             refusal,
             Some(super::LastRefusal {
-                stage: StorageStage::FinishDecrypt,
+                stage: Stage::FinishDecrypt,
                 error_code: None,
             })
         );
@@ -3728,7 +3726,7 @@ mod tests {
         assert_eq!(
             local,
             Some(super::LastRefusal {
-                stage: StorageStage::BeginDecrypt,
+                stage: Stage::BeginDecrypt,
                 error_code: None,
             })
         );
@@ -3754,7 +3752,7 @@ mod tests {
         assert_eq!(
             refusal,
             Some(super::LastRefusal {
-                stage: StorageStage::EnvelopeLocked,
+                stage: Stage::EnvelopeLocked,
                 error_code: None,
             })
         );

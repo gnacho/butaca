@@ -328,20 +328,6 @@ fn rtkmem_blocks(cell: &OnceLock<RtkmemProbe>) -> bool {
     )
 }
 
-/// The closed-enum sandbox fact for every telemetry event — `ok` / `missing` / `n/a` — read from
-/// the SAME cached [`probe_jail`] verdict [`jail_blocks_native_video`] gates playback on, never a
-/// second probe of `/dev/rtkmem`. An unset cell (a call racing ahead of boot's [`probe_jail`], the
-/// same race [`jail_blocks_native_video`]'s doc describes) reads as `n/a` — the same fallback that
-/// function uses, so a telemetry event and the gate it would have been diagnosing this attempt's
-/// failure against can never disagree about what this jail carries.
-pub(crate) fn rtkmem_context() -> &'static str {
-    match RTKMEM.get().copied().unwrap_or(RtkmemProbe::NotApplicable) {
-        RtkmemProbe::NotApplicable => "n/a",
-        RtkmemProbe::Ok => "ok",
-        RtkmemProbe::Missing => "missing",
-    }
-}
-
 // ---- the ROOT press: give the screen back, without ending the process -------------------------
 
 /// **Show the television's own Home, and keep running.**

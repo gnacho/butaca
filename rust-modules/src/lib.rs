@@ -5,10 +5,9 @@
 //!
 //! plxnative-modules — the Rust app core, built as a staticlib and linked into the C
 //! boot shim. The crate's C surface is tiny: C calls `plex_run` (app.rs), writes the fallback
-//! image marker through `plx_crash_write_image_marker`, re-enters the native-crash spool through
-//! `plx_sentry_spool_external`, and forwards the two Starfish callbacks (`sf_on_event`/
-//! `acb_on_event`, player/mod.rs). Everything else is Rust-internal (the per-module `repr(C)`
-//! shapes are migration legacy, not ABI).
+//! image marker through `plx_crash_write_image_marker`, and forwards the two Starfish callbacks
+//! (`sf_on_event`/`acb_on_event`, player/mod.rs). Everything else is Rust-internal (the
+//! per-module `repr(C)` shapes are migration legacy, not ABI).
 mod abr; // client-managed fixed-session HLS controller: estimate, propose, prime, then commit
 mod app; // plex_run — the Rust app core / event loop (the entry inverted from main.c)
 mod aq;
@@ -17,6 +16,7 @@ mod browse; // Library browse: per-section paged catalog (sparse store + off-thr
 mod capture; // dev live UI capture stream: own-GLES-frame grab → MPEG1/TS or JPEG → TCP (UI plane only)
 mod cbuf; // fixed NUL-terminated C-string buffer read/write (shared by pms/route/posters)
 mod coldstart; // retires old last-page bookmarks; authenticated cold boots now stay on Home
+mod crash_marker; // running-image identity (build id, load span) written into the LOCAL crash log; no reporting
 mod curlio; // the HTTPS media plane: a remote file pulled by byte range over libcurl-multi (stream.rs is the plaintext-socket twin)
 mod dev; // the /tmp/plxnative-* trigger surface, behind one `devtriggers` feature — read it before adding a trigger
 mod devcaps; // what this SoC decodes — the TV's own codec table, read once at boot (the capability profile + direct-play gate derive from it)
@@ -65,7 +65,6 @@ mod surface; // what we are actually drawing into — drawable vs the 1920x1080 
 mod svg; // runtime SVG rasterizer FFI (src/svg.c / nanosvg) — vector icon assets
 mod system;
 mod task; // the one spawn: a refused thread is a return value, not a panic that kills the app
-mod telemetry; // the opt-in crash + usage channels: consent, the spool, the worker, the two wire formats
 mod viewstate; // watched / unwatched / remove-from-deck: the PMS view-state WRITES, off the SDL thread
 
 #[cfg(test)]
@@ -143,7 +142,7 @@ fn events_log() -> std::path::PathBuf {
 }
 
 /// Test-only sink override for [`events_log`]. Without this, every test that truncated and read
-/// back `plxnative-events.log` (`telemetry::storage`, `telemetry::mod`) shared the SAME
+/// back `plxnative-events.log` (`plex::session`, `diag`) shared the SAME
 /// process-wide path — `paths::runtime_dir()` resolves to the literal `/tmp` in a test build — so
 /// a concurrent test process in another lane, or a live `make sim`/device-adjacent tool, could
 /// interleave a write between the truncate and the read-back, and `make check` in one worktree
@@ -155,27 +154,6 @@ static TEST_LOG: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex
 #[cfg(test)]
 fn test_log_override() -> Option<std::path::PathBuf> {
     TEST_LOG.lock().unwrap_or_else(|e| e.into_inner()).clone()
-}
-
-/// Point [`log`] at a scratch file private to this test PROCESS for the duration of the closure,
-/// then restore whatever was there before. Callers must still hold `testlock::serial()` — this
-/// only stops a DIFFERENT process from clobbering the file, not two tests in the same process from
-/// racing each other.
-#[cfg(test)]
-pub(crate) fn with_test_log<R>(f: impl FnOnce(&std::path::Path) -> R) -> R {
-    use std::os::unix::fs::OpenOptionsExt;
-    let p = std::env::temp_dir().join(format!("plxnative-log-test-{}", std::process::id()));
-    let _ = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&p);
-    *TEST_LOG.lock().unwrap_or_else(|e| e.into_inner()) = Some(p.clone());
-    let result = f(&p);
-    *TEST_LOG.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    let _ = std::fs::remove_file(&p);
-    result
 }
 
 pub(crate) fn open_private_log_append(path: &std::path::Path) -> std::io::Result<std::fs::File> {

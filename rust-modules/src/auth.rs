@@ -247,31 +247,8 @@ struct Ctl {
     link_frozen_secs: Option<u64>,
     /// Which sign-in attempt is currently live — see [`next_attempt`]. Bumped by every flow reset
     /// (`start_login`, `retry`/`restart`, `cancel`'s resume-stored, `sign_out`, `erase_local_state`
-    /// — every site that replaces or re-seeds `Ctl`), so [`trouble_snapshot`] can tell "this
-    /// trouble belongs to the attempt on screen right now" from "this trouble is a leftover from
-    /// the one before it".
+    /// — every site that replaces or re-seeds `Ctl`).
     attempt: u64,
-    /// **Issue #75.** This attempt's sign-in trouble, if any — set by [`set_error`] (a failed
-    /// attempt) or [`note_waiting_trouble`] (a stuck one), read once a frame by the sign-in
-    /// screen's one-off report alert. `None` for a healthy attempt, and cleared to `None` on every
-    /// flow reset like the rest of `Ctl`.
-    trouble: Option<Trouble>,
-    /// Issue #75 dev seam only (`/tmp/plxnative-signinfail`) — overrides what
-    /// [`signin_error_context`] reads as the last plex.tv call, so [`synth_signin_trouble`] can
-    /// shape a realistic report with no real network call and without reaching into `net.rs`'s
-    /// process-wide record at all. `None` on every ordinary flow.
-    dev_link_outcome: Option<crate::net::CallOutcome>,
-}
-
-/// One attempt's sign-in trouble, held for [`trouble_snapshot`]/[`send_trouble_once`].
-struct Trouble {
-    ctx: crate::telemetry::signin::SignInErrorContext,
-    /// True once this trouble has actually left the television — either automatically
-    /// ([`set_error`]'s call to `telemetry::signin::report_error`, standing consent already on) or
-    /// by the person's own "Send report" press ([`send_trouble_once`]). Either way the sign-in
-    /// screen must show "a report was sent" and never offer to send a second one for the same
-    /// trouble.
-    reported: bool,
 }
 
 /// Allocator for [`Ctl::attempt`] — process-global for the same reason [`QR_GENERATION`] is:
@@ -311,16 +288,6 @@ pub fn acknowledge_persistence_warning(key: PersistenceWarningKey) -> bool {
         c.persistence_warning = None;
         true
     })
-}
-
-pub fn persistence_warning_report_context(
-    key: PersistenceWarningKey,
-) -> Option<crate::telemetry::signin::SignInErrorContext> {
-    if !with_ctl(|c| warning_matches(c, key)) {
-        return None;
-    }
-    let ctx = storage_report_context().1;
-    with_ctl(|c| warning_matches(c, key)).then_some(ctx)
 }
 
 fn update_fresh_persistence_warning(
@@ -632,32 +599,28 @@ fn fresh_login_ctl(session: Session) -> Ctl {
 }
 
 /// The in-place reset `restart`'s [`Restart::Discovery`] branch applies — the account credential
-/// this flow already earned is kept (that is the whole point of that branch), but it is still a
-/// fresh ATTEMPT for the one-off report offer: the trouble it may have carried belonged to the
-/// failure this press is retrying, not to whatever the retry itself does.
+/// this flow already earned is kept (that is the whole point of that branch), and it is still a
+/// fresh ATTEMPT: the link-health run the failure carried belonged to the failure this press is
+/// retrying, not to whatever the retry itself does.
 fn restart_discovery_ctl(c: &mut Ctl) {
     c.error.clear();
     c.phase = Phase::Discovering;
     c.signin_active = true;
     c.attempt = next_attempt();
-    c.trouble = None;
     c.persistence_warning = None;
     c.prepared_handoff = false;
-    // The link-health RUN belongs to the failure this press is retrying, exactly like `trouble`
-    // above — a fresh attempt must not carry a frozen `failing_for` into a retry that never fails
-    // for a link reason at all, which is otherwise readable in the next report `set_error` builds
+    // The link-health RUN belongs to the failure this press is retrying — a fresh attempt must
+    // not carry a frozen `failing_for` into a retry that never fails for a link reason at all
     // (`link_frozen_secs`'s own doc says it is "cleared with the rest of `Ctl` on the next
     // attempt", and this reset was the one attempt-boundary that left it standing).
     c.link_frozen_secs = None;
     c.link_failing_since = None;
     c.link_unanswered = 0;
     c.link_last_call = None;
-    c.dev_link_outcome = None;
 }
 
 /// Begin the QR login: reset state, load the persisted `client_id`, and kick off the pin thread.
 pub fn start_login() {
-    crate::diag::event(crate::diag::schema::DiagEvent::SignInStarted);
     let (epoch, ()) = begin_flow(|c| {
         *c = fresh_login_ctl(session::load());
     });
@@ -702,7 +665,7 @@ enum Restart {
 }
 
 fn restart(expected: Option<(Phase, u64)>) -> bool {
-    let Some((epoch, (plan, fresh_attempt))) = begin_flow_if(
+    let Some((epoch, plan)) = begin_flow_if(
         |c| restart_permitted(expected, (c.phase, c.qr_gen)),
         |c| {
             let plan = match retry_kind(c.phase, c.authorized_in_flow) {
@@ -712,25 +675,16 @@ fn restart(expected: Option<(Phase, u64)>) -> bool {
                 },
                 RetryKind::Login => Restart::Login,
             };
-            // An attempt that is still ACTIVE has already reported its `SignInStarted`, and the
-            // schema's contract is one start bracketed by exactly one completed/failed/cancelled.
-            // Restarting a LIVE wait — which is what both of this screen's timed escapes do — is that
-            // same attempt carrying on, not a second one; only a restart from a settled state (an
-            // error read-out, whose `set_error` already reported the failure) begins a new one.
-            let fresh_attempt = restart_is_a_new_attempt(c.signin_active);
             match plan {
                 Restart::Discovery { .. } => restart_discovery_ctl(c),
                 Restart::Login => *c = fresh_login_ctl(session::load()),
             }
-            (plan, fresh_attempt)
+            plan
         },
     ) else {
         log("auth: a restart was asked for, but the sign-in had already moved on — press ignored");
         return false;
     };
-    if fresh_attempt {
-        crate::diag::event(crate::diag::schema::DiagEvent::SignInStarted);
-    }
     // `Creating` and `Discovering` are spinners with a worker behind them; without one they never
     // end, and the error read-out's own retry becomes the only way out. **The copy is per branch**
     // — an account that authorized and then failed to reach a server has not failed to sign in,
@@ -1117,73 +1071,20 @@ pub fn submit_pin(index: usize, pin: &str) {
 /// sign-in and a field report that saw only the second could not tell a sign-in that never reached
 /// the disk from one that reached it and was then preserved over.
 ///
-/// Two different records, deliberately, because they answer two different questions — and they no
-/// longer run from the same places:
-///
-/// * [`crate::telemetry::signin::note_storage_outcome`] is recorded on EVERY outcome, persisted or
-///   not, from BOTH saves. It does not send anything: it is what the ONE-OFF sign-in report carries
-///   if the user later presses "Send report" on this screen — the only shape that can leave a
-///   television whose storage layer could not keep the standing consent decision in the first
-///   place. That is this function.
-/// * [`crate::telemetry::storage::report_sign_in_not_persisted`] is a report in its own right,
-///   raised only when nothing reached the disk — the state that costs the user their sign-in at
-///   the next launch, which is issue #76 itself. It belongs to [`commit_sign_in_persist`] below.
-///
-/// `candidate_reads_wire()` is this launch's own read summary (never a path — see
-/// `plex::session::CandidateRead`), carried on both so the save's verdict can be read against WHICH
-/// candidate location the launch had found, which is what separates "the file system said no" from
-/// "a secure envelope was deliberately left alone".
-fn note_sign_in_persist(outcome: session::PersistOutcome) {
-    crate::telemetry::signin::note_storage_outcome(
-        Some(outcome.wire()),
-        outcome.reason_wire(),
-        Some(session::candidate_reads_wire()),
-    );
+/// **The user-visible commit of a sign-in.** A save that did not persist is logged by the session
+/// layer itself; there is no report to raise — local state only.
+fn commit_sign_in_persist(_outcome: session::PersistOutcome) {
 }
 
-/// **The user-visible commit of a sign-in**: note the outcome as above, and — when nothing reached
-/// the disk — raise the report about it.
-///
-/// **Only [`take_ready`] calls this, and that is the fix** (review finding, 2026-09-11). Both of
-/// the sign-in flow's saves used to report, so one attempt raised two identical
-/// `SignInNotPersisted` events; and because `take_ready` also runs on every profile switch and on
-/// `resume_stored`, an install whose save steadily returns the same non-persisting outcome
-/// (`PreservedExistingSecure(NotProven)` on an unproven install, say) spooled another one on every
-/// switch for the life of the process. The discovery-thread save keeps its own log line and still
-/// notes the outcome for the one-off body; what it no longer does is report a sign-in the user has
-/// not finished committing.
-///
-/// The remaining repetition is deduped inside `telemetry::storage` — once per process per (save
-/// outcome, preserve reason) pair, the same "exactly once per process" rule
-/// `plex::session::report_once` already applies to every other storage report.
-fn commit_sign_in_persist(outcome: session::PersistOutcome) {
-    note_sign_in_persist(outcome);
-    if !outcome.persisted() {
-        crate::telemetry::storage::report_sign_in_not_persisted(
-            outcome.wire(),
-            outcome.reason_wire(),
-            session::candidate_reads_wire(),
-        );
-    }
-}
-
-/// Test-only door onto the DISCOVERY-thread half of the split above — see
-/// `telemetry::storage::tests::the_discovery_threads_save_notes_the_outcome_without_reporting_it`,
-/// which cannot drive `finish_sign_in` (a network flow on another thread) but must still prove
-/// that half reports nothing.
+/// Test-only door kept for the discovery-thread half of the split above: the note itself left
+/// with the reporting machinery, and this remains so an existing seam is not rebuilt if a local,
+/// non-reporting consumer ever needs it.
 #[cfg(test)]
-pub(crate) fn note_discovery_save_for_test(outcome: session::PersistOutcome) {
-    note_sign_in_persist(outcome);
+pub(crate) fn note_discovery_save_for_test(_outcome: session::PersistOutcome) {
 }
 
 /// **Arm the flow at exactly the state [`take_ready`] hands credentials out from**, and put it
 /// back afterwards ([`reset_ctl_for_test`]).
-///
-/// For the issue #76 report-lane integration tests, which cannot live in this file: the
-/// send-attempt double is a `thread_local` private to `telemetry::storage`'s own test module and
-/// the one-off body builder reads a static private to `telemetry::signin`, so the assertions have
-/// to be made over there while the thing under test — a real `take_ready` whose save cannot reach
-/// the disk — is driven from here.
 #[cfg(test)]
 pub(crate) fn arm_ready_for_test(session: session::Session) {
     with_ctl(|c| {
@@ -1428,20 +1329,13 @@ pub fn erase_local_state() {
 /// revoke what it just registered; if sign-out got here first, its epoch check refuses the old
 /// token. There is no check→revoke→re-register window.
 ///
-/// **The telemetry decision ends with the tenure too** (`telemetry::forget`), and it goes FIRST:
-/// its first act is publishing the unanswered decision, which is the instant every producer's gate
-/// closes and the sender stops picking up records — `PRIVACY.md` promises that no further report
-/// is picked up after a sign-out, so the reset cannot sit behind the session's file I/O, and it has to precede
-/// [`sign_out`]'s `start_login`, which emits `SignInStarted` on its first line. Consent belongs to
-/// the person who gave it; the next account to sign in is asked afresh, and nothing it causes can
-/// be reported under the departed account's identifiers. Outside the gate, because `forget` takes
+/// Session teardown is intentionally unconditional: signing out ends the account's tenure on this
+/// television — the session file, the registered servers and their tokens, and the Jellyfin local
+/// state in that flavor. It precedes [`sign_out`]'s `start_login` so the new flow never observes a
+/// half-cleared account. Outside the gate:
 /// the spool lock and the consent lock and nothing here should nest under the activation gate that
 /// it does not have to.
 fn forget_account() {
-    crate::telemetry::forget();
-    // A sign-in event held back by an unanswered consent question belongs to the account whose
-    // attempt caused it — never to whoever signs in next (issue #75's deferral, `diag::mod.rs`).
-    crate::diag::clear_deferred();
     let _gate = ACTIVATION_GATE.lock().unwrap_or_else(|e| e.into_inner());
     AUTH_EPOCH.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     session::clear();
@@ -1469,10 +1363,6 @@ fn deleted_ctl() -> Ctl {
 
 fn login_thread(epoch: u64) {
     let cid = with_ctl(|c| c.session.client_id.clone());
-    // Issue #75/76 dev seam — `/tmp/plxnative-signinfail[=error|stall|save]`.
-    if let Some(spec) = crate::dev::read("signinfail") {
-        return synth_signin_trouble(&spec);
-    }
     let ac = AccountClient::new(&cid, None);
 
     // 1) create a pin, and KEEP creating one for as long as this screen is up and the last one
@@ -1565,62 +1455,6 @@ fn login_thread(epoch: u64) {
     finish_sign_in(&ac, epoch);
 }
 
-/// **Issue #75/76 dev seam** — `/tmp/plxnative-signinfail[=error|stall|save]`, read once at the top of
-/// [`login_thread`]. Neither leg makes a real plex.tv call. `error` (the default — anything but
-/// exactly `stall`) fails the flow at once through the ordinary [`set_error`] path with a
-/// synthetic DNS-shaped outcome (one miss, frozen 3s), so the failed read-out and its one-off
-/// report alert are both reachable with no working network at all. `stall` instead seeds
-/// `Phase::Waiting` with three unanswered polls and a failing-since 70s in the past, so the
-/// sign-in screen's own stalled-wait escape and the trouble alert both have something to offer the
-/// moment it draws — neither actually polls plex.tv, since there is no worker behind this `Ctl`.
-/// `save` uses that same closed Waiting fixture but adds a synthetic discovery/WriteFailed warning
-/// so its presentation and Continue action can be captured without credentials, disk writes or a
-/// network request. It is UI evidence only; the real failed-write regression drives `take_ready`.
-///
-/// `Ctl::dev_link_outcome` is what lets this shape a realistic
-/// [`crate::telemetry::signin::SignInErrorContext`] without touching `net.rs`'s process-wide
-/// [`crate::net::last_plex_tv_call`] record at all — that record is real evidence about this
-/// process's actual network calls, and a synthetic trigger must not be able to plant a fake one
-/// for every OTHER caller of it to trip over.
-fn synth_signin_trouble(spec: &str) {
-    with_ctl(|c| {
-        c.dev_link_outcome = Some(crate::net::CallOutcome::Transport(6));
-        c.link_last_call = Some("couldn't resolve host (curl 6)".to_string());
-    });
-    if spec == "stall" || spec == "save" {
-        with_ctl(|c| {
-            c.phase = Phase::Waiting;
-            c.pin_code = "SIGN75".to_string();
-            c.link_unanswered = 3;
-            // `checked_sub`, not a bare `-`: `Instant` subtraction panics rather than saturating
-            // when the result would precede the monotonic clock's own origin (system boot on
-            // Linux), which a process launched within 70s of boot — plausible for an app auto-
-            // started at TV boot with this dev trigger armed — would hit on every launch.
-            c.link_failing_since = Some(
-                Instant::now()
-                    .checked_sub(Duration::from_secs(70))
-                    .unwrap_or_else(Instant::now),
-            );
-            if spec == "save" {
-                update_fresh_persistence_warning(
-                    c,
-                    PersistenceWarningSite::Discovery,
-                    session::PersistOutcome::WriteFailed,
-                );
-            }
-        });
-        return;
-    }
-    with_ctl(|c| {
-        c.link_unanswered = 1;
-        c.link_failing_since = Some(
-            Instant::now()
-                .checked_sub(Duration::from_secs(3))
-                .unwrap_or_else(Instant::now),
-        );
-    });
-    set_error("Couldn't create a sign-in code — check the connection.");
-}
 
 /// How many codes ONE visit to the sign-in screen may burn through before it gives up and offers
 /// its own *Try again*.
@@ -1802,7 +1636,6 @@ fn finish_sign_in(ac: &AccountClient, epoch: u64) {
             "auth: sign-in saved at discovery — {}",
             outcome.wire()
         ));
-        note_sign_in_persist(outcome);
         if reauthenticated {
             with_ctl(|c| {
                 update_fresh_persistence_warning(c, PersistenceWarningSite::Discovery, outcome)
@@ -3973,66 +3806,10 @@ fn switch_thread(index: usize, pin: Option<String>) {
 
 // ---- helpers ----
 
-/// PURE (given the `Ctl` snapshot). Build the issue #75 handled-error report's context from the
-/// flow's own state — factored out of [`set_error`] so it can be exercised directly against a
-/// constructed `Ctl` in tests, with no thread, no network and no consent gate in the way.
-/// `storage` is collected by the CALLER, before `with_ctl` is entered — `plex::session::
-/// storage_class` can do a flash read (`has_refused_marker`'s candidate scan) on the cold-cache
-/// path, and this `Ctl` lock is taken by the render thread every frame, so nothing that could
-/// block may be computed while it is held (see `set_error`'s note on the same rule; found in
-/// review, issue #76).
-fn signin_error_context(
-    c: &Ctl,
-    storage: crate::telemetry::storage::SessionStorageClass,
-) -> crate::telemetry::signin::SignInErrorContext {
-    let kind = match c.phase {
-        Phase::Creating => crate::telemetry::signin::SignInFailureKind::PinCreate,
-        Phase::Waiting => crate::telemetry::signin::SignInFailureKind::Authorization,
-        Phase::Discovering => crate::telemetry::signin::SignInFailureKind::Discovery,
-        _ => crate::telemetry::signin::SignInFailureKind::Other,
-    };
-    let outcome = c
-        .dev_link_outcome
-        .or_else(|| crate::net::last_plex_tv_call().map(|l| l.outcome));
-    // issue #76: the live verdict, not a placeholder — `plex::session::storage_class` reads the
-    // same process-wide state `keymanager.rs`'s own refusal tracking and `diag::schema::
-    // UsageContext::session_storage` are wired from, so a sign-in report and a usage event agree.
-    crate::telemetry::signin::context_from(
-        kind,
-        &link_state_of(c),
-        outcome,
-        c.code_generation,
-        storage,
-    )
-}
-
 fn set_error(msg: &str) {
     log(&format!("auth: ERROR {msg}"));
-    // Only the CHEAP `Ctl` fields are collected under the lock — the phase-derived diag kind and
-    // the pure context — and both the diag event and the telemetry report are emitted AFTER the
-    // lock is released. `crate::diag::event` and `crate::telemetry::signin::report_error` both do
-    // spool I/O (a lock of their own, a disk read/write, possibly a log line), and this `Ctl` lock
-    // is also taken from the render thread every frame — nothing that could block belongs inside
-    // `with_ctl`. This used to call `diag::event` from inside the closure; found in review.
-    let storage = crate::plex::session::storage_class();
-    let report = with_ctl(|c| {
-        let ctx = if c.signin_active {
-            let ctx = signin_error_context(c, storage);
-            let kind = match c.phase {
-                Phase::Creating => crate::diag::schema::SignInFailure::PinCreate,
-                Phase::Waiting => crate::diag::schema::SignInFailure::Authorization,
-                Phase::Discovering => crate::diag::schema::SignInFailure::Discovery,
-                _ => crate::diag::schema::SignInFailure::Other,
-            };
-            c.signin_active = false;
-            // Captured under the SAME lock the context and kind came from — `report_error` below
-            // does spool I/O outside this closure, and a reset landing in that window bumps
-            // `c.attempt`, so the write that follows must be able to tell whether it is still
-            // installing a trouble for the attempt that is actually on screen.
-            Some((kind, ctx, c.attempt))
-        } else {
-            None
-        };
+    with_ctl(|c| {
+        c.signin_active = false;
         c.error = msg.to_owned();
         c.phase = Phase::Error;
         // Freeze the link-health clock here, at the moment nothing is polling any more — see
@@ -4040,160 +3817,15 @@ fn set_error(msg: &str) {
         // already-settled flow (there isn't one today, but nothing enforces it) must not push the
         // frozen instant forward.
         c.link_frozen_secs = c.link_failing_since.map(|t| t.elapsed().as_secs());
-        ctx
     });
-    if let Some((kind, ctx, attempt)) = report {
-        crate::diag::event(crate::diag::schema::DiagEvent::SignInFailed { kind });
-        // Issue #75: the STANDING path — sends automatically when crash/error consent is already
-        // on. `sent` says whether it actually reached the spool, so the trouble this attempt is
-        // recorded with already knows whether the sign-in screen should offer the one-off alert
-        // or simply say "a report was sent".
-        let sent = crate::telemetry::signin::report_error(ctx);
-        with_ctl(|c| {
-            // The reset that would bump this has to land inside the disk-I/O window `report_error`
-            // just spent — a human press on the render thread, on the one frame between this
-            // attempt settling into `Phase::Error` and this write landing. Practically
-            // unreachable, but installing a stale attempt's trouble under a fresh one's id is
-            // exactly what `Ctl::attempt`'s own invariant promises never happens.
-            if c.attempt != attempt {
-                return;
-            }
-            // A one-off "Send report" press can already have reported THIS trouble while the
-            // standing report above was still in flight (`note_waiting_trouble` + a fast press,
-            // then a later `set_error` on the same attempt) — that flag must survive, or a
-            // trouble already sent loses its "was sent" note and a second call could resend it.
-            let already_reported = c.trouble.as_ref().is_some_and(|t| t.reported);
-            c.trouble = Some(Trouble {
-                ctx,
-                reported: sent || already_reported,
-            });
-        });
-    }
-}
-
-/// **Issue #75.** Build a trouble report from the LIVE link state, for the sign-in screen's one-off
-/// alert while it is stuck rather than failed — same context shape a failed sign-in reports
-/// (`kind` reads `Authorization` off the live `Phase::Waiting`), since the flow never actually
-/// reaches [`Phase::Error`] here and would otherwise have nothing to offer. Called from
-/// `ui::login::update` while the screen is in `Phase::Waiting`, the link is unreachable, and its
-/// own stalled-wait escape is already on offer.
-///
-/// **At most once per attempt.** The caller runs this every frame the screen is in that state, and
-/// the FIRST call wins — a later poll landing between two frames must not silently replace a
-/// context the person may already be reading in an open alert.
-///
-/// **Deliberately press-only, unlike [`set_error`] — it never calls `telemetry::signin::
-/// report_error` even when standing crash-report consent is already on.** A stuck sign-in has not
-/// actually failed; the flow may still recover on its own, so recording it here only sets up the
-/// one-off alert's context and leaves `reported` at `false`, and the person sees "Send report" on
-/// this screen even with the switch already on. `send_trouble_once` is the only door this trouble
-/// leaves through.
-pub fn note_waiting_trouble() {
-    // Cheap check first, under the lock the render thread also takes every frame — `storage_class`
-    // below can do a flash read, so it must run only on the one frame it is actually needed, never
-    // on every poll while a trouble is already recorded (see `signin_error_context`'s doc).
-    if with_ctl(|c| c.trouble.is_some()) {
-        return;
-    }
-    let storage = crate::plex::session::storage_class();
-    with_ctl(|c| {
-        if c.trouble.is_some() {
-            return;
-        }
-        let ctx = signin_error_context(c, storage);
-        c.trouble = Some(Trouble {
-            ctx,
-            reported: false,
-        });
-    });
-}
-
-/// This attempt's sign-in trouble, if any, plus which attempt it belongs to and whether it has
-/// already been reported — read once a frame by `ui::login`'s one-off report alert. The attempt id
-/// is what lets the screen tell "reopen for a new failure" from "already answered this one": a
-/// flow reset bumps [`Ctl::attempt`] and clears `trouble`, so a stale id can never be mistaken for
-/// the trouble on screen right now.
-pub fn trouble_snapshot() -> Option<(u64, crate::telemetry::signin::SignInErrorContext, bool)> {
-    with_ctl(|c| c.trouble.as_ref().map(|t| (c.attempt, t.ctx, t.reported)))
-}
-
-/// Build a report context for the storage Details action without inventing a failed sign-in or
-/// mutating the flow's trouble/phase. The attempt token is returned so a confirmation opened over
-/// this screen cannot report after a retry, sign-out, or a newer QR flow has taken ownership.
-pub fn storage_report_context() -> (u64, crate::telemetry::signin::SignInErrorContext) {
-    let storage = crate::plex::session::storage_class();
-    with_ctl(|c| {
-        if c.phase == Phase::Error {
-            if let Some(trouble) = c.trouble.as_ref() {
-                return (c.attempt, trouble.ctx);
-            }
-        }
-        (c.attempt, signin_error_context(c, storage))
-    })
-}
-
-/// Submit a manually requested Details report only for the attempt that supplied its context.
-/// A stale confirmation is refused before the telemetry producer is called, and a flow reset that
-/// races the producer cannot authorize a result for the newer attempt.
-pub fn send_storage_report(
-    attempt: u64,
-    ctx: crate::telemetry::signin::SignInErrorContext,
-) -> Option<String> {
-    if current_attempt() != attempt {
-        return None;
-    }
-    let event_id = crate::telemetry::signin::send_requested(
-        ctx,
-        crate::telemetry::signin::OneOffSource::StorageDetails,
-    )?;
-    (current_attempt() == attempt).then_some(event_id)
-}
-
-/// The one-off alert's "Send report" press ([`telemetry::signin::send_once`]). Takes the current
-/// attempt's trouble, sends it, and marks it reported so a second call — unreachable through the
-/// screen, since the alert dismisses on the same press, but not unreachable from a test — cannot
-/// resend it. Returns whether it was actually queued.
-pub fn send_trouble_once() -> bool {
-    send_trouble_event_once().is_some()
-}
-
-/// The explicit automatic-trouble path's event receipt, used by the shared confirmation surface
-/// when the transport accepts the record. The bool wrapper above remains for existing callers and
-/// tests that only need the legacy success predicate.
-pub fn send_trouble_event_once() -> Option<String> {
-    let (ctx, attempt) = with_ctl(|c| match &c.trouble {
-        Some(t) if !t.reported => Some((t.ctx, c.attempt)),
-        _ => None,
-    })?;
-    let event_id = crate::telemetry::signin::send_requested(
-        ctx,
-        crate::telemetry::signin::OneOffSource::SignInTrouble,
-    )?;
-    if current_attempt() != attempt {
-        return None;
-    }
-    with_ctl(|c| {
-        if c.attempt == attempt {
-            if let Some(t) = c.trouble.as_mut() {
-                t.reported = true;
-            }
-        }
-    });
-    Some(event_id)
 }
 
 fn finish_signin_cancelled() {
-    let report = with_ctl(|c| settle_signin(&mut c.signin_active));
-    if report {
-        crate::diag::event(crate::diag::schema::DiagEvent::SignInCancelled);
-    }
+    let _ = with_ctl(|c| settle_signin(&mut c.signin_active));
 }
 
 fn finish_signin_completed() {
-    let report = with_ctl(|c| settle_signin(&mut c.signin_active));
-    if report {
-        crate::diag::event(crate::diag::schema::DiagEvent::SignInCompleted);
-    }
+    let _ = with_ctl(|c| settle_signin(&mut c.signin_active));
 }
 
 fn settle_signin(active: &mut bool) -> bool {
@@ -4209,83 +3841,6 @@ mod tests {
     use super::*;
     use crate::plex::probe::Scheme;
     use std::cell::RefCell;
-
-    /// **The next account to sign in must be asked afresh.** The maintainer's scenario (2026-09-04):
-    /// account A consents to both channels, signs out, account B signs in through the QR flow — and
-    /// B was never asked, while B's usage went out under A's consent and A's identifiers. Consent
-    /// belongs to the person who gave it, so signing out ends it: the decision returns to
-    /// *unanswered*, both identifiers are destroyed and the file is gone, exactly as a withdrawal
-    /// plus a fresh install would leave it. The scenario is graded on [`forget_account`], the tail
-    /// both sign-out paths share, because [`sign_out`] ends in `start_login`, whose worker talks to
-    /// plex.tv.
-    #[test]
-    fn signing_out_leaves_no_consent_and_no_identifier_for_the_next_account() {
-        use crate::telemetry::consent;
-        /// Every crate-global redirect this test takes, handed back on drop — so a failed
-        /// assertion cannot leave the next test writing into this one's directory.
-        struct Redirects {
-            dir: std::path::PathBuf,
-            saved: Option<consent::Consent>,
-        }
-        impl Drop for Redirects {
-            fn drop(&mut self) {
-                crate::telemetry::spool::set_test_path(None);
-                crate::telemetry::redirect_for_test(None);
-                crate::plex::session::redirect_for_test(None);
-                if let Some(c) = self.saved.take() {
-                    consent::install(c);
-                }
-                let _ = std::fs::remove_dir_all(&self.dir);
-            }
-        }
-        let _g = crate::testlock::serial();
-        let dir = std::env::temp_dir().join(format!("plxnative-signout-consent-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("a writable temp dir");
-        let _redirects = Redirects {
-            dir: dir.clone(),
-            saved: consent::current(),
-        };
-        crate::plex::session::redirect_for_test(Some(dir.join("auth.json")));
-        let consent_file = dir.join("telemetry.json");
-        crate::telemetry::redirect_for_test(Some(consent_file.clone()));
-        crate::telemetry::spool::set_test_path(Some(dir.join("spool.jsonl")));
-
-        // Account A answers yes to both, which mints both identifiers and persists the decision.
-        crate::telemetry::record(consent::apply(
-            &consent::Consent::default(),
-            true,
-            true,
-            || Some("a".repeat(32)),
-        ));
-        assert!(consent::allows_usage() && consent::errors_id().is_some());
-        assert!(
-            consent_file.exists(),
-            "the decision was persisted for account A"
-        );
-
-        forget_account();
-
-        let after = consent::current().expect("a decision is always published");
-        assert!(
-            !after.answered(),
-            "account B would never be asked: A's answer survived the sign-out"
-        );
-        assert!(
-            after.install_id.is_none() && after.errors_id.is_none(),
-            "an identifier survived the sign-out and would tag B's reports as A"
-        );
-        assert!(!consent::allows_usage() && !consent::allows_errors());
-        assert!(consent::errors_id().is_none());
-        assert!(
-            consent::should_ask(&after, false),
-            "the next authorized sign-in must put the question on screen again"
-        );
-        assert!(
-            !consent_file.exists(),
-            "the consent file outlived the sign-out and would resume A's decision at the next boot"
-        );
-    }
 
     #[test]
     fn only_a_live_qr_attempt_can_settle_as_an_activation() {
@@ -6862,95 +6417,6 @@ mod tests {
     /// Three unanswered polls bucket to `TwoToFive`, the phase (`Waiting`) maps to `Authorization`,
     /// and the code generation `mint_pin` last stored is carried through unchanged.
     #[test]
-    fn signin_error_context_reports_authorization_with_the_live_flow_state() {
-        let c = Ctl {
-            phase: Phase::Waiting,
-            link_unanswered: 3,
-            link_failing_since: Some(Instant::now()),
-            code_generation: 2,
-            ..Ctl::default()
-        };
-        let ctx = signin_error_context(&c, crate::telemetry::storage::SessionStorageClass::None);
-        assert_eq!(ctx.kind, crate::telemetry::signin::SignInFailureKind::Authorization);
-        assert_eq!(ctx.unanswered, crate::telemetry::signin::UnansweredBucket::TwoToFive);
-        assert_eq!(ctx.code_generation, 2);
-    }
-
-    /// A flow that never minted a code (a pin-CREATE failure, `Phase::Creating`) reports generation
-    /// `0` clamped up to `1` by `context_from` — `Ctl::code_generation`'s documented default.
-    #[test]
-    fn signin_error_context_reports_pin_create_with_no_code_yet() {
-        let c = Ctl {
-            phase: Phase::Creating,
-            ..Ctl::default()
-        };
-        let ctx = signin_error_context(&c, crate::telemetry::storage::SessionStorageClass::None);
-        assert_eq!(ctx.kind, crate::telemetry::signin::SignInFailureKind::PinCreate);
-        assert_eq!(ctx.code_generation, 1, "0 clamps up to 1");
-    }
-
-    /// Issue #76: a sign-in trouble report carries the LIVE session storage verdict —
-    /// `signin_error_context` reads `plex::session::storage_class()`, not a placeholder. A
-    /// recognized-but-unopenable envelope always writes the cross-launch marker before this can
-    /// even be asked (see `plex::session::storage_class`'s own doc), so the class here is
-    /// `secure_refused` rather than the narrower `secure_locked`.
-    #[test]
-    fn signin_error_context_carries_the_live_session_storage_class() {
-        let _lock = crate::testlock::serial();
-        let dir = std::env::temp_dir()
-            .join(format!("plxnative-auth-storage-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("a writable temp dir");
-        let file = dir.join("auth.json");
-        let sealed = crate::keymanager::Sealed {
-            backend: crate::keymanager::Backend::Keymanager3,
-            key: "plxnative.session.v1".into(),
-            iv: "AAAAAAAAAAAAAAAAAAAAAA==".into(),
-            data: "c2VjcmV0".into(),
-            identity: crate::keymanager::Identity::Anonymous,
-        };
-        let envelope = serde_json::json!({
-            "format": "plxnative-secure-session",
-            "version": 1,
-            "sealed": sealed,
-        });
-        std::fs::write(&file, serde_json::to_vec(&envelope).unwrap()).unwrap();
-        crate::plex::session::redirect_for_test(Some(file));
-        // The cross-launch marker is written only on evidence a service actually answered
-        // (`plex::session::read_locked`'s gate, issue #76 review) — a real refusal reply, not the
-        // unscripted default that stands in for a registration that never reached a service at all.
-        crate::keymanager::arm_for_test(vec![(
-            "begin",
-            Ok(serde_json::json!({
-                "returnValue": false, "errorCode": -10001, "errorText": "key not found"
-            })),
-        )]);
-        let _ = crate::plex::session::load();
-        crate::keymanager::disarm_for_test();
-
-        let c = Ctl {
-            phase: Phase::Waiting,
-            ..Ctl::default()
-        };
-        let ctx = signin_error_context(&c, crate::plex::session::storage_class());
-        assert_eq!(
-            ctx.storage,
-            crate::telemetry::storage::SessionStorageClass::SecureRefused
-        );
-
-        crate::plex::session::redirect_for_test(None);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// **Stage B2 item 2 (issue #76 field report case 6, ported): a save that cannot write must not
-    /// leave the RUN looking signed out.** `session::save_locked` only publishes its in-process
-    /// cache once a write actually lands, so on an install where every candidate refuses the write
-    /// (a jail-profile directory that LOOKS writable and is not — `auth_paths`'s own doc), the old
-    /// `take_ready` called `session::set_current` unconditionally right after `session::save`
-    /// regardless of whether anything was actually written — leaving the account chip showing a
-    /// user while every OTHER reader of the session (`session::peek`, `signed_in()`) answered the
-    /// default. That is exactly "the chip said *Sign in* during the run that had just signed in".
-    #[test]
     fn field_6_a_save_that_cannot_write_leaves_the_run_looking_signed_in_anyway() {
         use std::os::unix::fs::PermissionsExt;
         let _lock = crate::testlock::serial();
@@ -7073,80 +6539,6 @@ mod tests {
     }
 
     #[test]
-    fn persistence_warning_generation_and_attempt_bound_every_ack_and_report() {
-        let _lock = crate::testlock::serial();
-        with_ctl(|c| {
-            *c = Ctl {
-                phase: Phase::Ready,
-                attempt: next_attempt(),
-                ..Ctl::default()
-            };
-            update_fresh_persistence_warning(
-                c,
-                PersistenceWarningSite::Discovery,
-                session::PersistOutcome::WriteFailed,
-            );
-        });
-        let discovery = pending_persistence_warning().unwrap();
-        assert!(persistence_warning_report_context(discovery.key).is_some());
-        assert!(acknowledge_persistence_warning(discovery.key));
-
-        with_ctl(|c| {
-            update_fresh_persistence_warning(
-                c,
-                PersistenceWarningSite::Final,
-                session::PersistOutcome::WriteFailed,
-            )
-        });
-        let final_warning = pending_persistence_warning().unwrap();
-        assert_ne!(discovery.key.generation, final_warning.key.generation);
-        assert!(!acknowledge_persistence_warning(discovery.key));
-        assert!(persistence_warning_report_context(discovery.key).is_none());
-
-        with_ctl(|c| {
-            update_fresh_persistence_warning(
-                c,
-                PersistenceWarningSite::Final,
-                session::PersistOutcome::PersistedPlaintext,
-            )
-        });
-        assert!(pending_persistence_warning().is_none(), "fresh success supersedes failure");
-
-        with_ctl(|c| {
-            update_fresh_persistence_warning(
-                c,
-                PersistenceWarningSite::Discovery,
-                session::PersistOutcome::WriteFailed,
-            );
-            restart_discovery_ctl(c);
-        });
-        assert!(pending_persistence_warning().is_none());
-        with_ctl(|c| *c = Ctl::default());
-    }
-
-    #[test]
-    fn synthetic_save_failure_only_seeds_the_warning_presentation_fixture() {
-        let _lock = crate::testlock::serial();
-        with_ctl(|c| {
-            *c = Ctl {
-                attempt: next_attempt(),
-                ..Ctl::default()
-            }
-        });
-        synth_signin_trouble("save");
-        assert_eq!(phase(), Phase::Waiting);
-        let warning = pending_persistence_warning().unwrap();
-        assert_eq!(warning.site, PersistenceWarningSite::Discovery);
-        assert_eq!(warning.outcome, session::PersistOutcome::WriteFailed);
-        assert!(!with_ctl(|c| c.authorized_in_flow));
-        assert!(acknowledge_persistence_warning(warning.key));
-        assert_eq!(phase(), Phase::Waiting, "Continue reveals the inert QR fixture");
-        with_ctl(|c| *c = Ctl::default());
-    }
-
-    /// A fresh flow starts believing plex.tv is fine — the failing state of whatever flow came
-    /// before must never leak into the next one's first frame.
-    #[test]
     fn a_fresh_ctl_has_a_healthy_link_state() {
         let _lock = crate::testlock::serial();
         with_ctl(|c| *c = Ctl::default());
@@ -7264,173 +6656,5 @@ mod tests {
             deleted.attempt > discovery.attempt,
             "a local-data erasure is a fresh attempt too"
         );
-    }
-
-    /// [`resume_stored`] (BACK out of the flow) is the one reset shape that mutates the shared
-    /// `Ctl` directly rather than through a pure constructor — tested against the live global the
-    /// way the file's other `resume_stored` tests already do.
-    #[test]
-    fn resuming_the_stored_session_stamps_a_new_attempt_and_clears_any_trouble() {
-        let _lock = crate::testlock::serial();
-        with_ctl(|c| {
-            *c = Ctl {
-                phase: Phase::Waiting,
-                from: Picker::Boot,
-                ..Ctl::default()
-            }
-        });
-        note_waiting_trouble(); // nothing was seeded, so this is a no-op — the point is the id below
-        let before = with_ctl(|c| c.attempt);
-        assert!(resume_stored(signed_in_as("u-kid")), "an unprotected profile resumes");
-        let after = with_ctl(|c| c.attempt);
-        assert!(after > before);
-        assert!(trouble_snapshot().is_none(), "a resumed session starts with no trouble");
-        with_ctl(|c| *c = Ctl::default());
-    }
-
-    /// **`note_waiting_trouble` is at most once per attempt.** A second call while the screen is
-    /// still stuck must not silently replace the context an open alert may already be showing.
-    #[test]
-    fn note_waiting_trouble_is_recorded_at_most_once_per_attempt() {
-        let _lock = crate::testlock::serial();
-        with_ctl(|c| {
-            *c = Ctl::default();
-            c.phase = Phase::Waiting;
-            c.link_unanswered = 3;
-            c.link_failing_since = Some(Instant::now());
-            c.code_generation = 1;
-        });
-        note_waiting_trouble();
-        let (attempt, first, _) = trouble_snapshot().expect("a trouble was recorded");
-        // Something the context reads changes — a real poll landing between two frames — and the
-        // SECOND call must still report the FIRST context, unchanged.
-        with_ctl(|c| c.code_generation = 4);
-        note_waiting_trouble();
-        let (attempt2, second, _) = trouble_snapshot().expect("still recorded");
-        assert_eq!(attempt, attempt2, "still the same attempt");
-        assert_eq!(
-            first.code_generation, second.code_generation,
-            "the first call's context wins — a later poll must not silently replace it"
-        );
-        with_ctl(|c| *c = Ctl::default());
-    }
-
-    /// A flow reset (a fresh login here — the shape every other reset shares) leaves the new
-    /// attempt with no trouble at all, whatever the attempt before it was carrying.
-    #[test]
-    fn a_flow_reset_clears_the_remembered_trouble() {
-        let _lock = crate::testlock::serial();
-        with_ctl(|c| {
-            *c = Ctl::default();
-            c.phase = Phase::Waiting;
-            c.link_unanswered = 2;
-            c.link_failing_since = Some(Instant::now());
-        });
-        note_waiting_trouble();
-        assert!(trouble_snapshot().is_some());
-        // The reset every top-level entry point performs, without spawning the worker behind it.
-        with_ctl(|c| *c = fresh_login_ctl(Session::default()));
-        assert!(
-            trouble_snapshot().is_none(),
-            "a fresh attempt must not inherit the trouble the one before it recorded"
-        );
-        with_ctl(|c| *c = Ctl::default());
-    }
-
-    /// **`set_error` must not clobber a trouble THIS attempt already reported.** A one-off "Send
-    /// report" press can mark the current attempt's trouble reported before the flow later
-    /// settles into `Phase::Error` for an unrelated reason (e.g. the pin-generation cap) —
-    /// `set_error` used to write `Ctl::trouble` unconditionally, silently flipping `reported`
-    /// back to `false` and losing the "a report was sent" note the person had just been shown
-    /// (and, per `send_trouble_once`'s own "at most once" doc, reopening the door to a second
-    /// send of the same trouble).
-    #[test]
-    fn set_error_preserves_an_already_reported_trouble_on_the_same_attempt() {
-        let _lock = crate::testlock::serial();
-        with_ctl(|c| {
-            *c = Ctl::default();
-            c.signin_active = true;
-            c.phase = Phase::Waiting;
-            c.link_unanswered = 2;
-            c.link_failing_since = Some(Instant::now());
-        });
-        note_waiting_trouble();
-        let (attempt, _, reported_before) =
-            trouble_snapshot().expect("a trouble was recorded");
-        assert!(!reported_before, "note_waiting_trouble never reports on its own");
-        // Stand in for a successful one-off "Send report" press, without a real Sentry endpoint.
-        with_ctl(|c| {
-            if let Some(t) = c.trouble.as_mut() {
-                t.reported = true;
-            }
-        });
-        set_error("network refused");
-        let (attempt2, _, reported_after) = trouble_snapshot().expect("still a trouble");
-        assert_eq!(attempt, attempt2, "same attempt — set_error must not have reset it");
-        assert!(
-            reported_after,
-            "an already-reported trouble must stay reported through set_error"
-        );
-        with_ctl(|c| *c = Ctl::default());
-    }
-
-    /// **`send_trouble_once` refuses a trouble already marked reported**, whether that happened
-    /// automatically (standing consent) or by an earlier press — the guard this function's whole
-    /// "at most once" promise rests on, gradeable with no real Sentry endpoint in the loop.
-    #[test]
-    fn send_trouble_once_refuses_an_already_reported_trouble() {
-        let _lock = crate::testlock::serial();
-        let ctx = signin_error_context(
-            &Ctl::default(),
-            crate::telemetry::storage::SessionStorageClass::None,
-        );
-        with_ctl(|c| {
-            *c = Ctl::default();
-            c.trouble = Some(Trouble {
-                ctx,
-                reported: true,
-            });
-        });
-        assert!(
-            !send_trouble_once(),
-            "already reported — a second press must never resend it"
-        );
-        with_ctl(|c| *c = Ctl::default());
-    }
-
-    /// With no trouble recorded at all, there is nothing to send.
-    #[test]
-    fn send_trouble_once_with_no_trouble_sends_nothing() {
-        let _lock = crate::testlock::serial();
-        with_ctl(|c| *c = Ctl::default());
-        assert!(!send_trouble_once());
-    }
-
-    #[test]
-    fn storage_report_context_on_healthy_qr_does_not_create_trouble() {
-        let _lock = crate::testlock::serial();
-        with_ctl(|c| {
-            *c = Ctl::default();
-            c.phase = Phase::Waiting;
-            c.signin_active = true;
-        });
-        let (attempt, ctx) = storage_report_context();
-        assert_eq!(ctx.kind, crate::telemetry::signin::SignInFailureKind::Authorization);
-        assert_eq!(attempt, current_attempt());
-        assert!(trouble_snapshot().is_none());
-        with_ctl(|c| *c = Ctl::default());
-    }
-
-    #[test]
-    fn stale_storage_report_attempt_is_refused_without_mutating_trouble() {
-        let _lock = crate::testlock::serial();
-        with_ctl(|c| {
-            *c = Ctl::default();
-            c.phase = Phase::Waiting;
-        });
-        let (attempt, ctx) = storage_report_context();
-        assert!(!send_storage_report(attempt.wrapping_add(1), ctx).is_some());
-        assert!(trouble_snapshot().is_none());
-        with_ctl(|c| *c = Ctl::default());
     }
 }

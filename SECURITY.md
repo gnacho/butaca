@@ -50,15 +50,14 @@ looking at:
   `com.webos.service.keymanager3` is available and permitted, with a 0600 plaintext compatibility
   fallback otherwise. The legacy `com.palm.keymanager` AES-CFB interface is not used because it
   provides no authenticated-encryption operation. The file is always created 0600 through
-  `open(2)`'s own mode argument, and every open of it (and of the telemetry decision file, the
-  telemetry spool, and every marker/probe file beside them) repairs the mode back to 0600 in place
+  `open(2)`'s own mode argument, and every open of it (and of every marker/probe file beside
+  it) repairs the mode back to 0600 in place
   if it has grown group/other bits, rather than refusing to read or append to a file this install
   still owns. **Repairing the mode is not the same claim as trusting the content it protected while
   it was wide open**: a mode widened only to add a group/other READ bit is a disclosure problem and
   the content still loads, but any group/other WRITE bit means another uid could have rewritten the
-  bytes, so that content is never trusted — the session and consent files are discarded rather than
-  parsed, a marker or probe file is ignored and deleted, and the telemetry spool is truncated rather
-  than appended onto. **A write-widened SESSION file is QUARANTINED rather than deleted**: it is
+  bytes, so that content is never trusted — the session file is discarded rather than
+  parsed, and a marker or probe file is ignored and deleted. **A write-widened SESSION file is QUARANTINED rather than deleted**: it is
   renamed to `<id>-auth.json.untrusted` beside itself, still 0600, and never parsed or opened again
   by anything in the app — it is kept for the television's owner to inspect, those bytes being the
   only record of what was tampered with. **Only the most recent one is kept**: a later tampering
@@ -67,9 +66,9 @@ looking at:
   holding that name as a directory, say), **or if the mode repair itself did not take** (a
   read-only remount, or a jail that denies the operation — the file would otherwise be moved aside
   still world-writable, token and all), the file is deleted outright, because the rule that matters
-  is that it must not still be at the name the next launch reads. The consent file and the telemetry spool are deliberately
-  unchanged: a discarded decision and a truncated spool leave nothing worth keeping. A downgrade of an existing encrypted file, a way to read it from another
-  process, or a way to make the app write it somewhere world-readable is in scope.
+  is that it must not still be at the name the next launch reads. A downgrade of an existing encrypted
+  file, a way to read it from another process, or a way to make the app write it somewhere
+  world-readable is in scope.
 - **The Developer Mode shared-namespace exposure, and why it is not the same claim as the above.**
   A **sideloaded** (Developer Mode / Homebrew) install runs under `jail_native_devmode.conf`, which
   mounts `/media/developer` **read-write for the whole directory**, measured `drwxrwxrwx` root:root
@@ -87,16 +86,16 @@ looking at:
   ownership/mode/regular-file check anywhere in this app can distinguish that from the file it wrote
   itself.** That is a known, undetected limitation of every mode/ownership check described in this
   document, not a guarantee any of them make; it is pinned by a test
-  (`plex::session::tests::a_replayed_older_valid_session_file_is_indistinguishable_from_current`,
-  and its consent-file twin) precisely so it stays documented rather than silently assumed away.
+  (`plex::session::tests::a_replayed_older_valid_session_file_is_indistinguishable_from_current`)
+  precisely so it stays documented rather than silently assumed away.
   **This is a property of Developer Mode itself, not a bug in this app**, and it does not apply to a
   **retail** install: `jail_native.conf` gives a store-distributed app `mountappdir` — only its own
   directory in the mount namespace, nothing else on the device visible to it at all. A report
   describing this exposure (substitution OR replay) on a retail install (were one ever to exist) is
   in scope; the same exposure on a sideloaded install, reachable only by another process the user
   chose to sideload beside this one, is disclosed here rather than treated as a vulnerability of
-  this app, and is not itself something to report. A storage error report may name which of these
-  tiers (`developer`/`internal`/`app_dir`/`runtime`/`other`) a candidate session file was found or
+  this app, and is not itself something to report. The local event log names which of these tiers
+  (`developer`/`internal`/`app_dir`/`runtime`/`other`) a candidate session file was found or
   rejected at — a category word, never the path itself.
 - **The bundled FFmpeg.** Built from unmodified FFmpeg 9.0 with demuxers, parsers and subtitle
   decoders only — it is fed untrusted bytes from the network, so parser bugs reachable through
@@ -117,25 +116,13 @@ looking at:
 No account of its own, no server, no payment path, and no user-generated content. It signs in to
 **your** Plex account and talks to **your** servers.
 
-**It does have telemetry, and that hedge used to say it did not.** A release binary carries a Sentry
-DSN and a PostHog project key — both **write-only ingest credentials**, publishable by design, which
-permit sending to a project and grant no read of anything in it. First run asks about crash reports
-and product analytics separately. The first answer remains a draft; answering the second records
-both choices, and only a **Share** answer enables that category and permits its POSTs to
-`ingest.de.sentry.io` or `eu.i.posthog.com`. The one deliberate exception is the sign-in screen's
-one-off "Send report" press: it is its own consent, POSTs to Sentry under no standing answer
-either way, and carries no identifier — a researcher can tell it apart from the consent gate
-failing open (below) by that missing identifier. `BACK` navigates without recording a refusal.
-Later changes live under Account → Settings → Privacy & data, where **Done** commits and `BACK`
-discards.
-The Sentry
-**auth token** is the real secret in this system: it can read and delete the project, it never
-enters the binary, and it exists only as a GitHub Actions secret used by `sentry-cli` in the release
-workflow.
+**It has no telemetry, and that hedge used to say it did.** This fork removed the upstream
+reporting system end to end: no Sentry DSN, no PostHog key, no consent question, no identifiers,
+no report queue, no out-of-process crash reporter, and no sign-in "Send report" flow. The local
+event log and the local crash log remain, and both stay on the television. The release audit
+asserts on the shipped bytes that no endpoint credential appears in them at all.
 
-In scope for a report, and worth naming since a "no telemetry endpoint" line told researchers not to
-look here: the consent gate failing open, an identifier existing before product analytics is
-explicitly enabled or surviving its withdrawal, anything that gets a runtime string past
-`diag::schema`'s no-owned-strings guarantee,
-and the spool's file mode or its contents. [PRIVACY.md](PRIVACY.md) is the full account of what
-leaves the television.
+In scope for a report, and worth naming so researchers know where to look: anything that
+re-introduces an outbound reporting path, anything that writes a runtime string into the local
+logs unredacted (see `diag::scrub`), and any file-mode regression in the local log or session
+files. leaves the television.

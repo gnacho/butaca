@@ -250,9 +250,9 @@ def scan_strings(blob: bytes, rx: re.Pattern, limit: int = 40, trim: bool = Fals
 # design -- any client that sends anything must carry them, which is why printing them here costs
 # nothing -- so recording them is what lets anybody reproduce the package byte for byte. Without
 # this row, "reproducible" would have quietly become "reproducible by the maintainer".
-# Any Sentry-protocol DSN host, not just sentry.io: this fork reports to a self-hosted sink
-# behind its own facade, and the old sentry.io-only pattern made the audit misreport the
-# endpoint as absent for exactly the builds that carry one.
+# This fork carries no telemetry: the audit's job here is to WITNESS that the shipped bytes
+# contain no Sentry DSN and no PostHog key, the same patterns the upstream audit used to extract
+# them.
 SENTRY_DSN_RE = re.compile(rb"https://[0-9a-f]{8,}@[A-Za-z0-9.-]+/\d+")
 POSTHOG_KEY_RE = re.compile(rb"phc_[A-Za-z0-9]{20,}")
 
@@ -261,16 +261,11 @@ def telemetry_endpoints(binary: bytes) -> str:
     dsn = SENTRY_DSN_RE.findall(binary)
     key = POSTHOG_KEY_RE.findall(binary)
     if not dsn and not key:
-        return ("none — this build carries no endpoint at all and **cannot report anything**. "
-                "`option_env!` resolved to `None` at compile time, so there is no URL in these "
-                "bytes to reach")
-    parts = []
-    for d in sorted({x.decode() for x in dsn}):
-        region = "EU" if ".de.sentry.io" in d else "**NOT the EU region**"
-        parts.append(f"Sentry `{d}` ({region})")
-    for k in sorted({x.decode() for x in key}):
-        parts.append(f"PostHog `{k}`")
-    return "; ".join(parts) + " — write-only ingest credentials, publishable by design"
+        return ("none — this build carries no endpoint at all and **cannot report anything**: "
+                "no Sentry DSN and no PostHog key appear anywhere in these bytes")
+    found = [d.decode() for d in dsn] + [k.decode() for k in key]
+    return "**UNEXPECTED** — a telemetry credential appeared in a fork that removed them: " \
+        + "; ".join(found)
 
 
 def generate(args) -> str:

@@ -240,8 +240,8 @@ use crate::ui::widgets::Pill;
 /// generated. `crashtrace.c` says so itself. Two deliberate SIGSEGVs produced the signal status and
 /// an empty `/var/log/reports/librdx/`.
 ///
-/// The line this hook writes is also the crash channel's PANIC input: `telemetry::crashreport`
-/// reads the log on the next launch, hashes the message and sends the location only.
+/// The line this hook writes also lands in the persistent crash log: the local debugging
+/// surfaces (the event log, `tools/crash-report.sh`) read it on the next launch.
 fn install_panic_logger() {
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -261,7 +261,7 @@ fn install_panic_logger() {
         log(&line);
         // Same hardened sink as `crate::log`'s event log — 0600, O_NOFOLLOW, owned-regular-file
         // checked and repaired — not a bare `OpenOptions`: this file is read back cross-launch by
-        // `telemetry::crashreport`, and on `make sim` / the macOS app bundle `src/main.c` (which
+        // `tools/crash-report.sh`, and on `make sim` / the macOS app bundle `src/main.c` (which
         // otherwise chmods the fd 0600) never runs at all, so this hook is this file's creator.
         use std::io::Write;
         if let Ok(mut f) =
@@ -2531,9 +2531,6 @@ fn request_seek(x: i64) {
 /// without publishing a false viewer Resume. `resume_pend` asks the per-frame loop to close that
 /// bounded override. `repause_at` is the landed-frame wait target.
 fn commit_seek(target: i64, repause_at: &mut i64) {
-    crate::diag::event(crate::diag::schema::DiagEvent::FeatureUsed {
-        feature: crate::diag::schema::Feature::Seek,
-    });
     request_seek(target);
     set_scrub(-1);
     if paused() {
@@ -4048,10 +4045,6 @@ fn exit_player(
     crate::route::cancel_play(); // BACK during a load: supersede, drop the landing
     close_player_overlays();
     crate::player::stop_bufferfeed(mt);
-    // `stop_bufferfeed` reports/clears a real engine through `report::ended`, but a refusal or a
-    // BACK during resolve has no engine for teardown to take. The exit ritual still ends that
-    // attempt, so retire its in-memory trace here as the common backstop.
-    crate::player::report::clear_error_trace();
     // Same reasoning for the jail pre-flight refusal, which also has no Engine: without this,
     // `player::state()` kept reporting `Error` on every OTHER screen too — Home, the Library,
     // any detail page — for the rest of the process, after the viewer had already walked away
@@ -4121,14 +4114,6 @@ fn activate_ctrl_row(
             }
         }
         ControlSlot::Skip(pr) => {
-            crate::diag::event(crate::diag::schema::DiagEvent::FeatureUsed {
-                feature: match pr.kind {
-                    crate::metadata::MarkerKind::Intro => crate::diag::schema::Feature::SkipIntro,
-                    crate::metadata::MarkerKind::Credits => {
-                        crate::diag::schema::Feature::SkipCredits
-                    }
-                },
-            });
             match pr.action {
                 SkipAction::Seek(ns) => {
                     // Retire the segment FIRST: the seek lands on the preceding keyframe, which
@@ -4772,16 +4757,6 @@ unsafe fn on_auto_repeat(
             // reveal rule promises moves nothing. The advance clears it once there is real travel.
             log("scrub: hold engaged (0x101 repeat)");
         }
-    } else if crate::ui::consent::is_open() {
-        if let Some(delta) = updown_delta(sym) {
-            if modal_repeat.ready(n) {
-                crate::ui::consent::on_updown(delta);
-            }
-        } else if let Some(delta) = leftright_delta(sym) {
-            if modal_repeat.ready(n) {
-                crate::ui::consent::on_left_right(delta);
-            }
-        }
     } else if crate::ui::legal::is_open() {
         if let Some(delta) = updown_delta(sym) {
             if modal_repeat.ready(n) {
@@ -5271,50 +5246,6 @@ fn apply_onboarding_action(action: crate::ui::onboard::Action, trail: &mut Trail
 /// root when it lands, which is what puts the user one BACK from it either way.) `enter` is what the
 /// route's own BACK and its `Start watching` both come through, which is why there is one exit and
 /// not two.
-/// Put the telemetry question on screen, if this boot is one that should see it.
-///
-/// **Asked as soon as there is an AUTHORIZED ACCOUNT, and before the profile picker.**
-///
-/// The decision belongs to the SIGN-IN — `telemetry_candidates()` is one file with no profile
-/// key, shared by every profile on the account, and `auth::forget_account` unlinks it when the
-/// account signs out — so the person who signed the television in is the person who should answer
-/// it, and the next account to sign in is asked afresh. Asking after the picker (which is what
-/// shipped until 2026-09-02) put a data-protection question to whichever household member
-/// happened to be selected, up to and including a managed child profile, and dressed an
-/// account-wide answer as a personal setting.
-///
-/// It is still not asked at BOOT: a fresh install boots to the QR screen with nothing to consent
-/// about yet, and asking before somebody has managed to sign in is asking while they have nothing
-/// to lose by walking away. **The sign-in screen's one-off "Send report" alert (issue #75) is
-/// NOT this question and does not contradict this sentence** — it can appear on the QR screen
-/// before any account exists, but it records no decision, mints no identifier, and never touches
-/// this function's `should_show`/`install` path; it is a single explicit press about one specific
-/// problem, not the standing crash/analytics question.
-///
-/// Cheap and idempotent: `should_show` is false once a decision has been recorded, and false on any
-/// automated boot, so every call site can simply ask. Nothing is stored by asking.
-fn maybe_ask_consent() {
-    let c = crate::telemetry::consent::current().unwrap_or_default();
-    // dev: /tmp/plxnative-consent[=<crash|product>] forces either first-run purpose even on an
-    // automated boot. This screen is suppressed BY the presence of any trigger, so without an
-    // override it cannot be reached headlessly at all. Selecting Product changes display state
-    // only; no answer is stored by a harness boot.
-    if let Some(target) = crate::dev::read("consent") {
-        // `fresh` for the same reason `open` is idempotent: this is now asked from a per-frame
-        // routing site, and re-selecting the second purpose every frame would PIN the stage there
-        // and make the seam undriveable.
-        let fresh = !crate::ui::consent::is_open();
-        crate::ui::consent::open(&c);
-        if fresh && target.trim() == "product" {
-            crate::ui::consent::show_product_for_dev();
-        }
-        return;
-    }
-    if crate::ui::consent::should_show(&c, crate::dev::any_trigger_present()) {
-        crate::ui::consent::open(&c);
-    }
-}
-
 fn enter_home_from_onboard(trail: &mut Trail) -> Route {
     if crate::ui::onboard::settings_mode() {
         crate::ui::settings::refresh();
@@ -5329,7 +5260,7 @@ fn enter_home_from_onboard(trail: &mut Trail) -> Route {
     }
     trail.reset();
     // The consent pair is NOT asked here any more: it is the sign-in's decision, shared by every
-    // profile on the account, and is put before the profile picker, which is upstream of this whole step. See `maybe_ask_consent`.
+    // profile on the account, and is put before the profile picker, which is upstream of this whole step.
     // The selection just recorded is an input to Home's merge (`pms::feeds_home`), and the merge
     // re-runs off `browse`'s section generation — which `apply_pins` (the editor's one commit
     // write) has already bumped. Nothing to kick here; Home builds from the answer on its first
@@ -5392,86 +5323,10 @@ fn perform_settings_action(action: crate::ui::settings::Action, route: &mut Rout
             crate::ui::onboard::enter_settings();
             *route = Route::Onboard;
         }
-        crate::ui::settings::Action::Privacy => {
-            let current = crate::telemetry::consent::current().unwrap_or_default();
-            crate::ui::consent::open_settings(&current);
-        }
         crate::ui::settings::Action::Legal => crate::ui::legal::open(),
         crate::ui::settings::Action::About => crate::ui::legal::open_about(),
         crate::ui::settings::Action::None => {}
     }
-}
-
-/// What a confirmed **Delete all local data** does next, given how many files could not be
-/// unlinked.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-struct DeleteOutcome {
-    /// Leave for the sign-in screen.
-    to_sign_in: bool,
-    /// Write the leftovers to the event log.
-    report_leftovers: bool,
-}
-
-/// **Two independent facts, and conflating them was the bug.**
-///
-/// [`delete_all_local_data`] calls `auth::erase_local_state()` UNCONDITIONALLY and only then
-/// returns whatever it failed to unlink, so by the time this is asked the session is already gone.
-/// Routing on the cleanup result therefore answered the wrong question: one unremovable file — and
-/// the candidate lists span BOTH install prefixes, whose jail profiles disagree about which are
-/// writable, so a leftover is an ordinary outcome on a healthy set — left the user sitting in
-/// Settings on top of an app that had just signed itself out. The next BACK dropped them onto an
-/// empty Home with no session, no servers and no route to sign-in short of relaunching.
-///
-/// It is a function rather than a branch because the branch lives inside the SDL key loop, where
-/// no host test can reach it.
-fn delete_outcome(leftovers: usize) -> DeleteOutcome {
-    DeleteOutcome {
-        to_sign_in: true,
-        report_leftovers: leftovers > 0,
-    }
-}
-
-/// The one destructive Settings operation. Individual UI rows never remove their own files.
-///
-/// Returns the paths it could NOT unlink — a report, never a verdict. The irreversible half
-/// (`auth::erase_local_state`) runs whatever the file sweep managed; see [`delete_outcome`].
-fn delete_all_local_data() -> Vec<String> {
-    let remove = |path: &std::path::Path| match std::fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(format!("{}: {e}", path.display())),
-    };
-    let mut failures = Vec::new();
-    for path in crate::paths::obsolete_last_place_candidates()
-        .into_iter()
-        .chain(crate::paths::telemetry_candidates())
-        .chain(crate::paths::telemetry_spool_candidates())
-        .chain(crate::paths::telemetry_crashmark_candidates())
-    {
-        if let Err(e) = remove(&path) {
-            failures.push(e);
-        }
-    }
-    for name in [
-        "plxnative-events.log",
-        "plxnative-crash.log",
-        "plxnative-stderr.log",
-        "plxnative-anim.log",
-        "plxnative-gst.log",
-        "plxnative-gputime.jsonl",
-        "plxnative-hwcnt.jsonl",
-    ] {
-        if let Err(e) = remove(&crate::paths::in_runtime_dir(name)) {
-            failures.push(e);
-        }
-    }
-    crate::ui::search::recents::clear();
-    crate::metadata::clear();
-    // The telemetry decision, both identifiers, the spool and the native backend go with the
-    // account: `erase_local_state` → `forget_account` → `telemetry::forget`, the same door
-    // Sign out uses. The sweep above already unlinked the files; `forget` finds them gone.
-    crate::auth::erase_local_state();
-    failures
 }
 
 /// The press-and-hold item menu is modal too — rows nav, OK commits, BACK closes back to the shelf
@@ -6163,11 +6018,7 @@ unsafe fn key_ok(
         } else {
             let np = !paused();
             if np {
-                if set_transport_paused(mt, true) {
-                    crate::diag::event(crate::diag::schema::DiagEvent::FeatureUsed {
-                        feature: crate::diag::schema::Feature::Pause,
-                    });
-                }
+                if set_transport_paused(mt, true) {}
             } else {
                 set_transport_paused(mt, false);
             }
@@ -6308,11 +6159,7 @@ unsafe fn key_ok(
 /// PAUSE — the dedicated transport key, which only ever pauses (PLAY is its other half).
 fn key_pause(mt: &crate::task::MainThread, route: Route, now: u32) {
     if matches!(route, Route::Player { .. }) && !paused() {
-        if set_transport_paused(mt, true) {
-            crate::diag::event(crate::diag::schema::DiagEvent::FeatureUsed {
-                feature: crate::diag::schema::Feature::Pause,
-            });
-        }
+        let _ = set_transport_paused(mt, true);
     }
     extend_hud(now, HUD_LINGER_MS);
 }
@@ -6632,56 +6479,10 @@ fn back_at_root() {
     }
 }
 
-/// Commit the consent screen's focused stop — the answer pill on the press spring-back
-/// (`consent::focus_is_ctl`), or a document row on its key-down. One function for both, because the
-/// erase-everything outcome underneath is the same whichever way the press arrived.
-fn commit_consent(route: &mut Route, trail: &mut crate::ui::trail::Trail) {
-    crate::ui::consent::on_ok();
-    if crate::ui::consent::take_delete_request() {
-        let leftovers = delete_all_local_data();
-        let outcome = delete_outcome(leftovers.len());
-        if outcome.report_leftovers {
-            crate::log(&format!(
-                "privacy: local data erased; {} file(s) could not be removed: {}",
-                leftovers.len(),
-                leftovers.join("; ")
-            ));
-        }
-        if outcome.to_sign_in {
-            crate::ui::settings::hide(); // the screen under it is going — no fade to run over
-            // Tell the read-out what the sweep actually achieved BEFORE it is mounted: a survivor
-            // can be the telemetry decision, which comes back on the next launch, so the screen
-            // must not claim to have removed it.
-            crate::ui::login::note_delete_leftovers(leftovers.len());
-            crate::ui::login::enter();
-            trail.reset();
-            *route = Route::Login;
-        }
-    }
-}
-
-/// Run a play-plan landing and then observe the derived player state in the same frame. This tiny
-/// seam is explicit because a refused `/decision` publishes `Error` inside the landing, after the
-/// loop's ordinary report tick; BACK on the next frame can otherwise erase the only observation.
-fn land_play_then_observe(land: impl FnOnce(), observe: impl FnOnce()) {
+/// Run a play-plan landing. Kept as a named seam so the landing stays one obvious place; the
+/// post-landing state observation that used to ride it left with the telemetry system.
+fn land_play(land: impl FnOnce()) {
     land();
-    observe();
-}
-
-#[cfg(test)]
-mod play_landing_order_tests {
-    use super::land_play_then_observe;
-    use std::cell::RefCell;
-
-    #[test]
-    fn the_landing_seam_runs_publication_before_observation() {
-        let order = RefCell::new(Vec::new());
-        land_play_then_observe(
-            || order.borrow_mut().push("landing"),
-            || order.borrow_mut().push("observation"),
-        );
-        assert_eq!(*order.borrow(), ["landing", "observation"]);
-    }
 }
 
 #[no_mangle]
@@ -6708,7 +6509,8 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
     // does not any more (the install directory is the authority), so this line turns an unanswered
     // device question into something every single run answers for free.
     log(&format!(
-        "install: id={} flavour={} runtime={} features={} APPID_env={}",
+        "install: plxnative@{} id={} flavour={} runtime={} features={} APPID_env={}",
+        crate::plex::identity::VERSION,
         crate::paths::app_id(),
         crate::paths::flavour().unwrap_or("-"),
         crate::paths::runtime_dir().display(),
@@ -6719,6 +6521,11 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
         },
         std::env::var("APPID").unwrap_or_else(|_| "unset".into()),
     ));
+    // The version as a COMPILE-TIME literal (env! at build.rs), not a runtime format: this is
+    // the string the packaging gate greps the binary for to prove the -dev suffix reaches the
+    // bytes - the same witness job the About page's `concat!("plxnative@", ...)` had before the
+    // bilingual About moved to a runtime "Version {v}".
+    log(concat!("version: plxnative@", env!("PLX_VERSION")));
     // ...and the app directory on the NEXT line, from `app_dir()` itself, which logs its own
     // provenance (`from current_exe` / `PLXNATIVE_APP_DIR` / `macOS bundle`) — strictly more than
     // repeating the path here would say. Forced now rather than left to whoever calls it first,
@@ -6729,21 +6536,13 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
     // tells a human to read the first line to learn which install wrote a log would have been
     // wrong by one line.
     let _ = crate::paths::app_dir();
-    // Before the crash backend is armed, identify the firmware it would need to report. Sentry's
-    // scope is snapshotted into the crash event file during `telemetry::boot`; probing afterwards
-    // leaves only `Linux 4.4.84`, which does not distinguish webOS releases at all. This reads one
-    // flat platform file and cannot fail the boot. The crash channel receives only the reviewed
-    // compatibility fields (webOS/API/model/SoC/hardware revision), never device identifiers.
+    // The firmware identity, read once: one flat platform file, cannot fail the boot. Local
+    // debugging surfaces (the event log, the crash log) name it; nothing sends it anywhere.
     crate::webos::probe();
-    // The stored telemetry decision, BEFORE the first event can be reported — `diag::event` reads
-    // a snapshot this publishes, and with none installed it refuses everything. So the ordering is
-    // the fail-closed guarantee, not a convenience.
-    let _telemetry_guard = crate::telemetry::boot();
-    // …and then, if asked, DIE. `plxnative-crashtest` is the instrument for the instrument: both
-    // the C fallback and (when consented/configured) the out-of-process native recorder are now
-    // armed, so this trigger grades the reporter users actually run. It remains before SDL so a
-    // playback/UI regression cannot make the instrument unreachable. Compiled out with
-    // `devtriggers`; a no-op in every other build.
+    // …and then, if asked, DIE. `plxnative-crashtest` is the instrument for the local crash log:
+    // the C fallback tracer is armed by the boot shim, so this trigger grades the handler users
+    // actually run. It remains before SDL so a playback/UI regression cannot make the instrument
+    // unreachable. Compiled out with `devtriggers`; a no-op in every other build.
     crate::dev::crash_on_purpose();
     // If `plxnative-keymanager=<mode>` named a mode this build understands, say so loudly and
     // before anything could have called `keymanager::seal`/`open` — session load is still ahead
@@ -6755,13 +6554,6 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
     // taken the app-id name either. Compiled out with `devtriggers`; a no-op in every other build.
     // Issue #76.
     crate::webos::ls2_identity_probe_if_armed();
-    // The first reportable event, and it is a marker with no fields on purpose — everything that
-    // would qualify a launch (model, firmware, version, locale) is a session constant and belongs
-    // in a sender's envelope, not repeated on every record. It reaches PostHog when the usage
-    // switch is on and this build carries a key; `crate::diag::event` is the gate and fails closed
-    // on either. (This comment said "nothing listens today" for as long as that was true and for a
-    // while after.)
-    crate::diag::event(crate::diag::schema::DiagEvent::AppLaunch);
     // And what it DECODES, from the device's own codec table — the capability profile and the
     // direct-play gate derive from this instead of asserting the dev TV's abilities as universal
     // (issue #22's bug class; docs/plex-pass-audit.md's closing section). Same contract as
@@ -6939,22 +6731,6 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
         // means this device has no libcurl we can bind, so plex.tv sign-in will not work — the app
         // still runs, and `net::global_init` has already said so in the event log.
         let _ = crate::net::global_init();
-        // Drain whatever the LAST session left behind, on a worker — and **after `global_init`,
-        // which is the whole reason this line is here and not beside `telemetry::boot()` 170 lines
-        // up.** It was there first, and the end-to-end run showed why that was wrong: the worker
-        // reached `post_ca` before libcurl was bound, `net::available()` was false, every record
-        // came back Keep, and the log read `holding 5 records` immediately ABOVE `net: bound
-        // libcurl`. So the first flush of every launch failed, always, and the failure was
-        // indistinguishable from a television with no network. Worse than the lost flush: curl's
-        // own init is documented as not thread-safe, and a worker that got there first would have
-        // been doing it off the main thread.
-        //
-        // Boot is the right cadence for a television. Sessions are long, and the reports most worth
-        // having are about how one ENDED — a crash is the end, so the record was written by a
-        // process that no longer exists and this is the first moment anything can send it. A record
-        // queued during THIS session goes out at the next launch, or sooner if a consent change
-        // flushes.
-        crate::telemetry::flush_soon();
 
         // NO token is compiled into this binary. PMS access comes from the signed-in session,
         // or — for automated runs only (the regression harness, headless captures) — from the
@@ -7126,15 +6902,6 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
         let mut pick_user: Option<usize> =
             crate::dev::read("pickuser").and_then(|s| s.parse().ok());
         let session = crate::plex::session::load();
-        // **Issue #76's report lane.** This is the app's one COLD `session::load` — the only call
-        // that reads candidates, resolves the cross-launch probe and may reseal — so it is where
-        // this launch's storage facts become known. Hand them to the sign-in screen now, before the
-        // boot gate below can route to it: `BootTo::Login` mounts that route without an `enter()`
-        // (which is the other refresh), and the read-out's "Details" pill is hidden until the
-        // screen has been told something. Unconditional, not gated on the boot destination — a
-        // session that is fine now may still sign out later in this launch, and the panel must not
-        // be the one surface that then has nothing to say.
-        crate::ui::login::refresh_storage_readout();
         // Install-wide playback preference, restored before any route can resolve a stream.
         // A legacy file with no value resolves to Original; a new file can choose Auto only
         // through route's explicit readiness gate (session::load records that decision once).
@@ -7394,9 +7161,6 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
         let mut account_osc_down = true;
         // First-run route oscillators keep their real focus models moving so the device FPS suite
         // grades the composition rather than a settled screen that correctly stops presenting.
-        let consent_osc = crate::dev::flag("consentosc");
-        let mut consent_osc_last = 0u32;
-        let mut consent_osc_down = true;
         let onboard_osc = crate::dev::flag("onboardosc");
         let mut onboard_osc_last = 0u32;
         let mut onboard_osc_right = true;
@@ -7462,10 +7226,6 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
         // spring-back after key-up) so `ok_armed` marks "a press is in flight, commit it from the
         // per-frame loop when press::take_commit fires". Only ever set on Home's grid.
         let mut ok_armed = false;
-        // Which route name was last REPORTED as an event. Not `route` itself: several `Route`
-        // values share one name (every `Route::Player { overlay }` is "player"), and an overlay
-        // opening is not a screen change.
-        let mut last_route_reported: &'static str = "";
         let mut press_tried = false; // dev: /tmp/plxnative-press fires one simulated grid-card press
         let mut press_release_at = 0u32; // …and the tick at which that simulated press releases
         let mut itemmenu_tried = false; // dev: /tmp/plxnative-itemmenu opens the card context menu once
@@ -7497,7 +7257,6 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
             // (which is what shipped for an hour) meant a stored session that still owed the
             // sources answer walked Onboard → Home and was never asked at all.
             BootTo::Home => {
-                maybe_ask_consent();
                 if ask_first_run() {
                     log("boot: asking which sources feed Home");
                     crate::ui::onboard::enter();
@@ -7825,65 +7584,6 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                     // television's Home instead of closing the notice. It is a `Popover` and not a
                     // `Route` (one owner, `ui::legal`), so it takes its turn by being high in the
                     // chain and `continue`ing on every key; that IS its modality.
-                    // ABOVE Legal, and therefore above everything: the consent question is the
-                    // one panel that must be answered before the app is usable, and it is not
-                    // answering a press the person just made — it is the reason the boot stopped,
-                    // which is why its BACK is navigation and never an answer (below). Same
-                    // mechanism as the arm below it (a `Popover`,
-                    // not a `Route`, taking its turn by height in the chain and `continue`ing on
-                    // every key), which is also the whole of its modality. First-run BACK is
-                    // navigation, never an answer: Product returns to Crash. Only the explicit
-                    // Share / Don’t Share ANSWERS write a decision — they are the route's
-                    // action band, not rows. Settings BACK discards its draft.
-                    //
-                    // **AT `Stage::Crash` THIS ARM SWALLOWS BACK, AND THAT IS THE ONE ROOT THE
-                    // 2026-09-03 root rule does not yet reach.** The comment here used to say that
-                    // press "restores Profiles or Shared Sources", which `consent::on_back` has
-                    // never done — it returns `true` having done nothing, because sign-in is behind
-                    // this question and cannot be undone. Under the new rule that is a root like
-                    // any other and should call `back_at_root()`: going to the television's Home
-                    // neither answers nor dismisses the question, so nothing is stranded and
-                    // selecting the tile again comes straight back to it. It is NOT done here for
-                    // one mechanical reason — `consent::on_back` reports `true` for BOTH the
-                    // stepped-back and the swallowed case, so this arm cannot tell them apart, and
-                    // teaching it to means changing `ui/consent.rs`'s return type (`Consumed |
-                    // Root`), which belongs with that module rather than in a BACK arm guessing at
-                    // its stage.
-                    if crate::ui::consent::is_open() {
-                        if is_ok(sym) {
-                            if crate::ui::consent::focus_is_ctl() {
-                                // An answer pill is a control face with a pop of its own
-                                // (`route_screen::ActionRow`), so OK takes the tvOS press: dip
-                                // now, commit in `commit_consent` on the spring-back — the shared
-                                // decision alert's shape, for the same reason (the sheet is up
-                                // through the whole animation, so the answer being taken stays
-                                // legible).
-                                // `arm_key` records WHICH control and that the press came from the
-                                // KEY, so hover judges it by the focus stop rather than by the
-                                // coordinates it never had (`route_screen::PressFrom`).
-                                crate::ui::consent::arm_key();
-                                crate::ui::press::begin_ctl(last_input);
-                                ok_armed = true;
-                            } else {
-                                // a TableView row (the two documents) commits on the key-down,
-                                // as every row in the app does
-                                commit_consent(&mut route, &mut trail);
-                            }
-                        } else if is_back(sym, wcode) {
-                            // BACK reverses Product → Crash and is swallowed at Crash: the step
-                            // behind the consent question is sign-in, which cannot be undone.
-                            crate::ui::consent::on_back();
-                        } else if sym == SDLK_UP {
-                            crate::ui::consent::on_updown(-1);
-                        } else if sym == SDLK_DOWN {
-                            crate::ui::consent::on_updown(1);
-                        } else if sym == SDLK_LEFT {
-                            crate::ui::consent::on_left_right(-1);
-                        } else if sym == SDLK_RIGHT {
-                            crate::ui::consent::on_left_right(1);
-                        }
-                        continue;
-                    }
                     if crate::ui::legal::is_open() {
                         if is_ok(sym) {
                             crate::ui::legal::on_ok();
@@ -8222,26 +7922,6 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                     // underneath instead. `ui::route_screen`'s rule 11 says hover parks focus on
                     // every screen in the family, so they take their turn here in exactly the
                     // order the key ladder gives them.
-                    if crate::ui::consent::is_open() {
-                        // `ui::press` assumes focus cannot move while a press is in flight — the
-                        // nav keys pay that by calling `press::cancel`, and hover owes the same.
-                        // Otherwise a pointer-down on `Share reports` plus ordinary Magic Remote
-                        // jitter records the OTHER answer, or — the case the first version of this
-                        // guard missed — slides off every control and records the ORIGINAL one
-                        // anyway, because a miss leaves focus where it was. `pointer_hold` parks
-                        // focus as usual and reports whether the pointer is still on the thing the
-                        // press was armed on, dead space included.
-                        let held = if crate::ui::consent::alert_is_open() {
-                            crate::ui::consent::alert_hold(mx, my)
-                        } else {
-                            crate::ui::consent::pointer_hold(mx, my)
-                        };
-                        if ok_armed && !held {
-                            crate::ui::press::cancel();
-                            ok_armed = false;
-                        }
-                        continue;
-                    }
                     if crate::ui::legal::is_open() {
                         crate::ui::legal::pointer_focus(mx, my);
                         continue;
@@ -8331,20 +8011,6 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                     // Rule 11's click half. These two used to `continue` unconditionally, which
                     // is why Privacy & Data answered neither hover nor click: an answer pill, a
                     // Done, a document row and a delete-confirmation answer were all unclickable.
-                    if crate::ui::consent::is_open() {
-                        let (cx, cy) = ptr_xy(&ev);
-                        // a control FACE dips and commits on the spring-back, exactly as its OK
-                        // does; a table row commits on the button-down like every row in the app
-                        if crate::ui::consent::alert_press_at(cx, cy)
-                            || crate::ui::consent::press_at(cx, cy)
-                        {
-                            crate::ui::press::begin_ctl(last_input);
-                            ok_armed = true;
-                        } else if crate::ui::consent::click_row(cx, cy) {
-                            commit_consent(&mut route, &mut trail);
-                        }
-                        continue;
-                    }
                     if crate::ui::legal::is_open() {
                         let (cx, cy) = ptr_xy(&ev);
                         crate::ui::legal::click(cx, cy);
@@ -8468,13 +8134,7 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                                 } else {
                                     let np = !paused();
                                     if np {
-                                        if set_transport_paused(mt, true) {
-                                            crate::diag::event(
-                                                crate::diag::schema::DiagEvent::FeatureUsed {
-                                                    feature: crate::diag::schema::Feature::Pause,
-                                                },
-                                            );
-                                        }
+                                        let _ = set_transport_paused(mt, true);
                                     } else {
                                         set_transport_paused(mt, false);
                                     }
@@ -8718,20 +8378,7 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                         }
                     } else if matches!(route, Route::Login) {
                         let (cx, cy) = ptr_xy(&ev);
-                        if crate::ui::login::modal_open() {
-                            // Issue #75 review: route the click THROUGH the one-off report alert
-                            // instead of synthesizing a bare OK — `alert_press_at` hits an actual
-                            // answer (or refuses on a miss), so a click on the scrim or outside the
-                            // panel can no longer activate whichever answer the D-pad last
-                            // focused. The storage Details panel (issue #76's report lane) answers
-                            // `modal_open` too and takes no OK at all — a click over it refuses
-                            // here rather than reaching the pill underneath, and BACK closes it.
-                            if crate::ui::login::details_press_at(cx, cy) {
-                                // Details is the visible topmost modal and is read-only.
-                            } else {
-                                crate::ui::login::alert_press_at(cx, cy);
-                            }
-                        } else if crate::ui::login::action_press_at(cx, cy) {
+                        if crate::ui::login::action_press_at(cx, cy) {
                             if crate::ui::login::arm_storage_action() {
                                 crate::ui::press::begin_ctl(last_input);
                                 ok_armed = true;
@@ -8800,9 +8447,7 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                             continue;
                         }
                         let delta = if dy < 0 { 1 } else { -1 };
-                        if crate::ui::consent::is_open() {
-                            crate::ui::consent::on_updown(delta);
-                        } else if crate::ui::legal::is_open() {
+                        if crate::ui::legal::is_open() {
                             crate::ui::legal::on_updown(delta);
                         } else if settings_root_owns_input(
                             route,
@@ -8953,10 +8598,6 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                         "" | "root" => {}
                         "home" => {
                             perform_settings_action(crate::ui::settings::Action::Home, &mut route)
-                        }
-                        "privacy" => {
-                            let current = crate::telemetry::consent::current().unwrap_or_default();
-                            crate::ui::consent::open_settings(&current);
                         }
                         "legal" => crate::ui::legal::open(),
                         other => log(&format!(
@@ -9419,13 +9060,6 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                     repause_at: &mut repause_at,
                 },
             );
-            // **Unconditional, and NOT inside the `is_started` block above.** `player::state()`
-            // derives two of its answers outside the pump entirely — `Resolving` while a plan is in
-            // flight, and `Error` for a `/decision` refusal, which happens before an engine exists —
-            // so gating this on a started engine would silently miss the earliest and most certain
-            // failure there is. It observes the value the HUD renders and reports only transitions,
-            // so the steady-state cost is one atomic load.
-            crate::player::report::tick();
             // end-of-stream: the pipeline drained at the credits → hand off to Up Next when the
             // show has another episode queued, else leave the player (back to the detail page or
             // home, whichever is behind), instead of freezing on the last frame.
@@ -9811,13 +9445,8 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                 } else if crate::ui::press::take_commit(now) {
                     ok_armed = false;
                     // The deferred activation, dispatched by asking the SAME questions the key
-                    // ladder asked when it armed the press, in the SAME order. The modal panel
-                    // comes first here because it comes first there: consent stands OVER a route
-                    // that has its own arm below, so a match on `route` alone would commit a
-                    // consent press as a Home activation.
-                    if crate::ui::consent::is_open() {
-                        commit_consent(&mut route, &mut trail);
-                    } else if matches!(route, Route::Onboard) {
+                    // ladder asked when it armed the press, in the SAME order.
+                    if matches!(route, Route::Onboard) {
                         if let Some(next) = apply_onboarding_action(commit_onboarding(), &mut trail)
                         {
                             route = next;
@@ -10038,7 +9667,6 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                 crate::ui::jf_login::leave(); // the system keyboard does not follow the route
                 activate_server();
                 trail.reset();
-                maybe_ask_consent();
                 log("login: jellyfin signed in — entering Home");
                 route = Route::Home;
             }
@@ -10070,8 +9698,7 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                     // The sign-in's question first, before any per-profile step. On a Plex Home
                     // account it was already asked at the picker below and this is a no-op; on a
                     // single-user account this is the earliest authorized moment there is.
-                    maybe_ask_consent();
-                    if crate::ui::onboard::asks() {
+                        if crate::ui::onboard::asks() {
                         log("login: server installed — asking which sources feed Home");
                         crate::ui::onboard::enter();
                         route = Route::Onboard;
@@ -10087,12 +9714,7 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                 } else {
                     match crate::auth::phase() {
                         crate::auth::Phase::Profiles | crate::auth::Phase::Switching => {
-                            // BEFORE the picker: the account is authorized, so the consent
-                            // question is answerable, and the person holding the remote at this
-                            // moment is the one who signed the television in. It draws over the
-                            // picker's route on its own opaque ground.
-                            maybe_ask_consent();
-                            if route == Route::Login {
+                                        if route == Route::Login {
                                 crate::ui::login::leave();
                             }
                             if route != Route::Profiles {
@@ -10297,7 +9919,7 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
             // remains separately testable instead of being inferred from route shape.
             } else if host_page_updates(
                 route,
-                crate::ui::settings::is_open() || crate::ui::consent::freezes_host(),
+                crate::ui::settings::is_open(),
             ) && matches!(page_of(route), Route::Home)
             {
                 if hero_osc && now.wrapping_sub(hero_osc_last) > 700 {
@@ -10334,7 +9956,7 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                 underlay_moving |= moving;
             } else if host_page_updates(
                 route,
-                crate::ui::settings::is_open() || crate::ui::consent::freezes_host(),
+                crate::ui::settings::is_open(),
             ) && matches!(page_of(route), Route::Library)
             {
                 // dev: libosc sweeps the browse-grid focus down↔up (the library_scroll FPS scene).
@@ -10371,7 +9993,7 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
             }
             if host_page_updates(
                 route,
-                crate::ui::settings::is_open() || crate::ui::consent::freezes_host(),
+                crate::ui::settings::is_open(),
             ) && matches!(page_of(route), Route::Search)
             {
                 // dev: searchosc sweeps the result shelves' focus down↔up (the fps:search-type
@@ -10438,20 +10060,9 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                         crate::ui::onboard::key(sym, 0);
                     } else if crate::ui::legal::is_open() {
                         crate::ui::legal::on_updown(delta);
-                    } else if crate::ui::consent::is_open() {
-                        crate::ui::consent::on_updown(delta);
                     } else {
                         crate::ui::settings::on_updown(delta);
                     }
-                }
-            }
-            if consent_osc && crate::ui::consent::is_open() && !crate::ui::settings::is_open() {
-                crate::ui::idle::invalidate();
-                if now.wrapping_sub(consent_osc_last) > 520 {
-                    consent_osc_last = now;
-                    let delta = if consent_osc_down { 1 } else { -1 };
-                    consent_osc_down = !consent_osc_down;
-                    crate::ui::consent::on_updown(delta);
                 }
             }
             if onboard_osc && matches!(route, Route::Onboard) {
@@ -10470,7 +10081,6 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
             // Self-gated like the alert, and for the same reason: not a route, so there is no
             // route term to test it with.
             crate::ui::legal::update(dt);
-            crate::ui::consent::update(dt);
             crate::ui::settings::update(dt);
             let jail_subject = jail_failure_subject(route);
             jail_repair.update(jail_subject, dt);
@@ -10557,8 +10167,7 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
             };
             // Async play resolve: install the worker's plan and start the engine. Route-
             // unconditional — a landing must never depend on which screen is mounted.
-            land_play_then_observe(
-                || {
+            land_play(|| {
                     if let Some(r) = crate::route::pump_play() {
                         crate::ui::idle::invalidate();
                         let resume_prepared = r <= 0
@@ -10595,12 +10204,7 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                             };
                         }
                     }
-                },
-                // `pump_play` can install a refused `/decision` after the earlier report
-                // observation but before this frame draws the Error screen. Observe again at that
-                // exact publication boundary; latches make a healthy/no-change frame idempotent.
-                crate::player::report::tick,
-            );
+            });
             // Async detail load: install the worker's item into CURRENT. Route-unconditional for
             // the same reason as pump_play — play_item_now requests a detail from Home and flips
             // straight to the player, so a Detail-gated pump would never land it.
@@ -10947,8 +10551,6 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                                 // notice is about the APP, not about anything on the page behind it.
                                 crate::ui::settings::draw_scrim();
                                 crate::ui::legal::draw_scrim();
-                                // And the consent question over all of them, mirroring the key ladder.
-                                crate::ui::consent::draw_scrim();
                             };
                             if let Some(reg) = crate::gfx::blur_direct_region() {
                                 crate::gfx::blur_snapshot_direct(reg, &mut page);
@@ -10961,9 +10563,7 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                             // The compact modals do NOT take this branch: they expose most of their
                             // host, so the page still has to be on the framebuffer. `page` runs, and
                             // the freeze inside it is what makes running it cheap.
-                            if !crate::ui::settings::host_ground_ready()
-                                && !crate::ui::consent::host_ground_ready()
-                            {
+                            if !crate::ui::settings::host_ground_ready() {
                                 crate::ui::profile::phase("main.ui", || page());
                             }
                             // The diagnostics read-out, off the player. It drew ONLY inside the branch
@@ -11008,9 +10608,6 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                                 crate::ui::onboard::draw();
                             }
                             crate::ui::legal::draw();
-                            // Top of the stack, mirroring the top of the key ladder — the boot stopped
-                            // for this, so nothing may be drawn over it.
-                            crate::ui::consent::draw();
                             // dev: the blurred route transition, then the load dial's glass surfaces.
                             // LAST on the non-player path, so the snapshot either takes is of the
                             // COMPLETE page — which is the honest source for a surface that sits on
@@ -11115,14 +10712,6 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                 Route::Player { .. } => "player",
                 _ => "home",
             };
-            // …and the same name as a reportable event, on CHANGE only. Per-frame would be a
-            // firehose of one fact; what is worth knowing is which screens get used, which is a
-            // transition count. `&'static str` from the table above, so nothing runtime-built can
-            // reach the wire — see `diag::schema`.
-            if rn != last_route_reported {
-                last_route_reported = rn;
-                crate::diag::event(crate::diag::schema::DiagEvent::RouteEntered { screen: rn });
-            }
             // The lab envelope's `route` field, from the SAME name the heartbeat and the focus
             // fingerprint print — a snapshot that disagreed with the log about which screen the
             // tester was on would be worse than one that omitted the field. Compiles away in every
@@ -11221,13 +10810,9 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                 let ov = if crate::ui::settings::is_open() {
                     if crate::ui::legal::is_open() {
                         " overlay=legal"
-                    } else if crate::ui::consent::is_open() {
-                        " overlay=privacy"
                     } else {
                         " overlay=settings"
                     }
-                } else if crate::ui::consent::is_open() {
-                    " overlay=consent"
                 } else {
                     match route {
                         Route::Player {
@@ -11339,7 +10924,6 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
             }
         }
 
-        crate::player::report::abandon_pending();
         if is_started() {
             crate::player::stop_bufferfeed(mt);
         }
@@ -11935,41 +11519,6 @@ mod root_back_tests {
                 "{what}"
             );
         }
-    }
-}
-
-#[cfg(test)]
-mod delete_local_data_tests {
-    //! **Where the app lands after Delete all local data.** The branch itself is inside the SDL
-    //! key loop, so the decision is lifted into [`delete_outcome`] and graded here.
-    use super::*;
-
-    /// **Reported 2026-09-02: deleting everything left the user in Settings, and BACK out of it
-    /// landed on an empty Home.** Both halves are this one branch. `delete_all_local_data` erases
-    /// the session unconditionally and only then reports what it could not unlink, so gating the
-    /// navigation on that report meant a single leftover file stranded a signed-out app on a
-    /// browsing screen — with no route back to sign-in short of relaunching.
-    ///
-    /// A leftover is not exotic: the candidate lists span BOTH webOS install prefixes, and the two
-    /// jail profiles disagree about which of those are writable, so `EACCES`/`EROFS` on a path
-    /// this profile was never going to own is an ordinary outcome on a healthy television.
-    #[test]
-    fn a_file_that_could_not_be_removed_still_returns_the_user_to_sign_in() {
-        assert!(
-            delete_outcome(0).to_sign_in,
-            "a clean delete goes to sign-in"
-        );
-        assert!(
-            delete_outcome(3).to_sign_in,
-            "and so does one that left files behind — the session is gone either way"
-        );
-    }
-
-    /// The leftovers are still worth saying out loud; they are just not a reason to stay put.
-    #[test]
-    fn leftovers_are_reported_but_a_clean_sweep_says_nothing() {
-        assert!(delete_outcome(1).report_leftovers);
-        assert!(!delete_outcome(0).report_leftovers);
     }
 }
 

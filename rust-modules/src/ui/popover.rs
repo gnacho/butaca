@@ -1368,13 +1368,7 @@ mod tests {
         );
 
         // The popovers `app.rs` draws WITHOUT a route term, gated only on `Popover::visible`.
-        const SELF_GATED: &[&str] = &[
-            "account_menu",
-            "item_menu",
-            "legal",
-            "consent",
-            "settings",
-        ];
+        const SELF_GATED: &[&str] = &["account_menu", "item_menu", "legal", "settings"];
 
         let mut offences: Vec<String> = Vec::new();
         let mut seen = 0usize;
