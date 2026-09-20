@@ -4,6 +4,7 @@
   "vendor": "gnacho",
   "type": "native",
   "main": "plxnative",
+  "requiredPermissions": ["database.operation", "securitykey.operation"],
   "title": "Butaca",
   "appDescription": "Unofficial native Jellyfin client - not affiliated with Jellyfin",
   "icon": "icon.png",

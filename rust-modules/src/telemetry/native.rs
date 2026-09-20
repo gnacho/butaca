@@ -47,19 +47,26 @@ impl Drop for Guard {
     }
 }
 
-/// Bring the capture backend into line with the currently published consent decision.
-///
-/// Boot imports pending envelopes before calling this. A withdrawal first restores the C crash
-/// tracer that Sentry found installed ahead of it, then removes both native directories.
-pub(crate) fn sync(c: &super::consent::Consent) -> Guard {
+/// Main-thread half of cold boot after [`prepare_boot`] has completed every explicit local purge
+/// and pending-envelope import on the persistence worker. SDK start/stop remains here because the
+/// native capture backend is process lifecycle state, not storage adapter work.
+pub(crate) fn sync_prepared(c: &super::consent::Consent) -> Guard {
     let wanted = c.answered() && c.errors && super::sender::sentry_dsn().is_some();
     if wanted {
         start();
     } else {
         stop();
-        purge_all();
     }
     Guard
+}
+
+pub(crate) fn prepare_boot(consent: &super::consent::Consent) -> Vec<CrashKey> {
+    if consent.errors && super::sender::sentry_dsn().is_some() {
+        import_pending_for(consent)
+    } else {
+        let _ = purge_all();
+        Vec::new()
+    }
 }
 
 /// Apply a consent change without manufacturing a second lifetime guard.
@@ -67,15 +74,19 @@ pub(crate) fn sync(c: &super::consent::Consent) -> Guard {
 /// A change that leaves the backend running (say, product analytics toggled while crash reports
 /// stay on) still re-applies the crash-report id to the scope: `start` returns early once active,
 /// and the id it set at init is the one the daemon would otherwise keep.
-pub(crate) fn sync_change(c: &super::consent::Consent) {
+pub(crate) fn sync_change(c: &super::consent::Consent) -> bool {
     let wanted = c.answered() && c.errors && super::sender::sentry_dsn().is_some();
     if wanted {
-        let _ = import_pending();
+        let _ = import_pending_for(c);
         start();
         set_user(c.errors_id.as_deref());
+        // The SDK exposes no status for an already-active backend or scope flush. This return only
+        // proves local cleanup on the off path; callers must use the effective consent gate as the
+        // authority rather than infer capture availability here.
+        true
     } else {
         stop();
-        purge_all();
+        purge_all()
     }
 }
 
@@ -87,13 +98,25 @@ fn pending_dir() -> PathBuf {
     crate::paths::in_runtime_dir(PENDING_DIR)
 }
 
-fn remove_database() {
-    let _ = std::fs::remove_dir_all(database_dir());
+fn remove_tree(path: PathBuf) -> bool {
+    match std::fs::remove_dir_all(&path) {
+        Ok(()) => path
+            .parent()
+            .and_then(|parent| std::fs::File::open(parent).ok())
+            .is_some_and(|parent| parent.sync_all().is_ok()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+        Err(_) => false,
+    }
 }
 
-fn purge_all() {
-    remove_database();
-    let _ = std::fs::remove_dir_all(pending_dir());
+fn remove_database() -> bool {
+    remove_tree(database_dir())
+}
+
+fn purge_all() -> bool {
+    let database = remove_database();
+    let pending = remove_tree(pending_dir());
+    database && pending
 }
 
 /// Is this the UUID-shaped filename the SDK gives an external event envelope?
@@ -264,6 +287,7 @@ const TOP_FIELDS: &[&str] = &[
     "exception",
     "threads",
     "debug_meta",
+    "breadcrumbs",
 ];
 /// `user` survives with exactly its `id`, and only when that id has the shape this app mints
 /// (`telemetry::is_minted_id`): the crash-report identifier `sdk::start` put on the scope. Email,
@@ -393,6 +417,9 @@ fn sanitise_event(event: &mut serde_json::Value, event_id: &str) {
     {
         retain_fields(sdk, SDK_FIELDS);
     }
+    if let Some(breadcrumbs) = event.get_mut("breadcrumbs") {
+        *breadcrumbs = super::window::sanitise(breadcrumbs);
+    }
     sanitise_user(event);
     if let Some(exception) = event
         .get_mut("exception")
@@ -509,6 +536,7 @@ pub(crate) const PREVIEW_USER_ID: &str = "<crash report id>";
 pub(crate) fn preview_event() -> Vec<u8> {
     let mut event = serde_json::json!({
         "event_id": "<random id for this crash>",
+        "breadcrumbs": super::window::preview(),
         "timestamp": "<crash time>",
         "platform": "native",
         "level": "fatal",
@@ -629,8 +657,8 @@ fn event_from_envelope(bytes: &[u8]) -> Option<(String, Vec<u8>, Option<CrashKey
 }
 
 /// Import every complete native envelope, deleting it only after the durable spool accepted it.
-pub(crate) fn import_pending() -> Vec<CrashKey> {
-    if !super::consent::allows_errors() || super::sender::sentry_dsn().is_none() {
+pub(crate) fn import_pending_for(consent: &super::consent::Consent) -> Vec<CrashKey> {
+    if !consent.errors || super::sender::sentry_dsn().is_none() {
         return Vec::new();
     }
     let Ok(entries) = std::fs::read_dir(pending_dir()) else {
@@ -726,6 +754,8 @@ mod sdk {
             install: *const c_char,
         );
         fn plx_sentry_set_user_id(id: *const c_char);
+        fn plx_sentry_window_breadcrumb(stage: *const c_char, playing: c_int,
+            major: c_int, minor: c_int, patch: c_int, display: c_int, surface: c_int);
     }
 
     /// Put the crash-report identifier on the SDK scope as `user.id`, or clear it. Each call makes
@@ -738,6 +768,17 @@ mod sdk {
         let id = id.filter(|id| !id.is_empty()).and_then(cstring);
         unsafe {
             plx_sentry_set_user_id(id.as_ref().map_or(std::ptr::null(), |id| id.as_ptr()));
+        }
+    }
+
+    pub(super) fn record_window(observation: super::super::window::Observation) {
+        if !ACTIVE.load(Ordering::Acquire) { return; }
+        let Some(stage) = cstring(observation.stage.code()) else { return; };
+        let version = observation.version.map(|v| v.map(c_int::from)).unwrap_or([-1; 3]);
+        let bit = |v: Option<bool>| v.map(c_int::from).unwrap_or(-1);
+        unsafe {
+            plx_sentry_window_breadcrumb(stage.as_ptr(), bit(observation.playing),
+                version[0], version[1], version[2], bit(observation.display), bit(observation.surface));
         }
     }
 
@@ -812,7 +853,7 @@ mod sdk {
                 sentry_options_set_dist(options, dist.as_ptr());
             }
             sentry_options_set_auto_session_tracking(options, 0);
-            sentry_options_set_max_breadcrumbs(options, 0);
+            sentry_options_set_max_breadcrumbs(options, super::super::window::LIMIT);
             sentry_options_set_debug(options, 0);
             sentry_options_set_crash_reporting_mode(options, 1); // NATIVE, no minidump
             if sentry_init(options) == 0 {
@@ -874,9 +915,38 @@ fn set_user(id: Option<&str>) {
 #[cfg(not(all(target_os = "linux", target_arch = "arm")))]
 fn set_user(_id: Option<&str>) {}
 
+/// Sparse breadcrumbs use the already-running, consent-gated native capture backend. Its
+/// transport is disabled; these leave the device only with a later crash event.
+pub(crate) fn record_window(observation: super::window::Observation) {
+    #[cfg(all(target_os = "linux", target_arch = "arm"))]
+    sdk::record_window(observation);
+    #[cfg(not(all(target_os = "linux", target_arch = "arm")))]
+    let _ = (observation.stage, observation.playing, observation.version,
+        observation.display, observation.surface);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_purge_reports_real_removal_failure() {
+        let dir = std::env::temp_dir().join(format!(
+            "plxnative-native-purge-result-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("tree")).unwrap();
+        std::fs::write(dir.join("tree/event"), b"pending").unwrap();
+        assert!(remove_tree(dir.join("tree")));
+        assert!(!dir.join("tree").exists());
+        let regular = dir.join("not-a-directory");
+        std::fs::write(&regular, b"keep").unwrap();
+        assert!(!remove_tree(regular.clone()));
+        assert!(regular.exists());
+        let _ = std::fs::remove_file(regular);
+        let _ = std::fs::remove_dir(dir);
+    }
 
     fn assert_keys(value: &serde_json::Value, pointer: &str, allowed: &[&str]) {
         let object = value
@@ -922,6 +992,25 @@ mod tests {
         ] {
             assert!(!envelope_filename(bad), "accepted {bad}");
         }
+    }
+
+    #[test]
+    #[ignore = "requires the envelope produced by ci/window-breadcrumb-probe.c on the TV"]
+    fn device_window_breadcrumbs_survive_the_real_importer() {
+        let path = std::env::var("PLX_WINDOW_PROBE_ENVELOPE").expect("set PLX_WINDOW_PROBE_ENVELOPE");
+        let bytes = std::fs::read(path).unwrap();
+        let (_, body, _) = event_from_envelope(&bytes).expect("device envelope must import");
+        let event: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let values = event["breadcrumbs"]["values"].as_array().unwrap();
+        assert_eq!(values.len(), super::super::window::LIMIT);
+        let stages: Vec<_> = values.iter().rev().take(3).map(|v| v["message"].as_str().unwrap()).collect();
+        assert_eq!(stages, ["first_frame", "wm_ready", "did_foreground"]);
+        assert_eq!(values[values.len() - 2]["data"]["surface"], true);
+        assert_eq!(values[values.len() - 2]["data"]["sdl_patch"], 5);
+        let json = String::from_utf8(body).unwrap();
+        assert!(!json.contains("example.invalid"));
+        assert!(!json.contains("/tmp/"));
+        assert!(values.iter().all(|v| v.get("timestamp").and_then(serde_json::Value::as_str).is_some()));
     }
 
     #[test]
