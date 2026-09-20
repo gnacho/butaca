@@ -1024,6 +1024,8 @@ check: lint
 	python3 ci/test_verify_deploy.py
 
 
+STAGE       := ipkroot/data/usr/palm/applications/$(APPID)
+
 ipk: pkg/plxnative $(APPINFO) release-guard
 	@echo "packaging $(if $(RELEASE),RELEASE,dev) build ($(RUST_CFG)) as $(APPID) [$(FLAVOR)]"
 	rm -rf ipkroot/data/usr && mkdir -p $(STAGE)/licenses
