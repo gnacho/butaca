@@ -157,7 +157,7 @@ APPPORT      = $(if $(filter stable,$(FLAVOR)),8910,8911)
 .DEFAULT_GOAL := all
 
 QUERY_GOALS = print-flavor print-appid print-appdir print-rundir print-eventlog print-appport print-tv \
-              print-simbin print-app-files print-deploy-files print-sentry-handler print-ffmpeg-staged
+              print-simbin print-app-files print-deploy-files print-ffmpeg-staged
 print-flavor:   ; @echo '$(FLAVOR)'
 print-appid:    ; @echo '$(APPID)'
 print-appdir:   ; @echo '$(APPDIR)'
@@ -173,11 +173,10 @@ print-simbin:   ; @echo '$(SIM_BIN)'
 # The four queries `ci/test_deploy_manifest.py` asks instead of running `make -p` (which prints a
 # RECURSIVE variable's unexpanded definition — see the ban on it elsewhere in this file — and
 # would in any case hand a host test the SAME string for two different flavours). Defined once
-# `APP_FILES`/`DEPLOY_FILES`/`SENTRY_HANDLER`/`FFMPEG_STAGED` exist, further down this file; make
+# `APP_FILES`/`DEPLOY_FILES`/`FFMPEG_STAGED` exist, further down this file; make
 # reads the whole file before running a recipe, so the forward reference is fine.
 print-app-files:      ; @echo '$(APP_FILES)'
 print-deploy-files:   ; @echo '$(DEPLOY_FILES)'
-print-sentry-handler: ; @echo '$(SENTRY_HANDLER)'
 print-ffmpeg-staged:  ; @echo '$(FFMPEG_STAGED)'
 
 # `make disk` — what every checkout of this repository is costing, in one table, plus how to get
@@ -481,49 +480,9 @@ RUST_STAMP     = pkg/.build-config
 # `make RELEASE=1 ipk` followed by `make RELEASE=1 SYMBOLS=1 symbols` silently relinks a different
 # binary and hands you a `.debug` that will never match anything a user's television reports — the
 # same shape as `make RELEASE=1 && make deploy`, which is the trap this whole mechanism exists for.
-# The telemetry endpoints, read out of the gitignored pkg/telemetry.local.json and handed to the
-# compiler as option_env! values. Absent file, absent key, EMPTY value -> the constant is None and
-# `telemetry::sender::configured()` is false at COMPILE time, so a fork, a CI runner and anyone
-# building from source get a binary with no endpoint in it at all. That is the safe direction and
-# it is a property of the artifact rather than of a runtime flag.
-#
-# **FOUR values, in two PAIRS, and the pair decides the environment.** This is not symmetry for its
-# own sake: the build's `environment` field is derived from WHICH pair it was given
-# (`telemetry::sender::ENVIRONMENT`), so a binary cannot label itself `production` while sending to
-# the dev project. The first draft derived it from the feature set instead, and
-# `make RELEASE=1 FLAVOR=debug deploy` -- an ordinary command -- would have done exactly that:
-# `RELEASE=1` drops `devtriggers`, so it read as production, while the key still came from the local
-# file and the data still went to dev. Destination and label diverging silently is the worst
-# outcome for a field whose only job is to say which side data is on.
-#
-# The DEV pair is what a developer's machine holds; the PRODUCTION pair exists only as a GitHub
-# repository variable and is injected by the release workflow. So a local build physically cannot
-# reach production -- not because a flag was set, but because the value is not on the machine.
-#
-# All four are WRITE-ONLY ingest credentials and publishable by design -- any client that sends
-# anything must carry one, and `strings` finds them in any shipped binary. The Sentry AUTH TOKEN is
-# a different thing entirely (it can read and delete the project's data), is not read here, and is
-# never compiled in; it lives only as a GitHub secret and is used only by `sentry-cli` in CI.
-# `python3 -c` rather than a grep because the file is JSON and a value can contain a `:` or a `/`;
-# `|| true` because the whole point is that a checkout without the file still builds.
-TELEMETRY_JSON = pkg/telemetry.local.json
-telemetry_val = $(shell python3 -c "import json,sys;print(json.load(open('$(TELEMETRY_JSON)')).get('$(1)',''))" 2>/dev/null || true)
-# The dev pair: read from the working copy, written there by `make telemetry-local`.
-PLX_SENTRY_DSN_DEV  ?= $(call telemetry_val,sentry_dsn_dev)
-PLX_POSTHOG_KEY_DEV ?= $(call telemetry_val,posthog_key_dev)
-# The production pair: deliberately NOT read from the file. Only the environment can supply these,
-# which in practice means the release workflow. Reading them from the working copy is precisely the
-# bug this whole arrangement exists to make impossible.
-PLX_SENTRY_DSN  ?=
-PLX_POSTHOG_KEY ?=
-
-# In the stamp, and it has to be: switching a build from unconfigured to configured changes what
-# the binary CAN DO and nothing about the sources, so without this the configuration would be
-# baked in from whichever build happened to run first -- the same class of trap as
-# `make RELEASE=1 && make deploy`. The values are hashed rather than written, so the stamp file
-# (which is not gitignored) never contains a credential.
-TELEMETRY_CFG  = $(shell printf '%s|%s|%s|%s' '$(PLX_SENTRY_DSN)' '$(PLX_POSTHOG_KEY)' '$(PLX_SENTRY_DSN_DEV)' '$(PLX_POSTHOG_KEY_DEV)' | shasum | cut -c1-12)
-RUST_CFG       = features:$(RUST_FEATFLAGS)$(if $(SYMBOLS),+symbols,)+tel:$(TELEMETRY_CFG)
+# This fork carries no telemetry endpoints: there is nothing to compile in and no
+# credential plumbing to inject. `RUST_CFG` tracks the features alone.
+RUST_CFG       = features:$(RUST_FEATFLAGS)$(if $(SYMBOLS),+symbols,)
 # Handled by $(shell) during PARSING, and by DELETING the output rather than by timestamps.
 # Both choices are load-bearing, and both were arrived at by measuring the failures:
 #   * A rule cannot do it. macOS ships GNU make 3.81, which decides whether a target is up to date
@@ -614,28 +573,6 @@ FFMPEG_SONAMES = libavutil-plx.so.61 libavcodec-plx.so.63 libavformat-plx.so.63 
                  $(if $(RELEASE),,libswscale-plx.so.10)
 FFMPEG_STAGED = $(addprefix pkg/,$(FFMPEG_SONAMES))
 
-# Sentry Native supplies only the async-signal-safe capture and out-of-process ARM stack walk. Its
-# HTTP transport is compiled out: the resulting envelope is handed back to this executable in
-# spool-only mode and sent later by telemetry::sender, behind the app's own consent and retry rules.
-# The pinned source, webOS/glibc-2.12/ARM32 patch and build recipe live in ci/build-sentry-native.sh.
-SENTRY_NATIVE_PREFIX = vendor/sentry-native-prefix
-SENTRY_NATIVE_LIB     = $(SENTRY_NATIVE_PREFIX)/lib/libsentry.a
-SENTRY_UNWIND_LIB     = $(SENTRY_NATIVE_PREFIX)/lib/libunwind.a
-SENTRY_HANDLER        = $(SENTRY_NATIVE_PREFIX)/bin/sentry-crash
-SENTRY_NATIVE_STAMP   = $(SENTRY_NATIVE_PREFIX)/.built
-SENTRY_NATIVE_INPUTS  = ci/build-sentry-native.sh vendor/sentry-native/webos-arm32.patch
-
-# `sentry_context.c` is the only application TU that includes the SDK header. Its Rust caller sees
-# plain C strings rather than sentry_value_t's opaque by-value union, whose AAPCS ABI must stay on
-# the C side. The header is generated by the pinned SDK build, hence the explicit prerequisite.
-src/sentry_context.o: CFLAGS += -I$(SENTRY_NATIVE_PREFIX)/include
-src/sentry_context.o: $(SENTRY_NATIVE_STAMP)
-
-$(SENTRY_NATIVE_STAMP): $(SENTRY_NATIVE_INPUTS)
-	WEBOS_SDK=$(WEBOS_SDK) ./ci/build-sentry-native.sh
-	@touch $@
-
-sentry-native: $(SENTRY_NATIVE_STAMP)
 
 $(FFMPEG_INC)/libavformat/avformat.h:
 	RELEASE=$(RELEASE) ./ci/build-ffmpeg.sh
@@ -664,8 +601,6 @@ $(FFABI_STAMP): ci/ffabi-assert.c $(FFMPEG_INC)/libavformat/avformat.h Makefile
 RUST_INPUTS := $(shell find rust-modules/src assets -type f 2>/dev/null)
 $(RUST_LIB): $(RUST_INPUTS) rust-modules/Cargo.toml rust-modules/Cargo.lock rust-modules/build.rs rust-modules/.cargo/config.toml Makefile $(FFABI_STAMP)
 	cd rust-modules && PATH="$$HOME/.cargo/bin:$$PATH" $(RUST_ENV) \
-	  PLX_SENTRY_DSN='$(PLX_SENTRY_DSN)' PLX_POSTHOG_KEY='$(PLX_POSTHOG_KEY)' \
-	  PLX_SENTRY_DSN_DEV='$(PLX_SENTRY_DSN_DEV)' PLX_POSTHOG_KEY_DEV='$(PLX_POSTHOG_KEY_DEV)' \
 	  cargo +$(RUST_NIGHTLY) build --release --target $(RUST_TARGET) \
 	    --target-dir $(RUST_TDIR) $(RUST_FEATFLAGS)
 
@@ -689,10 +624,10 @@ $(RUST_LIB): $(RUST_INPUTS) rust-modules/Cargo.toml rust-modules/Cargo.lock rust
 # this to -E/--export-dynamic: no other executable-private symbol is part of the native ABI.
 SMP_CALLBACK_HOOK = _ZN17StarfishMediaAPIs20callbackFunctionHookEixPKc
 SMP_INTERPOSER_LDFLAG = -Wl,--export-dynamic-symbol=$(SMP_CALLBACK_HOOK)
-pkg/plxnative: $(OBJS) $(RUST_LIB) $(FFMPEG_STAGED) $(SENTRY_NATIVE_STAMP) Makefile
+pkg/plxnative: $(OBJS) $(RUST_LIB) $(FFMPEG_STAGED) Makefile
 	$(CC) $(CFLAGS) -Wl,--build-id=sha1 $(SMP_INTERPOSER_LDFLAG) \
-	  $(OBJS) $(RUST_LIB) $(SENTRY_NATIVE_LIB) \
-	  $(SENTRY_UNWIND_LIB) $(LIBS_REAL) -ldl -lrt -lpthread -lm -o $@
+	  $(OBJS) $(RUST_LIB) \
+	  $(LIBS_REAL) -ldl -lrt -lpthread -lm -o $@
 
 # --- NDK bootstrap -----------------------------------------------------------
 # Download + extract + relocate the webosbrew native-toolchain into $(WEBOS_SDK).
@@ -718,36 +653,6 @@ NDK_URL = https://github.com/webosbrew/native-toolchain/releases/download/$(NDK_
 # where an unverified 156 MB download actually matters.
 NDK_SHA256_linux-aarch64 = 45a2d12ff557457d92cde4fddaa77a6f1090fca03adc43bb74397e5e0c379501
 NDK_SHA256 = $(NDK_SHA256_$(NDK_PLAT))
-# Fetch this checkout's DEV telemetry credentials from GitHub into the gitignored local file.
-#
-# **GitHub is the single source of truth for every credential**, including the dev ones; the working
-# copy is a cache and never an origin. That is what makes a fresh clone or a second worktree one
-# command instead of a hunt — `[[worktree-fleet-hazards]]` records forgotten gitignored files as a
-# recurring cost here, and this is one of them.
-#
-# It fetches ONLY the `_DEV` pair, and being the sole writer of this file is what keeps the dev /
-# production separation true. The production pair is never written to disk on a developer's machine.
-#
-# The AUTH TOKEN is deliberately absent and cannot be fetched: `gh` reads repository VARIABLES but
-# GitHub secrets are write-only through the API, and the only consumer — `sentry-cli` — runs in CI.
-# So the one genuinely dangerous credential never lands on this machine at all.
-#
-# No `gh`, no network, or never having run this: the build simply carries no endpoint and sends
-# nothing, which is the safe direction and already the behaviour.
-telemetry-local:
-	@command -v gh >/dev/null || { echo "telemetry-local: needs the gh CLI (brew install gh)"; exit 1; }
-	@gh auth status >/dev/null 2>&1 || { echo "telemetry-local: gh is not authenticated (gh auth login)"; exit 1; }
-	@set -e; \
-	  dsn=$$(gh variable get PLX_SENTRY_DSN_DEV 2>/dev/null || true); \
-	  key=$$(gh variable get PLX_POSTHOG_KEY_DEV 2>/dev/null || true); \
-	  if [ -z "$$dsn$$key" ]; then \
-	    echo "telemetry-local: neither PLX_SENTRY_DSN_DEV nor PLX_POSTHOG_KEY_DEV is set on the repo"; \
-	    exit 1; \
-	  fi; \
-	  python3 -c 'import json,sys; json.dump({"_comment":["Written by `make telemetry-local`. GITIGNORED. DEV credentials only — the production pair lives solely in GitHub repository variables and is injected by the release workflow.","No auth token here: gh cannot read secrets, and sentry-cli runs in CI."],"sentry_dsn_dev":sys.argv[1],"posthog_key_dev":sys.argv[2],"sentry_org":"gleb-linnik","sentry_project":"plx-native","posthog_host":"https://eu.i.posthog.com"}, open("$(TELEMETRY_JSON)","w"), indent=2)' "$$dsn" "$$key"; \
-	  chmod 0600 $(TELEMETRY_JSON); \
-	  echo "telemetry-local: wrote $(TELEMETRY_JSON) (dev credentials; environment=development)"
-
 setup-env:
 	@test "$(NDK_PLAT)" != UNSUPPORTED || { \
 	  echo "no webOS NDK published for $(NDK_OS)-$(NDK_HOST) at $(NDK_REL)."; \
@@ -797,7 +702,7 @@ ICONS     = $(if $(filter stable,$(FLAVOR)),pkg/icon.png pkg/largeIcon.png,pkg/d
 # a Cloud Test Lab set has no ssh and the package is the only channel into it. GITIGNORED, 0600,
 # and in `.claude/hooks/outbound-guard.py`'s PRIVATE_FILES — it carries a live credential.
 LAB_FILES = $(if $(LAB),pkg/lab.json,)
-APP_FILES = pkg/plxnative $(SENTRY_HANDLER) $(APPINFO) $(ICONS) pkg/splash.png \
+APP_FILES = pkg/plxnative $(APPINFO) $(ICONS) pkg/splash.png \
             pkg/appfont.ttf pkg/appfont-bold.ttf pkg/appfont-cjk.ttf pkg/OFL.txt \
             THIRD-PARTY-NOTICES.md \
             $(LAB_FILES) \
@@ -815,7 +720,7 @@ APP_FILES = pkg/plxnative $(SENTRY_HANDLER) $(APPINFO) $(ICONS) pkg/splash.png \
 # `THIRD-PARTY-NOTICES.md` were in every `.ipk` and in NO deployed app directory, silently, for as
 # long as nobody compared the two by hand. `ci/test_deploy_manifest.py` pins the relationship
 # itself (via `print-app-files`/`print-deploy-files`), not just today's four names.
-DEPLOY_FILES = $(filter-out pkg/plxnative $(SENTRY_HANDLER) $(FFMPEG_STAGED) $(LAB_FILES),$(APP_FILES))
+DEPLOY_FILES = $(filter-out pkg/plxnative $(FFMPEG_STAGED) $(LAB_FILES),$(APP_FILES))
 # appfont-cjk.ttf is the fallback face (Noto Sans CJK KR, tools/cut-noto-cjk.py) and it is the
 # single largest thing in the package — 21 MB raw, ~11 MB of the .ipk. It is PAYLOAD, not an
 # optional extra: without it a Korean, Japanese or Chinese library renders as tofu end to end, and
@@ -850,7 +755,7 @@ pkg/.flavor/$(FLAVOR)/appinfo.json: pkg/appinfo.json ci/flavor.py ci/mkipk.py
 # prerequisites run left to right, and a cold `make deploy` spends ~2 minutes building FFmpeg
 # before it touches the television. Taking the lock first would hold the set through a build that
 # needs no television — and, on the short implicit lease, could even let it expire before the scp.
-deploy: pkg/plxnative $(FFMPEG_STAGED) $(SENTRY_NATIVE_STAMP) $(APPINFO) release-guard tv-lock-require
+deploy: pkg/plxnative $(FFMPEG_STAGED) $(APPINFO) release-guard tv-lock-require
 	@echo "deploying $(if $(RELEASE),RELEASE,dev) build ($(RUST_CFG)) to $(APPID) [$(FLAVOR)]"
 	@$(SSH) 'test -d $(APPDIR)' || { \
 	  echo "$(APPDIR) does not exist on $(TV) — the $(FLAVOR) flavour is not installed."; \
@@ -873,8 +778,6 @@ deploy: pkg/plxnative $(FFMPEG_STAGED) $(SENTRY_NATIVE_STAMP) $(APPINFO) release
 	# then rename: an already-running app keeps the old daemon executable open, and scp directly to
 	# that inode fails with ETXTBSY (observed on the first handler upgrade). Renaming is atomic and
 	# leaves the old process on its old inode while the next launch gets this one.
-	$(SCP) $(SENTRY_HANDLER) root@$(TV):$(APPDIR)/sentry-crash.new
-	$(SSH) 'chmod 755 $(APPDIR)/sentry-crash.new && mv $(APPDIR)/sentry-crash.new $(APPDIR)/sentry-crash'
 	# ...then retire any FFmpeg from a PREVIOUS version. `scp` only adds, so bumping the bundled
 	# release left the old majors sitting in the app directory forever — observed on the dev TV,
 	# which was carrying libavcodec-plx.so.60 and .so.58 from an earlier experiment alongside the
@@ -934,7 +837,7 @@ deploy: pkg/plxnative $(FFMPEG_STAGED) $(SENTRY_NATIVE_STAMP) $(APPINFO) release
 # report to find weeks later. `VERIFY_FILES` is deliberately not `DEPLOY_FILES` alone: the binary,
 # the crash handler and the FFmpeg libraries take their own path to the device above and are just
 # as capable of silently drifting, so they are verified too.
-VERIFY_FILES = pkg/plxnative $(SENTRY_HANDLER) $(FFMPEG_STAGED) $(DEPLOY_FILES) \
+VERIFY_FILES = pkg/plxnative $(FFMPEG_STAGED) $(DEPLOY_FILES) \
                $(if $(LAB),pkg/lab.json,)
 verify-deploy: tv-lock-require
 	@echo "verify-deploy: comparing $(words $(VERIFY_FILES)) files against $(APPID) [$(FLAVOR)]"
@@ -1034,13 +937,7 @@ CRASHTRACE_TEST_BIN := $(or $(TMPDIR),/tmp/)plx-crashtrace-test
 PRIVATE_LOG_TEST_BIN := $(or $(TMPDIR),/tmp/)plx-private-log-test
 
 check: lint
-	@# The telemetry credentials are passed here too, and that is not decoration: `ENVIRONMENT` and
-	@# the two compile-time refusals are derived from them, so a host suite run WITHOUT them grades a
-	@# configuration nobody builds. With them, `the_environment_matches_the_credential_pair_that_was_
-	@# supplied` checks this checkout's actual configuration rather than the empty one.
 	cd rust-modules && PATH="$$HOME/.cargo/bin:$$PATH" \
-	  PLX_SENTRY_DSN='$(PLX_SENTRY_DSN)' PLX_POSTHOG_KEY='$(PLX_POSTHOG_KEY)' \
-	  PLX_SENTRY_DSN_DEV='$(PLX_SENTRY_DSN_DEV)' PLX_POSTHOG_KEY_DEV='$(PLX_POSTHOG_KEY_DEV)' \
 	  cargo +$(RUST_NIGHTLY) test --lib
 	@# The SAME suite again under `hostsim`, which is not a duplicate run: the host feed seam
 	@# (`player/ffi_host.rs`) only exists in that configuration, so every test that drives an AU
@@ -1050,8 +947,6 @@ check: lint
 	@# Cargo keys fingerprints by feature set, so the two configurations coexist in one target/ and
 	@# this costs a few seconds warm rather than a rebuild.
 	cd rust-modules && PATH="$$HOME/.cargo/bin:$$PATH" \
-	  PLX_SENTRY_DSN='$(PLX_SENTRY_DSN)' PLX_POSTHOG_KEY='$(PLX_POSTHOG_KEY)' \
-	  PLX_SENTRY_DSN_DEV='$(PLX_SENTRY_DSN_DEV)' PLX_POSTHOG_KEY_DEV='$(PLX_POSTHOG_KEY_DEV)' \
 	  cargo +$(RUST_NIGHTLY) test --lib --features hostsim
 	@# The flavour transform, host-side and free. Its central assertion — that the STABLE transform
 	@# is the identity — is the mechanical guarantee that having a second app id cannot perturb the
@@ -1061,10 +956,10 @@ check: lint
 	@# (here, ci/flavor.py, rust-modules/src/paths.rs), which no compiler can.
 	python3 ci/flavor.py --selftest
 	@# ...and the stamp decoder `ci/check-package.py` grades every "is this a RELEASE build?"
-	@# assertion through. It is pure string arithmetic over values only THIS file produces, and it
-	@# had been wrong since the telemetry field was added to RUST_CFG — decoding every real stamp as
-	@# "neither shipped configuration", which is a SKIP, so three gates printed nothing and nobody
-	@# saw it. Free, and the one place the make-side and python-side spellings of the stamp meet.
+	@# assertion through. It is pure string arithmetic over values only THIS file produces; it had
+	@# been wrong once already and decoded every real stamp as "neither shipped configuration",
+	@# which is a SKIP, so three gates printed nothing and nobody saw it. Free, and the one place
+	@# the make-side and python-side spellings of the stamp meet.
 	python3 ci/check-package.py --selftest
 	@# The crash tracer's PURE half (src/crashfmt.h), compiled and RUN with the host compiler.
 	@# The tracer runs in signal context on ARM and can only be graded on a television — but the
@@ -1128,89 +1023,6 @@ check: lint
 	python3 ci/test_deploy_manifest.py
 	python3 ci/test_verify_deploy.py
 
-# `make lint` — the three clippy lints that catch a SHADOWED branch, the one bug class the unit
-# suite structurally cannot reach. `app.rs` shipped a duplicated `else if` whose empty body hid the
-# real arm, so OK on the Subtitles/Audio discs did nothing at all — no menu, no log line — and rustc
-# does not warn on a repeated condition. That dispatch lives inside the SDL event loop, so there is
-# no host test for it; the lint is the whole gate. Explicitly NAMED lints, not a group: `-A
-# clippy::all` first because this crate is not clippy-clean and making it so is not this gate's job,
-# and naming them means a nightly bump cannot silently widen what `make check` fails on. All three
-# are clean as of 2026-07-29 (so is `clippy::correctness` as a group, except ff.rs:1330's deliberate
-# `loop { … break; }`). `--all-targets` so the `#[cfg(test)]` blocks are linted too, not just the
-# lib. ~12s cold, <1s warm — clippy needs the nightly clippy component, which rustup's DEFAULT
-# profile ships (a `--profile minimal` nightly does not).
-#
-# `if_same_then_else` is the one with a legitimate false positive here: two deliberately-identical
-# arms, e.g. `if back { exit_player() } else if stop { exit_player() }` — which app.rs's key chain
-# is full of. The escape hatch is this repo's own habit: clippy suppresses it when each arm carries
-# its own comment. Comment the arms, do not reach for an `#[allow]`.
-lint:
-	cd rust-modules && PATH="$$HOME/.cargo/bin:$$PATH" cargo +$(RUST_NIGHTLY) clippy --all-targets -- \
-	  -A clippy::all \
-	  -D clippy::ifs_same_cond -D clippy::same_functions_in_if_condition -D clippy::if_same_then_else
-
-# ipk assembly: deb-style ar archive; the NDK ar emits GNU format (macOS ar is BSD)
-# pkg/appinfo.json is the ONE place the version is written; the ipk filename and everything else
-# derive from it, and ci/check-package.py asserts ipkroot/ctl/control still agrees. The registry
-# reads both out of the archive (webosbrew repogen/ipk_file.py), so a mismatch is a rejected
-# submission rather than a warning.
-IPK_VERSION := $(shell python3 -c "import json;print(json.load(open('pkg/appinfo.json'))['version'])")
-IPK         := pkg/$(APPID)_$(IPK_VERSION)_arm.ipk
-# Where the payload is assembled. The DIRECTORY NAME is part of the package's identity — it is
-# what `paths::app_id` reads at runtime — so ci/mkipk.py and ci/check-package.py both assert it
-# equals the staged `appinfo.json`'s `id`.
-STAGE       := ipkroot/data/usr/palm/applications/$(APPID)
-
-# The .ipk is REPRODUCIBLE: same commit + same toolchain -> same sha256. That matters because the
-# manifest carries that hash and every user's TV verifies it at install time (there is no code
-# signing anywhere in the webosbrew chain — sha256 over HTTPS is the entire integrity story), so a
-# non-reproducible archive makes "rebuilt" and "tampered with" indistinguishable.
-#   - ci/mkipk.py normalises uid/gid/uname/gname/mtime/mode/order and the gzip header. `tar czf`
-#     was embedding `gleblinnik/staff` in every shipped archive.
-#   - `ar` gets D (deterministic): binutils' default embeds the builder's uid and a real mtime.
-# `make SYMBOLS=1 symbols` — separate the debug info into `pkg/plxnative.debug`.
-#
-# What this is FOR: a crash reported from a stranger's television carries an address, and the
-# binary they are running is stripped. Matching the two needs a debug file identified by the same
-# BUILD ID, which `-Wl,--build-id=sha1` on the link puts in an allocated note that survives
-# `strip`. Verified end to end 2026-08-29 — full, `.debug` and stripped all carry
-# `cc4a5c7b3923da5e872ee3c8f5054a3b23f07568`, and `addr2line -e pkg/plxnative.debug` resolves an
-# address the stripped binary answers `?? ??:0` for.
-#
-# **It refuses without SYMBOLS=1 rather than producing an empty shell.** `objcopy --only-keep-debug`
-# on a binary with no `.debug_*` sections succeeds and writes a file; that file matches nothing and
-# fails only much later, at the symbol server, on somebody else's crash. Fail here instead.
-symbols: pkg/plxnative
-ifneq ($(SYMBOLS),1)
-	@echo "make symbols needs SYMBOLS=1 — without it this binary carries no DWARF and" >&2
-	@echo "objcopy would write an empty .debug that silently matches nothing." >&2
-	@echo "  correct: make RELEASE=1 SYMBOLS=1 ipk symbols" >&2
-	@false
-else
-	$(TOOLPREFIX)objcopy --only-keep-debug pkg/plxnative pkg/plxnative.debug
-	@# The build ids MUST agree, and asserting it here is the point: everything downstream —
-	@# the DIF upload, the symbol server's lookup, `addr2line` against the right file — keys on
-	@# this one value, and a mismatch is invisible until a real crash fails to symbolize.
-	@bin=$$($(TOOLPREFIX)readelf -n pkg/plxnative | sed -n 's/.*Build ID: //p'); \
-	 dbg=$$($(TOOLPREFIX)readelf -n pkg/plxnative.debug 2>/dev/null | sed -n 's/.*Build ID: //p'); \
-	 if [ -z "$$bin" ]; then echo "pkg/plxnative has NO build id — is -Wl,--build-id still on the link?" >&2; exit 1; fi; \
-	 if [ "$$bin" != "$$dbg" ]; then echo "build id mismatch: binary $$bin, debug $$dbg" >&2; exit 1; fi; \
-	 echo "symbols: pkg/plxnative.debug  build-id $$bin  ($$(du -h pkg/plxnative.debug | cut -f1))"
-endif
-
-# Validate and upload the exact debug file that matches `pkg/plxnative`. This is a separate target
-# so a development build used for an on-device crash test gets the same fail-closed pairing as CI.
-# `SENTRY_AUTH_TOKEN` is read only from the process environment and is never echoed or written.
-SENTRY_ORG     ?= gleb-linnik
-SENTRY_PROJECT ?= plx-native
-SENTRY_CLI     ?= npx --yes @sentry/cli@latest
-sentry-symbols: symbols
-	@test -n "$${SENTRY_AUTH_TOKEN:-}" || { \
-	  echo "sentry-symbols: SENTRY_AUTH_TOKEN is required" >&2; exit 1; }
-	@SENTRY_ORG='$(SENTRY_ORG)' SENTRY_PROJECT='$(SENTRY_PROJECT)' \
-	  $(SENTRY_CLI) debug-files check pkg/plxnative.debug
-	@SENTRY_ORG='$(SENTRY_ORG)' SENTRY_PROJECT='$(SENTRY_PROJECT)' \
-	  $(SENTRY_CLI) debug-files upload --include-sources pkg/plxnative.debug pkg/plxnative
 
 ipk: pkg/plxnative $(APPINFO) release-guard
 	@echo "packaging $(if $(RELEASE),RELEASE,dev) build ($(RUST_CFG)) as $(APPID) [$(FLAVOR)]"
@@ -1421,8 +1233,6 @@ pkg/.ffabi-host-ok: ci/ffabi-assert.c $(FFMPEG_HOST_INC)/libavformat/avformat.h 
 # The host FFmpeg is a prerequisite of BOTH configurations: a lab simulator that cannot demux
 # would exercise the upload path over a playback that never started.
 sim: $(FFMPEG_HOST_STAGED) pkg/.ffabi-host-ok
-	PLX_SENTRY_DSN='$(PLX_SENTRY_DSN)' PLX_POSTHOG_KEY='$(PLX_POSTHOG_KEY)' \
-	  PLX_SENTRY_DSN_DEV='$(PLX_SENTRY_DSN_DEV)' PLX_POSTHOG_KEY_DEV='$(PLX_POSTHOG_KEY_DEV)' \
 	  cargo build --manifest-path rust-modules/Cargo.toml --target-dir $(SIM_TDIR)$(if $(LAB),-lab,) --features hostsim$(if $(LAB), --features lab-diagnostics,) --bin plxnative-sim
 
 # Interactive: opens a window. Ctrl-C to quit.
@@ -1558,5 +1368,5 @@ fetch-profile:
 	-$(SCP) root@$(TV):$(RUNDIR)/plxnative-hwcnt.jsonl pkg/plxnative-hwcnt.jsonl
 	@ls -l pkg/plxnative-*.jsonl 2>/dev/null || echo "no profiler output in $(RUNDIR) on the TV ($(APPID))"
 
-.PHONY: disk symbols sentry-symbols sentry-native all setup-env telemetry-local deploy verify-deploy run run-stream kill check lint test ipk clean tv-lock-require threadprobe sockprobe logmprobe mali-hwcnt-probe sim sim-run sim-shot sim-token sim-clean macapp macapp-zip fixtures fixtures-quick fixtures-pipeline fetch-profile \
+.PHONY: disk symbols all setup-env deploy verify-deploy run run-stream kill check lint test ipk clean tv-lock-require threadprobe sockprobe logmprobe mali-hwcnt-probe sim sim-run sim-shot sim-token sim-clean macapp macapp-zip fixtures fixtures-quick fixtures-pipeline fetch-profile \
         release-guard lab-guard install uninstall $(QUERY_GOALS)

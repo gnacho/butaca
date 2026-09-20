@@ -15,9 +15,8 @@ pub mod alt_sources; // "Also available": the same item on a second pinned sourc
 pub mod anim;
 pub mod card_row;
 pub mod chapters_panel;
-pub(crate) mod consent;
-pub mod consts;
 pub(crate) mod decision_alert;
+pub mod consts;
 pub mod detail;
 pub(crate) mod document_reader;
 pub mod fmt; // shared duration/clock display formatters
@@ -34,7 +33,6 @@ pub mod lab_toast; // the Lab Diagnostics upload read-out (lab builds only — s
 pub mod label;
 pub mod legal;
 mod legal_es; // Privacy / open-source / source-offer / trademarks — the LG, Plex and LGPL duties that must be readable ON the TV
-mod consent_es; // Consent / Privacy & data Spanish bodies — the long documents whose English consts the tests pin
 pub mod library; // the Library browse screen (poster wall + server-driven sort/filter)
 pub mod login; // sign-in screen (QR / short code) for the plex.tv account flow
 #[cfg(feature = "jellyfin")]

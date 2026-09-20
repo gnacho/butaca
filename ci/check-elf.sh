@@ -69,13 +69,13 @@ echo "== crash-report identity =="
 # its own program headers at runtime (`telemetry::sentry::image_addr`), so this is not what the
 # report USES — it is the check that the fallback constant, and the value measured against the live
 # project on 2026-08-29, still describe the link.
-grep -q 'Type: *EXEC' <<<"$H" || fail "no longer ET_EXEC — the image base is now a load bias (telemetry::sentry::image_addr returns None for ET_DYN and would fall back to a WRONG constant)"
+grep -q 'Type: *EXEC' <<<"$H" || fail "no longer ET_EXEC — the image base is now a load bias and the crash log offset math would fall back to a WRONG constant"
 # One variable for the expectation, named once: written twice, a change to the comparison and a
 # change to the message drift apart, and the failure then reports "is X, not X".
 WANT_BASE=0x00010000
 LOAD_BASE=$("$READELF" -l "$BIN" | awk '/^  LOAD/{print $3}' | LC_ALL=C sort | head -1)
 [ "$LOAD_BASE" = "$WANT_BASE" ] \
-  || fail "lowest PT_LOAD is $LOAD_BASE, not $WANT_BASE — update telemetry::sentry::IMAGE_ADDR and re-verify that a real crash still symbolicates"
+  || fail "lowest PT_LOAD is $LOAD_BASE, not $WANT_BASE — update the crash-log base constant and re-verify that a real crash still resolves"
 
 # (2) The BUILD ID. It is the only thing that pairs a stripped binary a stranger's television
 # faulted in with the pkg/plxnative.debug a release uploaded. `-Wl,--build-id=sha1` is

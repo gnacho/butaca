@@ -347,32 +347,10 @@ jobs:
           # separated .debug back to the binary a stranger's television crashed in. Two steps would
           # hand us a .debug matching nothing that ever shipped.
           SYMBOLS: "1"
-          # The PRODUCTION telemetry endpoints, and `vars` rather than `secrets` DELIBERATELY.
-          # They are write-only client identifiers: they permit sending TO a project and grant no
-          # read of anything in it, and `strings` finds both in every shipped binary, so treating
-          # them as secret is theatre. It would also be actively harmful here — GitHub masks a
-          # secret's value everywhere it appears in a log, and `ci/gen-release-audit.py` reads the
-          # endpoints back OUT of the packaged binary and prints them, which is the row that lets a
-          # stranger confirm where their television reports to. Masked, that row reads `***`.
-          # Only SENTRY_AUTH_TOKEN, in the upload step below, is a real secret: it can read and
-          # delete the project.
-          #
-          # These live ONLY here. A developer's machine gets the `_DEV` pair instead
-          # (`make telemetry-local`), and `telemetry::sender::ENVIRONMENT` is derived from WHICH
-          # pair a build was handed — so this block is also the whole reason a shipped binary
-          # reports as `production`, and the reason a locally built one cannot.
-          PLX_SENTRY_DSN: ${{ vars.PLX_SENTRY_DSN }}
-          PLX_POSTHOG_KEY: ${{ vars.PLX_POSTHOG_KEY }}
           # This fork IS the Jellyfin client: without the feature the whole backend compiles out
           # and the published .ipk would boot as a Plex-only app (issue #17). RUST_TDIR follows it
           # (target-release-jellyfin), which is also what local stable builds use.
           JELLYFIN: "1"
-          # Declared EMPTY rather than merely absent. The step below refuses a release that carries
-          # development credentials, and an assertion on a variable this file never names reads as
-          # dead code to the next person editing it — which is how a guard gets deleted. It also
-          # makes the check hold if a `set -u` is ever added to that script.
-          PLX_SENTRY_DSN_DEV: ""
-          PLX_POSTHOG_KEY_DEV: ""
         run: |
           make -j"$(nproc)"
           make ipk symbols
@@ -389,46 +367,15 @@ jobs:
             || { echo "::error::SYMBOLS=1 did not take — pkg/.build-config says [$(cat pkg/.build-config)]"; exit 1; }
           test -s pkg/plxnative.debug \
             || { echo "::error::pkg/plxnative.debug is missing or empty"; exit 1; }
-          # The build id is what pairs the two. Assert it here rather than trusting the upload:
-          # `sentry-cli` will happily accept a .debug whose id matches nothing that shipped.
+          # The build id is what pairs the two. Assert it here rather than trusting whatever
+          # later consumes the .debug: a symbol server happily accepts one whose id matches
+          # nothing that shipped.
           idof() { readelf -n "$1" | awk '/Build ID/{print $3}'; }
           [ "$(idof pkg/plxnative)" = "$(idof pkg/plxnative.debug)" ] \
             || { echo "::error::build id mismatch between the shipped binary and its .debug"; exit 1; }
           echo "build-id $(idof pkg/plxnative)"
-          # **The telemetry configuration FAILS CLOSED here, and only here.** For a local build,
-          # "no endpoint -> telemetry compiled out" is the right default and the safe one. For an
-          # OFFICIAL RELEASE it is a configuration failure: a binary that silently cannot report is
-          # indistinguishable from a healthy one until months later, when the crash that should
-          # have arrived never did. This step used to warn and continue.
-          [ -n "$PLX_SENTRY_DSN" ] \
-            || { echo "::error::PLX_SENTRY_DSN is unset — refusing to ship a release that cannot report a crash. Set it as a repository VARIABLE (not a secret)."; exit 1; }
-          [ -n "$PLX_POSTHOG_KEY" ] \
-            || { echo "::error::PLX_POSTHOG_KEY is unset — refusing to ship a release that cannot report usage. Set it as a repository VARIABLE (not a secret)."; exit 1; }
-          # The DEVELOPMENT pair must be ABSENT. Supplying both is already a compile error —
-          # `telemetry::sender`'s const block refuses it, because the environment a build reports
-          # is derived from which pair it was given and two pairs have no answer — so this is the
-          # same assertion, made earlier and in words that name the workflow rather than the crate.
-          [ -z "$PLX_SENTRY_DSN_DEV$PLX_POSTHOG_KEY_DEV" ] \
-            || { echo "::error::development telemetry credentials are present in a release build"; exit 1; }
-          grep -q 'tel:' pkg/.build-config \
-            || { echo "::error::telemetry endpoints were set but did not reach the build"; exit 1; }
-          # And that the binary carries the PRODUCTION endpoint specifically, rather than merely
-          # "some endpoint". `option_env!` yields a `&'static str`, so a configured DSN is in
-          # `.rodata` verbatim; finding it there is what proves `telemetry::sender`'s const block
-          # took the production branch, and so that `ENVIRONMENT` is `production` and every event
-          # from this release lands in the right project. Substring, not whole-line: Rust string
-          # literals are not NUL-terminated and adjacent ones merge into one `strings` record.
-          strings pkg/plxnative | grep -qF "$PLX_SENTRY_DSN" \
-            || { echo "::error::the packaged binary does not carry the production Sentry DSN"; exit 1; }
-          strings pkg/plxnative | grep -qF "$PLX_POSTHOG_KEY" \
-            || { echo "::error::the packaged binary does not carry the production PostHog key"; exit 1; }
-          # Fingerprints, not values. These are publishable, but they are also usable to write junk
-          # into the project and burn a free-tier quota, and a workflow log is a far more casually
-          # read surface than the audit file — which does record them in full, deliberately, being
-          # the document that makes the package reproducible by somebody other than the maintainer.
-          echo "telemetry fingerprints (sha256, first 16):"
-          printf '  sentry  %s\n' "$(printf %s "$PLX_SENTRY_DSN"  | sha256sum | cut -c1-16)"
-          printf '  posthog %s\n' "$(printf %s "$PLX_POSTHOG_KEY" | sha256sum | cut -c1-16)"
+          # This fork carries no telemetry endpoints: the audit's "telemetry endpoints" row
+          # witnesses that no Sentry DSN or PostHog key appears in the shipped bytes.
           # ...and carry the stamp to the publish job under a NON-HIDDEN name: upload-artifact
           # silently drops dotfiles, so `pkg/.build-config` would never arrive and the audit would
           # lose the row recording which configuration was built.
@@ -438,39 +385,6 @@ jobs:
           # assertion when that id is not stable, so a wrong-flavour package exits 0 there.
           ls pkg/com.beb.plxnative_*_arm.ipk >/dev/null 2>&1 \
             || { echo "::error::packaged the wrong flavour — pkg/ holds $(ls pkg/*.ipk 2>&1)"; exit 1; }
-
-      - name: Upload debug files to Sentry
-        # **In the same job as the build, deliberately.** `pkg/plxnative.debug` is 75 MB and exists
-        # only here; carrying it between jobs as an artifact would cost an upload and a download to
-        # move a file whose only consumer is this step. It also keeps the pairing local: the binary
-        # and its .debug are asserted to share a build id twenty lines up, and nothing can come
-        # between that assertion and this upload.
-        #
-        # **Fails the release.** A build whose native crash addresses have no matching DIF is not a
-        # working crash-reporting build: ingest accepts it silently and the dashboard shows bare
-        # addresses. The binary/debug build-id assertion above catches a wrong pair; this step
-        # catches a missing token, unusable DIF and failed upload.
-        #
-        # `--include-sources` bundles every source the DWARF references, so Sentry can show source
-        # context around a frame. Checked before enabling it: 1961 files are referenced and NONE of
-        # them is gitignored — in particular `src/config.local.h`, which holds a live Plex token, is
-        # not referenced at all, and that token appears zero times in both the .debug and the
-        # stripped binary. The repository is public and MIT, so the sources are already published.
-        env:
-          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
-          SENTRY_ORG: ${{ vars.SENTRY_ORG || 'gleb-linnik' }}
-          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT || 'plx-native' }}
-        run: |
-          if [ -z "$SENTRY_AUTH_TOKEN" ]; then
-            echo "::error::SENTRY_AUTH_TOKEN is not set — refusing to ship unsymbolicatable crash reports."
-            exit 1
-          fi
-          # `debug-files check` first: it is the step that says whether Symbolicator can use this
-          # object at all, and its answer (`Arch: arm`, `Usable: yes`) is the one thing no vendor
-          # documentation states about armv7.
-          npx --yes @sentry/cli@3.7.0 debug-files check pkg/plxnative.debug
-          npx --yes @sentry/cli@3.7.0 debug-files upload \
-              --include-sources pkg/plxnative.debug pkg/plxnative
 
       - name: ELF + packaging assertions
         # REQUIRE_PACKAGE: this step runs AFTER `make ipk`, so "nothing staged" here means the build

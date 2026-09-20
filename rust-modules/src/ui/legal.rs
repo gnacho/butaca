@@ -129,9 +129,9 @@ impl Page {
 // reporting answers now belong to the sign-in and leave with it (telemetry::forget in
 // forget_account).
 #[cfg(feature = "jellyfin")]
-const PRIVACY: &str = "RESPONSIBLE FOR BUTACA DATA\n\nbutaca’s maintainers are responsible only for data butaca stores locally and for optional reports you choose to share.\n\nYOUR JELLYFIN SERVER\n\nbutaca is an independent client for Jellyfin. There is no central Jellyfin account service: to sign you in, browse and play media, update watch progress and use server features, the app communicates directly with the Jellyfin server you name. Those requests are handled by that server and its operator. butaca’s developer does not receive them.\n\nON THIS TELEVISION\n\nbutaca stores the address of your Jellyfin server, your username and your password (in a file only the app can read), a device identifier, your Home library choices, your recent searches, your playback quality preference, and a small rotating local log. It also stores your answers to the two optional-reporting questions, the random Crash report ID if you turned crash reports on, the random Analytics ID if you turned product analytics on, any report waiting to be sent, and a marker recording how much of the crash log has already been read. It keeps no bookmark of its own for where you stopped watching: playback position is held by your Jellyfin server. Delete all local data in Settings signs out and removes butaca data from this television.\n\nOPTIONAL CRASH REPORTS\n\nIf enabled, technical crash details are sent to Sentry in Germany. They can include the signal, code addresses, thread information and device compatibility details. Each report carries a random Crash report ID created on this television when you turned crash reports on, so that repeated crashes under one Crash report ID are counted once rather than once each. It is not derived from your Jellyfin account, your television or anything about you, and it is never sent with product analytics. Settings shows it as your Crash report ID while crash reports are on.\n\nOPTIONAL PRODUCT ANALYTICS\n\nIf enabled, screen and feature events and broad sign-in and playback outcomes are sent to PostHog in Germany with a random Analytics ID created when you turned product analytics on. Settings shows that identifier as your Analytics ID while product analytics is on.\n\nNEVER INCLUDED\n\nTitles, Jellyfin account names, searches, server names or addresses, passwords and tokens, subtitle text and exact viewing history are not included in either optional report type. Both choices are independent and can be changed at any time in Settings.\n\nRETENTION\n\nDifferent things here have different lifetimes, so this is stated for each. Your sign-in — the stored server address, username and password — is removed when you sign out. Your answers to the two optional-reporting questions, and the Crash report ID and Analytics ID if they exist, belong to that sign-in: signing out removes them with it, and whoever signs in next is asked afresh. A report waiting to be sent is deleted once it is sent; signing out, or Delete all local data, is a harder stop: it destroys everything queued at once. The local log rotates, so its oldest lines are discarded continuously. Delete all local data removes all of it. A report that has already been sent is held by the service that received it, under that service’s own retention schedule; write to the contact below to ask what those periods currently are.\n\nYOUR CHOICES AND HOW TO ASK\n\nBoth optional reports are off until you turn them on, and either can be turned off again at any time in Settings. When this notice changes, a wording-only revision describing the same data and the same purpose is never a new question; a wider purpose, or data materially different from what you were told, is a new question for that change alone, asked before butaca starts collecting it, and it names only the category that actually grew. Delete all local data removes what butaca stored on this television; it does not reach anything already sent. To ask what crash reports or product analytics hold for your installation, or to have them deleted, write to the contact below and quote your Crash report ID or Analytics ID from Settings. Turning a category off deletes its identifier from this television, and so does signing out; reports already sent keep the old one, so copy it down first if you intend to ask for their deletion.\n\nWHERE DATA IS PROCESSED\n\nOptional crash reports are processed by Sentry in Germany and optional product analytics by PostHog in Germany. A Jellyfin server you connect to may be located anywhere and is operated by whoever runs it, not by butaca’s developer.\n\nUNINSTALLING\n\nRemoving butaca removes the application, but webOS gives an application no way to run code as it is removed, so anything kept outside the application’s own directory can survive. Two things are deliberately kept there: your sign-in, so that reinstalling does not sign you out, and — because they belong to that sign-in — your optional-reporting answers together with the Crash report ID and Analytics ID, so that a decision you have already made is not put to you again after a reinstall. Use Delete all local data BEFORE uninstalling if you want nothing of butaca left on this television.\n\nCONTACT\n\nPrivacy questions: support@plxnative.com";
+const PRIVACY: &str = "RESPONSIBLE FOR BUTACA DATA\n\nbutaca's maintainers are responsible only for data butaca stores locally on this television.\n\nYOUR JELLYFIN SERVER\n\nbutaca is an independent client for Jellyfin. There is no central Jellyfin account service: to sign you in, browse and play media, update watch progress and use server features, the app communicates directly with the Jellyfin server you name. Those requests are handled by that server and its operator. butaca's developer does not receive them.\n\nON THIS TELEVISION\n\nbutaca stores the address of your Jellyfin server, your username and your password (in a file only the app can read), a device identifier, your Home library choices, your recent searches and your playback quality preference. It also keeps a small rotating local log and a local crash log for debugging; both stay on this television and are read only from it. butaca sends nothing: there are no crash reports, no product analytics and no diagnostics leaving the television, and nothing in these logs is transmitted anywhere. It keeps no bookmark of its own for where you stopped watching: playback position is held by your Jellyfin server. Delete all local data in Settings signs out and removes butaca data from this television.\n\nUNINSTALLING\n\nRemoving butaca removes the application, but webOS gives an application no way to run code as it is removed, so anything kept outside the application's own directory can survive. Your sign-in is deliberately kept there so that reinstalling does not sign you out. Use Delete all local data BEFORE uninstalling if you want nothing of butaca left on this television.\n\nCONTACT\n\nPrivacy questions: support@plxnative.com";
 #[cfg(not(feature = "jellyfin"))]
-const PRIVACY: &str = "RESPONSIBLE FOR PLXNATIVE DATA\n\nGleb Linnik is responsible only for data PlxNative stores locally and for optional reports you choose to share.\n\nPLEX SERVICES\n\nPlxNative is an independent client for Plex. To sign you in, discover servers and provide Plex account features, the app communicates directly with Plex services. Plex processes information received by those services under Plex’s own Privacy Policy. PlxNative’s developer does not receive that information.\n\nPlex Privacy Policy: https://www.plex.tv/about/privacy-legal/\n\nPLEX MEDIA SERVERS\n\nTo browse and play media, update watch progress and use server features, PlxNative communicates directly with the Plex Media Servers you select. Those requests are handled by the selected server and its operator. PlxNative’s developer does not receive them.\n\nON THIS TELEVISION\n\nPlxNative stores your Plex account token and a separate token for each server you use, the addresses and identifiers of those servers, the profile you selected together with the profile names and pictures on your account, your Home library choices, your recent searches, your playback quality preference, and a small rotating local log. It also stores your answers to the two optional-reporting questions, the random Crash report ID if you turned crash reports on, the random Analytics ID if you turned product analytics on, any report waiting to be sent, and a marker recording how much of the crash log has already been read. It keeps no bookmark of its own for where you stopped watching: playback position is held by your Plex Media Server. Delete all local data in Settings signs out and removes PlxNative data from this television.\n\nYour sign-in is protected with this television's own key service when one is available and this install has shown it can be trusted: the app checks, on a later launch, that the television's key service can still open something it sealed before, and only after that check has passed does it seal your actual sign-in with it — until then the sign-in is kept in an owner-only file that only PlxNative can read. Two small, content-only markers on disk record the outcome of that check: `secure-storage.proven` records that the key service has been shown to work on this install, `secure-storage.refused` that it has been shown not to. Neither carries key material. If the saved sign-in file is ever found writable by other apps on this television, its contents are not trusted or used: it is set aside unread as `<id>-auth.json.untrusted` beside itself, still readable only by PlxNative, and signing out or Delete all local data removes it.\n\nOPTIONAL CRASH REPORTS\n\nIf enabled, technical crash details are sent to Sentry in Germany. They can include the signal, code addresses, thread information and device compatibility details. Each report carries a random Crash report ID created on this television when you turned crash reports on, so that repeated crashes under one Crash report ID are counted once rather than once each. It is not derived from your Plex account, your television or anything about you, and it is never sent with product analytics. Settings shows it as your Crash report ID while crash reports are on. The same choice also covers a handled sign-in error report when a sign-in attempt fails: which stage failed, a coarse class of what plex.tv's last answer actually was, that exact HTTP status or curl return code as a bare number, bucketed counts and durations, and how your sign-in is stored on this television right now. It contains no PIN, sign-in code, token, account, URL, hostname or address. The same choice also covers a handled storage error report when this television's attempt to seal or open your saved sign-in fails, or the file itself cannot be written at all: which step failed, the numeric error code the key service replied with, how the session is protected right now, and whether this install has already recorded its key service as refused. When it is known, it also says whether the device key that attempt used already existed or was newly created, and always says how that attempt identified itself to the key service, as two Yes/No facts: whether it used an application identity, and whether it instead used a fixed name on the system bus — never both, and No to both on a television whose system bus grants neither. Separately, it says which identity protected the saved sign-in the report is about, as one of app_id, named, anonymous, or none where the report is about nothing protected at all. It contains no key material, ciphertext, plaintext or file path. The same storage error report can also carry a compact candidate-location summary of which of this television's candidate sign-in locations were checked and how each one went. It also covers a fresh sign-in whose file could not be kept the way this television decided to keep it: what the save actually did and, when it left an existing file alone rather than overwriting it, why; it may carry the same save-outcome and candidate-location facts — each outcome one closed word, including one that says only that the file was there and its contents were not recognised at all — built only from closed words and small numbers and never a file path. It is sent only once you have answered the crash-reports question Yes; a report found before that question is answered waits in memory, dated to when it actually happened, for the rest of that one launch only, and is discarded if you answer No or if the app closes before you answer. Separately, whether or not crash reporting is on, you can request a diagnostic report from Details on the sign-in screen. The screen can also offer a one-off report about a specific sign-in problem. Opening Details sends nothing: you must confirm Send report. Working QR polling is not labelled as a connection failure merely because you requested diagnostics. The report distinguishes the original startup read from a later fresh sign-in save: candidate categories and rejection reasons; credential-presence and local-boot booleans; key-service stages and numeric errors; registration and sealed-key identity categories; save outcomes and disk readback; and per-candidate write operations, numeric OS errors, policy rejections and directory-sync durability warnings. It also includes app/webOS versions and hardware-class information, never file contents, paths, account names, credentials, PINs, sign-in codes or network addresses. It carries no identifier that persists between reports or identifies you or this television — not the Crash report ID, not the Analytics ID. A random one-off Report ID identifies only that event and is shown in Details so you can quote it. Sending it does not enable either optional reporting category or store an account-wide consent decision. Reports normally queue on disk for background delivery. If the queue cannot be written, one bounded background send is attempted directly from memory. Queued does not mean received; a direct request is marked sent only after a successful server response. If it fails, you can retry explicitly. An in-memory request cannot survive closing the app.\n\nOPTIONAL PRODUCT ANALYTICS\n\nIf enabled, screen and feature events and broad sign-in and playback outcomes are sent to PostHog in Germany with a random Analytics ID created when you turned product analytics on, and every event carries how the saved sign-in is stored on this television. Settings shows that identifier as your Analytics ID while product analytics is on.\n\nNEVER INCLUDED\n\nTitles, Plex accounts, searches, server names or addresses, tokens, subtitle text, key material, ciphertext, plaintext, file paths, and exact viewing history are not included in either optional report type. Both choices are independent and can be changed at any time in Settings.\n\nRETENTION\n\nDifferent things here have different lifetimes, so this is stated for each. Your sign-in, the servers registered with it and their tokens are removed when you sign out. Your answers to the two optional-reporting questions, and the Crash report ID and Analytics ID if they exist, belong to that sign-in: signing out removes them with it, and whoever signs in next is asked afresh. Switching between the profiles of one Plex account is not a sign-out and keeps them. A report waiting to be sent is deleted once it is sent. Switching a category off deletes that category's own queued reports; one report the sender had already picked up at that moment may still be sent, and no further report of that category is picked up after it. Signing out, or Delete all local data, is a harder stop: it destroys everything queued at once, including one-off reports. Signing out or deleting local data also clears pending in-memory report state; neither action can retract a request already transmitted. The local log rotates, so its oldest lines are discarded continuously. Delete all local data removes all of it. A report that has already been sent is held by the service that received it, under that service’s own retention schedule; write to the contact below to ask what those periods currently are.\n\nYOUR CHOICES AND HOW TO ASK\n\nBoth optional reports are off until you turn them on, and either can be turned off again at any time in Settings. When this notice changes, whether you are asked again depends on what changed: a wording-only revision describing the same data and the same purpose is never a new question; a new field that still fits the data and purpose you already read about is checked against the answer you already gave rather than opening one; a wider purpose, or data materially different from what you were told, is a new question for that change alone, asked before PlxNative starts collecting it, and it names only the category that actually grew. Declining an expansion is not the same as switching a category off: it keeps what you already agreed to running exactly as it was, sends nothing of the new part, and does not ask again until it grows further still — turning a category off entirely stays a separate action, any time, in Settings. The record of what you accepted, and what you last declined, is kept, so a later expansion is checked against the real answer you gave, not a guess. Delete all local data removes what PlxNative stored on this television; it does not reach anything already sent. To ask what crash reports or product analytics hold for your installation, or to have them deleted, write to the contact below and quote your Crash report ID or Analytics ID from Settings. For a particular one-off report, quote the one-off Report ID shown in Details. That random event identifier does not link separate reports to you or your television. Turning a category off deletes its identifier from this television, and so does signing out; reports already sent keep the old one, so copy it down first if you intend to ask for their deletion.\n\nWHERE DATA IS PROCESSED\n\nOptional crash reports are processed by Sentry in Germany and optional product analytics by PostHog in Germany. Plex processes what its own services receive under Plex’s Privacy Policy. A Plex Media Server you connect to may be located anywhere and is operated by whoever runs it, not by PlxNative’s developer.\n\nUNINSTALLING\n\nRemoving PlxNative removes the application, but webOS gives an application no way to run code as it is removed, so anything kept outside the application’s own directory can survive. Two things are deliberately kept there: your sign-in, so that reinstalling does not sign you out, and — because they belong to that sign-in — your optional-reporting answers together with the Crash report ID and Analytics ID, so that a decision you have already made is not put to you again after a reinstall. Use Delete all local data BEFORE uninstalling if you want nothing of PlxNative left on this television.\n\nCONTACT\n\nPrivacy questions: support@plxnative.com";
+const PRIVACY: &str = "RESPONSIBLE FOR PLXNATIVE DATA\n\nGleb Linnik is responsible only for data PlxNative stores locally on this television.\n\nPLEX SERVICES\n\nPlxNative is an independent client for Plex. To sign you in, discover servers and provide Plex account features, the app communicates directly with Plex services. Plex processes information received by those services under Plex's own Privacy Policy. PlxNative's developer does not receive that information.\n\nPlex Privacy Policy: https://www.plex.tv/about/privacy-legal/\n\nPLEX MEDIA SERVERS\n\nTo browse and play media, update watch progress and use server features, PlxNative communicates directly with the Plex Media Servers you select. Those requests are handled by the selected server and its operator. PlxNative's developer does not receive them.\n\nON THIS TELEVISION\n\nPlxNative stores your Plex account token and a separate token for each server you use, the addresses and identifiers of those servers, the profile you selected together with the profile names and pictures on your account, your Home library choices, your recent searches and your playback quality preference. It also keeps a small rotating local log and a local crash log for debugging; both stay on this television and are read only from it. PlxNative sends nothing: there are no crash reports, no product analytics and no diagnostics leaving the television, and nothing in these logs is transmitted anywhere. It keeps no bookmark of its own for where you stopped watching: playback position is held by your Plex Media Server. Delete all local data in Settings signs out and removes PlxNative data from this television.\n\nYour sign-in is protected with this television's own key service when one is available and this install has shown it can be trusted: the app checks, on a later launch, that the television's key service can still open something it sealed before, and only after that check has passed does it seal your actual sign-in with it — until then the sign-in is kept in an owner-only file that only PlxNative can read. Two small, content-only markers on disk record the outcome of that check: `secure-storage.proven` records that the key service has been shown to work on this install, `secure-storage.refused` that it has been shown not to. Neither carries key material. If the saved sign-in file is ever found writable by other apps on this television, its contents are not trusted or used: it is set aside unread as `<id>-auth.json.untrusted` beside itself, still readable only by PlxNative, and signing out or Delete all local data removes it.\n\nUNINSTALLING\n\nRemoving PlxNative removes the application, but webOS gives an application no way to run code as it is removed, so anything kept outside the application's own directory can survive. Your sign-in is deliberately kept there so that reinstalling does not sign you out. Use Delete all local data BEFORE uninstalling if you want nothing of PlxNative left on this television.\n\nCONTACT\n\nPrivacy questions: support@plxnative.com";
 #[cfg(feature = "jellyfin")]
 const OPEN_SOURCE: &str = "butaca is free software under the MIT Licence, built on the plx-native project. Copyright (c) 2026 Gleb Linnik and contributors.\n\nThe application package includes THIRD-PARTY-NOTICES.md, the complete licence texts and font notices. Included projects include libcurl, SDL2, SDL2_ttf, nanosvg, zlib, jsmpeg, Inter, Noto Sans CJK, Feather, Heroicons, Material Icons and the Rust crates used by this build.";
 #[cfg(not(feature = "jellyfin"))]
@@ -519,32 +519,35 @@ mod tests {
         );
         for claim in [
             "recent searches",
-            "Analytics ID",
-            "Crash report ID",
-            "RETENTION",
-            "WHERE DATA IS PROCESSED",
+            "local log",
             "UNINSTALLING",
         ] {
             assert!(p.contains(claim), "the policy never mentions {claim:?}");
         }
-        for stale in [
-            "carries no installation identifier",
-            "cannot be linked",
-            "cannot be found or deleted",
-            // consent and both identifiers END with the sign-in since 2026-09-04
-            "NOT removed by signing out",
+        // The build sends nothing: the words that would promise a report are the ones it must
+        // never contain, in either flavor's document.
+        for gone in [
+            "Crash report ID",
+            "Analytics ID",
+            "PostHog",
+            "Sentry",
+            "optional report",
+            "OPTIONAL CRASH REPORTS",
+            "OPTIONAL PRODUCT ANALYTICS",
+            "WHERE DATA IS PROCESSED",
+            "Send report",
         ] {
             assert!(
-                !p.contains(stale),
-                "the policy still claims crash reports are anonymous: {stale:?}"
+                !p.contains(gone),
+                "the policy still describes the removed reporting machinery: {gone:?}"
             );
         }
-        // The two identifier names the Settings rows use are the names the policy uses.
-        assert!(p.contains("Settings shows it as your Crash report ID"));
-        assert!(p.contains("Settings shows that identifier as your Analytics ID"));
-        // …and the policy says what `auth::forget_account` does to them.
-        assert!(p.contains("signing out removes them with it"));
+        assert!(
+            p.contains("sends nothing") || p.contains("no envia nada"),
+            "the policy must state plainly that nothing leaves the television"
+        );
     }
+
     #[test]
     fn legal_has_six_current_documents() {
         assert_eq!(Page::ALL.len(), 6);
@@ -649,7 +652,7 @@ mod tests {
     #[test]
     fn plex_boundary_is_explicit() {
         assert!(PRIVACY.contains(
-            "Plex processes information received by those services under Plex’s own Privacy Policy"
+            "Plex processes information received by those services under Plex's own Privacy Policy"
         ));
         assert!(PRIVACY.contains("https://www.plex.tv/about/privacy-legal/"));
         assert!(!TRADEMARKS.contains("used under licence"));
@@ -671,59 +674,21 @@ mod tests {
     /// paths — the automatic handled-error report the crash switch gates, and the one-off report
     /// the sign-in screen can offer regardless of that switch, which must say plainly it carries
     /// no identifier.
-    #[cfg(not(feature = "jellyfin"))]
-    #[test]
-    fn privacy_names_both_signin_reporting_paths() {
-        assert!(PRIVACY.contains("handled sign-in error report"));
-        assert!(PRIVACY.contains("one-off report about a specific sign-in problem"));
-        assert!(PRIVACY.contains("no identifier that persists between reports"));
-    }
 
-    #[cfg(not(feature = "jellyfin"))]
-    #[test]
-    fn privacy_explains_oneoff_receipts_and_unwritable_queue_delivery() {
-        assert!(PRIVACY.contains("one-off Report ID"));
-        assert!(PRIVACY.contains("directly from memory"));
-        assert!(PRIVACY.contains("startup read from a later fresh sign-in save"));
-        assert!(!PRIVACY.contains("no handle at all"));
-        assert!(!PRIVACY.contains("cannot be looked up or deleted on request"));
-        assert!(PRIVACY.contains("no identifier that persists between reports"));
-    }
 
     /// **Issue #76, mirrored from `PRIVACY.md`**: the storage error report and the
     /// `session_storage` usage fact are both named, and neither ever carries key material.
-    #[cfg(not(feature = "jellyfin"))]
-    #[test]
-    fn privacy_names_the_storage_error_report_and_the_usage_fact() {
-        assert!(PRIVACY.contains("handled storage error report"));
-        assert!(PRIVACY.contains("how the saved sign-in is stored on this television"));
-        assert!(PRIVACY.contains("no key material"));
-    }
 
     /// **Issue #76, second half, mirrored from `PRIVACY.md`**: a storage-error report found before
     /// the crash-reports question is answered waits in memory rather than being sent or silently
     /// dropped, and the notice must say so plainly — otherwise it still reads like every report is
     /// either sent now or lost for good, which stopped being true once `telemetry::storage` started
     /// deferring one instead of dropping it.
-    #[cfg(not(feature = "jellyfin"))]
-    #[test]
-    fn privacy_states_the_storage_report_defers_before_the_question_is_answered() {
-        assert!(PRIVACY.contains("It is sent only once you have answered the crash-reports question Yes"));
-        assert!(PRIVACY.contains("waits in memory"));
-        assert!(PRIVACY.contains("discarded if you answer No or if the app closes before you answer"));
-    }
 
     /// **Consent scope versions (owner decision, 2026-09-10), mirrored from `PRIVACY.md`**: a
     /// declined extension must be stated as distinct from switching a category off — otherwise the
     /// policy text still reads like the old "a No stays a No" withdrawal model that `apply_extension`
     /// no longer implements.
-    #[cfg(not(feature = "jellyfin"))]
-    #[test]
-    fn privacy_distinguishes_a_declined_extension_from_switching_a_category_off() {
-        assert!(PRIVACY.contains("Declining an expansion is not the same as switching a category off"));
-        assert!(PRIVACY.contains("sends nothing of the new part"));
-        assert!(PRIVACY.contains("stays a separate action"));
-    }
 
     /// **Stage B2 (issue #76), mirrored from `PRIVACY.md`**: the cross-launch storage probe is
     /// described in plain language, and its two on-disk markers are named — otherwise "how your
@@ -743,11 +708,6 @@ mod tests {
     /// call a key service answered. `legal.rs`'s condensed prose names the SHAPE rather than
     /// enumerating every closed code (it never has — `PRIVACY.md`'s own enumeration is what
     /// `telemetry::storage::tests::privacy_names_the_closed_storage_vocabulary` pins).
-    #[cfg(not(feature = "jellyfin"))]
-    #[test]
-    fn privacy_names_a_write_that_fails_outright_in_the_storage_report() {
-        assert!(PRIVACY.contains("or the file itself cannot be written at all"));
-    }
 
     /// **Issue #76's identity decider, mirrored from `PRIVACY.md`**: the storage report names the
     /// key-outcome fact (existed vs newly created) and the owner_hint fact (whether the seal's own
@@ -755,42 +715,6 @@ mod tests {
     /// possibly unknown rather than implied. The owner_hint half stopped being "always No" on
     /// 2026-09-10, when that registration started asking for the app id where nothing else in the
     /// process holds it (`keymanager`'s "Identity" section) — so the prose says what decides it.
-    #[cfg(not(feature = "jellyfin"))]
-    #[test]
-    fn privacy_names_the_key_outcome_and_owner_hint_facts_in_the_storage_report() {
-        assert!(PRIVACY.contains("already `existed` or was newly `created`")
-            || PRIVACY.contains("already existed or was newly created"));
-        assert!(PRIVACY.contains("application identity") || PRIVACY.contains("application id"));
-    }
-
-    /// **The two fields the notice gained on 2026-09-10 are the two this asserts** (review
-    /// finding, 2026-09-11): they were added to the report under the "a new field inside the
-    /// purpose you already read about" rule (`telemetry::consent`'s own doc), which is precisely
-    /// the route that does NOT re-ask — so nothing but a test makes the notice actually describe
-    /// them. `sealed_identity`'s closed vocabulary is asserted off `Identity::ALL` rather than a
-    /// literal, for the reason `telemetry::storage`'s own vocabulary tests are: a hand-written
-    /// list here had already gone stale once, in the commit that added `named`.
-    #[cfg(not(feature = "jellyfin"))]
-    #[test]
-    fn privacy_describes_the_registration_name_and_the_sealed_identity() {
-        // `registered_with_name` — the plain bus-NAME registration, as against the application
-        // identity the sibling bool reports. The notice says it in words, not field names.
-        assert!(PRIVACY.contains("a fixed name on the system bus"));
-        // `sealed_identity` — whose key protects the file this report is about, which is a
-        // different question from what THIS launch registered as, and the whole point of the field.
-        assert!(PRIVACY.contains("which identity protected the saved sign-in"));
-        for identity in crate::keymanager::Identity::ALL {
-            assert!(
-                PRIVACY.contains(identity.code()),
-                "the notice never names the `{}` identity",
-                identity.code()
-            );
-        }
-        assert!(
-            PRIVACY.contains("none where the report is about nothing protected at all"),
-            "…and the absence case has to be a word too, since the report sends one"
-        );
-    }
 
     /// **Issue #76's quarantine, mirrored from `PRIVACY.md` and `SECURITY.md`**: a session file
     /// another app could have rewritten is not silently destroyed, and the owner cannot look for
@@ -802,31 +726,4 @@ mod tests {
         assert!(PRIVACY.contains("signing out or Delete all local data removes it"));
     }
 
-    /// **Issue #76's report lane (2026-09-11), mirrored from `PRIVACY.md`**: a fresh sign-in whose
-    /// file could not be kept is named as its own case of the storage error report, the one-off
-    /// report says it may carry the same facts, and the candidate-location summary is described as
-    /// closed words and numbers rather than a path — `legal.rs`'s condensed prose names the SHAPE
-    /// rather than enumerating every closed code, the same reasoning
-    /// [`privacy_names_a_write_that_fails_outright_in_the_storage_report`] gives for `write_failed`.
-    #[cfg(not(feature = "jellyfin"))]
-    #[test]
-    fn privacy_names_a_sign_in_that_could_not_be_persisted() {
-        assert!(PRIVACY.contains("a fresh sign-in whose file could not be kept"));
-        assert!(PRIVACY.contains("what the save actually did"));
-        assert!(PRIVACY.contains("never a file path"));
-        assert!(PRIVACY.contains("may carry the same save-outcome and candidate-location facts"));
-    }
-
-    /// **The candidate summary's outcome words are a CLOSED list, and the on-screen notice has to
-    /// say so** — including the one added on 2026-09-11 for a candidate whose bytes are none of
-    /// the shapes this build knows (`plex::session::ReadRejection::Unparsable`, wire
-    /// `unparsable`). That word describes a file whose CONTENT was rejected, which is exactly the
-    /// class a reader of this notice would otherwise assume is never examined, so the notice says
-    /// what is sent about it and what is not.
-    #[cfg(not(feature = "jellyfin"))]
-    #[test]
-    fn privacy_says_the_candidate_summary_covers_an_unrecognised_file() {
-        assert!(PRIVACY.contains("each outcome one closed word"));
-        assert!(PRIVACY.contains("contents were not recognised at all"));
-    }
 }

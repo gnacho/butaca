@@ -594,10 +594,6 @@ pub(crate) struct Shared {
     /// the pump took to run again. `pump.rs` reads this once, for the "native: Load returned
     /// after Nms" log, exactly when it observes the deferral epoch marker above matching its own.
     pub native_load_elapsed_ms: AtomicU64,
-    /// Sparse, typed playback transitions retained only for an opted-in handled-error report.
-    /// Unlike the engine fields around it this spans reloads and seeks; `report::requested` owns
-    /// the attempt boundary and clears it for a genuinely new Play.
-    pub playback_trace: Mutex<super::report::PlaybackTrace>,
 
     // client-rendered subtitles: selected track index (-1 = off) + the demuxed cues.
     // demux (D) pushes cues; main (M) reads the active one for the current playpos.
@@ -918,7 +914,6 @@ impl Shared {
             load_timed_out: AtomicBool::new(false),
             native_load_deferred_logged_epoch: AtomicU32::new(0),
             native_load_elapsed_ms: AtomicU64::new(0),
-            playback_trace: Mutex::new(super::report::PlaybackTrace::new()),
             desired_sub_idx: AtomicI32::new(-1),
             track_names: Mutex::new(TrackNames::new()),
             sub_cues: Mutex::new(Vec::new()),
@@ -3190,10 +3185,6 @@ mod tests {
         s.seen_frame.store(true, Ordering::Relaxed);
         s.frames.store(9, Ordering::Relaxed);
         s.demux_io_failed.store(true, Ordering::Relaxed);
-        s.playback_trace
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .seed_for_reset_test();
         s.dg_abr_mode.store(2, Ordering::Relaxed);
         s.dg_abr_kbps.store(2_000, Ordering::Relaxed);
         s.dg_abr_declared_kbps.store(1_459, Ordering::Relaxed);
@@ -3217,14 +3208,6 @@ mod tests {
         assert!(
             !s.demux_io_failed.load(Ordering::Relaxed),
             "a new session must not inherit an I/O failure"
-        );
-        assert_eq!(
-            s.playback_trace
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .step_count_for_test(),
-            1,
-            "an engine reload must preserve the playback attempt's causal trace",
         );
         assert_eq!(s.dg_abr_mode.load(Ordering::Relaxed), 0);
         assert_eq!(s.dg_abr_kbps.load(Ordering::Relaxed), 0);

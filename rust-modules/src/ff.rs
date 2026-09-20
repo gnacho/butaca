@@ -5625,7 +5625,7 @@ fn hls_demux(
                         );
                         continue;
                     }
-                    crate::route::OriginalProbeResult::Failed { outcome, failure } => {
+                    crate::route::OriginalProbeResult::Failed { failure } => {
                         publish_original_probe_failure(failure);
                         let probe_verdict = recovery
                             .as_mut()
@@ -5636,10 +5636,9 @@ fn hls_demux(
                         );
                         SHARED.dg_abr_target_kbps.store(0, Ordering::Relaxed);
                         crate::player::log(&format!(
-                            "abr: Original probe #{} produced no body outcome={}; retaining best HLS \
+                            "abr: Original probe #{} produced no body; retaining best HLS \
                              request left={}s verdict={:?}",
                             recovery.as_ref().map(|gate| gate.probes()).unwrap_or(0),
-                            outcome.code(),
                             remaining_ms / 1_000,
                             probe_verdict,
                         ));
@@ -6618,12 +6617,6 @@ fn hls_demux(
             Ordering::Relaxed,
         );
         publish_hls_abr_action(proposal, refreshing_same_request, Some(true));
-        crate::player::report::note_hls_committed_for(
-            control.trace_generation(),
-            proposal.direction,
-            proposal.rung,
-            refreshing_same_request,
-        );
         // Promoted: from here this cursor IS the playback, so its playlist is the one that may
         // speak for the film's duration.
         candidate.publishes_duration = true;

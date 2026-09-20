@@ -381,12 +381,6 @@ fn prepare_failed_original_rollback(status: i32) -> OriginalRollbackPreparation 
         super::log("abr: restored HLS encoder but could not rebase it to the recovery position");
         return OriginalRollbackPreparation::RebaseFailed;
     }
-    super::report::note_delivery_requested_for(
-        crate::route::playback_trace_generation(),
-        super::report::DeliveryClass::Hls,
-        super::report::QualityClass::Unknown,
-        super::report::DeliveryReason::OriginalOpenRollback,
-    );
     OriginalRollbackPreparation::Prepared(rollback)
 }
 
@@ -1092,10 +1086,6 @@ pub(crate) fn pump(mt: &MainThread, now: u32) {
                 ));
                 SHARED.load_failed.store(true, Release);
                 SHARED.load_timed_out.store(true, Release);
-                super::report::note_load_gate_for(
-                    crate::route::playback_trace_generation(),
-                    super::report::LoadElapsedClass::from_ms(elapsed.as_millis() as i64),
-                );
             }
             Some(_) => {}
             // `native_load_elapsed` shares its precondition with `native_load_returned` — both
@@ -1112,13 +1102,6 @@ pub(crate) fn pump(mt: &MainThread, now: u32) {
                 );
                 SHARED.load_failed.store(true, Release);
                 SHARED.load_timed_out.store(true, Release);
-                // The epoch left Active before this arm ever saw an elapsed reading, so the exact
-                // in-flight time is unknown — bucket it as the budget's own ceiling, which is the
-                // honest floor for "still deferred when Active was lost".
-                super::report::note_load_gate_for(
-                    crate::route::playback_trace_generation(),
-                    super::report::LoadElapsedClass::Over20s,
-                );
             }
         }
     } else if eng.stage == Stage::Loading
@@ -1210,10 +1193,6 @@ pub(crate) fn pump(mt: &MainThread, now: u32) {
                 ));
                 SHARED.load_failed.store(true, Release);
                 SHARED.load_timed_out.store(true, Release);
-                super::report::note_load_gate_for(
-                    crate::route::playback_trace_generation(),
-                    super::report::LoadElapsedClass::from_ms(elapsed.as_millis() as i64),
-                );
             }
             Some(_) => {}
             // Same rationale as the `None` arm above: losing `Active` (a synchronous
@@ -1226,10 +1205,6 @@ pub(crate) fn pump(mt: &MainThread, now: u32) {
                 );
                 SHARED.load_failed.store(true, Release);
                 SHARED.load_timed_out.store(true, Release);
-                super::report::note_load_gate_for(
-                    crate::route::playback_trace_generation(),
-                    super::report::LoadElapsedClass::Over20s,
-                );
             }
         }
     }

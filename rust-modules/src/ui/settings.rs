@@ -11,7 +11,6 @@ use std::ptr::{addr_of, addr_of_mut};
 pub(crate) enum Action {
     None,
     Home,
-    Privacy,
     Legal,
     About,
 }
@@ -70,9 +69,7 @@ pub(crate) fn is_open() -> bool {
     unsafe { (*addr_of!(POP)).is_open() }
 }
 fn covered_by_child() -> bool {
-    crate::ui::consent::is_open()
-        || crate::ui::legal::is_open()
-        || crate::ui::onboard::settings_mode()
+    crate::ui::legal::is_open() || crate::ui::onboard::settings_mode()
 }
 fn root_content_visible(child: f32) -> bool {
     child < 0.995
@@ -102,19 +99,13 @@ fn rebuild(sel: i32) {
         actions.push(Action::Home);
     }
     sections.push(
-        Section::new(crate::i18n::t("Privacy"))
-            .row(
-                Row::new(crate::i18n::t("Privacy & data"))
-                    .detail(crate::i18n::t("Optional reports, privacy information and local data."))
-                    .chevron(true),
-            )
-            .row(
-                Row::new(crate::i18n::t("Legal notices"))
-                    .detail(crate::i18n::t("Privacy, licences, source code, trademarks and contact."))
-                    .chevron(true),
-            ),
+        Section::new(crate::i18n::t("Privacy")).row(
+            Row::new(crate::i18n::t("Legal notices"))
+                .detail(crate::i18n::t("Privacy, licences, source code, trademarks and contact."))
+                .chevron(true),
+        ),
     );
-    actions.extend([Action::Privacy, Action::Legal]);
+    actions.push(Action::Legal);
     sections.push(
         Section::new(crate::i18n::t("System")).row(
             Row::new(if cfg!(feature = "jellyfin") { crate::i18n::t("About butaca") } else { crate::i18n::t("About PlxNative") })
@@ -379,8 +370,8 @@ mod tests {
     use super::*;
     #[test]
     fn root_has_only_the_product_destinations() {
-        let rows = [Action::Home, Action::Privacy, Action::Legal, Action::About];
-        assert_eq!(rows.len(), 4);
+        let rows = [Action::Home, Action::Legal, Action::About];
+        assert_eq!(rows.len(), 3);
     }
 
     /// Run the modal's entrance to rest. Rule 11 refuses a POSITIONAL hit until the layer it

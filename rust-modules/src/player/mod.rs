@@ -16,7 +16,6 @@
 pub(crate) mod engine;
 mod ffi;
 mod pump;
-pub(crate) mod report;
 mod shared;
 pub(crate) mod threads;
 
@@ -474,7 +473,6 @@ pub(crate) fn ended() -> bool {
     SHARED.ended.load(Relaxed)
 }
 pub(crate) fn request_seek(ns: i64) {
-    report::note_seek_for(crate::route::playback_trace_generation());
     crate::route::note_user_seek_intent(ns);
     SHARED.ended.store(false, Relaxed); // seeking back from the end un-ends the stream
     SHARED.seeking.store(true, Relaxed); // HUD: spinner + freeze the playhead until it lands
@@ -618,12 +616,10 @@ fn support_line_of(i: &crate::webos::Info, hw: &crate::webos::Hardware, kind: Fa
 /// **Why a playback failed, as a closed set.** Drives the wording below AND the telemetry code, so
 /// the two are one decision.
 ///
-/// Current variants are outcomes `error_shape` can tell apart. One historical wire code,
-/// [`OriginalRollback`](FailureKind::OriginalRollback), remains so old telemetry fixtures and
-/// dashboards retain their meaning after the destructive probe transaction was removed; no live
-/// path emits it now. Runtime source, interrupted-playback and `Load` failures became distinct only
-/// when their worker signals existed. A video-plane bind or stalled feed still reaches
-/// [`Unspecified`](FailureKind::Unspecified) until an equally concrete signal exists.
+/// Current variants are outcomes `error_shape` can tell apart. Runtime source,
+/// interrupted-playback and `Load` failures became distinct only when their worker signals
+/// existed. A video-plane bind or stalled feed still reaches [`Unspecified`](FailureKind::
+/// Unspecified) until an equally concrete signal exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FailureKind {
     /// `/decision` refused the item outright — the server can neither direct play nor convert it.
@@ -642,8 +638,6 @@ pub(crate) enum FailureKind {
     PlaybackInterrupted,
     /// Starfish refused the Load declaration, so no decoder session could start.
     TvPipeline,
-    /// Historical telemetry only: the retired exclusive Original experiment lost its HLS rollback.
-    OriginalRollback,
     /// This device's jail is missing `/dev/rtkmem` on a SoC where that is a known cause of
     /// native A/V crashes — the Load was never attempted. Community-tier finding: see
     /// [`crate::webos::jail_blocks_native_video`]'s doc.
@@ -669,7 +663,6 @@ impl FailureKind {
             FailureKind::MediaSource => "media_source",
             FailureKind::PlaybackInterrupted => "playback_interrupted",
             FailureKind::TvPipeline => "tv_pipeline",
-            FailureKind::OriginalRollback => "original_rollback",
             FailureKind::JailMissingRtkmem => "jail_missing_rtkmem",
             FailureKind::LoadTimeout => "load_timeout",
             FailureKind::Unspecified => "unspecified",

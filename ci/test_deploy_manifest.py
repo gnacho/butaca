@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """`make deploy` must ship exactly what `make ipk` stages, minus the entries that get their own
-handling for a documented reason (the binary + crash handler's `.new`+`mv` dance, the bundled
-FFmpeg libraries' own retirement loop, and the LAB session file's ship-or-remove rule).
+handling for a documented reason (the binary's own scp, the bundled FFmpeg libraries' own
+retirement loop, and the LAB session file's ship-or-remove rule).
 
 This runs `make -s print-app-files` / `print-deploy-files` — two query targets that only echo a
 Makefile variable, exactly the pattern `docs/agent-reference.md` prescribes instead of `make -p`
@@ -39,9 +39,8 @@ class DeployManifest(unittest.TestCase):
             with self.subTest(flavor=flavor):
                 app_files = make_print("print-app-files", flavor)
                 deploy_files = make_print("print-deploy-files", flavor)
-                handler_bin = make_print("print-sentry-handler", flavor)
                 ffmpeg_libs = make_print("print-ffmpeg-staged", flavor)
-                carve_outs = {"pkg/plxnative", *handler_bin, *ffmpeg_libs}
+                carve_outs = {"pkg/plxnative", *ffmpeg_libs}
                 # LAB_FILES is empty unless LAB=1 is passed, and this test never sets it — so the
                 # session file never appears in either list here, and is asserted separately below.
                 expected = [f for f in app_files if f not in carve_outs]

@@ -35,16 +35,10 @@ def build_configuration(stamp: str) -> "str | None":
     """Decode `pkg/.build-config` into "dev", "release", or None for anything else.
 
     THE FEATURE FLAGS ARE ONE FIELD OF SEVERAL, and reading the stamp as a whole string is what
-    silently switched every gate that depends on this off. `RUST_CFG` is `features:$(RUST_FEATFLAGS)`,
-    then `+symbols` when SYMBOLS=1, then always `+tel:<hash>` — so the real stamp for an ordinary
-    dev build is `features:+tel:98c4b7d3`, which equals neither of the two literals this was once
-    written against. It matched when it was written; the telemetry field was added later, and from
-    that day the answer was None for EVERY build this project makes. Nothing failed — the callers
-    print "SKIP — neither shipped configuration" and move on — so the dev-trigger gate, the
-    dev-only-library gate and the reported-version gate all graded nothing on every CI run. Exactly
-    the defect class DEV_WITNESS is commented against, a witness that cannot fail, reached by
-    another route. The release cut carries `SYMBOLS=1`, which adds a THIRD field, so repairing the
-    two literals by hand would have left the release job ungraded anyway.
+    silently switched every gate that depends on this off. `RUST_CFG` is
+    `features:$(RUST_FEATFLAGS)` plus `+symbols` when SYMBOLS=1, and this fork adds no further
+    fields. Older stamps may still carry a `+tel:<hash>` suffix from the removed telemetry
+    plumbing; the decoder accepts it so an old stamp is not misread.
 
     Only the FEATURE half is decoded, and matched WHOLE rather than by substring: the "shots"
     recipe in the Makefile's header is `--no-default-features --features devtriggers`, which a
@@ -137,13 +131,15 @@ def _selftest() -> int:
 
     cases = {
         # what the Makefile writes today, per documented configuration
-        "features:+tel:98c4b7d37a4c": "dev",
-        "features:--no-default-features+tel:98c4b7d37a4c": "release",
-        "features:--no-default-features+symbols+tel:98c4b7d37a4c": "release",   # the release cut
-        "features:+symbols+tel:98c4b7d37a4c": "dev",
-        # older stamps, from before the telemetry and symbols fields existed
         "features:": "dev",
         "features:--no-default-features": "release",
+        "features:--no-default-features+symbols": "release",   # the release cut
+        "features:+symbols": "dev",
+        # older stamps, from before the telemetry field was removed and the symbols field existed
+        "features:+tel:98c4b7d37a4c": "dev",
+        "features:--no-default-features+tel:98c4b7d37a4c": "release",
+        "features:--no-default-features+symbols+tel:98c4b7d37a4c": "release",
+        "features:+symbols+tel:98c4b7d37a4c": "dev",
         # configurations that are neither shipped one, and must SAY so rather than be graded
         "features: --features lab-diagnostics+tel:abc123def456": None,          # LAB=1
         "features:--no-default-features --features lab-diagnostics+tel:abc123def456": None,
@@ -841,9 +837,8 @@ if binary.exists():
     # MATCHED WITH THE `plxnative@` PREFIX, not as a bare number, and that is the difference
     # between grading `PLX_VERSION` and grading whatever digits happen to be in .rodata: the About
     # page and any release note text carry the version too, so a bare-number search was satisfiable
-    # by a page the version mechanism never touched. `telemetry::{crashreport,native,playback}`
-    # compose `concat!("plxnative@", env!("PLX_VERSION"))` in every configuration — telemetry is
-    # ungated on purpose — so this witnesses the emitted value itself.
+    # by a page the version mechanism never touched. The About page composes
+    # `concat!("plxnative@", env!("PLX_VERSION"))`, so this witnesses the emitted value itself.
     _release_line_path = ROOT / "RELEASE_LINE"
     _release_line_content = _release_line_path.read_text() if _release_line_path.exists() else None
     _dev_version_str, _dev_version_err = expected_dev_version(appinfo["version"], _release_line_content)
@@ -1057,7 +1052,7 @@ for loc in staged_locales:
 
 print("== ipk payload ==")
 expected = {
-    "plxnative", "sentry-crash", "appinfo.json", "icon.png", "largeIcon.png", "splash.png",
+    "plxnative", "appinfo.json", "icon.png", "largeIcon.png", "splash.png",
     # appfont-cjk.ttf is the fallback face. Its absence is not a cosmetic loss: every Korean,
     # Japanese and Chinese title in the library becomes tofu, which is LG checklist #6 and #48.
     "appfont.ttf", "appfont-bold.ttf", "appfont-cjk.ttf", "OFL.txt",
@@ -1075,8 +1070,6 @@ if data_tar.exists():
     check(expected <= names, f"payload carries all {len(expected)} app files")
     check(modes.get("plxnative") == 0o755,
           "native app is executable by its jailed runtime uid")
-    check(modes.get("sentry-crash") == 0o755,
-          "native crash handler is executable in the archive")
     # **The simulator's Mach-O FFmpeg lives in pkg/ too, and must never be in the package.** It
     # cannot get there today — `APP_FILES` is an explicit list, not a glob — but "cannot" is a
     # property of one Makefile line, and what it guards against is 2 MB of unrunnable arm64 shipped

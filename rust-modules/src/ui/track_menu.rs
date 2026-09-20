@@ -208,9 +208,6 @@ pub(crate) fn on_ok() {
                 let ord = tracks()
                     .map(|t| metadata::audio_ordinal(&t.audio, sel.max(0) as usize))
                     .unwrap_or(sel);
-                crate::diag::event(crate::diag::schema::DiagEvent::FeatureUsed {
-                    feature: crate::diag::schema::Feature::AudioTrack,
-                });
                 crate::route::commit_audio_selection(ord, &s.codec, s.id);
             }
         }
@@ -232,11 +229,7 @@ pub(crate) fn on_ok() {
             .filter(|_| new_sub >= 0)
             .map(|t| metadata::sub_render_ordinal(&t.subs, new_sub as usize))
             .unwrap_or(-1);
-        if changed {
-            crate::diag::event(crate::diag::schema::DiagEvent::FeatureUsed {
-                feature: crate::diag::schema::Feature::SubtitleTrack,
-            });
-        }
+        let _ = changed;
         crate::route::commit_subtitle_selection(ridx, sub_stream_id());
     }
 }

@@ -209,11 +209,6 @@ fn redirect_for_test_multi(paths: Vec<std::path::PathBuf>) {
     UNAVAILABLE_NOTED.store(false, std::sync::atomic::Ordering::Relaxed);
     *LAST_FRESH_READBACK.lock().unwrap_or_else(|e| e.into_inner()) = None;
     FRESH_WRITE_ATTEMPTS.lock().unwrap_or_else(|e| e.into_inner()).clear();
-    FRESH_SAVE_ERRORS.lock().unwrap_or_else(|e| e.into_inner()).clear();
-    *COLD_SESSION_FACTS.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    *COLD_STORAGE_DIAGNOSTIC
-        .lock()
-        .unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 /// Point this module's file at `p`, or back at the real search order with `None`.
@@ -243,11 +238,6 @@ pub(crate) fn redirect_for_test(p: Option<std::path::PathBuf>) {
     UNAVAILABLE_NOTED.store(false, std::sync::atomic::Ordering::Relaxed);
     *LAST_FRESH_READBACK.lock().unwrap_or_else(|e| e.into_inner()) = None;
     FRESH_WRITE_ATTEMPTS.lock().unwrap_or_else(|e| e.into_inner()).clear();
-    FRESH_SAVE_ERRORS.lock().unwrap_or_else(|e| e.into_inner()).clear();
-    *COLD_SESSION_FACTS.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    *COLD_STORAGE_DIAGNOSTIC
-        .lock()
-        .unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 /// **One in-process copy of the session.** Published by every successful [`load`], [`save_locked`]
@@ -312,7 +302,7 @@ const LOCKED_UNRECOVERABLE: u8 = 2;
 const LOCKED_CORRUPT: u8 = 3;
 /// **The key service did not ANSWER this launch, and that is not evidence about the key.** A
 /// recognized own-format envelope is on disk and `keymanager::open_checked` never got far enough
-/// to say anything about it: no reply inside its budget (`StorageStage::NoReply`), a registration
+/// to say anything about it: no reply inside its budget (`Stage::NoReply`), a registration
 /// that never reached the bus (`Unreachable`), or the hub answering `-1` for a service that is not
 /// on this firmware at all. See [`open_failure_is_transient`] for the whole classification.
 ///
@@ -359,183 +349,8 @@ const CLASS_SECURE: u8 = 3;
 /// says, since those are facts about the file RIGHT NOW rather than about the last successful step.
 static LAST_CLASS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(CLASS_UNKNOWN);
 
-/// Issue #76 storage telemetry: this process's public, live verdict on how the session file is
-/// protected right now — [`crate::telemetry::storage::SessionStorageClass`], the one vocabulary
-/// this module, `keymanager.rs` and `diag::schema::UsageContext::session_storage` all share.
-///
-/// **Ordered by how outranking a fact is, not by how recently it was learned.** A persisted refused
-/// marker or this process's own live [`LOCKED_STATE`] both describe the file as it stands RIGHT NOW
-/// and must win over [`LAST_CLASS`], which only remembers the last NON-locked step — otherwise a
-/// process whose most recent successful read was plaintext (launch 3 of the four-launch sequence
-/// `save_locked`'s doc walks through) would report `Plaintext` even while sitting on a marker that
-/// says this install has already been downgraded for good, or — the narrower per-process case —
-/// while `LOCKED_STATE` says the file this process just tried to read is the one it could not open.
-pub(crate) fn storage_class() -> crate::telemetry::storage::SessionStorageClass {
-    use crate::telemetry::storage::SessionStorageClass;
-    if has_refused_marker() {
-        return SessionStorageClass::SecureRefused;
-    }
-    match LOCKED_STATE.load(std::sync::atomic::Ordering::Relaxed) {
-        // Its own class, never folded into `SecureLocked`: nothing was refused and nothing was
-        // downgraded — the sealed envelope is intact and unread. See [`LOCKED_UNAVAILABLE`].
-        LOCKED_UNAVAILABLE => SessionStorageClass::SecureUnavailable,
-        LOCKED_RECOVERABLE | LOCKED_UNRECOVERABLE => SessionStorageClass::SecureLocked,
-        _ => match LAST_CLASS.load(std::sync::atomic::Ordering::Relaxed) {
-            CLASS_SECURE => SessionStorageClass::Secure,
-            CLASS_PLAINTEXT => SessionStorageClass::Plaintext,
-            CLASS_NONE => SessionStorageClass::None,
-            // CLASS_UNKNOWN: this process has not read or saved anything yet — reachable from
-            // `app.launch` (the highest-volume usage event), sent before the boot path's own
-            // first `load()`. Reporting `None` here would claim "no session file exists" about an
-            // install this process has simply never looked at, including a secure or locked one.
-            _ => SessionStorageClass::Unknown,
-        },
-    }
-}
-
-/// Storage-error reports discovered while [`IO`] was held, drained and sent once the lock is
-/// released — the same reason `auth.rs`'s `set_error` collects under `Ctl`'s lock and reports after:
-/// `telemetry::storage::report_error` does spool I/O (its own lock, a disk read/write, possibly a
-/// log line), and `IO` here is held across a synchronous save on the SDL main thread. A `Vec` rather
-/// than a single slot only because a read that lands Locked and a save's own seal failure could in
-/// principle both queue within the same locked step.
-#[derive(Clone, Debug)]
-struct PendingReport {
-    context: crate::telemetry::storage::StorageErrorContext,
-    candidate_reads: Option<String>,
-    candidate: Option<CandidateCategory>,
-}
-
-static PENDING_REPORTS: Mutex<Vec<PendingReport>> = Mutex::new(Vec::new());
-
-fn queue_report(ctx: crate::telemetry::storage::StorageErrorContext) {
-    PENDING_REPORTS.lock().unwrap_or_else(|e| e.into_inner()).push(PendingReport {
-        context: ctx,
-        candidate_reads: None,
-        candidate: None,
-    });
-}
-
-fn queue_report_for_candidate(
-    ctx: crate::telemetry::storage::StorageErrorContext,
-    candidate: CandidateCategory,
-) {
-    PENDING_REPORTS.lock().unwrap_or_else(|e| e.into_inner()).push(PendingReport {
-        context: ctx,
-        candidate_reads: None,
-        candidate: Some(candidate),
-    });
-}
-
-/// Bind the completed candidate summary to reports raised by this cold read while [`IO`] is still
-/// held. A later save can queue and drain on another thread, but it can no longer steal this load's
-/// evidence because the string travels with the report it describes.
-fn attach_candidate_reads_to_pending(reads: &str) {
-    for report in PENDING_REPORTS.lock().unwrap_or_else(|e| e.into_inner()).iter_mut() {
-        if report.candidate_reads.is_none() {
-            report.candidate_reads = Some(reads.to_string());
-        }
-    }
-}
-
-/// Which [`crate::telemetry::storage::StorageStage`]s this PROCESS has already REPORTED — "exactly
-/// once per process per stage", so a television whose keymanager3 answers the same refusal call
-/// after call does not fill the spool with the same report on every later save. **A stage lands
-/// here only once its own attempt was actually SENT or safely DEFERRED for a later replay** (Stage
-/// B2, issue #76 field report case 5) — see [`report_once`]'s doc for why that is not the same
-/// question as "was `report_once` called for it".
-static REPORTED_STAGES: Mutex<Vec<crate::telemetry::storage::StorageStage>> = Mutex::new(Vec::new());
-
-/// **Stage B2's own set, kept apart from [`REPORTED_STAGES`] on purpose.** A stage whose attempt
-/// was DROPPED outright — the Errors channel's own consent question already answered "No" (or this
-/// build carries no Sentry endpoint to send to at all) — must never be retried on every later
-/// occurrence of the same failure (a save that fails on every roster refresh would otherwise re-run
-/// the whole consent-gated attempt on every single one), but it is also not the same fact as "this
-/// stage was reported": nothing was ever sent, and nothing is waiting to be. Tracking it separately
-/// is what lets [`report_once`] answer "skip, already handled" for both without a caller ever
-/// reading a genuinely dropped stage back as a reported one.
-static DROPPED_STAGES: Mutex<Vec<crate::telemetry::storage::StorageStage>> = Mutex::new(Vec::new());
-
-/// Route through here rather than `telemetry::storage::report_error` directly so a test can capture
-/// what this module tried to report without a real Sentry endpoint compiled in — same shape as
-/// `keymanager.rs`'s own `log`/`capture` seam. Both configurations now also call the real
-/// consent-gated `telemetry::storage::report_error` (Stage B2): the test capture alone cannot tell
-/// [`report_once`] whether an attempt was sent, deferred or dropped, and that three-way split is
-/// exactly what decides which of [`REPORTED_STAGES`]/[`DROPPED_STAGES`] a stage lands in.
-#[cfg(not(test))]
-fn report_storage_error(
-    ctx: crate::telemetry::storage::StorageErrorContext,
-    candidate_reads: Option<String>,
-) -> crate::telemetry::storage::ReportOutcome {
-    crate::telemetry::storage::report_error_with_candidate_reads(ctx, candidate_reads)
-}
-#[cfg(test)]
-fn report_storage_error(
-    ctx: crate::telemetry::storage::StorageErrorContext,
-    candidate_reads: Option<String>,
-) -> crate::telemetry::storage::ReportOutcome {
-    tests::capture_report(ctx);
-    crate::telemetry::storage::report_error_with_candidate_reads(ctx, candidate_reads)
-}
-
-/// **Stage B2 (issue #76 field report case 5): a report cannot be burned by an attempt that never
-/// actually reported anything.** The old version of this function marked a stage as `REPORTED_STAGES`
-/// unconditionally, before even calling [`report_storage_error`] — so a stage found before the
-/// consent question was answered, or one the answer already refused, was treated exactly like one
-/// that had genuinely gone out, and no later occurrence of that same failure (this launch or, via
-/// the persisted refused marker's cross-launch cousin, a much later one) could ever be attempted
-/// again — even after the question got a real "Yes". `report_storage_error`'s outcome now decides
-/// where a stage lands: [`crate::telemetry::storage::ReportOutcome::Sent`] and `Deferred` are both
-/// "this attempt is spoken for" and go to [`REPORTED_STAGES`] (a deferred one is `telemetry::storage`'s
-/// own [`crate::telemetry::storage::replay_deferred`] to resolve, not this module's job to retry);
-/// `Dropped` goes to [`DROPPED_STAGES`] instead, so it is never conflated with a stage that left real
-/// evidence somewhere, while still never being retried on every subsequent occurrence.
-fn report_once(report: PendingReport) {
-    let ctx = report.context;
-    if REPORTED_STAGES.lock().unwrap_or_else(|e| e.into_inner()).contains(&ctx.stage) {
-        return;
-    }
-    if DROPPED_STAGES.lock().unwrap_or_else(|e| e.into_inner()).contains(&ctx.stage) {
-        return;
-    }
-    match report_storage_error(ctx, report.candidate_reads) {
-        crate::telemetry::storage::ReportOutcome::Sent
-        | crate::telemetry::storage::ReportOutcome::Deferred => {
-            REPORTED_STAGES.lock().unwrap_or_else(|e| e.into_inner()).push(ctx.stage);
-        }
-        crate::telemetry::storage::ReportOutcome::Dropped => {
-            DROPPED_STAGES.lock().unwrap_or_else(|e| e.into_inner()).push(ctx.stage);
-        }
-    }
-}
-
-/// Drain and send whatever [`queue_report`] collected — called by every public entry point
-/// ([`load`], [`update`], [`save`]) AFTER its own `IO` guard has dropped.
-fn take_pending_reports() -> Vec<PendingReport> {
-    std::mem::take(&mut *PENDING_REPORTS.lock().unwrap_or_else(|e| e.into_inner()))
-}
-
-fn send_pending_reports(pending: Vec<PendingReport>) {
-    for report in pending {
-        report_once(report);
-    }
-}
-
 /// Test-only: forget every stage this process has already "reported" (see
 /// [`tests::capture_report`]) — deliberately NOT folded into [`redirect_for_test`], since the
-/// **Issue #76 review (should-fix): a real "Yes" gives a dropped stage its one attempt back.**
-/// [`DROPPED_STAGES`] exists apart from [`REPORTED_STAGES`] precisely so a stage the Errors
-/// channel's consent question genuinely refused is never conflated with one that actually went
-/// out — but until this existed nothing ever read the distinction back: a "No" burned a stage for
-/// the rest of the process even after the SAME process later turned Errors on in Settings, which
-/// is the shape [`report_once`]'s own doc already claimed was handled and was not. Called from
-/// `telemetry::record` exactly when a decision newly enables the Errors channel — the same signal
-/// `crashreport::discard_pending_before_opt_in` already keys off — so the very next occurrence of
-/// a previously-dropped stage is attempted again instead of silently skipped forever.
-pub(crate) fn retry_dropped_stages() {
-    DROPPED_STAGES.lock().unwrap_or_else(|e| e.into_inner()).clear();
-}
-
 /// once-per-process rule is exactly what a real process never resets on a file redirect either.
 ///
 /// `pub(crate)`: `telemetry::storage`'s own integration tests drive a real `load` through this
@@ -543,20 +358,11 @@ pub(crate) fn retry_dropped_stages() {
 /// in the binary already reported is a stage `report_once` will silently skip.
 #[cfg(test)]
 pub(crate) fn reset_report_state_for_test() {
-    PENDING_REPORTS.lock().unwrap_or_else(|e| e.into_inner()).clear();
-    REPORTED_STAGES.lock().unwrap_or_else(|e| e.into_inner()).clear();
-    DROPPED_STAGES.lock().unwrap_or_else(|e| e.into_inner()).clear();
     *LAST_SESSION_WRITE.lock().unwrap_or_else(|e| e.into_inner()) = None;
     *LAST_FRESH_READBACK.lock().unwrap_or_else(|e| e.into_inner()) = None;
     FRESH_WRITE_ATTEMPTS.lock().unwrap_or_else(|e| e.into_inner()).clear();
-    FRESH_SAVE_ERRORS.lock().unwrap_or_else(|e| e.into_inner()).clear();
-    *COLD_SESSION_FACTS.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    *COLD_STORAGE_DIAGNOSTIC
-        .lock()
-        .unwrap_or_else(|e| e.into_inner()) = None;
     *LAST_PERSIST.lock().unwrap_or_else(|e| e.into_inner()) = None;
     CANDIDATE_READS.lock().unwrap_or_else(|e| e.into_inner()).clear();
-    tests::CAPTURED_REPORTS.with(|c| c.borrow_mut().clear());
 }
 
 /// **The cross-launch half of issue #76.** [`LOCKED_STATE`] is a *process* global — it answers
@@ -627,7 +433,7 @@ fn has_refused_marker() -> bool {
 /// overwriting. No key material, ciphertext or plaintext goes into it, only the version that
 /// observed the refusal.
 fn write_refused_marker(
-    stage: crate::telemetry::storage::StorageStage,
+    stage: crate::keymanager::Stage,
     key_outcome: Option<crate::keymanager::KeyOutcome>,
 ) {
     if has_refused_marker() {
@@ -814,9 +620,10 @@ fn clear_unavailable_marker() {
 /// before any call — is deliberately NOT transient: it is not this install's envelope at all, and
 /// it took today's path before this function existed.
 fn open_failure_is_transient(refusal: crate::keymanager::LastRefusal) -> bool {
-    use crate::telemetry::storage::StorageStage;
-    matches!(refusal.stage, StorageStage::NoReply | StorageStage::Unreachable)
-        || refusal.error_code == Some(-1)
+    matches!(
+        refusal.stage,
+        crate::keymanager::Stage::NoReply | crate::keymanager::Stage::Unreachable
+    ) || refusal.error_code == Some(-1)
 }
 
 /// Count this launch's unanswered open and decide whether the install has run out of patience.
@@ -1006,36 +813,11 @@ fn remove_probe_files() {
     }
 }
 
-/// Issue #76's storage telemetry, from the PROBE side — [`check_probe`]'s own failure branches
-/// used to arm the refused marker and stop there, reporting nothing: nothing else in this file
-/// called `queue_report` for a probe outcome, so a probe that failed to reopen left no telemetry
-/// trace at all, only the marker. `key_outcome` is the probe's own PERSISTED value (from the
-/// launch that planted it), never a live read — see [`ProbeFile::key_outcome`]'s doc. Called AFTER
-/// [`write_refused_marker`] wherever there is one, so `refused_marker` below reads the marker this
-/// same failure just armed — and the `IdentityUnavailable` call site deliberately has none, which
-/// is exactly what that report then says: the stage, with `refused_marker` still false.
-/// `sealed_identity` is the identity the PROBE FILE records — the owner its key already has —
-/// which is what makes a probe report answer issue #76's actual question rather than restate this
-/// launch's own registration a third time (review finding, 2026-09-10). `None` only where there
-/// was no parseable probe to read one from.
-fn queue_probe_report(
-    stage: crate::telemetry::storage::StorageStage,
-    service_error_code: Option<i64>,
-    key_outcome: Option<crate::keymanager::KeyOutcome>,
-    sealed_identity: Option<crate::keymanager::Identity>,
-) {
-    queue_report(crate::telemetry::storage::StorageErrorContext {
-        stage,
-        service_error_code,
-        class: storage_class(),
-        refused_marker: has_refused_marker(),
-        key_outcome,
-        registered_with_app_id: crate::keymanager::registered_with_app_id(),
-        registered_with_name: crate::keymanager::registered_with_name(),
-        sealed_identity,
-    });
-}
-
+/// **The identity-unavailable probe drop.** `key_outcome` is the probe's own PERSISTED value (from
+/// the launch that planted it), never a live read — see [`ProbeFile::key_outcome`]'s doc. Called
+/// AFTER [`write_refused_marker`] wherever there is one. `sealed_identity` is the identity the
+/// PROBE FILE records — the owner its key already has. `None` only where there was no parseable
+/// probe to read one from.
 fn check_probe() {
     for path in probe_paths() {
         let Some(bytes) = read_trusted_marker(&path) else {
@@ -1051,20 +833,14 @@ fn check_probe() {
                 (Some(_), _) => {
                     remove_probe_files();
                     write_refused_marker(
-                        crate::telemetry::storage::StorageStage::RoundtripMismatch,
+                        crate::keymanager::Stage::RoundtripMismatch,
                         probe.key_outcome,
-                    );
-                    queue_probe_report(
-                        crate::telemetry::storage::StorageStage::RoundtripMismatch,
-                        None,
-                        probe.key_outcome,
-                        Some(probe.sealed.identity),
                     );
                 }
                 (None, refusal) => {
                     let stage = refusal
                         .map(|r| r.stage)
-                        .unwrap_or(crate::telemetry::storage::StorageStage::EnvelopeLocked);
+                        .unwrap_or(crate::keymanager::Stage::EnvelopeLocked);
                     // Issue #76 review (should-fix): `NoReply`/`Unreachable` proves nothing about
                     // the KEY — only that keymanager3 did not answer within its ~4s boot-race
                     // budget, or that the registration itself never reached the bus. Arming the
@@ -1077,23 +853,15 @@ fn check_probe() {
                     // launch.** That is a fact about a bus NAME, not about the key or the
                     // service, so it may never arm the refused marker — and unlike the two
                     // unanswered stages below it does not get better by trying the same envelope
-                    // again either: this launch's identity is what it is. Drop the probe (with
-                    // its report) so the next save plants one under the identity this install
-                    // actually has.
-                    if stage == crate::telemetry::storage::StorageStage::IdentityUnavailable {
+                    // again either: this launch's identity is what it is. Drop the probe so the
+                    // next save plants one under the identity this install actually has.
+                    if stage == crate::keymanager::Stage::IdentityUnavailable {
                         remove_probe_files();
-                        queue_probe_report(
-                            stage,
-                            None,
-                            probe.key_outcome,
-                            Some(probe.sealed.identity),
-                        );
                         return;
                     }
                     if matches!(
                         stage,
-                        crate::telemetry::storage::StorageStage::NoReply
-                            | crate::telemetry::storage::StorageStage::Unreachable
+                        crate::keymanager::Stage::NoReply | crate::keymanager::Stage::Unreachable
                     ) && probe.attempts + 1 < PROBE_MAX_ATTEMPTS
                     {
                         let retried = ProbeFile {
@@ -1106,15 +874,8 @@ fn check_probe() {
                         }
                         return;
                     }
-                    let sealed_identity = Some(probe.sealed.identity);
                     remove_probe_files();
                     write_refused_marker(stage, probe.key_outcome);
-                    queue_probe_report(
-                        stage,
-                        refusal.and_then(|r| r.error_code),
-                        probe.key_outcome,
-                        sealed_identity,
-                    );
                 }
             },
             // A probe file this build cannot even parse as a sealed envelope — corruption, or a
@@ -1123,17 +884,7 @@ fn check_probe() {
             // is no `ProbeFile` to read a key outcome from either.
             Err(_) => {
                 remove_probe_files();
-                write_refused_marker(
-                    crate::telemetry::storage::StorageStage::EnvelopeUnparseable,
-                    None,
-                );
-                queue_probe_report(
-                    crate::telemetry::storage::StorageStage::EnvelopeUnparseable,
-                    None,
-                    None,
-                    // Nothing parsed, so there is no recorded owner to name.
-                    None,
-                );
+                write_refused_marker(crate::keymanager::Stage::EnvelopeUnparseable, None);
             }
         }
         return;
@@ -2002,17 +1753,8 @@ fn io() -> std::sync::MutexGuard<'static, ()> {
 /// end up with an id; it is not one on a path a keypress can reach. Falls back to the
 /// pre-relocation path (migration), same as `load`.
 pub fn peek() -> Session {
-    let (s, pending) = {
-        let _io = io();
-        let s = peek_locked();
-        (s, take_pending_reports())
-    };
-    // The cold-cache fallback inside `peek_locked` can be the first `read_locked` in the process
-    // (see its own doc) and can therefore queue a storage report the same way `load` can — drained
-    // here for the same reason every other public entry point drains: `IO` must already be
-    // released before `report_error` does its own spool I/O.
-    send_pending_reports(pending);
-    s
+    let _io = io();
+    peek_locked()
 }
 
 /// [`peek`] with the lock already held — the read half every entry point here shares.
@@ -2073,9 +1815,9 @@ enum ReadState {
 fn locked(
     kind: u8,
     path: &std::path::Path,
-    refusal: Option<crate::keymanager::LastRefusal>,
-    sealed_identity: Option<crate::keymanager::Identity>,
-    category: CandidateCategory,
+    _refusal: Option<crate::keymanager::LastRefusal>,
+    _sealed_identity: Option<crate::keymanager::Identity>,
+    _category: CandidateCategory,
 ) -> ReadState {
     LOCKED_STATE.store(kind, std::sync::atomic::Ordering::Relaxed);
     // `LOCKED_PATH` is the target a fresh-sign-in recovery write replaces — meaningful for
@@ -2088,48 +1830,6 @@ fn locked(
     *LOCKED_PATH.lock().unwrap_or_else(|e| e.into_inner()) =
         matches!(kind, LOCKED_RECOVERABLE | LOCKED_CORRUPT | LOCKED_UNAVAILABLE)
             .then(|| path.to_path_buf());
-    // Issue #76 storage telemetry: a read landing Locked is one of the two triggers
-    // `save_locked`'s own seal failure is the other — for a handled report, reported at most once
-    // per process per stage (`report_once`, drained by the caller after `IO` is released).
-    // `LOCKED_RECOVERABLE` is exactly `keymanager::open` having been attempted and failed
-    // (`EnvelopeLocked`) versus a shape this build never asked a key manager to open at all (an
-    // unrecognized envelope) or one that decrypted fine but did not parse as a session
-    // (`EnvelopeUnparseable`), neither of which has a service reply to attach a code from.
-    // When the open reached a stage of its own (`begin_decrypt` with a code, `no_reply`,
-    // `unreachable`, …) the report carries THAT — it is the question a dashboard on these sets
-    // needs answered, and `EnvelopeLocked` says only that the envelope did not open.
-    use crate::telemetry::storage::{StorageErrorContext, StorageStage};
-    let stage = match (kind, refusal) {
-        // `LOCKED_UNAVAILABLE` always carries a refusal (it is classified FROM one — see
-        // `open_failure_is_transient`), and the stage IS the report: `no_reply` and `unreachable`
-        // are precisely what a dashboard needs to tell a stalled key service apart from a refused
-        // one.
-        (LOCKED_RECOVERABLE | LOCKED_UNAVAILABLE, Some(r)) => r.stage,
-        (LOCKED_RECOVERABLE, None) => StorageStage::EnvelopeLocked,
-        _ => StorageStage::EnvelopeUnparseable,
-    };
-    let service_error_code = refusal.and_then(|r| r.error_code);
-    // Issue #76's identity decider: a plain READ never calls `generateKey` (only `seal` does), so
-    // this process's own `last_key_outcome` is live evidence about a DIFFERENT call (an earlier
-    // `seal` this same launch may have made) rather than about the seal that produced THIS
-    // envelope — there is no persisted per-envelope record the way `ProbeFile::key_outcome` is for
-    // a probe. Carried anyway, as the process-global "most recent" fact `LAST_REFUSAL` already is,
-    // and `None` on the common cold-boot path where no `seal` has happened yet this launch.
-    let key_outcome = crate::keymanager::last_key_outcome();
-    queue_report_for_candidate(StorageErrorContext {
-        stage,
-        service_error_code,
-        class: storage_class(),
-        refused_marker: has_refused_marker(),
-        key_outcome,
-        registered_with_app_id: crate::keymanager::registered_with_app_id(),
-        registered_with_name: crate::keymanager::registered_with_name(),
-        // **The envelope's own owner, not this launch's** (review finding, 2026-09-10). The two
-        // bools above say which registration this process latched; this says which one the key
-        // being reported on already belongs to, and issue #76's hypothesis is precisely that they
-        // differ. `None` for `LOCKED_UNRECOVERABLE`, where nothing parsed far enough to record one.
-        sealed_identity,
-    }, category);
     ReadState::Locked {
         recoverable: kind == LOCKED_RECOVERABLE,
     }
@@ -2307,116 +2007,6 @@ pub(crate) fn candidate_reads_wire() -> String {
         .join(",")
 }
 
-/// What the cold boot read actually handed to the routing gate, captured before `load` can mint a
-/// client id or migrate/reseal anything. Fixed categories and booleans only: safe for a local
-/// Details panel and incapable of exposing a token, server identity, or filesystem path.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct ColdSessionFacts {
-    pub winner: Option<CandidateCategory>,
-    pub account_token_present: bool,
-    pub pms_token_present: bool,
-    pub server_dialable: bool,
-    pub can_go_local: bool,
-}
-
-static COLD_SESSION_FACTS: Mutex<Option<ColdSessionFacts>> = Mutex::new(None);
-
-pub(crate) fn cold_session_facts() -> Option<ColdSessionFacts> {
-    *COLD_SESSION_FACTS.lock().unwrap_or_else(|e| e.into_inner())
-}
-
-/// Immutable evidence from this process's one cold session read. The error context is copied from
-/// the report queued by that exact read, before a retry or fresh save can replace KeyManager's live
-/// globals. Candidate words and eligibility are bounded, path/token-free values.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ColdStorageDiagnostic {
-    pub errors: Vec<ColdStorageError>,
-    pub candidate_reads: String,
-    pub facts: ColdSessionFacts,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct ColdStorageError {
-    pub candidate: CandidateCategory,
-    pub context: crate::telemetry::storage::StorageErrorContext,
-}
-
-/// Storage errors raised by the most recent explicitly-authorized fresh credential save. Unlike
-/// [`ColdStorageError`], a save-wide failure is not always attributable to one candidate.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct FreshSaveError {
-    pub candidate: Option<CandidateCategory>,
-    pub context: crate::telemetry::storage::StorageErrorContext,
-}
-
-static FRESH_SAVE_ERRORS: Mutex<Vec<FreshSaveError>> = Mutex::new(Vec::new());
-
-pub(crate) fn fresh_save_errors() -> Vec<FreshSaveError> {
-    FRESH_SAVE_ERRORS.lock().unwrap_or_else(|e| e.into_inner()).clone()
-}
-
-static COLD_STORAGE_DIAGNOSTIC: Mutex<Option<ColdStorageDiagnostic>> = Mutex::new(None);
-
-pub(crate) fn cold_storage_diagnostic() -> Option<ColdStorageDiagnostic> {
-    COLD_STORAGE_DIAGNOSTIC
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone()
-}
-
-fn capture_cold_storage_diagnostic(
-    report_start: usize,
-    candidate_reads: String,
-    facts: ColdSessionFacts,
-) {
-    let errors = PENDING_REPORTS
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get(report_start..)
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|report| {
-            report.candidate.map(|candidate| ColdStorageError {
-                candidate,
-                context: report.context,
-            })
-        })
-        .collect();
-    *COLD_STORAGE_DIAGNOSTIC
-        .lock()
-        .unwrap_or_else(|e| e.into_inner()) = Some(ColdStorageDiagnostic {
-        errors,
-        candidate_reads,
-        facts,
-    });
-}
-
-fn capture_cold_session_facts(read: &ReadState) {
-    let session = match read {
-        ReadState::Ready { session, .. } => Some(session),
-        ReadState::Missing | ReadState::Locked { .. } => None,
-    };
-    let facts = ColdSessionFacts {
-        winner: last_candidate_reads()
-            .into_iter()
-            .find(|candidate| candidate.accepted_as.is_some())
-            .map(|candidate| candidate.category),
-        account_token_present: session.is_some_and(|s| !s.account_token.is_empty()),
-        pms_token_present: session.is_some_and(|s| !s.pms_token().is_empty()),
-        server_dialable: session.is_some_and(Session::server_dialable),
-        can_go_local: session.is_some_and(Session::can_go_local),
-    };
-    crate::log(&format!(
-        "session: cold eligibility winner={} account={} pms={} server={} local={}",
-        facts.winner.map_or("none", CandidateCategory::wire),
-        u8::from(facts.account_token_present),
-        u8::from(facts.pms_token_present),
-        u8::from(facts.server_dialable),
-        u8::from(facts.can_go_local),
-    ));
-    *COLD_SESSION_FACTS.lock().unwrap_or_else(|e| e.into_inner()) = Some(facts);
-}
-
 /// The first usable candidate, retaining whether an encrypted file exists but cannot be opened.
 fn read_locked() -> ReadState {
     CANDIDATE_READS
@@ -2462,18 +2052,6 @@ fn read_locked() -> ReadState {
                     "session: {name} was writable by others — content is untrusted, removing"
                 ));
             }
-            queue_report_for_candidate(crate::telemetry::storage::StorageErrorContext {
-                stage: crate::telemetry::storage::StorageStage::UntrustedMode,
-                service_error_code: None,
-                class: storage_class(),
-                refused_marker: has_refused_marker(),
-                key_outcome: crate::keymanager::last_key_outcome(),
-                registered_with_app_id: crate::keymanager::registered_with_app_id(),
-                registered_with_name: crate::keymanager::registered_with_name(),
-                // The bytes were never parsed — deliberately, since another uid could have
-                // written them — so no owner was read out of them and none is claimed.
-                sealed_identity: None,
-            }, category);
             record_candidate_read(category, Some(ReadRejection::UntrustedMode), None);
             continue;
         }
@@ -2510,12 +2088,12 @@ fn read_locked() -> ReadState {
                     // write nothing.
                     if let Some(refusal) = refusal {
                         if refusal.stage
-                            == crate::telemetry::storage::StorageStage::IdentityUnavailable
+                            == crate::keymanager::Stage::IdentityUnavailable
                         {
                             // The file names an LS2 identity this launch could not obtain — the
                             // key was never asked about, so this is transient in the same sense
                             // `NoReply`/`Unreachable` below are, but its own contract (see
-                            // `StorageStage::IdentityUnavailable`'s doc) is stricter still: it
+                            // `Stage::IdentityUnavailable`'s doc) is stricter still: it
                             // must NEVER arm the cross-launch refused marker, even once the
                             // bounded counter below runs out — a set whose bus never grants this
                             // launch's identity (the webOS 4.x anonymous-forever case) would
@@ -2810,83 +2388,51 @@ fn publish_identities(s: &Session) {
 /// Only the FIRST `load` in a process — genuinely the boot path — does the full read/mint/reseal
 /// work below.
 pub fn load() -> Session {
-    let (s, pending) = {
-        let _io = io();
-        let s = if let Some(s) = cached() {
-            s
-        } else {
-            // Stage B1 (issue #76): resolve a PRIOR launch's cross-launch probe before anything
-            // else this cold path does — see `check_probe`'s doc. It touches neither `CACHE` nor
-            // `LOCKED_STATE`, so ordering against `read_locked` below only matters for the very
-            // rare install that is simultaneously locked AND has an outstanding probe; either order
-            // reaches the same two markers.
-            check_probe();
-            // Probe reports above belong to a different file. Only reports appended after this
-            // boundary may describe the session candidate read captured below.
-            let cold_report_start = PENDING_REPORTS
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .len();
-            let read = read_locked();
-            capture_cold_session_facts(&read);
-            // Issue #76 field report gap: one line naming every candidate this launch examined
-            // and why each was declined or accepted — never a path, only the fixed category/
-            // rejection words `candidate_reads_wire` builds. See `CandidateRead`'s doc.
-            let reads = candidate_reads_wire();
-            capture_cold_storage_diagnostic(
-                cold_report_start,
-                reads.clone(),
-                cold_session_facts().unwrap_or_default(),
-            );
-            crate::log(&format!("session: read candidates={reads}"));
-            // …and the same summary onto the report side, BEFORE anything below can queue a
-            // storage-error report. `read_locked`'s own `UntrustedMode` report and the locked/
-            // unavailable ones `locked` queues are bound to this completed summary here, while IO
-            // is still held. They are only sent by `send_pending_reports` below, after IO is
-            // released, but another thread's later save can no longer steal this read's evidence.
-            let persisted = !matches!(read, ReadState::Missing);
-            let locked = matches!(read, ReadState::Locked { .. });
-            let plaintext = matches!(
-                read,
-                ReadState::Ready {
-                    plaintext: true,
-                    ..
-                }
-            );
-            let mut s = match read {
-                ReadState::Ready { session, .. } => session,
-                ReadState::Missing | ReadState::Locked { .. } => Session::default(),
-            };
-            seed_fresh_quality(&mut s, persisted, crate::route::auto_quality_ready());
-            if s.client_id.is_empty() {
-                s.client_id = new_client_id();
-                if !locked {
-                    let _ = save_locked(&s, SaveAuthority::Routine);
-                }
-            } else if plaintext {
-                // Offer every plaintext session to the Key Manager immediately. This also moves a
-                // parsable legacy-path file to the preferred location; without a usable service it
-                // stays an atomic mode-0600 plaintext fallback.
-                let _ = save_locked(&s, SaveAuthority::Routine);
-            }
-            publish_identities(&s);
-            // Whatever this run ends up believing the session is — even the ephemeral default
-            // that comes from a Locked or Missing read — becomes the in-process truth every later
-            // `peek` serves.
-            publish_cache(s.clone());
-            // Include reports from the read itself and from its migration/mint save, then detach
-            // the batch before releasing IO so no other entry point can drain or append to it.
-            attach_candidate_reads_to_pending(&reads);
-            s
-        };
-        (s, take_pending_reports())
+    let _io = io();
+    if let Some(s) = cached() {
+        return s;
+    }
+    // Stage B1 (issue #76): resolve a PRIOR launch's cross-launch probe before anything
+    // else this cold path does — see `check_probe`'s doc. It touches neither `CACHE` nor
+    // `LOCKED_STATE`, so ordering against `read_locked` below only matters for the very
+    // rare install that is simultaneously locked AND has an outstanding probe; either order
+    // reaches the same two markers.
+    check_probe();
+    let read = read_locked();
+    // One line naming every candidate this launch examined and why each was declined or
+    // accepted — never a path, only the fixed category/rejection words
+    // `candidate_reads_wire` builds. See `CandidateRead`'s doc.
+    crate::log(&format!("session: read candidates={}", candidate_reads_wire()));
+    let persisted = !matches!(read, ReadState::Missing);
+    let locked = matches!(read, ReadState::Locked { .. });
+    let plaintext = matches!(
+        read,
+        ReadState::Ready {
+            plaintext: true,
+            ..
+        }
+    );
+    let mut s = match read {
+        ReadState::Ready { session, .. } => session,
+        ReadState::Missing | ReadState::Locked { .. } => Session::default(),
     };
-    // Issue #76: a read landing Locked, or a save's own seal failure, may have queued a handled
-    // report above — sent only now that `IO` has been released (see `PENDING_REPORTS`'s doc). The
-    // cached fast path above never itself queues one (it does no `read_locked`/`save_locked`), but
-    // still passes through here rather than a bare early `return`, so it cannot silently start
-    // skipping this the moment that path ever changes.
-    send_pending_reports(pending);
+    seed_fresh_quality(&mut s, persisted, crate::route::auto_quality_ready());
+    if s.client_id.is_empty() {
+        s.client_id = new_client_id();
+        if !locked {
+            let _ = save_locked(&s, SaveAuthority::Routine);
+        }
+    } else if plaintext {
+        // Offer every plaintext session to the Key Manager immediately. This also moves a
+        // parsable legacy-path file to the preferred location; without a usable service it
+        // stays an atomic mode-0600 plaintext fallback.
+        let _ = save_locked(&s, SaveAuthority::Routine);
+    }
+    publish_identities(&s);
+    // Whatever this run ends up believing the session is — even the ephemeral default
+    // that comes from a Locked or Missing read — becomes the in-process truth every later
+    // `peek` serves.
+    publish_cache(s.clone());
     s
 }
 
@@ -2894,10 +2440,8 @@ pub fn load() -> Session {
 /// service never answered?** — [`LOCKED_UNAVAILABLE`], the state the sign-in screen draws its own
 /// read-out for.
 ///
-/// A bare atomic load, deliberately: `ui::login` asks on every frame it draws, and
-/// [`storage_class`] — the same verdict in the telemetry vocabulary — opens up to five candidate
-/// marker paths to answer, which is a per-frame syscall storm on the SDL main thread. This is the
-/// question a SCREEN asks; `storage_class` stays the one a REPORT asks.
+/// A bare atomic load, deliberately: `ui::login` asks on every frame it draws, and answering from
+/// the candidate marker paths would be a per-frame syscall storm on the SDL main thread.
 pub(crate) fn secure_unavailable() -> bool {
     LOCKED_STATE.load(std::sync::atomic::Ordering::Relaxed) == LOCKED_UNAVAILABLE
 }
@@ -2916,17 +2460,14 @@ pub(crate) fn secure_unavailable() -> bool {
 /// `false` once this open reached a real refusal — at which point the screen falls back to the
 /// plain QR flow, which is the honest offer for a sign-in that genuinely cannot be recovered.
 pub(crate) fn retry_secure_open() -> bool {
-    let (opened, pending) = {
-        let _io = io();
-        let opened = match read_locked() {
-            ReadState::Ready { session, .. } => {
-                publish_identities(&session);
-                publish_cache(session);
-                true
-            }
-            ReadState::Missing | ReadState::Locked { .. } => false,
-        };
-        (opened, take_pending_reports())
+    let _io = io();
+    let opened = match read_locked() {
+        ReadState::Ready { session, .. } => {
+            publish_identities(&session);
+            publish_cache(session);
+            true
+        }
+        ReadState::Missing | ReadState::Locked { .. } => false,
     };
     // The one line that says what the press achieved. `last_refusal` is the process-global
     // standing fact (see `keymanager::open_checked`'s doc) — right for a log line, which is why
@@ -2938,7 +2479,6 @@ pub(crate) fn retry_secure_open() -> bool {
             .map_or_else(|| "locked".to_string(), |r| r.stage.code().to_string())
     };
     crate::log(&format!("keymanager: retry -> {outcome}"));
-    send_pending_reports(pending);
     opened
 }
 
@@ -2968,36 +2508,30 @@ pub(crate) fn retry_secure_open() -> bool {
 /// that turns a recognized-but-unopenable secure envelope into a credential-free plaintext file;
 /// only a fresh SIGN-IN, through [`save_locked`]'s own recoverable branch, may do that.
 pub fn update(edit: impl FnOnce(&Session) -> Option<Session>) -> bool {
-    let (wrote, pending) = {
-        let _io = io();
-        let cur = peek_locked();
-        let wrote = if cur.client_id.is_empty()
-            || LOCKED_STATE.load(std::sync::atomic::Ordering::Relaxed) != NOT_LOCKED
-        {
-            false
-        } else {
-            match edit(&cur) {
-                // Issue #76 review (should-fix): `save_locked` can now genuinely refuse (the
-                // unproven-and-secure dead end above, or every candidate path refusing the
-                // write) — propagate its real verdict instead of claiming every edit landed. When
-                // it refuses, `save_locked` also never calls `publish_cache`, so — the same
-                // reasoning `auth::take_ready` already applies to `session::save` — publish the
-                // edit for THIS run anyway: a roster refresh or a pin that is real in memory but
-                // unpersisted must not also read back as though it never happened.
-                Some(next) => {
-                    let wrote = save_locked(&next, SaveAuthority::Routine).persisted();
-                    if !wrote {
-                        publish_unpersisted(next);
-                    }
-                    wrote
-                }
-                None => false,
+    let _io = io();
+    let cur = peek_locked();
+    if cur.client_id.is_empty()
+        || LOCKED_STATE.load(std::sync::atomic::Ordering::Relaxed) != NOT_LOCKED
+    {
+        return false;
+    }
+    match edit(&cur) {
+        // Issue #76 review (should-fix): `save_locked` can now genuinely refuse (the
+        // unproven-and-secure dead end above, or every candidate path refusing the
+        // write) — propagate its real verdict instead of claiming every edit landed. When
+        // it refuses, `save_locked` also never calls `publish_cache`, so — the same
+        // reasoning `auth::take_ready` already applies to `session::save` — publish the
+        // edit for THIS run anyway: a roster refresh or a pin that is real in memory but
+        // unpersisted must not also read back as though it never happened.
+        Some(next) => {
+            let wrote = save_locked(&next, SaveAuthority::Routine).persisted();
+            if !wrote {
+                publish_unpersisted(next);
             }
-        };
-        (wrote, take_pending_reports())
-    };
-    send_pending_reports(pending);
-    wrote
+            wrote
+        }
+        None => false,
+    }
 }
 
 /// Persist the session (best-effort; a write failure is non-fatal — we just re-login next boot).
@@ -3145,37 +2679,18 @@ fn note_session_write(path: &std::path::Path, winner: CandidateCategory, bytes: 
 }
 
 fn save_with_authority(s: &Session, authority: SaveAuthority) -> PersistOutcome {
-    let (outcome, pending) = {
-        let _io = io();
-        // Detach anything older at the boundary so it cannot be labeled as this save's evidence.
-        let mut pending_before = take_pending_reports();
-        if authority == SaveAuthority::FreshReauthentication {
-            *LAST_FRESH_READBACK.lock().unwrap_or_else(|e| e.into_inner()) = None;
-            FRESH_WRITE_ATTEMPTS.lock().unwrap_or_else(|e| e.into_inner()).clear();
-            FRESH_SAVE_ERRORS.lock().unwrap_or_else(|e| e.into_inner()).clear();
-        }
-        let outcome = save_locked(s, authority);
-        if authority == SaveAuthority::FreshReauthentication && outcome.persisted() {
-            verify_fresh_write_readback();
-        }
-        // Success is consumed by `verify_fresh_write_readback`; failure wrote nothing. Either way,
-        // serialized credentials never outlive this save in the private scratch slot.
-        *LAST_SESSION_WRITE.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        let pending_from_save = take_pending_reports();
-        if authority == SaveAuthority::FreshReauthentication {
-            *FRESH_SAVE_ERRORS.lock().unwrap_or_else(|e| e.into_inner()) = pending_from_save
-                .iter()
-                .take(8)
-                .map(|report| FreshSaveError {
-                    candidate: report.candidate,
-                    context: report.context,
-                })
-                .collect();
-        }
-        pending_before.extend(pending_from_save);
-        (outcome, pending_before)
-    };
-    send_pending_reports(pending);
+    let _io = io();
+    if authority == SaveAuthority::FreshReauthentication {
+        *LAST_FRESH_READBACK.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        FRESH_WRITE_ATTEMPTS.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+    let outcome = save_locked(s, authority);
+    if authority == SaveAuthority::FreshReauthentication && outcome.persisted() {
+        verify_fresh_write_readback();
+    }
+    // Success is consumed by `verify_fresh_write_readback`; failure wrote nothing. Either way,
+    // serialized credentials never outlive this save in the private scratch slot.
+    *LAST_SESSION_WRITE.lock().unwrap_or_else(|e| e.into_inner()) = None;
     outcome
 }
 
@@ -3202,7 +2717,7 @@ pub enum PersistOutcome {
     /// removes it.
     BlockedUnknownEnvelope,
     /// Every candidate path refused the write. The file system said no; nothing about the key
-    /// service is being claimed. Reported on its own as `StorageStage::WriteFailed`.
+    /// service is being claimed. Reported on its own as `Stage::WriteFailed`.
     WriteFailed,
     /// The `Session` (or the envelope wrapping it) would not serialize — a bug, not a device
     /// condition, and the one outcome that says nothing about the disk at all.
@@ -3467,45 +2982,13 @@ fn persist_locked(s: &Session, authority: SaveAuthority) -> PersistOutcome {
             }
         }
         crate::log("session: key manager succeeded but the protected file could not be written");
-        report_write_failed();
         return PersistOutcome::WriteFailed;
     }
     // `seal` failed for a reason unrelated to a locked-boot read (that case returned above).
     // Never turn an already protected session back into plaintext because a service was
     // temporarily unavailable during a save. Preserve the previous ciphertext instead.
-    //
-    // Issue #76 storage telemetry: this IS "a seal round trip fails" — `keymanager::seal` already
-    // logged its own refusal (or the round-trip mismatch) and published it as `last_refusal`, which
-    // is the stage and code a handled report needs. A backend that is simply ABSENT (no keymanager3
-    // on this firmware at all) never reaches a service call and leaves `last_refusal` at `None`, so
-    // an ordinary plaintext-only install reports nothing here.
-    // A `no_reply`/`unreachable` here is NOT reported: on an install that has never sealed, a
-    // service that does not answer is indistinguishable from a firmware that has no keymanager3
-    // at all (every set before webOS 24), and reporting it would send one StorageError from every
-    // such install's first save. Those two stages are evidence only on the READ side, where the
-    // envelope's existence proves the service once worked (`read_locked`).
-    if let Some(refusal) = crate::keymanager::last_refusal().filter(|r| {
-        r.error_code.is_some()
-            || r.stage == crate::telemetry::storage::StorageStage::RoundtripMismatch
-    }) {
-        // Issue #76's identity decider: this IS a seal-time report — `keymanager::seal` just ran,
-        // so the live outcome is exactly the one that produced (or failed to produce) the envelope
-        // this refusal is about.
-        queue_report(crate::telemetry::storage::StorageErrorContext {
-            stage: refusal.stage,
-            service_error_code: refusal.error_code,
-            class: storage_class(),
-            refused_marker: has_refused_marker(),
-            key_outcome: crate::keymanager::last_key_outcome(),
-            registered_with_app_id: crate::keymanager::registered_with_app_id(),
-            registered_with_name: crate::keymanager::registered_with_name(),
-            // A seal that FAILED produced no envelope, so there is no recorded owner to report.
-            // The identity this attempt registered under is this launch's own, which the two
-            // bools above already publish — restating it here as a third field would make
-            // `sealed_identity` mean two different things depending on the stage.
-            sealed_identity: None,
-        });
-    }
+    // `keymanager::seal` already logged its own refusal (or the round-trip mismatch) and
+    // published it as `last_refusal`, which is the local debugging vocabulary for it.
     if has_secure_locked() {
         // …unless this launch's own read already found that envelope unanswerable and this save
         // carries a completed sign-in (0.6.4, the same rule the unproven branch above applies).
@@ -3533,27 +3016,7 @@ fn persist_locked(s: &Session, authority: SaveAuthority) -> PersistOutcome {
     crate::log(
         "session: could not persist to ANY candidate path — login will not survive a reboot",
     );
-    report_write_failed();
     PersistOutcome::WriteFailed
-}
-
-/// Stage B2 (issue #76 field report case 6): every candidate path refused the write outright —
-/// queued from every "could not persist to ANY candidate path" branch in this file so the failure
-/// leaves a trace independent of `auth::take_ready`'s own once-per-call log line. Distinct from
-/// every other [`crate::telemetry::storage::StorageStage`]: this one never reached a key service at
-/// all, so it carries no service error code — the file system itself said no.
-fn report_write_failed() {
-    queue_report(crate::telemetry::storage::StorageErrorContext {
-        stage: crate::telemetry::storage::StorageStage::WriteFailed,
-        service_error_code: None,
-        class: storage_class(),
-        refused_marker: has_refused_marker(),
-        key_outcome: crate::keymanager::last_key_outcome(),
-        registered_with_app_id: crate::keymanager::registered_with_app_id(),
-        registered_with_name: crate::keymanager::registered_with_name(),
-        // Nothing reached the disk, so there is nothing sealed for this report to be about.
-        sealed_identity: None,
-    });
 }
 
 /// The write-side twin of [`not_locked`]. Both callers have just REPLACED the file on disk — a
@@ -3608,8 +3071,7 @@ fn recover_locked_session_as_plaintext(
             crate::log(
                 "session: could not persist to ANY candidate path — login will not survive a reboot",
             );
-            report_write_failed();
-            PersistOutcome::WriteFailed
+                    PersistOutcome::WriteFailed
         }
     }
 }
@@ -3625,8 +3087,7 @@ fn write_unproven_plaintext(s: &Session, json: &[u8], record_fresh: bool) -> Per
         crate::log(
             "session: could not persist to ANY candidate path — login will not survive a reboot",
         );
-        report_write_failed();
-        return PersistOutcome::WriteFailed;
+            return PersistOutcome::WriteFailed;
     }
     PersistOutcome::PersistedPlaintext
 }
@@ -3643,8 +3104,7 @@ fn write_refused_plaintext(s: &Session, json: &[u8], record_fresh: bool) -> Pers
         crate::log(
             "session: could not persist to ANY candidate path — login will not survive a reboot",
         );
-        report_write_failed();
-        return PersistOutcome::WriteFailed;
+            return PersistOutcome::WriteFailed;
     }
     PersistOutcome::PersistedPlaintext
 }
@@ -4459,11 +3919,6 @@ pub fn clear() {
     *LAST_SESSION_WRITE.lock().unwrap_or_else(|e| e.into_inner()) = None;
     *LAST_FRESH_READBACK.lock().unwrap_or_else(|e| e.into_inner()) = None;
     FRESH_WRITE_ATTEMPTS.lock().unwrap_or_else(|e| e.into_inner()).clear();
-    FRESH_SAVE_ERRORS.lock().unwrap_or_else(|e| e.into_inner()).clear();
-    *COLD_SESSION_FACTS.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    *COLD_STORAGE_DIAGNOSTIC
-        .lock()
-        .unwrap_or_else(|e| e.into_inner()) = None;
     *LAST_PERSIST.lock().unwrap_or_else(|e| e.into_inner()) = None;
     CANDIDATE_READS.lock().unwrap_or_else(|e| e.into_inner()).clear();
     clear_cache();
@@ -4557,22 +4012,6 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    thread_local! {
-        /// What [`super::report_storage_error`]'s test double captured instead of a real send —
-        /// same seam `keymanager.rs`'s `log`/`capture` uses, since a dev checkout has no Sentry
-        /// endpoint compiled in and `telemetry::storage::report_error` would always refuse.
-        pub(super) static CAPTURED_REPORTS: std::cell::RefCell<Vec<crate::telemetry::storage::StorageErrorContext>> =
-            std::cell::RefCell::new(Vec::new());
-    }
-
-    pub(super) fn capture_report(ctx: crate::telemetry::storage::StorageErrorContext) {
-        CAPTURED_REPORTS.with(|c| c.borrow_mut().push(ctx));
-    }
-
-    fn captured_reports() -> Vec<crate::telemetry::storage::StorageErrorContext> {
-        CAPTURED_REPORTS.with(|c| c.borrow().clone())
-    }
 
     /// The file a signed-in device holds today, once discovery has reached two servers. Written
     /// as literal JSON rather than by serialising a `Session`, because the thing under test is
@@ -5512,45 +4951,6 @@ mod tests {
     }
 
     #[test]
-    fn fresh_save_errors_are_save_scoped_retained_and_cleared() {
-        let _g = crate::testlock::serial();
-        let t = TwoCandidateSession::new("fresh-save-errors");
-        let missing_a = t.dir.join("absent-a").join("auth.json");
-        let missing_b = t.dir.join("absent-b").join("auth.json");
-        *COLD_STORAGE_DIAGNOSTIC.lock().unwrap_or_else(|e| e.into_inner()) =
-            Some(ColdStorageDiagnostic {
-                errors: Vec::new(),
-                candidate_reads: "internal:missing".into(),
-                facts: ColdSessionFacts {
-                    winner: None,
-                    account_token_present: false,
-                    pms_token_present: false,
-                    server_dialable: false,
-                    can_go_local: false,
-                },
-            });
-        super::redirect_for_test_multi(vec![missing_a, missing_b]);
-        assert!(cold_storage_diagnostic().is_none(), "a redirected fixture is a new launch");
-        assert_eq!(save_after_reauthentication(&signed_in()), PersistOutcome::WriteFailed);
-        let errors = fresh_save_errors();
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].candidate, None, "a save-wide failure invents no candidate");
-        assert_eq!(
-            errors[0].context.stage,
-            crate::telemetry::storage::StorageStage::WriteFailed
-        );
-        assert!(cold_storage_diagnostic().is_none(), "fresh evidence is not cold evidence");
-
-        save(&signed_in());
-        assert_eq!(fresh_save_errors(), errors, "routine saves retain fresh evidence");
-        clear();
-        assert!(fresh_save_errors().is_empty());
-    }
-
-    /// **The route ground's one persisted seed.** A fresh device has recorded nothing, a real
-    /// hero is remembered across the read-modify-write cycle `update` uses everywhere else, and
-    /// recording the SAME envelope again is a no-op rather than a second disk write.
-    #[test]
     fn last_hero_blur_round_trips_and_skips_a_redundant_write() {
         let _g = crate::testlock::serial();
         let _t = TempSession::new("last-hero");
@@ -6072,8 +5472,6 @@ mod tests {
         clear();
         assert_eq!(last_fresh_save_readback(), None);
         assert_eq!(last_persist_outcome(), None);
-        assert_eq!(cold_session_facts(), None);
-        assert_eq!(cold_storage_diagnostic(), None);
         assert!(last_candidate_reads().is_empty());
         assert_eq!(
             peek().account_token,
@@ -6145,12 +5543,6 @@ mod tests {
             );
         }
 
-        let reports = captured_reports();
-        assert_eq!(reports.len(), 1, "{reports:?}");
-        assert_eq!(
-            reports[0].stage,
-            crate::telemetry::storage::StorageStage::UntrustedMode
-        );
     }
 
     /// **QUARANTINE, not deletion** (maintainer decision, 2026-09-10). The bytes of a
@@ -6184,13 +5576,6 @@ mod tests {
             std::fs::metadata(&quarantine).unwrap().permissions().mode() & 0o777,
             0o600,
             "and no longer readable by the peer that widened it"
-        );
-        let reports = captured_reports();
-        assert!(
-            reports
-                .iter()
-                .any(|r| r.stage == crate::telemetry::storage::StorageStage::UntrustedMode),
-            "{reports:?}"
         );
     }
 
@@ -6632,17 +6017,9 @@ mod tests {
             LOCKED_STATE.load(std::sync::atomic::Ordering::Relaxed),
             LOCKED_UNAVAILABLE
         );
-        assert_eq!(
-            storage_class(),
-            crate::telemetry::storage::SessionStorageClass::SecureUnavailable,
-            "and it reports as its own class, not as a refusal"
-        );
-        // …and the launch is still REPORTED, with the stage that names the stall — the half of
-        // the old behaviour that was right, and the one a dashboard reads.
-        let stages: Vec<_> = captured_reports().iter().map(|c| c.stage).collect();
-        assert_eq!(
-            stages,
-            vec![crate::telemetry::storage::StorageStage::NoReply]
+        assert!(
+            secure_unavailable(),
+            "and it reads as its own state, not as a refusal"
         );
     }
 
@@ -6650,32 +6027,6 @@ mod tests {
     /// re-runs the whole read, and a person pressing it four times must not put four identical
     /// `StorageError`s in the spool. (`report_once`'s per-process-per-stage rule is what does it;
     /// this pins that the retry path really goes through it.)
-    #[test]
-    fn a_transient_failure_reports_once_however_often_try_again_is_pressed() {
-        let _g = crate::testlock::serial();
-        let t = TempSession::new("unavailable-reports-once");
-        std::fs::write(t.file(), locked_envelope_bytes()).unwrap();
-        reset_report_state_for_test();
-        crate::keymanager::arm_for_test(vec![
-            ("begin", Err(())),
-            ("begin", Err(())),
-            ("begin", Err(())),
-        ]);
-        let _ = load();
-        assert!(!retry_secure_open(), "the service is still silent");
-        assert!(!retry_secure_open());
-        crate::keymanager::disarm_for_test();
-        assert_eq!(
-            captured_reports().len(),
-            1,
-            "one launch, one report — however many times the screen asked again"
-        );
-        assert_eq!(
-            read_unavailable_attempts(),
-            1,
-            "and one launch spends exactly one of the install's three, not one per press"
-        );
-    }
 
     /// **The other half of the read-out: *Try again* that WORKS.** The service answers on the
     /// second ask, so the sealed session this launch booted without is published and the run
@@ -6719,10 +6070,6 @@ mod tests {
             "the recovered session is what every later reader sees"
         );
         assert!(!secure_unavailable());
-        assert_eq!(
-            storage_class(),
-            crate::telemetry::storage::SessionStorageClass::Secure
-        );
         assert_eq!(
             std::fs::read(t.file()).unwrap(),
             original,
@@ -6851,11 +6198,6 @@ mod tests {
             !has_proven_marker(),
             "an install upgraded from 0.6.2 has never earned sealed storage"
         );
-        let cold = cold_storage_diagnostic().expect("the cold failure is retained");
-        assert_eq!(cold.errors.len(), 1);
-        assert_eq!(cold.errors[0].candidate, CandidateCategory::Other);
-        assert_eq!(cold.candidate_reads, "other:secure");
-
         // The user signs in again, and the service is STILL silent — so there is no envelope to
         // be written and the 0600 file is the only place left.
         assert_eq!(
@@ -6875,11 +6217,6 @@ mod tests {
                 result: FreshSaveReadbackResult::Match,
             }),
             "the bytes just committed are read directly from the winning file, not CACHE"
-        );
-        assert_eq!(
-            cold_storage_diagnostic(),
-            Some(cold),
-            "a fresh save adds readback evidence without replacing the original cold failure"
         );
         crate::keymanager::disarm_for_test();
 
@@ -6923,23 +6260,12 @@ mod tests {
         let t = TempSession::new("cached-token-is-not-reauthentication");
         write_envelope_with_identity(&t.file(), crate::keymanager::Identity::AppId);
         let original = std::fs::read(t.file()).unwrap();
-        write_refused_marker(crate::telemetry::storage::StorageStage::BeginDecrypt, None);
+        write_refused_marker(crate::keymanager::Stage::BeginDecrypt, None);
         arm_opening_keymanager_for(&serde_json::to_vec_pretty(&signed_in()).unwrap());
         crate::keymanager::arm_identity_for_test(false, true, false);
 
         let cached = load();
         crate::keymanager::disarm_for_test();
-        assert_eq!(
-            cold_session_facts(),
-            Some(ColdSessionFacts {
-                winner: Some(CandidateCategory::Other),
-                account_token_present: true,
-                pms_token_present: false,
-                server_dialable: false,
-                can_go_local: false,
-            }),
-            "cold facts describe the reopened file before a save can rewrite the story"
-        );
         assert_eq!(
             cached.account_token, "acct",
             "the prior session reopened normally"
@@ -6983,7 +6309,7 @@ mod tests {
 
     /// The same defect through its OTHER door, and the one with no exit at all before 0.6.4: the
     /// envelope names an LS2 identity this launch cannot obtain
-    /// (`StorageStage::IdentityUnavailable`). That read is `LOCKED_UNAVAILABLE` like a silent
+    /// (`Stage::IdentityUnavailable`). That read is `LOCKED_UNAVAILABLE` like a silent
     /// service, but deliberately shares none of the bounded launch counter and therefore NEVER
     /// escalates to a refusal — see `many_identity_unavailable_launches_never_escalate_to_a_refusal`,
     /// which is the rule that must not change. So a television whose bus never grants the sealing
@@ -7009,17 +6335,6 @@ mod tests {
             LOCKED_STATE.load(std::sync::atomic::Ordering::Relaxed),
             LOCKED_UNAVAILABLE
         );
-        assert!(
-            captured_reports()
-                .iter()
-                .any(|r| r.stage == crate::telemetry::storage::StorageStage::IdentityUnavailable),
-            "the read really did end on the identity door: {:?}",
-            captured_reports()
-                .iter()
-                .map(|r| r.stage)
-                .collect::<Vec<_>>()
-        );
-
         assert!(
             save_after_reauthentication(&signed_in()).persisted(),
             "a name this launch cannot get must not cost the user their sign-in every launch"
@@ -7159,7 +6474,7 @@ mod tests {
 
         // RefusedMarkerNoFreshSignIn: a PRIOR launch recorded the refusal, and this save carries
         // no credentials of its own — an ordinary `update()` must never convert a present envelope.
-        write_refused_marker(crate::telemetry::storage::StorageStage::BeginDecrypt, None);
+        write_refused_marker(crate::keymanager::Stage::BeginDecrypt, None);
         assert_eq!(
             save(&Session {
                 client_id: "cid-1".into(),
@@ -7242,10 +6557,6 @@ mod tests {
             LOCKED_RECOVERABLE
         );
         assert!(!secure_unavailable());
-        assert_eq!(
-            storage_class(),
-            crate::telemetry::storage::SessionStorageClass::SecureRefused
-        );
         assert_eq!(read_unavailable_attempts(), 0, "and no launch was counted");
     }
 
@@ -7253,30 +6564,30 @@ mod tests {
     #[test]
     fn only_a_service_that_never_answered_is_graded_transient() {
         use crate::keymanager::LastRefusal;
-        use crate::telemetry::storage::StorageStage;
+        use crate::keymanager::Stage;
         let r = |stage, error_code| LastRefusal { stage, error_code };
         // Nothing that owns a key ever looked at ours.
-        assert!(open_failure_is_transient(r(StorageStage::NoReply, None)));
-        assert!(open_failure_is_transient(r(StorageStage::Unreachable, None)));
+        assert!(open_failure_is_transient(r(Stage::NoReply, None)));
+        assert!(open_failure_is_transient(r(Stage::Unreachable, None)));
         assert!(
-            open_failure_is_transient(r(StorageStage::BeginDecrypt, Some(-1))),
+            open_failure_is_transient(r(Stage::BeginDecrypt, Some(-1))),
             "the hub's own 'Service does not exist' — measured on the 4.10 dev set"
         );
         // …versus a key manager that answered about the key.
         assert!(!open_failure_is_transient(r(
-            StorageStage::BeginDecrypt,
+            Stage::BeginDecrypt,
             Some(-10001)
         )));
         assert!(!open_failure_is_transient(r(
-            StorageStage::BeginDecrypt,
+            Stage::BeginDecrypt,
             Some(-20030)
         )));
         assert!(!open_failure_is_transient(r(
-            StorageStage::FinishDecrypt,
+            Stage::FinishDecrypt,
             None
         )));
         assert!(
-            !open_failure_is_transient(r(StorageStage::EnvelopeLocked, None)),
+            !open_failure_is_transient(r(Stage::EnvelopeLocked, None)),
             "the interim AES-CFB envelope is refused by policy, not by a stalled service"
         );
     }
@@ -7509,232 +6820,6 @@ mod tests {
 
     /// (f) An ordinary save with no key manager at all lands as plaintext, and `storage_class`
     /// reports exactly that — no marker, no lock, nothing sitting behind it.
-    #[test]
-    fn storage_class_reports_plaintext_after_an_ordinary_save() {
-        let _g = crate::testlock::serial();
-        let _t = TempSession::new("class-plaintext");
-        reset_report_state_for_test();
-        save(&signed_in());
-        assert_eq!(storage_class(), crate::telemetry::storage::SessionStorageClass::Plaintext);
-    }
-
-    /// (g) A save that genuinely seals reports `Secure`.
-    #[test]
-    fn storage_class_reports_secure_after_a_sealing_save() {
-        let _g = crate::testlock::serial();
-        let _t = TempSession::new("class-secure");
-        mark_proven_for_test(); // sealing at all requires an earned install — see Stage B1
-        reset_report_state_for_test();
-        arm_round_tripping_keymanager(&signed_in());
-        save(&signed_in());
-        crate::keymanager::disarm_for_test();
-        assert_eq!(storage_class(), crate::telemetry::storage::SessionStorageClass::Secure);
-    }
-
-    /// (h) A locked-recoverable read always writes the marker before this function can even be
-    /// asked, so the live verdict is `SecureRefused` — the more definitive of the two, per
-    /// `storage_class`'s own doc — not merely `SecureLocked`.
-    #[test]
-    fn storage_class_reports_secure_refused_after_a_locked_recoverable_read() {
-        let _g = crate::testlock::serial();
-        let t = TempSession::new("class-locked-recoverable");
-        std::fs::write(t.file(), locked_envelope_bytes()).unwrap();
-        reset_report_state_for_test();
-        arm_refusing_keymanager();
-        let _ = load();
-        crate::keymanager::disarm_for_test();
-        assert_eq!(
-            storage_class(),
-            crate::telemetry::storage::SessionStorageClass::SecureRefused
-        );
-    }
-
-    /// (i) An UNRECOVERABLE locked read — a secure-shaped file this build does not recognize —
-    /// never writes the marker (see `ReadState::Locked`'s own doc), so `storage_class` reports the
-    /// narrower `SecureLocked` instead of `SecureRefused`.
-    #[test]
-    fn storage_class_reports_secure_locked_for_an_unrecoverable_unrecognized_envelope() {
-        let _g = crate::testlock::serial();
-        let t = TempSession::new("class-unrecoverable");
-        std::fs::write(t.file(), br#"{"format":"plxnative-secure-session"}"#).unwrap();
-        reset_report_state_for_test();
-        let _ = load();
-        assert_eq!(
-            LOCKED_STATE.load(std::sync::atomic::Ordering::Relaxed),
-            LOCKED_UNRECOVERABLE
-        );
-        assert!(
-            !has_refused_marker(),
-            "an unrecoverable read must not write the cross-launch marker"
-        );
-        assert_eq!(
-            storage_class(),
-            crate::telemetry::storage::SessionStorageClass::SecureLocked
-        );
-    }
-
-    /// (j) A read that lands `LOCKED_RECOVERABLE` reports the handled error exactly once — with
-    /// `EnvelopeLocked`, the live class and the marker fact at the time of the report — and a LATER
-    /// launch against the same still-locked file must not report the identical stage again.
-    #[test]
-    fn a_locked_read_reports_once_per_process_with_stage_envelope_locked() {
-        let _g = crate::testlock::serial();
-        let t = TempSession::new("report-envelope-locked");
-        std::fs::write(t.file(), locked_envelope_bytes()).unwrap();
-        reset_report_state_for_test();
-
-        arm_refusing_keymanager();
-        let _ = load();
-        crate::keymanager::disarm_for_test();
-        let reports = captured_reports();
-        assert_eq!(reports.len(), 1, "{reports:?}");
-        // The open failed at `begin(decrypt)` with a real code, so the report says THAT rather
-        // than the bare `envelope_locked` a failure with no stage of its own would carry.
-        assert_eq!(reports[0].stage, crate::telemetry::storage::StorageStage::BeginDecrypt);
-        assert_eq!(
-            reports[0].class,
-            crate::telemetry::storage::SessionStorageClass::SecureRefused
-        );
-        assert!(reports[0].refused_marker);
-
-        // A later launch against the SAME still-locked file — `redirect_for_test` is the "new
-        // launch" the four-launch test above uses (fresh `LOCKED_STATE`/`CACHE`, same file); the
-        // once-per-process dedup is deliberately NOT reset by it.
-        super::redirect_for_test(Some(t.file()));
-        arm_refusing_keymanager();
-        let _ = load();
-        crate::keymanager::disarm_for_test();
-        assert_eq!(
-            captured_reports().len(),
-            1,
-            "the same stage must not be reported twice in one process"
-        );
-    }
-
-    /// **Stage B2 item 1 (issue #76 field report case 5, ported).** The pre-B2 `report_once` marked
-    /// a stage `REPORTED_STAGES` unconditionally, BEFORE it even knew whether
-    /// `telemetry::storage::report_error` sent, deferred or dropped it — so a stage the consent
-    /// question genuinely REFUSED (a stored "No", the real terminal answer, not merely "not asked
-    /// yet") was recorded exactly like one that had gone out, in the SAME set a sent-or-held report
-    /// lives in. That is the shape this test pins apart: a real "No" must be tracked in its own set
-    /// (`DROPPED_STAGES`) — never reported, but also never retried on every later occurrence of the
-    /// identical failure — while an UNANSWERED consent state defers the report and is correctly
-    /// marked reported (a deferred report is `telemetry::storage`'s own replay to resolve, not a
-    /// reason for this module to ask again).
-    #[test]
-    fn field_5_a_dropped_report_is_tracked_apart_from_a_reported_one_and_never_retried() {
-        let _g = crate::testlock::serial();
-        reset_report_state_for_test();
-
-        // A real "No": the Errors channel's own consent question, already answered.
-        crate::telemetry::consent::install(crate::telemetry::consent::Consent {
-            asked_version: crate::telemetry::consent::POLICY_VERSION,
-            errors: false,
-            ..Default::default()
-        });
-        let dropped_stage = crate::telemetry::storage::StorageStage::BeginDecrypt;
-        let dropped_ctx = crate::telemetry::storage::StorageErrorContext {
-            stage: dropped_stage,
-            service_error_code: None,
-            class: crate::telemetry::storage::SessionStorageClass::SecureRefused,
-            refused_marker: true,
-            key_outcome: None,
-            registered_with_app_id: false,
-            registered_with_name: false,
-            sealed_identity: None,
-        };
-        report_once(PendingReport { context: dropped_ctx, candidate_reads: None, candidate: None });
-        assert_eq!(captured_reports().len(), 1, "one attempt was made");
-        assert!(
-            !REPORTED_STAGES.lock().unwrap_or_else(|e| e.into_inner()).contains(&dropped_stage),
-            "a dropped report must never read as one that was sent or held"
-        );
-        assert!(
-            DROPPED_STAGES.lock().unwrap_or_else(|e| e.into_inner()).contains(&dropped_stage),
-            "a dropped report must be tracked in its own set"
-        );
-
-        // The identical failure occurs again (another save hitting the same refusal) — it must not
-        // be retried every occurrence.
-        report_once(PendingReport { context: dropped_ctx, candidate_reads: None, candidate: None });
-        assert_eq!(
-            captured_reports().len(),
-            1,
-            "a dropped stage must not be re-attempted on every later occurrence"
-        );
-
-        // A DIFFERENT stage, found while the question is still open (unanswered, not refused),
-        // is DEFERRED rather than dropped — and a deferred attempt IS marked reported, since
-        // `telemetry::storage`'s own replay (not this module) is what resolves it later.
-        crate::telemetry::consent::install(crate::telemetry::consent::Consent::default());
-        let deferred_stage = crate::telemetry::storage::StorageStage::EnvelopeLocked;
-        report_once(PendingReport {
-            context: crate::telemetry::storage::StorageErrorContext {
-                stage: deferred_stage,
-                service_error_code: None,
-                class: crate::telemetry::storage::SessionStorageClass::SecureRefused,
-                refused_marker: true,
-                key_outcome: None,
-                registered_with_app_id: false,
-                registered_with_name: false,
-                sealed_identity: None,
-            },
-            candidate_reads: None,
-            candidate: None,
-        });
-        assert_eq!(
-            captured_reports().len(),
-            2,
-            "the second, different stage was attempted"
-        );
-        assert!(
-            REPORTED_STAGES
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .contains(&deferred_stage),
-            "a deferred report is spoken for and must read as reported"
-        );
-        assert!(!DROPPED_STAGES
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .contains(&deferred_stage));
-
-        // Drain `telemetry::storage`'s own DEFERRED queue — a crate-global the deferred report
-        // above was really pushed into (this module's `report_storage_error` calls the real
-        // `telemetry::storage::report_error` in every build, Stage B2), which every later test in
-        // that module's own suite (`crate::testlock::serial()`-guarded, same lock this test holds)
-        // asserts a specific length of. `replay_deferred` empties it unconditionally regardless of
-        // consent, since no dev build carries a Sentry endpoint to actually send through.
-        crate::telemetry::storage::replay_deferred();
-        crate::telemetry::consent::install(crate::telemetry::consent::Consent::default());
-    }
-
-    /// (k) A save whose `keymanager::seal` fails reports the handled error with THE KEYMANAGER'S
-    /// OWN stage and code — `BeginEncrypt` here, not a generic "seal failed".
-    #[test]
-    fn a_seal_failure_reports_once_with_the_keymanagers_stage_and_code() {
-        let _g = crate::testlock::serial();
-        let _t = TempSession::new("report-seal-failure");
-        mark_proven_for_test(); // a real seal attempt (not a probe) requires an earned install
-        reset_report_state_for_test();
-        crate::keymanager::arm_for_test(vec![
-            ("generateKey", Ok(serde_json::json!({"returnValue": true}))),
-            (
-                "begin",
-                Ok(serde_json::json!({
-                    "returnValue": false, "errorCode": -10001, "errorText": "key not found"
-                })),
-            ),
-        ]);
-
-        save(&signed_in());
-        crate::keymanager::disarm_for_test();
-
-        let reports = captured_reports();
-        assert_eq!(reports.len(), 1, "{reports:?}");
-        assert_eq!(reports[0].stage, crate::telemetry::storage::StorageStage::BeginEncrypt);
-        assert_eq!(reports[0].service_error_code, Some(-10001));
-    }
 
     /// (l) An install with no key manager at all — the ordinary case on today's dev set — gets no
     /// answer from any service (`keymanager` records that as `unreachable`/`no_reply`), and the
@@ -7750,15 +6835,6 @@ mod tests {
     /// finding one, since an install that has already settled on `UNAVAILABLE` takes `seal`'s fast
     /// path without asking a service anything. The premise this test states in its name —
     /// "reaches no service call" — is made true here rather than assumed.
-    #[test]
-    fn a_healthy_plaintext_install_reports_nothing() {
-        let _g = crate::testlock::serial();
-        let _t = TempSession::new("report-healthy-plaintext");
-        crate::keymanager::disarm_for_test();
-        reset_report_state_for_test();
-        save(&signed_in());
-        assert!(captured_reports().is_empty(), "{:?}", captured_reports());
-    }
 
     /// (e) The marker file itself is credentials-adjacent evidence about this device's key manager
     /// and is written through the same 0600 path everything else here uses.
@@ -7896,72 +6972,15 @@ mod tests {
     /// one this launch happened to latch — that is the fact the report exists to settle, and the
     /// two are different on precisely the sets issue #76 is about. Here the launch registers as an
     /// application service while the envelope on disk was sealed anonymously by an older build.
-    #[test]
-    fn a_locked_read_reports_the_identity_the_envelope_records() {
-        let _g = crate::testlock::serial();
-        let t = TempSession::new("report-sealed-identity");
-        write_envelope_with_identity(&t.file(), crate::keymanager::Identity::Anonymous);
-        reset_report_state_for_test();
-        // This launch can get the strongest identity there is; the envelope's is still anonymous.
-        crate::keymanager::arm_identity_for_test(false, true, false);
-
-        let _ = load();
-        crate::keymanager::disarm_for_test();
-
-        let reports = captured_reports();
-        assert_eq!(reports.len(), 1, "{reports:?}");
-        assert_eq!(
-            reports[0].sealed_identity,
-            Some(crate::keymanager::Identity::Anonymous),
-            "the report is about the envelope, not about this launch"
-        );
-        drop(t);
-    }
 
     /// The probe side of the same rule: a probe that fails to reopen reports the identity the
     /// PROBE FILE records. Here the hub grants the application-service form only, so the probe's
     /// own plain bus name is out of reach and `check_probe` reports `identity_unavailable` — about
     /// a probe whose recorded owner is `named`, not about the `app_id` this launch could have had.
-    #[test]
-    fn a_probe_report_names_the_identity_the_probe_records() {
-        let _g = crate::testlock::serial();
-        let t = TempSession::new("report-probe-identity");
-        write_probe_with_identity(crate::keymanager::Identity::Named);
-        reset_report_state_for_test();
-        arm_opening_keymanager_for(PROBE_PLAINTEXT);
-        crate::keymanager::arm_identity_for_test(false, true, false);
-
-        let _ = load();
-        crate::keymanager::disarm_for_test();
-
-        let reports = captured_reports();
-        assert!(
-            reports.iter().any(|r| r.stage
-                == crate::telemetry::storage::StorageStage::IdentityUnavailable
-                && r.sealed_identity == Some(crate::keymanager::Identity::Named)),
-            "{reports:?}"
-        );
-        drop(t);
-    }
 
     /// A report about no sealed thing at all carries `None` — the write that never landed. Read
     /// straight off the queue `report_write_failed` builds, since what is being graded is the
     /// context it CONSTRUCTS, not the consent-gated send that follows.
-    #[test]
-    fn a_write_failure_report_names_no_sealed_identity() {
-        let _g = crate::testlock::serial();
-        let _t = TempSession::new("report-no-identity");
-        PENDING_REPORTS.lock().unwrap_or_else(|e| e.into_inner()).clear();
-        report_write_failed();
-        let pending = PENDING_REPORTS.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        assert_eq!(pending.len(), 1, "{pending:?}");
-        assert_eq!(
-            pending[0].context.stage,
-            crate::telemetry::storage::StorageStage::WriteFailed
-        );
-        assert_eq!(pending[0].context.sealed_identity, None);
-        PENDING_REPORTS.lock().unwrap_or_else(|e| e.into_inner()).clear();
-    }
 
     /// Plant an unanswered-launch counter at `launches`, as though that many prior launches had
     /// all found the key service silent.
@@ -8397,12 +7416,6 @@ mod tests {
             !has_refused_marker(),
             "a name this launch could not get must never downgrade the install"
         );
-        assert!(
-            captured_reports().iter().any(|r| r.stage
-                == crate::telemetry::storage::StorageStage::IdentityUnavailable),
-            "the reason reaches a report: {:?}",
-            captured_reports().iter().map(|r| r.stage).collect::<Vec<_>>()
-        );
     }
 
     /// **Regression for the review finding (2026-09-10): an `IdentityUnavailable` open used to
@@ -8570,11 +7583,6 @@ mod tests {
         assert!(
             probe_paths().iter().all(|p| !p.exists()),
             "the probe is dropped so the next save can plant one for this identity"
-        );
-        assert!(
-            captured_reports().iter().any(|r| r.stage
-                == crate::telemetry::storage::StorageStage::IdentityUnavailable),
-            "the reason reaches a report"
         );
         drop(t);
     }
@@ -8912,57 +7920,6 @@ mod tests {
     /// this launch queues must carry `key_outcome = created`, read from the PROBE FILE (the seal
     /// that produced it), never from this launch's own `last_key_outcome` — this launch never once
     /// called `generateKey`, since `check_probe` only opens.
-    #[test]
-    fn a_probe_sealed_after_a_created_key_that_fails_next_launch_reports_created_and_the_tag_code() {
-        let _g = crate::testlock::serial();
-        let t = TempSession::new("probe-key-outcome-created");
-        reset_report_state_for_test();
-
-        // Launch 1: `generateKey` succeeds outright (no `-10002`) — a NEW key was minted — and the
-        // probe round-trips in-process, exactly as `plant_probe` requires before it persists.
-        arm_round_tripping_keymanager_bytes(PROBE_PLAINTEXT);
-        save(&signed_in());
-        crate::keymanager::disarm_for_test();
-        assert!(probe_paths().iter().any(|p| p.exists()), "launch 1 planted a probe");
-
-        // Launch 2 — the power cycle. This launch's OWN registration cannot open the key: `begin`
-        // succeeds but `finish(decrypt)` answers the real GCM tag-mismatch code.
-        super::redirect_for_test(Some(t.file()));
-        crate::keymanager::arm_for_test(vec![
-            (
-                "begin",
-                Ok(serde_json::json!({"returnValue": true, "handle": "h-dec"})),
-            ),
-            (
-                "finish",
-                Ok(serde_json::json!({
-                    "returnValue": false, "errorCode": -20030, "errorText": "tag mismatch"
-                })),
-            ),
-        ]);
-        let after = load();
-        crate::keymanager::disarm_for_test();
-
-        assert_eq!(
-            after.account_token, "acct",
-            "the session was already plaintext — a failed probe costs nothing that was not \
-             already lost"
-        );
-        assert!(has_refused_marker(), "a genuine tag mismatch arms the refused marker");
-        assert!(probe_paths().iter().all(|p| !p.exists()), "the probe is consumed");
-
-        let reports = captured_reports();
-        assert_eq!(reports.len(), 1, "exactly one report for this failure");
-        assert_eq!(reports[0].stage, crate::telemetry::storage::StorageStage::FinishDecrypt);
-        assert_eq!(reports[0].service_error_code, Some(-20030));
-        assert_eq!(
-            reports[0].key_outcome,
-            Some(crate::keymanager::KeyOutcome::Created),
-            "the report must carry the PROBE's own seal-time outcome, not this launch's (which \
-             never called generateKey at all)"
-        );
-        assert!(reports[0].refused_marker, "the marker this same failure just armed");
-    }
 
     /// The `existed` half of the same decider, at PLANT time: a save whose `generateKey` answers
     /// `-10002` ("key already exists") persists `key_outcome: existed` into the probe file — for
@@ -9463,68 +8420,10 @@ mod tests {
         );
     }
 
-    // ---- Issue #76 review (should-fix): a real consent "Yes" gives a dropped stage its attempt --
+    // ---- every app-owned file creation names mode 0600 --------------------------------------
 
-    /// [`retry_dropped_stages`] clears the dropped-stage set — [`telemetry::mod::record`]'s own
-    /// hook when a decision newly enables the Errors channel — so the identical failure, occurring
-    /// again after that "Yes", is attempted rather than skipped forever.
     #[test]
-    fn retry_dropped_stages_lets_the_identical_failure_be_attempted_again() {
-        let _g = crate::testlock::serial();
-        reset_report_state_for_test();
-        crate::telemetry::consent::install(crate::telemetry::consent::Consent {
-            asked_version: crate::telemetry::consent::POLICY_VERSION,
-            errors: false,
-            ..Default::default()
-        });
-        let stage = crate::telemetry::storage::StorageStage::BeginDecrypt;
-        let ctx = crate::telemetry::storage::StorageErrorContext {
-            stage,
-            service_error_code: None,
-            class: crate::telemetry::storage::SessionStorageClass::SecureRefused,
-            refused_marker: true,
-            key_outcome: None,
-            registered_with_app_id: false,
-            registered_with_name: false,
-            sealed_identity: None,
-        };
-        report_once(PendingReport { context: ctx, candidate_reads: None, candidate: None });
-        assert_eq!(captured_reports().len(), 1);
-        report_once(PendingReport { context: ctx, candidate_reads: None, candidate: None });
-        assert_eq!(captured_reports().len(), 1, "a dropped stage is not retried on its own");
-
-        retry_dropped_stages();
-        report_once(PendingReport { context: ctx, candidate_reads: None, candidate: None });
-        assert_eq!(
-            captured_reports().len(),
-            2,
-            "a real Yes must give the dropped stage its one attempt back"
-        );
-        crate::telemetry::consent::install(crate::telemetry::consent::Consent::default());
-    }
-
-    // ---- storage-file hardening: no writer under telemetry/ or this file creates anything at a
-    // permissive mode -----------------------------------------------------------------------------
-
-    /// **Every file this module, `telemetry/`, `lib.rs` or `keymanager.rs` creates fresh must name
-    /// `0o600` explicitly, in the SAME STATEMENT, or be on this test's own allowlist by exact
-    /// line.** A file that already exists and is merely reopened (the spool's ordinary append) is
-    /// not a creation and is not what this test is about — see `repair_owned_mode` and its callers
-    /// for that half instead.
-    ///
-    /// Walks the real source tree (`env!("CARGO_MANIFEST_DIR")`), so it cannot rot the way a
-    /// transcribed list would: a new creation call added to any scanned scope fails this test the
-    /// moment it lands, not the next time somebody happens to read the file by hand. Two needle
-    /// sets, because two shapes both create a file: an `OpenOptions` builder chain naming
-    /// `.create(true)`/`.create_new(true)` (or bare `File::create(`/`File::create_new(`), which
-    /// must carry `.mode(0o600)` somewhere in its own statement — the mode is looked for in the
-    /// STATEMENT the creating call belongs to (found by walking outward to the nearest `;`/`{`/`}`
-    /// on each side), not a fixed line window, so an unrelated `.mode(0o600)` on a neighbouring
-    /// statement can no longer exempt this one by accident; and `std::fs::write(`/`fs::write(`,
-    /// which has no mode parameter at all and so is unconditionally an offence — the fix at that
-    /// call site is always to switch to `write_atomic` (0600) or an explicit `OpenOptions` chain.
-    #[test]
-    fn every_file_creation_in_telemetry_and_session_names_mode_0600() {
+    fn every_file_creation_in_session_and_friends_names_mode_0600() {
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         // (file, 1-indexed line) pairs that are deliberately exempt, each with why.
         let allowlist: &[(&str, usize)] = &[];
@@ -9537,13 +8436,9 @@ mod tests {
                 .to_string_lossy()
                 .replace('\\', "/");
             // Scope: every module known to write app-owned files into the shared runtime root or
-            // the session directory, not only `telemetry/` + this file — `lib.rs`'s event/panic
-            // log sink and `keymanager.rs`'s dev-only key file are app-owned data too.
-            if !(rel.starts_with("telemetry/")
-                || rel == "plex/session.rs"
-                || rel == "lib.rs"
-                || rel == "keymanager.rs")
-            {
+            // the session directory — `lib.rs`'s event/panic log sink and `keymanager.rs`'s
+            // dev-only key file are app-owned data too.
+            if !(rel == "plex/session.rs" || rel == "lib.rs" || rel == "keymanager.rs") {
                 return;
             }
             files += 1;
@@ -9623,7 +8518,7 @@ mod tests {
             }
         });
         assert!(
-            files >= 8,
+            files >= 3,
             "the walk found only {files} files across the scanned scope — it is not reading the tree"
         );
         assert!(
@@ -9643,9 +8538,6 @@ mod tests {
         let _t = TempSession::new("candidate-missing");
         let _ = load();
         assert_eq!(candidate_reads_wire(), "other:missing");
-        let cold = cold_storage_diagnostic().expect("a missing cold read is still diagnostic");
-        assert!(cold.errors.is_empty());
-        assert_eq!(cold.facts, ColdSessionFacts::default());
     }
 
     /// `open(2)` refusing for a reason OTHER than `ENOENT` — a denied parent directory — must be
@@ -9736,23 +8628,6 @@ mod tests {
         assert_eq!(candidate_reads_wire(), "other:untrusted_mode");
     }
 
-    #[test]
-    fn cold_snapshot_preserves_every_candidate_error_in_order() {
-        use std::os::unix::fs::PermissionsExt;
-        let _g = crate::testlock::serial();
-        let t = TwoCandidateSession::new("cold-multiple-errors");
-        for path in [t.higher(), t.lower()] {
-            std::fs::write(&path, b"{}").unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)).unwrap();
-        }
-        let _ = load();
-        let cold = cold_storage_diagnostic().unwrap();
-        assert_eq!(cold.errors.len(), 2, "no candidate failure may be collapsed away");
-        assert!(cold.errors.iter().all(|error| {
-            error.context.stage == crate::telemetry::storage::StorageStage::UntrustedMode
-                && error.candidate == CandidateCategory::Other
-        }));
-    }
 
     /// The counterpart to every rejection above: a trusted, owned, regular file that parses as
     /// this build's plain session shape is recorded as accepted, not merely as "not rejected".

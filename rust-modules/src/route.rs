@@ -2262,7 +2262,6 @@ fn is_worker_ticket_current(expected: &WorkerTicket) -> bool {
 /// the demux worker starts; it never reads the mutable route session afterwards.
 #[derive(Clone)]
 pub(crate) struct HlsAbrControl {
-    trace_generation: u32,
     sid: ServerId,
     rating_key: String,
     logical_session: String,
@@ -2327,9 +2326,8 @@ pub(crate) struct PrimedHls {
 pub(crate) enum OriginalProbeResult {
     Measured(crate::curlio::ThroughputSample),
     /// The request reached no usable body. The client-side HLS route remained selected; PMS-side
-    /// cursor continuity is not inferred. The outcome is telemetry, not a zero-capacity sample.
+    /// cursor continuity is not inferred.
     Failed {
-        outcome: crate::player::report::TraceOutcome,
         failure: OriginalProbeFailure,
     },
     /// The active route changed while the finite GET was in flight. Its bytes belong to an old
@@ -2337,9 +2335,9 @@ pub(crate) enum OriginalProbeResult {
     Stale,
 }
 
-/// Photograph-safe detail for an Original source probe failure. The report trace keeps a broad
-/// outcome class, but the on-screen panel must not collapse a PMS 503, a deadline and a broken
-/// connection into the same `Original check failed` sentence.
+/// Photograph-safe detail for an Original source probe failure. The on-screen panel must not
+/// collapse a PMS 503, a deadline and a broken connection into the same `Original check failed`
+/// sentence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum OriginalProbeFailure {
     HttpStatus(i32),
@@ -2347,20 +2345,6 @@ pub(crate) enum OriginalProbeFailure {
     Transport,
     NoBody,
     Other,
-}
-
-fn source_probe_sample_outcome(
-    sample: crate::curlio::ThroughputSample,
-) -> crate::player::report::TraceOutcome {
-    if sample.target_reached {
-        crate::player::report::TraceOutcome::Succeeded
-    } else {
-        // A non-empty prefix is useful only as a right-censored observation. `curlio` currently
-        // collapses the terminal deadline/read reason once bytes exist, so naming it successful
-        // would be stronger than the evidence. Keep the trace honest until that result type grows
-        // a terminal-cause field.
-        crate::player::report::TraceOutcome::Inconclusive
-    }
 }
 
 /// **Why [`HlsAbrControl::prime`] would not register a candidate encoder**, in the one distinction
@@ -2415,10 +2399,6 @@ fn classify_prime_decision(
 }
 
 impl HlsAbrControl {
-    pub(crate) fn trace_generation(&self) -> u32 {
-        self.trace_generation
-    }
-
     pub(crate) fn request_original_recovery(
         &self,
         ticket: &WorkerTicket,
@@ -2504,7 +2484,6 @@ impl HlsAbrControl {
         F: FnOnce() -> bool,
     {
         use crate::curlio::{OpenErr, ThroughputFailure as Failure};
-        use crate::player::report::{OriginalProbePhase as Phase, TraceOutcome as Outcome};
 
         if !is_worker_ticket_current(expected) {
             return OriginalProbeResult::Stale;
@@ -2512,7 +2491,6 @@ impl HlsAbrControl {
         let url = if self.fixture_base.is_empty() {
             let Some(client) = crate::plex::client_for(self.sid) else {
                 return OriginalProbeResult::Failed {
-                    outcome: Outcome::Inconclusive,
                     failure: OriginalProbeFailure::Other,
                 };
             };
@@ -2522,11 +2500,6 @@ impl HlsAbrControl {
         } else {
             self.original_probe_part.clone()
         };
-        crate::player::report::note_original_probe_for(
-            self.trace_generation,
-            Phase::SampleSource,
-            Outcome::Started,
-        );
         let sample = crate::curlio::sample_active_throughput_result(
             &url,
             plan.target_bytes,
@@ -2535,22 +2508,10 @@ impl HlsAbrControl {
             cancelled,
         );
         if !is_worker_ticket_current(expected) {
-            crate::player::report::note_original_probe_for(
-                self.trace_generation,
-                Phase::SampleSource,
-                Outcome::Inconclusive,
-            );
             return OriginalProbeResult::Stale;
         }
         match sample {
-            Ok(sample) => {
-                crate::player::report::note_original_probe_for(
-                    self.trace_generation,
-                    Phase::SampleSource,
-                    source_probe_sample_outcome(sample),
-                );
-                OriginalProbeResult::Measured(sample)
-            }
+            Ok(sample) => OriginalProbeResult::Measured(sample),
             Err(failure) => {
                 let detail = match &failure {
                     Failure::Open(OpenErr::Status(status)) => {
@@ -2564,27 +2525,10 @@ impl HlsAbrControl {
                     Failure::NoBody { .. } => OriginalProbeFailure::NoBody,
                     _ => OriginalProbeFailure::Other,
                 };
-                let outcome = match failure {
-                    Failure::Open(OpenErr::Deadline) | Failure::BodyDeadline => Outcome::Deadline,
-                    Failure::Open(OpenErr::Transport(_) | OpenErr::Multi(_))
-                    | Failure::BodyRead { .. } => Outcome::Transport,
-                    Failure::Open(OpenErr::Status(503 | 509)) => Outcome::Refused,
-                    Failure::Open(OpenErr::Status(500..=599)) => Outcome::ServerState,
-                    Failure::NoBody { .. } => Outcome::NoBody,
-                    _ => Outcome::Inconclusive,
-                };
-                crate::player::report::note_original_probe_for(
-                    self.trace_generation,
-                    Phase::SampleSource,
-                    outcome,
-                );
                 crate::player::log(&format!(
                     "abr: Original source request produced no capacity sample failure={failure:?}"
                 ));
-                OriginalProbeResult::Failed {
-                    outcome,
-                    failure: detail,
-                }
+                OriginalProbeResult::Failed { failure: detail }
             }
         }
     }
@@ -2871,7 +2815,6 @@ pub(crate) fn hls_abr_control() -> Option<(HlsAbrControl, WorkerTicket)> {
         .flatten();
     Some((
         HlsAbrControl {
-            trace_generation: playback_trace_generation(),
             sid: cur_sid(),
             rating_key: cur_rk(),
             logical_session: sess(),
@@ -3123,13 +3066,7 @@ pub(crate) fn fallback_auto_to_hls_for(
         rung.raster().0,
         rung.raster().1,
     ));
-    install_auto_hls(
-        expected,
-        rung,
-        offset_secs,
-        true,
-        crate::player::report::DeliveryReason::LinkFallback,
-    )
+    install_auto_hls(expected, rung, offset_secs, true)
 }
 
 /// Replace an Auto Original route whose source request never opened.
@@ -3157,13 +3094,7 @@ pub(crate) fn fallback_unopened_auto_to_hls(offset_secs: i64) -> Option<String> 
         rung.raster().0,
         rung.raster().1,
     ));
-    install_auto_hls(
-        &expected,
-        rung,
-        offset_secs,
-        false,
-        crate::player::report::DeliveryReason::OriginalOpenRollback,
-    )
+    install_auto_hls(&expected, rung, offset_secs, false)
 }
 
 /// Commit the common Original→HLS route mutation after the caller has chosen a rung from the
@@ -3175,7 +3106,6 @@ fn install_auto_hls(
     rung: crate::abr::Rung,
     offset_secs: i64,
     visible_switch: bool,
-    reason: crate::player::report::DeliveryReason,
 ) -> Option<String> {
     let fixture_base = session().auto_fixture_base.clone();
     let previous = {
@@ -3229,12 +3159,6 @@ fn install_auto_hls(
         if visible_switch {
             note_visible_switch();
         }
-        crate::player::report::note_delivery_requested_for(
-            playback_trace_generation(),
-            crate::player::report::DeliveryClass::Hls,
-            crate::player::report::QualityClass::from_rung(rung),
-            reason,
-        );
         Some(url)
     };
     if !fixture_base.is_empty() {
@@ -3364,12 +3288,6 @@ pub(crate) fn recover_auto_to_original_for(
         } else {
             "quality: Original restored direct play; HLS encoder held pending frames"
         });
-        crate::player::report::note_delivery_requested_for(
-            playback_trace_generation(),
-            crate::player::report::DeliveryClass::Direct,
-            crate::player::report::QualityClass::Original,
-            crate::player::report::DeliveryReason::OriginalRecovery,
-        );
         return Some(AutoOriginalReload::Direct);
     }
 
@@ -3387,12 +3305,6 @@ pub(crate) fn recover_auto_to_original_for(
     } else {
         "quality: Original restored remux; HLS encoder held pending frames"
     });
-    crate::player::report::note_delivery_requested_for(
-        playback_trace_generation(),
-        crate::player::report::DeliveryClass::Remux,
-        crate::player::report::QualityClass::Original,
-        crate::player::report::DeliveryReason::OriginalRecovery,
-    );
     Some(AutoOriginalReload::Remux)
 }
 
@@ -4886,7 +4798,6 @@ pub(crate) fn restore_quality(q: Quality) {
 /// rebuilds from the stored ceiling, so only an explicit pick can move it mid-film.
 fn persist_quality_choice(q: Quality) -> Quality {
     let q = supported_quality(q);
-    crate::player::report::note_quality_selected_for(playback_trace_generation(), q);
     QUALITY.store(q.index(), Ordering::Relaxed);
     // A session write is a read-modify-write under the session lock: changing this preference
     // must not overwrite a roster refresh, a profile switch, or another profile's recents.
@@ -6920,10 +6831,18 @@ fn take_resume_for(pending: &mut Option<(u32, i64)>, gen: u32) -> i64 {
         None => 0,
     }
 }
-/// Trace generation owned by the plan that is actually installed. It deliberately remains the
-/// outgoing generation while the next plan resolves, because that engine is still alive; its
-/// workers carry the same token and are ignored by the newly reset report trace.
+/// Attempt generation owned by the plan that is actually installed. It deliberately remains the
+/// outgoing generation while the next plan resolves, because that engine is still alive. It is a
+/// local playback-attempt epoch: the Stats-for-nerds sweep chart resets on a new one, and nothing
+/// leaves the device.
 static ACTIVE_TRACE_GENERATION: AtomicU32 = AtomicU32::new(0);
+/// The mint for the next attempt generation. Values never repeat within a process, so a late
+/// worker can never write into the next attempt's window.
+static NEXT_ATTEMPT_GENERATION: AtomicU32 = AtomicU32::new(0);
+
+fn next_attempt_generation() -> u32 {
+    NEXT_ATTEMPT_GENERATION.fetch_add(1, Ordering::SeqCst) + 1
+}
 
 pub(crate) fn playback_trace_generation() -> u32 {
     ACTIVE_TRACE_GENERATION.load(Ordering::SeqCst)
@@ -7017,14 +6936,11 @@ fn request_play_inner(
         );
         return false;
     }
-    // **The playback funnel's denominator, minted HERE and not where the plan lands.** Every way
-    // into playback comes through this one function, including the ones that go on to be refused at
-    // `/decision` — and a refusal never reaches the engine, so anchoring the attempt any later
-    // would have produced a `playback.failed` with no `playback.requested` before it: a funnel that
-    // under-counts exactly the failure it exists to measure. It is after the empty-request guard
-    // above, so a press that resolves to nothing is not an attempt.
-    let trace_generation =
-        trace_generation.unwrap_or_else(|| crate::player::report::requested(sid));
+    // **The playback attempt epoch, minted HERE and not where the plan lands.** Every way into
+    // playback comes through this one function, including the ones that go on to be refused at
+    // `/decision`. It is after the empty-request guard above, so a press that resolves to nothing
+    // is not an attempt.
+    let trace_generation = trace_generation.unwrap_or_else(next_attempt_generation);
     // The fields a play REQUEST owns, as against the ones only a landing may install: the HUD
     // strings (published now, so the pre-roll has a title through the whole resolve) and the five
     // the OUTGOING item leaves behind. Everything else — url, session ids, codecs — stays as it is
@@ -9635,7 +9551,6 @@ mod tests {
         install_active_hls(active, "http://fixture.invalid/old.m3u8", rung);
         let active_route = worker_ticket();
         let control = HlsAbrControl {
-            trace_generation: 0,
             sid,
             rating_key: "1".into(),
             logical_session: "probe-logical".into(),
@@ -9734,7 +9649,6 @@ mod tests {
         install_active_hls(active, "http://fixture.invalid/old.m3u8", rung);
         let active_route = worker_ticket();
         let control = HlsAbrControl {
-            trace_generation: 0,
             sid,
             rating_key: "1".into(),
             logical_session: "probe-bodyless-logical".into(),
@@ -9756,7 +9670,6 @@ mod tests {
         assert_eq!(
             result,
             OriginalProbeResult::Failed {
-                outcome: crate::player::report::TraceOutcome::ServerState,
                 failure: OriginalProbeFailure::HttpStatus(500),
             },
             "HTTP 500 stays exact for the panel and is never a zero-rate observation",
@@ -9773,25 +9686,6 @@ mod tests {
         install_active_encoder("");
         crate::plex::reset_servers_for_test();
         reset_session();
-    }
-
-    #[test]
-    fn a_partial_source_body_is_not_traced_as_a_successful_measurement() {
-        use crate::player::report::TraceOutcome;
-        let sample = |target_reached| crate::curlio::ThroughputSample {
-            bytes: 64 * 1024,
-            elapsed: std::time::Duration::from_millis(500),
-            target_reached,
-        };
-        assert_eq!(
-            source_probe_sample_outcome(sample(false)),
-            TraceOutcome::Inconclusive,
-            "a right-censored non-empty prefix cannot claim the requested sample completed",
-        );
-        assert_eq!(
-            source_probe_sample_outcome(sample(true)),
-            TraceOutcome::Succeeded,
-        );
     }
 
     /// The worker may finish a bounded response after a concurrent quality change has installed a
@@ -9852,7 +9746,6 @@ mod tests {
         );
         let active_route = worker_ticket();
         let control = HlsAbrControl {
-            trace_generation: 0,
             sid,
             rating_key: "1".into(),
             logical_session: "probe-logical".into(),
