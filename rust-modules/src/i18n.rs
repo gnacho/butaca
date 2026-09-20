@@ -281,7 +281,7 @@ fn es(s: &str) -> Option<&'static str> {
         // ---- Sign-in (Jellyfin) ----
         "required" => "obligatorio",
         "may be empty" => "puede estar vacío",
-        "That doesn't look like a server address \u{2014} try e.g. 192.168.1.20:8096" => "Eso no parece una dirección de servidor; prueba p. ej. 192.168.1.20:8096",
+        "That doesn't look like a server address \u{2014} try e.g. jellyfin.local:8096" => "Eso no parece una dirección de servidor; prueba p. ej. jellyfin.local:8096",
         "That address would carry your password unprotected \u{2014} use https:// or a local network address" => "Esa dirección enviaría tu contraseña sin protección; usa https:// o una dirección de red local",
         "The server didn't recognize that user name or password" => "El servidor no reconoció ese usuario o contraseña",
         "Couldn't reach the server \u{2014} check the address and that it's on" => "No se pudo conectar con el servidor; comprueba la dirección y que esté encendido",
@@ -830,7 +830,7 @@ mod tests {
             "Settings apply to this Plex profile on this television. You can return here from the profile menu at any time.",
             "required",
             "may be empty",
-            "That doesn't look like a server address \u{2014} try e.g. 192.168.1.20:8096",
+            "That doesn't look like a server address \u{2014} try e.g. jellyfin.local:8096",
             "That address would carry your password unprotected \u{2014} use https:// or a local network address",
             "The server didn't recognize that user name or password",
             "Couldn't reach the server \u{2014} check the address and that it's on",
