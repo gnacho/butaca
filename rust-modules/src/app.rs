@@ -6521,6 +6521,11 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
         },
         std::env::var("APPID").unwrap_or_else(|_| "unset".into()),
     ));
+    // The version as a COMPILE-TIME literal (env! at build.rs), not a runtime format: this is
+    // the string the packaging gate greps the binary for to prove the -dev suffix reaches the
+    // bytes - the same witness job the About page's `concat!("plxnative@", ...)` had before the
+    // bilingual About moved to a runtime "Version {v}".
+    log(concat!("version: plxnative@", env!("PLX_VERSION")));
     // ...and the app directory on the NEXT line, from `app_dir()` itself, which logs its own
     // provenance (`from current_exe` / `PLXNATIVE_APP_DIR` / `macOS bundle`) — strictly more than
     // repeating the path here would say. Forced now rather than left to whoever calls it first,
