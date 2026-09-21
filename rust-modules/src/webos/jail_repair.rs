@@ -38,7 +38,13 @@ pub(crate) enum Failure {
 impl Failure {
     pub(crate) const fn message(self) -> &'static str {
         match self {
-            Self::StartFailed => "Could not start the repair. Close and reopen PlxNative to try again.",
+            Self::StartFailed => {
+                if cfg!(feature = "jellyfin") {
+                    "Could not start the repair. Close and reopen Butaca to try again."
+                } else {
+                    "Could not start the repair. Close and reopen PlxNative to try again."
+                }
+            }
             Self::HbcUnavailable => "Homebrew Channel service is unavailable.",
             Self::NotRoot => "Homebrew Channel service is not running as root.",
             Self::CommandFailed => "The sandbox repair command failed.",

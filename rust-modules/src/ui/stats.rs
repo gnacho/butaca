@@ -405,7 +405,7 @@ fn header(d: &crate::player::Diag, now: u32) -> [String; 2] {
         // number does, and this line has to fit beside it.
         format!(
             "{} {} · {} · {os} · surface {vw}x{vh}",
-            crate::plex::identity::PRODUCT,
+            crate::plex::identity::display_name(),
             crate::plex::identity::VERSION,
             if cfg!(feature = "devtriggers") {
                 "dev"
