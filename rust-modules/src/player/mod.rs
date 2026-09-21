@@ -554,7 +554,8 @@ pub(crate) fn state() -> shared::PlaybackState {
 }
 
 /// The one line that makes a phone photograph of the failure read-out a complete report:
-/// `PlxNative 0.6.0-dev · webOS 4.10.2 · 43LM6300PVB · m3r · tv_pipeline`. It exists because
+/// `Butaca 0.6.0-dev · webOS 4.10.2 · 43LM6300PVB · m3r · tv_pipeline` (the product word is the
+/// flavour's display name, not the wire identity). It exists because
 /// issue #63 arrived as a title, a model name and nothing else — no version, no reason — and the
 /// only surface carrying those facts (Stats for nerds) is reachable from the player's overflow
 /// menu alone and is force-closed on leaving playback, so a failed session had no way to show them.
@@ -577,7 +578,7 @@ fn support_line_of(i: &crate::webos::Info, hw: &crate::webos::Hardware, kind: Fa
     let set: &str = if set.is_empty() { "unknown set" } else { &set };
     format!(
         "{} {} · {} · {} · {}",
-        crate::plex::identity::PRODUCT,
+        crate::plex::identity::display_name(),
         crate::plex::identity::VERSION,
         i.release_line(),
         set,
@@ -772,7 +773,11 @@ fn jail_error_shape() -> ErrorShape {
     ErrorShape {
         kind: FailureKind::JailMissingRtkmem,
         caption: c"Playback failed — this TV's sandbox blocks native video",
-        panel: "this install's sandbox blocks access to /dev/rtkmem; PlxNative can offer a confirmed repair through rooted Homebrew Channel access",
+        panel: if cfg!(feature = "jellyfin") {
+            "this install's sandbox blocks access to /dev/rtkmem; Butaca can offer a confirmed repair through rooted Homebrew Channel access"
+        } else {
+            "this install's sandbox blocks access to /dev/rtkmem; PlxNative can offer a confirmed repair through rooted Homebrew Channel access"
+        },
         readout: "This set's sandbox does not give the app /dev/rtkmem",
         detail: std::borrow::Cow::Borrowed(
             "Repair requires a rooted TV and Homebrew Channel access. See github.com/GLinnik21/plx-native/issues/74 for help.",
@@ -2172,7 +2177,8 @@ mod tests {
         assert_eq!(
             line,
             format!(
-                "PlxNative {} · webOS 4.10.2 · 43LM6300PVB · m3r · tv_pipeline",
+                "{} {} · webOS 4.10.2 · 43LM6300PVB · m3r · tv_pipeline",
+                crate::plex::identity::display_name(),
                 crate::plex::identity::VERSION
             )
         );
