@@ -176,14 +176,20 @@ const CONTACT: &str = "Privacy questions may be sent to support@plxnative.com.\n
 ///
 /// `concat!` rather than a `format!` at draw time: the whole page is a `&'static str` the reader
 /// borrows, and `env!` is a literal at expansion.
+///
+/// Jellyfin flavor (#39): names butaca as a fork of plx-native with Gleb Linnik's copyright kept,
+/// and points at the fork's own repo (github.com/gnacho/butaca) for source, licenses and
+/// third-party notices, rather than at the upstream repo.
 #[cfg(feature = "jellyfin")]
 const ABOUT: &str = concat!(
     "Version ",
     env!("PLX_VERSION"),
     "\nBuild ",
     env!("PLX_BUILD_SHA"),
-    "\n\nbutaca is built on plx-native\ndeveloped by Gleb Linnik\n\u{00A9} 2026 Gleb Linnik and contributors",
-    "\n\nOpen source under the MIT License\ngithub.com/GLinnik21/plx-native",
+    "\n\nbutaca is a fork of plx-native, the native media client for LG webOS developed by Gleb Linnik.",
+    "\n\u{00A9} 2026 Gleb Linnik and contributors",
+    "\n\nFree and open source under the MIT License. Source, licenses and third-party notices:",
+    "\ngithub.com/gnacho/butaca",
     "\n\nbutaca is an independent, unofficial Jellyfin client. It is not produced by, endorsed by, or affiliated with the Jellyfin Project or LG Electronics Inc."
 );
 #[cfg(not(feature = "jellyfin"))]
@@ -563,6 +569,19 @@ mod tests {
         assert!(
             ABOUT.contains(&format!("Version {v}")),
             "About should name {v}, says: {ABOUT:?}"
+        );
+    }
+
+    /// The Jellyfin flavor's About page (#39): says fork of plx-native, keeps Gleb Linnik's
+    /// copyright, and points at the fork's own repo for source and licenses.
+    #[cfg(feature = "jellyfin")]
+    #[test]
+    fn jellyfin_about_names_the_fork_and_our_repo() {
+        assert!(ABOUT.contains("a fork of plx-native"), "says: {ABOUT:?}");
+        assert!(ABOUT.contains("Gleb Linnik"), "keeps the copyright: {ABOUT:?}");
+        assert!(
+            ABOUT.contains("github.com/gnacho/butaca"),
+            "points at the fork repo: {ABOUT:?}"
         );
     }
 
