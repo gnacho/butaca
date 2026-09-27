@@ -212,6 +212,11 @@ struct Scene {
     /// the per-shelf heading counts — digits change only when a landing does, so they are baked
     /// with the rest of the runs rather than formatted per frame
     shelf_count_c: [CString; NSHELF],
+    /// the per-shelf heading TITLES, translated — same lifetime rule as the counts: `Label` holds
+    /// a non-owning pointer, so the translated bytes must live in the Scene, not in a stack
+    /// temporary that drops before `draw` reads it (the old `{ let t = shelf_title(kind); … }`
+    /// borrowed a dead buffer and the heading rendered as nothing, leaving a bare count on screen)
+    shelf_title_c: [CString; NSHELF],
     /// The measured header layout, and the flag that says it needs remeasuring. Rebuilt in
     /// [`update`] on the frame a store change lands, never in the draw — see [`HeaderFlow`].
     header: HeaderFlow,
@@ -235,6 +240,7 @@ impl Scene {
             roles_c: CString::default(),
             life_c: CString::default(),
             shelf_count_c: [CString::default(), CString::default()],
+            shelf_title_c: shelf_titles(),
             header: HeaderFlow::default(),
             header_dirty: true,
         }
@@ -500,6 +506,18 @@ fn refresh_runs(sc: &mut Scene) {
             n => CString::new(n.to_string()).unwrap_or_default(),
         };
     }
+}
+
+/// Both shelf headings translated and owned — built when the page's Scene is created (the locale
+/// is fixed for the page's lifetime), and the draw reads the bytes through a raw pointer, so they
+/// must be owned here and not borrowed from a stack temporary that drops before `draw` (the old
+/// `{ let t = shelf_title(kind); … }` borrowed a dead buffer and the heading rendered as nothing,
+/// leaving a bare count on screen).
+fn shelf_titles() -> [CString; NSHELF] {
+    [shelf_title(0), shelf_title(1)].map(|b| {
+        let n = b.iter().position(|&c| c == 0).unwrap_or(b.len());
+        CString::new(&b[..n]).unwrap_or_default()
+    })
 }
 
 /// A header meta line, NUL-terminated and clipped to `w`. `Painter` has no clip, so an over-long
@@ -1194,7 +1212,7 @@ fn draw_shelf(p: Painter, person: &Person, kind: usize, sc: &Scene) {
     let hy = -row.lift();
     #[allow(unused_variables)] // `tw` is used only when the count run exists
     let tw = Label::new(
-        { let t = shelf_title(kind); t.as_ptr().cast() },
+        sc.shelf_title_c[kind].as_ptr(),
         theme::size::HEADLINE,
         theme::TEXT_HEADING,
     )
@@ -1204,7 +1222,7 @@ fn draw_shelf(p: Painter, person: &Person, kind: usize, sc: &Scene) {
     if !sc.shelf_count_c[kind].as_bytes().is_empty() {
         // the count sits ON THE HEADING'S BASELINE — two sizes cap-top-aligned would leave the
         // smaller run floating above the line the eye reads
-        let tw = crate::text::text_width({ let t = shelf_title(kind); t.as_ptr().cast() }, theme::size::HEADLINE, 1);
+        let tw = crate::text::text_width(sc.shelf_title_c[kind].as_ptr(), theme::size::HEADLINE, 1);
         Label::new(
             sc.shelf_count_c[kind].as_ptr(),
             theme::size::CAPTION,
