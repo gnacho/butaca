@@ -116,18 +116,31 @@ pub(crate) const KEYBOARD_H: f32 = 324.0;
 /// `x` is `consts::MARGIN_X` rather than the design's literal 90 — it always MEANT the app's side
 /// margin, and spelling it twice is how it stayed at 90 when the margin moved to the overscan-safe
 /// 96. `y` is `widgets::TOP_BAR_BOTTOM` + 8 and `h` is the design's 80, which is the box a 72px run
-/// sits in, not a control height. **This is also the pointer HIT rect** (`hit`'s `FIELD.contains`,
-/// below) — deliberately NOT grown by `field::descent_pad`, which is a live font-metric read and
-/// would couple this pure geometry function to a glyph cache. The two disagree by only the pad's
-/// few px (≈3.5px on the shipped face): a click landing in that sliver — past `FIELD`'s own bottom
-/// edge but still inside the clipped glyph's own descent — reads as a miss rather than a field hit.
-/// Left as a known, recorded gap (Codex review round 1, `field::draw`'s own comment above its
-/// `field_box`) rather than silently ignored.
+/// sits in, not a control height. This is the DRAWN rect; the pointer hit-tests the grown
+/// [`FIELD_HIT`] below — an exact-box hit test on a 4K panel with a wand pointer turned real
+/// clicks on the field into dead ground (the ≈3.5px descent strip under the box alone was a
+/// recorded miss; see `FIELD_HIT`'s doc). Growing for the POINTER only keeps this pure geometry
+/// free of the live font-metric read `field::descent_pad` would couple it to.
 pub(crate) const FIELD: Rect = Rect {
     x: crate::ui::consts::MARGIN_X,
     y: 138.0,
     w: crate::ui::consts::SCR_W - 2.0 * crate::ui::consts::MARGIN_X,
     h: 80.0,
+};
+
+/// The FIELD's POINTER hit rect — the drawn box grown 12px left/right/bottom and 4px up. The
+/// growth is forgiveness, not geometry: the Magic Remote's click is a coarse gesture on a 4K
+/// panel, and an exact-box hit test turned real clicks on the field into dead ground (the
+/// 3.5px descent strip under the box's bottom edge alone was a recorded miss, and clicks a
+/// few px off any edge felt like "the app ignores me"). What is DRAWN stays [`FIELD`] exactly;
+/// only what the pointer ADDRESSES is grown, the same "recorded at draw, hit-tested with
+/// tolerance" split `library`'s card rows use. 4px up (not 12) so the row of pills above keeps
+/// its own strip: a click that far up IS a pill press.
+const FIELD_HIT: Rect = Rect {
+    x: FIELD.x - 12.0,
+    y: FIELD.y - 4.0,
+    w: FIELD.w + 24.0,
+    h: FIELD.h + 16.0,
 };
 /// The scope block's top — the field's own fact, UNDER the query now.
 ///
@@ -681,6 +694,17 @@ pub(crate) fn enter(q: &str) {
 /// point.
 pub(crate) fn resume() {
     mount(None);
+}
+
+/// The PILL's arrival (the only caller): same re-seat as [`resume`], but the panel rises
+/// immediately. Pressing the search icon is a request to TYPE, not to review — the field is
+/// already focused by the mount, so leaving the keyboard down would make the press a two-step
+/// gesture (arrive, then activate the field) for the one action the icon names. A BACK-return
+/// (`app.rs`'s other `resume` caller) deliberately does NOT get this: coming back from a result
+/// is a return to a place, and the panel popping up over it would be noise.
+pub(crate) fn resume_editing() {
+    mount(None);
+    start_editing();
 }
 
 /// The one mount. `seed` is `Some` only for the boot trigger; `None` RETURNS to the screen.
@@ -1333,7 +1357,7 @@ fn hit(mx: f32, my: f32) -> Option<Hit> {
     if let Some(i) = crate::ui::widgets::tab_pill_at(mx, my) {
         return Some(Hit::Pill(i.min(strip_last())));
     }
-    if FIELD.contains(mx, my) {
+    if FIELD_HIT.contains(mx, my) {
         return Some(Hit::Field);
     }
     let rects = unsafe { addr_of!(HIT_R).as_ref() }?;
@@ -2526,6 +2550,56 @@ mod tests {
         // …and an ordinary seed is untouched, trailing space and all — the field draws that
         enter("wallace ");
         assert_eq!(crate::search::query(), "wallace ");
+        crate::search::reset();
+    }
+
+    /// The PILL's arrival raises the panel immediately: pressing the search icon is a request
+    /// to type, and needing a second activation of the field made the press a no-op for pointer
+    /// users (issue #27). A BACK-return (`resume`) deliberately stays keyboard-down — that
+    /// distinction is the whole reason this is a separate function.
+    #[test]
+    fn pill_arrival_mounts_with_the_panel_up() {
+        let _s = crate::testlock::serial();
+        let _g = ZLOCK.lock().unwrap_or_else(|e| e.into_inner());
+        reset();
+        unsafe { *addr_of_mut!(ZONE) = Zone::Results };
+        resume_editing();
+        assert_eq!(zone(), Zone::Field, "the mount seats the field whatever the pill found");
+        assert!(editing(), "the pill's arrival raises the panel on entry");
+        // And the plain resume keeps the documented keyboard-down posture, or BACK-returns
+        // would pop the panel over the result the user just came back from.
+        reset();
+        resume();
+        assert!(!editing(), "a BACK-return stays keyboard-down");
+        crate::search::reset();
+    }
+
+    /// The pointer hit-test forgives near misses the exact drawn box used to turn into dead
+    /// ground: a click a few px past the box's bottom edge (the glyph-descent strip) and one
+    /// past its side must both still address the field, while ground well outside the grown
+    /// rect must stay a miss — a click 30px below is a click on the shelf flow, not the field.
+    #[test]
+    fn field_hit_rect_forgives_near_misses_without_swallowing_ground() {
+        let _s = crate::testlock::serial();
+        let _g = ZLOCK.lock().unwrap_or_else(|e| e.into_inner());
+        reset();
+        let cx = FIELD.x + FIELD.w / 2.0;
+        assert_eq!(hit(cx, FIELD.y + FIELD.h / 2.0), Some(Hit::Field));
+        assert_eq!(
+            hit(cx, FIELD.y + FIELD.h + 8.0),
+            Some(Hit::Field),
+            "8px below the drawn box is inside the forgiveness growth"
+        );
+        assert_eq!(
+            hit(FIELD.x + 6.0, FIELD.y + FIELD.h / 2.0),
+            Some(Hit::Field),
+            "6px past the left edge is inside the forgiveness growth"
+        );
+        assert_eq!(
+            hit(cx, FIELD.y + FIELD.h + 30.0),
+            None,
+            "30px below the box is shelf ground, not the field"
+        );
         crate::search::reset();
     }
 

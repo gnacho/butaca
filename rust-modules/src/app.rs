@@ -9829,7 +9829,11 @@ pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
                             // you already made — `library::enter`'s `restore_view` one screen over
                             // — and a fresh profile needs no special case for it, since the store
                             // it returns to is empty until something is typed into it.
-                            crate::ui::search::resume();
+                            // `resume_editing`, NOT `resume`: the press names the action, so the
+                            // panel rises on arrival instead of needing a second activation of
+                            // the field (see `ui::search::resume_editing`'s doc for the one
+                            // caller distinction — BACK-returns stay keyboard-down).
+                            crate::ui::search::resume_editing();
                             trail.push(Node::Search);
                             route = Route::Search;
                         }
