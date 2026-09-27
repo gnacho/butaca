@@ -139,7 +139,7 @@ fn es(s: &str) -> Option<&'static str> {
         "Created by" => "Creada por",
         "About" => "Acerca de",
         "MORE" => "MÁS",
-        "Related" => "Relacionado",
+        "Related" => "Similares",
         "TV Show" => "Serie",
         "Show" => "Serie",
         "Season {}" => "Temporada {}",
