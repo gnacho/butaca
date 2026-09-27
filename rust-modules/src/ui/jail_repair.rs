@@ -13,11 +13,26 @@ fn tr_c(en: &'static std::ffi::CStr, es: &'static std::ffi::CStr) -> &'static st
 }
 
 /// The repair confirmation's body, translated at draw time (the `\u{2019}` is the source's own
-/// right single quote, byte-exact with the key in the Spanish table).
+/// right single quote, byte-exact with the key in the Spanish table). Two keys, one per flavour's
+/// product name: the Spanish table carries both.
 fn body() -> &'static str {
     crate::i18n::t(
-        "Use Homebrew Channel\u{2019}s root access to update PlxNative\u{2019}s sandbox with LG\u{2019}s native profile. This requires a rooted TV. Close and reopen PlxNative afterward.",
+        if cfg!(feature = "jellyfin") {
+            "Use Homebrew Channel\u{2019}s root access to update Butaca\u{2019}s sandbox with LG\u{2019}s native profile. This requires a rooted TV. Close and reopen Butaca afterward."
+        } else {
+            "Use Homebrew Channel\u{2019}s root access to update PlxNative\u{2019}s sandbox with LG\u{2019}s native profile. This requires a rooted TV. Close and reopen PlxNative afterward."
+        },
     )
+}
+
+/// The confirmation's question, translated: the shipped flavour names butaca, upstream's Plex
+/// build keeps PlxNative.
+fn title() -> &'static std::ffi::CStr {
+    if cfg!(feature = "jellyfin") {
+        tr_c(c"Repair Butaca\u{2019}s sandbox?", c"¿Reparar el sandbox de butaca?")
+    } else {
+        tr_c(c"Repair PlxNative\u{2019}s sandbox?", c"¿Reparar el sandbox de PlxNative?")
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,7 +102,7 @@ impl Controller {
     pub(crate) fn open(&mut self) {
         if self.state() == State::Idle && !self.alert.visible() {
             self.alert
-                .open_with_body(tr_c(c"Repair PlxNative\u{2019}s sandbox?", c"¿Reparar el sandbox de butaca?"), body());
+                .open_with_body(title(), body());
         }
     }
 

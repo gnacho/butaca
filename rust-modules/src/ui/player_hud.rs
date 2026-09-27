@@ -816,7 +816,11 @@ fn draw_failed_readout(p: Painter, jail_repair: crate::webos::jail_repair::State
             State::Running => (crate::i18n::t("Repairing sandbox…"), ""),
             State::Repaired => (
                 crate::i18n::t("Sandbox repaired"),
-                crate::i18n::t("Fully close and reopen PlxNative before trying playback again."),
+                crate::i18n::t(if cfg!(feature = "jellyfin") {
+                    "Fully close and reopen Butaca before trying playback again."
+                } else {
+                    "Fully close and reopen PlxNative before trying playback again."
+                }),
             ),
             State::Failed(failure) => (
                 failure.message(),

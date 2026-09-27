@@ -35,6 +35,14 @@
 /// The product name. Unique, and not `Plex …` anything.
 pub(crate) const PRODUCT: &str = "PlxNative";
 
+/// The product name user-visible copy prints, by flavour: the fork's shipped flavour is butaca,
+/// upstream's Plex build remains PlxNative. `PRODUCT` above stays the WIRE identity (client
+/// headers, session storage formats), which must stay stable so servers and stored sign-ins
+/// keep recognising this install; the surfaces that print for a human read this instead.
+pub(crate) fn display_name() -> &'static str {
+    if cfg!(feature = "jellyfin") { "Butaca" } else { PRODUCT }
+}
+
 /// The app version, derived from `Cargo.toml` rather than written as a literal — `pkg/appinfo.json`
 /// (which is the single source for the ipk's version) and this must not be able to disagree, and
 /// the two literals this replaces were already stale in opposite directions before the first
