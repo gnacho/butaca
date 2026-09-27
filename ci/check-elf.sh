@@ -71,19 +71,16 @@ echo "== crash-report identity =="
 # from never having uploaded symbols at all. There is no way to notice from the dashboard, so they
 # are asserted here, on the artifact.
 #
-# (1) The IMAGE BASE. Symbolicator computes `rva = instruction_addr - image_addr`, and for this
-# non-PIE executable that base is the lowest PT_LOAD vaddr rather than 0. The app derives it from
-# its own program headers at runtime (`telemetry::sentry::image_addr`), so this is not what the
-# report USES — it is the check that the fallback constant, and the value measured against the live
-# project on 2026-08-29, still describe the link.
-grep -q 'Type: *EXEC' <<<"$H" || fail "no longer ET_EXEC — the image base is now a load bias (telemetry::sentry::image_addr returns None for ET_DYN and would fall back to a WRONG constant)"
+# (1) The IMAGE BASE. The local crash tracer symbolizes fault addresses against the linked image;
+# for this non-PIE executable that base is the lowest PT_LOAD vaddr rather than 0.
+grep -q 'Type: *EXEC' <<<"$H" || fail "no longer ET_EXEC — the image base is now a load bias and the crash tracer's fallback constant would be a WRONG constant"
 # One variable for the expectation, named once: written twice, a change to the comparison and a
 # change to the message drift apart, and the failure then reports "is X, not X".
 WANT_BASE=0x00010000
 PHEADERS=$("$READELF" -l "$BIN") || fail "readelf -l failed"
 LOAD_BASE=$(awk '/^  LOAD/{print $3}' <<<"$PHEADERS" | LC_ALL=C sort | sed -n '1p')
 [ "$LOAD_BASE" = "$WANT_BASE" ] \
-  || fail "lowest PT_LOAD is $LOAD_BASE, not $WANT_BASE — update telemetry::sentry::IMAGE_ADDR and re-verify that a real crash still symbolicates"
+  || fail "lowest PT_LOAD is $LOAD_BASE, not $WANT_BASE — update the crash tracer's image base and re-verify that a real crash still symbolizes"
 
 # (2) The BUILD ID. It is the only thing that pairs a stripped binary a stranger's television
 # faulted in with the pkg/plxnative.debug a release uploaded. `-Wl,--build-id=sha1` is

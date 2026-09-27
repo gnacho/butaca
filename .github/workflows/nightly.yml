@@ -31,11 +31,10 @@ name: Nightly
 # the steps that would actually mutate the repo's releases (the immutable-tag guard, tagging and
 # `gh release create`, and the post-publish download/verify) are individually gated on `dry`.
 #
-# FORK PULL REQUESTS ARE SKIPPED ENTIRELY (see `plan`'s own `if:`). `build`, even in dry mode,
-# still runs through build-package.yml's "Upload debug files to Sentry" step, which needs
-# `secrets.SENTRY_AUTH_TOKEN` — and GitHub does not expose repository secrets to a workflow run
-# triggered by a fork's pull request. Running anyway would not "run drier", it would fail on a
-# missing secret and read as this pipeline being broken rather than as the sandboxing that it is.
+# FORK PULL REQUESTS ARE SKIPPED ENTIRELY (see `plan`'s own `if:`), because GitHub does not expose
+# repository secrets to a workflow run triggered by a fork's pull request. Running anyway would
+# not "run drier", it would fail on a missing secret and read as this pipeline being broken
+# rather than as the sandboxing that it is.
 
 on:
   schedule:
@@ -155,11 +154,6 @@ jobs:
       ref: ${{ needs.plan.outputs.sha }}
       flavor: nightly
       nightly-date: ${{ needs.plan.outputs.date }}
-      # The DEVELOPMENT telemetry pair — a nightly is unreleased and untested on a television, so
-      # its crash reports and usage events belong in the project's development project
-      # (`plx-native-dev`), not mixed into what a real release reports. build-package.yml's own
-      # build step asserts this pair specifically for `telemetry: development`.
-      telemetry: development
       artifact: nightly-assets
       # The package REDISTRIBUTES FFmpeg, so the LGPL corresponding-source obligation applies here
       # exactly as it does to a stable release — this is the fail-closed default anyway, but named
@@ -174,8 +168,6 @@ jobs:
       # Homebrew Channel manifests are keyed to the STABLE app id (build-package.yml refuses this
       # combination outright for any non-stable flavour) — a nightly is never listed there.
       homebrew-manifest: false
-    secrets:
-      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
   publish:
     name: publish nightly prerelease
@@ -222,7 +214,7 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           ipk="plxnative-v${LABEL}.ipk"
-          cp raw/com.beb.plxnative.nightly_*_arm.ipk "dist/$ipk"
+          cp raw/com.butaca.nightly_*_arm.ipk "dist/$ipk"
           ( cd dist && sha256sum "$ipk" > nightly.sha256 )
           # The LGPL corresponding source for the bundled FFmpeg — required here for the same
           # reason as a stable release: this package redistributes FFmpeg, so it owes the source

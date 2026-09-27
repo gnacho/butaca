@@ -11,7 +11,7 @@ Why Python rather than tar flags: the flags differ irreconcilably between GNU ta
 tarfile gives both hosts the same bytes with no branching.
 
 WHICH INSTALL a package is for comes from `$FLAVOR` (see `ci/flavor.py`): unset or `stable` builds
-the app users install, `debug` builds `com.beb.plxnative.debug`, which sits beside it on the same
+the app users install, `debug` builds `com.butaca.debug`, which sits beside it on the same
 television. Every id in the archive — the control `Package:`, `packageinfo.json`, the staged
 `applications/<id>/` directory and the `.ipk` filename — comes from that one transform, and the
 directory is additionally what the installed binary reads to learn which install it is
@@ -162,7 +162,7 @@ def add_tree(tf: tarfile.TarFile, src: Path, arc_root: str, skip: set = ()) -> N
         ti.mtime = EPOCH
         # Normalise mode: the binary and directories executable, everything else 0644. Otherwise
         # a stray local chmod changes the archive.
-        ti.mode = 0o755 if (ti.isdir() or p.name in {"plxnative", "plxnative-storage", "sentry-crash"}) else 0o644
+        ti.mode = 0o755 if (ti.isdir() or p.name in {"plxnative", "plxnative-storage"}) else 0o644
         if ti.isfile():
             with open(p, "rb") as fh:
                 tf.addfile(ti, fh)
