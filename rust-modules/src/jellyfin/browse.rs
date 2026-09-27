@@ -191,6 +191,15 @@ pub(crate) fn fetch_genres(c: &JfClient, key: i64) -> Option<Vec<GenreEntry>> {
     Some(out)
 }
 
+/// The A-Z rail's letter table of one section — the Jellyfin counterpart of Plex's
+/// `firstCharacter` directory (see [`JfClient::letter_counts`]). The counts MUST describe
+/// exactly the section's listing or `letter_start`'s prefix sums would index the wrong rows,
+/// hence the same `include_types` filter `fetch_page` uses. `None` is the failure sentinel.
+pub(crate) fn fetch_letters(c: &JfClient, key: i64, kind: SecKind) -> Option<Vec<(String, i64)>> {
+    let view = view_for_key(key)?;
+    c.letter_counts(&view, include_types(kind))
+}
+
 /// The `IncludeItemTypes` spelling of a section kind. Both kinds list their LEAF-playable
 /// parent type: a movies view lists Movies, a tvshows view lists Series (episodes are reached
 /// through the detail page, as on Plex).

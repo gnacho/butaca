@@ -354,6 +354,48 @@ impl JfClient {
         self.get_json(&path)
     }
 
+    /// Per-letter item counts of one library for the A-Z rail — the Jellyfin counterpart of
+    /// Plex's `firstCharacter` directory. Jellyfin has no per-letter counts endpoint, but
+    /// `NameStartsWith` (verified to filter on `SortName`, the field the listing's
+    /// `SortBy=SortName` order rides) with `Limit=0` yields `TotalRecordCount` without
+    /// transferring a single item, so 27 lightweight queries replace the one Plex call. The
+    /// non-alphabetic bucket is the unfiltered total minus the A-Z sum: digits and punctuation
+    /// sort before letters, so it leads the rail, exactly like Plex's "#".
+    pub(crate) fn letter_counts(
+        &self,
+        view_id: &str,
+        include_types: &str,
+    ) -> Option<Vec<(String, i64)>> {
+        let user_id = self.user_id()?;
+        let total = self.count_query(&user_id, view_id, include_types, "")?;
+        let mut counts = Vec::new();
+        for b in b'A'..=b'Z' {
+            let letter = (b as char).to_string();
+            let n = self
+                .count_query(&user_id, view_id, include_types, &format!("&NameStartsWith={letter}"))
+                .unwrap_or(0);
+            if n > 0 {
+                counts.push((letter, n));
+            }
+        }
+        Some(build_letters(total, counts))
+    }
+
+    /// One `Limit=0` count query: `TotalRecordCount` rides the envelope, no items transfer.
+    fn count_query(
+        &self,
+        user_id: &str,
+        view_id: &str,
+        include_types: &str,
+        extra: &str,
+    ) -> Option<i64> {
+        let res: ItemsResult = self.get_json(&format!(
+            "/Users/{user_id}/Items?ParentId={view_id}&Recursive=true\
+             &IncludeItemTypes={include_types}&Limit=0{extra}"
+        ))?;
+        Some(res.total)
+    }
+
     /// The genre value list of one library (`GET /Genres?ParentId=…`) — the filter menu's rows.
     /// Genres arrive as items with their own GUIDs, and the listing filter takes those ids back
     /// (`GenreIds`), so no name ever round-trips through a query string.
@@ -849,6 +891,20 @@ impl JfClient {
     }
 }
 
+/// The rail's letter table from an unfiltered total and the per-letter A-Z counts (letters
+/// absent from `counts` have zero items): "#" first when the non-alphabetic remainder is
+/// non-empty (digits sort before letters in `SortName` ascending), then the letters in order.
+/// Pure so both the wire path and the tests share ONE derivation.
+pub(crate) fn build_letters(total: i64, counts: Vec<(String, i64)>) -> Vec<(String, i64)> {
+    let mut out = Vec::with_capacity(counts.len() + 1);
+    let sum: i64 = counts.iter().map(|(_, n)| *n).sum();
+    if total - sum > 0 {
+        out.push(("#".into(), total - sum));
+    }
+    out.extend(counts);
+    out
+}
+
 /// `http::Method`'s token is private to the transport; the log line wants the same spelling.
 fn method_name(m: http::Method) -> &'static str {
     match m {
@@ -1262,5 +1318,66 @@ mod tests {
         assert_eq!(reqs.len(), 2); // auth + the delete; the fail-closed calls never hit the wire
         assert!(reqs[1]
             .starts_with("DELETE /Videos/ActiveEncodings?playSessionId=ps-9&deviceId=dev-1 HTTP/1.1"));
+    }
+
+    /// The rail's letter table: "#" leads when the non-alphabetic remainder is non-zero, zero
+    /// letters are absent, and the input order (A-Z) is preserved.
+    #[test]
+    fn build_letters_derives_the_hash_bucket_and_keeps_alphabetical_order() {
+        let none = build_letters(10, vec![("A".into(), 10)]);
+        assert_eq!(none, vec![("A".into(), 10)]); // exact sum: no "#"
+        let with_hash = build_letters(12, vec![("A".into(), 10), ("Z".into(), 1)]);
+        assert_eq!(
+            with_hash,
+            vec!["#".to_string(), "A".to_string(), "Z".to_string()]
+                .into_iter()
+                .zip([1i64, 10, 1])
+                .collect::<Vec<_>>()
+        );
+        let empty = build_letters(0, vec![]);
+        assert!(empty.is_empty());
+    }
+
+    /// The Jellyfin letter fetch: one unfiltered count plus one `NameStartsWith` count per
+    /// letter, every query at `Limit=0` (counts only, no items transferred), and the counts
+    /// wired into the rail table.
+    #[test]
+    fn letter_counts_query_limit_zero_for_the_total_and_every_letter() {
+        // total 12: A=10, Z=1, other=1 -> "#" bucket
+        let total = r#"{"Items":[],"TotalRecordCount":12}"#;
+        let a = r#"{"Items":[],"TotalRecordCount":10}"#;
+        let z = r#"{"Items":[],"TotalRecordCount":1}"#;
+        let zero = r#"{"Items":[],"TotalRecordCount":0}"#;
+        let mut responses = vec![(200, AUTH_OK), (200, total)];
+        for l in 'A'..='Z' {
+            responses.push((200, if l == 'A' { a } else if l == 'Z' { z } else { zero }));
+        }
+        let server = MockServer::start(responses);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        client.authenticate_by_name("demo", "").unwrap();
+
+        let letters = client
+            .letter_counts("view-1", "Movie")
+            .expect("letter counts parse");
+        assert_eq!(
+            letters,
+            vec!["#".to_string(), "A".to_string(), "Z".to_string()]
+                .into_iter()
+                .zip([1i64, 10, 1])
+                .collect::<Vec<_>>()
+        );
+
+        let reqs = server.finish();
+        assert_eq!(reqs.len(), 28); // auth + total + 26 letters
+        let total_q = reqs[1].lines().next().unwrap();
+        assert!(total_q.starts_with("GET /Users/u-1/Items?"));
+        assert!(total_q.contains("ParentId=view-1"));
+        assert!(total_q.contains("IncludeItemTypes=Movie"));
+        assert!(total_q.contains("Limit=0"));
+        assert!(!total_q.contains("NameStartsWith"));
+        let a_q = reqs[2].lines().next().unwrap();
+        assert!(a_q.contains("NameStartsWith=A"));
+        assert!(a_q.contains("Limit=0"));
+        assert!(reqs[27].lines().next().unwrap().contains("NameStartsWith=Z"));
     }
 }
