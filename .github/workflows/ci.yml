@@ -148,6 +148,13 @@ jobs:
           key: ffmpeg-${{ runner.arch }}-${{ hashFiles('ci/build-ffmpeg.sh') }}
 
       - name: Build
+        # This fork IS the Jellyfin client: without the feature the backend compiles out and the
+        # artifact boots as a Plex-only app (same reasoning as release.yml's JELLYFIN=1). The
+        # strings alone do not prove the flavor: the i18n tables ship every string unconditioned,
+        # so a Plex-only binary still carries "Sign in to Jellyfin" — the silent-`false`
+        # `jellyfin::boot::try_boot` arm is the difference, and it logs nothing.
+        env:
+          JELLYFIN: "1"
         run: make WEBOS_SDK='${{ steps.ndk.outputs.sdk-dir }}' -j"$(nproc)"
 
       - name: Package
@@ -158,7 +165,9 @@ jobs:
         # than over it. The release job is the only place `FLAVOR=stable` belongs (release.yml).
         # Named explicitly rather than inherited, so this is a decision on the page instead of a
         # default that moves if the Makefile's does.
-        run: make ipk FLAVOR=debug WEBOS_SDK='${{ steps.ndk.outputs.sdk-dir }}'
+        env:
+          JELLYFIN: "1"
+        run: make ipk FLAVOR=debug JELLYFIN=1 WEBOS_SDK='${{ steps.ndk.outputs.sdk-dir }}'
 
       - name: ELF assertions
         run: ./ci/check-elf.sh
