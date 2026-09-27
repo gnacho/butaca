@@ -418,6 +418,9 @@ static JF_SRC_RESULT: Mutex<Option<(u32, usize, (String, SrcWhat))>> = Mutex::ne
 /// The Jellyfin genre-menu landing: `(epoch, section index, rows)`.
 #[cfg(feature = "jellyfin")]
 static JF_GENRE_RESULT: Mutex<Option<(u32, usize, Vec<GenreEntry>)>> = Mutex::new(None);
+/// The Jellyfin letter-rail landing: `(epoch, section index, (letter, count) rows)`.
+#[cfg(feature = "jellyfin")]
+static JF_LETTERS_RESULT: Mutex<Option<(u32, usize, Vec<(String, i64)>)>> = Mutex::new(None);
 
 /// What a source-discovery worker brings back, per SOURCE — named by its index, which appending
 /// can never move.
@@ -482,6 +485,7 @@ pub(crate) fn reset() {
         *JF_SRC_RESULT.lock().unwrap_or_else(|e| e.into_inner()) = None;
         *JF_PAGE_RESULT.lock().unwrap_or_else(|e| e.into_inner()) = None;
         *JF_GENRE_RESULT.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        *JF_LETTERS_RESULT.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
     // Dropping a mailbox without clearing its flag latches the fetch forever (the flag is only
     // cleared on a successful take), so the two must move together.
@@ -2012,8 +2016,61 @@ fn jf_land_genres() {
     }
 }
 
-// ---- letter rail (firstCharacter index) -----------------------------------------------------
+/// The letter rail's fetch, Jellyfin lane — [`jf_kick_genres`]'s shape with per-letter counts in
+/// place of the genre list. The section's `SecKind` is captured on the main thread (the standing
+/// rule: never resolve the current server inside a worker) so the counts describe exactly the
+/// rows the grid pages (`include_types` parity with `fetch_page`).
+#[cfg(feature = "jellyfin")]
+fn jf_kick_letters() {
+    let c = cur();
+    let Some(sec) = sections().get(c) else { return };
+    let Some(jc) = crate::jellyfin::client() else { return };
+    if LETTERS_FETCHING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let key = sec.key;
+    let kind = sec.kind;
+    let epoch = EPOCH.load(Ordering::SeqCst);
+    let spawned = crate::task::spawn_small("directory", move || {
+        let list = catch_unwind(|| {
+            crate::jellyfin::browse::fetch_letters(jc, key, kind).unwrap_or_default()
+        })
+        .unwrap_or_default();
+        *JF_LETTERS_RESULT.lock().unwrap_or_else(|e| e.into_inner()) = Some((epoch, c, list));
+    });
+    if !spawned {
+        // `jf_land_letters` clears the single-flight when it takes the mailbox, and nothing is
+        // ever going to fill it — release the flag or this section never gets its rail.
+        LETTERS_FETCHING.store(false, Ordering::SeqCst);
+    }
+}
 
+/// The letter rail's landing, Jellyfin lane — epoch-gated like [`jf_land_genres`]. An empty
+/// list still marks the fetch done: `rail_available`'s `letters.len() > 1` keeps the rail
+/// hidden where a section has nothing to jump between.
+#[cfg(feature = "jellyfin")]
+fn jf_land_letters() {
+    let Some((epoch, sec, list)) = JF_LETTERS_RESULT
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()
+    else {
+        return;
+    };
+    crate::ui::idle::invalidate();
+    LETTERS_FETCHING.store(false, Ordering::SeqCst);
+    if epoch != EPOCH.load(Ordering::SeqCst) {
+        return;
+    }
+    if let Some(st) = state_mut(sec) {
+        st.letters_done = true;
+        if st.letters.is_empty() {
+            st.letters = list;
+        }
+    }
+}
+
+// ---- letter rail (firstCharacter index) -----------------------------------------------------
 /// Per-letter (label, count) of the current section, or empty until [`kick_letters`] lands.
 pub(crate) fn letters() -> &'static [(String, i64)] {
     cur_state().map(|s| s.letters.as_slice()).unwrap_or(&[])
@@ -2029,8 +2086,17 @@ pub(crate) fn letter_start(i: usize) -> usize {
 pub(crate) fn rail_available() -> bool {
     let Some(st) = cur_state() else { return false };
     let title_asc = match st.sorts.get(st.sort_idx) {
-        Some(s) => s.key == "titleSort" && !st.sort_desc,
-        None => true, // server default IS titleSort asc
+        Some(s) => {
+            // the title sort's key is the backend's own vocabulary: "titleSort" on Plex,
+            // "SortName" on Jellyfin — either way the rail's letter counts (SortName-based
+            // on Jellyfin) describe exactly the listing's ascending order
+            #[cfg(feature = "jellyfin")]
+            let jellyfin_title = s.key == "SortName" && cur_is_jellyfin();
+            #[cfg(not(feature = "jellyfin"))]
+            let jellyfin_title = false;
+            (s.key == "titleSort" || jellyfin_title) && !st.sort_desc
+        }
+        None => true, // server default IS the ascending title sort
     };
     title_asc && !st.unwatched && st.genre.is_none() && st.letters.len() > 1
 }
@@ -2038,14 +2104,9 @@ pub(crate) fn rail_available() -> bool {
 /// [`pump`]). Letter counts are query-independent (always the unfiltered title listing).
 pub(crate) fn kick_letters() {
     let done = cur_state().map(|s| s.letters_done).unwrap_or(true);
-    // Jellyfin has no per-letter COUNTS endpoint (`NameStartsWith` filters but does not count),
-    // so the rail has nothing truthful to show on this backend: mark the fetch done, leave the
-    // list empty, and `rail_available`'s `letters.len() > 1` keeps the rail hidden.
     #[cfg(feature = "jellyfin")]
     if !done && cur_is_jellyfin() {
-        if let Some(st) = state_mut(cur()) {
-            st.letters_done = true;
-        }
+        jf_kick_letters();
         return;
     }
     kick_directory(
@@ -2528,6 +2589,8 @@ pub(crate) fn pump() -> bool {
     });
     #[cfg(feature = "jellyfin")]
     jf_land_genres();
+    #[cfg(feature = "jellyfin")]
+    jf_land_letters();
     // page landing
     if let Some(r) = PAGE_RESULT.lock().unwrap_or_else(|e| e.into_inner()).take() {
         // a page landing fills the grid under a screen that may have gone idle waiting for it;
