@@ -167,6 +167,10 @@ fn carried_dev_ready_is_not_handed_off_after_erase() {
 }
 
 #[test]
+// Plex-only: the assertion drives the QR screen's "Try again" action. A Jellyfin build mounts
+// `screens::jf_login` for the login route, whose Activate starts the Jellyfin form flow, not a
+// clean account Login — the dev-token retry this grades has no counterpart on that backend.
+#[cfg(not(feature = "jellyfin"))]
 fn mounted_login_try_again_recovers_dev_boundary_errors_through_revoke_ack() {
     use crate::auth::owner::{BootstrapAuthority, CommitAdmission, CommitReply, SessionEvent, SessionWork};
     use crate::plex::session::{Session, ServerRef};

@@ -2194,9 +2194,11 @@ impl BrowseState {
         // needs each library's KIND beside its key (that backend filters counts by item type,
         // where Plex asks a section key alone) — so the job is re-packed with the kinds the
         // table already holds before the request is built.
+        // The guard is load-bearing: the jellyfin slot is 0, which test fixtures also hand to
+        // `register_for_test` Plex clients — an absent jellyfin client must fall THROUGH.
         #[cfg(feature = "jellyfin")]
-        if sid == crate::jellyfin::SERVER_ID {
-            let Some(jc) = crate::jellyfin::client() else { return };
+        if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+            let jc = crate::jellyfin::client().expect("guarded above");
             let job = match job {
                 SrcJob::Counts(keys) => SrcJob::JfCounts(
                     keys.iter()
@@ -2343,9 +2345,11 @@ impl BrowseState {
         // this backend's fixed list (`jellyfin::browse::sorts`), landed with the first page, so
         // the query below takes the RAW sort key and the descending flag separately — Jellyfin
         // sends `SortOrder` as its own parameter, where Plex encodes direction into the token.
+        // The guard is load-bearing: the jellyfin slot is 0, which test fixtures also hand to
+        // `register_for_test` Plex clients — an absent jellyfin client must fall THROUGH.
         #[cfg(feature = "jellyfin")]
-        if sid == crate::jellyfin::SERVER_ID {
-            let Some(jc) = crate::jellyfin::client() else { return };
+        if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+            let jc = crate::jellyfin::client().expect("guarded above");
             let sort_key = state.sorts.get(state.sort_idx)
                 .map(|sort| sort.key.clone())
                 .unwrap_or_default();

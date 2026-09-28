@@ -524,6 +524,9 @@ pub(crate) struct LoginScreen {
 }
 
 impl LoginScreen {
+    /// Unused on a Jellyfin build (the registry mounts `screens::jf_login` for the login route
+    /// there) — kept compiling so the flavor's test suite keeps driving it directly.
+    #[cfg_attr(feature = "jellyfin", allow(dead_code))]
     pub(crate) fn new(entry: EntryId, auth: auth::SessionRead<'_>) -> Self {
         let mut s = Self {
             entry,

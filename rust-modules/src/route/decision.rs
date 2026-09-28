@@ -4494,8 +4494,10 @@ pub(crate) fn transcode_seek(ps: &mut PlaybackSession, offset_secs: i64) -> Opti
     // of PMS's start.mkv decision+spec handshake. Same route-ownership machinery publishes the
     // replacement, so the teardown (and a later scrobble_stop) resolves the server resource from
     // ACTIVE_ENCODER exactly as on the Plex arm.
+    // The guard is load-bearing: the jellyfin slot is 0, which host fixtures also hand to
+    // `register_for_test` Plex clients — an absent jellyfin client must fall THROUGH.
     #[cfg(feature = "jellyfin")]
-    if cur_sid(ps) == crate::jellyfin::SERVER_ID {
+    if cur_sid(ps) == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
         return jellyfin_transcode_seek(ps, offset_secs, &rk);
     }
     let c = cur_client(ps)?;

@@ -1661,11 +1661,12 @@ fn kick_with(gen: u32, adapter: &PmsAdapter, s: &mut Src, launch: impl FnOnce(Hu
     // The Jellyfin flavor's single source is never in the Plex registry, so it is captured
     // from its own client slot (the spawn-site capture rule is the same: the main thread reads
     // the `&'static` here and the worker holds it, never a lookup).
+    // The guard is load-bearing, not redundant: the jellyfin slot is 0, which test fixtures also
+    // hand to `register_for_test` Plex clients — an absent jellyfin client must fall THROUGH to
+    // the Plex registry, not shadow it.
     #[cfg(feature = "jellyfin")]
-    if s.sid == crate::jellyfin::SERVER_ID {
-        let Some(c) = crate::jellyfin::client() else {
-            return Some(landed_fail(s));
-        };
+    if s.sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+        let c = crate::jellyfin::client().expect("guarded above");
         let Some(request) = s.begin_request(HubClientRef::Jellyfin(c), 0, 0, gen,
             || adapter.next_request.fetch_add(1, Ordering::Relaxed)) else { return None };
         let sid = request.sid;

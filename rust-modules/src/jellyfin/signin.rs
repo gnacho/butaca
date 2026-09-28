@@ -205,7 +205,7 @@ mod tests {
                 &origin,
                 "/Users/AuthenticateByName",
                 &["Authorization: MediaBrowser …"],
-                false,
+                crate::plex::CredentialPolicy::HttpsOnly,
             ),
             "a public address over http must not carry the password"
         );
@@ -215,7 +215,7 @@ mod tests {
                 &lan,
                 "/Users/AuthenticateByName",
                 &["Authorization: MediaBrowser …"],
-                false,
+                crate::plex::CredentialPolicy::HttpsOnly,
             ),
             "…while the LAN literal the PoC targets stays allowed"
         );

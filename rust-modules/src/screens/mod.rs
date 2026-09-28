@@ -27,6 +27,8 @@ pub(crate) mod search;
 pub(crate) mod family;
 pub(crate) mod legal;
 pub(crate) mod login;
+#[cfg(feature = "jellyfin")]
+pub(crate) mod jf_login; // the Jellyfin flavor's sign-in - a server/user/password form, not a QR
 pub(crate) mod onboard;
 pub(crate) mod plaintext_question;
 pub(crate) mod player;
