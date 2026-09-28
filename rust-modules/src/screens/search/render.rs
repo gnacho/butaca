@@ -371,7 +371,7 @@ fn empty<H: SearchLike>(screen: &SearchScreen, f: &DrawFrame<'_, '_, H>, p: Pain
     let statement = if empty == EmptyState::NoResults {
         let shell =
             f.cx.measure
-                .width(c"No results for “”", theme::size::TITLE, true);
+                .width_str(crate::i18n::t("No results for \u{201C}*\u{201D}"), theme::size::TITLE, true);
         no_results_line(&elide(
             screen.draft.query().trim(),
             1200.0 - shell,
@@ -606,7 +606,7 @@ fn header_of(state: EmptyState) -> &'static str {
 }
 
 fn no_results_line(q: &str) -> String {
-    format!("No results for \u{201C}{q}\u{201D}")
+    crate::i18n::t("No results for \u{201C}*\u{201D}").replacen('*', q, 1)
 }
 
 fn heading_flow(

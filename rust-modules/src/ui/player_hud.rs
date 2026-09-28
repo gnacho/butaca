@@ -1048,16 +1048,16 @@ fn draw_failed_readout(
         use crate::webos::jail_repair::State;
         match ps.repair_status {
             State::Idle => {},
-            State::Running => { e.readout = "Repairing this app’s sandbox…"; e.detail = "Wait for the result before closing the app.".into(); },
+            State::Running => { e.readout = crate::i18n::t("Repairing this app’s sandbox…"); e.detail = crate::i18n::t("Wait for the result before closing the app.").into(); },
             State::Repaired => {
-                e.readout = "Sandbox repair completed";
+                e.readout = crate::i18n::t("Sandbox repair completed");
                 e.detail = if cfg!(feature = "jellyfin") {
-                    "Close and reopen Butaca before playing video."
+                    crate::i18n::t("Close and reopen Butaca before playing video.")
                 } else {
-                    "Close and reopen PlxNative before playing video."
+                    crate::i18n::t("Close and reopen PlxNative before playing video.")
                 }.into();
             },
-            State::Failed(reason) => { e.readout = "Sandbox repair could not be confirmed"; e.detail = reason.message().into(); },
+            State::Failed(reason) => { e.readout = crate::i18n::t("Sandbox repair could not be confirmed"); e.detail = reason.message().into(); },
         }
     }
     // The GROUND, first: `Player Screen.dc.html` gives the failed variant `inset:0; background:#000`
@@ -1119,7 +1119,8 @@ fn draw_failed_readout(
             );
     }
     if e.no_pass {
-        let words = c"This server has no";
+        let mut words_buf = [0u8; crate::i18n::TC_MAX];
+        let words = crate::i18n::tcstr(crate::i18n::t("This server has no"), &mut words_buf);
         let ww = measure.width(words, theme::size::BODY, false);
         let cw = crate::ui::widgets::pass_capsule_w(measure);
         const GAP: f32 = 16.0;
@@ -1141,20 +1142,31 @@ fn draw_failed_readout(
     // Both exits stay visible.  OK enters the shared quality ladder (selecting the current rung is
     // a plain retry); BACK still leaves the player.  The key caps are what survive a phone photo.
     if !jail || ps.repair_status == crate::webos::jail_repair::State::Idle {
-        let action = if jail {
-            c"to review sandbox repair"
+        let action_key = if jail {
+            crate::i18n::t("to review sandbox repair")
         } else if crate::route::forced_direct_play(ps) {
-            c"to open retry options"
+            crate::i18n::t("to open retry options")
         } else {
-            c"to choose quality or retry"
+            crate::i18n::t("to choose quality or retry")
         };
-        draw_hint_with_keycap(p, c"Press", c"OK", action, FR_HINT_TOP, measure);
+        let mut press_b = [0u8; crate::i18n::TC_MAX];
+        let mut action_b = [0u8; crate::i18n::TC_MAX];
+        draw_hint_with_keycap(
+            p,
+            crate::i18n::tcstr(crate::i18n::t("Press"), &mut press_b),
+            c"OK",
+            crate::i18n::tcstr(action_key, &mut action_b),
+            FR_HINT_TOP,
+            measure,
+        );
     }
+    let mut press_b = [0u8; crate::i18n::TC_MAX];
+    let mut ret_b = [0u8; crate::i18n::TC_MAX];
     draw_hint_with_keycap(
         p,
-        c"Press",
+        crate::i18n::tcstr(crate::i18n::t("Press"), &mut press_b),
         c"BACK",
-        c"to return",
+        crate::i18n::tcstr(crate::i18n::t("to return"), &mut ret_b),
         FR_HINT_TOP + FR_HINT_GAP,
         measure,
     );

@@ -65,35 +65,38 @@ impl LibraryScreen {
                 // Your own server is "your Plex server", the words Home uses for the same fault;
                 // a borrowed one is named, since "your" would be untrue of it.
                 let caption = match owner {
-                    None => "Can\u{2019}t reach your Plex server".to_string(),
-                    Some(_) => format!("Can\u{2019}t reach {name}"),
+                    None => crate::i18n::t("Can\u{2019}t reach your Plex server").to_string(),
+                    // The translated template carries one `*` slot the server name fills.
+                    Some(_) => crate::i18n::t("Can\u{2019}t reach *").replacen('*', name, 1),
                 };
                 // A server discovery offers "Connect without encryption?" for says why instead,
                 // and names what *Connect* / *Try again* does (`auth::plaintext_copy`).
                 let reason = match self.plaintext.verdict() {
                     Some(verdict) => Some(crate::auth::plaintext_copy(Some(verdict),
                         crate::auth::ReadoutSurface::SignedIn).into_owned()),
-                    None => owner.map(|owner| format!("Shared by {owner} · your own server is fine.")),
+                    None => owner.map(|owner| {
+                        crate::i18n::t("Shared by * — your own server is fine.").replacen('*', owner, 1)
+                    }),
                 };
                 (caption, reason)
             }
             Readout::Empty => {
-                let caption = if self.wanted_kind.is_some() { "Nothing here matches".into() }
+                let caption = if self.wanted_kind.is_some() { crate::i18n::t("Nothing here matches").into() }
                     else if directory.sections().is_empty() { crate::i18n::t("No libraries on this server").into() }
-                    else if listing.unwatched() || listing.genre().is_some() { "Nothing here matches".into() }
+                    else if listing.unwatched() || listing.genre().is_some() { crate::i18n::t("Nothing here matches").into() }
                     else if let Some(section) = directory.current().and_then(|i| directory.sections().get(i)) {
                         let noun = if section.kind == SecKind::Show {
                             match listing.library_type() {
-                                crate::browse::LibraryType::Shows => "TV shows",
-                                crate::browse::LibraryType::Seasons => "seasons",
-                                crate::browse::LibraryType::Episodes => "episodes",
+                                crate::browse::LibraryType::Shows => crate::i18n::t("TV shows"),
+                                crate::browse::LibraryType::Seasons => crate::i18n::t("seasons"),
+                                crate::browse::LibraryType::Episodes => crate::i18n::t("episodes"),
                             }
                         } else { section.kind.noun() };
-                        format!("No {noun} in {}", section.row.title)
+                        crate::i18n::t("No * in **").replacen('*', noun, 1).replacen("**", &section.row.title, 1)
                     } else { "Nothing here matches".into() };
                 (caption, None)
             }
-            Readout::Loading => ("Loading…".into(), None),
+            Readout::Loading => (crate::i18n::t("Loading…").into(), None),
             Readout::Grid => (String::new(), None),
         };
         (CString::new(caption).unwrap_or_default(), reason.map(|reason| CString::new(reason).unwrap_or_default()))
