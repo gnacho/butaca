@@ -52,6 +52,8 @@ use crate::ui::{theme, Painter, Rect};
 
 use super::family::{inner_cx, table_focus, InnerHost, SettingsPage, ALERT_GROUP};
 use super::plaintext_question::{self, AlertStep, PlaintextAlert};
+use crate::ui::decision_alert::{Choice, DecisionAlert};
+use crate::ui::screen::{Activate, Hover, Stop};
 use super::registry::{word, DirectoryLike};
 
 /// Which ceremony the surface carries.
@@ -59,8 +61,6 @@ use super::registry::{word, DirectoryLike};
 pub(crate) enum Family {
     /// Settings, over a live page: scrim + ambient ground sampled off the host.
     Settings,
-    /// The first-run consent question: a route surface of its own on the hero-keyed ground.
-    FirstRunConsent,
 }
 
 /// The family's shared push constants (`route_screen::RoutePush`'s, unchanged).
@@ -145,7 +145,7 @@ impl RouteSurface {
         id: InstanceId,
         kind: Family,
         root: SettingsPage,
-        hubs: crate::pms::HubsView<'_>,
+        _hubs: crate::pms::HubsView<'_>,
     ) -> Self {
         let mut s = Self {
             entry,
@@ -154,7 +154,7 @@ impl RouteSurface {
             inner: NavStack::new(Box::new(Immediate)),
             ids: Minter::default(),
             push: Push::new(),
-            ground: if kind == Family::FirstRunConsent { super::family::pre_home_ground(hubs) } else { RouteGround::new() },
+            ground: RouteGround::new(),
             ground_ready: false,
             remembered: Vec::new(),
         };
@@ -443,7 +443,7 @@ fn mount_page(
     entry: EntryId,
     arg: SettingsPage,
     cx: &Cx<'_, InnerHost>,
-    fx: &mut Effects<'_, InnerHost>,
+    _fx: &mut Effects<'_, InnerHost>,
 ) -> Box<dyn Screen<InnerHost>> {
     match arg {
         SettingsPage::Root => Box::new(RootPage::new(entry, cx.views)),
@@ -452,11 +452,6 @@ fn mount_page(
         SettingsPage::Legal => Box::new(super::legal::LegalIndex::new(entry)),
         SettingsPage::About => Box::new(super::legal::DocumentPage::about(entry)),
         SettingsPage::Document(i) => Box::new(super::legal::DocumentPage::legal(entry, i)),
-        SettingsPage::Privacy => Box::new(super::consent::ConsentPage::settings(entry, cx, fx)),
-        SettingsPage::Preview(i) => Box::new(super::consent::PreviewPage::new(entry, i)),
-        SettingsPage::ConsentStage(i) => {
-            Box::new(super::consent::ConsentPage::first_run(entry, i, cx, fx))
-        }
         SettingsPage::Favourites => Box::new(super::onboard::OnboardScreen::settings(entry, cx.views)),
     }
 }
@@ -560,7 +555,6 @@ impl LogicalState for RouteSurface {
     fn probe(&self, out: &mut String) {
         out.push_str(match self.kind {
             Family::Settings => "settings",
-            Family::FirstRunConsent => "consent",
         });
         // one segment per page, bottom of the stack first, so a divergence report reads as the
         // path the surface is standing on rather than as a single opaque word
@@ -845,14 +839,10 @@ impl<H: DirectoryLike> Screen<H> for RouteSurface {
                 root.rect(Rect::FULL, 0.0, dim, dim, 0.0);
                 crate::ui::profile::phase("st.ground", || self.ground.draw_host(root.alpha(a)));
             }
-            Family::FirstRunConsent => {
-                self.ground.draw_home(root);
-            }
         }
         self.ground_ready = a >= 0.995;
         let entrance = match self.kind {
             Family::Settings => root.alpha(settings_entrance_alpha(a, f.nav_page_alpha)),
-            Family::FirstRunConsent => root.alpha(a).translate(Rect::FULL.w * (1.0 - a), 0.0),
         };
         self.draw_pages(f, entrance);
     }
@@ -951,13 +941,14 @@ impl Mounter<InnerHost> for RouteSurface {
 enum Action {
     Playback,
     AudioSubtitles,    Favourites,
-    Privacy,
     Legal,
     AutoSignIn,
     TrailerAutoplay,
     /// A server's "connect without encryption" switch — the index into
     /// [`RootPage::plaintext_rows`].
     Plaintext(usize),
+    /// Delete all local data, confirmed: erase, sign out, land on sign-in.
+    DeleteAllLocalData,
     About,
 }
 
@@ -980,6 +971,8 @@ pub(crate) struct RootPage {
     pending_plaintext: Option<(String, bool)>,
     /// The shared question (`screens::plaintext_question`), asked when a switch is turned ON.
     alert: PlaintextAlert,
+    /// The delete-all-data confirmation — the one destructive action on this root.
+    delete_alert: DecisionAlert,
     /// `plex::grant::revision` as last read — an offer or an answer landing rebuilds the rows.
     grant_seen: u64,
 }
@@ -1026,6 +1019,7 @@ impl RootPage {
             plaintext_rows: Vec::new(),
             pending_plaintext: None,
             alert: PlaintextAlert::new(ALERT_GROUP, super::registry::ALERT, super::registry::ALERT + 1),
+            delete_alert: DecisionAlert::new(),
             grant_seen: crate::plex::grant::revision(),
             state: RootState {
                 sel: 0,
@@ -1075,8 +1069,8 @@ impl RootPage {
         sections.push(
             Section::new("Privacy")
                 .row(
-                    Row::new("Privacy & data")
-                        .detail("Optional reports, privacy information and local data.")
+                    Row::new("Delete all local data")
+                        .detail("Erase this television's sign-ins, profiles and settings.")
                         .chevron(true),
                 )
                 .row(
@@ -1085,7 +1079,7 @@ impl RootPage {
                         .chevron(true),
                 ),
         );
-        actions.extend([Action::Privacy, Action::Legal]);
+        actions.extend([Action::Legal, Action::DeleteAllLocalData]);
         let mut system = Section::new("System");
         // A one-person account already skips the picker; the switch only changes a multi-user boot.
         if signed_in && multi_user {
@@ -1239,8 +1233,15 @@ impl RootPage {
             Action::Playback => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Playback))),
             Action::AudioSubtitles => fx.push(Fx::Nav(NavOp::Push(SettingsPage::AudioSubtitles))),
             Action::Favourites => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Favourites))),
-            Action::Privacy => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Privacy))),
             Action::Legal => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Legal))),
+            Action::DeleteAllLocalData => {
+                self.delete_alert.open_with_body(
+                    c"Delete all local data?",
+                    "This signs the television out and removes every stored sign-in, profile, server and setting. Playback positions on the servers are not touched.",
+                );
+                self.delete_alert.set_choice(Choice::Destructive);
+                plaintext_question::enter_group(fx, MachineId::Instance(InstanceId(0)), ALERT_GROUP);
+            }
             Action::About => fx.push(Fx::Nav(NavOp::Push(SettingsPage::About))),
         }
     }
@@ -1273,6 +1274,46 @@ impl Machine<InnerHost> for RootPage {
         cx: &Cx<'_, InnerHost>,
         fx: &mut Effects<'_, InnerHost>,
     ) -> Handled {
+        if self.delete_alert.visible() {
+            match ev {
+                ScreenEvent::FocusMoved { to, .. } => {
+                    self.delete_alert.set_choice(if to.elem == super::registry::ALERT + 1 {
+                        Choice::Destructive
+                    } else {
+                        Choice::Cancel
+                    });
+                    return Handled::Yes;
+                }
+                ScreenEvent::PressCommit(_) => {
+                    if let Some(key) = cx.focus.current {
+                        if key.elem >= super::registry::ALERT && key.elem <= super::registry::ALERT + 1 {
+                            if key.elem == super::registry::ALERT + 1 {
+                                fx.push(Fx::App(super::registry::AppFx::Loop(
+                                    super::registry::LoopReq::DeleteAllLocalData)));
+                            }
+                            self.delete_alert.dismiss();
+                            plaintext_question::enter_group(fx, MachineId::Instance(InstanceId(0)), GroupId(0));
+                            fx.invalidate(crate::ui::present::Provenance::Input);
+                        }
+                    }
+                    return Handled::Yes;
+                }
+                ScreenEvent::Activate(_) => return Handled::Yes,
+                ScreenEvent::Input(crate::ui::machine::InputEvent {
+                    kind: crate::ui::machine::InputKind::Key { key: Key::Back, .. }, ..
+                }) => {
+                    self.delete_alert.dismiss();
+                    plaintext_question::enter_group(fx, MachineId::Instance(InstanceId(0)), GroupId(0));
+                    fx.invalidate(crate::ui::present::Provenance::Input);
+                    return Handled::Yes;
+                }
+                ScreenEvent::Tick(t) => {
+                    self.delete_alert.update(t.dt());
+                    return Handled::Yes;
+                }
+                _ => return Handled::Yes,
+            }
+        }
         match self.alert.step(ev, cx) {
             AlertStep::Pass => {}
             AlertStep::Done(handled) => return handled,
@@ -1410,6 +1451,26 @@ impl Screen<InnerHost> for RootPage {
         let mut v = self.view();
         crate::ui::screen::Part::<InnerHost>::draw(&mut v, f, Rect::FULL);
         self.alert.draw(f, self.entry);
+        if self.delete_alert.visible() {
+            self.delete_alert.draw_scrim();
+            self.delete_alert.draw(c"Cancel", c"Delete all");
+            let frames = self.delete_alert.frames();
+            if self.delete_alert.is_open() && self.delete_alert.settled() {
+                for (i, rect) in [frames.0, frames.1].into_iter().enumerate() {
+                    f.stop(
+                        Painter::root(),
+                        Stop {
+                            key: crate::ui::machine::FocusKey { entry: self.entry, elem: super::registry::ALERT + i as u32 },
+                            rect,
+                            rest_rect: rect,
+                            clip: Rect::FULL,
+                            hover: Hover::Focus,
+                            activate: Activate::Press,
+                        },
+                    );
+                }
+            }
+        }
     }
     fn render(&self) -> RenderStrategy {
         RenderStrategy::Page

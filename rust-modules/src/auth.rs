@@ -10,10 +10,6 @@
 //! Stored Home, picker and explicit developer bootstrap use the same owner, with distinct typed
 //! authority. Network/PIN derivation remain worker operations; offline policy is retained below.
 use crate::plex::account::{AccountClient, CallEvidence, HomeUser, PinPoll, Resource, SwitchOutcome};
-use crate::telemetry::incident::{
-    CountBucket, DiscoveryClass, DiscoveryEvidence, DiscoveryTarget, DiscoveryTrigger,
-    IncidentContext, IncidentKind, NoServersEvidence,
-};
 use crate::plex::grant::PlaintextAsk;
 use crate::plex::probe::{
     self, Candidate, HttpsRoutes, InsecureEvidence, Outcome, PlaintextEligibility, ProbePlan, RouteOutcome,
@@ -822,16 +818,13 @@ pub(crate) enum LoginProgress {
     /// account, discovery unreachable/refused, the pin ran out of automatic replacements, or pin
     /// creation itself could not reach plex.tv. Only the current owner may publish that failure.
     ///
-    /// `incident` is the same failure as closed evidence for the onboarding report — a kind, the
-    /// class of the last network call and its counters, never `message`'s text.
     /// `plaintext` is the server the read-out may offer a consented plaintext connection to
-    /// ([`PlaintextVerdict::offers`]) — screen-only; the incident carries closed codes alone.
-    Failed { epoch: u64, message: String, incident: crate::telemetry::incident::IncidentContext,
-        plaintext: Option<PlaintextVerdict> },
+    /// ([`PlaintextVerdict::offers`]) — screen-only.
+    Failed { epoch: u64, message: String, plaintext: Option<PlaintextVerdict> },
     /// plex.tv stopped answering the polls of the code on screen (`Some`, once, when the run of
     /// unanswered polls reaches [`LINK_TROUBLE_AFTER`]) or answered again (`None`). Non-terminal:
-    /// the wait goes on, and the owner raises a `LinkStalled` incident from the evidence.
-    LinkTrouble { epoch: u64, trouble: Option<crate::telemetry::incident::IncidentContext> },
+    /// the wait goes on.
+    LinkTrouble { epoch: u64 },
     /// Discovery and the account's Home-user fetch both finished. Carries everything
     /// the owner's resource commit needs to update the session coherently: the winning
     /// server, the reachable roster, and the Home users (empty for a single-user account, in which
@@ -896,29 +889,37 @@ fn merge_profile_delta(session: &mut Session, delta: ProfileDelta) {
 
 // ---- worker threads ----
 
-/// A failure's evidence for a test that is not about the incident offer.
-#[cfg(test)]
-pub(crate) fn synthetic_incident() -> IncidentContext {
-    IncidentContext::new(IncidentKind::PinCreate, None)
-}
-
-/// End a sign-in on the error read-out. `incident` is the same failure as closed evidence — the
-/// caption is for the person, the context is what an onboarding report may carry.
+/// End a sign-in on the error read-out.
 fn output_failed(output: &dyn owner::ObservationSink, epoch: u64, message: &str,
-    incident: IncidentContext, plaintext: Option<PlaintextVerdict>) {
-    output.terminal(LoginProgress::Failed { epoch, message: message.into(), incident, plaintext }.into());
+    plaintext: Option<PlaintextVerdict>) {
+    output.terminal(LoginProgress::Failed { epoch, message: message.into(), plaintext }.into());
 }
 
-/// The caption and the incident for a discovery that found nothing usable. One table for the
-/// sign-in and the rediscovery paths, so the two cannot word — or report — the same verdict
-/// differently: the rediscovery worker is reached only through *Try again* after a discovery
-/// failure (`retry_kind`), and reporting that failure under a kind of its own made the retry ask
-/// the question the person had just answered. `None` for the outcomes that are not failures.
+/// Which flow ran a discovery — the same closed classification the removed telemetry module
+/// carried, kept because the no-servers log line names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DiscoveryTrigger {
+    Login,
+    Rediscover,
+}
+
+impl DiscoveryTrigger {
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            Self::Login => "login",
+            Self::Rediscover => "rediscover",
+        }
+    }
+}
+
+/// The caption for a discovery that found nothing usable. One table for the sign-in and the
+/// rediscovery paths, so the two cannot word the same verdict differently: the rediscovery worker
+/// is reached only through *Try again* after a discovery failure (`retry_kind`). `None` for the
+/// outcomes that are not failures.
 ///
-/// **plex.tv refusing the account token is not silence.** `/resources` answering 401 or 403 is an
-/// [`IncidentKind::Authorization`] failure, with a caption that does not send the person to a
-/// network that is working.
-fn discovery_failure(d: &Discovery) -> Option<(std::borrow::Cow<'static, str>, IncidentContext)> {
+/// **plex.tv refusing the account token is not silence.** `/resources` answering 401 or 403 gets
+/// a caption that does not send the person to a network that is working.
+fn discovery_failure(d: &Discovery) -> Option<std::borrow::Cow<'static, str>> {
     if let Discovery::PlexTvFailed(run) = d {
         let last = &run.last;
         let status = match last {
@@ -926,68 +927,60 @@ fn discovery_failure(d: &Discovery) -> Option<(std::borrow::Cow<'static, str>, I
             Err(failure) => failure.status,
         };
         if matches!(status, Some(401 | 403)) {
-            return Some((
-                "Plex didn't accept this sign-in. Try again.".into(),
-                IncidentContext::new(IncidentKind::Authorization, Some(*last)),
-            ));
+            return Some("Plex didn't accept this sign-in. Try again.".into());
         }
     }
-    let (message, class, last) = match d {
+    Some(match d {
         Discovery::Ok { .. } | Discovery::Cancelled => return None,
-        Discovery::NoServers(evidence) => {
-            return Some((
-                "This Plex account has no server yet.".into(),
-                IncidentContext::new(IncidentKind::Discovery(DiscoveryClass::NoServers), None)
-                    .with_no_servers(*evidence),
-            ));
-        }
-        Discovery::Refused => (
-            "Your Plex server refused the connection — check its network access settings.",
-            DiscoveryClass::Refused,
-            None,
-        ),
-        Discovery::ServersUnreachable { trigger } => return Some((
+        Discovery::NoServers => "This Plex account has no server yet.".into(),
+        Discovery::Refused =>
+            "Your Plex server refused the connection — check its network access settings.".into(),
+        Discovery::ServersUnreachable =>
             "plex.tv listed your servers, but none of them answered. Make sure your Plex Media Server is on and online, then try again.".into(),
-            IncidentContext::new(IncidentKind::Discovery(DiscoveryClass::Silent), None)
-                .with_discovery(DiscoveryEvidence { trigger: *trigger,
-                    target: Some(DiscoveryTarget::Servers) }),
-        )),
         Discovery::PlexTvFailed(run) => {
-            let (link, _, _) = crate::telemetry::incident::classify(Some(run.last));
-            let message = match link {
-                crate::telemetry::incident::LinkClass::Dns => retry_copy(
-                    "This TV couldn't find plex.tv, so your servers weren't checked.", run.attempts),
-                crate::telemetry::incident::LinkClass::Tls =>
-                    "This TV couldn't make a secure connection to plex.tv. Check the TV's date and time, then try again.".into(),
-                crate::telemetry::incident::LinkClass::Answered2xx
-                | crate::telemetry::incident::LinkClass::Answered4xx
-                | crate::telemetry::incident::LinkClass::Answered5xx
-                | crate::telemetry::incident::LinkClass::AnsweredOther =>
-                    "plex.tv is having trouble right now, so your servers weren't checked. Try again in a few minutes.".into(),
-                _ => retry_copy(
-                    "This TV couldn't reach plex.tv, so your servers weren't checked.", run.attempts),
+            // The same coarse link classes `telemetry::incident` once reported, kept only to pick
+            // the caption: a DNS failure and a TLS refusal are the two answers a failed sign-in
+            // most needs told apart.
+            let class = match run.last {
+                Ok(status) => answered_class(status),
+                Err(failure) => match failure.curl_rc {
+                    Some(6) => LinkClass::Dns,
+                    Some(rc @ (35 | 60 | 77 | 90)) => { let _ = rc; LinkClass::Tls }
+                    Some(_) => LinkClass::TransportOther,
+                    None => match failure.status {
+                        Some(status) => answered_class(status),
+                        None => LinkClass::Unknown,
+                    },
+                },
             };
-            let incident = IncidentContext::new(IncidentKind::Discovery(DiscoveryClass::Silent), Some(run.last))
-                .with_retry_run(run.attempts, run.elapsed)
-                .with_discovery(DiscoveryEvidence { trigger: run.trigger,
-                    target: Some(DiscoveryTarget::PlexTv) });
-            return Some((message.into(), incident));
+            match class {
+                LinkClass::Dns => retry_copy(
+                    "This TV couldn't find plex.tv, so your servers weren't checked.", run.attempts).into(),
+                LinkClass::Tls =>
+                    "This TV couldn't make a secure connection to plex.tv. Check the TV's date and time, then try again.".into(),
+                LinkClass::Answered2xx | LinkClass::Answered4xx | LinkClass::Answered5xx
+                | LinkClass::AnsweredOther =>
+                    "plex.tv is having trouble right now, so your servers weren't checked. Try again in a few minutes.".into(),
+                LinkClass::TransportOther | LinkClass::Unknown => retry_copy(
+                    "This TV couldn't reach plex.tv, so your servers weren't checked.", run.attempts).into(),
+            }
         }
         Discovery::InsecureOnly(evidence) => {
-            let incident = IncidentContext::new(IncidentKind::Discovery(DiscoveryClass::InsecureOnly), None);
-            let verdict = evidence.as_ref().map(|(_, verdict)| verdict);
-            return Some((
-                insecure_only_copy(verdict),
-                match evidence {
-                    Some((evidence, verdict)) => incident
-                        .with_insecure(*evidence)
-                        .with_plaintext_consent(plaintext_consent_code(verdict)),
-                    None => incident,
-                },
-            ));
+            insecure_only_copy(evidence.as_ref().map(|(_, verdict)| verdict))
         }
-    };
-    Some((message.into(), IncidentContext::new(IncidentKind::Discovery(class), last)))
+    })
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LinkClass { Dns, Tls, TransportOther, Unknown, Answered2xx, Answered4xx, Answered5xx, AnsweredOther }
+
+fn answered_class(status: u16) -> LinkClass {
+    match status {
+        200..=299 => LinkClass::Answered2xx,
+        400..=499 => LinkClass::Answered4xx,
+        500..=599 => LinkClass::Answered5xx,
+        _ => LinkClass::AnsweredOther,
+    }
 }
 
 fn retry_copy(prefix: &str, attempts: u32) -> String {
@@ -1028,7 +1021,6 @@ fn login_worker_with_output(epoch: u64, cid: String, ask: &PlaintextAsk, output:
             output,
             started: code.minted,
             epoch,
-            generation,
         };
         match poll_for_token(&mut watch, pin_window(code.expires_in)) {
             PollEnd::Token(t) => break t,
@@ -1036,10 +1028,9 @@ fn login_worker_with_output(epoch: u64, cid: String, ask: &PlaintextAsk, output:
             PollEnd::Expired(_) if another_code_allowed(generation) => {
                 log("auth: the sign-in code ran out — minting a fresh one");
             }
-            PollEnd::Expired(tail) => {
+            PollEnd::Expired(_tail) => {
                 log("auth: out of automatic sign-in codes — asking the user to start again");
-                let incident = expired_incident(&tail, generation);
-                return output_failed(output, epoch, "Sign-in timed out — try again.", incident, None);
+                return output_failed(output, epoch, "Sign-in timed out — try again.", None);
             }
         }
     };
@@ -1063,8 +1054,8 @@ fn login_worker_with_output(epoch: u64, cid: String, ask: &PlaintextAsk, output:
     // place: a token refusal is not a router problem, and an account with no server is not an
     // outage.
     let discovery = discover_and_store(&ac, &cid, epoch, DiscoveryTrigger::Login, ask, output);
-    if let Some((message, incident)) = discovery_failure(&discovery) {
-        return output_failed(output, epoch, &message, incident, plaintext_offer(&discovery));
+    if let Some(message) = discovery_failure(&discovery) {
+        return output_failed(output, epoch, &message, plaintext_offer(&discovery));
     }
     let Discovery::Ok { server, sources } = discovery else { return };
     finish_sign_in(&ac, epoch, server, sources, output);
@@ -1130,12 +1121,11 @@ fn mint_pin(ac: &AccountClient, epoch: u64, generation: u32,
             // Says what the internet is FOR here — signing in — because the one time this screen
             // appears with the link deliberately down is the first boot of a set that has never
             // signed in. Drawn as the reason under "Couldn't sign in" (`screens/login.rs`).
+            let _ = (last, generation);
             output_failed(output,
                 epoch,
                 "Couldn\u{2019}t reach Plex. Check your internet connection. An internet connection is \
                  needed to sign in.",
-                IncidentContext::new(IncidentKind::PinCreate, Some(last))
-                    .with_link_state(0, None, generation),
                 None,
             );
             return None;
@@ -1266,9 +1256,9 @@ fn rediscovery_worker_with_output(cid: String, token: String, epoch: u64, ask: &
     if !output.live() { return; }
     let ac = AccountClient::new(&cid, Some(&token));
     let discovery = discover_and_store(&ac, &cid, epoch, DiscoveryTrigger::Rediscover, ask, output);
-    if let Some((message, incident)) = discovery_failure(&discovery) {
-        // The same caption AND the same incident as sign-in: this is the retry of that failure.
-        return output_failed(output, epoch, &message, incident, plaintext_offer(&discovery));
+    if let Some(message) = discovery_failure(&discovery) {
+        // The same caption as sign-in: this is the retry of that failure.
+        return output_failed(output, epoch, &message, plaintext_offer(&discovery));
     }
     if let Discovery::Ok { server, sources } = discovery {
         finish_sign_in(&ac, epoch, server, sources, output);
@@ -1292,12 +1282,6 @@ impl PollTail {
     fn at(elapsed: Duration, misses: u32, since: Duration, last: Option<CallEvidence>) -> Self {
         Self { last, unanswered: misses, failing_for: (misses > 0).then(|| elapsed.saturating_sub(since)) }
     }
-}
-
-/// The report for the last code of a flow running out, from how its polls last went.
-fn expired_incident(tail: &PollTail, generation: u32) -> IncidentContext {
-    IncidentContext::new(IncidentKind::PinExpired, tail.last)
-        .with_link_state(tail.unanswered, tail.failing_for, generation)
 }
 
 /// How one publication of a QR code ended.
@@ -1506,9 +1490,7 @@ struct LivePin<'a> {
     output: &'a dyn owner::ObservationSink,
     started: Instant,
     epoch: u64,
-    /// Which code of the flow this is, 1-based — the report's code generation.
-    generation: u32,
-}
+    }
 
 impl PinWatch for LivePin<'_> {
     fn poll(&mut self) -> PinPoll {
@@ -1525,11 +1507,8 @@ impl PinWatch for LivePin<'_> {
         self.started.elapsed()
     }
     fn link_trouble(&mut self, stall: Option<Stall>) {
-        let trouble = stall.map(|s| {
-            IncidentContext::new(IncidentKind::LinkStalled, Some(s.last))
-                .with_link_state(s.unanswered, Some(s.failing_for), self.generation)
-        });
-        self.output.progress(LoginProgress::LinkTrouble { epoch: self.epoch, trouble }.into());
+        let _ = stall;
+        self.output.progress(LoginProgress::LinkTrouble { epoch: self.epoch }.into());
     }
 }
 
@@ -1684,11 +1663,11 @@ enum Discovery {
     ///
     /// Carries how many resources `/resources` did return and which flow asked (closed evidence
     /// for the incident).
-    NoServers(NoServersEvidence),
+    NoServers,
     /// plex.tv itself did not yield a usable resource list, after the bounded retry run.
     PlexTvFailed(PlexTvFailure),
     /// plex.tv listed servers, but none of those servers answered.
-    ServersUnreachable { trigger: DiscoveryTrigger },
+    ServersUnreachable,
     /// At least one answered **401**, and none was reachable. Something in front of that server
     /// refuses unauthenticated requests — an auth proxy, or `allowedNetworks` excluding this
     /// subnet. It is not a network fault and not a dead server, so it must not be worded as one.
@@ -1798,18 +1777,6 @@ pub(crate) fn plaintext_copy(verdict: Option<&PlaintextVerdict>, surface: Readou
 /// [`ReadoutSurface::SignIn`].
 pub(crate) fn insecure_only_copy(verdict: Option<&PlaintextVerdict>) -> std::borrow::Cow<'static, str> {
     plaintext_copy(verdict, ReadoutSurface::SignIn)
-}
-
-/// The consent outcome a report carries for an insecure-only verdict — a closed code, never the
-/// server. `None` when the verdict was never offered (not eligible).
-pub(crate) fn plaintext_consent_code(verdict: &PlaintextVerdict) -> Option<crate::telemetry::incident::PlaintextConsentOutcome> {
-    use crate::telemetry::incident::PlaintextConsentOutcome as O;
-    verdict.offers().then_some(match verdict.choice {
-        PlaintextChoice::Undecided => O::Offered,
-        PlaintextChoice::Allowed => O::Accepted,
-        PlaintextChoice::Declined => O::Declined,
-        PlaintextChoice::Revoked => O::Revoked,
-    })
 }
 
 /// The probe path. **Unauthenticated on purpose** — `/identity` answers 200 to anybody, which
@@ -3072,10 +3039,7 @@ fn resolved_without_roster(
                 "auth: no servers (resources n={resources}, all non-server) after {}",
                 trigger.code()
             ));
-            Err(Discovery::NoServers(NoServersEvidence {
-                resources: CountBucket::from_count(resources),
-                trigger,
-            }))
+            Err(Discovery::NoServers)
         }
         // A verified-but-plaintext answer is worth more to the user than a parallel/proxy 401,
         // because it names a fixable cause (HTTPS to the server) rather than a credential one.
@@ -3088,8 +3052,10 @@ fn resolved_without_roster(
             Err(Discovery::InsecureOnly(evidence))
         }
         Resolved::None { refused: true, insecure: false, .. } => Err(Discovery::Refused),
-        Resolved::None { refused: false, insecure: false, .. } =>
-            Err(Discovery::ServersUnreachable { trigger }),
+        Resolved::None { refused: false, insecure: false, .. } => {
+            let _ = trigger;
+            Err(Discovery::ServersUnreachable)
+        }
         Resolved::Reached(found) => Ok(found),
     }
 }

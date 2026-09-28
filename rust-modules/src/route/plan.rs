@@ -153,19 +153,6 @@ pub(super) struct AutoOriginalCandidate {
 }
 
 
-pub(super) fn source_probe_sample_outcome(
-    sample: crate::curlio::ThroughputSample,
-) -> crate::player::report::TraceOutcome {
-    if sample.target_reached {
-        crate::player::report::TraceOutcome::Succeeded
-    } else {
-        // A non-empty prefix is useful only as a right-censored observation. `curlio` currently
-        // collapses the terminal deadline/read reason once bytes exist, so naming it successful
-        // would be stronger than the evidence. Keep the trace honest until that result type grows
-        // a terminal-cause field.
-        crate::player::report::TraceOutcome::Inconclusive
-    }
-}
 
 
 /// **Why [`HlsAbrControl::prime`] would not register a candidate encoder**, in the one distinction

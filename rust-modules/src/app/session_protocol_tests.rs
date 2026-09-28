@@ -87,7 +87,7 @@ mod carry_matrix {
                     epoch: key.epoch, expected: None, sources: Vec::new(), primary: None,
                 })).unwrap();
             }
-            output.complete(LoginProgress::Failed { epoch: key.epoch, message: "old flow".into(), incident: crate::auth::synthetic_incident(), plaintext: None }.into()).unwrap();
+            output.complete(LoginProgress::Failed { epoch: key.epoch, message: "old flow".into(), plaintext: None }.into()).unwrap();
         }).unwrap();
         let records = rig.session_adapter.take_results();
         assert_eq!(records.len(), 3);
@@ -118,7 +118,7 @@ mod carry_matrix {
         assert!(records.iter().all(|r| rig.session_adapter.admitted(r)));
         let next_key = SessionWorkKey { epoch: EPOCH + 1, op: SessionOp::Login };
         rig.session_adapter.launch(RequestId(2), next_key, true, |job| { job(); true }, move |output| {
-            output.complete(LoginProgress::Failed { epoch: next_key.epoch, message: "next batch".into(), incident: crate::auth::synthetic_incident(), plaintext: None }.into()).unwrap();
+            output.complete(LoginProgress::Failed { epoch: next_key.epoch, message: "next batch".into(), plaintext: None }.into()).unwrap();
         }).unwrap();
         assert!(rig.session_adapter.take_results().is_empty());
         assert!(frame(&mut rig, &mut d, Vec::new(), &mut trace).carried > 0);
@@ -805,9 +805,7 @@ fn erased_publication_waits_for_carried_resource_completion() {
     assert!(rig.session.snapshot_init().pending_erase.is_none());
     assert!(rig.take_reqs().iter().any(|req| matches!(req, LoopReq::LocalDataErased)));
     let events = &rig.session_adapter.fixture_resources().coordinator_events;
-    assert!(matches!(events.first(), Some(crate::auth::owner::CoordinatorAction::CloseTelemetry)));
-    assert!(!events.iter().any(|event| matches!(event, crate::auth::owner::CoordinatorAction::SignInStarted)),
-        "a carried start cannot launch before erase completion");
+    assert!(events.is_empty(), "the erase carries no telemetry coordinator effects any more");
     execute_session_command(&mut d, Command::StartLogin);
     d.emit(MachineId::Session, Fx::Deliver(MachineId::Session, Delivery::Machine(AppMsg::Session(
         crate::auth::owner::SessionEvent::Erased { epoch: erased_epoch, leftovers: 99 }))));

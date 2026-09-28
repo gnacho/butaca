@@ -1193,10 +1193,7 @@ impl BrowseState {
                 if choice {
                     self.note_library_choice(index);
                     if switched {
-                        crate::diag::event(crate::diag::schema::DiagEvent::FeatureUsed {
-                            feature: crate::diag::schema::Feature::LibrarySwitch,
-                        });
-                    }
+                                            }
                 }
                 match query {
                     Some(QueryEdit::Sort { key, desc }) => self.set_sort_by_key(&key, desc),
@@ -3130,19 +3127,6 @@ pub(crate) fn adapter_src_fetching_for_test(adapter: &BrowseAdapter) -> bool {
 }
 
 #[cfg(test)]
-pub(crate) fn queue_page_failure_for_owner_test(
-    state: &mut BrowseState,
-    adapter: &BrowseAdapter,
-    client: &'static crate::plex::Client,
-) {
-    prepare_page_for_owner_test(state, client.id());
-    let sec = state.cur();
-    adapter.fetching.store(true, Ordering::SeqCst);
-    *adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()) = Some(PageResult {
-        client, token_gen: client.token_gen(), gen: state.query_gen(), sec, start: 0,
-        items: Vec::new(), total: -1, sorts: None,
-    });
-}
 
 #[cfg(test)]
 pub(crate) fn set_adapter_fetching_for_test(adapter: &BrowseAdapter, fetching: bool) {
@@ -3202,6 +3186,7 @@ mod home_and_tabs_tests;
 #[cfg(test)]
 #[path = "browse_reachability_tests.rs"]
 mod reachability_tests;
+
 
 #[cfg(test)]
 mod library_type_tests;

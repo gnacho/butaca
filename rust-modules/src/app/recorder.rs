@@ -152,8 +152,7 @@ const APP_SHAPES: &[&str] = &[
     crate::ui::press::Press::SHAPE,
     crate::ui::input::STATE_SHAPE,
     "TextInputWire{kind:text,text:str,panel:bool,ms:u32,dt_us:u32,source:{Sdl,RemoteFifo,Script,Replay}}",
-    "AppFrameV4{route:str,overlay:str,focus:str,tree:u64,session:u64,consent:u64,initial:u64}",
-    super::bridge::ConsentMachine::SHAPE,
+    "AppFrameV4{route:str,overlay:str,focus:str,tree:u64,session:u64,initial:u64}",
     crate::ui::containers::STATE_SHAPE,
     crate::ui::screen::RETURN_STATE_SHAPE,
     crate::pms::record::SHAPE,
@@ -235,12 +234,11 @@ pub(crate) fn state_hash(
     focus: &str,
     tree: u64,
     session: u64,
-    consent: u64,
     initial: u64,
 ) -> u64 {
     let mut c = Canon::new();
     press.write(&mut c);
-    c.str(route).str(overlay).str(focus).u64(tree).u64(session).u64(consent).u64(initial);
+    c.str(route).str(overlay).str(focus).u64(tree).u64(session).u64(initial);
     c.finish()
 }
 
@@ -1700,7 +1698,7 @@ mod tests {
             let mut rig=bridge::Bridge::for_test(||0);
             rec.prepare_resources(&mut rig);
             bridge::show_page(&mut d,crate::screens::registry::AppArg::Settings(
-                crate::screens::family::SettingsPage::ConsentStage(0)));
+                crate::screens::family::SettingsPage::Root));
             let mut states=Vec::new();
             let mut focuses=Vec::new();
             for (f,key) in [None,Some(Key::Right),Some(Key::Right),Some(Key::Left),
@@ -2389,11 +2387,11 @@ mod tests {
     #[test]
     fn the_state_hash_moves_with_the_focus_line_and_the_press() {
         let mut press = crate::ui::press::Press::new();
-        let a = state_hash(&press, "home", "", "focus route=home sel=0", 0, 0, 0, 0);
-        let b = state_hash(&press, "home", "", "focus route=home sel=1", 0, 0, 0, 0);
+        let a = state_hash(&press, "home", "", "focus route=home sel=0", 0, 0, 0);
+        let b = state_hash(&press, "home", "", "focus route=home sel=1", 0, 0, 0);
         assert_ne!(a, b);
         press.begin(10);
-        let c = state_hash(&press, "home", "", "focus route=home sel=0", 0, 0, 0, 0);
+        let c = state_hash(&press, "home", "", "focus route=home sel=0", 0, 0, 0);
         assert_ne!(a, c);
     }
 
@@ -2404,16 +2402,16 @@ mod tests {
     #[test]
     fn the_state_hash_moves_with_the_container_tree() {
         let press = crate::ui::press::Press::new();
-        let a = state_hash(&press, "home", " overlay=settings", "focus route=home", 0x11, 0, 0, 0);
-        let b = state_hash(&press, "home", " overlay=settings", "focus route=home", 0x12, 0, 0, 0);
+        let a = state_hash(&press, "home", " overlay=settings", "focus route=home", 0x11, 0, 0);
+        let b = state_hash(&press, "home", " overlay=settings", "focus route=home", 0x12, 0, 0);
         assert_ne!(a, b, "the same page and focus over a different tree is a different state");
     }
 
     #[test]
     fn the_state_hash_moves_with_the_physical_consent_owner() {
         let press = crate::ui::press::Press::new();
-        let denied = state_hash(&press, "home", "", "focus route=home", 0, 0, 0x11, 0);
-        let allowed = state_hash(&press, "home", "", "focus route=home", 0, 0, 0x12, 0);
+        let denied = state_hash(&press, "home", "", "focus route=home", 0, 0, 0x11);
+        let allowed = state_hash(&press, "home", "", "focus route=home", 0, 0, 0x12);
         assert_ne!(
             denied, allowed,
             "a consent decision changed without moving the canonical application state"

@@ -5,24 +5,6 @@ use super::*;
 #[allow(unused_imports)]
 use super::test_support::*;
 
-#[test]
-fn a_partial_source_body_is_not_traced_as_a_successful_measurement() {
-    use crate::player::report::TraceOutcome;
-    let sample = |target_reached| crate::curlio::ThroughputSample {
-        bytes: 64 * 1024,
-        elapsed: std::time::Duration::from_millis(500),
-        target_reached,
-    };
-    assert_eq!(
-        source_probe_sample_outcome(sample(false)),
-        TraceOutcome::Inconclusive,
-        "a right-censored non-empty prefix cannot claim the requested sample completed",
-    );
-    assert_eq!(
-        source_probe_sample_outcome(sample(true)),
-        TraceOutcome::Succeeded,
-    );
-}
 
 
 /// **GATE 1 — Original changes nothing, for any source, on any link.** It is the migration and

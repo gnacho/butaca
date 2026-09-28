@@ -42,7 +42,6 @@ pub(super) fn snapshot(phase: Phase, users: Vec<auth::UserTile>) -> auth::owner:
         scope: auth::owner::ProfileScope(0),
         delete_leftovers: 0,
         persistence_warning: None,
-        incident: None,
         plaintext: None,
         link_trouble: false,
         discovery_retry: None,

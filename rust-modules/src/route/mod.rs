@@ -9,7 +9,7 @@
 //! `Instant::now`/`SystemTime::now`/`.elapsed()`; `decision.rs` is not scanned by that gate (a
 //! network/adapter effect is allowed to read wall time) but as of this split carries none either.
 
-mod decision;
+pub(crate) mod decision;
 mod plan;
 
 pub(crate) use decision::*;

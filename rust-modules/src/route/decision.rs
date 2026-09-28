@@ -2343,7 +2343,6 @@ fn is_worker_ticket_current(expected: &WorkerTicket) -> bool {
 /// the demux worker starts; it never reads the mutable route session afterwards.
 #[derive(Clone)]
 pub(crate) struct HlsAbrControl {
-    trace_generation: u32,
     sid: ServerId,
     rating_key: String,
     logical_session: String,
@@ -2391,7 +2390,6 @@ pub(crate) enum OriginalProbeResult {
     /// The request reached no usable body. The client-side HLS route remained selected; PMS-side
     /// cursor continuity is not inferred. The outcome is telemetry, not a zero-capacity sample.
     Failed {
-        outcome: crate::player::report::TraceOutcome,
         failure: OriginalProbeFailure,
     },
     /// The active route changed while the finite GET was in flight. Its bytes belong to an old
@@ -2421,10 +2419,6 @@ pub(crate) enum HlsCommitRefusal {
 }
 
 impl HlsAbrControl {
-    pub(crate) fn trace_generation(&self) -> u32 {
-        self.trace_generation
-    }
-
     pub(crate) fn request_original_recovery(
         &self,
         ticket: &WorkerTicket,
@@ -2512,15 +2506,12 @@ impl HlsAbrControl {
         F: FnOnce() -> bool,
     {
         use crate::curlio::{OpenErr, ThroughputFailure as Failure};
-        use crate::player::report::{OriginalProbePhase as Phase, TraceOutcome as Outcome};
-
         if !is_worker_ticket_current(expected) {
             return OriginalProbeResult::Stale;
         }
         let url = if self.fixture_base.is_empty() {
             let Some(client) = crate::plex::client_for(self.sid) else {
                 return OriginalProbeResult::Failed {
-                    outcome: Outcome::Inconclusive,
                     failure: OriginalProbeFailure::Other,
                 };
             };
@@ -2530,12 +2521,7 @@ impl HlsAbrControl {
         } else {
             self.original_probe_part.clone()
         };
-        crate::player::report::note_original_probe_for(
-            self.trace_generation,
-            Phase::SampleSource,
-            Outcome::Started,
-        );
-        let sample = crate::curlio::sample_active_throughput_result(
+                let sample = crate::curlio::sample_active_throughput_result(
             &url,
             plan.target_bytes,
             std::time::Duration::from_millis(plan.budget_ms),
@@ -2543,21 +2529,11 @@ impl HlsAbrControl {
             cancelled,
         );
         if !is_worker_ticket_current(expected) {
-            crate::player::report::note_original_probe_for(
-                self.trace_generation,
-                Phase::SampleSource,
-                Outcome::Inconclusive,
-            );
-            return OriginalProbeResult::Stale;
+                        return OriginalProbeResult::Stale;
         }
         match sample {
             Ok(sample) => {
-                crate::player::report::note_original_probe_for(
-                    self.trace_generation,
-                    Phase::SampleSource,
-                    source_probe_sample_outcome(sample),
-                );
-                OriginalProbeResult::Measured(sample)
+                                OriginalProbeResult::Measured(sample)
             }
             Err(failure) => {
                 let detail = match &failure {
@@ -2572,25 +2548,10 @@ impl HlsAbrControl {
                     Failure::NoBody { .. } => OriginalProbeFailure::NoBody,
                     _ => OriginalProbeFailure::Other,
                 };
-                let outcome = match failure {
-                    Failure::Open(OpenErr::Deadline) | Failure::BodyDeadline => Outcome::Deadline,
-                    Failure::Open(OpenErr::Transport(_) | OpenErr::Multi(_))
-                    | Failure::BodyRead { .. } => Outcome::Transport,
-                    Failure::Open(OpenErr::Status(503 | 509)) => Outcome::Refused,
-                    Failure::Open(OpenErr::Status(500..=599)) => Outcome::ServerState,
-                    Failure::NoBody { .. } => Outcome::NoBody,
-                    _ => Outcome::Inconclusive,
-                };
-                crate::player::report::note_original_probe_for(
-                    self.trace_generation,
-                    Phase::SampleSource,
-                    outcome,
-                );
-                crate::player::log(&format!(
+                                crate::player::log(&format!(
                     "abr: Original source request produced no capacity sample failure={failure:?}"
                 ));
                 OriginalProbeResult::Failed {
-                    outcome,
                     failure: detail,
                 }
             }
@@ -2885,7 +2846,6 @@ pub(crate) fn hls_abr_control(ps: &PlaybackSession) -> Option<(HlsAbrControl, Wo
         .flatten();
     Some((
         HlsAbrControl {
-            trace_generation: playback_trace_generation(),
             sid: cur_sid(ps),
             rating_key: cur_rk(ps),
             logical_session: sess(ps),
@@ -3144,14 +3104,7 @@ pub(crate) fn fallback_auto_to_hls_for(
         rung.raster().0,
         rung.raster().1,
     ));
-    install_auto_hls(
-        ps,
-        expected,
-        rung,
-        offset_secs,
-        true,
-        crate::player::report::DeliveryReason::LinkFallback,
-    )
+    install_auto_hls(ps, expected, rung, offset_secs, true)
 }
 
 /// Replace an Auto Original route whose source request never opened.
@@ -3179,14 +3132,7 @@ pub(crate) fn fallback_unopened_auto_to_hls(ps: &mut PlaybackSession, offset_sec
         rung.raster().0,
         rung.raster().1,
     ));
-    install_auto_hls(
-        ps,
-        &expected,
-        rung,
-        offset_secs,
-        false,
-        crate::player::report::DeliveryReason::OriginalOpenRollback,
-    )
+    install_auto_hls(ps, &expected, rung, offset_secs, false)
 }
 
 /// Commit the common Original→HLS route mutation after the caller has chosen a rung from the
@@ -3199,7 +3145,6 @@ fn install_auto_hls(
     rung: crate::abr::Rung,
     offset_secs: i64,
     visible_switch: bool,
-    reason: crate::player::report::DeliveryReason,
 ) -> Option<String> {
     let fixture_base = ps.auto_fixture_base.clone();
     let previous = {
@@ -3255,13 +3200,7 @@ fn install_auto_hls(
         if visible_switch {
             note_visible_switch(ps, ps.now_ms);
         }
-        crate::player::report::note_delivery_requested_for(
-            playback_trace_generation(),
-            crate::player::report::DeliveryClass::Hls,
-            crate::player::report::QualityClass::from_rung(rung),
-            reason,
-        );
-        Some(url)
+                Some(url)
     };
     if !fixture_base.is_empty() {
         let encoder = format!("auto-fixture-{}", rung.kbps());
@@ -3393,13 +3332,7 @@ pub(crate) fn recover_auto_to_original_for(
         } else {
             "quality: Original restored direct play; HLS encoder held pending frames"
         });
-        crate::player::report::note_delivery_requested_for(
-            playback_trace_generation(),
-            crate::player::report::DeliveryClass::Direct,
-            crate::player::report::QualityClass::Original,
-            crate::player::report::DeliveryReason::OriginalRecovery,
-        );
-        return Some(AutoOriginalReload::Direct);
+                return Some(AutoOriginalReload::Direct);
     }
 
     // `/decision` only registers the replacement. Just like a raw Part open, it does not prove
@@ -3416,13 +3349,7 @@ pub(crate) fn recover_auto_to_original_for(
     } else {
         "quality: Original restored remux; HLS encoder held pending frames"
     });
-    crate::player::report::note_delivery_requested_for(
-        playback_trace_generation(),
-        crate::player::report::DeliveryClass::Remux,
-        crate::player::report::QualityClass::Original,
-        crate::player::report::DeliveryReason::OriginalRecovery,
-    );
-    Some(AutoOriginalReload::Remux)
+        Some(AutoOriginalReload::Remux)
 }
 
 /// The route as it stood the instant before an Original recovery overwrote it, kept so the
@@ -4823,7 +4750,6 @@ pub(crate) fn restore_quality(q: Quality) {
 /// rebuilds from the stored ceiling, so only an explicit pick can move it mid-film.
 fn persist_quality_choice(q: Quality) -> Quality {
     let q = supported_quality(q);
-    crate::player::report::note_quality_selected_for(playback_trace_generation(), q);
     // See `restore_quality`: the same process global, the same lock requirement in tests.
     #[cfg(test)]
     crate::testlock::assert_held("the playback quality ceiling (persist_quality_choice)");
@@ -5447,10 +5373,15 @@ pub(crate) fn playback_preview_with_capability_for_test(
 }
 
 static PLAY_GEN: AtomicU32 = AtomicU32::new(0);
+
+/// The playback-request generation: bumped on every new play request. Local consumers (the
+/// diagnostics sweep chart) use it as an epoch; nothing is reported anywhere.
+pub(crate) fn play_generation() -> u32 {
+    PLAY_GEN.load(Ordering::SeqCst)
+}
 static PLAY_BUSY: AtomicBool = AtomicBool::new(false);
 struct PlayLanding {
     gen: u32,
-    trace_generation: u32,
     /// Desired route contract captured before ResolveEnv was projected on the main thread.
     contract_revision: u64,
     plan: Plan,
@@ -5488,15 +5419,6 @@ fn retire_abandoned_plan(plan: Plan) {
     if let Some(resources) = abandoned_plan_resources(&plan) {
         retire_plan_resources(resources);
     }
-}
-
-/// Trace generation owned by the plan that is actually installed. It deliberately remains the
-/// outgoing generation while the next plan resolves, because that engine is still alive; its
-/// workers carry the same token and are ignored by the newly reset report trace.
-static ACTIVE_TRACE_GENERATION: AtomicU32 = AtomicU32::new(0);
-
-pub(crate) fn playback_trace_generation() -> u32 {
-    ACTIVE_TRACE_GENERATION.load(Ordering::SeqCst)
 }
 
 /// True while a resolve is in flight — the HUD renders `PlaybackState::Resolving` from this.
@@ -5586,7 +5508,6 @@ pub(crate) fn request_play(
             preview: false,
         },
         None,
-        None,
         false,
     )
 }
@@ -5617,7 +5538,6 @@ pub(crate) fn request_preview(
             preview: true,
         },
         None,
-        None,
         false,
     )
 }
@@ -5630,7 +5550,6 @@ fn request_play_inner(
     meta: &mut crate::stores::metadata::MetadataStore,
     request: PlaybackRequest,
     retry: Option<RetryContext>,
-    trace_generation: Option<u32>,
     drain_previous: bool,
 ) -> bool {
     let sid = request.sid;
@@ -5647,17 +5566,6 @@ fn request_play_inner(
         );
         return false;
     }
-    // **The playback funnel's denominator, minted HERE and not where the plan lands.** Every way
-    // into playback comes through this one function, including the ones that go on to be refused at
-    // `/decision` — and a refusal never reaches the engine, so anchoring the attempt any later
-    // would have produced a `playback.failed` with no `playback.requested` before it: a funnel that
-    // under-counts exactly the failure it exists to measure. It is after the empty-request guard
-    // above, so a press that resolves to nothing is not an attempt.
-    let trace_generation = if request.preview {
-        0
-    } else {
-        trace_generation.unwrap_or_else(|| crate::player::report::requested(ps, sid))
-    };
     // The fields a play REQUEST owns, as against the ones only a landing may install: the HUD
     // strings (published now, so the pre-roll has a title through the whole resolve) and the five
     // the OUTGOING item leaves behind. Everything else — url, session ids, codecs — stays as it is
@@ -5735,7 +5643,6 @@ fn request_play_inner(
             .unwrap_or_else(|_| Plan { direct_play_mode: env.direct_play_mode, ..Default::default() });
         let landing = PlayLanding {
             gen,
-            trace_generation,
             contract_revision,
             plan,
             rk,
@@ -5829,7 +5736,7 @@ pub(crate) fn retry_current_play(ps: &mut PlaybackSession, meta: &mut crate::sto
         "playback retry: resolving item again at quality {}",
         quality().label(),
     ));
-    request_play_inner(ps, meta, request, Some(current_retry_context(ps, resume_ns)), None, true)
+    request_play_inner(ps, meta, request, Some(current_retry_context(ps, resume_ns)), true)
 }
 
 /// ASYNC twins of `play_movie` / `play_episode`: identical HUD strings and inputs. On `true`, the
@@ -5933,7 +5840,6 @@ pub(crate) fn pump_play(ps: &mut PlaybackSession, meta: &mut crate::stores::meta
     let taken = PLAY_SLOT.lock().unwrap_or_else(|e| e.into_inner()).take();
     let Some(PlayLanding {
         gen,
-        trace_generation,
         contract_revision,
         plan,
         rk,
@@ -5962,7 +5868,7 @@ pub(crate) fn pump_play(ps: &mut PlaybackSession, meta: &mut crate::stores::meta
             crate::player::log(
                 "playback resolve: desired contract changed in flight; discarding and resolving the latest contract",
             );
-            let _ = request_play_inner(ps, meta, request, Some(retry), Some(trace_generation), false);
+            let _ = request_play_inner(ps, meta, request, Some(retry), false);
         } else {
             cancel_playback_request(ps, has_url(ps));
         }
@@ -5978,13 +5884,6 @@ pub(crate) fn pump_play(ps: &mut PlaybackSession, meta: &mut crate::stores::meta
         let mut resume = PLAY_RESUME.lock().unwrap_or_else(|e| e.into_inner());
         take_resume_for(&mut resume, gen)
     };
-    // A preview's trace_generation is the placeholder 0 (request_play_inner never asked
-    // report::requested() for a real one), so it must not overwrite the funnel's active
-    // generation here — doing so would misattribute whatever telemetry a genuinely active,
-    // non-preview resolve/trace is still using this counter for.
-    if !is_preview(ps) {
-        ACTIVE_TRACE_GENERATION.store(trace_generation, Ordering::SeqCst);
-    }
     let _start = apply_plan(ps, meta, plan, &rk);
     if let Some(resources) = refused_resources {
         retire_plan_resources(resources);
@@ -6648,7 +6547,7 @@ pub(crate) fn report_timeline(
 // ---------------------------------------------------------------------------------------
 #[cfg(test)]
 #[path = "decision_test_support.rs"]
-mod test_support;
+pub(crate) mod test_support;
 
 #[cfg(test)]
 #[path = "decision_resolve_route_tests.rs"]

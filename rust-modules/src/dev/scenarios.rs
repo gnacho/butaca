@@ -59,7 +59,6 @@ pub(crate) struct DevFlags {
     pub(crate) legal_doc: bool,
     pub(crate) alert_boot: bool,
     pub(crate) account_osc: bool,
-    pub(crate) consent_osc: bool,
     pub(crate) onboard_osc: bool,
     pub(crate) nav_osc: bool,
     pub(crate) nav_osc_rk: String,
@@ -93,8 +92,6 @@ pub(crate) struct Scenarios {
     pub(crate) alert_step: u8,
     pub(crate) account_osc_last: u32,
     pub(crate) account_osc_down: bool,
-    pub(crate) consent_osc_last: u32,
-    pub(crate) consent_osc_down: bool,
     pub(crate) onboard_osc_last: u32,
     pub(crate) onboard_osc_right: bool,
     pub(crate) nav_osc_last: u32,
@@ -379,10 +376,6 @@ pub(crate) fn alert_armed() -> bool {
 /// `/tmp/plxnative-acctosc`.
 pub(crate) fn acctosc_armed() -> bool {
     crate::dev::flag("acctosc")
-}
-/// `/tmp/plxnative-consentosc`.
-pub(crate) fn consentosc_armed() -> bool {
-    crate::dev::flag("consentosc")
 }
 /// `/tmp/plxnative-onboardosc`.
 pub(crate) fn onboardosc_armed() -> bool {
@@ -903,7 +896,6 @@ fn settings_boot_arm(app: &mut App, fr: &mut Frame) {
             let page = match app.scenarios.dev.settings_boot.as_deref().map(str::trim).unwrap_or("root") {
                 "" | "root" => crate::screens::family::SettingsPage::Root,
                 "home" => crate::screens::family::SettingsPage::Favourites,
-                "privacy" => crate::screens::family::SettingsPage::Privacy,
                 "legal" => crate::screens::family::SettingsPage::Legal,
                 "playback" => crate::screens::family::SettingsPage::Playback,
                 "audio" => crate::screens::family::SettingsPage::AudioSubtitles,
@@ -2032,19 +2024,6 @@ pub(crate) fn settings_osc_tick(app: &mut App, now: u32, dt: f32) {
     }
 }
 
-/// `/tmp/plxnative-consentosc` — sweep the first-run consent question's focus.
-pub(crate) fn consent_osc_tick(app: &mut App, now: u32, dt: f32) {
-    if app.scenarios.dev.consent_osc && crate::app::bridge::consent_up(&app.pages) {
-        crate::ui::idle::invalidate();
-        if now.wrapping_sub(app.scenarios.consent_osc_last) > 520 {
-            app.scenarios.consent_osc_last = now;
-            let key = if app.scenarios.consent_osc_down { Key::Down } else { Key::Up };
-            app.scenarios.consent_osc_down = !app.scenarios.consent_osc_down;
-            let tick = Tick { ms: now, dt_us: (dt * 1_000_000.0) as u32 };
-            app.inputs.extend(crate::app::bridge::script_key(key, tick));
-        }
-    }
-}
 
 /// `/tmp/plxnative-onboardosc` — sweep the first-run sources editor's focus.
 pub(crate) fn onboard_osc_tick(app: &mut App, now: u32, dt: f32) {
@@ -2075,12 +2054,6 @@ pub(crate) fn detail_osc_tick(app: &mut App, now: u32) {
 // =================================================================================================
 
 /// `/tmp/plxnative-consent[=<crash|product>]` — forces either first-run purpose even on an
-/// automated boot. Read by `app::input::maybe_ask_consent`, which stays production code with this
-/// one dev-only branch: presenting the real consent screen is not itself a dev arm.
-pub(crate) fn consent_override() -> Option<String> {
-    crate::dev::read("consent")
-}
-
 /// `/tmp/plxnative-rec` — read by controlled-bootstrap preflight. The recorder/replay MECHANISM
 /// stays in `app/recorder.rs` (this phase's instructions: it is not a scenario), but the raw
 /// trigger read goes through the one door every other trigger does.
@@ -2182,49 +2155,4 @@ pub(crate) fn signin_trouble_resources()
     }
 }
 
-/// `/tmp/plxnative-consentstate=unset|yes4|yes7|no` — boot with this consent record instead of
-/// the stored one: never asked, error reports allowed at scope 4 (before the onboarding report
-/// existed) or 7, or declined. Installed through `consent::install` like a real load, and written
-/// nowhere. `None` without the trigger or with an unknown value (which is logged). Unused under
-/// test, where `telemetry::capture_initial` never consults it.
-#[cfg_attr(test, allow(dead_code))]
-pub(crate) fn consent_state_override() -> Option<crate::telemetry::consent::Consent> {
-    use crate::telemetry::consent::{Consent, ONBOARDING_REPORT_SCOPE, POLICY_VERSION};
-    let spec = crate::dev::read("consentstate")?;
-    // An answered record as `consent::apply` would have written it: errors on at `scope` with a
-    // freshly minted Crash report ID, or errors off with nothing kept.
-    let answered = |errors: bool, scope: u32| Consent {
-        asked_version: POLICY_VERSION,
-        errors,
-        errors_scope: if errors { scope } else { 0 },
-        errors_id: errors.then(crate::telemetry::mint_id).flatten(),
-        ..Consent::default()
-    };
-    let consent = match spec.as_str() {
-        "unset" => Consent::default(),
-        "yes4" => answered(true, 4),
-        "yes7" => answered(true, ONBOARDING_REPORT_SCOPE),
-        "no" => answered(false, 0),
-        other => {
-            crate::log(&format!("dev: consentstate — unknown value {other:?}, ignored"));
-            return None;
-        }
-    };
-    crate::log(&format!("dev: consentstate={spec} — booting with that consent record"));
-    Some(consent)
-}
 
-/// Is a harness driving this boot? The onboarding offer is a modal question, and a scripted run
-/// (a test identity, a forced profile pick, a recording) must not stop on one. **Narrow on
-/// purpose**, where `dev::any_trigger_present` is broad: every other trigger — `plxnative-login`,
-/// `-nowan`, `-signinfail`, the consent state — is how the offer is PUT on screen for a capture,
-/// and a gate that saw them would hide the thing being captured. Read once.
-pub(crate) fn harness_driven() -> bool {
-    if cfg!(test) { return false; }
-    static DRIVEN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *DRIVEN.get_or_init(|| {
-        crate::dev::read("token").is_some_and(|t| !t.is_empty())
-            || crate::dev::read("pickuser").is_some()
-            || matches!(rec_trigger(), Ok(Some(_)))
-    })
-}

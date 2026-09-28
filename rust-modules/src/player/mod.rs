@@ -23,7 +23,7 @@ pub(crate) mod machine;
 pub(crate) mod preview;
 mod ffi;
 mod pump;
-pub(crate) mod report;
+
 mod shared;
 pub(crate) mod sidecar;
 #[cfg(feature = "hostsim")]
@@ -465,8 +465,7 @@ pub(crate) fn ended() -> bool {
     SHARED.ended.load(Relaxed)
 }
 pub(crate) fn request_seek(ns: i64) {
-    report::note_seek_for(crate::route::playback_trace_generation());
-    crate::route::note_user_seek_intent(ns);
+        crate::route::note_user_seek_intent(ns);
     SHARED.ended.store(false, Relaxed); // seeking back from the end un-ends the stream
     SHARED.seeking.store(true, Relaxed); // HUD: spinner + freeze the playhead until it lands
     SHARED.seek_display_ns.store(ns, Relaxed);
@@ -636,7 +635,6 @@ pub(crate) enum FailureKind {
     /// Starfish refused the Load declaration, so no decoder session could start.
     TvPipeline,
     /// Historical telemetry only: the retired exclusive Original experiment lost its HLS rollback.
-    OriginalRollback,
     /// This device's jail is missing `/dev/rtkmem` on a SoC where that is a known cause of
     /// native A/V crashes — the Load was never attempted. Community-tier finding: see
     /// [`crate::webos::jail_blocks_native_video`]'s doc.
@@ -663,7 +661,6 @@ impl FailureKind {
             FailureKind::MediaSource => "media_source",
             FailureKind::PlaybackInterrupted => "playback_interrupted",
             FailureKind::TvPipeline => "tv_pipeline",
-            FailureKind::OriginalRollback => "original_rollback",
             FailureKind::JailMissingRtkmem => "jail_missing_rtkmem",
             FailureKind::LoadTimeout => "load_timeout",
             FailureKind::Unspecified => "unspecified",

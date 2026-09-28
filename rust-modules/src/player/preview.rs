@@ -31,7 +31,7 @@
 //! playing exactly where it was — a seek is a nice-to-have on a preview that still has no watch
 //! state to protect, and the budget is shared with every later item's autoplay, so it is not worth
 //! spending one of the last slots on it. `seek` never calls `player::request_seek`: no
-//! `route::note_user_seek_intent`, no `report::note_seek_for(playback_trace_generation())` — a
+//! `route::note_user_seek_intent`, no user-seek intent either — a
 //! preview has no trace generation, and the watch-state promise this file opens with covers a
 //! seek exactly like every other write. Pausing has none of this to begin with: it is
 //! `player::pause`/`resume` on a live engine, and `TX.reset()` on a real stop clears the flag, so

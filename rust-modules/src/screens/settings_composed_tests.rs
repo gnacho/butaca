@@ -57,6 +57,24 @@ use crate::ui::present::Present;
 /// which stands in for whatever page the application has UNDER Settings. The root stack
 /// needs a body and this test is not about which one; a document is the family's most
 /// inert page (its `prepare` is empty and it draws nothing without a `DrawFrame`).
+fn consent_opened(page: SettingsPage) -> (Dispatcher<InnerHost>, SurfaceRig, EntryId) {
+    consent_opened_on(page, SurfaceRig::new())
+}
+
+fn consent_opened_on(
+    page: SettingsPage,
+    mut rig: SurfaceRig,
+) -> (Dispatcher<InnerHost>, SurfaceRig, EntryId) {
+    let mut d = Dispatcher::new();
+    d.request(MachineId::Nav, NavOp::Root(SettingsPage::About));
+    frame(&mut d, &mut rig, 0, vec![]);
+    d.nav.next_style = Style::Opaque { snapshot: true };
+    d.request(MachineId::Nav, NavOp::Present(page));
+    frame(&mut d, &mut rig, 16, vec![]);
+    let id = d.nav.modals.top().unwrap().entry.id;
+    (d, rig, id)
+}
+
 struct SurfaceMounter;
 
 impl Mounter<InnerHost> for SurfaceMounter {
@@ -77,9 +95,6 @@ impl Mounter<InnerHost> for SurfaceMounter {
         };
         match arg {
             SettingsPage::About => mount_page(entry, SettingsPage::About, cx, fx),
-            SettingsPage::ConsentStage(stage) => Box::new(RouteSurface::new(entry, id,
-                Family::FirstRunConsent, SettingsPage::ConsentStage(*stage),
-                crate::pms::HubsSnapshot::empty_for_test().view())),
             other => Box::new(RouteSurface::new(entry, id, Family::Settings, *other,
                 crate::pms::HubsSnapshot::empty_for_test().view())),
         }
@@ -215,104 +230,6 @@ fn path(d: &Dispatcher<InnerHost>, id: EntryId) -> String {
 /// rather than about the rule under test.
 fn seat(d: &mut Dispatcher<InnerHost>, id: EntryId, elem: u32) {
     d.set_focus(Some(FocusKey { entry: id, elem }));
-}
-
-fn consent_opened(page: SettingsPage) -> (Dispatcher<InnerHost>, SurfaceRig, EntryId) {
-    consent_opened_on(page, SurfaceRig::new())
-}
-
-fn consent_opened_on(
-    page: SettingsPage,
-    mut rig: SurfaceRig,
-) -> (Dispatcher<InnerHost>, SurfaceRig, EntryId) {
-    let mut d = Dispatcher::new();
-    d.request(MachineId::Nav, NavOp::Root(SettingsPage::About));
-    frame(&mut d, &mut rig, 0, vec![]);
-    d.nav.next_style = Style::Opaque { snapshot: true };
-    d.request(MachineId::Nav, NavOp::Present(page));
-    frame(&mut d, &mut rig, 16, vec![]);
-    let id = d.nav.modals.top().unwrap().entry.id;
-    (d, rig, id)
-}
-
-#[test]
-fn composed_owner_first_run_answers_survive_full_frames() {
-    let _g = crate::testlock::serial();
-    for stage in [0, 1, 17] {
-        let (mut d, mut rig, id) = consent_opened(SettingsPage::ConsentStage(stage));
-        assert_eq!(d.focus(), Some(FocusKey { entry: id, elem: registry::BAND }), "stage {stage} mount");
-        frame(&mut d, &mut rig, 32, vec![]);
-        assert_eq!(d.focus().unwrap().elem, registry::BAND);
-        for (round, direction) in [Key::Left, Key::Down].into_iter().enumerate() {
-            let ms = 48 + round as u32 * 64;
-            seat(&mut d, id, 1); // Privacy policy, not a guessed geometric starting point.
-            frame(&mut d, &mut rig, ms, vec![key(direction, tick(ms))]);
-            assert!(registry::band_index(d.focus().unwrap().elem).is_some(), "stage {stage}, {direction:?}");
-            seat(&mut d, id, registry::BAND);
-            frame(&mut d, &mut rig, ms + 16, vec![key(Key::Right, tick(ms + 16))]);
-            assert_eq!(d.focus().unwrap().elem, registry::BAND + 1);
-            frame(&mut d, &mut rig, ms + 32, vec![]);
-            assert_eq!(d.focus().unwrap().elem, registry::BAND + 1);
-            frame(&mut d, &mut rig, ms + 48, vec![key(Key::Left, tick(ms + 48))]);
-            assert_eq!(d.focus().unwrap().elem, registry::BAND);
-        }
-        assert_eq!(d.nav.input_owner(), Some(InputOwner::Entry(id)));
-        assert_eq!(rig.roots, 0);
-    }
-}
-
-#[test]
-fn composed_owner_settings_done_survives_then_disappears_with_reverted_draft() {
-    let _g = crate::testlock::serial();
-    let (mut d, mut rig, id) = consent_opened(SettingsPage::Privacy);
-    seat(&mut d, id, 0);
-    frame(&mut d, &mut rig, 32, vec![key(Key::Ok, tick(32))]); // draft only
-    frame(&mut d, &mut rig, 48, vec![key(Key::Left, tick(48))]);
-    assert_eq!(d.focus().unwrap().elem, registry::BAND);
-    frame(&mut d, &mut rig, 64, vec![]);
-    assert_eq!(d.focus().unwrap().elem, registry::BAND);
-    seat(&mut d, id, 0);
-    frame(&mut d, &mut rig, 80, vec![key(Key::Ok, tick(80))]); // reverse draft
-    seat(&mut d, id, registry::BAND); // a retained key for a removed control
-    frame(&mut d, &mut rig, 96, vec![]);
-    assert!(registry::band_index(d.focus().unwrap().elem).is_none());
-    assert_eq!(d.nav.input_owner(), Some(InputOwner::Entry(id)));
-}
-
-#[test]
-fn composed_owner_pointer_seats_and_validates_answer_press_identity_without_committing() {
-    use crate::ui::machine::{InputEvent, InputKind, PressId, Source};
-    use crate::ui::screen::{Activate, Hover, Stop};
-    let _g = crate::testlock::serial();
-    for stage in [0, 1] {
-        let (mut d, mut rig, id) = consent_opened(SettingsPage::ConsentStage(stage));
-        for (round, elem) in [registry::BAND, registry::BAND + 1].into_iter().enumerate() {
-            let ms = 32 + round as u32 * 32;
-            let unchanged_path = path(&d, id);
-            let focused = FocusKey { entry: id, elem };
-            let c = cx(None);
-            let screen = &d.nav.entry(id).unwrap().inst.as_ref().unwrap().screen;
-            let placed = screen.place(&elem, &c, At::Drawn).expect("real Consent button geometry");
-            // No GL draw on the host: publish the real queried geometry to the real hit map.
-            d.input.hit.fill(vec![Stop { key: focused, rect: placed.rect, rest_rect: placed.rest_rect,
-                clip: placed.clip, hover: Hover::Focus, activate: Activate::Press }]);
-            d.input.hit.swap();
-            d.input.hit.dpad_mode = false;
-            frame(&mut d, &mut rig, ms, vec![InputEvent { at: tick(ms), source: Source::Script,
-                kind: InputKind::Pointer { x: placed.rect.cx(), y: placed.rect.cy(), hit: None } }]);
-            assert_eq!(d.focus(), Some(focused));
-            let instance = d.nav.instance_of(id).unwrap();
-            // The production typed press validator, but Hold rather than Commit: this
-            // page does not answer on hold, so neither consent choice is made or saved.
-            d.emit(MachineId::Input, Fx::Deliver(MachineId::Instance(instance),
-                Delivery::Press { id: PressId(1), key: focused, held: true }));
-            let report = d.frame_with(&mut rig, tick(ms + 16), vec![], vec![], &mut NoTap, false);
-            assert_eq!(report.dropped_deliveries, 0, "a valid button was refused by press identity validation");
-            assert_eq!(d.focus(), Some(focused));
-            assert_eq!(path(&d, id), unchanged_path, "holding must not answer or advance the stage");
-            assert_eq!(d.nav.input_owner(), Some(InputOwner::Entry(id)));
-        }
-    }
 }
 
 #[test]

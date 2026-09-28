@@ -51,7 +51,7 @@ pub(super) fn recorder_end_frame(
     rec.measurements(bridge);
     rec.content_end();
     rec.end_frame_with_gate(&|| super::recorder::state_hash(
-        press, route, overlay, focus, tree, bridge.session_subhash(), bridge.consent_subhash(),
+        press, route, overlay, focus, tree, bridge.session_subhash(),
         bridge.initial_subhash(),
     ), &|id| bridge.store_gen(id), bridge.landgate())
 }
@@ -648,7 +648,6 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
     restore_window: impl FnOnce(*mut c_void)) {
     let et = rd_u32(&app.ev, 0);
     app.window_activity.event(et);
-    crate::telemetry::window::lifecycle(et, matches!(app.route(), AppArg::Player));
     if controlled_replay(app) {
         // The tape owns logical ingress; real SDL startup notifications must not be
         // counted a second time. The real compositor still owns window safety.
@@ -1429,7 +1428,6 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
         // so gating this on a started engine would silently miss the earliest and most certain
         // failure there is. It observes the value the HUD renders and reports only transitions,
         // so the steady-state cost is one atomic load.
-        crate::player::report::tick(&mut app.player.session);
         // end-of-stream: the pipeline drained at the credits → hand off to Up Next when the
         // show has another episode queued, else leave the player (back to the detail page or
         // home, whichever is behind), instead of freezing on the last frame.
@@ -2020,7 +2018,6 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         crate::dev::scenarios::legal_doc_tick(app, fr.now, fr.dt);
         crate::dev::scenarios::alert_tick(app, fr.now, fr.dt);
         crate::dev::scenarios::settings_osc_tick(app, fr.now, fr.dt);
-        crate::dev::scenarios::consent_osc_tick(app, fr.now, fr.dt);
         crate::dev::scenarios::onboard_osc_tick(app, fr.now, fr.dt);
         // (`legal::update` / `consent::update` / `settings::update` stood here, self-gated on
         // their own `Popover::visible` because none of them was a route. The surface and its
@@ -2137,10 +2134,11 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
                     }
                 }
             },
-            // `pump_play` can install a refused `/decision` after the earlier report
-            // observation but before this frame draws the Error screen. Observe again at that
-            // exact publication boundary; latches make a healthy/no-change frame idempotent.
-            |app| crate::player::report::tick(&app.player.session),
+            // `pump_play` can install a refused `/decision` after the earlier state observation
+            // but before this frame draws the Error screen. The removed playback report funnel
+            // observed again at this publication boundary; with nothing left to feed, the
+            // observation is a deliberate no-op kept so the seam stays explicit.
+            |_| {},
         );
         // Async detail load: install the worker's item into CURRENT. Route-unconditional for
         // the same reason as pump_play — play_item_now requests a detail from Home and flips
@@ -2427,8 +2425,7 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
         // reach the wire — see `diag::schema`.
         if fr.rn != app.last_route_reported {
             app.last_route_reported = fr.rn;
-            crate::diag::event(crate::diag::schema::DiagEvent::RouteEntered { screen: fr.rn });
-        }
+                    }
         // The lab envelope's `route` field, from the SAME name the heartbeat and the focus
         // fingerprint print — a snapshot that disagreed with the log about which screen the
         // tester was on would be worse than one that omitted the field. Compiles away in every
@@ -2504,7 +2501,6 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
                 // can be the probe's `route=`. Named rather than swept into a `_` so a new page
                 // variant is a compile error here rather than a silently mis-probed screen.
                 AppArg::Settings(_)
-                | AppArg::FirstRunConsent(_)
                 | AppArg::LibraryMenu(_)
                 | AppArg::AccountMenu
                 | AppArg::ItemMenu(_)
@@ -2745,7 +2741,6 @@ pub(crate) unsafe fn shutdown(
     ps: &mut crate::route::PlaybackSession,
     pa: &mut crate::player::adapter::PlayerAdapter,
 ) {
-    crate::player::report::abandon_pending(ps);
     if is_started() {
         crate::player::stop_bufferfeed(ps, pa);
     }
@@ -3011,7 +3006,6 @@ mod lifecycle_regression_tests {
             measure_fault_logged: Default::default(),
             rec: super::super::recorder::Recplay::Off,
             boot_initial: Default::default(),
-            telemetry_guard: Default::default(),
             present: crate::ui::present::Present::new(),
             glass: Default::default(),
             pages: crate::ui::dispatch::Dispatcher::new(),

@@ -438,33 +438,3 @@ fn a_single_miss_reports_no_link_trouble() {
     assert_eq!(poll_for_token(&mut w, pin_window(900)), PollEnd::Token("t".into()));
     assert!(w.troubles.is_empty(), "{:?}", w.troubles);
 }
-
-/// **The last code running out says how its polls went.** A flow that ends on "Sign-in timed out"
-/// after plex.tv spent the code answering 429 is a rate limit, not a person who never scanned —
-/// and the PinExpired report used to carry neither the answer nor the run of misses.
-#[test]
-fn an_expiry_after_refused_polls_carries_what_they_answered() {
-    use crate::telemetry::incident::{LinkClass, UnansweredBucket};
-    let mut answers = vec![PinPoll::Pending];
-    answers.extend((0..40).map(|_| PinPoll::Unreachable(Ok(429))));
-    let mut w = ScriptedPin::new(answers);
-    // 20 s: one pending answer, then four refused polls on the 2-4-8 s backoff before the end.
-    let PollEnd::Expired(tail) = poll_for_token(&mut w, Duration::from_secs(20)) else {
-        panic!("the code must run out");
-    };
-    let incident = expired_incident(&tail, MAX_PIN_GENERATIONS);
-    assert_eq!(incident.kind, crate::telemetry::incident::IncidentKind::PinExpired);
-    assert_eq!((incident.link, incident.http_status), (LinkClass::Answered4xx, Some(429)));
-    assert_eq!(incident.unanswered, UnansweredBucket::TwoToFive);
-    assert_ne!(incident.failing_for, crate::telemetry::incident::FailingForBucket::None);
-    assert_eq!(incident.code_generation, Some(4));
-
-    // A code nobody scanned, on a link that answered every time, says exactly that.
-    let mut w = ScriptedPin::new((0..40).map(|_| PinPoll::Pending).collect());
-    let PollEnd::Expired(tail) = poll_for_token(&mut w, Duration::from_secs(60)) else {
-        panic!("the code must run out");
-    };
-    let incident = expired_incident(&tail, 4);
-    assert_eq!((incident.link, incident.http_status), (LinkClass::Answered2xx, Some(200)));
-    assert_eq!(incident.unanswered, UnansweredBucket::Zero);
-}

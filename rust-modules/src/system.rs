@@ -62,18 +62,13 @@ impl WindowActivity {
         self.active && requested
     }
 
-    pub(crate) fn begin_present(&self, playing: bool) {
-        if self.first_frame {
-            crate::telemetry::window::record(crate::telemetry::window::Observation::step(
-                crate::telemetry::window::Stage::FirstFrame, Some(playing)));
-        }
+    pub(crate) fn begin_present(&self, _playing: bool) {
+        let _ = self.first_frame;
     }
 
-    pub(crate) fn presented(&mut self, playing: bool) {
+    pub(crate) fn presented(&mut self, _playing: bool) {
         if self.first_frame {
             self.first_frame = false;
-            crate::telemetry::window::record(crate::telemetry::window::Observation::step(
-                crate::telemetry::window::Stage::FirstSwapComplete, Some(playing)));
         }
     }
 }
@@ -160,8 +155,6 @@ pub(crate) fn ls2_pump() {
 }
 
 pub(crate) fn sys_grab_wayland(winp: *mut c_void) {
-    crate::telemetry::window::record(crate::telemetry::window::Observation::step(
-        crate::telemetry::window::Stage::WmQuery, None));
     unsafe {
         let mut wmbuf = [0u8; 512];
         // SDL_VERSION(&wm->version): major/minor/patch (u8) at offset 0.
@@ -520,26 +513,18 @@ pub(crate) fn opaque_route(_player: bool) {}
 unsafe fn update_wayland_info(ok: c_int, info: &[u8; 512]) {
     sys_release_wayland();
     let subsystem = i32::from_ne_bytes(info[4..8].try_into().unwrap());
-    let (mut display_present, mut surface_present) = (false, false);
     if ok != 0 && subsystem == 6 { // SDL_SYSWM_WAYLAND
         let pointers = info.as_ptr().add(8) as *const *mut c_void;
         let display = pointers.read_unaligned();
         let surface = pointers.add(1).read_unaligned();
-        display_present = !display.is_null();
-        surface_present = !surface.is_null();
-        if display_present && surface_present {
+        if !display.is_null() && !surface.is_null() {
             G_WL_DISPLAY = display;
             G_WL_SURFACE = surface;
         }
     }
-    use crate::telemetry::window::{Observation, Stage};
-    let stage = if ok == 0 { Stage::WmFailed }
-        else if subsystem != 6 { Stage::WmWrongBackend }
-        else if G_WL_SURFACE.is_null() { Stage::WmNoSurface }
-        else { Stage::WmReady };
-    crate::telemetry::window::record(Observation { stage, playing: None,
-        version: Some([info[0], info[1], info[2]]),
-        display: Some(display_present), surface: Some(surface_present) });
+    if ok != 0 && subsystem == 6 && !G_WL_SURFACE.is_null() {
+        crate::log("window: wayland display + surface ready");
+    }
 }
 
 #[cfg(test)]

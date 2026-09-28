@@ -43,8 +43,6 @@ pub(crate) enum AppFx {
     Store(StoreId, StoreCmd),
     /// Poll only the store work this visible route owns, after its read-only step returns.
     StoreWork(StoreWork),
-    /// The consent MACHINE's command (§2.2): it owns the two decisions and publishes them.
-    Consent(ConsentCmd),
     /// A request of the legacy loop (§14) — see [`LoopReq`].
     Loop(LoopReq),
     /// Content-page requests, executed by the navigation bridge during coexistence (phase 7).
@@ -956,7 +954,6 @@ pub(crate) enum DetailRefreshPhase {
 /// The application's messages (spec §3.1).
 pub(crate) enum AppMsg {
     Session(crate::auth::owner::SessionEvent),
-    Consent(ConsentCmd),
     RestartReply { correlation: u32, accepted: bool },
     SelectionReply { correlation: u32, accepted: bool, flow_epoch: u64 },
     BackReply { correlation: u32, resumed: bool },
@@ -978,12 +975,6 @@ pub(crate) enum AppMsg {
     /// the destination and the PAGE navigates, which is `LibraryMenu`'s shape (`LibrarySelect`) and
     /// what keeps "what a press means on the Detail page" in one place instead of two.
     AltSourceOpen(ContentArg),
-}
-
-/// What the consent machine is told (§2.3): a person's answer to both questions at once.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum ConsentCmd {
-    Record { errors: bool, usage: bool },
 }
 
 /// What an owned screen asks the LEGACY LOOP to do, because the owner of that decision is not on
@@ -1065,7 +1056,6 @@ pub(crate) mod word {
     pub(crate) const SETTINGS: &str = "settings";
     pub(crate) const PRIVACY: &str = "privacy";
     pub(crate) const LEGAL: &str = "legal";
-    pub(crate) const CONSENT: &str = "consent";
     pub(crate) const ONBOARD: &str = "onboard";
     /// The QR sign-in (`screens::login::LoginScreen`). Same spelling as `app::words::route_word`'s
     /// `AppArg::Login` arm — see this module's doc for why that equality is load-bearing.
@@ -1130,9 +1120,12 @@ pub(crate) fn band_elem(i: usize) -> u32 {
 pub(crate) fn band_index(elem: u32) -> Option<usize> {
     (elem >= BAND && elem < ALERT).then(|| (elem - BAND) as usize)
 }
+
+#[cfg(test)]
 pub(crate) fn alert_index(elem: u32) -> Option<usize> {
     (elem >= ALERT && elem < ALERT + 2).then(|| (elem - ALERT) as usize)
 }
+
 
 // ── The modal REPEAT CADENCE ─────────────────────────────────────────────────────────────────
 //
@@ -1211,27 +1204,6 @@ pub(crate) const PANEL_REPEAT_MS: u32 = 110;
 mod repeat_gate_tests {
     use super::{RepeatGate, PANEL_REPEAT_MS};
 
-    #[test]
-    fn a_gate_admits_the_first_step_then_holds_the_cadence() {
-        let mut gate = RepeatGate::IDLE;
-        assert!(gate.ready(1_000), "nothing has fired yet");
-        assert!(!gate.ready(1_050), "too soon");
-        assert!(!gate.ready(1_159), "still short of the step");
-        assert!(gate.ready(1_160), "exactly one step later");
-        assert!(!gate.ready(1_161));
-    }
-
-    /// SDL ticks wrap at 2^32ms; the same arithmetic `HeldKey`'s lost-keyup net and client-side
-    /// repeat already rely on, so this gate must survive it the same way.
-    #[test]
-    fn the_gate_survives_the_tick_wrap() {
-        let mut gate = RepeatGate::IDLE;
-        let at = u32::MAX - 50;
-        assert!(gate.ready(at));
-        assert!(!gate.ready(at.wrapping_add(100)));
-        assert!(gate.ready(at.wrapping_add(160)));
-    }
-
     /// The player panels' own cadence, and the reason `ready_every` exists: the remote's ~50 ms
     /// hardware repeat is admitted at 110 ms, not at 160 (a settings row) and not at 50.
     #[test]
@@ -1286,8 +1258,28 @@ mod tests {
         assert_eq!(band_index(ALERT - 1), Some((ALERT - 1 - BAND) as usize), "the band's range runs right up to the alert's");
         assert_eq!(band_index(ALERT), None, "…and stops there — the two ranges must not overlap");
     }
-}
 
+        #[test]
+    fn a_gate_admits_the_first_step_then_holds_the_cadence() {
+        let mut gate = RepeatGate::IDLE;
+        assert!(gate.ready(1_000), "nothing has fired yet");
+        assert!(!gate.ready(1_050), "too soon");
+        assert!(!gate.ready(1_159), "still short of the step");
+        assert!(gate.ready(1_160), "exactly one step later");
+        assert!(!gate.ready(1_161));
+    }
+
+    /// SDL ticks wrap at 2^32ms; the same arithmetic `HeldKey`'s lost-keyup net and client-side
+    /// repeat already rely on, so this gate must survive it the same way.
+    #[test]
+    fn the_gate_survives_the_tick_wrap() {
+        let mut gate = RepeatGate::IDLE;
+        let at = u32::MAX - 50;
+        assert!(gate.ready(at));
+        assert!(!gate.ready(at.wrapping_add(100)));
+        assert!(gate.ready(at.wrapping_add(160)));
+    }
+}
 // ---------------------------------------------------------------------------------------------
 // the page alphabet, the screen argument and the one mount match
 // ---------------------------------------------------------------------------------------------
@@ -1390,12 +1382,9 @@ pub(crate) enum AppArg {
     Content(ContentArg),
     /// The Settings family, rooted at this page (`SettingsPage::Root` for every real opening).
     Settings(SettingsPage),
-    /// The first-run consent question, rooted at this stage byte (0 for every real opening;
-    /// `screens::consent`'s `STAGE_PRODUCT` for `/tmp/plxnative-consent=product`).
-    FirstRunConsent(u8),
 }
 
-pub(crate) const ARG_SHAPE: &str = "AppArg{Login,Profiles,Onboard,Home,Library,Search,Player,Content:{Detail{sid:u32,rk:str},Person{sid:u32,key:str,guid:str,name:str,thumb:str},Filmography{sid:u32,key:str}},Settings:SettingsPage{Root,Playback,AudioSubtitles,Favourites,Privacy,Legal,About,Document(u8),Preview(u8),ConsentStage(u8)},FirstRunConsent(u8),LibraryMenu{host:u32,target:{epoch:u32,sid:u32,section:u64},kind:u32,anchor:[u32;4]},\
+pub(crate) const ARG_SHAPE: &str = "AppArg{Login,Profiles,Onboard,Home,Library,Search,Player,Content:{Detail{sid:u32,rk:str},Person{sid:u32,key:str,guid:str,name:str,thumb:str},Filmography{sid:u32,key:str}},Settings:SettingsPage{Root,Playback,AudioSubtitles,Favourites,Legal,About,Document(u8)},LibraryMenu{host:u32,target:{epoch:u32,sid:u32,section:u64},kind:u32,anchor:[u32;4]},\
      PlayerOverlay{Tracks(tab:i32),Info,Chapters,More(quality:bool)},\
      AltSources{host:u32,sid:u32,rk:str,anchor:[u32;4]},\
      TracksPanel{page:i32},AboutPanel,PersonBio,AccountMenu,\
@@ -1433,7 +1422,7 @@ impl LogicalState for AppArg {
             Self::Player => { c.u32(0).u32(10); }
             Self::Content(arg) => { c.u32(1); arg.write(c); }
             Self::Settings(page) => { c.u32(2); page.write(c); }
-            Self::FirstRunConsent(stage) => { c.u32(3).u8(*stage); }
+            // 3 was the first-run consent surface, retired with the telemetry module.
         }
     }
     fn probe(&self, out: &mut String) { out.push_str("app_arg"); }
@@ -1454,7 +1443,6 @@ impl crate::ui::screen::ScreenArg for AppArg {
             | AppArg::Player
             | AppArg::Content(_)
             | AppArg::Settings(_)
-            | AppArg::FirstRunConsent(_)
             | AppArg::LibraryMenu(_)
             | AppArg::AccountMenu
             | AppArg::ItemMenu(_)
@@ -1498,10 +1486,10 @@ impl crate::ui::screen::ScreenArg for AppArg {
             AppArg::Library => 7,
             AppArg::Search => 10,
             AppArg::Player => 11,
-            // The ROOT payload is a boot address, not an identity: one Settings surface and one
-            // consent question, whichever page each happens to have been rooted at.
+            // The ROOT payload is a boot address, not an identity: one Settings surface,
+            // whichever page each happens to have been rooted at.
             AppArg::Settings(_) => 12,
-            AppArg::FirstRunConsent(_) => 13,
+            // 13 was the first-run consent surface, retired with the telemetry module.
             AppArg::Content(ContentArg::Detail { .. }) => 8,
             AppArg::Content(ContentArg::Person { .. }) => 9,
             AppArg::Content(ContentArg::Filmography { .. }) => 14,
@@ -1705,13 +1693,6 @@ where
             AppArg::Settings(root) => {
                 Box::new(RouteSurface::new(entry, id, Family::Settings, *root, H::hubs(cx)))
             }
-            AppArg::FirstRunConsent(stage) => Box::new(RouteSurface::new(
-                entry,
-                id,
-                Family::FirstRunConsent,
-                SettingsPage::ConsentStage(*stage),
-                H::hubs(cx),
-            )),
         }
     }
 }
@@ -1774,7 +1755,6 @@ pub(crate) fn every_surface_arg() -> Vec<AppArg> {
         AppArg::PlayerOverlay(PlayerOverlayArg { kind: OverlayKind::Chapters }),
         AppArg::PlayerOverlay(PlayerOverlayArg { kind: OverlayKind::More { quality: false } }),
         AppArg::Settings(SettingsPage::Root),
-        AppArg::FirstRunConsent(0),
     ];
     for a in &args {
         match a {
@@ -1786,8 +1766,7 @@ pub(crate) fn every_surface_arg() -> Vec<AppArg> {
             | AppArg::AboutPanel
             | AppArg::PersonBio
             | AppArg::PlayerOverlay(_)
-            | AppArg::Settings(_)
-            | AppArg::FirstRunConsent(_) => {}
+            | AppArg::Settings(_) => {}
             // The eight PAGE variants. Named rather than swept into a `_`, so the exhaustiveness
             // above is real and a new SURFACE variant cannot land in a catch-all.
             AppArg::Login

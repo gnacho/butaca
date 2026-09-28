@@ -329,7 +329,6 @@ fn first_run_consent_over_the_picker_does_not_flip_mounts_every_frame() {
     // run under `--features hostsim` with a private `PLXNATIVE_RUNTIME_DIR`, as `make check` does.
     assert!(!crate::dev::any_trigger_present(), "a stray trigger in {:?} suppresses the consent question",
         crate::paths::runtime_dir());
-    assert!(crate::dev::scenarios::consent_override().is_none());
 
     let mut account = stored(true);
     account.user = UserRef::default();

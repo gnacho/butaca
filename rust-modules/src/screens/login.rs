@@ -6,36 +6,12 @@
 //! It has no panel of its own and is not a table. Its controls are ONE group of up to two
 //! `ElemKind::Bare` elements, walked in order: the read-out's primary action (the failed/stalled/
 //! deleted pill, or — while the code is simply unscanned for a long time — the QR screen's own
-//! "press OK for a new code" sentence), and, while a sign-in failure is held as an onboarding
-//! incident, *Details*. Both fire on the OK key-down edge with no hold and no press bounce,
-//! exactly as the lone action did under the old `key()` ladder.
+//! "press OK for a new code" sentence). It fires on the OK key-down edge with no hold and no
+//! press bounce, exactly as the lone action did under the old `key()` ladder.
 //!
-//! **The onboarding report.** Session raises the failure as an incident (`auth::owner::incident`);
-//! this screen is the one that shows it, so it is the one that resolves it against the report
-//! permission it reads now ([`auth::SessionCmd::ResolveIncident`]). An undetermined permission
-//! turns into a question — a [`DecisionAlert`] over the read-out, *Not now* / *Send report* — and
-//! a decided one never asks: a Yes at the onboarding scope is sent by Session without a press, a
-//! No keeps nothing. A stalled QR wait never asks at all — Session resolves it to `OnRequest`,
-//! so the code stays uncovered and only *Details* offers it. Whatever the answer, *Details* keeps
-//! the Report ID, the support line and *Send report* one press away for as long as the failure is
-//! on screen.
-//!
-//! **Details is a card, never an expansion** (owner, 2026-09-19: "3 buttons and labels. Looks like
-//! a mess."). The read-out itself never grows: *Details* opens the same [`DecisionAlert`] the
-//! question uses, titled "Details", whose body is the Report ID (once there is one) and the
-//! support line, and whose answers are *Close* and — only while a report can still be sent —
-//! *Send report*, which starts focused when it is there on open. While the card stays open its
-//! content follows the incident, retaining valid focus as receipts and answers change. BACK or *Close* puts focus back on
-//! *Details*; *Send report* closes the card too. Ordinary failure read-outs then show
-//! "Sending report…" beside its spinner; helper save warnings keep their storage stage visible. The QR screen's *Details* opens the same card.
-//!
-//! **The calm default.** Until somebody acts (or a standing Yes sends one), the failure is the
-//! design system's `StatusOverlay` failed and nothing else: verdict, reason, *Try again* /
-//! *Details*. A report adds at most ONE short status line under the row ([`report_status`]); a
-//! helper save warning uses that line for its photographable storage stage. The
-//! Report ID lives only inside the Details card. A report still on its way carries the shared inline
-//! spinner beside "Sending report…" wherever that line is drawn — the QR screen's stall line keeps
-//! its own spinner too.
+//! This fork sends nothing: the onboarding report (Session's incident offers, the Report ID,
+//! *Details* and *Send report*) was removed with the telemetry module. A sign-in failure is the
+//! design system's `StatusOverlay` failed and nothing else: verdict, reason, *Try again*.
 //!
 //! The constructor and each `Tick` consume one immutable [`auth::SessionRead`] publication through
 //! [`AuthLike`]. Its login client-id capture resolves on the storage worker when the visible
@@ -63,44 +39,27 @@ use crate::ui::screen::{
     Seat, Step, Stop,
 };
 use crate::ui::text_view::TextView;
-use crate::ui::decision_alert::{Choice, DecisionAlert, Tone};
-use crate::ui::widgets::{Button, CtlPop, Spinner, StatusKind, StatusOverlay};
+use crate::ui::decision_alert::DecisionAlert;
+use crate::ui::widgets::{CtlPop, Spinner, StatusKind, StatusOverlay};
 use crate::ui::{theme, Env, Painter, Rect, View};
 
 use super::plaintext_question::{self, PlaintextQuestion, CONNECT};
 use super::registry::{word, AppFx, AppLike, AppMsg, AuthLike};
 
-/// The screen's elements. The read-out's primary action and *Details* share [`CONTROL_GROUP`];
-/// the alert's answers — the report question's *Not now* / *Send report*, the Details card's
-/// *Close* / *Send report* — are [`ALERT_GROUP`], the only group while the alert is open. `GroupId(0)` matches the container's own default fresh-mount target
+/// The screen's elements. The read-out's primary action owns [`CONTROL_GROUP`]; the plaintext
+/// question's answers are [`ALERT_GROUP`], the only group while the alert is open. `GroupId(0)`
+/// matches the container's own default fresh-mount target
 /// (`stack.rs::fresh`), which is what lets a screen that mounts straight into `Phase::Deleted` (a
 /// real control from frame one) get seated by the ordinary Mount → Enter sequence with no
 /// correction of its own.
 const CONTROL: u32 = 0;
-const DETAILS: u32 = 1;
-/// The alert's cancel slot: *Not now* on the question, *Close* on the Details card.
+/// The alert's cancel slot.
 const ALERT_CANCEL: u32 = 3;
-const ALERT_SEND: u32 = 4;
+/// The alert's affirm slot: the plaintext question's *Connect*.
+const ALERT_AFFIRM: u32 = 4;
 const CONTROL_GROUP: GroupId = GroupId(0);
 const ALERT_GROUP: GroupId = GroupId(1);
 
-const DETAILS_LABEL: &CStr = c"Details";
-/// The Details card's title — the pill's own word, so the card names what opened it.
-const DETAILS_TITLE: &CStr = c"Details";
-const SEND_REPORT: &CStr = c"Send report";
-const NOT_NOW: &CStr = c"Not now";
-const CLOSE: &CStr = c"Close";
-const REPORT_QUESTION: &CStr = c"Send a report about this sign-in problem?";
-/// The report alert's disclosure — short, because it is read from the sofa. **Every clause is a
-/// claim about `telemetry::incident::event_body`** and must stay true of it: "which sign-in step
-/// failed and how the connection answered" is the `incident` context (kind, link class, HTTP
-/// status or `CURLcode`, the bucketed counters, the code generation), "the app version" is
-/// `release`; and every category it rules out — the same five `PRIVACY.md`'s onboarding section
-/// names — is not in the body at all. The full field list lives in `PRIVACY.md` and the in-app
-/// Privacy Policy, not here.
-pub(crate) const REPORT_BODY: &str = "The report says which sign-in step failed and how the \
-connection answered, storage failure stages and error numbers, plus the app version. It never includes your account name, tokens, PIN, \
-sign-in code or network addresses.";
 
 /// How long a working phase runs before the read-out grows a way out.
 ///
@@ -411,40 +370,13 @@ struct LoginState {
     /// AUTH-03: whether a `PersistenceWarning` is currently shown. The key itself is not part of
     /// the logical state a container needs to notice a change — only whether one is showing.
     warning: bool,
-    report: ReportState,
+    /// Session's "plex.tv is not answering the wait" — the QR screen's status line.
+    link_trouble: bool,
+    /// Whether the plaintext question's alert is open.
+    alert_open: bool,
     /// `Some(question_open)` while the read-out offers an unencrypted connection. Written to the
     /// canon only when `Some`, so every other state's digest is unchanged.
     plaintext: Option<bool>,
-}
-
-/// The onboarding report's part of the logical state: which offer is shown and where it has got
-/// to, the disclosure, the alert, and the last resolution this screen asked for.
-#[derive(Clone, Copy, Default)]
-struct ReportState {
-    offer: Option<(u32, u8)>,
-    link_trouble: bool,
-    /// the Details card (rather than the report question) is the open alert
-    details_open: bool,
-    /// `Some(send_focused)` while the alert is open
-    alert: Option<bool>,
-    resolved: Option<(u32, u32)>,
-}
-
-fn incident_state_disc(state: &auth::owner::IncidentState) -> u8 {
-    use auth::owner::IncidentState as S;
-    match state {
-        S::Pending => 0,
-        S::Offered { .. } => 1,
-        S::AutoSending => 2,
-        S::Sending => 3,
-        S::Queued { .. } => 4,
-        S::Saved { .. } => 9,
-        S::Delivered { .. } => 10,
-        S::Failed => 5,
-        S::NotNow => 6,
-        S::Dropped => 7,
-        S::OnRequest { .. } => 8,
-    }
 }
 
 impl LogicalState for LoginState {
@@ -461,16 +393,9 @@ impl LogicalState for LoginState {
             w.u32(correlation);
         });
         w.bool(self.warning);
-        let r = &self.report;
-        w.option(r.offer, |w, (id, state)| {
-            w.u32(id).u8(state);
-        });
-        w.bool(r.link_trouble).bool(r.details_open);
-        w.option(r.alert, |w, send| {
-            w.bool(send);
-        });
-        w.option(r.resolved, |w, (id, revision)| {
-            w.u32(id).u32(revision);
+        w.bool(self.link_trouble);
+        w.option(self.alert_open.then_some(()), |w, ()| {
+            w.bool(true);
         });
         if let Some(open) = self.plaintext {
             w.bool(open);
@@ -478,8 +403,7 @@ impl LogicalState for LoginState {
     }
     fn probe(&self, out: &mut String) {
         out.push_str(&format!(
-            "login phase={} qr_gen={} replaced={} control={} leftovers={} next={:?} restart={:?} warning={} \
-             incident={:?} link_trouble={} details={} alert={:?} resolved={:?} plaintext={:?}",
+            "login phase={} qr_gen={} replaced={} control={} leftovers={} next={:?} restart={:?} warning={} link_trouble={} alert_open={} plaintext={:?}",
             self.phase,
             self.qr_gen,
             self.qr_replaced,
@@ -488,11 +412,8 @@ impl LogicalState for LoginState {
             self.next_correlation,
             self.pending_restart,
             self.warning,
-            self.report.offer,
-            self.report.link_trouble,
-            self.report.details_open,
-            self.report.alert,
-            self.report.resolved,
+            self.link_trouble,
+            self.alert_open,
             self.plaintext,
         ));
     }
@@ -504,180 +425,11 @@ struct PendingRestart {
     wait: Wait,
 }
 
-/// Everything the screen keeps for the onboarding report — see the module doc.
-struct Report {
-    /// The incident Session is holding, retained from the publication.
-    offer: Option<auth::owner::IncidentOffer>,
-    /// Session's "plex.tv is not answering the wait" — the QR screen's status line.
-    link_trouble: bool,
-    /// Which card the alert is showing — see [`Sheet`].
-    sheet: Sheet,
-    /// The support line for [`Self::support_for`]'s offer: product, version, firmware, set and
-    /// the failure's code — built once per offer, since the firmware and set cannot change.
-    support: CString,
-    support_for: Option<u32>,
-    alert: DecisionAlert,
-    /// The offer the alert was opened for. Set once per offer, so an answered offer is not asked
-    /// again when its state flickers back.
-    alert_for: Option<u32>,
-    /// The alert's answers as last drawn — `Focusable` answers with `&self`.
-    alert_frames: Option<(Rect, Rect)>,
-    /// The last `(id, revision)` this screen resolved, so a pending offer is resolved once rather
-    /// than on every frame the owner has yet to answer.
-    last_resolve: Option<(u32, u32)>,
-    /// The control group's focus pops, by slot (primary, Details).
-    pop: CtlPop<2>,
-}
-
-/// What the one [`DecisionAlert`] is showing: the report QUESTION the screen asks once per offer,
-/// or the DETAILS card a press on *Details* opens. Their answers share the alert's two slots — the
-/// cancel slot is *Not now* / *Close*, the second *Send report* on both.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Sheet {
-    Question,
-    Details,
-    /// "Connect without encryption?" — *Not now* / *Connect*, asked from the read-out's primary.
-    Plaintext,
-}
-
-impl Report {
-    fn new() -> Self {
-        let mut alert = DecisionAlert::new();
-        alert.set_tone(Tone::Neutral);
-        Self {
-            offer: None,
-            link_trouble: false,
-            sheet: Sheet::Question,
-            support: CString::default(),
-            support_for: None,
-            alert,
-            alert_for: None,
-            alert_frames: None,
-            last_resolve: None,
-            pop: CtlPop::new(),
-        }
-    }
-
-    fn state(&self) -> ReportState {
-        ReportState {
-            offer: self.offer.as_ref().map(|o| (o.id, incident_state_disc(&o.state))),
-            link_trouble: self.link_trouble,
-            details_open: self.alert.is_open() && self.sheet == Sheet::Details,
-            alert: self.alert.is_open().then(|| self.alert.choice() == Choice::Destructive),
-            resolved: self.last_resolve,
-        }
-    }
-
-    /// The report's one quiet status line — see [`report_status`].
-    fn status(&self) -> Option<(&'static CStr, bool)> {
-        report_status(&self.offer.as_ref()?.state)
-    }
-
-    /// The Details card's body: the Report ID line once there is one, then the support line.
-    fn details_body(&self) -> Vec<std::borrow::Cow<'static, str>> {
-        let mut out = Vec::new();
-        if let Some(r) = self.receipt() {
-            out.push(report_id_line(r).into());
-        }
-        if !self.support.is_empty() {
-            out.push(self.support.to_string_lossy().into_owned().into());
-        }
-        out
-    }
-
-    /// Whether a press on *Send report* would be accepted now.
-    fn sendable(&self) -> bool {
-        self.offer.as_ref().is_some_and(|o| o.sendable())
-    }
-
-    /// The Report ID a person can quote, once the report has one.
-    fn receipt(&self) -> Option<&str> {
-        use auth::owner::IncidentState as S;
-        match &self.offer.as_ref()?.state {
-            S::Queued { receipt } | S::Saved { receipt } | S::Delivered { receipt } => Some(receipt),
-            _ => None,
-        }
-    }
-}
-
-/// **The one short line that says what became of a report**, and whether it is still on its way
-/// (the one fact that can put a spinner beside it). `None` until somebody has acted or a standing
-/// Yes sent one: a failure nobody has reported says nothing about reporting at all. "Sent" is kept
-/// for a server's acceptance; a queued report is still being sent. The Report ID is never on this
-/// line — it lives inside the Details card ([`report_id_line`]).
-fn report_status(state: &auth::owner::IncidentState) -> Option<(&'static CStr, bool)> {
-    use auth::owner::IncidentState as S;
-    Some(match state {
-        S::Sending | S::AutoSending | S::Queued { .. } => (c"Sending report\u{2026}", true),
-        S::Delivered { .. } => (c"Report sent. Thank you.", false),
-        S::Saved { .. } => (c"Report saved. It will be sent later.", false),
-        S::Failed => (c"Report couldn\u{2019}t be sent.", false),
-        S::Pending | S::Offered { .. } | S::OnRequest { .. } | S::NotNow | S::Dropped => return None,
-    })
-}
-
-/// A Report ID as a person reads it aloud: lowercase hex in groups of four
-/// (`41de 4cd3 88e4 0416 54de 38f2 787c 3922`). The id's own separators (a UUID's hyphens) are
-/// dropped first, so the grouping is the only spacing in it.
-fn group_report_id(receipt: &str) -> String {
-    let chars: Vec<char> = receipt
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .map(|c| c.to_ascii_lowercase())
-        .collect();
-    chars
-        .chunks(4)
-        .map(|g| g.iter().collect::<String>())
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// The Details card's line that carries the Report ID — labelled, its own paragraph.
-fn report_id_line(receipt: &str) -> String {
-    format!("Report ID: {}", group_report_id(receipt))
-}
-
-/// The report's one status line, and whether a spinner turns beside it.
+/// A short status line under the read-out, and whether a spinner turns beside it.
 #[derive(Debug, PartialEq, Eq)]
 struct Note {
     text: CString,
     busy: bool,
-}
-
-/// The support line a person reads out or photographs: what is running, on which firmware and
-/// set, and which failure — codes only, never an address or an account. The trailing segment is
-/// [`crate::telemetry::incident::storage_evidence_line`] — the persistence class, key-manager
-/// stage and service error code, read from the offer's current read-out facts. Those facts advance
-/// on a deduplicated retry even when the report's already-resolved context and receipt stay put.
-fn support_line(offer: &auth::owner::IncidentOffer) -> String {
-    use crate::telemetry::incident::LinkClass;
-    let set = crate::webos::device().set_line();
-    let set = if set.is_empty() { "unknown set".to_string() } else { set };
-    let code = match offer.key.link {
-        LinkClass::Unknown => offer.key.kind.code().to_string(),
-        link => format!("{}.{}", offer.key.kind.code(), link.code()),
-    };
-    let storage = crate::telemetry::incident::storage_evidence_line(offer.readout_context());
-    let discovery = offer.readout_context().and_then(|ctx| ctx.discovery.map(|e| {
-        let target = e.target.map_or("discovery", |target| match target {
-            crate::telemetry::incident::DiscoveryTarget::PlexTv => "plex.tv",
-            crate::telemetry::incident::DiscoveryTarget::Servers => "your servers",
-        });
-        let attempts = ctx.discovery_attempts
-            .map_or(String::new(), |n| format!(" attempts:{n}"));
-        format!("target:{target} class:{}{attempts}", ctx.link.code())
-    }));
-    let discovery = discovery.map_or(String::new(), |line| format!(" \u{b7} {line}"));
-    format!(
-        "{} {} \u{b7} {} \u{b7} {} \u{b7} {}{} \u{b7} {}",
-        crate::plex::identity::PRODUCT,
-        crate::plex::identity::VERSION,
-        crate::webos::info().release_line(),
-        set,
-        code,
-        discovery,
-        storage
-    )
 }
 
 /// The control group's elements in walk order. At most two, so a fixed array.
@@ -704,7 +456,6 @@ impl Row {
 fn slot_of(elem: u32) -> Option<usize> {
     match elem {
         CONTROL => Some(0),
-        DETAILS => Some(1),
         _ => None,
     }
 }
@@ -757,10 +508,18 @@ pub(crate) struct LoginScreen {
     /// The insecure-only verdict the failure read-out is about (`SessionSnapshot::plaintext`),
     /// synced every `resync`.
     plaintext: Option<auth::PlaintextVerdict>,
-    /// The shared question, asked on the report's alert ([`Sheet::Plaintext`]).
+    /// The shared plaintext question's alert.
     question: PlaintextQuestion,
     ground: RouteGround,
-    report: Report,
+    /// Session's "plex.tv is not answering the wait" — the QR screen's status line.
+    link_trouble: bool,
+    /// The plaintext question's decision alert (the only alert this screen has since the
+    /// onboarding report was removed with the telemetry module).
+    alert: DecisionAlert,
+    /// The alert's answers as last drawn — `Focusable` answers with `&self`.
+    alert_frames: Option<(Rect, Rect)>,
+    /// The control group's focus pops.
+    pop: CtlPop<1>,
     state: LoginState,
 }
 
@@ -791,7 +550,10 @@ impl LoginScreen {
             plaintext: None,
             question: PlaintextQuestion::new(),
             ground: RouteGround::new(),
-            report: Report::new(),
+            link_trouble: false,
+            alert: DecisionAlert::new(),
+            alert_frames: None,
+            pop: CtlPop::new(),
             state: LoginState {
                 phase: 0,
                 qr_gen: 0,
@@ -801,7 +563,8 @@ impl LoginScreen {
                 next_correlation: Some(1),
                 pending_restart: None,
                 warning: false,
-                report: ReportState::default(),
+                link_trouble: false,
+                alert_open: false,
                 plaintext: None,
             },
         };
@@ -852,8 +615,7 @@ impl LoginScreen {
             self.delete_leftovers = snapshot.delete_leftovers;
         }
         self.persistence_warning = snapshot.persistence_warning;
-        self.report.offer = snapshot.incident.clone();
-        self.report.link_trouble = snapshot.link_trouble;
+        self.link_trouble = snapshot.link_trouble;
         self.plaintext = snapshot.plaintext.clone();
         self.sync_state();
         (self.phase, self.qr_gen)
@@ -869,16 +631,15 @@ impl LoginScreen {
             next_correlation: self.next_correlation,
             pending_restart: self.pending_restart.map(|pending| pending.correlation),
             warning: self.persistence_warning.is_some(),
-            report: self.report.state(),
-            plaintext: self.plaintext_asks().then(|| {
-                self.report.alert.is_open() && self.report.sheet == Sheet::Plaintext
-            }),
+            link_trouble: self.link_trouble,
+            alert_open: self.alert.is_open(),
+            plaintext: self.plaintext_asks().then(|| self.alert.is_open()),
         };
     }
 
     fn tick<H: AuthLike>(&mut self, t: Tick, cx: &Cx<'_, H>, fx: &mut Effects<'_, H>) {
         let had_control = self.has_control();
-        let alert_was_open = self.report.alert.is_open();
+        let alert_was_open = self.alert.is_open();
 
         // ONE sample of `crate::auth` feeds both the wait-restart clock below and every cached
         // field `resync` publishes — see `resync`'s own doc, and the module doc's "read it twice
@@ -917,7 +678,7 @@ impl LoginScreen {
         // none of its own (a failed sign-in), so the spinner's clock also runs while it is busy —
         // and ONLY the spinner's: `phase_ms` stays on the control's own condition.
         let control_spins = control_has_spinner(self.phase, self.persistence_warning.is_some());
-        let report_spins = self.report_note().is_some_and(|n| n.busy);
+        let report_spins = false;
         if control_spins || report_spins {
             let mut present = fx.present();
             self.spin_ms = self.spin_phase.advance(t, &mut present);
@@ -929,8 +690,8 @@ impl LoginScreen {
         self.tick_report(t, cx, fx);
 
         let reseat = (self.has_control() && !had_control)
-            || (alert_was_open && !self.report.alert.is_open() && self.has_control());
-        if reseat && !self.report.alert.is_open() {
+            || (alert_was_open && !self.alert.is_open() && self.has_control());
+        if reseat && !self.alert.is_open() {
             // The control just appeared (a stalled wait grew its escape, or a phase moved straight
             // to `Error`) — seat focus on it now. The container's default `Enter` already ran, at
             // mount time, against whatever `groups()` answered THEN; nothing else will ever ask
@@ -943,13 +704,6 @@ impl LoginScreen {
         self.sync_state();
     }
 
-    fn enter_elem<H: AppLike>(fx: &mut Effects<'_, H>, key: crate::ui::machine::FocusKey<u32>) {
-        let me = fx.from();
-        fx.push(Fx::Deliver(
-            me,
-            Delivery::Screen(ScreenEvent::Enter(Enter::Fresh { focus: FocusTarget::Elem(key) })),
-        ));
-    }
 
     fn enter_group<H: AppLike>(fx: &mut Effects<'_, H>, group: GroupId) {
         let me = fx.from();
@@ -961,90 +715,22 @@ impl LoginScreen {
         ));
     }
 
-    /// The onboarding report's frame: resolve a pending offer, put an offered one on screen, take
-    /// the alert down when the offer it asks about has gone, and step the motion.
-    fn tick_report<H: AuthLike>(&mut self, t: Tick, cx: &Cx<'_, H>, fx: &mut Effects<'_, H>) {
-        use auth::owner::IncidentState as S;
-        let offer = self.report.offer.clone();
-        let id = offer.as_ref().map(|o| o.id);
-        if self.report.support_for != id {
-            // A different failure: its own support line, and a Details card still up for the
-            // old one has nothing left to describe.
-            self.report.support_for = id;
-            if self.report.sheet == Sheet::Details && self.report.alert.is_open() {
-                self.report.alert.close();
-            }
-            self.report.support = offer
-                .as_ref()
-                .and_then(|o| CString::new(support_line(o)).ok())
-                .unwrap_or_default();
-        }
-        if let Some(o) = &offer {
-            // **The screen that shows the failure resolves it**, at the permission it reads now:
-            // the decision can change while the failure is on screen (a withdrawal elsewhere),
-            // and an offer made under an older decision is resolved again. A harness-driven boot
-            // never stops on the question, so it never asks for one.
-            let revision = crate::telemetry::consent::revision();
-            let stale = match o.state {
-                S::Pending => true,
-                S::Offered { revision: at } | S::OnRequest { revision: at } => at != revision,
-                _ => false,
-            };
-            if stale
-                && !crate::dev::scenarios::harness_driven()
-                && self.report.last_resolve != Some((o.id, revision))
-            {
-                self.report.last_resolve = Some((o.id, revision));
-                let permission = crate::telemetry::consent::report_permission_now(
-                    crate::telemetry::consent::ONBOARDING_REPORT_SCOPE,
-                );
-                fx.push(Fx::App(AppFx::Session(auth::SessionCmd::ResolveIncident {
-                    id: o.id,
-                    permission,
-                    revision,
-                })));
-            }
-            // An eligible plaintext-only server is a CHOICE, not a failure: the read-out asks
-            // it through *Connect*, and the report stays one press away behind *Details*.
-            if matches!(o.state, S::Offered { .. })
-                && !self.plaintext_eligible()
-                && !self.report.alert.visible()
-                && self.report.alert_for != Some(o.id)
-            {
-                self.report.alert_for = Some(o.id);
-                self.report.sheet = Sheet::Question;
-                self.report.alert.open_with_body(REPORT_QUESTION, REPORT_BODY);
-                Self::enter_group(fx, ALERT_GROUP);
-            }
-        }
-        let still_asked = offer.as_ref().is_some_and(|o| {
-            matches!(o.state, S::Offered { .. }) && self.report.alert_for == Some(o.id)
-        });
-        if self.report.alert.is_open() && self.report.sheet == Sheet::Question && !still_asked {
-            // The question is no longer the one on the table — answered elsewhere, superseded,
-            // or erased by a sign-out. Nothing to answer, so no fade either.
-            self.report.alert.close();
-        }
-        if self.report.alert.is_open() && self.report.sheet == Sheet::Plaintext && !self.plaintext_asks() {
+    /// The plaintext question's frame: take the alert down when the question it asks about has
+    /// gone, and step the motion.
+    fn tick_report<H: AuthLike>(&mut self, t: Tick, cx: &Cx<'_, H>, _fx: &mut Effects<'_, H>) {
+        if self.alert.is_open() && !self.plaintext_asks() {
             // The server the question is about is no longer the failure on screen.
-            self.question.withdraw(&mut self.report.alert);
+            self.question.withdraw(&mut self.alert);
         }
-        if self.report.alert.is_open() && self.report.sheet == Sheet::Details {
-            use crate::ui::decision_alert::Answers;
-            let body = self.report.details_body();
-            let answers = if self.report.sendable() { Answers::Two } else { Answers::One };
-            self.report.alert.reconcile_card(DETAILS_TITLE, body, answers);
-        }
-        self.report.alert.update(t.dt());
+        self.alert.update(t.dt());
         let focused = cx
             .focus
             .current
             .filter(|k| k.entry == self.entry)
             .and_then(|k| slot_of(k.elem));
-        let pops = if self.report.alert.visible() { None } else { focused };
-        self.report.pop.step(pops, t.dt());
+        let pops = if self.alert.visible() { None } else { focused };
+        self.pop.step(pops, t.dt());
     }
-
     fn control_kind(&self) -> Option<ControlKind> {
         if self.persistence_warning.is_some() {
             return Some(ControlKind::ContinueUnsaved);
@@ -1061,11 +747,6 @@ impl LoginScreen {
         }
     }
 
-    /// Whether the failure on screen is an eligible plaintext-only server — answered or not. Such
-    /// a failure is a choice, not a fault, so the report question is not raised over it.
-    fn plaintext_eligible(&self) -> bool {
-        self.phase == Phase::Error && self.plaintext.as_ref().is_some_and(|v| v.offers())
-    }
 
     /// Whether the failure on screen still ASKS: eligible and not yet answered
     /// (`plaintext_question::asks`).
@@ -1078,31 +759,13 @@ impl LoginScreen {
         let Some(v) = self.plaintext.as_ref().filter(|_| self.plaintext_asks()) else {
             return;
         };
-        self.report.sheet = Sheet::Plaintext;
-        self.question.open(&mut self.report.alert, &v.machine_id, None);
+        self.question.open(&mut self.alert, &v.machine_id, None);
         Self::enter_group(fx, ALERT_GROUP);
     }
 
-    /// Whether ANY element of the control group is on screen — the primary, or the report's
-    /// *Details*.
+    /// Whether the read-out's primary action is on screen.
     fn has_control(&self) -> bool {
         self.row().n > 0
-    }
-
-    /// Whether the held incident offers its *Details*: on the failure read-out, and on the QR
-    /// screen while the wait itself is what failed, or for the helper failure on a save warning.
-    fn details_offered(&self) -> bool {
-        if let Some(warning) = self.persistence_warning {
-            return warning.helper.is_some() && self.report.offer.as_ref().is_some_and(|o|
-                o.key.kind == crate::telemetry::incident::IncidentKind::SaveFailed);
-        }
-        match (&self.report.offer, self.phase) {
-            (Some(_), Phase::Error) => true,
-            (Some(o), Phase::Waiting) => {
-                o.key.kind == crate::telemetry::incident::IncidentKind::LinkStalled
-            }
-            _ => false,
-        }
     }
 
     /// The control group in walk order. On the read-out the primary leads (it is the row's centre
@@ -1111,13 +774,7 @@ impl LoginScreen {
     fn row(&self) -> Row {
         let mut row = Row::default();
         let primary = self.control_kind().is_some();
-        let report = |row: &mut Row| {
-            if self.details_offered() {
-                row.push(DETAILS);
-            }
-        };
         if self.phase == Phase::Waiting && self.persistence_warning.is_none() {
-            report(&mut row);
             if primary {
                 row.push(CONTROL);
             }
@@ -1125,54 +782,16 @@ impl LoginScreen {
             if primary {
                 row.push(CONTROL);
             }
-            report(&mut row);
         }
         row
     }
 
-    /// **The report's one status line** — shared by the failed read-out and the QR screen, so the
-    /// two say the same thing: `None` until somebody has acted or a standing Yes sent one. A report
-    /// still on its way is `busy` on both screens, which each draw the shared inline spinner
-    /// beside it. The Report ID and the support line are never here — they are the Details card's.
+    /// The persistence warning's one status line: the helper failure's photographable storage
+    /// stage.
     fn report_note(&self) -> Option<Note> {
-        if let Some(helper) = self.persistence_warning.and_then(|warning| warning.helper) {
-            return Some(Note { text: CString::new(helper.line()).unwrap(), busy: false });
-        }
-        if !self.details_offered() {
-            return None;
-        }
-        let (text, busy) = self.report.status()?;
-        Some(Note { text: text.to_owned(), busy })
+        let helper = self.persistence_warning.and_then(|warning| warning.helper)?;
+        Some(Note { text: CString::new(helper.line()).unwrap(), busy: false })
     }
-
-    /// Open the Details card for the held report: the Report ID and the support line, *Close*,
-    /// and *Send report* only while Session would accept it — which then holds focus.
-    fn open_details<H: AppLike>(&mut self, fx: &mut Effects<'_, H>) {
-        if self.report.offer.is_none() {
-            return;
-        }
-        use crate::ui::decision_alert::Answers;
-        let sendable = self.report.sendable();
-        let body = self.report.details_body();
-        self.report.sheet = Sheet::Details;
-        self.report
-            .alert
-            .open_card(DETAILS_TITLE, body, if sendable { Answers::Two } else { Answers::One });
-        if sendable {
-            self.report.alert.set_choice(Choice::Destructive);
-        }
-        Self::enter_group(fx, ALERT_GROUP);
-    }
-
-    /// The QR screen's *Details* pill, at the head of the route's bottom action band.
-    fn waiting_details(&self, measure: &dyn Measure) -> Option<Rect> {
-        if !self.details_offered() {
-            return None;
-        }
-        let w = Button::pill_w_measured(DETAILS_LABEL, theme::size::BODY, false, false, measure);
-        Some(RouteLayout::screen().action_pair(w, 0.0).0)
-    }
-
     /// The read-out's control labels by slot (primary, *Details*), and whether the read-out
     /// carries a reason. How tall the reason is — one line, or a `Failed` read-out's
     /// two-line slot — is the widget's answer from the kind.
@@ -1187,8 +806,7 @@ impl LoginScreen {
             ControlKind::ContinueUnsaved => true, // the warning sentence is unconditional
             ControlKind::ConnectPlaintext => true, // `auth::insecure_only_copy` always states one
         };
-        let details = self.details_offered().then_some(DETAILS_LABEL);
-        ([Some(label_for(kind)), details], has_reason)
+        ([Some(label_for(kind)), None], has_reason)
     }
 
     /// The read-out's treatment — the one answer `draw` and the control geometry both read: the
@@ -1214,7 +832,6 @@ impl LoginScreen {
                 // The QR screen's escape is a SENTENCE, not a button (see `waiting_status`'s doc),
                 // so its geometry is the status line's own rect rather than a computed pill.
                 CONTROL => Some(qr_layout(RouteLayout::screen()).status),
-                DETAILS => self.waiting_details(measure),
                 _ => None,
             };
         }
@@ -1255,65 +872,23 @@ impl LoginScreen {
             // Not on screen this frame — a control that is not drawn is never activated.
             return;
         }
-        match elem {
-            DETAILS => {
-                self.open_details(fx);
-                self.sync_state();
-            }
-            _ => self.activate(fx),
-        }
+        self.activate(fx);
     }
-
-    /// The alert's answer. On the question, Not now and BACK decline for this launch and Send
-    /// report is the whole of the one-off's consent; either way focus returns to the read-out,
-    /// where *Details* keeps the report one press away. On the Details card, Close and BACK only
-    /// close it and Send report sends it (Session re-checks that it still can); either way focus
-    /// returns to the *Details* that opened it.
+    /// The alert's answer. *Connect* allows this server and retries at once; *Not now* and BACK
+    /// record the refusal, and the read-out says how to be asked again. Session persists either.
+    /// The shared question dismisses the alert.
     fn alert_answer<H: AppLike>(&mut self, send: bool, fx: &mut Effects<'_, H>) {
-        if !self.report.alert.is_open() {
+        if !self.alert.is_open() {
             return;
         }
-        if self.report.sheet == Sheet::Plaintext {
-            // *Connect* allows this server and retries at once; *Not now* and BACK record the
-            // refusal, and the read-out says how to be asked again. Session persists either. The
-            // shared question dismisses the alert.
-            if let Some(cmd) = self.question.answer(&mut self.report.alert, send) {
-                fx.push(Fx::App(AppFx::Session(cmd)));
-            }
-            if self.has_control() {
-                Self::enter_group(fx, CONTROL_GROUP);
-            }
-            self.sync_state();
-            return;
-        }
-        self.report.alert.dismiss();
-        if self.report.sheet == Sheet::Details {
-            if let Some(o) = self.report.offer.as_ref().filter(|o| send && o.sendable()) {
-                crate::log("login: user sent a sign-in report from Details");
-                fx.push(Fx::App(AppFx::Session(auth::SessionCmd::ReportIncident { id: o.id })));
-            }
-            if self.row().position(DETAILS).is_some() {
-                Self::enter_elem(fx, self.key(DETAILS));
-            } else if self.has_control() {
-                Self::enter_group(fx, CONTROL_GROUP);
-            }
-            self.sync_state();
-            return;
-        }
-        if let Some(o) = &self.report.offer {
-            let id = o.id;
-            fx.push(Fx::App(AppFx::Session(if send {
-                auth::SessionCmd::ReportIncident { id }
-            } else {
-                auth::SessionCmd::DeclineIncident { id }
-            })));
+        if let Some(cmd) = self.question.answer(&mut self.alert, send) {
+            fx.push(Fx::App(AppFx::Session(cmd)));
         }
         if self.has_control() {
             Self::enter_group(fx, CONTROL_GROUP);
         }
         self.sync_state();
     }
-
     fn activate<H: AppLike>(&mut self, fx: &mut Effects<'_, H>) {
         match self.control_kind() {
             Some(ControlKind::ContinueUnsaved) => {
@@ -1422,14 +997,14 @@ impl LoginScreen {
         focus: Option<u32>,
     ) {
         let press = f.press.scale;
-        let pop = &self.report.pop;
+        let pop = &self.pop;
         if o.action.is_some() {
             o = o
                 .focus(focus.and_then(slot_of))
                 .scales([0, 1].map(|i| pop.scale_with(i, press)));
         }
         o.draw_measured(env, p, f.measure);
-        if self.report.alert.visible() {
+        if self.alert.visible() {
             // The alert owns the pointer while it is up; nothing under it is a target.
             return;
         }
@@ -1554,7 +1129,7 @@ impl LoginScreen {
     /// focus-dependent look would be a NEW affordance, and a visual one belongs in front of
     /// `ui/CLAUDE.md`'s own design review, not slipped in unreviewed by a bug-fix pass. The report's
     /// *Details* pill is an ordinary control in the route's action band and DOES take `focus`.
-    fn draw_waiting<H: AppLike>(&self, f: &mut DrawFrame<'_, '_, H>, p: Painter, focus: Option<u32>) {
+    fn draw_waiting<H: AppLike>(&self, f: &mut DrawFrame<'_, '_, H>, p: Painter, _focus: Option<u32>) {
         let layout = RouteLayout::screen();
         layout.draw_narrative(
             p,
@@ -1612,7 +1187,7 @@ impl LoginScreen {
         let wr = 15.0;
         let wy = right.status.cy();
         let escaping = qr_escape_offered(self.phase_ms);
-        let status = waiting_status(self.qr_replaced, escaping, self.report.link_trouble);
+        let status = waiting_status(self.qr_replaced, escaping, self.link_trouble);
         let status_w = f.measure.width(status, theme::size::BODY, false);
         let sx = right.status.cx() - (wr * 2.0 + theme::space::SM + status_w) * 0.5;
         Spinner::new(sx + wr, wy, wr)
@@ -1630,28 +1205,18 @@ impl LoginScreen {
             0,
         );
 
-        let details = self.waiting_details(f.measure);
-        if let Some(rect) = details {
-            Button::new(DETAILS_LABEL.as_ptr(), theme::size::BODY, rect)
-                .focused(focus == Some(DETAILS))
-                .scale(self.report.pop.scale_with(1, f.press.scale))
-                .draw(&Env::inert(), p);
-        }
         self.draw_disclosure(p, layout, f.measure);
 
-        if self.report.alert.visible() {
+        if self.alert.visible() {
             return;
         }
         if escaping {
             self.control_stop(f, p, CONTROL, right.status);
         }
-        if let Some(rect) = details {
-            self.control_stop(f, p, DETAILS, rect);
-        }
     }
 
-    /// The QR screen's report status — [`Self::report_note`], the failed read-out's own line — as
-    /// fine print sitting on the action band, in the narrative column *Details* stands in.
+    /// The QR screen's status line — [`Self::report_note`], the failed read-out's own line — as
+    /// fine print sitting on the action band, in the narrative column.
     fn draw_disclosure(&self, p: Painter, layout: RouteLayout, measure: &dyn crate::ui::machine::Measure) {
         let bottom = layout.action.y - theme::space::MD;
         if let Some(note) = self.report_note() {
@@ -1677,21 +1242,17 @@ impl LoginScreen {
     /// The alert — the report question or the Details card — over whatever the phase drew, and its
     /// answers' stops once it has settled (a pointer hit is positional — `DecisionAlert::settled`).
     fn draw_alert<H: AppLike>(&mut self, f: &mut DrawFrame<'_, '_, H>) {
-        if !self.report.alert.visible() {
+        if !self.alert.visible() {
             return;
         }
-        self.report.alert.draw_scrim();
-        let (cancel, affirm) = match self.report.sheet {
-            Sheet::Question => (NOT_NOW, SEND_REPORT),
-            Sheet::Details => (CLOSE, SEND_REPORT),
-            Sheet::Plaintext => PlaintextQuestion::verbs(),
-        };
-        self.report.alert.draw(cancel, affirm);
-        let frames = self.report.alert.frames();
-        self.report.alert_frames = Some(frames);
-        if self.report.alert.is_open() && self.report.alert.settled() {
+        self.alert.draw_scrim();
+        let (cancel, affirm) = PlaintextQuestion::verbs();
+        self.alert.draw(cancel, affirm);
+        let frames = self.alert.frames();
+        self.alert_frames = Some(frames);
+        if self.alert.is_open() && self.alert.settled() {
             for &elem in self.alert_elems() {
-                let rect = if elem == ALERT_SEND { frames.1 } else { frames.0 };
+                let rect = if elem == ALERT_AFFIRM { frames.1 } else { frames.0 };
                 f.stop(
                     Painter::root(),
                     Stop {
@@ -1750,9 +1311,8 @@ impl LoginScreen {
     /// The alert's answer rects as last drawn. Before the first draw there is no measured panel;
     /// the answers are not stops until the sheet has settled anyway.
     fn alert_rect(&self, elem: u32) -> Rect {
-        self.report
-            .alert_frames
-            .map(|(not_now, send)| if elem == ALERT_SEND { send } else { not_now })
+        self.alert_frames
+            .map(|(cancel, affirm)| if elem == ALERT_AFFIRM { affirm } else { cancel })
             .unwrap_or(Rect::FULL)
     }
 
@@ -1760,11 +1320,10 @@ impl LoginScreen {
         crate::ui::machine::FocusKey { entry: self.entry, elem }
     }
 
-    /// The open alert's answers: both, or — a Details card with nothing left to send — *Close*
-    /// alone.
+    /// The open alert's answers: the plaintext question's *Not now* / *Connect*.
     fn alert_elems(&self) -> &'static [u32] {
-        match self.report.alert.answers() {
-            crate::ui::decision_alert::Answers::Two => &[ALERT_CANCEL, ALERT_SEND],
+        match self.alert.answers() {
+            crate::ui::decision_alert::Answers::Two => &[ALERT_CANCEL, ALERT_AFFIRM],
             crate::ui::decision_alert::Answers::One => &[ALERT_CANCEL],
         }
     }
@@ -1775,7 +1334,7 @@ impl LoginScreen {
 /// the focus a dismissal hands back has somewhere to land).
 impl<H: AppLike> Focusable<H> for LoginScreen {
     fn groups(&self, cx: &Cx<'_, H>, out: &mut Vec<GroupSpec>) {
-        if self.report.alert.is_open() {
+        if self.alert.is_open() {
             out.push(GroupSpec {
                 id: ALERT_GROUP,
                 kind: GroupKind::Row { wrap: false },
@@ -1817,7 +1376,7 @@ impl<H: AppLike> Focusable<H> for LoginScreen {
         });
     }
     fn group_of(&self, key: &u32, _cx: &Cx<'_, H>) -> Option<GroupId> {
-        if self.report.alert.is_open() {
+        if self.alert.is_open() {
             return self.alert_elems().contains(key).then_some(ALERT_GROUP);
         }
         self.row().position(*key).map(|_| CONTROL_GROUP)
@@ -1828,12 +1387,12 @@ impl<H: AppLike> Focusable<H> for LoginScreen {
         dir: Dir,
         _cx: &Cx<'_, H>,
     ) -> Step<u32> {
-        if self.report.alert.is_open() {
+        if self.alert.is_open() {
             return match (key.elem, dir) {
-                (ALERT_CANCEL, Dir::Right) if self.alert_elems().contains(&ALERT_SEND) => {
-                    Step::Move(self.key(ALERT_SEND))
+                (ALERT_CANCEL, Dir::Right) if self.alert_elems().contains(&ALERT_AFFIRM) => {
+                    Step::Move(self.key(ALERT_AFFIRM))
                 }
-                (ALERT_SEND, Dir::Left) => Step::Move(self.key(ALERT_CANCEL)),
+                (ALERT_AFFIRM, Dir::Left) => Step::Move(self.key(ALERT_CANCEL)),
                 _ => Step::Edge,
             };
         }
@@ -1849,7 +1408,7 @@ impl<H: AppLike> Focusable<H> for LoginScreen {
         next.map_or(Step::Edge, |i| Step::Move(self.key(row.elems[i])))
     }
     fn place(&self, key: &u32, cx: &Cx<'_, H>, _at: At) -> Option<Placed> {
-        if self.report.alert.is_open() {
+        if self.alert.is_open() {
             if !self.alert_elems().contains(key) {
                 return None;
             }
@@ -1858,7 +1417,7 @@ impl<H: AppLike> Focusable<H> for LoginScreen {
                 rect,
                 rest_rect: rect,
                 clip: Rect::FULL,
-                index: Some((*key == ALERT_SEND) as u32),
+                index: Some((*key == ALERT_AFFIRM) as u32),
             });
         }
         let index = self.row().position(*key)?;
@@ -1870,9 +1429,8 @@ impl<H: AppLike> Focusable<H> for LoginScreen {
             index: Some(index as u32),
         })
     }
-    /// A focused element that has left the row — an alert answer once the alert is gone, a primary
-    /// that stopped being offered — hands focus to *Details* when it is still there, otherwise to
-    /// the head of the group.
+    /// A focused element that has left the row — the primary that stopped being offered — hands
+    /// focus to the head of the group.
     fn reconcile(
         &self,
         want: crate::ui::machine::FocusKey<u32>,
@@ -1881,20 +1439,14 @@ impl<H: AppLike> Focusable<H> for LoginScreen {
         if self.group_of(&want.elem, cx).is_some() {
             return want;
         }
-        if self.report.alert.is_open() {
-            // Content reconciliation can remove Send while Details stays open. The shared card
-            // has already retained a valid choice; map that choice back to the engine's keys.
-            return self.key(match self.report.alert.choice() {
-                Choice::Cancel => ALERT_CANCEL,
-                Choice::Destructive => ALERT_SEND,
-            });
+        if self.alert.is_open() {
+            return self.key(ALERT_CANCEL);
         }
         let row = self.row();
         if row.n == 0 {
             return want;
         }
-        let elem = if row.position(DETAILS).is_some() { DETAILS } else { row.elems[0] };
-        self.key(elem)
+        self.key(row.elems[0])
     }
     fn seat(
         &self,
@@ -1903,9 +1455,8 @@ impl<H: AppLike> Focusable<H> for LoginScreen {
         _cx: &Cx<'_, H>,
     ) -> crate::ui::machine::FocusKey<u32> {
         if g == ALERT_GROUP {
-            // The Details card opens on *Send report* while there is one; the question on *Not now*.
-            let send = self.report.sheet == Sheet::Details && self.alert_elems().contains(&ALERT_SEND);
-            return self.key(if send { ALERT_SEND } else { ALERT_CANCEL });
+            // The question seats on *Not now*.
+            return self.key(ALERT_CANCEL);
         }
         let row = self.row();
         self.key(if row.n > 0 { row.elems[0] } else { CONTROL })
@@ -1919,27 +1470,27 @@ impl<H: AuthLike> Machine<H> for LoginScreen {
         // player repair alert's trap, verbatim in shape: its answers are `Control` elements (the
         // press dip, a commit on release), BACK is the cancel slot (*Not now* / *Close*), the
         // arrows and OK go on to the engine for the answers, and nothing reaches the read-out.
-        if self.report.alert.visible() {
+        if self.alert.visible() {
             match ev {
                 ScreenEvent::FocusMoved { to, .. } => {
-                    self.report.alert.set_choice(if to.elem == ALERT_SEND {
-                        Choice::Destructive
+                    self.alert.set_choice(if to.elem == ALERT_AFFIRM {
+                        crate::ui::decision_alert::Choice::Destructive
                     } else {
-                        Choice::Cancel
+                        crate::ui::decision_alert::Choice::Cancel
                     });
                     return Handled::Yes;
                 }
                 ScreenEvent::PressCommit(_) => {
                     if let Some(key) = cx.focus.current {
                         if self.alert_elems().contains(&key.elem) {
-                            self.alert_answer(key.elem == ALERT_SEND, fx);
+                            self.alert_answer(key.elem == ALERT_AFFIRM, fx);
                         }
                     }
                     return Handled::Yes;
                 }
                 ScreenEvent::Activate(_) => return Handled::Yes,
                 ScreenEvent::Input(input) => {
-                    if !self.report.alert.is_open() {
+                    if !self.alert.is_open() {
                         return Handled::Yes;
                     }
                     use crate::ui::consts;
@@ -2150,7 +1701,6 @@ mod tests {
             scope: auth::owner::ProfileScope(0),
             delete_leftovers: 0,
             persistence_warning: None,
-            incident: None,
             link_trouble: false,
             discovery_retry: None,
             plaintext: None,
@@ -2423,7 +1973,10 @@ mod tests {
             plaintext: None,
             question: PlaintextQuestion::new(),
             ground: RouteGround::new(),
-            report: Report::new(),
+            link_trouble: false,
+            alert: DecisionAlert::new(),
+            alert_frames: None,
+            pop: CtlPop::new(),
             state: LoginState {
                 phase: 0,
                 qr_gen: 0,
@@ -2433,7 +1986,8 @@ mod tests {
                 next_correlation: Some(1),
                 pending_restart: None,
                 warning: false,
-                report: ReportState::default(),
+                link_trouble: false,
+                alert_open: false,
                 plaintext: None,
             },
         }
@@ -2588,52 +2142,18 @@ mod tests {
         }
     }
 
-    /// **The failed read-out stands on the page read-out's anchor and never grows.** Its verdict
-    /// hangs from `StatusOverlay::FULL_ANCHOR_TOP` and its row — *Try again* / *Details*, nothing
-    /// else — stacks `space::LG` under the reason; a report's status line, a sendable offer and a
-    /// delivered report all leave the row exactly where it was.
-    #[test]
-    fn the_failed_readout_stands_on_the_page_lines_and_never_grows() {
-        use auth::owner::IncidentState as S;
-        let m = crate::ui::fixture::FixtureMeasure;
-        let pin = crate::telemetry::incident::IncidentKind::PinCreate;
-        let rows = |s: &LoginScreen| {
-            let (labels, has_reason) = s.readout_labels();
-            status_row_rects(&m, labels, s.readout_kind(), has_reason)
-        };
-        let calm = rows(&screen_with(Phase::Error, S::NotNow, pin));
-        let (primary, details) = (calm[0].unwrap(), calm[1].unwrap());
-        let failed = screen_with(Phase::Error, S::NotNow, pin);
-        let (labels, has_reason) = failed.readout_labels();
-        assert!(has_reason, "the sign-in failure always says why");
-        let overlay = readout_overlay(c"", failed.readout_kind(), Some(c""), labels, None);
-        let verdict = overlay.verdict_band_measured(&m);
-        assert_eq!(verdict.y, StatusOverlay::FULL_ANCHOR_TOP);
-        assert_eq!(overlay.action_frame_measured(&m).unwrap().y, primary.y, "the drawn row is the hit row");
-        assert!(primary.y > verdict.y + verdict.h, "the row stacks under the copy");
-        assert_eq!(details.y, primary.y, "Details shares the row");
-        for state in [S::Offered { revision: 0 }, S::Sending, S::Delivered { receipt: "0123abcd".into() }] {
-            let s = screen_with(Phase::Error, state.clone(), pin);
-            let r = rows(&s);
-            assert_eq!((r[0].unwrap().y, r[1].unwrap().x), (primary.y, details.x), "{state:?}");
-            assert_eq!(s.row().as_slice(), [CONTROL, DETAILS], "{state:?}: two controls, never three");
-        }
-    }
-
-    /// A [`Measure`] that forwards straight to `crate::text`'s own raw, no-font-loaded fallbacks —
-    /// the exact numbers `StatusOverlay::bands`/`action_frame` themselves fall back to when nothing
-    /// has called `init_text`, which is true of every host test. It exists ONLY for the test below,
-    /// and neither of the two `Measure`s already in this file can stand in for it:
-    /// [`crate::ui::fixture::FixtureMeasure`]'s `line_h` is `sz * 1.2`, a deliberately rough
-    /// stand-in for real font metrics (see its own doc) rather than the widget's actual fallback —
-    /// `text_height`'s is `sz` exactly, factor 1.0, no font needed — so a `FixtureMeasure`-based
-    /// comparison against the real widget could never agree numerically even when the two formulas
-    /// are identical; and `TtfMeasure::width` carries a `debug_assert!` that exists to catch a REAL
-    /// draw reached before boot's `init_text`, which every host test would trip on the first call.
-    /// Neither omission was a bug — `FixtureMeasure` is for tests that only need INTERNAL
-    /// consistency (the two tests above), and `TtfMeasure`'s assert is doing its job — but their
-    /// combination is exactly why the property `status_action_rect`'s own doc claims ("mirrors …
-    /// exactly") had never actually been checked by anything in this file.
+    /// **The property `status_action_rect`'s own doc claims, actually checked.** Neither test above
+    /// it compares against a real [`StatusOverlay`] at all — both only compare two calls to
+    /// `status_action_rect` against EACH OTHER, which can pin an ordering but can never catch the
+    /// two formulas drifting apart from each other, term for term, in lockstep. This test builds a
+    /// real `StatusOverlay` with the same shape (`kind`, `reason`, `action`) `LoginScreen::draw`
+    /// ever configures one with and asserts its `action_frame()` Rect is bit-for-bit the Rect
+    /// `status_action_rect` computes for the equivalent inputs, across both axes
+    /// (`working`/`has_reason`) this screen ever combines. `RawTextMeasure` is what makes an exact
+    /// comparison possible on the host at all — see its own doc for why `FixtureMeasure` cannot do
+    /// this job.
+    /// A [`Measure`] that forwards straight to `crate::text`'s own raw, no-font-loaded fallbacks,
+    /// the exact numbers `StatusOverlay::bands`/`action_frame` themselves fall back to.
     struct RawTextMeasure;
     impl Measure for RawTextMeasure {
         fn width(&self, s: &CStr, sz: i32, bold: bool) -> f32 {
@@ -2647,16 +2167,6 @@ mod tests {
         }
     }
 
-    /// **The property `status_action_rect`'s own doc claims, actually checked.** Neither test above
-    /// it compares against a real [`StatusOverlay`] at all — both only compare two calls to
-    /// `status_action_rect` against EACH OTHER, which can pin an ordering but can never catch the
-    /// two formulas drifting apart from each other, term for term, in lockstep. This test builds a
-    /// real `StatusOverlay` with the same shape (`kind`, `reason`, `action`) `LoginScreen::draw`
-    /// ever configures one with and asserts its `action_frame()` Rect is bit-for-bit the Rect
-    /// `status_action_rect` computes for the equivalent inputs, across both axes
-    /// (`working`/`has_reason`) this screen ever combines. `RawTextMeasure` is what makes an exact
-    /// comparison possible on the host at all — see its own doc for why `FixtureMeasure` cannot do
-    /// this job.
     #[test]
     fn status_action_rect_matches_the_widget_it_is_reproducing() {
         for kind in [StatusKind::Working, StatusKind::Failed, StatusKind::Empty] {
@@ -3101,579 +2611,23 @@ mod tests {
             "…nor go on claiming its bytes in the frame's render set"
         );
     }
-
-    /// **The QR bitmap is a render this SCREEN owns** — its own `upload_rgba`, its own
-    /// `delete_tex` — so it is one of the two things in the tree that override
-    /// `Screen::render_report` (§8.3 rule (c)); everything else on screen here is drawn
-    /// immediate-mode or comes from a shared pool. `999` stands in for a real GL id for the same
-    /// reason `unmount_frees_the_qr_texture` uses it: a host test uploads nothing.
-    #[test]
-    fn the_qr_bitmap_is_reported_as_this_screens_own_render() {
-        use crate::ui::frame::RenderReport;
-        let mut s = bare_screen(Phase::Waiting, 0.0);
-        assert_eq!(
-            Screen::<SessionHost>::render_report(&s),
-            RenderReport::NONE,
-            "no code yet: this screen holds no render of its own"
-        );
-        s.qr_tex = 999;
-        s.qr_px = (400, 400);
-        assert_eq!(
-            Screen::<SessionHost>::render_report(&s),
-            RenderReport::one(400, 400),
-            "one texture, 400x400 RGBA8 = 640,000 bytes"
-        );
-    }
-
-    fn incident(state: auth::owner::IncidentState, kind: crate::telemetry::incident::IncidentKind)
-        -> auth::owner::IncidentOffer {
-        let mut context = crate::auth::synthetic_incident();
-        context.kind = kind;
-        auth::owner::IncidentOffer {
-            id: 7,
-            key: auth::owner::IncidentKey {
-                flow: auth::owner::IncidentFlow::SignIn,
-                kind,
-                link: context.link,
-            },
-            context: Some(context),
-            readout_context: Some(context),
-            state,
-        }
-    }
-
     fn tick_ev(ms: u32) -> ScreenEvent<SessionHost> {
         ScreenEvent::Tick(Tick { ms, dt_us: 16_667 })
     }
 
-    fn enters_group(effects: &[Stamped<SessionHost>], group: GroupId) -> bool {
-        effects.iter().any(|st| matches!(&st.fx,
-            Fx::Deliver(_, Delivery::Screen(ScreenEvent::Enter(Enter::Fresh {
-                focus: FocusTarget::ContainerGroup(g),
-            }))) if *g == group))
-    }
-
-    /// (b) A sign-in failure whose incident has not been resolved yet is resolved by the screen
-    /// that shows it, against the permission and revision it reads now — once, not every frame.
-    #[test]
-    fn a_pending_incident_is_resolved_once_by_the_screen_that_shows_it() {
-        let _serial = crate::testlock::serial();
-        let mut failed = snapshot(Phase::Error, 0, "");
-        failed.error = Arc::from("Can’t reach Plex");
-        failed.incident = Some(incident(auth::owner::IncidentState::Pending,
-            crate::telemetry::incident::IncidentKind::PinCreate));
-        let mut s = LoginScreen::new(EntryId(0), failed.read());
-        let m = crate::ui::fixture::FixtureMeasure;
-        let (_, first) = step_ev_with(&mut s, &tick_ev(16), &failed, InstanceId(0), &m);
-        let resolves = |fx: &[Stamped<SessionHost>]| fx.iter().filter(|st| matches!(st.fx,
-            Fx::App(AppFx::Session(auth::SessionCmd::ResolveIncident { id: 7, .. })))).count();
-        assert_eq!(resolves(&first), 1, "the pending offer is resolved on the first frame it is shown");
-        let (_, second) = step_ev_with(&mut s, &tick_ev(32), &failed, InstanceId(0), &m);
-        assert_eq!(resolves(&second), 0, "…and not again while the owner has yet to answer");
-    }
-
-    /// (b) An offered incident puts the question on screen, with focus on its answers.
-    #[test]
-    fn an_offered_incident_opens_the_report_alert_with_focus_on_its_answers() {
-        let _serial = crate::testlock::serial();
-        let mut failed = snapshot(Phase::Error, 0, "");
-        failed.incident = Some(incident(
-            auth::owner::IncidentState::Offered { revision: crate::telemetry::consent::revision() },
-            crate::telemetry::incident::IncidentKind::PinCreate));
-        let mut s = LoginScreen::new(EntryId(0), failed.read());
-        let m = crate::ui::fixture::FixtureMeasure;
-        let (_, fx) = step_ev_with(&mut s, &tick_ev(16), &failed, InstanceId(0), &m);
-        assert!(enters_group(&fx, GroupId(1)), "focus is sent to the alert's answers");
-        let (_, again) = step_ev_with(&mut s, &tick_ev(32), &failed, InstanceId(0), &m);
-        assert!(!enters_group(&again, GroupId(1)), "the offer is asked once");
-    }
 
     /// Build a cx whose engine focus is on `elem`, for a `PressCommit` the trap reads it from.
-    fn step_focused(
-        s: &mut LoginScreen,
-        ev: &ScreenEvent<SessionHost>,
-        snapshot: &auth::owner::SessionSnapshot,
-        elem: u32,
-    ) -> Vec<Stamped<SessionHost>> {
-        let m = crate::ui::fixture::FixtureMeasure;
-        let mut cx = cx_with(&m, snapshot);
-        cx.focus.current = Some(crate::ui::machine::FocusKey { entry: EntryId(0), elem });
-        let mut present = Present::new();
-        let mut buf: Vec<Stamped<SessionHost>> = Vec::new();
-        {
-            let mut fx = Effects::new(&mut buf, MachineId::Instance(InstanceId(0)), &mut present);
-            Machine::<SessionHost>::step(s, ev, &cx, &mut fx);
-        }
-        buf
-    }
 
-    fn sends(fx: &[Stamped<SessionHost>]) -> bool {
-        fx.iter().any(|st| matches!(st.fx, Fx::App(AppFx::Session(auth::SessionCmd::ReportIncident { id: 7 }))))
-    }
-
-    fn failed_with(state: auth::owner::IncidentState) -> auth::owner::SessionSnapshot {
-        let mut failed = snapshot(Phase::Error, 0, "");
-        failed.error = Arc::from("Can’t reach Plex");
-        failed.incident = Some(incident(state, crate::telemetry::incident::IncidentKind::PinCreate));
-        failed
-    }
-
-    /// **Details opens the card** — the one alert, as the Details sheet, with focus sent to its
-    /// answers — and the read-out itself gains nothing: the row stays *Try again* / *Details*.
+    /// BACK with no alert up asks Session for the root press.
     #[test]
-    fn details_opens_the_details_card() {
-        let _serial = crate::testlock::serial();
-        let failed = failed_with(auth::owner::IncidentState::NotNow);
+    fn with_the_card_closed_back_is_the_root_press() {
+        let failed = snapshot(Phase::Error, 0, "");
         let mut s = LoginScreen::new(EntryId(0), failed.read());
         let m = crate::ui::fixture::FixtureMeasure;
-        let (_, fx) = step_ev_with(&mut s, &tick_ev(16), &failed, InstanceId(0), &m);
-        assert!(!enters_group(&fx, ALERT_GROUP), "an answered offer is not asked again");
-        let (_, fx) = step_ev_with(&mut s, &ScreenEvent::Activate(DETAILS), &failed, InstanceId(0), &m);
-        assert!(s.report.alert.is_open() && s.report.sheet == Sheet::Details);
-        assert!(s.state.report.details_open);
-        assert!(enters_group(&fx, ALERT_GROUP), "focus goes to the card's answers");
-        assert_eq!(s.row().as_slice(), [CONTROL, DETAILS]);
-    }
-
-    #[test]
-    fn open_details_card_reconciles_delivery_failure_without_reopening() {
-        use auth::owner::IncidentState as S;
-        use crate::ui::decision_alert::Answers;
-        let _serial = crate::testlock::serial();
-        let mut failed = failed_with(S::Queued { receipt: "old-receipt".into() });
-        let mut s = LoginScreen::new(EntryId(0), failed.read());
-        let m = crate::ui::fixture::FixtureMeasure;
-        step_ev_with(&mut s, &tick_ev(16), &failed, InstanceId(0), &m);
-        step_ev_with(&mut s, &ScreenEvent::Activate(DETAILS), &failed, InstanceId(0), &m);
-        assert_eq!(s.report.alert.answers(), Answers::One);
-        assert!(s.report.alert.body_for_test()[0].starts_with("Report ID:"));
-        failed.incident.as_mut().unwrap().state = S::Failed;
-        step_ev_with(&mut s, &tick_ev(32), &failed, InstanceId(0), &m);
-        assert!(s.report.alert.is_open());
-        assert_eq!(s.report.alert.answers(), Answers::Two, "a failed delivery can be sent again while Details stays open");
-        assert_eq!(s.report.alert.body_for_test(), s.report.details_body(), "the retired receipt must leave the card");
-        assert_eq!(s.report.alert.choice(), Choice::Cancel, "adding Send must not steal focus from Close");
-    }
-
-    #[test]
-    fn open_details_card_reconciles_a_receipt_arriving_while_open() {
-        use auth::owner::IncidentState as S;
-        let _serial = crate::testlock::serial();
-        let mut failed = failed_with(S::Sending);
-        let mut s = LoginScreen::new(EntryId(0), failed.read());
-        let m = crate::ui::fixture::FixtureMeasure;
-        step_ev_with(&mut s, &tick_ev(16), &failed, InstanceId(0), &m);
-        step_ev_with(&mut s, &ScreenEvent::Activate(DETAILS), &failed, InstanceId(0), &m);
-        assert!(!s.report.alert.body_for_test().iter().any(|p| p.starts_with("Report ID:")));
-        failed.incident.as_mut().unwrap().state = S::Queued { receipt: "0123456789abcdef".into() };
-        step_ev_with(&mut s, &tick_ev(32), &failed, InstanceId(0), &m);
-        assert!(s.report.alert.is_open());
-        assert_eq!(s.report.alert.body_for_test()[0], "Report ID: 0123 4567 89ab cdef",
-            "the same incident gained a receipt after the card opened");
-        assert_eq!(s.report.alert.body_for_test(), s.report.details_body());
-        // A new value within the SAME state variant must repaint too: the card renders the
-        // receipt, not merely the incident's ID or the Queued discriminator.
-        failed.incident.as_mut().unwrap().state = S::Queued { receipt: "fedcba9876543210".into() };
-        step_ev_with(&mut s, &tick_ev(48), &failed, InstanceId(0), &m);
-        assert_eq!(s.report.alert.body_for_test()[0], "Report ID: fedc ba98 7654 3210");
-    }
-
-    #[test]
-    fn open_details_card_reconciles_focus_when_send_is_removed() {
-        use auth::owner::IncidentState as S;
-        let _serial = crate::testlock::serial();
-        let mut failed = failed_with(S::NotNow);
-        let mut s = LoginScreen::new(EntryId(0), failed.read());
-        let m = crate::ui::fixture::FixtureMeasure;
-        step_ev_with(&mut s, &tick_ev(16), &failed, InstanceId(0), &m);
-        step_ev_with(&mut s, &ScreenEvent::Activate(DETAILS), &failed, InstanceId(0), &m);
-        assert_eq!(s.report.alert.choice(), Choice::Destructive);
-        failed.incident.as_mut().unwrap().state = S::Queued { receipt: "receipt".into() };
-        step_focused(&mut s, &tick_ev(32), &failed, ALERT_SEND);
-        assert_eq!(s.report.alert.choice(), Choice::Cancel);
-        let cx = cx_with(&m, &failed);
-        let key = <LoginScreen as Focusable<SessionHost>>::reconcile(&s, s.key(ALERT_SEND), &cx);
-        assert_eq!(key, s.key(ALERT_CANCEL));
-        assert!(<LoginScreen as Focusable<SessionHost>>::place(&s, &key.elem, &cx, At::Drawn).is_some());
-    }
-
-    /// **Send report is on the card iff the report can still be sent**, and holds focus when it is
-    /// there; otherwise *Close* is the one answer. The body carries the Report ID once there is one,
-    /// then the support line.
-    #[test]
-    fn the_details_card_offers_send_report_iff_sendable() {
-        use auth::owner::IncidentState as S;
-        use crate::ui::decision_alert::Answers;
-        let _serial = crate::testlock::serial();
-        let m = crate::ui::fixture::FixtureMeasure;
-        let cx = test_cx(&m);
-        let pin = crate::telemetry::incident::IncidentKind::PinCreate;
-        let receipt = "41de4cd388e4041654de38f2787c3922".to_string();
-        for state in [S::NotNow, S::Failed, S::OnRequest { revision: 0 }, S::Sending,
-            S::Delivered { receipt: receipt.clone() }, S::Saved { receipt: receipt.clone() }]
-        {
-            let mut s = screen_with(Phase::Error, state.clone(), pin);
-            let sendable = s.report.sendable();
-            let mut buf: Vec<Stamped<SessionHost>> = Vec::new();
-            let mut present = Present::new();
-            {
-                let mut fx = Effects::new(&mut buf, MachineId::Instance(InstanceId(0)), &mut present);
-                s.activate_elem(DETAILS, &mut fx);
-            }
-            let want = if sendable { Answers::Two } else { Answers::One };
-            assert_eq!(s.report.alert.answers(), want, "{state:?}");
-            assert_eq!(s.alert_elems().contains(&ALERT_SEND), sendable, "{state:?}");
-            let seat = <LoginScreen as Focusable<SessionHost>>::seat(
-                &s, ALERT_GROUP, Placed { rect: Rect::FULL, rest_rect: Rect::FULL, clip: Rect::FULL, index: None }, &cx);
-            assert_eq!(seat.elem, if sendable { ALERT_SEND } else { ALERT_CANCEL }, "{state:?}");
-            let body = s.report.details_body();
-            let support = "PlxNative 0 · webOS 0 · set · pin_create";
-            if matches!(state, S::Delivered { .. } | S::Saved { .. }) {
-                assert_eq!(body, ["Report ID: 41de 4cd3 88e4 0416 54de 38f2 787c 3922", support], "{state:?}");
-            } else {
-                assert_eq!(body, [support], "{state:?}");
-            }
-            s.report.alert.close();
-        }
-        // The two ends of the sendable question, stated rather than derived.
-        assert!(screen_with(Phase::Error, S::NotNow, pin).report.sendable());
-        assert!(!screen_with(Phase::Error, S::Delivered { receipt }, pin).report.sendable());
-    }
-
-    /// **BACK and Close close the card and put focus back on Details** — and neither sends
-    /// anything or leaves the screen; with the card closed, BACK is the root press it always was.
-    #[test]
-    fn back_or_close_returns_focus_to_details() {
-        let _serial = crate::testlock::serial();
-        let failed = failed_with(auth::owner::IncidentState::NotNow);
-        let m = crate::ui::fixture::FixtureMeasure;
-        for via_back in [true, false] {
-            let mut s = LoginScreen::new(EntryId(0), failed.read());
-            step_ev_with(&mut s, &tick_ev(16), &failed, InstanceId(0), &m);
-            step_ev_with(&mut s, &ScreenEvent::Activate(DETAILS), &failed, InstanceId(0), &m);
-            assert!(s.report.alert.is_open());
-            let fx = if via_back {
-                step_ev_with(&mut s, &key_back_down(), &failed, InstanceId(0), &m).1
-            } else {
-                step_focused(&mut s, &ScreenEvent::PressCommit(crate::ui::machine::PressId(1)), &failed, ALERT_CANCEL)
-            };
-            assert!(!s.report.alert.is_open(), "via_back={via_back}: the card closes");
-            assert!(enters_elem(&fx, DETAILS), "via_back={via_back}: focus returns to Details");
-            assert!(!sends(&fx), "via_back={via_back}: nothing is sent");
-            assert_eq!(root_backs(&fx), 0, "via_back={via_back}: the screen stays");
-        }
-        let mut s = LoginScreen::new(EntryId(0), failed.read());
         step_ev_with(&mut s, &tick_ev(16), &failed, InstanceId(0), &m);
         let (_, fx) = step_ev_with(&mut s, &key_back_down(), &failed, InstanceId(0), &m);
-        assert_eq!(root_backs(&fx), 1, "with the card closed, BACK is the root press");
+        assert_eq!(fx.iter().filter(|st| matches!(&st.fx,
+            Fx::App(AppFx::Session(auth::SessionCmd::BackAtRoot { .. })))).count(), 1,
+            "with the card closed, BACK is the root press");
     }
-
-    /// **Send report on the card sends the held report**, closes the card and returns focus to
-    /// Details, where the status line then reports it.
-    #[test]
-    fn send_report_on_the_card_sends_the_report() {
-        let _serial = crate::testlock::serial();
-        let failed = failed_with(auth::owner::IncidentState::NotNow);
-        let m = crate::ui::fixture::FixtureMeasure;
-        let mut s = LoginScreen::new(EntryId(0), failed.read());
-        step_ev_with(&mut s, &tick_ev(16), &failed, InstanceId(0), &m);
-        let (_, early) = step_ev_with(&mut s, &ScreenEvent::Activate(ALERT_SEND), &failed, InstanceId(0), &m);
-        assert!(!sends(&early), "no answer is live before the card is open");
-        step_ev_with(&mut s, &ScreenEvent::Activate(DETAILS), &failed, InstanceId(0), &m);
-        let fx = step_focused(&mut s, &ScreenEvent::PressCommit(crate::ui::machine::PressId(1)), &failed, ALERT_SEND);
-        assert!(sends(&fx), "Send report sends the held offer");
-        assert!(!s.report.alert.is_open(), "…and closes the card");
-        assert!(enters_elem(&fx, DETAILS), "…handing focus back to Details");
-    }
-
-    // ---- PLX-NATIVE-10: the consent question ----
-
-    fn plaintext_verdict(eligibility: crate::plex::probe::PlaintextEligibility)
-        -> auth::PlaintextVerdict {
-        auth::PlaintextVerdict {
-            machine_id: "lan-machine".into(),
-            name: "Home".into(),
-            shared_by: String::new(),
-            eligibility,
-            choice: crate::plex::session::PlaintextChoice::Undecided,
-        }
-    }
-
-    /// An offered report on an insecure-only failure, with `eligibility`'s verdict.
-    fn insecure_failure(eligibility: crate::plex::probe::PlaintextEligibility)
-        -> auth::owner::SessionSnapshot {
-        let mut failed = failed_with(auth::owner::IncidentState::Offered {
-            revision: crate::telemetry::consent::revision(),
-        });
-        let verdict = plaintext_verdict(eligibility);
-        failed.error = Arc::from(auth::insecure_only_copy(Some(&verdict)).as_ref());
-        failed.plaintext = Some(verdict);
-        failed
-    }
-
-    fn answers(effects: &[Stamped<SessionHost>]) -> Vec<bool> {
-        effects.iter().filter_map(|st| match &st.fx {
-            Fx::App(AppFx::Session(auth::SessionCmd::AnswerPlaintext { machine_id, choice, sid: None }))
-                if machine_id == "lan-machine" => Some(*choice == crate::plex::session::PlaintextChoice::Allowed),
-            _ => None,
-        }).collect()
-    }
-
-    /// **An eligible plaintext-only server is a choice, not a failure**: the read-out's one primary
-    /// is *Connect* beside *Details* — never a third button — and the report question is NOT raised
-    /// on its own; the report stays behind *Details*.
-    #[test]
-    fn an_eligible_plaintext_failure_offers_connect_and_does_not_raise_the_report_question() {
-        let _serial = crate::testlock::serial();
-        let failed = insecure_failure(crate::plex::probe::PlaintextEligibility::Eligible);
-        let mut s = LoginScreen::new(EntryId(0), failed.read());
-        let m = crate::ui::fixture::FixtureMeasure;
-        let (_, fx) = step_ev_with(&mut s, &tick_ev(16), &failed, InstanceId(0), &m);
-        assert!(!enters_group(&fx, ALERT_GROUP), "the report question is not raised");
-        assert!(!s.report.alert.is_open());
-        assert_eq!(s.control_kind(), Some(ControlKind::ConnectPlaintext));
-        assert_eq!(s.readout_labels().0, [Some(CONNECT), Some(DETAILS_LABEL)]);
-        assert_eq!(s.row().as_slice(), [CONTROL, DETAILS]);
-        assert_eq!(s.state.plaintext, Some(false));
-        assert!(answers(&fx).is_empty(), "nothing is answered for the person");
-    }
-
-    /// **The DRAWN primary is the one the press acts on** (design review D1). The failed read-out
-    /// painted *Try again* over a primary that asked the question — the geometry and the press
-    /// read `control_kind`, the paint a hard-coded label. Every stage is checked on the overlay
-    /// the draw paints (`failed_readout`), not on `readout_labels`: an unanswered eligible server
-    /// draws *Connect*; once answered (*Not now*) it draws *Try again*, which is what it does.
-    #[test]
-    fn the_failed_readout_draws_the_label_its_press_acts_on() {
-        use crate::plex::session::PlaintextChoice;
-        let _serial = crate::testlock::serial();
-        let m = crate::ui::fixture::FixtureMeasure;
-        let mut failed = insecure_failure(crate::plex::probe::PlaintextEligibility::Eligible);
-        for (choice, want) in [(PlaintextChoice::Undecided, CONNECT), (PlaintextChoice::Declined, ESCAPE),
-            (PlaintextChoice::Revoked, ESCAPE), (PlaintextChoice::Allowed, ESCAPE)] {
-            if let Some(v) = failed.plaintext.as_mut() {
-                v.choice = choice;
-            }
-            let mut s = LoginScreen::new(EntryId(0), failed.read());
-            step_ev_with(&mut s, &tick_ev(16), &failed, InstanceId(0), &m);
-            let reason = CString::new(s.error.as_ref()).unwrap();
-            let drawn = s.failed_readout(&reason, None);
-            assert_eq!(drawn.action, Some(want), "{choice:?}: the drawn primary");
-            assert_eq!(drawn.action, s.control_kind().map(label_for), "{choice:?}: drawn = pressed");
-        }
-    }
-
-    /// **Connect asks, and only the answer reaches Session.** The question opens seated on
-    /// *Not now*; *Connect* allows, *Not now* and BACK decline — each exactly once, and focus comes
-    /// back to the read-out.
-    #[test]
-    fn connect_asks_the_question_and_only_its_answer_reaches_session() {
-        let _serial = crate::testlock::serial();
-        let failed = insecure_failure(crate::plex::probe::PlaintextEligibility::Eligible);
-        let m = crate::ui::fixture::FixtureMeasure;
-        for (how, allow) in [("connect", true), ("not now", false), ("back", false)] {
-            let mut s = LoginScreen::new(EntryId(0), failed.read());
-            step_ev_with(&mut s, &tick_ev(16), &failed, InstanceId(0), &m);
-            let (_, opened) = step_ev_with(&mut s, &ScreenEvent::Activate(CONTROL), &failed, InstanceId(0), &m);
-            assert!(answers(&opened).is_empty(), "{how}: opening the question answers nothing");
-            assert!(s.report.alert.is_open() && s.report.sheet == Sheet::Plaintext, "{how}");
-            assert!(enters_group(&opened, ALERT_GROUP), "{how}");
-            assert_eq!(s.state.plaintext, Some(true));
-            let cx_m = crate::ui::fixture::FixtureMeasure;
-            let cx = cx_with(&cx_m, &failed);
-            assert_eq!(Focusable::<SessionHost>::seat(&s, ALERT_GROUP, Placed { rect: Rect::FULL, rest_rect: Rect::FULL, clip: Rect::FULL, index: None }, &cx).elem,
-                ALERT_CANCEL, "{how}: seated on Not now");
-            let fx = match how {
-                "connect" => step_focused(&mut s, &ScreenEvent::PressCommit(crate::ui::machine::PressId(1)), &failed, ALERT_SEND),
-                "not now" => step_focused(&mut s, &ScreenEvent::PressCommit(crate::ui::machine::PressId(1)), &failed, ALERT_CANCEL),
-                _ => step_ev_with(&mut s, &key_back_down(), &failed, InstanceId(0), &m).1,
-            };
-            assert_eq!(answers(&fx), [allow], "{how}");
-            assert!(!sends(&fx), "{how}: no report is sent");
-            assert_eq!(root_backs(&fx), 0, "{how}: the screen stays");
-            assert!(!s.report.alert.is_open(), "{how}");
-            assert!(enters_group(&fx, CONTROL_GROUP), "{how}: focus returns to the read-out");
-        }
-    }
-
-    /// A verdict that cannot be offered (remote-only here) keeps today's read-out: *Try again*, and
-    /// the report question raised as for any failure.
-    #[test]
-    fn an_ineligible_plaintext_failure_keeps_try_again_and_the_report_question() {
-        let _serial = crate::testlock::serial();
-        let failed = insecure_failure(crate::plex::probe::PlaintextEligibility::NotLocal);
-        let mut s = LoginScreen::new(EntryId(0), failed.read());
-        let m = crate::ui::fixture::FixtureMeasure;
-        let (_, fx) = step_ev_with(&mut s, &tick_ev(16), &failed, InstanceId(0), &m);
-        assert_eq!(s.control_kind(), Some(ControlKind::Retry));
-        assert!(enters_group(&fx, ALERT_GROUP), "the report question is asked");
-        assert_eq!(s.report.sheet, Sheet::Question);
-        assert_eq!(s.state.plaintext, None);
-    }
-
-    fn root_backs(effects: &[Stamped<SessionHost>]) -> usize {
-        effects
-            .iter()
-            .filter(|st| matches!(st.fx, Fx::App(AppFx::Session(auth::SessionCmd::BackAtRoot { .. }))))
-            .count()
-    }
-
-    fn enters_elem(effects: &[Stamped<SessionHost>], elem: u32) -> bool {
-        effects.iter().any(|st| matches!(&st.fx,
-            Fx::Deliver(_, Delivery::Screen(ScreenEvent::Enter(Enter::Fresh {
-                focus: FocusTarget::Elem(k),
-            }))) if k.elem == elem))
-    }
-
-    /// **(e) One quiet line says what became of the report**, and only once there is something to
-    /// say. Queued is not sent: "sent" is kept for a server's acceptance. The line never carries
-    /// the Report ID — that lives in Details.
-    #[test]
-    fn the_report_status_is_one_short_line_without_the_report_id() {
-        use auth::owner::IncidentState as S;
-        let r = || "0123abcd".to_string();
-        let line = |state: S| report_status(&state).map(|(t, busy)| (t.to_str().unwrap().to_string(), busy));
-        let expect = |text: &str, busy: bool| Some((text.to_string(), busy));
-        assert_eq!(line(S::Sending), expect("Sending report\u{2026}", true));
-        assert_eq!(line(S::AutoSending), expect("Sending report\u{2026}", true));
-        assert_eq!(line(S::Queued { receipt: r() }), expect("Sending report\u{2026}", true));
-        assert_eq!(line(S::Saved { receipt: r() }), expect("Report saved. It will be sent later.", false));
-        assert_eq!(line(S::Delivered { receipt: r() }), expect("Report sent. Thank you.", false));
-        assert_eq!(line(S::Failed), expect("Report couldn\u{2019}t be sent.", false));
-        for quiet in [S::Pending, S::NotNow, S::Dropped, S::Offered { revision: 0 }, S::OnRequest { revision: 0 }] {
-            assert_eq!(line(quiet.clone()), None, "{quiet:?}");
-        }
-    }
-
-    /// The Report ID reads aloud in groups of four, lowercase, whatever separators it came with.
-    #[test]
-    fn the_report_id_is_grouped_in_fours() {
-        assert_eq!(
-            group_report_id("41de4cd388e4041654de38f2787c3922"),
-            "41de 4cd3 88e4 0416 54de 38f2 787c 3922"
-        );
-        assert_eq!(
-            group_report_id("41DE4CD3-88E4-0416-54DE-38F2787C3922"),
-            "41de 4cd3 88e4 0416 54de 38f2 787c 3922"
-        );
-        assert_eq!(report_id_line("0123abcd"), "Report ID: 0123 abcd");
-    }
-
-    /// **The Details card's support line names the current read-out's storage evidence.** An offer
-    /// with no persistence/key-manager/service evidence still shows the fixed `unknown` triple
-    /// rather than dropping the segment. A Declined incident clears the report context but keeps
-    /// the separate read-out facts, which project to the same line.
-    #[test]
-    fn support_line_carries_the_current_readout_storage_evidence() {
-        let plain = incident(
-            auth::owner::IncidentState::NotNow,
-            crate::telemetry::incident::IncidentKind::PinCreate,
-        );
-        assert!(
-            support_line(&plain).ends_with("persistence:unknown keymgr:unknown svc:unknown"),
-            "{}",
-            support_line(&plain)
-        );
-
-        let mut with_evidence = plain.clone();
-        let mut ctx = crate::auth::synthetic_incident();
-        ctx.kind = crate::telemetry::incident::IncidentKind::SaveFailed;
-        ctx.persistence = Some(crate::telemetry::incident::PersistenceFailure::WriteFailed);
-        ctx.keymanager_stage = Some(crate::storage::wire::KeymanagerStage::Begin);
-        ctx.service_error_code = Some(-17);
-        with_evidence.key.kind = ctx.kind;
-        with_evidence.context = Some(ctx);
-        with_evidence.readout_context = Some(ctx);
-        assert!(
-            support_line(&with_evidence)
-                .ends_with("persistence:write_failed keymgr:begin svc:-17"),
-            "{}",
-            support_line(&with_evidence)
-        );
-
-        let mut declined = plain.clone();
-        declined.context = None;
-        assert!(
-            support_line(&declined).ends_with("persistence:unknown keymgr:unknown svc:unknown"),
-            "a declined offer drops report context but keeps its read-out facts"
-        );
-    }
-
-    #[test]
-    fn discovery_support_uses_exact_attempts_and_omits_an_uncollected_count() {
-        let mut offer = incident(auth::owner::IncidentState::NotNow,
-            crate::telemetry::incident::IncidentKind::Discovery(
-                crate::telemetry::incident::DiscoveryClass::Silent));
-        let discovery = crate::telemetry::incident::DiscoveryEvidence {
-            trigger: crate::telemetry::incident::DiscoveryTrigger::Login,
-            target: Some(crate::telemetry::incident::DiscoveryTarget::PlexTv),
-        };
-        offer.context = Some(crate::auth::synthetic_incident()
-            .with_discovery(discovery)
-            .with_retry_run(2, std::time::Duration::from_secs(3)));
-        offer.readout_context = Some(crate::auth::synthetic_incident()
-            .with_discovery(discovery)
-            .with_retry_run(3, std::time::Duration::from_secs(7)));
-        assert!(support_line(&offer).contains("attempts:3"), "{}", support_line(&offer));
-        assert!(!support_line(&offer).contains("attempts:2"),
-            "Details must not show the deduplicated report's older run: {}", support_line(&offer));
-
-        offer.context = Some(crate::auth::synthetic_incident().with_discovery(
-            crate::telemetry::incident::DiscoveryEvidence {
-                trigger: crate::telemetry::incident::DiscoveryTrigger::Rediscover,
-                target: Some(crate::telemetry::incident::DiscoveryTarget::Servers),
-            }));
-        offer.readout_context = offer.context;
-        assert!(!support_line(&offer).contains("attempts:"), "{}", support_line(&offer));
-    }
-
-    fn screen_with(phase: Phase, state: auth::owner::IncidentState,
-        kind: crate::telemetry::incident::IncidentKind) -> LoginScreen {
-        let mut s = bare_screen(phase, 0.0);
-        s.error = Arc::from("Can’t reach Plex");
-        s.report.offer = Some(incident(state, kind));
-        s.report.support = CString::new("PlxNative 0 · webOS 0 · set · pin_create").unwrap();
-        s
-    }
-
-    fn text(note: Option<Note>) -> Option<String> {
-        note.map(|n| n.text.to_str().unwrap().to_string())
-    }
-
-    /// **The calm default**: a failure nobody has reported draws its verdict, reason and row and
-    /// nothing else — no status line — and a report's line is its status alone: the Report ID
-    /// and the support line are the Details card's, never the read-out's.
-    #[test]
-    fn a_failure_with_no_report_draws_no_status_line() {
-        use auth::owner::IncidentState as S;
-        let pin = crate::telemetry::incident::IncidentKind::PinCreate;
-        for state in [S::Pending, S::Offered { revision: 0 }, S::NotNow, S::Dropped, S::OnRequest { revision: 0 }] {
-            let s = screen_with(Phase::Error, state.clone(), pin);
-            assert_eq!(text(s.report_note()), None, "{state:?}");
-        }
-        let delivered = S::Delivered { receipt: "41de4cd388e4041654de38f2787c3922".into() };
-        let s = screen_with(Phase::Error, delivered, pin);
-        assert_eq!(text(s.report_note()).as_deref(), Some("Report sent. Thank you."));
-    }
-
-    /// **(e) A report on its way keeps the inline spinner turning over a settled read-out** — the
-    /// failed sign-in draws no spinner of its own, so its clock must still run for the report's,
-    /// and stop once the report has settled.
-    #[test]
-    fn a_report_on_its_way_turns_the_spinner_on_a_failed_readout() {
-        let _serial = crate::testlock::serial();
-        let m = crate::ui::fixture::FixtureMeasure;
-        let spin_after_ticks = |state: auth::owner::IncidentState| {
-            let mut failed = snapshot(Phase::Error, 0, "");
-            failed.incident = Some(incident(state, crate::telemetry::incident::IncidentKind::PinCreate));
-            let mut s = LoginScreen::new(EntryId(0), failed.read());
-            for ms in [16, 32, 48] {
-                step_ev_with(&mut s, &tick_ev(ms), &failed, InstanceId(0), &m);
-            }
-            s.spin_ms
-        };
-        assert!(spin_after_ticks(auth::owner::IncidentState::Queued { receipt: "r".into() }) > 0.0, "queued: turning");
-        assert_eq!(spin_after_ticks(auth::owner::IncidentState::Delivered { receipt: "r".into() }), 0.0, "delivered: still");
-    }
-
 }

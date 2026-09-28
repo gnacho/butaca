@@ -927,7 +927,7 @@ fn issue_95_without_a_relay_a_plaintext_only_answer_is_not_reached() {
 fn resolved_none_insecure_outranks_refused_and_every_other_shape_is_unchanged() {
     assert!(matches!(
         resolved_without_roster(Resolved::NoServers { resources: 0 }, DiscoveryTrigger::Login),
-        Err(Discovery::NoServers(_))
+        Err(Discovery::NoServers)
     ));
     assert!(matches!(
         resolved_without_roster(Resolved::None { refused: true, insecure: false, evidence: None }, DiscoveryTrigger::Login),
@@ -935,7 +935,7 @@ fn resolved_none_insecure_outranks_refused_and_every_other_shape_is_unchanged() 
     ));
     assert!(matches!(
         resolved_without_roster(Resolved::None { refused: false, insecure: false, evidence: None }, DiscoveryTrigger::Login),
-        Err(Discovery::ServersUnreachable { trigger: DiscoveryTrigger::Login })
+        Err(Discovery::ServersUnreachable)
     ));
     assert!(
         matches!(
@@ -2061,99 +2061,11 @@ fn the_three_empty_outcomes_are_distinguished() {
     );
 }
 
-// ---- the discovery failure's incident (review round 2026-09-19) ----
-
-/// **The discovery-only retry reports the SAME failure the sign-in did.** On this branch the
-/// rediscovery worker is reached only through *Try again* after an authorized discovery failed
-/// (`retry_kind`), so the failure it ends on is that one again. It used to be minted as a kind of
-/// its own, which the per-launch dedup key reads as a new question — the person who answered
-/// Not now was asked again by their own retry. Both workers take the whole incident from
-/// [`discovery_failure`], the one table, and name no kind themselves.
-#[test]
-fn the_discovery_retry_reports_the_failure_it_retried() {
-    let src = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/auth.rs"),
-    )
-    .expect("auth.rs must be readable from its own test");
-    for name in ["rediscovery_worker_with_output", "login_worker_with_output"] {
-        let body = extract_fn_body(&src, name);
-        assert!(body.contains("discovery_failure(&discovery)"), "`{name}` no longer uses the shared table");
-        assert!(
-            !body.contains("IncidentKind::Rediscovery") && !body.contains("IncidentKind::Discovery"),
-            "`{name}` names its own discovery incident kind instead of taking the shared table's:\n{body}"
-        );
-    }
-    let (_, silent) = discovery_failure(&Discovery::ServersUnreachable {
-        trigger: DiscoveryTrigger::Login,
-    }).expect("a failure");
-    assert_eq!(silent.kind, IncidentKind::Discovery(DiscoveryClass::Silent));
-}
-
-/// **A token plex.tv refused is an authorization failure, not a network one.** `/resources`
-/// answering 401 or 403 means plex.tv heard us and said no — "check the connection" sends the
-/// person to a router that is fine, and the report must not be grouped with real silence.
-#[test]
-fn a_refused_token_is_reported_as_authorization_not_as_silence() {
-    for status in [401u16, 403] {
-        let refused = [
-            Ok(status),
-            // A refusal whose body broke is still that refusal (`net::response_status`).
-            Err(crate::net::RequestFailure {
-                cause: crate::net::RequestError::Transport,
-                status: Some(status),
-                body_limit: None,
-                curl_rc: Some(18),
-            }),
-        ];
-        for last in refused {
-            let (message, incident) =
-                discovery_failure(&Discovery::PlexTvFailed(PlexTvFailure {
-                    last, attempts: 1, elapsed: Duration::ZERO, trigger: DiscoveryTrigger::Login,
-                })).expect("a failure");
-            assert_eq!(incident.kind, IncidentKind::Authorization, "{status}");
-            assert_eq!(incident.http_status, Some(status));
-            assert!(!message.contains("connection"), "{status}: {message:?} blames the network");
-        }
-    }
-    // Real silence, and other answers, stay what they were.
-    for last in [Ok(503), Ok(429)] {
-        let (message, incident) = discovery_failure(&Discovery::PlexTvFailed(PlexTvFailure {
-            last, attempts: 3, elapsed: Duration::from_secs(6), trigger: DiscoveryTrigger::Login,
-        })).expect("a failure");
-        assert_eq!(incident.kind, IncidentKind::Discovery(DiscoveryClass::Silent), "{last:?}");
-        assert!(message.contains("plex.tv"));
-    }
-}
-
-#[test]
-fn terminal_discovery_copy_names_the_target_cause_retry_and_action() {
-    let failure = |rc, cause| Err(crate::net::RequestFailure { cause, status: None,
-        body_limit: None, curl_rc: rc });
-    let message = |last| discovery_failure(&Discovery::PlexTvFailed(PlexTvFailure {
-        last, attempts: 3, elapsed: Duration::from_secs(6), trigger: DiscoveryTrigger::Login,
-    })).unwrap().0.into_owned();
-    assert_eq!(message(failure(Some(6), crate::net::RequestError::Transport)),
-        "This TV couldn't find plex.tv, so your servers weren't checked. We tried 3 times. Check the TV's internet connection, then try again.");
-    assert_eq!(message(failure(Some(28), crate::net::RequestError::TimedOut)),
-        "This TV couldn't reach plex.tv, so your servers weren't checked. We tried 3 times. Check the TV's internet connection, then try again.");
-    assert_eq!(message(failure(Some(60), crate::net::RequestError::Transport)),
-        "This TV couldn't make a secure connection to plex.tv. Check the TV's date and time, then try again.");
-    for evidence in [Ok(200), Ok(408), Ok(429), Ok(503)] {
-        assert_eq!(message(evidence),
-            "plex.tv is having trouble right now, so your servers weren't checked. Try again in a few minutes.");
-    }
-    let servers = discovery_failure(&Discovery::ServersUnreachable {
-        trigger: DiscoveryTrigger::Rediscover,
-    }).unwrap().0;
-    assert_eq!(servers,
-        "plex.tv listed your servers, but none of them answered. Make sure your Plex Media Server is on and online, then try again.");
-}
-
 #[test]
 fn a_single_discovery_attempt_uses_grammatical_retry_copy() {
     let last = Err(crate::net::RequestFailure { cause: crate::net::RequestError::Transport,
         status: None, body_limit: None, curl_rc: Some(6) });
-    let (message, _) = discovery_failure(&Discovery::PlexTvFailed(PlexTvFailure {
+    let message = discovery_failure(&Discovery::PlexTvFailed(PlexTvFailure {
         last, attempts: 1, elapsed: Duration::ZERO, trigger: DiscoveryTrigger::Login,
     })).unwrap();
     assert!(message.contains("We tried once."), "{message}");
@@ -2179,7 +2091,7 @@ fn background_resource_call_sites_clamp_each_request_to_the_runner_budget() {
 fn dns_copy_never_claims_that_a_plex_server_was_contacted() {
     let last = Err(crate::net::RequestFailure { cause: crate::net::RequestError::Transport,
         status: None, body_limit: None, curl_rc: Some(6) });
-    let (caption, _) = discovery_failure(&Discovery::PlexTvFailed(PlexTvFailure {
+    let caption = discovery_failure(&Discovery::PlexTvFailed(PlexTvFailure {
         last, attempts: 3, elapsed: Duration::from_secs(6), trigger: DiscoveryTrigger::Login,
     })).unwrap();
     assert!(caption.contains("plex.tv"));
@@ -2236,8 +2148,7 @@ fn insecure_evidence_of(d: &Discovery) -> probe::InsecureEvidence {
     let Discovery::InsecureOnly(Some((evidence, _))) = d else {
         panic!("expected an insecure-only verdict with probe evidence");
     };
-    let (_, incident) = discovery_failure(d).expect("an insecure-only verdict is a failure");
-    assert_eq!(incident.insecure, Some(*evidence), "the incident carries the verdict's evidence");
+    let _message = discovery_failure(d).expect("an insecure-only verdict is a failure");
     *evidence
 }
 
@@ -2364,36 +2275,6 @@ fn insecure_only_evidence_tells_an_absent_relay_from_a_failed_one() {
     assert_eq!(absent.https.relay, probe::RouteOutcome::Absent, "plex.tv advertised no relay");
 }
 
-/// **(d) An account whose resources are all players says how many it had, and which flow asked.**
-/// `NoServers` is a statement about the account, so its evidence is a bucketed count of what
-/// `/resources` did return — never a name — and whether a fresh sign-in or a retry produced it.
-#[test]
-fn no_servers_evidence_counts_the_players_and_names_the_trigger() {
-    let player = |n: usize| {
-        format!(r#"{{"name":"p{n}","clientIdentifier":"cccc{n}","provides":"player","connections":[]}}"#)
-    };
-    let one = serde_json::from_str::<Vec<Resource>>(&format!("[{}]", player(1))).unwrap();
-    let seven = serde_json::from_str::<Vec<Resource>>(&format!(
-        "[{}]",
-        (0..7).map(player).collect::<Vec<_>>().join(",")
-    ))
-    .unwrap();
-    for (resources, trigger, bucket) in [
-        (one, DiscoveryTrigger::Rediscover, crate::telemetry::incident::CountBucket::One),
-        (seven, DiscoveryTrigger::Login, crate::telemetry::incident::CountBucket::SixPlus),
-    ] {
-        let resolved = resolve_roster(&resources, &[], CredentialPolicy::HttpsOnly, &|_| (0, Vec::new()));
-        let d = resolved_without_roster(resolved, trigger).err().expect("no server is a failure");
-        let Discovery::NoServers(evidence) = d else { panic!("expected NoServers") };
-        assert_eq!(
-            evidence,
-            crate::telemetry::incident::NoServersEvidence { resources: bucket, trigger }
-        );
-        let (_, incident) = discovery_failure(&d).expect("no servers is a failure");
-        assert_eq!(incident.no_servers, Some(evidence));
-        assert_eq!(incident.insecure, None);
-    }
-}
 
 // ---- PLX-NATIVE-10: consent-gated plaintext on the home network ----
 

@@ -154,7 +154,6 @@ pub(crate) enum Entropy {
 pub(crate) struct Initial {
     pub version: u32,
     pub session: crate::auth::SessionInit,
-    pub consent: crate::telemetry::consent::Consent,
     pub home: crate::pms::initial::Initial,
     pub clock_start: u32,
     pub entropy: Entropy,
@@ -189,7 +188,7 @@ impl Initial {
             origin_url:origin.base(),token:format!("s{:08x}",seed.wrapping_add(1)),
             tier:Some(crate::plex::probe::Location::Local), ..Default::default() };
         let initial = Self { version:1, session:crate::auth::SessionInit::captured_boot(saved,Some(primary),Vec::new()),
-            consent:Default::default(),home:crate::pms::initial::Initial::fresh(),clock_start:0,
+            home:crate::pms::initial::Initial::fresh(),clock_start:0,
             entropy:Entropy::Seeded(seed),primary_client:1,automated:true,settings:settings.clone(),
             content:None, triggers:vec!["plxnative-app-init".into(),"plxnative-rec".into(),
                 "plxnative-focus".into(),"plxnative-noidle".into()] };
@@ -211,7 +210,7 @@ impl Initial {
         });
         let initial = Self { version: 1,
             session: crate::auth::SessionInit::captured_boot(saved, primary, Vec::new()),
-            consent: crate::telemetry::capture_initial(), clock_start: 0, entropy: Entropy::Captured(entropy),
+            clock_start: 0, entropy: Entropy::Captured(entropy),
             primary_client: crate::plex::Client::capture_generation_seed(),
             automated: crate::dev::any_trigger_present(),
             settings: crate::dev::scenarios::settings_boot_value(),
@@ -227,9 +226,6 @@ impl Initial {
         let s = &self.session;
         if self.version != 1 { return Err("unsupported initial version"); }
         if self.primary_client == 0 { return Err("invalid primary client binding"); }
-        if crate::screens::consent::should_show(&self.consent, self.automated) {
-            return Err("unsupported initial consent route");
-        }
         if !self.home.validate_boot() { return Err("unsupported populated Home initial state"); }
         if s.phase != crate::auth::Phase::Idle || s.epoch != 1 || s.next_req != 0
             || !s.pending.is_empty() || s.pending_commit.is_some() || s.pending_erase.is_some()
@@ -305,10 +301,6 @@ impl LogicalState for Initial {
         c.u32(self.version);
         self.session.write(c);
         self.home.write(c);
-        let v = &self.consent;
-        c.u32(v.asked_version).bool(v.errors).bool(v.usage);
-        c.option(v.install_id.as_ref(), |c, id| { c.str(id); });
-        c.option(v.errors_id.as_ref(), |c, id| { c.str(id); });
         c.u32(self.clock_start);
         match self.entropy {
             Entropy::Captured(bytes) => { c.u32(0); c.option(bytes.as_ref(), |c, bytes| { for byte in bytes { c.u32(u32::from(*byte)); } }); }

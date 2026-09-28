@@ -5,6 +5,7 @@ use super::*;
 #[allow(unused_imports)]
 use super::test_support::*;
 use super::test_support::apply_plan;
+#[allow(unused_imports)]
 
 #[test]
 #[cfg(feature = "devtriggers")]
@@ -347,7 +348,6 @@ fn quality_changed_during_resolve_cannot_land_the_old_contract() {
     PLAY_BUSY.store(true, Ordering::SeqCst);
     *PLAY_SLOT.lock().unwrap_or_else(|e| e.into_inner()) = Some(PlayLanding {
         gen,
-        trace_generation: 7,
         contract_revision: old_contract,
         plan: Plan {
             url: "https://example.invalid/old-contract.mkv".into(),
@@ -1276,7 +1276,6 @@ fn abandoned_resolves_retire_the_streaming_resources_they_created() {
     PLAY_GEN.store(2, Ordering::SeqCst);
     *PLAY_SLOT.lock().unwrap_or_else(|e| e.into_inner()) = Some(PlayLanding {
         gen: 1,
-        trace_generation: 1,
         contract_revision: desired_contract_revision(),
         plan: Plan {
             sid,
@@ -1296,7 +1295,6 @@ fn abandoned_resolves_retire_the_streaming_resources_they_created() {
     PLAY_GEN.store(3, Ordering::SeqCst);
     *PLAY_SLOT.lock().unwrap_or_else(|e| e.into_inner()) = Some(PlayLanding {
         gen: 3,
-        trace_generation: 2,
         contract_revision: desired_contract_revision(),
         plan: Plan {
             sid,
@@ -1641,7 +1639,6 @@ fn source_probe_reuses_live_hls_resource_instead_of_entering_adhoc_mde() {
     install_active_hls(active, "http://fixture.invalid/old.m3u8", rung);
     let active_route = worker_ticket();
     let control = HlsAbrControl {
-        trace_generation: 0,
         sid,
         rating_key: "1".into(),
         logical_session: "probe-logical".into(),
@@ -1742,7 +1739,6 @@ fn a_rejected_original_probe_keeps_hls_and_produces_no_capacity_observation() {
     install_active_hls(active, "http://fixture.invalid/old.m3u8", rung);
     let active_route = worker_ticket();
     let control = HlsAbrControl {
-        trace_generation: 0,
         sid,
         rating_key: "1".into(),
         logical_session: "probe-bodyless-logical".into(),
@@ -1764,7 +1760,6 @@ fn a_rejected_original_probe_keeps_hls_and_produces_no_capacity_observation() {
     assert_eq!(
         result,
         OriginalProbeResult::Failed {
-            outcome: crate::player::report::TraceOutcome::ServerState,
             failure: OriginalProbeFailure::HttpStatus(500),
         },
         "HTTP 500 stays exact for the panel and is never a zero-rate observation",
@@ -1843,7 +1838,6 @@ fn a_source_sample_from_a_superseded_hls_resource_is_discarded() {
     );
     let active_route = worker_ticket();
     let control = HlsAbrControl {
-        trace_generation: 0,
         sid,
         rating_key: "1".into(),
         logical_session: "probe-logical".into(),

@@ -99,13 +99,12 @@ fn typed_initial_roundtrip_and_hidden_input_hash_are_complete() {
     let initial = Initial::synthetic_home(17, 32517, None).unwrap();
     let value = serde_json::to_value(&initial).unwrap();
     assert_eq!(Initial::decode(value.clone(), initial.hash()).unwrap().hash(), initial.hash());
-    let mut changed = initial.clone();
-    changed.consent.errors = true;
+    let changed = initial.clone();
     changed.validate().unwrap();
-    assert_ne!(changed.hash(), initial.hash(), "automation hides the prompt, not its logical initial decision");
+    assert_eq!(changed.hash(), initial.hash());
     let press = crate::ui::press::Press::new();
-    assert_ne!(super::super::recorder::state_hash(&press,"home","","",0,0,0,initial.hash()),
-        super::super::recorder::state_hash(&press,"home","","",0,0,0,changed.hash()));
+    assert_eq!(super::super::recorder::state_hash(&press,"home","","",0,0,initial.hash()),
+        super::super::recorder::state_hash(&press,"home","","",0,0,changed.hash()));
     assert!(Initial::decode(serde_json::to_value(&changed).unwrap(),initial.hash()).is_err());
     let mut unknown = value.clone(); unknown["unrecognized"] = json!(true);
     assert!(Initial::from_value(unknown).is_err());
@@ -161,7 +160,7 @@ fn normal_and_controlled_activation_publish_the_owner_supplied_scope() {
     let mt = unsafe { crate::task::MainThread::assume() };
     let initial = Initial::synthetic_home(19,9,None).unwrap();
     let mut live = super::super::bridge::Bridge::new(
-        ||0, initial.session.clone(), initial.consent.clone(), &mt);
+        ||0, initial.session.clone(), &mt);
     activate(&mut live);
     let live_view = live.profile_resource_view().unwrap();
     let live_owner = live.snapshot_session_init();

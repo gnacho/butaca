@@ -56,17 +56,15 @@ impl Observation {
                             super::DiscoveryRetryRun::HomeUsers => 1,
                         });
                     }
-                    LoginProgress::Failed { epoch, message, incident, plaintext } => {
+                    LoginProgress::Failed { epoch, message, plaintext } => {
                         w.u8(3).u64(*epoch).str(message);
-                        owner::write_incident_context(w, incident);
                         // Appended only when present, so a failure without one keeps its digest.
                         if let Some(verdict) = plaintext {
                             owner::write_plaintext_verdict(w, verdict);
                         }
                     }
-                    LoginProgress::LinkTrouble { epoch, trouble } => {
+                    LoginProgress::LinkTrouble { epoch } => {
                         w.u8(5).u64(*epoch);
-                        w.option(trouble.as_ref(), |w, c| owner::write_incident_context(w, c));
                     }
                     LoginProgress::SignedIn { epoch, server, sources, users } => {
                         w.u8(4).u64(*epoch); write_server(w, server); write_sources(w, sources);

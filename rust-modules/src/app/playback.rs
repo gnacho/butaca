@@ -81,10 +81,7 @@ pub(crate) fn request_seek(x: i64) {
 /// without publishing a false viewer Resume. `resume_pend` asks the per-frame loop to close that
 /// bounded override. `repause_at` is the landed-frame wait target.
 pub(crate) fn commit_seek(target: i64, repause_at: &mut i64) {
-    crate::diag::event(crate::diag::schema::DiagEvent::FeatureUsed {
-        feature: crate::diag::schema::Feature::Seek,
-    });
-    request_seek(target);
+        request_seek(target);
     if paused() {
         *repause_at = target;
         set_resume_pend(true);
@@ -620,9 +617,6 @@ pub(crate) fn exit_player(
     close_player_overlays(pages);
     crate::player::stop_bufferfeed(ps, pa);
     // `stop_bufferfeed` reports/clears a real engine through `report::ended`, but a refusal or a
-    // BACK during resolve has no engine for teardown to take. The exit ritual still ends that
-    // attempt, so retire its in-memory trace here as the common backstop.
-    crate::player::report::clear_error_trace();
     // The jail pre-flight refusal (also no Engine to teardown) is already retired above: it
     // lives on `ps.jail_load_blocked`, and `cancel_play` at the top of this function clears it
     // via `clear_play_verdict` the same way it clears a `/decision` refusal — see that function's
@@ -697,15 +691,7 @@ pub(crate) fn activate_ctrl_row(
             }
         }
         ControlSlot::Skip(pr) => {
-            crate::diag::event(crate::diag::schema::DiagEvent::FeatureUsed {
-                feature: match pr.kind {
-                    crate::metadata::MarkerKind::Intro => crate::diag::schema::Feature::SkipIntro,
-                    crate::metadata::MarkerKind::Credits => {
-                        crate::diag::schema::Feature::SkipCredits
-                    }
-                },
-            });
-            match pr.action {
+                        match pr.action {
                 SkipAction::Seek(ns) => {
                     // Retire the segment FIRST: the seek lands on the preceding keyframe, which
                     // is usually still inside it, so without this the button comes straight back
@@ -989,10 +975,7 @@ pub(crate) fn key_pause(
 ) {
     if super::bridge::player(pages).is_some() && !paused() {
         if set_transport_paused(pa, true) {
-            crate::diag::event(crate::diag::schema::DiagEvent::FeatureUsed {
-                feature: crate::diag::schema::Feature::Pause,
-            });
-        }
+                    }
     }
     if let Some(player) = super::bridge::player_mut(pages) {
         player.hud.extend(now, HUD_LINGER_MS);
