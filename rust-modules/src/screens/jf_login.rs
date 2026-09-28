@@ -12,6 +12,7 @@
 #![cfg(feature = "jellyfin")]
 
 use crate::jellyfin::signin::{self, Fail, Phase};
+use super::family::table_focus;
 use crate::screens::registry::AppLike;
 use crate::ui::machine::{Cx, Effects, EntryId, FocusKey, GroupId, Handled, Machine};
 use crate::ui::route_screen::{RouteGround, RouteLayout};
@@ -294,7 +295,7 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
                 Handled::Yes
             }
             ScreenEvent::FocusMoved { to, .. } => {
-                crate::screens::family::table_focus(&mut self.table, to.elem);
+                table_focus(&mut self.table, to.elem);
                 Handled::Yes
             }
             ScreenEvent::Activate(elem) => {

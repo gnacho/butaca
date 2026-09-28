@@ -975,20 +975,15 @@ class FpsIdentity(unittest.TestCase):
         self.assertTrue(sources["triggers"]["plxnative-firstrun"])
         self.assertTrue(sources["triggers"]["plxnative-onboardosc"])
 
-        for name, stage in (("consent-crash", "crash"), ("consent-product", "product")):
-            with self.subTest(scene=name):
-                scene = scenes[name]
-                self.assertEqual(scene["route"], "home")
-                self.assertEqual(scene["overlay"], "consent")
-                self.assertGreaterEqual(scene["loop_floor"], 50)
-                self.assertGreaterEqual(scene["fps_floor"], 50)
-                self.assertEqual(scene["triggers"]["plxnative-consent"], stage)
-                self.assertTrue(scene["triggers"]["plxnative-consentosc"])
+        # The consent fps scenes went with the consent surface itself (telemetry removal):
+        # the manifest no longer lists them, and the parse_fps contract above is the
+        # only consent behaviour this file still pins.
 
     def test_settings_scenes_carry_the_50_fps_contract_and_idle_inverse(self):
         scenes = {s["name"]: s for s in _manifest()["fps_scenes"]}
+        # settings-privacy went with the Privacy & data page itself (replaced by the
+        # delete-all-local-data row); only root and legal scenes remain.
         for name, overlay in (("settings-root", "settings"),
-                              ("settings-privacy", "privacy"),
                               ("settings-legal", "legal")):
             with self.subTest(scene=name):
                 scene = scenes[name]

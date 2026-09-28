@@ -206,7 +206,7 @@ wholly_test_files() {
         path=$0; sub(/^#\[path = "/,"",path); sub(/"\].*/,"",path)
         next
       }
-      prevcfg==1 && /^mod [a-z_]+;/ {
+      prevcfg==1 && /^(pub(\(crate\))? )?mod [a-z_]+;/ {
         line=$0; sub(/^mod /,"",line); sub(/;.*/,"",line)
         if (path != "") print dir "/" path
         else { print moddir "/" line ".rs"; print moddir "/" line "/mod.rs" }

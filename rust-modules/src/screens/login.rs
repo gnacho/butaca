@@ -777,14 +777,11 @@ impl LoginScreen {
     fn row(&self) -> Row {
         let mut row = Row::default();
         let primary = self.control_kind().is_some();
-        if self.phase == Phase::Waiting && self.persistence_warning.is_none() {
-            if primary {
-                row.push(CONTROL);
-            }
-        } else {
-            if primary {
-                row.push(CONTROL);
-            }
+        // Both phases used to walk differently — the Waiting arm led with the telemetry
+        // *Details* control, removed with the reporting surface itself — and now agree: the
+        // primary alone, when there is one.
+        if primary {
+            row.push(CONTROL);
         }
         row
     }

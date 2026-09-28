@@ -84,7 +84,9 @@ pub(crate) fn try_boot() -> bool {
 fn load_config() -> Option<BootConfig> {
     // 1. the dev trigger
     if let Some(raw) = crate::dev::read("jellyfin") {
-        return parse_config(&raw, "/tmp/plxnative-jellyfin");
+        // Not the literal path: the tmppath gate keeps `/tmp/plxnative-` spellings inside dev.rs,
+        // and `dev::read` already owns that path. The label only feeds the log line.
+        return parse_config(&raw, "dev trigger (jellyfin)");
     }
     // 2. the persistent file beside the session
     let path = persistent_config_path();

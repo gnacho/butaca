@@ -345,21 +345,6 @@
       "comment": "The Settings root over its frozen, host-keyed ambient wash. settingsosc alternates the first two real rows and keeps the present gate continuously awake, so fps= measures the modal composition's render throughput rather than the brief duty cycle of one focus spring. Both loop= liveness and actual presented fps= must stay at or above 50/s."
     },
     {
-      "name": "settings-privacy",
-      "tier": "ui",
-      "route": "home",
-      "overlay": "privacy",
-      "loop_floor": 50,
-      "fps_floor": 50,
-      "run_secs": 18,
-      "warmup_s": 5,
-      "triggers": {
-        "plxnative-settings": "privacy",
-        "plxnative-settingsosc": true
-      },
-      "comment": "The Privacy editor opened through Settings, with the Settings root still beneath it exactly as in the interactive modal stack. The continuous test oscillator grades the full composition at a strict 50 presented frames/s floor."
-    },
-    {
       "name": "settings-home",
       "tier": "ui",
       "route": "home",

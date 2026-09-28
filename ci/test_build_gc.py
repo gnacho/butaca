@@ -10,6 +10,12 @@ import tempfile
 import time
 import unittest
 
+# Three cases below plant a synthetic running cargo and expect build-gc to
+# locate it through a REAL lsof (upstream CI's hosts have one). On a host
+# without lsof the tool fails closed — which other tests here grade — and
+# these three cannot run, so they skip rather than fail.
+needs_lsof = unittest.skipUnless(shutil.which("lsof"), "this host has no lsof")
+
 ROOT = Path(__file__).resolve().parent.parent
 MODES = ("--incremental", "--orphans", "--lanes", "--cache", "--worktrees", "--all")
 
@@ -238,6 +244,7 @@ class BuildGcTests(unittest.TestCase):
                 '  exit 0\n'
                 'fi\n')
 
+    @needs_lsof
     def test_live_checkout_is_spared_while_every_other_tree_is_reclaimed(self):
         pidfile = self.root / "live.pid"
         pidfile.write_text("0\n")
@@ -258,6 +265,7 @@ class BuildGcTests(unittest.TestCase):
             live.stdin.close()
             live.wait(timeout=5)
 
+    @needs_lsof
     def test_live_external_lane_tree_survives_even_with_its_worktree_gone(self):
         # `fleet-plan` points a worker's CARGO_TARGET_DIR at $PLX_FLEET_DIR/<lane>, and the
         # documented teardown order is: remove the worktrees, then `--orphans`. A lane whose last
@@ -283,6 +291,7 @@ class BuildGcTests(unittest.TestCase):
             live.stdin.close()
             live.wait(timeout=5)
 
+    @needs_lsof
     def test_own_ancestors_never_protect_the_checkout_being_cleaned(self):
         # `make disk` runs this script from a `make` whose cwd IS the checkout to clean. That make
         # is blocked waiting on us, not compiling; counting it protects the very tree the user
