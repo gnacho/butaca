@@ -1105,7 +1105,11 @@ impl RootPage {
         actions.push(Action::Playback);
         if signed_in {
             playback = playback.row(Row::new("Audio & subtitles")
-                .detail("Language preferences synced with your Plex account.").chevron(true));
+                .detail(if cfg!(feature = "jellyfin") {
+                    "Language preferences synced with your Jellyfin account."
+                } else {
+                    "Language preferences synced with your Plex account."
+                }).chevron(true));
             actions.push(Action::AudioSubtitles);
         }
         sections.push(playback);
@@ -1176,7 +1180,11 @@ impl RootPage {
                 RouteLayout::screen(),
                 None,
                 "Settings",
-                "Manage this television and your Plex profile. Language preferences sync with your Plex account; playback defaults apply to this television.",
+                if cfg!(feature = "jellyfin") {
+                    "Manage this television and your Jellyfin profile. Language preferences sync with your Jellyfin account; playback defaults apply to this television."
+                } else {
+                    "Manage this television and your Plex profile. Language preferences sync with your Plex account; playback defaults apply to this television."
+                },
             ),
             &self.table,
             GroupId(0),

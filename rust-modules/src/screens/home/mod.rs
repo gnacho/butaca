@@ -2126,7 +2126,12 @@ fn status_read(
             (c"Loading your library\u{2026}", StatusKind::Working, None)
         }
         crate::pms::HubState::Failed => (
-            c"Can\u{2019}t reach your Plex server",
+            // The backend the viewer actually has, named.
+            if cfg!(feature = "jellyfin") {
+                c"Can\u{2019}t reach your Jellyfin server"
+            } else {
+                c"Can\u{2019}t reach your Plex server"
+            },
             StatusKind::Failed,
             Some(c"Try again"),
         ),
