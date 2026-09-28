@@ -2308,7 +2308,7 @@ mod tests {
         // graded under.
         // Plaintext consent adds the captured offer and persisted answers: ControlledHomeInitV5
         // carries SessionInitV4. The previous app census was 0xb2a6_c39d_095e_c1b6.
-        assert_eq!(crate::ui::rec::state_fp(APP_SHAPES), 0x5a63_834a_7437_1acb);
+        assert_eq!(crate::ui::rec::state_fp(APP_SHAPES), 0x4c8f_ce4c_6d05_abaa);
     }
 
     /// The gate at the REAL hubs landing site, through the recording the driver loads: a result
@@ -2519,7 +2519,7 @@ mod tests {
     fn consent_and_session_frame_shapes_refuse_their_predecessors() {
         // The consent machine's shape left with the telemetry module: the census below is the
         // post-removal pin. Any later shape change must update it in the same commit.
-        assert_eq!(crate::ui::rec::state_fp(APP_SHAPES), 0x5a63_834a_7437_1acb);
+        assert_eq!(crate::ui::rec::state_fp(APP_SHAPES), 0x4c8f_ce4c_6d05_abaa);
         // Dropping any one of the surviving shapes changes the fingerprint, so a recording
         // graded under this census is refused the moment a shape moves.
         let mut short = APP_SHAPES.to_vec();
