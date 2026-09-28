@@ -793,8 +793,14 @@ pub(crate) fn row_watch_state<T: crate::ui::tile::Tile + ?Sized>(m: &T) -> Poste
 ///
 /// Each names the OUTCOME its press produces, never the state the item is in — which is what lets
 /// a part-watched item show both at once without either being a lie.
-pub(crate) const MARK_WATCHED_VERB: &str = "Mark as Watched";
-pub(crate) const MARK_UNWATCHED_VERB: &str = "Mark as Unwatched";
+/// The verbs are functions, not constants: the label follows the television's locale at draw
+/// time, and a `const &str` cannot. Each returns the translated word for its English key.
+pub(crate) fn mark_watched_verb() -> &'static str {
+    crate::i18n::t("Mark as Watched")
+}
+pub(crate) fn mark_unwatched_verb() -> &'static str {
+    crate::i18n::t("Mark as Unwatched")
+}
 
 /// …and the third verb the same two surfaces share: **play this from 00:00, ignoring the resume
 /// point.** The detail hero's disc and the card menu's row are one action, so they carry one WORD —
@@ -808,8 +814,12 @@ pub(crate) const MARK_UNWATCHED_VERB: &str = "Mark as Unwatched";
 /// resembling a play mark. The two were reconciled onto one glyph for a day and it was wrong;
 /// `Icon::Restart`'s doc is the argument. One action, one word, and the mark chosen per surface for
 /// what that surface has to tell apart.
-pub(crate) const PLAY_FROM_START_VERB: &str = "Play from Start";
-pub(crate) const PLAY_TRAILER_VERB: &str = "Play Trailer";
+pub(crate) fn play_from_start_verb() -> &'static str {
+    crate::i18n::t("Play from Start")
+}
+pub(crate) fn play_trailer_verb() -> &'static str {
+    crate::i18n::t("Play Trailer")
+}
 
 /// The **watched tick** on a poster, as fractions of the tile's DRAWN width: the tick's box, its
 /// corner inset, then the veil's box. Anchored on the design system's `ArtTile` — a 26px tick inset

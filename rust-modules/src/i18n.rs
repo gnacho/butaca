@@ -102,6 +102,86 @@ pub(crate) fn t(s: &'static str) -> &'static str {
 /// translation - an empty or placeholder arm would render as such, which is worse than English.
 fn es(s: &str) -> Option<&'static str> {
     Some(match s {
+        // ---- Settings, menus and read-outs (the 0.7 port's wrap sweep) ----
+        "Libraries" => "Bibliotecas",
+        "Favorite libraries" => "Bibliotecas favoritas",
+        "Which libraries this television shows." => "Qué bibliotecas muestra este televisor.",
+        "favorite" => "favorita",
+        "favorites" => "favoritas",
+        "Delete all local data" => "Eliminar todos los datos locales",
+        "Delete all local data?" => "¿Eliminar todos los datos locales?",
+        "Erase every stored sign-in, profile and setting." => "Borra cada sesión, perfil y ajuste guardado.",
+        "Automatically Sign In" => "Iniciar sesión automáticamente",
+        "Skip the profile list when the app starts." => "Omitir la lista de perfiles al iniciar la app.",
+        "Play trailers automatically" => "Reproducir tráilers automáticamente",
+        "After a moment on a title, play its trailer with sound." => "Al dejar un título un momento, reproduce su tráiler con sonido.",
+        "Playback" => "Reproducción",
+        "Video & playback" => "Vídeo y reproducción",
+        "Default quality and Direct Play." => "Calidad predeterminada y reproducción directa.",
+        "Audio & subtitles" => "Audio y subtítulos",
+        "Language preferences synced with your Jellyfin account." => "Preferencias de idioma sincronizadas con tu cuenta de Jellyfin.",
+        "Language preferences synced with your Plex account." => "Preferencias de idioma sincronizadas con tu cuenta de Plex.",
+        "Unencrypted connections" => "Conexiones sin cifrar",
+        "Connect without encryption?" => "¿Conectar sin cifrado?",
+        "Delete all" => "Eliminar todo",
+        "Not now" => "Ahora no",
+        "Try again" => "Reintentar",
+        "Retry" => "Reintentar",
+        "Force Direct Play?" => "¿Forzar reproducción directa?",
+        "Enable Force" => "Activar forzar",
+        "Overridden by Force Direct Play: Original quality." => "Anulado por Reproducción directa forzada: calidad original.",
+        "Automatic selection is off in Plex. Choosing a language enables it." => "La selección automática está desactivada en Plex. Al elegir un idioma se activa.",
+        "Try the account request again." => "Inténtalo de nuevo con la solicitud de la cuenta.",
+        "Saved preference; Force Direct Play uses Original." => "Preferencia guardada; Reproducción directa forzada usa Calidad original.",
+        // ---- Detail hero and item menus ----
+        "Also available" => "También disponible",
+        "Mark as Watched" => "Marcar como visto",
+        "Mark as Unwatched" => "Marcar como no visto",
+        "Mark Show as Watched" => "Marcar serie como vista",
+        "Mark Show as Unwatched" => "Marcar serie como no vista",
+        "Play from Start" => "Reproducir desde el inicio",
+        "Play Trailer" => "Reproducir tráiler",
+        "Trailer" => "Tráiler",
+        "Full screen" => "Pantalla completa",
+        "Watch Credits" => "Ver créditos",
+        "to scroll" => "para desplazarte",
+        "to return" => "para volver",
+        "Press" => "Pulsa",
+        // ---- Home and read-outs ----
+        "Can\u{2019}t reach your Jellyfin server" => "No se puede alcanzar tu servidor Jellyfin",
+        "Can\u{2019}t reach your Plex server" => "No se puede alcanzar tu servidor Plex",
+        "Nothing on this server yet" => "Todavía no hay nada en este servidor",
+        "Couldn\u{2019}t sign in" => "No se pudo iniciar sesión",
+        "Couldn\u{2019}t save your sign-in" => "No se pudo guardar tu sesión",
+        "Local data deleted" => "Datos locales eliminados",
+        "Credentials, preferences, telemetry and local diagnostics have been removed." => "Se han eliminado las credenciales, las preferencias, la telemetría y los diagnósticos locales.",
+        "Signed out, and most local data deleted" => "Sesión cerrada y la mayoría de los datos locales eliminados",
+        "Some files could not be removed and may still be on this television." => "Algunos archivos no se pudieron eliminar y pueden seguir en este televisor.",
+        "Nothing from this person is in your libraries" => "Nada de esta persona está en tus bibliotecas",
+        "Couldn\u{2019}t load libraries" => "No se pudieron cargar las bibliotecas",
+        "Check the connection, then try again." => "Comprueba la conexión e inténtalo de nuevo.",
+        "Start watching" => "Empezar a ver",
+        "Repair Butaca’s sandbox?" => "¿Reparar el sandbox de Butaca?",
+        "Repair PlxNative’s sandbox?" => "¿Reparar el sandbox de PlxNative?",
+        // ---- Search ----
+        "Search your library" => "Busca en tu biblioteca",
+        "Search didn’t reach the server" => "La búsqueda no llegó al servidor",
+        "Your libraries are fine, try again in a moment." => "Tus bibliotecas están bien, inténtalo de nuevo en un momento.",
+        "Filter by" => "Filtrar por",
+        "Connect" => "Conectar",
+        "Go to Episode" => "Ir al episodio",
+        "Go to Movie" => "Ir a la película",
+        "Converts on server" => "Convierte en el servidor",
+        "Direct Play" => "Reproducción directa",
+        "Direct Stream" => "Transmisión directa",
+        "hardware conversion needs" => "necesita conversión por hardware",
+        "tone-mapping needs" => "necesita mapeo de tonos",
+        "Next Episode" => "Siguiente episodio",
+        "TRACK INFORMATION" => "INFORMACIÓN DE PISTA",
+        "No tracks" => "Sin pistas",
+        "Check for new shares" => "Buscar nuevos recursos compartidos",
+        "All Genres" => "Todos los géneros",
+        "Nothing here matches" => "Nada coincide aquí",
         // ---- Home: shelf and row titles (the data layer builds them; the literal is the key) --
         "Continue Watching" => "Seguir viendo",
         "Recently Added" => "Añadido recientemente",
@@ -168,8 +248,6 @@ fn es(s: &str) -> Option<&'static str> {
         "Closed captions refer to subtitles in available languages with the addition of relevant non-dialogue information." => "Los subtítulos (CC) incluyen subtítulos en los idiomas disponibles con información adicional relevante no dialogada.",
         "Subtitles for the deaf and hard of hearing (SDH) refer to subtitles in the original language with the addition of relevant non-dialogue information." => "Los subtítulos para personas sordas o con dificultades auditivas (SDH) incluyen subtítulos en el idioma original con información adicional relevante no dialogada.",
         "Audio descriptions (AD) refer to a narration track describing what is happening on screen, to provide context for those who are blind or have low vision." => "Las audiodescripciones (AD) son una pista de narración que describe lo que ocurre en pantalla, para dar contexto a personas ciegas o con baja visión.",
-        "hardware conversion needs" => "necesita conversión por hardware",
-        "tone-mapping needs" => "necesita mapeo de tono",
         "New episode" => "Nuevo episodio",
         "Loading your library…" => "Cargando tu biblioteca…",
         "Can't reach your Jellyfin server" => "No se puede conectar con tu servidor Jellyfin",
@@ -179,24 +257,17 @@ fn es(s: &str) -> Option<&'static str> {
         "Shared by {o} · your own server is fine." => "Compartido por {o} · tu propio servidor funciona bien.",
         "this server" => "este servidor",
         "No libraries on this server" => "No hay bibliotecas en este servidor",
-        "Nothing here matches" => "Nada coincide aquí",
         "items" => "elementos",
         "No {noun} in {}" => "No hay {noun} en {}",
         "Loading…" => "Cargando…",
         "Unwatched only" => "Solo no vistas",
         "Genre" => "Género",
-        "All Genres" => "Todos los géneros",
         "From Beginning" => "Desde el principio",
         "Go to Show" => "Ir a la serie",
-        "Go to Movie" => "Ir a la película",
-        "Go to Episode" => "Ir al episodio",
         "Go to Season" => "Ir a la temporada",
         "Remove from Deck" => "Quitar de la fila",
-        "Direct Play" => "Reproducción directa",
-        "Direct Stream" => "Emisión directa",
         "Converting" => "Convirtiendo",
         "Converting · {name}" => "Convirtiendo · {name}",
-        "No tracks" => "Sin pistas",
         "films" => "películas",
         "shows" => "series",
         "Films" => "Películas",
@@ -215,7 +286,6 @@ fn es(s: &str) -> Option<&'static str> {
         "Server" => "Servidor",
         "User name" => "Usuario",
         "Password" => "Contraseña",
-        "Connect" => "Conectar",
         // ---- Search ----
         "SEARCH RESULTS" => "RESULTADOS DE BÚSQUEDA",
         "RECENT SEARCHES" => "BÚSQUEDAS RECIENTES",
@@ -248,7 +318,6 @@ fn es(s: &str) -> Option<&'static str> {
         "FILE" => "ARCHIVO",
         "VIDEO" => "VÍDEO",
         "SUBTITLES" => "SUBTÍTULOS",
-        "TRACK INFORMATION" => "INFORMACIÓN DE PISTAS",
         // ---- Person page ----
         "Born {born}" => "Nacido el {born}",
         "Born {born}, {}" => "Nacido el {born}, {}",
@@ -296,9 +365,7 @@ fn es(s: &str) -> Option<&'static str> {
         "Not reachable" => "No accesible",
         "Remote" => "Remoto",
         "Home needs one library" => "El Inicio necesita una biblioteca",
-        "Check for new shares" => "Buscar nuevas comparticiones",
         // ---- Player HUD and related panels ----
-        "Next Episode" => "Siguiente episodio",
         "Up Next · {}" => "A continuación · {}",
         "Skip Intro" => "Saltar intro",
         "Skip Credits" => "Saltar créditos",
@@ -308,7 +375,6 @@ fn es(s: &str) -> Option<&'static str> {
         "Options" => "Opciones",
         "Quality" => "Calidad",
         "Chapters" => "Capítulos",
-        "Converts on server" => "Convierte en el servidor",
         "This TV\u{2019}s sandbox blocks access to /dev/rtkmem" => "El sandbox de esta TV bloquea el acceso a /dev/rtkmem",
         "Repair needs rooted Homebrew Channel access · Help: github.com/GLinnik21/plx-native/issues/74" => "La reparación necesita Homebrew Channel con root · Ayuda: github.com/GLinnik21/plx-native/issues/74",
         "Repairing sandbox…" => "Reparando sandbox…",
@@ -598,6 +664,21 @@ pub(crate) fn tc<'a>(s: &'static str, buf: &'a mut [u8; TC_MAX]) -> &'a [u8] {
     buf[..n].copy_from_slice(&t.as_bytes()[..n]);
     buf[n] = 0;
     &buf[..n + 1]
+}
+
+/// Translate into an OWNED NUL-terminated string — for prompts that store their labels across
+/// frames. The locale is fixed at boot, so the translation is resolved once, here, and the
+/// owned string lives as long as its prompt.
+pub(crate) fn tcstring(s: &'static str) -> std::ffi::CString {
+    std::ffi::CString::new(t(s)).unwrap_or_default()
+}
+
+/// The CStr-shaped twin of [`tc`]: same buffer contract, returned as a `&CStr` for the C-ABI
+/// surfaces (button labels, unfurl discs) that take a pointer. The borrow is the caller's
+/// buffer's, so a draw site holds one `[u8; TC_MAX]` beside the call and the label lives exactly
+/// as long as the draw needs it.
+pub(crate) fn tcstr<'a>(s: &'static str, buf: &'a mut [u8; TC_MAX]) -> &'a std::ffi::CStr {
+    std::ffi::CStr::from_bytes_with_nul(tc(s, buf)).unwrap_or(c"")
 }
 
 /// Longest label the bridge will carry, NUL included. Enough for every row heading and pill in

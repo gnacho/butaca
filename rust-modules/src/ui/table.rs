@@ -690,7 +690,7 @@ impl TableView {
     pub fn draw(&self, p: Painter, frame: Rect, measure: &dyn crate::ui::machine::Measure) {
         if self.n_rows() == 0 {
             Label::new(
-                c"No tracks".as_ptr(),
+                { let mut b = [0u8; crate::i18n::TC_MAX]; crate::i18n::tcstr(crate::i18n::t("No tracks"), &mut b).as_ptr() },
                 theme::size::BODY,
                 theme::TEXT_TERTIARY,
             )
@@ -1118,11 +1118,11 @@ mod tests {
     #[test]
     fn a_row_states_exactly_one_trailing_read_out() {
         assert_eq!(
-            Row::new("Unwatched only").toggle(true).readout(),
+            Row::new(crate::i18n::t("Unwatched only")).toggle(true).readout(),
             Some("On")
         );
         assert_eq!(
-            Row::new("Unwatched only").toggle(false).readout(),
+            Row::new(crate::i18n::t("Unwatched only")).toggle(false).readout(),
             Some("Off")
         );
         assert_eq!(Row::new("Genre").value("All").readout(), Some("All"));

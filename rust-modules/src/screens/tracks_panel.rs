@@ -985,7 +985,8 @@ impl TracksPanelScreen {
         let cx = r.x + PAD;
         let cw = PANEL_W - 2.0 * PAD;
         let mut y = r.y + PAD;
-        let eyebrow = c"TRACK INFORMATION";
+        let mut eyebrow_buf = [0u8; crate::i18n::TC_MAX];
+        let eyebrow = crate::i18n::tcstr(crate::i18n::t("TRACK INFORMATION"), &mut eyebrow_buf);
         Label::new(eyebrow.as_ptr(), theme::size::CAPTION, theme::TEXT_TERTIARY)
             .bold()
             .v(VAlign::CapTop)
@@ -1066,7 +1067,8 @@ impl TracksPanelScreen {
         // The design's `gap:12` applies between EVERY item in this run, the label included — the loop
         // above already advances by 12, so the label takes the pen where it is rather than adding a
         // second nudge of its own (which is what made this one gap 16 while its neighbour was 12).
-        let hint = c"to scroll";
+        let mut hint_buf = [0u8; crate::i18n::TC_MAX];
+        let hint = crate::i18n::tcstr(crate::i18n::t("to scroll"), &mut hint_buf);
         Label::new(hint.as_ptr(), theme::size::CAPTION, theme::TEXT_TERTIARY)
             .draw(p, Rect::new(gx, fy, cw, FOOTER_H));
         // right: Press [BACK] to return, RIGHT-aligned on the padding edge. The shared
@@ -1074,7 +1076,13 @@ impl TracksPanelScreen {
         // `right - width()`. (This was a local `key_cap_hint` that built its cap out of `keyline_chip`
         // — which HUGS its label's cap band, where the design's KeyCap is a fixed 82x36 with a MICRO
         // bold label. The shared cap is the fixed band, so the panels all draw one object.)
-        let back_hint = crate::ui::widgets::KeyHint::new(c"Press", c"BACK", c"to return");
+        let mut press_b = [0u8; crate::i18n::TC_MAX];
+        let mut ret_b = [0u8; crate::i18n::TC_MAX];
+        let back_hint = crate::ui::widgets::KeyHint::new(
+            crate::i18n::tcstr(crate::i18n::t("Press"), &mut press_b),
+            c"BACK",
+            crate::i18n::tcstr(crate::i18n::t("to return"), &mut ret_b),
+        );
         back_hint.draw(p, cx + cw - back_hint.width(measure), cy, measure);
     }
 }

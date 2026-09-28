@@ -157,12 +157,12 @@ fn reconciling_card_content_invalidates_its_cached_ground_only_when_changed() {
     let _serial = crate::testlock::serial();
     let _reset = Reset::new(false);
     let mut alert = DecisionAlert::new();
-    alert.open_card(c"Details", vec!["support".into()], Answers::One);
+    alert.open_card("Details", vec!["support".into()], Answers::One);
     embedded_alert_frame(true, true);
     assert!(matches!(held(), Held::Ground(_)));
-    assert!(!alert.reconcile_card(c"Details", vec!["support".into()], Answers::One));
+    assert!(!alert.reconcile_card("Details", vec!["support".into()], Answers::One));
     assert!(matches!(held(), Held::Ground(_)), "unchanged content keeps its snapshot");
-    assert!(alert.reconcile_card(c"Details", vec!["receipt".into(), "support".into()], Answers::Two));
+    assert!(alert.reconcile_card("Details", vec!["receipt".into(), "support".into()], Answers::Two));
     assert!(held() == Held::Nothing, "the taller card cannot reuse the old panel outline");
     assert_eq!(embedded_alert_frame(true, true), ["page", "scrim", "glass", "title/body/buttons"]);
 }

@@ -82,7 +82,7 @@ impl PreferencesPage {
                 quality: crate::route::quality(), direct_play: crate::route::direct_play_mode(),
                 values: Vec::new(), confirming: false, affirmative: false },
             parent_row: 0, copy: String::new(), request: None, snapshot: None, pending: None, retry: None,
-            alert: DecisionPrompt::new(ALERT_GROUP, ALERT, ALERT + 1, c"Cancel", c"Enable Force") };
+            alert: DecisionPrompt::new(ALERT_GROUP, ALERT, ALERT + 1, "Cancel", "Enable Force") };
         s.rebuild(0);
         s
     }
@@ -213,15 +213,15 @@ impl PreferencesPage {
                 let value = self.value_label(field);
                 let mut row = Row::new(field.title()).value(&value).chevron(true).dim(self.state.busy);
                 if field == Field::Quality && self.state.direct_play == DirectPlayMode::Forced {
-                    row = row.detail("Overridden by Force Direct Play: Original quality.");
+                    row = row.detail(crate::i18n::t("Overridden by Force Direct Play: Original quality."));
                 }
                 if field == Field::AudioLanguage && self.snapshot.as_ref().is_some_and(|s| s.preferences.auto_select_audio == Some(false)) {
-                    row = row.detail("Automatic selection is off in Plex. Choosing a language enables it.");
+                    row = row.detail(crate::i18n::t("Automatic selection is off in Plex. Choosing a language enables it."));
                 }
                 section = section.row(row); self.state.values.push(value); self.actions.push(Action::Open(field));
             }
             if self.state.kind == Kind::AudioSubtitles && !self.state.busy && !self.state.status.is_empty() {
-                section = section.row(Row::new("Retry").detail("Try the account request again.")); self.actions.push(Action::Retry);
+                section = section.row(Row::new(crate::i18n::t("Retry")).detail(crate::i18n::t("Try the account request again."))); self.actions.push(Action::Retry);
             }
         }
         self.table.compact = false; self.table.header_ink = theme::TEXT_READING;
@@ -243,7 +243,7 @@ impl PreferencesPage {
             }
             Action::Pick(value) => {
                 if value == Value::DirectPlay(DirectPlayMode::Forced) && self.state.direct_play != DirectPlayMode::Forced {
-                    self.alert.open(c"Force Direct Play?", FORCE_BODY);
+                    self.alert.open(crate::i18n::t("Force Direct Play?"), FORCE_BODY);
                     self.state.confirming = true; self.state.affirmative = false; self.focus(fx, ALERT_GROUP);
                     return;
                 }

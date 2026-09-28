@@ -50,7 +50,7 @@ impl Resources {
             self.query = q.into();
             self.caret = caret;
             self.run = if q.trim().is_empty() {
-                c"Search your library".into()
+                crate::i18n::tcstring("Search your library")
             } else {
                 cstring(q)
             };
@@ -276,8 +276,9 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
 
 fn recents<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: Painter) {
     let env = Env::inert();
+    let mut hdr = [0u8; crate::i18n::TC_MAX];
     Label::new(
-        c"RECENT SEARCHES".as_ptr(),
+        crate::i18n::tcstr(crate::i18n::t("RECENT SEARCHES"), &mut hdr).as_ptr(),
         theme::size::CAPTION,
         theme::TEXT_TERTIARY,
     )
@@ -333,7 +334,7 @@ fn recents<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p
         stop(screen, *elem, ElemKind::Bare, f, p);
     }
     let rect = layout::clear(shown, screen.scroll.pos, f.cx.measure);
-    Button::new(c"Clear recent searches".as_ptr(), theme::size::BODY, rect)
+    { let mut b = [0u8; crate::i18n::TC_MAX]; Button::new(crate::i18n::tcstr(crate::i18n::t("Clear recent searches"), &mut b).as_ptr(), theme::size::BODY, rect) }
         .focused(f.cx.focus.current == Some(screen.key(CLEAR)))
         .draw(&env, p);
     stop(screen, CLEAR, ElemKind::Control, f, p);
@@ -350,12 +351,23 @@ fn empty<H: SearchLike>(screen: &SearchScreen, f: &DrawFrame<'_, '_, H>, p: Pain
     let mut rect = layout::empty_band(screen.editing);
     rect.y -= screen.scroll.pos;
     if empty == EmptyState::Fault {
-        StatusOverlay::new(rect, c"Search didn’t reach the server", StatusKind::Failed)
-            .reason(c"Your libraries are fine — try again in a moment.")
-            .draw(&Env::inert(), p);
+        let mut cap_b = [0u8; crate::i18n::TC_MAX];
+        let mut why_b = [0u8; crate::i18n::TC_MAX];
+        StatusOverlay::new(
+            rect,
+            crate::i18n::tcstr(crate::i18n::t("Search didn’t reach the server"), &mut cap_b),
+            StatusKind::Failed,
+        )
+        .reason(crate::i18n::tcstr(
+            crate::i18n::t("Your libraries are fine, try again in a moment."),
+            &mut why_b,
+        ))
+        .draw(&Env::inert(), p);
         return;
     }
     let header = header_of(empty);
+    let mut header_buf = [0u8; crate::i18n::TC_MAX];
+    let header = crate::i18n::tcstr(header, &mut header_buf);
     let statement = if empty == EmptyState::NoResults {
         let shell =
             f.cx.measure
@@ -586,10 +598,10 @@ fn empty_state(state: crate::search::State, has_shelves: bool) -> Option<EmptySt
     }
 }
 
-fn header_of(state: EmptyState) -> &'static CStr {
+fn header_of(state: EmptyState) -> &'static str {
     match state {
-        EmptyState::NoResults => c"SEARCH RESULTS",
-        _ => c"RECENT SEARCHES",
+        EmptyState::NoResults => crate::i18n::t("SEARCH RESULTS"),
+        _ => crate::i18n::t("RECENT SEARCHES"),
     }
 }
 
@@ -1172,8 +1184,8 @@ mod tests {
         assert_eq!(empty_state(State::Ready, true), None);
         assert_eq!(empty_state(State::Failed, true), Some(EmptyState::Fault));
         assert_eq!(empty_state(State::Idle, true), Some(EmptyState::NotYet));
-        assert_eq!(header_of(EmptyState::NotYet), c"RECENT SEARCHES");
-        assert_eq!(header_of(EmptyState::NoResults), c"SEARCH RESULTS");
+        assert_eq!(header_of(EmptyState::NotYet), crate::i18n::t("RECENT SEARCHES"));
+        assert_eq!(header_of(EmptyState::NoResults), crate::i18n::t("SEARCH RESULTS"));
     }
 
     #[test]

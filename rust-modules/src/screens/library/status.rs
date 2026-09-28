@@ -4,7 +4,7 @@ use super::*;
 use crate::ui::widgets::{StatusKind, StatusOverlay};
 
 impl LibraryScreen {
-    pub(super) fn status_overlay<'a, H: LibraryLike>(&self, cx: &Cx<'_, H>, caption: &'a CStr, reason: Option<&'a CStr>) -> StatusOverlay<'a> {
+    pub(super) fn status_overlay<'a, H: LibraryLike>(&self, cx: &Cx<'_, H>, caption: &'a CStr, reason: Option<&'a CStr>, action: Option<&'a CStr>) -> StatusOverlay<'a> {
         let kind = match self.readout {
             Readout::Failed => StatusKind::Failed, Readout::Loading => StatusKind::Working,
             Readout::Empty | Readout::Grid => StatusKind::Empty,
@@ -16,10 +16,16 @@ impl LibraryScreen {
         let mut overlay = StatusOverlay::new(self.status_frame(), caption, kind).page().phase(cx.tick.ms)
             .focused(cx.focus.current == Some(self.key(RETRY)));
         if let Some(reason) = reason { overlay = overlay.reason(reason); }
-        if self.readout == Readout::Failed {
-            overlay = overlay.action(super::super::plaintext_question::primary(self.plaintext.verdict()));
-        }
+        if let Some(action) = action { overlay = overlay.action(action); }
         overlay
+    }
+
+    /// The failed read-out's action label, translated and OWNED by the caller, which is what the
+    /// returned overlay's borrow needs: `None` on any read-out but `Failed`.
+    pub(super) fn action_label(&self) -> Option<std::ffi::CString> {
+        (self.readout == Readout::Failed).then(|| {
+            crate::i18n::tcstring(super::super::plaintext_question::primary(self.plaintext.verdict()))
+        })
     }
 
     /// Follow the offer for the failed source's server (`plex::grant::offers`), and take the
@@ -43,7 +49,9 @@ impl LibraryScreen {
     pub(super) fn status_rect<H: LibraryLike>(&self, cx: &Cx<'_, H>) -> Option<Rect> {
         if self.readout != Readout::Failed { return None; }
         let (caption, reason) = self.status_text(cx);
-        self.status_overlay(cx, &caption, reason.as_deref()).action_frame_measured(cx.measure)
+        let action = self.action_label();
+        self.status_overlay(cx, &caption, reason.as_deref(), action.as_deref())
+            .action_frame_measured(cx.measure)
     }
 
     pub(super) fn status_text<H: LibraryLike>(&self, cx: &Cx<'_, H>) -> (CString, Option<CString>) {

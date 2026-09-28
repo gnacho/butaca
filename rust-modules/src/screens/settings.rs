@@ -1046,12 +1046,12 @@ impl RootPage {
             // The section is Libraries and the row is Favorite libraries: the switch governs the
             // whole app — Home's shelves, the top tab strip and the Library's Sources picker.
             sections.push(
-                Section::new("Libraries").row(
-                    Row::new("Favorite libraries")
-                        .detail("Which libraries this television shows.")
+                Section::new(crate::i18n::t("Libraries")).row(
+                    Row::new(crate::i18n::t("Favorite libraries"))
+                        .detail(crate::i18n::t("Which libraries this television shows."))
                         .value(format!(
                             "{n} {}",
-                            if n == 1 { "favorite" } else { "favorites" }
+                            if n == 1 { crate::i18n::t("favorite") } else { crate::i18n::t("favorites") }
                         ))
                         .chevron(true),
                 ),
@@ -1064,8 +1064,8 @@ impl RootPage {
         sections.push(
             Section::new(crate::i18n::t("Privacy"))
                 .row(
-                    Row::new("Delete all local data")
-                        .detail("Erase every stored sign-in, profile and setting.")
+                    Row::new(crate::i18n::t("Delete all local data"))
+                        .detail(crate::i18n::t("Erase every stored sign-in, profile and setting."))
                         .chevron(true),
                 )
                 .row(
@@ -1079,16 +1079,16 @@ impl RootPage {
         // A one-person account already skips the picker; the switch only changes a multi-user boot.
         if signed_in && multi_user {
             system = system.row(
-                Row::new("Automatically Sign In")
-                    .detail("Skip the profile list when the app starts.")
+                Row::new(crate::i18n::t("Automatically Sign In"))
+                    .detail(crate::i18n::t("Skip the profile list when the app starts."))
                     .toggle(auto_sign_in),
             );
             actions.push(Action::AutoSignIn);
         }
         if signed_in {
             system = system.row(
-                Row::new("Play trailers automatically")
-                    .detail("After a moment on a title, play its trailer with sound.")
+                Row::new(crate::i18n::t("Play trailers automatically"))
+                    .detail(crate::i18n::t("After a moment on a title, play its trailer with sound."))
                     .toggle(trailer_autoplay),
             );
             actions.push(Action::TrailerAutoplay);
@@ -1096,21 +1096,21 @@ impl RootPage {
         system = system.row(
             // The fork's own build brands the About row (0.6.x did exactly this); a plain Plex
             // build keeps upstream's name.
-            Row::new(if cfg!(feature = "jellyfin") { "About butaca" } else { "About PlxNative" })
+            Row::new(if cfg!(feature = "jellyfin") { crate::i18n::t("About butaca") } else { crate::i18n::t("About PlxNative") })
                 .detail(crate::i18n::t("Version, copyright and project information."))
                 .chevron(true),
         );
         sections.push(system);
         actions.push(Action::About);
-        let mut playback = Section::new("Playback").row(
-            Row::new("Video & playback").detail("Default quality and Direct Play.").chevron(true));
+        let mut playback = Section::new(crate::i18n::t("Playback")).row(
+            Row::new(crate::i18n::t("Video & playback")).detail(crate::i18n::t("Default quality and Direct Play.")).chevron(true));
         actions.push(Action::Playback);
         if signed_in {
-            playback = playback.row(Row::new("Audio & subtitles")
+            playback = playback.row(Row::new(crate::i18n::t("Audio & subtitles"))
                 .detail(if cfg!(feature = "jellyfin") {
-                    "Language preferences synced with your Jellyfin account."
+                    crate::i18n::t("Language preferences synced with your Jellyfin account.")
                 } else {
-                    "Language preferences synced with your Plex account."
+                    crate::i18n::t("Language preferences synced with your Plex account.")
                 }).chevron(true));
             actions.push(Action::AudioSubtitles);
         }
@@ -1156,7 +1156,7 @@ impl RootPage {
         if self.plaintext_rows.is_empty() {
             return None;
         }
-        let mut section = Section::new("Unencrypted connections");
+        let mut section = Section::new(crate::i18n::t("Unencrypted connections"));
         let offers = crate::plex::grant::offers();
         for (i, (machine, on)) in self.plaintext_rows.iter().enumerate() {
             // An offered server was never reached, so the session file does not know it yet:

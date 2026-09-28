@@ -2363,7 +2363,14 @@ impl DetailScreen {
                 .scale(scale)
                 .draw(&Env::inert(), p),
                 hero::HeroCtl::Alt => {
-                    Button::new(hero::ALT_LABEL.as_ptr(), theme::size::BODY, rect)
+                    Button::new(
+                        {
+                            let mut buf = [0u8; crate::i18n::TC_MAX];
+                            crate::i18n::tcstr(hero::alt_label(), &mut buf).as_ptr()
+                        },
+                        theme::size::BODY,
+                        rect,
+                    )
                         .trailing_icon(crate::ui::icons::Icon::ChevronDown)
                         .focused(focused)
                         .palette(palette)
@@ -2387,7 +2394,8 @@ impl DetailScreen {
                         .ground(ground)
                         .scale(scale);
                     if let Some((slot, label)) = hero::disc_verb(ctl, self.named_show(meta)) {
-                        button = button.label(label.as_ptr(), self.disc_unfurl[slot].pos);
+                        let mut buf = [0u8; crate::i18n::TC_MAX];
+                        button = button.label(crate::i18n::tcstr(label, &mut buf).as_ptr(), self.disc_unfurl[slot].pos);
                     }
                     button.draw(&Env::inert(), p);
                 }

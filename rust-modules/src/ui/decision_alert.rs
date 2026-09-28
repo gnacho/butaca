@@ -180,7 +180,7 @@ pub(crate) struct DecisionAlert {
     controls: CtlPop<2>,
     /// Stored with the body so draw and pointer hit-testing use the same measured wrapping even on
     /// the first frame after open.
-    question: &'static str,
+    question: String,
     /// The optional paragraphs under the question, held on the ALERT rather than passed to
     /// [`draw`](Self::draw). It has to be here because the body changes where the buttons are, and
     /// [`frames`](Self::frames) must compute the same panel as the last draw did. A body passed
@@ -219,7 +219,7 @@ impl DecisionAlert {
             pop: Popover::new().caching_host(),
             choice: Choice::Cancel,
             controls: CtlPop::new(),
-            question: "",
+            question: String::new(),
             body: Vec::new(),
             answers: Answers::Two,
             tone: Tone::Destructive,
@@ -242,8 +242,8 @@ impl DecisionAlert {
         self.pop.appear_settled()
     }
     /// Ask the question alone.
-    pub(crate) fn open(&mut self, question: &'static core::ffi::CStr) {
-        self.question = question.to_str().unwrap_or("");
+    pub(crate) fn open(&mut self, question: &str) {
+        self.question = question.to_string();
         self.body.clear();
         self.answers = Answers::Two;
         self.open_inner();
@@ -254,7 +254,7 @@ impl DecisionAlert {
     /// moment that difference can be stated.
     pub(crate) fn open_with_body(
         &mut self,
-        question: &'static core::ffi::CStr,
+        question: &str,
         body: &'static str,
     ) {
         self.open_card(question, vec![Cow::Borrowed(body)], Answers::Two);
@@ -264,7 +264,7 @@ impl DecisionAlert {
     /// a caller whose default is the second answer says so with [`set_choice`](Self::set_choice).
     pub(crate) fn open_card(
         &mut self,
-        question: &'static core::ffi::CStr,
+        question: &str,
         paragraphs: Vec<Cow<'static, str>>,
         answers: Answers,
     ) {
@@ -277,18 +277,17 @@ impl DecisionAlert {
     /// changed. Closed and dismissing cards keep their last content for the exit choreography.
     pub(crate) fn reconcile_card(
         &mut self,
-        question: &'static core::ffi::CStr,
+        question: &str,
         paragraphs: Vec<Cow<'static, str>>,
         answers: Answers,
     ) -> bool {
-        let question = question.to_str().unwrap_or("");
         if !self.is_open()
             || (self.question == question && self.body == paragraphs && self.answers == answers)
         {
             return false;
         }
         let _own = crate::ui::popover::own_motion();
-        self.question = question;
+        self.question = question.to_string();
         self.body = paragraphs;
         self.answers = answers;
         self.choice = self.valid_choice(self.choice);
@@ -317,7 +316,7 @@ impl DecisionAlert {
     /// The panel for the current retained content. **Not callable from a host test** — `text_height` and `measure_h`
     /// both reach SDL2_ttf; the pure half is [`layout`].
     fn measured(&self) -> Layout {
-        let qh = Self::question_view(self.question).measure_h(BODY_W);
+        let qh = Self::question_view(&self.question).measure_h(BODY_W);
         let heights: Vec<f32> = self.body.iter().map(|b| Self::body_view(b).measure_h(BODY_W)).collect();
         layout_with(qh, body_h(&heights), self.answers)
     }
@@ -409,7 +408,7 @@ impl DecisionAlert {
         let p = self.pop.content_painter(Popover::RISE);
         crate::ui::profile::phase("da.panel", || self.pop.panel(p, l.panel, theme::ALERT_PANEL_RAD, Some(&self.field)));
         crate::ui::profile::phase("da.text", || {
-            Self::question_view(self.question).draw(p, l.question);
+            Self::question_view(&self.question).draw(p, l.question);
             let mut y = l.body.y;
             for para in &self.body {
                 let view = Self::body_view(para);
@@ -457,26 +456,26 @@ mod tests {
     fn reconciling_a_card_preserves_motion_and_valid_focus_and_is_quiet_when_unchanged() {
         let _serial = crate::testlock::serial();
         let mut alert = DecisionAlert::new();
-        alert.open_card(c"Details", vec!["old".into()], Answers::Two);
+        alert.open_card("Details", vec!["old".into()], Answers::Two);
         alert.set_choice(Choice::Destructive);
         for _ in 0..90 { alert.update(1.0 / 60.0); }
         assert!(alert.settled());
         let appear = alert.pop.appear();
         let users = crate::ui::popover::host_users_for_test();
-        assert!(alert.reconcile_card(c"Details", vec!["receipt".into()], Answers::Two));
+        assert!(alert.reconcile_card("Details", vec!["receipt".into()], Answers::Two));
         assert_eq!(alert.body_for_test(), ["receipt"]);
         assert_eq!(alert.choice(), Choice::Destructive);
         assert_eq!(alert.pop.appear(), appear, "content must not restart the entrance");
         assert_eq!(crate::ui::popover::host_users_for_test(), users);
         crate::ui::idle::take_local_damage();
-        assert!(!alert.reconcile_card(c"Details", vec!["receipt".into()], Answers::Two));
+        assert!(!alert.reconcile_card("Details", vec!["receipt".into()], Answers::Two));
         assert_eq!(crate::ui::idle::take_local_damage(), 0, "a settled card must stay idle");
-        assert!(alert.reconcile_card(c"Details", vec!["receipt".into()], Answers::One));
+        assert!(alert.reconcile_card("Details", vec!["receipt".into()], Answers::One));
         assert_eq!(alert.choice(), Choice::Cancel, "the removed answer hands focus to Close");
         alert.set_choice(Choice::Destructive);
         assert_eq!(alert.choice(), Choice::Cancel, "a late focus delivery cannot select a missing answer");
         alert.dismiss();
-        assert!(!alert.reconcile_card(c"Details", vec!["new".into()], Answers::Two));
+        assert!(!alert.reconcile_card("Details", vec!["new".into()], Answers::Two));
         assert_eq!(alert.body_for_test(), ["receipt"], "the exit keeps its last picture");
     }
     /// **A body must not move an alert that has none.** The body arithmetic has to vanish
@@ -564,9 +563,9 @@ mod tests {
     fn reopening_with_a_question_alone_clears_the_previous_body() {
         let _serial = crate::testlock::serial();
         let mut alert = DecisionAlert::new();
-        alert.open_with_body(c"First question?", "Consequences of the first question.");
+        alert.open_with_body("First question?", "Consequences of the first question.");
         assert!(!alert.body.is_empty());
-        alert.open(c"Second question?");
+        alert.open("Second question?");
         assert_eq!(alert.question, "Second question?");
         assert!(alert.body.is_empty());
         alert.close();
@@ -585,9 +584,9 @@ mod tests {
         assert_eq!(one.destructive.w, 0.0);
         let _serial = crate::testlock::serial();
         let mut alert = DecisionAlert::new();
-        alert.open_card(c"Details", vec!["A".into(), "B".into()], Answers::One);
+        alert.open_card("Details", vec!["A".into(), "B".into()], Answers::One);
         assert_eq!((alert.answers(), alert.body.len()), (Answers::One, 2));
-        alert.open(c"Question?");
+        alert.open("Question?");
         assert_eq!(alert.answers(), Answers::Two);
         alert.close();
     }

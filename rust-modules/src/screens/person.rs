@@ -1362,9 +1362,10 @@ impl PersonScreen {
             }
             return;
         }
+        let mut cap = [0u8; crate::i18n::TC_MAX];
         StatusOverlay::new(
             band,
-            c"Nothing from this person is in your libraries",
+            crate::i18n::tcstr(crate::i18n::t("Nothing from this person is in your libraries"), &mut cap),
             StatusKind::Empty,
         )
         .draw(env, p);

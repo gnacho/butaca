@@ -558,9 +558,9 @@ impl PlayerScreen {
             if ps.repair_status == crate::webos::jail_repair::State::Idle && !self.repair_alert.visible() {
                 self.repair_alert.open_with_body(
                     if cfg!(feature = "jellyfin") {
-                        c"Repair Butaca’s sandbox?"
+                        crate::i18n::t("Repair Butaca’s sandbox?")
                     } else {
-                        c"Repair PlxNative’s sandbox?"
+                        crate::i18n::t("Repair PlxNative’s sandbox?")
                     },
                     REPAIR_BODY,
                 );

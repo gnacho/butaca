@@ -43,7 +43,7 @@ use crate::ui::decision_alert::DecisionAlert;
 use crate::ui::widgets::{CtlPop, Spinner, StatusKind, StatusOverlay};
 use crate::ui::{theme, Env, Painter, Rect, View};
 
-use super::plaintext_question::{self, PlaintextQuestion, CONNECT};
+use super::plaintext_question::{self, PlaintextQuestion};
 use super::registry::{word, AppFx, AppLike, AppMsg, AuthLike};
 
 /// The screen's elements. The read-out's primary action owns [`CONTROL_GROUP`]; the plaintext
@@ -103,11 +103,10 @@ fn discovery_trouble_visible(phase: Phase, retry: Option<auth::DiscoveryRetryPro
 /// wedged request has its result discarded when it finally returns, and it re-runs only the leg
 /// that failed — discovery when the pin already yielded an account credential, a whole fresh pin
 /// when it did not.
-const ESCAPE: &CStr = c"Try again";
-const SIGN_IN: &CStr = c"Sign in";
+
 /// AUTH-03: acknowledges a fresh save the disk could not confirm — proceed, knowing the next
 /// launch may ask you to sign in again.
-const CONTINUE_UNSAVED: &CStr = c"Continue";
+
 
 /// How long a QR code may go unscanned before the screen offers to replace it on request.
 ///
@@ -169,16 +168,18 @@ fn qr_cache_stale(cached: u64, live: u64, phase: Phase) -> bool {
 /// sweep can fail on include the TELEMETRY decision, so a survivor is re-read on the next launch
 /// and a consent the user believed they had deleted comes back. The session is gone either way, so
 /// the verdict stays true and the reason carries the qualification.
-fn deleted_readout(leftovers: usize) -> (&'static CStr, &'static CStr) {
+/// The delete read-out's verdict and reason as KEYS (`&'static str`): the draw site renders them
+/// through `i18n::tcstr`, because both follow the television's locale.
+fn deleted_readout(leftovers: usize) -> (&'static str, &'static str) {
     if leftovers == 0 {
         (
-            c"Local data deleted",
-            c"Credentials, preferences, telemetry and local diagnostics have been removed.",
+            crate::i18n::t("Local data deleted"),
+            crate::i18n::t("Credentials, preferences, telemetry and local diagnostics have been removed."),
         )
     } else {
         (
-            c"Signed out, and most local data deleted",
-            c"Some files could not be removed and may still be on this television.",
+            crate::i18n::t("Signed out, and most local data deleted"),
+            crate::i18n::t("Some files could not be removed and may still be on this television."),
         )
     }
 }
@@ -328,12 +329,14 @@ enum ControlKind {
     ConnectPlaintext,
 }
 
-fn label_for(kind: ControlKind) -> &'static CStr {
+/// The control labels are keys, translated per call (the locale is fixed at boot): the draw
+/// site renders the returned word through `i18n::tcstr` beside the button.
+fn label_for(kind: ControlKind) -> &'static str {
     match kind {
-        ControlKind::RestartWait | ControlKind::Retry => ESCAPE,
-        ControlKind::StartLogin => SIGN_IN,
-        ControlKind::ContinueUnsaved => CONTINUE_UNSAVED,
-        ControlKind::ConnectPlaintext => CONNECT,
+        ControlKind::RestartWait | ControlKind::Retry => crate::i18n::t("Try again"),
+        ControlKind::StartLogin => crate::i18n::t("Sign in"),
+        ControlKind::ContinueUnsaved => crate::i18n::t("Continue"),
+        ControlKind::ConnectPlaintext => crate::i18n::t("Connect"),
     }
 }
 
@@ -795,7 +798,7 @@ impl LoginScreen {
     /// The read-out's control labels by slot (primary, *Details*), and whether the read-out
     /// carries a reason. How tall the reason is — one line, or a `Failed` read-out's
     /// two-line slot — is the widget's answer from the kind.
-    fn readout_labels(&self) -> ([Option<&'static CStr>; 2], bool) {
+    fn readout_labels(&self) -> ([Option<&'static str>; 2], bool) {
         let Some(kind) = self.control_kind() else {
             return ([None; 2], false);
         };
@@ -836,7 +839,11 @@ impl LoginScreen {
             };
         }
         let (labels, has_reason) = self.readout_labels();
-        let frames = status_row_rects(measure, labels, self.readout_kind(), has_reason);
+        let mut b0 = [0u8; crate::i18n::TC_MAX];
+        let mut b1 = [0u8; crate::i18n::TC_MAX];
+        let l0 = match labels[0] { Some(l) => Some(crate::i18n::tcstr(l, &mut b0)), None => None };
+        let l1 = match labels[1] { Some(l) => Some(crate::i18n::tcstr(l, &mut b1)), None => None };
+        let frames = status_row_rects(measure, [l0, l1], self.readout_kind(), has_reason);
         frames[slot_of(elem)?]
     }
 
@@ -961,32 +968,48 @@ impl LoginScreen {
         focus: Option<u32>,
     ) {
         let note = self.report_note();
-        let o = self.readout(caption, kind, reason, note.as_ref());
+        let mut b0 = [0u8; crate::i18n::TC_MAX];
+        let mut b1 = [0u8; crate::i18n::TC_MAX];
+        let o = self.readout(caption, kind, reason, note.as_ref(), [&mut b0, &mut b1]);
         self.draw_overlay(f, p, env, o, focus);
     }
 
     /// **The read-out as it is drawn** — the one overlay `draw_overlay` paints and the tests read.
     /// Its controls are [`Self::readout_labels`], the same answer the geometry and the press read,
     /// so the pill on screen always names what OK does: no stage passes a label of its own.
+    /// `label_bufs` are the CALLER's: the overlay this returns borrows the rendered labels, so the
+    /// buffers live in the draw fn that also draws it — one borrow, one frame.
     fn readout<'a>(
         &self,
         caption: &'a CStr,
         kind: StatusKind,
         reason: Option<&'a CStr>,
         note: Option<&'a Note>,
+        label_bufs: [&'a mut [u8; crate::i18n::TC_MAX]; 2],
     ) -> StatusOverlay<'a> {
         debug_assert_eq!(kind, self.readout_kind(), "the geometry reads the same kind the draw paints");
         let (labels, _) = self.readout_labels();
-        readout_overlay(caption, kind, reason, labels, note).phase(self.spin_ms as u32)
+        let [lb0, lb1] = label_bufs;
+        let l0 = match labels[0] { Some(l) => Some(crate::i18n::tcstr(l, lb0)), None => None };
+        let l1 = match labels[1] { Some(l) => Some(crate::i18n::tcstr(l, lb1)), None => None };
+        readout_overlay(caption, kind, reason, [l0, l1], note).phase(self.spin_ms as u32)
     }
 
-    /// The failed sign-in's read-out: the verdict, the phase's reason and its controls.
-    fn failed_readout<'a>(&self, reason: &'a CStr, note: Option<&'a Note>) -> StatusOverlay<'a> {
+    /// The failed sign-in's read-out: the verdict, the phase's reason and its controls. `bufs`
+    /// are the caller's render buffers (see [`Self::readout`]).
+    fn failed_readout<'a>(
+        &self,
+        reason: &'a CStr,
+        note: Option<&'a Note>,
+        bufs: [&'a mut [u8; crate::i18n::TC_MAX]; 3],
+    ) -> StatusOverlay<'a> {
+        let [cap, lb0, lb1] = bufs;
         self.readout(
-            c"Couldn\u{2019}t sign in",
+            crate::i18n::tcstr(crate::i18n::t("Couldn\u{2019}t sign in"), cap),
             StatusKind::Failed,
             (!reason.is_empty()).then_some(reason),
             note,
+            [lb0, lb1],
         )
     }
 
@@ -1071,11 +1094,13 @@ impl LoginScreen {
         env: &Env,
         focus: Option<u32>,
     ) {
+        let mut cap = [0u8; crate::i18n::TC_MAX];
+        let caption = crate::i18n::tcstr(crate::i18n::t("Couldn\u{2019}t save your sign-in"), &mut cap);
         self.draw_readout(
             f,
             p,
             env,
-            c"Couldn\u{2019}t save your sign-in",
+            caption,
             StatusKind::Failed,
             Some(c"Your sign-in couldn\u{2019}t be saved on this TV. You can continue, but you\u{2019}ll be asked to sign in again next time."),
             focus,
@@ -1091,7 +1116,10 @@ impl LoginScreen {
     ) {
         let reason = CString::new(self.error.as_ref()).unwrap_or_default();
         let note = self.report_note();
-        let o = self.failed_readout(&reason, note.as_ref());
+        let mut cap = [0u8; crate::i18n::TC_MAX];
+        let mut b0 = [0u8; crate::i18n::TC_MAX];
+        let mut b1 = [0u8; crate::i18n::TC_MAX];
+        let o = self.failed_readout(&reason, note.as_ref(), [&mut cap, &mut b0, &mut b1]);
         self.draw_overlay(f, p, env, o, focus);
     }
 
@@ -1107,6 +1135,10 @@ impl LoginScreen {
         focus: Option<u32>,
     ) {
         let (verdict, reason) = deleted_readout(self.delete_leftovers);
+        let mut cap = [0u8; crate::i18n::TC_MAX];
+        let mut why = [0u8; crate::i18n::TC_MAX];
+        let verdict = crate::i18n::tcstr(verdict, &mut cap);
+        let reason = crate::i18n::tcstr(reason, &mut why);
         self.draw_readout(
             f,
             p,
@@ -1249,7 +1281,7 @@ impl LoginScreen {
         }
         self.alert.draw_scrim();
         let (cancel, affirm) = self.question.verbs();
-        self.alert.draw(cancel, affirm);
+        self.alert.draw(&cancel, &affirm);
         let frames = self.alert.frames();
         self.alert_frames = Some(frames);
         if self.alert.is_open() && self.alert.settled() {
@@ -1754,13 +1786,13 @@ mod tests {
         let (whole, whole_why) = deleted_readout(0);
         let (partial, partial_why) = deleted_readout(2);
         assert_ne!(whole, partial);
-        assert!(whole_why.to_bytes().windows(9).any(|w| w == b"telemetry"));
+        assert!(whole_why.as_bytes().windows(9).any(|w| w == b"telemetry"));
         assert!(
-            !partial_why.to_bytes().windows(9).any(|w| w == b"telemetry"),
+            !partial_why.as_bytes().windows(9).any(|w| w == b"telemetry"),
             "a partial wipe must not name what it may have failed to delete"
         );
         assert!(
-            partial.to_bytes().windows(10).any(|w| w == b"Signed out"),
+            partial.as_bytes().windows(10).any(|w| w == b"Signed out"),
             "…but it still states what it DID do: the session is gone either way"
         );
     }
@@ -2122,8 +2154,10 @@ mod tests {
     #[test]
     fn a_stalled_working_readout_sits_its_action_pill_lower_than_a_settled_one() {
         let m = crate::ui::fixture::FixtureMeasure;
-        let working = status_action_rect(&m, ESCAPE, StatusKind::Working, true);
-        let settled = status_action_rect(&m, ESCAPE, StatusKind::Empty, true);
+        let mut b = [0u8; crate::i18n::TC_MAX];
+        let working = status_action_rect(&m, crate::i18n::tcstr(crate::i18n::t("Try again"), &mut b), StatusKind::Working, true);
+        let mut settled_buf = [0u8; crate::i18n::TC_MAX];
+        let settled = status_action_rect(&m, crate::i18n::tcstr(crate::i18n::t("Try again"), &mut settled_buf), StatusKind::Empty, true);
         assert!(
             working.y > settled.y,
             "Working straddles the centre with the spinner above it; a settled read-out centres \
@@ -2138,8 +2172,10 @@ mod tests {
     fn a_reason_line_pushes_the_action_pill_down_further() {
         let m = crate::ui::fixture::FixtureMeasure;
         for kind in [StatusKind::Working, StatusKind::Empty, StatusKind::Failed] {
-            let with_reason = status_action_rect(&m, ESCAPE, kind, true);
-            let without = status_action_rect(&m, ESCAPE, kind, false);
+            let mut with_reason_buf = [0u8; crate::i18n::TC_MAX];
+            let with_reason = status_action_rect(&m, crate::i18n::tcstr(crate::i18n::t("Try again"), &mut with_reason_buf), kind, true);
+            let mut without_buf = [0u8; crate::i18n::TC_MAX];
+            let without = status_action_rect(&m, crate::i18n::tcstr(crate::i18n::t("Try again"), &mut without_buf), kind, false);
             assert!(with_reason.y > without.y, "{kind:?}");
         }
     }
@@ -2173,12 +2209,14 @@ mod tests {
     fn status_action_rect_matches_the_widget_it_is_reproducing() {
         for kind in [StatusKind::Working, StatusKind::Failed, StatusKind::Empty] {
             for has_reason in [false, true] {
-                let mut o = StatusOverlay::new(Rect::FULL, c"caption", kind).page().action(ESCAPE);
+                let mut action_buf = [0u8; crate::i18n::TC_MAX];
+                let mut o = StatusOverlay::new(Rect::FULL, c"caption", kind).page().action(crate::i18n::tcstr(crate::i18n::t("Try again"), &mut action_buf));
                 if has_reason {
                     o = o.reason(c"This is taking longer than usual.");
                 }
                 let want = o.action_frame().expect("an action was set above");
-                let got = status_action_rect(&RawTextMeasure, ESCAPE, kind, has_reason);
+                let mut got_buf = [0u8; crate::i18n::TC_MAX];
+                let got = status_action_rect(&RawTextMeasure, crate::i18n::tcstr(crate::i18n::t("Try again"), &mut got_buf), kind, has_reason);
                 assert_eq!(
                     (got.x, got.y, got.w, got.h),
                     (want.x, want.y, want.w, want.h),

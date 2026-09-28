@@ -38,15 +38,30 @@ use crate::ui::{Painter, Rect};
 
 /// The read-out's primary while the question can be asked — and the question's affirmative verb,
 /// the same word, so the reason's "Select Connect" names the button either way.
-pub(crate) const CONNECT: &CStr = c"Connect";
-pub(crate) const DELETE_ALL: &CStr = c"Delete all";
-pub(crate) const DELETE_QUESTION: &CStr = c"Delete all local data?";
+/// The verbs are keys, translated per call: the locale is fixed at boot but a `const` CStr
+/// cannot say so. Callers that draw immediately use `i18n::tcstr`; read-outs that hold the
+/// label render it into their own `CString`.
+pub(crate) fn connect() -> &'static str {
+    crate::i18n::t("Connect")
+}
+pub(crate) fn delete_all() -> &'static str {
+    crate::i18n::t("Delete all")
+}
+pub(crate) fn delete_question() -> &'static str {
+    crate::i18n::t("Delete all local data?")
+}
 pub(crate) const DELETE_BODY: &str = "This signs the television out and removes every stored sign-in, profile, server and setting. Playback positions on the servers are not touched.";
 /// The read-out's primary once the person has answered (or on any other failure).
-pub(crate) const TRY_AGAIN: &CStr = c"Try again";
-pub(crate) const NOT_NOW: &CStr = c"Not now";
+pub(crate) fn try_again() -> &'static str {
+    crate::i18n::t("Try again")
+}
+pub(crate) fn not_now() -> &'static str {
+    crate::i18n::t("Not now")
+}
 /// The question — a choice, not a failure report.
-pub(crate) const QUESTION: &CStr = c"Connect without encryption?";
+pub(crate) fn question() -> &'static str {
+    crate::i18n::t("Connect without encryption?")
+}
 /// Its one line: what saying yes does, in the words a person uses. True of `crate::plex::grant`:
 /// the sign-in travels only to the one verified address, on this network.
 pub(crate) const BODY: &str =
@@ -61,8 +76,10 @@ pub(crate) fn asks(verdict: Option<&PlaintextVerdict>) -> bool {
 }
 
 /// The read-out's primary for `verdict`: [`CONNECT`] when it [`asks`], [`TRY_AGAIN`] otherwise.
-pub(crate) fn primary(verdict: Option<&PlaintextVerdict>) -> &'static CStr {
-    if asks(verdict) { CONNECT } else { TRY_AGAIN }
+/// The read-out's primary for `verdict`, as a KEY the draw site renders through
+/// `i18n::tcstr` into its own buffer: [`CONNECT`] when it [`asks`], *Try again* otherwise.
+pub(crate) fn primary(verdict: Option<&PlaintextVerdict>) -> &'static str {
+    if asks(verdict) { connect() } else { try_again() }
 }
 
 /// The reason line a SIGNED-IN read-out (Home, a Library source) shows for `verdict` — the one
@@ -113,20 +130,26 @@ impl PlaintextQuestion {
     /// an OK held through the press that opened it never answers yes.
     pub(crate) fn open(&mut self, alert: &mut DecisionAlert, machine_id: &str, sid: Option<ServerId>) {
         alert.set_tone(Tone::Neutral);
-        alert.open_with_body(QUESTION, BODY);
+        alert.open_with_body(&question(), BODY);
         self.subject = Some(Subject { machine_id: machine_id.to_owned(), sid });
     }
 
     /// The two verbs the host draws the alert with: *Not now* / *Connect*, or *Cancel* /
     /// *Delete all* for the delete confirmation.
-    pub(crate) fn verbs(&self) -> (&'static CStr, &'static CStr) {
-        if self.delete { (NOT_NOW, DELETE_ALL) } else { (NOT_NOW, CONNECT) }
+    /// The labels OWNED, because the alert draws them across frames: translated once per call,
+    /// and the locale is fixed at boot, so the allocation happens on open, never per frame.
+    pub(crate) fn verbs(&self) -> (std::ffi::CString, std::ffi::CString) {
+        if self.delete {
+            (crate::i18n::tcstring(not_now()), crate::i18n::tcstring(delete_all()))
+        } else {
+            (crate::i18n::tcstring(not_now()), crate::i18n::tcstring(connect()))
+        }
     }
 
     /// Ask the delete-all-data confirmation on `alert` — no subject, its own copy.
     pub(crate) fn open_delete(&mut self, alert: &mut DecisionAlert) {
         alert.set_tone(Tone::Neutral);
-        alert.open_with_body(DELETE_QUESTION, DELETE_BODY);
+        alert.open_with_body(&delete_question(), DELETE_BODY);
         self.delete = true;
     }
 
@@ -403,7 +426,7 @@ impl PlaintextAlert {
         }
         self.alert.draw_scrim();
         let (cancel, affirm) = self.question.verbs();
-        self.alert.draw(cancel, affirm);
+        self.alert.draw(&cancel, &affirm);
         let frames = self.alert.frames();
         self.frames.set(Some(frames));
         if self.alert.is_open() && self.alert.settled() {

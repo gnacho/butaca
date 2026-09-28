@@ -1,7 +1,6 @@
 //! Engine focus and input adapter for a reusable two-answer decision alert.
 //! The host consumes a boolean answer; no application command or persistence lives here.
 use std::cell::Cell;
-use std::ffi::CStr;
 use crate::ui::decision_alert::{Choice, DecisionAlert, Tone};
 use crate::ui::machine::{Cx, Edge, EntryId, FocusKey, GroupId, Handled, Host, InputEvent, InputKind, Key};
 use crate::ui::screen::{Activate, AxisMask, Dir, DrawFrame, EdgeRule, ElemKind, GroupKind, GroupSpec, Hover, Placed, ScreenEvent, Seat, Step, Stop};
@@ -14,17 +13,21 @@ pub(crate) struct DecisionPrompt {
     group: GroupId,
     cancel: u32,
     affirm: u32,
-    cancel_label: &'static CStr,
-    affirm_label: &'static CStr,
+    cancel_label: std::ffi::CString,
+    affirm_label: std::ffi::CString,
     frames: Cell<Option<(Rect, Rect)>>,
 }
 impl DecisionPrompt {
+    /// The labels are English KEYS translated here, once: the locale is fixed at boot, and an
+    /// owned CString is what lets the prompt hold them across frames.
     pub(crate) fn new(group: GroupId, cancel: u32, affirm: u32,
-        cancel_label: &'static CStr, affirm_label: &'static CStr) -> Self {
-        Self { alert: DecisionAlert::new(), group, cancel, affirm, cancel_label,
-            affirm_label, frames: Cell::new(None) }
+        cancel_label: &'static str, affirm_label: &'static str) -> Self {
+        Self { alert: DecisionAlert::new(), group, cancel, affirm,
+            cancel_label: crate::i18n::tcstring(cancel_label),
+            affirm_label: crate::i18n::tcstring(affirm_label),
+            frames: Cell::new(None) }
     }
-    pub(crate) fn open(&mut self, question: &'static CStr, body: &'static str) {
+    pub(crate) fn open(&mut self, question: &str, body: &'static str) {
         self.alert.set_tone(Tone::Neutral);
         self.alert.open_with_body(question, body);
     }
@@ -148,7 +151,7 @@ impl DecisionPrompt {
             return;
         }
         self.alert.draw_scrim();
-        let (cancel, affirm) = (self.cancel_label, self.affirm_label);
+        let (cancel, affirm) = (&self.cancel_label, &self.affirm_label);
         self.alert.draw(cancel, affirm);
         let frames = self.alert.frames();
         self.frames.set(Some(frames));

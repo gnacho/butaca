@@ -75,14 +75,31 @@ const FACTS_R: f32 = crate::ui::consts::SCR_W
 const HERO_ICON_RATIO: f32 = 1.15;
 const HERO_ICON_GAP: f32 = 12.0;
 
-pub(crate) const ALT_LABEL: &CStr = c"Also available";
+/// The disc/pill labels follow the television's locale, so they are keys, not constants: the
+/// English literal is the lookup key (a missing translation degrades to it) and the CStr-shaped
+/// surfaces render it through `i18n::tcstr` beside the draw.
+pub(crate) fn alt_label() -> &'static str {
+    crate::i18n::t("Also available")
+}
 
-const MARK_WATCHED_LABEL: &CStr = c"Mark as Watched";
-const MARK_UNWATCHED_LABEL: &CStr = c"Mark as Unwatched";
-const MARK_SHOW_WATCHED_LABEL: &CStr = c"Mark Show as Watched";
-const MARK_SHOW_UNWATCHED_LABEL: &CStr = c"Mark Show as Unwatched";
-const PLAY_FROM_START_LABEL: &CStr = c"Play from Start";
-const TRAILER_LABEL: &CStr = c"Trailer";
+fn mark_watched_label() -> &'static str {
+    crate::i18n::t("Mark as Watched")
+}
+fn mark_unwatched_label() -> &'static str {
+    crate::i18n::t("Mark as Unwatched")
+}
+fn mark_show_watched_label() -> &'static str {
+    crate::i18n::t("Mark Show as Watched")
+}
+fn mark_show_unwatched_label() -> &'static str {
+    crate::i18n::t("Mark Show as Unwatched")
+}
+fn play_from_start_label() -> &'static str {
+    crate::i18n::t("Play from Start")
+}
+fn trailer_label() -> &'static str {
+    crate::i18n::t("Trailer")
+}
 
 /// A control in the hero action row, named rather than numbered — ported verbatim from
 /// `ui/detail.rs::HeroCtl`.
@@ -302,14 +319,14 @@ pub(crate) fn watch_names_show(d: &Detail) -> bool {
 }
 
 /// A disc's slot (`[restart, trailer, watch]`) and the verb it unfurls to — `None` for the two PILLS.
-pub(crate) fn disc_verb(ctl: HeroCtl, name_show: bool) -> Option<(usize, &'static CStr)> {
+pub(crate) fn disc_verb(ctl: HeroCtl, name_show: bool) -> Option<(usize, &'static str)> {
     match (ctl, name_show) {
-        (HeroCtl::Restart, _) => Some((0, PLAY_FROM_START_LABEL)),
-        (HeroCtl::Trailer, _) => Some((1, TRAILER_LABEL)),
-        (HeroCtl::MarkWatched, false) => Some((2, MARK_WATCHED_LABEL)),
-        (HeroCtl::MarkWatched, true) => Some((2, MARK_SHOW_WATCHED_LABEL)),
-        (HeroCtl::MarkUnwatched, false) => Some((2, MARK_UNWATCHED_LABEL)),
-        (HeroCtl::MarkUnwatched, true) => Some((2, MARK_SHOW_UNWATCHED_LABEL)),
+        (HeroCtl::Restart, _) => Some((0, play_from_start_label())),
+        (HeroCtl::Trailer, _) => Some((1, trailer_label())),
+        (HeroCtl::MarkWatched, false) => Some((2, mark_watched_label())),
+        (HeroCtl::MarkWatched, true) => Some((2, mark_show_watched_label())),
+        (HeroCtl::MarkUnwatched, false) => Some((2, mark_unwatched_label())),
+        (HeroCtl::MarkUnwatched, true) => Some((2, mark_show_unwatched_label())),
         _ => None,
     }
 }
@@ -360,7 +377,8 @@ pub(crate) fn hero_pill_w(measure: &dyn Measure, has_restart: bool) -> f32 {
 }
 
 pub(crate) fn alt_pill_w(measure: &dyn Measure) -> f32 {
-    pill_w(measure, ALT_LABEL, theme::size::BODY, false, true)
+    let mut buf = [0u8; crate::i18n::TC_MAX];
+    pill_w(measure, crate::i18n::tcstr(alt_label(), &mut buf), theme::size::BODY, false, true)
 }
 
 /// Every measured width the row's accumulation needs, as one value — ported verbatim from
@@ -412,7 +430,7 @@ pub(crate) fn disc_caps(
     let mut label_w = [0.0f32; 3];
     for &c in &v[..n] {
         if let Some((slot, label)) = disc_verb(c, named_show) {
-            label_w[slot] = measure.width(label, theme::size::BODY, true);
+            label_w[slot] = measure.width_str(label, theme::size::BODY, true);
         }
     }
     disc_caps_at(
@@ -921,33 +939,33 @@ mod tests {
     fn each_watch_disc_writes_its_own_verb() {
         assert_eq!(
             disc_verb(HeroCtl::Restart, false),
-            Some((0, PLAY_FROM_START_LABEL))
+            Some((0, play_from_start_label()))
         );
         assert_eq!(
             disc_verb(HeroCtl::Restart, true),
-            Some((0, PLAY_FROM_START_LABEL))
+            Some((0, play_from_start_label()))
         );
         assert_eq!(
             disc_verb(HeroCtl::MarkWatched, false),
-            Some((2, MARK_WATCHED_LABEL))
+            Some((2, mark_watched_label()))
         );
         assert_eq!(
             disc_verb(HeroCtl::MarkWatched, true),
-            Some((2, MARK_SHOW_WATCHED_LABEL))
+            Some((2, mark_show_watched_label()))
         );
         assert_eq!(
             disc_verb(HeroCtl::MarkUnwatched, false),
-            Some((2, MARK_UNWATCHED_LABEL))
+            Some((2, mark_unwatched_label()))
         );
         assert_eq!(
             disc_verb(HeroCtl::MarkUnwatched, true),
-            Some((2, MARK_SHOW_UNWATCHED_LABEL))
+            Some((2, mark_show_unwatched_label()))
         );
         assert_eq!(
             disc_verb(HeroCtl::Trailer, false),
-            Some((1, TRAILER_LABEL))
+            Some((1, trailer_label()))
         );
-        assert_eq!(disc_verb(HeroCtl::Trailer, true), Some((1, TRAILER_LABEL)));
+        assert_eq!(disc_verb(HeroCtl::Trailer, true), Some((1, trailer_label())));
         assert_eq!(
             disc_verb(HeroCtl::Play, false),
             None,
@@ -1562,27 +1580,15 @@ mod tests {
     #[test]
     fn the_unfurled_verbs_are_the_menus_own() {
         assert_eq!(
-            disc_verb(HeroCtl::Restart, false)
-                .unwrap()
-                .1
-                .to_str()
-                .unwrap(),
+            disc_verb(HeroCtl::Restart, false).unwrap().1,
             "Play from Start"
         );
         assert_eq!(
-            disc_verb(HeroCtl::MarkWatched, false)
-                .unwrap()
-                .1
-                .to_str()
-                .unwrap(),
+            disc_verb(HeroCtl::MarkWatched, false).unwrap().1,
             "Mark as Watched"
         );
         assert_eq!(
-            disc_verb(HeroCtl::MarkUnwatched, true)
-                .unwrap()
-                .1
-                .to_str()
-                .unwrap(),
+            disc_verb(HeroCtl::MarkUnwatched, true).unwrap().1,
             "Mark Show as Unwatched"
         );
     }

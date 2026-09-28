@@ -157,7 +157,8 @@ impl LibraryScreen {
                 .phase(f.cx.tick.ms).draw(&env, f.painter.alpha(f.page_alpha));
         } else if self.readout != Readout::Grid {
             let (text, reason) = self.status_text(f.cx);
-            let status = self.status_overlay(f.cx, &text, reason.as_deref());
+            let action = self.action_label();
+            let status = self.status_overlay(f.cx, &text, reason.as_deref(), action.as_deref());
             let alpha = if self.readout == Readout::Empty { self.page_fade.alpha() * self.grid_fade.alpha() } else { 1.0 };
             status.draw_measured(&env, f.painter.alpha(f.page_alpha * alpha), f.cx.measure);
         }

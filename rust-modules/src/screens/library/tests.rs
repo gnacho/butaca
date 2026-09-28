@@ -464,7 +464,7 @@ fn a_failed_library_section_and_a_failed_home_share_the_verdict_and_the_row() {
         if owner.is_empty() {
             assert_eq!(caption.to_str().unwrap(), "Can\u{2019}t reach your Plex server");
         }
-        let library = page.status_overlay(&cx, &caption, reason.as_deref());
+        let library = page.status_overlay(&cx, &caption, reason.as_deref(), None);
         let (lv, hv) = (library.verdict_band_measured(cx.measure), home.verdict_band_measured(cx.measure));
         assert_eq!(lv.y, hv.y, "owner={owner:?}: the verdicts share a line");
         assert_eq!(lv.y, StatusOverlay::FULL_ANCHOR_TOP);
@@ -711,7 +711,6 @@ fn discovery_failure_retry_targets_the_source_without_a_section() {
 #[test]
 fn a_failed_source_over_an_offered_server_asks_the_shared_question() {
     use crate::plex::session::PlaintextChoice;
-    use super::super::plaintext_question::CONNECT;
     let _guard = crate::testlock::serial();
     crate::plex::reset_servers_for_test();
     crate::plex::grant::reset_for_test();
@@ -735,14 +734,24 @@ fn a_failed_source_over_an_offered_server_asks_the_shared_question() {
     tick(&mut page);
     let cx = fixture.cx(Some(page.key(RETRY)));
     let (caption, reason) = page.status_text(&cx);
-    assert_eq!(page.status_overlay(&cx, &caption, reason.as_deref()).action, Some(c"Try again"),
-        "another server's offer is not this source's");
+    let action = page.action_label();
+    assert_eq!(
+        page.status_overlay(&cx, &caption, reason.as_deref(), action.as_deref())
+            .action.and_then(|a| a.to_str().ok()),
+        Some(crate::screens::plaintext_question::try_again()),
+        "another server's offer is not this source's"
+    );
 
     offer("lan-machine");
     tick(&mut page);
     let (caption, reason) = page.status_text(&cx);
     assert!(reason.as_ref().and_then(|r| r.to_str().ok()).is_some_and(|r| r.contains("Select Connect")), "{reason:?}");
-    assert_eq!(page.status_overlay(&cx, &caption, reason.as_deref()).action, Some(CONNECT));
+    let action = page.action_label();
+    assert_eq!(
+        page.status_overlay(&cx, &caption, reason.as_deref(), action.as_deref()).action
+            .and_then(|a| a.to_str().ok()),
+        Some(crate::screens::plaintext_question::connect())
+    );
     let mut out = Vec::new();
     let mut present = crate::ui::present::Present::new();
     page.activate(RETRY, false, &cx, &mut Effects::new(&mut out, MachineId::Instance(InstanceId(19)), &mut present));

@@ -1285,7 +1285,9 @@ impl HomeScreen {
     }
 
     fn draw_status(&self, view: HubsView<'_>, env: &Env, p: Painter, focus: Option<Located>) {
-        let Some(overlay) = status_overlay(view, &self.plaintext) else {
+        let mut cap = [0u8; crate::i18n::TC_MAX];
+        let mut act = [0u8; crate::i18n::TC_MAX];
+        let Some(overlay) = status_overlay(view, &self.plaintext, &mut cap, &mut act) else {
             return;
         };
         overlay
@@ -1793,7 +1795,10 @@ impl HomeScreen {
             if index != 0 || action.is_none() {
                 return None;
             }
-            return status_overlay(view, &self.plaintext)?.action_frame_measured(measure);
+            let mut cap = [0u8; crate::i18n::TC_MAX];
+            let mut act = [0u8; crate::i18n::TC_MAX];
+            return status_overlay(view, &self.plaintext, &mut cap, &mut act)?
+                .action_frame_measured(measure);
         }
         let hero = self.selected_hero(view)?.item;
         let resumes = crate::metadata::resume_ns(hero.resume_ms, hero.dur_ns / 1_000_000) > 0;
@@ -2111,34 +2116,36 @@ fn pinned_snap(target: f32, rows: usize) -> f32 {
     }
 }
 
+/// The status read-out as KEYS: the draw site renders them through `i18n::tcstr`, because the
+/// labels follow the television's locale and a translated CStr cannot live in a `const`.
 fn status_read(
     view: HubsView<'_>,
 ) -> Option<(
-    &'static std::ffi::CStr,
+    &'static str,
     StatusKind,
-    Option<&'static std::ffi::CStr>,
+    Option<&'static str>,
 )> {
     if view.hub_count() > 0 {
         return None;
     }
     Some(match view.state {
         crate::pms::HubState::Loading => {
-            (c"Loading your library\u{2026}", StatusKind::Working, None)
+            (crate::i18n::t("Loading your library\u{2026}"), StatusKind::Working, None)
         }
         crate::pms::HubState::Failed => (
             // The backend the viewer actually has, named.
             if cfg!(feature = "jellyfin") {
-                c"Can\u{2019}t reach your Jellyfin server"
+                crate::i18n::t("Can\u{2019}t reach your Jellyfin server")
             } else {
-                c"Can\u{2019}t reach your Plex server"
+                crate::i18n::t("Can\u{2019}t reach your Plex server")
             },
             StatusKind::Failed,
-            Some(c"Try again"),
+            Some(crate::i18n::t("Try again")),
         ),
         crate::pms::HubState::Ready => (
-            c"Nothing on this server yet",
+            crate::i18n::t("Nothing on this server yet"),
             StatusKind::Empty,
-            Some(c"Refresh"),
+            Some(crate::i18n::t("Refresh")),
         ),
     })
 }
@@ -2151,16 +2158,32 @@ fn status_read(
 /// A failure while discovery offers "Connect without encryption?" for a server (`plaintext`)
 /// says why in the reason slot and — until it is answered — makes *Connect* the primary
 /// (`screens::plaintext_question`, shared with the sign-in and a Library source's read-out).
-fn status_overlay<'a>(view: HubsView<'_>, plaintext: &'a OfferWatch) -> Option<StatusOverlay<'a>> {
+/// The overlay borrows `cap`/`act`, the caller's render buffers: the labels are locale-keys
+/// and the CStr has to live somewhere the returned overlay can borrow.
+fn status_overlay<'a>(
+    view: HubsView<'_>,
+    plaintext: &'a OfferWatch,
+    cap: &'a mut [u8; crate::i18n::TC_MAX],
+    act: &'a mut [u8; crate::i18n::TC_MAX],
+) -> Option<StatusOverlay<'a>> {
     let (caption, kind, action) = status_read(view)?;
-    let mut overlay = StatusOverlay::new(Rect::FULL, caption, kind).page();
-    let mut action = action;
-    if kind == StatusKind::Failed {
+    let mut overlay = StatusOverlay::new(Rect::FULL, crate::i18n::tcstr(caption, cap), kind).page();
+    // One key, one render: the plaintext verdict replaces the status action wholesale, so the
+    // buffer is borrowed exactly once.
+    let action_key = if kind == StatusKind::Failed {
         if let (Some(verdict), Some(reason)) = (plaintext.verdict(), plaintext.reason()) {
             overlay = overlay.reason(reason);
-            action = Some(plaintext_question::primary(Some(verdict)));
+            Some(plaintext_question::primary(Some(verdict)))
+        } else {
+            action
         }
-    }
+    } else {
+        action
+    };
+    let action = match action_key {
+        Some(key) => Some(crate::i18n::tcstr(key, act)),
+        None => None,
+    };
     Some(match action {
         Some(label) => overlay.action(label),
         None => overlay,

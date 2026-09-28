@@ -197,8 +197,14 @@ const BTN_GAP: f32 = theme::space::MD;
 const PILL_GAP: f32 = theme::space::SM;
 const CAPTION_H: f32 = 30.0;
 
-const NEXT_LABEL: &str = "Next Episode";
-const CREDITS_LABEL: &core::ffi::CStr = c"Watch Credits";
+/// The buttons' labels follow the television's locale: keys, not constants. The draw sites render
+/// them through `i18n::tcstr` into their own buffers.
+fn next_label() -> &'static str {
+    crate::i18n::t("Next Episode")
+}
+fn credits_label() -> &'static str {
+    crate::i18n::t("Watch Credits")
+}
 
 /// The caption is RIGHT-ALIGNED text, so it may run wider than the still/button column without
 /// breaking it — the column's edges are the two solid rectangles, and a text run has no left edge
@@ -250,8 +256,12 @@ pub(crate) fn layout_of(next_w: f32, credits_w: f32) -> Layout {
 /// equivalent.
 pub(crate) fn layout(row: &mut crate::ui::player_hud::TransportRow, measure: &dyn crate::ui::machine::Measure) -> Layout {
     layout_of(
-        crate::ui::player_hud::ctrl_slot(row, NEXT_LABEL, measure).w,
-        crate::ui::widgets::Button::pill_w_measured(CREDITS_LABEL, theme::size::BODY, false, false, measure),
+        crate::ui::player_hud::ctrl_slot(row, next_label(), measure).w,
+        {
+            let mut buf = [0u8; crate::i18n::TC_MAX];
+            crate::ui::widgets::Button::pill_w_measured(
+                crate::i18n::tcstr(credits_label(), &mut buf), theme::size::BODY, false, false, measure)
+        },
     )
 }
 
@@ -261,8 +271,12 @@ pub(crate) fn layout(row: &mut crate::ui::player_hud::TransportRow, measure: &dy
 /// one is how a stray click starts an episode the user did not ask for.
 pub(crate) fn layout_peek(row: &crate::ui::player_hud::TransportRow, measure: &dyn crate::ui::machine::Measure) -> Layout {
     layout_of(
-        crate::ui::player_hud::ctrl_slot_w(row, NEXT_LABEL, measure),
-        crate::ui::widgets::Button::pill_w_measured(CREDITS_LABEL, theme::size::BODY, false, false, measure),
+        crate::ui::player_hud::ctrl_slot_w(row, next_label(), measure),
+        {
+            let mut buf = [0u8; crate::i18n::TC_MAX];
+            crate::ui::widgets::Button::pill_w_measured(
+                crate::i18n::tcstr(credits_label(), &mut buf), theme::size::BODY, false, false, measure)
+        },
     )
 }
 
@@ -324,7 +338,11 @@ pub(crate) fn draw(
     let e = Env::inert();
     // The focus pop is the CONTROL ROW's, not this card's: these two stand in the transport's own
     // slot and share its cursor, so they share its springs (`TransportRow::scale`).
-    Button::new(CREDITS_LABEL.as_ptr(), theme::size::BODY, l.credits)
+    Button::new(
+        { let mut buf = [0u8; crate::i18n::TC_MAX]; crate::i18n::tcstr(credits_label(), &mut buf).as_ptr() },
+        theme::size::BODY,
+        l.credits,
+    )
         .focused(focused && btn == BTN_CREDITS)
         // Both buttons on this card stand on LIVE CREDITS — the video plane, under this card's own
         // scrim — so both take the unkeyed ground (`ControlGround`). It is what the app's
@@ -338,7 +356,7 @@ pub(crate) fn draw(
     // starts. Driven straight off the remaining MILLISECONDS and redrawn every frame, so the sweep
     // is continuous; the label carries no seconds, because the pill's width is derived from its
     // label and a ticking numeral would resize the button and slide its centred text every second.
-    let Ok(label) = CString::new(NEXT_LABEL) else {
+    let Ok(label) = CString::new(next_label()) else {
         return;
     };
     let mut b = Button::new(label.as_ptr(), theme::size::BODY, l.next)
@@ -417,7 +435,7 @@ mod tests {
     /// the host suite cannot link SDL2_ttf at all.
     #[test]
     fn the_column_is_right_anchored_on_one_edge() {
-        // the real orders of magnitude: `ctrl_slot`'s floor is 236, and "Watch Credits" measures a
+        // the real orders of magnitude: `ctrl_slot`'s floor is 236, and crate::i18n::t("Watch Credits") measures a
         // little under it — which is the asymmetry the design is making a point of
         let l = layout_of(243.0, 226.0);
         let (n, c, t, cap) = (l.next, l.credits, l.still, l.caption);
