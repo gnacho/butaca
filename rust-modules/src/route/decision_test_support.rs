@@ -364,6 +364,7 @@ pub(super) fn fourk_item_with_subs(
         width: 3840,
         height: 2160,
         bitrate: 48_000,
+        container: String::new(),
         dovi: crate::metadata::Dovi::NONE,
         markers: Vec::new(),
         chapters: Vec::new(),

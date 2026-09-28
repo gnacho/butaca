@@ -142,6 +142,9 @@ pub(crate) fn playing_item(
         width,
         blur: None,
         show_rk: String::new(),
+        // the MediaSource's own container word — a GUID id has no extension, so this field IS
+        // the demuxer test on this backend
+        container: src.and_then(|s| s.container.clone()).unwrap_or_default(),
         height,
         bitrate: src.and_then(|s| s.bitrate).unwrap_or(0) / 1_000,
         // VideoRangeType carries no DV layering — `detail_from_dto`'s note. All-zero refuses

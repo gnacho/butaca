@@ -900,6 +900,7 @@ mod tests {
                 sid: crate::plex::ServerId::from_raw(0),
                 rk: "rk".into(),
                 show_rk: String::new(),
+                container: String::new(),
                 audio: Vec::new(),
                 subs: vec![
                     crate::metadata::Stream {

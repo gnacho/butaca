@@ -4108,6 +4108,11 @@ pub(crate) fn ctxline_cptr(ps: &PlaybackSession) -> *const c_char {
 }
 struct ScrobbleWork {
     client: Option<&'static crate::plex::Client>,
+    /// The Jellyfin client when the playback came from the Jellyfin backend — captured at the
+    /// same spawn site and under the same "current is the origin" caveat as `client` (a jellyfin
+    /// install has exactly one server, so cur IS the origin for the life of this flavor).
+    #[cfg(feature = "jellyfin")]
+    jf_client: Option<&'static crate::jellyfin::JfClient>,
     final_report: Option<(String, i64, i64)>,
     report_th: Option<std::thread::JoinHandle<()>>,
     session: String,
@@ -4131,6 +4136,20 @@ impl ScrobbleWork {
         if let Some((rk, t_ms, d_ms)) = self.final_report.take() {
             let ok = {
                 let _effect = TIMELINE_EFFECT.lock().unwrap_or_else(|e| e.into_inner());
+                // The final `stopped` report, on whichever backend the playback came from.
+                // `session` is already tsession-when-set (the capture in `scrobble_stop`), which
+                // on the Jellyfin side is the PlaySessionId rule `jellyfin::profile` states.
+                #[cfg(feature = "jellyfin")]
+                if let Some(jc) = self.jf_client {
+                    let ok = jc.session_stopped(&rk, t_ms, &self.session);
+                    crate::log(&format!(
+                        "timeline stopped t={}s/{}s ok={}",
+                        t_ms / 1000,
+                        d_ms / 1000,
+                        ok as i32,
+                    ));
+                    return;
+                }
                 self.client.is_some_and(|c| {
                     c.timeline(&crate::plex::TimelineReport {
                         rating_key: &rk,
@@ -4159,6 +4178,17 @@ impl ScrobbleWork {
             stop.finish();
         }
         if !self.transcode_session.is_empty() {
+            // The server-side encoder kill, on whichever backend holds the session. Jellyfin's
+            // is a best-effort DELETE (the server reaps a quiet HLS encoder on its own); Plex's
+            // is the transcode-session stop.
+            #[cfg(feature = "jellyfin")]
+            let ok = if let Some(jc) = self.jf_client {
+                jc.stop_active_encodings(&self.transcode_session)
+            } else {
+                self.client
+                    .is_some_and(|c| c.transcode_stop(&self.transcode_session))
+            };
+            #[cfg(not(feature = "jellyfin"))]
             let ok = self
                 .client
                 .is_some_and(|c| c.transcode_stop(&self.transcode_session));
@@ -4211,6 +4241,14 @@ pub(crate) fn scrobble_stop(
     // transcode session both live there, and by the time a stop runs the user may well have walked
     // back to a different source's Home.
     let client = cur_client(ps);
+    // The Jellyfin backend's client lives outside the Plex registry, so `cur_client` above can
+    // never resolve it; capture it under the same origin rule (one server per jellyfin install).
+    #[cfg(feature = "jellyfin")]
+    let jf_client = if cur_sid(ps) == crate::jellyfin::SERVER_ID {
+        crate::jellyfin::client()
+    } else {
+        None
+    };
     // Serialise against a previous stop still in flight: these carry a position for a specific
     // item, and letting two race would let an older one land last. Normally free — the measured
     // baseline for a finished worker is 0 ms.
@@ -4219,6 +4257,8 @@ pub(crate) fn scrobble_stop(
         (final_report.is_some() || report_th.is_some()).then(|| TIMELINE_STOP_FENCE.announce());
     let work = std::sync::Arc::new(std::sync::Mutex::new(Some(ScrobbleWork {
         client,
+        #[cfg(feature = "jellyfin")]
+        jf_client,
         final_report,
         report_th,
         session,
@@ -4450,6 +4490,14 @@ pub(crate) fn transcode_seek(ps: &mut PlaybackSession, offset_secs: i64) -> Opti
     if rk.is_empty() {
         return None;
     }
+    // The Jellyfin flavor re-cuts the server session with a StartTimeTicks PlaybackInfo instead
+    // of PMS's start.mkv decision+spec handshake. Same route-ownership machinery publishes the
+    // replacement, so the teardown (and a later scrobble_stop) resolves the server resource from
+    // ACTIVE_ENCODER exactly as on the Plex arm.
+    #[cfg(feature = "jellyfin")]
+    if cur_sid(ps) == crate::jellyfin::SERVER_ID {
+        return jellyfin_transcode_seek(ps, offset_secs, &rk);
+    }
     let c = cur_client(ps)?;
     // A plain seek/foreground resume has no claimed RouteAction, but it still replaces the PMS
     // route and native Engine. Reserve the same start transaction before exposing any candidate
@@ -4545,6 +4593,113 @@ pub(crate) fn transcode_seek(ps: &mut PlaybackSession, offset_secs: i64) -> Opti
             "seek: synchronously retired previous encoder ok={}",
             ok as i32
         ));
+    }
+    Some(url)
+}
+
+/// The Jellyfin arm of [`transcode_seek`]: a PlaybackInfo naming the offset re-cuts the HLS
+/// transcode, and the new `TranscodingUrl` becomes the route. The old server-side session is
+/// retired off the main thread — best-effort, as Jellyfin reaps a quiet encoder on its own.
+#[cfg(feature = "jellyfin")]
+fn jellyfin_transcode_seek(
+    ps: &mut PlaybackSession,
+    offset_secs: i64,
+    rk: &str,
+) -> Option<String> {
+    let c = crate::jellyfin::client()?;
+    // Reserve the same start transaction the Plex arm reserves, so a seek cannot publish a
+    // replacement beneath a Load that is already on its way.
+    let route_start = begin_route_start();
+    let reject_preparation = || {
+        if let Some(ticket) = route_start {
+            let _ = reject_route_start_preparation(ticket);
+        }
+    };
+    // Reconcile the worker-owned projection (if any) into the session before snapshotting, exactly
+    // like the Plex arm — the URL/ceiling to replace is the one live NOW, not the bootstrap one.
+    let live_hls = sync_active_hls_to_session(ps);
+    let expected = live_hls
+        .as_ref()
+        .map(|(ticket, _)| ticket.clone())
+        .unwrap_or_else(worker_ticket);
+    let previous = expected.encoder().to_owned();
+    if previous.is_empty() {
+        reject_preparation();
+        return None;
+    }
+    // The MediaSource id the route was resolved under. `build_stream_jellyfin` derives it the
+    // same way (`msid = ""` when the part IS the item id — a GUID item with no separate source).
+    let part = ps
+        .request
+        .as_ref()
+        .map(|request| request.part.clone())
+        .unwrap_or_default();
+    let msid = if part == rk { String::new() } else { part };
+    // 1 Jellyfin tick = 100 ns, so 1 second is 10^7 ticks (the profile's units rule, outbound half).
+    let body = crate::jellyfin::profile::playback_info_body(
+        cur_ceiling(ps),
+        offset_secs.saturating_mul(10_000_000),
+    );
+    let Some(info) = c.playback_info(rk, &msid, &body) else {
+        reject_preparation();
+        return None;
+    };
+    if info.error_code.as_deref().is_some() {
+        reject_preparation();
+        return None;
+    }
+    let Some(source) = info.media_sources.first() else {
+        reject_preparation();
+        return None;
+    };
+    let Some(relative) = source.transcoding_url.as_deref() else {
+        reject_preparation();
+        return None;
+    };
+    let Some(url) = c.transcode_url(relative) else {
+        reject_preparation();
+        return None;
+    };
+    // The new PlaySessionId, when the server mints one for the re-cut (it usually does). Keep the
+    // current session id when it does not — the route is then the same server session re-cut.
+    let replacement = info
+        .play_session_id
+        .clone()
+        .filter(|session_id| !session_id.is_empty())
+        .unwrap_or_else(|| previous.clone());
+    // Publish the replacement through the SAME route ownership machinery the Plex arm uses.
+    let replacement_published = if let Some((_, hls)) = live_hls.as_ref() {
+        replace_active_hls_for(&expected, &replacement, &url, hls.rung, None).is_some()
+    } else {
+        replace_active_encoder_for(&expected, &replacement).is_some()
+    };
+    if !replacement_published {
+        reject_preparation();
+        return None;
+    }
+    { let s = &mut *ps; {
+        s.tsession = replacement.clone();
+        s.url = url.clone();
+    } };
+    publish_applied_route_projection(ps);
+    if let Some(ticket) = route_start {
+        if !prepare_route_start(ticket) {
+            crate::player::log("jellyfin seek: prepared route lost its start transaction");
+            return None;
+        }
+    }
+    // Retire the OLD server-side session off the main thread — the same backgrounded hand-off the
+    // Plex arm performs.
+    if replacement != previous {
+        let old = previous.clone();
+        let jc = c; // 'static
+        if crate::task::spawn_small_keeping("jf-seek-stop", move || {
+            let _ = jc.stop_active_encodings(&old);
+        })
+        .is_none()
+        {
+            let _ = c.stop_active_encodings(&previous);
+        }
     }
     Some(url)
 }
@@ -6179,6 +6334,15 @@ pub(crate) fn retranscode_for(ps: &mut PlaybackSession, expected: &WorkerTicket,
     if !is_worker_ticket_current(expected) {
         return None;
     }
+    // Jellyfin arm — a re-transcode that selects a track is a NEW PlaybackInfo POST with that
+    // stream named in the body (the server cuts the playlist with it selected), exactly the shape
+    // `jellyfin_transcode_seek` uses for a seek. The Plex machinery below resolves its client
+    // from a registry the Jellyfin slot is not in, so without this arm an audio switch to a
+    // non-direct-playable track is silently rejected on this backend.
+    #[cfg(feature = "jellyfin")]
+    if cur_sid(ps) == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+        return jellyfin_retranscode_as(ps, expected, offset_secs);
+    }
     if matches!(
         cur_delivery(ps),
         crate::plex::TranscodeDelivery::FixedHls { .. }
@@ -6189,6 +6353,108 @@ pub(crate) fn retranscode_for(ps: &mut PlaybackSession, expected: &WorkerTicket,
         }
     }
     retranscode_as(ps, expected, offset_secs, false)
+}
+
+/// The Jellyfin arm of a mid-playback re-transcode: a fresh `POST /Items/{id}/PlaybackInfo` whose
+/// body names the chosen track (`MediaSourceId` + `AudioStreamIndex`, see
+/// [`crate::jellyfin::profile::playback_info_body_for`]) answers a `TranscodingUrl` that replaces
+/// the route. This is the server half of an audio switch; it also covers the case the item was
+/// ALREADY transcoding, where the old server session is retired in the background.
+#[cfg(feature = "jellyfin")]
+fn jellyfin_retranscode_as(
+    ps: &mut PlaybackSession,
+    expected: &WorkerTicket,
+    offset_secs: i64,
+) -> Option<String> {
+    if forced_direct_play(ps) {
+        return None;
+    }
+    let rk = cur_rk(ps);
+    if rk.is_empty() {
+        return None;
+    }
+    let c = crate::jellyfin::client()?;
+    // The MediaSource id, derived exactly as `build_stream_jellyfin` does (`""` when the part IS
+    // the item id — a GUID item with no separate source).
+    let part = ps
+        .request
+        .as_ref()
+        .map(|request| request.part.clone())
+        .unwrap_or_default();
+    let msid = if part == rk { String::new() } else { part };
+    // The chosen track, by the stream INDEX the server selects on (`convert_stream` mirrors
+    // Jellyfin's `Index` into `Stream.id`, and `cur_audio_sid` holds the user's pick).
+    let audio_index = cur_audio_sid(ps) as i32;
+    let body = crate::jellyfin::profile::playback_info_body_for(
+        cur_ceiling(ps),
+        offset_secs.max(0).saturating_mul(10_000_000),
+        &msid,
+        Some(audio_index),
+        None,
+    );
+    let info = c.playback_info(&rk, &msid, &body)?;
+    if let Some(code) = info.error_code.as_deref() {
+        crate::player::log(&format!("jellyfin retranscode: refused ({code})"));
+        return None;
+    }
+    let Some(source) = info.media_sources.first() else {
+        return None;
+    };
+    let Some(relative) = source.transcoding_url.as_deref() else {
+        crate::player::log("jellyfin retranscode: server offered no TranscodingUrl");
+        return None;
+    };
+    let url = c.transcode_url(relative)?;
+    let logical = sess(ps);
+    let namespace = if logical.is_empty() {
+        format!("plxnative-{rk}")
+    } else {
+        logical
+    };
+    let replacement = info
+        .play_session_id
+        .clone()
+        .filter(|session_id| !session_id.is_empty())
+        .unwrap_or_else(|| next_encoder_session(&namespace));
+    // Publish through the SAME route ownership machinery the Plex arm uses, so the teardown that
+    // follows (and a later scrobble_stop) resolves the server resource from ACTIVE_ENCODER rather
+    // than from a session field the reload already moved past.
+    if replace_active_encoder_for(expected, &replacement).is_none() {
+        let _ = c.stop_active_encodings(&replacement);
+        return None;
+    }
+    { let s = &mut *ps; {
+        s.cur_remux = false;
+        s.tsession = replacement.clone();
+        s.url = url.clone();
+        // The profile's transcode target is pinned h264+aac in MPEG-TS HLS (see
+        // `jellyfin::profile`), so the Load payload's guess is not a guess.
+        s.stream_vcodec = "h264".to_owned();
+        s.stream_acodec = "aac".to_owned();
+        s.stream_fps = 0.0;
+        s.stream_dovi = crate::metadata::Dovi::NONE;
+        s.stream_immersive = false;
+    } };
+    // Retire the previous server session off the main thread — the same backgrounded hand-off the
+    // Plex arm performs. Best-effort: Jellyfin reaps a quiet encoder on its own. Empty on the
+    // common direct-play → transcode switch, where there is no old encoder to stop.
+    let previous = expected.encoder().to_owned();
+    if !previous.is_empty() && previous != replacement {
+        let old = previous.clone();
+        if crate::task::spawn_small_keeping("jf-retranscode-stop", move || {
+            let _ = c.stop_active_encodings(&old);
+        })
+        .is_none()
+        {
+            let _ = c.stop_active_encodings(&previous);
+        }
+    }
+    // NEVER log the URL (it ends in `api_key=…`). The rk, the track and the offset are the whole
+    // diagnostic value here.
+    crate::player::log(&format!(
+        "retranscode rk={rk} audio={audio_index} offset={offset_secs} -> jellyfin transcode start"
+    ));
+    Some(url)
 }
 
 fn retranscode_as(ps: &mut PlaybackSession, expected: &WorkerTicket, offset_secs: i64, remux: bool) -> Option<String> {
