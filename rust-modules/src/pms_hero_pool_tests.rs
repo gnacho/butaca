@@ -100,3 +100,38 @@ fn the_hero_pool_opens_on_our_own_item_and_never_dedups_across_servers() {
     );
     reset(&mut o.state, &o.adapter);
 }
+
+/// Issue #43: Jellyfin stamps its Recently Added shelves `jf.latest.<viewId>`, which the old
+/// eligibility rule (home.continue, or any id containing "recent") never matched — the
+/// billboard only ever rotated Continue Watching on that backend. The jf.latest shape feeds
+/// the pool now; an unrelated jellyfin shelf keeps staying out.
+#[test]
+fn jellyfin_latest_shelves_feed_the_hero_pool() {
+    let _guard = crate::testlock::serial();
+    let mut o = Owner::default();
+    seed(
+        &mut o.state,
+        vec![src(
+            0,
+            "",
+            HubState::Ready,
+            Some(built(
+                0,
+                &[(9, "cw")],
+                vec![
+                    shelf(0, "Recently Added - Movies", "jf.latest.movies", &["a1", "a2"]),
+                    shelf(0, "Browse by genre", "jf.genres", &["x1"]),
+                ],
+            )),
+        )],
+    );
+    assert_eq!(
+        hero_pool_len(&o.state),
+        3,
+        "the deck item plus both Latest items; the genre shelf is not hero material"
+    );
+    assert_eq!(hero_pool_item(&o.state, 0).unwrap().rk, "cw");
+    assert_eq!(hero_pool_item(&o.state, 1).unwrap().rk, "a1");
+    assert_eq!(hero_pool_item(&o.state, 2).unwrap().rk, "a2");
+    assert!(hero_pool_item(&o.state, 3).is_none());
+}

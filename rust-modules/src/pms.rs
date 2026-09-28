@@ -484,6 +484,16 @@ pub(crate) enum HubIdentity<'a> {
     Key { sid: ServerId, key: &'a str },
 }
 
+/// Which shelves may feed the rotating hero pool, in one place so a backend's hub-id shape
+/// cannot drift out of the rule unnoticed. Plex: the Continue Watching deck plus every
+/// Recently Added variant (home.movies.recent, home.television.recent, promoted
+/// <type>.recentlyadded.<id>) all carry "recent". Jellyfin: the per-view Latest shelves stamp
+/// `jf.latest.<viewId>` (issue #43 — that shape matched neither Plex arm, so the billboard
+/// never promoted Recently Added on this backend).
+fn hero_eligible(hub_id: &str) -> bool {
+    hub_id == "home.continue" || hub_id.contains("recent") || hub_id.starts_with("jf.latest.")
+}
+
 fn stable_hub_identity<'a>(row: &'a HubRow, items: &[PmsMovie]) -> Option<HubIdentity<'a>> {
     if row.len == 0 { return None; }
     let sid = items.get(row.start)?.sid;
@@ -1028,10 +1038,9 @@ fn merge_with_scope(srcs: &[Src], scope: &BrowseScope) -> HubBuild {
     // makes a poor billboard). Capped at HERO_MAX.
     let mut new_pool: Vec<HeroSlot> = Vec::new();
     for hub in &new_hubs {
-        // Match on the locale-independent hubIdentifier, not the localized display title:
-        // "home.continue" plus every Recently Added variant (home.movies.recent,
-        // home.television.recent, promoted <type>.recentlyadded.<id>) all carry "recent".
-        let eligible = hub.hub_id == "home.continue" || hub.hub_id.contains("recent");
+        // Match on the locale-independent hubIdentifier, not the localized display title
+        // (hero_eligible names every shape).
+        let eligible = hero_eligible(&hub.hub_id);
         if !eligible {
             continue;
         }
