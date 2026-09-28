@@ -458,7 +458,7 @@ fn header(ps: &crate::route::PlaybackSession, d: &crate::player::Diag, now: u32)
         // number does, and this line has to fit beside it.
         format!(
             "{} {} · {} · {os} · DV {} · surface {vw}x{vh}",
-            crate::plex::identity::PRODUCT,
+            crate::plex::identity::display_name(),
             crate::plex::identity::VERSION,
             if cfg!(feature = "devtriggers") {
                 "dev"

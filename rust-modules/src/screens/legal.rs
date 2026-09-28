@@ -301,7 +301,7 @@ impl DocumentPage {
             entry,
             reader: DocumentReader::new(),
             crumb: CRUMB_SETTINGS,
-            title: "About PlxNative",
+            title: if cfg!(feature = "jellyfin") { "About butaca" } else { "About PlxNative" },
             subtitle: "A native media client built for LG webOS.",
             body: ABOUT,
             word: word::LEGAL,

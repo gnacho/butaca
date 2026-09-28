@@ -1094,7 +1094,9 @@ impl RootPage {
             actions.push(Action::TrailerAutoplay);
         }
         system = system.row(
-            Row::new("About PlxNative")
+            // The fork's own build brands the About row (0.6.x did exactly this); a plain Plex
+            // build keeps upstream's name.
+            Row::new(if cfg!(feature = "jellyfin") { "About butaca" } else { "About PlxNative" })
                 .detail(crate::i18n::t("Version, copyright and project information."))
                 .chevron(true),
         );

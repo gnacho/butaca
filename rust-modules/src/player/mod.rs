@@ -569,7 +569,7 @@ fn support_line_of(i: &crate::webos::Info, hw: &crate::webos::Hardware, kind: Fa
     let set: &str = if set.is_empty() { "unknown set" } else { &set };
     format!(
         "{} {} · {} · {} · {}",
-        crate::plex::identity::PRODUCT,
+        crate::plex::identity::display_name(),
         crate::plex::identity::VERSION,
         i.release_line(),
         set,
@@ -2285,7 +2285,8 @@ mod tests {
         assert_eq!(
             line,
             format!(
-                "PlxNative {} · webOS 4.10.2 · 43LM6300PVB · m3r · tv_pipeline",
+                "{} {} · webOS 4.10.2 · 43LM6300PVB · m3r · tv_pipeline",
+                crate::plex::identity::display_name(),
                 crate::plex::identity::VERSION
             )
         );

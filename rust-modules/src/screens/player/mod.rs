@@ -397,7 +397,11 @@ const GROUP_FAILURE: GroupId = GroupId(3);
 const GROUP_REPAIR: GroupId = GroupId(4);
 const REPAIR_CANCEL: u32 = 40_000;
 const REPAIR_CONFIRM: u32 = REPAIR_CANCEL + 1;
-const REPAIR_BODY: &str = "Use Homebrew Channel’s root access to update PlxNative’s sandbox with LG’s native profile. This requires a rooted TV. Close and reopen PlxNative afterward.";
+const REPAIR_BODY: &str = if cfg!(feature = "jellyfin") {
+    "Use Homebrew Channel’s root access to update Butaca’s sandbox with LG’s native profile. This requires a rooted TV. Close and reopen Butaca afterward."
+} else {
+    "Use Homebrew Channel’s root access to update PlxNative’s sandbox with LG’s native profile. This requires a rooted TV. Close and reopen PlxNative afterward."
+};
 
 impl<H: PlayerLike + crate::screens::registry::MetadataLike> Machine<H> for PlayerScreen {
     type Ev = ScreenEvent<H>;
@@ -552,7 +556,14 @@ impl PlayerScreen {
     fn failure_action<H: AppLike>(&mut self, ps: &crate::route::PlaybackSession, fx: &mut Effects<'_, H>) {
         if crate::player::error_now(ps).kind == crate::player::FailureKind::JailMissingRtkmem {
             if ps.repair_status == crate::webos::jail_repair::State::Idle && !self.repair_alert.visible() {
-                self.repair_alert.open_with_body(c"Repair PlxNative’s sandbox?", REPAIR_BODY);
+                self.repair_alert.open_with_body(
+                    if cfg!(feature = "jellyfin") {
+                        c"Repair Butaca’s sandbox?"
+                    } else {
+                        c"Repair PlxNative’s sandbox?"
+                    },
+                    REPAIR_BODY,
+                );
                 Self::repair_focus(fx, GROUP_REPAIR);
             }
         } else {

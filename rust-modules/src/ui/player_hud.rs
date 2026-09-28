@@ -1049,7 +1049,14 @@ fn draw_failed_readout(
         match ps.repair_status {
             State::Idle => {},
             State::Running => { e.readout = "Repairing this app’s sandbox…"; e.detail = "Wait for the result before closing the app.".into(); },
-            State::Repaired => { e.readout = "Sandbox repair completed"; e.detail = "Close and reopen PlxNative before playing video.".into(); },
+            State::Repaired => {
+                e.readout = "Sandbox repair completed";
+                e.detail = if cfg!(feature = "jellyfin") {
+                    "Close and reopen Butaca before playing video."
+                } else {
+                    "Close and reopen PlxNative before playing video."
+                }.into();
+            },
             State::Failed(reason) => { e.readout = "Sandbox repair could not be confirmed"; e.detail = reason.message().into(); },
         }
     }
