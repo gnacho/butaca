@@ -754,7 +754,9 @@ impl<H: LibraryLike> Machine<H> for LibraryScreen {
             AlertStep::Pass => {}
             AlertStep::Done(handled) => return handled,
             AlertStep::Answer(cmd) => {
-                if let Some(cmd) = cmd { fx.push(Fx::App(AppFx::Session(cmd))); }
+                if let Some(super::plaintext_question::QuestionAnswer::Plaintext(cmd)) = cmd {
+                    fx.push(Fx::App(AppFx::Session(cmd)));
+                }
                 self.reseat(FocusTarget::ContainerGroup(STATUS_GROUP), fx);
                 return Handled::Yes;
             }

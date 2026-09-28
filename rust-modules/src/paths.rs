@@ -704,21 +704,21 @@ mod tests {
     #[test]
     fn the_app_id_is_the_install_directory_and_only_a_real_one() {
         use std::path::Path;
-        let dev = "/media/developer/apps/usr/palm/applications/com.beb.plxnative.debug/plxnative";
-        let hbc = "/media/cryptofs/apps/usr/palm/applications/com.beb.plxnative/plxnative";
+        let dev = "/media/developer/apps/usr/palm/applications/com.butaca.debug/plxnative";
+        let hbc = "/media/cryptofs/apps/usr/palm/applications/com.butaca/plxnative";
         let nightly =
-            "/media/developer/apps/usr/palm/applications/com.beb.plxnative.nightly/plxnative";
+            "/media/developer/apps/usr/palm/applications/com.butaca.nightly/plxnative";
         assert_eq!(
             super::installed_app_id(Path::new(dev)).as_deref(),
-            Some("com.beb.plxnative.debug")
+            Some("com.butaca.debug")
         );
         assert_eq!(
             super::installed_app_id(Path::new(hbc)).as_deref(),
-            Some("com.beb.plxnative")
+            Some("com.butaca")
         );
         assert_eq!(
             super::installed_app_id(Path::new(nightly)).as_deref(),
-            Some("com.beb.plxnative.nightly")
+            Some("com.butaca.nightly")
         );
         // A host build: the parent is `debug`, whose parent is `target-sim` — not `applications`.
         // Without this arm the simulator would mint an app called `debug`, take `/tmp/debug` as its
@@ -749,13 +749,13 @@ mod tests {
             None
         );
         assert_eq!(
-            "com.beb.plxnative.debug"
+            "com.butaca.debug"
                 .strip_prefix(super::STABLE_APP_ID)
                 .and_then(|r| r.strip_prefix('.')),
             Some("debug")
         );
         assert_eq!(
-            "com.beb.plxnative.nightly"
+            "com.butaca.nightly"
                 .strip_prefix(super::STABLE_APP_ID)
                 .and_then(|r| r.strip_prefix('.')),
             Some("nightly")
@@ -780,11 +780,11 @@ mod tests {
             return; // a host build answers from the environment first; this is the television rule
         }
         let stable = super::resolve_runtime_dir(None, None, super::STABLE_APP_ID);
-        let debug = super::resolve_runtime_dir(None, None, "com.beb.plxnative.debug");
-        let nightly = super::resolve_runtime_dir(None, None, "com.beb.plxnative.nightly");
+        let debug = super::resolve_runtime_dir(None, None, "com.butaca.debug");
+        let nightly = super::resolve_runtime_dir(None, None, "com.butaca.nightly");
         assert_eq!(stable, std::path::Path::new("/tmp"));
-        assert_eq!(debug, std::path::Path::new("/tmp/com.beb.plxnative.debug"));
-        assert_eq!(nightly, std::path::Path::new("/tmp/com.beb.plxnative.nightly"));
+        assert_eq!(debug, std::path::Path::new("/tmp/com.butaca.debug"));
+        assert_eq!(nightly, std::path::Path::new("/tmp/com.butaca.nightly"));
         assert_ne!(
             stable.join("plxnative-events.log"),
             debug.join("plxnative-events.log")
@@ -912,7 +912,7 @@ mod tests {
             ]
         };
         let a = named(super::STABLE_APP_ID);
-        let b = named("com.beb.plxnative.debug");
+        let b = named("com.butaca.debug");
         assert!(
             a.iter().all(|p| !b.contains(p)),
             "{a:?} and {b:?} share a session file"

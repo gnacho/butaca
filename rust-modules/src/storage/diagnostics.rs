@@ -1206,7 +1206,7 @@ mod tests {
             .expect("end of enter_application")
             .0;
         let identity = body
-            .find(".then(pre_boot_diagnostics)")
+            .find("pre_boot_diagnostics();")
             .expect("identity preamble");
         let diagnostics = body
             .find("crate::storage::diagnostics::start()")

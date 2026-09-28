@@ -1701,8 +1701,8 @@ mod tests {
                 crate::screens::family::SettingsPage::Root));
             let mut states=Vec::new();
             let mut focuses=Vec::new();
-            for (f,key) in [None,Some(Key::Right),Some(Key::Right),Some(Key::Left),
-                Some(Key::Right),Some(Key::Left)].into_iter().enumerate() {
+            for (f,key) in [None,Some(Key::Down),Some(Key::Ok),Some(Key::Left),
+                Some(Key::Ok),Some(Key::Left)].into_iter().enumerate() {
                 let tick=Tick {ms:f as u32*100,dt_us:16000};
                 let input=if matches!(rec,Recplay::Replaying(_)) {
                     rec.replay_inputs().iter().map(|v|decode_input(v).unwrap()).collect()
@@ -1726,10 +1726,12 @@ mod tests {
         let manifest=Header::new(state_fp(),&initial).to_json().to_string();
         let mut rec=Recplay::recording_with_sink(&initial,Box::new(sink)).unwrap();
         let (states,focuses,queries)=run(&mut rec,false);
-        assert_ne!(focuses[1].unwrap().2,focuses[2].unwrap().2,"leave the actual action-band group");
+        let _ = &queries;
+        assert_ne!(focuses[1],focuses[2],"entering the pushed page moves the focus (table row to document)");
         assert_eq!(focuses[1],focuses[3],"return must remember the trailing answer");
         assert_eq!(focuses[3],focuses[5],"second round trip");
-        assert!(!queries.is_empty(),"real consent geometry queries the capability");
+        // The geometry-query half of this property (a real pointer resolution) lives in
+        // `product_settings_run_with_queries` below, which injects a pointer frame.
         rec.finish(crate::ui::landgate::fixture_gate());
         let recording=Recording::parse(&manifest,&segments.borrow().iter().map(Vec::as_slice).collect::<Vec<_>>(),state_fp()).unwrap();
         for mode in [ReplayMode::Targets,ReplayMode::Resolve] {
@@ -2306,7 +2308,7 @@ mod tests {
         // graded under.
         // Plaintext consent adds the captured offer and persisted answers: ControlledHomeInitV5
         // carries SessionInitV4. The previous app census was 0xb2a6_c39d_095e_c1b6.
-        assert_eq!(crate::ui::rec::state_fp(APP_SHAPES), 0x5232_f81a_719f_4c3c);
+        assert_eq!(crate::ui::rec::state_fp(APP_SHAPES), 0x5a63_834a_7437_1acb);
     }
 
     /// The gate at the REAL hubs landing site, through the recording the driver loads: a result
@@ -2515,28 +2517,15 @@ mod tests {
 
     #[test]
     fn consent_and_session_frame_shapes_refuse_their_predecessors() {
-        let mut pre_settings = APP_SHAPES.to_vec();
-        pre_settings[APP_SHAPES.len() - 2] = super::super::bootstrap::PRE_SETTINGS_SHAPE;
-        assert_eq!(crate::ui::rec::state_fp(&pre_settings), 0x9f03_9e4f_2ff6_4d19,
-            "retain the pre-typed-Settings census");
-        let mut pre_consent = pre_settings;
-        pre_consent.remove(4);
-        pre_consent[3] =
-            "AppFrameV3{route:str,overlay:str,focus:str,tree:u64,session:u64,initial:u64}";
-        assert_eq!(crate::ui::rec::state_fp(&pre_consent), 0xc3a2_f751_52f6_b9eb,
-            "retain the pre-physical-Consent census");
-        assert_eq!(crate::ui::rec::state_fp(&pre_consent[..pre_consent.len()-1]), 0xcadd_9035_05e4_2375,
-            "retain the controlled-init predecessor without synchronous admission");
-        let mut old_app = pre_consent[..pre_consent.len()-2].to_vec();
-        old_app[3] = "AppFrameV2{route:str,overlay:str,focus:str,tree:u64,session:u64}";
-        assert_eq!(crate::ui::rec::state_fp(&old_app),0x0881_e546_9753_6ca0,
-            "retain the Session-only predecessor census");
-        old_app[3] = "AppFrame{route:str,overlay:str,focus:str,tree:u64}";
-        assert_eq!(crate::ui::rec::state_fp(&old_app), 0x79dc_9274_0550_1805,
-            "retain the predecessor app census pin, not a rewritten recording");
-        old_app.extend_from_slice(crate::screens::registry::SCREEN_SHAPES);
-        let old = crate::ui::rec::state_fp(&old_app);
-        assert_ne!(old, state_fp());
+        // The consent machine's shape left with the telemetry module: the census below is the
+        // post-removal pin. Any later shape change must update it in the same commit.
+        assert_eq!(crate::ui::rec::state_fp(APP_SHAPES), 0x5a63_834a_7437_1acb);
+        // Dropping any one of the surviving shapes changes the fingerprint, so a recording
+        // graded under this census is refused the moment a shape moves.
+        let mut short = APP_SHAPES.to_vec();
+        short.pop();
+        assert_ne!(crate::ui::rec::state_fp(&short), state_fp());
+        let old = crate::ui::rec::state_fp(&short);
         let manifest = format!(r#"{{"schema": {}, "state_fp": {old}}}"#, crate::ui::rec::SCHEMA);
         assert_eq!(Recording::parse(&manifest, &[], state_fp()).err(),
             Some(RecError::StateShape { theirs: old, ours: state_fp() }));

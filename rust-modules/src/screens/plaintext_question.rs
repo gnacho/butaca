@@ -39,6 +39,9 @@ use crate::ui::{Painter, Rect};
 /// The read-out's primary while the question can be asked — and the question's affirmative verb,
 /// the same word, so the reason's "Select Connect" names the button either way.
 pub(crate) const CONNECT: &CStr = c"Connect";
+pub(crate) const DELETE_ALL: &CStr = c"Delete all";
+pub(crate) const DELETE_QUESTION: &CStr = c"Delete all local data?";
+pub(crate) const DELETE_BODY: &str = "This signs the television out and removes every stored sign-in, profile, server and setting. Playback positions on the servers are not touched.";
 /// The read-out's primary once the person has answered (or on any other failure).
 pub(crate) const TRY_AGAIN: &CStr = c"Try again";
 pub(crate) const NOT_NOW: &CStr = c"Not now";
@@ -83,11 +86,22 @@ struct Subject {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct PlaintextQuestion {
     subject: Option<Subject>,
+    /// The delete-all-data confirmation reuses the same two-answer alert with its own verbs and
+    /// no plaintext subject at all.
+    delete: bool,
+}
+
+/// What an answered alert asks the host to do.
+pub(crate) enum QuestionAnswer {
+    /// The plaintext question: record the person's answer.
+    Plaintext(SessionCmd),
+    /// The delete-all-data confirmation: *Delete all* was pressed.
+    DeleteAllLocalData,
 }
 
 impl PlaintextQuestion {
     pub(crate) fn new() -> Self {
-        Self { subject: None }
+        Self { subject: None, delete: false }
     }
 
     /// The server the question is open about, if it is.
@@ -103,33 +117,50 @@ impl PlaintextQuestion {
         self.subject = Some(Subject { machine_id: machine_id.to_owned(), sid });
     }
 
-    /// The two verbs the host draws the alert with: *Not now* / *Connect*.
-    pub(crate) fn verbs() -> (&'static CStr, &'static CStr) {
-        (NOT_NOW, CONNECT)
+    /// The two verbs the host draws the alert with: *Not now* / *Connect*, or *Cancel* /
+    /// *Delete all* for the delete confirmation.
+    pub(crate) fn verbs(&self) -> (&'static CStr, &'static CStr) {
+        if self.delete { (NOT_NOW, DELETE_ALL) } else { (NOT_NOW, CONNECT) }
+    }
+
+    /// Ask the delete-all-data confirmation on `alert` — no subject, its own copy.
+    pub(crate) fn open_delete(&mut self, alert: &mut DecisionAlert) {
+        alert.set_tone(Tone::Neutral);
+        alert.open_with_body(DELETE_QUESTION, DELETE_BODY);
+        self.delete = true;
     }
 
     /// **The person answered** — *Connect* (`allow`) or *Not now* / BACK. Dismisses the alert (an
     /// answer is never an instant hide) and returns the command to send; `None` when nothing was
     /// being asked.
-    pub(crate) fn answer(&mut self, alert: &mut DecisionAlert, allow: bool) -> Option<SessionCmd> {
+    pub(crate) fn answer(&mut self, alert: &mut DecisionAlert, allow: bool) -> Option<QuestionAnswer> {
         alert.dismiss();
+        if self.delete {
+            self.delete = false;
+            return allow.then(|| {
+                crate::log("settings: user confirmed Delete all local data");
+                QuestionAnswer::DeleteAllLocalData
+            });
+        }
         let subject = self.subject.take()?;
         crate::log(if allow {
             "plaintext: user allowed an unencrypted connection on this network"
         } else {
             "plaintext: user declined an unencrypted connection"
         });
-        Some(SessionCmd::AnswerPlaintext {
+        Some(QuestionAnswer::Plaintext(SessionCmd::AnswerPlaintext {
             machine_id: subject.machine_id,
             choice: if allow { PlaintextChoice::Allowed } else { PlaintextChoice::Declined },
             sid: subject.sid,
-        })
+        }))
     }
 
     /// The subject went away under the open question (the offer was withdrawn): take it down
     /// without an answer.
     pub(crate) fn withdraw(&mut self, alert: &mut DecisionAlert) {
-        if self.subject.take().is_some() && alert.is_open() {
+        self.subject = None;
+        self.delete = false;
+        if alert.is_open() {
             alert.close();
         }
     }
@@ -204,6 +235,11 @@ impl PlaintextAlert {
         enter_group(fx, to, self.group);
     }
 
+    /// Open the delete-all-data confirmation on this alert, seating focus on *Not now* (`to`).
+    pub(crate) fn open_delete(&mut self) {
+        self.question.open_delete(&mut self.alert);
+    }
+
     /// Take the question down unanswered — its subject went away.
     pub(crate) fn withdraw(&mut self) {
         self.question.withdraw(&mut self.alert);
@@ -223,7 +259,7 @@ impl PlaintextAlert {
 
     /// A press on `elem`: an answer while the question is open, else `None` (not this alert's).
     /// `Some(None)` means it was an answer but nothing was being asked.
-    pub(crate) fn press(&mut self, elem: u32) -> Option<Option<SessionCmd>> {
+    pub(crate) fn press(&mut self, elem: u32) -> Option<Option<QuestionAnswer>> {
         if !self.is_open() || !self.owns(elem) {
             return None;
         }
@@ -231,7 +267,7 @@ impl PlaintextAlert {
     }
 
     /// BACK while open: *Not now*. `None` when the alert is not open (BACK is the host's).
-    pub(crate) fn back(&mut self) -> Option<Option<SessionCmd>> {
+    pub(crate) fn back(&mut self) -> Option<Option<QuestionAnswer>> {
         if !self.is_open() {
             return None;
         }
@@ -366,7 +402,7 @@ impl PlaintextAlert {
             return;
         }
         self.alert.draw_scrim();
-        let (cancel, affirm) = PlaintextQuestion::verbs();
+        let (cancel, affirm) = self.question.verbs();
         self.alert.draw(cancel, affirm);
         let frames = self.alert.frames();
         self.frames.set(Some(frames));
@@ -396,7 +432,7 @@ pub(crate) enum AlertStep {
     Done(Handled),
     /// The person answered: push the command (if any), seat focus back on the host's own
     /// controls, and return `Handled::Yes`.
-    Answer(Option<SessionCmd>),
+    Answer(Option<QuestionAnswer>),
 }
 
 /// The offer a signed-in failure read-out speaks about, as its host caches it — the verdict and

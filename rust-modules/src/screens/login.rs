@@ -881,7 +881,9 @@ impl LoginScreen {
         if !self.alert.is_open() {
             return;
         }
-        if let Some(cmd) = self.question.answer(&mut self.alert, send) {
+        if let Some(super::plaintext_question::QuestionAnswer::Plaintext(cmd)) =
+            self.question.answer(&mut self.alert, send)
+        {
             fx.push(Fx::App(AppFx::Session(cmd)));
         }
         if self.has_control() {
@@ -1246,7 +1248,7 @@ impl LoginScreen {
             return;
         }
         self.alert.draw_scrim();
-        let (cancel, affirm) = PlaintextQuestion::verbs();
+        let (cancel, affirm) = self.question.verbs();
         self.alert.draw(cancel, affirm);
         let frames = self.alert.frames();
         self.alert_frames = Some(frames);

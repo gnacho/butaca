@@ -52,8 +52,6 @@ use crate::ui::{theme, Painter, Rect};
 
 use super::family::{inner_cx, table_focus, InnerHost, SettingsPage, ALERT_GROUP};
 use super::plaintext_question::{self, AlertStep, PlaintextAlert};
-use crate::ui::decision_alert::{Choice, DecisionAlert};
-use crate::ui::screen::{Activate, Hover, Stop};
 use super::registry::{word, DirectoryLike};
 
 /// Which ceremony the surface carries.
@@ -971,8 +969,6 @@ pub(crate) struct RootPage {
     pending_plaintext: Option<(String, bool)>,
     /// The shared question (`screens::plaintext_question`), asked when a switch is turned ON.
     alert: PlaintextAlert,
-    /// The delete-all-data confirmation — the one destructive action on this root.
-    delete_alert: DecisionAlert,
     /// `plex::grant::revision` as last read — an offer or an answer landing rebuilds the rows.
     grant_seen: u64,
 }
@@ -1019,7 +1015,6 @@ impl RootPage {
             plaintext_rows: Vec::new(),
             pending_plaintext: None,
             alert: PlaintextAlert::new(ALERT_GROUP, super::registry::ALERT, super::registry::ALERT + 1),
-            delete_alert: DecisionAlert::new(),
             grant_seen: crate::plex::grant::revision(),
             state: RootState {
                 sel: 0,
@@ -1070,7 +1065,7 @@ impl RootPage {
             Section::new("Privacy")
                 .row(
                     Row::new("Delete all local data")
-                        .detail("Erase this television's sign-ins, profiles and settings.")
+                        .detail("Erase every stored sign-in, profile and setting.")
                         .chevron(true),
                 )
                 .row(
@@ -1079,7 +1074,7 @@ impl RootPage {
                         .chevron(true),
                 ),
         );
-        actions.extend([Action::Legal, Action::DeleteAllLocalData]);
+        actions.extend([Action::DeleteAllLocalData, Action::Legal]);
         let mut system = Section::new("System");
         // A one-person account already skips the picker; the switch only changes a multi-user boot.
         if signed_in && multi_user {
@@ -1235,32 +1230,32 @@ impl RootPage {
             Action::Favourites => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Favourites))),
             Action::Legal => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Legal))),
             Action::DeleteAllLocalData => {
-                self.delete_alert.open_with_body(
-                    c"Delete all local data?",
-                    "This signs the television out and removes every stored sign-in, profile, server and setting. Playback positions on the servers are not touched.",
-                );
-                self.delete_alert.set_choice(Choice::Destructive);
-                plaintext_question::enter_group(fx, MachineId::Instance(InstanceId(0)), ALERT_GROUP);
+                self.alert.open_delete();
+                plaintext_question::enter_group(fx, fx.from(), ALERT_GROUP);
             }
             Action::About => fx.push(Fx::Nav(NavOp::Push(SettingsPage::About))),
         }
     }
-}
 
-impl RootPage {
-    /// The question was answered: send the one command it became (a *Connect* shows the switch
-    /// on at once; Session records it and re-finds the server), and hand focus back to the table.
-    fn alert_answer(&mut self, cmd: Option<crate::auth::SessionCmd>, directory: crate::stores::browse::DirectoryView<'_>,
+    fn alert_answer(&mut self, answer: Option<super::plaintext_question::QuestionAnswer>,
+        directory: crate::stores::browse::DirectoryView<'_>,
         fx: &mut Effects<'_, InnerHost>) {
-        if let Some(cmd) = cmd {
-            if let crate::auth::SessionCmd::AnswerPlaintext { machine_id, choice, .. } = &cmd {
-                if choice.allows() {
-                    self.pending_plaintext = Some((machine_id.clone(), true));
+        match answer {
+            Some(super::plaintext_question::QuestionAnswer::Plaintext(cmd)) => {
+                if let crate::auth::SessionCmd::AnswerPlaintext { machine_id, choice, .. } = &cmd {
+                    if choice.allows() {
+                        self.pending_plaintext = Some((machine_id.clone(), true));
+                    }
                 }
+                fx.push(Fx::App(super::registry::AppFx::Session(cmd)));
             }
-            fx.push(Fx::App(super::registry::AppFx::Session(cmd)));
+            Some(super::plaintext_question::QuestionAnswer::DeleteAllLocalData) => {
+                fx.push(Fx::App(super::registry::AppFx::Loop(
+                    super::registry::LoopReq::DeleteAllLocalData)));
+            }
+            None => {}
         }
-        plaintext_question::enter_group(fx, MachineId::Instance(InstanceId(0)), GroupId(0));
+        plaintext_question::enter_group(fx, fx.from(), GroupId(0));
         self.rebuild(self.table.sel, directory);
         fx.invalidate(Provenance::Input);
     }
@@ -1274,46 +1269,6 @@ impl Machine<InnerHost> for RootPage {
         cx: &Cx<'_, InnerHost>,
         fx: &mut Effects<'_, InnerHost>,
     ) -> Handled {
-        if self.delete_alert.visible() {
-            match ev {
-                ScreenEvent::FocusMoved { to, .. } => {
-                    self.delete_alert.set_choice(if to.elem == super::registry::ALERT + 1 {
-                        Choice::Destructive
-                    } else {
-                        Choice::Cancel
-                    });
-                    return Handled::Yes;
-                }
-                ScreenEvent::PressCommit(_) => {
-                    if let Some(key) = cx.focus.current {
-                        if key.elem >= super::registry::ALERT && key.elem <= super::registry::ALERT + 1 {
-                            if key.elem == super::registry::ALERT + 1 {
-                                fx.push(Fx::App(super::registry::AppFx::Loop(
-                                    super::registry::LoopReq::DeleteAllLocalData)));
-                            }
-                            self.delete_alert.dismiss();
-                            plaintext_question::enter_group(fx, MachineId::Instance(InstanceId(0)), GroupId(0));
-                            fx.invalidate(crate::ui::present::Provenance::Input);
-                        }
-                    }
-                    return Handled::Yes;
-                }
-                ScreenEvent::Activate(_) => return Handled::Yes,
-                ScreenEvent::Input(crate::ui::machine::InputEvent {
-                    kind: crate::ui::machine::InputKind::Key { key: Key::Back, .. }, ..
-                }) => {
-                    self.delete_alert.dismiss();
-                    plaintext_question::enter_group(fx, MachineId::Instance(InstanceId(0)), GroupId(0));
-                    fx.invalidate(crate::ui::present::Provenance::Input);
-                    return Handled::Yes;
-                }
-                ScreenEvent::Tick(t) => {
-                    self.delete_alert.update(t.dt());
-                    return Handled::Yes;
-                }
-                _ => return Handled::Yes,
-            }
-        }
         match self.alert.step(ev, cx) {
             AlertStep::Pass => {}
             AlertStep::Done(handled) => return handled,
@@ -1451,26 +1406,6 @@ impl Screen<InnerHost> for RootPage {
         let mut v = self.view();
         crate::ui::screen::Part::<InnerHost>::draw(&mut v, f, Rect::FULL);
         self.alert.draw(f, self.entry);
-        if self.delete_alert.visible() {
-            self.delete_alert.draw_scrim();
-            self.delete_alert.draw(c"Cancel", c"Delete all");
-            let frames = self.delete_alert.frames();
-            if self.delete_alert.is_open() && self.delete_alert.settled() {
-                for (i, rect) in [frames.0, frames.1].into_iter().enumerate() {
-                    f.stop(
-                        Painter::root(),
-                        Stop {
-                            key: crate::ui::machine::FocusKey { entry: self.entry, elem: super::registry::ALERT + i as u32 },
-                            rect,
-                            rest_rect: rect,
-                            clip: Rect::FULL,
-                            hover: Hover::Focus,
-                            activate: Activate::Press,
-                        },
-                    );
-                }
-            }
-        }
     }
     fn render(&self) -> RenderStrategy {
         RenderStrategy::Page

@@ -574,3 +574,4 @@ fn force_warning_engine_focus_confirms_only_the_chosen_answer() {
     }
     crate::route::restore_direct_play_mode(previous);
 }
+

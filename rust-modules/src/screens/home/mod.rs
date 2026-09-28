@@ -1825,7 +1825,7 @@ impl<H: HomeLike> Machine<H> for HomeScreen {
             AlertStep::Pass => {}
             AlertStep::Done(handled) => return handled,
             AlertStep::Answer(cmd) => {
-                if let Some(cmd) = cmd {
+                if let Some(super::plaintext_question::QuestionAnswer::Plaintext(cmd)) = cmd {
                     fx.push(Fx::App(AppFx::Session(cmd)));
                 }
                 self.reseat(FocusTarget::ContainerGroup(HERO_GROUP), cx, fx);

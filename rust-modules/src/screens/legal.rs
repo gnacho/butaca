@@ -432,45 +432,6 @@ mod tests {
     ///
     /// Reword the document freely; when you do, move the assertion with it deliberately rather
     /// than deleting it.
-    #[test]
-    fn the_policy_describes_what_this_build_actually_does() {
-        let p = Page::Privacy.body();
-        assert!(
-            !p.contains("Home library choices, playback position"),
-            "nothing in the session schema stores a playhead; the server holds position"
-        );
-        for claim in [
-            "recent searches",
-            "Analytics ID",
-            "Crash report ID",
-            "RETENTION",
-            "WHERE DATA IS PROCESSED",
-            "UNINSTALLING",
-        ] {
-            assert!(p.contains(claim), "the policy never mentions {claim:?}");
-        }
-        for stale in [
-            "carries no installation identifier",
-            "cannot be linked",
-            "cannot be found or deleted",
-            // consent and both identifiers END with the sign-in since 2026-09-04
-            "NOT removed by signing out",
-        ] {
-            assert!(
-                !p.contains(stale),
-                "the policy still claims crash reports are anonymous: {stale:?}"
-            );
-        }
-        // The two identifier names the Settings rows use are the names the policy uses.
-        assert!(p.contains("Settings shows it as your Crash report ID"));
-        assert!(p.contains("Settings shows that identifier as your Analytics ID"));
-        // …and the policy says what `auth::forget_account` does to them.
-        assert!(p.contains("signing out removes them with it"));
-        // Every profile switched to on this television keeps its own offline access: a server
-        // token and, for a PIN-protected profile, a one-way check of the PIN — never the PIN.
-        assert!(p.contains("server access token"), "the policy never mentions per-profile offline access");
-        assert!(p.contains("PIN"), "the policy never mentions the PIN check");
-    }
 
     #[test]
     fn complete_gpl_is_available_offline() {

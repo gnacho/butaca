@@ -1903,7 +1903,7 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 /// `tools/plxnative-rec rerecord` like any other shape-pin bump before replay is trusted.
 #[cfg(test)]
 // Playback/account preference pages add their arguments and logical state to the inventory.
-const SCREEN_SHAPES_PIN: u64 = 0x54b17d5fd41a2606;
+const SCREEN_SHAPES_PIN: u64 = 0x126a_4f60_57a2_7a1c;
 
 #[cfg(test)]
 mod arg_tests {

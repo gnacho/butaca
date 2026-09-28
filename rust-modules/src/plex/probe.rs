@@ -540,6 +540,8 @@ impl RouteOutcome {
         // an HTTP status are three different fixes.
         match (failure.status, failure.curl_rc) {
             (Some(401), _) => Self::Unauthorized,
+            (None, Some(28)) => Self::Timeout,
+            (None, Some(7)) => Self::Refused,
             (Some(s), _) if (200..=299).contains(&s) => Self::WrongServer, // a truncated 2xx verified nothing
             (Some(s), _) if (400..=499).contains(&s) => Self::Answered4xx,
             (Some(s), _) if (500..=599).contains(&s) => Self::Answered5xx,

@@ -805,7 +805,8 @@ fn erased_publication_waits_for_carried_resource_completion() {
     assert!(rig.session.snapshot_init().pending_erase.is_none());
     assert!(rig.take_reqs().iter().any(|req| matches!(req, LoopReq::LocalDataErased)));
     let events = &rig.session_adapter.fixture_resources().coordinator_events;
-    assert!(events.is_empty(), "the erase carries no telemetry coordinator effects any more");
+    assert!(events.iter().all(|event| matches!(event, crate::auth::owner::CoordinatorAction::LocalDataErased)),
+        "the erase carries only the local-data coordinator effect, no telemetry");
     execute_session_command(&mut d, Command::StartLogin);
     d.emit(MachineId::Session, Fx::Deliver(MachineId::Session, Delivery::Machine(AppMsg::Session(
         crate::auth::owner::SessionEvent::Erased { epoch: erased_epoch, leftovers: 99 }))));
