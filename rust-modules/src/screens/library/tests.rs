@@ -738,7 +738,7 @@ fn a_failed_source_over_an_offered_server_asks_the_shared_question() {
     assert_eq!(
         page.status_overlay(&cx, &caption, reason.as_deref(), action.as_deref())
             .action.and_then(|a| a.to_str().ok()),
-        Some(crate::screens::plaintext_question::try_again()),
+        Some(super::super::plaintext_question::try_again()),
         "another server's offer is not this source's"
     );
 
@@ -750,7 +750,7 @@ fn a_failed_source_over_an_offered_server_asks_the_shared_question() {
     assert_eq!(
         page.status_overlay(&cx, &caption, reason.as_deref(), action.as_deref()).action
             .and_then(|a| a.to_str().ok()),
-        Some(crate::screens::plaintext_question::connect())
+        Some(super::super::plaintext_question::connect())
     );
     let mut out = Vec::new();
     let mut present = crate::ui::present::Present::new();
