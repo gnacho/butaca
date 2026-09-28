@@ -494,6 +494,40 @@ pub(super) fn up_next_of(r: &crate::plex::QueueRow) -> Option<UpNext> {
 }
 
 
+/// Build the Up Next descriptor from Jellyfin's `GET /Shows/NextUp` answer (issues #41/#42) —
+/// the episode the server says follows the one now playing, in the same shape the Plex lane
+/// gets free from its `continuous=1` PlayQueue. Episodes only, the same rule as
+/// [`up_next_of`]: "up next" is a show idea.
+#[cfg(feature = "jellyfin")]
+fn up_next_from_dto(it: &crate::jellyfin::BaseItemDto) -> Option<UpNext> {
+    let m = crate::jellyfin::movie_from_dto(it, crate::jellyfin::SERVER_ID, 0)?;
+    if m.kind != 3 {
+        return None;
+    }
+    Some(UpNext {
+        rk: m.rk,
+        part: m.part,
+        vcodec: m.vcodec,
+        acodec: m.acodec,
+        show_title: m.show_title,
+        ep_title: m.title,
+        season: m.season_index as i64,
+        index: m.ep_index as i64,
+        thumb: m.thumb,
+        // UpNext speaks milliseconds; the converter's dur_ns is ticks x 100
+        dur_ms: m.dur_ns / 1_000_000,
+        resume_ms: m.resume_ms,
+    })
+}
+
+/// Ask the server for the show's next episode and project it. An empty NextUp (a show never
+/// started or fully watched) is `None` exactly like a transport failure: both honestly read as
+/// "no up next".
+#[cfg(feature = "jellyfin")]
+fn jellyfin_up_next(c: &crate::jellyfin::JfClient, series_id: &str) -> Option<UpNext> {
+    c.next_up(series_id)?.items.first().and_then(up_next_from_dto)
+}
+
 /// Every piece of [`Session`] the resolve used to READ, captured on the main thread and passed by
 /// value.
 ///
@@ -2328,6 +2362,18 @@ fn build_stream_jellyfin(
         .cached_item
         .clone()
         .or_else(|| crate::metadata::fetch_playing_item(env.sid, rk));
+    // Up Next (#41/#42): what follows this episode, off the show's own NextUp answer. The Plex
+    // lane gets the same fact free from its continuous PlayQueue; here it costs one query per
+    // episode resolve, skipped for movies (no show_rk) and previews. Everything downstream —
+    // the HUD control and the auto-advance countdown — reads `plan.up_next`, backend-agnostic.
+    if !env.preview {
+        plan.up_next = plan
+            .playing
+            .as_ref()
+            .map(|p| p.show_rk.as_str())
+            .filter(|show| !show.is_empty())
+            .and_then(|show| jellyfin_up_next(c, show));
+    }
     let (src_w, src_h) = plan
         .playing
         .as_ref()
@@ -2565,3 +2611,7 @@ mod dolby_vision_tests;
 #[cfg(test)]
 #[path = "plan_mde_decision_tests.rs"]
 mod mde_decision_tests;
+
+#[cfg(test)]
+#[path = "plan_up_next_tests.rs"]
+mod up_next_tests;
