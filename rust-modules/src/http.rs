@@ -77,6 +77,9 @@ pub(crate) enum Method {
     Get,
     Put,
     Post,
+    /// Jellyfin's view-state writes (`DELETE .../PlayedItems/{id}`) and its transcode kill
+    /// (`DELETE /Videos/ActiveEncodings`) — bodyless like a GET, parameters in the query string.
+    Delete,
 }
 
 impl Method {
@@ -86,6 +89,7 @@ impl Method {
             Method::Get => "GET",
             Method::Put => "PUT",
             Method::Post => "POST",
+            Method::Delete => "DELETE",
         }
     }
 }
@@ -179,7 +183,29 @@ pub(crate) fn request(
     headers: &[&str],
     pin: Option<&ResolvePin>,
 ) -> Option<Reply> {
-    request_with(origin, path, method, headers, BodyPolicy::Api, pin).response()
+    request_with(origin, path, method, headers, BodyPolicy::Api, pin, &[]).response()
+}
+
+/// A JSON-body POST: the one shape Jellyfin's control plane needs that Plex's never did
+/// (`AuthenticateByName`, `Sessions/Playing`, the view-state writes). The caller's `headers`
+/// ride alongside the two this function adds (`Accept`, `Content-Type`, `Content-Length` — the
+/// body is sized here, so the head and the bytes on the wire cannot disagree). The ordinary API
+/// policy applies; there is deliberately no body-bearing probe or deadline variant, because a
+/// control POST either fits the API budget or is a failure the caller already handles as one.
+pub(crate) fn request_post_json(
+    origin: &Origin,
+    path: &str,
+    headers: &[&str],
+    body: &[u8],
+) -> Option<Reply> {
+    let ct = "Content-Type: application/json".to_owned();
+    let cl = format!("Content-Length: {}", body.len());
+    let mut all: Vec<&str> = Vec::with_capacity(headers.len() + 3);
+    all.push(ACCEPT_JSON);
+    all.extend_from_slice(headers);
+    all.push(&ct);
+    all.push(&cl);
+    request_with(origin, path, Method::Post, &all, BodyPolicy::Api, None, body).response()
 }
 
 /// A PMS request whose response size is content-dependent. Only the TLS arm differs from
@@ -191,7 +217,7 @@ pub(crate) fn request_bulk(
     headers: &[&str],
     pin: Option<&ResolvePin>,
 ) -> Option<Reply> {
-    request_with(origin, path, method, headers, BodyPolicy::Bulk, pin).response()
+    request_with(origin, path, method, headers, BodyPolicy::Bulk, pin, &[]).response()
 }
 
 /// A small control-plane request inside an already-running transaction reserve. Plaintext composes
@@ -215,6 +241,7 @@ pub(crate) fn request_until_outcome(
         headers,
         BodyPolicy::Deadline { at: deadline },
         pin,
+        &[],
     )
 }
 
@@ -252,6 +279,8 @@ pub(crate) fn request_probe(
             timeout_s,
         },
         pin,
+   
+        &[],
     ) {
         RequestOutcome::Response(reply) => Ok(reply),
         RequestOutcome::Transport(failure) => Err(failure),
@@ -268,14 +297,15 @@ fn request_with(
     headers: &[&str],
     body_policy: BodyPolicy,
     pin: Option<&ResolvePin>,
+    req_body: &[u8],
 ) -> RequestOutcome {
     if !credential_transport_allowed(origin, path, headers) {
         return RequestOutcome::Transport(None);
     }
     match origin.scheme() {
         // The plaintext arm dials the literal it is given; a pin belongs to a TLS NAME only.
-        Scheme::Http => plaintext(origin, path, method, headers, body_policy),
-        Scheme::Https => tls(origin, path, method, headers, body_policy, pin),
+        Scheme::Http => plaintext(origin, path, method, headers, body_policy, req_body),
+        Scheme::Https => tls(origin, path, method, headers, body_policy, pin, req_body),
     }
 }
 
@@ -354,6 +384,7 @@ fn plaintext(
     method: Method,
     headers: &[&str],
     body_policy: BodyPolicy,
+    req_body: &[u8],
 ) -> RequestOutcome {
     // The raw socket takes ONE `extra` blob, CRLF-terminated per line and CRLF-terminated at the
     // end — it is spliced straight into the request head. Control-plane is one-shot: send
@@ -440,6 +471,28 @@ fn plaintext(
                 }
             }
         }
+        // The JSON-body entry point is the one caller that brings bytes of its own, and it runs
+        // the ordinary API policy only — there is no body-bearing probe or deadline variant, and
+        // `request_post_json`'s doc says why none is needed. An empty slice keeps `http_open`'s
+        // byte-for-byte head and behaviour.
+        _ if !req_body.is_empty() => crate::stream::http_open_body(
+            &mut *hs,
+            host_c.as_ptr(),
+            origin.port(),
+            path_c.as_ptr(),
+            extra_ptr,
+            method.as_str(),
+            req_body,
+        ),
+        _ if !req_body.is_empty() => crate::stream::http_open_body(
+            &mut *hs,
+            host_c.as_ptr(),
+            origin.port(),
+            path_c.as_ptr(),
+            extra_ptr,
+            method.as_str(),
+            req_body,
+        ),
         _ => crate::stream::http_open(
             &mut *hs,
             host_c.as_ptr(),
@@ -590,7 +643,9 @@ fn tls(
     headers: &[&str],
     body_policy: BodyPolicy,
     pin: Option<&ResolvePin>,
+    req_body: &[u8],
 ) -> RequestOutcome {
+    let _ = &req_body; // the tls arm forwards it to the socket layer below
     let url = format!("{}{}", origin.base(), path);
     let resolve = pin
         .filter(|p| p.host() == origin.host() && p.port() == origin.port())

@@ -292,6 +292,7 @@ pub(crate) mod testlock {
     }
 }
 mod i18n;
+mod jellyfin;
 mod text;
 mod textinput; // the TV's own on-screen keyboard, via plain SDL_StartTextInput (see the module doc)
 mod ui;

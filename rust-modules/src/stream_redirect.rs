@@ -165,6 +165,7 @@ pub(crate) fn open_following(
             req.deadline,
             req.deadline.is_some(),
             checkpoint,
+            &[],
         );
         let status = match opened {
             Ok(()) => return Ok(Opened::Socket(cur)),
@@ -399,7 +400,9 @@ mod tests {
             "192.168.1.10",
             32400,
             "/library/parts/1/file.mp4?X-Plex-Token=tok",
-        )
+        
+        &[],
+    )
     }
 
     #[test]

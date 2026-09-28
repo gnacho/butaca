@@ -418,7 +418,7 @@ struct Mail {
 
 /// One source's results, keyed by [`KINDS`] index. The worker builds this, so no wire DTO ever
 /// crosses the mailbox.
-type Projection = [Vec<Item>; NKIND];
+pub(crate) type Projection = [Vec<Item>; NKIND];
 
 /// One registry slot's worker-touched half: the single-flight claim plus the landing mailbox.
 /// Bundled into [`SearchAdapter`], which a production `Bridge` holds as one `Arc` per owner —
