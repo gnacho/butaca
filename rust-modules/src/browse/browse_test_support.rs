@@ -227,6 +227,8 @@ pub(super) fn queue_directories_from(
     let epoch = browse.state.table_epoch();
     *browse.adapter.genre_result.lock().unwrap_or_else(|e| e.into_inner()) = Some(DirectoryResult {
         library_type: browse.state.states[0].library_type,
+            #[cfg(feature = "jellyfin")]
+            letters_filter: None,
         epoch,
         sec: 0,
         client: super::DiscClient::Plex(client),
@@ -238,6 +240,8 @@ pub(super) fn queue_directories_from(
     });
     *browse.adapter.letter_result.lock().unwrap_or_else(|e| e.into_inner()) = Some(DirectoryResult {
         library_type: browse.state.states[0].library_type,
+            #[cfg(feature = "jellyfin")]
+            letters_filter: None,
         epoch,
         sec: 0,
         client: super::DiscClient::Plex(client),
@@ -247,14 +251,20 @@ pub(super) fn queue_directories_from(
     browse.adapter.genre_fetching.store(true, Ordering::SeqCst);
     browse.adapter.letters_fetching.store(true, Ordering::SeqCst);
     browse.state.land_directory_owned(
-        &browse.adapter.genre_fetching, &browse.adapter.genre_result, |st, list| {
+        &browse.adapter.genre_fetching, &browse.adapter.genre_result, |st, list, _filter| {
         st.genres_done = true;
         st.genres = Arc::new(list);
     });
     browse.state.land_directory_owned(
-        &browse.adapter.letters_fetching, &browse.adapter.letter_result, |st, list| {
+        &browse.adapter.letters_fetching, &browse.adapter.letter_result, |st, list, filter| {
         st.letters_done = true;
         st.letters = Arc::new(list);
+        #[cfg(feature = "jellyfin")]
+        {
+            st.letters_filter = filter;
+        }
+        #[cfg(not(feature = "jellyfin"))]
+        let _ = filter;
     });
 }
 pub(super) fn assert_new_directories_survive(browse: &TestBrowse) {

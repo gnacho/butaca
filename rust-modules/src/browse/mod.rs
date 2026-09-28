@@ -351,6 +351,16 @@ impl SortEntry {
     }
 }
 
+/// The filter combination a letters probe describes (issue #37): Jellyfin's per-letter counts
+/// are computed WITH the active filter, so a landed table is only valid for the unwatched/genre
+/// state it was kicked under. Plex's `firstCharacter` counts are query-independent and never
+/// carry one of these.
+#[derive(Clone, Default, PartialEq, Eq, Debug)]
+pub(crate) struct LettersFilter {
+    pub(crate) unwatched: bool,
+    pub(crate) genre: Option<String>, // genre id (GUID), none when unfiltered
+}
+
 /// One genre value (tag id + display title), from the section's `/genre` value list.
 #[derive(Clone)]
 pub(crate) struct GenreEntry {
@@ -431,6 +441,10 @@ struct SecState {
     /// Counts describe the UNFILTERED title listing, so the rail only shows in that state.
     letters: Arc<Vec<(String, i64)>>,
     letters_done: bool,
+    /// The filter combination the landed `letters` describe — Jellyfin only (issue #37); Plex
+    /// never sets this. `kick_letters` refetches whenever the current state disagrees.
+    #[cfg(feature = "jellyfin")]
+    letters_filter: Option<crate::browse::LettersFilter>,
     /// **The library's OWN shelves** — `Library Recommended`, as its server's owner arranged it.
     /// A field here rather than a store of its own because this struct is already the per-section
     /// aggregate; `section_hubs`' module doc argues it, and `reset()` clearing it on a profile
@@ -566,6 +580,8 @@ impl Default for SecState {
             genres_done: false,
             letters: Arc::default(),
             letters_done: false,
+        #[cfg(feature = "jellyfin")]
+        letters_filter: None,
             hubs: Default::default(),
             fetch: SecFetch::Loading,
             total: -1,
@@ -922,6 +938,11 @@ impl BrowseState {
             return true;
         }
         state.unwatched = on;
+        #[cfg(feature = "jellyfin")]
+        if state.sorts.iter().any(|s| s.key == "SortName") {
+            // Issue #37: the landed letters describe the OLD filter combination.
+            state.letters_done = false;
+        }
         self.requery();
         true
     }
@@ -956,6 +977,11 @@ impl BrowseState {
         state.genre = index
             .and_then(|i| state.genres.get(i).cloned())
             .map(Arc::new);
+        #[cfg(feature = "jellyfin")]
+        if state.sorts.iter().any(|s| s.key == "SortName") {
+            // Issue #37: the landed letters describe the OLD filter combination.
+            state.letters_done = false;
+        }
         self.requery();
     }
     fn set_genre_by_id(&mut self, id: Option<&str>) -> bool {
@@ -1128,6 +1154,8 @@ impl BrowseState {
                 client: DiscClient::Plex(client),
                 token_gen,
                 library_type,
+                #[cfg(feature = "jellyfin")]
+                letters_filter: None,
                 list,
             });
         });
@@ -1154,7 +1182,8 @@ impl BrowseState {
         done: bool,
         flag: fn(&BrowseAdapter) -> &AtomicBool,
         mail: fn(&BrowseAdapter) -> &Mutex<Option<DirectoryResult<T>>>,
-        fetch: fn(&'static crate::jellyfin::JfClient, i64, SecKind) -> Vec<T>,
+        letters_filter: Option<LettersFilter>,
+        fetch: impl Fn(&'static crate::jellyfin::JfClient, i64, SecKind) -> Vec<T> + Send + 'static,
     ) {
         let current = self.cur();
         if self.states.get(current).is_none() || done {
@@ -1171,13 +1200,15 @@ impl BrowseState {
         let worker_adapter = Arc::clone(&adapter);
         let spawned = crate::task::spawn_small("directory", move || {
             // a panicking fetch lands as EMPTY, the same refusal the Plex arm posts
-            let list = catch_unwind(|| fetch(jc, key, kind)).unwrap_or_default();
+            let list = catch_unwind(std::panic::AssertUnwindSafe(|| fetch(jc, key, kind)))
+                .unwrap_or_default();
             *mail(&worker_adapter).lock().unwrap_or_else(|e| e.into_inner()) = Some(DirectoryResult {
                 epoch,
                 sec: current,
                 client: DiscClient::Jellyfin(jc),
                 token_gen: 0,
                 library_type,
+                letters_filter,
                 list,
             });
         });
@@ -1195,7 +1226,7 @@ impl BrowseState {
         // the same mailbox.
         #[cfg(feature = "jellyfin")]
         if self.cur_is_jellyfin() {
-            self.jf_kick_directory(adapter, done, |a| &a.genre_fetching, |a| &a.genre_result,
+            self.jf_kick_directory(adapter, done, |a| &a.genre_fetching, |a| &a.genre_result, None,
                 |jc, key, _kind| crate::jellyfin::browse::fetch_genres(jc, key).unwrap_or_default());
             return;
         }
@@ -1212,11 +1243,26 @@ impl BrowseState {
             .map(|state| state.letters_done)
             .unwrap_or(true);
         // The Jellyfin lane: the per-letter counts come from 26 cheap Limit=0 probes (the rail
-        // is this fork's issue #31 feature, ported onto the new store's directory mailbox).
+        // is this fork's issue #31 feature, ported onto the new store's directory mailbox). The
+        // probes carry the ACTIVE filter (issue #37) — IsPlayed and GenreIds ride NameStartsWith
+        // — so `done` is only true when the landed table describes the current filter state;
+        // changing unwatched/genre makes the next frame kick a fresh combination.
         #[cfg(feature = "jellyfin")]
         if self.cur_is_jellyfin() {
+            let state = self.cur_state();
+            let filter = LettersFilter {
+                unwatched: state.is_some_and(|state| state.unwatched),
+                genre: state.and_then(|state| state.genre.as_ref().map(|g| g.id.clone())),
+            };
+            let done = done
+                && state.is_some_and(|state| {
+                    state.letters_filter.as_ref() == Some(&filter)
+                });
             self.jf_kick_directory(adapter, done, |a| &a.letters_fetching, |a| &a.letter_result,
-                |jc, key, kind| crate::jellyfin::browse::fetch_letters(jc, key, kind).unwrap_or_default());
+                Some(filter.clone()),
+                move |jc, key, kind| {
+                    crate::jellyfin::browse::fetch_letters(jc, key, kind, &filter).unwrap_or_default()
+                });
             return;
         }
         self.kick_directory(
@@ -1469,7 +1515,16 @@ impl BrowseState {
             Some(sort) => sort.key == "titleSort" && !state.sort_desc,
             None => true,
         };
-        title_asc && !state.unwatched && state.genre.is_none() && state.letters.len() > 1
+        // Issue #37: on Jellyfin the per-letter counts are recomputed WITH the active filter,
+        // so the rail may stay for unwatched-only and per-genre listings. The backend test is
+        // the fixed sort vocabulary ("SortName" never appears on Plex). Plex's counts are
+        // query-independent and would index the wrong rows, so its lane keeps the gate.
+        #[cfg(feature = "jellyfin")]
+        let filter_ok = state.sorts.iter().any(|s| s.key == "SortName")
+            || (!state.unwatched && state.genre.is_none());
+        #[cfg(not(feature = "jellyfin"))]
+        let filter_ok = !state.unwatched && state.genre.is_none();
+        title_asc && filter_ok && state.letters.len() > 1
     }
     fn discovery_state(&self) -> SecFetch {
         if !self.sections.is_empty() || self.sources.iter().all(|source| source.sections_done) {
@@ -2251,7 +2306,7 @@ impl BrowseState {
         gate: &crate::ui::landgate::Gate,
         flag: &AtomicBool,
         mail: &Mutex<Option<DirectoryResult<T>>>,
-        apply: impl FnOnce(&mut SecState, Vec<T>),
+        apply: impl FnOnce(&mut SecState, Vec<T>, Option<LettersFilter>),
     ) -> bool {
         let taken = crate::stores::take_landing(gate, crate::stores::StoreId::Browse, || {
             mail.lock().unwrap_or_else(|e| e.into_inner()).take()
@@ -2262,6 +2317,9 @@ impl BrowseState {
         if result.epoch != self.table_epoch() {
             return false;
         }
+        #[cfg(feature = "jellyfin")]
+        let DirectoryResult { sec, client, token_gen, library_type, letters_filter, list, .. } = result;
+        #[cfg(not(feature = "jellyfin"))]
         let DirectoryResult { sec, client, token_gen, library_type, list, .. } = result;
         // The Jellyfin landing applies straight to its section state — a process-lifetime
         // install has no registry lifecycle to validate against.
@@ -2270,7 +2328,7 @@ impl BrowseState {
             let applied = if self.section_sid(sec) == Some(crate::jellyfin::SERVER_ID) {
                 match self.state_mut(sec) {
                     Some(state) if state.library_type == library_type => {
-                        apply(state, list);
+                        apply(state, list, letters_filter);
                         true
                     }
                     _ => false,
@@ -2291,7 +2349,7 @@ impl BrowseState {
                     if state.library_type != library_type {
                         return false;
                     }
-                    apply(state, list);
+                    apply(state, list, None);
                     return true;
                 }
             }
@@ -2305,7 +2363,8 @@ impl BrowseState {
     }
     #[cfg(test)]
     fn land_directory_owned<T>(&mut self, flag: &AtomicBool,
-        mail: &Mutex<Option<DirectoryResult<T>>>, apply: impl FnOnce(&mut SecState, Vec<T>)) -> bool {
+        mail: &Mutex<Option<DirectoryResult<T>>>,
+        apply: impl FnOnce(&mut SecState, Vec<T>, Option<LettersFilter>)) -> bool {
         self.land_directory_owned_with_gate(crate::ui::landgate::fixture_gate(), flag, mail, apply)
     }
     fn maybe_spawn_owned(&mut self, adapter: &Arc<BrowseAdapter>) {
@@ -2434,7 +2493,7 @@ impl BrowseState {
         changed |= self.hubs_tick_all(adapter);
         changed |= self.land_directory_owned_with_gate(
             gate,
-            &adapter.genre_fetching, &adapter.genre_result, |state, list| {
+            &adapter.genre_fetching, &adapter.genre_result, |state, list, _filter| {
             state.genres_done = true;
             if state.genres.is_empty() {
                 state.genres = Arc::new(list);
@@ -2442,11 +2501,19 @@ impl BrowseState {
         });
         changed |= self.land_directory_owned_with_gate(
             gate,
-            &adapter.letters_fetching, &adapter.letter_result, |state, list| {
+            &adapter.letters_fetching, &adapter.letter_result, |state, list, filter| {
                 state.letters_done = true;
-                if state.letters.is_empty() {
-                    state.letters = Arc::new(list);
+                // Jellyfin's counts describe one filter combination (issue #37): the new table
+                // REPLACES the old, and the combination it ran under is stamped so a later
+                // filter change can tell stale from fresh. Plex lands here with `None` and its
+                // query-independent counts, which replace identically.
+                state.letters = Arc::new(list);
+                #[cfg(feature = "jellyfin")]
+                {
+                    state.letters_filter = filter;
                 }
+                #[cfg(not(feature = "jellyfin"))]
+                let _ = filter;
             });
         let page = crate::stores::take_landing(gate, crate::stores::StoreId::Browse, || {
             adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()).take()
@@ -2651,6 +2718,11 @@ struct DirectoryResult<T> {
     client: DiscClient,
     token_gen: u32,
     library_type: LibraryType,
+    /// Letters flights only (issue #37): the filter combination the probe ran under, stamped on
+    /// the landing so the store can tell a stale table from a fresh one. Genres and Plex's
+    /// query-independent `firstCharacter` flights leave it `None`.
+    #[cfg(feature = "jellyfin")]
+    letters_filter: Option<crate::browse::LettersFilter>,
     list: Vec<T>,
 }
 
@@ -3483,6 +3555,8 @@ pub(crate) fn queue_genre_for_owner_test(
             epoch: state.table_epoch(), sec, client: DiscClient::Plex(client),
             token_gen: client.token_gen(),
             library_type: state.states[sec].library_type,
+            #[cfg(feature = "jellyfin")]
+            letters_filter: None,
             list: vec![GenreEntry { id: "new".into(), title: "New Genre".into() }],
         });
 }

@@ -228,14 +228,33 @@ impl<'a> ListingView<'a> {
         let title_key = |key: &str| key == "titleSort" || key == "SortName";
         #[cfg(not(feature = "jellyfin"))]
         let title_key = |key: &str| key == "titleSort";
+        // Issue #37: Jellyfin recomputes the per-letter counts WITH the active filter, so its
+        // rail may stay for unwatched-only and per-genre listings; the backend test is the
+        // fixed sort vocabulary ("SortName" never appears on Plex). Plex's firstCharacter
+        // counts are query-independent and would index the wrong rows filtered, so its lane
+        // keeps the gate.
+        let filters_ok = self.jellyfin_sorts() || (!self.unwatched() && self.genre().is_none());
         self.id().is_some()
             && self
                 .sorts()
                 .get(self.sort_index())
                 .is_none_or(|s| title_key(&s.key) && !self.sort_desc())
-            && !self.unwatched()
-            && self.genre().is_none()
+            && filters_ok
             && self.letters().len() > 1
+    }
+
+    /// Whether this section's sort vocabulary is Jellyfin's fixed list — the token test the
+    /// rail uses for the backend, since "SortName" never appears on Plex and "titleSort" never
+    /// on Jellyfin.
+    fn jellyfin_sorts(self) -> bool {
+        #[cfg(feature = "jellyfin")]
+        {
+            self.sorts().iter().any(|s| s.key == "SortName")
+        }
+        #[cfg(not(feature = "jellyfin"))]
+        {
+            false
+        }
     }
     pub(crate) fn letter_start(self, index: usize) -> usize {
         self.letters()
@@ -731,6 +750,46 @@ mod tests {
         owner.reset();
         assert_eq!(filtered.view().genre().unwrap().title, "Drama");
         assert!(!owner.listing_snapshot().view().rail_available());
+    }
+
+    /// Issue #37: a Jellyfin section (SortName vocabulary) keeps the rail under an active
+    /// unwatched/genre filter, because its letter counts are recomputed WITH the filter. The
+    /// same filters on the Plex-shaped section above must keep hiding it.
+    #[cfg(feature = "jellyfin")]
+    #[test]
+    fn jellyfin_rail_stays_under_a_filter() {
+        let _guard = crate::testlock::serial();
+        let mut owner = super::super::BrowseState::default();
+        super::super::seed_two_source_table_for_owner_test(&mut owner);
+        owner.set_cur(0);
+        {
+            let section = owner.state_mut(0).unwrap();
+            section.sorts = Arc::new(vec![SortEntry {
+                desc_key: String::new(),
+                key: "SortName".into(),
+                title: "Name".into(),
+                default_desc: false,
+            }]);
+            section.letters = Arc::new(vec![("A".into(), 3), ("B".into(), 4)]);
+        }
+        assert!(owner.listing_snapshot().view().rail_available());
+        owner.set_unwatched(true);
+        assert!(
+            owner.listing_snapshot().view().rail_available(),
+            "the jellyfin rail survives an unwatched filter"
+        );
+        owner.set_unwatched(false);
+        owner.set_genre_by_id(Some("7"));
+        assert!(
+            owner.listing_snapshot().view().rail_available(),
+            "the jellyfin rail survives a genre filter"
+        );
+        owner.set_genre_by_id(None);
+        owner.set_sort_by_key("SortName", true);
+        assert!(
+            !owner.listing_snapshot().view().rail_available(),
+            "a descending (non-title-ascending) sort still hides it"
+        );
     }
 
     #[test]

@@ -365,14 +365,30 @@ impl JfClient {
         &self,
         view_id: &str,
         include_types: &str,
+        filter: &crate::browse::LettersFilter,
     ) -> Option<Vec<(String, i64)>> {
         let user_id = self.user_id()?;
-        let total = self.count_query(&user_id, view_id, include_types, "")?;
+        // The counts MUST describe exactly the listing the rail rides on — with a filter active
+        // (issue #37) the probe carries it, which is what makes the rail stay honest under one:
+        // `NameStartsWith` accepts `IsPlayed` and `GenreIds` alongside `ParentId`.
+        let mut scope = String::new();
+        if filter.unwatched {
+            scope.push_str("&IsPlayed=false");
+        }
+        if let Some(genre) = &filter.genre {
+            scope.push_str(&format!("&GenreIds={genre}"));
+        }
+        let total = self.count_query(&user_id, view_id, include_types, &scope)?;
         let mut counts = Vec::new();
         for b in b'A'..=b'Z' {
             let letter = (b as char).to_string();
             let n = self
-                .count_query(&user_id, view_id, include_types, &format!("&NameStartsWith={letter}"))
+                .count_query(
+                    &user_id,
+                    view_id,
+                    include_types,
+                    &format!("{scope}&NameStartsWith={letter}"),
+                )
                 .unwrap_or(0);
             if n > 0 {
                 counts.push((letter, n));
@@ -937,81 +953,8 @@ mod tests {
     /// (every request here is `Connection: close`), records each raw request, and answers with
     /// the queued body in order. Loopback is inside the http gate's LAN arm, so the credential
     /// policy being tested is the REAL one, not a bypass.
-    struct MockServer {
-        port: u16,
-        requests: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
-        join: Option<std::thread::JoinHandle<()>>,
-    }
+    use crate::jellyfin::MockServer;
 
-    impl MockServer {
-        fn start(responses: Vec<(i32, &'static str)>) -> MockServer {
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-            let port = listener.local_addr().expect("addr").port();
-            let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-            let requests2 = requests.clone();
-            let join = std::thread::spawn(move || {
-                for (status, body) in responses {
-                    let (mut socket, _) = listener.accept().expect("accept");
-                    // Read head AND the Content-Length'd body — the whole point of the fixture
-                    // is to see what the transport put on the wire, and leaving the body unread
-                    // would RST the socket under the client's response read on some kernels.
-                    let mut buf = Vec::new();
-                    let mut chunk = [0u8; 4096];
-                    let mut content_length = None::<usize>;
-                    let mut head_end = None::<usize>;
-                    loop {
-                        let n = socket.read(&mut chunk).expect("read");
-                        if n == 0 {
-                            break;
-                        }
-                        buf.extend_from_slice(&chunk[..n]);
-                        if head_end.is_none() {
-                            if let Some(pos) = find(&buf, b"\r\n\r\n") {
-                                head_end = Some(pos + 4);
-                                let head = String::from_utf8_lossy(&buf[..pos]).to_lowercase();
-                                content_length = head
-                                    .lines()
-                                    .find_map(|l| l.strip_prefix("content-length:"))
-                                    .and_then(|v| v.trim().parse().ok());
-                            }
-                        }
-                        if let (Some(he), Some(cl)) = (head_end, content_length) {
-                            if buf.len() >= he + cl {
-                                break;
-                            }
-                        } else if head_end.is_some() && content_length.is_none() {
-                            break;
-                        }
-                    }
-                    requests2
-                        .lock()
-                        .unwrap()
-                        .push(String::from_utf8_lossy(&buf).into_owned());
-                    let reason = if status == 200 { "OK" } else { "Error" };
-                    write!(socket, "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
-                        .expect("write");
-                }
-            });
-            MockServer {
-                port,
-                requests,
-                join: Some(join),
-            }
-        }
-
-        fn finish(self) -> Vec<String> {
-            let mut this = self;
-            if let Some(j) = this.join.take() {
-                j.join().expect("server thread");
-            }
-            let recorded = std::mem::take(&mut *this.requests.lock().unwrap());
-            recorded
-        }
-    }
-
-    fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
-        hay.windows(needle.len()).position(|w| w == needle)
-    }
 
     const AUTH_OK: &str = r#"{"User":{"Id":"u-1","Name":"demo"},"AccessToken":"tok-1","ServerId":"srv-1","SessionInfo":null}"#;
 
@@ -1354,6 +1297,39 @@ mod tests {
     /// The Jellyfin letter fetch: one unfiltered count plus one `NameStartsWith` count per
     /// letter, every query at `Limit=0` (counts only, no items transferred), and the counts
     /// wired into the rail table.
+    /// Issue #37: with a filter active, every probe (the total and each letter) carries it —
+    /// `NameStartsWith` accepts `IsPlayed` and `GenreIds` alongside `ParentId`, which is what
+    /// makes the A-Z rail able to stay honest under unwatched-only or a genre.
+    #[test]
+    fn letter_counts_carry_the_active_filter_on_every_probe() {
+        let total = r#"{"Items":[],"TotalRecordCount":3}"#;
+        let a = r#"{"Items":[],"TotalRecordCount":3}"#;
+        let zero = r#"{"Items":[],"TotalRecordCount":0}"#;
+        let mut responses = vec![(200, AUTH_OK), (200, total)];
+        for l in 'A'..='Z' {
+            responses.push((200, if l == 'A' { a } else { zero }));
+        }
+        let server = MockServer::start(responses);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        client.authenticate_by_name("demo", "").unwrap();
+
+        let letters = client
+            .letter_counts(
+                "view-1",
+                "Series",
+                &crate::browse::LettersFilter { unwatched: true, genre: Some("g-7".into()) },
+            )
+            .expect("letter counts parse");
+        assert_eq!(letters, vec![("A".to_string(), 3)]);
+        let reqs = server.finish();
+        assert_eq!(reqs.len(), 28);
+        for (i, req) in reqs.iter().enumerate().skip(1) {
+            let q = req.lines().next().unwrap();
+            assert!(q.contains("IsPlayed=false"), "probe {i} misses IsPlayed: {q}");
+            assert!(q.contains("GenreIds=g-7"), "probe {i} misses GenreIds: {q}");
+        }
+    }
+
     #[test]
     fn letter_counts_query_limit_zero_for_the_total_and_every_letter() {
         // total 12: A=10, Z=1, other=1 -> "#" bucket
@@ -1370,7 +1346,7 @@ mod tests {
         client.authenticate_by_name("demo", "").unwrap();
 
         let letters = client
-            .letter_counts("view-1", "Movie")
+            .letter_counts("view-1", "Movie", &crate::browse::LettersFilter::default())
             .expect("letter counts parse");
         assert_eq!(
             letters,
@@ -1379,9 +1355,12 @@ mod tests {
                 .zip([1i64, 10, 1])
                 .collect::<Vec<_>>()
         );
-
         let reqs = server.finish();
         assert_eq!(reqs.len(), 28); // auth + total + 26 letters
+        assert!(
+            reqs.iter().all(|r| !r.contains("IsPlayed=") && !r.contains("GenreIds=")),
+            "an unfiltered probe carries no filter: {reqs:?}"
+        );
         let total_q = reqs[1].lines().next().unwrap();
         assert!(total_q.starts_with("GET /Users/u-1/Items?"));
         assert!(total_q.contains("ParentId=view-1"));
