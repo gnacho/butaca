@@ -497,9 +497,20 @@ impl Source {
 /// A profile switch can additionally deactivate only the middle slot, so even that post-sign-out
 /// window is not necessarily contiguous. Collecting at most 16 indices is the honest shape.
 fn slots() -> Vec<usize> {
-    crate::plex::server_ids()
+    #[allow(unused_mut)] // the jellyfin arm below pushes
+    let mut out: Vec<usize> = crate::plex::server_ids()
         .filter_map(|id| ((id.raw() as usize) < NSRC).then_some(id.raw() as usize))
-        .collect()
+        .collect();
+    // The Jellyfin backend's one server lives outside the Plex registry; its slot is appended
+    // here so the fan-out asks it like any other source. The guard is the load-bearing half:
+    // slot 0 is also a valid PLEX slot (every test fixture), so without an installed jellyfin
+    // client this must not double-list it.
+    #[cfg(feature = "jellyfin")]
+    if crate::jellyfin::client().is_some() && !out.contains(&(crate::jellyfin::SERVER_ID.raw() as usize))
+    {
+        out.push(crate::jellyfin::SERVER_ID.raw() as usize);
+    }
+    out
 }
 
 /// How many sources this store fans out over — the width of [`slots`].
@@ -1219,6 +1230,13 @@ fn maybe_spawn(state: &mut SearchState, adapter: &Arc<SearchAdapter>, i: usize) 
         // the mailbox is filled OUTSIDE the guard so a panicking fetch still lands — as a FAILURE
         // (None), not as an answer of "this server has nothing"
         let what = catch_unwind(|| {
+            // The Jellyfin backend answers one flat item page instead of a hub list; the
+            // shelfing moves into `jellyfin::search` and the mailbox shape is unchanged. Same
+            // account-wide scope: no ParentId, the whole library.
+            #[cfg(feature = "jellyfin")]
+            if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+                return crate::jellyfin::search::search(crate::jellyfin::client()?, &q, LIMIT);
+            }
             // sectionId 0 = every section, which `opt_int` sends by omitting it. The Search screen
             // is deliberately account-wide: `sectionId` only RANKS (measured — every other
             // section's rows still come back), so it could not scope this even if we wanted it to.

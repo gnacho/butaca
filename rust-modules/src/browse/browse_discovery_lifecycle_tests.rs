@@ -394,7 +394,7 @@ fn page_failure_and_recovery_republish_directory_reachability() {
         let changed = browse.state.sources()[0].state != expected;
         let generation = browse.state.source_list_gen();
         *browse.adapter.page_result.lock().unwrap() = Some(PageResult {
-            client,
+            client: super::DiscClient::Plex(client),
             token_gen: client.token_gen(),
             gen: browse.state.query_gen(),
             sec: 0,

@@ -192,7 +192,7 @@ pub(super) fn queue_success_from(
     token_gen: u32,
 ) {
     let landing = SrcLanding {
-        client,
+        client: super::DiscClient::Plex(client),
         token_gen,
         name: "stale-name".into(),
         what: SrcWhat::Sections(Some(vec![(99, "Stale Library".into(), SecKind::Movie)])),
@@ -207,7 +207,7 @@ pub(super) fn queue_page_from(
     token_gen: u32,
 ) {
     *browse.adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()) = Some(PageResult {
-        client,
+        client: super::DiscClient::Plex(client),
         token_gen,
         gen: browse.state.query_gen(),
         sec: 0,
@@ -229,7 +229,7 @@ pub(super) fn queue_directories_from(
         library_type: browse.state.states[0].library_type,
         epoch,
         sec: 0,
-        client,
+        client: super::DiscClient::Plex(client),
         token_gen,
         list: vec![GenreEntry {
             id: "stale".into(),
@@ -240,7 +240,7 @@ pub(super) fn queue_directories_from(
         library_type: browse.state.states[0].library_type,
         epoch,
         sec: 0,
-        client,
+        client: super::DiscClient::Plex(client),
         token_gen,
         list: vec![("S".into(), 99)],
     });
@@ -284,7 +284,7 @@ pub(super) fn seed_one_section(browse: &mut TestBrowse) {
 pub(super) fn land_page(browse: &mut TestBrowse, total: i64, items: usize) {
     let client = crate::plex::client();
     let r = PageResult {
-        client,
+        client: super::DiscClient::Plex(client),
         token_gen: client.token_gen(),
         gen: browse.state.query_gen(),
         sec: 0,
@@ -302,7 +302,7 @@ pub(super) fn land_page(browse: &mut TestBrowse, total: i64, items: usize) {
 pub(super) fn land_page_with_sorts(browse: &mut TestBrowse, sorts: Vec<SortEntry>) {
     let client = crate::plex::client();
     let r = PageResult {
-        client,
+        client: super::DiscClient::Plex(client),
         token_gen: client.token_gen(),
         gen: browse.state.query_gen(),
         sec: browse.state.cur(),

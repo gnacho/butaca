@@ -400,9 +400,7 @@ mod tests {
             "192.168.1.10",
             32400,
             "/library/parts/1/file.mp4?X-Plex-Token=tok",
-        
-        &[],
-    )
+        )
     }
 
     #[test]

@@ -61,7 +61,7 @@ pub(crate) fn decode(
         Some(id) => {
             let c = client(id).ok_or("unresolved hubs client")?;
             if c.id() != p.sid { return Err("wrong hubs client server"); }
-            Some(LandingClient { instance: id, resource: c })
+            Some(LandingClient { instance: id, resource: super::HubClientRef::Plex(c) })
         }
         None => None,
     };
@@ -160,7 +160,8 @@ mod tests {
         crate::plex::reset_servers_for_test();
         let sid = crate::plex::register_for_test("codec-machine", "codec.invalid", 32400, "secret-codec-token", "private-device");
         let old = crate::plex::client_for(sid).unwrap();
-        let l = Landing { gen: 1, seq: 2, sid, client: Some(LandingClient::live(old)), token_gen: old.token_gen(), build: None };
+        let l = Landing { gen: 1, seq: 2, sid, client: Some(LandingClient {
+            instance: old.instance_gen(), resource: super::super::HubClientRef::Plex(old) }), token_gen: old.token_gen(), build: None };
         old.set_token("replacement-secret");
         let encoded = encode(&l);
         let text = encoded.to_string();
@@ -169,7 +170,12 @@ mod tests {
         }
         assert!(decode(encoded.clone(), |_| None).is_err());
         let restored = decode(encoded.clone(), |id| (id == old.instance_gen()).then_some(old)).unwrap();
-        assert!(std::ptr::eq(restored.client.unwrap().resource, old));
+        let resource = match restored.client.unwrap().resource {
+            super::super::HubClientRef::Plex(resource) => resource,
+            #[cfg(feature = "jellyfin")]
+            super::super::HubClientRef::Jellyfin(_) => unreachable!("a Plex recording binds a Plex client"),
+        };
+        assert!(std::ptr::eq(resource, old));
         assert_eq!(restored.token_gen, l.token_gen);
         assert_ne!(restored.token_gen, old.token_gen(), "do not upgrade a stale request while decoding");
         assert_eq!(crate::plex::register_for_test("codec-machine", "repointed.invalid", 32400,
@@ -177,7 +183,12 @@ mod tests {
         let current = crate::plex::client_for(sid).unwrap();
         assert_ne!(current.instance_gen(), old.instance_gen());
         let stale = decode(encoded.clone(), |id| (id == old.instance_gen()).then_some(old)).unwrap();
-        assert!(!std::ptr::eq(stale.client.unwrap().resource, current), "do not rebind a late arrival to the live slot");
+        let stale_resource = match stale.client.unwrap().resource {
+            super::super::HubClientRef::Plex(resource) => resource,
+            #[cfg(feature = "jellyfin")]
+            super::super::HubClientRef::Jellyfin(_) => unreachable!("a Plex recording binds a Plex client"),
+        };
+        assert!(!std::ptr::eq(stale_resource, current), "do not rebind a late arrival to the live slot");
         // A replay bootstrap may bind this recorded instance to another process's resource.
         // Re-encoding that binding must retain the recorded identity, not its new allocation id.
         let remapped = decode(encoded.clone(), |_| Some(current)).unwrap();

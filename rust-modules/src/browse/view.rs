@@ -221,11 +221,18 @@ impl<'a> ListingView<'a> {
         self.0.data.as_ref().map_or(super::LibraryType::default(), |s| s.library_type)
     }
     pub(crate) fn rail_available(self) -> bool {
+        // The rail only exists for the title ordering. Plex's token is "titleSort"; Jellyfin's
+        // fixed vocabulary says "SortName" — the two never appear on the other backend, so the
+        // disjunction is the slot test without needing the section's sid up here.
+        #[cfg(feature = "jellyfin")]
+        let title_key = |key: &str| key == "titleSort" || key == "SortName";
+        #[cfg(not(feature = "jellyfin"))]
+        let title_key = |key: &str| key == "titleSort";
         self.id().is_some()
             && self
                 .sorts()
                 .get(self.sort_index())
-                .is_none_or(|s| s.key == "titleSort" && !self.sort_desc())
+                .is_none_or(|s| title_key(&s.key) && !self.sort_desc())
             && !self.unwatched()
             && self.genre().is_none()
             && self.letters().len() > 1

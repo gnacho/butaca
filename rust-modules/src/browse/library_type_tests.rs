@@ -95,7 +95,8 @@ mod tests {
         let captured_type = browse.state.states[0].library_type;
         assert!(browse.state.set_library_type(LibraryType::Episodes));
         let mail = Mutex::new(Some(DirectoryResult {
-            epoch: browse.state.table_epoch(), sec: 0, client, token_gen: client.token_gen(),
+            epoch: browse.state.table_epoch(), sec: 0, client: crate::browse::DiscClient::Plex(client),
+            token_gen: client.token_gen(),
             library_type: captured_type, list: vec![("S".into(), 99)],
         }));
         let fetching = AtomicBool::new(true);

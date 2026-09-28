@@ -759,6 +759,65 @@ fn fetch_source(c: &crate::plex::Client, sid: ServerId) -> Option<SourceBuild> {
     Some(project(&mc, &cw, sid))
 }
 
+/// GET the Jellyfin home surface and project it into this source's [`SourceBuild`] (flavor
+/// `jellyfin`). The same two-piece contract as [`fetch_source`]: `None` is a FAILED fetch
+/// (retry on the ladder), `Some` with empty shelves is a server that answered with nothing on
+/// it. What Home is built from is Jellyfin's own vocabulary rather than `/hubs`: Continue
+/// Watching is `/Items/Resume` (the deck, server-sorted by last-played) and each
+/// movies/tvshows view contributes one Recently Added shelf from `/Items/Latest`.
+#[cfg(feature = "jellyfin")]
+fn fetch_source_jellyfin(c: &'static crate::jellyfin::JfClient, sid: ServerId) -> Option<SourceBuild> {
+    // A row earns its card the same way the Plex projection's `keep` decides it: a title to
+    // name it and a poster to draw. Jellyfin ids are GUIDs, so the catalog pin (`sec`) has no
+    // per-library meaning here and stays 0 — listings are scoped at query time instead.
+    let keep = |it: &crate::jellyfin::BaseItemDto| {
+        let m = crate::jellyfin::movie_from_dto(it, sid, 0)?;
+        (!m.title.is_empty() && !m.thumb.is_empty()).then_some(m)
+    };
+
+    let resume = c.resume(HUB_FETCH_COUNT)?;
+    let mut out = SourceBuild::default();
+    out.cw = resume
+        .items
+        .iter()
+        .filter_map(|it| {
+            keep(it).map(|m| CwItem {
+                // Jellyfin's resume list is already last-played ordered; the Plex merge key
+                // (`lastViewedAt`) has no counterpart on the row and 0 keeps that order intact.
+                last_viewed_at: 0,
+                m,
+            })
+        })
+        .collect();
+
+    let views = c.views()?;
+    for v in &views.items {
+        // Movies and TV shows are the app's honest scope (README's words, still true on this
+        // backend); a mixed/music/photos view is skipped rather than half-rendered.
+        if !matches!(v.collection_type.as_deref(), Some("movies") | Some("tvshows")) {
+            continue;
+        }
+        // A failed Latest fails the SHELF, not the source: Resume already committed above, and
+        // one unreadable library must not blank the deck with it.
+        let Some(latest) = c.latest(&v.id, HUB_FETCH_COUNT) else {
+            continue;
+        };
+        let items: Vec<PmsMovie> = latest.items.iter().filter_map(keep).collect();
+        if items.is_empty() {
+            continue;
+        }
+        out.shelves.push(Shelf {
+            title: format!("{} - {}", crate::i18n::t("Recently Added"), v.name),
+            hub_id: format!("jf.latest.{}", v.id),
+            // The hub key Plex's shelves carry (what a click resolves to) has no Jellyfin
+            // counterpart — a Latest shelf is a query, not an addressable hub.
+            key: String::new(),
+            items,
+        });
+    }
+    Some(out)
+}
+
 /// Project one source's `/hubs` + `/hubs/continueWatching` responses into its [`SourceBuild`].
 /// Pure — no statics, no I/O, no knowledge of any other source; `sid` is the server the two
 /// containers came from, stamped onto every row it builds.
@@ -1078,16 +1137,22 @@ impl Src {
     /// after admission to this source's single flight; the adapter receives the captured value.
     fn begin_request(
         &mut self,
-        client: &'static crate::plex::Client,
+        resource: HubClientRef,
+        instance: u32,
+        token_gen: u32,
         generation: u32,
         mint: impl FnOnce() -> u32,
     ) -> Option<HubRequest> {
         if self.fetching { return None; }
         let request = HubRequest {
             gen: generation, seq: mint(), sid: self.sid,
-            client: LandingClient::live(client), token_gen: client.token_gen(),
+            client: LandingClient { instance, resource }, token_gen,
         };
-        self.client = Some(client);
+        self.client = match resource {
+            HubClientRef::Plex(c) => Some(c),
+            #[cfg(feature = "jellyfin")]
+            HubClientRef::Jellyfin(_) => None,
+        };
         self.token_gen = request.token_gen;
         self.fetching = true;
         self.state = HubState::Loading;
@@ -1138,18 +1203,25 @@ fn refresh_src_lifecycle(s: &mut Src) -> bool {
 // now — `state.srcs`/`state.seen`/`state.seen_facts` — rebuilt from the roster by
 // `sync_roster_with_scope`; main-thread only, so no lock is needed.
 
+/// The one-fetch resource a request carries to its worker. Plex sources hold their registry
+/// client; the Jellyfin flavor's single source holds the installed Jellyfin client instead.
+/// Both are leaked-static precisely so this reference stays valid across a mid-request
+/// re-point, exactly as the Plex arm documents below.
+#[derive(Clone, Copy)]
+enum HubClientRef {
+    Plex(&'static crate::plex::Client),
+    /// The Jellyfin flavor has ONE source — the server the boot flow authenticated against —
+    /// and no Plex registry slot behind it, so no instance/token generation to fingerprint.
+    #[cfg(feature = "jellyfin")]
+    Jellyfin(&'static crate::jellyfin::JfClient),
+}
+
 /// One adapter resource and the logical identity under which this arrival knows it.
 #[derive(Clone, Copy)]
 struct LandingClient {
     /// Logical identity in the recording's process, preserved when replay binds another resource.
     instance: u32,
-    resource: &'static crate::plex::Client,
-}
-
-impl LandingClient {
-    fn live(resource: &'static crate::plex::Client) -> Self {
-        Self { instance: resource.instance_gen(), resource }
-    }
+    resource: HubClientRef,
 }
 
 /// Everything a Home fetch needs from the main thread, captured before the adapter runs.
@@ -1351,6 +1423,13 @@ fn home_server_sets(pins: &[(ServerId, i64, bool)]) -> (Vec<ServerId>, Vec<Serve
 /// the grant to a pin. The handle comes from the same place (`ServerFacts`), so nothing here has an
 /// opinion about who a server belongs to that the Sources list does not share.
 fn roster_with_scope(scope: &BrowseScope) -> Vec<(ServerId, String)> {
+    // The Jellyfin flavor has ONE source — the server the boot flow authenticated against —
+    // with no plex.tv registry to enumerate and no share handle to display. It is listed the
+    // moment the client exists; before that, the Plex enumeration below answers empty anyway.
+    #[cfg(feature = "jellyfin")]
+    if crate::jellyfin::client().is_some() {
+        return vec![(crate::jellyfin::SERVER_ID, String::new())];
+    }
     let (pinned, known) = home_server_sets(&scope.pins);
     let mut own: Vec<(ServerId, String)> = Vec::new();
     let mut shared: Vec<(ServerId, String)> = Vec::new();
@@ -1386,6 +1465,12 @@ fn roster_key() -> u64 {
 }
 
 fn roster_key_with_scope(scope: &BrowseScope) -> u64 {
+    // The Jellyfin client's install is an event no plex-registry generation can see, so under
+    // the flavor it IS the high bit: boot order (sync first, install second) must still rebuild.
+    #[cfg(feature = "jellyfin")]
+    if crate::jellyfin::client().is_some() {
+        return u64::MAX;
+    }
     ((crate::plex::server_roster_gen() as u64) << 32) | u64::from(scope.cache_key())
 }
 
@@ -1573,10 +1658,29 @@ fn kick_with(gen: u32, adapter: &PmsAdapter, s: &mut Src, launch: impl FnOnce(Hu
     // slot id; it never asks which server is current, and a slot re-pointed mid-request cannot
     // redirect a fetch that is already out (`plex::servers` leaks each client precisely so that
     // reference stays live).
+    // The Jellyfin flavor's single source is never in the Plex registry, so it is captured
+    // from its own client slot (the spawn-site capture rule is the same: the main thread reads
+    // the `&'static` here and the worker holds it, never a lookup).
+    #[cfg(feature = "jellyfin")]
+    if s.sid == crate::jellyfin::SERVER_ID {
+        let Some(c) = crate::jellyfin::client() else {
+            return Some(landed_fail(s));
+        };
+        let Some(request) = s.begin_request(HubClientRef::Jellyfin(c), 0, 0, gen,
+            || adapter.next_request.fetch_add(1, Ordering::Relaxed)) else { return None };
+        let sid = request.sid;
+        let spawned = launch(request);
+        if !spawned {
+            s.fetching = false;
+            return Some(landed_fail(s));
+        }
+        crate::log(&format!("hubs: source {} fetching (off-thread, jellyfin)", sid.raw()));
+        return None;
+    }
     let Some(c) = crate::plex::client_for(s.sid) else {
         return Some(landed_fail(s));
     };
-    let Some(request) = s.begin_request(c, gen,
+    let Some(request) = s.begin_request(HubClientRef::Plex(c), c.instance_gen(), c.token_gen(), gen,
         || adapter.next_request.fetch_add(1, Ordering::Relaxed)) else { return None };
     let sid = request.sid;
     let spawned = launch(request);
@@ -1598,8 +1702,12 @@ pub(crate) fn spawn_fetch(adapter: &Arc<PmsAdapter>, request: HubRequest) -> boo
     if REFUSE_FETCH_FOR_TEST.with(|flag| flag.get()) { return false; }
     let worker_adapter = Arc::clone(adapter);
     crate::task::spawn_small("hubs", move || {
-        let (client, sid) = (request.client.resource, request.sid);
-        let build = catch_unwind(move || fetch_source(client, sid)).ok().flatten();
+        let (resource, sid) = (request.client.resource, request.sid);
+        let build = catch_unwind(move || match resource {
+            HubClientRef::Plex(client) => fetch_source(client, sid),
+            #[cfg(feature = "jellyfin")]
+            HubClientRef::Jellyfin(client) => fetch_source_jellyfin(client, sid),
+        }).ok().flatten();
         // Outside the panic guard: every admitted worker answers, including a panicking fetch.
         worker_adapter.results.lock().unwrap_or_else(|e| e.into_inner()).push(request.complete(build));
     })
@@ -1851,9 +1959,15 @@ fn step_landings_with_scope(state: &mut PmsState, adapter: &PmsAdapter, dt: Opti
         let Some(s) = srcs.iter_mut().find(|s| s.sid == l.sid) else {
             continue; // its source left the roster while it was out
         };
-        let lifecycle_matches = l.client.is_none_or(|client| {
-            crate::plex::client_for(l.sid)
-                .is_some_and(|now| std::ptr::eq(now, client.resource) && now.token_gen() == l.token_gen)
+        let lifecycle_matches = l.client.is_none_or(|client| match client.resource {
+            HubClientRef::Plex(resource) => crate::plex::client_for(l.sid)
+                .is_some_and(|now| std::ptr::eq(now, resource) && now.token_gen() == l.token_gen),
+            // The Jellyfin client is a single leaked-static: it is the same resource for the
+            // whole install, and its retirement (uninstall) removes the source from the roster
+            // wholesale, so a pointer check against the current slot is the whole lifecycle.
+            #[cfg(feature = "jellyfin")]
+            HubClientRef::Jellyfin(resource) => crate::jellyfin::client()
+                .is_some_and(|now| std::ptr::eq(now, resource)),
         });
         if l.gen != cur || l.seq != s.seq || !lifecycle_matches {
             if l.gen == cur && l.seq == s.seq && !lifecycle_matches {

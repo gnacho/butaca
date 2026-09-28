@@ -22,12 +22,12 @@ fn request_addresses_do_not_alias_across_sources_or_profile_resets() {
     kick_with(o.state.hub_gen, &o.adapter, &mut first, |request| { held = Some(request); true });
     let a = held.unwrap().seq;
     kick_with(o.state.hub_gen, &o.adapter, &mut first, |_| panic!("an in-flight source must not invoke the adapter again"));
-    assert!(first.begin_request(ca, 1, || panic!("single flight must not mint again")).is_none());
-    let b = second.begin_request(cb, 1, mint).unwrap().seq;
+    assert!(first.begin_request(crate::pms::HubClientRef::Plex(ca), ca.instance_gen(), ca.token_gen(), 1, || panic!("single flight must not mint again")).is_none());
+    let b = second.begin_request(crate::pms::HubClientRef::Plex(cb), cb.instance_gen(), cb.token_gen(), 1, mint).unwrap().seq;
     first.fetching = false; // the prior attempt completed
-    let retry = first.begin_request(ca, 1, mint).unwrap().seq;
+    let retry = first.begin_request(crate::pms::HubClientRef::Plex(ca), ca.instance_gen(), ca.token_gen(), 1, mint).unwrap().seq;
     reset(&mut o.state, &o.adapter);
-    let next_profile = Src::new(a_sid, String::new()).begin_request(ca, 2, mint).unwrap().seq;
+    let next_profile = Src::new(a_sid, String::new()).begin_request(crate::pms::HubClientRef::Plex(ca), ca.instance_gen(), ca.token_gen(), 2, mint).unwrap().seq;
     let mut ids = vec![a, b, retry, next_profile];
     ids.sort_unstable();
     ids.dedup();
@@ -75,7 +75,7 @@ fn a_prepared_request_keeps_its_original_context_without_running_an_adapter() {
     source.retry_n = 3;
     source.retry_s = 8.0;
     let generation = o.state.hub_gen;
-    let request = source.begin_request(client, generation, || 23).unwrap();
+    let request = source.begin_request(crate::pms::HubClientRef::Plex(client), client.instance_gen(), client.token_gen(), generation, || 23).unwrap();
     assert!(source.fetching);
     assert_eq!(source.state, HubState::Loading);
     assert_eq!(source.retry_s, 0.0);
@@ -88,7 +88,12 @@ fn a_prepared_request_keeps_its_original_context_without_running_an_adapter() {
     assert_ne!(o.state.hub_gen, generation);
     let result = request.complete(None);
     assert_eq!((result.gen, result.seq, result.sid, result.token_gen), (generation, 23, sid, token_gen));
-    assert!(std::ptr::eq(result.client.unwrap().resource, client));
+    let resource = match result.client.unwrap().resource {
+        crate::pms::HubClientRef::Plex(resource) => resource,
+        #[cfg(feature = "jellyfin")]
+        crate::pms::HubClientRef::Jellyfin(_) => unreachable!("a Plex request carries a Plex client"),
+    };
+    assert!(std::ptr::eq(resource, client));
     assert!(result.build.is_none(), "a failed request is not an empty success");
     crate::plex::reset_servers_for_test();
 }
