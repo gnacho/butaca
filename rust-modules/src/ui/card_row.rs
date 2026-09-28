@@ -899,7 +899,7 @@ fn cw_caption(m: &crate::pms::PmsMovie) -> Option<std::ffi::CString> {
     } else if m.kind == 3 {
         // next-up episode: no resume point, so no bar and no time — just the "New episode" cue
         if show.is_empty() {
-            "New episode".to_string()
+            crate::i18n::t("New episode").to_string()
         } else {
             format!("{show} \u{00b7} New episode")
         }

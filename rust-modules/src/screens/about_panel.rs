@@ -312,7 +312,7 @@ impl AboutPanelScreen {
         };
 
         run(
-            "ABOUT",
+            crate::i18n::t("ABOUT"),
             s.eyebrow,
             theme::size::CAPTION,
             EYEBROW_LEAD,

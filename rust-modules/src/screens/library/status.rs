@@ -71,7 +71,7 @@ impl LibraryScreen {
             }
             Readout::Empty => {
                 let caption = if self.wanted_kind.is_some() { "Nothing here matches".into() }
-                    else if directory.sections().is_empty() { "No libraries on this server".into() }
+                    else if directory.sections().is_empty() { crate::i18n::t("No libraries on this server").into() }
                     else if listing.unwatched() || listing.genre().is_some() { "Nothing here matches".into() }
                     else if let Some(section) = directory.current().and_then(|i| directory.sections().get(i)) {
                         let noun = if section.kind == SecKind::Show {

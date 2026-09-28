@@ -388,6 +388,10 @@ impl App {
 ///
 fn pre_boot_diagnostics() {
     install_panic_logger();
+    // The UI's language, decided BEFORE the first frame so no label is ever drawn in one
+    // tongue and re-drawn in another: the television's own UI locale, read once (see `i18n`'s
+    // module doc for why there is no in-app override in this cut).
+    crate::i18n::detect_and_set();
     // WHICH INSTALL wrote this log. First line, before anything can fail.
     //
     // Two builds can sit on one television — the app users get, and a developer one beside it

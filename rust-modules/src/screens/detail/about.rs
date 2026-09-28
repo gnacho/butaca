@@ -70,7 +70,7 @@ impl Rows {
         self.info.clear();
         let released = crate::ui::fmt::pretty_date(&d.aired, d.year);
         if !released.is_empty() {
-            self.info.push(("Released", released));
+            self.info.push((crate::i18n::t("Released"), released));
         }
         let dur = if d.dur_ms > 0 {
             d.dur_ms
@@ -78,7 +78,7 @@ impl Rows {
             d.episodes.first().map(|e| e.dur_ms).unwrap_or(0)
         };
         if dur > 0 {
-            self.info.push(("Run Time", crate::ui::fmt::dur_long(dur)));
+            self.info.push((crate::i18n::t("Run Time"), crate::ui::fmt::dur_long(dur)));
         }
         self.info.push((
             "Rated",
@@ -90,7 +90,7 @@ impl Rows {
         ));
         if !d.countries.is_empty() {
             self.info
-                .push(("Regions of Origin", d.countries.join(", ")));
+                .push((crate::i18n::t("Regions of Origin"), d.countries.join(", ")));
         }
         self.orig_audio = d.audio.first().map(|a| {
             if a.lang.is_empty() {

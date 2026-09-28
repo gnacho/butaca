@@ -350,7 +350,7 @@ impl TrackMenuState {
 
     fn build_subs(&self, ps: &crate::route::PlaybackSession, meta: metadata::MetadataView<'_>) -> Section {
         let mut sec = Section::new("Subtitles");
-        sec = sec.row(Row::new("Off").checked(self.active_sub() < 0));
+        sec = sec.row(Row::new(crate::i18n::t("Off")).checked(self.active_sub() < 0));
         if let Some(t) = tracks(meta) {
             let names = crate::player::SHARED.track_names.lock().unwrap();
             for i in visible_subs(ps, meta) {

@@ -548,8 +548,8 @@ pub(crate) fn meta_runs(roles: &str, born: &str, died: &str, birthplace: &str) -
     // what made the asymmetry easy to miss.
     for (label, value) in [
         ("", roles),
-        ("Born ", born),
-        ("Died ", died),
+        (crate::i18n::t("Born "), born),
+        (crate::i18n::t("Died "), died),
         ("", birthplace),
     ] {
         let value = value.trim();

@@ -1062,20 +1062,20 @@ impl RootPage {
             }
         }
         sections.push(
-            Section::new("Privacy")
+            Section::new(crate::i18n::t("Privacy"))
                 .row(
                     Row::new("Delete all local data")
                         .detail("Erase every stored sign-in, profile and setting.")
                         .chevron(true),
                 )
                 .row(
-                    Row::new("Legal notices")
-                        .detail("Privacy, licences, source code, trademarks and contact.")
+                    Row::new(crate::i18n::t("Legal notices"))
+                        .detail(crate::i18n::t("Privacy, licences, source code, trademarks and contact."))
                         .chevron(true),
                 ),
         );
         actions.extend([Action::DeleteAllLocalData, Action::Legal]);
-        let mut system = Section::new("System");
+        let mut system = Section::new(crate::i18n::t("System"));
         // A one-person account already skips the picker; the switch only changes a multi-user boot.
         if signed_in && multi_user {
             system = system.row(
@@ -1095,7 +1095,7 @@ impl RootPage {
         }
         system = system.row(
             Row::new("About PlxNative")
-                .detail("Version, copyright and project information.")
+                .detail(crate::i18n::t("Version, copyright and project information."))
                 .chevron(true),
         );
         sections.push(system);

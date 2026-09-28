@@ -240,7 +240,7 @@ pub(crate) fn sections(
         acts.push(SrcAction::None);
         // no leading glyph, deliberately: on the Browse level that column carries the picker's
         // tick, and an action mark in it would be a second grammar for one column
-        last.rows.push(Row::new("Check for new shares"));
+        last.rows.push(Row::new(crate::i18n::t("Check for new shares")));
         acts.push(SrcAction::Recheck);
     }
     (out, acts)

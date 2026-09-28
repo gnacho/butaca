@@ -435,7 +435,7 @@ fn body_copy_for(who: &[String]) -> String {
                  and the Library's own tabs; Settings lists every one you have."
             .to_string(),
         Some(names) => {
-            let verb = if who.len() == 1 { "has" } else { "have" };
+            let verb = if who.len() == 1 { crate::i18n::t("has") } else { "have" };
             format!("{names} {verb} shared libraries with you.{tail}")
         }
     }

@@ -230,7 +230,7 @@ fn build_with(
         // row covers it; a show's own page is likewise the only navigation it has
         2 if !m.show_rk.is_empty() => {
             nav.push((
-                "Go to Season",
+                crate::i18n::t("Go to Season"),
                 Icon::Show,
                 Action::GoToShow(m.show_rk.clone(), m.season_index),
             ));
@@ -280,7 +280,7 @@ fn build_with(
         // the neighbouring card it is anchored beside. It is also the more accurate of the two —
         // the server action hides the item from the DECK and leaves its resume point intact, so
         // "remove from continue watching" over-promises a reset it does not perform.
-        sec = sec.row(Row::new("Remove from Deck").licon(Icon::Close).destructive(true));
+        sec = sec.row(Row::new(crate::i18n::t("Remove from Deck")).licon(Icon::Close).destructive(true));
         acts.push(Some(Action::RemoveFromDeck(m.rk.clone())));
     }
     debug_assert_eq!(acts.len(), sec.rows.len(), "{ACTS_PARALLEL}");

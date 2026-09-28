@@ -446,7 +446,7 @@ impl Diagnostics {
 fn header(ps: &crate::route::PlaybackSession, d: &crate::player::Diag, now: u32) -> [String; 2] {
     let w = crate::webos::info();
     let os = if w.major == 0 {
-        "webOS unknown — os_info.json unreadable".to_string()
+        crate::i18n::t("webOS unknown — os_info.json unreadable").to_string()
     } else {
         format!("webOS {} · api {}", w.release, w.api)
     };
@@ -549,7 +549,7 @@ fn device_rows() -> Vec<Field> {
         Field::new(
             "Set",
             if set_unknown {
-                "unknown — nyx did not answer".to_string()
+                crate::i18n::t("unknown — nyx did not answer").to_string()
             } else {
                 set
             },
@@ -586,10 +586,10 @@ fn device_rows() -> Vec<Field> {
                 if c.hevc {
                     format!("HEVC {}x{}", c.hevc_max.0, c.hevc_max.1)
                 } else {
-                    "no HEVC".to_string()
+                    crate::i18n::t("no HEVC").to_string()
                 },
                 if c.vp9 { "VP9" } else { "no VP9" },
-                if measured { "device table" } else { "ASSUMED" },
+                if measured { crate::i18n::t("device table") } else { "ASSUMED" },
             ),
         )
         .fault(!measured),
@@ -605,7 +605,7 @@ fn device_rows() -> Vec<Field> {
     // The same row the pipeline block leads with, minus the direct-play/transcode half that has no
     // meaning yet: it answers "did the server ever reply", which IS the failure when nothing plays.
     v.push(Field::new(
-        "Server",
+        crate::i18n::t("Server"),
         server_line(
             &crate::plex::serverinfo::version(),
             crate::plex::serverinfo::subscription(),
@@ -632,7 +632,7 @@ fn rows(ps: &crate::route::PlaybackSession, d: &crate::player::Diag, prev: (i64,
 
 fn pipeline_rows(ps: &crate::route::PlaybackSession, d: &crate::player::Diag, prev: (i64, i64, u32), now: u32) -> Vec<Field> {
     let mut v = Vec::with_capacity(LEFT_ROWS);
-    v.push(Field::new("Connection", connection_line(ps)));
+    v.push(Field::new(crate::i18n::t("Connection"), connection_line(ps)));
     v.push(Field::new("AppArg", route_line(ps, d)));
 
     let mut video = chain(
@@ -651,7 +651,7 @@ fn pipeline_rows(ps: &crate::route::PlaybackSession, d: &crate::player::Diag, pr
             decision.capability.label(),
         ));
     }
-    v.push(Field::new("Video", video));
+    v.push(Field::new(crate::i18n::t("Video"), video));
 
     let mut audio = chain(
         crate::route::source_acodec(ps),
@@ -673,7 +673,7 @@ fn pipeline_rows(ps: &crate::route::PlaybackSession, d: &crate::player::Diag, pr
     // the silent-instrument trap on a photographed surface.
     let route_fps = crate::route::stream_fps(ps);
     let (fps_milli, fps_src) = if d.video_fps_milli > 0 {
-        (d.video_fps_milli, "pipeline says")
+        (d.video_fps_milli, crate::i18n::t("pipeline says"))
     } else if route_fps > 0.0 {
         ((route_fps * 1_000.0).round() as i64, "declared")
     } else {
@@ -693,7 +693,7 @@ fn pipeline_rows(ps: &crate::route::PlaybackSession, d: &crate::player::Diag, pr
         .fault(d.video_w == 0 || d.video_h == 0),
     );
     v.push(Field::new(
-        "Timeline",
+        crate::i18n::t("Timeline"),
         format!(
             "{} / {}",
             crate::ui::fmt::clock(d.pos_ns / 1_000_000),
@@ -704,17 +704,17 @@ fn pipeline_rows(ps: &crate::route::PlaybackSession, d: &crate::player::Diag, pr
             },
         ),
     ));
-    v.push(Field::new("A/V sync", skew(d)).fault(skew_bad(d)));
+    v.push(Field::new(crate::i18n::t("A/V sync"), skew(d)).fault(skew_bad(d)));
 
     let (plane, plane_bad) = plane_line(d);
-    v.push(Field::new("Video plane", plane).fault(plane_bad));
+    v.push(Field::new(crate::i18n::t("Video plane"), plane).fault(plane_bad));
 
     let transfer = match (d.http_status, d.net_rx) {
         (0, _) => "no connection".to_string(),
         (st, rx) => format!("HTTP {st} · {} received", mb(rx)),
     };
     v.push(
-        Field::new("Transfer", transfer)
+        Field::new(crate::i18n::t("Transfer"), transfer)
             .fault(d.http_status != 0 && !(200..300).contains(&d.http_status)),
     );
     v.push(
@@ -723,11 +723,11 @@ fn pipeline_rows(ps: &crate::route::PlaybackSession, d: &crate::player::Diag, pr
             format!(
                 "{} · {}",
                 if d.load_failed {
-                    "REFUSED"
+                    crate::i18n::t("REFUSED")
                 } else if d.load_completed {
-                    "completed"
+                    crate::i18n::t("completed")
                 } else {
-                    "waiting"
+                    crate::i18n::t("waiting")
                 },
                 match (d.cb_count, d.cb_err) {
                     (0, _) => "no callbacks".to_string(),
@@ -746,7 +746,7 @@ fn pipeline_rows(ps: &crate::route::PlaybackSession, d: &crate::player::Diag, pr
                 if d.pushed_any {
                     fed_rate(d, prev, now)
                 } else {
-                    "NOTHING demuxed".to_string()
+                    crate::i18n::t("NOTHING demuxed").to_string()
                 },
                 d.feed_state_str(),
             ),
@@ -755,7 +755,7 @@ fn pipeline_rows(ps: &crate::route::PlaybackSession, d: &crate::player::Diag, pr
     );
     let (cv, ca) = crate::player::aq_caps();
     v.push(Field::new(
-        "Queues",
+        crate::i18n::t("Queues"),
         format!(
             "video {:.1}/{:.1} MB · audio {:.2}/{:.1} MB",
             mb_f(d.aq_video),
@@ -765,7 +765,7 @@ fn pipeline_rows(ps: &crate::route::PlaybackSession, d: &crate::player::Diag, pr
         ),
     ));
     v.push(
-        Field::new("Frames", frames_str(d, now))
+        Field::new(crate::i18n::t("Frames"), frames_str(d, now))
             .fault(!d.seen_frame && d.load_completed && since(d.load_at, now) > STALL_MS),
     );
     debug_assert_eq!(v.len(), LEFT_ROWS);
@@ -785,7 +785,7 @@ fn fps_milli_str(fps_milli: i64) -> String {
 fn connection_line(ps: &crate::route::PlaybackSession) -> String {
     let sid = crate::route::cur_sid(ps);
     let Some(client) = crate::plex::client_for(sid) else {
-        return "standalone · no PMS".to_string();
+        return crate::i18n::t("standalone · no PMS").to_string();
     };
     let tier = match client.link() {
         Some(crate::plex::probe::Location::Local) => "LAN",
@@ -807,7 +807,7 @@ fn route_line(ps: &crate::route::PlaybackSession, d: &crate::player::Diag) -> St
     {
         "HLS"
     } else {
-        "progressive"
+        crate::i18n::t("progressive")
     };
     let transform = match (crate::route::is_transcoding(ps), crate::route::is_remux(ps)) {
         (false, _) => "direct play",
@@ -833,9 +833,9 @@ fn plane_line(d: &crate::player::Diag) -> (String, bool) {
             // The identifier itself is not useful evidence and is the only unbounded string in a
             // field row.  The state we need is whether the compositor gave us one at all.
             let win = if d.window_id.is_empty() {
-                "NO WINDOW"
+                crate::i18n::t("NO WINDOW")
             } else {
-                "window ready"
+                crate::i18n::t("window ready")
             };
             // `rv == 0` is "the seam had no window or no symbol", NOT "SDL refused" — worded so a
             // reader is not sent looking for a rejection that never happened.
@@ -914,13 +914,13 @@ fn model_rows(ps: &crate::route::PlaybackSession, d: &crate::player::Diag) -> Ve
 }
 
 fn abr_rows(ps: &crate::route::PlaybackSession, d: &crate::player::Diag, selected: crate::route::Quality, v: &mut Vec<Field>) {
-    v.push(Field::new("Mode", abr_mode(d, selected)));
+    v.push(Field::new(crate::i18n::t("Mode"), abr_mode(d, selected)));
     v.push(Field::new("Quality", abr_quality(d, selected)));
-    v.push(Field::new("Sample", abr_link(d, selected)));
+    v.push(Field::new(crate::i18n::t("Sample"), abr_link(d, selected)));
     v.push(Field::new("Conservative", abr_budget(d, selected)));
     v.push(Field::new("Buffer", abr_buffer(d, selected)));
     v.push(
-        Field::new("Risk", abr_risk(d, selected))
+        Field::new(crate::i18n::t("Risk"), abr_risk(d, selected))
             .fault(d.abr_why == crate::player::ABR_WHY_STARVATION),
     );
     v.push(Field::new("Acquisition", abr_acquisition_cadence(ps, d)));
@@ -944,7 +944,7 @@ fn inactive_model(selected: crate::route::Quality, absent: &'static str) -> Stri
     if selected == crate::route::Quality::Auto {
         format!("{absent} · controller idle")
     } else {
-        "inactive · manual quality".to_string()
+        crate::i18n::t("inactive · manual quality").to_string()
     }
 }
 
@@ -953,10 +953,10 @@ fn inactive_model(selected: crate::route::Quality, absent: &'static str) -> Stri
 /// demand rather than being an independent speed test to the server.
 fn abr_link(d: &crate::player::Diag, selected: crate::route::Quality) -> String {
     if d.abr_mode == 0 {
-        return inactive_model(selected, "not sampled");
+        return inactive_model(selected, crate::i18n::t("not sampled"));
     }
     if d.abr_net_kbps < 0 {
-        return "waiting for first measurement".to_string();
+        return crate::i18n::t("waiting for first measurement").to_string();
     }
     let mut s = format!("{} · stream-limited", abr_rate(d.abr_net_kbps));
     if d.abr_unc_pm >= 0 {
@@ -975,7 +975,7 @@ fn abr_budget(d: &crate::player::Diag, selected: crate::route::Quality) -> Strin
         return inactive_model(selected, "not computed");
     }
     if d.abr_safe_kbps < 0 {
-        return "waiting for conservative budget".to_string();
+        return crate::i18n::t("waiting for conservative budget").to_string();
     }
     let demand = if d.abr_mode == crate::player::ABR_MODE_HLS {
         d.abr_media_kbps
@@ -990,7 +990,7 @@ fn abr_budget(d: &crate::player::Diag, selected: crate::route::Quality) -> Strin
         "{} budget · {} measured stream · {} {}",
         abr_rate(d.abr_safe_kbps),
         abr_rate(demand),
-        if delta >= 0 { "headroom" } else { "short" },
+        if delta >= 0 { crate::i18n::t("headroom") } else { "short" },
         abr_rate(delta.abs()),
     )
 }
@@ -1273,7 +1273,7 @@ fn abr_action(d: &crate::player::Diag, selected: crate::route::Quality) -> Strin
         return if selected == crate::route::Quality::Auto {
             "none · controller idle".to_string()
         } else {
-            "fixed by user".to_string()
+            crate::i18n::t("fixed by user").to_string()
         };
     }
     if d.abr_mode == crate::player::ABR_MODE_ORIGINAL {
@@ -1339,18 +1339,18 @@ fn abr_reason(d: &crate::player::Diag, selected: crate::route::Quality) -> Strin
         return if selected == crate::route::Quality::Auto {
             "no adaptive session".to_string()
         } else {
-            "adaptive controller inactive".to_string()
+            crate::i18n::t("adaptive controller inactive").to_string()
         };
     }
     if d.abr_mode == crate::player::ABR_MODE_ORIGINAL {
         return if d.abr_unsafe_deficit_ms <= 0 {
-            "sample sustains source demand".to_string()
+            crate::i18n::t("sample sustains source demand").to_string()
         } else {
             "sample below source demand".to_string()
         };
     }
     abr_why_text(d.abr_why)
-        .unwrap_or("waiting for decision")
+        .unwrap_or(crate::i18n::t("waiting for decision"))
         .to_string()
 }
 
@@ -1364,18 +1364,18 @@ fn original_failure_reason(d: &crate::player::Diag) -> Option<String> {
             _ => "PMS rejected Original source".to_string(),
         }),
         crate::player::ABR_FAILURE_ORIGINAL_DEADLINE => {
-            Some("Original source probe timed out".to_string())
+            Some(crate::i18n::t("Original source probe timed out").to_string())
         }
         crate::player::ABR_FAILURE_ORIGINAL_TRANSPORT => {
-            Some("Original source connection failed".to_string())
+            Some(crate::i18n::t("Original source connection failed").to_string())
         }
         crate::player::ABR_FAILURE_ORIGINAL_NO_BODY => {
-            Some("Original source returned no body".to_string())
+            Some(crate::i18n::t("Original source returned no body").to_string())
         }
         crate::player::ABR_FAILURE_ORIGINAL_OPEN => Some(if status > 0 {
             format!("Original stream failed after HTTP {status}")
         } else {
-            "Original stream could not be opened".to_string()
+            crate::i18n::t("Original stream could not be opened").to_string()
         }),
         _ => None,
     }
@@ -1500,7 +1500,7 @@ fn chain(src: String, sent: String, payload: &str) -> String {
 fn server_line(version: &str, sub: crate::plex::serverinfo::Subscription) -> String {
     use crate::plex::serverinfo::Subscription as S;
     if version.is_empty() {
-        return "not yet queried".to_string();
+        return crate::i18n::t("not yet queried").to_string();
     }
     let v = short_version(version);
     match sub {
@@ -1614,7 +1614,7 @@ pub(crate) fn draw(&self) {
     }
     // the verdict — the one line that says what the pipeline thinks it is doing
     if let Ok(cs) = CString::new(head[1].as_str()) {
-        let ink = if head[1].starts_with("Playback error") {
+        let ink = if head[1].starts_with(crate::i18n::t("Playback error")) {
             theme::DANGER
         } else {
             theme::TEXT_PRIMARY
@@ -2503,7 +2503,7 @@ mod tests {
             abr_action: crate::player::ABR_ACTION_PROBE_ORIGINAL,
             ..Default::default()
         };
-        assert_eq!(val(&build(&probing), "Action"), "checking Original link");
+        assert_eq!(val(&build(&probing), "Action"), crate::i18n::t("checking Original link"));
         let recovering = crate::player::Diag {
             abr_mode: crate::player::ABR_MODE_HLS,
             abr_risk: -1,
@@ -2512,7 +2512,7 @@ mod tests {
         };
         assert_eq!(
             val(&build(&recovering), "Action"),
-            "switching back to Original"
+            crate::i18n::t("switching back to Original")
         );
         let unavailable = crate::player::Diag {
             abr_mode: crate::player::ABR_MODE_HLS,
