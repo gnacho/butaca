@@ -77,11 +77,93 @@ impl Page {
 }
 
 
-// PLACEHOLDER: reescrito en la fase legal del port (postura butaca "sends nothing").
-const PRIVACY: &str = "RESPONSIBLE FOR BUTACA DATA\n\nButaca is a fork of PlxNative (Gleb Linnik) and sends nothing: no crash reports, no analytics. It stores your sign-in and preferences locally on this television; Delete all local data in Settings removes them.\n\nCONTACT\n\nPrivacy questions: the fork's issue tracker at https://github.com/gnacho/butaca.";
+// The fork's policy, structured like the upstream document it replaced: one section per
+// audience question, every claim pinned by a test below. It names what THIS build does, and the
+// YOUR SERVICE section names the backend the build actually speaks to, so there is one const
+// per flavor (concat! takes literals only, and the shared text is not worth a runtime join).
+#[cfg(feature = "jellyfin")]
+const PRIVACY: &str = concat!(
+    "RESPONSIBLE FOR BUTACA DATA\n\n",
+    "Butaca is a fork of PlxNative (Gleb Linnik) and is responsible only for data Butaca stores ",
+    "locally on this television. The fork sends nothing: no crash reports, no product analytics ",
+    "and no diagnostics leave the television, from the app or from its storage service. There is ",
+    "no telemetry SDK in the build at all.\n\n",
+    "YOUR SERVICE\n\n",
+    "To sign you in and provide server features, the app communicates directly with your ",
+    "Jellyfin server. That server is run by you or by whoever you chose to trust with it; ",
+    "Butaca's developer does not receive any of that information, and there is no Butaca service ",
+    "in between.\n\n",
+    "MEDIA SERVERS\n\n",
+    "To browse and play media, update watch progress and use server features, Butaca communicates ",
+    "directly with the media servers you select. Those requests are handled by the selected server ",
+    "and its operator. Butaca's developer does not receive them.\n\n",
+    "ON THIS TELEVISION\n\n",
+    "Butaca stores your account token and a separate token for each server you use, the addresses ",
+    "and identifiers of those servers, the profile you selected together with the profile names ",
+    "and pictures on your account, your Home library choices, your recent searches and your ",
+    "playback preferences. It keeps no bookmark of its own for where you stopped watching: ",
+    "playback position is held by your media server. Delete all local data in Settings signs out ",
+    "and removes Butaca's data from this television.\n\n",
+    "YOUR SIGN-IN\n\n",
+    "Your sign-in is protected with this television's own key service when one is available and ",
+    "this install has shown it can be trusted: the app checks, on a later launch, that the key ",
+    "service can still open something it sealed before, and only after that check has passed does ",
+    "it seal your actual sign-in with it. Until then the sign-in is kept in an owner-only file ",
+    "that only Butaca can read. Two small, content-only markers on disk record the outcome of ",
+    "that check; neither carries key material. If the saved sign-in file is ever found writable ",
+    "by other apps on this television, its contents are not trusted or used: it is set aside ",
+    "unread beside itself, and signing out or Delete all local data removes it.\n\n",
+    "UNINSTALLING\n\n",
+    "Removing Butaca removes the application, but webOS gives an application no way to run code ",
+    "as it is removed, so anything kept outside the application's own directory can survive. Your ",
+    "sign-in is deliberately kept there so that reinstalling does not sign you out. Use Delete ",
+    "all local data BEFORE uninstalling if you want nothing of Butaca left on this television.\n\n",
+    "CONTACT\n\n",
+    "Privacy questions: the fork's issue tracker at https://github.com/gnacho/butaca."
+);
+#[cfg(not(feature = "jellyfin"))]
+const PRIVACY: &str = concat!(
+    "RESPONSIBLE FOR BUTACA DATA\n\n",
+    "Butaca is a fork of PlxNative (Gleb Linnik) and is responsible only for data Butaca stores ",
+    "locally on this television. The fork sends nothing: no crash reports, no product analytics ",
+    "and no diagnostics leave the television, from the app or from its storage service. There is ",
+    "no telemetry SDK in the build at all.\n\n",
+    "YOUR SERVICE\n\n",
+    "To sign you in, discover servers and provide Plex account features, the app communicates ",
+    "directly with Plex services. Plex processes information received by those services under ",
+    "Plex's own Privacy Policy. Butaca's developer does not receive that information.\n\n",
+    "Plex Privacy Policy: https://www.plex.tv/about/privacy-legal/\n\n",
+    "MEDIA SERVERS\n\n",
+    "To browse and play media, update watch progress and use server features, Butaca communicates ",
+    "directly with the media servers you select. Those requests are handled by the selected server ",
+    "and its operator. Butaca's developer does not receive them.\n\n",
+    "ON THIS TELEVISION\n\n",
+    "Butaca stores your account token and a separate token for each server you use, the addresses ",
+    "and identifiers of those servers, the profile you selected together with the profile names ",
+    "and pictures on your account, your Home library choices, your recent searches and your ",
+    "playback preferences. It keeps no bookmark of its own for where you stopped watching: ",
+    "playback position is held by your media server. Delete all local data in Settings signs out ",
+    "and removes Butaca's data from this television.\n\n",
+    "YOUR SIGN-IN\n\n",
+    "Your sign-in is protected with this television's own key service when one is available and ",
+    "this install has shown it can be trusted: the app checks, on a later launch, that the key ",
+    "service can still open something it sealed before, and only after that check has passed does ",
+    "it seal your actual sign-in with it. Until then the sign-in is kept in an owner-only file ",
+    "that only Butaca can read. Two small, content-only markers on disk record the outcome of ",
+    "that check; neither carries key material. If the saved sign-in file is ever found writable ",
+    "by other apps on this television, its contents are not trusted or used: it is set aside ",
+    "unread beside itself, and signing out or Delete all local data removes it.\n\n",
+    "UNINSTALLING\n\n",
+    "Removing Butaca removes the application, but webOS gives an application no way to run code ",
+    "as it is removed, so anything kept outside the application's own directory can survive. Your ",
+    "sign-in is deliberately kept there so that reinstalling does not sign you out. Use Delete ",
+    "all local data BEFORE uninstalling if you want nothing of Butaca left on this television.\n\n",
+    "CONTACT\n\n",
+    "Privacy questions: the fork's issue tracker at https://github.com/gnacho/butaca."
+);
 
 const OPEN_SOURCE: &str = concat!(
-    "PlxNative is open-source software licensed under GPL-3.0-or-later. Copyright (c) 2026 Gleb Linnik and contributors. You may modify and redistribute it under these terms. There is no warranty, to the extent permitted by law.\n\nThird-party components retain their own licences. The package includes THIRD-PARTY-NOTICES.md and licence texts for the Rust runtime and crates, FFmpeg, Sentry Native, libunwind, NanoSVG, fonts and icons. Platform libraries have separate terms.\n\n",
+    "Butaca is a fork of PlxNative, open-source software licensed under GPL-3.0-or-later. Copyright (c) 2026 Gleb Linnik and contributors. You may modify and redistribute it under these terms. There is no warranty, to the extent permitted by law. The fork lives at github.com/gnacho/butaca.\n\nThird-party components retain their own licences. The package includes THIRD-PARTY-NOTICES.md and licence texts for the Rust runtime and crates, FFmpeg, NanoSVG, fonts and icons. Platform libraries have separate terms.\n\n",
     include_str!("../../../LICENSE")
 );
 const FFMPEG: &str = "This software uses libraries from the FFmpeg project under the LGPLv2.1. FFmpeg is copyright (c) the FFmpeg developers; PlxNative does not own FFmpeg.\n\nThe FFmpeg libraries are unmodified and loaded dynamically, and may be replaced with an interface-compatible build. The complete corresponding FFmpeg 9.0 source, exact configure line and build script are published with every PlxNative release.";
@@ -91,7 +173,19 @@ const SOURCE: &str = concat!(
     "\n\nLocal migration candidates may contain unpublished changes. Their matching source snapshot is provided with the candidate evidence. A published binary must be accompanied by its version-specific complete source bundle and build instructions; a moving branch is not the corresponding-source record. See LICENSING.md in the package."
 );
 const TRADEMARKS: &str = "Plex, the Plex logo and Plex Media Server are trademarks of Plex, Inc.\n\nLG and webOS are trademarks of LG Electronics Inc.\n\nPlxNative is an independent, unofficial application. It is not produced by, endorsed by, or affiliated with Plex, Inc. or LG Electronics Inc.";
-const CONTACT: &str = "Privacy questions may be sent to support@plxnative.com.\n\nSecurity vulnerabilities may be reported privately through GitHub Security Advisories for GLinnik21/plx-native. Please do not include Plex tokens, server addresses or personal media information in a report.";
+const CONTACT: &str = "Questions about the Butaca fork may be opened at github.com/gnacho/butaca.\n\nQuestions about upstream PlxNative may be sent to support@plxnative.com.\n\nSecurity vulnerabilities may be reported privately through GitHub Security Advisories for gnacho/butaca. Please do not include server tokens, server addresses or personal media information in a report.";
+#[cfg(feature = "jellyfin")]
+const ABOUT: &str = concat!(
+    "Version ",
+    env!("PLX_VERSION"),
+    "\nBuild ",
+    env!("PLX_BUILD_SHA"),
+    "\n\nbutaca is built on plx-native\ndeveloped by Gleb Linnik\n\u{00A9} 2026 Gleb Linnik and contributors",
+    "\n\nOpen source under GPL-3.0-or-later\ngithub.com/GLinnik21/plx-native",
+    "\n\nFork: github.com/gnacho/butaca",
+    "\n\nbutaca is an independent, unofficial Jellyfin client. It is not produced by, endorsed by, or affiliated with the Jellyfin Project or LG Electronics Inc."
+);
+#[cfg(not(feature = "jellyfin"))]
 const ABOUT: &str = concat!(
     "Version ",
     env!("PLX_VERSION"),
@@ -411,27 +505,50 @@ mod tests {
     use crate::ui::screen::{Activate, By, EdgeRule, Focusable, Hover, Stop};
 
     /// **The policy must describe the build it ships in.** These assertions pin CLAIMS, not
-    /// wording: each names a fact about this application that the document was silently wrong or
-    /// silent about, and each was RED when it was written.
+    /// wording: each names a fact about this fork that the document would be silently wrong or
+    /// silent about if a future edit broke it, and each was RED when written against the
+    /// placeholder it replaces. Reword the document freely; move the assertions with it
+    /// deliberately rather than deleting them.
     ///
-    /// * Nothing in the persisted session carries a playhead: `session.rs` has no such field, and
-    ///   position is read from and reported to the server. **Do not cite `coldstart.rs` as the
-    ///   evidence** — what it retired is `lastplace.json`, the last-PAGE/route bookmark (which
-    ///   Detail or Library screen a cold boot reopened), which is a different artefact that was
-    ///   conflated with a playhead when this test was written.
-    /// * `session.rs` persists `recent_searches` — the exact search terms, per Home profile — plus
-    ///   per-server tokens and server addresses. None were listed.
-    /// * There are TWO identifiers and they never travel together: `install_id` goes to PostHog
-    ///   only (`telemetry/sender.rs`) and `errors_id` to Sentry only, as `user.id`
-    ///   (`telemetry/sentry.rs::attach_user`). The policy used to promise that a crash report
-    ///   "carries no installation identifier" and "cannot be linked to any other report"; both
-    ///   became false the day the crash-report id was added, and the assertion below is what
-    ///   would have caught a policy that still said so.
-    /// * The sign-in is stored OUTSIDE the app directory on purpose (`paths.rs`), so it survives a
-    ///   reinstall. "Uninstall removes everything" would have been false.
-    ///
-    /// Reword the document freely; when you do, move the assertion with it deliberately rather
-    /// than deleting it.
+    /// * The fork's whole posture is "sends nothing": the build ships no telemetry SDK (removed
+    ///   with the reporting surface), so the document must promise exactly that and must NOT
+    ///   hedge with report-opt-out language that no longer maps to any control.
+    /// * The escape hatch must be named: Delete all local data is a real Settings row and the
+    ///   policy is where a worried user learns it exists.
+    /// * The sign-in is stored OUTSIDE the app directory on purpose (`paths.rs`), so it survives
+    ///   a reinstall. "Uninstall removes everything" would be false, and the uninstall section
+    ///   must say so.
+    /// * The YOUR SERVICE section must name the backend this build actually speaks to: a
+    ///   Jellyfin build claiming it talks to Plex services (or the other way) is the exact
+    ///   flavour-blind drift the cfg'd const pair exists to prevent.
+    #[test]
+    fn privacy_names_what_this_build_does() {
+        let body = Page::Privacy.body();
+        assert!(body.contains("sends nothing"), "the fork's posture must be stated plainly");
+        assert!(body.contains("no crash reports"), "{body:?}");
+        assert!(
+            !body.to_lowercase().contains("opt-out") && !body.to_lowercase().contains("opt out"),
+            "there is no telemetry left to opt out of; the promise is absence, not consent: {body:?}"
+        );
+        assert!(
+            body.contains("Delete all local data"),
+            "the escape hatch must be named: {body:?}"
+        );
+        assert!(
+            body.contains("sign-in is deliberately kept there so that reinstalling does not sign you out"),
+            "the uninstall section must not promise removal the platform cannot give: {body:?}"
+        );
+        #[cfg(feature = "jellyfin")]
+        assert!(
+            body.contains("Jellyfin server") && !body.contains("Plex services"),
+            "a Jellyfin build must name its own backend: {body:?}"
+        );
+        #[cfg(not(feature = "jellyfin"))]
+        assert!(
+            body.contains("Plex services") && !body.contains("Jellyfin server"),
+            "a Plex build must name its own backend: {body:?}"
+        );
+    }
 
     #[test]
     fn complete_gpl_is_available_offline() {

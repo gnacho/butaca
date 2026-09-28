@@ -22,7 +22,7 @@ ROOT_FILES = {'Makefile', 'LICENSE', 'LICENSING.md', 'THIRD-PARTY-NOTICES.md',
 ROOT_DIRS = {'src', 'include', 'rust-modules', 'assets', 'ci', 'tools', 'docs', 'tests', 'licenses', '.agents'}
 PKG_FILES = {'OFL.txt', 'appfont.ttf', 'appfont-bold.ttf', 'appfont-cjk.ttf',
              'appinfo.json', 'icon.png', 'icon160.png', 'icon320.png', 'icon400.png',
-             'largeIcon.png', 'splash.png', 'telemetry.local.json.example'}
+             'largeIcon.png', 'splash.png'}
 PRIVATE_NAMES = {'.tv-host', '.tv-mac', '.tv-dpad-pass', '.tv-remote-url',
                  'config.local.h', 'manifest.local.json', 'auth.json', 'lab.json',
                  'telemetry.local.json', 'local.env', '.env', 'id_rsa', 'id_ed25519'}

@@ -1,3 +1,16 @@
+# Butaca (fork of PlxNative)
+
+**Butaca is a fork of [PlxNative](https://github.com/GLinnik21/plx-native) by Gleb Linnik, turned
+into a [Jellyfin](https://jellyfin.org/) client for rooted LG webOS televisions. It draws the
+interface directly on the GPU at 60 fps and plays video on the TV's own decoder. The fork removes
+all telemetry and crash reporting and changes nothing about those promises:
+[privacy](https://github.com/gnacho/butaca), [upstream](https://github.com/GLinnik21/plx-native).**
+
+The rest of this README still describes upstream PlxNative, the Plex client this fork is built
+from; the app it documents is the same code under the fork's packaging.
+
+---
+
 # PlxNative
 
 A fast, unofficial [Plex](https://www.plex.tv/) client for LG webOS televisions. Native, not a web
@@ -154,22 +167,13 @@ from mine — [**docs/building.md**](docs/building.md) is the build and the test
 hardware I most need help with. Security issues go through [`SECURITY.md`](SECURITY.md) rather than
 a public issue.
 
-## Acknowledgements
-
-Error monitoring for PlxNative is sponsored by [Sentry](https://sentry.io/for/good/).
-
-<a href="https://sentry.io/for/good/">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/sentry-wordmark-light.svg">
-    <source media="(prefers-color-scheme: light)" srcset="docs/assets/sentry-wordmark-dark.svg">
-    <img alt="Sentry" src="docs/assets/sentry-wordmark-dark.svg" width="160">
-  </picture>
-</a>
-
 ## Licence
 
-[GPL-3.0-or-later](LICENSE), © 2026 Gleb Linnik. The PlxNative name and its brand artwork are excluded — see
-[`TRADEMARKS.md`](TRADEMARKS.md), which also carries the Plex and LG non-affiliation statements.
+[GPL-3.0-or-later](LICENSE), © 2026 Gleb Linnik and contributors. Butaca is a fork maintained
+at [gnacho/butaca](https://github.com/gnacho/butaca); the upstream project is
+[GLinnik21/plx-native](https://github.com/GLinnik21/plx-native). The PlxNative name and its brand
+artwork are excluded — see [`TRADEMARKS.md`](TRADEMARKS.md), which also carries the Plex and LG
+non-affiliation statements.
 Third-party components and their licences are in
 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) and `licenses/` — notably the app ships its own
 LGPL build of FFmpeg. Those notices and licence texts ship inside the `.ipk` too, so they travel
