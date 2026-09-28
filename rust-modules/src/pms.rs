@@ -800,6 +800,25 @@ fn fetch_source_jellyfin(c: &'static crate::jellyfin::JfClient, sid: ServerId) -
         })
         .collect();
 
+    // Next Up (issue #44): the next unseen episode of every started series, which Jellyfin's
+    // own clients surface as a first-class Home row beside Continue Watching. It leads the
+    // shelves for exactly that reason. A failed NextUp fails nothing else: Resume already
+    // committed above and the Latest shelves below are independent — the same one-shelf
+    // isolation the Latest arm documents.
+    if let Some(next) = c.next_up_all(HUB_FETCH_COUNT) {
+        let items: Vec<PmsMovie> = next.items.iter().filter_map(keep).collect();
+        if !items.is_empty() {
+            out.shelves.push(Shelf {
+                title: crate::i18n::t("Next Up").to_string(),
+                // Not hero-eligible on purpose: a billboard sells art, and this row sells the
+                // next episode of a specific show (hero_eligible names the accepted shapes).
+                hub_id: "jf.nextup".to_string(),
+                key: String::new(),
+                items,
+            });
+        }
+    }
+
     let views = c.views()?;
     for v in &views.items {
         // Movies and TV shows are the app's honest scope (README's words, still true on this
@@ -2279,6 +2298,10 @@ mod local_edit_tests;
 #[cfg(test)]
 #[path = "pms_hero_pool_tests.rs"]
 mod hero_pool_tests;
+
+#[cfg(all(test, feature = "jellyfin"))]
+#[path = "pms_jellyfin_fetch_tests.rs"]
+mod jellyfin_fetch_tests;
 
 #[cfg(test)]
 #[path = "pms_multi_source_merge_tests.rs"]

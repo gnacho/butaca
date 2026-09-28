@@ -506,12 +506,24 @@ impl JfClient {
     }
 
     /// The episode the server says is next for this show (`GET /Shows/NextUp`) — the detail
-    /// page's OnDeck. An empty result is a show never started or finished, NOT a failure: the
-    /// caller distinguishes by `Items` emptiness, and only a transport/HTTP failure is `None`.
+    /// page's OnDeck and the player route's Up Next. An empty result is a show never started or
+    /// finished, NOT a failure: the caller distinguishes by `Items` emptiness, and only a
+    /// transport/HTTP failure is `None`.
     pub(crate) fn next_up(&self, series_id: &str) -> Option<ItemsResult> {
+        self.next_up_path(&format!("&SeriesId={series_id}&Limit=1"))
+    }
+
+    /// The next unseen episode of EVERY started series (`GET /Shows/NextUp` with no SeriesId) —
+    /// one row per series, which is exactly the Home shelf Jellyfin's own clients surface as
+    /// "Next Up" (issue #44). Same emptiness-is-not-failure contract as [`next_up`].
+    pub(crate) fn next_up_all(&self, limit: i64) -> Option<ItemsResult> {
+        self.next_up_path(&format!("&Limit={limit}"))
+    }
+
+    fn next_up_path(&self, query: &str) -> Option<ItemsResult> {
         let user_id = self.user_id()?;
         self.get_json(&format!(
-            "/Shows/NextUp?UserId={user_id}&SeriesId={series_id}&Limit=1\
+            "/Shows/NextUp?UserId={user_id}{query}\
              &Fields=Overview,MediaSources,OfficialRating&EnableImageTypes=Primary"
         ))
     }

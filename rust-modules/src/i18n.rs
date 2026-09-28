@@ -105,6 +105,7 @@ fn es(s: &str) -> Option<&'static str> {
         // ---- Home: shelf and row titles (the data layer builds them; the literal is the key) --
         "Continue Watching" => "Seguir viendo",
         "Recently Added" => "Añadido recientemente",
+        "Next Up" => "A continuación",
         // ---- Home: hero pill and deck states ----
         "Continue" => "Continuar",
         "Play" => "Reproducir",
