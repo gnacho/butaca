@@ -1317,9 +1317,6 @@ impl BrowseState {
                 if choice {
                     self.note_library_choice(index);
                     if switched {
-                        crate::diag::event(crate::diag::schema::DiagEvent::FeatureUsed {
-                            feature: crate::diag::schema::Feature::LibrarySwitch,
-                        });
                     }
                 }
                 match query {

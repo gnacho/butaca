@@ -33,6 +33,21 @@ pub(crate) enum Failure {
     Unsupported,
 }
 
+impl Failure {
+    #[allow(dead_code)]
+    pub(crate) const fn message(self) -> &'static str {
+        match self {
+            Self::StartFailed => "Could not start the repair. Close and reopen PlxNative to try again.",
+            Self::HbcUnavailable => "Homebrew Channel service is unavailable.",
+            Self::NotRoot => "Homebrew Channel service is not running as root.",
+            Self::CommandFailed => "The sandbox repair command failed.",
+            Self::Timeout => "Repair outcome is unknown. Close and reopen the app to check again.",
+            Self::Unreadable => "Repair completed, but this app cannot see /dev/rtkmem yet. Close and reopen the app.",
+            Self::Unsupported => "Sandbox repair is not available on this device.",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum State {
     Idle,
@@ -237,11 +252,11 @@ mod tests {
 
     #[test]
     fn command_is_fixed_and_contains_the_only_validated_install_arguments() {
-        let id = "com.beb.plxnative.debug-1";
+        let id = "com.butaca.debug-1";
         let c = command(&dir(id), id).unwrap();
-        assert!(c.contains("/usr/bin/jailer -t native -p '/media/developer/apps/usr/palm/applications/com.beb.plxnative.debug-1' -i 'com.beb.plxnative.debug-1' /bin/true"));
+        assert!(c.contains("/usr/bin/jailer -t native -p '/media/developer/apps/usr/palm/applications/com.butaca.debug-1' -i 'com.butaca.debug-1' /bin/true"));
         assert!(c.contains("id -u"));
         assert!(c.contains("[ ! -c /dev/rtkmem ]"));
-        assert!(c.contains("/var/palm/jail/com.beb.plxnative.debug-1/dev/rtkmem"));
+        assert!(c.contains("/var/palm/jail/com.butaca.debug-1/dev/rtkmem"));
     }
 }

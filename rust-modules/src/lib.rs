@@ -69,7 +69,6 @@ mod surface; // what we are actually drawing into — drawable vs the 1920x1080 
 mod svg; // runtime SVG rasterizer FFI (src/svg.c / nanosvg) — vector icon assets
 mod system;
 mod task; // the one spawn: a refused thread is a return value, not a panic that kills the app
-mod telemetry; // the opt-in crash + usage channels: consent, the spool, the worker, the two wire formats
 mod viewstate; // watched / unwatched / remove-from-deck: the PMS view-state WRITES, off the SDL thread
 
 #[cfg(test)]

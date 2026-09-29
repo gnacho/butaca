@@ -69,7 +69,7 @@
   "settings.consent.analytics_id": "ID аналітыкі",
   "settings.consent.crash_id": "ID справаздач пра збоі",
   "settings.consent.delete": "Выдаліць усе лакальныя даныя",
-  "settings.consent.delete_scope": "Вы выйдзеце з уліковага запісу, а даныя PlxNative на гэтым тэлевізары будуць выдалены. Гэта не выдаляе даныя, ужо дасланыя ў Plex, на вашы серверы Plex, у Sentry або PostHog.",
+  "settings.consent.delete_scope": "Гэта завяршае сеанс на тэлевізары і выдаляе ўсе захаваныя ўліковыя запісы, профілі, серверы і налады. Пазіцыі прайгравання на серверах не закранаюцца.",
   "settings.consent.settings_copy": "Кіруйце неабавязковымі справаздачамі, правярайце, якія звесткі могуць дасылацца, і кіруйце данымі PlxNative на гэтым тэлевізары.",
   "settings.consent.reporting": "Справаздачы",
   "settings.consent.information": "Інфармацыя",

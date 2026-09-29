@@ -42,7 +42,6 @@ pub(crate) fn route_word(route: &AppArg) -> &'static str {
         // compile error here — the failure this table exists to prevent is a word the app cannot
         // print, which reads on the television as "0 post-warmup samples".
         AppArg::Settings(_)
-        | AppArg::FirstRunConsent(_)
         | AppArg::LibraryMenu(_)
         | AppArg::AccountMenu
         | AppArg::ItemMenu(_)

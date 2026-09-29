@@ -43,6 +43,10 @@ pub(crate) use crate::i18n::msg::{
     settings_plaintext_not_now_c as not_now,
     settings_plaintext_question_c as question,
     settings_plaintext_body as body,
+    settings_consent_delete_question_c as delete_question,
+    settings_consent_delete_scope as delete_body,
+    settings_cancel_c as cancel_verb,
+    settings_delete_c as delete_verb,
 };
 
 /// **Does a read-out about `verdict` ask the question?** Only for a server the same-network rule
@@ -79,11 +83,12 @@ struct Subject {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct PlaintextQuestion {
     subject: Option<Subject>,
+    delete: bool,
 }
 
 impl PlaintextQuestion {
     pub(crate) fn new() -> Self {
-        Self { subject: None }
+        Self { subject: None, delete: false }
     }
 
     /// The server the question is open about, if it is.
@@ -104,11 +109,31 @@ impl PlaintextQuestion {
         (not_now(), connect())
     }
 
+    /// The verbs for the question AS OPEN: *Cancel* / *Delete* for the delete-all confirmation,
+    /// the plaintext pair otherwise.
+    pub(crate) fn verbs_for(&self) -> (&'static CStr, &'static CStr) {
+        if self.delete { (cancel_verb(), delete_verb()) } else { Self::verbs() }
+    }
+
+    /// Ask the delete-all-data confirmation on `alert` — no subject, its own copy.
+    pub(crate) fn open_delete(&mut self, alert: &mut DecisionAlert) {
+        alert.set_tone(Tone::Neutral);
+        alert.open_with_body(delete_question(), delete_body());
+        self.delete = true;
+    }
+
     /// **The person answered** — *Connect* (`allow`) or *Not now* / BACK. Dismisses the alert (an
     /// answer is never an instant hide) and returns the command to send; `None` when nothing was
     /// being asked.
     pub(crate) fn answer(&mut self, alert: &mut DecisionAlert, allow: bool) -> Option<SessionCmd> {
         alert.dismiss();
+        if self.delete {
+            self.delete = false;
+            if allow {
+                crate::log("settings: user confirmed Delete all local data");
+            }
+            return allow.then_some(SessionCmd::EraseLocal);
+        }
         let subject = self.subject.take()?;
         crate::log(if allow {
             "plaintext: user allowed an unencrypted connection on this network"
@@ -198,6 +223,11 @@ impl PlaintextAlert {
         fx: &mut Effects<'_, H>) {
         self.question.open(&mut self.alert, machine_id, sid);
         enter_group(fx, to, self.group);
+    }
+
+    /// Open the delete-all-data confirmation on this alert — the Settings root's own row.
+    pub(crate) fn open_delete(&mut self) {
+        self.question.open_delete(&mut self.alert);
     }
 
     /// Take the question down unanswered — its subject went away.
@@ -362,7 +392,7 @@ impl PlaintextAlert {
             return;
         }
         self.alert.draw_scrim();
-        let (cancel, affirm) = PlaintextQuestion::verbs();
+        let (cancel, affirm) = self.question.verbs_for();
         self.alert.draw(cancel, affirm, f.measure);
         let frames = self.alert.frames(f.measure);
         self.frames.set(Some(frames));

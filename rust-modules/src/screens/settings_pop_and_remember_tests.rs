@@ -52,7 +52,7 @@ fn a_pop_that_would_empty_the_stack_dismisses_the_surface_instead() {
         EntryId(7),
         InstanceId(0),
         Family::Settings,
-        SettingsPage::Privacy,
+        SettingsPage::Legal,
     
         crate::pms::HubsSnapshot::empty_for_test().view(),
     );

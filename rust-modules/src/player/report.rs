@@ -34,7 +34,6 @@
 //! suspend all end an ENGINE without ending a playback, and counting those as endings would make
 //! the completion rate a measure of how often people scrub.
 
-use crate::diag::schema::DiagEvent;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU8, Ordering::Relaxed};
 
 /// The current attempt's opaque id — random, per attempt, never stored. See `DiagEvent`'s playback
@@ -63,6 +62,7 @@ const fn pack_connection(server: u16, link: u8, ip: u8) -> u32 {
     (server as u32) | ((link as u32) << 16) | ((ip as u32) << 24)
 }
 
+#[cfg(test)]
 fn unpack_connection(word: u32) -> (u16, u8, u8) {
     (word as u16, (word >> 16) as u8, (word >> 24) as u8)
 }
@@ -70,7 +70,9 @@ fn unpack_connection(word: u32) -> (u16, u8, u8) {
 // Link/IP encode-decode is the one pair `crate::plex::client` owns (`encode_link`/`decode_link`,
 // `encode_ip`/`decode_ip`) — this module used to keep a second private copy of both tables, which
 // is exactly the drift the shared pair exists to rule out.
-use crate::plex::{decode_ip, decode_link, encode_ip, encode_link};
+use crate::plex::{encode_ip, encode_link};
+#[cfg(test)]
+use crate::plex::{decode_ip, decode_link};
 /// Process-local trace generation. Unlike `ATTEMPT`, this is never sent; it only prevents an
 /// outgoing demux worker from writing its late transitions into the next Play's reset trace.
 static NEXT_TRACE_GENERATION: AtomicU32 = AtomicU32::new(0);
@@ -108,16 +110,6 @@ pub(crate) enum TraceAge {
 }
 
 impl TraceAge {
-    pub(crate) const fn code(self) -> &'static str {
-        match self {
-            Self::Under1s => "<1s",
-            Self::S1To3 => "1-3s",
-            Self::S3To10 => "3-10s",
-            Self::S10To30 => "10-30s",
-            Self::S30To120 => "30-120s",
-            Self::Over2m => "2m+",
-        }
-    }
 
     fn from_ms(ms: i64) -> Self {
         match ms.max(0) {
@@ -140,14 +132,6 @@ pub(crate) enum DeliveryClass {
 }
 
 impl DeliveryClass {
-    pub(crate) const fn code(self) -> &'static str {
-        match self {
-            Self::Direct => "original_direct",
-            Self::Remux => "original_remux",
-            Self::Hls => "hls",
-            Self::Transcode => "progressive_transcode",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,26 +155,6 @@ pub(crate) enum QualityClass {
 }
 
 impl QualityClass {
-    pub(crate) const fn code(self) -> &'static str {
-        match self {
-            Self::Unknown => "unknown",
-            Self::Auto => "auto",
-            Self::Original => "original",
-            Self::K320 => "320k",
-            Self::K720 => "720k",
-            Self::M2 => "2m",
-            Self::M4 => "4m",
-            Self::M6 => "6m",
-            Self::M8 => "8m",
-            Self::M10 => "10m",
-            Self::M12 => "12m",
-            Self::M14 => "14m",
-            Self::M16 => "16m",
-            Self::M18 => "18m",
-            Self::M20 => "20m",
-            Self::M22 => "22m",
-        }
-    }
 
     fn selected(q: crate::route::Quality) -> Self {
         use crate::route::Quality as Q;
@@ -244,17 +208,6 @@ pub(crate) enum RateClass {
 }
 
 impl RateClass {
-    pub(crate) const fn code(self) -> &'static str {
-        match self {
-            Self::Unknown => "unknown",
-            Self::Under1m => "<1m",
-            Self::M1To3 => "1-3m",
-            Self::M3To6 => "3-6m",
-            Self::M6To12 => "6-12m",
-            Self::M12To20 => "12-20m",
-            Self::Over20m => "20m+",
-        }
-    }
 
     fn from_kbps(kbps: i64) -> Self {
         match kbps {
@@ -279,15 +232,6 @@ pub(crate) enum RasterClass {
 }
 
 impl RasterClass {
-    pub(crate) const fn code(self) -> &'static str {
-        match self {
-            Self::Unknown => "unknown",
-            Self::Sd => "sd",
-            Self::Hd => "hd",
-            Self::Fhd => "fhd",
-            Self::Uhd => "uhd",
-        }
-    }
 
     fn from_height(height: i32) -> Self {
         match height {
@@ -308,13 +252,6 @@ pub(crate) enum TraceDirection {
 }
 
 impl TraceDirection {
-    pub(crate) const fn code(self) -> &'static str {
-        match self {
-            Self::Up => "up",
-            Self::Down => "down",
-            Self::Refresh => "refresh",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -325,38 +262,14 @@ pub(crate) enum DeliveryReason {
 }
 
 impl DeliveryReason {
-    pub(crate) const fn code(self) -> &'static str {
-        match self {
-            Self::LinkFallback => "link_fallback",
-            Self::OriginalRecovery => "original_recovery",
-            Self::OriginalOpenRollback => "original_open_rollback",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OriginalProbePhase {
-    // Retained stable wire vocabulary for events produced by builds before 2026-08-31. Current
-    // runtime emits SampleSource only; removing/reusing these strings would rewrite dashboards.
-    RetireHls,
     SampleSource,
-    CloseSource,
-    RestoreHls,
-    OpenHls,
-    CommitHls,
 }
 
 impl OriginalProbePhase {
-    pub(crate) const fn code(self) -> &'static str {
-        match self {
-            Self::RetireHls => "retire_hls",
-            Self::SampleSource => "sample_source",
-            Self::CloseSource => "close_source",
-            Self::RestoreHls => "restore_hls",
-            Self::OpenHls => "open_hls",
-            Self::CommitHls => "commit_hls",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -404,14 +317,6 @@ pub(crate) enum LoadElapsedClass {
 }
 
 impl LoadElapsedClass {
-    pub(crate) const fn code(self) -> &'static str {
-        match self {
-            Self::Under1s => "under_1s",
-            Self::S1To5 => "1_to_5s",
-            Self::S5To20 => "5_to_20s",
-            Self::Over20s => "over_20s",
-        }
-    }
 
     pub(crate) fn from_ms(ms: i64) -> Self {
         match ms.max(0) {
@@ -495,15 +400,6 @@ impl PlaybackTrace {
         self.push(at_ms, TraceEvent::Requested { selected });
     }
 
-    /// Install an attempt boundary without collecting a breadcrumb. This keeps a later opt-in
-    /// scoped to the current Play while preserving the rule that nothing is collected before it.
-    fn arm(&mut self, generation: u32) {
-        self.generation = generation;
-        self.started_ms = -1;
-        self.sealed = false;
-        self.steps.clear();
-    }
-
     fn push_for(&mut self, generation: u32, at_ms: i64, event: TraceEvent) -> bool {
         if generation == 0 || self.generation != generation || self.sealed {
             return false;
@@ -560,113 +456,6 @@ impl PlaybackTrace {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PipelineClass {
-    Loading,
-    Playing,
-    Bound,
-    Streaming,
-}
-
-impl PipelineClass {
-    pub(crate) const fn code(self) -> &'static str {
-        match self {
-            Self::Loading => "loading",
-            Self::Playing => "playing",
-            Self::Bound => "bound",
-            Self::Streaming => "streaming",
-        }
-    }
-
-    fn from_stage(stage: u8) -> Self {
-        match stage {
-            1 => Self::Playing,
-            2 => Self::Bound,
-            3 => Self::Streaming,
-            _ => Self::Loading,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HttpClass {
-    None,
-    Success,
-    ClientError,
-    ServerError,
-    Other,
-}
-
-impl HttpClass {
-    pub(crate) const fn code(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Success => "2xx",
-            Self::ClientError => "4xx",
-            Self::ServerError => "5xx",
-            Self::Other => "other",
-        }
-    }
-
-    fn from_status(status: i32) -> Self {
-        match status {
-            0 => Self::None,
-            200..=299 => Self::Success,
-            400..=499 => Self::ClientError,
-            500..=599 => Self::ServerError,
-            _ => Self::Other,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BufferClass {
-    Unknown,
-    Empty,
-    Under3s,
-    S3To10,
-    S10To30,
-    Over30s,
-}
-
-impl BufferClass {
-    pub(crate) const fn code(self) -> &'static str {
-        match self {
-            Self::Unknown => "unknown",
-            Self::Empty => "empty",
-            Self::Under3s => "<3s",
-            Self::S3To10 => "3-10s",
-            Self::S10To30 => "10-30s",
-            Self::Over30s => "30s+",
-        }
-    }
-
-    fn from_ms(ms: i64) -> Self {
-        match ms {
-            m if m < 0 => Self::Unknown,
-            0 => Self::Empty,
-            1..=2_999 => Self::Under3s,
-            3_000..=9_999 => Self::S3To10,
-            10_000..=29_999 => Self::S10To30,
-            _ => Self::Over30s,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PlaybackErrorContext {
-    pub(crate) delivery: DeliveryClass,
-    pub(crate) selected: QualityClass,
-    pub(crate) requested: QualityClass,
-    pub(crate) declared_rate: RateClass,
-    pub(crate) media_rate: RateClass,
-    pub(crate) raster: RasterClass,
-    pub(crate) pipeline: PipelineClass,
-    pub(crate) http: HttpClass,
-    pub(crate) buffer: BufferClass,
-    pub(crate) started: bool,
-}
-
 fn delivery_class(ps: &crate::route::PlaybackSession) -> DeliveryClass {
     if crate::route::is_segmented_hls(ps) {
         DeliveryClass::Hls
@@ -684,12 +473,6 @@ fn push_trace_for(generation: u32, event: TraceEvent) {
         .playback_trace
         .lock()
         .unwrap_or_else(|e| e.into_inner());
-    // Check consent while holding the same trace lock used by withdrawal's clear. Either this
-    // append finishes before the clear (and is erased) or it observes the new decision and does
-    // nothing; no breadcrumb can appear after withdrawal and survive it.
-    if !crate::telemetry::consent::allows_errors() {
-        return;
-    }
     trace.push_for(generation, now_ms(), event);
 }
 
@@ -698,7 +481,7 @@ fn push_trace(event: TraceEvent) {
         .playback_trace
         .lock()
         .unwrap_or_else(|e| e.into_inner());
-    if !crate::telemetry::consent::allows_errors() || trace.generation == 0 {
+    if trace.generation == 0 {
         return;
     }
     let generation = trace.generation;
@@ -713,10 +496,6 @@ fn finish_trace(event: TraceEvent) -> Vec<TraceStep> {
         .playback_trace
         .lock()
         .unwrap_or_else(|e| e.into_inner());
-    if !crate::telemetry::consent::allows_errors() {
-        trace.sealed = true;
-        return Vec::new();
-    }
     trace.finish(now_ms(), event)
 }
 
@@ -796,30 +575,6 @@ pub(crate) fn note_load_gate_for(generation: u32, elapsed: LoadElapsedClass) {
     push_trace_for(generation, TraceEvent::LoadGateOpened { elapsed });
 }
 
-fn error_context(ps: &crate::route::PlaybackSession) -> PlaybackErrorContext {
-    let delivery = delivery_class(ps);
-    let selected = QualityClass::selected(crate::route::quality());
-    let requested = if delivery == DeliveryClass::Hls {
-        QualityClass::from_kbps(super::SHARED.dg_abr_kbps.load(Relaxed))
-    } else if matches!(delivery, DeliveryClass::Direct | DeliveryClass::Remux) {
-        QualityClass::Original
-    } else {
-        selected
-    };
-    PlaybackErrorContext {
-        delivery,
-        selected,
-        requested,
-        declared_rate: RateClass::from_kbps(super::SHARED.dg_abr_declared_kbps.load(Relaxed)),
-        media_rate: RateClass::from_kbps(super::SHARED.dg_abr_media_kbps.load(Relaxed)),
-        raster: RasterClass::from_height(super::SHARED.video_raster().1),
-        pipeline: PipelineClass::from_stage(super::SHARED.dg_stage.load(Relaxed)),
-        http: HttpClass::from_status(super::SHARED.dg_http_status.load(Relaxed)),
-        buffer: BufferClass::from_ms(super::SHARED.dg_abr_buffer_ms.load(Relaxed)),
-        started: SAW_START.load(Relaxed),
-    }
-}
-
 fn presented_event(ps: &crate::route::PlaybackSession) -> TraceEvent {
     let delivery = delivery_class(ps);
     let requested = if delivery == DeliveryClass::Hls {
@@ -886,17 +641,12 @@ pub(crate) fn requested(ps: &crate::route::PlaybackSession, server: crate::plex:
         .playback_trace
         .lock()
         .unwrap_or_else(|e| e.into_inner());
-    if crate::telemetry::consent::allows_errors() {
-        trace.reset(
-            generation,
-            at,
-            QualityClass::selected(crate::route::quality()),
-        );
-    } else {
-        trace.arm(generation);
-    }
+    trace.reset(
+        generation,
+        at,
+        QualityClass::selected(crate::route::quality()),
+    );
     drop(trace);
-    emit(DiagEvent::PlaybackRequested { playback_id: id });
     generation
 }
 
@@ -907,16 +657,6 @@ pub(crate) fn attempt_connection_snapshot_for_test(
 ) -> (Option<crate::plex::probe::Location>, Option<crate::plex::IpVersion>) {
     let (_, link, ip) = unpack_connection(ATTEMPT_CONNECTION.load(Relaxed));
     (decode_link(link), decode_ip(ip))
-}
-
-fn emit(event: DiagEvent) {
-    // One load, not three — see `ATTEMPT_CONNECTION`'s doc for why a concurrent `requested` must
-    // never be observable as a torn mix of the old server slot and the new connection or back.
-    let (server, link, ip) = unpack_connection(ATTEMPT_CONNECTION.load(Relaxed));
-    let sid = crate::plex::ServerId::from_raw(server);
-    let link = decode_link(link);
-    let ip = decode_ip(ip);
-    crate::diag::event_for_connection(event, sid, link, ip);
 }
 
 /// Resolve an attempt before a newer Play overwrites its join key. Before first frame this is an
@@ -938,7 +678,7 @@ fn replacement(saw_start: bool, saw_fail: bool, saw_end: bool) -> Replacement {
     }
 }
 
-fn resolve_replaced_attempt(ps: &crate::route::PlaybackSession) {
+fn resolve_replaced_attempt(_ps: &crate::route::PlaybackSession) {
     let id = ATTEMPT.swap(0, Relaxed);
     if id == 0 {
         return;
@@ -949,34 +689,21 @@ fn resolve_replaced_attempt(ps: &crate::route::PlaybackSession) {
         SAW_END.load(Relaxed),
     ) {
         Replacement::None => {}
-        Replacement::Cancelled => {
-            emit(DiagEvent::PlaybackCancelled {
-                playback_id: id,
-                mode: mode(ps),
-            });
-        }
+        Replacement::Cancelled => {}
         Replacement::Abandoned => {
             report_quality(id);
-            emit(DiagEvent::PlaybackAbandoned {
-                playback_id: id,
-                mode: mode(ps),
-            });
         }
     }
 }
 
 /// The process is leaving an unresolved attempt. Unlike a newer Play, this was not a replacement
 /// choice, so classify it as abandonment; if playback had started, close its quality summary too.
-pub(crate) fn abandon_pending(ps: &crate::route::PlaybackSession) {
+pub(crate) fn abandon_pending(_ps: &crate::route::PlaybackSession) {
     let id = ATTEMPT.load(Relaxed);
     if id == 0 || SAW_FAIL.load(Relaxed) || SAW_END.swap(true, Relaxed) {
         return;
     }
     report_quality(id);
-    emit(DiagEvent::PlaybackAbandoned {
-        playback_id: id,
-        mode: mode(ps),
-    });
 }
 
 /// What a frame's state change is worth reporting, if anything.
@@ -1027,27 +754,12 @@ pub(crate) fn tick(ps: &crate::route::PlaybackSession) {
     match transition(prev, now, SAW_START.load(Relaxed), SAW_FAIL.load(Relaxed)) {
         Some(What::Started) => {
             SAW_START.store(true, Relaxed);
-            emit(DiagEvent::PlaybackStarted {
-                playback_id: ATTEMPT.load(Relaxed),
-                mode: mode(ps),
-                raster: raster_class(super::SHARED.video_raster().1),
-                fps: fps_rung(crate::route::stream_fps(ps)),
-                video: video_codec_class(&crate::route::stream_vcodec(ps)),
-                audio: audio_codec_class(&crate::route::stream_acodec(ps)),
-                startup: startup_class(now_ms() - REQUESTED_MS.load(Relaxed)),
-            });
         }
         Some(What::Failed) => {
             SAW_FAIL.store(true, Relaxed);
             report_quality(ATTEMPT.load(Relaxed));
             let shape = super::error_now(ps);
-            let trace = finish_trace(TraceEvent::Failed { kind: shape.kind });
-            crate::telemetry::playback::report_error(shape.kind, error_context(ps), &trace);
-            emit(DiagEvent::PlaybackFailed {
-                playback_id: ATTEMPT.load(Relaxed),
-                mode: mode(ps),
-                kind: shape.kind.code(),
-            });
+            finish_trace(TraceEvent::Failed { kind: shape.kind });
         }
         None => {}
     }
@@ -1055,7 +767,7 @@ pub(crate) fn tick(ps: &crate::route::PlaybackSession) {
 
 /// **A real teardown.** Called from the one place playback actually ends — never from a seek, a
 /// rung change or a suspend, each of which destroys an engine and keeps the playback.
-pub(crate) fn ended(ps: &crate::route::PlaybackSession, position_ns: i64, duration_ns: i64) {
+pub(crate) fn ended(_ps: &crate::route::PlaybackSession, _position_ns: i64, _duration_ns: i64) {
     if SAW_END.swap(true, Relaxed) || SAW_FAIL.load(Relaxed) {
         clear_error_trace();
         return; // already terminal
@@ -1066,19 +778,10 @@ pub(crate) fn ended(ps: &crate::route::PlaybackSession, position_ns: i64, durati
         return;
     }
     if !SAW_START.load(Relaxed) {
-        emit(DiagEvent::PlaybackAbandoned {
-            playback_id: id,
-            mode: mode(ps),
-        });
         clear_error_trace();
         return;
     }
     report_quality(id);
-    emit(DiagEvent::PlaybackEnded {
-        playback_id: id,
-        mode: mode(ps),
-        watched: watched_class(position_ns, duration_ns),
-    });
     clear_error_trace();
 }
 
@@ -1123,37 +826,6 @@ fn report_quality(playback_id: i64) {
         return;
     }
     finish_rebuffer_window();
-    emit(DiagEvent::PlaybackQuality {
-        playback_id,
-        rebuffers: rebuffer_count_class(REBUFFER_COUNT.load(Relaxed)),
-        buffering: rebuffer_time_class(REBUFFER_TOTAL_MS.load(Relaxed)),
-    });
-}
-
-fn rebuffer_count_class(n: u8) -> &'static str {
-    match n {
-        0 => "0",
-        1 => "1",
-        2..=3 => "2-3",
-        _ => "4+",
-    }
-}
-
-fn rebuffer_time_class(ms: i64) -> &'static str {
-    match ms {
-        ..=0 => "none",
-        1..=1_999 => "<2s",
-        2_000..=9_999 => "2-10s",
-        _ => "10s+",
-    }
-}
-
-fn mode(ps: &crate::route::PlaybackSession) -> &'static str {
-    if crate::route::is_transcoding(ps) {
-        "transcode"
-    } else {
-        "direct"
-    }
 }
 
 /// Milliseconds since this process started, monotonic.
@@ -1185,106 +857,6 @@ fn new_attempt_id() -> i64 {
         return 0; // no randomness: the funnel loses its join and nothing else
     }
     (i64::from_le_bytes(b) & i64::MAX) as i64
-}
-
-/// The video codec, from a CLOSED table.
-///
-/// `route::stream_vcodec` hands back a `String` off the wire, and `diag::schema` has no arm that
-/// could carry one — deliberately, that being the property that makes "no runtime string reaches
-/// the wire" a fact about the type. So the mapping is here: a name the table does not know becomes
-/// `other`, which is a real answer (it means the server sent something this app did not expect) and
-/// cannot become a leak.
-pub(crate) fn video_codec_class(name: &str) -> &'static str {
-    match name.to_ascii_lowercase().as_str() {
-        "h264" | "avc" | "avc1" => "h264",
-        "hevc" | "h265" | "hvc1" => "hevc",
-        "av1" => "av1",
-        "vp9" => "vp9",
-        "mpeg2video" | "mpeg2" => "mpeg2",
-        "" => "unknown",
-        _ => "other",
-    }
-}
-
-/// The audio codec, from a closed table, for [`video_codec_class`]'s reason.
-pub(crate) fn audio_codec_class(name: &str) -> &'static str {
-    match name.to_ascii_lowercase().as_str() {
-        "aac" => "aac",
-        "ac3" => "ac3",
-        "eac3" | "ac3 plus" | "ec-3" => "eac3",
-        "truehd" => "truehd",
-        "dts" | "dca" => "dts",
-        "flac" => "flac",
-        "mp3" => "mp3",
-        "opus" => "opus",
-        "" => "unknown",
-        _ => "other",
-    }
-}
-
-// ---- the buckets, which are the privacy decision --------------------------------------------
-//
-// Exact duration + exact raster + exact frame rate + codec identifies a specific file in a specific
-// library. As classes they answer every question this channel exists to answer — does 4K HEVC fail
-// more than 1080p h264, does startup get worse on big files — and identify nothing. All pure, so
-// every boundary is graded on the host.
-
-/// The four rungs the whole project already reasons in — the pipeline tier's resolution matrix, the
-/// PMS decision's own classes, LG's checklist. Named rather than measured for the reason above.
-pub(crate) fn raster_class(height: i32) -> &'static str {
-    RasterClass::from_height(height).code()
-}
-
-/// A fixed rung, so 23.976 and 24.000 are one bucket rather than two — the distinction is a
-/// fingerprint of a particular encode and answers nothing. Anything off the ladder is `other`
-/// rather than the nearest rung: a genuinely odd rate is a fact worth being able to see.
-pub(crate) fn fps_rung(fps: f64) -> &'static str {
-    const RUNGS: [(f64, &str); 6] = [
-        (24.0, "24"),
-        (25.0, "25"),
-        (30.0, "30"),
-        (50.0, "50"),
-        (60.0, "60"),
-        (100.0, "100"),
-    ];
-    if !(fps > 0.0) {
-        return "unknown";
-    }
-    // 1.5% either side, which separates every rung above and still catches both spellings of each
-    // (23.976/24, 29.97/30, 59.94/60 — the 1001-denominator forms this project's own fixtures use).
-    RUNGS
-        .iter()
-        .find(|(r, _)| (fps - r).abs() / r <= 0.015)
-        .map(|(_, n)| *n)
-        .unwrap_or("other")
-}
-
-/// How long the viewer waited for a picture. The boundaries are where the EXPERIENCE changes, not
-/// round numbers: under a second reads as instant, three seconds is where a person starts to wonder,
-/// ten is where they press something.
-pub(crate) fn startup_class(ms: i64) -> &'static str {
-    match ms {
-        m if m < 0 => "unknown",
-        m if m < 1_000 => "<1s",
-        m if m < 3_000 => "1-3s",
-        m if m < 10_000 => "3-10s",
-        _ => "10s+",
-    }
-}
-
-/// How much of it was watched, as the four answers anyone asks of a completion rate. Not a
-/// percentage: a percentage plus a duration bucket is a duration, which is the fingerprint the
-/// buckets exist to avoid.
-pub(crate) fn watched_class(position_ns: i64, duration_ns: i64) -> &'static str {
-    if duration_ns <= 0 || position_ns < 0 {
-        return "unknown";
-    }
-    match (position_ns as f64) / (duration_ns as f64) {
-        f if f < 0.05 => "abandoned",
-        f if f < 0.5 => "some",
-        f if f < 0.9 => "most",
-        _ => "finished",
-    }
 }
 
 #[cfg(test)]
@@ -1377,14 +949,6 @@ mod tests {
 
     #[test]
     fn quality_is_bounded_and_seek_priming_is_not_a_rebuffer() {
-        assert_eq!(rebuffer_count_class(0), "0");
-        assert_eq!(rebuffer_count_class(1), "1");
-        assert_eq!(rebuffer_count_class(3), "2-3");
-        assert_eq!(rebuffer_count_class(u8::MAX), "4+");
-        assert_eq!(rebuffer_time_class(0), "none");
-        assert_eq!(rebuffer_time_class(1_999), "<2s");
-        assert_eq!(rebuffer_time_class(2_000), "2-10s");
-        assert_eq!(rebuffer_time_class(10_000), "10s+");
         assert!(starts_rebuffer(S::Playing, S::Buffering, true));
         assert!(!starts_rebuffer(S::Seeking, S::Buffering, true));
         assert!(!starts_rebuffer(S::Playing, S::Buffering, false));
@@ -1486,7 +1050,7 @@ mod tests {
         let snapshot = trace.finish(
             (ERROR_TRACE_MAX as i64 + 9) * 1_000,
             TraceEvent::Failed {
-                kind: crate::player::FailureKind::OriginalRollback,
+                kind: crate::player::FailureKind::MediaSource,
             },
         );
         assert_eq!(trace.steps.len(), ERROR_TRACE_MAX);
@@ -1497,7 +1061,7 @@ mod tests {
         assert!(matches!(
             snapshot.last().map(|s| s.event),
             Some(TraceEvent::Failed {
-                kind: crate::player::FailureKind::OriginalRollback,
+                kind: crate::player::FailureKind::MediaSource,
             })
         ));
         assert!(
@@ -1611,149 +1175,6 @@ mod tests {
         ] {
             assert_eq!(RasterClass::from_height(height), want, "height {height}");
         }
-        for (ms, want) in [
-            (-1, BufferClass::Unknown),
-            (0, BufferClass::Empty),
-            (1, BufferClass::Under3s),
-            (2_999, BufferClass::Under3s),
-            (3_000, BufferClass::S3To10),
-            (9_999, BufferClass::S3To10),
-            (10_000, BufferClass::S10To30),
-            (29_999, BufferClass::S10To30),
-            (30_000, BufferClass::Over30s),
-        ] {
-            assert_eq!(BufferClass::from_ms(ms), want, "buffer {ms}");
-        }
-        for (stage, want) in [
-            (0, PipelineClass::Loading),
-            (1, PipelineClass::Playing),
-            (2, PipelineClass::Bound),
-            (3, PipelineClass::Streaming),
-            (4, PipelineClass::Loading),
-        ] {
-            assert_eq!(PipelineClass::from_stage(stage), want, "stage {stage}");
-        }
-        for (status, want) in [
-            (0, HttpClass::None),
-            (199, HttpClass::Other),
-            (200, HttpClass::Success),
-            (299, HttpClass::Success),
-            (300, HttpClass::Other),
-            (399, HttpClass::Other),
-            (400, HttpClass::ClientError),
-            (499, HttpClass::ClientError),
-            (500, HttpClass::ServerError),
-            (599, HttpClass::ServerError),
-            (600, HttpClass::Other),
-        ] {
-            assert_eq!(HttpClass::from_status(status), want, "HTTP {status}");
-        }
-    }
-
-    /// **A codec name the table does not know becomes `other`, never itself.** The wire vocabulary
-    /// is closed by construction — `diag::schema` has no arm that can carry a runtime string — and
-    /// this is the mapping that keeps it that way for a field whose source IS one.
-    #[test]
-    fn an_unknown_codec_name_cannot_travel_as_itself() {
-        assert_eq!(video_codec_class("h264"), "h264");
-        assert_eq!(
-            video_codec_class("HEVC"),
-            "hevc",
-            "the server's casing varies"
-        );
-        assert_eq!(
-            audio_codec_class("AC3 PLUS"),
-            "eac3",
-            "the Load payload's own spelling"
-        );
-        for odd in ["cinepak", "../../etc/passwd", "Dune.mkv", "h264 (Main)"] {
-            assert_eq!(video_codec_class(odd), "other", "{odd} travelled as itself");
-        }
-        assert_eq!(video_codec_class(""), "unknown");
-        assert_eq!(audio_codec_class(""), "unknown");
-    }
-
-    /// The rungs, and both spellings of each. `pipe_h264_1080p5994` is the project's own fixture
-    /// that reaches `fps_rational`'s 1001-denominator branch and measures `60000/1001`; a bucket
-    /// that put it beside 60 in one build and beside `other` in the next would make a year of
-    /// comparisons meaningless.
-    #[test]
-    fn both_spellings_of_a_frame_rate_land_on_one_rung() {
-        for (fps, want) in [
-            (24.0, "24"),
-            (24000.0 / 1001.0, "24"),
-            (25.0, "25"),
-            (30.0, "30"),
-            (30000.0 / 1001.0, "30"),
-            (50.0, "50"),
-            (60.0, "60"),
-            (60000.0 / 1001.0, "60"),
-        ] {
-            assert_eq!(fps_rung(fps), want, "{fps}");
-        }
-        // Off the ladder stays off it — a genuinely odd rate is worth being able to see.
-        assert_eq!(fps_rung(48.0), "other");
-        assert_eq!(fps_rung(23.0), "other");
-        assert_eq!(fps_rung(0.0), "unknown");
-        assert_eq!(fps_rung(f64::NAN), "unknown");
-    }
-
-    /// The raster classes are the ones the rest of the project already reasons in, and the
-    /// boundaries are inclusive at the top of each: 1080 is FHD, 1081 is not.
-    #[test]
-    fn the_raster_classes_are_the_projects_own_rungs() {
-        for (h, want) in [
-            (480, "sd"),
-            (576, "sd"),
-            (720, "hd"),
-            (1080, "fhd"),
-            (1081, "uhd"),
-            (2160, "uhd"),
-        ] {
-            assert_eq!(raster_class(h), want, "{h}");
-        }
-        assert_eq!(raster_class(0), "unknown");
-        assert_eq!(raster_class(-1), "unknown");
-    }
-
-    /// **No bucket ever reports an exact value**, which is the whole reason they exist: raster plus
-    /// frame rate plus duration plus codec identifies a specific file in a specific library.
-    #[test]
-    fn a_bucket_never_carries_the_number_it_was_built_from() {
-        for h in [479, 481, 719, 1079, 2160, 4320] {
-            assert!(
-                !raster_class(h).contains(char::is_numeric),
-                "{h} leaked its height"
-            );
-        }
-        assert!(!watched_class(3_600_000_000_000, 7_200_000_000_000).contains(char::is_numeric));
-    }
-
-    /// The completion classes, including the two ends that are the point of the measure.
-    #[test]
-    fn the_watched_classes_separate_a_bounce_from_a_finish() {
-        let hour = 3_600_000_000_000i64;
-        assert_eq!(watched_class(0, hour), "abandoned");
-        assert_eq!(watched_class(hour / 100, hour), "abandoned");
-        assert_eq!(watched_class(hour / 4, hour), "some");
-        assert_eq!(watched_class(hour * 3 / 4, hour), "most");
-        assert_eq!(watched_class(hour, hour), "finished");
-        // A live stream, or metadata that never arrived — not a completion of anything.
-        assert_eq!(watched_class(hour, 0), "unknown");
-        assert_eq!(watched_class(-1, hour), "unknown");
-    }
-
-    /// The startup boundaries are where the EXPERIENCE changes rather than round numbers, and a
-    /// negative interval — a clock that went backwards, or an `ended` with no `requested` — is
-    /// `unknown` rather than the fastest bucket, which would silently improve the metric.
-    #[test]
-    fn a_backwards_clock_is_unknown_and_not_the_fastest_bucket() {
-        assert_eq!(startup_class(0), "<1s");
-        assert_eq!(startup_class(999), "<1s");
-        assert_eq!(startup_class(1_000), "1-3s");
-        assert_eq!(startup_class(9_999), "3-10s");
-        assert_eq!(startup_class(10_000), "10s+");
-        assert_eq!(startup_class(-1), "unknown");
     }
 
     /// **No `fetch_update` may come back, and only a source grep can say so here.**

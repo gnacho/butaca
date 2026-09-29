@@ -59,7 +59,6 @@ pub(crate) struct DevFlags {
     pub(crate) legal_doc: bool,
     pub(crate) alert_boot: bool,
     pub(crate) account_osc: bool,
-    pub(crate) consent_osc: bool,
     pub(crate) onboard_osc: bool,
     pub(crate) nav_osc: bool,
     pub(crate) nav_osc_rk: String,
@@ -93,8 +92,6 @@ pub(crate) struct Scenarios {
     pub(crate) alert_step: u8,
     pub(crate) account_osc_last: u32,
     pub(crate) account_osc_down: bool,
-    pub(crate) consent_osc_last: u32,
-    pub(crate) consent_osc_down: bool,
     pub(crate) onboard_osc_last: u32,
     pub(crate) onboard_osc_right: bool,
     pub(crate) nav_osc_last: u32,
@@ -217,9 +214,9 @@ pub(crate) fn pickuser_index() -> Option<usize> {
 /// for the read-out glyph work's own visual verification (spec "1A"), with NO network call and no
 /// account touched: paired with `plxnative-login` (which already forces `BootTo::Login` with no
 /// session), `login_worker_with_output` reads this ONCE at the top of the worker thread and, for
-/// every case named here, skips straight to `auth::output_failed` with a canned caption and
-/// [`crate::telemetry::incident::IncidentContext`] instead of minting a PIN or discovering
-/// anything — the exact same terminal path a real failure reaches, so `LoginScreen`'s `Phase::
+/// every case named here, skips straight to `auth::output_failed` with a canned caption instead
+/// of minting a PIN or discovering
+/// anything — the exact same terminal path a real failure reaches, so `LoginScreen`'s `Phase:::
 /// Error` draw, `readout_kind` and `readout_glyph` are exercised UNMODIFIED. Every value below is
 /// the one `auth::discovery_failure`'s table would have built for the same cause; see that
 /// function and `telemetry::incident::IncidentContext::readout_glyph`'s doc for why each case maps
@@ -263,73 +260,28 @@ pub(crate) fn readout_case() -> Option<ReadoutCase> {
 }
 
 impl ReadoutCase {
-    /// The canned caption + [`IncidentContext`](crate::telemetry::incident::IncidentContext)
-    /// `login_worker_with_output` feeds `output_failed` in place of the real network calls — see
-    /// [`readout_case`]'s doc.
-    pub(crate) fn canned_login_failure(
-        self,
-    ) -> (std::borrow::Cow<'static, str>, crate::telemetry::incident::IncidentContext) {
+    /// The canned caption `login_worker_with_output` feeds `output_failed` in place of the real
+    /// network calls — see [`readout_case`]'s doc.
+    pub(crate) fn canned_login_failure(self) -> std::borrow::Cow<'static, str> {
         use crate::i18n::msg;
-        use crate::telemetry::incident::{
-            DiscoveryClass, DiscoveryEvidence, DiscoveryTarget, DiscoveryTrigger, IncidentContext,
-            IncidentKind, LinkClass,
-        };
-        fn ctx(kind: IncidentKind) -> IncidentContext {
-            IncidentContext::new(kind, None)
-        }
-        fn plextv(target: DiscoveryTarget) -> DiscoveryEvidence {
-            DiscoveryEvidence { trigger: DiscoveryTrigger::Login, target: Some(target) }
-        }
         match self {
-            Self::PinCreate => (msg::browse_auth_plex_unreachable().into(), ctx(IncidentKind::PinCreate)),
-            Self::PinExpired => (msg::browse_auth_timeout().into(), ctx(IncidentKind::PinExpired)),
-            Self::Authorization => (msg::browse_auth_signin_refused().into(), ctx(IncidentKind::Authorization)),
-            Self::DiscoveryNoServers => (
-                msg::browse_auth_no_servers().into(),
-                ctx(IncidentKind::Discovery(DiscoveryClass::NoServers)),
-            ),
-            Self::DiscoveryRefused => (
-                msg::browse_auth_refused().into(),
-                ctx(IncidentKind::Discovery(DiscoveryClass::Refused)),
-            ),
-            Self::DiscoveryServersSilent => {
-                let mut c = ctx(IncidentKind::Discovery(DiscoveryClass::Silent));
-                c.discovery = Some(plextv(DiscoveryTarget::Servers));
-                (msg::browse_auth_servers_unreachable().into(), c)
-            }
-            Self::DiscoveryPlexTvDns => {
-                let mut c = ctx(IncidentKind::Discovery(DiscoveryClass::Silent));
-                c.link = LinkClass::Dns;
-                c.discovery = Some(plextv(DiscoveryTarget::PlexTv));
-                (msg::browse_auth_plex_dns_retry(1).into(), c)
-            }
-            Self::DiscoveryPlexTvTls => {
-                let mut c = ctx(IncidentKind::Discovery(DiscoveryClass::Silent));
-                c.link = LinkClass::Tls;
-                c.discovery = Some(plextv(DiscoveryTarget::PlexTv));
-                (msg::browse_auth_plex_tls().into(), c)
-            }
-            Self::DiscoveryPlexTvAnswered => {
-                let mut c = ctx(IncidentKind::Discovery(DiscoveryClass::Silent));
-                c.link = LinkClass::Answered5xx;
-                c.discovery = Some(plextv(DiscoveryTarget::PlexTv));
-                (msg::browse_auth_plex_unavailable().into(), c)
-            }
-            Self::DiscoveryPlexTvOther => {
-                let mut c = ctx(IncidentKind::Discovery(DiscoveryClass::Silent));
-                c.discovery = Some(plextv(DiscoveryTarget::PlexTv));
-                (msg::browse_auth_plex_connect_retry(1).into(), c)
-            }
-            Self::DiscoveryInsecureOnly => (
-                msg::browse_auth_insecure().into(),
-                ctx(IncidentKind::Discovery(DiscoveryClass::InsecureOnly)),
-            ),
+            Self::PinCreate => msg::browse_auth_plex_unreachable().into(),
+            Self::PinExpired => msg::browse_auth_timeout().into(),
+            Self::Authorization => msg::browse_auth_signin_refused().into(),
+            Self::DiscoveryNoServers => msg::browse_auth_no_servers().into(),
+            Self::DiscoveryRefused => msg::browse_auth_refused().into(),
+            Self::DiscoveryServersSilent => msg::browse_auth_servers_unreachable().into(),
+            Self::DiscoveryPlexTvDns => msg::browse_auth_plex_dns_retry(1).into(),
+            Self::DiscoveryPlexTvTls => msg::browse_auth_plex_tls().into(),
+            Self::DiscoveryPlexTvAnswered => msg::browse_auth_plex_unavailable().into(),
+            Self::DiscoveryPlexTvOther => msg::browse_auth_plex_connect_retry(1).into(),
+            Self::DiscoveryInsecureOnly => msg::browse_auth_insecure().into(),
             // The real "Couldn't save your sign-in" warning arrives through a different path
             // (`persistence_warning`, drawn by `LoginScreen::draw_warning`) — this case takes the
             // ordinary `Phase::Error` route instead, which draws a different caption ("Couldn't
             // sign in") but the SAME page-placed `Failed` layout and the SAME `KeyBadgeAlert`
             // glyph, which is the only thing this trigger exists to show.
-            Self::SaveFailed => (msg::browse_login_failed().into(), ctx(IncidentKind::SaveFailed)),
+            Self::SaveFailed => msg::browse_login_failed().into(),
         }
     }
 }
@@ -546,10 +498,6 @@ pub(crate) fn alert_armed() -> bool {
 /// `/tmp/plxnative-acctosc`.
 pub(crate) fn acctosc_armed() -> bool {
     crate::dev::flag("acctosc")
-}
-/// `/tmp/plxnative-consentosc`.
-pub(crate) fn consentosc_armed() -> bool {
-    crate::dev::flag("consentosc")
 }
 /// `/tmp/plxnative-onboardosc`.
 pub(crate) fn onboardosc_armed() -> bool {
@@ -1070,7 +1018,6 @@ fn settings_boot_arm(app: &mut App, fr: &mut Frame) {
             let page = match app.scenarios.dev.settings_boot.as_deref().map(str::trim).unwrap_or("root") {
                 "" | "root" => crate::screens::family::SettingsPage::Root,
                 "home" => crate::screens::family::SettingsPage::Favourites,
-                "privacy" => crate::screens::family::SettingsPage::Privacy,
                 "legal" => crate::screens::family::SettingsPage::Legal,
                 "language" => crate::screens::family::SettingsPage::Language,
                 "contribute" => crate::screens::family::SettingsPage::Contribute,
@@ -2409,20 +2356,6 @@ pub(crate) fn settings_osc_tick(app: &mut App, now: u32, dt: f32) {
     }
 }
 
-/// `/tmp/plxnative-consentosc` — sweep the first-run consent question's focus.
-pub(crate) fn consent_osc_tick(app: &mut App, now: u32, dt: f32) {
-    if app.scenarios.dev.consent_osc && crate::app::bridge::consent_up(&app.pages) {
-        crate::ui::idle::invalidate();
-        if now.wrapping_sub(app.scenarios.consent_osc_last) > 520 {
-            app.scenarios.consent_osc_last = now;
-            let key = if app.scenarios.consent_osc_down { Key::Down } else { Key::Up };
-            app.scenarios.consent_osc_down = !app.scenarios.consent_osc_down;
-            let tick = Tick { ms: now, dt_us: (dt * 1_000_000.0) as u32 };
-            app.inputs.extend(crate::app::bridge::script_key(key, tick));
-        }
-    }
-}
-
 /// `/tmp/plxnative-onboardosc` — sweep the first-run sources editor's focus.
 pub(crate) fn onboard_osc_tick(app: &mut App, now: u32, dt: f32) {
     if app.scenarios.dev.onboard_osc && matches!(app.route(), AppArg::Onboard) {
@@ -2450,13 +2383,6 @@ pub(crate) fn detail_osc_tick(app: &mut App, now: u32) {
 // it is genuinely production code with one dev-only branch, or is the recorder/replay path this
 // phase's instructions say to leave alone.
 // =================================================================================================
-
-/// `/tmp/plxnative-consent[=<crash|product>]` — forces either first-run purpose even on an
-/// automated boot. Read by `app::input::maybe_ask_consent`, which stays production code with this
-/// one dev-only branch: presenting the real consent screen is not itself a dev arm.
-pub(crate) fn consent_override() -> Option<String> {
-    crate::dev::read("consent")
-}
 
 /// `/tmp/plxnative-rec` — read by controlled-bootstrap preflight. The recorder/replay MECHANISM
 /// stays in `app/recorder.rs` (this phase's instructions: it is not a scenario), but the raw
@@ -2557,51 +2483,4 @@ pub(crate) fn signin_trouble_resources()
             Some(Err(Err(synthetic_dns_failure()))),
         _ => None,
     }
-}
-
-/// `/tmp/plxnative-consentstate=unset|yes4|yes7|no` — boot with this consent record instead of
-/// the stored one: never asked, error reports allowed at scope 4 (before the onboarding report
-/// existed) or 7, or declined. Installed through `consent::install` like a real load, and written
-/// nowhere. `None` without the trigger or with an unknown value (which is logged). Unused under
-/// test, where `telemetry::capture_initial` never consults it.
-#[cfg_attr(test, allow(dead_code))]
-pub(crate) fn consent_state_override() -> Option<crate::telemetry::consent::Consent> {
-    use crate::telemetry::consent::{Consent, ONBOARDING_REPORT_SCOPE, POLICY_VERSION};
-    let spec = crate::dev::read("consentstate")?;
-    // An answered record as `consent::apply` would have written it: errors on at `scope` with a
-    // freshly minted Crash report ID, or errors off with nothing kept.
-    let answered = |errors: bool, scope: u32| Consent {
-        asked_version: POLICY_VERSION,
-        errors,
-        errors_scope: if errors { scope } else { 0 },
-        errors_id: errors.then(crate::telemetry::mint_id).flatten(),
-        ..Consent::default()
-    };
-    let consent = match spec.as_str() {
-        "unset" => Consent::default(),
-        "yes4" => answered(true, 4),
-        "yes7" => answered(true, ONBOARDING_REPORT_SCOPE),
-        "no" => answered(false, 0),
-        other => {
-            crate::log(&format!("dev: consentstate — unknown value {other:?}, ignored"));
-            return None;
-        }
-    };
-    crate::log(&format!("dev: consentstate={spec} — booting with that consent record"));
-    Some(consent)
-}
-
-/// Is a harness driving this boot? The onboarding offer is a modal question, and a scripted run
-/// (a test identity, a forced profile pick, a recording) must not stop on one. **Narrow on
-/// purpose**, where `dev::any_trigger_present` is broad: every other trigger — `plxnative-login`,
-/// `-nowan`, `-signinfail`, the consent state — is how the offer is PUT on screen for a capture,
-/// and a gate that saw them would hide the thing being captured. Read once.
-pub(crate) fn harness_driven() -> bool {
-    if cfg!(test) { return false; }
-    static DRIVEN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *DRIVEN.get_or_init(|| {
-        crate::dev::read("token").is_some_and(|t| !t.is_empty())
-            || crate::dev::read("pickuser").is_some()
-            || matches!(rec_trigger(), Ok(Some(_)))
-    })
 }

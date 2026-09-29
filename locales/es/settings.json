@@ -67,7 +67,7 @@
   "settings.consent.analytics_id": "ID de análisis",
   "settings.consent.crash_id": "ID de informe de fallos",
   "settings.consent.delete": "Borrar todos los datos locales",
-  "settings.consent.delete_scope": "Esto cierra la sesión y elimina los datos de PlxNative guardados en este televisor. No elimina datos ya enviados a Plex, tus Plex Media Servers, Sentry o PostHog.",
+  "settings.consent.delete_scope": "Cierra la sesión del televisor y elimina cada inicio de sesión, perfil, servidor y ajuste guardados. Las posiciones de reproducción en los servidores no se tocan.",
   "settings.consent.settings_copy": "Controla los informes opcionales, consulta qué se puede compartir y gestiona los datos guardados por PlxNative en este televisor.",
   "settings.consent.reporting": "Informes",
   "settings.consent.information": "Información",

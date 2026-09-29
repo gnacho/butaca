@@ -485,7 +485,8 @@ mod tests {
         let locale = crate::i18n::LocaleContext::resolve(crate::i18n::Preference::Be, None, None, None, None);
         let question = crate::i18n::msg::settings_consent_delete_question_in(&locale);
         let body = crate::i18n::msg::settings_consent_delete_scope_in(&locale);
-        assert!(body.contains("серверы Plex") && body.contains("Sentry") && body.contains("PostHog"));
+        // The fork's Belarusian scope names no Sentry or PostHog: nothing is ever sent.
+        assert!(!body.contains("Sentry") && !body.contains("PostHog"));
         let question_view = DecisionAlert::question_view(question).with_measure(&measure);
         let body_view = DecisionAlert::body_view(body).with_measure(&measure);
         assert!(!question_view.truncates(BODY_W));

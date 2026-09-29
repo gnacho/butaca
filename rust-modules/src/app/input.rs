@@ -902,51 +902,6 @@ pub(crate) fn enter_profiles_from_onboard(pages: &mut crate::ui::dispatch::Dispa
     super::bridge::nav_root_if_unsettled(pages, AppArg::Profiles);
 }
 
-/// Put the telemetry question on screen, if this boot is one that should see it.
-///
-/// **Asked as soon as there is an AUTHORIZED ACCOUNT, and before the profile picker.**
-///
-/// The decision belongs to the SIGN-IN — `telemetry_candidates()` is one file with no profile
-/// key, shared by every profile on the account, and `auth::forget_account` unlinks it when the
-/// account signs out — so the person who signed the television in is the person who should answer
-/// it, and the next account to sign in is asked afresh. Asking after the picker (which is what
-/// shipped until 2026-09-02) put a data-protection question to whichever household member
-/// happened to be selected, up to and including a managed child profile, and dressed an
-/// account-wide answer as a personal setting.
-///
-/// It is still not asked at BOOT: a fresh install boots to the QR screen with nothing to consent
-/// about yet, and asking before somebody has managed to sign in is asking while they have nothing
-/// to lose by walking away.
-///
-/// Cheap and idempotent: `should_show` is false once a decision has been recorded, and false on any
-/// automated boot, so every call site can simply ask. Nothing is stored by asking — and that is a
-/// property of the SURFACE, not of this function: presenting `AppArg::FirstRunConsent` mounts a
-/// `ConsentPage` holding a draft, and only its two answer pills reach `ConsentCmd::Record`.
-///
-/// Phase 5b: the screen is the tree's, so this presents rather than opens. `bridge::open_*` is
-/// itself idempotent while the surface is up (any phase), which is what lets the three per-frame
-/// routing call sites go on simply asking.
-pub(crate) fn maybe_ask_consent(pages: &mut crate::ui::dispatch::Dispatcher<super::bridge::AppHost>) {
-    let c = crate::telemetry::consent::current().unwrap_or_default();
-    // dev: /tmp/plxnative-consent[=<crash|product>] forces either first-run purpose even on an
-    // automated boot. This screen is suppressed BY the presence of any trigger, so without an
-    // override it cannot be reached headlessly at all. Selecting Product changes display state
-    // only; no answer is stored by a harness boot — the stage byte is where the surface STARTS,
-    // and reaching stage 1 that way skips the crash question rather than answering it.
-    if let Some(target) = crate::dev::scenarios::consent_override() {
-        // `screens::consent`'s `STAGE_PRODUCT`, spelled here because it is that module's private
-        // encoding of `SettingsPage::ConsentStage` and this is its only outside caller. The
-        // companion bit (`ERRORS_SHARED`, 0x10) is deliberately NOT set: a dev boot has answered
-        // nothing, so the product stage opens with the crash answer at its default.
-        let stage = u8::from(target.trim() == "product");
-        super::bridge::open_first_run_consent_at(pages, stage);
-        return;
-    }
-    if crate::screens::consent::should_show(&c, crate::dev::any_trigger_present()) {
-        super::bridge::open_first_run_consent(pages);
-    }
-}
-
 /// Leave the first-run question for Home — `LoopReq::OnboardDone`.
 ///
 /// The trail is RESET rather than pushed to: this route is the last of the onboarding gates and
@@ -1296,9 +1251,6 @@ pub(crate) unsafe fn key_ok(
             let np = !paused();
             if np {
                 if set_transport_paused(pa, true) {
-                    crate::diag::event(crate::diag::schema::DiagEvent::FeatureUsed {
-                        feature: crate::diag::schema::Feature::Pause,
-                    });
                 }
             } else {
                 set_transport_paused(pa, false);

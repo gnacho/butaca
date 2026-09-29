@@ -1205,8 +1205,10 @@ mod tests {
             .split_once("/// The ten-line public skeleton")
             .expect("end of enter_application")
             .0;
+        // The fork's pre_boot_diagnostics returns no telemetry guard, so the call is a plain
+        // statement at the same point upstream's `.then(...)` combinator occupies.
         let identity = body
-            .find(".then(pre_boot_diagnostics)")
+            .find("pre_boot_diagnostics();")
             .expect("identity preamble");
         let diagnostics = body
             .find("crate::storage::diagnostics::start()")

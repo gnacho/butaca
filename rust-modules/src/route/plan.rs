@@ -633,12 +633,8 @@ pub(super) fn enhancement_fallback(
 /// Log + diag the server's refusal of an enhanced ask, from whichever call site first learns of
 /// it. `context` is the site-specific tail after the shared "enhancement: refused/ignored by
 /// server" opening, so every site keeps the exact log sentence it always had.
-pub(super) fn note_enhancement_refused(context: &str, audio: crate::plex::AudioEnhancements) {
+pub(super) fn note_enhancement_refused(context: &str, _audio: crate::plex::AudioEnhancements) {
     crate::player::log(&format!("enhancement: refused/ignored by server{context}"));
-    crate::diag::event(crate::diag::schema::DiagEvent::EnhancementRefused {
-        boost_dialog: audio.boost_dialog,
-        normalize_loudness: audio.normalize_loudness,
-    });
 }
 
 /// The audio lane's own stream decision off a `/decision` body (`copy`/`transcode`), if it says.

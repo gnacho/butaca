@@ -84,7 +84,10 @@ pub(crate) use client::ArtFetch;
 pub(crate) use client::JsonDeadlineOutcome;
 // The one link/IP ⇄ u8 encode/decode pair — shared by `Client`'s own atomics and
 // `player::report`'s packed attempt snapshot, so the two never keep a private copy each.
-pub(crate) use client::{decode_ip, decode_link, encode_ip, encode_link};
+// The decode half is now test-only (`player::report::attempt_connection_snapshot_for_test`).
+pub(crate) use client::{encode_ip, encode_link};
+#[cfg(test)]
+pub(crate) use client::{decode_ip, decode_link};
 #[allow(unused_imports)]
 pub use client::{Client, IpVersion, StreamUrl};
 // WHERE a server is, as one value. `Origin` is what `register_origin`/`install` take and what a

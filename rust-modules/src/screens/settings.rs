@@ -58,8 +58,6 @@ use super::registry::{word, AppFx, DirectoryLike};
 pub(crate) enum Family {
     /// Settings, over a live page: scrim + ambient ground sampled off the host.
     Settings,
-    /// The first-run consent question: a route surface of its own on the hero-keyed ground.
-    FirstRunConsent,
 }
 
 /// The `Family::Settings` scrim's ink alpha: the surface's own appear (`local_alpha`, the
@@ -135,7 +133,7 @@ impl RouteSurface {
         id: InstanceId,
         kind: Family,
         root: SettingsPage,
-        hubs: crate::pms::HubsView<'_>,
+        _hubs: crate::pms::HubsView<'_>,
     ) -> Self {
         let mut s = Self {
             entry,
@@ -144,7 +142,7 @@ impl RouteSurface {
             inner: NavStack::new(Box::new(Immediate)),
             ids: Minter::default(),
             push: Push::new(),
-            ground: if kind == Family::FirstRunConsent { super::family::pre_home_ground(hubs) } else { RouteGround::new() },
+            ground: RouteGround::new(),
             ground_ready: false,
             remembered: Vec::new(),
         };
@@ -432,7 +430,7 @@ fn mount_page(
     entry: EntryId,
     arg: SettingsPage,
     cx: &Cx<'_, InnerHost>,
-    fx: &mut Effects<'_, InnerHost>,
+    _fx: &mut Effects<'_, InnerHost>,
 ) -> Box<dyn Screen<InnerHost>> {
     match arg {
         SettingsPage::Root => Box::new(RootPage::new(entry, cx.views)),
@@ -443,11 +441,6 @@ fn mount_page(
         SettingsPage::Legal => Box::new(super::legal::LegalIndex::new(entry)),
         SettingsPage::About => Box::new(super::legal::DocumentPage::about(entry)),
         SettingsPage::Document(i) => Box::new(super::legal::DocumentPage::legal(entry, i)),
-        SettingsPage::Privacy => Box::new(super::consent::ConsentPage::settings(entry, cx, fx)),
-        SettingsPage::Preview(i) => Box::new(super::consent::PreviewPage::new(entry, i)),
-        SettingsPage::ConsentStage(i) => {
-            Box::new(super::consent::ConsentPage::first_run(entry, i, cx, fx))
-        }
         SettingsPage::Favourites => Box::new(super::onboard::OnboardScreen::settings(entry, cx.views)),
     }
 }
@@ -551,7 +544,6 @@ impl LogicalState for RouteSurface {
     fn probe(&self, out: &mut String) {
         out.push_str(match self.kind {
             Family::Settings => "settings",
-            Family::FirstRunConsent => "consent",
         });
         // one segment per page, bottom of the stack first, so a divergence report reads as the
         // path the surface is standing on rather than as a single opaque word
@@ -825,14 +817,10 @@ impl<H: DirectoryLike> Screen<H> for RouteSurface {
                 root.rect(Rect::FULL, 0.0, dim, dim, 0.0);
                 crate::ui::profile::phase("st.ground", || self.ground.draw_host(root.alpha(a)));
             }
-            Family::FirstRunConsent => {
-                self.ground.draw_home(root);
-            }
         }
         self.ground_ready = a >= 0.995;
         let entrance = match self.kind {
             Family::Settings => root.alpha(settings_entrance_alpha(a, f.nav_page_alpha)),
-            Family::FirstRunConsent => root.alpha(a).translate(Rect::FULL.w * (1.0 - a), 0.0),
         };
         self.draw_pages(f, entrance);
     }
@@ -930,10 +918,10 @@ impl Mounter<InnerHost> for RouteSurface {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Action {
     Language,
+    DeleteAllLocalData,
     Playback,
     AudioSubtitles,
     Favourites,
-    Privacy,
     Legal,
     AutoSignIn,
     TrailerAutoplay,
@@ -1057,8 +1045,9 @@ impl RootPage {
         sections.push(
             Section::new(crate::i18n::msg::settings_privacy_section())
                 .row(
-                    Row::new(crate::i18n::msg::settings_privacy_title())
-                        .detail(crate::i18n::msg::settings_privacy_detail())
+                    Row::new(crate::i18n::msg::settings_consent_delete())
+                        .detail(crate::i18n::msg::settings_consent_delete_detail())
+                        .destructive(true)
                         .chevron(true),
                 )
                 .row(
@@ -1067,7 +1056,7 @@ impl RootPage {
                         .chevron(true),
                 ),
         );
-        actions.extend([Action::Privacy, Action::Legal]);
+        actions.extend([Action::DeleteAllLocalData, Action::Legal]);
         let mut system = Section::new(crate::i18n::msg::settings_system_section());
         // A one-person account already skips the picker; the switch only changes a multi-user boot.
         if signed_in && multi_user {
@@ -1224,9 +1213,11 @@ impl RootPage {
             Action::Playback => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Playback))),
             Action::AudioSubtitles => fx.push(Fx::Nav(NavOp::Push(SettingsPage::AudioSubtitles))),
             Action::Favourites => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Favourites))),
-            Action::Privacy => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Privacy))),
             Action::Legal => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Legal))),
             Action::About => fx.push(Fx::Nav(NavOp::Push(SettingsPage::About))),
+            Action::DeleteAllLocalData => {
+                self.alert.open_delete();
+            }
             Action::Language => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Language))),
         }
     }
@@ -1235,15 +1226,21 @@ impl RootPage {
 impl RootPage {
     /// The question was answered: send the one command it became (a *Connect* shows the switch
     /// on at once; Session records it and re-finds the server), and hand focus back to the table.
-    fn alert_answer(&mut self, cmd: Option<crate::auth::SessionCmd>, directory: crate::stores::browse::DirectoryView<'_>,
+    fn alert_answer(&mut self, cmd: Option<crate::auth::SessionCmd>,
+        directory: crate::stores::browse::DirectoryView<'_>,
         fx: &mut Effects<'_, InnerHost>) {
         if let Some(cmd) = cmd {
-            if let crate::auth::SessionCmd::AnswerPlaintext { machine_id, choice, .. } = &cmd {
-                if choice.allows() {
-                    self.pending_plaintext = Some((machine_id.clone(), true));
+            if matches!(cmd, crate::auth::SessionCmd::EraseLocal) {
+                fx.push(Fx::App(super::registry::AppFx::Loop(
+                    super::registry::LoopReq::DeleteAllLocalData)));
+            } else {
+                if let crate::auth::SessionCmd::AnswerPlaintext { machine_id, choice, .. } = &cmd {
+                    if choice.allows() {
+                        self.pending_plaintext = Some((machine_id.clone(), true));
+                    }
                 }
+                fx.push(Fx::App(super::registry::AppFx::Session(cmd)));
             }
-            fx.push(Fx::App(super::registry::AppFx::Session(cmd)));
         }
         plaintext_question::enter_group(fx, MachineId::Instance(InstanceId(0)), GroupId(0));
         self.rebuild(self.table.sel, directory);

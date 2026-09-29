@@ -428,3 +428,33 @@ pub(crate) mod msg {
 mod catalog_tests;
 #[cfg(test)]
 mod tests;
+
+// ---- TEMPORARY SYNC SHIM - dies in phase S8 when call sites move to msg:: keys ----
+// English passthrough for the pre-catalog i18n API (`crate::i18n::t` / `tc` / `tcstring` /
+// `tcstr` / `TC_MAX`) that the 0.7 fork-delta files still call. The catalog system
+// (`crate::i18n::msg::*`) is the real translation layer; these items exist only so the
+// port-checked-out files compile while their call sites migrate. `t` is identity, and the
+// C-string bridges copy the English literal into the caller's buffer exactly as the old
+// runtime did before the catalog landed.
+pub(crate) fn t(s: &'static str) -> &'static str {
+    s
+}
+
+#[allow(dead_code)]
+pub(crate) fn tc<'a>(s: &'static str, buf: &'a mut [u8; TC_MAX]) -> &'a [u8] {
+    let n = s.len().min(TC_MAX - 1);
+    buf[..n].copy_from_slice(&s.as_bytes()[..n]);
+    buf[n] = 0;
+    &buf[..n + 1]
+}
+
+#[allow(dead_code)]
+pub(crate) fn tcstring(s: &'static str) -> std::ffi::CString {
+    std::ffi::CString::new(s).unwrap_or_default()
+}
+
+pub(crate) fn tcstr<'a>(s: &'static str, buf: &'a mut [u8; TC_MAX]) -> &'a std::ffi::CStr {
+    std::ffi::CStr::from_bytes_with_nul(tc(s, buf)).unwrap_or(c"")
+}
+
+pub(crate) const TC_MAX: usize = 64;

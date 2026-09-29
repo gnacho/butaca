@@ -81,9 +81,6 @@ pub(crate) fn request_seek(x: i64) {
 /// without publishing a false viewer Resume. `resume_pend` asks the per-frame loop to close that
 /// bounded override. `repause_at` is the landed-frame wait target.
 pub(crate) fn commit_seek(target: i64, repause_at: &mut i64) {
-    crate::diag::event(crate::diag::schema::DiagEvent::FeatureUsed {
-        feature: crate::diag::schema::Feature::Seek,
-    });
     request_seek(target);
     if paused() {
         *repause_at = target;
@@ -739,14 +736,6 @@ pub(crate) fn activate_ctrl_row(
             }
         }
         ControlSlot::Skip(pr) => {
-            crate::diag::event(crate::diag::schema::DiagEvent::FeatureUsed {
-                feature: match pr.kind {
-                    crate::metadata::MarkerKind::Intro => crate::diag::schema::Feature::SkipIntro,
-                    crate::metadata::MarkerKind::Credits => {
-                        crate::diag::schema::Feature::SkipCredits
-                    }
-                },
-            });
             match pr.action {
                 SkipAction::Seek(ns) => {
                     // Retire the segment FIRST: the seek lands on the preceding keyframe, which
@@ -1031,9 +1020,6 @@ pub(crate) fn key_pause(
 ) {
     if super::bridge::player(pages).is_some() && !paused() {
         if set_transport_paused(pa, true) {
-            crate::diag::event(crate::diag::schema::DiagEvent::FeatureUsed {
-                feature: crate::diag::schema::Feature::Pause,
-            });
         }
     }
     if let Some(player) = super::bridge::player_mut(pages) {

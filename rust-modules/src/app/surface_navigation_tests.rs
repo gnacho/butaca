@@ -33,7 +33,6 @@ fn a_page_arg_wears_the_chrome_its_own_table_says() {
     // …and the root payload is a boot address, never an identity: the two Settings arguments
     // below are ONE screen, which is what stops a dev boot target minting a second surface.
     assert!(AppArg::Settings(SettingsPage::Root).same_instance(&AppArg::Settings(SettingsPage::Legal)));
-    assert!(!AppArg::Settings(SettingsPage::Root).same_instance(&AppArg::FirstRunConsent(0)));
 }
 
 /// **Every route mounts a screen that NAMES the heartbeat word** (§15.2).
@@ -901,38 +900,6 @@ fn the_hud_state_helper_reads_every_phase_of_every_surface() {
     }
 }
 
-/// **THE FOURTH ROOT** (`app/input.rs`'s `back_at_root`, and the key ladder's dispatcher arm).
-///
-/// BACK at the FIRST consent stage was SWALLOWED for as long as that screen was a `Popover`:
-/// the step behind it is sign-in, which cannot be undone, and `ui::consent::on_back` reported
-/// `true` for both the stepped-back and the swallowed case — so the loop's BACK arm could not
-/// tell them apart and the 2026-09-03 root rule could not reach this screen. What is graded
-/// here is that the owned screen SAYS which it is, as a request the loop performs, and that it
-/// does so WITHOUT dismissing itself: going to the television's Home neither answers nor
-/// dismisses the question, so selecting the tile again must come straight back to it.
-#[test]
-fn back_at_the_first_consent_stage_is_the_root_press_and_leaves_the_question_up() {
-    let _g = crate::testlock::serial();
-    let mut d = Dispatcher::<AppHost>::new();
-    let mut rig = Bridge::for_test(|| 0);
-    frame(&mut d, &mut rig, AppArg::Profiles, tick(0), vec![]);
-    open_first_run_consent(&mut d);
-    frame(&mut d, &mut rig, AppArg::Profiles, tick(1), vec![]);
-    assert!(consent_up(&d));
-    assert_eq!(overlay_word(&d), Some("consent"));
-    let _ = rig.take_reqs(); // the mount's own effects are not what this grades
-    frame(&mut d, &mut rig, AppArg::Profiles, tick(2), script_key(Key::Back, tick(2)));
-    assert_eq!(
-        rig.take_reqs(),
-        vec![LoopReq::BackAtRoot],
-        "the screen asks the loop for the root press rather than swallowing the key"
-    );
-    frame(&mut d, &mut rig, AppArg::Profiles, tick(3), vec![]);
-    assert!(
-        consent_up(&d),
-        "…and the question is still up: the platform took the screen, nothing was answered"
-    );
-}
 
 /// TV session 4 (2026-09-09): `settings-root` fell from 60 to 40 fps the day Home became an
 /// owned page. The fold said Replaced, but the loop's guard read `!host_replaced ||

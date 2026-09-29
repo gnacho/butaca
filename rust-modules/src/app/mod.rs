@@ -321,7 +321,6 @@ pub(crate) struct App {
     /// The recorder / replay driver (`plxnative-rec` / `plxnative-recplay`, spec §5.3/§5.5).
     pub(crate) rec: recorder::Recplay,
     pub(crate) boot_initial: Option<bootstrap::Initial>,
-    pub(crate) telemetry_guard: Option<crate::telemetry::native::Guard>,
     /// The present gate as a machine (spec §4.4). `ui::idle` is still the product's verdict on
     /// this loop; this one receives the render cache's notes and is what `dispatch` takes over.
     present: crate::ui::present::Present,
@@ -391,13 +390,7 @@ impl App {
 /// Extracted so `plex_run` itself stays a ten-line skeleton (D4): this is not a phase-function
 /// split of ONGOING per-frame work like `app/run.rs`'s, but the one-shot bring-up sequence, and
 /// splitting it out changes nothing about when any of it runs.
-///
-/// Returns the telemetry guard, which MUST outlive the whole process — `crate::telemetry::boot`'s
-/// own doc: the crash channel's scope is snapshotted here, and `diag::event` reads its live
-/// published decision for the rest of the run, not only for as long as this function's own stack
-/// frame exists. `plex_run` binds it as `_telemetry_guard` for exactly that reason: a bare
-/// `pre_boot_diagnostics();` would drop it at the end of THIS call, before a single frame ran.
-fn pre_boot_diagnostics() -> crate::telemetry::native::Guard {
+fn pre_boot_diagnostics() {
     install_panic_logger();
     // WHICH INSTALL wrote this log. First line, before anything can fail.
     //
@@ -443,10 +436,6 @@ fn pre_boot_diagnostics() -> crate::telemetry::native::Guard {
     // flat platform file and cannot fail the boot. The crash channel receives only the reviewed
     // compatibility fields (webOS/API/model/SoC/hardware revision), never device identifiers.
     crate::webos::probe();
-    // The stored telemetry decision, BEFORE the first event can be reported — `diag::event` reads
-    // a snapshot this publishes, and with none installed it refuses everything. So the ordering is
-    // the fail-closed guarantee, not a convenience.
-    let telemetry_guard = crate::telemetry::boot();
     // …and then, if asked, DIE. `plxnative-crashtest` is the instrument for the instrument: both
     // the C fallback and (when consented/configured) the out-of-process native recorder are now
     // armed, so this trigger grades the reporter users actually run. It remains before SDL so a
@@ -460,7 +449,6 @@ fn pre_boot_diagnostics() -> crate::telemetry::native::Guard {
     // switch is on and this build carries a key; `crate::diag::event` is the gate and fails closed
     // on either. (This comment said "nothing listens today" for as long as that was true and for a
     // while after.)
-    crate::diag::event(crate::diag::schema::DiagEvent::AppLaunch);
     // And what it DECODES, from the device's own codec table — the capability profile and the
     // direct-play gate derive from this instead of asserting the dev TV's abilities as universal
     // (issue #22's bug class; docs/plex-pass-audit.md's closing section). Same contract as
@@ -483,7 +471,6 @@ fn pre_boot_diagnostics() -> crate::telemetry::native::Guard {
     // Last: the worker must observe every boot-time environment/trigger mutation above, while a
     // controlled replay which deliberately skips this preflight keeps the conservative Unknown.
     crate::webos::caps::start_probe();
-    telemetry_guard
 }
 
 /// The run+teardown sequence `plex_run` hands the mounted `App` to, split out for the same reason
@@ -525,7 +512,7 @@ fn enter_application(pms_host: *const c_char, pms_port: c_int) -> Result<App,c_i
         Err(reason) => { log(&format!("replay: REFUSED — {reason}")); return Err(1); }
     };
     // Replay preflight and typed decoding precede identity mint, telemetry and bootstrap work.
-    let telemetry_guard = (!preflight.controlled()).then(pre_boot_diagnostics);
+    if !preflight.controlled() { pre_boot_diagnostics(); }
     // Unlike the capability worker, these existing diagnostic latches are needed by controlled
     // replay too. Resolve their filesystem state outside `FrameScope` on every boot so a preview
     // or synthetic payload cannot perform its first `stat` from a render frame.
@@ -534,8 +521,7 @@ fn enter_application(pms_host: *const c_char, pms_port: c_int) -> Result<App,c_i
     // Diagnostics probes `app_dir()` on its worker, so starting it earlier races that preamble.
     crate::storage::diagnostics::start();
     let main_thread = unsafe { crate::task::MainThread::assume() };
-    let mut app = unsafe { boot(pms_host,pms_port,main_thread,preflight) }?;
-    if telemetry_guard.is_some() { app.telemetry_guard = telemetry_guard; }
+    let app = unsafe { boot(pms_host,pms_port,main_thread,preflight) }?;
     Ok(app)
 }
 

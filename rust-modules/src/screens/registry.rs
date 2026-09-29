@@ -43,8 +43,6 @@ pub(crate) enum AppFx {
     Store(StoreId, StoreCmd),
     /// Poll only the store work this visible route owns, after its read-only step returns.
     StoreWork(StoreWork),
-    /// The consent MACHINE's command (§2.2): it owns the two decisions and publishes them.
-    Consent(ConsentCmd),
     /// A request of the legacy loop (§14) — see [`LoopReq`].
     Loop(LoopReq),
     /// Content-page requests, executed by the navigation bridge during coexistence (phase 7).
@@ -1073,7 +1071,6 @@ pub(crate) enum DetailRefreshPhase {
 /// The application's messages (spec §3.1).
 pub(crate) enum AppMsg {
     Session(crate::auth::owner::SessionEvent),
-    Consent(ConsentCmd),
     RestartReply { correlation: u32, accepted: bool },
     SelectionReply { correlation: u32, accepted: bool, flow_epoch: u64 },
     BackReply { correlation: u32, resumed: bool },
@@ -1097,12 +1094,6 @@ pub(crate) enum AppMsg {
     AltSourceOpen(ContentArg),
 }
 
-/// What the consent machine is told (§2.3): a person's answer to both questions at once.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum ConsentCmd {
-    Record { errors: bool, usage: bool },
-}
-
 /// What an owned screen asks the LEGACY LOOP to do, because the owner of that decision is not on
 /// the dispatcher yet. Each names the phase that retires it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -1112,6 +1103,7 @@ pub(crate) enum LoopReq {
     BackAtRoot,
     /// Privacy & data → Delete all local data, confirmed: erase, sign out, land on sign-in.
     /// Retires when Session owns the sign-in (phase 6).
+    #[allow(dead_code)]
     DeleteAllLocalData,
     /// The ordered Session erase and local-file sweep completed; leave the old account's UI.
     LocalDataErased,
@@ -1183,7 +1175,6 @@ pub(crate) mod word {
     pub(crate) const SETTINGS: &str = "settings";
     pub(crate) const PRIVACY: &str = "privacy";
     pub(crate) const LEGAL: &str = "legal";
-    pub(crate) const CONSENT: &str = "consent";
     pub(crate) const ONBOARD: &str = "onboard";
     /// The QR sign-in (`screens::login::LoginScreen`). Same spelling as `app::words::route_word`'s
     /// `AppArg::Login` arm — see this module's doc for why that equality is load-bearing.
@@ -1248,6 +1239,7 @@ pub(crate) fn band_elem(i: usize) -> u32 {
 pub(crate) fn band_index(elem: u32) -> Option<usize> {
     (elem >= BAND && elem < ALERT).then(|| (elem - BAND) as usize)
 }
+#[cfg(test)]
 pub(crate) fn alert_index(elem: u32) -> Option<usize> {
     (elem >= ALERT && elem < ALERT + 2).then(|| (elem - ALERT) as usize)
 }
@@ -1511,12 +1503,9 @@ pub(crate) enum AppArg {
     Content(ContentArg),
     /// The Settings family, rooted at this page (`SettingsPage::Root` for every real opening).
     Settings(SettingsPage),
-    /// The first-run consent question, rooted at this stage byte (0 for every real opening;
-    /// `screens::consent`'s `STAGE_PRODUCT` for `/tmp/plxnative-consent=product`).
-    FirstRunConsent(u8),
 }
 
-pub(crate) const ARG_SHAPE: &str = "AppArg{Login,Profiles,Onboard,Home,Library,Search,Player,Content:{Detail{sid:u32,rk:str},Person{sid:u32,key:str,guid:str,name:str,thumb:str},Filmography{sid:u32,key:str},Collection{sid:u32,rk:str,sec:i64,tag:i64,name:str}},Settings:SettingsPage{Root,Playback,AudioSubtitles,Favourites,Privacy,Legal,About,Document(u8),Preview(u8),ConsentStage(u8),Language,Contribute},FirstRunConsent(u8),LibraryMenu{host:u32,target:{epoch:u32,sid:u32,section:u64},kind:u32,anchor:[u32;4]},\
+pub(crate) const ARG_SHAPE: &str = "AppArg{Login,Profiles,Onboard,Home,Library,Search,Player,Content:{Detail{sid:u32,rk:str},Person{sid:u32,key:str,guid:str,name:str,thumb:str},Filmography{sid:u32,key:str},Collection{sid:u32,rk:str,sec:i64,tag:i64,name:str}},Settings:SettingsPage{Root,Playback,AudioSubtitles,Favourites,Legal,About,Document(u8),Language,Contribute},LibraryMenu{host:u32,target:{epoch:u32,sid:u32,section:u64},kind:u32,anchor:[u32;4]},\
      PlayerOverlay{Tracks(tab:i32),Info,Chapters,More(quality:bool)},\
      AltSources{host:u32,sid:u32,rk:str,anchor:[u32;4]},\
      TracksPanel{page:i32},AboutPanel,PersonBio,CollectionAbout,AccountMenu,\
@@ -1555,7 +1544,6 @@ impl LogicalState for AppArg {
             Self::Player => { c.u32(0).u32(10); }
             Self::Content(arg) => { c.u32(1); arg.write(c); }
             Self::Settings(page) => { c.u32(2); page.write(c); }
-            Self::FirstRunConsent(stage) => { c.u32(3).u8(*stage); }
         }
     }
     fn probe(&self, out: &mut String) { out.push_str("app_arg"); }
@@ -1576,7 +1564,6 @@ impl crate::ui::screen::ScreenArg for AppArg {
             | AppArg::Player
             | AppArg::Content(_)
             | AppArg::Settings(_)
-            | AppArg::FirstRunConsent(_)
             | AppArg::LibraryMenu(_)
             | AppArg::AccountMenu
             | AppArg::ItemMenu(_)
@@ -1622,10 +1609,8 @@ impl crate::ui::screen::ScreenArg for AppArg {
             AppArg::Library => 7,
             AppArg::Search => 10,
             AppArg::Player => 11,
-            // The ROOT payload is a boot address, not an identity: one Settings surface and one
-            // consent question, whichever page each happens to have been rooted at.
+            // The ROOT payload is a boot address, not an identity: one Settings surface.
             AppArg::Settings(_) => 12,
-            AppArg::FirstRunConsent(_) => 13,
             AppArg::Content(ContentArg::Detail { .. }) => 8,
             AppArg::Content(ContentArg::Person { .. }) => 9,
             AppArg::Content(ContentArg::Filmography { .. }) => 14,
@@ -1838,13 +1823,6 @@ where
             AppArg::Settings(root) => {
                 Box::new(RouteSurface::new(entry, id, Family::Settings, *root, H::hubs(cx)))
             }
-            AppArg::FirstRunConsent(stage) => Box::new(RouteSurface::new(
-                entry,
-                id,
-                Family::FirstRunConsent,
-                SettingsPage::ConsentStage(*stage),
-                H::hubs(cx),
-            )),
         }
     }
 }
@@ -1905,7 +1883,7 @@ pub(crate) fn every_surface_arg() -> Vec<AppArg> {
     // The player's panels are ONE screen with several kinds, and each answers a different
     // `Screen::name` — so every kind is listed, not one representative.
     args.extend(OverlayKind::ALL.map(|kind| AppArg::PlayerOverlay(PlayerOverlayArg { kind })));
-    args.extend([AppArg::Settings(SettingsPage::Root), AppArg::FirstRunConsent(0)]);
+    args.extend([AppArg::Settings(SettingsPage::Root)]);
     for a in &args {
         match a {
             AppArg::LibraryMenu(_)
@@ -1917,8 +1895,7 @@ pub(crate) fn every_surface_arg() -> Vec<AppArg> {
             | AppArg::PersonBio
             | AppArg::CollectionAbout
             | AppArg::PlayerOverlay(_)
-            | AppArg::Settings(_)
-            | AppArg::FirstRunConsent(_) => {}
+            | AppArg::Settings(_) => {}
             // The eight PAGE variants. Named rather than swept into a `_`, so the exhaustiveness
             // above is real and a new SURFACE variant cannot land in a catch-all.
             AppArg::Login
@@ -2078,7 +2055,9 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 // from 0x38a9_2955_0af8_72f6 (see the doc paragraphs above), to 0xbb81_9301_0d21_bc8a on main.
 // Localization's Settings pages then join it as LocalizationSettingsV4, with the language
 // picker's busy state and the login report alert (0x677d_0944_ef25_3900 before the collections).
-const SCREEN_SHAPES_PIN: u64 = 0x668c_44dc_797c_5b0f;
+// The fork's sync drops the consent and incident-report screens from the inventory: the pin
+// above was 0x668c_44dc_797c_5b0f with them.
+const SCREEN_SHAPES_PIN: u64 = 0xab1b_123e_0a85_9621;
 
 #[cfg(test)]
 mod arg_tests {

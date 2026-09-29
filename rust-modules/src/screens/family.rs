@@ -72,18 +72,12 @@ pub(crate) enum SettingsPage {
     AudioSubtitles,
     /// Favorite libraries — the onboard screen in Settings mode.
     Favourites,
-    /// Privacy & data — the consent screen in Settings mode.
-    Privacy,
     /// The Legal index.
     Legal,
     /// About PlxNative, a document pushed straight from the root.
     About,
     /// One Legal document, by index into `screens::legal`'s page list.
     Document(u8),
-    /// One Privacy preview document (`screens::consent::Preview`).
-    Preview(u8),
-    /// The FIRST-RUN consent question: one stage per page, the second pushed over the first.
-    ConsentStage(u8),
 }
 
 impl ScreenArg for SettingsPage {
@@ -98,12 +92,9 @@ impl ScreenArg for SettingsPage {
             SettingsPage::Language => 110,
             SettingsPage::Contribute => 111,
             SettingsPage::Favourites => 101,
-            SettingsPage::Privacy => 102,
             SettingsPage::Legal => 103,
             SettingsPage::About => 104,
             SettingsPage::Document(_) => 105,
-            SettingsPage::Preview(_) => 106,
-            SettingsPage::ConsentStage(_) => 107,
         })
     }
     fn title(&self) -> Option<&str> {
@@ -137,10 +128,9 @@ impl LogicalState for SettingsPage {
             | SettingsPage::Playback
             | SettingsPage::AudioSubtitles
             | SettingsPage::Favourites
-            | SettingsPage::Privacy
             | SettingsPage::Legal
             | SettingsPage::About => 0,
-            SettingsPage::Document(i) | SettingsPage::Preview(i) | SettingsPage::ConsentStage(i) => *i,
+            SettingsPage::Document(i) => *i,
         });
     }
     fn probe(&self, out: &mut String) {
@@ -151,14 +141,11 @@ impl LogicalState for SettingsPage {
             SettingsPage::Playback => "playback",
             SettingsPage::AudioSubtitles => "audio-subtitles",
             SettingsPage::Favourites => "favourites",
-            SettingsPage::Privacy => "privacy",
             SettingsPage::Legal => "legal",
             SettingsPage::About => "about",
             SettingsPage::Document(_) => "document",
-            SettingsPage::Preview(_) => "preview",
-            SettingsPage::ConsentStage(_) => "stage",
         });
-        if let SettingsPage::Document(i) | SettingsPage::Preview(i) | SettingsPage::ConsentStage(i) = self {
+        if let SettingsPage::Document(i) = self {
             out.push_str(&format!("[{i}]"));
         }
     }
@@ -315,12 +302,9 @@ mod tests {
             SettingsPage::Playback,
             SettingsPage::AudioSubtitles,
             SettingsPage::Favourites,
-            SettingsPage::Privacy,
             SettingsPage::Legal,
             SettingsPage::About,
             SettingsPage::Document(0),
-            SettingsPage::Preview(0),
-            SettingsPage::ConsentStage(0),
         ];
         let mut ids: Vec<u32> = pages.iter().map(|p| crate::ui::screen::ScreenArg::id(p).0).collect();
         ids.sort_unstable();
@@ -336,8 +320,6 @@ mod tests {
     fn an_indexed_variant_s_id_does_not_vary_with_its_index() {
         use crate::ui::screen::ScreenArg;
         assert_eq!(SettingsPage::Document(0).id(), SettingsPage::Document(5).id());
-        assert_eq!(SettingsPage::Preview(0).id(), SettingsPage::Preview(3).id());
-        assert_eq!(SettingsPage::ConsentStage(0).id(), SettingsPage::ConsentStage(1).id());
         // …but `same_instance` still tells them apart, since it is bare equality here:
         assert!(!SettingsPage::Document(0).same_instance(&SettingsPage::Document(1)));
     }

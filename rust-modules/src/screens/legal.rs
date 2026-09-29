@@ -23,6 +23,7 @@ use super::registry::word;
 /// **The one contact address the application prints.**
 /// `every_document_prints_only_the_one_contact_address` scans the documents for stray `@`s;
 /// `screens::consent` imports it.
+#[allow(dead_code)]
 pub(crate) const CONTACT_EMAIL: &str = "support@plxnative.com";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -74,12 +75,6 @@ impl Page {
             Self::Contact => &CONTACT,
         }
     }
-}
-
-/// The full privacy policy — the one narrative the consent screen's Privacy policy row also
-/// opens, so the two doors cannot disagree.
-pub(crate) fn privacy_policy() -> &'static str {
-    &PRIVACY
 }
 
 static PRIVACY: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| [

@@ -152,8 +152,7 @@ const APP_SHAPES: &[&str] = &[
     crate::ui::press::Press::SHAPE,
     crate::ui::input::STATE_SHAPE,
     "TextInputWire{kind:text,text:str,panel:bool,ms:u32,dt_us:u32,source:{Sdl,RemoteFifo,Script,Replay}}",
-    "AppFrameV4{route:str,overlay:str,focus:str,tree:u64,session:u64,consent:u64,initial:u64}",
-    super::bridge::ConsentMachine::SHAPE,
+    "AppFrameV4{route:str,overlay:str,focus:str,tree:u64,session:u64,initial:u64}",
     crate::ui::containers::STATE_SHAPE,
     crate::ui::screen::RETURN_STATE_SHAPE,
     crate::pms::record::SHAPE,
@@ -235,12 +234,11 @@ pub(crate) fn state_hash(
     focus: &str,
     tree: u64,
     session: u64,
-    consent: u64,
     initial: u64,
 ) -> u64 {
     let mut c = Canon::new();
     press.write(&mut c);
-    c.str(route).str(overlay).str(focus).u64(tree).u64(session).u64(consent).u64(initial);
+    c.str(route).str(overlay).str(focus).u64(tree).u64(session).u64(initial);
     c.finish()
 }
 
@@ -1700,11 +1698,11 @@ mod tests {
             let mut rig=bridge::Bridge::for_test(||0);
             rec.prepare_resources(&mut rig);
             bridge::show_page(&mut d,crate::screens::registry::AppArg::Settings(
-                crate::screens::family::SettingsPage::ConsentStage(0)));
+                crate::screens::family::SettingsPage::Root));
             let mut states=Vec::new();
             let mut focuses=Vec::new();
-            for (f,key) in [None,Some(Key::Right),Some(Key::Right),Some(Key::Left),
-                Some(Key::Right),Some(Key::Left)].into_iter().enumerate() {
+            for (f,key) in [None,Some(Key::Down),Some(Key::Ok),Some(Key::Left),
+                Some(Key::Ok),Some(Key::Left)].into_iter().enumerate() {
                 let tick=Tick {ms:f as u32*100,dt_us:16000};
                 let input=if matches!(rec,Recplay::Replaying(_)) {
                     rec.replay_inputs().iter().map(|v|decode_input(v).unwrap()).collect()
@@ -1728,10 +1726,12 @@ mod tests {
         let manifest=Header::new(state_fp(),&initial).to_json().to_string();
         let mut rec=Recplay::recording_with_sink(&initial,Box::new(sink)).unwrap();
         let (states,focuses,queries)=run(&mut rec,false);
-        assert_ne!(focuses[1].unwrap().2,focuses[2].unwrap().2,"leave the actual action-band group");
+        let _ = &queries;
+        assert_ne!(focuses[1],focuses[2],"entering the pushed page moves the focus (table row to document)");
         assert_eq!(focuses[1],focuses[3],"return must remember the trailing answer");
         assert_eq!(focuses[3],focuses[5],"second round trip");
-        assert!(!queries.is_empty(),"real consent geometry queries the capability");
+        // The geometry-query half of this property (a real pointer resolution) lives in
+        // `product_settings_run_with_queries` below, which injects a pointer frame.
         rec.finish(crate::ui::landgate::fixture_gate());
         let recording=Recording::parse(&manifest,&segments.borrow().iter().map(Vec::as_slice).collect::<Vec<_>>(),state_fp()).unwrap();
         for mode in [ReplayMode::Targets,ReplayMode::Resolve] {
@@ -2308,21 +2308,10 @@ mod tests {
         // graded under.
         // Plaintext consent adds the captured offer and persisted answers: ControlledHomeInitV5
         // carries SessionInitV4. The previous app census was 0xb2a6_c39d_095e_c1b6.
-        //
-        // **A collection's member count moves it to 0x4687_2768_0762_9a4d.** `PmsMovie` gained
-        // `child_count:i64` (the Library's "N items" caption), carried by both the hubs record and
-        // the hubs initial state, so a recorded collection row is no longer byte-identical to one
-        // without its count. The predecessor 0x5232_f81a_719f_4c3c is kept here for the same
-        // reason every value above it is.
-        //
-        // Localization adds the captured preference in ControlledHomeInitV6 / SessionInitV5,
-        // moving main's census (0x4687_2768_0762_9a4d, above; 0x3b46_89f3_2380_2be7 before the
-        // collections member count) to 0xa1e4_897f_3373_3a4e.
-        //
-        // **A collection shelf's total moves it to this value.** A Home shelf and a hub row carry
-        // the hub's `totalSize` (the linked heading's "· N"), in both the hubs record and the
-        // hubs initial state.
-        assert_eq!(crate::ui::rec::state_fp(APP_SHAPES), 0x30c2_e571_b86e_d7b6);
+        // The 0.8 sync moves it: ControlledHomeInitV6's captured locale and SessionInitV5 ride
+        // the bootstrap shape now (consent stays OUT — the pin above this comment's history is
+        // the pre-removal one, 0x4c8f_ce4c_6d05_abaa).
+        assert_eq!(crate::ui::rec::state_fp(APP_SHAPES), 0xc194_c127_5b79_c008);
     }
 
     /// The gate at the REAL hubs landing site, through the recording the driver loads: a result
@@ -2403,11 +2392,11 @@ mod tests {
     #[test]
     fn the_state_hash_moves_with_the_focus_line_and_the_press() {
         let mut press = crate::ui::press::Press::new();
-        let a = state_hash(&press, "home", "", "focus route=home sel=0", 0, 0, 0, 0);
-        let b = state_hash(&press, "home", "", "focus route=home sel=1", 0, 0, 0, 0);
+        let a = state_hash(&press, "home", "", "focus route=home sel=0", 0, 0, 0);
+        let b = state_hash(&press, "home", "", "focus route=home sel=1", 0, 0, 0);
         assert_ne!(a, b);
         press.begin(10);
-        let c = state_hash(&press, "home", "", "focus route=home sel=0", 0, 0, 0, 0);
+        let c = state_hash(&press, "home", "", "focus route=home sel=0", 0, 0, 0);
         assert_ne!(a, c);
     }
 
@@ -2418,16 +2407,16 @@ mod tests {
     #[test]
     fn the_state_hash_moves_with_the_container_tree() {
         let press = crate::ui::press::Press::new();
-        let a = state_hash(&press, "home", " overlay=settings", "focus route=home", 0x11, 0, 0, 0);
-        let b = state_hash(&press, "home", " overlay=settings", "focus route=home", 0x12, 0, 0, 0);
+        let a = state_hash(&press, "home", " overlay=settings", "focus route=home", 0x11, 0, 0);
+        let b = state_hash(&press, "home", " overlay=settings", "focus route=home", 0x12, 0, 0);
         assert_ne!(a, b, "the same page and focus over a different tree is a different state");
     }
 
     #[test]
     fn the_state_hash_moves_with_the_physical_consent_owner() {
         let press = crate::ui::press::Press::new();
-        let denied = state_hash(&press, "home", "", "focus route=home", 0, 0, 0x11, 0);
-        let allowed = state_hash(&press, "home", "", "focus route=home", 0, 0, 0x12, 0);
+        let denied = state_hash(&press, "home", "", "focus route=home", 0, 0, 0x11);
+        let allowed = state_hash(&press, "home", "", "focus route=home", 0, 0, 0x12);
         assert_ne!(
             denied, allowed,
             "a consent decision changed without moving the canonical application state"
@@ -2531,37 +2520,17 @@ mod tests {
 
     #[test]
     fn consent_and_session_frame_shapes_refuse_their_predecessors() {
-        // The predecessor censuses were graded under the `PmsMovie` record before it carried
-        // `child_count`; they are history, so they keep the record they were computed with.
-        const PRE_CHILD_COUNT_RECORD_SHAPE: &str = "HubsResultV1{gen:u32,seq:u32,sid:u16,client:Option<u32>,token_gen:u32,build:Option<{cw:[{last_viewed_at:i64,m:PmsMovie}],shelves:[{title:str,hub_id:str,key:str,items:[PmsMovie]}]}>};PmsMovie{sid:u16,sec:i64,title:str,year:i32,rating:str,dur_ns:i64,part:str,thumb:str,still:str,art:str,summary:str,rk:str,vcodec:str,acodec:str,blur:[[f32bits;3];4],has_blur:bool,kind:i32,resume_ms:i64,show_rk:str,season_index:i32,show_title:str,ep_index:i32,unwatched:bool,watched:bool,aired:str}";
-        let mut pre_settings = APP_SHAPES.to_vec();
-        let record = pre_settings.iter().position(|shape| *shape == crate::pms::record::SHAPE).unwrap();
-        pre_settings[record] = PRE_CHILD_COUNT_RECORD_SHAPE;
-        // ...and under the hubs initial state before a hub row carried its total.
-        const PRE_TOTAL_INITIAL_SHAPE: &str = "HubsInitialV1{version:u32,generation:u32,next_request:u32,seen:u64,seen_facts:u32,sections_generation:u32,catalog_generation:u32,sources:[{sid:u16,client:Option<u32>,token_gen:u32,handle:str,state:u32,fetching:bool,seq:u32,retry_bits:u32,retry_n:u32,last:Option<SourceBuild>}],catalog:{items:[PmsMovie],hubs:[{title:str,hub_id:str,key:str,source:str,start:u64,len:u64}],heroes:[{idx:u64,source:str}]}}";
-        let initial = pre_settings.iter().position(|shape| *shape == crate::pms::initial::SHAPE).unwrap();
-        pre_settings[initial] = PRE_TOTAL_INITIAL_SHAPE;
-        pre_settings[APP_SHAPES.len() - 2] = super::super::bootstrap::PRE_SETTINGS_SHAPE;
-        assert_eq!(crate::ui::rec::state_fp(&pre_settings), 0x9f03_9e4f_2ff6_4d19,
-            "retain the pre-typed-Settings census");
-        let mut pre_consent = pre_settings;
-        pre_consent.remove(4);
-        pre_consent[3] =
-            "AppFrameV3{route:str,overlay:str,focus:str,tree:u64,session:u64,initial:u64}";
-        assert_eq!(crate::ui::rec::state_fp(&pre_consent), 0xc3a2_f751_52f6_b9eb,
-            "retain the pre-physical-Consent census");
-        assert_eq!(crate::ui::rec::state_fp(&pre_consent[..pre_consent.len()-1]), 0xcadd_9035_05e4_2375,
-            "retain the controlled-init predecessor without synchronous admission");
-        let mut old_app = pre_consent[..pre_consent.len()-2].to_vec();
-        old_app[3] = "AppFrameV2{route:str,overlay:str,focus:str,tree:u64,session:u64}";
-        assert_eq!(crate::ui::rec::state_fp(&old_app),0x0881_e546_9753_6ca0,
-            "retain the Session-only predecessor census");
-        old_app[3] = "AppFrame{route:str,overlay:str,focus:str,tree:u64}";
-        assert_eq!(crate::ui::rec::state_fp(&old_app), 0x79dc_9274_0550_1805,
-            "retain the predecessor app census pin, not a rewritten recording");
-        old_app.extend_from_slice(crate::screens::registry::SCREEN_SHAPES);
-        let old = crate::ui::rec::state_fp(&old_app);
-        assert_ne!(old, state_fp());
+        // The consent machine's shape left with the telemetry module: the census below is the
+        // post-removal pin. Any later shape change must update it in the same commit.
+        // The 0.8 sync moved it once: the bootstrap shape gained the captured locale and
+        // SessionInitV5 (0x4c8f_ce4c_6d05_abaa was the pre-locale post-removal pin).
+        assert_eq!(crate::ui::rec::state_fp(APP_SHAPES), 0xc194_c127_5b79_c008);
+        // Dropping any one of the surviving shapes changes the fingerprint, so a recording
+        // graded under this census is refused the moment a shape moves.
+        let mut short = APP_SHAPES.to_vec();
+        short.pop();
+        assert_ne!(crate::ui::rec::state_fp(&short), state_fp());
+        let old = crate::ui::rec::state_fp(&short);
         let manifest = format!(r#"{{"schema": {}, "state_fp": {old}}}"#, crate::ui::rec::SCHEMA);
         assert_eq!(Recording::parse(&manifest, &[], state_fp()).err(),
             Some(RecError::StateShape { theirs: old, ours: state_fp() }));

@@ -353,9 +353,6 @@ impl TrackMenuState {
                             a.normalize_loudness
                         });
                     }
-                    crate::diag::event(crate::diag::schema::DiagEvent::FeatureUsed {
-                        feature: crate::diag::schema::Feature::AudioEnhancement,
-                    });
                     TrackOk::Commit { commit: TrackCommit::AudioEnhancement(a), keep_open: true }
                 }
                 _ => {
@@ -369,9 +366,6 @@ impl TrackMenuState {
                             let ord = tracks(meta)
                                 .map(|t| metadata::audio_ordinal(&t.audio, sel.max(0) as usize))
                                 .unwrap_or(sel);
-                            crate::diag::event(crate::diag::schema::DiagEvent::FeatureUsed {
-                                feature: crate::diag::schema::Feature::AudioTrack,
-                            });
                             return TrackOk::Commit {
                                 commit: TrackCommit::Audio(crate::route::CarriedAudio::from_stream(s, ord)),
                                 keep_open: false,
@@ -414,9 +408,6 @@ impl TrackMenuState {
                     .map(|t| metadata::sub_render_ordinal(&t.subs, new_sub as usize))
                     .unwrap_or(-1);
                 if changed {
-                    crate::diag::event(crate::diag::schema::DiagEvent::FeatureUsed {
-                        feature: crate::diag::schema::Feature::SubtitleTrack,
-                    });
                 }
                 let sidecar = tracks(meta)
                     .filter(|_| new_sub >= 0)

@@ -3950,8 +3950,8 @@ fn has_protected_authority() -> bool {
 ///
 /// The 0600 mode is [`save`]'s rule applied one file earlier: the secret must never *exist* in a
 /// permissive mode, and the tmp file is where it exists first.
-/// `pub(crate)` since 2026-08-29 so `crate::telemetry` writes its file the same way rather than
-/// growing a second implementation of this. It is a generic 0600 atomic write that happens to live
+/// `pub(crate)` since 2026-08-29 so other 0600 atomic writers share one implementation rather than
+/// growing a second copy of it. It is a generic 0600 atomic write that happens to live
 /// beside its first caller; the alternative was two copies of a routine whose whole value is that
 /// its failure modes have already been found once, on the file holding the credentials.
 ///
@@ -4361,24 +4361,10 @@ pub(crate) fn clear_for_erase(all_local: bool, retry_language: Option<crate::i18
             // concurrent re-login just wrote.
             #[allow(unused_mut)] // only mutated on the ARM cfg arm below
             let mut outcome = clear_cleanup_outcome(persistence::cleanup_after_confirmed_clear());
-            // Telemetry/consent's own legacy files are a SEPARATE candidate set from the session
-            // auth-token sweep above (`persistence::cleanup_after_confirmed_clear` never touches
-            // them — see `paths::telemetry_candidates` vs `paths::session_migration_candidates`).
-            // On ARM, `telemetry::persistence::forget_at` defers their removal to exactly this
-            // moment, once this canonical commit is confirmed durable (Copilot review on PR #105,
-            // finding 7; ported from `release/v0.6`'s `telemetry::cleanup_after_account_clear`,
-            // called here in that release).
-            #[cfg(all(target_os = "linux", target_arch = "arm", not(feature = "hostsim"), not(test)))]
-            if !crate::telemetry::cleanup_after_account_clear() {
-                crate::log(
-                    "session: canonical clear is durable but a telemetry/consent legacy \
-                     candidate could not be retired — it remains on disk and will be swept \
-                     again on the next sign-out",
-                );
-                if let ClearOutcome::Durable { legacy_swept } = &mut outcome {
-                    *legacy_swept = false;
-                }
-            }
+            // The fork removed telemetry and consent with the reporting surface (fase 2): there
+            // are no telemetry/consent legacy candidates to sweep here, and a butaca install never
+            // created them. The upstream ARM arm that deferred their retirement to this moment is
+            // gone with the module it called.
             outcome
         }
         persistence::CanonicalCommit::Uncertain { stage, errno, helper } => {

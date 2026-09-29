@@ -517,22 +517,6 @@ pub(crate) unsafe fn construct(
     // means this device has no libcurl we can bind, so plex.tv sign-in will not work — the app
     // still runs, and `net::global_init` has already said so in the event log.
     let _ = crate::net::global_init();
-    // Drain whatever the LAST session left behind, on a worker — and **after `global_init`,
-    // which is the whole reason this line is here and not beside `telemetry::boot()` 170 lines
-    // up.** It was there first, and the end-to-end run showed why that was wrong: the worker
-    // reached `post_ca` before libcurl was bound, `net::available()` was false, every record
-    // came back Keep, and the log read `holding 5 records` immediately ABOVE `net: bound
-    // libcurl`. So the first flush of every launch failed, always, and the failure was
-    // indistinguishable from a television with no network. Worse than the lost flush: curl's
-    // own init is documented as not thread-safe, and a worker that got there first would have
-    // been doing it off the main thread.
-    //
-    // Boot is the right cadence for a television. Sessions are long, and the reports most worth
-    // having are about how one ENDED — a crash is the end, so the record was written by a
-    // process that no longer exists and this is the first moment anything can send it. A record
-    // queued during THIS session goes out at the next launch, or sooner if a consent change
-    // flushes.
-    if !preflight.controlled() { crate::telemetry::flush_soon(); }
 
     // NO token is compiled into this binary. PMS access comes from the signed-in session,
     // or — for automated runs only (the regression harness, headless captures) — from the
@@ -660,8 +644,7 @@ pub(crate) unsafe fn construct(
         super::bridge::Bridge::controlled_home(crate::diag::heartbeat::now_us,
             initial.as_ref().expect("controlled initialization"), &mt, preflight.replay())
     } else {
-        super::bridge::Bridge::new(crate::diag::heartbeat::now_us, session_init,
-            crate::telemetry::consent::current().unwrap_or_default(), &mt)
+        super::bridge::Bridge::new(crate::diag::heartbeat::now_us, session_init, &mt)
     };
     // Construct the one dispatcher before bootstrap commands; move this same queue into App.
     let mut pages = crate::ui::dispatch::Dispatcher::with_transition(Box::new(
@@ -937,11 +920,6 @@ pub(crate) unsafe fn construct(
     let account_osc = !controlled && crate::dev::scenarios::acctosc_armed();
     let account_osc_last = 0u32;
     let account_osc_down = true;
-    // First-run route oscillators keep their real focus models moving so the device FPS suite
-    // grades the composition rather than a settled screen that correctly stops presenting.
-    let consent_osc = !controlled && crate::dev::scenarios::consentosc_armed();
-    let consent_osc_last = 0u32;
-    let consent_osc_down = true;
     let onboard_osc = !controlled && crate::dev::scenarios::onboardosc_armed();
     let onboard_osc_last = 0u32;
     let onboard_osc_right = true;
@@ -1089,12 +1067,6 @@ pub(crate) unsafe fn construct(
     let ask_first_run = || !controlled && (crate::dev::scenarios::firstrun_armed()
         || (!automated_boot()
             && crate::stores::browse::onboard::asks(bridge.browse_directory())));
-    // The sign-in's telemetry question is PRESENTED on the container tree, and the tree lives on
-    // the `App` this function is still assembling — so this boot arm records that it owes the
-    // question and `maybe_ask_consent` is called once the struct exists, a few dozen lines down.
-    // Deferring it changes nothing about when it is ASKED: the surface would not have drawn until
-    // the loop's first frame either way, and the route below is a page underneath it.
-    let mut owes_consent_question = false;
     let route = match boot_to {
         // **Both Home arms ask, and the shared call is the point.** This is the one boot that
         // has no earlier hook — an install already signed in, either never asked or asked
@@ -1103,7 +1075,6 @@ pub(crate) unsafe fn construct(
         // (which is what shipped for an hour) meant a stored session that still owed the
         // sources answer walked Onboard → Home and was never asked at all.
         BootTo::Home => {
-            owes_consent_question = true;
             if ask_first_run() {
                 log("boot: asking which sources feed Home");
                 // No `enter()`: the first-run editor is an OWNED screen, and naming the route is
@@ -1231,7 +1202,6 @@ pub(crate) unsafe fn construct(
         input: crate::ui::input::Input::new(),
         rec: super::recorder::Recplay::Off,
         boot_initial: initial,
-        telemetry_guard: None,
         present: crate::ui::present::Present::new(),
         glass,
         // **The application's page stack runs the route DIP** (§6.2). It ran `Immediate` until
@@ -1261,8 +1231,6 @@ pub(crate) unsafe fn construct(
             alert_step,
             account_osc_last,
             account_osc_down,
-            consent_osc_last,
-            consent_osc_down,
             onboard_osc_last,
             onboard_osc_right,
             nav_osc_last,
@@ -1316,7 +1284,6 @@ pub(crate) unsafe fn construct(
                 legal_doc,
                 alert_boot,
                 account_osc,
-                consent_osc,
                 onboard_osc,
                 nav_osc,
                 nav_osc_rk,
@@ -1348,9 +1315,6 @@ pub(crate) unsafe fn construct(
             apply_deferred_capture(&mut app.rec, app.bridge.landgate(), deferred)
                 .map_err(|reason| { log(&format!("rec: REFUSED — {reason}")); 1 })?;
             log("bootstrap: captured session persistence applied");
-        }
-        if !replay {
-            app.telemetry_guard = Some(crate::telemetry::activate_initial(initial.consent.clone()));
         }
         if !replay { super::adapters::poster::init(); }
         app.rec.tick(initial.clock_start, 0.0);
@@ -1386,21 +1350,5 @@ pub(crate) unsafe fn construct(
         super::bridge::nav_root(&mut app.pages, route);
     }
     if controlled { log(&format!("bootstrap: root-request tree={:016x}", app.pages.state_hash())); }
-    // …the deferred half of the `BootTo::Home` arm above: the tree exists now, so the question can
-    // be presented. Idempotent and cheap (`should_show` is false once a decision is recorded and
-    // on any automated boot), so the flag is the only thing carrying the decision forward.
-    if owes_consent_question {
-        if let Some(initial) = &app.boot_initial {
-            // The same policy, evaluated over captured consent and automation inputs. A
-            // recplay trigger alone intentionally does not grant live automation authority.
-            // Preflight refuses the still-unsupported first-run surface before resource boot.
-            if crate::screens::consent::should_show(&initial.consent, initial.automated) {
-                log("bootstrap: REFUSED — unsupported initial consent route");
-                return Err(1);
-            }
-        } else {
-            maybe_ask_consent(&mut app.pages);
-        }
-    }
     Ok(app)
 }

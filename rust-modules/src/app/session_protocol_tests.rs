@@ -87,7 +87,7 @@ mod carry_matrix {
                     epoch: key.epoch, expected: None, sources: Vec::new(), primary: None,
                 })).unwrap();
             }
-            output.complete(LoginProgress::Failed { epoch: key.epoch, message: "old flow".into(), incident: crate::auth::synthetic_incident(), plaintext: None }.into()).unwrap();
+            output.complete(LoginProgress::Failed { epoch: key.epoch, message: "old flow".into(), plaintext: None }.into()).unwrap();
         }).unwrap();
         let records = rig.session_adapter.take_results();
         assert_eq!(records.len(), 3);
@@ -118,7 +118,7 @@ mod carry_matrix {
         assert!(records.iter().all(|r| rig.session_adapter.admitted(r)));
         let next_key = SessionWorkKey { epoch: EPOCH + 1, op: SessionOp::Login };
         rig.session_adapter.launch(RequestId(2), next_key, true, |job| { job(); true }, move |output| {
-            output.complete(LoginProgress::Failed { epoch: next_key.epoch, message: "next batch".into(), incident: crate::auth::synthetic_incident(), plaintext: None }.into()).unwrap();
+            output.complete(LoginProgress::Failed { epoch: next_key.epoch, message: "next batch".into(), plaintext: None }.into()).unwrap();
         }).unwrap();
         assert!(rig.session_adapter.take_results().is_empty());
         assert!(frame(&mut rig, &mut d, Vec::new(), &mut trace).carried > 0);
@@ -362,7 +362,7 @@ fn home_roster_failure_history(cached: bool, failure: u8) {
     assert_eq!(rig.auth_read().0.phase, Phase::Profiles,
         "failure kind {failure}, cached={cached}: completed work cannot leave an empty picker loading");
     assert_eq!(rig.auth_read().0.users.len(), usize::from(cached));
-    assert_eq!(&*rig.auth_read().0.error, if cached { "" } else { crate::auth::owner::roster_unreachable() });
+    assert_eq!(&*rig.auth_read().0.error, if cached { "" } else { crate::auth::owner::ROSTER_UNREACHABLE });
     assert!(rig.session.snapshot_init().pending.is_empty());
     assert!(rig.take_session_ready().is_none());
     rig.session_adapter.cancel_all();
@@ -805,9 +805,8 @@ fn erased_publication_waits_for_carried_resource_completion() {
     assert!(rig.session.snapshot_init().pending_erase.is_none());
     assert!(rig.take_reqs().iter().any(|req| matches!(req, LoopReq::LocalDataErased)));
     let events = &rig.session_adapter.fixture_resources().coordinator_events;
-    assert!(matches!(events.first(), Some(crate::auth::owner::CoordinatorAction::CloseTelemetry)));
-    assert!(!events.iter().any(|event| matches!(event, crate::auth::owner::CoordinatorAction::SignInStarted)),
-        "a carried start cannot launch before erase completion");
+    assert!(events.iter().all(|event| matches!(event, crate::auth::owner::CoordinatorAction::LocalDataErased)),
+        "the erase carries only the local-data coordinator effect, no telemetry");
     execute_session_command(&mut d, Command::StartLogin);
     d.emit(MachineId::Session, Fx::Deliver(MachineId::Session, Delivery::Machine(AppMsg::Session(
         crate::auth::owner::SessionEvent::Erased { epoch: erased_epoch, leftovers: 99 }))));

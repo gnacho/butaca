@@ -484,6 +484,7 @@ impl<M> Fetch<M> {
 
     /// Is mail waiting? A test's view of the mailbox without taking it.
     #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn has_mail(&self) -> bool {
         self.lock().is_some()
     }

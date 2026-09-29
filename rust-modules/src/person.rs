@@ -77,7 +77,8 @@
 use crate::plex::{ServerId, Tag};
 use crate::pms::{parse_item, PmsMovie};
 use std::panic::catch_unwind;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 /// Per-shelf item cap. A `CardRow` owns exactly [`crate::ui::card_row::MAX_ROW_ITEMS`] focus-scale
 /// springs and `scale(i)` clamps past the end, so an item beyond the cap would draw with the last
@@ -509,10 +510,77 @@ pub(crate) fn validate_record(slot: u32, value: &serde_json::Value) -> Result<()
     Ok(())
 }
 
-/// The single-flight mailbox the Person, Search and Collection stores share; see
-/// [`crate::stores::Fetch`] for the claim/take/clear rules. The retry countdown is NOT a third
-/// field there; [`RETRY_CD`] documents why it cannot be.
-type Fetch = crate::stores::Fetch<Mail>;
+/// One fetch's two WORKER-VISIBLE halves: the claim that it is out, and the mailbox its answer
+/// lands in. Bundled because they move together — the claim of a worker that is out is cleared by
+/// the take of the mail answering it ([`Fetch::take`]), so emptying that mailbox any other way
+/// owes the release ([`Fetch::clear`]), and a spawn that never happened owes it too
+/// ([`Fetch::release`]). Three methods, each spelling one of those, rather than two arrays and the
+/// same rule restated at every site that touches both.
+///
+/// The retry countdown is NOT a third field here; [`RETRY_CD`] documents why it cannot be.
+struct Fetch {
+    /// The claim that this fetch is out. Once a worker holds it, it is cleared ONLY by a mailbox
+    /// take, so anything that drops the mailbox ([`supersede`]) must clear it too — otherwise the
+    /// fetch stays latched and the page spins forever. Same latch `browse.rs` documents on its
+    /// `IN_FLIGHT` array.
+    ///
+    /// It bounds spawns per *pump*, which is what matters; it is NOT a hard one-worker-at-a-time
+    /// interlock, and claiming otherwise would be wrong. Two ways a second worker can briefly
+    /// exist: [`supersede`] releases the claim while the old worker is still running, and a take
+    /// releases it before the generation check (so a stale landing can free a NEWER fetch's claim,
+    /// costing one duplicate request). Neither can wedge or corrupt — [`land`] is monotone on the
+    /// generation and [`PersonState::pump`] discards anything stale — and `browse.rs` has the identical shape.
+    in_flight: AtomicBool,
+    /// Where the worker posts what it came back with — the one half of a [`Fetch`] a worker
+    /// touches, the claim beside it being moved by the main thread alone. `None` means nothing has
+    /// landed since the last take.
+    slot: Mutex<Option<Mail>>,
+}
+
+impl Fetch {
+    const IDLE: Fetch = Fetch {
+        in_flight: AtomicBool::new(false),
+        slot: Mutex::new(None),
+    };
+
+    /// Is the claim held? [`maybe_spawn`]'s first gate.
+    fn busy(&self) -> bool {
+        self.in_flight.load(Ordering::SeqCst)
+    }
+
+    /// Claim the fetch, on the way into a spawn.
+    fn claim(&self) {
+        self.in_flight.store(true, Ordering::SeqCst);
+    }
+
+    /// Release the claim without touching the mailbox — what a REFUSED spawn (`task.rs`'s thread
+    /// ceiling) owes, since nothing will ever land to release it, and the second half of
+    /// [`Fetch::clear`].
+    fn release(&self) {
+        self.in_flight.store(false, Ordering::SeqCst);
+    }
+
+    /// Take whatever landed, RELEASING the claim with it. The release does not depend on what the
+    /// mail turns out to be — an answer, a failure, or a generation the pump is about to discard —
+    /// because once a worker is out this take and [`supersede`] are the two things that can clear
+    /// its claim: hold it while dropping a landing and this fetch never spawns again.
+    ///
+    /// An EMPTY mailbox releases nothing, which is the other half of the rule: the claim it would
+    /// clear belongs to a worker still running, and the next frame would spawn a duplicate.
+    fn take(&self) -> Option<Mail> {
+        let mail = self.slot.lock().unwrap_or_else(|e| e.into_inner()).take()?;
+        self.in_flight.store(false, Ordering::SeqCst);
+        Some(mail)
+    }
+
+    /// Drop the mailbox and release the claim with it — [`supersede`]'s per-fetch half. Releases
+    /// unconditionally, unlike [`Fetch::take`], and that difference is the point: the worker
+    /// holding this claim is still out, and what it will answer about is a person no longer open.
+    fn clear(&self) {
+        *self.slot.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        self.release();
+    }
+}
 
 /// Cross-thread transport for one physical owner. Every worker captures this exact `Arc`; reset
 /// rotates the store to a fresh adapter, so a detached old worker can only fill retired slots.
@@ -534,7 +602,10 @@ impl Default for PersonAdapter {
 /// cannot reach through [`open`], because reaching it needs two overlapping real fetches.
 impl PersonAdapter {
     fn land(&self, i: usize, generation: u32, what: Landing) {
-        self.fetch[i].post(Mail { gen: generation, what }, |old| old.gen < generation);
+        let mut slot = self.fetch[i].slot.lock().unwrap_or_else(|e| e.into_inner());
+        if slot.as_ref().map(|r| r.gen < generation).unwrap_or(true) {
+            *slot = Some(Mail { gen: generation, what });
+        }
     }
 }
 
@@ -991,8 +1062,19 @@ impl PersonState {
             // The take releases the single-flight claim with the mail, whatever the landing turns
             // out to be. Under replay it happens on the recorded frame; spawning remains outside
             // that gate so the request still leaves on time.
-            let reply = crate::app::bootstrap::stores::take_store_landing(
-                gate, crate::stores::StoreId::Person, "person", i as u32, &adapter.fetch[i]);
+            let reply = if crate::app::bootstrap::stores::active() {
+                let reply = crate::app::bootstrap::stores::poll("person", i as u32, || {
+                    adapter.fetch[i].take()
+                });
+                if reply.is_some() {
+                    gate.landed(crate::stores::StoreId::Person.ord());
+                }
+                reply
+            } else {
+                crate::stores::take_landing(gate, crate::stores::StoreId::Person, || {
+                    adapter.fetch[i].take()
+                })
+            };
             if let Some(reply) = reply {
                 adapter.fetch[i].release();
                 // Every landing repaints, failures included: a shelf or stopped spinner must not
@@ -1289,7 +1371,7 @@ fn apply_landing(state: &mut PersonState, i: usize, what: Landing) -> bool {
             {
                 let s = &mut p.srcs[si];
                 // A landing addressed to a shelf list that has since been REPLACED must not settle
-                // the current one: `stores::Fetch`'s doc allows a brief duplicate media worker
+                // the current one: `Fetch::in_flight`'s doc allows a brief duplicate media worker
                 // at one generation, so a second media landing can swap this source's shelves while
                 // a roles batch for the first list is in flight. Refusing it (without arming the
                 // failure backoff — nothing failed) leaves `roled` false, and `address` simply
@@ -1414,6 +1496,28 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
     // worker matches a credit row by either id space
     let guid = p.guid.clone();
     if i == F_PROFILE || i == F_CREDITS {
+        // The Jellyfin flavor's page is its own provider: the biography is the person ITEM the
+        // credit row already named (`fetch_profile_jf`), and plex.tv's global filmography has no
+        // counterpart on this backend at all — the filmography the route draws there is the
+        // per-source shelves below, so the F_CREDITS mailbox asks for nothing.
+        #[cfg(feature = "jellyfin")]
+        if p.sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+            if i == F_CREDITS {
+                return;
+            }
+            adapter.fetch[i].claim();
+            let worker_adapter = Arc::clone(adapter);
+            let spawned = crate::task::spawn_small("person", move || {
+                // filled OUTSIDE the guard so a panicking fetch still lands — as a FAILURE (None),
+                // not as an empty biography
+                let prof = catch_unwind(|| fetch_profile_jf(&arg[0])).unwrap_or(None);
+                worker_adapter.land(i, generation, Landing::Profile(prof));
+            });
+            if !spawned {
+                adapter.fetch[i].release();
+            }
+            return;
+        }
         let controlled = crate::app::bootstrap::stores::active();
         let session = if controlled { None } else { crate::plex::session::peek_settled() };
         if !controlled && session.as_ref().is_none_or(|s| s.client_id.is_empty()) { return; }
@@ -1438,6 +1542,40 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
         return;
     }
     let Some((sid, kind)) = un_fx(i) else { return };
+    // The Jellyfin slot's own answers. That backend's client lives outside the Plex registry
+    // `client_for` reads, so without this arm the fetch backs off forever and the page never
+    // fills — the "opening a cast member does nothing" of issue #8 was exactly that silence, plus
+    // a plex.tv biography a signed-out session could never fetch. K_RESOLVE is unreachable here
+    // by construction (the origin src is born resolved and no other source exists on this
+    // backend) and is spelled out anyway so a future caller of the fx space cannot turn that
+    // silence into a spawn loop. The filmography landing carries an EMPTY match index: that
+    // table joins plex.tv guids, and a Jellyfin item has none.
+    #[cfg(feature = "jellyfin")]
+    if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+        if kind == K_RESOLVE {
+            return;
+        }
+        let pkey = p.key.clone();
+        adapter.fetch[i].claim();
+        let worker_adapter = Arc::clone(adapter);
+        let spawned = crate::task::spawn_small("person", move || {
+            // same contract as the Plex arms: a panicking worker lands as a FAILURE, never as an
+            // empty filmography or silently-missing credit names
+            let what = match kind {
+                K_MEDIA => Landing::Media(
+                    catch_unwind(|| person_media_jf(sid, &arg[0])).unwrap_or(None),
+                ),
+                _ => Landing::Roles(
+                    catch_unwind(|| person_roles_jf(&pkey, &arg)).unwrap_or(None),
+                ),
+            };
+            worker_adapter.land(i, generation, what);
+        });
+        if !spawned {
+            adapter.fetch[i].release();
+        }
+        return;
+    }
     // CAPTURE AT THE SPAWN SITE — `pms::kick` states the rule and this store now needs it for the
     // same reason. The worker is handed THIS server's own `&'static Client`, never `client()`: a
     // slot re-pointed mid-request cannot redirect a fetch already out (`plex::servers` leaks each
@@ -1544,6 +1682,125 @@ fn fetch_credits(_guid: &str, _session: &crate::plex::session::Session) -> Optio
 #[cfg(test)]
 fn fetch_profile(_guid: &str, _session: &crate::plex::session::Session) -> Option<crate::plex::discover::PersonProfile> {
     None
+}
+
+// ---- the Jellyfin backend's answers -----------------------------------------------------------
+//
+// There is no plex.tv on that side and no per-server join either: the person IS an item id the
+// credit row already carried, so the whole arm is three direct reads (profile item, filmography
+// page per shelf kind, credit rows inline on the filmography) mapped into the same landings the
+// Plex workers post. The pure halves are split out (`jf_profile_from`, `jf_shelf`, `jf_roles`)
+// because they are the parts worth grading: the date trim, the cap-vs-total split and the
+// credit-row match are each exactly the kind of off-by-one a worker test would never catch once
+// the real server answers.
+
+/// Map the person's own item record onto the profile landing. The name and headshot are
+/// deliberately NOT carried: `apply`'s Profile arm keeps the credit row's spelling and picture
+/// for exactly the mid-fetch-rename reason its comment records, and an empty `thumb` here is
+/// what leaves that untouched. Jellyfin has no departments and no birthplace on the record;
+/// both stay empty, which the header draws as absent rather than as a blank line.
+#[cfg(feature = "jellyfin")]
+fn jf_profile_from(it: &crate::jellyfin::BaseItemDto) -> crate::plex::discover::PersonProfile {
+    let date = |v: &Option<String>| {
+        v.as_deref()
+            .and_then(|s| s.split('T').next())
+            .unwrap_or_default()
+            .to_string()
+    };
+    crate::plex::discover::PersonProfile {
+        title: it.name.clone(),
+        summary: it.overview.clone().unwrap_or_default(),
+        born_at: date(&it.premiere_date),
+        died_at: date(&it.end_date),
+        birth_place: String::new(),
+        known_for: String::new(),
+        thumb: String::new(),
+        credit_types: Vec::new(),
+    }
+}
+
+/// One shelf from one filmography page: rows converted and capped to [`SHELF_MAX`], the REAL
+/// total kept beside them (a prolific actor has more credits than tiles, and the heading counts
+/// facts, not what fitted), and the roles vector pre-sized parallel with empty strings — the
+/// credit names land through their own fetch, never this one.
+#[cfg(feature = "jellyfin")]
+fn jf_shelf(
+    items: &[crate::jellyfin::BaseItemDto],
+    total: i64,
+    sid: ServerId,
+) -> Shelf {
+    let mut sh = Shelf::default();
+    sh.total = total.max(0) as usize;
+    for it in items.iter().take(SHELF_MAX) {
+        if let Some(m) = crate::jellyfin::movie_from_dto(it, sid, 0) {
+            sh.items.push(m);
+        }
+    }
+    sh.roles = vec![String::new(); sh.items.len()];
+    sh
+}
+
+/// The credit rows: for every filmography item the shelf holds, the part THIS person played in
+/// it, read off the item's own `People[]`. Items outside `keys` are skipped rather than carried —
+/// the landing is addressed to one shelf list, exactly the contract `RolesLanding`'s `keys`
+/// exists to enforce. A credit with no `Role` string (crew, or a sparse record) answers `""`,
+/// which `apply` already reads as "name no part".
+#[cfg(feature = "jellyfin")]
+fn jf_roles(
+    items: &[crate::jellyfin::BaseItemDto],
+    person_id: &str,
+    keys: &[&str],
+) -> Vec<(String, String)> {
+    items
+        .iter()
+        .filter(|it| keys.contains(&it.id.as_str()))
+        .map(|it| {
+            let role = it
+                .people
+                .iter()
+                .find(|p| p.id == person_id)
+                .and_then(|p| p.role.clone())
+                .unwrap_or_default();
+            (it.id.clone(), role)
+        })
+        .collect()
+}
+
+/// WORKER THREAD: the Jellyfin biography. The detail fetch answers the person's own record; the
+/// mapping is the whole job.
+#[cfg(feature = "jellyfin")]
+fn fetch_profile_jf(person_id: &str) -> Option<crate::plex::discover::PersonProfile> {
+    crate::jellyfin::client()?.item_detail(person_id).map(|it| jf_profile_from(&it))
+}
+
+/// WORKER THREAD: the Jellyfin filmography, both shelves. One page per kind keeps each shelf's
+/// REAL total a fact about its own answer rather than a split of a shared count.
+#[cfg(feature = "jellyfin")]
+fn person_media_jf(sid: ServerId, person_id: &str) -> Option<MediaLanding> {
+    let c = crate::jellyfin::client()?;
+    let movies = c.person_items(person_id, "Movie", "")?;
+    let shows = c.person_items(person_id, "Series", "")?;
+    Some(MediaLanding {
+        shelves: [
+            jf_shelf(&movies.items, movies.total, sid),
+            jf_shelf(&shows.items, shows.total, sid),
+        ],
+        // The cross-source availability join is plex.tv-guid vocabulary; a Jellyfin item has no
+        // guid, so the index that join reads stays empty.
+        matches: Vec::new(),
+    })
+}
+
+/// WORKER THREAD: the Jellyfin credit rows, off one filmography page that asks for `People`.
+#[cfg(feature = "jellyfin")]
+fn person_roles_jf(person_id: &str, keys: &[String]) -> Option<RolesLanding> {
+    let c = crate::jellyfin::client()?;
+    let res = c.person_items(person_id, "Movie,Series", "People")?;
+    let key_refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+    Some(RolesLanding {
+        keys: keys.to_vec(),
+        pairs: jf_roles(&res.items, person_id, &key_refs),
+    })
 }
 
 /// `(ratingKey, character)` for every row of a batched `/library/metadata/{csv}` response, keeping
@@ -1710,7 +1967,7 @@ pub(crate) fn filmography(p: &Person) -> Vec<Department> {
     };
     let mut kept: Vec<Department> = Vec::new();
     let mut other = Department {
-        title: crate::i18n::msg::browse_person_other().to_string(),
+        title: "Other".to_string(),
         total: 0,
         rows: Vec::new(),
     };
@@ -1906,7 +2163,8 @@ pub(crate) fn ownership_fixture_for_test(&self, adapter: &Arc<PersonAdapter>) ->
         generation: self.generation,
         retry_cd: self.retry_cd,
         flights: std::array::from_fn(|i| adapter.fetch[i].busy()),
-        mail: std::array::from_fn(|i| adapter.fetch[i].has_mail()),
+        mail: std::array::from_fn(|i| adapter.fetch[i].slot.lock()
+            .unwrap_or_else(|e| e.into_inner()).is_some()),
     }
 }
 
@@ -2094,7 +2352,11 @@ mod tests {
             [a, c]
         );
         assert!(
-            !owner.adapter.fetch[fx(b, K_MEDIA).unwrap()].has_mail(),
+            owner.adapter.fetch[fx(b, K_MEDIA).unwrap()]
+                .slot
+                .lock()
+                .unwrap()
+                .is_none(),
             "old-share mail was superseded"
         );
         assert!(owner.current()

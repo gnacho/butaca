@@ -534,20 +534,21 @@ impl RouteOutcome {
     /// split out of `transport_other` here only — the report's top-level `link` keeps its class,
     /// because Sentry fingerprints on it.
     pub(crate) fn of_failure(failure: Option<crate::net::RequestFailure>) -> Self {
-        use crate::telemetry::incident::{classify, LinkClass};
         let Some(failure) = failure else { return Self::Unknown };
-        match classify(Some(Err(failure))) {
-            (LinkClass::Answered2xx, ..) => Self::WrongServer, // a truncated 2xx verified nothing
-            (LinkClass::Answered4xx, Some(401), _) => Self::Unauthorized,
-            (LinkClass::Answered4xx, ..) => Self::Answered4xx,
-            (LinkClass::Answered5xx, ..) => Self::Answered5xx,
-            (LinkClass::AnsweredOther, ..) => Self::AnsweredOther,
-            (LinkClass::Dns, ..) => Self::Dns,
-            (LinkClass::Tls, ..) => Self::Tls,
-            (LinkClass::Timeout, ..) => Self::Timeout,
-            (LinkClass::TransportOther, _, Some(7)) => Self::Refused,
-            (LinkClass::TransportOther, ..) => Self::TransportOther,
-            (LinkClass::Unknown, ..) => Self::Unknown,
+        // The same coarse link classes the removed telemetry module classified by, kept so the
+        // plaintext-eligibility answers name a fixable cause: a DNS failure, a TLS refusal and
+        // an HTTP status are three different fixes.
+        match (failure.status, failure.curl_rc) {
+            (Some(401), _) => Self::Unauthorized,
+            (None, Some(28)) => Self::Timeout,
+            (None, Some(7)) => Self::Refused,
+            (Some(s), _) if (200..=299).contains(&s) => Self::WrongServer, // a truncated 2xx verified nothing
+            (Some(s), _) if (400..=499).contains(&s) => Self::Answered4xx,
+            (Some(s), _) if (500..=599).contains(&s) => Self::Answered5xx,
+            (Some(_), _) => Self::AnsweredOther,
+            (None, Some(6)) => Self::Dns,
+            (None, Some(rc)) if matches!(rc, 35 | 60 | 77 | 90) => Self::Tls,
+            _ => Self::TransportOther,
         }
     }
 

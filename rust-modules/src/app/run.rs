@@ -51,7 +51,7 @@ pub(super) fn recorder_end_frame(
     rec.measurements(bridge);
     rec.content_end();
     rec.end_frame_with_gate(&|| super::recorder::state_hash(
-        press, route, overlay, focus, tree, bridge.session_subhash(), bridge.consent_subhash(),
+        press, route, overlay, focus, tree, bridge.session_subhash(),
         bridge.initial_subhash(),
     ), &|id| bridge.store_gen(id), bridge.landgate())
 }
@@ -656,7 +656,6 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
     restore_window: impl FnOnce(*mut c_void)) {
     let et = rd_u32(&app.ev, 0);
     app.window_activity.event(et);
-    crate::telemetry::window::lifecycle(et, matches!(app.route(), AppArg::Player));
     if controlled_replay(app) {
         // The tape owns logical ingress; real SDL startup notifications must not be
         // counted a second time. The real compositor still owns window safety.
@@ -2028,7 +2027,6 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         crate::dev::scenarios::legal_doc_tick(app, fr.now, fr.dt);
         crate::dev::scenarios::alert_tick(app, fr.now, fr.dt);
         crate::dev::scenarios::settings_osc_tick(app, fr.now, fr.dt);
-        crate::dev::scenarios::consent_osc_tick(app, fr.now, fr.dt);
         crate::dev::scenarios::onboard_osc_tick(app, fr.now, fr.dt);
         // (`legal::update` / `consent::update` / `settings::update` stood here, self-gated on
         // their own `Popover::visible` because none of them was a route. The surface and its
@@ -2438,7 +2436,6 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
         // reach the wire — see `diag::schema`.
         if fr.rn != app.last_route_reported {
             app.last_route_reported = fr.rn;
-            crate::diag::event(crate::diag::schema::DiagEvent::RouteEntered { screen: fr.rn });
         }
         // The lab envelope's `route` field, from the SAME name the heartbeat and the focus
         // fingerprint print — a snapshot that disagreed with the log about which screen the
@@ -2518,7 +2515,6 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
                 // can be the probe's `route=`. Named rather than swept into a `_` so a new page
                 // variant is a compile error here rather than a silently mis-probed screen.
                 AppArg::Settings(_)
-                | AppArg::FirstRunConsent(_)
                 | AppArg::LibraryMenu(_)
                 | AppArg::AccountMenu
                 | AppArg::ItemMenu(_)
@@ -2963,8 +2959,6 @@ mod lifecycle_regression_tests {
                 alert_step: Default::default(),
                 account_osc_last: Default::default(),
                 account_osc_down: Default::default(),
-                consent_osc_last: Default::default(),
-                consent_osc_down: Default::default(),
                 onboard_osc_last: Default::default(),
                 onboard_osc_right: Default::default(),
                 nav_osc_last: Default::default(),
@@ -3018,7 +3012,6 @@ mod lifecycle_regression_tests {
                     legal_doc: Default::default(),
                     alert_boot: Default::default(),
                     account_osc: Default::default(),
-                    consent_osc: Default::default(),
                     onboard_osc: Default::default(),
                     nav_osc: Default::default(),
                     nav_osc_rk: Default::default(),

@@ -635,8 +635,6 @@ pub(crate) enum FailureKind {
     PlaybackInterrupted,
     /// Starfish refused the Load declaration, so no decoder session could start.
     TvPipeline,
-    /// Historical telemetry only: the retired exclusive Original experiment lost its HLS rollback.
-    OriginalRollback,
     /// This device's jail is missing `/dev/rtkmem` on a SoC where that is a known cause of
     /// native A/V crashes — the Load was never attempted. Community-tier finding: see
     /// [`crate::webos::jail_blocks_native_video`]'s doc.
@@ -663,7 +661,6 @@ impl FailureKind {
             FailureKind::MediaSource => "media_source",
             FailureKind::PlaybackInterrupted => "playback_interrupted",
             FailureKind::TvPipeline => "tv_pipeline",
-            FailureKind::OriginalRollback => "original_rollback",
             FailureKind::JailMissingRtkmem => "jail_missing_rtkmem",
             FailureKind::LoadTimeout => "load_timeout",
             FailureKind::Unspecified => "unspecified",
@@ -725,7 +722,7 @@ pub(crate) fn failure_actions(kind: FailureKind, cx: FailureContext) -> Vec<Fail
     use FailureAction as A;
     use FailureKind as K;
     let transient = matches!(kind, K::MediaSource | K::PlaybackInterrupted | K::LoadTimeout
-        | K::OriginalRollback | K::Unspecified);
+        | K::Unspecified);
     let mut v = Vec::with_capacity(4);
     match kind {
         // A device finding: nothing about the request changes it; only the repair can.
@@ -2340,7 +2337,7 @@ mod tests {
     fn every_failure_row() -> Vec<(FailureKind, FailureContext, Vec<FailureAction>)> {
         use FailureKind as K;
         let kinds = [K::DecisionRefused, K::PlaybackPolicy, K::NoVideoTranscodeTarget, K::NoVideoTrack,
-            K::MediaSource, K::PlaybackInterrupted, K::TvPipeline, K::LoadTimeout, K::OriginalRollback,
+            K::MediaSource, K::PlaybackInterrupted, K::TvPipeline, K::LoadTimeout,
             K::JailMissingRtkmem, K::Unspecified];
         let mut out = Vec::new();
         for kind in kinds {

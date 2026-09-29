@@ -260,7 +260,7 @@
     "description": "Settings, account, onboarding or privacy UI: settings.consent.delete"
   },
   "settings.consent.delete_scope": {
-    "value": "This signs out and removes PlxNative data stored on this television. It does not delete data already sent to Plex, your Plex Media Servers, Sentry or PostHog.",
+    "value": "This signs the television out and removes every stored sign-in, profile, server and setting. Playback positions on the servers are not touched.",
     "description": "Settings, account, onboarding or privacy UI: settings.consent.delete_scope"
   },
   "settings.consent.settings_copy": {
