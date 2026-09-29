@@ -2273,6 +2273,13 @@ pub(crate) struct PlayingItem {
     /// stream's rate—when deciding whether a remote connection has enough headroom to carry the
     /// original file, because the transport also has to carry audio and container overhead.
     pub(crate) bitrate: i64,
+    /// The source's container word (`Part[0].container`, `Media[0].container` on Plex; the
+    /// MediaSource's own name on Jellyfin) — the direct-play gate's demuxer test where the part
+    /// key carries no extension to read (a Jellyfin MediaSource id is a GUID). Empty means "not
+    /// said", and the gate then falls back to the part key's extension, which is the same fact
+    /// on Plex.
+    #[allow(dead_code)] // read by the jellyfin direct-play gate (decision.rs arm lands in S7)
+    pub(crate) container: String,
     /// The played leaf's Dolby Vision layering — the direct-play gate's other refusal, beside the
     /// frame size above and for the same reason: the local fallback never asks PMS, so a file
     /// whose base layer we cannot display correctly (Profile 5, or a dual-layer Profile 7) would
@@ -2295,6 +2302,7 @@ impl PlayingItem {
         PlayingItem {
             sid: crate::plex::ServerId::from_raw(0),
             rk: "rk".into(),
+            container: String::new(),
             show_rk: String::new(),
             audio: Vec::new(),
             subs,
@@ -2337,6 +2345,7 @@ fn cached_playing(state: &MetadataState, sid: crate::plex::ServerId, rk: &str) -
         .map(|d| PlayingItem {
             sid,
             rk: rk.to_string(),
+            container: d.container.clone(),
             show_rk: d.show_rk.clone(),
             audio: d.audio.clone(),
             subs: d.subs.clone(),
@@ -2391,6 +2400,7 @@ pub(crate) fn fetch_playing_item(sid: crate::plex::ServerId, rk: &str) -> Option
         .and_then(|it| it.ultra_blur_colors)
         .and_then(|u| u.corners());
     Some(PlayingItem {
+        container: String::new(),
         sid,
         rk: rk.to_string(),
         show_rk,

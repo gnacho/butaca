@@ -77,6 +77,9 @@ pub(crate) enum Method {
     Get,
     Put,
     Post,
+    /// Jellyfin's view-state writes (`DELETE .../PlayedItems/{id}`) and its transcode kill
+    /// (`DELETE /Videos/ActiveEncodings`) — bodyless like a GET, parameters in the query string.
+    Delete,
 }
 
 impl Method {
@@ -86,6 +89,7 @@ impl Method {
             Method::Get => "GET",
             Method::Put => "PUT",
             Method::Post => "POST",
+            Method::Delete => "DELETE",
         }
     }
 }
@@ -179,7 +183,29 @@ pub(crate) fn request(
     headers: &[&str],
     pin: Option<&ResolvePin>,
 ) -> Option<Reply> {
-    request_with(origin, path, method, headers, BodyPolicy::Api, pin).response()
+    request_with(origin, path, method, headers, BodyPolicy::Api, pin, &[]).response()
+}
+
+/// A JSON-body POST: the one shape Jellyfin's control plane needs that Plex's never did
+/// (`AuthenticateByName`, `Sessions/Playing`, the view-state writes). The caller's `headers`
+/// ride alongside the two this function adds (`Accept`, `Content-Type`, `Content-Length` — the
+/// body is sized here, so the head and the bytes on the wire cannot disagree). The ordinary API
+/// policy applies; there is deliberately no body-bearing probe or deadline variant, because a
+/// control POST either fits the API budget or is a failure the caller already handles as one.
+pub(crate) fn request_post_json(
+    origin: &Origin,
+    path: &str,
+    headers: &[&str],
+    body: &[u8],
+) -> Option<Reply> {
+    let ct = "Content-Type: application/json".to_owned();
+    let cl = format!("Content-Length: {}", body.len());
+    let mut all: Vec<&str> = Vec::with_capacity(headers.len() + 3);
+    all.push(ACCEPT_JSON);
+    all.extend_from_slice(headers);
+    all.push(&ct);
+    all.push(&cl);
+    request_with(origin, path, Method::Post, &all, BodyPolicy::Api, None, body).response()
 }
 
 /// A PMS request whose response size is content-dependent. Only the TLS arm differs from
@@ -191,7 +217,7 @@ pub(crate) fn request_bulk(
     headers: &[&str],
     pin: Option<&ResolvePin>,
 ) -> Option<Reply> {
-    request_with(origin, path, method, headers, BodyPolicy::Bulk, pin).response()
+    request_with(origin, path, method, headers, BodyPolicy::Bulk, pin, &[]).response()
 }
 
 /// A small control-plane request inside an already-running transaction reserve. Plaintext composes
@@ -215,6 +241,7 @@ pub(crate) fn request_until_outcome(
         headers,
         BodyPolicy::Deadline { at: deadline },
         pin,
+        &[],
     )
 }
 
@@ -252,6 +279,8 @@ pub(crate) fn request_probe(
             timeout_s,
         },
         pin,
+   
+        &[],
     ) {
         RequestOutcome::Response(reply) => Ok(reply),
         RequestOutcome::Transport(failure) => Err(failure),
@@ -268,25 +297,92 @@ fn request_with(
     headers: &[&str],
     body_policy: BodyPolicy,
     pin: Option<&ResolvePin>,
+    req_body: &[u8],
 ) -> RequestOutcome {
     if !credential_transport_allowed(origin, path, headers) {
         return RequestOutcome::Transport(None);
     }
     match origin.scheme() {
         // The plaintext arm dials the literal it is given; a pin belongs to a TLS NAME only.
-        Scheme::Http => plaintext(origin, path, method, headers, body_policy),
-        Scheme::Https => tls(origin, path, method, headers, body_policy, pin),
+        Scheme::Http => plaintext(origin, path, method, headers, body_policy, req_body),
+        Scheme::Https => tls(origin, path, method, headers, body_policy, pin, req_body),
     }
 }
 
+/// Which credential shape a request carries — the Plex arm's rule and the Jellyfin flavor's
+/// relaxation answer DIFFERENT questions, so the classifier names the shape before any policy
+/// runs. `None` is "no credential", and every policy admits it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Credential {
+    None,
+    Plex,
+    Jellyfin,
+}
+
+fn credential_carried(path: &str, headers: &[&str]) -> Credential {
+    let lower = path.to_ascii_lowercase();
+    if lower.contains("x-plex-token=") {
+        return Credential::Plex;
+    }
+    // Jellyfin accepts the access token either as the `api_key` query parameter (its SDKs' habit,
+    // and what our image/stream URLs use) or inside the `Authorization` header under its own
+    // `MediaBrowser` scheme — since Jellyfin 12 the ONLY accepted spelling: the legacy
+    // `X-Emby-Token` / `X-Emby-Authorization` headers were removed server-side. The name check
+    // for everything else is deliberately EXACT: a bare `Authorization` belongs to the Plex
+    // arm's rule (and to every bearer scheme), and substring-matching it onto Jellyfin's old
+    // identity header would route Jellyfin's credentials through a policy written for another
+    // service.
+    if lower.contains("api_key=") {
+        return Credential::Jellyfin;
+    }
+    let mut saw = Credential::None;
+    for header in headers {
+        let Some((name, value)) = header.split_once(':') else {
+            continue;
+        };
+        let name = name.trim();
+        if name.eq_ignore_ascii_case("x-plex-token") || name.eq_ignore_ascii_case("authorization") {
+            // `Authorization: MediaBrowser ...` is Jellyfin's own scheme; it answers to the
+            // Jellyfin plaintext policy, not to the Plex arm a generic Authorization obeys.
+            if name.eq_ignore_ascii_case("authorization")
+                && value.trim_start().starts_with("MediaBrowser")
+            {
+                return Credential::Jellyfin;
+            }
+            return Credential::Plex;
+        }
+        if name.eq_ignore_ascii_case("x-emby-token")
+            || name.eq_ignore_ascii_case("x-emby-authorization")
+        {
+            saw = Credential::Jellyfin;
+        }
+    }
+    saw
+}
+
 fn carries_credential(path: &str, headers: &[&str]) -> bool {
-    path.to_ascii_lowercase().contains("x-plex-token=")
-        || headers.iter().any(|header| {
-            header.split_once(':').is_some_and(|(name, _)| {
-                name.trim().eq_ignore_ascii_case("x-plex-token")
-                    || name.trim().eq_ignore_ascii_case("authorization")
-            })
-        })
+    credential_carried(path, headers) != Credential::None
+}
+
+/// The host half of the Jellyfin plaintext relaxation (the flavor's module doc states the whole
+/// rule): an address that cannot leave the LAN by routing — RFC 1918 v4, loopback, link-local,
+/// v6 loopback/ULA/link-local. A HOSTNAME (even `jellyfin.local`) is not on this list on
+/// purpose: it requires a resolver round-trip to classify, the answer can lie (rebinding), and
+/// the sign-in form asks for an address, not a name.
+fn is_lan_host(host: &str) -> bool {
+    use std::net::IpAddr;
+    match host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(a)) => {
+            a.is_private() || a.is_loopback() || a.is_link_local() || a.is_unspecified()
+        }
+        Ok(IpAddr::V6(a)) => {
+            a.is_loopback()
+                || a.is_unspecified()
+                || (a.segments()[0] & 0xfe00) == 0xfc00 // fc00::/7 unique-local
+                || (a.segments()[0] & 0xffc0) == 0xfe80 // fe80::/10 link-local
+        }
+        Err(_) => false,
+    }
 }
 
 pub(crate) fn credential_transport_allowed_by_policy(
@@ -295,7 +391,17 @@ pub(crate) fn credential_transport_allowed_by_policy(
     headers: &[&str],
     policy: CredentialPolicy,
 ) -> bool {
-    !carries_credential(path, headers) || crate::plex::grant::allowed_under(policy, origin)
+    match credential_carried(path, headers) {
+        Credential::None => true,
+        Credential::Plex => crate::plex::grant::allowed_under(policy, origin),
+        // Jellyfin has no *.plex.direct equivalent: a home server is plain HTTP on a LAN
+        // address in the overwhelming majority of installs, so its credential shapes may cross
+        // plaintext ONLY to an address that cannot route off the LAN. TLS, a developer build and
+        // a live consented grant admit everything the Plex arm admits.
+        Credential::Jellyfin => {
+            crate::plex::grant::allowed_under(policy, origin) || is_lan_host(origin.host())
+        }
+    }
 }
 
 /// The shared control/media credential boundary: a request that carries a credential reaches the
@@ -354,6 +460,7 @@ fn plaintext(
     method: Method,
     headers: &[&str],
     body_policy: BodyPolicy,
+    req_body: &[u8],
 ) -> RequestOutcome {
     // The raw socket takes ONE `extra` blob, CRLF-terminated per line and CRLF-terminated at the
     // end — it is spliced straight into the request head. Control-plane is one-shot: send
@@ -440,6 +547,28 @@ fn plaintext(
                 }
             }
         }
+        // The JSON-body entry point is the one caller that brings bytes of its own, and it runs
+        // the ordinary API policy only — there is no body-bearing probe or deadline variant, and
+        // `request_post_json`'s doc says why none is needed. An empty slice keeps `http_open`'s
+        // byte-for-byte head and behaviour.
+        _ if !req_body.is_empty() => crate::stream::http_open_body(
+            &mut *hs,
+            host_c.as_ptr(),
+            origin.port(),
+            path_c.as_ptr(),
+            extra_ptr,
+            method.as_str(),
+            req_body,
+        ),
+        _ if !req_body.is_empty() => crate::stream::http_open_body(
+            &mut *hs,
+            host_c.as_ptr(),
+            origin.port(),
+            path_c.as_ptr(),
+            extra_ptr,
+            method.as_str(),
+            req_body,
+        ),
         _ => crate::stream::http_open(
             &mut *hs,
             host_c.as_ptr(),
@@ -590,7 +719,9 @@ fn tls(
     headers: &[&str],
     body_policy: BodyPolicy,
     pin: Option<&ResolvePin>,
+    req_body: &[u8],
 ) -> RequestOutcome {
+    let _ = &req_body; // the tls arm forwards it to the socket layer below
     let url = format!("{}{}", origin.base(), path);
     let resolve = pin
         .filter(|p| p.host() == origin.host() && p.port() == origin.port())

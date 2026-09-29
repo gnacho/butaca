@@ -375,6 +375,7 @@ pub(super) fn fourk_item_with_subs(
     crate::metadata::PlayingItem {
         sid,
         rk: "rk-4k".into(),
+        container: String::new(),
         show_rk: String::new(),
         audio,
         subs,

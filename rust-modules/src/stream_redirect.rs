@@ -165,6 +165,7 @@ pub(crate) fn open_following(
             req.deadline,
             req.deadline.is_some(),
             checkpoint,
+            &[],
         );
         let status = match opened {
             Ok(()) => return Ok(Opened::Socket(cur)),

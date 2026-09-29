@@ -418,6 +418,15 @@ impl SortEntry {
     }
 }
 
+
+/// The filter a Jellyfin rail's letter counts were computed WITH — Plex's `firstCharacter`
+/// counts are query-independent and never carry one of these.
+#[derive(Clone, Default, PartialEq, Eq, Debug)]
+pub(crate) struct LettersFilter {
+    pub(crate) unwatched: bool,
+    pub(crate) genre: Option<String>, // genre id (GUID), none when unfiltered
+}
+
 /// One genre value (tag id + display title), from the section's `/genre` value list.
 #[derive(Clone)]
 pub(crate) struct GenreEntry {
