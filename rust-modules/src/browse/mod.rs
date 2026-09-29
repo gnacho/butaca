@@ -1837,6 +1837,10 @@ impl BrowseState {
                 match what {
                     SrcWhat::Sections(list) => {
                         let answered = list.is_some();
+                        crate::log(&format!(
+                            "browse: jellyfin sections landed: {:?} (answered={answered})",
+                            list.as_ref().map(|l| l.len())
+                        ));
                         self.append_sections_with(
                             source_index, list.unwrap_or_default(), preferences);
                         // The sort menu is Jellyfin's fixed vocabulary, handed to each of this
@@ -2225,6 +2229,10 @@ impl BrowseState {
         let ready = |source: &BrowseSource| source.retry_cd == 0;
         let mut pick = self.sources.iter().enumerate().find_map(|(index, source)| {
             (ready(source) && !source.sections_done).then(|| {
+                #[cfg(feature = "jellyfin")]
+                if source.sid == crate::jellyfin::SERVER_ID {
+                    crate::log("browse: jellyfin sections fetch picked");
+                }
                 (index, source.sid, SrcJob::Sections, source.name.is_empty())
             })
         });
