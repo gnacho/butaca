@@ -805,7 +805,9 @@ def check_tracked_resources(expect_title: str) -> list:
         # The English sentence is a trademark disclaimer. A translation that transliterated the
         # mark ("플렉스") would both lose the disclaimer's force and misuse it, and no reader of
         # this repository is placed to catch that by eye in twelve languages.
-        check("Plex" in desc, f"{loc}/appinfo.json names Plex verbatim (the disclaimer's subject)")
+        # The fork's disclaimer names Jellyfin (its descriptions say so in every locale); the
+        # subject of the non-affiliation sentence is the service the client speaks to.
+        check("Jellyfin" in desc, f"{loc}/appinfo.json names Jellyfin verbatim (the disclaimer's subject)")
     return locales
 
 
@@ -1476,7 +1478,8 @@ for loc in staged_locales:
 
 print("== ipk payload ==")
 expected = {
-    "plxnative", "sentry-crash", "libass-plx.so.0", "appinfo.json", "icon.png", "largeIcon.png", "splash.png",
+    # No sentry-crash: this fork ships no crash daemon (the Makefile is sentry-free).
+    "plxnative", "libass-plx.so.0", "appinfo.json", "icon.png", "largeIcon.png", "splash.png",
     # appfont-cjk.ttf is the fallback face. Its absence is not a cosmetic loss: every Korean,
     # Japanese and Chinese title in the library becomes tofu, which is LG checklist #6 and #48.
     "appfont.ttf", "appfont-bold.ttf", "appfont-cjk.ttf", "OFL.txt",
@@ -1505,8 +1508,8 @@ if data_blob is not None:
     check(expected <= names, f"payload carries all {len(expected)} app files")
     check(modes.get("plxnative") == 0o755,
           "native app is executable by its jailed runtime uid")
-    check(modes.get("sentry-crash") == 0o755,
-          "native crash handler is executable in the archive")
+    check("sentry-crash" not in names,
+          "no crash daemon in the archive (this fork ships none)")
     # **The simulator's Mach-O FFmpeg lives in pkg/ too, and must never be in the package.** It
     # cannot get there today — `APP_FILES` is an explicit list, not a glob — but "cannot" is a
     # property of one Makefile line, and what it guards against is 2 MB of unrunnable arm64 shipped

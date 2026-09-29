@@ -299,9 +299,11 @@ void plx_crash_write_image_marker(int fd) {
     if (n <= 0) return;
     path[n] = 0;
     const char pre[] = "bin: ";
-    (void)write(fd, pre, sizeof(pre) - 1);
-    (void)write(fd, path, (size_t)n);
-    (void)write(fd, "\n", 1);
+    // warn_unused_result does not honour the (void) cast; a named sink does.
+    ssize_t ignored = write(fd, pre, sizeof(pre) - 1);
+    ignored += write(fd, path, (size_t)n);
+    ignored += write(fd, "\n", 1);
+    (void)ignored;
 }
 
 void plx_crash_install(int ev_fd, int cr_fd) {
