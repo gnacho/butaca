@@ -16,6 +16,23 @@ fn install_bare_jellyfin_client() {
 }
 
 #[test]
+fn an_unadopted_jellyfin_client_opens_the_discovery_gate() {
+    let _guard = crate::testlock::serial();
+    let mut state = BrowseState::default();
+    // Align the session cursor so the gate's generation arm cannot answer for this test.
+    state.session_generation = crate::plex::session::visible_generation();
+    let adapter = BrowseAdapter::default();
+    assert!(!state.discovery_needs_pump(&adapter),
+        "empty roster and no client: nothing to do");
+
+    install_bare_jellyfin_client();
+    assert!(state.discovery_needs_pump(&adapter),
+        "a client the table has not adopted yet is precisely the work the pump exists for");
+
+    crate::jellyfin::uninstall();
+}
+
+#[test]
 fn the_jellyfin_source_survives_the_sync_after_its_adoption() {
     let _guard = crate::testlock::serial();
     install_bare_jellyfin_client();

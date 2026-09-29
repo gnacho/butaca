@@ -732,6 +732,17 @@ impl BrowseState {
         if adapter.src_result.lock().unwrap_or_else(|e| e.into_inner()).is_some() {
             return true;
         }
+        // An installed-but-unadopted Jellyfin client IS discovery work, and only this gate can
+        // say so: the roster diff below reads the PLEX registry (empty in this flavour), so
+        // without the arm a client installed after the first sync — boot order, or a mid-session
+        // sign-in — is never adopted, and the empty table above reads "nothing to do" forever.
+        // The reverse edge (client gone, source still present) needs no arm: the length diff
+        // below already opens the gate, and the sync retires the source.
+        #[cfg(feature = "jellyfin")]
+        if crate::jellyfin::client().is_some()
+            && !self.sources.iter().any(|s| s.sid == crate::jellyfin::SERVER_ID) {
+            return true;
+        }
         let live: Vec<ServerId> = crate::plex::server_ids().collect();
         if live.len() != self.sources.len()
             || self.sources.iter().zip(&live).any(|(source, sid)| source.sid != *sid) {
