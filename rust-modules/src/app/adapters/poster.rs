@@ -510,7 +510,6 @@ fn built_key(srv: ServerId, path: &str, w: c_int, h: c_int, png: bool) -> Option
     if path.is_empty() {
         return None;
     }
-    let c = crate::plex::client_for(srv)?;
     // SAFETY: main-thread only (every caller is a draw path), and the borrow is consumed by the
     // caller before the memo can be touched again; the `'static` is that discipline, not a fact.
     let memo = unsafe {
@@ -518,6 +517,28 @@ fn built_key(srv: ServerId, path: &str, w: c_int, h: c_int, png: bool) -> Option
             map: std::collections::HashMap::new(),
         })
     };
+    // The Jellyfin flavor builds the key from ITS client's image path — same discipline (the
+    // built path is the LRU key AND the fetch path, token baked in), different query vocabulary.
+    // `token_gen` is 0: a Jellyfin client has no token rotation, so the memo invalidates on
+    // (server, path, size) alone, which is exactly when the bytes could change.
+    //
+    // The arm engages only when a Jellyfin client is INSTALLED, not on the slot number alone:
+    // slot 0 is also what a host test's `register_for_test` hands out, and without the guard the
+    // flavor's own test suite would route a Plex fixture through this arm.
+    #[cfg(feature = "jellyfin")]
+    if srv == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+        let c = crate::jellyfin::client()?;
+        let s = memo.get_or_build(srv.raw(), path, w, h, png, 0, || {
+            let n = crate::surface::render_scale() as i64;
+            c.image_path(path, w as i64 * n, h as i64 * n, png).unwrap_or_default()
+        });
+        if s.len() > KEY_MAX {
+            warn_key_refused(s.len());
+            return None;
+        }
+        return Some(s);
+    }
+    let c = crate::plex::client_for(srv)?;
     let s = memo.get_or_build(srv.raw(), path, w, h, png, c.token_gen(), || {
         // A server-generated collection composite is replaced by the app's baked fan: one
         // synthetic key per collection and stamp, whatever box the consumer draws it in.
@@ -726,7 +747,18 @@ fn logo_key(srv: ServerId, rk: &str) -> Option<&'static str> {
     if rk.is_empty() {
         return None;
     }
-    built_key(srv, &format!("/library/metadata/{rk}/clearLogo"), LOGO_REQ_W, LOGO_REQ_H, true)
+    // Plex names the clearLogo under `/library/metadata/{rk}` with the `clearLogo` transcode
+    // verb; Jellyfin keeps the same picture as the item's own `Logo` image type. Getting this
+    // wrong is silent — the fetch just 404s and the hero falls back to title text.
+    #[cfg(feature = "jellyfin")]
+    let src_path = if srv == crate::jellyfin::SERVER_ID {
+        format!("/Items/{rk}/Images/Logo")
+    } else {
+        format!("/library/metadata/{rk}/clearLogo")
+    };
+    #[cfg(not(feature = "jellyfin"))]
+    let src_path = format!("/library/metadata/{rk}/clearLogo");
+    built_key(srv, &src_path, LOGO_REQ_W, LOGO_REQ_H, true)
 }
 
 /// The prefetch twin of [`logo_src`] — starts the same fetch, takes no texture and no LRU
@@ -1554,13 +1586,42 @@ fn poster_worker() {
             s.state = P_LOADING;
             (idx, String::from_utf8_lossy(key_bytes(s)).into_owned(), s.srv, s.gen, s.cache_gen, s.token_gen)
         };
-        let (mut w, mut h) = (0, 0);
-        let mut px = std::ptr::null_mut();
+        let mut w = 0;
+        let mut h = 0;
+        let mut px: *mut std::os::raw::c_uchar = std::ptr::null_mut();
+
         let mut stale = None;
         let mut transient = false;
-        // Revoked servers cannot use disk as a route around sign-out. Keep this client snapshot
-        // for both identity and transport; a later registry repoint must not mix the two.
-        if let Some(client) = crate::plex::client_for(srv)
+        // The Jellyfin slot fetches through ITS client: the key was built by `image_path` and is
+        // already a complete token-bearing path, which is what `get_bytes` dials as-is. The
+        // installed-client guard is `built_key`'s: slot 0 alone must not pick this arm (a host
+        // test's Plex fixture registers there too). No disk arm on this backend: the cache
+        // namespace is a Plex-registry concept and 0.6.x fetched direct.
+        #[cfg(feature = "jellyfin")]
+        let jellyfin_slot = srv == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some();
+        #[cfg(not(feature = "jellyfin"))]
+        let jellyfin_slot = false;
+        if jellyfin_slot {
+            match crate::jellyfin::client() {
+                Some(client) => match client.get_bytes(&key_s) {
+                    Some(b) if !b.is_empty() => {
+                        px = img::img_decode_rgba(b.as_ptr(), b.len() as c_int, &mut w, &mut h);
+                    }
+                    Some(_) => {
+                        transient = true;
+                        warn_fetch_failed(srv, ArtFail::Empty);
+                    }
+                    None => {
+                        transient = true;
+                        warn_fetch_failed(srv, ArtFail::NoResponse);
+                    }
+                },
+                None => {
+                    transient = cache_gen == crate::imgcache::generation();
+                    warn_fetch_failed(srv, ArtFail::NoServer);
+                }
+            }
+        } else if let Some(client) = crate::plex::client_for(srv)
             .filter(|c| cache_gen == crate::imgcache::generation() && c.token_gen() == token_gen)
         {
             if let Some((rk, stamp)) = fan::parse_fan_key(&key_s) {
