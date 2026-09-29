@@ -107,9 +107,10 @@ impl JfClient {
     }
 
     /// The `MediaBrowser` identity, as the standard `Authorization` header the login wants, and
-    /// also the value Jellyfin shows in its own device list. Reuses the ONE product/version/
-    /// device identity the Plex backend reports (`plex::identity`), so an install never
-    /// describes itself two ways to two servers.
+    /// also the value Jellyfin shows in its own device list. The Client is the DISPLAY name (the
+    /// fork's own build says Butaca there — issue #35), while Device/DeviceId/Version keep the
+    /// one wire identity the Plex backend reports (`plex::identity`), so an install never
+    /// describes its device two ways to two servers.
     ///
     /// Jellyfin 12 removed the legacy `X-Emby-Authorization` line this client used to send:
     /// the login POST answers a blanket 400 to it, identity or no identity (verified against
@@ -118,7 +119,7 @@ impl JfClient {
     fn identity_header(&self) -> String {
         format!(
             "Authorization: MediaBrowser Client=\"{}\", Device=\"{}\", DeviceId=\"{}\", Version=\"{}\"",
-            crate::plex::identity::PRODUCT,
+            crate::plex::identity::display_name(),
             crate::plex::identity::DEVICE,
             self.device_id,
             crate::plex::identity::VERSION,
@@ -981,6 +982,10 @@ mod tests {
         let auth = &reqs[0];
         assert!(auth.starts_with("POST /Users/AuthenticateByName HTTP/1.1"));
         assert!(auth.to_ascii_lowercase().contains("content-type: application/json"));
+        // The dashboard names the fork: Client is the display name, "Butaca" on this build.
+        #[cfg(feature = "jellyfin")]
+        assert!(auth.contains("Authorization: MediaBrowser Client=\"Butaca\""));
+        #[cfg(not(feature = "jellyfin"))]
         assert!(auth.contains("Authorization: MediaBrowser Client=\"PlxNative\""));
         // Key order in the body is serde_json's (alphabetical without preserve_order) — assert
         // the two fields, not one literal, so the test does not hinge on serializer internals.
