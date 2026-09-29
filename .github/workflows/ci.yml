@@ -13,34 +13,7 @@ on:
     # for `release.yml`'s `line` input, so it gets the same push gate `main` does — otherwise the
     # first time a hotfix's changes are compiled in a clean checkout is the release run itself.
     branches: [main, 'release/v*']
-    # This gate is host checks (lint + unit suite) and an ARM cross-build — expensive (#261 spent
-    # ~20 runner-minutes on a README-only PR), and neither stage reads prose. Verified by walking
-    # the `make check` chain: no gate here parses `.md` content EXCEPT `docs/screenshots/CREDITS.md`
-    # (read by `tests/test_demo_library.py`) and `PRIVACY.md` (pulled in via `include_str!`, so it
-    # stays compiled into the binary and must stay a trigger via the leading `'**'`). `site/` is
-    # deployed separately by `pages.yml`, not built or checked here, EXCEPT `site/credits.html`,
-    # which the same `test_demo_library.py` reads and cross-checks against the `.md` source — so
-    # both credits files are re-included below despite the broad excludes. Files under
-    # `docs/measurements/*.log` are read by `tools/test_*.py` but are not `.md`, so the `!docs/**/
-    # *.md` exclude never touches them; they stay covered by the leading `'**'`. If a future gate
-    # starts reading some other doc, add it back here as its own re-include line, in order, after
-    # the exclude that would otherwise drop it — `paths` patterns are evaluated in the order they
-    # appear, so a later positive pattern re-includes what an earlier negative one dropped.
-    # There are no required status checks on `main` (branch protection allows merging without a
-    # green run), so a run this filter skips can never wedge a PR waiting on it.
-    paths: &ci_paths
-      - '**'
-      - '!README.md'
-      - '!docs/**/*.md'
-      # graded by tests/test_demo_library.py (make check): must stay a trigger
-      - 'docs/screenshots/CREDITS.md'
-      - '!site/**'
-      # graded by tests/test_demo_library.py (make check): must stay a trigger
-      - 'site/credits.html'
-      - '!.agents/**/*.md'
-      - '!rust-modules/**/*.md'
   pull_request:
-    paths: *ci_paths
   workflow_dispatch:
 
 permissions:
@@ -189,17 +162,26 @@ jobs:
           key: ffmpeg-${{ runner.arch }}-${{ hashFiles('ci/build-ffmpeg.sh') }}
 
       - name: Build
+        # This fork IS the Jellyfin client: without the feature the backend compiles out and the
+        # artifact boots as a Plex-only app (same reasoning as release.yml's JELLYFIN=1). The
+        # strings alone do not prove the flavor: the i18n tables ship every string unconditioned,
+        # so a Plex-only binary still carries "Sign in to Jellyfin" — the silent-`false`
+        # `jellyfin::boot::try_boot` arm is the difference, and it logs nothing.
+        env:
+          JELLYFIN: "1"
         run: make WEBOS_SDK='${{ steps.ndk.outputs.sdk-dir }}' -j"$(nproc)"
 
       - name: Package
         # DELIBERATELY the developer id. This artifact is a DEV build — the whole point of a PR
         # package is that you can sideload it with the `/tmp` trigger surface on — and
         # `release-guard` refuses a dev build on the id users install, correctly. So the artifact
-        # below is `com.beb.plxnative.debug_*.ipk` and installs BESIDE anyone's real one rather
+        # below is `com.butaca.debug_*.ipk` and installs BESIDE anyone's real one rather
         # than over it. The release job is the only place `FLAVOR=stable` belongs (release.yml).
         # Named explicitly rather than inherited, so this is a decision on the page instead of a
         # default that moves if the Makefile's does.
-        run: make ipk FLAVOR=debug WEBOS_SDK='${{ steps.ndk.outputs.sdk-dir }}'
+        env:
+          JELLYFIN: "1"
+        run: make ipk FLAVOR=debug JELLYFIN=1 WEBOS_SDK='${{ steps.ndk.outputs.sdk-dir }}'
 
       - name: ELF assertions
         run: ./ci/check-elf.sh
