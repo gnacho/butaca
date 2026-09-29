@@ -717,7 +717,34 @@ pub(crate) unsafe fn construct(
             }
             BootTo::Home
         } else { BootTo::Login }
-    } else if session.can_go_local() {
+    } else if crate::jellyfin::boot::try_boot() {
+        // The Jellyfin flavor's whole boot: a config file named a server, the server took
+        // the credentials, the client is installed. On a Plex build this arm is a constant
+        // `false` (the function says so at its definition), so this chain is unchanged there.
+        // The store resets mirror `activate_server`: the boot gate must never carry the
+        // previous user's cached grid, shelves, searches or queued view-state writes, and
+        // the refetch is what fills Home now that the client is installed.
+        use crate::stores::{StoreCmd, StoreWork};
+        use crate::ui::machine::{Fx, MachineId};
+        use crate::screens::registry::AppFx;
+        for cmd in [
+            StoreCmd::Browse(crate::stores::browse::BrowseCmd::Reset),
+            StoreCmd::Search(crate::stores::search::SearchCmd::Reset),
+            StoreCmd::Person(crate::stores::person::PersonCmd::Reset),
+            StoreCmd::ViewState(crate::stores::viewstate::ViewStateCmd::Reset),
+            StoreCmd::Hubs(crate::stores::hubs::HubsCmd::Reset),
+            StoreCmd::Hubs(crate::stores::hubs::HubsCmd::RefetchHubs),
+        ] { pages.emit(MachineId::Nav, Fx::App(AppFx::Store(cmd.store(), cmd))); }
+        pages.emit(MachineId::Nav, Fx::App(AppFx::StoreWork(StoreWork::BrowseDiscovery)));
+        pages.frame_with(bridge, crate::ui::machine::Tick::default(), Vec::new(), Vec::new(),
+            rec, false);
+        log("boot: jellyfin config — signed in, to Home");
+        BootTo::Home
+    // A Plex stored session is never this flavor's to boot from: a Jellyfin install does
+    // not write one, and a legacy file left by a Plex build under the same appid must not
+    // walk this boot into a server-less Plex Home. The Jellyfin flavor reaches Home through
+    // `try_boot` above — which has already installed the client — or not at all.
+    } else if session.can_go_local() && !cfg!(feature = "jellyfin") {
         if session.boot_shows_picker(automated_boot(), pick_user.is_some()) {
             // The Session owner installs the avatar read client and retained grants, publishes
             // the captured profile, then owns the picker/refresh flows. It does NOT issue the

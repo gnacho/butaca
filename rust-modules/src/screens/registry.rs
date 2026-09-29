@@ -1773,7 +1773,15 @@ where
             // every remaining `app::input`/`app::run` call site drop its own `enter()`-equivalent
             // reset (see `input::enter_profiles_from_onboard`'s doc for the same argument made
             // about `screens::onboard` in 5b).
-            AppArg::Login => Box::new(crate::screens::login::LoginScreen::new(entry, H::auth(cx))),
+            AppArg::Login => {
+                // The Jellyfin flavor's sign-in is a different screen wearing this route - its
+                // own module, mounted in place of the QR screen on this build (the route word,
+                // and so the heartbeat and its fps scenes, stays "login").
+                #[cfg(feature = "jellyfin")]
+                { Box::new(crate::screens::jf_login::JfLoginScreen::new(entry)) }
+                #[cfg(not(feature = "jellyfin"))]
+                { Box::new(crate::screens::login::LoginScreen::new(entry, H::auth(cx))) }
+            }
             AppArg::Profiles => {
                 let screen = crate::screens::profiles::ProfilesScreen::new(entry, H::auth(cx));
                 fx.push(crate::ui::machine::Fx::App(AppFx::Session(

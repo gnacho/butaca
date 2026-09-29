@@ -677,6 +677,16 @@ impl SessionAdapter {
             for commit in &self.commits { commit.cancelled.store(true, Ordering::Release); }
             crate::plex::revoke_all();
             crate::plex::session::revoke_cached_session();
+            // The Jellyfin flavor's sign-out retires ITS credential instead of a Plex PIN: the
+            // config file goes (the next boot asks again), the installed client is retired (the
+            // stores fail closed at once), and the form's flow resets. One site covers both
+            // sign-out and delete-all-local-data: every account teardown funnels through here.
+            #[cfg(feature = "jellyfin")]
+            {
+                crate::jellyfin::boot::erase_config();
+                crate::jellyfin::uninstall();
+                crate::jellyfin::signin::reset();
+            }
             let diagnostics = all_local;
             #[cfg(test)]
             let diagnostics = diagnostics && self.resource_test_io.is_none();
