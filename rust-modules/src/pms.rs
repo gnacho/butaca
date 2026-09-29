@@ -837,7 +837,7 @@ fn fetch_source_jellyfin(c: &'static crate::jellyfin::JfClient, sid: ServerId) -
         let items: Vec<PmsMovie> = next.items.iter().filter_map(keep).collect();
         if !items.is_empty() {
             out.shelves.push(Shelf {
-                title: crate::i18n::t("Next Up").to_string(),
+                title: crate::i18n::msg::browse_jellyfin_next_up().to_string(),
                 // Not hero-eligible on purpose: a billboard sells art, and this row sells the
                 // next episode of a specific show (hero_eligible names the accepted shapes).
                 hub_id: "jf.nextup".to_string(),
@@ -865,7 +865,7 @@ fn fetch_source_jellyfin(c: &'static crate::jellyfin::JfClient, sid: ServerId) -
             continue;
         }
         out.shelves.push(Shelf {
-            title: format!("{} - {}", crate::i18n::t("Recently Added"), v.name),
+            title: format!("{} - {}", crate::i18n::msg::browse_library_hub_recently_added(), v.name),
             hub_id: format!("jf.latest.{}", v.id),
             // The hub key Plex's shelves carry (what a click resolves to) has no Jellyfin
             // counterpart — a Latest shelf is a query, not an addressable hub.

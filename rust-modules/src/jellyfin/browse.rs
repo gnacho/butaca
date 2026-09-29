@@ -61,25 +61,25 @@ pub(crate) fn sorts() -> Vec<SortEntry> {
     vec![
         SortEntry {
             key: "SortName".into(),
-            title: crate::i18n::t("Title").to_string(),
+            title: crate::i18n::msg::browse_jellyfin_sort_title().to_string(),
             desc_key: "".into(),
             default_desc: false,
         },
         SortEntry {
             key: "PremiereDate".into(),
-            title: crate::i18n::t("Release date").to_string(),
+            title: crate::i18n::msg::browse_jellyfin_sort_release_date().to_string(),
             desc_key: "".into(),
             default_desc: true,
         },
         SortEntry {
             key: "DateCreated".into(),
-            title: crate::i18n::t("Date added").to_string(),
+            title: crate::i18n::msg::browse_jellyfin_sort_date_added().to_string(),
             desc_key: "".into(),
             default_desc: true,
         },
         SortEntry {
             key: "CommunityRating".into(),
-            title: crate::i18n::t("Rating").to_string(),
+            title: crate::i18n::msg::browse_jellyfin_sort_rating().to_string(),
             desc_key: "".into(),
             default_desc: true,
         },

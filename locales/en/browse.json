@@ -2028,5 +2028,73 @@
   "browse.collection.order.custom": {
     "value": "Custom order",
     "description": "Annotation after the collection page's Items heading: members are in the order the collection's owner set"
+  },
+  "browse.jellyfin.next_up": {
+    "value": "Next Up",
+    "description": "Jellyfin flavor's sign-in form, library sort menu or Home shelf: browse.jellyfin.next_up"
+  },
+  "browse.jellyfin.sort.title": {
+    "value": "Title",
+    "description": "Jellyfin flavor's sign-in form, library sort menu or Home shelf: browse.jellyfin.sort.title"
+  },
+  "browse.jellyfin.sort.release_date": {
+    "value": "Release date",
+    "description": "Jellyfin flavor's sign-in form, library sort menu or Home shelf: browse.jellyfin.sort.release_date"
+  },
+  "browse.jellyfin.sort.date_added": {
+    "value": "Date added",
+    "description": "Jellyfin flavor's sign-in form, library sort menu or Home shelf: browse.jellyfin.sort.date_added"
+  },
+  "browse.jellyfin.sort.rating": {
+    "value": "Rating",
+    "description": "Jellyfin flavor's sign-in form, library sort menu or Home shelf: browse.jellyfin.sort.rating"
+  },
+  "browse.jellyfin.sign_in_title": {
+    "value": "Sign in to Jellyfin",
+    "description": "Jellyfin flavor's sign-in form, library sort menu or Home shelf: browse.jellyfin.sign_in_title"
+  },
+  "browse.jellyfin.sign_in_explainer": {
+    "value": "Your server's address, your user name and its password. OK opens the keyboard for a field; OK again commits it.",
+    "description": "Jellyfin flavor's sign-in form or library UI: browse.jellyfin.sign_in_explainer"
+  },
+  "browse.jellyfin.server": {
+    "value": "Server",
+    "description": "Jellyfin flavor's sign-in form, library sort menu or Home shelf: browse.jellyfin.server"
+  },
+  "browse.jellyfin.user_name": {
+    "value": "User name",
+    "description": "Jellyfin flavor's sign-in form, library sort menu or Home shelf: browse.jellyfin.user_name"
+  },
+  "browse.jellyfin.password": {
+    "value": "Password",
+    "description": "Jellyfin flavor's sign-in form, library sort menu or Home shelf: browse.jellyfin.password"
+  },
+  "browse.jellyfin.hint_address": {
+    "value": "e.g. jellyfin.local:8096",
+    "description": "Jellyfin flavor's sign-in form, library sort menu or Home shelf: browse.jellyfin.hint_address"
+  },
+  "browse.jellyfin.hint_required": {
+    "value": "required",
+    "description": "Jellyfin flavor's sign-in form, library sort menu or Home shelf: browse.jellyfin.hint_required"
+  },
+  "browse.jellyfin.hint_optional": {
+    "value": "may be empty",
+    "description": "Jellyfin flavor's sign-in form, library sort menu or Home shelf: browse.jellyfin.hint_optional"
+  },
+  "browse.jellyfin.error_address": {
+    "value": "That doesn't look like a server address — try e.g. jellyfin.local:8096",
+    "description": "Jellyfin flavor's sign-in form or library UI: browse.jellyfin.error_address"
+  },
+  "browse.jellyfin.error_https": {
+    "value": "That address would carry your password unprotected — use https:// or a local network address",
+    "description": "Jellyfin flavor's sign-in form or library UI: browse.jellyfin.error_https"
+  },
+  "browse.jellyfin.error_auth": {
+    "value": "The server didn't recognize that user name or password",
+    "description": "Jellyfin flavor's sign-in form or library UI: browse.jellyfin.error_auth"
+  },
+  "browse.jellyfin.error_reach": {
+    "value": "Couldn't reach the server — check the address and that it's on",
+    "description": "Jellyfin flavor's sign-in form or library UI: browse.jellyfin.error_reach"
   }
 }

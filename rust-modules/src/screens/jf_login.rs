@@ -33,17 +33,15 @@ const ROW_CONNECT: u32 = 3;
 
 fn labels() -> [&'static str; 3] {
     [
-        crate::i18n::t("Server"),
-        crate::i18n::t("User name"),
-        crate::i18n::t("Password"),
+        crate::i18n::msg::browse_jellyfin_server(),
+        crate::i18n::msg::browse_jellyfin_user_name(),
+        crate::i18n::msg::browse_jellyfin_password(),
     ]
 }
 /// What an untouched field says. The server's is an example (the one thing a person must invent
 /// is also the one with a shape worth showing); the other two state their requirement.
 // The password hint is honest about the rule `connectable` actually applies: plenty of LAN
 // Jellyfin users have no password, and the field must not claim otherwise.
-const HINTS: [&str; 3] = ["e.g. jellyfin.local:8096", "required", "may be empty"];
-
 pub(crate) struct JfLoginScreen {
     entry: EntryId,
     ground: RouteGround,
@@ -98,8 +96,8 @@ impl JfLoginScreen {
             Header::new(
                 RouteLayout::screen(),
                 None,
-                crate::i18n::t("Sign in to Jellyfin"),
-                crate::i18n::t("Your server's address, your user name and its password. OK opens the keyboard for a field; OK again commits it."),
+                crate::i18n::msg::browse_jellyfin_sign_in_title(),
+                crate::i18n::msg::browse_jellyfin_sign_in_explainer(),
             ),
             &self.table,
             GroupId(0),
@@ -125,7 +123,12 @@ impl JfLoginScreen {
         for (i, label) in labels().iter().enumerate() {
             let empty = self.fields[i].is_empty();
             let value = if empty {
-                crate::i18n::t(HINTS[i]).to_string()
+                [
+            crate::i18n::msg::browse_jellyfin_hint_address(),
+            crate::i18n::msg::browse_jellyfin_hint_required(),
+            crate::i18n::msg::browse_jellyfin_hint_optional(),
+        ][i]
+        .to_string()
             } else if i == F_PASS {
                 masked(&self.fields[i])
             } else {
@@ -134,7 +137,7 @@ impl JfLoginScreen {
             fields = fields.row(Row::new(*label).value(value).value_dim(empty).dim(working));
         }
         let action = Section::new("").row(
-            Row::new(crate::i18n::t("Connect"))
+            Row::new(crate::i18n::msg::settings_plaintext_connect())
                 .chevron(true)
                 .dim(working || !connectable(&self.fields)),
         );
@@ -230,14 +233,14 @@ fn commit_text(fields: &mut [String; 3], editing: Option<usize>, text: &str) -> 
 fn fail_text(f: Fail) -> &'static str {
     match f {
         Fail::Parse => {
-            crate::i18n::t("That doesn't look like a server address \u{2014} try e.g. jellyfin.local:8096")
+            crate::i18n::msg::browse_jellyfin_error_address()
         }
         Fail::Plaintext => {
-            crate::i18n::t("That address would carry your password unprotected \u{2014} use https:// or a local network address")
+            crate::i18n::msg::browse_jellyfin_error_https()
         }
-        Fail::Refused => crate::i18n::t("The server didn't recognize that user name or password"),
+        Fail::Refused => crate::i18n::msg::browse_jellyfin_error_auth(),
         Fail::Unreachable => {
-            crate::i18n::t("Couldn't reach the server \u{2014} check the address and that it's on")
+            crate::i18n::msg::browse_jellyfin_error_reach()
         }
     }
 }
@@ -408,12 +411,12 @@ impl<H: AppLike> Screen<H> for JfLoginScreen {
                 .draw(p, Rect::new(nar.x, y, nar.w, theme::size::DISPLAY as f32 * 1.3));
             y += theme::size::DISPLAY as f32 * 1.6;
         }
-        TextView::new(crate::i18n::t("Sign in to Jellyfin"), theme::size::TITLE, theme::TEXT_HEADING)
+        TextView::new(crate::i18n::msg::browse_jellyfin_sign_in_title(), theme::size::TITLE, theme::TEXT_HEADING)
             .bold()
             .draw(p, Rect::new(nar.x, y, nar.w, theme::size::TITLE as f32 * 1.4));
         y += theme::size::TITLE as f32 * 1.4 + theme::space::SM;
         TextView::new(
-            crate::i18n::t("Your server's address, your user name and its password. OK opens the keyboard for a field; OK again commits it."),
+            crate::i18n::msg::browse_jellyfin_sign_in_explainer(),
             theme::size::LABEL,
             theme::TEXT_SECONDARY,
         )
@@ -470,7 +473,7 @@ mod tests {
             "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.",
             "172.29.", "172.30.", "172.31.",
         ];
-        for s in [HINTS[0], fail_text(Fail::Parse)] {
+        for s in [crate::i18n::msg::browse_jellyfin_hint_address(), fail_text(Fail::Parse)] {
             for octet in private_octets {
                 assert!(
                     !s.contains(octet),

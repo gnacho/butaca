@@ -481,5 +481,22 @@
   "browse.collection.items": "Элементы",
   "browse.collection.order.release": "Па даце выхаду",
   "browse.collection.order.title": "Па алфавіце",
-  "browse.collection.order.custom": "Уласны парадак"
+  "browse.collection.order.custom": "Уласны парадак",
+  "browse.jellyfin.next_up": "Далей",
+  "browse.jellyfin.sort.title": "Назва",
+  "browse.jellyfin.sort.release_date": "Дата выхаду",
+  "browse.jellyfin.sort.date_added": "Дата дадавання",
+  "browse.jellyfin.sort.rating": "Ацэнка",
+  "browse.jellyfin.sign_in_title": "Увайсці ў Jellyfin",
+  "browse.jellyfin.sign_in_explainer": "Адрас вашага сервера, імя карыстальніка і пароль. OK адкрывае клавіятуру для поля; націсніце OK зноў, каб пацвердзіць.",
+  "browse.jellyfin.server": "Сервер",
+  "browse.jellyfin.user_name": "Імя карыстальніка",
+  "browse.jellyfin.password": "Пароль",
+  "browse.jellyfin.hint_address": "напр. jellyfin.local:8096",
+  "browse.jellyfin.hint_required": "абавязкова",
+  "browse.jellyfin.hint_optional": "можа быць пустым",
+  "browse.jellyfin.error_address": "Гэта не падобна на адрас сервера — паспрабуйце, напр., jellyfin.local:8096",
+  "browse.jellyfin.error_https": "Гэты адрас перадасць ваш пароль без абароны — выкарыстоўвайце https:// або адрас лакальнай сеткі",
+  "browse.jellyfin.error_auth": "Сервер не распазнаў гэтае імя карыстальніка або пароль",
+  "browse.jellyfin.error_reach": "Не атрымалася дабрацца да сервера — праверце адрас і што ён уключаны"
 }
