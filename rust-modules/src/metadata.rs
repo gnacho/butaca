@@ -1744,6 +1744,16 @@ fn dev_source() -> Option<&'static str> {
 }
 
 fn fetch_detail(sid: crate::plex::ServerId, rk: &str) -> Option<(Detail, String)> {
+    // Jellyfin arm: the same Detail from the other backend's full fetch (item + NextUp +
+    // seasons + hero episode's streams). The extra key has no counterpart there: trailer
+    // identity comes from the DTO itself, so the slot is empty.
+    // The installed-client guard is load-bearing: slot 0 is also a valid Plex slot in this build.
+    #[cfg(feature = "jellyfin")]
+    if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+        let c = crate::jellyfin::client().expect("guarded above");
+        let d = crate::jellyfin::detail::fetch_full(c, sid, rk)?;
+        return Some((d, String::new()));
+    }
     let it = crate::plex::client_for(sid)?.metadata(rk)?;
     let media0 = it.primary_media();
     // one read, both fields (see `Detail::blur`)
