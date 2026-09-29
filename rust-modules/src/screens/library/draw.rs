@@ -196,11 +196,11 @@ impl LibraryScreen {
         for &elem in self.toolbar_elems() {
             let chip = self.toolbar_chip(elem, f.cx);
             if let Some(placed) = <Self as Focusable<H>>::place(self, &elem, f.cx, At::Drawn) {
-                ValueChip::new(chip.name, &chip.value, chip.note.as_deref(), placed.rect)
+                ValueChip::new(&chip.name, &chip.value, chip.note.as_deref(), placed.rect)
                     .focused(f.focus.current.is_some_and(|key| key.elem == elem)).draw(&env, p);
             }
         }
-        card_row::draw_heading(p, "All", "", MARGIN_X,
+        card_row::draw_heading(p, crate::i18n::t("All"), "", MARGIN_X,
             y, layout::GRID_RIGHT - MARGIN_X, f.measure);
     }
 

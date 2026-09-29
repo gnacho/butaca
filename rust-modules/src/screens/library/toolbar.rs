@@ -1,16 +1,16 @@
 //! One value-chip model supplies both focus geometry and paint runs.
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use super::*;
 use crate::ui::value_chip::ValueChip;
 
 pub(super) struct Chip {
-    pub name: &'static CStr,
+    pub name: std::ffi::CString,
     pub value: CString,
     pub note: Option<CString>,
 }
 impl Chip {
     pub fn width(&self, measure: &dyn crate::ui::machine::Measure) -> f32 {
-        ValueChip::width(measure, self.name, &self.value, self.note.as_deref())
+        ValueChip::width(measure, &self.name, &self.value, self.note.as_deref())
     }
 }
 
@@ -56,13 +56,13 @@ impl LibraryScreen {
                 Some(GridAction::LibraryType(kind)) => *kind,
                 _ => listing.library_type(),
             };
-            (c"Type", kind.title().to_owned())
+            (crate::i18n::tcstring("Type"), kind.title().to_owned())
         } else if elem == SORT {
             let sort = match queued {
                 Some(GridAction::Sort { key, .. }) => listing.sorts().iter().find(|sort| &sort.key == key),
                 _ => listing.sorts().get(listing.sort_index()),
             };
-            (c"Sort", sort.map_or("Title", |sort| sort.title.as_str()).to_owned())
+            (crate::i18n::tcstring("Sort"), sort.map_or(crate::i18n::t("Title"), |sort| sort.title.as_str()).to_owned())
         } else {
             let genre = match queued {
                 Some(GridAction::Genre { id }) => id.as_ref().and_then(|id| listing.genres().iter().find(|genre| &genre.id == id)),
@@ -72,9 +72,11 @@ impl LibraryScreen {
                 Some(GridAction::Unwatched { desired }) => *desired,
                 _ => listing.unwatched(),
             };
-            (c"Filter", match (genre, unwatched) {
-                ("All", false) => "All".into(), ("All", true) => "Unwatched".into(),
-                (genre, false) => genre.into(), (genre, true) => format!("{genre} · Unwatched"),
+            (crate::i18n::tcstring("Filter"), match (genre, unwatched) {
+                ("All", false) => crate::i18n::t("All").into(),
+                ("All", true) => crate::i18n::t("Unwatched").into(),
+                (genre, false) => genre.into(),
+                (genre, true) => format!("{genre} · {}", crate::i18n::t("Unwatched")),
             })
         };
         Chip { name, value: CString::new(format!(" · {value}")).unwrap_or_default(), note: None }

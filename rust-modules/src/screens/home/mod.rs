@@ -1129,11 +1129,11 @@ impl HomeScreen {
         press_scale: f32,
     ) {
         let resumes = crate::metadata::resume_ns(hero.resume_ms, hero.dur_ns / 1_000_000) > 0;
-        let label = if resumes { c"Continue" } else { c"Play" };
+        let label = crate::i18n::tcstring(if resumes { "Continue" } else { "Play" });
         let pill = Rect::new(
             MARGIN_X,
             HERO_ROW_Y,
-            hero_pill_w(measure, label),
+            hero_pill_w(measure, &label),
             HERO_CTRL_D,
         );
         let info = Rect::new(
@@ -1802,11 +1802,11 @@ impl HomeScreen {
         }
         let hero = self.selected_hero(view)?.item;
         let resumes = crate::metadata::resume_ns(hero.resume_ms, hero.dur_ns / 1_000_000) > 0;
-        let label = if resumes { c"Continue" } else { c"Play" };
+        let label = crate::i18n::tcstring(if resumes { "Continue" } else { "Play" });
         let pill = Rect::new(
             MARGIN_X,
             HERO_ROW_Y,
-            hero_pill_w(measure, label),
+            hero_pill_w(measure, &label),
             HERO_CTRL_D,
         );
         match index {
@@ -2387,7 +2387,7 @@ fn hero_content(hero: &PmsMovie, source: &str, p: Painter, dx: f32, measure: &dy
     } else {
         format!(
             "{} \u{b7} {} \u{b7} {}",
-            if hero.kind == 1 { "Show" } else { "Movie" },
+            if hero.kind == 1 { crate::i18n::t("Show") } else { crate::i18n::t("Movie") },
             hero.year,
             if hero.rating.is_empty() {
                 "NR"

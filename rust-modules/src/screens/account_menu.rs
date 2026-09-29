@@ -134,11 +134,11 @@ pub(crate) fn chip_label(acc: &Account) -> String {
 
 fn label(a: Action) -> &'static str {
     match a {
-        Action::ChangeProfile => "Change profile",
-        Action::SignIn => "Sign in",
-        Action::SignOut => "Sign out",
-        Action::Settings => "Settings",
-        Action::SendDiagnostics => "Send diagnostics",
+        Action::ChangeProfile => crate::i18n::t("Change profile"),
+        Action::SignIn => crate::i18n::t("Sign in"),
+        Action::SignOut => crate::i18n::t("Sign out"),
+        Action::Settings => crate::i18n::t("Settings"),
+        Action::SendDiagnostics => crate::i18n::t("Send diagnostics"),
         Action::None => "",
     }
 }
@@ -222,6 +222,31 @@ impl AccountMenuScreen {
     fn build(&mut self, switch_refused: bool) {
         if self.built {
             return;
+        }
+        // The Jellyfin flavor: no Plex session ever settles here (nothing loads one), so the
+        // guard below would leave the panel EMPTY forever. The account facts live on the
+        // installed client — the same source `Session::account`'s jellyfin arm reads, with the
+        // same precedence: a signed-in Jellyfin user outranks any Plex session on disk.
+        #[cfg(feature = "jellyfin")]
+        if let Some(client) = crate::jellyfin::client() {
+            if let Some(name) = client.user_name() {
+                self.built = true;
+                let acc = crate::plex::session::Account {
+                    signed_in: true,
+                    can_switch: false,
+                    name: Some(name.clone()),
+                };
+                self.switch_refused = switch_refused;
+                self.rows = rows_for(&acc, switch_refused);
+                self.header = name;
+                let mut sec = Section::new(self.header.clone());
+                for a in self.rows {
+                    sec = sec.row(Row::new(label(*a)).chevron(drills_in(*a)).destructive(destructive(*a)));
+                }
+                self.table.compact = true;
+                self.table.open_sections(vec![sec]);
+                return;
+            }
         }
         let Some(sess) = crate::plex::session::peek_settled() else { return };
         self.built = true;
@@ -863,4 +888,30 @@ mod tests {
         assert_eq!(action_at(no_switch, 1), Action::Settings);
         assert_eq!(action_at(no_switch, 2), Action::None);
     }
+
+    #[cfg(feature = "jellyfin")]
+    #[test]
+    fn the_jellyfin_client_builds_the_menu_without_a_plex_session() {
+        // The TV bug: in the Jellyfin flavor no Plex session ever settles, so `build` waited on
+        // `peek_settled` forever and the chip opened an EMPTY panel.
+        let _guard = crate::testlock::serial();
+        let server = crate::jellyfin::MockServer::start(vec![
+            (200, r#"{"User":{"Id":"u-1","Name":"demo"},"AccessToken":"tok-1","ServerId":"srv-1","SessionInfo":null}"#.to_string()),
+        ]);
+        let client = crate::jellyfin::JfClient::new(
+            crate::plex::Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        client.authenticate_by_name("demo", "").unwrap();
+        crate::jellyfin::install(client);
+
+        let mut menu = AccountMenuScreen::new(EntryId(0));
+        menu.build(false);
+        assert!(menu.built, "the jellyfin arm builds without a settled Plex session");
+        assert_eq!(menu.header, "demo");
+        assert!(menu.rows.contains(&Action::SignOut));
+        assert!(menu.rows.contains(&Action::Settings));
+
+        crate::jellyfin::uninstall();
+        let _ = server.finish();
+    }
+
 }

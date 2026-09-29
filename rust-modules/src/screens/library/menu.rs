@@ -187,7 +187,7 @@ fn source_draft(
 }
 
 fn sort_draft(sorts: &[SortEntry], sort_index: usize, sort_desc: bool) -> MenuDraft {
-    let mut section = Section::new("Sort by");
+    let mut section = Section::new(crate::i18n::t("Sort by"));
     let mut rows = Vec::new();
     let mut stamp = Stamp::default();
     stamp.tag(7);
@@ -254,7 +254,7 @@ fn filter_draft(unwatched: bool, genre: Option<&GenreEntry>, genres_supported: b
     let mut section = Section::new("Filter")
         .row(Row::new(crate::i18n::t("Unwatched only")).toggle(unwatched));
     if genres_supported { section = section.row(
-            Row::new("Genre")
+            Row::new(crate::i18n::t("Genre"))
                 .value(genre.map(|g| g.title.as_str()).unwrap_or(crate::i18n::t("All")))
                 .chevron(true),
         ); }
@@ -405,11 +405,11 @@ impl LibraryMenu {
         let mut sections = Vec::new();
         let selected = 0i32;
         let title = match self.kind {
-            LibraryMenuKind::Type => "Filter by",
-            LibraryMenuKind::Sort => "Sort by",
-            LibraryMenuKind::Filter => "Filter",
-            LibraryMenuKind::Genre => "Genre",
-            LibraryMenuKind::Sources => "Libraries",
+            LibraryMenuKind::Type => crate::i18n::t("Filter by"),
+            LibraryMenuKind::Sort => crate::i18n::t("Sort by"),
+            LibraryMenuKind::Filter => crate::i18n::t("Filter"),
+            LibraryMenuKind::Genre => crate::i18n::t("Genre"),
+            LibraryMenuKind::Sources => crate::i18n::t("Libraries"),
         };
         let mut section = Section::new(title);
         match self.kind {

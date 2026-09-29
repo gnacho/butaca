@@ -380,7 +380,7 @@ fn empty<H: SearchLike>(screen: &SearchScreen, f: &DrawFrame<'_, '_, H>, p: Pain
             f.cx.measure,
         ))
     } else {
-        "Nothing searched yet".into()
+        crate::i18n::t("Nothing searched yet").into()
     };
     let statement = cstring(&statement);
     let hh = f.cx.measure.cap_h(theme::size::CAPTION);
