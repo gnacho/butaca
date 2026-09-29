@@ -241,6 +241,7 @@ impl SearchScreen {
             return Handled::Yes;
         }
         if elem == FIELD {
+            crate::log(&format!("search: field ok (editing={})", self.editing));
             self.keyboard(!self.editing, true, fx);
             return Handled::Yes;
         }

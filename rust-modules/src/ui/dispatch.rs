@@ -1644,7 +1644,9 @@ where
                 let accepted = if up { active } else {
                     self.input.keyboard_owner == Some(instance) || (self.input.keyboard_owner.is_none() && active)
                 };
-                if !accepted { report.dropped_deliveries += 1; return; }
+                if !accepted { report.dropped_deliveries += 1;
+                    crate::log(&format!("dispatch: keyboard delivery dropped up={up} active={active}"));
+                    return; }
                 let owner = up.then_some(instance);
                 if self.input.keyboard != up || self.input.keyboard_owner != owner {
                     self.input.keyboard = up;
@@ -1668,6 +1670,10 @@ where
                 };
                 if !valid_key {
                     report.dropped_deliveries += 1;
+                    crate::log(&format!(
+                        "dispatch: press dropped valid_owner={valid_owner} focus_is_some={}",
+                        self.focus().is_some()
+                    ));
                     return;
                 }
                 let event = if held { ScreenEvent::PressHold(id) } else { ScreenEvent::PressCommit(id) };
