@@ -44,8 +44,13 @@ enum What {
 pub(crate) fn take_from(adapter: &Arc<BrowseAdapter>) -> Option<Result> {
     let (epoch, source, landing) = adapter.src_result.lock()
         .unwrap_or_else(|e| e.into_inner()).take()?;
+    let instance = match landing.client {
+        super::DiscClient::Plex(c) => c.instance_gen(),
+        #[cfg(feature = "jellyfin")]
+        super::DiscClient::Jellyfin(_) => 0,
+    };
     Some(Result {
-        epoch, source, instance: landing.client.instance_gen(), landing,
+        epoch, source, instance, landing,
         adapter: Some(Arc::clone(adapter)),
     })
 }
@@ -53,7 +58,12 @@ pub(crate) fn take_from(adapter: &Arc<BrowseAdapter>) -> Option<Result> {
 pub(crate) fn encode(result: &Result) -> serde_json::Value {
     let landing = &result.landing;
     serde_json::to_value(Wire { kind: "discovery".into(), version: 1,
-        epoch: result.epoch, source: result.source as u32, sid: landing.client.id().raw(),
+        epoch: result.epoch, source: result.source as u32,
+        sid: match landing.client {
+            super::DiscClient::Plex(c) => c.id().raw(),
+            #[cfg(feature = "jellyfin")]
+            super::DiscClient::Jellyfin(_) => crate::jellyfin::SERVER_ID.raw(),
+        },
         client: result.instance, token_gen: landing.token_gen, name: landing.name.clone(),
         what: match &landing.what {
             SrcWhat::Sections(list) => What::Sections(list.as_ref().map(|list| list.iter()
@@ -67,10 +77,32 @@ pub(crate) fn decode(value: serde_json::Value,
     mut bind: impl FnMut(u32) -> Option<&'static crate::plex::Client>) -> std::result::Result<Result, &'static str> {
     let wire: Wire = serde_json::from_value(value).map_err(|_| "invalid discovery result")?;
     if wire.kind != "discovery" || wire.version != 1 { return Err("unsupported discovery result"); }
-    let client = bind(wire.client).ok_or("unbound discovery client")?;
-    if client.id().raw() != wire.sid || client.token_gen() != wire.token_gen {
-        return Err("discovery client mismatch");
-    }
+    // A Jellyfin wire names SERVER_ID (raw 0) with client 0 and token_gen 0. Slot 0 is also a
+    // valid Plex slot, but the two flavors never mix in one process: a Plex build has no
+    // Jellyfin client (no wire can name it), and a Jellyfin build has no Plex registry to bind
+    // against — so in each flavor the arm is unambiguous.
+    #[cfg(feature = "jellyfin")]
+    let (client, token_gen) = if wire.sid == crate::jellyfin::SERVER_ID.raw()
+        && wire.client == 0 && wire.token_gen == 0
+        && crate::plex::server_ids().next().is_none()
+    {
+        let Some(jc) = crate::jellyfin::client() else { return Err("no jellyfin client installed") };
+        (super::DiscClient::Jellyfin(jc), 0)
+    } else {
+        let client = bind(wire.client).ok_or("unbound discovery client")?;
+        if client.id().raw() != wire.sid || client.token_gen() != wire.token_gen {
+            return Err("discovery client mismatch");
+        }
+        (super::DiscClient::Plex(client), wire.token_gen)
+    };
+    #[cfg(not(feature = "jellyfin"))]
+    let (client, token_gen) = {
+        let client = bind(wire.client).ok_or("unbound discovery client")?;
+        if client.id().raw() != wire.sid || client.token_gen() != wire.token_gen {
+            return Err("discovery client mismatch");
+        }
+        (super::DiscClient::Plex(client), wire.token_gen)
+    };
     let what = match wire.what {
         What::Counts(counts) => SrcWhat::Counts(counts),
         What::Sections(list) => SrcWhat::Sections(list.map(|list| list.into_iter().map(|(key, title, kind)| {
@@ -78,7 +110,7 @@ pub(crate) fn decode(value: serde_json::Value,
         }).collect::<std::result::Result<Vec<_>, _>>()).transpose()?),
     };
     Ok(Result { epoch: wire.epoch, source: wire.source as usize, instance: wire.client,
-        landing: SrcLanding { client, token_gen: wire.token_gen, name: wire.name, what },
+        landing: SrcLanding { client, token_gen, name: wire.name, what },
         adapter: None })
 }
 

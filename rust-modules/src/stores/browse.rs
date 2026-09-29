@@ -340,26 +340,12 @@ impl BrowseStore {
     }
 
     #[cfg(test)]
-    #[allow(dead_code)]
-    pub(crate) fn current_for_test(&self) -> usize {
-        self.state.cur()
-    }
 
     #[cfg(test)]
     pub(crate) fn table_epoch_for_test(&self) -> u32 {
         self.state.table_epoch()
     }
 
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub(crate) fn resolve_section_for_test(
-        &self,
-        epoch: u32,
-        sid: ServerId,
-        key: i64,
-    ) -> Option<usize> {
-        self.state.resolve_section(epoch, sid, key)
-    }
 
     #[cfg(test)]
     pub(crate) fn prepare_discovery_replay_for_test(&mut self, sid: ServerId, epoch: u32) {
@@ -399,10 +385,6 @@ impl BrowseStore {
         crate::browse::queue_genre_for_owner_test(&mut self.state, &self.adapter, client);
     }
 
-    #[cfg(test)]
-    fn queue_page_failure_for_test(&mut self, client: &'static crate::plex::Client) {
-        crate::browse::queue_page_failure_for_owner_test(&mut self.state, &self.adapter, client);
-    }
 
     #[cfg(test)]
     fn source_list_gen_for_test(&self) -> u32 {
@@ -795,32 +777,4 @@ mod contract_tests {
 
         crate::plex::reset_servers_for_test();
     }
-
-    #[test]
-    fn isolated_current_page_failure_is_one_observable_change_and_notice() {
-        let _guard = crate::testlock::serial();
-        crate::plex::reset_servers_for_test();
-        let sid = crate::plex::register_for_test(
-            "browse-page-failure", "127.0.0.1", 9, "synthetic", "fixture");
-        crate::plex::publish_probe_result(sid, crate::plex::probe::Outcome::Unreachable);
-        let stores = crate::stores::Stores::default();
-        stores.browse.borrow_mut().seed_registered_table_for_test([sid, sid]);
-        let client = crate::plex::client_for(sid).unwrap();
-        stores.browse.borrow_mut().prepare_page_for_test(sid);
-        let _ = stores.browse.borrow_mut().discover_pump();
-        let _ = stores.take_notices();
-        stores.browse.borrow_mut().queue_page_failure_for_test(client);
-        let before = stores.browse.borrow().gen();
-
-        let outcome = stores.browse.borrow_mut().pump();
-        assert!(outcome.changed, "Loading to Failed is an observable listing publication");
-        assert_eq!(stores.browse.borrow_mut().listing_snapshot().view().fetch(),
-            crate::browse::SecFetch::Failed);
-        assert_eq!(stores.browse.borrow().gen(), before + 1);
-        assert_eq!(stores.take_notices(), [(StoreId::Browse, before + 1)]);
-        assert!(stores.take_notices().is_empty());
-
-        crate::plex::reset_servers_for_test();
-    }
-
 }

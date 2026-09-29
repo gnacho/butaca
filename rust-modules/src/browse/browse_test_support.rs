@@ -192,7 +192,7 @@ pub(super) fn queue_success_from(
     token_gen: u32,
 ) {
     let landing = SrcLanding {
-        client,
+        client: super::DiscClient::Plex(client),
         token_gen,
         name: "stale-name".into(),
         what: SrcWhat::Sections(Some(vec![(99, "Stale Library".into(), SecKind::Movie)])),
@@ -207,15 +207,16 @@ pub(super) fn queue_page_from(
     token_gen: u32,
 ) {
     *browse.adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()) = Some(PageResult {
-        client,
+        client: super::DiscClient::Plex(client),
         token_gen,
         gen: browse.state.query_gen(),
         sec: 0,
         start: 0,
         items: Vec::new(),
         total: 0,
-        sorts: None, restored: None,
-    });
+        sorts: None,
+     restored: None,
+        });
     browse.adapter.fetching.store(true, Ordering::SeqCst);
     let _outcome = browse.pump();
 }
@@ -227,9 +228,11 @@ pub(super) fn queue_directories_from(
     let epoch = browse.state.table_epoch();
     *browse.adapter.genre_result.lock().unwrap_or_else(|e| e.into_inner()) = Some(DirectoryResult {
         library_type: browse.state.states[0].library_type,
+            #[cfg(feature = "jellyfin")]
+            letters_filter: None,
         epoch,
         sec: 0,
-        client,
+        client: super::DiscClient::Plex(client),
         token_gen,
         list: vec![GenreEntry {
             id: "stale".into(),
@@ -238,23 +241,31 @@ pub(super) fn queue_directories_from(
     });
     *browse.adapter.letter_result.lock().unwrap_or_else(|e| e.into_inner()) = Some(DirectoryResult {
         library_type: browse.state.states[0].library_type,
+            #[cfg(feature = "jellyfin")]
+            letters_filter: None,
         epoch,
         sec: 0,
-        client,
+        client: super::DiscClient::Plex(client),
         token_gen,
         list: vec![("S".into(), 99)],
     });
     browse.adapter.genre_fetching.store(true, Ordering::SeqCst);
     browse.adapter.letters_fetching.store(true, Ordering::SeqCst);
     browse.state.land_directory_owned(
-        &browse.adapter.genre_fetching, &browse.adapter.genre_result, |st, list| {
+        &browse.adapter.genre_fetching, &browse.adapter.genre_result, |st, list, _filter| {
         st.genres_done = true;
         st.genres = Arc::new(list);
     });
     browse.state.land_directory_owned(
-        &browse.adapter.letters_fetching, &browse.adapter.letter_result, |st, list| {
+        &browse.adapter.letters_fetching, &browse.adapter.letter_result, |st, list, filter| {
         st.letters_done = true;
         st.letters = Arc::new(list);
+        #[cfg(feature = "jellyfin")]
+        {
+            st.letters_filter = filter;
+        }
+        #[cfg(not(feature = "jellyfin"))]
+        let _ = filter;
     });
 }
 pub(super) fn assert_new_directories_survive(browse: &TestBrowse) {
@@ -284,14 +295,15 @@ pub(super) fn seed_one_section(browse: &mut TestBrowse) {
 pub(super) fn land_page(browse: &mut TestBrowse, total: i64, items: usize) {
     let client = crate::plex::client();
     let r = PageResult {
-        client,
+        client: super::DiscClient::Plex(client),
         token_gen: client.token_gen(),
         gen: browse.state.query_gen(),
         sec: 0,
         start: 0,
         items: (0..items).map(|_| PmsMovie::default()).collect(),
         total,
-        sorts: None, restored: None,
+        sorts: None,
+        restored: None,
     };
     *browse.adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
     let _outcome = browse.pump();
@@ -302,14 +314,15 @@ pub(super) fn land_page(browse: &mut TestBrowse, total: i64, items: usize) {
 pub(super) fn land_page_with_sorts(browse: &mut TestBrowse, sorts: Vec<SortEntry>) {
     let client = crate::plex::client();
     let r = PageResult {
-        client,
+        client: super::DiscClient::Plex(client),
         token_gen: client.token_gen(),
         gen: browse.state.query_gen(),
         sec: browse.state.cur(),
         start: 0,
         items: Vec::new(),
         total: 0,
-        sorts: Some(sorts), restored: None,
+        sorts: Some(sorts),
+        restored: None,
     };
     *browse.adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
     let _outcome = browse.pump();

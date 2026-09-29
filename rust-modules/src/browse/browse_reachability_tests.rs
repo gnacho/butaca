@@ -281,7 +281,7 @@ fn an_empty_count_landing_does_not_latch_the_probe_off() {
         epoch,
         0,
         SrcLanding {
-            client,
+            client: super::DiscClient::Plex(client),
             token_gen: client.token_gen(),
             name: String::new(),
             what: SrcWhat::Counts(Vec::new()),
@@ -299,7 +299,7 @@ fn an_empty_count_landing_does_not_latch_the_probe_off() {
         epoch,
         0,
         SrcLanding {
-            client,
+            client: super::DiscClient::Plex(client),
             token_gen: client.token_gen(),
             name: String::new(),
             what: SrcWhat::Counts(vec![(1, 185)]),
@@ -353,15 +353,16 @@ fn a_stale_failure_landing_does_not_blame_the_current_query() {
     let stale = browse.state.query_gen();
     browse.state.bump_gen(); // the query moved on under the in-flight fetch
     let r = PageResult {
-        client,
+        client: super::DiscClient::Plex(client),
         token_gen: client.token_gen(),
         gen: stale,
         sec: 0,
         start: 0,
         items: Vec::new(),
         total: -1,
-        sorts: None, restored: None,
-    };
+        sorts: None,
+     restored: None,
+        };
     *browse.adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
     let _outcome = browse.pump();
     assert_eq!(

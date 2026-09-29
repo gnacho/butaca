@@ -134,11 +134,15 @@ mod tests {
         let captured_type = browse.state.states[0].library_type;
         assert!(browse.state.set_library_type(LibraryType::Episodes));
         let mail = Mutex::new(Some(DirectoryResult {
-            epoch: browse.state.table_epoch(), sec: 0, client, token_gen: client.token_gen(),
-            library_type: captured_type, list: vec![("S".into(), 99)],
+            epoch: browse.state.table_epoch(), sec: 0, client: crate::browse::DiscClient::Plex(client),
+            token_gen: client.token_gen(),
+            library_type: captured_type,
+            #[cfg(feature = "jellyfin")]
+            letters_filter: None,
+            list: vec![("S".into(), 99)],
         }));
         let fetching = AtomicBool::new(true);
-        assert!(!browse.state.land_directory_owned(&fetching, &mail, |state, list| {
+        assert!(!browse.state.land_directory_owned(&fetching, &mail, |state, list, _filter| {
             state.letters = Arc::new(list);
             state.letters_done = true;
         }));
