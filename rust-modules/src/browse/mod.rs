@@ -2007,7 +2007,20 @@ impl BrowseState {
         // rather than a file read — but it is still per sync and not per source.
         let session = crate::plex::session::peek();
         let household = session.household_ids();
-        let retire_adapter = self.sources.iter().any(|source| !live.contains(&source.sid));
+        let retire_adapter = self.sources.iter().any(|source| {
+            if live.contains(&source.sid) {
+                return false;
+            }
+            // The Jellyfin source is not in the Plex roster — `live` is EMPTY in this flavour —
+            // so the bare roster test would retire it on every sync, resetting the table it had
+            // just been adopted into (and every section that landed meanwhile). It is live for
+            // exactly as long as its client is installed; sign-out retires it through this arm.
+            #[cfg(feature = "jellyfin")]
+            if source.sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+                return false;
+            }
+            true
+        });
         let mut changed = retire_adapter;
         // Did any source change SIDE of the household line in this pass? That, and not a changed
         // `ServerFacts`, is what the pin defaults and the tab destination are derived from.
@@ -3653,3 +3666,7 @@ mod reachability_tests;
 
 #[cfg(test)]
 mod library_type_tests;
+
+#[cfg(all(test, feature = "jellyfin"))]
+#[path = "browse_roster_jellyfin_tests.rs"]
+mod roster_jellyfin_tests;
