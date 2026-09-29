@@ -23,7 +23,6 @@ pub(crate) mod machine;
 pub(crate) mod preview;
 mod ffi;
 mod pump;
-pub(crate) mod report;
 mod shared;
 pub(crate) mod sidecar;
 #[cfg(feature = "hostsim")]
@@ -465,7 +464,6 @@ pub(crate) fn ended() -> bool {
     SHARED.ended.load(Relaxed)
 }
 pub(crate) fn request_seek(ns: i64) {
-    report::note_seek_for(crate::route::playback_trace_generation());
     crate::route::note_user_seek_intent(ns);
     SHARED.ended.store(false, Relaxed); // seeking back from the end un-ends the stream
     SHARED.seeking.store(true, Relaxed); // HUD: spinner + freeze the playhead until it lands

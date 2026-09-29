@@ -1436,7 +1436,6 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
         // so gating this on a started engine would silently miss the earliest and most certain
         // failure there is. It observes the value the HUD renders and reports only transitions,
         // so the steady-state cost is one atomic load.
-        crate::player::report::tick(&mut app.player.session);
         // end-of-stream: the pipeline drained at the credits → hand off to Up Next when the
         // show has another episode queued, else leave the player (back to the detail page or
         // home, whichever is behind), instead of freezing on the last frame.
@@ -2143,10 +2142,11 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
                     }
                 }
             },
-            // `pump_play` can install a refused `/decision` after the earlier report
-            // observation but before this frame draws the Error screen. Observe again at that
-            // exact publication boundary; latches make a healthy/no-change frame idempotent.
-            |app| crate::player::report::tick(&app.player.session),
+            // `pump_play` can install a refused `/decision` after the earlier state observation
+            // but before this frame draws the Error screen. The removed playback report funnel
+            // observed again at this publication boundary; with nothing left to feed, the
+            // observation is a deliberate no-op kept so the seam stays explicit.
+            |_| {},
         );
         // Async detail load: install the worker's item into CURRENT. Route-unconditional for
         // the same reason as pump_play — play_item_now requests a detail from Home and flips
@@ -2757,7 +2757,6 @@ pub(crate) unsafe fn shutdown(
     ps: &mut crate::route::PlaybackSession,
     pa: &mut crate::player::adapter::PlayerAdapter,
 ) {
-    crate::player::report::abandon_pending(ps);
     if is_started() {
         crate::player::stop_bufferfeed(ps, pa);
     }

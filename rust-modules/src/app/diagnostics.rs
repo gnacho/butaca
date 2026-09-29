@@ -434,7 +434,7 @@ impl Diagnostics {
         };
         self.prev_fed = (d.fed_v, d.fed_a, now);
         self.history.record(
-            crate::route::playback_trace_generation(),
+            crate::route::play_generation(),
             &d,
             crate::route::quality(),
             now,

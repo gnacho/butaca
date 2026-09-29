@@ -1703,11 +1703,6 @@ fn teardown(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::Pla
     // measure of how often people scrub. Read before the teardown below zeroes both values, for
     // the same reason `final_report` is.
     if !for_reload {
-        crate::player::report::ended(
-            ps,
-            SHARED.playpos_ns.load(Ordering::Relaxed),
-            SHARED.duration_ns.load(Ordering::Relaxed),
-        );
     }
     let final_report = if for_reload {
         None

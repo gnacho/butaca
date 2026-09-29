@@ -661,7 +661,6 @@ pub(crate) fn exit_player(
     // `stop_bufferfeed` reports/clears a real engine through `report::ended`, but a refusal or a
     // BACK during resolve has no engine for teardown to take. The exit ritual still ends that
     // attempt, so retire its in-memory trace here as the common backstop.
-    crate::player::report::clear_error_trace();
     // The jail pre-flight refusal (also no Engine to teardown) is already retired above: it
     // lives on `ps.jail_load_blocked`, and `cancel_play` at the top of this function clears it
     // via `clear_play_verdict` the same way it clears a `/decision` refusal — see that function's

@@ -2436,7 +2436,6 @@ fn is_worker_ticket_current(expected: &WorkerTicket) -> bool {
 /// the demux worker starts; it never reads the mutable route session afterwards.
 #[derive(Clone)]
 pub(crate) struct HlsAbrControl {
-    trace_generation: u32,
     sid: ServerId,
     rating_key: String,
     logical_session: String,
@@ -2484,7 +2483,6 @@ pub(crate) enum OriginalProbeResult {
     /// The request reached no usable body. The client-side HLS route remained selected; PMS-side
     /// cursor continuity is not inferred. The outcome is telemetry, not a zero-capacity sample.
     Failed {
-        outcome: crate::player::report::TraceOutcome,
         failure: OriginalProbeFailure,
     },
     /// The active route changed while the finite GET was in flight. Its bytes belong to an old
@@ -2514,10 +2512,6 @@ pub(crate) enum HlsCommitRefusal {
 }
 
 impl HlsAbrControl {
-    pub(crate) fn trace_generation(&self) -> u32 {
-        self.trace_generation
-    }
-
     pub(crate) fn request_original_recovery(
         &self,
         ticket: &WorkerTicket,
@@ -2605,15 +2599,12 @@ impl HlsAbrControl {
         F: FnOnce() -> bool,
     {
         use crate::curlio::{OpenErr, ThroughputFailure as Failure};
-        use crate::player::report::{OriginalProbePhase as Phase, TraceOutcome as Outcome};
-
         if !is_worker_ticket_current(expected) {
             return OriginalProbeResult::Stale;
         }
         let url = if self.fixture_base.is_empty() {
             let Some(client) = crate::plex::client_for(self.sid) else {
                 return OriginalProbeResult::Failed {
-                    outcome: Outcome::Inconclusive,
                     failure: OriginalProbeFailure::Other,
                 };
             };
@@ -2623,12 +2614,7 @@ impl HlsAbrControl {
         } else {
             self.original_probe_part.clone()
         };
-        crate::player::report::note_original_probe_for(
-            self.trace_generation,
-            Phase::SampleSource,
-            Outcome::Started,
-        );
-        let sample = crate::curlio::sample_active_throughput_result(
+                let sample = crate::curlio::sample_active_throughput_result(
             &url,
             plan.target_bytes,
             std::time::Duration::from_millis(plan.budget_ms),
@@ -2636,21 +2622,11 @@ impl HlsAbrControl {
             cancelled,
         );
         if !is_worker_ticket_current(expected) {
-            crate::player::report::note_original_probe_for(
-                self.trace_generation,
-                Phase::SampleSource,
-                Outcome::Inconclusive,
-            );
-            return OriginalProbeResult::Stale;
+                        return OriginalProbeResult::Stale;
         }
         match sample {
             Ok(sample) => {
-                crate::player::report::note_original_probe_for(
-                    self.trace_generation,
-                    Phase::SampleSource,
-                    source_probe_sample_outcome(sample),
-                );
-                OriginalProbeResult::Measured(sample)
+                                OriginalProbeResult::Measured(sample)
             }
             Err(failure) => {
                 let detail = match &failure {
@@ -2665,25 +2641,10 @@ impl HlsAbrControl {
                     Failure::NoBody { .. } => OriginalProbeFailure::NoBody,
                     _ => OriginalProbeFailure::Other,
                 };
-                let outcome = match failure {
-                    Failure::Open(OpenErr::Deadline) | Failure::BodyDeadline => Outcome::Deadline,
-                    Failure::Open(OpenErr::Transport(_) | OpenErr::Multi(_))
-                    | Failure::BodyRead { .. } => Outcome::Transport,
-                    Failure::Open(OpenErr::Status(503 | 509)) => Outcome::Refused,
-                    Failure::Open(OpenErr::Status(500..=599)) => Outcome::ServerState,
-                    Failure::NoBody { .. } => Outcome::NoBody,
-                    _ => Outcome::Inconclusive,
-                };
-                crate::player::report::note_original_probe_for(
-                    self.trace_generation,
-                    Phase::SampleSource,
-                    outcome,
-                );
-                crate::player::log(&format!(
+                                crate::player::log(&format!(
                     "abr: Original source request produced no capacity sample failure={failure:?}"
                 ));
                 OriginalProbeResult::Failed {
-                    outcome,
                     failure: detail,
                 }
             }
@@ -2981,7 +2942,6 @@ pub(crate) fn hls_abr_control(ps: &PlaybackSession) -> Option<(HlsAbrControl, Wo
         .flatten();
     Some((
         HlsAbrControl {
-            trace_generation: playback_trace_generation(),
             sid: cur_sid(ps),
             rating_key: cur_rk(ps),
             logical_session: sess(ps),
@@ -3240,14 +3200,7 @@ pub(crate) fn fallback_auto_to_hls_for(
         rung.raster().0,
         rung.raster().1,
     ));
-    install_auto_hls(
-        ps,
-        expected,
-        rung,
-        offset_secs,
-        true,
-        crate::player::report::DeliveryReason::LinkFallback,
-    )
+    install_auto_hls(ps, expected, rung, offset_secs, true)
 }
 
 /// Replace an Auto Original route whose source request never opened.
@@ -3275,14 +3228,7 @@ pub(crate) fn fallback_unopened_auto_to_hls(ps: &mut PlaybackSession, offset_sec
         rung.raster().0,
         rung.raster().1,
     ));
-    install_auto_hls(
-        ps,
-        &expected,
-        rung,
-        offset_secs,
-        false,
-        crate::player::report::DeliveryReason::OriginalOpenRollback,
-    )
+    install_auto_hls(ps, &expected, rung, offset_secs, false)
 }
 
 /// Commit the common Original→HLS route mutation after the caller has chosen a rung from the
@@ -3295,7 +3241,6 @@ fn install_auto_hls(
     rung: crate::abr::Rung,
     offset_secs: i64,
     visible_switch: bool,
-    reason: crate::player::report::DeliveryReason,
 ) -> Option<String> {
     let fixture_base = ps.auto_fixture_base.clone();
     let previous = {
@@ -3351,13 +3296,7 @@ fn install_auto_hls(
         if visible_switch {
             note_visible_switch(ps, ps.now_ms);
         }
-        crate::player::report::note_delivery_requested_for(
-            playback_trace_generation(),
-            crate::player::report::DeliveryClass::Hls,
-            crate::player::report::QualityClass::from_rung(rung),
-            reason,
-        );
-        Some(url)
+                Some(url)
     };
     if !fixture_base.is_empty() {
         let encoder = format!("auto-fixture-{}", rung.kbps());
@@ -3520,6 +3459,7 @@ pub(crate) fn recover_auto_to_original_for(
             EnhancementOutcome::Off,
         );
     };
+
     // `/decision` only registers the replacement. Just like a raw Part open, it does not prove
     // that Starfish can read and decode the resulting MKV. Publish the remux without stopping the
     // old HLS encoder, then put both exact identities in PendingOriginal; decoded frames retire
@@ -3572,13 +3512,7 @@ pub(crate) fn recover_auto_to_original_for(
             "enhancement: released to Original remux; previous encoder held pending frames"
         }
     });
-    crate::player::report::note_delivery_requested_for(
-        playback_trace_generation(),
-        crate::player::report::DeliveryClass::Remux,
-        crate::player::report::QualityClass::Original,
-        crate::player::report::DeliveryReason::OriginalRecovery,
-    );
-    Some(AutoOriginalReload::Remux)
+        Some(AutoOriginalReload::Remux)
 }
 
 /// Whether the server will serve an Original's raw Part to this playback right now.
@@ -3759,12 +3693,6 @@ fn recover_original_direct(
             "enhancement: released to Original direct play; remux encoder held pending frames"
         }
     });
-    crate::player::report::note_delivery_requested_for(
-        playback_trace_generation(),
-        crate::player::report::DeliveryClass::Direct,
-        crate::player::report::QualityClass::Original,
-        crate::player::report::DeliveryReason::OriginalRecovery,
-    );
     Some(AutoOriginalReload::Direct)
 }
 
@@ -4539,6 +4467,11 @@ pub(crate) fn ctxline_cptr(ps: &PlaybackSession) -> *const c_char {
 }
 struct ScrobbleWork {
     client: Option<&'static crate::plex::Client>,
+    /// The Jellyfin client when the playback came from the Jellyfin backend — captured at the
+    /// same spawn site and under the same "current is the origin" caveat as `client` (a jellyfin
+    /// install has exactly one server, so cur IS the origin for the life of this flavor).
+    #[cfg(feature = "jellyfin")]
+    jf_client: Option<&'static crate::jellyfin::JfClient>,
     final_report: Option<(String, i64, i64)>,
     report_th: Option<std::thread::JoinHandle<()>>,
     session: String,
@@ -4562,6 +4495,20 @@ impl ScrobbleWork {
         if let Some((rk, t_ms, d_ms)) = self.final_report.take() {
             let ok = {
                 let _effect = TIMELINE_EFFECT.lock().unwrap_or_else(|e| e.into_inner());
+                // The final `stopped` report, on whichever backend the playback came from.
+                // `session` is already tsession-when-set (the capture in `scrobble_stop`), which
+                // on the Jellyfin side is the PlaySessionId rule `jellyfin::profile` states.
+                #[cfg(feature = "jellyfin")]
+                if let Some(jc) = self.jf_client {
+                    let ok = jc.session_stopped(&rk, t_ms, &self.session);
+                    crate::log(&format!(
+                        "timeline stopped t={}s/{}s ok={}",
+                        t_ms / 1000,
+                        d_ms / 1000,
+                        ok as i32,
+                    ));
+                    return;
+                }
                 self.client.is_some_and(|c| {
                     c.timeline(&crate::plex::TimelineReport {
                         rating_key: &rk,
@@ -4590,6 +4537,17 @@ impl ScrobbleWork {
             stop.finish();
         }
         if !self.transcode_session.is_empty() {
+            // The server-side encoder kill, on whichever backend holds the session. Jellyfin's
+            // is a best-effort DELETE (the server reaps a quiet HLS encoder on its own); Plex's
+            // is the transcode-session stop.
+            #[cfg(feature = "jellyfin")]
+            let ok = if let Some(jc) = self.jf_client {
+                jc.stop_active_encodings(&self.transcode_session)
+            } else {
+                self.client
+                    .is_some_and(|c| c.transcode_stop(&self.transcode_session))
+            };
+            #[cfg(not(feature = "jellyfin"))]
             let ok = self
                 .client
                 .is_some_and(|c| c.transcode_stop(&self.transcode_session));
@@ -4642,6 +4600,14 @@ pub(crate) fn scrobble_stop(
     // transcode session both live there, and by the time a stop runs the user may well have walked
     // back to a different source's Home.
     let client = cur_client(ps);
+    // The Jellyfin backend's client lives outside the Plex registry, so `cur_client` above can
+    // never resolve it; capture it under the same origin rule (one server per jellyfin install).
+    #[cfg(feature = "jellyfin")]
+    let jf_client = if cur_sid(ps) == crate::jellyfin::SERVER_ID {
+        crate::jellyfin::client()
+    } else {
+        None
+    };
     // Serialise against a previous stop still in flight: these carry a position for a specific
     // item, and letting two race would let an older one land last. Normally free — the measured
     // baseline for a finished worker is 0 ms.
@@ -4650,6 +4616,8 @@ pub(crate) fn scrobble_stop(
         (final_report.is_some() || report_th.is_some()).then(|| TIMELINE_STOP_FENCE.announce());
     let work = std::sync::Arc::new(std::sync::Mutex::new(Some(ScrobbleWork {
         client,
+        #[cfg(feature = "jellyfin")]
+        jf_client,
         final_report,
         report_th,
         session,
@@ -4881,6 +4849,16 @@ pub(crate) fn transcode_seek(ps: &mut PlaybackSession, offset_secs: i64) -> Opti
     if rk.is_empty() {
         return None;
     }
+    // The Jellyfin flavor re-cuts the server session with a StartTimeTicks PlaybackInfo instead
+    // of PMS's start.mkv decision+spec handshake. Same route-ownership machinery publishes the
+    // replacement, so the teardown (and a later scrobble_stop) resolves the server resource from
+    // ACTIVE_ENCODER exactly as on the Plex arm.
+    // The guard is load-bearing: the jellyfin slot is 0, which host fixtures also hand to
+    // `register_for_test` Plex clients — an absent jellyfin client must fall THROUGH.
+    #[cfg(feature = "jellyfin")]
+    if cur_sid(ps) == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+        return jellyfin_transcode_seek(ps, offset_secs, &rk);
+    }
     let c = cur_client(ps)?;
     // A plain seek/foreground resume has no claimed RouteAction, but it still replaces the PMS
     // route and native Engine. Reserve the same start transaction before exposing any candidate
@@ -4973,6 +4951,113 @@ pub(crate) fn transcode_seek(ps: &mut PlaybackSession, offset_secs: i64) -> Opti
             "seek: synchronously retired previous encoder ok={}",
             ok as i32
         ));
+    }
+    Some(url)
+}
+
+/// The Jellyfin arm of [`transcode_seek`]: a PlaybackInfo naming the offset re-cuts the HLS
+/// transcode, and the new `TranscodingUrl` becomes the route. The old server-side session is
+/// retired off the main thread — best-effort, as Jellyfin reaps a quiet encoder on its own.
+#[cfg(feature = "jellyfin")]
+fn jellyfin_transcode_seek(
+    ps: &mut PlaybackSession,
+    offset_secs: i64,
+    rk: &str,
+) -> Option<String> {
+    let c = crate::jellyfin::client()?;
+    // Reserve the same start transaction the Plex arm reserves, so a seek cannot publish a
+    // replacement beneath a Load that is already on its way.
+    let route_start = begin_route_start();
+    let reject_preparation = || {
+        if let Some(ticket) = route_start {
+            let _ = reject_route_start_preparation(ticket);
+        }
+    };
+    // Reconcile the worker-owned projection (if any) into the session before snapshotting, exactly
+    // like the Plex arm — the URL/ceiling to replace is the one live NOW, not the bootstrap one.
+    let live_hls = sync_active_hls_to_session(ps);
+    let expected = live_hls
+        .as_ref()
+        .map(|(ticket, _)| ticket.clone())
+        .unwrap_or_else(worker_ticket);
+    let previous = expected.encoder().to_owned();
+    if previous.is_empty() {
+        reject_preparation();
+        return None;
+    }
+    // The MediaSource id the route was resolved under. `build_stream_jellyfin` derives it the
+    // same way (`msid = ""` when the part IS the item id — a GUID item with no separate source).
+    let part = ps
+        .request
+        .as_ref()
+        .map(|request| request.part.clone())
+        .unwrap_or_default();
+    let msid = if part == rk { String::new() } else { part };
+    // 1 Jellyfin tick = 100 ns, so 1 second is 10^7 ticks (the profile's units rule, outbound half).
+    let body = crate::jellyfin::profile::playback_info_body(
+        cur_ceiling(ps),
+        offset_secs.saturating_mul(10_000_000),
+    );
+    let Some(info) = c.playback_info(rk, &msid, &body) else {
+        reject_preparation();
+        return None;
+    };
+    if info.error_code.as_deref().is_some() {
+        reject_preparation();
+        return None;
+    }
+    let Some(source) = info.media_sources.first() else {
+        reject_preparation();
+        return None;
+    };
+    let Some(relative) = source.transcoding_url.as_deref() else {
+        reject_preparation();
+        return None;
+    };
+    let Some(url) = c.transcode_url(relative) else {
+        reject_preparation();
+        return None;
+    };
+    // The new PlaySessionId, when the server mints one for the re-cut (it usually does). Keep the
+    // current session id when it does not — the route is then the same server session re-cut.
+    let replacement = info
+        .play_session_id
+        .clone()
+        .filter(|session_id| !session_id.is_empty())
+        .unwrap_or_else(|| previous.clone());
+    // Publish the replacement through the SAME route ownership machinery the Plex arm uses.
+    let replacement_published = if let Some((_, hls)) = live_hls.as_ref() {
+        replace_active_hls_for(&expected, &replacement, &url, hls.rung, None).is_some()
+    } else {
+        replace_active_encoder_for(&expected, &replacement).is_some()
+    };
+    if !replacement_published {
+        reject_preparation();
+        return None;
+    }
+    { let s = &mut *ps; {
+        s.tsession = replacement.clone();
+        s.url = url.clone();
+    } };
+    publish_applied_route_projection(ps);
+    if let Some(ticket) = route_start {
+        if !prepare_route_start(ticket) {
+            crate::player::log("jellyfin seek: prepared route lost its start transaction");
+            return None;
+        }
+    }
+    // Retire the OLD server-side session off the main thread — the same backgrounded hand-off the
+    // Plex arm performs.
+    if replacement != previous {
+        let old = previous.clone();
+        let jc = c; // 'static
+        if crate::task::spawn_small_keeping("jf-seek-stop", move || {
+            let _ = jc.stop_active_encodings(&old);
+        })
+        .is_none()
+        {
+            let _ = c.stop_active_encodings(&previous);
+        }
     }
     Some(url)
 }
@@ -5189,7 +5274,6 @@ pub(crate) fn restore_quality(q: Quality) {
 /// rebuilds from the stored ceiling, so only an explicit pick can move it mid-film.
 fn persist_quality_choice(q: Quality) -> Quality {
     let q = supported_quality(q);
-    crate::player::report::note_quality_selected_for(playback_trace_generation(), q);
     // See `restore_quality`: the same process global, the same lock requirement in tests.
     #[cfg(test)]
     crate::testlock::assert_held("the playback quality ceiling (persist_quality_choice)");
@@ -5853,10 +5937,15 @@ pub(crate) fn playback_preview_with_capability_for_test(
 }
 
 static PLAY_GEN: AtomicU32 = AtomicU32::new(0);
+
+/// The playback-request generation: bumped on every new play request. Local consumers (the
+/// diagnostics sweep chart) use it as an epoch; nothing is reported anywhere.
+pub(crate) fn play_generation() -> u32 {
+    PLAY_GEN.load(Ordering::SeqCst)
+}
 static PLAY_BUSY: AtomicBool = AtomicBool::new(false);
 struct PlayLanding {
     gen: u32,
-    trace_generation: u32,
     /// Desired route contract captured before ResolveEnv was projected on the main thread.
     contract_revision: u64,
     plan: Plan,
@@ -5894,15 +5983,6 @@ fn retire_abandoned_plan(plan: Plan) {
     if let Some(resources) = abandoned_plan_resources(&plan) {
         retire_plan_resources(resources);
     }
-}
-
-/// Trace generation owned by the plan that is actually installed. It deliberately remains the
-/// outgoing generation while the next plan resolves, because that engine is still alive; its
-/// workers carry the same token and are ignored by the newly reset report trace.
-static ACTIVE_TRACE_GENERATION: AtomicU32 = AtomicU32::new(0);
-
-pub(crate) fn playback_trace_generation() -> u32 {
-    ACTIVE_TRACE_GENERATION.load(Ordering::SeqCst)
 }
 
 /// True while a resolve is in flight — the HUD renders `PlaybackState::Resolving` from this.
@@ -5992,7 +6072,6 @@ pub(crate) fn request_play(
             preview: false,
         },
         None,
-        None,
         false,
     )
 }
@@ -6023,7 +6102,6 @@ pub(crate) fn request_preview(
             preview: true,
         },
         None,
-        None,
         false,
     )
 }
@@ -6036,7 +6114,6 @@ fn request_play_inner(
     meta: &mut crate::stores::metadata::MetadataStore,
     request: PlaybackRequest,
     retry: Option<RetryContext>,
-    trace_generation: Option<u32>,
     drain_previous: bool,
 ) -> bool {
     let sid = request.sid;
@@ -6053,17 +6130,6 @@ fn request_play_inner(
         );
         return false;
     }
-    // **The playback funnel's denominator, minted HERE and not where the plan lands.** Every way
-    // into playback comes through this one function, including the ones that go on to be refused at
-    // `/decision` — and a refusal never reaches the engine, so anchoring the attempt any later
-    // would have produced a `playback.failed` with no `playback.requested` before it: a funnel that
-    // under-counts exactly the failure it exists to measure. It is after the empty-request guard
-    // above, so a press that resolves to nothing is not an attempt.
-    let trace_generation = if request.preview {
-        0
-    } else {
-        trace_generation.unwrap_or_else(|| crate::player::report::requested(ps, sid))
-    };
     // The fields a play REQUEST owns, as against the ones only a landing may install: the HUD
     // strings (published now, so the pre-roll has a title through the whole resolve) and the five
     // the OUTGOING item leaves behind. Everything else — url, session ids, codecs — stays as it is
@@ -6144,7 +6210,6 @@ fn request_play_inner(
             .unwrap_or_else(|_| Plan { direct_play_mode: env.direct_play_mode, ..Default::default() });
         let landing = PlayLanding {
             gen,
-            trace_generation,
             contract_revision,
             plan,
             rk,
@@ -6264,12 +6329,12 @@ pub(crate) fn retry_current_play(
         "playback retry: resolving item again at quality {:?}",
         quality(),
     ));
-    let retry = retry_context_with(ps, resume_ns, direct_play);
-    request_play_inner(ps, meta, request, Some(retry), None, true)
+    request_play_inner(ps, meta, request, Some(retry_context_with(ps, resume_ns, direct_play)), true)
 }
 
 /// [`rescue_retry_context`] with the failed attempt's Direct Play mode optionally replaced — the
-/// one place a retry can resolve under a different mode than the attempt it repeats.
+/// one place a retry can resolve under a different mode than the attempt it repeats, and the one
+/// the removed report trace never rode.
 fn retry_context_with(ps: &PlaybackSession, resume_ns: i64, direct_play: Option<DirectPlayMode>) -> RetryContext {
     let mut retry = rescue_retry_context(ps, resume_ns);
     if let Some(mode) = direct_play {
@@ -6379,7 +6444,6 @@ pub(crate) fn pump_play(ps: &mut PlaybackSession, meta: &mut crate::stores::meta
     let taken = PLAY_SLOT.lock().unwrap_or_else(|e| e.into_inner()).take();
     let Some(PlayLanding {
         gen,
-        trace_generation,
         contract_revision,
         plan,
         rk,
@@ -6408,7 +6472,7 @@ pub(crate) fn pump_play(ps: &mut PlaybackSession, meta: &mut crate::stores::meta
             crate::player::log(
                 "playback resolve: desired contract changed in flight; discarding and resolving the latest contract",
             );
-            let _ = request_play_inner(ps, meta, request, Some(retry), Some(trace_generation), false);
+            let _ = request_play_inner(ps, meta, request, Some(retry), false);
         } else {
             cancel_playback_request(ps, has_url(ps));
         }
@@ -6424,13 +6488,6 @@ pub(crate) fn pump_play(ps: &mut PlaybackSession, meta: &mut crate::stores::meta
         let mut resume = PLAY_RESUME.lock().unwrap_or_else(|e| e.into_inner());
         take_resume_for(&mut resume, gen)
     };
-    // A preview's trace_generation is the placeholder 0 (request_play_inner never asked
-    // report::requested() for a real one), so it must not overwrite the funnel's active
-    // generation here — doing so would misattribute whatever telemetry a genuinely active,
-    // non-preview resolve/trace is still using this counter for.
-    if !is_preview(ps) {
-        ACTIVE_TRACE_GENERATION.store(trace_generation, Ordering::SeqCst);
-    }
     let _start = apply_plan(ps, meta, plan, &rk);
     if let Some(resources) = refused_resources {
         retire_plan_resources(resources);
@@ -6781,6 +6838,15 @@ pub(crate) fn retranscode_for(ps: &mut PlaybackSession, expected: &WorkerTicket,
     if !is_worker_ticket_current(expected) {
         return None;
     }
+    // Jellyfin arm — a re-transcode that selects a track is a NEW PlaybackInfo POST with that
+    // stream named in the body (the server cuts the playlist with it selected), exactly the shape
+    // `jellyfin_transcode_seek` uses for a seek. The Plex machinery below resolves its client
+    // from a registry the Jellyfin slot is not in, so without this arm an audio switch to a
+    // non-direct-playable track is silently rejected on this backend.
+    #[cfg(feature = "jellyfin")]
+    if cur_sid(ps) == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+        return jellyfin_retranscode_as(ps, expected, offset_secs);
+    }
     if matches!(
         cur_delivery(ps),
         crate::plex::TranscodeDelivery::FixedHls { .. }
@@ -6828,12 +6894,110 @@ fn retranscode_contract(ps: &PlaybackSession) -> crate::plex::EncodeContract {
 /// Rebuild the current item under `contract` (issue #266: the whole encode shape, enhancement
 /// included). Publishes `cur_contract` and `cur_enhancement` only after PMS accepted it — the
 /// applied enhancement is never written at the selection (I9).
+#[cfg(feature = "jellyfin")]
+fn jellyfin_retranscode_as(
+    ps: &mut PlaybackSession,
+    expected: &WorkerTicket,
+    offset_secs: i64,
+) -> Option<String> {
+    if forced_direct_play(ps) {
+        return None;
+    }
+    let rk = cur_rk(ps);
+    if rk.is_empty() {
+        return None;
+    }
+    let c = crate::jellyfin::client()?;
+    // The MediaSource id, derived exactly as `build_stream_jellyfin` does (`""` when the part IS
+    // the item id — a GUID item with no separate source).
+    let part = ps
+        .request
+        .as_ref()
+        .map(|request| request.part.clone())
+        .unwrap_or_default();
+    let msid = if part == rk { String::new() } else { part };
+    // The chosen track, by the stream INDEX the server selects on (`convert_stream` mirrors
+    // Jellyfin's `Index` into `Stream.id`, and `cur_audio_sid` holds the user's pick).
+    let audio_index = cur_audio_sid(ps) as i32;
+    let body = crate::jellyfin::profile::playback_info_body_for(
+        cur_ceiling(ps),
+        offset_secs.max(0).saturating_mul(10_000_000),
+        &msid,
+        Some(audio_index),
+        None,
+    );
+    let info = c.playback_info(&rk, &msid, &body)?;
+    if let Some(code) = info.error_code.as_deref() {
+        crate::player::log(&format!("jellyfin retranscode: refused ({code})"));
+        return None;
+    }
+    let Some(source) = info.media_sources.first() else {
+        return None;
+    };
+    let Some(relative) = source.transcoding_url.as_deref() else {
+        crate::player::log("jellyfin retranscode: server offered no TranscodingUrl");
+        return None;
+    };
+    let url = c.transcode_url(relative)?;
+    let logical = sess(ps);
+    let namespace = if logical.is_empty() {
+        format!("plxnative-{rk}")
+    } else {
+        logical
+    };
+    let replacement = info
+        .play_session_id
+        .clone()
+        .filter(|session_id| !session_id.is_empty())
+        .unwrap_or_else(|| next_encoder_session(&namespace));
+    // Publish through the SAME route ownership machinery the Plex arm uses, so the teardown that
+    // follows (and a later scrobble_stop) resolves the server resource from ACTIVE_ENCODER rather
+    // than from a session field the reload already moved past.
+    if replace_active_encoder_for(expected, &replacement).is_none() {
+        let _ = c.stop_active_encodings(&replacement);
+        return None;
+    }
+    { let s = &mut *ps; {
+        s.cur_contract.remux = false;
+        s.tsession = replacement.clone();
+        s.url = url.clone();
+        // The profile's transcode target is pinned h264+aac in MPEG-TS HLS (see
+        // `jellyfin::profile`), so the Load payload's guess is not a guess.
+        s.stream_vcodec = "h264".to_owned();
+        s.stream_acodec = "aac".to_owned();
+        s.stream_fps = 0.0;
+        s.stream_dovi = crate::metadata::Dovi::NONE;
+        s.stream_immersive = false;
+    } };
+    // Retire the previous server session off the main thread — the same backgrounded hand-off the
+    // Plex arm performs. Best-effort: Jellyfin reaps a quiet encoder on its own. Empty on the
+    // common direct-play → transcode switch, where there is no old encoder to stop.
+    let previous = expected.encoder().to_owned();
+    if !previous.is_empty() && previous != replacement {
+        let old = previous.clone();
+        if crate::task::spawn_small_keeping("jf-retranscode-stop", move || {
+            let _ = c.stop_active_encodings(&old);
+        })
+        .is_none()
+        {
+            let _ = c.stop_active_encodings(&previous);
+        }
+    }
+    // NEVER log the URL (it ends in `api_key=…`). The rk, the track and the offset are the whole
+    // diagnostic value here.
+    crate::player::log(&format!(
+        "retranscode rk={rk} audio={audio_index} offset={offset_secs} -> jellyfin transcode start"
+    ));
+    Some(url)
+}
+
 fn retranscode_as(
     ps: &mut PlaybackSession,
     expected: &WorkerTicket,
     offset_secs: i64,
     contract: crate::plex::EncodeContract,
 ) -> Option<String> {
+
     if forced_direct_play(ps) { return None; }
     let c = cur_client(ps)?;
     let rk = cur_rk(ps);
@@ -7764,7 +7928,7 @@ pub(crate) fn report_timeline(
 // ---------------------------------------------------------------------------------------
 #[cfg(test)]
 #[path = "decision_test_support.rs"]
-mod test_support;
+pub(crate) mod test_support;
 
 #[cfg(test)]
 #[path = "decision_resolve_route_tests.rs"]

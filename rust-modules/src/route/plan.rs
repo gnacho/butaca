@@ -281,19 +281,6 @@ impl AutoOriginalCandidate {
 }
 
 
-pub(super) fn source_probe_sample_outcome(
-    sample: crate::curlio::ThroughputSample,
-) -> crate::player::report::TraceOutcome {
-    if sample.target_reached {
-        crate::player::report::TraceOutcome::Succeeded
-    } else {
-        // A non-empty prefix is useful only as a right-censored observation. `curlio` currently
-        // collapses the terminal deadline/read reason once bytes exist, so naming it successful
-        // would be stronger than the evidence. Keep the trace honest until that result type grows
-        // a terminal-cause field.
-        crate::player::report::TraceOutcome::Inconclusive
-    }
-}
 
 
 /// **Why [`HlsAbrControl::prime`] would not register a candidate encoder**, in the one distinction
@@ -848,6 +835,40 @@ pub(super) fn up_next_of(r: &crate::plex::QueueRow) -> Option<UpNext> {
 }
 
 
+/// Build the Up Next descriptor from Jellyfin's `GET /Shows/NextUp` answer (issues #41/#42) —
+/// the episode the server says follows the one now playing, in the same shape the Plex lane
+/// gets free from its `continuous=1` PlayQueue. Episodes only, the same rule as
+/// [`up_next_of`]: "up next" is a show idea.
+#[cfg(feature = "jellyfin")]
+fn up_next_from_dto(it: &crate::jellyfin::BaseItemDto) -> Option<UpNext> {
+    let m = crate::jellyfin::movie_from_dto(it, crate::jellyfin::SERVER_ID, 0)?;
+    if m.kind != 3 {
+        return None;
+    }
+    Some(UpNext {
+        rk: m.rk,
+        part: m.part,
+        vcodec: m.vcodec,
+        acodec: m.acodec,
+        show_title: m.show_title,
+        ep_title: m.title,
+        season: m.season_index as i64,
+        index: m.ep_index as i64,
+        thumb: m.thumb,
+        // UpNext speaks milliseconds; the converter's dur_ns is ticks x 100
+        dur_ms: m.dur_ns / 1_000_000,
+        resume_ms: m.resume_ms,
+    })
+}
+
+/// Ask the server for the show's next episode and project it. An empty NextUp (a show never
+/// started or fully watched) is `None` exactly like a transport failure: both honestly read as
+/// "no up next".
+#[cfg(feature = "jellyfin")]
+fn jellyfin_up_next(c: &crate::jellyfin::JfClient, series_id: &str) -> Option<UpNext> {
+    c.next_up(series_id)?.items.first().and_then(up_next_from_dto)
+}
+
 /// Every piece of [`Session`] the resolve used to READ, captured on the main thread and passed by
 /// value.
 ///
@@ -1136,6 +1157,14 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     if env.direct_play_mode == DirectPlayMode::Disabled && rk.is_empty() {
         plan.verdict = Some(PlayVerdict::DirectPlayDisabled);
         return plan;
+    }
+    // The Jellyfin flavor resolves its own route: no plex.tv PlayQueue, no MDE decision, and a
+    // GUID MediaSource instead of a numeric Part id. Same Plan shape out, so everything from
+    // apply_plan down cannot tell the two apart. The installed-client guard is every jellyfin
+    // arm's guard: the slot number alone is also a valid Plex slot in host fixtures.
+    #[cfg(feature = "jellyfin")]
+    if env.sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+        return build_stream_jellyfin(rk, part, vcodec, acodec, env);
     }
     let forced = env.direct_play_mode == DirectPlayMode::Forced;
     let playback_quality = if forced { Quality::Original } else { env.quality };
@@ -2556,10 +2585,212 @@ pub(crate) fn playback_preview_of(
 /// are sent to Plex for a container remux instead of direct-play. Matches the container
 /// extension in the part-key filename; the m4v spelling is the same mov demuxer and the same
 /// `container=mp4` in PMS metadata.
+/// The Jellyfin flavor's whole resolve, the twin of [`build_stream`] below: no plex.tv
+/// PlayQueue, no MDE handshake, one server by construction. Direct play streams the raw file;
+/// anything else asks the server's transcoder with this set's pinned profile (H264/AAC in
+/// MPEG-TS HLS), and the PlaybackInfo answer carries the transcode URL, the kill handle and
+/// the progress quote.
+#[cfg(feature = "jellyfin")]
+fn build_stream_jellyfin(
+    rk: &str,
+    part: &str,
+    vcodec: &str,
+    acodec: &str,
+    env: &ResolveEnv,
+) -> Plan {
+    let Some(c) = crate::jellyfin::client() else {
+        // unreachable through build_stream's guard; an early, url-less plan keeps this total anyway
+        return Plan {
+            sid: env.sid,
+            direct_play_mode: env.direct_play_mode,
+            source_decodable: true,
+            ..Default::default()
+        };
+    };
+    let mut plan = Plan {
+        sid: env.sid,
+        direct_play_mode: env.direct_play_mode,
+        // a Jellyfin MediaSource id is a GUID — no numeric part id exists to carry, and nothing
+        // on this backend reads part_id (it keys Plex's /library/parts selection PUTs)
+        part_id: 0,
+        src_vcodec: vcodec.to_string(),
+        src_acodec: acodec.to_string(),
+        source_decodable: true,
+        ..Default::default()
+    };
+    // The playback session id doubles as Jellyfin's PlaySessionId on a DIRECT play — the server
+    // mints one only for a transcode, so progress reporting quotes `tsession` when it is set and
+    // this one otherwise (the viewstate arm's rule).
+    plan.sess = new_sess(rk);
+    plan.playing = env
+        .cached_item
+        .clone()
+        .or_else(|| crate::metadata::fetch_playing_item(env.sid, rk));
+    // Up Next (#41/#42): what follows this episode, off the show's own NextUp answer. The Plex
+    // lane gets the same fact free from its continuous PlayQueue; here it costs one query per
+    // episode resolve, skipped for movies (no show_rk) and previews. Everything downstream —
+    // the HUD control and the auto-advance countdown — reads `plan.up_next`, backend-agnostic.
+    if !env.preview {
+        plan.up_next = plan
+            .playing
+            .as_ref()
+            .map(|p| p.show_rk.as_str())
+            .filter(|show| !show.is_empty())
+            .and_then(|show| jellyfin_up_next(c, show));
+    }
+    let (src_w, src_h) = plan
+        .playing
+        .as_ref()
+        .map(|p| (p.width, p.height))
+        .unwrap_or((0, 0));
+    plan.src_measure = (env.src_kbps, src_w, src_h);
+    plan.transport_kbps = plan
+        .playing
+        .as_ref()
+        .map(|p| p.bitrate)
+        .filter(|&v| v > 0)
+        .unwrap_or(env.src_kbps);
+    plan.contract.ceiling = env.quality.ceiling();
+    let dovi = plan.playing.as_ref().map(|p| p.dovi).unwrap_or_default();
+    let dv = dovi.presentation_now(vcodec == "hevc");
+    let video_dp = video_direct_plays(vcodec, src_w, src_h, dv, crate::devcaps::caps());
+    plan.source_decodable = video_dp;
+    let tracks = plan
+        .playing
+        .as_ref()
+        .map(|p| p.audio.as_slice())
+        .unwrap_or(&[]);
+    let audio_sel = pick_dp_audio_pref(tracks, acodec, AudioLangPrefs::default());
+    // The demuxer's own container list: the DTO's container name is the same fact the Plex lane
+    // reads off a part-key extension (`streamable_container` owns the one list, so the two
+    // backends cannot disagree).
+    let container = plan
+        .playing
+        .as_ref()
+        .map(|p| p.container.as_str())
+        .unwrap_or("");
+    let streamable = streamable_container(container, part);
+    // A fixed quality rung denies direct play exactly as on the Plex branch — the user's ceiling
+    // is an ask, and the only way to honour it is the branch where the server applies the bound.
+    let quality = quality_policy(env.quality, true, env.src_kbps, src_w, src_h);
+    let directplay = quality.direct_play && video_dp && streamable && audio_sel.is_some();
+    crate::player::log(&format!(
+        "route(jellyfin): {vcodec}/{acodec} {src_w}x{src_h} {container} — video_dp={video_dp} audio_dp={} streamable={streamable} quality_dp={} → {}",
+        audio_sel.is_some(),
+        quality.direct_play,
+        if directplay { "direct play" } else { "transcode" },
+    ));
+    if directplay {
+        // Mirror of the Plex direct-play branch: source codecs on the Load payload, fps off the
+        // store, the picked track fed by CONTAINER ordinal. Subtitles start OFF on this backend:
+        // Jellyfin's per-item selection indexes live on the PlaybackInfo answer, which a direct
+        // play never asks for — the file's own default embedded subtitle is the read-back half
+        // of the contract (the track menu's writes are the other).
+        let (aidx, achosen, asid) = audio_sel.unwrap_or((-1, acodec.to_string(), 0));
+        plan.fps = plan.playing.as_ref().map(|p| p.video_fps).unwrap_or(0.0);
+        plan.vcodec = vcodec.to_string();
+        plan.acodec = achosen;
+        plan.dovi = dovi;
+        plan.immersive = plan
+            .playing
+            .as_ref()
+            .and_then(|p| {
+                if aidx >= 0 {
+                    p.audio.get(aidx as usize)
+                } else {
+                    p.audio.iter().find(|a| a.selected)
+                }
+            })
+            .is_some_and(|a| a.has_atmos());
+        plan.audio = Some(crate::route::CarriedAudio::named(asid, -1));
+        if aidx >= 0 {
+            plan.feed_audio_ordinal = Some(
+                plan.playing
+                    .as_ref()
+                    .map(|p| crate::metadata::audio_ordinal(&p.audio, aidx as usize))
+                    .unwrap_or(aidx),
+            );
+        }
+        // The read-back half of the subtitle contract, Jellyfin flavour: the file's default
+        // subtitle comes up on a direct play exactly as it does on Plex (which reads the server's
+        // per-part selection instead — this backend has none). `apply_plan` installs it on the
+        // main thread; the client renderer takes the embedded-subtitle ordinal.
+        if let Some((ssid, ord)) = plan.playing.as_ref().and_then(|p| {
+            pick_dp_subtitle_account(
+                &p.subs,
+                &crate::plex::ShowLangPrefs::default(),
+                SubtitleLangPrefs::default(),
+                "",
+            )
+        }) {
+            plan.sub_sid = ssid;
+            plan.sub_render_ordinal = Some(ord);
+        }
+        // `part` carries the MediaSource id — but `convert` falls back to the ITEM id when a row
+        // has no MediaSources, and passing that back as MediaSourceId would 404 the stream.
+        let msid = if part == rk { "" } else { part };
+        match c.direct_stream_url(rk, msid) {
+            Some(url) => plan.url = url,
+            None => return plan, // no token — the url-less plan fails like any unresolvable one
+        }
+        return plan;
+    }
+    // ---- transcode: ask the server to decide with this set's profile -------------------------
+    let msid = if part == rk { "" } else { part };
+    // the client fills UserId itself — it owns the token state
+    let body = crate::jellyfin::profile::playback_info_body(plan.contract.ceiling, 0);
+    let Some(info) = c.playback_info(rk, msid, &body) else {
+        return plan; // unreachable/unparseable — url-less plan, resolve_failed tells the page
+    };
+    if let Some(code) = info.error_code.as_deref() {
+        plan.verdict = Some(crate::route::PlayVerdict::Server(format!("Jellyfin refused playback ({code})")));
+        return plan;
+    }
+    let Some(source) = info.media_sources.first() else {
+        return plan;
+    };
+    match source.transcoding_url.as_deref().and_then(|t| c.transcode_url(t)) {
+        Some(url) => {
+            // The profile's transcode target is pinned h264+aac in MPEG-TS HLS (see
+            // `jellyfin::profile`), so the Load payload's guess is not a guess.
+            plan.url = url;
+            plan.vcodec = "h264".into();
+            plan.acodec = "aac".into();
+            plan.contract.delivery = crate::plex::TranscodeDelivery::FixedHls {
+                seconds_per_segment: 6,
+            };
+            // The SERVER's session id — the transcode's kill handle and the progress quote.
+            plan.tsession = info.play_session_id.clone().unwrap_or_default();
+        }
+        None => {
+            if !source.supports_transcoding {
+                plan.verdict = Some(
+                    crate::route::PlayVerdict::Server("Jellyfin can neither direct-play nor transcode this item for this TV".into()),
+                );
+            }
+            // else: the server said transcoding is possible but offered no URL — the url-less
+            // plan fails on the shared resolve_failed path, and the log above names the gate.
+        }
+    }
+    plan
+}
+
 pub(super) fn part_is_streamable(part_key: &str) -> bool {
     let name = part_key.rsplit('/').next().unwrap_or(part_key);
     let name = name.split('?').next().unwrap_or(name);
     name.ends_with(".mkv") || name.ends_with(".mp4") || name.ends_with(".m4v")
+}
+
+/// The demuxer's own container test, one list for both backends: a Jellyfin MediaSource has no
+/// path extension to read — the DTO's container word IS the same fact (`part_is_streamable`
+/// stays the fallback for a row that named no container, which is also its Plex role when a
+/// part key is all we hold).
+#[cfg(feature = "jellyfin")]
+pub(super) fn streamable_container(container: &str, part_key: &str) -> bool {
+    if !container.is_empty() {
+        return matches!(container, "mkv" | "mp4" | "m4v");
+    }
+    part_is_streamable(part_key)
 }
 
 
@@ -2644,3 +2875,7 @@ mod dolby_vision_tests;
 #[cfg(test)]
 #[path = "plan_mde_decision_tests.rs"]
 mod mde_decision_tests;
+
+#[cfg(test)]
+#[path = "plan_up_next_tests.rs"]
+mod up_next_tests;
