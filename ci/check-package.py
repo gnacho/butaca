@@ -1005,7 +1005,10 @@ HOSTPATH = re.compile(rb"(?:^|[^A-Za-z0-9/_.-])(/(?:Users|home)/[A-Za-z0-9_./+-]
 # The NDK's own location cannot be removed — `--cross-prefix` must be absolute (the wrapper gcc
 # dies when invoked through PATH), so it rides in FFmpeg's recorded configure string. It is
 # identical on every CI runner, which is the reason releases must be BUILT by CI.
-ALLOWED_PATH = re.compile(rb"webos-ndk|^/home/runner/")
+# Jellyfin's own REST endpoints ride in the binary as format strings, and "/Users/" is both a
+# macOS build path and that API's prefix: "/Users/AuthenticateByName" and every "/Users/{user_id}"
+# template are the service's words, not a machine's. Only those two shapes are exempt.
+ALLOWED_PATH = re.compile(rb"webos-ndk|^/home/runner/|^/Users/(AuthenticateByName|\{)")
 
 # A missing payload directory is a HARD failure, not an empty loop. `check` only ever prints for
 # something it was given, so an absent stage used to print nothing at all here — no ok, no FAIL —
