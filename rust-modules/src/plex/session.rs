@@ -4500,6 +4500,15 @@ impl Session {
             .and_then(|u| named(&u.title))
             .or_else(|| named(&self.user.title))
             .or_else(roster);
+        // The Jellyfin flavor: this app only reaches Home WITH a signed-in Jellyfin client, and
+        // no Plex session ever exists to name it. The account facts come from the installed
+        // client itself, so a signed-in user sees their name, never "Sign in".
+        #[cfg(feature = "jellyfin")]
+        if let Some(client) = crate::jellyfin::client() {
+            if let Some(name) = client.user_name() {
+                return Account { signed_in: true, can_switch: false, name: Some(name) };
+            }
+        }
         Account {
             signed_in: !self.account_token.is_empty() || self.can_go_local(),
             can_switch: !self.account_token.is_empty(),

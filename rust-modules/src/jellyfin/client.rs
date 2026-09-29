@@ -90,6 +90,9 @@ pub(crate) struct JfClient {
 struct TokenState {
     token: String,
     user_id: String,
+    /// The display name the sign-in answered (`AuthOk.user_name`) — the Home chip reads it
+    /// (`Session::account`'s jellyfin arm), so a signed-in user never sees "Sign in".
+    user_name: String,
 }
 
 impl JfClient {
@@ -179,8 +182,15 @@ impl JfClient {
         *self.token.write().unwrap() = Some(TokenState {
             token: ok.token.clone(),
             user_id: ok.user_id.clone(),
+            user_name: ok.user_name.clone(),
         });
         Ok(ok)
+    }
+
+    /// The signed-in user's display name, once the login landed (None before it). The account
+    /// chip reads it: a Jellyfin install has no Plex session to name itself from.
+    pub(crate) fn user_name(&self) -> Option<String> {
+        self.token.read().unwrap().as_ref().map(|t| t.user_name.clone())
     }
 
     /// The authed headers for a control request: token + identity in the ONE `Authorization`

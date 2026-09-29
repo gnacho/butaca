@@ -53,6 +53,13 @@ pub(crate) fn detect_and_set() {
         .as_deref()
         .is_some_and(|l| l.len() >= 2 && l[..2].eq_ignore_ascii_case("es"));
     ES.store(es, Ordering::Relaxed);
+    // One line per boot, so a television that disagrees can say so: the UI locale read, and the
+    // language the app serves. Without it a wrong-language report has no evidence at all.
+    crate::log(&format!(
+        "i18n: UI locale {:?} -> {}",
+        ui.as_deref().unwrap_or("unreadable"),
+        if es { "es" } else { "en" }
+    ));
 }
 
 /// Is the compiled-in Spanish table the one being served? Public for the tests that pin a
