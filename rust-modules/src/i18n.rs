@@ -243,7 +243,7 @@ fn es(s: &str) -> Option<&'static str> {
         "Created by" => "Creada por",
         "About" => "Acerca de",
         "MORE" => "MÁS",
-        "Related" => "Relacionado",
+        "Related" => "Similares", // issue #34: "Relacionado" read as a verb; shelves are Similar
         "TV Show" => "Serie",
         "Show" => "Serie",
         "Season {}" => "Temporada {}",
