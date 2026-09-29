@@ -2288,7 +2288,7 @@ pub(crate) struct PlayingItem {
     /// key carries no extension to read (a Jellyfin MediaSource id is a GUID). Empty means "not
     /// said", and the gate then falls back to the part key's extension, which is the same fact
     /// on Plex.
-    #[allow(dead_code)] // read by the jellyfin direct-play gate (decision.rs arm lands in S7)
+    #[cfg_attr(not(feature = "jellyfin"), allow(dead_code))] // the Plex gate reads the part key
 
     pub(crate) container: String,
     /// The played leaf's Dolby Vision layering — the direct-play gate's other refusal, beside the
