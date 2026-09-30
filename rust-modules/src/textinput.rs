@@ -300,6 +300,31 @@ pub(crate) fn stop() {
         // is not it. With both transitions logged, one log answers which of the two you have.
         log("keyboard: stop");
         SDL_StopTextInput();
+        webos_hide_keyboard();
+    }
+}
+
+/// The reopen wedge this file's own module doc records (moonlight-tv#435, reproduced on webOS
+/// 7.4): after the first dismissal the panel never rises again, because the fork's
+/// `SDL_StopTextInput` leaves the compositor's `text_model` up and every later
+/// `WebOSShowScreenKeyboard` lands in a panel the compositor believes is already shown. The
+/// fork's own hide entry point, driven by name with the same dlsym discipline as
+/// `SDL_SetWindowInputFocus`: a firmware without it merely keeps the old behaviour, and the log
+/// says which happened. No-op on the simulator.
+unsafe fn webos_hide_keyboard() {
+    #[cfg(not(feature = "hostsim"))]
+    {
+        unsafe extern "C" {
+            fn dlsym(handle: *mut c_void, symbol: *const std::os::raw::c_char) -> *mut c_void;
+        }
+        let sym = dlsym(std::ptr::null_mut(), c"WebOSHideScreenKeyboard".as_ptr());
+        if sym.is_null() {
+            log("keyboard: WebOSHideScreenKeyboard absent on this firmware");
+            return;
+        }
+        let hide: unsafe extern "C" fn(*mut c_void) = std::mem::transmute(sym);
+        hide(*addr_of!(WIN));
+        log("keyboard: panel hidden at the webOS layer");
     }
 }
 
