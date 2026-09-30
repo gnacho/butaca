@@ -2743,7 +2743,8 @@ fn build_stream_jellyfin(
         return plan; // unreachable/unparseable — url-less plan, resolve_failed tells the page
     };
     if let Some(code) = info.error_code.as_deref() {
-        plan.verdict = Some(crate::route::PlayVerdict::Server(format!("Jellyfin refused playback ({code})")));
+        plan.verdict = Some(crate::route::PlayVerdict::Server(
+            crate::i18n::msg::browse_jellyfin_verdict_refused(code).into()));
         return plan;
     }
     let Some(source) = info.media_sources.first() else {
@@ -2765,7 +2766,8 @@ fn build_stream_jellyfin(
         None => {
             if !source.supports_transcoding {
                 plan.verdict = Some(
-                    crate::route::PlayVerdict::Server("Jellyfin can neither direct-play nor transcode this item for this TV".into()),
+                    crate::route::PlayVerdict::Server(
+                        crate::i18n::msg::browse_jellyfin_verdict_unplayable().into()),
                 );
             }
             // else: the server said transcoding is possible but offered no URL — the url-less

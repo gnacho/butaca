@@ -2096,5 +2096,16 @@
   "browse.jellyfin.error_reach": {
     "value": "Couldn't reach the server — check the address and that it's on",
     "description": "Jellyfin flavor's sign-in form or library UI: browse.jellyfin.error_reach"
+  },
+  "browse.jellyfin.verdict_refused": {
+    "value": "Jellyfin refused playback ({code})",
+    "args": {
+      "code": "str"
+    },
+    "description": "Playback verdict shown when the Jellyfin server refuses with a code: browse.jellyfin.verdict_refused"
+  },
+  "browse.jellyfin.verdict_unplayable": {
+    "value": "Jellyfin can neither direct-play nor transcode this item for this TV",
+    "description": "Playback verdict when the server offers no playable shape: browse.jellyfin.verdict_unplayable"
   }
 }

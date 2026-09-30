@@ -3021,7 +3021,6 @@ mod lifecycle_regression_tests {
             measure_fault_logged: Default::default(),
             rec: super::super::recorder::Recplay::Off,
             boot_initial: Default::default(),
-            telemetry_guard: Default::default(),
             present: crate::ui::present::Present::new(),
             glass: Default::default(),
             pages: crate::ui::dispatch::Dispatcher::new(),

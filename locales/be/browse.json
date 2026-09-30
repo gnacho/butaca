@@ -498,5 +498,7 @@
   "browse.jellyfin.error_address": "Гэта не падобна на адрас сервера — паспрабуйце, напр., jellyfin.local:8096",
   "browse.jellyfin.error_https": "Гэты адрас перадасць ваш пароль без абароны — выкарыстоўвайце https:// або адрас лакальнай сеткі",
   "browse.jellyfin.error_auth": "Сервер не распазнаў гэтае імя карыстальніка або пароль",
-  "browse.jellyfin.error_reach": "Не атрымалася дабрацца да сервера — праверце адрас і што ён уключаны"
+  "browse.jellyfin.error_reach": "Не атрымалася дабрацца да сервера — праверце адрас і што ён уключаны",
+  "browse.jellyfin.verdict_refused": "Jellyfin адмовіў у прайграванні ({code})",
+  "browse.jellyfin.verdict_unplayable": "Jellyfin не можа прайграць гэты тытул на гэтым тэлевізары ні напрамую, ні транскадаваннем"
 }

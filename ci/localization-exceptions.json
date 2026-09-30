@@ -16,5 +16,11 @@
     "boundary": "Field::new",
     "text": "VP9",
     "reason": "Technical codec identifier; no app-owned prose."
+  },
+  {
+    "path": "rust-modules/src/screens/jf_login.rs",
+    "boundary": "TextView::new",
+    "text": "butaca",
+    "reason": "The fork's brand wordmark, drawn when the logo texture is absent; a product name is not translated."
   }
 ]
