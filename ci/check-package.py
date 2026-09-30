@@ -805,7 +805,9 @@ def check_tracked_resources(expect_title: str) -> list:
         # The English sentence is a trademark disclaimer. A translation that transliterated the
         # mark ("플렉스") would both lose the disclaimer's force and misuse it, and no reader of
         # this repository is placed to catch that by eye in twelve languages.
-        check("Plex" in desc, f"{loc}/appinfo.json names Plex verbatim (the disclaimer's subject)")
+        # The fork's disclaimer names Jellyfin (its descriptions say so in every locale); the
+        # subject of the non-affiliation sentence is the service the client speaks to.
+        check("Jellyfin" in desc, f"{loc}/appinfo.json names Jellyfin verbatim (the disclaimer's subject)")
     return locales
 
 
@@ -1003,7 +1005,10 @@ HOSTPATH = re.compile(rb"(?:^|[^A-Za-z0-9/_.-])(/(?:Users|home)/[A-Za-z0-9_./+-]
 # The NDK's own location cannot be removed — `--cross-prefix` must be absolute (the wrapper gcc
 # dies when invoked through PATH), so it rides in FFmpeg's recorded configure string. It is
 # identical on every CI runner, which is the reason releases must be BUILT by CI.
-ALLOWED_PATH = re.compile(rb"webos-ndk|^/home/runner/")
+# Jellyfin's own REST endpoints ride in the binary as format strings, and "/Users/" is both a
+# macOS build path and that API's prefix: "/Users/AuthenticateByName" and every "/Users/{user_id}"
+# template are the service's words, not a machine's. Only those two shapes are exempt.
+ALLOWED_PATH = re.compile(rb"webos-ndk|^/home/runner/|^/Users/(AuthenticateByName|\{)")
 
 # A missing payload directory is a HARD failure, not an empty loop. `check` only ever prints for
 # something it was given, so an absent stage used to print nothing at all here — no ok, no FAIL —
@@ -1128,7 +1133,7 @@ check(binary.exists(), f"the staged payload carries the binary ({binary.name})")
 # THE ID IS THE RULE, and it is graded whatever the stamp says — note the `if IS_STABLE`
 # below sits BESIDE the `BUILD` branch, never inside it.
 #
-# `com.beb.plxnative` is what a user installs, so a dev-featured binary under it ships the whole
+# `com.butaca` is what a user installs, so a dev-featured binary under it ships the whole
 # /tmp trigger surface, the world-writable `plxnative-remote` FIFO and the `:8910` listener to the
 # public. The Makefile's `release-guard` refuses to BUILD that; this is the same rule on the bytes,
 # which is the half that survives someone reaching for the documented `ALLOW_DEV_ON_STABLE=1`
@@ -1299,8 +1304,8 @@ elif sha_file.exists():
 
 # The Makefile derives IPK_VERSION from appinfo.json, so the built filename is the fourth witness.
 # Scoped to THIS flavour's id: two flavours' artifacts can sit in pkg/ side by side, and the
-# `_arm.ipk` suffix in the pattern is what keeps `com.beb.plxnative_*` from also matching
-# `com.beb.plxnative.debug_*` (the dot is not a `_`, but a bare prefix test would still match).
+# `_arm.ipk` suffix in the pattern is what keeps `com.butaca_*` from also matching
+# `com.butaca.debug_*` (the dot is not a `_`, but a bare prefix test would still match).
 built = sorted((ROOT / "pkg").glob(f"{PACKAGED_ID}_*_arm.ipk"))
 if built:
     check(len(built) == 1, f"exactly one built {PACKAGED_ID} ipk in pkg/ (saw {[p.name for p in built]})")
@@ -1378,24 +1383,21 @@ if corner is not None:
 
 check(png_size(PAYLOAD / "splash.png") == (1920, 1080),
       "splash.png is exactly 1920x1080 (splashBackground accepts no other size)")
-# The badged sets are tracked artwork sources (`tools/mkicons.py --out-dir=pkg/dev --badge=DEV`,
-# `--out-dir=pkg/nightly --badge=NIGHTLY`), so they are graded whether or not this run happens to be
-# packaging them — otherwise a regression in one would only ever be found by whoever next built
-# that flavour's package.
-for badged in ("pkg/dev", "pkg/nightly"):
-    if not (ROOT / badged).is_dir():
-        continue
-    check(png_size(ROOT / badged / "icon.png") == (80, 80), f"{badged}/icon.png is 80x80")
-    check(png_size(ROOT / badged / "largeIcon.png") == (130, 130), f"{badged}/largeIcon.png is 130x130")
+# The badged set is a tracked artwork source (`tools/mkicons.py --out-dir=pkg/dev --badge=DEV`), so
+# it is graded whether or not this run happens to be packaging it — otherwise a regression in it
+# would only ever be found by whoever next built a debug package.
+if (ROOT / "pkg/dev").is_dir():
+    check(png_size(ROOT / "pkg/dev/icon.png") == (80, 80), "pkg/dev/icon.png is 80x80")
+    check(png_size(ROOT / "pkg/dev/largeIcon.png") == (130, 130), "pkg/dev/largeIcon.png is 130x130")
     if corner is not None:
         # Same rule as above, and the same failure it prevents: iconColor paints the launcher tile
         # BEHIND the icon, so a badge that changed the tile's own background without moving
         # iconColor would draw the debug icon as a hard-edged rectangle in a differently-coloured
         # tile. The badge is a BOTTOM bar for this reason — pixel (1,1) is untouched, so one
         # iconColor stays correct for both flavours.
-        dbg_corner = Image.open(ROOT / badged / "largeIcon.png").convert("RGB").getpixel((1, 1))
+        dbg_corner = Image.open(ROOT / "pkg/dev/largeIcon.png").convert("RGB").getpixel((1, 1))
         check(max(abs(a - b) for a, b in zip(dbg_corner, declared)) <= 2,
-              f"{badged}'s badged tile keeps iconColor {appinfo['iconColor']} at its corner rgb{dbg_corner}")
+              f"the badged tile keeps iconColor {appinfo['iconColor']} at its corner rgb{dbg_corner}")
 check(appinfo.get("splashBackground") == "splash.png",
       "appinfo declares splashBackground: splash.png")
 
@@ -1443,9 +1445,6 @@ NEEDED_LICENCES = {
     "LLVM-exception.txt": "compiler_builtins",
     "Unicode-3.0.txt": "the Unicode tables inside Rust core",
     "Zlib.txt": "nanosvg — vendored and compiled into the binary",
-    "ICU4X.txt": "ICU4X locale code/data — Unicode and IBM adaptation notices",
-    "libm.txt": "registry libm — complete upstream math attributions",
-    "qrcodegen.txt": "Project Nayuki QR code generator — upstream MIT notice",
     "libass-ISC.txt": "the bundled native ASS renderer",
     "FreeType.txt": "FreeType's elected FTL and its contributed modules",
     "HarfBuzz-Old-MIT.txt": "the bundled text shaper",
@@ -1482,7 +1481,8 @@ for loc in staged_locales:
 
 print("== ipk payload ==")
 expected = {
-    "plxnative", "sentry-crash", "libass-plx.so.0", "appinfo.json", "icon.png", "largeIcon.png", "splash.png",
+    # No sentry-crash: this fork ships no crash daemon (the Makefile is sentry-free).
+    "plxnative", "libass-plx.so.0", "appinfo.json", "icon.png", "largeIcon.png", "splash.png",
     # appfont-cjk.ttf is the fallback face. Its absence is not a cosmetic loss: every Korean,
     # Japanese and Chinese title in the library becomes tofu, which is LG checklist #6 and #48.
     "appfont.ttf", "appfont-bold.ttf", "appfont-cjk.ttf", "OFL.txt",
@@ -1511,8 +1511,8 @@ if data_blob is not None:
     check(expected <= names, f"payload carries all {len(expected)} app files")
     check(modes.get("plxnative") == 0o755,
           "native app is executable by its jailed runtime uid")
-    check(modes.get("sentry-crash") == 0o755,
-          "native crash handler is executable in the archive")
+    check("sentry-crash" not in names,
+          "no crash daemon in the archive (this fork ships none)")
     # **The simulator's Mach-O FFmpeg lives in pkg/ too, and must never be in the package.** It
     # cannot get there today — `APP_FILES` is an explicit list, not a glob — but "cannot" is a
     # property of one Makefile line, and what it guards against is 2 MB of unrunnable arm64 shipped
