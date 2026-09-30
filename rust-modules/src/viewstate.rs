@@ -114,6 +114,10 @@ pub(crate) enum Write {
     Unwatched,
     /// `PUT /actions/removeFromContinueWatching` — HIDE from the deck, keeping the resume point.
     RemoveFromDeck,
+    /// Jellyfin's heart: `POST/DELETE /Users/{uid}/FavoriteItems/{id}`. No Plex counterpart —
+    /// the variant exists only on the flavor that draws the heart.
+    #[cfg(feature = "jellyfin")]
+    Favorite(bool),
 }
 
 impl Write {
@@ -125,6 +129,10 @@ impl Write {
         match self {
             Write::Watched | Write::Unwatched => 0,
             Write::RemoveFromDeck => 1,
+            // A heart toggle is its own decision about the item: a later favorite supersedes an
+            // earlier one, and it must not be swallowed by a watched toggle that followed it.
+            #[cfg(feature = "jellyfin")]
+            Write::Favorite(_) => 2,
         }
     }
 
@@ -142,11 +150,28 @@ impl Write {
             Write::Watched => c.scrobble(rk),
             Write::Unwatched => c.unscrobble(rk),
             Write::RemoveFromDeck => c.remove_from_continue_watching(rk),
+            #[cfg(feature = "jellyfin")]
+            Write::Favorite(_) => unreachable!("the jellyfin arm performs its own favorite call"),
+        }
+    }
+
+    /// The Jellyfin flavor's `perform`: the same queue, the other backend's client. Played-state
+    /// and favorite writes ride `PlayedItems`/`FavoriteItems`; the deck removal is the documented
+    /// resume-point merge (`clear_resume`).
+    #[cfg(feature = "jellyfin")]
+    fn perform_jellyfin(self, c: &crate::jellyfin::JfClient, rk: &str) -> bool {
+        match self {
+            Write::Watched => c.mark_played(rk),
+            Write::Unwatched => c.mark_unplayed(rk),
+            Write::RemoveFromDeck => c.clear_resume(rk),
+            Write::Favorite(want) => c.set_favorite(rk, want),
         }
     }
 
     fn name(self) -> &'static str {
         match self {
+            #[cfg(feature = "jellyfin")]
+            Write::Favorite(on) => if on { "favorite" } else { "unfavorite" },
             Write::Watched => "watched",
             Write::Unwatched => "unwatched",
             Write::RemoveFromDeck => "deck-remove",
@@ -278,7 +303,11 @@ impl ViewStateState {
     // machine marks a DIFFERENT film watched there (both servers number their items from 1). None is
     // a slot that is not registered, where `client()` panics — a view-state write is exactly the
     // operation to skip and log rather than take to the wrong machine.
-    if crate::plex::client_for(sid).is_none() {
+    #[cfg(feature = "jellyfin")]
+    let jellyfin = sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some();
+    #[cfg(not(feature = "jellyfin"))]
+    let jellyfin = false;
+    if crate::plex::client_for(sid).is_none() && !jellyfin {
         crate::log(&format!(
             "viewstate: rk={rk} {} DROPPED — server {} is not registered",
             w.name(),
@@ -378,6 +407,14 @@ fn edit_local_with_owners(
         }
         // The one edit that can be stated with certainty: the server hides the item from the deck
         // and keeps everything else about it (`plex::Client::remove_from_continue_watching`).
+        #[cfg(feature = "jellyfin")]
+        Write::Favorite(on) => {
+            // The heart is only drawn on the detail page: the loaded item's flag. The show-level
+            // roll-up the watched pair performs is NOT wanted here — a heart has no children.
+            metadata(crate::stores::metadata::MetadataCmd::SetFavoriteLocal {
+                sid, rk: rk.to_string(), on,
+            });
+        }
         Write::RemoveFromDeck => {
             hubs(crate::stores::hubs::HubsCmd::EditItem {
                 sid,
@@ -427,6 +464,30 @@ impl ViewStateState {
         // stopped holding a client is a write with nowhere to go: dropping it silently would be the
         // one PMS write with no line at all, which is what the request-time check above exists to
         // prevent, so it says so here too.
+        #[cfg(feature = "jellyfin")]
+        let jellyfin = req.sid == crate::jellyfin::SERVER_ID;
+        #[cfg(feature = "jellyfin")]
+        if jellyfin {
+            let Some(c) = crate::jellyfin::client() else {
+                crate::log(&format!(
+                    "viewstate: rk={} {} DROPPED — the jellyfin client left while queued",
+                    req.rk,
+                    req.w.name(),
+                ));
+                continue;
+            };
+            let (id, rk, w) = (req.id, req.rk.clone(), req.w);
+            let worker_adapter = Arc::clone(adapter);
+            let spawned = crate::task::spawn_small("viewstate", move || {
+                let done = catch_unwind(move || w.perform_jellyfin(c, &rk));
+                *worker_adapter.mail.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some(Completion { id, done: Done { ok: done.unwrap_or(false), also: Vec::new() } });
+            });
+            if !spawned {
+                crate::log("viewstate: jellyfin write refused at spawn");
+            }
+            continue;
+        }
         let Some(c) = crate::plex::client_for(req.sid) else {
             crate::log(&format!(
                 "viewstate: rk={} {} DROPPED — server {} left the registry while queued",

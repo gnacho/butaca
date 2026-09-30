@@ -124,7 +124,7 @@ fn bare(_guard: &crate::testlock::Serial, sid: ServerId, rk: &str) -> DetailScre
         tabs: TabStrip::new(),
         season_pop: CtlPop::new(),
         ctl_pop: CtlPop::new(),
-        disc_unfurl: [Spring::at(0.0); 3],
+        disc_unfurl: [Spring::at(0.0); 4],
         season_metrics: season::Metrics::new(),
         about_rows: about::Rows::new(),
         ground: AmbientWash::flat(theme::SURFACE_APP),
@@ -893,9 +893,11 @@ fn hero_focus_survives_a_control_appearing_in_the_middle_of_the_row() {
         trailer: false,
         alt: false,
         mark: PosterMark::None,
+        favorite: None,
     };
     let after = hero::HeroSet {
         alt: true,
+        favorite: None,
         ..before
     };
     let before_index = hero::watch_index(before).unwrap();
@@ -1055,11 +1057,12 @@ fn a_pointer_lands_on_the_capsule_the_unfurl_drew() {
         trailer: false,
         alt: false,
         mark: PosterMark::InProgress,
+        favorite: None,
     };
     let index = hero::watch_index(set).unwrap();
     assert_eq!(hero::ctl_at(set, index - 1), Some(hero::HeroCtl::Restart));
     for unfurl in [0.2, 0.6, 1.0] {
-        let disc = hero::disc_caps_at(set, 230.0, 0.0, [0.0, 0.0, unfurl], [201.0, 0.0, 267.0]);
+        let disc = hero::disc_caps_at(set, 230.0, 0.0, [0.0, 0.0, unfurl, 0.0], [201.0, 0.0, 267.0, 0.0]);
         let widths = hero::HeroWidths {
             pill: 230.0,
             alt: 0.0,
@@ -1127,15 +1130,17 @@ fn hero_action_row_hit_matches_the_drawn_controls_at_every_set_size() {
                         "the preview path replaced the Trailer disc"
                     );
                     let (controls, n) = hero::hero_ctls(set);
-                    assert_eq!(n, 2 + usize::from(restart) + usize::from(alt));
+                    // The heart rides the Jellyfin flavor's rows, beside the pair this counts.
+                    assert_eq!(n, 2 + usize::from(restart) + usize::from(alt)
+                        + usize::from(set.favorite.is_some()));
                     sizes.insert(n);
                     for unfurl in [
-                        [0.0, 0.0, 0.0],
-                        [0.0, 0.0, 1.0],
-                        [0.0, 1.0, 0.0],
-                        [0.3, 0.0, 0.7],
-                        [1.0, 0.0, 0.0],
-                        [0.0, 1.0, 1.0],
+                        [0.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 1.0, 0.0],
+                        [0.0, 1.0, 0.0, 0.0],
+                        [0.3, 0.0, 0.7, 0.0],
+                        [1.0, 0.0, 0.0, 0.0],
+                        [0.0, 1.0, 1.0, 0.0],
                     ] {
                         screen.disc_unfurl = unfurl.map(Spring::at);
                         for scroll in [0.0, 48.0] {
@@ -1181,8 +1186,15 @@ fn hero_action_row_hit_matches_the_drawn_controls_at_every_set_size() {
             }
         }
     }
-    assert_eq!(sizes.into_iter().collect::<Vec<_>>(), vec![2, 3, 4]);
-    assert_eq!(cases, 192);
+    // The Jellyfin flavor's heart shifts every row one wider than the Plex shape this test
+    // was written against.
+    if cfg!(feature = "jellyfin") {
+        assert_eq!(sizes.into_iter().collect::<Vec<_>>(), vec![3, 4, 5]);
+        assert_eq!(cases, 192);
+    } else {
+        assert_eq!(sizes.into_iter().collect::<Vec<_>>(), vec![2, 3, 4]);
+        assert_eq!(cases, 192);
+    }
     clear();
     crate::plex::reset_servers_for_test();
 }

@@ -212,9 +212,11 @@ fn detail_from_dto(it: &BaseItemDto, sid: ServerId) -> Detail {
         None => (0, false),
     };
 
+    let is_favorite = it.user_data.as_ref().map(|ud| ud.is_favorite).unwrap_or(false);
     let mut d = Detail {
         sid,
         rk: it.id.clone(),
+        is_favorite,
         collection: None,
         extras: Vec::new(),
         trailer_rk: String::new(),

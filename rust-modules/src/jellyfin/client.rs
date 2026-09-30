@@ -840,6 +840,19 @@ impl JfClient {
         )
     }
 
+    /// Favorite: `POST/DELETE /Users/{uid}/FavoriteItems/{id}` — bodyless like the played pair,
+    /// and the server's answer is the updated UserData the caller does not need (the fan-out
+    /// already moved the UI optimistically).
+    pub(crate) fn set_favorite(&self, item_id: &str, want: bool) -> bool {
+        let Some(user_id) = self.user_id() else {
+            return false;
+        };
+        self.request_status(
+            &format!("/Users/{user_id}/FavoriteItems/{item_id}"),
+            if want { http::Method::Post } else { http::Method::Delete },
+        )
+    }
+
     /// Mark unplayed: `DELETE /Users/{uid}/PlayedItems/{id}` — clears the flag, the count and
     /// the resume point, the exact semantics `viewstate` documents for an unscrobble.
     pub(crate) fn mark_unplayed(&self, item_id: &str) -> bool {
@@ -1146,6 +1159,26 @@ mod tests {
         assert_eq!(reqs.len(), 2);
         assert!(reqs[1].starts_with("POST /Sessions/Playing/Stopped HTTP/1.1"));
         assert!(reqs[1].contains("\"PositionTicks\":50000000"));
+    }
+
+    /// The heart: POST favorites on, DELETE off, both bodyless and user-scoped (#47).
+    #[test]
+    fn favorite_writes_hit_the_favorite_items_endpoint() {
+        let server = MockServer::start(vec![
+            (200, AUTH_OK),
+            (200, "{}"),
+            (200, "{}"),
+        ]);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        client.authenticate_by_name("demo", "").unwrap();
+
+        assert!(client.set_favorite("mv-1", true));
+        assert!(client.set_favorite("mv-1", false));
+
+        let reqs = server.finish();
+        assert_eq!(reqs.len(), 3);
+        assert!(reqs[1].starts_with("POST /Users/u-1/FavoriteItems/mv-1 HTTP/1.1"));
+        assert!(reqs[2].starts_with("DELETE /Users/u-1/FavoriteItems/mv-1 HTTP/1.1"));
     }
 
     /// The three view-state writes: played is a bodyless POST, unplayed a DELETE on the same

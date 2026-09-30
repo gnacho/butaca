@@ -198,7 +198,7 @@ pub(crate) struct DetailScreen {
     tabs: TabStrip,
     season_pop: CtlPop<1>,
     ctl_pop: CtlPop<5>,
-    disc_unfurl: [Spring; 3],
+    disc_unfurl: [Spring; 4],
     season_metrics: season::Metrics,
     about_rows: about::Rows,
     /// The page's own keyed ground. Deliberately a bare [`AmbientWash`] and not the shared
@@ -411,7 +411,7 @@ impl DetailScreen {
             tabs: TabStrip::new(),
             season_pop: CtlPop::new(),
             ctl_pop: CtlPop::new(),
-            disc_unfurl: [Spring::at(0.0); 3],
+            disc_unfurl: [Spring::at(0.0); 4],
             season_metrics: season::Metrics::new(),
             about_rows: about::Rows::new(),
             ground,
@@ -2582,6 +2582,7 @@ impl DetailScreen {
                         hero::HeroCtl::Restart => crate::ui::icons::Icon::Restart,
                         hero::HeroCtl::Trailer => crate::ui::icons::Icon::Trailer,
                         hero::HeroCtl::MarkWatched => crate::ui::icons::Icon::Check,
+            hero::HeroCtl::Favorite => crate::ui::icons::Icon::Heart,
                         hero::HeroCtl::MarkUnwatched => crate::ui::icons::Icon::Minus,
                         _ => unreachable!(),
                     };
@@ -3524,11 +3525,18 @@ impl DetailScreen {
         // `a_movie_trailer_disc_plays_the_extra_from_the_start` et al., which explicitly assert
         // `!hero_set().trailer` and then drive `ELEM_TRAILER` directly to prove `activate_hero`'s
         // handling stays correct even though the disc itself is never shown.)
+        // The heart rides only where the backend HAS favorites: the Jellyfin flavor reads the
+        // loaded item's flag; the Plex build never draws the control.
+        #[cfg(feature = "jellyfin")]
+        let favorite = self.detail(meta).map(|d| d.is_favorite);
+        #[cfg(not(feature = "jellyfin"))]
+        let favorite = None;
         hero::HeroSet {
             restart,
             trailer: false,
             alt: self.alt_available(meta),
             mark,
+            favorite,
         }
     }
 
@@ -3709,6 +3717,26 @@ impl DetailScreen {
                             anchor: [rect.x, rect.y, rect.w, rect.h].map(f32::to_bits),
                         }),
                     );
+                }
+            }
+            hero::HeroCtl::Favorite => {
+                #[cfg(feature = "jellyfin")]
+                if let Some(d) = self.detail(meta) {
+                    let on = !d.is_favorite;
+                    fx.push(Fx::App(AppFx::Store(
+                        StoreId::ViewState,
+                        StoreCmd::ViewState(ViewStateCmd::Request {
+                            sid: d.sid,
+                            rk: d.rk.clone(),
+                            write: crate::viewstate::Write::Favorite(on),
+                            detail: Some(crate::stores::viewstate::DetailRefresh {
+                                sid: d.sid,
+                                rk: d.rk.clone(),
+                                keep: None,
+                            }),
+                            guid: d.guid.clone(),
+                        }),
+                    )));
                 }
             }
             hero::HeroCtl::MarkWatched | hero::HeroCtl::MarkUnwatched => {

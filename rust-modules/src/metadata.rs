@@ -1427,6 +1427,12 @@ pub(crate) struct Detail {
     pub(crate) dur_ms: i64,
     pub(crate) resume_ms: i64, // viewOffset (0 = not partially watched) — the resume position
     pub(crate) watched: bool,  // movie: viewCount ≥ 1; show: viewedLeafCount ≥ leafCount
+    /// The heart's state (Jellyfin's `UserData.IsFavorite`; always false on Plex — the backend
+    /// has no such flag, and the heart is only drawn on the flavor that does). False stays OFF
+    /// the wire: an unfavorited item's record is byte-identical to one that predates the field
+    /// (the committed fixtures' canonical gate prices exactly that).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(crate) is_favorite: bool,
     pub(crate) part: String,   // Media[0].Part[0].key for a leaf (movie/episode); empty for a show
     pub(crate) vcodec: String, // Media[0].videoCodec (drives the direct-play/transcode decision)
     pub(crate) acodec: String, // Media[0].audioCodec
@@ -1669,6 +1675,20 @@ pub(crate) fn install_for_test(state: &mut MetadataState, d: Option<Detail>) {
 /// episode keeping its old `viewOffset` would still draw its resume bar and no check.
 ///
 /// The landed refresh is the truth and silently corrects any of this; see [`crate::viewstate`].
+/// The heart toggle's optimistic half: only the loaded item's flag — the heart is not drawn on
+/// cards, so there is no shelf fan-out to walk.
+#[cfg(feature = "jellyfin")]
+fn set_favorite_local(state: &mut MetadataState, sid: crate::plex::ServerId, rk: &str, on: bool) -> bool {
+    let Some(d) = state.current.as_mut() else {
+        return false;
+    };
+    if d.sid == sid && d.rk == rk && d.is_favorite != on {
+        d.is_favorite = on;
+        return true;
+    }
+    false
+}
+
 fn set_watched_local(state: &mut MetadataState, sid: crate::plex::ServerId, rk: &str, on: bool) -> bool {
     {
         let Some(d) = state.current.as_mut() else {
@@ -1944,6 +1964,7 @@ fn fetch_detail(sid: crate::plex::ServerId, rk: &str) -> Option<(Detail, String)
         aired: it.originally_available_at.clone(),
         dur_ms: it.duration,
         resume_ms: it.view_offset,
+        is_favorite: false,
         watched: if it.kind == "show" || it.kind == "season" {
             it.leaf_count > 0 && it.viewed_leaf_count >= it.leaf_count
         } else {
@@ -3459,6 +3480,8 @@ pub(crate) fn run(state: &mut MetadataState, adapter: &std::sync::Arc<MetadataAd
             true
         }
         MetadataCmd::SetWatchedLocal { sid, rk, on } => set_watched_local(state, sid, &rk, on),
+        #[cfg(feature = "jellyfin")]
+        MetadataCmd::SetFavoriteLocal { sid, rk, on } => set_favorite_local(state, sid, &rk, on),
         MetadataCmd::InstallPlaying(p) => {
             install_playing(state, p);
             true

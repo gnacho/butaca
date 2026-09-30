@@ -486,5 +486,7 @@
   "browse.jellyfin.error_auth": "El servidor no reconoció ese usuario o contraseña",
   "browse.jellyfin.error_reach": "No se pudo conectar con el servidor; comprueba la dirección y que esté encendido",
   "browse.jellyfin.verdict_refused": "Jellyfin rechazó la reproducción ({code})",
-  "browse.jellyfin.verdict_unplayable": "Jellyfin no puede reproducir este título en esta tele ni directamente ni transcodificado"
+  "browse.jellyfin.verdict_unplayable": "Jellyfin no puede reproducir este título en esta tele ni directamente ni transcodificado",
+  "browse.detail.favorite": "Marcar como favorito",
+  "browse.detail.unfavorite": "Quitar de favoritos"
 }

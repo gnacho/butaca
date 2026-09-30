@@ -160,6 +160,11 @@ pub(crate) enum MetadataCmd {
     /// Unlike `Clear`, this one must not leave a previous profile's playback descriptor or track
     /// store reachable from the next profile's Bridge.
     Reset,
+    /// The heart toggle's optimistic half: the loaded detail's flag flips now, the server write
+    /// lands when it lands (a failure leaves no rollback — the next detail fetch re-reads it).
+    /// Jellyfin-only: a Plex build has no heart to toggle.
+    #[cfg(feature = "jellyfin")]
+    SetFavoriteLocal { sid: ServerId, rk: String, on: bool },
     /// The season strip: flip optimistically, fetch the episodes off-thread.
     LoadSeason(usize),
     /// The BLOCKING season load, for a caller that indexes the episodes in the same frame.

@@ -2107,5 +2107,13 @@
   "browse.jellyfin.verdict_unplayable": {
     "value": "Jellyfin can neither direct-play nor transcode this item for this TV",
     "description": "Playback verdict when the server offers no playable shape: browse.jellyfin.verdict_unplayable"
+  },
+  "browse.detail.favorite": {
+    "value": "Favorite",
+    "description": "Detail hero's heart disc verb, not favorited state: browse.detail.favorite"
+  },
+  "browse.detail.unfavorite": {
+    "value": "Unfavorite",
+    "description": "Detail hero's heart disc verb, favorited state: browse.detail.unfavorite"
   }
 }

@@ -500,5 +500,7 @@
   "browse.jellyfin.error_auth": "Сервер не распазнаў гэтае імя карыстальніка або пароль",
   "browse.jellyfin.error_reach": "Не атрымалася дабрацца да сервера — праверце адрас і што ён уключаны",
   "browse.jellyfin.verdict_refused": "Jellyfin адмовіў у прайграванні ({code})",
-  "browse.jellyfin.verdict_unplayable": "Jellyfin не можа прайграць гэты тытул на гэтым тэлевізары ні напрамую, ні транскадаваннем"
+  "browse.jellyfin.verdict_unplayable": "Jellyfin не можа прайграць гэты тытул на гэтым тэлевізары ні напрамую, ні транскадаваннем",
+  "browse.detail.favorite": "У абранае",
+  "browse.detail.unfavorite": "Выдаліць з абранага"
 }

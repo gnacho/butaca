@@ -64,6 +64,10 @@ pub enum Icon {
     CheckCircleFill,
     /// See [`Icon::CheckCircleFill`].
     MinusCircleFill,
+    /// The favorite heart, outline face (not favorited) — the Jellyfin flavor's detail hero.
+    Heart,
+    /// The heart's filled face (the item IS favorited).
+    HeartFill,
     /// A bare horizontal stroke — the "remove" half of the bare [`Icon::Check`], for a control that
     /// is ALREADY a circle (a hero or detail disc button), where a filled disc inside a disc would
     /// be two circles saying one thing. Its user is the detail hero's *mark unwatched* disc, beside
@@ -272,6 +276,8 @@ fn src(id: Icon) -> &'static str {
         Icon::Cc => include_str!("../../../assets/icons/cc.svg"),
         Icon::Audio => include_str!("../../../assets/icons/audio.svg"),
         Icon::Check => include_str!("../../../assets/icons/check.svg"),
+        Icon::Heart => include_str!("../../../assets/icons/heart.svg"),
+        Icon::HeartFill => include_str!("../../../assets/icons/heart-fill.svg"),
         Icon::Chevron => include_str!("../../../assets/icons/chevron.svg"),
         Icon::ChevronLeft => include_str!("../../../assets/icons/chevron-left.svg"),
         Icon::ChevronDown => include_str!("../../../assets/icons/chevron-down.svg"),
