@@ -136,6 +136,7 @@ fn contribution_is_focusable_and_right_opens_the_guide() {
     assert!(crate::ui::qr::QrCode::new(crate::i18n::CONTRIBUTE_URL).is_ok());
 }
 
+#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn signed_out_settings_reaches_language_and_back_restores_it_after_contribution() {
     let _guard = crate::testlock::serial();

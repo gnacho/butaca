@@ -1135,6 +1135,18 @@ pub(crate) enum LoopReq {
     /// Lab builds only, and it changes no route: the tester stays where they were and the toast
     /// says what happened.
     AccountSendDiagnostics,
+    /// Jellyfin flavor only: the Settings root's *Conexión rápida* — arm add-server mode and land
+    /// on the sign-in form; a successful connect appends the new server instead of replacing.
+    #[cfg(feature = "jellyfin")]
+    JfAddServer,
+    /// Jellyfin flavor only: the server picker committed a row — sign in against that configured
+    /// server (index into `jellyfin::boot`'s list) and make it active.
+    #[cfg(feature = "jellyfin")]
+    JfSwitchServer(usize),
+    /// Jellyfin flavor only: the Settings root's *Desconectar* — remove the active server's
+    /// credentials and land on the sign-in gate (or switch to the survivor, if any remain).
+    #[cfg(feature = "jellyfin")]
+    JfDisconnectServer,
 }
 
 /// Any host that carries this bundle. The screens under `screens/` are written against it, so the

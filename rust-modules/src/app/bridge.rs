@@ -304,7 +304,7 @@ pub(crate) struct Bridge {
 }
 
 impl Bridge {
-    #[cfg(test)]
+    #[cfg(all(test, not(feature = "jellyfin")))]
     pub(crate) fn measurement_queries(&self)->Vec<crate::ui::rec::MetricKey> { self.measure.queries() }
     pub(crate) fn prepare_measurements(&mut self, replay: Option<&std::collections::HashMap<crate::ui::rec::MetricKey,u32>>) {
         self.measure.prepare(replay);
@@ -2400,6 +2400,19 @@ pub(crate) fn nav_root_if_unsettled(d: &mut Dispatcher<AppHost>, arg: AppArg) {
 /// below read `d.top_arg()` themselves before deciding whether to call this at all — asserting
 /// "outside the phase this asks nothing" needs no help from the function it is testing.
 pub(crate) fn follow_auth_landing(pages: &mut Dispatcher<AppHost>, bridge: &mut Bridge) {
+    // The Jellyfin flavor's sign-in landing: a successful form attempt (first boot OR the Settings
+    // "quick connect" add) has installed the client and persisted the config. Reset the stores the
+    // previous server filled and land on Home — the same reset the boot gate runs. On a Plex build
+    // this arm is compiled out and `take_ready` is a jellyfin-only fn, so the chain below is
+    // unchanged there.
+    #[cfg(feature = "jellyfin")]
+    if crate::jellyfin::signin::take_ready() {
+        crate::jellyfin::signin::set_add_mode(false);
+        let endpoints = super::boot::activate_server_owned(bridge);
+        execute_endpoint_outcomes(pages, endpoints);
+        nav_root_if_unsettled(pages, AppArg::Home);
+        return;
+    }
     if let Some(c) = bridge.take_session_ready() {
         // A sign-out followed by a fresh sign-in can replace the session without restarting the
         // process. Re-read only at this one credentials handoff so the old account's in-memory

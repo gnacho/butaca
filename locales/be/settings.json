@@ -258,5 +258,17 @@
   "settings.consent.placeholder.random_id": "выпадковы id",
   "settings.consent.placeholder.project_key": "ключ праекта",
   "settings.consent.placeholder.app_version": "версія праграмы",
-  "settings.consent.placeholder.webos_codename_short": "кодавая назва webOS"
+  "settings.consent.placeholder.webos_codename_short": "кодавая назва webOS",
+  "settings.servers.section": "Серверы",
+  "settings.servers.select": "Выбраць сервер",
+  "settings.servers.select.detail": "Выберыце, які наладжаны сервер выкарыстоўвае гэты тэлевізар.",
+  "settings.servers.quick": "Хуткае падключэнне",
+  "settings.servers.quick.detail": "Дадаць іншы сервер Jellyfin.",
+  "settings.servers.disconnect": "Адключыцца",
+  "settings.servers.disconnect.detail": "Выйсці з бягучага сервера.",
+  "settings.servers.copy": "Выберыце сервер, да якога падключаецца гэты тэлевізар.",
+  "settings.privacy.lan": "Прыватнасць",
+  "settings.privacy.lan.detail": "Нічога не выходзіць за межы вашай лакальнай сеткі.",
+  "settings.privacy.lan.copy": "Як Butaca абыходзіцца з вашымі данымі.",
+  "settings.privacy.lan.body": "Нічога не выходзіць за межы вашай лакальнай сеткі. Butaca не мае ўліковага запісу, не адпраўляе тэлеметрыю і не збірае аналітыку. Вашы ўліковыя даныя захоўваюцца толькі на гэтым тэлевізары. Адзіны сервер, з якім размаўляе праграма, - той, які вы наладзілі."
 }

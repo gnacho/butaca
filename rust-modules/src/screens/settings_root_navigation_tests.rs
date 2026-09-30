@@ -6,6 +6,7 @@ use super::*;
 use super::test_support::*;
 use crate::ui::machine::{Edge, InputEvent, InputKind, Source};
 use crate::ui::present::Present;
+#[cfg(not(feature = "jellyfin"))]
 use crate::ui::screen::By;
 
 /// Mounting the surface at its `Root` page runs the inner stack's own lifecycle (§3.4) and
@@ -27,6 +28,7 @@ fn mounting_the_surface_names_its_root_page() {
     assert_eq!(s.kind, Family::Settings);
 }
 
+#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn signed_out_root_does_not_offer_automatically_sign_in() {
     let _g = crate::testlock::serial();
@@ -63,6 +65,7 @@ fn signed_out_root_does_not_offer_automatically_sign_in() {
     assert!(!crate::plex::session::peek().auto_sign_in());
 }
 
+#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn a_multi_user_root_toggles_automatically_sign_in_in_place() {
     let _g = crate::testlock::serial();
@@ -106,6 +109,7 @@ fn a_multi_user_root_toggles_automatically_sign_in_in_place() {
     assert_eq!(s.inner.depth(), 1);
 }
 
+#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn right_on_automatically_sign_in_does_not_push() {
     let _g = crate::testlock::serial();
@@ -197,6 +201,7 @@ fn back_at_the_surface_s_own_root_is_not_handled() {
 /// fixture: "Favourites is absent signed out"), so row 1 is Legal notices. The engine seats
 /// focus there, OK pushes the index, and a BACK must hand focus back to THAT row — not row 0
 /// — which is the one thing `bridge.rs`'s word-only assertions cannot see from outside `app/`.
+#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn a_pop_from_legal_restores_focus_to_the_row_that_opened_it() {
     let _g = crate::testlock::serial();
@@ -285,6 +290,7 @@ fn a_pop_from_legal_restores_focus_to_the_row_that_opened_it() {
 /// emitted effect would have kept passing on the old, buggy `ContainerGroup` request forever,
 /// because the request LOOKED right; it just fed a policy that made it wrong two steps later. So
 /// this asserts the new target by name, not merely "some fresh focus target came out".
+#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn a_push_seats_the_new_page_fresh_rather_than_from_the_remembered_list() {
     let _g = crate::testlock::serial();
@@ -329,6 +335,7 @@ fn a_push_seats_the_new_page_fresh_rather_than_from_the_remembered_list() {
 /// every pop records one entry; without the retire-time cleanup in `request`, opening and
 /// closing Legal a few times would leave stale rows behind for entries the container has
 /// already dropped for good, because a popped page's `EntryId` is never minted again.
+#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn remembered_does_not_grow_across_repeated_visits_to_the_same_page() {
     let _g = crate::testlock::serial();
@@ -393,6 +400,7 @@ fn remembered_does_not_grow_across_repeated_visits_to_the_same_page() {
 /// The assertion is on `at_rest()` because `draw` cannot be reached from a host test: it
 /// paints, and painting measures text through SDL2_ttf, which this build does not link. This
 /// is the predicate the branch is now keyed on, and the one that used to have no equivalent.
+#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn a_settled_pop_leaves_the_surface_at_rest_at_depth_two() {
     let _g = crate::testlock::serial();
@@ -497,6 +505,7 @@ fn a_settled_pop_leaves_the_surface_at_rest_at_depth_two() {
 /// mechanism dressed as a guarantee, and a verifier refuted it by scrolling a Legal document
 /// with the hash standing still. That half is each page's test to write, in each page's own
 /// file; the `LogicalState` impl above carries the census of who currently does.
+#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn the_logical_state_follows_the_inner_stack() {
     let _g = crate::testlock::serial();
@@ -544,6 +553,7 @@ fn the_logical_state_follows_the_inner_stack() {
     );
 }
 
+#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn session_refresh_rebuilds_root_without_navigation() {
     let _g = crate::testlock::serial();
@@ -562,6 +572,7 @@ fn session_refresh_rebuilds_root_without_navigation() {
         "a landed roster must restore the multi-user row");
 }
 
+#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn session_refresh_keeps_optimistic_setting_through_transient_completion() {
     let _g = crate::testlock::serial();
@@ -590,6 +601,7 @@ fn session_refresh_keeps_optimistic_setting_through_transient_completion() {
 /// switch, its detail stating what it means and that a grant carries it now; turning the switch
 /// off withdraws the grant AT ONCE — before the preferences write lands — and records the
 /// revocation, so the next discovery keeps the server tokenless.
+#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn the_unencrypted_connection_switch_shows_the_grant_and_revokes_it_at_once() {
     use crate::plex::session::PlaintextChoice;
@@ -650,6 +662,7 @@ fn no_unencrypted_connection_section_without_an_answer() {
 /// and nobody has answered shows its switch OFF; turning it on records nothing — it opens the
 /// SAME question the read-outs ask (`screens::plaintext_question`), seated on *Not now* — and only
 /// its *Connect* sends the answer (Allowed, re-finding the server), shown on at once.
+#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn turning_an_unencrypted_connection_on_asks_the_shared_question_first() {
     use crate::plex::session::PlaintextChoice;
@@ -699,4 +712,27 @@ fn turning_an_unencrypted_connection_on_asks_the_shared_question_first() {
     assert_eq!(root.state.plaintext, vec![true], "the switch shows the answer optimistically");
     crate::plex::grant::reset_for_test();
     crate::plex::reset_servers_for_test();
+}
+
+/// The Jellyfin flavor's root replaces the Plex-era pages entirely: a *Servidores* section (select,
+/// quick connect, disconnect) and a *Privacidad* row, and nothing else.
+#[cfg(feature = "jellyfin")]
+#[test]
+fn the_jellyfin_root_offers_only_the_servers_and_privacy_rows() {
+    let _g = crate::testlock::serial();
+    let _sess = scratch_session("jellyfin-root-rows");
+    let root = RootPage::new(EntryId(0), cx(None).views);
+    assert_eq!(
+        root.rows,
+        vec![
+            Action::SelectServer,
+            Action::QuickConnect,
+            Action::Disconnect,
+            Action::LanPrivacy,
+        ],
+        "the Jellyfin root carries exactly the four new rows, and none of the Plex-era ones"
+    );
+    assert_eq!(root.table.sections.len(), 2, "a Servers section and a Privacy section");
+    assert_eq!(root.table.sections[0].rows.len(), 3, "select / quick connect / disconnect");
+    assert_eq!(root.table.sections[1].rows.len(), 1, "one privacy row");
 }

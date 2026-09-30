@@ -1045,5 +1045,53 @@
   "settings.consent.placeholder.webos_codename_short": {
     "value": "webOS codename",
     "description": "Placeholder shown inside angle brackets in the data preview, standing for the TV software's release codename."
+  },
+  "settings.servers.section": {
+    "value": "Servers",
+    "description": "Settings, account, onboarding or privacy UI: the Jellyfin server section header."
+  },
+  "settings.servers.select": {
+    "value": "Select server",
+    "description": "Settings, account, onboarding or privacy UI: the row that opens the server picker."
+  },
+  "settings.servers.select.detail": {
+    "value": "Choose which configured server this television uses.",
+    "description": "Settings, account, onboarding or privacy UI: the server picker row's detail line."
+  },
+  "settings.servers.quick": {
+    "value": "Quick connect",
+    "description": "Settings, account, onboarding or privacy UI: the row that opens the sign-in form to add another server."
+  },
+  "settings.servers.quick.detail": {
+    "value": "Add another Jellyfin server.",
+    "description": "Settings, account, onboarding or privacy UI: the quick-connect row's detail line."
+  },
+  "settings.servers.disconnect": {
+    "value": "Disconnect",
+    "description": "Settings, account, onboarding or privacy UI: the row that signs out of the current server."
+  },
+  "settings.servers.disconnect.detail": {
+    "value": "Sign out of the current server.",
+    "description": "Settings, account, onboarding or privacy UI: the disconnect row's detail line."
+  },
+  "settings.servers.copy": {
+    "value": "Choose which server this television connects to.",
+    "description": "Settings, account, onboarding or privacy UI: the server picker page's subtitle."
+  },
+  "settings.privacy.lan": {
+    "value": "Privacy",
+    "description": "Settings, account, onboarding or privacy UI: the row and page title of the Jellyfin privacy statement."
+  },
+  "settings.privacy.lan.detail": {
+    "value": "Nothing leaves your local network.",
+    "description": "Settings, account, onboarding or privacy UI: the privacy row's detail line."
+  },
+  "settings.privacy.lan.copy": {
+    "value": "How Butaca treats your data.",
+    "description": "Settings, account, onboarding or privacy UI: the privacy page's subtitle."
+  },
+  "settings.privacy.lan.body": {
+    "value": "Nothing leaves your local network. Butaca has no account, no telemetry and no analytics. Your credentials live only on this television. The only server the app talks to is the one you configured.",
+    "description": "Settings, account, onboarding or privacy UI: the Jellyfin flavor's self-contained privacy statement."
   }
 }

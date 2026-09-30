@@ -442,6 +442,10 @@ fn mount_page(
         SettingsPage::About => Box::new(super::legal::DocumentPage::about(entry)),
         SettingsPage::Document(i) => Box::new(super::legal::DocumentPage::legal(entry, i)),
         SettingsPage::Favourites => Box::new(super::onboard::OnboardScreen::settings(entry, cx.views)),
+        #[cfg(feature = "jellyfin")]
+        SettingsPage::Servers => Box::new(super::servers::ServersPage::new(entry)),
+        #[cfg(feature = "jellyfin")]
+        SettingsPage::LanPrivacy => Box::new(super::legal::DocumentPage::lan_privacy(entry)),
     }
 }
 
@@ -929,6 +933,18 @@ enum Action {
     /// [`RootPage::plaintext_rows`].
     Plaintext(usize),
     About,
+    /// Jellyfin flavor: open the server picker.
+    #[cfg(feature = "jellyfin")]
+    SelectServer,
+    /// Jellyfin flavor: add another server through the sign-in form.
+    #[cfg(feature = "jellyfin")]
+    QuickConnect,
+    /// Jellyfin flavor: sign out of the current server.
+    #[cfg(feature = "jellyfin")]
+    Disconnect,
+    /// Jellyfin flavor: open the self-contained privacy statement.
+    #[cfg(feature = "jellyfin")]
+    LanPrivacy,
 }
 
 /// The Settings root: a table of destinations, every row a door (no band; rule 9 in full).
@@ -1011,6 +1027,17 @@ impl RootPage {
     }
 
     fn rebuild(&mut self, sel: i32, directory: crate::stores::browse::DirectoryView<'_>) {
+        // The Plex root is built first on every flavor; the Jellyfin flavor then REPLACES it with
+        // its own servers-and-privacy root. Building both keeps the Plex body compiled (and its
+        // Action variants "constructed") on the flavor build, avoiding an unreachable-code lint
+        // from a gated early return, while leaving the Plex build's output byte-identical.
+        self.rebuild_plex(sel, directory);
+        #[cfg(feature = "jellyfin")]
+        self.rebuild_jellyfin(sel, directory);
+    }
+
+    /// The Plex flavor's root (unchanged): libraries, privacy, system and playback sections.
+    fn rebuild_plex(&mut self, sel: i32, directory: crate::stores::browse::DirectoryView<'_>) {
         if let Some(snapshot) = crate::plex::session::peek_settled() {
             self.session_snapshot = snapshot;
         }
@@ -1094,6 +1121,46 @@ impl RootPage {
             actions.push(Action::AudioSubtitles);
         }
         sections.push(playback);
+        self.rows = actions;
+        self.table.compact = false;
+        self.table.header_ink = theme::TEXT_READING;
+        self.table.set_sections(sections, sel, false);
+        self.table.list_focused = true;
+    }
+
+    /// The Jellyfin flavor's root: a *Servidores* section (select, quick connect, disconnect) and
+    /// a *Privacidad* row. No Plex-era pages are offered — the flavor follows the television's
+    /// language, has no Plex account, no trailer autoplay and no Plex playback/audio preferences.
+    #[cfg(feature = "jellyfin")]
+    fn rebuild_jellyfin(&mut self, sel: i32, _directory: crate::stores::browse::DirectoryView<'_>) {
+        let mut actions = Vec::new();
+        let mut sections = Vec::new();
+        let servers = Section::new(crate::i18n::msg::settings_servers_section())
+            .row(
+                Row::new(crate::i18n::msg::settings_servers_select())
+                    .detail(crate::i18n::msg::settings_servers_select_detail())
+                    .chevron(true),
+            )
+            .row(
+                Row::new(crate::i18n::msg::settings_servers_quick())
+                    .detail(crate::i18n::msg::settings_servers_quick_detail())
+                    .chevron(true),
+            )
+            .row(
+                Row::new(crate::i18n::msg::settings_servers_disconnect())
+                    .detail(crate::i18n::msg::settings_servers_disconnect_detail())
+                    .destructive(true),
+            );
+        actions.extend([Action::SelectServer, Action::QuickConnect, Action::Disconnect]);
+        sections.push(servers);
+        sections.push(
+            Section::new(crate::i18n::msg::settings_privacy_section()).row(
+                Row::new(crate::i18n::msg::settings_privacy_lan())
+                    .detail(crate::i18n::msg::settings_privacy_lan_detail())
+                    .chevron(true),
+            ),
+        );
+        actions.push(Action::LanPrivacy);
         self.rows = actions;
         self.table.compact = false;
         self.table.header_ink = theme::TEXT_READING;
@@ -1219,6 +1286,18 @@ impl RootPage {
                 self.alert.open_delete();
             }
             Action::Language => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Language))),
+            #[cfg(feature = "jellyfin")]
+            Action::SelectServer => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Servers))),
+            #[cfg(feature = "jellyfin")]
+            Action::QuickConnect => {
+                fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::JfAddServer)))
+            }
+            #[cfg(feature = "jellyfin")]
+            Action::Disconnect => {
+                fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::JfDisconnectServer)))
+            }
+            #[cfg(feature = "jellyfin")]
+            Action::LanPrivacy => fx.push(Fx::Nav(NavOp::Push(SettingsPage::LanPrivacy))),
         }
     }
 }

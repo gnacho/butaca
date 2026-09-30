@@ -279,6 +279,7 @@ fn composed_owner_favourites_footer_survives_left_down_and_idle_frames() {
 /// / Legal notices / About, so OK on row 1 pushes the Legal index; LEFT off that index's
 /// column then runs the whole chain — edge rule, synthetic BACK, the surface's own pop —
 /// and lands back on the Settings root with the surface still up and still owning input.
+#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn left_inside_the_family_pops_the_inner_stack_and_never_dismisses_the_surface() {
     let _g = crate::testlock::serial();
@@ -375,6 +376,7 @@ fn left_at_the_surfaces_own_root_dismisses_it() {
 /// Fixture choice: the SIGNED-OUT root, like every other test in this file — its second row
 /// (`elem: 1`) is Legal notices. A signed-in root prepends Favourites and moves Legal to index 2,
 /// which would still prove the same thing but is not what `opened()` boots here.
+#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn a_real_push_seats_the_new_page_fresh_and_a_pop_restores_the_row_that_opened_it() {
     let _g = crate::testlock::serial();
@@ -581,6 +583,7 @@ fn force_warning_engine_focus_confirms_only_the_chosen_answer() {
 /// page in this family shares the surface's `EntryId`, so that stale key (the Audio & Subtitles
 /// row, the root's last) read as a row of the new page once rows landed and was clamped onto
 /// the new table's last row. Drive the real push from the real root row.
+#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn audio_subtitles_pushed_from_the_root_seats_its_first_row_when_rows_land() {
     use crate::plex::account::{AudioPreferences, PreferenceRequest};

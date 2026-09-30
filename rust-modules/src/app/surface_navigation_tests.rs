@@ -399,6 +399,7 @@ fn player_diagnostics_hide_behind_any_open_player_overlay() {
 /// Phase 5b: the Settings surface is PRESENTED on the tree, owns input from its first frame,
 /// names the heartbeat word of its top page, walks its own stack on BACK (root → Legal →
 /// back → root) and only then lets the container dismiss it — with the app's page untouched.
+#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn the_settings_surface_owns_input_and_walks_its_own_stack() {
     let _g = crate::testlock::serial();

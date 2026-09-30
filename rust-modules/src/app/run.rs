@@ -1938,7 +1938,65 @@ fn loop_requests(app: &mut App) {
             crate::screens::registry::LoopReq::AccountSendDiagnostics => {
                 crate::lab::request_upload("menu", &app.player.session);
             }
+            // The Jellyfin flavor's Settings root: *Conexión rápida* arms add-server mode and lands
+            // on the sign-in form; the picker and *Desconectar* switch/remove the active server.
+            #[cfg(feature = "jellyfin")]
+            crate::screens::registry::LoopReq::JfAddServer => {
+                crate::jellyfin::signin::set_add_mode(true);
+                super::bridge::nav_root(&mut app.pages, AppArg::Login);
+            }
+            #[cfg(feature = "jellyfin")]
+            crate::screens::registry::LoopReq::JfSwitchServer(i) => {
+                jellyfin_switch_server(app, i);
+                super::bridge::dismiss_surfaces(&mut app.pages);
+            }
+            #[cfg(feature = "jellyfin")]
+            crate::screens::registry::LoopReq::JfDisconnectServer => {
+                jellyfin_disconnect_server(app);
+            }
         }
+    }
+}
+
+#[cfg(feature = "jellyfin")]
+fn jellyfin_switch_server(app: &mut App, i: usize) {
+    let Some(list) = crate::jellyfin::boot::load_servers() else {
+        return;
+    };
+    let Some(entry) = list.servers.get(i).cloned() else {
+        return;
+    };
+    if crate::jellyfin::boot::authenticate_server(&entry) {
+        crate::jellyfin::boot::save_servers(&list.servers, i);
+        let endpoints = super::boot::activate_server_owned(&mut app.bridge);
+        super::bridge::execute_endpoint_outcomes(&mut app.pages, endpoints);
+    }
+}
+
+/// *Desconectar*: retire the active server's credentials. With servers remaining the first
+/// survivor is signed in and made active (the same switch path); with none the config is erased
+/// and the app lands on the sign-in gate.
+#[cfg(feature = "jellyfin")]
+fn jellyfin_disconnect_server(app: &mut App) {
+    let Some(remaining) = crate::jellyfin::boot::remove_active() else {
+        return;
+    };
+    crate::jellyfin::uninstall();
+    crate::jellyfin::signin::reset();
+    if remaining.servers.is_empty() {
+        crate::jellyfin::boot::erase_config();
+        super::bridge::dismiss_surfaces(&mut app.pages);
+        super::bridge::nav_root(&mut app.pages, AppArg::Login);
+    } else {
+        crate::jellyfin::boot::save_servers(&remaining.servers, remaining.active);
+        let active = remaining.active;
+        if let Some(entry) = remaining.servers.get(active).cloned() {
+            if crate::jellyfin::boot::authenticate_server(&entry) {
+                let endpoints = super::boot::activate_server_owned(&mut app.bridge);
+                super::bridge::execute_endpoint_outcomes(&mut app.pages, endpoints);
+            }
+        }
+        super::bridge::dismiss_surfaces(&mut app.pages);
     }
 }
 

@@ -256,5 +256,17 @@
   "settings.consent.placeholder.random_id": "id aleatorio",
   "settings.consent.placeholder.project_key": "clave del proyecto",
   "settings.consent.placeholder.app_version": "versión de la app",
-  "settings.consent.placeholder.webos_codename_short": "nombre en clave de webOS"
+  "settings.consent.placeholder.webos_codename_short": "nombre en clave de webOS",
+  "settings.servers.section": "Servidores",
+  "settings.servers.select": "Seleccionar servidor",
+  "settings.servers.select.detail": "Elige entre los servidores configurados.",
+  "settings.servers.quick": "Conexión rápida",
+  "settings.servers.quick.detail": "Añade otro servidor Jellyfin.",
+  "settings.servers.disconnect": "Desconectar",
+  "settings.servers.disconnect.detail": "Cierra la sesión de este servidor.",
+  "settings.servers.copy": "Elige el servidor al que se conecta este televisor.",
+  "settings.privacy.lan": "Privacidad",
+  "settings.privacy.lan.detail": "Nada sale de tu red local.",
+  "settings.privacy.lan.copy": "Cómo trata Butaca tus datos.",
+  "settings.privacy.lan.body": "Nada sale de tu red local. Butaca no tiene cuenta, no envía telemetría y no recoge analíticas. Tus credenciales se guardan solo en este televisor. El único servidor con el que habla la app es el que tú has configurado."
 }

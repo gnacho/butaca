@@ -6,6 +6,7 @@ use super::*;
 #[allow(unused_imports)]
 use super::test_support::*;
 use crate::ui::present::Present;
+#[cfg(not(feature = "jellyfin"))]
 use crate::ui::screen::By;
 
 #[test]
@@ -84,6 +85,7 @@ fn a_pop_that_would_empty_the_stack_dismisses_the_surface_instead() {
 /// forwarded Pop is an ordinary inner pop and the surface stays up. Without this, "dismiss on
 /// Pop" would be indistinguishable from "dismiss on every Pop", which would take Privacy's
 /// Done straight out of Settings instead of back to its root.
+#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn a_pop_with_a_page_under_it_pops_the_inner_stack_and_stays_up() {
     let _g = crate::testlock::serial();
@@ -140,6 +142,7 @@ fn a_pop_with_a_page_under_it_pops_the_inner_stack_and_stays_up() {
 /// hashed identically and then behaved differently the moment BACK was pressed: the second
 /// assertion is that divergence, arriving one frame later at the re-seat, with nothing in the
 /// record able to say why.
+#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn the_remembered_seats_are_part_of_the_hash() {
     let _g = crate::testlock::serial();

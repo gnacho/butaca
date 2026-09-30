@@ -25,6 +25,7 @@ fn overflowing(page: &str, table: &TableView, out: &mut Vec<String>) {
 
 /// The root rows only a signed-in (and multi-user) account sees, built exactly as
 /// `RootPage::rebuild` builds them; the signed-out rows come from a real `RootPage`.
+#[cfg(not(feature = "jellyfin"))]
 fn signed_in_root_rows() -> TableView {
     let mut table = TableView::new();
     table.compact = false;
@@ -41,6 +42,7 @@ fn signed_in_root_rows() -> TableView {
     table
 }
 
+#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn every_settings_row_fits_its_column_in_every_language() {
     let mut out = Vec::new();

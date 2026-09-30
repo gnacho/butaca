@@ -4,6 +4,7 @@
 use super::*;
 #[allow(unused_imports)]
 use super::test_support::*;
+#[cfg(not(feature = "jellyfin"))]
 use crate::ui::machine::Measure as _;
 
 /// Spec §14 phase 8: `Family::Settings`'s scrim/entrance composition reads
@@ -151,6 +152,7 @@ fn opening_settings_never_writes_the_session_file() {
 /// this table draws, and a `.toggle` row (Automatically Sign In, Play trailers automatically)
 /// passing this bound is evidence its line got shorter, not proof it clears the tighter toggle
 /// budget specifically. The device capture is still what finally settles a real elide.
+#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn every_root_detail_line_fits_a_known_good_width() {
     let _g = crate::testlock::serial();

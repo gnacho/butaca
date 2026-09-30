@@ -1549,9 +1549,11 @@ mod tests {
         fn result(&mut self,f:u64,a:&crate::ui::machine::Addr,m:&crate::screens::registry::AppMsg){crate::ui::dispatch::Tap::<Product>::result(self.rec,f,a,m);}
     }
 
+#[cfg(not(feature = "jellyfin"))]
     fn product_settings_run(rec:&mut Recplay, changed_focus:bool, changed_hit:bool) -> Vec<u64> {
         product_settings_run_with_queries(rec,changed_focus,changed_hit,&mut Vec::new())
     }
+#[cfg(not(feature = "jellyfin"))]
     fn product_settings_run_with_queries(rec:&mut Recplay, changed_focus:bool, changed_hit:bool,
         queries:&mut Vec<crate::ui::rec::MetricKey>) -> Vec<u64> {
         use crate::ui::{dispatch::Dispatcher,machine::{Tick,Key,InputKind}};
@@ -1607,6 +1609,7 @@ mod tests {
         hashes
     }
 
+#[cfg(not(feature = "jellyfin"))]
     fn product_settings_recording() -> (Recording,Vec<u64>) {
         let initial=super::super::bootstrap::Initial::synthetic_home(1,32517,Some("root".into())).unwrap();
         let sink=crate::ui::rec::MemSink::default();
@@ -1624,6 +1627,7 @@ mod tests {
         Recording {header:rec.header.clone(),frames:rec.frames.clone(),metrics:rec.metrics.clone(),stopped_at:rec.stopped_at}
     }
 
+#[cfg(not(feature = "jellyfin"))]
     #[test]
     fn product_replay_uses_captured_metrics_and_missing_queries_refuse_same() {
         let _serial=crate::testlock::serial();
@@ -1645,6 +1649,7 @@ mod tests {
         crate::ui::landgate::disarm();
     }
 
+#[cfg(not(feature = "jellyfin"))]
     #[test]
     fn product_record_and_resolve_query_order_is_identical() {
         let _serial=crate::testlock::serial();
@@ -1688,6 +1693,7 @@ mod tests {
         assert!(bridge.take_measurements().unwrap().is_empty());
     }
 
+#[cfg(not(feature = "jellyfin"))]
     #[test]
     fn product_recorded_continuations_preserve_cross_group_memory_without_avalanche() {
         use crate::ui::{dispatch::Dispatcher,machine::{Tick,Key}};
@@ -1749,6 +1755,7 @@ mod tests {
         crate::ui::landgate::disarm();
     }
 
+#[cfg(not(feature = "jellyfin"))]
     #[test]
     fn product_targets_and_resolve_grade_pointwise_and_continue_before_effects() {
         let _serial=crate::testlock::serial();
@@ -1774,6 +1781,7 @@ mod tests {
         crate::ui::landgate::disarm();
     }
 
+#[cfg(not(feature = "jellyfin"))]
     #[test]
     fn product_resolution_tape_rejects_missing_extra_order_and_impossible_targets() {
         let _serial=crate::testlock::serial();
