@@ -14,7 +14,7 @@
 use crate::jellyfin::signin::{self, Fail, Phase};
 use super::family::table_focus;
 use crate::screens::registry::AppLike;
-use crate::ui::machine::{Cx, Effects, EntryId, FocusKey, GroupId, Handled, Machine};
+use crate::ui::machine::{Cx, Effects, EntryId, FocusKey, Fx, GroupId, Handled, Machine, NavOp};
 use crate::ui::route_screen::{RouteGround, RouteLayout};
 use crate::ui::screen::{
     At, Dir, DrawFrame, Focusable, Placed, Screen, ScreenEvent, Step,
@@ -335,10 +335,18 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
                         }
                         fx.invalidate(crate::ui::present::Provenance::Input);
                         Handled::Yes
+                    } else if key == Key::Back {
+                        // BACK with no edit in flight: the boot gate's form keeps swallowing it
+                        // (nothing lives behind a first-ever boot's sign-in), but the Settings
+                        // "quick connect" copy was PUSHED over the page that asked - disarm add
+                        // mode and hand the user back there (#56).
+                        if signin::add_mode() {
+                            signin::set_add_mode(false);
+                            fx.push(Fx::Nav(NavOp::Pop));
+                        }
+                        Handled::Yes
                     } else {
-                        // BACK with no edit in flight is swallowed on purpose — see the module
-                        // doc. Nothing lives behind the first-ever boot's sign-in.
-                        (key == Key::Back).then_some(Handled::Yes).unwrap_or(Handled::No)
+                        Handled::No
                     }
                 }
                 _ => Handled::No,

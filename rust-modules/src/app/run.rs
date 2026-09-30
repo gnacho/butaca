@@ -1943,7 +1943,9 @@ fn loop_requests(app: &mut App) {
             #[cfg(feature = "jellyfin")]
             crate::screens::registry::LoopReq::JfAddServer => {
                 crate::jellyfin::signin::set_add_mode(true);
-                super::bridge::nav_root(&mut app.pages, AppArg::Login);
+                // PUSH, never nav_root: the form opened over Settings, and BACK must hand the
+                // user back to it - a root here strands them on the form (#56).
+                super::bridge::nav_push(&mut app.pages, AppArg::Login);
             }
             #[cfg(feature = "jellyfin")]
             crate::screens::registry::LoopReq::JfSwitchServer(i) => {
