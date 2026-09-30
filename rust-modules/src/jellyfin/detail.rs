@@ -84,12 +84,13 @@ pub(crate) fn fetch_full(c: &JfClient, sid: ServerId, rk: &str) -> Option<Detail
         })
         .unwrap_or_default();
     crate::log(&format!(
-        "detail: rk={rk} loaded (jellyfin) — {} seasons, {} eps, {} cast, {} related, {} markers | ms={}",
+        "detail: rk={rk} loaded (jellyfin) — {} seasons, {} eps, {} cast, {} related, {} markers | on_deck={} | ms={}",
         d.seasons.len(),
         d.episodes.len(),
         d.credits_len(),
         d.related.len(),
         d.markers.len(),
+        i32::from(d.on_deck.is_some()),
         t0.elapsed().as_millis()
     ));
     Some(d)
@@ -497,7 +498,7 @@ fn episode_from_dto(it: &BaseItemDto) -> Episode {
     }
 }
 
-fn season_from_dto(it: &BaseItemDto) -> Season {
+pub(crate) fn season_from_dto(it: &BaseItemDto) -> Season {
     let leaf = it.child_count.unwrap_or(0);
     let unplayed = it
         .user_data

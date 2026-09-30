@@ -2804,6 +2804,17 @@ fn fetch_item_streams(sid: crate::plex::ServerId, rk: &str, d: &mut Detail) {
 }
 
 fn fetch_seasons(sid: crate::plex::ServerId, rk: &str) -> Vec<Season> {
+    // The store's own season list, beside fetch_full's: the same data through the same client —
+    // without this arm the tab strip read "0 seasons" off the empty Plex registry and the show
+    // rendered season 1 with no way to reach the rest (TV-reported).
+    #[cfg(feature = "jellyfin")]
+    if sid == crate::jellyfin::SERVER_ID {
+        return crate::jellyfin::client()
+            .map(|c| c.seasons(rk)
+                .map(|r| r.items.iter().map(crate::jellyfin::detail::season_from_dto).collect())
+                .unwrap_or_default())
+            .unwrap_or_default();
+    }
     let mc = match crate::plex::client_for(sid).and_then(|c| c.children(rk)) {
         Some(m) => m,
         None => {
