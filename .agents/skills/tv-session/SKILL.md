@@ -13,12 +13,13 @@ description: >
 # Working on the TV
 
 > **FIRST: take the television's lock.** One set, no OS-level mutex — two jobs on it produce
-> plausible WRONG data rather than a clean failure. `tools/tv-lock.sh acquire --why "…"` before the
-> session and `release` after (and `tools/tv-lock.sh status` to see who has it). Every driving
-> subcommand below refuses without it; `log` and `status` are read-only and only name the holder.
-> The **`tv-lock` skill** is the workflow, and the reason to take one lease for the whole session
-> rather than letting each command take its own: the gap between two of your own commands is where
-> another lane lands.
+> plausible WRONG data rather than a clean failure. `tools/tv-lock.sh acquire --ttl 30 --why "…"` before
+> one run (`up` … `down`) and `release` right after it (and `tools/tv-lock.sh status` to see who
+> has it). Every driving subcommand below refuses without it; `log` and `status` are read-only and
+> only name the holder. The **`tv-lock` skill** is the workflow: one lease spans the commands of
+> ONE run, because the gap between two of your own commands is where another lane lands — but
+> never a whole working session. Build, read captures and fix with the lease released, then queue
+> again for the next run; other lanes are waiting on the same set.
 
 > **Before booking the TV: can the simulator answer this?** `make sim` runs the same app core on
 > macOS — real UI, real PMS data, boot triggers, the same FIFO tokens, self-screenshotting, and
@@ -44,8 +45,31 @@ tools/tv-session.sh key down down ok        # key tokens through the real handle
 tools/tv-session.sh click 960 540           # authored 1920x1080 coords
 tools/tv-session.sh shot [out.png]          # panel capture (video plane included)
 tools/tv-session.sh log [--flavor <f>] [regex]   # the on-device event log
+tools/tv-session.sh screen off|on           # blank/restore the PANEL only (app keeps running)
+tools/tv-session.sh sound off|on|status     # mute/unmute the TELEVISION (independent of the panel)
+tools/tv-session.sh wan off [TTL]|on|status  # cut the SET's uplink (LAN intact), self-restoring
 tools/tv-session.sh down [--flavor <f>]     # hand the TV back
 ```
+
+`screen off` blanks the picture while the app keeps running and playback keeps decoding — a PANEL
+state, not an app state (see the owner's panel rule below). `sound off`/`on` calls
+`com.webos.service.audio/setMuted` and reads `getVolume` back to confirm rather than trusting the
+call's own result; `sound status` only reads `getVolume`. This is the sanctioned way to mute the
+set — no lane needs the raw luna-send/`PLX_TV_LOCK_BYPASS` route for it. Neither `screen` nor
+`sound` is restored automatically by `down`; a lane that muted or blanked the panel for its own
+reasons is the one that knows when to undo it.
+
+**The panel rule (the owner's standing directive, restated 2026-09-07):** run every device tier —
+playback, fps scenes, `shot`, capture — with the panel OFF and the sound OFF; the set is in a
+living room, and rendering continues with the LCD off. `tools/tv-session.sh screen off` and
+`tools/tv-session.sh sound off` are both it. See `docs/agent-reference.md` (Tier 2) for the full
+history of this rule.
+
+`wan off` is the offline-mode test condition: a netfilter chain on the television rejects every
+v4 packet leaving the LAN and every DNS query, an `unreachable 2000::/3` route cuts public v6
+(the firmware has no `ip6tables` filter table), and a watchdog on the set restores both after the
+TTL whatever happens to your shell. Read what the APP saw from its own log (`net: curl
+rc=6`, `pinned: … name resolved locally`), not from this command's status lines.
 
 `down` hands back the APP (interactive boot, triggers cleared); `tools/tv-lock.sh release` hands
 back the TELEVISION. Do both, in that order — a released lock with an automated app still on
@@ -66,7 +90,8 @@ token injected → close-first relaunch → process alive → the route heartbea
 on the screen you asked for → the remote FIFO exists. A live view is one flag away.
 
 `--screen` accepts: `home` (default), `profiles`, `login`, `account`, `library[=N]`,
-`detail=<ratingKey>`, `person=<MOVIE ratingKey>`, `player=<ratingKey>`, `itemmenu`.
+`detail=<ratingKey>`, `collection=<ratingKey>`, `person=<MOVIE ratingKey>`, `player=<ratingKey>`,
+`itemmenu`.
 (That is the script's whole `case`; `tools/tv-session.sh --help` is the other copy.)
 
 For a multi-server boot, `--server <slot>` supplies the server half of a `detail=` or `player=`
@@ -92,13 +117,15 @@ you want both the Movies and Shows shelves populated.
 
 ## Which install — and the one step `up` cannot do for you
 
-Two builds live on this television. **stable** is `com.beb.plxnative`, the app the household
+Three builds live on this television. **stable** is `com.beb.plxnative`, the app the household
 watches with; **debug** is `com.beb.plxnative.debug`, the developer build beside it, with its own
-launcher tile (amber DEV bar), its own sign-in and its own runtime files. webOS keys the install
-directory, SAM's `launch`/`closeByAppId` and the LS2 role file on that id, so the two cannot touch
-each other. **`debug` is the default**, deliberately: deploying to `debug` when you meant `stable`
-costs you retyping one command, while the reverse destroys a working install — possibly mid-film —
-on the app somebody actually watches with. So `stable` has to be typed.
+launcher tile (amber DEV bar), its own sign-in and its own runtime files; **nightly** is
+`com.beb.plxnative.nightly`, its own install beside the other two with its own launcher tile
+(grey NIGHTLY bar), runtime root and crash log. webOS keys the install directory, SAM's `launch`/`closeByAppId` and the LS2 role file on
+that id, so none of the three can touch each other. **`debug` is the default**, deliberately:
+deploying to `debug` when you meant `stable` costs you retyping one command, while the reverse
+destroys a working install — possibly mid-film — on the app somebody actually watches with. So
+`stable` (and `nightly`) have to be typed.
 
 **A flavour must be INSTALLED once before `deploy`, and therefore before `up`, can reach it:**
 
@@ -136,9 +163,14 @@ and idle in front of you.
 
 The stable install keeps `/tmp` byte for byte, so every recipe and every `/tmp/plxnative-…` line
 below stays literally true for the app users get. A flavoured install puts its triggers, its
-`plxnative-remote` FIFO and its three `*.log` files in `/tmp/<app id>` instead. **Every name is
+`plxnative-remote` FIFO and its runtime logs in `/tmp/<app id>` instead. **Every name is
 unchanged — only the directory moved**, so read each `/tmp/plxnative-…` path here as
 `$(make -s print-rundir FLAVOR=…)/plxnative-…`.
+
+`plxnative-diag.log` is the storage worker's allowlisted snapshot on every flavour (0640,
+at most 16 KiB). It records build/uid/gid, fixed-label write probes, activation and helper stages;
+it contains no session data or resolved paths. Events, crash and stderr remain 0600. The diagnostics
+file is exempt from trigger detection and is replaced only when diagnostic status changes.
 
 **Two payloads do not carry the prefix, and that rewrite rule silently misses them:**
 `sample.h264` and `sample.h265`, the raw Annex-B samples the player feeds instead of streaming.
@@ -195,11 +227,13 @@ Every `plxnative-*` trigger in the install's runtime root is read **once at boot
 must be in place before the launch. Anything you want to do to a *running* app goes through
 the remote FIFO (`tv-session.sh key` / `click`).
 
-**Three exceptions, all deliberate and all read LIVE**: `plxnative-failtest` (so a read-out variant
-can be swapped mid-playback), `plxnative-testpat` (the same for the synthetic ground), and
+**Some exceptions are deliberate and read LIVE**: `plxnative-failtest` (so a read-out variant
+can be swapped mid-playback), `plxnative-testpat` (the same for the synthetic ground),
 `plxnative-gohome` (which leg of the root press to force — armed AFTER the screen you want has
 settled, because arming it before the launch also makes the boot count as automated and moves which
-screen you land on).
+screen you land on), and `plxnative-signinfail` (`dev::scenarios::signinfail_spec` is re-read on
+every sign-in code request and every poll, so *Try again* keeps failing the same way until the file
+is removed).
 
 **Two traps that cost real time:**
 
@@ -238,18 +272,19 @@ for a multi-user account) → otherwise QR sign-in. Nothing is compiled into the
 
 **Two ports, and they are not the same one.** `:8909` is the local page `stream-screen.py`
 serves you; the app's own capture listener on the TV is a second port that the page consumes.
-That listener is **8910 for the stable install and 8911 for a flavoured one** — two installs must
+That listener is **8910 for the stable install, 8911 for debug, 8912 for nightly** — installs must
 not fight over one socket — and `make -s print-appport FLAVOR=…` is that rule for the shell
 (`capture::default_port` is the same rule in Rust; `ci/flavor.py --selftest` compares them).
 
 The split only bites when you arm the trigger **by hand**: an empty `plxnative-capture` takes the
-default for that install, so a debug install lands on 8911 and the page needs
-`--app-port 8911` (or `TV_APP_PORT=8911`) to find it. `tv-session.sh --stream` never has to be told:
-it writes the resolved number into the trigger content (`plxnative-capture=$APPPORT`, where
-`APPPORT` came from `make -s print-appport FLAVOR=$FLAVOR`) and hands the SAME variable to
-`stream-screen.py --app-port`, so the arm and the viewer cannot address different ports. The
-session is therefore on 8910 for `--flavor stable` and 8911 at the default — the port follows the
-flavour rather than being pinned to either.
+default for that install, so a debug install (the default flavour) lands on 8911 and the page needs
+`--app-port 8911` (or `TV_APP_PORT=8911`) to find the debug install. `tv-session.sh --stream` never
+has to be told: it writes the resolved number into the trigger content
+(`plxnative-capture=$APPPORT`, where `APPPORT` came from `make -s print-appport FLAVOR=$FLAVOR`)
+and hands the SAME variable to `stream-screen.py --app-port`, so the arm and the viewer cannot
+address different ports. The session is therefore on 8910 for `--flavor stable`, 8911 at the
+default (debug), or 8912 for `--flavor nightly` — the port follows the flavour rather than being
+pinned to any one of them.
 
 **Stream resolution is a speed lever, not cosmetics.** MPEG1 has no intra prediction, so
 encode cost tracks screen *detail* as much as size. Measured on the same home screen (a
@@ -382,8 +417,10 @@ the TV is signed in as whatever the automation chose.
   opened the library).
 - **Dead ends, so nobody re-tries them:** external input injection cannot reach this app
   (the compositor opens a fixed evdev set at boot; LG's keymanager only reaches the web-app
-  layer) — the in-app FIFO is the only path. There is no continuous-capture API on this
-  build, only the one-shot service. `luna-send` silently no-ops without a controlling TTY,
+  layer) — the in-app FIFO is the only path. There is no continuous **LS2 capture-service** API on
+  this build, only the one-shot service. A rooted native process can separately use DILE_VT's
+  SCALER DMA ring; `tools/tv-capture-bench.c stream` proves that video-only path at 720p60, but it
+  is not a luna service and does not include the UI plane. `luna-send` silently no-ops without a controlling TTY,
   so on-device calls are wrapped in `script -qc` (never `ssh -tt` for a binary stream — it
   mangles the bytes).
 
@@ -391,7 +428,7 @@ the TV is signed in as whatever the automation chose.
 
 | Symptom | Fix |
 |---|---|
-| `no route= heartbeat` after launch | The app died on boot or is still starting. Run `tools/crash-report.sh` (crash-triage skill). |
+| `no route= heartbeat` after launch | Check the install-scoped PID with `fuser`. No PID: `crash-triage`; live PID: `profile-tv` / `tools/plxnative-sample snapshot`. |
 | Landed on the wrong screen | A stale trigger. Re-run `up` (it clears), or check `status`, which lists what is armed. |
 | Boot shows the QR sign-in screen | No token — `src/config.local.h` is missing/unreadable, or you passed `--no-token`. |
 | Picker appeared during an automated run | You armed only DIAG-exempt triggers. Add any other trigger, or use `--screen profiles` deliberately. |

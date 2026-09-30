@@ -12,13 +12,22 @@
 //! — and `plxnative-url` replaces the stream the player feeds.
 //!
 //! So every read goes through here, and here is `#[cfg]`-gated on the `devtriggers` feature. In a
-//! `--no-default-features` build [`flag`] is `false` and [`read`] is `None` at COMPILE time, the
-//! branches behind them fold away, and the binary opens nothing under `/tmp` but its own logs.
+//! `--no-default-features` build [`flag`] is `false` and [`read`] is `None` at COMPILE time, so
+//! no trigger can be armed. Storage and diagnostics still use runtime files; none are developer
+//! triggers.
+//!
+//! That does NOT keep a trigger's NAME out of the binary. A branch behind `flag`/`read` usually
+//! folds away, but not reliably: once the answer is carried through a struct field (the
+//! `nobudget` flag on `DevFlags`), the optimizer may keep the branch and its string literals
+//! in a release build, and `ci/check-package.py` fails the package because it greps the shipped
+//! bytes for every trigger name this module lists. So every statement whose literal names a trigger
+//! (a log line saying `/tmp/plxnative-…`) carries its own `#[cfg(feature = "devtriggers")]`. Never
+//! rely on constant folding for this.
 //!
 //! Two rules for anything added later:
 //!
 //! 1. **Never open a `/tmp` path directly.** The grep that audits this (`/tmp/plxnative-` outside
-//!    this module and the four unconditional log sinks) is the only thing keeping the property
+//!    this module and the unconditional log sinks) is the only thing keeping the property
 //!    true. The two profiler logs are dev-only and listed in [`DIAG`] below.
 //! 2. **A gate is not always a path.** `any_trigger_present` scans the whole directory and names
 //!    no file at all — it was the one surface a literal-replacement sweep would have missed, and
@@ -26,9 +35,18 @@
 //!    (the capture listener's `INADDR_ANY` socket, the remote FIFO's `mkfifo`) are gated at their
 //!    call sites in `app.rs` for the same reason.
 //!
-//! The four unconditional LOG sinks are deliberately NOT here and stay in every build: they are creates, not
+//! The unconditional LOG sinks are deliberately NOT here and stay in every build: they are creates, not
 //! reads, they are how on-device crash triage works at all, and writing them is not a way for
 //! another process to steer this one.
+//!
+//! **Since UI restructure phase 10, [`scenarios`] is where a read gets ACTED on.** This module is
+//! still the one door onto `/tmp` itself (`flag`/`read`, below); `dev::scenarios` gathers every
+//! ARM — the app-core code that calls through this door and reacts — that used to be scattered
+//! across `app/boot.rs`, `app/run.rs`, `app/content.rs` and `app/mod.rs`, plus the per-arm state
+//! (oscillator phases, retry latches) those arms used to keep on `App` itself. Read that module's
+//! doc before adding a new trigger that `app/` consumes.
+
+pub(crate) mod scenarios;
 
 /// Files that are pure diagnostics rather than automation — see [`any_trigger_present`].
 ///
@@ -40,7 +58,8 @@
 // `test` as well as the feature: `any_trigger_present` is the only caller and it is cfg'd out of a
 // release build, but the test below asserts this list's contents and runs with default features.
 #[cfg(any(feature = "devtriggers", test))]
-const DIAG: [&str; 21] = [
+const DIAG: [&str; 31] = [
+    "plxnative-diag.log",
     "plxnative-events.log",
     "plxnative-stderr.log",
     "plxnative-crash.log",
@@ -71,6 +90,12 @@ const DIAG: [&str; 21] = [
     "plxnative-overdraw",
     "plxnative-drawmask",
     "plxnative-heroground",
+    // The FRAME BUDGET's A/B control leg (`ui/frame/budget.rs`, spec §8.1): admission as it was
+    // before phase 11 — quota only, no time ceiling, no solo rule. DIAG for exactly the argument
+    // the three above make: its whole method is an A/B against an unmasked control leg, and a
+    // non-DIAG trigger would boot the two legs to DIFFERENT SCREENS, so what the numbers measured
+    // would be the screen and not the admission rule.
+    "plxnative-nobudget",
     // LG's own GStreamer logging ([`arm_gst_logging`]) and the file it writes. Both are DIAG for
     // the same reason `plxnative-profile` is: the whole point is to observe a playback that would
     // otherwise be unobservable, and a non-DIAG trigger would silently move the boot screen out
@@ -84,7 +109,65 @@ const DIAG: [&str; 21] = [
     // one is moot — but leaving it out of this list would be a silent inconsistency for the next
     // reader, and the honest reading is that it changes no screen.
     "plxnative-crashtest",
+    // The FRAME-DROP DETECTOR (`app.rs`, the `FRAMEDROP` line and `worstframe=`). It observes the
+    // frame it is armed on and changes no screen; the harness's `worst_ceiling_ms` /
+    // `stall_ceiling_ms` gates arm it under every fps scene, and a scene whose gate moved the boot
+    // away from the screen it grades would fail as "never entered this screen".
+    "plxnative-framedrop",
+    "plxnative-imagecache-stats",
+    "plxnative-imagecache-bypass",
+    // The deterministic RECORDER and its replay trigger (`ui/rec.rs`, NOT YET IN THE TREE — reserved
+    // here first so the recorder cannot land as a non-DIAG trigger and move the boot screen out
+    // from under the session it records; restructure spec §5.3). Both observe or reproduce a session and must not decide
+    // which screen it starts on — a recording of the who's-watching picker has to be possible.
+    // `recplay` is a NEW name: `plxnative-replay[=N]` is the EOS replay COUNTER, non-DIAG, and
+    // stays exactly as it is.
+    "plxnative-rec",
+    "plxnative-recplay",
+    "plxnative-guard", // diagnostic policy only; never changes the boot screen
+    // Boot-latched Dolby Vision capability A/B. They alter only the platform answer used by the
+    // route policy, so an experiment must not independently replace Home with the profile picker.
+    "plxnative-dvcaps0",
+    "plxnative-dvcaps1",
 ];
+
+/// The triggers a CONTROLLED boot (`app::bootstrap`: the recorder, a replay, an explicit
+/// `app-init`) may carry, as bare names. Anything else armed on a recording boot makes its typed
+/// initial unsupported, so a replay cannot silently run under a trigger it never modelled.
+///
+/// One gated table rather than literals at each consumer, for the reason [`DIAG`] is gated: a
+/// full trigger name in the release binary is exactly what `ci/check-package.py` grades as "dev
+/// triggers compiled in", and `plxnative-noidle` is its witness. A release build never arms a
+/// trigger ([`armed_triggers`] is empty there), so it has no vocabulary to check against and the
+/// accessors below answer "not supported" / "not listed" without naming one.
+#[cfg(any(feature = "devtriggers", test))]
+const CONTROLLED: &[&str] = &[
+    "rec", "recplay", "focus", "noidle", "token", "app-init", "settings",
+    "detail", "detailsec", "detailok", "filmography", "personcredits", "nowan",
+];
+
+/// Is the recorded trigger `trigger` (full `plxnative-<name>` form, as [`armed_triggers`] lists
+/// it) one a controlled boot supports? See [`CONTROLLED`].
+#[cfg(any(feature = "devtriggers", test))]
+pub(crate) fn controlled_trigger(trigger: &str) -> bool {
+    trigger.strip_prefix("plxnative-").is_some_and(|name| CONTROLLED.contains(&name))
+}
+#[cfg(not(any(feature = "devtriggers", test)))]
+pub(crate) fn controlled_trigger(_trigger: &str) -> bool {
+    false
+}
+
+/// Does a recorded trigger list (full names, as [`armed_triggers`] returns them) carry the
+/// trigger `name` (bare)? The typed-initial counterpart of [`flag`]: it reads the list a boot was
+/// captured with, never the filesystem. Always `false` in a release build, whose list is empty.
+#[cfg(any(feature = "devtriggers", test))]
+pub(crate) fn listed(triggers: &[String], name: &str) -> bool {
+    triggers.iter().any(|trigger| trigger.strip_prefix("plxnative-") == Some(name))
+}
+#[cfg(not(any(feature = "devtriggers", test)))]
+pub(crate) fn listed(_triggers: &[String], _name: &str) -> bool {
+    false
+}
 
 /// Is the trigger `name` (bare, without the `plxnative-` prefix) present?
 #[cfg(feature = "devtriggers")]
@@ -158,7 +241,7 @@ pub(crate) fn arm_gst_logging() {
     } else {
         spec
     };
-    let log = crate::paths::in_runtime_dir("plxnative-gst.log");
+    let log = crate::paths::in_runtime_dir(crate::paths::runtime_file::GST);
     // SAFETY: single-threaded here by construction — `plex_run` has not yet minted a worker, and
     // this runs before SDL init. `set_var` is only unsound against a concurrent reader.
     std::env::set_var("GST_DEBUG", &spec);
@@ -184,42 +267,41 @@ pub(crate) fn read(_name: &str) -> Option<String> {
     None
 }
 
-/// **Select a fake `com.webos.service.keymanager3` double** — `plxnative-keymanager=<mode>`
-/// (issue #76: `keymanager3` seals and round-trips a session envelope IN-PROCESS but the envelope
-/// never reopens on the NEXT launch). Read once at boot, like every other automation trigger, and
-/// handed to `crate::keymanager::fake`, which owns the mode grammar (`perprocess`, `healthy`,
-/// `stall`, `refuse=<code>`, `nocode`, `badoutput`, `absent`) and the in-process service it
-/// implements. Deliberately **not** in [`DIAG`]: it swaps which backend `keymanager::seal`/`open`
-/// talk to, which is exactly the kind of behaviour change every other automation trigger already
-/// suppresses the who's-watching picker for.
-#[cfg(feature = "devtriggers")]
-pub(crate) fn keymanager_fake_mode() -> Option<String> {
-    read("keymanager")
-}
-#[cfg(not(feature = "devtriggers"))]
-pub(crate) fn keymanager_fake_mode() -> Option<String> {
-    None
+/// Boot-latched main-thread checker escape hatch. File content must be exactly `log`.
+#[cfg(feature = "threadcheck")]
+pub(crate) fn guard_log_only() -> bool {
+    static MODE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *MODE.get_or_init(|| read("guard").as_deref() == Some("log"))
 }
 
-/// **Ask the LS2 hub which identity it grants this app** — `plxnative-ls2identity[=probe]`
-/// (issue #76). At boot, before anything could register for a keymanager call, try every
-/// registration shape once and log the hub's own answer to each — the name asked for, the numeric
-/// code and the `LSError` message text, which this app freed unread for a whole device session.
-/// `Some("")`/`Some("probe")` runs it; any other content is logged and ignored, so a typo cannot
-/// look like a silent refusal.
+/// **`/tmp/plxnative-nowan` — refuse every name lookup, as a dead resolver would.**
 ///
-/// It exists because "which owner does this firmware's key manager see" is answerable on a set
-/// that has NO keymanager3 at all (the 2019 dev set) and on a reporter's set alike (5.6.2 through
-/// 11.2.0, all with `libAcbAPI` gone), without
-/// either of them having to reach a seal. Deliberately **not** in [`DIAG`]: it registers on the
-/// bus, which briefly takes and releases the app-id name — behaviour, not observation.
-#[cfg(feature = "devtriggers")]
-pub(crate) fn ls2_identity_probe() -> Option<String> {
-    read("ls2identity")
+/// The offline-mode reproduction. A household whose internet is down but whose LAN is up resolves
+/// no public name at all: `plex.tv`, `discover.provider.plex.tv` and — the one that matters — the
+/// `plex.direct` hostname the app persisted for its OWN server on the LAN. Nothing on a desk can
+/// take the router's uplink away deterministically, so this trigger does it inside the app: while
+/// armed, [`crate::net`], [`crate::curlio`] and [`crate::stream`] refuse any host that is not a
+/// numeric literal, at the point where they would otherwise hand it to a resolver, and return the
+/// same error a failed resolution returns. A name reaches the wire only when the request carries a
+/// resolve pin ([`crate::plex::ResolvePin`]) — which is exactly what the fix provides, so the same
+/// trigger shows the defect red and the fix green with no network condition arranged anywhere.
+///
+/// Content `slow` first sleeps the connect budget an API call would have spent waiting on a dead
+/// resolver ([`crate::net::API`]'s `connect_s`), so a worker that would have stalled stalls here
+/// too. Empty is the fast variant. Latched at first read like every per-frame trigger, and `None`
+/// at COMPILE time without `devtriggers`, so a public binary carries no such switch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct NoWan {
+    pub(crate) slow: bool,
 }
-#[cfg(not(feature = "devtriggers"))]
-pub(crate) fn ls2_identity_probe() -> Option<String> {
-    None
+
+pub(crate) fn no_wan() -> Option<NoWan> {
+    static SEEN: std::sync::OnceLock<Option<NoWan>> = std::sync::OnceLock::new();
+    *SEEN.get_or_init(|| {
+        read("nowan").map(|s| NoWan {
+            slow: s.trim() == "slow",
+        })
+    })
 }
 
 /// **Hold the Load-returned flag** — `plxnative-holdload[=ms]`.
@@ -285,12 +367,13 @@ pub(crate) fn server_slot() -> Option<Result<u16, String>> {
     None
 }
 
-/// **Crash the app on purpose** — `plxnative-crashtest=<segv|abrt|bus|ill|trap>`.
+/// **Crash the app on purpose** — `plxnative-crashtest=<segv|abrt|bus|ill|trap|panic|unwind>`.
 ///
 /// Not a feature. An INSTRUMENT for the instrument, and it exists because of the rule this repo
 /// keeps re-learning: prove the instrument can see the thing before you read its silence, and
 /// prove the recorder records before you trust an empty recording. The fallback C crash tracer is
-/// the witness, and the local crash log it writes is the recording. Until
+/// always one witness; when crash consent and a DSN are present, Sentry Native's out-of-process
+/// handler is a second witness that can safely inspect the stopped process. Until
 /// 2026-08-29 nothing had ever exercised it deliberately — which is how it went seven weeks with a
 /// re-raise that did not re-raise, silently costing every crash its `WIFSIGNALED` status — and only
 /// that: no crashd backtrace was lost, because this firmware writes no core and so produces none.
@@ -300,6 +383,21 @@ pub(crate) fn server_slot() -> Option<Result<u16, String>> {
 /// the record carries a real faulting PC and a real `si_addr`. The rest go through `raise`, which
 /// proves five of the seven `sigaction` calls took but cannot produce a meaningful PC.
 ///
+/// `panic` is a Rust panic inside an `extern "C"` CALLBACK — the shape of `ff::read_cb` under
+/// libav: the hook writes its `*** RUST PANIC` line, the unwind stops at the callback's own
+/// boundary, and the process aborts with `plex_run`'s frame intact. That leaves BOTH a panic
+/// record and a native SIGABRT envelope, the pair `telemetry::crashreport` must send as the one
+/// panic.
+///
+/// `unwind` panics straight in here instead, so the unwind crosses `plex_run`'s own frame before
+/// aborting at its `extern "C"` boundary. That used to drop the telemetry `Guard` on the way past
+/// and stop the native backend before the abort landed (dev set, 2026-09-19), so no envelope was
+/// written. `Drop for Guard` (`telemetry::native`) now checks `std::thread::panicking()` and
+/// returns early instead of tearing the backend down, so the backend stays armed through the
+/// unwind and the boundary abort still produces a native SIGABRT envelope (PR #168). `panic`
+/// remains the shape worth exercising for a real panic under libav; `unwind` is the regression
+/// test for the `Guard` fix itself.
+///
 /// **Compiled out of a release build** with the rest of `devtriggers`, so a shipped binary has no
 /// path to it at all. Called after telemetry boot (so native capture can be armed) but before SDL
 /// or any screen is created, so it remains reachable when the fault being chased prevents UI boot.
@@ -308,6 +406,20 @@ pub(crate) fn crash_on_purpose() {
     let Some(kind) = read("crashtest") else {
         return;
     };
+    if kind == "panic" {
+        extern "C" fn callback() {
+            panic!("crashtest: deliberate panic");
+        }
+        crate::log("crashtest: DELIBERATE crash, kind=panic (aborts at an extern \"C\" callback)");
+        callback();
+        return;
+    }
+    if kind == "unwind" {
+        crate::log(
+            "crashtest: DELIBERATE crash, kind=unwind (unwinds plex_run to its extern \"C\" boundary)",
+        );
+        panic!("crashtest: deliberate unwinding panic");
+    }
     // The signal numbers are Linux's, written out rather than taken from a libc crate: this crate
     // binds no libc, and these five have been stable in the Linux ABI since it had one.
     let sig = match kind.as_str() {
@@ -339,6 +451,33 @@ pub(crate) fn crash_on_purpose() {
 }
 #[cfg(not(feature = "devtriggers"))]
 pub(crate) fn crash_on_purpose() {}
+
+/// `plxnative-softfloat`: the ARM half of `ui::motion`'s differential claim (spec §4.2). Runs the
+/// 4,096-operand table through this binary's own arithmetic, logs its hash beside the host's
+/// pinned one, and writes the words to `plxnative-softfloat.tbl` in the runtime root so a
+/// divergence can be diffed word by word. `make softfloat-probe` is the recipe.
+#[cfg(feature = "devtriggers")]
+pub(crate) fn softfloat_probe() {
+    if !flag("softfloat") {
+        return;
+    }
+    let host = crate::ui::motion::DIFFERENTIAL_HASH_HOST;
+    let here = crate::ui::motion::differential_hash();
+    crate::log(&format!(
+        "softfloat: n={} hash={here:#018x} host={host:#018x} {}",
+        crate::ui::motion::DIFFERENTIAL_N,
+        if here == host { "MATCH" } else { "DIVERGE" }
+    ));
+    let mut t = Vec::new();
+    crate::ui::motion::differential_table(&mut t);
+    let body: String = t.iter().map(|w| format!("{w:08x}\n")).collect();
+    let path = crate::paths::runtime_dir().join("plxnative-softfloat.tbl");
+    if let Err(e) = std::fs::write(&path, body) {
+        crate::log(&format!("softfloat: table write failed: {e}"));
+    }
+}
+#[cfg(not(feature = "devtriggers"))]
+pub(crate) fn softfloat_probe() {}
 
 /// A test-only playback policy override from `plxnative-quality`.
 ///
@@ -442,16 +581,21 @@ pub(crate) fn quality_switch_script() -> Option<(u32, Vec<crate::plex::session::
 }
 
 /// One synchronized user Pause, optionally followed by Resume —
-/// `plxnative-autopause=[delay=<ms>,][hold=<ms>]`.
+/// `plxnative-autopause=[delay=<ms>,][at=<ms>,][hold=<ms>]`.
 ///
 /// An empty file preserves the original paused-HUD capture contract: pause at the player's
 /// ordinary six-second dev gate and stay paused. A non-empty script may delay that edge and name a
-/// finite accepted hold. Unknown/duplicate/invalid fields fail the whole trigger closed; silently
+/// finite accepted hold. `at` also holds the edge until the PUBLISHED playhead has reached that
+/// media position (and, in the simulator, stops the clock sink exactly on it, so the pause freezes
+/// that position: `ffi_host.rs::stop_clock_at`): a wall-clock delay pauses wherever the host's
+/// scheduling has got playback to, which moves from run to run, and the documentation's player
+/// figure wants the same frame and the same clock every time. Unknown/duplicate/invalid fields fail the whole trigger closed; silently
 /// substituting a duration would exercise a different interleaving from the manifest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct PauseScript {
     pub(crate) delay_ms: u32,
     pub(crate) hold_ms: Option<u32>,
+    pub(crate) at_ms: Option<u32>,
 }
 
 fn parse_pause_script(raw: &str) -> Option<PauseScript> {
@@ -459,10 +603,12 @@ fn parse_pause_script(raw: &str) -> Option<PauseScript> {
         return Some(PauseScript {
             delay_ms: 0,
             hold_ms: None,
+            at_ms: None,
         });
     }
     let mut delay_ms = None;
     let mut hold_ms = None;
+    let mut at_ms = None;
     for field in raw
         .split(',')
         .map(str::trim)
@@ -473,6 +619,11 @@ fn parse_pause_script(raw: &str) -> Option<PauseScript> {
                 return None;
             }
             delay_ms = Some(value.parse().ok()?);
+        } else if let Some(value) = field.strip_prefix("at=") {
+            if at_ms.is_some() {
+                return None;
+            }
+            at_ms = Some(value.parse().ok()?);
         } else if let Some(value) = field.strip_prefix("hold=") {
             if hold_ms.is_some() {
                 return None;
@@ -489,6 +640,7 @@ fn parse_pause_script(raw: &str) -> Option<PauseScript> {
     Some(PauseScript {
         delay_ms: delay_ms.unwrap_or(0),
         hold_ms,
+        at_ms,
     })
 }
 
@@ -591,6 +743,14 @@ pub(crate) struct DevServer {
     /// Public, like the machine name: it is the string every browsing surface says out loud.
     #[serde(default, alias = "sourceTitle", alias = "source_title")]
     pub(crate) handle: String,
+    /// The literal to dial `host` at WITHOUT resolving it — the `Connection.address` plex.tv
+    /// advertises beside a `plex.direct` `uri`, which is what a stored session persists. This is
+    /// how a headless run puts a pinned TLS origin through the registry (`/tmp/plxnative-nowan`
+    /// beside it is the offline reproduction). It is validated exactly as a session's address is
+    /// ([`crate::plex::ResolvePin::for_origin`]): a value the `host` label does not encode pins
+    /// nothing. Omitted: no pin, unchanged behaviour for every overlay written before it existed.
+    #[serde(default, alias = "address_pin", alias = "resolve")]
+    pub(crate) pin: String,
 }
 
 fn default_port() -> i64 {
@@ -671,6 +831,13 @@ impl DevServer {
         }
         crate::plex::probe::dial_port(self.port)
             .map(|p| crate::plex::Origin::new(self.scheme, &self.host, p))
+    }
+
+    /// The resolve pin for [`DevServer::origin`], from the `pin` field — `None` when absent or
+    /// when the label does not encode it.
+    pub(crate) fn resolve_pin(&self) -> Option<crate::plex::ResolvePin> {
+        let origin = self.origin()?;
+        crate::plex::ResolvePin::for_origin(&origin, &self.pin)
     }
 }
 
@@ -903,6 +1070,36 @@ pub(crate) fn any_trigger_present() -> bool {
         .unwrap_or(false)
 }
 
+/// Every `plxnative-*` FILE in the runtime root, by name (DIAG entries included), sorted — the
+/// recorder's header lists them so a replay can say what the recording boot had armed. Names
+/// only: a trigger's CONTENT can be a query or a path and never enters a recording.
+#[cfg(feature = "devtriggers")]
+pub(crate) fn armed_triggers() -> Vec<String> {
+    armed_triggers_in(crate::paths::runtime_dir())
+}
+#[cfg(feature = "devtriggers")]
+fn armed_triggers_in(root: &std::path::Path) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(root)
+        .ok()
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+                .filter_map(|e| {
+                    let n = e.file_name().to_string_lossy().into_owned();
+                    // Runtime logs share the prefix and are not triggers
+                    (n.starts_with("plxnative-") && !n.ends_with(".log")).then_some(n)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    v.sort();
+    v
+}
+#[cfg(not(feature = "devtriggers"))]
+pub(crate) fn armed_triggers() -> Vec<String> {
+    Vec::new()
+}
+
 #[cfg(feature = "devtriggers")]
 fn is_armed_trigger(entry: &std::fs::DirEntry) -> bool {
     if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
@@ -975,16 +1172,28 @@ mod tests {
     /// than against a copy of the list, so adding another log sink without listing it fails here.
     #[test]
     fn diag_names_every_log_this_app_writes() {
-        for log in [
-            "plxnative-events.log",
-            "plxnative-stderr.log",
-            "plxnative-crash.log",
-            "plxnative-anim.log",
-            "plxnative-gputime.jsonl",
-            "plxnative-hwcnt.jsonl",
-        ] {
+        for log in crate::paths::runtime_file::LOGS {
             assert!(super::DIAG.contains(&log), "{log} is written by this app but absent from DIAG — it would suppress the boot picker forever");
         }
+    }
+
+    #[cfg(feature = "devtriggers")]
+    #[test]
+    fn storage_diagnostics_is_never_an_armed_trigger() {
+        let _serial = crate::testlock::serial();
+        let root = std::env::temp_dir().join(format!(".plx-diag-trigger-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+        }
+        let _cleanup = Cleanup(root.clone());
+        std::fs::write(root.join(crate::storage::diagnostics::NAME), b"schema=1\n").unwrap();
+        let entry = std::fs::read_dir(&root).unwrap().next().unwrap().unwrap();
+        assert!(!super::is_armed_trigger(&entry));
+        assert!(super::armed_triggers_in(&root).is_empty());
+        std::fs::write(root.join("plxnative-home"), b"").unwrap();
+        assert_eq!(super::armed_triggers_in(&root), vec!["plxnative-home"]);
     }
 
     /// A DIRECTORY whose name matches the trigger prefix must not read as an armed trigger.
@@ -993,6 +1202,10 @@ mod tests {
     /// who's-watching picker, so a squatted entry changes which screen this install comes up on
     /// with nothing logged anywhere. It became reachable when two installs started sharing `/tmp`
     /// — the second install's runtime root is a directory sitting right there.
+    // `is_armed_trigger` itself is compiled out entirely under `--no-default-features` (it is
+    // `devtriggers`-only, not merely dead code behind the runtime `ENABLED` check below), so this
+    // test cannot exist in that build at all rather than just skip at runtime.
+    #[cfg(feature = "devtriggers")]
     #[test]
     fn a_directory_is_not_an_armed_trigger() {
         if !super::ENABLED {
@@ -1517,6 +1730,7 @@ mod tests {
             Some(super::PauseScript {
                 delay_ms: 0,
                 hold_ms: None,
+                at_ms: None,
             }),
             "the empty screenshot trigger remains a permanent Pause",
         );
@@ -1525,8 +1739,20 @@ mod tests {
             Some(super::PauseScript {
                 delay_ms: 25_000,
                 hold_ms: Some(6_000),
+                at_ms: None,
             }),
         );
+        assert_eq!(
+            parse("at=432000"),
+            Some(super::PauseScript {
+                delay_ms: 0,
+                hold_ms: None,
+                at_ms: Some(432_000),
+            }),
+            "a position-gated pause: the published playhead, not a wall-clock delay",
+        );
+        assert_eq!(parse("at=1,at=2"), None);
+        assert_eq!(parse("at=soon"), None);
         assert_eq!(parse("hold=0"), None);
         assert_eq!(parse("delay=10,delay=20"), None);
         assert_eq!(parse("hold=oops"), None);

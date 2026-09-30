@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Gleb Linnik
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Own Rust mirror of src/starfish.h, written from the public ABI contract.
 //! player::ffi — the starfish.c seam (sf_* / acb_* verbs). These stay C (the mangled-C++ + ACB
 //! ABI). The library thread calls back into our sf_on_event / acb_on_event (defined in mod.rs).
 //! Signatures mirror `src/starfish.h` exactly; `long` is 32-bit on the arm target -> c_long.
@@ -78,8 +81,8 @@ mod sys {
 /// the main thread would stall the frame loop for the whole load. What keeps that safe is NOT
 /// `sf_ready()` — that reads true the moment the object is constructed, before the real Load call
 /// returns (issue #74) — but the C seam's own `g_load_returned` gate inside `sf_ready_object()`,
-/// which refuses every other verb until this call has returned; the pump's `NATIVE_LOAD_BUDGET`
-/// is the only Rust-side view of that in-flight state.
+/// which refuses the other Starfish verbs until this call has returned. Rust tracks the same
+/// epoch boundary in Shared and the pump bounds both waits with `NATIVE_LOAD_BUDGET`.
 #[inline]
 pub(crate) unsafe fn sf_load(payload: *const c_char, epoch: u32) -> c_int {
     sys::sf_load(payload, epoch)
@@ -115,6 +118,13 @@ pub(crate) fn force_callback_intercepts_for_test(value: u32) {
     sys::force_callback_intercepts_for_test(value);
 }
 
+/// Stop the simulator's clock sink exactly at a movie position, or lift the stop. See
+/// `ffi_host.rs::stop_clock_at`; the television's pipeline has no such control.
+#[cfg(feature = "hostsim")]
+pub(crate) fn stop_sim_clock_at(media_ns: Option<i64>) -> bool {
+    sys::stop_clock_at(media_ns)
+}
+
 #[cfg(all(test, feature = "hostsim"))]
 pub(crate) fn reset_native_lifecycle_for_test() {
     sys::reset_native_lifecycle_for_test();
@@ -126,6 +136,12 @@ pub(crate) fn reset_native_lifecycle_for_test() {
 #[cfg(all(test, feature = "hostsim"))]
 pub(crate) fn force_object_ready_for_test(on: bool) {
     sys::force_object_ready_for_test(on);
+}
+
+/// Whether the host seam has quarantined its object. See `ffi_host.rs::lifecycle_blocked_for_test`.
+#[cfg(all(test, feature = "hostsim"))]
+pub(crate) fn lifecycle_blocked_for_test() -> bool {
+    sys::lifecycle_blocked_for_test()
 }
 
 #[cfg(all(test, feature = "hostsim"))]
@@ -237,10 +253,10 @@ pub(crate) unsafe fn sf_quarantine(_: &MainThread) {
 /// Which video-plane binding this television has. See `src/starfish.h`'s `VP_*` and the long
 /// comment at the top of `src/starfish.c`.
 pub(crate) const VP_NONE: c_int = 0;
-/// The PLAYBACK path never branches on this one: the ACB path is selected by the SEAM (every
-/// `acb_*` verb no-ops in the other modes) rather than by a branch here, and `ACB_OK` carries the
-/// fact the pump needs. It is read outside playback, by `player::acb_holds_app_id` — which asks
-/// this constant a question about the LS2 BUS (does ACB hold the app-id name) and not about video.
+/// Not referenced in Rust: the ACB path is selected by the SEAM (every `acb_*` verb no-ops in the
+/// other modes) rather than by a branch here, and `ACB_OK` carries the fact the pump needs. Kept
+/// so the three values are readable together, matching `starfish.h`.
+#[allow(dead_code)]
 pub(crate) const VP_ACB: c_int = 1;
 pub(crate) const VP_EXPORTED: c_int = 2;
 
@@ -252,7 +268,7 @@ pub(crate) fn vp_mode() -> c_int {
 }
 
 /// The exported windowId the seam holds, or an empty string when none was created. Diagnostics
-/// only (`ui::stats`): it answers "did the window this firmware needs ever exist?", which is the
+/// only (`app::diagnostics`): it answers "did the window this firmware needs ever exist?", which is the
 /// first thing to check when webOS 5+ plays sound over a black screen. Points at the seam's own
 /// long-lived buffer, so it is never NULL and never owned here. No token — it reads a static char[].
 #[inline]

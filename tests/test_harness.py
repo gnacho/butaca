@@ -22,6 +22,7 @@ synthetic): the invariants being checked — every case ends with an `rk` or a `
 skips only its owner — are properties of the tracked matrix as it actually stands, and a case added
 tomorrow that breaks one of them should fail here rather than on the television.
 """
+import http.client
 import importlib.util
 import inspect
 import io
@@ -48,6 +49,7 @@ sys.path.append(os.path.join(REPO_ROOT, "tools"))
 import netcond  # noqa: E402
 import run  # noqa: E402  (path juggling above is the point)
 import serve_fixtures  # noqa: E402
+import focusfp_check  # noqa: E402
 
 _FIXTURE_GEN_SPEC = importlib.util.spec_from_file_location(
     "plx_make_fixtures", os.path.join(TESTS_DIR, "fixtures", "make_fixtures.py"))
@@ -84,6 +86,771 @@ class _Overlay:
         os.unlink(self.fh.name)
 
 
+class ContentFocusFlows(unittest.TestCase):
+    def test_home_down_must_reach_the_second_shelf_not_bounce_to_the_hero(self):
+        log = ["focus route=home snapt=0 hf=-1 row=-1 col=-1",
+               "focus route=home snapt=0 hf=0 row=-1 col=-1",
+               "focus route=home snapt=1 hf=-1 row=0 col=0",
+               "focus route=home snapt=0 hf=0 row=-1 col=-1"]
+        self.assertIsNotNone(focusfp_check.check(1, log))
+        log[-1] = "focus route=home snapt=1 hf=-1 row=1 col=0"
+        self.assertIsNone(focusfp_check.check(1, log))
+        self.assertIsNotNone(focusfp_check.check(1, log[1:]))
+
+    def test_settings_family_must_visit_privacy_as_well_as_legal(self):
+        log = ["hb route=home overlay=settings", "hb route=home overlay=legal",
+               "hb route=home overlay=settings", "hb route=home"]
+        self.assertIsNotNone(focusfp_check.check(6, log))
+        log[1:1] = ["hb route=home overlay=privacy", "hb route=home overlay=settings"]
+        self.assertIsNone(focusfp_check.check(6, log))
+        self.assertIsNotNone(focusfp_check.check(6, log[:-1]))
+
+    def test_the_old_about_only_false_pass_does_not_prove_a_related_hold(self):
+        log = ["focus route=home sid=0 rk=200622",
+               "focus route=detail sec=5 col=0 card=0 sid=0 rk=1001",
+               "focus route=detail sec=5 col=0 card=0 sid=0 rk=1001 press=1"]
+        self.assertIn("never opened", focusfp_check.check(8, log))
+
+    def test_the_menu_must_open_over_detail_and_return_to_the_same_card(self):
+        # The menu line is the HOST's since UI-restructure phase 10 — `route=detail` with the
+        # surface's own `imenu=`/`isel=`/`imsid=` fields on it — because a ModalStack surface is
+        # presented over the top page and never replaces it.
+        log = ["focus route=detail sec=3 col=2 card=1 sid=0 rk=1001",
+               "focus route=detail sec=3 col=2 card=1 sid=0 rk=1001 imenu=1 isel=0 imsid=0",
+               "focus route=detail sec=3 col=2 card=1 sid=0 rk=1001"]
+        self.assertIsNone(focusfp_check.check(8, log))
+        self.assertIsNotNone(focusfp_check.check(8, log[:-1]))
+        self.assertIsNotNone(focusfp_check.check(8, [log[0], log[1].replace("route=detail", "route=home"), log[2]]))
+        self.assertIsNotNone(focusfp_check.check(8, [*log[:-1], log[-1].replace("col=2", "col=0")]))
+
+    def test_detail_back_restores_the_home_card_identity_and_position(self):
+        log = ["focus route=home row=1 col=2 sid=0 rk=1001",
+               "focus route=detail sid=0 rk=1001",
+               "focus route=home row=1 col=2 sid=0 rk=1001"]
+        self.assertIsNone(focusfp_check.check(2, log))
+        self.assertIsNotNone(focusfp_check.check(2, log[:-1]))
+        self.assertIsNotNone(focusfp_check.check(2, [*log[:-1], log[-1].replace("rk=1001", "rk=1002")]))
+        self.assertIsNotNone(focusfp_check.check(2, ["focus route=home", "focus route=detail", "focus route=home"]))
+
+    @staticmethod
+    def _library_adoption_log():
+        return [
+            "focus route=home snapt=1 hf=-1 row=1 col=0 sid=0 rk=1046",
+            "focus route=library pill=-1 card=1 menu=0 sid=0 rk=1046 row=2 col=4 viewport=2",
+            "focus route=detail sid=0 rk=1046",
+            "focus route=library pill=-1 card=1 menu=0 sid=0 rk=1046 row=2 col=4 viewport=2",
+        ]
+
+    def test_library_flow_rejects_the_recorded_home_detail_home_false_pass(self):
+        # This is the shape from the verified false-PASS artifact: the old flow had enough lines
+        # to look alive, but it never entered the Library at all.
+        log = [
+            "focus route=home snapt=0 snapp=0 hf=-1 row=-1 col=-1 sid=- rk=- press=0",
+            "focus route=home snapt=1 snapp=1 hf=-1 row=1 col=0 sid=0 rk=1048 press=0",
+            "focus route=detail sec=0 col=0 sid=0 rk=1048 press=1",
+            "focus route=home snapt=1 snapp=1 hf=-1 row=1 col=0 sid=0 rk=1048 press=0",
+        ]
+        self.assertIsNotNone(focusfp_check.check(3, log))
+
+    def test_library_adoption_requires_the_same_card_and_focus_position(self):
+        log = self._library_adoption_log()
+        self.assertIsNone(focusfp_check.check(3, log))
+
+        for label, replacement in (
+            ("server slot", ("sid=0", "sid=1")),
+            ("rating key", ("rk=1046", "rk=1047")),
+            ("grid position", ("col=4", "col=5")),
+        ):
+            with self.subTest(label=label):
+                changed = list(log)
+                changed[-1] = changed[-1].replace(*replacement)
+                self.assertIsNotNone(focusfp_check.check(3, changed))
+
+    def test_library_adoption_refuses_missing_identity_or_focus_fields(self):
+        log = self._library_adoption_log()
+        for label, missing in (("rating key", " rk=1046"), ("grid position", " col=4")):
+            with self.subTest(label=label):
+                changed = list(log)
+                changed[-1] = changed[-1].replace(missing, "")
+                self.assertIsNotNone(focusfp_check.check(3, changed))
+
+    def test_library_adoption_requires_a_card_and_the_matching_detail(self):
+        log = self._library_adoption_log()
+        for field in ("pill", "card", "menu"):
+            changed = [re.sub(r" " + field + r"=[^ ]+", "", line) for line in log]
+            with self.subTest(missing_both_sides=field):
+                self.assertIsNotNone(focusfp_check.check(3, changed))
+        for field, value in (("card", "0"), ("menu", "1")):
+            changed = [re.sub(r" " + field + r"=[^ ]+", " " + field + "=" + value, line) for line in log]
+            with self.subTest(not_a_card=field):
+                self.assertIsNotNone(focusfp_check.check(3, changed))
+        for replacement in ("sid=1 rk=1046", "sid=0 rk=9999", "sid=0"):
+            changed = list(log)
+            changed[2] = "focus route=detail " + replacement
+            with self.subTest(wrong_detail=replacement):
+                self.assertIsNotNone(focusfp_check.check(3, changed))
+
+    def test_library_flow_validates_every_focus_record_after_back(self):
+        log = self._library_adoption_log()
+        corruptions = (
+            ("wrong item", ("rk=1046", "rk=1047")),
+            ("wrong server", ("sid=0", "sid=1")),
+            ("missing identity", (" rk=1046", "")),
+            ("viewport drift", ("viewport=2", "viewport=3")),
+        )
+        for label, replacement in corruptions:
+            with self.subTest(label=label):
+                changed = log + [log[-1].replace(*replacement)]
+                self.assertIsNotNone(focusfp_check.check(3, changed))
+
+    def test_library_flow_rejects_a_later_route_departure(self):
+        log = self._library_adoption_log()
+        self.assertIsNotNone(focusfp_check.check(3, log + ["focus route=home"]))
+
+    def test_library_flow_allows_press_only_changes_after_back(self):
+        log = self._library_adoption_log()
+        changed = log + [log[-1] + " press=1"]
+        self.assertIsNone(focusfp_check.check(3, changed))
+
+    def test_a_person_boot_alone_does_not_prove_a_nested_return(self):
+        log = ["focus route=" + r for r in ("home", "detail", "person", "person")]
+        self.assertIsNotNone(focusfp_check.check(5, log))
+        log[-1] += " sid=0 rk=1001"
+        log += ["focus route=detail", "focus route=person sid=0 rk=1001", "focus route=detail"]
+        self.assertIsNone(focusfp_check.check(5, log))
+
+    def test_person_return_preserves_the_selected_card(self):
+        log = ["focus route=person card=1 sid=0 rk=1001 group=2 elem=4096",
+               "focus route=detail sid=0 rk=1001",
+               "focus route=person card=1 sid=0 rk=1001 group=2 elem=4096",
+               "focus route=detail sid=0 rk=1001"]
+        self.assertIsNone(focusfp_check.check(5, log))
+        self.assertIsNotNone(focusfp_check.check(5, [*log[:2], log[2].replace("rk=1001", "rk=1002"), log[3]]))
+        self.assertIsNotNone(focusfp_check.check(5, [*log[:2], log[2].replace("elem=4096", "elem=4097"), log[3]]))
+
+    def test_filmography_is_restored_before_back_dismisses_it(self):
+        log = ["focus route=person filmography=1 group=0 elem=0",
+               "focus route=person filmography=1 group=1 elem=42",
+               "focus route=detail",
+               "focus route=person filmography=1 group=1 elem=42",
+               "focus route=person filmography=0 group=2 elem=1"]
+        self.assertIsNone(focusfp_check.check(12, log))
+        self.assertIsNotNone(focusfp_check.check(12, [*log[:3], log[-1]]))
+        self.assertIsNotNone(focusfp_check.check(12, [*log[:3], log[3].replace("elem=42", "elem=0"), log[-1]]))
+        self.assertIsNotNone(focusfp_check.check(12, log[:-1]))
+
+
+class FocusFpAccounting(unittest.TestCase):
+    def test_product_modes_are_explicit_exclusive_and_grade_all_counters(self):
+        summary = ('replay: done frames=1 graded=1 diverged=0 present_diffs=0 input_diffs=0 '
+                   'result_diffs=0 land_diffs=0 effect_diffs=0 focus_diffs=0 hit_diffs=0 verdict=SAME')
+        for mode in ('--replay', '--targets', '--resolve'):
+            expected = 'resolve' if mode == '--resolve' else 'targets'
+            script = ('#!/bin/sh\nroot="$PLXNATIVE_RUNTIME_DIR"\n'
+                      'test "$(sed -n 1p "$root/plxnative-recplay")" = v1 || exit 3\n'
+                      f'test "$(sed -n 2p "$root/plxnative-recplay")" = {expected} || exit 3\n'
+                      f'printf "hubs: landed\\n{summary}\\n" > "$root/plxnative-events.log"\n')
+            result = self._run_isolated_focusfp(script, '--only', '1', mode=mode)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for pair in (('--rec', '--replay'), ('--targets', '--resolve'), ('--resolve', '--replay'),
+                     ('--targets', '--targets')):
+            result = self._run_isolated_focusfp('#!/bin/sh\nexit 88\n', pair[1], mode=pair[0])
+            self.assertEqual(result.returncode, 2)
+            self.assertIn('conflicting modes', result.stderr)
+        for field in ('input_diffs', 'focus_diffs', 'hit_diffs'):
+            for bad in (summary.replace(field + '=0', field + '=1'),
+                        summary.replace(' ' + field + '=0', '')):
+                script = ('#!/bin/sh\nroot="$PLXNATIVE_RUNTIME_DIR"\n'
+                          f'printf "hubs: landed\\n{bad}\\n" > "$root/plxnative-events.log"\n')
+                result = self._run_isolated_focusfp(script, '--only', '1', mode='--resolve')
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+
+    @staticmethod
+    def _run_isolated_focusfp(simulator, *args, mode="--replay"):
+        """Run a copied focusfp script against only the fixtures this accounting test needs."""
+        fixture_names = (
+            "1-boot-home-chip-grid",
+            "6-settings-family",
+            "12-filmography-detail-return",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = os.path.join(tmp, "repo")
+            tests = os.path.join(repo, "tests")
+            fixtures = os.path.join(tests, "fixtures", "replay")
+            os.makedirs(fixtures)
+            for name in fixture_names:
+                os.makedirs(os.path.join(fixtures, name))
+
+            focusfp = os.path.join(tests, "focusfp.sh")
+            shutil.copyfile(os.path.join(TESTS_DIR, "focusfp.sh"), focusfp)
+            os.chmod(focusfp, 0o755)
+
+            sim = os.path.join(tmp, "fake-sim")
+            with open(sim, "w", encoding="utf-8") as f:
+                f.write(simulator)
+            os.chmod(sim, 0o755)
+
+            env = os.environ.copy()
+            env.update({"SIM_BIN": sim, "OUT": os.path.join(tmp, "out")})
+            return subprocess.run(
+                [focusfp, "--pms", "127.0.0.1:9", mode, *args],
+                cwd=repo,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+
+    def test_replay_counts_pass_skip_and_failure_separately(self):
+        """A missing replay fixture is a skip, not a successful flow."""
+        script = """#!/bin/sh
+root="$PLXNATIVE_RUNTIME_DIR"
+if [ -e "$root/plxnative-settings" ]; then
+    marker='overlay=settings'
+elif [ -e "$root/plxnative-filmography" ]; then
+    marker='route=person'
+else
+    marker='hubs: landed'
+fi
+printf '%s\\nreplay: done frames=1 graded=1 diverged=0 present_diffs=0 input_diffs=0 result_diffs=0 land_diffs=0 effect_diffs=0 focus_diffs=0 hit_diffs=0 verdict=SAME\\n' "$marker" > "$root/plxnative-events.log"
+exit 0
+"""
+        result = self._run_isolated_focusfp(script)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("=== focusfp: 3 passed, 0 failed, 9 skipped of 12 ===", result.stdout)
+
+
+    def test_only_counts_a_failed_simulator_and_the_tv_root_as_selected_outcomes(self):
+        script = """#!/bin/sh
+root="$PLXNATIVE_RUNTIME_DIR"
+printf 'hubs: landed\\n' > "$root/plxnative-events.log"
+exit 0
+"""
+        result = self._run_isolated_focusfp(script, "--only", "1,10")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("=== focusfp: 0 passed, 1 failed, 1 skipped of 2 ===", result.stdout)
+
+
+class ReplayFixtures(unittest.TestCase):
+    """Restructure spec §5.6 rule 2: every string value in a committed replay fixture belongs to
+    the closed synthetic alphabet (tests/fixtures/replay/ALPHABET.json). The guard applies the same
+    rule before a push; this is the copy that runs on every `make check`, so a fixture that slipped
+    in by any other route is still caught."""
+
+    FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "replay")
+
+    def _alphabet(self):
+        with open(os.path.join(self.FIXTURES, "ALPHABET.json"), encoding="utf-8") as f:
+            a = json.load(f)
+        return frozenset(a["literals"]), [re.compile("^(?:%s)$" % p) for p in a["patterns"]]
+
+    def test_actual_cli_and_outbound_fixture_exception(self):
+        """Invoke both public boundaries; never execute the described outbound command."""
+        with tempfile.TemporaryDirectory() as root:
+            subprocess.run(["git", "init", "-q", root], check=True)
+            fixtures = os.path.join(root, "tests", "fixtures", "replay")
+            os.makedirs(fixtures)
+            os.makedirs(os.path.join(root, "tools"))
+            tool = os.path.join(root, "tools", "plxnative-rec")
+            shutil.copy(os.path.join(REPO_ROOT, "tools", "plxnative-rec"), tool)
+            shutil.copy(os.path.join(self.FIXTURES, "ALPHABET.json"), fixtures)
+            hook = os.path.join(REPO_ROOT, ".claude", "hooks", "outbound-guard.py")
+
+            def guard(path):
+                return subprocess.run([sys.executable, hook], input=json.dumps({
+                    "tool_name": "Bash", "cwd": root, "tool_input": {
+                        "command": "gh pr create --body-file " + path}}),
+                    capture_output=True, text=True, cwd=root)
+
+            d = self._synthetic_recording(fixtures)
+            relative = "tests/fixtures/replay/rec/rec-0000.jsonl"
+            negatives = ["UnlistedHouseholdName", "UNLISTEDHOUSEHOLDNAME",
+                         "UnlistedHouseholdName(Instance(4))",
+                         "Landing(UnlistedHouseholdName(4))",
+                         "plxnative-unlistedhouseholdname", "route=unlistedhouseholdname",
+                         "pat:unlistedhouseholdname", "txt:deadbeefcafebabe",
+                         "12345678-1234-4234-8234-123456789abc",
+                         "ABCDEFPrivateToken", "s01234567\n",
+                         "plxnative-rec=unlistedhouseholdname",
+                         "route=home overlay=unlistedhouseholdname",
+                         "Landing(Instance(4))"]
+            positives = ["Mount", "Session", "Landing(Instance(InstanceId(4)))",
+                         "Landing(Store(StoreOrd(3)))", "Landing(Session)",
+                         "Resource(Texture)", "Timer(TimerId(7))", "s01234567",
+                         "route=home overlay=account", "plxnative-rec",
+                         "pat:solid:120:50", "txt:s01234567+s89abcdef"]
+            for index, value in enumerate(negatives + positives):
+                accepted = index >= len(negatives)
+                with self.subTest(case=index, accepted=accepted):
+                    with open(os.path.join(d, "rec-0000.jsonl"), "w", encoding="utf-8") as f:
+                        f.write(json.dumps({"t": "st", "f": 0, "probe": value}) + "\n")
+                    cli = subprocess.run([sys.executable, tool, "check", d],
+                                         capture_output=True, text=True, cwd=root)
+                    outbound = guard(relative)
+                    with self.subTest(boundary="cli"):
+                        self.assertEqual(cli.returncode, 0 if accepted else 1)
+                    with self.subTest(boundary="guard"):
+                        self.assertEqual(outbound.returncode, 0 if accepted else 2)
+                    if not accepted:
+                        self.assertNotIn(value, cli.stdout + cli.stderr)
+                        self.assertNotIn(value, outbound.stdout + outbound.stderr)
+            # The original counterexample changed only manifest.build, not a frame payload.
+            with open(os.path.join(d, "rec-0000.jsonl"), "w", encoding="utf-8") as f:
+                f.write(json.dumps({"t": "st", "f": 0, "hash": 1}) + "\n")
+            manifest_path = os.path.join(d, "manifest.json")
+            with open(manifest_path, encoding="utf-8") as f:
+                manifest = json.load(f)
+            manifest["build"] = negatives[0]
+            with open(manifest_path, "w", encoding="utf-8") as f:
+                json.dump(manifest, f)
+            cli = subprocess.run([sys.executable, tool, "check", d],
+                                 capture_output=True, text=True, cwd=root)
+            outbound = guard("tests/fixtures/replay/rec/manifest.json")
+            with self.subTest(boundary="manifest-cli"):
+                self.assertEqual(cli.returncode, 1)
+            with self.subTest(boundary="manifest-guard"):
+                self.assertEqual(outbound.returncode, 2)
+            self.assertNotIn(negatives[0], cli.stdout + cli.stderr + outbound.stdout + outbound.stderr)
+            # Identical synthetic bytes outside the exception remain private recording grammar.
+            shutil.copy(os.path.join(d, "rec-0000.jsonl"), os.path.join(root, "outside.jsonl"))
+            self.assertEqual(guard("outside.jsonl").returncode, 2)
+            for name in sorted(os.listdir(self.FIXTURES)):
+                source = os.path.join(self.FIXTURES, name)
+                if not os.path.isfile(os.path.join(source, "manifest.json")):
+                    continue
+                target = os.path.join(fixtures, name)
+                shutil.copytree(source, target)
+                result = subprocess.run([sys.executable, tool, "check", target],
+                                        capture_output=True, text=True, cwd=root)
+                self.assertEqual(result.returncode, 0, name)
+                for fn in os.listdir(target):
+                    if fn == "manifest.json" or fn.endswith(".jsonl"):
+                        self.assertEqual(guard("tests/fixtures/replay/" + name + "/" + fn).returncode, 0,
+                                         name + "/" + fn)
+
+    def test_metric_text_bytes_are_checked_at_both_public_fixture_boundaries(self):
+        """MetricKey::Width is byte-valued on disk, but public fixtures are UTF-8 synthetic text.
+
+        Exercise the two actual publication boundaries against an alphabet that already admits
+        the finite metric protocol words.  That arrangement is intentional: a private title must
+        not become publishable merely because ``Width`` itself is later admitted.
+        """
+        with tempfile.TemporaryDirectory() as root:
+            subprocess.run(["git", "init", "-q", root], check=True)
+            fixtures = os.path.join(root, "tests", "fixtures", "replay")
+            os.makedirs(fixtures)
+            os.makedirs(os.path.join(root, "tools"))
+            tool = os.path.join(root, "tools", "plxnative-rec")
+            shutil.copy(os.path.join(REPO_ROOT, "tools", "plxnative-rec"), tool)
+            alphabet_path = os.path.join(fixtures, "ALPHABET.json")
+            shutil.copy(os.path.join(self.FIXTURES, "ALPHABET.json"), alphabet_path)
+
+            recording = self._synthetic_recording(fixtures)
+            segment = os.path.join(recording, "rec-0000.jsonl")
+            relative = "tests/fixtures/replay/rec/rec-0000.jsonl"
+            hook = os.path.join(REPO_ROOT, ".claude", "hooks", "outbound-guard.py")
+
+            def outcomes(rows):
+                with open(segment, "w", encoding="utf-8") as f:
+                    for row in rows:
+                        f.write(json.dumps(row, separators=(",", ":")) + "\n")
+                cli = subprocess.run([sys.executable, tool, "check", recording],
+                                     capture_output=True, text=True, cwd=root)
+                guard = subprocess.run([sys.executable, hook], input=json.dumps({
+                    "tool_name": "Bash", "cwd": root, "tool_input": {
+                        "command": "gh pr create --body-file " + relative}}),
+                    capture_output=True, text=True, cwd=root)
+                return cli, guard
+
+            natural = [
+                {"f": 0, "t": "metrics", "q": {"kind": "Width",
+                 "text": list(b"s01234567"), "sz": 28, "bold": False}, "bits": 1},
+                {"f": 0, "t": "metrics", "q": {"kind": "Cap", "sz": 28}, "bits": 2},
+                {"f": 0, "t": "metrics", "q": {"kind": "Line", "sz": 28}, "bits": 3},
+            ]
+            for boundary, result in zip(("cli", "guard"), outcomes(natural)):
+                with self.subTest(case="natural", boundary=boundary):
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+            private = "UnlistedHouseholdName"
+            bad_texts = [
+                list(private.encode("utf-8")),       # valid UTF-8, outside the closed alphabet
+                [0xff],                              # not UTF-8
+                [ord("s"), 0, ord("0")],           # C-string-invalid NUL
+                [115, 48, 49, 50, 51, 52, 53, 54, 55.0],  # noncanonical JSON number
+                [115, 48, 49, 50, 51, 52, 53, 54, True],  # bool is not an integer byte
+                [256],                               # outside byte bounds
+                [ord("s")] * 16385,                 # ui/rec.rs MetricKey::valid bound
+            ]
+            for index, text_bytes in enumerate(bad_texts):
+                row = {"f": 0, "t": "metrics", "q": {"kind": "Width",
+                       "text": text_bytes, "sz": 28, "bold": False}, "bits": 1}
+                for boundary, result in zip(("cli", "guard"), outcomes([row])):
+                    with self.subTest(case=index, boundary=boundary):
+                        self.assertEqual(result.returncode, 1 if boundary == "cli" else 2,
+                                         result.stdout + result.stderr)
+                        self.assertNotIn(private, result.stdout + result.stderr)
+
+            malformed = {"f": 0, "t": "metrics", "q": {"kind": "Unknown",
+                         "text": list(b"UnlistedHouseholdName"), "sz": 28, "bold": False},
+                         "bits": 1}
+            for boundary, result in zip(("cli", "guard"), outcomes([malformed])):
+                with self.subTest(case="unknown-byte-context", boundary=boundary):
+                    self.assertEqual(result.returncode, 1 if boundary == "cli" else 2,
+                                     result.stdout + result.stderr)
+                    self.assertNotIn(private, result.stdout + result.stderr)
+
+            # Ordinary json.loads keeps only the final spelling of a duplicate key. The raw file
+            # must not retain private bytes in an earlier spelling that both publishers overlook.
+            duplicate = ('{"f":0,"t":"metrics","q":{"kind":"Width",'
+                         '"text":' + json.dumps(list(private.encode("utf-8"))) + ','
+                         '"text":' + json.dumps(list(b"s01234567")) + ','
+                         '"sz":28,"bold":false},"bits":1}\n')
+            with open(segment, "w", encoding="utf-8") as f:
+                f.write(duplicate)
+            cli = subprocess.run([sys.executable, tool, "check", recording],
+                                 capture_output=True, text=True, cwd=root)
+            guard = subprocess.run([sys.executable, hook], input=json.dumps({
+                "tool_name": "Bash", "cwd": root, "tool_input": {
+                    "command": "gh pr create --body-file " + relative}}),
+                capture_output=True, text=True, cwd=root)
+            for boundary, result in zip(("cli", "guard"), (cli, guard)):
+                with self.subTest(case="duplicate-metric-key", boundary=boundary):
+                    self.assertEqual(result.returncode, 1 if boundary == "cli" else 2,
+                                     result.stdout + result.stderr)
+                    self.assertNotIn(private, result.stdout + result.stderr)
+
+    @staticmethod
+    def _strings(node, out):
+        if isinstance(node, str):
+            out.append(node)
+        elif isinstance(node, dict):
+            for v in node.values():
+                ReplayFixtures._strings(v, out)
+        elif isinstance(node, list):
+            for v in node:
+                ReplayFixtures._strings(v, out)
+
+    def test_no_committed_fixture_string_leaves_the_synthetic_alphabet(self):
+        lits, pats = self._alphabet()
+        checked = 0
+        for name in sorted(os.listdir(self.FIXTURES)):
+            d = os.path.join(self.FIXTURES, name)
+            if not os.path.isdir(d):
+                continue
+            for fn in sorted(os.listdir(d)):
+                if not (fn == "manifest.json" or (fn.startswith("rec-") and fn.endswith(".jsonl"))):
+                    continue
+                with open(os.path.join(d, fn), encoding="utf-8") as f:
+                    text = f.read()
+                boundary = self._tool("check", d)
+                self.assertEqual(boundary.returncode, 0, boundary.stdout + boundary.stderr)
+                docs = ([json.loads(text)] if fn.endswith(".json")
+                        else [json.loads(l) for l in text.splitlines() if l.strip()])
+                for doc in docs:
+                    vals = []
+                    self._strings(doc, vals)
+                    for v in vals:
+                        checked += 1
+                        # the value is deliberately not in the message: a leak by a shorter route
+                        self.assertTrue(v in lits or any(p.fullmatch(v) for p in pats),
+                                        "%s/%s: a %d-char string outside the alphabet" % (name, fn, len(v)))
+        self.assertGreater(checked, 0)
+
+    QUARANTINED_FIXTURES = {}
+
+    def test_every_committed_fixture_carries_the_trees_recording_schema(self):
+        """`ui/rec.rs`'s SCHEMA moved 1 -> 2 in restructure phase 11 and this suite did not
+        notice: a stale fixture's manifest only refuses to LOAD at replay time
+        (`Recording::parse`), which is too late to catch here on `make check`. Read SCHEMA out of
+        the tree the way `ci/flavor.py` reads other Rust constants agreed with a second language —
+        a plain regex over the source, no cargo invocation — and check every committed fixture's
+        manifest agrees with it, so a fixture left behind by a schema bump fails loudly beside the
+        alphabet check above instead of only at `tests/focusfp.sh --replay` time.
+
+        `schema` alone is not the only way a fixture goes stale: two anchors can share `schema`
+        while their `state_fp` (the recorded state SHAPE — route/overlay/focus/tree/session/
+        consent/initial) has moved apart, which is exactly what `tools/plxnative-rec rerecord`
+        reports as a load-time REFUSED and what the README documents happened to fixture 12. So
+        this also checks every non-quarantined fixture's `state_fp` agrees with the majority
+        value among committed anchors, and reports (without reddening `make check`) any
+        quarantined fixture whose `state_fp` has drifted onto the current value — at that point
+        the quarantine itself is stale and should be lifted."""
+        rec_rs_path = os.path.join(REPO_ROOT, "rust-modules", "src", "ui", "rec.rs")
+        with open(rec_rs_path, encoding="utf-8") as f:
+            rec_rs = f.read()
+        m = re.search(r"(?m)^pub const SCHEMA: u32 = (\d+);", rec_rs)
+        self.assertIsNotNone(m, "ui/rec.rs SCHEMA constant found")
+        schema = int(m.group(1))
+        checked = 0
+        fps = {}
+        for name in sorted(os.listdir(self.FIXTURES)):
+            d = os.path.join(self.FIXTURES, name)
+            if not os.path.isdir(d):
+                continue
+            manifest_path = os.path.join(d, "manifest.json")
+            if not os.path.isfile(manifest_path):
+                continue
+            with open(manifest_path, encoding="utf-8") as f:
+                manifest = json.load(f)
+            checked += 1
+            self.assertEqual(manifest.get("schema"), schema,
+                              "%s/manifest.json: schema %r does not match ui/rec.rs SCHEMA=%d "
+                              "(tools/plxnative-rec rerecord it)"
+                              % (name, manifest.get("schema"), schema))
+            fps[name] = manifest.get("state_fp")
+        self.assertGreater(checked, 0)
+
+        live_fps = {n: fp for n, fp in fps.items() if n not in self.QUARANTINED_FIXTURES}
+        if live_fps:
+            from collections import Counter
+            current_fp, _ = Counter(live_fps.values()).most_common(1)[0]
+            for name, fp in live_fps.items():
+                self.assertEqual(fp, current_fp,
+                                  "%s/manifest.json: state_fp %r does not match the other "
+                                  "committed anchors' %r (tools/plxnative-rec rerecord it, or "
+                                  "quarantine it in QUARANTINED_FIXTURES with a reason)"
+                                  % (name, fp, current_fp))
+            for name, reason in self.QUARANTINED_FIXTURES.items():
+                if name not in fps:
+                    continue
+                if fps[name] == current_fp:
+                    print("NOTE: quarantined fixture %s now shares state_fp with the live "
+                          "anchors (%r) — lift its QUARANTINED_FIXTURES entry" % (name, current_fp))
+                else:
+                    print("QUARANTINED: %s/manifest.json — %s" % (name, reason))
+
+    def _tool(self, *args):
+        tool = os.path.join(os.path.dirname(self.FIXTURES), "..", "..", "tools", "plxnative-rec")
+        return subprocess.run([sys.executable, os.path.abspath(tool), *args],
+                              capture_output=True, text=True)
+
+    def test_recording_info_reports_adapter_event_counts_without_payloads(self):
+        with tempfile.TemporaryDirectory() as root:
+            recording = self._synthetic_recording(root)
+            result = self._tool("info", recording)
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("effects=0 results=0", result.stdout)
+            with open(os.path.join(recording, "rec-0000.jsonl"), "a", encoding="utf-8") as f:
+                for kind in ["eff", "eff", "async", "life"]:
+                    f.write(json.dumps({"f": 1, "t": kind, "payload": "not-for-info-output"}) + "\n")
+            result = self._tool("info", recording)
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("effects=2 results=1 landings=0 lifecycle=1", result.stdout)
+            self.assertNotIn("not-for-info-output", result.stdout)
+
+    def test_safe_printers_do_not_echo_unlisted_header_or_kind(self):
+        sentinel = "UnlistedHouseholdName"
+        with tempfile.TemporaryDirectory() as root:
+            first = self._synthetic_recording(os.path.join(root, "a"), st=1)
+            second = self._synthetic_recording(os.path.join(root, "b"), st=2)
+            path = os.path.join(first, "manifest.json")
+            with open(path, encoding="utf-8") as f:
+                header = json.load(f)
+            header["build"] = sentinel
+            header["features"] = [sentinel]
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(header, f)
+            with open(os.path.join(first, "rec-0000.jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps({"t": sentinel, "f": 0}) + "\n")
+            for args in [("info", first), ("diff", first, second)]:
+                with self.subTest(command=args[0]):
+                    result = self._tool(*args)
+                    self.assertEqual(result.returncode, 0 if args[0] == "info" else 1)
+                    self.assertIn("<redacted>", result.stdout)
+                    self.assertNotIn(sentinel, result.stdout + result.stderr)
+
+    def test_info_redacts_malformed_features_container_without_iterating_it(self):
+        sentinel = "SACFMZSACFMZ"
+        with tempfile.TemporaryDirectory() as root:
+            recording = self._synthetic_recording(root)
+            path = os.path.join(recording, "manifest.json")
+            with open(path, encoding="utf-8") as f:
+                header = json.load(f)
+            for features in (sentinel, {sentinel: True}, None, 17, True):
+                with self.subTest(container=type(features).__name__):
+                    header["features"] = features
+                    with open(path, "w", encoding="utf-8") as f:
+                        json.dump(header, f)
+                    result = self._tool("info", recording)
+                    self.assertEqual(result.returncode, 0)
+                    self.assertIn("features=<redacted>", result.stdout)
+                    self.assertNotIn(sentinel, (result.stdout + result.stderr).replace(",", ""))
+
+    def _synthetic_recording(self, root, st=0x1234, anchor=False):
+        d = os.path.join(root, "rec")
+        os.makedirs(d)
+        manifest = {"schema": 1, "state_fp": 7, "build": "0.7.0-dev", "features": [], "triggers": [],
+                    "init": {"probe": "seed=0", "hash": 1}, "clock": {"start": 0}, "blobs": False}
+        if anchor:
+            manifest["anchor"] = True
+        with open(os.path.join(d, "manifest.json"), "w", encoding="utf-8") as f:
+            json.dump(manifest, f)
+        with open(os.path.join(d, "rec-0000.jsonl"), "w", encoding="utf-8") as f:
+            f.write(json.dumps({"t": "tick", "f": 0, "ms": 0, "dt_us": 16000}) + "\n")
+            f.write(json.dumps({"t": "in", "f": 0, "kind": "key", "sym": 1, "wcode": 0, "down": True, "repeat": False}) + "\n")
+            f.write(json.dumps({"t": "st", "f": 0, "hash": st}) + "\n")
+        return d
+
+    def test_a_rebaseline_without_a_divergence_record_is_refused(self):
+        """Spec §5.5 / §15.1: `--rebaseline` is allowed only with a divergence record the replay
+        driver's own log supports, and never for an anchor fixture. The tool is the owner of the
+        rule, so its test lives here rather than in the Rust fixture list."""
+        with tempfile.TemporaryDirectory() as tmp:
+            fixtures = os.path.join(tmp, "fixtures")
+            os.makedirs(fixtures)
+            env_tool = os.path.join(os.path.dirname(self.FIXTURES), "..", "..", "tools", "plxnative-rec")
+            src = open(os.path.abspath(env_tool), encoding="utf-8").read()
+            # point the tool at a throwaway fixture directory
+            tool = os.path.join(tmp, "plxnative-rec")
+            with open(tool, "w", encoding="utf-8") as f:
+                f.write(src.replace('FIXTURES = os.path.join(ROOT, "tests", "fixtures", "replay")',
+                                    'FIXTURES = %r' % fixtures))
+            shutil.copy(os.path.join(self.FIXTURES, "ALPHABET.json"), fixtures)
+            old = self._synthetic_recording(os.path.join(tmp, "a"), st=0x10)
+            run = lambda *a: subprocess.run([sys.executable, tool, *a], capture_output=True, text=True)
+            self.assertEqual(run("import", old, "flow").returncode, 0)
+            new = self._synthetic_recording(os.path.join(tmp, "b"), st=0x20)
+            # 1. no record at all
+            r = run("rebaseline", new, "flow")
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertIn("divergence record", r.stdout)
+            # 2. a log that says SAME is not a divergence record
+            log = os.path.join(tmp, "same.log")
+            open(log, "w").write("replay: done frames=1 graded=1 diverged=0 present_diffs=0 verdict=SAME\n")
+            r = run("rebaseline", new, "flow", "--log", log)
+            self.assertEqual(r.returncode, 1, r.stdout)
+            # 3. a divergence about a DIFFERENT fixture (expected hash is not this one's)
+            log = os.path.join(tmp, "other.log")
+            open(log, "w").write("replay: diverge f=0 expected=0x0000000000000099 got=0x0000000000000020 inputs=1\n"
+                                 "replay: done frames=1 graded=1 diverged=1 present_diffs=0 verdict=DIVERGED\n")
+            r = run("rebaseline", new, "flow", "--log", log)
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertIn("not this fixture", r.stdout)
+            # Result mismatches cannot be hidden behind an otherwise valid state divergence.
+            # Until the adoption record can represent them, refuse without replacing the fixture.
+            kept = {}
+            for name in ("manifest.json", "rec-0000.jsonl"):
+                with open(os.path.join(fixtures, "flow", name), "rb") as f:
+                    kept[name] = f.read()
+            for result_line, count in [("replay: result diverge f=0 index=0 reason=changed\n", 1),
+                                       ("", 1),
+                                       ("replay: result diverge f=0 index=0 reason=missing\n", 0)]:
+                log = os.path.join(tmp, "result.log")
+                with open(log, "w") as f:
+                    f.write(result_line +
+                            "replay: diverge f=0 expected=0x0000000000000010 got=0x0000000000000020 inputs=1\n" +
+                            "replay: done frames=1 graded=1 diverged=1 present_diffs=0 result_diffs=%d verdict=DIVERGED\n" % count)
+                r = run("rebaseline", new, "flow", "--log", log)
+                self.assertEqual(r.returncode, 1, r.stdout)
+                self.assertIn("result", r.stdout)
+                self.assertFalse(os.path.exists(os.path.join(fixtures, "flow", "divergence.json")))
+                for name, contents in kept.items():
+                    with open(os.path.join(fixtures, "flow", name), "rb") as f:
+                        self.assertEqual(f.read(), contents)
+            for effect_line, count in [("replay: effect diverge f=0 index=0\n", 1),
+                                       ("", 1), ("replay: effect diverge f=0 index=0\n", 0)]:
+                log = os.path.join(tmp, "effect.log")
+                with open(log, "w") as f:
+                    f.write(effect_line +
+                            "replay: diverge f=0 expected=0x0000000000000010 got=0x0000000000000020 inputs=1\n" +
+                            "replay: done frames=1 graded=1 diverged=1 present_diffs=0 effect_diffs=%d verdict=DIVERGED\n" % count)
+                r = run("rebaseline", new, "flow", "--log", log)
+                self.assertEqual(r.returncode, 1, r.stdout)
+                self.assertIn("effect", r.stdout)
+                self.assertFalse(os.path.exists(os.path.join(fixtures, "flow", "divergence.json")))
+                for name, contents in kept.items():
+                    with open(os.path.join(fixtures, "flow", name), "rb") as f:
+                        self.assertEqual(f.read(), contents)
+            for input_line, count in [("replay: input diverge f=0 script_index=0 reason=changed\n", 1),
+                                      ("", 1),
+                                      ("replay: input diverge f=0 script_index=0 reason=missing count=1\n", 0)]:
+                log = os.path.join(tmp, "input.log")
+                with open(log, "w") as f:
+                    f.write(input_line +
+                            "replay: diverge f=0 expected=0x0000000000000010 got=0x0000000000000020 inputs=1\n" +
+                            "replay: done frames=1 graded=1 diverged=1 present_diffs=0 input_diffs=%d verdict=DIVERGED\n" % count)
+                r = run("rebaseline", new, "flow", "--log", log)
+                self.assertEqual(r.returncode, 1, r.stdout)
+                self.assertIn("input", r.stdout)
+                self.assertFalse(os.path.exists(os.path.join(fixtures, "flow", "divergence.json")))
+                for name, contents in kept.items():
+                    with open(os.path.join(fixtures, "flow", name), "rb") as f:
+                        self.assertEqual(f.read(), contents)
+            # Product focus/hit differences are input-resolution differences, with dedicated
+            # subset counters. Neither the detail witness nor the aggregate can be adopted
+            # through the older state-only rebaseline, even alongside a real state mismatch.
+            for family in ('focus', 'hit'):
+                for detail, count in [(True, 1), (False, 1), (True, 0)]:
+                    log = os.path.join(tmp, family + '.log')
+                    with open(log, 'w') as f:
+                        if detail:
+                            f.write(f'replay: input diverge f=0 resolution_index=0 reason=changed resolution={family}\n')
+                        f.write('replay: diverge f=0 expected=0x0000000000000010 got=0x0000000000000020 inputs=1\n')
+                        f.write(f'replay: done frames=1 graded=1 diverged=1 input_diffs={count} {family}_diffs=1 verdict=DIVERGED\n')
+                    r = run('rebaseline', new, 'flow', '--log', log)
+                    self.assertEqual(r.returncode, 1, r.stdout)
+                    self.assertIn('input', r.stdout)
+                    self.assertFalse(os.path.exists(os.path.join(fixtures, 'flow', 'divergence.json')))
+                    for name, contents in kept.items():
+                        with open(os.path.join(fixtures, 'flow', name), 'rb') as f:
+                            self.assertEqual(f.read(), contents)
+            # 4. a real record: accepted, and divergence.json is written beside the new recording
+            log = os.path.join(tmp, "real.log")
+            open(log, "w").write("replay: diverge f=0 expected=0x0000000000000010 got=0x0000000000000020 inputs=1\n"
+                                 "replay: done frames=1 graded=1 diverged=1 present_diffs=0 verdict=DIVERGED\n")
+            r = run("rebaseline", new, "flow", "--log", log)
+            self.assertEqual(r.returncode, 0, r.stdout)
+            rec = json.load(open(os.path.join(fixtures, "flow", "divergence.json")))
+            self.assertEqual(rec["first_frame"], 0)
+            self.assertEqual(rec["preceding_event_kinds"], ["in"])
+            # 5. an anchor refuses even with a record
+            anchor = self._synthetic_recording(os.path.join(tmp, "c"), st=0x30, anchor=True)
+            self.assertEqual(run("import", anchor, "pinned").returncode, 0)
+            log = os.path.join(tmp, "anchor.log")
+            open(log, "w").write("replay: diverge f=0 expected=0x0000000000000030 got=0x0000000000000020 inputs=1\n"
+                                 "replay: done frames=1 graded=1 diverged=1 present_diffs=0 verdict=DIVERGED\n")
+            r = run("rebaseline", new, "pinned", "--log", log)
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertIn("ANCHOR", r.stdout)
+
+    def test_the_alphabet_refuses_a_title_shaped_string(self):
+        lits, pats = self._alphabet()
+        for v in ("Film Club Night", "The Godfather", "10.203.0.10", "nas-home",
+                  "UnlistedHouseholdName", "UnlistedUppercaseWord", "ABCDEFPrivateToken"):
+            self.assertFalse(v in lits or any(p.fullmatch(v) for p in pats), "rejected case")
+        for v in ("s0a1b2c3d", "tick", "inst:3", "0.7.0-dev", "Landing(Instance(InstanceId(4)))", "plxnative-rec"):
+            self.assertTrue(v in lits or any(p.fullmatch(v) for p in pats), "protocol case")
+
+    def test_home_payload_alphabet_accepts_only_the_mock_protocol_and_synthetic_words(self):
+        lits, pats = self._alphabet()
+        accepts = lambda value: value in lits or any(p.fullmatch(value) for p in pats)
+        for value in ("", "hubs", "PG-13", "TV-14", "ac3", "h264", "home.movies.recent",
+                      "home.television.recent", "/library/sections/1/recentlyAdded",
+                      "/library/sections/2/recentlyAdded", "/library/metadata/1001/thumb/1",
+                      "/library/metadata/2001/art/1", "/library/parts/2/1700000002/file.mkv",
+                      "2024-03-14", " ".join(["s01234567"] * 24)):
+            self.assertTrue(accepts(value), value)
+        for value in ("A household summary", "s01234567 household", "/library/metadata/My Film/thumb/1",
+                      "/library/metadata/1001/thumb/1?X-Plex-Token=secret",
+                      "/library/parts/2/1700000002/household.mkv", "http://nas.local/library/metadata/1001",
+                      "s01234567\nThe Godfather", " ".join(["s01234567"] * 23 + ["household"])):
+            self.assertFalse(accepts(value), value)
+
+    def test_controlled_init_alphabet_is_a_finite_source_vocabulary(self):
+        lits, pats = self._alphabet()
+        accepts = lambda value: value in lits or any(p.fullmatch(value) for p in pats)
+        for value in ("controlled=home version=1", "plxnative-app-init", "127.0.0.1",
+                      "http://127.0.0.1:32517", "Idle", "Boot", "ActivateDevBootstrap",
+                      "AlreadyInstalled", "Request", "owned", "Sdl", "RemoteFifo", "Script", "Replay",
+                      "Up", "Down", "Left", "Right", "Repeat", "discovery", "reset", "refetch"):
+            self.assertTrue(accepts(value), "source protocol constant")
+        for value in ("UnlistedHouseholdName", "UnlistedUppercaseWord", "plxnative-app-init=secret",
+                      "http://192.0.2.1:32517", "https://127.0.0.1:32517", "http://127.0.0.1:325170",
+                      "http://127.0.0.1:32517?X-Plex-Token=secret", "http://127.0.0.1:32517@private",
+                      "01234567-89ab-4cde-8fab-0123456789ab"):
+            self.assertFalse(accepts(value), "unlisted or private-shaped input")
+
+
 class TeardownProcessTable(unittest.TestCase):
     def test_non_utf8_argv_cannot_hide_or_crash_a_run_stream_pid(self):
         marker = "/tmp/com.beb.plxnative.debug/plxnative-events.log"
@@ -94,9 +861,54 @@ class TeardownProcessTable(unittest.TestCase):
         fake.assert_called_once_with(["ps", "-Ao", "pid,command"], capture_output=True)
 
 
+class StoredSessionGate(unittest.TestCase):
+    """A `session: stored` case with no stored sign-in on the install used to call
+    `require_stored_session()` -> `sys.exit()` from inside `run_case`, and `SystemExit` is not an
+    `Exception` — the per-case `except Exception` in main()'s run loop let it straight through and
+    killed the whole batch at the first such case. The fix moves the check in front of the loop
+    (`stored_session_reason` + `partition_stored_sessions`) so an unmet precondition SKIPS just
+    those cases instead."""
+
+    def test_stored_session_reason_is_none_when_a_session_file_is_present(self):
+        with mock.patch.object(run, "ssh") as ssh:
+            ssh.return_value = subprocess.CompletedProcess([], 0)
+            self.assertIsNone(run.stored_session_reason("192.0.2.5"))
+
+    def test_stored_session_reason_names_how_to_fix_it_when_absent(self):
+        with mock.patch.object(run, "ssh") as ssh:
+            ssh.return_value = subprocess.CompletedProcess([], 1)
+            reason = run.stored_session_reason("192.0.2.5")
+        self.assertIn("signed-in session", reason)
+        self.assertIn("sign in on that install once", reason)
+
+    def test_a_stored_case_is_skipped_not_dropped_as_a_systemexit(self):
+        """This is the regression itself: before the fix, the only way main() learned a stored
+        session was missing was `require_stored_session()` raising `SystemExit` from inside the
+        per-case try/except — which does not catch it. `partition_stored_sessions` must instead
+        move the case out of `cases` and into the skip list, raising nothing."""
+        cases = [{"name": "offline_play", "session": "stored"},
+                 {"name": "normal_case"}]
+        remaining, skipped = run.partition_stored_sessions(
+            cases, "needs a signed-in session on com.beb.plxnative")
+        self.assertEqual([c["name"] for c in remaining], ["normal_case"])
+        self.assertEqual([c["name"] for c in skipped], ["offline_play"])
+
+    def test_a_present_session_leaves_every_case_untouched(self):
+        cases = [{"name": "offline_play", "session": "stored"}, {"name": "normal_case"}]
+        remaining, skipped = run.partition_stored_sessions(cases, None)
+        self.assertEqual(remaining, cases)
+        self.assertEqual(skipped, [])
+
+    def test_no_stored_case_in_the_batch_is_untouched_even_with_a_reason(self):
+        cases = [{"name": "normal_case"}]
+        remaining, skipped = run.partition_stored_sessions(cases, "some reason")
+        self.assertEqual(remaining, cases)
+        self.assertEqual(skipped, [])
+
+
 class ItemResolution(unittest.TestCase):
     def test_placeholder_reads_as_absent(self):
-        """The stranger's dominant path is `cp` the example, which ships all twelve keys bracketed.
+        """The stranger's dominant path is `cp` the example, which ships every key bracketed.
         If only the ABSENT branch skipped, that path would still die — one guard further down."""
         items = {"present": 1234, "blank": "<ratingKey>"}
         self.assertEqual(run._item_rk(items, "present"), "1234")   # ints are stringified
@@ -125,7 +937,10 @@ class ItemResolution(unittest.TestCase):
 class FpsIdentity(unittest.TestCase):
     def test_every_route_except_login_gets_the_temporary_test_identity(self):
         """FPS evidence must not depend on this debug install having been signed in by hand."""
-        for route in ("home", "detail", "itemmenu", "person", "library", "search", "account", "player"):
+        # `itemmenu`/`account` left this list in UI-restructure phase 10: both menus are
+        # ModalStack surfaces now, so a scene naming one keys on `overlay`, and its `route` is the
+        # host page's word — which is already in the list.
+        for route in ("home", "detail", "person", "library", "search", "player"):
             scene = {"route": route, "tier": "player" if route == "player" else "ui"}
             self.assertTrue(run.fps_scene_needs_token(scene), route)
         self.assertFalse(run.fps_scene_needs_token({"route": "login", "tier": "ui"}))
@@ -160,20 +975,15 @@ class FpsIdentity(unittest.TestCase):
         self.assertTrue(sources["triggers"]["plxnative-firstrun"])
         self.assertTrue(sources["triggers"]["plxnative-onboardosc"])
 
-        for name, stage in (("consent-crash", "crash"), ("consent-product", "product")):
-            with self.subTest(scene=name):
-                scene = scenes[name]
-                self.assertEqual(scene["route"], "home")
-                self.assertEqual(scene["overlay"], "consent")
-                self.assertGreaterEqual(scene["loop_floor"], 50)
-                self.assertGreaterEqual(scene["fps_floor"], 50)
-                self.assertEqual(scene["triggers"]["plxnative-consent"], stage)
-                self.assertTrue(scene["triggers"]["plxnative-consentosc"])
+        # The consent fps scenes went with the consent surface itself (telemetry removal):
+        # the manifest no longer lists them, and the parse_fps contract above is the
+        # only consent behaviour this file still pins.
 
     def test_settings_scenes_carry_the_50_fps_contract_and_idle_inverse(self):
         scenes = {s["name"]: s for s in _manifest()["fps_scenes"]}
+        # settings-privacy went with the Privacy & data page itself (replaced by the
+        # delete-all-local-data row); only root and legal scenes remain.
         for name, overlay in (("settings-root", "settings"),
-                              ("settings-privacy", "privacy"),
                               ("settings-legal", "legal")):
             with self.subTest(scene=name):
                 scene = scenes[name]
@@ -203,6 +1013,428 @@ class FpsIdentity(unittest.TestCase):
             [s["name"] for s in run.fps_for_tiers(scenes, True, "settings")],
             ["settings-root", "settings-player"],
         )
+
+
+class FrameCeilings(unittest.TestCase):
+    """The two frame-TIME gates (`worst_ceiling_ms`, `stall_ceiling_ms`) added for the restructure's
+    phase 0. Graded from synthetic heartbeat/FRAMEDROP lines so the arithmetic is pinned here and
+    not first exercised on the television."""
+
+    HB = "loop=60 route=home overlay=settings fps=12 worstframe={w}ms worstprep=0.4ms"
+
+    def _lines(self, worsts, drops=()):
+        out = [self.HB.format(w=w) for w in worsts]
+        out += [f"FRAMEDROP total={d} ingest=0.1 results=0.1 tick_drain=1.0 navcommit=0.0 "
+                f"prepare=0.5 draw=20.0 capture=0.2 swap=1.0 up=0 px=0 cards=1 off=0 route=home "
+                f"load=-1 snap=0.00" for d in drops]
+        return out
+
+    def test_worst_ceiling_is_the_second_highest_post_warmup_peak(self):
+        scene = {"worst_ceiling_ms": 30}
+        # one 80 ms outlier is tolerated (a poster landing); the second-highest decides
+        ok, detail = run.grade_frame_ceilings(scene, self._lines([80, 20, 22, 21, 25, 19, 24]),
+                                              "home", "settings", warmup=0)
+        self.assertTrue(ok, detail)
+        ok, _ = run.grade_frame_ceilings(scene, self._lines([80, 35, 22, 21, 25, 19, 24]),
+                                         "home", "settings", warmup=0)
+        self.assertFalse(ok)
+
+    def test_worst_ceiling_respects_warmup_and_the_overlay_word(self):
+        scene = {"worst_ceiling_ms": 30}
+        lines = self._lines([90, 90, 20, 22, 21, 25, 19, 24])
+        ok, _ = run.grade_frame_ceilings(scene, lines, "home", "settings", warmup=2)
+        self.assertTrue(ok)
+        # the same lines carry overlay=settings, so a privacy scene sees no samples and FAILS
+        ok, detail = run.grade_frame_ceilings(scene, lines, "home", "privacy", warmup=0)
+        self.assertFalse(ok)
+        self.assertIn("no worstframe= samples", detail)
+
+    def test_an_unarmed_detector_cannot_pass_a_ceiling_vacuously(self):
+        lines = ["loop=60 route=home overlay=settings fps=12"] * 8
+        for scene in ({"worst_ceiling_ms": 30}, {"stall_ceiling_ms": 80}):
+            ok, detail = run.grade_frame_ceilings(scene, lines, "home", "settings", warmup=0)
+            self.assertFalse(ok, scene)
+            self.assertIn("not armed", detail)
+
+    def test_stall_ceiling_reads_every_framedrop_line_warmup_included(self):
+        scene = {"stall_ceiling_ms": 80}
+        lines = self._lines([20] * 6, drops=[45.0, 79.9])
+        ok, detail = run.grade_frame_ceilings(scene, lines, "home", "settings", warmup=3)
+        self.assertTrue(ok, detail)
+        lines = self._lines([20] * 6, drops=[45.0, 80.1])
+        ok, _ = run.grade_frame_ceilings(scene, lines, "home", "settings", warmup=3)
+        self.assertFalse(ok)
+        # a drop on ANOTHER route is not this scene's
+        other = [ln.replace("route=home", "route=detail") for ln in self._lines([], drops=[200.0])]
+        ok, _ = run.grade_frame_ceilings(scene, self._lines([20] * 6) + other, "home", "settings", 0)
+        self.assertTrue(ok)
+
+    def test_the_armed_threshold_is_the_lower_ceiling(self):
+        self.assertIsNone(run.frame_ceiling_threshold({"loop_floor": 30}))
+        self.assertEqual(run.frame_ceiling_threshold({"worst_ceiling_ms": 40}), "40")
+        self.assertEqual(run.frame_ceiling_threshold({"worst_ceiling_ms": 40,
+                                                      "stall_ceiling_ms": 33}), "33")
+
+    def test_a_scene_without_a_ceiling_is_untouched(self):
+        ok, detail = run.grade_frame_ceilings({"loop_floor": 30}, [], "home", None, 0)
+        self.assertTrue(ok)
+        self.assertEqual(detail, "")
+
+    def test_an_old_log_without_the_frame_plan_fields_still_parses(self):
+        """Phase 11 appended `carried=`/`dropped=`/`budget=`/`evicted_hot=` after `worstprep=`,
+        and `tests/run.py` anchors `fps=` and `worstframe=` with a lazy `.*?` in front of each.
+        A log from BEFORE that must keep parsing (these are logs the maintainer replays), and a
+        log from after must parse identically — the fields ride behind both anchors."""
+        old = "loop=60 route=home overlay=settings fps=12 worstframe=31.5ms worstprep=0.4ms"
+        new = (old + " carried=2 dropped=0 budget=7/1/solo:residency evicted_hot=3 sim_placeholder")
+        for label, ln in (("old", old), ("new", new.replace(" sim_placeholder", ""))):
+            with self.subTest(log=label):
+                self.assertEqual(run.parse_fps([ln], "home", "settings"), [12])
+                self.assertEqual(run.parse_worst([ln], "home", "settings"), [31.5])
+                self.assertEqual(run.parse_loop([ln], "home", "settings"), [60])
+
+    def test_the_frame_drop_line_still_parses_with_the_per_frame_counters(self):
+        """The four counters moved from the loop's `extra()` closure into the instrument, in the
+        same wire position. `FRAMEDROP_RE` reads `total=` and the trailing `route=`, so a line
+        with them still grades — and a `stall_ceiling_ms` gate still sees it."""
+        ln = ("FRAMEDROP total=148.2 ingest=0.0 results=133.0 tick_drain=0.0 navcommit=1.1 "
+              "prepare=0.2 draw=6.6 capture=0.0 swap=7.2 up=1 px=93750 cards=0 off=0 "
+              "route=detail load=-1 snapt=0.00")
+        self.assertEqual(run.parse_framedrop([ln], "detail"), [148.2])
+        self.assertEqual(run.parse_framedrop([ln], "home"), [])
+
+
+class ColdOpenGate(unittest.TestCase):
+    """`coldopen_ceiling_ms` (restructure spec §8.4), graded from the app's unarmed `coldopen`
+    line. Its whole reason for existing is what `stall_ceiling_ms` cannot do, so that is what the
+    first two tests are about."""
+
+    LINE = "coldopen screen={s} ms={ms} prepared={p}"
+
+    def _lines(self, samples, screen="detail"):
+        return [self.LINE.format(s=screen, ms=ms, p="true" if ok else "false")
+                for ms, ok in samples]
+
+    def test_the_slowest_mount_decides_and_a_faster_one_is_still_a_sample(self):
+        scene = {"coldopen_ceiling_ms": 160}
+        ok, detail = run.grade_coldopen(scene, self._lines([(31, True), (140, True)]),
+                                        "detail", None)
+        self.assertTrue(ok, detail)
+        self.assertIn("worst=140ms over 2 mount(s)", detail)
+        ok, _ = run.grade_coldopen(scene, self._lines([(31, True), (161, True)]), "detail", None)
+        self.assertFalse(ok)
+
+    def test_a_run_with_no_coldopen_line_FAILS_where_a_framedrop_gate_would_pass(self):
+        """The censoring `stall_ceiling_ms` fixes: a cold open under the armed threshold leaves no
+        FRAMEDROP line, and no line is a PASS there. An absent `coldopen` line is a failure."""
+        heartbeats = ["loop=60 route=detail fps=60 worstframe=20.0ms worstprep=0.1ms"] * 6
+        ok, _ = run.grade_frame_ceilings({"stall_ceiling_ms": 160}, heartbeats, "detail", None, 0)
+        self.assertTrue(ok, "the FRAMEDROP gate passes a run it has no samples from")
+        ok, detail = run.grade_coldopen({"coldopen_ceiling_ms": 160}, heartbeats, "detail", None)
+        self.assertFalse(ok)
+        self.assertIn("no `coldopen screen=detail` line", detail)
+
+    def test_the_screen_word_is_the_overlay_when_the_scene_pins_one(self):
+        scene = {"coldopen_ceiling_ms": 100}
+        lines = self._lines([(30, True)], screen="settings") + self._lines([(400, True)])
+        ok, detail = run.grade_coldopen(scene, lines, "home", "settings")
+        self.assertTrue(ok, detail)
+        self.assertIn("worst=30ms", detail, "the detail mount is another scene's")
+
+    def test_an_unprepared_mount_is_reported_and_never_asserted(self):
+        scene = {"coldopen_ceiling_ms": 160}
+        ok, detail = run.grade_coldopen(scene, self._lines([(20, False)]), "detail", None)
+        self.assertTrue(ok, "a refused resource is the budget working, not a gate failure")
+        self.assertIn("refused resource", detail)
+
+    def test_a_scene_without_the_gate_is_untouched(self):
+        ok, detail = run.grade_coldopen({"loop_floor": 30}, [], "detail", None)
+        self.assertTrue(ok)
+        self.assertEqual(detail, "")
+
+    def test_the_gate_does_not_arm_the_frame_drop_detector(self):
+        """`coldopen` is unarmed by construction; a scene declaring only this gate must not make
+        the harness arm `plxnative-framedrop`, which would perturb the pacing it did not ask for."""
+        self.assertIsNone(run.frame_ceiling_threshold({"coldopen_ceiling_ms": 160}))
+
+    def test_cold_open_gate_is_measured_not_provisional(self):
+        """TV session 7 leg 6 is the session that RESOLVES the provisional gate this test used to
+        guard (formerly `test_cold_open_carries_the_provisional_gate_and_says_it_is_provisional`):
+        five unarmed runs, panel off, `coldopen_ceiling_ms` set from the samples rather than
+        copied from `stall_ceiling_ms`. The note must now say so, not still claim PROVISIONAL."""
+        scene = {s["name"]: s for s in _manifest()["fps_scenes"]}["cold-open"]
+        self.assertIsNotNone(scene.get("coldopen_ceiling_ms"))
+        note = scene.get("_coldopen_note", "")
+        self.assertIn("MEASURED", note)
+        self.assertNotIn("PROVISIONAL", note, "the gate was resolved, not carried forward")
+        self.assertIn("TV session 7", note, "the note must name the session that sets the value")
+        self.assertIn("leg 6", note, "the note must name the leg the samples came from")
+
+
+class FrameCeilingsManifest(unittest.TestCase):
+    def test_the_new_scenes_declare_a_ceiling_and_a_known_route_word(self):
+        scenes = {s["name"]: s for s in _manifest()["fps_scenes"]}
+        for name in ("modal-ramp", "legal-document", "page-panel", "decision-alert", "cold-open"):
+            s = scenes[name]
+            self.assertIsNotNone(run.frame_ceiling_threshold(s), name)
+        self.assertEqual(scenes["cold-open"].get("warmup_s"), 0,
+                         "a cold open grades its FIRST frames")
+
+
+class BenchGrading(unittest.TestCase):
+    """`parse_bench`/`grade_bench` — the stress-bench (`push-100`/`modal-100`) parser and its four
+    fail conditions (missed refreshes, drift, rss-growth, incomplete-run). Synthetic `bench:`
+    lines, so the arithmetic is pinned here rather than first exercised on the television — the
+    same reason `FrameCeilings` above is synthetic."""
+
+    def _lines(self, kind, worsts, rss=None, n=None, done=True, target="detail", missed=None):
+        n = n if n is not None else len(worsts)
+        rss = rss if rss is not None else [1000] * len(worsts)
+        missed = missed if missed is not None else [0] * len(worsts)
+        out = [
+            f"bench: kind={kind} cycle={i}/{n} target={target} worst_ms={w:.1f} frames=5 "
+            f"dur_ms=1400 rss_kb={r} tex=108/49125 first_ms=6.0 missed={k} "
+            f"open=first:6.0,worst:{w:.1f}@3,iv:{w:.1f},missed:{k} "
+            f"close=first:5.0,worst:16.9@2,iv:17.0,missed:0"
+            for i, (w, r, k) in enumerate(zip(worsts, rss, missed), start=1)
+        ]
+        if done:
+            out.append(f"bench: kind={kind} done cycles={n}")
+        return out
+
+    def test_parse_bench_reads_every_field_and_ignores_the_other_kind(self):
+        lines = self._lines("push", [5.0, 6.5]) + self._lines("modal", [9.0])
+        cycles, done = run.parse_bench(lines, "push")
+        self.assertTrue(done)
+        self.assertEqual([c["cycle"] for c in cycles], [1, 2])
+        self.assertEqual(cycles[0],
+                         {"cycle": 1, "n": 2, "target": "detail", "worst_ms": 5.0, "frames": 5,
+                          "dur_ms": 1400, "rss_kb": 1000, "first_ms": 6.0, "missed": 0,
+                          "open": "first:6.0,worst:5.0@3,iv:5.0,missed:0",
+                          "close": "first:5.0,worst:16.9@2,iv:17.0,missed:0"})
+        modal_cycles, modal_done = run.parse_bench(lines, "modal")
+        self.assertTrue(modal_done)
+        self.assertEqual(len(modal_cycles), 1)
+
+    def test_a_healthy_run_of_100_cycles_passes(self):
+        lines = self._lines("push", [5.0] * 100, rss=[1000] * 100)
+        ok, detail = run.grade_bench({"bench": "push"}, lines)
+        self.assertTrue(ok, detail)
+        self.assertIn("worst_ms (Top->Swap", detail)
+        self.assertIn("missed refreshes=0", detail)
+
+    def test_top_to_swap_over_budget_without_a_missed_refresh_passes(self):
+        """The vsync wait sits inside Top->Swap on this driver: 23 ms frames with no repeated
+        picture are a clean run, and the old 20 ms ceiling failed them."""
+        lines = self._lines("push", [23.0] * 12)
+        ok, detail = run.grade_bench({"bench": "push"}, lines)
+        self.assertTrue(ok, detail)
+
+    def test_one_missed_refresh_fails_and_names_the_cycle_and_its_halves(self):
+        missed = [0] * 11 + [1]
+        lines = self._lines("push", [18.0] * 11 + [29.0], missed=missed)
+        ok, detail = run.grade_bench({"bench": "push"}, lines)
+        self.assertFalse(ok)
+        self.assertIn("FAIL: missed refreshes=1 in 1 cycle(s) of 12 vs bench_missed_max 0", detail)
+        self.assertIn("cycle=12/12 target=detail missed=1 open=first:6.0,worst:29.0@3", detail)
+        ok, _ = run.grade_bench({"bench": "push", "bench_missed_max": 1}, lines)
+        self.assertTrue(ok)
+
+    def test_a_line_without_the_missed_field_fails_rather_than_grading_clean(self):
+        lines = [f"bench: kind=push cycle={i}/12 target=detail worst_ms=5.0 frames=5 dur_ms=1400 "
+                 f"rss_kb=1000" for i in range(1, 13)] + ["bench: kind=push done cycles=12"]
+        ok, detail = run.grade_bench({"bench": "push"}, lines)
+        self.assertFalse(ok)
+        self.assertIn("carry no `missed=` field", detail)
+
+    def test_last_ten_cycles_drifting_above_the_first_ten_fails(self):
+        worsts = [5.0] * 10 + [10.0] * 10
+        lines = self._lines("push", worsts)
+        ok, detail = run.grade_bench({"bench": "push"}, lines)
+        self.assertFalse(ok)
+        self.assertIn("drift(last10-first10)=+5.00ms", detail)
+        # a drift ceiling raised past the measured drift passes the same run
+        ok, _ = run.grade_bench({"bench": "push", "bench_drift_ms": 10.0}, lines)
+        self.assertTrue(ok)
+
+    def test_rss_growing_past_cycle_ten_fails(self):
+        rss = [1000] * 10 + [20000] * 2  # growth is measured from cycle 10, not cycle 1
+        lines = self._lines("push", [5.0] * 12, rss=rss)
+        ok, detail = run.grade_bench({"bench": "push"}, lines)
+        self.assertFalse(ok)
+        self.assertIn("rss growth(last-cycle10)=19000kB", detail)
+        ok, _ = run.grade_bench({"bench": "push", "bench_rss_growth_kb": 20000}, lines)
+        self.assertTrue(ok)
+
+    def test_a_run_missing_the_done_line_fails_even_if_every_cycle_looks_clean(self):
+        lines = self._lines("push", [5.0] * 12, done=False)
+        ok, detail = run.grade_bench({"bench": "push"}, lines)
+        self.assertFalse(ok)
+        self.assertIn("no `done` line", detail)
+
+    def test_no_bench_lines_at_all_fails_rather_than_passing_vacuously(self):
+        ok, detail = run.grade_bench({"bench": "push"}, ["loop=60 route=home fps=12"])
+        self.assertFalse(ok)
+        self.assertIn("no `bench: kind=push` cycle lines", detail)
+
+    def test_push_and_modal_kinds_are_graded_independently(self):
+        lines = self._lines("push", [5.0] * 12) + self._lines("modal", [25.0] * 12, missed=[1] * 12)
+        ok_push, _ = run.grade_bench({"bench": "push"}, lines)
+        ok_modal, _ = run.grade_bench({"bench": "modal"}, lines)
+        self.assertTrue(ok_push)
+        self.assertFalse(ok_modal)
+
+
+class BenchManifest(unittest.TestCase):
+    def test_push_100_and_modal_100_are_bench_scenes_with_an_item_and_enough_run_secs(self):
+        scenes = {s["name"]: s for s in _manifest()["fps_scenes"]}
+        push = scenes["push-100"]
+        modal = scenes["modal-100"]
+        self.assertEqual(push["bench"], "push")
+        self.assertEqual(modal["bench"], "modal")
+        self.assertEqual(push.get("item"), "movie_in_home_catalog")
+        # 100 cycles * 2 half-periods each; run_secs must clear that plus warmup with margin.
+        self.assertGreater(push["run_secs"], 100 * 2 * 1.4 + push.get("warmup_s", 5))
+        self.assertGreater(modal["run_secs"], 100 * 2 * 1.5 + modal.get("warmup_s", 5))
+        for name in ("push-100", "modal-100"):
+            self.assertEqual(scenes[name]["tier"], "ui")
+            self.assertIn("plxnative-framedrop", scenes[name]["triggers"],
+                         f"{name}: bench worst_ms reads 0.0 unarmed — see bench_frame_tick's doc")
+
+
+class DeepBenchGrading(unittest.TestCase):
+    """`parse_deep_bench`/`grade_deep_bench` — the DEEP-stack bench (`deep-100`) parser and its
+    five fail conditions (missed refreshes, push drift, pop drift, depth-rss growth, unwound root
+    rss) plus the incomplete-run case. Synthetic `bench: kind=deep` lines, same reasoning as
+    `BenchGrading` above: pinned here rather than first exercised on the television."""
+
+    def _lines(self, depth, worsts=None, rss=None, done=True, target="detail", missed=None,
+               root=None):
+        n = 2 * depth
+        worsts = worsts if worsts is not None else [5.0] * n
+        rss = rss if rss is not None else [1000] * n
+        missed = missed if missed is not None else [0] * n
+        out = []
+        for i in range(n):
+            cycle = i + 1
+            if i < depth:
+                dirn, d = "push", i + 1
+            else:
+                dirn, d = "pop", depth - 1 - (i - depth)
+            out.append(
+                f"bench: kind=deep cycle={cycle}/{n} target={target} dir={dirn} depth={d} "
+                f"worst_ms={worsts[i]:.1f} frames=5 dur_ms=1400 rss_kb={rss[i]} tex=108/49125 "
+                f"first_ms=6.0 missed={missed[i]} "
+                f"open=first:6.0,worst:{worsts[i]:.1f}@2,iv:17.0,missed:{missed[i]}"
+            )
+        if done:
+            out.append(f"bench: kind=deep done cycles={n} "
+                       f"rss_root_kb={root if root is not None else (rss[-1] if rss else 1000)}")
+        return out
+
+    def test_parse_deep_bench_reads_every_field(self):
+        lines = self._lines(3)
+        steps, rss_root_kb = run.parse_deep_bench(lines)
+        self.assertEqual(len(steps), 6)
+        self.assertEqual(rss_root_kb, 1000)
+        self.assertEqual(
+            steps[0],
+            {"cycle": 1, "n": 6, "target": "detail", "dir": "push", "depth": 1,
+             "worst_ms": 5.0, "frames": 5, "dur_ms": 1400, "rss_kb": 1000, "first_ms": 6.0,
+             "missed": 0, "open": "first:6.0,worst:5.0@2,iv:17.0,missed:0", "close": None},
+        )
+        self.assertEqual([s["dir"] for s in steps], ["push"] * 3 + ["pop"] * 3)
+        self.assertEqual([s["depth"] for s in steps], [1, 2, 3, 2, 1, 0])
+
+    def test_a_healthy_run_of_depth_100_passes(self):
+        lines = self._lines(100)
+        ok, detail = run.grade_deep_bench({"bench": "deep", "bench_root_rss_kb": 2000}, lines)
+        self.assertTrue(ok, detail)
+
+    def test_no_deep_bench_lines_at_all_fails_rather_than_passing_vacuously(self):
+        ok, detail = run.grade_deep_bench({"bench": "deep"}, ["loop=60 route=home fps=12"])
+        self.assertFalse(ok)
+        self.assertIn("no `bench: kind=deep` step lines", detail)
+
+    def test_a_run_missing_the_done_line_fails_even_if_every_step_looks_clean(self):
+        lines = self._lines(20, done=False)
+        ok, detail = run.grade_deep_bench({"bench": "deep"}, lines)
+        self.assertFalse(ok)
+        self.assertIn("no `done` line", detail)
+
+    def test_one_missed_refresh_fails_and_names_the_step(self):
+        missed = [0] * 20
+        missed[11] = 2  # step 12 (a pop) repeated two pictures
+        lines = self._lines(10, missed=missed)
+        ok, detail = run.grade_deep_bench({"bench": "deep"}, lines)
+        self.assertFalse(ok)
+        self.assertIn("FAIL: missed refreshes=2 in 1 step(s) of 20", detail)
+        self.assertIn("cycle=12/20 dir=pop target=detail missed=2", detail)
+
+    def test_push_drift_growing_with_depth_fails(self):
+        depth = 20
+        worsts = ([5.0] * 10 + [10.0] * 10) + [5.0] * depth  # pushes drift, pops flat
+        lines = self._lines(depth, worsts=worsts)
+        ok, detail = run.grade_deep_bench({"bench": "deep"}, lines)
+        self.assertFalse(ok)
+        self.assertIn("push drift(last10-first10)=+5.00ms", detail)
+        ok, _ = run.grade_deep_bench({"bench": "deep", "bench_drift_ms": 10.0}, lines)
+        self.assertTrue(ok)
+
+    def test_pop_drift_growing_toward_the_root_fails(self):
+        depth = 20
+        # pops in log order run deepest->shallowest; "last 10 pops" (shallowest) drifting above
+        # "first 10 pops" (deepest) is the failure this catches.
+        worsts = [5.0] * depth + ([5.0] * 10 + [10.0] * 10)
+        lines = self._lines(depth, worsts=worsts)
+        ok, detail = run.grade_deep_bench({"bench": "deep"}, lines)
+        self.assertFalse(ok)
+        self.assertIn("pop drift(last10-first10)=+5.00ms", detail)
+        ok, _ = run.grade_deep_bench({"bench": "deep", "bench_drift_ms": 10.0}, lines)
+        self.assertTrue(ok)
+
+    def test_memory_held_by_depth_beyond_the_unwound_root_fails(self):
+        depth = 20
+        # rss climbs steadily across the 20 pushes and is given back across the 20 pops: the
+        # deepest push is 38000 kB over the unwound root, past the default bench_depth_rss_kb=16384.
+        push_rss = [1000 + 2000 * i for i in range(depth)]
+        pop_rss = list(reversed(push_rss))
+        lines = self._lines(depth, rss=push_rss + pop_rss)
+        ok, detail = run.grade_deep_bench({"bench": "deep"}, lines)
+        self.assertFalse(ok)
+        self.assertIn("depth rss(maxdepth-root)=38000kB (maxdepth=39000, root=1000)", detail)
+        ok, _ = run.grade_deep_bench({"bench": "deep", "bench_depth_rss_kb": 1000000}, lines)
+        self.assertTrue(ok)
+
+    def test_the_unwound_root_is_graded_against_an_absolute_ceiling_not_step_ten(self):
+        """The device shape that failed the old step-10 delta: step 10 read while caches were still
+        filling (68104 kB), a root that unwound to the same ~86 MB every run. Absolute: passes."""
+        depth = 20
+        rss = [68104] * 10 + [86000] * 30
+        lines = self._lines(depth, rss=rss, root=86856)
+        ok, detail = run.grade_deep_bench({"bench": "deep", "bench_root_rss_kb": 98304}, lines)
+        self.assertTrue(ok, detail)
+        self.assertIn("root rss=86856kB vs bench_root_rss_kb 98304", detail)
+        # …and a root that did NOT give its pages back fails whatever step 10 read
+        lines = self._lines(depth, rss=rss, root=120000)
+        ok, detail = run.grade_deep_bench({"bench": "deep", "bench_root_rss_kb": 98304}, lines)
+        self.assertFalse(ok)
+        self.assertIn("root rss=120000kB vs bench_root_rss_kb 98304", detail)
+
+
+class DeepBenchManifest(unittest.TestCase):
+    def test_deep_100_is_a_bench_scene_with_an_item_and_enough_run_secs(self):
+        scenes = {s["name"]: s for s in _manifest()["fps_scenes"]}
+        deep = scenes["deep-100"]
+        self.assertEqual(deep["bench"], "deep")
+        self.assertEqual(deep.get("item"), "movie_in_home_catalog")
+        self.assertEqual(deep["tier"], "ui")
+        # depth=100 -> 200 steps * 2 half-periods each; run_secs must clear that plus warmup.
+        self.assertGreater(deep["run_secs"], 200 * 2 * 1.4 + deep.get("warmup_s", 5))
+        self.assertIn("plxnative-framedrop", deep["triggers"],
+                     "deep-100: bench worst_ms reads 0.0 unarmed — see bench_frame_tick's doc")
+        self.assertIn("bench_depth_rss_kb", deep)
+        self.assertIn("bench_root_rss_kb", deep, "the unwound end state is graded absolutely")
 
 
 class LoadManifest(unittest.TestCase):
@@ -257,6 +1489,49 @@ class LoadManifest(unittest.TestCase):
         m = self._load(_overlay(self._all_keys()))
         self.assertFalse([c["name"] for c in m["cases"] if c.get("skip")])
         self.assertFalse([s["name"] for s in m.get("fps_scenes", []) if s.get("skip")])
+
+    def test_collection_scenes_resolve_through_the_overlay(self):
+        """manifest.json is installation-independent, so the collection scenes may not carry a
+        mock_pms ratingKey: on a real server `plxnative-collection=50001` opens a collection that
+        does not exist and the page's fps_ceiling passes vacuously on its failure read-out."""
+        tracked = {s["name"]: s for s in _manifest()["fps_scenes"]}
+        for name in ("collection-page", "library-collections"):
+            with self.subTest(scene=name):
+                self.assertEqual(tracked[name]["item"], "collection")
+        self.assertEqual(tracked["collection-page"]["triggers"]["plxnative-collection"], "$rk")
+
+        items = self._all_keys()
+        items["collection"] = 424242
+        scenes = {s["name"]: s for s in self._load(_overlay(items))["fps_scenes"]}
+        page = scenes["collection-page"]
+        self.assertIn(("plxnative-collection", "424242"), run.fps_trigger_files(page))
+        # library-collections declares the key as a requirement only: nothing reads its `$rk`.
+        self.assertNotIn("424242", [v for _, v in run.fps_trigger_files(scenes["library-collections"])])
+
+        items["collection"] = "<ratingKey: a movie COLLECTION, not a movie>"
+        scenes = {s["name"]: s for s in self._load(_overlay(items))["fps_scenes"]}
+        for name in ("collection-page", "library-collections"):
+            with self.subTest(scene=name):
+                self.assertIn("template placeholder", scenes[name]["skip"])
+                self.assertNotIn("rk", scenes[name])
+
+    def test_no_fps_trigger_holds_a_literal_ratingkey(self):
+        """A scene that opens one item names it by `item` + `$rk`, never by a number that is true
+        on one server only. These are the triggers whose value carries a ratingKey."""
+        takes_rk = ("plxnative-detail", "plxnative-collection", "plxnative-play", "plxnative-navosc",
+                    "plxnative-pushbench", "plxnative-modalbench", "plxnative-deepbench")
+        for scene in _manifest()["fps_scenes"]:
+            for trigger, value in scene.get("triggers", {}).items():
+                if trigger in takes_rk and value is not True:
+                    with self.subTest(scene=scene["name"], trigger=trigger):
+                        self.assertIn("$rk", str(value))
+                        self.assertIn("item", scene)
+
+    def test_the_example_overlay_names_every_item_key(self):
+        """A key missing from the template is a scene nobody copying it can ever run."""
+        with open(run.MANIFEST_LOCAL_EXAMPLE) as f:
+            example = json.load(f)["items"]
+        self.assertFalse(set(self._all_keys()) - set(example))
 
     def test_placeholders_outside_items_are_still_fatal(self):
         """No run of any size can proceed without these, so they keep the loud death."""
@@ -380,6 +1655,9 @@ class PipelineTier(unittest.TestCase):
             ("plxnative-play", "1234"),
             ("plxnative-quality", "original"),
             ("plxnative-stats", None),
+            # issue #266 PR4 review: EVERY case forces the persisted audio-enhancement preference
+            # too, default "off" -- see test_audio_enhancement_boot_trigger_defaults_off_and_is_overridable.
+            ("plxnative-audioenh", "off"),
         ])
 
     def test_an_integration_case_can_explicitly_grade_auto(self):
@@ -625,6 +1903,21 @@ class DefaultTier(unittest.TestCase):
         for extra in ("--server", "--fps", "--fps-player"):
             self.assertNotEqual(self._list("--pipeline", extra).returncode, 0,
                                 f"--pipeline {extra} should refuse")
+
+    def test_fps_listing_survives_a_bench_scene_with_no_loop_floor(self):
+        """`--fps --list` walks every fps_scene and printed `loop_floor={s['loop_floor']}`
+        unconditionally, which assumed every scene gates on it. The push/modal/deep-100 bench
+        scenes gate on missed refreshes instead and carry no `loop_floor` at all, so the listing
+        crashed with KeyError('loop_floor') partway through printing — after the ordinary cases,
+        so a bare `--list` (the pipeline-tier listing) never saw it. The fix must print what a
+        bench scene actually gates on rather than assuming every scene shares one key."""
+        out = self._list("--fps")
+        self.assertEqual(out.returncode, 0,
+                         f"--fps --list crashed:\n{out.stdout}\n{out.stderr}")
+        self.assertIn("fps:push-100", out.stdout)
+        self.assertIn("bench_missed_max=0", out.stdout)
+        self.assertNotIn("Traceback", out.stderr)
+        self.assertNotIn("KeyError", out.stderr)
 
     def test_the_manifest_declares_a_frame_rate_axis(self):
         """Every fixture ran at 24p until 2026-08-22, so `engine::fps_rational`'s branches had one
@@ -1252,6 +2545,191 @@ class AutoNetworkProfile(unittest.TestCase):
                 run._probe_fixture = saved
 
 
+class FixtureKeepAlive(unittest.TestCase):
+    """Sequential media GETs against serve_fixtures.py must reuse one TCP connection.
+
+    The pipeline server used to force `Connection: close` on every 2xx, so keep-alive in
+    stream.rs was never exercised by the local player path. These tests bind loopback only.
+    """
+
+    def _serve(self, root):
+        srv = serve_fixtures.FixtureServer(root, 0, bind="127.0.0.1")
+        thread = threading.Thread(target=srv.serve_forever, daemon=True)
+        thread.start()
+        return srv
+
+    def test_sequential_gets_reuse_one_accept(self):
+        with tempfile.TemporaryDirectory() as root:
+            with open(os.path.join(root, "clip.bin"), "wb") as stream:
+                stream.write(b"ABCDEFGH")
+            srv = self._serve(root)
+            try:
+                host, port = srv.server_address
+                conn = http.client.HTTPConnection(host, port, timeout=5)
+                conn.request("GET", "/clip.bin")
+                first = conn.getresponse()
+                body1 = first.read()
+                header1 = (first.getheader("Connection") or "").lower()
+                self.assertEqual(first.status, 200)
+                self.assertEqual(body1, b"ABCDEFGH")
+                self.assertNotEqual(header1, "close")
+                conn.request("GET", "/clip.bin")
+                second = conn.getresponse()
+                body2 = second.read()
+                self.assertEqual(second.status, 200)
+                self.assertEqual(body2, b"ABCDEFGH")
+                self.assertEqual(srv.n_opens, 2)
+                self.assertEqual(srv.n_accepts, 1)
+                conn.close()
+            finally:
+                srv.shutdown()
+                srv.server_close()
+
+    def test_range_get_still_answers_206_on_a_kept_alive_connection(self):
+        with tempfile.TemporaryDirectory() as root:
+            with open(os.path.join(root, "clip.bin"), "wb") as stream:
+                stream.write(b"ABCDEFGH")
+            srv = self._serve(root)
+            try:
+                host, port = srv.server_address
+                conn = http.client.HTTPConnection(host, port, timeout=5)
+                conn.request("GET", "/clip.bin")
+                whole = conn.getresponse()
+                self.assertEqual(whole.status, 200)
+                self.assertEqual(whole.read(), b"ABCDEFGH")
+                conn.request("GET", "/clip.bin", headers={"Range": "bytes=4-"})
+                part = conn.getresponse()
+                self.assertEqual(part.status, 206)
+                self.assertEqual(part.read(), b"EFGH")
+                self.assertEqual(int(part.getheader("Content-Length", -1)), 4)
+                self.assertEqual(srv.n_opens, 2)
+                self.assertEqual(srv.n_ranged, 1)
+                self.assertEqual(srv.n_accepts, 1)
+                conn.close()
+            finally:
+                srv.shutdown()
+                srv.server_close()
+
+    def test_error_replies_still_close_the_connection(self):
+        with tempfile.TemporaryDirectory() as root:
+            with open(os.path.join(root, "clip.bin"), "wb") as stream:
+                stream.write(b"ABCDEFGH")
+            srv = self._serve(root)
+            try:
+                host, port = srv.server_address
+                conn = http.client.HTTPConnection(host, port, timeout=5)
+                conn.request("GET", "/missing.bin")
+                missing = conn.getresponse()
+                self.assertEqual(missing.status, 404)
+                missing.read()
+                header = (missing.getheader("Connection") or "").lower()
+                self.assertEqual(header, "close")
+                conn.request("GET", "/clip.bin")
+                ok = conn.getresponse()
+                self.assertEqual(ok.status, 200)
+                self.assertEqual(ok.read(), b"ABCDEFGH")
+                self.assertEqual(srv.n_accepts, 2)
+                conn.close()
+            finally:
+                srv.shutdown()
+                srv.server_close()
+
+    def test_client_reset_while_waiting_for_the_next_request_is_not_an_error(self):
+        """A seek/teardown RST during the keep-alive wait must not traceback.
+
+        BaseHTTPRequestHandler.handle loops on readline(); the TV's RST is
+        ConnectionResetError, not the empty-line close the stdlib handles.
+        """
+        import struct
+        with tempfile.TemporaryDirectory() as root:
+            with open(os.path.join(root, "clip.bin"), "wb") as stream:
+                stream.write(b"ABCDEFGH")
+            notes = []
+            srv = serve_fixtures.FixtureServer(
+                root, 0, sink=notes.append, bind="127.0.0.1")
+            thread = threading.Thread(target=srv.serve_forever, daemon=True)
+            thread.start()
+            try:
+                host, port = srv.server_address
+                conn = http.client.HTTPConnection(host, port, timeout=5)
+                conn.request("GET", "/clip.bin")
+                first = conn.getresponse()
+                self.assertEqual(first.status, 200)
+                self.assertEqual(first.read(), b"ABCDEFGH")
+                conn.sock.setsockopt(
+                    socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+                conn.close()
+                deadline = time.monotonic() + 1.0
+                while time.monotonic() < deadline and not any(
+                    "reset keep-alive" in n for n in notes
+                ):
+                    time.sleep(0.02)
+                self.assertTrue(
+                    any("reset keep-alive" in n for n in notes),
+                    f"handler did not swallow the RST; notes={notes!r}",
+                )
+                conn2 = http.client.HTTPConnection(host, port, timeout=5)
+                conn2.request("GET", "/clip.bin")
+                second = conn2.getresponse()
+                self.assertEqual(second.status, 200)
+                self.assertEqual(second.read(), b"ABCDEFGH")
+                conn2.close()
+                self.assertEqual(srv.n_accepts, 2)
+            finally:
+                srv.shutdown()
+                srv.server_close()
+
+    def test_finish_raising_on_a_reset_socket_does_not_traceback(self):
+        """`finish()` runs in socketserver's own `finally`, independent of `handle()`.
+
+        StreamRequestHandler.finish() only guards its own wfile.flush() against socket.error;
+        the wfile/rfile close() calls right after it are unguarded, so closing an already-reset
+        socket's wrapped file objects can still raise there. Force that exact raise and confirm
+        FixtureHandler.finish swallows it instead of letting socketserver.ThreadingMixIn's
+        process_request_thread print an uncaught traceback — the real-TV regression a normal
+        seek/teardown exposed once keep-alive made this path live on every request, not just
+        the first.
+        """
+        import socketserver
+        with tempfile.TemporaryDirectory() as root:
+            with open(os.path.join(root, "clip.bin"), "wb") as stream:
+                stream.write(b"ABCDEFGH")
+            notes = []
+            srv = serve_fixtures.FixtureServer(
+                root, 0, sink=notes.append, bind="127.0.0.1")
+            thread = threading.Thread(target=srv.serve_forever, daemon=True)
+            thread.start()
+            stderr_capture = io.StringIO()
+            try:
+                with mock.patch.object(
+                    socketserver.StreamRequestHandler, "finish",
+                    side_effect=ConnectionResetError("simulated"),
+                ), mock.patch("sys.stderr", stderr_capture):
+                    host, port = srv.server_address
+                    conn = http.client.HTTPConnection(host, port, timeout=5)
+                    conn.request("GET", "/clip.bin")
+                    r = conn.getresponse()
+                    self.assertEqual(r.status, 200)
+                    self.assertEqual(r.read(), b"ABCDEFGH")
+                    conn.close()
+                    deadline = time.monotonic() + 1.0
+                    while time.monotonic() < deadline and not any(
+                        "keep-alive (finish)" in n for n in notes
+                    ):
+                        time.sleep(0.02)
+            finally:
+                srv.shutdown()
+                srv.server_close()
+            self.assertTrue(
+                any("keep-alive (finish)" in n for n in notes),
+                f"finish() did not swallow the reset; notes={notes!r}",
+            )
+            self.assertNotIn(
+                "Traceback", stderr_capture.getvalue(),
+                "an exception from finish() must not reach socketserver's own handle_error",
+            )
+
+
 class NetcondRate(unittest.TestCase):
     """`tools/netcond.py`'s `rate:<kbps>` — the mode LG #43 CASE1's legs are produced with.
 
@@ -1687,6 +3165,169 @@ class AbrTraceMetrics(unittest.TestCase):
         self.assertTrue(run.op_audio_transcode(tr_old)[0], "the old spelling still grades")
         self.assertFalse(run.op_audio_transcode([h264, "reload_transcode: fresh Load at offset 5s"])[0],
                          "a transcode reload with no switch line is not an audio switch")
+
+    def test_audio_enhancement_op_writes_a_named_target_not_a_row(self):
+        """issue #266 PR4 review: `audio_enhancement` reuses `plxnative-menupick` at tab 0, but
+        writes a NAMED target (`AudioRowTarget`/`TrackMenuState::row_for_audio_target` resolve it
+        against the panel's own row map) rather than a row number derived from the item's track
+        count -- the bug this review caught was exactly a hand-derived row going stale against the
+        real server's track count. There is no track count to fetch or get wrong any more: the
+        same two triggers are correct for every item, whatever it carries."""
+        case = {
+            "rk": "1",
+            "operations": [{"op": "play"}, {"op": "audio_enhancement", "which": "normalize_loudness"}],
+        }
+        files = run.triggers_for_case(case)
+        self.assertIn(("plxnative-menupick", "0,loudness"), files)
+        case["operations"][1] = {"op": "audio_enhancement", "which": "boost_dialog"}
+        files = run.triggers_for_case(case)
+        self.assertIn(("plxnative-menupick", "0,boost"), files)
+
+    def test_audio_enhancement_boot_trigger_defaults_off_and_is_overridable(self):
+        """issue #266 PR4 review: EVERY case forces the persisted preference at boot (default
+        `off`), so a case's starting preference never depends on what an earlier case's pick left
+        behind; a case opts into a non-off start with `audio_enhancements_boot`."""
+        files = run.triggers_for_case({"rk": "1", "operations": [{"op": "play"}]})
+        self.assertIn(("plxnative-audioenh", "off"), files)
+        files = run.triggers_for_case({
+            "rk": "1", "audio_enhancements_boot": "loudness", "operations": [{"op": "play"}],
+        })
+        self.assertIn(("plxnative-audioenh", "loudness"), files)
+
+    def test_audio_enhancement_op_grades_applied_remux_and_ac3(self):
+        """A live Normalize Loudness pick that took effect: the server ran the DSP params
+        (`enhancement: applied ..`, printed only for `EnhancementOutcome::Applied`), the Load
+        declares the audio the decision NEGOTIATED (never a literal: PMS answers an AAC source's
+        DSP ask with a=aac, an AC-3 source's with ac3), the video codec is unchanged across the
+        switch (a copy, i.e. a remux and not a full re-encode), the resulting stream is
+        `start.mkv` (ProgressiveMkv), and no source failed to open after the toggle."""
+        h264 = "ff: v=#0 codec=h264 codec_id=27 1920x1080 trc=1 pri=1 spc=1 a=#1 dur_ns=1"
+        dp_load = 'load: v=H264 a="AAC" fps=25.000 dv=present:0 P0/0 el:0 atmos:0 max=1920x1080@25'
+        aac_load = 'load: v=H264 a="AAC" fps=0.000 dv=present:0 P0/0 el:0 atmos:0 max=1920x1080@60'
+        ac3_load = 'load: v=H264 a="AC3" fps=0.000 dv=present:0 P0/0 el:0 atmos:0 max=1920x1080@60'
+        remux = "stream: example.com path=/video/:/transcode/universal/start.mkv?a=1"
+        applied = "enhancement: applied boost=0 loudness=1"
+        # PR4's device shape: the direct play was torn down before it logged `ff: v=`, so the
+        # pre-toggle video evidence is its `load: v=` line; the source is AAC and so is the output.
+        good = [dp_load, "decision output: v=h264 a=aac", applied,
+                "ff: aborted during open_input r=-1094995529", aac_load, remux, h264]
+        ok, why = run.op_audio_enhancement(good)
+        self.assertTrue(ok, why)
+        # The same with an AC-3 source: whatever the decision says, the Load must say it too.
+        ok, why = run.op_audio_enhancement(
+            [h264, "decision output: v=h264 a=ac3", applied, ac3_load, remux, h264])
+        self.assertTrue(ok, why)
+        # E-AC3 is "AC3 PLUS" in LG's Load vocabulary.
+        eac3_load = ac3_load.replace('a="AC3"', 'a="AC3 PLUS"')
+        ok, why = run.op_audio_enhancement(
+            [h264, "decision output: v=h264 a=eac3", applied, eac3_load, remux, h264])
+        self.assertTrue(ok, why)
+        # No `enhancement: applied` line at all -- the pick never took effect.
+        no_commit = [h264, "menupick: row 2 already active — no commit"]
+        ok, why = run.op_audio_enhancement(no_commit)
+        self.assertFalse(ok, why)
+        self.assertIn("no `enhancement: applied` line", why)
+        # The row was never offered at all (`menupick: unknown target ".." — no commit`,
+        # dev/scenarios.rs) -- the miss preamble must quote this line too, not just the
+        # "row already active" shape.
+        unknown_target = [h264, 'menupick: unknown target "loudness" — no commit']
+        ok, why = run.op_audio_enhancement(unknown_target)
+        self.assertFalse(ok, why)
+        self.assertIn("no `enhancement: applied` line", why)
+        self.assertIn("unknown target", why)
+        refused = [h264, "enhancement: refused/ignored by server; current stream retained"]
+        ok, why = run.op_audio_enhancement(refused)
+        self.assertFalse(ok, why)
+        self.assertIn("refused/ignored", why)
+        # `enhancement: applied` present but for the WRONG field (boost, not loudness) fails --
+        # this case's row is specifically Normalize Loudness.
+        wrong_field = [h264, "decision output: v=h264 a=ac3", "enhancement: applied boost=1 loudness=0", h264]
+        ok, why = run.op_audio_enhancement(wrong_field)
+        self.assertFalse(ok, why)
+        self.assertIn("loudness=1", why)
+        # The Load declared a codec the decision did not negotiate (the old hard-coded ac3).
+        mislabeled = [dp_load, "decision output: v=h264 a=aac", applied, ac3_load, remux, h264]
+        ok, why = run.op_audio_enhancement(mislabeled)
+        self.assertFalse(ok, why)
+        self.assertIn("negotiated", why)
+        # Applied, but the video was RE-ENCODED across the switch -- not a remux.
+        hevc = "ff: v=#0 codec=hevc codec_id=173 1920x1080 trc=1 pri=1 spc=1 a=#1 dur_ns=1"
+        reencoded = [h264, "decision output: v=hevc a=ac3", applied,
+                     ac3_load.replace("v=H264", "v=H265"), remux, hevc]
+        ok, why = run.op_audio_enhancement(reencoded)
+        self.assertFalse(ok, why)
+        self.assertIn("RE-ENCODED", why)
+        # Applied and copied -- but the post-toggle stream is start.m3u8, a capped-rung re-encode
+        # rather than a remux.
+        no_remux = [h264, "decision output: v=h264 a=ac3", applied, ac3_load,
+                    "stream: example.com path=/video/:/transcode/universal/start.m3u8?a=1", h264]
+        ok, why = run.op_audio_enhancement(no_remux)
+        self.assertFalse(ok, why)
+        self.assertIn("not a remux", why)
+        # A source that really failed to open after the toggle.
+        failed = [dp_load, "decision output: v=h264 a=aac", applied,
+                  "ff: open_input failed r=-1094995529", aac_load, remux, h264]
+        ok, why = run.op_audio_enhancement(failed)
+        self.assertFalse(ok, why)
+        self.assertIn("open_input failed", why)
+
+    def test_audio_enhancement_release_op_grades_the_cleanup_leg(self):
+        """`audio_enhancement_normalize_reset`'s own assertion: a second pick of the same row,
+        from a fresh boot that inherited the persisted preference, must release the route back to
+        Original direct play and STAY there: the next stream is the item's `/library/parts/` Part,
+        no transcode stream follows (a failed trial rolls back to the enhanced remux), and no 503
+        answers it (PR4's first device run)."""
+        released = "enhancement: released to Original direct play; remux encoder held pending frames"
+        part = "stream: example.com path=/library/parts/1/2/file.mkv?a=1"
+        remux = "stream: example.com path=/video/:/transcode/universal/start.mkv?a=1"
+        ok, why = run.op_audio_enhancement_release(
+            [remux, released, part, "ff: open status=206 clen=1"])
+        self.assertTrue(ok, why)
+        # PR4's device run: the Part answered 503 and the rollback restored the enhanced remux.
+        ok, why = run.op_audio_enhancement_release(
+            [remux, released, part, "stream: GET /library/parts/1/2/file.mkv status=503", remux])
+        self.assertFalse(ok, why)
+        self.assertIn("rolled back", why)
+        ok, why = run.op_audio_enhancement_release(
+            [remux, released, part, "stream: GET /library/parts/1/2/file.mkv status=503"])
+        self.assertFalse(ok, why)
+        self.assertIn("503", why)
+        # The admission found the Part refused and the release became the plain remux.
+        ok, why = run.op_audio_enhancement_release(
+            ["enhancement: server refused the Original Part (HTTP 503); restoring Original as a remux",
+             "enhancement: released to Original remux; previous encoder held pending frames", remux])
+        self.assertFalse(ok, why)
+        self.assertIn("refused the Original Part", why)
+        ok, why = run.op_audio_enhancement_release([released])
+        self.assertFalse(ok, why)
+        self.assertIn("no `stream: .. path=` line after the release", why)
+        ok, why = run.op_audio_enhancement_release(["menupick: row 2 already active — no commit"])
+        self.assertFalse(ok, why)
+        self.assertIn("no `enhancement: released` line", why)
+        ok, why = run.op_audio_enhancement_release(["some unrelated line"])
+        self.assertFalse(ok, why)
+
+    def test_audio_enhancement_dispatch_picks_release_by_settle(self):
+        """`evaluate()`'s per-operation dispatch: `settle: "released"` grades the cleanup leg, and
+        its absence grades the ordinary apply leg."""
+        case = {
+            "rk": "1",
+            "operations": [{"op": "play"}, {"op": "audio_enhancement", "which": "normalize_loudness"}],
+            "expect": {},
+        }
+        h264 = "ff: v=#0 codec=h264 codec_id=27 1920x1080 trc=1 pri=1 spc=1 a=#1 dur_ns=1"
+        lines = [h264, "decision output: v=h264 a=ac3", "enhancement: applied boost=0 loudness=1",
+                 "stream: example.com path=/video/:/transcode/universal/start.mkv?a=1", h264]
+        _, results = run.evaluate(case, lines)
+        self.assertIn("audio_enhancement", dict((label, ok) for label, ok, _ in results))
+        release_case = dict(case)
+        release_case["operations"] = [
+            {"op": "play"},
+            {"op": "audio_enhancement", "which": "normalize_loudness", "settle": "released"},
+        ]
+        _, results = run.evaluate(release_case,
+                                  ["enhancement: released to Original direct play; remux encoder held pending frames"])
+        self.assertIn("audio_enhancement_release", dict((label, ok) for label, ok, _ in results))
 
     def test_seek_inplace_ignores_a_reload_that_preceded_the_seek(self):
         """`original_then_auto_and_seek`, 2026-09-02: handing playback to Auto now restarts the
@@ -3458,6 +5099,595 @@ class PresentedRate(unittest.TestCase):
         ok, why = run.a_presented_rate(lines2, {})
         self.assertTrue(ok, why)
         self.assertIn("median 25.0", why)
+
+class DepGates(unittest.TestCase):
+    """Restructure spec §15.2: `ci/check-deps.sh` is green, and every allowlist under ci/allow/
+    declares the count it actually has — so an allowlist grows only by editing both lines, and a
+    review sees the number move."""
+
+    ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
+    def test_check_deps_is_green(self):
+        r = subprocess.run([os.path.join(self.ROOT, "ci", "check-deps.sh")], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def _plant(self, name, content):
+        """Write `content` to a temp file under rust-modules/src that no ci/allow/*.txt names,
+        run ci/check-deps.sh against the real tree with it present, and guarantee removal even if
+        the assertion that follows fails. An orphan .rs file with no `mod` statement pointing at
+        it is invisible to cargo (nothing declares it part of the crate) but not to `find … -name
+        '*.rs'`, which is all these gates scan with — so this is the cheapest way to prove a gate
+        catches a shape without touching a real, permanent source file."""
+        target = os.path.join(self.ROOT, "rust-modules", "src", name)
+        self.assertFalse(os.path.exists(target), f"stale self-test artifact at {target} — remove it by hand")
+        try:
+            with open(target, "w", encoding="utf-8") as f:
+                f.write(content)
+            return subprocess.run([os.path.join(self.ROOT, "ci", "check-deps.sh")],
+                                   capture_output=True, text=True)
+        finally:
+            if os.path.exists(target):
+                os.remove(target)
+
+    def _mutate(self, relpath, needle, replacement):
+        """Temporarily replace ONE occurrence of `needle` with `replacement` in a REAL tracked
+        file, run ci/check-deps.sh, then unconditionally restore the original bytes — even if the
+        assertion that follows fails. Unlike `_plant`'s orphan-file trick, `mutators-visibility`
+        greps a DECLARATION LINE inside one of the seven specific legacy-store files by path, not
+        a `find … -name '*.rs'` sweep, so an orphan file elsewhere in the tree is invisible to it
+        by design; a scratch mutation of the real file's own content is what "plants a
+        pub(crate) fn set_cur in a temp copy" (the D3 brief's own words) has to mean here."""
+        target = os.path.join(self.ROOT, "rust-modules", "src", relpath)
+        with open(target, encoding="utf-8") as f:
+            original = f.read()
+        self.assertEqual(original.count(needle), 1, f"{needle!r} not found exactly once in {relpath}")
+        try:
+            with open(target, "w", encoding="utf-8") as f:
+                f.write(original.replace(needle, replacement, 1))
+            return subprocess.run([os.path.join(self.ROOT, "ci", "check-deps.sh")],
+                                   capture_output=True, text=True)
+        finally:
+            with open(target, "w", encoding="utf-8") as f:
+                f.write(original)
+
+    def _prepend(self, relpath, content):
+        """Temporarily prepend a valid module-level fixture to a scanned Rust file."""
+        target = os.path.join(self.ROOT, "rust-modules", "src", relpath)
+        with open(target, encoding="utf-8") as f:
+            original = f.read()
+        try:
+            with open(target, "w", encoding="utf-8") as f:
+                f.write(content + original)
+            return subprocess.run([os.path.join(self.ROOT, "ci", "check-deps.sh")],
+                                  capture_output=True, text=True)
+        finally:
+            with open(target, "w", encoding="utf-8") as f:
+                f.write(original)
+
+    def test_browse_owner_gate_rejects_a_republished_free_mutator(self):
+        """A valid module-level declaration is rejected even without a call site."""
+        r = self._prepend("browse/mod.rs", "\npub(crate) fn set_cur(i: usize) {}\n")
+        out = r.stdout + r.stderr
+        self.assertNotEqual(r.returncode, 0, out)
+        self.assertIn("browse-owner:", out)
+        self.assertIn("fn set_cur", out)
+
+    def test_browse_owner_gate_rejects_all_free_declaration_modifiers(self):
+        for declaration in (
+            "    pub(super) fn set_cur(i: usize) {}\n",
+            "async fn set_cur(i: usize) {}\n",
+            "const fn set_cur(i: usize) {}\n",
+            "unsafe extern \"C\" fn set_cur(i: usize) {}\n",
+        ):
+            with self.subTest(declaration=declaration):
+                r = self._prepend("browse/mod.rs", "\n" + declaration)
+                self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertIn("browse-owner:", r.stdout + r.stderr)
+
+    def test_browse_owner_gate_rejects_attributes_and_split_free_declarations(self):
+        for declaration in (
+            "#[inline] pub(super) const fn set_cur(i: usize) {}\n",
+            "#[inline]\npub(super)\nconst fn\nset_cur(i: usize) {}\n",
+        ):
+            with self.subTest(declaration=declaration):
+                r = self._prepend("browse/mod.rs", "\n" + declaration)
+                out = r.stdout + r.stderr
+                self.assertNotEqual(r.returncode, 0, out)
+                self.assertIn("browse-owner:", out)
+                self.assertIn("set_cur", out)
+
+    def test_browse_owner_gate_is_nonvacuous_for_indented_free_declarations(self):
+        r = self._prepend("browse/mod.rs", "\n    pub fn set_cur(i: usize) {}\n")
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("browse/mod.rs", r.stdout + r.stderr)
+
+    def test_browse_owner_gate_ignores_normal_string_braces_before_a_free_const_fn(self):
+        """Compiling counterexample for the old raw brace counter: the `{` belongs to LABEL,
+        so the indented const fn after it is still a module-level retired facade and must fail."""
+        r = self._prepend(
+            "browse/mod.rs",
+            '\nconst LABEL: &str = "{";\n    pub(crate) const fn set_cur(i: usize) {}\n',
+        )
+        out = r.stdout + r.stderr
+        self.assertNotEqual(r.returncode, 0, out)
+        self.assertIn("browse-owner:", out)
+        self.assertIn("const fn set_cur", out)
+
+    def test_browse_owner_gate_ignores_every_rust_noncode_brace_before_a_free_fn(self):
+        fixtures = (
+            '// {\n',
+            '/* outer { /* nested { */ */\n',
+            'const RAW_SCOPE: &str = r###"{"###;\n',
+            'const BYTE_SCOPE: &[u8] = b"{";\n',
+            'const RAW_BYTE_SCOPE: &[u8] = br##"{"##;\n',
+            "const CHAR_SCOPE: char = '{';\n",
+            "const BYTE_CHAR_SCOPE: u8 = b'{';\n",
+            'const ESCAPED_SCOPE: &str = "\\\\\\\"{";\n',
+            "const ESCAPED_CHAR_SCOPE: char = '\\\'';\nconst LABEL_SCOPE: &str = \"{\";\n",
+        )
+        for prefix in fixtures:
+            with self.subTest(prefix=prefix):
+                r = self._prepend(
+                    "browse/mod.rs",
+                    "\n" + prefix + "    pub(super) unsafe extern \"C\" fn set_cur(i: usize) {}\n",
+                )
+                self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertIn("browse-owner:", r.stdout + r.stderr)
+
+    def test_browse_owner_gate_ignores_noncode_closing_braces_inside_an_impl(self):
+        """A compiling impl fixture remains receiver-bound even when every Rust literal/comment
+        form contains `}`. The old counter escaped the impl and falsely reported `cur`."""
+        fixture = r'''
+struct BrowseScopeFixture;
+impl BrowseScopeFixture {
+    // }
+    /* outer } /* nested } */ } */
+    const NORMAL: &'static str = "}\\\"";
+    const RAW: &'static str = r###"}"###;
+    const BYTES: &'static [u8] = b"}";
+    const RAW_BYTES: &'static [u8] = br##"}"##;
+    const CHAR: char = '}';
+    const BYTE_CHAR: u8 = b'}';
+    const ESCAPED_CHAR: char = '\'';
+    pub(crate) fn cur(&self) -> usize { 0 }
+}
+'''
+        r = self._prepend("browse/mod.rs", fixture)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("ok — browse-owner", r.stdout)
+
+    def test_browse_owner_gate_rejects_retired_transport_declarations(self):
+        for relpath, declaration in (
+            ("browse/mod.rs", "    pub(crate) static LEGACY_ADAPTER: () = ();\n"),
+            ("stores/browse.rs", "    pub(super) static ACTIVE: () = ();\n"),
+            ("browse/mod.rs", "    static mut RETIRED_BROWSE: Option<BrowseState> = None;\n"),
+        ):
+            with self.subTest(declaration=declaration):
+                r = self._prepend(relpath, "\n" + declaration)
+                self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertIn("browse-owner:", r.stdout + r.stderr)
+
+    def test_browse_owner_gate_rejects_retired_thread_local_selectors(self):
+        for relpath, selector in (
+            ("browse/mod.rs", "LEGACY_ADAPTER"),
+            ("stores/browse.rs", "ACTIVE"),
+        ):
+            with self.subTest(selector=selector):
+                r = self._prepend(
+                    relpath,
+                    f"\nthread_local! {{\n    static {selector}: () = ();\n}}\n",
+                )
+                out = r.stdout + r.stderr
+                self.assertNotEqual(r.returncode, 0, out)
+                self.assertIn("browse-owner:", out)
+                self.assertIn(f"static {selector}", out)
+
+    def test_browse_owner_gate_accepts_unrelated_thread_local_state(self):
+        r = self._prepend(
+            "browse/mod.rs",
+            "\nthread_local! {\n    static UNRELATED_CACHE: () = ();\n}\n",
+        )
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("ok — browse-owner", r.stdout)
+
+    def test_browse_owner_gate_fails_closed_when_a_scanner_input_is_missing(self):
+        target = os.path.join(self.ROOT, "rust-modules", "src", "browse", "view.rs")
+        hidden = target + ".check-deps-selftest"
+        self.assertTrue(os.path.exists(target), f"missing scanner fixture {target}")
+        self.assertFalse(os.path.exists(hidden), f"stale self-test artifact at {hidden}")
+        try:
+            os.replace(target, hidden)
+            r = subprocess.run(
+                [os.path.join(self.ROOT, "ci", "check-deps.sh")],
+                capture_output=True,
+                text=True,
+            )
+        finally:
+            if os.path.exists(hidden):
+                os.replace(hidden, target)
+        out = r.stdout + r.stderr
+        self.assertNotEqual(r.returncode, 0, out)
+        self.assertIn("browse declaration scanner failed", out)
+        self.assertIn("browse-owner:", out)
+
+    def test_browse_owner_gate_accepts_receiver_bound_owned_methods(self):
+        """A BrowseState selector is safe when it requires an explicit receiver. GREEN:
+        temporarily widen the owned `cur(&self)` method to `pub`; the gate must still pass,
+        proving it rejects free/global facades rather than all methods with those names."""
+        r = self._mutate(
+            os.path.join("browse", "mod.rs"),
+            "    pub(crate) fn cur(&self) -> usize {",
+            "    pub fn cur(&self) -> usize {",
+        )
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("ok — browse-owner", r.stdout)
+
+    def test_viewstate_owner_gate_rejects_a_republished_free_state_facade(self):
+        """A free pump can only reach process state; the owned spelling requires a receiver."""
+        for declaration in (
+            "pub(crate) fn pump() {}\n",
+            "#[inline]\npub(super)\nconst fn\nis_busy() -> bool { false }\n",
+        ):
+            with self.subTest(declaration=declaration):
+                r = self._prepend("viewstate.rs", "\n" + declaration)
+                out = r.stdout + r.stderr
+                self.assertNotEqual(r.returncode, 0, out)
+                self.assertIn("viewstate-owner:", out)
+
+    def test_viewstate_owner_gate_rejects_storage_transport_and_selector_statics(self):
+        fixtures = (
+            ("viewstate.rs", "static mut QUEUE: Vec<()> = Vec::new();\n"),
+            ("viewstate.rs", "static MAIL: std::sync::Mutex<Option<()>> = std::sync::Mutex::new(None);\n"),
+            ("stores/viewstate.rs", "static RETIRED: Option<ViewStateStore> = None;\n"),
+            ("stores/viewstate.rs", "thread_local! {\n    static ACTIVE: () = ();\n}\n"),
+        )
+        for relpath, declaration in fixtures:
+            with self.subTest(declaration=declaration):
+                r = self._prepend(relpath, "\n" + declaration)
+                out = r.stdout + r.stderr
+                self.assertNotEqual(r.returncode, 0, out)
+                self.assertIn("viewstate-owner:", out)
+
+    def test_viewstate_owner_gate_accepts_receiver_bound_owned_methods(self):
+        fixture = """
+struct ViewStateOwnerGateFixture;
+impl ViewStateOwnerGateFixture {
+    pub(crate) fn pump(&mut self) {}
+    pub(crate) fn is_busy(&self) -> bool { false }
+}
+"""
+        r = self._prepend("viewstate.rs", fixture)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("ok — viewstate-owner", r.stdout)
+
+    def test_test_module_discovery_lexer_and_graph_regressions(self):
+        result = subprocess.run([sys.executable, os.path.join(self.ROOT, "ci", "test_rust_test_modules.py")],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def _module_path_fixture(self, production_reference):
+        source = os.path.join(self.ROOT, "rust-modules", "src")
+        with tempfile.TemporaryDirectory(prefix="_check_deps_cfg_", dir=source) as directory:
+            declaration = '#[cfg(test)]\n#[allow(dead_code)]\n#[path = "support.rs"]\npub(crate) mod checks;\n'
+            if production_reference:
+                declaration += '#[path = "support.rs"] mod production;\n'
+            with open(os.path.join(directory, "entry.rs"), "w", encoding="utf-8") as output:
+                output.write(declaration)
+            target = os.path.join(directory, "support.rs")
+            with open(target, "w", encoding="utf-8") as output:
+                output.write('pub fn helper() { std::thread::spawn(|| {}); let _ = 0.5f32.powf(2.4); }\n')
+            result = subprocess.run([os.path.join(self.ROOT, "ci", "check-deps.sh")],
+                                    capture_output=True, text=True)
+            return result, os.path.relpath(target, self.ROOT)
+
+    def test_cfg_test_path_modules_are_excluded_from_production_gates(self):
+        result, target = self._module_path_fixture(False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn(target + ":", result.stdout)
+
+    def test_production_path_reference_prevents_test_file_exemption(self):
+        result, target = self._module_path_fixture(True)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("threads:", result.stdout)
+        self.assertIn("libm:", result.stdout)
+        self.assertIn(target + ":", result.stdout)
+
+    def test_person_owner_gate_rejects_free_read_and_mutation_facades(self):
+        for declaration in (
+            "pub(crate) fn current() -> Option<()> { None }\n",
+            "#[inline]\npub(super)\nfn\npump() -> bool { false }\n",
+            "pub(crate) fn apply() {}\n",
+        ):
+            with self.subTest(declaration=declaration):
+                r = self._prepend("person.rs", "\n" + declaration)
+                out = r.stdout + r.stderr
+                self.assertNotEqual(r.returncode, 0, out)
+                self.assertIn("person-owner:", out)
+
+    def test_person_owner_gate_rejects_model_transport_and_selector_statics(self):
+        fixtures = (
+            ("person.rs", "static mut CURRENT: Option<Person> = None;\n"),
+            ("person.rs", "static FETCH: Option<Fetch> = None;\n"),
+            ("person.rs", "static RETRY_CD: [u32; 1] = [0];\n"),
+            ("stores/person.rs", "static RETIRED: Option<PersonStore> = None;\n"),
+            ("stores/person.rs", "thread_local! {\n    static ACTIVE: () = ();\n}\n"),
+        )
+        for relpath, declaration in fixtures:
+            with self.subTest(declaration=declaration):
+                r = self._prepend(relpath, "\n" + declaration)
+                out = r.stdout + r.stderr
+                self.assertNotEqual(r.returncode, 0, out)
+                self.assertIn("person-owner:", out)
+
+    def test_person_owner_gate_accepts_receiver_bound_owned_methods(self):
+        fixture = """
+struct PersonOwnerGateFixture;
+impl PersonOwnerGateFixture {
+    pub(crate) fn current(&self) -> Option<()> { None }
+    pub(crate) fn pump(&mut self) -> bool { false }
+    pub(crate) fn apply(&mut self) {}
+}
+"""
+        r = self._prepend("person.rs", fixture)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("ok — person-owner", r.stdout)
+
+    def test_threads_gate_catches_a_bare_thread_spawn_after_use_std_thread(self):
+        """The gate used to match only the fully-qualified `std::thread::spawn(` spelling, so a
+        file that does `use std::thread;` and then calls the bare `thread::spawn(` — exactly the
+        shape the phase-12 gates package's own brief named as invisible — passed silently. RED:
+        planting that shape in a file ci/allow/threads.txt does not name must fail `threads`."""
+        r = self._plant(
+            "_check_deps_selftest_threads.rs",
+            "use std::thread;\n\npub fn spawn_worker() {\n    thread::spawn(|| {});\n}\n",
+        )
+        out = r.stdout + r.stderr
+        self.assertNotEqual(r.returncode, 0, out)
+        self.assertIn("threads:", out)
+        self.assertIn("_check_deps_selftest_threads.rs", out)
+
+    def test_tmppath_gate_catches_a_path_built_on_one_line_and_opened_on_the_next(self):
+        """The gate used to require the literal and a filesystem-open verb on the SAME line, so a
+        value built on one line and opened on the next passed silently. RED: planting that split
+        in a file dev.rs does not own must fail `tmppath`."""
+        r = self._plant(
+            "_check_deps_selftest_tmppath_open.rs",
+            'pub fn open_it() {\n    let p = "/tmp/plxnative-selftest";\n'
+            "    let _ = std::fs::File::open(p);\n}\n",
+        )
+        out = r.stdout + r.stderr
+        self.assertNotEqual(r.returncode, 0, out)
+        self.assertIn("tmppath:", out)
+        self.assertIn("_check_deps_selftest_tmppath_open.rs", out)
+
+    def test_tmppath_gate_exempts_a_log_message_mention(self):
+        """D4's own exemption: a `/tmp/plxnative-` literal that is only message text passed to
+        `log`/`crate::log`/`log!` must not fail the gate. GREEN: planting one, including a nested
+        `format!` the way most real call sites spell it, must leave `tmppath` (and the whole
+        script) green."""
+        r = self._plant(
+            "_check_deps_selftest_tmppath_log.rs",
+            'pub fn mention_it(n: u32) {\n    crate::log(&format!(\n'
+            '        "selftest: see /tmp/plxnative-selftest ({n})"\n    ));\n}\n',
+        )
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertIn("ok — tmppath", out)
+
+    def test_textmeasure_gate_catches_a_bare_call_outside_the_seam(self):
+        """Phase 12, D4: `textmeasure` went from an allowlist to zero-tolerance. RED: a raw
+        `crate::text::text_width(` call in a file that is neither one of the three seam files
+        (`text.rs`, `ui/text_view.rs`, `ui/text_buffer.rs`) nor inside an `impl … Measure for …`
+        block must fail — a screen reaching for the raw function instead of threading a `Measure`
+        capability down is exactly the shape D1 spent this phase eliminating."""
+        r = self._plant(
+            "_check_deps_selftest_textmeasure_bare.rs",
+            'pub fn label_width(s: &std::ffi::CStr) -> f32 {\n'
+            "    crate::text::text_width(s.as_ptr(), 24, 0)\n}\n",
+        )
+        out = r.stdout + r.stderr
+        self.assertNotEqual(r.returncode, 0, out)
+        self.assertIn("textmeasure:", out)
+        self.assertIn("_check_deps_selftest_textmeasure_bare.rs", out)
+
+    def test_textmeasure_gate_exempts_the_body_of_a_measure_impl(self):
+        """The exemption is STRUCTURAL, not a path allowlist: any `impl … Measure for …` block,
+        anywhere in the tree, may call the raw functions it wraps — `widgets.rs`'s `LegacyMeasure`
+        and `login.rs`'s `RawTextMeasure` are today's two, but a third added later must not need
+        its file added to a list. GREEN: the identical call from the RED case above, moved inside
+        such a block in a brand-new file, must leave `textmeasure` green."""
+        r = self._plant(
+            "_check_deps_selftest_textmeasure_impl.rs",
+            "struct SelftestMeasure;\n\n"
+            "impl crate::ui::machine::Measure for SelftestMeasure {\n"
+            "    fn width(&self, s: &std::ffi::CStr, sz: i32, bold: bool) -> f32 {\n"
+            "        crate::text::text_width(s.as_ptr(), sz, bold as i32)\n"
+            "    }\n"
+            "}\n",
+        )
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertIn("ok — textmeasure", out)
+
+    def test_dt_gate_catches_a_raw_accumulator(self):
+        """Phase 12, D4: `dt` went from a 12-file allowlist to zero-tolerance everywhere but
+        `ui/motion.rs`. RED: a `self.t += dt;`-shaped accumulator in a new file must fail — this
+        is the exact pattern (a clock-driven animator summing a raw per-frame delta instead of
+        reading `Tick.ms` through `motion::Ramp`/`motion::Phase`) the frozen-animator regression
+        class comes from."""
+        r = self._plant(
+            "_check_deps_selftest_dt_accum.rs",
+            "pub struct Ramp { t: f32 }\n\nimpl Ramp {\n"
+            "    pub fn tick(&mut self, dt: f32) {\n        self.t += dt;\n    }\n}\n",
+        )
+        out = r.stdout + r.stderr
+        self.assertNotEqual(r.returncode, 0, out)
+        self.assertIn("dt:", out)
+        self.assertIn("_check_deps_selftest_dt_accum.rs", out)
+
+    def test_dt_gate_catches_idle_dt_by_name(self):
+        """`idle::dt()` is deleted from `ui/idle.rs` — the accessor callers used to sum themselves.
+        RED: a call spelled `idle::dt()` anywhere must fail even with no `+=`/`-=` beside it, since
+        the function no longer exists to call."""
+        r = self._plant(
+            "_check_deps_selftest_dt_fn.rs",
+            "pub fn read_it() -> f32 {\n    crate::ui::idle::dt()\n}\n",
+        )
+        out = r.stdout + r.stderr
+        self.assertNotEqual(r.returncode, 0, out)
+        self.assertIn("dt:", out)
+        self.assertIn("_check_deps_selftest_dt_fn.rs", out)
+
+    def test_check_statics_is_green(self):
+        """Spec §0 done-criterion 1: `ci/check-statics.sh` — every `static mut` under ui/ and screens/
+        is a named render cache (ci/allow/statics.txt) or sits in a legacy module still awaiting its
+        phase (ci/allow/statics-migration.txt), and no allowlist entry is stale."""
+        r = subprocess.run([os.path.join(self.ROOT, "ci", "check-statics.sh")], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_every_allowlist_declares_its_own_count(self):
+        allow = os.path.join(self.ROOT, "ci", "allow")
+        seen = 0
+        for fn in sorted(os.listdir(allow)):
+            with open(os.path.join(allow, fn), encoding="utf-8") as f:
+                lines = f.read().splitlines()
+            declared = int(lines[0].split(":")[1])
+            entries = [l for l in lines if l.strip() and not l.startswith("#")]
+            self.assertEqual(declared, len(entries), fn)
+            for e in entries:
+                self.assertTrue(os.path.exists(os.path.join(self.ROOT, e.split("\t")[0])), e)
+            seen += 1
+        self.assertGreaterEqual(seen, 3)
+
+    # Phase 12 (P8-H): a per-file PIN, on top of the self-consistency check above. That check
+    # only proves a file's own `# count: N` line matches its own entry count — it cannot see an
+    # allowlist and its count grow TOGETHER, correctly, in the same edit, past the number this
+    # phase actually measured. This table is that second line of defence: growing any file below
+    # means also raising its number HERE, in the same diff, so a reviewer sees the move rather
+    # than an allowlist quietly absorbing a new violation. Shrinking is always allowed (update
+    # the number down). The weave that merged P8-H also retired `ci/allow/statics-migration.txt`
+    # to 0 — its one entry (ui/widgets.rs) was the 11 top-bar/glass-band statics named individually
+    # in `ci/allow/statics.txt` instead, which is why that file's own pin moved 6 -> 17 in the same
+    # diff. `ci/allow/sibling-migration.txt` moved to its phase target of 0 in the wave-0
+    # integration pass: `screens/onboard.rs`'s breadcrumb constant was duplicated locally instead
+    # of reading `screens::profiles::TITLE` (the `CRUMB_SETTINGS` pattern already beside it), and
+    # `screens/detail/tests.rs`'s two raw-key-driven `alt_sources` tests were deleted as stale —
+    # the Engine conversion (P2) retired the mechanism they drove, and
+    # `screens/alt_sources_tests.rs`'s own `focus_and_hit` module already carries the replacement
+    # coverage for the same observable through `Activate`/`FocusMoved`.
+    #
+    # `ci/allow/textmeasure.txt` and `ci/allow/dt.txt` are GONE, not zeroed (phase 12, D4): every
+    # `crate::text::(text_width|elide|cap_h)` call site now either threads a real `Measure`
+    # capability down from its caller or sits inside the BODY of an `impl … Measure for …` block
+    # (`check-deps.sh`'s `textmeasure` gate detects that structurally, not by allowlisted path),
+    # and `idle::dt()` is deleted from `ui/idle.rs` outright — every clock-driven animator that
+    # used to accumulate a raw per-frame `dt` now advances through `motion::Ramp`/`motion::Phase`
+    # off a real `Tick`, or (`ui/xfade.rs`, `ui/containers/transition.rs`, whose ramps are HASHED
+    # replay state and already reported motion correctly through another mechanism) is spelled to
+    # avoid the gate's literal `(+=|-=) dt` pattern with no change to the arithmetic at all. Both
+    # rules are absent from the table below on purpose, the same way a deleted allowlist's own
+    # entry disappears rather than pinning at 0.
+    PINNED_ALLOWLIST_COUNTS = {
+        "libm.txt": 6,  # widgets.rs's existing test helper moved to widgets_test_support.rs
+        "mutators.txt": 0,
+        "nav.txt": 0,
+        "sibling-migration.txt": 0,
+        "statics-migration.txt": 0,
+        "statics.txt": 17,
+        "store-seams.txt": 0,
+        "threads.txt": 0,
+        "ticks.txt": 2,
+        "wall.txt": 3,
+    }
+
+    def test_allowlist_counts_match_the_pinned_table(self):
+        allow = os.path.join(self.ROOT, "ci", "allow")
+        on_disk = sorted(os.listdir(allow))
+        self.assertEqual(
+            set(on_disk), set(self.PINNED_ALLOWLIST_COUNTS),
+            "a new ci/allow/*.txt file (or a deleted one) must add (or remove) its own line in "
+            "PINNED_ALLOWLIST_COUNTS deliberately, not appear here as a surprise",
+        )
+        for fn, pinned in self.PINNED_ALLOWLIST_COUNTS.items():
+            with open(os.path.join(allow, fn), encoding="utf-8") as f:
+                declared = int(f.readline().split(":")[1])
+            self.assertLessEqual(
+                declared, pinned,
+                f"{fn} grew from the pinned {pinned} to {declared} — if this growth is "
+                "deliberate (a real, reasoned new entry, not a workaround), raise the number in "
+                "PINNED_ALLOWLIST_COUNTS in the same change so a reviewer sees it move",
+            )
+
+
+class PosterGateCoverage(unittest.TestCase):
+    def test_device_manifest_has_settle_eviction_and_dive_workloads(self):
+        scenes = {s.get('poster_gate', {}).get('kind'): s for s in _manifest()['fps_scenes'] if s.get('poster_gate')}
+        self.assertEqual(set(scenes), {'settle', 'eviction', 'dive'})
+        for scene in scenes.values():
+            self.assertGreaterEqual(scene['poster_gate']['moving_fps_floor'], 55)
+            self.assertIn('plxnative-postergate', scene['triggers'])
+
+    def test_poster_grade_requires_real_work_and_complete_settle(self):
+        import poster_gate
+        def evidence(kind):
+            records = []
+            for phase in poster_gate.PHASES[kind]:
+                values = {k: 0 for k in poster_gate.FIELDS}
+                values.update(ms=1000, frames=60, draws=720, ready=720, moving=700,
+                              moving_frames=60, moving_ms=983, requested=12,
+                              refused_new=20, refused_evicted=10, rearmed=12,
+                              uploads=12, lost=12, last_draws=12, last_ready=12, complete=1)
+                if kind == 'dive':
+                    values.update(shelf_start_px=1500, shelf_end_px=1500,
+                                  snap_end_milli=0 if phase == 'hero' else 1000,
+                                  snap_begin_milli=0 if phase in ('warm','dive') else 1000)
+                records.append('poster-gate: kind='+kind+' phase='+phase+' '+' '.join(f'{k}={v}' for k,v in values.items()))
+            records.append('poster-gate: kind='+kind+' phase=done')
+            return records
+        for kind in poster_gate.PHASES:
+            scene = {'poster_gate': {'kind': kind, 'moving_fps_floor': 55}}
+            lines = evidence(kind)
+            self.assertTrue(run.grade_poster_gate(scene, lines)[0])
+            for bad, replacement in [('requested_moving=0','requested_moving=1'), ('uploads=12','uploads=0'),
+                                     ('last_ready=12','last_ready=0'), ('moving_frames=60','moving_frames=0'),
+                                     ('refused_new=20 refused_evicted=10','refused_new=0 refused_evicted=0')]:
+                broken = [line.replace(bad,replacement) for line in lines]
+                self.assertFalse(run.grade_poster_gate(scene, broken)[0], (kind,bad))
+            self.assertFalse(run.grade_poster_gate(scene, lines[:-1])[0])
+            self.assertFalse(run.grade_poster_gate(scene, ['loop=60 route=library fps=60'])[0])
+        dive = {'poster_gate': {'kind': 'dive', 'moving_fps_floor': 55}}
+        for bad,replacement in [('shelf_end_px=1500','shelf_end_px=0'), ('shelf_span_px=0','shelf_span_px=20'),
+                                ('shelf_v_milli=0','shelf_v_milli=2000'), ('snap_end_milli=1000','snap_end_milli=700')]:
+            self.assertFalse(run.grade_poster_gate(dive,[line.replace(bad,replacement) for line in evidence('dive')])[0])
+        scene = {'poster_gate': {'kind': 'eviction','moving_fps_floor':55}}
+        for bad in ('lost=12','rearmed=12','refused_evicted=10'):
+            self.assertFalse(run.grade_poster_gate(scene,[line.replace(bad,bad.split('=')[0]+'=0') for line in evidence('eviction')])[0])
+
+    def test_poster_grade_reads_the_sized_plan_and_names_an_unfit_catalog(self):
+        # The scene sizes its targets to the catalog it booted into and logs that plan; the plan
+        # line is context, not a phase. A catalog too small to prove anything is refused by the
+        # app by name, and the grade must say THAT rather than blame the renderer.
+        import poster_gate
+        values = {k: 0 for k in poster_gate.FIELDS}
+        values.update(ms=1000, frames=60, draws=720, ready=720, moving=700, moving_frames=60,
+                      moving_ms=983, requested=12, refused_new=20, refused_evicted=10, rearmed=12,
+                      uploads=12, lost=12, last_draws=12, last_ready=12, complete=1)
+        fields = ' '.join(f'{k}={v}' for k, v in values.items())
+        lines = ['poster-gate: kind=eviction phase=armed budget_mib=12',
+                 'poster-gate: kind=eviction phase=planned content=Grid { rows: 7, per_screen: 3 } '
+                 'stages=warm@row0,seed1@row3,seed2@row6,reverse@row6,settle@row0']
+        lines += [f'poster-gate: kind=eviction phase={p} {fields}' for p in poster_gate.PHASES['eviction']]
+        lines.append('poster-gate: kind=eviction phase=done')
+        scene = {'poster_gate': {'kind': 'eviction', 'moving_fps_floor': 55}}
+        self.assertTrue(run.grade_poster_gate(scene, lines)[0])
+        unfit = ['poster-gate: kind=eviction phase=armed budget_mib=12',
+                 'poster-gate: kind=eviction phase=unfit what=library-rows have=5 need=6']
+        ok, detail = run.grade_poster_gate(scene, unfit)
+        self.assertFalse(ok)
+        self.assertIn('UNFIT CATALOG', detail)
+        self.assertIn('library-rows >= 6', detail)
+        self.assertIn('has 5', detail)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

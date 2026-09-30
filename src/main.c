@@ -1,5 +1,5 @@
 /* PlxNative — an unofficial native Plex client for LG webOS.
- * Copyright © 2026 Gleb Linnik. Licensed under the MIT Licence; see LICENSE at the repository
+ * Copyright © 2026 Gleb Linnik. Licensed under GPL-3.0-or-later; see LICENSE at the repository
  * root, and THIRD-PARTY-NOTICES.md for the components this links or redistributes.
  * Not affiliated with, endorsed by, or sponsored by Plex GmbH or LG Electronics.
  *
@@ -26,7 +26,7 @@ FILE *elogf = NULL;   /* shared event/diagnostic log (extern in app.h); used by 
  * ONLY writer is the signal handler, and stdio is not usable there. See `src/crashtrace.c`. */
 
 extern int plex_run(const char *pms_host, int pms_port);  /* Rust app core (no creds — session or /tmp/plxnative-token) */
-extern void plx_crash_write_image_marker(int fd); /* identify this binary in the append-only log */
+extern void plx_crash_write_image_marker(int fd); /* identify this binary in the append-only log (crashtrace.c) */
 
 /* Where this INSTALL's runtime files live — `/tmp/plxnative-events.log` for the app users get,
  * `/tmp/com.beb.plxnative.debug/plxnative-events.log` for a developer build installed beside it.
@@ -105,6 +105,8 @@ static int open_fd_0600(const char *path, int flags) {
 }
 
 int main(int argc, char **argv) {
+    // This fork ships no crash daemon: there is no envelope-re-entry mode, and a stray argument is
+    // an ordinary launch that ignores it (as `void argc` below always did for every other count).
     (void)argc; (void)argv;
     elogf = open_event_log();
     /* The crash handler's own descriptors, both opened BEFORE `install_crash_tracer` arms the

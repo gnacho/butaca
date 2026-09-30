@@ -90,6 +90,9 @@ pub(crate) struct JfClient {
 struct TokenState {
     token: String,
     user_id: String,
+    /// The display name the sign-in answered (`AuthOk.user_name`) — the Home chip reads it
+    /// (`Session::account`'s jellyfin arm), so a signed-in user never sees "Sign in".
+    user_name: String,
 }
 
 impl JfClient {
@@ -107,9 +110,10 @@ impl JfClient {
     }
 
     /// The `MediaBrowser` identity, as the standard `Authorization` header the login wants, and
-    /// also the value Jellyfin shows in its own device list. Reuses the ONE product/version/
-    /// device identity the Plex backend reports (`plex::identity`), so an install never
-    /// describes itself two ways to two servers.
+    /// also the value Jellyfin shows in its own device list. The Client is the DISPLAY name (the
+    /// fork's own build says Butaca there — issue #35), while Device/DeviceId/Version keep the
+    /// one wire identity the Plex backend reports (`plex::identity`), so an install never
+    /// describes its device two ways to two servers.
     ///
     /// Jellyfin 12 removed the legacy `X-Emby-Authorization` line this client used to send:
     /// the login POST answers a blanket 400 to it, identity or no identity (verified against
@@ -118,7 +122,7 @@ impl JfClient {
     fn identity_header(&self) -> String {
         format!(
             "Authorization: MediaBrowser Client=\"{}\", Device=\"{}\", DeviceId=\"{}\", Version=\"{}\"",
-            crate::plex::identity::PRODUCT,
+            crate::plex::identity::display_name(),
             crate::plex::identity::DEVICE,
             self.device_id,
             crate::plex::identity::VERSION,
@@ -178,8 +182,15 @@ impl JfClient {
         *self.token.write().unwrap() = Some(TokenState {
             token: ok.token.clone(),
             user_id: ok.user_id.clone(),
+            user_name: ok.user_name.clone(),
         });
         Ok(ok)
+    }
+
+    /// The signed-in user's display name, once the login landed (None before it). The account
+    /// chip reads it: a Jellyfin install has no Plex session to name itself from.
+    pub(crate) fn user_name(&self) -> Option<String> {
+        self.token.read().unwrap().as_ref().map(|t| t.user_name.clone())
     }
 
     /// The authed headers for a control request: token + identity in the ONE `Authorization`
@@ -218,7 +229,7 @@ impl JfClient {
     pub(crate) fn get_json<T: DeserializeOwned>(&self, path: &str) -> Option<T> {
         let headers = self.authed_headers()?;
         let refs: Vec<&str> = headers.iter().map(String::as_str).collect();
-        let reply = http::request(&self.origin, path, http::Method::Get, &refs)?;
+        let reply = http::request(&self.origin, path, http::Method::Get, &refs, None)?;
         if !reply.ok() {
             crate::log(&format!(
                 "jellyfin: GET {} answered {}",
@@ -279,7 +290,7 @@ impl JfClient {
         );
         let headers = self.authed_headers()?;
         let refs: Vec<&str> = headers.iter().map(String::as_str).collect();
-        let reply = http::request(&self.origin, &path, http::Method::Get, &refs)?;
+        let reply = http::request(&self.origin, &path, http::Method::Get, &refs, None)?;
         if !reply.ok() {
             crate::log(&format!(
                 "jellyfin: GET {} answered {}",
@@ -365,14 +376,30 @@ impl JfClient {
         &self,
         view_id: &str,
         include_types: &str,
+        filter: &crate::browse::LettersFilter,
     ) -> Option<Vec<(String, i64)>> {
         let user_id = self.user_id()?;
-        let total = self.count_query(&user_id, view_id, include_types, "")?;
+        // The counts MUST describe exactly the listing the rail rides on — with a filter active
+        // (issue #37) the probe carries it, which is what makes the rail stay honest under one:
+        // `NameStartsWith` accepts `IsPlayed` and `GenreIds` alongside `ParentId`.
+        let mut scope = String::new();
+        if filter.unwatched {
+            scope.push_str("&IsPlayed=false");
+        }
+        if let Some(genre) = &filter.genre {
+            scope.push_str(&format!("&GenreIds={genre}"));
+        }
+        let total = self.count_query(&user_id, view_id, include_types, &scope)?;
         let mut counts = Vec::new();
         for b in b'A'..=b'Z' {
             let letter = (b as char).to_string();
             let n = self
-                .count_query(&user_id, view_id, include_types, &format!("&NameStartsWith={letter}"))
+                .count_query(
+                    &user_id,
+                    view_id,
+                    include_types,
+                    &format!("{scope}&NameStartsWith={letter}"),
+                )
                 .unwrap_or(0);
             if n > 0 {
                 counts.push((letter, n));
@@ -445,7 +472,7 @@ impl JfClient {
     /// `plex::Client::get_bytes`). The built image path carries its `api_key`, so no header is
     /// needed and none is sent: the path IS the credential, same as the Plex shape.
     pub(crate) fn get_bytes(&self, built_path: &str) -> Option<Vec<u8>> {
-        let reply = http::request(&self.origin, built_path, http::Method::Get, &[])?;
+        let reply = http::request(&self.origin, built_path, http::Method::Get, &[], None)?;
         reply.ok().then_some(reply.body)
     }
 
@@ -490,7 +517,7 @@ impl JfClient {
     pub(crate) fn seasons(&self, series_id: &str) -> Option<ItemsResult> {
         let user_id = self.user_id()?;
         self.get_json(&format!(
-            "/Shows/{series_id}/Seasons?UserId={user_id}&Fields=Overview,OfficialRating\
+            "/Shows/{series_id}/Seasons?UserId={user_id}&Fields=Overview,OfficialRating,ChildCount\
              &EnableImageTypes=Primary,Backdrop"
         ))
     }
@@ -506,12 +533,24 @@ impl JfClient {
     }
 
     /// The episode the server says is next for this show (`GET /Shows/NextUp`) — the detail
-    /// page's OnDeck. An empty result is a show never started or finished, NOT a failure: the
-    /// caller distinguishes by `Items` emptiness, and only a transport/HTTP failure is `None`.
+    /// page's OnDeck and the player route's Up Next. An empty result is a show never started or
+    /// finished, NOT a failure: the caller distinguishes by `Items` emptiness, and only a
+    /// transport/HTTP failure is `None`.
     pub(crate) fn next_up(&self, series_id: &str) -> Option<ItemsResult> {
+        self.next_up_path(&format!("&SeriesId={series_id}&Limit=1"))
+    }
+
+    /// The next unseen episode of EVERY started series (`GET /Shows/NextUp` with no SeriesId) —
+    /// one row per series, which is exactly the Home shelf Jellyfin's own clients surface as
+    /// "Next Up" (issue #44). Same emptiness-is-not-failure contract as [`next_up`].
+    pub(crate) fn next_up_all(&self, limit: i64) -> Option<ItemsResult> {
+        self.next_up_path(&format!("&Limit={limit}"))
+    }
+
+    fn next_up_path(&self, query: &str) -> Option<ItemsResult> {
         let user_id = self.user_id()?;
         self.get_json(&format!(
-            "/Shows/NextUp?UserId={user_id}&SeriesId={series_id}&Limit=1\
+            "/Shows/NextUp?UserId={user_id}{query}\
              &Fields=Overview,MediaSources,OfficialRating&EnableImageTypes=Primary"
         ))
     }
@@ -538,6 +577,7 @@ impl JfClient {
             &format!("/MediaSegments/{item_id}"),
             http::Method::Get,
             &refs,
+            None,
         )?;
         if reply.status == 404 {
             return Some(super::dto::SegmentsResult { items: Vec::new() });
@@ -800,6 +840,19 @@ impl JfClient {
         )
     }
 
+    /// Favorite: `POST/DELETE /Users/{uid}/FavoriteItems/{id}` — bodyless like the played pair,
+    /// and the server's answer is the updated UserData the caller does not need (the fan-out
+    /// already moved the UI optimistically).
+    pub(crate) fn set_favorite(&self, item_id: &str, want: bool) -> bool {
+        let Some(user_id) = self.user_id() else {
+            return false;
+        };
+        self.request_status(
+            &format!("/Users/{user_id}/FavoriteItems/{item_id}"),
+            if want { http::Method::Post } else { http::Method::Delete },
+        )
+    }
+
     /// Mark unplayed: `DELETE /Users/{uid}/PlayedItems/{id}` — clears the flag, the count and
     /// the resume point, the exact semantics `viewstate` documents for an unscrobble.
     pub(crate) fn mark_unplayed(&self, item_id: &str) -> bool {
@@ -864,7 +917,7 @@ impl JfClient {
             return false;
         };
         let refs: Vec<&str> = headers.iter().map(String::as_str).collect();
-        match http::request(&self.origin, path, method, &refs) {
+        match http::request(&self.origin, path, method, &refs, None) {
             Some(r) if r.ok() => true,
             Some(r) => {
                 crate::log(&format!(
@@ -924,81 +977,8 @@ mod tests {
     /// (every request here is `Connection: close`), records each raw request, and answers with
     /// the queued body in order. Loopback is inside the http gate's LAN arm, so the credential
     /// policy being tested is the REAL one, not a bypass.
-    struct MockServer {
-        port: u16,
-        requests: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
-        join: Option<std::thread::JoinHandle<()>>,
-    }
+    use crate::jellyfin::MockServer;
 
-    impl MockServer {
-        fn start(responses: Vec<(i32, &'static str)>) -> MockServer {
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-            let port = listener.local_addr().expect("addr").port();
-            let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-            let requests2 = requests.clone();
-            let join = std::thread::spawn(move || {
-                for (status, body) in responses {
-                    let (mut socket, _) = listener.accept().expect("accept");
-                    // Read head AND the Content-Length'd body — the whole point of the fixture
-                    // is to see what the transport put on the wire, and leaving the body unread
-                    // would RST the socket under the client's response read on some kernels.
-                    let mut buf = Vec::new();
-                    let mut chunk = [0u8; 4096];
-                    let mut content_length = None::<usize>;
-                    let mut head_end = None::<usize>;
-                    loop {
-                        let n = socket.read(&mut chunk).expect("read");
-                        if n == 0 {
-                            break;
-                        }
-                        buf.extend_from_slice(&chunk[..n]);
-                        if head_end.is_none() {
-                            if let Some(pos) = find(&buf, b"\r\n\r\n") {
-                                head_end = Some(pos + 4);
-                                let head = String::from_utf8_lossy(&buf[..pos]).to_lowercase();
-                                content_length = head
-                                    .lines()
-                                    .find_map(|l| l.strip_prefix("content-length:"))
-                                    .and_then(|v| v.trim().parse().ok());
-                            }
-                        }
-                        if let (Some(he), Some(cl)) = (head_end, content_length) {
-                            if buf.len() >= he + cl {
-                                break;
-                            }
-                        } else if head_end.is_some() && content_length.is_none() {
-                            break;
-                        }
-                    }
-                    requests2
-                        .lock()
-                        .unwrap()
-                        .push(String::from_utf8_lossy(&buf).into_owned());
-                    let reason = if status == 200 { "OK" } else { "Error" };
-                    write!(socket, "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())
-                        .expect("write");
-                }
-            });
-            MockServer {
-                port,
-                requests,
-                join: Some(join),
-            }
-        }
-
-        fn finish(self) -> Vec<String> {
-            let mut this = self;
-            if let Some(j) = this.join.take() {
-                j.join().expect("server thread");
-            }
-            let recorded = std::mem::take(&mut *this.requests.lock().unwrap());
-            recorded
-        }
-    }
-
-    fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
-        hay.windows(needle.len()).position(|w| w == needle)
-    }
 
     const AUTH_OK: &str = r#"{"User":{"Id":"u-1","Name":"demo"},"AccessToken":"tok-1","ServerId":"srv-1","SessionInfo":null}"#;
 
@@ -1025,6 +1005,10 @@ mod tests {
         let auth = &reqs[0];
         assert!(auth.starts_with("POST /Users/AuthenticateByName HTTP/1.1"));
         assert!(auth.to_ascii_lowercase().contains("content-type: application/json"));
+        // The dashboard names the fork: Client is the display name, "Butaca" on this build.
+        #[cfg(feature = "jellyfin")]
+        assert!(auth.contains("Authorization: MediaBrowser Client=\"Butaca\""));
+        #[cfg(not(feature = "jellyfin"))]
         assert!(auth.contains("Authorization: MediaBrowser Client=\"PlxNative\""));
         // Key order in the body is serde_json's (alphabetical without preserve_order) — assert
         // the two fields, not one literal, so the test does not hinge on serializer internals.
@@ -1175,6 +1159,26 @@ mod tests {
         assert_eq!(reqs.len(), 2);
         assert!(reqs[1].starts_with("POST /Sessions/Playing/Stopped HTTP/1.1"));
         assert!(reqs[1].contains("\"PositionTicks\":50000000"));
+    }
+
+    /// The heart: POST favorites on, DELETE off, both bodyless and user-scoped (#47).
+    #[test]
+    fn favorite_writes_hit_the_favorite_items_endpoint() {
+        let server = MockServer::start(vec![
+            (200, AUTH_OK),
+            (200, "{}"),
+            (200, "{}"),
+        ]);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        client.authenticate_by_name("demo", "").unwrap();
+
+        assert!(client.set_favorite("mv-1", true));
+        assert!(client.set_favorite("mv-1", false));
+
+        let reqs = server.finish();
+        assert_eq!(reqs.len(), 3);
+        assert!(reqs[1].starts_with("POST /Users/u-1/FavoriteItems/mv-1 HTTP/1.1"));
+        assert!(reqs[2].starts_with("DELETE /Users/u-1/FavoriteItems/mv-1 HTTP/1.1"));
     }
 
     /// The three view-state writes: played is a bodyless POST, unplayed a DELETE on the same
@@ -1341,6 +1345,39 @@ mod tests {
     /// The Jellyfin letter fetch: one unfiltered count plus one `NameStartsWith` count per
     /// letter, every query at `Limit=0` (counts only, no items transferred), and the counts
     /// wired into the rail table.
+    /// Issue #37: with a filter active, every probe (the total and each letter) carries it —
+    /// `NameStartsWith` accepts `IsPlayed` and `GenreIds` alongside `ParentId`, which is what
+    /// makes the A-Z rail able to stay honest under unwatched-only or a genre.
+    #[test]
+    fn letter_counts_carry_the_active_filter_on_every_probe() {
+        let total = r#"{"Items":[],"TotalRecordCount":3}"#;
+        let a = r#"{"Items":[],"TotalRecordCount":3}"#;
+        let zero = r#"{"Items":[],"TotalRecordCount":0}"#;
+        let mut responses = vec![(200, AUTH_OK), (200, total)];
+        for l in 'A'..='Z' {
+            responses.push((200, if l == 'A' { a } else { zero }));
+        }
+        let server = MockServer::start(responses);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        client.authenticate_by_name("demo", "").unwrap();
+
+        let letters = client
+            .letter_counts(
+                "view-1",
+                "Series",
+                &crate::browse::LettersFilter { unwatched: true, genre: Some("g-7".into()) },
+            )
+            .expect("letter counts parse");
+        assert_eq!(letters, vec![("A".to_string(), 3)]);
+        let reqs = server.finish();
+        assert_eq!(reqs.len(), 28);
+        for (i, req) in reqs.iter().enumerate().skip(1) {
+            let q = req.lines().next().unwrap();
+            assert!(q.contains("IsPlayed=false"), "probe {i} misses IsPlayed: {q}");
+            assert!(q.contains("GenreIds=g-7"), "probe {i} misses GenreIds: {q}");
+        }
+    }
+
     #[test]
     fn letter_counts_query_limit_zero_for_the_total_and_every_letter() {
         // total 12: A=10, Z=1, other=1 -> "#" bucket
@@ -1357,7 +1394,7 @@ mod tests {
         client.authenticate_by_name("demo", "").unwrap();
 
         let letters = client
-            .letter_counts("view-1", "Movie")
+            .letter_counts("view-1", "Movie", &crate::browse::LettersFilter::default())
             .expect("letter counts parse");
         assert_eq!(
             letters,
@@ -1366,9 +1403,12 @@ mod tests {
                 .zip([1i64, 10, 1])
                 .collect::<Vec<_>>()
         );
-
         let reqs = server.finish();
         assert_eq!(reqs.len(), 28); // auth + total + 26 letters
+        assert!(
+            reqs.iter().all(|r| !r.contains("IsPlayed=") && !r.contains("GenreIds=")),
+            "an unfiltered probe carries no filter: {reqs:?}"
+        );
         let total_q = reqs[1].lines().next().unwrap();
         assert!(total_q.starts_with("GET /Users/u-1/Items?"));
         assert!(total_q.contains("ParentId=view-1"));

@@ -97,7 +97,7 @@ use host_test_sdl::{
 ///
 /// `cargo test --lib` links a Mach-O binary against no SDL at all, and unlike every other SDL user
 /// in this crate these calls are reachable from ordinary `pub(crate)` functions that a test can
-/// touch — `available()` and `start()` are one `ui::search` call away. An unguarded reference is
+/// touch — `available()` and `start()` are one `screens::search::SearchScreen` call away. An unguarded reference is
 /// therefore an undefined symbol at LINK time, which does not fail one test: it stops the whole
 /// suite building, exactly as `ff.rs`'s `#[link]` directives used to before that module moved to
 /// `dlopen`. SDL is a real link on the device, so the seam here is a `cfg` rather than a `dlopen`.
@@ -247,13 +247,13 @@ pub(crate) fn start() {
                 None => "?".into(), // bind() was never called — a boot-order bug, not a TV fact
             }
         ));
-        // Trap 2's fix, at the moment it matters. The panel rises only for the window SDL's
-        // keyboard focus names, and ours is created OPENGL|FULLSCREEN without ever being handed
-        // it (the TV's compositor never sends a keyboard-enter to a set with no physical
-        // keyboard), so on device focus=0 and the IME silently never appears. The NDK's SDL
-        // fork exports `SDL_SetWindowInputFocus` (the vendored 2.0.4 header is stock and omits
-        // it); the firmware inventories do not track it, so it is resolved by dlsym rather
-        // than linked, and a firmware without it merely keeps today's behaviour.
+        // The fix this fork carried on the 0.6.x line (issue #27): the panel rises only for the
+        // window SDL's keyboard focus names, and ours is created OPENGL|FULLSCREEN without ever
+        // being handed it (the TV's compositor never sends a keyboard-enter to a set with no
+        // physical keyboard), so on device focus=0 and the IME silently never appears. The NDK's
+        // SDL fork exports `SDL_SetWindowInputFocus` (the vendored 2.0.4 header is stock and omits
+        // it); resolved by dlsym rather than linked, and a firmware without it merely keeps the
+        // old behaviour — the log says which happened.
         if has_focus() == Some(false) {
             give_focus();
         }
@@ -263,7 +263,7 @@ pub(crate) fn start() {
 
 /// Hand SDL's keyboard focus to our window. `dlsym` on the already-linked SDL2 (RTLD_DEFAULT is
 /// NULL on Linux), one call, best effort: the log names what happened, and a miss changes
-/// nothing - `start` still runs, exactly as it did before this existed.
+/// nothing — `start` still runs, exactly as it did before this existed.
 unsafe fn give_focus() {
     unsafe extern "C" {
         fn dlsym(handle: *mut c_void, symbol: *const std::os::raw::c_char) -> *mut c_void;
@@ -285,8 +285,8 @@ unsafe fn give_focus() {
 /// Dismiss it. Also idempotent.
 pub(crate) fn stop() {
     unsafe {
-        // Guarded, and not only for symmetry: `ui::search` calls this on every BACK and every
-        // leave, including ones where the field was never edited. Unguarded, that would call
+        // Guarded, and not only for symmetry: `screens::search::SearchScreen` requests this on
+        // every BACK and every leave, including ones where the field was never edited. Unguarded, that would call
         // `SDL_StopTextInput` on a simulator where text events had been on since `SDL_VideoInit`
         // and turn them off for the rest of the process — the decode path below would then be
         // dead, on the one platform where it can be exercised by typing.
@@ -300,6 +300,31 @@ pub(crate) fn stop() {
         // is not it. With both transitions logged, one log answers which of the two you have.
         log("keyboard: stop");
         SDL_StopTextInput();
+        webos_hide_keyboard();
+    }
+}
+
+/// The reopen wedge this file's own module doc records (moonlight-tv#435, reproduced on webOS
+/// 7.4): after the first dismissal the panel never rises again, because the fork's
+/// `SDL_StopTextInput` leaves the compositor's `text_model` up and every later
+/// `WebOSShowScreenKeyboard` lands in a panel the compositor believes is already shown. The
+/// fork's own hide entry point, driven by name with the same dlsym discipline as
+/// `SDL_SetWindowInputFocus`: a firmware without it merely keeps the old behaviour, and the log
+/// says which happened. No-op on the simulator.
+unsafe fn webos_hide_keyboard() {
+    #[cfg(not(feature = "hostsim"))]
+    {
+        unsafe extern "C" {
+            fn dlsym(handle: *mut c_void, symbol: *const std::os::raw::c_char) -> *mut c_void;
+        }
+        let sym = dlsym(std::ptr::null_mut(), c"WebOSHideScreenKeyboard".as_ptr());
+        if sym.is_null() {
+            log("keyboard: WebOSHideScreenKeyboard absent on this firmware");
+            return;
+        }
+        let hide: unsafe extern "C" fn(*mut c_void) = std::mem::transmute(sym);
+        hide(*addr_of!(WIN));
+        log("keyboard: panel hidden at the webOS layer");
     }
 }
 
@@ -329,14 +354,14 @@ pub(crate) fn stop() {
 /// that clears the editing state from this signal drops the user's typing, which is a total failure
 /// of the feature to avoid a cosmetic one.
 ///
-/// What replaced it is in `ui::search::pump_text`: **an arriving `SDL_TEXTINPUT` is proof the panel
+/// What replaced it is in `screens::search::SearchScreen`: **an arriving `SDL_TEXTINPUT` is proof the panel
 /// is up**, so a commit that lands while the screen thinks it is not editing ADOPTS the panel
 /// instead of being dropped. That signal cannot lie, it needs no polling, and it self-heals every
 /// route into the mismatch rather than the one this was aimed at.
 const _: () = ();
 
 /// Re-take ownership of a panel that is demonstrably already up — see the note above and
-/// `ui::search::pump_text`. Deliberately does NOT call `SDL_StartTextInput` (the panel is up; asking
+/// `screens::search::SearchScreen`. Deliberately does NOT call `SDL_StartTextInput` (the panel is up; asking
 /// for it again re-issues a wayland IME activation for nothing) and deliberately does NOT clear
 /// [`PENDING`], because the whole reason this is being called is that a commit is waiting in it.
 pub(crate) fn adopt() {

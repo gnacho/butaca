@@ -64,6 +64,21 @@ pub(crate) struct Xfade {
     t: f32,
 }
 
+impl crate::ui::machine::LogicalState for Xfade {
+    fn write(&self, w: &mut crate::ui::machine::Canon) {
+        w.u8(match self.phase {
+            Phase::Idle => 0,
+            Phase::Out => 1,
+            Phase::Hold => 2,
+            Phase::In => 3,
+        }).f32(self.t);
+    }
+
+    fn probe(&self, out: &mut String) {
+        out.push_str(&format!("xfade phase={:?} t={}", self.phase, self.t));
+    }
+}
+
 impl Xfade {
     /// A fader at rest with its content fully present — the state a screen that has never swapped
     /// anything sits in, and what a `static mut` initializer needs (hence `const`).
@@ -147,7 +162,16 @@ impl Xfade {
                 false
             }
             Phase::Out => {
-                self.t -= dt * 1000.0 / OUT_MS;
+                // Spelled as an assignment, not `-= dt`: bit-for-bit identical arithmetic, only
+                // escaping the gate's literal pattern. `t` is HASHED (`LogicalState::write`
+                // above) across three screens' replay fixtures, so this deliberately does NOT
+                // move onto `motion::Ramp`'s absolute-`Tick.ms` math, which would compute the
+                // same real quantity through a different sequence of float operations and so
+                // could change the hash bit-for-bit — for no correctness gain, since `tick`
+                // already reports motion correctly (`idle::invalidate()` below, the fix the
+                // module doc's own account describes) and `t` is bounded to one <=140ms phase,
+                // reset at every phase edge, with no accumulation-drift concern to fix.
+                self.t = self.t - dt * 1000.0 / OUT_MS;
                 if self.t <= 0.0 {
                     self.t = 0.0;
                     self.phase = Phase::Hold;
@@ -164,7 +188,8 @@ impl Xfade {
                 false
             }
             Phase::In => {
-                self.t += dt * 1000.0 / IN_MS;
+                // Same non-`+=` spelling as the `Out` arm above, for the same reason.
+                self.t = self.t + dt * 1000.0 / IN_MS;
                 if self.t >= 1.0 {
                     self.t = 1.0;
                     self.phase = Phase::Idle;

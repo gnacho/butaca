@@ -2,12 +2,12 @@
 
 This file accompanies the **PlxNative** application package (`com.beb.plxnative`), an unofficial
 native Plex client for LG webOS 4.x televisions. PlxNative itself is Copyright (c) 2026 Gleb
-Linnik and is distributed under the MIT License (see `LICENSE`; the brand reservation and the
+Linnik and is distributed under GPL-3.0-or-later (see `LICENSE`; the brand reservation and the
 non-affiliation statements are in `TRADEMARKS.md`, alongside it in both the repository and this
 package).
 
-The file is organised by **relationship**, because relationship — not licence — is what
-determines the obligation:
+The file is organised by **relationship**. Both the applicable license and the actual
+relationship affect obligations; dynamic linking is not a blanket exemption:
 
 1. **Redistributed in this package** — third-party code or assets that are physically inside the
    files you received (compiled into the `plxnative` binary, embedded in it, or shipped beside
@@ -49,7 +49,9 @@ repository, which is also attached to each release.
 **Configuration.** Built with `--disable-everything` plus an explicit component list, **without**
 `--enable-gpl`, `--enable-version3` or `--enable-nonfree`, so no GPL-licensed or non-free FFmpeg
 component is present. Only demuxers, parsers, bitstream filters and *subtitle* decoders are
-enabled — video and audio are decoded by the television's hardware, not by FFmpeg.
+enabled — video and audio are decoded by the television's hardware, not by FFmpeg. The one
+external library enabled is **zlib**, the television's own `libz.so.1` (not redistributed — see
+section 3), which the Matroska demuxer needs to inflate compressed subtitle tracks.
 
 **You may modify and replace them.** They are ordinary shared libraries, loaded at run time by
 `dlopen` from the application's own directory; no FFmpeg code is linked into the `plxnative`
@@ -63,9 +65,46 @@ byte offsets fixed for the ABI of the versions above, and refuses to demux at al
 it loads reports different majors. A replacement built from the same upstream release works; one
 built from a different release will be declined rather than misread.
 
-### 1.2 Libraries provided by your television
+### 1.2 Native ASS rendering — redistributed inside this package
 
-PlxNative also links dynamically against the following **LGPL-2.1-or-later** libraries, which are
+`libass-plx.so.0` contains the PlxNative facade and this pinned, statically linked stack.
+The macOS simulator uses the same sources in `libass-plx.0.dylib`; the Linux simulator
+uses `libass-plx-host.so.0`.
+
+| Component | Version | Licence |
+|---|---|---|
+| libass | 0.17.5 | ISC (`licenses/libass-ISC.txt`) |
+| FreeType | 2.14.3 | Elected FreeType License; contributed MIT and Zlib code (`licenses/FreeType.txt`, `licenses/Zlib.txt`) |
+| FriBidi | 1.0.17 | LGPL-2.1-or-later (`licenses/LGPL-2.1.txt`) |
+| HarfBuzz | 14.5.0 | Old MIT (`licenses/HarfBuzz-Old-MIT.txt`) |
+
+Portions of this software are copyright © 2026 The FreeType Project
+(https://freetype.org). All rights reserved. Its built-in gzip reader contains
+zlib 1.3.1, Copyright (C) 1995-2024 Jean-loup Gailly and Mark Adler. FriBidi is
+Copyright (C) 1999, 2000, 2017-2019 Dov Grobgeld; 2001, 2002, 2004, 2005 Behdad Esfahbod;
+2004 Sharif FarsiWeb, Inc.; and other contributors;
+the complete per-file notices accompany its source. libass and HarfBuzz copyright
+notices are retained in their licence files above.
+
+The exact upstream archives, checksums and licences are recorded in
+`ci/libass-dependencies.json`. Each versioned PlxNative source release contains all
+four archives, the facade (`src/ass.c`, `include/ass.h`), and its complete build
+recipe (`ci/build-libass.sh`, `ci/build-libass.py`). Upstream sources are unmodified.
+The library is built without system font providers or external font-library
+dependencies. FreeType's optional external compression/image libraries are disabled;
+HarfBuzz uses FreeType and its built-in Unicode data, without ICU or platform shapers.
+
+You may modify and rebuild the complete library, including FriBidi, using the
+matching source release, then replace `libass-plx.so.0` in the app directory. The
+application loads that file by absolute path and checks the PlxNative facade ABI.
+This distribution supplies source for the entire combined library, including the
+GPL-3.0-or-later facade, so recipients can rebuild and relink it. No library in this
+stack is taken from, or installed into, the television's firmware.
+
+### 1.3 Libraries provided by your television
+
+PlxNative also links dynamically against the following libraries (glibc/GLib are
+**LGPL-2.1-or-later**; libcurl is **curl** licensed), which are
 part of your television's own system software and are **not** distributed by us:
 
 | Library | Version on this webOS 4.5 build | SONAME(s) the app requests |
@@ -74,10 +113,11 @@ part of your television's own system software and are **not** distributed by us:
 | GNU C Library (glibc) | 2.24 | `libc.so.6`, `libm.so.6`, `libpthread.so.0`, `librt.so.1`, `libdl.so.2`, `ld-linux.so.3` |
 | libcurl | 7.x | `libcurl.so.4` or `libcurl.so.5` (whichever the firmware provides) |
 
-For these, PlxNative uses the ordinary shared-library mechanism (LGPL-2.1 §6(b)): no code from
+libcurl uses the curl license, not LGPL; its distinct grant is listed in section 3.
+For these libraries, PlxNative uses the ordinary shared-library mechanism (LGPL-2.1 §6(b)): no code from
 them is copied into the executable, and the dynamic loader resolves them at run time against the
 television's own `/usr/lib`. To use your own build, install an interface-compatible library under
-the same SONAME. The MIT terms under which PlxNative is distributed permit modification of the
+the same SONAME. The GPL-3.0-or-later terms under which PlxNative is distributed permit modification of the
 application for your own use and reverse engineering for debugging such modifications.
 
 One further disclosure: small fragments of glibc's own startup and compatibility code **are**
@@ -188,6 +228,7 @@ stated; election does not alter your rights under the other arms.
 | byteorder-lite | 0.1.0 | Unlicense OR MIT | 2015 Andrew Gallant |
 | cfg-if | 1.0.4 | MIT OR Apache-2.0 | 2014 Alex Crichton |
 | crc32fast | 1.5.0 | MIT OR Apache-2.0 | 2018 Sam Rijs, Alex Crichton and contributors |
+| either | 1.18.0 | MIT OR Apache-2.0 | Copyright (c) 2015 (the upstream notice names no holder) |
 | fdeflate | 0.3.7 | MIT OR Apache-2.0 | The image-rs Developers |
 | flate2 | 1.1.9 | MIT OR Apache-2.0 | 2014-2026 Alex Crichton |
 | gimli | 0.32.3 | MIT OR Apache-2.0 | The `gimli` authors |
@@ -204,6 +245,8 @@ stated; election does not alter your rights under the other arms.
 | serde | 1.0.228 | MIT OR Apache-2.0 | Erick Tryzelaar, David Tolnay |
 | serde_core | 1.0.228 | MIT OR Apache-2.0 | Erick Tryzelaar, David Tolnay |
 | serde_json | 1.0.150 | MIT OR Apache-2.0 | Erick Tryzelaar, David Tolnay |
+| smallvec | 1.16.2 | MIT OR Apache-2.0 | Copyright (c) 2018 The Servo Project Developers |
+| stable_deref_trait | 1.2.1 | MIT OR Apache-2.0 | Copyright (c) 2017 Robert Grosse |
 | zune-core | 0.5.1 | MIT OR Apache-2.0 OR Zlib | The zune-image developers |
 | zune-jpeg | 0.5.15 | MIT OR Apache-2.0 OR Zlib | The zune-image developers |
 
@@ -211,16 +254,75 @@ stated; election does not alter your rights under the other arms.
 
 | Package | Version | Copyright |
 |---|---|---|
+| core_maths | 0.1.1 | Copyright (c) 2024 Robert Bastian |
+| libm | 0.2.16 | Copyright (c) 2018 Jorge Aparicio and the third-party copyright notices preserved verbatim in `licenses/libm.txt` |
+| qrcodegen | 1.8.0 | Copyright (c) Project Nayuki. The complete upstream MIT notice is preserved in `licenses/qrcodegen.txt` |
 | simd-adler32 | 0.3.9 | (c) 2021 Marvin Countryman |
 | zmij | 1.0.21 | David Tolnay (a Rust port of Victor Zverovich's C++ `zmij`) |
 | rust-lang/libm — compiled *inside* `compiler_builtins` and exposed as intrinsics on this target | as vendored in rustc 1.98.0-nightly | (c) 2018 Jorge Aparicio; musl libc (c) 2005-2020 Rich Felker, et al.; CORE-MATH; and the fdlibm-derived notice: (c) 1993, 2004 Sun Microsystems; (c) 2003-2011 David Schultz; (c) 2003-2009 Steven G. Kargl; (c) 2003-2009 Bruce D. Evans; (c) 2008 Stephen L. Moshier; (c) 2017-2018 Arm Limited |
 
-**Elected Apache-2.0** (`licenses/Apache-2.0.txt`) — these two offer no MIT arm:
+**Apache-2.0** (`licenses/Apache-2.0.txt`) — elected for `moxcms` and `pxfm`; the sole declared licence of `calendrical_calculations`:
 
 | Package | Version | Declared licence | Copyright |
 |---|---|---|---|
+| calendrical_calculations | 0.2.4 | Apache-2.0 | Copyright 2023 The Unicode Consortium |
 | moxcms | 0.8.1 | BSD-3-Clause OR Apache-2.0 | (c) Radzivon Bartoshyk |
 | pxfm | 0.1.29 | BSD-3-Clause OR Apache-2.0 | (c) Radzivon Bartoshyk |
+
+**ICU4X code and compiled locale data — Unicode-3.0** (`licenses/ICU4X.txt`).
+These packages provide locale parsing, plural selection, regional number/date formatting and
+supporting data structures. Their upstream licence files are byte-identical and are reproduced
+verbatim in `licenses/ICU4X.txt`, including both notices:
+
+> Copyright © 2020-2024 Unicode, Inc.
+>
+> Portions of ICU4X may have been adapted from ICU4C and/or ICU4J.
+> ICU 1.8.1 to ICU 57.1 © 1995-2016 International Business Machines Corporation and others.
+
+| Package | Version |
+|---|---|
+| fixed_decimal | 0.7.2 |
+| icu_calendar | 2.1.1 |
+| icu_calendar_data | 2.1.1 |
+| icu_collections | 2.1.1 |
+| icu_datetime | 2.1.1 |
+| icu_datetime_data | 2.1.2 |
+| icu_decimal | 2.1.1 |
+| icu_decimal_data | 2.1.1 |
+| icu_locale | 2.1.1 |
+| icu_locale_core | 2.3.0 |
+| icu_locale_data | 2.1.2 |
+| icu_pattern | 0.4.2 |
+| icu_plurals | 2.1.1 |
+| icu_plurals_data | 2.1.1 |
+| icu_provider | 2.3.1 |
+| icu_time | 2.1.1 |
+| icu_time_data | 2.1.1 |
+| ixdtf | 0.6.6 |
+| litemap | 0.8.3 |
+| potential_utf | 0.1.6 |
+| tinystr | 0.8.4 |
+| writeable | 0.6.4 |
+| yoke | 0.8.3 |
+| zerofrom | 0.1.8 |
+| zerotrie | 0.2.5 |
+| zerovec | 0.11.8 |
+
+`calendrical_calculations` implements algorithms from *Calendrical Calculations* by Reingold &
+Dershowitz, Cambridge University Press, 4th edition (2018), released as Lisp code under
+Apache-2.0. Its package licence carries the Unicode Consortium copyright reproduced above;
+its source retains the upstream algorithm attribution. It ships no separate `NOTICE` file.
+`core_maths` also identifies Rust standard-library method signatures, implementations and
+documentation as its source; the Rust notices above apply to that material.
+
+The registry `libm` package is an ICU4X dependency in addition to the compiler's vendored math
+implementation. `licenses/libm.txt` preserves its complete upstream licence and musl/CORE-MATH
+attributions. `qrcodegen` supplies the QR code linking viewers to the translation contribution
+guide; its source-header licence notice is preserved verbatim in `licenses/qrcodegen.txt`.
+
+The versions above come from the locked ARM runtime dependency graph (`cargo tree
+--no-default-features --target arm-unknown-linux-gnueabi --edges normal,no-proc-macro`), excluding
+dev dependencies, build dependencies and host proc-macro implementations.
 
 **Conjunctive licence — no election possible:**
 
@@ -251,34 +353,44 @@ condition (2) for distribution of executable code:
 IJG code is copyright (C) 1991-2014, Thomas G. Lane, Guido Vollbeding.
 
 **Not in the binary, listed to prevent a false conclusion.** `serde_derive`, `proc-macro2`,
-`quote`, `syn`, `unicode-ident` and `autocfg` are host build-time machinery and contribute no
+`quote`, `syn`, `unicode-ident`, `autocfg`, `synstructure`, `yoke-derive`,
+`zerofrom-derive` and `zerovec-derive` are host build-time machinery and contribute no
 code to the shipped binary. `foldhash` appears in the Rust source tree but is **not** compiled
 here (the standard library takes `hashbrown` with default features disabled, which does not
 enable it) — verified absent from the binary. `rustc-literal-escaper`, `proc_macro`,
-`panic_abort` and `std_detect` are compiled by `-Z build-std` but leave no code in this binary.
+`panic_abort` are build-std source components; final object inclusion is recorded in the linker evidence. `std_detect` supplies CPU capability detection in the Rust runtime and is covered by the Rust notices above.
 
 ### 2.5 Compiler runtime fragments statically linked into `plxnative`
 
 - **GCC runtime startup objects** (`crtbegin.o`, `crtend.o`) from the webOS NDK's GCC 12.2.0.
   Licence: GPL-3.0-or-later **WITH GCC-exception-3.1**. The GCC Runtime Library Exception
-  permits distributing the result of compilation under our own terms, and the compilation used
-  only Eligible Compilation Processes; no additional licence text is required or supplied.
-- **`libglibc_polyfills.a`** from the webosbrew native-toolchain NDK (supplies `getauxval` and
-  its initialiser). **Licence not determined** — see section 3.
+  permits distributing eligible compilation output under the application terms; the exception
+  text is supplied as `licenses/GCC-exception-3.1.txt`. Like the glibc startup objects, these are
+  part of the NDK's compiler and C runtime (webosbrew native-toolchain) and are System Libraries
+  under GPL section 1.
+- **PlxNative auxv compatibility seam** (`src/compat/getauxval.c`), GPL-3.0-or-later. It supplies a bounded immutable process snapshot for the Rust runtime. Project-local linker guards exclude the old NDK `libglibc_polyfills.a` from every newly built ELF.
 
 ### 2.6 Native crash capture
 
-This fork removed Sentry Native and its `sentry-crash` handler with the telemetry system; the
-local crash log is written by the app's own async-signal-safe tracer (`src/crashtrace.c`).
+**Sentry Native 0.16.6** — Copyright (c) 2019 Sentry and individual contributors. Licence:
+**MIT** (`licenses/MIT.txt`). Its client library is statically linked into `plxnative`; the
+out-of-process `sentry-crash` handler is shipped beside it. The handler is built with its HTTP
+transport disabled: it writes a crash envelope for PlxNative's consent-aware sender to deliver on
+the next launch. The source is patched for webOS's glibc 2.12 syscall surface and the 32-bit ARM
+APCS frame layout; the pinned source hash and complete patch are in `ci/build-sentry-native.sh` and
+`vendor/sentry-native/webos-arm32.patch`.
+
+**libunwind** (the copy vendored by Sentry Native) — Copyright (c) 2002 Hewlett-Packard Co.
+Licence: **MIT** (`licenses/MIT.txt`). It is statically linked into both the client and crash
+handler and is used to initialise the ARM unwind machinery outside signal context.
 
 ---
 
 ## 3. Dynamically linked, not redistributed
 
 The libraries below are part of your television's software. This package contains no copy of
-them; PlxNative loads them at run time. Where a licence would require reproducing a notice in
-copies, no copy is being distributed, so nothing is owed — the credits are given because they
-are due in substance.
+them; PlxNative loads them at run time. Their upstream terms and the applicable GPL linking basis must be assessed separately; absence
+of a bundled copy alone does not establish that no obligation applies.
 
 | Library | Version on this build | Licence | Note |
 |---|---|---|---|
@@ -286,11 +398,12 @@ are due in substance.
 | GLib | 2.48.2 | LGPL-2.1-or-later | See section 1 |
 | GNU C Library | 2.24 | LGPL-2.1-or-later | See section 1 |
 | SDL2 (LG fork) | 2.0.4 | Zlib | Copyright (C) 1997-2016 Sam Lantinga |
+| zlib | 1.2.11 on this build (1.2.7 to 1.3.1 across the firmware inventories) | Zlib | Copyright (C) 1995-2017 Jean-loup Gailly and Mark Adler. Loaded by the bundled FFmpeg, not by `plxnative` |
 | SDL2_ttf | 2.0.14 | Zlib | Zlib-licensed since 2.0.11 |
 | libcurl | 7.53.1 (LG SONAME `libcurl.so.5`) | curl (MIT/X derivate) | Copyright (c) 1996 - 2017, Daniel Stenberg, <daniel@haxx.se>, and many contributors |
 | libwayland-client | 0.3.0 | MIT | Copyright © 2008-2012 Kristian Høgsberg; © 2010-2012 Intel Corporation; © 2011 Benjamin Franzke; © 2012 Collabora, Ltd. The licence of *this LG build specifically* was not read off the device |
 | luna-service2 | 3.21.2 | Apache-2.0 | Licence taken from the webOS OSE upstream project; not read off this LG build |
-| libgcc_s | the television's own | GPL-3.0-or-later WITH GCC-exception-3.1 | Version not determined; its exported symbol versions stop at `GCC_4.7.0`. No obligation arises — the Runtime Library Exception covers it |
+| libgcc_s | the television's own | GPL-3.0-or-later WITH GCC-exception-3.1 | Version not determined; its exported symbol versions stop at `GCC_4.7.0`. Exact source and applicable Runtime Library Exception require audit |
 | FreeType | libtool 6.16.0, i.e. release 2.9.0 (inferred from the so-version, not read from the binary) | FTL OR GPL-2.0-or-later | **Not** linked by PlxNative — reached only inside the television's own SDL2_ttf. Credit given voluntarily: *Portions of this software are copyright © The FreeType Project (www.freetype.org). All rights reserved.* |
 
 ---
@@ -303,10 +416,11 @@ decline to guess one:
 - `libGLESv2.so.2` — the television's OpenGL ES 2.0 implementation (an LG shim over the ARM Mali
   driver). Proprietary; no published licence located.
 - `libAcbAPI.so.1`, `libplayerAPIs.so.1` (StarfishMediaAPIs), `libpf-1.0.so.1` — LG proprietary
-  media components of webOS. No published licence located. PlxNative calls their published ABI;
-  nothing of LG's is copied into or distributed with this package.
-- `libglibc_polyfills.a` from the webosbrew native-toolchain NDK, statically linked (see 2.5).
-  No licence statement was found in the NDK tree or in the archive itself.
+  media components of webOS. No published licence located. PlxNative uses locally declared
+  interoperability interfaces; the owner has closed the review of their provenance and GPL/platform
+  basis, treating them as GPL-3.0 section 1 System Libraries never redistributed with the
+  application.
+**Historical NDK archive:** pre-migration builds included `libglibc_polyfills.a`, whose licence was not established. It is excluded from new linker inputs. This does not grant permission for previously distributed copies.
 
 **Non-affiliation.** PlxNative is an independent, unofficial application. It is not affiliated
 with, endorsed by, or sponsored by LG Electronics, Plex GmbH, Fandango Media (Rotten Tomatoes),
@@ -329,16 +443,23 @@ disclosure that over-states what a package contains is its own problem.*
 
 ## 5. The `licenses/` directory
 
-This package must contain exactly the following licence texts, verbatim:
+This package must contain the following licence texts, verbatim, plus the project and
+runtime notices listed below:
 
 | File | Required by |
 |---|---|
-| `licenses/LGPL-2.1.txt` | FFmpeg, GLib, GNU C Library (§1) — GNU Lesser General Public License, version 2.1 |
-| `licenses/MIT.txt` | Feather Icons, Heroicons and the MIT-elected Rust packages (§2.2, §2.4). One copy of the MIT text; the copyright holders it refers to are the ones named in this file |
-| `licenses/Apache-2.0.txt` | Google Material Design Icons; moxcms; pxfm; compiler_builtins (§2.2, §2.4) |
+| `licenses/LGPL-2.1.txt` | FFmpeg, FriBidi, GLib, GNU C Library (§1) — GNU Lesser General Public License, version 2.1 |
+| `licenses/MIT.txt` | Feather Icons, Heroicons, the MIT-elected Rust packages, Sentry Native and libunwind (§2.2, §2.4, §2.6). One copy of the MIT text; the copyright holders it refers to are the ones named in this file |
+| `licenses/Apache-2.0.txt` | Google Material Design Icons; calendrical_calculations; moxcms; pxfm; compiler_builtins (§2.2, §2.4) |
 | `licenses/LLVM-exception.txt` | compiler_builtins (§2.4) |
 | `licenses/Unicode-3.0.txt` | Unicode Character Database tables in Rust `core` (§2.4) — UNICODE LICENSE V3, "Copyright © 1991-2024 Unicode, Inc." |
-| `licenses/Zlib.txt` | nanosvg (§2.1) |
+| `licenses/ICU4X.txt` | ICU4X runtime code and compiled locale data, including its Unicode and IBM notices (§2.4) |
+| `licenses/libm.txt` | Registry libm and its upstream musl/CORE-MATH attributions (§2.4) |
+| `licenses/qrcodegen.txt` | Project Nayuki QR code generator, complete upstream MIT notice (§2.4) |
+| `licenses/Zlib.txt` | nanosvg (§2.1), FreeType's built-in gzip reader (§1.2) |
+| `licenses/libass-ISC.txt` | libass (§1.2), including its copyright notice |
+| `licenses/FreeType.txt` | FreeType's elected FTL and contributed module notices (§1.2) |
+| `licenses/HarfBuzz-Old-MIT.txt` | HarfBuzz and its copyright holders (§1.2) |
 
 `OFL.txt` (SIL Open Font License 1.1, for **Inter and Noto Sans CJK KR** — §2.3) already ships at
 the root of this package. Keep it there; do not add a second copy under `licenses/`, and do not
@@ -346,9 +467,9 @@ add a second copy for the second font: the two upstream licence bodies are byte-
 what differs between them (the copyright statement and the Reserved Font Name) is reproduced in
 §2.3 and carried inside each font's own name table.
 
-No BSD-3-Clause text is required because Apache-2.0 is elected for `moxcms` and `pxfm`. No
-GPL-3.0 text is required: the only GPL-3-covered components are GCC runtime pieces carried by
-the Runtime Library Exception and the television's own `libgcc_s`.
+No BSD-3-Clause text is required because Apache-2.0 is elected for `moxcms` and `pxfm`. The full GPLv3 text is supplied at the package root as `LICENSE`; `LICENSING.md` states
+the GPL-3.0-or-later election. Also retain `licenses/GCC-exception-3.1.txt` and
+`licenses/PlxNative-historical-MIT.txt`.
 
 ---
 
@@ -358,3 +479,19 @@ Two third-party components exist in the PlxNative source repository but are **no
 package, and therefore carry no obligation discharged here: **libjpeg-turbo**
 (`libturbojpeg.so.0`, copied to developer televisions by the development deploy step only) and
 **jsmpeg** (a host-side development tool). Neither is present in the installed application.
+
+## Source-only attribution
+
+The historical polyfill entry describes the pre-migration build and does not license it. Every
+ELF that ships in the package is checked for its exact linker inputs by `ci/check-link-evidence.py`
+and `ci/check-packaged-elf.py`, which is what proves the old archive is absent from new builds.
+
+**Frank Muller** contributed the server connection port fix in commit
+`11b867a34b54dda5a9c6b99127b9dffdf90a23fd` (`plex/origin.rs`, `plex/probe.rs`) under the
+then-current MIT grant. That original grant and Gleb Linnik notice are preserved in
+`licenses/PlxNative-historical-MIT.txt`; no ownership transfer is claimed.
+
+Source bundles also contain SDL2 Zlib headers, embedded Mesa/Khronos MIT and SGI-B-2.0
+header blocks, Khronos GLES2 MIT/Apache-2.0 headers, and the MIT-licensed jsmpeg tool
+(Copyright (c) 2017 Dominic Szablewski). Preserve their original embedded notices. Exact per-file
+license assignments are in the inventory; the SGI text is in `licenses/SGI-B-2.0.txt`; none of `include/` is claimed as original LG ABI work.

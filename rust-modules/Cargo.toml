@@ -12,7 +12,7 @@ edition = "2021"
 # they are so `cargo metadata` and any SBOM tool agree with the repo's own LICENSE, which is the
 # provenance a webosbrew reviewer reads. The manifest asserting nothing while the root said MIT
 # was a contradiction with no upside.
-license = "MIT"
+license = "GPL-3.0-or-later"
 description = "Application core for PlxNative — an unofficial native Plex client for LG webOS."
 repository = "https://github.com/GLinnik21/plx-native"
 
@@ -33,11 +33,15 @@ name = "plxnative-sim"
 path = "src/bin/sim.rs"
 required-features = ["hostsim"]
 
+[[bin]]
+name = "plxnative-storage"
+path = "src/bin/plxnative-storage.rs"
+
 [features]
 # On by default, so every ordinary `make`, every `make test` and every on-device harness run
 # behaves exactly as it always has. `make RELEASE=1` passes --no-default-features, which is what
 # CI's release job builds with.
-default = ["devtools", "devtriggers"]
+default = ["devtools", "devtriggers", "threadcheck"]
 # Developer-facing chrome that must not reach a public build. Currently: the on-screen
 # seven-segment counter. Everything gated here must be DRAW-ONLY or otherwise inert — the device
 # is the only test this project has, so a release build must not differ from the tested one in
@@ -53,6 +57,9 @@ devtools = []
 # read back the event log, and `tests/run.py` builds with plain `make` — the harness never builds
 # a release binary, so gating the whole surface costs it nothing.
 devtriggers = []
+# The one deliberate behavioural difference of dev builds: make main-thread violations LOUDER
+# (abort/warning), never change a code path that succeeds. Dropped by --no-default-features.
+threadcheck = []
 # **Cloud Lab Bridge** — the ring buffer, Blue-button upload and authenticated long-poll command
 # channel for a television in LG Cloud Test Lab, where there is no ssh, no console and no way to
 # download a file. See `rust-modules/src/lab/` and `docs/lab-diagnostics.md`.
@@ -105,11 +112,11 @@ lab-diagnostics = []
 # (LG's SDL fork shifts SDL_KeyboardEvent; stock SDL2 does not), and the wayland/glib calls that
 # have no host equivalent. Everything else — all of `ui/`, the whole Plex data layer, the demux
 # orchestration — is compiled identically for both.
-# Jellyfin backend (PoC). ADDITIVE in the cargo sense: the `jellyfin/` module compiles either
+# Jellyfin backend. ADDITIVE in the cargo sense: the `jellyfin/` module compiles either
 # way, and what the feature switches on is the WIRING — the boot-gate arm that reads
-# jellyfin.json, the home-fetch arm in `pms`, the poster arms — each a `#[cfg]` beside the Plex
-# path it parallels, so an ordinary build is byte-for-byte unaffected. `make JELLYFIN=1 …` builds
-# it; the flavor keeps its own app id so both installs can sit on one television.
+# jellyfin.json, the home-fetch arm in `pms`, the poster arms — each a `#[cfg]` beside the
+# Plex path it parallels, so an ordinary build is byte-for-byte unaffected. `make JELLYFIN=1 …`
+# builds it; the fork ships it as the flavor it installs.
 jellyfin = []
 hostsim = []
 
@@ -153,9 +160,25 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 # raw socket/libc FFI for the stream module (correct constants + struct layouts)
 libc = "0.2"
 # JSON parsing for the pms module (replaces the C's hand-rolled string scrape)
-serde_json = { version = "1", default-features = false, features = ["alloc"] }
+# std exposes the writer API used to bound manifest encoding before any filesystem write.
+serde_json = { version = "1", default-features = false, features = ["alloc", "std"] }
 # derive(Deserialize) for the typed plex API response models (src/plex/models.rs)
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+icu_locale = "=2.1.1"
+icu_plurals = "=2.1.1"
+icu_decimal = "=2.1.1"
+icu_datetime = { version = "=2.1.1", default-features = false, features = ["compiled_data"] }
+icu_calendar = "=2.1.1"
+icu_provider = { version = "2.1", features = ["sync"] }
+qrcodegen = "=1.8.0"
+
+[build-dependencies]
+serde_json = "1"
+serde = "1"
 
 [profile.release]
 opt-level = 2
+
+[dev-dependencies]
+rcgen = "0.14.10"
+rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12"] }

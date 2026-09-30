@@ -1,0 +1,794 @@
+//! **Issue 28, restated against the surface that now answers it.**
+//!
+//! Until phase 9 this was `app::playback::overlay_swallows_key` — a pure predicate over
+//! `Route::Player { overlay }` that told the loop's key ladder whether to `continue` past its
+//! overlay arm or let the press FALL THROUGH to the ordinary transport arms. A surface cannot fall
+//! through: the dispatcher hands it the key and the ladder never sees it. So the behaviour the old
+//! predicate expressed as "does not swallow" is expressed here as "FORWARDS `PlayerReq::Transport`",
+//! and this module grades the same three claims the old one did, one layer lower — over the real
+//! `Machine::step`, with the real `consts::classify`, rather than over a hand-written `Key`.
+//!
+//! **Restructure phase 12 (D2) moved who answers a direction and an OK.** Before this package the
+//! `Focusable` impl was a stub — one `Free` region of `len: 1` regardless of the panel, `place`
+//! answering `Rect::FULL` for any key — and `step`'s own `key` ladder moved every panel's cursor by
+//! hand, swallowing every direction and OK itself (`Handled::Yes` unconditionally). The tests below
+//! marked **(D2 repro)** are the ones that were RED against that tree; the rest keep grading exactly
+//! what they always did, one behaviour the ENGINE now owns rather than this ladder.
+//!
+//! What it still cannot say is whether the panel visually stays up; that is a device check.
+
+use super::overlay::{OverlayKind, Panel, PlayerOverlayScreen};
+use crate::screens::registry::{AppFx, AppMsg, PageMemory, PlayerReq};
+use crate::ui::consts::{SDLK_DOWN, SDLK_RETURN, SDLK_UP, WCODE_BACK, WCODE_PAUSE, WCODE_PLAY,
+    WCODE_PLAYPAUSE, WCODE_STOP};
+use crate::ui::fixture::FixtureMeasure;
+use crate::ui::machine::{
+    Cx, Edge, Effects, EntryId, FocusKey, Fx, GroupId, Handled, Host, InputEvent, InputKind,
+    InputOwner, InstanceId, Machine, MachineId, NavOp, PressId, Source, Tick,
+};
+use crate::ui::screen::{At, By, Focusable, Placed, ScreenEvent};
+
+pub(super) struct TestHost;
+impl Host for TestHost {
+    type Arg = crate::ui::fixture::FixtureArg;
+    type Fx = AppFx;
+    type Msg = AppMsg;
+    type Elem = u32;
+    type Views<'a> = ();
+    type Init = crate::ui::fixture::FixtureArg;
+    type Memory = PageMemory;
+}
+
+impl crate::screens::registry::PlayerLike for TestHost {
+    fn session<'a>(_cx: &Cx<'a, Self>) -> &'a crate::route::PlaybackSession {
+        crate::route::idle_session_for_test()
+    }
+}
+
+thread_local! {
+    // TEST ONLY: see `screens::detail::tests`'s `TEST_METADATA` for why this lives here rather
+    // than being threaded as a parameter.
+    static TEST_METADATA: std::cell::UnsafeCell<crate::stores::metadata::MetadataStore> =
+        std::cell::UnsafeCell::new(crate::stores::metadata::MetadataStore::default());
+}
+
+fn test_store() -> &'static mut crate::stores::metadata::MetadataStore {
+    TEST_METADATA.with(|cell| unsafe { &mut *cell.get() })
+}
+
+impl crate::screens::registry::MetadataLike for TestHost {
+    fn metadata<'a>(_cx: &Cx<'a, Self>) -> crate::metadata::MetadataView<'a> {
+        test_store().view()
+    }
+}
+
+const ENTRY: EntryId = EntryId(44);
+const INST: InstanceId = InstanceId(7);
+
+fn cx() -> Cx<'static, TestHost> {
+    Cx {
+        views: (),
+        tick: Tick::default(),
+        measure: &FixtureMeasure,
+        focus: Default::default(),
+        press: Default::default(),
+        owner: InputOwner::Entry(ENTRY),
+    }
+}
+
+/// Deliver one event through the surface. Returns `(handled, the app requests it raised, whether
+/// it asked the container to dismiss it)` — the three things every test below reads back.
+fn deliver(page: &mut PlayerOverlayScreen, ev: ScreenEvent<TestHost>) -> (Handled, Vec<PlayerReq>, bool) {
+    let mut out = Vec::new();
+    let mut present = crate::ui::present::Present::new();
+    let handled = page.step(
+        &ev,
+        &cx(),
+        &mut Effects::new(&mut out, MachineId::Instance(INST), &mut present),
+    );
+    let mut reqs = Vec::new();
+    let mut dismissed = false;
+    for effect in out {
+        match effect.fx {
+            Fx::App(AppFx::Player(req)) => reqs.push(req),
+            Fx::Nav(NavOp::Dismiss(id)) if id == ENTRY => dismissed = true,
+            _ => {}
+        }
+    }
+    (handled, reqs, dismissed)
+}
+
+/// One key press through the surface.
+fn press(page: &mut PlayerOverlayScreen, sym: u32, wcode: u32, edge: Edge) -> (Handled, Vec<PlayerReq>, bool) {
+    deliver(
+        page,
+        ScreenEvent::Input(InputEvent {
+            kind: InputKind::Key {
+                key: crate::ui::machine::Key::Other,
+                sym,
+                wcode,
+                edge,
+                at_edge: false,
+            },
+            at: Tick { ms: 1_000, dt_us: 0 },
+            source: Source::Sdl,
+        }),
+    )
+}
+
+/// A direction re-delivered at this panel's group EDGE (`EdgeRule::Screen`, §7.3 step 3) — what
+/// the engine does after its own `neighbour` answers `Step::Edge` and the group declares `Screen`
+/// on that side; `edge_key` is the only place left that a panel decides something outside its own
+/// scope, so this is the one path a unit test has to synthesize rather than observe end to end.
+fn press_at_edge(page: &mut PlayerOverlayScreen, sym: u32) -> (Handled, Vec<PlayerReq>, bool) {
+    deliver(
+        page,
+        ScreenEvent::Input(InputEvent {
+            kind: InputKind::Key {
+                key: crate::ui::machine::Key::Other,
+                sym,
+                wcode: 0,
+                edge: Edge::Down,
+                at_edge: true,
+            },
+            at: Tick { ms: 1_000, dt_us: 0 },
+            source: Source::Sdl,
+        }),
+    )
+}
+
+fn click(page: &mut PlayerOverlayScreen, x: f32, y: f32) -> (Handled, Vec<PlayerReq>, bool) {
+    deliver(page, ScreenEvent::Input(InputEvent {
+        kind: InputKind::Click { x, y, hit: None },
+        at: Tick { ms: 1_000, dt_us: 0 },
+        source: Source::Sdl,
+    }))
+}
+
+/// A pointer click's `Activate` — delivered directly by the dispatcher's hit map on a hit
+/// (§7.5-7.6), never scanned for inside `step` any more.
+fn activate(page: &mut PlayerOverlayScreen, elem: u32) -> (Handled, Vec<PlayerReq>, bool) {
+    deliver(page, ScreenEvent::Activate(elem))
+}
+
+/// A keyboard OK's deferred commit — the engine's own press machinery arms on the down edge and
+/// delivers this on release (§7.4).
+fn press_commit(page: &mut PlayerOverlayScreen, id: u32) -> (Handled, Vec<PlayerReq>, bool) {
+    deliver(page, ScreenEvent::PressCommit(PressId(id)))
+}
+
+/// The three panels a viewer reads WHILE the film runs. `More` is deliberately not here.
+const MODAL: [(OverlayKind, &str); 3] = [
+    (OverlayKind::Tracks { tab: 0 }, "Menu (tracks)"),
+    (OverlayKind::Info, "Info"),
+    (OverlayKind::Chapters, "Chapters"),
+];
+
+/// **The reported bug.** A viewer holding the track menu, the Info card or the Chapters strip open
+/// still expects PAUSE/PLAY to work — and the panel to stay up. The old ladder said this by NOT
+/// swallowing; the surface says it by forwarding the press to the loop, which spends it on the
+/// same toggle. Either way the panel is untouched, which is the half `Fx::Nav(Dismiss)` grades.
+#[test]
+fn a_transport_key_is_forwarded_by_a_modal_panel_and_leaves_it_up() {
+    let ps = crate::route::PlaybackSession::IDLE;
+    for (kind, name) in MODAL {
+        for (wcode, want) in [
+            (WCODE_PAUSE, Some(false)),
+            (WCODE_PLAY, Some(true)),
+            (WCODE_PLAYPAUSE, None),
+        ] {
+            let mut page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, kind);
+            let (handled, reqs, dismissed) = press(&mut page, 0, wcode, Edge::Down);
+            assert_eq!(handled, Handled::Yes, "{name}: the surface owns the press");
+            assert_eq!(
+                reqs,
+                vec![PlayerReq::Transport(want)],
+                "{name}: wcode {wcode} must reach the toggle",
+            );
+            assert!(!dismissed, "{name}: the panel stays up under a transport key");
+        }
+    }
+}
+
+/// **(D2 repro)** A fresh DIRECTION is no longer the panel's own at all: it falls through
+/// (`Handled::No`) so the ENGINE's `neighbour` can move it (§7.3 step 2). On 2790f47a this
+/// returned `Handled::Yes` unconditionally (the ladder moved the cursor itself), which is exactly
+/// what made the engine's own geometric stepping dead code. OK is left to the same mechanism
+/// (§7.4) — see the `activate`/`press_commit` tests below for what happens once it fires. BACK
+/// stays the panel's own, since dismissing a modal is not a focus move.
+#[test]
+fn a_fresh_direction_and_ok_fall_through_to_the_engine_and_back_is_still_the_panels_own() {
+    let ps = crate::route::PlaybackSession::IDLE;
+    for (kind, name) in MODAL {
+        let mut page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, kind);
+        let (handled, reqs, _) = press(&mut page, SDLK_UP, 0, Edge::Down);
+        assert_eq!(handled, Handled::No, "{name}: UP is now the engine's to move");
+        assert!(
+            !reqs.iter().any(|r| matches!(r, PlayerReq::Transport(_))),
+            "{name}: UP is not a transport key",
+        );
+
+        let mut page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, kind);
+        let (handled, ..) = press(&mut page, SDLK_RETURN, 0, Edge::Down);
+        assert_eq!(handled, Handled::No, "{name}: OK is the engine's Activate/PressArm to answer");
+
+        let mut page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, kind);
+        let (handled, _, dismissed) = press(&mut page, 0, WCODE_BACK, Edge::Down);
+        assert_eq!(handled, Handled::Yes, "{name}: BACK is still the panel's");
+        assert!(dismissed, "{name}: and BACK is what closes it");
+    }
+}
+
+/// STOP is not one of the transport exceptions. A reading panel owns and swallows it; leaking it
+/// would end playback underneath a still-open panel.
+#[test]
+fn stop_stays_swallowed_by_the_three_reading_panels() {
+    let ps = crate::route::PlaybackSession::IDLE;
+    for (kind, name) in MODAL {
+        let mut page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, kind);
+        let (handled, reqs, dismissed) = press(&mut page, 0, WCODE_STOP, Edge::Down);
+        assert_eq!(handled, Handled::Yes, "{name}: STOP is panel-owned");
+        assert!(reqs.is_empty(), "{name}: STOP must not reach the player");
+        assert!(!dismissed, "{name}: STOP is swallowed, not translated to BACK");
+    }
+}
+
+/// `More` keeps the old swallow-everything answer, for the reason it always had: the transport
+/// exception was reported and reproduced against the other three, and this popover's rows include
+/// the failure read-out's own recovery path.
+#[test]
+fn the_options_popover_keeps_the_old_swallow_everything_behaviour() {
+    let ps = crate::route::PlaybackSession::IDLE;
+    for wcode in [WCODE_PAUSE, WCODE_PLAY, WCODE_PLAYPAUSE] {
+        let mut page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, OverlayKind::More { quality: false });
+        let (handled, reqs, dismissed) = press(&mut page, 0, wcode, Edge::Down);
+        assert_eq!(handled, Handled::Yes);
+        assert!(
+            reqs.is_empty(),
+            "More is excluded from the transport exception (wcode {wcode})",
+        );
+        assert!(!dismissed);
+    }
+}
+
+#[test]
+fn back_dismisses_more_including_the_quality_recovery_variant() {
+    let ps = crate::route::PlaybackSession::IDLE;
+    for quality in [false, true] {
+        let mut page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, OverlayKind::More { quality });
+        let (handled, reqs, dismissed) = press(&mut page, 0, WCODE_BACK, Edge::Down);
+        assert_eq!(handled, Handled::Yes, "More quality={quality} owns BACK");
+        assert!(reqs.is_empty(), "BACK must not activate a More row");
+        assert!(dismissed, "BACK must dismiss More quality={quality}");
+    }
+}
+
+/// **The held-direction cadence, which moved WITH the input** (unchanged mechanism, graded at the
+/// `Handled` level now that a fresh direction no longer moves a cursor `step` itself owns). The
+/// loop paced these four lists at 110 ms from its own `HeldKey` timer; the hardware streams
+/// `Edge::Repeat` at ~50 ms, so without a gate of its own the surface would ask the engine to walk
+/// a menu twice as fast as every other list in the app. A FRESH press is never swallowed by the
+/// press before it, which is what `rearm` is for.
+#[test]
+fn a_held_direction_is_paced_and_a_fresh_press_is_never_swallowed() {
+    let ps = crate::route::PlaybackSession::IDLE;
+    let mut page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, OverlayKind::More { quality: false });
+    // A fresh press rearms the cadence and is handed to the engine.
+    let (handled, ..) = press(&mut page, SDLK_DOWN, 0, Edge::Down);
+    assert_eq!(handled, Handled::No, "the fresh press falls through to the engine");
+    // Two hardware repeats inside one 110 ms window: the second (here, the very next repeat at
+    // the same synthetic instant) is admitted by nothing and stays the panel's own.
+    let (handled, ..) = press(&mut page, SDLK_DOWN, 0, Edge::Repeat);
+    assert_eq!(
+        handled,
+        Handled::Yes,
+        "a repeat inside the window is swallowed by the panel, not handed to the engine",
+    );
+    // …and a NEW press at the same instant is not the held key's beat — it always rearms.
+    let (handled, ..) = press(&mut page, SDLK_DOWN, 0, Edge::Down);
+    assert_eq!(handled, Handled::No, "a fresh press always falls through");
+}
+
+/// **(D2 repro)** A click no longer scans pixels — or dismisses — inside `step`. The dispatcher's
+/// own hit map resolves it BEFORE the raw event reaches a screen at all (§7.5-7.6: a hit delivers
+/// `Activate`, a miss reaches `Style::PlayerPanel`'s own `OnMiss::Dismiss` in
+/// `ui/containers/modal.rs`), so every panel's `step` just lets it fall through. On 2790f47a this
+/// path read `Panel::More`'s own pixel position by hand and dismissed unconditionally for every
+/// other panel — see `activate`/`press_commit` below for what a resolved hit does now.
+#[test]
+fn a_click_no_longer_scans_pixels_or_dismisses_inside_step() {
+    let ps = crate::route::PlaybackSession::IDLE;
+    for (kind, name) in MODAL.into_iter().chain([(OverlayKind::More { quality: false }, "More")]) {
+        let mut page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, kind);
+        let (handled, reqs, dismissed) = click(&mut page, 10.0, 10.0);
+        assert_eq!(handled, Handled::No, "{name}: the engine's hit map resolves a click, not step");
+        assert!(reqs.is_empty(), "{name}: step raises nothing from a raw click");
+        assert!(!dismissed, "{name}: step no longer dismisses a click itself");
+    }
+}
+
+/// **(D2 repro)** `groups()` publishes the ACTIVE panel's real row count. On 2790f47a this
+/// answered one `Free` region of `len: 1` no matter what — `Info` always has exactly two action
+/// buttons regardless of what is playing, so this needs no external data to be a clean assertion
+/// either way, and it is the exact case the package brief names.
+#[test]
+fn groups_publishes_the_active_panels_real_row_count() {
+    let ps = crate::route::PlaybackSession::IDLE;
+    let page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, OverlayKind::Info);
+    let mut groups = Vec::new();
+    Focusable::<TestHost>::groups(&page, &cx(), &mut groups);
+    assert_eq!(groups.len(), 1, "one focus group for the action column");
+    assert_eq!(
+        groups[0].len, 2,
+        "From Beginning + Go to Show/Movie — not the stub's len 1",
+    );
+}
+
+/// **(D2 repro)** `place(k, At::Drawn)` answers each row's OWN drawn rect, not one `Rect::FULL`
+/// for every key regardless of which — the hit map needs the real rect to resolve a click at all.
+#[test]
+fn place_answers_each_rows_own_rect_not_one_full_screen_stop() {
+    let ps = crate::route::PlaybackSession::IDLE;
+    let page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, OverlayKind::Info);
+    let first: Placed = Focusable::<TestHost>::place(&page, &0u32, &cx(), At::Drawn).expect("row 0 places");
+    let second: Placed = Focusable::<TestHost>::place(&page, &1u32, &cx(), At::Drawn).expect("row 1 places");
+    assert_ne!(
+        (first.rect.y, first.rect.h),
+        (second.rect.y, second.rect.h),
+        "each row is its own rect, not the whole screen twice",
+    );
+    let full = crate::ui::Rect::FULL;
+    assert_ne!(
+        (first.rect.x, first.rect.y, first.rect.w, first.rect.h),
+        (full.x, full.y, full.w, full.h),
+        "not the stub's whole-screen placement",
+    );
+    assert!(
+        Focusable::<TestHost>::place(&page, &99u32, &cx(), At::Drawn).is_none(),
+        "an out-of-range row does not place at all",
+    );
+}
+
+/// **(D2 repro)** §7.3 step 5: the ENGINE owns the current element; the owner's `step` only reacts
+/// to a `FocusMoved` it is told about. On 2790f47a nothing in `step` handled this event, so a
+/// panel's own cursor could never follow an engine-driven move at all.
+#[test]
+fn focus_moved_writes_the_new_cursor_into_the_open_panel() {
+    let ps = crate::route::PlaybackSession::IDLE;
+    let mut page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, OverlayKind::Info);
+    assert_eq!(page.sel(), 0);
+    let (_, reqs, _) = deliver(
+        &mut page,
+        ScreenEvent::FocusMoved { from: None, to: FocusKey { entry: ENTRY, elem: 1 }, by: By::Dir },
+    );
+    assert_eq!(page.sel(), 1, "the panel's cursor follows the engine's FocusMoved");
+    assert!(
+        reqs.iter().any(|r| matches!(r, PlayerReq::ExtendHud(_))),
+        "a moved cursor keeps the transport up for a menu's read time",
+    );
+}
+
+/// **(D2 repro)** `Tracks`' and `More`'s rows answer `ElemKind::Bare`: a key-down or pointer-click
+/// `Activate` commits immediately — the engine's own mechanism replacing the old ladder's direct
+/// `Key::Ok` arms.
+#[test]
+fn activate_commits_the_bare_rows_directly() {
+    let ps = crate::route::PlaybackSession::IDLE;
+    let mut page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, OverlayKind::Tracks { tab: 0 });
+    let (_, _, dismissed) = activate(&mut page, 0);
+    assert!(dismissed, "Tracks: Activate commits and dismisses");
+
+    let mut page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, OverlayKind::More { quality: false });
+    let (_, reqs, dismissed) = activate(&mut page, 0);
+    assert!(dismissed, "More: Activate commits and dismisses");
+    assert!(
+        reqs.iter().any(|r| matches!(r, PlayerReq::More(_))),
+        "More: Activate reports its action",
+    );
+}
+
+/// `resolve_menupick_row` is the `/tmp/plxnative-menupick` trigger's own parser: a plain number
+/// always wins (the original "row N" contract, on either tab); a name is only ever tried on the
+/// Audio tab, and an unrecognized one — or a name asked of the Subtitles tab, which has no such
+/// map — resolves to nothing, which `menupick_arm` turns into its "unknown target" log rather than
+/// a commit.
+#[test]
+fn resolve_menupick_row_parses_a_number_or_an_audio_tab_name() {
+    let ps = crate::route::PlaybackSession::IDLE;
+    let audio_page =
+        PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, OverlayKind::Tracks { tab: 0 });
+    assert_eq!(audio_page.resolve_menupick_row("3"), Some(3), "a plain row number always resolves");
+    // no enhancement offered on an idle session with no playing item: the names resolve to nothing
+    assert_eq!(audio_page.resolve_menupick_row("boost"), None);
+    assert_eq!(audio_page.resolve_menupick_row("loudness"), None);
+    assert_eq!(audio_page.resolve_menupick_row("not-a-thing"), None);
+
+    let sub_page =
+        PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, OverlayKind::Tracks { tab: 1 });
+    assert_eq!(sub_page.resolve_menupick_row("2"), Some(2), "a plain row number still resolves on Subtitles");
+    assert_eq!(sub_page.resolve_menupick_row("boost"), None, "names are an Audio-tab-only contract");
+}
+
+/// **A Color press commits and leaves the Subtitles panel UP.** The tone is found by cycling and
+/// watching the caption change; every other Tracks row (including Off) still commits and closes.
+/// Timing itself no longer steps in this panel at all — OK on it hands off to the Timing capsule
+/// overlay (`TrackOk::OpenTiming`, plan §4); see `open_timing_dismisses_tracks_and_opens_the_capsule_with_no_extend_hud`
+/// below for that hand-off.
+#[test]
+fn a_color_press_commits_without_dismissing_the_tracks_panel() {
+    let _g = crate::testlock::serial(); // the panel seeds its tone from the player's global
+    crate::player::restore_subtitle_tone(crate::plex::session::SubtitleTone::White);
+    let ps = crate::route::PlaybackSession::IDLE;
+    let meta = crate::stores::metadata::MetadataStore::default();
+    let mut page = PlayerOverlayScreen::new(&ps, meta.view(), ENTRY, OverlayKind::Tracks { tab: 1 });
+    // no playing item: Off, then the headerless Timing + Color section
+    let color = 2;
+    deliver(&mut page, ScreenEvent::FocusMoved { from: None, to: FocusKey { entry: ENTRY, elem: color }, by: By::Dir });
+    let (_, reqs, dismissed) = activate(&mut page, color);
+    assert!(!dismissed, "a Color press keeps the panel open");
+    assert!(reqs.iter().any(|r| matches!(
+        r,
+        PlayerReq::CommitTrack(crate::ui::track_menu::TrackCommit::SubtitleTone(
+            crate::plex::session::SubtitleTone::Silver
+        ))
+    )));
+    assert!(reqs.iter().any(|r| matches!(r, PlayerReq::ExtendHud(_))));
+
+    deliver(&mut page, ScreenEvent::FocusMoved { from: None, to: FocusKey { entry: ENTRY, elem: 0 }, by: By::Dir });
+    let (_, _, dismissed) = activate(&mut page, 0);
+    assert!(dismissed, "Off still commits and closes");
+}
+
+/// **OK on the dim Timing row while subtitles are Off is inert — it neither opens the capsule
+/// nor closes the panel.** The row reads "nothing to time"; an OK that silently dismissed the
+/// panel would throw away the viewer's place for no effect at all.
+#[test]
+fn ok_on_the_dim_timing_row_while_off_keeps_the_panel_open() {
+    let _g = crate::testlock::serial();
+    crate::player::sidecar::reset();
+    crate::player::set_subtitle_offset(0);
+    let ps = crate::route::PlaybackSession::IDLE;
+    let meta = crate::stores::metadata::MetadataStore::default();
+    let mut page = PlayerOverlayScreen::new(&ps, meta.view(), ENTRY, OverlayKind::Tracks { tab: 1 });
+    // no playing item: Off, then Timing, then Color — and Off is the checked row
+    let timing = 1;
+    {
+        let Panel::Tracks(menu) = page.panel() else { panic!("Tracks panel") };
+        assert_eq!(menu.targets()[timing as usize], crate::ui::track_menu::RowTarget::Timing);
+    }
+    deliver(&mut page, ScreenEvent::FocusMoved { from: None, to: FocusKey { entry: ENTRY, elem: timing }, by: By::Dir });
+    let (_, reqs, dismissed) = activate(&mut page, timing);
+    assert!(!dismissed, "an inert row keeps the panel up");
+    assert!(
+        !reqs.iter().any(|r| matches!(r, PlayerReq::OpenOverlay(_) | PlayerReq::CommitTrack(_))),
+        "and asks for nothing: {reqs:?}",
+    );
+}
+
+/// **The Timing hand-off.** Selecting the Subtitles menu's own Timing row while a subtitle is
+/// active returns `TrackOk::OpenTiming` (`ui::track_menu`'s own
+/// `timing_returns_open_timing_once_a_subtitle_is_active_and_is_inert_while_off`); `activate`'s
+/// Tracks arm spends that by dismissing the Tracks panel and asking for the capsule to open in its
+/// place, WITHOUT the read-time `ExtendHud` every ordinary commit raises — the capsule owns its own
+/// visible time (it hides the HUD outright, `OverlayKind::hud_policy`), so extending a HUD it is
+/// about to hide would be dead motion.
+#[test]
+fn open_timing_dismisses_tracks_and_opens_the_capsule_with_no_extend_hud() {
+    let _g = crate::testlock::serial();
+    crate::player::sidecar::reset();
+    crate::player::set_subtitle_offset(0);
+    let ps = crate::route::PlaybackSession::IDLE;
+    let mut store = crate::stores::metadata::MetadataStore::default();
+    assert!(store.run(crate::stores::metadata::MetadataCmd::InstallPlaying(Some(
+        crate::metadata::PlayingItem::with_subs(vec![crate::metadata::Stream {
+            id: 1,
+            index: 0,
+            lang: "English".into(),
+            lang_code: "eng".into(),
+            codec: "srt".into(),
+            ..Default::default()
+        }]),
+    ))));
+    let mut page = PlayerOverlayScreen::new(&ps, store.view(), ENTRY, OverlayKind::Tracks { tab: 1 });
+    let (sub_row, timing_row) = {
+        let Panel::Tracks(menu) = page.panel() else { panic!("Tracks panel") };
+        let sub_row = menu
+            .targets()
+            .iter()
+            .position(|t| matches!(t, crate::ui::track_menu::RowTarget::Sub(_)))
+            .expect("a subtitle track row");
+        let timing_row = menu
+            .targets()
+            .iter()
+            .position(|t| *t == crate::ui::track_menu::RowTarget::Timing)
+            .expect("Timing row");
+        (sub_row, timing_row)
+    };
+    // Select the subtitle track first — Timing is inert while subtitles are Off.
+    deliver(&mut page, ScreenEvent::FocusMoved { from: None, to: FocusKey { entry: ENTRY, elem: sub_row as u32 }, by: By::Dir });
+    activate(&mut page, sub_row as u32);
+    deliver(&mut page, ScreenEvent::FocusMoved { from: None, to: FocusKey { entry: ENTRY, elem: timing_row as u32 }, by: By::Dir });
+    let (_, reqs, dismissed) = activate(&mut page, timing_row as u32);
+    assert!(dismissed, "OpenTiming dismisses the Tracks panel");
+    assert_eq!(
+        reqs,
+        vec![PlayerReq::OpenOverlay(OverlayKind::Timing)],
+        "and asks for exactly the capsule to open — no ExtendHud alongside it",
+    );
+}
+
+/// The Timing overlay's own word and slot, read by the same heartbeat/replay machinery every
+/// other `OverlayKind` answers through (`app::words`, `PlayerOverlayArg::write`).
+#[test]
+fn timings_word_and_slot() {
+    assert_eq!(OverlayKind::Timing.word(), "timing");
+    assert_eq!(OverlayKind::Timing.slot(), 4);
+}
+
+/// LEFT/RIGHT on the capsule commit a new `SubtitleOffset` through the ordinary `CommitTrack`
+/// path — the same request every other Tracks row's step uses, so the loop's one handler serves
+/// both.
+#[test]
+fn timing_left_and_right_commit_subtitle_offset() {
+    let _g = crate::testlock::serial();
+    crate::player::sidecar::reset();
+    crate::player::set_subtitle_offset(0);
+    let ps = crate::route::PlaybackSession::IDLE;
+    let mut page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, OverlayKind::Timing);
+    let (handled, reqs, dismissed) = press(&mut page, crate::ui::consts::SDLK_RIGHT, 0, Edge::Down);
+    assert_eq!(handled, Handled::Yes, "the capsule owns every key, never falls through");
+    assert!(!dismissed);
+    assert_eq!(
+        reqs,
+        vec![PlayerReq::CommitTrack(crate::ui::track_menu::TrackCommit::SubtitleOffset(100))],
+        "RIGHT steps +100ms",
+    );
+
+    let (_, reqs, _) = press(&mut page, crate::ui::consts::SDLK_LEFT, 0, Edge::Down);
+    assert_eq!(
+        reqs,
+        vec![PlayerReq::CommitTrack(crate::ui::track_menu::TrackCommit::SubtitleOffset(0))],
+        "LEFT steps back down",
+    );
+}
+
+/// OK and BACK both close the capsule (`TimingCapsule::key`'s `Key::Ok | Key::Back` arm) —
+/// dismissing the surface with the offset kept: neither key raises a reset commit, and neither
+/// asks for anything else (the transport staying down is `PlayerScreen::set_hud_policy`'s, for
+/// every way the surface can close).
+#[test]
+fn timing_ok_and_back_close_and_keep_the_offset() {
+    let _g = crate::testlock::serial();
+    crate::player::sidecar::reset();
+    crate::player::set_subtitle_offset(300);
+    let ps = crate::route::PlaybackSession::IDLE;
+    for (sym, wcode) in [(SDLK_RETURN, 0), (0, WCODE_BACK)] {
+        let mut page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, OverlayKind::Timing);
+        let (handled, reqs, dismissed) = press(&mut page, sym, wcode, Edge::Down);
+        assert_eq!(handled, Handled::Yes);
+        assert!(dismissed, "sym={sym} wcode={wcode}: closes the capsule");
+        assert_eq!(reqs, vec![], "sym={sym} wcode={wcode}: no offset reset alongside it");
+    }
+}
+
+/// PLAY/PAUSE still reach the player while the capsule is up — the same transport exception the
+/// three reading panels get (`a_transport_key_is_forwarded_by_a_modal_panel_and_leaves_it_up`),
+/// checked before the Timing branch in `key()` so the capsule never swallows it.
+#[test]
+fn timing_forwards_transport_and_leaves_the_capsule_up() {
+    let _g = crate::testlock::serial();
+    crate::player::sidecar::reset();
+    crate::player::set_subtitle_offset(0);
+    let ps = crate::route::PlaybackSession::IDLE;
+    let mut page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, OverlayKind::Timing);
+    let (handled, reqs, dismissed) = press(&mut page, 0, WCODE_PAUSE, Edge::Down);
+    assert_eq!(handled, Handled::Yes);
+    assert_eq!(reqs, vec![PlayerReq::Transport(Some(false))]);
+    assert!(!dismissed, "the capsule stays up under a transport key");
+}
+
+/// No `ExtendHud` is ever raised while the capsule is the active panel's `Tick` — the capsule
+/// itself hides the HUD (`OverlayKind::extends_hud` is false), so keeping it "alive" for the transport's own
+/// read time would fight that.
+#[test]
+fn timing_ticks_do_not_extend_the_hud() {
+    let _g = crate::testlock::serial();
+    crate::player::sidecar::reset();
+    crate::player::set_subtitle_offset(0);
+    let ps = crate::route::PlaybackSession::IDLE;
+    let mut page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, OverlayKind::Timing);
+    let (_, reqs, _) = deliver(&mut page, ScreenEvent::Tick(Tick { ms: 1_016, dt_us: 16_000 }));
+    assert!(
+        !reqs.iter().any(|r| matches!(r, PlayerReq::ExtendHud(_))),
+        "a Timing tick must not extend the HUD it is itself hiding",
+    );
+}
+
+/// **Info's split, kept from the old ladder's `Key::Ok if p.focus_is_ctl()` arm** (restructure
+/// phase 12): a POINTER click's `Activate` is already a precise, instantaneous gesture, so it
+/// applies the card's action at once; a keyboard OK arms the engine's own (non-holdable) press and
+/// only reaches here as `PressCommit`, on release — which defers instead to the loop's tvOS dip
+/// (`PlayerReq::ArmInfoPress`, read back on the spring-back by `commit_info_press`).
+#[test]
+fn infos_activate_and_press_commit_take_different_roads() {
+    let ps = crate::route::PlaybackSession::IDLE;
+    let mut page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, OverlayKind::Info);
+    let (_, reqs, dismissed) = activate(&mut page, 0);
+    assert!(dismissed, "a pointer click applies the card's action at once");
+    assert!(reqs.iter().any(|r| matches!(r, PlayerReq::Info(_))));
+
+    let mut page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, OverlayKind::Info);
+    let (_, reqs, dismissed) = press_commit(&mut page, 0);
+    assert!(!dismissed, "a keyboard OK defers instead of acting now");
+    assert!(reqs.iter().any(|r| matches!(r, PlayerReq::ArmInfoPress)));
+}
+
+/// `Chapters`' cards answer `ElemKind::Card` (a holdable press for the keyboard): OK's own
+/// `PressCommit` on release seeks and dismisses, exactly as the old ladder's `Key::Ok` did.
+#[test]
+fn chapters_press_commit_seeks_and_dismisses() {
+    let ps = crate::route::PlaybackSession::IDLE;
+    let mut page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, OverlayKind::Chapters);
+    let (_, _, dismissed) = press_commit(&mut page, 0);
+    assert!(
+        dismissed,
+        "Chapters: PressCommit (the Card's release) dismisses regardless of the seek target",
+    );
+}
+
+/// **The one thing a panel still decides outside its own scope**: the engine re-delivers a
+/// direction at this panel's group EDGE (`EdgeRule::Screen`), and Tracks answers by switching its
+/// tab rather than moving within the group — `TrackMenuState::focus_tab`, unchanged from the old
+/// ladder's LEFT/RIGHT arm.
+#[test]
+fn tracks_edge_key_switches_tab_instead_of_moving_within_the_group() {
+    use crate::ui::consts::SDLK_RIGHT;
+    let ps = crate::route::PlaybackSession::IDLE;
+    let mut page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, OverlayKind::Tracks { tab: 0 });
+    assert!(matches!(page.kind(), OverlayKind::Tracks { .. }));
+    let (handled, ..) = press_at_edge(&mut page, SDLK_RIGHT);
+    assert_eq!(handled, Handled::Yes, "the panel answers its own edge crossing");
+    assert!(matches!(page.panel(), Panel::Tracks(_)), "still the same panel, just retabbed");
+}
+
+/// **`FocusSource::Engine`/`HitSource::Engine` (restructure phase 12, D2 Part A)** — this surface
+/// registers through the engine's own hit map and `Focusable` bookkeeping, rather than being
+/// invisible to both the way a `Legacy` screen is.
+#[test]
+fn the_overlay_answers_engine_for_both_focus_and_hits() {
+    use crate::ui::screen::{FocusSource, HitSource, Screen};
+    let ps = crate::route::PlaybackSession::IDLE;
+    let page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, OverlayKind::Info);
+    assert_eq!(Screen::<TestHost>::focus_source(&page), FocusSource::Engine);
+    assert_eq!(Screen::<TestHost>::hit_source(&page), HitSource::Engine);
+}
+
+/// One group seats at its real cursor and reports back to itself through `group_of` — the same
+/// round-trip property `screens/player/mod.rs`'s own `Focusable` suite pins for its four.
+#[test]
+fn the_active_groups_seat_round_trips_through_group_of() {
+    let ps = crate::route::PlaybackSession::IDLE;
+    let page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, OverlayKind::Info);
+    let mut groups = Vec::new();
+    Focusable::<TestHost>::groups(&page, &cx(), &mut groups);
+    assert_eq!(groups.len(), 1, "one focus group for the action column");
+    let seated = Focusable::<TestHost>::seat(
+        &page,
+        groups[0].id,
+        Placed {
+            rect: crate::ui::Rect::FULL,
+            rest_rect: crate::ui::Rect::FULL,
+            clip: crate::ui::Rect::FULL,
+            index: None,
+        },
+        &cx(),
+    );
+    assert_eq!(
+        Focusable::<TestHost>::group_of(&page, &seated.elem, &cx()),
+        Some(GroupId(0)),
+    );
+}
+
+/// **The player's panels dim through the container, inheriting the PLAYING item's own light.** GL
+/// cannot read the video plane, so the track menu and the `…` menu ask for a dim over
+/// [`UnderlaySource::Corners`](crate::ui::screen::UnderlaySource::Corners) — the leaf's UltraBlur
+/// envelope — at their `theme::underlay` roles; the Info card and Chapters strip ask for none, as
+/// they drew none; and an item with no envelope falls back to the flat ink.
+///
+/// Observed RED before this package: every kind answered `Scrim::NONE` (the dims were hand-drawn
+/// inside `TrackMenuState::draw`/`MoreMenuState::draw`), so the first assertion failed at 0.0.
+#[test]
+fn the_player_panels_dim_through_the_container_from_the_playing_items_corners() {
+    use crate::ui::screen::{Screen, UnderlaySource};
+    use crate::ui::theme::underlay::{DIM_PLAYER, DIM_SHEET};
+    let ps = crate::route::PlaybackSession::IDLE;
+    let corners = [[0.1, 0.5, 0.2], [0.2, 0.4, 0.1], [0.6, 0.2, 0.1], [0.1, 0.1, 0.4]];
+    let mut store = crate::stores::metadata::MetadataStore::default();
+    assert!(store.run(crate::stores::metadata::MetadataCmd::InstallPlaying(Some(crate::metadata::PlayingItem {
+        container: String::new(),
+        sid: crate::plex::ServerId::from_raw(0), rk: "rk".into(), show_rk: String::new(), audio: Vec::new(), subs: Vec::new(),
+        video_fps: 0.0, width: 0, height: 0, bitrate: 0, dovi: Default::default(),
+        markers: Vec::new(), chapters: Vec::new(), blur: Some(corners),
+    }))));
+    for (kind, alpha) in [
+        (OverlayKind::Tracks { tab: 0 }, DIM_PLAYER),
+        (OverlayKind::More { quality: false }, DIM_SHEET),
+        (OverlayKind::Info, 0.0),
+        (OverlayKind::Chapters, 0.0),
+    ] {
+        let page = PlayerOverlayScreen::new(&ps, store.view(), ENTRY, kind);
+        let scrim = Screen::<TestHost>::scrim(&page);
+        assert_eq!(scrim.alpha, alpha, "{}: its role's weight", kind.word());
+        if alpha > 0.0 {
+            assert_eq!(scrim.source, UnderlaySource::Corners(corners), "{}: the item's own light", kind.word());
+        }
+    }
+    let bare = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, OverlayKind::Tracks { tab: 0 });
+    assert_eq!(Screen::<TestHost>::scrim(&bare).source, UnderlaySource::Flat, "no envelope: the flat ink");
+}
+
+/// **Issue #162's census, for the four panels over the player**: every row a panel's `Focusable`
+/// declares — what the D-pad walks — is clickable with the pointer over its whole visible rect,
+/// against the map the panel's own paint-free `record_stops` fills. It grades the HIT MAP only —
+/// what a click there spends is `activate_commits_the_bare_rows_directly`'s — and with the empty
+/// test metadata the Tracks and Chapters panels declare no rows, so for those two it is vacuous.
+#[test]
+fn every_panel_row_the_dpad_reaches_is_clickable_with_the_pointer() {
+    use crate::ui::hit::{pointer_gaps, HitMap};
+    use crate::ui::screen::DrawFrame;
+    let _g = crate::testlock::serial();
+    let ps = crate::route::PlaybackSession::IDLE;
+    for kind in [
+        OverlayKind::Tracks { tab: 0 },
+        OverlayKind::Tracks { tab: 1 },
+        OverlayKind::Info,
+        OverlayKind::Chapters,
+        OverlayKind::More { quality: false },
+        OverlayKind::More { quality: true },
+    ] {
+        let page = PlayerOverlayScreen::new(&ps, crate::stores::metadata::MetadataStore::default().view(), ENTRY, kind);
+        let cx = cx();
+        let mut f = DrawFrame::new(&cx, crate::ui::Painter::root());
+        page.record_stops(&mut f);
+        let mut map = HitMap::new();
+        map.fill(f.into_stops());
+        map.swap();
+        let mut groups = Vec::new();
+        Focusable::<TestHost>::groups(&page, &cx, &mut groups);
+        let mut rows = Vec::new();
+        for g in &groups {
+            for elem in 0..g.len as u32 {
+                let p = Focusable::<TestHost>::place(&page, &elem, &cx, At::Drawn)
+                    .unwrap_or_else(|| panic!("{kind:?}: row {elem} is declared but does not place"));
+                let visible = p.rect.intersect(p.clip);
+                if visible.w > 0.0 && visible.h > 0.0 {
+                    rows.push((FocusKey { entry: ENTRY, elem }, visible));
+                }
+            }
+        }
+        if matches!(kind, OverlayKind::Info | OverlayKind::More { .. }) {
+            assert!(!rows.is_empty(), "{kind:?} always has rows to press");
+        }
+        let gaps = pointer_gaps(&mut map, ENTRY, &rows);
+        assert!(gaps.is_empty(), "{kind:?}: rows the pointer cannot click:\n{}", gaps.join("\n"));
+    }
+}
+
+/// **`OverlayKind::ALL` lists every kind exactly once**, and the census derived from it cannot
+/// silently miss a new one: the `match` below names every variant with no wildcard, so adding a
+/// variant fails to compile HERE — the reminder to add it to `ALL` as well — and the slots `ALL`
+/// covers must be exactly `0..ALL.len()`, which a kind left out of `ALL` would break.
+#[test]
+fn every_kind_is_listed_once() {
+    let listed = |k: OverlayKind| match k {
+        OverlayKind::Tracks { .. }
+        | OverlayKind::Info
+        | OverlayKind::Chapters
+        | OverlayKind::More { .. }
+        | OverlayKind::Timing => OverlayKind::ALL.iter().any(|a| a.slot() == k.slot()),
+    };
+    let mut slots: Vec<u8> = OverlayKind::ALL.iter().map(|k| k.slot()).collect();
+    slots.sort_unstable();
+    assert_eq!(slots, (0..OverlayKind::ALL.len() as u8).collect::<Vec<_>>());
+    assert!(OverlayKind::ALL.into_iter().all(listed));
+}

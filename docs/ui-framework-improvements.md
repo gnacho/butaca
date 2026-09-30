@@ -364,6 +364,28 @@ The same deletion repeats at `library.rs:816/872`, `detail.rs:981/993`, `profile
 
 ## 1.7 Hit-testing — `ui/hit.rs`, and it ships **with** the mechanism, not after
 
+> **BUILT** (verified against the tree 2026-09-10, restructure phase 12). The mechanism below
+> shipped as `ui/hit.rs`'s double-buffered `HitMap`, under the names the restructure spec settled
+> on rather than this sketch's own (`HitId` → a generic `K` key, `Painter::hit` → `DrawFrame::stop`,
+> `top_at` → `HitMap::top_at`, unchanged in spirit: "the last stop whose `rect ∩ clip` contains the
+> point, painter order IS z"). It really is registered FROM the draw with the draw's own rect, so
+> visibility and hittability are the same fact, as this section predicted. It now backs every
+> Screen's click resolution (`FocusSource::Engine`/`HitSource::Engine`, spec's D2) rather than the
+> `app.rs` rect-table idiom this section was written to replace — by restructure phase 12 that
+> idiom is gone from every screen (the last two, the player and its overlay, converted in phase
+> 12), so A1's modal-click-fallthrough bug class (below) is now structurally harder to reintroduce
+> for a converted screen: a modal that draws over the transport and does not register a stop for
+> it makes the transport genuinely unhittable, rather than merely policy the click handler had to
+> remember to apply.
+>
+> **Scope of “BUILT”:** this is the hit-map/focus ownership mechanism only. It does not mean the
+> broader recorder contract is closed: controlled replay remains bounded to supported domains,
+> but `tests/focusfp.sh` now exposes both `--targets` and `--resolve`; Resolve grades product
+> Focus/Hit answers pointwise before recorded continuation. This still does not establish
+> whole-application deterministic restore, and `make check` alone does not run committed
+> scenario replays. Those are separate proof and
+> implementation work, not evidence supplied by D2 or this section.
+>
 > **Revised.** An earlier draft deferred this as over-scoped, on the reasoning that it "explicitly
 > does not cover the two grids, which is where most clicks land." **That premise is false.** Both
 > grids draw each visible tile individually with its `rect` already in scope (`home.rs:491-493`,
@@ -571,7 +593,7 @@ Tier A items A5-A9 are independent and can land in any gap.
 # Part 4 — Deliberately not doing
 
 - **Multi-pass traversal / demand-driven re-entry.** The guard sits at the primitive, but the cost is
-  upstream: `widgets::resolve_tex` hashes a 352-byte key per tile per call, `card_row::under_label`
+  upstream: `widgets::resolve_tex` hashes a 352-byte key per tile per call, `card_row::draw_label_block`
   heap-allocates twice per label per call. A skipped pass still pays all of it. Every screen also
   opens with a raw `gfx::frame_clear`, so pass 2 wipes pass 1. And `Painter::text` returning 0.0 on a
   skipped pass breaks the cursor-advance idiom (`library.rs:770-776`). Failure mode: silent 3× CPU.

@@ -76,6 +76,7 @@ pub(crate) fn movie_from_dto(it: &BaseItemDto, sid: ServerId, sec: i64) -> Optio
         title: it.name.clone(),
         year: it.year.unwrap_or(0) as c_int,
         rating: it.official_rating.clone().unwrap_or_default(),
+        aired: String::new(),
         dur_ns,
         // The MediaSource id is what phase 3's PlaybackInfo is addressed by; with no sources in
         // the payload the item id itself is the right fallback — Jellyfin addresses both.
@@ -107,6 +108,7 @@ pub(crate) fn movie_from_dto(it: &BaseItemDto, sid: ServerId, sec: i64) -> Optio
         } else {
             0
         },
+        child_count: 0,
         unwatched,
         watched,
     })

@@ -67,12 +67,11 @@
 //! cannot, because libcurl owns that framing and `net.rs` sees only the assembled body. The gap is
 //! narrower than it looks: `plex::client::get_json` logs the status, the byte count and serde's own
 //! error whenever a 2xx will not parse, over either transport.
-use crate::plex::{Origin, Scheme};
+use crate::plex::{CredentialPolicy, Origin, Scheme, ResolvePin};
 
-/// The verb. The Plex control plane uses three — reads, the body-less `PUT /library/parts/{id}`
-/// that selects a track server-side, and the POSTs whose params ride the query string
-/// (`/:/timeline`, `/playQueues`); the Jellyfin backend adds DELETE for its view-state writes
-/// and its transcode kill.
+/// The verb. Three, because three is what the Plex control plane uses: reads, the body-less
+/// `PUT /library/parts/{id}` that selects a track server-side, and the POSTs whose params ride the
+/// query string (`/:/timeline`, `/playQueues`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Method {
     Get,
@@ -113,14 +112,17 @@ pub(crate) struct Reply {
 pub(crate) enum RequestOutcome {
     Response(Reply),
     Deadline,
-    Transport,
+    /// Nothing answered. Carries libcurl's [`crate::net::RequestFailure`] when the TLS transport
+    /// ran and produced one; `None` from the plaintext transport and from a request refused
+    /// before any transport ran.
+    Transport(Option<crate::net::RequestFailure>),
 }
 
 impl RequestOutcome {
     fn response(self) -> Option<Reply> {
         match self {
             Self::Response(reply) => Some(reply),
-            Self::Deadline | Self::Transport => None,
+            Self::Deadline | Self::Transport(_) => None,
         }
     }
 }
@@ -179,17 +181,17 @@ pub(crate) fn request(
     path: &str,
     method: Method,
     headers: &[&str],
+    pin: Option<&ResolvePin>,
 ) -> Option<Reply> {
-    request_with(origin, path, method, headers, BodyPolicy::Api, &[]).response()
+    request_with(origin, path, method, headers, BodyPolicy::Api, pin, &[]).response()
 }
 
-/// A POST with a JSON request body — the shape Jellyfin's control plane requires
-/// (`/Users/AuthenticateByName` answers 415 to an empty body; Plex's POSTs carry their params in
-/// the query string and an empty body, which is why no entry point took one before). The
-/// `Content-Type: application/json` and `Content-Length` header lines are added HERE, not by the
-/// caller, so the two transports can never disagree about the length: the plaintext arm splices
-/// the header block verbatim and then writes `body`, and libcurl sizes its upload from the same
-/// slice.
+/// A JSON-body POST: the one shape Jellyfin's control plane needs that Plex's never did
+/// (`AuthenticateByName`, `Sessions/Playing`, the view-state writes). The caller's `headers`
+/// ride alongside the two this function adds (`Accept`, `Content-Type`, `Content-Length` — the
+/// body is sized here, so the head and the bytes on the wire cannot disagree). The ordinary API
+/// policy applies; there is deliberately no body-bearing probe or deadline variant, because a
+/// control POST either fits the API budget or is a failure the caller already handles as one.
 pub(crate) fn request_post_json(
     origin: &Origin,
     path: &str,
@@ -203,7 +205,7 @@ pub(crate) fn request_post_json(
     all.extend_from_slice(headers);
     all.push(&ct);
     all.push(&cl);
-    request_with(origin, path, Method::Post, &all, BodyPolicy::Api, body).response()
+    request_with(origin, path, Method::Post, &all, BodyPolicy::Api, None, body).response()
 }
 
 /// A PMS request whose response size is content-dependent. Only the TLS arm differs from
@@ -213,8 +215,9 @@ pub(crate) fn request_bulk(
     path: &str,
     method: Method,
     headers: &[&str],
+    pin: Option<&ResolvePin>,
 ) -> Option<Reply> {
-    request_with(origin, path, method, headers, BodyPolicy::Bulk, &[]).response()
+    request_with(origin, path, method, headers, BodyPolicy::Bulk, pin, &[]).response()
 }
 
 /// A small control-plane request inside an already-running transaction reserve. Plaintext composes
@@ -229,6 +232,7 @@ pub(crate) fn request_until_outcome(
     method: Method,
     headers: &[&str],
     deadline: std::time::Instant,
+    pin: Option<&ResolvePin>,
 ) -> RequestOutcome {
     request_with(
         origin,
@@ -236,6 +240,7 @@ pub(crate) fn request_until_outcome(
         method,
         headers,
         BodyPolicy::Deadline { at: deadline },
+        pin,
         &[],
     )
 }
@@ -243,6 +248,18 @@ pub(crate) fn request_until_outcome(
 /// A bounded discovery probe. The caller chooses 5 s for a local candidate and 10 s for a remote
 /// or relay candidate; this façade carries that policy into either transport without either arm
 /// trying to infer locality from an address.
+///
+/// **Pinned.** `auth::race_batch` builds a [`ResolvePin`] for each `https://…plex.direct`
+/// candidate from the address plex.tv advertised beside it (`ResolvePin::for_origin`) and hands it
+/// down here — exactly the mechanism data calls already use (the `tls` arm below), now run at the
+/// DIAL that decides a winner rather than only after one is already decided. The plaintext arm
+/// ignores it: a pin belongs to a TLS name, never to a literal. A candidate whose dashed label does
+/// not encode the address it was persisted with gets no pin, and resolves through DNS exactly as
+/// before.
+///
+/// `Err` is a transport failure, carrying libcurl's [`crate::net::RequestFailure`] when the TLS
+/// arm produced one — the evidence a discovery verdict names per route
+/// (`plex::probe::RouteOutcome::of_failure`). `None` from the plaintext arm, which has no code.
 pub(crate) fn request_probe(
     origin: &Origin,
     path: &str,
@@ -250,8 +267,9 @@ pub(crate) fn request_probe(
     headers: &[&str],
     max_body: usize,
     timeout_s: i32,
-) -> Option<Reply> {
-    request_with(
+    pin: Option<&ResolvePin>,
+) -> Result<Reply, Option<crate::net::RequestFailure>> {
+    match request_with(
         origin,
         path,
         method,
@@ -260,9 +278,16 @@ pub(crate) fn request_probe(
             max: max_body,
             timeout_s,
         },
+        pin,
+   
         &[],
-    )
-    .response()
+    ) {
+        RequestOutcome::Response(reply) => Ok(reply),
+        RequestOutcome::Transport(failure) => Err(failure),
+        // A probe carries no caller deadline (`BodyPolicy::Probe`), so this is unreachable; it is
+        // a failure without evidence rather than a panic if that ever changes.
+        RequestOutcome::Deadline => Err(None),
+    }
 }
 
 fn request_with(
@@ -271,26 +296,23 @@ fn request_with(
     method: Method,
     headers: &[&str],
     body_policy: BodyPolicy,
-    body: &[u8],
+    pin: Option<&ResolvePin>,
+    req_body: &[u8],
 ) -> RequestOutcome {
     if !credential_transport_allowed(origin, path, headers) {
-        return RequestOutcome::Transport;
+        return RequestOutcome::Transport(None);
     }
     match origin.scheme() {
-        Scheme::Http => plaintext(origin, path, method, headers, body_policy, body),
-        Scheme::Https => tls(origin, path, method, headers, body_policy, body),
+        // The plaintext arm dials the literal it is given; a pin belongs to a TLS NAME only.
+        Scheme::Http => plaintext(origin, path, method, headers, body_policy, req_body),
+        Scheme::Https => tls(origin, path, method, headers, body_policy, pin, req_body),
     }
 }
 
-/// What kind of credential a request carries, if any. The two backends' shapes are listed
-/// separately because they answer to DIFFERENT plaintext policies: a Plex token may ride only TLS
-/// (PMS offers `*.plex.direct` certificates everywhere, so plaintext-with-token is always a
-/// misconfiguration this app refuses), while a Jellyfin token may additionally ride plaintext to
-/// a LAN address — Jellyfin has no wildcard-cert facility and a home server is overwhelmingly
-/// plain HTTP on a private address, so refusing that shape would refuse the backend entirely.
-/// The relaxation is scoped to Jellyfin's own credential spellings so no existing Plex guarantee
-/// moves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Which credential shape a request carries — the Plex arm's rule and the Jellyfin flavor's
+/// relaxation answer DIFFERENT questions, so the classifier names the shape before any policy
+/// runs. `None` is "no credential", and every policy admits it.
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Credential {
     None,
     Plex,
@@ -342,10 +364,11 @@ fn carries_credential(path: &str, headers: &[&str]) -> bool {
     credential_carried(path, headers) != Credential::None
 }
 
-/// The host half of the Jellyfin plaintext relaxation: an address that cannot leave the LAN by
-/// routing — RFC 1918 v4, loopback, link-local, v6 loopback/ULA/link-local. A HOSTNAME (even
-/// `jellyfin.local`) is not on this list on purpose: it requires a resolver round-trip to
-/// classify, the answer can lie (rebinding), and the PoC asks for an address, not a name.
+/// The host half of the Jellyfin plaintext relaxation (the flavor's module doc states the whole
+/// rule): an address that cannot leave the LAN by routing — RFC 1918 v4, loopback, link-local,
+/// v6 loopback/ULA/link-local. A HOSTNAME (even `jellyfin.local`) is not on this list on
+/// purpose: it requires a resolver round-trip to classify, the answer can lie (rebinding), and
+/// the sign-in form asks for an address, not a name.
 fn is_lan_host(host: &str) -> bool {
     use std::net::IpAddr;
     match host.parse::<IpAddr>() {
@@ -366,41 +389,58 @@ pub(crate) fn credential_transport_allowed_by_policy(
     origin: &Origin,
     path: &str,
     headers: &[&str],
-    allow_plaintext_credentials: bool,
+    policy: CredentialPolicy,
 ) -> bool {
-    if origin.is_tls() || allow_plaintext_credentials {
-        return true;
-    }
     match credential_carried(path, headers) {
         Credential::None => true,
-        Credential::Plex => false,
-        // See [`credential_carried`]: Jellyfin's token may cross plaintext only to an address
-        // that cannot route off the LAN. Everything else stays refused.
-        Credential::Jellyfin => is_lan_host(origin.host()),
+        Credential::Plex => crate::plex::grant::allowed_under(policy, origin),
+        // Jellyfin has no *.plex.direct equivalent: a home server is plain HTTP on a LAN
+        // address in the overwhelming majority of installs, so its credential shapes may cross
+        // plaintext ONLY to an address that cannot route off the LAN. TLS, a developer build and
+        // a live consented grant admit everything the Plex arm admits.
+        Credential::Jellyfin => {
+            crate::plex::grant::allowed_under(policy, origin) || is_lan_host(origin.host())
+        }
     }
 }
 
-/// The shared control/media credential boundary. Store builds fail closed on a token-bearing HTTP
-/// URL; only a build that explicitly carries the developer-trigger feature may exercise a local
-/// plaintext PMS for lab work. The log names neither URL nor token.
+/// The shared control/media credential boundary: a request that carries a credential reaches the
+/// wire only when THE authority (`plex::grant`) says its origin may carry one — TLS, a developer
+/// build, or a live consented grant for exactly this plaintext origin. Asked per request, so a
+/// revoked grant stops the next request, whoever queued it and whenever. The log names neither
+/// URL nor token.
 pub(crate) fn credential_transport_allowed(origin: &Origin, path: &str, headers: &[&str]) -> bool {
     let allowed = credential_transport_allowed_by_policy(
         origin,
         path,
         headers,
-        cfg!(feature = "devtriggers"),
+        CredentialPolicy::build(),
     );
     if !origin.is_tls() && carries_credential(path, headers) {
-        static REPORTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-        if !REPORTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-            if allowed {
-                crate::log("security: developer build allows plaintext PMS credentials");
-            } else {
-                crate::log("security: refused plaintext PMS credentials; HTTPS required");
-            }
+        static REPORTED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+        if let Some(line) = plaintext_credential_report(&REPORTED, CredentialPolicy::build(), allowed) {
+            crate::log(line);
         }
     }
     allowed
+}
+
+/// The plaintext-credential log line for this outcome, the first time the process meets it —
+/// once per OUTCOME, not once per process: a store build meets the refusal before the person
+/// consents, and the consented send after it is the line a device check looks for.
+fn plaintext_credential_report(
+    seen: &std::sync::atomic::AtomicU8,
+    policy: CredentialPolicy,
+    allowed: bool,
+) -> Option<&'static str> {
+    let (bit, line) = if policy == CredentialPolicy::AllowPlaintext {
+        (1, "security: developer build allows plaintext PMS credentials")
+    } else if allowed {
+        (2, "security: plaintext PMS credentials sent under a consented grant")
+    } else {
+        (4, "security: refused plaintext PMS credentials; HTTPS required")
+    };
+    (seen.fetch_or(bit, std::sync::atomic::Ordering::Relaxed) & bit == 0).then_some(line)
 }
 
 /// The plaintext arm: [`crate::stream`]'s raw socket.
@@ -423,23 +463,32 @@ fn plaintext(
     req_body: &[u8],
 ) -> RequestOutcome {
     // The raw socket takes ONE `extra` blob, CRLF-terminated per line and CRLF-terminated at the
-    // end — it is spliced straight into the request head. An empty header list must produce a null
-    // pointer, not an empty string, so the head keeps the exact bytes it always had.
-    let extra = (!headers.is_empty()).then(|| {
+    // end — it is spliced straight into the request head. Control-plane is one-shot: send
+    // `Connection: close` so PMS does not wait for a second request on an fd we are about to
+    // `http_close`. Media sequential GETs call `stream::http_open` directly and omit the header
+    // so the demux socket can reuse. A caller that already named Connection keeps their spelling.
+    let extra = {
+        let has_connection = headers.iter().any(|h| {
+            h.split_once(':')
+                .is_some_and(|(name, _)| name.eq_ignore_ascii_case("connection"))
+        });
         let mut s = String::new();
+        if !has_connection {
+            s.push_str("Connection: close\r\n");
+        }
         for h in headers {
             s.push_str(h);
             s.push_str("\r\n");
         }
         s
-    });
+    };
     let Ok(host_c) = std::ffi::CString::new(origin.host()) else {
-        return RequestOutcome::Transport;
+        return RequestOutcome::Transport(None);
     };
     let Ok(path_c) = std::ffi::CString::new(path) else {
-        return RequestOutcome::Transport;
+        return RequestOutcome::Transport(None);
     };
-    let extra_c = extra.and_then(|e| std::ffi::CString::new(e).ok());
+    let extra_c = std::ffi::CString::new(extra).ok();
     let extra_ptr = extra_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
 
     let mut hs = crate::stream::http_stream_boxed();
@@ -475,6 +524,7 @@ fn plaintext(
                 extra_ptr,
                 method.as_str(),
                 effective,
+                &mut crate::checkpoint::NoCheckpoint,
             ) {
                 Ok(()) => 0,
                 Err(crate::stream::HttpOpenError::Status(status)) => {
@@ -484,13 +534,16 @@ fn plaintext(
                 Err(crate::stream::HttpOpenError::Deadline) => {
                     return match owner {
                         DeadlineOwner::Caller => RequestOutcome::Deadline,
-                        DeadlineOwner::Liveness => RequestOutcome::Transport,
+                        DeadlineOwner::Liveness => RequestOutcome::Transport(None),
                     };
                 }
+                // `Stopped` cannot occur: this request has no checkpoint.
                 Err(
-                    crate::stream::HttpOpenError::Aborted | crate::stream::HttpOpenError::Transport,
+                    crate::stream::HttpOpenError::Aborted
+                    | crate::stream::HttpOpenError::Stopped
+                    | crate::stream::HttpOpenError::Transport,
                 ) => {
-                    return RequestOutcome::Transport;
+                    return RequestOutcome::Transport(None);
                 }
             }
         }
@@ -498,6 +551,15 @@ fn plaintext(
         // the ordinary API policy only — there is no body-bearing probe or deadline variant, and
         // `request_post_json`'s doc says why none is needed. An empty slice keeps `http_open`'s
         // byte-for-byte head and behaviour.
+        _ if !req_body.is_empty() => crate::stream::http_open_body(
+            &mut *hs,
+            host_c.as_ptr(),
+            origin.port(),
+            path_c.as_ptr(),
+            extra_ptr,
+            method.as_str(),
+            req_body,
+        ),
         _ if !req_body.is_empty() => crate::stream::http_open_body(
             &mut *hs,
             host_c.as_ptr(),
@@ -564,6 +626,7 @@ fn plaintext(
                             chunk.as_mut_ptr(),
                             want as i32,
                             Some(effective),
+                            &mut crate::checkpoint::NoCheckpoint,
                         ),
                         Some(owner),
                     )
@@ -579,10 +642,10 @@ fn plaintext(
                     deadline_failure = Some(if n == crate::stream::HTTP_READ_DEADLINE {
                         match read_deadline_owner.unwrap_or(DeadlineOwner::Caller) {
                             DeadlineOwner::Caller => RequestOutcome::Deadline,
-                            DeadlineOwner::Liveness => RequestOutcome::Transport,
+                            DeadlineOwner::Liveness => RequestOutcome::Transport(None),
                         }
                     } else {
-                        RequestOutcome::Transport
+                        RequestOutcome::Transport(None)
                     });
                 }
                 break;
@@ -614,21 +677,21 @@ fn plaintext(
     }
     if overflowed {
         crate::log("http: response exceeded body limit");
-        return RequestOutcome::Transport;
+        return RequestOutcome::Transport(None);
     }
     if matches!(body_policy, BodyPolicy::Deadline { .. })
         && opened == 0
         && content_length >= 0
         && (body.len() as i64) < content_length
     {
-        return RequestOutcome::Transport;
+        return RequestOutcome::Transport(None);
     }
     // A status of 0 is not something a server sent — it is what `http_open`'s parser leaves when
     // the connection never produced an `HTTP/1.x NNN` line at all, i.e. a transport failure. It
     // must not reach a caller as a "response", because `classify` would read it as `Unreachable`
     // by luck rather than by decision, and `Reply::ok` would read it as a refusal.
     if status == 0 {
-        RequestOutcome::Transport
+        RequestOutcome::Transport(None)
     } else {
         RequestOutcome::Response(Reply { status, body })
     }
@@ -643,25 +706,31 @@ fn plaintext(
 /// plex.tv advertised. Unmatched private-LAN connections on a share are removed earlier by
 /// `probe::candidates`; validation could reject a stranger there, but could not refund its 8 s
 /// sequential connect setting (subject to the synchronous-resolver caveat in the module doc).
+///
+/// `pin`, when the origin has one, is handed to `net` as a ready `CURLOPT_RESOLVE` entry, so the
+/// `plex.direct` name is dialled at the address plex.tv advertised beside it and no resolver is
+/// consulted — the whole of offline mode, from this layer's point of view. A pin for a DIFFERENT
+/// host than this origin's is ignored: the entry is keyed on the URL's own host, and curl would
+/// simply never match it, but refusing to send it keeps the log honest.
 fn tls(
     origin: &Origin,
     path: &str,
     method: Method,
     headers: &[&str],
     body_policy: BodyPolicy,
+    pin: Option<&ResolvePin>,
     req_body: &[u8],
 ) -> RequestOutcome {
+    let _ = &req_body; // the tls arm forwards it to the socket layer below
     let url = format!("{}{}", origin.base(), path);
+    let resolve = pin
+        .filter(|p| p.host() == origin.host() && p.port() == origin.port())
+        .map(crate::net::resolve::entry_of);
     let owned: Vec<String> = headers.iter().map(|h| (*h).to_string()).collect();
     // A POST carries a body even when that body is empty — the Plex control plane's POSTs put
     // their params in the query string — while GET and the body-less PUT carry none. `net` turns
-    // the second shape into `CURLOPT_CUSTOMREQUEST`. A caller-supplied body (Jellyfin's JSON
-    // control POSTs, via [`request_post_json`]) replaces the empty one wholesale.
-    let body: Option<&[u8]> = if !req_body.is_empty() {
-        Some(req_body)
-    } else {
-        matches!(method, Method::Post).then_some(&[][..])
-    };
+    // the second shape into `CURLOPT_CUSTOMREQUEST`.
+    let body: Option<&[u8]> = matches!(method, Method::Post).then_some(&[][..]);
     let (timeouts, max_body, caller_owns_timeout) = match body_policy {
         BodyPolicy::Api => (crate::net::API, None, false),
         BodyPolicy::Bulk => (crate::net::BULK, None, false),
@@ -715,7 +784,7 @@ fn tls(
     };
     // PMS redirects are responses, never instructions: the path already carries a token. Keeping
     // `FOLLOWLOCATION` off also makes the TLS arm's 3xx semantics match the plaintext arm.
-    match crate::net::request_result(
+    match crate::net::request_result_evidence(
         &url,
         &owned,
         method.as_str(),
@@ -723,15 +792,16 @@ fn tls(
         timeouts,
         false,
         max_body,
+        resolve.as_deref(),
     ) {
         Ok(r) => RequestOutcome::Response(Reply {
             status: r.status as i32,
             body: r.body,
         }),
-        Err(crate::net::RequestError::TimedOut) if caller_owns_timeout => RequestOutcome::Deadline,
-        Err(crate::net::RequestError::TimedOut | crate::net::RequestError::Transport) => {
-            RequestOutcome::Transport
+        Err(failure) if failure.cause == crate::net::RequestError::TimedOut && caller_owns_timeout => {
+            RequestOutcome::Deadline
         }
+        Err(failure) => RequestOutcome::Transport(Some(failure)),
     }
 }
 
@@ -757,6 +827,109 @@ mod tests {
     /// `stream::http_open` and fails to connect. Both are `None`, so what this really pins is that
     /// neither one PANICS and neither one dials the other's target — the useful half on a machine
     /// that has no PMS.
+    /// **The control plane end to end.** An https origin whose name no resolver answers for is
+    /// dialled at the pinned address: the loopback listener ACCEPTS a connection (the TLS
+    /// handshake against a plaintext listener then fails, which is fine — reaching the socket is
+    /// the whole claim, and a DNS failure never reaches one). A pin for a different host is not
+    /// sent, so the same request stays undialled.
+    #[test]
+    fn a_pinned_tls_origin_is_dialled_at_the_pinned_address() {
+        let _g = crate::testlock::serial();
+        if !crate::net::global_init() {
+            return;
+        }
+        let Ok(srv) = std::net::TcpListener::bind("127.0.0.1:0") else { return };
+        let port = srv.local_addr().unwrap().port();
+        srv.set_nonblocking(true).unwrap();
+        let accepts = std::sync::atomic::AtomicUsize::new(0);
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        std::thread::scope(|sc| {
+            sc.spawn(|| {
+                while !stop.load(std::sync::atomic::Ordering::Acquire) {
+                    match srv.accept() {
+                        Ok(_) => {
+                            accepts.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+                        }
+                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(std::time::Duration::from_millis(1))
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+            let origin = Origin::parse(&format!("https://no-such-host.invalid:{port}")).unwrap();
+            let pin = ResolvePin::for_test("no-such-host.invalid", port as i32, "127.0.0.1".parse().unwrap());
+            let other = ResolvePin::for_test("other.invalid", port as i32, "127.0.0.1".parse().unwrap());
+            assert!(request(&origin, "/identity", Method::Get, &[], Some(&other)).is_none());
+            assert_eq!(accepts.load(std::sync::atomic::Ordering::Acquire), 0, "a foreign pin is not sent");
+            assert!(request(&origin, "/identity", Method::Get, &[], Some(&pin)).is_none(), "TLS against a plaintext listener fails, as it must");
+            assert_eq!(accepts.load(std::sync::atomic::Ordering::Acquire), 1, "…but the socket was reached through the pin");
+            stop.store(true, std::sync::atomic::Ordering::Release);
+        });
+    }
+
+    /// **`request_probe` — the discovery race's entry point — carries a pin the same way
+    /// [`request`] does over TLS, and structurally cannot over plaintext.** `auth::race_batch`
+    /// builds a [`ResolvePin`] only for a TLS origin (`ResolvePin::for_origin` refuses anything
+    /// else outright), and `request_with`'s `Scheme::Http` arm calls `plaintext(...)`, which has no
+    /// `pin` parameter at all — there is no plumbing left for a foreign value to travel through even
+    /// if one were built. Proved the same way as the test above, at this entry point instead of
+    /// `request`'s: the TLS probe reaches the pinned loopback socket with no resolver involved, and a
+    /// plaintext probe against a guaranteed-unrouted TEST-NET-1 (RFC 5737) address, given the SAME
+    /// pin pointed at that socket, never reaches it.
+    #[test]
+    fn request_probe_hands_the_pin_to_the_tls_path_only() {
+        let _g = crate::testlock::serial();
+        if !crate::net::global_init() {
+            return;
+        }
+        let Ok(srv) = std::net::TcpListener::bind("127.0.0.1:0") else { return };
+        let port = srv.local_addr().unwrap().port();
+        srv.set_nonblocking(true).unwrap();
+        let accepts = std::sync::atomic::AtomicUsize::new(0);
+        let stop = std::sync::atomic::AtomicBool::new(false);
+        std::thread::scope(|sc| {
+            sc.spawn(|| {
+                while !stop.load(std::sync::atomic::Ordering::Acquire) {
+                    match srv.accept() {
+                        Ok(_) => {
+                            accepts.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+                        }
+                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(std::time::Duration::from_millis(1))
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+            let tls_origin = Origin::parse(&format!("https://no-such-host.invalid:{port}")).unwrap();
+            let pin = ResolvePin::for_test("no-such-host.invalid", port as i32, "127.0.0.1".parse().unwrap());
+            assert!(
+                request_probe(&tls_origin, "/identity", Method::Get, &[], 4096, 1, Some(&pin)).is_err(),
+                "TLS against a plaintext listener fails, as it must"
+            );
+            assert_eq!(
+                accepts.load(std::sync::atomic::Ordering::Acquire),
+                1,
+                "the TLS probe reached the pinned socket with no resolver"
+            );
+
+            let http_origin = Origin::parse("http://192.0.2.1:32400").unwrap();
+            let same_pin = ResolvePin::for_test("192.0.2.1", 32400, "127.0.0.1".parse().unwrap());
+            assert!(
+                request_probe(&http_origin, "/identity", Method::Get, &[], 4096, 1, Some(&same_pin))
+                    .is_err(),
+                "the unrouted literal never answers, pin or no pin"
+            );
+            assert_eq!(
+                accepts.load(std::sync::atomic::Ordering::Acquire),
+                1,
+                "a plaintext probe must never be redirected to the pinned socket"
+            );
+            stop.store(true, std::sync::atomic::Ordering::Release);
+        });
+    }
+
     #[test]
     fn a_request_is_routed_by_the_origins_scheme() {
         // TEST-NET-1 (RFC 5737): guaranteed unrouted, so nothing can answer either of these.
@@ -765,8 +938,8 @@ mod tests {
         assert_eq!(http.scheme(), Scheme::Http);
         assert_eq!(https.scheme(), Scheme::Https);
 
-        assert!(request(&http, "/identity", Method::Get, &[ACCEPT_JSON]).is_none());
-        assert!(request(&https, "/identity", Method::Get, &[ACCEPT_JSON]).is_none());
+        assert!(request(&http, "/identity", Method::Get, &[ACCEPT_JSON], None).is_none());
+        assert!(request(&https, "/identity", Method::Get, &[ACCEPT_JSON], None).is_none());
     }
 
     /// The verb tokens are what goes on the request line, and `plex::client::put` and the
@@ -777,60 +950,6 @@ mod tests {
         assert_eq!(Method::Get.as_str(), "GET");
         assert_eq!(Method::Put.as_str(), "PUT");
         assert_eq!(Method::Post.as_str(), "POST");
-        assert_eq!(Method::Delete.as_str(), "DELETE");
-    }
-
-    /// The credential gate's two-backend contract. Plex shapes stay TLS-only even to a LAN
-    /// address (PMS has plex.direct certificates; plaintext-with-token is a misconfiguration);
-    /// Jellyfin shapes additionally open to LAN literals only (Jellyfin has no such facility —
-    /// see [`credential_carried`]). Everything the policy promises is asserted here rather than
-    /// in prose, because this is the rule that decides whose token can be sniffed off a wire.
-    #[test]
-    fn jellyfin_credentials_ride_plaintext_only_to_a_lan_address() {
-        let lan = Origin::parse("http://192.168.1.20:8096").unwrap();
-        let public = Origin::parse("http://203.0.113.10:8096").unwrap(); // RFC 5737 TEST-NET-3
-        let tls = Origin::parse("https://jellyfin.example.com").unwrap();
-
-        let jf_path = "/Items/abc/Images/Primary?api_key=deadbeef";
-        let jf_header = ["X-Emby-Token: deadbeef"];
-        let plex_path = "/library/metadata/1?X-Plex-Token=deadbeef";
-
-        // Jellyfin: allowed to a LAN literal, refused to a public address, allowed over TLS.
-        assert!(credential_transport_allowed_by_policy(&lan, jf_path, &[], false));
-        assert!(credential_transport_allowed_by_policy(&lan, "/Items/abc", &jf_header, false));
-        assert!(!credential_transport_allowed_by_policy(&public, jf_path, &[], false));
-        assert!(!credential_transport_allowed_by_policy(
-            &public,
-            "/Items/abc",
-            &jf_header,
-            false
-        ));
-        assert!(credential_transport_allowed_by_policy(&tls, jf_path, &[], false));
-
-        // Plex: unchanged — refused in plaintext EVEN to the LAN literal the Jellyfin arm opens.
-        assert!(!credential_transport_allowed_by_policy(&lan, plex_path, &[], false));
-
-        // No credential: allowed anywhere either way.
-        assert!(credential_transport_allowed_by_policy(&public, "/identity", &[], false));
-    }
-
-    /// The address shapes the LAN arm must classify without a resolver: dotted-quad privacy,
-    /// loopback, link-local and v6 ULA in; hostnames and public literals out. A hostname is
-    /// refused ON PURPOSE — classifying one needs a DNS answer, and the answer can lie.
-    #[test]
-    fn the_lan_rule_reads_literals_not_names() {
-        assert!(is_lan_host("192.168.0.1"));
-        assert!(is_lan_host("10.0.0.5"));
-        assert!(is_lan_host("172.16.3.4"));
-        assert!(is_lan_host("127.0.0.1"));
-        assert!(is_lan_host("169.254.1.1"));
-        assert!(is_lan_host("::1"));
-        assert!(is_lan_host("fd12::1"));
-        assert!(is_lan_host("fe80::1"));
-        assert!(!is_lan_host("172.32.0.1")); // just outside 172.16/12
-        assert!(!is_lan_host("203.0.113.10"));
-        assert!(!is_lan_host("jellyfin.local"));
-        assert!(!is_lan_host("not-an-address"));
     }
 
     /// **A `Reply` is a response, not a success.** The fold every caller used to inherit from
@@ -863,6 +982,26 @@ mod tests {
         assert!(!ACCEPT_JSON.contains('\r') && !ACCEPT_JSON.contains('\n'));
     }
 
+    /// A store build refuses plaintext credentials until the person consents — so a refusal is
+    /// normally met FIRST, and the consented send after it must still be said once: the log is
+    /// the only evidence a grant carried a token (PLX-NATIVE-10's device check reads it).
+    #[test]
+    fn each_plaintext_credential_outcome_is_reported_once() {
+        let seen = std::sync::atomic::AtomicU8::new(0);
+        let store = CredentialPolicy::HttpsOnly;
+        assert_eq!(
+            plaintext_credential_report(&seen, store, false),
+            Some("security: refused plaintext PMS credentials; HTTPS required")
+        );
+        assert_eq!(plaintext_credential_report(&seen, store, false), None, "once per outcome");
+        assert_eq!(
+            plaintext_credential_report(&seen, store, true),
+            Some("security: plaintext PMS credentials sent under a consented grant"),
+            "a consented send after a refusal is a different outcome"
+        );
+        assert_eq!(plaintext_credential_report(&seen, store, true), None);
+    }
+
     #[test]
     fn store_policy_refuses_credentials_over_plaintext_http() {
         let http = Origin::http("127.0.0.1", 32400);
@@ -873,31 +1012,31 @@ mod tests {
             &http,
             token_path,
             &[],
-            false,
+            CredentialPolicy::HttpsOnly,
         ));
         assert!(!credential_transport_allowed_by_policy(
             &http,
             "/identity",
             &["Authorization: Bearer secret"],
-            false,
+            CredentialPolicy::HttpsOnly,
         ));
         assert!(credential_transport_allowed_by_policy(
             &https,
             token_path,
             &[],
-            false,
+            CredentialPolicy::HttpsOnly,
         ));
         assert!(credential_transport_allowed_by_policy(
             &http,
             "/identity",
             &[ACCEPT_JSON],
-            false,
+            CredentialPolicy::HttpsOnly,
         ));
         assert!(credential_transport_allowed_by_policy(
             &http,
             token_path,
             &[],
-            true,
+            CredentialPolicy::AllowPlaintext,
         ));
     }
 
@@ -910,7 +1049,13 @@ mod tests {
         let server = std::thread::spawn(move || {
             let (mut socket, _) = listener.accept().expect("accept");
             let mut request = [0u8; 1024];
-            let _ = socket.read(&mut request).expect("request");
+            let n = socket.read(&mut request).expect("request");
+            assert!(
+                request[..n]
+                    .windows(b"Connection: close".len())
+                    .any(|w| w.eq_ignore_ascii_case(b"connection: close")),
+                "control-plane plaintext still sends Connection: close"
+            );
             socket
                 .write_all(
                     b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nabcde",
@@ -919,7 +1064,7 @@ mod tests {
         });
 
         let origin = Origin::http("127.0.0.1", port as i32);
-        assert!(request_probe(&origin, "/identity", Method::Get, &[ACCEPT_JSON], 4, 1).is_none());
+        assert!(request_probe(&origin, "/identity", Method::Get, &[ACCEPT_JSON], 4, 1, None).is_err());
         server.join().expect("server");
     }
 
@@ -941,7 +1086,7 @@ mod tests {
         let origin = Origin::http("127.0.0.1", port as i32);
         let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
 
-        let outcome = request_until_outcome(&origin, "/decision", Method::Get, &[], deadline);
+        let outcome = request_until_outcome(&origin, "/decision", Method::Get, &[], deadline, None);
         server.join().unwrap();
         cross(deadline);
 
@@ -979,11 +1124,11 @@ mod tests {
         let origin = Origin::http("127.0.0.1", port as i32);
         let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
 
-        let outcome = request_until_outcome(&origin, "/decision", Method::Get, &[], deadline);
+        let outcome = request_until_outcome(&origin, "/decision", Method::Get, &[], deadline, None);
         server.join().unwrap();
         cross(deadline);
 
-        assert!(matches!(outcome, RequestOutcome::Transport));
+        assert!(matches!(outcome, RequestOutcome::Transport(_)));
     }
 
     #[test]
@@ -998,7 +1143,7 @@ mod tests {
         let origin = Origin::http("127.0.0.1", port as i32);
         let deadline = std::time::Instant::now() + std::time::Duration::from_millis(80);
 
-        let outcome = request_until_outcome(&origin, "/decision", Method::Get, &[], deadline);
+        let outcome = request_until_outcome(&origin, "/decision", Method::Get, &[], deadline, None);
         let _ = release_tx.send(());
         server.join().unwrap();
 

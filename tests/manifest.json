@@ -5,6 +5,56 @@
   "_fps_comment": "On-device UI framerate regression scenes (./tests/run.py --fps, or --fps-player to add the player tier). Each sets its plxnative-* triggers, runs profiler-OFF, parses the once/sec `loop=<n> route=<r> fps=<n>` heartbeat for its route(+overlay), skips warmup_s samples, and requires the 2nd-lowest loop= >= loop_floor plus whichever of fps_floor / fps_ceiling the scene declares. loop= counts LOOP ITERATIONS (liveness only — a settled screen reads ~62 while swapping nothing); fps= counts FRAMES ACTUALLY SWAPPED and is the only real frame rate here. RENAMED 2026-08-01 with the old name REUSED: a pre-rename log's FPS= is this loop=, and its pres= is this fps=. `item` keys resolve through manifest.local.json exactly like the cases below; detail-transition needs an in-home-catalog (recently-added/on-deck) movie or it FAILs with 'never entered route=detail'. NOTE (who's-watching): a multi-user Plex Home roster boots to the who's-watching PICKER (route=profiles), so any home/detail scene MUST set at least one non-diagnostic plxnative-* trigger — that marks the boot automated and skips the picker to land on route=home. home-hero continuously pages the carousel with plxnative-heroosc; home-fold alternates Hero and the first shelf with plxnative-homefoldosc; home-grid starts in the grid and sweeps its rows. A scene with empty triggers stalls on the picker and FAILs with 'never entered route=home'.",
   "fps_scenes": [
     {
+      "name": "poster-scroll-settle",
+      "tier": "ui",
+      "route": "library",
+      "loop_floor": 50,
+      "run_secs": 30,
+      "warmup_s": 4,
+      "poster_gate": {
+        "kind": "settle",
+        "moving_fps_floor": 55
+      },
+      "triggers": {
+        "plxnative-postergate": "settle",
+        "plxnative-library": true
+      },
+      "comment": "Finite 18-row scroll followed by a complete art window. Requires >=152 library items with reachable artwork. Motion FPS and zero new admissions for fast-moving cards are graded separately from the settled request/upload/render proof. No activation or viewing-history writes."
+    },
+    {
+      "name": "poster-eviction-reversal",
+      "tier": "ui",
+      "route": "library",
+      "loop_floor": 50,
+      "run_secs": 42,
+      "warmup_s": 4,
+      "poster_gate": {
+        "kind": "eviction",
+        "moving_fps_floor": 55
+      },
+      "triggers": {
+        "plxnative-postergate": "eviction",
+        "plxnative-library": true
+      },
+      "comment": "Warm grid rows 0, 6 and 12 under an explicit 12 MiB texture ceiling, reverse quickly across the actually evicted rows, then require them to rearm and render fully. The source retains 64 slots; this scene exercises real byte-LRU eviction before source identity recycling. Requires >=104 library items. No activation or viewing-history writes."
+    },
+    {
+      "name": "poster-hero-grid-dive",
+      "tier": "ui",
+      "route": "home",
+      "loop_floor": 50,
+      "run_secs": 30,
+      "warmup_s": 4,
+      "poster_gate": {
+        "kind": "dive",
+        "moving_fps_floor": 55
+      },
+      "triggers": {
+        "plxnative-postergate": "dive"
+      },
+      "comment": "Warm Home shelf 0 at column 11, return to the hero, then dive back through the retained horizontal offset. The explicit 12 MiB texture ceiling makes hero art evict shelf art, so the dive must refuse actual demand and refill it at rest. Requires >=12 items in Home shelf 0. No activation or viewing-history writes."
+    },
+    {
       "name": "home-hero",
       "tier": "ui",
       "route": "home",
@@ -90,7 +140,9 @@
     {
       "name": "item-menu",
       "tier": "ui",
-      "route": "itemmenu",
+      "route": "home",
+      "overlay": "itemmenu",
+      "_route_note": "`route: home` + `overlay: itemmenu` since UI-restructure phase 10, and `route: home` is the HOST rather than a rename: the card menu WAS a route of its own (`Route::ItemMenu { over: MenuHost }`) whose heartbeat word was `itemmenu`, and it is a `Style::Compact` surface on the shared ModalStack now, so the heartbeat prints the page under it as `route=` and the surface's own `Screen::name` as ` overlay=`. The trigger (`plxnative-itemmenu`) opens it on a HOME grid card, which is what makes `home` the right host word here. tests/run.py's LOOP_RE matches the two groups independently, so a scene left keyed on the retired word would match zero samples and fail as \"never entered this screen\" — the same re-key `home-acct-glass` took in the commit before this one.",
       "_floor_note": "45 like the other scrim'd-popover scenes (track-menu, library-switch): this one draws a full-screen scrim plus a panel OVER the live home grid, which is strictly more fill than home-grid's 50.",
       "loop_floor": 45,
       "run_secs": 18,
@@ -116,7 +168,26 @@
         "plxnative-detailok": true
       },
       "fps_ceiling": 5,
-      "_fps_ceiling_note": "This screen SETTLES, so once its appear/condense springs are done it must fall to the keepalive (0.5/s). 5 leaves room for a late poster landing. Guards the over-reporting direction: an animator that reports when it should not costs the whole feature and trips no floor anywhere."
+      "_fps_ceiling_note": "This screen SETTLES, so once its appear springs, its shelf scroll and the ambient wash's twelve corner springs are done it must fall to the keepalive (0.5/s). 5 leaves room for a late poster landing. (It used to name a band CONDENSE spring too; that band stopped condensing, so anything debugging a ceiling failure here should not go looking for one.) Guards the over-reporting direction: an animator that reports when it should not costs the whole feature and trips no floor anywhere."
+    },
+    {
+      "name": "filmography-idle",
+      "tier": "ui",
+      "route": "person",
+      "loop_floor": 50,
+      "fps_ceiling": 5,
+      "run_secs": 22,
+      "warmup_s": 8,
+      "item": "movie_cast0_in_both_libraries",
+      "comment": "The Filmography route, at rest. It is a screen-owned modal over the person page, so the heartbeat still says route=person; plxnative-filmography opens it on the same frame detailok mounts the person store, and plxnative-personcredits seeds seven departments so the strip is the overflowing one rather than a two-pill row. Reached ONLY this way: the route has no boot trigger that does not go through a cast press.",
+      "triggers": {
+        "plxnative-detail": "$rk",
+        "plxnative-detailsec": 1,
+        "plxnative-detailok": true,
+        "plxnative-filmography": true,
+        "plxnative-personcredits": 9
+      },
+      "_fps_ceiling_note": "This route had NO fps scene at all while it grew three clocks: a horizontal scroll spring for its department strip (tab_hscroll), a preview poster on its own settle timer (PV_SETTLE) and an Xfade for the swap. Only the spring reports to ui::idle for free. The ceiling is the direction that catches all three, because an animator that never reports done costs the whole present gate and trips no floor anywhere in the suite. 5 leaves room for a late preview poster landing. There is no FLOOR twin yet and that is a stated gap rather than an oversight: the strip has no oscillator trigger, and a scene with no motion grades nothing."
     },
     {
       "name": "library-scroll",
@@ -129,8 +200,9 @@
         "plxnative-library": true,
         "plxnative-libosc": true
       },
-      "fps_floor": 25,
-      "_fps_floor_note": "Measured healthy median 49 fps on device 2026-07-31 (this scene's oscillator steps focus every 350ms and the spring now settles inside that period, so the gaps are real idle — the drop from ~60 is the settle predicate working, not a regression). A FROZEN animator reads ~0.5/s, the keepalive alone, so 25 separates them by a wide margin without gating on the exact duty cycle. Fill-rate regressions stay on `loop_floor`, which grades loop= and falls with the render rate while presenting."
+      "fps_floor": 30,
+      "_rebaseline_note": "REBASELINED on device 2026-09-05, after the one-scroll rewrite. Measured median 60 fps (min 60, max 60, n=12) against the July poster-wall number of 49, and the reason is the sweep rather than the fill rate: `libosc` reverses at the document's own ends now (`ui::library::osc_step`) instead of on a 3s clock, which at 350ms could not reach the grid of a twelve-shelf library at all — so something is in motion on every frame and the scene never falls into the idle gate between steps. The floor moves 25 → 30, which keeps the same ratio to the healthy median the old pair had; a FROZEN animator still reads ~0.5/s, so the margin is unchanged. Measured on a one-shelf library: a library with twelve shelves spends more of the leg in the shelf run, so treat 60 as this library's number and the floor as the frozen/alive separator it is meant to be.",
+      "_fps_floor_note": "SUPERSEDED by _rebaseline_note above; kept for its reasoning. Measured healthy median 49 fps on device 2026-07-31 (this scene's oscillator steps focus every 350ms and the spring now settles inside that period, so the gaps are real idle — the drop from ~60 is the settle predicate working, not a regression). A FROZEN animator reads ~0.5/s, the keepalive alone, so 25 separates them by a wide margin without gating on the exact duty cycle. Fill-rate regressions stay on `loop_floor`, which grades loop= and falls with the render rate while presenting."
     },
     {
       "name": "library-switch",
@@ -147,6 +219,19 @@
       "_fps_floor_note": "Measured healthy median 18 fps on device 2026-07-31 (this scene's oscillator steps focus every 350ms and the spring now settles inside that period, so the gaps are real idle — the drop from ~60 is the settle predicate working, not a regression). A FROZEN animator reads ~0.5/s, the keepalive alone, so 8 separates them by a wide margin without gating on the exact duty cycle. Fill-rate regressions stay on `loop_floor`, which grades loop= and falls with the render rate while presenting."
     },
     {
+      "name": "library-idle",
+      "tier": "ui",
+      "route": "library",
+      "loop_floor": 30,
+      "fps_ceiling": 3,
+      "run_secs": 22,
+      "warmup_s": 10,
+      "triggers": {
+        "plxnative-library": true
+      },
+      "comment": "The Library's half of home-idle, and it did not exist before the one-scroll rewrite: a settled library must STOP presenting. It is the only scene that can catch either of this screen's two new perpetual animators — the page/grid fade coordinator and the A–Z rail's alpha spring — repainting forever, because every other library scene drives motion on purpose and an fps FLOOR is blind to a frame rate that is too high. loop_floor still grades loop=, which counts loop iterations: the loop must stay responsive at >=30Hz while presenting nothing. warmup_s is 10, longer than home-idle's 8, because this page settles last: its posters, its section hubs and the shelf reveal springs those land into all have to finish."
+    },
+    {
       "name": "search-type",
       "tier": "ui",
       "route": "search",
@@ -158,7 +243,7 @@
         "plxnative-searchosc": true
       },
       "fps_floor": 20,
-      "comment": "The Search screen while it is being USED: a query in the field and focus travelling the result shelves, which is the shape the screen spends its whole life in. plxnative-search seeds the field (nothing here can type — the harness has no keyboard, and the TV's own panel is raised by the user, not by a trigger), plxnative-searchosc then steps focus every 350ms and reverses every 3s, exactly as homeosc and libosc do. The pairing is required: searchosc alone does not reach route=search, and the sample-count guard would fail the scene as 'never entered this screen' rather than passing it vacuously.",
+      "comment": "The Search screen while it is being USED: a query in the field and focus travelling the result shelves, which is the shape the screen spends its whole life in. plxnative-search seeds the field (nothing here can type — the harness has no keyboard, and the TV's own panel is raised by the user, not by a trigger), plxnative-searchosc then steps focus every 350ms and reverses every 3s, exactly as homeosc does (libosc shares the cadence but reverses at the Library document's own ends, since a clock could not cross that screen's shelf/grid seam). The pairing is required: searchosc alone does not reach route=search, and the sample-count guard would fail the scene as 'never entered this screen' rather than passing it vacuously.",
       "_fps_floor_note": "MEASURED on the dev set 2026-08-14: median 44 fps (min 14, max 60, n=14) with plxnative-searchosc stepping focus every 350ms. 20 is under half that median, the same margin fps:library-scroll takes (floor 25 against a 49 median) — a real regression has to halve the frame rate before this fires, and a STOPPED animator reads ~0.5/s from ui::idle's keepalive alone, so it cannot pass by freezing.\n\nIt replaced a 10 chosen as a frozen-vs-running discriminator while the screen was still being built, back when this scene was expected to FAIL by design. Both that note and its landing check are gone: the screen has landed, and the check it named (plex/mod.rs's 'no callers yet' admission) had rotted anyway.",
       "_caret_note": "THE CARET BLINKS — this note said the opposite, quoting a ui/search/field.rs paragraph ('solid by design', 'a blinking caret would hold the GL loop awake forever') that the module itself has since retracted: BLINK_MS is 530ms and step_blink reports to ui::idle on the phase FLIP alone, so the cost is two presents a second while the panel is up and nothing while it is not. ui/search/mod.rs's the_caret_blinks_and_reports_only_on_the_flip grades both halves on the host.\n\nWhat this scene grades is still not the caret, and no fps scene can: the caret is drawn only while `editing`, i.e. with the television's own keyboard raised. plxnative-search seeds the field but leaves EDITING false (search::enter calls leave() first), raising the panel takes a real OK press on the field, and run_fps_scene has no key-injection path at all — only the playback cases do, via stream_case's inject=. So a caret scene needs a harness change AND would then measure a screen with a system panel over its bottom third, which is a different measurement; the blink's gate is the host test named above.\n\nWhat the fps_floor here does grade is the motion that exists while searching: the field's focus-ink fade as focus enters and leaves it, and the shelves scrolling under the sweep. A frozen shelf spring or a field that stopped reporting to ui::idle::invalidate lands here.",
       "_query_note": "'th' is the one installation-DEPENDENT value in this scene, and it is a literal rather than a symbolic key because run.py resolves items, not queries. Two characters is deliberate — search::MIN_QUERY is 2, so this is also the shortest query the server answers at all (a one-character query returns every hub empty, measured against PMS 1.43.3). It matches any library holding titles that begin with 'The'. If YOUR library returns nothing for it the shelves are empty, the sweep has nothing to travel, and this scene degrades to grading the tab strip's focus springs — change the literal to a term your library matches rather than lowering the floor."
@@ -212,6 +297,25 @@
       "_fps_floor_note": "Graded on the MEDIAN, not the min: navosc reverses every 1400ms of which only the 70+140ms dip is motion, so a 1s heartbeat window can land wholly inside the settled gap and read 0 with a perfectly healthy fade (measured: min=0, median=15). A FROZEN fade reads ~1/s — the keepalive alone — so 8 separates them by a wide margin. This is the scene that proves ui/xfade.rs reports at all: navosc calls nav_open/nav_back DIRECTLY, with no SDL event and no press spring to accidentally cover the ramp."
     },
     {
+      "name": "push-100",
+      "tier": "ui",
+      "route": "home",
+      "item": "movie_in_home_catalog",
+      "bench": "push",
+      "run_secs": 330,
+      "warmup_s": 8,
+      "_run_secs_note": "100 cycles, each cycle two half-periods of PUSH_BENCH_PERIOD_MS=1400 (open, then settle+close) — 280s nominal. 330s leaves ~50s of margin over warmup and the discrete per-frame tick granularity (bench_advance only fires on a frame that actually lands past the period, so real elapsed time runs a little long of the nominal figure, same as navosc's own scenes above).",
+      "bench_worst_ms": 20.0,
+      "bench_drift_ms": 2.0,
+      "bench_rss_growth_kb": 8192,
+      "triggers": {
+        "plxnative-pushbench": "100,$rk",
+        "plxnative-framedrop": true
+      },
+      "comment": "100 push->settle->pop cycles through the real nav path (app::bridge::nav_push/nav_pop/nav_tab), rotating Detail, Person and the Library tab — see dev::scenarios::bench's module doc for why Person opportunistically refreshes from the live cast row rather than being supplied up front, and falls back to Library (logged once) until the first Detail cycle lands cast data. plxnative-framedrop is required: bench's own worst_ms/frames accounting reads the SAME Instruments stamps frame_drop_line does, which read 0 unarmed. Each `bench:` line's worst_ms is the max single-frame Top->Swap cost inside that cycle; the harness (tests/run.py grade_bench) fails on any cycle over bench_worst_ms, on the last-10-vs-first-10 mean drifting past bench_drift_ms, on RSS growing past bench_rss_growth_kb from cycle 10 onward, or on the run stopping short of the `done` line. NOT YET MEASURED on the television; run once to seed real baselines and replace this note.",
+      "_ceiling_note": "bench_worst_ms=20.0 borrows page-panel/about-panel's caching-host ceiling tier rather than modal-ramp's uncached-ramp 75ms — a settled push/pop through Detail and Library is the SAME page-transition machinery home-detail-nav/home-library-nav already grade on loop/fps floors, so 20ms is a first guess pending the device baseline, not a measured figure."
+    },
+    {
       "name": "onboard-sources",
       "tier": "ui",
       "route": "onboard",
@@ -224,36 +328,6 @@
         "plxnative-onboardosc": true
       },
       "comment": "The source picker as the first-run route, using every source the test identity can reach. onboardosc moves the real focus between the bottom action and source list and keeps the present gate continuously awake; both loop and presented frames must remain at or above 50/s. A configured second server may be injected with --shared-server for a heavier local run, but the baseline gate must not disappear when that private fixture is absent."
-    },
-    {
-      "name": "consent-crash",
-      "tier": "ui",
-      "route": "home",
-      "overlay": "consent",
-      "loop_floor": 50,
-      "fps_floor": 50,
-      "run_secs": 18,
-      "warmup_s": 5,
-      "triggers": {
-        "plxnative-consent": "crash",
-        "plxnative-consentosc": true
-      },
-      "comment": "The first independent first-run reporting decision. consentosc walks focus between the answer band and the two readable rows beside it, which keeps the present gate awake across both focus grounds; the trigger changes display state only and records no consent."
-    },
-    {
-      "name": "consent-product",
-      "tier": "ui",
-      "route": "home",
-      "overlay": "consent",
-      "loop_floor": 50,
-      "fps_floor": 50,
-      "run_secs": 18,
-      "warmup_s": 5,
-      "triggers": {
-        "plxnative-consent": "product",
-        "plxnative-consentosc": true
-      },
-      "comment": "The second first-run reporting decision, booted without answering or persisting the first. It has its own strict 50 FPS scene so Product analytics copy and wrapping cannot hide behind the Crash reports measurement."
     },
     {
       "name": "settings-root",
@@ -271,24 +345,10 @@
       "comment": "The Settings root over its frozen, host-keyed ambient wash. settingsosc alternates the first two real rows and keeps the present gate continuously awake, so fps= measures the modal composition's render throughput rather than the brief duty cycle of one focus spring. Both loop= liveness and actual presented fps= must stay at or above 50/s."
     },
     {
-      "name": "settings-privacy",
-      "tier": "ui",
-      "route": "home",
-      "overlay": "privacy",
-      "loop_floor": 50,
-      "fps_floor": 50,
-      "run_secs": 18,
-      "warmup_s": 5,
-      "triggers": {
-        "plxnative-settings": "privacy",
-        "plxnative-settingsosc": true
-      },
-      "comment": "The Privacy editor opened through Settings, with the Settings root still beneath it exactly as in the interactive modal stack. The continuous test oscillator grades the full composition at a strict 50 presented frames/s floor."
-    },
-    {
       "name": "settings-home",
       "tier": "ui",
-      "route": "onboard",
+      "route": "home",
+      "overlay": "onboard",
       "loop_floor": 50,
       "fps_floor": 50,
       "run_secs": 18,
@@ -297,7 +357,7 @@
         "plxnative-settings": "home",
         "plxnative-settingsosc": true
       },
-      "comment": "The shared Home-source picker opened as a Settings editor. settingsosc moves the real source TableView and grades the clean BACK composition over Settings rather than treating the visually similar first-run route as sufficient coverage; the dirty Done replacement is a pure state contract covered by the onboard unit suite."
+      "comment": "The shared Home-source picker opened as a Settings editor. Filters on route=home overlay=onboard rather than the old route=onboard: the picker is now a PAGE of the Settings family surface (`SettingsPage::Favourites`), not its own route, so `app.route` never leaves Home. Until 2026-09-07 this scene selected on overlay=settings — the family's ROOT word — because `bridge::overlay_word` prints whatever the topmost page's `Screen::name` answers, and the Home-sources editor answered the SAME `settings` word the root page does; the scene's heartbeat was therefore BYTE-IDENTICAL to settings-root/settings-idle, so a boot-target regression that left this run stuck on the root (a renamed `plxnative-settings=home` value, or a future bug in the boot-target match in `app/run.rs`) still produced >=5 matching samples and PASSED, at the wrong screen. `OnboardScreen::name` now answers its own `onboard` word while mounted inside the family (word chosen to match the FIRST-RUN mounting of the identical screen, which already prints route=onboard with no overlay — one screen, two positions, one name) and `bridge::overlay_word` maps it, so this scene can no longer be satisfied by any other page of the family. settingsosc moves the real source TableView and grades the clean BACK composition over Settings rather than treating the visually similar first-run route as sufficient coverage; the dirty Done replacement is a pure state contract covered by the onboard unit suite."
     },
     {
       "name": "settings-legal",
@@ -354,7 +414,8 @@
       "triggers": {
         "plxnative-play": "$rk",
         "plxnative-menu": "0"
-      }
+      },
+      "_more_note": "overlay=more (the \"...\" options popover; it IS one of OVERLAY_WORDS, see app/mod.rs) has no fps:more-menu scene here on purpose, not by omission: it has no headless boot trigger. app/playback.rs and app/run.rs only ever open ui::more_menu from a live remote key (MORE, or the OK-hold item context path), the same way info-panel/track-menu/chapters-panel are opened from plxnative-info/plxnative-menu/plxnative-chapters. If a plxnative-more (or equivalent) boot trigger is ever added, mirror this scene as fps:more-menu: route player, overlay more, tier player, loop_floor 45, run_secs 26, warmup_s 9, the same item shape."
     },
     {
       "name": "chapters-panel",
@@ -366,7 +427,7 @@
       "warmup_s": 9,
       "item": "movie_hevc_4k_hdr10_truehd",
       "comment": "The Chapters strip: the third glass overlay the player can raise, and the last one with a boot trigger of its own (plxnative-chapters, app.rs). It sat outside the suite while info-panel and track-menu were gated, which is the gap this closes -- the strip carries a horizontal row of chapter THUMBNAILS over live video, so it is the only player overlay whose cost scales with artwork rather than with rows of text.",
-      "_floor_note": "45, the player-overlay tier, exactly as info-panel and track-menu: same route, same live decode underneath, same cached-glass popover over it. No fps_floor and no fps_ceiling, and that is the tier's shape rather than an omission -- the present gate deliberately EXCLUDES the player route (system.rs slaves the video plane to our surface), so fps= on a player scene grades neither an animator nor an idle screen. loop= is the signal that exists here.",
+      "_floor_note": "45, the player-overlay tier, exactly as info-panel and track-menu: same route, same live decode underneath, same cached-glass popover over it. No fps_floor and no fps_ceiling, and that is the tier's shape rather than an omission -- the present gate answers true while the hardware video plane stays bound (Player::set_video_plane_bound), which is this whole scene, so fps= on a player scene grades neither an animator nor an idle screen. loop= is the signal that exists here.",
       "triggers": {
         "plxnative-play": "$rk",
         "plxnative-chapters": true
@@ -375,7 +436,8 @@
     {
       "name": "home-acct-glass",
       "tier": "ui",
-      "route": "account",
+      "route": "home",
+      "overlay": "account",
       "loop_floor": 50,
       "run_secs": 18,
       "warmup_s": 5,
@@ -388,7 +450,255 @@
       "_trigger_note": "acctosc is load-bearing: the frozen host is supposed to remain still, so the former homeosc trigger would correctly produce no motion and grade only the idle keepalive. heroidx pins the stationary host image so an unrelated hero auto-rotation cannot change the sample.",
       "fps_floor": 50,
       "_fps_floor_note": "The oscillator keeps the profile menu's own selection spring moving and the present gate awake. A frozen white plate cannot pass this floor, while the removed repeated backdrop captures are no longer part of the intended composition.",
-      "_route_note": "`account`, not `home`: the Account popover is a ROUTE of its own (app.rs names it in the heartbeat), so a scene keyed on home matches zero samples and fails as \"never entered this screen\" — which is exactly what the first run of this scene did."
+      "_route_note": "`route: home` + `overlay: account` since UI-restructure phase 10. The Account popover WAS a route of its own (`Route::Account { over: BarHost }`) and this scene was keyed `route: account`; it is a `Style::Sheet` surface on the shared ModalStack now, so the heartbeat prints the HOST page's word as `route=` and the surface's own `Screen::name` as ` overlay=`. tests/run.py's LOOP_RE matches the two groups independently, so a scene keyed on the retired word would match zero samples and fail as \"never entered this screen\" — which is exactly what the first run of this scene did, from the other direction."
+    },
+    {
+      "name": "modal-ramp",
+      "tier": "ui",
+      "route": "home",
+      "loop_floor": 30,
+      "run_secs": 18,
+      "warmup_s": 5,
+      "worst_ceiling_ms": 75,
+      "comment": "Settings opened and dismissed every 1.5 s through the real open/on_back (plxnative-modalosc), so the samples are the appear/disappear RAMP — host snapshot, scrim, ground — rather than a settled modal. No fps_floor: the ramp is ~200 ms of a 1500 ms period, so the median is legitimately low; the frame-TIME gate is the point. BASELINE 2026-09-06 panel-ON (TV session 1): worst robust_max=66.8 ms, max=67.4 — a Settings ramp frame costs ~67 ms today; the ceiling HOLDS that cost (fps floors are held, not raised, during the migration) and phase 11 is what brings it down. BIMODAL (TV session 2, 2026-09-06, phase 1b-ii): the same scene reads EITHER ~65 ms OR ~94 ms, on main's build AND the branch's, in one session (main: 96/94/67; branch: 93/93/65/84/96; a rebuild is byte-identical, so it is not the binary). In the slow mode the Settings-open frame charges ~52 ms to tick_drain (the update phase, where the host snapshot is taken) and ~41 ms to draw; in the fast mode ~10 ms and ~74 ms — the same work, differently placed, plus ~25 ms. Which mode a run lands in is not understood; the ceiling stays at the fast mode so the slow one is VISIBLE, and a single FAIL here is not evidence about a change until it is A/B'd against main in the same session.",
+      "triggers": {
+        "plxnative-settings": "root",
+        "plxnative-modalosc": true
+      }
+    },
+    {
+      "name": "modal-100",
+      "tier": "ui",
+      "route": "home",
+      "item": "movie_in_home_catalog",
+      "bench": "modal",
+      "run_secs": 340,
+      "warmup_s": 8,
+      "_run_secs_note": "100 cycles, each cycle two half-periods of MODAL_BENCH_PERIOD_MS=1500 (present, then settle+dismiss) — 300s nominal, same +50s margin reasoning as push-100.",
+      "bench_worst_ms": 20.0,
+      "bench_drift_ms": 2.0,
+      "bench_rss_growth_kb": 8192,
+      "triggers": {
+        "plxnative-modalbench": "100,$rk",
+        "plxnative-framedrop": true
+      },
+      "comment": "100 present->settle->dismiss cycles through the real modal bridge calls (open_settings/open_account_menu/open_item_menu/open_content_panel, dismiss_surfaces), rotating every Style reachable without a TV-only gesture: Settings (Opaque), the account menu (Sheet), the item menu (Compact, built from a synthetic PmsMovie row through open_item_menu exactly as nav_osc supplies identity directly rather than deriving it from focus) and the About panel (Alert). `plxnative-modalbench=<n>,<rk>` carries its own ratingKey — deliberately NOT reusing plxnative-navosc's trigger here, because setting that file also arms navosc's own independent Home<->tab/Detail bounce (`nav_osc = nav_osc_rk.is_some()`), which would race this bench's own nav stack use. Library menu and Filmography are NOT in the rotation: both need a live, already-mounted page (a Library page instance's SectionAddress/InstanceId, or a Person page gated on Detail cast data) that only push navigation produces, which push-100 already exercises separately — see ModalBench::new's doc for the full reasoning. plxnative-framedrop is required for the same reason as push-100. NOT YET MEASURED on the television; run once to seed real baselines and replace this note.",
+      "_ceiling_note": "bench_worst_ms=20.0, same first-guess reasoning as push-100 — modal-ramp's 75ms is the uncached Settings RAMP frame specifically (TV session 1/2 bimodal cost, documented above); this bench's settle point is the settled, dismissed-back-to-idle side of the cycle, closer to page-panel/about-panel's cached-host tier."
+    },
+    {
+      "name": "deep-100",
+      "tier": "ui",
+      "route": "home",
+      "item": "movie_in_home_catalog",
+      "bench": "deep",
+      "run_secs": 630,
+      "warmup_s": 8,
+      "_run_secs_note": "depth=100, so 2*depth=200 steps, each step two half-periods of DEEP_BENCH_PERIOD_MS=1400 (the nav op, then settle) — 560s nominal (200*2*1.4). 630s leaves ~70s of margin over warmup and the discrete per-frame tick granularity, same reasoning as push-100's own note.",
+      "bench_missed_max": 0,
+      "bench_drift_ms": 2.0,
+      "bench_depth_rss_kb": 16384,
+      "bench_root_rss_kb": 98304,
+      "triggers": {
+        "plxnative-deepbench": "100,$rk",
+        "plxnative-framedrop": true
+      },
+      "comment": "100 pages pushed with NO pop in between (rotating Detail/Person through the real nav_push, opportunistically refreshing Person from the live cast row exactly as push-100 does, falling back to re-pushing Detail — never Library — until cast data lands), then 100 pops back to the root one page at a time — 200 `bench:` lines total, each ONE nav op (`dir=push|pop`) rather than push-100's open+close round trip. Library is NOT in the rotation: its only entry point (app::bridge::nav_tab -> NavOp::SelectTab) retires every entry above the root and mints at most one new one over it, so rotating it in would collapse the very depth this scene exists to build rather than deepen it — see dev::scenarios::bench::DeepBench's module doc. Found while building this scene: NavStack (ui/containers/stack.rs) bounds only the MOUNTED body count at CAP=16 (the oldest body below the top is evicted — Screen torn down, Unmount delivered — once more than 15 stay live below a new top), never the logical stack depth itself, which is unbounded; every Entry (id, arg, ReturnState) is retained regardless, so depth=100 pushes 100 real entries but only ever mounts <=16 of them at once, and a Pop past CAP remounts from the retained ReturnState. bench_depth_rss_kb grades exactly that: the deepest point minus the unwound root is the retained per-level state, which must stay small once eviction is doing its job. plxnative-framedrop is required for the same reason as push-100/modal-100.",
+      "_ceiling_note": "bench_missed_max=0 for push-100's reason. The RSS gates are absolute and end-state because a growth figure measured from step 10 moves with whatever step 10 happened to hold: two runs read 68104 and 81732 kB there against 86856/86296 kB at the root. bench_depth_rss_kb=16384 bounds maxdepth minus the unwound root. bench_root_rss_kb=98304 is the measured ~86.5 MB root plus a margin a little over one 8.3 MB FrameCache, well inside the package's requiredMemory of 160 MB. MEASURED 2026-09-28 on the television, panel off: depth rss 176 kB (87156 at max depth, 86980 at root); 18 missed refreshes in 13 of 200 steps (worst_ms p50 17.6, p95 28.1), the same held-image GPU waits push-100 records. Unfixed, and left failing."
+    },
+    {
+      "name": "legal-document",
+      "tier": "ui",
+      "route": "home",
+      "overlay": "legal",
+      "loop_floor": 30,
+      "run_secs": 18,
+      "warmup_s": 5,
+      "fps_ceiling": 5,
+      "worst_ceiling_ms": 33,
+      "comment": "A pushed legal DOCUMENT (the reader over the frozen ground), reached by one OK on the index (plxnative-legaldoc). It must settle (fps_ceiling) and no settled-screen frame may exceed a vsync pair. BASELINE 2026-09-06 panel-ON (TV session 1): worst robust_max=2.3 ms; the ceiling stands.",
+      "triggers": {
+        "plxnative-settings": "legal",
+        "plxnative-legaldoc": true
+      }
+    },
+    {
+      "name": "page-panel",
+      "tier": "ui",
+      "route": "detail",
+      "item": "movie_h264_ac3_1080p",
+      "loop_floor": 30,
+      "run_secs": 18,
+      "warmup_s": 5,
+      "fps_ceiling": 5,
+      "worst_ceiling_ms": 40,
+      "comment": "A page-owned glass panel (Track information, plxnative-tracks) over a caching host: the alert-over-a-static-page frame is what cost ~75 ms before the host cache. It must settle and its settled peaks must stay under the ceiling. BASELINE 2026-09-06 panel-ON (TV session 1): worst robust_max=5.3 ms (max=26.8, one poster landing); the ceiling stands.",
+      "triggers": {
+        "plxnative-detail": "$rk",
+        "plxnative-tracks": true
+      }
+    },
+    {
+      "name": "about-panel",
+      "tier": "ui",
+      "route": "detail",
+      "overlay": "about",
+      "item": "movie_h264_ac3_1080p",
+      "loop_floor": 30,
+      "run_secs": 18,
+      "warmup_s": 5,
+      "fps_ceiling": 5,
+      "worst_ceiling_ms": 40,
+      "comment": "The About sheet (plxnative-about), the second page-owned glass alert over the same caching host as page-panel and the first surface converted for restructure phase 10's criterion 5. Same gates as page-panel, and the pair is the point: same page, same host policy, two different sheets, so a frame-time regression in the SHARED path (the host snapshot, the scrim, the panel ground) shows on both while one panel's own layout shows on one. It carries an overlay word where page-panel does not, because this scene is also what proves `overlay=about` reaches the heartbeat now that the word is the surface's own `Screen::name` rather than a byte on the page. NOT YET MEASURED on the television: the ceilings are page-panel's, inherited rather than baselined, and the first device run owes this comment its own numbers.",
+      "triggers": {
+        "plxnative-detail": "$rk",
+        "plxnative-about": true
+      }
+    },
+    {
+      "name": "person-bio",
+      "tier": "ui",
+      "route": "person",
+      "overlay": "bio",
+      "item": "movie_cast0_in_both_libraries",
+      "loop_floor": 30,
+      "run_secs": 18,
+      "warmup_s": 5,
+      "fps_ceiling": 5,
+      "worst_ceiling_ms": 40,
+      "comment": "The biography sheet (plxnative-bio) over the person page. Same gates as about-panel and page-panel. It was the app's only DYNAMIC_BACKDROP glass, re-sourcing its blur every changed present, until 2026-09-19: like every panel it now stands on the latched underlay field (`widgets::panel_ground`), so a ceiling that fails here and holds for the other two is this sheet's own foreground (the paged prose, the rail, the feather), not a refresh cadence. It needs plxnative-personbio to have any prose at all on a headless boot: the bio comes from plex.tv, which answers an injected server token 401. NOT YET MEASURED on the television; the ceilings are page-panel's, inherited rather than baselined.",
+      "triggers": {
+        "plxnative-detail": "$rk",
+        "plxnative-detailsec": 1,
+        "plxnative-detailok": true,
+        "plxnative-personbio": "The biography this scene reads, seeded because plex.tv refuses an injected server token. It is deliberately long enough to page: a sheet with one screenful of prose draws no rail and no feather, which is not the frame this scene is grading. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.",
+        "plxnative-bio": true
+      }
+    },
+    {
+      "name": "decision-alert",
+      "tier": "ui",
+      "route": "home",
+      "overlay": "privacy",
+      "loop_floor": 30,
+      "run_secs": 18,
+      "warmup_s": 5,
+      "fps_ceiling": 5,
+      "worst_ceiling_ms": 40,
+      "comment": "The shared yes/no alert (Delete all local data?, plxnative-alert) over the privacy panel over Settings over Home — three modal layers, the deepest composition a bar page carries. Opening it deletes nothing. BASELINE 2026-09-06 panel-ON (TV session 1): worst robust_max=3.0 ms (max=3.7); the ceiling stands.",
+      "triggers": {
+        "plxnative-settings": "privacy",
+        "plxnative-alert": true
+      }
+    },
+    {
+      "name": "cold-open",
+      "tier": "ui",
+      "route": "detail",
+      "item": "movie_h264_ac3_1080p",
+      "loop_floor": 30,
+      "run_secs": 14,
+      "warmup_s": 0,
+      "stall_ceiling_ms": 160,
+      "coldopen_ceiling_ms": 40,
+      "_coldopen_note": "MEASURED, TV session 7 leg 6 (2026-09-10): five unarmed runs of this scene, panel off, `--save-logs`, no `plxnative-framedrop` armed. Every run's `coldopen screen=detail` line read `ms=0` (mount and first prepared+drawn frame landed in the same tick, the honest same-frame reading `diag/heartbeat.rs`'s doc describes) - 5/5, no outliers, two of the five also carrying `prepared=false` (that frame's Budget refused something, independent of the mount being on-screen already). 40 is not the max plus a margin in the usual sense, since the max was 0: it is a flat margin chosen at roughly 2-3 frame times (60fps ~= 16.7ms/frame) over an observed-instant mount, wide enough to absorb real device jitter a 5-sample run cannot rule out without making the gate meaningless (0 or 1 would fail on noise alone). Was 160 (equal to stall_ceiling_ms, carried over with no measurement behind it - see git history for that note's full account). `stall_ceiling_ms` is left at 160 per the brief: it grades a different thing (largest FRAMEDROP total on route=detail over the whole run) and this session's data does not speak to it - no FRAMEDROP line appeared on any of the five runs at all (unarmed, so only lines already above whatever default the scene's own triggers set were possible, and none fired). Do not tighten either from a simulator run - `sim=1` disqualifies the log.",
+      "comment": "The COLD MOUNT of a detail page. TWO gates now: `stall_ceiling_ms` is the largest FRAMEDROP total on route=detail over the WHOLE run, warmup included, because the frame that matters is the first one; `coldopen_ceiling_ms` grades the `coldopen screen=detail` line the app writes unarmed once per mount (restructure spec §8.4). Both are kept deliberately - the FRAMEDROP gate cannot see a cold open faster than its own arming threshold (see `grade_coldopen`), and the coldopen line cannot see a slow frame that is not a mount. BASELINE 2026-09-06 panel-ON (TV session 1): one FRAMEDROP line, total=143.1 ms, on the first detail frame; that run's `results=` was a BLOCKING PMS fetch this arm no longer makes.",
+      "triggers": {
+        "plxnative-detail": "$rk"
+      }
+    },
+    {
+      "name": "show-detail",
+      "tier": "ui",
+      "route": "detail",
+      "loop_floor": 45,
+      "run_secs": 22,
+      "warmup_s": 6,
+      "item": "show_detail",
+      "triggers": {
+        "plxnative-detail": "$rk",
+        "plxnative-detailosc": true
+      },
+      "fps_floor": 45,
+      "comment": "detail-transition on a SHOW: the same oscillator over a page that also carries the season strip and the episode shelf, which a movie has neither of. Issue 18: every show detail held 27 fps where a movie held 60, with identical GPU work — the page's walk re-hashed every episode's text once per registered stop (O(episodes^2) per walk, and the frame walks the page for backdrop discovery as well as the visible pass). Named without 'detail-transition' because --only is a substring match."
+    },
+    {
+      "name": "collection-page",
+      "tier": "ui",
+      "route": "collection",
+      "loop_floor": 50,
+      "run_secs": 20,
+      "warmup_s": 6,
+      "item": "collection",
+      "comment": "Direct Collection-page boot on the `collection` item (a MOVIE collection with at least two members that have posters), resolved through manifest.local.json like every other `item`: `$rk` below becomes that collection's ratingKey. The screen loads its header and ordered children through the real collection store and settles after artwork and scroll motion. An installation that maps no collection SKIPS this scene rather than opening a ratingKey its server does not hold, which would settle on the failure read-out and pass the ceiling vacuously. By hand in the simulator against tests/mock_pms.py, the trigger's value is that mock's collection ratingKey, 50001. MEASURED on the dev set 2026-09-28 (main c468aaf8, panel off): loop/s robust_min 61, median 61 (n=13, two runs); fps robust_max 1, median 0 once the page settles.",
+      "triggers": {
+        "plxnative-collection": "$rk"
+      },
+      "fps_ceiling": 3,
+      "_fps_ceiling_note": "The page settles; this guards a retry/spinner/scroll path reporting frames forever. MEASURED on the dev set 2026-09-28: robust_max 1, median 0 after settle. Ceiling moved 5 -> 3 to match home-idle/library-idle's settled-scene ceiling (ui::idle's KEEPALIVE_MS backstop is 2s, i.e. 0.5/s, so 3 leaves room for a late poster landing without letting a regression through)."
+    },
+    {
+      "name": "detail-collection-shelf",
+      "tier": "ui",
+      "route": "detail",
+      "loop_floor": 50,
+      "run_secs": 20,
+      "warmup_s": 6,
+      "item": "collection_member_movie",
+      "comment": "Detail page of a movie that belongs to a collection with at least two members, so /related carries a collection.related hub and the page draws the collection shelf under its linked heading above Related. detailsec=3 walks focus from the hero to that shelf (hero, extras, cast, collection: the item needs extras and cast too), which scrolls the page and lifts the heading label with the shelf's focus. On the simulator, mock_pms movie 1041 (a member of collection 50001) has that shape. MEASURED on the dev set 2026-09-28 (main c468aaf8, panel off): loop/s robust_min 60-61, median 61; fps robust_max 1, median 0 once the page settles.",
+      "triggers": {
+        "plxnative-detail": "$rk",
+        "plxnative-detailsec": 3
+      },
+      "fps_ceiling": 3,
+      "_fps_ceiling_note": "The page settles once the section scroll, the shelf's label lift and the poster landings are done; this guards the new shelf or its heading reporting frames forever. MEASURED on the dev set 2026-09-28: robust_max 1, median 0 after settle. Ceiling moved 5 -> 3 to match home-idle/library-idle's settled-scene ceiling (ui::idle's KEEPALIVE_MS backstop is 2s, i.e. 0.5/s, so 3 leaves room for a late poster landing without letting a regression through)."
+    },
+    {
+      "name": "library-collections",
+      "tier": "ui",
+      "route": "library",
+      "loop_floor": 50,
+      "run_secs": 18,
+      "warmup_s": 6,
+      "item": "collection",
+      "comment": "The Movies library listed as its collections (TYPE menu > Collections, `all?type=18`): `libtype` switches the listing through the TYPE menu's own edit, then `libosc` sweeps the collection grid, whose cards mix posters and the neutral glyph-and-name tile. `plxnative-library` enters the server's preferred MOVIES library and no trigger names a section, so the scene declares the `collection` item for its REQUIREMENT, not its ratingKey (no trigger reads `$rk`): an installation that maps no collection skips it instead of sweeping an empty grid, and the mapped collection must live in that same Movies library. MEASURED on the dev set 2026-09-28 (main c468aaf8, panel off): loop/s median 60; fps median 60, min 58-59, max 61, over a 3-card collections grid.",
+      "triggers": {
+        "plxnative-library": true,
+        "plxnative-libtype": "collections",
+        "plxnative-libosc": true
+      },
+      "fps_floor": 30,
+      "_fps_floor_note": "MEASURED on the dev set 2026-09-28: flat ~60 fps (median 60, min 58-59, max 61) against this floor of 30, the same frozen/alive separator library-scroll keeps for its own flat 60. Kept at 30 rather than raised: the test identity's mapped collection is a tiny 3-card grid, well short of library-scroll's twelve-shelf library, and a bigger collections grid may spend more of the sweep filling tiles the way library-scroll's larger library does — so 30 stays the frozen/alive line here rather than a tight bound on this one grid's size."
+    },
+    {
+      "name": "track-menu-subs",
+      "tier": "player",
+      "route": "player",
+      "overlay": "menu",
+      "loop_floor": 45,
+      "run_secs": 26,
+      "warmup_s": 9,
+      "item": "movie_h264_ac3_1080p",
+      "comment": "track-menu's own item (movie_hevc_4k_hdr10_truehd) has no subs (make_fixtures.py), so its Subtitles tab measures only the Off row. This variant opens tab 1 on movie_h264_ac3_1080p, which carries embedded subrip, so the grouped Subtitles panel (plan `subtitle-menu-capsule`) is actually measured with rows in it.",
+      "triggers": {
+        "plxnative-play": "$rk",
+        "plxnative-menu": "1"
+      }
+    },
+    {
+      "name": "timing-capsule",
+      "tier": "player",
+      "route": "player",
+      "overlay": "timing",
+      "loop_floor": 45,
+      "run_secs": 36,
+      "warmup_s": 9,
+      "item": "movie_h264_ac3_1080p",
+      "comment": "The Timing capsule (plan `subtitle-menu-capsule` §4): opened by the self-contained plxnative-subtiming trigger, which selects the item's first embedded English subtitle and then opens the capsule directly, never through plxnative-menupick (that one fires at 7000ms and would stack a Tracks panel underneath). movie_h264_ac3_1080p is used rather than track-menu's 4K HDR item because it has embedded subrip and plays direct, so committing a subtitle track does not reload the pipeline mid-scene.",
+      "_run_secs_note": "26 was too short on real hardware: on this item playback does not reach its first decoded frame (pos=0) until ~13s into the run, so warmup_s=9 left only ~4s of settled measurement before the scene ended -- a device run once needed 13 real seconds just to reach pos=0, one sample short of loop_floor's post-warmup minimum. 36 gives the same warmup plus a real post-warmup window after this item's own start latency, not just after the trigger fires.",
+      "triggers": {
+        "plxnative-play": "$rk",
+        "plxnative-subtiming": "1"
+      }
     }
   ],
   "cases": [
@@ -444,6 +754,97 @@
         "require_video_bound": true
       },
       "_quality_note": "The standalone CONTROL: it establishes that playback left alone on Auto runs on this server, independently of the switching mechanism. Deliberately asserts nothing about rungs or controller presence: on an unshaped link what Auto chooses is the server's and the network's business, and a bound here would grade the afternoon. Run with `--verbose` when its `auto:` and `abr: sample` lines are wanted as characterisation; no cross-case fact is silently imported into the switch assertions."
+    },
+    {
+      "name": "offline_play",
+      "item": "movie_h264_ac3_1080p",
+      "kind": "movie",
+      "title": "Offline: the television's uplink cut, boot from the stored sign-in, play from the LAN server",
+      "covers": [
+        "offline",
+        "resolve-pin",
+        "stored-session",
+        "e2e"
+      ],
+      "session": "stored",
+      "wan": "off",
+      "run_secs": 70,
+      "operations": [
+        {
+          "op": "play"
+        }
+      ],
+      "expect": {
+        "min_timeline_climb_s": 20,
+        "no_playing_error": true,
+        "require_video_bound": true,
+        "resolve_pin": "v4",
+        "offline": true
+      },
+      "_note": "THE offline case. `session: stored` boots from the install's own sign-in — whose primary is the `https://…plex.direct` name plex.tv advertised, exactly what a household's television persists — and `wan: off` rejects every packet leaving the LAN plus every DNS query, on the set, for this case. What is graded: the boot pinned that name to the stored address (`resolve_pin`), plex.tv was refused and the primary's hubs still landed (`offline`), and a film played and reported progress over the LAN. It plays as the STORED profile, so that profile's history moves; the pre-case unscrobble is on the test user and does not reach it. Needs a sign-in on the install, made with the internet up."
+    },
+    {
+      "name": "offline_play_v6",
+      "item": "movie_h264_ac3_1080p",
+      "kind": "movie",
+      "title": "Offline over IPv6: the primary re-pointed to its IPv6 plex.direct origin, then the same play",
+      "covers": [
+        "offline",
+        "resolve-pin",
+        "ipv6",
+        "e2e"
+      ],
+      "session": "stored",
+      "wan": "off",
+      "primary_ipv6": true,
+      "run_secs": 70,
+      "operations": [
+        {
+          "op": "play"
+        }
+      ],
+      "expect": {
+        "min_timeline_climb_s": 20,
+        "no_playing_error": true,
+        "require_video_bound": true,
+        "resolve_pin": "v6",
+        "offline": true
+      },
+      "_note": "`offline_play` with the primary moved onto the server's IPv6 `plex.direct` origin: the harness reads that connection (uri + address) off plex.tv and writes it as a plxnative-servers entry with the same machineIdentifier and a `pin`, which RE-POINTS slot 0 rather than adding a source. On the dev set's libcurl 7.53.1 the resolve entry is the bare v6 literal (brackets arrived in 7.57.0), so this is the run that proves that syntax on the television; the media stream is TLS over v6. Skips with a reason when plex.tv advertises no local IPv6 connection for the server."
+    },
+    {
+      "name": "offline_pick_cached",
+      "item": "movie_h264_ac3_1080p",
+      "kind": "movie",
+      "title": "Offline: pick a household profile on the who's-watching screen with plex.tv unreachable, then play",
+      "covers": [
+        "offline",
+        "profiles",
+        "stored-session",
+        "e2e"
+      ],
+      "session": "stored",
+      "wan": "off",
+      "prime_online": [
+        1,
+        2
+      ],
+      "triggers": {
+        "pickuser": "1"
+      },
+      "run_secs": 70,
+      "operations": [
+        {
+          "op": "play"
+        }
+      ],
+      "expect": {
+        "min_timeline_climb_s": 20,
+        "no_playing_error": true,
+        "require_video_bound": true,
+        "offline_pick": true
+      },
+      "_note": "The 2026-09-06 outage: with the uplink down the picker could seat nobody, because every pick went to plex.tv's /switch. Now a profile this television has seated online before is seated from the credentials that seating cached (`Session::profiles`; a PIN-protected one on its PIN, checked against a local verifier). `prime_online` seats roster tile 1 and then tile 2 with the link up, so tile 1 is CACHED but NOT ACTIVE (the active profile needs no network — an older shortcut this case must not grade); `pickuser=1` then picks tile 1 with the link cut. Tiles 1 and 2 must be UNPROTECTED profiles — the harness cannot type a PIN it does not know; the protected case is proven on the simulator (`docs/measurements/offline-picker-sim-green-2026-09-06.log`) and by hand. Graded: the pick was seated offline (`offline_pick`), plex.tv was refused and the primary's hubs landed (`offline`), and a film played over the LAN. `expect.offline` is deliberately absent: its positive half wants the primary's hubs, and the play trigger enters the player the moment the seating lands, before Home has fetched a shelf; the offline-seat line is itself the proof plex.tv did not answer."
     },
     {
       "name": "auto_hls_pin_and_back",
@@ -1060,11 +1461,11 @@
       "name": "dp_h264_ac3_many_audio",
       "item": "movie_h264_ac3_many_audio",
       "kind": "movie",
-      "title": "movie · h264/ac3 · 1080p · 8 audio tracks (dts + vorbis present)",
+      "title": "movie · h264/ac3 · 1080p · 8 audio tracks (truehd + vorbis present)",
       "covers": [
         "h264+ac3",
         "many-audio-tracks",
-        "dts+vorbis-present"
+        "truehd+vorbis-present"
       ],
       "run_secs": 60,
       "operations": [
@@ -1299,12 +1700,12 @@
       "name": "audio_switch_native",
       "item": "episode_hevc_4k_hdr10_eac3",
       "kind": "episode",
-      "title": "episode · hevc 4K HDR10 / e-ac3 · foreign default + eng — native audio switch (eng auto-picked at start -> the default-language track, row 0)",
+      "title": "episode · hevc 4K HDR10 / e-ac3 · foreign default + eng — native audio switch (file default picked at start -> switch to row 1, the English track)",
       "covers": [
         "audio-switch-native",
         "hevc-stays-174",
         "eac3->eac3",
-        "auto-pick-eng-start"
+        "file-default-picked-at-start"
       ],
       "run_secs": 60,
       "operations": [
@@ -1314,7 +1715,7 @@
         {
           "op": "audio_switch",
           "tab": 0,
-          "row": 0,
+          "row": 1,
           "mode": "native"
         }
       ],
@@ -1331,11 +1732,11 @@
       "name": "audio_switch_transcode",
       "item": "movie_h264_ac3_many_audio",
       "kind": "movie",
-      "title": "movie · h264/ac3 · 1080p · 8 audio tracks — switch to the English dts track (forces transcode)",
+      "title": "movie · h264/ac3 · 1080p · 8 audio tracks — switch to the English truehd track (forces transcode)",
       "covers": [
         "audio-switch-transcode",
         "lang-forces-transcode",
-        "dca-target"
+        "truehd-target"
       ],
       "run_secs": 70,
       "operations": [
@@ -1425,6 +1826,95 @@
         "no_playing_error": true,
         "require_video_bound": true
       }
+    },
+    {
+      "name": "audio_enhancement_normalize",
+      "item": "episode_h264_aac",
+      "kind": "episode",
+      "title": "episode · h264/aac · 1080p · no subtitle — live Normalize Loudness toggle (issue #266) turns a direct play into an enhanced remux",
+      "comment": "Retargeted off movie_h264_ac3_1080p (PR4 device run, 2026-09-29): the Guest identity PMS pre-selects an SRT subtitle on that item (`server-selected subtitle: sid=2698 render_idx=2`), and the enhancement rows are withheld by design whenever a subtitle is shown (M4: text subs are not carried into the enhanced progressive MKV; see route/plan.rs's `subtitle_shown` gate on `enhancements_offered`) — so the rows never appeared and the case direct-played without ever exercising the toggle. episode_h264_aac has no subtitle selected for Guest, so the rows are offered. The Audio tab's row layout (track_menu.rs's build_audio) appends the two Plex Pass DSP rows AFTER the audio tracks: `which` names the row, and run.py writes it as a NAMED plxnative-menupick target (`0,loudness`/`0,boost`), resolved against the panel's own AudioRowTarget row map (TrackMenuState::row_for_audio_target) rather than a row number derived from this item's track count. audio_enhancements_boot is omitted (defaults to \"off\"), so this case starts direct-playing exactly like dp_h264_aac_episode. op_audio_enhancement grades what the toggle produced, never a literal codec: the `decision output:` audio at/before `enhancement: applied` must equal the post-toggle Load's declared audio (PMS answers this item's AAC source with a=aac, and the payload follows /decision's OUTPUT), the video codec must match the pre-toggle `load: v=`/`ff: v=` (a copy, not a re-encode), the post-toggle stream must be start.mkv, and no `ff: open_input failed` may follow (the direct-play demuxer the reload tears down logs `ff: aborted during open_input`).",
+      "covers": [
+        "audio-enhancement-normalize",
+        "enhancement-applied",
+        "enhancement-remux-not-reencode"
+      ],
+      "run_secs": 70,
+      "operations": [
+        {
+          "op": "play"
+        },
+        {
+          "op": "audio_enhancement",
+          "which": "normalize_loudness"
+        }
+      ],
+      "expect": {
+        "decision": "directplay",
+        "codec": "h264",
+        "min_timeline_climb_s": 8,
+        "no_playing_error": true,
+        "require_video_bound": true
+      },
+      "known_gap": false
+    },
+    {
+      "name": "audio_enhancement_normalize_reset",
+      "item": "episode_h264_aac",
+      "kind": "episode",
+      "title": "episode · h264/aac · 1080p · no subtitle — boots with Normalize Loudness forced ON, then releases it back to Original (issue #266)",
+      "comment": "Retargeted off movie_h264_ac3_1080p (PR4 device run, 2026-09-29) for the same reason as audio_enhancement_normalize above: Guest has a server-selected SRT subtitle on that item, and a shown subtitle withholds the enhancement rows by design, so the case never reached the toggle it exists to exercise. episode_h264_aac has no subtitle selected for Guest. Boost Dialog / Normalize Loudness is a PERSISTED preference (plex/session.rs's Session::audio_enhancements), not an in-memory-only override like plxnative-quality — so a harness that ever turns it on must guarantee every later case starts clean regardless of whether its own pick lands. `audio_enhancements_boot: \"loudness\"` forces the preference ON at boot through dev::scenarios::arm_audio_enhancements (the SAME persisting player::set_audio_enhancements call a real pick makes), which also proves the cold-start path: route/plan.rs's cold-start audio branch turns an otherwise direct-playable candidate into an enhanced remux before the first frame, hence expect.decision here is \"transcode\". Picking the SAME derived row again (`settle: \"released\"` selects the release grader) TOGGLES the preference back to NONE through the ordinary commit path — not a second boot trigger — so it re-persists as OFF for real and this case is its own cleanup: no second op, no dependency on run order. Releases straight back to Direct Play since this item's candidate direct-plays (route/decision.rs's EnhancementStep::ReleaseToDirect), and op_audio_enhancement_release grades where it LANDED: `released to Original direct play`, the next stream line is the /library/parts/ Part, no later start.mkv/start.m3u8 stream line (a failed trial rolls back to the enhanced remux) and no status=503 stream line (PR4's first device run met exactly that refusal; the Part is now admitted before the trial, and a refused one becomes the plain remux, which this case fails). The picked row is still the named `loudness` target (this item carries 2 audio tracks, but the trigger names the row rather than deriving a number from that count) — never hardcoded. **Known gap (device, TV, live PMS 1.43.4, Guest, 2026-09-29):** admitting the Part before the trial did not close this case — with the enhanced start.mkv actually playing first (timelines posted on this same session id), the admission's own Part GET still meets HTTP 503, so the release still lands on the plain codec-copy Original remux, not Direct Play; `enhancement: server refused the Original Part (HTTP 503); restoring Original as a remux` is the honest, expected line, and op_audio_enhancement_release fails the case on it exactly as designed — the grader is not weakened, and this stays XFAIL until the server side of the 503 is understood or worked around. Host probes as Guest against the same server and Part identity could not reproduce it (every Part GET came back 200/206, with the remux encoder live, stopped, or abandoned, same session id, identical header keys) — the difference a host cannot create is the posted timelines, so the leading untested hypothesis is that PMS refuses a raw Part on a session it has already seen post `state=playing` timelines (a `session lacking permission to direct play` style refusal), which is untestable from a host because timelines are real watch-history writes.",
+      "covers": [
+        "audio-enhancement-cleanup",
+        "audio-enhancement-cold-start-remux"
+      ],
+      "run_secs": 50,
+      "operations": [
+        {
+          "op": "play"
+        },
+        {
+          "op": "audio_enhancement",
+          "which": "normalize_loudness",
+          "settle": "released"
+        }
+      ],
+      "audio_enhancements_boot": "loudness",
+      "expect": {
+        "decision": "transcode",
+        "codec": "h264",
+        "min_timeline_climb_s": 8,
+        "no_playing_error": true,
+        "require_video_bound": true
+      },
+      "known_gap": "device, TV, live PMS 1.43.4, Guest, 2026-09-29: releasing the enhancement after the enhanced start.mkv has actually played (timelines posted on this session id) meets a 503 on admit_original_part's own Part GET, so the release lands on the plain codec-copy Original remux instead of Direct Play; host probes as Guest could not reproduce the 503 on the same server/identity, and the leading untested hypothesis is that PMS refuses a raw Part on a session that has posted state=playing timelines, which a host cannot exercise because timelines are watch-history writes."
+    },
+    {
+      "name": "audio_enhancement_withheld_under_subtitle",
+      "item": "movie_h264_ac3_1080p",
+      "kind": "movie",
+      "title": "movie · h264/ac3 · 1080p · server-selected subtitle — a shown subtitle withholds the enhancement even with the preference forced ON (issue #266)",
+      "comment": "The device-level proof of the subtitle gate that audio_enhancement_normalize and audio_enhancement_normalize_reset had to move off this item to avoid: Guest's PMS pre-selects an SRT subtitle on movie_h264_ac3_1080p (`server-selected subtitle: sid=2698 render_idx=2`), and route/plan.rs's cold-start audio branch computes `subtitle_shown` and feeds it into `enhancements_offered` for the SAME candidate the boot-forced preference would otherwise decorate — so with a subtitle on screen the preference is evaluated and refused before the first frame, not merely hidden from the menu. `audio_enhancements_boot: \"loudness\"` forces the PERSISTED preference ON at boot through dev::scenarios::arm_audio_enhancements, exactly like audio_enhancement_normalize_reset — and it is reset back to \"off\" by the SAME per-case `plxnative-audioenh` boot trigger run.py writes for every case (triggers_for_case: `files.append((\"plxnative-audioenh\", case.get(\"audio_enhancements_boot\", \"off\")))`), so this case needs no cleanup op of its own. There is no menu row to pick here — the rows are withheld from the Audio tab entirely (track_menu.rs's enh_rows_absent_subtitle_shown) — so the only operation is `play`, and op_audio_enhancement_withheld grades the boot log directly: the forced-preference line must be present, a server-selected-subtitle line must be present (the precondition this case depends on — its absence fails loudly instead of passing vacuously if a future server or library stops selecting a subtitle here), and no `enhancement:` line of any kind may appear. Because the enhancement is refused, not applied, the candidate direct-plays exactly like any other movie_h264_ac3_1080p case.",
+      "covers": [
+        "audio-enhancement-subtitle-gate"
+      ],
+      "run_secs": 60,
+      "operations": [
+        {
+          "op": "play"
+        },
+        {
+          "op": "audio_enhancement_withheld"
+        }
+      ],
+      "audio_enhancements_boot": "loudness",
+      "expect": {
+        "decision": "directplay",
+        "codec": "h264",
+        "min_timeline_climb_s": 8,
+        "no_playing_error": true,
+        "require_video_bound": true
+      },
+      "known_gap": false
     }
   ],
   "_pipeline_comment": "The SYNTHETIC tier, and the DEFAULT one since 2026-08-22: the player with no Plex behind it. Each case names a GENERATED clip (`make fixtures-pipeline`) served off the dev machine by tests/serve_fixtures.py, and the Load payload DECLARATION to play it with. A bare `./tests/run.py` runs them; `--server` selects the library-backed 21 instead. Nothing here is installation-dependent -- no ratingKey, no PMS, no token, no manifest.local.json -- which is what makes this the tier a stranger can run.",
@@ -1466,6 +1956,52 @@
         "video_size": "1920x1080",
         "load_video": "H264",
         "load_audio": "AC3",
+        "load_dovi": "none",
+        "load_atmos": false,
+        "min_pos_climb_s": 8,
+        "require_video_bound": true,
+        "no_playing_error": true,
+        "server_opens_min": 1,
+        "load_max": "1920x1080@24",
+        "sink_echo": "1920x1080@24"
+      }
+    },
+    {
+      "name": "pipe_h264_dts_1080p",
+      "fixture": "pipe_h264_dts_1080p.mkv",
+      "title": "1080p H264 + DTS core 5.1 — capability-gated DTS audio feed",
+      "covers": [
+        "DTS Load payload",
+        "DTS core audio",
+        "audio sync",
+        "seek"
+      ],
+      "declare": {
+        "vcodec": "h264",
+        "acodec": "dts",
+        "fps": 24.0,
+        "source_raster": [
+          1920,
+          1080
+        ]
+      },
+      "run_secs": 40,
+      "operations": [
+        {
+          "op": "play"
+        },
+        {
+          "op": "seek",
+          "target_s": 20,
+          "mode": "inplace",
+          "delay_ms": 12000
+        }
+      ],
+      "expect": {
+        "codec": "h264",
+        "video_size": "1920x1080",
+        "load_video": "H264",
+        "load_audio": "DTS",
         "load_dovi": "none",
         "load_atmos": false,
         "min_pos_climb_s": 8,
@@ -2494,7 +3030,7 @@
         "no_playing_error": true,
         "abr_shape": {}
       },
-      "_census_note": "Measurement step M4 of docs/adaptive-playback-plan.md, as ONE command: this case writes the play URL, quality=auto and plxnative-abrpin together, so the census needs no manual prerequisite. the bottom of the ladder: the 1 MiB AUDIO queue should bind, not the 8 MiB video one. The link is deliberately UNSHAPED (no network_profile) so the AU queue byte cap is the only limiter -- a shaped leg would measure the shaper instead. `start_hls` is what puts this case in HLS, and it is the honest replacement for what used to: `source_kbps: 900000` was declared so that the starvation horizon would fire and drop Auto out of Original, on an unshaped link where the reserve was visibly FILLING. That entry only ever worked because the horizon did not check whether anything was draining, and it stopped working the day that was fixed -- correctly, since a growing reserve is not a starvation. `route::arm_auto_fixture` now installs the post-fallback state directly. The declared rate is kept because it still bounds the actuator raster and keeps Original RECOVERY out of the case, and it no longer forces anything. `abr_shape: {}` reports every I0 metric and asserts none of them: this case exists to produce evidence, and a bound written before the baseline exists would be a number somebody guessed. Run it with --no-early: the census needs the FULL window, and a case that satisfied every assertion would otherwise stop as soon as it had. min_pos_climb_s stays below the 60 s entry fixture's own duration, which the harness checks up front."
+      "_census_note": "Measurement step M4 of docs/adaptive-playback-plan.md, as ONE command: this case writes the play URL, quality=auto and plxnative-abrpin together, so the census needs no manual prerequisite. the bottom of the ladder: the 1 MiB audio queue should bind before the video queue capped by engine::AQ_VIDEO_BYTES. The link is deliberately UNSHAPED (no network_profile) so the AU queue byte cap is the only limiter -- a shaped leg would measure the shaper instead. `start_hls` is what puts this case in HLS, and it is the honest replacement for what used to: `source_kbps: 900000` was declared so that the starvation horizon would fire and drop Auto out of Original, on an unshaped link where the reserve was visibly FILLING. That entry only ever worked because the horizon did not check whether anything was draining, and it stopped working the day that was fixed -- correctly, since a growing reserve is not a starvation. `route::arm_auto_fixture` now installs the post-fallback state directly. The declared rate is kept because it still bounds the actuator raster and keeps Original RECOVERY out of the case, and it no longer forces anything. `abr_shape: {}` reports every I0 metric and asserts none of them: this case exists to produce evidence, and a bound written before the baseline exists would be a number somebody guessed. Run it with --no-early: the census needs the FULL window, and a case that satisfied every assertion would otherwise stop as soon as it had. min_pos_climb_s stays below the 60 s entry fixture's own duration, which the harness checks up front."
     },
     {
       "name": "pipe_abr_pin_720",
@@ -3350,7 +3886,7 @@
       "flac",
       "pcm/lpcm",
       "mp3",
-      "dts-only-at-movie-level (reachable only via language selection on a many-audio movie, never as the item's own default)"
+      "dts-only-at-movie-level (pipeline DTS 5.1 is covered; no mapped Plex item exercises the account/server route)"
     ],
     "subtitles": [
       "ass/ssa",

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """`make deploy` must ship exactly what `make ipk` stages, minus the entries that get their own
-handling for a documented reason (the binary's own scp, the bundled FFmpeg libraries' own
-retirement loop, and the LAB session file's ship-or-remove rule).
+handling for a documented reason (the binary + crash handler's `.new`+`mv` dance, the bundled
+FFmpeg libraries' own retirement loop, and the LAB session file's ship-or-remove rule).
 
 This runs `make -s print-app-files` / `print-deploy-files` — two query targets that only echo a
 Makefile variable, exactly the pattern `docs/agent-reference.md` prescribes instead of `make -p`
@@ -39,6 +39,8 @@ class DeployManifest(unittest.TestCase):
             with self.subTest(flavor=flavor):
                 app_files = make_print("print-app-files", flavor)
                 deploy_files = make_print("print-deploy-files", flavor)
+                # No sentry-handler carve-out: this fork's Makefile ships no crash handler
+                # (the 0.6.x line removed it with the reporting surface).
                 ffmpeg_libs = make_print("print-ffmpeg-staged", flavor)
                 carve_outs = {"pkg/plxnative", *ffmpeg_libs}
                 # LAB_FILES is empty unless LAB=1 is passed, and this test never sets it — so the

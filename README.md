@@ -1,81 +1,194 @@
-# Butaca
+# Butaca (fork of PlxNative)
 
-A native [Jellyfin](https://jellyfin.org/) client for LG webOS televisions. Not a web page: the
-interface is drawn directly on the GPU at 60 fps, and the video is decoded by the TV's own
-hardware.
+**Butaca is a fork of [PlxNative](https://github.com/GLinnik21/plx-native) by Gleb Linnik, turned
+into a [Jellyfin](https://jellyfin.org/) client for rooted LG webOS televisions. It draws the
+interface directly on the GPU at 60 fps and plays video on the TV's own decoder. The fork removes
+all telemetry and crash reporting and changes nothing about those promises:
+[privacy](https://github.com/gnacho/butaca), [upstream](https://github.com/GLinnik21/plx-native).**
 
-An armchair to sit in and watch whatever is on your server.
+The rest of this README still describes upstream PlxNative, the Plex client this fork is built
+from; the app it documents is the same code under the fork's packaging.
 
-![Home](docs/screenshots/home.png)
+---
 
-## Why
+# PlxNative
 
-It's about getting the most out of LG TVs that are not exactly new. Models running webOS 5.x and
-earlier ship with a Chromium that is old and slow: the official web apps come up short exactly
-where they shouldn't, and there's no way a browser reaches the stable 60 fps of a native
-interface.
+A fast, unofficial [Plex](https://www.plex.tv/) client for LG webOS televisions. Native, not a web
+page — the interface is drawn straight on the GPU at 60 fps, and video plays on the TV's own decoder.
 
-Butaca attacks that at the root: it throws the browser away, draws on the GPU, and hands the
-video to the same silicon the built-in apps use. No Chromium, no JavaScript, no web view.
+*In daily use on a 2019 LG set. Get started with the
+[installation guide](docs/install-and-verify.md).*
 
-## Screenshots
+## Why this exists
 
-All three were taken from the desktop simulator build, running against a real Jellyfin server;
-on the television the same screens render through the TV's GPU at native 1080p.
+The official Plex app on my old LG is slow. Scrolling a shelf stutters, opening a poster takes a
+beat too long. It behaves like a web page because it is one: a web app running in the television's
+Chromium. Patching it doesn't help — the ceiling isn't the code, it's the browser.
 
-| | |
+So I threw the browser away.
+
+PlxNative draws straight on the GPU and hands video to the same silicon the built-in apps use. No
+Chromium, no JavaScript, no web view. It just draws. Almost all of it is Rust, and I use it every
+day to watch things off my server in the next room.
+
+## What it looks like
+
+Real captures of the app, not mockups: the same code that runs on the television, on the desktop
+simulator, browsing a demo library of openly licensed films
+([credits](docs/screenshots/CREDITS.md)). `make screenshots` regenerates them.
+
+![Home](docs/screenshots/home.jpg)
+
+**Home** — a rotating hero from what you're partway through and what's just landed, shelves under it.
+
+![Library](docs/screenshots/library.jpg)
+
+**Library** — a library opens on its own shelves: what you're partway through, with the time
+left under the focused card, and what just landed. Further down is the full grid, with sort,
+filter (including unwatched-only) and an A–Z rail down the side
+([pictured here](docs/screenshots/ux-library-grid.jpg)).
+
+![Search](docs/screenshots/search.jpg)
+
+**Search** — one query across every server you can reach, results grouped by kind.
+
+![Player](docs/screenshots/player.jpg)
+
+**Player** — the transport with chapters and track menus, drawn over video the television decodes
+itself. (In this capture the frame under it was decoded by the simulator.)
+
+## What it does
+
+- **An interface that keeps up with the remote.** 60 fps on the 2019 set I develop on, with
+  frame-rate regression scenes that measure it on the television rather than trusting it.
+- **Sign in on the TV** with an on-screen QR code and pick a Plex Home profile.
+- **Browse and search your libraries** — on your own servers and on ones shared with you. Your
+  servers' libraries, that is, not Plex's catalogue or Watchlist.
+- **Direct play** H.264 and HEVC — 4K, 10-bit, Dolby Vision profiles 5 and 8, E-AC-3 Atmos —
+  decided against your television's own codec table where it publishes one. Anything else the
+  server transcodes, and you can switch a playback to Auto to follow a link whose speed changes.
+- **Everything you expect while watching**: resume, seek and scrub, chapters, audio and subtitle
+  tracks (including image subtitles), Skip Intro, Skip Credits, Up Next with auto-advance, and
+  progress reported back to your server.
+
+## Will it work on my television?
+
+**It needs webOS 4.0 or newer**; older firmware won't start — you'd get a tile that does nothing.
+Past that, it most likely will. I develop and test on a 2019 set, and opt-in usage reports show
+video playing on sets from 2018 through the newest, on webOS 11 — both direct play and server
+transcodes, Developer Mode installs included.
+
+### Known issues
+
+| Where | What happens |
 |---|---|
-| ![Sign in](docs/screenshots/sign-in.png) | ![Library](docs/screenshots/library.png) |
-| Sign-in: server, user, password | The library grid |
+| **Some 2019 sets on LG's k5lp or k3lp chip**, installed through Developer Mode | Video won't play. On these sets LG's Developer Mode sandbox can withhold a device the video path needs — Kodi and Moonlight hit the same wall. The app checks for it and says so instead of crashing; other sets on the same chip play normally. On a rooted TV with Homebrew Channel, the failure screen offers **Repair**, which applies the Homebrew Channel fix to the sandbox (one owner fixed it this way from a root shell; the button itself hasn't been run on an affected set yet). Without root there is no fix. |
+| **2018 sets on firmware that reports platform release 3.9.3** | Sign-in and browsing work, but video has never been seen to start on one, and no error is reported either: [#249](https://github.com/GLinnik21/plx-native/issues/249). |
+| **Sets on LG's k6hp chip** | A crash seen in opt-in crash reports and not reproduced here, because I have no such set: [#174](https://github.com/GLinnik21/plx-native/issues/174). |
 
-## What's done
+### Rooted or not
 
-Ported from [plx-native](https://github.com/GLinnik21/plx-native) and now tracking its v0.6.5
-line, swapping the Plex backend for Jellyfin:
+**No root is needed.** A regular TV in Developer Mode runs everything except the k5lp/k3lp Repair
+above. What Developer Mode costs you is renewal: if the session lapses, LG removes the apps
+installed through it ([how to keep them](docs/install-and-verify.md#important-developer-mode-expires)).
+A rooted TV with Homebrew Channel has no expiry.
 
-- Native (Rust) interface at 60 fps on the TV, with regression scenes that measure it on the
-  actual television instead of just trusting it.
-- On-screen Jellyfin login: URL, username and password, with no prior setup.
-- Library browsing, detail, profiles and search wired to the Jellyfin API.
-- Direct playback (H.264 / HEVC) through the TV's native video pipeline, plus seek-on-transcode
-  resume support.
-- Everything the upstream v0.6 line brought with it: the decoder race fix, the failure screens
-  that name your set, the opt-in reporting with its consent flow, and redacted event logs.
-- Custom identity: the name "Butaca", the icons and the on-screen text.
+If something goes wrong, check [Troubleshooting](docs/troubleshooting.md) first, then
+[tell me what happened](https://github.com/GLinnik21/plx-native/issues) — and if you own one of the
+sets above, it working is as useful a report as it failing.
 
-### Jellyfin server compatibility
+## Installing
 
-Works against Jellyfin 10.x and 12.x servers. The client authenticates over the standard
-`Authorization: MediaBrowser` header, which is what Jellyfin 12 requires (the legacy
-`X-Emby-*` headers were removed server-side in 12), and media/stream/image URLs ride the
-`api_key` parameter that both versions accept.
+**First time installing an app outside the LG Content Store?** Follow the
+[**step-by-step installation guide**](docs/install-and-verify.md). It starts with a regular LG
+webOS TV, a computer on the same network, and a Plex account with access to your own or a shared
+server. **No root is required.**
 
-## Status
+Set up LG Developer Mode and connect with webOS Dev Manager, then choose:
 
-Not distributable just yet. The remaining work is tracked in the issues:
+- **Install PlxNative directly:** add only PlxNative to the TV; install future `.ipk` updates from
+  your computer.
+- **Install Homebrew Channel first:** get an app catalogue on the TV, then install PlxNative and
+  its updates with the remote.
 
-- [#1](https://github.com/gnacho/butaca/issues/1) - runtime UI translation engine and Spanish
-- [#2](https://github.com/gnacho/butaca/issues/2) - first-run sign-in for new users and the
-  stable installable package
-- [#3](https://github.com/gnacho/butaca/issues/3) - route crash and error reports to our own
-  collection backend
-- [#4](https://github.com/gnacho/butaca/issues/4) - redesign the launcher icon set
+**Already have Homebrew Channel?** Find [PlxNative in its catalogue](https://repo.webosbrew.org/apps/com.beb.plxnative/)
+and select **Install**. Skip the computer setup.
 
-Until #2 lands, there is no public .ipk to install: the repository is published so the work is
-out in the open and the history is honest.
+**Developer Mode needs periodic renewal.** If it expires and LG disables Developer Mode, apps
+installed through it are removed. Installing Homebrew Channel through Developer Mode does not
+remove that requirement. The guide explains [how to renew the session](docs/install-and-verify.md#important-developer-mode-expires).
 
-## Credits
+For manual `.ipk` downloads, [verify the release checksum](docs/install-and-verify.md#verifying-the-package)
+before installing. Homebrew Channel verifies catalogue downloads for you.
 
-This project is a fork of [plx-native](https://github.com/GLinnik21/plx-native), the native Plex
-client for webOS by [Gleb Linnik](https://github.com/GLinnik21). The rendering engine, the host
-layer and the video pipeline Butaca builds on are his, and the hours it must have taken him to
-get there are obvious. We're deeply grateful, and this wouldn't exist without his work.
+## Nightly builds
 
-## License
+Every day `main` moves, CI cuts a nightly `.ipk` from wherever it stands and publishes it as a
+[prerelease](https://github.com/GLinnik21/plx-native/releases?q=nightly). It installs beside the
+regular app as **"PlxNative Nightly"** — its own tile, its own sign-in — so trying it never touches
+the release you already trust. The newest one is always linked from
+[plxnative.com/nightly/latest.json](https://plxnative.com/nightly/latest.json).
 
-[MIT](LICENSE). The original copyright belongs to Gleb Linnik (see LICENSE); Butaca's changes and
-adaptations are published under the same terms. The "Butaca" name and the fork itself are not
-affiliated with, endorsed or sponsored by Jellyfin, LG or Gleb Linnik.
+**It is not tested on a television.** It passes the same automated build and packaging checks a
+release does, but nobody has watched it play. It is not in the Homebrew Channel and does not
+update itself — reinstall by hand whenever you want the next one — and each nightly is deleted
+30 days after it is published, so link to a specific `.ipk` at your own risk.
 
-**Unofficial client.** "Jellyfin", "LG" and "webOS" are trademarks of their respective owners;
-where they appear, they identify the service or platform the app works with.
+## Privacy
+
+**Your library data never reaches me.** The app talks to your Plex server, to `plex.tv` to sign in,
+and to `discover.provider.plex.tv` for cast biographies.
+
+**Crash reports and usage analytics are off until you turn them on** — two separate first-run
+questions, each answerable with Don't Share, both reversible later under Account → Settings →
+Privacy & data. No title, search term, subtitle line, server name or address can appear in any
+report. [`PRIVACY.md`](PRIVACY.md) is the whole statement, including the schemas.
+
+ASS/SSA subtitles render natively during direct play, including styles, positioning, overlapping
+signs and dialogue, karaoke, and embedded fonts. External ASS files retain their original scripts.
+Transcoded playback continues to use the server's subtitle burn-in.
+
+## The honest scope
+
+I built this for how *I* watch, so it's narrower than Plex's:
+
+- **Movies and TV shows.** No music, no photos, no live TV or DVR.
+- **No typing in server addresses.** Servers come from your Plex account; set them up on a phone or
+  PC and choose from what's there. Servers reached through Plex's relay, or that require an
+  encrypted connection, are supported but haven't been watched end to end.
+- **One person's spare time.** There will be bugs I haven't hit, because I don't watch the way you do.
+
+If that fits, it's genuinely nice to use. If it doesn't, the official app will serve you better.
+
+## Contributing
+
+Issues and pull requests are welcome, especially from anyone whose television or library differs
+from mine — [**docs/building.md**](docs/building.md) is the build and the test loop, and says what
+hardware I most need help with. Security issues go through [`SECURITY.md`](SECURITY.md) rather than
+a public issue.
+
+## Licence
+
+[GPL-3.0-or-later](LICENSE), © 2026 Gleb Linnik and contributors. Butaca is a fork maintained
+at [gnacho/butaca](https://github.com/gnacho/butaca); the upstream project is
+[GLinnik21/plx-native](https://github.com/GLinnik21/plx-native). The PlxNative name and its brand
+artwork are excluded — see [`TRADEMARKS.md`](TRADEMARKS.md), which also carries the Plex and LG
+non-affiliation statements.
+Third-party components and their licences are in
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) and `licenses/` — notably the app ships its own
+LGPL build of FFmpeg. Those notices and licence texts ship inside the `.ipk` too, so they travel
+with the binary and not only with this repository.
+
+This is an unofficial client, not affiliated with, endorsed by, or sponsored by Plex GmbH or LG
+Electronics. "Plex", "Rotten Tomatoes", "IMDb", "TMDB", "LG" and "webOS" are trademarks of their
+respective owners; where they appear in the app, they identify whose service or score is being shown.
+
+## Star history
+
+<a href="https://www.star-history.com/?repos=glinnik21%2Fplx-native&type=date&legend=bottom-right">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=glinnik21/plx-native&type=date&theme=dark&legend=bottom-right">
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=glinnik21/plx-native&type=date&legend=bottom-right">
+    <img alt="Star history chart" src="https://api.star-history.com/chart?repos=glinnik21/plx-native&type=date&legend=bottom-right">
+  </picture>
+</a>

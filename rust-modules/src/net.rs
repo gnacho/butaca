@@ -9,9 +9,10 @@
 //! because that is what the certificate is issued for — so the whole PMS control plane comes
 //! through here too whenever the origin is TLS. `crate::http` is the door that decides which of
 //! the two transports a request takes; this module is only ever the https half of it. Direct
-//! callers are `plex::account`, auth's public headerless QR-image fetch and the public QR image
-//! redirect follower. **This list has stood here while becoming untrue before**, which is why it
-//! is worth checking rather than trusting; that is twice.
+//! callers are `plex::account` and auth's public headerless QR-image fetch. It goes through
+//! [`post_ca`]: CA-verified,
+//! unpinned, bounded sink. **This list has stood here while becoming untrue before**, which is why
+//! it is worth checking rather than trusting; that is twice.
 //!
 //! Only the curl *easy* API is used here; [`crate::curlio`] binds the multi API separately for the
 //! media plane. This module owns their shared process init, including the mutex callbacks required
@@ -24,11 +25,11 @@ use std::ffi::CString;
 use std::mem::MaybeUninit;
 use std::os::raw::{c_char, c_int, c_long, c_uint, c_void};
 use std::ptr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 type CURL = c_void;
-type curl_slist = c_void;
+pub(crate) type curl_slist = c_void;
 
 /// The stable head of `curl_version_info_data`. Passing `CURLVERSION_FIRST` promises to inspect
 /// only these original fields; libcurl extends the struct at the tail for later ages, so this
@@ -142,6 +143,14 @@ const CURLOPT_PINNEDPUBLICKEY: c_int = 10230;
 /// roots are trusted, and any certificate chaining to one of them still validates. What it buys is
 /// independence from a store nobody can update on a television, on a path whose far end is not a
 /// Plex service and whose CA may rotate.
+const CURLOPT_CAINFO: c_int = 10065;
+/// `CURLOPTTYPE_SLISTPOINT + 203`: a `curl_slist` of `host:port:address` entries that pre-populate
+/// the DNS cache, so the named host is never resolved. Present since 7.21.3; the entry syntax the
+/// television's 7.53.1 parses is documented on [`crate::plex::ResolvePin::entry`]. See [`resolve`].
+const CURLOPT_RESOLVE: c_int = 10203;
+/// `CURLE_UNKNOWN_OPTION` — what `curl_easy_setopt` answers for an option id this libcurl was
+/// built without. The one `setopt` result in this module that is NOT fatal: see [`resolve`].
+const CURLE_UNKNOWN_OPTION: c_int = 48;
 // curl.h info ids (CURLINFO_LONG = 0x200000).
 const CURLINFO_RESPONSE_CODE: c_int = 0x20_0002;
 const CURL_GLOBAL_ALL: c_long = 3;
@@ -156,6 +165,14 @@ static CURL_OK: AtomicBool = AtomicBool::new(false);
 /// checks this separately from [`CURL_OK`]: an old OpenSSL whose mutex API cannot be installed may
 /// still serve serialized HTTPS control, but must not be driven beside another curl request.
 static CURL_THREADED_TLS_OK: AtomicBool = AtomicBool::new(false);
+/// `curl_version_info().version_num` (`0xXXYYZZ`), captured once by [`global_init`]; `0` until then
+/// or when the struct could not be read. Read by [`resolve`] to pick the entry syntax.
+static CURL_VERSION_NUM: AtomicU32 = AtomicU32::new(0);
+
+/// The bound libcurl's numeric version, `0xXXYYZZ`, or `0` before [`global_init`].
+pub(crate) fn curl_version_num() -> u32 {
+    CURL_VERSION_NUM.load(Ordering::Acquire)
+}
 /// Only used on the abnormal old-OpenSSL/no-callback fallback. Normal devices never take it.
 static CURL_FALLBACK_SERIAL: Mutex<()> = Mutex::new(());
 
@@ -325,7 +342,7 @@ fn setup_legacy_crypto_locks(soname: &'static str) -> LegacyCrypto {
     })
 }
 
-fn available() -> bool {
+pub(crate) fn available() -> bool {
     CURL_OK.load(Ordering::Acquire)
 }
 
@@ -363,6 +380,9 @@ pub fn global_init() -> bool {
             // CONNECTTIMEOUT; log the runtime fact for every firmware instead of promoting one
             // set's string into a fleet-wide guarantee.
             let vi = unsafe { curl_version_info(CURLVERSION_FIRST) };
+            if !vi.is_null() {
+                CURL_VERSION_NUM.store(unsafe { (*vi).version_num } as u32, Ordering::Release);
+            }
             let async_dns = if vi.is_null() {
                 "unknown"
             } else if unsafe { (*vi).features } & CURL_VERSION_ASYNCHDNS != 0 {
@@ -463,6 +483,10 @@ impl Drop for Easy {
     }
 }
 
+/// An owned `curl_slist`, freed on drop. Named for its first job (the request headers) and used
+/// for the resolve list too: libcurl does not copy either list, it keeps the pointer for the life
+/// of the transfer, so the wrapper must outlive `curl_easy_perform` — which it does by being a
+/// local of the function that performs.
 struct HeaderList(*mut curl_slist);
 
 impl Drop for HeaderList {
@@ -493,112 +517,59 @@ pub(crate) enum RequestError {
     Transport,
 }
 
-/// What the **most recent plex.tv account API call** actually did, in curl's own terms — recorded
-/// so the sign-in screen (which cannot otherwise tell "not reachable" from "not yet scanned") can
-/// say why. `Answered` carries the HTTP status whatever it was (a `429` is as much an answer as a
-/// `200`); `Transport` carries the raw `CURLcode` (a negative value means libcurl itself could not
-/// be loaded — there was no code to report); `TimedOut` is curl's own `CURLE_OPERATION_TIMEDOUT`
-/// (28), split out because it is the one rc callers already treat specially.
+/// Safe response evidence without a partial body, URL, headers or arbitrary error text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CallOutcome {
-    Answered(u16),
-    Transport(i32),
-    TimedOut,
+pub(crate) struct RequestFailure {
+    pub cause: RequestError,
+    pub status: Option<u16>,
+    pub body_limit: Option<usize>,
+    /// The non-zero `CURLcode` `curl_easy_perform` returned, when the failure came from a transfer
+    /// at all. `None` for a request refused before libcurl ran (a URL with a NUL, an unloadable
+    /// libcurl, a failed handle setup). A bare number with no identity, which is why it may leave
+    /// the device in `telemetry::incident`'s link class; a DNS failure and a TLS refusal are the
+    /// two answers a failed sign-in most needs told apart.
+    pub curl_rc: Option<i32>,
 }
 
-/// One recorded outcome plus when it happened, so a caller can also say "as of Ns ago".
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct LastCall {
-    pub outcome: CallOutcome,
-    pub at: std::time::Instant,
+impl From<RequestError> for RequestFailure {
+    fn from(cause: RequestError) -> Self { Self { cause, status: None, body_limit: None, curl_rc: None } }
 }
 
-/// Sentinel [`CallOutcome::Transport`] code meaning "libcurl could not be loaded at all" — there is
-/// no `CURLcode` for that, since the request was never handed to curl.
-const CURL_UNAVAILABLE: i32 = -1;
-
-static LAST_PLEX_TV_CALL: Mutex<Option<LastCall>> = Mutex::new(None);
-
-/// The most recent recorded plex.tv account API call, if any has happened this process.
-///
-/// Read by `auth.rs` — the sign-in screen's link-health sentence and its issue #75 sign-in error
-/// report both build from this (`signin_error_context`, `link_detail_at`'s caller).
-pub(crate) fn last_plex_tv_call() -> Option<LastCall> {
-    *LAST_PLEX_TV_CALL
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-}
-
-fn record_plex_tv_call(outcome: CallOutcome) {
-    let mut g = LAST_PLEX_TV_CALL.lock().unwrap_or_else(|e| e.into_inner());
-    *g = Some(LastCall {
-        outcome,
-        at: std::time::Instant::now(),
-    });
-}
-
-#[cfg(test)]
-pub(crate) fn reset_last_plex_tv_call_for_test() {
-    *LAST_PLEX_TV_CALL
-        .lock()
-        .unwrap_or_else(|e| e.into_inner()) = None;
-}
-
-/// Serializes tests that touch the process-wide [`LAST_PLEX_TV_CALL`] store — it is shared state,
-/// and `cargo test` runs this module's tests concurrently by default.
-#[cfg(test)]
-static LAST_CALL_TEST_SERIAL: Mutex<()> = Mutex::new(());
-
-/// The URL's host, by parsing the authority — never by substring match, since `plex.tv` is a
-/// substring of `discover.provider.plex.tv` and of a token embedded elsewhere in a URL. Returns
-/// `None` for a URL with no `scheme://` prefix rather than guessing.
-fn url_host(url: &str) -> Option<&str> {
-    let after_scheme = url.split_once("://")?.1;
-    let authority_end = after_scheme
-        .find(['/', '?', '#'])
-        .unwrap_or(after_scheme.len());
-    let authority = &after_scheme[..authority_end];
-    let host_port = authority.rsplit('@').next().unwrap_or(authority);
-    if let Some(rest) = host_port.strip_prefix('[') {
-        // An IPv6 literal: host ends at the closing bracket, whatever follows it (a port).
-        return rest.split(']').next();
+/// CURLINFO_RESPONSE_CODE is the last response, not the CONNECT proxy response:
+/// https://curl.se/libcurl/c/CURLINFO_RESPONSE_CODE.html . On errors following redirects we
+/// cannot prove it belongs to the final origin, so withhold it. Only documented body-transfer
+/// failures retain final HTTP evidence; TLS, setup and unrecognized failures cannot earn it.
+/// Codes: https://curl.se/libcurl/c/libcurl-errors.html (partial file, write callback, timeout,
+/// receive failure, HTTP/2 connection/stream errors). In curl-8_7_1/lib/http2.c,
+/// http2_handle_stream_close returns 92 on an error reset; cf_h2_recv returns 16 on a closed
+/// connection before body bytes, even after headers published status in lib/http.c.
+/// Its receive loop also flushes H2 control frames through h2_progress_egress, which can return
+/// CURLE_SEND_ERROR (55); a send error alone does not imply that no response was received.
+/// Setup can also return 16, so valid final status remains mandatory; no code alone is evidence.
+/// No new curl option/info constant or binding is required.
+fn response_status(rc: c_int, info_rc: c_int, code: c_long, follow_redirects: bool) -> Option<u16> {
+    if info_rc != 0 || !(100..=599).contains(&code) { return None; }
+    if rc == 0 { return u16::try_from(code).ok(); }
+    if !follow_redirects && code >= 200 && matches!(rc, 16 | 18 | 23 | 28 | 55 | 56 | 92) {
+        return u16::try_from(code).ok();
     }
-    Some(host_port.split(':').next().unwrap_or(host_port))
+    None
 }
 
-/// Is this request's host **exactly** `plex.tv` — the account API, not a subdomain
-/// (`discover.provider.plex.tv`, `api.plex.tv`) and not a user's own `*.plex.direct` PMS origin.
-fn is_plex_tv_host(url: &str) -> bool {
-    url_host(url).is_some_and(|h| h.eq_ignore_ascii_case("plex.tv"))
-}
-
-/// The reason string [`request_tls_result`] logs beside a nonzero `CURLcode` — factored out here so
-/// the sign-in screen can show the caller the same words the event log already carries, rather than
-/// a second, drifting table. Unrecognised codes fall back to the generic "transport error" the log
-/// has always used for them.
-pub(crate) fn curl_rc_why(rc: i32) -> &'static str {
-    match rc {
-        60 => "peer certificate could not be verified (CA store too old?)",
-        35 => "TLS handshake failed (protocol too new for this firmware?)",
-        77 => "CA bundle could not be read",
-        6 => "could not resolve host",
-        28 => "timed out",
-        90 => "certificate pin did not match (stale lab session?)",
-        _ => "transport error",
+fn finish_response(
+    rc: c_int, info_rc: c_int, code: c_long, follow_redirects: bool,
+    max_body: Option<usize>, sink: BodySink,
+) -> Result<Resp, RequestFailure> {
+    let status = response_status(rc, info_rc, code, follow_redirects);
+    if sink.overflowed || rc != 0 || status.is_none() {
+        return Err(RequestFailure {
+            cause: if rc == 28 && !sink.overflowed { RequestError::TimedOut } else { RequestError::Transport },
+            status,
+            body_limit: if sink.overflowed { max_body } else { None },
+            curl_rc: (rc != 0).then_some(rc as i32),
+        });
     }
-}
-
-/// A bounded, identifier-free one-line description of a [`CallOutcome`] for the sign-in screen —
-/// never a URL, host, or token, just curl's own vocabulary.
-///
-/// Read by `auth.rs`'s sign-in link-health sentence (`link_last_call`, refreshed on every poll).
-pub(crate) fn describe_outcome(o: CallOutcome) -> String {
-    match o {
-        CallOutcome::Answered(status) => format!("HTTP {status}"),
-        CallOutcome::TimedOut => "timed out (curl 28)".to_string(),
-        CallOutcome::Transport(rc) if rc < 0 => "libcurl unavailable".to_string(),
-        CallOutcome::Transport(rc) => format!("{} (curl {rc})", curl_rc_why(rc)),
-    }
+    Ok(Resp { status: status.unwrap(), body: sink.body })
 }
 
 /// **How long one call may take.** The values are a PER-CALL argument rather than constants
@@ -681,6 +652,7 @@ fn allowed_redirect_protocols(url: &[u8]) -> c_long {
 /// into a PUT, no stale header list, no connection reuse whose keep-alive outlives the token that
 /// authorised it. A reusable handle (or a share/multi) would buy connection reuse and cost a
 /// design: this app makes tens of control-plane requests per session, not thousands.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn request(
     url: &str,
     headers: &[String],
@@ -689,12 +661,14 @@ pub(crate) fn request(
     t: Timeouts,
     follow_redirects: bool,
     max_body: Option<usize>,
+    resolve: Option<&str>,
 ) -> Option<Resp> {
-    request_result(url, headers, verb, body, t, follow_redirects, max_body).ok()
+    request_result(url, headers, verb, body, t, follow_redirects, max_body, resolve).ok()
 }
 
 /// Typed twin used by a caller which must keep curl's timeout distinct from every other transport
 /// failure. Ordinary clients retain [`request`]'s compatibility `Option`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn request_result(
     url: &str,
     headers: &[String],
@@ -703,8 +677,48 @@ pub(crate) fn request_result(
     t: Timeouts,
     follow_redirects: bool,
     max_body: Option<usize>,
+    resolve: Option<&str>,
 ) -> Result<Resp, RequestError> {
-    request_tls_result(
+    request_result_evidence(url, headers, verb, body, t, follow_redirects, max_body, resolve)
+        .map_err(|failure| failure.cause)
+}
+
+/// [`request_result`] keeping the whole [`RequestFailure`] — the `CURLcode` a discovery probe's
+/// evidence names (`plex::probe::RouteOutcome`). The same one entry every such request passes.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn request_result_evidence(
+    url: &str,
+    headers: &[String],
+    verb: &str,
+    body: Option<&[u8]>,
+    t: Timeouts,
+    follow_redirects: bool,
+    max_body: Option<usize>,
+    resolve: Option<&str>,
+) -> Result<Resp, RequestFailure> {
+    // A host test that needs to drive the REAL discovery-probe path (`http::request_probe`, and
+    // through it `auth::get_identity`) against a loopback HTTPS server cannot make libcurl trust
+    // that server's self-signed certificate any other way: this function is the one place every
+    // such request enters (see `request_tls_evidence`'s `nowan` comment for the same observation
+    // about the offline gate). `test_ca_bundle::get()` is compiled out entirely in a non-test
+    // build — there is no bundle to read and no branch that reads one — so this is not a
+    // production bypass, only a second `cfg(test)` caller of the `Tls::CaBundle` mode that already
+    // exists for the lab receiver.
+    #[cfg(test)]
+    if let Some(bundle) = test_ca_bundle::get() {
+        return request_tls_evidence(
+            url,
+            headers,
+            verb,
+            body,
+            t,
+            follow_redirects,
+            max_body,
+            Tls::CaBundle(&bundle),
+            resolve,
+        );
+    }
+    request_tls_evidence(
         url,
         headers,
         verb,
@@ -713,8 +727,195 @@ pub(crate) fn request_result(
         follow_redirects,
         max_body,
         Tls::Ca,
+        resolve,
     )
 }
+
+/// Test-only override of the CA trust root `request_result` verifies against — see that
+/// function's doc. Process-global rather than thread-local: `auth::race_batch` dials each
+/// candidate on a real worker thread (`task::spawn_small`), which a thread-local would never see.
+/// Guard every read/write with `crate::testlock::serial()`, matching this crate's existing
+/// convention for shared test-global state (see `lib.rs`'s `testlock` module doc).
+#[cfg(test)]
+pub(crate) mod test_ca_bundle {
+    use std::sync::Mutex;
+
+    static BUNDLE: Mutex<Option<String>> = Mutex::new(None);
+
+    /// Point every `request_result` call at `path` (a PEM CA bundle) until cleared. Caller must
+    /// hold `crate::testlock::serial()` for the duration any dial using it can run.
+    pub(crate) fn set(path: Option<&str>) {
+        *BUNDLE.lock().unwrap_or_else(|e| e.into_inner()) = path.map(str::to_owned);
+    }
+
+    pub(crate) fn get() -> Option<String> {
+        BUNDLE.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+}
+
+/// Real loopback PMS doubles for driving the discovery-probe race through the REAL curl/TLS
+/// stack (`auth::get_identity` → `http::request_probe` → `net::request_result_evidence`, unmodified) rather
+/// than a fake [`auth::ProbeDial`] closure. `test_ca_bundle` above is the other half: it is how
+/// curl is told to trust the certificate [`mint_cert`] mints here — the same PEM, so a real TLS
+/// handshake against [`spawn_dual_protocol`] genuinely verifies.
+// Not `pub(crate) mod` directly: `ci/check-deps.sh`'s `threads` gate only recognises a bare
+// `#[cfg(test)]` + `mod ` pair when deciding a block is test-only and skipping the real
+// `std::thread::spawn` calls inside it (`spawn_dual_protocol`/`spawn_plain_only`, standing in for
+// a loopback PMS peer) — the same convention the `mutators` gate above already relies on. A `pub`
+// or `pub(crate)` qualifier on the `mod` line does not match that pattern, so the module stays
+// private and every item the rest of the crate needs is re-exported below instead.
+#[cfg(test)]
+mod loopback_pms {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{Arc, Once};
+
+    /// A minted self-signed certificate, the key rustls needs to terminate TLS with it, and its
+    /// PEM form for `test_ca_bundle::set`.
+    pub(crate) struct TestCert {
+        cert_der: rustls::pki_types::CertificateDer<'static>,
+        key_der: rustls::pki_types::PrivateKeyDer<'static>,
+        pub(crate) pem: String,
+    }
+
+    /// Mint a self-signed cert whose SAN list is exactly `names`. rcgen tells a dotted IPv4
+    /// literal apart from a DNS label itself, so a caller passing `["127.0.0.1"]` gets an IP SAN
+    /// and one passing a `plex.direct`-shaped dashed label gets a DNS SAN — the E2E tests need
+    /// both, one per candidate that dials this loopback double a different way.
+    pub(crate) fn mint_cert(names: &[&str]) -> TestCert {
+        let subject_alt_names: Vec<String> = names.iter().map(|s| s.to_string()).collect();
+        let rcgen::CertifiedKey { cert, signing_key } =
+            rcgen::generate_simple_self_signed(subject_alt_names).expect("test cert generation");
+        let pem = cert.pem();
+        let cert_der = cert.der().clone();
+        let key_der = rustls::pki_types::PrivateKeyDer::from(signing_key);
+        TestCert {
+            cert_der,
+            key_der,
+            pem,
+        }
+    }
+
+    fn ring_provider_once() {
+        static ONCE: Once = Once::new();
+        ONCE.call_once(|| {
+            let _ = rustls::crypto::ring::default_provider().install_default();
+        });
+    }
+
+    fn tls_config(cert: &TestCert) -> Arc<rustls::ServerConfig> {
+        ring_provider_once();
+        let certs = vec![cert.cert_der.clone()];
+        let key = cert.key_der.clone_key();
+        let cfg = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(certs, key)
+            .expect("test tls server config");
+        Arc::new(cfg)
+    }
+
+    fn http_ok(body: &[u8]) -> Vec<u8> {
+        let mut out = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        out.extend_from_slice(body);
+        out
+    }
+
+    /// Drain one HTTP/1.1 request off `r` before answering — the probe's `/identity` GET has no
+    /// body, so this only needs to find the header terminator, not parse anything. Bounded and
+    /// best-effort: nothing here sends a request built to defeat it.
+    fn drain_request(r: &mut impl Read) {
+        let mut buf = [0u8; 4096];
+        let mut seen = Vec::new();
+        loop {
+            let Ok(n) = r.read(&mut buf) else { return };
+            if n == 0 {
+                return;
+            }
+            seen.extend_from_slice(&buf[..n]);
+            if seen.windows(4).any(|w| w == b"\r\n\r\n") || seen.len() > 64 * 1024 {
+                return;
+            }
+        }
+    }
+
+    /// A loopback PMS double that answers the SAME body over either transport on ONE port —
+    /// exactly what `plex::probe::candidates` assumes when it synthesizes a plaintext twin at the
+    /// advertised connection's own address and port. Peeks the first byte: `0x16` is a TLS
+    /// handshake record, anything else is treated as plaintext HTTP.
+    pub(crate) fn spawn_dual_protocol(cert: Arc<TestCert>, body: Vec<u8>) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind dual-protocol listener");
+        let port = listener.local_addr().unwrap().port();
+        let tls_cfg = tls_config(&cert);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut sock) = stream else { continue };
+                let tls_cfg = Arc::clone(&tls_cfg);
+                let body = body.clone();
+                std::thread::spawn(move || {
+                    let mut peek = [0u8; 1];
+                    let is_tls = matches!(sock.peek(&mut peek), Ok(1) if peek[0] == 0x16);
+                    if is_tls {
+                        let Ok(mut conn) = rustls::ServerConnection::new(tls_cfg) else {
+                            return;
+                        };
+                        let mut tls = rustls::Stream::new(&mut conn, &mut sock);
+                        drain_request(&mut tls);
+                        let _ = tls.write_all(&http_ok(&body));
+                        let _ = tls.flush();
+                    } else {
+                        drain_request(&mut sock);
+                        let _ = sock.write_all(&http_ok(&body));
+                    }
+                });
+            }
+        });
+        port
+    }
+
+    /// A loopback double that only ever speaks plaintext HTTP — for the "HTTPS fails" E2E
+    /// scenario, where a TLS ClientHello against this listener must fail the handshake (there is
+    /// no `rustls::ServerConnection` here to answer it) while a plain request still succeeds.
+    ///
+    /// A ClientHello (first byte `0x16`) gets what a plaintext-only web server sends it — a bare
+    /// `400` — so curl fails the HANDSHAKE at once rather than stalling until its timeout while
+    /// `drain_request` waits for a header terminator a ClientHello never contains.
+    pub(crate) fn spawn_plain_only(body: Vec<u8>) -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind plaintext listener");
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut sock) = stream else { continue };
+                let body = body.clone();
+                std::thread::spawn(move || {
+                    let mut first = [0u8; 1];
+                    if matches!(sock.peek(&mut first), Ok(1)) && first[0] == 0x16 {
+                        let _ = sock.write_all(
+                            b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        );
+                        return;
+                    }
+                    drain_request(&mut sock);
+                    let _ = sock.write_all(&http_ok(&body));
+                });
+            }
+        });
+        port
+    }
+
+    /// A loopback port nothing listens on: bind, read back the ephemeral port, then drop the
+    /// listener — so a candidate dialled here gets a deterministic refused connection rather than
+    /// a merely-unassigned one.
+    pub(crate) fn dead_port() -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind dead-port probe");
+        listener.local_addr().unwrap().port()
+    }
+}
+#[cfg(test)]
+pub(crate) use loopback_pms::{dead_port, mint_cert, spawn_dual_protocol, spawn_plain_only};
 
 /// **How the peer is verified.** Three modes, and they are an enum rather than an
 /// `Option<&str>` for one reason: the pinned one turns CA verification OFF, so "pinned" and
@@ -724,6 +925,10 @@ pub(crate) enum Tls<'a> {
     /// CA-verified against **the television's own trust store**. The default, and what every
     /// plex.tv and PMS call has always used — `request` is exactly this.
     Ca,
+    /// CA-verified against **a PEM bundle we ship**, by absolute path. Same verification, different
+    /// roots: it exists so a third-party endpoint's CA rotation is not at the mercy of a store
+    /// baked into a 2019 firmware.
+    CaBundle(&'a str),
     /// **Pinned**, and CA verification deliberately off — see [`CURLOPT_PINNEDPUBLICKEY`]. Only the
     /// lab receiver, which is a self-signed certificate on a developer's Mac.
     #[cfg_attr(not(feature = "lab-diagnostics"), allow(dead_code))]
@@ -733,6 +938,7 @@ pub(crate) enum Tls<'a> {
 /// The same three, owning their `CString`s so the pointers handed to curl outlive `perform`.
 enum TlsCfg {
     Ca,
+    CaBundle(CString),
     #[cfg_attr(not(feature = "lab-diagnostics"), allow(dead_code))]
     Pinned(CString),
 }
@@ -745,7 +951,6 @@ enum TlsCfg {
 /// One extra parameter rather than a second transport: everything else about a request — the header
 /// list, the verb shapes, the bounded sink, the `CURLcode` naming, the fallback serialisation — is
 /// identical, and a copy of this function would be a second place for all of it to drift.
-#[cfg_attr(not(feature = "lab-diagnostics"), allow(dead_code))]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn request_tls(
     url: &str,
@@ -757,9 +962,13 @@ pub(crate) fn request_tls(
     max_body: Option<usize>,
     tls: Tls<'_>,
 ) -> Option<Resp> {
-    request_tls_result(url, headers, verb, body, t, follow_redirects, max_body, tls).ok()
+    request_tls_result(url, headers, verb, body, t, follow_redirects, max_body, tls, None).ok()
 }
 
+/// `resolve` is a ready-made `CURLOPT_RESOLVE` entry (`host:port:address`, see
+/// [`crate::plex::ResolvePin::entry`]) for the URL's own host, or `None` to let the resolver
+/// answer. Every request whose origin carries a [`crate::plex::ResolvePin`] passes one; plex.tv
+/// calls pass `None`, and that is the difference the `nowan` trigger grades (see [`refuse_name`]).
 #[allow(clippy::too_many_arguments)]
 fn request_tls_result(
     url: &str,
@@ -770,16 +979,46 @@ fn request_tls_result(
     follow_redirects: bool,
     max_body: Option<usize>,
     tls: Tls<'_>,
+    resolve: Option<&str>,
 ) -> Result<Resp, RequestError> {
+    request_tls_evidence(url, headers, verb, body, t, follow_redirects, max_body, tls, resolve)
+        .map_err(|failure| failure.cause)
+}
+
+/// Opt-in detailed twin; compatibility callers project only the original cause above.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn request_evidence(
+    url: &str, headers: &[String], verb: &str, body: Option<&[u8]>, t: Timeouts,
+    follow_redirects: bool, max_body: Option<usize>, resolve: Option<&str>,
+) -> Result<Resp, RequestFailure> {
+    request_tls_evidence(url, headers, verb, body, t, follow_redirects, max_body, Tls::Ca, resolve)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn request_tls_evidence(
+    url: &str, headers: &[String], verb: &str, body: Option<&[u8]>, t: Timeouts,
+    follow_redirects: bool, max_body: Option<usize>, tls: Tls<'_>, resolve: Option<&str>,
+) -> Result<Resp, RequestFailure> {
     // Every fallible CString is built BEFORE the easy handle exists. The RAII guards below still
     // make later early returns safe, but this ordering also means malformed caller input never
     // enters curl with a half-configured request.
     let verb_c = CString::new(verb).map_err(|_| RequestError::Transport)?;
     let url_c = CString::new(url).map_err(|_| RequestError::Transport)?;
+    let resolve_c = resolve
+        .map(CString::new)
+        .transpose()
+        .map_err(|_| RequestError::Transport)?;
+    // The offline reproduction: with `/tmp/plxnative-nowan` armed, a name reaches the wire only
+    // with a pin. This is the ONE place every easy request passes (`request_result` enters here
+    // directly), which is why the gate is here and not on `request_tls`.
+    if resolve.is_none() && refuse_name(crate::plex::url_host(url), t.connect_s) {
+        return Err(RequestError::Transport.into());
+    }
     let ua =
         CString::new(crate::plex::identity::user_agent()).map_err(|_| RequestError::Transport)?;
     let tls_c = match tls {
         Tls::Ca => TlsCfg::Ca,
+        Tls::CaBundle(p) => TlsCfg::CaBundle(CString::new(p).map_err(|_| RequestError::Transport)?),
         Tls::Pinned(p) => TlsCfg::Pinned(CString::new(p).map_err(|_| RequestError::Transport)?),
     };
     let hdr_owned: Vec<CString> = headers
@@ -787,15 +1026,11 @@ fn request_tls_result(
         .map(|line| CString::new(line.as_str()))
         .collect::<Result<_, _>>()
         .map_err(|_| RequestError::Transport)?;
-    let host_is_plex_tv = is_plex_tv_host(url);
     // The guard `CURL_OK` exists for. Without it, a device with no libcurl this app can bind
     // reaches `curl_easy_init`'s wrapper and takes `dynlib::missing_symbol`, which panics — an
     // account lookup failing should return None and let the caller fall back, not kill a thread.
     if !available() {
-        if host_is_plex_tv {
-            record_plex_tv_call(CallOutcome::Transport(CURL_UNAVAILABLE));
-        }
-        return Err(RequestError::Transport);
+        return Err(RequestError::Transport.into());
     }
     // A legacy OpenSSL whose callback API is unexpectedly hidden can still support HTTPS control,
     // but only one easy request at a time. The normal installed/existing-callback path never takes
@@ -818,13 +1053,13 @@ fn request_tls_result(
                         "net: libcurl refused security option {} (rc={rc}); request cancelled",
                         $name
                     ));
-                    return Err(RequestError::Transport);
+                    return Err(RequestError::Transport.into());
                 }
             }};
         }
         let h = curl_easy_init();
         if h.is_null() {
-            return Err(RequestError::Transport);
+            return Err(RequestError::Transport.into());
         }
         let easy = Easy(h);
         curl_easy_setopt_ptr(easy.0, CURLOPT_URL, url_c.as_ptr() as *const c_void);
@@ -886,6 +1121,18 @@ fn request_tls_result(
             // been doing since it was written.
             TlsCfg::Ca => {}
             // A bundle we ship. The return code is checked for the same reason the pin's is, but
+            // the failure it guards is milder and worth stating so nobody "simplifies" the pinned
+            // check to match: a REJECTED `CURLOPT_CAINFO` leaves the device's own store in force,
+            // which still verifies, whereas a rejected pin would leave nothing verifying at all.
+            // Refusing here is a deliberate over-reaction — if we could not select the roots we
+            // meant to, the honest report is that the send did not happen.
+            TlsCfg::CaBundle(p) => {
+                let rc = curl_easy_setopt_ptr(easy.0, CURLOPT_CAINFO, p.as_ptr() as *const c_void);
+                if rc != 0 {
+                    crate::log(&format!("net: this libcurl refuses CURLOPT_CAINFO (rc={rc}) — refusing to send against an unknown trust store"));
+                    return Err(RequestError::Transport.into());
+                }
+            }
             TlsCfg::Pinned(p) => {
                 let rc = curl_easy_setopt_ptr(
                     easy.0,
@@ -894,7 +1141,7 @@ fn request_tls_result(
                 );
                 if rc != 0 {
                     crate::log(&format!("net: this libcurl refuses CURLOPT_PINNEDPUBLICKEY (rc={rc}) — refusing to send unpinned"));
-                    return Err(RequestError::Transport);
+                    return Err(RequestError::Transport.into());
                 }
                 require_setopt!(
                     curl_easy_setopt_long(easy.0, CURLOPT_SSL_VERIFYPEER, 0 as c_long),
@@ -922,12 +1169,29 @@ fn request_tls_result(
         for c in &hdr_owned {
             let next = curl_slist_append(slist.0, c.as_ptr());
             if next.is_null() {
-                return Err(RequestError::Transport);
+                return Err(RequestError::Transport.into());
             }
             slist.0 = next;
         }
         if !slist.0.is_null() {
             curl_easy_setopt_ptr(easy.0, CURLOPT_HTTPHEADER, slist.0 as *const c_void);
+        }
+        // The resolve pin. Its list is a second `HeaderList` local for the same lifetime reason as
+        // the first: curl keeps the pointer until the transfer ends. NOT `require_setopt!` — a
+        // libcurl that answers `CURLE_UNKNOWN_OPTION` here has simply not got the option, and the
+        // right outcome is today's DNS path, logged once; every OTHER refusal still cancels
+        // (`resolve::note_setopt` decides).
+        let mut resolve_list = HeaderList(ptr::null_mut());
+        if let Some(r) = &resolve_c {
+            let l = curl_slist_append(ptr::null_mut(), r.as_ptr());
+            if l.is_null() {
+                return Err(RequestError::Transport.into());
+            }
+            resolve_list.0 = l;
+            let rc = curl_easy_setopt_ptr(easy.0, CURLOPT_RESOLVE, l as *const c_void);
+            if resolve::note_setopt(rc).is_err() {
+                return Err(RequestError::Transport.into());
+            }
         }
         // The VERB. Three shapes, and the split is what keeps each one on the wire curl already
         // knows how to send:
@@ -958,54 +1222,45 @@ fn request_tls_result(
 
         let rc = curl_easy_perform(easy.0);
         let mut code: c_long = 0;
-        curl_easy_getinfo_long(easy.0, CURLINFO_RESPONSE_CODE, &mut code as *mut c_long);
+        let info_rc = curl_easy_getinfo_long(easy.0, CURLINFO_RESPONSE_CODE, &mut code as *mut c_long);
 
         if sink.overflowed {
             crate::log(&format!(
                 "net: response exceeded {} byte body limit",
                 max_body.unwrap_or(0)
             ));
-            return Err(RequestError::Transport);
         }
-        if rc != 0 {
+        if rc != 0 && !sink.overflowed {
             // NAMED, not just counted. Everything here rides the TELEVISION's curl and therefore
             // its OpenSSL and its CA store — the library webosbrew's caniuse data singles out as
             // the one that varies most across firmwares. Collapsing every failure to None made a
             // stale CA bundle on a set nobody here owns indistinguishable from being offline: the
             // QR sign-in simply never completes. These four are the ones that mean something
             // different from "the network is down".
-            let why = curl_rc_why(rc);
+            let why = match rc {
+                60 => "peer certificate could not be verified (CA store too old?)",
+                35 => "TLS handshake failed (protocol too new for this firmware?)",
+                77 => "CA bundle could not be read",
+                6 => "could not resolve host",
+                28 => "timed out",
+                90 => "certificate pin did not match (stale lab session?)",
+                _ => "transport error",
+            };
             crate::log(&format!("net: curl rc={rc} — {why}"));
-            if host_is_plex_tv {
-                record_plex_tv_call(if rc == 28 {
-                    CallOutcome::TimedOut
-                } else {
-                    CallOutcome::Transport(rc)
-                });
-            }
-            return Err(if rc == 28 {
-                RequestError::TimedOut
-            } else {
-                RequestError::Transport
-            });
         }
-        if host_is_plex_tv {
-            record_plex_tv_call(CallOutcome::Answered(code as u16));
-        }
-        Ok(Resp {
-            status: code as u16,
-            body: sink.body,
-        })
+        finish_response(rc, info_rc, code, follow_redirects, max_body, sink)
     }
 }
 
-/// Blocking HTTPS GET on the [`API`] deadlines — the plex.tv account calls.
+/// Option-projected blocking HTTPS GET on the [`API`] deadlines.
+#[allow(dead_code)] // Preserve the Option compatibility API; account now opts into evidence.
 pub fn https_get(url: &str, headers: &[String]) -> Option<Resp> {
-    request(url, headers, "GET", None, API, false, None)
+    request(url, headers, "GET", None, API, false, None, None)
 }
 /// Blocking HTTPS POST (`body` may be empty) on the [`API`] deadlines.
+#[allow(dead_code)] // Preserve the Option compatibility API; account now opts into evidence.
 pub fn https_post(url: &str, headers: &[String], body: &[u8]) -> Option<Resp> {
-    request(url, headers, "POST", Some(body), API, false, None)
+    request(url, headers, "POST", Some(body), API, false, None, None)
 }
 
 /// Blocking **pinned** HTTPS POST — used by Lab Diagnostics uploads and Lab Control's long poll.
@@ -1033,16 +1288,409 @@ pub(crate) fn post_pinned(
     )
 }
 
+/// Blocking **CA-verified, unpinned** HTTPS POST to a third-party endpoint — the telemetry sinks.
+///
+/// # Why this exists, given that [`https_post`] is already CA-verified and unpinned
+///
+/// The plan this was built to called for a new request mode on the grounds that [`post_pinned`]
+/// sets `SSL_VERIFYPEER=0`, so "Sentry and PostHog need the opposite". They do — and `request` has
+/// been that opposite since it was written: `VERIFYPEER=1`/`VERIFYHOST=2` unconditionally, dropped
+/// only inside the pinning branch. The premise was wrong, and the mode it asked for already
+/// existed. Recording that rather than quietly building it, because "add a mode that is already
+/// the default" is the kind of finding that otherwise gets rediscovered.
+///
+/// What a telemetry sender genuinely needs beyond [`https_post`] is three other things:
+///
+/// * **a bounded response sink.** `https_post` passes `max_body: None`. plex.tv is a service this
+///   app is built around; a telemetry endpoint is not, and an unbounded sink on a 1.68 GB
+///   television is a memory risk for a reply we only read a status code from;
+/// * **its own deadlines.** [`API`] is tuned for a call a person is waiting on. A background flush
+///   holding a worker for 25 s to report a crash that already happened has the priority backwards;
+/// * **our own roots, when we ship them.** The device's trust store was frozen in 2019 and cannot
+///   be updated; a third party's CA rotation should not be able to end reporting on every
+///   television at once. When `roots.pem` sits beside the binary this uses it, and says which it
+///   used — otherwise "which trust store verified that" is unanswerable after the fact.
+///
+/// **Never pinned, deliberately.** Pinning a third party's SPKI means going dark at their next key
+/// rotation, on televisions nobody can update. That is the opposite trade from the lab receiver's.
+#[allow(dead_code)] // no sender yet — see `telemetry::sentry`
+pub(crate) fn post_ca(url: &str, headers: &[String], body: &[u8], t: Timeouts) -> Option<Resp> {
+    let bundle = shipped_ca_bundle(crate::paths::app_dir());
+    // Once per process, not per send. Which trust store verified a telemetry endpoint is a fact
+    // that is unanswerable after the event and free to state before it — but it does not change
+    // between sends, and a line per upload would drown the log it is written into.
+    static SAID: std::sync::Once = std::sync::Once::new();
+    SAID.call_once(|| match &bundle {
+        Some(p) => crate::log(&format!("net: telemetry TLS verifies against the shipped bundle ({p})")),
+        None => crate::log("net: telemetry TLS verifies against the DEVICE trust store (no roots.pem beside the binary)"),
+    });
+    let tls = match bundle.as_deref() {
+        Some(p) => Tls::CaBundle(p),
+        None => Tls::Ca,
+    };
+    request_tls(
+        url,
+        headers,
+        "POST",
+        Some(body),
+        t,
+        false,
+        Some(TELEMETRY_MAX_REPLY),
+        tls,
+    )
+}
+
+/// The shipped PEM bundle beside the binary, if there is one.
+///
+/// Split out from [`post_ca`] because the interesting behaviour is the FALLBACK, and the fallback
+/// is silent by nature: no bundle means the device's own 2019 trust store verifies instead, which
+/// works right up until it does not. A host test can watch this choose, and cannot watch a socket.
+///
+/// `to_str` rather than a lossy conversion — a path that is not UTF-8 cannot become a `CString`
+/// curl would open, and answering `None` sends us down the working path rather than into a
+/// guaranteed error 77.
+fn shipped_ca_bundle(dir: &std::path::Path) -> Option<String> {
+    let p = dir.join("roots.pem");
+    p.is_file().then(|| p.to_str().map(str::to_owned)).flatten()
+}
+
+/// How much of a telemetry endpoint's reply is worth keeping. Both vendors answer a small JSON
+/// object and the only field either sender acts on is the status code; the body is kept at all so a
+/// rejection can be logged with the server's own explanation, which is the difference between
+/// debugging a 400 and guessing at one.
+const TELEMETRY_MAX_REPLY: usize = 4096;
+
 /// Redirect-following HTTPS GET for a PUBLIC, credential-free resource. The QR image fetch is the
 /// only caller: at most five HTTP(S)-only redirects are followed, and an HTTPS request may never
 /// downgrade. Account/PMS requests keep redirects off because replayed headers/URLs carry tokens.
 pub fn https_get_public(url: &str) -> Option<Resp> {
-    request(url, &[], "GET", None, API, true, None)
+    request(url, &[], "GET", None, API, true, None, None)
+}
+
+/// The `nowan` gate shared by the three resolver doors ([`request_tls_result`],
+/// [`crate::curlio`] and [`crate::stream`]): `true` when `/tmp/plxnative-nowan` is armed and
+/// `host` is a NAME rather than a literal, i.e. when a dead resolver would have refused it. The
+/// `slow` variant first spends `connect_s`, the budget a worker would have lost waiting on that
+/// resolver. `false` without the trigger, and at compile time without `devtriggers`.
+pub(crate) fn refuse_name(host: &str, connect_s: c_long) -> bool {
+    let Some(nw) = crate::dev::no_wan() else {
+        return false;
+    };
+    let bare = host
+        .strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(host);
+    if bare.parse::<std::net::IpAddr>().is_ok() {
+        return false;
+    }
+    if nw.slow {
+        std::thread::sleep(std::time::Duration::from_secs(connect_s.max(0) as u64));
+    }
+    // `host=`, not a bare `{host}` interpolation, so `diag::scrub::scrub_local`'s host clause
+    // catches it — a private hostname reaching this line unredacted is the exact device leak
+    // `stream.rs`'s DNS-failure line had.
+    crate::log(&format!("net: nowan — refused name host={host}"));
+    true
+}
+
+/// **Resolve pins — the DNS answers this process already knows.**
+///
+/// A [`ResolvePin`] says "this `plex.direct` name IS this address", validated by
+/// [`ResolvePin::for_origin`] so that it is a pure function of the hostname (its doc has the
+/// rule). The control plane carries the pin on each `Client` and passes it into
+/// [`request_result`] explicitly. The media plane cannot: `ff::demux` receives a URL string and
+/// `curlio::CurlSource` builds a fresh easy handle on every open and seek, so it asks THIS table
+/// by the URL's host and port instead.
+///
+/// **Append-only, process-lifetime, never replaced.** A registry slot is re-pointed by publishing
+/// a new `Client` over a leaked old one, and a worker mid-stream keeps the old reference — so a
+/// table that removed or rewrote an entry on re-point could change the resolution of a route a
+/// demuxer already captured. Because a valid pin cannot become wrong, nothing here ever needs to
+/// be taken back: a re-point that lands on a new host appends, and the old entry stays true.
+/// The table holds one entry per server address this process has ever pinned — a handful.
+pub(crate) mod resolve {
+    use super::{c_int, Mutex, Ordering, CURLE_UNKNOWN_OPTION};
+    use crate::plex::ResolvePin;
+
+    static PINS: Mutex<Vec<ResolvePin>> = Mutex::new(Vec::new());
+
+    /// Record a pin. `true` when it was new, `false` when the same host and port were already
+    /// pinned (to the same address, by construction).
+    pub(crate) fn add(pin: &ResolvePin) -> bool {
+        let mut pins = PINS.lock().unwrap_or_else(|e| e.into_inner());
+        if pins
+            .iter()
+            .any(|p| p.host() == pin.host() && p.port() == pin.port())
+        {
+            return false;
+        }
+        pins.push(pin.clone());
+        true
+    }
+
+    /// The pin for `host:port`, if this process has recorded one.
+    pub(crate) fn lookup(host: &str, port: i32) -> Option<ResolvePin> {
+        PINS.lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .find(|p| p.host() == host && p.port() == port)
+            .cloned()
+    }
+
+    /// The `CURLOPT_RESOLVE` entry for a pin, in the syntax the bound libcurl parses.
+    pub(crate) fn entry_of(pin: &ResolvePin) -> String {
+        pin.entry(super::curl_version_num())
+    }
+
+    /// [`lookup`] then [`entry_of`] — what the media plane asks for a URL it is about to open.
+    pub(crate) fn entry_for(host: &str, port: i32) -> Option<String> {
+        lookup(host, port).map(|p| entry_of(&p))
+    }
+
+    /// Grade a `curl_easy_setopt(CURLOPT_RESOLVE)` result. `Ok` means the request may go on:
+    /// either the pin took, or this libcurl has no such option (`CURLE_UNKNOWN_OPTION`, 48) and
+    /// the name resolves through DNS as it did before the pin existed — logged once per process
+    /// so the fact is in the log from a set nobody here owns. Any OTHER refusal is `Err`: a
+    /// malformed entry or a broken handle is not a reason to quietly send the request elsewhere.
+    /// Under `nowan` even 48 is `Err`, because DNS is deliberately unavailable there.
+    pub(crate) fn note_setopt(rc: c_int) -> Result<(), ()> {
+        if rc == 0 {
+            return Ok(());
+        }
+        if rc == CURLE_UNKNOWN_OPTION {
+            static REPORTED: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
+            if !REPORTED.swap(true, Ordering::Relaxed) {
+                crate::log(
+                    "net: resolve pin not applied (rc=48, this libcurl has no CURLOPT_RESOLVE); \
+                     names resolve through DNS",
+                );
+            }
+            return if crate::dev::no_wan().is_some() { Err(()) } else { Ok(()) };
+        }
+        crate::log(&format!("net: resolve pin refused (rc={rc}); request cancelled"));
+        Err(())
+    }
+
+    /// Tests share one process-global table; this empties it between them.
+    #[cfg(test)]
+    pub(crate) fn clear() {
+        PINS.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn with_test_response(reply: Vec<u8>, stall: bool, check: impl FnOnce(&str)) {
+    request_tests::with_response(reply, stall, check);
+}
+
+/// Test-only input at the curl completion boundary, not a simulated wire exchange.
+#[cfg(test)]
+pub(crate) fn test_response_failure(rc: c_int, info_rc: c_int, code: c_long, redirects: bool)
+    -> Result<Resp, RequestFailure> {
+    let mut sink = BodySink::new(None);
+    sink.push(b"synthetic partial body");
+    finish_response(rc, info_rc, code, redirects, None, sink)
 }
 
 #[cfg(test)]
 mod request_tests {
     use super::*;
+
+    pub(super) fn with_response(reply: Vec<u8>, stall: bool, check: impl FnOnce(&str)) {
+        use std::io::{Read, Write};
+        use std::time::{Duration, Instant};
+        let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        server.set_nonblocking(true).unwrap();
+        let url = format!("http://127.0.0.1:{}/", server.local_addr().unwrap().port());
+        let stop = AtomicBool::new(false);
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                let until = Instant::now() + Duration::from_secs(5);
+                while !stop.load(Ordering::Acquire) && Instant::now() < until {
+                    if let Ok((mut socket, _)) = crate::testnet::accept(&server) {
+                        socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                        socket.set_write_timeout(Some(Duration::from_secs(2))).unwrap();
+                        let _ = socket.read(&mut [0; 4096]);
+                        let _ = socket.write_all(&reply);
+                        while stall && !stop.load(Ordering::Acquire) && Instant::now() < until {
+                            std::thread::sleep(Duration::from_millis(1));
+                        }
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            });
+            struct Stop<'a>(&'a AtomicBool);
+            impl Drop for Stop<'_> { fn drop(&mut self) { self.0.store(true, Ordering::Release); } }
+            let _stop = Stop(&stop);
+            check(&url);
+        });
+    }
+
+    fn truncated_refusal_keeps_status(status: u16) {
+        let _serial = crate::testlock::serial();
+        assert!(global_init() && available(), "this transport regression requires host libcurl");
+        let reply = format!("HTTP/1.1 {status} Refused\r\nContent-Length: 1000\r\nConnection: close\r\n\r\nshort");
+        with_response(reply.into_bytes(), false, |url| {
+            let failure = request_evidence(url, &[], "GET", None, API, false, None, None).err().unwrap();
+            assert_eq!(failure.status, Some(status), "received refusal status was erased");
+            assert_eq!(failure.cause, RequestError::Transport);
+            assert_eq!(failure.body_limit, None);
+        });
+    }
+
+    #[test]
+    fn truncated_401_retains_response_evidence() { truncated_refusal_keeps_status(401); }
+
+    #[test]
+    fn truncated_403_retains_response_evidence() { truncated_refusal_keeps_status(403); }
+
+    #[test]
+    fn http2_reset_keeps_validated_final_status() {
+        for rc in [16, 55, 92] {
+            for code in [401, 403, 404, 410] {
+                assert_eq!(response_status(rc, 0, code, false), Some(code as u16));
+                assert_eq!(response_status(rc, 1, code, false), None);
+                assert_eq!(response_status(rc, 0, code, true), None);
+            }
+            for code in [0, 99, 100, 199, 600, 65536] {
+                assert_eq!(response_status(rc, 0, code, false), None);
+            }
+        }
+    }
+
+    #[test]
+    fn ca_trusted_http2_wire_reset_retains_refusal() {
+        use std::io::{BufRead, Write};
+        use std::process::{Command, Stdio};
+        let _serial = crate::testlock::serial();
+        assert!(global_init() && available());
+        struct Peer(std::process::Child);
+        impl Drop for Peer {
+            fn drop(&mut self) {
+                if let Some(mut input) = self.0.stdin.take() { let _ = input.write_all(b"\n"); }
+                let _ = self.0.wait();
+            }
+        }
+        for status in [401, 403, 404, 410] {
+            let mut peer = Peer(Command::new("python3")
+                .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/src/net/h2_reset_fixture.py"))
+                .arg(status.to_string()).stdin(Stdio::piped()).stdout(Stdio::piped())
+                .stderr(Stdio::inherit()).spawn().expect("local Python/OpenSSL H2 fixture"));
+            let mut output = std::io::BufReader::new(peer.0.stdout.take().unwrap());
+            let mut ready = String::new(); output.read_line(&mut ready).unwrap();
+            let ready: serde_json::Value = serde_json::from_str(&ready).expect("fixture startup");
+            let url = format!("https://127.0.0.1:{}/", ready["port"].as_u64().unwrap());
+            let response = request_tls_evidence(&url, &[], "GET", None,
+                Timeouts { total_s: 5, ..API }, false, None,
+                Tls::CaBundle(ready["ca"].as_str().unwrap()), None);
+            let mut sent = String::new(); output.read_line(&mut sent).unwrap();
+            assert_eq!(sent.trim(), "h2-reset-sent", "fixture must negotiate H2 and send RST_STREAM");
+            let failure = response.err().expect("reset transfer cannot expose a partial body");
+            assert_eq!(failure.status, Some(status));
+            assert_eq!(failure.cause, RequestError::Transport);
+            assert_eq!(failure.body_limit, None);
+            crate::plex::account::test_refusal_evidence(status, Err(failure));
+            peer.0.stdin.take().unwrap().write_all(b"\n").unwrap();
+            assert!(peer.0.wait().unwrap().success());
+        }
+    }
+
+    #[test]
+    fn evidence_bounds_and_completion_use_the_real_request_path() {
+        let _serial = crate::testlock::serial();
+        assert!(global_init() && available());
+        for status in [200, 401, 403] {
+            for len in [31, 32, 33, 65536] {
+                let mut reply = format!("HTTP/1.1 {status} Reply\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n").into_bytes();
+                reply.extend(vec![b'x'; len]);
+                with_response(reply, false, |url| {
+                    let response = request_evidence(url, &[], "GET", None, API, false, Some(32), None);
+                    if len <= 32 {
+                        let response = response.ok().expect("complete within-limit transfer");
+                        assert_eq!(response.status, status);
+                        assert_eq!(response.body.len(), len);
+                    } else {
+                        let failure = response.err().expect("no truncated response may escape");
+                        assert_eq!(failure.status, Some(status));
+                        assert_eq!(failure.body_limit, Some(32));
+                        assert_eq!(failure.cause, RequestError::Transport);
+                    }
+                });
+            }
+        }
+    }
+
+    #[test]
+    fn body_timeout_retains_status_but_legacy_projection_stays_timed_out() {
+        let _serial = crate::testlock::serial();
+        assert!(global_init() && available());
+        let reply = b"HTTP/1.1 403 Refused\r\nContent-Length: 1000\r\n\r\nshort".to_vec();
+        let t = Timeouts { total_ms: 200, ..API };
+        with_response(reply.clone(), true, |url| {
+            let failure = request_evidence(url, &[], "GET", None, t, false, None, None).err().unwrap();
+            assert_eq!(failure.status, Some(403));
+            assert_eq!(failure.cause, RequestError::TimedOut);
+        });
+        with_response(reply, true, |url| {
+            assert!(matches!(request_result(url, &[], "GET", None, t, false, None, None), Err(RequestError::TimedOut)));
+        });
+    }
+
+    #[test]
+    fn absent_invalid_and_redirect_failure_status_are_not_evidence() {
+        let _serial = crate::testlock::serial();
+        assert!(global_init() && available());
+        for reply in [Vec::new(), b"HTTP/1.1 999 Invalid\r\nContent-Length: 0\r\n\r\n".to_vec()] {
+            with_response(reply, false, |url| {
+                let failure = request_evidence(url, &[], "GET", None, API, false, None, None).err().unwrap();
+                assert_eq!(failure.status, None);
+            });
+        }
+        // Redirect target is the same synthetic server, whose one reply ends its accept loop.
+        with_response(b"HTTP/1.1 302 Move\r\nLocation: /next\r\nContent-Length: 0\r\n\r\n".to_vec(), false, |url| {
+            let failure = request_evidence(url, &[], "GET", None, Timeouts { total_ms: 200, ..API }, true, None, None).err().unwrap();
+            assert_eq!(failure.status, None, "a prior redirect is not final-origin evidence");
+        });
+    }
+
+    #[test]
+    fn evidence_validation_excludes_security_errors_and_invalid_getinfo() {
+        for rc in [35, 60, 77, 90, 47, 6, 7, 8] {
+            assert_eq!(response_status(rc, 0, 401, false), None, "rc={rc}");
+        }
+        for code in [-1, 0, 99, 600, 65536, c_long::MAX] {
+            assert_eq!(response_status(0, 0, code, false), None);
+        }
+        assert_eq!(response_status(18, 1, 401, false), None);
+        assert_eq!(response_status(18, 0, 100, false), None);
+        for rc in [16, 18, 23, 28, 55, 56, 92] {
+            assert_eq!(response_status(rc, 0, 401, false), Some(401));
+            assert_eq!(response_status(rc, 0, 401, true), None);
+        }
+        let mut sink = BodySink::new(Some(4));
+        assert!(!sink.push(b"synthetic-secret"));
+        let failure = finish_response(23, 1, 401, false, Some(4), sink).err().unwrap();
+        assert_eq!(failure.status, None);
+        assert_eq!(failure.body_limit, Some(4));
+        assert!(!format!("{failure:?}").contains("synthetic-secret"));
+    }
+
+    #[test]
+    fn option_wrappers_preserve_complete_and_incomplete_projection() {
+        let _serial = crate::testlock::serial();
+        assert!(global_init() && available());
+        for post in [false, true] {
+            for complete in [false, true] {
+                let length = if complete { 2 } else { 100 };
+                with_response(format!("HTTP/1.1 401 Refused\r\nContent-Length: {length}\r\nConnection: close\r\n\r\nok").into_bytes(), false, |url| {
+                    let response = if post { https_post(url, &[], b"") } else { https_get(url, &[]) };
+                    assert_eq!(response.map(|r| r.status), complete.then_some(401));
+                });
+            }
+        }
+    }
 
     #[test]
     fn a_bounded_sink_refuses_before_it_allocates_past_the_limit() {
@@ -1080,6 +1728,120 @@ mod request_tests {
         );
     }
 
+    /// A loopback HTTP/1.1 server answering one request per connection with `ok`, counting the
+    /// connections it accepted. The acceptor is stopped through the flag whether or not the body
+    /// panicked (the scope joins before it reports).
+    fn with_ok_server(
+        bind: &str,
+        body: impl FnOnce(u16, &std::sync::atomic::AtomicUsize),
+    ) -> Option<()> {
+        use std::io::{Read, Write};
+        use std::sync::atomic::AtomicUsize;
+        let srv = std::net::TcpListener::bind(bind).ok()?;
+        let port = srv.local_addr().unwrap().port();
+        srv.set_nonblocking(true).unwrap();
+        let accepts = AtomicUsize::new(0);
+        let stop = AtomicBool::new(false);
+        std::thread::scope(|sc| {
+            sc.spawn(|| {
+                while !stop.load(Ordering::Acquire) {
+                    match crate::testnet::accept(&srv) {
+                        Ok((mut s, _)) => {
+                            accepts.fetch_add(1, Ordering::AcqRel);
+                            let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+                            let mut buf = [0u8; 2048];
+                            let _ = s.read(&mut buf);
+                            let _ = s.write_all(
+                                b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                            );
+                        }
+                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(std::time::Duration::from_millis(1))
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+            struct StopAll<'a>(&'a AtomicBool);
+            impl Drop for StopAll<'_> {
+                fn drop(&mut self) {
+                    self.0.store(true, Ordering::Release);
+                }
+            }
+            let _stop = StopAll(&stop);
+            body(port, &accepts);
+        });
+        Some(())
+    }
+
+    /// **The offline fix, at the transport.** A host no resolver on earth answers for
+    /// (`.invalid`, RFC 2606) reaches a loopback listener when the request carries a resolve
+    /// entry naming it, and reaches nothing without one — so a request that succeeds here did so
+    /// through `CURLOPT_RESOLVE` and not through DNS. Vacuous on a host with no libcurl.
+    #[test]
+    fn a_resolve_entry_dials_the_address_without_dns() {
+        let _g = crate::testlock::serial();
+        if !(global_init() && available()) {
+            return;
+        }
+        with_ok_server("127.0.0.1:0", |port, accepts| {
+            let url = format!("http://no-such-host.invalid:{port}/");
+            let entry = format!("no-such-host.invalid:{port}:127.0.0.1");
+            let t = Timeouts {
+                connect_s: 3,
+                total_s: 5,
+                ..API
+            };
+            let r = request_result(&url, &[], "GET", None, t, false, None, Some(&entry))
+                .expect("the pinned name reaches the listener");
+            assert_eq!(r.status, 200);
+            assert_eq!(r.body, b"ok");
+            assert_eq!(accepts.load(Ordering::Acquire), 1);
+            // and without the entry the same name is exactly as unreachable as it always was
+            assert!(request_result(&url, &[], "GET", None, t, false, None, None).is_err());
+            assert_eq!(accepts.load(Ordering::Acquire), 1, "nothing dialled");
+        })
+        .expect("loopback v4 binds");
+    }
+
+    /// The same over IPv6, in whichever entry syntax the bound libcurl takes — bare below 7.57.0,
+    /// bracketed from it — chosen by `ResolvePin::entry` from the version this process captured.
+    /// Skips where `::1` cannot be bound.
+    #[test]
+    fn a_v6_resolve_entry_dials_the_address_in_this_curls_syntax() {
+        let _g = crate::testlock::serial();
+        if !(global_init() && available()) {
+            return;
+        }
+        let ran = with_ok_server("[::1]:0", |port, accepts| {
+            let pin = crate::plex::ResolvePin::for_test(
+                "no-such-host.invalid",
+                port as i32,
+                "::1".parse().unwrap(),
+            );
+            let entry = resolve::entry_of(&pin);
+            assert_eq!(
+                curl_version_num() >= crate::plex::origin::CURL_RESOLVE_BRACKETS_SINCE,
+                entry.ends_with(":[::1]"),
+                "entry {entry:?} for curl {:#x}",
+                curl_version_num()
+            );
+            let url = format!("http://no-such-host.invalid:{port}/");
+            let t = Timeouts {
+                connect_s: 3,
+                total_s: 5,
+                ..API
+            };
+            let r = request_result(&url, &[], "GET", None, t, false, None, Some(&entry))
+                .expect("the pinned name reaches the v6 listener");
+            assert_eq!(r.status, 200);
+            assert_eq!(accepts.load(Ordering::Acquire), 1);
+        });
+        if ran.is_none() {
+            eprintln!("skipped: ::1 not bindable here");
+        }
+    }
+
     #[test]
     fn public_redirects_are_http_only_and_never_downgrade_tls() {
         assert_eq!(
@@ -1096,80 +1858,6 @@ mod request_tests {
             "plaintext may upgrade, but the inverse is forbidden"
         );
         assert_eq!(PUBLIC_MAX_REDIRECTS, 5);
-    }
-
-    #[test]
-    fn plex_tv_host_is_matched_exactly() {
-        assert!(is_plex_tv_host("https://plex.tv/api/v2/pins"));
-        assert!(is_plex_tv_host("https://PLEX.TV/api/v2/pins"), "case-insensitive");
-        assert!(is_plex_tv_host("https://plex.tv:443/api/v2/pins"), "port is stripped");
-        assert!(
-            !is_plex_tv_host("https://api.plex.tv/api/v2/pins"),
-            "a subdomain is not plex.tv"
-        );
-        assert!(
-            !is_plex_tv_host("https://discover.provider.plex.tv/hubs"),
-            "a subdomain is not plex.tv"
-        );
-        assert!(
-            !is_plex_tv_host("https://abc123.def456.plex.direct:32400/library"),
-            "a user's own PMS is never plex.tv"
-        );
-        assert!(
-            !is_plex_tv_host("http://192.168.1.50:32400/library"),
-            "a plain PMS origin is never plex.tv"
-        );
-        assert!(!is_plex_tv_host("not a url at all"));
-    }
-
-    #[test]
-    fn curl_rc_why_names_the_codes_the_sign_in_screen_cares_about() {
-        assert_eq!(curl_rc_why(6), "could not resolve host");
-        assert_eq!(curl_rc_why(28), "timed out");
-        assert_eq!(
-            curl_rc_why(35),
-            "TLS handshake failed (protocol too new for this firmware?)"
-        );
-        assert_eq!(
-            curl_rc_why(60),
-            "peer certificate could not be verified (CA store too old?)"
-        );
-        assert_eq!(curl_rc_why(77), "CA bundle could not be read");
-        assert_eq!(curl_rc_why(9999), "transport error", "unknown codes fall back");
-    }
-
-    #[test]
-    fn describe_outcome_is_bounded_and_identifier_free() {
-        assert_eq!(describe_outcome(CallOutcome::Answered(200)), "HTTP 200");
-        assert_eq!(describe_outcome(CallOutcome::Answered(429)), "HTTP 429");
-        assert_eq!(describe_outcome(CallOutcome::TimedOut), "timed out (curl 28)");
-        assert_eq!(
-            describe_outcome(CallOutcome::Transport(6)),
-            "could not resolve host (curl 6)"
-        );
-        assert_eq!(
-            describe_outcome(CallOutcome::Transport(CURL_UNAVAILABLE)),
-            "libcurl unavailable"
-        );
-    }
-
-    #[test]
-    fn last_plex_tv_call_reports_the_most_recent_record() {
-        let _serial = LAST_CALL_TEST_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-        reset_last_plex_tv_call_for_test();
-        assert!(last_plex_tv_call().is_none(), "nothing recorded yet");
-
-        record_plex_tv_call(CallOutcome::Transport(6));
-        let first = last_plex_tv_call().expect("a call was recorded");
-        assert_eq!(first.outcome, CallOutcome::Transport(6));
-
-        record_plex_tv_call(CallOutcome::Answered(201));
-        let second = last_plex_tv_call().expect("a call was recorded");
-        assert_eq!(second.outcome, CallOutcome::Answered(201));
-        assert!(second.at >= first.at, "the record advances in time");
-
-        reset_last_plex_tv_call_for_test();
-        assert!(last_plex_tv_call().is_none(), "reset clears it again");
     }
 }
 
@@ -1227,5 +1915,54 @@ mod legacy_tests {
             libc::pthread_mutex_unlock(&mut lock);
             libc::pthread_mutex_destroy(&mut lock);
         }
+    }
+}
+
+#[cfg(test)]
+mod tls_mode_tests {
+    use super::*;
+
+    /// **The fallback is the interesting half, and it is silent.** With no `roots.pem` beside the
+    /// binary a telemetry POST verifies against the television's own 2019 trust store — which works
+    /// until a third party rotates to a root that firmware never shipped, and then stops working on
+    /// every set at once with nothing to read. Pinned here so the day the bundle starts shipping,
+    /// the change in behaviour is a test diff rather than a discovery.
+    #[test]
+    fn a_missing_bundle_falls_back_to_the_device_trust_store() {
+        let dir = std::env::temp_dir().join("plx-net-ca-absent");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        assert_eq!(shipped_ca_bundle(&dir), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// …and a bundle that IS there is selected, by absolute path. FFmpeg's `$ORIGIN` lesson applies
+    /// to curl too: nothing beside this binary is on any search path, so the only workable form is
+    /// the one `app_dir()` resolves at runtime.
+    #[test]
+    fn a_shipped_bundle_is_selected_by_absolute_path() {
+        let dir = std::env::temp_dir().join("plx-net-ca-present");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        std::fs::write(dir.join("roots.pem"), b"-----BEGIN CERTIFICATE-----\n").expect("write");
+        let got = shipped_ca_bundle(&dir).expect("the bundle beside the binary is found");
+        assert!(got.ends_with("roots.pem"));
+        assert!(
+            std::path::Path::new(&got).is_absolute(),
+            "curl is given an absolute path"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A DIRECTORY named `roots.pem` is not a bundle. `exists()` would accept it and hand curl a
+    /// path it fails to read as error 77 — a send that dies at perform rather than falling back to
+    /// the store that would have worked.
+    #[test]
+    fn a_directory_named_like_the_bundle_is_not_one() {
+        let dir = std::env::temp_dir().join("plx-net-ca-dir");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("roots.pem")).expect("temp dirs");
+        assert_eq!(shipped_ca_bundle(&dir), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

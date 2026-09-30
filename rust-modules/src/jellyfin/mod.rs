@@ -55,6 +55,11 @@
 // Module-wide and TEMPORARY on purpose — the last consumer to land removes this attribute.
 #![allow(dead_code, unused_imports)]
 
+#[cfg(test)]
+pub(crate) mod mock_server;
+#[cfg(test)]
+pub(crate) use mock_server::MockServer;
+
 pub(crate) mod boot;
 pub(crate) mod browse;
 pub(crate) mod client;

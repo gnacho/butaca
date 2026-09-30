@@ -41,6 +41,29 @@ fn main() {
         .next()
         .or_else(|| std::env::var("PLXNATIVE_PMS_HOST").ok())
         .unwrap_or_default();
+    if host == "--write-synthetic-initial" {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let result = (|| -> Result<(), &'static str> {
+            let path = args.next().ok_or("missing output path")?;
+            let seed = args.next().and_then(|value| value.parse::<u32>().ok()).ok_or("invalid seed")?;
+            let port = args.next().and_then(|value| value.parse::<u16>().ok()).ok_or("invalid port")?;
+            let settings = match args.next() {
+                None => None,
+                Some(value) if value == "flow12" => Some(value),
+                Some(value) if value.starts_with("settings=") =>
+                    Some(value.trim_start_matches("settings=").to_string()),
+                Some(_) => return Err("unsupported synthetic initial argument"),
+            };
+            if args.next().is_some() { return Err("unexpected argument"); }
+            let encoded = plxnative_modules::synthetic_home_initial(seed,port,settings)?;
+            let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600)
+                .open(path).map_err(|_| "cannot create initial input file")?;
+            file.write_all(encoded.as_bytes()).map_err(|_| "cannot write initial input file")
+        })();
+        if let Err(reason) = result { eprintln!("synthetic initial input: {reason}"); std::process::exit(2); }
+        return;
+    }
     let port: u16 = args
         .next()
         .or_else(|| std::env::var("PLXNATIVE_PMS_PORT").ok())
@@ -99,5 +122,27 @@ fn main() {
 
     // `as c_int` directly — an intermediate i16 would wrap every port above 32767.
     let rc = plex_run(c_host.as_ptr(), port as c_int);
-    std::process::exit(rc);
+    exit_without_atexit_teardown(rc)
+}
+
+/// Leave the process WITHOUT running libc's `atexit` handlers or shared-library destructors.
+///
+/// `plex_run` returns with detached workers still alive — the sign-in PIN request, the poster
+/// fetchers, anything else parked in libcurl — because nothing in the app joins them, and on the
+/// television nothing has to. `std::process::exit` would call libc `exit`, whose handlers include
+/// OpenSSL 3's `OPENSSL_cleanup`: it frees libcrypto's global tables underneath a worker that is
+/// mid-handshake, and the simulator dies with SIGSEGV after it has already done its job. That is
+/// what failed the Linux simulator CI launch intermittently (core dump: main thread in
+/// `OPENSSL_cleanup` from `exit`, worker in `X509_STORE_load_file_ex` under `auth::mint_pin`).
+///
+/// Nothing that must survive the process lives in those handlers: the event log is appended
+/// unbuffered, the app's own shutdown (telemetry flush included) already ran inside `plex_run`,
+/// and the two std streams are flushed here by hand.
+fn exit_without_atexit_teardown(rc: c_int) -> ! {
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+    // SAFETY: `_exit` is async-signal-safe and takes no pointers; it ends every thread at once,
+    // which is exactly the point.
+    unsafe { libc::_exit(rc) }
 }

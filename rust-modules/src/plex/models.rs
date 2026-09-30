@@ -1,13 +1,13 @@
-//! serde response DTOs — only the fields the app consumes. Everything is
-//! `#[serde(default)]` to mirror the "all optional" reality of PMS JSON (a trimmed
-//! response never fails to deserialize). `kind` renames the JSON `type` field (a Rust
-//! keyword). These are read-only: the app's own view structs are populated *from* them.
+//! serde response DTOs — only the fields the app consumes. The top-level `MediaContainer` is
+//! required; fields inside it default to mirror the "all optional" reality of PMS JSON (a trimmed
+//! container does not fail to deserialize). `kind` renames the JSON `type` field (a Rust keyword).
+//! These are read-only: the app's own view structs are populated *from* them.
 use serde::Deserialize;
 
 /// `{ "MediaContainer": … }` — every list/detail response.
 #[derive(Deserialize, Default)]
 pub struct Envelope {
-    #[serde(rename = "MediaContainer", default)]
+    #[serde(rename = "MediaContainer")]
     pub media_container: MediaContainer,
 }
 
@@ -15,6 +15,10 @@ pub struct Envelope {
 /// list (`Directory`), an items/detail list (`Metadata`), or a hub list (`Hub`).
 #[derive(Deserialize, Default)]
 pub struct MediaContainer {
+    /// The item's own SETTINGS, on `/library/metadata/{id}/tree` (`docs/plex-openapi.json`'s
+    /// `show` example): `episodeSort`, `audioLanguage`, `subtitleLanguage`, … — see [`Setting`].
+    #[serde(rename = "Setting", default)]
+    pub setting: Vec<Setting>,
     #[serde(rename = "Directory", default)]
     pub directory: Vec<LibrarySection>,
     #[serde(rename = "Metadata", default)]
@@ -140,11 +144,14 @@ pub struct MetaType {
     pub sort: Vec<SortOption>,
 }
 
-/// One sort menu entry: `sort={key}:asc|desc` on the listing.
+/// One sort menu entry. `descKey` carries the server's descending expression when it is
+/// different from appending `:desc` (Show ordering reverses the show, not each episode).
 #[derive(Deserialize, Default)]
 pub struct SortOption {
     #[serde(default)]
     pub key: String, // "titleSort"
+    #[serde(rename = "descKey", default)]
+    pub desc_key: String,
     #[serde(rename = "defaultDirection", default)]
     pub default_direction: String, // "asc" | "desc"
     #[serde(default)]
@@ -157,6 +164,15 @@ pub struct Hub {
     pub kind: String,
     #[serde(rename = "hubIdentifier", default)]
     pub hub_identifier: String, // e.g. home.continue, home.ondeck — stable, locale-independent
+    /// The route this hub's own listing lives at — `/hubs/sections/1/continueWatching/items` for a
+    /// per-section deck, `/library/collections/{id}/children` for a collection.
+    ///
+    /// It exists because on `/hubs/sections/{id}` it is the second half of "is this the Continue
+    /// Watching row" (`browse::section_hubs::shelf_is_continue`): the identifier is what a server
+    /// could plausibly spell differently, the key is the route it must answer at. Nothing follows
+    /// it yet — the items on that route arrive embedded (`docs/pms-api.md` §3a).
+    #[serde(default)]
+    pub key: String,
     #[serde(default)]
     pub title: String,
     #[serde(rename = "Metadata", default)]
@@ -170,7 +186,9 @@ pub struct Hub {
     /// | `Metadata[]` | `movie`, `show`, `episode`, `album`, `artist`, `track` |
     /// | **`Directory[]`** | **`actor`, `director`, `collection`** |
     ///
-    /// So Cast & Crew *and* Collections both come through here. `plex-openapi.json`'s own worked
+    /// So Cast & Crew *and* Collections both come through here — Collections only when the request
+    /// omits `includeCollections=1`, which moves them to full `Metadata[]` collection rows and which
+    /// `Client::search` always sends. `plex-openapi.json`'s own worked
     /// example for `/hubs/search` disagrees — it puts shows under `Directory` — which is why this
     /// was probed live rather than modelled from the spec, and why the split is written down here
     /// instead of being rediscovered the next time a hub looks empty.
@@ -181,15 +199,101 @@ pub struct Hub {
     /// ones are worth drawing.
     #[serde(default, deserialize_with = "de_i64")]
     pub size: i64,
+    /// How many items the hub's listing holds in ALL, when the hub embeds only a page of them
+    /// (`plex-openapi.json`'s `Hub.totalSize`). A collection hub's member count — the "· N" its
+    /// linked heading carries — is this, or [`Self::size`] when the server sent no total.
+    #[serde(rename = "totalSize", default, deserialize_with = "de_i64")]
+    pub total_size: i64,
+}
+
+impl Hub {
+    /// Every item the hub's listing holds: `totalSize`, else `size`, never negative.
+    pub fn total(&self) -> usize {
+        self.total_size.max(self.size).max(0) as usize
+    }
+}
+
+/// One of an item's per-item settings — the show page's "Advanced" dialog in Plex Web. Only the
+/// id and the CURRENT value are read; `value` is empty for "Library/Account default".
+#[derive(Deserialize, Default, Clone, Debug)]
+pub struct Setting {
+    #[serde(default, deserialize_with = "de_str")]
+    pub id: String,
+    #[serde(default, deserialize_with = "de_str")]
+    pub value: String,
+}
+
+/// A SHOW's language settings — its Advanced dialog in Plex Web. `None` / `-1` mean "Account
+/// default", inherited from the active Plex profile when its preferences are available.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShowLangPrefs {
+    /// `audioLanguage`, e.g. `"hu-HU"`
+    pub audio: Option<String>,
+    /// `subtitleLanguage`, e.g. `"hu-HU"`
+    pub subtitle: Option<String>,
+    /// `subtitleMode`: -1 account default · 0 manually selected · 1 shown with foreign audio ·
+    /// 2 always enabled
+    pub subtitle_mode: i32,
+}
+
+impl Default for ShowLangPrefs {
+    fn default() -> Self { Self { audio: None, subtitle: None, subtitle_mode: -1 } }
+}
+
+impl ShowLangPrefs {
+    /// Read the three settings out of a `Setting[]`, or None when it carries none of them (so the
+    /// caller can ask the other endpoint).
+    pub fn from_settings(settings: &[Setting]) -> Option<ShowLangPrefs> {
+        let get = |id: &str| settings.iter().find(|s| s.id == id).map(|s| s.value.trim());
+        let (a, s, m) = (get("audioLanguage"), get("subtitleLanguage"), get("subtitleMode"));
+        if a.is_none() && s.is_none() && m.is_none() {
+            return None;
+        }
+        // `""` and `"-1"` are both "Account default" — unset as far as this struct is concerned
+        let lang = |v: Option<&str>| v.filter(|v| !v.is_empty() && *v != "-1").map(str::to_string);
+        Some(ShowLangPrefs {
+            audio: lang(a),
+            subtitle: lang(s),
+            subtitle_mode: m.and_then(|m| m.parse().ok()).unwrap_or(-1),
+        })
+    }
+}
+
+/// `Metadata.Preferences`, present when a metadata read asks `includePreferences=1`.
+#[derive(Deserialize, Default)]
+pub struct Preferences {
+    #[serde(rename = "Setting", default)]
+    pub setting: Vec<Setting>,
 }
 
 /// The movie/show/season/episode item. Missing fields default (Plex omits optionals).
 #[derive(Deserialize, Default)]
 pub struct Metadata {
+    /// Only on a read that asked `includePreferences=1` — see [`Preferences`].
+    #[serde(rename = "Preferences", default)]
+    pub preferences: Preferences,
     #[serde(rename = "type", default)]
     pub kind: String, // movie|show|season|episode|clip
     #[serde(rename = "ratingKey", default)]
     pub rating_key: String,
+    /// `/library/metadata/{rk}` for a leaf, `/library/metadata/{rk}/children` for a show/season.
+    /// Extras matching also reads this against `primaryExtraKey` (docs/pms-api.md §4 extras).
+    #[serde(default)]
+    pub key: String,
+    /// Clip extras only: `trailer` / `behindTheScenes` / `sceneOrSample` / …
+    #[serde(default)]
+    pub subtype: String,
+    /// Clip extras only. `1` is a trailer; `5` behind-the-scenes; `6` scene-or-sample
+    /// (verified live 2026-09-12). Lenient: PMS string-encodes numerics on some endpoints.
+    #[serde(rename = "extraType", default, deserialize_with = "de_i64")]
+    pub extra_type: i64,
+    /// Path of the item's primary extra (`/library/metadata/{rk}`). Present on movie/show
+    /// metadata even without `includeExtras=1`.
+    #[serde(rename = "primaryExtraKey", default)]
+    pub primary_extra_key: String,
+    /// Nested extras, only with `?includeExtras=1`. Same rows as `GET …/extras`.
+    #[serde(rename = "Extras", default)]
+    pub extras: Option<ExtrasHub>,
     /// **The only PORTABLE identity Plex issues** — `plex://movie/6856…291d`, the metadata
     /// provider's id, identical on every server that ever matched this film. Everything else
     /// item-shaped (`ratingKey`, `librarySectionID`, `Part.key`, `Stream.id`) is a server-local
@@ -223,6 +327,11 @@ pub struct Metadata {
     pub content_rating: String,
     #[serde(default)]
     pub summary: String,
+    /// A collection's member order, as its owner set it in Plex: `0` release date, `1`
+    /// alphabetical, `2` custom (python-plexapi's `Collection.collectionSort`). Absent on every
+    /// other row, and on a collection whose server did not send it.
+    #[serde(rename = "collectionSort", default, deserialize_with = "de_opt_i64")]
+    pub collection_sort: Option<i64>,
     #[serde(default)]
     pub tagline: String,
     #[serde(default)]
@@ -235,12 +344,19 @@ pub struct Metadata {
     pub view_offset: i64, // ms; resume point
     #[serde(rename = "lastViewedAt", default, deserialize_with = "de_i64")]
     pub last_viewed_at: i64, // unix secs; drives Continue Watching recency sort
+    /// Collection rows use this as their tag id (distinct from `ratingKey`).
     #[serde(default, deserialize_with = "de_i64")]
     pub index: i64, // season/episode number
+    #[serde(rename = "childCount", default, deserialize_with = "de_i64")]
+    pub child_count: i64,
+    #[serde(rename = "updatedAt", default, deserialize_with = "de_i64")]
+    pub updated_at: i64,
     #[serde(rename = "parentIndex", default, deserialize_with = "de_i64")]
     pub parent_index: i64,
     #[serde(rename = "parentRatingKey", default)]
     pub parent_rating_key: String, // season → its show
+    #[serde(rename = "parentTitle", default)]
+    pub parent_title: String, // season → show title; episode → season title
     #[serde(rename = "grandparentRatingKey", default)]
     pub grandparent_rating_key: String, // episode → its show
     #[serde(rename = "grandparentTitle", default)]
@@ -253,6 +369,8 @@ pub struct Metadata {
     pub view_count: i64, // present only once watched ≥1× (absent = unwatched)
     #[serde(default)]
     pub thumb: String,
+    #[serde(rename = "parentThumb", default)]
+    pub parent_thumb: String,
     #[serde(default)]
     pub art: String,
     #[serde(rename = "grandparentThumb", default)]
@@ -397,6 +515,20 @@ pub struct MediaPart {
     pub stream: Vec<Stream>,
 }
 
+impl MediaPart {
+    /// Veto: a remux that copies video is forbidden only when a video `Stream` on this part
+    /// is `decision=transcode`. Silence is not a video re-encode — missing `Stream[]`, `copy`,
+    /// unnamed, or any other spelling leave copy allowed. Library metadata omits
+    /// `Stream.decision`; this reader is for `/decision` bodies. `Part.decision=transcode` is a
+    /// container change: TrueHD-only and Profile 5 are `Part=transcode` with video `copy`
+    /// (`docs/pms-api.md`).
+    pub fn video_forbids_copy(&self) -> bool {
+        self.stream
+            .iter()
+            .any(|s| s.stream_type == 1 && s.decision == "transcode")
+    }
+}
+
 /// D-2: channels/title/hearingImpaired/audioDescription/forced are real PMS fields the spec
 /// omits — kept here. Plex 0/1 booleans stay i64; the app tests `!= 0`.
 #[derive(Deserialize, Default)]
@@ -417,10 +549,18 @@ pub struct Stream {
     pub key: String,
     #[serde(default)]
     pub codec: String,
+    /// `/decision` only: this lane's verdict — `"directplay"` | `"transcode"` | `"copy"`.
+    /// [`MediaPart::video_forbids_copy`] is the playback reader; a library metadata body omits it.
+    #[serde(default)]
+    pub decision: String,
     #[serde(default)]
     pub language: String,
     #[serde(rename = "languageCode", default)]
     pub language_code: String, // ISO-639 code, e.g. "eng" (route audio-track pick)
+    /// The BCP-47 tag ("es-419", "en-GB") — `language_code` is only the primary subtag.
+    /// `default` because PMS omits it on a stream with no language.
+    #[serde(rename = "languageTag", default)]
+    pub language_tag: String,
     // Video stream only: source fps for the Load esInfo. Lenient (number OR numeric string)
     // so a non-numeric frameRate never fails the whole detail parse — matches the old jfloat.
     #[serde(rename = "frameRate", default, deserialize_with = "de_f64")]
@@ -525,6 +665,15 @@ pub struct Stream {
     pub is_default: i64,
     #[serde(default, deserialize_with = "de_i64")]
     pub selected: i64,
+    /// Audio stream only: PMS 1.43.4+ with Plex Pass says this track's loudness was analyzed and
+    /// the server can honor `normalizeLoudness=1` (and, paired with it, `boostDialog=1`) on the
+    /// universal transcoder for it (issue #266). `de_bool` because it arrives as `"1"` on some
+    /// endpoints and a real JSON bool on others; `default` because an old PMS or a video/subtitle
+    /// stream never sends the key at all, and absent must mean false, never "unknown but assume
+    /// yes" — offering the enhancement on a track the server can't actually normalize is exactly
+    /// the failure mode I2/I5 exist to prevent.
+    #[serde(rename = "canNormalizeLoudness", default, deserialize_with = "de_bool")]
+    pub can_normalize_loudness: bool,
 }
 
 /// A tag row — `Genre[]`, `Country[]`, `Role[]`, `Director[]`, `Writer[]`. The three PEOPLE
@@ -557,6 +706,10 @@ pub struct Tag {
     /// alternate `personId` (both forms verified live against the same record).
     #[serde(rename = "tagKey", default, deserialize_with = "de_str")]
     pub tag_key: String,
+    /// Collection identity shared by collection rows, search hits and member `Collection[]` tags.
+    /// Empty means absent, matching every other string field on this tolerant record.
+    #[serde(default, deserialize_with = "de_str")]
+    pub guid: String,
     /// The server's own ready-made listing filter for this tag, e.g. `"actor=161"` /
     /// `"director=459"` — append it to `/library/sections/{k}/all?` to list ONE section's items
     /// for this person. Carries the tag's ROLE in the library (actor vs director vs writer),
@@ -708,8 +861,14 @@ impl From<String> for HexColor {
     }
 }
 
-/// Lenient f64: a JSON number, a numeric string, or null → 0.0 (matches the old `jfloat`
-/// scrape). Called only when the field is present; a missing field uses `default` (0.0).
+/// `includeExtras=1` nests extras as `Extras.Metadata[]` — the same clip rows `GET …/extras`
+/// returns at the container root.
+#[derive(Deserialize, Default)]
+pub struct ExtrasHub {
+    #[serde(rename = "Metadata", default)]
+    pub metadata: Vec<Metadata>,
+}
+
 /// `OnDeck`'s envelope. Its `Metadata` is a single **object**, not the array every other nested hub
 /// in this file uses — precisely the shape inconsistency `plex/CLAUDE.md` warns about, and a strict
 /// field here would fail the WHOLE `MediaContainer` parse (an empty detail page), not just drop the
@@ -735,6 +894,8 @@ fn de_on_deck<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Box<Metad
     })
 }
 
+/// Lenient f64: a JSON number, a numeric string, or null → 0.0 (matches the old `jfloat`
+/// scrape). Called only when the field is present; a missing field uses `default` (0.0).
 fn de_f64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
@@ -972,6 +1133,33 @@ mod tests {
         );
     }
 
+    /// `Part.decision=transcode` is a container change. A remux that copies video is forbidden
+    /// only when the VIDEO stream itself is `transcode` — the measured P5 shape was video `copy`.
+    #[test]
+    fn a_transcode_part_forbids_copy_only_when_the_video_stream_is_transcode() {
+        let copy: super::MediaPart = serde_json::from_slice(
+            br#"{"decision":"transcode","Stream":[{"streamType":1,"decision":"copy"},{"streamType":2,"decision":"transcode"}]}"#,
+        )
+        .expect("parse");
+        assert!(
+            !copy.video_forbids_copy(),
+            "audio transcode + video copy is a remux"
+        );
+
+        let video_tc: super::MediaPart = serde_json::from_slice(
+            br#"{"decision":"transcode","Stream":[{"streamType":1,"decision":"transcode"}]}"#,
+        )
+        .expect("parse");
+        assert!(video_tc.video_forbids_copy());
+
+        let unnamed: super::MediaPart =
+            serde_json::from_slice(br#"{"decision":"transcode"}"#).expect("parse");
+        assert!(
+            !unnamed.video_forbids_copy(),
+            "a part with no Stream[] cannot claim the video must re-encode"
+        );
+    }
+
     /// A show container carries no `Media` at all — the accessor must say so rather than panic,
     /// because the detail page asks every item for its primary version.
     #[test]
@@ -1094,14 +1282,13 @@ mod tests {
     /// The `Directory[]` row is a [`super::Tag`] — the SAME record the detail page's cast row is
     /// built from — and every field the search screen reads off one must survive the round trip.
     ///
-    /// Two of them are the reason a person hit and a collection hit cannot share a code path:
-    /// a person carries `tagKey` (the portable guid, and the only id `discover.provider.plex.tv`
-    /// answers to) and an ABSOLUTE `metadata-static.plex.tv` `thumb`; a collection carries
-    /// **neither**, nor a `ratingKey`. It is not identity-less — it has the server-local `id`,
-    /// `filter` and `key` — but it has nothing that means anything OFF this server, so a screen
-    /// that keys tags by `tagKey` silently loses every collection.
+    /// A person carries `tagKey` (the portable guid that `discover.provider.plex.tv` answers to)
+    /// and an ABSOLUTE `metadata-static.plex.tv` `thumb`; a collection instead carries its own
+    /// `collection://` guid plus a server-local tag `id`, `filter` and listing `key`, but no
+    /// `ratingKey` or artwork. A screen that keys every tag by person `tagKey` still silently loses
+    /// every collection.
     #[test]
-    fn a_person_hit_carries_a_portable_guid_and_a_collection_hit_carries_no_portable_identity() {
+    fn person_and_collection_hits_keep_their_distinct_portable_identities() {
         let mc = serde_json::from_slice::<Envelope>(SEARCH_WALLACE)
             .expect("lenient parse")
             .media_container;
@@ -1130,13 +1317,17 @@ mod tests {
         assert_eq!((c.id, c.count), (6068, 6));
         assert_eq!(c.key, "/library/sections/1/all?collection=6068");
         assert_eq!(c.filter, "collection=6068");
-        assert_eq!(c.tag_key, "", "a collection has no portable guid");
+        assert_eq!(c.tag_key, "", "a collection guid is not a person tagKey");
+        assert_eq!(
+            c.guid,
+            "collection://10c9bd0a-40ce-400c-bf57-dfd4009bb216"
+        );
         assert_eq!(c.thumb, "", "…and no artwork of its own");
-        // so it is addressable on THIS server and nowhere else
+        // `is_person` consumes person identity only; collection resolution uses `guid`, then id.
         assert!(c.is_person("6068", ""), "the server-local id still matches");
         assert!(
             !c.is_person("", "5d776827151a60001f24ab18"),
-            "but no guid ever will"
+            "a person's tagKey cannot match a collection guid"
         );
 
         // …and a row the server sent no id for must not match a caller's literal "0" — the guard
@@ -1323,5 +1514,27 @@ mod tests {
             .expect("parse")
             .media_container;
         assert!(mc.hub.is_empty());
+    }
+
+    /// `canNormalizeLoudness` (issue #266) arrives as a real bool, as the string PMS also uses for
+    /// its other flags, and — on an old server or a non-audio stream — not at all. Absent must
+    /// parse to `false`, never fail the whole part like a strict field would.
+    #[test]
+    fn stream_parses_can_normalize_loudness_forms() {
+        for (raw, want) in [
+            (r#"{"streamType":2,"canNormalizeLoudness":"1"}"#, true),
+            (r#"{"streamType":2,"canNormalizeLoudness":1}"#, true),
+            (r#"{"streamType":2,"canNormalizeLoudness":true}"#, true),
+            (r#"{"streamType":2}"#, false),
+            (r#"{"streamType":2,"canNormalizeLoudness":"0"}"#, false),
+        ] {
+            let part: super::MediaPart =
+                serde_json::from_slice(format!(r#"{{"Stream":[{raw}]}}"#).as_bytes())
+                    .expect("parse");
+            assert_eq!(
+                part.stream[0].can_normalize_loudness, want,
+                "input {raw}"
+            );
+        }
     }
 }

@@ -23,8 +23,23 @@
 //! authorized-devices list does not grow a new "LG webOS TV" on every boot.
 
 use super::client::{AuthError, JfClient};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
+/// One configured server: the URL it answers at, the account that signed in, the password, and
+/// (once minted) the per-server device id. The password lives in the file and nowhere else: it is
+/// used once, for the login POST, and never logged nor held past it.
+#[derive(Deserialize, Serialize, Clone, PartialEq, Eq, Debug)]
+pub(crate) struct ServerEntry {
+    pub(crate) url: String,
+    pub(crate) user: String,
+    pub(crate) password: String,
+    /// Optional stable device id; when absent one is minted and persisted (see module doc).
+    #[serde(default)]
+    pub(crate) device_id: Option<String>,
+}
+
+/// The flat single-server shape this install wrote before the multi-server list. Still read, never
+/// written: a legacy file parses as a one-entry list with that entry active.
 #[derive(Deserialize)]
 struct BootConfig {
     url: String,
@@ -32,6 +47,24 @@ struct BootConfig {
     password: String,
     /// Optional stable device id; when absent one is minted and persisted (see module doc).
     device_id: Option<String>,
+}
+
+/// The multi-server shape: every configured server and which one is active (an index into
+/// `servers`).
+#[derive(Deserialize, Serialize, Clone, PartialEq, Eq, Debug)]
+pub(crate) struct ServerList {
+    pub(crate) servers: Vec<ServerEntry>,
+    #[serde(default)]
+    pub(crate) active: usize,
+}
+
+/// The persisted file is either the list shape or, from an older install, the flat one. `untagged`
+/// tries the list first (it requires a `servers` key) and falls back to the flat shape.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ConfigFile {
+    List(ServerList),
+    Flat(BootConfig),
 }
 
 /// The boot gate's question, as one function: is there a Jellyfin server to go to, and did it
@@ -44,16 +77,24 @@ struct BootConfig {
 /// frame by one LAN request, which is the honest price of knowing whether Home can fill.
 #[cfg(feature = "jellyfin")]
 pub(crate) fn try_boot() -> bool {
-    let Some(cfg) = load_config() else {
+    let Some(cfg) = active_server() else {
         return false;
     };
-    let Some(origin) = crate::plex::Origin::parse(&cfg.url) else {
+    authenticate_server(&cfg)
+}
+
+/// Sign in against one configured server: parse its origin, authenticate, and install the client
+/// on success. This is the one place the boot gate and the Settings "switch server" action share —
+/// a switch is a boot against a different entry of the same list.
+#[cfg(feature = "jellyfin")]
+pub(crate) fn authenticate_server(entry: &ServerEntry) -> bool {
+    let Some(origin) = crate::plex::Origin::parse(&entry.url) else {
         crate::log("jellyfin: config ignored — url is not a parseable http(s) origin");
         return false;
     };
-    let device_id = cfg.device_id.unwrap_or_else(device_id_persistent);
+    let device_id = entry.device_id.clone().unwrap_or_else(device_id_persistent);
     let client = JfClient::new(origin, device_id);
-    match client.authenticate_by_name(&cfg.user, &cfg.password) {
+    match client.authenticate_by_name(&entry.user, &entry.password) {
         Ok(ok) => {
             crate::log(&format!(
                 "jellyfin: signed in as {} — server {}",
@@ -80,47 +121,79 @@ pub(crate) fn try_boot() -> bool {
     false
 }
 
+/// Read the configured server list, in the same order the boot gate searches: the dev trigger
+/// first, then the persistent file beside the session.
 #[cfg(feature = "jellyfin")]
-fn load_config() -> Option<BootConfig> {
+pub(crate) fn load_servers() -> Option<ServerList> {
     // 1. the dev trigger
     if let Some(raw) = crate::dev::read("jellyfin") {
-        return parse_config(&raw, "/tmp/plxnative-jellyfin");
+        // Not the literal path: the tmppath gate keeps `/tmp/plxnative-` spellings inside dev.rs,
+        // and `dev::read` already owns that path. The label only feeds the log line.
+        return parse_config(&raw, "dev trigger (jellyfin)");
     }
     // 2. the persistent file beside the session
+    load_servers_persistent()
+}
+
+/// The persistent file only (the `/tmp` trigger is the harness's business, not the form's nor the
+/// picker's).
+#[cfg(feature = "jellyfin")]
+fn load_servers_persistent() -> Option<ServerList> {
     let path = persistent_config_path();
     let raw = std::fs::read_to_string(&path).ok()?;
     parse_config(&raw, &path.display().to_string())
 }
 
+/// Parse either the list shape or the flat legacy shape into a [`ServerList`], validating that
+/// every entry names a url and a user.
 #[cfg(feature = "jellyfin")]
-fn parse_config(raw: &str, where_from: &str) -> Option<BootConfig> {
-    match serde_json::from_str::<BootConfig>(raw) {
-        Ok(c) if !c.url.is_empty() && !c.user.is_empty() => Some(c),
-        Ok(_) => {
-            crate::log(&format!(
-                "jellyfin: {where_from} ignored — url and user must be non-empty"
-            ));
-            None
-        }
+fn parse_config(raw: &str, where_from: &str) -> Option<ServerList> {
+    let list = match serde_json::from_str::<ConfigFile>(raw) {
+        Ok(ConfigFile::List(list)) => list,
+        Ok(ConfigFile::Flat(c)) => ServerList {
+            servers: vec![ServerEntry {
+                url: c.url,
+                user: c.user,
+                password: c.password,
+                device_id: c.device_id,
+            }],
+            active: 0,
+        },
         Err(e) => {
             crate::log(&format!("jellyfin: {where_from} ignored — not valid JSON: {e}"));
-            None
+            return None;
         }
+    };
+    if list
+        .servers
+        .iter()
+        .all(|c| !c.url.is_empty() && !c.user.is_empty())
+    {
+        Some(list)
+    } else {
+        crate::log(&format!(
+            "jellyfin: {where_from} ignored — url and user must be non-empty"
+        ));
+        None
     }
 }
 
-/// Write the config the boot arm reads, after the sign-in form's first successful auth. The
-/// password goes in BECAUSE the file is the credential store — the module doc's rule stands: it
-/// lives here and nowhere else (never logged, never held past the login POST by the client).
-/// 0600 like every secret this install keeps; a failed write is reported, not retried — the
-/// session still runs, the next boot simply asks again.
+/// The active server, if the configured list names one.
 #[cfg(feature = "jellyfin")]
-pub(crate) fn save_config(url: &str, user: &str, password: &str, device_id: &str) -> bool {
+pub(crate) fn active_server() -> Option<ServerEntry> {
+    let list = load_servers()?;
+    list.servers.get(list.active).cloned()
+}
+
+/// Write the server list the boot arm reads. The password goes in BECAUSE the file is the
+/// credential store — the module doc's rule stands: it lives here and nowhere else (never logged,
+/// never held past the login POST by the client). 0600 like every secret this install keeps; a
+/// failed write is reported, not retried — the session still runs, the next boot simply asks again.
+#[cfg(feature = "jellyfin")]
+pub(crate) fn save_servers(servers: &[ServerEntry], active: usize) -> bool {
     let body = serde_json::json!({
-        "url": url,
-        "user": user,
-        "password": password,
-        "device_id": device_id,
+        "servers": servers,
+        "active": active,
     });
     let path = persistent_config_path();
     let ok = std::fs::write(&path, body.to_string()).is_ok();
@@ -138,6 +211,67 @@ pub(crate) fn save_config(url: &str, user: &str, password: &str, device_id: &str
     ok
 }
 
+/// Write the config the boot arm reads, after the sign-in form's first successful auth — a fresh
+/// single server REPLACES the whole list and becomes active.
+#[cfg(feature = "jellyfin")]
+pub(crate) fn save_config(url: &str, user: &str, password: &str, device_id: &str) -> bool {
+    save_servers(
+        &[ServerEntry {
+            url: url.to_string(),
+            user: user.to_string(),
+            password: password.to_string(),
+            device_id: Some(device_id.to_string()),
+        }],
+        0,
+    )
+}
+
+/// Append a newly signed-in server to the list and make it active (the Settings "Conexión rápida"
+/// half of [`save_config`], which replaces instead).
+#[cfg(feature = "jellyfin")]
+pub(crate) fn append_server(url: &str, user: &str, password: &str, device_id: &str) -> bool {
+    let mut list = load_servers().unwrap_or(ServerList {
+        servers: Vec::new(),
+        active: 0,
+    });
+    append_to(
+        &mut list,
+        ServerEntry {
+            url: url.to_string(),
+            user: user.to_string(),
+            password: password.to_string(),
+            device_id: Some(device_id.to_string()),
+        },
+    );
+    save_servers(&list.servers, list.active)
+}
+
+/// Remove the active server from the list and return what remains (the first survivor becomes the
+/// new active pointer). The caller decides whether to [`save_servers`] the remainder or
+/// [`erase_config`] an empty list.
+#[cfg(feature = "jellyfin")]
+pub(crate) fn remove_active() -> Option<ServerList> {
+    let mut list = load_servers()?;
+    remove_active_from(&mut list);
+    Some(list)
+}
+
+/// The pure append step: push an entry and point `active` at it.
+#[cfg(feature = "jellyfin")]
+fn append_to(list: &mut ServerList, entry: ServerEntry) {
+    list.servers.push(entry);
+    list.active = list.servers.len() - 1;
+}
+
+/// The pure disconnect step: retire the active entry, the first survivor becomes the pointer.
+#[cfg(feature = "jellyfin")]
+fn remove_active_from(list: &mut ServerList) {
+    if list.active < list.servers.len() {
+        list.servers.remove(list.active);
+    }
+    list.active = 0;
+}
+
 /// Drop the persisted config — the sign-out path's half of [`save_config`], so a television that
 /// signs out asks for a server again instead of silently returning to the last one.
 #[cfg(feature = "jellyfin")]
@@ -153,9 +287,9 @@ pub(crate) fn erase_config() {
 /// persistent file only: the `/tmp` trigger is the harness's business, not the form's.
 #[cfg(feature = "jellyfin")]
 pub(crate) fn stored_config() -> Option<(String, String, String)> {
-    let raw = std::fs::read_to_string(persistent_config_path()).ok()?;
-    let cfg: BootConfig = serde_json::from_str(&raw).ok()?;
-    Some((cfg.url, cfg.user, cfg.password))
+    let list = load_servers_persistent()?;
+    let cfg = list.servers.get(list.active)?;
+    Some((cfg.url.clone(), cfg.user.clone(), cfg.password.clone()))
 }
 
 /// `/media/developer/<app id>-jellyfin.json` — one of the locations
@@ -231,5 +365,87 @@ mod tests {
         assert!(parse_config(r#"{"url":"","user":"a","password":""}"#, "t").is_none());
         assert!(parse_config(r#"{"url":"http://10.0.0.2","user":"","password":""}"#, "t").is_none());
         assert!(parse_config("not json", "t").is_none());
+    }
+
+    fn entry(url: &str, user: &str) -> ServerEntry {
+        ServerEntry {
+            url: url.to_string(),
+            user: user.to_string(),
+            password: "pw".to_string(),
+            device_id: Some("dev".to_string()),
+        }
+    }
+
+    /// A flat legacy file reads as a one-entry list with that entry active.
+    #[test]
+    fn a_flat_legacy_file_reads_as_a_one_entry_list() {
+        let list = parse_config(
+            r#"{"url":"http://10.0.0.2:8096","user":"gleb","password":"x","device_id":"d"}"#,
+            "t",
+        )
+        .expect("a flat file is a valid single-server config");
+        assert_eq!(list.servers.len(), 1);
+        assert_eq!(list.active, 0);
+        assert_eq!(list.servers[0].url, "http://10.0.0.2:8096");
+        assert_eq!(list.servers[0].user, "gleb");
+    }
+
+    /// A list file picks the server its `active` index names.
+    #[test]
+    fn a_list_file_picks_the_active_server() {
+        let list = parse_config(
+            r#"{"servers":[
+                {"url":"http://10.0.0.2:8096","user":"a","password":"x"},
+                {"url":"http://10.0.0.3:8096","user":"b","password":"y"}
+            ],"active":1}"#,
+            "t",
+        )
+        .expect("a list is a valid config");
+        assert_eq!(list.servers.len(), 2);
+        assert_eq!(list.active, 1);
+        assert_eq!(list.servers[list.active].user, "b");
+    }
+
+    /// The whole list round-trips through the wire shape: serialize then parse.
+    #[test]
+    fn the_server_list_round_trips_through_the_wire_shape() {
+        let list = ServerList {
+            servers: vec![entry("http://10.0.0.2:8096", "a"), entry("http://10.0.0.3:8096", "b")],
+            active: 1,
+        };
+        let wire = serde_json::to_string(&list).unwrap();
+        let back = parse_config(&wire, "t").expect("a serialized list parses back");
+        assert_eq!(back, list);
+    }
+
+    /// `append_server` adds a server to the list and makes it active.
+    #[test]
+    fn append_activates_the_new_server() {
+        let mut list = ServerList {
+            servers: vec![entry("http://10.0.0.2:8096", "a")],
+            active: 0,
+        };
+        append_to(&mut list, entry("http://10.0.0.3:8096", "b"));
+        assert_eq!(list.servers.len(), 2);
+        assert_eq!(list.active, 1, "the appended server becomes active");
+        assert_eq!(list.servers[list.active].user, "b");
+    }
+
+    /// Disconnecting the active server leaves the others configured, the first survivor active.
+    #[test]
+    fn disconnect_of_active_leaves_the_others() {
+        let mut list = ServerList {
+            servers: vec![
+                entry("http://10.0.0.2:8096", "a"),
+                entry("http://10.0.0.3:8096", "b"),
+                entry("http://10.0.0.4:8096", "c"),
+            ],
+            active: 1,
+        };
+        remove_active_from(&mut list);
+        assert_eq!(list.servers.len(), 2, "the active server is gone, the others remain");
+        assert_eq!(list.servers[0].user, "a");
+        assert_eq!(list.servers[1].user, "c");
+        assert_eq!(list.active, 0, "the first survivor becomes the active pointer");
     }
 }

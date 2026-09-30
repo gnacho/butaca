@@ -17,8 +17,8 @@ Everything below is derived from bytes:
   * every payload file, with its size, mode, owner and sha256;
   * the binary's ELF class, machine and complete DT_NEEDED list (parsed here, in pure Python —
     no readelf, so this runs on the runner, on a Mac, and on a machine with no NDK);
-  * the bundled FFmpeg libraries, their SONAMEs, and the configure invocation FFmpeg records
-    inside libavutil — which is where the LGPL position is actually decided, and where v0.2.1's
+  * the bundled FFmpeg libraries, their SONAMEs and DT_NEEDED, and the configure invocation
+    FFmpeg records inside libavutil — which is where the LGPL position is actually decided, and where v0.2.1's
     build-machine path was found;
   * the dev-trigger witnesses, counted rather than asserted, so "none" is a measurement;
   * host- and path-shaped strings in the shipped binary, as a FLOOR on what it can reach.
@@ -45,8 +45,6 @@ import struct
 import sys
 import tarfile
 from pathlib import Path
-
-import flavor
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -190,8 +188,8 @@ def sha256(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
-def row(k: str, v: str) -> str:
-    return f"| {k} | {v} |"
+def row(*cells: str) -> str:
+    return f"| {' | '.join(cells)} |"
 
 
 def table(rows: list[str], head: tuple[str, ...] = ("", "")) -> str:
@@ -250,10 +248,7 @@ def scan_strings(blob: bytes, rx: re.Pattern, limit: int = 40, trim: bool = Fals
 # design -- any client that sends anything must carry them, which is why printing them here costs
 # nothing -- so recording them is what lets anybody reproduce the package byte for byte. Without
 # this row, "reproducible" would have quietly become "reproducible by the maintainer".
-# This fork carries no telemetry: the audit's job here is to WITNESS that the shipped bytes
-# contain no Sentry DSN and no PostHog key, the same patterns the upstream audit used to extract
-# them.
-SENTRY_DSN_RE = re.compile(rb"https://[0-9a-f]{8,}@[A-Za-z0-9.-]+/\d+")
+SENTRY_DSN_RE = re.compile(rb"https://[0-9a-f]{8,}@[A-Za-z0-9.-]*ingest\.[a-z]{2}\.sentry\.io/\d+")
 POSTHOG_KEY_RE = re.compile(rb"phc_[A-Za-z0-9]{20,}")
 
 
@@ -261,11 +256,16 @@ def telemetry_endpoints(binary: bytes) -> str:
     dsn = SENTRY_DSN_RE.findall(binary)
     key = POSTHOG_KEY_RE.findall(binary)
     if not dsn and not key:
-        return ("none — this build carries no endpoint at all and **cannot report anything**: "
-                "no Sentry DSN and no PostHog key appear anywhere in these bytes")
-    found = [d.decode() for d in dsn] + [k.decode() for k in key]
-    return "**UNEXPECTED** — a telemetry credential appeared in a fork that removed them: " \
-        + "; ".join(found)
+        return ("none — this build carries no endpoint at all and **cannot report anything**. "
+                "`option_env!` resolved to `None` at compile time, so there is no URL in these "
+                "bytes to reach")
+    parts = []
+    for d in sorted({x.decode() for x in dsn}):
+        region = "EU" if ".de.sentry.io" in d else "**NOT the EU region**"
+        parts.append(f"Sentry `{d}` ({region})")
+    for k in sorted({x.decode() for x in key}):
+        parts.append(f"PostHog `{k}`")
+    return "; ".join(parts) + " — write-only ingest credentials, publishable by design"
 
 
 def generate(args) -> str:
@@ -324,7 +324,8 @@ def generate(args) -> str:
     # Actions" line printed under `asset uploader: GLinnik21` is the audit telling two stories.
     by_ci = args.uploader in (None, "github-actions[bot]")
     rows.append(row("built by",
-                    "GitHub Actions (`.github/workflows/release.yml`, job `build + verify`)" if by_ci
+                    "GitHub Actions (`.github/workflows/release.yml`'s `build + verify` job, "
+                    "which runs `.github/workflows/build-package.yml`)" if by_ci
                     else f"**not GitHub Actions** — the assets were uploaded by `{args.uploader}`, "
                          "so the build and verify jobs did not produce them"))
     out += [table(rows, ("field", "value")), ""]
@@ -383,7 +384,7 @@ def generate(args) -> str:
     rows = [
         row("flavour", f"`{app_id}` — "
             + ("the stable id, which is what users install"
-               if app_id == flavor.STABLE_ID else "**not the stable id**")),
+               if app_id == "com.butaca" else "**not the stable id**")),
         row("cargo features", f"`{args.build_config}`" if args.build_config
             else "not recorded in the assets — the dev-trigger row below is the same property, "
                  "measured on the bytes"),
@@ -495,14 +496,19 @@ def generate(args) -> str:
         rows = []
         for name, data in sorted(sos.items()):
             e = elf_info(data)
+            # Their own DT_NEEDED is what the television's loader resolves when the app opens them,
+            # and nothing else in this block states it: v0.7.0's libavformat gained `libz.so.1`
+            # (#235) and the only record of that was a hand-typed sentence in the authored half.
+            needed = ", ".join(f"`{n}`" for n in e.get("needed", [])) or "—"
             rows.append(row(f"`{name.rsplit('/', 1)[-1]}`",
                             f"SONAME `{e.get('soname') or '?'}`, {human(len(data))} bytes, "
-                            f"sha256 `{sha256(data)[:16]}`"))
+                            f"sha256 `{sha256(data)[:16]}`", needed))
         out.append("Shared libraries shipped **beside** the binary and opened by absolute path out "
                    "of the app's own directory, so they can neither shadow nor be shadowed by the "
-                   "television's own FFmpeg:")
+                   "television's own FFmpeg. Their `DT_NEEDED` entries that are not shipped here "
+                   "are resolved from the television, and the static matrix below grades them:")
         out.append("")
-        out += [table(rows, ("file", "identity")), ""]
+        out += [table(rows, ("file", "identity", "`DT_NEEDED`")), ""]
 
     # ---- FFmpeg + licence
     out.append("### FFmpeg and the LGPL position")
@@ -532,7 +538,7 @@ def generate(args) -> str:
                         else f"**{', '.join(banned)} present**"))
     lic = sorted(n.rsplit("/", 1)[-1] for n in files if "/licenses/" in n)
     rows.append(row("licence texts in the payload", ", ".join(f"`{n}`" for n in lic) or "**none**"))
-    for doc in ("THIRD-PARTY-NOTICES.md", "LICENSE", "TRADEMARKS.md"):
+    for doc in ("THIRD-PARTY-NOTICES.md", "LICENSE", "LICENSING.md", "TRADEMARKS.md"):
         rows.append(row(f"`{doc}` in the payload",
                         "yes" if any(n.endswith("/" + doc) for n in files) else "**no**"))
     out += [table(rows, ("field", "value")), ""]

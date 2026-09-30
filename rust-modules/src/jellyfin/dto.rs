@@ -161,6 +161,9 @@ pub(crate) struct UserDataDto {
     pub(crate) playback_position_ticks: i64,
     /// Container rows only: leaves NOT yet played under it. Plex sends `viewedLeafCount` and the
     /// app computes the complement; Jellyfin sends the complement directly.
+    /// The heart: `UserData.IsFavorite` (absent/false = not favorited).
+    #[serde(default, rename = "IsFavorite")]
+    pub(crate) is_favorite: bool,
     #[serde(rename = "UnplayedItemCount")]
     pub(crate) unplayed_item_count: Option<i64>,
     /// RFC3339 — the Continue Watching deck's merge key (Plex's `lastViewedAt`).

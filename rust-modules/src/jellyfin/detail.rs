@@ -84,12 +84,13 @@ pub(crate) fn fetch_full(c: &JfClient, sid: ServerId, rk: &str) -> Option<Detail
         })
         .unwrap_or_default();
     crate::log(&format!(
-        "detail: rk={rk} loaded (jellyfin) — {} seasons, {} eps, {} cast, {} related, {} markers | ms={}",
+        "detail: rk={rk} loaded (jellyfin) — {} seasons, {} eps, {} cast, {} related, {} markers | on_deck={} | ms={}",
         d.seasons.len(),
         d.episodes.len(),
         d.credits_len(),
         d.related.len(),
         d.markers.len(),
+        i32::from(d.on_deck.is_some()),
         t0.elapsed().as_millis()
     ));
     Some(d)
@@ -140,9 +141,13 @@ pub(crate) fn playing_item(
         subs,
         video_fps,
         width,
+        blur: None,
+        show_rk: String::new(),
+        // the MediaSource's own container word — a GUID id has no extension, so this field IS
+        // the demuxer test on this backend
+        container: src.and_then(|s| s.container.clone()).unwrap_or_default(),
         height,
         bitrate: src.and_then(|s| s.bitrate).unwrap_or(0) / 1_000,
-        container: src.and_then(|s| s.container.clone()).unwrap_or_default(),
         // VideoRangeType carries no DV layering — `detail_from_dto`'s note. All-zero refuses
         // nothing, which is the gate's honest "the server said nothing".
         dovi: Default::default(),
@@ -207,9 +212,14 @@ fn detail_from_dto(it: &BaseItemDto, sid: ServerId) -> Detail {
         None => (0, false),
     };
 
+    let is_favorite = it.user_data.as_ref().map(|ud| ud.is_favorite).unwrap_or(false);
     let mut d = Detail {
         sid,
         rk: it.id.clone(),
+        is_favorite,
+        collection: None,
+        extras: Vec::new(),
+        trailer_rk: String::new(),
         // One server on this backend: no attribution to draw, and no portable cross-server
         // identity exists on Jellyfin; the item id fills the field so the "Also available"
         // machinery has a well-formed non-answer and no other source to ask.
@@ -364,6 +374,9 @@ fn convert_stream(st: &super::dto::MediaStreamDto) -> Stream {
     Stream {
         id: st.index.unwrap_or(0) as i64,
         index: st.index.unwrap_or(0) as i64,
+        key: String::new(),
+        can_normalize_loudness: false,
+        language_tag: st.language.clone().unwrap_or_default(),
         // The Language column is the ISO code on both backends; the human line ("English") is
         // derived from it by the track menu's own naming, as it is for Plex's "eng".
         lang: st.language.clone().unwrap_or_default(),
@@ -487,7 +500,7 @@ fn episode_from_dto(it: &BaseItemDto) -> Episode {
     }
 }
 
-fn season_from_dto(it: &BaseItemDto) -> Season {
+pub(crate) fn season_from_dto(it: &BaseItemDto) -> Season {
     let leaf = it.child_count.unwrap_or(0);
     let unplayed = it
         .user_data

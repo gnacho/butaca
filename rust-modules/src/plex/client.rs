@@ -42,6 +42,17 @@ pub(crate) enum JsonDeadlineOutcome {
     Transport,
 }
 
+/// A JSON read that preserves whether PMS answered and, if it did, its HTTP status.
+/// Ordinary reads intentionally keep using `Option<MediaContainer>`; collection screens need to
+/// tell an unshared library (403) from a missing collection (404) and a dead server.
+pub(super) enum JsonStatusOutcome {
+    Response {
+        status: i32,
+        parsed: Option<MediaContainer>,
+    },
+    Transport,
+}
+
 /// The headers shared by EVERY PMS operation, over either transport. `X-Plex-Language` belongs
 /// here rather than in [`Client::playback_identity`]: it selects server-returned metadata for
 /// browse/search reads too, not only playback protocol calls. Owned strings keep the optional
@@ -86,6 +97,14 @@ pub struct Client {
     /// still answer exactly what they always did, which is why the ~30 call sites below this
     /// layer did not move.
     pub(super) origin: Origin,
+    /// **The DNS answer for `origin`, when this process may supply it** — see
+    /// [`super::origin::ResolvePin`]. `None` for a plaintext origin, a literal host, a name that
+    /// is not a dashed `plex.direct` label, or a stored address the label does not encode; every
+    /// request this client makes hands it to [`crate::http`], which is what lets the household's
+    /// own server be reached with no resolver at all. Set once at construction
+    /// ([`Client::with_resolve_pin`]) because it is a pure function of `origin` plus the address
+    /// plex.tv advertised, and a re-point publishes a fresh `Client` anyway.
+    pub(super) resolve_pin: Option<super::origin::ResolvePin>,
     // X-Plex-Token value. Interior-mutable because the token changes at runtime after boot: it's
     // installed once we've logged in, and swapped when the user switches Plex Home profile (same
     // server, different per-user token). Read in exactly one place (`with_token`).
@@ -109,7 +128,7 @@ pub struct Client {
     pub(super) version: String,   // "0.1.0"
     pub(super) platform: String,  // "webOS"
     // Token generation, PER SERVER. Bumped by `set_token`; read by caches keyed on a path that
-    // bakes the token in (`posters::poster_key`'s memo). This used to be a process-global
+    // bakes the token in (`app::adapters::poster::built_key`'s memo). This used to be a process-global
     // `static TOKEN_GEN`, which cannot express "server B's token changed" — with a registry that
     // would flush every server's cache on any server's profile switch, and (worse) would say
     // NOTHING changed when the CURRENT server switched from A to B, handing B's requests A's
@@ -117,6 +136,11 @@ pub struct Client {
     // share a value: a cache that only compares "did this number move" therefore also flushes
     // when `client()` starts answering with a different server.
     token_gen: AtomicU32,
+    /// Immutable process-local instance identity for adapter recordings, distinct from both the
+    /// secret token and the Plex device identifier. A token swap must not rename this instance.
+    instance_gen: u32,
+    data_io_disabled: std::sync::atomic::AtomicBool,
+    denied_data_requests: AtomicU32,
     /// HOW this server is reached — the tier of the connection that won the probe, or "nobody has
     /// said yet" ([`LINK_UNKNOWN`]). A property of the SERVER, not of the request, which is why it
     /// lives beside its address rather than being recomputed at a call site.
@@ -166,22 +190,41 @@ impl IpVersion {
     }
 }
 
-/// `Location` ⇄ `u8`, so the tier fits in an atomic. Written as two total matches rather than a
-/// cast: `Location`'s declaration ORDER is its preference order (`probe`'s derived `Ord` is the
+/// `Location`/`IpVersion` ⇄ `u8`, so each tier fits in an atomic. **The one encode/decode pair for
+/// both fields** — this `Client`'s own atomics and [`crate::player::report`]'s packed attempt
+/// snapshot (`ATTEMPT_CONNECTION`) both go through these rather than keeping a second private
+/// table each, which is what let the two drift apart before. Written as total matches rather than
+/// a cast: `Location`'s declaration ORDER is its preference order (`probe`'s derived `Ord` is the
 /// ranking), so a discriminant cast would silently tie the stored encoding to that ordering and
-/// break the moment a tier is inserted in the middle.
-fn link_code(l: Location) -> u8 {
+/// break the moment a tier is inserted in the middle. `0` is the shared "unknown"/`None` code for
+/// both fields.
+pub(crate) fn encode_link(l: Option<Location>) -> u8 {
     match l {
-        Location::Local => 1,
-        Location::Remote => 2,
-        Location::Relay => 3,
+        None => LINK_UNKNOWN,
+        Some(Location::Local) => 1,
+        Some(Location::Remote) => 2,
+        Some(Location::Relay) => 3,
     }
 }
-fn link_of_code(c: u8) -> Option<Location> {
+pub(crate) fn decode_link(c: u8) -> Option<Location> {
     match c {
         1 => Some(Location::Local),
         2 => Some(Location::Remote),
         3 => Some(Location::Relay),
+        _ => None,
+    }
+}
+pub(crate) fn encode_ip(ip: Option<IpVersion>) -> u8 {
+    match ip {
+        None => IP_UNKNOWN,
+        Some(IpVersion::V4) => 1,
+        Some(IpVersion::V6) => 2,
+    }
+}
+pub(crate) fn decode_ip(c: u8) -> Option<IpVersion> {
+    match c {
+        1 => Some(IpVersion::V4),
+        2 => Some(IpVersion::V6),
         _ => None,
     }
 }
@@ -191,6 +234,17 @@ fn link_of_code(c: u8) -> Option<Location> {
 use super::identity::{device_name, DEVICE, MODEL, PROVIDES};
 
 impl Client {
+    #[cfg(test)]
+    pub(crate) fn client_id_for_test(&self) -> &str { &self.client_id }
+
+    pub(crate) fn capture_generation_seed() -> u32 { GEN_SEQ.load(Relaxed) }
+
+    /// Called only before constructing controlled resources in an empty registry.
+    pub(crate) fn restore_generation_seed(seed: u32) -> Result<(), &'static str> {
+        if seed == 0 || super::server_count() != 0 { return Err("invalid client initialization boundary"); }
+        GEN_SEQ.store(seed, Relaxed);
+        Ok(())
+    }
     /// Build a client for ONE server. `pub(super)`: a `Client` nobody can reach is useless, so
     /// the only construction site is [`super::servers::register`], which leaks it into the slot
     /// named by `id`.
@@ -199,7 +253,7 @@ impl Client {
     /// but `session::load` reads a file and can WRITE one (it mints + persists the uuid on first
     /// boot), which was tolerable behind a `OnceLock` singleton built exactly once and is not on
     /// a registry that constructs a `Client` per server and re-points slots. The registry does
-    /// that read once per registration instead, so this constructor touches no filesystem and no
+    /// receives a captured identity (or consults the non-blocking cache), so this constructor touches no filesystem and no
     /// global but the generation counter.
     pub(super) fn new(
         id: ServerId,
@@ -208,19 +262,39 @@ impl Client {
         token: &str,
         client_id: &str,
     ) -> Client {
+        debug_assert!(!client_id.is_empty(), "Client requires a captured device identity");
+        let generation = next_gen();
         Client {
             id,
             machine_id: machine_id.to_owned(),
             origin,
+            resolve_pin: None,
             token: RwLock::new(token.to_owned()),
             client_id: client_id.to_owned(),
             product: super::identity::PRODUCT.into(),
             version: super::identity::VERSION.into(),
             platform: super::identity::PLATFORM.into(),
-            token_gen: AtomicU32::new(next_gen()),
+            token_gen: AtomicU32::new(generation),
+            instance_gen: generation,
+            data_io_disabled: std::sync::atomic::AtomicBool::new(false),
+            denied_data_requests: AtomicU32::new(0),
             link: AtomicU8::new(LINK_UNKNOWN),
             ip_version: AtomicU8::new(IP_UNKNOWN),
         }
+    }
+
+    /// [`Client::new`] plus the origin's resolve pin. A builder rather than a sixth constructor
+    /// argument so the registry is the only place that decides a pin, and every test that builds
+    /// a bare client stays as it was.
+    pub(super) fn with_resolve_pin(mut self, pin: Option<super::origin::ResolvePin>) -> Client {
+        self.resolve_pin = pin;
+        self
+    }
+
+    /// The pin this client dials its origin through, if any — what the registry recorded for the
+    /// media plane and what `http` receives on every control request.
+    pub fn resolve_pin(&self) -> Option<&super::origin::ResolvePin> {
+        self.resolve_pin.as_ref()
     }
 
     /// Append the full playback identity to a query — every playback-protocol request
@@ -251,8 +325,8 @@ impl Client {
     ///   issue #22's lesson exactly: a claim true of the development environment asserted as
     ///   universal.
     ///
-    /// `X-Plex-Language` is conditional rather than absent, and broader than this PLAYBACK-only
-    /// query identity: [`pms_headers`] adds it to every PMS operation from the process locale.
+    /// `X-Plex-Language` is broader than this PLAYBACK-only query identity: [`pms_headers`]
+    /// adds the resolved UI language to every PMS operation.
     pub(super) fn playback_identity(&self, q: QueryBuilder) -> QueryBuilder {
         q.str("X-Plex-Client-Identifier", &self.client_id)
             .str("X-Plex-Product", &self.product)
@@ -279,10 +353,20 @@ impl Client {
     }
     /// Token generation for THIS server — moved by [`Client::set_token`]; caches keyed on paths
     /// that embed the token compare this to know when to flush. Signature unchanged from the
-    /// process-global era on purpose: `posters.rs` reads it through `client()` and must keep
+    /// process-global era on purpose: `app/adapters/poster.rs` reads it through `client()` and must keep
     /// compiling untouched.
     pub fn token_gen(&self) -> u32 {
         self.token_gen.load(Relaxed)
+    }
+    pub(crate) fn instance_gen(&self) -> u32 { self.instance_gen }
+    /// Resource capability only. Revocation is irreversible for this incarnation and never
+    /// changes a logical result; a controlled replay must supply that result through ingress.
+    pub(crate) fn disable_data_io(&self) { self.data_io_disabled.store(true, Relaxed); }
+    pub(crate) fn denied_data_requests(&self) -> u32 { self.denied_data_requests.load(Relaxed) }
+    fn may_send(&self) -> bool {
+        if !self.data_io_disabled.load(Relaxed) { return true; }
+        self.denied_data_requests.fetch_add(1, Relaxed);
+        false
     }
     /// The host to DIAL — never bracketed, even for a v6 literal (see [`Origin::host`]). Unchanged
     /// in meaning and in bytes from when this was a plain field.
@@ -308,44 +392,48 @@ impl Client {
     }
     /// Record which tier of connection reached this server — for the code that ACTIVATES a
     /// candidate (`probe::candidates` ranks them; racing and dialling them lands with the
-    /// transport work). Call it once the probe has answered and the address is the one in use;
-    /// until someone does, [`Client::link`] is `None` and playback policy is unrestricted.
+    /// transport work). Until someone sets it, [`Client::link`] is `None` and playback policy is
+    /// unrestricted.
     ///
-    /// **ORDER MATTERS: register the address FIRST, then set the link on the client you get back**
-    /// (`let id = register_origin(mid, &o, tok); client_for(id).unwrap().set_link(l);`). A
-    /// `register` whose address differs RE-POINTS the slot — it publishes a fresh `Client`, which
-    /// starts at `LINK_UNKNOWN` — so a tier set before that call is simply gone, and the policy
-    /// silently reverts to unrestricted. That reset is deliberate rather than a wart: an address
-    /// change is exactly the event that can turn a LAN connection into a relay, so the old tier is
-    /// not evidence about the new one.
+    /// **Every production caller was moved onto [`Client::apply_connection`] / the registry's
+    /// [`super::servers::ConnectionFacts`] in #95 step 8** — the same "register, then set" order
+    /// this comment used to require raced a re-point (a fresh `Client` starting at
+    /// `LINK_UNKNOWN`) against the separate follow-up call, and `ConnectionFacts` is applied
+    /// atomically inside the registration write itself instead. This method remains a plain,
+    /// unconditional setter for tests that want to seed a tier directly (e.g. to grade
+    /// `finish_profile_switch` against a known-good roster) without going through the registry.
     pub fn set_link(&self, l: Location) {
-        self.link.store(link_code(l), Relaxed);
+        self.link.store(encode_link(Some(l)), Relaxed);
     }
-    /// Publish both coarse network facts from the winning probe candidate. No address, hostname or
-    /// port survives this boundary — only the path class and IP generation analytics needs.
+    /// Publish both coarse network facts unconditionally — `ip_version: None` sets `ip_version()`
+    /// back to `None`/unknown, unlike [`Client::apply_connection`]'s "leave unchanged" semantics.
+    /// Superseded in production by `apply_connection`/`ConnectionFacts` (#95 step 8); this stays a
+    /// direct test seam.
     pub fn set_connection(&self, l: Location, ip_version: Option<IpVersion>) {
         self.set_link(l);
-        self.ip_version.store(
-            match ip_version {
-                Some(IpVersion::V4) => 1,
-                Some(IpVersion::V6) => 2,
-                None => IP_UNKNOWN,
-            },
-            Relaxed,
-        );
+        self.ip_version.store(encode_ip(ip_version), Relaxed);
+    }
+    /// Apply [`super::servers::ConnectionFacts`] captured AT registration (#95 step 8 / A1).
+    /// `None` in either field of `conn` is LEFT UNCHANGED — never written as unknown — so a
+    /// same-origin retoken cannot blank a tier or IP a previous activation already proved. The
+    /// registry is the only caller: it applies this inside the same write that creates or
+    /// re-points the slot, never as a separate step a caller can forget.
+    pub(crate) fn apply_connection(&self, conn: super::servers::ConnectionFacts) {
+        if let Some(tier) = conn.tier {
+            self.link.store(encode_link(Some(tier)), Relaxed);
+        }
+        if let Some(ip) = conn.ip {
+            self.ip_version.store(encode_ip(Some(ip)), Relaxed);
+        }
     }
     /// How this server is reached, `None` while nothing has said. Feed it to
     /// [`super::transcoder::link_policy`] rather than matching on it at a call site — a relay is
     /// not the only fact a tier could ever carry, and the policy is the one place that decides.
     pub fn link(&self) -> Option<Location> {
-        link_of_code(self.link.load(Relaxed))
+        decode_link(self.link.load(Relaxed))
     }
     pub fn ip_version(&self) -> Option<IpVersion> {
-        match self.ip_version.load(Relaxed) {
-            1 => Some(IpVersion::V4),
-            2 => Some(IpVersion::V6),
-            _ => None,
-        }
+        decode_ip(self.ip_version.load(Relaxed))
     }
 
     // ---- transport choke points: the only code that touches crate::stream ----
@@ -363,6 +451,7 @@ impl Client {
     /// wrapper this used to call folded every non-2xx into `None` for everybody, which is why a
     /// probe could not tell a 401 from a dead router.
     fn send(&self, path_no_token: &str, method: Method, headers: &[&str]) -> Option<http::Reply> {
+        if !self.may_send() { return None; }
         let owned = pms_headers(headers);
         let headers: Vec<&str> = owned.iter().map(String::as_str).collect();
         http::request(
@@ -370,6 +459,7 @@ impl Client {
             &self.with_token(path_no_token),
             method,
             &headers,
+            self.resolve_pin.as_ref(),
         )
     }
 
@@ -384,6 +474,7 @@ impl Client {
         headers: &[&str],
         deadline: std::time::Instant,
     ) -> http::RequestOutcome {
+        if !self.may_send() { return http::RequestOutcome::Transport(None); }
         let owned = pms_headers(headers);
         let headers: Vec<&str> = owned.iter().map(String::as_str).collect();
         http::request_until_outcome(
@@ -392,6 +483,7 @@ impl Client {
             method,
             &headers,
             deadline,
+            self.resolve_pin.as_ref(),
         )
     }
 
@@ -404,18 +496,25 @@ impl Client {
         r.ok().then_some(r.body)
     }
 
-    /// The read twin of [`Client::body_2xx`] for a content-dependent PMS body. On HTTPS it keeps
-    /// the connect deadline but has no 25 s whole-transfer cutoff; on plaintext it is the same
-    /// socket policy `stream.rs` has always used.
-    fn body_2xx_bulk(&self, path_no_token: &str, headers: &[&str]) -> Option<Vec<u8>> {
+    /// The status-preserving read twin of [`Client::send`] for a content-dependent PMS body. On
+    /// HTTPS it keeps the connect deadline but has no 25 s whole-transfer cutoff; on plaintext it
+    /// is the same socket policy `stream.rs` has always used.
+    fn send_bulk(&self, path_no_token: &str, headers: &[&str]) -> Option<http::Reply> {
+        if !self.may_send() { return None; }
         let owned = pms_headers(headers);
         let headers: Vec<&str> = owned.iter().map(String::as_str).collect();
-        let r = http::request_bulk(
+        http::request_bulk(
             &self.origin,
             &self.with_token(path_no_token),
             Method::Get,
             &headers,
-        )?;
+            self.resolve_pin.as_ref(),
+        )
+    }
+
+    /// The 2xx-folding twin of [`Client::send_bulk`] used by ordinary content-dependent reads.
+    fn body_2xx_bulk(&self, path_no_token: &str, headers: &[&str]) -> Option<Vec<u8>> {
+        let r = self.send_bulk(path_no_token, headers)?;
         r.ok().then_some(r.body)
     }
 
@@ -460,7 +559,35 @@ impl Client {
         }
     }
 
-    /// The deadline-bearing twin used only by an in-flight ABR candidate registration. Parsing
+    /// Status-preserving GET for operations whose UI gives authorization and absence different
+    /// meanings. This deliberately sits beside, rather than changes, the long-standing `get_json`
+    /// collapse used by all other PMS reads.
+    pub(super) fn get_json_status(&self, path_no_token: &str) -> JsonStatusOutcome {
+        let Some(reply) = self.send_bulk(path_no_token, &[ACCEPT_JSON]) else {
+            return JsonStatusOutcome::Transport;
+        };
+        let parsed = if reply.ok() {
+            match serde_json::from_slice::<Envelope>(&reply.body) {
+                Ok(envelope) => Some(envelope.media_container),
+                Err(error) => {
+                    crate::log(&format!(
+                        "pms: GET {} answered {} bytes that will not parse — {error}",
+                        path_no_token.split('?').next().unwrap_or(path_no_token),
+                        reply.body.len()
+                    ));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        JsonStatusOutcome::Response {
+            status: reply.status,
+            parsed,
+        }
+    }
+
+    /// The deadline-bearing twin for ABR registration and optional show preferences. Parsing
     /// and endpoint-safe diagnostics are identical to the ordinary path; only transport policy
     /// differs.
     pub(super) fn get_json_with_headers_until(
@@ -492,13 +619,25 @@ impl Client {
                 JsonDeadlineOutcome::Response { reply, parsed }
             }
             http::RequestOutcome::Deadline => JsonDeadlineOutcome::Deadline,
-            http::RequestOutcome::Transport => JsonDeadlineOutcome::Transport,
+            http::RequestOutcome::Transport(_) => JsonDeadlineOutcome::Transport,
         }
     }
 
     /// GET raw bytes (image transcode / sidecar sub) — caller decodes.
     pub(super) fn get_bytes(&self, path_no_token: &str) -> Option<Vec<u8>> {
         self.body_2xx_bulk(path_no_token, &[])
+    }
+
+    /// A size-bounded body on either transport, with a finite stalled-transfer timeout.
+    pub(super) fn get_sidecar_bytes(&self, path_no_token: &str) -> Option<Vec<u8>> {
+        if !self.may_send() { return None; }
+        let owned = pms_headers(&[]);
+        let headers: Vec<&str> = owned.iter().map(String::as_str).collect();
+        let r = http::request_probe(
+            &self.origin, &self.with_token(path_no_token), Method::Get, &headers,
+            super::SIDECAR_MAX_BYTES, 25, self.resolve_pin.as_ref(),
+        ).ok()?;
+        r.ok().then_some(r.body)
     }
 
     /// GET raw bytes for a path this server ALREADY BUILT — the one entry point that does **not**
@@ -508,19 +647,43 @@ impl Client {
     /// there, the built `/photo/:/transcode?…&X-Plex-Token=…` path *is* the LRU key, so the key
     /// and the request must be the same bytes. Routing it through [`Client::get_bytes`] would
     /// append a second token — a URL with two `X-Plex-Token` params, whose meaning is the
-    /// server's business and not ours. `pub(crate)` because `posters.rs` lives outside this
+    /// server's business and not ours. `pub(crate)` because `app/adapters/poster.rs` lives outside this
     /// module tree; it exists so that file stops calling `crate::stream` behind this layer's
     /// back, which is what the module doc above has always claimed nothing does.
     ///
     /// The token is therefore in the CALLER's string. It must not be logged — the poster store
     /// logs no keys, and neither may anything else that holds one.
     pub(crate) fn fetch_built(&self, path_with_token: &str) -> Option<Vec<u8>> {
+        match self.fetch_built_outcome(path_with_token) {
+            ArtFetch::Bytes(b) => Some(b),
+            ArtFetch::Status(_) | ArtFetch::NoResponse => None,
+        }
+    }
+
+    /// [`Self::fetch_built`] keeping WHY there are no bytes, which is the difference between a
+    /// poster that will never exist (a 404) and one that could not be fetched right now (a refused
+    /// or timed-out connect, a link this client may not send on yet — the shapes a boot's
+    /// address race and an endpoint refresh take). The poster store retries the second kind and
+    /// not the first.
+    pub(crate) fn fetch_built_outcome(&self, path_with_token: &str) -> ArtFetch {
+        if !self.may_send() {
+            return ArtFetch::NoResponse;
+        }
         // NOT `body_2xx`, for the same reason this method exists at all: that helper appends the
         // token, and this path already ends in one.
         let owned = pms_headers(&[]);
         let headers: Vec<&str> = owned.iter().map(String::as_str).collect();
-        let r = http::request_bulk(&self.origin, path_with_token, Method::Get, &headers)?;
-        r.ok().then_some(r.body)
+        match http::request_bulk(
+            &self.origin,
+            path_with_token,
+            Method::Get,
+            &headers,
+            self.resolve_pin.as_ref(),
+        ) {
+            Some(r) if r.ok() => ArtFetch::Bytes(r.body),
+            Some(r) => ArtFetch::Status(r.status),
+            None => ArtFetch::NoResponse,
+        }
     }
 
     /// GET whose body is discarded (transcode decision / stop registration side effects).
@@ -564,7 +727,7 @@ impl Client {
     ) -> Option<i32> {
         match self.send_until(path_no_token, Method::Get, &[], deadline) {
             http::RequestOutcome::Response(reply) => Some(reply.status),
-            http::RequestOutcome::Deadline | http::RequestOutcome::Transport => None,
+            http::RequestOutcome::Deadline | http::RequestOutcome::Transport(_) => None,
         }
     }
 
@@ -576,7 +739,7 @@ impl Client {
     ) -> Option<i32> {
         match self.send_until(path_no_token, Method::Post, &[], deadline) {
             http::RequestOutcome::Response(reply) => Some(reply.status),
-            http::RequestOutcome::Deadline | http::RequestOutcome::Transport => None,
+            http::RequestOutcome::Deadline | http::RequestOutcome::Transport(_) => None,
         }
     }
 
@@ -638,6 +801,10 @@ pub(super) fn enc(src: &str) -> String {
 /// (digits are unreserved). No op file ever formats a query by hand. `.query()` returns just
 /// the joined params (no path/`?`) for the transcode endpoints that embed them after a fixed
 /// `start.mkv?`/`decision?` prefix.
+///
+/// A path that already carries a query (an IVA extra's `/services/iva/assets?…` part key)
+/// joins further params with `&`. A second `?` is a 400 from PMS, and Auto then treats that
+/// failed direct-play sample as a reason to start HLS.
 pub(super) struct QueryBuilder {
     path: String,
     parts: Vec<String>,
@@ -675,7 +842,8 @@ impl QueryBuilder {
         if self.parts.is_empty() {
             self.path
         } else {
-            format!("{}?{}", self.path, self.parts.join("&"))
+            let sep = if self.path.contains('?') { '&' } else { '?' };
+            format!("{}{sep}{}", self.path, self.parts.join("&"))
         }
     }
     pub(super) fn query(self) -> String {
@@ -753,6 +921,34 @@ mod tests {
         )
     }
 
+    /// PR #104 review: `encode_link`/`decode_link` and `encode_ip`/`decode_ip` are the ONE
+    /// encode/decode pair for both fields — `Client`'s own atomics and `player::report`'s packed
+    /// attempt snapshot both go through these instead of each keeping a private copy. Every
+    /// `Location`/`IpVersion` value, plus `None`, must round-trip through its pair.
+    #[test]
+    fn link_and_ip_codes_round_trip_every_value() {
+        for l in [None, Some(Location::Local), Some(Location::Remote), Some(Location::Relay)] {
+            assert_eq!(decode_link(encode_link(l)), l, "link {l:?} did not round-trip");
+        }
+        for ip in [None, Some(IpVersion::V4), Some(IpVersion::V6)] {
+            assert_eq!(decode_ip(encode_ip(ip)), ip, "ip {ip:?} did not round-trip");
+        }
+        // `0` is the shared unknown/`None` code for both fields, and an unrecognised code decodes
+        // to `None` rather than panicking — a packed word can carry any `u8` in these bits.
+        assert_eq!(encode_link(None), 0);
+        assert_eq!(encode_ip(None), 0);
+        assert_eq!(decode_link(0), None);
+        assert_eq!(decode_ip(0), None);
+        assert_eq!(decode_link(200), None);
+        assert_eq!(decode_ip(200), None);
+    }
+
+    // Dev-only: this fixture drives a plaintext loopback PMS with a real client that carries a
+    // token, which a store build's `CredentialPolicy::HttpsOnly` refuses before the request ever
+    // reaches the wire (see `http::credential_transport_allowed`) — the connection this test
+    // waits on then never arrives. The store-build case is covered instead by `auth.rs`'s
+    // `e2e_real_curl_*` HTTPS harness.
+    #[cfg(feature = "devtriggers")]
     #[test]
     fn malformed_2xx_remains_a_response_after_its_deadline_passes() {
         use std::io::{Read, Write};
@@ -791,6 +987,24 @@ mod tests {
                 parsed: None,
             } if body == b"not-json"
         ));
+    }
+
+    /// IVA extra part keys already carry a query. Appending playback identity with a second
+    /// `?` is a 400, which Auto reads as a failed capacity sample and answers with HLS. The
+    /// preview then refuses that as "not a direct play" even though the file itself is a
+    /// direct-playable mp4.
+    #[test]
+    fn an_extra_part_key_keeps_its_existing_query() {
+        let c = a_client("mach-A", "tok-a");
+        let extra = c.direct_play_url(
+            "/services/iva/assets?url=https%3A%2F%2Fexample.invalid%2Fx",
+            "sess-1",
+        );
+        assert_eq!(extra.path.matches('?').count(), 1, "{}", extra.path);
+        assert!(extra.path.starts_with(
+            "/services/iva/assets?url=https%3A%2F%2Fexample.invalid%2Fx&X-Plex-Session-Identifier=sess-1&"
+        ));
+        assert!(extra.path.contains("&X-Plex-Token=tok-a"));
     }
 
     /// A `Client` is one server's identity plus its token, and every piece of it now arrives
@@ -839,6 +1053,29 @@ mod tests {
         .is_set());
     }
 
+    /// **Issue #12 (Belarusian Home mixed-localization report): the client sends the LITERAL
+    /// selected UI language on every PMS operation, whatever it is** — this is the half of the
+    /// question this repo can answer without a live server. Hub `title` strings arrive already
+    /// localized IN the `/hubs`/`/hubs/promoted` response body (`docs/pms-api.md` §"Verified hub
+    /// list", `plex::hubs`, `Hub::title` in `models.rs`); the app has no hub-title catalog and
+    /// performs no client-side translation or substitution on it (`screens/home/mod.rs`'s
+    /// `LinkedHeading::heading(hub.title, ..)` at the render site). So a mix of Belarusian and
+    /// Russian/English hub titles on one Home screen is PMS's own answer to the `X-Plex-Language:
+    /// be` this client already sends — PMS's translation coverage for a given tag, not this
+    /// repo's language selection — and the deliberate, documented choice (`plex/CLAUDE.md`,
+    /// `docs/pms-api.md`) is to forward the selected tag as-is and accept whatever PMS returns,
+    /// rather than inventing a client-side substitute catalog for server-owned strings.
+    #[test]
+    fn pms_headers_carry_the_literal_selected_ui_language_be_included() {
+        use crate::i18n::{language_on_this_thread_for_test, Preference};
+        for (pref, tag) in [(Preference::En, "en"), (Preference::Es, "es"), (Preference::Be, "be")] {
+            let _guard = language_on_this_thread_for_test(pref);
+            let headers = pms_headers(&[ACCEPT_JSON]);
+            let sent = headers.iter().find_map(|h| h.strip_prefix("X-Plex-Language: "));
+            assert_eq!(sent, Some(tag), "PMS must see the exact tag the UI is set to, not a substitute");
+        }
+    }
+
     /// A fresh client knows nothing about how it is reached, and says so rather than guessing a
     /// tier. That default is load-bearing: `transcoder::link_policy` reads `None` as "no
     /// restriction", so every client built before an activation path exists plays exactly as it
@@ -872,7 +1109,7 @@ mod tests {
     }
 
     /// The token generation is per-CLIENT (it was a process-global `TOKEN_GEN`). Two properties
-    /// matter to `posters::poster_key`'s token-baked memo, which is the only reader: a swap must
+    /// matter to `app::adapters::poster::built_key`'s token-baked memo, which is the only reader: a swap must
     /// MOVE this server's number and no other's, and two servers must never share a value — the
     /// memo compares one number, so identical generations across servers would let server B be
     /// served server A's memoised, token-bearing paths.
@@ -881,10 +1118,13 @@ mod tests {
         let (a, b) = (a_client("mach-A", "tok-a"), a_client("mach-B", "tok-b"));
         let (ga, gb) = (a.token_gen(), b.token_gen());
         assert_ne!(ga, gb, "distinct clients, distinct generations");
+        let instance = a.instance_gen();
+        assert_ne!(instance, b.instance_gen());
 
         a.set_token("tok-a2");
         assert_eq!(a.with_token("/x"), "/x?X-Plex-Token=tok-a2");
         assert_ne!(a.token_gen(), ga, "the swapped client's generation moved");
+        assert_eq!(a.instance_gen(), instance, "a token swap does not replace the client");
         assert_eq!(b.token_gen(), gb, "the other client's did not");
     }
 
@@ -980,4 +1220,14 @@ mod tests {
             8020
         );
     }
+}
+
+/// What [`Client::fetch_built_outcome`] found: bytes, an HTTP status outside 2xx, or no
+/// completed response at all (transport — refused, timed out, refused by this build's own
+/// plaintext-credential rule, or a client that may not send yet).
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum ArtFetch {
+    Bytes(Vec<u8>),
+    Status(i32),
+    NoResponse,
 }

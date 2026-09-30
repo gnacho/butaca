@@ -1,74 +1,30 @@
-# Native video blocked by the TV's sandbox
+# Native video sandbox and Repair
 
-On some Realtek k5lp/k3lp televisions, PlxNative stops playback with
-`jail_missing_rtkmem`. The app cannot read `/dev/rtkmem` inside its sandbox. It refuses to
-start LG's native video pipeline because that condition has been associated with crashes.
-Changing playback quality does not repair the sandbox.
+On a machine name starting with `k5lp` or `k3lp`, an unreadable `/dev/rtkmem` blocks native
+playback before an Engine is installed. The failure code is `jail_missing_rtkmem`. This is a
+community finding carried from final 0.6.6, not a diagnosis of every native playback failure.
+The cached device fact lasts until process exit; leaving playback clears only that playback's
+refusal.
 
-For a TV without root access, see the [Developer Mode guide](non-root-video-sandbox.md).
-It describes an app-local LG-signed configuration option whose affected-device result still
-needs confirmation. The in-app Homebrew Channel repair below requires root.
+The failure screen offers **OK to review sandbox repair**. The confirmation starts on Cancel
+and explains that Homebrew Channel root access will update this app's sandbox through LG's
+native jailer profile. Only the explicit Repair answer submits the fixed command. Boot and
+ordinary Play never submit it.
 
-## Repair from the failure screen
+One accepted attempt is allowed for the entire process, including worker failure and timeout.
+Leaving or recreating the player page does not reset it. A timeout means the remote outcome is
+unknown: cancelling the LS2 wait cannot promise that the root command stopped.
 
-Choose **Repair sandbox**, then confirm the dialog explaining the use of root access.
-PlxNative asks the installed Homebrew Channel service to run LG's jailer for this PlxNative
-install. This needs a rooted TV with an elevated Homebrew Channel service. It does not root
-the TV or install a privileged service.
+Success requires the exact result marker and a fresh readability check from this app's jail.
+Close PlxNative completely and reopen it before playing. The cached preflight is deliberately
+not cleared by success. The repair does not root a TV, install a service, download a file, or
+send Plex credentials to Homebrew Channel.
 
-If the app reports **Sandbox repaired**, close PlxNative completely and reopen it before
-trying playback. The result means the repair command succeeded and this app can now read
-the device node; it does not mean a video has been decoded yet. If the service is unavailable,
-not elevated, or the repair fails, the failure screen says so. A timeout leaves the result
-unknown because cancelling a service request does not necessarily stop its command.
-PlxNative will not submit another repair in that process.
-
-This operation uses the
-[Homebrew Channel's documented local service](https://github.com/webosbrew/webos-homebrew-channel#luna-service).
-It does not send a Plex token, media information, or account data to that service, and does
-not download a configuration from the internet.
-
-## Repair reported on the 43UM7400PLB
-
-The [reporter of issue #74](https://github.com/GLinnik21/plx-native/issues/74#issuecomment-5634518876)
-confirmed playback with PlxNative 0.6.3 after running this command in a **root shell on the TV**:
-
-```sh
-jailer -d -t native -p /media/developer/apps/usr/palm/applications/com.beb.plxnative -i com.beb.plxnative /bin/true
-```
-
-This path is the reporter's standard PlxNative install. Check your installed app's directory
-before using it; it must match the app id passed with `-i`. Do not substitute another app's id.
-The command asks LG's jailer to populate PlxNative's existing jail using its `native` profile.
-The [attached jailer output](https://github.com/user-attachments/files/32104665/jailer.txt)
-records creation of `/var/palm/jail/com.beb.plxnative/dev/rtkmem`.
-
-Close PlxNative completely and reopen it after the repair. Returning to Home alone may leave
-the process running. PlxNative caches its sandbox check at launch, so retrying in the old
-process still uses the old result. A fresh event log should say
-`devjail: soc=k5lp rtkmem=ok`; then test playback. A successful shell command alone does not
-prove that the app can play.
-
-The report covers this k5lp set on platform release 4.10.0. It does not establish success on
-every Realtek television or after an app reinstall, firmware update, or full power cycle.
-[The original Homebrew Channel change](https://github.com/webosbrew/webos-homebrew-channel/pull/202)
-describes the created nodes as surviving reboot; that persistence has not been independently
-tested by this project on the affected set.
-
-## Why reinstalling Homebrew Channel does not fix it
-
-Homebrew Channel briefly had an installer step that ran this jailer command as root.
-[PR #211 reverted it](https://github.com/webosbrew/webos-homebrew-channel/pull/211) because it
-did not solve other sandbox problems on some webOS 8 models. No tagged Homebrew Channel
-release shipped that step. Reinstalling PlxNative through the Channel therefore does not
-perform this repair.
-
-The community also provides a [Kodi jailer-fix add-on](https://github.com/mariotaku/kodi.addon.webos-jailer-fix)
-that downloads LG's signed configuration into **Kodi's own app directory** and asks for a full
-power cycle. We have not established that running it for Kodi repairs PlxNative. It is not a
-verified substitute for the PlxNative-specific command above.
-
-If the [non-root Developer Mode procedure](non-root-video-sandbox.md) is unavailable or does
-not restore playback, keep the failure screen's version, model, firmware, and failure code
-when [reporting the problem](https://github.com/GLinnik21/plx-native/issues/74).
-Do not disable the playback guard or create a device node by guessing its device numbers.
+Source evidence: v0.6.6 (`48866094e73493eb57a045723cdb6e195d9f4361`),
+[issue #74](https://github.com/GLinnik21/plx-native/issues/74#issuecomment-5634518876), and
+[Homebrew Channel PR #202](https://github.com/webosbrew/webos-homebrew-channel/pull/202).
+The source records one reporter's k5lp 43UM7400PLB playback confirmation after a root-shell
+jailer repair. This port has host evidence only. It does not newly establish Repair execution,
+node persistence, or playback on an affected chassis. A healthy older TV cannot prove those
+claims. Native playback, final dialog pixels, and Repair presentation still need the integration
+candidate's simulator/device acceptance.

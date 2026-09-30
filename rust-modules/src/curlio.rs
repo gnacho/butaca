@@ -74,15 +74,23 @@
 //!    `getaddrinfo`, where no byte in our pipe can reach it. The dev set reports `AsynchDNS = YES`
 //!    (c-ares), so the window is much smaller than feared there, but that is ONE firmware.
 //!
-//! ## The designed fallback for DNS cancellation — documented, deliberately NOT built
+//! ## `CURLOPT_RESOLVE` — built on 2026-09-05, for a different reason than this doc once gave
 //!
-//! With `CURLOPT_NOSIGNAL=1` and a synchronous resolver, libcurl cannot honour a timeout during
-//! name resolution, so neither can we. **If a device probe ever shows this is a real teardown
-//! problem**, the clean fix is our own `getaddrinfo` plus `CURLOPT_RESOLVE`: the `plex.direct`
-//! hostname stays in the URL, so TLS SNI and certificate identity are untouched, while libcurl is
-//! handed the resolved numeric address separately and never resolves anything itself. It is a
-//! dozen lines. It is not written here because nothing has measured it as needed, and a
-//! pre-emptive resolver is a second name-resolution path to keep in step with `stream.rs`'s.
+//! This section used to describe our own `getaddrinfo` plus `CURLOPT_RESOLVE` as the "designed
+//! fallback for DNS cancellation, deliberately NOT built": with `CURLOPT_NOSIGNAL=1` and a
+//! synchronous resolver libcurl cannot honour a timeout during name resolution, and pre-resolving
+//! would have sidestepped that. Nothing measured that as needed, and it still has not been.
+//!
+//! What DID need it is offline play. plex.tv advertises the household's own server as an
+//! `https://…plex.direct` name that only public DNS resolves, so a LAN with its uplink down could
+//! not reach a server one hop away. `CurlSource::open*` now asks `net::resolve` for a pin by the
+//! URL's host and port — recorded by the registry from the address plex.tv advertised beside the
+//! name, validated in `plex::origin::ResolvePin` — and applies it as ONE `CURLOPT_RESOLVE` entry
+//! on every easy handle it attaches. The hostname stays in the URL, so SNI and certificate
+//! identity are untouched; libcurl simply never resolves it. There is no `getaddrinfo` here: the
+//! address comes from plex.tv, never from a resolver of ours, so the second-resolution-path
+//! objection above does not arise. The list is owned by the easy handle it was set on (see
+//! `stop`), and a libcurl that answers `CURLE_UNKNOWN_OPTION` keeps resolving names itself.
 //!
 //! # Why the abort handle lives in a module-global REGISTRY
 //!
@@ -114,6 +122,8 @@ use std::ffi::CString;
 use std::os::raw::{c_char, c_int, c_long, c_void};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Once};
+
+use crate::checkpoint::{self, Checkpoint, NoCheckpoint, Pacer};
 
 pub(crate) type CURL = c_void;
 pub(crate) type CURLM = c_void;
@@ -189,6 +199,9 @@ const CURLOPT_TIMEOUT_MS: c_int = 155;
 /// The numeric protocol options are the compatibility surface for this project's curl floor.
 /// Their `_STR` replacements are newer than webOS 4.5's libcurl 7.53.1.
 const CURLOPT_PROTOCOLS: c_int = 181;
+/// `host:port:address` DNS pre-population — the media plane's half of the offline fix. The option
+/// id and its non-fatal polarity are documented on `net::CURLOPT_RESOLVE` / `net::resolve`.
+const CURLOPT_RESOLVE: c_int = 10203;
 const CURLOPT_REDIR_PROTOCOLS: c_int = 182;
 const CURLPROTO_HTTP: c_long = 1 << 0;
 const CURLPROTO_HTTPS: c_long = 1 << 1;
@@ -214,6 +227,10 @@ const WAIT_MS: c_int = 200;
 /// Internal result used only by the segmented ABR prime. Ordinary [`CurlSource::read`] callers
 /// retain the public three-way contract (>0 bytes, 0 EOF, -1 failure/teardown).
 pub(crate) const READ_DEADLINE: c_int = -2;
+/// Internal result of a read whose caller's [`Checkpoint`] answered
+/// [`Flow::Stop`](crate::checkpoint::Flow::Stop): neither a transport failure nor teardown. The
+/// transfer is left attached and unlatched, for the caller to retire.
+pub(crate) const READ_STOPPED: c_int = -3;
 
 /// `CURLOPT_CONNECTTIMEOUT`, seconds. Matches `stream.rs`'s `CONNECT_TIMEOUT_MS` intent.
 const CONNECT_TIMEOUT_S: c_long = 15;
@@ -455,6 +472,10 @@ pub(crate) enum OpenErr {
     Aborted,
     /// A caller-owned bounded preflight expired. Ordinary media opens have no such deadline.
     Deadline,
+    /// The caller's [`Checkpoint`] stopped the open. The request has been retired and the source
+    /// is NOT torn down: its multi (and TLS session) and abort pipe are intact, and this is never
+    /// grounds for a fallback open.
+    Stopped,
     /// A `CURLcode` — DNS, TLS, connect, low-speed. Named the way `net.rs` names them.
     Transport(c_int),
     /// A `CURLMcode` from the multi interface itself. This is local transport machinery failing,
@@ -532,6 +553,16 @@ pub(crate) struct CurlSource {
     url: CString,
     ua: CString,
     range: Option<CString>,
+    /// The `CURLOPT_RESOLVE` entry for this URL's host, when `net::resolve` holds a pin for it —
+    /// computed once at open, applied to every easy handle this source attaches (a seek is a fresh
+    /// handle). The pinned name is a pure function of the host, so it cannot go stale mid-stream.
+    resolve_entry: Option<CString>,
+    /// The `curl_slist` built from `resolve_entry` for the CURRENT easy handle. **Owned by that
+    /// handle**: libcurl keeps the pointer for the transfer's life, so it is freed only after the
+    /// handle has been removed and cleaned, and it is abandoned together with the handles on
+    /// `stop`'s catastrophic path (freeing it under a handle libcurl may still reference would be
+    /// a use-after-free, which is the one thing that path exists to avoid).
+    resolve: *mut crate::net::curl_slist,
     xfer: Box<Xfer>,
     abort: Arc<Abort>,
     /// Byte offset of the next byte [`CurlSource::read`] will deliver.
@@ -585,15 +616,16 @@ impl CurlSource {
         Self::open_with_reservation(url, at, reservation)
     }
 
-    /// Finish a reserved open inside a caller-owned absolute deadline. ABR candidate setup uses
-    /// this so DNS/TLS/headers spend the same conservation budget as the response body.
-    pub(crate) fn open_reserved_until(
+    /// A reserved open whose every blocking wait consults `checkpoint`, with or without a caller
+    /// deadline — the HLS segment open, which must never drop its acquisition's checkpoint.
+    pub(crate) fn open_reserved_checked(
         url: &str,
         at: i64,
         reservation: OpenReservation,
-        deadline: std::time::Instant,
+        deadline: Option<std::time::Instant>,
+        checkpoint: &mut dyn Checkpoint,
     ) -> Result<Box<CurlSource>, OpenErr> {
-        Self::open_with_reservation_until(url, at, reservation, Some(deadline))
+        Self::open_with_reservation_range_until(url, at, None, reservation, deadline, checkpoint)
     }
 
     /// [`open`](Self::open) with the availability verdict injected, so the host suite can grade
@@ -622,7 +654,14 @@ impl CurlSource {
         reservation: OpenReservation,
         deadline: Option<std::time::Instant>,
     ) -> Result<Box<CurlSource>, OpenErr> {
-        Self::open_with_reservation_range_until(url, at, None, reservation, deadline)
+        Self::open_with_reservation_range_until(
+            url,
+            at,
+            None,
+            reservation,
+            deadline,
+            &mut NoCheckpoint,
+        )
     }
 
     /// Open the finite prefix used by an Original throughput experiment. Unlike an ordinary
@@ -638,7 +677,14 @@ impl CurlSource {
             .ok()
             .and_then(|n| n.checked_sub(1))
             .ok_or(OpenErr::Local)?;
-        Self::open_with_reservation_range_until(url, 0, Some(end), reservation, deadline)
+        Self::open_with_reservation_range_until(
+            url,
+            0,
+            Some(end),
+            reservation,
+            deadline,
+            &mut NoCheckpoint,
+        )
     }
 
     fn open_with_reservation_range_until(
@@ -647,10 +693,25 @@ impl CurlSource {
         range_end: Option<i64>,
         reservation: OpenReservation,
         deadline: Option<std::time::Instant>,
+        checkpoint: &mut dyn Checkpoint,
     ) -> Result<Box<CurlSource>, OpenErr> {
         if !media_url_allowed(url) {
             return Err(OpenErr::Local);
         }
+        // The resolve pin, by this URL's host and port — see `net::resolve` for why the media
+        // plane consults a table rather than carrying the pin. Looked up ONCE here; a seek reuses it.
+        let (origin, _) = crate::plex::origin::split(url);
+        let resolve_entry = crate::net::resolve::entry_for(origin.host(), origin.port());
+        // The offline reproduction (`/tmp/plxnative-nowan`): a name opens only with a pin.
+        if resolve_entry.is_none()
+            && crate::net::refuse_name(origin.host(), crate::net::API.connect_s)
+        {
+            return Err(OpenErr::Local);
+        }
+        let resolve_entry = resolve_entry
+            .map(CString::new)
+            .transpose()
+            .map_err(|_| OpenErr::Local)?;
         let url_c = CString::new(url).map_err(|_| OpenErr::Local)?;
         let ua = CString::new(crate::plex::identity::user_agent()).map_err(|_| OpenErr::Local)?;
         let multi = unsafe { curl_multi_init() };
@@ -664,6 +725,8 @@ impl CurlSource {
             url: url_c,
             ua,
             range: None,
+            resolve_entry,
+            resolve: std::ptr::null_mut(),
             xfer: Box::new(Xfer::new()),
             abort: Arc::clone(&abort),
             off: 0,
@@ -675,8 +738,45 @@ impl CurlSource {
             readable: false,
             poisoned: false,
         });
-        src.start_range_until(at, range_end, deadline)?;
+        src.start_range_until(at, range_end, deadline, checkpoint)?;
         Ok(src)
+    }
+
+    /// Start a new GET on this source's existing `CURLM`. HLS playlist and segment URLs share one
+    /// multi handle so libcurl can keep the TLS session; a fresh easy handle still carries the URL.
+    /// Does not publish a second [`OpenReservation`] — abort stays the handle already registered.
+    pub(crate) fn reopen_until(
+        &mut self,
+        url: &str,
+        deadline: Option<std::time::Instant>,
+        checkpoint: &mut dyn Checkpoint,
+    ) -> Result<(), OpenErr> {
+        if self.abort.is_set() {
+            return Err(OpenErr::Aborted);
+        }
+        if !media_url_allowed(url) {
+            return Err(OpenErr::Local);
+        }
+        let (origin, _) = crate::plex::origin::split(url);
+        let resolve_entry = crate::net::resolve::entry_for(origin.host(), origin.port());
+        if resolve_entry.is_none()
+            && crate::net::refuse_name(origin.host(), crate::net::API.connect_s)
+        {
+            return Err(OpenErr::Local);
+        }
+        self.resolve_entry = resolve_entry
+            .map(CString::new)
+            .transpose()
+            .map_err(|_| OpenErr::Local)?;
+        self.url = CString::new(url).map_err(|_| OpenErr::Local)?;
+        self.off = 0;
+        self.size = -1;
+        self.poisoned = false;
+        {
+            let mut act = lock_active();
+            *act = Some(Arc::clone(&self.abort));
+        }
+        self.start_range_until(0, None, deadline, checkpoint)
     }
 
     /// Attach a fresh easy handle at byte `at` and pump until its headers are complete.
@@ -689,14 +789,18 @@ impl CurlSource {
         at: i64,
         deadline: Option<std::time::Instant>,
     ) -> Result<(), OpenErr> {
-        self.start_range_until(at, None, deadline)
+        self.start_range_until(at, None, deadline, &mut NoCheckpoint)
     }
 
+    /// `checkpoint` is consulted between `curl_multi_wait` slices while the headers are awaited;
+    /// its `next_check` only shortens a wait and never reaches `CURLOPT_TIMEOUT_MS`, which stays the
+    /// caller's deadline alone.
     fn start_range_until(
         &mut self,
         at: i64,
         range_end: Option<i64>,
         deadline: Option<std::time::Instant>,
+        checkpoint: &mut dyn Checkpoint,
     ) -> Result<(), OpenErr> {
         self.stop();
         if self.multi_failed {
@@ -746,6 +850,7 @@ impl CurlSource {
                         ));
                         crate::net::curl_easy_cleanup(easy);
                         self.easy = std::ptr::null_mut();
+                        self.free_resolve_list();
                         return Err(OpenErr::Local);
                     }
                 }};
@@ -771,6 +876,25 @@ impl CurlSource {
             );
             if let Some(r) = &self.range {
                 crate::net::curl_easy_setopt_ptr(easy, CURLOPT_RANGE, r.as_ptr() as *const c_void);
+            }
+            // The resolve pin, one list entry, owned by THIS easy handle (`stop` frees it after the
+            // handle, or abandons both). Not `require_setopt!`: a libcurl without the option keeps
+            // resolving the name itself, and that is a logged fact rather than a cancelled stream.
+            if let Some(r) = &self.resolve_entry {
+                let l = crate::net::curl_slist_append(std::ptr::null_mut(), r.as_ptr());
+                if l.is_null() {
+                    crate::net::curl_easy_cleanup(easy);
+                    self.easy = std::ptr::null_mut();
+                    return Err(OpenErr::Local);
+                }
+                self.resolve = l;
+                let rc = crate::net::curl_easy_setopt_ptr(easy, CURLOPT_RESOLVE, l as *const c_void);
+                if crate::net::resolve::note_setopt(rc).is_err() {
+                    crate::net::curl_easy_cleanup(easy);
+                    self.easy = std::ptr::null_mut();
+                    self.free_resolve_list();
+                    return Err(OpenErr::Local);
+                }
             }
             // TLS verification ON, both halves — the certificate is issued for the `plex.direct`
             // NAME, which is the entire reason an Origin is parsed from a URL and never rebuilt
@@ -852,6 +976,7 @@ impl CurlSource {
             })
         };
         // Pump until the final response's headers are in, the transfer ends, or teardown fires.
+        let mut pacer = Pacer::new(checkpoint);
         while !self.xfer.headers_done && !self.done {
             if self.abort.is_set() {
                 return Err(OpenErr::Aborted);
@@ -872,6 +997,13 @@ impl CurlSource {
             if wait_ms <= 0 {
                 return Err(OpenErr::Deadline);
             }
+            let Ok(slice) = pacer.before_wait() else {
+                // Retire this request, and nothing more: the abort pipe and `lock_active` belong
+                // to teardown, and the multi stays for the caller's next reopen.
+                self.stop();
+                return Err(OpenErr::Stopped);
+            };
+            let wait_ms = slice.map_or(wait_ms, |at| checkpoint::wait_ms_until(at, wait_ms));
             match multi_wait(self.multi, &self.abort, wait_ms) {
                 Wait::Woken if self.abort.is_set() => return Err(OpenErr::Aborted),
                 Wait::Failed(rc) => {
@@ -881,7 +1013,10 @@ impl CurlSource {
                 _ => {}
             }
         }
-        self.validate(at, setup_timeout_at)?;
+        self.validate(at, setup_timeout_at).map_err(|e| {
+            self.stop();
+            e
+        })?;
         if deadline.is_some() {
             // `CURLOPT_TIMEOUT_MS` is a TOTAL request timeout. We use it above only to make the
             // DNS/TLS/header phase obey the caller's open snapshot; leaving it armed would let
@@ -1008,6 +1143,15 @@ impl CurlSource {
         self.done = true;
     }
 
+    /// Free the resolve list of a handle that is already gone (cleaned up, or never attached).
+    /// Only ever AFTER the easy handle: libcurl holds the pointer for the handle's life.
+    fn free_resolve_list(&mut self) {
+        if !self.resolve.is_null() {
+            unsafe { crate::net::curl_slist_free_all(self.resolve) };
+            self.resolve = std::ptr::null_mut();
+        }
+    }
+
     /// Detach and free the current easy handle. Idempotent.
     ///
     /// If libcurl refuses the detach, ownership is no longer provable. Its documented cleanup
@@ -1025,14 +1169,18 @@ impl CurlSource {
                     self.multi_failed = true;
                     // Neither cleanup is contractually safe while attachment is uncertain.
                     // Forget both values; `start` sees `multi_failed` and builds a fresh owner.
+                    // The resolve list goes with them: libcurl may still hold its pointer.
                     self.multi = std::ptr::null_mut();
                     self.easy = std::ptr::null_mut();
+                    self.resolve = std::ptr::null_mut();
                     self.range = None;
                     return;
                 }
                 crate::net::curl_easy_cleanup(self.easy);
             }
             self.easy = std::ptr::null_mut();
+            // After the handle, never before: the list must outlive the transfer.
+            self.free_resolve_list();
         }
         self.range = None;
     }
@@ -1042,21 +1190,26 @@ impl CurlSource {
     /// negative result as an I/O error rather than collapsing a truncated transfer into EOF.
     #[allow(dead_code)] // convenience wrapper retained for transport tests; production passes deadlines
     pub(crate) fn read(&mut self, dst: &mut [u8]) -> c_int {
-        self.read_until(dst, None)
+        self.read_until(dst, None, &mut NoCheckpoint)
     }
 
     /// Deliver bytes until an optional caller-owned absolute wake. This transport does not decide
     /// what the instant proves: ABR passes a current wall projection of its playhead-funded reserve
     /// and retrospectively classifies the owning clock, while bounded probes may pass a true body
     /// deadline. libcurl's low-speed policy remains an independent transport-liveness bound.
+    ///
+    /// `checkpoint` is asked only before a wait for fresh bytes; a stop returns [`READ_STOPPED`]
+    /// with the transfer still attached.
     pub(crate) fn read_until(
         &mut self,
         dst: &mut [u8],
         deadline: Option<std::time::Instant>,
+        checkpoint: &mut dyn Checkpoint,
     ) -> c_int {
         if dst.is_empty() {
             return 0;
         }
+        let mut pacer = Pacer::new(checkpoint);
         loop {
             if self.abort.is_set() || self.poisoned || !self.readable {
                 return -1;
@@ -1095,6 +1248,10 @@ impl CurlSource {
             if wait_ms <= 0 {
                 return READ_DEADLINE;
             }
+            let Ok(slice) = pacer.before_wait() else {
+                return READ_STOPPED;
+            };
+            let wait_ms = slice.map_or(wait_ms, |at| checkpoint::wait_ms_until(at, wait_ms));
             match multi_wait(self.multi, &self.abort, wait_ms) {
                 Wait::Woken if self.abort.is_set() => return -1,
                 Wait::Failed(rc) => {
@@ -1104,6 +1261,51 @@ impl CurlSource {
                 _ => {}
             }
         }
+    }
+
+    /// Copy bytes already waiting in the multi handle, or readable without blocking.
+    /// Used while Original playback is parked in `aq_push` so TCP's window does not collapse.
+    pub(crate) fn drain_available(&mut self, dst: &mut [u8]) -> c_int {
+        if dst.is_empty() {
+            return 0;
+        }
+        if self.abort.is_set() {
+            return -1;
+        }
+        if self.poisoned || !self.readable {
+            return 0;
+        }
+        for _ in 0..2 {
+            if self.xfer.pending() > 0 {
+                let n = std::cmp::min(dst.len(), self.xfer.pending());
+                dst[..n].copy_from_slice(&self.xfer.buf[self.xfer.pos..self.xfer.pos + n]);
+                self.xfer.pos += n;
+                if self.xfer.pos == self.xfer.buf.len() {
+                    self.xfer.buf.clear();
+                    self.xfer.pos = 0;
+                }
+                self.off += n as i64;
+                return n as c_int;
+            }
+            if self.done {
+                return 0;
+            }
+            if self.perform().is_err() {
+                return -1;
+            }
+            if self.xfer.pending() > 0 {
+                continue;
+            }
+            match multi_wait(self.multi, &self.abort, 0) {
+                Wait::Woken if self.abort.is_set() => return -1,
+                Wait::Failed(rc) => {
+                    self.fail_multi_wait(rc);
+                    return -1;
+                }
+                _ => {}
+            }
+        }
+        0
     }
 
     /// Record a multi-wait failure as a terminal transport error.
@@ -1157,6 +1359,31 @@ impl CurlSource {
     /// The last response's HTTP status — the diagnostics read-out's `dg_http_status`.
     pub(crate) fn status(&self) -> c_int {
         self.xfer.status
+    }
+
+    /// What this transfer holds of the body beyond what the reader has taken. With nothing
+    /// buffered, it first takes the one non-blocking transfer step [`read_until`](Self::read_until)
+    /// would take next, so bytes already in the socket count as received here exactly as they
+    /// would there. `finished` is a successful DONE; a failed one is not an end.
+    pub(crate) fn body_receipt(&mut self) -> crate::stream::BodyReceipt {
+        let stepped = self.xfer.pending() == 0
+            && !self.done
+            && self.readable
+            && !self.poisoned
+            && !self.abort.is_set();
+        if stepped {
+            let _ = self.perform();
+        }
+        crate::stream::BodyReceipt {
+            ahead: self.xfer.pending() as i64,
+            finished: self.done && !self.failed,
+            stepped,
+        }
+    }
+
+    /// Body fully received and already copied out of the multi buffer.
+    pub(crate) fn body_complete(&self) -> bool {
+        self.done && self.xfer.pending() == 0
     }
 
     /// Signal teardown on THIS source. `player::engine` uses [`abort_active`] instead, since it
@@ -1286,7 +1513,7 @@ fn sample_throughput_with_reservation(
     let mut chunk = [0u8; 64 * 1024];
     while bytes < target_bytes {
         let want = chunk.len().min(target_bytes - bytes);
-        let n = src.read_until(&mut chunk[..want], Some(body_deadline));
+        let n = src.read_until(&mut chunk[..want], Some(body_deadline), &mut NoCheckpoint);
         last_read = n;
         if n <= 0 {
             break;
@@ -1319,14 +1546,9 @@ fn media_url_allowed(url: &str) -> bool {
 }
 
 #[cfg(test)]
-fn media_url_allowed_by_policy(url: &str, allow_plaintext_credentials: bool) -> bool {
+fn media_url_allowed_by_policy(url: &str, policy: crate::plex::CredentialPolicy) -> bool {
     let (origin, path) = crate::plex::origin::split(url);
-    crate::http::credential_transport_allowed_by_policy(
-        &origin,
-        path,
-        &[],
-        allow_plaintext_credentials,
-    )
+    crate::http::credential_transport_allowed_by_policy(&origin, path, &[], policy)
 }
 
 impl Drop for CurlSource {
@@ -1567,15 +1789,15 @@ mod tests {
     fn lower_media_layer_refuses_plaintext_credentials_in_store_policy() {
         assert!(!media_url_allowed_by_policy(
             "http://192.0.2.1:32400/video.mkv?X-Plex-Token=secret",
-            false,
+            crate::plex::CredentialPolicy::HttpsOnly,
         ));
         assert!(media_url_allowed_by_policy(
             "https://example.invalid/video.mkv?X-Plex-Token=secret",
-            false,
+            crate::plex::CredentialPolicy::HttpsOnly,
         ));
         assert!(media_url_allowed_by_policy(
             "http://192.0.2.1:32400/video.mkv?X-Plex-Token=secret",
-            true,
+            crate::plex::CredentialPolicy::AllowPlaintext,
         ));
     }
 
@@ -1594,7 +1816,7 @@ mod tests {
     /// So: hold the crate-wide lock for the WHOLE test (`lib.rs`'s `testlock`, not a local mutex —
     /// `ff.rs`'s curl-backed AVIO tests contend on the same registry from another module).
     /// `None` on a host with no libcurl at all, where these tests are vacuous and skip.
-    fn curl_gate() -> Option<std::sync::MutexGuard<'static, ()>> {
+    fn curl_gate() -> Option<crate::testlock::Serial> {
         let g = crate::testlock::serial();
         if crate::net::global_init() && available() {
             Some(g)
@@ -1606,13 +1828,9 @@ mod tests {
     /// A loopback file server that speaks enough HTTP/1.1 for a byte-range pull, and counts BOTH
     /// connections accepted AND requests served.
     ///
-    /// **Two counters, because one of them stopped being enough.** The socket transport sends
-    /// `Connection: close` and reopens per seek, so "did it go back to the server" is exactly the
-    /// accept count. libcurl keeps the connection in the multi handle's cache and REUSES it, which
-    /// is the right behaviour for a media stream — it saves a whole TLS handshake on every seek —
-    /// and it means a successful seek makes no new connection at all. Grading a curl seek on
-    /// accepts alone would therefore assert nothing: refused and succeeded look identical. The
-    /// request count is what moves.
+    /// The socket transport used to send `Connection: close` and reopen per seek. Sequential
+    /// GETs now reuse the fd; a Range seek still closes first, so "did this seek dial" remains
+    /// the accept count. libcurl keeps the connection in the multi handle's cache and REUSES it.
     ///
     /// Keep-alive is likewise not a test convenience: a stand-in that closed after one request
     /// would make our own connection reuse untestable, and a real PMS speaks HTTP/1.1.
@@ -1639,9 +1857,51 @@ mod tests {
         OmitContentRange,
         /// Fail the first seek request with 503, then honour a later retry.
         FailFirstSeek,
+        /// Answer requests before the numbered one normally; from it on, read the request and
+        /// never answer — a server slow to produce headers, held until the test ends.
+        WithholdFrom(usize),
     }
 
     const BODY: &[u8] = b"ABCDEFGH";
+
+    /// **The offline fix's media half.** A `.invalid` host is opened through the resolve TABLE —
+    /// the pin was recorded the way the registry records one, and the source found it by the
+    /// URL's host and port with no parameter threaded through `ff::demux`. The bytes arrive, the
+    /// listener saw exactly one connection, and the same URL without an entry opens nothing.
+    #[test]
+    fn a_pinned_host_streams_through_the_resolve_table_without_dns() {
+        let Some(_g) = curl_gate() else { return };
+        crate::net::resolve::clear();
+        with_server(RangeMode::Honour, |port, accepts, _requests| {
+            let url = format!("http://no-such-host.invalid:{port}/f.mkv");
+            assert!(
+                CurlSource::open_gated(&url, 0, true).is_err(),
+                "unpinned, the name resolves to nothing"
+            );
+            assert_eq!(accepts.load(Ordering::Acquire), 0);
+            let pin = crate::plex::ResolvePin::for_test(
+                "no-such-host.invalid",
+                port as i32,
+                "127.0.0.1".parse().unwrap(),
+            );
+            assert!(crate::net::resolve::add(&pin));
+            let mut src = CurlSource::open_gated(&url, 0, true).expect("opens through the pin");
+            let mut buf = [0u8; 16];
+            let n = src.read(&mut buf);
+            assert!(n > 0, "read returned {n}");
+            assert_eq!(&buf[..n as usize], &BODY[..n as usize]);
+            assert_eq!(accepts.load(Ordering::Acquire), 1);
+            // a seek is a fresh easy handle: the entry is applied again and, the connection
+            // being reused, the listener still counts one accept
+            assert!(src.seek(2), "the seek re-applies the pin");
+            let n = src.read(&mut buf);
+            assert!(n > 0, "read after seek returned {n}");
+            assert_eq!(&buf[..n as usize], &BODY[2..2 + n as usize]);
+            assert_eq!(accepts.load(Ordering::Acquire), 1);
+            drop(src);
+        });
+        crate::net::resolve::clear();
+    }
 
     fn with_server(mode: RangeMode, body: impl FnOnce(u16, &AtomicUsize, &AtomicUsize)) {
         let srv = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
@@ -1653,7 +1913,7 @@ mod tests {
         std::thread::scope(|sc| {
             sc.spawn(|| {
                 while !stop.load(Ordering::Acquire) {
-                    match srv.accept() {
+                    match crate::testnet::accept(&srv) {
                         Ok((s, _)) => {
                             // Bumped BEFORE the reply, so it is already final by the time any
                             // open against this listener can return — every assertion is causally
@@ -1723,6 +1983,12 @@ mod tests {
             };
             let request_no = requests.fetch_add(1, Ordering::AcqRel) + 1;
             let start = range_start_of(&head);
+            if matches!(mode, RangeMode::WithholdFrom(n) if request_no >= n) {
+                while !stop.load(Ordering::Acquire) {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                return;
+            }
             if mode == RangeMode::DelayedHeaders {
                 std::thread::sleep(std::time::Duration::from_millis(300));
                 let _ = w.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
@@ -1880,6 +2146,80 @@ mod tests {
                 accepts.load(Ordering::Acquire) <= 2,
                 "…on at most two connections — one is the reuse we want, two is a client that \
                  chose not to; both are correct, three would mean a leak"
+            );
+        });
+    }
+
+    #[test]
+    fn reopen_until_reuses_the_multi_for_a_second_get() {
+        let Some(_gate) = curl_gate() else { return };
+        with_server(RangeMode::Honour, |port, accepts, requests| {
+            let url = format!("http://127.0.0.1:{port}/f.mkv");
+            let mut src = CurlSource::open(&url, 0).expect("open");
+            assert_eq!(read_all(&mut src), BODY);
+            src.reopen_until(&url, None, &mut NoCheckpoint)
+                .expect("reopen");
+            assert_eq!(read_all(&mut src), BODY);
+            assert_eq!(requests.load(Ordering::Acquire), 2);
+            assert_eq!(
+                accepts.load(Ordering::Acquire),
+                1,
+                "the second GET must stay on the cached connection"
+            );
+        });
+    }
+
+    #[test]
+    fn reopen_until_does_not_start_a_request_after_abort() {
+        let Some(_gate) = curl_gate() else { return };
+        with_server(RangeMode::Honour, |port, _, requests| {
+            let url = format!("http://127.0.0.1:{port}/f.mkv");
+            let mut src = CurlSource::open(&url, 0).expect("open");
+            assert_eq!(read_all(&mut src), BODY);
+            src.abort();
+            assert_eq!(
+                src.reopen_until(&url, None, &mut NoCheckpoint),
+                Err(OpenErr::Aborted)
+            );
+            assert_eq!(requests.load(Ordering::Acquire), 1);
+        });
+    }
+
+    /// `drain_available`/`body_complete` are what `ff.rs::AvioState::drain_wire` calls while
+    /// Original is parked in `aq_push`, so they otherwise have no test of their own — every other
+    /// case exercises them only transitively through `read`. Pin them directly: the non-blocking
+    /// drain must eventually collect the whole body, `body_complete` must not flip early, and a
+    /// drain after completion must report nothing left rather than erroring.
+    #[test]
+    fn drain_available_reads_the_body_and_body_complete_flips_once_done() {
+        let Some(_gate) = curl_gate() else { return };
+        with_server(RangeMode::Honour, |port, _, _| {
+            let url = format!("http://127.0.0.1:{port}/f.mkv");
+            let mut src = CurlSource::open(&url, 0).expect("open");
+            assert!(
+                !src.body_complete(),
+                "nothing has been drained yet, the body cannot be complete"
+            );
+            let mut got = Vec::new();
+            let mut buf = [0u8; 64];
+            let started = std::time::Instant::now();
+            while !src.body_complete() {
+                let n = src.drain_available(&mut buf);
+                assert!(n >= 0, "a healthy loopback server must not fail the drain");
+                if n > 0 {
+                    got.extend_from_slice(&buf[..n as usize]);
+                } else {
+                    assert!(
+                        started.elapsed() < std::time::Duration::from_secs(2),
+                        "drain_available must eventually see the body complete"
+                    );
+                }
+            }
+            assert_eq!(got, BODY);
+            assert_eq!(
+                src.drain_available(&mut buf),
+                0,
+                "a completed body has nothing left to drain"
             );
         });
     }
@@ -2043,7 +2383,11 @@ mod tests {
     #[test]
     fn teardown_aborts_a_runtime_source_probe_without_waiting_out_its_budget() {
         let Some(_gate) = curl_gate() else { return };
-        with_server(RangeMode::Stall, |port, _, _| {
+        // The server never answers, so the probe is parked in its setup wait and only teardown's
+        // wake can end it. `Stall` sent headers at once: a 200 to the probe's Range, which the
+        // probe itself refuses as `RangeIgnored` — ending the sample (and retiring its handle)
+        // before teardown ran whenever this thread was late, which a loaded suite made it.
+        with_server(RangeMode::WithholdFrom(1), |port, _, _| {
             let url = format!("http://127.0.0.1:{port}/f.mkv");
             let started = std::time::Instant::now();
             std::thread::scope(|scope| {
@@ -2069,6 +2413,10 @@ mod tests {
                     );
                     std::thread::yield_now();
                 }
+                // Teardown lands whenever the main thread next runs, not the instant the probe
+                // publishes. A loaded suite deschedules this thread right here; the delay makes
+                // that the case every run, so the probe is already on the wire when it is woken.
+                std::thread::sleep(std::time::Duration::from_millis(100));
                 abort_active();
                 let result = worker.join().expect("probe worker");
                 assert!(
@@ -2213,7 +2561,10 @@ mod tests {
             let started = std::time::Instant::now();
             let deadline = started + std::time::Duration::from_millis(120);
             let mut b = [0u8; 32];
-            assert_eq!(src.read_until(&mut b, Some(deadline)), READ_DEADLINE);
+            assert_eq!(
+                src.read_until(&mut b, Some(deadline), &mut NoCheckpoint),
+                READ_DEADLINE
+            );
             let took = started.elapsed();
             assert!(
                 took >= std::time::Duration::from_millis(80)
@@ -2229,11 +2580,12 @@ mod tests {
         with_server(RangeMode::DelayedBody, |port, _, _| {
             let reservation = CurlSource::reserve_open().expect("reserve");
             let open_deadline = std::time::Instant::now() + std::time::Duration::from_millis(120);
-            let mut src = CurlSource::open_reserved_until(
+            let mut src = CurlSource::open_reserved_checked(
                 &format!("http://127.0.0.1:{port}/f.mkv"),
                 0,
                 reservation,
-                open_deadline,
+                Some(open_deadline),
+                &mut NoCheckpoint,
             )
             .expect("headers arrive inside the open deadline");
 
@@ -2241,7 +2593,7 @@ mod tests {
             let mut got = Vec::new();
             let mut chunk = [0u8; 32];
             loop {
-                let n = src.read_until(&mut chunk, Some(read_deadline));
+                let n = src.read_until(&mut chunk, Some(read_deadline), &mut NoCheckpoint);
                 assert!(n >= 0, "the expired open timeout must not abort the body");
                 if n == 0 {
                     break;
@@ -2252,17 +2604,109 @@ mod tests {
         });
     }
 
+    /// A first open whose server withholds its headers: the caller's checkpoint is consulted
+    /// between `curl_multi_wait` slices, and its Stop ends the open as `Stopped` — neither a
+    /// deadline nor teardown — without a fallback dial.
+    #[test]
+    fn a_checkpoint_stop_ends_a_withheld_first_open_without_a_second_dial() {
+        let Some(_gate) = curl_gate() else { return };
+        with_server(RangeMode::WithholdFrom(1), |port, accepts, requests| {
+            let reservation = CurlSource::reserve_open().expect("reserve");
+            let mut cp =
+                checkpoint::TestCheckpoint::stopping_after(3, std::time::Duration::from_millis(20));
+            let started = std::time::Instant::now();
+            let result = CurlSource::open_reserved_checked(
+                &format!("http://127.0.0.1:{port}/f.mkv"),
+                0,
+                reservation,
+                Some(started + std::time::Duration::from_secs(30)),
+                &mut cp,
+            );
+            let took = started.elapsed();
+            assert_eq!(result.err(), Some(OpenErr::Stopped));
+            assert_eq!(cp.calls(), 4, "three Continue answers, then the Stop");
+            assert!(
+                took >= std::time::Duration::from_millis(45)
+                    && took < std::time::Duration::from_secs(5),
+                "the slices were waited, not spun, and the 30 s deadline never mattered: {took:?}"
+            );
+            assert_eq!(accepts.load(Ordering::Acquire), 1);
+            assert_eq!(requests.load(Ordering::Acquire), 1);
+        });
+    }
+
+    /// The reused-session twin: a stopped reopen keeps its multi and abort pipe (no teardown
+    /// latch), retires only the request, and dials nothing new.
+    #[test]
+    fn a_checkpoint_stop_ends_a_withheld_reopen_without_latching_teardown() {
+        let Some(_gate) = curl_gate() else { return };
+        with_server(RangeMode::WithholdFrom(2), |port, accepts, requests| {
+            let url = format!("http://127.0.0.1:{port}/f.mkv");
+            let mut src = CurlSource::open(&url, 0).expect("first open");
+            assert_eq!(read_all(&mut src), BODY);
+            let mut cp =
+                checkpoint::TestCheckpoint::stopping_after(3, std::time::Duration::from_millis(20));
+            let started = std::time::Instant::now();
+            let result = src.reopen_until(
+                &url,
+                Some(started + std::time::Duration::from_secs(30)),
+                &mut cp,
+            );
+            assert_eq!(result, Err(OpenErr::Stopped));
+            assert!(started.elapsed() < std::time::Duration::from_secs(5));
+            assert_eq!(cp.calls(), 4);
+            assert!(!src.abort.is_set(), "a controlled stop is not teardown");
+            assert!(src.easy.is_null(), "the stopped request is retired");
+            assert!(
+                !src.multi.is_null() && !src.multi_failed,
+                "the session survives"
+            );
+            assert_eq!(requests.load(Ordering::Acquire), 2);
+            assert_eq!(accepts.load(Ordering::Acquire), 1, "no fallback dial");
+        });
+    }
+
+    /// A body read parked on a stalled transfer: Continue slices do not return early, Stop returns
+    /// `READ_STOPPED`, and the transfer is still attached afterwards (a later bounded read waits
+    /// again and reports its own deadline rather than a failure).
+    #[test]
+    fn a_checkpoint_stop_ends_a_stalled_read_and_leaves_the_transfer_attached() {
+        let Some(_gate) = curl_gate() else { return };
+        with_server(RangeMode::Stall, |port, _, _| {
+            let mut src =
+                CurlSource::open(&format!("http://127.0.0.1:{port}/f.mkv"), 0).expect("open");
+            let mut cp =
+                checkpoint::TestCheckpoint::stopping_after(5, std::time::Duration::from_millis(20));
+            let mut b = [0u8; 16];
+            let started = std::time::Instant::now();
+            assert_eq!(src.read_until(&mut b, None, &mut cp), READ_STOPPED);
+            let took = started.elapsed();
+            assert_eq!(cp.calls(), 6, "five Continue answers did not return early");
+            assert!(
+                took >= std::time::Duration::from_millis(80)
+                    && took < std::time::Duration::from_secs(5),
+                "stop took {took:?}"
+            );
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(60);
+            assert_eq!(
+                src.read_until(&mut b, Some(deadline), &mut NoCheckpoint),
+                READ_DEADLINE
+            );
+        });
+    }
+
     #[test]
     fn libcurl_firing_the_open_timer_is_still_a_typed_deadline() {
         let Some(_gate) = curl_gate() else { return };
         with_server(RangeMode::DelayedHeaders, |port, _, _| {
             let reservation = CurlSource::reserve_open().expect("reserve");
             let deadline = std::time::Instant::now() + std::time::Duration::from_millis(120);
-            let result = CurlSource::open_reserved_until(
+            let result = CurlSource::open_reserved_checked(
                 &format!("http://127.0.0.1:{port}/f.mkv"),
                 0,
                 reservation,
-                deadline,
+                Some(deadline),
+                &mut NoCheckpoint,
             );
             assert_eq!(result.err(), Some(OpenErr::Deadline));
         });

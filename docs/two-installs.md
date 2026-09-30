@@ -1,5 +1,11 @@
 # Two installs on one television
 
+**This document predates the nightly flavour.** A third flavour, `FLAVOR=nightly`
+(`com.beb.plxnative.nightly`, port 8912), has since landed, and nightly is the one flavour that
+feeds a codegen input — `PLX_CHANNEL` / `PLX_NIGHTLY_DATE` into `build.rs`'s reported version. See
+`docs/agent-reference.md` for the current account; the body below still only describes stable and
+debug.
+
 **Status, 2026-08-21: BUILT ENTIRELY OFF-DEVICE. NOTHING BELOW HAS BEEN ON A TELEVISION.**
 
 Everything here is either a fact provable on a desk — a make variable, a `/proc/self/exe` read, a
@@ -36,7 +42,7 @@ So: two ids, two installs, two tiles.
 | runtime root | `/tmp` | `/tmp/com.beb.plxnative.debug` |
 | session file | `/media/developer/com.beb.plxnative-auth.json` | `/media/developer/com.beb.plxnative.debug-auth.json` |
 | launcher title | `PlxNative` | `PlxNative debug` |
-| launcher artwork | `pkg/icon.png` | `pkg/dev/icon.png` (amber DEV bar) |
+| launcher artwork | `pkg/icon.png` | `pkg/dev/icon.png` (amber DEV bar; nightly: `pkg/nightly/`, grey NIGHTLY bar) |
 | plex.tv device name | `PlxNative (LG TV)` | `PlxNative debug (LG TV)` |
 
 **`FLAVOR ?= debug`, in the tracked Makefile.** The asymmetry is deliberate and it is the whole
@@ -381,7 +387,7 @@ forgetting: the stable package must not contain the `plxnative-noidle` dev witne
 That gate is graded **unconditionally**, outside the build-configuration branch, and the nesting is
 why it is worth a paragraph rather than a clause. `pkg/.build-config` records a feature set, and it
 maps to `None` for anything that is neither shipped configuration — the Makefile's own header
-documents a third (`--no-default-features --features devtriggers`, the README-screenshot recipe).
+documents a third (`--no-default-features --features devtriggers`, the on-device screenshot recipe).
 Nested under that stamp, exactly that combination satisfied `release-guard` (`RELEASE` is
 non-empty), printed `SKIP — neither shipped configuration`, and would have packaged a dev-trigger
 binary under the released id on an all-green run. "This package carries no dev-trigger surface" is a

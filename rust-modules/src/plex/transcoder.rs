@@ -10,9 +10,10 @@
 //!     The caller MUST read the OUTPUT codecs off the returned body (Part.Stream[].codec):
 //!     the Load payload has to describe what the server will actually send, not the source
 //!     (see route::apply_decision_codecs and [[audio-payload-codecs]]).
-//! The ordinary calls return the parsed MediaContainer; a `?`/None degrades exactly like the old
-//! raw-body scan (caller falls back to the local codec heuristic / skips the codec override). The
-//! ABR deadline-bearing twin retains HTTP, deadline and transport causes for route policy.
+//! The ordinary calls return the parsed MediaContainer; a `?`/None from MDE means the caller
+//! must not Original (PMS 1.43 503s a Part without a registered decision) and may still remux
+//! or re-encode via a separate `transcode_decision`. The ABR deadline-bearing twin retains
+//! HTTP, deadline and transport causes for route policy.
 use super::client::{Client, JsonDeadlineOutcome, QueryBuilder, StreamUrl};
 use super::models::MediaContainer;
 use super::params::{Ceiling, TranscodeDelivery, TranscodeSpec};
@@ -22,12 +23,34 @@ use super::probe::Location;
 /// two-sided test — what our demuxer/payload path can feed, before asking whether this
 /// particular SoC can decode it. The live set is `devcaps::Caps::audio` (this list ∩ the
 /// device's own codec table), and the ONE-definition rule moved there with it: the
-/// [`is_dp_audio`] predicate that gates every direct-play decision (route + the track menu's
-/// native-switch) and the profile string's audio lists BOTH read the caps snapshot, so the
-/// claim sent to PMS and the gate applied locally cannot drift apart.
-pub const DP_AUDIO_CODECS: &str = "aac,ac3,eac3";
+/// Normal routing uses [`is_dp_audio_track`] for membership and channel bounds, shared with
+/// the device profile. Forced mode instead uses the implemented software feed formats and
+/// its separate profile, without conservative device bounds.
+pub const DP_AUDIO_CODECS: &str = "aac,ac3,eac3,dts";
 pub fn is_dp_audio(codec: &str) -> bool {
     crate::devcaps::caps().audio_has(codec)
+}
+
+/// Codec and channel check for an actual selected track. Codec-only membership is insufficient
+/// on devices whose DTS decoder stops at 5.1 or whose AAC decoder stops at stereo.
+pub fn is_dp_audio_track(codec: &str, channels: i64) -> bool {
+    crate::devcaps::caps().audio_supports(codec, channels)
+}
+
+/// Subtitle codecs Original client-renders (`ff.rs` / the track menu). This is the
+/// `subtitleCodec=` list on the direct-play profile **and** the gate on MDE's
+/// `subtitleStreamID`: a selected embedded track whose codec is here is named on `/decision`,
+/// anything else (sidecar, or a codec we render but do not advertise) is sent as `0` so MDE
+/// does not burn/transcode a sub the demuxer will draw itself.
+///
+/// Spellings are PMS profile names plus the FFmpeg/Stream.codec aliases they arrive as
+/// (`movtext` as in Roku; `dvd` beside `vobsub` / `dvd_subtitle`). Obscure `ff.rs` Plain
+/// aliases (`vplayer`, `jacosub`, …) stay off this list on purpose — unknown selected codecs
+/// take the `0` path rather than a full re-encode.
+pub const DP_SUBTITLE_CODECS: &str = "srt,subrip,ass,ssa,mov_text,movtext,webvtt,text,pgs,hdmv_pgs_subtitle,vobsub,dvd,dvd_subtitle,dvdsub,dvb_subtitle,dvbsub";
+pub fn is_dp_subtitle(codec: &str) -> bool {
+    let codec = codec.to_ascii_lowercase();
+    DP_SUBTITLE_CODECS.split(',').any(|c| c == codec)
 }
 
 // ---- the relay policy: what the LINK to a server allows a plan to ask for -------------------
@@ -157,7 +180,7 @@ pub fn link_policy(link: Option<Location>) -> LinkPolicy {
 ///   lane: MDE logged "Cannot direct stream audio stream due to codec aac when profile only
 ///   allows ac3" and re-encoded audio that the pipeline decodes natively. The list is exactly
 ///   the caps audio subset, so anything copied is something we both feed and decode; a track
-///   that genuinely needs encoding (TrueHD/DTS) goes to the first entry.
+///   that genuinely needs encoding (TrueHD or unsupported DTS) goes to the first entry.
 ///
 /// The Load payload cannot drift whatever PMS chooses: `route.rs` reads the OUTPUT codecs off
 /// the /decision response (`decision_codecs`) and describes those, not the profile's wish.
@@ -175,11 +198,19 @@ fn profile_for_delivery(caps: &crate::devcaps::Caps, delivery: TranscodeDelivery
     let (w, h) = caps.hevc_max;
     let dp_audio = &caps.audio;
     // ac3 first — the preferred ENCODE target — then the rest of the caps subset as copy lanes.
-    let target_audio = ["ac3", "eac3", "aac"]
+    let target_audio = ["ac3", "eac3", "aac", "dts"]
         .into_iter()
         .filter(|c| caps.audio_has(c))
         .collect::<Vec<_>>()
         .join(",");
+    // PMS scopes audio carried by a video profile as videoAudioCodec (Plex-for-Kodi's
+    // plexplayer.py uses this scope for audio.channels too); audioCodec is not a valid scope.
+    let audio_limits = caps.audio_channels.iter()
+        .filter(|(codec, _)| caps.audio_has(codec))
+        .map(|(codec, channels)| format!(
+            "+add-limitation(scope=videoAudioCodec&scopeName={codec}&type=upperBound&name=audio.channels&value={channels}&replace=true)"
+        ))
+        .collect::<String>();
     let target = match delivery {
         TranscodeDelivery::ProgressiveMkv => format!(
             "add-transcode-target(type=videoProfile&context=streaming&protocol=http\
@@ -194,13 +225,17 @@ fn profile_for_delivery(caps: &crate::devcaps::Caps, delivery: TranscodeDelivery
                 .to_string()
         }
     };
+    // Image + text subs the demuxer client-renders (`ff.rs` / the track menu). Leaving a
+    // selected bitmap off made MDE answer transcode, which then 503'd the Original part GET
+    // ("decision is for a transcode"). [`DP_SUBTITLE_CODECS`] is the one list — MDE's
+    // `subtitleStreamID` gate reads the same constant.
     format!(
         "add-direct-play-profile(type=videoProfile&container=mkv,mp4&videoCodec={dp_video}\
-         &audioCodec={dp_audio}&subtitleCodec=srt,subrip,ass,ssa)\
+         &audioCodec={dp_audio}&subtitleCodec={DP_SUBTITLE_CODECS})\
          +add-limitation(scope=videoCodec&scopeName=*&type=upperBound&name=video.width&value={w}&replace=true)\
          +add-limitation(scope=videoCodec&scopeName=*&type=upperBound&name=video.height&value={h}&replace=true)\
          +add-limitation(scope=videoCodec&scopeName=*&type=upperBound&name=video.bitDepth&value=10&replace=true)\
-         +{target}",
+         {audio_limits}+{target}",
     )
 }
 
@@ -211,6 +246,10 @@ fn profile_for(caps: &crate::devcaps::Caps) -> String {
 /// The profile for THIS device — [`profile_for`] over the boot-probed caps snapshot.
 fn profile_extra(delivery: TranscodeDelivery) -> String {
     profile_for_delivery(crate::devcaps::caps(), delivery)
+}
+
+fn forced_direct_profile() -> String {
+    format!("add-direct-play-profile(type=videoProfile&container=mkv,mp4&videoCodec=h264,hevc&audioCodec={DP_AUDIO_CODECS}&subtitleCodec={DP_SUBTITLE_CODECS})")
 }
 
 impl Client {
@@ -245,12 +284,12 @@ impl Client {
         // only on the re-encode flavor — a REMUX is a copy by definition, so the two can never
         // both be true (`build_stream` derives `remux` from a gate this flag has already failed).
         // See [`TranscodeSpec::no_video_copy`] for the measurement.
-        let hls = matches!(s.delivery, TranscodeDelivery::FixedHls { .. });
+        let hls = matches!(s.contract.delivery, TranscodeDelivery::FixedHls { .. });
         debug_assert!(
-            !(hls && s.remux),
+            !(hls && s.contract.remux),
             "fixed HLS is an encoded rendition, never a remux"
         );
-        let copy_ok = !hls && !(s.no_video_copy && !s.remux);
+        let copy_ok = !hls && !(s.contract.no_video_copy && !s.contract.remux);
         let protocol = if hls { "hls" } else { "http" };
         let mut q = QueryBuilder::new("")
             .str("path", &format!("/library/metadata/{}", s.rating_key))
@@ -276,14 +315,14 @@ impl Client {
         // than becoming a hole: `quality_policy` admits a remux only for a source it measured
         // under the ceiling, so those bytes are already inside the bound. A cap here would do the
         // one thing the remux exists to avoid — force the re-encode.
-        q = if s.remux && !hls {
+        q = if s.contract.remux && !hls {
             q.int("directStreamAudio", 1)
         } else {
-            let c = s.ceiling.unwrap_or(Ceiling::NATIVE_4K);
+            let c = s.contract.ceiling.unwrap_or(Ceiling::NATIVE_4K);
             let q = q
                 .str("videoResolution", &c.resolution())
                 .int("maxVideoBitrate", c.max_kbps);
-            match s.delivery {
+            match s.contract.delivery {
                 TranscodeDelivery::ProgressiveMkv => q,
                 TranscodeDelivery::FixedHls {
                     seconds_per_segment,
@@ -305,6 +344,16 @@ impl Client {
             q = q.int("directStreamAudio", 1);
         }
         q = q.opt_int("audioStreamID", s.audio_stream_id);
+        // Plex Pass audio DSP (issue #266) — the transcode leg ONLY (never `mde_decision_with_profile`,
+        // which builds its own query and never reads `TranscodeSpec` at all: I3). Only ever `1`;
+        // PMS treats absence as off, and an explicit `=0` was never observed to differ from
+        // omitting the param, so there is no baseline byte to preserve by sending it.
+        if s.contract.audio.boost_dialog {
+            q = q.int("boostDialog", 1);
+        }
+        if s.contract.audio.normalize_loudness {
+            q = q.int("normalizeLoudness", 1);
+        }
         if s.subtitle_stream_id > 0 {
             // burned in (Plex's default decision for our profile — no soft-sub support advertised)
             q = q
@@ -318,7 +367,7 @@ impl Client {
         q = self
             .playback_identity(q)
             .str("X-Plex-Client-Profile-Name", "Generic")
-            .str("X-Plex-Client-Profile-Extra", &profile_extra(s.delivery));
+            .str("X-Plex-Client-Profile-Extra", &profile_extra(s.contract.delivery));
         if let Some(offset) = s.offset.wire_seconds() {
             q = q.str("offset", &offset);
         }
@@ -329,7 +378,50 @@ impl Client {
     /// Decision Engine whether the item direct-plays given our capability profile. Registers
     /// the session as a side effect. The caller reads `Part.decision` ("directplay" vs
     /// "transcode") and the verdict codes off the returned container.
-    pub fn mde_decision(&self, rating_key: &str, session: &str) -> Option<MediaContainer> {
+    ///
+    /// `audio_stream_id` is the track the demuxer will actually feed (0 = omit, PMS uses the
+    /// part default). Smart direct-play names the AAC/AC3/EAC3 sibling here so MDE does not
+    /// veto a TrueHD/DTS default we never intended to play.
+    ///
+    /// `subtitle_stream_id` is always sent: a positive id is an advertised embedded track Original
+    /// will client-render; **0** tells MDE to evaluate with subs off so a selected sidecar or
+    /// unadvertised codec does not force a burn/transcode. (`opt_int` would omit 0.)
+    ///
+    /// `subtitles=none` is the client-rendered mode. Omitting it leaves PMS on `auto`, and
+    /// 1.43.4 HTTP 400s `hasMDE`+`directPlay` when the part already has a selected subtitle
+    /// (`invalid subtitle setting 'auto'`). That `None` fail-closes Original into remux and a
+    /// PUT `subtitleStreamID=0`, which clears the selection. `burn` would force a transcode.
+    pub fn mde_decision(
+        &self,
+        rating_key: &str,
+        session: &str,
+        audio_stream_id: i64,
+        subtitle_stream_id: i64,
+    ) -> Option<MediaContainer> {
+        self.mde_decision_with_profile(rating_key, session, audio_stream_id, subtitle_stream_id, false)
+    }
+
+    /// Strict Original override: advertise the software feed formats without device limits.
+    /// No transcode target or direct-stream alternative is offered. The caller must still reject
+    /// any verdict other than directplay; a server refusal is not permission to transcode.
+    pub fn mde_decision_forced(
+        &self,
+        rating_key: &str,
+        session: &str,
+        audio_stream_id: i64,
+        subtitle_stream_id: i64,
+    ) -> Option<MediaContainer> {
+        self.mde_decision_with_profile(rating_key, session, audio_stream_id, subtitle_stream_id, true)
+    }
+
+    fn mde_decision_with_profile(
+        &self,
+        rating_key: &str,
+        session: &str,
+        audio_stream_id: i64,
+        subtitle_stream_id: i64,
+        forced: bool,
+    ) -> Option<MediaContainer> {
         let q = QueryBuilder::new("/video/:/transcode/universal/decision")
             .str("path", &format!("/library/metadata/{rating_key}"))
             .int("mediaIndex", 0)
@@ -337,17 +429,20 @@ impl Client {
             .str("protocol", "http")
             .int("hasMDE", 1)
             .int("directPlay", 1)
-            .int("directStream", 1)
-            .int("directStreamAudio", 1)
+            .int("directStream", i64::from(!forced))
+            .int("directStreamAudio", i64::from(!forced))
             .int("mediaBufferSize", 20971)
             .str("session", session)
-            .str("X-Plex-Session-Identifier", session);
+            .str("X-Plex-Session-Identifier", session)
+            .opt_int("audioStreamID", audio_stream_id)
+            .int("subtitleStreamID", subtitle_stream_id)
+            .str("subtitles", "none");
         let q = self
             .playback_identity(q)
             .str("X-Plex-Client-Profile-Name", "Generic")
             .str(
                 "X-Plex-Client-Profile-Extra",
-                &profile_extra(TranscodeDelivery::ProgressiveMkv),
+                &if forced { forced_direct_profile() } else { profile_extra(TranscodeDelivery::ProgressiveMkv) },
             );
         self.get_json(&q.build())
     }
@@ -384,7 +479,7 @@ impl Client {
 
     /// The delivery-matched stream target for `spec` — same params as the registering decision.
     pub fn transcode_start_url(&self, spec: &TranscodeSpec) -> StreamUrl {
-        let endpoint = match spec.delivery {
+        let endpoint = match spec.contract.delivery {
             TranscodeDelivery::ProgressiveMkv => "start.mkv",
             TranscodeDelivery::FixedHls { .. } => "start.m3u8",
         };
@@ -410,6 +505,9 @@ impl Client {
     /// [`super::library::Client::scrobble`], it does not tell a 200 from a 404: `get_ok` is
     /// `http_get`'s own success, which is the honest limit of a GET whose body carries nothing.
     pub fn transcode_stop(&self, session: &str) -> bool {
+        if session.is_empty() {
+            return false;
+        }
         self.get_ok(&self.transcode_stop_query(session, true))
     }
 
@@ -417,6 +515,9 @@ impl Client {
     /// HLS→direct recovery uses this after decoded source frames: that raw Part is exact-borrowing
     /// the same resource, and terminating it here would make the next Range/seek return 503.
     pub(crate) fn transcode_stop_physical(&self, session: &str) -> bool {
+        if session.is_empty() {
+            return false;
+        }
         self.get_ok(&self.transcode_stop_query(session, false))
     }
 
@@ -442,6 +543,9 @@ impl Client {
     /// For the same authenticated owner, 404 is the idempotent already-closed answer; every other
     /// non-2xx status and transport failure remains inconclusive.
     pub fn transcode_resource_reconciled(&self, session: &str) -> Option<bool> {
+        if session.is_empty() {
+            return None;
+        }
         let q =
             QueryBuilder::new("/status/sessions/close").str("X-Plex-Session-Identifier", session);
         match self.post_status(&q.build())? {
@@ -458,6 +562,9 @@ impl Client {
     /// physical half; callers must follow it with [`Client::transcode_resource_reconciled`]. Every
     /// other response remains unknown.
     pub fn transcode_session_present(&self, session: &str) -> Option<bool> {
+        if session.is_empty() {
+            return None;
+        }
         let q = QueryBuilder::new("/video/:/transcode/universal/ping").str("session", session);
         match self.get_status(&q.build())? {
             200..=299 => Some(true),
@@ -473,7 +580,7 @@ mod tests {
         link_policy, Ceiling, Client, LinkPolicy, Location, TranscodeDelivery, TranscodeSpec,
     };
     use crate::devcaps::Caps;
-    use crate::plex::{Origin, ServerId};
+    use crate::plex::{AudioEnhancements, EncodeContract, Origin, ServerId};
 
     // ---- the universal-transcoder query: who is allowed to COPY ---------------------------
 
@@ -488,17 +595,28 @@ mod tests {
     }
 
     fn spec<'a>(remux: bool, no_video_copy: bool) -> TranscodeSpec<'a> {
+        spec_with_audio(remux, no_video_copy, AudioEnhancements::NONE)
+    }
+
+    fn spec_with_audio<'a>(
+        remux: bool,
+        no_video_copy: bool,
+        audio: AudioEnhancements,
+    ) -> TranscodeSpec<'a> {
         TranscodeSpec {
             rating_key: "5",
             session: "s1",
             encoder_session: "s1",
-            delivery: super::TranscodeDelivery::ProgressiveMkv,
-            remux,
-            no_video_copy,
+            contract: EncodeContract {
+                remux,
+                delivery: super::TranscodeDelivery::ProgressiveMkv,
+                no_video_copy,
+                ceiling: None,
+                audio,
+            },
             audio_stream_id: 0,
             subtitle_stream_id: 0,
             offset: crate::plex::TranscodeOffset::Fresh,
-            ceiling: None,
         }
     }
 
@@ -506,6 +624,14 @@ mod tests {
     /// matching ping exact-looks up that half of the lifecycle: 200 while the physical map entry
     /// exists, 404 after it is gone. Other statuses prove neither state and must fail closed; the
     /// logical Streaming Resource has its own close method and is deliberately not inferred here.
+    //
+    // Dev-only, this test through `resource_close_is_posted_and_accepts_only_terminated_or_absent`
+    // below: each drives a plaintext loopback PMS with a real, token-bearing client, which a store
+    // build's `CredentialPolicy::HttpsOnly` refuses before the request reaches the wire (see
+    // `http::credential_transport_allowed`) — the refused call's return value fails the fixture's
+    // own assertion. The store-build case is covered instead by `auth.rs`'s `e2e_real_curl_*`
+    // HTTPS harness.
+    #[cfg(feature = "devtriggers")]
     #[test]
     fn transcode_ping_distinguishes_present_absent_and_unknown_cleanup_state() {
         use std::io::{BufRead, BufReader, Write};
@@ -557,6 +683,8 @@ mod tests {
     /// carries both `closeResourceSession=1` and the exact resource identity. Without these two
     /// fields each successful ABR experiment leaves less WAN budget for the next one even after
     /// `/ping` says the physical encoder is gone.
+    // Dev-only: see the comment on `transcode_ping_distinguishes_present_absent_and_unknown_cleanup_state`.
+    #[cfg(feature = "devtriggers")]
     #[test]
     fn transcode_stop_closes_its_exact_streaming_resource() {
         use std::io::{BufRead, BufReader, Write};
@@ -594,6 +722,8 @@ mod tests {
         );
     }
 
+    // Dev-only: see the comment on `transcode_ping_distinguishes_present_absent_and_unknown_cleanup_state`.
+    #[cfg(feature = "devtriggers")]
     #[test]
     fn resource_close_is_posted_and_accepts_only_terminated_or_absent() {
         use std::io::{BufRead, BufReader, Write};
@@ -643,6 +773,30 @@ mod tests {
             );
         }
         server.join().unwrap();
+    }
+
+    /// An empty `session=` is not a transcode identity. PMS logs "without a valid session GUID"
+    /// (and the matching ping warning) for that request; nothing on the server can be retired.
+    #[test]
+    fn an_empty_transcode_session_does_not_hit_the_wire() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port() as i32;
+        let client = Client::new(
+            ServerId::from_raw(1),
+            "mach",
+            Origin::http("127.0.0.1", port),
+            "tok",
+            "cid",
+        );
+        assert!(!client.transcode_stop(""));
+        assert!(!client.transcode_stop_physical(""));
+        assert_eq!(client.transcode_session_present(""), None);
+        assert_eq!(client.transcode_resource_reconciled(""), None);
+        match listener.accept() {
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            other => panic!("empty session must not open a socket: {other:?}"),
+        }
     }
 
     /// **`directStream` is the server's permission to copy the video track, and the ordinary
@@ -735,7 +889,7 @@ mod tests {
         // A rung: 720p at 4 Mbps. Both axes move, and the old values are GONE — a query carrying
         // both would be a contradiction PMS resolves by position, which is not ours to assume.
         let mut s = spec(false, false);
-        s.ceiling = Some(Ceiling {
+        s.contract.ceiling = Some(Ceiling {
             max_kbps: 4000,
             max_w: 1280,
             max_h: 720,
@@ -775,7 +929,7 @@ mod tests {
         // those bytes are already inside the bound — and a cap here would force the very
         // re-encode the remux exists to avoid.
         let mut r = spec(true, false);
-        r.ceiling = Some(Ceiling {
+        r.contract.ceiling = Some(Ceiling {
             max_kbps: 4000,
             max_w: 1280,
             max_h: 720,
@@ -799,10 +953,10 @@ mod tests {
     #[test]
     fn fixed_hls_is_one_coherent_wire_contract() {
         let mut s = spec(false, false);
-        s.delivery = TranscodeDelivery::FixedHls {
+        s.contract.delivery = TranscodeDelivery::FixedHls {
             seconds_per_segment: 2,
         };
-        s.ceiling = Some(Ceiling {
+        s.contract.ceiling = Some(Ceiling {
             max_kbps: 720,
             max_w: 854,
             max_h: 480,
@@ -834,8 +988,9 @@ mod tests {
                 hevc_row: (0, 0, 0),
                 vp9: true,
                 audio: "aac,ac3,eac3".into(),
+            audio_channels: Default::default(),
             },
-            s.delivery,
+            s.contract.delivery,
         );
         let target = target_of(&profile);
         assert!(target.contains("protocol=hls"), "{target}");
@@ -847,7 +1002,7 @@ mod tests {
     #[test]
     fn an_hls_replacement_keeps_the_exact_fractional_content_boundary() {
         let mut s = spec(false, false);
-        s.delivery = TranscodeDelivery::FixedHls {
+        s.contract.delivery = TranscodeDelivery::FixedHls {
             seconds_per_segment: 2,
         };
         s.offset = crate::plex::TranscodeOffset::from_micros(2_002_000);
@@ -859,7 +1014,7 @@ mod tests {
     #[test]
     fn the_probe_builder_keeps_the_two_session_wires_explicit() {
         let mut s = spec(false, false);
-        s.delivery = TranscodeDelivery::FixedHls {
+        s.contract.delivery = TranscodeDelivery::FixedHls {
             seconds_per_segment: 2,
         };
         s.session = "playback-stable";
@@ -922,7 +1077,7 @@ mod tests {
         )
         .expect("fixture parses");
 
-        let cs = super::super::probe::candidates(&res);
+        let cs = super::super::probe::candidates(&res, crate::plex::CredentialPolicy::HttpsOnly);
         assert_eq!(cs.len(), 1, "a relay gets no plain-http twin: {cs:#?}");
         assert_eq!(cs[0].location, Location::Relay);
 
@@ -975,10 +1130,33 @@ mod tests {
             "no subscription-free video fallback in {video:?} — a free server drops the video track");
         assert_eq!(video.first().map(String::as_str), Some("hevc"),
             "hevc must stay FIRST: order is preference, and hevc is what keeps 4K+HDR10 through a re-encode");
-        for c in super::DP_AUDIO_CODECS.split(',') {
+        for c in crate::devcaps::Caps::assumed().audio.split(',') {
             assert!(list_of(target, "audioCodec=").contains(&c.to_string()),
                 "{c} is direct-playable but absent from the target — the server would re-encode a track we decode natively");
         }
+    }
+
+    #[test]
+    fn dts_is_device_gated_and_channel_limited_in_both_profiles() {
+        let mut caps = Caps::assumed();
+        assert!(!super::profile_for(&caps).contains("dts"));
+        caps.audio.push_str(",dts");
+        caps.audio_channels.insert("dts".into(), 6);
+        let profile = super::profile_for(&caps);
+        assert!(list_of(&profile, "audioCodec=").contains(&"dts".into()));
+        assert!(list_of(target_of(&profile), "audioCodec=").contains(&"dts".into()));
+        assert!(profile.contains("scope=videoAudioCodec&scopeName=dts&type=upperBound&name=audio.channels&value=6&replace=true"));
+        assert!(!profile.contains("truehd"));
+    }
+
+    #[test]
+    fn force_profile_advertises_engine_formats_without_device_limits_or_transcode() {
+        let p = super::forced_direct_profile();
+        assert_eq!(list_of(&p, "audioCodec="), ["aac", "ac3", "eac3", "dts"]);
+        assert_eq!(list_of(&p, "videoCodec="), ["h264", "hevc"]);
+        assert!(!p.contains("add-limitation"));
+        assert!(!p.contains("transcode-target"));
+        assert!(!p.contains("truehd"));
     }
 
     /// The other side of issue #22's fallback-chain rule: on a SoC whose table has no HEVC row,
@@ -994,6 +1172,7 @@ mod tests {
             hevc_row: (0, 0, 0),
             vp9: false,
             audio: "aac,ac3,eac3".into(),
+            audio_channels: Default::default(),
         };
         let p = super::profile_for(&caps);
         assert!(!p.contains("hevc"), "hevc must not appear anywhere in {p}");
@@ -1020,6 +1199,7 @@ mod tests {
                 hevc_row: (0, 0, 0),
                 vp9: false,
                 audio: "aac".into(),
+                audio_channels: Default::default(),
             },
         ] {
             let p = super::profile_for(&caps);
@@ -1043,6 +1223,7 @@ mod tests {
             hevc_row: (0, 0, 0),
             vp9: true,
             audio: "aac".into(),
+            audio_channels: Default::default(),
         };
         let p = super::profile_for(&caps);
         let dp = p.split("add-transcode-target").next().unwrap();
@@ -1050,21 +1231,143 @@ mod tests {
         assert_eq!(list_of(target_of(&p), "audioCodec="), ["aac"]);
     }
 
-    /// PIN: the assumed (table-unreadable) profile is byte-identical to the constant string the
-    /// app sent before devcaps existed. This is the fallback half of devcaps' contract — the
-    /// derivation may never drift for a device that was working yesterday, and any deliberate
-    /// profile change must update this literal to say so.
+    /// The profile's `subtitleCodec=` list IS [`DP_SUBTITLE_CODECS`] — MDE's stream-id gate
+    /// reads the same constant, so a selected PGS/mov_text/dvd_subtitle cannot be advertised
+    /// here and omitted from `/decision`, or the other way around.
+    #[test]
+    fn the_direct_play_subtitle_list_is_the_shared_constant() {
+        let p = super::profile_for(&Caps::assumed());
+        assert!(
+            p.contains(&format!("subtitleCodec={})", super::DP_SUBTITLE_CODECS)),
+            "profile must interpolate DP_SUBTITLE_CODECS verbatim: {p}"
+        );
+        assert!(super::is_dp_subtitle("MOV_TEXT"));
+        assert!(super::is_dp_subtitle("dvd_subtitle"));
+        assert!(super::is_dp_subtitle("hdmv_pgs_subtitle"));
+        assert!(
+            !super::is_dp_subtitle("vplayer"),
+            "obscure aliases stay off the advertised set"
+        );
+    }
+
+    /// PIN: `Caps::assumed()` must emit this exact profile string. This is the assumed-caps
+    /// contract, not a claim that the string predates device-capability tables. A deliberate
+    /// profile edit must update this literal so the change is visible;
+    /// `the_direct_play_subtitle_list_is_the_shared_constant` is the interpolation gate
+    /// against [`DP_SUBTITLE_CODECS`].
     #[test]
     fn the_assumed_profile_is_byte_identical_to_the_shipped_one() {
         assert_eq!(
             super::profile_for(&Caps::assumed()),
             "add-direct-play-profile(type=videoProfile&container=mkv,mp4&videoCodec=h264,hevc\
-             &audioCodec=aac,ac3,eac3&subtitleCodec=srt,subrip,ass,ssa)\
+             &audioCodec=aac,ac3,eac3&subtitleCodec=srt,subrip,ass,ssa,mov_text,movtext,webvtt,text,pgs,hdmv_pgs_subtitle,vobsub,dvd,dvd_subtitle,dvdsub,dvb_subtitle,dvbsub)\
              +add-limitation(scope=videoCodec&scopeName=*&type=upperBound&name=video.width&value=3840&replace=true)\
              +add-limitation(scope=videoCodec&scopeName=*&type=upperBound&name=video.height&value=2176&replace=true)\
              +add-limitation(scope=videoCodec&scopeName=*&type=upperBound&name=video.bitDepth&value=10&replace=true)\
              +add-transcode-target(type=videoProfile&context=streaming&protocol=http\
              &container=matroska&videoCodec=hevc,h264&audioCodec=ac3,eac3,aac)"
         );
+    }
+
+    // ---- Plex Pass audio DSP (issue #266, PR1): boostDialog / normalizeLoudness -----------
+    //
+    // Production never sets `EncodeContract::audio` to anything but `NONE` in this PR (the
+    // offering policy lands later); these tests pin the wire mechanics `transcode_query` already
+    // has, in isolation, so a later PR's offering policy has a settled, tested contract to build
+    // on top of.
+
+    /// A remux with `normalizeLoudness` alone emits exactly that one param.
+    #[test]
+    fn remux_with_normalize_loudness_emits_param() {
+        let q = a_client().transcode_query(&spec_with_audio(
+            true,
+            false,
+            AudioEnhancements { boost_dialog: false, normalize_loudness: true },
+        ));
+        assert!(q.contains("normalizeLoudness=1"), "{q}");
+        assert!(!q.contains("boostDialog"), "{q}");
+    }
+
+    /// Both toggles on a remux emit both params, independently.
+    #[test]
+    fn remux_with_both_enhancements_emits_both() {
+        let q = a_client().transcode_query(&spec_with_audio(
+            true,
+            false,
+            AudioEnhancements { boost_dialog: true, normalize_loudness: true },
+        ));
+        assert!(q.contains("boostDialog=1"), "{q}");
+        assert!(q.contains("normalizeLoudness=1"), "{q}");
+    }
+
+    /// The re-encode flavor carries the same two params — `transcode_query` builds them
+    /// unconditionally off `s.contract.audio`, not gated to the remux branch.
+    #[test]
+    fn reencode_contract_with_audio_emits_params() {
+        let q = a_client().transcode_query(&spec_with_audio(
+            false,
+            false,
+            AudioEnhancements { boost_dialog: true, normalize_loudness: true },
+        ));
+        assert!(q.contains("boostDialog=1"), "{q}");
+        assert!(q.contains("normalizeLoudness=1"), "{q}");
+    }
+
+    /// `mde_decision` (`hasMDE=1`, `directPlay=1`) builds its own query from scratch and never
+    /// reads a `TranscodeSpec`/`EncodeContract` at all — M1's rule that these params only ever
+    /// mean anything alongside a remux, pinned structurally rather than by a flag this function
+    /// has no way to read.
+    #[cfg(feature = "devtriggers")]
+    #[test]
+    fn mde_never_carries_enhancements() {
+        use std::io::{BufRead, BufReader, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port() as i32;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept decision");
+            let mut line = String::new();
+            BufReader::new(&socket)
+                .read_line(&mut line)
+                .expect("request line");
+            tx.send(line).expect("publish request");
+            write!(
+                socket,
+                "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            )
+            .expect("response");
+        });
+
+        let client = Client::new(
+            ServerId::from_raw(1),
+            "mach",
+            Origin::http("127.0.0.1", port),
+            "tok",
+            "cid",
+        );
+        let _ = client.mde_decision("5", "s1", 0, 0);
+        let line = rx.recv().expect("captured decision request");
+        assert!(!line.contains("boostDialog"), "{line}");
+        assert!(!line.contains("normalizeLoudness"), "{line}");
+        server.join().unwrap();
+    }
+
+    /// `AudioEnhancements::NONE` — every path this PR builds — must not change a single byte of
+    /// the query relative to before #266 touched this function: the ZERO BEHAVIOUR CHANGE gate
+    /// for the shipping default.
+    #[test]
+    fn enhancement_off_is_byte_identical() {
+        for (remux, no_video_copy) in [(false, false), (false, true), (true, false)] {
+            let with_none = a_client().transcode_query(&spec_with_audio(
+                remux,
+                no_video_copy,
+                AudioEnhancements::NONE,
+            ));
+            let bare = a_client().transcode_query(&spec(remux, no_video_copy));
+            assert_eq!(with_none, bare);
+            assert!(!with_none.contains("boostDialog"), "{with_none}");
+            assert!(!with_none.contains("normalizeLoudness"), "{with_none}");
+        }
     }
 }

@@ -86,6 +86,7 @@ pub(crate) fn scrub_local_with(line: &str, ids: &[String]) -> String {
     let s = scrub_headers(&s);
     let s = scrub_params(&s);
     let s = scrub_authority(&s);
+    let s = scrub_host_kv(&s);
     let s = scrub_ipv6(&s);
     let s = scrub_addresses(&s);
     let s = scrub_viewing(&s);
@@ -100,6 +101,7 @@ pub(crate) fn scrub_with(line: &str, ids: &[String]) -> Scrubbed {
     let s = scrub_headers(&s);
     let s = scrub_params(&s);
     let s = scrub_authority(&s);
+    let s = scrub_host_kv(&s);
     let s = scrub_ipv6(&s);
     let s = scrub_addresses(&s);
     let s = scrub_viewing(&s);
@@ -523,6 +525,51 @@ fn scrub_authority(s: &str) -> String {
     out.push_str(rest);
     out
 }
+
+/// **`host=<value>` → `host=<host>`** — the shape [`scrub_authority`] cannot see, because there is
+/// no `scheme://` here for it to anchor on.
+///
+/// This is the gap the device found: `stream.rs`'s DNS-failure line spells the unresolved name as
+/// bare `host=<fqdn>`, several `plex::servers`/`player::engine` re-point lines do the same for an
+/// address, and none of those go through a URL. Rather than teach every such call site its own
+/// redaction, this is keyed the same way [`scrub_params`] is keyed on its credential parameters —
+/// the literal `host=` is the signal, not a guess at what a hostname looks like, so it cannot
+/// mistake a soname (`libavformat-plx.so.63`), a version (`1.43.4.10903`) or a GL extension name
+/// for one, the way a generic "any dotted token" scan would.
+///
+/// **One value is deliberately spared: a `0x…` hex dump.** `dev.rs`'s softfloat probe reuses this
+/// exact key for a diagnostic hash (`host={hash:#018x}`), which is not a hostname or an address at
+/// all — blanking it would destroy the one thing that line exists to compare. Everything else after
+/// `host=` — a bare IPv4/IPv6 literal or an alphabetic name, with or without a trailing `:port` — is
+/// replaced whole; a numeric address here would already have been caught by [`scrub_addresses`] or
+/// [`scrub_ipv6`] on its own, this pass runs first only so an alphabetic FQDN (which neither of
+/// those recognises) does not fall through to them and survive.
+fn scrub_host_kv(s: &str) -> String {
+    const KEY: &str = "host=";
+    if !s.contains(KEY) {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(at) = rest.find(KEY) {
+        out.push_str(&rest[..at + KEY.len()]);
+        let after = &rest[at + KEY.len()..];
+        let vlen = after
+            .find(|c: char| c.is_whitespace())
+            .unwrap_or(after.len());
+        let val = &after[..vlen];
+        let lower = val.to_ascii_lowercase();
+        if val.is_empty() || val.starts_with('<') || lower.starts_with("0x") {
+            // nothing to redact, already a placeholder, or a hex diagnostic dump — not a host
+            out.push_str(val);
+        } else {
+            out.push_str("<host>");
+        }
+        rest = &after[vlen..];
+    }
+    out.push_str(rest);
+    out
+}
 #[cfg(test)]
 mod tests {
     // NB the `Refuse` half is gated to its only present caller (the lab bridge); Phase G widens
@@ -572,6 +619,40 @@ mod tests {
         let out = kept("a?token=AAA b?apikey=BBB");
         assert!(!out.contains("AAA") && !out.contains("BBB"), "{out}");
         assert_eq!(out.matches("<redacted>").count(), 2);
+    }
+
+    /// **The device leak** (found on a real TV, `stream.rs:947`): a DNS resolution failure logs
+    /// `host=<fqdn>` with no `scheme://` in front of it, so [`scrub_authority`] — the pass that
+    /// catches every OTHER host in this file — never sees it. A real multi-label private hostname
+    /// reached `plxnative-events.log` unredacted this way. Reproduces the exact shape.
+    #[test]
+    fn a_dns_failure_does_not_leak_the_bare_hostname() {
+        let out = kept("stream: GET /identity DNS FAILED host=plex.main.example.net");
+        assert!(
+            !out.contains("plex.main.example.net")
+                && !out.contains("example.net")
+                && !out.contains("plex.main"),
+            "the hostname survived: {out}"
+        );
+        assert!(
+            out.contains("stream: GET /identity DNS FAILED"),
+            "the diagnostic half survives: {out}"
+        );
+    }
+
+    /// The other call site this same shape leaked from (`net.rs`'s nowan refusal), plus the
+    /// counter-case: a hex diagnostic dump that reuses the `host=` key for something that is not a
+    /// hostname at all (`dev.rs`'s softfloat probe) must survive untouched.
+    #[test]
+    fn a_bare_host_kv_is_redacted_but_a_hex_dump_reusing_the_key_is_not() {
+        assert_eq!(
+            kept("net: nowan — refused name host=plex.main.example.net"),
+            "net: nowan — refused name host=<host>"
+        );
+        assert_eq!(
+            kept("softfloat: n=4096 hash=0x65a8e905a259246d host=0x65a8e905a259246d MATCH"),
+            "softfloat: n=4096 hash=0x65a8e905a259246d host=0x65a8e905a259246d MATCH",
+        );
     }
 
     /// The address clause: a `plex.direct` name encodes a LAN address in its leftmost label, and a
@@ -655,6 +736,26 @@ mod tests {
         }
     }
 
+    #[test]
+    fn other_ipv6_log_spellings_are_redacted_without_eating_punctuation() {
+        for (line, expected) in [
+            ("connect to 2001:db8::1 failed", "connect to <addr> failed"),
+            (
+                "connect to 2001:db8::1. failed",
+                "connect to <addr>. failed",
+            ),
+            ("reached [2001:db8::1] now", "reached <addr> now"),
+            ("bound [2001:db8::1]:32400", "bound <addr>"),
+            ("peer ::ffff:192.168.1.5 connected", "peer <addr> connected"),
+            (
+                "resolved 2001:0db8:0000:0000:0000:ff00:0042:8329",
+                "resolved <addr>",
+            ),
+        ] {
+            assert_eq!(scrub_local_with(line, &[]), expected, "{line}");
+        }
+    }
+
     /// A syntactically complete IPv6 literal wins over the probe's non-standard `address:port`
     /// interpretation. `::1:80` and `::0:80` are public-address-shaped literals, not loopback or
     /// unspecified plus an inferred port, and must not inherit either privacy exception.
@@ -685,26 +786,6 @@ mod tests {
                 }
                 Scrubbed::Refuse => panic!("address-only line should be safely rewritable"),
             }
-        }
-    }
-
-    #[test]
-    fn other_ipv6_log_spellings_are_redacted_without_eating_punctuation() {
-        for (line, expected) in [
-            ("connect to 2001:db8::1 failed", "connect to <addr> failed"),
-            (
-                "connect to 2001:db8::1. failed",
-                "connect to <addr>. failed",
-            ),
-            ("reached [2001:db8::1] now", "reached <addr> now"),
-            ("bound [2001:db8::1]:32400", "bound <addr>"),
-            ("peer ::ffff:192.168.1.5 connected", "peer <addr> connected"),
-            (
-                "resolved 2001:0db8:0000:0000:0000:ff00:0042:8329",
-                "resolved <addr>",
-            ),
-        ] {
-            assert_eq!(scrub_local_with(line, &[]), expected, "{line}");
         }
     }
 
@@ -866,6 +947,84 @@ mod tests {
         );
     }
 
+    /// The ban list `no_log_call_site_interpolates_viewing_content` reads: a banned substring in a
+    /// `log(&format!(…))` call, why it is banned, and the `(file, receiver-spelling)` pairs that
+    /// are exempt — household identity logged through a differently-spelled receiver, not viewing
+    /// content. See that test's doc for why the exemption is scoped by FILE and not by substring
+    /// alone.
+    const BANNED: &[(&str, &str, &[(&str, &str)])] = &[
+        ("ep_title", "the episode title — log `rk=` instead (app.rs)", &[]),
+        (
+            "q='",
+            "the search query — log `q[{n}ch]` instead (search.rs)",
+            &[],
+        ),
+        (
+            ".title",
+            "the item's own title — log `rk=`/`sid=` and the shape counts (metadata.rs)",
+            &[("auth.rs", "tile.title")],
+        ),
+        (
+            "title}",
+            "the item's own title as an inline capture — log `rk=`/`sid=` instead",
+            &[("auth.rs", "tile.title}")],
+        ),
+    ];
+
+    /// Every [`BANNED`] hit in one `log(&format!(…))` call, as one formatted offence line per hit
+    /// (empty if the call is clean). `path` decides which of a needle's file-scoped exemptions
+    /// apply — an exception is struck from the call text FIRST (so a `tile.title` in a call cannot
+    /// mask a `d.title` sitting beside it in the SAME call), but only when `path` ends with the
+    /// exception's own file.
+    fn banned_hits_in_call(path: &std::path::Path, line: usize, call: &str) -> Vec<String> {
+        let mut offences = Vec::new();
+        for (needle, why, exceptions) in BANNED {
+            let mut rest = call.to_string();
+            for (file, ex) in *exceptions {
+                if path.ends_with(file) {
+                    rest = rest.replace(ex, "");
+                }
+            }
+            if rest.contains(needle) {
+                offences.push(format!(
+                    "{}:{line} logs {needle} — {why}\n    {}",
+                    path.display(),
+                    call.trim()
+                ));
+            }
+        }
+        offences
+    }
+
+    /// **Finding 1, phase 11 review (2026-09-10).** Red before the fix: the exception used to be a
+    /// bare substring strip (`call.replace("tile.title", "")`) applied regardless of which file the
+    /// call came from, so a `tile.title()` receiver OUTSIDE `auth.rs` — exactly what
+    /// `ui::tile::Tile::title` (implemented for `pms::PmsMovie`, the library's own content item)
+    /// would spell at a call site — was silently exempted too. Scoping the exception to `auth.rs`
+    /// closes that: this call, attributed to an unrelated screen module, must still be caught.
+    #[test]
+    fn the_tile_title_exception_does_not_exempt_a_content_tile_outside_auth_rs() {
+        let path = std::path::Path::new("rust-modules/src/ui/card_row.rs");
+        let call = "log(&format!(\"card: opened {}\", tile.title()));";
+        let hits = banned_hits_in_call(path, 1, call);
+        assert!(
+            !hits.is_empty(),
+            "a `tile.title()` receiver outside auth.rs must not be exempted from the `.title` ban: {hits:?}"
+        );
+    }
+
+    /// The counterpart: the exemption still holds where it is real — `auth.rs`'s own
+    /// switch-diagnostic lines, which log the roster tile's name as household identity.
+    #[test]
+    fn the_tile_title_exception_still_applies_inside_auth_rs() {
+        let path = std::path::Path::new("rust-modules/src/auth.rs");
+        let call = "log(&format!(\"auth: switch '{}' -> ok\", tile.title));";
+        assert!(
+            banned_hits_in_call(path, 1, call).is_empty(),
+            "the household-identity exception must still hold for its real, file-scoped case"
+        );
+    }
+
     /// **The mechanism for titles, pinned by reading the source.**
     ///
     /// The scrubber cannot catch a programme title (see the test above), so what actually keeps
@@ -875,29 +1034,45 @@ mod tests {
     /// in. So it is asserted the only way it can be: by grepping the tree.
     ///
     /// The banned identifiers are the FIELDS that carry viewing content, not the words. Each one
-    /// was a real leak on 2026-08-29:
+    /// was a real leak:
     ///
-    /// * `ep_title`   — `app.rs`'s Up Next line; logs `rk=` now
-    /// * `q='`        — `search.rs`, seven sites; logs `q[Nch]` now
-    /// * the subtitle cue's text — `player/mod.rs`; logs `len=` now
+    /// * `ep_title`   — `app.rs`'s Up Next line; logs `rk=` now (2026-08-29)
+    /// * `q='`        — `search.rs`, seven sites; logs `q[Nch]` now (2026-08-29)
+    /// * the subtitle cue's text — `player/mod.rs`; logs `len=` now (2026-08-29)
+    /// * `.title` / `title}` — `metadata.rs`'s `detail:` line carried the item's own title in
+    ///   quotes on every detail open, for as long as that line has existed (found 2026-09-10,
+    ///   restructure phase 11). It logs `rk=`/`sid=` and the shape counts now.
     ///
-    /// Deliberately NOT banned: `.name` and `.title` on a server or a user. Those are household
+    /// **The gate reads the whole `log(&format!(…))` CALL, not the one line the call opens on**,
+    /// and that widening is what makes the fourth entry possible at all: the `detail:` line spells
+    /// its format string on one line and its arguments on the two below, so a line-scoped grep
+    /// could not have seen `d.title` however the needle was spelled. The two older needles are
+    /// clean under the stricter read too — widening found no new hit for either.
+    ///
+    /// Deliberately NOT banned: `.name` and `.title` on a server or a USER. Those are household
     /// identity rather than viewing content, they are genuinely load-bearing in `auth.rs`'s
     /// diagnostics, and `scrub_identities` removes them from the line at write time using the list
-    /// the session layer publishes. Two different problems, two different mechanisms.
+    /// the session layer publishes. Two different problems, two different mechanisms — so the
+    /// `.title` needle carries ONE exception, `tile.title`: a roster tile's title IS the profile's
+    /// name, which is that identity case, and it is `auth.rs`'s seven switch-diagnostic lines.
+    ///
+    /// **The exception is scoped by FILE, not by receiver name alone** (fixed 2026-09-10, phase 11
+    /// review, finding 1). It used to be a bare substring strip applied to every call in the tree —
+    /// but `ui/tile.rs` defines `pub trait Tile { fn title(&self) -> &str; … }`, the library's own
+    /// CONTENT item (implemented for `pms::PmsMovie`), whose idiomatic receiver name is also
+    /// `tile`. A future `log(&format!("… {} …", tile.title()))` over a content tile would spell the
+    /// exact exempted substring and this gate would stay silent on a real title leak. So [`BANNED`]
+    /// pairs each exception with the file it is legitimate in — today that is `auth.rs` alone, the
+    /// only file that logs a roster tile's own name — and [`banned_hits_in_call`] only strikes an
+    /// exception when the call came from that file. A new module logging `tile.title` through some
+    /// OTHER receiver is still the leak this entry exists for; only `auth.rs`'s switch diagnostics
+    /// are exempt.
     #[test]
     fn no_log_call_site_interpolates_viewing_content() {
         // Walk the source of THIS crate. `file!()` is `src/diag/scrub.rs`, so the tree root is two
         // levels up — resolved from the manifest dir so it is independent of the working directory
         // the test runner happens to have.
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let banned: &[(&str, &str)] = &[
-            ("ep_title", "the episode title — log `rk=` instead (app.rs)"),
-            (
-                "q='",
-                "the search query — log `q[{n}ch]` instead (search.rs)",
-            ),
-        ];
         let mut offences: Vec<String> = Vec::new();
         let mut files = 0usize;
         walk(&src, &mut |path: &std::path::Path, text: &str| {
@@ -906,20 +1081,8 @@ mod tests {
                 return;
             }
             files += 1;
-            for (n, line) in text.lines().enumerate() {
-                if !line.contains("log(&format!") && !line.contains("log(&*format!") {
-                    continue;
-                }
-                for (needle, why) in banned {
-                    if line.contains(needle) {
-                        offences.push(format!(
-                            "{}:{} logs {needle} — {why}\n    {}",
-                            path.display(),
-                            n + 1,
-                            line.trim()
-                        ));
-                    }
-                }
+            for (n, call) in log_calls(text) {
+                offences.extend(banned_hits_in_call(path, n, &call));
             }
         });
         assert!(
@@ -930,6 +1093,133 @@ mod tests {
             offences.is_empty(),
             "viewing content is interpolated into a log line:\n{}",
             offences.join("\n")
+        );
+    }
+
+    /// Parenthesis depth over `chars`, counting only `(`/`)` that are OUTSIDE a string or char
+    /// literal — the fix for finding 2 of the phase 11 review (2026-09-10). [`log_calls`] used to
+    /// count bare `(`/`)` with no notion of a literal at all, on the claim that an unbalanced quote
+    /// can only widen its span; a `)` inside a log call's own FORMAT STRING (a real shape in this
+    /// tree — see `a_closing_paren_inside_the_format_string_does_not_truncate_the_call_span`)
+    /// disproves that, since it can decrement the running depth to zero before the real closing
+    /// paren, truncating the span short of the argument line.
+    ///
+    /// Tracks `\`-escapes inside both a `"…"` string and a `'…'` char literal, so `"a\"b"` and
+    /// `'\''` do not mis-toggle. Deliberately does not special-case a raw string (`r#"…"#`): no
+    /// `log(&format!` call in this tree uses one (checked 2026-09-10 — re-check before relying on
+    /// this again if that changes). If one ever appears, the failure mode is the same SAFE one this
+    /// whole scanner had before the fix: an unrecognised `#`/`"` pair is just ordinary characters
+    /// here, so the span can only run long, never short. A bare `'` that does not close within a
+    /// couple of characters (a lifetime — `'a`, `'static`) is left as an ordinary character rather
+    /// than treated as opening a literal, so it cannot swallow real parens hunting for a closing
+    /// quote that will never come.
+    fn paren_depth_outside_literals(chars: &[char]) -> i32 {
+        let mut depth = 0i32;
+        let mut in_str = false;
+        let mut i = 0usize;
+        while i < chars.len() {
+            let c = chars[i];
+            if in_str {
+                match c {
+                    '\\' => i += 1, // the escaped character is never a closing quote
+                    '"' => in_str = false,
+                    _ => {}
+                }
+            } else if c == '"' {
+                in_str = true;
+            } else if c == '\'' {
+                if chars.get(i + 1) == Some(&'\\') && chars.get(i + 3) == Some(&'\'') {
+                    i += 3; // `'\X'` — land on the closing quote
+                } else if chars.get(i + 2) == Some(&'\'') {
+                    i += 2; // `'X'` — land on the closing quote
+                }
+                // else: a lifetime or stray apostrophe — leave it as an ordinary character
+            } else {
+                match c {
+                    '(' => depth += 1,
+                    ')' => depth -= 1,
+                    _ => {}
+                }
+            }
+            i += 1;
+        }
+        depth
+    }
+
+    /// Every `log(&format!(…))` / `log(&*format!(…))` call in one source file, as
+    /// `(1-based line the call opens on, the WHOLE call flattened onto one line)`.
+    ///
+    /// The span ends where the parentheses opened by `log(` balance again, counted by
+    /// [`paren_depth_outside_literals`] so a `(`/`)` inside a string or char literal cannot close
+    /// (or falsely widen) it. A span that never balances is truncated at the end of the file.
+    fn log_calls(text: &str) -> Vec<(usize, String)> {
+        let lines: Vec<&str> = text.lines().collect();
+        let mut out = Vec::new();
+        let mut i = 0usize;
+        while i < lines.len() {
+            let Some(at) = lines[i]
+                .find("log(&format!")
+                .or_else(|| lines[i].find("log(&*format!"))
+            else {
+                i += 1;
+                continue;
+            };
+            // start at the `(` of `log(`, so the depth walk below opens on it
+            let start = at + "log".len();
+            let mut buf: Vec<char> = lines[i][start..].chars().collect();
+            buf.push(' ');
+            let mut j = i;
+            let mut depth = paren_depth_outside_literals(&buf);
+            while depth > 0 && j + 1 < lines.len() {
+                j += 1;
+                buf.extend(lines[j].chars());
+                buf.push(' ');
+                depth = paren_depth_outside_literals(&buf);
+            }
+            out.push((i + 1, buf.into_iter().collect()));
+            i = j + 1;
+        }
+        out
+    }
+
+    /// The span walker itself, on a shape this tree has and a line-scoped grep cannot see.
+    #[test]
+    fn a_log_call_is_read_whole_even_when_its_arguments_are_lines_below() {
+        let src = "    crate::log(&format!(\n        \"detail: rk={} '{}'\",\n        d.rk, d.title\n    ));\n    let x = 1;\n";
+        let calls = log_calls(src);
+        assert_eq!(calls.len(), 1, "one call: {calls:?}");
+        assert_eq!(calls[0].0, 1, "reported at the line the call OPENS on");
+        assert!(calls[0].1.contains("d.title"), "the arguments are in the span: {}", calls[0].1);
+        assert!(!calls[0].1.contains("let x"), "the span stops at the closing paren: {}", calls[0].1);
+    }
+
+    /// **Finding 2, phase 11 review (2026-09-10).** The doc above `log_calls` claimed an unbalanced
+    /// quote can only WIDEN the span, never shorten it — true for a quote with no `(`/`)` inside,
+    /// false the moment one appears. A `)` inside the FORMAT STRING on the call's own opening line
+    /// decrements the naive counter early: two closing parens with no matching opens are enough to
+    /// walk the running depth (2, after `log(` + `format!(`) down to 0 before the argument line —
+    /// where `d.title` actually sits — is ever appended. That is exactly the multi-line shape
+    /// `no_log_call_site_interpolates_viewing_content`'s `detail:` entry names as the reason the
+    /// gate reads the whole call rather than one line; a `)` in the format string defeats the same
+    /// widening from the opposite direction.
+    ///
+    /// Red before the fix: the format string here contains `))` with no matching opens, so the old
+    /// depth walk reached 0 on the string's own line and truncated the span there — `d.title` was
+    /// never appended and this assertion failed.
+    #[test]
+    fn a_closing_paren_inside_the_format_string_does_not_truncate_the_call_span() {
+        let src = "    crate::log(&format!(\n        \"detail: rk={} )) still just the string\",\n        d.rk, d.title\n    ));\n    let x = 1;\n";
+        let calls = log_calls(src);
+        assert_eq!(calls.len(), 1, "one call: {calls:?}");
+        assert!(
+            calls[0].1.contains("d.title"),
+            "a `)` inside the format string must not truncate the span before the argument line: {}",
+            calls[0].1
+        );
+        assert!(
+            !calls[0].1.contains("let x"),
+            "the span still stops at the real closing paren: {}",
+            calls[0].1
         );
     }
 

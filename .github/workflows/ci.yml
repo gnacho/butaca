@@ -102,6 +102,20 @@ jobs:
           cargo "+$RUST_NIGHTLY" check --lib --features hostsim
           cargo "+$RUST_NIGHTLY" check --lib --no-default-features --features hostsim
 
+      - name: Type-check the Cloud Lab feature set
+        # `lab-diagnostics` is the one feature that is NOT in the default set (which is what makes
+        # it unshippable by forgetting a flag), so no step above compiles a line of `lab/` or of
+        # `ui/lab_toast.rs`. Until 2026-09-10 nothing anywhere did, and the configuration had been
+        # broken since restructure phase 9 moved `player::diag` onto the playback session — found
+        # by writing this gate, not by a lab hour, which is where it would otherwise have surfaced:
+        # rented, remote, with no console and no way to rebuild.
+        #
+        # `--tests` and not a bare `--lib`: a feature-gated module's TEST code is the half nothing
+        # else here can see, and an orphaned `#[test]` attribute had been sitting in
+        # `lab/snapshot.rs` for exactly that reason. It needs no `pkg/lab.json` — that file is
+        # `make LAB=1`'s requirement (a live session secret), not the compiler's.
+        run: cd rust-modules && cargo "+$RUST_NIGHTLY" check --lib --tests --features lab-diagnostics
+
       - name: Report suite size
         # CLAUDE.md's stated test count has gone stale twice. Print the real number rather than
         # trusting a doc: the count is a fact the suite can produce about itself.
@@ -161,7 +175,7 @@ jobs:
         # DELIBERATELY the developer id. This artifact is a DEV build — the whole point of a PR
         # package is that you can sideload it with the `/tmp` trigger surface on — and
         # `release-guard` refuses a dev build on the id users install, correctly. So the artifact
-        # below is `com.beb.plxnative.debug_*.ipk` and installs BESIDE anyone's real one rather
+        # below is `com.butaca.debug_*.ipk` and installs BESIDE anyone's real one rather
         # than over it. The release job is the only place `FLAVOR=stable` belongs (release.yml).
         # Named explicitly rather than inherited, so this is a decision on the page instead of a
         # default that moves if the Makefile's does.
@@ -232,6 +246,10 @@ jobs:
         #
         # It grades whether the app STARTS. It says nothing about playback, which above 4.10.0 has
         # never been observed on hardware — see docs/webos5-port.md §4.
+        #
+        # pkg/plxnative-storage ships alongside the main binary as of 0.7.0 (the LS2 storage
+        # helper) and gets graded the same way — a helper that fails to exec is as invisible to
+        # every other check as the main binary would be.
         run: |
           set -euo pipefail
           {
@@ -240,6 +258,15 @@ jobs:
             echo '```'
             ./tools/fwcompat.py --db /usr/share/webosbrew/compat-checker/data \
               --min-release 4.4.2 pkg/plxnative
+            ./tools/fwcompat.py --db /usr/share/webosbrew/compat-checker/data \
+              --min-release 4.4.2 pkg/plxnative-storage
+            # The dlopen'd bundled FFmpeg: nothing above resolves its own DT_NEEDED (#235's
+            # libz.so.1). Its sibling libraries ship in pkg/, so --shipped takes them off the list.
+            for lib in pkg/lib*-plx.so.*; do
+              case "$lib" in *.link.*) continue ;; esac   # the link-evidence sidecars
+              ./tools/fwcompat.py --db /usr/share/webosbrew/compat-checker/data \
+                --min-release 4.4.2 --shipped pkg "$lib"
+            done
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 

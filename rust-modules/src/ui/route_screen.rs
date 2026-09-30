@@ -18,8 +18,18 @@
 //!
 //! **The rule for `None` is "BACK does not go anywhere inside the app", not "the Settings root".**
 //! Three routes qualify today and a hard count here would be the fourth transcription of a number
-//! this project keeps letting rot — take the census with
-//! `git grep -A2 'draw_narrative(' -- 'rust-modules/src/ui/*.rs'`. They are the Settings modal
+//! this project keeps letting rot — take the census by CALL SITE: a screen composed through
+//! `table_screen.rs` names its crumb in `Header::new(layout, None, …)` and the literal
+//! `draw_narrative` call sits once, generically, inside `Header::paint`, so
+//! `git grep -nE 'draw_narrative\(|Header::new\(' -- 'rust-modules/src/ui/*.rs' 'rust-modules/src/screens/*.rs'`
+//! with the `None` crumbs read off each site is the census — a call-site grep rather than a
+//! transcribed count exactly so a file move cannot make it stale silently, which already happened
+//! once: phase 5b moved every real screen of this family out of `ui/` and into `screens/`, and a
+//! pathspec of `'rust-modules/src/ui/*.rs'` alone now matches neither of the family's `Header::new`
+//! sites at all (grepping the method alone, even over both directories, now finds only ONE of the
+//! three — `ui/login.rs`'s QR sign-in, the one screen here that never joined the family's
+//! `Header`/`TableScreen` — because 5b moved the FIRST first-run consent stage's `None` crumb
+//! behind `Header::new` too, beside the Settings root's since 5a). They are the Settings modal
 //! (BACK leaves the family), the FIRST first-run consent question (sign-in is behind it and
 //! cannot be undone) and the QR sign-in itself (there is no app behind it yet).
 //!
@@ -67,15 +77,23 @@
 //!    [`crate::ui::table::TableView::hit_row`]); a click activates whatever is parked; a click that
 //!    parks nothing does nothing.
 
+//! **Long translated action labels reflow as a column.** In that shape UP/DOWN move between
+//! the two answers, RIGHT reaches the content column, and UP above the first action leaves the
+//! band. First-run consent uses contextual answer labels in one row and a measured reading
+//! column. Exceptional overflow scrolls on UP/DOWN while the selected answer retains focus.
+//! The paragraph is never shortened to make translated actions fit.
+
 use crate::ui::consts::SAFE;
 use crate::ui::icons::{self, Icon};
+use crate::ui::machine::Measure;
 use crate::ui::text_view::TextView;
-use crate::ui::widgets::{AmbientWash, ControlPalette};
+use crate::ui::underlay::{FrameLatch, Grade, Role, UnderlayField};
+use crate::ui::widgets::ControlPalette;
 use crate::ui::{theme, Painter, Rect, Spring};
 
 /// The left column is the same editorial measure as the Home hero.  Reusing that named measure is
 /// what makes first-run routes and Settings feel like one family instead of two similar layouts.
-const NARRATIVE_W: f32 = crate::ui::home::HERO_COL_W;
+const NARRATIVE_W: f32 = crate::ui::landing_hero::COL_W;
 /// Two visually separate columns need a region gap, not a row gap.  Expressed entirely on the
 /// spacing ladder so a retune of that ladder moves every route together.
 const COLUMN_GAP: f32 = theme::space::XL * 2.0 + theme::space::LG + theme::space::SM;
@@ -108,106 +126,126 @@ const PUSH_K: f32 = 200.0;
 const PARENT_TRAVEL: f32 = 0.35;
 const CHILD_LEAD: f32 = 0.22;
 
-/// Density of the Settings-family ambient ground.
-///
-/// The source is already an UltraBlur envelope (or four broad framebuffer means), so increasing
-/// this number does not make it *more blurred*; it only lets more source light through.  Reusing
-/// the shared ground weight keeps bright green/yellow artwork below the section-label contrast
-/// floor while preserving its hue.
-const GROUND_W: f32 = AmbientWash::GROUND_W;
-
 /// The fixed ground under a Settings-family route.
 ///
-/// It deliberately stores a four-corner colour envelope rather than a downsampled screenshot.
-/// That is effectively a blur with a support wider than the screen: title glyphs, faces and poster
-/// edges cannot survive it, but the host artwork's light still does.  Once latched it never samples
-/// again; nested push/back transitions therefore move content over one stationary ground.
-#[derive(Clone, Copy)]
+/// **PR2 stage B (2026-09-19):** it holds an [`UnderlayField`] rather than its own four-corner
+/// [`AmbientWash`](crate::ui::widgets::AmbientWash) envelope, so it owns a GL texture and is no
+/// longer `Copy` — every owner already held it by field (a screen struct, exactly as before), so
+/// nothing but this type's own derive had to change. [`UnderlayField::latch_from_corners`] grades a
+/// four-corner source through the SAME `AmbientWash::keyed_one` a wash used to, so a route drawn
+/// from a seed or from the authored fallback reads the same colour it always did — the migration is
+/// a change of SHAPE, not of palette (see `ui::underlay`'s module doc). [`Self::draw_host`] is the
+/// one path that gets MORE than a corner envelope now: it latches from the rendered frame itself
+/// (120 cells, spatially faithful — title glyphs, faces and poster edges still cannot survive the
+/// reduction, exactly as a four-corner wash's wider blur could not, but the light that does is no
+/// longer four degrees of freedom) and only falls back to a corner envelope when the frame is not a
+/// readable source this frame. Once latched a ground never samples again; nested push/back
+/// transitions therefore move content over one stationary ground.
 pub(crate) struct RouteGround {
-    wash: AmbientWash,
-    key: [f32; 3],
-    latched: bool,
+    field: UnderlayField,
 }
+
+/// **The narrative title's line pitch.** `--size-hero`/**1.05**, which is the design system's own
+/// number (`components/panels/RouteScreen.jsx`: `font: var(--font-weight-bold) var(--size-hero)/1.05`)
+/// and NOT [`TextView`]'s derived default of `sz * 1.32`.
+///
+/// The default is a READING pitch — it is right for the copy under this title and for a synopsis,
+/// and wrong for one 72px line of display type, where 1.32 puts 95px of box under a 52px cap. On a
+/// one-line title every pixel of that surplus becomes air between the title and the copy, because
+/// [`RouteLayout::draw_narrative`] stacks the copy at `title_h + space::MD`: the family's stated
+/// 24px gap was arriving as ~43 (owner report on the Filmography route, 2026-09-06, which is simply
+/// where it was noticed — every route in this family drew it). On a WRAPPED title it is also the
+/// pitch between the two lines, and the same argument applies there: display type sets tight.
+const TITLE_LEADING: f32 = theme::size::HERO as f32 * 1.05;
 
 impl RouteGround {
     pub(crate) const fn new() -> Self {
         Self {
-            wash: AmbientWash::flat(theme::SURFACE_APP),
-            key: [
-                theme::SURFACE_APP[0],
-                theme::SURFACE_APP[1],
-                theme::SURFACE_APP[2],
-            ],
-            latched: false,
+            field: UnderlayField::new(),
         }
     }
 
     pub(crate) fn reset(&mut self) {
-        self.wash.jump([theme::SURFACE_APP; 4]);
-        self.key = [
-            theme::SURFACE_APP[0],
-            theme::SURFACE_APP[1],
-            theme::SURFACE_APP[2],
-        ];
-        self.latched = false;
+        self.field.reset();
     }
 
-    fn latch(&mut self, corners: [[f32; 3]; 4], key: [f32; 3]) {
-        if self.latched {
-            return;
-        }
-        self.wash.jump(AmbientWash::keyed(corners, [GROUND_W; 4]));
-        self.key = key;
-        self.latched = true;
+    /// `theme::ROUTE_GROUND_FALLBACK`, dropping its alpha column — the corners every authored
+    /// atmosphere below reaches for when it has no artwork to key from: the pre-Home fallback
+    /// ([`Self::for_home`]'s `None` seed, [`Self::draw_default`]) and, since PR2 stage B,
+    /// [`Self::draw_host`]'s own answer when the live frame is not a readable source this frame.
+    fn fallback_corners() -> [[f32; 3]; 4] {
+        theme::ROUTE_GROUND_FALLBACK.map(|c| [c[0], c[1], c[2]])
     }
 
-    fn latch_target(&mut self, target: [[f32; 4]; 4]) {
-        if self.latched {
-            return;
+    /// A pre-content page receives a numeric atmosphere from its application owner at mount.
+    /// Neither construction nor drawing this UI value reads a catalog or session file.
+    ///
+    /// A real seed is ARTWORK — the future Home's initial hero — so it is graded exactly as a live
+    /// frame would be ([`Grade::Ground`]: capped and leaned toward the surface). The authored
+    /// fallback is not artwork, it IS the finished colour ([`Grade::Dim`], the identity grade) —
+    /// see `theme::ROUTE_GROUND_FALLBACK`'s own doc for why grading it again would be wrong.
+    pub(crate) fn for_home(seed: Option<[[f32; 3]; 4]>) -> Self {
+        let mut ground = Self::new();
+        match seed {
+            Some(blur) => ground.field.latch_from_corners(blur, Grade::Ground),
+            None => ground.field.latch_from_corners(Self::fallback_corners(), Grade::Dim),
         }
-        self.wash.jump(target);
-        self.key = mean_target_key(target);
-        self.latched = true;
+        ground
     }
 
     /// Freeze the page that was already drawn this frame. Its one caller is the Settings modal,
     /// which opens over Home; first-run consent takes [`Self::draw_home`] instead, because since
     /// the consent question moved ahead of the profile picker it usually has no rendered host to
     /// sample at all.
-    pub(crate) fn draw_host(&mut self, p: Painter) {
-        if !self.latched {
-            let sample = crate::gfx::sample_modal_ambient();
-            self.latch(sample.corners, sample.key);
+    ///
+    /// `latch_from_frame` refuses on `gfx::field_kick`'s list (§9's video-plane door among them —
+    /// see [`crate::gfx::field_kick`]'s doc): whenever it answers [`FrameLatch::Refused`] this falls
+    /// back to the same authored atmosphere [`Self::draw_default`] uses when it has no host at all,
+    /// graded [`Grade::Ground`] because it is standing in for a live sample rather than being drawn
+    /// as itself.
+    ///
+    /// Split from the draw call below (`latch_host` / `draw_host`) so a host test can prove the
+    /// live-frame-fails-so-fall-back-to-corners decision without ever reaching `field.draw`'s real
+    /// GL: a host test binary links `OpenGL.framework` but never creates a context, so any draw that
+    /// is not gated behind a `PROG == 0`/`tex == 0` check (`field.draw`'s `Role::Ground` arm is not,
+    /// once latched, is not either — see [`UnderlayField::draw`]) is an immediate SIGSEGV.
+    ///
+    /// The read never stalls the frame ([`UnderlayField::latch_from_frame`]): it lands a frame or
+    /// two into the Settings fade, and until it does the ground draws the flat app surface an
+    /// unlatched field falls back to, at the bottom of the appear ramp. Read synchronously it was
+    /// the 50 ms `surf` span of the Settings open frame on the television (2026-09-19), and 21 ms of
+    /// the frame after once deferred only while invisible. A pending read is not a refusal: the
+    /// corner fallback is for a frame with no honest source, and it latches for the life of the
+    /// ground.
+    fn latch_host(&mut self) {
+        // The host snapshot is the undimmed page when there is one (Settings caches its host), and
+        // it saves the chain its own full-screen copy; a route with no snapshot reads the frame.
+        let src = crate::ui::popover::host::page_tex();
+        if self.field.latch_from_frame(Grade::Ground, src) == FrameLatch::Refused {
+            self.field.latch_from_corners(Self::fallback_corners(), Grade::Ground);
         }
-        self.wash.draw(p, Rect::FULL);
     }
 
-    /// Seed a pre-Home route from the same hero metadata Home will use when it appears. Shared
-    /// Sources has no rendered host to sample yet, so this is the semantic equivalent of freezing
-    /// Home after an infinitely broad blur.
-    ///
-    /// **Three tiers, in order, and each one only reachable when the one before it has nothing.**
-    /// (1) Home's OWN hero, when this boot has already fetched one — the ordinary case for Settings
-    /// and Legal, opened well after Home exists. (2) Failing that, the LAST hero envelope this
-    /// television ever showed (`plex::session::last_hero`) — the case that motivated this: since
-    /// the device consent question moved ahead of the profile picker, its usual host is the picker
-    /// with no hub fetched yet, so tier 1 is empty on almost every ordinary boot, not only a fresh
-    /// device's first one. (3) Only a genuinely fresh television — signed in for the first time,
-    /// never having rendered a hero at all — falls all the way to the design system's authored
-    /// atmosphere (`theme::ROUTE_GROUND_FALLBACK`). Recording the seed for tier 2 is this
-    /// function's other job whenever tier 1 succeeds — see `plex::session::record_last_hero`.
-    pub(crate) fn draw_home(&mut self, p: Painter) {
-        if !self.latched {
-            if let Some(hero) = crate::ui::home::hero_item().filter(|m| m.has_blur) {
-                self.latch(hero.blur, mean_key(hero.blur));
-                crate::plex::session::record_last_hero(hero.blur);
-            } else if let Some(blur) = crate::plex::session::last_hero() {
-                self.latch(blur, mean_key(blur));
-            } else {
-                self.latch_target(theme::ROUTE_GROUND_FALLBACK);
-            }
+    pub(crate) fn draw_host(&mut self, p: Painter) {
+        // `ModalStack::draw_scrims_on`'s rule, for its reason — see [`ground_reads_host`].
+        if ground_reads_host(p.opacity(), crate::gfx::snapshot_captured_this_frame()) {
+            self.latch_host();
         }
-        self.wash.draw(p, Rect::FULL);
+        self.field.draw(p, Rect::FULL, Role::Ground, 1.0);
+    }
+
+    /// Draw the pre-Home atmosphere captured at construction. Ordinary Settings samples its
+    /// rendered host through draw_host instead. No application reads or writes happen in draw.
+    pub(crate) fn draw_home(&mut self, p: Painter) {
+        self.draw_default(p);
+    }
+
+    /// The latch half of [`Self::draw_default`] — see [`Self::latch_host`] for why this is split
+    /// out from the draw call rather than inlined.
+    fn latch_default(&mut self) {
+        if !self.field.is_latched() {
+            self.field.latch_from_corners(Self::fallback_corners(), Grade::Dim);
+        }
     }
 
     /// Draw a pre-content route on the product's authored fallback atmosphere.
@@ -216,36 +254,50 @@ impl RouteGround {
     /// belong to the same route family, so they take the same broad graphite/amber envelope as an
     /// artwork-less first-run screen instead of inventing another flat background locally.
     pub(crate) fn draw_default(&mut self, p: Painter) {
-        if !self.latched {
-            self.latch_target(theme::ROUTE_GROUND_FALLBACK);
+        self.latch_default();
+        self.field.draw(p, Rect::FULL, Role::Ground, 1.0);
+    }
+
+    /// **The ground's own colour at one screen point.** Every `draw_*` above paints the field over
+    /// [`Rect::FULL`], so that is the rect the sample is taken against.
+    ///
+    /// It exists for an EDGE FADE. A route that scissor-clips a scrolling strip cuts it at a hard
+    /// line; laying this colour over the cut at a falling alpha dissolves it instead. The constant
+    /// a caller would otherwise guess cannot work here — the ground is keyed to the host page's
+    /// artwork, so it is a different colour on every person's page. Before the first latch this is
+    /// `theme::SURFACE_APP` everywhere, the same flat answer an unlatched field's own [`Role::Ground`]
+    /// draw falls back to — [`UnderlayField::sample`] has no such guard of its own (an unlatched
+    /// field's cells are zero, not the surface), so it belongs here rather than being forwarded raw.
+    pub(crate) fn sample(&self, x: f32, y: f32) -> [f32; 3] {
+        if self.field.is_latched() {
+            self.field.sample(x, y)
+        } else {
+            SURFACE_APP_RGB
         }
-        self.wash.draw(p, Rect::FULL);
     }
 
     pub(crate) fn palette(&self) -> ControlPalette {
-        ControlPalette::ambient(self.key)
+        ControlPalette::ambient(if self.field.is_latched() {
+            self.field.key()
+        } else {
+            SURFACE_APP_RGB
+        })
     }
 
     pub(crate) fn is_latched(&self) -> bool {
-        self.latched
+        self.field.is_latched()
     }
 }
 
-fn mean_key(corners: [[f32; 3]; 4]) -> [f32; 3] {
-    let mut key = [0.0; 3];
-    for corner in corners {
-        for channel in 0..3 {
-            key[channel] += corner[channel] * 0.25;
-        }
-    }
-    key
-}
+const SURFACE_APP_RGB: [f32; 3] = [
+    theme::SURFACE_APP[0],
+    theme::SURFACE_APP[1],
+    theme::SURFACE_APP[2],
+];
 
-fn mean_target_key(corners: [[f32; 4]; 4]) -> [f32; 3] {
-    mean_key(corners.map(|c| [c[0], c[1], c[2]]))
-}
-
-/// The one nested-route transition used by Settings documents.
+/// The one nested-route transition of the Settings family: the surface's page push
+/// (`screens::settings::RouteSurface`) and a page's own in-place submenu (the preference
+/// pickers, `screens::preferences`) both drive this, so every Settings submenu slides the same.
 ///
 /// Only content moves: the host ground is drawn outside these painters and therefore remains
 /// fixed. The parent exits left while fading; the child leads from the right while appearing.
@@ -261,6 +313,14 @@ impl RoutePush {
         }
     }
 
+    /// A push parked mid-flight at `t` — for tests that grade one frame of the slide.
+    #[cfg(test)]
+    pub(crate) const fn at(t: f32) -> Self {
+        Self {
+            progress: Spring::at(t),
+        }
+    }
+
     pub(crate) fn jump(&mut self, open: bool) {
         self.progress.jump(if open { 1.0 } else { 0.0 });
     }
@@ -271,6 +331,39 @@ impl RoutePush {
 
     pub(crate) fn amount(&self) -> f32 {
         self.progress.pos.clamp(0.0, 1.0)
+    }
+
+    /// **At rest at `open`'s endpoint** — position AND velocity, the integrator's own stop rule.
+    /// Stricter than [`settled`](Self::settled), which is the pointer's positional guard.
+    pub(crate) fn resting(&self, open: bool) -> bool {
+        let target = if open { 1.0 } else { 0.0 };
+        (self.progress.pos - target).abs() < 0.001 && self.progress.vel.abs() < 0.02
+    }
+
+    /// Advance toward `open` on the frame clock, reporting motion to the present gate, and snap
+    /// exactly onto the endpoint once [`resting`](Self::resting) there. A no-op at rest.
+    pub(crate) fn tick(
+        &mut self,
+        open: bool,
+        t: crate::ui::machine::Tick,
+        present: &mut crate::ui::machine::PresentHandle<'_>,
+    ) {
+        if self.resting(open) {
+            return;
+        }
+        let target = if open { 1.0 } else { 0.0 };
+        crate::ui::motion::spring(
+            &mut self.progress.pos,
+            &mut self.progress.vel,
+            target,
+            PUSH_K,
+            t,
+            present,
+        );
+        if self.resting(open) {
+            self.progress.pos = target;
+            self.progress.vel = 0.0;
+        }
     }
 
     /// Seed this push's spring — position AND velocity, not just [`amount`](Self::amount)'s
@@ -647,9 +740,26 @@ pub(crate) struct RouteLayout {
 
 impl RouteLayout {
     pub(crate) fn screen() -> Self {
+        Self::screen_with_copy_w(NARRATIVE_W)
+    }
+
+    /// The same two columns with the narrative one at a **stated measure** — `--route-copy-w`, the
+    /// one number in this layout the design system lets a route retune.
+    ///
+    /// The default is the Home hero's editorial measure (660), which is right for a screen whose
+    /// COPY is the screen: Settings' narrative column carries the sentence that explains the list
+    /// beside it. A route whose LIST is the screen can prefer a narrower measure: Filmography
+    /// starts at 480, then `screen_for_title` accommodates its translated title, reclaiming space (`Person Screen.dc.html`, 2026-09-06:
+    /// "titles were truncating while half the frame held a static heading").
+    ///
+    /// **The REGION GAP does not move with it.** `COLUMN_GAP` is what makes the two columns read as
+    /// related rather than as two screens side by side, and it is the one number here that belongs
+    /// to every route — so a retune of the copy column slides the content column and resizes it,
+    /// and changes nothing else.
+    pub(crate) fn screen_with_copy_w(copy_w: f32) -> Self {
         let top = SAFE.y + TOP_INSET;
         let bottom = SAFE.y + SAFE.h;
-        let narrative = Rect::new(SAFE.x, top, NARRATIVE_W, bottom - top);
+        let narrative = Rect::new(SAFE.x, top, copy_w, bottom - top);
         let content_x = narrative.x + narrative.w + COLUMN_GAP;
         let content = Rect::new(content_x, top, SAFE.x + SAFE.w - content_x, bottom - top);
         let action = Rect::new(narrative.x, bottom - ACTION_H, narrative.w, ACTION_H);
@@ -657,6 +767,47 @@ impl RouteLayout {
             narrative,
             content,
             action,
+        }
+    }
+
+    /// Allocate enough narrative width for an unbreakable title word at HERO size, while
+    /// preserving the caller's minimum content width. Short titles keep the preferred measure.
+    /// This is shared layout: tabs, rows, focus and paint must all consume the returned columns.
+    pub(crate) fn screen_for_title(
+        preferred_copy_w: f32,
+        min_content_w: f32,
+        title: &str,
+        measure: &dyn Measure,
+    ) -> Self {
+        let longest_word = title
+            .split(|c: char| c.is_whitespace() && c != '\u{a0}')
+            .map(|word| measure.width_str(word, theme::size::HERO, true))
+            .fold(0.0f32, f32::max);
+        let max_copy_w = (SAFE.w - COLUMN_GAP - min_content_w).max(0.0);
+        // Keep a short feature name on one line when possible, including expansion markers.
+        // Longer multiword titles use the bounded column and the shared title's wrapping policy.
+        let title_width = measure.width_str(title, theme::size::HERO, true);
+        Self::screen_with_copy_w(preferred_copy_w.max(longest_word).max(title_width).ceil().min(max_copy_w))
+    }
+
+    /// Keep a complete disclosure above its peer actions, reclaiming unused narrative width
+    /// before requiring scrolling. The other column keeps its measured minimum width. `fits`
+    /// uses the same title/body flow as drawing; the returned columns serve focus and paint.
+    pub(crate) fn screen_for_reading(
+        min_action_w: f32,
+        min_content_w: f32,
+        fits: impl Fn(Self) -> bool,
+    ) -> Self {
+        let max_copy_w = (SAFE.w - COLUMN_GAP - min_content_w).max(NARRATIVE_W);
+        let mut width = NARRATIVE_W.max(min_action_w).min(max_copy_w);
+        loop {
+            let mut layout = Self::screen_with_copy_w(width);
+            // The answer row can use the inter-column whitespace without narrowing either
+            // reading column. Keep one control gap before the related-link column.
+            let action_limit = layout.content.x - layout.action.x - crate::ui::widgets::CONTROL_GAP;
+            layout.action.w = layout.action.w.max(min_action_w.min(action_limit));
+            if fits(layout) || width >= max_copy_w { return layout; }
+            width = (width + theme::space::MD).min(max_copy_w);
         }
     }
 
@@ -706,11 +857,12 @@ impl RouteLayout {
         )
     }
 
-    /// Place two controls on one action row, as ONE GROUP.
+    /// Place two peer controls in a row when they fit, otherwise in a bottom-anchored column.
     ///
     /// Their relationship belongs here: the leading one starts on the shared margin, the trailing
-    /// one follows by [`widgets::CONTROL_GAP`], and both inherit the action band's Y/height. A
-    /// screen supplies measured widths, never a second pair of coordinates.
+    /// one follows by [`widgets::CONTROL_GAP`]. When the pair needs a column, that same gap
+    /// separates them vertically and the trailing control retains the bottom anchor. Both retain
+    /// the normal control height. A screen supplies measured widths, never private coordinates.
     ///
     /// **Its one caller is first-run consent's two answers, and they are EQUALS** — no primary,
     /// no secondary, no danger face. This doc used to describe a primary beside a BACK
@@ -720,15 +872,18 @@ impl RouteLayout {
     /// a separate hint, and two peer answers at that distance read as two unrelated controls
     /// sharing a row rather than one question's two faces.
     pub(crate) fn action_pair(self, leading_w: f32, trailing_w: f32) -> (Rect, Rect) {
-        let leading = Rect::new(self.action.x, self.action.y, leading_w, self.action.h);
-        let trailing = Rect::new(
-            leading.x + leading.w + crate::ui::widgets::CONTROL_GAP,
-            self.action.y,
-            trailing_w,
-            self.action.h,
-        );
-        debug_assert!(trailing.x + trailing.w <= self.action.x + self.action.w);
-        (leading, trailing)
+        let gap = crate::ui::widgets::CONTROL_GAP;
+        if leading_w + gap + trailing_w <= self.action.w {
+            let leading = Rect::new(self.action.x, self.action.y, leading_w, self.action.h);
+            let trailing = Rect::new(leading.x + leading.w + gap, self.action.y, trailing_w, self.action.h);
+            (leading, trailing)
+        } else {
+            // Preserve label size and equal treatment. The final control retains the bottom
+            // anchor; the first moves up and the narrative reserves the resulting full extent.
+            let leading = Rect::new(self.action.x, self.action.y - self.action.h - gap, leading_w, self.action.h);
+            let trailing = Rect::new(self.action.x, self.action.y, trailing_w, self.action.h);
+            (leading, trailing)
+        }
     }
 
     /// Draw the return crumb — `‹ <where BACK goes>` — in the band whose top is at `top`.
@@ -751,7 +906,17 @@ impl RouteLayout {
         }
     }
 
-    fn draw_crumb(self, p: Painter, top: f32, back_to: &str) {
+    /// The available prose region after the complete title and before the actual action group.
+    /// A scrolling disclosure uses exactly the same title flow as an ordinary route header.
+    pub(crate) fn narrative_copy_frame(self, has_crumb: bool, title: &str,
+        actions_top: f32, measure: &dyn Measure) -> Rect {
+        let title_h = Self::narrative_title(title).with_measure(measure).measure_h(self.narrative.w);
+        let top = self.narrative_top(has_crumb) + title_h + theme::space::MD;
+        Rect::new(self.narrative.x, top, self.narrative.w,
+            (actions_top - theme::space::MD - top).max(0.0))
+    }
+
+    fn draw_crumb(self, p: Painter, top: f32, back_to: &str, measure: &dyn Measure) {
         let h = CRUMB_BAND;
         let cy = top + h * 0.5;
         icons::draw(
@@ -767,10 +932,26 @@ impl RouteLayout {
         );
         let (_, ink_r) = icons::ink_x(Icon::ChevronLeft);
         let x = self.narrative.x + CRUMB_MARK * ink_r + theme::space::XS;
-        let ty = crumb_label_top(cy, crate::text::cap_h(theme::size::CAPTION, 0));
+        let ty = crumb_label_top(cy, measure.cap_h(theme::size::CAPTION));
         TextView::new(back_to, theme::size::CAPTION, theme::TEXT_TERTIARY)
             .max_lines(1)
             .draw(p, Rect::new(x, ty, self.narrative.x + self.narrative.w - x, h));
+    }
+
+    /// **The narrative title, as the view [`draw_narrative`] actually draws** — its rung, its
+    /// weight, its wrap and its [`TITLE_LEADING`] line pitch, in one place a host test can call.
+    ///
+    /// It is split out for exactly that reason and the reason is a lesson: the first test for the
+    /// leading correction asserted `TITLE_LEADING == HERO * 1.05` and nothing else, so deleting
+    /// `.leading(TITLE_LEADING)` from the builder below — reverting the whole fix, putting the copy
+    /// 19.4px back down on all eight callers of this function — left it green. A test that grades a
+    /// constant grades the constant. Building the view here lets it grade the thing that is drawn.
+    /// App-owned titles and questions wrap completely; following content uses their measured height.
+    pub(crate) fn narrative_title(title: &str) -> TextView<'_> {
+        TextView::new(title, theme::size::HERO, theme::TEXT_HEADING)
+            .bold()
+            .break_long_words()
+            .leading(TITLE_LEADING)
     }
 
     /// Draw a measured crumb→title→copy flow.  Each block begins after the previous one's actual
@@ -788,62 +969,22 @@ impl RouteLayout {
         title: &str,
         copy: &str,
         copy_size: std::os::raw::c_int,
-    ) {
-        self.draw_narrative_with_note(p, back_to, title, None, copy, copy_size);
-    }
-
-    /// [`Self::draw_narrative`], with one optional block inserted between the heading and the
-    /// body: a short explanatory NOTE, in `theme::TEXT_SECONDARY` at the rung below the body's
-    /// own, that pushes the body down by exactly its own measured height plus one `space::SM` gap
-    /// — never a fixed offset, so a note of any length still leaves the body's own text
-    /// untouched by it. `note` is `None` on every ordinary route; issue #75's consent re-ask is
-    /// its first caller.
-    pub(crate) fn draw_narrative_with_note(
-        self,
-        p: Painter,
-        back_to: Option<&str>,
-        title: &str,
-        note: Option<&str>,
-        copy: &str,
-        copy_size: std::os::raw::c_int,
+        measure: &dyn Measure,
     ) {
         let top = self.narrative_top(back_to.is_some());
         if let Some(back_to) = back_to {
-            self.draw_crumb(p, self.narrative.y, back_to);
+            self.draw_crumb(p, self.narrative.y, back_to, measure);
         }
 
-        let title = TextView::new(title, theme::size::HERO, theme::TEXT_HEADING)
-            .bold()
-            .max_lines(2);
+        let title = Self::narrative_title(title);
         let title_h = title.measure_h(self.narrative.w);
         title.draw(p, Rect::new(self.narrative.x, top, self.narrative.w, title_h));
 
-        let mut copy_top = top + title_h + theme::space::MD;
-        if let Some(note) = note {
-            let note_size = theme::size::LABEL;
-            let note_view = TextView::new(note, note_size, theme::TEXT_SECONDARY)
-                .leading(note_size as f32 + theme::space::XS)
-                .max_lines(3);
-            let note_h = note_view.measure_h(self.narrative.w);
-            note_view.draw(
-                p,
-                Rect::new(self.narrative.x, copy_top, self.narrative.w, note_h),
-            );
-            copy_top += note_h + theme::space::SM;
-        }
+        let copy_top = top + title_h + theme::space::MD;
         let copy_bottom = self.action.y - theme::space::XL;
-        // The cap must come from the room actually LEFT, not a fixed count: `TextView::draw`
-        // paints every line `max_lines` allows regardless of the frame height it is handed (it has
-        // no clip — see its module doc), so a fixed `12` overruns whenever something above the body
-        // (a note, a crumb) has already spent part of that vertical budget. 12 stays the CEILING —
-        // an ordinary note-less route never had more room than that to begin with — but a stage
-        // that also draws a note gets fewer lines rather than a body that runs past the action row.
-        let copy_leading = copy_size as f32 + theme::space::XS;
-        let room_lines = ((copy_bottom - copy_top).max(0.0) / copy_leading).floor() as usize;
-        let max_lines = room_lines.clamp(1, 12);
         TextView::new(copy, copy_size, theme::TEXT_READING)
-            .leading(copy_leading)
-            .max_lines(max_lines)
+            .leading(copy_size as f32 + theme::space::XS)
+            .max_lines(12)
             .draw(
                 p,
                 Rect::new(
@@ -856,8 +997,42 @@ impl RouteLayout {
     }
 }
 
+/// **When a route ground reads its host**: on the frame that captured the host (nothing presents
+/// after it until its GPU work is done, `gfx::snapshot_frame_begin`, so the reduction queued with
+/// it costs no presented frame), or else on the first frame the ground is seen. A held, invisible
+/// frame that captured nothing reads nothing — nothing is drawn through the field at opacity 0.
+fn ground_reads_host(opacity: f32, captured: bool) -> bool {
+    opacity > 0.0 || captured
+}
+
 #[cfg(test)]
 mod tests {
+    /// `ModalStack::draw_scrims_on`'s rule, for a route ground: the host is read on the frame that
+    /// captured it (whose GPU work is waited out before anything presents) or once the ground is
+    /// seen — never on a held, invisible frame that captured nothing.
+    #[test]
+    fn a_route_ground_reads_its_host_on_the_capture_frame_or_once_seen() {
+        use super::ground_reads_host;
+        assert!(ground_reads_host(0.0, true), "the capture frame");
+        assert!(ground_reads_host(0.4, false), "seen");
+        assert!(!ground_reads_host(0.0, false), "held and nothing captured");
+    }
+
+    #[test]
+    fn a_pre_home_ground_is_latched_from_its_explicit_seed_before_drawing() {
+        let rgb = [super::theme::SURFACE_APP[0], super::theme::SURFACE_APP[1], super::theme::SURFACE_APP[2]];
+        let seed = [rgb; 4];
+        let ground = super::RouteGround::for_home(Some(seed));
+        assert!(ground.is_latched());
+        // The seed is graded exactly as `latch_from_corners(_, Grade::Ground)` would grade it on
+        // any other caller — a fresh field latched the same way is the reference, not a re-typed
+        // formula, so this cannot drift from the production path the way a duplicated mean could.
+        let mut want = super::UnderlayField::new();
+        want.latch_from_corners(seed, super::Grade::Ground);
+        assert_eq!(ground.palette(), super::ControlPalette::ambient(want.key()));
+        assert!(super::RouteGround::for_home(None).is_latched());
+    }
+
     use super::*;
     use crate::ui::consts::inside_safe;
 
@@ -888,6 +1063,102 @@ mod tests {
             l.narrative.y
         );
         assert_eq!(table.y + table.h, l.content.y + l.content.h);
+    }
+
+    /// **The title sets at the design system's pitch, not at `TextView`'s reading default.**
+    ///
+    /// `RouteScreen.jsx` states `var(--size-hero)/1.05`; `TextView` derives `sz * 1.32` when no
+    /// leading is given, which is a pitch for PROSE. The difference is 19.4px, and on a one-line
+    /// title all of it lands between the title and the copy — `draw_narrative` stacks the copy at
+    /// `title_h + space::MD`, so the family's stated 24px gap was drawing as ~43. This is the whole
+    /// of that correction as arithmetic, and it is here rather than in `filmography.rs` because the
+    /// route that noticed it is not the only one that drew it.
+    #[test]
+    fn translated_route_titles_grow_without_taking_the_content_minimum() {
+        struct TitleMeasure;
+        impl Measure for TitleMeasure {
+            fn width(&self, text: &std::ffi::CStr, size: i32, _bold: bool) -> f32 {
+                text.to_string_lossy().chars().count() as f32 * size as f32 * 0.6
+            }
+            fn cap_h(&self, size: i32) -> f32 { size as f32 * 0.7 }
+            fn line_h(&self, size: i32) -> f32 { size as f32 * 1.2 }
+        }
+        let measure = TitleMeasure;
+        let min_content = RouteLayout::screen().content.w;
+        for preference in [crate::i18n::Preference::En, crate::i18n::Preference::Es, crate::i18n::Preference::Be] {
+            let locale = crate::i18n::LocaleContext::resolve(preference, None, None, None, None);
+            let title = crate::i18n::msg::browse_person_filmography_in(&locale);
+            let layout = RouteLayout::screen_for_title(480.0, min_content, title, &measure);
+            let full_width = measure.width_str(title, theme::size::HERO, true);
+            assert!(layout.narrative.w >= full_width, "route label must fit in full: {title}");
+            assert!(layout.content.w >= min_content);
+            assert!(inside_safe(layout.content));
+            assert!(inside_safe(layout.narrative));
+            if preference == crate::i18n::Preference::Be {
+                assert!(layout.narrative.w > 480.0, "exercise the clipped screenshot's narrow column");
+            }
+        }
+        // Expansion beyond available width must wrap, never steal the content column.
+        let title = "ФільмаграфіяФільмаграфія";
+        let layout = RouteLayout::screen_for_title(480.0, min_content, title, &measure);
+        assert_eq!(layout.content.w, min_content);
+        let view = RouteLayout::narrative_title(title).with_measure(&measure);
+        assert!(view.measure_h(layout.narrative.w) > TITLE_LEADING);
+        assert!(!view.truncates(layout.narrative.w));
+    }
+
+    #[test]
+    fn the_narrative_title_sets_at_the_design_systems_own_line_height() {
+        assert!(
+            (TITLE_LEADING - theme::size::HERO as f32 * 1.05).abs() < 0.01,
+            "the mock's own ratio, not a rounded pixel"
+        );
+        // …and, the half that actually guards the fix: the view `draw_narrative` DRAWS carries it.
+        // Asserting the constant alone is a tautology — deleting `.leading(TITLE_LEADING)` from the
+        // builder reverts the entire correction and leaves that assertion green.
+        assert!(
+            (RouteLayout::narrative_title("Filmography").line_h() - TITLE_LEADING).abs() < 0.01,
+            "the drawn title must set at TITLE_LEADING, not at TextView's derived reading pitch"
+        );
+        // …and the default it replaces, named so the size of the bug stays legible.
+        let reading_default = theme::size::HERO as f32 * 1.32;
+        assert!(
+            reading_default - TITLE_LEADING > 19.0,
+            "the correction has to be worth making: {reading_default} against {TITLE_LEADING}"
+        );
+        // The box still contains the ink it was tightened around: a 72px cap plus its descender.
+        assert!(
+            TITLE_LEADING > theme::size::HERO as f32,
+            "a pitch under the em box would clip a descender between two wrapped title lines"
+        );
+    }
+
+    /// Real consent questions need a third HERO line in Spanish and Belarusian. The shared
+    /// title must keep the whole question and move the disclosure region by that same height.
+    #[test]
+    fn translated_consent_questions_keep_their_complete_titles() {
+        struct QuestionMeasure;
+        impl crate::ui::machine::Measure for QuestionMeasure {
+            fn width(&self, text: &std::ffi::CStr, size: i32, _bold: bool) -> f32 {
+                text.to_string_lossy().chars().count() as f32 * size as f32 * 0.6
+            }
+            fn cap_h(&self, size: i32) -> f32 { size as f32 * 0.7 }
+            fn line_h(&self, size: i32) -> f32 { size as f32 * 1.2 }
+        }
+        let measure = QuestionMeasure;
+        let layout = RouteLayout::screen();
+        for preference in [crate::i18n::Preference::En, crate::i18n::Preference::Es, crate::i18n::Preference::Be] {
+            let locale = crate::i18n::LocaleContext::resolve(preference, None, None, None, None);
+            for question in [crate::i18n::msg::settings_consent_crash_title_in(&locale),
+                crate::i18n::msg::settings_consent_product_title_in(&locale)] {
+                let title = RouteLayout::narrative_title(question).with_measure(&measure);
+                assert!(!title.truncates(layout.narrative.w), "question was elided: {question}");
+                let height = title.measure_h(layout.narrative.w);
+                let copy = layout.narrative_copy_frame(false, question, layout.action.y, &measure);
+                assert_eq!(copy.y, layout.narrative_top(false) + height + theme::space::MD);
+                assert!(copy.h > theme::size::BODY as f32 * 6.0, "disclosure keeps a readable viewport");
+            }
+        }
     }
 
     #[test]
@@ -1283,28 +1554,97 @@ mod tests {
         assert!(push.amount() < 0.001);
     }
 
+    /// **A latched RouteGround does not re-latch.** `draw_default` runs its own `if
+    /// !self.field.is_latched()` guard every frame it is called, exactly as `draw_host`/`draw_home`
+    /// do; two calls with two different fallbacks in force between them must still land on whichever
+    /// atmosphere the FIRST call saw, or nested push/back transitions would repaint their ground out
+    /// from under the content moving over it.
+    ///
+    /// Exercises `latch_default` rather than `draw_default` itself — see [`RouteGround::latch_host`]'s
+    /// doc for why a host test cannot call through to `field.draw`.
     #[test]
-    fn route_ground_latches_once_instead_of_following_child_screens() {
+    fn a_latched_route_ground_does_not_re_latch() {
         let mut ground = RouteGround::new();
-        let first = [[0.1, 0.2, 0.3]; 4];
-        let second = [[0.8, 0.7, 0.6]; 4];
-        ground.latch(first, mean_key(first));
-        let palette = ground.palette();
-        ground.latch(second, mean_key(second));
-        assert_eq!(ground.palette(), palette);
+        ground.latch_default();
         assert!(ground.is_latched());
+        let palette = ground.palette();
+
+        ground.latch_default();
+        assert_eq!(
+            ground.palette(),
+            palette,
+            "a second latch must not move an already-latched ground"
+        );
     }
 
+    /// **A route whose live-frame latch fails still gets an atmosphere.** `draw_host` cannot force
+    /// `gfx::field_kick` to answer — a video-plane frame, a blur source pass, a frozen
+    /// page and a drawable the exact-2x chain cannot be built for are all real "no honest frame this
+    /// time" answers this route does not get to pick between — so it has to fall back, once, to the
+    /// same authored corners `draw_default` uses when it has no host at all. The video-plane refusal
+    /// is the one member of that list a host test can DRIVE (`gfx::set_video_plane_frame`, thread-
+    /// local — see its own doc — so this cannot leak into another test): the other three would need
+    /// a live GL context this binary never creates.
+    ///
+    /// Exercises `latch_host` rather than `draw_host` itself — see [`RouteGround::latch_host`]'s doc
+    /// for why a host test cannot call through to `field.draw`.
     #[test]
-    fn route_ground_key_is_the_whole_envelope_not_one_loud_corner() {
-        assert_eq!(
-            mean_key([
-                [0.0, 0.2, 0.4],
-                [0.2, 0.4, 0.6],
-                [0.4, 0.6, 0.8],
-                [0.6, 0.8, 1.0],
-            ]),
-            [0.3, 0.5, 0.7]
+    fn a_route_ground_whose_frame_latch_fails_falls_back_to_corners() {
+        // A refusal is not a pending read, and the deferred read must not turn one into a frame of
+        // no atmosphere.
+        {
+            let was = crate::gfx::set_video_plane_frame(true);
+            let mut ground = RouteGround::new();
+            ground.latch_host();
+            crate::gfx::set_video_plane_frame(was);
+
+            assert!(
+                ground.is_latched(),
+                "a refused live frame must still leave the ground with an atmosphere"
+            );
+            let mut want = UnderlayField::new();
+            want.latch_from_corners(RouteGround::fallback_corners(), Grade::Ground);
+            assert_eq!(
+                ground.palette(),
+                ControlPalette::ambient(want.key()),
+                "the fallback must be the SAME corners, graded the SAME way draw_host would grade a \
+                 live sample"
+            );
+        }
+    }
+
+    /// **THE POINT OF STAGE B, seen through `RouteGround` itself**: `sample()` is spatially
+    /// faithful, not a four-corner bilinear wearing a new implementation. Green in the bottom-left
+    /// corner must read greener there than in the top-right, which a wash of only four degrees of
+    /// freedom could also manage — the case that actually discriminates is `underlay_tests.rs`'s
+    /// `the_field_samples_greener_where_the_green_is`; this one exists to prove `RouteGround::sample`
+    /// is wired to the field's OWN sample rather than to some remaining four-corner shortcut.
+    #[test]
+    fn route_ground_sample_is_spatially_faithful() {
+        let dark = [0.05, 0.05, 0.05];
+        let red = [0.9, 0.05, 0.05];
+        let green = [0.05, 0.9, 0.05];
+        // Painter corner order: top-left, top-right, bottom-right, bottom-left.
+        let mut ground = RouteGround::new();
+        ground
+            .field
+            .latch_from_corners([dark, red, dark, green], Grade::Dim);
+
+        let bl = ground.sample(
+            crate::ui::consts::SCR_W * 0.08,
+            crate::ui::consts::SCR_H * 0.92,
+        );
+        let tr = ground.sample(
+            crate::ui::consts::SCR_W * 0.92,
+            crate::ui::consts::SCR_H * 0.08,
+        );
+        assert!(
+            bl[1] - bl[0] > 0.2,
+            "the bottom-left corner must read GREEN, got {bl:?}"
+        );
+        assert!(
+            tr[0] - tr[1] > 0.2,
+            "the top-right corner must read RED, got {tr:?}"
         );
     }
 
@@ -1393,13 +1733,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn default_route_ground_latches_the_auth_fallback_once() {
-        let mut ground = RouteGround::new();
-        ground.latch_target(theme::ROUTE_GROUND_FALLBACK);
-        let palette = ground.palette();
-        ground.latch_target([[1.0, 0.0, 0.0, 1.0]; 4]);
-        assert_eq!(ground.palette(), palette);
-        assert!(ground.is_latched());
-    }
 }

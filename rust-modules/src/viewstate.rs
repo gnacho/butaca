@@ -59,7 +59,7 @@
 //!   its rows with.
 //! * **No resume position is ever COPIED from one server to another — only the watched flag
 //!   travels.** This is the subtle half. A resume offset is about a file you are streaming from one
-//!   host, and `ui::alt_sources`' module doc reasons that out at length; that reasoning stands. So
+//!   host, and `screens::alt_sources`' module doc reasons that out at length; that reasoning stands. So
 //!   `unscrobble` IS repeated on the other copies (it is the "unwatched" end of one control, and
 //!   clearing the flag is the same statement about the title), but no `viewOffset` is read here and
 //!   none is pushed anywhere.
@@ -90,18 +90,20 @@
 //! **What the other copies look like on the press frame: unchanged, and that is deliberate.**
 //! [`request`]'s optimistic edit can only reach the `(sid, rk)` the user pressed, because no other
 //! key is KNOWN yet — the resolve is what discovers them, and it is off-thread by construction.
-//! The copies are flipped locally when the fan-out reports ([`pump`] applies [`edit_local`] to each
+//! The copies are flipped locally when the fan-out reports ([`ViewStateState::pump`] applies
+//! [`edit_local_with_owners`] to each
 //! one the server took), and the hub refetch that already follows every write reconciles whatever
 //! that missed. So the copy in hand changes at once and the others change a round trip later,
 //! which is the same contract the press already has with its own server.
 //!
-//! Every static here is main-thread-only except [`MAIL`], which is the worker's single output —
-//! the discipline `pms.rs` and `metadata.rs` state for their own mailboxes.
+//! Physical ownership now follows Browse's pattern: `stores::viewstate::ViewStateStore` owns this
+//! module's main-thread `ViewStateState`, an `Arc<ViewStateAdapter>` mailbox captured by every
+//! worker, and its notice. Reset rotates the adapter, and request IDs fence malformed or stale
+//! completions even within one adapter. There is no process-global ViewState transport or state.
 
 use crate::plex::ServerId;
 use std::panic::catch_unwind;
-use std::ptr::{addr_of, addr_of_mut};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// What to ask the item's server for.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -112,6 +114,10 @@ pub(crate) enum Write {
     Unwatched,
     /// `PUT /actions/removeFromContinueWatching` — HIDE from the deck, keeping the resume point.
     RemoveFromDeck,
+    /// Jellyfin's heart: `POST/DELETE /Users/{uid}/FavoriteItems/{id}`. No Plex counterpart —
+    /// the variant exists only on the flavor that draws the heart.
+    #[cfg(feature = "jellyfin")]
+    Favorite(bool),
 }
 
 impl Write {
@@ -123,6 +129,10 @@ impl Write {
         match self {
             Write::Watched | Write::Unwatched => 0,
             Write::RemoveFromDeck => 1,
+            // A heart toggle is its own decision about the item: a later favorite supersedes an
+            // earlier one, and it must not be swallowed by a watched toggle that followed it.
+            #[cfg(feature = "jellyfin")]
+            Write::Favorite(_) => 2,
         }
     }
 
@@ -140,23 +150,28 @@ impl Write {
             Write::Watched => c.scrobble(rk),
             Write::Unwatched => c.unscrobble(rk),
             Write::RemoveFromDeck => c.remove_from_continue_watching(rk),
+            #[cfg(feature = "jellyfin")]
+            Write::Favorite(_) => unreachable!("the jellyfin arm performs its own favorite call"),
         }
     }
 
-    /// The Jellyfin spelling of the three writes — the mapping (and what deck-removal costs on a
-    /// server with no hide-from-deck) is documented at `jellyfin::client`'s view-state section.
-    /// WORKER THREAD, same spawn-site capture rule as [`Write::perform`].
+    /// The Jellyfin flavor's `perform`: the same queue, the other backend's client. Played-state
+    /// and favorite writes ride `PlayedItems`/`FavoriteItems`; the deck removal is the documented
+    /// resume-point merge (`clear_resume`).
     #[cfg(feature = "jellyfin")]
     fn perform_jellyfin(self, c: &crate::jellyfin::JfClient, rk: &str) -> bool {
         match self {
             Write::Watched => c.mark_played(rk),
             Write::Unwatched => c.mark_unplayed(rk),
             Write::RemoveFromDeck => c.clear_resume(rk),
+            Write::Favorite(want) => c.set_favorite(rk, want),
         }
     }
 
     fn name(self) -> &'static str {
         match self {
+            #[cfg(feature = "jellyfin")]
+            Write::Favorite(on) => if on { "favorite" } else { "unfavorite" },
             Write::Watched => "watched",
             Write::Unwatched => "unwatched",
             Write::RemoveFromDeck => "deck-remove",
@@ -169,14 +184,17 @@ impl Write {
 /// says the worker must never ask which server is current; resolving a SLOT there is that rule, and
 /// it also means a share whose registration went away while this sat in the queue is turned away
 /// with a log line instead of being sent to whatever now occupies the slot.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct RequestId(u64);
+
 struct Req {
+    id: RequestId,
     sid: ServerId,
     rk: String,
     w: Write,
-    /// Re-read the mounted detail page when this lands, landing the filmstrip back on this episode.
-    /// `Some("")` = the hero's own toggle (no filmstrip position to protect); `None` = the press
-    /// came from Home, which has no detail page to refresh.
-    detail: Option<String>,
+    /// Re-read the originating Detail page when this lands, by its exact `(sid, rk)` address.
+    /// `keep` retains a filmstrip episode; `None` here means the press came from another screen.
+    detail: Option<crate::stores::viewstate::DetailRefresh>,
     /// The item's PORTABLE identity (`plex://movie/…`) **as it is on `sid` for `rk`**, or empty when
     /// the press had none in hand — [`fan_out`] then resolves it from the pair, on the worker.
     ///
@@ -188,45 +206,6 @@ struct Req {
     guid: String,
 }
 
-/// The server a queued write goes to, resolved on the main thread at the spawn site —
-/// `pms::kick`'s rule ("capture at the spawn site") says the worker must never ask which server
-/// is current; resolving a SLOT there is that rule, and it also means a share whose registration
-/// went away while the write sat in the queue is turned away with a log line instead of being
-/// sent to whatever now occupies the slot. The Jellyfin client lives outside the Plex registry,
-/// so its arm is the same slot test plus installed-client guard the poster and hub arms use.
-enum Resolved {
-    Plex(&'static crate::plex::Client),
-    #[cfg(feature = "jellyfin")]
-    Jellyfin(&'static crate::jellyfin::JfClient),
-}
-
-/// MAIN THREAD. `client_for`, never `client()`: the item may live on a share, and a scrobble sent
-/// to the wrong machine marks a DIFFERENT film watched there (both servers number their items
-/// from 1). `None` is a slot that is not registered, where `client()` panics — a view-state write
-/// is exactly the operation to skip and log rather than take to the wrong machine.
-fn resolve(sid: ServerId) -> Option<Resolved> {
-    // The guard is load-bearing, not redundant: the jellyfin slot is 0, which test fixtures also
-    // hand to `register_for_test` Plex clients — an absent jellyfin client must fall THROUGH to
-    // the Plex registry, not shadow it.
-    #[cfg(feature = "jellyfin")]
-    if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
-        return crate::jellyfin::client().map(Resolved::Jellyfin);
-    }
-    crate::plex::client_for(sid).map(Resolved::Plex)
-}
-
-/// Writes waiting for a worker. Main-thread only; drained one at a time by [`kick`].
-static mut QUEUE: Vec<Req> = Vec::new();
-/// The write currently out, if any. Main-thread only — it is what [`pump`] turns into a refresh.
-static mut SENT: Option<Req> = None;
-/// Frames left before re-attempting a spawn the OS refused. Main-thread only.
-static mut RETRY_CD: u32 = 0;
-/// A hub refetch is owed once the queue empties. Main-thread only.
-static mut WANT_HUBS: bool = false;
-/// A detail re-read is owed once the queue empties, carrying the episode the filmstrip must land
-/// back on (empty = none). Main-thread only.
-static mut WANT_DETAIL: Option<String> = None;
-
 /// The worker's ONLY output: whether the item's own server took the write it was given, plus the
 /// OTHER sources' copies of the same title the fan-out also wrote — `(server, ratingKey)` each, and
 /// only the ones that were TAKEN, since by the time this is filled the answer is known and there is
@@ -237,31 +216,67 @@ struct Done {
     also: Vec<(ServerId, String)>,
 }
 
-/// There is at most one worker at a time, and the main thread clears the slot as it takes it.
-static MAIL: Mutex<Option<Done>> = Mutex::new(None);
+struct Completion {
+    id: RequestId,
+    done: Done,
+}
+
+/// Cross-thread transport for one physical owner. Every worker captures the exact adapter that
+/// admitted it; reset replaces the owner's `Arc`, fencing any completion still headed here.
+#[derive(Default)]
+pub(crate) struct ViewStateAdapter {
+    mail: Mutex<Option<Completion>>,
+}
+
+/// Main-thread state for one ViewState owner. Nothing in this value selects another owner.
+pub(crate) struct ViewStateState {
+    queue: Vec<Req>,
+    sent: Option<Req>,
+    retry_cd: u32,
+    want_hubs: bool,
+    want_detail: Option<crate::stores::viewstate::DetailRefresh>,
+    next_request_id: u64,
+}
+
+impl Default for ViewStateState {
+    fn default() -> Self {
+        Self {
+            queue: Vec::new(),
+            sent: None,
+            retry_cd: 0,
+            want_hubs: false,
+            want_detail: None,
+            next_request_id: 1,
+        }
+    }
+}
 
 /// ~2 s at 60 fps — the same wait `search.rs` gives a refused spawn. Without it, a process at the
 /// thread ceiling would re-attempt (and log a refusal) every single frame.
 const RETRY_FRAMES: u32 = 120;
 
-fn queue() -> &'static mut Vec<Req> {
-    unsafe { &mut *addr_of_mut!(QUEUE) }
-}
+impl ViewStateState {
+    fn mint_request_id(&mut self) -> RequestId {
+        let id = RequestId(self.next_request_id);
+        self.next_request_id = self.next_request_id.checked_add(1)
+            .expect("viewstate request identity exhausted");
+        id
+    }
 
-/// Is a write queued or in flight? What gates the deferred refresh, and the predicate any future
-/// "saving…" affordance would read.
-pub(crate) fn is_busy() -> bool {
-    unsafe { !(*addr_of!(QUEUE)).is_empty() || (*addr_of!(SENT)).is_some() }
-}
+    /// Is a write queued or in flight? What gates the deferred refresh, and the predicate any
+    /// future "saving…" affordance would read.
+    pub(crate) fn is_busy(&self) -> bool {
+        !self.queue.is_empty() || self.sent.is_some()
+    }
 
 /// Ask the item's server to change `(sid, rk)`'s view state, and update every surface that describes
 /// it AT ONCE. **MAIN THREAD, NON-BLOCKING.** Returns false when the write never left — the one case
 /// being a server slot that holds no client, which is a dropped PMS write and says so in the log
 /// rather than being the one that goes unrecorded.
 ///
-/// `detail` says what to re-read when the write lands: `None` for a press on a Home shelf,
-/// `Some(episode_rk)` for the detail page's filmstrip menu, `Some("")` for the detail hero's own
-/// toggle. The hub refetch happens either way — the Continue Watching shelf changes with any of
+/// `detail` says exactly what to re-read when the write lands: `None` for a press outside Detail,
+/// an addressed page plus kept episode for its filmstrip, and the addressed page with no episode
+/// for the hero toggle. The hub refetch happens either way — Continue Watching changes with any of
 /// these three writes, whichever screen asked for it.
 ///
 /// `guid` is the item's portable identity **if the caller already holds the one belonging to `rk`**,
@@ -269,16 +284,30 @@ pub(crate) fn is_busy() -> bool {
 /// than a degraded one: the worker looks it up. It is what a watched write FANS OUT on, so that a
 /// title held by more than one source ends up watched on all of them (module doc). It is ignored
 /// for [`Write::RemoveFromDeck`], which stays on the server it was pressed on.
-pub(crate) fn request(
+    fn request(
+    &mut self,
+    adapter: &Arc<ViewStateAdapter>,
     sid: ServerId,
     rk: &str,
     w: Write,
-    detail: Option<String>,
+    detail: Option<crate::stores::viewstate::DetailRefresh>,
     guid: &str,
+    browse: &mut dyn FnMut(crate::stores::browse::BrowseCmd) -> bool,
+    hubs: &mut dyn FnMut(crate::stores::hubs::HubsCmd) -> crate::stores::StoreOutcome,
+    person: &mut dyn FnMut(crate::stores::person::PersonCmd) -> bool,
+    collection: &mut dyn FnMut(crate::stores::collection::CollectionCmd) -> bool,
+    search: &mut dyn FnMut(crate::stores::search::SearchCmd) -> bool,
+    metadata: &mut dyn FnMut(crate::stores::metadata::MetadataCmd) -> bool,
 ) -> bool {
-    // Resolved through the same choke point the worker will use, so a press that cannot be sent
-    // is refused HERE (and says so) rather than queued toward a drop.
-    if resolve(sid).is_none() {
+    // `client_for`, never `client()`: the item may live on a share, and a scrobble sent to the wrong
+    // machine marks a DIFFERENT film watched there (both servers number their items from 1). None is
+    // a slot that is not registered, where `client()` panics — a view-state write is exactly the
+    // operation to skip and log rather than take to the wrong machine.
+    #[cfg(feature = "jellyfin")]
+    let jellyfin = sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some();
+    #[cfg(not(feature = "jellyfin"))]
+    let jellyfin = false;
+    if crate::plex::client_for(sid).is_none() && !jellyfin {
         crate::log(&format!(
             "viewstate: rk={rk} {} DROPPED — server {} is not registered",
             w.name(),
@@ -289,17 +318,20 @@ pub(crate) fn request(
     // OPTIMISTIC, before the request: the press must land on the panel now, not one WAN round trip
     // from now. Only THIS copy — the other sources' keys are not known until the fan-out resolves
     // them, which is what [`pump`] finishes the job with.
-    edit_local(sid, rk, w);
-    coalesce(sid, rk, w);
-    queue().push(Req {
+    edit_local_with_owners(sid, rk, w, browse, hubs, person, collection, search, metadata);
+    self.coalesce(sid, rk, w);
+    let id = self.mint_request_id();
+    self.queue.push(Req {
+        id,
         sid,
         rk: rk.to_string(),
         w,
         detail,
         guid: guid.to_string(),
     });
-    kick();
+    self.kick(adapter);
     true
+    }
 }
 
 /// Flip every LOCAL surface that describes `(sid, rk)` to what `w` is about to make true, and ask
@@ -311,7 +343,17 @@ pub(crate) fn request(
 /// Called from two places, for one reason. [`request`] calls it optimistically for the copy the
 /// user pressed, and [`pump`] calls it for each OTHER source's copy the fan-out reached — which
 /// cannot be known any earlier than that, because discovering them is the round trip.
-fn edit_local(sid: ServerId, rk: &str, w: Write) {
+fn edit_local_with_owners(
+    sid: ServerId,
+    rk: &str,
+    w: Write,
+    browse: &mut dyn FnMut(crate::stores::browse::BrowseCmd) -> bool,
+    hubs: &mut dyn FnMut(crate::stores::hubs::HubsCmd) -> crate::stores::StoreOutcome,
+    person: &mut dyn FnMut(crate::stores::person::PersonCmd) -> bool,
+    collection: &mut dyn FnMut(crate::stores::collection::CollectionCmd) -> bool,
+    search: &mut dyn FnMut(crate::stores::search::SearchCmd) -> bool,
+    metadata: &mut dyn FnMut(crate::stores::metadata::MetadataCmd) -> bool,
+) {
     match w {
         Write::Watched | Write::Unwatched => {
             let on = w == Write::Watched;
@@ -323,60 +365,138 @@ fn edit_local(sid: ServerId, rk: &str, w: Write) {
             // the user was looking at until a refetch, which reads as the row having done nothing.
             //
             // `metadata::set_watched_local` covers TWO of those surfaces, which is why the list below
-            // is five calls and not six: the detail page holds the loaded item, its season's episodes
+            // is six calls and not seven: the detail page holds the loaded item, its season's episodes
             // AND the Related tiles, and that one call walks all three.
             //
-            // All five are no-ops where the item does not appear — a walk of an empty or unrelated
+            // All six are no-ops where the item does not appear — a walk of an empty or unrelated
             // store — so a press from any one screen still costs about what it did.
-            crate::pms::edit_item(sid, rk, crate::pms::LocalEdit::Watched(on));
-            crate::metadata::set_watched_local(sid, rk, on);
-            crate::browse::set_watched_local(sid, rk, on);
-            crate::search::set_watched_local(sid, rk, on);
-            crate::person::set_watched_local(sid, rk, on);
+            //
+            // Through the store VOCABULARY (`crate::stores`, restructure phase 4) rather than the
+            // data modules directly, so every store a press flips raises its own notice and a
+            // migrated screen hears the optimistic edit the same way it hears a landing.
+            hubs(crate::stores::hubs::HubsCmd::EditItem {
+                sid,
+                rk: rk.to_string(),
+                edit: crate::pms::LocalEdit::Watched(on),
+            }).changed;
+            metadata(crate::stores::metadata::MetadataCmd::SetWatchedLocal {
+                sid,
+                rk: rk.to_string(),
+                on,
+            });
+            browse(crate::stores::browse::BrowseCmd::SetWatchedLocal {
+                sid,
+                rk: rk.to_string(),
+                on,
+            });
+            search(crate::stores::search::SearchCmd::SetWatchedLocal {
+                sid,
+                rk: rk.to_string(),
+                on,
+            });
+            person(crate::stores::person::PersonCmd::SetWatchedLocal {
+                sid,
+                rk: rk.to_string(),
+                on,
+            });
+            collection(crate::stores::collection::CollectionCmd::SetWatchedLocal {
+                sid,
+                rk: rk.to_string(),
+                on,
+            });
         }
         // The one edit that can be stated with certainty: the server hides the item from the deck
         // and keeps everything else about it (`plex::Client::remove_from_continue_watching`).
+        #[cfg(feature = "jellyfin")]
+        Write::Favorite(on) => {
+            // The heart is only drawn on the detail page: the loaded item's flag. The show-level
+            // roll-up the watched pair performs is NOT wanted here — a heart has no children.
+            metadata(crate::stores::metadata::MetadataCmd::SetFavoriteLocal {
+                sid, rk: rk.to_string(), on,
+            });
+        }
         Write::RemoveFromDeck => {
-            crate::pms::edit_item(sid, rk, crate::pms::LocalEdit::LeftTheDeck);
+            hubs(crate::stores::hubs::HubsCmd::EditItem {
+                sid,
+                rk: rk.to_string(),
+                edit: crate::pms::LocalEdit::LeftTheDeck,
+            }).changed;
+            // …and the LIBRARY's own deck, which is a different shelf on a different screen and is
+            // where this row is now reachable from at all (the Library's section Continue Watching
+            // shelf, 2026-09-05).
+            browse(crate::stores::browse::BrowseCmd::LeftTheDeck {
+                sid,
+                rk: rk.to_string(),
+            });
         }
     }
     crate::ui::idle::invalidate(); // the tick/veil/bar just changed with no spring behind it
 }
 
 /// Drop any QUEUED write for the same item and toggle — see [`Write::family`]. The write already in
-/// flight ([`SENT`]) is deliberately untouched: it is on the wire, the client cannot recall it, and
+/// flight (`ViewStateState::sent`) is deliberately untouched: it is on the wire, the client cannot
+/// recall it, and
 /// the one that supersedes it is queued behind it in the order pressed.
-fn coalesce(sid: ServerId, rk: &str, w: Write) {
+impl ViewStateState {
+    fn coalesce(&mut self, sid: ServerId, rk: &str, w: Write) {
     let fam = w.family();
-    queue().retain(|r| !(crate::plex::same_item((r.sid, &r.rk), (sid, rk)) && r.w.family() == fam));
-}
+    self.queue.retain(|r| !(crate::plex::same_item((r.sid, &r.rk), (sid, rk)) && r.w.family() == fam));
+    }
 
 /// Spend one frame of the refused-spawn ladder; true when the next attempt is due. Split out so the
 /// ladder is gradeable without a registry or a socket — `pms::retry_due`'s twin.
-fn retry_tick() -> bool {
-    unsafe {
-        let cd = *addr_of!(RETRY_CD);
+    fn retry_tick(&mut self) -> bool {
+        let cd = self.retry_cd;
         if cd > 0 {
-            *addr_of_mut!(RETRY_CD) = cd - 1;
+            self.retry_cd = cd - 1;
         }
         cd <= 1
     }
-}
 
 /// Start the next queued write if nothing is out. MAIN THREAD.
-fn kick() {
-    unsafe {
-        if (*addr_of!(SENT)).is_some() || *addr_of!(RETRY_CD) > 0 {
+    fn kick(&mut self, adapter: &Arc<ViewStateAdapter>) {
+        if self.sent.is_some() || self.retry_cd > 0 {
             return;
         }
-    }
-    while !queue().is_empty() {
-        let req = queue().remove(0);
+    while !self.queue.is_empty() {
+        let req = self.queue.remove(0);
         // Resolved HERE, at the spawn site, and never inside the worker. A slot that has since
         // stopped holding a client is a write with nowhere to go: dropping it silently would be the
         // one PMS write with no line at all, which is what the request-time check above exists to
         // prevent, so it says so here too.
-        let Some(target) = resolve(req.sid) else {
+        #[cfg(feature = "jellyfin")]
+        let jellyfin = req.sid == crate::jellyfin::SERVER_ID;
+        #[cfg(feature = "jellyfin")]
+        if jellyfin {
+            let Some(c) = crate::jellyfin::client() else {
+                crate::log(&format!(
+                    "viewstate: rk={} {} DROPPED — the jellyfin client left while queued",
+                    req.rk,
+                    req.w.name(),
+                ));
+                continue;
+            };
+            let (id, rk, w) = (req.id, req.rk.clone(), req.w);
+            let worker_adapter = Arc::clone(adapter);
+            let spawned = crate::task::spawn_small("viewstate", move || {
+                let done = catch_unwind(move || w.perform_jellyfin(c, &rk));
+                *worker_adapter.mail.lock().unwrap_or_else(|e| e.into_inner()) =
+                    Some(Completion { id, done: Done { ok: done.unwrap_or(false), also: Vec::new() } });
+            });
+            if !spawned {
+                // Nothing will ever fill the mailbox. Put the write back at the HEAD, exactly as
+                // the Plex arm below does, and wait out the ladder before trying again.
+                self.queue.insert(0, req);
+                self.retry_cd = RETRY_FRAMES;
+                crate::log("viewstate: jellyfin write refused at spawn");
+                return;
+            }
+            // The in-flight identity is what the completion matches against — without it the
+            // answer lands as "ignored: in-flight identity is none" and the queue jams behind it.
+            self.sent = Some(req);
+            continue;
+        }
+        let Some(c) = crate::plex::client_for(req.sid) else {
             crate::log(&format!(
                 "viewstate: rk={} {} DROPPED — server {} left the registry while queued",
                 req.rk,
@@ -385,44 +505,35 @@ fn kick() {
             ));
             continue;
         };
-        let (sid, rk, w, guid) = (req.sid, req.rk.clone(), req.w, req.guid.clone());
+        let (id, sid, rk, w, guid) = (req.id, req.sid, req.rk.clone(), req.w, req.guid.clone());
+        let worker_adapter = Arc::clone(adapter);
         let spawned = crate::task::spawn_small("viewstate", move || {
             // Filled OUTSIDE the guard, so a panicking write still lands (as a failure) rather than
             // latching the queue behind a worker that will never report.
-            let done = catch_unwind(move || match target {
-                Resolved::Plex(c) => {
-                    let ok = w.perform(c, &rk);
-                    // The fan-out runs INSIDE this worker rather than beside it. The queue is
-                    // drained one worker at a time precisely so two writes for one item cannot
-                    // land out of order, and a second thread doing the other sources would put
-                    // those copies outside that ordering — a watched/unwatched pair could then
-                    // settle differently per server, which is the one thing this whole feature
-                    // exists to stop.
-                    let also = if w.propagates() {
-                        fan_out(c, sid, &rk, &guid, w)
-                    } else {
-                        Vec::new()
-                    };
-                    Done { ok, also }
-                }
-                // No fan-out on this backend: it walks PLEX guids across PLEX sources, and a
-                // Jellyfin item has neither — and a mixed Plex+Jellyfin install is not a build
-                // this flavor produces, so there is never a second source to propagate to.
-                #[cfg(feature = "jellyfin")]
-                Resolved::Jellyfin(jc) => Done {
-                    ok: w.perform_jellyfin(jc, &rk),
-                    also: Vec::new(),
-                },
+            let done = catch_unwind(move || {
+                let ok = w.perform(c, &rk);
+                // The fan-out runs INSIDE this worker rather than beside it. The queue is drained
+                // one worker at a time precisely so two writes for one item cannot land out of
+                // order, and a second thread doing the other sources would put those copies outside
+                // that ordering — a watched/unwatched pair could then settle differently per server,
+                // which is the one thing this whole feature exists to stop.
+                let also = if w.propagates() {
+                    fan_out(c, sid, &rk, &guid, w)
+                } else {
+                    Vec::new()
+                };
+                Done { ok, also }
             })
             .unwrap_or_default();
-            *MAIL.lock().unwrap_or_else(|e| e.into_inner()) = Some(done);
+            *worker_adapter.mail.lock().unwrap_or_else(|e| e.into_inner()) =
+                Some(Completion { id, done });
         });
         if !spawned {
             // Nothing will ever fill the mailbox. Put the write back at the HEAD — dropping it would
             // silently lose a press the user has already seen take effect on screen — and wait out
             // the ladder before trying again, exactly as `search.rs`/`browse.rs` do.
-            queue().insert(0, req);
-            unsafe { *addr_of_mut!(RETRY_CD) = RETRY_FRAMES };
+            self.queue.insert(0, req);
+            self.retry_cd = RETRY_FRAMES;
             return;
         }
         crate::log(&format!(
@@ -431,18 +542,37 @@ fn kick() {
             w.name(),
             req.sid.raw()
         ));
-        unsafe { *addr_of_mut!(SENT) = Some(req) };
+        self.sent = Some(req);
         return;
     }
-}
+    }
 
 /// MAIN THREAD, once a frame, ROUTE-UNCONDITIONAL — a landing must never depend on which screen is
 /// mounted, because the user can walk off Home (or off the detail page) between the press and the
 /// answer, and the refresh is owed either way.
-pub(crate) fn pump() {
-    let due = retry_tick();
-    if let Some(done) = MAIL.lock().unwrap_or_else(|e| e.into_inner()).take() {
-        if let Some(r) = unsafe { (*addr_of_mut!(SENT)).take() } {
+pub(crate) fn pump_with_gate(
+    &mut self,
+    adapter: &Arc<ViewStateAdapter>,
+    gate: &crate::ui::landgate::Gate,
+    browse: &mut dyn FnMut(crate::stores::browse::BrowseCmd) -> bool,
+    hubs: &mut dyn FnMut(crate::stores::hubs::HubsCmd) -> crate::stores::StoreOutcome,
+    person: &mut dyn FnMut(crate::stores::person::PersonCmd) -> bool,
+    collection: &mut dyn FnMut(crate::stores::collection::CollectionCmd) -> bool,
+    search: &mut dyn FnMut(crate::stores::search::SearchCmd) -> bool,
+    metadata: &mut dyn FnMut(crate::stores::metadata::MetadataCmd) -> bool,
+) -> crate::stores::EndpointRefreshSet {
+    let mut endpoints = crate::stores::EndpointRefreshSet::default();
+    let due = self.retry_tick();
+    // the landing GATE (§3.3 step 3, `ui::landgate`): under a replay the server's answer is taken
+    // on the frame the recording took it on. The retry tick and `kick` below stay outside it.
+    let landed = crate::stores::take_landing(gate, crate::stores::StoreId::ViewState, || {
+        adapter.mail.lock().unwrap_or_else(|e| e.into_inner()).take()
+    });
+    if let Some(completion) = landed {
+        let exact = self.sent.as_ref().is_some_and(|request| request.id == completion.id);
+        if exact {
+            let r = self.sent.take().expect("the exact in-flight request remains present");
+            let done = completion.done;
             crate::log(&format!(
                 "viewstate: rk={} {} ok={} others={}",
                 r.rk,
@@ -455,44 +585,153 @@ pub(crate) fn pump() {
             // the ones their server took. A press that reached no other source does nothing here,
             // which is every press on a one-server install.
             for (osid, ork) in &done.also {
-                edit_local(*osid, ork, r.w);
+                edit_local_with_owners(*osid, ork, r.w, browse, hubs, person, collection, search, metadata);
             }
             // The refresh is owed whether or not the server took it: on success it is the reconcile,
             // and on failure it is what puts the optimistic edit back to whatever the server really
             // says. A server that can answer neither question leaves the shelves exactly as they
             // are — `pms.rs`'s per-source rule, unchanged.
-            unsafe {
-                *addr_of_mut!(WANT_HUBS) = true;
-                if let Some(keep) = r.detail {
-                    *addr_of_mut!(WANT_DETAIL) = Some(keep);
-                }
+            self.want_hubs = true;
+            if let Some(detail) = r.detail {
+                self.want_detail = Some(detail);
             }
+        } else {
+            crate::log(&format!(
+                "viewstate: completion {} ignored — in-flight identity is {}",
+                completion.id.0,
+                self.sent.as_ref().map(|request| request.id.0.to_string())
+                    .unwrap_or_else(|| "none".into()),
+            ));
         }
     }
     if due {
-        kick();
+        self.kick(adapter);
     }
-    if is_busy() {
-        return; // a burst still has writes to send — one refresh at the end of it, not per write
+    if self.is_busy() {
+        return endpoints; // a burst still has writes to send — one refresh at the end of it, not per write
     }
-    let (hubs, detail) = unsafe {
-        (
-            std::mem::take(&mut *addr_of_mut!(WANT_HUBS)),
-            (*addr_of_mut!(WANT_DETAIL)).take(),
-        )
-    };
-    if let Some(keep) = detail {
-        // BEFORE the hubs: this re-reads the item the page is mounted on, and the hub refetch's own
-        // reconcile (`detail::reselect`) then re-resolves the catalog row under it. If the user has
-        // walked to a DIFFERENT page in the meantime it re-reads that one instead — one wasted
-        // fetch, the same contract this call has always had ("re-read the mounted item"), and the
-        // keep-focus latch simply does not resolve there (`take_kept_episode` starts the row over).
-        crate::ui::detail::refresh_view_state(&keep);
-    }
-    if hubs {
-        crate::pms::request_refetch_hubs();
+    let refresh_hubs = std::mem::take(&mut self.want_hubs);
+    if refresh_hubs {
+        endpoints.merge(hubs(crate::stores::hubs::HubsCmd::RefetchHubs).endpoints);
+        // the same staleness, one screen over: a library's own shelves carry watch state and its
+        // own Continue Watching row, so the burst that made Home's hubs stale made these stale too
+        browse(crate::stores::browse::BrowseCmd::HubsInvalidateAll);
         crate::ui::idle::invalidate();
     }
+    endpoints
+}
+
+#[cfg(test)]
+pub(crate) fn pump(
+    &mut self,
+    adapter: &Arc<ViewStateAdapter>,
+    browse: &mut dyn FnMut(crate::stores::browse::BrowseCmd) -> bool,
+    hubs: &mut dyn FnMut(crate::stores::hubs::HubsCmd) -> crate::stores::StoreOutcome,
+    person: &mut dyn FnMut(crate::stores::person::PersonCmd) -> bool,
+    collection: &mut dyn FnMut(crate::stores::collection::CollectionCmd) -> bool,
+    search: &mut dyn FnMut(crate::stores::search::SearchCmd) -> bool,
+    metadata: &mut dyn FnMut(crate::stores::metadata::MetadataCmd) -> bool,
+) -> crate::stores::EndpointRefreshSet {
+    self.pump_with_gate(adapter, crate::ui::landgate::fixture_gate(), browse, hubs, person, collection,
+        search, metadata)
+}
+
+#[cfg(test)]
+pub(crate) fn owe_hubs_refresh_for_test(&mut self) {
+    self.want_hubs = true;
+}
+
+#[cfg(test)]
+pub(crate) fn hold_inflight_for_test(&mut self, sid: ServerId, rk: &str) {
+        let id = self.mint_request_id();
+        self.sent = Some(Req {
+            id,
+            sid,
+            rk: rk.into(),
+            w: Write::Watched,
+            detail: None,
+            guid: String::new(),
+        });
+}
+
+/// Drain the addressed Detail reconciliation only after this owner's burst is idle.
+pub(crate) fn take_detail_refresh(&mut self) -> Option<crate::stores::viewstate::DetailRefresh> {
+    if self.is_busy() { return None; }
+    self.want_detail.take()
+}
+}
+
+#[cfg(test)]
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct OwnershipFixture {
+    pub(crate) queue: Vec<String>,
+    pub(crate) sent: Option<String>,
+    pub(crate) retry_cd: u32,
+    pub(crate) want_hubs: bool,
+    pub(crate) want_detail: Option<crate::stores::viewstate::DetailRefresh>,
+    pub(crate) mail: bool,
+}
+
+#[cfg(test)]
+impl ViewStateState {
+    fn fixture_req(&mut self, rk: &str) -> Req {
+        let id = self.mint_request_id();
+        Req {
+            id,
+            sid: ServerId::UNSET,
+            rk: rk.into(),
+            w: Write::Watched,
+            detail: None,
+            guid: String::new(),
+        }
+    }
+
+    pub(crate) fn seed_ownership_fixture(&mut self, adapter: &Arc<ViewStateAdapter>) {
+        self.reset();
+        let queued = self.fixture_req("queued");
+        let flight = self.fixture_req("flight");
+        let id = flight.id;
+        self.queue.push(queued);
+        self.sent = Some(flight);
+        self.retry_cd = 9;
+        self.want_hubs = true;
+        self.want_detail = Some(crate::stores::viewstate::DetailRefresh {
+            sid: ServerId::UNSET,
+            rk: "detail".into(),
+            keep: Some("episode".into()),
+        });
+        *adapter.mail.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(Completion { id, done: Done::default() });
+    }
+
+    pub(crate) fn ownership_fixture(&self, adapter: &Arc<ViewStateAdapter>) -> OwnershipFixture {
+        OwnershipFixture {
+            queue: self.queue.iter().map(|r| r.rk.clone()).collect(),
+            sent: self.sent.as_ref().map(|r| r.rk.clone()),
+            retry_cd: self.retry_cd,
+            want_hubs: self.want_hubs,
+            want_detail: self.want_detail.clone(),
+            mail: adapter.mail.lock().unwrap_or_else(|e| e.into_inner()).is_some(),
+        }
+    }
+
+    pub(crate) fn late_completion(
+        &self,
+        adapter: &Arc<ViewStateAdapter>,
+    ) -> Box<dyn FnOnce()> {
+        let id = self.sent.as_ref().expect("an old request is held").id;
+        let adapter = Arc::clone(adapter);
+        Box::new(move || {
+            *adapter.mail.lock().unwrap_or_else(|e| e.into_inner()) =
+                Some(Completion { id, done: Done::default() });
+        })
+    }
+
+    pub(crate) fn seed_post_reset_flight(&mut self) {
+        let req = self.fixture_req("post-reset");
+        self.sent = Some(req);
+    }
+
 }
 
 // ---- the fan-out: one title, every source that holds it ---------------------------------------
@@ -632,31 +871,192 @@ fn fanout_targets(origin: (ServerId, &str), answers: &[Answer]) -> Vec<(ServerId
     out
 }
 
+impl ViewStateState {
 /// Drop everything — the identity-change twin of `pms::reset`/`browse::reset`, called from the same
-/// place. A queued write belongs to the account that asked for it; one already SENT is on the wire
-/// and simply lands into a mailbox nobody is owed a refresh for.
-pub(crate) fn reset() {
-    queue().clear();
-    *MAIL.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    unsafe {
-        *addr_of_mut!(SENT) = None;
-        *addr_of_mut!(RETRY_CD) = 0;
-        *addr_of_mut!(WANT_HUBS) = false;
-        *addr_of_mut!(WANT_DETAIL) = None;
+/// place. The request counter deliberately survives: identities remain monotone across reset, while
+/// the owning store rotates the adapter so an old worker has no route into the replacement owner.
+fn reset(&mut self) {
+    self.queue.clear();
+    self.sent = None;
+    self.retry_cd = 0;
+    self.want_hubs = false;
+    self.want_detail = None;
+}
+
+pub(crate) fn run(
+    &mut self,
+    adapter: &Arc<ViewStateAdapter>,
+    cmd: crate::stores::viewstate::ViewStateCmd,
+    browse: &mut dyn FnMut(crate::stores::browse::BrowseCmd) -> bool,
+    hubs: &mut dyn FnMut(crate::stores::hubs::HubsCmd) -> crate::stores::StoreOutcome,
+    person: &mut dyn FnMut(crate::stores::person::PersonCmd) -> bool,
+    collection: &mut dyn FnMut(crate::stores::collection::CollectionCmd) -> bool,
+    search: &mut dyn FnMut(crate::stores::search::SearchCmd) -> bool,
+    metadata: &mut dyn FnMut(crate::stores::metadata::MetadataCmd) -> bool,
+) -> bool {
+    use crate::stores::viewstate::ViewStateCmd;
+    match cmd {
+        ViewStateCmd::Request { sid, rk, write, detail, guid } => {
+            self.request(adapter, sid, &rk, write, detail, &guid, browse, hubs, person, collection, search, metadata)
+        }
+        ViewStateCmd::Reset => {
+            self.reset();
+            true
+        }
     }
+}
 }
 
 // ---------------------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn owner_callback_receives_the_optimistic_browse_edit_before_run_returns() {
+        let _g = crate::testlock::serial();
+        crate::plex::reset_servers_for_test();
+        let sid = crate::plex::register_for_test(
+            "viewstate-owner", "127.0.0.1", 9, "synthetic", "fixture");
+        let mut store = crate::stores::viewstate::ViewStateStore::default();
+        store.hold_inflight_for_test(sid, "held");
+        let mut browse = Vec::new();
+        let mut hubs = Vec::new();
+        let mut person = Vec::new();
+        let mut collection = Vec::new();
+        let mut search = Vec::new();
+        let mut metadata_store = crate::stores::metadata::MetadataStore::default();
+
+        assert!(store.run(
+            crate::stores::viewstate::ViewStateCmd::Request {
+                sid,
+                rk: "7".into(),
+                write: Write::Watched,
+                detail: None,
+                guid: String::new(),
+            },
+            &mut |cmd| { browse.push(cmd); true },
+            &mut |cmd| {
+                hubs.push(cmd);
+                crate::stores::StoreOutcome::default()
+            },
+            &mut |cmd| { person.push(cmd); true },
+            &mut |cmd| { collection.push(cmd); true },
+            &mut |cmd| { search.push(cmd); true },
+            &mut |cmd| metadata_store.run(cmd),
+        ));
+
+        assert!(matches!(hubs.as_slice(), [crate::stores::hubs::HubsCmd::EditItem {
+            sid: seen, rk, edit: crate::pms::LocalEdit::Watched(true)
+        }] if *seen == sid && rk == "7"));
+        assert!(matches!(browse.as_slice(), [crate::stores::browse::BrowseCmd::SetWatchedLocal {
+            sid: seen, rk, on: true
+        }] if *seen == sid && rk == "7"));
+        assert!(matches!(person.as_slice(), [crate::stores::person::PersonCmd::SetWatchedLocal {
+            sid: seen, rk, on: true
+        }] if *seen == sid && rk == "7"));
+        assert!(matches!(collection.as_slice(), [crate::stores::collection::CollectionCmd::SetWatchedLocal {
+            sid: seen, rk, on: true
+        }] if *seen == sid && rk == "7"), "a collection member's disc flips with the press");
+        assert!(matches!(search.as_slice(), [crate::stores::search::SearchCmd::SetWatchedLocal {
+            sid: seen, rk, on: true
+        }] if *seen == sid && rk == "7"));
+        assert!(metadata_store.take_notice().is_some(),
+            "the optimistic edit reaches {} before run returns", crate::stores::StoreId::Metadata.name());
+        assert!(store.take_notice().is_some(), "the owning ViewState store notices its command");
+        crate::plex::reset_servers_for_test();
+    }
+
+    #[test]
+    fn stores_route_the_optimistic_edit_to_the_addressed_browse_owner() {
+        let _g = crate::testlock::serial();
+        crate::plex::reset_servers_for_test();
+        let sid = crate::plex::register_for_test(
+            "viewstate-stores-owner", "127.0.0.1", 9, "synthetic", "fixture");
+        let mut selected = crate::stores::Stores::default();
+        selected.browse.borrow_mut().seed_registered_table_for_test([sid, sid]);
+        selected.browse.borrow_mut().seed_items_for_test(1);
+        let decoy = crate::stores::Stores::default();
+        selected.viewstate.borrow_mut().hold_inflight_for_test(sid, "held");
+        let directory = crate::stores::browse::DirectorySnapshot::default();
+
+        assert!(selected.viewstate_run(crate::stores::viewstate::ViewStateCmd::Request {
+            sid,
+            rk: "1".into(),
+            write: Write::Watched,
+            detail: None,
+            guid: String::new(),
+        }, directory.view()));
+
+        assert!(!selected.browse.borrow_mut().listing_snapshot().view().item(0).unwrap().unwatched,
+            "the selected owner changes before the command returns");
+        assert!(decoy.browse.borrow_mut().listing_snapshot().view().item(0).is_none(),
+            "the unaddressed decoy is not used by the owner-aware callback");
+        drop((selected, decoy));
+        crate::plex::reset_servers_for_test();
+    }
+
+    #[test]
+    fn owner_callback_receives_fanout_edits_and_the_terminal_hubs_invalidation() {
+        let _g = crate::testlock::serial();
+                let origin = ServerId::from_raw(0);
+        let other = ServerId::from_raw(1);
+        let mut state = ViewStateState::default();
+        let adapter = Arc::new(ViewStateAdapter::default());
+        let id = state.mint_request_id();
+        state.sent = Some(Req { id, sid: origin, rk: "7".into(), w: Write::Watched,
+            detail: None, guid: "plex://movie/7".into() });
+        *adapter.mail.lock().unwrap_or_else(|e| e.into_inner()) = Some(Completion {
+            id,
+            done: Done { ok: true, also: vec![(other, "70".into())] },
+        });
+        let mut browse = Vec::new();
+        let mut hubs = Vec::new();
+        let mut person = Vec::new();
+
+        let _ = state.pump(&adapter,
+            &mut |cmd| { browse.push(cmd); true },
+            &mut |cmd| {
+                hubs.push(cmd);
+                crate::stores::StoreOutcome::default()
+            },
+            &mut |cmd| { person.push(cmd); true },
+            &mut |_| false,
+            &mut |_| false,
+            &mut |_| false,
+        );
+
+        assert!(matches!(&hubs[0], crate::stores::hubs::HubsCmd::EditItem {
+            sid, rk, edit: crate::pms::LocalEdit::Watched(true)
+        } if *sid == other && rk == "70"));
+        assert!(matches!(hubs[1], crate::stores::hubs::HubsCmd::RefetchHubs),
+            "the fan-out edit lands before the terminal reconcile request");
+        assert!(matches!(&browse[0], crate::stores::browse::BrowseCmd::SetWatchedLocal {
+            sid, rk, on: true
+        } if *sid == other && rk == "70"));
+        assert!(matches!(browse[1], crate::stores::browse::BrowseCmd::HubsInvalidateAll));
+        assert_eq!(person.len(), 1, "the fan-out reaches the supplied Person owner callback");
+            }
+
+    #[test]
+    fn endpoint_outcomes_survive_the_viewstate_refetch_pump() {
+        let _g = crate::testlock::serial();
+        let _session = crate::plex::session::TempSession::new("endpoint-viewstate");
+        crate::plex::reset_servers_for_test();
+                let sid = crate::plex::register_for_test("endpoint-viewstate", "127.0.0.1", 9, "synthetic", "cid");
+        let mut stores = crate::stores::Stores::default();
+        stores.viewstate.borrow_mut().owe_hubs_refresh_for_test();
+        let directory = crate::stores::browse::DirectorySnapshot::default();
+        let endpoints = crate::pms::with_refused_fetches_for_test(||
+            stores.viewstate_pump(directory.view()));
+        assert_eq!(endpoints.iter().map(|r| r.sid).collect::<Vec<_>>(), [sid]);
+        assert_eq!(stores.viewstate_pump(directory.view()).iter().count(), 0,
+            "refetch is consumed once");
+                crate::plex::reset_servers_for_test();
+    }
     use super::*;
 
-    // Every test here that touches a STATIC holds the crate-wide serial lock: the queue, the
-    // mailbox and the two refresh latches are process globals, and `request`/`pump` reach into `pms`
-    // and `metadata` — whose own tests drive the same statics. `reset()` doubles as setup and
-    // teardown. The fan-out block at the bottom is the exception and says so there: most of its
-    // cases grade pure functions, which is why the identity rule was factored out of the worker in
-    // the first place.
+    // Tests that touch the remaining compatibility stores hold the crate-wide serial lock. The
+    // ViewState queue, latches and adapter below are ordinary local values and need no lock by
+    // themselves; fan-out's pure identity cases need none at all.
     //
     // None of these calls `kick`. A host test has no registry, so a kicked write resolves no client
     // and is dropped with a log line — which is correct behaviour and useless as a subject. What is
@@ -670,20 +1070,33 @@ mod tests {
     const SRV_B: ServerId = ServerId::from_raw(1);
     const SRV_C: ServerId = ServerId::from_raw(2);
 
-    fn req(rk: &str, w: Write, detail: Option<&str>) -> Req {
+    fn detail(episode: &str) -> crate::stores::viewstate::DetailRefresh {
+        crate::stores::viewstate::DetailRefresh {
+            sid: SRV_A,
+            rk: "show".into(),
+            keep: Some(episode.into()),
+        }
+    }
+
+    fn req(state: &mut ViewStateState, rk: &str, w: Write,
+        detail: Option<crate::stores::viewstate::DetailRefresh>) -> Req {
+        let id = state.mint_request_id();
         Req {
+            id,
             sid: ServerId::UNSET,
             rk: rk.into(),
             w,
-            detail: detail.map(str::to_string),
+            detail,
             guid: String::new(),
         }
     }
 
     /// Queue a write without spawning anything — the half of [`request`] under test here.
-    fn enqueue(rk: &str, w: Write, detail: Option<&str>) {
-        coalesce(ServerId::UNSET, rk, w);
-        queue().push(req(rk, w, detail));
+    fn enqueue(state: &mut ViewStateState, rk: &str, w: Write,
+        detail: Option<crate::stores::viewstate::DetailRefresh>) {
+        state.coalesce(ServerId::UNSET, rk, w);
+        let req = req(state, rk, w, detail);
+        state.queue.push(req);
     }
 
     /// One source's answer, as [`ask_sources`] would have built it: `Some` is an answer (empty =
@@ -692,8 +1105,8 @@ mod tests {
         (id, Some(keys.iter().map(|k| k.to_string()).collect()))
     }
 
-    fn queued() -> Vec<(String, Write)> {
-        queue().iter().map(|r| (r.rk.clone(), r.w)).collect()
+    fn queued(state: &ViewStateState) -> Vec<(String, Write)> {
+        state.queue.iter().map(|r| (r.rk.clone(), r.w)).collect()
     }
 
     /// Two presses on one item are ONE write, and it is the latest one — a scrobble and an
@@ -701,62 +1114,53 @@ mod tests {
     /// not what the user asked for and is not even deterministic.
     #[test]
     fn a_second_press_on_one_item_replaces_the_queued_write_rather_than_joining_it() {
-        let _g = crate::testlock::serial();
-        reset();
+        let mut state = ViewStateState::default();
 
-        enqueue("7", Write::Watched, None);
-        enqueue("9", Write::Watched, None);
-        enqueue("7", Write::Unwatched, None); // the user changed their mind about 7
+        enqueue(&mut state, "7", Write::Watched, None);
+        enqueue(&mut state, "9", Write::Watched, None);
+        enqueue(&mut state, "7", Write::Unwatched, None); // the user changed their mind about 7
 
         assert_eq!(
-            queued(),
+            queued(&state),
             vec![("9".into(), Write::Watched), ("7".into(), Write::Unwatched)],
             "7's earlier write is gone and its latest one is queued behind 9's, in press order"
         );
-        reset();
     }
 
     /// …but a deck removal is a DIFFERENT decision about the same item, so a watched toggle must not
     /// swallow it. Both are owed a round trip.
     #[test]
     fn a_deck_removal_and_a_watched_toggle_on_one_item_are_two_writes() {
-        let _g = crate::testlock::serial();
-        reset();
+        let mut state = ViewStateState::default();
 
-        enqueue("7", Write::RemoveFromDeck, None);
-        enqueue("7", Write::Watched, None);
+        enqueue(&mut state, "7", Write::RemoveFromDeck, None);
+        enqueue(&mut state, "7", Write::Watched, None);
 
         assert_eq!(
-            queued(),
+            queued(&state),
             vec![
                 ("7".into(), Write::RemoveFromDeck),
                 ("7".into(), Write::Watched)
             ],
             "two families, two writes, in the order pressed"
         );
-        reset();
     }
 
     /// A write already ON THE WIRE is not coalesced away: the client cannot recall it, so pretending
     /// otherwise would drop the press that supersedes it and leave the server on the older answer.
     #[test]
     fn a_write_already_in_flight_is_never_coalesced_away() {
-        let _g = crate::testlock::serial();
-        reset();
-        unsafe { *addr_of_mut!(SENT) = Some(req("7", Write::Watched, None)) };
+        let mut state = ViewStateState::default();
+        state.sent = Some(req(&mut state, "7", Write::Watched, None));
 
-        enqueue("7", Write::Unwatched, None);
+        enqueue(&mut state, "7", Write::Unwatched, None);
 
-        assert!(
-            unsafe { (*addr_of!(SENT)).is_some() },
-            "the one on the wire stays out"
-        );
+        assert!(state.sent.is_some(), "the one on the wire stays out");
         assert_eq!(
-            queued(),
+            queued(&state),
             vec![("7".into(), Write::Unwatched)],
             "and its successor is queued behind it"
         );
-        reset();
     }
 
     /// The refresh is owed ONCE, at the end of a burst — not per write. Ticking four episodes
@@ -764,44 +1168,34 @@ mod tests {
     /// carry the episode the filmstrip has to land back on.
     #[test]
     fn the_refresh_waits_for_the_last_write_of_a_burst_and_carries_the_kept_episode() {
-        let _g = crate::testlock::serial();
-        reset();
+        let mut state = ViewStateState::default();
 
-        unsafe { *addr_of_mut!(SENT) = Some(req("1", Write::Watched, Some("1"))) };
-        enqueue("2", Write::Watched, Some("2"));
-        assert!(is_busy());
+        state.sent = Some(req(&mut state, "1", Write::Watched, Some(detail("1"))));
+        enqueue(&mut state, "2", Write::Watched, Some(detail("2")));
+        assert!(state.is_busy());
 
         // write 1 answers — the latches arm, but the queue is not empty, so nothing is refreshed
-        let landed = unsafe { (*addr_of_mut!(SENT)).take() }.expect("a write was out");
-        unsafe {
-            *addr_of_mut!(WANT_HUBS) = true;
-            *addr_of_mut!(WANT_DETAIL) = landed.detail;
-        }
+        let landed = state.sent.take().expect("a write was out");
+        state.want_hubs = true;
+        state.want_detail = landed.detail;
         assert!(
-            is_busy(),
+            state.is_busy(),
             "write 2 is still queued — the refresh is not owed yet"
         );
 
         // …and write 2 answers, superseding which episode the filmstrip lands back on
-        let two = queue().remove(0);
-        unsafe {
-            *addr_of_mut!(WANT_HUBS) = true;
-            *addr_of_mut!(WANT_DETAIL) = two.detail;
-        }
-        assert!(!is_busy());
-        let (hubs, detail) = unsafe {
-            (
-                std::mem::take(&mut *addr_of_mut!(WANT_HUBS)),
-                (*addr_of_mut!(WANT_DETAIL)).take(),
-            )
-        };
+        let two = state.queue.remove(0);
+        state.want_hubs = true;
+        state.want_detail = two.detail;
+        assert!(!state.is_busy());
+        let hubs = std::mem::take(&mut state.want_hubs);
+        let detail = state.want_detail.take();
         assert!(hubs, "exactly one hub refetch is owed for the burst");
         assert_eq!(
-            detail.as_deref(),
+            detail.as_ref().and_then(|target| target.keep.as_deref()),
             Some("2"),
             "…and the LAST write's episode is the one kept"
         );
-        reset();
     }
 
     /// A refused spawn must neither panic nor block nor silently lose the press: the write goes back
@@ -809,62 +1203,62 @@ mod tests {
     /// the OS out of threads, which no host test can arrange, so what is graded is the recovery.
     #[test]
     fn a_refused_spawn_keeps_the_write_at_the_head_of_the_queue_and_waits_out_the_ladder() {
-        let _g = crate::testlock::serial();
-        reset();
+        let mut state = ViewStateState::default();
 
         // exactly what `kick`'s refusal branch does
-        enqueue("5", Write::Watched, None);
-        let head = queue().remove(0);
-        queue().insert(0, head);
-        unsafe { *addr_of_mut!(RETRY_CD) = RETRY_FRAMES };
+        enqueue(&mut state, "5", Write::Watched, None);
+        let head = state.queue.remove(0);
+        state.queue.insert(0, head);
+        state.retry_cd = RETRY_FRAMES;
 
         assert_eq!(
-            queued(),
+            queued(&state),
             vec![("5".into(), Write::Watched)],
             "the press survives the refusal"
         );
         assert!(
-            unsafe { (*addr_of!(SENT)).is_none() },
+            state.sent.is_none(),
             "and nothing is recorded as in flight"
         );
 
         for i in 1..RETRY_FRAMES {
-            assert!(!retry_tick(), "frame {i} of the wait is not the due one");
+            assert!(!state.retry_tick(), "frame {i} of the wait is not the due one");
         }
         assert!(
-            retry_tick(),
+            state.retry_tick(),
             "the ladder is spent after RETRY_FRAMES frames"
         );
-        assert_eq!(unsafe { *addr_of!(RETRY_CD) }, 0);
+        assert_eq!(state.retry_cd, 0);
         assert!(
-            retry_tick(),
+            state.retry_tick(),
             "…and stays due until a fresh refusal re-arms it"
         );
-        reset();
     }
 
     /// `reset` is what an identity change leans on: nothing of the previous account's may be left
     /// queued, in flight, or owed a refresh.
     #[test]
     fn reset_leaves_nothing_queued_in_flight_or_owed() {
-        let _g = crate::testlock::serial();
-        reset();
-        enqueue("1", Write::Watched, Some(""));
-        unsafe {
-            *addr_of_mut!(SENT) = Some(req("2", Write::Unwatched, None));
-            *addr_of_mut!(WANT_HUBS) = true;
-            *addr_of_mut!(WANT_DETAIL) = Some("3".into());
-            *addr_of_mut!(RETRY_CD) = 9;
-        }
-        *MAIL.lock().unwrap_or_else(|e| e.into_inner()) = Some(Done::default());
+        let mut state = ViewStateState::default();
+        let adapter = Arc::new(ViewStateAdapter::default());
+        enqueue(&mut state, "1", Write::Watched, Some(detail("1")));
+        let sent = req(&mut state, "2", Write::Unwatched, None);
+        let sent_id = sent.id;
+        state.sent = Some(sent);
+        state.want_hubs = true;
+        state.want_detail = Some(detail("3"));
+        state.retry_cd = 9;
+        *adapter.mail.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(Completion { id: sent_id, done: Done::default() });
 
-        reset();
+        state.reset();
 
-        assert!(!is_busy());
-        assert!(MAIL.lock().unwrap_or_else(|e| e.into_inner()).is_none());
-        assert!(!unsafe { *addr_of!(WANT_HUBS) });
-        assert!(unsafe { (*addr_of!(WANT_DETAIL)).is_none() });
-        assert_eq!(unsafe { *addr_of!(RETRY_CD) }, 0);
+        assert!(!state.is_busy());
+        assert!(!state.want_hubs);
+        assert!(state.want_detail.is_none());
+        assert_eq!(state.retry_cd, 0);
+        assert!(adapter.mail.lock().unwrap_or_else(|e| e.into_inner()).is_some(),
+            "state reset does not mutate an adapter; the owning store retires it wholesale");
     }
 
     // ---- the fan-out ---------------------------------------------------------------------
@@ -962,80 +1356,137 @@ mod tests {
     #[test]
     fn the_landing_flips_another_sources_copy_the_press_could_not_reach() {
         let _g = crate::testlock::serial();
-        reset();
+        let mut metadata_store = crate::stores::metadata::MetadataStore::default();
         // the page is mounted on the SHARE's copy, which the press on our own copy never touched
-        crate::metadata::install_for_test(Some(crate::metadata::Detail {
+        crate::metadata::install_for_test(metadata_store.state_mut(), Some(crate::metadata::Detail {
             sid: SRV_B,
             rk: "4".into(),
             resume_ms: 900_000,
             ..Default::default()
         }));
 
-        edit_local(SRV_A, "4", Write::Watched); // our copy: same key, different film, no effect here
+        edit_local_with_owners(SRV_A, "4", Write::Watched, &mut |_| false,
+            &mut |_cmd| crate::stores::StoreOutcome::default(), &mut |_| false, &mut |_| false, &mut |_| false,
+            &mut |cmd| metadata_store.run(cmd));
         assert!(
-            !crate::metadata::current().unwrap().watched,
+            !metadata_store.view().current().unwrap().watched,
             "A's 4 is not B's 4"
         );
 
-        edit_local(SRV_B, "4", Write::Watched); // …and the fan-out's report, which is
-        assert!(crate::metadata::current().unwrap().watched);
+        edit_local_with_owners(SRV_B, "4", Write::Watched, &mut |_| false,
+            &mut |_cmd| crate::stores::StoreOutcome::default(), &mut |_| false, &mut |_| false, &mut |_| false,
+            &mut |cmd| metadata_store.run(cmd));
+        assert!(metadata_store.view().current().unwrap().watched);
         assert_eq!(
-            crate::metadata::current().unwrap().resume_ms,
+            metadata_store.view().current().unwrap().resume_ms,
             0,
             "watched stops offering to resume"
         );
 
-        crate::metadata::install_for_test(None);
-        reset();
+        crate::metadata::install_for_test(metadata_store.state_mut(), None);
     }
 
-    /// **The landing itself, driven through [`pump`].** The test above grades what `edit_local`
-    /// does; this one grades that `pump` actually CALLS it — for every copy the worker reported,
+    /// **The landing itself, driven through [`ViewStateState::pump`].** The test above grades what
+    /// `edit_local_with_owners` does; this one grades that the pump actually CALLS it — for every copy the worker reported,
     /// with the write that was SENT rather than whatever was pressed since — and then clears the
     /// in-flight slot. Without this the fan-out could report copies nobody ever applied, and every
     /// pure test above would still be green.
     #[test]
     fn the_landing_applies_the_workers_whole_report_and_retires_the_write() {
         let _g = crate::testlock::serial();
-        reset();
+        let mut metadata_store = crate::stores::metadata::MetadataStore::default();
         // the mounted page is the SHARE's copy — the one the press could not reach
-        crate::metadata::install_for_test(Some(crate::metadata::Detail {
+        crate::metadata::install_for_test(metadata_store.state_mut(), Some(crate::metadata::Detail {
             sid: SRV_B,
             rk: "4".into(),
             ..Default::default()
         }));
 
         // a write that went out on OUR copy, and the worker's answer naming the share's
-        unsafe {
-            *addr_of_mut!(SENT) = Some(Req {
-                sid: SRV_A,
-                rk: "4".into(),
-                w: Write::Watched,
-                detail: None, // no detail re-read: this press came from a Home card menu
-                guid: "plex://movie/6856893830a4aaafd5c4291d".into(),
-            })
-        };
-        *MAIL.lock().unwrap_or_else(|e| e.into_inner()) = Some(Done {
-            ok: true,
-            also: vec![(SRV_B, "4".into())],
+        let mut state = ViewStateState::default();
+        let adapter = Arc::new(ViewStateAdapter::default());
+        let id = state.mint_request_id();
+        state.sent = Some(Req {
+            id,
+            sid: SRV_A,
+            rk: "4".into(),
+            w: Write::Watched,
+            detail: None, // no detail re-read: this press came from a Home card menu
+            guid: "plex://movie/6856893830a4aaafd5c4291d".into(),
+        });
+        *adapter.mail.lock().unwrap_or_else(|e| e.into_inner()) = Some(Completion {
+            id,
+            done: Done { ok: true, also: vec![(SRV_B, "4".into())] },
         });
 
-        pump();
+        let _outcome = state.pump(&adapter, &mut |_| false,
+            &mut |_cmd| crate::stores::StoreOutcome::default(), &mut |_| false, &mut |_| false, &mut |_| false,
+            &mut |cmd| metadata_store.run(cmd));
 
         assert!(
-            crate::metadata::current().unwrap().watched,
+            metadata_store.view().current().unwrap().watched,
             "the page mounted on the share's copy is flipped by the landing, not by the press"
         );
         assert!(
-            !is_busy(),
+            !state.is_busy(),
             "…and the write that reported is no longer in flight"
         );
         assert!(
-            MAIL.lock().unwrap_or_else(|e| e.into_inner()).is_none(),
+            adapter.mail.lock().unwrap_or_else(|e| e.into_inner()).is_none(),
             "the mailbox is drained"
         );
 
-        crate::metadata::install_for_test(None);
-        reset();
+        crate::metadata::install_for_test(metadata_store.state_mut(), None);
+    }
+
+    #[test]
+    fn only_the_exact_monotone_request_identity_can_retire_a_flight() {
+        let _guard = crate::testlock::serial();
+        let mut state = ViewStateState::default();
+        let adapter = Arc::new(ViewStateAdapter::default());
+        let first = req(&mut state, "before-reset", Write::Watched, None);
+        let first_id = first.id;
+        state.sent = Some(first);
+        state.reset();
+        let second = req(&mut state, "after-reset", Write::Unwatched, None);
+        let second_id = second.id;
+        assert!(second_id.0 > first_id.0, "request identity stays monotone across reset");
+        state.sent = Some(second);
+        *adapter.mail.lock().unwrap_or_else(|e| e.into_inner()) = Some(Completion {
+            id: first_id,
+            done: Done::default(),
+        });
+
+        let _ = state.pump(&adapter, &mut |_| false,
+            &mut |_| crate::stores::StoreOutcome::default(), &mut |_| false, &mut |_| false, &mut |_| false,
+            &mut |_| false);
+
+        assert_eq!(state.sent.as_ref().map(|request| request.id), Some(second_id),
+            "a stale or mismatched completion cannot satisfy the current in-flight identity");
+        assert!(!state.want_hubs);
+        assert!(state.want_detail.is_none());
+    }
+
+    #[test]
+    fn deferred_detail_refresh_keeps_the_originating_page_address() {
+        let _guard = crate::testlock::serial();
+        let target = crate::stores::viewstate::DetailRefresh {
+            sid: SRV_B,
+            rk: "origin-show".into(),
+            keep: Some("episode-7".into()),
+        };
+        let mut state = ViewStateState::default();
+        let adapter = Arc::new(ViewStateAdapter::default());
+        let request = req(&mut state, "episode-7", Write::Watched, Some(target.clone()));
+        let id = request.id;
+        state.sent = Some(request);
+        *adapter.mail.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(Completion { id, done: Done::default() });
+
+        let _ = state.pump(&adapter, &mut |_| false,
+            &mut |_| crate::stores::StoreOutcome::default(), &mut |_| false, &mut |_| false, &mut |_| false,
+            &mut |_| false);
+
+        assert_eq!(state.take_detail_refresh(), Some(target));
     }
 }

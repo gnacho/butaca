@@ -1,0 +1,17 @@
+[
+  {
+    "name": "stable",
+    "app_id": "com.butaca",
+    "object_id": "plxstate.stable"
+  },
+  {
+    "name": "debug",
+    "app_id": "com.butaca.debug",
+    "object_id": "plxstate.debug"
+  },
+  {
+    "name": "nightly",
+    "app_id": "com.butaca.nightly",
+    "object_id": "plxstate.night"
+  }
+]

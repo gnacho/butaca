@@ -5,11 +5,13 @@
 //! the app "had no idea such a thing existed" — the reviewer derived the cause from the server's
 //! own transcoder logs. The Plex Pass audit (`docs/plex-pass-audit.md`) names the bug class this
 //! kills: a claim true on the development environment (a Pass'd server) asserted as universal.
-//! This module is the app finally *knowing*, so `ui::stats` can print it and
+//! This module is the app finally *knowing*, so `app::diagnostics` can print it and
 //! `player::error_shape` can name the cause in words.
 //!
 //! **Visibility only, never behavior.** Nothing here may feed a routing or profile decision —
-//! see [`subscription`]'s doc for why that is a rule and not a gap.
+//! see [`subscription`]'s doc for why that is a rule and not a gap. "Visibility" includes whether
+//! a Plex Pass feature is OFFERED at all (issue #266's audio enhancement, `route::enhancements_offered`):
+//! the subscription decides that a toggle exists, and never which flavour or profile a stream gets.
 //!
 //! **PER SERVER, keyed the way the registry is.** This was one process-global answer, justified
 //! by "host/port fix at the first install (a later install is only a token swap)" — a premise
@@ -38,8 +40,9 @@ use std::sync::Mutex;
 /// (never fetched, fetch failed, or a PMS old enough not to say) must stay distinguishable from
 /// a real "no" — the error wording in `player::error_shape` blames a missing Pass only on a
 /// known-free server, never on one we merely haven't heard from.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(crate) enum Subscription {
+    #[default]
     Unknown = 0,
     No = 1,
     Yes = 2,
@@ -126,6 +129,14 @@ pub(crate) fn version_of(id: ServerId) -> String {
 /// stale or `Unknown` at decision time (boot races, a fetch that failed, an old PMS that never
 /// says), so a decision built on it would be issue #22's bug again with the polarity flipped:
 /// a dev-environment claim — this time "we know the subscription" — asserted as universal.
+///
+/// **What it MAY decide is whether a Plex Pass feature is offered** (issue #266's I8): the audio
+/// enhancement (`route::enhancements_offered`) is shown, and asked for, only on a server known to
+/// answer `Yes`. That is visibility, not routing — `Unknown` and `No` both hide it, so a stale or
+/// missing answer degrades to exactly the app without the feature, never to a different flavour,
+/// and once the viewer has opted in the request still goes through the ordinary flavour machinery
+/// (`route::flavors_allowed`) and falls back if the server refuses. It never picks the flavour or
+/// the profile for anything that is not that opt-in.
 pub(crate) fn subscription() -> Subscription {
     subscription_of(super::current_server())
 }
@@ -189,6 +200,7 @@ fn fetch_once(id: ServerId, c: &Client) {
     // per-server override. Checked here, once per fetch, rather than in `subscription()` — that
     // accessor is on per-frame paths and `dev::flag` is a filesystem stat.
     if crate::dev::flag("nopass") {
+        #[cfg(feature = "devtriggers")]
         crate::log("pms: /tmp/plxnative-nopass — reporting subscription as No");
         sub = Subscription::No;
     }
@@ -239,7 +251,7 @@ fn store(id: ServerId, sub: Subscription, version: &str) {
 /// Test-only: publish one server's answer without a round trip.
 ///
 /// [`store`] is this module's private seam, and the suites that need it are the ones grading its
-/// READERS — `player::playing_subscription` and `ui::detail::item_subscription`, both of which
+/// READERS — `player::playing_subscription` and `screens::detail::hero::item_subscription`, both of which
 /// answer "whose server is this item on" and neither of which can reach a real PMS. Callers must
 /// hold `crate::testlock::serial()`: the slot arrays are crate globals, and they deliberately
 /// outlive `servers::reset_for_test` (they are keyed on the SLOT, not on the client), so a test
@@ -335,7 +347,7 @@ mod tests {
     #[test]
     fn one_servers_plex_pass_is_never_read_as_the_others() {
         use super::super::servers;
-        struct Fresh(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+        struct Fresh(#[allow(dead_code)] crate::testlock::Serial);
         impl Drop for Fresh {
             fn drop(&mut self) {
                 servers::reset_for_test();

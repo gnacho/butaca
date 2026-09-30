@@ -100,6 +100,77 @@ impl Scheme {
 /// The port a PMS origin means when its URL names none. See the module doc: 32400, not 80/443.
 pub const DEFAULT_PORT: i32 = 32400;
 
+/// **The build's half of "may a credential ride this origin".** The question itself has ONE
+/// answer, `super::grant::credential_allowed` (or `grant::allowed_under` in a pure function that
+/// receives this value): this policy, OR a live consented plaintext grant for that exact origin
+/// (PLX-NATIVE-10). Every caller that used to carry its own `cfg!(feature = "devtriggers")` (the
+/// http guard, the curlio media twin, the probe activation gate) now goes through it, and
+/// [`CredentialPolicy::build`] is the ONLY place the cfg still lives.
+///
+/// A store build is [`CredentialPolicy::HttpsOnly`]: by policy a token may only ride a TLS origin
+/// (a grant is the one exception, and it lives in `grant`, not here). A
+/// developer build (`devtriggers`) is [`CredentialPolicy::AllowPlaintext`]: the rule exists so a
+/// lane with no TLS server of its own can still exercise the credentialed path against a plain
+/// `dev::DevServer` — unless `/tmp/plxnative-storepolicy` was armed at boot, which
+/// gives a developer build the store's `HttpsOnly` so the consent flow (reachable only under it)
+/// can be exercised in the sim and on the TV. The trigger only ever tightens, and a store build
+/// has no trigger to read. Nothing about WHICH origin is eligible ever depends on where the policy came
+/// from — a pure function receives it as a parameter. [`build`](CredentialPolicy::build) itself is
+/// no longer just the two discovery live edges (`auth::resolve_roster_live_while`,
+/// `auth::probe_profile_resource_live`): the registry asks it too, at every write that admits an
+/// origin — `servers::register_origin`, `servers::register_captured_origin_with_connection` and
+/// `servers::register_pinned_with_client_id` — so a stored origin is graded by the same rule a
+/// discovered one is, and the transport boundary (`http::credential_transport_allowed`) still asks
+/// it a third time, per request, as the backstop if either ever admitted one wrongly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CredentialPolicy {
+    /// A store build: only a TLS origin may carry a credential by policy — the one exception, a
+    /// live consented plaintext grant, is `super::grant`'s, never this type's.
+    HttpsOnly,
+    /// A developer build: any origin may, matching every build's behaviour before this type
+    /// existed.
+    AllowPlaintext,
+}
+
+#[cfg(all(feature = "devtriggers", not(test)))]
+crate::dev::latched_flag!(
+    /// `/tmp/plxnative-storepolicy` — a developer build takes the store's
+    /// [`CredentialPolicy::HttpsOnly`], read once at boot, so the PLX-NATIVE-10 consent flow (which
+    /// `AllowPlaintext` never needs) is reachable in the sim and on the TV. Absent from a store
+    /// build, and never read by a host test: a stray file on a developer's machine must not change
+    /// what the suite grades.
+    fn store_policy_forced = "storepolicy";
+);
+#[cfg(not(all(feature = "devtriggers", not(test))))]
+fn store_policy_forced() -> bool {
+    false
+}
+
+impl CredentialPolicy {
+    /// The build's own policy — **the only `cfg!` for this rule in the whole crate.** Every other
+    /// caller either receives this value as a parameter (a pure function) or calls this directly
+    /// at a live edge; nothing else re-derives it.
+    pub fn build() -> Self {
+        Self::of_build(cfg!(feature = "devtriggers"), store_policy_forced())
+    }
+
+    /// [`build`](Self::build)'s rule, pure: a developer build allows plaintext unless the store
+    /// policy was forced; anything else is `HttpsOnly`. Forcing can only tighten.
+    pub(crate) const fn of_build(devtriggers: bool, store_forced: bool) -> Self {
+        if devtriggers && !store_forced {
+            CredentialPolicy::AllowPlaintext
+        } else {
+            CredentialPolicy::HttpsOnly
+        }
+    }
+
+    /// May a credential ride `origin` under this policy? TLS always; plaintext only under
+    /// [`CredentialPolicy::AllowPlaintext`].
+    pub fn may_carry_credential(self, origin: &Origin) -> bool {
+        origin.is_tls() || self == CredentialPolicy::AllowPlaintext
+    }
+}
+
 /// **One server's address, completely.** Scheme, host and port — no path, no query, no trailing
 /// slash. See the module doc for the bracket invariant on [`Origin::host`] vs [`Origin::authority`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,6 +230,30 @@ impl Origin {
         let p = Parts::of(url);
         (p.scheme_known && !p.host.is_empty() && !p.port_bad)
             .then(|| Origin::new(p.scheme, p.host, p.port.unwrap_or(DEFAULT_PORT)))
+    }
+
+    /// Parse an advertised `Connection.uri`, but fall back to the connection's own advertised
+    /// `port` — not [`DEFAULT_PORT`] — when the URI wrote none.
+    ///
+    /// plex.tv's `plex.direct` URIs always spell their port (`…plex.direct:32400`). A **custom
+    /// server-access URL** does not: `https://plex.example.com` carries no port, and its owner is
+    /// serving it on 443 (a reverse proxy), which is exactly what the connection's `port` field
+    /// reports. Parsing such a URI through [`parse`] would apply the 32400 PMS default and dial a
+    /// closed port — the whole server then reads as unreachable, with no relay to fall back on
+    /// (observed live: a share whose only remote was `https://<custom>` at `port:443`, timing out
+    /// at every probe deadline while the official client reached it fine). A URI that DID write a
+    /// port keeps it; `advertised` is the fallback, and only a `port_bad` URI (a written-but-
+    /// garbage port) is still refused.
+    pub fn parse_connection(uri: &str, advertised: i64) -> Option<Origin> {
+        let p = Parts::of(uri);
+        if !p.scheme_known || p.host.is_empty() || p.port_bad {
+            return None;
+        }
+        let port = p
+            .port
+            .or_else(|| dial_port(advertised))
+            .unwrap_or(DEFAULT_PORT);
+        Some(Origin::new(p.scheme, p.host, port))
     }
 
     pub fn scheme(&self) -> Scheme {
@@ -312,6 +407,161 @@ impl<'a> Parts<'a> {
     }
 }
 
+/// **A DNS shortcut for one origin, validated: dial this literal instead of resolving
+/// [`Origin::host`].** It never validates anything — TLS still checks the certificate against the
+/// hostname, which stays in the URL and in SNI. libcurl is merely told the answer DNS would have
+/// given (`CURLOPT_RESOLVE`), so no lookup happens at all.
+///
+/// ## Why it exists
+///
+/// plex.tv advertises the household's OWN server as `https://192-168-0-10.<hash>.plex.direct`,
+/// and that name resolves only through Plex's public wildcard zone. Discovery ranks TLS first and
+/// persists the winner, so a LAN server is normally stored under that name — and on a LAN whose
+/// uplink is down it can no longer be found, although it is one hop away. The plaintext twin
+/// [`super::probe::candidates`] synthesizes for exactly this case cannot carry a token in a store
+/// build (`crate::http::credential_transport_allowed`), so the only offline route is the TLS name
+/// with its address supplied locally. That is this type.
+///
+/// ## What is accepted, and why the rule is narrow
+///
+/// A pin is built ONLY for a TLS origin whose host is a dashed-address `*.plex.direct` label, and
+/// only when the address that label ENCODES equals the address stored beside it — the
+/// `Connection.address` plex.tv advertised, persisted as `ServerRef::address` / `SourceRef::address`.
+/// The stored address is what is dialled (data copied from plex.tv, per `docs/shared-servers.md`
+/// §1); the decode is the cross-check. Two consequences:
+///
+/// * a mismatch, an undecodable label, a plain hostname or a literal host yields `None`, and the
+///   request resolves through DNS exactly as before — a wrong guess can only COST a pin, never
+///   produce a wrong one;
+/// * a valid pin is a pure function of the hostname, so a mapping recorded once can never become
+///   stale when a registry slot re-points. That is what lets `crate::net::resolve` keep an
+///   append-only table for the media plane instead of threading this value through the engine.
+///
+/// The IPv6 label is Plex's documented spelling — the full eight groups joined by dashes, no `::`
+/// shorthand — and it is what this account's server advertises on the wire (captured 2026-09-05
+/// alongside the v4 form). An abbreviated fixture such as `2001-db8--1` is therefore not a label
+/// this decoder accepts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvePin {
+    host: String,
+    port: i32,
+    addr: std::net::IpAddr,
+}
+
+/// `CURLOPT_RESOLVE` learned bracketed IPv6 addresses in 7.57.0 (`0x073900`). Below it, the entry
+/// parser is `sscanf("%255[^:]:%d:%255s")` and takes the bare literal — verified in the 7.53.1
+/// source the development television runs.
+pub const CURL_RESOLVE_BRACKETS_SINCE: u32 = 0x07_39_00;
+
+impl ResolvePin {
+    /// The pin for `origin`, given the address plex.tv advertised (or a file persisted) beside it —
+    /// `None` unless every rule in the type doc holds.
+    pub fn for_origin(origin: &Origin, stored_address: &str) -> Option<ResolvePin> {
+        if !origin.is_tls() {
+            return None;
+        }
+        let stored: std::net::IpAddr = unbracket(stored_address.trim()).parse().ok()?;
+        let encoded = plex_direct_literal(origin.host())?;
+        (encoded == stored).then(|| ResolvePin {
+            host: origin.host().to_owned(),
+            port: origin.port(),
+            addr: stored,
+        })
+    }
+
+    /// A pin for a host no zone would ever answer for — the loopback tests' way of proving that a
+    /// name reached the wire through the pin and not through DNS. Production pins come only from
+    /// [`ResolvePin::for_origin`].
+    #[cfg(test)]
+    pub(crate) fn for_test(host: &str, port: i32, addr: std::net::IpAddr) -> ResolvePin {
+        ResolvePin {
+            host: host.to_owned(),
+            port,
+            addr,
+        }
+    }
+
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+    pub fn port(&self) -> i32 {
+        self.port
+    }
+    pub fn addr(&self) -> std::net::IpAddr {
+        self.addr
+    }
+
+    /// The `CURLOPT_RESOLVE` list entry — `host:port:address`, the v6 address bracketed only on a
+    /// libcurl that parses brackets (see [`CURL_RESOLVE_BRACKETS_SINCE`]).
+    pub fn entry(&self, curl_version_num: u32) -> String {
+        match self.addr {
+            std::net::IpAddr::V4(a) => format!("{}:{}:{a}", self.host, self.port),
+            std::net::IpAddr::V6(a) if curl_version_num >= CURL_RESOLVE_BRACKETS_SINCE => {
+                format!("{}:{}:[{a}]", self.host, self.port)
+            }
+            std::net::IpAddr::V6(a) => format!("{}:{}:{a}", self.host, self.port),
+        }
+    }
+
+    /// `"v4"` or `"v6"` — the only thing about a pin the event log says. The host is a dashed
+    /// LAN address in disguise and the address is that address; neither belongs in the file
+    /// users paste into issues (the scrubber catches the bare address, not the label).
+    pub fn family(&self) -> &'static str {
+        if self.addr.is_ipv6() {
+            "v6"
+        } else {
+            "v4"
+        }
+    }
+
+    /// Host and address, for a test's eyes. Never logged — see [`ResolvePin::family`].
+    pub fn log_form(&self) -> String {
+        format!("{} -> {}", self.host, self.addr)
+    }
+}
+
+/// The address a dashed `plex.direct` label encodes, or `None` for anything else.
+///
+/// `192-168-0-10.<label>.plex.direct` → `192.168.0.10`; eight dash-joined hex groups → the v6
+/// address. Only the FIRST label is read; the hash label and the zone are checked for shape, not
+/// meaning. This is the reverse of a mapping plex.tv performs and is used as a cross-check against
+/// an address it advertised — never to build a hostname ([`super::probe`]'s rule stands).
+pub fn plex_direct_literal(host: &str) -> Option<std::net::IpAddr> {
+    let host = unbracket(host);
+    let rest = host.strip_suffix(".plex.direct")?;
+    let (label, hash) = rest.split_once('.')?;
+    if hash.is_empty() || hash.contains('.') {
+        return None; // exactly `<address>.<hash>.plex.direct`
+    }
+    let groups: Vec<&str> = label.split('-').collect();
+    match groups.len() {
+        4 => {
+            let mut o = [0u8; 4];
+            for (i, g) in groups.iter().enumerate() {
+                if g.is_empty() || g.len() > 3 || !g.bytes().all(|b| b.is_ascii_digit()) {
+                    return None;
+                }
+                o[i] = g.parse().ok()?;
+            }
+            Some(std::net::IpAddr::V4(o.into()))
+        }
+        8 => {
+            if groups
+                .iter()
+                .any(|g| g.is_empty() || g.len() > 4 || !g.bytes().all(|b| b.is_ascii_hexdigit()))
+            {
+                return None;
+            }
+            groups
+                .join(":")
+                .parse::<std::net::Ipv6Addr>()
+                .ok()
+                .map(std::net::IpAddr::V6)
+        }
+        _ => None,
+    }
+}
+
 /// Strip the brackets a URL authority puts around a v6 literal, if they are there.
 fn unbracket(host: &str) -> &str {
     host.strip_prefix('[')
@@ -328,6 +578,42 @@ fn is_v6_literal(host: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// T1: the store-policy trigger makes a developer build `HttpsOnly`, and nothing can loosen a
+    /// store build.
+    #[test]
+    fn the_store_policy_trigger_only_tightens() {
+        assert_eq!(CredentialPolicy::of_build(true, false), CredentialPolicy::AllowPlaintext);
+        assert_eq!(CredentialPolicy::of_build(true, true), CredentialPolicy::HttpsOnly);
+        assert_eq!(CredentialPolicy::of_build(false, false), CredentialPolicy::HttpsOnly);
+        assert_eq!(CredentialPolicy::of_build(false, true), CredentialPolicy::HttpsOnly);
+    }
+
+    /// `parse_connection` falls back to the connection's advertised port for a portless custom URL,
+    /// keeps a port the URL DID write, and still refuses a written-but-garbage one. This is the
+    /// contract that stops a custom `https://host` (served on 443) from being dialled on 32400.
+    #[test]
+    fn parse_connection_takes_the_advertised_port_only_when_the_uri_omits_one() {
+        // portless custom URL → the advertised 443, not the 32400 PMS default
+        let o = Origin::parse_connection("https://plex.example.com", 443).unwrap();
+        assert_eq!(
+            (o.scheme(), o.host(), o.port()),
+            (Scheme::Https, "plex.example.com", 443)
+        );
+        assert_eq!(o.base(), "https://plex.example.com:443");
+
+        // a plex.direct URL that spells its port keeps it, ignoring the advertised fallback
+        let o = Origin::parse_connection("https://1-2-3-4.hash.plex.direct:32400", 443).unwrap();
+        assert_eq!(o.port(), 32400);
+
+        // an empty advertised port is not a port — fall through to the PMS default rather than 0
+        let o = Origin::parse_connection("https://plex.example.com", 0).unwrap();
+        assert_eq!(o.port(), DEFAULT_PORT);
+
+        // a written-but-garbage port is still refused (the `port_bad` guard `parse` also honours)
+        assert!(Origin::parse_connection("https://plex.example.com:", 443).is_none());
+        assert!(Origin::parse_connection("ftp://plex.example.com", 443).is_none());
+    }
 
     /// **The bracket invariant, as a round trip.** `host()` is the resolver's node and is bare;
     /// `authority()` is URL serialization and is bracketed; `base()` reproduces the input exactly.
@@ -546,5 +832,96 @@ mod tests {
             Scheme::Https < Scheme::Http,
             "probe RANKS on this order — TLS is the better connection"
         );
+    }
+
+    // ---- ResolvePin: the offline-mode shortcut ----
+
+    #[test]
+    fn a_plex_direct_v4_origin_with_a_matching_stored_address_yields_a_pin() {
+        let o = Origin::parse("https://192-168-0-10.h4sh.plex.direct:32400").unwrap();
+        let p = ResolvePin::for_origin(&o, "192.168.0.10").expect("pinned");
+        assert_eq!(p.host(), "192-168-0-10.h4sh.plex.direct");
+        assert_eq!(p.port(), 32400);
+        assert_eq!(p.addr(), "192.168.0.10".parse::<std::net::IpAddr>().unwrap());
+        assert_eq!(p.entry(0x07_35_01), "192-168-0-10.h4sh.plex.direct:32400:192.168.0.10");
+        assert_eq!(p.log_form(), "192-168-0-10.h4sh.plex.direct -> 192.168.0.10");
+        assert_eq!(p.family(), "v4");
+    }
+
+    #[test]
+    fn a_plex_direct_v6_origin_with_a_matching_stored_address_yields_a_pin() {
+        // The eight-group label plex.tv actually advertises (captured 2026-09-05), no `::`.
+        let o = Origin::parse("https://2001-0db8-0000-0000-0000-0000-0000-0001.h4sh.plex.direct:32400")
+            .unwrap();
+        let p = ResolvePin::for_origin(&o, "2001:db8::1").expect("pinned");
+        assert_eq!(p.addr(), "2001:db8::1".parse::<std::net::IpAddr>().unwrap());
+        assert_eq!(p.family(), "v6");
+        // …and a bracketed spelling of the stored address is the same address
+        assert_eq!(ResolvePin::for_origin(&o, "[2001:db8::1]"), Some(p));
+    }
+
+    #[test]
+    fn the_entry_is_bare_v6_below_7_57_and_bracketed_from_7_57() {
+        let o = Origin::parse("https://2001-0db8-0000-0000-0000-0000-0000-0001.h4sh.plex.direct:32400")
+            .unwrap();
+        let p = ResolvePin::for_origin(&o, "2001:db8::1").unwrap();
+        // the development television's 7.53.1 parses `%255[^:]:%d:%255s`: bare
+        assert_eq!(
+            p.entry(0x07_35_01),
+            "2001-0db8-0000-0000-0000-0000-0000-0001.h4sh.plex.direct:32400:2001:db8::1"
+        );
+        assert_eq!(
+            p.entry(CURL_RESOLVE_BRACKETS_SINCE),
+            "2001-0db8-0000-0000-0000-0000-0000-0001.h4sh.plex.direct:32400:[2001:db8::1]"
+        );
+        assert_eq!(
+            p.entry(0x08_00_00),
+            "2001-0db8-0000-0000-0000-0000-0000-0001.h4sh.plex.direct:32400:[2001:db8::1]"
+        );
+    }
+
+    #[test]
+    fn a_mismatched_or_undecodable_label_yields_no_pin() {
+        let v4 = Origin::parse("https://192-168-0-10.h4sh.plex.direct:32400").unwrap();
+        // the address the label encodes is not the one stored beside it: no pin, DNS as before
+        assert_eq!(ResolvePin::for_origin(&v4, "192.168.0.11"), None);
+        assert_eq!(ResolvePin::for_origin(&v4, ""), None);
+        assert_eq!(ResolvePin::for_origin(&v4, "nas.local"), None);
+        // plaintext never pins: the raw socket dials the literal it is given
+        let http = Origin::parse("http://192-168-0-10.h4sh.plex.direct:32400").unwrap();
+        assert_eq!(ResolvePin::for_origin(&http, "192.168.0.10"), None);
+        // a literal host has nothing to resolve
+        let lit = Origin::parse("https://192.168.0.10:32400").unwrap();
+        assert_eq!(ResolvePin::for_origin(&lit, "192.168.0.10"), None);
+        // a share's own hostname is not a plex.direct label
+        let name = Origin::parse("https://nas.example.net:31234").unwrap();
+        assert_eq!(ResolvePin::for_origin(&name, "203.0.113.9"), None);
+        // the abbreviated v6 spelling this repo's fixtures guessed is NOT what plex.tv sends
+        let abbrev = Origin::parse("https://2001-db8--1.h4sh.plex.direct:32400").unwrap();
+        assert_eq!(ResolvePin::for_origin(&abbrev, "2001:db8::1"), None);
+    }
+
+    #[test]
+    fn plex_direct_literal_decodes_only_the_documented_shapes() {
+        let ip = |s: &str| s.parse::<std::net::IpAddr>().unwrap();
+        assert_eq!(plex_direct_literal("192-168-0-10.h4sh.plex.direct"), Some(ip("192.168.0.10")));
+        assert_eq!(
+            plex_direct_literal("2001-0db8-0000-0000-0000-0000-0000-0001.h4sh.plex.direct"),
+            Some(ip("2001:db8::1"))
+        );
+        assert_eq!(plex_direct_literal("fe80-0-0-0-1-2-3-4.h4sh.plex.direct"), Some(ip("fe80::1:2:3:4")));
+        for bad in [
+            "192-168-0-10.plex.direct",        // no hash label
+            "192-168-0-10.h4sh.x.plex.direct", // one label too many
+            "192-168-0-256.h4sh.plex.direct",  // not an octet
+            "192-168-0.h4sh.plex.direct",      // three groups
+            "2001-db8--1.h4sh.plex.direct",    // abbreviated
+            "192-168-0-10.h4sh.plex.tv",       // wrong zone
+            "nas.h4sh.plex.direct",            // a name
+            "192.168.0.10",
+            "",
+        ] {
+            assert_eq!(plex_direct_literal(bad), None, "{bad}");
+        }
     }
 }

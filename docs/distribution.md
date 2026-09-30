@@ -1,3 +1,7 @@
+> Historical distribution research below is retained as dated analysis. The current license
+> is GPL-3.0-or-later; see `../LICENSING.md` and `../THIRD-PARTY-NOTICES.md`. Earlier MIT
+> recommendations below do not describe the current tree.
+
 # Distribution: what it takes to ship this publicly
 
 Researched 2026-08-01 against live primary sources (webosbrew apps-repo + schemas, LG developer
@@ -424,7 +428,11 @@ The media stack is permitted by an **LS2 role file the Dev Mode installer writes
 nothing we declare. On the device, `/var/palm/ls2-dev/roles/pub/com.beb.plxnative.json` grants
 `com.webos.media.client.*`, `com.webos.rm.client.*`, `com.webos.pipeline.*` with in/outbound to
 `com.webos.media`. That is exactly the surface StarfishMediaAPIs needs, and it is why **no
-`requiredPermissions` field is needed in `appinfo.json`** (neither Kodi nor Moonlight sets one).
+`requiredPermissions` entry is needed for playback itself** (neither Kodi nor Moonlight declares
+one for it). Since the storage helper landed, `appinfo.json` DOES carry `requiredPermissions` —
+`database.operation` and `securitykey.operation`, both the storage service's, for the local DB8
+keystore and the platform key manager it wraps — so the field is no longer absent; it is just
+declared for a surface neither Kodi nor Moonlight has an equivalent of.
 
 Corroboration: Kodi's `MediaPipelineWebOS.cpp` drives `mediaTransportType: "BUFFERSTREAM"` and
 `AcbAPI_initialize(…, PLAYER_TYPE_MSE, getenv("APPID"), …)`, and its own docs say *"you do not need
@@ -513,7 +521,7 @@ world-readable `/tmp` on the TV across many runs.
 - `sshpass -p alpine` (`Makefile:24-25`) — **not a secret.** `alpine` is the published webosbrew
   dev-mode root password; the repo's own skill says so. Publishable. It does teach an insecure
   default and will authenticate against *any* rooted webOS TV a contributor points `TV=` at.
-- `192.168.0.114` / `192.168.0.3` — RFC1918, low risk, but they are the maintainer's home topology,
+- `TV_HOST` / `PMS_HOST` — RFC1918, low risk, but they are the maintainer's home topology,
   they are the defaults every contributor inherits, **and one of them gets baked into the binary**.
   **FIXED 2026-08-02.** `git ls-files | xargs grep '192\.168\.0\.'` is now empty outside this
   section, which keeps its citations on purpose. The TV's address moved to the gitignored
@@ -530,7 +538,7 @@ world-readable `/tmp` on the TV across many runs.
 
 **What a public build would leak (verified by `strings` on `pkg/plxnative` and inside the ipk):**
 
-1. `192.168.0.3` — `PMS_HOST` from `config.local.h` is compiled in. *(Only used on the
+1. `PMS_HOST` — `PMS_HOST` from `config.local.h` is compiled in. *(Only used on the
    `/tmp/plxnative-token` automation branch — `app.rs:436-438` — so a public build with no
    `config.local.h` compiles the `"YOUR_PMS_HOST"` placeholder and never uses it. Still, don't ship a
    binary built on this machine.)*
@@ -628,7 +636,10 @@ Privacy & data. First run asks about the two purposes separately and offers the 
 preview before either answer: the first choice remains a draft, the second records both, and BACK
 records nothing either way — it steps back from the product question to the crash one, and on the
 crash question (which is asked once per sign-in, immediately after it and before the
-profile picker) there is nothing behind it, so it is swallowed rather than closing the ceremony.
+profile picker) there is nothing behind it *inside the app* — sign-in is the step behind it, and
+that cannot be undone — so BACK there is the platform's own root press (`docs/remote-keys.md` §8)
+rather than closing the ceremony: it neither answers nor dismisses the question, and returning to
+the app finds it still there.
 `PRIVACY.md` carries the schemas: usage is generated from
 `diag::schema::EVENT_SPECS`, native crashes are checked against their sanitizer allowlist, and
 handled playback errors use the same typed serializer/key-contract as the consent preview and
@@ -1189,7 +1200,13 @@ build you did not make.
 
 ## 8. Release CI (built 2026-08-01)
 
-`.github/workflows/{ci,release}.yml` + `.github/actions/webos-ndk` + `ci/`.
+`.github/workflows/{ci,release,nightly,build-package}.yml` + `.github/actions/webos-ndk` + `ci/`.
+The ARM build+verify pipeline itself lives once, in `build-package.yml`, as a reusable
+(`workflow_call`) workflow — `release.yml`'s `build` job and `nightly.yml`'s `build` job are both
+thin callers into it, selecting a flavour, a telemetry pair, and which optional steps (the
+Homebrew manifest, the LGPL source asset, caches, the firmware-database gate) apply. (A third
+caller, `canary.yml`, existed the same way before nightly replaced it; its public prereleases
+remain on GitHub as history.)
 
 **The runner is forced.** `webosbrew/native-toolchain` publishes exactly three host builds for
 `webos-d7ed7ee.6` — `darwin-arm64`, `darwin-x86_64`, `linux-aarch64` — and **no linux-x86_64**.
@@ -1235,6 +1252,7 @@ seven-segment counter** (`app.rs`). The fps scenes are unaffected — they grade
 heartbeat in the *event log*, never the pixels. Anything added to this feature must be draw-only:
 the device is the only test this project has, so a release build must not differ from the tested
 one in any way that could change behaviour, only in what it paints.
+`RELEASE=1` also drops `threadcheck`, the default-on main-thread violation checker.
 
 Three traps this cost, all found by measurement rather than reasoning, all silent:
 
@@ -1250,9 +1268,10 @@ Three traps this cost, all found by measurement rather than reasoning, all silen
    comparison and cannot be defeated by either.
 3. **`make RELEASE=1 && make deploy` deploys a DEV binary** — the second invocation has no
    `RELEASE`, so it rebuilds and ships that. The flag must be on *every* invocation that produces
-   or ships the binary (`make RELEASE=1 deploy`). `deploy` and `ipk` now echo which configuration
-   they are shipping, and `release.yml` asserts `pkg/.build-config` really says
-   `--no-default-features` rather than trusting that the flag took.
+   or ships the binary (`make RELEASE=1 deploy`). `deploy` and `ipk` now echo which
+   configuration they are shipping, and `build-package.yml` (called from `release.yml`'s
+   `build` job) asserts `pkg/.build-config` really says `--no-default-features` rather than
+   trusting that the flag took.
 
 Verified on the device, not just by binary size: the release build deployed to the TV
 (md5-matched) renders the who's-watching screen with no counter; the dev build renders `62`.
@@ -1456,6 +1475,15 @@ tracked, cut from the SAME master by the same script:
 python3 tools/mkicons.py assets/logo-master.png --out-dir=pkg/dev --sizes=80,130 --badge=DEV
 ```
 
+The nightly install (`com.beb.plxnative.nightly`) is a third tile beside both, so it wears its own
+set, `pkg/nightly/`, in the palette's cool grey (`COOL_200`, `#cdd3dd`) with the derived dark ink —
+cut the same way:
+
+```sh
+python3 tools/mkicons.py assets/logo-master.png --out-dir=pkg/nightly --sizes=80,130 \
+  --badge=NIGHTLY --badge-fill=#cdd3dd
+```
+
 The badge is a **full-bleed bottom bar** — amber (`theme::RESUME_FILL` over `AMBER_950` ink, the
 design system's own filled-control pair, so it is on-brand while being the one thing on the tile
 that could not be mistaken for the release artwork). Both halves of "full-bleed bottom bar" are
@@ -1469,7 +1497,7 @@ load-bearing rather than taste:
   corner alone, so **one `iconColor` stays correct for both flavours and the badge needs no
   descriptor change at all**. That is why the flavour transform moves only `id` and `title`. It is
   enforced, not merely documented: `check-package.py` runs the same pixel-(1,1)-within-2-levels test
-  a second time against `pkg/dev/largeIcon.png`, so a badge that creeps into the corner fails the
+  again against `pkg/dev/largeIcon.png` and `pkg/nightly/largeIcon.png`, so a badge that creeps into the corner fails the
   package rather than shipping a hard-edged rectangle in a differently-coloured tile.
 - **A bar, not a whole-tile tint.** Tinting means moving `iconColor` in lockstep — or reproducing
   exactly the defect above — and it stops looking like the product.
@@ -1707,27 +1735,21 @@ section closed anything at all.
 4. **Does anything on a webOS TV display `appDescription` at all** for a sideloaded app, or is it
    Content-Store-listing metadata only? If the latter, this closes #41's listing half and nothing
    visible on the set, which is still the right answer for a submission but is a different claim.
-5. **The app does not crash or misrender on a language change** — which it structurally cannot,
-   see §12.5, but the checklist item asks about behaviour and behaviour is measured.
+5. **The app does not crash or misrender on a language change** — the checklist item asks about
+   behaviour, and behaviour is measured; the UI now follows the language (§12.5).
 
-### 12.5 What is explicitly NOT closed
+### 12.5 The UI half (since closed)
 
-**The UI is English-only and stays that way in this change.** There are ~203 display literals
-across 45 files, and `Label`/`Button` take a non-owning `*const c_char` — an owned `String` needs a
-lifetime story that a metadata change has no business inventing. The CJK fallback face landed
-separately and is a *precondition* for a translated UI, not the thing itself: glyph coverage means
-Korean renders, not that anything is written in Korean.
+**Superseded: the UI is localized now.** When this section was written the UI was English-only,
+with ~203 display literals across 45 files and no string ownership story, and the native UI was
+locale-blind apart from a best-effort `X-Plex-Language` read from the POSIX locale environment.
+Both are gone. The app's own text comes from bundled catalogs (English, Spanish, Belarusian), the
+UI language resolves from a saved Settings → Language override, then the TV UI language reported
+by the native Settings Service, then the process locale, then English, and
+`plex::identity::language` now sends that resolved language as `X-Plex-Language`.
+[`docs/localization.md`](localization.md) is the current account of runtime behaviour and of its
+verification on the television.
 
-**The native UI remains locale-blind, but PMS metadata has a best-effort locale.**
-`plex::identity::language` reads the inherited POSIX `LC_ALL`, `LC_MESSAGES`, then `LANG` and
-validates the value; `plex::client::pms_headers` and `AccountClient::headers` send the result as
-`X-Plex-Language`. An absent, neutral, or malformed locale omits the header and leaves PMS on its
-default language. The app does not query webOS's language service, so whether the TV launcher
-exports the menu language into that process environment is a device acceptance question, not a
-host claim. This improves server-returned strings without pretending that the app's own display
-literals are translated.
-
-**So the honest mark for #41** is: the metadata half is implemented and gated; the UI half is
-English-only by design; and the whole thing is **unverified on a television** until §12.4 item 1 is
-run. A tester who changes the language and finds an English UI has found a documented decision, not
-a defect — but "Pass" cannot be written next to this row on the strength of this section alone.
+**So the mark for #41** is: the metadata half is implemented and gated as above; the UI half is
+implemented by the localization work and verified on the webOS 4.5 set as `docs/localization.md`
+records; the launcher-metadata acceptance questions in §12.4 are still separate device checks.

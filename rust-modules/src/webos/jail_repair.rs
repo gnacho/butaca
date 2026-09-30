@@ -1,13 +1,11 @@
 //! User-confirmed repair for the k5lp/k3lp Developer Mode jail.
 //!
-//! No repair runs at boot. `request` is the sole production repair entry point and
-//! exists for a confirmation action in the UI. An accepted attempt is retained for the life of
-//! the process, including a timeout: the remote shell may still be running after LS2 gives up.
+//! No repair runs at boot. PlayerAdapter calls `execute` only after Player.repair accepts
+//! explicit confirmation. That app-owned attempt survives every screen and session reset,
+//! including timeout: the remote shell may still run after LS2 gives up.
 
-use crate::task::MainThread;
 use serde_json::Value;
 use std::path::Path;
-use std::sync::Mutex;
 #[cfg(all(not(feature = "hostsim"), not(test)))]
 use std::time::Duration;
 
@@ -26,25 +24,20 @@ pub(crate) enum Failure {
     NotRoot,
     CommandFailed,
     // The simulator has no LS2 timeout; development fixtures and tests still construct it.
-    #[cfg_attr(
-        all(feature = "hostsim", not(feature = "devtriggers"), not(test)),
-        expect(dead_code)
-    )]
+    // `devtriggers` is irrelevant here: hostsim's `call_hbc` stub never constructs this variant
+    // either way, so it is dead outside `#[cfg(test)]` in every hostsim build, not only when
+    // `devtriggers` happens to be off.
+    #[cfg_attr(all(feature = "hostsim", not(test)), expect(dead_code))]
     Timeout,
     Unreadable,
     Unsupported,
 }
 
 impl Failure {
+    #[allow(dead_code)]
     pub(crate) const fn message(self) -> &'static str {
         match self {
-            Self::StartFailed => {
-                if cfg!(feature = "jellyfin") {
-                    "Could not start the repair. Close and reopen Butaca to try again."
-                } else {
-                    "Could not start the repair. Close and reopen PlxNative to try again."
-                }
-            }
+            Self::StartFailed => "Could not start the repair. Close and reopen PlxNative to try again.",
             Self::HbcUnavailable => "Homebrew Channel service is unavailable.",
             Self::NotRoot => "Homebrew Channel service is not running as root.",
             Self::CommandFailed => "The sandbox repair command failed.",
@@ -63,155 +56,14 @@ pub(crate) enum State {
     Failed(Failure),
 }
 
-struct Controller {
-    state: Mutex<State>,
-}
-
-impl Controller {
-    const fn new() -> Self {
-        Self {
-            state: Mutex::new(State::Idle),
-        }
-    }
-
-    fn snapshot(&self) -> State {
-        *self.state.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
-    fn begin(&self, is_supported: bool) -> bool {
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        if *state != State::Idle {
-            return false;
-        }
-        if !is_supported {
-            *state = State::Failed(Failure::Unsupported);
-            return false;
-        }
-        *state = State::Running;
-        true
-    }
-
-    fn finish(&self, result: Result<(), Failure>) {
-        *self.state.lock().unwrap_or_else(|e| e.into_inner()) = match result {
-            Ok(()) => State::Repaired,
-            Err(failure) => State::Failed(failure),
-        };
-    }
-
-    fn spawn_refused(&self) {
-        self.finish(Err(Failure::StartFailed));
-    }
-}
-
-static REPAIR: Controller = Controller::new();
-
-#[cfg(feature = "devtriggers")]
-crate::dev::latched_flag!(
-    /// `/tmp/plxnative-jailrepair-probe` — one read-only HBC identity call for device verification.
-    fn probe_armed = "jailrepair-probe";
-);
-
-/// Development-only proof that this jailed process can reach HBC's fixed exec endpoint. This is
-/// intentionally separate from `request`: it neither checks nor alters repair state and its only
-/// command is the read-only literal `id -u`.
-#[cfg(feature = "devtriggers")]
-pub(super) fn probe_if_armed() {
-    if !probe_armed() {
-        return;
-    }
-    if !crate::task::spawn_small("jail repair HBC probe", || {
-        let result = probe_result(call_hbc(
-            &serde_json::json!({ "command": "id -u" }).to_string(),
-        ));
-        crate::log(match result {
-            ProbeResult::Root => "jail-repair-probe: root",
-            ProbeResult::NotRoot => "jail-repair-probe: not_root",
-            ProbeResult::Unavailable => "jail-repair-probe: unavailable",
-        });
-    }) {
-        crate::log("jail-repair-probe: unavailable");
-    }
-}
-
-#[cfg(not(feature = "devtriggers"))]
-pub(super) fn probe_if_armed() {}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg(feature = "devtriggers")]
-enum ProbeResult {
-    Root,
-    NotRoot,
-    Unavailable,
-}
-
-#[cfg(feature = "devtriggers")]
-fn probe_result(reply: Result<String, Failure>) -> ProbeResult {
-    let Ok(reply) = reply else {
-        return ProbeResult::Unavailable;
-    };
-    let Ok(value) = serde_json::from_str::<Value>(&reply) else {
-        return ProbeResult::Unavailable;
-    };
-    if value.get("returnValue").and_then(Value::as_bool) != Some(true) {
-        return ProbeResult::Unavailable;
-    }
-    match value.get("stdoutString").and_then(Value::as_str) {
-        Some("0\n") => ProbeResult::Root,
-        Some(stdout)
-            if stdout.ends_with('\n')
-                && stdout[..stdout.len() - 1]
-                    .parse::<u32>()
-                    .is_ok_and(|uid| uid != 0) =>
-        {
-            ProbeResult::NotRoot
-        }
-        Some(_) => ProbeResult::Unavailable,
-        None => ProbeResult::Unavailable,
-    }
-}
-
-pub(crate) fn snapshot() -> State {
-    REPAIR.snapshot()
-}
-
-/// True only for the cached affected-SoC verdict whose current jail lacks `/dev/rtkmem`.
-pub(crate) fn supported() -> bool {
-    super::jail_blocks_native_video()
-}
-
-/// Start the one repair attempt this process permits. The token makes the user action originate
-/// on the UI thread; it is intentionally not captured by the worker.
-pub(crate) fn request(_mt: &MainThread) -> bool {
-    if !REPAIR.begin(supported()) {
-        return false;
-    }
-    if !crate::task::spawn_small("jail repair", || {
-        let result = repair(
-            |payload| call_hbc(payload),
-            crate::paths::app_dir(),
-            crate::paths::app_id(),
-            || device_readable(RTKMEM),
-        );
-        crate::log(match result {
-            Ok(()) => "jail-repair: repaired; close and reopen the app",
-            Err(Failure::StartFailed) => "jail-repair: worker start failed; relaunch to try again",
-            Err(Failure::HbcUnavailable) => "jail-repair: Homebrew Channel unavailable",
-            Err(Failure::NotRoot) => "jail-repair: Homebrew Channel is not root",
-            Err(Failure::CommandFailed) => "jail-repair: command failed",
-            Err(Failure::Timeout) => {
-                "jail-repair: timed out; remote outcome unknown, relaunch to check"
-            }
-            Err(Failure::Unreadable) => {
-                "jail-repair: node still unreadable; close and reopen the app"
-            }
-            Err(Failure::Unsupported) => "jail-repair: unsupported",
-        });
-        REPAIR.finish(result);
-    }) {
-        REPAIR.spawn_refused();
-        return false;
-    }
-    true
+/// Called only by the PlayerAdapter worker after the owner accepts explicit confirmation.
+pub(crate) fn execute() -> Result<(), Failure> {
+    repair(
+        call_hbc,
+        crate::paths::app_dir(),
+        crate::paths::app_id(),
+        || device_readable(RTKMEM),
+    )
 }
 
 const RTKMEM: &str = "/dev/rtkmem";
@@ -399,79 +251,12 @@ mod tests {
     }
 
     #[test]
-    fn controller_is_single_flight_and_retains_every_terminal_result() {
-        let c = Controller::new();
-        assert!(c.begin(true));
-        assert_eq!(c.snapshot(), State::Running);
-        assert!(!c.begin(true));
-        c.finish(Err(Failure::Timeout));
-        assert_eq!(c.snapshot(), State::Failed(Failure::Timeout));
-        assert!(
-            !c.begin(true),
-            "a timeout must never permit a second remote command"
-        );
-
-        let refused = Controller::new();
-        assert!(refused.begin(true));
-        refused.spawn_refused();
-        assert_eq!(refused.snapshot(), State::Failed(Failure::StartFailed));
-        assert!(
-            !refused.begin(true),
-            "a refused spawn still spends the process attempt"
-        );
-
-        let unsupported = Controller::new();
-        assert!(!unsupported.begin(false));
-        assert_eq!(unsupported.snapshot(), State::Failed(Failure::Unsupported));
-        assert!(!unsupported.begin(true));
-
-        for result in [
-            Ok(()),
-            Err(Failure::StartFailed),
-            Err(Failure::HbcUnavailable),
-            Err(Failure::NotRoot),
-            Err(Failure::CommandFailed),
-            Err(Failure::Timeout),
-            Err(Failure::Unreadable),
-        ] {
-            let terminal = Controller::new();
-            assert!(terminal.begin(true));
-            terminal.finish(result);
-            assert!(
-                !terminal.begin(true),
-                "every terminal result must spend the attempt"
-            );
-        }
-    }
-
-    #[test]
     fn command_is_fixed_and_contains_the_only_validated_install_arguments() {
-        // The id this build ships, derived from the same constant `valid_id` checks against: a
-        // foreign literal fails that gate and the command comes back `Unsupported`.
-        let id = format!("{}.debug-1", crate::paths::STABLE_APP_ID);
-        let c = command(&dir(&id), &id).unwrap();
-        assert!(c.contains(&format!(
-            "/usr/bin/jailer -t native -p '/media/developer/apps/usr/palm/applications/{id}' -i '{id}' /bin/true"
-        )));
+        let id = "com.butaca.debug-1";
+        let c = command(&dir(id), id).unwrap();
+        assert!(c.contains("/usr/bin/jailer -t native -p '/media/developer/apps/usr/palm/applications/com.butaca.debug-1' -i 'com.butaca.debug-1' /bin/true"));
         assert!(c.contains("id -u"));
         assert!(c.contains("[ ! -c /dev/rtkmem ]"));
-        assert!(c.contains(&format!("/var/palm/jail/{id}/dev/rtkmem")));
-    }
-
-    #[test]
-    #[cfg(feature = "devtriggers")]
-    fn development_probe_accepts_only_the_fixed_id_response_and_cannot_form_a_repair() {
-        assert_eq!(probe_result(Ok(reply("0\n"))), ProbeResult::Root);
-        assert_eq!(probe_result(Ok(reply("1000\n"))), ProbeResult::NotRoot);
-        assert_eq!(probe_result(Ok(reply(OK_MARKER))), ProbeResult::Unavailable);
-        assert_eq!(probe_result(Ok(reply("wat\n"))), ProbeResult::Unavailable);
-        assert_eq!(probe_result(Ok("{}".into())), ProbeResult::Unavailable);
-
-        let payload = serde_json::json!({ "command": "id -u" }).to_string();
-        assert_eq!(
-            serde_json::from_str::<Value>(&payload).unwrap()["command"],
-            "id -u"
-        );
-        assert!(!payload.contains("jailer"));
+        assert!(c.contains("/var/palm/jail/com.butaca.debug-1/dev/rtkmem"));
     }
 }

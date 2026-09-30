@@ -29,8 +29,20 @@ CASES = [
     (BLOCK, "make -C /repo run RUN_SECS=30"),
     (BLOCK, "./tests/run.py --fps"),
     (BLOCK, "python3 tests/run.py --filter seek"),
+    # `--list-foo` is a different (unrecognised) flag, not `--list` — a substring match here would
+    # wrongly allow it.
+    (BLOCK, "tests/run.py --list-foo"),
     (BLOCK, "tools/tv-session.sh up --screen home"),
     (BLOCK, "tools/tv-session.sh key down ok"),
+    (BLOCK, "tools/tv-session.sh screen off"),
+    # `sound` is a device command exactly like `screen` -- it reaches the television over ssh for
+    # off/on AND for status (getVolume is still a round trip to the set), so all three subcommands
+    # block. The classifier keys on the tv-session.sh SUBCOMMAND word ("sound"), not on the literal
+    # word "status" (which only the top-level `tv-session.sh status` allows through read-only) --
+    # `tv-session.sh sound status` is a different, nested word and must still block.
+    (BLOCK, "tools/tv-session.sh sound off"),
+    (BLOCK, "tools/tv-session.sh sound on"),
+    (BLOCK, "tools/tv-session.sh sound status"),
     (BLOCK, "tools/capture-screen.sh out.png DISPLAY"),
     (BLOCK, "ssh root@192.0.2.10 'cat /tmp/plxnative-events.log'"),
     (BLOCK, "sshpass -p alpine scp pkg/plxnative root@192.0.2.10:/tmp/"),
@@ -50,6 +62,16 @@ CASES = [
     (ALLOW, "tools/tv-lock.sh status"),
     (ALLOW, "tools/tv-session.sh log 'route='"),
     (ALLOW, "tools/tv-session.sh status"),
+    # `tests/run.py --list` never commits to driving the television — `main()` returns 0 for every
+    # `args.list` branch before the TV lock is ever acquired (see the pipeline-tier listing branch
+    # and the server-tier one right after it). argparse's `--list` is `action="store_true"`, so it
+    # takes effect wherever it sits on the line — leading, trailing, or beside `--server`/`--fps`/
+    # `--only` — and so does this allowance.
+    (ALLOW, "./tests/run.py --list"),
+    (ALLOW, "tests/run.py --list --server"),
+    (ALLOW, "python3 tests/run.py --list --fps"),
+    (ALLOW, "tests/run.py --list --only cold-open"),
+    (ALLOW, "tests/run.py --only x --list"),
     (ALLOW, "tools/crash-report.sh --flavor debug"),
     (ALLOW, ".agents/skills/wake-tv/wake-tv.sh"),
     (ALLOW, 'pgrep -fl "tests/run.py|capture-screen|make deploy"'),   # the pre-flight itself
@@ -58,6 +80,11 @@ CASES = [
     (ALLOW, 'grep -rn "ssh root@" docs/'),
     (ALLOW, "ssh someserver.example.com uptime"),
     (ALLOW, "PLX_TV_LOCK_BYPASS=1 ssh root@1.2.3.4 uptime"),          # the documented hatch
+    # "sound" alone, off the tv-session.sh command word, must not trip the classifier -- it keys
+    # on the SUBCOMMAND of tv-session.sh specifically, not on the word appearing anywhere on the
+    # line (prose, a commit message, an unrelated script).
+    (ALLOW, 'git commit -m "tools: add tv-session.sh sound off|on|status"'),
+    (ALLOW, 'grep -rn "sound off" .agents/skills/tv-session/SKILL.md'),
 ]
 
 
@@ -92,6 +119,103 @@ def blocked(cmd):
     return any(guard.classify(seg) for seg in guard.segments(guard.strip_heredocs(cmd)))
 
 
+# --- lane identity: the hook and tools/tv-lock.sh must agree on ONE lane -------------------------
+#
+# A subagent's own worktree is not `payload["cwd"]` (the harness always reports the SESSION
+# checkout there), so it names its lane by prefixing `PLX_TV_LOCK_LANE=<its worktree>` on the
+# command itself. These cases run the SAME decision `main()` makes — classify, then resolve a
+# lane with `lane_from_command()`, then check `lease_for()` — against a throwaway mirror directory,
+# never the real `~/.plxnative/tv-lock` a live `tools/tv-lock.sh` writes to.
+import shutil
+import tempfile
+import time as _time
+
+
+def _fake_state_dir(live_lanes):
+    """A temp STATE_DIR holding one live `.lease` file per lane in `live_lanes`."""
+    d = tempfile.mkdtemp(prefix="tv-lock-guard-test-")
+    for i, lane in enumerate(live_lanes):
+        with open(os.path.join(d, f"lane{i}.lease"), "w") as fh:
+            fh.write(
+                f"TOKEN='tok{i}'\n"
+                f"EXPIRES={_time.time() + 3600}\n"
+                f"ACQUIRED={_time.time()}\n"
+                f"VERIFIED={_time.time()}\n"
+                f"TV='192.0.2.10'\n"
+                f"LANE='{lane}'\n"
+            )
+    return d
+
+
+def blocked_full(cmd, cwd, env=None, live_lanes=()):
+    """The hook's whole decision — classify, resolve the lane, check for a mirror lease — the way
+    `main()` does it, against a disposable STATE_DIR rather than the real mirror.
+    """
+    if "PLX_TV_LOCK_BYPASS=1" in cmd:
+        return False
+    if not any(guard.classify(seg) for seg in guard.segments(guard.strip_heredocs(cmd))):
+        return False
+    lane = guard.lane_from_command(cmd, env or {}, cwd)
+    d = _fake_state_dir(live_lanes)
+    old_state_dir = guard.STATE_DIR
+    try:
+        guard.STATE_DIR = d
+        return not bool(guard.lease_for(lane))
+    finally:
+        guard.STATE_DIR = old_state_dir
+        shutil.rmtree(d, ignore_errors=True)
+
+
+LANE_A = "/repo/worktrees/lane-a"
+LANE_B = "/repo/worktrees/lane-b"
+SESSION_CWD = "/repo/session-checkout"
+
+# (expect_blocked, cmd, cwd, env, live_lanes)
+LANE_CASES = [
+    # A prefixed lane whose own mirror lease is live is allowed, even though the reported cwd is
+    # the session checkout (never lane-a) and holds nothing itself.
+    (False,
+     f"PLX_TV_LOCK_LANE={LANE_A} make deploy",
+     SESSION_CWD, {}, (LANE_A,)),
+    # The identical command naming a DIFFERENT lane, which holds no lease, is blocked — the prefix
+    # is honoured, not the cwd, and not lane-a's lease either.
+    (True,
+     f"PLX_TV_LOCK_LANE={LANE_B} make deploy",
+     SESSION_CWD, {}, (LANE_A,)),
+    # A prefixed lane must not be satisfied by a lease belonging to the CWD's own lane: cwd is
+    # lane-a (which has a live lease), but the command explicitly names lane-b (which has none).
+    (True,
+     f"PLX_TV_LOCK_LANE={LANE_B} make deploy",
+     LANE_A, {}, (LANE_A,)),
+    # A `# PLX_TV_LOCK_LANE=` inside a COMMENT does not count as the prefix: the would-be lane
+    # (lane-a) holds the only live lease, but cwd resolves to lane-b, which holds none — so this
+    # must still block. If the comment were mistakenly read as the prefix, it would wrongly allow.
+    (True,
+     f"# PLX_TV_LOCK_LANE={LANE_A}\nmake deploy",
+     LANE_B, {}, (LANE_A,)),
+    # The same escape, but as a heredoc BODY rather than a comment — also must not count.
+    (True,
+     f"cat > note.txt <<'EOF'\nPLX_TV_LOCK_LANE={LANE_A}\nEOF\nmake deploy",
+     LANE_B, {}, (LANE_A,)),
+    # `env PLX_TV_LOCK_LANE=<path>` spelling is honoured the same as a bare assignment.
+    (False,
+     f"env PLX_TV_LOCK_LANE={LANE_A} make deploy",
+     SESSION_CWD, {}, (LANE_A,)),
+    # A leading `cd <dir> &&` before the assignment is still a prefix.
+    (False,
+     f"cd /repo/worktrees/lane-a && PLX_TV_LOCK_LANE={LANE_A} make deploy",
+     SESSION_CWD, {}, (LANE_A,)),
+    # No prefix at all: falls back to the hook's own environment variable.
+    (False,
+     "make deploy",
+     SESSION_CWD, {"PLX_TV_LOCK_LANE": LANE_A}, (LANE_A,)),
+    # No prefix, no env var: falls back to cwd, exactly as before this change.
+    (False,
+     "make deploy",
+     LANE_A, {}, (LANE_A,)),
+]
+
+
 def main():
     fails = 0
     for want, cmd in CASES:
@@ -100,7 +224,14 @@ def main():
             fails += 1
             print(f"  FAIL  expected {'BLOCK' if want else 'ALLOW'}, got "
                   f"{'BLOCK' if got else 'ALLOW'}: {cmd}")
-    print(f"tv-lock-guard: {len(CASES) - fails}/{len(CASES)} cases correct")
+    for want, cmd, cwd, env, live_lanes in LANE_CASES:
+        got = blocked_full(cmd, cwd, env, live_lanes)
+        if got != want:
+            fails += 1
+            print(f"  FAIL  expected {'BLOCK' if want else 'ALLOW'}, got "
+                  f"{'BLOCK' if got else 'ALLOW'}: {cmd!r} cwd={cwd!r} env={env!r}")
+    total = len(CASES) + len(LANE_CASES)
+    print(f"tv-lock-guard: {total - fails}/{total} cases correct")
     return 1 if fails else 0
 
 

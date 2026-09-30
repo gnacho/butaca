@@ -11,7 +11,7 @@ device verification item rather than an unimplemented transport.
 **Anonymisation — read this before adding an example anywhere in the repo.** Addresses, ports,
 tokens, machine identifiers, the owner's username and their library names are deliberately **not**
 recorded here or in any fixture, doc comment, commit message or PR body — the same redaction rule
-`ui/stats.rs` applies to the diagnostics panel, and for a stronger reason: **this repository is
+`app/diagnostics.rs` applies to the diagnostics panel, and for a stronger reason: **this repository is
 public, and none of that data is ours.** It belongs to the person who shared their server.
 
 This paragraph stood here, in these words, while the repo published the friend's handle, their
@@ -29,8 +29,8 @@ now used throughout — and the only ones to use in new work — are:
 | any public address | `203.0.113.9` / `198.51.100.7` (TEST-NET-3 / TEST-NET-2) |
 | a machine identifier | `aaaabbbb…` runs, never a real 40-hex id |
 
-Several are deliberately the **same character length** as what they replaced, because `ui/home.rs`
-asserts text widths against them. The live values live only in the gitignored
+Several are deliberately the **same character length** as what they replaced, because the owned
+Home's tests (`screens/home/tests.rs`) assert text widths against them. The live values live only in the gitignored
 `tests/manifest.local.json` and `src/config.local.h`, which is the whole reason those files are
 gitignored.
 
@@ -155,7 +155,9 @@ wget -q -T 8 -O - http://<public-ip>:31234/identity
 
 That unauthenticated `/identity` response proves the endpoint is reachable. It does not prove the
 authenticated transport: stable browse and playback require an HTTPS origin, while token-bearing
-plaintext is available only in an explicit developer-trigger lab build.
+plaintext is available only in an explicit developer-trigger lab build — or, for a numeric private
+address on the television's own network, after the person consents (`plex::grant`). A public
+endpoint like this one is remote and is never eligible.
 
 Also measured, because they shape the playback story:
 
@@ -204,7 +206,7 @@ re-verified 2026-08-13 and all but one still hold:**
 | `metadata.rs:1291-1307` | `pump_season`'s `d.rk != r.rk` ownership test |
 | `browse.rs:32-36` | `BrowseSection.key: i64` — **verified collision**: both servers have section `1` |
 | `route.rs:35` | `MACHINE_ID`, "cached once", feeds the PlayQueue `server://` uri |
-| `ui/trail.rs:42-59` | `Node::Detail{rk}` — navigation history itself is server-less |
+| ~~`ui/trail.rs:42-59`~~ | `Node::Detail{rk}` — navigation history itself was server-less. **Retired with the file** (restructure phase 12, D1): the app keeps no second history, and a page's identity is its `AppArg` — `ContentArg::Detail{sid, rk}` carries the `plex::ServerId` the fix would have added, so the concern is structurally closed rather than outstanding |
 
 Already server-agnostic, needing no work: `img.rs`, `player/engine.rs` + `threads.rs` (they consume
 a full URL), `plex/discover.rs`, and the single `X-Plex-Client-Identifier` — one device on N servers
@@ -222,6 +224,34 @@ and curl is *push*, and `stream.rs`'s single-closer teardown protocol has to be 
 terms. The bundled FFmpeg cannot help — it is built `--disable-network`,
 `--enable-protocol=file` (`ci/build-ffmpeg.sh:122,129`) and pinned to majors 63/63/61.
 
+**Offline (2026-09-05): the `plex.direct` name is dialled with no DNS at all.** A LAN whose uplink
+is down resolves no `plex.direct` name, and the plaintext twin cannot carry a token in a store
+build (a consented plaintext grant needs a fresh plex.tv resource list, which an offline boot does
+not have), so the household's own server used to be unreachable exactly when it was the only thing
+left. `rust-modules/src/plex/origin.rs`'s `ResolvePin` keeps the https origin and hands libcurl the
+`address` plex.tv advertised beside it through `CURLOPT_RESOLVE`, on both the control and the media
+plane; the certificate is still validated against the name. `rust-modules/src/plex/CLAUDE.md` has
+the rules, and `/tmp/plxnative-nowan` is the reproduction.
+
+**Offline, the who's-watching pick (2026-09-06).** A profile pick is a plex.tv call, so the pinned
+origin alone still left the picker unable to seat anybody the first time the uplink really went
+down. Every online seating now caches that profile's credentials in `Session::profiles` (a
+PIN-protected one with a local verifier of the PIN, never the PIN), and a pick that plex.tv does
+not answer is seated from the cache — an unprotected profile on the pick, a protected one on its
+PIN. A profile that has never been seated online on this television has nothing cached, and the
+picker says so: "No internet connection. Pick this profile once while online, and it will work
+offline." One online sign-in and one online pick per profile are the whole precondition. `rust-modules/src/plex/CLAUDE.md` has the mechanism.
+
+**Offline artwork.** Every reusable image transcode—posters, backdrops, logos, episode stills,
+profile avatars and cast headshots—uses the shared disk tier in `rust-modules/src/imgcache.rs`.
+A hit is decoded locally before any network request. Entries are keyed by stable server identity,
+source and transformation, with the outer request’s `X-Plex-Token` excluded; the volatile avatar roster stamp is ignored.
+On a stale disk hit (after a day), cached art remains visible while a bounded background lane
+attempts a refresh.
+A missing image still requires its server (and, for proxied external art, that server's uplink).
+Sign-out clears the cache and retires in-flight writes. See [image-cache.md](image-cache.md)
+for bounds, lifecycle and the large-grid verification recipe.
+
 **That plaintext endpoint is useful reachability evidence, not a stable authenticated route.**
 §2(c) shows that the TV can reach it, but a public build still needs one of the server's advertised
 HTTPS origins before it may attach the token. Connection selection and the multi-server data model
@@ -231,7 +261,9 @@ Two caveats that make TLS a real follow-up rather than a nicety:
 
 1. **Historical risk, now closed for stable builds:** plain HTTP over the WAN puts
    `X-Plex-Token` in the clear. The current transport boundary refuses every token-bearing HTTP
-   control or media URL unless the binary explicitly includes the developer-trigger feature.
+   control or media URL unless the binary explicitly includes the developer-trigger feature, or
+   the person consented to one verified numeric private origin on their own network
+   (`plex::grant`) — never a WAN address like this one.
 2. The plain-HTTP route is **the owner's setting, not ours**. If they flip *Require secure
    connections* to Required, or their port-forward stops exposing the plain port, it disappears and
    only the curl path reaches them. Same for any share that is relay-only.
@@ -255,11 +287,11 @@ asked for is how to read what shipped.
 | 1 **LANDED** | **Server registry** — shipped with N slots rather than the one this row asked for; the ceiling is `MAX_SERVERS = 16`. New `plex/servers.rs`: `ServerId(u16)`, `Server`, `Conn{scheme,…}`, a `CLIENTS` table + `CURRENT`. `install` registers slot 1; `client()`/`client_opt()` keep their signatures and now mean "the current server". `TOKEN_GEN` moves **into** `Client`. Zero call-site changes. Note `client()` is hot — `posters::poster_key` calls it three times per key per tile per frame, so use an atomic-pointer table, not an `RwLock`. | ½–1 d | Foundation |
 | 2 | **Thread `ServerId` through the stored structs** — `PmsMovie`, `BrowseSection`, `Detail`, `PlayingItem`, `Person`, `Pslot`, `trail::Node`, `ResolveEnv`/`Plan`, `UpNext`/`QueueRow`. Every rk equality test becomes a pair. The rule is **capture at the spawn site**, never read the current server inside a worker (`ResolveEnv`'s doc is the template and gives the general form of it; the `browse.rs:576` citation this row gave does not survive — that line has moved and carries no such comment). Behaviour change: none. | 2–3 d | The mechanical diff |
 | 3 | **Move the ~30 call sites onto `client_for(sid)`.** `posters.rs:452` becomes `client_for(slot.sid)?.fetch_built(&key)` — **token-free**, because the poster key already ends in `with_token(…)` and `get_bytes` would append a second one. Ship gate: byte-identical event log across `tests/run.py`. | 1 d | Correctness |
-| 4 **LANDED** | **Probe + race.** `plex/probe.rs` retains the advertised HTTPS URI but suppresses plaintext for unmatched non-owned LAN connections (§2a), drops HTTP when `httpsRequired`, and ranks local→remote→relay. `auth.rs` races candidates within one server, verifies `machineIdentifier`, activates the first verified answer, may re-point once to the final best score, and persists only that winner. Servers remain serial with a 4 s gap; relay is a second phase; `401` is the final reason only when no candidate verifies. | 1–1½ d | **The share becomes reachable** |
+| 4 **LANDED** | **Probe + race.** `plex/probe.rs` retains the advertised HTTPS URI but suppresses plaintext for unmatched non-owned LAN connections (§2a), drops HTTP when `httpsRequired`, and ranks local→remote→relay. `auth.rs` races candidates within one server, verifies `machineIdentifier`, and activates the first VERIFIED answer this build can put a credential on (`Candidate::credential_eligible`, stamped once at synthesis from `CredentialPolicy` — issue #95: a verified plaintext answer no longer counts as reached in a store build), may re-point once to the best such answer, and persists only that winner. Servers remain serial with a 4 s gap; relay is a second phase whenever nothing eligible verified directly; a verified plaintext-only answer ends as `Reach::InsecureOnly` ("Not secure"), which outranks a `401`. | 1–1½ d | **The share becomes reachable** |
 | 5 | **Persist the registry; boot from the hint.** `session.rs` gains `servers: Vec<ServerRec>` + `current_machine_id`, every field `#[serde(default)]`, legacy `ServerRef` still written for one release. A corrupt `servers` array must not fail the whole `Session` parse — that is a silent sign-out at every boot. No timestamps: this TV's wall clock is ~3 h skewed. | 1 d | Fast boot |
 | 6 **LANDED** | **TLS control plane.** Shipped as `rust-modules/src/http.rs`: `Scheme::Http` keeps the raw `stream.rs` arm, while `Scheme::Https` uses `net.rs`/libcurl. The curl request surface now carries per-call deadlines, a bounded response sink, body-less `CUSTOMREQUEST` PUT, HTTP(S)-only redirect policy for the public QR fetch, and one fresh easy handle per call so no request state can survive into the next. Probe ranking is TLS-first, status remains distinct from reachability, and every PMS/account request conditionally carries the validated inherited locale as `X-Plex-Language`. | 1–1½ d | Any https-only share browses |
 | 7 **LANDED** | **TLS media plane.** Shipped as `rust-modules/src/curlio.rs`: the second `dynlib!` table (seven `curl_multi_*`, device-probed PRESENT and inventory-confirmed on all 14 releases; `curl_multi_poll`/`curl_multi_wakeup` probed ABSENT and therefore banned — they first appear at 7.4.0, so binding them would have emptied the table on four of the nine gated releases), `AvioState`'s source enum, the `read_cb`/`seek_cb` dispatch, the preserved seek abort guard and the two extended abort-guard tests, all as this row asked. **One deviation, deliberate:** teardown is a **wake pipe** handed to `curl_multi_wait` as an application-owned extra fd, NOT `curl_multi` pumped from inside `read_cb`. The row's outcome — teardown collapses to "set the flag, join" — is preserved, and that is the reason: self-polling puts a 10–100 ms floor on every teardown, while a byte on a pipe wakes a blocked wait at once. The one gap the pipe cannot close is a thread already inside `curl_multi_perform` doing SYNCHRONOUS name resolution; the dev set reports `AsynchDNS`, and the designed fallback (our own `getaddrinfo` + `CURLOPT_RESOLVE`, hostname untouched so SNI and certificate identity survive) is written into `curlio`'s module doc and deliberately not built. With step 6 present, ordinary HTTPS browse/play now reaches this source; `plxnative-servers` and `plxnative-playurl` remain the isolation routes for device diagnosis. | 2–4 d | Any share plays |
-| 8 **LANDED** | **N servers live** — the Sources list is a library-toolbar chip with a two-level panel (§6), `sourceTitle` is the row subtitle, and attribution stays in **text not artwork**. Profile activation only installs prepared identity and queues catalog work; hubs and sections use per-source workers/mailboxes, lifecycle generations reject stale landings after a repoint, and a dead share no longer blocks the SDL loop or blanks another source. A failed catalog request also queues a single-flight `/resources` re-probe for that exact granted machine, so a Wi-Fi/LAN transition can publish a newly reachable origin without copying the account owner's token into a managed profile or changing its grants. Continue Watching is merged by `lastViewedAt`. | 2–4 d | The product |
+| 8 **LANDED** | **N servers live** — the Sources list is a chip at the head of the Library's document with a one-level picker panel (§6; it was a toolbar chip with a two-level panel until 2026-09-05), `sourceTitle` is the row subtitle, and attribution stays in **text not artwork**. Profile activation only installs prepared identity and queues catalog work; hubs and sections use per-source workers/mailboxes, lifecycle generations reject stale landings after a repoint, and a dead share no longer blocks the SDL loop or blanks another source. A failed catalog request also queues a single-flight `/resources` re-probe for that exact granted machine, so a Wi-Fi/LAN transition can publish a newly reachable origin without copying the account owner's token into a managed profile or changing its grants. Continue Watching is merged by `lastViewedAt`. | 2–4 d | The product |
 | 9 **LANDED, UNVERIFIABLE** | **Relay policy.** The relay clamps no bitrate: `maxVideoBitrate` is a literal on the re-encode branch only. (`TranscodeSpec` gained a `ceiling` field on 2026-08-23 for the USER's ladder — same mechanism, different input; the relay still names no rate.) Respecting relay's 2 Mbps means **forcing a transcode decision** in `build_stream` — a policy change, not a parameter. | ½–1 d | Correctness on relay |
 
 **Shortest path to seeing the share on screen: 0 → 1 → 4**, plus enough of 2/3 to keep the caches
@@ -292,11 +324,28 @@ not built, the strip has three pills, the headings carry no annotation.
 **People in content, machines in settings.** The handle (`friend`) on every browsing surface; the
 machine name (`nas-home`) only in the Sources list and the failure read-out.
 
-- **A — the Sources list is a LIBRARY TOOLBAR CHIP**, not a row in the account popover. `Library ·
-  Film Club  friend ▾`, opening a 640-wide panel with **two levels** switched by Browse / On Home
-  pills at the panel top (the track menu's own swap). **Browse** is a picker — one tick, OK closes.
-  **On Home** is a toggle — the word `On`/`Off` at the trailing edge, OK flips, the panel stays open.
-  Grouped by server: header = machine, accessory = person. The last pinned library uses `value_dim`;
+- **A — the Sources list is reached through the library pill strip's `MORE` pill**, not a row in
+  the account popover. Zero or one eligible library draws no selector at all, for every profile,
+  owned or borrowed; two or more draw the strip, with a `MORE` pill once the row overflows, and
+  only `MORE` opens a 640-wide panel — issue #100/#165: a borrowed singleton no longer keeps a dead
+  picker. The canvas gave it **two levels** switched by
+  Browse / On Home pills at the panel top (the track menu's own swap); **the shipped panel has one**
+  — it is the picker, and nothing else. The second level became its own route on 2026-09-05, when
+  the switch stopped governing Home alone: *Favorite libraries*, which is also the
+  only surface listing every GRANTED library, so a non-favourite has a way back. **As of phase 5b
+  (2026-09-07) that is no longer one mechanism for both entry points**: the screen itself moved off
+  the `static mut` `ui::onboard` module onto an owned `Screen` impl, `screens::onboard`'s
+  `OnboardScreen`, mounted twice (spec §6.2) — first-run still arrives as its own page
+  (`AppArg::Onboard`, the route this paragraph describes), but reached from Settings it is now a
+  *page* of the Settings family (`SettingsPage::Favourites`) rather than a second value the app's
+  page alphabet takes, so the
+  once/sec heartbeat's `route=` field no longer reads `onboard` for the Settings-opened case — only
+  for the first-run one. A picker that could
+  turn into an editor would let a library be un-favourited from inside the list of favourites and
+  then vanish out of it under the cursor. **Browse** is a picker — one tick, OK closes, scoped to
+  the FAVOURITES of the type being browsed. **On Home** is a toggle — the word `On`/`Off` at the
+  trailing edge, OK flips, the list stays open.
+  Grouped by server: header = machine, accessory = person. The last favourite library uses `value_dim`;
   an unreachable server's whole group dims at .52, header included. "Check for new shares" sits last
   under a separator. Rejecting the popover also withdraws both of the flags this doc raised about
   `account_menu.rs`'s static arrays and its close-before-acting OK.
@@ -308,9 +357,16 @@ machine name (`nas-home`) only in the Sources list and the failure read-out.
   sources and carries no annotation at all** — a shelf drawn from three servers cannot be named by
   one of them. Nothing on the tile, ever. The hero needs nothing: it *is* the shelf's focused tile.
 - **D — a dead source is absent from Home** (no shelf, no spinner) and its borrowed items leave
-  Continue Watching. Its library section draws the shared failure read-out: `Can't reach nas-home`,
-  reason `Shared by friend · your own server is fine.`, one action `Try again`, anchored in the
-  content region with only the Source chip beside it — no sort/filter chips, no count, no A–Z rail.
+  Continue Watching. Its library section draws the shared failure read-out: `Can’t reach nas-home`,
+  reason `Shared by friend · your own server is fine.`, one action `Try again`, its verdict on the
+  same screen-space anchor as Home's and the sign-in failure's (`StatusOverlay::page`), with only
+  the head of the document beside it — no sort/filter chips, no count, no
+  A–Z rail. **The head is whichever form it would take on a healthy page**, which since issue #68
+  (2026-09-06) is never a chip — there is none any more: `Layout::failed` builds the head with the
+  same eligible-library rule `draw_document` uses, so a dead library that shares its type with
+  another favourite draws the library pill strip beside the read-out. That is the useful answer
+  anyway — the strip is how you leave the library that cannot be reached — but there is no "Source
+  chip" left to qualify.
 - **E — `Shared by friend`** as the last run on the detail hero's date/runtime line, plus an **Also
   available** button in the actions row when a second pinned source holds the film. **OK navigates**
   to that server's page rather than swapping the copy in place, which is also what settles the
@@ -320,9 +376,18 @@ machine name (`nas-home`) only in the Sources list and the failure read-out.
   watching*, BACK skips. **LANDED — see §12, which also records the one place the OWNER's ruling
   overrides this canvas: the selection is per Plex Home PROFILE, not per install.**
 
-**PINNING is the new concept.** It governs **Home only** — tabs, grid, sort, A–Z rail and browsing
-all come from the grant, which is not a setting. Three orthogonal states: *granted* (plex.tv's
-answer), *pinned* (the only control), *reachable* (a fact about now).
+**PINNING is the new concept.** Three orthogonal states: *granted* (plex.tv's answer), *pinned*
+(the only control), *reachable* (a fact about now).
+
+**It governed Home ALONE until 2026-09-05, and this paragraph said so.** The switch is now called
+**Favorite libraries** and it governs every browsing surface: Home's shelves, **which type pills the
+top strip draws at all** (`browse::tab_has_favorite` — a type whose last favourite is switched off
+draws no pill), and the Library's own Sources picker (`browse::source_rows`). The identifiers did
+not move with the words: `BrowseSection::pinned`, `HomePins`, `plex/pins.rs` and the persisted
+`home_pins` key are all unchanged, deliberately — renaming the persisted key breaks ROLLBACK rather
+than upgrade. What still comes from the GRANT and not from the setting: access itself, the grid,
+sort, the A–Z rail, and Search, which stays grant-wide and only RANKS favourite-library hits first.
+The grant decides what you can reach; the favourite decides what the app offers.
 
 **Two divergences between the canvas and main, both because main moved while it was drawn**, neither
 requiring the design to change: its toolbar frames include an `Unwatched` chip that `0d9a4f6f`
@@ -468,7 +533,7 @@ could not see the bug:
   for a freshly constructed/legacy client; discovery and session restore now publish the measured
   tier after each registration or re-point.
 
-## 10. The section table goes multi-server, and gets its Source chip (deliverable A)
+## 10. The section table goes multi-server, and gets its library pill strip (deliverable A)
 
 Step 1's registry now has its first real consumer, and deliverable A of the design is drawn.
 
@@ -487,15 +552,30 @@ Step 1's registry now has its first real consumer, and deliverable A of the desi
   same worker/mailbox pump — sections, then the server's own `friendlyName`, then a `size=0` count
   probe per library — with a 10 s per-source backoff. Entering Library only selects a type and view
   state; it performs no HTTP. A dead share becomes a recoverable failed source without parking SDL.
-- **Pinning** is the design's one control and governs Home only: your own libraries start pinned, a
-  friend's start unpinned, and the last pinned one cannot be turned off. `pinned_libraries()` is its
-  read side, waiting for deliverable C.
-- **The tab strip has a permanent vocabulary:** `Home | Movies | TV Shows | Search`. A library pill
-  names a type, never a discovered row, so it survives reset and failed/delayed discovery. The
-  selected type resolves owned-first, then to the first usable shared section; the Source panel
+- **Pinning** is the design's one control and, since 2026-09-05, governs the whole app rather than
+  Home alone (above): your HOUSEHOLD's libraries start favourite, a friend's start favourite only
+  if the household has no library of that type, and the last favourite cannot be turned off.
+  `pinned_libraries()` is its read side. The household and not the account, because plex.tv grades
+  a Plex Home managed profile's own family server `owned:false` — read on ownership, such a profile
+  had nothing of its own, no type of its own, and therefore every library it could see starting
+  favourite, a stranger's included.
+- **The tab strip's vocabulary is permanent; its LENGTH is not.** A library pill names a type, never
+  a discovered row, so it survives reset and failed/delayed discovery — but a type with no favourite
+  library draws no pill at all, so the row is `Home … Search` with two to four stops in between.
+  Store a `Pill`, never a `usize`. The
+  selected type resolves to the library this profile last chose, else household-first, then to the
+  first usable outside section; the Source panel
   selects alternatives.
-- **The Source chip and its two-level panel** are `ui/library.rs`; the row model is pure and
-  host-tested. `TableView` gained the two things it was missing for it: a drawn `Section::accessory`
+- **The library pill strip and its Sources panel** are `screens/library/toolbar.rs` (the strip) and
+  `screens/library/mod.rs` (the panel); the row model is pure and host-tested. The
+  panel had two levels (`Browse` ⟷ `On Home`) until 2026-09-05 and is now a PICKER and nothing else
+  — one level, one tick, no words. The editor was its own route (*Favorite libraries*,
+  `ui::onboard`) until phase 5b (2026-09-07); reached from Settings it is now a PAGE of the
+  Settings family (`SettingsPage::Favourites`, hosting `screens::onboard`'s owned `OnboardScreen`)
+  rather than a second value the page alphabet takes — deliverable A above has the mechanism, and
+  first-run alone still arrives as `AppArg::Onboard`. Either way it remains the one surface listing
+  every GRANTED library, so a non-favourite has a way back. The pill strip itself now heads the
+  Library's document rather than leading a toolbar. `TableView` gained the two things it was missing for it: a drawn `Section::accessory`
   (declared but never painted before) and `Section::dim`.
 - **The roster's own facts** (machine name, owner handle, owned) live beside the registry as
   `plex::ServerFacts`, merged rather than replaced so plex.tv and a server naming itself over `GET /`
@@ -532,7 +612,7 @@ per source, off the SDL thread).
   both servers in this household hold a `ratingKey` 4, so a fan-out matched on the key marks a
   different film watched on the other machine — confidently, and with a 200 back.
 - **No resume position is ever COPIED between servers. Only the watched flag travels.** This is the
-  subtle half, and it is the half `ui/alt_sources.rs` reasons out: an offset is about a file you are
+  subtle half, and it is the half `screens/alt_sources.rs` reasons out: an offset is about a file you are
   streaming from one host, which is also why that panel NAVIGATES to the other copy rather than
   swapping it under you. `unscrobble` is fanned out too — it is the other end of one control, and
   clearing the claim is still a claim about the title — but no `viewOffset` is read or pushed
@@ -564,8 +644,10 @@ local edit; the two-server round trip itself needs a television and both servers
 
 ## 12. The Home selection, per PROFILE — deliverable F (2026-08-21)
 
-The canvas's first-run route is built (`ui/onboard.rs`), and building it settled the question the
-canvas could not, because it was drawn before the owner ruled on it:
+The canvas's first-run route was built in `ui/onboard.rs` (phase 5b, 2026-09-07, moved it to
+`screens/onboard.rs` as the owned `OnboardScreen` described in deliverable A above — the route
+itself, and everything below about what it shows and why, is unchanged), and building it settled
+the question the canvas could not, because it was drawn before the owner ruled on it:
 
 > *"Servers are configured on a PC or phone. On the television we only CHOOSE from the available
 > servers. And it is separate for each profile."*
@@ -575,7 +657,9 @@ Three consequences, all of which the code now states:
 **There is no add-a-server-by-address on the television, and there will not be.** The list is the
 plex.tv grant — the existing registry — and nothing else. This is a product decision, not a
 transport limitation: HTTPS control/media are supported in stable builds; plaintext
-hostname/IPv4/IPv6 origins remain available only in explicit developer-trigger lab builds.
+hostname/IPv4/IPv6 origins remain available only in explicit developer-trigger lab builds, apart
+from the consented home-network exception (`plex::grant`), which admits one verified numeric
+private origin per server and never a name.
 
 **The selection is keyed by PROFILE.** `Session::pinned: Vec<PinnedLib>` hung off the `Session`,
 which is one per install — so a household could hold exactly one opinion about a friend's films,
@@ -592,12 +676,30 @@ put must fall on its own DEFAULT, not silently Off because it was absent from a 
 it existed. That is also what makes the canvas's "a share arriving later does not reopen this
 screen" honest rather than merely quiet.
 
-The rules are `plex::pins` — pure, no store, host-graded: the ownership default, the recorded
+The rules are `plex::pins` — pure, no store, host-graded: the HOUSEHOLD default, the recorded
 answer, the "more than one source, once per profile" gate, and a **never-empty floor** (a recorded
 selection CAN be emptied without any toggle — pin only a friend's library, then lose the friend
-from the roster). `browse.rs` is the plumbing around them, and a selection PERSISTS: every flip was
-in-memory before 2026-08-21, so a selection made in the Sources panel was gone by the next boot and
-the ownership default came back, which reads as the switch not working. Since 2026-09-04 the write
+from the roster). Only the rows a viewer ANSWERED are recorded (`pins::answers`): a default
+nobody chose keeps re-deriving, which is what lets a Home roster landing after the first-run screen
+correct a classification it arrived too late to inform, without touching an answer anybody gave.
+Which rows those are is carried BY the commit — `BrowseCmd::ApplyPins` holds the rows a press
+actually MOVED (`screens::onboard`'s `touched`, recorded at the toggle), not the rows the editor
+showed and not a comparison of any kind. The store inferred it from "the row disagrees with the
+live pin" and the screen then inferred it from "the draft disagrees with `entry_pins`"; both drop
+an answer the world drifted onto, one layer apart, which is why the provenance is written down
+where it happens. And because only the answered rows are recorded, a commit that produced a record
+ends by reconciling the whole table against the optimistic in-memory record (the same reconcile a
+reclassification runs), without claiming that what is displayed was saved. The queued read-merge-write
+runs later, tracked by `PinWrite`/`pending_pins`; a pending or failed write keeps the local answer.
+A commit REFUSED before queuing — no `client_id` yet — produces no record and is not reconciled at
+all: the record still standing is the one the commit meant to replace, so resolving against it would
+put the viewer's answer back the way it was. The answer stands in memory for the run instead.
+An admission refusal from `queue_update_ticket` would likewise produce no record; that is its
+queueing contract, not `session::update`'s. The current implementation always returns `Ok`, retaining
+writes for retry when the worker queue cannot admit them. `browse.rs` is the plumbing
+around them, and a selection PERSISTS: every flip was in-memory before 2026-08-21, so a selection
+made in the Sources panel was gone by the next boot and the default came back, which reads as the
+switch not working. Since 2026-09-04 the write
 is `browse::apply_pins`, once, when the Home editor's `Done`/`Start watching` commits its draft — a
 flip edits the in-memory draft and nothing is written until then (`toggle_pin`, the old per-press
 write, is a test-only fixture now).
@@ -611,16 +713,20 @@ Four places, all recorded so the next reader does not "fix" them back:
    the shipped Sources panel draws nothing, on its own stated rule that an empty handle is *the
    absence of an owner rather than an anonymous one*. The route and the panel must agree, and they
    do — that rule is the one that stays.
-3. **A borrowed-only account gets every library On.** The canvas's "a friend's arrives Off" has no
-   answer for an account with no server of its own; taken literally it opens the app on nothing.
-   With nothing of your own to prefer, a borrowed library is simply a library.
+3. **An account with no server of its HOUSEHOLD'S gets every library On.** The canvas's "a friend's
+   arrives Off" has no answer for such an account; taken literally it opens the app on nothing.
+   With nothing of the household's to prefer, a borrowed library is simply a library. The
+   household and not the account, and the distinction is the whole managed-profile fix: plex.tv
+   answers a Plex Home managed profile `owned:false` about the family server, so read on ownership
+   this exemption was satisfied by *every* managed and Guest profile in existence — which is how a
+   genuine friend's share came up favourite on the family's Home beside the family's own.
 4. **Focus opens on *Start watching*.** The canvas says so twice in prose and draws it that way —
    but a stale comment in its own `renderVals` claims focus opens on row index 2, "the first shared
    library". The prose and the artwork agree with each other, so the comment is the odd one out.
 
 ### The screen, and how to look at it
 
-`ui/onboard.rs` mounts `ui::source_list` — the SAME row-model builder the Library toolbar's Sources
+`screens/onboard.rs` (`ui/onboard.rs` before phase 5b, 2026-09-07) mounts `ui::source_list` — the SAME row-model builder the Library toolbar's Sources
 panel uses, extracted out of `ui/library.rs` for exactly this reason. It differs by two arguments,
 not by a second builder: every library rather than the browsed type's (`browse::all_source_rows` —
 there is no tab bar here to be scoped to), and no *Check for new shares* tail.
@@ -668,7 +774,7 @@ name a record has:
   Home's own pump, and `session.rs` forbids a per-frame file read.
 - **`pins::carry_forward`** — a record is written from the section table, and `set_pins_for`
   replaces a profile's entry wholesale, so one switch flipped on a boot the share missed would
-  otherwise have erased the share's answer and let the ownership default back in. The merge grain is
+  otherwise have erased the share's answer and let the default back in. The merge grain is
   the MACHINE: a server the table holds has just been answered about in full (a library it has since
   lost is correctly dropped); one it does not hold has not been answered about at all.
 
@@ -768,7 +874,8 @@ Two say the whole phrase through `ui::fmt::shared_by`, which is words and not po
 hero's meta run and the detail page's facts row. The Library read-out, the Sources panel and
 Search's owner annotation draw the bare handle in their own sentence. The "Also available" rows
 carry it as `AltCopy::owner`, naming a row's source rather than captioning an item. And the
-first-run onboarding copy (`ui::onboard::body_copy`, "…has shared a library with you") lists the
+first-run onboarding copy (`screens::onboard`'s `OnboardScreen::body_copy` method — a free function
+of the same name, `ui::onboard::body_copy`, before phase 5b — "…has shared a library with you") lists the
 people from `browse::source_groups`, i.e. the same field one projection further out. Adding a screen
 means reading that field; it does not mean re-deciding this.
 
@@ -828,9 +935,9 @@ Then, per cache:
   hold the item, so the copies are kept and only their `owner` is re-read. Two riders, both found
   the round after: `install` regrades the incoming list as well, because a resolve dispatched before
   the correction lands after it and no epoch downstream looks again; and an OPEN panel is rebuilt,
-  because `open` materialises `TABLE`/`DESTS` once and `draw` renders that snapshot — so the rows
+  because the surface materialises its `TableView` once and `draw` renders that snapshot — so the rows
   keep their old text *and their old order* otherwise, and the order is not cosmetic, `owner` is the
-  own-before-a-friend's tiebreak. The one place `AltCopy::owner` is decided is `alt_sources::regrade`,
+  own-before-a-friend's tiebreak. The one place `AltCopy::owner` is decided is `metadata::alt_regrade`,
   applied at both boundaries, and skipped whole while the `/tmp/plxnative-shared` stand-in owns the
   list (its entire purpose is to fabricate a borrowed copy on a slot the registry calls ours).
 
@@ -841,18 +948,34 @@ Then, per cache:
   `pms::roster` groups Home's shelves by it, and `metadata::alt_copies` turns it into the
   "This account" row. For the household server that is now the right answer; for an unnamed external
   share it is wrong, and it was wrong before this change too (`ServerFacts::owned` has always
-  documented that a share with no `sourceTitle` is still a share). Fixing it properly means a
-  three-state `Owned | Household | External` relation carried on `ServerFacts` and `SourceRef`
-  instead of two booleans — a bigger change than the reported bug needs, and one that would also
-  want `owned` to stop meaning "this ACCOUNT owns it" on the four surfaces that read it for
-  ordering and default pinning. Recorded here rather than done.
+  documented that a share with no `sourceTitle` is still a share). This paragraph used to say the
+  proper fix meant a three-state `Owned | Household | External` relation *carried* on `ServerFacts`
+  and `SourceRef`, and named the blocker: the evidence that would grade a stored entry was never
+  written down. **That blocker is gone.** `GrantEvidence` — `owned`, `home`, `ownerId` — now rides
+  `ServerFacts`, `SourceRef` and `CandidateActivation`, and the three states are simply *derived*
+  from it: `owned` is Owned, else `is_household` is Household, else External. A stored relation
+  would add nothing a `match` on those three fields does not already give, and it would go stale
+  the moment the Home roster changed under it, which is precisely why the verdict is derived and
+  only the evidence is kept. What the pins and the tab destination read is that derivation
+  (`BrowseSource::household`), and `owned` has stopped meaning "prefer this" on both of them. So
+  what is left here is genuinely only the two empty-credit READERS above — a scoped follow-up whose
+  cost is teaching those two surfaces the third state, not a data-model change — and it stays a
+  follow-up because it changes what "This account" says on a user-facing row, which nobody has
+  asked for. `screens::alt_sources_tests`'
+  `an_unnamed_external_share_is_drawn_like_the_household_and_that_is_the_open_bug` pins the current
+  behaviour so the follow-up has a red test waiting for it.
 - **A session file written by an earlier build** has the raw handle already persisted in
   `SourceRef::shared_by`. It is corrected the first time the roster is re-derived — a sign-in, a
   `refresh_roster` (every boot, for the account owner) or any profile switch that is not the
   no-network "same profile" fast path — because `refreshed_sources` now *assigns* the credit rather
-  than merging it, and `describe` now publishes that assignment. There is no offline migration, and
-  there cannot be a good one: the evidence that would grade a stored entry (`ownerId`, `home`) was
-  never written down.
+  than merging it, and `describe` now publishes that assignment. There is no offline migration for
+  a file that old, and there cannot be a good one: the evidence that would grade a stored entry
+  (`ownerId`, `home`) was not written down at the time, and nothing offline can reconstruct it.
+  **New records do carry it** — `SourceRef` and `CandidateActivation` persist all three fields,
+  `#[serde(default)]`, so the gap is genuinely confined to sessions written before they existed.
+  Such a session deserializes to `owned:false, home:false, ownerId:0`, which `is_household` grades
+  as an outsider's until the first online roster re-derive corrects it — the safe direction, and
+  the same one every other unknown here falls in.
 - **The `/tmp/plxnative-servers` dev trigger still derives `owned` as `handle.is_empty()`**
   (`app.rs`), which is the derivation `ServerFacts::owned` documents as wrong. It is left alone
   because there the operator states the handle by hand and means it; but it cannot express an

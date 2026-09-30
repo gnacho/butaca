@@ -61,11 +61,15 @@ No third-party deps -- Python 3 stdlib only (macOS system python3 is fine).
 
 import argparse
 import atexit
+import datetime as datetime_module
 import functools
 import json
+import math
 import os
+from pathlib import Path
 import re
 import signal
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -79,6 +83,7 @@ import urllib.request
 # ---------------------------------------------------------------------------
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(TESTS_DIR)
+TOOLS_DIR = os.path.join(REPO_ROOT, "tools")
 MANIFEST = os.path.join(TESTS_DIR, "manifest.json")
 MANIFEST_LOCAL = os.path.join(TESTS_DIR, "manifest.local.json")
 MANIFEST_LOCAL_EXAMPLE = MANIFEST_LOCAL + ".example"
@@ -87,6 +92,14 @@ TV_HOST_FILE = os.path.join(REPO_ROOT, ".tv-host")
 
 sys.path.insert(0, TESTS_DIR)
 from serve_fixtures import serve, default_root as serve_fixtures_default_root  # noqa: E402  (needs TESTS_DIR on the path first)
+sys.path.insert(0, TOOLS_DIR)
+from graphics_profile import (  # noqa: E402
+    format_irq,
+    parse_irq_snapshots,
+    percentile as profile_percentile,
+    summarize_irq,
+    write_irq_jsonl,
+)
 
 # Where `make fixtures-pipeline` puts the generated pack. NOT inside the repo, and not merely by
 # convention: the generator REFUSES an --out under the repo root, because this repository is
@@ -116,13 +129,16 @@ RUN_STREAM_MARK = None  # the remote command text — see _run_stream_pids()
 # root's plxnative-*, so this no longer has to be exhaustive — it's kept for humans / grep)
 ALL_TRIGGERS = [
     "plxnative-detail", "plxnative-detailplay", "plxnative-detailsec", "plxnative-detailcol",
-    "plxnative-autoseek", "plxnative-menupick", "plxnative-menu", "plxnative-noaudio",
+    "plxnative-collection",
+    # the Library's listing type (TYPE menu value), for scenes such as library-collections
+    "plxnative-libtype",
+    "plxnative-autoseek", "plxnative-menupick", "plxnative-menu", "plxnative-subtiming", "plxnative-noaudio",
     "plxnative-grid", "plxnative-autoplay", "plxnative-h265", "plxnative-playidx", "plxnative-url",
     "plxnative-play", "plxnative-server", "plxnative-ffprobe", "plxnative-token", "plxnative-servers",
     # UI/FPS scenes (both profiler triggers MUST be cleared; either invalidates production pacing)
     "plxnative-detailosc", "plxnative-homeosc", "plxnative-heroosc", "plxnative-homefoldosc",
     "plxnative-info", "plxnative-chapters", "plxnative-profile",
-    "plxnative-hwcnt", "plxnative-glassboth", "plxnative-glasshz",
+    "plxnative-hwcnt",
     # the track's material and the instruments that override or narrate it. `flattabs` is the one
     # that MUST be cleared: it swaps the shipped material for the flat capsule, so a leftover turns
     # every glass assertion into a measurement of something else.
@@ -132,7 +148,8 @@ ALL_TRIGGERS = [
     "plxnative-heroidx", "plxnative-pickuser", "plxnative-firstrun",
     "plxnative-onboardosc", "plxnative-consent", "plxnative-consentosc",
     "plxnative-settings", "plxnative-settingsosc", "plxnative-acct", "plxnative-acctosc",
-    # itemmenu snaps into the grid and opens the press-and-hold card context menu (route=itemmenu)
+    # itemmenu snaps into the grid and opens the press-and-hold card context menu
+    # (route=home overlay=itemmenu: the menu is a ModalStack surface since UI-restructure phase 10)
     "plxnative-itemmenu",
     # playurl is the synthetic tier's entry; replay is how many times a FINISHED one restarts (#46)
     "plxnative-playurl", "plxnative-replay", "plxnative-gstlog", "plxnative-quality",
@@ -400,7 +417,7 @@ def fetch_managed_user_token(admin_token, host, port, user_id):
 # fetch_managed_user_token: one secret in one gitignored place, everything else derived at runtime.
 def _plextv_resources(admin_token):
     """Every server this account can reach — owned AND shared with it — from plex.tv."""
-    url = "https://plex.tv/api/v2/resources?includeHttps=1&includeRelay=1"
+    url = "https://plex.tv/api/v2/resources?includeHttps=1&includeRelay=1&includeIPv6=1"
     req = urllib.request.Request(url, headers={
         "Accept": "application/json",
         "X-Plex-Token": admin_token,
@@ -449,6 +466,39 @@ def pick_connection(hit):
     best = min(conns, key=rank)
     how = "relay" if best.get("relay") else ("LAN" if best.get("local") else "remote")
     return best["address"], int(best.get("port") or 32400), f"{how}, {best.get('protocol', '?')}"
+
+
+def stored_primary_machine_id(tv):
+    """The `machine_id` of the install's stored primary, read off its session file on the set —
+    so the IPv6 re-point names THAT server and not merely the first owned one plex.tv lists."""
+    r = ssh(tv, f"cat /media/developer/{APPID}-auth.json 2>/dev/null || cat /media/internal/.{APPID}-auth.json")
+    try:
+        return json.loads(r.stdout).get("server", {}).get("machine_id", "")
+    except (ValueError, AttributeError):
+        return ""
+
+
+def primary_ipv6_server(admin_token, machine_id=""):
+    """The owned server's LOCAL IPv6 connection as a plxnative-servers entry — same machine id as
+    the stored primary (so the registry re-points slot 0 rather than adding a source), the
+    `plex.direct` uri as the https host, and the advertised address as the `pin` the app dials it
+    at with no resolver. Refuses with the reason when plex.tv advertises no such connection: an
+    IPv6 case that quietly ran over v4 would grade nothing about v6."""
+    owned = [r for r in _server_resources(_plextv_resources(admin_token)) if r.get("owned")]
+    if machine_id:
+        owned = [r for r in owned if r.get("clientIdentifier") == machine_id]
+    for hit in owned:
+        for c in hit.get("connections") or []:
+            uri = c.get("uri") or ""
+            addr = c.get("address") or ""
+            if not c.get("local") or c.get("relay") or ":" not in addr or ".plex.direct" not in uri:
+                continue
+            host = uri.split("://", 1)[1].split("/", 1)[0].rsplit(":", 1)[0]
+            return {"name": hit.get("name") or "", "machine_id": hit["clientIdentifier"],
+                    "host": host, "port": int(c.get("port") or 32400), "scheme": "https",
+                    "tier": "local", "token": hit.get("accessToken") or admin_token, "pin": addr}
+    sys.exit("primary_ipv6: plex.tv advertises no local IPv6 plex.direct connection for an owned "
+             "server (is the server's host on a v6 LAN, and does PMS see it?)")
 
 
 def resolve_shared_server(admin_token, spec):
@@ -542,16 +592,172 @@ def sh_squote(s):
 # ---------------------------------------------------------------------------
 # Device I/O
 # ---------------------------------------------------------------------------
-def ssh(tv, remote_cmd, timeout=30):
-    """Run a command on the TV. Mirrors the Makefile's committed sshpass creds."""
-    cmd = [
+_WAN_CUT = False
+# Did the tool's own probe from the television confirm the LAST cut (`resolve plex.tv -> FAIL`)?
+# Read by `a_offline_roster` as the negative control when the app's log cannot carry one: with a
+# managed profile active the server-roster refresh is skipped, and an automated boot never raises
+# the picker whose home-user refresh would fail instead. Reset per case, not on `on`, because the
+# verdict is graded after the restore.
+_WAN_CUT_VERIFIED = False
+
+
+def tv_wan(state, ttl_s=None):
+    """Cut or restore the television's uplink through `tools/tv-session.sh wan`, which owns the
+    netfilter recipe and the on-device watchdog. Never raises on `on`: a restore that cannot reach
+    the set must not mask the failure that got us here, and the watchdog covers that case."""
+    global _WAN_CUT, _WAN_CUT_VERIFIED
+    argv = [os.path.join(REPO_ROOT, "tools", "tv-session.sh"), "wan", state]
+    if state == "off":
+        argv.append(str(int(ttl_s or 900)))
+    r = subprocess.run(argv, capture_output=True, text=True, timeout=120)
+    for ln in (r.stdout or "").splitlines():
+        if ln.strip():
+            print(f"    wan {state}: {ln.strip()}")
+    if state == "off":
+        if r.returncode != 0:
+            sys.exit(f"wan off failed (rc={r.returncode}): {(r.stderr or '').strip()}")
+        _WAN_CUT = True
+        _WAN_CUT_VERIFIED = "resolve plex.tv -> FAIL" in (r.stdout or "")
+    else:
+        _WAN_CUT = False
+        if r.returncode != 0:
+            print(f"    WARNING: wan on returned rc={r.returncode}; the on-device watchdog restores it")
+
+
+def stored_session_reason(tv):
+    """Why `session: stored` cases cannot run on this install, or None when a stored sign-in
+    exists in one of the two places `paths::session_candidates` reads for a flavoured install.
+    Returned rather than raised: whether an unmet precondition SKIPS the affected cases or aborts
+    the whole batch is the caller's call, not this probe's — a batch that also has cases which
+    don't need a stored session must not die for want of one that a few of them do."""
+    r = ssh(tv, f"test -s /media/developer/{APPID}-auth.json || test -s /media/internal/.{APPID}-auth.json")
+    if r.returncode != 0:
+        return (f"needs a signed-in session on {APPID} (none at /media/developer/{APPID}-auth.json) "
+                f"— sign in on that install once, with the internet up, and rerun")
+    return None
+
+
+def partition_stored_sessions(cases, reason):
+    """Split `cases` into (still-runnable, skipped-for-stored-session) given `reason` — the
+    string `stored_session_reason()` returned, or None when a stored sign-in is present. Pure and
+    TV-independent, so the skip-vs-run decision is unit-testable without an ssh mock: the bug this
+    guards against (a missing stored session taking the whole batch down via an uncaught
+    `SystemExit`) is a property of what ends up in `cases`, not of any device state."""
+    if not reason:
+        return cases, []
+    stored = [c for c in cases if c.get("session") == "stored"]
+    if not stored:
+        return cases, []
+    return [c for c in cases if c.get("session") != "stored"], stored
+
+
+def require_stored_session(tv, name):
+    """A `session: stored` case needs a sign-in ON THE INSTALL. Refused with the reason rather
+    than silently running as the injected identity, which would be the false pass the attribute
+    exists to prevent. This is the single-case belt to the batch-level suspenders in main(): a
+    case reaching here whose batch-level check already found the session missing is a bug, not a
+    new thing to discover, so it still refuses loudly rather than playing as the wrong identity."""
+    reason = stored_session_reason(tv)
+    if reason:
+        sys.exit(f"{name}: `session: stored` {reason}")
+
+
+def ssh_argv(tv, remote_cmd):
+    """The one SSH command shape used by blocking calls and streaming profiler helpers."""
+    return [
         "sshpass", "-p", "alpine", "ssh",
         "-o", "StrictHostKeyChecking=no",
         "-o", "UserKnownHostsFile=/dev/null",
         "-o", "ConnectTimeout=8",
         f"root@{tv}", remote_cmd,
     ]
+
+
+def ssh(tv, remote_cmd, timeout=30):
+    """Run a command on the TV. Mirrors the Makefile's committed sshpass creds."""
+    cmd = ssh_argv(tv, remote_cmd)
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+
+class MaliIrqSampler:
+    """Temporary root helper for passive, global Mali IRQ samples.
+
+    The app cannot read root's /proc view from its jail, and it should not: this layer must remain
+    external so an unarmed production leg has no new hot-path work. The helper is an explicit
+    standalone Make target, not an APP_FILE, and this owner removes its unique /tmp copy.
+    """
+
+    def __init__(self, tv):
+        self.tv = tv
+        self.remote = f"/tmp/plxnative-mali-irq-{os.getpid()}"
+        self.proc = None
+
+    def stage(self):
+        built = make(["mali-irq-sample"], timeout=120, capture=False)
+        if built.returncode != 0:
+            raise RuntimeError("failed to build mali-irq-sample")
+        local = os.path.join(REPO_ROOT, "pkg", "mali-irq-sample")
+        cmd = [
+            "sshpass", "-p", "alpine", "scp", "-O",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "ConnectTimeout=8",
+            local, f"root@{self.tv}:{self.remote}.new",
+        ]
+        if subprocess.run(cmd).returncode != 0:
+            raise RuntimeError("failed to stage mali-irq-sample")
+        moved = ssh(self.tv, f"chmod 700 {self.remote}.new && mv {self.remote}.new {self.remote}")
+        if moved.returncode != 0:
+            raise RuntimeError("failed to install temporary mali-irq-sample")
+
+    def capture(self, seconds, interval_ms=100):
+        samples = max(2, math.ceil(seconds * 1000.0 / interval_ms) + 1)
+        result = ssh(self.tv, f"{self.remote} {samples} {interval_ms}",
+                     timeout=max(30, int(seconds) + 15))
+        if not result.stdout:
+            raise RuntimeError(result.stderr.strip() or "Mali IRQ sampler returned no data")
+        return result.stdout
+
+    def start(self, seconds, interval_ms=100):
+        if self.proc is not None:
+            raise RuntimeError("Mali IRQ sampler already running")
+        samples = max(2, math.ceil(seconds * 1000.0 / interval_ms) + 1)
+        self.proc = subprocess.Popen(
+            ssh_argv(self.tv, f"{self.remote} {samples} {interval_ms}"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+
+    def finish(self, timeout=15):
+        if self.proc is None:
+            raise RuntimeError("Mali IRQ sampler was not started")
+        proc, self.proc = self.proc, None
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
+            out, err = proc.communicate(timeout=5)
+        if not out:
+            raise RuntimeError(err.strip() or "Mali IRQ sampler returned no data")
+        return out
+
+    def close(self):
+        if self.proc is not None:
+            try:
+                os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
+            try:
+                self.proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+            self.proc = None
+        ssh(self.tv, f"rm -f {self.remote} {self.remote}.new", timeout=15)
 
 
 def make_argv(target_args):
@@ -782,6 +988,14 @@ def triggers_for_case(case, url_base=None):
     gst_debug = case.get("gst_trace", {}).get("debug")
     if gst_debug:
         files.append(("plxnative-gstlog", gst_debug))
+    # issue #266 PR4 review: force the PERSISTED Boost Dialog / Normalize Loudness preference at
+    # boot on EVERY case, not just the two that exercise it — `dev::scenarios::arm_audio_enhancements`
+    # calls the real persisting setter, so a case's starting preference is a property of the
+    # manifest instead of of whatever a PREVIOUS case's (or a real person's) toggle left behind. A
+    # case opts into a non-off start with `"audio_enhancements_boot": "loudness"` (used by the
+    # reset case below to prove the cold-start "a saved preference forces a remux" path);
+    # everything else gets `"off"`.
+    files.append(("plxnative-audioenh", case.get("audio_enhancements_boot", "off")))
     # Arbitrary extra dev triggers, `{"name": content}` → `plxnative-<name>` in the runtime root
     # (`null` for a bare flag). For the one-run experiments a trigger exists for — `sinkmax`,
     # `nofps` — without teaching the harness a key per knob; the case's own triggers above win on
@@ -840,12 +1054,26 @@ def triggers_for_case(case, url_base=None):
             files.append(("plxnative-menupick", f'{op["tab"]},{op["row"]}'))
         elif kind == "subtitle":
             files.append(("plxnative-menupick", f'{op["tab"]},{op["row"]}'))
+        elif kind == "audio_enhancement":
+            # issue #266: the Boost Dialog / Normalize Loudness rows live on the Audio tab (0),
+            # appended after the audio tracks (`track_menu.rs`'s `build_audio`). `menupick` names
+            # them rather than stating a row: `AudioRowTarget`/`TrackMenuState::row_for_audio_target`
+            # resolve "boost"/"loudness" through the SAME row map `on_ok` dispatches on, so the
+            # trigger is correct regardless of the item's own track count — the derived-row-number
+            # dance this replaced (PR4's fix for a row hardcoded against a wrong track count) is
+            # gone; there is no track count to get wrong any more.
+            which = op.get("which", "normalize_loudness")
+            name = "boost" if which == "boost_dialog" else "loudness"
+            files.append(("plxnative-menupick", f'0,{name}'))
         elif kind == "pause_resume":
             files.append((
                 "plxnative-autopause",
                 f'delay={int(op.get("delay_ms", 0))},hold={int(op["hold_ms"])}',
             ))
-        # "play" and startup "resume" need no extra trigger (resume rides the seeded viewOffset).
+        # "play", startup "resume" and "audio_enhancement_withheld" need no extra trigger: the last
+        # of those grades a boot-forced preference the `plxnative-audioenh` trigger above already
+        # wrote, and there is no menu row to pick because the rows are withheld from the screen
+        # (resume rides the seeded viewOffset).
     return files
 
 
@@ -1134,6 +1362,101 @@ def a_no_error(lines):
         if "smp_cb type=18" in ln or "Playing error" in ln:
             return False, f"error surfaced :: {ln.strip()}"
     return True, "no `smp_cb type=18` / `Playing error`"
+
+
+def a_resolve_pin(lines, want="any"):
+    """The registry dialled the primary's `plex.direct` name at the address plex.tv advertised
+    beside it, with no resolver: `plex: server slot N registered at … (pinned: v4 name resolved
+    locally)`. The line is written once per pin, when it is NEW, so it is the boot's own statement
+    that offline mode had something to stand on. Its absence means the stored session's address
+    does not match its name (or the file predates the field) — DNS as before, which is exactly
+    what an offline case must not pass on. The line names the FAMILY and nothing else: the
+    app's scrubber rewrites every host to `<host>`, and a dashed `plex.direct` label is a LAN
+    address spelled sideways, so neither the name nor the address is ever in a log.
+
+    `want` narrows the family: `"v6"` demands a v6 pin (the `primary_ipv6` case would otherwise
+    be satisfied by the v4 pin the stored session registers first, before the re-point), `"v4"`
+    the reverse, anything else either. For `v6` the pin must also be on the CURRENT server
+    before the play starts — the re-point line must precede `plxnative-play: … start` — which
+    is the ordering that proves the stream was dispatched on the re-pointed slot (the `stream:`
+    line itself cannot say, its host being scrubbed)."""
+    marker = " name resolved locally)"
+    hits = [(i, ln) for i, ln in enumerate(lines) if "(pinned: " in ln and marker in ln]
+    if want in ("v4", "v6"):
+        hits = [(i, ln) for i, ln in hits if f"(pinned: {want} " in ln]
+    # the PRIMARY's slot, when the play start names it: a share pinned to its own LAN label is
+    # a pin too, and must not stand in for the server the case actually plays from
+    slot = primary_slot(lines)
+    if slot is not None:
+        mine = [(i, ln) for i, ln in hits if f"server slot {slot} " in ln]
+        hits = mine or []
+    if not hits:
+        return False, f"no `(pinned: … name resolved locally)` line{' for ' + want if want in ('v4', 'v6') else ''}: nothing was pinned"
+    i, ln = hits[-1]
+    if want == "v6":
+        start = next((j for j, l in enumerate(lines) if "plxnative-play: " in l and " start" in l), None)
+        if start is None or start < i:
+            return False, f"the v6 pin landed AFTER the play started (or no start line): {ln.strip()}"
+        if "re-pointed" not in ln:
+            return False, f"the v6 pin did not re-point the primary's slot: {ln.strip()}"
+    return True, ln.strip()
+
+
+def primary_slot(lines):
+    """The registry slot the boot's PRIMARY landed in — the `server=N` of the direct-play trigger's
+    own start line, which names the slot the play was dispatched on. Slots are never reused after a
+    sign-out, so a hardcoded 0 would be wrong on the second sign-in of a process."""
+    for ln in lines:
+        m = re.search(r"plxnative-play: rk=\d+ server=(\d+) start", ln)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def a_offline_roster(lines):
+    """Three halves of "the internet was really down and it did not matter": the boot's roster
+    refresh reached for plex.tv and was refused (the negative control — a cut that did not cut
+    would refresh silently); the PRIMARY's source landed its hubs (`hubs: source N ok`, the
+    positive half, N being the slot the play was dispatched on); and that same source never
+    FAILED a hub fetch, which is what a DNS-dependent origin does within seconds of the refusal."""
+    # The SERVER roster refresh runs only for the owner's profile; with a managed profile
+    # active it is skipped, and the negative control is then the picker's HOME-USER refresh
+    # failing, or a pick seated from the cache — which only happens when plex.tv did not answer.
+    # …and when the boot makes NO plex.tv call at all (a managed profile active, picker
+    # suppressed), the tool's own probe from the set is the control — `tv_wan` records it.
+    roster = (find(lines, "plex.tv unreachable, keeping the stored roster")
+              or find(lines, "roster refresh failed — keeping cached roster")
+              or find(lines, "-> ok (offline, cached credentials)"))
+    if roster is None and _WAN_CUT_VERIFIED:
+        roster = "(the app made no plex.tv call this boot; the cut was verified from the set: resolve plex.tv -> FAIL)"
+    if roster is None:
+        return False, "no `plex.tv unreachable` / `roster refresh failed` / offline-seat line, and the tool did not verify the cut: plex.tv was reachable"
+    slot = primary_slot(lines)
+    if slot is None:
+        return False, "no `plxnative-play: … server=N start` line: which slot was the primary?"
+    landed = find(lines, f"hubs: source {slot} ok")
+    if landed is None:
+        return False, f"the primary (slot {slot}) never landed its hubs offline"
+    failed = find(lines, f"hubs: source {slot} FAILED")
+    if failed is not None:
+        return False, f"the primary's hub fetch failed offline :: {failed.strip()}"
+    return True, f"{roster.strip()} ; {landed.strip()}"
+
+
+def a_offline_pick(lines):
+    """The who's-watching pick was seated from this television's cached credentials — the line
+    `auth::seat_offline` writes — and not through plex.tv, which the `offline` assertion beside
+    this proves was unreachable. A `-> failed` on the same profile is the 2026-09-06 outage."""
+    ok = find(lines, "-> ok (offline, cached credentials)")
+    if ok is not None:
+        return True, ok.strip()
+    failed = find(lines, "auth: switch '")
+    if failed is not None:
+        return False, f"the pick was not seated from the cache :: {failed.strip()}"
+    # Say what the picker DID do: every auth/pick line, so the verdict carries its own evidence.
+    saw = " | ".join(ln.strip() for ln in lines
+                     if any(k in ln for k in ("auth: ", "pickuser", "boot: ")))
+    return False, f"no `auth: switch` line at all: the picker never took the pick :: {saw}"
 
 
 def a_video_bound(lines):
@@ -2737,7 +3060,8 @@ def a_server_wire(delta, min_opens, min_range, exact_opens=None, exact_range=Non
     server (a hand-substituted `python3 -m http.server`, say) answering 200 to a Range request —
     the silent corruption this tier's server exists to make impossible.
     """
-    opens, ranges = delta
+    opens, ranges = delta[0], delta[1]
+    accepts = delta[2] if len(delta) > 2 else None
     if exact_opens is not None and opens != exact_opens:
         return False, f"the fixture server served {opens} body/bodies, want exactly {exact_opens}"
     if exact_range is not None and ranges != exact_range:
@@ -2747,7 +3071,14 @@ def a_server_wire(delta, min_opens, min_range, exact_opens=None, exact_range=Non
     if ranges < min_range:
         return False, (f"{ranges} ranged (206) request(s), need >={min_range} — the seek never "
                        f"reached the demuxer's Range reopen")
-    return True, f"server saw {opens} open(s), {ranges} ranged"
+    reuse = ""
+    if accepts is not None:
+        reuse = f", {accepts} accept(s)"
+        if opens > 1 and accepts == 1:
+            reuse += " — keep-alive reuse"
+        elif opens > 1 and accepts >= opens:
+            reuse += " — no socket reuse"
+    return True, f"server saw {opens} open(s), {ranges} ranged{reuse}"
 
 
 def a_replayed(lines, want):
@@ -3195,6 +3526,12 @@ def a_no_demux_failure(lines):
 # still grades.
 AUDIO_NATIVE_SWITCH_LINES = ("route transition: native audio idx=", "audio switch (native)")
 AUDIO_RETRANSCODE_LINES = ("route transition: user retranscode", "re-transcode:")
+# issue #266: `route/decision.rs`'s `retranscode_as` logs this ONLY when `EnhancementOutcome`
+# becomes `Applied` — the server demonstrably ran the DSP params, not merely accepted a request a
+# source-copy would have produced anyway (`EnhancementOutcome`'s own doc). `decision output: v=..
+# a=..` is the SAME call's statement of what the negotiated codecs actually are.
+RE_ENHANCEMENT_APPLIED = re.compile(r"enhancement: applied boost=(\d) loudness=(\d)")
+RE_DECISION_OUTPUT = re.compile(r"decision output: v=(\S+) a=(\S+)")
 
 
 def _find_any(lines, needles):
@@ -3208,6 +3545,12 @@ def _find_any(lines, needles):
 def op_audio_native(lines):
     hit = _find_any(lines, AUDIO_NATIVE_SWITCH_LINES)
     if hit is None:
+        # A row already active at menupick time commits nothing and never reaches the
+        # transition line at all; scenarios.rs logs that case explicitly, so surface it
+        # here instead of leaving a bare "not native" that looks like a route regression.
+        no_commit = find(lines, "menupick: row")
+        if no_commit is not None:
+            return False, f"no `route transition: native audio` line :: {no_commit.strip()}"
         return False, "no `route transition: native audio` line (switch was not native)"
     cs = codec_ids(lines)
     if not cs:
@@ -3241,6 +3584,198 @@ def op_audio_transcode(lines):
         return False, (f"video was RE-ENCODED across the audio switch ({cs[0][0]} -> {cs[-1][0]}); "
                        f"expected a copy :: {cs[-1][3].strip()}")
     return True, f"transcode switch OK (video copied, {cs[-1][0] if cs else '?'}) :: {rl_t.strip()}"
+
+
+# LG's buffer-feed audio vocabulary (`player::engine::audio_payload_codec`) back to the PMS codec
+# names a `decision output:` line uses, so the two can be compared.
+LOAD_AUDIO_TO_PMS = {"ac3": "ac3", "ac3 plus": "eac3", "aac": "aac", "dts": "dts"}
+# The Load vocabulary's video names back to the demuxer's (`ff: v=#0 codec=..`).
+LOAD_VIDEO_TO_FF = {"h264": "h264", "h265": "hevc", "hevc": "hevc"}
+
+
+def _video_codec(line):
+    """The video codec a `load: v=..` or `ff: v=#0 codec=..` line states, in the demuxer's names;
+    None for any other line."""
+    m = RE_CODEC.search(line)
+    if m:
+        return m.group(1).lower()
+    m = RE_LOAD.search(line)
+    if m:
+        v = m.group(1).lower()
+        return LOAD_VIDEO_TO_FF.get(v, v)
+    return None
+
+
+def _enhancement_miss(lines, hit_label, fallback_msg, refused_marker=None, refused_label=None):
+    """The shared "the expected line never showed up" preamble for the #266 audio-enhancement
+    graders below: check whether the trigger fired but the app logged no commit — either
+    `menupick: row .. already active — no commit` (the same marker `op_audio_switch`/`op_subtitle`
+    check) or `menupick: unknown target ".." — no commit` (the row for boost/loudness was never
+    offered, `dev/scenarios.rs`'s `arm_audio_enhancements` menupick handler) — then, if the caller
+    has one, whether the server explicitly refused/ignored the request, before falling back to the
+    caller's own generic message. `hit_label` names the missing line for the no-commit message;
+    `fallback_msg` is returned verbatim when neither more specific cause is found."""
+    no_commit = next((ln for ln in lines if "menupick: " in ln and "no commit" in ln), None)
+    if no_commit is not None:
+        return False, f"no `{hit_label}` line :: {no_commit.strip()}"
+    if refused_marker is not None:
+        refused = find(lines, refused_marker)
+        if refused is not None:
+            return False, f"{refused_label} :: {refused.strip()}"
+    return False, fallback_msg
+
+
+def op_audio_enhancement(lines):
+    """A live Boost Dialog / Normalize Loudness toggle (issue #266), asked for mid-play through
+    the SAME single-shot `plxnative-menupick` mechanism `op_audio_switch`/`op_subtitle` use.
+
+    Graded in order:
+    1. The ask reached the server and TOOK EFFECT: the app's own `enhancement: applied boost=..
+       loudness=1` line, printed only on `EnhancementOutcome::Applied` (`route/decision.rs`'s
+       `retranscode_as`), so a request the server merely accepted (or silently ignored) fails.
+    2. The Load was declared with the audio the server actually negotiated: the `decision output:`
+       audio codec at/before the applied line (`retranscode_as` logs its own codecs first) equals
+       the post-toggle `load: .. a=".."` codec. Invariant I4: the payload follows /decision's
+       OUTPUT, never the source or a literal — PMS 1.43.4 answers a DSP param over an AAC source
+       with `a=aac`, over AC-3 with `ac3`.
+    3. The route is a REMUX, not a re-encode: the video codec after the toggle (`ff: v=`, else the
+       post-toggle `load: v=`) equals the codec before it (the last `ff: v=`/`load: v=` before the
+       applied line — a direct-play start may be torn down before it ever logged `ff: v=`).
+    4. The post-toggle stream is `start.mkv` (`TranscodeDelivery::ProgressiveMkv`), the one
+       delivery PMS answers a DSP param with; an HLS re-encode under a fixed rung would be
+       `start.m3u8`, a different, non-enhanced contract by design.
+    5. No `ff: open_input failed` after the applied line. The demuxer the reload tears down logs
+       `ff: aborted during open_input` instead (`ff::open_input_failure_note`), so this line is
+       only ever a source that really would not open.
+    """
+    hit = find(lines, "enhancement: applied boost=")
+    if hit is None:
+        return _enhancement_miss(
+            lines, "enhancement: applied",
+            "no `enhancement: applied boost=.. loudness=..` line (toggle never took effect)",
+            refused_marker="enhancement: refused/ignored by server",
+            refused_label="the server refused/ignored the enhancement")
+    m = RE_ENHANCEMENT_APPLIED.search(hit)
+    if not m or m.group(2) != "1":
+        return False, f"applied line does not show loudness=1 :: {hit.strip()}"
+    hit_i = lines.index(hit)
+    before, after = lines[:hit_i + 1], lines[hit_i + 1:]
+
+    dec = next((ln for ln in reversed(before) if RE_DECISION_OUTPUT.search(ln)), None)
+    if dec is None:
+        return False, f"no `decision output:` line at/before the toggle :: {hit.strip()}"
+    negotiated = RE_DECISION_OUTPUT.search(dec).group(2).lower()
+    load = next((ln for ln in after if RE_LOAD.search(ln)), None)
+    if load is None:
+        return False, f"no post-toggle `load: v=.. a=\"..\"` line :: {hit.strip()}"
+    declared_raw = RE_LOAD.search(load).group(2).lower()
+    declared = LOAD_AUDIO_TO_PMS.get(declared_raw, declared_raw)
+    if declared != negotiated:
+        return False, (f"Load declared audio {declared_raw!r} but the server negotiated "
+                       f"{negotiated!r} :: {dec.strip()} / {load.strip()}")
+
+    pre = next((c for c in map(_video_codec, reversed(before)) if c), None)
+    if pre is None:
+        return False, f"no pre-toggle `load: v=`/`ff: v=` line to compare the video against :: {hit.strip()}"
+    post_line = (next((ln for ln in after if RE_CODEC.search(ln)), None)
+                 or next((ln for ln in after if RE_LOAD.search(ln)), None))
+    post = _video_codec(post_line) if post_line else None
+    if post != pre:
+        return False, (f"video was RE-ENCODED across the enhancement toggle ({pre} -> {post}); "
+                       f"expected a copy (remux) :: {(post_line or hit).strip()}")
+
+    stream = next((ln for ln in after if RE_STREAM_PATH.search(ln)), None)
+    if stream is None or "start.mkv" not in RE_STREAM_PATH.search(stream).group(1):
+        return False, (f"the post-toggle stream is not start.mkv (not a remux) :: "
+                       f"{redact((stream or hit).strip())}")
+    failed = next((ln for ln in after if "ff: open_input failed" in ln), None)
+    if failed is not None:
+        return False, f"a source failed to open after the toggle :: {failed.strip()}"
+    return True, (f"enhancement applied as a {post} remux declaring {declared_raw} audio "
+                  f"(negotiated {negotiated}) :: {hit.strip()} / {redact(stream.strip())}")
+
+
+def op_audio_enhancement_release(lines):
+    """The `audio_enhancement_normalize_reset` case's own settle grade: this case boots with
+    `plxnative-audioenh=loudness` forcing the PERSISTED preference ON before the first frame (via
+    `dev::scenarios::arm_audio_enhancements` -> `player::set_audio_enhancements`, the SAME real
+    setter a person's pick calls) — proving the cold-start `route/plan.rs` path (a saved
+    preference turns an otherwise direct-playable candidate into an enhanced remux before route
+    ever runs) — then picks the SAME row `op_audio_enhancement` picks, which `on_ok` TOGGLES: from
+    ON, that reconciles the preference back to NONE. `enhancement_step` releases a directly-
+    playable candidate straight back to it (`route/decision.rs`'s `EnhancementStep::ReleaseToDirect`
+    -> `recover_auto_to_original_for(.. EnhancementReleased)`). Because the toggle goes through the
+    ordinary commit path (not a second boot trigger), it also re-persists the preference as OFF for
+    real — the case ends idempotent with no second op needed.
+
+    Graded on where the release actually LANDED, not on the line announcing it: `enhancement:
+    released to Original direct play`, then the next `stream: .. path=` is the item's
+    `/library/parts/` Part, no later `start.mkv`/`start.m3u8` stream line (a failed trial rolls
+    back to the enhanced remux the release was leaving), and no `status=503` stream line after the
+    release (the refusal PR 4's first device run met). The Part is admitted before the trial
+    (`route::decision::admit_original_part`); a server that refuses it gets the plain remux, logged
+    `enhancement: released to Original remux`, which this case — whose item direct-plays — fails.
+    """
+    hit = find(lines, "enhancement: released to Original")
+    if hit is None:
+        return _enhancement_miss(
+            lines, "enhancement: released",
+            "no `enhancement: released to Original ..` line (release never took effect)")
+    after = lines[lines.index(hit) + 1:]
+    refused = find(lines, "server refused the Original Part")
+    if refused is not None:
+        return False, f"the server refused the Original Part :: {redact(refused.strip())}"
+    if "released to Original direct play" not in hit:
+        return False, f"the release did not land on direct play :: {hit.strip()}"
+    stream = next((ln for ln in after if RE_STREAM_PATH.search(ln)), None)
+    if stream is None:
+        return False, f"no `stream: .. path=` line after the release :: {hit.strip()}"
+    if not RE_STREAM_PATH.search(stream).group(1).startswith("/library/parts/"):
+        return False, f"the release's stream is not the Original Part :: {redact(stream.strip())}"
+    later = next((ln for ln in after if RE_STREAM_PATH.search(ln)
+                  and re.search(r"start\.(mkv|m3u8)", RE_STREAM_PATH.search(ln).group(1))), None)
+    if later is not None:
+        return False, (f"a transcode stream followed the release (the trial rolled back) :: "
+                       f"{redact(later.strip())}")
+    refusal = next((ln for ln in after if "stream:" in ln and "status=503" in ln), None)
+    if refusal is not None:
+        return False, f"the server answered 503 after the release :: {redact(refusal.strip())}"
+    return True, (f"enhancement released to Original direct play on the Part :: "
+                  f"{hit.strip()} / {redact(stream.strip())}")
+
+
+def op_audio_enhancement_withheld(lines):
+    """`audio_enhancement_withheld_under_subtitle`'s grade: the device-level proof that a shown
+    subtitle withholds Boost Dialog / Normalize Loudness even when the PERSISTED preference is
+    forced ON at boot (`plxnative-audioenh=loudness`, the same `dev::scenarios::arm_audio_enhancements`
+    trigger `op_audio_enhancement_release` above uses) — route/plan.rs's cold-start audio branch
+    computes `subtitle_shown` and feeds it into `enhancements_offered` for the same candidate the
+    preference would otherwise decorate, so the preference is evaluated and refused before the
+    first frame rather than merely hidden from the Audio tab's menu (track_menu.rs's
+    `enh_rows_absent_subtitle_shown`).
+
+    Graded on three POSITIVE lines, not on the absence of one: the boot-forced preference actually
+    armed (`audioenh: forced ..`), the precondition this case depends on actually held on the
+    server (`server-selected subtitle: ..` — if a future server or library stops selecting a
+    subtitle on this item, this case must FAIL LOUDLY rather than pass vacuously because there was
+    nothing left to withhold), and no `enhancement:`-prefixed line of any kind (applied, released,
+    refused/ignored, displaced, or the plan-time `.. becomes an enhanced remux` line) — proving the
+    enhancement was never even attempted, not merely that it failed.
+    """
+    forced = find(lines, "audioenh: forced boost_dialog=false normalize_loudness=true")
+    if forced is None:
+        return False, "no `audioenh: forced boost_dialog=false normalize_loudness=true` boot line " \
+                      "(the plxnative-audioenh=loudness trigger never armed the preference)"
+    sub = find(lines, "server-selected subtitle:")
+    if sub is None:
+        return False, ("precondition failed: no `server-selected subtitle: ..` line — this item no "
+                        "longer has a server-selected subtitle for this identity, so the subtitle "
+                        "gate this case proves was never exercised")
+    enh = next((ln for ln in lines if "enhancement:" in ln), None)
+    if enh is not None:
+        return False, f"an `enhancement:` line appeared despite the shown subtitle :: {enh.strip()}"
+    return True, (f"preference forced ON, subtitle shown, enhancement withheld :: "
+                  f"{forced.strip()} / {sub.strip()}")
 
 
 def op_subtitle(lines):
@@ -3459,6 +3994,14 @@ def teardown(tv):
     global _TEARDOWN_DONE
     if _TEARDOWN_DONE:
         return
+    # A cut uplink outlives the harness like the app does: put it back before anything else, so
+    # an interrupted offline case never leaves the household's television off the internet for
+    # the watchdog's whole TTL.
+    if _WAN_CUT:
+        try:
+            tv_wan("on")
+        except Exception as e:  # noqa: BLE001 — never mask the real failure
+            print(f"    WARNING: wan restore failed ({e}); the on-device watchdog restores it")
     _TEARDOWN_DONE = True
     try:
         make(["kill", f"TV={tv}"], timeout=40)
@@ -3814,6 +4357,12 @@ def evaluate(case, lines):
     if exp.get("no_playing_error", True):
         results.append(("no_error", *a_no_error(lines)))
     results.append(("presented_rate", *a_presented_rate(lines, exp)))
+    if exp.get("resolve_pin"):
+        results.append(("resolve_pin", *a_resolve_pin(lines, exp["resolve_pin"])))
+    if exp.get("offline"):
+        results.append(("offline", *a_offline_roster(lines)))
+    if exp.get("offline_pick"):
+        results.append(("offline_pick", *a_offline_pick(lines)))
 
     # per-operation assertions
     for op in case["operations"]:
@@ -3846,6 +4395,12 @@ def evaluate(case, lines):
             results.append(("audio_native", *op_audio_native(lines)))
         elif k == "audio_switch":
             results.append(("audio_transcode", *op_audio_transcode(lines)))
+        elif k == "audio_enhancement" and op.get("settle") == "released":
+            results.append(("audio_enhancement_release", *op_audio_enhancement_release(lines)))
+        elif k == "audio_enhancement":
+            results.append(("audio_enhancement", *op_audio_enhancement(lines)))
+        elif k == "audio_enhancement_withheld":
+            results.append(("audio_enhancement_withheld", *op_audio_enhancement_withheld(lines)))
         elif k == "subtitle" and op.get("image"):
             results.append(("image_subtitle", *op_image_subtitle(lines)))
         elif k == "subtitle":
@@ -3881,7 +4436,48 @@ def report_case(passed, results, elapsed, run_secs, stopped_early, settled, verb
         print(f"       stopped early — settled: {redact(settled)}")
 
 
+def prime_online(case, cfg, files):
+    """`prime_online: [tile, ...]` — seat each roster tile ONCE, in order, with the uplink up,
+    and close the app after each. The offline picker seats a profile from the credentials its
+    last ONLINE seating cached (`Session::profiles`), so a case that grades the offline pick has
+    to make the seating happen on this install — otherwise it grades whether somebody happened
+    to use that profile since the last sign-in. Listing a SECOND tile last is what makes the
+    offline pick of the first one go through the cache rather than the same-user shortcut: the
+    active profile needs no network at all, which is a different (older) path.
+
+    Each launch is the case's own trigger set with `pickuser` overridden, so the play trigger
+    rides along exactly as it will offline; runs before `wan: off` cuts the link."""
+    tv = cfg["tv"]
+    tiles = case["prime_online"]
+    if tiles is True:
+        tiles = [int((case.get("triggers") or {}).get("pickuser", 0))]
+    def seated(_case, lines):
+        # Either road seats the profile online: the plex.tv switch, or the same-user shortcut
+        # when the tile was already the active profile (which also writes the record).
+        ok = (find(lines, "-> ok (per-user server token)") is not None
+              or find(lines, "already active — no switch needed") is not None)
+        return ok, [("primed", ok, "seated online")]
+    for tile in tiles:
+        print(f"    prime: seating roster tile {tile} online once, so the cache holds it ...")
+        primed = [(n, c) for n, c in files if n != "plxnative-pickuser"]
+        primed.append(("plxnative-pickuser", str(tile)))
+        apply_triggers(tv, primed)
+        lines, _, _, _ = stream_case(case, cfg, 60, early=True, inject=None, evaluator=seated)
+        make(["kill", f"TV={tv}"], timeout=40)
+        ok, _ = seated(case, lines)
+        if not ok:
+            # Say what the launch DID do: the lines that decide this, verbatim (already scrubbed).
+            for ln in lines:
+                if any(k in ln for k in ("auth: ", "pickuser", "boot: ")):
+                    print(f"      prime saw: {ln.strip()}")
+            raise RuntimeError(f"prime_online: roster tile {tile} was not seated online (is the "
+                               "uplink up, and does the stored roster hold that tile?)")
+    print("    prime: done")
+
+
 def run_case(case, cfg, token, verbose, cond=None):
+    global _WAN_CUT_VERIFIED
+    _WAN_CUT_VERIFIED = False
     name = case["name"]
     tv = cfg["tv"]
     run_secs = case.get("run_secs", 60)
@@ -3931,20 +4527,42 @@ def run_case(case, cfg, token, verbose, cond=None):
     # Always required — the binary carries no baked token, so plxnative-token in the runtime root
     # is the only way an automated run gets PMS access.
     files = triggers_for_case(case)
+    # `session: stored` — boot from the install's own signed-in session instead of the injected
+    # identity. The injected token installs the compiled PMS_HOST as a PLAINTEXT origin, which
+    # never touches the `plex.direct` name a real sign-in persists, so an offline case graded
+    # through it would be a false pass by construction. The install must therefore hold a sign-in
+    # already (refused with the reason otherwise), and that sign-in's profile is who plays — the
+    # one case family where the owner's history can move.
+    stored = case.get("session") == "stored"
+    if stored:
+        require_stored_session(tv, name)
+    inject = bool(cfg.get("inject_token")) and not stored
     extras = []
-    if cfg.get("inject_token"):
+    if inject:
         extras.append(f"printf '%s' '{token}' > {RUNDIR}/plxnative-token")
     # …and, for a case that declares it needs one, the SECOND server's credentials — same rules:
     # value never on stdout, cleared by the glob wipe above and again by teardown().
     srv_json = shared_servers_json(cfg, case)
+    if case.get("primary_ipv6"):
+        # The same server re-registered at its IPv6 `plex.direct` origin with its pin: the
+        # registry keys on machineIdentifier, so this RE-POINTS slot 0 rather than adding a
+        # source, and the case plays over v6 with no resolver. Built from plex.tv's own answer.
+        # The OWNER's token: plex.tv answers about the identity that asks, and a managed test
+        # user gets a 401 from `/api/v2/resources`. The stored session plays as the owner anyway.
+        srv_json = json.dumps([primary_ipv6_server(read_token(), stored_primary_machine_id(tv))],
+                              separators=(",", ":"))
     if srv_json:
         extras.append(f"printf '%s' {sh_squote(srv_json)} > {RUNDIR}/plxnative-servers")
     apply_triggers(tv, files, extra=extras)
     shown = ", ".join(n + ("=" + c if c is not None else "") for n, c in files)
     print(f"    triggers: {shown}")
-    if cfg.get("inject_token"):
+    if inject:
         print(f"    plxnative-token: <{cfg['user_label']}, redacted>")
-    if srv_json:
+    elif stored:
+        print(f"    session: the install's own stored sign-in (no token injected)")
+    if case.get("primary_ipv6"):
+        print("    plxnative-servers: <the primary's IPv6 plex.direct origin + pin, token redacted>")
+    if srv_json and not case.get("primary_ipv6"):
         # said the way the APP says it (`describe_server`): a share is a `ref=` tag and nothing
         # else. The token was never printed here and still is not.
         print(f"    plxnative-servers: <{describe_server(cfg['shared_server'])}, token redacted>")
@@ -3958,6 +4576,17 @@ def run_case(case, cfg, token, verbose, cond=None):
     on_start = None
     if profile and cond and cond.usable:
         on_start = lambda at: cond.arm(profile, at)
+    # `wan: off` — cut the television's uplink for this case (tools/tv-session.sh wan), after the
+    # triggers are armed and before the launch, so the boot itself runs offline. The set restores
+    # itself after a TTL whatever happens to this process; the explicit `on` below is the prompt
+    # half of that promise, and teardown() repeats it.
+    wan_off = case.get("wan") == "off"
+    if case.get("prime_online"):
+        prime_online(case, cfg, files)
+        # the priming launches wrote their own trigger sets; put the case's back
+        apply_triggers(tv, files, extra=extras)
+    if wan_off:
+        tv_wan("off", ttl_s=run_secs + 120)
     try:
         lines, elapsed, stopped_early, settled = stream_case(
             case, cfg, run_secs, early=early, inject=key_inject_for_case(case),
@@ -3967,6 +4596,8 @@ def run_case(case, cfg, token, verbose, cond=None):
         # this one, and nothing downstream would say so.
         if on_start:
             cond.disarm()
+        if wan_off:
+            tv_wan("on")
 
     # 5. evaluate
     passed, results = evaluate(case, lines)
@@ -4279,7 +4910,7 @@ def run_pipeline_case(case, cfg, srv, url_base, verbose):
         # response body, so at the moment this case was set up there were no windows to read.
         c["_dip_windows"] = srv.dip_windows()
         now = srv.stats()
-        return evaluate_pipeline(c, ls, (now[0] - before[0], now[1] - before[1]))
+        return evaluate_pipeline(c, ls, tuple(n - b for n, b in zip(now, before)))
 
     early, why = early_exit_allowed(case, cfg)
     if not early and why:
@@ -4288,7 +4919,7 @@ def run_pipeline_case(case, cfg, srv, url_base, verbose):
     lines, elapsed, stopped_early, settled = stream_case(case, cfg, run_secs, early=early,
                                                          evaluator=grade)
     after = srv.stats()
-    delta = (after[0] - before[0], after[1] - before[1])
+    delta = tuple(a - b for a, b in zip(after, before))
 
     gst_lines = pull_runtime_log(tv, "plxnative-gst.log") if case.get("gst_trace") else None
     if gst_lines is not None:
@@ -4391,6 +5022,22 @@ def reject_simulator(lines):
         )
 
 
+# The RECORDER (`plxnative-rec`) writes ` rec=<n>us` onto every heartbeat while armed. A recorder
+# perturbs the pacing it feeds (restructure spec §5.3), so — exactly like the two profiler triggers —
+# it disqualifies a run's `fps=`/`worstframe=`; `loop=` is still readable (liveness is not pacing).
+REC_RE = re.compile(r"\brec=\d+us\b")
+
+
+def reject_recorder(lines):
+    """Abort rather than grade a frame rate measured with the recorder armed."""
+    if any(REC_RE.search(ln) for ln in lines):
+        raise SystemExit(
+            "refusing to grade: this log carries `rec=`, so the recorder (plxnative-rec) was armed "
+            "for the run. A recorder perturbs the pacing it feeds; take pacing in a separate, "
+            "unarmed run."
+        )
+
+
 def parse_loop(lines, route, overlay):
     """The per-second LOOP-ITERATION counts whose route (+overlay, if the scene pins one) match."""
     reject_simulator(lines)
@@ -4415,6 +5062,7 @@ FPS_RE = re.compile(r"\bloop=\d+ route=(\w+)(?: overlay=(\w+))?.*?\bfps=(\d+)")
 def parse_fps(lines, route, overlay):
     """The per-second PRESENTED-FRAME counts whose route (+overlay) match."""
     reject_simulator(lines)
+    reject_recorder(lines)
     out = []
     for ln in lines:
         m = FPS_RE.search(ln)
@@ -4424,6 +5072,417 @@ def parse_fps(lines, route, overlay):
             continue
         out.append(int(m.group(3)))
     return out
+
+
+# `worstframe=<ms>ms` — the worst WHOLE-ITERATION time in that heartbeat second, present only when
+# `plxnative-framedrop` is armed (run_fps_scene arms it for any scene declaring a ceiling below).
+# Deliberately its own regex, for FPS_RE's reason: a log from a build or a run without the field
+# must fail as "no samples", never match nothing and pass.
+WORST_RE = re.compile(r"\bloop=\d+ route=(\w+)(?: overlay=(\w+))?.*?\bworstframe=(\d+(?:\.\d+)?)ms")
+# One `FRAMEDROP` line per frame over the armed threshold; `total=` is the whole iteration. The
+# route word sits after the phase breakdown (`route=<word>`), so a scene grades only its own screen.
+FRAMEDROP_RE = re.compile(r"^FRAMEDROP total=(\d+(?:\.\d+)?) .*?\broute=(\w+)")
+
+
+def parse_worst(lines, route, overlay):
+    """The per-second `worstframe=` peaks (ms) whose route (+overlay) match."""
+    reject_simulator(lines)
+    reject_recorder(lines)
+    out = []
+    for ln in lines:
+        m = WORST_RE.search(ln)
+        if not m or m.group(1) != route:
+            continue
+        if overlay and (m.group(2) or "none") != overlay:
+            continue
+        out.append(float(m.group(3)))
+    return out
+
+
+# `coldopen screen=<word> ms=<n> prepared=<bool>` — one line per screen MOUNT (restructure spec
+# §8.4). UNARMED: the app writes it in every build, with no trigger and no threshold. That is the
+# whole reason it exists as a separate instrument, and the reason `stall_ceiling_ms` could not be
+# re-pointed at it — see `grade_coldopen`.
+COLDOPEN_RE = re.compile(r"\bcoldopen screen=(\w+) ms=(\d+) prepared=(true|false)")
+
+
+def parse_coldopen(lines, screen):
+    """Every `coldopen` sample (ms, prepared) for one SCREEN word, in log order."""
+    reject_simulator(lines)
+    out = []
+    for ln in lines:
+        m = COLDOPEN_RE.search(ln)
+        if m and m.group(1) == screen:
+            out.append((int(m.group(2)), m.group(3) == "true"))
+    return out
+
+
+def grade_coldopen(scene, lines, route, overlay):
+    """`coldopen_ceiling_ms`: the SLOWEST cold open of this scene's screen must be <= the ceiling,
+    and there must be at least one.
+
+    **Why this is not `stall_ceiling_ms` pointed at a different number.** That gate reads
+    `FRAMEDROP` lines, and the frame-drop detector prints only ABOVE the threshold the harness
+    armed it with — `frame_ceiling_threshold`, the lower of the scene's two ceilings. So a cold
+    open FASTER than the ceiling leaves no line at all, `parse_framedrop` returns [], and
+    `grade_frame_ceilings` passes it as "no FRAMEDROP line". The instrument censors every sample
+    below its own gate, which is the half of the distribution a ceiling most needs to see: five
+    runs of the same scene read "no-line PASS, 208.5, no-line PASS, 191.4, 227.8" (TV session 5,
+    2026-09-10) and there is no way to tell a 30 ms cold open from a 159 ms one in that.
+
+    `coldopen` is written unconditionally, so every run contributes exactly one sample per mount
+    and an absent line means the screen never mounted — a FAILURE here rather than a silent pass.
+    Returns (ok, detail_suffix)."""
+    ceiling = scene.get("coldopen_ceiling_ms")
+    if ceiling is None:
+        return True, ""
+    screen = overlay or route
+    samples = parse_coldopen(lines, screen)
+    if not samples:
+        return False, (f" | no `coldopen screen={screen}` line — the screen never mounted, or this "
+                       f"build predates the instrument")
+    worst = max(ms for ms, _ in samples)
+    unprepared = sum(1 for _, ok in samples if not ok)
+    ok = worst <= ceiling
+    detail = (f" | coldopen worst={worst}ms over {len(samples)} mount(s) vs coldopen_ceiling_ms "
+              f"{ceiling}")
+    if unprepared:
+        # reported, never asserted: a refusal is the budget working, and whether it is acceptable
+        # is what the TV session decides, not this run
+        detail += f" ({unprepared} mount(s) drew with a refused resource)"
+    return ok, detail
+
+
+def parse_framedrop(lines, route):
+    """Every FRAMEDROP `total=` (ms) logged on this route, in log order, warmup included: a stall
+    is graded over the WHOLE run because the interesting one (a cold mount) is the first."""
+    reject_simulator(lines)
+    out = []
+    for ln in lines:
+        m = FRAMEDROP_RE.search(ln)
+        if m and m.group(2) == route:
+            out.append(float(m.group(1)))
+    return out
+
+
+def frame_ceiling_threshold(scene):
+    """The `plxnative-framedrop` content to arm for this scene, or None when it declares neither
+    ceiling. The detector logs a FRAMEDROP line only ABOVE its threshold, so the threshold is the
+    lower of the two ceilings: everything a gate could fail on is then in the log."""
+    cs = [scene[k] for k in ("worst_ceiling_ms", "stall_ceiling_ms") if scene.get(k) is not None]
+    if not cs:
+        return None
+    return str(int(min(cs)))
+
+
+def grade_frame_ceilings(scene, lines, route, overlay, warmup):
+    """`worst_ceiling_ms`: the 2nd-HIGHEST post-warmup `worstframe=` (robust_max, fps_ceiling's
+    mirror — one poster landing is tolerated, a sustained ramp is not) must be <= the ceiling.
+    `stall_ceiling_ms`: the LARGEST FRAMEDROP total on this route over the whole run — warmup
+    included — must be <= the ceiling; no FRAMEDROP line at all passes, PROVIDED the heartbeat
+    proves the detector was armed (at least one worstframe= sample), since a run where it was not
+    would otherwise pass vacuously. Returns (ok, detail_suffix)."""
+    ok, detail = True, ""
+    w_ceiling = scene.get("worst_ceiling_ms")
+    s_ceiling = scene.get("stall_ceiling_ms")
+    if w_ceiling is None and s_ceiling is None:
+        return ok, detail
+    worst_all = parse_worst(lines, route, overlay)
+    if not worst_all:
+        return False, (" | no worstframe= samples for this route — plxnative-framedrop was not "
+                       "armed, or the scene never reached this screen")
+    if w_ceiling is not None:
+        worst = worst_all[warmup:]
+        if len(worst) < 5:
+            return False, (f" | only {len(worst)} post-warmup worstframe= samples (need >= 5)")
+        sw = sorted(worst, reverse=True)
+        robust_max = sw[1]
+        ok = ok and robust_max <= w_ceiling
+        detail += (f" | worst robust_max={robust_max:.1f}ms (max={sw[0]:.1f}, n={len(worst)}) "
+                   f"vs worst_ceiling_ms {w_ceiling}")
+    if s_ceiling is not None:
+        drops = parse_framedrop(lines, route)
+        peak = max(drops) if drops else 0.0
+        ok = ok and peak <= s_ceiling
+        detail += (f" | stall peak={peak:.1f}ms over {len(drops)} FRAMEDROP line(s), whole run, "
+                   f"vs stall_ceiling_ms {s_ceiling}")
+    return ok, detail
+
+
+# `bench: kind=<push|modal> cycle=<i>/<n> target=<name> worst_ms=<f> frames=<k> dur_ms=<d>
+# rss_kb=<r> tex=<n>/<kB> first_ms=<f> missed=<k> open=<half>[ close=<half>]` — one line per
+# completed stress-bench cycle (`dev::scenarios::push_bench_tick` / `modal_bench_tick`), and a
+# terminal `bench: kind=<k> done cycles=<n>` once every cycle ran. `missed` is the GATED number:
+# refreshes on which the panel repeated a picture, counted from present-to-present intervals
+# (`dev::scenarios::bench::HalfStats`). `worst_ms` is the largest Top->Swap, which on this driver
+# includes the frame's own vsync wait, so it is reported but not graded. Each `<half>` is
+# `first:<ms>,worst:<ms>@<i>,iv:<ms>,missed:<k>` — the open (press) and close (back) halves.
+BENCH_TAIL = (r"(?: tex=\S+)? first_ms=(?P<first>\d+(?:\.\d+)?) missed=(?P<missed>\d+)"
+              r" open=(?P<open>\S+)(?: close=(?P<close>\S+))?")
+BENCH_RE = re.compile(
+    r"^bench: kind=(?P<kind>push|modal) cycle=(?P<cycle>\d+)/(?P<n>\d+) "
+    r"target=(?P<target>[\w-]+) worst_ms=(?P<worst>\d+(?:\.\d+)?) frames=(?P<frames>\d+) "
+    r"dur_ms=(?P<dur>\d+) rss_kb=(?P<rss>\d+)(?:" + BENCH_TAIL + r")?")
+BENCH_DONE_RE = re.compile(r"^bench: kind=(?P<kind>push|modal) done cycles=(?P<n>\d+)")
+
+
+def _bench_tail(m):
+    """The `first_ms`/`missed`/half fields of a matched `bench:` line; `missed` is `None` on a line
+    from a binary that predates the missed-refresh accounting."""
+    missed = m.group("missed")
+    return {
+        "first_ms": float(m.group("first")) if m.group("first") is not None else None,
+        "missed": int(missed) if missed is not None else None,
+        "open": m.group("open"),
+        "close": m.group("close"),
+    }
+
+
+def parse_bench(lines, kind):
+    """Every completed `bench:` cycle for `kind` ("push"|"modal"), in log order, plus whether the
+    terminal `done` line was seen. Each cycle: `{cycle, n, target, worst_ms, frames, dur_ms,
+    rss_kb, first_ms, missed, open, close}`, `cycle` 1-based (the wire format's own
+    `cycle=<i>/<n>` is 1-based)."""
+    reject_simulator(lines)
+    cycles = []
+    done = False
+    for ln in lines:
+        s = ln.strip()
+        m = BENCH_RE.match(s)
+        if m and m.group("kind") == kind:
+            cycles.append({
+                "cycle": int(m.group("cycle")),
+                "n": int(m.group("n")),
+                "target": m.group("target"),
+                "worst_ms": float(m.group("worst")),
+                "frames": int(m.group("frames")),
+                "dur_ms": int(m.group("dur")),
+                "rss_kb": int(m.group("rss")),
+                **_bench_tail(m),
+            })
+            continue
+        m = BENCH_DONE_RE.match(s)
+        if m and m.group("kind") == kind:
+            done = True
+    return cycles, done
+
+
+def _grade_missed(samples, scene, unit):
+    """The frame gate every bench shares: the run's summed `missed` refreshes must not exceed
+    `bench_missed_max` (default 0 — a repeated picture is a visible drop). A line without the
+    field fails outright rather than grading as clean. Returns `(ok, detail)`."""
+    ceiling = scene.get("bench_missed_max", 0)
+    unaccounted = [c for c in samples if c["missed"] is None]
+    if unaccounted:
+        return False, (f" | FAIL: {len(unaccounted)} {unit} line(s) carry no `missed=` field — "
+                       f"a build older than the missed-refresh accounting cannot be graded")
+    total = sum(c["missed"] for c in samples)
+    dropped = [c for c in samples if c["missed"] > 0]
+    detail = (f" | missed refreshes={total} in {len(dropped)} {unit}(s) of {len(samples)} "
+              f"vs bench_missed_max {ceiling}")
+    if dropped:
+        worst = sorted(dropped, key=lambda c: (-c["missed"], c["cycle"]))[:3]
+        named = ", ".join(
+            f"cycle={c['cycle']}/{c['n']}"
+            + (f" dir={c['dir']}" if "dir" in c else "")
+            + f" target={c['target']} missed={c['missed']} open={c['open']}"
+            + (f" close={c['close']}" if c.get("close") else "")
+            for c in worst)
+        detail += f" | most missed: {named}"
+    ok = total <= ceiling
+    if not ok:
+        detail = " | FAIL:" + detail[2:]
+    return ok, detail
+
+
+def _worst_stats(samples):
+    sw = sorted(c["worst_ms"] for c in samples)
+    n = len(sw)
+    firsts = sorted(c["first_ms"] for c in samples if c["first_ms"] is not None)
+    out = (f" | worst_ms (Top->Swap, includes the vsync wait; reported, not graded) "
+           f"p50={sw[n // 2]:.1f} p95={sw[min(n - 1, int(n * 0.95))]:.1f} max={sw[-1]:.1f} n={n}")
+    if firsts:
+        out += f" | first_ms p50={firsts[len(firsts) // 2]:.1f} max={firsts[-1]:.1f}"
+    return out
+
+
+def grade_bench(scene, lines):
+    """Grade a `bench: push`/`bench: modal` stress run (spec: 100 counted push/modal cycles).
+
+    FAILS unless: the `done` line is present (every cycle completed); the run's summed `missed`
+    refreshes are <= `bench_missed_max` (default 0 — see `_grade_missed`); the mean `worst_ms` of
+    the last 10 cycles is <= the first 10's mean + `bench_drift_ms` (default 2.0) — per-cycle cost
+    must not grow; and the last cycle's `rss_kb` is <= cycle 10's `rss_kb` + `bench_rss_growth_kb`
+    (default 8192).
+
+    Why missed refreshes and not a Top->Swap ceiling: a frame's Top->Swap on this driver includes
+    its own wait for a free buffer, so a steady 60 fps animation reads 16.7-23 ms per frame without
+    the panel ever repeating a picture, while a present interval of more than 1.5 refreshes is a
+    repeat whichever side — CPU or GPU — was late. `worst_ms` stays on the line and in the detail.
+
+    Returns `(ok, detail)`, `detail` already prefixed with a leading space+`|` per clause,
+    matching every other `grade_*` helper's contract with the caller's `print`."""
+    kind = scene["bench"]
+    cycles, done = parse_bench(lines, kind)
+    if not cycles:
+        return False, f" | no `bench: kind={kind}` cycle lines — the bench never armed, or logged nothing"
+
+    drift_ceiling = scene.get("bench_drift_ms", 2.0)
+    rss_ceiling = scene.get("bench_rss_growth_kb", 8192)
+
+    detail = f" | bench:{kind} {len(cycles)} cycle line(s) (expect n={cycles[-1]['n']})"
+    ok = True
+    if not done:
+        ok = False
+        detail += " | FAIL: no `done` line — not every cycle completed"
+
+    missed_ok, missed_detail = _grade_missed(cycles, scene, "cycle")
+    ok = ok and missed_ok
+    detail += missed_detail
+
+    worst_vals = [c["worst_ms"] for c in cycles]
+    if len(worst_vals) >= 10:
+        mean_first = sum(worst_vals[:10]) / 10.0
+        mean_last = sum(worst_vals[-10:]) / 10.0
+        drift = mean_last - mean_first
+        ok = ok and drift <= drift_ceiling
+        detail += (f" | drift(last10-first10)={drift:+.2f}ms (first10 mean={mean_first:.2f}, "
+                   f"last10 mean={mean_last:.2f}) vs bench_drift_ms {drift_ceiling}")
+    else:
+        detail += f" | drift: only {len(worst_vals)} cycle(s), need >= 10 — not graded"
+
+    if len(cycles) >= 10:
+        rss10 = cycles[9]["rss_kb"]
+        rss_last = cycles[-1]["rss_kb"]
+        growth = rss_last - rss10
+        ok = ok and growth <= rss_ceiling
+        detail += (f" | rss growth(last-cycle10)={growth}kB (cycle10={rss10}, last={rss_last}) "
+                   f"vs bench_rss_growth_kb {rss_ceiling}")
+    else:
+        detail += f" | rss growth: only {len(cycles)} cycle(s), need >= 10 — not graded"
+
+    return ok, detail + _worst_stats(cycles)
+
+
+# `bench: kind=deep cycle=<i>/<n> target=<name> dir=<push|pop> depth=<d> worst_ms=<f> frames=<k>
+# dur_ms=<d> rss_kb=<r> tex=<n>/<kB> first_ms=<f> missed=<k> open=<half>` — one line per completed
+# DEEP-stack bench step (`dev::scenarios::deep_bench_tick`), and a terminal `bench: kind=deep done
+# cycles=<n> rss_root_kb=<r>` once every step ran. Unlike `push`/`modal` (one open+close round trip
+# per line), a `deep` line is ONE nav op — a push OR a pop, never both — which is why it carries
+# its own `dir`/`depth` fields and a single measured half.
+BENCH_DEEP_RE = re.compile(
+    r"^bench: kind=deep cycle=(?P<cycle>\d+)/(?P<n>\d+) target=(?P<target>[\w-]+) "
+    r"dir=(?P<dir>push|pop) depth=(?P<depth>\d+) worst_ms=(?P<worst>\d+(?:\.\d+)?) "
+    r"frames=(?P<frames>\d+) dur_ms=(?P<dur>\d+) rss_kb=(?P<rss>\d+)(?:" + BENCH_TAIL + r")?")
+BENCH_DEEP_DONE_RE = re.compile(r"^bench: kind=deep done cycles=(?P<n>\d+) rss_root_kb=(?P<rss>\d+)")
+
+
+def parse_deep_bench(lines):
+    """Every completed `bench: kind=deep` step, in log order, plus the `done` line's own
+    `rss_root_kb` (`None` if it never printed). Each step: `{cycle, n, target, dir, depth,
+    worst_ms, frames, dur_ms, rss_kb, first_ms, missed, open, close}`, `cycle` 1-based exactly
+    like `parse_bench`."""
+    reject_simulator(lines)
+    steps = []
+    rss_root_kb = None
+    for ln in lines:
+        s = ln.strip()
+        m = BENCH_DEEP_RE.match(s)
+        if m:
+            steps.append({
+                "cycle": int(m.group("cycle")),
+                "n": int(m.group("n")),
+                "target": m.group("target"),
+                "dir": m.group("dir"),
+                "depth": int(m.group("depth")),
+                "worst_ms": float(m.group("worst")),
+                "frames": int(m.group("frames")),
+                "dur_ms": int(m.group("dur")),
+                "rss_kb": int(m.group("rss")),
+                **_bench_tail(m),
+            })
+            continue
+        m = BENCH_DEEP_DONE_RE.match(s)
+        if m:
+            rss_root_kb = int(m.group("rss"))
+    return steps, rss_root_kb
+
+
+def grade_deep_bench(scene, lines):
+    """Grade a `bench: kind=deep` DEEP nav-stack stress run (spec: `depth` pushes with no pop in
+    between, then `depth` pops back to the root one page at a time — `2*depth` steps total).
+
+    FAILS unless: all `2*depth` steps AND the terminal `done` line are present; the summed `missed`
+    refreshes are <= `bench_missed_max` (default 0, `_grade_missed`, same as `grade_bench`); the
+    mean `worst_ms` of the LAST 10 pushes is <= the FIRST 10 pushes' mean + `bench_drift_ms`
+    (default 2.0) — catches per-push cost growing with depth — and the identical check over pops,
+    where the FIRST 10 pops are the DEEPEST (recorded right after the walk turns around) and the
+    LAST 10 are the SHALLOWEST (just before the root); the deepest push's `rss_kb` is <= the
+    unwound root's `rss_root_kb` + `bench_depth_rss_kb` (default 16384 — ~160kB/level over 100
+    levels, retained STATE rather than pixels) — catches memory held BY depth, which unwinding
+    gives back; and `rss_root_kb` itself — the process once the stack is fully unwound — is <= the
+    absolute `bench_root_rss_kb` when the scene sets one — catches what unwinding did NOT give
+    back.
+
+    Both are measured against the END state, never against step 10: step 10's RSS is read while
+    the image, text and texture caches are still filling, and moved ~16 MB between two device runs
+    whose unwound root RSS agreed within 0.6 MB (step 10 68104/81732 kB, root 86856/86296 kB). By
+    the unwound root those caches are warm, so the difference to the deepest push is depth alone.
+
+    Returns `(ok, detail)`, same contract as `grade_bench`."""
+    steps, rss_root_kb = parse_deep_bench(lines)
+    if not steps:
+        return False, " | no `bench: kind=deep` step lines — the bench never armed, or logged nothing"
+
+    n = steps[0]["n"]
+    drift_ceiling = scene.get("bench_drift_ms", 2.0)
+    depth_rss_ceiling = scene.get("bench_depth_rss_kb", 16384)
+    root_rss_ceiling = scene.get("bench_root_rss_kb")
+
+    ok = True
+    detail = f" | bench:deep {len(steps)} step line(s) (expect n={n})"
+
+    if rss_root_kb is None or len(steps) < n:
+        ok = False
+        detail += " | FAIL: no `done` line, or fewer than the expected step count — not every step completed"
+
+    missed_ok, missed_detail = _grade_missed(steps, scene, "step")
+    ok = ok and missed_ok
+    detail += missed_detail
+
+    pushes = [s for s in steps if s["dir"] == "push"]
+    pops = [s for s in steps if s["dir"] == "pop"]
+
+    def drift_check(label, samples):
+        nonlocal ok, detail
+        if len(samples) < 10:
+            detail += f" | {label} drift: only {len(samples)} step(s), need >= 10 — not graded"
+            return
+        vals = [s["worst_ms"] for s in samples]
+        mean_first = sum(vals[:10]) / 10.0
+        mean_last = sum(vals[-10:]) / 10.0
+        drift = mean_last - mean_first
+        ok = ok and drift <= drift_ceiling
+        detail += (f" | {label} drift(last10-first10)={drift:+.2f}ms (first10 mean={mean_first:.2f}, "
+                   f"last10 mean={mean_last:.2f}) vs bench_drift_ms {drift_ceiling}")
+
+    drift_check("push", pushes)
+    drift_check("pop", pops)
+
+    if pushes and rss_root_kb is not None:
+        rss_depth_max = pushes[-1]["rss_kb"]
+        depth_growth = rss_depth_max - rss_root_kb
+        ok = ok and depth_growth <= depth_rss_ceiling
+        detail += (f" | depth rss(maxdepth-root)={depth_growth}kB (maxdepth={rss_depth_max}, "
+                   f"root={rss_root_kb}) vs bench_depth_rss_kb {depth_rss_ceiling}")
+    if rss_root_kb is not None:
+        if root_rss_ceiling is None:
+            detail += f" | root rss={rss_root_kb}kB (no bench_root_rss_kb — not graded)"
+        else:
+            ok = ok and rss_root_kb <= root_rss_ceiling
+            detail += f" | root rss={rss_root_kb}kB vs bench_root_rss_kb {root_rss_ceiling}"
+
+    return ok, detail + _worst_stats(steps)
 
 
 def rate_stats(vals):
@@ -4444,6 +5503,14 @@ def rate_stats(vals):
     tail = sum(vals[-third:]) / float(third) if n else 0.0
     return {"n": n, "min": s[0] if s else 0, "median": s[n // 2] if n else 0,
             "robust_min": robust_min, "head": head, "tail": tail, "drift": tail - head}
+
+
+def grade_poster_gate(scene, lines):
+    if not scene.get("poster_gate"):
+        return True, ""
+    import poster_gate
+    ok, detail = poster_gate.grade(scene["poster_gate"], lines)
+    return ok, " | " + detail
 
 
 def fps_scene_needs_token(scene, has_shared_server=False):
@@ -4474,32 +5541,57 @@ def fps_run_needs_token(scenes, has_shared_server):
                 or any(fps_scene_needs_token(s, has_shared_server) for s in scenes))
 
 
-def run_fps_scene(scene, cfg, token):
+def fps_trigger_files(scene):
+    """A scene's `triggers` as (name, content) trigger files, `$rk` substituted.
+
+    `$rk` is how a scene names the ratingKey its `item` key resolved to (see _resolve_items); a
+    tracked scene never holds a ratingKey itself, because manifest.json is installation-independent.
+    `None` content is a bare flag file. Reads scene["rk"] only when a value names `$rk`, so a
+    scene whose `item` is a requirement rather than a target (library-collections) needs none."""
+    files = []
+    for tname, tval in scene.get("triggers", {}).items():
+        if tval is True:
+            files.append((tname, None))
+        elif isinstance(tval, str) and "$rk" in tval:
+            # Exact `"$rk"` is the common case (home-detail-nav's `plxnative-navosc`,
+            # collection-page's `plxnative-collection`); the substring form is what a bench
+            # scene's `plxnative-pushbench=<n>,$rk` needs, since its ratingKey rides inside a
+            # larger, comma-joined value.
+            files.append((tname, tval.replace("$rk", str(scene["rk"]))))
+        else:
+            files.append((tname, str(tval)))
+    return files
+
+
+def run_fps_scene(scene, cfg, token, *, extra_triggers=(), capture=None,
+                  instrumented=False, log_suffix="", before_run=None):
     name = scene["name"]
     tv = cfg["tv"]
     route = scene["route"]
     overlay = scene.get("overlay")  # None for home/detail
-    loop_floor = scene["loop_floor"]
+    # A `bench` scene (see grade_bench) is graded entirely off its own `bench:` lines, never off
+    # loop_floor — optional rather than `scene["loop_floor"]` so those scenes need not carry a
+    # value nothing reads.
+    loop_floor = scene.get("loop_floor", 0)
     warmup = scene.get("warmup_s", 5)
     run_secs = scene.get("run_secs", 18)
     tag = route + (f"/{overlay}" if overlay else "")
     print(f"\n=== fps:{name}  (route={tag}, loop_floor {loop_floor}/s) ===")
 
     make(["kill", f"TV={tv}"], timeout=40)
-    files = []
-    for tname, tval in scene.get("triggers", {}).items():
-        if tval is True:
-            files.append((tname, None))
-        elif tval == "$rk":
-            files.append((tname, str(scene["rk"])))
-        else:
-            files.append((tname, str(tval)))
+    files = fps_trigger_files(scene)
     # Player FPS baselines were calibrated on the established Original route. Pin that route just
     # as the server matrix does; otherwise a persisted Auto choice turns this into an HLS encoder
     # benchmark and makes the number describe a different workload. Future adaptive FPS scenes
     # opt in explicitly with `"quality": "auto"`.
     if scene.get("tier") == "player":
         files.append(("plxnative-quality", scene.get("quality", "original")))
+    files.extend(extra_triggers)
+    # A frame-ceiling gate needs the frame-drop detector armed, at the lower of its two ceilings
+    # (see frame_ceiling_threshold). It is a DIAG trigger, so arming it moves no boot screen.
+    thr = frame_ceiling_threshold(scene)
+    if thr is not None and not any(n == "plxnative-framedrop" for n, _ in files):
+        files.append(("plxnative-framedrop", thr))
     # clears every plxnative-* (incl. plxnative-profile) then writes this scene's. Player-tier
     # scenes actually decode video, so they need the test-user token too — appended to the same
     # round-trip via extra= so its value stays off stdout, exactly like the playback cases.
@@ -4519,6 +5611,8 @@ def run_fps_scene(scene, cfg, token):
         # same redaction as the playback cases — see `describe_server`.
         print(f"    plxnative-servers: <{describe_server(cfg['shared_server'])}, token redacted>")
 
+    if before_run:
+        before_run()
     try:
         proc = make(["run", f"TV={tv}", f"RUN_SECS={run_secs}"], timeout=run_secs + 90)
     except subprocess.TimeoutExpired:
@@ -4528,11 +5622,28 @@ def run_fps_scene(scene, cfg, token):
     # FPS scenes are the runs most likely to carry profiler summaries.  Preserve them just like
     # playback cases when --save-logs is requested; otherwise teardown relaunches the app and the
     # only copy of the HWCNT/phase evidence is lost before it can be compared with the A/B leg.
-    save_case_log(cfg, f"fps-{name}", lines)
+    save_case_log(cfg, f"fps-{name}{log_suffix}", lines)
+    if capture is not None:
+        capture.update({"lines": lines, "warmup": warmup, "run_secs": run_secs,
+                        "route": route, "overlay": overlay})
     # Same refusal as the playback cases, and it matters at least as much here: a scene graded
     # against the wrong install's log, or against a release build that never read its triggers,
     # fails on the <5-samples guard and reads as "the app never reached this screen".
     require_install(lines, cfg)
+
+    # A `bench` scene (push-100/modal-100/deep-100) is graded entirely off its own `bench:` lines
+    # — see `grade_bench`/`grade_deep_bench`. It shares every line above (triggers, `make run`, log
+    # capture, install check) with an ordinary fps scene, and diverges only here: none of
+    # loop_floor/fps_floor/fps_ceiling/worst_ceiling_ms/coldopen_ceiling_ms describes what a
+    # counted, stop-after-n bench run is answering. `deep` is graded separately from `push`/`modal`
+    # because its wire format carries `dir`/`depth` the other two kinds don't.
+    if scene.get("bench"):
+        if scene["bench"] == "deep":
+            ok, detail = grade_deep_bench(scene, lines)
+        else:
+            ok, detail = grade_bench(scene, lines)
+        print(f"    [{'PASS' if ok else 'FAIL'}]{detail}")
+        return ok, detail
 
     alls = parse_loop(lines, route, overlay)
     samples = alls[warmup:]  # heartbeat is ~1/sec, so drop the first `warmup` matching samples
@@ -4546,6 +5657,17 @@ def run_fps_scene(scene, cfg, token):
                f"entered this screen? ({len(alls)} total matched before warmup)")
         print(f"    [FAIL] {msg}")
         return False, msg
+
+    # HWCNT deliberately brackets the selected phase with glFinish. The leg is evidence about
+    # counters, never a regression gate on frame pacing; applying the ordinary floor here would
+    # reject the instrument for perturbing the pipeline exactly as documented. We still require
+    # five live route heartbeats above, so a failed boot cannot masquerade as an empty profile.
+    if instrumented:
+        pres = parse_fps(lines, route, overlay)[warmup:]
+        detail = (f"instrumented HWCNT leg: route={tag}, loop samples={st['n']}, "
+                  f"fps samples={len(pres)} — pacing is INVALID under glFinish")
+        print(f"    [INFO] {detail}")
+        return True, detail
 
     ok = st["robust_min"] >= loop_floor
     detail = (f"robust_min={st['robust_min']} loop/s (min={st['min']}, median={st['median']}, "
@@ -4602,6 +5724,22 @@ def run_fps_scene(scene, cfg, token):
                    f"n={len(pres)}) vs fps_ceiling {ceiling}")
         ok = ok and ok_c
 
+    # `worst_ceiling_ms` / `stall_ceiling_ms`: the frame-TIME gates (see grade_frame_ceilings).
+    # They answer what a rate cannot: a modal ramp or a cold mount that drops ONE 80 ms frame reads
+    # as a healthy fps median and a healthy loop rate, and is the hitch the user actually sees.
+    ok_f, detail_f = grade_frame_ceilings(scene, lines, route, overlay, warmup)
+    ok = ok and ok_f
+    detail += detail_f
+
+    # `coldopen_ceiling_ms`: the frame-plan instrument's own gate (see grade_coldopen for why it
+    # is not `stall_ceiling_ms` with a different number on it).
+    ok_o, detail_o = grade_coldopen(scene, lines, route, overlay)
+    ok = ok and ok_o
+    detail += detail_o
+
+    ok_p, detail_p = grade_poster_gate(scene, lines)
+    ok = ok and ok_p
+    detail += detail_p
     print(f"    [{'PASS' if ok else 'FAIL'}] {detail}")
     return ok, detail
 
@@ -4622,10 +5760,16 @@ def run_fps_suite(scenes, cfg, token, include_player, skipped=()):
     # A second filter-and-bail here was dead code that someone would keep maintaining.
     tiers = {"ui"} | ({"player"} if include_player else set())
     print(f"=== FPS regression suite: {len(scenes)} scene(s), tiers={sorted(tiers)} ===")
+    # The panel rule (docs/agent-reference.md, Tier 2), restated by the owner 2026-09-07: the panel
+    # is OFF and the sound is OFF for EVERY device run, fps scenes included — rendering continues
+    # with the LCD off. The 2026-09-06 "panel ON for fps" form is superseded.
+    print("    panel rule: run this suite with the television's panel OFF and the sound OFF "
+          "(tools/tv-session.sh screen off; tools/tv-session.sh sound off) — the owner's "
+          "standing directive")
     results = []
     for s in scenes:
         try:
-            ok, detail = run_fps_scene(s, cfg, token)
+            ok, detail = run_fps_scene(s, cfg, token, extra_triggers=tuple(cfg.get("extra_triggers") or ()))
         except Exception as e:  # keep the batch going
             ok, detail = False, f"ERROR: {e}"
             print(f"    [FAIL] ERROR: {e}")
@@ -4640,6 +5784,145 @@ def run_fps_suite(scenes, cfg, token, include_player, skipped=()):
     tail = f", {len(skipped)} skipped" if skipped else ""
     print(f"\n{len(results) - nfail} passed, {nfail} failed of {len(results)}{tail}")
     return 0 if nfail == 0 else 1  # the TV is cleaned by main()'s teardown, on every exit path
+
+
+def _pacing_profile(capture):
+    values = parse_fps(capture["lines"], capture["route"], capture["overlay"])[capture["warmup"]:]
+    if not values:
+        return {"n": 0, "p50": 0.0, "p10": 0.0, "p95": 0.0, "min": 0.0,
+                "max": 0.0, "drift": 0.0}
+    floats = [float(value) for value in values]
+    third = max(len(floats) // 3, 1)
+    return {
+        "n": len(floats),
+        "p50": statistics.median(floats),
+        "p10": profile_percentile(floats, 0.10),
+        "p95": profile_percentile(floats, 0.95),
+        "min": min(floats),
+        "max": max(floats),
+        "drift": statistics.fmean(floats[-third:]) - statistics.fmean(floats[:third]),
+    }
+
+
+def run_graphics_profile(scene, cfg, token, phase, output=None):
+    """Two launches, three layers: unarmed pacing + passive IRQ, then attributable HWCNT.
+
+    A single launch cannot answer all three honestly. HWCNT's glFinish boundaries perturb pacing,
+    while the unarmed leg must remain exactly the scene the FPS suite grades. The scene definition
+    is reused for both launches so route, oscillators, account and timing cannot drift by hand.
+    """
+    if not re.fullmatch(r"[a-z0-9_.~]+", phase):
+        raise SystemExit("--profile-phase must be one exact profiler phase name")
+    stamp = datetime_module.datetime.now(datetime_module.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    bundle = output or os.path.join(REPO_ROOT, "pkg", "diagnostics",
+                                    f"graphics-{scene['name']}-{stamp}")
+    os.makedirs(bundle, exist_ok=False)
+    sampler = MaliIrqSampler(cfg["tv"])
+    production = {}
+    instrumented = {}
+    try:
+        sampler.stage()
+        # The baseline deliberately closes the SELECTED install. Another installed app and the
+        # compositor may still exist, so this is a system floor, not a claim that every active IRQ
+        # in the next leg belongs to PlxNative. Layer two remains global by construction.
+        make(["kill", f"TV={cfg['tv']}"], timeout=40)
+        baseline_raw = sampler.capture(3.0)
+
+        run_secs = scene.get("run_secs", 18)
+        prod_ok, prod_detail = run_fps_scene(
+            scene, cfg, token, capture=production, log_suffix="-production",
+            before_run=lambda: sampler.start(run_secs + 4.0),
+        )
+        production_raw = sampler.finish()
+
+        hw_ok, hw_detail = run_fps_scene(
+            scene, cfg, token,
+            extra_triggers=(("plxnative-hwcnt", phase),),
+            capture=instrumented,
+            instrumented=True,
+            log_suffix="-hwcnt",
+            before_run=lambda: sampler.start(run_secs + 4.0),
+        )
+        hw_irq_raw = sampler.finish()
+        hwcnt_result = ssh(cfg["tv"], f"cat {RUNDIR}/plxnative-hwcnt.jsonl 2>/dev/null", timeout=30)
+        if not hwcnt_result.stdout:
+            raise RuntimeError(
+                "HWCNT produced no JSONL — phase unknown, trigger unread, or /dev/mali0 refused"
+            )
+    finally:
+        sampler.close()
+
+    baseline_rows = parse_irq_snapshots(baseline_raw, "baseline")
+    production_rows = parse_irq_snapshots(production_raw, "production")
+    hw_irq_rows = parse_irq_snapshots(hw_irq_raw, "instrumented")
+    if not baseline_rows or not production_rows or not hw_irq_rows:
+        raise RuntimeError("one or more Mali IRQ legs contained no matching IRQ rows")
+    write_irq_jsonl(Path(bundle) / "mali-irq.jsonl",
+                    [baseline_rows, production_rows, hw_irq_rows])
+    with open(os.path.join(bundle, "events-production.log"), "w", encoding="utf-8") as out:
+        out.write("\n".join(production["lines"]) + "\n")
+    with open(os.path.join(bundle, "events-hwcnt.log"), "w", encoding="utf-8") as out:
+        out.write("\n".join(instrumented["lines"]) + "\n")
+    hwcnt_path = os.path.join(bundle, "plxnative-hwcnt.jsonl")
+    with open(hwcnt_path, "w", encoding="utf-8") as out:
+        out.write(hwcnt_result.stdout)
+
+    # The sampler starts immediately before make run. Drop launch plus the scene's declared
+    # heartbeat warmup from active summaries; raw JSONL remains complete for a different cut.
+    discard = int((production["warmup"] + 2) * 10)
+    baseline_irq = summarize_irq(baseline_rows)
+    production_irq = summarize_irq(production_rows, discard)
+    instrumented_irq = summarize_irq(hw_irq_rows, discard)
+    pacing = _pacing_profile(production)
+    analyzer = subprocess.run(
+        [sys.executable, os.path.join(TOOLS_DIR, "analyze-hwcnt.py"), hwcnt_path,
+         "--phase", phase, "--discard", "10"],
+        capture_output=True, text=True,
+    )
+    if analyzer.returncode != 0:
+        raise RuntimeError(f"HWCNT analyzer failed: {analyzer.stderr.strip()}")
+
+    metadata = {
+        "version": 1,
+        "scene": scene["name"],
+        "phase": phase,
+        "flavor": FLAVOUR,
+        "appid": APPID,
+        "production_gate": {"ok": prod_ok, "detail": prod_detail},
+        "instrumented_gate": {"ok": hw_ok, "detail": hw_detail},
+        "pacing": pacing,
+        "irq": {"baseline": baseline_irq, "production": production_irq,
+                "instrumented": instrumented_irq},
+    }
+    with open(os.path.join(bundle, "metadata.json"), "w", encoding="utf-8") as out:
+        json.dump(metadata, out, indent=2)
+        out.write("\n")
+
+    summary = [
+        f"PlxNative three-layer graphics profile: fps:{scene['name']}",
+        f"install: {APPID} [{FLAVOUR}]  HWCNT phase={phase}",
+        "",
+        "Layer 1 — production present pacing (profilers OFF):",
+        f"  fps p50={pacing['p50']:.1f} p10={pacing['p10']:.1f} "
+        f"p95={pacing['p95']:.1f} min={pacing['min']:.0f} max={pacing['max']:.0f} "
+        f"drift={pacing['drift']:+.1f} n={pacing['n']}",
+        f"  regression gate: {'PASS' if prod_ok else 'FAIL'} — {prod_detail}",
+        "",
+        "Layer 2 — passive Mali IRQ activity (global; not process-attributable):",
+        *format_irq("baseline (selected install closed)", baseline_irq),
+        *format_irq("production scene", production_irq),
+        *format_irq("instrumented scene", instrumented_irq),
+        "",
+        "Layer 3 — Mali Midgard HWCNT (phase-attributable):",
+        "  FPS FROM THIS LEG IS INVALID: glFinish intentionally serializes the selected phase.",
+        analyzer.stdout.rstrip(),
+    ]
+    summary_text = "\n".join(summary) + "\n"
+    with open(os.path.join(bundle, "summary.txt"), "w", encoding="utf-8") as out:
+        out.write(summary_text)
+    print("\n" + summary_text, end="")
+    print(f"graphics profile bundle: {bundle}")
+    return 0 if prod_ok and hw_ok else 1
 
 
 # ---------------------------------------------------------------------------
@@ -4709,7 +5992,7 @@ def main():
         pass
     ap = argparse.ArgumentParser(description="webOS Plex player on-device regression harness")
     ap.add_argument("--build", action="store_true", help="cargo + make + make deploy before running")
-    ap.add_argument("--filter", default=None,
+    ap.add_argument("--filter", "--only", dest="filter", default=None,
                     help="run only cases or FPS scenes whose name contains this substring")
     ap.add_argument("--suite", default=None, choices=["logic", "codec"],
                     help="run only one suite: 'logic' (seek/resume/audio/subtitle — the engine and "
@@ -4717,6 +6000,11 @@ def main():
                          "play-only decision + Load-payload cases). Default: every case. "
                          "NB distinct from fps_scenes' ui|player 'tier'.")
     ap.add_argument("--list", action="store_true", help="list cases and exit")
+    ap.add_argument("--extra-trigger", action="append", default=[], metavar="NAME[=CONTENT]",
+                    help="arm one more plxnative-* trigger for every fps scene of this run (e.g. "
+                         "plxnative-cpuprof, plxnative-framedrop=20). A profiler trigger disqualifies "
+                         "the run's fps= as a pacing number, exactly as --graphics-profile does; use "
+                         "it to attribute a frame, never to grade one.")
     ap.add_argument("--save-logs", metavar="DIR", default=None,
                     help="write each case's full event log to DIR/<case>.log. The app truncates "
                          "its log every launch and each case overwrites the previous one, so a "
@@ -4738,6 +6026,16 @@ def main():
     ap.add_argument("--owner", action="store_true",
                     help="run as the config.local.h OWNER token (default: run as the overlay's "
                          "test_user, so watch history stays off your real account)")
+    ap.add_argument("--print-test-token", action="store_true",
+                    help="resolve manifest.local.json's test_user to its per-server Plex token, "
+                         "print it to stdout and exit -- no cases, no television, no TV lock. "
+                         "This is the identity-resolution half of the --owner/test_user split "
+                         "above, exposed standalone so tools/tv-session.sh's `up --guest` can "
+                         "reuse it instead of re-deriving the plex.tv shared_servers call: a "
+                         "guest boot must resolve the REAL managed-user token or refuse, never "
+                         "fall through to the owner's (see the 2026-09-10 postmortem in that "
+                         "script's header — a silent fallback wrote real progress into the "
+                         "household account and unscrobbling it also reset the item's viewCount).")
     ap.add_argument("--shared-server", action="store_true",
                     help="inject the overlay's `shared_server` credentials into EVERY case/scene of "
                          "this run, not just the ones declaring needs_shared_server. For bringing "
@@ -4746,6 +6044,13 @@ def main():
                     help="run the FPS regression suite (UI tier: home/detail, no video needed)")
     ap.add_argument("--fps-player", action="store_true",
                     help="FPS suite INCLUDING player-tier scenes (info/menu — needs playback, slower)")
+    ap.add_argument("--graphics-profile", action="store_true",
+                    help="for exactly one selected FPS scene, run production pacing + passive "
+                         "Mali IRQ + a separate HWCNT leg and save one diagnostic bundle")
+    ap.add_argument("--profile-phase", default="frame.ui", metavar="PHASE",
+                    help="exact HWCNT phase for --graphics-profile (default: frame.ui)")
+    ap.add_argument("--graphics-output", default=None, metavar="DIR",
+                    help="bundle directory for --graphics-profile (default pkg/diagnostics/<stamp>)")
     # THE DEFAULT TIER. `--server` opts into the library-backed one; `--pipeline` is accepted and
     # redundant, kept because it is what every recipe written between this tier landing and the
     # inversion says, and because naming the default explicitly is never wrong.
@@ -4764,6 +6069,35 @@ def main():
                     help="port for the fixture HTTP server (default: pick a free one). Pin it when "
                          "a firewall rule names a port")
     args = ap.parse_args()
+    if args.print_test_token:
+        # Standalone: this mode answers one question (what token is the managed test user's?)
+        # and touches nothing else -- no case selection, no TV lock, no launch. Reject every flag
+        # that implies one of those instead of silently ignoring it, so a copy-pasted command line
+        # fails loudly rather than quietly running the wrong thing.
+        conflicting = [f for f, v in [
+            ("--list", args.list), ("--server", args.server), ("--fps", args.fps),
+            ("--fps-player", args.fps_player), ("--pipeline", args.pipeline),
+            ("--owner", args.owner), ("--build", args.build),
+        ] if v]
+        if conflicting:
+            sys.exit(f"--print-test-token is standalone and cannot combine with {', '.join(conflicting)}")
+        manifest = load_manifest(pipeline_only=False, tv_override=args.tv)
+        test_user = manifest.get("test_user")
+        if not test_user:
+            sys.exit("no test_user in manifest.local.json -- nothing to resolve as a guest "
+                     "identity (add a test_user block, see manifest.local.json.example; or boot "
+                     "as the owner explicitly instead of asking for a guest)")
+        pms = manifest["pms"]
+        token = fetch_managed_user_token(read_token(), pms["host"], pms["port"], test_user["id"])
+        print(token)
+        return 0
+    if args.graphics_profile and not (args.fps or args.fps_player):
+        sys.exit("--graphics-profile operates on one deterministic FPS scene; combine it with "
+                 "--fps or --fps-player and select one with --only/--filter")
+    if args.graphics_output and not args.graphics_profile:
+        sys.exit("--graphics-output is only meaningful with --graphics-profile")
+    if args.graphics_profile and args.list:
+        sys.exit("--graphics-profile drives the television and cannot be combined with --list")
 
     # WHICH TIER. The synthetic pipeline tier is the DEFAULT (2026-08-22); the library-backed one
     # is `--server`. The inversion is deliberate and it is about what a bare `./tests/run.py`
@@ -4797,6 +6131,7 @@ def main():
         "pms": manifest.get("pms", {}),
         "no_early": args.no_early,
         "save_logs": args.save_logs,
+        "extra_triggers": [tuple(t.split("=", 1)) if "=" in t else (t, None) for t in args.extra_trigger],
     }
     cases = manifest["cases"]
     if args.suite:
@@ -4851,11 +6186,25 @@ def main():
                   f"{ops:20s} {', '.join(c.get('covers', []))}{mark}")
         for s in manifest.get("fps_scenes", []):
             tag = s["route"] + (f"/{s.get('overlay')}" if s.get("overlay") else "")
-            gates = f"loop_floor={s['loop_floor']}"
+            # A bench scene (push/modal/deep-100) gates on missed refreshes, not loop_floor — it
+            # has no `loop_floor` key at all, so assuming one crashed the listing partway through
+            # printing. Print whichever this scene actually declares.
+            if s.get("loop_floor") is not None:
+                gates = f"loop_floor={s['loop_floor']}"
+            elif s.get("bench"):
+                gates = f"bench_missed_max={s.get('bench_missed_max', 0)}"
+            else:
+                gates = "gate=?"
             if s.get("fps_floor") is not None:
                 gates += f" fps_floor={s['fps_floor']}"
             if s.get("fps_ceiling") is not None:
                 gates += f" fps_ceiling={s['fps_ceiling']}"
+            if s.get("worst_ceiling_ms") is not None:
+                gates += f" worst_ceiling_ms={s['worst_ceiling_ms']}"
+            if s.get("stall_ceiling_ms") is not None:
+                gates += f" stall_ceiling_ms={s['stall_ceiling_ms']}"
+            if s.get("coldopen_ceiling_ms") is not None:
+                gates += f" coldopen_ceiling_ms={s['coldopen_ceiling_ms']}"
             mark = "  [+2nd server]" if s.get("needs_shared_server") else ""
             mark += f"  [SKIP: {s['skip']}]" if s.get("skip") else ""
             print(f"fps:{s['name']:28s} tier={s.get('tier','ui'):6s} {tag:16s} {gates}{mark}")
@@ -4897,7 +6246,8 @@ def main():
                      + (":\n  " + "\n  ".join(f"{n}  <- {r}" for n, r in pskipped)
                         if pskipped else f" — --filter {args.filter!r} matched nothing"))
         srv, url_base = serve(root, port=args.fixtures_port,
-                              sink=(lambda m: print(f"      [srv] {m}")) if args.verbose else None)
+                              sink=(lambda m: print(f"      [srv] {m}")) if args.verbose else None,
+                              peer=cfg["tv"])
         # LIFO: registered after the server and BEFORE arm_teardown, so on the way out the TV is
         # cleaned FIRST and the bytes are pulled second. The other order stops serving an app that
         # is still playing, which turns every interrupted run into a demux failure in the log.
@@ -4939,6 +6289,10 @@ def main():
             sys.exit("no FPS scene left to run"
                      + (":\n  " + "\n  ".join(f"{n}  <- {r}" for n, r in fps_skipped)
                         if fps_skipped else f" for tier(s) {'ui+player' if include_player else 'ui'}"))
+        if args.graphics_profile and len(scenes) != 1:
+            names = ", ".join(scene["name"] for scene in scenes)
+            sys.exit("--graphics-profile requires exactly one reproducible scene; "
+                     f"--only/--filter currently selected {len(scenes)}: {names}")
         token = None
         # A second-server scene needs the FIRST server's token too, whatever its tier: without it
         # the app boots to QR sign-in and the scene grades a screen it never reached.
@@ -4956,6 +6310,10 @@ def main():
         arm_teardown(cfg["tv"])
         if args.build:
             do_build(cfg["tv"])
+        if args.graphics_profile:
+            return run_graphics_profile(
+                scenes[0], cfg, token, args.profile_phase, args.graphics_output
+            )
         return run_fps_suite(scenes, cfg, token, include_player, fps_skipped)
 
     if not cases:
@@ -5001,6 +6359,25 @@ def main():
     arm_teardown(cfg["tv"])
     if args.build:
         do_build(cfg["tv"])
+
+    # `session: stored` cases need a sign-in already on the install (see stored_session_reason).
+    # That is a property of the INSTALL, not of any one case, so it is checked once here — same
+    # shape as the link conditioner below — and an unmet precondition SKIPS just those cases
+    # instead of aborting the whole batch (`sys.exit` inside a per-case `run_case` is NOT caught
+    # by that loop's `except Exception`, so one offline case used to take the other 34 down with
+    # it). A `--filter`/`--suite` that selected ONLY stored-session cases still gets a loud exit
+    # naming the reason, so the operator sees why nothing ran rather than a quiet "0 passed".
+    stored_reason = None
+    if any(c.get("session") == "stored" for c in cases):
+        stored_reason = stored_session_reason(cfg["tv"])
+    cases, stored_skipped = partition_stored_sessions(cases, stored_reason)
+    if stored_skipped:
+        print(f"stored session UNAVAILABLE — {stored_reason}")
+        for c in stored_skipped:
+            print(f"    SKIP {c['name']}: `session: stored` {stored_reason}")
+        if not cases:
+            sys.exit(f"every case matching --filter {args.filter!r} / --suite {args.suite!r} "
+                     f"is `session: stored` and none can run: {stored_reason}")
 
     # The link conditioner, started ONCE for the tier — the binary points at its port for every
     # case, conditioned or not, so it cannot be a per-case resource. `usable` decides whether a
@@ -5061,7 +6438,9 @@ def main():
               f"{os.path.basename(MANIFEST_LOCAL)}")
     for c in link_skipped:
         print(f"  [SKIP] {c['name']}  <- needs a conditioned link: {cond.why}")
-    nskip = len(shared_skipped) + len(item_skipped) + len(link_skipped)
+    for c in stored_skipped:
+        print(f"  [SKIP] {c['name']}  <- `session: stored` {stored_reason}")
+    nskip = len(shared_skipped) + len(item_skipped) + len(link_skipped) + len(stored_skipped)
     tail = f", {nskip} skipped" if nskip else ""
     print(f"\n{npass} passed, {real_fail} failed, {nxfail} known-gap of {len(summary)}{tail}")
     return 0 if real_fail == 0 else 1

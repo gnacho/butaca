@@ -25,8 +25,6 @@ Two other readers exist — a webosbrew reviewer deciding whether to put an unsi
 
 A small standard, not a wall of mandatory sections. Sections that would add nothing are omitted; the order below is the default, and questions 3 and 4 override it.
 
-The H1 becomes the published release's title — CI lifts it out and hands it to GitHub as the release name, then strips it from the body, so it must not be repeated in the rendered body.
-
 ```markdown
 # vX.Y.Z — <short human-readable theme>
 
@@ -58,6 +56,14 @@ The H1 becomes the published release's title — CI lifts it out and hands it to
 ```
 
 `**Full Changelog**` is appended by GitHub, from the compare range, and must never be typed into the file. A hand-written compare link is exactly the class of measurable fact this project has got wrong before.
+
+**The `# vX.Y.Z — <theme>` line never reaches the published body.** `release.yml` extracts it as
+the release's own `name` — GitHub already renders that next to the tag, above the body, so leaving
+it in as the body's first line too put the version on the page twice (a v0.6.0 defect, fixed the
+same day it published). Keep writing it: it is still what makes the committed `.md` file read as a
+complete, titled document on its own, and it is the only source the workflow has for the release's
+display name. Just do not expect to see it a second time on the release page — the body CI posts
+starts at the paragraph underneath it.
 
 ### When the reader has to act, that comes first
 

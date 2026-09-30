@@ -39,7 +39,6 @@ use crate::ui::widgets::{draw_card, Button, ControlGround};
 use crate::ui::{Env, Painter, Rect, View};
 use std::ffi::CString;
 use std::os::raw::c_int;
-use std::ptr::{addr_of, addr_of_mut};
 
 /// How long the tile holds before starting the next episode by itself. Long enough to read the
 /// title and reach for the remote, short enough that "always the next episode" stays automatic.
@@ -54,13 +53,26 @@ pub(crate) const BTN_NEXT: c_int = 1;
 /// `app.rs` stays one line for every occupant.
 pub(crate) const PRIMARY_BTN: c_int = BTN_NEXT;
 
-/// `SDL_GetTicks` deadline at which the next episode auto-starts. 0 = not armed (the tile is not
-/// up, or the countdown was cancelled).
-static mut DEADLINE: u32 = 0;
-/// The user cancelled the auto-advance for THIS segment (they took hold of the row). Latched,
-/// because `tick` runs every frame and would otherwise re-arm the countdown the very next one.
-/// Cleared when the segment ends, so the next episode's credits get their own chance.
-static mut CANCELLED: bool = false;
+/// **The auto-advance countdown, owned by the player's instance** (`PlayerScreen::up_next`,
+/// restructure spec §9). Two `static mut`s until phase 9, and the reason they had to move is the
+/// reason every other piece of this route's state did: the countdown belongs to ONE playback, and a
+/// module global cannot be told that a playback has ended — `reset` was called by hand from four
+/// places to stand in for that.
+#[derive(Default)]
+pub(crate) struct Countdown {
+    /// `SDL_GetTicks` deadline at which the next episode auto-starts. 0 = not armed (the tile is
+    /// not up, or the countdown was cancelled).
+    ///
+    /// It stays a stored INSTANT rather than becoming a `Fx::Timer` alone, because the tile's
+    /// primary button IS the countdown: its fill sweeps off the REMAINING milliseconds every frame
+    /// ([`draw`]), so the deadline has to be readable, not merely scheduled. A timer beside it
+    /// would be a second representation of one instant and a second thing to keep in step.
+    deadline: u32,
+    /// The user cancelled the auto-advance for THIS segment (they took hold of the row). Latched,
+    /// because `tick` runs every frame and would otherwise re-arm the countdown the very next one.
+    /// Cleared when the segment ends, so the next episode's credits get their own chance.
+    cancelled: bool,
+}
 
 /// Whether this owns the control row this frame. The precedence itself lives in ONE place —
 /// [`crate::ui::player_hud::slot_for`] — so this is just a read of the resolved slot.
@@ -73,16 +85,18 @@ pub(crate) fn is_shown(slot: crate::ui::player_hud::ControlSlot) -> bool {
 ///
 /// It arms on APPEARANCE, never on focus: the tile's whole promise is that it starts the next
 /// episode on its own. Focus only ever [`cancel`]s it.
-pub(crate) fn tick(slot: crate::ui::player_hud::ControlSlot, now: u32) {
+impl Countdown {
+pub(crate) fn tick(&mut self, slot: crate::ui::player_hud::ControlSlot, now: u32) {
     if !is_shown(slot) {
         // segment over (or the queue emptied): drop the deadline AND the cancel latch, so the
         // next episode's credits arm normally instead of inheriting this one's refusal
-        reset();
+        self.reset();
         return;
     }
-    if (unsafe { addr_of!(DEADLINE).read() }) == 0 && !(unsafe { addr_of!(CANCELLED).read() }) {
-        unsafe { addr_of_mut!(DEADLINE).write(now.wrapping_add(COUNTDOWN_MS).max(1)) }
+    if self.deadline == 0 && !self.cancelled {
+        self.deadline = now.wrapping_add(COUNTDOWN_MS).max(1);
     }
+}
 }
 
 /// PURE — may the countdown keep running, the transport standing this way?
@@ -107,18 +121,17 @@ pub(crate) fn countdown_may_run(bare_transport: bool, row_focused: bool, btn: c_
     bare_transport && row_focused && btn == BTN_NEXT
 }
 
+impl Countdown {
 /// Stop the auto-advance without hiding the tile — the user took hold of the row, or is leaving.
 /// The tile stays up as a plain "OK to play" target; only the clock is off.
-pub(crate) fn cancel() {
-    unsafe {
-        addr_of_mut!(DEADLINE).write(0);
-        addr_of_mut!(CANCELLED).write(true);
-    }
+pub(crate) fn cancel(&mut self) {
+    self.deadline = 0;
+    self.cancelled = true;
 }
 
 /// True while the countdown is running (drives holding the HUD up, so the timer is never invisible).
-pub(crate) fn armed() -> bool {
-    (unsafe { addr_of!(DEADLINE).read() }) != 0
+pub(crate) fn armed(&self) -> bool {
+    self.deadline != 0
 }
 
 /// Milliseconds left (0 when disarmed or elapsed).
@@ -126,10 +139,18 @@ pub(crate) fn armed() -> bool {
 /// `SDL_GetTicks` wraps every ~49 days, so the comparison is the codebase's wrapping idiom
 /// (`wrapping_sub` against the 0x8000_0000 half-range), not `now < deadline` — the same guard
 /// `app.rs` uses for its deferred-refresh deadline.
-fn remaining_ms(now: u32) -> u32 {
-    let d = unsafe { addr_of!(DEADLINE).read() };
+///
+/// While the screenshot pipeline holds the free-running clocks (`stillclock`,
+/// [`crate::ui::motion::held_clock_ms`]) the countdown holds with them, at that much elapsed: its
+/// fill then draws one fixed picture and it never runs out. Never in a build without
+/// `devtriggers`.
+fn remaining_ms(&self, now: u32) -> u32 {
+    let d = self.deadline;
     if d == 0 {
         return 0;
+    }
+    if let Some(held) = crate::ui::motion::held_clock_ms() {
+        return COUNTDOWN_MS.saturating_sub(held).max(1);
     }
     let left = d.wrapping_sub(now);
     if left == 0 || left >= 0x8000_0000 {
@@ -140,25 +161,24 @@ fn remaining_ms(now: u32) -> u32 {
 }
 
 /// True once the countdown has run out — `app.rs` polls this and starts the next episode.
-pub(crate) fn expired(now: u32) -> bool {
-    armed() && remaining_ms(now) == 0
+pub(crate) fn expired(&self, now: u32) -> bool {
+    self.armed() && self.remaining_ms(now) == 0
 }
 
 /// The descriptor to start, cloned off the `&'static` store. Cloning is mandatory, not tidiness:
 /// `route::request_play_up_next` clears `UP_NEXT` as its first act, so handing it a borrow of the
 /// static would be a use-after-free the borrow checker cannot see through a `'static` lifetime.
-pub(crate) fn take() -> Option<UpNext> {
-    cancel();
-    crate::route::up_next().cloned()
+pub(crate) fn take(&mut self, ps: &crate::route::PlaybackSession) -> Option<UpNext> {
+    self.cancel();
+    crate::route::up_next(ps).cloned()
 }
 
 /// Per-session reset — a new playback must not inherit the previous episode's countdown OR its
 /// cancel latch.
-pub(crate) fn reset() {
-    unsafe {
-        addr_of_mut!(DEADLINE).write(0);
-        addr_of_mut!(CANCELLED).write(false);
-    }
+pub(crate) fn reset(&mut self) {
+    self.deadline = 0;
+    self.cancelled = false;
+}
 }
 
 // ---- geometry: the control row's slot, with the next episode's still stacked above it. The still
@@ -177,17 +197,8 @@ const BTN_GAP: f32 = theme::space::MD;
 const PILL_GAP: f32 = theme::space::SM;
 const CAPTION_H: f32 = 30.0;
 
-/// The translated pick of a fixed label (same helper `ui::detail` owns): static C strings in,
-/// one pointer out, nothing allocates on the draw path.
-fn tr_c(en: &'static std::ffi::CStr, es: &'static std::ffi::CStr) -> &'static std::ffi::CStr {
-    if crate::i18n::is_es() { es } else { en }
-}
-fn next_label() -> &'static str {
-    crate::i18n::t("Next Episode")
-}
-fn credits_label() -> &'static core::ffi::CStr {
-    tr_c(c"Watch Credits", c"Ver créditos")
-}
+
+
 
 /// The caption is RIGHT-ALIGNED text, so it may run wider than the still/button column without
 /// breaking it — the column's edges are the two solid rectangles, and a text run has no left edge
@@ -237,26 +248,22 @@ pub(crate) fn layout_of(next_w: f32, credits_w: f32) -> Layout {
 /// deliberately NOT a second `ctrl_slot`, because that floor exists to hold the row's right edge
 /// steady, which is the primary's job, and two equal capsules would say the two choices are
 /// equivalent.
-pub(crate) fn layout() -> Layout {
+pub(crate) fn layout(row: &mut crate::ui::player_hud::TransportRow, measure: &dyn crate::ui::machine::Measure) -> Layout {
     layout_of(
-        crate::ui::player_hud::ctrl_slot(next_label()).w,
-        Button::pill_w(credits_label().as_ptr(), theme::size::BODY, false),
+        crate::ui::player_hud::ctrl_slot(row, crate::i18n::msg::widgets_next_episode(), measure).w,
+        crate::ui::widgets::Button::pill_w_measured(crate::i18n::msg::widgets_next_credits_c(), theme::size::BODY, false, false, measure),
     )
 }
 
-/// Pointer hit-test: which of the row's two buttons is under (cx, cy) — [`BTN_CREDITS`],
-/// [`BTN_NEXT`], or None. The still and its caption are NOT targets: with two actions in the row a
-/// click on the artwork has no single obvious meaning, and guessing one is how a stray click starts
-/// an episode the user did not ask for. The caller has already established that this owns the row.
-pub(crate) fn hit(cx: f32, cy: f32) -> Option<c_int> {
-    let l = layout();
-    if l.credits.contains(cx, cy) {
-        Some(BTN_CREDITS)
-    } else if l.next.contains(cx, cy) {
-        Some(BTN_NEXT)
-    } else {
-        None
-    }
+/// [`layout`] without writing the row's width memo — what `ControlSlot::item_rect` places the two
+/// buttons at. Only the two BUTTONS are pointer targets: the still and its caption are not, since
+/// with two actions in the row a click on the artwork has no single obvious meaning, and guessing
+/// one is how a stray click starts an episode the user did not ask for.
+pub(crate) fn layout_peek(row: &crate::ui::player_hud::TransportRow, measure: &dyn crate::ui::machine::Measure) -> Layout {
+    layout_of(
+        crate::ui::player_hud::ctrl_slot_w(row, crate::i18n::msg::widgets_next_episode(), measure),
+        crate::ui::widgets::Button::pill_w_measured(crate::i18n::msg::widgets_next_credits_c(), theme::size::BODY, false, false, measure),
+    )
 }
 
 /// The caption — `"Up Next · S2, E4 · Laura"`. PRIMARY and bold, not secondary: it sits at y≈760
@@ -264,22 +271,29 @@ pub(crate) fn hit(cx: f32, cy: f32) -> Option<c_int> {
 /// invisible. It is also the only thing distinguishing this episode's ID from the now-playing one
 /// on the same band, hence the explicit "Up Next ·" kicker rather than a bare "S2, E4".
 fn caption(u: &UpNext) -> String {
-    if u.season > 0 || u.index > 0 {
-        crate::i18n::t("Up Next · {}").replacen(
-            "{}",
-            &crate::ui::fmt::episode_kicker(u.season, u.index, &u.ep_title),
-            1,
-        )
+    let episode = if u.season > 0 || u.index > 0 {
+        crate::ui::fmt::episode_kicker(u.season, u.index, &u.ep_title)
     } else {
-        crate::i18n::t("Up Next · {}").replacen("{}", &u.ep_title, 1)
-    }
+        u.ep_title.clone()
+    };
+    crate::i18n::msg::widgets_next_caption(&episode)
 }
 
-pub(crate) fn draw(p: Painter, focused: bool, btn: c_int, now: u32) {
-    let Some(u) = crate::route::up_next() else {
+pub(crate) fn draw(
+    ps: &crate::route::PlaybackSession,
+    row: &mut crate::ui::player_hud::TransportRow,
+    up: &Countdown,
+    p: Painter,
+    focused: bool,
+    btn: c_int,
+    now: u32,
+    measure: &dyn crate::ui::machine::Measure,
+) {
+    let Some(u) = crate::route::up_next(ps) else {
         return;
     };
-    let l = layout();
+    let l = layout(row, measure);
+    let (pop_credits, pop_next) = (row.scale(BTN_CREDITS), row.scale(BTN_NEXT));
     // NOT scaled: `CARD_FOCUS_SCALE` is the terminal value of a focus spring the shelves drive, and
     // passing it as a constant drew the still permanently 7% oversized — overhanging the column on
     // both sides. The still is decoration on a focusable row, not a focusable tile itself, so it
@@ -287,7 +301,7 @@ pub(crate) fn draw(p: Painter, focused: bool, btn: c_int, now: u32) {
     draw_card(
         p,
         l.still,
-        crate::route::item_sid(crate::route::cur_sid()),
+        crate::route::item_sid(crate::route::cur_sid(ps)),
         &u.thumb,
         (480, 270),
         10.0,
@@ -295,13 +309,10 @@ pub(crate) fn draw(p: Painter, focused: bool, btn: c_int, now: u32) {
         1.0,
     );
 
-    if let Ok(cs) = CString::new(crate::text::elide(
-        &caption(u),
-        l.caption.w,
-        theme::size::CAPTION,
-        1,
-        false,
-    )) {
+    let elided = crate::text::elide_by(&caption(u), l.caption.w, false, |t| {
+        measure.width_str(t, theme::size::CAPTION, true)
+    });
+    if let Ok(cs) = CString::new(elided) {
         Label::new(cs.as_ptr(), theme::size::CAPTION, theme::TEXT_PRIMARY)
             .bold()
             .h(HAlign::Right)
@@ -310,34 +321,38 @@ pub(crate) fn draw(p: Painter, focused: bool, btn: c_int, now: u32) {
 
     let e = Env::inert();
     // The focus pop is the CONTROL ROW's, not this card's: these two stand in the transport's own
-    // slot and share its cursor, so they share its springs (`player_hud::row_pop`).
-    Button::new(credits_label().as_ptr(), theme::size::BODY, l.credits)
+    // slot and share its cursor, so they share its springs (`TransportRow::scale`).
+    Button::new(crate::i18n::msg::widgets_next_credits_c().as_ptr(), theme::size::BODY, l.credits)
         .focused(focused && btn == BTN_CREDITS)
         // Both buttons on this card stand on LIVE CREDITS — the video plane, under this card's own
         // scrim — so both take the unkeyed ground (`ControlGround`). It is what the app's
         // `ControlStyle::Keyline` was hand-rolling for exactly this surface, and the right way
         // round: a light film over the scrim rather than a darker plate cut into the picture.
         .ground(ControlGround::Unkeyed)
-        .scale(crate::ui::player_hud::row_pop(BTN_CREDITS))
+        .scale(pop_credits)
         .draw(&e, p);
 
     // The primary IS the countdown — its fill sweeps left→right and, at the far edge, the episode
     // starts. Driven straight off the remaining MILLISECONDS and redrawn every frame, so the sweep
     // is continuous; the label carries no seconds, because the pill's width is derived from its
     // label and a ticking numeral would resize the button and slide its centred text every second.
-    let Ok(label) = CString::new(next_label()) else {
+    let Ok(label) = CString::new(crate::i18n::msg::widgets_next_episode()) else {
         return;
     };
     let mut b = Button::new(label.as_ptr(), theme::size::BODY, l.next)
         .focused(focused && btn == BTN_NEXT)
         .ground(ControlGround::Unkeyed)
-        .scale(crate::ui::player_hud::row_pop(BTN_NEXT));
-    if armed() {
+        .scale(pop_next);
+    if up.armed() {
         // It animates from a CLOCK, so `ui::idle`'s spring instrumentation cannot see it — the trap
         // `Xfade::tick` and `Spinner::draw` both shipped frozen in. The player route bypasses the
         // frame gate outright today, so this changes nothing now; it is what keeps that reversible.
-        crate::ui::idle::invalidate();
-        b = b.progress(1.0 - (remaining_ms(now) as f32 / COUNTDOWN_MS as f32).clamp(0.0, 1.0));
+        // A HELD clock (`remaining_ms`) draws one fixed fill, so there is nothing to redraw — the
+        // same exception `widgets::Spinner` makes.
+        if !crate::ui::motion::phase_clocks_held() {
+            crate::ui::idle::invalidate();
+        }
+        b = b.progress(1.0 - (up.remaining_ms(now) as f32 / COUNTDOWN_MS as f32).clamp(0.0, 1.0));
     }
     b.draw(&e, p);
 }

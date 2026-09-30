@@ -9,6 +9,10 @@
 #   tv-session.sh shot [out.png] grab the panel (video plane included) via the capture service
 #   tv-session.sh log [pattern]  fetch the on-device event log, optionally grepped
 #   tv-session.sh screen off|on  blank the PANEL while the app keeps running (see below)
+#   tv-session.sh sound off|on|status
+#                                mute/unmute the TELEVISION, independent of the panel (see below)
+#   tv-session.sh wan off [TTL]|on|status
+#                                cut the TELEVISION's route to the internet, LAN intact (see below)
 #   tv-session.sh down           hand the TV back: strip automation, relaunch interactive
 #
 # Options (accepted before OR after the subcommand, because every one of them needs it):
@@ -18,12 +22,27 @@
 #                     the close, the launch, the triggers and the log all follow it.
 #
 # `up` options:
-#   --screen <name>   home (default) | profiles | library[=N] | detail=<rk> | person=<movie rk>
+#   --screen <name>   home (default) | profiles | library[=N] | detail=<rk> | collection=<rk> | person=<movie rk>
 #                     | player=<rk> | login | account | itemmenu
 #   --server <slot>   open detail=/player= on this registered Plex server slot instead of the
 #                     current one; boots through the signed-in stored roster so secondary slots
 #                     exist (an already-armed plxnative-servers also survives with --keep)
-#   --guest           run as the managed test user rather than the owner (default: owner)
+#   --guest           boot as tests/manifest.local.json's managed TEST USER, never the owner.
+#                     Reuses run.py's own identity resolution (fetch_managed_user_token, the
+#                     plex.tv shared_servers lookup) rather than re-deriving it, so the two
+#                     never disagree about what "guest" means. REFUSES (exit 1) rather than
+#                     falling through to the owner when no manifest.local.json/test_user is
+#                     configured — see the 2026-09-10 postmortem below `cmd_up`'s definition:
+#                     a caller asked for a guest, got the owner silently, and a real playback
+#                     wrote progress into the household account.
+#   --owner           boot as the household account (the config.local.h owner token). This is
+#                     also what a bare `up` does with neither flag — spelling it out is for a
+#                     script that wants the choice to be visible in its own command line.
+#   --mock            with --guest, use only tests/mock_pms.py at the configured PMS endpoint.
+#                     Verifies its synthetic identity; never uses an account token or contacts plex.tv.
+#   --dry-run         resolve and print the identity `up` would use (including a real --guest
+#                     token lookup, which touches plex.tv but never the TV) and the shape of the
+#                     commands it would run, then exit 0 without contacting the television at all.
 #   --stream[=PORT]   also start tools/stream-screen.py for a live browser view (default 8909)
 #                     STREAM_RES=480x270 makes mpeg encode ~4x cheaper (see the skill)
 #   --remote[=PORT]   like --stream, but ALSO publish an authenticated, D-pad-only page over an
@@ -31,7 +50,9 @@
 #                     (default dpad port 8908). Prints a URL + generated password; `down` revokes
 #                     both. Needs cloudflared (brew install cloudflared). See the skill for why
 #                     this is a tunnel and never a router port forward.
-#   --no-token        boot with no injected token (exercises the QR sign-in flow)
+#   --no-token        boot with no injected token (exercises the QR sign-in flow, or the
+#                     who's-watching picker for a stored session — a THIRD identity, distinct
+#                     from both --guest and --owner)
 #   --keep            do not clear existing triggers first (rarely what you want)
 #
 # SCREEN OFF is a panel state, not an app state. `luna://com.webos.service.tvpower/power/
@@ -47,6 +68,27 @@
 # where it saves the panel over long runs and costs nothing. DO NOT use it for the fps scenes,
 # `shot`, or the capture stream: `ui::idle` gates presents and the panel is the thing those
 # measure, so a dark screen makes them either meaningless or silently wrong.
+#
+# SOUND is the television's own mute, separate from the panel above and from playback: it silences
+# whatever the set would otherwise put out, panel on or off, app running or not.
+# `luna://com.webos.service.audio/setMuted` flips the flag and `com.webos.service.audio/getVolume`
+# reads it back. Both calls were exercised by hand on the set on 2026-09-19 — `setMuted` returned
+# success and an independent `getVolume` then reported `muted:true` — but the SUBCOMMAND around
+# them is host-tested only and has never run against a television. Whoever uses it first: watch
+# what the set actually does and record it. `off`/`on` call `setMuted` and then RE-READ `getVolume` to
+# confirm, rather than trusting `setMuted`'s own `returnValue` — the same discipline `ensure_binary`
+# already uses for a deploy. `status` only reads `getVolume`. Like `screen`, this drives the set and
+# takes the TV lock.
+#
+# THIS IS THE SANCTIONED PATH for muting the television. Before it existed, the only ways to
+# silence a run were the physical remote or a raw `luna-send` reached through
+# `PLX_TV_LOCK_BYPASS=1` around the lock guard — neither belongs in an automated lane, and the
+# bypass in particular is meant for a human who knows the set is theirs, not for routine muting. No
+# lane needs it for this: `tv-session.sh sound off` is the tool.
+#
+# It does NOT restore sound at teardown — `down` does not call it — because a lane that muted for
+# its own reasons is the only one that knows when unmuting is correct; restoring automatically
+# would fight a human who muted the set on purpose before handing it to a lane.
 #
 # THE TV LOCK: every subcommand that DRIVES the set (up, key, click, shot, down) requires the
 # television's lock and refuses when another lane holds it; `status` and `log` are read-only and
@@ -241,16 +283,67 @@ ensure_installed() {
 }
 
 # ------------------------------------------------------------- deploy --------
+is_md5_hash() {
+  [ "${#1}" -eq 32 ] || return 1
+  case "$1" in
+    *[!0-9a-fA-F]*) return 1 ;;
+  esac
+}
+
+local_binary_hash() {
+  local raw hash
+  if raw=$(md5 -q "$REPO/pkg/plxnative" 2>/dev/null); then
+    :
+  else
+    raw=$(md5sum "$REPO/pkg/plxnative" 2>/dev/null) || return 1
+  fi
+  hash=${raw%%[[:space:]]*}
+  [ -z "$hash" ] && { printf '\n'; return 0; }
+  is_md5_hash "$hash" || return 1
+  printf '%s\n' "$hash"
+}
+
+remote_binary_hash() {
+  local raw hash
+  raw=$(tvq "md5sum $APPDIR/plxnative") || return 1
+  hash=${raw%%[[:space:]]*}
+  [ -z "$hash" ] && { printf '\n'; return 0; }
+  is_md5_hash "$hash" || return 1
+  printf '%s\n' "$hash"
+}
+
 ensure_binary() {
   [ -f "$REPO/pkg/plxnative" ] || { bad "no pkg/plxnative — run make"; return 1; }
-  local l t
-  l=$(md5 -q "$REPO/pkg/plxnative" 2>/dev/null || md5sum "$REPO/pkg/plxnative" | cut -d' ' -f1)
-  t=$(tvq "md5sum $APPDIR/plxnative" | cut -d' ' -f1)
+  local l t presence
+  if ! l=$(local_binary_hash); then
+    bad "could not read local binary hash"
+    return 1
+  fi
+  [ -n "$l" ] || { bad "local binary hash is empty"; return 1; }
+  # A registered install can have lost its executable. Only a successful, exact response
+  # from a searchable/readable app directory establishes absence; transport failures and
+  # dangling symlinks must not authorize a repair deploy.
+  if ! presence=$(tvq "cd '$APPDIR' && [ -r . ] && [ -x . ] || exit 1
+if [ -e plxnative ] || [ -L plxnative ]; then printf 'present\\n'; else printf 'missing\\n'; fi"); then
+    bad "could not determine deployed binary presence"
+    return 1
+  fi
+  case "$presence" in
+    present)
+      if ! t=$(remote_binary_hash); then
+        bad "could not read deployed binary hash"
+        return 1
+      fi
+      [ -n "$t" ] || { bad "deployed binary hash is empty"; return 1; }
+      ;;
+    missing) t=""; info "deployed binary is missing — repair required" ;;
+    *) bad "invalid deployed binary presence response"; return 1 ;;
+  esac
   # This compares BYTES, and `pkg/plxnative` is a path that every flavour and both configurations
   # write — so a match says "these are the bytes on my disk right now", never "this is the install
   # I asked for". That second question is settled by assert_install, on the app's own boot line.
   if [ "$l" = "$t" ]; then ok "deployed binary matches local build"; return 0; fi
-  info "binary differs — deploying to $APPID"
+  info "binary differs or is missing — deploying to $APPID"
   # THE SAME flavour that was resolved above. A deploy that fell back to the Makefile default
   # would write install A's directory and then launch install B below — SAM's stale-running no-op,
   # after which every assertion here grades the other app's log.
@@ -264,7 +357,16 @@ ensure_binary() {
     printf '%s\n' "$_deploy_out" | sed 's/^/    /'
     return 1
   fi
-  t=$(tvq "md5sum $APPDIR/plxnative" | cut -d' ' -f1)
+  if ! l=$(local_binary_hash); then
+    bad "could not re-read local binary hash after deploy"
+    return 1
+  fi
+  [ -n "$l" ] || { bad "local binary hash is empty after deploy"; return 1; }
+  if ! t=$(remote_binary_hash); then
+    bad "could not re-read deployed binary hash"
+    return 1
+  fi
+  [ -n "$t" ] || { bad "deployed binary hash is empty after deploy"; return 1; }
   # a standby can truncate an scp mid-flight, so verify rather than trust
   [ "$l" = "$t" ] && { ok "deployed + md5 verified"; return 0; }
   # Re-running `up` fixes the standby case and nothing else, so name the other one too — see
@@ -289,6 +391,79 @@ push_token() {
   [ -n "$tok" ] || { bad "no PMS_TOKEN in src/config.local.h (gitignored) — boot will hit QR sign-in"; return 1; }
   printf '%s' "$tok" | tv "cat > $RUNDIR/plxnative-token" || return 1
   ok "token injected (value not printed)"
+}
+
+# guest identity: reuse tests/run.py's OWN resolution instead of re-deriving the plex.tv call.
+# `--print-test-token` is that path exposed standalone (tests/manifest.local.json's `test_user`
+# -> fetch_managed_user_token, the same owner-token + shared_servers lookup run.py already makes
+# for the identical reason -- keeping test playback off the real account's watch history).
+#
+# On success sets GUEST_TOKEN and returns 0. On failure sets GUEST_ERROR to run.py's own reason
+# (no manifest.local.json, no test_user block, the managed user has no shared_servers entry, …)
+# and returns 1 -- the caller MUST refuse rather than fall back to push_token, which is exactly
+# the 2026-09-10 defect this replaced: `--guest` printed a warning and booted as the owner anyway,
+# and a real playback wrote progress into the household account (clearing it needed
+# /:/unscrobble, which also reset that item's viewCount — real data loss, not a test artifact).
+GUEST_TOKEN=""
+GUEST_ERROR=""
+resolve_guest_token() {
+  GUEST_TOKEN=""; GUEST_ERROR=""
+  local errfile tok rc
+  errfile=$(mktemp 2>/dev/null) || errfile=/dev/null
+  if [ "${mock:-0}" = 1 ]; then
+    tok=$(python3 "$REPO/tools/mock-guest.py" "$REPO/src/config.local.h" 2>"$errfile")
+  else
+  tok=$(cd "$REPO/tests" && python3 run.py --print-test-token 2>"$errfile")
+  fi
+  rc=$?
+  if [ $rc -ne 0 ] || [ -z "$tok" ]; then
+    GUEST_ERROR=$(cat "$errfile" 2>/dev/null)
+    [ -n "$GUEST_ERROR" ] || GUEST_ERROR="tests/run.py --print-test-token exited $rc with no output"
+    [ "$errfile" = /dev/null ] || rm -f "$errfile"
+    return 1
+  fi
+  [ "$errfile" = /dev/null ] || rm -f "$errfile"
+  GUEST_TOKEN="$tok"
+}
+
+# Decide the Plex identity this boot will use, and do it BEFORE a single trigger is armed or the
+# television is touched — so --dry-run can print exactly the decision a real `up` would make, and
+# so an unresolvable --guest fails before the TV lock is even taken instead of after. Reads the
+# CALLER's (cmd_up's, or cmd_selftest's) locals guest/owner/no_token/server_set/server_slot by
+# Bash's dynamic scope — the same convention configure_direct_screen above already uses — and sets
+# the caller's identity_desc/push_guest/push_owner the same way.
+#
+# Returns 1 ONLY for an unresolvable --guest, and the caller MUST treat that as fatal: falling
+# through to the owner from here is the exact 2026-09-10 defect this function replaced (see
+# resolve_guest_token's doc above).
+resolve_identity() {
+  identity_desc=""; push_guest=0; push_owner=0
+  if [ "$no_token" = 1 ]; then
+    if [ "$server_set" = 1 ]; then
+      identity_desc="stored session — restoring the signed-in multi-server roster for slot $server_slot"
+    else
+      identity_desc="stored session / picker — boots as a real user would (picker, or QR if $APPID has no session)"
+    fi
+    return 0
+  fi
+  if [ "$guest" = 1 ]; then
+    if resolve_guest_token; then
+      push_guest=1
+      if [ "${mock:-0}" = 1 ]; then
+        identity_desc="guest — synthetic mock PMS (no Plex account or account token)"
+      else
+      identity_desc="guest — the manifest's managed test user (token via tests/run.py, value not printed)"
+      fi
+      return 0
+    fi
+    bad "cannot resolve a guest identity: $GUEST_ERROR"
+    bad "refusing to boot — falling through to the owner here is the exact defect this guard replaced"
+    info "alternative: tests/run.py --server --filter <case>   (drives the harness AS the managed test user)"
+    info "alternative: tv-session.sh up --owner                (boot as the household account, explicitly)"
+    return 1
+  fi
+  identity_desc="owner (household account) — the config.local.h token"
+  push_owner=1
 }
 
 # ------------------------------------------------------------- launch --------
@@ -339,9 +514,19 @@ assert_install() {
   return 1
 }
 
+# The heartbeat carries TWO words since UI-restructure phase 10: the PAGE as `route=` and the top
+# `ModalStack` surface's own `Screen::name` as ` overlay=`. A surface that used to be a route of
+# its own — the account sheet, the press-and-hold card menu — therefore prints
+# `route=home overlay=account`, never the retired `route=account`.
+#
+# Reading only the page word is not merely imprecise here, it is unable to fail: every one of
+# those surfaces sits over Home, so `route=home` is already true the instant the app boots, and a
+# trigger the app REFUSED would be graded as having arrived. So a caller that names an overlay
+# gets both halves checked. ` overlay=none` (what the player prints with nothing up) normalises
+# to "no overlay" so a caller naming only a page still matches it.
 assert_route() {
-  local want="$1" seen
-  seen=$(tvq "grep -oE 'route=[a-z]+' $EVENTLOG 2>/dev/null | tail -1")
+  local want="$1" want_overlay="${2:-}" seen seen_route seen_overlay
+  seen=$(tvq "grep -oE 'route=[a-z]+( overlay=[a-z]+)?' $EVENTLOG 2>/dev/null | tail -1")
   if [ -z "$seen" ]; then
     bad "no route= heartbeat in $EVENTLOG yet (app booting, or it died)"
     info "if it died: tools/crash-report.sh --flavor $FLAVOR"
@@ -349,8 +534,25 @@ assert_route() {
   fi
   info "reached ${seen}"
   [ -z "$want" ] && return 0
-  [ "$seen" = "route=$want" ] && { ok "on the requested screen"; return 0; }
-  bad "wanted route=$want, got $seen"; return 1
+  seen_route="${seen%% *}"
+  case "$seen" in
+    *" overlay="*) seen_overlay="${seen##* overlay=}" ;;
+    *)             seen_overlay="" ;;
+  esac
+  [ "$seen_overlay" = none ] && seen_overlay=""
+  # A caller naming ONLY a page does not care what sits over it — `--screen detail=<rk>` with a
+  # panel trigger armed beside it is a boot that arrived, not a boot that missed. The overlay is
+  # compared only when it was asked for.
+  if [ "$seen_route" = "route=$want" ] \
+     && { [ -z "$want_overlay" ] || [ "$seen_overlay" = "$want_overlay" ]; }; then
+    ok "on the requested screen"; return 0
+  fi
+  if [ -n "$want_overlay" ]; then
+    bad "wanted route=$want overlay=$want_overlay, got $seen"
+  else
+    bad "wanted route=$want, got $seen"
+  fi
+  return 1
 }
 
 # Resolve everything implied by `--server` in one testable place. Bash's dynamic local scope is
@@ -370,8 +572,8 @@ configure_direct_screen() {
     *) bad "--server must use canonical decimal (no leading zero), got: $server_slot"; return 2 ;;
   esac
   case "$screen" in
-    detail=*|player=*) ;;
-    *) bad "--server applies only to --screen detail=<rk> or player=<rk>"; return 2 ;;
+    detail=*|collection=*|player=*) ;;
+    *) bad "--server applies only to --screen detail=<rk>, collection=<rk>, or player=<rk>"; return 2 ;;
   esac
   direct_kind="${screen%%=*}"
   direct_rk="${screen#*=}"
@@ -454,8 +656,9 @@ await_direct_screen() {
 
 # ------------------------------------------------------------ commands -------
 cmd_up() {
-  local screen=home guest=0 stream="" no_token=0 keep=0 remote="" server_slot="" server_set=0
+  local screen=home guest=0 mock=0 owner=0 dry_run=0 stream="" no_token=0 keep=0 remote="" server_slot="" server_set=0
   local direct_kind="" direct_rk="" direct_marker=""
+  local identity_desc="" push_guest=0 push_owner=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --screen) screen="$2"; shift 2 ;;
@@ -464,6 +667,9 @@ cmd_up() {
                 server_slot="$2"; server_set=1; shift 2 ;;
       --server=*) server_slot="${1#*=}"; server_set=1; shift ;;
       --guest) guest=1; shift ;;
+      --mock) mock=1; shift ;;
+      --owner) owner=1; shift ;;
+      --dry-run) dry_run=1; shift ;;
       --stream) stream=8909; shift ;;
       --stream=*) stream="${1#*=}"; shift ;;
       --remote) remote=8908; shift ;;
@@ -473,6 +679,19 @@ cmd_up() {
       *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
   done
+  if [ "$mock" = 1 ] && [ "$guest" != 1 ]; then
+    bad "--mock requires --guest (synthetic identity only)"; exit 2
+  fi
+  if [ "$mock" = 1 ] && [ "$FLAVOR" != debug ]; then
+    bad "--mock requires the debug install"; exit 2
+  fi
+  if [ "$guest" = 1 ] && [ "$owner" = 1 ]; then
+    echo "--guest and --owner are mutually exclusive" >&2; exit 2
+  fi
+  if [ "$guest" = 1 ] && [ "$no_token" = 1 ]; then
+    echo "--guest and --no-token are mutually exclusive: --no-token boots the stored session (or the who's-watching picker), which is a THIRD identity, distinct from both --guest and --owner" >&2
+    exit 2
+  fi
   configure_direct_screen || exit 2
   # --remote is --stream plus a front door: there is nothing to publish without a stream, so it
   # turns one on rather than making the caller remember to pass both.
@@ -482,23 +701,13 @@ cmd_up() {
       bad "--remote needs cloudflared (brew install cloudflared)"; exit 1
     fi
   fi
-  # Before the relaunch, never after — see stop_viewers.
-  stop_viewers
 
-  echo "== bringing up the TV session ($screen) on $APPID [$FLAVOR]"
-  # FIRST, before anything is closed, cleared or deployed. `up` kills the running app and wipes
-  # every trigger under the runtime root — if another lane is mid-run, that is its session, and
-  # everything after this point would be measuring a television two jobs are steering.
-  require_lock "tv-session up --screen $screen [$FLAVOR]"
-  ensure_awake  || exit 1
-  ensure_installed || exit 1
-  ensure_rundir || exit 1
-  ensure_binary || exit 1
-  [ "$keep" = 1 ] || clear_triggers
-
-  # screen -> triggers. Triggers are read ONCE at boot, so they must all be in place
-  # before the launch below; anything live goes through the FIFO afterwards.
-  local files=() want_route=""
+  # screen -> triggers. Triggers are read ONCE at boot, so they must all be in place before the
+  # launch below; anything live goes through the FIFO afterwards. Computed here, BEFORE the
+  # television is touched at all, so identity resolution (next) and --dry-run (after that) can
+  # both see the final, fully-resolved no_token — including the two screens that force it
+  # themselves (profiles, and --server via configure_direct_screen above).
+  local files=() want_route="" want_overlay=""
   case "$screen" in
     home)      want_route=home ;;
     # The picker is what an ORDINARY boot shows: it needs the stored session and NO
@@ -511,13 +720,20 @@ cmd_up() {
     # the design — two installs are two devices to the account — not a broken picker.
     profiles)  no_token=1; want_route=profiles ;;
     login)     files+=("plxnative-login="); want_route=login ;;
-    account)   files+=("plxnative-acct="); want_route=account ;;
+    # The account sheet and the card menu are SURFACES on the shared ModalStack since
+    # UI-restructure phase 10, not routes: the heartbeat prints the host page as `route=` and
+    # the surface's own `Screen::name` as ` overlay=`. Both halves are named, because the host
+    # page alone is Home — true from the first heartbeat of any boot — so naming only it would
+    # grade a refused trigger as a success. `tests/manifest.json` re-keyed its `home-acct-glass`
+    # and `item-menu` scenes the same way and for the same reason.
+    account)   files+=("plxnative-acct="); want_route=home; want_overlay=account ;;
     # the press-and-hold card menu: the trigger snaps into the grid and holds the focused
     # card for us, because a real hold is a live gesture no boot trigger can express
-    itemmenu)  files+=("plxnative-itemmenu="); want_route=itemmenu ;;
+    itemmenu)  files+=("plxnative-itemmenu="); want_route=home; want_overlay=itemmenu ;;
     library)   files+=("plxnative-library="); want_route=library ;;
     library=*) files+=("plxnative-library=${screen#*=}"); want_route=library ;;
     detail=*)  files+=("plxnative-detail=${screen#*=}"); want_route=detail ;;
+    collection=*) files+=("plxnative-collection=${screen#*=}"); want_route=collection ;;
     # the person page has no boot trigger of its own — it is REACHED, by opening a movie's
     # detail page, walking focus down to Cast & Crew (a movie's second section) and pressing
     # OK on the first headshot. So the rk here is the MOVIE's, not the person's.
@@ -532,6 +748,62 @@ cmd_up() {
   # (which would fall through to the app's own default) so that the number the app binds and the
   # number the streamer dials are the one variable resolved at the top of this file.
   [ -n "$stream" ] && files+=("plxnative-capture=$APPPORT")
+
+  # A caller who typed --guest gets a REFUSAL, not a silently different identity, the moment the
+  # chosen screen/server turns out to force the stored-session boot instead (profiles; any
+  # --server slot, via configure_direct_screen above). Silently downgrading here would be the same
+  # shape of bug this whole change exists to close, just moved one option combination sideways.
+  if [ "$guest" = 1 ] && [ "$no_token" = 1 ]; then
+    bad "--guest cannot be combined with --screen $screen (server_set=$server_set): that combination requires the stored-session boot (no injected token), which is a different identity from the managed test user"
+    exit 1
+  fi
+
+  # Identity is decided HERE — before a single trigger is armed, before the TV lock, before the
+  # television is even woken — so it can be said out loud before booting into it, and so
+  # --dry-run never has to touch the set to answer "what would this do". See the 2026-09-10
+  # postmortem on resolve_guest_token above: --guest used to print a warning and then push the
+  # OWNER's token anyway, and a real playback wrote progress into the household Plex account.
+  resolve_identity || exit 1
+  info "identity: $identity_desc"
+
+  if [ "$dry_run" = 1 ]; then
+    echo "== DRY RUN ($screen) on $APPID [$FLAVOR] — nothing below touches the television"
+    if [ ${#files[@]} -gt 0 ]; then
+      for f in "${files[@]}"; do
+        local dn="${f%%=*}" dv="${f#*=}"
+        if [ "$f" = "$dn=" ] || [ -z "$dv" ]; then echo "  would run: touch $RUNDIR/$dn"
+        else echo "  would run: printf '%s' '<redacted>' > $RUNDIR/$dn"; fi
+      done
+    else
+      echo "  (no boot triggers for this screen)"
+    fi
+    if [ "$push_guest" = 1 ]; then
+      echo "  would run: printf '%s' '<guest token, not printed>' | ssh root@$HOST 'cat > $RUNDIR/plxnative-token'"
+    elif [ "$push_owner" = 1 ]; then
+      echo "  would run: printf '%s' '<owner token from src/config.local.h, not printed>' | ssh root@$HOST 'cat > $RUNDIR/plxnative-token'"
+    else
+      echo "  would inject: nothing ($identity_desc)"
+    fi
+    echo "  would run: make -C $REPO FLAVOR=$FLAVOR kill"
+    echo "  would run: ssh root@$HOST luna-send -i luna://com.webos.applicationManager/launch '{\"id\":\"$APPID\"}'"
+    echo "  would then require: route=${want_route:-<any>}${want_overlay:+ overlay=$want_overlay}"
+    echo "== dry run complete — identity: $identity_desc"
+    return 0
+  fi
+
+  # Before the relaunch, never after — see stop_viewers.
+  stop_viewers
+
+  echo "== bringing up the TV session ($screen) on $APPID [$FLAVOR]"
+  # FIRST, before anything is closed, cleared or deployed. `up` kills the running app and wipes
+  # every trigger under the runtime root — if another lane is mid-run, that is its session, and
+  # everything after this point would be measuring a television two jobs are steering.
+  require_lock "tv-session up --screen $screen [$FLAVOR]"
+  ensure_awake  || exit 1
+  ensure_installed || exit 1
+  ensure_rundir || exit 1
+  ensure_binary || exit 1
+  [ "$keep" = 1 ] || clear_triggers
 
   # NB bash 3.2 (macOS system bash) + `set -u`: "${arr[@]}" on an EMPTY array is an
   # unbound-variable error, so every expansion here is length-guarded. Screens that need
@@ -549,20 +821,12 @@ cmd_up() {
     info "no boot triggers needed for this screen"
   fi
 
-  if [ "$no_token" = 0 ]; then
-    if [ "$guest" = 1 ]; then
-      info "guest identity: use tests/run.py (it resolves the managed-user token); booting as owner"
-    fi
+  if [ "$push_guest" = 1 ]; then
+    printf '%s' "$GUEST_TOKEN" | tv "cat > $RUNDIR/plxnative-token" \
+      && ok "guest token injected (value not printed)" \
+      || { bad "failed to inject the guest token"; exit 1; }
+  elif [ "$push_owner" = 1 ]; then
     push_token || info "continuing without a token — expect the QR sign-in screen"
-  else
-    # with a stored session this lands on the who's-watching picker; only an install with
-    # no session of its OWN falls through to QR — the file is named for the app id, so the
-    # other flavour having signed in does not count
-    if [ "$server_set" = 1 ]; then
-      info "stored session identity — restoring the signed-in multi-server roster for slot $server_slot"
-    else
-      info "no token by request — boots as a real user would (picker, or QR if $APPID has no session)"
-    fi
   fi
 
   PREV_PIDS=$(app_pids)
@@ -574,7 +838,7 @@ cmd_up() {
   if [ "$server_set" = 1 ]; then
     await_direct_screen "$direct_marker" "$want_route" || exit 1
   else
-    assert_route "$want_route" || true
+    assert_route "$want_route" "$want_overlay" || true
   fi
 
   if [ -n "$stream" ]; then
@@ -698,6 +962,90 @@ cmd_selftest() {
     bad "direct waiter ignored process death"; return 1;
   }
   ok "tv-session direct-screen contract"
+
+  # ---- identity: `--guest` must resolve the real managed-user token or REFUSE, and must never
+  # fall through to the owner's — the 2026-09-10 TV session 5 defect (a warning printed, then the
+  # owner's token pushed anyway; a real playback wrote progress into the household Plex account,
+  # and clearing it needed /:/unscrobble, which also reset that item's viewCount).
+  #
+  # Stubs resolve_guest_token so this never shells out to python3/plex.tv. A Bash function
+  # definition is GLOBAL, not scoped to this one — cmd_selftest itself runs as a side effect of
+  # simply `source`ing this script with "selftest" as $1 (see the dispatch `case` at the bottom of
+  # the file), which is exactly what ci/test_tv_session.py's own harness does to reach OTHER
+  # functions in this file without touching the TV. Leaving the stub installed would then silently
+  # answer every LATER call to resolve_guest_token in that same sourced shell, in that test file's
+  # own process — so it is captured and restored around this block rather than left in place.
+  local identity_desc="" push_guest=0 push_owner=0
+  local guest=1 owner=0 no_token=0 server_set=0 server_slot=""
+  local _guest_stub_ok=1
+  local _real_resolve_guest_token; _real_resolve_guest_token=$(declare -f resolve_guest_token)
+  resolve_guest_token() {
+    if [ "$_guest_stub_ok" = 1 ]; then GUEST_TOKEN="stub-token"; GUEST_ERROR=""; return 0
+    else GUEST_TOKEN=""; GUEST_ERROR="stubbed failure"; return 1
+    fi
+  }
+
+  local _identity_rc=0
+  resolve_identity || { bad "resolve_identity failed on a resolvable guest"; _identity_rc=1; }
+  if [ "$_identity_rc" = 0 ]; then
+    { [ "$push_guest" = 1 ] && [ "$push_owner" = 0 ] && [ "$GUEST_TOKEN" = "stub-token" ]; } || {
+      bad "a resolvable guest did not resolve cleanly (push_guest=$push_guest push_owner=$push_owner)"
+      _identity_rc=1
+    }
+  fi
+
+  if [ "$_identity_rc" = 0 ]; then
+    _guest_stub_ok=0
+    if resolve_identity; then
+      bad "resolve_identity must FAIL when the guest cannot be resolved"; _identity_rc=1
+    elif ! { [ "$push_guest" = 0 ] && [ "$push_owner" = 0 ]; }; then
+      bad "an UNRESOLVABLE guest left push_guest=$push_guest push_owner=$push_owner -- this is the exact silent-owner-fallback defect"
+      _identity_rc=1
+    fi
+  fi
+
+  if [ "$_identity_rc" = 0 ]; then
+    guest=0; owner=1
+    resolve_identity
+    [ "$push_owner" = 1 ] || { bad "--owner did not resolve to the owner identity"; _identity_rc=1; }
+  fi
+
+  if [ "$_identity_rc" = 0 ]; then
+    guest=0; owner=0; no_token=0
+    resolve_identity
+    [ "$push_owner" = 1 ] || {
+      bad "the DEFAULT (neither --guest nor --owner) must resolve to the owner identity"; _identity_rc=1
+    }
+  fi
+
+  if [ "$_identity_rc" = 0 ]; then
+    guest=0; owner=0; no_token=1
+    resolve_identity
+    { [ "$push_guest" = 0 ] && [ "$push_owner" = 0 ]; } || {
+      bad "--no-token must inject no identity at all"; _identity_rc=1
+    }
+  fi
+
+  if [ "$_identity_rc" = 0 ]; then
+    _guest_stub_ok=1
+    local mock_dry
+    mock_dry=$(cmd_up --guest --mock --dry-run 2>&1) || _identity_rc=1
+    case "$mock_dry" in
+      *"identity: guest — synthetic mock PMS"*) ;;
+      *) bad "mock guest dry run did not select a synthetic identity"; _identity_rc=1 ;;
+    esac
+    if (cmd_up --mock --dry-run) >/dev/null 2>&1; then
+      bad "mock without guest must refuse"; _identity_rc=1
+    fi
+    if (FLAVOR=stable; cmd_up --guest --mock --dry-run) >/dev/null 2>&1; then
+      bad "mock on stable must refuse"; _identity_rc=1
+    fi
+  fi
+
+  # Restore the REAL resolve_guest_token unconditionally, whichever branch above set _identity_rc.
+  eval "$_real_resolve_guest_token"
+  [ "$_identity_rc" = 0 ] || return 1
+  ok "tv-session identity contract (guest resolves-or-refuses, never falls back to owner)"
 }
 
 cmd_status() {
@@ -805,15 +1153,180 @@ cmd_screen() {
   fi
 }
 
+# Mute/unmute the TELEVISION's own audio (see SOUND in the header), or just read the flag back.
+# `off`/`on` call setMuted and then RE-READ getVolume to confirm rather than trusting setMuted's
+# own returnValue -- the same discipline ensure_binary already uses for a deploy; `status` only
+# reads getVolume. This never restores sound on its own -- see the header for why.
+cmd_sound() {
+  local want="${1:-}" muted=""
+  case "$want" in
+    off) muted=true ;;
+    on)  muted=false ;;
+    status) ;;
+    *) echo "usage: tv-session.sh sound off|on|status" >&2; exit 2 ;;
+  esac
+  # Driving the set (off/on) takes the lock like `screen`; `status` still reaches the television
+  # over ssh, so it goes through the same advisory-only check `status`/`log` use elsewhere in this
+  # file rather than either refusing outright or pretending it never touched the set.
+  if [ "$want" = status ]; then advise_lock "tv-session sound status"
+  else require_lock "tv-session sound $want"; fi
+  ensure_awake || exit 1
+
+  if [ "$want" != status ]; then
+    # `luna-send` silently no-ops without a controlling TTY -- the house `script -qc` wrapper,
+    # same as every other luna call against this television.
+    local reply flat
+    reply=$(tv "script -qc \"luna-send -n 1 -f luna://com.webos.service.audio/setMuted '{\\\"muted\\\":$muted}'\" /dev/null" 2>/dev/null)
+    flat=$(printf '%s' "$reply" | tr -d '\r\n' | tr -s ' ')
+    if ! printf '%s' "$flat" | grep -q '"returnValue": *true'; then
+      bad "sound $want refused: $flat"; return 1
+    fi
+  fi
+
+  # The reply is pretty-printed multi-line JSON whose exact spacing is not ours to rely on, so
+  # match it with grep/sed on the collapsed text rather than a shell glob over embedded newlines --
+  # see cmd_screen's own note on the same trap.
+  local vreply vflat seen_muted vol
+  vreply=$(tv "script -qc \"luna-send -n 1 -f luna://com.webos.service.audio/getVolume '{}'\" /dev/null" 2>/dev/null)
+  vflat=$(printf '%s' "$vreply" | tr -d '\r\n' | tr -s ' ')
+  if ! printf '%s' "$vflat" | grep -q '"returnValue": *true'; then
+    bad "sound $want: getVolume refused: $vflat"; return 1
+  fi
+  # `-E` (extended regex) rather than a BRE `\(true\|false\)`: BSD sed (the macOS host this is
+  # developed on) does not support `\|` alternation inside a BRE group, so that spelling silently
+  # matched nothing at all -- caught by this file's own host test, never on the set.
+  seen_muted=$(printf '%s' "$vflat" | sed -En 's/.*"muted": *(true|false).*/\1/p')
+  vol=$(printf '%s' "$vflat" | sed -n 's/.*"volume": *\([0-9]*\).*/\1/p')
+  case "$want" in
+    off)
+      [ "$seen_muted" = true ] || {
+        bad "setMuted true did not stick -- getVolume reports muted=${seen_muted:-unknown}"; return 1
+      }
+      ok "sound off (muted, volume ${vol:-?})"
+      ;;
+    on)
+      [ "$seen_muted" = false ] || {
+        bad "setMuted false did not stick -- getVolume reports muted=${seen_muted:-unknown}"; return 1
+      }
+      ok "sound on (unmuted, volume ${vol:-?})"
+      ;;
+    status)
+      info "sound: muted=${seen_muted:-unknown} volume=${vol:-?}"
+      ;;
+  esac
+}
+
+# ------------------------------------------------------------ the WAN cut ----
+# "Offline mode" is a household whose LAN is up and whose uplink is down. Nothing on a desk can
+# take the router's uplink away for ONE device deterministically, so this does it on the set
+# itself, in two halves because the firmware only has one of the two tools (probed 2026-09-05):
+#   * v4: a netfilter chain on OUTPUT (iptables 1.6, filter table loaded) REJECTS every packet
+#     not bound for the LAN, plus every DNS query anywhere — the router would otherwise still
+#     resolve `plex.direct` through its own uplink, which is the half of "offline" that matters;
+#   * v6: there is NO ip6tables filter table (`ip6_tables` is not in the kernel's modules), so
+#     the cut is an `unreachable 2000::/3` route — more specific than either default route, so
+#     no metric contest with connman's or the RA's, and less specific than the on-link /64s, so
+#     LAN v6 keeps routing and neighbour discovery is untouched. DNS is v4 here (connman's
+#     resolv.conf names the router's v4 address), so the v4 chain already covers it.
+# REJECT / unreachable rather than DROP, so a dead destination fails at once instead of burning a
+# connect budget: the case graded is "the app reaches the LAN server", not "how long a timeout takes".
+#
+# FAIL-SAFE BY CONSTRUCTION. `off` writes the restore script ON THE SET and starts a watchdog
+# there (`nohup sh -c 'sleep TTL; sh restore'`), so a harness that dies, a Mac that sleeps and an
+# ssh that drops all end with the television back online without anybody's help. `on` runs the
+# same restore and kills the watchdog. Idempotent both ways. The marker is outside the
+# `plxnative-*` prefix, like the lock, so it neither suppresses the picker nor gets swept.
+#
+# Two things this cannot claim, stated so nobody grades them from it: a REJECT is not what a
+# real router does with its uplink down (that is usually silence), and the jail's resolver view
+# is the app's business — read `net: curl rc=6` / `nowan` lines in the app's OWN log, never this
+# script's status, to say what the app saw.
+WAN_MARK=/tmp/plx-wan-off
+WAN_RESTORE=/tmp/plx-wan-restore.sh
+cmd_wan() {
+  local want="${1:-}" ttl="${2:-900}"
+  case "$want" in off|on|status) ;; *) echo "usage: tv-session.sh wan off [TTL_SECONDS]|on|status" >&2; exit 2 ;; esac
+  case "$ttl" in ''|*[!0-9]*) echo "wan off: TTL must be seconds" >&2; exit 2 ;; esac
+  if [ "$want" = status ]; then advise_lock "tv-session wan status"; else require_lock "tv-session wan $want"; fi
+  ensure_awake || exit 1
+  case "$want" in
+    off)
+      # The restore script FIRST, so a watchdog can never exist without the thing it runs.
+      tv "cat > $WAN_RESTORE" <<'RESTORE'
+#!/bin/sh
+# written by tools/tv-session.sh wan off — puts the television's uplink back
+while iptables -D OUTPUT -j PLXWAN 2>/dev/null; do :; done
+iptables -F PLXWAN 2>/dev/null; iptables -X PLXWAN 2>/dev/null
+while ip -6 route del unreachable 2000::/3 2>/dev/null; do :; done
+[ -f /tmp/plx-wan-off.wd ] && kill "$(cat /tmp/plx-wan-off.wd)" 2>/dev/null
+rm -f /tmp/plx-wan-off /tmp/plx-wan-off.wd
+RESTORE
+      if ! tv "sh -s $ttl" <<'CUT'
+set -e
+ttl="$1"
+sh /tmp/plx-wan-restore.sh >/dev/null 2>&1 || true   # idempotent: start from a clean chain
+lan4=$(ip -4 route show dev eth0 scope link | awk '/\// {print $1; exit}')
+iptables -N PLXWAN
+iptables -A PLXWAN -p udp --dport 53 -j REJECT
+iptables -A PLXWAN -p tcp --dport 53 -j REJECT
+iptables -A PLXWAN -d 127.0.0.0/8 -j ACCEPT
+[ -n "$lan4" ] && iptables -A PLXWAN -d "$lan4" -j ACCEPT
+iptables -A PLXWAN -d 224.0.0.0/4 -j ACCEPT
+iptables -A PLXWAN -j REJECT --reject-with icmp-net-unreachable
+# The watchdog BEFORE the hook: if anything after this line fails, the set still comes back.
+date +%s > /tmp/plx-wan-off
+nohup sh -c "sleep $ttl; sh /tmp/plx-wan-restore.sh" >/dev/null 2>&1 &
+echo $! > /tmp/plx-wan-off.wd
+iptables -I OUTPUT -j PLXWAN
+ip -6 route add unreachable 2000::/3
+# …and prove it took, from the set's own tables, or fail this command.
+[ "$(iptables -S OUTPUT | grep -c PLXWAN)" = 1 ] || { echo "v4 chain not hooked" >&2; exit 3; }
+ip -6 route show | grep -q '^unreachable 2000::/3' || { echo "v6 route not added" >&2; exit 3; }
+echo "lan4=$lan4 ttl=$ttl"
+CUT
+      then
+        bad "WAN cut FAILED on the television — restoring whatever half took"
+        tv "sh $WAN_RESTORE" >/dev/null 2>&1 || true
+        exit 1
+      fi
+      ok "WAN cut on the television (LAN + loopback open, DNS refused, public v6 unreachable); auto-restores in ${ttl}s"
+      cmd_wan status
+      ;;
+    on)
+      tv "[ -f $WAN_RESTORE ] && sh $WAN_RESTORE; while iptables -D OUTPUT -j PLXWAN 2>/dev/null; do :; done; iptables -F PLXWAN 2>/dev/null; iptables -X PLXWAN 2>/dev/null; while ip -6 route del unreachable 2000::/3 2>/dev/null; do :; done; rm -f $WAN_MARK $WAN_MARK.wd; true"
+      ok "WAN restored"
+      cmd_wan status
+      ;;
+    status)
+      local chain since pms
+      chain=$(tvq "iptables -S OUTPUT 2>/dev/null | grep -c PLXWAN; ip -6 route show 2>/dev/null | grep -c '^unreachable 2000::/3'" | tr '\n' '/')
+      since=$(tvq "cat $WAN_MARK 2>/dev/null")
+      if [ -n "$since" ]; then
+        info "WAN: CUT since epoch $since (v4 chain / v6 unreachable route armed: ${chain%/}); watchdog pid $(tvq "cat $WAN_MARK.wd 2>/dev/null")"
+      else
+        info "WAN: open (v4 chain / v6 unreachable route armed: ${chain%/})"
+      fi
+      # Measured from the SET, which is the only place the answer is about: the PMS on the Mac
+      # over the LAN, and a public name through the router's resolver. The PMS host comes from
+      # the gitignored config, when this checkout has one; a lane without it skips that line.
+      pms=${PMS_HOST:-$(sed -n 's/.*PMS_HOST *"\([^"]*\)".*/\1/p' "$REPO/src/config.local.h" 2>/dev/null)}
+      [ -n "$pms" ] && info "from the TV: LAN PMS /identity -> $(tvq "wget -q -T 5 -O - http://$pms:32400/identity >/dev/null 2>&1 && echo ok || echo FAIL")"
+      info "from the TV: resolve plex.tv -> $(tvq "nslookup plex.tv >/dev/null 2>&1 && echo ok || echo FAIL")"
+      ;;
+  esac
+}
+
 case "${1:-}" in
   selftest) cmd_selftest ;;
+  wan)    shift; cmd_wan "$@" ;;
   up)     shift; cmd_up "$@" ;;
   screen) shift; cmd_screen "$@" ;;
+  sound)  shift; cmd_sound "$@" ;;
   status) shift; cmd_status ;;
   key)    shift; cmd_key "$@" ;;
   click)  shift; cmd_click "$@" ;;
   shot)   shift; cmd_shot "$@" ;;
   log)    shift; cmd_log "$@" ;;
   down)   shift; cmd_down ;;
-  *) sed -n '3,38p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '3,55p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

@@ -1,16 +1,19 @@
 name: Release
 
 # Publishes the .ipk and the webosbrew manifest.json to a GitHub Release, so that
-# `releases/latest/download/com.beb.plxnative.manifest.json` is a stable URL the Homebrew Channel
+# `releases/latest/download/com.butaca.manifest.json` is a stable URL the Homebrew Channel
 # package YAML can point at forever. The package YAML is submitted ONCE; every later version flows
 # through this workflow with no further PR to webosbrew/apps-repo.
 #
-# TWO TRAPS ENCODED BELOW, both of which fail silently rather than loudly:
-#  1. gen-manifest writes a BARE FILENAME into ipkUrl, resolved relative to the manifest URL. The
-#     .ipk and the manifest must therefore be assets of the SAME release.
+# TWO TRAPS THIS WORKFLOW GUARDS AGAINST, both of which fail silently rather than loudly:
+#  1. gen-manifest writes a BARE FILENAME into ipkUrl, resolved relative to the manifest URL. That
+#     step now lives in build-package.yml's "Generate the Homebrew Channel manifest" step (run from
+#     the `build` job below, which calls it) — but the constraint is still this workflow's to keep:
+#     the .ipk and the manifest must be assets of the SAME release, which is why `publish` uploads
+#     them together from one artifact.
 #  2. A draft or prerelease is excluded from `releases/latest`, so publishing one leaves users
 #     resolving the PREVIOUS release's manifest — an update that silently never arrives.
-#     Hence: no draft, no prerelease.
+#     Hence: no draft, no prerelease (enforced below, in `publish`).
 #
 # Separate from ci.yml because this is the only workflow that needs `contents: write`. Merging them
 # would put a write token on every pull-request run.
@@ -298,197 +301,31 @@ jobs:
 
   build:
     name: build + verify
-    runs-on: ubuntu-24.04-arm
     needs: [legal-gate, guard]
     # See legal-gate: explicit, or the tag-push path skips this silently.
     if: always() && needs.guard.result == 'success' && needs['legal-gate'].result == 'success'
-    outputs:
-      ipk: ${{ steps.name.outputs.ipk }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ needs.guard.outputs.tag }}
-
-      - name: Install pinned nightly Rust
-        # Pinned by DATE for releases. `-Z build-std` recompiles std from source and is the most
-        # drift-sensitive thing this build does; a release should be reproducible from its tag,
-        # which an unpinned `nightly` cannot be. Bump deliberately, alongside a device test run.
-        run: |
-          rustup toolchain install "$RUST_NIGHTLY" --profile minimal --component rust-src
-          rustup run "$RUST_NIGHTLY" rustc --version
-        env:
-          RUST_NIGHTLY: ${{ vars.RUST_NIGHTLY || 'nightly-2026-07-02' }}
-
-      - id: ndk
-        uses: ./.github/actions/webos-ndk
-
-      - name: Build + package
-        # No src/config.local.h exists in a clean checkout, so src/app.h's __has_include falls back
-        # to the YOUR_PMS_HOST placeholder. That is what makes the CI-built binary the leak-free
-        # one by construction rather than by discipline — check-elf.sh asserts it below.
-        env:
-          WEBOS_SDK: ${{ steps.ndk.outputs.sdk-dir }}
-          RUST_NIGHTLY: ${{ vars.RUST_NIGHTLY || 'nightly-2026-07-02' }}
-          # Drops the `devtools` cargo feature — no on-screen counter in a public build.
-          RELEASE: "1"
-          # WHICH INSTALL. `FLAVOR ?= debug` in the Makefile — deliberately, so a developer's
-          # muscle-memory `make deploy` cannot overwrite the app users watch with — and CI is the
-          # one place that default is wrong. Without this the release job packages
-          # `com.beb.plxnative.debug`, `webosbrew-gen-manifest` writes that id INTO the manifest the
-          # Homebrew Channel resolves, and the sha256 cross-check below still passes because it
-          # compares the wrong artifact against its own manifest. It would finally die four jobs
-          # later on a missing `dist/ipk.sha256` (a flavoured package deliberately does not write
-          # that released asset name) — a loud failure naming a checksum rather than a flavour.
-          FLAVOR: stable
-          # DWARF, so the release can be symbolicated later. It must be set on EVERY invocation in
-          # this step and it must be the SAME invocation that cuts the .ipk: a debuginfo build and a
-          # plain one produce DIFFERENT BUILD IDs from identical sources (measured — see the
-          # Makefile's RUST_CFG comment), and the build id is the only thing that matches a
-          # separated .debug back to the binary a stranger's television crashed in. Two steps would
-          # hand us a .debug matching nothing that ever shipped.
-          SYMBOLS: "1"
-          # This fork IS the Jellyfin client: without the feature the whole backend compiles out
-          # and the published .ipk would boot as a Plex-only app (issue #17). RUST_TDIR follows it
-          # (target-release-jellyfin), which is also what local stable builds use.
-          JELLYFIN: "1"
-        run: |
-          make -j"$(nproc)"
-          make ipk symbols
-          # Prove the flags actually took, rather than trusting that they did: the Makefile records
-          # the configuration it built, and a stale/ignored RELEASE= is exactly the silent failure
-          # the parse-time stamp exists to prevent.
-          grep -q -- '--no-default-features' pkg/.build-config \
-            || { echo "::error::RELEASE=1 did not take — pkg/.build-config says [$(cat pkg/.build-config)]"; exit 1; }
-          # Same argument for SYMBOLS, and it needs its own check because the failure is silent in
-          # the other direction: `make symbols` REFUSES without the flag, but a stamp that lost it
-          # between the two invocations would relink and hand the upload a .debug for a binary
-          # nobody shipped.
-          grep -q '+symbols' pkg/.build-config \
-            || { echo "::error::SYMBOLS=1 did not take — pkg/.build-config says [$(cat pkg/.build-config)]"; exit 1; }
-          test -s pkg/plxnative.debug \
-            || { echo "::error::pkg/plxnative.debug is missing or empty"; exit 1; }
-          # The build id is what pairs the two. Assert it here rather than trusting whatever
-          # later consumes the .debug: a symbol server happily accepts one whose id matches
-          # nothing that shipped.
-          idof() { readelf -n "$1" | awk '/Build ID/{print $3}'; }
-          [ "$(idof pkg/plxnative)" = "$(idof pkg/plxnative.debug)" ] \
-            || { echo "::error::build id mismatch between the shipped binary and its .debug"; exit 1; }
-          echo "build-id $(idof pkg/plxnative)"
-          # This fork carries no telemetry endpoints: the audit's "telemetry endpoints" row
-          # witnesses that no Sentry DSN or PostHog key appears in the shipped bytes.
-          # ...and carry the stamp to the publish job under a NON-HIDDEN name: upload-artifact
-          # silently drops dotfiles, so `pkg/.build-config` would never arrive and the audit would
-          # lose the row recording which configuration was built.
-          cp pkg/.build-config pkg/build-config.txt
-          # ...and the same for the flavour, on the artifact's own name. `check-package.py` cannot
-          # catch this one: it derives the packaged id from the stage and SKIPs every stable-only
-          # assertion when that id is not stable, so a wrong-flavour package exits 0 there.
-          ls pkg/com.beb.plxnative_*_arm.ipk >/dev/null 2>&1 \
-            || { echo "::error::packaged the wrong flavour — pkg/ holds $(ls pkg/*.ipk 2>&1)"; exit 1; }
-
-      - name: ELF + packaging assertions
-        # REQUIRE_PACKAGE: this step runs AFTER `make ipk`, so "nothing staged" here means the build
-        # produced no package and must fail. The pre-build callers (`prepare`, `guard`) deliberately
-        # do not set it — they exist to grade the version files before anything is built.
-        env:
-          WEBOS_SDK: ${{ steps.ndk.outputs.sdk-dir }}
-          REQUIRE_PACKAGE: "1"
-        run: |
-          ./ci/check-elf.sh
-          python3 ci/check-package.py
-          # A gate row is appended only AFTER the gate passed — `run:` is `bash -e`, so a failure
-          # never reaches these lines. The audit therefore lists gates that really ran, which is
-          # the fact v0.2.1 could not produce: it was hand-published and every gate was skipped.
-          { echo "| \`ci/check-elf.sh\` — ELF identity, CP15 barriers, DT_NEEDED | pass |"
-            echo "| \`ci/check-package.py\` — versions, ar layout, descriptors, payload, notes | pass |"
-          } >> pkg/gates.md
-
-      - name: webosbrew tooling
-        run: |
-          set -euo pipefail
-          TAG=v20260731-e1bb0c0
-          declare -A SHA256=(
-            [fw-symbols]=639721a0c2248b13e5984930b53729cc201f022725954086aca35e2ccae515b5
-            [ipk-verify]=2868b4b2efc097939ab11117c9266d796f0326ee48c90f80070766814fb174d9
-            [gen-manifest]=46a023cdec6f5aa07316ef4a0548c30897b349c4843596c41c70a23f8d2792e9
-          )
-          for p in fw-symbols ipk-verify gen-manifest; do
-            file="webosbrew-toolbox-${p}_0.4.0-1_arm64.deb"
-            curl -fsSLo "$file" "https://github.com/webosbrew/dev-toolbox-cli/releases/download/${TAG}/$file"
-            echo "${SHA256[$p]}  $file" | sha256sum -c -
-          done
-          sudo apt-get install -y ./webosbrew-toolbox-*.deb
-
-      - name: Compatibility check (gating)
-        # Captured to a FILE as well as to the summary, because `ci/gen-release-audit.py` embeds
-        # this verbatim in the audit's static-compatibility section. The release note carries one
-        # line summarising it; the matrix is fourteen rows and belongs in the audit, derived from
-        # the tool rather than retyped — `docs/release-notes/README.md` bans retyping it and this
-        # is what makes that possible.
-        run: |
-          webosbrew-ipk-verify --details --format markdown \
-            --fw-releases '>=4.0' pkg/*.ipk | tee pkg/ipk-verify.md | tee -a "$GITHUB_STEP_SUMMARY"
-
-      - id: name
-        run: echo "ipk=$(ls pkg/*.ipk)" >> "$GITHUB_OUTPUT"
-
-      - name: Generate the Homebrew Channel manifest
-        # -r false: the app needs no root. Device-proven — it runs jailed as uid 6910 under LG's
-        # stock jail_native_devmode profile. See docs/distribution.md §3.5.
-        run: |
-          # icon160.png, NOT largeIcon.png: 130x130 is LG's launcher size, while the channel
-          # listing wants 160 (and 320 for the detail icon) — `tools/mkicons.py` cuts all four from
-          # one master for exactly this reason. The URL must return 200 or webosbrew's own
-          # `repogen.lintpkg` rejects the submission, which means the REPO MUST BE PUBLIC and the
-          # icon must be committed on the default branch before the first release.
-          webosbrew-gen-manifest \
-            -p "${{ steps.name.outputs.ipk }}" \
-            -i "https://raw.githubusercontent.com/${{ github.repository }}/main/pkg/icon160.png" \
-            -l "https://github.com/${{ github.repository }}" \
-            -r false \
-            -o pkg/com.beb.plxnative.manifest.json
-          cat pkg/com.beb.plxnative.manifest.json
-
-      - name: The manifest hash must match the artifact
-        # The sha256 is enforced ON THE DEVICE at install time and by nothing in CI, so a mismatch
-        # here is invisible until it breaks every user's install. Assert it while we still can.
-        run: |
-          set -euo pipefail
-          want=$(python3 -c "import json;print(json.load(open('pkg/com.beb.plxnative.manifest.json'))['ipkHash']['sha256'])")
-          have=$(sha256sum "${{ steps.name.outputs.ipk }}" | cut -d' ' -f1)
-          [ "$want" = "$have" ] || { echo "::error::manifest sha256 $want != artifact $have"; exit 1; }
-          echo "ipk sha256 $have" >> "$GITHUB_STEP_SUMMARY"
-          echo "| the Homebrew Channel manifest's sha256 matches the artifact | pass |" >> pkg/gates.md
-
-      - name: LGPL corresponding source for the bundled FFmpeg
-        # NOT optional and not paperwork. The package ships four FFmpeg shared libraries, so
-        # LGPL-2.1's source obligation is OURS rather than the television's, and
-        # THIRD-PARTY-NOTICES.md §1.1 states in writing that the exact tarball and the complete
-        # configure invocation accompany every release. A release without these contradicts the
-        # notice that ships inside it.
-        #
-        # The tarball is the pristine upstream one build-ffmpeg.sh already downloaded and verified
-        # against a pinned sha256 — no patches are applied, so this IS the corresponding source.
-        run: |
-          set -euo pipefail
-          tarball=$(ls vendor/ffmpeg-build/ffmpeg-*.tar.xz)
-          cp "$tarball" pkg/
-          cp ci/build-ffmpeg.sh pkg/
-          echo "LGPL source: $(basename "$tarball") + build-ffmpeg.sh" >> "$GITHUB_STEP_SUMMARY"
-          echo "| LGPL corresponding source attached ($(basename "$tarball") + build-ffmpeg.sh) | pass |" >> pkg/gates.md
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: release-assets
-          path: |
-            pkg/*.ipk
-            pkg/*.manifest.json
-            pkg/ipk.sha256
-            pkg/ffmpeg-*.tar.xz
-            pkg/build-ffmpeg.sh
-            pkg/ipk-verify.md
-            pkg/gates.md
-            pkg/build-config.txt
+    # The ARM build+verify pipeline itself lives in build-package.yml — shared with nightly.yml so
+    # the two stop being hand-kept copies of one job. This job only carries the release-specific
+    # decisions: which ref, which flavour, which optional steps.
+    uses: ./.github/workflows/build-package.yml
+    with:
+      ref: ${{ needs.guard.outputs.tag }}
+      # WHICH INSTALL. `FLAVOR ?= debug` in the Makefile — deliberately, so a developer's
+      # muscle-memory `make deploy` cannot overwrite the app users watch with — and CI is the one
+      # place that default is wrong. Without this the release job packages `com.butaca.debug`,
+      # `webosbrew-gen-manifest` writes that id INTO the manifest the Homebrew Channel resolves, and
+      # the sha256 cross-check still passes because it compares the wrong artifact against its own
+      # manifest. It would finally die four jobs later on a missing `dist/ipk.sha256` (a flavoured
+      # package deliberately does not write that released asset name) — a loud failure naming a
+      # checksum rather than a flavour.
+      flavor: stable
+      artifact: release-assets
+      homebrew-manifest: true
+      source-asset: true
+      # The per-binary firmware-database check nightly has carried since #137; a release ships
+      # plxnative-storage too (its 8 DT_NEEDED first went stable in 0.7.0), so it owes the same
+      # gate webosbrew-ipk-verify's per-package verdict does not replace.
+      fwcompat: true
 
   publish:
     name: publish release
@@ -526,11 +363,7 @@ jobs:
       # ONE value in it cannot exist in the committed file — the artifact's sha256 — so the note
       # carries a sentinel and it is filled HERE, from the artifact itself. That is the point: a
       # hash nobody types cannot be the wrong hash, which is the class of defect the release-note
-      # standard exists to end. Everything else in the body is the reviewed text, byte for byte —
-      # EXCEPT the note's own H1 (`# vX.Y.Z — <theme>`), which becomes the release's NAME and is
-      # stripped out of the body rather than repeated in it. GitHub renders a release's name ABOVE
-      # its body, so publishing the H1 as body text too doubled the title on the release page —
-      # v0.6.0 and v0.6.1 were both retitled by hand after the fact to fix exactly this.
+      # standard exists to end. Everything else in the body is the reviewed text, byte for byte.
       #
       # The other four sentinels (`__COMMIT__`, `__RUN_URL__`, `__IPK_SIZE__`, `__INSTALLED_SIZE__`)
       # are still substituted for a note that uses them, so every published note stays reproducible
@@ -551,8 +384,8 @@ jobs:
           # reader, they move with every build (the bundled FFmpeg's size depends on the build), and
           # the standard's §1.9 defect was exactly a size somebody typed. Read from the manifest,
           # which is the artifact the note tells the reader they came from.
-          size=$(python3 -c "import json;print(json.load(open('dist/com.beb.plxnative.manifest.json'))['ipkSize'])")
-          inst=$(python3 -c "import json;print(json.load(open('dist/com.beb.plxnative.manifest.json'))['installedSize'])")
+          size=$(python3 -c "import json;print(json.load(open('dist/com.butaca.manifest.json'))['ipkSize'])")
+          inst=$(python3 -c "import json;print(json.load(open('dist/com.butaca.manifest.json'))['installedSize'])")
           # ONE sentinel is mandatory: the artifact's sha256, which is the only tamper check a
           # user of an unsigned binary has. A note that lost it would publish a body with no hash
           # at all, and `verify-published.sh` would only catch that once the release was public.
@@ -561,27 +394,26 @@ jobs:
           # generated from the artifact rather than written with sentinels.
           grep -q __IPK_SHA256__ "$note" \
             || { echo "::error::$note does not carry the __IPK_SHA256__ sentinel"; exit 1; }
-
-          # The note's first line MUST be the standard's H1, naming THIS tag — that is what makes
-          # it safe to promote to the release name and delete from the body. Anything else means
-          # either the standard was not followed or the note belongs to a different version than
-          # the one being published.
-          first_line=$(head -n1 "$note")
-          case "$first_line" in
-            "# $tag — "*) ;;
-            *)
-              echo "::error::$note's first line is '$first_line', expected '# $tag — <theme>'"
-              exit 1
-              ;;
-          esac
-          title="${first_line#\# }"
-          echo "title=$title" >> "$GITHUB_OUTPUT"
-
-          # Substitute sentinels, then drop the H1 and the blank line(s) immediately after it —
-          # everything else is the reviewed text, byte for byte.
           sed -e "s|__IPK_SHA256__|$sha|g" -e "s|__COMMIT__|$commit|g" -e "s|__RUN_URL__|$run|g" \
               -e "s|__IPK_SIZE__|$size|g" -e "s|__INSTALLED_SIZE__|$inst|g" \
-              "$note" | tail -n +2 | sed '/./,$!d' > dist/body.md
+              "$note" > dist/body-full.md
+          # GitHub already renders a release's own `name` as its own big header next to the tag —
+          # see the release page itself, not this file. The note's `# vX.Y.Z — <theme>` line is
+          # therefore the RELEASE'S NAME, not also the body's first line: publishing it as both
+          # put "v0.6.0" on the page twice, once as GitHub's own title and once as the body's H1
+          # repeating it. The H1 stays in the committed note (docs/release-notes/*.md keeps reading
+          # naturally as a standalone file, and this is where a human writing the next one edits
+          # it) and is extracted here, not duplicated into what gets posted as the body.
+          title_line="$(head -1 dist/body-full.md)"
+          # Anchored to THIS tag specifically, not just "starts with a #": a note copied from the
+          # template or from the previous release with its version line left unedited would
+          # otherwise publish under a stale display name — cosmetic before this change (one wrong
+          # string buried in the body), now the release's own canonical title.
+          echo "$title_line" | grep -qE "^# ${tag} — .+" \
+            || { echo "::error::$note's first line ('$title_line') must read exactly '# $tag — <theme>' — it becomes the release title"; exit 1; }
+          title="$(echo "$title_line" | sed -e 's/^# *//')"
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+          tail -n +2 dist/body-full.md | sed '/./,$!d' > dist/body.md
           echo "title: $title" >> "$GITHUB_STEP_SUMMARY"
           echo "body: $(wc -l < dist/body.md) lines, sha $sha" >> "$GITHUB_STEP_SUMMARY"
       # THE AUDIT'S EVIDENCE HALF, derived from the artifact that is about to be published.
@@ -625,10 +457,12 @@ jobs:
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ needs.guard.outputs.tag }}
-          # the note's own H1, stripped from the body above — GitHub renders the name ABOVE the
-          # body, so publishing both doubled the title.
+          # The note's own `# vX.Y.Z — theme` line, not the bare tag — GitHub already shows this
+          # as the release's own header, so leaving `name` unset (which defaults it to the tag)
+          # made the body's H1 repeat it right underneath. Extracted in the render step above.
           name: ${{ steps.render.outputs.title }}
-          # the committed note, with GitHub's compare-link tail appended after it
+          # the committed note (its H1 stripped — see the render step), with GitHub's
+          # compare-link tail appended after it
           body_path: dist/body.md
           append_body: true
           # NEITHER of these may become true: both exclude the release from `releases/latest`,
@@ -643,6 +477,8 @@ jobs:
             dist/ipk.sha256
             dist/ffmpeg-*.tar.xz
             dist/build-ffmpeg.sh
+            dist/plxnative-source-*.tar.gz*
+            dist/source-rebuild.json
       # Re-derive every published claim FROM the published artifacts. Everything assertable
       # before publishing is in ci/check-package.py; this is the half that needs a live release —
       # the hash agreeing in four places, `shasum -c` working where a user actually stands, the

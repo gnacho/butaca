@@ -1,5 +1,5 @@
 /* PlxNative — an unofficial native Plex client for LG webOS.
- * Copyright © 2026 Gleb Linnik. Licensed under the MIT Licence; see LICENSE at the repository root.
+ * Copyright © 2026 Gleb Linnik. Licensed under GPL-3.0-or-later; see LICENSE at the repository root.
  *
  * crashtrace.c — the fatal-signal tracer's I/O half: the descriptors, `write(2)`, the chunked read
  * of `/proc/self/maps`, and the handler itself. `src/crashfmt.h` holds the pure half (formatting
@@ -284,6 +284,26 @@ static void crash_handler(int sig, siginfo_t *si, void *uc) {
     sigprocmask(SIG_UNBLOCK, &one, NULL);
     raise(sig);
     _exit(128 + sig);   /* genuinely unreachable now — see above for when it was not */
+}
+
+/** The image marker main.c writes into the append-only crash log at launch: the resolved
+ * `/proc/self/exe`, so a record written after a deploy still names the binary that wrote it. This
+ * fork has no Sentry handler to provide it (the symbol upstream lived in that handler's TU); the
+ * local crash log keeps the contract with the one fact it actually needs. Called before the
+ * handler is armed, so plain syscalls are fine here.
+ */
+void plx_crash_write_image_marker(int fd) {
+    if (fd < 0) return;
+    char path[256];
+    ssize_t n = readlink("/proc/self/exe", path, sizeof(path) - 1);
+    if (n <= 0) return;
+    path[n] = 0;
+    const char pre[] = "bin: ";
+    // warn_unused_result does not honour the (void) cast; a named sink does.
+    ssize_t ignored = write(fd, pre, sizeof(pre) - 1);
+    ignored += write(fd, path, (size_t)n);
+    ignored += write(fd, "\n", 1);
+    (void)ignored;
 }
 
 void plx_crash_install(int ev_fd, int cr_fd) {

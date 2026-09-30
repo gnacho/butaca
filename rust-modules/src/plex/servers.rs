@@ -23,7 +23,7 @@
 //!
 //! ## Why an atomic pointer table and not an `RwLock<Vec<Arc<Client>>>`
 //!
-//! `client()` is a HOT path: `posters::poster_key` calls it three times per key, for every
+//! `client()` is a HOT path: `app::adapters::poster::built_key` calls it three times per key, for every
 //! visible art tile, every frame (~25–40 tiles × 60 fps). An `RwLock` there buys nothing and
 //! costs an atomic RMW pair per call plus a fairness stall whenever a login writes; an `Arc`
 //! clone would be a refcount bump per call on top of changing every call site's type. So a read
@@ -63,10 +63,39 @@
 //! inside one process.
 
 use super::client::Client;
-use super::origin::Origin;
-use super::probe::Outcome;
+use super::origin::{CredentialPolicy, Origin, ResolvePin};
+use super::probe::{Location, Outcome};
+use super::IpVersion;
 use std::sync::atomic::{AtomicPtr, AtomicU32, AtomicU8, AtomicUsize, Ordering};
 use std::sync::Mutex;
+
+/// #95 step 8 / A1: connection facts to apply to a `Client` AT REGISTRATION, atomically with
+/// whichever [`register_lazy`] branch the write lands in — never as a separate post-hoc
+/// `Client::set_connection`/`set_link` call a caller can forget, and never something a re-point
+/// (a fresh `Client`) can lose between the write and the caller's next line.
+///
+/// **`None` in either field means LEAVE UNCHANGED, never "set unknown".** A same-origin retoken
+/// (`register_lazy`'s in-place branch) must not blank a tier or IP a previous activation already
+/// proved just because this particular caller doesn't know it — `abr::bootstrap` (`probe.rs:187-
+/// 189`) reads the tier on every resolve, and a naive unconditional `LINK_UNKNOWN` write here
+/// would regress it on every plain retoken. A re-point starts the fresh `Client` at
+/// `LINK_UNKNOWN`/`IP_UNKNOWN` regardless (`Client::new`), so `None` there is simply "still
+/// unknown" — the same value it would have been with no `Connection` at all.
+///
+/// Not `plex::account::Connection` (the plex.tv resources API shape `Connection.uri`/`.address`
+/// this module's own doc talks about) — deliberately a different, narrower type so the registry
+/// write never has to reach into that wire struct.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct ConnectionFacts {
+    pub tier: Option<Location>,
+    pub ip: Option<IpVersion>,
+}
+
+impl ConnectionFacts {
+    pub(crate) fn new(tier: Option<Location>, ip: Option<IpVersion>) -> Self {
+        Self { tier, ip }
+    }
+}
 
 /// Slot ceiling. A Plex account's server list is a handful (own + shared); past this, a
 /// registration is refused and logged rather than growing a table the hot path indexes.
@@ -81,7 +110,7 @@ pub const MAX_SERVERS: usize = 16;
 
 /// A registry slot — a small `Copy` handle that names a server without borrowing it. Stable for
 /// the life of the process, so it can sit in UI state, a route, or a queued job.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub struct ServerId(u16);
 
 impl ServerId {
@@ -161,7 +190,82 @@ pub struct ServerFacts {
     /// through unedited. Not derivable from an empty handle in either direction: a share whose
     /// `sourceTitle` plex.tv did not send is still a share, and a Plex Home managed user does not
     /// "own" the household server they watch every day.
+    ///
+    /// **It is the WIRE fact and not the household verdict**, which is why it sits beside
+    /// [`ServerFacts::home`] and [`ServerFacts::owner_id`] rather than being replaced by one:
+    /// every consumer that legitimately wants "does this account own it" keeps reading this, and
+    /// a consumer asking "is this our household's" asks [`is_household`] with all three.
     pub owned: bool,
+    /// plex.tv's `home` on the resource, carried through unedited — see [`Grant::home`]. Evidence
+    /// for [`is_household`], never a verdict on its own.
+    pub home: bool,
+    /// plex.tv's `ownerId` — the account that owns the server, `0` on our own and `0` when
+    /// plex.tv sent none. Evidence for [`is_household`], compared against the Home roster.
+    pub owner_id: i64,
+}
+
+/// **The grant evidence a describer publishes**, as opposed to the CREDIT it publishes beside it.
+///
+/// [`Grant`] is the borrowed wire row, alive only as long as the `/api/v2/resources` response it
+/// points into; this is its durable, owned reduction — the three fields [`is_household`] reads,
+/// with the handle deliberately left out because a describer's handle is already a *credit*
+/// ([`owner_credit`]'s answer) and not the raw `sourceTitle` the rule takes.
+///
+/// It exists so the registry cannot publish a partial grant. `describe` used to take `owned: bool`
+/// alone, and everything downstream that asked "is this our household's server?" had nothing else
+/// to reason with — so a Plex Home managed profile's own household server read as a stranger's on
+/// every surface but the credit. Carrying all three together, in one value, is what makes that
+/// unforgettable at a call site rather than a field somebody remembers to set.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct GrantEvidence {
+    /// plex.tv's `owned` — see [`ServerFacts::owned`].
+    pub owned: bool,
+    /// plex.tv's `home` — see [`Grant::home`].
+    pub home: bool,
+    /// plex.tv's `ownerId` — see [`Grant::owner_id`].
+    pub owner_id: i64,
+}
+
+impl GrantEvidence {
+    /// The evidence half of a wire row, dropping only the handle.
+    pub fn of(g: Grant<'_>) -> Self {
+        Self { owned: g.owned, home: g.home, owner_id: g.owner_id }
+    }
+
+    /// What this carried evidence says as a [`Grant`], for [`is_household`]. `source_title` is
+    /// empty because the rule does not read it — [`owner_credit`] does, and a credit has already
+    /// been decided by the time evidence is carried.
+    pub fn grant(&self) -> Grant<'static> {
+        Grant { owned: self.owned, home: self.home, owner_id: self.owner_id, source_title: "" }
+    }
+
+    /// Our own server: owned, with nobody else's id on it.
+    pub fn ours() -> Self {
+        Self { owned: true, ..Self::default() }
+    }
+
+    /// A grant this account does not own and about which plex.tv volunteered no household
+    /// evidence — the shape a legacy record deserializes to, and what a test means by "a share".
+    pub fn outside() -> Self {
+        Self::default()
+    }
+
+    /// **The household's own server as a member who does not own it sees it** — a Plex Home
+    /// managed or Guest profile looking at the family machine. `owned:false`, because plex.tv says
+    /// so; `home:true`, because the grant reaches this account through its own Plex Home; and
+    /// `owner_id` the admin's, which is the signal [`is_household`] actually decides on.
+    ///
+    /// Pass `0` for a caller with no roster to name one from. `home` then carries the case alone —
+    /// which is [`is_household`]'s un-enumerable-roster arm, not a weaker version of the same
+    /// answer; read that function's doc before relying on it.
+    ///
+    /// It exists because [`GrantEvidence::outside`] is a CLAIM, and writing it where a household
+    /// server was meant made an assertion pass for the wrong reason: before this type, `false`
+    /// only meant "not owned", which is true of the household's server too, so the two cases were
+    /// spelled identically and a fixture could not say which it meant.
+    pub fn household(owner_id: i64) -> Self {
+        Self { owned: false, home: true, owner_id }
+    }
 }
 
 /// One `/api/v2/resources` row reduced to **whose server it is** — the four fields the credit rule
@@ -281,6 +385,15 @@ static COUNT: AtomicUsize = AtomicUsize::new(0);
 /// can remove one share without retiring every slot number above it; inactive clients stay leaked
 /// but resolve to nothing, and their token is blanked before this bit is cleared.
 static ACTIVE: AtomicU32 = AtomicU32::new(0);
+/// Which active roster slots may carry their credential under the policy that admitted their
+/// current origin. An ineligible stored origin remains ACTIVE as recovery metadata (so Sources
+/// and the endpoint rediscovery loop retain it), but never becomes CURRENT and its `Client`
+/// carries an empty token. A later eligible re-point flips this bit in the same registry write.
+static CREDENTIAL_ELIGIBLE: AtomicU32 = AtomicU32::new(0);
+/// The subset of [`CREDENTIAL_ELIGIBLE`] whose eligibility rests on a plaintext grant
+/// (`super::grant`) rather than the policy alone — the slots [`regrade_credentials`] re-asks when
+/// a grant ends. Written with the eligibility bit, in the same registry write.
+static ON_GRANT: AtomicU32 = AtomicU32::new(0);
 /// Monotone epoch of the active roster's identity. It moves when a slot appears/disappears or is
 /// re-pointed, even when the active COUNT stays the same, so cached fan-out stores can distinguish
 /// `{0,1}` from `{0,2}` and can discard work aimed at a superseded origin.
@@ -324,6 +437,7 @@ fn probe_code(outcome: Outcome) -> u8 {
         Outcome::Unauthorized => 2,
         Outcome::WrongServer => 3,
         Outcome::Unreachable => 4,
+        Outcome::InsecureOnly => 5,
     }
 }
 
@@ -333,6 +447,7 @@ fn probe_of_code(code: u8) -> Option<Outcome> {
         2 => Some(Outcome::Unauthorized),
         3 => Some(Outcome::WrongServer),
         4 => Some(Outcome::Unreachable),
+        5 => Some(Outcome::InsecureOnly),
         _ => None,
     }
 }
@@ -374,9 +489,16 @@ pub fn current() -> ServerId {
 }
 
 /// Point `client()` at another registered server. `false` (and no change) for an id that names
-/// no client — retargeting to nothing would turn every `client()` into a panic.
+/// no client or only recovery metadata whose origin cannot carry a credential in this build —
+/// retargeting to either would make the hot-path `client()` answer unusable connection state.
 pub fn set_current(id: ServerId) -> bool {
-    let ok = client_for(id).is_some();
+    // `CURRENT` is a crate global; a test that flips it outside `crate::testlock::serial()` lands
+    // in the middle of some other module's test — see `lib.rs::testlock`.
+    #[cfg(test)]
+    crate::testlock::assert_held("the plex server registry (set_current)");
+    let ok = id.index().is_some_and(|i| {
+        client_for(id).is_some() && CREDENTIAL_ELIGIBLE.load(Ordering::Acquire) & (1u32 << i) != 0
+    });
     if ok {
         // Release, pairing with `current()`'s Acquire: publishes the slot store that
         // `client_for` above just proved visible TO US, so it is visible to every later reader.
@@ -385,8 +507,9 @@ pub fn set_current(id: ServerId) -> bool {
     ok
 }
 
-/// The CURRENT server's `Client`. Panics if nothing has been installed — unchanged contract
-/// (and unchanged message) from the singleton this replaced.
+/// The CURRENT server's `Client`. Panics unless at least one credential-eligible server has been
+/// installed and selected; recovery-only origins deliberately do not satisfy that precondition.
+/// The panic message is retained for compatibility with the singleton this replaced.
 pub fn client() -> &'static Client {
     client_opt().expect("plex::install not called")
 }
@@ -418,8 +541,8 @@ pub fn roster_gen() -> u32 {
 /// **Not every published field moves it**, and the exception is deliberate:
 /// [`commit_reachability_if_current`] can merge a fresher machine NAME — the server naming itself,
 /// on a path that runs per request — without bumping this. A cache that needs to follow that has
-/// the facts POINTER to key on (`ui::search::field::Key` does exactly that, and it is how a name
-/// landing reaches the Search scope line); making a per-request commit move a counter that
+/// the facts POINTER to key on (`search::scope::Key`'s own `facts` fingerprint does exactly that,
+/// and it is how a name landing reaches the Search scope line); making a per-request commit move a counter that
 /// `pms::sync_roster` rebuilds Home's whole source table on would be a poor trade for a field Home
 /// does not draw.
 pub fn facts_gen() -> u32 {
@@ -439,6 +562,14 @@ pub fn ids() -> impl Iterator<Item = ServerId> {
     (FLOOR.load(Ordering::Acquire).min(hi)..hi)
         .filter(move |&i| active & (1u32 << i) != 0)
         .map(|i| ServerId(i as u16))
+}
+
+/// The active slot `machine_id` is registered in, if any.
+pub(crate) fn id_of_machine(machine_id: &str) -> Option<ServerId> {
+    if machine_id.is_empty() {
+        return None;
+    }
+    ids().find(|&id| client_for(id).is_some_and(|c| c.machine_id() == machine_id))
 }
 
 /// What the roster says about one server, `None` until something has described it — and `None`
@@ -499,10 +630,16 @@ pub fn commit_reachability_if_current<R>(
     let i = current_lifecycle_index(id, expected, token_gen)?;
     let outcome = if ok {
         Outcome::Reachable
-    } else if probe_of_code(PROBES[i].load(Ordering::Acquire)) == Some(Outcome::Unauthorized) {
-        Outcome::Unauthorized
     } else {
-        Outcome::Unreachable
+        // A generic request cannot distinguish HTTP status from transport/parse failure, so it
+        // must not overwrite the more specific identity-probe verdict with a plain Unreachable —
+        // true of Unauthorized already, and equally true of InsecureOnly (issue #95): the server
+        // IS answering, just not over a transport this build can put a credential on.
+        match probe_of_code(PROBES[i].load(Ordering::Acquire)) {
+            Some(Outcome::Unauthorized) => Outcome::Unauthorized,
+            Some(Outcome::InsecureOnly) => Outcome::InsecureOnly,
+            _ => Outcome::Unreachable,
+        }
     };
     PROBES[i].store(probe_code(outcome), Ordering::Release);
     if let Some(name) = name.filter(|name| !name.is_empty()) {
@@ -510,7 +647,14 @@ pub fn commit_reachability_if_current<R>(
         let merged = ServerFacts {
             name: pick(name, old.map(|f| f.name.as_str())),
             handle: old.map(|f| f.handle.clone()).unwrap_or_default(),
+            // The grant EVIDENCE is carried through whole, for the same reason the credit is: a
+            // server naming itself over `GET /` learned a machine name and nothing whatever about
+            // whose grant this is. Dropping `home`/`owner_id` here would un-household the
+            // household's own server the moment its friendly name arrived — the `owned` bug
+            // `describe_name` documents, two fields over.
             owned: old.map(|f| f.owned).unwrap_or(true),
+            home: old.map(|f| f.home).unwrap_or(false),
+            owner_id: old.map(|f| f.owner_id).unwrap_or(0),
         };
         FACTS[i].store(Box::into_raw(Box::new(merged)), Ordering::Release);
     }
@@ -576,9 +720,12 @@ fn current_lifecycle_index(
 ///
 /// A no-op for an id that names no client: describing a slot nothing dials would leave a row in
 /// the Sources list that cannot be browsed.
-pub fn describe(id: ServerId, name: &str, handle: &str, owned: bool) {
+/// `grant` is the EVIDENCE ([`GrantEvidence`]), authoritative like the credit and for the same
+/// reason: every caller here holds a roster row plex.tv has just answered with, and the case that
+/// matters is the one where the stored answer was wrong.
+pub fn describe(id: ServerId, name: &str, handle: &str, grant: GrantEvidence) {
     let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
-    describe_locked(id, name, Some(handle), owned);
+    describe_locked(id, name, Some(handle), grant);
 }
 
 /// The body of [`describe`] and [`describe_name`], with the caller holding [`WRITE`].
@@ -591,21 +738,26 @@ pub fn describe(id: ServerId, name: &str, handle: &str, owned: bool) {
 /// The read-modify-write is inside the critical section for the ordinary reason: [`describe_name`]
 /// reads `facts` and writes back a value derived from it, and an authoritative describe landing
 /// between the two would be overwritten by the stale credit it had just replaced.
-fn describe_locked(id: ServerId, name: &str, credit: Option<&str>, owned: bool) {
+fn describe_locked(id: ServerId, name: &str, credit: Option<&str>, grant: GrantEvidence) {
     let Some(i) = id.index().filter(|_| client_for(id).is_some()) else {
         return;
     };
     let old = facts(id);
     let merged = ServerFacts {
         name: pick(name, old.map(|f| f.name.as_str())),
-        handle: match (owned, credit) {
+        handle: match (grant.owned, credit) {
             (true, _) => String::new(),
             (false, Some(c)) => c.to_owned(),
             (false, None) => old.map(|f| f.handle.clone()).unwrap_or_default(),
         },
-        // `owned` has no "unknown", so the newest answer wins — but a describer that only learned
-        // a name passes the flag it read back, which is what makes that a no-op rather than a lie.
-        owned,
+        // The grant has no "unknown" spelling, so the newest answer wins whole — but a describer
+        // that only learned a name passes back the evidence it read, which is what makes that a
+        // no-op rather than a lie. All three move together: `home` and `owner_id` are the same
+        // answer about the same grant that `owned` is, and a half-updated trio would let a stale
+        // `ownerId` outlive the `owned` that was corrected beside it.
+        owned: grant.owned,
+        home: grant.home,
+        owner_id: grant.owner_id,
     };
     FACTS[i].store(Box::into_raw(Box::new(merged)), Ordering::Release);
     // The PUBLISHED FACTS moved, which every cached projection of them has to be able to notice —
@@ -645,8 +797,10 @@ fn describe_locked(id: ServerId, name: &str, credit: Option<&str>, owned: bool) 
 /// shape of the `owned` bug this function was written to close, one field over.
 pub fn describe_name(id: ServerId, name: &str) {
     let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
-    let owned = facts(id).map(|f| f.owned).unwrap_or(true);
-    describe_locked(id, name, None, owned);
+    let grant = facts(id)
+        .map(|f| GrantEvidence { owned: f.owned, home: f.home, owner_id: f.owner_id })
+        .unwrap_or_else(GrantEvidence::ours);
+    describe_locked(id, name, None, grant);
 }
 
 /// `new` when it says something, else whatever was already known.
@@ -690,16 +844,40 @@ fn populated(id: ServerId) -> Option<&'static Client> {
     (!p.is_null()).then(|| unsafe { &*p })
 }
 
-/// Publish one populated slot into the active profile's roster. Pointer/token writes happen first;
-/// the Release bit is what makes them reachable through [`client_for`].
-fn activate(id: ServerId) {
+/// Record whether `id`'s credential rests on a plaintext grant — see [`ON_GRANT`].
+fn mark_on_grant(id: ServerId, on_grant: bool) {
     let Some(i) = id.index() else { return };
     let bit = 1u32 << i;
+    if on_grant {
+        ON_GRANT.fetch_or(bit, Ordering::Release);
+    } else {
+        ON_GRANT.fetch_and(!bit, Ordering::Release);
+    }
+}
+
+/// Publish one populated slot into the active profile's roster. Pointer/token writes happen first;
+/// the Release bit is what makes them reachable through [`client_for`].
+fn activate(id: ServerId, credential_eligible: bool) {
+    let Some(i) = id.index() else { return };
+    let bit = 1u32 << i;
+    if credential_eligible {
+        CREDENTIAL_ELIGIBLE.fetch_or(bit, Ordering::Release);
+    } else {
+        CREDENTIAL_ELIGIBLE.fetch_and(!bit, Ordering::Release);
+    }
     if ACTIVE.fetch_or(bit, Ordering::Release) & bit == 0 {
         ROSTER_GEN.fetch_add(1, Ordering::AcqRel);
     }
-    if !current().is_set() {
+    if credential_eligible && !current().is_set() {
         CURRENT.store(id.0 as u32, Ordering::Release);
+    } else if !credential_eligible && current() == id {
+        let usable = ACTIVE.load(Ordering::Acquire) & CREDENTIAL_ELIGIBLE.load(Ordering::Acquire);
+        let next = if usable == 0 {
+            ServerId::UNSET
+        } else {
+            ServerId(usable.trailing_zeros() as u16)
+        };
+        CURRENT.store(next.0 as u32, Ordering::Release);
     }
 }
 
@@ -721,11 +899,12 @@ fn activate(id: ServerId) {
 /// nothing everywhere by construction — [`describe`], [`set_current`] and [`client_for`] all turn
 /// it away — so every caller degrades correctly without a full-table branch of its own.
 ///
-/// Does NOT steal `current` from an established server — only the first registration sets it
-/// (otherwise there is nothing for `client()` to answer with). Use [`set_current`] to switch,
-/// or [`install`], which is the session path and always retargets.
+/// Does NOT steal `current` from an established server — only the first credential-eligible
+/// registration sets it (otherwise there is nothing usable for `client()` to answer with). Use
+/// [`set_current`] to switch, or [`install`], which is the session path and retargets whenever
+/// the supplied origin is credential-eligible.
 pub fn register(machine_id: &str, host: &str, port: i32, token: &str) -> ServerId {
-    register_origin(machine_id, &Origin::http(host, port), token)
+    register_origin(machine_id, &Origin::http(host, port), token, None, ConnectionFacts::default())
 }
 
 /// [`register`], given the server's whole [`Origin`] instead of a plaintext address.
@@ -736,23 +915,52 @@ pub fn register(machine_id: &str, host: &str, port: i32, token: &str) -> ServerI
 /// and the certificate is issued for the name. So an origin has to be carried from where it was
 /// parsed ([`super::probe::Candidate::origin`]) all the way to here, and the pair-shaped entry
 /// points are kept only for callers that genuinely have nothing but an address.
-pub fn register_origin(machine_id: &str, origin: &Origin, token: &str) -> ServerId {
-    // The playback identity (`X-Plex-Client-Identifier`) is the persisted login identity, so it
-    // comes from the session file — read LAZILY, i.e. only when a `Client` is actually built.
-    // `session::load` can WRITE (it mints + persists the uuid when there is none), and the
-    // commonest call here by far is the profile switch, which only swaps a token; the singleton
-    // this replaced read the file exactly once, and so does this.
-    let id = register_lazy(machine_id, origin, token, &|| {
-        super::session::load().client_id
+///
+/// `pin` is the origin's [`ResolvePin`] when the caller holds the address plex.tv advertised
+/// beside it (`ResolvePin::for_origin`), `None` otherwise. The registry records it on the
+/// published `Client` for the control plane and in `crate::net::resolve` for the media plane;
+/// that table is append-only, so a pin is never retracted — see its doc for why that is sound.
+/// Captured bootstrap identity: same registry/refresh path, without a lazy session-file read.
+///
+/// Carries connection facts to apply atomically (#95 step 8) — the dev-boot / captured-bootstrap
+/// twin of [`register_origin`]. Every production caller already knows a tier (or `None`) at
+/// registration time, so there is no plain, connection-less variant to keep in sync.
+pub(crate) fn register_captured_origin_with_connection(machine_id: &str, origin: &Origin,
+    token: &str, pin: Option<&ResolvePin>, client_id: &str, connection: ConnectionFacts) -> ServerId {
+    let policy = CredentialPolicy::build();
+    let id = register_lazy(
+        machine_id, origin, token, pin, connection, policy, &|| client_id.to_owned(),
+    );
+    #[cfg(not(test))]
+    if super::grant::allowed_for(policy, machine_id, origin) {
+        super::serverinfo::refresh(id);
+    }
+    id
+}
+
+/// Carries connection facts (#95 step 8) to apply to the published `Client` AT registration, in
+/// the same write that creates or re-points its slot — never as a separate post-hoc call a caller
+/// can forget or that a re-point can race. `connection`'s doc explains why `None` means "leave
+/// unchanged" rather than "unknown"; a caller that genuinely knows nothing about the connection
+/// passes `ConnectionFacts::default()` explicitly (that is [`register`]'s whole body).
+pub(crate) fn register_origin(
+    machine_id: &str,
+    origin: &Origin,
+    token: &str,
+    pin: Option<&ResolvePin>,
+    connection: ConnectionFacts,
+) -> ServerId {
+    let policy = CredentialPolicy::build();
+    // Boot/credential completion has already supplied the install identity. Registration also
+    // runs inside frames, so a new or re-pointed slot may only consult the cached snapshot.
+    let id = register_lazy(machine_id, origin, token, pin, connection, policy, &|| {
+        super::session::peek().client_id.clone()
     });
-    // Every server the app actually talks to arrives through THIS function (the `_with_client_id`
-    // seam below is the test one and deliberately does not), so it is the single place that keeps
-    // each server's self-description — version + Plex Pass, issue #22's blind spot — fresh
-    // without every caller remembering to. It used to sit in `install`, which reached only the
-    // CURRENT server; a shared server registered beside it would have stayed permanently
-    // `Unknown`, and the failure read-out blames a missing Pass on a known-free server only.
-    // A worker fetch, single-flighted per server; nothing waits on it.
-    super::serverinfo::refresh(id);
+    // Both this cached-identity path and the captured-identity path refresh the server's
+    // self-description. The worker is single-flighted per server; registration never waits.
+    if super::grant::allowed_for(policy, machine_id, origin) {
+        super::serverinfo::refresh(id);
+    }
     id
 }
 
@@ -764,8 +972,8 @@ pub fn register_origin(machine_id: &str, origin: &Origin, token: &str) -> Server
 ///
 /// **Two reasons a host test must come through here, and the second one cost a red CI run.**
 ///
-/// 1. The public [`register`] resolves the device id through `session::load`, which MINTS AND
-///    PERSISTS a uuid when there is none. A host test must not write one.
+/// 1. The public [`register`] resolves the device id through `session::peek`; a cache miss can
+///    queue a storage refresh. Pure registry tests supply the id instead.
 /// 2. [`register`] also fires [`serverinfo::refresh`](super::serverinfo::refresh), which spawns a
 ///    worker that really opens a socket. Tests of the registry must not acquire that unrelated
 ///    network side effect or depend on worker scheduling. (`stream::http_stream_boxed` now zeros
@@ -780,26 +988,84 @@ pub(crate) fn register_with_client_id(
     token: &str,
     client_id: &str,
 ) -> ServerId {
-    register_origin_with_client_id(machine_id, &Origin::http(host, port), token, client_id)
+    // Same crate-global registry guard as `register_lazy` (which this reaches through
+    // `register_pinned_with_client_id`) — named directly here too, since this is the entry point
+    // D5 names and `register_lazy`'s own assertion is one call away rather than at this frame.
+    #[cfg(test)]
+    crate::testlock::assert_held("the plex server registry (register_with_client_id)");
+    register_pinned_with_client_id(machine_id, &Origin::http(host, port), token, None, client_id,
+        ConnectionFacts::default())
 }
 
-/// [`register_with_client_id`], given the whole [`Origin`] — the seam for a test that is about the
-/// SCHEME, which the `(host, port)` form cannot express. Same contract: no session file, no worker.
-pub(crate) fn register_origin_with_client_id(
+/// [`register_with_client_id`], given the whole [`Origin`] and, optionally, a resolve pin — the
+/// seam for a test that is about the SCHEME (which the `(host, port)` form cannot express) or the
+/// PIN, and for grading [`ConnectionFacts`]'s "leave unchanged on retoken" / "sets both on
+/// re-point" semantics (#95 step 8). Same contract as every `_with_client_id` seam: no session
+/// file, no worker — a caller that genuinely knows nothing about the connection passes
+/// `ConnectionFacts::default()` explicitly.
+pub(crate) fn register_pinned_with_client_id(
     machine_id: &str,
     origin: &Origin,
     token: &str,
+    pin: Option<&ResolvePin>,
     client_id: &str,
+    connection: ConnectionFacts,
 ) -> ServerId {
-    register_lazy(machine_id, origin, token, &|| client_id.to_owned())
+    register_lazy(
+        machine_id,
+        origin,
+        token,
+        pin,
+        connection,
+        CredentialPolicy::build(),
+        &|| client_id.to_owned(),
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn register_pinned_with_client_id_and_policy(
+    machine_id: &str,
+    origin: &Origin,
+    token: &str,
+    pin: Option<&ResolvePin>,
+    client_id: &str,
+    connection: ConnectionFacts,
+    policy: CredentialPolicy,
+) -> ServerId {
+    register_lazy(machine_id, origin, token, pin, connection, policy, &|| client_id.to_owned())
 }
 
 fn register_lazy(
     machine_id: &str,
     origin: &Origin,
     token: &str,
+    pin: Option<&ResolvePin>,
+    connection: ConnectionFacts,
+    policy: CredentialPolicy,
     client_id: &dyn Fn() -> String,
 ) -> ServerId {
+    // The registry's SLOTS/COUNT/ACTIVE/CURRENT tables are crate globals — a test reaching this
+    // through `register_with_client_id`/`register_pinned_with_client_id` without
+    // `crate::testlock::serial()` writes them outside the lock, exactly what `lib.rs::testlock`
+    // exists to catch.
+    #[cfg(test)]
+    crate::testlock::assert_held("the plex server registry (register)");
+    let client_id = client_id();
+    // A transient/revoked session has no install identity. Never publish a malformed client.
+    if client_id.is_empty() { return ServerId::UNSET; }
+    // Recorded BEFORE the client is published, so no request made through the new pointer can
+    // reach `curlio` ahead of the table entry it will look for. Once per (host, port); the
+    // log line below names the pin only when it is new, so a token-only re-registration of the
+    // same server (every profile switch) stays byte-identical to what it always logged.
+    let pinned = pin.is_some_and(crate::net::resolve::add);
+    // The NOTE names the family and nothing else. The pin's host is a dashed LAN address and its
+    // `addr` is that address again: `crate::log`'s scrubber rewrites a bare address but has no
+    // rule for a `192-168-0-10.<hash>.plex.direct` label, so printing either would put the
+    // household's LAN layout into the file users paste into issues.
+    let pin_note = match pin {
+        Some(p) if pinned => format!(" (pinned: {} name resolved locally)", p.family()),
+        _ => String::new(),
+    };
     let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
     let n = COUNT.load(Ordering::Acquire);
     let floor = FLOOR.load(Ordering::Acquire).min(n);
@@ -809,16 +1075,36 @@ fn register_lazy(
     let found = (floor..n)
         .map(|i| ServerId(i as u16))
         .find(|&id| populated(id).is_some_and(|c| same_server(c, machine_id, origin)));
+    // THE authority (`super::grant`): TLS, a developer build, or a live consented grant for this
+    // SERVER at this exact plaintext origin — the machine this registration is for (a legacy
+    // id-less call adopting a slot is that slot's machine; with none known, no grant applies).
+    // Asked under the write lock, so a revocation that lands after this line re-grades the slot
+    // it publishes (`regrade_credentials`), never misses it.
+    let grant_machine = match found.and_then(populated) {
+        Some(c) if machine_id.is_empty() => c.machine_id(),
+        _ => machine_id,
+    };
+    let credential_eligible = super::grant::allowed_for(policy, grant_machine, origin);
+    let on_grant = super::grant::rests_on_grant(policy, grant_machine, origin);
+    let admitted_token = if credential_eligible { token } else { "" };
 
     if let Some(id) = found {
         let c = populated(id).expect("the matched slot is populated");
+        let bit = 1u32 << id.index().expect("a populated slot has an index");
+        let was_eligible = CREDENTIAL_ELIGIBLE.load(Ordering::Acquire) & bit != 0;
         // Keep an id we already know: a legacy address-keyed call must not blank it.
         let mid = if machine_id.is_empty() {
             c.machine_id()
         } else {
             machine_id
         };
-        if c.origin() != origin || c.machine_id() != mid {
+        // A pin ARRIVING on a slot that had none is a re-publication condition too: the pin lives
+        // on the `Client` (immutable there by design), so a same-origin registration that only
+        // swapped the token would leave the control plane resolving through DNS while the media
+        // table already knew the answer. A pin never goes away (same origin ⇒ same pin), so this
+        // is a one-way upgrade and cannot churn.
+        let pin_arrived = pin.is_some() && c.resolve_pin() != pin;
+        if c.origin() != origin || c.machine_id() != mid || pin_arrived {
             // Re-point. The old `Client` stays alive and merely stale for anyone mid-request
             // with it; the fresh one also gets a fresh token generation, so token-baked caches
             // flush without a special case.
@@ -829,7 +1115,7 @@ fn register_lazy(
             // worth saying, which is the only way a headless run armed with `{"scheme":"https"}`
             // can be told from an http one at all. See `Origin::log_form`.
             crate::log(&format!(
-                "plex: server slot {} re-pointed to {}",
+                "plex: server slot {} re-pointed to {}{pin_note}",
                 id.0,
                 origin.log_form()
             ));
@@ -842,17 +1128,34 @@ fn register_lazy(
             PROBES[id.0 as usize].store(PROBE_UNKNOWN, Ordering::Release);
             publish(
                 id,
-                Client::new(id, mid, origin.clone(), token, &client_id()),
+                Client::new(id, mid, origin.clone(), admitted_token, &client_id)
+                    .with_resolve_pin(pin.cloned()),
             );
             ROSTER_GEN.fetch_add(1, Ordering::AcqRel);
         } else {
-            c.set_token(token); // in place — every reference already handed out follows along
-                                // The slot set did not change, but its lifecycle did. Catalog source tables key their
-                                // reconciliation on this generation so they can release an old single-flight and
-                                // re-arm with the new per-profile credential even on a same-origin retoken.
+            c.set_token(admitted_token); // every reference already handed out follows along
+            // The slot set did not change, but its lifecycle did. Catalog source tables key their
+            // reconciliation on this generation so they can release an old single-flight and
+            // re-arm with the new per-profile credential even on a same-origin retoken.
             ROSTER_GEN.fetch_add(1, Ordering::AcqRel);
         }
-        activate(id);
+        // Applied AFTER either branch, against the slot's now-current `Client` — a re-point
+        // publishes a fresh pointer, so re-fetching here (rather than reusing `c`) is what makes
+        // this the client a re-pointed reader actually gets. `None` fields leave whatever that
+        // client already has (fresh: still unknown; in-place: whatever a prior activation set) —
+        // see `ConnectionFacts`'s doc (#95 step 8 / A1).
+        if let Some(fresh) = populated(id) {
+            fresh.apply_connection(connection);
+        }
+        activate(id, credential_eligible);
+        mark_on_grant(id, on_grant);
+        if credential_eligible {
+            if !was_eligible {
+                PROBES[id.0 as usize].store(PROBE_UNKNOWN, Ordering::Release);
+            }
+        } else {
+            PROBES[id.0 as usize].store(probe_code(Outcome::InsecureOnly), Ordering::Release);
+        }
         return id;
     }
 
@@ -866,34 +1169,46 @@ fn register_lazy(
     PROBES[n].store(PROBE_UNKNOWN, Ordering::Release);
     publish(
         id,
-        Client::new(id, machine_id, origin.clone(), token, &client_id()),
+        Client::new(id, machine_id, origin.clone(), admitted_token, &client_id)
+            .with_resolve_pin(pin.cloned()),
     );
     COUNT.store(n + 1, Ordering::Release); // after the pointer: a visible count implies a live slot
-    activate(id);
-    // Address only — the machineIdentifier is a permanent household fingerprint (see `ui::stats`)
+    if let Some(fresh) = populated(id) {
+        fresh.apply_connection(connection);
+    }
+    activate(id, credential_eligible);
+    mark_on_grant(id, on_grant);
+    if !credential_eligible {
+        PROBES[n].store(probe_code(Outcome::InsecureOnly), Ordering::Release);
+    }
+    // Address only — the machineIdentifier is a permanent household fingerprint (see `app::diagnostics`)
     // and the event log is what users send us. `log_form` rather than `base`, for the reason the
     // re-point line above gives.
     crate::log(&format!(
-        "plex: server slot {} registered at {}",
+        "plex: server slot {} registered at {}{pin_note}",
         id.0,
         origin.log_form()
     ));
     id
 }
 
-/// Install for a (re)login / profile switch — the SESSION path, unchanged signature and
-/// unchanged single-server behaviour.
+/// Install for a (re)login / profile switch — the SESSION path. **Signature grew a
+/// [`ConnectionFacts`] parameter (#95 step 8)**: the caller who
+/// already knows which tier won discovery, and at what address, now hands it to the same write
+/// that registers the server rather than setting it in a second call this function's old callers
+/// sometimes skipped. `ConnectionFacts::default()` reproduces the exact old behaviour (nothing
+/// set, nothing changed).
 ///
 /// The caller has an address and no machine id (a stored session, or what the login resolved),
 /// so the same address is the same server: a second call for it swaps the token in place exactly
 /// as the old singleton did — which is every install this app makes today, and why nothing about
 /// a single-server session changed. A call naming a DIFFERENT address now registers a second slot
-/// and makes it current, where the singleton kept the FIRST server's address and quietly applied
-/// the new token to it (a mis-target no caller could see, because the address was frozen).
-pub fn install(origin: &Origin, token: &str) {
-    let id = register_origin("", origin, token);
-    set_current(id); // the session path always retargets: this is now the server we are using
-                     // (`register` already refreshed this server's self-description — see its doc.)
+/// and makes it current when its origin is credential-eligible. An ineligible stored origin is
+/// retained tokenless with an [`Outcome::InsecureOnly`] result, so ordinary endpoint discovery
+/// can repair it without ever making that origin the credentialed current client.
+pub fn install(origin: &Origin, token: &str, pin: Option<&ResolvePin>, connection: ConnectionFacts) {
+    let id = register_origin("", origin, token, pin, connection);
+    set_current(id); // eligible session installs retarget; recovery-only metadata is refused
 }
 
 /// **Profile switch.** Blank every live token and hide every non-current slot before the new
@@ -954,7 +1269,7 @@ pub(crate) fn finish_profile_switch(installed: &[ServerId]) {
             continue;
         }
         exact |= 1u32 << i;
-        if !first.is_set() {
+        if !first.is_set() && CREDENTIAL_ELIGIBLE.load(Ordering::Acquire) & (1u32 << i) != 0 {
             first = id;
         }
     }
@@ -962,7 +1277,8 @@ pub(crate) fn finish_profile_switch(installed: &[ServerId]) {
     let old_current = current();
     let keep_current = old_current
         .index()
-        .is_some_and(|i| exact & (1u32 << i) != 0);
+        .is_some_and(|i| exact & (1u32 << i) != 0
+            && CREDENTIAL_ELIGIBLE.load(Ordering::Acquire) & (1u32 << i) != 0);
     let next = if keep_current { old_current } else { first };
 
     // Every installed slot was already activated, so publishing the new CURRENT first cannot
@@ -989,6 +1305,12 @@ pub(crate) fn finish_profile_switch(installed: &[ServerId]) {
 /// It does NOT free anything and does not lower [`COUNT`] — see the module doc on why a slot number
 /// is never handed out twice.
 pub(crate) fn revoke_all() {
+    // Same crate-global registry `register_lazy`/`set_current` guard — see `lib.rs::testlock`.
+    #[cfg(test)]
+    crate::testlock::assert_held("the plex server registry (revoke_all)");
+    // Every plaintext grant dies with the identity that consented. First, and outside WRITE: its
+    // re-grade takes the same lock.
+    super::grant::identity_changed();
     let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
     let n = COUNT.load(Ordering::Acquire);
     let floor = FLOOR.load(Ordering::Acquire);
@@ -1004,6 +1326,8 @@ pub(crate) fn revoke_all() {
     // slot the floor has already killed, which is the one state `client()`'s `expect` would take.
     CURRENT.store(ServerId::UNSET.0 as u32, Ordering::Release);
     ACTIVE.store(0, Ordering::Release);
+    CREDENTIAL_ELIGIBLE.store(0, Ordering::Release);
+    ON_GRANT.store(0, Ordering::Release);
     FLOOR.store(n, Ordering::Release);
     ROSTER_GEN.fetch_add(1, Ordering::AcqRel);
     if n > floor {
@@ -1018,6 +1342,42 @@ pub(crate) fn revoke_all() {
     crate::ui::idle::invalidate();
 }
 
+/// **Re-ask the grant table for every client a grant was carrying** ([`ON_GRANT`]), after a plaintext grant was
+/// revoked or died (`super::grant`'s revocation paths). A client whose origin may no longer carry
+/// a credential has its token blanked IN PLACE — every `&'static Client` already handed out
+/// follows along, so a worker mid-request can at worst send a tokenless request — and is marked
+/// ineligible and [`Outcome::InsecureOnly`], exactly what [`register_lazy`] records for a stored
+/// origin it cannot credential. `current` moves off it when another usable slot exists.
+///
+/// Discovery is what re-grants: a later eligible, consented verdict mints a fresh grant and the
+/// ordinary registration re-tokens the slot.
+pub(crate) fn regrade_credentials() {
+    let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut regraded = 0usize;
+    for id in ids() {
+        let Some(c) = client_for(id) else { continue };
+        let Some(i) = id.index() else { continue };
+        let bit = 1u32 << i;
+        if ON_GRANT.load(Ordering::Acquire) & bit == 0
+            || super::grant::granted_now(c.machine_id(), c.origin())
+        {
+            continue;
+        }
+        c.set_token("");
+        activate(id, false);
+        mark_on_grant(id, false);
+        PROBES[i].store(probe_code(Outcome::InsecureOnly), Ordering::Release);
+        ROSTER_GEN.fetch_add(1, Ordering::AcqRel);
+        regraded += 1;
+    }
+    if regraded > 0 {
+        crate::log(&format!(
+            "plex: {regraded} server(s) lost their plaintext credential — the grant ended"
+        ));
+        crate::ui::idle::invalidate();
+    }
+}
+
 /// Empty the table so each test starts from "nothing installed". Leaks whatever was registered
 /// (that is the ordinary lifecycle here, not a test-only wart) and must be called under
 /// [`crate::testlock::serial`] — the registry is a crate global.
@@ -1027,6 +1387,7 @@ pub(crate) fn revoke_all() {
 /// to ask `client_opt()` gets `Some(a client whose port closed when that test returned)`.
 #[cfg(test)]
 pub(crate) fn reset_for_test() {
+    crate::testlock::assert_held("the plex server registry (reset)");
     let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
     for s in SLOTS.iter() {
         s.store(std::ptr::null_mut(), Ordering::Release);
@@ -1039,6 +1400,8 @@ pub(crate) fn reset_for_test() {
     }
     COUNT.store(0, Ordering::Release);
     ACTIVE.store(0, Ordering::Release);
+    CREDENTIAL_ELIGIBLE.store(0, Ordering::Release);
+    ON_GRANT.store(0, Ordering::Release);
     ROSTER_GEN.store(1, Ordering::Release);
     FACTS_GEN.store(1, Ordering::Release);
     // The floor goes back with the count, or every test after one that signed out would register
@@ -1062,11 +1425,11 @@ mod tests {
     /// modules' tests too.
     ///
     /// It empties the registry on the way OUT as well as on the way in, and that half is
-    /// load-bearing rather than tidy: `browse::pump` adopts every registered slot as a source and
-    /// then spawns a discovery worker for it, so servers left behind here would have another
+    /// load-bearing rather than tidy: an owned `BrowseStore::pump` adopts every registered slot as
+    /// a source and then spawns a discovery worker for it, so servers left behind here would have another
     /// module's tests dialling `10.0.0.1` on a background thread. The reset happens while the lock
     /// is still held (a struct's own `Drop` runs before its fields').
-    struct Fresh(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+    struct Fresh(#[allow(dead_code)] crate::testlock::Serial);
     impl Drop for Fresh {
         fn drop(&mut self) {
             reset_for_test();
@@ -1089,6 +1452,141 @@ mod tests {
 
     fn reg(machine_id: &str, host: &str, token: &str) -> ServerId {
         register_with_client_id(machine_id, host, 32400, token, "test-client-id")
+    }
+
+    #[test]
+    fn registration_refuses_an_empty_client_identifier() {
+        let _g = fresh();
+        assert_eq!(register_with_client_id("synthetic-machine", "127.0.0.1", 9,
+            "synthetic-token", ""), ServerId::UNSET);
+        assert!(client_opt().is_none());
+    }
+
+    /// **The offline fix's registry half.** A pinned registration publishes the pin on the
+    /// `Client` (the control plane reads it there) AND records it in `net::resolve` (the media
+    /// plane looks it up by host); a re-point to a new origin APPENDS a second entry and leaves the
+    /// first in place, because a worker mid-stream may still hold the old client and its URL; and
+    /// a token-only re-registration of the same server records nothing new.
+    #[test]
+    fn installing_a_pinned_origin_appends_to_the_resolve_table_and_a_repoint_appends_not_replaces() {
+        let _g = fresh();
+        crate::net::resolve::clear();
+        let ip = |s: &str| s.parse::<std::net::IpAddr>().unwrap();
+        let o1 = Origin::parse("https://192-168-0-10.h4sh.plex.direct:32400").unwrap();
+        let p1 = ResolvePin::for_origin(&o1, "192.168.0.10").expect("a valid pin");
+        let id = register_pinned_with_client_id("m1", &o1, "tok", Some(&p1), "cid", ConnectionFacts::default());
+        assert!(id.is_set());
+        assert_eq!(client_for(id).unwrap().resolve_pin(), Some(&p1), "the client carries it");
+        assert_eq!(
+            crate::net::resolve::lookup("192-168-0-10.h4sh.plex.direct", 32400).map(|p| p.addr()),
+            Some(ip("192.168.0.10")),
+            "the media plane can find it by host and port"
+        );
+        // a profile switch: same server, new token, no new entry
+        let again = register_pinned_with_client_id("m1", &o1, "tok2", Some(&p1), "cid", ConnectionFacts::default());
+        assert_eq!(again, id);
+        assert_eq!(client_for(id).unwrap().resolve_pin(), Some(&p1));
+        // DHCP moved the server and discovery re-pointed the slot: the old entry survives
+        let o2 = Origin::parse("https://192-168-0-20.h4sh.plex.direct:32400").unwrap();
+        let p2 = ResolvePin::for_origin(&o2, "192.168.0.20").unwrap();
+        let moved = register_pinned_with_client_id("m1", &o2, "tok2", Some(&p2), "cid", ConnectionFacts::default());
+        assert_eq!(moved, id, "re-pointed in place");
+        assert_eq!(client_for(id).unwrap().resolve_pin(), Some(&p2));
+        assert_eq!(
+            crate::net::resolve::lookup("192-168-0-10.h4sh.plex.direct", 32400).map(|p| p.addr()),
+            Some(ip("192.168.0.10")),
+            "append-only: the route an old worker captured still resolves"
+        );
+        assert_eq!(
+            crate::net::resolve::lookup("192-168-0-20.h4sh.plex.direct", 32400).map(|p| p.addr()),
+            Some(ip("192.168.0.20"))
+        );
+        // an unpinned registration carries nothing and records nothing
+        let plain = Origin::http("10.0.0.7", 32400);
+        let pid = register_pinned_with_client_id("m2", &plain, "t", None, "cid", ConnectionFacts::default());
+        assert_eq!(client_for(pid).unwrap().resolve_pin(), None);
+        assert_eq!(crate::net::resolve::lookup("10.0.0.7", 32400), None);
+        crate::net::resolve::clear();
+    }
+
+    /// A pin that arrives on an ALREADY registered origin (a legacy session file re-saved with its
+    /// address, a roster refresh learning it) must reach the control plane: the same origin is
+    /// re-published with the pin rather than only re-tokened, and the slot stays the same.
+    #[test]
+    fn a_pin_arriving_on_a_registered_origin_republishes_the_same_slot() {
+        let _g = fresh();
+        crate::net::resolve::clear();
+        let o = Origin::parse("https://192-168-0-10.h4sh.plex.direct:32400").unwrap();
+        let id = register_pinned_with_client_id("m1", &o, "tok", None, "cid", ConnectionFacts::default());
+        assert_eq!(client_for(id).unwrap().resolve_pin(), None);
+        let p = ResolvePin::for_origin(&o, "192.168.0.10").unwrap();
+        let again = register_pinned_with_client_id("m1", &o, "tok", Some(&p), "cid", ConnectionFacts::default());
+        assert_eq!(again, id, "same slot");
+        assert_eq!(client_for(id).unwrap().resolve_pin(), Some(&p), "…now pinned");
+        assert_eq!(count(), 1);
+        crate::net::resolve::clear();
+    }
+
+    /// #95 step 8 / A1: `ConnectionFacts::default()` (both fields `None`) on a same-origin
+    /// retoken — `register_lazy`'s IN-PLACE branch — must LEAVE the prior tier/IP exactly as they
+    /// were, never blank them. A naive unconditional write here would regress `abr::bootstrap`
+    /// (`probe.rs:187-189`), which reads the tier on every resolve.
+    #[test]
+    fn a_same_origin_retoken_with_default_connection_preserves_the_prior_tier_and_ip() {
+        let _g = fresh();
+        let o = Origin::http("10.0.0.5", 32400);
+        let connection = ConnectionFacts::new(Some(Location::Local), Some(IpVersion::V4));
+        let id = register_pinned_with_client_id("m1", &o, "tok", None, "cid",
+            connection);
+        let c = client_for(id).unwrap();
+        assert_eq!(c.link(), Some(Location::Local));
+        assert_eq!(c.ip_version(), Some(IpVersion::V4));
+        // Same origin, same machine id: `register_lazy` takes the in-place branch. A plain
+        // retoken (e.g. a profile switch swapping only the token) knows nothing new about the
+        // connection, so it passes `ConnectionFacts::default()`.
+        let again = register_pinned_with_client_id("m1", &o, "tok2", None, "cid",
+            ConnectionFacts::default());
+        assert_eq!(again, id, "same slot — in place, not a re-point");
+        let c = client_for(id).unwrap();
+        assert_eq!(c.link(), Some(Location::Local), "tier survives an unrelated retoken");
+        assert_eq!(c.ip_version(), Some(IpVersion::V4), "ip survives an unrelated retoken");
+    }
+
+    /// #95 step 8: a re-point (a DIFFERENT origin — a fresh `Client`, published at `LINK_UNKNOWN`/
+    /// `IP_UNKNOWN` by `Client::new`) that carries `Some` connection facts must have BOTH applied
+    /// to the new slot in the same write, not left at their fresh-client defaults.
+    #[test]
+    fn a_repoint_with_some_connection_sets_both_tier_and_ip_on_the_fresh_client() {
+        let _g = fresh();
+        let o1 = Origin::http("10.0.0.5", 32400);
+        let id = register_pinned_with_client_id("m1", &o1, "tok", None, "cid",
+            ConnectionFacts::new(Some(Location::Relay), Some(IpVersion::V4)));
+        assert_eq!(client_for(id).unwrap().link(), Some(Location::Relay));
+        // DHCP moved the server: a different origin for the same machine id re-points the slot.
+        let o2 = Origin::http("10.0.0.9", 32400);
+        let connection = ConnectionFacts::new(Some(Location::Local), Some(IpVersion::V6));
+        let moved = register_pinned_with_client_id("m1", &o2, "tok", None, "cid",
+            connection);
+        assert_eq!(moved, id, "re-pointed in place (same slot id)");
+        let c = client_for(id).unwrap();
+        assert_eq!(c.link(), Some(Location::Local), "the NEW tier, not the old one");
+        assert_eq!(c.ip_version(), Some(IpVersion::V6), "the NEW ip, not the old one");
+    }
+
+    /// The boot gate registers the stored roster (with machine ids) and then installs the
+    /// primary by ORIGIN alone (`install` has no id): that must land in the roster's slot, not a
+    /// second one. Written because a device log read as two slots at one origin (it was the
+    /// friend's share pinned to its own LAN label), and the coalescing rule deserved a pin.
+    #[test]
+    fn installing_the_primary_after_the_roster_reuses_its_slot() {
+        let _g = fresh();
+        let o = Origin::parse("https://192-168-0-10.h4sh.plex.direct:32400").unwrap();
+        let p = ResolvePin::for_origin(&o, "192.168.0.10").unwrap();
+        let roster = register_pinned_with_client_id("m1", &o, "tok", Some(&p), "cid", ConnectionFacts::default());
+        let primary = register_pinned_with_client_id("", &o, "tok", Some(&p), "cid", ConnectionFacts::default());
+        assert_eq!(primary, roster);
+        assert_eq!(count(), 1);
+        crate::net::resolve::clear();
     }
 
     /// The table's basic contract: a registration round trips through its id, the reserved UNSET
@@ -1168,7 +1666,7 @@ mod tests {
     /// pair-shaped code did because it could not spell one — and the day a server moves to https
     /// the registry keeps a plaintext client for it, in place, with nothing in the log.
     ///
-    /// Driven through [`register_origin_with_client_id`], NOT the public [`register_origin`] — see
+    /// Driven through [`register_pinned_with_client_id`], NOT the public [`register_origin`] — see
     /// that seam's doc. This test was written against the public one and turned CI red on Linux
     /// with a stack overflow in an unnamed thread, because `register_origin` spawns a real
     /// `serverinfo` worker that opens a real socket on a 256 KiB stack.
@@ -1176,7 +1674,7 @@ mod tests {
     fn moving_a_server_to_https_re_points_its_slot() {
         let _g = fresh();
         let reg_at = |o: &Origin, tok: &str| {
-            register_origin_with_client_id("mach-A", o, tok, "test-client-id")
+            register_pinned_with_client_id("mach-A", o, tok, None, "test-client-id", ConnectionFacts::default())
         };
         let plain = Origin::http("10.0.0.1", 32400);
         let id = reg_at(&plain, "tok-a");
@@ -1250,6 +1748,34 @@ mod tests {
             None,
             "a different profile's token starts unprobed"
         );
+    }
+
+    /// Issue #95 plan §6: `InsecureOnly` round-trips through the same `probe_code`/`probe_of_code`
+    /// table every other [`Outcome`] does — verified end to end via [`publish_probe_result`] and
+    /// [`probe_result`] rather than by re-deriving the private code number here.
+    #[test]
+    fn insecure_only_probe_result_round_trips_through_the_slot() {
+        let _g = fresh();
+        let id = reg("mach-insecure", "10.0.0.1", "tok-a");
+        publish_probe_result(id, Outcome::InsecureOnly);
+        assert_eq!(probe_result(id), Some(Outcome::InsecureOnly));
+    }
+
+    /// A generic request's failure cannot disprove a more specific identity-probe verdict — true
+    /// of `Unauthorized` already ([`aggregate_probe_results_follow_a_slot_and_reset_on_repoint`]
+    /// doesn't cover it directly either, but the doc above `commit_reachability_if_current` does),
+    /// and equally true of `InsecureOnly` (issue #95): a generic failure must not read as the
+    /// coarser Unreachable once the identity probe already knows the server answers, just not
+    /// securely.
+    #[test]
+    fn a_generic_failure_preserves_insecure_only_rather_than_widening_to_unreachable() {
+        let _g = fresh();
+        let id = reg("mach-insecure-2", "10.0.0.1", "tok-a");
+        publish_probe_result(id, Outcome::InsecureOnly);
+        let client = client_for(id).unwrap();
+        let outcome = commit_reachability_if_current(id, client, client.token_gen(), false, None, |o| o);
+        assert_eq!(outcome, Some(Outcome::InsecureOnly));
+        assert_eq!(probe_result(id), Some(Outcome::InsecureOnly));
     }
 
     /// A different server is a NEW slot, never a silent retarget of the old one — the singleton's
@@ -1368,7 +1894,7 @@ mod tests {
         );
 
         // plex.tv first (owner known, no machine name in this path), then the server itself
-        describe(b, "", "friend", false);
+        describe(b, "", "friend", GrantEvidence::outside());
         describe_name(b, "nas-home");
         let f = facts(b).expect("described");
         assert_eq!(
@@ -1377,7 +1903,7 @@ mod tests {
         );
 
         // and the other order, on the other slot
-        describe(a, "mac-mini", "", true);
+        describe(a, "mac-mini", "", GrantEvidence::ours());
         describe_name(a, "");
         let f = facts(a).expect("described");
         assert_eq!(
@@ -1386,7 +1912,7 @@ mod tests {
         );
 
         // a slot nothing dials is never described — a Sources row you cannot browse
-        describe(ServerId::from_raw(9), "ghost", "nobody", false);
+        describe(ServerId::from_raw(9), "ghost", "nobody", GrantEvidence::outside());
         assert!(facts(ServerId::from_raw(9)).is_none());
         assert!(
             facts(ServerId::UNSET).is_none(),
@@ -1443,7 +1969,7 @@ mod tests {
         let _g = fresh();
         let a = reg("mach-A", "10.0.0.1", "tok-a");
         let b = reg("mach-B", "10.0.0.2", "tok-b");
-        describe(b, "nas-home", "friend", false);
+        describe(b, "nas-home", "friend", GrantEvidence::outside());
         // the reference a worker took before the sign-out, which nothing can take back
         let inflight: &'static Client = client_for(b).unwrap();
         assert_eq!(token_of(inflight), "tok-b");
@@ -1584,7 +2110,7 @@ mod tests {
         assert!(std::ptr::eq(client(), client_for(after).unwrap()));
 
         // and a description of the retired slot is still refused — it dials nothing
-        describe(before, "ghost", "nobody", false);
+        describe(before, "ghost", "nobody", GrantEvidence::outside());
         assert!(facts(before).is_none());
     }
 
@@ -1596,7 +2122,7 @@ mod tests {
     fn a_registration_that_does_not_fit_is_refused_rather_than_aliased_onto_the_current_server() {
         let _g = fresh();
         let ours = reg("mach-ours", "10.0.0.1", "tok-ours");
-        describe(ours, "Mac mini", "", true);
+        describe(ours, "Mac mini", "", GrantEvidence::ours());
         for i in 1..MAX_SERVERS {
             reg(&format!("mach-{i}"), &format!("10.0.1.{i}"), "tok");
         }
@@ -1611,7 +2137,7 @@ mod tests {
         assert_eq!(count(), MAX_SERVERS, "nothing was appended");
 
         // the call site's very next line, verbatim — and it must land on nobody
-        describe(refused, "nas-home", "friend", false);
+        describe(refused, "nas-home", "friend", GrantEvidence::outside());
         let f = facts(ours).expect("our own server is still described");
         assert_eq!(
             (f.name.as_str(), f.handle.as_str(), f.owned),
@@ -1637,8 +2163,8 @@ mod tests {
         let b = reg("mach-B", "10.0.0.2", "tok-b");
         // the case the bug was invisible in: a share plex.tv sent no `sourceTitle` for, so there is
         // no handle to derive anything from — and it is a share all the same
-        describe(a, "", "", false);
-        describe(b, "", "friend", false);
+        describe(a, "", "", GrantEvidence::outside());
+        describe(b, "", "friend", GrantEvidence::outside());
 
         describe_name(a, "nas-home");
         describe_name(b, "nas-loft");
@@ -1789,10 +2315,10 @@ mod tests {
         let a = reg("mach-A", "10.0.0.1", "tok-a");
 
         // what a build without the rule persisted, replayed by `install_roster` at boot
-        describe(a, "Mac mini", "admin", false);
+        describe(a, "Mac mini", "admin", GrantEvidence::outside());
         assert_eq!(facts(a).map(|f| f.handle.as_str()), Some("admin"));
 
-        describe(a, "Mac mini", "", true);
+        describe(a, "Mac mini", "", GrantEvidence::ours());
         assert_eq!(
             facts(a).map(|f| (f.handle.as_str(), f.owned)),
             Some(("", true)),
@@ -1802,11 +2328,42 @@ mod tests {
         // and it is not a blanket ban on the merge: the machine NAME still merges, because that
         // one really does arrive from two describers in either order
         let b = reg("mach-B", "10.0.0.2", "tok-b");
-        describe(b, "nas-home", "friend", false);
-        describe(b, "", "friend", false);
+        describe(b, "nas-home", "friend", GrantEvidence::outside());
+        describe(b, "", "friend", GrantEvidence::outside());
         assert_eq!(
             facts(b).map(|f| (f.name.as_str(), f.handle.as_str())),
             Some(("nas-home", "friend"))
+        );
+    }
+
+    /// **A name-only describer may not un-household a server**, for the same reason it may not
+    /// un-attribute one: a server naming itself over `GET /` learned a machine name and nothing
+    /// whatever about whose grant this is.
+    ///
+    /// The `owned` bug this guards against is a shipped one (see [`describe_name`]); `home` and
+    /// `owner_id` are the same fact about the same grant, and dropping them would turn a managed
+    /// profile's own household server into an outsider's the moment its friendly name landed.
+    #[test]
+    fn a_name_only_describer_carries_the_grant_evidence_through() {
+        let _g = fresh();
+        let a = reg("mach-A", "10.0.0.1", "tok-a");
+
+        // a managed profile's view of its own household server: owned by nobody it knows of
+        describe(a, "Mac mini", "", GrantEvidence { owned: false, home: true, owner_id: 111_111 });
+        describe_name(a, "nas-loft");
+
+        assert_eq!(
+            facts(a).map(|f| (f.name.as_str(), f.owned, f.home, f.owner_id)),
+            Some(("nas-loft", false, true, 111_111)),
+            "the name is the only thing that describer knew"
+        );
+
+        // the authoritative describer still REPLACES all three, whichever way they move
+        describe(a, "nas-loft", "friend", GrantEvidence { owned: false, home: false, owner_id: 987_654 });
+        assert_eq!(
+            facts(a).map(|f| (f.home, f.owner_id)),
+            Some((false, 987_654)),
+            "a re-grade is not a merge: stale evidence must not outlive the `owned` beside it"
         );
     }
 
@@ -1829,11 +2386,11 @@ mod tests {
         let a = reg("mach-A", "10.0.0.1", "tok-a");
 
         // the stale publication: an older build's persisted `sourceTitle`, replayed at boot
-        describe(a, "Mac mini", "admin", false);
+        describe(a, "Mac mini", "admin", GrantEvidence::outside());
         assert_eq!(facts(a).map(|f| f.handle.as_str()), Some("admin"));
 
         // the corrected roster's very next boot — same call shape, empty credit
-        describe(a, "Mac mini", "", false);
+        describe(a, "Mac mini", "", GrantEvidence::outside());
         assert_eq!(
             facts(a).map(|f| (f.handle.as_str(), f.owned)),
             Some(("", false)),
@@ -1842,13 +2399,13 @@ mod tests {
 
         // a share whose handle plex.tv stops sending loses the credit by the same route
         let b = reg("mach-B", "10.0.0.2", "tok-b");
-        describe(b, "nas-home", "friend", false);
-        describe(b, "nas-home", "", false);
+        describe(b, "nas-home", "friend", GrantEvidence::outside());
+        describe(b, "nas-home", "", GrantEvidence::outside());
         assert_eq!(facts(b).map(|f| f.handle.as_str()), Some(""));
 
         // …while the describer that knows only a NAME still cannot un-attribute anybody
         let c = reg("mach-C", "10.0.0.3", "tok-c");
-        describe(c, "", "friend", false);
+        describe(c, "", "friend", GrantEvidence::outside());
         describe_name(c, "nas-loft");
         assert_eq!(
             facts(c).map(|f| (f.name.as_str(), f.handle.as_str(), f.owned)),

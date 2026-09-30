@@ -61,22 +61,26 @@ pub(crate) fn sorts() -> Vec<SortEntry> {
     vec![
         SortEntry {
             key: "SortName".into(),
-            title: crate::i18n::t("Title").to_string(),
+            title: crate::i18n::msg::browse_jellyfin_sort_title().to_string(),
+            desc_key: "".into(),
             default_desc: false,
         },
         SortEntry {
             key: "PremiereDate".into(),
-            title: crate::i18n::t("Release date").to_string(),
+            title: crate::i18n::msg::browse_jellyfin_sort_release_date().to_string(),
+            desc_key: "".into(),
             default_desc: true,
         },
         SortEntry {
             key: "DateCreated".into(),
-            title: crate::i18n::t("Date added").to_string(),
+            title: crate::i18n::msg::browse_jellyfin_sort_date_added().to_string(),
+            desc_key: "".into(),
             default_desc: true,
         },
         SortEntry {
             key: "CommunityRating".into(),
-            title: crate::i18n::t("Rating").to_string(),
+            title: crate::i18n::msg::browse_jellyfin_sort_rating().to_string(),
+            desc_key: "".into(),
             default_desc: true,
         },
     ]
@@ -195,9 +199,14 @@ pub(crate) fn fetch_genres(c: &JfClient, key: i64) -> Option<Vec<GenreEntry>> {
 /// `firstCharacter` directory (see [`JfClient::letter_counts`]). The counts MUST describe
 /// exactly the section's listing or `letter_start`'s prefix sums would index the wrong rows,
 /// hence the same `include_types` filter `fetch_page` uses. `None` is the failure sentinel.
-pub(crate) fn fetch_letters(c: &JfClient, key: i64, kind: SecKind) -> Option<Vec<(String, i64)>> {
+pub(crate) fn fetch_letters(
+    c: &JfClient,
+    key: i64,
+    kind: SecKind,
+    filter: &crate::browse::LettersFilter,
+) -> Option<Vec<(String, i64)>> {
     let view = view_for_key(key)?;
-    c.letter_counts(&view, include_types(kind))
+    c.letter_counts(&view, include_types(kind), filter)
 }
 
 /// The `IncludeItemTypes` spelling of a section kind. Both kinds list their LEAF-playable

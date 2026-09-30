@@ -188,13 +188,18 @@ is why moving to or from them fades the whole screen rather than just the page.
 ![Home, shelves](screenshots/ux-home-shelves.jpg)
 
 DOWN from the hero enters the shelves; DOWN again steps between them; LEFT/RIGHT walks the cards.
-The focused card grows, and its title and a status line appear beneath it — here *"2 hr 6 min
+The focused card grows, and its title and a status line appear beneath it — here *"8 min
 left"*, which is the resume state. A watched item carries a check mark in its corner.
 
-**OK on a card in *Continue Watching* plays it directly** — as does OK on any card that is itself an
-episode, wherever it sits. **OK on any other card opens that item's page.** The difference is
-intentional: the deck is a list of things already in progress, and one press is the whole point of
-it.
+**OK on a card in *Continue Watching* plays it directly**, and the amber ▶ on the card is what
+announces that. **Every other card opens a page, an episode included**: an episode tile on a
+discovery shelf ("Recently Released Episodes", "Recently Added…") opens that EPISODE's own page and
+carries no ▶, precisely so nothing on it promises playback. The difference is intentional: the deck
+is a list of things already in progress, and one press is the whole point of it — everywhere else,
+a press is a question rather than a commitment. A card's resume bar is a fact about how far in you
+are and appears on both kinds, so it is never the thing that says a press will play; that is the
+triangle's job alone. (Until 2026-09-05 an episode played from wherever it sat, which put the
+triangle on cards that navigated.)
 
 One refinement inside the deck rule: a **show** or **season** card there has no single stream to
 start, so it opens its page, waits for the load to land on the expected item, and fires that page's
@@ -228,7 +233,8 @@ advances by itself the moment the account is linked. Nothing needs pressing; aft
 answer the spinner's line becomes *"Still waiting — press OK for a new code"*, and OK mints a fresh
 code without leaving the screen.
 
-*The code in the figure is a one-time, short-lived claim code. It names no account.*
+*The code in the figure, DEMO, and its QR are the mock server's stand-in for plex.tv's pin
+service (§9); a real code is a one-time, short-lived claim code that names no account.*
 
 Account **creation** happens on plex.tv, not in the app.
 
@@ -268,16 +274,18 @@ pad back to the roster.
 
 Reached from any library pill in the top strip. A poster grid, four-way navigable, with:
 
-- **Sort** and **Filter** pills above the grid (left);
-- the item **count** (right) — *"27 films"*;
+- **Sort** and **Filter** pills above the grid (left), each reading its current choice;
 - an **A–Z rail** down the right edge, which jumps the grid to a letter;
 - watched check marks on the cards.
 
 **CH ▲ / CH ▼ page the grid**, which is the fast way through a large library.
 
-**BACK here is two steps, not one**: from the grid or the toolbar it returns focus to the tab row,
-and only a second BACK leaves the library for Home. UP from the toolbar does the same thing, landing
-on the pill of the library being browsed.
+**BACK here is ONE step to the head of the library, and a second leaves for Home.** From a shelf, a
+grid row, the Sort/Filter row or the A–Z rail, BACK returns to the top of the page — a deep shelf is
+as far from the head as a deep grid row is — and only from the head does it hand the screen back.
+(This said "two steps: to the tab row, then Home" until 2026-09-05. The Library is one continuous
+scroll now, with no fixed toolbar to walk up from and a tab track that never hides, so UP is the
+one-press route to the strip and BACK is about the DOCUMENT.)
 
 Sort and Filter open as **popovers over the live grid**, never as full-screen sheets:
 
@@ -310,9 +318,8 @@ The line beside the field names the **scope** — which server or servers are be
 covers the user's own servers and any shared with the account; Plex Discover / Watchlist catalog
 results are deliberately out of scope, by decision rather than by omission.
 
-*The scope line in the figure is redacted: it names a real server. The substitute is the app's own
-string for a server that reports no name (`ui/search/field.rs::scope_text`), so the figure shows a
-state the app really produces.*
+*The figure searches the demo library's mock server, so its scope line names that server,
+"Demo Library".*
 
 ### 5.6 Card context menu
 
@@ -334,9 +341,10 @@ OK opens a popover headed *ACCOUNT*. Signed in, it offers switching profile and 
 
 One more row, **Settings**, is offered in **every** state, signed in or out. A person who cannot get
 past sign-in has still received a copy of this software, so privacy and legal information cannot be
-conditional on an account. *(The figure above predates this row.)* Settings opens a full-screen
-modal: signed-in users also get **Home screen**, while everyone gets **Privacy & data**, **Legal
-notices** and **About PlxNative**.
+conditional on an account. Settings opens a full-screen
+modal: signed-in users also get **Favorite libraries** (under a **Libraries** section — which
+libraries this television shows, on Home, in the top strip and in the Library's own picker), while
+everyone gets **Privacy & data**, **Legal notices** and **About PlxNative**.
 
 - **Privacy & data** holds the two saved reporting choices, one scrollable what-is-actually-sent document PER CHANNEL (Crashes / Errors, Analytics / Usage),
   the privacy policy, and Delete all local data. Changed switches commit through Done; BACK
@@ -369,15 +377,18 @@ For a series, the page carries its seasons and episodes rather than a single act
 
 ### 5.9 The root press
 
-**BACK at a root shows the television's own Home screen, and the app keeps running.** Three roots
-today: Home's own root, the who's-watching picker and the QR sign-in.
+**BACK at a root shows the television's own Home screen, and the app keeps running.** Four roots,
+as of 2026-09-07: Home's own root, the who's-watching picker, the QR sign-in, and the first-run
+consent question's first stage.
 
-**One screen with nothing behind it is NOT yet covered**, and saying so is the point of writing the
-list out — the first-run consent question still swallows BACK at its first stage. Going to the LG
-Home would neither answer nor dismiss it, so nothing would be stranded and it ought to behave like
-the other three; what stops it is that `consent::on_back` reports the same value whether it stepped
-back a stage or swallowed the press, so the key arm cannot tell those apart. `app.rs`'s consent arm
-carries the whole account.
+**The fourth was the hard one, and it stayed open for a while for a reason worth keeping**: going
+to the LG Home neither answers nor dismisses the consent question, so nothing is stranded by it —
+but the old key arm could not tell the first stage's BACK apart from a later stage's ordinary
+step-back, because both reported the same value out of the legacy screen's `on_back`. Closing it
+took a screen change rather than a key-arm change: `ConsentPage` (`screens/consent.rs`) now answers
+`Handled::No` at an ordinary step-back and pushes `LoopReq::BackAtRoot` only at the first stage, and
+`app::input::back_at_root` performs the platform press. The question is left up — the LG Home
+neither answers nor dismisses it, and selecting the tile again lands straight back on it.
 
 There is no figure, because the screen it produces is LG's launcher and not ours.
 
@@ -397,10 +408,19 @@ app; BACK no longer does, anywhere.
 
 When playback cannot start, the app does not fail silently and does not show a spinner forever. It
 draws a full-screen read-out: a warning mark, a headline, **the reason in plain language**, the
-server's own verdict beneath it where there is one, and the way out — *"Press BACK to return"*.
+server's own verdict beneath it where there is one, a row of the actions that can actually change
+the outcome, and a dim diagnostics footer. The row always ends in **Back**. For an ordinary failure
+it offers **Change quality**, which opens the same quality ladder the `…` menu does on the rung
+this playback is already using, preceded by **Try again** when the failure may be transient. With
+Force Direct Play enabled no rung can help, so the row offers **Switch to Auto and play** instead:
+OK turns Force off and retries in place, with no trip to Settings. A file with no video track gets
+Back alone, because nothing the viewer picks puts a picture in it. A failure is therefore terminal
+for the pipeline, not a trap for the viewer.
 
-The figure is a real server verdict (*"Cannot convert this item. Implementation for video encoder
-'hevc' not found."*). The screen is shaped to survive being photographed off a panel and pasted into
+The verdict in the figure (*"Cannot convert this item. Implementation for video encoder 'hevc' not
+found."*) is the one a real server returned when it had no HEVC encoder; the figure replays it
+through the `failtest` dev trigger, and its footer reads "webOS unknown — os_info.json unreadable · unknown
+set" because it was taken on the simulator. The screen is shaped to survive being photographed off a panel and pasted into
 a bug report, which is the state it is usually seen in.
 
 ### 5.11 Diagnostics read-out
@@ -473,9 +493,9 @@ grounds are below, and they are the reason this document exists.
 
 ![Player HUD](screenshots/player.jpg)
 
-*Device capture. The Starfish/ACB media seam exists only on the television, so the player cannot be
-photographed on the desktop simulator — see §9. The figure shows the **paused** state: note the
-pause mark immediately right of the `0:25` clock, and that there is no transport button row.*
+*Simulator capture — see §9 for how the picture under it was made. The figure shows the **paused**
+state: note the pause mark immediately right of the elapsed clock, and that there is no transport
+button row.*
 
 The HUD is summoned by any input and hides itself again after **4.5 s** of no input — **8 s** while
 one of its panels is open, which is longer read time for a list. While it is hidden the picture is
@@ -532,7 +552,13 @@ from**. For an episode that is the **show page, scrolled to the episode that pla
 generic show root. The final position is reported to the server on the way out, so the item resumes
 where it was left, on this client or any other, and Continue Watching is refreshed shortly after.
 
-While a playback **failure** owns the frame (§5.10), BACK is the only key that acts.
+While a playback **failure** owns the frame (§5.10), exactly three keys act and everything else
+is swallowed, because nothing else on that frame is drawn: **OK** opens the shared quality ladder on
+its current rung (picking that rung is a plain retry), **BACK** and **Stop** leave the playback, and
+**EXIT** ends the app as it does everywhere. Both of the first two are printed on the read-out
+itself. This line said "BACK is the only key that acts" and was true only by accident: the arm that
+implemented the OK escape carried a guard it could never satisfy, so OK fell through to the ordinary
+transport toggle instead — restructure phase 12 (PX-PLAYER) is where that was found and fixed.
 
 ### 6.5 The state mark — what the HUD shows instead of buttons
 
@@ -602,8 +628,10 @@ full-screen sheet. All three are modal while open: they take every key, and BACK
   closes. Subtitles offers the item's subtitle tracks plus *Off*; both text and image (PGS/VobSub)
   subtitles render. Audio offers the item's audio tracks. Switching is a **server-side** selection,
   so it persists as the item's preference rather than lasting only this session.
-- **More** opens an *Options* popover — one row today, **Stats for nerds**, an On/Off toggle that
-  overlays live playback statistics. LEFT/RIGHT are deliberately swallowed here: it is one column.
+- **More** opens a popover led by the **Quality** ladder — Auto plus the fixed rungs — with an
+  *Options* section beneath it: **Stats for nerds**, an On/Off toggle that overlays live playback
+  statistics, plus **Send diagnostics** when that row is enabled. LEFT/RIGHT are deliberately
+  swallowed here: it is one column.
 
 The app exposes **no subtitle appearance settings**, and its client-rendered subtitles do not read
 the television's own subtitle settings — stated here because that is what makes the second half of
@@ -716,19 +744,24 @@ Where the four deferring items are answered, and the neighbouring items this doc
 
 ## 9. Figures, and which ones still need a device capture
 
-Every figure in this document except the player HUD was taken from the **desktop simulator**
-(`make sim`), which runs the same application core, against a real Plex server, at the authored
-1920×1080. Layout, focus, navigation and the whole data layer are identical to the television's.
+Every figure in this document was taken from the **desktop simulator**, which runs the same
+application core at the authored 1920×1080, against the **mock server's demo library** — openly
+licensed and public-domain films (`tests/demo_library/`, credited in
+`docs/screenshots/CREDITS.md`) — and never against a real Plex account. `make screenshots`
+regenerates all of them from the scene manifest `tests/screenshots/scenes.json`, which names the
+state each figure shows and the dev triggers that reach it. Layout, focus, navigation and the whole
+data layer are identical to the television's.
 
-**What the simulator cannot photograph** is anything involving video. The Starfish/ACB media seam is
-29 symbols that exist only on the television, so a Play press on the desktop lands on the app's real
-failure read-out — which is how §5.10's figure was taken honestly, and why the player figures cannot
-be.
+**What the simulator cannot show** is the television's video path. The Starfish/ACB media seam is
+29 symbols that exist only on the television. The player figure (§6.3) is the real HUD over a real
+decoded frame, but the frame is made by a simulator-only facility: a clock sink plays the file the
+mock serves and a system `ffmpeg` decodes it under the UI (`player/sim_video.rs`). It shows what the
+HUD looks like over a picture; it says nothing about LG's decoder or the hardware video plane.
 
 | figure | source | status |
 |---|---|---|
-| Home hero, Home shelves, Detail, Card menu, Library grid, Library sort, Search, Account menu, Sign in, Failure read-out | simulator, 1920×1080 | **in this document** |
-| Player HUD (`screenshots/player.jpg`) | device capture | **in this document** — shows the paused state mark |
+| Home hero, Home shelves, Detail, Card menu, Library grid, Library sort, Search, Account menu, Sign in, Failure read-out | simulator, demo library, 1920×1080 | **in this document** |
+| Player HUD (`screenshots/player.jpg`) | simulator, demo library, simulator-decoded frame | **in this document** — shows the paused state mark |
 | Player HUD, playing steadily (empty mark slot) | device | **needed** |
 | Player HUD, fast-forward and rewind marks | device | **needed** |
 | Subtitle track menu · Audio track menu | device | **needed** |
@@ -749,7 +782,8 @@ The needed captures are all reachable on the bench with the boot triggers docume
 - Key dispatch: `rust-modules/src/ui/consts.rs::classify` and `rust-modules/src/app.rs`'s ladder.
 - Screen map: the `Route` enum in `rust-modules/src/app.rs` and `ui::trail`.
 - Audio: `Makefile` `LIBS_REAL`, and `SDL_Init(SDL_INIT_VIDEO)` in `rust-modules/src/app.rs`.
-- Figures: `make sim`, 2026-08-23, at 1920×1080, dev counter compiled out.
+- Figures: `make screenshots` (the simulator against `tests/mock_pms.py`'s demo library), at
+  1920×1080, dev counter compiled out; the scene manifest is `tests/screenshots/scenes.json`.
 
-**Exactly one figure is edited, and the edit is stated where it appears**: the Search scope line
-(§5.5), which named a real server. No other figure has been retouched in any way.
+**No figure is edited.** Each is the app's own capture of a settled screen, scaled and encoded by
+`tools/screenshots.py` and nothing else.

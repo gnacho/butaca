@@ -21,12 +21,12 @@ pub enum Badge {
     Text(String),
 }
 impl Badge {
-    fn text(&self) -> &str {
+    pub(crate) fn text(&self) -> &str {
         match self {
-            Badge::Ad => "AD",
-            Badge::Forced => "FORCED",
-            Badge::Sdh => "SDH",
-            Badge::Cc => "CC",
+            Badge::Ad => crate::i18n::msg::widgets_badge_ad(),
+            Badge::Forced => crate::i18n::msg::widgets_badge_forced(),
+            Badge::Sdh => crate::i18n::msg::widgets_badge_sdh(),
+            Badge::Cc => crate::i18n::msg::widgets_badge_cc(),
             Badge::Text(s) => s.as_str(),
         }
     }
@@ -51,6 +51,8 @@ pub struct Row {
     /// THE trailing accessory icon slot (an SVG asset, never a font glyph): the drill-in
     /// chevron (via the [`Row::chevron`] sugar) or e.g. the sort menu's direction chevron.
     pub ticon: Option<crate::ui::icons::Icon>,
+    /// Reserve [`Self::ticon`]'s column even when this row draws no icon — see [`Row::ticon_slot`].
+    pub ticon_slot: bool,
     /// THE leading accessory icon — the SAME column the [`Row::checked`] checkmark occupies, for
     /// lists whose rows are ACTIONS rather than a picker's options (the item context menu's
     /// `[icon] [label]` rows). `checked` wins the slot when both are set: a picker's active mark is
@@ -64,6 +66,11 @@ pub struct Row {
     /// a line that does nothing. (A second `Section` cannot do this job: a headerless section adds
     /// vertical air but draws no rule, because the hairline rides the section HEADER.)
     pub sep: bool,
+    /// The row's action is **destructive** — it ends or removes something (Sign out, Remove from
+    /// Deck). Semantics only, never drawn: it exists so a menu never OPENS with its focus on one
+    /// ([`TableView::opening_row`]). A stray OK on a freshly opened menu must be harmless; the row
+    /// stays one press away, it is simply never where focus starts.
+    pub destructive: bool,
 }
 impl Row {
     pub fn new(label: impl Into<String>) -> Self {
@@ -76,9 +83,11 @@ impl Row {
             value: None,
             value_dim: false,
             ticon: None,
+            ticon_slot: false,
             licon: None,
             dim: false,
             sep: false,
+            destructive: false,
         }
     }
     /// The grouping hairline — a row that draws a rule and cannot be focused.
@@ -112,7 +121,7 @@ impl Row {
     fn readout(&self) -> Option<&str> {
         match (&self.value, self.toggle) {
             (Some(v), _) => Some(v.as_str()),
-            (None, Some(on)) => Some(if on { crate::i18n::t("On") } else { crate::i18n::t("Off") }),
+            (None, Some(on)) => Some(if on { crate::i18n::msg::widgets_toggle_on() } else { crate::i18n::msg::widgets_toggle_off() }),
             (None, None) => None,
         }
     }
@@ -131,6 +140,17 @@ impl Row {
         }
         self
     }
+    /// **Hold the trailing accessory's column open on a row that draws none.**
+    ///
+    /// For a list where only SOME rows go somewhere: without it the read-out beside the chevron
+    /// shifts right on every row that has none, so a column of years reads as ragged text instead
+    /// of a column you can compare down. The design states it as a reserved 26px slot at
+    /// `opacity:0` (`Person Screen.dc.html`: "the column is reserved on every row so the year
+    /// column stays on one guide"). Ignored when a `ticon` is actually set.
+    pub fn ticon_slot(mut self, v: bool) -> Self {
+        self.ticon_slot = v;
+        self
+    }
     pub fn ticon(mut self, i: crate::ui::icons::Icon) -> Self {
         self.ticon = Some(i);
         self
@@ -143,13 +163,20 @@ impl Row {
         self.dim = v;
         self
     }
-    fn height(&self) -> f32 {
+    /// Mark the row's action destructive — see [`Row::destructive`].
+    pub fn destructive(mut self, v: bool) -> Self {
+        self.destructive = v;
+        self
+    }
+    /// `tall` is the TABLE's two-line measure — see [`TableView::tall_rows`]. A row cannot answer
+    /// this alone: 92 and 98 are both correct, and which one applies is a property of the LIST.
+    fn height_in(&self, tall: f32) -> f32 {
         if self.sep {
             SEP_H
         } else if self.detail.is_empty() {
             ROW_H
         } else {
-            ROW_H_TALL
+            tall
         }
     }
 }
@@ -212,12 +239,23 @@ pub const PAD_V: f32 = TOP_PAD + BOT_PAD;
 /// A plain row (label only) — mockup rowBase padding 13 + 34px label.
 ///
 /// `pub` for the same caller shape [`CONTENT_X`] is: a block that draws ROWS of its own on the
-/// app's ground rather than mounting a [`TableView`] (`ui/search/recents.rs` — its rows are the
+/// app's ground rather than mounting a [`TableView`] (`screens::search::render`'s `recents` — its rows are the
 /// user's own words and have to stay editable in place). It re-derived this and the four constants
 /// below from the mockup, so a row-height change here silently misaligned that block while both
 /// modules' own tests stayed green.
 pub const ROW_H: f32 = 60.0;
 const ROW_H_TALL: f32 = 92.0; // a row that carries a detail sub-line (title HEADLINE + detail CAPTION)
+/// **A CATALOG list's two-line row: 98, against a settings table's 92** — see
+/// [`TableView::tall_rows`].
+///
+/// It arrived as the height of a row carrying a leading 54x81 POSTER, a slot this widget briefly
+/// grew for `ui::filmography` and no longer has: the canvas retired the chip the next day ("a
+/// poster at that size is a grey rectangle 222 times over") in favour of one large preview beside
+/// the list. The chip went with it rather than being kept as a variant nobody draws — it is not an
+/// answer waiting for its next caller, it is one that was measured and rejected. The taller ROW
+/// survives it, because that was never about the poster: it is what a `BODY` title over a
+/// `CAPTION` sub-line wants when the list IS the screen.
+pub const ROW_H_ART: f32 = 98.0;
 const ROW_SUB_GAP: f32 = 15.0; // title baseline → detail cap-top, in a two-line row
 /// Panel header ("AUDIO"/"SUBTITLES", a server over its libraries). 58px in BOTH size classes and
 /// whatever the header's own size — the band is fixed so a size change cannot reflow a panel.
@@ -235,7 +273,7 @@ const DIV_H: f32 = 24.0; // gap + hairline between sections
 /// list (the Sources panel's level band) has to subtract it to put the SEAM on the space scale —
 /// otherwise the two paddings add and the gap lands between rungs.
 pub const TOP_PAD: f32 = 20.0;
-const BOT_PAD: f32 = 20.0;
+pub const BOT_PAD: f32 = 20.0;
 /// Distance from a table frame's top edge to the cap-top of its first section label.
 ///
 /// Route screens use this to align that label with the narrative title in the neighbouring
@@ -259,6 +297,34 @@ pub const PILL_INSET: f32 = 3.0;
 const PANEL_BG: [f32; 4] = theme::SURFACE_PANEL; // opaque panel colour — fade masks + badge knockout
 /// Air between two chips of one right-aligned badge run (a subtitle row's `FORCED` + `SDH`).
 const BADGE_GAP: f32 = 10.0;
+const ACCESSORY_GAP: f32 = 14.0;
+/// The empty band under a row's lowest ink, which every row kind leaves: a plain row's label is
+/// centred in `ROW_H` with 13px under it, and a two-line row's centred pair leaves ~12.
+const ROW_INK_PAD: f32 = 12.0;
+/// A section header's ink ends at its CAPTION caps below `HEADER_CAP_INSET`.
+const HDR_INK_PAD: f32 = HDR_H - HEADER_CAP_INSET - theme::size::CAPTION as f32;
+
+/// The bottom-edge fade shared by rows and headers ([`TableView::bottom_edge_alpha`]): opaque
+/// while `ink_bot` has `pad + BOT_PAD` of viewport below it, transparent once the edge reaches it.
+fn edge_alpha(ink_bot: f32, vis_bot: f32, pad: f32) -> f32 {
+    ((vis_bot - ink_bot) / (pad + BOT_PAD)).clamp(0.0, 1.0)
+}
+
+/// A row's two text columns as [`TableView::row_columns`] resolves them: the primary label's (and
+/// its sub-line's) width, and the trailing value's, which the value is elided to.
+/// The share of a row's text span the primary label is guaranteed (up to its natural width)
+/// when a trailing value does not fit beside it — see [`TableView::row_columns`].
+const LABEL_SHARE: f32 = 0.6;
+/// The label's measured width is hugged with this factor (the text-fit tests' own 2% headroom,
+/// `fontcov::advances::HEADROOM`, plus a hair) so the label it keeps is truly whole on the set.
+const LABEL_HUG_MARGIN: f32 = 1.025;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct RowColumns {
+    pub label_w: f32,
+    pub value_w: f32,
+}
+const ACCESSORY_ICON_W: f32 = 26.0;
 /// The trailing read-out's WEIGHT: `size::LABEL` **bold**, which is what the `PlxNative Design
 /// System`'s `TableView` authors it as (`var(--font-weight-bold) var(--size-label)`) and what its
 /// prose says in words. The product drew it regular until 2026-08-21 — a rung below the row's
@@ -272,8 +338,8 @@ const BADGE_GAP: f32 = 10.0;
 /// their regular twins, so measuring on one flag and painting on the other under-counts `trailing`
 /// — and `trailing` is the LABEL's elision budget (`text_w` below), so the label would be elided
 /// as though the read-out were narrower than it is and run right into it. The BADGE run is not at
-/// risk and cannot be: it is placed before this block adds `vw`, which is exactly why the read-out
-/// sits INSIDE it rather than the other way round.
+/// risk: it is placed outside the read-out, while the complete trailing-width calculation
+/// reserves both runs before measuring the label.
 const VALUE_BOLD: std::os::raw::c_int = 1;
 
 pub struct TableView {
@@ -298,6 +364,8 @@ pub struct TableView {
     /// It no longer affects HEADERS: those are CAPS at CAPTION in both classes, because the caps
     /// are what make a header a label and a size that varied could tie with its own rows.
     pub compact: bool,
+    /// see [`TableView::tall_rows`]
+    tall: bool,
     /// Semantic ink for section labels. Ambient routes can raise this role for contrast without
     /// replacing the shared table header renderer or changing row/detail hierarchy.
     pub header_ink: [f32; 4],
@@ -308,12 +376,40 @@ pub struct TableView {
     scroll: Spring,
 }
 impl TableView {
+    pub(crate) const MOTION_SHAPE: &'static str = "TableViewMotion{sel:i32,list_focused:bool,compact:bool,tall:bool,header_ink:[f32;4],hl_top:Spring{pos:f32,vel:f32},hl_bot:Spring{pos:f32,vel:f32},scroll:Spring{pos:f32,vel:f32}}";
+
+    /// The owner records its row data separately. These fields determine layout, the selected
+    /// face and subsequent motion; no text/texture cache or renderer pointer is traversed.
+    pub(crate) fn write_motion(&self, c: &mut crate::ui::machine::Canon) {
+        let Self { sections: _, sel, list_focused, compact, tall, header_ink, hl_top, hl_bot, scroll } = self;
+        c.u32(*sel as u32).bool(*list_focused).bool(*compact).bool(*tall);
+        for component in header_ink { c.f32(*component); }
+        for spring in [hl_top, hl_bot, scroll] { c.f32(spring.pos).f32(spring.vel); }
+    }
+
+    /// **Two-line rows at the CATALOG measure (98) rather than the settings one (92).**
+    ///
+    /// Opt-in per table, because both are right: a settings row is a line of chrome in a panel, and
+    /// a row in a list that IS the screen — `ui::filmography`'s credits — carries a `BODY` title
+    /// over a `CAPTION` sub-line and wants the air. The canvas states 98 for that list and 92 is
+    /// what every other table here has always drawn.
+    pub fn tall_rows(&mut self, v: bool) {
+        self.tall = v;
+    }
+    fn tall_row_h(&self) -> f32 {
+        if self.tall {
+            ROW_H_ART
+        } else {
+            ROW_H_TALL
+        }
+    }
     pub const fn new() -> Self {
         Self {
             sections: Vec::new(),
             sel: 0,
             list_focused: true,
             compact: false,
+            tall: false,
             header_ink: theme::TEXT_TERTIARY,
             hl_top: Spring::at(0.0),
             hl_bot: Spring::at(0.0),
@@ -323,6 +419,60 @@ impl TableView {
 
     /// The row under the pointer in a `frame`-anchored draw (screen coords), or None — popover
     /// click support (hover→focus, click→commit) shares the draw's own layout walk.
+    /// **Where row `i` is on screen** — the exact inverse of [`Self::hit_row`], walked the same
+    /// way so the two can never disagree about a row's band.
+    ///
+    /// It exists for `ui::popover::Opener`: a context menu anchors beside the element it was opened
+    /// from, and a caller that measured that band itself would be a second layout of this widget.
+    /// Answers `None` for a header, a hairline, or a row scrolled out of the frame — all three are
+    /// cases where there is nothing on screen to anchor to.
+    pub fn row_rect(&self, frame: Rect, i: i32) -> Option<Rect> {
+        self.row_frame(frame, i)
+            .filter(|r| r.y + r.h > frame.y && r.y < frame.y + frame.h)
+    }
+
+    /// Row `i`'s frame under the live scroll WHETHER OR NOT it is inside the viewport — the one
+    /// walk [`row_rect`](Self::row_rect), [`hit_row`](Self::hit_row) and `ui::geom::Table::place`
+    /// share (spec §7.1). `None` for a header index, a separator, or an index out of range.
+    pub fn row_frame(&self, frame: Rect, i: i32) -> Option<Rect> {
+        let top0 = frame.y + TOP_PAD;
+        let scroll = self.scroll.pos;
+        let mut out = None;
+        self.walk(|cy, gi, _| {
+            if gi != i || gi < 0 || self.rows_at(gi).sep {
+                return;
+            }
+            let sy = top0 + cy - scroll;
+            let h = self.rows_at(gi).height_in(self.tall_row_h());
+            out = Some(Rect::new(frame.x + SIDE, sy, frame.w - 2.0 * SIDE, h));
+        });
+        out
+    }
+
+    /// The next SELECTABLE row from `i` in direction `delta` (−1/+1; 0 answers `i` itself if
+    /// selectable), stepping over separators as `move_sel` does; `None` at the ends.
+    pub fn next_selectable(&self, i: i32, delta: i32) -> Option<i32> {
+        let n = self.n_rows();
+        if n == 0 || i < 0 || i >= n {
+            return None;
+        }
+        if delta == 0 {
+            return (!self.rows_at(i).sep).then_some(i);
+        }
+        let mut j = i + delta;
+        while j >= 0 && j < n {
+            if !self.rows_at(j).sep {
+                return Some(j);
+            }
+            j += delta;
+        }
+        None
+    }
+
+    /// The nearest selectable row to `i` (what `set_sections` and `move_sel` settle on).
+    pub fn settle(&self, i: i32) -> i32 {
+        self.settle_sel(i)
+    }
     pub fn hit_row(&self, frame: Rect, mx: f32, my: f32) -> Option<i32> {
         if !frame.contains(mx, my) {
             return None;
@@ -335,7 +485,7 @@ impl TableView {
                 return; // headers and grouping hairlines are not click targets
             }
             let sy = top0 + cy - scroll;
-            if my >= sy && my <= sy + self.rows_at(gi).height() {
+            if my >= sy && my <= sy + self.rows_at(gi).height_in(self.tall_row_h()) {
                 hit = Some(gi);
             }
         });
@@ -355,6 +505,28 @@ impl TableView {
                 .jump(top + self.row_height(self.sel) - PILL_INSET);
             self.scroll.jump(0.0);
         }
+    }
+
+    /// **Open** a menu on `sections`: [`Self::set_sections`] with the selection on
+    /// [`Self::opening_row`] and the pill snapped there. Every menu that has no prior selection to
+    /// restore opens through this, so none can open with its focus on a destructive action.
+    pub fn open_sections(&mut self, sections: Vec<Section>) {
+        self.sections = sections;
+        let sel = self.opening_row();
+        let sections = std::mem::take(&mut self.sections);
+        self.set_sections(sections, sel, false);
+    }
+
+    /// Where a menu's focus STARTS: the first selectable row that is not [`Row::destructive`]; the
+    /// first selectable row when every row is destructive (the menu still has to focus something,
+    /// and then the one action on offer is the one asked for); `0` for an empty table.
+    pub fn opening_row(&self) -> i32 {
+        let n = self.n_rows();
+        let selectable = || (0..n).filter(|&i| !self.rows_at(i).sep);
+        selectable()
+            .find(|&i| !self.rows_at(i).destructive)
+            .or_else(|| selectable().next())
+            .unwrap_or(0)
     }
 
     pub fn n_rows(&self) -> i32 {
@@ -396,6 +568,116 @@ impl TableView {
             return 120.0;
         }
         self.content_h() + TOP_PAD + BOT_PAD
+    }
+
+    /// Intrinsic panel width for complete labels at the table's own typography. Action menus
+    /// use this before placing their panel, rather than sizing it for one English label.
+    pub(crate) fn measured_width(&self, measure: &dyn crate::ui::machine::Measure) -> f32 {
+        let (size, bold) = self.label_style();
+        let mut width: f32 = 0.0;
+        for section in &self.sections {
+            if !section.header.is_empty() {
+                let header = measure.width_str(&section.header.to_uppercase(), theme::size::CAPTION, false);
+                let accessory = if section.accessory.is_empty() { 0.0 } else {
+                    GAP + measure.width_str(&section.accessory, theme::size::MICRO, false).min(ACCESSORY_W)
+                };
+                width = width.max(2.0 * CONTENT_X + header + accessory);
+            }
+            for row in section.rows.iter().filter(|row| !row.sep) {
+                let label = measure.width_str(&row.label, size, bold);
+                let detail = measure.width_str(&row.detail, theme::size::CAPTION, false);
+                width = width.max(2.0 * CONTENT_X + CHECK_W + GAP
+                    + label.max(detail) + Self::trailing_width(row, measure));
+            }
+        }
+        width.ceil()
+    }
+
+    /// Every row label or sub-line that a `frame_w`-wide panel would end in an ellipsis, with
+    /// `headroom` of each row's label budget to spare — for the per-language text-fit tests, which
+    /// measure with the device's own advances (`fontcov::advances::ShippedMeasure`).
+    #[cfg(test)]
+    pub(crate) fn elided_rows(&self, frame_w: f32, measure: &dyn crate::ui::machine::Measure, headroom: f32) -> Vec<String> {
+        let (size, bold) = self.label_style();
+        let mut out = Vec::new();
+        for row in self.sections.iter().flat_map(|s| s.rows.iter()).filter(|r| !r.sep) {
+            let budget = self.label_width(row, frame_w, measure) * headroom;
+            for (text, size, bold) in [(&row.label, size, bold), (&row.detail, theme::size::CAPTION, false)] {
+                let w = measure.width_str(text, size, bold);
+                if w > budget {
+                    out.push(format!("{text:?} is {w:.0}px in a {budget:.0}px column"));
+                }
+            }
+        }
+        out
+    }
+
+    fn label_style(&self) -> (std::os::raw::c_int, bool) {
+        if self.compact { (theme::size::BODY, false) } else { (theme::size::HEADLINE, true) }
+    }
+
+    fn trailing_width(row: &Row, measure: &dyn crate::ui::machine::Measure) -> f32 {
+        let mut width = if row.ticon.is_some() || row.ticon_slot {
+            ACCESSORY_ICON_W + ACCESSORY_GAP
+        } else { 0.0 };
+        if !row.badges.is_empty() {
+            width += row.badges.iter().map(|badge| crate::ui::widgets::badge_w(badge.text(), None, measure)).sum::<f32>()
+                + BADGE_GAP * (row.badges.len() - 1) as f32 + ACCESSORY_GAP;
+        }
+        if let Some(value) = row.readout() {
+            width += measure.width_str(value, theme::size::LABEL, VALUE_BOLD != 0) + ACCESSORY_GAP;
+        }
+        width
+    }
+
+    /// The same label budget used by rendering and intrinsic-width checks.
+    pub(crate) fn label_width(&self, row: &Row, frame_w: f32, measure: &dyn crate::ui::machine::Measure) -> f32 {
+        self.row_columns(row, frame_w, measure).label_w
+    }
+
+    /// A row's label and trailing-value columns, resolved by priority — content hugging and
+    /// compression resistance, measured rather than assumed from English lengths.
+    ///
+    /// When both runs fit, the value takes its natural width and the label (with its sub-line)
+    /// every pixel left, as it always did. When they do not, the LABEL is the primary read: it
+    /// keeps its natural width up to [`LABEL_SHARE`] of the row's text span, and the value gives
+    /// way first, elided to what is left. The label only yields below its natural width once it
+    /// alone would take more than that share — and then the value still keeps the rest.
+    pub(crate) fn row_columns(&self, row: &Row, frame_w: f32, measure: &dyn crate::ui::machine::Measure) -> RowColumns {
+        let fixed = Self::trailing_width(row, measure) - Self::value_slot(row, measure);
+        let span = (frame_w - 2.0 * CONTENT_X - CHECK_W - GAP - fixed).max(0.0);
+        let Some(value) = row.readout() else {
+            return RowColumns { label_w: span, value_w: 0.0 };
+        };
+        let value_nat = measure.width_str(value, theme::size::LABEL, VALUE_BOLD != 0);
+        let (size, bold) = self.label_style();
+        // hugged with a margin: a measure models whole-pixel advances but not the device's
+        // kerning/hinting, so a label kept at exactly its measured width can still elide on the set
+        let label_nat = (measure.width_str(&row.label, size, bold) * LABEL_HUG_MARGIN).ceil();
+        let slot = value_nat + ACCESSORY_GAP;
+        if label_nat + slot <= span {
+            return RowColumns { label_w: span - slot, value_w: value_nat };
+        }
+        let label_w = (span - slot).max(label_nat.min(span * LABEL_SHARE));
+        RowColumns { label_w, value_w: (span - label_w - ACCESSORY_GAP).max(0.0) }
+    }
+
+    /// The trailing value's natural slot (run + its gap), `0` for a row without one.
+    fn value_slot(row: &Row, measure: &dyn crate::ui::machine::Measure) -> f32 {
+        row.readout().map_or(0.0, |v| measure.width_str(v, theme::size::LABEL, VALUE_BOLD != 0) + ACCESSORY_GAP)
+    }
+
+    /// How opaque a row spanning `y..y + h` is drawn at the viewport's bottom edge `vis_bot`.
+    ///
+    /// The draw hard-clips to its frame, and at the TOP that is right (a row scrolling away under
+    /// the crumb band). At the BOTTOM it cut the next row mid-glyph wherever the frame happened to
+    /// end — the Settings column at the safe area, a popover at its height cap. So a row fades as
+    /// the edge climbs from the list's own bottom air ([`BOT_PAD`]) up through its empty lower
+    /// band ([`ROW_INK_PAD`]), and is fully transparent by the time the edge reaches its ink: the
+    /// scissor only ever cuts padding or nothing visible. A row resting with the list's bottom
+    /// air below it — where the last row settles — is whole.
+    pub(crate) fn bottom_edge_alpha(&self, y: f32, h: f32, vis_bot: f32) -> f32 {
+        edge_alpha(y + h - ROW_INK_PAD, vis_bot, ROW_INK_PAD)
     }
 
     /// The nearest **selectable** row to `i`: `i` itself when it is one, else the first non-separator
@@ -457,7 +739,7 @@ impl TableView {
             }
             for row in &sec.rows {
                 f(y, gi, si);
-                y += row.height();
+                y += row.height_in(self.tall_row_h());
                 gi += 1;
             }
         }
@@ -477,7 +759,7 @@ impl TableView {
         for sec in &self.sections {
             for row in &sec.rows {
                 if n == target {
-                    return row.height();
+                    return row.height_in(self.tall_row_h());
                 }
                 n += 1;
             }
@@ -530,20 +812,23 @@ impl TableView {
         )
     }
 
-    /// The scroll spring's settled position, in content coordinates. Test-only: this is what a
-    /// regression on the `update(dt, frame_h)` contract shows up as first — the pill motion test
-    /// above cannot see it, since a 2-row list never scrolls.
-    #[cfg(test)]
+    /// The scroll spring's live position, in content coordinates.
+    ///
+    /// It was `#[cfg(test)]` — the tests are still its main reader, for the reason below — until a
+    /// caller needed to draw a SCROLL RAIL beside the list (`ui::filmography`). A rail is the one
+    /// thing outside this widget that has to know where the scroll actually is; everything else it
+    /// exposes is about rows.
+    ///
+    /// For tests: this is what a regression on the `update(dt, frame_h)` contract shows up as
+    /// first — the pill motion test cannot see it, since a 2-row list never scrolls.
     pub(crate) fn scroll_pos(&self) -> f32 {
         self.scroll.pos
     }
 
-    pub fn draw(&self, p: Painter, frame: Rect) {
+    pub fn draw(&self, p: Painter, frame: Rect, measure: &dyn crate::ui::machine::Measure) {
         if self.n_rows() == 0 {
-            let mut nb = [0u8; crate::i18n::TC_MAX];
-            let nt = crate::i18n::tc("No tracks", &mut nb);
             Label::new(
-                nt.as_ptr().cast(),
+                crate::i18n::msg::widgets_tracks_empty_c().as_ptr(),
                 theme::size::BODY,
                 theme::TEXT_TERTIARY,
             )
@@ -565,7 +850,6 @@ impl TableView {
         let dimc = theme::TEXT_TERTIARY; // was #8a8a8e; unified onto the tertiary grey
         let ink = crate::ui::ACCENT_INK; // text/glyph over the light pill
         let content_x = frame.x + SIDE + CONTENT_PAD;
-        let label_x = content_x + CHECK_W + GAP;
         let text_right = frame.x + frame.w - SIDE - CONTENT_PAD;
 
         // ---- sliding pill (under the rows) — warm off-white; top/bottom edges morph independently ----
@@ -597,6 +881,8 @@ impl TableView {
             if gi == -1 {
                 // panel/section header (+ hairline divider above later sections); scissor-clipped to `frame`
                 if sy + HDR_H > vis_top && sy < vis_bot {
+                    // fades out at the bottom edge before its caps are cut (`bottom_edge_alpha`)
+                    let p = p.alpha(edge_alpha(sy + HDR_H - HDR_INK_PAD, vis_bot, HDR_INK_PAD));
                     let sec = &self.sections[si];
                     if si > 0 {
                         p.rect(
@@ -643,7 +929,9 @@ impl TableView {
                         // (`TableView.prompt.md`). At CAPTION the two were the same size and a
                         // plex.tv handle read as loud as the machine it hangs off.
                         let asz = theme::size::MICRO;
-                        let a = crate::text::elide(&sec.accessory, ACCESSORY_W, asz, 0, false);
+                        let a = crate::text::elide_by(&sec.accessory, ACCESSORY_W, false, |t| {
+                            measure.width_str(t, asz, false)
+                        });
                         if let Ok(ac) = CString::new(a) {
                             Label::new(ac.as_ptr(), asz, self.header_ink)
                                 .h(HAlign::Right)
@@ -655,10 +943,16 @@ impl TableView {
                 return;
             }
             let row = self.rows_at(gi);
-            let h = row.height();
+            let h = row.height_in(self.tall_row_h());
             if sy + h < vis_top || sy > vis_bot {
                 return; // fully scrolled out; a partial edge row is drawn and scissor-clipped to `frame`
             }
+            // …and at the BOTTOM edge it is faded out before the scissor can reach its ink
+            let edge = self.bottom_edge_alpha(sy, h, vis_bot);
+            if edge <= 0.0 {
+                return;
+            }
+            let p = p.alpha(edge);
             if row.sep {
                 // grouping hairline, on the row's centre line and inset to the label column so it
                 // reads as a divider between groups rather than a full-bleed panel rule
@@ -694,6 +988,7 @@ impl TableView {
             // Leading column (SVG): the PICKER's tick, or an ACTION's glyph — one or the other, and
             // never a switch. A mark here says WHERE YOU ARE; what a row is SET to is a word at the
             // trailing edge (below), and no row is allowed to say both.
+            let label_x = content_x + CHECK_W + GAP;
             let lead = if row.checked {
                 Some(crate::ui::icons::Icon::Check)
             } else {
@@ -707,10 +1002,12 @@ impl TableView {
             // trailing accessory (SVG)
             let mut trailing = 0.0f32;
             if let Some(ti) = row.ticon {
-                let cs = 26.0f32;
+                let cs = ACCESSORY_ICON_W;
                 let cr = Rect::new(text_right - cs, cyc - cs * 0.5, cs, cs);
                 crate::ui::icons::draw(p, ti, cr, base);
-                trailing = cs + 14.0;
+                trailing = cs + ACCESSORY_GAP;
+            } else if row.ticon_slot {
+                trailing = ACCESSORY_ICON_W + ACCESSORY_GAP; // reserved, drawn empty — see `Row::ticon_slot`
             }
             // PLACE 4 — the badge run, RIGHT-ALIGNED at the trailing edge and the outermost of the
             // three trailing runs (the design system's cell is a flex row whose label block takes
@@ -727,7 +1024,7 @@ impl TableView {
                 let run: f32 = row
                     .badges
                     .iter()
-                    .map(|b| crate::ui::widgets::badge_w(b.text(), None))
+                    .map(|b| crate::ui::widgets::badge_w(b.text(), None, measure))
                     .sum::<f32>()
                     + BADGE_GAP * (row.badges.len() - 1) as f32;
                 let mut bx = text_right - trailing - run;
@@ -741,9 +1038,9 @@ impl TableView {
                         border: if focused { base } else { theme::OVERLAY_BORDER },
                         bg: row_bg,
                     };
-                    bx += crate::ui::widgets::badge(p, bx, cyc, b.text(), None, sty) + BADGE_GAP;
+                    bx += crate::ui::widgets::badge(p, bx, cyc, b.text(), None, sty, measure) + BADGE_GAP;
                 }
-                trailing += run + 14.0;
+                trailing += run + ACCESSORY_GAP;
             }
             // Trailing VALUE — the read-out that says what this row is set to ("On"/"Off" for a
             // switch, or any word). One step behind the label in ink, so the label is what you read
@@ -752,16 +1049,15 @@ impl TableView {
             // step is the ink's ALONE — the run itself is bold (see [`VALUE_BOLD`], which all three
             // calls below take so the measure and the paint can never be two different faces).
             if let Some(v) = row.readout() {
-                let ink = match (focused, row.value_dim) {
-                    (true, false) => theme::ROW_VALUE_INK_ON,
-                    (true, true) => theme::ROW_VALUE_INK_ON_DIM,
-                    (false, false) => theme::TEXT_SECONDARY,
-                    (false, true) => theme::TEXT_TERTIARY,
-                };
+                let ink = row_value_ink(row, focused);
+                // the value gives way before the label (`row_columns`): elided to its column
+                let vsz = theme::size::LABEL;
+                let value_w = self.row_columns(row, frame.w, measure).value_w;
+                let v = crate::text::elide_by(v, value_w, false, |t| {
+                    measure.width_str(t, vsz, VALUE_BOLD != 0)
+                });
                 if let Ok(vc) = std::ffi::CString::new(v) {
-                    let vsz = theme::size::LABEL;
                     let vy = crate::text::text_vcenter_y(vsz, VALUE_BOLD, cyc);
-                    let vw = crate::text::text_width(vc.as_ptr(), vsz, VALUE_BOLD);
                     p.text(
                         vc.as_ptr(),
                         text_right - trailing,
@@ -771,7 +1067,6 @@ impl TableView {
                         2,
                         VALUE_BOLD,
                     );
-                    trailing += vw + 14.0;
                 }
             }
             // Single-line rows centre their label on the row by cap band. Two-line rows stack a
@@ -802,8 +1097,10 @@ impl TableView {
             } else {
                 (theme::size::HEADLINE, 1)
             };
-            let text_w = text_right - label_x - trailing;
-            let lbl = crate::text::elide(&row.label, text_w, lsz, lbold, false);
+            let text_w = self.label_width(row, frame.w, measure);
+            let lbl = crate::text::elide_by(&row.label, text_w, false, |t| {
+                measure.width_str(t, lsz, lbold != 0)
+            });
             if let Ok(cs) = CString::new(lbl) {
                 if two_line {
                     p.text(cs.as_ptr(), label_x, title_y, tsz, base, 0, tbold);
@@ -826,8 +1123,9 @@ impl TableView {
                 } else {
                     dimc
                 };
-                let detail =
-                    crate::text::elide(&row.detail, text_w, theme::size::CAPTION, 0, false);
+                let detail = crate::text::elide_by(&row.detail, text_w, false, |t| {
+                    measure.width_str(t, theme::size::CAPTION, false)
+                });
                 if let Ok(cd) = CString::new(detail) {
                     p.text(
                         cd.as_ptr(),
@@ -866,6 +1164,13 @@ impl TableView {
         0
     }
 
+    /// **One row, for an in-place edit** — a read-out that changes while the list does not (the
+    /// Subtitles panel's Color value), so a press re-writes that row alone instead of rebuilding
+    /// every section. `None` past the end. The caller must not change the row's height class.
+    pub(crate) fn row_mut(&mut self, gi: i32) -> Option<&mut Row> {
+        usize::try_from(gi).ok().and_then(|gi| self.sections.iter_mut().flat_map(|s| s.rows.iter_mut()).nth(gi))
+    }
+
     fn rows_at(&self, gi: i32) -> &Row {
         let mut n = 0i32;
         for sec in &self.sections {
@@ -885,8 +1190,76 @@ impl TableView {
     }
 }
 
+/// The ink of a row's trailing read-out ([`Row::readout`]): one step behind the row's label, so it
+/// follows the row's [`Row::dim`] as well as its own [`Row::value_dim`]. A dim row's label is
+/// already [`theme::TEXT_TERTIARY`], so its read-out takes [`theme::ROW_VALUE_INK_DIM`] below
+/// that; drawn at the live row's ink, a step that cannot be taken (the Timing section's Earlier at
+/// its floor) still announced itself at the trailing edge. Over the focused pill a dim row's
+/// read-out takes the quiet rung.
+fn row_value_ink(row: &Row, focused: bool) -> [f32; 4] {
+    match (focused, row.dim, row.value_dim) {
+        (true, false, false) => theme::ROW_VALUE_INK_ON,
+        (true, _, _) => theme::ROW_VALUE_INK_ON_DIM,
+        (false, true, _) => theme::ROW_VALUE_INK_DIM,
+        (false, false, false) => theme::TEXT_SECONDARY,
+        (false, false, true) => theme::TEXT_TERTIARY,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    /// **A dimmed row's read-out dims with it.** The Timing section's Earlier row at the
+    /// selected kind's floor is `dim`, and its "−0.1 s" read-out was drawn at the SAME ink as the
+    /// live Later row's — so the step that could not be taken still announced itself at the
+    /// trailing edge. The read-out stays one step behind its label: a dim label is
+    /// [`theme::TEXT_TERTIARY`], so a dim row's value sits below that.
+    #[test]
+    fn a_dim_rows_readout_follows_the_row_dim() {
+        let live = Row::new("Later").value("+0.1 s").value_dim(true);
+        let dimmed = Row::new("Earlier").value("\u{2212}0.1 s").value_dim(true).dim(true);
+        assert_ne!(
+            row_value_ink(&dimmed, false),
+            row_value_ink(&live, false),
+            "a dim row's read-out must not keep the live row's ink",
+        );
+        assert!(
+            row_value_ink(&dimmed, false)[3] < theme::TEXT_TERTIARY[3],
+            "a dim row's read-out sits a step behind its dim label",
+        );
+        // an undimmed, unquietened read-out is unchanged
+        let plain = Row::new("Audio").value("English");
+        assert_eq!(row_value_ink(&plain, false), theme::TEXT_SECONDARY);
+        assert_eq!(row_value_ink(&plain, true), theme::ROW_VALUE_INK_ON);
+        // over the focused pill a dim row's read-out takes the quiet rung
+        let dim_plain = Row::new("Audio").value("English").dim(true);
+        assert_eq!(row_value_ink(&dim_plain, true), theme::ROW_VALUE_INK_ON_DIM);
+    }
+
+    #[test]
+    fn table_motion_canonical_state_covers_hidden_spring_velocity_and_layout_flags() {
+        fn hash(table: &super::TableView) -> u64 {
+            let mut c = crate::ui::machine::Canon::new();
+            table.write_motion(&mut c);
+            c.finish()
+        }
+        let baseline = hash(&super::TableView::new());
+        for field in 0..7 {
+            let mut table = super::TableView::new();
+            match field {
+                0 => table.hl_top.vel = 1.0,
+                1 => table.hl_bot.vel = 1.0,
+                2 => table.scroll.vel = 1.0,
+                3 => table.sel = 7,
+                4 => table.list_focused = !table.list_focused,
+                5 => table.compact = !table.compact,
+                6 => table.tall = !table.tall,
+                _ => unreachable!(),
+            }
+            assert_ne!(hash(&table), baseline, "field {field}");
+            assert_eq!(hash(&table), hash(&table), "reading state must not advance animation");
+        }
+    }
+
     use super::*;
 
     /// ONE trailing read-out per row, resolved in ONE place. The rule the design system states and
@@ -947,6 +1320,30 @@ mod tests {
         let empty = TableView::new();
         assert_eq!(empty.last_row(), None);
         assert!(!empty.at_last_row());
+    }
+
+    /// **A menu never opens with its focus on a destructive action.** The opening row steps over
+    /// destructive rows and separators; when every row is destructive it is the first anyway.
+    #[test]
+    fn a_menu_opens_on_its_first_non_destructive_row() {
+        let mut t = TableView::new();
+        t.open_sections(vec![Section::new("S")
+            .row(Row::new("Sign out").destructive(true))
+            .row(Row::separator())
+            .row(Row::new("Settings"))]);
+        assert_eq!(t.sel, 2);
+        assert_eq!(t.opening_row(), 2);
+
+        t.open_sections(vec![Section::new("S")
+            .row(Row::separator())
+            .row(Row::new("Remove").destructive(true))]);
+        assert_eq!(t.sel, 1, "all destructive: the first selectable row anyway");
+
+        t.open_sections(vec![Section::new("S").row(Row::new("a")).row(Row::new("b"))]);
+        assert_eq!(t.sel, 0, "an ordinary menu still opens on its first row");
+
+        t.open_sections(Vec::new());
+        assert_eq!(t.sel, 0);
     }
 
     /// **A row OPENS something exactly when it wears the drill-in chevron.** `route_screen`'s
@@ -1042,5 +1439,45 @@ mod tests {
              (frame_h={frame_h}, content_h={content_h}, scroll={})",
             t.scroll_pos()
         );
+    }
+
+    /// Owner reports: the Settings table (issue 10) and the player's Quality popover (its last
+    /// rung) ended in a row cut mid-glyph by the viewport's bottom edge. A row crossing that edge
+    /// must be transparent before the edge reaches its ink, and a row resting with the list's own
+    /// bottom air below it must be whole. Swept over every scroll a DOWN walk passes through, in
+    /// both a Settings-sized frame and a popover-sized one, with plain and two-line rows.
+    #[test]
+    fn no_row_is_drawn_cut_mid_glyph_at_the_bottom_edge() {
+        let _serial = crate::testlock::serial();
+        for (frame_h, detail_every) in [(300.0f32, 2usize), (520.0, 3), (455.0, 0)] {
+            let mut t = TableView::new();
+            let mut sec = Section::new("S");
+            for i in 0..18 {
+                let mut row = Row::new(format!("row {i}")).value("value");
+                if detail_every > 0 && i % detail_every == 0 { row = row.detail("detail"); }
+                sec = sec.row(row);
+            }
+            t.set_sections(vec![sec, Section::new("T").row(Row::new("tail"))], 0, false);
+            let frame = Rect::new(0.0, 100.0, 700.0, frame_h);
+            let bottom = frame.y + frame.h;
+            let mut crossed = 0;
+            for step in 0..t.n_rows() {
+                if step > 0 { t.move_sel(1); }
+                for _ in 0..12 { t.update(1.0 / 60.0, frame_h); }
+                for i in 0..t.n_rows() {
+                    let Some(r) = t.row_frame(frame, i) else { continue };
+                    let a = t.bottom_edge_alpha(r.y, r.h, bottom);
+                    if r.y < bottom && r.y + r.h > bottom {
+                        crossed += 1;
+                        assert!(a == 0.0 || r.y + r.h - ROW_INK_PAD <= bottom,
+                            "row {i} at {}..{} is drawn at {a} while the edge {bottom} cuts its ink", r.y, r.y + r.h);
+                    }
+                    if r.y + r.h + BOT_PAD <= bottom {
+                        assert_eq!(a, 1.0, "row {i} resting above the bottom air is whole");
+                    }
+                }
+            }
+            assert!(crossed > 0, "the premise: rows do cross the bottom edge at {frame_h}");
+        }
     }
 }

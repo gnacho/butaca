@@ -13,7 +13,7 @@
 //! and routes Home, exactly as the Plex flow's handoff does.
 
 use super::client::{AuthError, JfClient};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Mutex;
 
 /// Why a connect attempt ended without a session. The form words these; the flow logs them.
@@ -54,6 +54,11 @@ struct Outcome {
 static MAIL: Mutex<Option<Outcome>> = Mutex::new(None);
 static EPOCH: AtomicU32 = AtomicU32::new(0);
 static mut PHASE: Phase = Phase::Editing;
+/// **Add-server mode**: the Settings "Conexión rápida" arm sets this before routing to the form.
+/// A successful attempt then APPENDS the new server to the configured list (and activates it)
+/// instead of REPLACING the whole config with a single entry. Reset by the caller once the
+/// landing follower consumes the success.
+static ADD_SERVER: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn phase() -> Phase {
     unsafe { std::ptr::addr_of!(PHASE).read() }
@@ -62,6 +67,11 @@ pub(crate) fn phase() -> Phase {
 fn set_phase(p: Phase) {
     unsafe { *std::ptr::addr_of_mut!(PHASE) = p };
     crate::ui::idle::invalidate();
+}
+
+/// Arm or disarm add-server mode, the flag [`start`]'s worker reads once when it captures it.
+pub(crate) fn set_add_mode(on: bool) {
+    ADD_SERVER.store(on, Ordering::SeqCst);
 }
 
 /// What the user typed, tidied for the wire: scheme defaults to `http://` because nobody should
@@ -101,6 +111,7 @@ pub(crate) fn start(url_raw: &str, user: &str, password: &str) -> Result<(), Fai
     }
     let epoch = EPOCH.fetch_add(1, Ordering::SeqCst) + 1;
     let (user, password) = (user.to_string(), password.to_string());
+    let add_server = ADD_SERVER.load(Ordering::SeqCst);
     set_phase(Phase::Working);
     let spawned = crate::task::spawn_small("jf-signin", move || {
         let outcome = std::panic::catch_unwind(move || {
@@ -113,7 +124,11 @@ pub(crate) fn start(url_raw: &str, user: &str, password: &str) -> Result<(), Fai
                         ok.user_name, ok.server_id
                     ));
                     super::install(client);
-                    super::boot::save_config(&url, &ok.user_name, &password, &device_id);
+                    if add_server {
+                        super::boot::append_server(&url, &ok.user_name, &password, &device_id);
+                    } else {
+                        super::boot::save_config(&url, &ok.user_name, &password, &device_id);
+                    }
                     Ok(())
                 }
                 Err(AuthError::Unauthorized) => Err(Fail::Refused),
@@ -187,6 +202,11 @@ mod tests {
 
     #[test]
     fn an_unparseable_address_never_reaches_the_network() {
+        // The module keeps flow state across tests in this process (the servers-list tests
+        // legitimately leave the form signed in) — start from a known phase rather than
+        // whatever a neighbour left.
+        let _guard = crate::testlock::serial();
+        reset();
         let before = EPOCH.load(Ordering::SeqCst);
         assert_eq!(start("http://", "u", "p"), Err(Fail::Parse));
         assert_eq!(start("://", "u", "p"), Err(Fail::Parse));
@@ -205,7 +225,7 @@ mod tests {
                 &origin,
                 "/Users/AuthenticateByName",
                 &["Authorization: MediaBrowser …"],
-                false,
+                crate::plex::CredentialPolicy::HttpsOnly,
             ),
             "a public address over http must not carry the password"
         );
@@ -215,7 +235,7 @@ mod tests {
                 &lan,
                 "/Users/AuthenticateByName",
                 &["Authorization: MediaBrowser …"],
-                false,
+                crate::plex::CredentialPolicy::HttpsOnly,
             ),
             "…while the LAN literal the PoC targets stays allowed"
         );

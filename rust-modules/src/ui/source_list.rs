@@ -1,11 +1,19 @@
 //! **The Sources ROW MODEL** — one list of libraries grouped by server, drawn on two surfaces.
 //!
-//! The Library toolbar's Source panel (`ui::library`, deliverable A) and the first-run route that
-//! asks the same question before Home (`ui::onboard`, deliverable F) show the SAME list: your
-//! servers, each server's libraries, and whether each one feeds Home. The canvas says so in as
+//! The Library toolbar's Source panel (`screens::library::menu`, deliverable A) and the Favorite libraries
+//! editor — first run, and its Settings twin (`crate::screens::onboard`, deliverable F) — show
+//! the SAME list:
+//! your servers, each server's libraries, and which of them are favorites. The canvas says so in as
 //! many words — F "is the same list as A's On Home level, in the flow's own frame rather than a
-//! panel" — so it is one builder, and the two screens differ only in the frame around it and in
-//! whether the roster-refresh row rides along.
+//! panel" — so it is one builder, and the two screens differ only in the frame around it, in the
+//! LEVEL they ask for, and in whether the roster-refresh row rides along.
+//!
+//! **They no longer differ in a control.** The panel used to carry a `TabPill::segment` pair at its
+//! top swapping its own two levels; the levels are now a property of the SURFACE, one each and
+//! fixed — the panel is a picker, the editor is the switches — so there is nothing to swap and the
+//! pills are gone. That was never only a tidy-up: with the switch governing the whole app rather
+//! than Home alone, a picker that could turn into an editor would let a library be un-favourited
+//! from inside the list of favourites and then vanish out of it under the cursor.
 //!
 //! Building it twice would have been the ordinary thing to do and the wrong one: the two would
 //! have drifted on exactly the details that make the list readable — which column carries a mark,
@@ -19,16 +27,20 @@ use crate::browse::{SourceState, SrcGroup};
 use crate::plex::probe::Location;
 use crate::ui::table::{Row, Section};
 
-/// The two levels of the Sources panel, swapped by the pills at its top — the same swap the
-/// player's track menu makes between Audio and Subtitles.
+/// The two levels of the Sources list — **one per surface now, and not swappable from either.**
+/// They were the two halves of one panel, exchanged by segmented pills at its top; see the module
+/// doc for why that control is gone.
 ///
 /// They differ in MEDIUM as well as in position, and that is the design's rule: a **mark** says
 /// where you are, a **word** says what is set, and no row ever says both. So Browse draws one tick
-/// and no words, On Home draws every row's word and no ticks — neither level mirrors the other's
+/// and no words, OnHome draws every row's word and no ticks — neither level mirrors the other's
 /// marks.
 ///
-/// The first-run route is [`Level::OnHome`] and nothing else: it has no current library to point
-/// at, because it runs before there is a Library screen to have been on.
+/// The Library panel is [`Level::Browse`] and nothing else, and is scoped to the FAVOURITES of the
+/// type being browsed. The Favorite libraries editor is [`Level::OnHome`] and nothing else — it has
+/// no current library to point at, because first run happens before there is a Library screen to
+/// have been on, and it is the one surface that lists every granted library so a non-favourite has
+/// a way back.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Level {
     /// a picker: one tick, on the library you are looking at; OK closes the panel
@@ -43,7 +55,7 @@ pub(crate) enum Level {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum SrcAction {
     None,
-    /// browse (Browse level) or pin (On Home level) this section
+    /// browse (Browse level) or favourite (OnHome level) this section
     Library(usize),
     Recheck,
 }
@@ -72,21 +84,30 @@ pub(crate) enum Tail {
 fn state_word(s: SourceState) -> Option<&'static str> {
     match s {
         SourceState::NotProbed | SourceState::Reachable => None,
-        SourceState::Unauthorized => Some(crate::i18n::t(UNAUTHORIZED)),
-        SourceState::Unreachable => Some(crate::i18n::t(UNREACHABLE)),
+        SourceState::Unauthorized => Some(unauthorized()),
+        SourceState::Unreachable => Some(unreachable()),
+        SourceState::InsecureOnly => Some(insecure_only()),
     }
 }
 
 /// The server answered and **refused our token**: a sharing-grant problem, never a network one.
 ///
-/// It has to read as a different KIND of fault from [`UNREACHABLE`], because it has a different
+/// It has to read as a different KIND of fault from [`unreachable`], because it has a different
 /// remedy and the wrong word costs the user an evening — "not reachable" sends somebody to look at
 /// a router for something no router was ever part of. The remedy is in this same panel, one row
 /// down: *Check for new shares* is the `/api/v2/resources` refetch that reissues the per-(user,
 /// server) `accessToken`, which is why this run does not have to carry an instruction as well.
-const UNAUTHORIZED: &str = "Not authorized";
+fn unauthorized() -> &'static str { crate::i18n::msg::widgets_source_unauthorized() }
 /// Did not answer at all — refused, timed out, or unresolvable.
-const UNREACHABLE: &str = "Not reachable";
+fn unreachable() -> &'static str { crate::i18n::msg::widgets_source_unreachable() }
+/// Answered, verified as the right machine, but only over a transport this build may not put a
+/// credential on without the person's consent (issue #95, PLX-NATIVE-10). A different kind of fault from [`unreachable`] again — the server IS
+/// there, it is the connection to it that has to change (HTTPS), not the server itself.
+///
+/// Deliberately NOT the consent flow's "without encryption" wording: this row names a state no
+/// question can change (the server was ineligible, or not yet offered); an eligible server is
+/// asked through `screens::plaintext_question`, and a granted one reads as connected.
+fn insecure_only() -> &'static str { crate::i18n::msg::widgets_source_insecure() }
 
 /// The word a WORKING group's connection tier is said in — `None` when there is nothing worth
 /// saying.
@@ -104,8 +125,8 @@ const UNREACHABLE: &str = "Not reachable";
 fn tier_word(t: Location) -> Option<&'static str> {
     match t {
         Location::Local => None,
-        Location::Remote => Some(crate::i18n::t("Remote")),
-        Location::Relay => Some("Relay"),
+        Location::Remote => Some(crate::i18n::msg::widgets_source_remote()),
+        Location::Relay => Some(crate::i18n::msg::widgets_source_relay()),
     }
 }
 
@@ -124,6 +145,9 @@ fn usable(g: &SrcGroup) -> bool {
     match g.state {
         SourceState::NotProbed | SourceState::Reachable | SourceState::Unreachable => g.reachable(),
         SourceState::Unauthorized => false,
+        // Verified alive, but nothing behind it is browsable in this build — same shape as
+        // Unauthorized, a different remedy (HTTPS to the server, not a fresh grant).
+        SourceState::InsecureOnly => false,
     }
 }
 
@@ -196,7 +220,7 @@ pub(crate) fn sections(
                     // is the library that works.
                     .value_dim(r.last_pinned)
                     .detail(if r.last_pinned {
-                        crate::i18n::t("Home needs one library").to_string()
+                        crate::i18n::msg::widgets_source_needs_library().to_string()
                     } else {
                         r.count_line.clone()
                     }),
@@ -216,7 +240,7 @@ pub(crate) fn sections(
         acts.push(SrcAction::None);
         // no leading glyph, deliberately: on the Browse level that column carries the picker's
         // tick, and an action mark in it would be a second grammar for one column
-        last.rows.push(Row::new(crate::i18n::t("Check for new shares")));
+        last.rows.push(Row::new(crate::i18n::msg::widgets_source_new_shares()));
         acts.push(SrcAction::Recheck);
     }
     (out, acts)
@@ -273,6 +297,24 @@ mod tests {
         assert_ne!(
             words[2], words[3],
             "the two faults are told apart, or the remedy is a guess"
+        );
+    }
+
+    /// Issue #95 plan §4/S9: `InsecureOnly` is a FIFTH sentence, told apart from `Unreachable`
+    /// (the server is alive, just not over a transport this build can use) and it dims the group
+    /// exactly as `Unauthorized` does — `reachable() == false`, unlike the two silent states.
+    #[test]
+    fn insecure_only_gets_its_own_word_and_dims_like_unauthorized() {
+        assert_eq!(
+            accessory(&group(SourceState::InsecureOnly, None, "friend")),
+            "Not secure \u{b7} friend"
+        );
+        assert!(!group(SourceState::InsecureOnly, None, "friend").reachable());
+        assert!(!usable(&group(SourceState::InsecureOnly, None, "friend")));
+        assert_ne!(
+            accessory(&group(SourceState::InsecureOnly, None, "friend")),
+            accessory(&group(SourceState::Unreachable, None, "friend")),
+            "verified-but-plaintext and never-answered must read as different faults"
         );
     }
 
@@ -333,4 +375,6 @@ mod tests {
             "…and this is exactly the answer that made the fourth state worth its own arm"
         );
     }
+
+    include!("source_list_contract_tests.rs");
 }

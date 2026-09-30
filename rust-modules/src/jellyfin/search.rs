@@ -67,8 +67,10 @@ pub(crate) fn search(c: &JfClient, terms: &str, limit: i64) -> Option<Projection
 fn tag_hit(it: &BaseItemDto, collection: bool) -> TagHit {
     TagHit {
         sid: SERVER_ID,
+        sec: 0, // one virtual library: hits carry no section grain on this backend
         name: it.name.clone(),
         tag_key: String::new(), // a plex.tv global person guid — this backend has no such thing
+        fav: false,
         id: it.id.clone(),
         thumb: match it.image_tags.get("Primary") {
             Some(t) => format!("/Items/{}/Images/Primary?tag={t}", it.id),

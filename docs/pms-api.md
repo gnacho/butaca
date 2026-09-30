@@ -121,6 +121,11 @@ spec's "Media Queries" section documents the full query language.
   type=2 has odd semantics — returned 1 of 10 live); episodes `unwatched=1` normal.
 - **Show granularity:** `?type=2|3|4` on `/all` lists shows/seasons/episodes flat (no
   children-walking). Type ids: movie=1, show=2, season=3, episode=4.
+  Rechecked live 2026-09-26: `includeMeta=1` returns all three `Type` entries and marks the
+  requested one `active`. Seasons and episodes advertise a compound Show sort and its `descKey`;
+  use that descending expression as supplied. Neither advertises a Genre filter. Typed
+  `/firstCharacter?type=2|3|4` counts match the corresponding flat listing totals.
+  Seasons accept `unwatchedLeaves=1`; episodes use `unwatched=1`.
 - **Letter index:** `GET /library/sections/{key}/firstCharacter` → per-letter `Directory[]` with
   `size` counts in titleSort order (articles stripped); `/firstCharacter/{L}` returns the items.
   **`?firstCharacter=X` on `/all` is silently IGNORED** — jump = prefix-summed
@@ -128,8 +133,16 @@ spec's "Media Queries" section documents the full query language.
   404s.) `titleSort<=`/`>=` behave as a lexicographic range, not begins/ends-with.
 - **Collections — two id spaces:** `/library/sections/{key}/collections` → `Metadata[]` with
   **ratingKey** (browse via `/library/collections/{rk}/children`); the `/collection` filter dir
-  returns **tag ids** for `/all?collection={tag}`. Don't mix. `includeCollections=1` inlines
-  collections into `/all`.
+  returns **tag ids** for `/all?collection={tag}`. Don't mix. A collection row's `index` is that
+  tag id, while its `guid` is shared with search hits and member `Collection[]` tags. Adding
+  `includeCollections=1` to `/hubs/search` yields full collection `Metadata[]` rows rather than
+  tag-shaped `Directory[]` hits.
+- **Collection routes and hubs:** `/library/collections/{rk}/children` and `/items` return the same
+  paged members. A promoted `custom.collection.*` hub embeds the members and carries the collection
+  ratingKey in its identifier; a member's `collection.related.*` hub lists the whole collection.
+  Automatic art is `/library/collections/{rk}/composite/{stamp}` (possibly with a query), while a
+  custom poster is `/library/metadata/{rk}/thumb/{stamp}`. An unshared section answers 403 from its
+  collections listing; preserve that as authorization denial rather than an empty result.
 - **Paging gotcha:** a query-param `X-Plex-Container-Size` WITHOUT `Start` is silently ignored —
   always send both (the client does), or use the headers. Header `Size: 0` = count-only probe.
   `totalSize` is only present on paged responses.
@@ -168,8 +181,42 @@ the spec but **this server does not emit it on `Role[]`** — treat 0 as unknown
   is required** or you get XML; and **an unknown person is a `200` with `totalSize:0`**, not a 404,
   so "no such person" and "the request failed" are different answers. Being a different HOST, it
   needs DNS+TLS and therefore `net.rs`/libcurl, never the raw `stream.rs` socket. The typed client is
-  `plex/discover.rs`; a filmography list (`…/library/people/{tagKey}/credits` → `CreditGroup[]` of
-  Discover items, NOT local library rows) is documented there and not yet built.
+  `plex/discover.rs`.
+- **The filmography IS built** — `…/library/people/{tagKey}/credits` → `CreditGroup[]` of Discover
+  items, NOT local library rows. `AccountClient::person_credits`, drawn by the independently
+  mounted `screens/filmography.rs`.
+  **The shape was measured 2026-09-06 and is not what the names suggest.** The container is
+  `MediaContainer.CreditGroup[]` (never `Metadata`, which the DTO also accepted until a real
+  response settled it). A group is `{title, type, Credit[]}` — `title` is "Actor"/"Producer"/
+  "Appearances", `type` is `actor`/`producer`/`appeared`, and there is **no `size`**, so a group's
+  count IS its row count. A credit is `{order, role, Metadata}` where `Metadata` is ONE item, whose
+  whole key set is `art`, `key`, `originallyAvailableAt`, `publicPagesURL`, `ratingKey`, `slug`,
+  `thumb`, `title`, `type`, `year`.
+  **There is NO `guid` on that item**, and this is the trap: PMS states the same identity as
+  `plex://movie/5d7768295af944001f1f7477` while this endpoint states it as a bare `ratingKey` of
+  `5d7768295af944001f1f7477`. The join is therefore on the guid's **last path segment**
+  (`person::guid_tail`), not on the whole string. Modelling a `guid` field here — it defaults to
+  empty on every row — made the availability join match NOTHING while every count around it read
+  healthy: `joinable=5`, 544 rows drawn, not one markable.
+  `thumb` is an **absolute URL** on `image.tmdb.org` or `metadata-static.plex.tv`. That is not a
+  reason to skip the artwork: `posters::poster_key` URL-encodes exactly such a URL into
+  `/photo/:/transcode?url=…` and the SERVER fetches it, the same path Search's `actor` headshots
+  take. And its group counts are **not** `CreditType`'s — that
+  record says 1745 actor credits where this returns 222 — so the tabs and the person page's entry
+  row spend the group's own, never the profile's. The one thing NOT settled live is which key the
+  container puts the groups under (`CreditGroup` or `Metadata`); the DTO accepts both, logs which
+  one answered, and treats a body carrying NEITHER as a failure to be retried rather than as a
+  person with no career.
+- **Unlike the profile beside it, `/credits` REQUIRES a token** (measured 2026-09-05): with no
+  `X-Plex-Token` it answers `401 {"error":"Unauthorized","message":"You must provide a token!"}`,
+  where `/library/people/{tagKey}` answers 200 unauthenticated. And the token it wants is the
+  plex.tv **account** token, not a PMS server token — which is what puts the whole filmography out
+  of reach of every automated boot in this repo: those sign in with `/tmp/plxnative-token`, a
+  server token, and leave `Session::account_token` empty. It is the same wall
+  `/tmp/plxnative-personbio` exists for one step further along — the biography degrades to a blank
+  line, the filmography to nothing at all — and it is why `/tmp/plxnative-personcredits` had to be
+  written. Reaching either with real data needs a signed-in account (`make sim` with a real
+  session, or the debug install with `--no-token`).
 - **The person's titles:** `GET /library/people/{personId}/media` → `Metadata[]`, everything the
   person appears in **across EVERY library section in one request** (person 161 → 3 items;
   person 6059 → 6). This is the right call for a person page; `?actor=<id>` below is the right
@@ -217,6 +264,63 @@ Verified Continue Watching item (movie, trimmed):
  "duration":6543120,"viewOffset":131703,"audienceRating":7.2}
 ```
 
+**Hub `title` is PMS-owned text, localized server-side by `X-Plex-Language` — and PMS's own
+per-string translation coverage for a tag is partial, which this app now papers over for every
+STANDARD hub rather than forwarding it as-is** (issue #12, investigated 2026-09-28: a Belarusian
+UI showed some hub titles in Belarusian and others in Russian/English on one Home screen).
+`plex::client::headers`/`pms_headers` still send the literal selected UI tag (`en`/`es`/`be` —
+`identity::language()` → `i18n::current().language().tag()`) on **every** PMS operation, hubs
+included (`rust-modules/src/plex/client.rs`'s
+`pms_headers_carry_the_literal_selected_ui_language_be_included` test pins that for all three
+shipped tags) — that part of the earlier record stands. What changed is that neither
+`screens/home/mod.rs` nor a library's own browse grid renders `hub.title` unconditionally:
+`plex::hub_title::localized_hub_title` sits between a PMS `Hub` and the row the screen draws, at
+BOTH call sites — Home's whole-catalog merge (`pms.rs::project`, one row per source, `/hubs`) and
+a library's own shelves (`browse::section_hubs::parse_hubs`, `/hubs/sections/{id}`) — one shared
+table so the two cannot drift apart. It overrides the title, **unconditionally** (not gated on
+whether the selected tag happens to be one PMS translates), for a hubIdentifier this catalog
+recognizes, and the override differs by **scope** because PMS itself titles the "Recently Added"
+family differently at the two endpoints (§3 vs §3a):
+
+| scope | hubIdentifier | client-side override | locale key |
+|---|---|---|---|
+| Home | `home.ondeck` / `home.onDeck` | "On Deck" | `browse.home.hub.on_deck` |
+| Home | `home.playlists` | "Recent Playlists" | `browse.home.hub.recent_playlists` |
+| Home | `home.movies.recent` / `.television.recent` / `.music.recent` / `.videos.recent` / `.photos.recent`, when the identifier names the household's ONLY hub of that type in the response | "Recently Added Movies" / "…TV" / "…Music" / "…Videos" / "…Photos" | `browse.home.hub.recently_added_movies` / `_tv` / `_music` / `_videos` / `_photos` |
+| Home | the same 5 `home.*.recent` identifiers when PMS mints MORE THAN ONE hub under the same identifier (two same-type libraries), and any `movie.recentlyadded.<id>` / `show.recentlyadded.<id>` / `tv.recentlyadded.<id>` | "Recently Added in {library}" (library = the hub's own `librarySectionTitle`) | `browse.home.hub.recently_added_in` |
+| Section (`/hubs/sections/{id}`) | `movie.recentlyadded.<id>` / `show.recentlyadded.<id>` / `tv.recentlyadded.<id>` | "Recently Added" (no library name — the section page already is that library, and PMS itself drops the qualifier here) | `browse.library.hub.recently_added` |
+
+The per-type Home wording ("Recently Added Movies") is right only when nothing needs
+disambiguating: `home_keeps_recently_added_rows_for_two_same_type_libraries`
+(`pms_multi_source_merge_tests.rs`) measured PMS minting one `home.television.recent` hub PER TV
+library when a household owns more than one, each with the library folded into `title`
+("Recently Added in TV" vs "…in TV HDR") — so `pms.rs::project` counts occurrences of each
+`hubIdentifier` in the response BEFORE choosing a wording (`hub_identifier_counts`,
+`identifier_is_unique`), and only a hub that is the sole one under its identifier gets the
+per-type form (`one_movie_and_one_tv_library_get_the_natural_per_type_recently_added_titles`). A
+household with exactly one library of a type gets a `home.movies.recent` hub that is really that
+ONE library's shelf wearing the whole-server identifier — the per-type form, not "Recently Added
+in Movies", which reads oddly when there is nothing to disambiguate. `home.continue` never reaches
+this table at all: Continue Watching's `HubRow.title` has never come from PMS — it is set from
+`i18n::msg::browse_home_continue_watching()` where the dedicated `/hubs/continueWatching` deck is
+merged into `HubRow`s (`pms.rs::merge_with_scope`) — and the standard-hub override above is the
+SAME rule (an unconditional client-side string, not one gated on PMS's per-tag coverage) applied
+to the shelves Continue Watching's own fix never touched. A per-section deck
+(`movie.inprogress.<id>` / `tv.inprogress.<id>`, §3a) and every other section-hub family this
+catalog has not specifically enumerated — a rotating genre/actor rail, a collection
+(`custom.collection.*`) — keep drawing `hub.title` verbatim at BOTH scopes, exactly as before:
+there is still no substitute catalog for arbitrary server-owned text, and no live evidence (this
+file, `docs/plex-openapi.json`, or the repo's own fixtures) that those families need one. Tests:
+`pms_multi_source_merge_tests.rs`'s `a_recently_added_library_hub_renders_the_be_catalog_string_under_a_be_ui`,
+`one_movie_and_one_tv_library_get_the_natural_per_type_recently_added_titles`,
+`a_lone_movie_library_renders_the_be_per_type_catalog_string_under_a_be_ui`, and
+`an_unrecognized_hub_identifier_keeps_the_pms_title_verbatim` (Home scope); `section_hubs.rs`'s
+`a_be_ui_localizes_the_section_recently_added_hub_and_leaves_an_unknown_one_alone` (Section scope).
+This cannot be verified further against a live PMS from here (the mock server under
+`tests/mock_pms.py` does not model per-string translation coverage, by design — see its own header
+comment); do not infer a different PMS-side fallback chain (e.g. "falls back to the account's
+region") from the one field report that started this.
+
 Hub items **do include full `Media[].Part[]`**, so Continue Watching can direct-play
 without a second metadata fetch. Resume position = `viewOffset` ms.
 `home.ondeck` items are episodes with `grandparentTitle`, `parentIndex`, `index`,
@@ -225,6 +329,80 @@ without a second metadata fetch. Resume position = `viewOffset` ms.
 Recommendation for the app: use `/hubs/promoted?count=12` for the home screen
 (one request → Continue Watching + On Deck + Recently Added + collections),
 and hub `key` + paging for "see all".
+
+---
+
+## 3a. Per-library hubs — `/hubs/sections/{id}` (verified live 2026-09-05, PMS 1.43.3)
+
+```
+GET /hubs/sections/{sectionId}?count=12&X-Plex-Token=...
+```
+
+**This is the library's own shelf list, and it is the SERVER OWNER's setting, not ours.** It is
+the `Library Recommended` column of *Plex Web → Manage → Libraries*, in the order the owner
+arranged by dragging. Nine rows there is nine hubs here, in that order — verified by comparing a
+live response against the owner's own table on 2026-09-05, row for row.
+
+Measured on this server, and every one of these is a thing the OpenAPI spec does not say:
+
+* **Items ARE embedded** in each hub's `Metadata[]`. `docs/plex-openapi.json`'s example shows
+  hubs with a nonzero `size` and an EMPTY `Metadata` array, which would have meant a second
+  request per shelf; that is an artifact of the example, not the endpoint.
+* **Empty hubs are still returned**, with `size: 0` and no `Metadata`. On a sparse library that
+  is most of them — one movie section here answered with 6 hubs of which 5 were empty. **A
+  client that draws what it is given draws five headings over nothing**, so dropping an empty
+  hub is required, not a nicety.
+* **`count` defaults to 6** and is honoured up to at least 24. It is items-per-hub; it never
+  changes how many hubs come back.
+* **`onlyTransient` is a no-op on this server** — `0`, `1` and absent all returned the same nine
+  hubs. Do not send it and do not rely on it.
+* **`Accept: */*` returns XML here too**, like every other PMS route. The client's explicit
+  `Accept: application/json` is what makes this parse at all.
+* **A hub's `type` can be `mixed`** (`tv.recentlyadded.N`), so an item's own `type` is the only
+  thing worth reading. `pms::parse_item` already does that.
+* **Continue Watching is present, scoped to the section**, as `movie.inprogress.N` /
+  `tv.inprogress.N` with `key=/hubs/sections/N/continueWatching/items`. **It is NOT
+  `home.continue`**, so `pms::hub_is_continue`'s match does not carry over — a per-section
+  shelf is identified by the `*.inprogress.*` id or that `key`.
+* **A collection is a hub like any other** (`custom.collection.N.<id>.<id>`,
+  `key=/library/collections/{id}/children`), which is why the owner's table lists
+  "Toy Story Collection" in the same column as "Recently Added".
+* **PMS titles a `*.recentlyadded.<id>` hub plain "Recently Added" here — no library name**,
+  unlike the same hubIdentifier on the whole-server `/hubs` (§3's "Recently Added in Movies").
+  This route is already scoped to one library, so there is nothing to disambiguate. This app's own
+  client-side override (§3's table, Section row) reproduces that: `browse.library.hub.recently_added`,
+  not `browse.home.hub.recently_added_in`.
+
+**The trap worth carrying: two of these hubs CHANGE IDENTITY BETWEEN REQUESTS.** The genre and
+the actor/director shelves rotate their subject on every call — six consecutive requests
+returned `movie.genre.1.3897`, `.153`, `.48`, `.150`, `.152`, `.149`, and
+`movie.by.actor.or.director.1.<id>` likewise, sometimes answering with zero items and therefore
+vanishing from the drawn set entirely. So a refetch of one library can legitimately return a
+different SHELF COUNT and different shelf IDs with no change on the server. Anything that
+remembers a position by `hubIdentifier` needs a fallback for an id that simply is not there any
+more, and any UI that lays out below these shelves must not let a refresh move the ground under
+a viewer.
+
+Example shape (trimmed; one populated hub and one empty one):
+
+```json
+{"MediaContainer":{"size":9,"librarySectionID":1,"librarySectionTitle":"Movies","Hub":[
+  {"hubIdentifier":"movie.inprogress.1","title":"Continue Watching","type":"movie","size":2,
+   "more":false,"key":"/hubs/sections/1/continueWatching/items","Metadata":[
+     {"ratingKey":"1001","key":"/library/metadata/1001","type":"movie","title":"Alpha",
+      "year":2001,"thumb":"/library/metadata/1001/thumb/1","duration":6124864,
+      "librarySectionID":1,"viewOffset":1048421}]},
+  {"hubIdentifier":"movie.by.actor.or.director.1.3932","title":"Top Movies with …",
+   "type":"movie","size":0,"more":false,
+   "key":"/library/sections/1/all?unwatched=1&actor=3932&sort=audienceRating:desc"}
+]}}
+```
+
+**Not yet established**, and both need someone other than this server to answer: whether a
+**shared-library token** authorizes this route at all and what it returns when it does not, and
+a direct before/after proof that **reordering** a row in *Manage → Libraries* reorders the
+response (the order matching the owner's table exactly is strong evidence, not a controlled
+test).
 
 ---
 
@@ -270,7 +448,11 @@ A `Directory[]` row is the same `Tag` record the cast row on a detail page is bu
 A **collection** row carries `tag`, `id`, `key`, `count`, `filter`, `librarySectionID`, `reason`,
 `reasonTitle` and a `guid` (`collection://…`) — and **no `tagKey`, no `thumb`, no `ratingKey`**. So
 `key` is the only handle a collection hit gives you, and a screen that keys tags by `tagKey`
-silently drops every collection. A person's `thumb` is an **absolute** `metadata-static.plex.tv`
+silently drops every collection. **The app therefore sends `includeCollections=1`** on every
+search (`plex::Client::search`): the `collection` hub then answers full collection **`Metadata[]`**
+rows — `ratingKey`, `index` (== the tag `id`), `thumb`, `childCount`, `UltraBlurColors`, plus
+`score` — and the table above holds only without the flag. `search::project` keeps the tag shape as
+the fallback for a server that ignores it. A person's `thumb` is an **absolute** `metadata-static.plex.tv`
 URL, not a PMS path (§5's transcoder still fetches it, but nothing may prepend the server host).
 
 **The same person arrives once per library section.** Wallace Shawn comes back twice — section 1
@@ -546,6 +728,67 @@ The picker must iterate `Media[]` and choose by codec/resolution, not take `[0]`
 Episode container metadata also carries `grandparentTitle`/`grandparentThumb` at the
 `MediaContainer` level for header rendering.
 
+### Extras / trailers (verified live 2026-09-12, PMS 1.43)
+
+Movie and show metadata can name a primary trailer and a list of extras. The Trailer control
+reads **one playable trailer** from that list (`Detail::trailer()`). The detail page draws
+every extras row, trailer included, as an Extras shelf (`Detail.extras`). `trailer()` only
+picks which of those rows the background preview and Play Trailer use. The hero Trailer disc
+is not drawn.
+
+```
+GET /library/metadata/{rk}?includeChapters=1&includeMarkers=1&includeOnDeck=1&includeExtras=1
+GET /library/metadata/{rk}/extras
+```
+
+Verified against this household's PMS (no titles recorded here):
+
+| | movie | show |
+|---|---|---|
+| metadata GET (today's flags, no extras) | ~25 KB | ~21 KB |
+| same GET with `includeExtras=1` | ~45 KB (+20 KB) | ~29 KB (+8 KB) |
+| dedicated `GET …/extras` | ~21 KB | ~9 KB |
+| extras rows | 14 | 3 |
+| playable `subtype=trailer` rows | 2 | 3 |
+
+`?includeExtras=1` nests the **same playable rows** as `/extras` under `Metadata[0].Extras.Metadata[]`
+(a dict with a `Metadata` array, not a bare array). Each extra is `type: "clip"` and already
+carries `Media[]` / `Part[0].key` / `videoCodec` / `audioCodec` / `duration` — not identity-only.
+`Part.key` is a PMS-absolute path that is **not** `/library/parts/…` (online trailer assets);
+it still has a part id, a container (`mp4`), and a `Stream[]`. Empty-`Part` extras were not
+observed on this server. Folding extras onto the existing metadata GET therefore adds no serial
+hop; a dedicated `/extras` GET is the same payload as a second trip.
+
+The client still issues `/extras` **in parallel with** `/related` on movie and show detail only,
+rather than `includeExtras=1` on every `metadata()` call: episode and season pages must not pay
+the extras blob, and a refused extras GET must not fail the whole page. Serial depth stays 2
+(movie) / 5 (show).
+
+**`primaryExtraKey`** is the path `/library/metadata/{rk}` (OpenAPI's spelling; a bare rk was
+not observed). It matches both `extra.ratingKey` (the path tail) and `extra.key`. On this
+library it named a trailer that was also in the extras list.
+
+**`subtype` / `extraType`** seen together:
+
+| subtype | extraType |
+|---|---|
+| `trailer` | 1 |
+| `behindTheScenes` | 5 |
+| `sceneOrSample` | 6 |
+
+Either `subtype == "trailer"` or `extraType == 1` is enough to count as a trailer. Behind-the-
+scenes / featurettes / interviews are not this control.
+
+**PlayQueue for an extra.** `POST /playQueues?uri=/library/metadata/{extraRk}&type=video&continuous=1`
+returned **HTTP 400** on the simple uri form; the app's real POST uses
+`server://{machineIdentifier}/com.plexapp.plugins.library/library/metadata/{rk}`. Sibling extras
+under `continuous=1` would be the Up-Next hazard, so trailer sessions **omit `continuous`**
+rather than filtering a queue after the fact. `up_next_of` is already episode-gated (`kind ==
+"episode"`), so a clip successor would not arm the tile even if a queue came back larger than 1.
+
+Shows carry no `Media` of their own; a show-level trailer still has its extra's `Part`. Episode
+and season `/extras` are not requested.
+
 ---
 
 ## 5. Images (poster / art)
@@ -553,20 +796,32 @@ Episode container metadata also carries `grandparentTitle`/`grandparentThumb` at
 ### Transcoded (use this for all UI images)
 
 ```
-GET /photo/:/transcode?width={w}&height={h}&minSize=1&upscale=1
-    &url={urlencoded thumb-or-art path}&X-Plex-Token=...
+GET /photo/:/transcode?width={w}&height={h}&minSize=1&url={urlencoded thumb-or-art path}
+    [&format=png]&X-Plex-Token=...
 ```
 
-`url` is the URL-encoded value of `thumb`/`art`/`grandparentThumb` (e.g.
-`%2Flibrary%2Fmetadata%2F1%2Fthumb%2F1778526065`). `minSize=1` = fill (crop to
-exact w×h), `upscale=1` = allow upscaling small sources so returned size is exact.
+This is exactly what `plex::Client::image_transcode_path` (`rust-modules/src/plex/transcoder.rs`)
+builds; no other image request exists. `url` is the URL-encoded value of `thumb`/`art`/
+`grandparentThumb` (e.g. `%2Flibrary%2Fmetadata%2F1%2Fthumb%2F1778526065`). `format=png` is sent
+only for a clearLogo, which needs its alpha. **No `upscale` parameter is sent.**
+
+**`minSize=1` means COVER: the result fills the w×h box and keeps the SOURCE's aspect.** It is
+not cropped to exactly w×h, so its long side can overshoot the box: a 2:3 portrait requested at
+300×300 comes back about 300×450. The client depends on this. `ui::Rect::cover_uv` and
+`widgets::art_uv` crop the texture to the tile at draw time using its decoded size, and
+`img.rs`'s decode-budget limits assume an overshooting long side. *Unverified against a real
+PMS:* this is the PMS photo-transcoder semantics the code is written to, and the model
+`tests/mock_pms.py` implements (`scale=…:force_original_aspect_ratio=increase`). The results
+below are consistent with it, but they cannot tell cover from crop. The poster's source is 2:3
+(its raw size is 1920×2880, below), so it already had the box's shape, and the art's source
+size was not recorded.
 
 Verified live:
 
 | request | result |
 |---|---|
-| `width=420&height=236&url=/library/metadata/1/art/...` | 200, `image/jpeg`, exactly 420×236, 29 KB |
-| `width=300&height=450&url=/library/metadata/1/thumb/...` | 200, `image/jpeg`, exactly 300×450, 36 KB |
+| `width=420&height=236&url=/library/metadata/1/art/...` | 200, `image/jpeg`, 420×236, 29 KB |
+| `width=300&height=450&url=/library/metadata/1/thumb/...` | 200, `image/jpeg`, 300×450, 36 KB |
 
 ### Raw (no transcode wrapper) — verified, do NOT use for grids
 
@@ -578,17 +833,22 @@ Returns 200 `image/jpeg` but at **full original size**: 1920×2880, **1.3 MB**
 (vs 36 KB transcoded). ~40× the bytes and a GLES texture upload/downscale per cell —
 always go through `/photo/:/transcode`.
 
-### Size recommendations for 1920×1080 UI
+### Boxes the app requests
 
-| UI element | request size | notes |
+Each image is requested at the size its tile draws, not a multiple of it (the TV panel is 1:1 at
+1080p), so a source already at the tile's aspect uploads exactly at tile size. The table is
+mirrored in `img.rs`'s decode-budget note.
+
+| UI element | request (all `minSize=1`) | source aspect differs from the box → |
 |---|---|---|
-| Landscape shelf card 420×236 | `width=420&height=236&minSize=1&upscale=1`, `url=art` (or episode `thumb`) | exact-size JPEG, ~25–40 KB |
-| Poster card 300×450 | `width=300&height=450&minSize=1&upscale=1`, `url=thumb` | ~30–45 KB |
-| Detail background | `width=1920&height=1080&minSize=1&upscale=1`, `url=art` | fetch once, ~150–300 KB |
-| Focus zoom headroom (optional) | request 1.25×: 525×295 / 375×563 | only if cards scale >1.1 on focus |
-
-Requesting the exact card size (no devicePixelRatio multiplier — the TV panel is 1:1
-at 1080p) keeps texture memory minimal: 420×236 RGBA = ~400 KB VRAM per card.
+| Poster card | `width=250&height=375`, `url=thumb` | long side overshoots; cropped at draw (`art_uv`) |
+| Landscape still (episode / shelf) | `width=420&height=236`, still → show art → poster | cropped at draw (`art_uv`) |
+| Person headshot, profile avatar | `width=300&height=300`, `url=thumb` | cropped at draw, headshots riding high (`Crop::Headshot`) |
+| Profile chip avatar | `width=128&height=128` | cropped at draw |
+| Player info panel still | `width=480&height=270` | cropped to its 320×180 box at draw |
+| Home hero backdrop | `width=1280&height=720`, `url=art` | overflowed off-panel (`Rect::cover`) |
+| Detail backdrop | `width=1920&height=1080`, `url=art` | overflowed off-panel (`Rect::cover`) |
+| Hero clearLogo | `width=600&height=240&format=png` | contained in its column (`hero_logo::fit`) |
 
 ---
 
@@ -666,6 +926,50 @@ user-selected fixed rungs remain on the progressive direct-play/start.mkv paths 
 
 ---
 
+## 6a. Plex Pass audio DSP — `boostDialog` / `normalizeLoudness` (issue #266, measured against PMS 1.43.4.10903 with Plex Pass)
+
+Two universal-transcoder query params, each `1` or absent (never `0` — omit to mean off). PMS
+accepts them on the transcode leg only; `Stream.canNormalizeLoudness` (bool, lenient-decoded like
+every other PMS bool) says per-track whether the server has the loudness analysis the DSP needs.
+Every session opened for these measurements was stopped afterward; see `/tmp/plx266/measurements.md`
+for the raw captures behind this table.
+
+| # | Request | Result |
+|---|---|---|
+| M1 | MDE shape `directPlay=1&directStream=1&directStreamAudio=1` plus either param | direct play becomes a Part TRANSCODE: video copy, audio transcoded to ac3 with the same channel count. `directPlayDecisionText` never names the enhancement — there is no wire signal that a DSP-driven remux differs from an ordinary one. Both params `=0` reproduces the baseline (no remux). |
+| M2 | Remux shape `directPlay=0&directStream=1&directStreamAudio=1` (profile matroska, hevc/h264, ac3/eac3) | AC3 2.0: the baseline COPIES the audio; adding a param TRANSCODES it (audio decision `copy`→`transcode` is directly observable — the wire test for "did the server honour the ask"). AAC 5.1: audio transcodes to ac3 6ch with or without the params (already transcoded at baseline, so the ask is unobservable there — this is `EnhancementOutcome::Unverified`). |
+| M3 | Re-encode shapes (`directStream=1` with a quality ceiling; `directStream=0&directStreamAudio=1`) | Audio transcodes even at baseline, and a server-selected SRT is burned into the video. The params change nothing observable — the enhancement is never offered on a re-encode rung (I5) precisely because there is nothing here to verify. |
+| M4 | Enhanced remux plus `subtitleStreamID` for an embedded SRT | `subtitles=embedded` or `=sidecar`: video copy, subtitle decision `unavailable` — PMS refuses to carry a text subtitle into the progressive MKV the enhancement produces. `subtitles=auto`: the server instead re-encodes the video and burns it. Either way a subtitle and the enhancement cannot share a route, which is I6. |
+| M5 | Part GET (`Range: bytes=0-1023`) on a transcode session, after MDE, after MDE followed by an enhanced-remux decision on the same session, and after only an enhanced decision | 206 Partial Content in every case from a host, including with the remux encoder still live, stopped physically, stopped with `closeResourceSession=1`, or abandoned. PR 4's device run nonetheless met a **503** on the Part right after releasing an enhanced remux; what PMS keyed it on did not reproduce off the television, so a release asks for the Part before it trials it and falls to the plain remux on a refusal (`route::decision::admit_original_part`). |
+| M6 | MDE `/decision` on a session whose transcoder is live | The MDE ENDS that transcoder: an HLS session's later segments answer 404 (200 without the MDE) and its stop 404; a progressive session's `start.mkv` at an offset on the same id answers 400 until it is re-decided. Re-issuing MDE is harmless only when nothing is live — never before a Part GET whose rollback needs the encoder still running. |
+
+**Known device-only gap on M5 (`audio_enhancement_normalize_reset`, `tests/manifest.json`, 2026-09-29).**
+Admitting the Part before the trial (`admit_original_part`) does not close the 503 in every case:
+with the enhanced `start.mkv` actually **playing** first — timelines posted on that same session id,
+not just decided — the admission's own Part GET still meets HTTP 503 on the television, and the
+release honestly lands on the plain codec-copy Original remux (`enhancement: server refused the
+Original Part (HTTP 503); restoring Original as a remux`) instead of Direct Play. Host probes as
+Guest against the same server and Part identity could not reproduce this: every Part GET came back
+200/206, with the remux encoder live, stopped, or abandoned, same session id, identical header keys.
+The one variable a host cannot create is the posted timelines, so the leading untested hypothesis is
+that PMS refuses a raw Part on a session it has already seen post `state=playing` timelines (a
+"session lacking permission to direct play" style refusal) — untestable from a host because a
+timeline post is a real watch-history write. The harness case is `known_gap` (XFAIL) until this is
+understood or worked around; a release from a session that has posted playing timelines returns to
+Direct Play only when PMS admits the Part, otherwise it returns to the plain Original remux.
+
+**Client-side reading.** `route::plan::enhancements_offered` (I1-I7) gates the ASK; the wire params
+are never sent outside a Direct/Remux target even when the viewer's preference is on (M3, I5).
+`route::EnhancementOutcome` grades the ANSWER from the params' own observability in the table above:
+`Applied` (M1/M2 AC3: the transcode happened and the source codec is in the profile's copy list),
+`Unverified` (M2 AAC: transcoded regardless, so honoring the ask cannot be told apart from ignoring
+it), `Refused` (the server declined the params outright, or the audio decision came back `copy`
+despite them). The player's Audio tab ("Boost dialog"/"Normalize loudness", `ui/track_menu.rs`)
+and the diagnostics Audio-row suffix / `route_line`'s `enh=<word>` both read this outcome, never the
+bare ask.
+
+---
+
 ## 7. Progress reporting — `/:/timeline` (DOCUMENTED ONLY, not called live)
 
 Sources: python-plexapi `plexapi/base.py` (`Playable.updateTimeline`,
@@ -737,8 +1041,12 @@ against a PMS, which nobody has run.
 `rust-modules/src/plex/client.rs::playback_identity` (constants in `plex/identity.rs`) always emits
 nine fields: `X-Plex-Client-Identifier`, `-Product`, `-Version`, `-Platform`, `-Platform-Version`,
 `-Device`, `-Device-Name`, `-Model` and `-Provides`, plus the token. The central PMS request choke
-point conditionally sends **`X-Plex-Language` as a header** from the inherited process locale on
-every operation, omitting it for an absent or neutral locale. `X-Plex-Device-Vendor` is sent to
+point sends **`X-Plex-Language` as a header** on every operation, using the UI language resolved
+at boot from the app preference and TV locale (English fallback). This is THIS app's own
+System-preference resolution (webOS locale → shipped catalog, `i18n::mod.rs`); once resolved, the
+literal tag is what goes on the wire, unchanged by whether PMS happens to have a full translation
+for it — see §3's hub-title note for the issue #12 case (`be`) this distinction settles.
+`X-Plex-Device-Vendor` is sent to
 plex.tv's authorized-device surface but not PMS;
 `X-Plex-Device-Screen-Resolution` and `X-Plex-Features` remain absent from both. The table is the
 target; this paragraph is the state.

@@ -64,10 +64,22 @@ pub const UNDER_LABEL_AIR: f32 = 22.0;
 /// shelf's own title. Replaces the old `CARD_H + ROW_TITLE_H + 144.0` — same 549px total
 /// (`34 + 26 + 375 + 92 + 22`), now built from the same two named constants Library's `PITCH` uses,
 /// instead of a bare `144` that silently baked in a DIFFERENT air than Library's `96` did.
+///
+/// **Since 2026-09-05 it is the pitch of a FOCUSED shelf — the maximum — rather than the pitch of
+/// every shelf.** The label block exists only while its shelf holds focus, and reserving all 92px
+/// of it on all of them spent most of a 1080 panel on emptiness; a shelf column is now a running
+/// sum of `card_row::ROW_PITCH_FIXED + card_row::under_band(e)`, which is exactly this at `e == 1`.
+/// Every screen that stacks shelves — Home, the Library, Search and the person page — accumulates
+/// it that way, and `card_row::settled_top` is the closed form a scroll target must use. What is
+/// unchanged is that this constant remains the ONE authority on a poster shelf's rhythm: the four
+/// screens differ in their fixed part (a landscape row, a typed search block), never in the band.
 pub const ROW_PITCH: f32 =
     TITLE_DY + CARD_DY + CARD_H + crate::ui::card_row::UNDER_LABEL_H + UNDER_LABEL_AIR;
 pub const CONTENT_Y: f32 = 200.0;
-pub const GLOW_PAD: f32 = 48.0;
+/// Off-screen cull/clip-edge slack for a focused card's glow AND its risen drop-shadow — big enough
+/// to cover the worst case, a large poster's `CARD_SHADOW_BLUR + CARD_SHADOW_DY` (44+18=62) plus a
+/// 1px AA margin, rounded up.
+pub const GLOW_PAD: f32 = 64.0;
 pub(crate) use crate::surface::{LOGICAL_H as SCR_H, LOGICAL_W as SCR_W};
 
 /// **The safe area itself** — the box every piece of REQUIRED content has to fit inside, as one
@@ -253,11 +265,13 @@ pub enum Key {
     Down,
     /// LEFT and RIGHT carry a flag because the ladder asks about them in two ways that accept
     /// DIFFERENT sets, and the difference is behaviour rather than an accident of spelling.
-    /// `alt` is `false` when the press arrived as the plain [`SDLK_LEFT`]/[`SDLK_RIGHT`] sym, and
+    /// [`classify`] sets `alt` to `false` when the press arrived as the plain [`SDLK_LEFT`]/[`SDLK_RIGHT`] sym, and
     /// `true` when it arrived only as a TRANSPORT key, [`WCODE_REWIND`]/[`WCODE_FASTFORWARD`]
     /// (in either field). The non-player four-way nav dispatch matches `alt: false` alone, so an
     /// alternate-code LEFT on Home reaches no arm that acts on it; the player's scrub arm and the
     /// Chapters strip match both. Preserve that asymmetry — it is what the flag is for.
+    /// [`classify_input`] also uses `alt: false` for an already-canonical navigation direction;
+    /// its screen consumers act on that direction without branching on the raw-code provenance.
     Left {
         alt: bool,
     },
@@ -353,6 +367,48 @@ pub fn classify(sym: c_uint, wcode: c_uint) -> Key {
     Key::Other
 }
 
+/// Classify an owned input event. The Input machine's canonical key is authoritative: pointer
+/// releases and scripted navigation have no raw SDL pair at all. Only `Other` needs raw fields
+/// to distinguish transport actions outside the small navigation alphabet. Screens must use
+/// this boundary instead of reclassifying raw fields and losing the machine's decision.
+pub fn classify_input(key: super::machine::Key, sym: c_uint, wcode: c_uint) -> Key {
+    use super::machine::Key as Canonical;
+    match key {
+        Canonical::Up => Key::Up,
+        Canonical::Down => Key::Down,
+        Canonical::Left => Key::Left { alt: false },
+        Canonical::Right => Key::Right { alt: false },
+        Canonical::Ok => Key::Ok,
+        Canonical::Back => Key::Back,
+        Canonical::Other => classify(sym, wcode),
+    }
+}
+
+#[cfg(test)]
+mod canonical_input_tests {
+    use super::*;
+    use crate::ui::machine::Key as Canonical;
+
+    #[test]
+    fn canonical_keys_work_without_raw_codes_and_outrank_them() {
+        for (canonical, expected) in [(Canonical::Up, Key::Up), (Canonical::Down, Key::Down),
+            (Canonical::Left, Key::Left { alt: false }), (Canonical::Right, Key::Right { alt: false }),
+            (Canonical::Ok, Key::Ok), (Canonical::Back, Key::Back)] {
+            assert_eq!(classify_input(canonical, 0, 0), expected);
+            assert_eq!(classify_input(canonical, 0, WCODE_PAUSE), expected);
+        }
+    }
+
+    #[test]
+    fn other_preserves_physical_transport_and_scrub_codes() {
+        for (sym, wcode) in [(0, WCODE_PLAY), (0, WCODE_PAUSE), (0, WCODE_PLAYPAUSE),
+            (0, WCODE_STOP), (0, WCODE_REWIND), (0, WCODE_FASTFORWARD), (0, WCODE_EXIT),
+            (0, WCODE_POINTER_HIDDEN), (0, 0)] {
+            assert_eq!(classify_input(Canonical::Other, sym, wcode), classify(sym, wcode));
+        }
+    }
+}
+
 /// **Which way the Library grid pages, if this press pages it at all.** `Some(-1)` up, `Some(1)`
 /// down, `None` for everything else.
 ///
@@ -397,7 +453,7 @@ pub fn page_dir(sym: c_uint, wcode: c_uint) -> Option<c_int> {
 ///    click — the exact pair of side effects this function exists to withhold.
 /// 3. [`page_dir`] — the Library pager, a SEPARATE predicate (see its doc).
 /// 4. [`SDLK_BACKSPACE`] / [`SDLK_CLEAR`] — the television keyboard's own edit keys, read inside
-///    the Search screen (`ui::search::key`), which the classifier never sees.
+///    the owned Search screen (`screens::search`'s key match), which the classifier never sees.
 /// 5. An ASCII digit **in `sym`** — the who's-watching PIN keypad types straight from the remote's
 ///    number buttons (`ui::profiles`' own `digit_of`, which owns that behaviour).
 ///
@@ -488,7 +544,7 @@ mod tests {
     ///
     /// **So tiles are entered at REST, and that is a decision rather than an oversight.** A focused
     /// card is drawn `RowStyle::HOME`'s 1.09 about its own centre, which puts the first column's
-    /// painted edge ~11px past the margin, and `GLOW_PAD` spills 48 further. Neither is new content:
+    /// painted edge ~11px past the margin, and `GLOW_PAD` spills 64 further. Neither is new content:
     /// the pop MAGNIFIES ink already inside the frame, strictly containing its resting rect
     /// (`widgets`' own note on the control pop), and the caption under it — the TEXT — does not
     /// scale at all. The line this draws is between decoration that overflows and *the thing
@@ -519,15 +575,14 @@ mod tests {
 
         // ---- the shared chrome, and the screens composed on it ------------------------------
         probe("widgets", &crate::ui::widgets::overscan_rects);
-        probe("library", &crate::ui::library::overscan_rects);
-        probe("detail", &crate::ui::detail::overscan_rects);
+        probe("detail", &crate::ui::detail_layout::overscan_rects);
         probe("player_hud", &crate::ui::player_hud::overscan_rects);
 
         // ---- the panels, each at the widest/tallest state its own clamp admits ---------------
-        probe("account_menu", &crate::ui::account_menu::overscan_rects);
+        probe("account_menu", &crate::screens::account_menu::overscan_rects);
         probe("track_menu", &crate::ui::track_menu::overscan_rects);
         probe("more_menu", &crate::ui::more_menu::overscan_rects);
-        probe("stats", &crate::ui::stats::overscan_rects);
+        probe("stats", &crate::app::diagnostics::overscan_rects);
         drop(probe);
 
         // ---- the screens whose outermost geometry is already public here --------------------
@@ -535,7 +590,7 @@ mod tests {
         // first shelf heading is the highest ink the page draws under the bar.
         r.push((
             "home hero text column",
-            Rect::new(MARGIN_X, 380.0, crate::ui::home::HERO_COL_W, 400.0),
+            Rect::new(MARGIN_X, 380.0, crate::ui::landing_hero::COL_W, 400.0),
         ));
         r.push((
             "home first shelf heading (grid view)",
@@ -546,7 +601,7 @@ mod tests {
             Rect::new(MARGIN_X, GRID_TOP_Y + CARD_DY, CARD_W, CARD_H),
         ));
         // …and the focused card's block at the BOTTOM of its reveal: card + the 96px label band,
-        // which is what `home::update`'s and `library`'s reveal rules keep clear of the edge.
+        // which is what the owned Home's and `library`'s reveal rules keep clear of the edge.
         r.push((
             "home focused card block, revealed",
             Rect::new(
@@ -558,10 +613,10 @@ mod tests {
         ));
 
         // Search: the bare query line, and the scope line below it.
-        r.push(("search field", crate::ui::search::FIELD));
+        r.push(("search field", crate::screens::search::layout::FIELD));
         r.push((
             "search first shelf heading",
-            Rect::new(MARGIN_X, crate::ui::search::CONTENT_TOP, 400.0, 40.0),
+            Rect::new(MARGIN_X, crate::screens::search::layout::CONTENT_TOP, 400.0, 40.0),
         ));
 
         // Person: the portrait at the margin, and the air the reveal keeps under a shelf.
@@ -574,7 +629,7 @@ mod tests {
         // Onboarding + login: both centre or hang off the same margin.
         r.push((
             "onboard copy column",
-            Rect::new(MARGIN_X, 150.0, crate::ui::home::HERO_COL_W, 500.0),
+            Rect::new(MARGIN_X, 150.0, crate::ui::landing_hero::COL_W, 500.0),
         ));
 
         for (name, rect) in r {

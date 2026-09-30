@@ -8,14 +8,13 @@ description: >
   TOUCHED — pure logic, a screen, text rasterization, an animation, frame rate, the player
   pipeline, selection/resume/markers, FFI, the release feature set, packaging — to the cheapest
   tier that can actually see it, names the tiers that cannot, and hands off to `ui-sim`,
-  `tv-session`, `tv-lock` or a plain `make check`. There are three tiers here with non-obvious
-  blind spots, and both recorded mistakes were the same shape: a green result from a tier that was
-  never able to see the thing being changed.
+  `tv-session`, `tv-lock` or a plain `make check`. Each tier has non-obvious blind spots, and a
+  tier that cannot see a change passes it green.
 ---
 
 # which-tier — what actually verifies this change
 
-This skill **decides**. `ui-sim`, `tv-session`, `tv-lock`, `fleet-plan`, `crash-triage` and
+This skill **decides**. `ui-sim`, `tv-session`, `tv-lock`, `fleet-plan`, `profile-tv`, `crash-triage` and
 `cut-release` **execute** — it ends by handing off to one of them, and it deliberately does not
 restate what they already document.
 
@@ -54,10 +53,9 @@ is not a subset failure, it is a whole bypassed layer:
   and a regression there passes it green;
 - it reaches **no resume, no markers, no Up Next, no `/:/timeline` reporter, no track SELECTION,
   and no transcode path** whatsoever;
-- `engine`'s `_ =>` arm maps an unrecognised audio codec to `"AC3"` and a non-`hevc` video codec to
-  the H264 payload — so a trigger that was **never read** still produces exactly the right payload
-  for the AC-3 baseline case. That is the tier's own false-PASS shape, and it is why the matrix
-  carries cases expecting `"AC3 PLUS"` and `"AAC"`.
+- Unsupported audio declarations fail before Load. The matrix's codec assertions still verify
+  that each fixture supplies the intended declaration; an omitted trigger cannot be inferred
+  from a generic liveness assertion.
 
 **Never ship on the default alone.** `tests/README.md` has the full tier table.
 
@@ -65,7 +63,7 @@ is not a subset failure, it is a whole bypassed layer:
 
 | tier | command | cost | can never answer |
 |---|---|---|---|
-| **1 — host suite** | `make check` | **3.8 s warm**, no TV | anything that needs a native library, a Linux kernel, or a pixel |
+| **1 — host suite** | `make check` | **3.8 s warm once running**, no TV, but machine-wide-serialized: it queues behind any other worktree's `make check` first | anything that needs a native library, a Linux kernel, or a pixel |
 | **1.5 — simulator** | `make sim` + the `ui-sim` skill | seconds, N at once | frame rate, text rasterization, anything about video |
 | **2 — the device** | `tv-lock` → `wake-tv` → `tv-session` / `tests/run.py` | one television, serialized | what only a PHOTOGRAPH of the panel shows — see below |
 
@@ -93,9 +91,12 @@ whole of what that tool exposes to the public internet, and the only gate it has
 cargo can see a python file).
 
 **It is not sub-second, and the figure that circulates is one of its five parts.** The ~0.3 s
-everybody quotes is `cargo test --lib` alone; end to end it is now well over ten seconds warm, most
-of the growth being suite size and **~7 s of the lab selftest, which is mostly two DELIBERATE
-rate-limit waits** — so a ten-second-plus pause there is the target working, not a hang. (That step
+everybody quotes is `cargo test --lib` alone, and that part is itself ~28 s now; end to end the
+gate runs in MINUTES warm. The bulk of it is `python3 tests/test_harness.py`, which shells out to
+`ci/check-deps.sh` about thirty times to prove each structure gate still catches a planted
+violation — 386 s of a 616 s run, measured 2026-09-17, and that is AFTER the 2.5× speed-up of
+`check-deps.sh` itself. The lab selftest's **~7 s is mostly two DELIBERATE rate-limit waits** — so
+a ten-second-plus pause there is the target working, not a hang. (That step
 also SSDP-probes the LAN to report whether a UPnP gateway is present; still no television, still no
 lock.) Do not write a new number here: measure it if you need one — this file has already carried a
 `3.8 s` that four separate additions made wrong.
@@ -124,14 +125,20 @@ ships, because `-Z build-std` is what ships.
    on Darwin the same call makes `connect_timeout` report *success* on a socket that never
    connected. A socket assertion passing here is evidence about macOS.
 3. **Some tests are serialized on crate globals**, not parallel. `metadata.rs`'s take `lib.rs`'s
-   crate-wide `testlock::serial()`; `ui/home.rs`'s take that module's `FOCUS` mutex for its
-   `static mut fr`/`fc`. `ui/xfade.rs` is the cautionary case, and its own module doc says why:
+   crate-wide `testlock::serial()`, and so does every owned-screen test that seeds a store —
+   an owned screen keeps no focus of its own (the `FocusEngine` does), but `pms`'s catalog statics
+   are shared across modules. `ui/xfade.rs` is the cautionary case, and its own module doc says why:
    pure value semantics **with one exception that costs them their parallelism** — `tick` reports
    to `ui::idle`'s process-global dirty flag, which `ui::idle`'s own "a settled screen does not
    repaint" assertions read. Without the lock they fail *other modules'* tests intermittently,
    which is the worst shape a flake can take. **Anything you make report to the frame gate inherits
    that obligation**, and reach for `testlock` rather than a fresh local mutex when the global is
-   shared across modules.
+   shared across modules. Since 2026-09-10 the lock records the holding THREAD and the stores
+   assert it (`testlock::assert_held` in `browse::reset`/`append_sections`,
+   `plex::servers::reset_for_test` and the app frame trunk), so a write without the guard is a
+   deterministic panic in the offending test instead of an intermittent failure in a bystander —
+   which is how the `app::chrome` strip flake was finally attributed to three unguarded
+   `app::heartbeat_word_tests` cases.
 
 ### Tier 1.5 — the simulator
 
@@ -150,6 +157,9 @@ It provably cannot answer:
 - **Anything about video.** The 29-symbol Starfish/ACB seam does not exist off-device; Play lands
   on the app's real failure read-out, which is correct behaviour and a convenient way to look at
   that screen.
+- **The cached modal ground.** The simulator runs with the frame cache OFF (`frame cache:
+  CopyTexSubImage error=0x500 — cache off`), so `popover::host`'s cached stages never run and a sim
+  capture cannot show a fault in them; only the TV can.
 
 **Two host-only traps that read as your change being broken.** The recipes are `ui-sim`'s; they are
 named here only so you can tell them from a regression in your own edit.
@@ -173,7 +183,7 @@ OS-level mutex, and two jobs on it produce plausible WRONG data rather than a cl
 ./tests/run.py                 # the synthetic tier — the player pipeline, no Plex, no credentials
 ./tests/run.py --server        # the 21 library-backed cases — selection, the whole Plex chain
 ./tests/run.py --fps           # the UI fps scenes (implies --server; resolves the test identity)
-./tests/run.py --fps-player    # + the player-overlay scenes (info-panel, track-menu, chapters-panel)
+./tests/run.py --fps-player    # + the player-overlay scenes (manifest `tier: "player"`; `--list --server` names them)
 ./tests/run.py --list          # OFFLINE: the synthetic cases, each declaration and raster, and
                                #          which fixtures the pack is missing. THE census — a count
                                #          written into prose here rotted inside one commit.
@@ -207,12 +217,12 @@ knows the set is theirs.
 
 | what you changed | run, in order | what those tiers CANNOT see |
 |---|---|---|
-| **pure logic** — `route.rs`, `plex/`, `metadata.rs`, `browse.rs`, `aq.rs`, `stream.rs` parsing, `ff.rs` helpers | `make check` (+ a new test) → `make sim-shot` if a screen reads it | the native libraries; Linux syscall semantics; whether the value reaches a pixel |
+| **pure logic** — `route/plan.rs`, `plex/`, `metadata.rs`, `browse.rs`, `aq.rs`, `stream.rs` parsing, `ff.rs` helpers | `make check` (+ a new test) → `make sim-shot` if a screen reads it | the native libraries; Linux syscall semantics; whether the value reaches a pixel |
 | **UI layout / spacing / colour / a new screen** (`ui/`) | `make check` → `make sim-shot SIM_W=1920 SIM_H=1080` (`ui-sim`) → **one device capture, looked at** | the fps tier is blind to pixels (the 2026-08-13 watched-mark bug); a FITTED sim shot is 960x540 on a 1x display, layout evidence only — which is what `SIM_W`/`SIM_H` exist for |
 | **text rasterization, fonts, the `theme::size` ladder** | `tools/font-hint-audit.py` → device capture | **the simulator is disqualified** — different FreeType; `make check` never rasterizes anything |
 | **anything ANIMATED, or repainting from a CLOCK** | two host tests (runs / rests) → `--fps` with a real `fps_floor`, plus an `fps_ceiling` if the screen settles | `loop_floor` cannot see a stopped animation at all; the simulator cannot see rate |
-| **frame rate / perf** | `./tests/run.py --fps` (implies `--server`), unarmed | never the simulator; never a run with a profiler armed; `drift` is reported, never asserted |
-| **player pipeline, demux, Starfish/ACB, the Load payload** | `make check` (pure `ff.rs` logic) → `./tests/run.py` (synthetic) → `--server` if selection is involved | the synthetic tier bypasses `metadata → plan → apply_plan` and false-PASSes an unread trigger via `engine`'s `_ =>` arm |
+| **frame rate / perf** | `profile-tv`: `./tests/run.py --fps` unarmed, or one scene with `--graphics-profile` for pacing + IRQ + HWCNT | never the simulator; only the profile's production leg has quotable FPS; `drift` is reported, never asserted |
+| **player pipeline, demux, Starfish/ACB, the Load payload, `route/decision.rs`** | `make check` (pure `ff.rs` logic) → `./tests/run.py` (synthetic) → `--server` if selection is involved | the synthetic tier bypasses `metadata → plan → apply_plan` and false-PASSes an unread trigger via `engine`'s `_ =>` arm |
 | **track selection, resume, markers, Up Next, `/:/timeline`** | `./tests/run.py --server` — **only** | the synthetic tier reaches none of these; a bare `./tests/run.py` is not evidence about any of them |
 | **FFI / linkage / `dynlib!`** | `tools/fwcompat.py` → `make check` → **`make sim` or `make macapp`** → device | **there is no link error any more**; and the device cannot see an Apple-ABI variadic bug — see below |
 | **the release feature configuration** | `cargo +nightly check --lib --no-default-features` → `make RELEASE=1` | `make check`, `make` and `make sim` all build DEV features; a broken `RELEASE=1` is invisible to every one of them |
@@ -237,8 +247,10 @@ every `floor` in the suite still passes.
 
 **Anything that animates from a CLOCK rather than a spring** — a millisecond ramp, a phase, a
 countdown — must call `ui::idle::invalidate()` itself. `note_spring` cannot see it, and both
-`Xfade::tick` (every route dip) and `Spinner::draw` (every loading read-out) **shipped FROZEN**
-before they were made to report. No fps scene caught either, because those graded `loop=`. The same
+`Xfade::tick` (every CONTENT cross-fade) and `Spinner::draw` (every loading read-out) **shipped
+FROZEN** before they were made to report. (`Xfade` drove the ROUTE dip too until restructure phase
+12 lifted that onto `ui::containers::transition::PageDip`, which reports from inside its own
+`tick`.) No fps scene caught either, because those graded `loop=`. The same
 applies to a new async landing that repaints: without an `invalidate()` it arrives invisibly until
 the next keypress.
 
@@ -311,13 +323,16 @@ built the package; a real release goes through the **`cut-release`** skill.
 | needs a suite on the television | `tv-lock` → `./tests/run.py`, plus `--server` / `--fps` / `--fps-player` as the router says |
 | several agents, and one of them needs the set | **`fleet-plan`** — at most ONE lane gets the television; the rest go to the simulator |
 | new FFI into a TV library | **`bind-tv-lib-abi`** (evidence via **`decompile-tv-lib`**) |
+| it is alive but slow or stuck | **`profile-tv`** |
 | it died on the set | **`crash-triage`** |
 | it is going out to users | **`cut-release`** |
 
 ## Cheapest first, and why it is not just thrift
 
-Run `make check` before waking a television. It costs under a second, it needs no NDK, no lock and
-no set, and it is the **only signal you get without taking the mutex** — which matters because the
+Run `make check` before waking a television. It costs under a second once it is running, needs no
+NDK and no TV, and it is the **only signal you get without taking the television's mutex** — a
+different mutex now serializes `make check` itself machine-wide (`tools/check-lock.py`), so a
+contended run waits on another worktree rather than on the TV — which matters because the
 television is not merely slow, it is *shared*, and every minute you hold it is a minute another
 lane is queued behind you or, worse, colliding with you and producing data that looks fine. The
 ordering is therefore: host suite → simulator → device, and you move down a tier only when the one

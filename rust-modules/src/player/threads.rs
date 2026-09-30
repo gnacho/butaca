@@ -52,6 +52,9 @@ pub(crate) fn load_thread(
             .native_load_elapsed_ms
             .store(elapsed_ms, Ordering::Relaxed);
         super::log(&format!("native: Load returned after {elapsed_ms}ms"));
+        // issue #74 item 3: the Load-returned gate opening, bucketed — never the millisecond
+        // count. This is the ordinary path; `pump.rs`'s two D.1.4 budget arms record the other
+        // half, for a Load that never returns at all.
     }
     if let Some(ticket) = route_start {
         crate::route::publish_route_start_result(
@@ -67,9 +70,7 @@ pub(crate) fn load_thread(
         // Publish it. This used to be logged and discarded, so a refused payload was
         // indistinguishable from a slow one and the pump waited on a `loadCompleted` that could
         // never come.
-        super::SHARED
-            .load_failed
-            .store(true, std::sync::atomic::Ordering::Release);
+        SHARED.publish_native_load_failure(native_epoch);
     }
 }
 
