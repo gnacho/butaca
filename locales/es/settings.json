@@ -268,5 +268,6 @@
   "settings.privacy.lan": "Privacidad",
   "settings.privacy.lan.detail": "Nada sale de tu red local.",
   "settings.privacy.lan.copy": "Cómo trata Butaca tus datos.",
-  "settings.privacy.lan.body": "Nada sale de tu red local. Butaca no tiene cuenta, no envía telemetría y no recoge analíticas. Tus credenciales se guardan solo en este televisor. El único servidor con el que habla la app es el que tú has configurado."
+  "settings.privacy.lan.body": "Nada sale de tu red local. Butaca no tiene cuenta, no envía telemetría y no recoge analíticas. Tus credenciales se guardan solo en este televisor. El único servidor con el que habla la app es el que tú has configurado.",
+  "settings.root.jellyfin_copy": "Gestiona este televisor y tus servidores Jellyfin. Todo se queda en tu red local: sin cuenta, sin telemetría, nada sale de ella."
 }

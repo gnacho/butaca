@@ -1228,7 +1228,12 @@ impl RootPage {
                 RouteLayout::screen(),
                 None,
                 crate::i18n::msg::settings_title(),
-                crate::i18n::msg::settings_root_copy(),
+                // The flavor's root names its own truth, not Plex's account sync.
+                if cfg!(feature = "jellyfin") {
+                    crate::i18n::msg::settings_root_jellyfin_copy()
+                } else {
+                    crate::i18n::msg::settings_root_copy()
+                },
             ),
             &self.table,
             GroupId(0),

@@ -202,6 +202,11 @@ mod tests {
 
     #[test]
     fn an_unparseable_address_never_reaches_the_network() {
+        // The module keeps flow state across tests in this process (the servers-list tests
+        // legitimately leave the form signed in) — start from a known phase rather than
+        // whatever a neighbour left.
+        let _guard = crate::testlock::serial();
+        reset();
         let before = EPOCH.load(Ordering::SeqCst);
         assert_eq!(start("http://", "u", "p"), Err(Fail::Parse));
         assert_eq!(start("://", "u", "p"), Err(Fail::Parse));

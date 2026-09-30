@@ -1093,5 +1093,9 @@
   "settings.privacy.lan.body": {
     "value": "Nothing leaves your local network. Butaca has no account, no telemetry and no analytics. Your credentials live only on this television. The only server the app talks to is the one you configured.",
     "description": "Settings, account, onboarding or privacy UI: the Jellyfin flavor's self-contained privacy statement."
+  },
+  "settings.root.jellyfin_copy": {
+    "value": "Manage this television and your Jellyfin servers. Everything stays on your local network: no account, no telemetry, nothing leaves it.",
+    "description": "Settings root left-column intro on the Jellyfin flavor: settings.root.jellyfin_copy"
   }
 }
