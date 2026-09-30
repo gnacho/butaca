@@ -328,6 +328,16 @@ pub(crate) enum LibraryType {
 impl LibraryType {
     /// The TYPE menu's rows for a section of `kind`, in menu order.
     pub(crate) fn offered(kind: SecKind) -> &'static [LibraryType] {
+        // The Jellyfin flavor has no collections wired (BoxSets are the server-side concept and
+        // the flavor's fetch never lands them): the Collections entry would open an empty page,
+        // which is worse than no entry at all (issue #52). Seasons/Episodes DO work there.
+        #[cfg(feature = "jellyfin")]
+        if crate::jellyfin::client().is_some() {
+            return match kind {
+                SecKind::Movie => &[Self::Primary],
+                SecKind::Show => &[Self::Primary, Self::Seasons, Self::Episodes],
+            };
+        }
         match kind {
             SecKind::Movie => &[Self::Primary, Self::Collections],
             SecKind::Show => &[Self::Primary, Self::Seasons, Self::Episodes, Self::Collections],
