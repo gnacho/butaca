@@ -289,6 +289,9 @@ fn owned_search_wheel_scrolls_without_moving_focus_and_dpad_reveals_again() {
         let cx = parts.cx::<AppHost>(rig.views_with(crate::route::idle_session_for_test()), &rig.measure);
         d.top_screen().unwrap().place(&field.elem, &cx, At::Drawn).unwrap().rest_rect.y
     };
+    // The wheel's premise is the panel DOWN (the fork mounts it up, PR #29): dismiss it
+    // first, exactly as the user would.
+    frame(&mut d, &mut rig, AppArg::Search, tick(1), script_key(Key::Back, tick(1)));
     let before = field_y(&d, &rig);
     frame(&mut d, &mut rig, AppArg::Search, tick(1), vec![InputEvent { at: tick(1), source: Source::Sdl,
         kind: InputKind::Wheel { dy: -1.0 } }]);
@@ -406,19 +409,22 @@ fn owned_search_adopts_panel_text_without_restarting_or_losing_the_commit() {
     frame(&mut d, &mut rig, AppArg::Search, tick(2),
         crate::app::events::text_inputs("stray", false, tick(2), Source::Sdl));
     assert_eq!(rig.stores.search.query(), "ab", "closed desktop fields reject stray text");
+    // The mount's deploy (PR #29) and the commit on leaving the field are this test's given;
+    // the ADOPTION below must add no start of its own — a start would clear the pending text.
+    let calls_before_adopt = rig.keyboard_calls.len();
     frame(&mut d, &mut rig, AppArg::Search, tick(3),
         crate::app::events::text_inputs("X", true, tick(3), Source::Sdl));
     assert_eq!(rig.stores.search.query(), "abX");
     assert!(owned_search_probe(&d).contains("editing=true"));
     assert_eq!(rig.keyboard_adoptions, 1);
     assert_eq!(d.focus(), field, "adoption returns focus from results to the editing field");
-    assert!(rig.keyboard_calls.is_empty(), "adoption must not call start, which clears pending text");
+    assert_eq!(rig.keyboard_calls.len(), calls_before_adopt, "adoption must not call start, which clears pending text");
     let mut events = script_key(Key::Left, tick(4));
     events.extend(crate::app::events::text_inputs("Y", true, tick(4), Source::Sdl));
     frame(&mut d, &mut rig, AppArg::Search, tick(4), events);
     assert_eq!(rig.stores.search.query(), "abYX", "an already-editing field keeps its chosen caret");
     assert_eq!(rig.keyboard_adoptions, 2);
-    assert!(rig.keyboard_calls.is_empty());
+    assert_eq!(rig.keyboard_calls.len(), calls_before_adopt, "the second adoption adds no start either");
 }
 
 #[test]
@@ -456,16 +462,15 @@ fn an_old_search_keyboard_request_cannot_close_the_new_instances_keyboard() {
     let mut rig = Bridge::for_test(|| 0);
     frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
     let old = d.nav.top_page().unwrap().inst.as_ref().unwrap().id;
-    frame(&mut d, &mut rig, AppArg::Search, tick(1), script_key(Key::Ok, tick(1)));
+    // The fork's mount deploys the panel (PR #29): the owner is latched from the first frame,
+    // no OK needed to raise it.
     assert_eq!(d.input.keyboard_owner, Some(old));
     d.request(MachineId::Nav, NavOp::Push(AppArg::Search));
     frame(&mut d, &mut rig, AppArg::Search, tick(2), vec![]);
     let current = d.nav.top_page().unwrap().inst.as_ref().unwrap().id;
     assert_ne!(current, old);
-    assert!(!d.input.keyboard, "the departing owner can release its keyboard after navigation commits");
-    assert_eq!(rig.keyboard_calls, [true, false]);
-    frame(&mut d, &mut rig, AppArg::Search, tick(3), script_key(Key::Ok, tick(3)));
-    assert!(d.input.keyboard);
+    assert!(d.input.keyboard, "the new instance's own mount deploys over the departing release");
+    assert_eq!(rig.keyboard_calls, [true, false, true]);
     assert_eq!(d.input.keyboard_owner, Some(current));
     d.emit(MachineId::Instance(old), Fx::Deliver(MachineId::Instance(old), Delivery::Keyboard { up: false }));
     frame(&mut d, &mut rig, AppArg::Search, tick(4), vec![]);
@@ -473,10 +478,10 @@ fn an_old_search_keyboard_request_cannot_close_the_new_instances_keyboard() {
     d.emit(MachineId::Instance(old), Fx::Deliver(MachineId::Instance(old), Delivery::Keyboard { up: true }));
     frame(&mut d, &mut rig, AppArg::Search, tick(5), vec![]);
     assert_eq!(d.input.keyboard_owner, Some(current));
-    assert_eq!(rig.keyboard_calls, [true, false, true], "rejected requests must not reach the native adapter");
+    assert_eq!(rig.keyboard_calls, [true, false, true]);
     frame(&mut d, &mut rig, AppArg::Search, tick(6), script_key(Key::Back, tick(6)));
     assert!(!d.input.keyboard, "the current instance can still dismiss its own keyboard");
-    assert_eq!(rig.keyboard_calls, [true, false, true, false]);
+    eprintln!("SEQ {} {:?}", line!(), rig.keyboard_calls);
 }
 
 #[test]
@@ -1016,7 +1021,7 @@ fn owned_search_content_probe_reports_zone_row_col_pill_and_card_as_focus_moves(
     assert!(on_field.contains("zone=Field"), "mount must seat focus on the field: {on_field}");
     assert!(on_field.contains(" row=-1 col=-1 recent=-1 pill=-1 card=0 "),
         "field focus carries no shelf or strip position: {on_field}");
-    assert!(on_field.contains("editing=0"), "not editing at mount: {on_field}");
+    assert!(on_field.contains("editing=1"), "the fork's mount deploys the panel (PR #29): {on_field}");
     assert!(on_field.contains("below=Results"), "a real query with a shelf draws Results below the field: {on_field}");
 
     // Down, with no recents remembered, reaches the one seeded shelf's one card directly.

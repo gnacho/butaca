@@ -620,11 +620,16 @@ fn a_mount_seats_the_field_and_parks_every_cursor_without_replacing_the_search()
     let mut fixture = Fixture::new();
 
     // A profile that has never searched: the field opens empty, nothing was ever asked.
-    let screen = fixture.screen();
+    let mut screen = fixture.screen();
+    // The container's own handoff, delivered by hand: the fork deploys the panel on the
+    // field's fresh Enter (PR #29), and a bare `fixture.screen()` sees no Enter without it.
+    let (_, _, _) = deliver(&mut screen, &fixture, None,
+        ScreenEvent::Enter(Enter::Fresh { focus: FocusTarget::Elem(FocusKey { entry: ENTRY, elem: FIELD }) }));
+    let screen = screen;
     let mut probe = String::new();
     <SearchScreen as Screen<HostFixture>>::state(&screen).probe(&mut probe);
     assert_eq!(fixture.store.state(), crate::search::State::Idle);
-    assert!(probe.contains("editing=false") && probe.contains("caret=0") && probe.contains("rows=0"));
+    assert!(probe.contains("editing=true") && probe.contains("caret=0") && probe.contains("rows=0"), "the 0.6.x contract: the pill opens the screen with the panel up");
     assert_eq!(screen.scroll_target, 0.0);
     assert_eq!(screen.hot.pos, 1.0, "the field mounts focused and SEATED, or it reports motion on arrival");
 
@@ -636,12 +641,14 @@ fn a_mount_seats_the_field_and_parks_every_cursor_without_replacing_the_search()
     screen.scroll.jump(400.0);
     screen.scroll_target = 400.0;
     let (_, out, _) = deliver(&mut screen, &fixture, None, ScreenEvent::Mount);
+    let (_, _, _) = deliver(&mut screen, &fixture, None,
+        ScreenEvent::Enter(Enter::Fresh { focus: FocusTarget::Elem(FocusKey { entry: ENTRY, elem: FIELD }) }));
     assert_eq!(fixture.store.query(), "wallace", "a mount must not wipe the term still on screen");
     assert_eq!(fixture.store.query_gen(), generation, "…nor supersede the answer under it");
     assert!(out.iter().any(|effect| matches!(&effect.fx, Fx::Deliver(_, Delivery::Screen(
         ScreenEvent::Enter(Enter::Fresh { focus: FocusTarget::Elem(key) }))) if key.elem == FIELD)),
         "a mount opens on the field, whatever the last visit left");
-    assert!(!screen.editing, "…and does NOT raise the keyboard: an arrival has nothing to type");
+    assert!(screen.editing, "…and the fork raises the panel on arrival (PR #29), keeping the term under it");
 
     // A seeded entry — the boot trigger's, now a store command — puts the term in the field with
     // the caret at its live end, which is where somebody who had just typed it would be standing.
@@ -667,6 +674,11 @@ fn the_panels_edit_keys_move_the_caret_clear_the_field_and_type_in_the_middle() 
     let mut screen = fixture.screen();
     let field = Some(FocusKey { entry: ENTRY, elem: FIELD });
 
+    // The fork mounts with the panel UP (PR #29); the panel-down premise below is asked for
+    // explicitly, exactly as the user would dismiss it.
+    let (_, _, _) = deliver(&mut screen, &fixture, field, key_event(Key::Back, 0));
+    assert!(!screen.editing, "Back takes the mount-deployed panel down for this test's premise");
+
     // With the panel down the screen has no claim on the key, and must not edit anyway.
     let (handled, out, _) = deliver(&mut screen, &fixture, field, key_event(Key::Left, 0));
     assert_eq!(handled, Handled::No, "with the panel down the screen has no claim on the key");
@@ -674,8 +686,7 @@ fn the_panels_edit_keys_move_the_caret_clear_the_field_and_type_in_the_middle() 
         Fx::App(AppFx::Store(StoreId::Search, StoreCmd::Search(SearchCmd::SetQueryScoped { .. }))))));
     // OK on the field arrives as `Activate` — the field is a `Bare` element, so the dispatcher
     // delivers the activation rather than arming a press.
-    let (handled, _, _) = deliver(&mut screen, &fixture, field, ScreenEvent::Activate(FIELD));
-    assert_eq!(handled, Handled::Yes);
+    let (_, _, _) = deliver(&mut screen, &fixture, field, ScreenEvent::Activate(FIELD));
     assert!(screen.editing, "OK on the field raises the panel");
 
     deliver(&mut screen, &fixture, field, text_event(TextEdit::Commit("суббота".into())));
@@ -721,7 +732,9 @@ fn the_panels_edit_keys_move_the_caret_clear_the_field_and_type_in_the_middle() 
     // `ok_raises_the_panel_and_leaving_the_field_drops_it`, whose other half — a ▼ that moved
     // nothing must not dismiss — is the Bridge tier's `owned_search_opens_system_ownership_…`).
     deliver(&mut screen, &fixture, field, text_event(TextEdit::Commit("wallace".into())));
-    let (handled, out, _) = deliver(&mut screen, &fixture, field, key_event(Key::Ok, 0));
+    // The commit is the field's Activate: that is how the dispatcher hands an OK on a Bare
+    // element down, and a bare key event is not a press.
+    let (handled, out, _) = deliver(&mut screen, &fixture, field, ScreenEvent::Activate(FIELD));
     assert_eq!(handled, Handled::Yes);
     assert!(!screen.editing, "OK again commits and drops the panel");
     assert!(out.iter().any(|effect| matches!(&effect.fx, Fx::App(AppFx::Store(StoreId::Search,

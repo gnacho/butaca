@@ -316,10 +316,29 @@ impl<H: SearchLike> Machine<H> for SearchScreen {
                 self.fade.mount();
                 self.reseat(FocusTarget::Elem(self.key(FIELD)), fx);
             }
+            // The 0.6.x contract (PR #29): the pill opens the screen WITH the panel up — the
+            // magnifier IS the keyboard's door, and a second OK on the field should not be
+            // needed. Deployed on Enter, not on Mount: by the time the fresh Enter lands, the
+            // strip's focus handoff has settled on the field and nothing commits the panel
+            // back down behind it. Returns from a detail arrive through RestoreMemory and keep
+            // whatever editing state they left.
+            ScreenEvent::Enter(Enter::Fresh { focus: FocusTarget::Elem(key) })
+                if key.elem == FIELD && key.entry == self.entry =>
+            {
+                self.keyboard(true, false, fx)
+            }
             ScreenEvent::WillLeave(_) | ScreenEvent::Unmount | ScreenEvent::Cover | ScreenEvent::Suspend => self.keyboard(false, false, fx),
             ScreenEvent::Activate(elem) => return self.activate(*elem, false, cx, fx),
             ScreenEvent::PressCommit(_) => {
-                if let Some(key) = cx.focus.current { return self.activate(key.elem, false, cx, fx); }
+                if let Some(key) = cx.focus.current {
+                    // The field's Bare-key route already delivered its own Activate for this
+                    // same press — toggling again here would close what that just opened (or
+                    // reopen what it just committed). Everything else activates as usual.
+                    if key.elem == FIELD {
+                        return Handled::Yes;
+                    }
+                    return self.activate(key.elem, false, cx, fx);
+                }
             }
             ScreenEvent::PressHold(_) => {
                 if let Some(key) = cx.focus.current { return self.activate(key.elem, true, cx, fx); }
@@ -354,7 +373,9 @@ impl<H: SearchLike> Machine<H> for SearchScreen {
                         };
                         if let Some(edit) = edit { self.edit(&edit, fx); return Handled::Yes; }
                         if *key == Key::Back { self.keyboard(false, false, fx); return Handled::Yes; }
-                        if *key == Key::Ok { self.keyboard(false, true, fx); return Handled::Yes; }
+                        // Key::Ok does NOT commit here: the press path already turns it into
+                        // PressCommit -> activate(FIELD), whose toggle is the single commit —
+                        // firing both would close-and-reopen the panel on every OK.
                         if *key == Key::Down {
                             if let Some(group) = self.first_content() {
                                 self.keyboard(false, true, fx);
