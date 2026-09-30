@@ -16,7 +16,9 @@ pub(crate) const ABOUT_GROUP: GroupId = GroupId(5);
 pub(crate) const CARD_ELEM: u32 = ABOUT_ELEM_RANGE_START;
 pub(crate) const LANGUAGES_ELEM: u32 = ABOUT_ELEM_RANGE_START + 1;
 
-const CARD_W: f32 = 640.0;
+// Full content width (was 640, a third): the card shares its row with nothing, and the dead
+// two-thirds beside it read as a hole on the television (issue #54).
+const CARD_W: f32 = crate::ui::consts::SCR_W - 2.0 * crate::ui::consts::MARGIN_X;
 const CARD_Y: f32 = 50.0;
 const CARD_PAD: f32 = 30.0;
 const COL_Y: f32 = 430.0;
