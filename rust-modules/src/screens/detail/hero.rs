@@ -315,7 +315,7 @@ pub(crate) fn watch_names_show(d: &Detail) -> bool {
 }
 
 /// A disc's slot (`[restart, trailer, watch, heart]`) and the verb it unfurls to — `None` for the two PILLS.
-pub(crate) fn disc_verb(ctl: HeroCtl, name_show: bool) -> Option<(usize, &'static CStr)> {
+pub(crate) fn disc_verb(ctl: HeroCtl, name_show: bool, favorited: bool) -> Option<(usize, &'static CStr)> {
     match (ctl, name_show) {
         (HeroCtl::Restart, _) => Some((0, play_from_start_label())),
         (HeroCtl::Trailer, _) => Some((1, trailer_label())),
@@ -323,7 +323,7 @@ pub(crate) fn disc_verb(ctl: HeroCtl, name_show: bool) -> Option<(usize, &'stati
         (HeroCtl::MarkWatched, true) => Some((2, mark_show_watched_label())),
         (HeroCtl::MarkUnwatched, false) => Some((2, mark_unwatched_label())),
         (HeroCtl::MarkUnwatched, true) => Some((2, mark_show_unwatched_label())),
-        (HeroCtl::Favorite, on) => Some((3, if on { unfavorite_label() } else { favorite_label() })),
+        (HeroCtl::Favorite, _) => Some((3, if favorited { unfavorite_label() } else { favorite_label() })),
         _ => None,
     }
 }
@@ -430,7 +430,7 @@ pub(crate) fn disc_caps(
     let (v, n) = hero_ctls(set);
     let mut label_w = [0.0f32; 4];
     for &c in &v[..n] {
-        if let Some((slot, label)) = disc_verb(c, named_show) {
+        if let Some((slot, label)) = disc_verb(c, named_show, set.favorite.unwrap_or(false)) {
             label_w[slot] = measure.width(label, theme::size::BODY, true);
         }
     }
@@ -938,40 +938,52 @@ mod tests {
     #[test]
     fn each_watch_disc_writes_its_own_verb() {
         assert_eq!(
-            disc_verb(HeroCtl::Restart, false),
+            disc_verb(HeroCtl::Restart, false, false),
             Some((0, play_from_start_label()))
         );
         assert_eq!(
-            disc_verb(HeroCtl::Restart, true),
+            disc_verb(HeroCtl::Restart, true, false),
             Some((0, play_from_start_label()))
         );
         assert_eq!(
-            disc_verb(HeroCtl::MarkWatched, false),
+            disc_verb(HeroCtl::MarkWatched, false, false),
             Some((2, mark_watched_label()))
         );
         assert_eq!(
-            disc_verb(HeroCtl::MarkWatched, true),
+            disc_verb(HeroCtl::MarkWatched, true, false),
             Some((2, mark_show_watched_label()))
         );
         assert_eq!(
-            disc_verb(HeroCtl::MarkUnwatched, false),
+            disc_verb(HeroCtl::MarkUnwatched, false, false),
             Some((2, mark_unwatched_label()))
         );
         assert_eq!(
-            disc_verb(HeroCtl::MarkUnwatched, true),
+            disc_verb(HeroCtl::MarkUnwatched, true, false),
             Some((2, mark_show_unwatched_label()))
         );
         assert_eq!(
-            disc_verb(HeroCtl::Trailer, false),
+            disc_verb(HeroCtl::Trailer, false, false),
             Some((1, trailer_label()))
         );
-        assert_eq!(disc_verb(HeroCtl::Trailer, true), Some((1, trailer_label())));
+        assert_eq!(disc_verb(HeroCtl::Trailer, true, false), Some((1, trailer_label())));
+    }
+
+    /// The heart's verb follows the FAVORITE flag, never `name_show` (the wiring bug of the
+    /// first cut: the label answered "Marcar como favorito" on an item the server already held
+    /// favorited, because the flag it read was the show-naming one).
+    #[cfg(feature = "jellyfin")]
+    #[test]
+    fn the_hearts_verb_follows_the_favorite_flag() {
+        assert_eq!(disc_verb(HeroCtl::Favorite, false, false), Some((3, favorite_label())));
+        assert_eq!(disc_verb(HeroCtl::Favorite, false, true), Some((3, unfavorite_label())));
+        assert_eq!(disc_verb(HeroCtl::Favorite, true, false), Some((3, favorite_label())));
+        assert_eq!(disc_verb(HeroCtl::Favorite, true, true), Some((3, unfavorite_label())));
         assert_eq!(
-            disc_verb(HeroCtl::Play, false),
+            disc_verb(HeroCtl::Play, false, false),
             None,
             "a pill has nothing to unfurl"
         );
-        assert_eq!(disc_verb(HeroCtl::Alt, false), None);
+        assert_eq!(disc_verb(HeroCtl::Alt, false, false), None);
     }
 
     /// The watched toggle is carried by its JOB, not by either face — `watch_index` must answer
@@ -1589,7 +1601,7 @@ mod tests {
     #[test]
     fn the_unfurled_verbs_are_the_menus_own() {
         assert_eq!(
-            disc_verb(HeroCtl::Restart, false)
+            disc_verb(HeroCtl::Restart, false, false)
                 .unwrap()
                 .1
                 .to_str()
@@ -1597,7 +1609,7 @@ mod tests {
             "Play from Start"
         );
         assert_eq!(
-            disc_verb(HeroCtl::MarkWatched, false)
+            disc_verb(HeroCtl::MarkWatched, false, false)
                 .unwrap()
                 .1
                 .to_str()
@@ -1605,7 +1617,7 @@ mod tests {
             "Mark as Watched"
         );
         assert_eq!(
-            disc_verb(HeroCtl::MarkUnwatched, true)
+            disc_verb(HeroCtl::MarkUnwatched, true, false)
                 .unwrap()
                 .1
                 .to_str()

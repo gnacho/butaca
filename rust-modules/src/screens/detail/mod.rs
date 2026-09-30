@@ -2601,7 +2601,8 @@ impl DetailScreen {
                         .palette(palette)
                         .ground(ground)
                         .scale(scale);
-                    if let Some((slot, label)) = hero::disc_verb(ctl, self.named_show(meta)) {
+                    let favorited = self.detail(meta).map(|d| d.is_favorite).unwrap_or(false);
+                    if let Some((slot, label)) = hero::disc_verb(ctl, self.named_show(meta), favorited) {
                         button = button.label(label.as_ptr(), self.disc_unfurl[slot].pos);
                     }
                     button.draw(&Env::inert(), p);
@@ -3099,7 +3100,10 @@ impl DetailScreen {
         self.season_pop
             .step(matches!(focused, Some(Located::Season(_))).then_some(0), dt);
         let disc = match focused {
-            Some(Located::Hero(c)) => hero::disc_verb(c, self.named_show(meta)).map(|(i, _)| i),
+            Some(Located::Hero(c)) => {
+                let favorited = self.detail(meta).map(|d| d.is_favorite).unwrap_or(false);
+                hero::disc_verb(c, self.named_show(meta), favorited).map(|(i, _)| i)
+            }
             _ => None,
         };
         for (i, spring) in self.disc_unfurl.iter_mut().enumerate() {
