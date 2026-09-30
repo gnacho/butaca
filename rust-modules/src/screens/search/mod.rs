@@ -398,8 +398,11 @@ impl<H: SearchLike> Machine<H> for SearchScreen {
                 _ => return Handled::No,
             },
             ScreenEvent::Tick(tick) => self.tick(*tick, cx, fx),
-            ScreenEvent::FocusMoved { to, .. } => {
-                if to.elem != FIELD { self.keyboard(false, true, fx); }
+            ScreenEvent::FocusMoved { to, by, .. } => {
+                // Only the D-pad commits the panel on leaving the field: a pointer move over the
+                // screen behind the system keyboard is the viewer AIMING at its keys, and closing
+                // on it makes the panel vanish the moment the hand moves (TV-reported).
+                if to.elem != FIELD && *by != crate::ui::screen::By::Pointer { self.keyboard(false, true, fx); }
                 self.reveal(*to, cx);
                 fx.invalidate(Provenance::Input);
             }
