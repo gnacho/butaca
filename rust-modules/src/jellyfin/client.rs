@@ -517,7 +517,7 @@ impl JfClient {
     pub(crate) fn seasons(&self, series_id: &str) -> Option<ItemsResult> {
         let user_id = self.user_id()?;
         self.get_json(&format!(
-            "/Shows/{series_id}/Seasons?UserId={user_id}&Fields=Overview,OfficialRating\
+            "/Shows/{series_id}/Seasons?UserId={user_id}&Fields=Overview,OfficialRating,ChildCount\
              &EnableImageTypes=Primary,Backdrop"
         ))
     }
