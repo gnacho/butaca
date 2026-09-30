@@ -1689,7 +1689,11 @@ where
                 rig.system_keyboard(up);
             }
             (MachineId::Instance(instance), Delivery::Press { id, key, held }) => {
-                let valid_owner = !self.input.keyboard && self.owner_entry() == Some(key.entry)
+                // Keys can't arrive stale: the arm-time gate refuses them while the panel is up,
+                // and `cancel_keyboard_gestures` purges anything pending across the edge. A
+                // POINTER press armed while the panel is up is a deliberate click on visible
+                // content (a search result above the keyboard) and must deliver.
+                let valid_owner = self.owner_entry() == Some(key.entry)
                     && self.nav.instance_of(key.entry) == Some(instance)
                     && self.focus() == Some(key);
                 let valid_key = valid_owner && {
