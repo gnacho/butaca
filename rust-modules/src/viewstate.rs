@@ -484,8 +484,16 @@ impl ViewStateState {
                     Some(Completion { id, done: Done { ok: done.unwrap_or(false), also: Vec::new() } });
             });
             if !spawned {
+                // Nothing will ever fill the mailbox. Put the write back at the HEAD, exactly as
+                // the Plex arm below does, and wait out the ladder before trying again.
+                self.queue.insert(0, req);
+                self.retry_cd = RETRY_FRAMES;
                 crate::log("viewstate: jellyfin write refused at spawn");
+                return;
             }
+            // The in-flight identity is what the completion matches against — without it the
+            // answer lands as "ignored: in-flight identity is none" and the queue jams behind it.
+            self.sent = Some(req);
             continue;
         }
         let Some(c) = crate::plex::client_for(req.sid) else {
