@@ -74,6 +74,13 @@ pub(crate) fn set_add_mode(on: bool) {
     ADD_SERVER.store(on, Ordering::SeqCst);
 }
 
+/// Read it: the sign-in SCREEN needs to know whether BACK is a way out (add-server from
+/// Settings, pushed over the page that asked) or stays swallowed (the boot gate's own form,
+/// which has nothing behind it).
+pub(crate) fn add_mode() -> bool {
+    ADD_SERVER.load(Ordering::SeqCst)
+}
+
 /// What the user typed, tidied for the wire: scheme defaults to `http://` because nobody should
 /// have to type it on a TV remote, and trailing slashes come off because `Origin::parse` keeps
 /// the address verbatim and every endpoint here is joined with a leading one.
