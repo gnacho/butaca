@@ -2582,7 +2582,15 @@ impl DetailScreen {
                         hero::HeroCtl::Restart => crate::ui::icons::Icon::Restart,
                         hero::HeroCtl::Trailer => crate::ui::icons::Icon::Trailer,
                         hero::HeroCtl::MarkWatched => crate::ui::icons::Icon::Check,
-            hero::HeroCtl::Favorite => crate::ui::icons::Icon::Heart,
+                        hero::HeroCtl::Favorite => {
+                            // One identity, two faces: the disc wears the filled heart while the
+                            // loaded item IS favorited (the verb label already follows the flag).
+                            if self.detail(meta).map(|d| d.is_favorite).unwrap_or(false) {
+                                crate::ui::icons::Icon::HeartFill
+                            } else {
+                                crate::ui::icons::Icon::Heart
+                            }
+                        }
                         hero::HeroCtl::MarkUnwatched => crate::ui::icons::Icon::Minus,
                         _ => unreachable!(),
                     };
