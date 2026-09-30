@@ -316,9 +316,23 @@ struct StartGate {
 }
 
 impl StartGate {
+    /// A terminal activation verdict: the hub already answered this window's hint, and the
+    /// answer was not "the helper is coming". Waiting out the deadline cannot change it - on a
+    /// television whose LS2 registration cannot start the helper at all, it is the difference
+    /// between a sub-second boot and paying the full startup window for nothing (#57).
+    fn activation_terminal(&self) -> bool {
+        matches!(
+            self.activation.map(|d| d.stage),
+            Some(Stage::ActivationRejected
+                | Stage::ActivationTimeout
+                | Stage::ActivationInvalidReply
+                | Stage::Unsupported)
+        )
+    }
+
     /// Called only after a connect attempt: a failed start never prevents trying a live helper.
     fn wait_after_failed_connect(&mut self, now: Instant, until: Instant) -> bool {
-        self.failed |= now >= until;
+        self.failed |= now >= until || self.activation_terminal();
         !self.failed
     }
 
@@ -901,6 +915,32 @@ mod tests {
         assert!(
             !gate.wait_after_failed_connect(later, later + START_DEADLINE),
             "elapsed time alone must not forget an unreachable helper"
+        );
+    }
+
+    /// A terminal activation verdict ends the startup wait at once: the hub answered "no" (or
+    /// nothing usable), so the helper cannot publish this window and the legacy fallback should
+    /// take over without paying the deadline (#57).
+    #[test]
+    fn a_terminal_activation_verdict_ends_the_startup_wait() {
+        let now = Instant::now();
+        for stage in [
+            Stage::ActivationRejected,
+            Stage::ActivationTimeout,
+            Stage::ActivationInvalidReply,
+            Stage::Unsupported,
+        ] {
+            let mut gate = StartGate { activation: Some(failure::Detail::new(stage, None)), ..StartGate::default() };
+            assert!(
+                !gate.wait_after_failed_connect(now, now + START_DEADLINE),
+                "{stage:?} must end the wait long before the deadline"
+            );
+        }
+        // …and the non-terminal verdicts change nothing: an accepted hint still waits.
+        let mut gate = StartGate { activation: Some(failure::Detail::new(Stage::ActivationAccepted, None)), ..StartGate::default() };
+        assert!(
+            gate.wait_after_failed_connect(now, now + START_DEADLINE),
+            "an accepted hint leaves the helper its full window to publish"
         );
     }
 
