@@ -2413,6 +2413,15 @@ pub(crate) fn follow_auth_landing(pages: &mut Dispatcher<AppHost>, bridge: &mut 
         nav_root_if_unsettled(pages, AppArg::Home);
         return;
     }
+    // The Plex phase machine below does not apply to a signed-in Jellyfin session: left to run,
+    // its `_ => nav_root_if_unsettled(Login)` tail re-roots the sign-in form right on top of the
+    // add-server PUSH, wiping the stack that BACK pops back to Settings - the second half of the
+    // #56 trap. The flavor drives its own sign-in navigation: the boot gate roots the form when
+    // there is no client, and disconnect does it when the last server leaves.
+    #[cfg(feature = "jellyfin")]
+    if crate::jellyfin::client().is_some() {
+        return;
+    }
     if let Some(c) = bridge.take_session_ready() {
         // A sign-out followed by a fresh sign-in can replace the session without restarting the
         // process. Re-read only at this one credentials handoff so the old account's in-memory
