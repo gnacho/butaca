@@ -339,10 +339,13 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
                         // BACK with no edit in flight: the boot gate's form keeps swallowing it
                         // (nothing lives behind a first-ever boot's sign-in), but the Settings
                         // "quick connect" copy was PUSHED over the page that asked - disarm add
-                        // mode and hand the user back there (#56).
+                        // mode and hand the user back there (#56). The invalidate is load-bearing:
+                        // structural ops apply at the frame's NAV COMMIT, and an idle loop renders
+                        // no frame - without it the parked pop sat uncommitted forever.
                         if signin::add_mode() {
                             signin::set_add_mode(false);
                             fx.push(Fx::Nav(NavOp::Pop));
+                            fx.invalidate(crate::ui::present::Provenance::Input);
                         }
                         Handled::Yes
                     } else {
