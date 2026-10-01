@@ -328,13 +328,13 @@ pub(crate) enum LibraryType {
 impl LibraryType {
     /// The TYPE menu's rows for a section of `kind`, in menu order.
     pub(crate) fn offered(kind: SecKind) -> &'static [LibraryType] {
-        // The Jellyfin flavor has no collections wired (BoxSets are the server-side concept and
-        // the flavor's fetch never lands them): the Collections entry would open an empty page,
-        // which is worse than no entry at all (issue #52). Seasons/Episodes DO work there.
+        // The Jellyfin flavor wires BoxSets as the Collections type for MOVIE sections only: the
+        // server keeps box sets under a movies view, and a TV library has no collections concept
+        // to list (issue #59). Seasons/Episodes work on both kinds as before.
         #[cfg(feature = "jellyfin")]
         if crate::jellyfin::client().is_some() {
             return match kind {
-                SecKind::Movie => &[Self::Primary],
+                SecKind::Movie => &[Self::Primary, Self::Collections],
                 SecKind::Show => &[Self::Primary, Self::Seasons, Self::Episodes],
             };
         }
@@ -1395,6 +1395,7 @@ impl BrowseState {
         #[cfg(feature = "jellyfin")]
         if self.cur_is_jellyfin() {
             let state = self.cur_state();
+            let library_type = state.map(|state| state.library_type).unwrap_or_default();
             let filter = LettersFilter {
                 unwatched: state.is_some_and(|state| state.unwatched),
                 genre: state.and_then(|state| state.genre.as_ref().map(|g| g.id.clone())),
@@ -1406,7 +1407,8 @@ impl BrowseState {
             self.jf_kick_directory(adapter, done, |a| &a.letters_fetching, |a| &a.letter_result,
                 Some(filter.clone()),
                 move |jc, key, kind| {
-                    crate::jellyfin::browse::fetch_letters(jc, key, kind, &filter).unwrap_or_default()
+                    crate::jellyfin::browse::fetch_letters(jc, key, kind, library_type, &filter)
+                        .unwrap_or_default()
                 });
             return;
         }
@@ -2593,12 +2595,13 @@ impl BrowseState {
             let unwatched = state.unwatched;
             let genre_ids = state.genre.as_ref().map(|genre| genre.id.clone()).unwrap_or_default();
             let kind = section.kind;
+            let library_type = state.library_type;
             adapter.fetching.store(true, Ordering::SeqCst);
             let worker_adapter = Arc::clone(adapter);
             let spawned = crate::task::spawn_small("page", move || {
                 let (items, total) = catch_unwind(|| {
                     crate::jellyfin::browse::fetch_page(
-                        jc, key, kind, start as i64, PAGE as i64,
+                        jc, key, kind, library_type, start as i64, PAGE as i64,
                         &sort_key, sort_desc, unwatched, &genre_ids,
                     ).unwrap_or_else(|| (Vec::new(), -1))
                 }).unwrap_or((Vec::new(), -1));
@@ -2741,7 +2744,14 @@ impl BrowseState {
                         // answer, never a fault
                         state.fetch = SecFetch::Ready;
                         if state.sorts.is_empty() {
-                            state.sorts = std::sync::Arc::new(crate::jellyfin::browse::sorts());
+                            // Collections lands the one-sort menu (box sets sort by name alone);
+                            // every other type lands the backend's full fixed vocabulary.
+                            state.sorts = std::sync::Arc::new(
+                                if state.library_type == LibraryType::Collections {
+                                    crate::jellyfin::browse::collection_sorts()
+                                } else {
+                                    crate::jellyfin::browse::sorts()
+                                });
                         }
                         if state.total != result.total {
                             state.total = result.total;

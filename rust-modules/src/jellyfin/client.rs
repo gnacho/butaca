@@ -365,6 +365,40 @@ impl JfClient {
         self.get_json(&path)
     }
 
+    /// One page of a library's BoxSets — the Collections type's listing, scoped to the same view
+    /// a `browse_page` asks for. A box set has no playable leaves of its own, so the fixed
+    /// `SortName` ascending order is the type's one ordering (see
+    /// `jellyfin::browse::collection_sorts`) and no watch-state or genre filter is ever sent. The
+    /// rows arrive with `Type="BoxSet"` and convert through `convert::boxset_from_dto`.
+    pub(crate) fn boxsets(&self, view_id: &str, start: i64, limit: i64) -> Option<ItemsResult> {
+        let user_id = self.user_id()?;
+        self.get_json(&format!(
+            "/Users/{user_id}/Items?ParentId={view_id}&IncludeItemTypes=BoxSet&Recursive=true\
+             &SortBy=SortName&SortOrder=Ascending&StartIndex={start}&Limit={limit}\
+             &Fields={}&EnableImageTypes=Primary,Backdrop",
+            Self::LISTING_FIELDS
+        ))
+    }
+
+    /// One page of a BoxSet's members — the collection screen's children fetch. `ParentId` is the
+    /// box set's id (the row's `rk`), and the members are Movie rows converted by the same
+    /// `convert::movie_from_dto` every listing uses. No `IncludeItemTypes` is sent: the box set's
+    /// own children ARE its members, and an unexpected kind is still dropped by the converter
+    /// rather than misfilled.
+    pub(crate) fn collection_children(
+        &self,
+        boxset_id: &str,
+        start: i64,
+        limit: i64,
+    ) -> Option<ItemsResult> {
+        let user_id = self.user_id()?;
+        self.get_json(&format!(
+            "/Users/{user_id}/Items?ParentId={boxset_id}&SortBy=SortName&SortOrder=Ascending\
+             &StartIndex={start}&Limit={limit}&Fields={}&EnableImageTypes=Primary,Backdrop",
+            Self::LISTING_FIELDS
+        ))
+    }
+
     /// Per-letter item counts of one library for the A-Z rail — the Jellyfin counterpart of
     /// Plex's `firstCharacter` directory. Jellyfin has no per-letter counts endpoint, but
     /// `NameStartsWith` (verified to filter on `SortName`, the field the listing's
@@ -1253,6 +1287,61 @@ mod tests {
             assert!(head.contains(want), "missing {want} in {head}");
         }
         assert!(reqs[1].contains("Authorization: MediaBrowser Token=\"tok-1\", "));
+    }
+
+    /// The Collections type's page query: BoxSets scoped to the view, no filter, fixed name order.
+    #[test]
+    fn boxsets_carries_the_collections_query() {
+        let server = MockServer::start(vec![
+            (200, AUTH_OK),
+            (200, r#"{"Items":[],"TotalRecordCount":4}"#),
+        ]);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        client.authenticate_by_name("demo", "").unwrap();
+
+        let res = client.boxsets("view-1", 60, 60).expect("boxsets parse");
+        assert_eq!(res.total, 4);
+
+        let reqs = server.finish();
+        assert_eq!(reqs.len(), 2);
+        let head = reqs[1].lines().next().unwrap();
+        assert!(head.starts_with("GET /Users/u-1/Items?"));
+        for want in [
+            "ParentId=view-1",
+            "IncludeItemTypes=BoxSet",
+            "Recursive=true",
+            "SortBy=SortName",
+            "SortOrder=Ascending",
+            "StartIndex=60",
+            "Limit=60",
+        ] {
+            assert!(head.contains(want), "missing {want} in {head}");
+        }
+        assert!(!head.contains("IsPlayed"), "a box set has no watch state: {head}");
+        assert!(!head.contains("GenreIds"), "a box set has no genre: {head}");
+    }
+
+    /// The collection screen's members fetch scopes `/Items` to the box set's own id.
+    #[test]
+    fn collection_children_hits_the_boxsets_parent_id() {
+        let server = MockServer::start(vec![
+            (200, AUTH_OK),
+            (200, r#"{"Items":[],"TotalRecordCount":0}"#),
+        ]);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        client.authenticate_by_name("demo", "").unwrap();
+
+        let res = client.collection_children("box-1", 0, 60).expect("children parse");
+        assert_eq!(res.total, 0);
+
+        let reqs = server.finish();
+        assert_eq!(reqs.len(), 2);
+        let head = reqs[1].lines().next().unwrap();
+        assert!(head.starts_with("GET /Users/u-1/Items?"));
+        assert!(head.contains("ParentId=box-1"), "{head}");
+        assert!(head.contains("SortBy=SortName"), "{head}");
+        assert!(head.contains("StartIndex=0"), "{head}");
+        assert!(head.contains("Limit=60"), "{head}");
     }
 
     /// Genres and the server's own name ride the same authed GET path as every other read.
