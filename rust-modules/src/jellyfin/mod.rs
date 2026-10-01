@@ -74,7 +74,7 @@ pub(crate) mod search;
 pub(crate) mod signin;
 
 pub(crate) use client::{AuthError, AuthOk, JfClient};
-pub(crate) use convert::movie_from_dto;
+pub(crate) use convert::{boxset_from_dto, movie_from_dto};
 pub(crate) use dto::{BaseItemDto, ItemsResult, ViewDto};
 
 use crate::plex::ServerId;

@@ -21,7 +21,7 @@
 
 use super::client::{BrowseQuery, JfClient};
 use super::SERVER_ID;
-use crate::browse::{GenreEntry, SecKind, SortEntry};
+use crate::browse::{GenreEntry, LibraryType, SecKind, SortEntry};
 use crate::pms::PmsMovie;
 use std::sync::Mutex;
 
@@ -86,6 +86,18 @@ pub(crate) fn sorts() -> Vec<SortEntry> {
     ]
 }
 
+/// The Collections type's sort menu: a box set sorts by name alone. The full [`sorts`] vocabulary
+/// (release date, rating, date added) has no meaning for a box set, so the type lands this
+/// one-entry menu the same moment Plex's server-driven menu would name its one sort.
+pub(crate) fn collection_sorts() -> Vec<SortEntry> {
+    vec![SortEntry {
+        key: "SortName".into(),
+        title: crate::i18n::msg::browse_jellyfin_sort_title().to_string(),
+        desc_key: "".into(),
+        default_desc: false,
+    }]
+}
+
 /// `GET /Users/{uid}/Views` → the `(key, title, kind)` rows `browse::append_sections` takes.
 /// `movies`/`tvshows` map to the app's two section kinds; every other collection type (music,
 /// books, mixed — the `None` included) is dropped here, which is `SecKind::from_wire`'s rule in
@@ -120,7 +132,7 @@ pub(crate) fn fetch_counts(c: &JfClient, keys: &[(i64, SecKind)]) -> Vec<(i64, i
             view_id: &view,
             start: 0,
             limit: 1,
-            include_types: include_types(kind),
+            include_types: include_types(kind, LibraryType::Primary),
             sort_by: "SortName",
             sort_desc: false,
             unwatched: false,
@@ -147,6 +159,7 @@ pub(crate) fn fetch_page(
     c: &JfClient,
     key: i64,
     kind: SecKind,
+    library_type: LibraryType,
     start: i64,
     limit: i64,
     sort_key: &str,
@@ -155,6 +168,9 @@ pub(crate) fn fetch_page(
     genre_ids: &str,
 ) -> Option<(Vec<PmsMovie>, i64)> {
     let view = view_for_key(key)?;
+    if library_type == LibraryType::Collections {
+        return fetch_collections(c, &view, start, limit);
+    }
     let sort_by = if sort_key.is_empty() {
         "SortName"
     } else {
@@ -164,7 +180,7 @@ pub(crate) fn fetch_page(
         view_id: &view,
         start,
         limit,
-        include_types: include_types(kind),
+        include_types: include_types(kind, library_type),
         sort_by,
         sort_desc,
         unwatched,
@@ -174,6 +190,22 @@ pub(crate) fn fetch_page(
         .items
         .iter()
         .filter_map(|it| super::convert::movie_from_dto(it, SERVER_ID, 0))
+        .collect();
+    Some((items, res.total))
+}
+
+/// One page of a section's BoxSets — the Collections type's Jellyfin listing. BoxSets answer the
+/// same `/Items` envelope every listing does; `IncludeItemTypes=BoxSet` guarantees the rows, and
+/// the fixed `SortName` ascending order matches the one-sort menu [`collection_sorts`] declares (a
+/// box set has no release date or rating of its own to sort by). Rows convert through
+/// [`super::convert::boxset_from_dto`] into `kind == collection` cards the browse grid already
+/// knows how to open.
+fn fetch_collections(c: &JfClient, view: &str, start: i64, limit: i64) -> Option<(Vec<PmsMovie>, i64)> {
+    let res = c.boxsets(view, start, limit)?;
+    let items: Vec<PmsMovie> = res
+        .items
+        .iter()
+        .filter_map(|it| super::convert::boxset_from_dto(it, SERVER_ID))
         .collect();
     Some((items, res.total))
 }
@@ -203,19 +235,25 @@ pub(crate) fn fetch_letters(
     c: &JfClient,
     key: i64,
     kind: SecKind,
+    library_type: LibraryType,
     filter: &crate::browse::LettersFilter,
 ) -> Option<Vec<(String, i64)>> {
     let view = view_for_key(key)?;
-    c.letter_counts(&view, include_types(kind), filter)
+    c.letter_counts(&view, include_types(kind, library_type), filter)
 }
 
-/// The `IncludeItemTypes` spelling of a section kind. Both kinds list their LEAF-playable
-/// parent type: a movies view lists Movies, a tvshows view lists Series (episodes are reached
-/// through the detail page, as on Plex).
-fn include_types(kind: SecKind) -> &'static str {
-    match kind {
-        SecKind::Movie => "Movie",
-        SecKind::Show => "Series",
+/// The `IncludeItemTypes` spelling of a section kind under a library type. Both kinds list their
+/// LEAF-playable parent type: a movies view lists Movies, a tvshows view lists Series (episodes
+/// are reached through the detail page, as on Plex). The Collections type lists BoxSets instead —
+/// its rows are the section's collections, not its playable leaves.
+fn include_types(kind: SecKind, library_type: LibraryType) -> &'static str {
+    if library_type == LibraryType::Collections {
+        "BoxSet"
+    } else {
+        match kind {
+            SecKind::Movie => "Movie",
+            SecKind::Show => "Series",
+        }
     }
 }
 
@@ -255,7 +293,9 @@ mod tests {
 
     #[test]
     fn section_kinds_map_to_leaf_types() {
-        assert_eq!(include_types(SecKind::Movie), "Movie");
-        assert_eq!(include_types(SecKind::Show), "Series");
+        assert_eq!(include_types(SecKind::Movie, LibraryType::Primary), "Movie");
+        assert_eq!(include_types(SecKind::Show, LibraryType::Primary), "Series");
+        assert_eq!(include_types(SecKind::Movie, LibraryType::Collections), "BoxSet");
+        assert_eq!(include_types(SecKind::Show, LibraryType::Collections), "BoxSet");
     }
 }

@@ -193,6 +193,25 @@ impl CollectionState {
         if adapter.fetch.busy() || self.retry_cd > 0 { return; }
         let Some(job) = self.job() else { return };
         let Some(c) = self.current.as_ref() else { return };
+        // The Jellyfin arm: a BoxSet open carries the box set's id as `rk`, so the store never
+        // resolves a tag route — its Header and Children jobs run against the Jellyfin client. The
+        // installed-client guard is load-bearing: slot 0 is also a valid Plex slot in this build.
+        #[cfg(feature = "jellyfin")]
+        if c.id.sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+            let jc = crate::jellyfin::client().expect("guarded above");
+            let generation = self.generation;
+            let sid = c.id.sid;
+            adapter.fetch.claim();
+            let worker_adapter = Arc::clone(adapter);
+            let request = serde_json::json!({"store":"collection","slot":0,"gen":generation,
+                "sid":sid.raw(),"client":0,"job":job});
+            let spawned = crate::app::bootstrap::stores::admit(request, || crate::task::spawn_small("collection", move || {
+                let what = catch_unwind(|| run_job_jellyfin(jc, sid, job)).unwrap_or(Landing::Transport);
+                worker_adapter.land(generation, what);
+            }));
+            if !spawned { adapter.fetch.release(); }
+            return;
+        }
         let Some(client) = crate::plex::client_for(c.id.sid) else {
             self.retry_cd = RETRY_FRAMES;
             if c.items.is_empty() { self.current.as_mut().unwrap().status = CollectionStatus::Failed; }
@@ -371,6 +390,56 @@ fn run_job(client: &'static crate::plex::Client, sid: ServerId, job: Job) -> Lan
         })
     };
     run().unwrap_or_else(|failed| failed)
+}
+
+/// The Jellyfin half of [`run_job`]: a BoxSet's header is the box set's own item (`/Items/{id}`),
+/// and its members are `/Items?ParentId={id}`. There is no tag-id space, so a `Resolve` job never
+/// arrives here — a Jellyfin open always carries the box set id as its `rk` — and the arm returns
+/// Missing rather than guessing, which the state machine reads as Unavailable.
+#[cfg(feature = "jellyfin")]
+fn run_job_jellyfin(
+    jc: &'static crate::jellyfin::JfClient,
+    sid: ServerId,
+    job: Job,
+) -> Landing {
+    let run = || -> Result<Landing, Landing> {
+        Ok(match job {
+            Job::Resolve { .. } => Landing::Missing,
+            Job::Header { rk } => {
+                let dto = jc.item_detail(&rk).ok_or(Landing::Transport)?;
+                Landing::Header { rk: None, head: boxset_header(&dto) }
+            }
+            Job::Children { rk, start } => {
+                let page = jc
+                    .collection_children(&rk, start as i64, PAGE_SIZE as i64)
+                    .ok_or(Landing::Transport)?;
+                let total = page.total.max(0) as usize;
+                let got = page.items.len();
+                let items = page
+                    .items
+                    .iter()
+                    .filter_map(|it| crate::jellyfin::movie_from_dto(it, sid, 0))
+                    .collect();
+                Landing::Page { start, got, items, total }
+            }
+        })
+    };
+    run().unwrap_or_else(|failed| failed)
+}
+
+/// A BoxSet's header fields from its own item DTO — the same Name/art/ChildCount the browse card
+/// was built from, so the collection page's title and art match the tile that opened it. A box set
+/// has no `collectionSort`, so `order` is never guessed.
+#[cfg(feature = "jellyfin")]
+fn boxset_header(dto: &crate::jellyfin::BaseItemDto) -> Header {
+    let m = crate::jellyfin::boxset_from_dto(dto, crate::jellyfin::SERVER_ID).unwrap_or_default();
+    Header {
+        title: if m.title.is_empty() { dto.name.clone() } else { m.title },
+        thumb: m.thumb,
+        summary: m.summary,
+        child_count: m.child_count.max(0) as usize,
+        order: None,
+    }
 }
 
 #[cfg(test)]

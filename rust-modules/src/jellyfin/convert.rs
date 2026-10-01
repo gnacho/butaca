@@ -124,6 +124,30 @@ fn image_path(it: &BaseItemDto, kind: &str, tag: Option<&String>) -> String {
     }
 }
 
+/// A BoxSet row → the browse grid's collection card (`kind == KIND_COLLECTION`). The card carries
+/// the box set's own id as its `rk`, so opening it routes to the collection screen — exactly the
+/// split `movie_from_dto` refuses to make, where a BoxSet would otherwise be skipped as an
+/// unshelfable kind. `ChildCount` rides the row's `child_count`, which the collection tile reads
+/// as its "N items" caption.
+pub(crate) fn boxset_from_dto(it: &BaseItemDto, sid: ServerId) -> Option<PmsMovie> {
+    if it.kind != "BoxSet" {
+        return None;
+    }
+    let thumb = image_path(it, "Primary", it.image_tags.get("Primary"));
+    Some(PmsMovie {
+        sid,
+        sec: 0,
+        title: it.name.clone(),
+        year: it.year.unwrap_or(0) as c_int,
+        thumb,
+        summary: it.overview.clone().unwrap_or_default(),
+        rk: it.id.clone(),
+        kind: crate::pms::KIND_COLLECTION,
+        child_count: it.child_count.unwrap_or(0).max(0),
+        ..Default::default()
+    })
+}
+
 /// First video and first audio codec ids, from the first MediaSource that carries streams.
 /// `(unknown, unknown)` is honest — a listing fetched without `Fields=MediaSources` is not a
 /// file without codecs, and the direct-play gate re-reads them from the detail fetch anyway.
@@ -218,5 +242,24 @@ mod tests {
     fn unknown_kind_is_skipped_not_misfilled() {
         let it = one(r#"{"Items": [{"Id": "b1", "Name": "Set", "Type": "BoxSet"}], "TotalRecordCount": 1}"#);
         assert!(movie_from_dto(&it, ServerId::from_raw(0), 0).is_none());
+    }
+
+    #[test]
+    fn a_boxset_row_converts_to_a_collection_card() {
+        let it = one(
+            r#"{"Items": [{
+                "Id": "box1", "Name": "The Saga", "Type": "BoxSet",
+                "ImageTags": {"Primary": "btag"}, "ChildCount": 7
+            }], "TotalRecordCount": 1}"#,
+        );
+        let m = boxset_from_dto(&it, ServerId::from_raw(0)).unwrap();
+        assert_eq!(m.kind, crate::pms::KIND_COLLECTION);
+        assert_eq!(m.rk, "box1");
+        assert_eq!(m.title, "The Saga");
+        assert_eq!(m.thumb, "/Items/box1/Images/Primary?tag=btag");
+        assert_eq!(m.child_count, 7);
+        assert_eq!(m.sec, 0);
+        // a non-BoxSet row is refused, never misfilled
+        assert!(boxset_from_dto(&one(r#"{"Items": [{"Id": "m", "Name": "Film", "Type": "Movie"}], "TotalRecordCount": 1}"#), ServerId::from_raw(0)).is_none());
     }
 }
