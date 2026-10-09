@@ -512,7 +512,21 @@ pub fn synthetic_home_initial(seed: u32, port: u16, settings: Option<String>)
     serde_json::to_string_pretty(&initial).map_err(|_| "cannot encode synthetic initial inputs")
 }
 
-fn enter_application(pms_host: *const c_char, pms_port: c_int, launch_params: Option<String>) -> Result<App,c_int> {
+fn enter_application(pms_host: *const c_char, pms_port: c_int, launch_params: *const c_char) -> Result<App,c_int> {
+    // The webOS launch-params JSON (argv[1] in the C shim; NULL on a plain launch, which is what
+    // SAM does). Read once, up front, while the pointer is known good; the deep-link key is picked
+    // out of it in `boot::construct`. Logged raw so a misbehaving launcher is diagnosable from our
+    // own event log.
+    let launch_params = unsafe {
+        if launch_params.is_null() {
+            None
+        } else {
+            std::ffi::CStr::from_ptr(launch_params).to_str().ok().map(str::to_owned)
+        }
+    };
+    if let Some(ref p) = launch_params {
+        log(&format!("boot: launch params {p}"));
+    }
     let preflight = match bootstrap::Preflight::detect() {
         Ok(mode) => mode,
         Err(reason) => { log(&format!("replay: REFUSED — {reason}")); return Err(1); }
@@ -532,21 +546,10 @@ fn enter_application(pms_host: *const c_char, pms_port: c_int, launch_params: Op
 }
 
 /// The ten-line public skeleton: preflight/construction, then the ordinary loop and teardown.
-///
-/// `launch_params` is the webOS launch-params JSON (argv[1] in the C shim; `None` on a plain
-/// launch). Logged raw once, then carried into `boot` for the deep-link gate.
+/// `launch_params` is the raw argv[1] pointer; it is read inside `enter_application` so this
+/// function keeps its line budget (check-deps `fnlen`).
 #[no_mangle]
 pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int, launch_params: *const c_char) -> c_int {
-    let launch_params = unsafe {
-        if launch_params.is_null() {
-            None
-        } else {
-            std::ffi::CStr::from_ptr(launch_params).to_str().ok().map(str::to_owned)
-        }
-    };
-    if let Some(ref p) = launch_params {
-        log(&format!("boot: launch params {p}"));
-    }
     let mut app = match enter_application(pms_host,pms_port,launch_params) { Ok(app) => app, Err(code) => return code };
     unsafe { run_and_shutdown(&mut app) }
 }
