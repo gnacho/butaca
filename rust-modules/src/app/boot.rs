@@ -249,14 +249,18 @@ pub(crate) enum BootTo {
     Profiles,
 }
 
-/// Extract the deep-link item id from a webOS launch-params JSON body (the `params` object SAM
-/// hands a native app in argv[1]). Malformed JSON, a missing key and a non-string value all
-/// answer None: a launcher that cannot read our log must never get a crash for its typo.
+/// Extract the deep-link item id from a webOS launch-params JSON body (the envelope SAM hands
+/// a native app in argv[1]). Measured on device, the envelope nests the launcher's own params
+/// under a `parameters` key (`{"event":"launch",...,"parameters":{"jellyfinItemId":"..."}}`),
+/// so BOTH the nested and a bare top-level key are accepted — the top-level read costs nothing
+/// and keeps unit tests honest about the shape. Malformed JSON, a missing key and a non-string
+/// value all answer None: a launcher that cannot read our log must never get a crash for its
+/// typo.
 #[cfg(feature = "jellyfin")]
 pub(crate) fn deeplink_item_id(params: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(params)
-        .ok()
-        .and_then(|v| v.get("jellyfinItemId").and_then(|x| x.as_str()).map(str::to_owned))
+    let value = serde_json::from_str::<serde_json::Value>(params).ok()?;
+    let as_id = |v: &serde_json::Value| v.get("jellyfinItemId").and_then(|x| x.as_str()).map(str::to_owned);
+    as_id(&value).or_else(|| value.get("parameters").and_then(as_id))
 }
 
 #[cfg(all(test, feature = "jellyfin"))]
@@ -277,6 +281,21 @@ mod deeplink_tests {
             deeplink_item_id("{\"foo\":1,\"jellyfinItemId\":\"x9\",\"bar\":true}").as_deref(),
             Some("x9")
         );
+    }
+
+    #[test]
+    fn sams_envelope_nests_the_id_under_parameters() {
+        // The shape argv[1] actually carries on device (measured 2026-10-09): the launcher's
+        // params arrive nested under "parameters", beside event/reason/appId/interfaceMethod.
+        let envelope = "{\"event\":\"launch\",\"reason\":\"undefined\",\"appId\":\"com.butaca.debug\",\"interfaceVersion\":2,\"parameters\":{\"jellyfinItemId\":\"f7e357\"},\"interfaceMethod\":\"registerApp\"}";
+        assert_eq!(deeplink_item_id(envelope).as_deref(), Some("f7e357"));
+        // Nested beats nothing; a top-level id still wins when both exist.
+        assert_eq!(
+            deeplink_item_id("{\"jellyfinItemId\":\"top\",\"parameters\":{\"jellyfinItemId\":\"nested\"}}").as_deref(),
+            Some("top")
+        );
+        // parameters present but carrying no id → None, not a panic.
+        assert_eq!(deeplink_item_id("{\"parameters\":{}}"), None);
     }
 
     #[test]
