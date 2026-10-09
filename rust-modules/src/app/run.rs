@@ -2998,6 +2998,7 @@ mod lifecycle_regression_tests {
             wslg_frame_pacing: false,
             t0: Default::default(),
             instr: crate::diag::heartbeat::Instruments::new(false, 22.0),
+            deeplink_rk: None,
             scenarios: crate::dev::scenarios::Scenarios {
             #[cfg(feature = "devtriggers")]
             poster_gate: Default::default(),
