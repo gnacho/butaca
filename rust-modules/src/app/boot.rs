@@ -249,6 +249,45 @@ pub(crate) enum BootTo {
     Profiles,
 }
 
+/// Extract the deep-link item id from a webOS launch-params JSON body (the `params` object SAM
+/// hands a native app in argv[1]). Malformed JSON, a missing key and a non-string value all
+/// answer None: a launcher that cannot read our log must never get a crash for its typo.
+#[cfg(feature = "jellyfin")]
+pub(crate) fn deeplink_item_id(params: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(params)
+        .ok()
+        .and_then(|v| v.get("jellyfinItemId").and_then(|x| x.as_str()).map(str::to_owned))
+}
+
+#[cfg(all(test, feature = "jellyfin"))]
+mod deeplink_tests {
+    use super::deeplink_item_id;
+
+    #[test]
+    fn parses_a_plain_item_id() {
+        assert_eq!(
+            deeplink_item_id("{\"jellyfinItemId\":\"a1b2c3\"}").as_deref(),
+            Some("a1b2c3")
+        );
+    }
+
+    #[test]
+    fn extra_keys_are_ignored() {
+        assert_eq!(
+            deeplink_item_id("{\"foo\":1,\"jellyfinItemId\":\"x9\",\"bar\":true}").as_deref(),
+            Some("x9")
+        );
+    }
+
+    #[test]
+    fn missing_key_malformed_json_and_non_string_all_answer_none() {
+        assert_eq!(deeplink_item_id("{\"other\":1}"), None);
+        assert_eq!(deeplink_item_id("not json"), None);
+        assert_eq!(deeplink_item_id("{\"jellyfinItemId\":42}"), None);
+        assert_eq!(deeplink_item_id(""), None);
+    }
+}
+
 /// Pure capture boundary shared by actual boot and owner bootstrap regression fixtures.
 pub(crate) fn captured_session_for_boot(saved: crate::plex::session::Session,
     dev_primary: Option<crate::plex::session::ServerRef>,
@@ -324,6 +363,7 @@ pub(crate) unsafe fn boot(
     pms_port: c_int,
     mt: crate::task::MainThread,
     preflight: super::bootstrap::Preflight,
+    launch_params: Option<String>,
 ) -> Result<App, c_int> {
     let initial = match &preflight {
         super::bootstrap::Preflight::Live => None,
@@ -337,8 +377,8 @@ pub(crate) unsafe fn boot(
         super::bootstrap::Preflight::Replay { initial, .. } => Some((initial.clone(), None)),
     };
     match initial {
-        Some((initial, deferred)) => App::from_init(initial, preflight, pms_host, pms_port, mt, deferred),
-        None => construct(pms_host, pms_port, mt, preflight, None, None),
+        Some((initial, deferred)) => App::from_init(initial, preflight, pms_host, pms_port, mt, deferred, launch_params),
+        None => construct(pms_host, pms_port, mt, preflight, None, None, launch_params),
     }
 }
 
@@ -356,6 +396,7 @@ pub(crate) unsafe fn construct(
     pms_host: *const c_char, pms_port: c_int, mt: crate::task::MainThread,
     preflight: super::bootstrap::Preflight, initial: Option<super::bootstrap::Initial>,
     deferred: Option<crate::plex::session::DeferredLoad>,
+    launch_params: Option<String>,
 ) -> Result<App, c_int> {
     let controlled = preflight.controlled();
     if let Some(initial) = &initial {
@@ -1125,6 +1166,24 @@ pub(crate) unsafe fn construct(
     // rows own resume. Never override this route from an old last-page bookmark. The cleanup is
     // intentionally unconditional so automated and ordinary upgrades retire the same state.
     crate::coldstart::retire();
+    // Launch-param deep link: seed only when the boot gate landed on Home ITSELF — a Login,
+    // Profiles or Onboard landing owns the screen, and a detail page pushed over it would
+    // strand BACK. Dropping the id in those cases is the issue's "fall back to Home, no error
+    // loop" contract. Parsed here (not in the frame arm) so malformed params cost one
+    // serde_json call at boot, never a per-frame one.
+    #[cfg(feature = "jellyfin")]
+    let deeplink_rk = if matches!(route, AppArg::Home) {
+        launch_params.as_deref().and_then(deeplink_item_id)
+    } else {
+        None
+    };
+    #[cfg(not(feature = "jellyfin"))]
+    let deeplink_rk: Option<String> = {
+        // Plex builds never deep-link; acknowledging the param keeps the signature honest
+        // without a second signature behind cfg.
+        let _ = &launch_params;
+        None
+    };
     // (`play_from`, the BACK trail and `nav_pending` were three run-loop locals here — the page
     // the live session returns to, the pages behind the one on screen, and the route change a fade
     // is carrying. All three are the container's since restructure phase 12: `PlayerScreen::origin`
@@ -1237,6 +1296,8 @@ pub(crate) unsafe fn construct(
         pages,
         inputs: Vec::new(),
         bridge,
+        // The launch-param deep link, seeded above; consumed once by the frame arm.
+        deeplink_rk,
         // Every dev-trigger arm's own state (spec: `dev/scenarios.rs`'s module doc).
         scenarios: crate::dev::scenarios::Scenarios {
             #[cfg(feature = "devtriggers")]

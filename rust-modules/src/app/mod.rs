@@ -314,6 +314,11 @@ pub(crate) struct App {
     /// Every dev-trigger arm's own state — oscillator phases, retry latches, boot-time flags
     /// (formerly `DevFlags`) — gathered on ONE struct (spec: `dev/scenarios.rs`'s module doc).
     pub(crate) scenarios: crate::dev::scenarios::Scenarios,
+    /// **The launch-param deep link** (argv[1] `jellyfinItemId`): one item id carried from the
+    /// C shim, seeded ONLY when the boot gate reached Home on its own (see `boot::construct`),
+    /// and consumed once by `dev::scenarios::deeplink_arm` on the first frames. None on a plain
+    /// launch, a non-Home landing, or a Plex build.
+    pub(crate) deeplink_rk: Option<String>,
     /// The Input machine: owner of the press (restructure spec §2.2); the ladders borrow it.
     pub(crate) input: crate::ui::input::Input,
     /// `text::take_measure_fault` has been reported once (the report is once per process).
@@ -369,8 +374,9 @@ impl App {
     /// Controlled construction receives decoded/captured inputs before bootstrap effects.
     pub(crate) unsafe fn from_init(initial: bootstrap::Initial, mode: bootstrap::Preflight,
         pms_host: *const c_char, pms_port: c_int, mt: crate::task::MainThread,
-        deferred: Option<crate::plex::session::DeferredLoad>) -> Result<Self, c_int> {
-        boot::construct(pms_host, pms_port, mt, mode, Some(initial), deferred)
+        deferred: Option<crate::plex::session::DeferredLoad>,
+        launch_params: Option<String>) -> Result<Self, c_int> {
+        boot::construct(pms_host, pms_port, mt, mode, Some(initial), deferred, launch_params)
     }
     /// **Which page is on top** (spec §15.2) — the container's answer, and since D1 the ONLY one.
     ///
@@ -506,7 +512,7 @@ pub fn synthetic_home_initial(seed: u32, port: u16, settings: Option<String>)
     serde_json::to_string_pretty(&initial).map_err(|_| "cannot encode synthetic initial inputs")
 }
 
-fn enter_application(pms_host: *const c_char, pms_port: c_int) -> Result<App,c_int> {
+fn enter_application(pms_host: *const c_char, pms_port: c_int, launch_params: Option<String>) -> Result<App,c_int> {
     let preflight = match bootstrap::Preflight::detect() {
         Ok(mode) => mode,
         Err(reason) => { log(&format!("replay: REFUSED — {reason}")); return Err(1); }
@@ -521,14 +527,27 @@ fn enter_application(pms_host: *const c_char, pms_port: c_int) -> Result<App,c_i
     // Diagnostics probes `app_dir()` on its worker, so starting it earlier races that preamble.
     crate::storage::diagnostics::start();
     let main_thread = unsafe { crate::task::MainThread::assume() };
-    let app = unsafe { boot(pms_host,pms_port,main_thread,preflight) }?;
+    let app = unsafe { boot(pms_host,pms_port,main_thread,preflight,launch_params) }?;
     Ok(app)
 }
 
 /// The ten-line public skeleton: preflight/construction, then the ordinary loop and teardown.
+///
+/// `launch_params` is the webOS launch-params JSON (argv[1] in the C shim; `None` on a plain
+/// launch). Logged raw once, then carried into `boot` for the deep-link gate.
 #[no_mangle]
-pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int) -> c_int {
-    let mut app = match enter_application(pms_host,pms_port) { Ok(app) => app, Err(code) => return code };
+pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int, launch_params: *const c_char) -> c_int {
+    let launch_params = unsafe {
+        if launch_params.is_null() {
+            None
+        } else {
+            std::ffi::CStr::from_ptr(launch_params).to_str().ok().map(str::to_owned)
+        }
+    };
+    if let Some(ref p) = launch_params {
+        log(&format!("boot: launch params {p}"));
+    }
+    let mut app = match enter_application(pms_host,pms_port,launch_params) { Ok(app) => app, Err(code) => return code };
     unsafe { run_and_shutdown(&mut app) }
 }
 
