@@ -25,7 +25,7 @@ FILE *elogf = NULL;   /* shared event/diagnostic log (extern in app.h); used by 
 /* The crash log has no `FILE *` any more, only a raw descriptor handed to `plx_crash_install`: its
  * ONLY writer is the signal handler, and stdio is not usable there. See `src/crashtrace.c`. */
 
-extern int plex_run(const char *pms_host, int pms_port);  /* Rust app core (no creds — session or /tmp/plxnative-token) */
+extern int plex_run(const char *pms_host, int pms_port, const char *launch_params);  /* Rust app core (no creds — session or /tmp/plxnative-token; argv[1] launch-params JSON or NULL) */
 extern void plx_crash_write_image_marker(int fd); /* identify this binary in the append-only log (crashtrace.c) */
 
 /* Where this INSTALL's runtime files live — `/tmp/plxnative-events.log` for the app users get,
@@ -105,9 +105,10 @@ static int open_fd_0600(const char *path, int flags) {
 }
 
 int main(int argc, char **argv) {
-    // This fork ships no crash daemon: there is no envelope-re-entry mode, and a stray argument is
-    // an ordinary launch that ignores it (as `void argc` below always did for every other count).
-    (void)argc; (void)argv;
+    // This fork ships no crash daemon: there is no envelope-re-entry mode, and a stray argument
+    // is an ordinary launch that ignores it. The ONE argument with meaning is argv[1]: SAM hands
+    // a native app its launch-params JSON there, and it is forwarded to the Rust core below,
+    // which picks its deep-link keys out of it.
     elogf = open_event_log();
     /* The crash handler's own descriptors, both opened BEFORE `install_crash_tracer` arms the
      * handler — so a signal can never reach code that has to open something first, which is the
@@ -136,5 +137,7 @@ int main(int argc, char **argv) {
     plx_crash_install(event_fd, crash_fd);
     /* request BACK key delivery from the webOS access policy (before SDL init) */
     setenv("SDL_WEBOS_ACCESS_POLICY_KEYS_BACK", "true", 1);
-    return plex_run(PMS_HOST, PMS_PORT);
+    /* webOS hands a native app its launch params as a JSON string in argv[1]
+     * (SAM "params" object; absent on a plain launch). Forwarded, not parsed here. */
+    return plex_run(PMS_HOST, PMS_PORT, argc > 1 ? argv[1] : NULL);
 }

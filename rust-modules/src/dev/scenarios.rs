@@ -1113,6 +1113,33 @@ fn itemmenu_arm(app: &mut App, fr: &mut Frame) {
     }
 }
 
+/// Launch-param deep link (`jellyfinItemId`) — the PRODUCT twin of `detail_arm` below: open one
+/// Jellyfin item's detail page after a Home landing. Same async landing (RequestDetail + a hard
+/// cut, never the retired blocking load), same 500 ms boot delay, but its trigger is the app
+/// field `App.deeplink_rk`, which `boot::construct` seeded only when the gate reached Home — so
+/// no route check is needed here. `take()` makes the arm one-shot even if Home is slow to mount.
+#[cfg(feature = "jellyfin")]
+fn deeplink_arm(app: &mut App, fr: &mut Frame) -> bool {
+    if fr.now.wrapping_sub(app.t0) <= 500 { return true; }
+    let Some(rk) = app.deeplink_rk.take() else { return true };
+    if rk.is_empty() { return true; }
+    let sid = crate::jellyfin::SERVER_ID;
+    app.bridge.metadata_mut().run(crate::stores::metadata::MetadataCmd::RequestDetail { sid, rk: rk.clone() });
+    crate::log(&format!("deeplink: jellyfinItemId={rk} — opening detail"));
+    crate::app::bridge::open_detail(&mut app.pages, &mut app.bridge, sid, &rk, None, None);
+    true
+}
+
+/// Plex builds: `App.deeplink_rk` is always None (the parser is jellyfin-only), so the arm is a
+/// no-op — but it stays in `each_frame` so the call site is not feature-gated soup.
+#[cfg(not(feature = "jellyfin"))]
+fn deeplink_arm(app: &mut App, fr: &mut Frame) -> bool {
+    // Consume the (always-None) field so it is "read" on this flavor too, and keep the
+    // one-shot contract identical to the jellyfin arm.
+    let _ = (app.deeplink_rk.take(), fr);
+    true
+}
+
 /// `/tmp/plxnative-detail=<rk>` — boot straight onto a detail page (`fps:cold-open`).
 ///
 /// **The request is the ASYNC one, and that is the whole scene.** This arm ran
@@ -1726,6 +1753,7 @@ pub(crate) fn failure_fixture(session: &mut crate::route::PlaybackSession) {
 pub(crate) unsafe fn each_frame(app: &mut App, fr: &mut Frame) -> bool {
     #[cfg(feature = "devtriggers")]
     poster_gate::tick(app, fr.now);
+    deeplink_arm(app, fr);
     autoplay_arm(app, fr);
     grid_library_search_heroidx_arm(app, fr);
     settings_boot_arm(app, fr);

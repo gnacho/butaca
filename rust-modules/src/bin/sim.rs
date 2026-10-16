@@ -121,7 +121,7 @@ fn main() {
     });
 
     // `as c_int` directly — an intermediate i16 would wrap every port above 32767.
-    let rc = plex_run(c_host.as_ptr(), port as c_int);
+    let rc = plex_run(c_host.as_ptr(), port as c_int, std::ptr::null());
     exit_without_atexit_teardown(rc)
 }
 

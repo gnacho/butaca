@@ -6,7 +6,7 @@
 #include <errno.h>
 #include <limits.h>
 
-int plex_run(const char *host, int port) { (void)host; (void)port; return 0; }
+int plex_run(const char *host, int port, const char *launch_params) { (void)host; (void)port; (void)launch_params; return 0; }
 int plx_sentry_spool_external(const char *path) { (void)path; return 0; }
 void plx_crash_write_image_marker(int fd) { (void)fd; }
 void plx_crash_install(int event_fd, int crash_fd) { (void)event_fd; (void)crash_fd; }
