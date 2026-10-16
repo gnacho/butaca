@@ -424,6 +424,7 @@ impl JfClient {
             scope.push_str(&format!("&GenreIds={genre}"));
         }
         let total = self.count_query(&user_id, view_id, include_types, &scope)?;
+        let diag_t0 = std::time::Instant::now();
         let mut counts = Vec::new();
         for b in b'A'..=b'Z' {
             let letter = (b as char).to_string();
@@ -439,6 +440,10 @@ impl JfClient {
                 counts.push((letter, n));
             }
         }
+        crate::log(&format!(
+            "[DEBUG-58] letters: 26 probes in {}ms",
+            diag_t0.elapsed().as_millis()
+        ));
         Some(build_letters(total, counts))
     }
 

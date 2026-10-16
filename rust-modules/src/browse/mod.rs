@@ -2596,6 +2596,11 @@ impl BrowseState {
             let genre_ids = state.genre.as_ref().map(|genre| genre.id.clone()).unwrap_or_default();
             let kind = section.kind;
             let library_type = state.library_type;
+            crate::log(&format!(
+                "[DEBUG-58] kick page start={} at ui-ms {}",
+                start,
+                crate::ui::idle::now_ms()
+            ));
             adapter.fetching.store(true, Ordering::SeqCst);
             let worker_adapter = Arc::clone(adapter);
             let spawned = crate::task::spawn_small("page", move || {
@@ -2683,6 +2688,11 @@ impl BrowseState {
         changed |= self.land_directory_owned_with_gate(
             gate,
             &adapter.letters_fetching, &adapter.letter_result, |state, list, filter| {
+                crate::log(&format!(
+                    "[DEBUG-58] land letters ({} rows) at ui-ms {}",
+                    list.len(),
+                    crate::ui::idle::now_ms()
+                ));
                 state.letters_done = true;
                 // Jellyfin's counts describe one filter combination (issue #37): the new table
                 // REPLACES the old, and the combination it ran under is stamped so a later
@@ -2743,6 +2753,12 @@ impl BrowseState {
                         // the server answered: Ready even at total 0 — an empty library is an
                         // answer, never a fault
                         state.fetch = SecFetch::Ready;
+                        crate::log(&format!(
+                            "[DEBUG-58] land page start={} total={} at ui-ms {}",
+                            result.start,
+                            result.total,
+                            crate::ui::idle::now_ms()
+                        ));
                         if state.sorts.is_empty() {
                             // Collections lands the one-sort menu (box sets sort by name alone);
                             // every other type lands the backend's full fixed vocabulary.

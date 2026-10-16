@@ -176,6 +176,7 @@ pub(crate) fn fetch_page(
     } else {
         sort_key
     };
+    let diag_t0 = std::time::Instant::now();
     let res = c.browse_page(&BrowseQuery {
         view_id: &view,
         start,
@@ -191,6 +192,12 @@ pub(crate) fn fetch_page(
         .iter()
         .filter_map(|it| super::convert::movie_from_dto(it, SERVER_ID, 0))
         .collect();
+    crate::log(&format!(
+        "[DEBUG-58] fetch_page: {} items (start={}) in {}ms",
+        items.len(),
+        start,
+        diag_t0.elapsed().as_millis()
+    ));
     Some((items, res.total))
 }
 
