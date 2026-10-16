@@ -874,6 +874,18 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
             (state & 0xff) == 1,
             state & 0x100 != 0,
         ));
+        // [DEBUG-28] temporary probe for issue #28: what a HELD arrow actually delivers in
+        // the Library (edge shape and cadence), so the fast-scroll fix lands on measured
+        // behaviour rather than on the driver's doc. Removal is this one block.
+        if matches!(app.route(), crate::screens::registry::AppArg::Library) {
+            crate::log(&format!(
+                "[DEBUG-28] key sym={} wcode={} state={state:#x} down={} repeatbit={}",
+                sym,
+                wcode,
+                (state & 0xff) == 1,
+                state & 0x100 != 0
+            ));
+        }
         // **Does the TREE own this key?** (phase 5b, `app/bridge.rs`'s coexistence
         // contract.) Asked once, here, above all three edges — because the dispatcher's
         // press machine wants ALL of them: `Edge::Down` arms, `Edge::Repeat` is the
