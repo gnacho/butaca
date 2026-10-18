@@ -697,8 +697,11 @@ pub(crate) fn bind_window(_win: *mut std::os::raw::c_void) {}
 /// One LS2 request/reply, on the calling thread.
 ///
 /// **The one LS2 client this process has**, shared by every caller that speaks to the bus from
-/// this application: [`super::launch_home`] (one 600 ms call on the SDL main thread) and
-/// `keymanager::platform::Client` (a registration kept alive across begin → finish, 4 s budget).
+/// this application: [`super::launch_home`] (one 600 ms call on the SDL main thread),
+/// `keymanager::platform::Client` (a registration kept alive across begin → finish, 4 s budget),
+/// and - jellyfin flavour only - `lifecycle`'s subscriber thread, whose anonymous registration
+/// lives for the whole PROCESS: `pump_forever` never returns, so it is the one registration here
+/// that is never dropped and never unregistered.
 /// Until 2026-09-04 it was two private copies, both registering with
 /// `LSRegisterApplicationService(NULL, app_id)`, and on this set that registration is REFUSED:
 /// `ls-hubd LSHUB_ROLE_FILE: Can not find service "" permissions for executable ".../plxnative"`
@@ -721,7 +724,8 @@ pub(crate) fn bind_window(_win: *mut std::os::raw::c_void) {}
 /// grades the reply of the one that matters — and the hub's refusal, when there is one, travels
 /// in [`RegisterFail`] to the caller's log line instead of being freed. Anonymous clients do not
 /// collide with each other, so nothing here is serialised; a registration lives for one caller's
-/// use and is unregistered on drop, as both copies always did.
+/// use and is unregistered on drop, as both copies always did - with the single exception named
+/// above, the lifecycle subscriber whose registration is process-lifetime by design.
 #[cfg(all(not(feature = "hostsim"), not(test)))]
 pub(crate) mod ls2 {
     use std::ffi::{CStr, CString};
