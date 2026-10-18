@@ -904,20 +904,22 @@ pub(crate) mod ls2 {
     /// Register CLAIMING THE APP ID as this connection's service name — the shape SAM's
     /// `registerApp` demands of a lifecycle subscriber (see [`super::lifecycle`]): SAM resolves the
     /// caller by the connection's LS2 name, and an anonymous client has none, which is the
-    /// `cannot find caller id` refusal the first shipped attempt measured. The role file
-    /// appinstalld writes for the app allows exactly this name, and the hub reports it UNOWNED
-    /// while the app runs (`ls-monitor -i`, 2026-10-18) — the `-1028` in the table above was a
-    /// stale holder of a previous instance, not a platform rule and not ACB, which owns no name.
+    /// `cannot find caller id` refusal the first shipped attempt measured. Via a plain NAMED
+    /// [`LSRegister`], deliberately NOT `LSRegisterApplicationService`: the hub refuses any
+    /// app-id annotation from a non-application-container with `-1027 Invalid permissions for
+    /// <name>` (measured 2026-10-18), and the caller resolution falls back to the sender service
+    /// name, which matches the running app by app id anyway. The role file appinstalld writes for
+    /// the app allows exactly this name.
     #[cfg(feature = "jellyfin")]
     pub(crate) fn register_as_app_service() -> Result<Registration, RegisterFail> {
         let app_id = app_id_cstring()?;
         register_with(Some(&app_id))
     }
 
-    /// The one registration body; `Some` is the app-service shape (`LSRegisterApplicationService`
-    /// with the app id as BOTH the name and the app id, `probe`'s first row), `None` the anonymous
-    /// one. Both land on a private glib context.
-    fn register_with(app_service: Option<&CString>) -> Result<Registration, RegisterFail> {
+    /// The one registration body; `Some` claims the name (plain `LSRegister` with a name — the one
+    /// shape the probe table never tried), `None` the anonymous one. Both land on a private glib
+    /// context.
+    fn register_with(name: Option<&CString>) -> Result<Registration, RegisterFail> {
         let mut error: LSError = unsafe { std::mem::zeroed() };
         unsafe { LSErrorInit(&mut error) };
         let context = unsafe { g_main_context_new() };
@@ -930,10 +932,8 @@ pub(crate) mod ls2 {
         }
         let mut handle = std::ptr::null_mut();
         let registered = unsafe {
-            match app_service {
-                Some(name) => LSRegisterApplicationService(
-                    name.as_ptr(), name.as_ptr(), &mut handle, &mut error,
-                ),
+            match name {
+                Some(name) => LSRegister(name.as_ptr(), &mut handle, &mut error),
                 None => LSRegister(std::ptr::null(), &mut handle, &mut error),
             }
         };
@@ -1276,7 +1276,12 @@ pub(crate) mod ls2 {
 /// app runs: `ls-monitor -i` answers "Service 'com.butaca.debug' is not registered at hub", the
 /// app's role file allows exactly that name, and `luna-send -a <app id>` gets `event: registered`
 /// from a root shell at the same moment. So the shape that works is to claim the app id as the
-/// connection's own service name: [`super::ls2::register_as_app_service`].
+/// connection's own service name: [`super::ls2::register_as_app_service`]. The annotation route is
+/// closed, measured: `LSRegisterApplicationService(name, app_id)` is refused with `-1027 Invalid
+/// permissions for <name>` because the hub only accepts an app-id annotation from an application
+/// container, and this TV's container set holds exactly three runtimes (`node`, `webappmgr`,
+/// `qml-runner` - `/etc/luna-service2/ls-hubd.conf` names the directory); the caller resolution's
+/// fallback to the sender service name is the one open door.
 ///
 /// (The `-1028` "name already exists" this shape answers when it loses the race is measured end to
 /// end (2026-10-18): the TV's SDL webOS driver claims the app id for its own connection during
