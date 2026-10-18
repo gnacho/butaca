@@ -1113,6 +1113,19 @@ fn itemmenu_arm(app: &mut App, fr: &mut Frame) {
     }
 }
 
+/// One Jellyfin item's detail page, from an id a launcher sent: the SHARED opening of the boot
+/// deep link below and of the relaunch one after it. Same async landing (RequestDetail + a hard
+/// cut, never the retired blocking load) and the same single forward entry
+/// (`bridge::open_detail`), so a second way in cannot drift from the first. `source` names the way
+/// in on the log line, which is the only thing that differs between the two.
+#[cfg(feature = "jellyfin")]
+fn open_deeplink_item(app: &mut App, rk: &str, source: &str) {
+    let sid = crate::jellyfin::SERVER_ID;
+    app.bridge.metadata_mut().run(crate::stores::metadata::MetadataCmd::RequestDetail { sid, rk: rk.to_string() });
+    crate::log(&format!("{source}: jellyfinItemId={rk} - opening detail"));
+    crate::app::bridge::open_detail(&mut app.pages, &mut app.bridge, sid, rk, None, None);
+}
+
 /// Launch-param deep link (`jellyfinItemId`) — the PRODUCT twin of `detail_arm` below: open one
 /// Jellyfin item's detail page after a Home landing. Same async landing (RequestDetail + a hard
 /// cut, never the retired blocking load), same 500 ms boot delay, but its trigger is the app
@@ -1123,10 +1136,25 @@ fn deeplink_arm(app: &mut App, fr: &mut Frame) -> bool {
     if fr.now.wrapping_sub(app.t0) <= 500 { return true; }
     let Some(rk) = app.deeplink_rk.take() else { return true };
     if rk.is_empty() { return true; }
-    let sid = crate::jellyfin::SERVER_ID;
-    app.bridge.metadata_mut().run(crate::stores::metadata::MetadataCmd::RequestDetail { sid, rk: rk.clone() });
-    crate::log(&format!("deeplink: jellyfinItemId={rk} — opening detail"));
-    crate::app::bridge::open_detail(&mut app.pages, &mut app.bridge, sid, &rk, None, None);
+    open_deeplink_item(app, &rk, "deeplink");
+    true
+}
+
+/// SAM's relaunch deep link - the SAME page as `deeplink_arm` above from the other clock. A tile
+/// clicked over an already-running install is not a second launch: SAM answers `returnValue:true`
+/// and delivers a `relaunch` event on the process's lifecycle subscription, which
+/// `webos::lifecycle` queues for this arm to drain (`butaca#71`).
+///
+/// No boot delay and no route check: the app is already up and the person is looking at it, so the
+/// event is served on the frame it is noticed. `take()` is what makes two tiles clicked inside one
+/// frame resolve to the last one rather than to a page each (the slot's own last-wins rule).
+#[cfg(feature = "jellyfin")]
+fn relaunch_arm(app: &mut App, fr: &mut Frame) -> bool {
+    // This arm's clock is the bus, not the frame: the frame's own timing governs nothing here.
+    let _ = fr;
+    let Some(rk) = crate::webos::lifecycle::take_pending() else { return true };
+    if rk.is_empty() { return true; }
+    open_deeplink_item(app, &rk, "relaunch");
     true
 }
 
@@ -1137,6 +1165,13 @@ fn deeplink_arm(app: &mut App, fr: &mut Frame) -> bool {
     // Consume the (always-None) field so it is "read" on this flavor too, and keep the
     // one-shot contract identical to the jellyfin arm.
     let _ = (app.deeplink_rk.take(), fr);
+    true
+}
+
+/// Plex builds hold no lifecycle queue at all (`webos::lifecycle` is the jellyfin flavour's), so
+/// this arm is a no-op that keeps the call site identical to the one above it.
+#[cfg(not(feature = "jellyfin"))]
+fn relaunch_arm(_app: &mut App, _fr: &mut Frame) -> bool {
     true
 }
 
@@ -1754,6 +1789,7 @@ pub(crate) unsafe fn each_frame(app: &mut App, fr: &mut Frame) -> bool {
     #[cfg(feature = "devtriggers")]
     poster_gate::tick(app, fr.now);
     deeplink_arm(app, fr);
+    relaunch_arm(app, fr);
     autoplay_arm(app, fr);
     grid_library_search_heroidx_arm(app, fr);
     settings_boot_arm(app, fr);

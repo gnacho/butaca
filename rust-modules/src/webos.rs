@@ -778,6 +778,20 @@ pub(crate) mod ls2 {
             token: *mut libc::c_ulong,
             error: *mut LSError,
         ) -> bool;
+        /// The SUBSCRIPTION half of the same pair: `LSCallOneReply` retires the callback after one
+        /// message, this one leaves it attached, which is what a service's `{"subscribe":true}`
+        /// method needs to deliver more than its first reply. The Jellyfin flavour's lifecycle
+        /// subscriber is its one caller, so the Plex build does not carry the declaration at all.
+        #[cfg(feature = "jellyfin")]
+        fn LSCall(
+            handle: *mut c_void,
+            uri: *const c_char,
+            payload: *const c_char,
+            callback: extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> bool,
+            context: *mut c_void,
+            token: *mut libc::c_ulong,
+            error: *mut LSError,
+        ) -> bool;
         fn LSCallCancel(handle: *mut c_void, token: libc::c_ulong, error: *mut LSError) -> bool;
         fn LSMessageGetPayload(message: *mut c_void) -> *const c_char;
         fn LSUnregister(handle: *mut c_void, error: *mut LSError) -> bool;
@@ -798,6 +812,23 @@ pub(crate) mod ls2 {
             }
         }
         true
+    }
+
+    /// One message's payload, COPIED OUT. The message and the string it points at belong to the bus
+    /// and are valid only for the duration of the callback that received them, so a subscriber
+    /// cannot keep the borrow it was handed (this is why [`Registration::call`] writes into a slot
+    /// instead of returning a `&str`). `pub(super)` because the lifecycle subscriber is the one
+    /// caller that wants the copy rather than a slot of its own.
+    #[cfg(feature = "jellyfin")]
+    pub(super) fn payload_of(message: *mut c_void) -> String {
+        if message.is_null() {
+            return String::new();
+        }
+        let payload = unsafe { LSMessageGetPayload(message) };
+        if payload.is_null() {
+            return String::new();
+        }
+        unsafe { CStr::from_ptr(payload) }.to_string_lossy().into_owned()
     }
 
     /// The app id as a C string, for [`probe`]'s app-service shapes — `register` itself passes
@@ -1014,6 +1045,69 @@ pub(crate) mod ls2 {
             let reply = unsafe { Box::from_raw(slot) };
             reply.ok_or(Fail::Timeout)
         }
+
+        /// Open a SUBSCRIPTION on this registration: the service keeps sending on `uri`, and every
+        /// message - the first reply and each event after it - lands in `on_message` on this
+        /// registration's own glib context.
+        ///
+        /// Nothing waits here: the messages arrive when [`Self::pump_forever`] iterates that
+        /// context, which is why this returns as soon as the bus accepted the call. An `Err` is a
+        /// call that never got as far as being sent, never "the service said no" - a refusal comes
+        /// back as a message, exactly as it does for [`Self::call`].
+        #[cfg(feature = "jellyfin")]
+        pub(crate) fn subscribe(
+            &self,
+            uri: &str,
+            payload: &str,
+            on_message: extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> bool,
+        ) -> Result<(), Fail> {
+            let setup = |stage| Fail::Setup {
+                stage,
+                detail: String::new(), code: None,
+            };
+            let uri = CString::new(uri).map_err(|_| setup("uri"))?;
+            let payload = CString::new(payload).map_err(|_| setup("payload"))?;
+            let mut error: LSError = unsafe { std::mem::zeroed() };
+            unsafe { LSErrorInit(&mut error) };
+            let mut token = 0;
+            // No context pointer: the callback carries the state it needs (see `payload_of`), and
+            // there is one subscription per registration.
+            let called = unsafe {
+                LSCall(
+                    self.handle,
+                    uri.as_ptr(),
+                    payload.as_ptr(),
+                    on_message,
+                    std::ptr::null_mut(),
+                    &mut token,
+                    &mut error,
+                )
+            };
+            let detail = error_text(&error);
+            unsafe { LSErrorFree(&mut error) };
+            if !called {
+                return Err(Fail::Setup {
+                    stage: "subscribe",
+                    detail, code: None,
+                });
+            }
+            Ok(())
+        }
+
+        /// Iterate this registration's context for as long as the process lives, blocking between
+        /// messages - what makes a subscription's events arrive at all. Never returns, so the
+        /// registration it borrows is never dropped and never unregistered: this is a
+        /// process-lifetime channel, and a bus client that unregisters mid-session would stop
+        /// receiving the events it exists for.
+        #[cfg(feature = "jellyfin")]
+        pub(crate) fn pump_forever(&self) -> ! {
+            let _block = crate::task::assert_may_block(
+                const { &crate::task::BlockingLabel::new("SAM lifecycle subscription") },
+            );
+            loop {
+                unsafe { g_main_context_iteration(self.context, 1) };
+            }
+        }
     }
 
     /// Register, call, wait up to [`BUDGET`], unregister — the main-thread shape.
@@ -1097,6 +1191,275 @@ pub(crate) mod ls2 {
                 }
             }
             unsafe { LSErrorFree(&mut error) };
+        }
+    }
+}
+
+/// SAM's lifecycle channel for THIS app, and the deep link a launch carries to a running one.
+///
+/// # The bug this exists for
+///
+/// `luna://com.webos.applicationManager/launch` with `params` opens the right item when the app is
+/// NOT running (argv[1], [`super::super::app::boot::deeplink_item_id`]) and does nothing when it is:
+/// a launcher tile clicked over a running install brought the app to the front and left it exactly
+/// where it was. Measured on the dev set (webOS 5.5) on 2026-10-18: SAM answers
+/// `{"returnValue":true}`, the process receives nothing, and its log has one `boot: launch params`
+/// line per BOOT and none per launch.
+///
+/// # What the platform does instead
+///
+/// The relaunch of an already-running app is not a second launch. SAM delivers it to the app's
+/// lifecycle registration - the `registerApp` method of the same service - as
+///
+/// ```text
+/// {"event":"relaunch","reason":"undefined","appId":"com.butaca.debug",
+///  "parameters":{"jellyfinItemId":"..."},"returnValue":true}
+/// ```
+///
+/// The `parameters` nesting is the one argv[1] carries at boot, so the boot parser reads both.
+/// (webOS OSE's LS2 reference for `com.webos.service.applicationmanager` documents `registerApp` as
+/// "Registers to receive events related to app life cycle": first reply `event: registered`, then
+/// `relaunch` / `pause` / `close` - LG vendor documentation, not inference.)
+///
+/// # Two things this does NOT need, both measured
+///
+/// * **`handlesRelaunch: true`.** LG's web-app guide describes that flag as the choice between "the
+///   platform shows your app full screen" (`false`) and "you handle the relaunch yourself" (`true`),
+///   and `luna-sysmgr`'s `IpcClientHost::relaunch()` sends the window IPC only when it is set. On
+///   this set the flag is `false` and the `relaunch` EVENT still arrives on a subscription, while
+///   `getForegroundAppInfo` answered `com.butaca.debug` right after the launch, so SAM is bringing
+///   the window forward for us. The flag stays exactly as upstream wrote it.
+/// * **An app-id registration.** The refusal that started this investigation
+///   (`{"errorCode":1,"returnValue":false,"errorText":"not existing app"}`) is what SAM answers a
+///   caller it cannot attribute to an app, and it came from `luna-send`, which is nobody. The same
+///   call is accepted from the app's own process: the jail attributes every client of this
+///   executable to the app id (`ls-monitor -l` lists our pid as `com.butaca.debug`, client only,
+///   while no code here registers that name), and the role file appinstalld writes for the app
+///   grants its client `outbound: ["*"]`.
+///
+/// # Shape
+///
+/// One thread, one anonymous registration, one subscription, and a [`Mutex`] the frame loop drains.
+/// The subscription callback runs on that thread and must not touch the UI; the frame loop must not
+/// block on the bus. Queue and take is the whole of the seam between them.
+///
+/// The whole module is the Jellyfin flavour's, and that is a product decision rather than a
+/// compile-tidiness one: this flavour is the one whose launcher sends `jellyfinItemId`, so it is
+/// the one with a deep link for the event to carry. The Plex flavour has no launch-param deep link
+/// at boot either (`app::boot::deeplink_item_id`), so a subscription there would receive events
+/// nothing could act on.
+#[cfg(feature = "jellyfin")]
+pub(crate) mod lifecycle {
+    use std::sync::Mutex;
+
+    /// The item id SAM's most recent relaunch asked for, waiting for the frame loop.
+    ///
+    /// LAST-WINS, not a queue: two tiles clicked before a frame drains means the person wants the
+    /// second one, and a backlog of stale ids opening one page after another is the failure mode a
+    /// queue would buy.
+    static PENDING: Mutex<Option<String>> = Mutex::new(None);
+
+    // -- The BUS side of the queue: the payload rule, its log wording, and the one function that
+    // writes the slot. These are compiled wherever there is a bus to feed them (`not(hostsim)`) or
+    // a host unit suite to grade them (`test`); the hostsim simulator is the one configuration with
+    // neither, and there the module is just the slot and `take_pending`.
+    /// What one lifecycle payload does to the pending slot, as a pure function so the rule is
+    /// gradeable without the process-wide slot: a relaunch REPLACES what is pending, and any other
+    /// event leaves it alone (a `pause` must not throw away a link nobody has opened yet).
+    #[cfg(any(test, not(feature = "hostsim")))]
+    fn slot_after(current: Option<String>, payload: &str) -> Option<String> {
+        relaunch_item_id(payload).or(current)
+    }
+
+    /// The item id in one lifecycle payload, when that payload is a relaunch that names one.
+    ///
+    /// Malformed JSON, another event, a refusal (`returnValue: false`) and an envelope without an id
+    /// all answer `None`: this runs on a bus thread, and a launcher typo must never be a crash or a
+    /// page opened for nothing.
+    #[cfg(any(test, not(feature = "hostsim")))]
+    pub(crate) fn relaunch_item_id(payload: &str) -> Option<String> {
+        let value: serde_json::Value = serde_json::from_str(payload).ok()?;
+        let field = |k: &str| value.get(k).and_then(serde_json::Value::as_str).unwrap_or("");
+        if value.get("returnValue").and_then(serde_json::Value::as_bool) == Some(false) {
+            return None;
+        }
+        if field("event") != "relaunch" {
+            return None;
+        }
+        // The id itself is read by the BOOT parser, which already knows this envelope: a relaunch
+        // nests the launcher's params under `parameters` exactly as argv[1] does, so there is one
+        // reader of that shape rather than two that could drift.
+        crate::app::boot::deeplink_item_id(payload).filter(|id| !id.is_empty())
+    }
+
+    /// The one-line account of a lifecycle message for the log: its event and reason, never the
+    /// whole payload (a relaunch carries the launcher's parameters, a close carries ids).
+    #[cfg(any(test, not(feature = "hostsim")))]
+    fn event_line(payload: &str) -> String {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
+            return format!("unparseable {} bytes", payload.len());
+        };
+        let field = |k: &str| value.get(k).and_then(serde_json::Value::as_str).unwrap_or("");
+        let (event, reason) = (field("event"), field("reason"));
+        match (event, reason) {
+            ("", _) => format!("reply without an event ({})", payload.trim()),
+            (e, "") => format!("event={e}"),
+            (e, r) => format!("event={e} reason={r}"),
+        }
+    }
+
+    /// One lifecycle message: log it, and remember a relaunch's item for the frame loop.
+    #[cfg(any(test, not(feature = "hostsim")))]
+    fn on_lifecycle(payload: &str) {
+        if let Some(id) = relaunch_item_id(payload) {
+            crate::log(&format!("samlife: relaunch asks for item {id}"));
+        } else {
+            crate::log(&format!("samlife: {}", event_line(payload)));
+        }
+        let mut slot = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+        *slot = slot_after(slot.take(), payload);
+    }
+
+    /// The item SAM's relaunch asked for, once - `None` when there is none, which is the ordinary
+    /// case for every frame of a session.
+    pub(crate) fn take_pending() -> Option<String> {
+        PENDING.lock().unwrap_or_else(|e| e.into_inner()).take()
+    }
+
+    /// Subscribe to SAM's lifecycle events, for the life of the process. No bus exists on the host
+    /// or under `cfg(test)`, which get the no-op twin below.
+    #[cfg(all(not(feature = "hostsim"), not(test)))]
+    pub(crate) fn start() {
+        use std::os::raw::c_void;
+
+        /// The bus thread's half: copy the payload out (the bus owns it for the callback only) and
+        /// hand it to the queue. A panic must not cross the FFI boundary, so it is caught here the
+        /// way `player::acb_on_event` catches its own.
+        extern "C" fn on_message(_h: *mut c_void, message: *mut c_void, _ctx: *mut c_void) -> bool {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                on_lifecycle(&super::ls2::payload_of(message));
+            }));
+            true
+        }
+
+        const URI: &str = "luna://com.webos.applicationManager/registerApp";
+
+        if !crate::task::spawn("sam lifecycle", || {
+            let registration = match super::ls2::register() {
+                Ok(r) => r,
+                Err(e) => {
+                    crate::log(&format!(
+                        "samlife: no bus registration, so relaunch deep links are off ({e})"
+                    ));
+                    return;
+                }
+            };
+            // Three arms, because the ways a call fails are different bugs and only one of them is
+            // about SAM - the wording `gohome` uses, for the same reason.
+            match registration.subscribe(URI, "{\"subscribe\":true}", on_message) {
+                Ok(()) => crate::log(&format!("samlife: subscribed to {URI}")),
+                Err(super::ls2::Fail::Setup { stage, detail, .. }) if detail.is_empty() => {
+                    crate::log(&format!("samlife: subscribe failed stage={stage}"));
+                    return;
+                }
+                Err(super::ls2::Fail::Setup { stage, detail, .. }) => {
+                    crate::log(&format!("samlife: subscribe failed stage={stage} - {detail}"));
+                    return;
+                }
+                // Unreachable by construction: `subscribe` does not wait for a reply, so nothing in
+                // it can time out. A refusal arrives as a MESSAGE, which `pump_forever` hands to
+                // `on_lifecycle` on the line after this match.
+                Err(super::ls2::Fail::Timeout) => {
+                    crate::log("samlife: subscribe timed out");
+                    return;
+                }
+            }
+            registration.pump_forever()
+        })
+        .is_some()
+        {
+            crate::log("samlife: no thread for the SAM lifecycle subscription");
+        }
+    }
+
+    /// Host and test builds hold no bus, and the arms above still consume [`take_pending`].
+    #[cfg(any(feature = "hostsim", test))]
+    pub(crate) fn start() {}
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// The payload the set actually delivered (2026-10-18), verbatim: the subscription was held
+        /// by `luna-send -a com.butaca.debug`, a `launch` with the launcher's params followed, and
+        /// this is what came back on it. The parser has to survive the platform's own formatting,
+        /// so the fixture is the platform's own bytes.
+        const MEASURED_RELAUNCH: &str = r#"{"event":"relaunch","reason":"undefined","appId":"com.butaca.debug","parameters":{"jellyfinItemId":"PROBE71A"},"returnValue":true}"#;
+
+        /// The first reply of the same subscription, also measured.
+        const MEASURED_REGISTERED: &str = r#"{"event":"registered","returnValue":true}"#;
+
+        #[test]
+        fn the_measured_relaunch_names_its_item() {
+            assert_eq!(relaunch_item_id(MEASURED_RELAUNCH).as_deref(), Some("PROBE71A"));
+        }
+
+        /// The subscription's own first reply is not a relaunch, and must not be read as one.
+        #[test]
+        fn the_registration_reply_is_not_a_relaunch() {
+            assert_eq!(relaunch_item_id(MEASURED_REGISTERED), None);
+        }
+
+        #[test]
+        fn other_events_and_bad_payloads_answer_none() {
+            for payload in [
+                r#"{"event":"pause","returnValue":true}"#,
+                r#"{"event":"close","returnValue":true}"#,
+                r#"{"event":"relaunch","returnValue":true}"#,
+                r#"{"event":"relaunch","parameters":{},"returnValue":true}"#,
+                r#"{"returnValue":false,"errorCode":2,"errorText":"The app is already registered"}"#,
+                r#"{"event":"relaunch","parameters":{"jellyfinItemId":"x"},"returnValue":false}"#,
+                r#"{"event":"relaunch","parameters":{"jellyfinItemId":42},"returnValue":true}"#,
+                r#"{"event":"relaunch","parameters":{"jellyfinItemId":""},"returnValue":true}"#,
+                "",
+                "not json",
+            ] {
+                assert_eq!(relaunch_item_id(payload), None, "payload {payload:?}");
+            }
+        }
+
+        /// Last wins, and an unrelated event does not clear a link nobody has opened yet.
+        #[test]
+        fn a_relaunch_replaces_the_pending_item_and_other_events_leave_it() {
+            let first = slot_after(None, MEASURED_RELAUNCH);
+            assert_eq!(first.as_deref(), Some("PROBE71A"));
+            assert_eq!(slot_after(first.clone(), MEASURED_REGISTERED).as_deref(), Some("PROBE71A"));
+            assert_eq!(slot_after(first, r#"{"event":"pause","returnValue":true}"#).as_deref(), Some("PROBE71A"));
+            let second = slot_after(
+                Some("PROBE71A".into()),
+                r#"{"event":"relaunch","parameters":{"jellyfinItemId":"SECOND"},"returnValue":true}"#,
+            );
+            assert_eq!(second.as_deref(), Some("SECOND"));
+        }
+
+        /// The whole seam on the REAL slot - the product path `on_message` drives: a relaunch
+        /// payload lands in the queue and `take_pending` hands it over exactly once, after which
+        /// the slot is empty again. This is the suite's only user of the process-wide slot, so it
+        /// stays deterministic under the test runner's parallelism.
+        #[test]
+        fn a_relaunch_reaches_the_frame_loop_exactly_once() {
+            on_lifecycle(MEASURED_RELAUNCH);
+            assert_eq!(take_pending().as_deref(), Some("PROBE71A"));
+            assert_eq!(take_pending(), None);
+        }
+
+        /// A message that is not JSON still produces a readable log line rather than a panic.
+        #[test]
+        fn the_log_line_never_carries_the_whole_payload() {
+            assert_eq!(event_line(MEASURED_REGISTERED), "event=registered");
+            assert_eq!(event_line(MEASURED_RELAUNCH), "event=relaunch reason=undefined");
+            assert_eq!(event_line("not json"), "unparseable 8 bytes");
+            assert!(event_line(r#"{"returnValue":true}"#).starts_with("reply without an event"));
         }
     }
 }

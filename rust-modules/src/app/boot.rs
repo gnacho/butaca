@@ -865,6 +865,12 @@ pub(crate) unsafe fn construct(
     if !controlled {
         crate::player::acb_init(&mt);
         crate::ff::boot(); // Live playback resource boot; controlled Home cannot invoke ABI probes.
+        // SAM's lifecycle channel (webos::lifecycle): a tile clicked over an already-running
+        // install is not a second launch but a `relaunch` event on a subscription, and this is
+        // where the process-lifetime channels are started. Jellyfin flavour only - it is the one
+        // with a launch-param deep link for the event to carry.
+        #[cfg(feature = "jellyfin")]
+        crate::webos::lifecycle::start();
     }
                        // dev: /tmp/plxnative-logintest validates the plex.tv account path end-to-end on the device — a
                        // real typed create_pin() through the libcurl transport + DTO deserialize. Logs only the
