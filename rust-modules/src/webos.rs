@@ -715,7 +715,7 @@ pub(crate) fn bind_window(_win: *mut std::os::raw::c_void) {}
 ///
 /// | registration | answer |
 /// |---|---|
-/// | `LSRegisterApplicationService(app_id, app_id)` | `-1028 Attempted to register for a service name that already exists` on 2026-09-04 — and the SAME shape registered cleanly on 2026-10-18 (`register_as_app_service`): the earlier refusal was a stale holder left by a previous instance, not a platform rule. The name is allowed to this exe by the role file, and `ls-monitor -i` reports it unowned while the app runs |
+/// | `LSRegisterApplicationService(app_id, app_id)` | `-1028 Attempted to register for a service name that already exists` whenever `SDL_Init` ran first — the SDL webOS driver claims the app id for its own connection at init (`lifecycle`'s module doc has the capture). `register_as_app_service` wins only when it runs BEFORE SDL, which is why `lifecycle::start` sits ahead of `SDL_Init` in boot |
 /// | `LSRegisterApplicationService(NULL, app_id)` | `-1027 Invalid permissions for (null)` — the `""` name has no permissions entry |
 /// | **`LSRegister(NULL)`** | registered, and `com.webos.applicationManager/getForegroundAppInfo` answered it |
 ///
@@ -1278,10 +1278,14 @@ pub(crate) mod ls2 {
 /// from a root shell at the same moment. So the shape that works is to claim the app id as the
 /// connection's own service name: [`super::ls2::register_as_app_service`].
 ///
-/// (The `-1028` "name already exists" the probe table once recorded for this same shape was a
-/// stale holder of a previous instance, not a platform rule: the name is free on a healthy run,
-/// and the earlier guess that ACB holds it is refuted by the same introspection - ACB's connection
-/// carries no name at all.)
+/// (The `-1028` "name already exists" this shape answers when it loses the race is measured end to
+/// end (2026-10-18): the TV's SDL webOS driver claims the app id for its own connection during
+/// `SDL_Init` and registers THE app lifecycle with SAM itself (`registerApp {"id":...}` ->
+/// `registered`, captured on the bus) - and SAM then delivers `relaunch` events to that claimant,
+/// which drops them. An earlier guess attributed the refusal to a stale holder and to ACB; both are
+/// refuted - ACB is not even loaded on webOS 5.5, and the hub reports the name unowned once SDL
+/// has claimed it in-process. It is a first-come claim inside one process, which is why
+/// [`start`] runs before `SDL_Init` and waits for its outcome.)
 ///
 /// # Two things this does NOT need, both measured
 ///
@@ -1294,9 +1298,11 @@ pub(crate) mod ls2 {
 ///
 /// # Shape
 ///
-/// One thread, one anonymous registration, one subscription, and a [`Mutex`] the frame loop drains.
-/// The subscription callback runs on that thread and must not touch the UI; the frame loop must not
-/// block on the bus. Queue and take is the whole of the seam between them.
+/// The claim (named registration + subscription) is made on the boot thread, before SDL, and
+/// `start` waits bounded for its outcome; only the pump lives on its own thread after that. One
+/// registration, one subscription, and a [`Mutex`] the frame loop drains. The subscription callback
+/// runs on that thread and must not touch the UI; the frame loop must not block on the bus. Queue
+/// and take is the whole of the seam between them.
 ///
 /// The whole module is the Jellyfin flavour's, and that is a product decision rather than a
 /// compile-tidiness one: this flavour is the one whose launcher sends `jellyfinItemId`, so it is
@@ -1381,11 +1387,13 @@ pub(crate) mod lifecycle {
         PENDING.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
 
-    /// Subscribe to SAM's lifecycle events, for the life of the process. No bus exists on the host
-    /// or under `cfg(test)`, which get the no-op twin below.
+    /// Subscribe to SAM's lifecycle events, for the life of the process. MUST be called before
+    /// SDL initialises - see the ordering argument in the module doc. No bus exists on the host or
+    /// under `cfg(test)`, which get the no-op twin below.
     #[cfg(all(not(feature = "hostsim"), not(test)))]
     pub(crate) fn start() {
         use std::os::raw::c_void;
+        use std::sync::mpsc;
 
         /// The bus thread's half: copy the payload out (the bus owns it for the callback only) and
         /// hand it to the queue. A panic must not cross the FFI boundary, so it is caught here the
@@ -1399,7 +1407,8 @@ pub(crate) mod lifecycle {
 
         const URI: &str = "luna://com.webos.applicationManager/registerApp";
 
-        if !crate::task::spawn("sam lifecycle", || {
+        let (decided, decided_rx) = mpsc::channel::<bool>();
+        let spawned = crate::task::spawn("sam lifecycle", move || {
             // NAMED, not anonymous: SAM resolves a registerApp caller by its LS2 name, and the
             // anonymous shape is refused with `cannot find caller id` (measured on the shipped
             // build, 2026-10-18). See the module doc's "What the caller has to be" section.
@@ -1409,19 +1418,25 @@ pub(crate) mod lifecycle {
                     crate::log(&format!(
                         "samlife: no named bus registration, so relaunch deep links are off ({e})"
                     ));
+                    let _ = decided.send(false);
                     return;
                 }
             };
             // Three arms, because the ways a call fails are different bugs and only one of them is
             // about SAM - the wording `gohome` uses, for the same reason.
             match registration.subscribe(URI, "{\"subscribe\":true}", on_message) {
-                Ok(()) => crate::log(&format!("samlife: subscribed to {URI}")),
+                Ok(()) => {
+                    let _ = decided.send(true);
+                    crate::log(&format!("samlife: subscribed to {URI}"));
+                }
                 Err(super::ls2::Fail::Setup { stage, detail, .. }) if detail.is_empty() => {
                     crate::log(&format!("samlife: subscribe failed stage={stage}"));
+                    let _ = decided.send(false);
                     return;
                 }
                 Err(super::ls2::Fail::Setup { stage, detail, .. }) => {
                     crate::log(&format!("samlife: subscribe failed stage={stage} - {detail}"));
+                    let _ = decided.send(false);
                     return;
                 }
                 // Unreachable by construction: `subscribe` does not wait for a reply, so nothing in
@@ -1429,14 +1444,37 @@ pub(crate) mod lifecycle {
                 // `on_lifecycle` on the line after this match.
                 Err(super::ls2::Fail::Timeout) => {
                     crate::log("samlife: subscribe timed out");
+                    let _ = decided.send(false);
                     return;
                 }
             }
             registration.pump_forever()
-        })
-        .is_some()
-        {
+        });
+
+        // Hold SDL off until the claim is decided: whoever claims the app id name first owns the
+        // relaunch channel for the whole process, so "spawn and hope" would be a race against
+        // SDL_Init's own claim. The bus answers a registration in well under a frame; the bound is
+        // for a bus that is wedged, and losing it degrades to SDL claiming, which is the pre-fix
+        // behaviour.
+        let decided = if spawned.is_none() {
             crate::log("samlife: no thread for the SAM lifecycle subscription");
+            false
+        } else {
+            match decided_rx.recv_timeout(std::time::Duration::from_secs(3)) {
+                Ok(decided) => decided,
+                Err(_) => {
+                    crate::log(
+                        "samlife: the lifecycle claim did not settle in 3s - SDL proceeds as the \
+                         claimant",
+                    );
+                    false
+                }
+            }
+        };
+        if !decided {
+            // The specific refusal is already logged on the thread; this line only says what the
+            // silence means for the feature.
+            crate::log("samlife: relaunch deep links are OFF");
         }
     }
 
