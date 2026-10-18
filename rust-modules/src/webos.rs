@@ -715,16 +715,19 @@ pub(crate) fn bind_window(_win: *mut std::os::raw::c_void) {}
 ///
 /// | registration | answer |
 /// |---|---|
-/// | `LSRegisterApplicationService(app_id, app_id)` | `-1028 Attempted to register for a service name that already exists` — this PROCESS already holds the app id: `ls-monitor -l` lists it beside an anonymous client, both ours, from boot; ACB is the one component handed the app id (`AcbAPI_initialize`, `player::acb_init` at boot) |
+/// | `LSRegisterApplicationService(app_id, app_id)` | `-1028 Attempted to register for a service name that already exists` on 2026-09-04 — and the SAME shape registered cleanly on 2026-10-18 (`register_as_app_service`): the earlier refusal was a stale holder left by a previous instance, not a platform rule. The name is allowed to this exe by the role file, and `ls-monitor -i` reports it unowned while the app runs |
 /// | `LSRegisterApplicationService(NULL, app_id)` | `-1027 Invalid permissions for (null)` — the `""` name has no permissions entry |
 /// | **`LSRegister(NULL)`** | registered, and `com.webos.applicationManager/getForegroundAppInfo` answered it |
 ///
-/// So every caller registers as a plain anonymous client, [`register`]. The role file still
-/// decides what such a client may CALL — the probe proves SAM's read-only method; `launch_home`
-/// grades the reply of the one that matters — and the hub's refusal, when there is one, travels
-/// in [`RegisterFail`] to the caller's log line instead of being freed. Anonymous clients do not
-/// collide with each other, so nothing here is serialised; a registration lives for one caller's
-/// use and is unregistered on drop, as both copies always did - with the single exception named
+/// So one-shot callers register as a plain anonymous client, [`register`], and the one caller that
+/// needs SAM to know WHO it is — the lifecycle subscriber, whose `registerApp` subscription SAM
+/// resolves by the connection's LS2 name — registers under the app id, [`register_as_app_service`].
+/// The role file still decides what a client may CALL — the probe proves SAM's read-only method;
+/// `launch_home` grades the reply of the one that matters — and the hub's refusal, when there is
+/// one, travels in [`RegisterFail`] to the caller's log line instead of being freed. Anonymous
+/// clients do not collide with each other, so nothing here is serialised; a registration lives for
+/// one caller's use and is unregistered on drop, as both copies always did - with the single
+/// exception named
 /// above, the lifecycle subscriber whose registration is process-lifetime by design.
 #[cfg(all(not(feature = "hostsim"), not(test)))]
 pub(crate) mod ls2 {
@@ -892,9 +895,29 @@ pub(crate) mod ls2 {
         context: *mut c_void,
     }
 
-    /// Register as a plain anonymous client — the one shape the hub accepts from this process
-    /// (module doc) — on a private glib context.
+    /// Register as a plain anonymous client — the shape [`launch_home`], the keymanager and the
+    /// one-shot helpers speak (module doc) — on a private glib context.
     pub(crate) fn register() -> Result<Registration, RegisterFail> {
+        register_with(None)
+    }
+
+    /// Register CLAIMING THE APP ID as this connection's service name — the shape SAM's
+    /// `registerApp` demands of a lifecycle subscriber (see [`super::lifecycle`]): SAM resolves the
+    /// caller by the connection's LS2 name, and an anonymous client has none, which is the
+    /// `cannot find caller id` refusal the first shipped attempt measured. The role file
+    /// appinstalld writes for the app allows exactly this name, and the hub reports it UNOWNED
+    /// while the app runs (`ls-monitor -i`, 2026-10-18) — the `-1028` in the table above was a
+    /// stale holder of a previous instance, not a platform rule and not ACB, which owns no name.
+    #[cfg(feature = "jellyfin")]
+    pub(crate) fn register_as_app_service() -> Result<Registration, RegisterFail> {
+        let app_id = app_id_cstring()?;
+        register_with(Some(&app_id))
+    }
+
+    /// The one registration body; `Some` is the app-service shape (`LSRegisterApplicationService`
+    /// with the app id as BOTH the name and the app id, `probe`'s first row), `None` the anonymous
+    /// one. Both land on a private glib context.
+    fn register_with(app_service: Option<&CString>) -> Result<Registration, RegisterFail> {
         let mut error: LSError = unsafe { std::mem::zeroed() };
         unsafe { LSErrorInit(&mut error) };
         let context = unsafe { g_main_context_new() };
@@ -906,7 +929,14 @@ pub(crate) mod ls2 {
             });
         }
         let mut handle = std::ptr::null_mut();
-        let registered = unsafe { LSRegister(std::ptr::null(), &mut handle, &mut error) };
+        let registered = unsafe {
+            match app_service {
+                Some(name) => LSRegisterApplicationService(
+                    name.as_ptr(), name.as_ptr(), &mut handle, &mut error,
+                ),
+                None => LSRegister(std::ptr::null(), &mut handle, &mut error),
+            }
+        };
         if !registered || handle.is_null() {
             let code = Some(error.error_code);
             let detail = error_text(&error);
@@ -1225,6 +1255,34 @@ pub(crate) mod ls2 {
 /// "Registers to receive events related to app life cycle": first reply `event: registered`, then
 /// `relaunch` / `pause` / `close` - LG vendor documentation, not inference.)
 ///
+/// # What the caller has to be, and why (all measured on the dev set, 2026-10-18)
+///
+/// The subscription must ride a connection whose LS2 service name IS the app id. The first shipped
+/// attempt reused the anonymous [`super::ls2::register`] shape and SAM refused it as a message on
+/// the subscription itself:
+///
+/// ```text
+/// {"errorCode":1,"returnValue":false,"errorText":"cannot find caller id"}
+/// ```
+///
+/// Upstream SAM's own source says why (`sam/src/bus/service/ApplicationManager.cpp::registerApp`):
+/// the handler resolves `lunaTask->getCaller()` - the caller connection's LS2 name - against the
+/// running app table, by LS2 name first (`getByLS2Name`) and by app id second (`getByAppId`), and
+/// refuses a caller that resolves to neither. An anonymous client has no name, so it resolves to
+/// neither. The same source shows what native apps are SUPPOSED to claim
+/// (`NativeContainer.cpp`): OSS sam hands the app an `LS2_NAME` env var of `appId-N`, and upstream's
+/// comment says the app registers "its name" from it. This TV's sam (webOS 5.5) passes `APPID`
+/// instead - measured in the process environment - and no name at all is held on the hub while the
+/// app runs: `ls-monitor -i` answers "Service 'com.butaca.debug' is not registered at hub", the
+/// app's role file allows exactly that name, and `luna-send -a <app id>` gets `event: registered`
+/// from a root shell at the same moment. So the shape that works is to claim the app id as the
+/// connection's own service name: [`super::ls2::register_as_app_service`].
+///
+/// (The `-1028` "name already exists" the probe table once recorded for this same shape was a
+/// stale holder of a previous instance, not a platform rule: the name is free on a healthy run,
+/// and the earlier guess that ACB holds it is refuted by the same introspection - ACB's connection
+/// carries no name at all.)
+///
 /// # Two things this does NOT need, both measured
 ///
 /// * **`handlesRelaunch: true`.** LG's web-app guide describes that flag as the choice between "the
@@ -1233,13 +1291,6 @@ pub(crate) mod ls2 {
 ///   this set the flag is `false` and the `relaunch` EVENT still arrives on a subscription, while
 ///   `getForegroundAppInfo` answered `com.butaca.debug` right after the launch, so SAM is bringing
 ///   the window forward for us. The flag stays exactly as upstream wrote it.
-/// * **An app-id registration.** The refusal that started this investigation
-///   (`{"errorCode":1,"returnValue":false,"errorText":"not existing app"}`) is what SAM answers a
-///   caller it cannot attribute to an app, and it came from `luna-send`, which is nobody. The same
-///   call is accepted from the app's own process: the jail attributes every client of this
-///   executable to the app id (`ls-monitor -l` lists our pid as `com.butaca.debug`, client only,
-///   while no code here registers that name), and the role file appinstalld writes for the app
-///   grants its client `outbound: ["*"]`.
 ///
 /// # Shape
 ///
@@ -1349,11 +1400,14 @@ pub(crate) mod lifecycle {
         const URI: &str = "luna://com.webos.applicationManager/registerApp";
 
         if !crate::task::spawn("sam lifecycle", || {
-            let registration = match super::ls2::register() {
+            // NAMED, not anonymous: SAM resolves a registerApp caller by its LS2 name, and the
+            // anonymous shape is refused with `cannot find caller id` (measured on the shipped
+            // build, 2026-10-18). See the module doc's "What the caller has to be" section.
+            let registration = match super::ls2::register_as_app_service() {
                 Ok(r) => r,
                 Err(e) => {
                     crate::log(&format!(
-                        "samlife: no bus registration, so relaunch deep links are off ({e})"
+                        "samlife: no named bus registration, so relaunch deep links are off ({e})"
                     ));
                     return;
                 }
