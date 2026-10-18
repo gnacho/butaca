@@ -861,7 +861,11 @@ which the linking section explains is load-bearing rather than tidy.
   size ladder; after a font swap re-verify with `tools/font-hint-audit.py` (host-side, freetype-py).
 - **SAM keeps stale "running" state after a hard kill**, so a launch is a silent no-op relaunch
   unless you close-first — `make run`/`kill` do the `closeByAppId` first (and `luna-send -i` must
-  stay subscribed for the launch to take).
+  stay subscribed for the launch to take). (When the process is genuinely alive, a `launch` with
+  `params` still does not re-run argv: the parameters arrive as a `relaunch` event on the app's
+  `registerApp` subscription, which `webos::lifecycle` queues for the frame loop to open. The
+  module doc in `rust-modules/src/webos.rs` carries the measured evidence, including that
+  `handlesRelaunch` stays `false`.)
 - **App-switch lifecycle (was a black-screen bug), handled in `app/run.rs` (the `0x103`–`0x106` arms of the frame loop):** the TV sends SDL app
   events — `0x103`/`0x104` (will/did enter **background**) and `0x105`/`0x106` (will/did enter
   **foreground**). On background during playback the loop **suspends the buffer-feed** (preserving the

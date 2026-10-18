@@ -424,6 +424,16 @@ pub(crate) unsafe fn construct(
         crate::plex::Client::restore_generation_seed(initial.primary_client).map_err(|_| 1)?;
     }
     SDL_SetMainReady();
+    // SAM's lifecycle claim (`webos::lifecycle`) MUST run before SDL initialises. Measured on the
+    // dev set (2026-10-18, butaca#71): the TV's SDL webOS driver claims the app id as its own LS2
+    // name during SDL_Init and registers THE app lifecycle subscription itself
+    // (`registerApp {"id":...}` -> registered, captured on the bus), and SAM then delivers
+    // `relaunch` deep links to that claimant - which drops them. Whoever claims the name first
+    // owns the channel, so the claim goes here with a bounded wait for its outcome; on any failure
+    // SDL proceeds exactly as before, which is the pre-fix behaviour. Jellyfin flavour only: it is
+    // the one with a launch-param deep link for the event to carry.
+    #[cfg(feature = "jellyfin")]
+    crate::webos::lifecycle::start();
     // DEAD END, measured 2026-07-31 — do not re-try this. The obvious answer to "a parked TV
     // should blank itself" is to stop inhibiting the platform screensaver here (and re-allow it
     // per route, since webOS BACKGROUNDS the app to run one and `0x103` suspends the
