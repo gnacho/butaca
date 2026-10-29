@@ -79,7 +79,16 @@ def verify_library(path, darwin, readelf=None):
     else:
         dynamic = subprocess.check_output([readelf, '-d', str(path)], text=True)
         needed = re.findall(r'\(NEEDED\).*\[([^\]]+)\]', dynamic)
+        # The TV's 32-bit ARM runtime uses ld-linux.so.3. Host builds use the
+        # loader matching the machine running this script (e.g. aarch64 in Linux CI).
+        host_loader = {
+            'aarch64': 'ld-linux-aarch64.so.1',
+            'x86_64': 'ld-linux-x86-64.so.2',
+            'armv7l': 'ld-linux-armhf.so.3',
+        }.get(platform.machine())
         allowed = {'libc.so.6', 'libm.so.6', 'libgcc_s.so.1', 'libpthread.so.0', 'ld-linux.so.3'}
+        if host_loader:
+            allowed.add(host_loader)
         symbols = subprocess.check_output([readelf, '--dyn-syms', '--wide', str(path)], text=True)
         names = []
         for line in symbols.splitlines():
