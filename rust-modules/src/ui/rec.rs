@@ -99,6 +99,25 @@ pub enum RecError {
     Malformed { line: usize, what: String },
 }
 
+impl RecError {
+    /// One sentence a boot log can carry, with the values the disagreement is about. The schema
+    /// note above promises both sides are printed; a fixed "invalid or incompatible recording"
+    /// string threw that away and left a stale fixture undiagnosable.
+    pub(crate) fn describe(&self) -> String {
+        match self {
+            Self::Schema { theirs, ours } =>
+                format!("recording schema {theirs}, this build records {ours}"),
+            Self::StateShape { theirs, ours } =>
+                format!("recording state shape {theirs:#018x}, this build's is {ours:#018x}"),
+            Self::MidSession { at_frame } => format!("recording resumed at frame {at_frame}, not 0"),
+            Self::InitialTooLarge { limit } => format!("initial inputs exceed {limit} bytes"),
+            Self::RecordingTooLarge { limit } => format!("recording exceeds {limit} bytes"),
+            Self::Io(what) => format!("recording IO: {what}"),
+            Self::Malformed { line, what } => format!("recording line {line}: {what}"),
+        }
+    }
+}
+
 /// The header (spec §5.3).
 #[derive(Clone, Debug)]
 pub struct Header {

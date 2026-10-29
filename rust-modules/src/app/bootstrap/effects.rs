@@ -194,13 +194,44 @@ pub(crate) fn app(effect: &AppFx) -> Result<Value, &'static str> {
     Ok(match effect {
         AppFx::Session(command) => json!({"session":wire(command)?}),
         AppFx::SessionEffect(effect) => json!({"session_effect":wire(effect)?}),
+        // Refused on purpose, and not by omission: a preference command's request and receipt
+        // carry account credentials, and the bridge test pins that controlled mode never captures
+        // a live profile nor enqueues persistence (see `AccountPreferenceReply`).
         AppFx::Preferences(_) => return Err("unsupported controlled preferences effect"),
         AppFx::Store(id, command) => json!({"store":id.ord().0,"command":store(command)?}),
         AppFx::StoreWork(work) => json!({"work":work_value(work)?}),
         AppFx::Content(req) => json!({"content":content_request(req)?}),
-        AppFx::Home(crate::screens::registry::HomeReq::FoldToHero) => json!({"home":"fold"}),
-        _ => return Err("unsupported Home application effect"),
+        AppFx::Home(req) => json!({"home":home_request(req)}),
+        AppFx::ItemMenu(_) => return Err("unsupported item menu effect"),
+        AppFx::Loop(_) => return Err("unsupported loop effect"),
+        AppFx::Library(_) => return Err("unsupported Library application effect"),
+        AppFx::Search(_) => return Err("unsupported Search application effect"),
+        AppFx::Player(_) => return Err("unsupported Player application effect"),
     })
+}
+
+/// A Home request in the recorder's vocabulary: identity only, never a credential, so every arm
+/// is encodable. `FoldToHero` keeps the bare `"fold"` it has always had — recordings of the BACK
+/// gesture already carry it — and the rest are `[kind, …payload]` like the store and content
+/// payloads above.
+fn home_request(req: &crate::screens::registry::HomeReq) -> Value {
+    use crate::screens::registry::{HomeReq, HomeTab};
+    match req {
+        HomeReq::FoldToHero => json!("fold"),
+        HomeReq::Account => json!("account"),
+        HomeReq::Tab(tab) => json!([
+            "tab",
+            match tab {
+                HomeTab::Home => "home",
+                HomeTab::Movies => "movies",
+                HomeTab::Shows => "shows",
+                HomeTab::Search => "search",
+            }
+        ]),
+        HomeReq::Play { sid, rk, resume_ns } => json!(["play", sid.raw(), rk, resume_ns]),
+        HomeReq::Detail { sid, rk } => json!(["detail", sid.raw(), rk]),
+        HomeReq::ItemMenu { sid, rk } => json!(["itemmenu", sid.raw(), rk]),
+    }
 }
 
 fn work_value(work: &crate::stores::StoreWork) -> Result<Value, &'static str> {
@@ -406,5 +437,39 @@ mod tests {
         let tab = encode(&Fx::Nav(NavOp::SelectTab(AppArg::Home))).unwrap();
         assert_eq!(root, serde_json::json!({"root": "home"}));
         assert_ne!(root, tab);
+    }
+
+    /// Every Home request a recorded flow can trigger is encodable. Before this, only the BACK
+    /// gesture's `FoldToHero` was, so a Settings or filmography pass died mid-recording with
+    /// "unsupported Home application effect" and the fixture could never be re-recorded.
+    #[test]
+    fn controlled_home_requests_are_encodable_and_distinct() {
+        use crate::screens::registry::{AppFx, HomeReq, HomeTab};
+        use serde_json::json;
+        let sid = crate::plex::ServerId::from_raw(3);
+        let cases = [
+            (HomeReq::FoldToHero, json!({"home":"fold"})),
+            (HomeReq::Account, json!({"home":"account"})),
+            (HomeReq::Tab(HomeTab::Home), json!({"home":["tab","home"]})),
+            (HomeReq::Tab(HomeTab::Movies), json!({"home":["tab","movies"]})),
+            (HomeReq::Tab(HomeTab::Shows), json!({"home":["tab","shows"]})),
+            (HomeReq::Tab(HomeTab::Search), json!({"home":["tab","search"]})),
+            (
+                HomeReq::Play { sid, rk: "9".into(), resume_ns: 42 },
+                json!({"home":["play",3,"9",42]}),
+            ),
+            (HomeReq::Detail { sid, rk: "9".into() }, json!({"home":["detail",3,"9"]})),
+            (
+                HomeReq::ItemMenu { sid, rk: "9".into() },
+                json!({"home":["itemmenu",3,"9"]}),
+            ),
+        ];
+        let mut encoded = Vec::new();
+        for (request, expected) in cases {
+            let actual = encode(&Fx::App(AppFx::Home(request))).unwrap();
+            assert_eq!(actual, expected);
+            assert!(!encoded.contains(&actual), "distinct requests must stay distinct");
+            encoded.push(actual);
+        }
     }
 }

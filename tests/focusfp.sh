@@ -93,9 +93,9 @@ trap cleanup EXIT
 RK_MOVIE=1001
 RK_SHOW=2001
 
-# run_flow <n> <name> "<triggers: name[=value] …>" "<tokens …>" <boot-marker-regex>
+# run_flow <n> <name> "<triggers: name[=value] …>" "<tokens …>" <boot-marker-regex> [step]
 run_flow() {
-  local n="$1" name="$2" triggers="$3" tokens="$4" marker="$5"
+  local n="$1" name="$2" triggers="$3" tokens="$4" marker="$5" step="${6:-$STEP}"
   local d="$OUT/root-$n"
   local fp="$OUT/$n-$name.fp"
   rm -rf "$d"; mkdir -p "$d"
@@ -188,7 +188,7 @@ PY
     for tok in $tokens; do
       case "$tok" in
         sleep:*) sleep "${tok#sleep:}" ;;
-        *) printf '%s ' "$tok" >&3; sleep "$STEP" ;;
+        *) printf '%s ' "$tok" >&3; sleep "$step" ;;
       esac
     done
     exec 3>&-
@@ -201,7 +201,7 @@ PY
     echo "# focusfp flow $n $name — pms=$PMS_HOST:$PMS_PORT seed=$SEED triggers=[$triggers] tokens=[$tokens]"
     # fingerprints, and every heartbeat whose route word CHANGED — the two lines the harness reads
     awk '/^focus / {print; next}
-         match($0, /route=[a-z]+( overlay=[a-z]+)?/) { r=substr($0, RSTART, RLENGTH); if (r != last) { print "hb " r; last=r } }' "$log"
+         match($0, /route=[a-z]+( overlay=[a-z-]+)?/) { r=substr($0, RSTART, RLENGTH); if (r != last) { print "hb " r; last=r } }' "$log"
   } > "$fp"
   local lines
   lines=$(grep -c '^focus ' "$fp" || true)
@@ -259,10 +259,22 @@ record_flow 3 home-library-detail-back "" "up right right ok sleep:3 down down d
 record_flow 4 search-shelf-detail-back "search=s0" "sleep:2 down down ok sleep:2 back" 'route=search'
 # 5 Detail -> Person -> Detail -> BACK -> Person -> BACK -> Detail
 record_flow 5 detail-person-detail "detail=$RK_MOVIE detailsec=1 detailok" "sleep:2 down ok sleep:2 back sleep:1 back sleep:1 down ok sleep:2 back" 'route=person'
-# 6 chip -> Account -> Settings -> Privacy -> Legal -> document -> BACK x4
-# The synthetic token boot has no signed-in account: Favourites is absent, so Privacy is row 0.
-# Visit it and toggle its first choice, then return to row 0 and step down once to Legal.
-record_flow 6 settings-family "settings=root" "sleep:1 ok sleep:1 ok sleep:1 back sleep:1 down ok sleep:1 ok sleep:1 back back back" 'overlay=settings'
+# 6 chip -> Settings -> Legal -> About -> Playback -> BACK (out of the modal)
+# The synthetic token boot has no signed-in account, so the Privacy section is row 0 and its first
+# row is the DESTRUCTIVE "delete all local data". Start with DOWN and never press OK on it: the run
+# visits Legal (a pushed index) and Playback (a pushed settings page), leaving each with BACK.
+# The Language picker is stepped over, never opened: its option labels are native names
+# (English/Español/Беларуская) that the fixture's closed alphabet does not carry, and widening that
+# alphabet buys a recording nothing a static label can drift into.
+# The walk is written against the TABLE's ends, not against a down count from the first row: the
+# modal's table swallows whatever arrives before it wires focus (observed: five downs landed three
+# rows down), so six downs clamp on Playback and five ups clamp back on row 0 before one down
+# reaches Legal. A count that has to be exact is a count that breaks the next time the frame rate
+# or the settle time changes.
+# The step is shorter than the harness default because this is the longest walk of the set and a
+# controlled recording is priced per frame: at 0.9 s between keys the six stages came to 14.469
+# lines and the fixture no longer fit the recorder's budget.
+record_flow 6 settings-family "settings=root" "sleep:2 down down down down down ok sleep:1 back sleep:1 up up up up up down ok sleep:1 back back" 'overlay=settings' 0.6
 # 7 first-run consent -> onboard -> Home
 record_flow 7 firstrun-consent-onboard "firstrun" "sleep:1 ok sleep:1 ok sleep:1 down ok sleep:2" 'route='
 # 8 Detail -> hold on Related -> ItemMenu -> BACK. detailsec is a DOWN count, not a section id:

@@ -324,22 +324,27 @@ pub(crate) enum Preflight {
 
 impl Preflight {
     /// Must precede Session load/identity mint, telemetry boot and every bootstrap worker.
-    pub(crate) fn detect() -> Result<Self, &'static str> {
-        let rec = crate::dev::scenarios::rec_trigger()?;
-        let replay = crate::dev::scenarios::recplay_trigger()?;
+    ///
+    /// The refusal carries the reason, not a category: a bare "invalid or incompatible recording"
+    /// left three committed fixtures undiagnosable, and the schema doc above promises that the two
+    /// values are printed when they disagree.
+    pub(crate) fn detect() -> Result<Self, String> {
+        let rec = crate::dev::scenarios::rec_trigger().map_err(str::to_owned)?;
+        let replay = crate::dev::scenarios::recplay_trigger().map_err(str::to_owned)?;
         match (rec, replay) {
-            (Some(_), Some(_)) => Err("conflicting recorder modes"),
+            (Some(_), Some(_)) => Err("conflicting recorder modes".into()),
             (None, Some(path)) => {
-                let (mode, path) = super::recorder::ReplayMode::parse(&path)?;
+                let (mode, path) = super::recorder::ReplayMode::parse(&path).map_err(str::to_owned)?;
                 let recording = Recording::load(std::path::Path::new(path), super::recorder::state_fp())
-                    .map_err(|_| "invalid or incompatible recording")?;
-                let initial = Initial::decode(recording.header.init_data.clone(), recording.header.init_hash)?;
-                super::recorder::validate_controlled(&recording, &initial)?;
-                super::recorder::validate_resolution_recording(&recording)?;
+                    .map_err(|error| error.describe())?;
+                let initial = Initial::decode(recording.header.init_data.clone(), recording.header.init_hash)
+                    .map_err(str::to_owned)?;
+                super::recorder::validate_controlled(&recording, &initial).map_err(str::to_owned)?;
+                super::recorder::validate_resolution_recording(&recording).map_err(str::to_owned)?;
                 Ok(Self::Replay { initial, recording, mode })
             }
             (Some(option), None) if option.is_empty() => Ok(Self::Record),
-            (Some(_), None) => Err("unsupported recorder option"),
+            (Some(_), None) => Err("unsupported recorder option".into()),
             (None, None) => Ok(Self::Live),
         }
     }
