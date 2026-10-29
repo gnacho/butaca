@@ -2217,6 +2217,12 @@ fn exploration_timeout_is_final(
 
 /// AVIO backing state: wraps the demux transport so libavformat reads through it and can seek by
 /// byte offset. Boxed so its address is stable for the C callbacks.
+/// How many times one source may be re-opened after its body stopped short of the length it
+/// announced. Enough to ride out a dropped connection or a server hiccup in the middle of a
+/// film, few enough that a genuinely broken origin reaches the player as an error quickly.
+/// Issue #74: the body died at t=1319s and the demuxer was told the film had ended.
+const MAX_SHORT_BODY_RETRIES: u8 = 4;
+
 struct AvioState {
     src: Src,
     aq: *mut AuQueue,
@@ -2226,6 +2232,10 @@ struct AvioState {
     /// FFmpeg may heal it through `seek_cb`; only an operation that still returns failure may
     /// publish it to the player.
     io_failed: bool,
+    /// How many times this source has been re-opened because its body stopped short of the
+    /// length it announced. Bounded: a body that truncates over and over is a broken origin and
+    /// has to reach the player as an error rather than spin here.
+    short_body_retries: u8,
     /// Time spent inside successful body reads only. Request setup, PMS JIT production, TTFB and
     /// demux/probe work intentionally stay out of this network-rate clock and remain in the
     /// enclosing segment's total acquisition clock.
@@ -2664,7 +2674,29 @@ extern "C" fn read_cb(op: *mut c_void, dst: *mut u8, n: c_int) -> c_int {
             }
             if r < 0 {
                 // Teardown was handled above through the AU flag and remains EOF. A negative
-                // result here is therefore a real transport/range failure.
+                // result here is therefore a real transport/range failure - unless the body
+                // simply stopped short of the length it announced. That is not a dead origin:
+                // the bytes we are missing are still there, at the byte we stopped on. Re-open
+                // there and keep reading instead of letting the demuxer call the film finished
+                // (issue #74, measured at t=1319s/2646s with the socket still open).
+                if s.short_body_retries < MAX_SHORT_BODY_RETRIES
+                    && matches!(&s.src, Src::Curl(cs) if cs.stopped_short())
+                {
+                    s.short_body_retries += 1;
+                    let at = s.off;
+                    let reopened = match &mut s.src {
+                        Src::Curl(cs) => cs.seek(at),
+                        _ => false,
+                    };
+                    if reopened {
+                        crate::player::log(&format!(
+                            "ff: body stopped short - reopened at byte {at} (short-body retry {}/{MAX_SHORT_BODY_RETRIES})",
+                            s.short_body_retries
+                        ));
+                        s.io_failed = false;
+                        continue;
+                    }
+                }
                 s.io_failed = true;
                 return AVERROR_IO;
             }
@@ -3968,6 +4000,7 @@ unsafe fn hls_input(
             off: 0,
             size,
             io_failed: false,
+            short_body_retries: 0,
             body_active_us: 0,
             body_bytes: 0,
             first_byte_at: None,
@@ -7879,6 +7912,7 @@ pub(crate) fn demux(
                     off: 0,
                     size,
                     io_failed: false,
+                    short_body_retries: 0,
                     body_active_us: 0,
                     body_bytes: 0,
                     first_byte_at: None,

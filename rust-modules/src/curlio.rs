@@ -1141,6 +1141,41 @@ impl CurlSource {
         self.done = true;
     }
 
+    /// Whether the transfer that `done` describes delivered the whole body it announced.
+    ///
+    /// `done` only says libcurl retired the transfer; it says NOTHING about how much of the body
+    /// arrived. A body that stops short of `size` is a truncated transfer, and reporting it as a
+    /// clean end tells the demuxer the media is over — issue #74: the film stopped dead at
+    /// t=1319s/2646s with the socket still open and megabytes unread. Grading it here turns that
+    /// silent "the end" into the transport failure it is, which the demuxer surfaces instead.
+    ///
+    /// `size < 0` means the server never named the resource length, so completeness is unknowable
+    /// from these numbers and the response's own end is all the evidence there is.
+    fn ended_with_whole_body(&mut self) -> bool {
+        if self.failed {
+            return false;
+        }
+        if self.size < 0 || self.off >= self.size {
+            return true;
+        }
+        crate::player::log(&format!(
+            "curlio: transfer ended at {}/{} bytes - body truncated, not end of media",
+            self.off, self.size
+        ));
+        self.failed = true;
+        false
+    }
+
+    /// Whether the transfer stopped short of the body it announced.
+    ///
+    /// This is the question the demuxer asks before giving up on a source: a short body is not a
+    /// dead origin, it is a stream that has to be re-opened at the byte it stopped at. It reads
+    /// the two numbers instead of a remembered verdict on purpose - `seek` resets them, so the
+    /// answer is always about the transfer in progress.
+    pub(crate) fn stopped_short(&self) -> bool {
+        self.size >= 0 && self.off < self.size
+    }
+
     /// Free the resolve list of a handle that is already gone (cleaned up, or never attached).
     /// Only ever AFTER the easy handle: libcurl holds the pointer for the handle's life.
     fn free_resolve_list(&mut self) {
@@ -1229,7 +1264,7 @@ impl CurlSource {
                 return n as c_int;
             }
             if self.done {
-                return if self.failed { -1 } else { 0 };
+                return if self.ended_with_whole_body() { 0 } else { -1 };
             }
             if self.perform().is_err() {
                 return -1;
@@ -2924,6 +2959,87 @@ mod tests {
             );
             assert_eq!(read_all(&mut src), b"EFGH");
             assert!(!src.multi_failed, "the replacement multi handle is healthy");
+        });
+    }
+
+    /// Issue #74: the transport retired the transfer after delivering only part of the body it had
+    /// announced. That is a truncation, and the demuxer must be told so, never handed EOF.
+    #[test]
+    fn a_body_that_stops_short_is_not_reported_as_clean_eof() {
+        let Some(_gate) = curl_gate() else { return };
+        with_server(RangeMode::Honour, |port, _, _| {
+            let mut src =
+                CurlSource::open(&format!("http://127.0.0.1:{port}/f.mkv"), 0).expect("open");
+            assert_eq!(
+                src.size,
+                BODY.len() as i64,
+                "the response named the whole body"
+            );
+            src.xfer.buf.clear();
+            src.xfer.pos = 0;
+            // What a truncated transfer leaves behind: libcurl retired the transfer, reported no
+            // error, and only half of the announced body ever reached the demuxer.
+            src.off = (BODY.len() / 2) as i64;
+            src.done = true;
+            let mut b = [0u8; 8];
+            assert_eq!(
+                src.read(&mut b),
+                -1,
+                "half a body must surface as a transport failure, not as the end of the media"
+            );
+            assert!(src.failed, "the truncation must persist past its read");
+        });
+    }
+
+    #[test]
+    fn a_short_body_is_recoverable_by_reopening_at_the_byte_it_stopped_at() {
+        let Some(_gate) = curl_gate() else { return };
+        with_server(RangeMode::Honour, |port, _, _| {
+            let mut src =
+                CurlSource::open(&format!("http://127.0.0.1:{port}/f.mkv"), 0).expect("open");
+            src.xfer.buf.clear();
+            src.xfer.pos = 0;
+            src.off = (BODY.len() / 2) as i64;
+            src.done = true;
+            let mut b = [0u8; 8];
+            assert_eq!(src.read(&mut b), -1, "the truncation is a failure first");
+            assert!(
+                src.stopped_short(),
+                "the numbers still say the announced body never arrived"
+            );
+            // This is what the demuxer does with that verdict: re-open at the byte it stopped on.
+            let at = src.off;
+            assert!(
+                src.seek(at),
+                "re-opening at the byte we stopped at must succeed"
+            );
+            assert!(!src.failed, "the re-opened transfer is not the failed one");
+            assert_eq!(src.off, at, "the reopened handle sits where we asked");
+            let n = src.read(&mut b);
+            assert!(n > 0, "the re-opened transfer must deliver bytes, got {n}");
+        });
+    }
+
+    #[test]
+    fn stopped_short_is_false_once_the_whole_body_arrived() {
+        let Some(_gate) = curl_gate() else { return };
+        with_server(RangeMode::Honour, |port, _, _| {
+            let mut src =
+                CurlSource::open(&format!("http://127.0.0.1:{port}/f.mkv"), 0).expect("open");
+            let mut b = [0u8; 8];
+            let mut total = 0usize;
+            loop {
+                let n = src.read(&mut b);
+                if n <= 0 {
+                    break;
+                }
+                total += n as usize;
+            }
+            assert_eq!(total, BODY.len());
+            assert!(
+                !src.stopped_short(),
+                "a body that arrived whole is not a short body"
+            );
         });
     }
 
