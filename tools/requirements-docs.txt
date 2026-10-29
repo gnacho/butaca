@@ -3,4 +3,4 @@
 # WOFF2 output bytes, under the site with no diff to review.
 markdown-it-py==3.0.0
 fonttools==4.66.0
-brotli==1.2.0
+brotli==1.2.1
