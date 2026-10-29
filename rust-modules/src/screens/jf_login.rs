@@ -231,14 +231,24 @@ fn pointer_rows(table: &TableView, frame: Rect) -> Vec<(u32, Rect)> {
         .collect()
 }
 
-/// Hover keeps the current row parked; a click still moves focus and activates the target.
-fn pointer_stop(entry: EntryId, elem: u32, rect: Rect, clip: Rect) -> Stop<u32> {
+/// Hover moves focus except while the text keyboard is active; clicks still focus and activate.
+fn pointer_stop(
+    entry: EntryId,
+    elem: u32,
+    rect: Rect,
+    clip: Rect,
+    keyboard_active: bool,
+) -> Stop<u32> {
     Stop {
         key: FocusKey { entry, elem },
         rect,
         rest_rect: rect,
         clip,
-        hover: crate::ui::screen::Hover::OnlyIfFocused,
+        hover: if keyboard_active {
+            crate::ui::screen::Hover::OnlyIfFocused
+        } else {
+            crate::ui::screen::Hover::Focus
+        },
         activate: crate::ui::screen::Activate::Direct,
     }
 }
@@ -525,7 +535,10 @@ impl<H: AppLike> Screen<H> for JfLoginScreen {
         // screen owns a custom narrative/layout, so it paints the shared table directly and must
         // publish those same stops itself; without them pointer clicks never reach the fields.
         for (i, rect) in pointer_rows(&self.table, frame) {
-            f.stop(p, pointer_stop(self.entry, i, rect, frame));
+            f.stop(
+                p,
+                pointer_stop(self.entry, i, rect, frame, self.editing.is_some()),
+            );
         }
         if signin::phase() == Phase::Working {
             Spinner::new(frame.cx(), frame.y - theme::space::XL, 15.0)
@@ -605,7 +618,9 @@ mod tests {
         let mut hit = HitMap::new();
         hit.fill(
             rows.iter()
-                .map(|&(i, rect)| pointer_stop(EntryId(9), i, rect, frame))
+                .map(|&(i, rect)| {
+                    pointer_stop(EntryId(9), i, rect, frame, screen.editing.is_some())
+                })
                 .collect(),
         );
         hit.swap();
@@ -625,7 +640,7 @@ mod tests {
     }
 
     #[test]
-    fn pointer_hover_keeps_login_focus_but_click_moves_it() {
+    fn pointer_hover_moves_focus_when_keyboard_is_inactive() {
         use crate::ui::hit::{HitMap, PointerKind};
         use crate::ui::machine::{EntryId, FocusKey};
 
@@ -635,7 +650,9 @@ mod tests {
         let mut hit = HitMap::new();
         hit.fill(
             rows.iter()
-                .map(|&(i, rect)| pointer_stop(EntryId(9), i, rect, frame))
+                .map(|&(i, rect)| {
+                    pointer_stop(EntryId(9), i, rect, frame, screen.editing.is_some())
+                })
                 .collect(),
         );
         hit.swap();
@@ -647,10 +664,60 @@ mod tests {
 
         let moved = hit.resolve(Some(EntryId(9)), PointerKind::Move, x, y, Some(selected));
         assert_eq!(moved.hit, Some(target));
-        assert_eq!(moved.focus, None, "hover must not steal the selected row");
+        assert_eq!(moved.focus, Some(target), "idle hover should move focus");
 
         let clicked = hit.resolve(Some(EntryId(9)), PointerKind::Click, x, y, Some(selected));
         assert_eq!(clicked.focus, Some(target), "a click must still move focus");
+        assert_eq!(clicked.activate.map(|(key, _)| key), Some(target));
+    }
+
+    #[test]
+    fn pointer_hover_keeps_focus_while_keyboard_is_active() {
+        use crate::ui::hit::{HitMap, PointerKind};
+        use crate::ui::machine::{EntryId, FocusKey};
+
+        let mut screen = JfLoginScreen::new(EntryId(9));
+        screen.editing = Some(F_SERVER);
+        let frame = Rect::new(720.0, 300.0, 520.0, screen.table.measured_height());
+        let rows = pointer_rows(&screen.table, frame);
+        let mut hit = HitMap::new();
+        hit.fill(
+            rows.iter()
+                .map(|&(i, rect)| {
+                    pointer_stop(EntryId(9), i, rect, frame, screen.editing.is_some())
+                })
+                .collect(),
+        );
+        hit.swap();
+
+        let selected = FocusKey {
+            entry: EntryId(9),
+            elem: F_SERVER as u32,
+        };
+        let target = FocusKey {
+            entry: EntryId(9),
+            elem: F_USER as u32,
+        };
+        let rect = rows
+            .iter()
+            .find(|(elem, _)| *elem == target.elem)
+            .unwrap()
+            .1;
+        let (x, y) = (rect.cx(), rect.cy());
+
+        let moved = hit.resolve(Some(EntryId(9)), PointerKind::Move, x, y, Some(selected));
+        assert_eq!(moved.hit, Some(target));
+        assert_eq!(
+            moved.focus, None,
+            "hover must not steal focus while editing"
+        );
+
+        let clicked = hit.resolve(Some(EntryId(9)), PointerKind::Click, x, y, Some(selected));
+        assert_eq!(
+            clicked.focus,
+            Some(target),
+            "clicks still move focus while editing"
+        );
         assert_eq!(clicked.activate.map(|(key, _)| key), Some(target));
     }
 
