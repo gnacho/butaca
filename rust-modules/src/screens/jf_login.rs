@@ -92,6 +92,14 @@ impl JfLoginScreen {
         screen
     }
 
+    fn selection_fill(&self) -> [f32; 4] {
+        if self.editing.is_some() {
+            theme::TABLE_FIELD_EDITING_FILL
+        } else {
+            theme::ACCENT
+        }
+    }
+
     fn view(&self) -> TableScreen<'_> {
         TableScreen::new(
             Header::new(
@@ -483,7 +491,8 @@ impl<H: AppLike> Screen<H> for JfLoginScreen {
             layout.content.w,
             h,
         );
-        self.table.draw(p, frame, f.measure);
+        self.table
+            .draw_with_selection_fill(p, frame, f.measure, self.selection_fill());
         // `TableScreen` normally registers each drawn row as a hit stop in its Part::draw. This
         // screen owns a custom narrative/layout, so it paints the shared table directly and must
         // publish those same stops itself; without them pointer clicks never reach the fields.
@@ -609,6 +618,23 @@ mod tests {
             })
             .collect();
         assert!(pointer_gaps(&mut hit, EntryId(9), &controls).is_empty());
+    }
+
+    #[test]
+    fn editing_a_text_field_uses_a_distinct_subtle_selection_fill() {
+        let mut screen = JfLoginScreen::new(EntryId(9));
+        assert_eq!(screen.selection_fill(), theme::ACCENT);
+        screen.editing = Some(F_SERVER);
+        assert_eq!(screen.selection_fill(), theme::TABLE_FIELD_EDITING_FILL);
+        let max_channel_delta = theme::TABLE_FIELD_EDITING_FILL
+            .iter()
+            .zip(theme::ACCENT)
+            .map(|(editing, focused)| (*editing - focused).abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            max_channel_delta >= 0.1,
+            "editing tint should be visibly distinct"
+        );
     }
 
     #[test]

@@ -356,6 +356,11 @@ pub const CONTROL_SPENT_FILL: [f32; 4] = mix(COOL_0, NEUTRAL_500, 1.0 - CONTROL_
 /// to the state that still has the caret to help it — see `field::draw`'s `ink_target`.
 pub const FIELD_EDITING_INK: [f32; 4] = TEXT_PRIMARY;
 
+/// The cool-tinted selected-row fill while a table field accepts text. Reuses [`COOL_150`]
+/// rather than the default near-white [`ACCENT`], so editing is visibly distinct without a stroke or
+/// a new palette stop; the existing near-black accent ink remains legible over it.
+pub const TABLE_FIELD_EDITING_FILL: [f32; 4] = COOL_150;
+
 /// The Search query field's **focused-but-not-editing** ink — the `hot` cross-fade's bright
 /// endpoint for the one state that has no caret, no keyboard and (since 2026-09-04) no plate to
 /// carry focus instead. Pure `WHITE`, not `TEXT_PRIMARY`/[`FIELD_EDITING_INK`]'s near-white
