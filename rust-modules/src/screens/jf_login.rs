@@ -270,6 +270,18 @@ fn delete_text(field: &mut String, edit: &crate::ui::machine::TextEdit) -> bool 
     }
 }
 
+impl JfLoginScreen {
+    fn end_editing(&mut self) -> bool {
+        self.editing.take().is_some()
+    }
+
+    /// Enter is normalized to `Key::Ok`; consuming it here prevents the table's activation path
+    /// from reopening the field after the keyboard is dismissed.
+    fn close_editing_on_key(&mut self, key: crate::ui::machine::Key) -> bool {
+        key == crate::ui::machine::Key::Ok && self.end_editing()
+    }
+}
+
 /// The reason line under the narrative — one sentence per failure, worded for a couch, not a
 /// console. The two address failures are told apart because their fixes are different verbs:
 /// retype it, or serve it over TLS / from the LAN.
@@ -348,7 +360,7 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
                 // The panel's edit protocol: while a field edit is up, OK commits and closes the
                 // keyboard instead of re-activating the row beneath it.
                 if self.editing.is_some() {
-                    self.editing = None;
+                    self.end_editing();
                     crate::textinput::stop();
                     fx.invalidate(crate::ui::present::Provenance::Input);
                     Handled::Yes
@@ -358,9 +370,14 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
                 }
             }
             ScreenEvent::Input(input) => match input.kind {
-                // While editing, backspace/clear arrive as keys and edit the field; OK and BACK
-                // both commit and close (Activate handles OK's row half, this is the raw key).
+                // While editing, Enter/OK closes in this key path; backspace/clear edit the field,
+                // and BACK also commits and closes it.
                 InputKind::Key { key, sym, edge: Edge::Down | Edge::Repeat, .. } => {
+                    if self.close_editing_on_key(key) {
+                        crate::textinput::stop();
+                        fx.invalidate(crate::ui::present::Provenance::Input);
+                        return Handled::Yes;
+                    }
                     if let Some(f) = self.editing {
                         // Backspace/Clear may be delivered as ordinary keys (the system keyboard's
                         // protocol) or as typed-edit events (the desktop editing path). Repeats
@@ -652,6 +669,25 @@ mod tests {
             max_channel_delta >= 0.1,
             "editing tint should be visibly distinct"
         );
+    }
+
+    #[test]
+    fn enter_closes_text_editing_and_leaves_focus_on_the_field() {
+        use crate::ui::machine::Key;
+
+        let mut screen = JfLoginScreen::new(EntryId(9));
+        screen.table.sel = F_USER as i32;
+        screen.editing = Some(F_USER);
+
+        assert!(screen.close_editing_on_key(Key::Ok));
+        assert_eq!(screen.editing, None);
+        assert_eq!(screen.table.sel, F_USER as i32, "focus stays parked for hover");
+        assert_eq!(screen.selection_fill(), theme::ACCENT, "the editing cue is removed");
+        assert!(!screen.close_editing_on_key(Key::Ok), "a closed field is not reopened");
+
+        screen.editing = Some(F_USER);
+        assert!(!screen.close_editing_on_key(Key::Down));
+        assert_eq!(screen.editing, Some(F_USER), "navigation keys do not dismiss editing");
     }
 
     #[test]
