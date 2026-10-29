@@ -1159,7 +1159,7 @@ impl CurlSource {
             return true;
         }
         crate::player::log(&format!(
-            "curlio: transfer ended at {}/{} bytes — body truncated, not end of media",
+            "curlio: transfer ended at {}/{} bytes - body truncated, not end of media",
             self.off, self.size
         ));
         self.failed = true;
