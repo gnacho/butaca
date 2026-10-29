@@ -892,6 +892,7 @@ fn issue_95_resolve_roster_only_ever_records_an_https_origin() {
 /// success.
 #[test]
 fn issue_95_without_a_relay_a_plaintext_only_answer_is_not_reached() {
+    let _g = crate::testlock::serial();
     let resources = vec![issue_95_account(false)];
     let dial: ProbeDial = status_dial(issue_95_dial);
     let mut probe_one = |plan: &ProbePlan| {
@@ -2354,6 +2355,7 @@ fn e2e_insecure_only_evidence_names_the_failed_tls_handshake() {
 /// them — times out. The plaintext facts are the ones a same-network decision would need.
 #[test]
 fn insecure_only_evidence_records_a_timeout_on_every_https_route() {
+    let _g = crate::testlock::serial();
     let dial: ProbeDial = Arc::new(|origin, _, _| {
         if origin.is_tls() {
             ProbeReply::Failed(Some(timed_out()))
@@ -2383,6 +2385,7 @@ fn insecure_only_evidence_records_a_timeout_on_every_https_route() {
 /// public one, DNS on the custom name); only the relay row differs.
 #[test]
 fn insecure_only_evidence_tells_an_absent_relay_from_a_failed_one() {
+    let _g = crate::testlock::serial();
     let dial: ProbeDial = Arc::new(|origin, _, _| {
         let host = origin.host();
         if !origin.is_tls() {
