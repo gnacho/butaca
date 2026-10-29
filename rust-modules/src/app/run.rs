@@ -560,6 +560,11 @@ unsafe fn present_and_swap(
         // settled screen from becoming a CPU spinner.
         SDL_Delay(crate::ui::idle::IDLE_POLL_MS);
     }
+    // A recording or a replay runs on the television's 60 Hz cadence, never on the panel's: the
+    // record stream is frame-indexed, and a 144 Hz panel turns one flow into 2.4x the records.
+    if app.rec.is_controlled() {
+        crate::app::recorder::pace_controlled_frame();
+    }
 }
 
 /// Ingest: the lab command channel, the remote FIFO and the SDL event queue (spec §3.3 step 2).
