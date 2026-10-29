@@ -1,7 +1,14 @@
 #!/bin/sh
 # Manage a persistent Xvfb + x11vnc + noVNC session for the Linux simulator.
-# Usage: tools/xvfb-novnc.sh start|stop|status|url
+# Usage: tools/xvfb-novnc.sh [--host ADDRESS] start|stop|status|url
 set -eu
+
+WEB_HOST=127.0.0.1
+if [ "${1:-}" = --host ]; then
+    [ "$#" -ge 3 ] || { echo 'Usage: $0 [--host ADDRESS] start|stop|status|url' >&2; exit 2; }
+    WEB_HOST=$2
+    shift 2
+fi
 
 DISPLAY_NUM=${PLX_XVFB_DISPLAY:-99}
 WIDTH=${PLX_XVFB_WIDTH:-1920}
@@ -65,8 +72,8 @@ case "${1:-}" in
             while [ ! -S "/tmp/.X11-unix/X$DISPLAY_NUM" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
             if [ ! -S "/tmp/.X11-unix/X$DISPLAY_NUM" ]; then echo 'Xvfb failed to start; see its log' >&2; exit 1; fi
         fi
-        start_one x11vnc env DISPLAY="$DISPLAY" x11vnc -display "$DISPLAY" -forever -shared -nopw -rfbport "$VNC_PORT"
-        start_one websockify websockify --web "$NOVNC_WEB" "0.0.0.0:$WEB_PORT" "127.0.0.1:$VNC_PORT"
+        start_one x11vnc env DISPLAY="$DISPLAY" x11vnc -display "$DISPLAY" -forever -shared -nopw -localhost -rfbport "$VNC_PORT"
+        start_one websockify websockify --web "$NOVNC_WEB" "$WEB_HOST:$WEB_PORT" "127.0.0.1:$VNC_PORT"
         echo "Streaming display $DISPLAY; open http://localhost:$WEB_PORT/vnc.html?autoconnect=true&resize=remote"
         echo "Simulator environment: DISPLAY=$DISPLAY"
         ;;
@@ -83,5 +90,5 @@ case "${1:-}" in
     url)
         echo "http://localhost:$WEB_PORT/vnc.html?autoconnect=true&resize=remote"
         ;;
-    *) echo "Usage: $0 start|stop|status|url" >&2; exit 2 ;;
+    *) echo "Usage: $0 [--host ADDRESS] start|stop|status|url" >&2; exit 2 ;;
 esac
