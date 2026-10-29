@@ -97,12 +97,17 @@ class ContentFocusFlows(unittest.TestCase):
         self.assertIsNone(focusfp_check.check(1, log))
         self.assertIsNotNone(focusfp_check.check(1, log[1:]))
 
-    def test_settings_family_must_visit_privacy_as_well_as_legal(self):
-        log = ["hb route=home overlay=settings", "hb route=home overlay=legal",
+    def test_settings_family_must_visit_playback_and_legal_in_that_order(self):
+        # The walk of the Settings family: the root table, Playback, back to the root, Legal, back
+        # to the root, and out. Privacy is no longer a child page (it is the root's own first
+        # row), so a log that visits it is not this walk any more.
+        log = ["hb route=home overlay=settings", "hb route=home overlay=settings-playback",
+               "hb route=home overlay=settings", "hb route=home overlay=legal",
                "hb route=home overlay=settings", "hb route=home"]
-        self.assertIsNotNone(focusfp_check.check(6, log))
-        log[1:1] = ["hb route=home overlay=privacy", "hb route=home overlay=settings"]
         self.assertIsNone(focusfp_check.check(6, log))
+        # A walk that never opens Playback is not the Settings family.
+        self.assertIsNotNone(focusfp_check.check(6, log[0:1] + log[2:]))
+        # ...and one that stops before returning Home either.
         self.assertIsNotNone(focusfp_check.check(6, log[:-1]))
 
     def test_the_old_about_only_false_pass_does_not_prove_a_related_hold(self):
