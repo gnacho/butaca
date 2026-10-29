@@ -123,9 +123,15 @@ def check(flow, lines):
                 stage = record.get("overlay", record.get("route"))
                 if not stages or stages[-1] != stage:
                     stages.append(stage)
-        wanted = ["settings", "privacy", "settings", "legal", "settings", "home"]
+        # The root is a TABLE of sections now: Privacy is a section, not a child page, and its
+        # first row is the destructive "delete all local data". So the walk starts with a DOWN and
+        # opens the two children a signed-out synthetic boot has that the fixture alphabet can
+        # carry: Legal (a pushed index) and Playback (a pushed settings page). BACK from a child
+        # returns focus to the row that opened it, which is why `settings` repeats between them.
+        wanted = ["settings", "settings-playback", "settings", "legal", "settings", "home"]
         if not any(stages[i:i + len(wanted)] == wanted for i in range(len(stages))):
-            return "the Settings → Privacy → Settings → Legal → Settings → Home sequence never ran"
+            return ("the Settings → Playback → Settings → Legal → Settings → Home sequence never "
+                    "ran")
     elif flow == 8:
         # `imenu=1`, not `route=itemmenu over=detail`: since UI-restructure phase 10 the card menu
         # is a ModalStack SURFACE, so the fingerprint names the page under it as `route=detail`

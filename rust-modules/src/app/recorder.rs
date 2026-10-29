@@ -526,6 +526,42 @@ pub(crate) enum Recplay {
     Replaying(Replay),
 }
 
+impl Recplay {
+    /// Is this loop recording or replaying? The two runs whose frame count IS the artifact.
+    pub(crate) fn is_controlled(&self) -> bool { !matches!(self, Self::Off) }
+}
+
+/// The television's cadence, and the one a controlled run is held to.
+const CONTROLLED_FRAME_US: u64 = 16_667;
+
+/// Hold a recording or a replay at 60 Hz.
+///
+/// A recording is a sequence of FRAMES, so the panel a flow was taken on decides how many records
+/// it produces: a 144 Hz desktop simulator wrote 2.4x the records of a 60 Hz set, and a fixture
+/// that used to load whole (6,427 lines) went past the hard decode bound (`ui::rec::CAP_BYTES`)
+/// at 15,101. Pacing the controlled loop at the television's own cadence keeps a fixture the size
+/// of the thing it describes, and keeps two machines recording the same flow comparable.
+pub(crate) fn pace_controlled_frame() {
+    use std::cell::Cell;
+    use std::time::{Duration, Instant};
+    thread_local! {
+        static DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) };
+    }
+    DEADLINE.with(|slot| {
+        let period = Duration::from_micros(CONTROLLED_FRAME_US);
+        let next = slot.get().map_or_else(Instant::now, |at| at + period);
+        let now = Instant::now();
+        if next > now {
+            std::thread::sleep(next - now);
+            slot.set(Some(next));
+        } else {
+            // Behind by a whole frame or more (a slow first frame, a stall): do not try to catch
+            // up by sleeping less than nothing, restart the cadence from here.
+            slot.set(Some(now));
+        }
+    });
+}
+
 /// Observe the real drain with complete supported effect and result payloads.
 impl crate::ui::dispatch::Tap<super::bridge::AppHost> for Recplay {
     fn resolution_mode(&self) -> Option<bool> {
