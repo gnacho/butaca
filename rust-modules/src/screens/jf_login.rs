@@ -14,10 +14,11 @@
 use crate::jellyfin::signin::{self, Fail, Phase};
 use super::family::table_focus;
 use crate::screens::registry::AppLike;
+use crate::ui::geom::IndexElem;
 use crate::ui::machine::{Cx, Effects, EntryId, FocusKey, Fx, GroupId, Handled, Machine, NavOp};
 use crate::ui::route_screen::{RouteGround, RouteLayout};
 use crate::ui::screen::{
-    At, Dir, DrawFrame, Focusable, Placed, Screen, ScreenEvent, Step,
+    At, Dir, DrawFrame, Focusable, Placed, Screen, ScreenEvent, Step, Stop,
 };
 use crate::ui::table_screen::{Header, TableScreen};
 use crate::ui::table::{Row, Section, TableView};
@@ -212,6 +213,15 @@ fn masked(s: &str) -> String {
 /// The password may legitimately be empty (a LAN-only account), so it is not in the rule.
 fn connectable(fields: &[String; 3]) -> bool {
     !fields[F_SERVER].trim().is_empty() && !fields[F_USER].trim().is_empty()
+}
+
+/// The pointer stops must use the same frame the table was actually drawn in. This screen lays
+/// out its table to the measured row height rather than the default `TableScreen` frame.
+fn pointer_rows(table: &TableView, frame: Rect) -> Vec<(u32, Rect)> {
+    (0..table.n_rows())
+        .filter(|&i| table.next_selectable(i, 0) == Some(i))
+        .filter_map(|i| table.row_frame(frame, i).map(|rect| (i as u32, rect)))
+        .collect()
 }
 
 /// What the keyboard committed, appended to the field being edited. Newlines and control
@@ -447,6 +457,25 @@ impl<H: AppLike> Screen<H> for JfLoginScreen {
             h,
         );
         self.table.draw(p, frame, f.measure);
+        // `TableScreen` normally registers each drawn row as a hit stop in its Part::draw. This
+        // screen owns a custom narrative/layout, so it paints the shared table directly and must
+        // publish those same stops itself; without them pointer clicks never reach the fields.
+        for (i, rect) in pointer_rows(&self.table, frame) {
+            f.stop(
+                p,
+                Stop {
+                    key: FocusKey {
+                        entry: self.entry,
+                        elem: H::Elem::of_index(i),
+                    },
+                    rect,
+                    rest_rect: rect,
+                    clip: frame,
+                    hover: crate::ui::screen::Hover::Focus,
+                    activate: crate::ui::screen::Activate::Direct,
+                },
+            );
+        }
         if signin::phase() == Phase::Working {
             Spinner::new(frame.cx(), frame.y - theme::space::XL, 15.0)
                 .phase(self.spin_ms as u32)
@@ -510,6 +539,49 @@ mod tests {
         assert!(!connectable(&f), "whitespace is not a server address");
         f[F_SERVER] = "192.168.1.20:8096".into();
         assert!(connectable(&f), "an empty password can be the truth on a LAN account");
+    }
+
+    #[test]
+    fn every_login_field_has_a_pointer_stop_matching_its_drawn_row() {
+        use crate::ui::hit::{HitMap, pointer_gaps};
+        use crate::ui::machine::{EntryId, FocusKey};
+        use crate::ui::screen::{Activate, Hover, Stop};
+
+        let screen = JfLoginScreen::new(EntryId(9));
+        let frame = Rect::new(720.0, 300.0, 520.0, screen.table.measured_height());
+        let rows = pointer_rows(&screen.table, frame);
+        assert_eq!(rows.len(), 4, "three edit fields and Connect need stops");
+
+        let mut hit = HitMap::new();
+        hit.fill(
+            rows.iter()
+                .map(|&(i, rect)| Stop {
+                    key: FocusKey {
+                        entry: EntryId(9),
+                        elem: i,
+                    },
+                    rect,
+                    rest_rect: rect,
+                    clip: frame,
+                    hover: Hover::Focus,
+                    activate: Activate::Direct,
+                })
+                .collect(),
+        );
+        hit.swap();
+        let controls: Vec<_> = rows
+            .iter()
+            .map(|&(i, rect)| {
+                (
+                    FocusKey {
+                        entry: EntryId(9),
+                        elem: i,
+                    },
+                    rect,
+                )
+            })
+            .collect();
+        assert!(pointer_gaps(&mut hit, EntryId(9), &controls).is_empty());
     }
 
     #[test]
