@@ -1247,9 +1247,9 @@ and "tampered with" are indistinguishable.
 
 **`RELEASE=1` — no dev chrome in a public build.** `rust-modules/Cargo.toml` gained a `devtools`
 feature, on by default so every ordinary `make`, `make test` and harness run behaves exactly as
-before. `make RELEASE=1` passes `--no-default-features`, which today removes the **on-screen
-seven-segment counter** (`app.rs`). The fps scenes are unaffected — they grade the once/sec
-heartbeat in the *event log*, never the pixels. Anything added to this feature must be draw-only:
+before. `make RELEASE=1` passes `--no-default-features`. Today that changes nothing on screen: the
+feature's last painting site (the on-screen counter) is gone, and what remains is the feature name
+the recorder stamps into a recording. Anything added to this feature must be draw-only or inert:
 the device is the only test this project has, so a release build must not differ from the tested
 one in any way that could change behaviour, only in what it paints.
 `RELEASE=1` also drops `threadcheck`, the default-on main-thread violation checker.

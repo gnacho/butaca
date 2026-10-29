@@ -231,13 +231,9 @@ pub(crate) struct App {
     loop_t: u32,
     iters_ct: i32,
     loop_shown: i32,
-    #[cfg(feature = "devtools")]
-    fps_shown: i32,
     play_prev: Option<(i64, u32)>,
     running: bool,
     window_activity: crate::system::WindowActivity,
-    #[cfg(feature = "devtools")]
-    buffer_flip_count: u8,
     /// The sym we believe is PHYSICALLY DOWN right now — set by a fresh key-down, cleared by its
     /// key-up. It tells a real hardware auto-repeat from a PHANTOM one, which this television emits
     /// routinely: over the system keyboard the panel does not deliver a key-up for the press that

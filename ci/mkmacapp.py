@@ -118,7 +118,7 @@ def package_version() -> str:
 def build_binary(tdir: Path) -> Path:
     """Cargo, release, with BOTH dev features off.
 
-    `--no-default-features` drops `devtools` (the on-screen counter) and `devtriggers` (the whole
+    `--no-default-features` drops `devtools` and `devtriggers` (the whole
     `/tmp/butaca-*` surface, the remote FIFO and the capture listener). A binary somebody was
     sent must not take instructions from a world-writable directory — and with the feature off
     there is nothing to take: `dev::flag` is `false` and `dev::read` is `None` at COMPILE time.
