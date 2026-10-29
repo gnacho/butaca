@@ -1166,6 +1166,16 @@ impl CurlSource {
         false
     }
 
+    /// Whether the transfer stopped short of the body it announced.
+    ///
+    /// This is the question the demuxer asks before giving up on a source: a short body is not a
+    /// dead origin, it is a stream that has to be re-opened at the byte it stopped at. It reads
+    /// the two numbers instead of a remembered verdict on purpose - `seek` resets them, so the
+    /// answer is always about the transfer in progress.
+    pub(crate) fn stopped_short(&self) -> bool {
+        self.size >= 0 && self.off < self.size
+    }
+
     /// Free the resolve list of a handle that is already gone (cleaned up, or never attached).
     /// Only ever AFTER the easy handle: libcurl holds the pointer for the handle's life.
     fn free_resolve_list(&mut self) {
@@ -2978,6 +2988,58 @@ mod tests {
                 "half a body must surface as a transport failure, not as the end of the media"
             );
             assert!(src.failed, "the truncation must persist past its read");
+        });
+    }
+
+    #[test]
+    fn a_short_body_is_recoverable_by_reopening_at_the_byte_it_stopped_at() {
+        let Some(_gate) = curl_gate() else { return };
+        with_server(RangeMode::Honour, |port, _, _| {
+            let mut src =
+                CurlSource::open(&format!("http://127.0.0.1:{port}/f.mkv"), 0).expect("open");
+            src.xfer.buf.clear();
+            src.xfer.pos = 0;
+            src.off = (BODY.len() / 2) as i64;
+            src.done = true;
+            let mut b = [0u8; 8];
+            assert_eq!(src.read(&mut b), -1, "the truncation is a failure first");
+            assert!(
+                src.stopped_short(),
+                "the numbers still say the announced body never arrived"
+            );
+            // This is what the demuxer does with that verdict: re-open at the byte it stopped on.
+            let at = src.off;
+            assert!(
+                src.seek(at),
+                "re-opening at the byte we stopped at must succeed"
+            );
+            assert!(!src.failed, "the re-opened transfer is not the failed one");
+            assert_eq!(src.off, at, "the reopened handle sits where we asked");
+            let n = src.read(&mut b);
+            assert!(n > 0, "the re-opened transfer must deliver bytes, got {n}");
+        });
+    }
+
+    #[test]
+    fn stopped_short_is_false_once_the_whole_body_arrived() {
+        let Some(_gate) = curl_gate() else { return };
+        with_server(RangeMode::Honour, |port, _, _| {
+            let mut src =
+                CurlSource::open(&format!("http://127.0.0.1:{port}/f.mkv"), 0).expect("open");
+            let mut b = [0u8; 8];
+            let mut total = 0usize;
+            loop {
+                let n = src.read(&mut b);
+                if n <= 0 {
+                    break;
+                }
+                total += n as usize;
+            }
+            assert_eq!(total, BODY.len());
+            assert!(
+                !src.stopped_short(),
+                "a body that arrived whole is not a short body"
+            );
         });
     }
 
