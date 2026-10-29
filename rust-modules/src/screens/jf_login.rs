@@ -237,6 +237,20 @@ fn commit_text(fields: &mut [String; 3], editing: Option<usize>, text: &str) -> 
     true
 }
 
+/// Apply the two deletion commands whether they arrive as raw desktop keys or typed-edit events.
+fn delete_text(field: &mut String, edit: &crate::ui::machine::TextEdit) -> bool {
+    use crate::ui::machine::TextEdit;
+    match edit {
+        TextEdit::Backspace => field.pop().is_some(),
+        TextEdit::Clear => {
+            let changed = !field.is_empty();
+            field.clear();
+            changed
+        }
+        _ => false,
+    }
+}
+
 /// The reason line under the narrative — one sentence per failure, worded for a couch, not a
 /// console. The two address failures are told apart because their fixes are different verbs:
 /// retype it, or serve it over TLS / from the LAN.
@@ -327,21 +341,26 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
             ScreenEvent::Input(input) => match input.kind {
                 // While editing, backspace/clear arrive as keys and edit the field; OK and BACK
                 // both commit and close (Activate handles OK's row half, this is the raw key).
-                InputKind::Key { key, sym, edge: Edge::Down, .. } => {
+                InputKind::Key { key, sym, edge: Edge::Down | Edge::Repeat, .. } => {
                     if let Some(f) = self.editing {
-                        // The panel's edit protocol, per search's key handler: backspace and
-                        // clear arrive as keys (the system keyboard's own codes), the printable
-                        // text as SDL_TEXTINPUT.
-                        match (key, sym) {
-                            (Key::Other, crate::ui::consts::SDLK_BACKSPACE) => {
-                                self.fields[f].pop();
-                                self.dirty = true;
+                        // Backspace/Clear may be delivered as ordinary keys (the system keyboard's
+                        // protocol) or as typed-edit events (the desktop editing path). Repeats
+                        // matter for a held delete key, while printable text still arrives as an
+                        // SDL_TEXTINPUT commit drained on Tick.
+                        let edit = match sym {
+                            crate::ui::consts::SDLK_BACKSPACE => {
+                                Some(crate::ui::machine::TextEdit::Backspace)
                             }
-                            (Key::Other, crate::ui::consts::SDLK_CLEAR) => {
-                                self.fields[f].clear();
-                                self.dirty = true;
+                            crate::ui::consts::SDLK_CLEAR => {
+                                Some(crate::ui::machine::TextEdit::Clear)
                             }
-                            _ => {}
+                            _ => None,
+                        };
+                        if edit
+                            .as_ref()
+                            .is_some_and(|edit| delete_text(&mut self.fields[f], edit))
+                        {
+                            self.dirty = true;
                         }
                         fx.invalidate(crate::ui::present::Provenance::Input);
                         Handled::Yes
@@ -361,6 +380,14 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
                     } else {
                         Handled::No
                     }
+                }
+                crate::ui::machine::InputKind::Text(ref edit) if self.editing.is_some() => {
+                    let field = self.editing.expect("guarded editing field");
+                    if delete_text(&mut self.fields[field], &edit) {
+                        self.dirty = true;
+                        fx.invalidate(crate::ui::present::Provenance::Input);
+                    }
+                    Handled::Yes
                 }
                 _ => Handled::No,
             },
@@ -592,5 +619,17 @@ mod tests {
         // …and with no edit in flight, text is dropped rather than smeared across field 0.
         assert!(!commit_text(&mut fields, None, "junk"));
         assert_eq!(fields[F_SERVER], "192.168.1.20");
+    }
+
+    #[test]
+    fn backspace_deletes_one_unicode_character_and_clear_empties_the_field() {
+        use crate::ui::machine::TextEdit;
+
+        let mut value = "mañana".to_owned();
+        assert!(delete_text(&mut value, &TextEdit::Backspace));
+        assert_eq!(value, "mañan");
+        assert!(delete_text(&mut value, &TextEdit::Clear));
+        assert!(value.is_empty());
+        assert!(!delete_text(&mut value, &TextEdit::Backspace));
     }
 }
