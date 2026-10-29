@@ -64,7 +64,9 @@ metadata untouched. Measure translated labels with the injected `Measure`; compl
 remain inside their safe frames at the shared theme sizes. Tile labels are the exception: they
 belong to their card, never to the safe area. `card_row::place_label` centres a focused tile's
 block on its card, or starts every line at the card's leading edge where the centred block would
-leave the panel; cast names scroll off-screen with their headshots at full width.
+leave the panel — judged where the tile will REST (`CardRow::settle_lag`, passed through
+`TileLabel::settling`), so a scroll glide never flips the block's alignment or width mid-flight;
+cast names scroll off-screen with their headshots at full width.
 
 Alert titles, eyebrows and reading text use `theme::alert::TEXT_ALIGN`: the common left padding
 edge. Decision dialogs follow the same rule as the About, biography and track-information panels.
@@ -222,8 +224,8 @@ presentation in a design pass.
    Home, Library, sign-in and the player's failure read-outs share ONE placement: the verdict hangs
    from `FULL_ANCHOR_TOP` with the reason and action row stacked directly under it, and a 112 px
    `theme::TEXT_SECONDARY` glyph above the verdict (`StatusOverlay::page`'s `glyph` argument). A
-   read-out centred in its own container instead lands ~250 px low and reads as a different
-   component.
+   read-out centred in its own container instead lands visibly off that verdict line and reads as a
+   different component.
 
 5. **Read the DS contract before inventing a control state.** Focus, hover and selected treatments
    come from the component's `.d.ts` in the design system, not from a lane's judgement. The Search
