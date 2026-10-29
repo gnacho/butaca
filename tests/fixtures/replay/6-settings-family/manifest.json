@@ -14,15 +14,6 @@
   "data": {
    "automated": true,
    "clock_start": 0,
-   "consent": {
-    "asked_version": 0,
-    "errors": false,
-    "errors_declined_scope": 0,
-    "errors_scope": 0,
-    "usage": false,
-    "usage_declined_scope": 0,
-    "usage_scope": 0
-   },
    "entropy": {
     "Seeded": 1
    },
@@ -100,10 +91,7 @@
     "error": "",
     "held_handoff": null,
     "inbox": [],
-    "incident": null,
-    "incidents_seen": [],
     "link_trouble": false,
-    "next_incident": 0,
     "next_qr": 0,
     "next_req": 0,
     "pending": {},
@@ -169,11 +157,11 @@
    ],
    "version": 1
   },
-  "hash": 16176457039972570882,
+  "hash": 10529155205723157907,
   "probe": "controlled=home version=1"
  },
  "schema": 3,
- "state_fp": 10638452537178981056,
+ "state_fp": 380541232516096414,
  "triggers": [
   "plxnative-app-init",
   "plxnative-rec",
