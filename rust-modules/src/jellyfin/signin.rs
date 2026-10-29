@@ -132,9 +132,9 @@ pub(crate) fn start(url_raw: &str, user: &str, password: &str) -> Result<(), Fai
                     ));
                     super::install(client);
                     if add_server {
-                        super::boot::append_server(&url, &ok.user_name, &password, &device_id);
+                        super::boot::append_server(&url, &ok.user_name, &ok.token, &device_id);
                     } else {
-                        super::boot::save_config(&url, &ok.user_name, &password, &device_id);
+                        super::boot::save_config(&url, &ok.user_name, &ok.token, &device_id);
                     }
                     Ok(())
                 }

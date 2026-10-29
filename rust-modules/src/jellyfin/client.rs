@@ -16,12 +16,21 @@
 //! LAN address. **The token is never logged** — parse failures name the endpoint, which is the
 //! part of the path before the query string.
 
-use super::dto::{AuthResponse, BaseItemDto, ItemsResult, ViewsResult};
+use super::dto::{AuthResponse, AuthUser, BaseItemDto, ItemsResult, ViewsResult};
 use crate::http;
 use crate::plex::Origin;
 use serde::de::DeserializeOwned;
 use std::collections::BTreeSet;
 use std::sync::{Mutex, RwLock};
+
+/// What a stored token resolves to: the account it was minted for. Narrower than [`AuthOk`]
+/// because `GET /Users/Me` names no server id — the token was minted against one and the boot arm
+/// only needs the user id every scoped endpoint is addressed by, plus the name the chip shows.
+#[derive(Debug, Clone)]
+pub(crate) struct TokenUser {
+    pub(crate) user_id: String,
+    pub(crate) user_name: String,
+}
 
 /// The one login failure taxonomy the onboarding needs: wrong credentials must be told apart
 /// from "the server did not answer", because the first is fixable on the on-screen keyboard and
@@ -185,6 +194,60 @@ impl JfClient {
             user_name: ok.user_name.clone(),
         });
         Ok(ok)
+    }
+
+    /// Adopt a token an earlier run persisted: install it, then ask the server who it belongs to.
+    ///
+    /// `GET /Users/Me` is the cheapest route that needs nothing but the token, which makes it both
+    /// the account lookup and the validity probe: a revoked or expired token answers 401 and the
+    /// boot arm can fall back to the password form. The token stays installed only when the probe
+    /// answered — a refusal clears it, so no later `views()` fires credentials the server has
+    /// already rejected. This is the whole reason a password no longer has to live on disk.
+    pub(crate) fn adopt_token(&self, token: &str) -> Result<TokenUser, AuthError> {
+        let install = |user_id: &str, user_name: &str| {
+            *self.token.write().unwrap() = Some(TokenState {
+                token: token.to_string(),
+                user_id: user_id.to_string(),
+                user_name: user_name.to_string(),
+            });
+        };
+        install("", "");
+        let Some(headers) = self.authed_headers() else {
+            return Err(AuthError::Unreachable);
+        };
+        let refs: Vec<&str> = headers.iter().map(String::as_str).collect();
+        let reply = match http::request(&self.origin, "/Users/Me", http::Method::Get, &refs, None) {
+            Some(r) => r,
+            None => {
+                *self.token.write().unwrap() = None;
+                return Err(AuthError::Unreachable);
+            }
+        };
+        if reply.status == 401 || reply.status == 403 {
+            *self.token.write().unwrap() = None;
+            return Err(AuthError::Unauthorized);
+        }
+        if !reply.ok() {
+            crate::log(&format!("jellyfin: GET /Users/Me answered {}", reply.status));
+            *self.token.write().unwrap() = None;
+            return Err(AuthError::Unreachable);
+        }
+        let me: AuthUser = match serde_json::from_slice(&reply.body) {
+            Ok(me) => me,
+            Err(e) => {
+                crate::log(&format!(
+                    "jellyfin: GET /Users/Me answered {} bytes that will not parse — {e}",
+                    reply.body.len()
+                ));
+                *self.token.write().unwrap() = None;
+                return Err(AuthError::Unreachable);
+            }
+        };
+        install(&me.id, &me.name);
+        Ok(TokenUser {
+            user_id: me.id,
+            user_name: me.name,
+        })
     }
 
     /// The signed-in user's display name, once the login landed (None before it). The account
@@ -1061,6 +1124,40 @@ mod tests {
             client.authenticate_by_name("demo", "wrong"),
             Err(AuthError::Unauthorized)
         ));
+        server.finish();
+    }
+
+    /// A persisted token is adopted and turned into the account it belongs to: `/Users/Me` is the
+    /// probe AND the lookup, and the request carries the token as a parameter of the same
+    /// MediaBrowser header every other control route uses.
+    #[test]
+    fn a_stored_token_is_adopted_and_resolved_through_users_me() {
+        let server = MockServer::start(vec![(200, r#"{"Id":"u-9","Name":"demo2"}"#)]);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+
+        let user = client.adopt_token("tok-9").expect("the probe answered");
+        assert_eq!(user.user_id, "u-9");
+        assert_eq!(user.user_name, "demo2");
+        assert_eq!(client.user_name().as_deref(), Some("demo2"));
+
+        let reqs = server.finish();
+        assert_eq!(reqs.len(), 1);
+        assert!(reqs[0].starts_with("GET /Users/Me HTTP/1.1"));
+        assert!(reqs[0].contains("Authorization: MediaBrowser Token=\"tok-9\", "));
+    }
+
+    /// A revoked token is refused and NOT left installed: the boot arm falls back to the password,
+    /// and a client whose token was rejected cannot fire it at a later endpoint.
+    #[test]
+    fn a_revoked_token_is_unauthorized_and_stays_uninstalled() {
+        let server = MockServer::start(vec![(401, "{}")]);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        assert!(matches!(
+            client.adopt_token("tok-old"),
+            Err(AuthError::Unauthorized)
+        ));
+        // No token, no user id: the request is not even attempted.
+        assert!(client.views().is_none());
         server.finish();
     }
 
