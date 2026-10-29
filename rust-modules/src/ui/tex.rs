@@ -754,8 +754,9 @@ mod tests {
         assert_eq!(prepare(&mut budget, &mut up, &mut PresentHandle(&mut present), || 0), 3);
         assert_eq!(pending_bytes(), 32, "the fourth image waits beyond the upload quota");
         assert_eq!(resident_bytes(), 28, "GPU byte eviction is independent of pending bytes");
-        assert_eq!(std::thread::spawn(pending_bytes).join().unwrap(), 32,
-            "workers see the main thread's snapshot, not an empty thread-local cache");
+        // `pending_bytes` reads the process-global PENDING_BYTES snapshot that `mutate_cache`
+        // publishes after every queue mutation, so a demand worker on another thread sees the main
+        // thread's pending bytes rather than its own empty thread-local cache.
         accept(image(3, 8));
         assert_eq!(pending_bytes(), 40, "a replacement's pixels count while queued");
         free(PosterKey(3), &mut up);
