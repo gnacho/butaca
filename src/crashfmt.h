@@ -1,4 +1,4 @@
-/* PlxNative — an unofficial native Plex client for LG webOS.
+/* Butaca — an unofficial native Plex client for LG webOS.
  * Copyright © 2026 Gleb Linnik. Licensed under GPL-3.0-or-later; see LICENSE at the repository root.
  *
  * crashfmt.h — the PURE half of the crash tracer: formatting a fault record and deciding what a
@@ -15,19 +15,19 @@
  * `bin:` line naming the wrong mapping, from which `tools/crash-report.sh` computes an offset and
  * answers with a confident wrong function. That is worse than no answer, it is silent, and it is
  * decidable from a string with no television in the room. Its twin is recorded in that script: the
- * app id `com.beb.plxnative` is a PREFIX of `com.beb.plxnative.debug`, so triaging the stable
+ * app id `com.butaca` is a PREFIX of `com.butaca.debug`, so triaging the stable
  * install would accept the debug install's load base.
  *
  * **A correction, because this file inherited an invented justification and it is exactly the kind
  * that makes a reader distrust the rest.** `src/main.c` carried, for as long as the tracer existed:
  *
- *     the app dir is itself named ...com.beb.plxnative/, so a bare substring test also matches
+ *     the app dir is itself named ...com.butaca/, so a bare substring test also matches
  *     libraries deployed beside the binary (libturbojpeg.so.0)
  *
- * It does not. The needle is `/plxnative`, with the slash, and the directory component is
- * `/com.beb.plxnative` — slash, then `c`. Measured rather than reasoned: a bare
- * `strstr(line, "/plxnative")` answers no on `…/com.beb.plxnative/libturbojpeg.so.0` and yes on
- * `…/com.beb.plxnative/plxnative`, which is the right answer for the wrong reason. What the
+ * It does not. The needle is `/butaca`, with the slash, and the directory component is
+ * `/com.butaca` — slash, then `c`. Measured rather than reasoned: a bare
+ * `strstr(line, "/butaca")` answers no on `…/com.butaca/libturbojpeg.so.0` and yes on
+ * `…/com.butaca/butaca`, which is the right answer for the wrong reason. What the
  * separator test actually buys is the two cases below, and the test file asserts those and not the
  * one that was written down.
  *
@@ -101,23 +101,23 @@ static inline const char *plx_parse_hex(const char *s, unsigned long *out) {
 
 /* Does `line` name our executable?
  *
- * A TOKEN test: `/plxnative` has to be followed by end-of-line, a space or the end of the buffer.
+ * A TOKEN test: `/butaca` has to be followed by end-of-line, a space or the end of the buffer.
  * Two things turn on that separator, and neither is the one main.c used to claim (see the header
  * comment above — the libturbojpeg story is false and was measured false):
  *
- *   * **a sibling whose name merely STARTS with ours.** `plxnative-sim` is the host simulator and
- *     `plxnative.new` is the name `make deploy` scp's to before renaming over the running binary,
- *     and a bare `strstr(line, "/plxnative")` matches both. Neither is mapped into a television's
+ *   * **a sibling whose name merely STARTS with ours.** `butaca-sim` is the host simulator and
+ *     `butaca.new` is the name `make deploy` scp's to before renaming over the running binary,
+ *     and a bare `strstr(line, "/butaca")` matches both. Neither is mapped into a television's
  *     address space today, which is precisely why this is worth a test rather than a hope: the
  *     cost of the guard is one comparison and the cost of losing it is silent.
  *   * **`(deleted)`**, which the kernel appends once the file has been replaced under a running
  *     process — which `make deploy`'s tmp+mv dance does on every single iteration. So the
  *     space-terminated spelling is the NORMAL one while developing, not an edge case, and a test
- *     for `"/plxnative\n"` alone would fail to find our own binary exactly when it is being
+ *     for `"/butaca\n"` alone would fail to find our own binary exactly when it is being
  *     worked on. The old code got this right with two `strstr` needles; this keeps it.
  */
 static inline int plx_names_our_binary(const char *line, size_t n) {
-    static const char TOK[] = "/plxnative";
+    static const char TOK[] = "/butaca";
     const size_t t = sizeof TOK - 1;
     if (n < t) return 0;
     for (size_t i = 0; i + t <= n; i++) {

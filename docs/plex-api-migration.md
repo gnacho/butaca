@@ -20,7 +20,7 @@
 >   with it: `GET /identity` (`machine_identity`) and `POST /playQueues` (`create_play_queue`,
 >   via a new `Client::post_json`; `post_void` carries the timeline).
 > - **The playback identity moved into `Client`** (`playback_identity` + the field values that
->   were `route::DEVICE_ID`/`identity_qs`) — the old dead "com.beb.plxnative/Generic" field
+>   were `route::DEVICE_ID`/`identity_qs`) — the old dead "com.butaca/Generic" field
 >   values are gone; PMS playback keys on the fixed device UUID as before.
 > - **`TBASE` died differently than planned**: instead of a stored offset-free query string,
 >   `route` keeps a `CUR_REMUX` flavor flag and rebuilds the identical `TranscodeSpec` from
@@ -32,7 +32,7 @@
 >   onto `route::report_timeline` → `Client::timeline` (POST, the spec verb — D-8a resolved:
 >   the old code already POSTed).
 > - **Preserved as-is (quirk, verified harmless against the live PMS log 2026-07-19):**
->   `retranscode` still sets `TSESSION = "plxnative-{rk}"` while the transcoder QUERY keeps
+>   `retranscode` still sets `TSESSION = "butaca-{rk}"` while the transcoder QUERY keeps
 >   riding `sess()` — stop/is_transcoding key off TSESSION, the server correlation stays on
 >   sess(). The server log shows the **stopped-timeline POST is what actually frees the
 >   encoder** (PMS kills the transcoder job on it, ~200ms before our explicit
@@ -286,7 +286,7 @@ let spec = crate::plex::TranscodeSpec {
 put_selection(cfg);                          // R5, now select_streams
 let c = crate::plex::client();
 c.transcode_decision(&spec);
-(c.transcode_start_url(&spec).to_url(), format!("plxnative-{rk}"))
+(c.transcode_start_url(&spec).to_url(), format!("butaca-{rk}"))
 ```
 `transcode_decision(&TranscodeSpec)` (get_void) + `transcode_start_url(&TranscodeSpec) -> StreamUrl`.
 
@@ -338,7 +338,7 @@ Current: builds `transcode_base(&rk,cfg)` → sets TBASE/TSESSION → `put_selec
 decision GET → `start.mkv` URL. Replacement mirrors **R4** (same `TranscodeSpec` with the current
 `offset_secs`), plus:
 ```rust
-unsafe { *addr_of_mut!(TSESSION) = format!("plxnative-{rk}"); }
+unsafe { *addr_of_mut!(TSESSION) = format!("butaca-{rk}"); }
 put_selection(cfg);      // R5
 // then transcode_decision + transcode_start_url as in R4; drop the TBASE write
 ```
@@ -467,13 +467,13 @@ migration): `section_items_paged`, `metadata_many`, `all_leaves`, `continue_watc
 
 1. **Timeline GET → POST** (T1 + engine final). `Client::timeline` uses `Client::post` (spec-correct,
    D-8a). The current code uses GET and works. Verify PMS accepts the POST (watch
-   `/tmp/plxnative-events.log` for the resume point + watched-state update). If it regresses, the design
+   `/tmp/butaca-events.log` for the resume point + watched-state update). If it regresses, the design
    notes the one-line fallback: swap `post` → `get_void` inside `timeline()`; signature unchanged.
 
 2. **Transcode `X-Plex-Client-Identifier`.** Today `route::transcode_base` sends
-   `X-Plex-Client-Identifier={session}` (= `plxnative-{rk}`) on decision/start (route.rs:173).
-   `Client::transcode_query` sends `X-Plex-Client-Identifier=self.client_id` (`com.beb.plxnative`)
-   while `session`/`X-Plex-Session-Identifier` stay `plxnative-{rk}`. Confirm the transcode still
+   `X-Plex-Client-Identifier={session}` (= `butaca-{rk}`) on decision/start (route.rs:173).
+   `Client::transcode_query` sends `X-Plex-Client-Identifier=self.client_id` (`com.butaca`)
+   while `session`/`X-Plex-Session-Identifier` stay `butaca-{rk}`. Confirm the transcode still
    registers and streams after R3/R4/R6 (this is the value the design deliberately changed; if PMS
    ties the session to the client-id, revert `transcode_query` to use `session` there).
 

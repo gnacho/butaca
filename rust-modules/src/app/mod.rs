@@ -309,7 +309,7 @@ pub(crate) struct App {
     /// write, so it stays here rather than on `dev::scenarios::Scenarios`.
     pub(crate) t0: u32,
     /// The frame's instruments: the eight phase stamps, FRAMEDROP, the per-second peaks
-    /// (`diag::heartbeat`), armed by `plxnative-framedrop`.
+    /// (`diag::heartbeat`), armed by `butaca-framedrop`.
     instr: crate::diag::heartbeat::Instruments,
     /// Every dev-trigger arm's own state — oscillator phases, retry latches, boot-time flags
     /// (formerly `DevFlags`) — gathered on ONE struct (spec: `dev/scenarios.rs`'s module doc).
@@ -323,7 +323,7 @@ pub(crate) struct App {
     pub(crate) input: crate::ui::input::Input,
     /// `text::take_measure_fault` has been reported once (the report is once per process).
     measure_fault_logged: bool,
-    /// The recorder / replay driver (`plxnative-rec` / `plxnative-recplay`, spec §5.3/§5.5).
+    /// The recorder / replay driver (`butaca-rec` / `butaca-recplay`, spec §5.3/§5.5).
     pub(crate) rec: recorder::Recplay,
     pub(crate) boot_initial: Option<bootstrap::Initial>,
     /// The present gate as a machine (spec §4.4). `ui::idle` is still the product's verdict on
@@ -402,8 +402,8 @@ fn pre_boot_diagnostics() {
     //
     // Two builds can sit on one television — the app users get, and a developer one beside it
     // (`paths::app_id`) — and until this line nothing in the system said which of them produced a
-    // given log. The obvious witnesses do not work: both binaries are named `plxnative`, so
-    // `pidof` cannot tell them apart on this busybox set; `pkg/plxnative` is a path EVERY
+    // given log. The obvious witnesses do not work: both binaries are named `butaca`, so
+    // `pidof` cannot tell them apart on this busybox set; `pkg/butaca` is a path EVERY
     // configuration writes, so an md5 against the local build proves only that some flavour of
     // some configuration matches. That ambiguity is the "plausible wrong data" failure this
     // project's testing section is built around: a harness that graded the other install's log
@@ -427,7 +427,7 @@ fn pre_boot_diagnostics() {
         std::env::var("APPID").unwrap_or_else(|_| "unset".into()),
     ));
     // ...and the app directory on the NEXT line, from `app_dir()` itself, which logs its own
-    // provenance (`from current_exe` / `PLXNATIVE_APP_DIR` / `macOS bundle`) — strictly more than
+    // provenance (`from current_exe` / `BUTACA_APP_DIR` / `macOS bundle`) — strictly more than
     // repeating the path here would say. Forced now rather than left to whoever calls it first,
     // so the two lines are adjacent and the pair is what a triage reader sees at the top.
     //
@@ -442,7 +442,7 @@ fn pre_boot_diagnostics() {
     // flat platform file and cannot fail the boot. The crash channel receives only the reviewed
     // compatibility fields (webOS/API/model/SoC/hardware revision), never device identifiers.
     crate::webos::probe();
-    // …and then, if asked, DIE. `plxnative-crashtest` is the instrument for the instrument: both
+    // …and then, if asked, DIE. `butaca-crashtest` is the instrument for the instrument: both
     // the C fallback and (when consented/configured) the out-of-process native recorder are now
     // armed, so this trigger grades the reporter users actually run. It remains before SDL so a
     // playback/UI regression cannot make the instrument unreachable. Compiled out with
@@ -505,7 +505,7 @@ pub fn synthetic_home_initial(seed: u32, port: u16, settings: Option<String>)
         initial.content = Some(bootstrap::ContentInitial { detail:"1001".into(), detailsec:1,
             detailok:true, filmography:true, personcredits:9, nowan:true });
         for name in ["detail", "detailsec", "detailok", "filmography", "personcredits", "nowan"] {
-            initial.triggers.push(format!("plxnative-{name}"));
+            initial.triggers.push(format!("butaca-{name}"));
         }
         initial.validate()?;
     }

@@ -234,7 +234,7 @@ pub(crate) fn sys_grab_wayland(winp: *mut c_void) {
 use crate::log;
 
 // ------------------------------------------------------------------------------------------
-// EXPERIMENT (`/tmp/plxnative-opaque`): declare the UI surface OPAQUE where nothing is behind it
+// EXPERIMENT (`/tmp/butaca-opaque`): declare the UI surface OPAQUE where nothing is behind it
 // ------------------------------------------------------------------------------------------
 //
 // `docs/perf-damage-tracking-verdict.md` §5 is the design. The whole app has run with
@@ -360,7 +360,7 @@ unsafe extern "C" fn on_global(
     ));
 }
 
-/// Build the full-surface opaque region, once, at boot. No-op unless `/tmp/plxnative-opaque` is
+/// Build the full-surface opaque region, once, at boot. No-op unless `/tmp/butaca-opaque` is
 /// armed; returns without touching the surface's current (NULL) region either way.
 #[cfg(not(feature = "hostsim"))]
 pub(crate) fn opaque_region_init() {
@@ -463,7 +463,7 @@ pub(crate) fn opaque_region_init() {}
 
 /// Assert the opaque region appropriate to this route, if the experiment is armed.
 ///
-/// A no-op — one read of a `static` and a return — whenever `/tmp/plxnative-opaque` is absent,
+/// A no-op — one read of a `static` and a return — whenever `/tmp/butaca-opaque` is absent,
 /// which is what keeps the default path byte-identical. Only sends a request when the answer
 /// CHANGES, because the opaque region is sticky server-side.
 #[cfg(not(feature = "hostsim"))]

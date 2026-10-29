@@ -20,14 +20,14 @@ use super::*;
 /// Falls back to the canvas size if SDL cannot answer, which is the behaviour this replaced.
 #[cfg(feature = "hostsim")]
 pub(crate) fn desktop_window_size() -> (c_int, c_int) {
-    // `PLXNATIVE_WIN=<w>x<h>` overrides the fit entirely — `make sim-shot SIM_W=1920 SIM_H=1080`.
+    // `BUTACA_WIN=<w>x<h>` overrides the fit entirely — `make sim-shot SIM_W=1920 SIM_H=1080`.
     // It exists because the fit below is chosen for a HUMAN looking at a window, and a screenshot
     // is not that: on a 1x display the divisor lands on 2 and every shot comes back 960x540, which
     // is half the canvas the UI is authored at. A hairline, a 1px edge-sheen and a snapped glyph
     // are exactly the things that do not survive that, so a shot taken to JUDGE the interface has
     // to be asked for at full size. Off-screen edges are fine for a headless grab: the drawable is
     // the window's own framebuffer, not the part of it the compositor happens to show.
-    if let Some(v) = std::env::var_os("PLXNATIVE_WIN") {
+    if let Some(v) = std::env::var_os("BUTACA_WIN") {
         let v = v.to_string_lossy().to_lowercase();
         if let Some((w, h)) = v.split_once('x') {
             if let (Ok(w), Ok(h)) = (w.trim().parse::<c_int>(), h.trim().parse::<c_int>()) {
@@ -91,7 +91,7 @@ pub(crate) fn install_panic_logger() {
         {
             let _ = writeln!(f, "{line}");
         }
-        default(info); // preserve default behaviour (stderr -> plxnative-stderr.log)
+        default(info); // preserve default behaviour (stderr -> butaca-stderr.log)
     }));
 }
 
@@ -125,8 +125,8 @@ pub(crate) fn loop_tick(iters_ct: &mut i32, loop_t: &mut u32, loop_shown: &mut i
     *loop_t = now;
     true
 }
-/// How many times a finished `plxnative-playurl` playback may start itself AGAIN — the
-/// `/tmp/plxnative-replay` trigger's content, as a number (LG App Self Checklist #46).
+/// How many times a finished `butaca-playurl` playback may start itself AGAIN — the
+/// `/tmp/butaca-replay` trigger's content, as a number (LG App Self Checklist #46).
 ///
 /// A named function rather than a closure at the one call site, for `note_global_press`'s reason
 /// one step removed: the call site is inside the SDL event loop, which no host test can enter, and
@@ -184,7 +184,7 @@ mod replay_budget_tests {
 
 /// Resolve the server half of a direct dev-screen request.
 ///
-/// An absent trigger preserves the historical `plxnative-play=<rk>` contract and uses the current
+/// An absent trigger preserves the historical `butaca-play=<rk>` contract and uses the current
 /// server. Once an explicit slot was written, however, failure is terminal: rating keys are local
 /// to one PMS, so falling back could open a different item on another server.
 pub(crate) fn resolve_direct_server(
@@ -508,9 +508,9 @@ pub(crate) unsafe fn construct(
     // the first thing a desktop shows, so the two builds spell it differently: the device keeps
     // the process-shaped name every log, `pidof` recipe and skill already uses.
     #[cfg(feature = "hostsim")]
-    let title = c"PlxNative";
+    let title = c"Butaca";
     #[cfg(not(feature = "hostsim"))]
-    let title = c"plxnative";
+    let title = c"butaca";
     let win = SDL_CreateWindow(title.as_ptr(), wx, wy, ww_req, wh_req, SDL_WINDOW_FLAGS);
     if win.is_null() {
         log("CreateWindow failed");
@@ -522,7 +522,7 @@ pub(crate) unsafe fn construct(
         return Err(1);
     }
     crate::surface::probe(win);
-    // vsync on → the frame rate locks to the panel refresh. `/tmp/plxnative-novsync` uncaps it so
+    // vsync on → the frame rate locks to the panel refresh. `/tmp/butaca-novsync` uncaps it so
     // `fps=` reports the true GPU render rate. WSLg's X11/GLX swap accepts interval 1 without
     // blocking, so the software budget in `run` follows the same switch.
     let vsync_enabled = controlled || !crate::dev::scenarios::novsync_armed();
@@ -575,7 +575,7 @@ pub(crate) unsafe fn construct(
     ));
 
     crate::system::sys_grab_wayland(win);
-    // EXPERIMENT (`/tmp/plxnative-opaque`), no-op without the trigger: build the full-surface
+    // EXPERIMENT (`/tmp/butaca-opaque`), no-op without the trigger: build the full-surface
     // wl_region once, so `opaque_route` below can declare the UI plane opaque on every screen
     // that has nothing behind it. See `system.rs`'s section on it.
     crate::system::opaque_region_init();
@@ -590,7 +590,7 @@ pub(crate) unsafe fn construct(
 
     // NO token is compiled into this binary. PMS access comes from the signed-in session,
     // or — for automated runs only (the regression harness, headless captures) — from the
-    // /tmp/plxnative-token dev trigger. The value is NEVER logged (only that one is in effect).
+    // /tmp/butaca-token dev trigger. The value is NEVER logged (only that one is in effect).
     let dev_token = match &initial {
         Some(initial) => {
             let crate::auth::owner::BootstrapAuthority::DevPms { primary, .. } = &initial.session.authority
@@ -599,20 +599,20 @@ pub(crate) unsafe fn construct(
         }
         _ => crate::dev::scenarios::dev_token(),
     };
-    // dev: /tmp/plxnative-servers — credentials for a SECOND (third, …) server, so an automated
+    // dev: /tmp/butaca-servers — credentials for a SECOND (third, …) server, so an automated
     // run can reach a friend's SHARED server beside the one above. A shared server is its own
     // authority: its own machineIdentifier, its own per-(user,server) access token, and a 401
-    // for anybody else's — which is precisely what ONE `plxnative-token` cannot express, and
+    // for anybody else's — which is precisely what ONE `butaca-token` cannot express, and
     // why no two-source state could be graded headlessly before this.
     //
-    // ADDITIVE and nothing more. The primary is still `plxnative-token` (or the stored session)
+    // ADDITIVE and nothing more. The primary is still `butaca-token` (or the stored session)
     // against the configured host/port (or the explicit dev-only pms-origin fixture override),
     // so an ordinary run that names one server behaves as before. `dev::servers()` is the accessor — memoized, so the harness's
     // /tmp wipe cannot change what this boot was handed — and `dev::DevServer` is the shape.
     //
     // It is NOT on the DIAG exemption list (`dev.rs`), deliberately: unlike a log or the anim
     // overlay, this file names a host AND the token to trust it with, so it must mark the boot
-    // automated and skip the who's-watching picker exactly as `plxnative-token` does. A run
+    // automated and skip the who's-watching picker exactly as `butaca-token` does. A run
     // that landed on the picker instead of Home would grade the wrong screen.
     //
     // Tokens are never logged: `DevServer` has no `Debug`, and `describe()` prints all of it
@@ -622,7 +622,7 @@ pub(crate) unsafe fn construct(
         // `_e`: the only reader is the gated log line (see `dev.rs` on why literals are gated).
         Err(_e) => {
             #[cfg(feature = "devtriggers")]
-            log(&format!("servers: /tmp/plxnative-servers IGNORED — not valid JSON: {_e}"));
+            log(&format!("servers: /tmp/butaca-servers IGNORED — not valid JSON: {_e}"));
         }
         Ok(v) if !v.is_empty() => {
             let usable = v.iter().filter(|s| s.usable()).count();
@@ -670,14 +670,14 @@ pub(crate) unsafe fn construct(
     // so the boot who's-watching picker is skipped. Pure diagnostics (the logs, the profiler,
     // the anim overlay) don't count as automation.
     // The scan itself, and the DIAG exemption list that decides what does NOT count as
-    // automation, live in `dev::any_trigger_present` — together with the `plxnative-anim.log`
+    // automation, live in `dev::any_trigger_present` — together with the `butaca-anim.log`
     // bug that list was rewritten for. It is the one dev-trigger surface that names no file,
     // so it is also the one a release build had to be taught about explicitly.
     let automated_boot = || controlled || crate::dev::any_trigger_present();
 
     // Boot gate. Order matters:
-    //  1. /tmp/plxnative-login forces the QR login screen (to exercise the flow on demand).
-    //  2. /tmp/plxnative-token (the harness / headless runs) beats the stored session — automation
+    //  1. /tmp/butaca-login forces the QR login screen (to exercise the flow on demand).
+    //  2. /tmp/butaca-token (the harness / headless runs) beats the stored session — automation
     //     must run as the injected test identity no matter who is signed in on the TV.
     //  3. A stored session (offline-capable LAN server) → Home. A multi-user Plex Home roster
     //     still goes through the who's-watching picker first on interactive boots, unless
@@ -686,7 +686,7 @@ pub(crate) unsafe fn construct(
     //  4. Nothing → the QR sign-in flow (no credentials are compiled in — like a real client).
     // The destination itself is [`BootTo`], at module scope with the rest of the vocabulary.
     //
-    // dev: /tmp/plxnative-pickuser=<index> — force the boot picker even on an automated boot and
+    // dev: /tmp/butaca-pickuser=<index> — force the boot picker even on an automated boot and
     // auto-select that roster tile once it's up (headless exercise of the who's-watching flow).
     let pick_user: Option<usize> = if controlled { None } else { crate::dev::scenarios::pickuser_index() };
     let session = match &initial {
@@ -731,7 +731,7 @@ pub(crate) unsafe fn construct(
     // The subtitle tone rides the same file and the same moment: a preference, restored once.
     crate::player::restore_subtitle_tone(session.subtitle_tone());
     crate::player::restore_audio_enhancements(session.audio_enhancements());
-    // dev: /tmp/plxnative-audioenh=off|boost|loudness — force the PERSISTED enhancement
+    // dev: /tmp/butaca-audioenh=off|boost|loudness — force the PERSISTED enhancement
     // preference right after it was restored from whatever the install actually has saved, so a
     // harness case's starting preference never depends on what an earlier run's pick left behind.
     // Unlike every other boot override on this page, this one calls the real persisting setter —
@@ -746,7 +746,7 @@ pub(crate) unsafe fn construct(
         pages.frame_with(bridge, crate::ui::machine::Tick::default(), Vec::new(), Vec::new(),
             rec, false);
         #[cfg(feature = "devtriggers")]
-        log("boot: /tmp/plxnative-login — starting QR login");
+        log("boot: /tmp/butaca-login — starting QR login");
         BootTo::Login
     } else if !dev_token.is_empty() {
         // `Origin::http` names the assumption out loud: the host and port compiled into the
@@ -876,22 +876,22 @@ pub(crate) unsafe fn construct(
         crate::player::acb_init(&mt);
         crate::ff::boot(); // Live playback resource boot; controlled Home cannot invoke ABI probes.
     }
-                       // dev: /tmp/plxnative-logintest validates the plex.tv account path end-to-end on the device — a
+                       // dev: /tmp/butaca-logintest validates the plex.tv account path end-to-end on the device — a
                        // real typed create_pin() through the libcurl transport + DTO deserialize. Logs only the
                        // public pin id + code length + that authToken is still null (never a token/secret).
     if !controlled { crate::dev::scenarios::arm_logintest(); }
-    // dev: the animation-diagnostic overlay is OFF by default; /tmp/plxnative-anim enables it (its
-    // trace goes to /tmp/plxnative-anim.log, a separate stream from the main event log)
+    // dev: the animation-diagnostic overlay is OFF by default; /tmp/butaca-anim enables it (its
+    // trace goes to /tmp/butaca-anim.log, a separate stream from the main event log)
     if !controlled { crate::dev::scenarios::arm_anim(); }
-    // dev: /tmp/plxnative-stillclock=<ms> holds every free-running animation clock (spinners)
+    // dev: /tmp/butaca-stillclock=<ms> holds every free-running animation clock (spinners)
     // still, so a screenshot of a waiting screen settles on one deterministic frame.
     if !controlled { crate::dev::scenarios::arm_stillclock(); }
     // dev: profile is asynchronous EXT_disjoint_timer_query timing; hwcnt is the serialized
     // direct Mali counter-attribution run. Their content names ONE phase (empty = frame.ui).
     // Combining them would perturb the timer result, so fail closed when both are present.
-    // dev: /tmp/plxnative-glassload is the backdrop-glass LOAD DIAL — a sweep of glass-surface
+    // dev: /tmp/butaca-glassload is the backdrop-glass LOAD DIAL — a sweep of glass-surface
     // count, size and refresh cadence that cycles its own steps inside one launch, so legs are
-    // interleaved by construction. /tmp/plxnative-navblur is the blurred-route-transition
+    // interleaved by construction. /tmp/butaca-navblur is the blurred-route-transition
     // prototype. Both live in `ui::glassload`; both are absent from a release build.
     // The plan is built HERE rather than in the `App` literal below so the dial is armed at the
     // point in boot it always was: `configure` logs what it will run, and that line's position in
@@ -902,10 +902,10 @@ pub(crate) unsafe fn construct(
         crate::dev::scenarios::arm_navblur(&mut glass);
     }
     // dev: the two OVERDRAW surfaces (`ui::overdraw`, docs/backdrop-blur-profiling.md Part 5).
-    // `plxnative-overdraw` arms the CPU-side per-draw-class ledger — how much screen-visible
+    // `butaca-overdraw` arms the CPU-side per-draw-class ledger — how much screen-visible
     // quad area this app submits, per primitive family, per frame. It is not billed for the
     // wayland compositor's work and is not `glFinish`-serialised, which is what the GPU's
-    // global FRAG_QUADS_RAST cannot say. `plxnative-drawmask=<classes>` REFUSES every draw of
+    // global FRAG_QUADS_RAST cannot say. `butaca-drawmask=<classes>` REFUSES every draw of
     // the named classes, so a whole-frame `frame.ui` A/B against the unmasked control prices
     // that class as the frame sees it; `all` draws nothing and is therefore the compositor
     // floor. A masked leg is a broken picture on purpose.
@@ -913,19 +913,19 @@ pub(crate) unsafe fn construct(
         crate::dev::scenarios::arm_overdraw();
         crate::dev::scenarios::arm_drawmask();
     }
-    // dev: /tmp/plxnative-heroground — draw the hero's photograph and BOTH of its scrim fields
+    // dev: /tmp/butaca-heroground — draw the hero's photograph and BOTH of its scrim fields
     // in one pass instead of the art plus four blended gradient quads over it. Absent, the
     // shipped four-quad path draws, which is what makes this an A/B on one binary.
     if !controlled { crate::dev::scenarios::arm_heroground(); }
-    // dev: /tmp/plxnative-nobudget — the frame budget's A/B CONTROL leg (spec §8.1). Read here
+    // dev: /tmp/butaca-nobudget — the frame budget's A/B CONTROL leg (spec §8.1). Read here
     // with the other boot triggers; applied to the one `Budget` below, once the tree exists.
     let nobudget = !controlled && crate::dev::scenarios::nobudget_armed();
     if !controlled { crate::dev::scenarios::arm_profile_hwcnt(); }
-    // dev: /tmp/plxnative-cpuprof — the render thread's OWN time per phase, every phase at
+    // dev: /tmp/butaca-cpuprof — the render thread's OWN time per phase, every phase at
     // once, no glFinish. The one mode that can see a frame the frame-drop detector reports as
     // all `draw=` and no `swap=`; the two GPU modes above are blind to it by construction.
     if !controlled { crate::dev::scenarios::arm_cpuprof(); }
-    // dev: /tmp/plxnative-noidle turns the whole-frame present gate (ui::idle) OFF, so a still
+    // dev: /tmp/butaca-noidle turns the whole-frame present gate (ui::idle) OFF, so a still
     // screen goes back to repainting at panel rate. It is a DIAG trigger (see the list above)
     // precisely so an A/B costs one file and does not also change which screen you boot to —
     // and so that if a frame ever looks wrong on the panel, ruling this feature out is one
@@ -937,10 +937,10 @@ pub(crate) unsafe fn construct(
     if let Some(initial) = &initial {
         crate::ui::idle::set_enabled(!crate::dev::listed(&initial.triggers, "noidle"));
     } else { crate::dev::scenarios::arm_noidle(); }
-    // dev: /tmp/plxnative-detailosc (read once at boot, like the other triggers) makes the detail scroll
+    // dev: /tmp/butaca-detailosc (read once at boot, like the other triggers) makes the detail scroll
     // perpetually swing hero<->bottom so the FPS heartbeat samples the transition, not the ends.
     let detail_osc = !controlled && crate::dev::scenarios::detailosc_armed();
-    // dev: /tmp/plxnative-homeosc — perpetually sweep the home grid focus DOWN to the bottom then
+    // dev: /tmp/butaca-homeosc — perpetually sweep the home grid focus DOWN to the bottom then
     // UP to the top (~3s each way, one row per 350ms), so a headless run reproduces the top↔bottom
     // vertical-scroll judder for the frame-drop detector / retui profiler.
     let home_osc = !controlled && crate::dev::scenarios::homeosc_armed();
@@ -954,23 +954,23 @@ pub(crate) unsafe fn construct(
     let home_fold_osc = !controlled && crate::dev::scenarios::homefoldosc_armed();
     let home_fold_osc_last = 0u32;
     let home_fold_down = true;
-    // dev: /tmp/plxnative-libosc — the Library twin of homeosc: sweep the browse grid focus
+    // dev: /tmp/butaca-libosc — the Library twin of homeosc: sweep the browse grid focus
     // down↔up perpetually for the library_scroll FPS scene.
     let lib_osc = !controlled && crate::dev::scenarios::libosc_armed();
     let lib_osc_last = 0u32;
-    // dev: /tmp/plxnative-libswitch — exercise EVERY Library switch on a timer (tab switch,
+    // dev: /tmp/butaca-libswitch — exercise EVERY Library switch on a timer (tab switch,
     // sort menu open/move/close, unwatched on/off, filter open/close) for the library_switch
     // FPS scene, so the re-query + popover paths are perf-gated, not just the scroll.
     let lib_switch = !controlled && crate::dev::scenarios::libswitch_armed();
     let lib_switch_last = 0u32;
     let lib_switch_step = 0u32;
-    // dev: /tmp/plxnative-searchosc — the Search twin of homeosc/libosc: sweep the result
+    // dev: /tmp/butaca-searchosc — the Search twin of homeosc/libosc: sweep the result
     // shelves' focus down↔up perpetually for the `fps:search-type` scene. It does NOT reach the
-    // screen on its own — pair it with `/tmp/plxnative-search=<query>`, and with a query the
+    // screen on its own — pair it with `/tmp/butaca-search=<query>`, and with a query the
     // library actually matches, or there are no shelves to sweep and the scene grades nothing.
     let search_osc = !controlled && crate::dev::scenarios::searchosc_armed();
     let search_osc_last = 0u32;
-    // dev: /tmp/plxnative-settings=<root|home|privacy|legal> opens the Settings modal (and,
+    // dev: /tmp/butaca-settings=<root|home|privacy|legal> opens the Settings modal (and,
     // optionally, one of its real child panels) once Home is available. `settingsosc` turns
     // that settled modal into a continuous render-throughput scene: it alternates the focused
     // row and explicitly keeps the present gate awake. Without the latter an efficient,
@@ -985,19 +985,19 @@ pub(crate) unsafe fn construct(
     let settings_osc = !controlled && crate::dev::scenarios::settingsosc_armed();
     let settings_osc_last = 0u32;
     let settings_osc_down = true;
-    // dev: /tmp/plxnative-modalosc — with `plxnative-settings=root`, OPEN and DISMISS the
+    // dev: /tmp/butaca-modalosc — with `butaca-settings=root`, OPEN and DISMISS the
     // Settings modal every 1500 ms through the same `open`/`on_back` the chip and BACK use, so
     // `fps:modal-ramp` grades the appear/disappear RAMP (host snapshot, scrim, ground) under
     // `worst_ceiling_ms` rather than a settled modal. It reverses on a clock because the ramp
     // itself has no end the app reports.
     let modal_osc = !controlled && crate::dev::scenarios::modalosc_armed();
     let modal_osc_last = 0u32;
-    // dev: /tmp/plxnative-legaldoc — with `plxnative-settings=legal`, press OK on the Legal
+    // dev: /tmp/butaca-legaldoc — with `butaca-settings=legal`, press OK on the Legal
     // index ONCE so the boot lands on a pushed DOCUMENT (the reader over the frozen ground),
     // which no boot trigger reached before: `fps:legal-document`.
     let legal_doc = !controlled && crate::dev::scenarios::legaldoc_armed();
     let legal_doc_tried = false;
-    // dev: /tmp/plxnative-alert — with `plxnative-settings=privacy`, open the "Delete all local
+    // dev: /tmp/butaca-alert — with `butaca-settings=privacy`, open the "Delete all local
     // data?" DECISION ALERT once the privacy panel is up. It is the one shared yes/no alert in
     // the app and nothing headless could reach it: `fps:decision-alert`. Opening it is all this
     // does — nothing is deleted, and Cancel is what a BACK would press.
@@ -1020,7 +1020,7 @@ pub(crate) unsafe fn construct(
     let onboard_osc = !controlled && crate::dev::scenarios::onboardosc_armed();
     let onboard_osc_last = 0u32;
     let onboard_osc_right = true;
-    // dev: /tmp/plxnative-navosc — bounce the ROUTE on a timer, so the page cross-fade
+    // dev: /tmp/butaca-navosc — bounce the ROUTE on a timer, so the page cross-fade
     // (`ui::nav`) is FPS-gated like every other motion in the app. These are the only scenes
     // that change route, and therefore the only ones that sample a whole-screen cascade alpha
     // over both screens' full draw. 1400 ms matches `libswitch`: long enough that the ~225 ms
@@ -1037,10 +1037,10 @@ pub(crate) unsafe fn construct(
     let nav_osc_rk = nav_osc_rk.unwrap_or_default();
     let nav_osc_last = 0u32;
 
-    // dev: /tmp/plxnative-pushbench[=<n>[,<ratingKey>]] — the counted, deterministic stress
+    // dev: /tmp/butaca-pushbench[=<n>[,<ratingKey>]] — the counted, deterministic stress
     // benchmark twin of `navosc` (spec: `docs/agent-reference.md`'s fps-scene section). Its
     // Detail leg reuses `navosc`'s own ratingKey when the bench's own trigger carries none, so
-    // `plxnative-navosc=<rk>` alone is enough to point both oscillators at the same item.
+    // `butaca-navosc=<rk>` alone is enough to point both oscillators at the same item.
     let push_bench = (!controlled)
         .then(crate::dev::scenarios::pushbench_value)
         .flatten()
@@ -1048,7 +1048,7 @@ pub(crate) unsafe fn construct(
             let rk = if rk.is_empty() { nav_osc_rk.clone() } else { rk };
             crate::dev::scenarios::bench::PushBench::new(n, rk)
         });
-    // dev: /tmp/plxnative-modalbench[=<n>[,<ratingKey>]] — the modal-ramp twin of the above, same
+    // dev: /tmp/butaca-modalbench[=<n>[,<ratingKey>]] — the modal-ramp twin of the above, same
     // n,rk shape. Its item-menu leg reuses `navosc`'s ratingKey ONLY when the bench's own trigger
     // carries none, exactly like the push leg above — see `modalbench_value`'s doc for why a
     // scene that wants the item menu but not navosc's own competing bounce sets its own rk here
@@ -1061,7 +1061,7 @@ pub(crate) unsafe fn construct(
             let rk = if rk.is_empty() { nav_osc_rk.clone() } else { rk };
             crate::dev::scenarios::bench::ModalBench::new(n, rk)
         });
-    // dev: /tmp/plxnative-deepbench[=<depth>[,<ratingKey>]] — the DEEP-stack twin of the two
+    // dev: /tmp/butaca-deepbench[=<depth>[,<ratingKey>]] — the DEEP-stack twin of the two
     // above: pushes `depth` pages with no pop in between (rotating Detail/Person — never Library,
     // see `bench::DeepBench::targets`'s doc), then pops all the way back to the root one page at a
     // time. Same empty-ratingKey resolution against `navosc`'s own value as the two legs above.
@@ -1073,7 +1073,7 @@ pub(crate) unsafe fn construct(
             crate::dev::scenarios::bench::DeepBench::new(depth, rk)
         });
 
-    // dev: /tmp/plxnative-framedrop — the FRAME-DROP DETECTOR. When present, each frame is timed with
+    // dev: /tmp/butaca-framedrop — the FRAME-DROP DETECTOR. When present, each frame is timed with
     // the high-res perf counter (pump / draw / swap, NO glFinish so it doesn't perturb the pipeline),
     // and any frame whose total exceeds a threshold (ms; file content overrides the 22ms default) is
     // logged with its phase breakdown + GL texture-upload count — so a scroll judder shows *what* stalled
@@ -1121,7 +1121,7 @@ pub(crate) unsafe fn construct(
     // ungated, and `on_auto_repeat`'s doc for the one thing left on the legacy side (the
     // deferred press's liveness beat, and nothing else since phase 12).
     let modal_repeat = RepeatGate::IDLE;
-    let marker_tried = false; // dev: the /tmp/plxnative-marker jump has been resolved
+    let marker_tried = false; // dev: the /tmp/butaca-marker jump has been resolved
     let player = crate::player::machine::Player::new();
     // The token stops being an argument here and becomes a field. `PlayerAdapter::new` CONSUMES
     // it, so the adapter is the only thing in the process that holds one, and a `&mut` to it is
@@ -1138,10 +1138,10 @@ pub(crate) unsafe fn construct(
     // values share one name (every `Route::Player` is "player"), and an overlay
     // opening is not a screen change.
     let last_route_reported: &'static str = "";
-    let press_tried = false; // dev: /tmp/plxnative-press fires one simulated grid-card press
+    let press_tried = false; // dev: /tmp/butaca-press fires one simulated grid-card press
     let press_release_at = 0u32; // …and the tick at which that simulated press releases
-    let itemmenu_tried = false; // dev: /tmp/plxnative-itemmenu opens the card context menu once
-    let acct_tried = false; // dev: /tmp/plxnative-acct opens the profile menu once
+    let itemmenu_tried = false; // dev: /tmp/butaca-itemmenu opens the card context menu once
+    let acct_tried = false; // dev: /tmp/butaca-acct opens the profile menu once
     let ptr = Pointer::IDLE;
 
     // Initial route from the boot gate: Login when we have no usable creds, Profiles for the
@@ -1156,9 +1156,9 @@ pub(crate) unsafe fn construct(
     // has a real answer by this line. An AUTOMATED boot is exempt for the reason the picker is
     // — a harness run must land on a deterministic Home.
     //
-    // dev: `/tmp/plxnative-firstrun` forces it — a screen that is by definition asked once is
+    // dev: `/tmp/butaca-firstrun` forces it — a screen that is by definition asked once is
     // otherwise unreachable the moment you have answered it, and the two-source roster it
-    // needs comes from `/tmp/plxnative-servers`, which marks the boot automated. Both halves
+    // needs comes from `/tmp/butaca-servers`, which marks the boot automated. Both halves
     // are why looking at this screen headlessly requires a trigger of its own.
     bridge.refresh_browse_directory();
     let ask_first_run = || !controlled && (crate::dev::scenarios::firstrun_armed()
@@ -1187,7 +1187,7 @@ pub(crate) unsafe fn construct(
         BootTo::Login => AppArg::Login,
         BootTo::Profiles => AppArg::Profiles,
     };
-    // (dev: /tmp/plxnative-acct used to open the profile menu HERE, beside a
+    // (dev: /tmp/butaca-acct used to open the profile menu HERE, beside a
     // `route = Route::Account { over: BarHost::Home }`. The menu is a `ModalStack` surface since
     // phase 10 and the container does not exist yet at this point in the boot, so the trigger is
     // an ordinary per-frame arm — `dev::scenarios::acct_arm`, beside `itemmenu_arm`.)
@@ -1220,7 +1220,7 @@ pub(crate) unsafe fn construct(
     // `PageDip`.)
 
     let auto_tried = false;
-    // dev: `/tmp/plxnative-replay[=N]` — how many times a finished `plxnative-playurl`
+    // dev: `/tmp/butaca-replay[=N]` — how many times a finished `butaca-playurl`
     // playback may be started AGAIN (LG App Self Checklist #46, "replay after completion").
     //
     // A COUNTER re-arming `auto_tried`, rather than the latch being lifted: `auto_tried` also
@@ -1239,14 +1239,14 @@ pub(crate) unsafe fn construct(
     let grid_tried = false;
     let settings_tried = settings_boot.is_none();
     let seek_tried = false;
-    // /tmp/plxnative-autoseek seek script (see the parse site): pending steps, the tick of
+    // /tmp/butaca-autoseek seek script (see the parse site): pending steps, the tick of
     // the last fired step, the gap between steps, and the last REQUESTED target (the base
     // for "+10"/"-10" tap-relative steps, like taps on the HUD's frozen scrub playhead).
     let seek_script: Vec<String> = Vec::new();
     let seek_script_at = 0u32;
     let seek_gap_ms = 300u32;
     let seek_script_last = 0i64;
-    // /tmp/plxnative-qualityswitch: the rungs still to switch to, the tick of the last one
+    // /tmp/butaca-qualityswitch: the rungs still to switch to, the tick of the last one
     // fired, and the gap between them. Same shape as the seek script above, for the same
     // reason — a person changing quality mid-playback does it more than once.
     let quality_script: Vec<crate::plex::session::PlaybackQuality> = Vec::new();
@@ -1261,7 +1261,7 @@ pub(crate) unsafe fn construct(
     let menupick_tried = false;
     let menupick_target = None;
     let pause_tried = false;
-    // `/tmp/plxnative-autopause`: an authored Pause edge, plus the optional Resume edge which
+    // `/tmp/butaca-autopause`: an authored Pause edge, plus the optional Resume edge which
     // owns the same script. External effects retry until the synchronized player state machine
     // accepts them; a busy native transition cannot silently consume the test operation.
     let pause_script: Option<(u32, Option<u32>, Option<u32>)> = None;
@@ -1273,7 +1273,7 @@ pub(crate) unsafe fn construct(
     let refresh_hubs_at = 0u32;
 
     let ev = [0u8; 128];
-    // dev/testing remote: drain any tokens written to /tmp/plxnative-remote and push
+    // dev/testing remote: drain any tokens written to /tmp/butaca-remote and push
     // them as synthetic key events BEFORE the poll loop, so they're consumed this frame
     // by the ONE real key handler (see crate::remote / tools/stream-screen.py).
     let remote = crate::remote::Remote::open();
@@ -1408,7 +1408,7 @@ pub(crate) unsafe fn construct(
             },
         },
     };
-    // dev: /tmp/plxnative-nobudget — put the ONE frame budget (the tree's, spec §2.2) into its
+    // dev: /tmp/butaca-nobudget — put the ONE frame budget (the tree's, spec §2.2) into its
     // pre-phase-11 shape for the A/B's control leg. The tree exists now, which is why this is
     // here rather than beside the trigger read.
     //
@@ -1418,7 +1418,7 @@ pub(crate) unsafe fn construct(
     if app.scenarios.dev.nobudget {
         app.pages.budget = crate::ui::frame::Budget::pre_phase_11();
         #[cfg(feature = "devtriggers")]
-        crate::log("budget: pre-phase-11 admission (quota only) by /tmp/plxnative-nobudget");
+        crate::log("budget: pre-phase-11 admission (quota only) by /tmp/butaca-nobudget");
     }
     if controlled {
         let initial = app.snapshot_init().expect("controlled constructor retains initial inputs");

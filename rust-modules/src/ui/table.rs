@@ -325,7 +325,7 @@ pub(crate) struct RowColumns {
     pub value_w: f32,
 }
 const ACCESSORY_ICON_W: f32 = 26.0;
-/// The trailing read-out's WEIGHT: `size::LABEL` **bold**, which is what the `PlxNative Design
+/// The trailing read-out's WEIGHT: `size::LABEL` **bold**, which is what the `Butaca Design
 /// System`'s `TableView` authors it as (`var(--font-weight-bold) var(--size-label)`) and what its
 /// prose says in words. The product drew it regular until 2026-08-21 — a rung below the row's
 /// HEADLINE label in size, a step behind it in ink, AND a weight lighter, which is three

@@ -843,7 +843,7 @@ mod tests {
     fn fixture() -> Snapshot {
         Snapshot {
             seq: 1,
-            app_id: Identifier::new("com.beb.plxnative"),
+            app_id: Identifier::new("com.butaca"),
             flavour: Identifier::new("stable"),
             version: Identifier::new("0.6.0"),
             uid: 6303,
@@ -1158,7 +1158,7 @@ mod tests {
         );
         assert_eq!(std::fs::read(&unrelated).unwrap(), b"sentinel");
         assert_eq!(std::fs::read_dir(&root.0).unwrap().count(), 1);
-        assert!(!unique().to_str().unwrap().starts_with("plxnative-"));
+        assert!(!unique().to_str().unwrap().starts_with("butaca-"));
         assert_eq!(
             probe(Directory::Runtime, &root.0.join("absent")).open,
             libc::ENOENT

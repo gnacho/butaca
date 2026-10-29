@@ -101,7 +101,7 @@ fn unauthorized() -> &'static str { crate::i18n::msg::widgets_source_unauthorize
 /// Did not answer at all — refused, timed out, or unresolvable.
 fn unreachable() -> &'static str { crate::i18n::msg::widgets_source_unreachable() }
 /// Answered, verified as the right machine, but only over a transport this build may not put a
-/// credential on without the person's consent (issue #95, PLX-NATIVE-10). A different kind of fault from [`unreachable`] again — the server IS
+/// credential on without the person's consent (issue #95, BUTACA-10). A different kind of fault from [`unreachable`] again — the server IS
 /// there, it is the connection to it that has to change (HTTPS), not the server itself.
 ///
 /// Deliberately NOT the consent flow's "without encryption" wording: this row names a state no

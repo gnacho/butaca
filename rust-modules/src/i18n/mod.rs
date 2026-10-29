@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::sync::OnceLock;
 
 pub(crate) const CONTRIBUTE_URL: &str =
-    "https://github.com/GLinnik21/plx-native/blob/main/docs/localization.md";
+    "https://github.com/gnacho/butaca/blob/main/docs/localization.md";
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -328,13 +328,13 @@ pub(crate) fn initialize(preference: Preference, controlled: bool) {
         .map(|v| (v.ui.as_deref(), v.fmt.as_deref(), v.clock.as_deref()))
         .unwrap_or_default();
     #[cfg(feature = "hostsim")]
-    let simulated_format = std::env::var("PLXNATIVE_FORMAT_LOCALE").ok();
+    let simulated_format = std::env::var("BUTACA_FORMAT_LOCALE").ok();
     #[cfg(feature = "hostsim")]
     let fmt = simulated_format.as_deref().or(fmt);
     #[allow(unused_mut)]
     let mut cx = LocaleContext::resolve(preference, ui, fmt, clock, env.as_deref());
     #[cfg(feature = "hostsim")]
-    if let Ok(forced) = std::env::var("PLXNATIVE_LOCALE") {
+    if let Ok(forced) = std::env::var("BUTACA_LOCALE") {
         cx = LocaleContext::resolve(
             Preference::from_tag(&forced),
             Some(&forced),

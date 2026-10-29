@@ -625,7 +625,7 @@ pub(crate) const SHAPE: &str = "TracksPanelScreen{page:i32,scroll:Spring{pos:f32
 
 /// What the container is asked to present.
 ///
-/// `page` is a boot ADDRESS, not an identity — `/tmp/plxnative-tracks=<n>` opens the sheet already
+/// `page` is a boot ADDRESS, not an identity — `/tmp/butaca-tracks=<n>` opens the sheet already
 /// scrolled, which is the only way a headless capture reaches page 2, and every interactive opening
 /// passes 1. It is the same distinction `AppArg::Settings`'s root page draws, and it is why
 /// `ScreenArg::same_instance` compares the SCREEN and not the payload.
@@ -700,7 +700,7 @@ impl TracksPanelScreen {
         // Guarded on having MEASURED something, because the first tick runs before the first
         // `draw` and `content_h` is 0 until one has: clamping against an unmeasured body would say
         // "one page" and silently undo a page set before the first frame — which is exactly what
-        // `/tmp/plxnative-tracks=<n>` does.
+        // `/tmp/butaca-tracks=<n>` does.
         if self.content_h > 0.0 {
             self.page = self.page.clamp(1, pages_for(self.content_h, view));
         }
@@ -1261,7 +1261,7 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::MetadataLi
         // The container owns the appear spring; `DrawFrame::page_alpha` IS `Surface::motion.appear`
         // for a surface, which is what this panel's own `Popover` used to hold.
         let appear = f.page_alpha;
-        // Named for `/tmp/plxnative-cpuprof` beside the page's own phases, so a slow frame while
+        // Named for `/tmp/butaca-cpuprof` beside the page's own phases, so a slow frame while
         // this sheet is up can be read as the PANEL or as the host under it rather than as one
         // `main.ui` total. It is the scene `fps:page-panel` grades.
         let measure = f.measure;

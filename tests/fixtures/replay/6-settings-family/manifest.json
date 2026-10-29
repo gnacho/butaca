@@ -161,11 +161,11 @@
    },
    "settings": "root",
    "triggers": [
-    "plxnative-app-init",
-    "plxnative-rec",
-    "plxnative-focus",
-    "plxnative-noidle",
-    "plxnative-settings"
+    "butaca-app-init",
+    "butaca-rec",
+    "butaca-focus",
+    "butaca-noidle",
+    "butaca-settings"
    ],
    "version": 1
   },
@@ -175,10 +175,10 @@
  "schema": 3,
  "state_fp": 10638452537178981056,
  "triggers": [
-  "plxnative-app-init",
-  "plxnative-rec",
-  "plxnative-focus",
-  "plxnative-noidle",
-  "plxnative-settings"
+  "butaca-app-init",
+  "butaca-rec",
+  "butaca-focus",
+  "butaca-noidle",
+  "butaca-settings"
  ]
 }

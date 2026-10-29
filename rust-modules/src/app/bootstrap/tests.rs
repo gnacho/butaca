@@ -8,7 +8,7 @@ fn filmography_initial_requires_complete_typed_inputs() {
     value["content"] = serde_json::json!({"detail":"1001", "detailsec":1,
         "detailok":true, "filmography":true, "personcredits":9, "nowan":true});
     for trigger in ["detail", "detailsec", "detailok", "filmography", "personcredits", "nowan"] {
-        value["triggers"].as_array_mut().unwrap().push(serde_json::json!(format!("plxnative-{trigger}")));
+        value["triggers"].as_array_mut().unwrap().push(serde_json::json!(format!("butaca-{trigger}")));
     }
     let initial = Initial::from_value(value.clone()).expect("complete filmography boot");
     assert_ne!(initial.hash(), Initial::synthetic_home(1, 32498, None).unwrap().hash());
@@ -58,7 +58,7 @@ fn controlled_script_input_roundtrips_without_claiming_a_physical_key() {
 fn settings_initial_is_typed_hashed_and_bound_to_its_trigger() {
     let initial = Initial::synthetic_home(17, 32517, Some("root".into())).unwrap();
     assert_eq!(initial.settings.as_deref(), Some("root"));
-    assert!(initial.triggers.iter().any(|trigger| trigger == "plxnative-settings"));
+    assert!(initial.triggers.iter().any(|trigger| trigger == "butaca-settings"));
     let encoded = serde_json::to_value(&initial).unwrap();
     let decoded = Initial::from_value(encoded).unwrap();
     assert_eq!(decoded.hash(), initial.hash());
@@ -68,7 +68,7 @@ fn settings_initial_is_typed_hashed_and_bound_to_its_trigger() {
     assert_eq!(bad_value.validate(), Err("unsupported initial Settings input"));
 
     let mut missing_trigger = initial.clone();
-    missing_trigger.triggers.retain(|trigger| trigger != "plxnative-settings");
+    missing_trigger.triggers.retain(|trigger| trigger != "butaca-settings");
     assert_eq!(missing_trigger.validate(), Err("incoherent initial Settings input"));
 
     let plain = Initial::synthetic_home(17, 32517, None).unwrap();

@@ -197,7 +197,7 @@ fn back_at_the_surface_s_own_root_is_not_handled() {
 }
 
 /// **The remembered-focus round trip (spec §7.3 step 4).** Signed out, the root's rows are
-/// Privacy & data / Legal notices / About PlxNative (`bridge.rs`'s own comment on the same
+/// Privacy & data / Legal notices / About Butaca (`bridge.rs`'s own comment on the same
 /// fixture: "Favourites is absent signed out"), so row 1 is Legal notices. The engine seats
 /// focus there, OK pushes the index, and a BACK must hand focus back to THAT row — not row 0
 /// — which is the one thing `bridge.rs`'s word-only assertions cannot see from outside `app/`.
@@ -597,7 +597,7 @@ fn session_refresh_keeps_optimistic_setting_through_transient_completion() {
     assert!(root.pending_auto.is_none());
 }
 
-/// **Unencrypted connections, in Settings** (PLX-NATIVE-10): a server the person allowed shows a
+/// **Unencrypted connections, in Settings** (BUTACA-10): a server the person allowed shows a
 /// switch, its detail stating what it means and that a grant carries it now; turning the switch
 /// off withdraws the grant AT ONCE — before the preferences write lands — and records the
 /// revocation, so the next discovery keeps the server tokenless.
@@ -657,7 +657,7 @@ fn no_unencrypted_connection_section_without_an_answer() {
     assert!(root.state.plaintext.is_empty());
 }
 
-/// **Turning a switch ON asks first, and a never-asked server is listed** (PLX-NATIVE-10, code
+/// **Turning a switch ON asks first, and a never-asked server is listed** (BUTACA-10, code
 /// review 3 and design review D8). A server discovery offers "Connect without encryption?" for
 /// and nobody has answered shows its switch OFF; turning it on records nothing — it opens the
 /// SAME question the read-outs ask (`screens::plaintext_question`), seated on *Not now* — and only

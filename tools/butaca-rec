@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""plxnative-rec — inspect, verify and compare recordings (restructure spec §5.3–§5.6).
+"""butaca-rec — inspect, verify and compare recordings (restructure spec §5.3–§5.6).
 
-    plxnative-rec info  <dir>                 frames, event frames, present count, header
-    plxnative-rec check <dir>                 every string value is in the synthetic alphabet
-    plxnative-rec diff  <a> <b> [--unsafe]    the st streams, pointwise; --safe is the default
-    plxnative-rec import <dir> <name>         copy a CHECKED recording into tests/fixtures/replay/<name>
-    plxnative-rec rebaseline <dir> <name> --log <events.log>
+    butaca-rec info  <dir>                 frames, event frames, present count, header
+    butaca-rec check <dir>                 every string value is in the synthetic alphabet
+    butaca-rec diff  <a> <b> [--unsafe]    the st streams, pointwise; --safe is the default
+    butaca-rec import <dir> <name>         copy a CHECKED recording into tests/fixtures/replay/<name>
+    butaca-rec rebaseline <dir> <name> --log <events.log>
                                               REPLACE fixture <name> with a new recording, allowed only
                                               with a DIVERGENCE RECORD derived from the replay's own log
                                               (spec §5.5), and never for an anchor fixture
-    plxnative-rec rerecord <dir> <name>       REPLACE fixture <name> after a SHAPE bump, allowed only when
+    butaca-rec rerecord <dir> <name>       REPLACE fixture <name> after a SHAPE bump, allowed only when
                                               the committed fixture's (schema, state_fp) differs from the
                                               new recording's — i.e. the old artifact can no longer be
                                               LOADED at all. Permitted for an anchor; see below

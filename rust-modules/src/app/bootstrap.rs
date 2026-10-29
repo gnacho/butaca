@@ -188,10 +188,10 @@ impl Initial {
         let initial = Self { version:1, session:crate::auth::SessionInit::captured_boot(saved,Some(primary),Vec::new()),
             home:crate::pms::initial::Initial::fresh(),clock_start:0,
             entropy:Entropy::Seeded(seed),primary_client:1,automated:true,settings:settings.clone(),
-            content:None, triggers:vec!["plxnative-app-init".into(),"plxnative-rec".into(),
-                "plxnative-focus".into(),"plxnative-noidle".into()] };
+            content:None, triggers:vec!["butaca-app-init".into(),"butaca-rec".into(),
+                "butaca-focus".into(),"butaca-noidle".into()] };
         let mut initial = initial;
-        if settings.is_some() { initial.triggers.push("plxnative-settings".into()); }
+        if settings.is_some() { initial.triggers.push("butaca-settings".into()); }
         initial.validate()?;
         Ok(initial)
     }

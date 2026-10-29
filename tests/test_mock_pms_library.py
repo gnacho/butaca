@@ -306,7 +306,7 @@ class DoviAndExtraMedia(unittest.TestCase):
 
 
 class PlaintextOnlyLan(unittest.TestCase):
-    """PLX-NATIVE-10: `--plaintext-only-lan`'s wire shape and the fail-mode/advertise-ip
+    """BUTACA-10: `--plaintext-only-lan`'s wire shape and the fail-mode/advertise-ip
     plumbing, kept separate from the (also-passing) live-socket assertions in mock_pms.py's own
     `--selftest`, which additionally proves the https route really fails a TLS handshake."""
 

@@ -143,14 +143,14 @@ def main() -> int:
 
     env = os.environ.copy()
     env.update(
-        PLXNATIVE_RUNTIME_DIR=str(runtime),
-        PLXNATIVE_APP_DIR=str(assets),
-        PLXNATIVE_WIN="1920x1080",
-        PLXNATIVE_SHOT=str(output),
-        PLXNATIVE_SHOT_FRAME="3",
-        PLXNATIVE_SHOT_EXIT="1",
+        BUTACA_RUNTIME_DIR=str(runtime),
+        BUTACA_APP_DIR=str(assets),
+        BUTACA_WIN="1920x1080",
+        BUTACA_SHOT=str(output),
+        BUTACA_SHOT_FRAME="3",
+        BUTACA_SHOT_EXIT="1",
     )
-    events = runtime / "plxnative-events.log"
+    events = runtime / "butaca-events.log"
     launched_at = time.time()
     try:
         result = subprocess.run(

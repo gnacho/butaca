@@ -75,6 +75,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4388bee8683e3d04af747c73422af53102d2bd24d9eadb6cbc100baef4b43f8"
 
 [[package]]
+name = "butaca-modules"
+version = "0.7.0"
+dependencies = [
+ "icu_calendar",
+ "icu_datetime",
+ "icu_decimal",
+ "icu_locale",
+ "icu_plurals",
+ "icu_provider",
+ "image",
+ "libc",
+ "qrcodegen",
+ "rcgen",
+ "rustls",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bytemuck"
 version = "1.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -563,25 +582,6 @@ checksum = "d354a98a3d1251555de99e8fdd8afda05573c31b82f59063a7b0a29b5527f120"
 dependencies = [
  "base64",
  "serde_core",
-]
-
-[[package]]
-name = "plxnative-modules"
-version = "0.7.0"
-dependencies = [
- "icu_calendar",
- "icu_datetime",
- "icu_decimal",
- "icu_locale",
- "icu_plurals",
- "icu_provider",
- "image",
- "libc",
- "qrcodegen",
- "rcgen",
- "rustls",
- "serde",
- "serde_json",
 ]
 
 [[package]]

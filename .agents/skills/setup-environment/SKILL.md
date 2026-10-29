@@ -29,7 +29,7 @@ environment" means getting three things in place so `make` works:
 3. **Host CLI tools** — `curl`, `tar`, CMake (the pinned Sentry Native build), and `sshpass`
    (deploy/run over ssh).
 
-The end state you're verifying: `make` produces `pkg/plxnative`, and it runs on the
+The end state you're verifying: `make` produces `pkg/butaca`, and it runs on the
 TV with no missing-symbol or illegal-instruction errors.
 
 ## Fast path
@@ -53,7 +53,7 @@ brew install sshpass      # deploy/run only; skip if you won't touch the TV
 Now build:
 
 ```bash
-make                  # -> pkg/plxnative
+make                  # -> pkg/butaca
 ```
 
 That's the whole setup. The sections below explain what each piece is, how to
@@ -136,13 +136,13 @@ them.
 #   -> arm-webos-linux-gnueabi
 
 # 2. Full build
-make            # -> pkg/plxnative, no errors
+make            # -> pkg/butaca, no errors
 
 # 3. Inspect the binary (readelf is in the NDK bin/ dir)
 RE="$HOME/webos-ndk/arm-webos-linux-gnueabi_sdk-buildroot/bin/arm-webos-linux-gnueabi-readelf"
-"$RE" -A pkg/plxnative | grep Tag_CPU_arch       # -> v7  (NOT v6 — v6 SIGILLs)
-"$RE" --version-info pkg/plxnative | grep -oE 'GLIBC_[0-9.]+' | sort -uV | tail -1   # -> GLIBC_2.12
-"$RE" -d pkg/plxnative | grep NEEDED             # SONAMEs should match the TV's libs
+"$RE" -A pkg/butaca | grep Tag_CPU_arch       # -> v7  (NOT v6 — v6 SIGILLs)
+"$RE" --version-info pkg/butaca | grep -oE 'GLIBC_[0-9.]+' | sort -uV | tail -1   # -> GLIBC_2.12
+"$RE" -d pkg/butaca | grep NEEDED             # SONAMEs should match the TV's libs
 ```
 
 The decisive check is on the TV itself: `make test` (deploy + run) and read the
@@ -155,8 +155,8 @@ test` stops before it deploys**, saying the app directory does not exist. That i
 correct and it is not a toolchain fault: `make deploy` scp's into an app directory that
 is already registered, while creating an app is appinstalld's job — SAM has to learn the
 id and the per-id LS2 role file has to be written. Three builds live on one TV now
-(`com.beb.plxnative`, what users install, `com.beb.plxnative.debug`, the Makefile's
-**default**, and `com.beb.plxnative.nightly`, the nightly build), so install this one once
+(`com.butaca`, what users install, `com.butaca.debug`, the Makefile's
+**default**, and `com.butaca.nightly`, the nightly build), so install this one once
 and everything after it is a plain `make test`:
 
 ```bash
@@ -177,7 +177,7 @@ the path with `make -s print-eventlog FLAVOR=debug` rather than typing one. The
 | `error: "-Z build-std" ... rust-src` or `cargo +nightly` fails | Missing nightly or rust-src: `rustup toolchain install nightly && rustup component add rust-src --toolchain nightly`. |
 | `make check` dies at `make lint` with `no such command: clippy` | The nightly was installed with `--profile minimal`, which omits clippy (the default profile ships it): `rustup component add clippy --toolchain nightly`. `make check` runs `lint` first; the cross-build itself never needs clippy. |
 | `build-sentry-native: cmake is required` | Install the host build generator with `brew install cmake`. It runs the webOS cross-compiler; it does not compile target code with the Mac toolchain. |
-| Binary is `Tag_CPU_arch: v6`, or SIGILLs on the TV at first atomic | `RUSTFLAGS_TV` got dropped, or std wasn't rebuilt. Ensure `-C target-cpu=cortex-a9` and `-Z build-std` are intact; `rm` the stale `libplxnative_modules.a` and rebuild. |
+| Binary is `Tag_CPU_arch: v6`, or SIGILLs on the TV at first atomic | `RUSTFLAGS_TV` got dropped, or std wasn't rebuilt. Ensure `-C target-cpu=cortex-a9` and `-Z build-std` are intact; `rm` the stale `libbutaca_modules.a` and rebuild. |
 | `relocation R_ARM_MOVW_ABS_NC ... recompile with -fPIC` when building a stub | A stub needs PIC. Stubs already use `-fPIC` in `STUBFLAGS`; if you added a bespoke stub rule, add `-fPIC`. |
 | Deploy/run steps fail with `sshpass: command not found` | `brew install sshpass`. The TV must be on and reachable (`make TV=<ip> ...`). |
 

@@ -91,7 +91,7 @@ mod layer_tests {
 
 impl LibraryScreen {
     pub(super) fn draw_page<H: LibraryLike>(&mut self, f: &mut DrawFrame<'_, '_, H>) {
-        // **The Library's own phase names**, in the `hm.*`/`st.*` family — `/tmp/plxnative-cpuprof`
+        // **The Library's own phase names**, in the `hm.*`/`st.*` family — `/tmp/butaca-cpuprof`
         // times each on the render thread (inclusive wall, no `glFinish`, every phase at once) and
         // `--graphics-profile --profile-phase <name>` samples one. They exist because the owned
         // screen shipped with NONE: the 2026-09-09 `fps:library-switch` profile read `frame.ui`

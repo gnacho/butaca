@@ -356,18 +356,18 @@ class BuildGcTests(unittest.TestCase):
             return path
 
         old_files = [
-            touch("plxnative_modules-aaaaaaaaaaaaaaaa", old, executable=True),
-            touch("plxnative_modules-aaaaaaaaaaaaaaaa.d", old),
-            touch("plxnative_modules-aaaaaaaaaaaaaaaa.codehash-cgu.00.rcgu.o", old),
-            touch("plxnative_modules-aaaaaaaaaaaaaaaa.codehash-cgu.01.rcgu.o", old),
+            touch("butaca_modules-aaaaaaaaaaaaaaaa", old, executable=True),
+            touch("butaca_modules-aaaaaaaaaaaaaaaa.d", old),
+            touch("butaca_modules-aaaaaaaaaaaaaaaa.codehash-cgu.00.rcgu.o", old),
+            touch("butaca_modules-aaaaaaaaaaaaaaaa.codehash-cgu.01.rcgu.o", old),
         ]
         newest_core = [
-            touch("plxnative_modules-bbbbbbbbbbbbbbbb", fresh, executable=True),
-            touch("plxnative_modules-bbbbbbbbbbbbbbbb.d", fresh),
+            touch("butaca_modules-bbbbbbbbbbbbbbbb", fresh, executable=True),
+            touch("butaca_modules-bbbbbbbbbbbbbbbb.d", fresh),
         ]
         newest_stale_objects = [
-            touch("plxnative_modules-bbbbbbbbbbbbbbbb.codehash-cgu.00.rcgu.o", old),
-            touch("plxnative_modules-bbbbbbbbbbbbbbbb.codehash-cgu.01.rcgu.o", old),
+            touch("butaca_modules-bbbbbbbbbbbbbbbb.codehash-cgu.00.rcgu.o", old),
+            touch("butaca_modules-bbbbbbbbbbbbbbbb.codehash-cgu.01.rcgu.o", old),
         ]
         return fixture, old_files, newest_core, newest_stale_objects
 
@@ -377,8 +377,8 @@ class BuildGcTests(unittest.TestCase):
         diagnostic = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, diagnostic)
         self.assertIn("would remove", diagnostic)
-        self.assertIn("plxnative_modules-aaaaaaaaaaaaaaaa (4 files)", diagnostic)
-        self.assertIn("plxnative_modules-bbbbbbbbbbbbbbbb rcgu.o objects (2 files)", diagnostic)
+        self.assertIn("butaca_modules-aaaaaaaaaaaaaaaa (4 files)", diagnostic)
+        self.assertIn("butaca_modules-bbbbbbbbbbbbbbbb rcgu.o objects (2 files)", diagnostic)
         for p in old_files + newest_core + newest_stale_objects:
             self.assertTrue(p.exists(), "-n deleted a file: " + diagnostic)
 
@@ -401,7 +401,7 @@ class BuildGcTests(unittest.TestCase):
         fixture, old_files, newest_core, newest_stale_objects = self._stale_deps_fixture()
         repo, env, _, _ = fixture
         deps = repo / "rust-modules/target/debug/deps"
-        young_but_superseded = deps / "plxnative_modules-cccccccccccccccc"
+        young_but_superseded = deps / "butaca_modules-cccccccccccccccc"
         young_but_superseded.write_bytes(b"")
         young_but_superseded.chmod(0o755)
         recent = time.time() - 2 * 3600
@@ -604,7 +604,7 @@ class InstallDiskWatchTests(unittest.TestCase):
                                 cwd=lane, env=env, text=True, capture_output=True, timeout=20)
         diagnostic = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, diagnostic)
-        plist = home / "Library/LaunchAgents/com.plxnative.build-gc.plist"
+        plist = home / "Library/LaunchAgents/com.butaca.build-gc.plist"
         self.assertTrue(plist.exists(), diagnostic)
         contents = plist.read_text()
         self.assertIn(str(main / "tools/build-gc.sh"), contents,

@@ -286,7 +286,7 @@ impl TrackMenuState {
         self.active_sub = sub;
     }
 
-    /// Focus an ABSOLUTE table row — the /tmp/plxnative-menupick trigger's contract ("row N").
+    /// Focus an ABSOLUTE table row — the /tmp/butaca-menupick trigger's contract ("row N").
     /// The interactive path always moves relatively; this exists because the initial focus is the
     /// ACTIVE row (derived from playback state), so a relative walk from it would land elsewhere.
     pub(crate) fn focus_row(&mut self, row: c_int) {
@@ -303,7 +303,7 @@ impl TrackMenuState {
     }
 
     /// Resolve a NAMED Audio-tab target (`"boost"`/`"loudness"`) to its absolute table row, for
-    /// the `/tmp/plxnative-menupick` trigger's named form — an alternative to a row number hand-
+    /// the `/tmp/butaca-menupick` trigger's named form — an alternative to a row number hand-
     /// derived from the item's track count, which is exactly the issue #266 PR4 bug: this harness
     /// once hardcoded the Normalize Loudness row from a WRONG assumed track count. Reading it back
     /// through [`Self::audio_targets`], the same map [`Self::on_ok`] dispatches on, means the name
@@ -1736,7 +1736,7 @@ mod enhancement_menu_tests {
         teardown(&ps);
     }
 
-    /// `TrackMenuState::row_for_audio_target` is the `/tmp/plxnative-menupick` named-target
+    /// `TrackMenuState::row_for_audio_target` is the `/tmp/butaca-menupick` named-target
     /// resolver: `"boost"`/`"loudness"` map to the two toggle rows AFTER the one track, and any
     /// other name is `None` rather than a guess — the same "unknown name, no commit" contract
     /// `menupick_arm` logs on.

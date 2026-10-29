@@ -1,7 +1,7 @@
 # Third-party notices
 
-This file accompanies the **PlxNative** application package (`com.beb.plxnative`), an unofficial
-native Plex client for LG webOS 4.x televisions. PlxNative itself is Copyright (c) 2026 Gleb
+This file accompanies the **Butaca** application package (`com.butaca`), an unofficial
+native Plex client for LG webOS 4.x televisions. Butaca itself is Copyright (c) 2026 Gleb
 Linnik and is distributed under GPL-3.0-or-later (see `LICENSE`; the brand reservation and the
 non-affiliation statements are in `TRADEMARKS.md`, alongside it in both the repository and this
 package).
@@ -10,7 +10,7 @@ The file is organised by **relationship**. Both the applicable license and the a
 relationship affect obligations; dynamic linking is not a blanket exemption:
 
 1. **Redistributed in this package** — third-party code or assets that are physically inside the
-   files you received (compiled into the `plxnative` binary, embedded in it, or shipped beside
+   files you received (compiled into the `butaca` binary, embedded in it, or shipped beside
    it). These carry real attribution obligations, discharged here and in `licenses/`.
 2. **Dynamically linked, not redistributed** — libraries that already exist on your television
    and are loaded at run time by SONAME. No copy of them is contained in this package.
@@ -28,7 +28,7 @@ Two different situations, and the difference matters for what we owe you.
 
 ### 1.1 FFmpeg — **redistributed inside this package**
 
-PlxNative **ships its own build of FFmpeg**. Earlier releases linked against the television's copy;
+Butaca **ships its own build of FFmpeg**. Earlier releases linked against the television's copy;
 they no longer do, because the TV's version moves with the firmware (libavformat 55, 57, 58, 59 and
 60 across webOS 2 to 11) and the components compiled into it cannot be determined from outside.
 
@@ -41,9 +41,9 @@ complete copy of that licence is supplied with this package at `licenses/LGPL-2.
 
 **Complete corresponding source.** The exact upstream tarball these were built from —
 `ffmpeg-9.0.tar.xz`, sha256 `7f607a00dd0d28a729d5a4811205812eef01cf6ef6155025febb6f36a9062d52`,
-from <https://ffmpeg.org/releases/> — is attached to every PlxNative release alongside the `.ipk`.
+from <https://ffmpeg.org/releases/> — is attached to every Butaca release alongside the `.ipk`.
 The sources are **unmodified**: no patches are applied. The complete configure invocation that
-produced them, including every enabled component, is `ci/build-ffmpeg.sh` in the PlxNative
+produced them, including every enabled component, is `ci/build-ffmpeg.sh` in the Butaca
 repository, which is also attached to each release.
 
 **Configuration.** Built with `--disable-everything` plus an explicit component list, **without**
@@ -54,9 +54,9 @@ external library enabled is **zlib**, the television's own `libz.so.1` (not redi
 section 3), which the Matroska demuxer needs to inflate compressed subtitle tracks.
 
 **You may modify and replace them.** They are ordinary shared libraries, loaded at run time by
-`dlopen` from the application's own directory; no FFmpeg code is linked into the `plxnative`
+`dlopen` from the application's own directory; no FFmpeg code is linked into the `butaca`
 executable. Build your own from the source above and put it in the app directory under the same
-file name, and PlxNative will load yours instead, with no change to the application. The `-plx`
+file name, and Butaca will load yours instead, with no change to the application. The `-plx`
 suffix in the file names exists so these cannot be confused with — or accidentally replace — the
 television's own FFmpeg; it denotes nothing about their content, which is stock upstream.
 
@@ -67,7 +67,7 @@ built from a different release will be declined rather than misread.
 
 ### 1.2 Native ASS rendering — redistributed inside this package
 
-`libass-plx.so.0` contains the PlxNative facade and this pinned, statically linked stack.
+`libass-plx.so.0` contains the Butaca facade and this pinned, statically linked stack.
 The macOS simulator uses the same sources in `libass-plx.0.dylib`; the Linux simulator
 uses `libass-plx-host.so.0`.
 
@@ -87,7 +87,7 @@ the complete per-file notices accompany its source. libass and HarfBuzz copyrigh
 notices are retained in their licence files above.
 
 The exact upstream archives, checksums and licences are recorded in
-`ci/libass-dependencies.json`. Each versioned PlxNative source release contains all
+`ci/libass-dependencies.json`. Each versioned Butaca source release contains all
 four archives, the facade (`src/ass.c`, `include/ass.h`), and its complete build
 recipe (`ci/build-libass.sh`, `ci/build-libass.py`). Upstream sources are unmodified.
 The library is built without system font providers or external font-library
@@ -96,14 +96,14 @@ HarfBuzz uses FreeType and its built-in Unicode data, without ICU or platform sh
 
 You may modify and rebuild the complete library, including FriBidi, using the
 matching source release, then replace `libass-plx.so.0` in the app directory. The
-application loads that file by absolute path and checks the PlxNative facade ABI.
+application loads that file by absolute path and checks the Butaca facade ABI.
 This distribution supplies source for the entire combined library, including the
 GPL-3.0-or-later facade, so recipients can rebuild and relink it. No library in this
 stack is taken from, or installed into, the television's firmware.
 
 ### 1.3 Libraries provided by your television
 
-PlxNative also links dynamically against the following libraries (glibc/GLib are
+Butaca also links dynamically against the following libraries (glibc/GLib are
 **LGPL-2.1-or-later**; libcurl is **curl** licensed), which are
 part of your television's own system software and are **not** distributed by us:
 
@@ -114,14 +114,14 @@ part of your television's own system software and are **not** distributed by us:
 | libcurl | 7.x | `libcurl.so.4` or `libcurl.so.5` (whichever the firmware provides) |
 
 libcurl uses the curl license, not LGPL; its distinct grant is listed in section 3.
-For these libraries, PlxNative uses the ordinary shared-library mechanism (LGPL-2.1 §6(b)): no code from
+For these libraries, Butaca uses the ordinary shared-library mechanism (LGPL-2.1 §6(b)): no code from
 them is copied into the executable, and the dynamic loader resolves them at run time against the
 television's own `/usr/lib`. To use your own build, install an interface-compatible library under
-the same SONAME. The GPL-3.0-or-later terms under which PlxNative is distributed permit modification of the
+the same SONAME. The GPL-3.0-or-later terms under which Butaca is distributed permit modification of the
 application for your own use and reverse engineering for debugging such modifications.
 
 One further disclosure: small fragments of glibc's own startup and compatibility code **are**
-statically linked into `plxnative` by the toolchain (`crt1.o` and objects from `libc_nonshared.a`
+statically linked into `butaca` by the toolchain (`crt1.o` and objects from `libc_nonshared.a`
 — this is why the binary defines `_start`, `__libc_csu_init`, `__libc_csu_fini`, `fstat64`,
 `lstat64`, `fstatat64`). They are covered by the same LGPL-2.1 notice and licence copy above.
 Whether those particular files additionally carry glibc's linking exception was **not verified**
@@ -131,7 +131,7 @@ for the NDK build used here.
 
 ## 2. Redistributed in this package
 
-### 2.1 Vendored C source, compiled into `plxnative`
+### 2.1 Vendored C source, compiled into `butaca`
 
 **nanosvg** and **nanosvgrast** — Copyright (c) 2013-14 Mikko Mononen <memon@inside.org>
 Licence: **Zlib** (`licenses/Zlib.txt`). The vendored headers are byte-identical to upstream
@@ -145,7 +145,7 @@ The upstream headers credit, and we reproduce, the following derivations:
 - The polygon rasterizer is heavily based on the **stb_truetype** rasterizer by Sean Barrett
   (http://nothings.org/).
 
-### 2.2 Icon artwork embedded in `plxnative`
+### 2.2 Icon artwork embedded in `butaca`
 
 The following SVG icons are compiled into the binary. All are visually modified from upstream
 (stroke width and/or colour); modifications are stated where the licence requires it.
@@ -169,7 +169,7 @@ The path data `M5 13l4 4L19 7` on a 24×24 grid is identical to Heroicons v1
 `optimized/outline/check.svg` (confirmed against upstream). *Modified*: stroke width 2 → 3,
 stroke colour set to white.
 
-The remaining icons in the application are original work by the PlxNative author. See section 4
+The remaining icons in the application are original work by the Butaca author. See section 4
 for a trademark note that applies to some of them.
 
 ### 2.3 Fonts
@@ -207,7 +207,7 @@ Hangul, Kana or Han, so without this face every Korean, Japanese and Chinese tit
 library renders as empty boxes. See `rust-modules/src/text.rs` for the chain and
 `rust-modules/src/fontcov.rs` for the coverage each face is required to have.
 
-### 2.4 Rust code statically linked into `plxnative`
+### 2.4 Rust code statically linked into `butaca`
 
 The application core is Rust. The Rust standard library is compiled from source
 (`-Z build-std`) and linked in, together with the crates below. All of this code is
@@ -360,7 +360,7 @@ here (the standard library takes `hashbrown` with default features disabled, whi
 enable it) — verified absent from the binary. `rustc-literal-escaper`, `proc_macro`,
 `panic_abort` are build-std source components; final object inclusion is recorded in the linker evidence. `std_detect` supplies CPU capability detection in the Rust runtime and is covered by the Rust notices above.
 
-### 2.5 Compiler runtime fragments statically linked into `plxnative`
+### 2.5 Compiler runtime fragments statically linked into `butaca`
 
 - **GCC runtime startup objects** (`crtbegin.o`, `crtend.o`) from the webOS NDK's GCC 12.2.0.
   Licence: GPL-3.0-or-later **WITH GCC-exception-3.1**. The GCC Runtime Library Exception
@@ -368,14 +368,14 @@ enable it) — verified absent from the binary. `rustc-literal-escaper`, `proc_m
   text is supplied as `licenses/GCC-exception-3.1.txt`. Like the glibc startup objects, these are
   part of the NDK's compiler and C runtime (webosbrew native-toolchain) and are System Libraries
   under GPL section 1.
-- **PlxNative auxv compatibility seam** (`src/compat/getauxval.c`), GPL-3.0-or-later. It supplies a bounded immutable process snapshot for the Rust runtime. Project-local linker guards exclude the old NDK `libglibc_polyfills.a` from every newly built ELF.
+- **Butaca auxv compatibility seam** (`src/compat/getauxval.c`), GPL-3.0-or-later. It supplies a bounded immutable process snapshot for the Rust runtime. Project-local linker guards exclude the old NDK `libglibc_polyfills.a` from every newly built ELF.
 
 ### 2.6 Native crash capture
 
 **Sentry Native 0.16.6** — Copyright (c) 2019 Sentry and individual contributors. Licence:
-**MIT** (`licenses/MIT.txt`). Its client library is statically linked into `plxnative`; the
+**MIT** (`licenses/MIT.txt`). Its client library is statically linked into `butaca`; the
 out-of-process `sentry-crash` handler is shipped beside it. The handler is built with its HTTP
-transport disabled: it writes a crash envelope for PlxNative's consent-aware sender to deliver on
+transport disabled: it writes a crash envelope for Butaca's consent-aware sender to deliver on
 the next launch. The source is patched for webOS's glibc 2.12 syscall surface and the 32-bit ARM
 APCS frame layout; the pinned source hash and complete patch are in `ci/build-sentry-native.sh` and
 `vendor/sentry-native/webos-arm32.patch`.
@@ -389,7 +389,7 @@ handler and is used to initialise the ARM unwind machinery outside signal contex
 ## 3. Dynamically linked, not redistributed
 
 The libraries below are part of your television's software. This package contains no copy of
-them; PlxNative loads them at run time. Their upstream terms and the applicable GPL linking basis must be assessed separately; absence
+them; Butaca loads them at run time. Their upstream terms and the applicable GPL linking basis must be assessed separately; absence
 of a bundled copy alone does not establish that no obligation applies.
 
 | Library | Version on this build | Licence | Note |
@@ -398,13 +398,13 @@ of a bundled copy alone does not establish that no obligation applies.
 | GLib | 2.48.2 | LGPL-2.1-or-later | See section 1 |
 | GNU C Library | 2.24 | LGPL-2.1-or-later | See section 1 |
 | SDL2 (LG fork) | 2.0.4 | Zlib | Copyright (C) 1997-2016 Sam Lantinga |
-| zlib | 1.2.11 on this build (1.2.7 to 1.3.1 across the firmware inventories) | Zlib | Copyright (C) 1995-2017 Jean-loup Gailly and Mark Adler. Loaded by the bundled FFmpeg, not by `plxnative` |
+| zlib | 1.2.11 on this build (1.2.7 to 1.3.1 across the firmware inventories) | Zlib | Copyright (C) 1995-2017 Jean-loup Gailly and Mark Adler. Loaded by the bundled FFmpeg, not by `butaca` |
 | SDL2_ttf | 2.0.14 | Zlib | Zlib-licensed since 2.0.11 |
 | libcurl | 7.53.1 (LG SONAME `libcurl.so.5`) | curl (MIT/X derivate) | Copyright (c) 1996 - 2017, Daniel Stenberg, <daniel@haxx.se>, and many contributors |
 | libwayland-client | 0.3.0 | MIT | Copyright © 2008-2012 Kristian Høgsberg; © 2010-2012 Intel Corporation; © 2011 Benjamin Franzke; © 2012 Collabora, Ltd. The licence of *this LG build specifically* was not read off the device |
 | luna-service2 | 3.21.2 | Apache-2.0 | Licence taken from the webOS OSE upstream project; not read off this LG build |
 | libgcc_s | the television's own | GPL-3.0-or-later WITH GCC-exception-3.1 | Version not determined; its exported symbol versions stop at `GCC_4.7.0`. Exact source and applicable Runtime Library Exception require audit |
-| FreeType | libtool 6.16.0, i.e. release 2.9.0 (inferred from the so-version, not read from the binary) | FTL OR GPL-2.0-or-later | **Not** linked by PlxNative — reached only inside the television's own SDL2_ttf. Credit given voluntarily: *Portions of this software are copyright © The FreeType Project (www.freetype.org). All rights reserved.* |
+| FreeType | libtool 6.16.0, i.e. release 2.9.0 (inferred from the so-version, not read from the binary) | FTL OR GPL-2.0-or-later | **Not** linked by Butaca — reached only inside the television's own SDL2_ttf. Credit given voluntarily: *Portions of this software are copyright © The FreeType Project (www.freetype.org). All rights reserved.* |
 
 ---
 
@@ -416,13 +416,13 @@ decline to guess one:
 - `libGLESv2.so.2` — the television's OpenGL ES 2.0 implementation (an LG shim over the ARM Mali
   driver). Proprietary; no published licence located.
 - `libAcbAPI.so.1`, `libplayerAPIs.so.1` (StarfishMediaAPIs), `libpf-1.0.so.1` — LG proprietary
-  media components of webOS. No published licence located. PlxNative uses locally declared
+  media components of webOS. No published licence located. Butaca uses locally declared
   interoperability interfaces; the owner has closed the review of their provenance and GPL/platform
   basis, treating them as GPL-3.0 section 1 System Libraries never redistributed with the
   application.
 **Historical NDK archive:** pre-migration builds included `libglibc_polyfills.a`, whose licence was not established. It is excluded from new linker inputs. This does not grant permission for previously distributed copies.
 
-**Non-affiliation.** PlxNative is an independent, unofficial application. It is not affiliated
+**Non-affiliation.** Butaca is an independent, unofficial application. It is not affiliated
 with, endorsed by, or sponsored by LG Electronics, Plex GmbH, Fandango Media (Rotten Tomatoes),
 IMDb.com, or The Movie Database. "webOS", "LG", "Plex", "Rotten Tomatoes", "IMDb", "TMDB" and all
 other trademarks are the property of their respective owners. Where those names appear in the
@@ -469,13 +469,13 @@ what differs between them (the copyright statement and the Reserved Font Name) i
 
 No BSD-3-Clause text is required because Apache-2.0 is elected for `moxcms` and `pxfm`. The full GPLv3 text is supplied at the package root as `LICENSE`; `LICENSING.md` states
 the GPL-3.0-or-later election. Also retain `licenses/GCC-exception-3.1.txt` and
-`licenses/PlxNative-historical-MIT.txt`.
+`licenses/Butaca-historical-MIT.txt`.
 
 ---
 
 ## 6. Deliberately not listed
 
-Two third-party components exist in the PlxNative source repository but are **not** part of this
+Two third-party components exist in the Butaca source repository but are **not** part of this
 package, and therefore carry no obligation discharged here: **libjpeg-turbo**
 (`libturbojpeg.so.0`, copied to developer televisions by the development deploy step only) and
 **jsmpeg** (a host-side development tool). Neither is present in the installed application.
@@ -489,7 +489,7 @@ and `ci/check-packaged-elf.py`, which is what proves the old archive is absent f
 **Frank Muller** contributed the server connection port fix in commit
 `11b867a34b54dda5a9c6b99127b9dffdf90a23fd` (`plex/origin.rs`, `plex/probe.rs`) under the
 then-current MIT grant. That original grant and Gleb Linnik notice are preserved in
-`licenses/PlxNative-historical-MIT.txt`; no ownership transfer is claimed.
+`licenses/Butaca-historical-MIT.txt`; no ownership transfer is claimed.
 
 Source bundles also contain SDL2 Zlib headers, embedded Mesa/Khronos MIT and SGI-B-2.0
 header blocks, Khronos GLES2 MIT/Apache-2.0 headers, and the MIT-licensed jsmpeg tool

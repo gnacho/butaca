@@ -234,7 +234,7 @@ pub(crate) enum HomeCmd {
     Flip(i32),
     SelectHero(i32),
     /// [`SelectHero`](Self::SelectHero), then HOLD that slot: the auto-advance stops for the
-    /// life of the page. The screenshot pipeline's pin (`/tmp/plxnative-heropin=<n>`), so a
+    /// life of the page. The screenshot pipeline's pin (`/tmp/butaca-heropin=<n>`), so a
     /// capture taken whenever the page settles shows the billboard the scene manifest named.
     PinHero(i32),
     ItemMenu,
@@ -382,16 +382,16 @@ impl crate::ui::machine::LogicalState for ItemMenuArg {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LibraryCmd {
     Enter(crate::stores::browse::SecKind),
-    /// Seat focus on one grid card (tests, and the screenshot pipeline's `plxnative-libgrid`).
+    /// Seat focus on one grid card (tests, and the screenshot pipeline's `butaca-libgrid`).
     FocusGrid { row: usize, col: usize },
     /// Seat focus on one card of a hub shelf above the grid, `shelf` counted from the top (the
-    /// screenshot pipeline's `plxnative-libshelf`).
+    /// screenshot pipeline's `butaca-libshelf`).
     FocusShelf { shelf: usize, col: usize },
     /// Open the Sort or Filter menu exactly as OK on its toolbar chip does (the screenshot
-    /// pipeline's `plxnative-libmenu`).
+    /// pipeline's `butaca-libmenu`).
     OpenMenu(LibraryMenuKind),
     /// Choose a TYPE menu value exactly as its row does (the screenshot pipeline's and the fps
-    /// suite's `plxnative-libtype`).
+    /// suite's `butaca-libtype`).
     SetType(crate::browse::LibraryType),
     Page(i32),
     Sweep,
@@ -910,7 +910,7 @@ pub(crate) enum ContentPanel {
     /// opened it — bit-preserving, so a canonical argument holds it without float equality.
     AltSources { anchor: [u32; 4] },
     /// *Track information* (`screens::tracks_panel`), opened at 1-based `page`. Every interactive
-    /// opening passes 1; `/tmp/plxnative-tracks=<n>` is the only caller that does not, and it is
+    /// opening passes 1; `/tmp/butaca-tracks=<n>` is the only caller that does not, and it is
     /// what makes a headless capture of page 2 possible at all.
     Tracks { page: i32 },
     /// *About* (`screens::about_panel`), the footer card's synopsis read in full. It carries
@@ -1436,7 +1436,7 @@ mod tests {
 /// wrapped were folded in here in phase 12 (§15.2: the enum is gone) — see the note above.
 ///
 /// **Both owned variants carry the page their inner stack is ROOTED at**, which is there for the
-/// dev boot targets and for nothing else. `/tmp/plxnative-settings=privacy` has to put a headless
+/// dev boot targets and for nothing else. `/tmp/butaca-settings=privacy` has to put a headless
 /// run on a page that is normally two presses inside the surface, and the loop cannot press them:
 /// the Settings root's row indices are `RootPage`'s private business (the Favourites row is absent
 /// signed out), so a loop that reached the child by delivering `Activate(<row>)` would be encoding
@@ -1662,7 +1662,7 @@ impl crate::ui::screen::ScreenArg for AppArg {
 /// **What a detail page that is about to mount should be RESTORED to** — the one payload the
 /// container's own `ReturnState` cannot supply, because the page has never been on this stack.
 ///
-/// Its two users are the `/tmp/plxnative-detail` boot trigger (a hard cut onto a page nobody
+/// Its two users are the `/tmp/butaca-detail` boot trigger (a hard cut onto a page nobody
 /// navigated from) and a show opened ON A PARTICULAR SEASON, which is the mount a page argument
 /// cannot express: an argument names a PAGE, and a season is a tab inside one. It was a
 /// `ui::trail::Node` until phase 12, i.e. a whole history entry used as a carrier for its `Spot`.
@@ -1985,7 +1985,7 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 /// The pin over [`SCREEN_SHAPES`] — bump it in the same edit that adds an entry, and say why.
 ///
 /// A committed replay fixture recorded against a different value cannot be LOADED at all, which is
-/// the cost this exists to make visible rather than silent; `tools/plxnative-rec rerecord` is the
+/// the cost this exists to make visible rather than silent; `tools/butaca-rec rerecord` is the
 /// verb (`tests/fixtures/replay/README.md`). The APP-side half is pinned separately in
 /// `app/recorder.rs`, over the shapes that are the loop's, so neither pin moves for the other's
 /// reason.
@@ -2034,7 +2034,7 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 ///
 /// **Extras shelf** (0xeb69_f6bf_105f_697f → 0xb462_145d_9477_05de): detail `Spot.saved_col` grows a seventh
 /// identity-keyed slot for the extras section, and `DetailIdentity` grows `Extra`. The shape
-/// string moved, so recorded fixtures need `tools/plxnative-rec rerecord` before a scenario
+/// string moved, so recorded fixtures need `tools/butaca-rec rerecord` before a scenario
 /// replay is trusted. Host unit tests do not replay them.
 ///
 /// **0.7 forward-port merge** (0xb462_145d_9477_05de → 0x0e66_311c_e4f1_0769): this bump is not one
@@ -2051,7 +2051,7 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 /// **Home hub identity keyed by listing key** (0x285a_3a99_d1e2_f068 → this): `HomeHubIdentity::Identifier`
 /// gains the provider-published listing key, keeping mixed-section hubs stable when their leading
 /// item changes libraries while still distinguishing section-specific rows. Recorded fixtures need
-/// `tools/plxnative-rec rerecord` like any other shape-pin bump before replay is trusted.
+/// `tools/butaca-rec rerecord` like any other shape-pin bump before replay is trusted.
 ///
 /// **Collection page** (`0x54b1_7d5f_d41a_2606` → this): `ARG_SHAPE` gains the Collection
 /// identity and the `CollectionAbout` summary sheet (the About panel over the collection store),

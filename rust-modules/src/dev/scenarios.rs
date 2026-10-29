@@ -1,4 +1,4 @@
-//! Every dev-trigger ARM — the code that reads `/tmp/plxnative-*` through [`super::flag`] /
+//! Every dev-trigger ARM — the code that reads `/tmp/butaca-*` through [`super::flag`] /
 //! [`super::read`] / [`super::latched_flag!`] and reacts to it — gathered on one file (UI
 //! restructure spec v4 §3.3 step 2 / §11, phase 10 lane P). A PURE MOVE: no trigger was renamed,
 //! no timing changed, no ordering changed. Before this phase the arms were spread across four
@@ -24,7 +24,7 @@
 //! file's `*_tick` functions at those same phase boundaries).
 //!
 //! **Not scenarios, deliberately left where they were:** the recorder/replay path
-//! (`plxnative-rec`/`plxnative-recplay`, `app::clock`) is a DIFFERENT kind of thing — it observes
+//! (`butaca-rec`/`butaca-recplay`, `app::clock`) is a DIFFERENT kind of thing — it observes
 //! or reproduces a whole session and must never decide which screen a boot starts on (`dev.rs`'s
 //! `DIAG` doc says why) — so its own machinery (`app::recorder::Recplay`) stays in
 //! `app/recorder.rs`; only the two raw trigger reads run through the thin passthroughs
@@ -62,7 +62,7 @@ pub(crate) struct DevFlags {
     pub(crate) onboard_osc: bool,
     pub(crate) nav_osc: bool,
     pub(crate) nav_osc_rk: String,
-    /// `plxnative-nobudget`: read at boot, applied to the one `Budget` at boot, and kept here so
+    /// `butaca-nobudget`: read at boot, applied to the one `Budget` at boot, and kept here so
     /// a log reader can tell an A leg from a B leg by the flags the boot recorded.
     pub(crate) nobudget: bool,
 }
@@ -88,7 +88,7 @@ pub(crate) struct Scenarios {
     pub(crate) modal_osc_last: u32,
     pub(crate) legal_doc_tried: bool,
     pub(crate) alert_tried: bool,
-    /// how many DOWN presses `plxnative-alert` has spent walking to the delete row.
+    /// how many DOWN presses `butaca-alert` has spent walking to the delete row.
     pub(crate) alert_step: u8,
     pub(crate) account_osc_last: u32,
     pub(crate) account_osc_down: bool,
@@ -100,7 +100,7 @@ pub(crate) struct Scenarios {
     pub(crate) press_release_at: u32,
     pub(crate) itemmenu_tried: bool,
     pub(crate) acct_tried: bool,
-    /// `/tmp/plxnative-acct`'s value, once read (see `acct_arm`).
+    /// `/tmp/butaca-acct`'s value, once read (see `acct_arm`).
     pub(crate) acct_rest: Option<Option<u32>>,
     pub(crate) auto_tried: bool,
     pub(crate) replay_left: u32,
@@ -117,37 +117,37 @@ pub(crate) struct Scenarios {
     pub(crate) quality_tried: bool,
     pub(crate) quality_playing_since: Option<u32>,
     pub(crate) detail_tried: bool,
-    /// `/tmp/plxnative-collection=<ratingKey>` — direct Collection-page boot.
+    /// `/tmp/butaca-collection=<ratingKey>` — direct Collection-page boot.
     pub(crate) collection_tried: bool,
-    /// The headless detail-page walk (`plxnative-detail`/`-play`), see [`ContentBoot`].
+    /// The headless detail-page walk (`butaca-detail`/`-play`), see [`ContentBoot`].
     pub(crate) content_boot: Option<ContentBoot>,
     pub(crate) play_tried: bool,
-    /// `/tmp/plxnative-play=<rk>` between its ASYNC request and the landing it plays from:
+    /// `/tmp/butaca-play=<rk>` between its ASYNC request and the landing it plays from:
     /// `(server, ratingKey, the frame clock at which the wait gives up)`. See [`play_arm`].
     pub(crate) play_await: Option<(crate::plex::ServerId, String, u32)>,
     pub(crate) menu_tried: bool,
     pub(crate) menupick_tried: bool,
-    /// dev: the row `/tmp/plxnative-menupick` still owes the track menu, as its RAW second field
+    /// dev: the row `/tmp/butaca-menupick` still owes the track menu, as its RAW second field
     /// (an absolute row number, or a named Audio-tab target such as `"boost"`/`"loudness"` — see
     /// `menupick_arm`'s doc): the panel opens and is picked on separate frames, so the pick is
     /// carried here until the surface it names exists.
     pub(crate) menupick_target: Option<String>,
-    /// `/tmp/plxnative-subtiming` — see [`subtiming_arm`] and [`Subtiming`].
+    /// `/tmp/butaca-subtiming` — see [`subtiming_arm`] and [`Subtiming`].
     pub(crate) subtiming: Subtiming,
     pub(crate) pause_tried: bool,
     /// An armed Pause edge: (due at, hold ms, the media position it also waits for).
     pub(crate) pause_script: Option<(u32, Option<u32>, Option<u32>)>,
     pub(crate) pause_resume_at: Option<u32>,
-    /// `/tmp/plxnative-pushbench` — see [`bench`]'s module doc. `None` unarmed; cleared to `None`
+    /// `/tmp/butaca-pushbench` — see [`bench`]'s module doc. `None` unarmed; cleared to `None`
     /// once its `n` cycles are done, the same shape `content_boot` uses to stop being ticked.
     pub(crate) push_bench: Option<bench::PushBench>,
-    /// `/tmp/plxnative-modalbench` — see [`bench`]'s module doc.
+    /// `/tmp/butaca-modalbench` — see [`bench`]'s module doc.
     pub(crate) modal_bench: Option<bench::ModalBench>,
-    /// `/tmp/plxnative-deepbench` — see [`bench`]'s module doc.
+    /// `/tmp/butaca-deepbench` — see [`bench`]'s module doc.
     pub(crate) deep_bench: Option<bench::DeepBench>,
     /// The boot-time trigger flags the loop consults every frame after.
     pub(crate) dev: DevFlags,
-    /// The screenshot pipeline's arms (`plxnative-libtype`, `-libgrid`, `-libshelf`, `-libmenu`, `-clockstop`) — see [`screenshot`].
+    /// The screenshot pipeline's arms (`butaca-libtype`, `-libgrid`, `-libshelf`, `-libmenu`, `-clockstop`) — see [`screenshot`].
     pub(crate) shots: screenshot::ScreenshotArms,
 }
 
@@ -155,7 +155,7 @@ pub(crate) struct Scenarios {
 // pre-SDL (today's app/mod.rs:451)
 // =================================================================================================
 
-/// `/tmp/plxnative-stats` — force the Stats-for-nerds overlay on, before SDL or a screen exists,
+/// `/tmp/butaca-stats` — force the Stats-for-nerds overlay on, before SDL or a screen exists,
 /// so a playback test photographs the same ABR/pipeline evidence on every automated run rather
 /// than depending on a previous manual toggle surviving into this session.
 pub(crate) fn pre_boot() {
@@ -167,26 +167,26 @@ pub(crate) fn pre_boot() {
 // =================================================================================================
 // boot-time arms (today's app/boot.rs) — each named for its trigger, called inline from
 // `app::boot::boot` in the exact order the reads always ran in. The boot-DECISION arms
-// (`plxnative-login`, `-token`) are deliberately thin: `BootTo` is core boot control flow, not
+// (`butaca-login`, `-token`) are deliberately thin: `BootTo` is core boot control flow, not
 // itself a dev arm, and moving its branches would risk the one thing this phase must not touch.
 // =================================================================================================
 
-/// `/tmp/plxnative-novsync` — uncap the swap interval so `fps=` reports the true GPU render rate.
+/// `/tmp/butaca-novsync` — uncap the swap interval so `fps=` reports the true GPU render rate.
 pub(crate) fn novsync_armed() -> bool {
     crate::dev::flag("novsync")
 }
 
-/// `/tmp/plxnative-login` — force the QR login screen even with a usable session.
+/// `/tmp/butaca-login` — force the QR login screen even with a usable session.
 pub(crate) fn login_forced() -> bool {
     crate::dev::flag("login")
 }
 
-/// `/tmp/plxnative-token` — the harness/headless test identity, read once. Never logged.
+/// `/tmp/butaca-token` — the harness/headless test identity, read once. Never logged.
 pub(crate) fn dev_token() -> String {
     match crate::dev::read("token") {
         Some(s) if !s.is_empty() => {
             #[cfg(feature = "devtriggers")]
-            crate::log("token: using /tmp/plxnative-token (test identity)");
+            crate::log("token: using /tmp/butaca-token (test identity)");
             s
         }
         _ => String::new(),
@@ -205,14 +205,14 @@ crate::dev::latched_flag! {
     pub(crate) fn imagecache_bypass_armed = "imagecache-bypass";
 }
 
-/// `/tmp/plxnative-pickuser=<index>` — force the boot picker and auto-select that roster tile.
+/// `/tmp/butaca-pickuser=<index>` — force the boot picker and auto-select that roster tile.
 pub(crate) fn pickuser_index() -> Option<usize> {
     crate::dev::read("pickuser").and_then(|s| s.parse().ok())
 }
 
-/// `/tmp/plxnative-readout=<case>` — boot straight into a chosen page-filling `Failed` read-out
+/// `/tmp/butaca-readout=<case>` — boot straight into a chosen page-filling `Failed` read-out
 /// for the read-out glyph work's own visual verification (spec "1A"), with NO network call and no
-/// account touched: paired with `plxnative-login` (which already forces `BootTo::Login` with no
+/// account touched: paired with `butaca-login` (which already forces `BootTo::Login` with no
 /// session), `login_worker_with_output` reads this ONCE at the top of the worker thread and, for
 /// every case named here, skips straight to `auth::output_failed` with a canned caption instead
 /// of minting a PIN or discovering
@@ -286,7 +286,7 @@ impl ReadoutCase {
     }
 }
 
-/// `/tmp/plxnative-logintest` — validate the plex.tv account path end to end on the device.
+/// `/tmp/butaca-logintest` — validate the plex.tv account path end to end on the device.
 pub(crate) fn arm_logintest() {
     if crate::dev::flag("logintest") {
         let _ = crate::task::spawn_small("logintest", || {
@@ -306,69 +306,69 @@ pub(crate) fn arm_logintest() {
     }
 }
 
-/// `/tmp/plxnative-stillclock=<ms>` — see [`screenshot::arm_stillclock`].
+/// `/tmp/butaca-stillclock=<ms>` — see [`screenshot::arm_stillclock`].
 pub(crate) fn arm_stillclock() {
     screenshot::arm_stillclock();
 }
 
-/// `/tmp/plxnative-anim` — the animation-diagnostic overlay (off by default).
+/// `/tmp/butaca-anim` — the animation-diagnostic overlay (off by default).
 pub(crate) fn arm_anim() {
     if crate::dev::flag("anim") {
         crate::ui::anim::set_enabled(true);
     }
 }
 
-/// `/tmp/plxnative-glassload` — the backdrop-glass LOAD DIAL.
+/// `/tmp/butaca-glassload` — the backdrop-glass LOAD DIAL.
 pub(crate) fn arm_glassload(glass: &mut crate::ui::frame::glass::GlassPlan) {
     if let Some(v) = crate::dev::read("glassload") {
         glass.configure_dial(&v);
     }
 }
 
-/// `/tmp/plxnative-navblur` — the blurred-route-transition prototype.
+/// `/tmp/butaca-navblur` — the blurred-route-transition prototype.
 pub(crate) fn arm_navblur(glass: &mut crate::ui::frame::glass::GlassPlan) {
     if let Some(v) = crate::dev::read("navblur") {
         glass.configure_navblur(&v);
     }
 }
 
-/// `/tmp/plxnative-overdraw` — the CPU-side per-draw-class overdraw ledger.
+/// `/tmp/butaca-overdraw` — the CPU-side per-draw-class overdraw ledger.
 pub(crate) fn arm_overdraw() {
     if crate::dev::flag("overdraw") {
         crate::ui::overdraw::set_ledger(true);
     }
 }
 
-/// `/tmp/plxnative-drawmask=<classes>` — refuse every draw of the named classes.
+/// `/tmp/butaca-drawmask=<classes>` — refuse every draw of the named classes.
 pub(crate) fn arm_drawmask() {
     if let Some(spec) = crate::dev::read("drawmask") {
         crate::ui::overdraw::set_mask(&spec);
     }
 }
 
-/// `/tmp/plxnative-heroground` — the one-pass hero ground A/B.
+/// `/tmp/butaca-heroground` — the one-pass hero ground A/B.
 pub(crate) fn arm_heroground() {
     if crate::dev::flag("heroground") {
         crate::ui::widgets::set_hero_ground(true);
         #[cfg(feature = "devtriggers")]
-        crate::log("hero: one-pass ground ENABLED by /tmp/plxnative-heroground");
+        crate::log("hero: one-pass ground ENABLED by /tmp/butaca-heroground");
     }
 }
 
-/// `/tmp/plxnative-profile` / `/tmp/plxnative-hwcnt` — the two GPU-time profilers. Both present
+/// `/tmp/butaca-profile` / `/tmp/butaca-hwcnt` — the two GPU-time profilers. Both present
 /// is refused; either alone arms its mode.
 ///
 /// Gated on `devtriggers` at the item level rather than left to `dev::read` folding to `None`:
 /// `dev::read` already makes this whole function inert in a release build, but the disabled-both
 /// diagnostic line below spells out both trigger names in full, and a compiled-but-unreachable
 /// function still carries its own string literals into `--no-default-features` bytes. Compiling
-/// the function out entirely is what actually keeps `plxnative-profile`/`plxnative-hwcnt` out of
+/// the function out entirely is what actually keeps `butaca-profile`/`butaca-hwcnt` out of
 /// the binary `ci/check-package.py`'s dev-trigger-catalog check inspects.
 #[cfg(feature = "devtriggers")]
 pub(crate) fn arm_profile_hwcnt() {
     match (crate::dev::read("profile"), crate::dev::read("hwcnt")) {
         (Some(_), Some(_)) => {
-            crate::log("PROFILE disabled: remove either /tmp/plxnative-profile or /tmp/plxnative-hwcnt");
+            crate::log("PROFILE disabled: remove either /tmp/butaca-profile or /tmp/butaca-hwcnt");
         }
         (Some(filter), None) => crate::ui::profile::set_enabled(&filter),
         (None, Some(filter)) => crate::ui::profile::set_hwcnt_enabled(&filter),
@@ -378,23 +378,23 @@ pub(crate) fn arm_profile_hwcnt() {
 #[cfg(not(feature = "devtriggers"))]
 pub(crate) fn arm_profile_hwcnt() {}
 
-/// `/tmp/plxnative-cpuprof` — the render thread's own per-phase CPU clock.
+/// `/tmp/butaca-cpuprof` — the render thread's own per-phase CPU clock.
 pub(crate) fn arm_cpuprof() {
     if crate::dev::flag("cpuprof") {
         crate::ui::profile::set_cpu_enabled();
     }
 }
 
-/// `/tmp/plxnative-noidle` — turn the whole-frame present gate off.
+/// `/tmp/butaca-noidle` — turn the whole-frame present gate off.
 pub(crate) fn arm_noidle() {
     if crate::dev::flag("noidle") {
         crate::ui::idle::set_enabled(false);
         #[cfg(feature = "devtriggers")]
-        crate::log("idle: present gate DISABLED by /tmp/plxnative-noidle");
+        crate::log("idle: present gate DISABLED by /tmp/butaca-noidle");
     }
 }
 
-/// `/tmp/plxnative-audioenh=off|boost|loudness` — force the PERSISTED Boost Dialog / Normalize
+/// `/tmp/butaca-audioenh=off|boost|loudness` — force the PERSISTED Boost Dialog / Normalize
 /// Loudness preference (issue #266) at boot, harness-only.
 ///
 /// Every other boot override here (`dev::playback_quality_override`, `arm_glassload`, …) is
@@ -430,84 +430,84 @@ pub(crate) fn arm_audio_enhancements() {
     crate::player::set_audio_enhancements(a);
     #[cfg(feature = "devtriggers")]
     crate::log(&format!(
-        "audioenh: forced boost_dialog={} normalize_loudness={} by /tmp/plxnative-audioenh",
+        "audioenh: forced boost_dialog={} normalize_loudness={} by /tmp/butaca-audioenh",
         a.boost_dialog, a.normalize_loudness,
     ));
 }
 
-/// `/tmp/plxnative-nobudget` — the frame budget's A/B CONTROL LEG (spec §8.1, phase 11).
+/// `/tmp/butaca-nobudget` — the frame budget's A/B CONTROL LEG (spec §8.1, phase 11).
 ///
 /// Present, admission is what it was before phase 11: the `Poster` quota of three per frame and
 /// nothing else — no time ceiling, no solo rule, and a `Residency` upload (a backdrop, a hero
 /// logo) spending one of those three exactly as it used to. It exists so a device A/B measures
 /// this CHANGE and not the difference between two builds, and it is DIAG for the reason
-/// `plxnative-drawmask` is: an A/B whose two legs boot to different screens has measured the
+/// `butaca-drawmask` is: an A/B whose two legs boot to different screens has measured the
 /// screen.
 pub(crate) fn nobudget_armed() -> bool {
     crate::dev::flag("nobudget")
 }
 
-/// `/tmp/plxnative-detailosc`.
+/// `/tmp/butaca-detailosc`.
 pub(crate) fn detailosc_armed() -> bool {
     crate::dev::flag("detailosc")
 }
-/// `/tmp/plxnative-homeosc`.
+/// `/tmp/butaca-homeosc`.
 pub(crate) fn homeosc_armed() -> bool {
     crate::dev::flag("homeosc")
 }
-/// `/tmp/plxnative-heroosc`.
+/// `/tmp/butaca-heroosc`.
 pub(crate) fn heroosc_armed() -> bool {
     crate::dev::flag("heroosc")
 }
-/// `/tmp/plxnative-homefoldosc`.
+/// `/tmp/butaca-homefoldosc`.
 pub(crate) fn homefoldosc_armed() -> bool {
     crate::dev::flag("homefoldosc")
 }
-/// `/tmp/plxnative-libosc`.
+/// `/tmp/butaca-libosc`.
 pub(crate) fn libosc_armed() -> bool {
     crate::dev::flag("libosc")
 }
-/// `/tmp/plxnative-libswitch`.
+/// `/tmp/butaca-libswitch`.
 pub(crate) fn libswitch_armed() -> bool {
     crate::dev::flag("libswitch")
 }
-/// `/tmp/plxnative-searchosc`.
+/// `/tmp/butaca-searchosc`.
 pub(crate) fn searchosc_armed() -> bool {
     crate::dev::flag("searchosc")
 }
-/// `/tmp/plxnative-settings=<root|home|privacy|legal>`.
+/// `/tmp/butaca-settings=<root|home|privacy|legal>`.
 pub(crate) fn settings_boot_value() -> Option<String> {
     crate::dev::read("settings")
 }
-/// `/tmp/plxnative-settingsosc`.
+/// `/tmp/butaca-settingsosc`.
 pub(crate) fn settingsosc_armed() -> bool {
     crate::dev::flag("settingsosc")
 }
-/// `/tmp/plxnative-modalosc`.
+/// `/tmp/butaca-modalosc`.
 pub(crate) fn modalosc_armed() -> bool {
     crate::dev::flag("modalosc")
 }
-/// `/tmp/plxnative-legaldoc`.
+/// `/tmp/butaca-legaldoc`.
 pub(crate) fn legaldoc_armed() -> bool {
     crate::dev::flag("legaldoc")
 }
-/// `/tmp/plxnative-alert`.
+/// `/tmp/butaca-alert`.
 pub(crate) fn alert_armed() -> bool {
     crate::dev::flag("alert")
 }
-/// `/tmp/plxnative-acctosc`.
+/// `/tmp/butaca-acctosc`.
 pub(crate) fn acctosc_armed() -> bool {
     crate::dev::flag("acctosc")
 }
-/// `/tmp/plxnative-onboardosc`.
+/// `/tmp/butaca-onboardosc`.
 pub(crate) fn onboardosc_armed() -> bool {
     crate::dev::flag("onboardosc")
 }
-/// `/tmp/plxnative-navosc[=<ratingKey>]`.
+/// `/tmp/butaca-navosc[=<ratingKey>]`.
 pub(crate) fn navosc_value() -> Option<String> {
     crate::dev::read("navosc")
 }
-/// `/tmp/plxnative-pushbench[=<n>[,<ratingKey>]]` — `(n, ratingKey)`, defaulting `n` to 100 and
+/// `/tmp/butaca-pushbench[=<n>[,<ratingKey>]]` — `(n, ratingKey)`, defaulting `n` to 100 and
 /// `ratingKey` to empty (the empty case is resolved against `navosc`'s own value by the caller,
 /// `app::boot::boot`, before `bench::PushBench::new` ever sees it).
 pub(crate) fn pushbench_value() -> Option<(u32, String)> {
@@ -520,13 +520,13 @@ pub(crate) fn pushbench_value() -> Option<(u32, String)> {
         (parse_bench_n(n), rk.trim().to_string())
     })
 }
-/// `/tmp/plxnative-modalbench[=<n>[,<ratingKey>]]` — `(n, ratingKey)`, the same shape as
+/// `/tmp/butaca-modalbench[=<n>[,<ratingKey>]]` — `(n, ratingKey)`, the same shape as
 /// [`pushbench_value`] and for the same reason: the item menu leg needs its own ratingKey, and
 /// piggy-backing on `navosc`'s value would also arm `navosc`'s own independent Home<->tab/Detail
 /// bounce (`nav_osc = nav_osc_rk.is_some()` in `app::boot::boot`) — two competing navigators
 /// racing the same nav stack while modalbench tries to measure. Empty is resolved against
 /// `navosc`'s own value by the caller exactly as pushbench's empty case is, so a bare
-/// `plxnative-navosc=<rk>` with no `plxnative-modalbench` value still works; a scene wanting the
+/// `butaca-navosc=<rk>` with no `butaca-modalbench` value still works; a scene wanting the
 /// item menu WITHOUT navosc's bounce sets its own `<rk>` here instead.
 pub(crate) fn modalbench_value() -> Option<(u32, String)> {
     crate::dev::read("modalbench").map(|v| {
@@ -538,7 +538,7 @@ pub(crate) fn modalbench_value() -> Option<(u32, String)> {
         (parse_bench_n(n), rk.trim().to_string())
     })
 }
-/// `/tmp/plxnative-deepbench[=<depth>[,<ratingKey>]]` — `(depth, ratingKey)`, the same shape as
+/// `/tmp/butaca-deepbench[=<depth>[,<ratingKey>]]` — `(depth, ratingKey)`, the same shape as
 /// [`pushbench_value`]/[`modalbench_value`] and the same empty-value resolution (against
 /// `navosc`'s own ratingKey, by the caller, `app::boot::boot`) — `Library` cannot stand in for a
 /// missing ratingKey here the way it does for `PushBench`, so a `DeepBench` with no ratingKey at
@@ -561,21 +561,21 @@ fn parse_bench_n(v: &str) -> u32 {
         v.parse().ok().filter(|n: &u32| *n > 0).unwrap_or(bench::DEFAULT_BENCH_N)
     }
 }
-/// `/tmp/plxnative-framedrop[=<ms>]`.
+/// `/tmp/butaca-framedrop[=<ms>]`.
 pub(crate) fn framedrop_value() -> Option<String> {
     crate::dev::read("framedrop")
 }
-/// `/tmp/plxnative-firstrun`.
+/// `/tmp/butaca-firstrun`.
 pub(crate) fn firstrun_armed() -> bool {
     crate::dev::flag("firstrun")
 }
-/// `/tmp/plxnative-acct[=<ms>]` — auto-open the profile menu (headless capture of the popover).
+/// `/tmp/butaca-acct[=<ms>]` — auto-open the profile menu (headless capture of the popover).
 /// `None` when unarmed; `Some(None)` opens it as soon as Home is up; `Some(Some(ms))` waits until
 /// the screen has been at rest for `ms` first (simulator only — see `acct_arm`).
 pub(crate) fn acct_armed() -> Option<Option<u32>> {
     crate::dev::read("acct").map(|v| v.parse().ok())
 }
-/// `/tmp/plxnative-replay[=N]`'s raw content, for [`crate::app::boot::replay_budget`].
+/// `/tmp/butaca-replay[=N]`'s raw content, for [`crate::app::boot::replay_budget`].
 pub(crate) fn replay_trigger_value() -> Option<String> {
     crate::dev::read("replay")
 }
@@ -584,7 +584,7 @@ pub(crate) fn replay_trigger_value() -> Option<String> {
 // the headless detail-page walk (today's app/content.rs)
 // =================================================================================================
 
-/// The `/tmp/plxnative-detail`/`-play` headless walk: which section/column to press into, whether
+/// The `/tmp/butaca-detail`/`-play` headless walk: which section/column to press into, whether
 /// to activate the focused control, and whether to continue into the cast/crew filmography strip.
 /// Moved verbatim out of `app/content.rs` (phase 10 lane P) — its own module doc said as much:
 /// "Content navigation during the legacy route transition" was never true of this type, which
@@ -599,7 +599,7 @@ pub(crate) struct ContentBoot {
     right: u32,
     activate: bool,
     filmography: bool,
-    /// `/tmp/plxnative-bio` — once the person page has landed, present its biography sheet. It
+    /// `/tmp/butaca-bio` — once the person page has landed, present its biography sheet. It
     /// rides the same wait as `filmography` because it needs the same thing: the person's profile
     /// has to have ARRIVED, or the sheet is offered over a header that has not decided whether its
     /// prose is truncated yet.
@@ -642,7 +642,7 @@ impl ContentBoot {
     }
 }
 
-/// `/tmp/plxnative-detailplay` — whether the headless Play from the content walk pins the HUD for
+/// `/tmp/butaca-detailplay` — whether the headless Play from the content walk pins the HUD for
 /// a headless capture (`HUD_HEADLESS_MS`) rather than the ordinary linger duration.
 pub(crate) fn detailplay_forces_headless_hud() -> bool {
     crate::dev::flag("detailplay")
@@ -681,12 +681,12 @@ pub(crate) fn advance_content_boot(app: &mut App, fr: &Frame) {
         return;
     }
     if boot.waiting_person && boot.bio {
-        // `/tmp/plxnative-bio` — the person page's biography sheet, presented through the same
+        // `/tmp/butaca-bio` — the person page's biography sheet, presented through the same
         // door OK on the header uses (`ContentPanel::Bio`) and gated on the same predicate, so the
         // trigger cannot open a sheet an interactive press would have refused. It exists because
         // this sheet has no other headless route: OK on the header only opens it when the prose is
         // TRUNCATED, and the bio comes from plex.tv, which answers an injected server token 401 —
-        // so pair it with `/tmp/plxnative-personbio=<text>` for a boot that has any prose at all.
+        // so pair it with `/tmp/butaca-personbio=<text>` for a boot that has any prose at all.
         let available = app
             .pages
             .nav
@@ -729,7 +729,7 @@ pub(crate) fn advance_content_boot(app: &mut App, fr: &Frame) {
         if let Some(key) = key {
             app.inputs.extend(bridge::script_key(key, Tick { ms: fr.now, dt_us: 0 }));
         } else {
-            // `/tmp/plxnative-tracks=<n>` presents the page's own *Track information* sheet at
+            // `/tmp/butaca-tracks=<n>` presents the page's own *Track information* sheet at
             // page `n` — the only caller that opens it anywhere but page 1, and the only way a
             // headless capture reaches page 2 at all. It goes through the same door the Languages
             // press does (`bridge::open_content_panel`), so the trigger cannot present a panel the
@@ -757,8 +757,8 @@ pub(crate) fn advance_content_boot(app: &mut App, fr: &Frame) {
                     );
                 }
             }
-            // `/tmp/plxnative-about` presents the page's own *About* sheet — the footer card's
-            // synopsis read in full. It carries no page or cursor, so unlike `plxnative-tracks`
+            // `/tmp/butaca-about` presents the page's own *About* sheet — the footer card's
+            // synopsis read in full. It carries no page or cursor, so unlike `butaca-tracks`
             // the trigger is a bare flag; like it, it goes through the same door the OK press on
             // that card uses (`bridge::open_content_panel` over `ContentPanel::About`), so the
             // headless boot cannot present a sheet an interactive press could not.
@@ -832,7 +832,7 @@ mod content_boot_tests {
 // iteration early (the loop `continue`s, as it always did).
 // =================================================================================================
 
-/// The `/tmp/plxnative-search[=<query>]` trigger's seed-and-stand. A host test can drive the
+/// The `/tmp/butaca-search[=<query>]` trigger's seed-and-stand. A host test can drive the
 /// exact effects the trigger causes rather than re-typing them by hand — see
 /// `app::search_owned_tests::a_seeded_boot_query_survives_the_freshly_mounted_screens_first_sync`,
 /// which calls this function directly and does NOT drive [`super::read`] itself (that one line is
@@ -1001,7 +1001,7 @@ fn grid_library_search_heroidx_arm(app: &mut App, _fr: &mut Frame) {
                 app.bridge.home_command(HomeCmd::SelectHero(n));
             }
         }
-        // `/tmp/plxnative-heropin=<n>` — `heroidx`, then HOLD that billboard (no auto-advance):
+        // `/tmp/butaca-heropin=<n>` — `heroidx`, then HOLD that billboard (no auto-advance):
         // the screenshot pipeline's pin, so a settled capture shows the slot its scene named.
         if let Some(s) = crate::dev::read("heropin") {
             if let Ok(n) = s.parse::<c_int>() {
@@ -1057,7 +1057,7 @@ fn press_arm(app: &mut App, fr: &mut Frame) {
     }
 }
 
-/// `/tmp/plxnative-acct` — auto-open the profile menu (headless capture of the surface).
+/// `/tmp/butaca-acct` — auto-open the profile menu (headless capture of the surface).
 ///
 /// A per-frame ARM rather than a boot assignment, and that is what the surface changed: the menu
 /// used to be a route the boot could simply name (`route = Route::Account { over: BarHost::Home }`
@@ -1086,7 +1086,7 @@ fn acct_arm(app: &mut App, fr: &mut Frame) {
     }
 }
 
-/// `/tmp/plxnative-itemmenu` — snap into the grid and open the press-and-hold card menu on the
+/// `/tmp/butaca-itemmenu` — snap into the grid and open the press-and-hold card menu on the
 /// focused card (`fps:item-menu`, and the headless capture of the panel).
 ///
 /// It presents through THE SAME PATH the hold does and always did — `HomeCmd::ItemMenu` is queued
@@ -1175,7 +1175,7 @@ fn relaunch_arm(_app: &mut App, _fr: &mut Frame) -> bool {
     true
 }
 
-/// `/tmp/plxnative-detail=<rk>` — boot straight onto a detail page (`fps:cold-open`).
+/// `/tmp/butaca-detail=<rk>` — boot straight onto a detail page (`fps:cold-open`).
 ///
 /// **The request is the ASYNC one, and that is the whole scene.** This arm ran
 /// `MetadataCmd::LoadDetailNow` until phase 11 — the deliberately BLOCKING load, two sequential
@@ -1200,13 +1200,13 @@ fn detail_arm(app: &mut App, fr: &mut Frame) -> bool {
                     Ok(sid) => sid,
                     Err(_e) => {
                         #[cfg(feature = "devtriggers")]
-                        crate::log(&format!("plxnative-detail: refused: {_e}"));
+                        crate::log(&format!("butaca-detail: refused: {_e}"));
                         return false;
                     }
                 };
                 app.bridge.metadata_mut().run(crate::stores::metadata::MetadataCmd::RequestDetail { sid, rk: rk.to_string() });
                 #[cfg(feature = "devtriggers")]
-                crate::log(&format!("plxnative-detail: rk={rk} server={} start", sid.raw()));
+                crate::log(&format!("butaca-detail: rk={rk} server={} start", sid.raw()));
                 // A HARD CUT onto the page: at boot there is no outgoing screen to replace, so a
                 // dip would fade the page up out of nothing and read as a slow app rather than a
                 // navigated one. `push_detail` + `seed_node` in one call.
@@ -1218,7 +1218,7 @@ fn detail_arm(app: &mut App, fr: &mut Frame) -> bool {
     true
 }
 
-/// `/tmp/plxnative-collection=<ratingKey>` — mount the Collection page through the same argument
+/// `/tmp/butaca-collection=<ratingKey>` — mount the Collection page through the same argument
 /// a kind-4 card produces. The mock/server supplies the header and children asynchronously.
 fn collection_arm(app: &mut App, fr: &mut Frame) -> bool {
     if app.scenarios.collection_tried || fr.now.wrapping_sub(app.t0) <= 500 { return true; }
@@ -1228,7 +1228,7 @@ fn collection_arm(app: &mut App, fr: &mut Frame) -> bool {
         Ok(sid) => sid,
         Err(_e) => {
             #[cfg(feature = "devtriggers")]
-            crate::log(&format!("plxnative-collection: refused: {_e}"));
+            crate::log(&format!("butaca-collection: refused: {_e}"));
             return false;
         }
     };
@@ -1236,11 +1236,11 @@ fn collection_arm(app: &mut App, fr: &mut Frame) -> bool {
         crate::screens::registry::ContentArg::Collection(crate::plex::collections::CollectionRef::by_rk(
             sid, &rk, 0, crate::i18n::msg::browse_collection_kind()))));
     #[cfg(feature = "devtriggers")]
-    crate::log(&format!("plxnative-collection: rk={rk} server={} start", sid.raw()));
+    crate::log(&format!("butaca-collection: rk={rk} server={} start", sid.raw()));
     true
 }
 
-/// `/tmp/plxnative-play=<rk>` — fetch that item and play its leaf, headless. TWO frames at least,
+/// `/tmp/butaca-play=<rk>` — fetch that item and play its leaf, headless. TWO frames at least,
 /// since phase 11: the request goes off-thread on the arming frame and the play is dispatched on
 /// the frame its landing arrives.
 ///
@@ -1253,7 +1253,7 @@ fn collection_arm(app: &mut App, fr: &mut Frame) -> bool {
 ///
 /// **The `start` line stays where it always was, at the DISPATCH**, not at the request. The
 /// harness's offline cases key on it (`tests/run.py`'s `resolve_pin`: the IPv6 re-point must
-/// PRECEDE `plxnative-play: … start`), and moving a line earlier is exactly the kind of change
+/// PRECEDE `butaca-play: … start`), and moving a line earlier is exactly the kind of change
 /// that turns an ordering assertion into a coin toss. The request gets its own `… request` line,
 /// which carries no `start` and so cannot be mistaken for one.
 ///
@@ -1274,13 +1274,13 @@ fn play_arm(app: &mut App, fr: &mut Frame) -> bool {
                     Ok(sid) => sid,
                     Err(_e) => {
                         #[cfg(feature = "devtriggers")]
-                        crate::log(&format!("plxnative-play: refused: {_e}"));
+                        crate::log(&format!("butaca-play: refused: {_e}"));
                         return false;
                     }
                 };
                 app.bridge.metadata_mut().run(crate::stores::metadata::MetadataCmd::RequestDetail { sid, rk: rk.to_string() });
                 #[cfg(feature = "devtriggers")]
-                crate::log(&format!("plxnative-play: rk={rk} server={} request", sid.raw()));
+                crate::log(&format!("butaca-play: rk={rk} server={} request", sid.raw()));
                 app.scenarios.play_await = Some((sid, rk.to_string(), fr.now.wrapping_add(12_000)));
             }
         }
@@ -1317,7 +1317,7 @@ fn play_await_tick(app: &mut App, fr: &mut Frame) {
             app.scenarios.play_await = None;
             #[cfg(feature = "devtriggers")]
             crate::log(&format!(
-                "plxnative-play: rk={rk} server={} — no detail landed ({})",
+                "butaca-play: rk={rk} server={} — no detail landed ({})",
                 sid.raw(),
                 if settled { "the fetch settled without it" } else { "12s" }
             ));
@@ -1327,11 +1327,11 @@ fn play_await_tick(app: &mut App, fr: &mut Frame) {
     app.scenarios.play_await = None;
     if part.is_empty() {
         #[cfg(feature = "devtriggers")]
-        crate::log(&format!("plxnative-play: rk={rk} server={} — nothing playable on it", sid.raw()));
+        crate::log(&format!("butaca-play: rk={rk} server={} — nothing playable on it", sid.raw()));
         return;
     }
     #[cfg(feature = "devtriggers")]
-    crate::log(&format!("plxnative-play: rk={rk} server={} start", sid.raw()));
+    crate::log(&format!("butaca-play: rk={rk} server={} start", sid.raw()));
     if crate::route::request_play(&mut app.player.session, app.bridge.metadata_mut(), sid, &rk, &part, &vc, &ac, &title, "") {
         let resume = crate::metadata::resume_ns(resume_ms, dur_ms);
         crate::app::playback::start_playback(&mut app.player.session,
@@ -1490,7 +1490,7 @@ fn menu_arm(app: &mut App, fr: &mut Frame) {
     }
 }
 
-/// `/tmp/plxnative-menupick=<tab>,<target>`: `target` is either an absolute `TableView` row
+/// `/tmp/butaca-menupick=<tab>,<target>`: `target` is either an absolute `TableView` row
 /// number (the original contract) or, on the Audio tab, a NAMED target — `"boost"`/`"loudness"` —
 /// resolved through the panel's own [`crate::ui::track_menu::AudioRowTarget`] row map
 /// (`TrackMenuState::row_for_audio_target`). A name survives a track-count change a hand-written
@@ -1528,7 +1528,7 @@ fn menupick_arm(app: &mut App, fr: &mut Frame) {
     }
 }
 
-/// `/tmp/plxnative-subtiming`'s own state across frames — see [`subtiming_arm`].
+/// `/tmp/butaca-subtiming`'s own state across frames — see [`subtiming_arm`].
 #[derive(Debug, Default)]
 pub(crate) struct Subtiming {
     /// `true` once stage 1 (the subtitle commit) has fired, so a later frame does not commit a
@@ -1580,8 +1580,8 @@ fn subtiming_step(now: u32, armed_at: u32, cur_sid: i64, want_sid: i64) -> Subti
     }
 }
 
-/// `/tmp/plxnative-subtiming` — the Timing capsule's own headless trigger (plan
-/// `subtitle-menu-capsule` §5), self-contained rather than riding `plxnative-menupick`: that one
+/// `/tmp/butaca-subtiming` — the Timing capsule's own headless trigger (plan
+/// `subtitle-menu-capsule` §5), self-contained rather than riding `butaca-menupick`: that one
 /// fires at 7000 ms and would stack a Tracks panel on top of the capsule this trigger wants alone.
 ///
 /// **Stage 1**, once the item's PLAN has landed and it is not transcoding: pick the first embedded
@@ -1736,7 +1736,7 @@ fn should_replay_after_eos(handed_off_to_up_next: bool, replay_left: u32, playur
     !handed_off_to_up_next && replay_left > 0 && playurl_flag
 }
 
-/// `/tmp/plxnative-replay[=N]` — REPLAY AFTER COMPLETION (LG App Self Checklist #46). Called from
+/// `/tmp/butaca-replay[=N]` — REPLAY AFTER COMPLETION (LG App Self Checklist #46). Called from
 /// `app::run::playback_tick` right after `finish_playback` has left the player on a real EOS;
 /// `handed_off_to_up_next` is that call's own return value, telling an Up Next handoff apart from
 /// a real exit (see [`should_replay_after_eos`]). Re-arming `auto_tried` sends the next frame back
@@ -1783,7 +1783,7 @@ pub(crate) fn failure_fixture(session: &mut crate::route::PlaybackSession) {
 /// quality, pause, menu, menupick, subtiming, marker), called once per iteration from
 /// `app::run::run` at exactly the position `dev_scripts` occupied. `false` propagates a refused
 /// trigger (an invalid
-/// `plxnative-server` slot) — the loop `continue`s exactly as it always did, skipping the rest of
+/// `butaca-server` slot) — the loop `continue`s exactly as it always did, skipping the rest of
 /// this frame's arms and phases alike.
 pub(crate) unsafe fn each_frame(app: &mut App, fr: &mut Frame) -> bool {
     #[cfg(feature = "devtriggers")]
@@ -1849,7 +1849,7 @@ pub(crate) fn controlled_each_frame(app: &mut App, fr: &mut Frame) -> bool {
 // governs production per-page work too (`update_home_chrome`) and is not itself a dev arm.
 // =================================================================================================
 
-/// `/tmp/plxnative-pickuser=<index>` — auto-select that roster tile once the who's-watching
+/// `/tmp/butaca-pickuser=<index>` — auto-select that roster tile once the who's-watching
 /// picker is up. Called from `app::run::update` at the position the arm always occupied.
 pub(crate) fn pickuser_tick(app: &mut App) {
     if !(matches!(app.route(), AppArg::Profiles)
@@ -1878,7 +1878,7 @@ pub(crate) fn pickuser_tick(app: &mut App) {
     }
 }
 
-/// `/tmp/plxnative-navosc` — bounce the route Home↔Library (or Home↔a named detail page) on a
+/// `/tmp/butaca-navosc` — bounce the route Home↔Library (or Home↔a named detail page) on a
 /// timer. Called from `app::run::land_results` at the position the arm always occupied.
 pub(crate) fn nav_osc_tick(app: &mut App, now: u32) {
     use crate::screens::registry::HomeTab;
@@ -1911,7 +1911,7 @@ pub(crate) fn nav_osc_tick(app: &mut App, now: u32) {
     }
 }
 
-/// `/tmp/plxnative-heroosc` — perpetually page the real hero carousel.
+/// `/tmp/butaca-heroosc` — perpetually page the real hero carousel.
 pub(crate) fn hero_osc_tick(app: &mut App, now: u32) {
     if app.scenarios.dev.hero_osc && now.wrapping_sub(app.scenarios.hero_osc_last) > 700 {
         app.scenarios.hero_osc_last = now;
@@ -1919,7 +1919,7 @@ pub(crate) fn hero_osc_tick(app: &mut App, now: u32) {
     }
 }
 
-/// `/tmp/plxnative-homefoldosc` — alternate the real hero↔first-shelf snap.
+/// `/tmp/butaca-homefoldosc` — alternate the real hero↔first-shelf snap.
 pub(crate) fn home_fold_osc_tick(app: &mut App, now: u32) {
     if app.scenarios.dev.home_fold_osc && now.wrapping_sub(app.scenarios.home_fold_osc_last) > 700 {
         app.scenarios.home_fold_osc_last = now;
@@ -1932,7 +1932,7 @@ pub(crate) fn home_fold_osc_tick(app: &mut App, now: u32) {
     }
 }
 
-/// `/tmp/plxnative-homeosc` — sweep the home grid focus top↔bottom to reproduce scroll judder.
+/// `/tmp/butaca-homeosc` — sweep the home grid focus top↔bottom to reproduce scroll judder.
 pub(crate) fn home_osc_tick(app: &mut App, now: u32) {
     if app.scenarios.dev.home_osc && now.wrapping_sub(app.scenarios.home_osc_last) > 350 {
         app.scenarios.home_osc_last = now;
@@ -1943,7 +1943,7 @@ pub(crate) fn home_osc_tick(app: &mut App, now: u32) {
     }
 }
 
-/// `/tmp/plxnative-libosc` — the Library twin of `homeosc`.
+/// `/tmp/butaca-libosc` — the Library twin of `homeosc`.
 pub(crate) fn lib_osc_tick(app: &mut App, now: u32) {
     if app.scenarios.dev.lib_osc && matches!(app.route(), AppArg::Library) && now.wrapping_sub(app.scenarios.lib_osc_last) > 350 {
         app.scenarios.lib_osc_last = now;
@@ -1951,7 +1951,7 @@ pub(crate) fn lib_osc_tick(app: &mut App, now: u32) {
     }
 }
 
-/// `/tmp/plxnative-libswitch` — cycle EVERY Library switch on a timer.
+/// `/tmp/butaca-libswitch` — cycle EVERY Library switch on a timer.
 pub(crate) fn lib_switch_tick(app: &mut App, now: u32) {
     if app.scenarios.dev.lib_switch && matches!(app.route(), AppArg::Library) && now.wrapping_sub(app.scenarios.lib_switch_last) > 1400 {
         app.scenarios.lib_switch_last = now;
@@ -1960,7 +1960,7 @@ pub(crate) fn lib_switch_tick(app: &mut App, now: u32) {
     }
 }
 
-/// `/tmp/plxnative-searchosc` — the Search twin of `homeosc`/`libosc`.
+/// `/tmp/butaca-searchosc` — the Search twin of `homeosc`/`libosc`.
 pub(crate) fn search_osc_tick(app: &mut App, now: u32) {
     if matches!(app.route(), AppArg::Search) && app.scenarios.dev.search_osc && now.wrapping_sub(app.scenarios.search_osc_last) > 350 {
         app.scenarios.search_osc_last = now;
@@ -1971,7 +1971,7 @@ pub(crate) fn search_osc_tick(app: &mut App, now: u32) {
     }
 }
 
-/// `/tmp/plxnative-acctosc` — drive the profile menu's own TableView.
+/// `/tmp/butaca-acctosc` — drive the profile menu's own TableView.
 pub(crate) fn account_osc_tick(app: &mut App, now: u32) {
     if app.scenarios.dev.account_osc && crate::app::bridge::account_menu_up(&app.pages) {
         crate::ui::idle::wake();
@@ -1989,7 +1989,7 @@ pub(crate) fn account_osc_tick(app: &mut App, now: u32) {
     }
 }
 
-/// `/tmp/plxnative-modalosc` (with `plxnative-settings=root`) — open/dismiss Settings every 1.5 s.
+/// `/tmp/butaca-modalosc` (with `butaca-settings=root`) — open/dismiss Settings every 1.5 s.
 pub(crate) fn modal_osc_tick(app: &mut App, now: u32) {
     if app.scenarios.dev.modal_osc && app.scenarios.settings_tried && now.wrapping_sub(app.scenarios.modal_osc_last) > 1500 {
         app.scenarios.modal_osc_last = now;
@@ -2002,7 +2002,7 @@ pub(crate) fn modal_osc_tick(app: &mut App, now: u32) {
 }
 
 // =================================================================================================
-// stress-bench oscillators (`/tmp/plxnative-pushbench`, `/tmp/plxnative-modalbench`) — see
+// stress-bench oscillators (`/tmp/butaca-pushbench`, `/tmp/butaca-modalbench`) — see
 // `bench`'s module doc for the pure state machine both ticks below drive. Half-periods reuse
 // `nav_osc`'s 1400 ms and `modal_osc`'s 1500 ms exactly: "never faster than a user could
 // plausibly drive" (spec) is the same argument those two already settled.
@@ -2142,7 +2142,7 @@ fn push_bench_refresh_person(app: &mut App) {
     }
 }
 
-/// `/tmp/plxnative-pushbench` — see `bench`'s module doc. Called from `land_results` beside
+/// `/tmp/butaca-pushbench` — see `bench`'s module doc. Called from `land_results` beside
 /// `nav_osc_tick`, the same phase boundary every route-changing dev arm runs at.
 pub(crate) fn push_bench_tick(app: &mut App, now: u32) {
     if app.scenarios.push_bench.is_none() {
@@ -2216,7 +2216,7 @@ fn modal_bench_open(app: &mut App, target: bench::ModalTarget) {
     }
 }
 
-/// `/tmp/plxnative-modalbench` — see `bench`'s module doc. Called from `update` beside
+/// `/tmp/butaca-modalbench` — see `bench`'s module doc. Called from `update` beside
 /// `modal_osc_tick`, the same phase boundary every Settings-family dev arm runs at. Dismissal is
 /// the single generic `dismiss_surfaces` every modal style already shares (`modal_osc_tick`'s own
 /// reverse leg): a Compact/Sheet/Alert surface is dismissed the same way regardless of which one
@@ -2256,7 +2256,7 @@ pub(crate) fn modal_bench_tick(app: &mut App, now: u32) {
 }
 
 // =================================================================================================
-// deep bench (`/tmp/plxnative-deepbench`) — see `bench`'s module doc for why each cycle here is
+// deep bench (`/tmp/butaca-deepbench`) — see `bench`'s module doc for why each cycle here is
 // one nav op, not a round trip, and why `Library` never appears in its rotation.
 // =================================================================================================
 
@@ -2321,7 +2321,7 @@ fn deep_bench_close(app: &mut App) {
     crate::app::bridge::nav_pop(&mut app.pages);
 }
 
-/// `/tmp/plxnative-deepbench` — see `bench`'s module doc. Called from `land_results` beside
+/// `/tmp/butaca-deepbench` — see `bench`'s module doc. Called from `land_results` beside
 /// `push_bench_tick`, the same phase boundary: this bench changes the page stack every step too.
 pub(crate) fn deep_bench_tick(app: &mut App, now: u32) {
     if app.scenarios.deep_bench.is_none() {
@@ -2375,7 +2375,7 @@ pub(crate) fn deep_bench_tick(app: &mut App, now: u32) {
     }
 }
 
-/// `/tmp/plxnative-legaldoc` (with `plxnative-settings=legal`) — one OK on the Legal index.
+/// `/tmp/butaca-legaldoc` (with `butaca-settings=legal`) — one OK on the Legal index.
 pub(crate) fn legal_doc_tick(app: &mut App, now: u32, dt: f32) {
     if app.scenarios.dev.legal_doc
         && !app.scenarios.legal_doc_tried
@@ -2387,7 +2387,7 @@ pub(crate) fn legal_doc_tick(app: &mut App, now: u32, dt: f32) {
     }
 }
 
-/// `/tmp/plxnative-alert` (with `plxnative-settings=privacy`) — walk to and open the decision alert.
+/// `/tmp/butaca-alert` (with `butaca-settings=privacy`) — walk to and open the decision alert.
 pub(crate) fn alert_tick(app: &mut App, now: u32, dt: f32) {
     if app.scenarios.dev.alert_boot
         && !app.scenarios.alert_tried
@@ -2406,7 +2406,7 @@ pub(crate) fn alert_tick(app: &mut App, now: u32, dt: f32) {
     }
 }
 
-/// `/tmp/plxnative-settingsosc` — hold Settings open under a continuous focus sweep.
+/// `/tmp/butaca-settingsosc` — hold Settings open under a continuous focus sweep.
 pub(crate) fn settings_osc_tick(app: &mut App, now: u32, dt: f32) {
     if app.scenarios.dev.settings_osc && crate::app::bridge::settings_up(&app.pages) {
         crate::ui::idle::wake();
@@ -2420,7 +2420,7 @@ pub(crate) fn settings_osc_tick(app: &mut App, now: u32, dt: f32) {
     }
 }
 
-/// `/tmp/plxnative-onboardosc` — sweep the first-run sources editor's focus.
+/// `/tmp/butaca-onboardosc` — sweep the first-run sources editor's focus.
 pub(crate) fn onboard_osc_tick(app: &mut App, now: u32, dt: f32) {
     if app.scenarios.dev.onboard_osc && matches!(app.route(), AppArg::Onboard) {
         crate::ui::idle::invalidate();
@@ -2434,7 +2434,7 @@ pub(crate) fn onboard_osc_tick(app: &mut App, now: u32, dt: f32) {
     }
 }
 
-/// `/tmp/plxnative-detailosc` — sweep the detail page's focus down↔up.
+/// `/tmp/butaca-detailosc` — sweep the detail page's focus down↔up.
 pub(crate) fn detail_osc_tick(app: &mut App, now: u32) {
     if app.scenarios.dev.detail_osc && matches!(app.route(), AppArg::Content(crate::screens::registry::ContentArg::Detail { .. })) {
         let key = if (now / 450) % 2 == 0 { Key::Down } else { Key::Up };
@@ -2448,7 +2448,7 @@ pub(crate) fn detail_osc_tick(app: &mut App, now: u32) {
 // phase's instructions say to leave alone.
 // =================================================================================================
 
-/// `/tmp/plxnative-rec` — read by controlled-bootstrap preflight. The recorder/replay MECHANISM
+/// `/tmp/butaca-rec` — read by controlled-bootstrap preflight. The recorder/replay MECHANISM
 /// stays in `app/recorder.rs` (this phase's instructions: it is not a scenario), but the raw
 /// trigger read goes through the one door every other trigger does.
 ///
@@ -2464,7 +2464,7 @@ pub(crate) fn rec_trigger() -> Result<Option<String>, &'static str> {
     Ok(None)
 }
 
-/// `/tmp/plxnative-recplay` — see [`rec_trigger`].
+/// `/tmp/butaca-recplay` — see [`rec_trigger`].
 #[cfg(feature = "devtriggers")]
 pub(crate) fn recplay_trigger() -> Result<Option<String>, &'static str> {
     crate::ui::rec::mode_value(&super::path("recplay")).map_err(|_| "invalid replay trigger")
@@ -2474,7 +2474,7 @@ pub(crate) fn recplay_trigger() -> Result<Option<String>, &'static str> {
     Ok(None)
 }
 
-/// `/tmp/plxnative-app-init` — an explicit typed initial for a controlled boot, read by
+/// `/tmp/butaca-app-init` — an explicit typed initial for a controlled boot, read by
 /// `app::bootstrap` in place of capturing one. `None` when the trigger is absent (always, in a
 /// release build); `Some(Err)` when it is present but unreadable. See [`rec_trigger`].
 #[cfg(feature = "devtriggers")]
@@ -2496,7 +2496,7 @@ pub(crate) fn app_init_value() -> Option<Result<serde_json::Value, &'static str>
 // real record installed at boot. Nothing here paints a screen directly.
 // =================================================================================================
 
-/// The synthetic failure `plxnative-signinfail` stands for: a name that did not resolve, the
+/// The synthetic failure `butaca-signinfail` stands for: a name that did not resolve, the
 /// commonest way a television "has no internet". A `net::RequestFailure` like the one libcurl's
 /// `CURLE_COULDNT_RESOLVE_HOST` produces, planted only into the one call it replaces — never into
 /// `net`'s own records, which other callers read as real evidence (0.6.6's reason, kept).
@@ -2514,7 +2514,7 @@ fn signinfail_spec() -> Option<String> {
     crate::dev::read("signinfail")
 }
 
-/// `/tmp/plxnative-signinfail[=error]` — every sign-in code request fails as an unresolvable
+/// `/tmp/butaca-signinfail[=error]` — every sign-in code request fails as an unresolvable
 /// plex.tv would. Re-read at each attempt, so *Try again* fails the same way until it is removed.
 /// `None` means "make the real request".
 pub(crate) fn signin_trouble_create()
@@ -2528,14 +2528,14 @@ pub(crate) fn signin_trouble_create()
     }
 }
 
-/// `/tmp/plxnative-signinfail=stall` — the code is real, but every poll of it goes unanswered, so
+/// `/tmp/butaca-signinfail=stall` — the code is real, but every poll of it goes unanswered, so
 /// the wait reaches the stalled rule (`auth::LINK_TROUBLE_AFTER`) exactly as a dropped link would.
 pub(crate) fn signin_trouble_poll() -> Option<crate::plex::account::PinPoll> {
     (signinfail_spec()?.as_str() == "stall")
         .then(|| crate::plex::account::PinPoll::Unreachable(Err(synthetic_dns_failure())))
 }
 
-/// `/tmp/plxnative-signinfail=resources|resources-blip` — fail the plex.tv resource listing on
+/// `/tmp/butaca-signinfail=resources|resources-blip` — fail the plex.tv resource listing on
 /// every attempt, or on its first attempt only. The latter exercises the in-place retry while the
 /// sign-in screen remains in Discovering.
 pub(crate) fn signin_trouble_resources()

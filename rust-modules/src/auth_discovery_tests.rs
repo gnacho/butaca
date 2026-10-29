@@ -5,7 +5,7 @@ use super::*;
 #[allow(unused_imports)]
 use super::test_support::*;
 
-/// PLX-NATIVE-12: authorization has already succeeded, so a transient failure listing plex.tv
+/// BUTACA-12: authorization has already succeeded, so a transient failure listing plex.tv
 /// resources must be retried in place instead of becoming the terminal silent verdict.
 #[test]
 fn authorized_discovery_retries_a_dns_blip_before_settling() {
@@ -1080,7 +1080,7 @@ struct TestCaGuard(std::path::PathBuf);
 impl TestCaGuard {
     fn install(pem: &str, tag: &str) -> TestCaGuard {
         let path = std::env::temp_dir().join(format!(
-            "plxnative-test-ca-{tag}-{}-{:?}.pem",
+            "butaca-test-ca-{tag}-{}-{:?}.pem",
             std::process::id(),
             std::thread::current().id()
         ));
@@ -2264,7 +2264,7 @@ fn a_sign_in_roster_carries_plex_tvs_household_evidence_verbatim() {
     );
 }
 
-// ---- PLX-NATIVE-10: an insecure-only verdict carries the evidence that explains it ----
+// ---- BUTACA-10: an insecure-only verdict carries the evidence that explains it ----
 
 /// Race `resource` through the production coordinator with `dial`, then fold the one-server
 /// roster exactly as sign-in does — the path whose `Discovery` the incident is built from.
@@ -2412,7 +2412,7 @@ fn insecure_only_evidence_tells_an_absent_relay_from_a_failed_one() {
 }
 
 
-// ---- PLX-NATIVE-10: consent-gated plaintext on the home network ----
+// ---- BUTACA-10: consent-gated plaintext on the home network ----
 
 /// What answers the no-relay reporter's topology when the plaintext candidate is named by any
 /// host (the hostname variant below re-addresses it): every plaintext candidate but the remote

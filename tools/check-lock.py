@@ -11,7 +11,7 @@ stale lock to clean up by hand (unlike a mkdir/pidfile scheme).
 Usage:
     check-lock.py [--lock PATH] [--timeout SECONDS] -- CMD...
 
-The lock file defaults to `${PLX_CHECK_LOCK:-~/.cache/plxnative/check.lock}`, which is
+The lock file defaults to `${PLX_CHECK_LOCK:-~/.cache/butaca/check.lock}`, which is
 deliberately OUTSIDE any git worktree so every checkout on the machine contends for the
 same file. Set `PLX_CHECK_LOCK=off` to bypass locking entirely (escape hatch for a
 machine known to be otherwise idle, or for debugging the wrapper itself).
@@ -37,7 +37,7 @@ import subprocess
 import sys
 import time
 
-DEFAULT_LOCK = os.path.expanduser("~/.cache/plxnative/check.lock")
+DEFAULT_LOCK = os.path.expanduser("~/.cache/butaca/check.lock")
 POLL_INTERVAL = 2
 REPORT_INTERVAL = 60
 EX_TEMPFAIL = 75

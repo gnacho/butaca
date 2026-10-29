@@ -103,7 +103,7 @@ pub const DEFAULT_PORT: i32 = 32400;
 /// **The build's half of "may a credential ride this origin".** The question itself has ONE
 /// answer, `super::grant::credential_allowed` (or `grant::allowed_under` in a pure function that
 /// receives this value): this policy, OR a live consented plaintext grant for that exact origin
-/// (PLX-NATIVE-10). Every caller that used to carry its own `cfg!(feature = "devtriggers")` (the
+/// (BUTACA-10). Every caller that used to carry its own `cfg!(feature = "devtriggers")` (the
 /// http guard, the curlio media twin, the probe activation gate) now goes through it, and
 /// [`CredentialPolicy::build`] is the ONLY place the cfg still lives.
 ///
@@ -111,7 +111,7 @@ pub const DEFAULT_PORT: i32 = 32400;
 /// (a grant is the one exception, and it lives in `grant`, not here). A
 /// developer build (`devtriggers`) is [`CredentialPolicy::AllowPlaintext`]: the rule exists so a
 /// lane with no TLS server of its own can still exercise the credentialed path against a plain
-/// `dev::DevServer` — unless `/tmp/plxnative-storepolicy` was armed at boot, which
+/// `dev::DevServer` — unless `/tmp/butaca-storepolicy` was armed at boot, which
 /// gives a developer build the store's `HttpsOnly` so the consent flow (reachable only under it)
 /// can be exercised in the sim and on the TV. The trigger only ever tightens, and a store build
 /// has no trigger to read. Nothing about WHICH origin is eligible ever depends on where the policy came
@@ -134,8 +134,8 @@ pub enum CredentialPolicy {
 
 #[cfg(all(feature = "devtriggers", not(test)))]
 crate::dev::latched_flag!(
-    /// `/tmp/plxnative-storepolicy` — a developer build takes the store's
-    /// [`CredentialPolicy::HttpsOnly`], read once at boot, so the PLX-NATIVE-10 consent flow (which
+    /// `/tmp/butaca-storepolicy` — a developer build takes the store's
+    /// [`CredentialPolicy::HttpsOnly`], read once at boot, so the BUTACA-10 consent flow (which
     /// `AllowPlaintext` never needs) is reachable in the sim and on the TV. Absent from a store
     /// build, and never read by a host test: a stray file on a developer's machine must not change
     /// what the suite grades.
@@ -224,7 +224,7 @@ impl Origin {
     /// prefix, and [`split`] is the entry point for a caller that wants the rest of the URL too.
     ///
     /// A MISSING scheme is read as `http`. That is not laxity for its own sake — it is what
-    /// `StreamUrl::parse` has always done with the `/tmp/plxnative-url` override, and this
+    /// `StreamUrl::parse` has always done with the `/tmp/butaca-url` override, and this
     /// function replaced that parser.
     pub fn parse(url: &str) -> Option<Origin> {
         let p = Parts::of(url);
@@ -314,7 +314,7 @@ impl Origin {
 /// Split a URL into its origin and the rest of it (path + query, `""` when there is none).
 ///
 /// **Total**, unlike [`Origin::parse`], because its caller is `StreamUrl::parse` — which turns the
-/// `/tmp/plxnative-url` override into something to dial and has no failure path to take. Every
+/// `/tmp/butaca-url` override into something to dial and has no failure path to take. Every
 /// degenerate input therefore yields *something*: a missing scheme reads as `http`, an unknown one
 /// is discarded rather than mistaken for a host, and a port that is absent or undialable becomes
 /// [`DEFAULT_PORT`] rather than wrapping into a port nobody wrote down (which is

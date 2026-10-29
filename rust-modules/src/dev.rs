@@ -1,15 +1,15 @@
 //! The `/tmp` developer-trigger surface, behind one door.
 //!
-//! This app is driven headlessly by ~44 files under `/tmp/plxnative-*`: which screen to boot to,
+//! This app is driven headlessly by ~44 files under `/tmp/butaca-*`: which screen to boot to,
 //! which item to play, which URL to stream, whether to auto-press OK, which PMS token to use.
 //! That is how `tests/run.py` and every capture scene work, and it is not going away.
 //!
 //! It must not exist in a public build. `/tmp` is the SHARED system `/tmp` in the production jail
 //! too (mode 1777, both jail profiles), so on an ordinary user's TV every one of those files is a
 //! behaviour switch any co-resident process can throw. Three are outright takeovers:
-//! `plxnative-token` beats the signed-in session (`app.rs`'s boot gate), `plxnative-servers` hands
+//! `butaca-token` beats the signed-in session (`app.rs`'s boot gate), `butaca-servers` hands
 //! the app a whole additional server — an address AND the token to trust it with (see [`servers`])
-//! — and `plxnative-url` replaces the stream the player feeds.
+//! — and `butaca-url` replaces the stream the player feeds.
 //!
 //! So every read goes through here, and here is `#[cfg]`-gated on the `devtriggers` feature. In a
 //! `--no-default-features` build [`flag`] is `false` and [`read`] is `None` at COMPILE time, so
@@ -21,12 +21,12 @@
 //! `nobudget` flag on `DevFlags`), the optimizer may keep the branch and its string literals
 //! in a release build, and `ci/check-package.py` fails the package because it greps the shipped
 //! bytes for every trigger name this module lists. So every statement whose literal names a trigger
-//! (a log line saying `/tmp/plxnative-…`) carries its own `#[cfg(feature = "devtriggers")]`. Never
+//! (a log line saying `/tmp/butaca-…`) carries its own `#[cfg(feature = "devtriggers")]`. Never
 //! rely on constant folding for this.
 //!
 //! Two rules for anything added later:
 //!
-//! 1. **Never open a `/tmp` path directly.** The grep that audits this (`/tmp/plxnative-` outside
+//! 1. **Never open a `/tmp` path directly.** The grep that audits this (`/tmp/butaca-` outside
 //!    this module and the unconditional log sinks) is the only thing keeping the property
 //!    true. The two profiler logs are dev-only and listed in [`DIAG`] below.
 //! 2. **A gate is not always a path.** `any_trigger_present` scans the whole directory and names
@@ -50,8 +50,8 @@ pub(crate) mod scenarios;
 
 /// Files that are pure diagnostics rather than automation — see [`any_trigger_present`].
 ///
-/// Every log this app writes belongs here, not just its trigger. `plxnative-anim` was listed and
-/// `plxnative-anim.log` was not, while arming the overlay creates exactly that file and nothing
+/// Every log this app writes belongs here, not just its trigger. `butaca-anim` was listed and
+/// `butaca-anim.log` was not, while arming the overlay creates exactly that file and nothing
 /// ever removes it (`make run` clears only the event log; `tests/run.py` spares every `*.log` by
 /// design) — so a single historical anim session skipped the who's-watching picker on every later
 /// boot, interactive ones included.
@@ -59,76 +59,76 @@ pub(crate) mod scenarios;
 // release build, but the test below asserts this list's contents and runs with default features.
 #[cfg(any(feature = "devtriggers", test))]
 const DIAG: [&str; 31] = [
-    "plxnative-diag.log",
-    "plxnative-events.log",
-    "plxnative-stderr.log",
-    "plxnative-crash.log",
-    "plxnative-anim.log",
-    "plxnative-profile",
-    "plxnative-gputime.jsonl",
-    "plxnative-hwcnt",
-    "plxnative-hwcnt.jsonl",
+    "butaca-diag.log",
+    "butaca-events.log",
+    "butaca-stderr.log",
+    "butaca-crash.log",
+    "butaca-anim.log",
+    "butaca-profile",
+    "butaca-gputime.jsonl",
+    "butaca-hwcnt",
+    "butaca-hwcnt.jsonl",
     // The render thread's own per-phase clock ([`crate::ui::profile`]'s CPU mode). DIAG for the
     // reason the two GPU profilers are: it observes a screen, and must not move the boot away
     // from the screen it was armed to observe.
-    "plxnative-cpuprof",
-    "plxnative-anim",
-    "plxnative-remote",
-    "plxnative-capture",
-    "plxnative-noidle",
+    "butaca-cpuprof",
+    "butaca-anim",
+    "butaca-remote",
+    "butaca-capture",
+    "butaca-noidle",
     // The focus fingerprint ([`crate::focusprobe`]). Diagnostic for `noidle`'s reason and one of
     // its own: it only READS focus and writes a log line, and a (route × key) characterization
     // harness has to be able to observe the who's-watching picker, which a non-DIAG trigger would
     // suppress — the observer would remove the screen it was armed to watch.
-    "plxnative-focus",
+    "butaca-focus",
     // The two OVERDRAW surfaces and the hero-ground fold ([`crate::ui::overdraw`],
     // `docs/backdrop-blur-profiling.md` Part 5). All three are measurement knobs whose whole
     // method is an A/B against an unmasked control leg — and a non-DIAG trigger suppresses the
     // who's-watching picker, so the control leg and the masked leg would boot to DIFFERENT
     // SCREENS and the difference between them would be the screen, not the class being priced.
     // That is the exact failure this list exists to stop, and it is invisible in the numbers.
-    "plxnative-overdraw",
-    "plxnative-drawmask",
-    "plxnative-heroground",
+    "butaca-overdraw",
+    "butaca-drawmask",
+    "butaca-heroground",
     // The FRAME BUDGET's A/B control leg (`ui/frame/budget.rs`, spec §8.1): admission as it was
     // before phase 11 — quota only, no time ceiling, no solo rule. DIAG for exactly the argument
     // the three above make: its whole method is an A/B against an unmasked control leg, and a
     // non-DIAG trigger would boot the two legs to DIFFERENT SCREENS, so what the numbers measured
     // would be the screen and not the admission rule.
-    "plxnative-nobudget",
+    "butaca-nobudget",
     // LG's own GStreamer logging ([`arm_gst_logging`]) and the file it writes. Both are DIAG for
-    // the same reason `plxnative-profile` is: the whole point is to observe a playback that would
+    // the same reason `butaca-profile` is: the whole point is to observe a playback that would
     // otherwise be unobservable, and a non-DIAG trigger would silently move the boot screen out
     // from under the very session being measured.
-    "plxnative-gstlog",
-    "plxnative-gst.log",
+    "butaca-gstlog",
+    "butaca-gst.log",
     // The forced Stats-for-nerds overlay. It only changes presentation, and grading a playback
     // case without the read-out risks a failure whose evidence was never put on screen.
-    "plxnative-stats",
+    "butaca-stats",
     // A deliberate crash happens before the picker could ever be reached, so whether it suppresses
     // one is moot — but leaving it out of this list would be a silent inconsistency for the next
     // reader, and the honest reading is that it changes no screen.
-    "plxnative-crashtest",
+    "butaca-crashtest",
     // The FRAME-DROP DETECTOR (`app.rs`, the `FRAMEDROP` line and `worstframe=`). It observes the
     // frame it is armed on and changes no screen; the harness's `worst_ceiling_ms` /
     // `stall_ceiling_ms` gates arm it under every fps scene, and a scene whose gate moved the boot
     // away from the screen it grades would fail as "never entered this screen".
-    "plxnative-framedrop",
-    "plxnative-imagecache-stats",
-    "plxnative-imagecache-bypass",
+    "butaca-framedrop",
+    "butaca-imagecache-stats",
+    "butaca-imagecache-bypass",
     // The deterministic RECORDER and its replay trigger (`ui/rec.rs`, NOT YET IN THE TREE — reserved
     // here first so the recorder cannot land as a non-DIAG trigger and move the boot screen out
     // from under the session it records; restructure spec §5.3). Both observe or reproduce a session and must not decide
     // which screen it starts on — a recording of the who's-watching picker has to be possible.
-    // `recplay` is a NEW name: `plxnative-replay[=N]` is the EOS replay COUNTER, non-DIAG, and
+    // `recplay` is a NEW name: `butaca-replay[=N]` is the EOS replay COUNTER, non-DIAG, and
     // stays exactly as it is.
-    "plxnative-rec",
-    "plxnative-recplay",
-    "plxnative-guard", // diagnostic policy only; never changes the boot screen
+    "butaca-rec",
+    "butaca-recplay",
+    "butaca-guard", // diagnostic policy only; never changes the boot screen
     // Boot-latched Dolby Vision capability A/B. They alter only the platform answer used by the
     // route policy, so an experiment must not independently replace Home with the profile picker.
-    "plxnative-dvcaps0",
-    "plxnative-dvcaps1",
+    "butaca-dvcaps0",
+    "butaca-dvcaps1",
 ];
 
 /// The triggers a CONTROLLED boot (`app::bootstrap`: the recorder, a replay, an explicit
@@ -137,7 +137,7 @@ const DIAG: [&str; 31] = [
 ///
 /// One gated table rather than literals at each consumer, for the reason [`DIAG`] is gated: a
 /// full trigger name in the release binary is exactly what `ci/check-package.py` grades as "dev
-/// triggers compiled in", and `plxnative-noidle` is its witness. A release build never arms a
+/// triggers compiled in", and `butaca-noidle` is its witness. A release build never arms a
 /// trigger ([`armed_triggers`] is empty there), so it has no vocabulary to check against and the
 /// accessors below answer "not supported" / "not listed" without naming one.
 #[cfg(any(feature = "devtriggers", test))]
@@ -146,11 +146,11 @@ const CONTROLLED: &[&str] = &[
     "detail", "detailsec", "detailok", "filmography", "personcredits", "nowan",
 ];
 
-/// Is the recorded trigger `trigger` (full `plxnative-<name>` form, as [`armed_triggers`] lists
+/// Is the recorded trigger `trigger` (full `butaca-<name>` form, as [`armed_triggers`] lists
 /// it) one a controlled boot supports? See [`CONTROLLED`].
 #[cfg(any(feature = "devtriggers", test))]
 pub(crate) fn controlled_trigger(trigger: &str) -> bool {
-    trigger.strip_prefix("plxnative-").is_some_and(|name| CONTROLLED.contains(&name))
+    trigger.strip_prefix("butaca-").is_some_and(|name| CONTROLLED.contains(&name))
 }
 #[cfg(not(any(feature = "devtriggers", test)))]
 pub(crate) fn controlled_trigger(_trigger: &str) -> bool {
@@ -162,14 +162,14 @@ pub(crate) fn controlled_trigger(_trigger: &str) -> bool {
 /// captured with, never the filesystem. Always `false` in a release build, whose list is empty.
 #[cfg(any(feature = "devtriggers", test))]
 pub(crate) fn listed(triggers: &[String], name: &str) -> bool {
-    triggers.iter().any(|trigger| trigger.strip_prefix("plxnative-") == Some(name))
+    triggers.iter().any(|trigger| trigger.strip_prefix("butaca-") == Some(name))
 }
 #[cfg(not(any(feature = "devtriggers", test)))]
 pub(crate) fn listed(_triggers: &[String], _name: &str) -> bool {
     false
 }
 
-/// Is the trigger `name` (bare, without the `plxnative-` prefix) present?
+/// Is the trigger `name` (bare, without the `butaca-` prefix) present?
 #[cfg(feature = "devtriggers")]
 pub(crate) fn flag(name: &str) -> bool {
     path(name).exists()
@@ -183,7 +183,7 @@ pub(crate) fn flag(_name: &str) -> bool {
 ///
 /// **A `dev::flag` is a `stat`, so a trigger read every frame is a syscall on the 60 fps path.**
 /// Latching also fixes a correctness wrinkle that has nothing to do with cost: `tests/run.py`
-/// clears `/tmp/plxnative-*` between cases, so a later read can legitimately find the file gone
+/// clears `/tmp/butaca-*` between cases, so a later read can legitimately find the file gone
 /// mid-run and a per-frame probe would change its answer half way through a case.
 ///
 /// A macro rather than a function because the latch has to be a `static` per trigger, and a
@@ -198,7 +198,7 @@ pub(crate) fn flag(_name: &str) -> bool {
 ///
 /// ```ignore
 /// crate::dev::latched_flag!(
-///     /// `/tmp/plxnative-flattabs` — the material off, for an A/B against the flat capsule.
+///     /// `/tmp/butaca-flattabs` — the material off, for an A/B against the flat capsule.
 ///     fn flat_tabs_armed = "flattabs";
 /// );
 /// ```
@@ -213,7 +213,7 @@ macro_rules! latched_flag {
 }
 pub(crate) use latched_flag;
 
-/// **Turn on the TELEVISION'S OWN GStreamer logging** — `/tmp/plxnative-gstlog`.
+/// **Turn on the TELEVISION'S OWN GStreamer logging** — `/tmp/butaca-gstlog`.
 ///
 /// This is the only instrument that can see inside LG's Dolby Vision chain. That chain is
 /// `dvbin` → `h265parse` → `dvsplitter` → {`lxvideodec`, `dvmdparse`} → `dualsequencer`, all of it
@@ -274,7 +274,7 @@ pub(crate) fn guard_log_only() -> bool {
     *MODE.get_or_init(|| read("guard").as_deref() == Some("log"))
 }
 
-/// **`/tmp/plxnative-nowan` — refuse every name lookup, as a dead resolver would.**
+/// **`/tmp/butaca-nowan` — refuse every name lookup, as a dead resolver would.**
 ///
 /// The offline-mode reproduction. A household whose internet is down but whose LAN is up resolves
 /// no public name at all: `plex.tv`, `discover.provider.plex.tv` and — the one that matters — the
@@ -304,7 +304,7 @@ pub(crate) fn no_wan() -> Option<NoWan> {
     })
 }
 
-/// **Hold the Load-returned flag** — `plxnative-holdload[=ms]`.
+/// **Hold the Load-returned flag** — `butaca-holdload[=ms]`.
 ///
 /// `Some(ms)` when armed (default 30000 for a bare/empty trigger, per its own `parse` fallback),
 /// else `None`. `player::threads::load_thread` sleeps this many milliseconds right after the real
@@ -328,9 +328,9 @@ pub(crate) fn holdload_delay_ms() -> Option<u64> {
     None
 }
 
-/// Parse `/tmp/plxnative-server=<slot>`, the optional server half of a direct-screen trigger.
+/// Parse `/tmp/butaca-server=<slot>`, the optional server half of a direct-screen trigger.
 ///
-/// A Plex `ratingKey` is only unique together with its server.  The original `plxnative-play`
+/// A Plex `ratingKey` is only unique together with its server.  The original `butaca-play`
 /// trigger predated the multi-server registry and therefore meant "that key on the current
 /// server".  Keeping the slot in a separate trigger preserves that wire format for the regression
 /// harness while allowing `tv-session --server N` to name the other half explicitly.
@@ -367,7 +367,7 @@ pub(crate) fn server_slot() -> Option<Result<u16, String>> {
     None
 }
 
-/// **Crash the app on purpose** — `plxnative-crashtest=<segv|abrt|bus|ill|trap|panic|unwind>`.
+/// **Crash the app on purpose** — `butaca-crashtest=<segv|abrt|bus|ill|trap|panic|unwind>`.
 ///
 /// Not a feature. An INSTRUMENT for the instrument, and it exists because of the rule this repo
 /// keeps re-learning: prove the instrument can see the thing before you read its silence, and
@@ -452,9 +452,9 @@ pub(crate) fn crash_on_purpose() {
 #[cfg(not(feature = "devtriggers"))]
 pub(crate) fn crash_on_purpose() {}
 
-/// `plxnative-softfloat`: the ARM half of `ui::motion`'s differential claim (spec §4.2). Runs the
+/// `butaca-softfloat`: the ARM half of `ui::motion`'s differential claim (spec §4.2). Runs the
 /// 4,096-operand table through this binary's own arithmetic, logs its hash beside the host's
-/// pinned one, and writes the words to `plxnative-softfloat.tbl` in the runtime root so a
+/// pinned one, and writes the words to `butaca-softfloat.tbl` in the runtime root so a
 /// divergence can be diffed word by word. `make softfloat-probe` is the recipe.
 #[cfg(feature = "devtriggers")]
 pub(crate) fn softfloat_probe() {
@@ -471,7 +471,7 @@ pub(crate) fn softfloat_probe() {
     let mut t = Vec::new();
     crate::ui::motion::differential_table(&mut t);
     let body: String = t.iter().map(|w| format!("{w:08x}\n")).collect();
-    let path = crate::paths::runtime_dir().join("plxnative-softfloat.tbl");
+    let path = crate::paths::runtime_dir().join("butaca-softfloat.tbl");
     if let Err(e) = std::fs::write(&path, body) {
         crate::log(&format!("softfloat: table write failed: {e}"));
     }
@@ -479,7 +479,7 @@ pub(crate) fn softfloat_probe() {
 #[cfg(not(feature = "devtriggers"))]
 pub(crate) fn softfloat_probe() {}
 
-/// A test-only playback policy override from `plxnative-quality`.
+/// A test-only playback policy override from `butaca-quality`.
 ///
 /// The server matrix grades established direct-play/remux/transcode routes. It must not silently
 /// become an Auto-HLS matrix because the television happened to persist that user preference in
@@ -523,7 +523,7 @@ fn parse_playback_quality(value: &str) -> Option<crate::plex::session::PlaybackQ
     }
 }
 
-/// **Switch the playback quality MID-PLAYBACK** — `plxnative-qualityswitch=[gap=<ms>,]<q>[,<q>…]`.
+/// **Switch the playback quality MID-PLAYBACK** — `butaca-qualityswitch=[gap=<ms>,]<q>[,<q>…]`.
 ///
 /// The one thing [`playback_quality_override`] above cannot do. That is a BOOT override: it decides
 /// what the playback starts as and is read once. What a person actually does at the television is
@@ -532,9 +532,9 @@ fn parse_playback_quality(value: &str) -> Option<crate::plex::session::PlaybackQ
 /// way out of Auto) tears down a running ABR controller. None of that is reachable from a boot
 /// value, and none of it was reachable from a test at all.
 ///
-/// Same vocabulary as `plxnative-quality`, deliberately — one spelling of a rung across both
+/// Same vocabulary as `butaca-quality`, deliberately — one spelling of a rung across both
 /// triggers, so a case cannot name a quality one of them accepts and the other silently ignores.
-/// Same grammar as `plxnative-autoseek`: an optional leading `gap=<ms>` then comma-separated steps
+/// Same grammar as `butaca-autoseek`: an optional leading `gap=<ms>` then comma-separated steps
 /// fired one per gap. There is no default gap and none is invented: with a single step no cadence
 /// exists to state, and a case wanting several states its own, in the manifest, where a reader can
 /// see it beside the assertions it enables.
@@ -542,7 +542,7 @@ fn parse_playback_quality(value: &str) -> Option<crate::plex::session::PlaybackQ
 /// **This writes the stored preference, and that is not incidental.** `route::set_quality` persists
 /// through `plex::session::update`, because a person picking a rung means it. A test therefore
 /// leaves the value behind — on the `debug` flavour's own session, never the install you watch
-/// with, and `tests/run.py` writes `plxnative-quality` on every server case, so the next boot
+/// with, and `tests/run.py` writes `butaca-quality` on every server case, so the next boot
 /// overrides whatever this left. Both halves are load-bearing; neither alone would make it safe.
 fn parse_quality_switch_script(
     raw: &str,
@@ -581,7 +581,7 @@ pub(crate) fn quality_switch_script() -> Option<(u32, Vec<crate::plex::session::
 }
 
 /// One synchronized user Pause, optionally followed by Resume —
-/// `plxnative-autopause=[delay=<ms>,][at=<ms>,][hold=<ms>]`.
+/// `butaca-autopause=[delay=<ms>,][at=<ms>,][hold=<ms>]`.
 ///
 /// An empty file preserves the original paused-HUD capture contract: pause at the player's
 /// ordinary six-second dev gate and stay paused. A non-empty script may delay that edge and name a
@@ -648,7 +648,7 @@ pub(crate) fn pause_script() -> Option<PauseScript> {
     parse_pause_script(&read("autopause")?)
 }
 
-/// **Pin Auto's HLS ladder to one actuator, by request rate** — `plxnative-abrpin=<kbps>`.
+/// **Pin Auto's HLS ladder to one actuator, by request rate** — `butaca-abrpin=<kbps>`.
 ///
 /// Measurement-only, for step M4 of `docs/adaptive-playback-plan.md`: reading a settled reserve at
 /// a given rung means holding that rung for minutes, and nothing in the app could do that.
@@ -671,8 +671,8 @@ pub(crate) fn abr_pin() -> Option<crate::abr::Rung> {
 }
 
 /// A raw dev payload in the runtime root, by bare NAME — only `sample.h264` and `sample.h265`,
-/// which predate the `plxnative-` prefix and feed the player a local Annex-B sample instead of a
-/// stream. Everything else here is `plxnative-<name>`; these two are the exception, so they get
+/// which predate the `butaca-` prefix and feed the player a local Annex-B sample instead of a
+/// stream. Everything else here is `butaca-<name>`; these two are the exception, so they get
 /// their own door rather than a prefix they do not have.
 ///
 /// It took an ABSOLUTE path until the flavour split, which left them as the last two runtime
@@ -734,7 +734,7 @@ pub(crate) struct DevServer {
     pub(crate) tier: Option<crate::plex::probe::Location>,
     /// This identity's per-(user,server) access token **for this server**. A shared server is a
     /// separate authority: the account token gets a 401 from it, which is the whole reason one
-    /// `plxnative-token` cannot express two servers. A SECRET — never logged.
+    /// `butaca-token` cannot express two servers. A SECRET — never logged.
     #[serde(default)]
     pub(crate) token: String,
     /// The owner's plex.tv handle (`sourceTitle` on the wire) — "friend". EMPTY means **your own
@@ -745,7 +745,7 @@ pub(crate) struct DevServer {
     pub(crate) handle: String,
     /// The literal to dial `host` at WITHOUT resolving it — the `Connection.address` plex.tv
     /// advertises beside a `plex.direct` `uri`, which is what a stored session persists. This is
-    /// how a headless run puts a pinned TLS origin through the registry (`/tmp/plxnative-nowan`
+    /// how a headless run puts a pinned TLS origin through the registry (`/tmp/butaca-nowan`
     /// beside it is the offline reproduction). It is validated exactly as a session's address is
     /// ([`crate::plex::ResolvePin::for_origin`]): a value the `host` label does not encode pins
     /// nothing. Omitted: no pin, unchanged behaviour for every overlay written before it existed.
@@ -761,7 +761,7 @@ impl DevServer {
     /// Everything about this server except the token, for the event log.
     pub(crate) fn describe(&self) -> String {
         // A SHARED server is someone else's machine, and this line goes to
-        // `/tmp/plxnative-events.log` — the file that gets pasted into issues and PR bodies. Four
+        // `/tmp/butaca-events.log` — the file that gets pasted into issues and PR bodies. Four
         // PR bodies leaked exactly these fields on 2026-08-14 and had to be redacted after the
         // fact, which a public repository does not really allow. So a share names NOTHING that
         // identifies it or its owner: not the server's name, not the plex.tv handle, not the
@@ -867,14 +867,14 @@ fn parse_servers(s: &str) -> Result<Vec<DevServer>, String> {
     }
 }
 
-/// The EXTRA servers this boot was given credentials for — `/tmp/plxnative-servers`.
+/// The EXTRA servers this boot was given credentials for — `/tmp/butaca-servers`.
 ///
-/// Purely ADDITIVE: the primary server is still the compiled-in host plus `plxnative-token` (or the
+/// Purely ADDITIVE: the primary server is still the compiled-in host plus `butaca-token` (or the
 /// signed-in session), untouched, so a run that names one server behaves exactly as it always has.
 /// This is the channel for the *second* authority — a friend's shared server, which has its own
 /// `machineIdentifier` and its own access token and answers 401 to anybody else's.
 ///
-/// Read and parsed **once**. `tests/run.py` wipes `/tmp/plxnative-*` between cases and again on
+/// Read and parsed **once**. `tests/run.py` wipes `/tmp/butaca-*` between cases and again on
 /// exit (pass, fail or Ctrl-C — that is how a live token stops surviving in world-readable `/tmp`),
 /// so a second read could legitimately see the file gone. The credentials a boot was handed are a
 /// property of that boot, not of what `/tmp` happens to hold when someone asks.
@@ -893,9 +893,9 @@ pub(crate) fn servers() -> Result<Vec<DevServer>, String> {
 }
 
 /// A stream to play and **the Load payload declaration to play it with**, with no library item
-/// behind it — `/tmp/plxnative-playurl`, the player-PIPELINE test tier's one entry point.
+/// behind it — `/tmp/butaca-playurl`, the player-PIPELINE test tier's one entry point.
 ///
-/// This is the trigger that makes the pipeline testable without Plex. `plxnative-url` already
+/// This is the trigger that makes the pipeline testable without Plex. `butaca-url` already
 /// hands the engine a URL, and everything downstream of it — `stream.rs`, `ff.rs`, `aq.rs`, the
 /// pump's `Feed()`, the ACB bind — is byte-identical to a real playback. What it CANNOT do is say
 /// what the stream *is*: the Starfish `Load` payload takes its codecs from `route::stream_vcodec`
@@ -1021,7 +1021,7 @@ impl PlayDovi {
 /// An `Err` rather than a defaulted object on malformed input, for [`parse_servers`]' reason: a
 /// run whose declaration was silently dropped grades as "the payload is wrong", when the fault is
 /// a typo in the harness. An empty `url` is an `Err` too — an all-defaults object would send the
-/// engine looking for `plxnative-url` instead and the case would play something else entirely.
+/// engine looking for `butaca-url` instead and the case would play something else entirely.
 #[cfg(any(feature = "devtriggers", test))]
 fn parse_playurl(s: &str) -> Result<PlayUrl, String> {
     let p: PlayUrl = serde_json::from_str(s).map_err(|e| e.to_string())?;
@@ -1031,7 +1031,7 @@ fn parse_playurl(s: &str) -> Result<PlayUrl, String> {
     Ok(p)
 }
 
-/// This boot's URL-and-declaration, if one was armed — `/tmp/plxnative-playurl`.
+/// This boot's URL-and-declaration, if one was armed — `/tmp/butaca-playurl`.
 ///
 /// `None` = not armed; `Some(Err)` = armed but unreadable, which the caller logs.
 ///
@@ -1056,11 +1056,11 @@ pub(crate) fn playurl() -> Option<Result<PlayUrl, String>> {
 /// screen from a squatted file — after every named read had been compiled out.
 ///
 /// **A trigger is a FILE.** Nothing else here names a path, so nothing else could have caught a
-/// non-file entry whose name happens to match: a directory called `plxnative-anything` sitting in
+/// non-file entry whose name happens to match: a directory called `butaca-anything` sitting in
 /// the runtime root would read as an armed trigger and permanently suppress the boot picker,
 /// silently changing which screen this install comes up on with no line in any log. That became
 /// reachable the moment two installs could share `/tmp` — the obvious name for a second install's
-/// runtime root is exactly `plxnative-<flavour>`, which is why `paths::resolve_runtime_dir` spells
+/// runtime root is exactly `butaca-<flavour>`, which is why `paths::resolve_runtime_dir` spells
 /// it with a DOT instead. Two independent reasons is the right number for a failure this quiet.
 #[cfg(feature = "devtriggers")]
 pub(crate) fn any_trigger_present() -> bool {
@@ -1070,7 +1070,7 @@ pub(crate) fn any_trigger_present() -> bool {
         .unwrap_or(false)
 }
 
-/// Every `plxnative-*` FILE in the runtime root, by name (DIAG entries included), sorted — the
+/// Every `butaca-*` FILE in the runtime root, by name (DIAG entries included), sorted — the
 /// recorder's header lists them so a replay can say what the recording boot had armed. Names
 /// only: a trigger's CONTENT can be a query or a path and never enters a recording.
 #[cfg(feature = "devtriggers")]
@@ -1087,7 +1087,7 @@ fn armed_triggers_in(root: &std::path::Path) -> Vec<String> {
                 .filter_map(|e| {
                     let n = e.file_name().to_string_lossy().into_owned();
                     // Runtime logs share the prefix and are not triggers
-                    (n.starts_with("plxnative-") && !n.ends_with(".log")).then_some(n)
+                    (n.starts_with("butaca-") && !n.ends_with(".log")).then_some(n)
                 })
                 .collect()
         })
@@ -1107,7 +1107,7 @@ fn is_armed_trigger(entry: &std::fs::DirEntry) -> bool {
     }
     let name = entry.file_name();
     let name = name.to_string_lossy();
-    name.starts_with("plxnative-") && !DIAG.contains(&name.as_ref())
+    name.starts_with("butaca-") && !DIAG.contains(&name.as_ref())
 }
 #[cfg(not(feature = "devtriggers"))]
 pub(crate) fn any_trigger_present() -> bool {
@@ -1118,7 +1118,7 @@ pub(crate) fn any_trigger_present() -> bool {
 /// call sites gating a whole subsystem (the capture listener, the remote FIFO) rather than a read.
 pub(crate) const ENABLED: bool = cfg!(feature = "devtriggers");
 
-/// The trigger's absolute path. `/tmp/plxnative-<name>` on the television; see
+/// The trigger's absolute path. `/tmp/butaca-<name>` on the television; see
 /// [`crate::paths::runtime_dir`] for why a host build may put the whole namespace elsewhere.
 ///
 /// `test` is in the cfg beside the feature, and only for a compile reason: the test below writes
@@ -1129,7 +1129,7 @@ pub(crate) const ENABLED: bool = cfg!(feature = "devtriggers");
 /// and the fn is gone exactly as before.
 #[cfg(any(feature = "devtriggers", test))]
 fn path(name: &str) -> std::path::PathBuf {
-    crate::paths::in_runtime_dir(&format!("plxnative-{name}"))
+    crate::paths::in_runtime_dir(&format!("butaca-{name}"))
 }
 
 #[cfg(test)]
@@ -1192,8 +1192,8 @@ mod tests {
         let entry = std::fs::read_dir(&root).unwrap().next().unwrap().unwrap();
         assert!(!super::is_armed_trigger(&entry));
         assert!(super::armed_triggers_in(&root).is_empty());
-        std::fs::write(root.join("plxnative-home"), b"").unwrap();
-        assert_eq!(super::armed_triggers_in(&root), vec!["plxnative-home"]);
+        std::fs::write(root.join("butaca-home"), b"").unwrap();
+        assert_eq!(super::armed_triggers_in(&root), vec!["butaca-home"]);
     }
 
     /// A DIRECTORY whose name matches the trigger prefix must not read as an armed trigger.
@@ -1218,7 +1218,7 @@ mod tests {
         // other `cargo test` on this Mac, and two suites running at once (a second checkout's
         // `make check`) removed each other's entry between the create and the read_dir.
         let d = crate::paths::in_runtime_dir(&format!(
-            "plxnative-notatrigger-{}",
+            "butaca-notatrigger-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&d);
@@ -1248,7 +1248,7 @@ mod tests {
         // `a_directory_is_not_an_armed_trigger` scans — they must not overlap.
         let _g = crate::testlock::serial();
         // Write through `path()` itself, NOT a literal and NOT `env::temp_dir()`. The literal was
-        // right when the namespace was always `/tmp/plxnative-…`, but it stops meeting the read as
+        // right when the namespace was always `/tmp/butaca-…`, but it stops meeting the read as
         // soon as an instance root is in effect; `env::temp_dir()` never met it at all, since on
         // the dev Mac that is a per-user `/var/folders/…/T/` path. Going through the same door the
         // code under test uses keeps the write and the read together wherever the root points.
@@ -1264,7 +1264,7 @@ mod tests {
     }
 
     /// **How an https origin is exercised without a plex.tv account that has one.** The
-    /// `plxnative-servers` trigger is the only surface that can inject a server the app did not
+    /// `butaca-servers` trigger is the only surface that can inject a server the app did not
     /// discover, so it is also the only way any lane or the integrator can put a TLS origin
     /// through `plex::register_origin` headlessly.
     ///
@@ -1532,15 +1532,15 @@ mod tests {
         assert_eq!(v[0].describe(), "SHARED ref=71c955 port_set=true");
     }
 
-    /// `plxnative-servers` must NOT be exempt from the picker-suppression scan: it names a host and
+    /// `butaca-servers` must NOT be exempt from the picker-suppression scan: it names a host and
     /// carries the token to trust it with, which is automation of the strongest kind. Listing it in
     /// DIAG would let a headless run boot to the who's-watching picker instead of Home.
     #[test]
     fn servers_trigger_is_not_diagnostic() {
-        assert!(!super::DIAG.contains(&"plxnative-servers"));
+        assert!(!super::DIAG.contains(&"butaca-servers"));
     }
 
-    // ---- plxnative-playurl (the pipeline test tier's one trigger) ----
+    // ---- butaca-playurl (the pipeline test tier's one trigger) ----
 
     /// The payload `tests/run.py` writes, verbatim. Pinned as a literal for `parse_servers`'
     /// reason: nothing links the two languages at build time, so if this has to change, the
@@ -1623,7 +1623,7 @@ mod tests {
     }
 
     /// An empty `url` must be an Err, not an all-defaults object: on `Ok` the engine would take
-    /// the empty URL, fall through to `plxnative-url` or a local sample, and PLAY SOMETHING ELSE —
+    /// the empty URL, fall through to `butaca-url` or a local sample, and PLAY SOMETHING ELSE —
     /// a case grading a stream it was never pointed at. Same class as `parse_servers`' untagged
     /// ordering trap, in different clothes.
     #[test]
@@ -1639,7 +1639,7 @@ mod tests {
     /// of into the player.
     #[test]
     fn playurl_trigger_is_not_diagnostic() {
-        assert!(!super::DIAG.contains(&"plxnative-playurl"));
+        assert!(!super::DIAG.contains(&"butaca-playurl"));
     }
 
     /// The harness writes triggers through a single-quoted `printf` with NO escaping
@@ -1656,8 +1656,8 @@ mod tests {
         assert!(super::parse_playurl(payload).is_ok());
     }
 
-    /// **One vocabulary for a rung, in both directions.** `plxnative-quality` and
-    /// `plxnative-qualityswitch` accept these strings and `quality: switch → …` prints them, so a
+    /// **One vocabulary for a rung, in both directions.** `butaca-quality` and
+    /// `butaca-qualityswitch` accept these strings and `quality: switch → …` prints them, so a
     /// case states its rung once and asserts on the same word. A one-way table would let the log
     /// drift from what the trigger accepts and the drift would show up as a case that arms
     /// correctly and then matches nothing — indistinguishable from the feature not working.
@@ -1684,7 +1684,7 @@ mod tests {
 
     /// The script grammar, including the two ways it must FAIL CLOSED. A typo that resolved to a
     /// default would switch the playback to something the case never asked for — the same hazard
-    /// `plxnative-abrpin` documents for its own value.
+    /// `butaca-abrpin` documents for its own value.
     #[test]
     fn a_quality_script_fails_closed_and_never_substitutes() {
         use crate::plex::session::PlaybackQuality as Q;

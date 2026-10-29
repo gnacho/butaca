@@ -169,16 +169,16 @@
    },
    "settings": null,
    "triggers": [
-    "plxnative-app-init",
-    "plxnative-rec",
-    "plxnative-focus",
-    "plxnative-noidle",
-    "plxnative-detail",
-    "plxnative-detailsec",
-    "plxnative-detailok",
-    "plxnative-filmography",
-    "plxnative-personcredits",
-    "plxnative-nowan"
+    "butaca-app-init",
+    "butaca-rec",
+    "butaca-focus",
+    "butaca-noidle",
+    "butaca-detail",
+    "butaca-detailsec",
+    "butaca-detailok",
+    "butaca-filmography",
+    "butaca-personcredits",
+    "butaca-nowan"
    ],
    "version": 1
   },
@@ -188,15 +188,15 @@
  "schema": 3,
  "state_fp": 10638452537178981056,
  "triggers": [
-  "plxnative-app-init",
-  "plxnative-rec",
-  "plxnative-focus",
-  "plxnative-noidle",
-  "plxnative-detail",
-  "plxnative-detailsec",
-  "plxnative-detailok",
-  "plxnative-filmography",
-  "plxnative-personcredits",
-  "plxnative-nowan"
+  "butaca-app-init",
+  "butaca-rec",
+  "butaca-focus",
+  "butaca-noidle",
+  "butaca-detail",
+  "butaca-detailsec",
+  "butaca-detailok",
+  "butaca-filmography",
+  "butaca-personcredits",
+  "butaca-nowan"
  ]
 }

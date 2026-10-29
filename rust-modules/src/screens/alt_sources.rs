@@ -68,7 +68,7 @@
 //! `ratingKey` 4 and a section 1 (`docs/shared-servers.md` §1). Matching on one would confidently
 //! offer a different film — which is why the STORE is ADDRESSED on the `(server, ratingKey)` PAIR:
 //! a resolve outliving the page that asked for it is the normal case, not the exotic one. The
-//! store, the cross-source resolve that fills it and the headless `/tmp/plxnative-shared` stand-in
+//! store, the cross-source resolve that fills it and the headless `/tmp/butaca-shared` stand-in
 //! all live in `crate::metadata`, beside the detail fetch whose landing kicks them; this module
 //! ORDERS, MARKS and DRAWS and owns nothing else.
 //!
@@ -621,7 +621,7 @@ impl<H: AppLike<Memory = PageMemory> + crate::screens::registry::MetadataLike> S
         let r = self.frame();
         let p = f.painter.alpha(appear).translate(0.0, RISE * (1.0 - appear));
         let measure = f.measure;
-        // Named for `/tmp/plxnative-cpuprof` beside the page's own phases, so a slow frame while
+        // Named for `/tmp/butaca-cpuprof` beside the page's own phases, so a slow frame while
         // this panel is up can be read as the PANEL or as the host under it.
         let field = f.underlay;
         crate::ui::profile::phase("dt.alt", || {

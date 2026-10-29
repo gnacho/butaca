@@ -1,17 +1,17 @@
-# Butaca (fork of PlxNative)
+# Butaca
 
-**Butaca is a fork of [PlxNative](https://github.com/GLinnik21/plx-native) by Gleb Linnik, turned
-into a [Jellyfin](https://jellyfin.org/) client for rooted LG webOS televisions. It draws the
+**Butaca is a fork of the upstream Plex client for rooted LG webOS televisions, by Gleb Linnik,
+turned into a [Jellyfin](https://jellyfin.org/) client. It draws the
 interface directly on the GPU at 60 fps and plays video on the TV's own decoder. The fork removes
 all telemetry and crash reporting and changes nothing about those promises:
-[privacy](https://github.com/gnacho/butaca), [upstream](https://github.com/GLinnik21/plx-native).**
+[privacy](PRIVACY.md).**
 
-The rest of this README still describes upstream PlxNative, the Plex client this fork is built
+The rest of this README still describes the upstream client this fork is built
 from; the app it documents is the same code under the fork's packaging.
 
 ---
 
-# PlxNative
+# Butaca
 
 A fast, unofficial [Plex](https://www.plex.tv/) client for LG webOS televisions. Native, not a web
 page — the interface is drawn straight on the GPU at 60 fps, and video plays on the TV's own decoder.
@@ -27,7 +27,7 @@ Chromium. Patching it doesn't help — the ceiling isn't the code, it's the brow
 
 So I threw the browser away.
 
-PlxNative draws straight on the GPU and hands video to the same silicon the built-in apps use. No
+Butaca draws straight on the GPU and hands video to the same silicon the built-in apps use. No
 Chromium, no JavaScript, no web view. It just draws. Almost all of it is Rust, and I use it every
 day to watch things off my server in the next room.
 
@@ -83,8 +83,8 @@ transcodes, Developer Mode installs included.
 | Where | What happens |
 |---|---|
 | **Some 2019 sets on LG's k5lp or k3lp chip**, installed through Developer Mode | Video won't play. On these sets LG's Developer Mode sandbox can withhold a device the video path needs — Kodi and Moonlight hit the same wall. The app checks for it and says so instead of crashing; other sets on the same chip play normally. On a rooted TV with Homebrew Channel, the failure screen offers **Repair**, which applies the Homebrew Channel fix to the sandbox (one owner fixed it this way from a root shell; the button itself hasn't been run on an affected set yet). Without root there is no fix. |
-| **2018 sets on firmware that reports platform release 3.9.3** | Sign-in and browsing work, but video has never been seen to start on one, and no error is reported either: [#249](https://github.com/GLinnik21/plx-native/issues/249). |
-| **Sets on LG's k6hp chip** | A crash seen in opt-in crash reports and not reproduced here, because I have no such set: [#174](https://github.com/GLinnik21/plx-native/issues/174). |
+| **2018 sets on firmware that reports platform release 3.9.3** | Sign-in and browsing work, but video has never been seen to start on one, and no error is reported either: #249. |
+| **Sets on LG's k6hp chip** | A crash seen in opt-in crash reports and not reproduced here, because I have no such set: #174. |
 
 ### Rooted or not
 
@@ -94,7 +94,7 @@ installed through it ([how to keep them](docs/install-and-verify.md#important-de
 A rooted TV with Homebrew Channel has no expiry.
 
 If something goes wrong, check [Troubleshooting](docs/troubleshooting.md) first, then
-[tell me what happened](https://github.com/GLinnik21/plx-native/issues) — and if you own one of the
+[tell me what happened](https://github.com/gnacho/butaca/issues) — and if you own one of the
 sets above, it working is as useful a report as it failing.
 
 ## Installing
@@ -106,12 +106,12 @@ server. **No root is required.**
 
 Set up LG Developer Mode and connect with webOS Dev Manager, then choose:
 
-- **Install PlxNative directly:** add only PlxNative to the TV; install future `.ipk` updates from
+- **Install Butaca directly:** add only Butaca to the TV; install future `.ipk` updates from
   your computer.
-- **Install Homebrew Channel first:** get an app catalogue on the TV, then install PlxNative and
+- **Install Homebrew Channel first:** get an app catalogue on the TV, then install Butaca and
   its updates with the remote.
 
-**Already have Homebrew Channel?** Find [PlxNative in its catalogue](https://repo.webosbrew.org/apps/com.beb.plxnative/)
+**Already have Homebrew Channel?** Find [Butaca in its catalogue](https://repo.webosbrew.org/apps/com.butaca/)
 and select **Install**. Skip the computer setup.
 
 **Developer Mode needs periodic renewal.** If it expires and LG disables Developer Mode, apps
@@ -124,10 +124,9 @@ before installing. Homebrew Channel verifies catalogue downloads for you.
 ## Nightly builds
 
 Every day `main` moves, CI cuts a nightly `.ipk` from wherever it stands and publishes it as a
-[prerelease](https://github.com/GLinnik21/plx-native/releases?q=nightly). It installs beside the
-regular app as **"PlxNative Nightly"** — its own tile, its own sign-in — so trying it never touches
-the release you already trust. The newest one is always linked from
-[plxnative.com/nightly/latest.json](https://plxnative.com/nightly/latest.json).
+prerelease. It installs beside the
+regular app as **"Butaca Nightly"** — its own tile, its own sign-in — so trying it never touches
+the release you already trust. The newest one is always the latest entry under the repository releases.
 
 **It is not tested on a television.** It passes the same automated build and packaging checks a
 release does, but nobody has watched it play. It is not in the Homebrew Channel and does not
@@ -170,8 +169,7 @@ a public issue.
 ## Licence
 
 [GPL-3.0-or-later](LICENSE), © 2026 Gleb Linnik and contributors. Butaca is a fork maintained
-at [gnacho/butaca](https://github.com/gnacho/butaca); the upstream project is
-[GLinnik21/plx-native](https://github.com/GLinnik21/plx-native). The PlxNative name and its brand
+at [gnacho/butaca](https://github.com/gnacho/butaca). The Butaca name and its brand
 artwork are excluded — see [`TRADEMARKS.md`](TRADEMARKS.md), which also carries the Plex and LG
 non-affiliation statements.
 Third-party components and their licences are in
@@ -185,10 +183,10 @@ respective owners; where they appear in the app, they identify whose service or 
 
 ## Star history
 
-<a href="https://www.star-history.com/?repos=glinnik21%2Fplx-native&type=date&legend=bottom-right">
+<a href="https://www.star-history.com/?repos=glinnik21%2Fbutaca&type=date&legend=bottom-right">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=glinnik21/plx-native&type=date&theme=dark&legend=bottom-right">
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=glinnik21/plx-native&type=date&legend=bottom-right">
-    <img alt="Star history chart" src="https://api.star-history.com/chart?repos=glinnik21/plx-native&type=date&legend=bottom-right">
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=glinnik21/butaca&type=date&theme=dark&legend=bottom-right">
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=glinnik21/butaca&type=date&legend=bottom-right">
+    <img alt="Star history chart" src="https://api.star-history.com/chart?repos=glinnik21/butaca&type=date&legend=bottom-right">
   </picture>
 </a>

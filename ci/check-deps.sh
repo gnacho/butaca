@@ -896,9 +896,9 @@ threads_declared=$(sed -n 's/^# count: *//p' ci/allow/threads.txt | head -1)
 if [ "$threads_bad" -eq "${threads_declared:-0}" ]; then ok "threads"
 else fail "threads: $threads_bad line(s) outside ci/allow/threads.txt (declared count is exactly ${threads_declared:-0}, not a ceiling)"; fi
 
-# tmppath: a literal `/tmp/plxnative-` string outside dev.rs and the log sinks, = 0 (D4). The
+# tmppath: a literal `/tmp/butaca-` string outside dev.rs and the log sinks, = 0 (D4). The
 # earlier version matched only a literal and a filesystem-open VERB co-occurring on the SAME
-# LINE, which passed a two-line split (`let p = format!("/tmp/plxnative-x"); File::open(p)`)
+# LINE, which passed a two-line split (`let p = format!("/tmp/butaca-x"); File::open(p)`)
 # straight through. Rewritten as the D4 wording actually reads: strip comments, then find the
 # literal, then walk the CALL that encloses it — the same paren-depth-outside-literals shape
 # `tmppath`'s own header used to point at `ci/check-scrub` for; that script does not exist
@@ -910,22 +910,22 @@ else fail "threads: $threads_bad line(s) outside ci/allow/threads.txt (declared 
 # maintains a stack of the CALL NAME behind every currently-open, not-yet-closed `(` (the token
 # immediately before it) — which is what lets a match inside `crate::log(&format!("…"))` see BOTH
 # enclosing calls, `format!` innermost and `crate::log` beneath it, across as many lines as the
-# call spans. A hit is a `/tmp/plxnative-` match that is NOT inside a string, or is inside one but
+# call spans. A hit is a `/tmp/butaca-` match that is NOT inside a string, or is inside one but
 # no enclosing call on that stack is `log`/`crate::log`/`log!` — i.e. exactly the two exemptions
-# D4 names, comment and log-message text, and nothing else (a bare `let s = "/tmp/plxnative-x";`
+# D4 names, comment and log-message text, and nothing else (a bare `let s = "/tmp/butaca-x";`
 # with no log() around it is a hit, deliberately, even though it opens nothing — the spec's own
 # wording is "any literal…unless", not "any literal that is also an open"). `dev.rs` is the one
 # structural exemption; a second category ("the log sinks") is named in the spec but resolves to
 # NOTHING in this tree today — `lib.rs::events_log`/`app/boot.rs`'s crash-log open both build the
-# path through `paths::in_runtime_dir("plxnative-…")`, a bare filename with no `/tmp/` prefix, so
-# neither one is a `/tmp/plxnative-` literal in the first place and there is no second file to
+# path through `paths::in_runtime_dir("butaca-…")`, a bare filename with no `/tmp/` prefix, so
+# neither one is a `/tmp/butaca-` literal in the first place and there is no second file to
 # name here (re-verify this if a log sink is ever given a hardcoded `/tmp/` path).
 tmp_hits=$(python3 - "$SRC" <<'PY'
 import os, sys
 
 src = sys.argv[1]
 exempt_files = {os.path.join(src, "dev.rs")}
-needle = "/tmp/plxnative-"
+needle = "/tmp/butaca-"
 log_names = {"log", "crate::log", "log!"}
 
 def scan(path, text):
@@ -1007,7 +1007,7 @@ tmp_status=$?
 if [ "$tmp_status" -eq 0 ] && [ -z "$tmp_hits" ]; then ok "tmppath"
 else
   echo "$tmp_hits" | sed 's/^/    /'
-  fail "tmppath: $(echo "$tmp_hits" | grep -c . ) line(s) of a literal /tmp/plxnative- path outside dev.rs, not comment or log-message text"
+  fail "tmppath: $(echo "$tmp_hits" | grep -c . ) line(s) of a literal /tmp/butaca- path outside dev.rs, not comment or log-message text"
 fi
 
 

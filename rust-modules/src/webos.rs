@@ -360,7 +360,7 @@ pub(crate) fn rtkmem_context() -> &'static str {
 /// (<https://webostv.developer.lge.com/develop/guides/back-button>, LG vendor documentation — it
 /// describes the WEB runtime's `webOS.platformBack()`, which a native app cannot call, but it is
 /// LG stating what the ROOT press means on this platform). The dev set is 4.10.2, so "launch the
-/// Home launcher" is the behaviour to reproduce, and the app's previous "Exit PlxNative?" question
+/// Home launcher" is the behaviour to reproduce, and the app's previous "Exit Butaca?" question
 /// was the webOS 6+ shape applied to a webOS 4 television — and it quit, which even there is only
 /// one of the two answers.
 ///
@@ -395,7 +395,7 @@ pub(crate) fn rtkmem_context() -> &'static str {
 /// failed — the log line says what was ASKED, never that it worked, and the screenshot is what
 /// says whether it did.
 ///
-/// `/tmp/plxnative-gohome=<sam|minimize>` forces one leg, so both can be exercised in one device
+/// `/tmp/butaca-gohome=<sam|minimize>` forces one leg, so both can be exercised in one device
 /// session instead of only whichever happens to answer first. Compiled out under `RELEASE=1`.
 ///
 /// **Not rate-limited here** — [`take_root_press`] is, and `app.rs` claims the press through it
@@ -704,7 +704,7 @@ pub(crate) fn bind_window(_win: *mut std::os::raw::c_void) {}
 /// that is never dropped and never unregistered.
 /// Until 2026-09-04 it was two private copies, both registering with
 /// `LSRegisterApplicationService(NULL, app_id)`, and on this set that registration is REFUSED:
-/// `ls-hubd LSHUB_ROLE_FILE: Can not find service "" permissions for executable ".../plxnative"`
+/// `ls-hubd LSHUB_ROLE_FILE: Can not find service "" permissions for executable ".../butaca"`
 /// once per root press, the app logging `stage=register after 2ms` having freed the LSError
 /// unread. The role file appinstalld generates for a native app
 /// (`/var/palm/ls2-dev/roles/{prv,pub}/<app id>.json` on a Developer-Mode set, read off the
@@ -1150,7 +1150,7 @@ pub(crate) mod ls2 {
         registration.call(uri, payload, BUDGET)
     }
 
-    /// `/tmp/plxnative-gohome=probe`: try every registration shape the role file could accept, log
+    /// `/tmp/butaca-gohome=probe`: try every registration shape the role file could accept, log
     /// what the hub answers to each — the LSError text this app freed unread for a whole device
     /// session — and, through whichever registered, ONE read-only SAM call. Evidence, not a leg:
     /// its answer is the table in the module doc and decided [`register`]'s shape, and it runs

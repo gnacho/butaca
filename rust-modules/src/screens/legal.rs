@@ -24,7 +24,7 @@ use super::registry::word;
 /// `every_document_prints_only_the_one_contact_address` scans the documents for stray `@`s;
 /// `screens::consent` imports it.
 #[allow(dead_code)]
-pub(crate) const CONTACT_EMAIL: &str = "support@plxnative.com";
+pub(crate) const CONTACT_EMAIL: &str = "hnacho@proton.me";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Page {
@@ -625,7 +625,7 @@ mod tests {
 
     /// The About page names the binary the user is RUNNING.
     ///
-    /// It was a hand-typed `PlxNative 0.5.0` that no bump script touched, so it could only ever
+    /// It was a hand-typed `Butaca 0.5.0` that no bump script touched, so it could only ever
     /// have been right by accident. Written against `identity::VERSION` rather than against
     /// `env!` again so that re-typing a literal here fails: on any developer build the two differ.
     #[test]

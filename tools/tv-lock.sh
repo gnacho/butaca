@@ -27,11 +27,11 @@
 # and this project's collisions come from exactly those. It is under /tmp deliberately — a TV
 # reboot clears it, which is the one event that also makes every holder's session meaningless.
 #
-# The name does NOT begin with `plxnative-`, and that is load-bearing rather than cosmetic: for the
+# The name does NOT begin with `butaca-`, and that is load-bearing rather than cosmetic: for the
 # stable install the app's runtime root IS /tmp, and any file there matching that prefix marks the
 # boot as automated and suppresses the who's-watching picker (`dev::any_trigger_present`). A lock
-# named `plxnative-tv.lock` would silently change which screen the app boots to — for every
-# session, including the ones it was taken to protect. It is also outside the `plxnative-*` glob
+# named `butaca-tv.lock` would silently change which screen the app boots to — for every
+# session, including the ones it was taken to protect. It is also outside the `butaca-*` glob
 # that `make run` and `tests/run.py` clear, so a teardown cannot drop somebody's lease.
 #
 # THE CLOCK IS THE HOST'S. Every timestamp written into the lock comes from the machine taking it,
@@ -46,7 +46,7 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 REMOTE_LOCK="${PLX_TV_LOCK_PATH:-/tmp/plx-tv.lock}"
-STATE_DIR="${PLX_TV_LOCK_STATE:-$HOME/.plxnative/tv-lock}"
+STATE_DIR="${PLX_TV_LOCK_STATE:-$HOME/.butaca/tv-lock}"
 
 # Lease lengths, in minutes. An EXPLICIT acquire is a session and gets the long one; the implicit
 # lease `require` takes when nobody holds the set is short on purpose, because nothing will ever
@@ -419,9 +419,9 @@ preflight_note() {
   dd="$(make -s -C "$REPO" FLAVOR=debug  print-appdir 2>/dev/null)"
   [ -n "$sd" ] && [ -n "$dd" ] || return 0
   # ONE round trip for both installs and the ssh count. `fuser` on each install's own binary,
-  # never `pidof plxnative`: both binaries carry that name, so a name-scoped test matches BOTH and
+  # never `pidof butaca`: both binaries carry that name, so a name-scoped test matches BOTH and
   # answers in an order busybox does not promise.
-  out="$(ssh_tv "for d in '$sd' '$dd'; do printf '%s ' \"\$(fuser \$d/plxnative 2>/dev/null || echo NONE)\"; done; echo; netstat -an 2>/dev/null | grep -c 'ESTABLISHED.*:22 \|:22 .*ESTABLISHED'")"
+  out="$(ssh_tv "for d in '$sd' '$dd'; do printf '%s ' \"\$(fuser \$d/butaca 2>/dev/null || echo NONE)\"; done; echo; netstat -an 2>/dev/null | grep -c 'ESTABLISHED.*:22 \|:22 .*ESTABLISHED'")"
   local apps ssh_n
   apps="$(printf '%s\n' "$out" | head -1)"
   ssh_n="$(printf '%s\n' "$out" | sed -n '2p')"

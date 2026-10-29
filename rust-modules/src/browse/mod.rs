@@ -106,7 +106,7 @@ pub(crate) enum SourceState {
 
 /// One SOURCE the table is addressed by — a server this account has been granted. Comes from the
 /// [server registry](crate::plex::server_ids), which is the granted roster: a server is registered
-/// only once plex.tv (or the `plxnative-servers` dev trigger) handed us a token for it.
+/// only once plex.tv (or the `butaca-servers` dev trigger) handed us a token for it.
 #[derive(Clone)]
 pub(crate) struct BrowseSource {
     /// The registry slot every fetch for this source's sections is issued through.

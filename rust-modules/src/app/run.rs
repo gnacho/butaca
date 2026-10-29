@@ -121,9 +121,9 @@ pub(crate) unsafe fn run(app: &mut App) {
         // The frame index the LANDING SCHEDULE stamps against (§3.3 step 3, `ui::landgate`),
         // published at the TOP because a landing site is reachable from the dev scenarios below
         // as well as from `land_results` and the dispatcher's own frame. One relaxed atomic load
-        // unless `plxnative-rec` or `plxnative-recplay` is armed.
+        // unless `butaca-rec` or `butaca-recplay` is armed.
         app.rec.begin_frame(app.bridge.landgate());
-        // REPLAY (`plxnative-recplay`): this frame runs on the recorded tick — set BEFORE
+        // REPLAY (`butaca-recplay`): this frame runs on the recorded tick — set BEFORE
         // ingest, whose key arms stamp `last_input` from the clock — and the frame's recorded
         // inputs are re-injected through the same synthesis the remote FIFO uses, so the poll
         // below consumes them exactly as it consumed the originals.
@@ -147,7 +147,7 @@ pub(crate) unsafe fn run(app: &mut App) {
         // it, so that stamp cannot disagree with the frame it belongs to. It used to come from
         // `player::vclock_ms()`, read at whatever depth of the call stack happened to need it.
         app.player.set_now(fr.now);
-        // dev: /tmp/plxnative-autoplay auto-presses OK once
+        // dev: /tmp/butaca-autoplay auto-presses OK once
         //
         // **Never from the sign-in or the picker.** The auth flow hands its credentials to
         // the main thread through `take_ready`, which is polled only on those two routes; a
@@ -394,7 +394,7 @@ unsafe fn prepare_window(app: &mut App, fr: &mut Frame) {
     // A third term goes FIRST and short-circuits the other two: a page capture still in flight on
     // the GPU (`gfx::SNAPSHOT_THIS_FRAME`'s doc). Presenting now would only wait a whole vsync for
     // a buffer; not asking `should_present` leaves its damage and motion for the frame that does.
-    // The simulator's settled capture (`PLXNATIVE_SHOT_SETTLE`): once nothing has changed for the
+    // The simulator's settled capture (`BUTACA_SHOT_SETTLE`): once nothing has changed for the
     // asked-for quiet, invalidate so the NEXT present is the settled frame and `maybe_capture`
     // takes it. Before the decision below, so that invalidate selects this very frame.
     #[cfg(feature = "hostsim")]
@@ -427,7 +427,7 @@ unsafe fn prepare_window(app: &mut App, fr: &mut Frame) {
             crate::diag::heartbeat::now_us,
         );
     }
-    // EXPERIMENT (`/tmp/plxnative-opaque`): one `static` read and a return when the trigger
+    // EXPERIMENT (`/tmp/butaca-opaque`): one `static` read and a return when the trigger
     // is absent. Edge-triggered — see `system.rs`.
     //
     // Called on EVERY frame, from the BIT rather than from the route. The false edge after an
@@ -498,7 +498,7 @@ unsafe fn present_and_swap(
             crate::capture::tick(fr.now);
         }
         app.instr.mark(crate::diag::heartbeat::Phase::Capture); // capture
-        // `plxnative-simvideo`: the decoded picture goes UNDER the finished UI, as the television's
+        // `butaca-simvideo`: the decoded picture goes UNDER the finished UI, as the television's
         // compositor puts its video plane under ours — before the capture, so shots include it.
         #[cfg(feature = "hostsim")]
         if fr.player {
@@ -1749,7 +1749,7 @@ pub(crate) unsafe fn land_results(app: &mut App, fr: &mut Frame) {
 
         // The ONE consumer of a cast-row person request, drained every frame whatever the
         // route. `detail::on_ok`'s cast arm raises it, and it is reached from three places
-        // (the immediate OK, the press-commit above, and the `plxnative-detailok`/-detailplay
+        // (the immediate OK, the press-commit above, and the `butaca-detailok`/-detailplay
         // dev triggers) — polling next to each of those left the flag SET on any path that
         // didn't poll, and a set flag then fired on an unrelated OK several screens later.
         // One drain cannot latch. The push is what STACKS the new page: the detail page being
@@ -1786,11 +1786,11 @@ pub(crate) unsafe fn land_results(app: &mut App, fr: &mut Frame) {
                 super::bridge::dismiss_surfaces(&mut app.pages);
             }
         }
-        // dev: /tmp/plxnative-navosc — `crate::dev::scenarios::nav_osc_tick`.
+        // dev: /tmp/butaca-navosc — `crate::dev::scenarios::nav_osc_tick`.
         crate::dev::scenarios::nav_osc_tick(app, fr.now);
-        // dev: /tmp/plxnative-pushbench — `crate::dev::scenarios::push_bench_tick`.
+        // dev: /tmp/butaca-pushbench — `crate::dev::scenarios::push_bench_tick`.
         crate::dev::scenarios::push_bench_tick(app, fr.now);
-        // dev: /tmp/plxnative-deepbench — `crate::dev::scenarios::deep_bench_tick`.
+        // dev: /tmp/butaca-deepbench — `crate::dev::scenarios::deep_bench_tick`.
         crate::dev::scenarios::deep_bench_tick(app, fr.now);
 
         // ---- the page cross-fade's commit frame ------------------------------------------
@@ -2013,7 +2013,7 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         // and whatever per-frame animation the legacy `ui::login`/`ui::profiles` scenes used to
         // step belongs to their `Screen::step`/`prepare` on a `Tick` the dispatcher already
         // delivers every frame through `bridge::frame` — not a second call from this function.
-        // dev: /tmp/plxnative-pickuser=<index> — `crate::dev::scenarios::pickuser_tick`.
+        // dev: /tmp/butaca-pickuser=<index> — `crate::dev::scenarios::pickuser_tick`.
         crate::dev::scenarios::pickuser_tick(app);
         // **The bare route, for every screen below** — `page_of` stood on each of these three
         // guards while a popover was a ROUTE that had to be resolved onto the page beneath it.
@@ -2061,7 +2061,7 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
             });
             fr.underlay_moving |= moving;
         }
-        // dev: /tmp/plxnative-searchosc — `crate::dev::scenarios::search_osc_tick`.
+        // dev: /tmp/butaca-searchosc — `crate::dev::scenarios::search_osc_tick`.
         crate::dev::scenarios::search_osc_tick(app, fr.now);
         // (The television's keyboard used to be dismissed HERE, by an `else` that called
         // `textinput::stop()` on every frame of every other route — because `search::leave`
@@ -2070,7 +2070,7 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         // ends in a `WillLeave`/`Unmount`/`Cover` on `SearchScreen`, which drops the keyboard on
         // each. That is also the half the per-frame poll never did — it cleared `textinput`'s own
         // flag and left the screen's editing state set.)
-        // dev: /tmp/plxnative-acctosc — `crate::dev::scenarios::account_osc_tick`.
+        // dev: /tmp/butaca-acctosc — `crate::dev::scenarios::account_osc_tick`.
         crate::dev::scenarios::account_osc_tick(app, fr.now);
         // ---- the Settings family's dev oscillators, on the tree -------------------------
         //
@@ -2081,7 +2081,7 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         // for the modal ramp, 520 ms for the three focus sweeps. Bodies live in
         // `crate::dev::scenarios` now; this frame still runs them at the same phase boundary.
         crate::dev::scenarios::modal_osc_tick(app, fr.now);
-        // dev: /tmp/plxnative-modalbench — `crate::dev::scenarios::modal_bench_tick`.
+        // dev: /tmp/butaca-modalbench — `crate::dev::scenarios::modal_bench_tick`.
         crate::dev::scenarios::modal_bench_tick(app, fr.now);
         crate::dev::scenarios::legal_doc_tick(app, fr.now, fr.dt);
         crate::dev::scenarios::alert_tick(app, fr.now, fr.dt);
@@ -2264,12 +2264,12 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
 pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32) {
     #[cfg(feature = "threadcheck")]
     let _draw_scope = crate::task::watchdog::draw_scope();
-            // EXPERIMENT (`/tmp/plxnative-egldamage`), no-op without the trigger. FIRST, before
+            // EXPERIMENT (`/tmp/butaca-egldamage`), no-op without the trigger. FIRST, before
             // any GL command of this frame: `EGL_KHR_partial_update` only permits a damage
             // region to be declared before rendering begins. See `egl.rs`.
             crate::egl::frame_damage();
             // dev: the backdrop-glass LOAD DIAL and the blurred-transition prototype
-            // (`/tmp/plxnative-glassload`, `/tmp/plxnative-navblur`). Both are no-ops when
+            // (`/tmp/butaca-glassload`, `/tmp/butaca-navblur`). Both are no-ops when
             // their trigger is absent. HERE and not below the gate, because the dial's cadence
             // is counted in PRESENTS — a loop iteration the gate skipped drew no glass — and
             // because a step rollover invalidates the snapshot, which must precede every glass
@@ -2502,7 +2502,7 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
         // tester was on would be worse than one that omitted the field. Compiles away in every
         // build that is not a lab build.
         crate::lab::note_route(fr.rn);
-        // dev: the FOCUS FINGERPRINT (`/tmp/plxnative-focus`, see `crate::focusprobe`). One
+        // dev: the FOCUS FINGERPRINT (`/tmp/butaca-focus`, see `crate::focusprobe`). One
         // ordered line naming everything the key ladder above can move, logged only when it
         // changes, so a (route x key) characterization run can read what a press did out of the
         // diff instead of out of `route=` alone.
@@ -2641,7 +2641,7 @@ pub(crate) unsafe fn report(app: &mut App, fr: &mut Frame) {
         }
         // frame-drop detector: attribute slow frames to pump(uploads)/draw/swap(GPU).
         // ONE tail for every route — this used to live only on the non-player path, which left
-        // /tmp/plxnative-framedrop dead during playback (the timings were collected, then a
+        // /tmp/butaca-framedrop dead during playback (the timings were collected, then a
         // `continue` threw them away).
         // `present` gates this too: a frame the idle gate skipped drew nothing, so grading it
         // would drag `worstframe` toward zero and read as a perf WIN. A skipped frame is not a

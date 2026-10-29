@@ -490,7 +490,7 @@ fn versioned_wrapper_is_decoded_before_bare_session_and_clear_is_a_tombstone() {
         ),
         ("wrapper-cleared", serde_json::json!("Cleared")),
     ] {
-        let wrapper = serde_json::json!({"format":"plxnative-record","version":1,"domain":"session","key":"session","revision":7,"state":state});
+        let wrapper = serde_json::json!({"format":"butaca-record","version":1,"domain":"session","key":"session","revision":7,"state":state});
         let source = LegacyFile::new(name, &wrapper);
         let mut store = MigrationFixture::default();
         let boot = persistence::bootstrap_with(
@@ -549,7 +549,7 @@ fn recorded_identity_refusal_and_unavailability_preserve_secure_input_without_re
     .into_iter()
     .enumerate()
     {
-        let mut secure = serde_json::json!({"format":"plxnative-secure-session","version":1,"sealed":{"backend":"keymanager3","key":"plxnative.session.v1","iv":"synthetic","data":"synthetic"}});
+        let mut secure = serde_json::json!({"format":"butaca-secure-session","version":1,"sealed":{"backend":"keymanager3","key":"butaca.session.v1","iv":"synthetic","data":"synthetic"}});
         if let Some(identity) = identity {
             secure["sealed"]["identity"] = identity.into();
         }
@@ -580,7 +580,7 @@ fn recorded_identity_refusal_and_unavailability_preserve_secure_input_without_re
 fn secure_open_then_durable_plaintext_readback_is_required_before_retirement() {
     let source = LegacyFile::new(
         "secure-open",
-        &serde_json::json!({"format":"plxnative-secure-session","version":1,"sealed":{"backend":"keymanager3","identity":"named"}}),
+        &serde_json::json!({"format":"butaca-secure-session","version":1,"sealed":{"backend":"keymanager3","identity":"named"}}),
     );
     let mut opener = Opener {
         plaintext: Some(serde_json::to_vec(&fixture()).unwrap()),
@@ -596,7 +596,7 @@ fn secure_open_then_durable_plaintext_readback_is_required_before_retirement() {
 
 #[test]
 fn unknown_secure_format_remains_opaque_until_explicit_clear() {
-    for (index,value) in [serde_json::json!({"format":"future-secure","version":3}),serde_json::json!({"format":"plxnative-secure-session","version":2}),serde_json::json!({"format":"plxnative-secure-session","version":1,"sealed":{"backend":"future"}})].into_iter().enumerate() {
+    for (index,value) in [serde_json::json!({"format":"future-secure","version":3}),serde_json::json!({"format":"butaca-secure-session","version":2}),serde_json::json!({"format":"butaca-secure-session","version":1,"sealed":{"backend":"future"}})].into_iter().enumerate() {
         let source=LegacyFile::new(&format!("unknown-{index}"),&value);let mut store=MigrationFixture::default();let mut opener=opener();
         let boot=persistence::bootstrap_with(&mut store,&mut opener,std::slice::from_ref(&source.path));
         assert!(matches!(boot.state,CanonicalRead::Blocked(_)));assert_eq!(store.commits,0);assert!(source.path.exists());assert!(opener.identities.is_empty());
@@ -688,7 +688,7 @@ fn production_client_coordinator_and_helper_backend_reconcile_committed_lost_rep
     let mut backend = crate::storage::backend::Backend::new(
         Db8::default(),
         state::Flavor::Stable,
-        "com.beb.plxnative.storage".into(),
+        "com.butaca.storage".into(),
     );
     let session = fixture();
     let mut lose_reply = true;
@@ -766,7 +766,7 @@ fn production_client_coordinator_and_helper_backend_reconcile_committed_lost_rep
 #[test]
 fn helper_signout_retains_the_language_and_only_the_delete_all_reset_removes_it() {
     let mut backend = crate::storage::backend::Backend::new(
-        Db8::default(), state::Flavor::Stable, "com.beb.plxnative.storage".into());
+        Db8::default(), state::Flavor::Stable, "com.butaca.storage".into());
     let mut transport = |request: Request| Ok(backend.dispatch(request));
     let session = Session { language: crate::i18n::Preference::Be, ..fixture() };
     assert!(matches!(
@@ -823,7 +823,7 @@ fn pending_import_retries_only_its_recorded_envelope_and_never_another_legacy_fi
         "pending-no-fallback",
         &serde_json::json!({"client_id":"other","account_token":"never-import"}),
     );
-    let envelope=serde_json::json!({"format":"plxnative-secure-session","version":1,"sealed":{"backend":"keymanager3","identity":"named"}}).to_string();
+    let envelope=serde_json::json!({"format":"butaca-secure-session","version":1,"sealed":{"backend":"keymanager3","identity":"named"}}).to_string();
     let mut store = MigrationFixture {
         pending: Some(envelope.clone()),
         ..Default::default()
@@ -882,7 +882,7 @@ fn check_v1_extension_bootstrap_roundtrip(keys: &[String]) {
     let mut backend = crate::storage::backend::Backend::new(
         Db8::default(),
         state::Flavor::Stable,
-        "com.beb.plxnative.storage".into(),
+        "com.butaca.storage".into(),
     );
     let mut transport = |request| Ok(backend.dispatch(request));
     assert!(matches!(
@@ -982,7 +982,7 @@ fn helper_migration_keeps_opened_session_typed_through_exact_readback() {
     let mut backend = crate::storage::backend::Backend::new(
         Db8::default(),
         state::Flavor::Stable,
-        "com.beb.plxnative.storage".into(),
+        "com.butaca.storage".into(),
     );
     let mut transport = |request| Ok(backend.dispatch(request));
     let result = persistence::bootstrap_with(
@@ -1063,7 +1063,7 @@ mod published_06 {
         crate::storage::backend::Backend::new(
             Db8 { record, ..Default::default() },
             state::Flavor::Stable,
-            "com.beb.plxnative.storage".into(),
+            "com.butaca.storage".into(),
         )
     }
 
@@ -1167,7 +1167,7 @@ fn fallback_written_file_migrates_into_recovered_missing_db8() {
     let mut backend = crate::storage::backend::Backend::new(
         Db8::default(),
         state::Flavor::Stable,
-        "com.beb.plxnative.storage".into(),
+        "com.butaca.storage".into(),
     );
     let mut transport = |request| Ok(backend.dispatch(request));
     let result = persistence::bootstrap_with(

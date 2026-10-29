@@ -4,9 +4,9 @@
 
 Report privately, **not** as a public issue:
 
-- **GitHub Security Advisories** — <https://github.com/GLinnik21/plx-native/security/advisories/new>
+- **GitHub Security Advisories** — <https://github.com/gnacho/butaca/security/advisories/new>
   (preferred: it is private, it threads, and it produces a CVE if one is warranted)
-- or e-mail **support@plxnative.com** with `PlxNative security` in the subject.
+- or e-mail **hnacho@proton.me** with `Butaca security` in the subject.
 
 This is a one-person unpaid project, so the honest service level is: acknowledged within **7 days**,
 an assessment within **30**. If you have not heard back in a week, assume the mail was lost and open
@@ -21,13 +21,13 @@ The app, its packaging, and the host-side tools in `tools/` and `ci/`. Concretel
 looking at:
 
 - **The `/tmp` trigger surface.** `/tmp` is mode 1777 in webOS's production jail, so any co-resident
-  process can create files there. Roughly forty `plxnative-*` files change behaviour, and three are
-  outright takeovers — `plxnative-token` beats the signed-in session, `plxnative-servers` injects a
-  server and its token, `plxnative-url` replaces the stream. **All of it is compiled out of a
+  process can create files there. Roughly forty `butaca-*` files change behaviour, and three are
+  outright takeovers — `butaca-token` beats the signed-in session, `butaca-servers` injects a
+  server and its token, `butaca-url` replaces the stream. **All of it is compiled out of a
   release build** by dropping the `devtriggers` cargo feature, and `ci/check-elf.sh` measures that
   on the shipped bytes rather than asserting it. A release binary that still carries any of it is a
   valid report, and a serious one.
-- **The event log.** `plxnative-events.log` is created 0600 and every line goes through
+- **The event log.** `butaca-events.log` is created 0600 and every line goes through
   `diag::scrub::scrub_local` before the write. A line that reaches it carrying a credential, a Plex
   token, a `plex.direct` hostname, a household name or anything about what is being watched is a
   valid report — see [PRIVACY.md](PRIVACY.md) for the contract that is meant to hold.

@@ -112,7 +112,7 @@ GET /video/:/transcode/universal/decision
   &session={SESS}
   &X-Plex-Session-Identifier={SESS}
   &X-Plex-Client-Identifier={DEVICE_ID}
-  &X-Plex-Product=PlxNative&X-Plex-Version=0.1.0
+  &X-Plex-Product=Butaca&X-Plex-Version=0.1.0
   &X-Plex-Platform=webOS&X-Plex-Platform-Version=4.5
   &X-Plex-Client-Profile-Name=Generic
   &X-Plex-Client-Profile-Extra={§1b blob}
@@ -175,9 +175,9 @@ the incompatible stream is handled.
 ### 3a. Root cause today
 
 - Timeline (`player/threads.rs:229-256`) sends bare GETs with `X-Plex-Client-Identifier=
-  com.beb.plxnative` and **no** `X-Plex-Session-Identifier`, no `playQueueItemID`, no
+  com.butaca` and **no** `X-Plex-Session-Identifier`, no `playQueueItemID`, no
   `audioStreamID`/`subtitleStreamID`.
-- Transcode (`route.rs:184`) uses `session=plxnative-{rk}` (per-ratingKey, not per-playback) and
+- Transcode (`route.rs:184`) uses `session=butaca-{rk}` (per-ratingKey, not per-playback) and
   wrongly sets `X-Plex-Client-Identifier={session}`.
 - The timeline and transcode session strings differ → PMS can't join them → dashboard shows the
   file's default track and mislabels Direct Play vs Transcode.
@@ -191,10 +191,10 @@ rides every timeline; and `audioStreamID`/`subtitleStreamID` on the timeline.
 
 | Key | Value | Notes |
 |---|---|---|
-| `X-Plex-Client-Identifier` | stable device id (persist once; e.g. `com.beb.plxnative` or persisted UUID) | groups the device; NEVER vary per item — fixes `route.rs:184` |
+| `X-Plex-Client-Identifier` | stable device id (persist once; e.g. `com.butaca` or persisted UUID) | groups the device; NEVER vary per item — fixes `route.rs:184` |
 | `X-Plex-Session-Identifier` | fresh opaque id per Play | becomes `Session/@id`; MUST equal the transcode `session` param byte-for-byte |
 | `X-Plex-Token` | token | already handled |
-| `X-Plex-Product` | `PlxNative` | today `plxnative` |
+| `X-Plex-Product` | `Butaca` | today `butaca` |
 | `X-Plex-Version` | `0.1.0` | today `1` |
 | `X-Plex-Platform` | `webOS` | today `Generic` |
 | `X-Plex-Platform-Version` | `4.5` | not sent today |
@@ -361,7 +361,7 @@ real vcodec + parsed dimensions (selection today at `engine.rs:163`). For HEVC +
     "videoWidth":3840,"videoHeight":2160,          // from §4a.5
     "videoFpsValue":24000,"videoFpsScale":1001
   },
-  "format":"RAW","provider":"plxnative"
+  "format":"RAW","provider":"butaca"
 }
 ```
 
@@ -439,9 +439,9 @@ is retained solely for the transcode fallback path.
 
 ## 6. Phased implementation plan (each phase independently shippable + on-device verifiable)
 
-No host runtime — verify via `/tmp/plxnative-events.log` (`make run` fetches it) + `tools/capture-
-screen.sh [out.png] DISPLAY`. Dev triggers: `/tmp/plxnative-url` (override part URL), `/tmp/sample.h264`,
-`/tmp/plxnative-autoplay`, `/tmp/plxnative-autoseek`.
+No host runtime — verify via `/tmp/butaca-events.log` (`make run` fetches it) + `tools/capture-
+screen.sh [out.png] DISPLAY`. Dev triggers: `/tmp/butaca-url` (override part URL), `/tmp/sample.h264`,
+`/tmp/butaca-autoplay`, `/tmp/butaca-autoseek`.
 
 ### Phase 0 — HEVC + HDR10 buffer-feed probe (LOAD-BEARING; do first)
 
@@ -453,11 +453,11 @@ buffer-feed HDR path is undocumented. Prove it before building the demuxer aroun
   clip demuxed offline to `VPS+SPS+PPS` + a few IRAP AUs) and drop it on the TV as
   `/tmp/sample.h265`. Add a boot trigger (mirror the existing `/tmp/sample.h264` path) that Loads
   with a hand-written `"codec":{"video":"H265"}` payload (§4b) and feeds the AUs. Gate on
-  `/tmp/plxnative-autoplay` for headless capture.
+  `/tmp/butaca-autoplay` for headless capture.
 - **Files:** `player/engine.rs` (add `PAYLOAD_H265` const + a `/tmp/sample.h265` branch alongside
   the H264 sample), `stub/starfish_stub.c` + `src/starfish.c` (add `setHdrInfo` symbol),
   `bf_split` (HEVC AUD). No `mkv.rs`, no `/decision`, no session work yet.
-- **On-device check:** `plxnative-events.log` shows LOADCOMPLETED + RECEIVE_GOOD_VIDEO (not
+- **On-device check:** `butaca-events.log` shows LOADCOMPLETED + RECEIVE_GOOD_VIDEO (not
   ERROR_06/no-signal); `capture-screen.sh out.png DISPLAY` shows decoded HEVC frames on the video
   plane. Then feed an HDR10 clip + `sf_set_hdr(...)` and confirm the panel enters HDR (capture +
   visible tone) and no decode error.
@@ -487,7 +487,7 @@ buffer-feed HDR path is undocumented. Prove it before building the demuxer aroun
   or advertise hevc but let Phase 0's verdict decide). Optionally route through
   `plex/transcoder.rs::transcode_decision` (the typed client is already installed at boot via
 `plex::install`; only the route.rs call-site migration remains).
-- **Check:** `plxnative-events.log` logs the parsed decision (`Part.decision`, per-stream `decision`,
+- **Check:** `butaca-events.log` logs the parsed decision (`Part.decision`, per-stream `decision`,
   `transcodeReasons`) for both an H264/AC3 title (→ directplay, raw part streams) and a
   known-transcode title (→ start.mkv). Behavior identical to today but now server-adjudicated.
 - **Fallback:** if decision parsing is unreliable, keep the extended local gate (§4e) as the
@@ -500,7 +500,7 @@ buffer-feed HDR path is undocumented. Prove it before building the demuxer aroun
   (runtime `format!` payload, `"video":"H265"`, real dims); `bf_split` (HEVC AUD); `route.rs:240`
   gate (§4e) or the Phase-2 decision branch now enabling hevc; §1a profile now safely advertises
   `hevc`.
-- **Check:** point `/tmp/plxnative-url` at a real HEVC 1080p/4K SDR MKV Part; `plxnative-events.log` shows
+- **Check:** point `/tmp/butaca-url` at a real HEVC 1080p/4K SDR MKV Part; `butaca-events.log` shows
   hvcC parsed (VPS/SPS/PPS lengths), IRAP keyframes detected, feed stats healthy; capture shows
   decoded HEVC; `/status/sessions` shows Direct Play. Seek works (IRAP resync).
 - **Fallback:** if hvcC/NAL parsing misbehaves on real files, gate `hevc` back out of the profile
@@ -511,7 +511,7 @@ buffer-feed HDR path is undocumented. Prove it before building the demuxer aroun
 - **Files/fns:** `mkv.rs` (Colour/MasteringMetadata parse, §4a.5 lower half); `engine.rs`
   (build HDR JSON, call `sf_set_hdr` between LOADCOMPLETED and `sf_play`); `starfish.c`/stub/ffi
   (`setHdrInfo`, from Phase 0); §1c bitDepth-unlock directives appended to the profile.
-- **Check:** real HDR10 4K MKV direct-plays; panel enters HDR (visible + capture); `plxnative-events.log`
+- **Check:** real HDR10 4K MKV direct-plays; panel enters HDR (visible + capture); `butaca-events.log`
   shows the HDR JSON fed and accepted; `/status/sessions` Direct Play. A/B the luminance unit
   forms.
 - **Fallback:** if `setHdrInfo` is ignored/errors, leave HDR10 SEI in-band only (may still
@@ -521,7 +521,7 @@ buffer-feed HDR path is undocumented. Prove it before building the demuxer aroun
 
 - **Files/fns:** `mkv.rs` (emit SRT/ASS as `es=3`; select audio track in demuxer per #35);
   UI text shader (draw subs); timeline reports chosen `audioStreamID`/`subtitleStreamID`.
-- **Check:** switch audio track with no re-transcode (instant, `plxnative-events.log` shows demuxer
+- **Check:** switch audio track with no re-transcode (instant, `butaca-events.log` shows demuxer
   track switch, not a `/decision`/start.mkv restart); soft SRT renders; `/status/sessions` shows
   the right track.
 - **Fallback:** retain the existing `PUT /library/parts` + `subtitles=burn` transcode path for
