@@ -193,7 +193,8 @@ mod tests {
         ServerEntry {
             url: url.to_string(),
             user: user.to_string(),
-            password: "pw".to_string(),
+            password: None,
+            token: Some("tok".to_string()),
             device_id: Some("dev".to_string()),
         }
     }

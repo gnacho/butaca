@@ -65,8 +65,9 @@ impl JfLoginScreen {
     pub(crate) fn new(entry: EntryId) -> Self {
         // Prefill from the persisted config: a boot that lands here DESPITE one means the server
         // refused or was gone, and re-typing credentials on a remote is the worst possible tax
-        // for it. The password prefills too — this television is the credential store, and the
-        // file it is read from is 0600 beside the session.
+        // for it. The URL and the user come back; the password does not, because the file keeps
+        // an access token and no secret the form could show, so the field starts empty and only
+        // the password is typed again.
         let fields = match crate::jellyfin::boot::stored_config() {
             Some((url, user, password)) => [url, user, password],
             None => Default::default(),

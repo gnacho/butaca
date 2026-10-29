@@ -11,13 +11,20 @@
 //!    (`paths::session_candidates`); this is where an installed PoC keeps its server.
 //!
 //! ```json
-//! { "url": "http://192.168.1.20:8096", "user": "gleb", "password": "…" }
+//! { "url": "http://192.168.1.20:8096", "user": "gleb", "token": "…" }
 //! ```
 //!
 //! `url` must be an **IP literal** for plaintext servers: the credential gate's LAN relaxation
 //! reads addresses, not names (`http::is_lan_host`), so `jellyfin.local` over http is refused —
-//! say it as `https://…` or as an address. The password lives in the file and nowhere else: it
-//! is used once, for the login POST, and never logged nor persisted by this code.
+//! say it as `https://…` or as an address.
+//!
+//! **The file keeps a token, never the password.** An access token is revocable on the server and
+//! says nothing about the password the user reuses elsewhere, so it is the one credential worth
+//! persisting: the boot arm adopts it, probes `/Users/Me` to learn whether it still stands, and
+//! asks for the password only when the server has stopped honouring it. The sign-in form still
+//! writes the field a password build wrote (`password`) and still READS it — an install that
+//! upgrades signs in with it once, then the file is rewritten with the token and the plaintext is
+//! gone. Legacy files are never rewritten with a password.
 //!
 //! The device id is minted once and persisted beside the config, so the server's
 //! authorized-devices list does not grow a new "LG webOS TV" on every boot.
@@ -25,14 +32,22 @@
 use super::client::{AuthError, JfClient};
 use serde::{Deserialize, Serialize};
 
-/// One configured server: the URL it answers at, the account that signed in, the password, and
-/// (once minted) the per-server device id. The password lives in the file and nowhere else: it is
-/// used once, for the login POST, and never logged nor held past it.
+/// One configured server: the URL it answers at, the account that signed in, the ACCESS TOKEN that
+/// stands in for the password, and (once minted) the per-server device id.
+///
+/// `password` is the legacy field: read for a file a password-era install wrote, never serialized
+/// again. It is `None` on every entry this code saves, so a successful boot rewrites the file
+/// without the plaintext (see [`remember_token`]).
 #[derive(Deserialize, Serialize, Clone, PartialEq, Eq, Debug)]
 pub(crate) struct ServerEntry {
     pub(crate) url: String,
     pub(crate) user: String,
-    pub(crate) password: String,
+    /// The password, from a file an older build wrote. Used once to mint a token, then dropped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) password: Option<String>,
+    /// The access token minted by the last successful sign-in — what this file exists to keep.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) token: Option<String>,
     /// Optional stable device id; when absent one is minted and persisted (see module doc).
     #[serde(default)]
     pub(crate) device_id: Option<String>,
@@ -44,7 +59,10 @@ pub(crate) struct ServerEntry {
 struct BootConfig {
     url: String,
     user: String,
-    password: String,
+    #[serde(default)]
+    password: Option<String>,
+    #[serde(default)]
+    token: Option<String>,
     /// Optional stable device id; when absent one is minted and persisted (see module doc).
     device_id: Option<String>,
 }
@@ -83,9 +101,10 @@ pub(crate) fn try_boot() -> bool {
     authenticate_server(&cfg)
 }
 
-/// Sign in against one configured server: parse its origin, authenticate, and install the client
-/// on success. This is the one place the boot gate and the Settings "switch server" action share —
-/// a switch is a boot against a different entry of the same list.
+/// Sign in against one configured server: adopt the token the file carries (or, for a
+/// password-era file, mint one with the password first), and install the client on success. This
+/// is the one place the boot gate and the Settings "switch server" action share — a switch is a
+/// boot against a different entry of the same list.
 #[cfg(feature = "jellyfin")]
 pub(crate) fn authenticate_server(entry: &ServerEntry) -> bool {
     let Some(origin) = crate::plex::Origin::parse(&entry.url) else {
@@ -94,13 +113,37 @@ pub(crate) fn authenticate_server(entry: &ServerEntry) -> bool {
     };
     let device_id = entry.device_id.clone().unwrap_or_else(device_id_persistent);
     let client = JfClient::new(origin, device_id);
-    match client.authenticate_by_name(&entry.user, &entry.password) {
+    if let Some(token) = entry.token.as_deref() {
+        match client.adopt_token(token) {
+            Ok(user) => {
+                crate::log(&format!(
+                    "jellyfin: signed in as {} — stored token",
+                    user.user_name
+                ));
+                super::install(client);
+                return true;
+            }
+            Err(AuthError::Unauthorized) => {
+                crate::log("jellyfin: stored token REFUSED (401) — falling back to the password");
+            }
+            Err(AuthError::Unreachable) => {
+                crate::log("jellyfin: server unreachable at boot — staying at the gate");
+                return false;
+            }
+        }
+    }
+    let Some(password) = entry.password.as_deref() else {
+        crate::log("jellyfin: no usable token and no password — staying at the gate");
+        return false;
+    };
+    match client.authenticate_by_name(&entry.user, password) {
         Ok(ok) => {
             crate::log(&format!(
                 "jellyfin: signed in as {} — server {}",
                 ok.user_name, ok.server_id
             ));
             super::install(client);
+            remember_token(entry, &ok.token);
             true
         }
         Err(AuthError::Unauthorized) => {
@@ -112,6 +155,31 @@ pub(crate) fn authenticate_server(entry: &ServerEntry) -> bool {
             false
         }
     }
+}
+
+/// Replace a persisted entry's password with the token just minted for it — the step that takes
+/// the plaintext off the television. Only the PERSISTENT file is touched: a `/tmp` dev trigger is
+/// the harness's business and must not invent a config beside the session. A miss (no persistent
+/// list, or no entry for this url and user) is silent: the boot that called this has already
+/// signed in, and the only cost is asking again next time.
+#[cfg(feature = "jellyfin")]
+fn remember_token(entry: &ServerEntry, token: &str) {
+    let Some(mut list) = load_servers_persistent() else {
+        return;
+    };
+    let Some(slot) = list
+        .servers
+        .iter_mut()
+        .find(|s| s.url == entry.url && s.user == entry.user)
+    else {
+        return;
+    };
+    if slot.token.as_deref() == Some(token) && slot.password.is_none() {
+        return;
+    }
+    slot.token = Some(token.to_string());
+    slot.password = None;
+    save_servers(&list.servers, list.active);
 }
 
 /// The Plex build has no Jellyfin boot arm; the gate call site is unconditional, so this is the
@@ -155,6 +223,7 @@ fn parse_config(raw: &str, where_from: &str) -> Option<ServerList> {
                 url: c.url,
                 user: c.user,
                 password: c.password,
+                token: c.token,
                 device_id: c.device_id,
             }],
             active: 0,
@@ -185,10 +254,10 @@ pub(crate) fn active_server() -> Option<ServerEntry> {
     list.servers.get(list.active).cloned()
 }
 
-/// Write the server list the boot arm reads. The password goes in BECAUSE the file is the
-/// credential store — the module doc's rule stands: it lives here and nowhere else (never logged,
-/// never held past the login POST by the client). 0600 like every secret this install keeps; a
-/// failed write is reported, not retried — the session still runs, the next boot simply asks again.
+/// Write the server list the boot arm reads. Entries carry tokens, not passwords: the file is a
+/// token store, and [`ServerEntry::password`] is `None` on everything this writes. 0600 like every
+/// secret this install keeps; a failed write is reported, not retried — the session still runs, the
+/// next boot simply asks again.
 #[cfg(feature = "jellyfin")]
 pub(crate) fn save_servers(servers: &[ServerEntry], active: usize) -> bool {
     let body = serde_json::json!({
@@ -212,14 +281,16 @@ pub(crate) fn save_servers(servers: &[ServerEntry], active: usize) -> bool {
 }
 
 /// Write the config the boot arm reads, after the sign-in form's first successful auth — a fresh
-/// single server REPLACES the whole list and becomes active.
+/// single server REPLACES the whole list and becomes active. What it keeps is the token the server
+/// just minted: the password the user typed is not written anywhere.
 #[cfg(feature = "jellyfin")]
-pub(crate) fn save_config(url: &str, user: &str, password: &str, device_id: &str) -> bool {
+pub(crate) fn save_config(url: &str, user: &str, token: &str, device_id: &str) -> bool {
     save_servers(
         &[ServerEntry {
             url: url.to_string(),
             user: user.to_string(),
-            password: password.to_string(),
+            password: None,
+            token: Some(token.to_string()),
             device_id: Some(device_id.to_string()),
         }],
         0,
@@ -229,7 +300,7 @@ pub(crate) fn save_config(url: &str, user: &str, password: &str, device_id: &str
 /// Append a newly signed-in server to the list and make it active (the Settings "Conexión rápida"
 /// half of [`save_config`], which replaces instead).
 #[cfg(feature = "jellyfin")]
-pub(crate) fn append_server(url: &str, user: &str, password: &str, device_id: &str) -> bool {
+pub(crate) fn append_server(url: &str, user: &str, token: &str, device_id: &str) -> bool {
     let mut list = load_servers().unwrap_or(ServerList {
         servers: Vec::new(),
         active: 0,
@@ -239,7 +310,8 @@ pub(crate) fn append_server(url: &str, user: &str, password: &str, device_id: &s
         ServerEntry {
             url: url.to_string(),
             user: user.to_string(),
-            password: password.to_string(),
+            password: None,
+            token: Some(token.to_string()),
             device_id: Some(device_id.to_string()),
         },
     );
@@ -282,14 +354,19 @@ pub(crate) fn erase_config() {
 }
 
 /// The persisted config as the sign-in form's PREFILL — `(url, user, password)`. A boot that
-/// reached the form despite a config on disk means the server refused or was gone; handing the
-/// same fields back is what turns "sign in again" into one press on Connect. Read from the
-/// persistent file only: the `/tmp` trigger is the harness's business, not the form's.
+/// reached the form despite a config on disk means the token no longer stands (or the server was
+/// gone); the password half is empty for every file this build wrote, and the form hands it back
+/// as an empty field rather than as a secret it does not have. Read from the persistent file only:
+/// the `/tmp` trigger is the harness's business, not the form's.
 #[cfg(feature = "jellyfin")]
 pub(crate) fn stored_config() -> Option<(String, String, String)> {
     let list = load_servers_persistent()?;
     let cfg = list.servers.get(list.active)?;
-    Some((cfg.url.clone(), cfg.user.clone(), cfg.password.clone()))
+    Some((
+        cfg.url.clone(),
+        cfg.user.clone(),
+        cfg.password.clone().unwrap_or_default(),
+    ))
 }
 
 /// `/media/developer/<app id>-jellyfin.json` — one of the locations
@@ -371,9 +448,48 @@ mod tests {
         ServerEntry {
             url: url.to_string(),
             user: user.to_string(),
-            password: "pw".to_string(),
+            password: None,
+            token: Some("tok".to_string()),
             device_id: Some("dev".to_string()),
         }
+    }
+
+    /// A saved entry carries the token and NOT the password: the wire shape is the proof, since
+    /// this is the string that lands in the file.
+    #[test]
+    fn a_saved_entry_serializes_the_token_and_no_password() {
+        let wire = serde_json::to_string(&entry("http://10.0.0.2:8096", "a")).unwrap();
+        assert!(wire.contains("\"token\":\"tok\""), "wire shape: {wire}");
+        assert!(
+            !wire.contains("password"),
+            "the password must not reach the file: {wire}"
+        );
+    }
+
+    /// An install that upgrades from a password-era file still signs in: the field is read, and it
+    /// is the only thing that can be read — such a file has no token.
+    #[test]
+    fn a_password_era_entry_still_reads_its_password() {
+        let list = parse_config(
+            r#"{"servers":[{"url":"http://10.0.0.2:8096","user":"a","password":"pw"}],"active":0}"#,
+            "t",
+        )
+        .expect("a password-era list is a valid config");
+        assert_eq!(list.servers[0].password.as_deref(), Some("pw"));
+        assert_eq!(list.servers[0].token, None);
+    }
+
+    /// An entry with neither credential parses (the picker may hold one mid-edit) and the boot arm
+    /// answers "no usable token and no password" instead of dereferencing an absent secret.
+    #[test]
+    fn an_entry_may_carry_no_credential_at_all() {
+        let list = parse_config(
+            r#"{"servers":[{"url":"http://10.0.0.2:8096","user":"a"}],"active":0}"#,
+            "t",
+        )
+        .expect("url and user are the only required fields");
+        assert_eq!(list.servers[0].password, None);
+        assert_eq!(list.servers[0].token, None);
     }
 
     /// A flat legacy file reads as a one-entry list with that entry active.
