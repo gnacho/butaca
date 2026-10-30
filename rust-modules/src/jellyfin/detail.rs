@@ -114,6 +114,24 @@ pub(crate) fn playing_item(
     rk: &str,
 ) -> Option<crate::metadata::PlayingItem> {
     let it = c.item_detail(rk)?;
+    let markers = c
+        .media_segments(rk)
+        .map(|s| convert_segments(&s))
+        .unwrap_or_default();
+    Some(playing_item_from_dto(&it, sid, rk, markers))
+}
+
+/// The mapping half of [`playing_item`], split from the two requests it needs so a test can pin
+/// what the plan reads without a server. `show_rk` is the series, not the leaf: the plan asks the
+/// server for what follows off exactly that id (`route/plan.rs`, `jellyfin_up_next`), and leaving
+/// it empty meant the card only appeared while the episode's own `Detail` happened to be the
+/// cached one, which is never the case on the second episode of a run.
+pub(crate) fn playing_item_from_dto(
+    it: &BaseItemDto,
+    sid: ServerId,
+    rk: &str,
+    markers: Vec<crate::metadata::Marker>,
+) -> crate::metadata::PlayingItem {
     let src = it
         .media_sources
         .as_ref()
@@ -136,7 +154,7 @@ pub(crate) fn playing_item(
             _ => {}
         }
     }
-    Some(crate::metadata::PlayingItem {
+    crate::metadata::PlayingItem {
         sid,
         rk: rk.to_string(),
         audio,
@@ -144,8 +162,8 @@ pub(crate) fn playing_item(
         video_fps,
         width,
         blur: None,
-        show_rk: String::new(),
-        // the MediaSource's own container word — a GUID id has no extension, so this field IS
+        show_rk: it.series_id.clone().unwrap_or_default(),
+        // the MediaSource's own container word: a GUID id has no extension, so this field IS
         // the demuxer test on this backend
         container: src.and_then(|s| s.container.clone()).unwrap_or_default(),
         height,
@@ -153,12 +171,9 @@ pub(crate) fn playing_item(
         // Derived from `VideoRangeType` (see `dovi_from_range`): DV present, base layer named
         // when the string names one, and bare `DOVI` read as Profile 5 (single-layer IPT-PQ).
         dovi,
-        markers: c
-            .media_segments(rk)
-            .map(|s| convert_segments(&s))
-            .unwrap_or_default(),
+        markers,
         chapters: chapters_from_dto(&it.chapters),
-    })
+    }
 }
 
 /// `ChapterDto[]` → the strip's `Chapter[]` — 1-based index, ticks to ms. Jellyfin HAS chapter
@@ -616,6 +631,27 @@ mod tests {
             ]
         }]
     }"#;
+
+    /// An episode as the same server sends it: the leaf plus the series it belongs to.
+    const EPISODE_JSON: &str = r#"{
+        "Id": "e2", "Name": "Second", "Type": "Episode", "SeriesId": "series9",
+        "SeriesName": "The Show", "ParentIndexNumber": 1, "IndexNumber": 2,
+        "MediaSources": [{"Id": "ms1", "Container": "mkv", "MediaStreams": [
+            {"Type": "Video", "Codec": "h264", "Index": 0, "Width": 1920, "Height": 1080},
+            {"Type": "Audio", "Codec": "aac", "Index": 1, "Language": "spa"}
+        ]}]
+    }"#;
+
+    /// The plan asks the server for what follows off `show_rk`, so a leaf resolved cold (which is
+    /// every episode after the first of a run) must still name its series.
+    #[test]
+    fn the_playing_item_names_the_series_the_plan_asks_for_what_follows() {
+        let it: BaseItemDto = serde_json::from_str(EPISODE_JSON).unwrap();
+        let p = playing_item_from_dto(&it, ServerId::from_raw(0), "e2", Vec::new());
+        assert_eq!(p.show_rk, "series9");
+        assert_eq!(p.rk, "e2");
+        assert_eq!(p.audio.len(), 1);
+    }
 
     #[test]
     fn a_leaf_record_maps_the_whole_detail() {
