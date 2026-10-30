@@ -17,7 +17,7 @@
 #  - The TV auto-drops to standby after a few idle minutes; every automation session
 #    starts here. Wake typically takes 15-60 s, occasionally ~2-3 min — hence the
 #    generous default timeout and the WoL resend every ~20 s while polling.
-#  - macOS has no `wakeonlan` out of the box; python3 broadcasts the magic packet.
+#  - there is no `wakeonlan` out of the box; python3 broadcasts the magic packet.
 #  - SSH auth: the installed key is tried first; the Makefile's sshpass fallback covers
 #    a machine without one. Key auth simply wins when both are available.
 set -euo pipefail

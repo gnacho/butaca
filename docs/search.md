@@ -319,7 +319,7 @@ This is a real constraint on the interaction design, not a footnote: the screen 
 Two host-side findings, recorded because both cost time today and neither is a statement about the
 television.
 
-**The boot probe's answer on macOS is `keyboard: support=0 active=1 focus=0 winflags=0x26`.** That
+**The boot probe's answer on the host is `keyboard: support=0 active=1 focus=0 winflags=0x26`.** That
 is **trap 2 observed**: `0x26` is `OPENGL | SHOWN | RESIZABLE` (`app.rs`'s `hostsim` arm asks for
 `0x2 | 0x20`; SDL adds `SHOWN`), and `0x200` — `SDL_WINDOW_INPUT_FOCUS` — is not in it. The trap is
 therefore reproducible without a television, which is the useful part; what it does **not** tell you
@@ -327,7 +327,7 @@ is anything about the TV's own answer, since `support=0` here just means desktop
 keyboard at all.
 
 **Do not push a synthetic `SDL_TEXTINPUT` through `SDL_PushEvent` on the host — it SIGSEGVs inside
-SDL.** macOS `libSDL2` is **sdl2-compat**, a shim forwarding into SDL3, and SDL3's text event
+SDL.** the desktop `libSDL2` is **sdl2-compat**, a shim forwarding into SDL3, and SDL3's text event
 carries a `char *text` **pointer** where SDL2 carries an inline `char[32]`; the compat layer
 dereferences what it is handed. There is no Rust panic and no log line — the process is simply gone.
 The existing remote-FIFO injection is safe by luck of shape: key events and `ck:` pointer clicks are

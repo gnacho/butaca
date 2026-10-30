@@ -131,7 +131,7 @@ while [ $# -gt 0 ]; do
     *)          _argv+=("$1"); shift ;;
   esac
 done
-# bash 3.2 (macOS system bash) + `set -u`: "${arr[@]}" on an EMPTY array is an unbound-variable
+# bash 3.2 + `set -u`: "${arr[@]}" on an EMPTY array is an unbound-variable
 # error, and a bare `tv-session.sh` with no arguments is precisely that case.
 set -- ${_argv[@]+"${_argv[@]}"}
 
@@ -805,7 +805,7 @@ cmd_up() {
   ensure_binary || exit 1
   [ "$keep" = 1 ] || clear_triggers
 
-  # NB bash 3.2 (macOS system bash) + `set -u`: "${arr[@]}" on an EMPTY array is an
+  # NB bash 3.2 + `set -u`: "${arr[@]}" on an EMPTY array is an
   # unbound-variable error, so every expansion here is length-guarded. Screens that need
   # no triggers at all (home, profiles) hit exactly that case.
   if [ ${#files[@]} -gt 0 ]; then
@@ -1192,7 +1192,7 @@ cmd_sound() {
   if ! printf '%s' "$vflat" | grep -q '"returnValue": *true'; then
     bad "sound $want: getVolume refused: $vflat"; return 1
   fi
-  # `-E` (extended regex) rather than a BRE `\(true\|false\)`: BSD sed (the macOS host this is
+  # `-E` (extended regex) rather than a BRE `\(true\|false\)`: BSD sed is what this
   # developed on) does not support `\|` alternation inside a BRE group, so that spelling silently
   # matched nothing at all -- caught by this file's own host test, never on the set.
   seen_muted=$(printf '%s' "$vflat" | sed -En 's/.*"muted": *(true|false).*/\1/p')

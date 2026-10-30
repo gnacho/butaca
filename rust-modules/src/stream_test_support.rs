@@ -14,7 +14,7 @@ pub(super) fn loopback_get(port: u16) -> Option<crate::http::Reply> {
     crate::http::request(&o, "/x", crate::http::Method::Get, &[], None)
 }
 
-/// Descriptors currently open in this process. `/dev/fd` works on both macOS and Linux;
+/// Descriptors currently open in this process. `/dev/fd` works on Linux;
 /// `read_dir` opens one itself, but that is constant between two calls.
 pub(super) fn open_fd_count() -> usize {
     std::fs::read_dir("/dev/fd").map(|d| d.count()).unwrap_or(0)

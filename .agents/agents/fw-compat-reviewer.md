@@ -135,8 +135,8 @@ whenever an extraction already exists somewhere on the box.
 
 **2. A `readelf` that understands ARM — but only for GRADING.** `elf_facts` shells out to
 `$WEBOS_SDK/bin/arm-webos-linux-gnueabi-readelf`, then `/usr/bin/readelf`, then anything on PATH.
-macOS ships neither of the last two (`command -v readelf` is empty here), so without the NDK the
-grading modes die with `no readelf found`. `--inventory` and `--lib` never open the binary and
+A host with no system `readelf` dies with `no readelf found` in the grading modes, so without the
+NDK the grading modes fail. `--inventory` and `--lib` never open the binary and
 never call it, so the library-and-symbol half of this review still works on a machine that cannot
 grade an ELF at all.
 
@@ -194,11 +194,9 @@ Four things, in this order:
    value.
 3. **Candidate list, and its ORDER.** Order is by preference, not by age, and it bites wherever a
    device carries both names — 5.3.1 and 6.4.0 do (see `--lib` under step 4). The live one is
-   `curl: ["libcurl.so.4", "libcurl.so.5", "libcurl.4.dylib"]` in `net.rs`, and every position has
-   a written reason: `.so.4` first because that is what most of the fleet answers to, and the
-   macOS `.4.dylib` **last, deliberately** — a television never reaches it, so it costs the device
-   one extra failed `dlopen` only in the already-fatal no-curl case, while being the single
-   candidate that lets the desktop build sign in at all. Read any new list against
+   `curl: ["libcurl.so.4", "libcurl.so.5"]` in `net.rs`, and every position has
+   a written reason: `.so.4` first because that is what most of the fleet answers to, and `.so.5`
+   for the older releases that answer only to it. Read any new list against
    `tools/fwcompat.py --inventory <lib>`.
 4. **Is `dynlib!` even right here?** If the SONAME does not move, the answer is no; link it and
    keep the compile-time check.
@@ -215,9 +213,9 @@ tools/fwcompat.py --lib <soname> --grep '^<symbol>$'   # presence + one symbol, 
 
 Then the recorded expectation has to move with it — `ci/check-elf.sh` diffs the binary's
 `DT_NEEDED` against `ci/expected-dt-needed.txt` (15 entries today) and fails on any drift.
-Regenerate it in **C collation**, not the shell's default: macOS orders case-insensitively and the
-Linux runner puts capitals first, and that pure-ordering diff reads exactly like the ABI drift the
-check exists to catch. That is what `LC_ALL=C` in the check is for.
+Regenerate it in **C collation**, not the shell's default: a case-insensitive locale orders
+differently from the Linux runner, which puts capitals first, and that pure-ordering diff reads
+exactly like the ABI drift the check exists to catch. That is what `LC_ALL=C` in the check is for.
 
 ### 4. Run the matrix — only if step 1 said you have a current ELF
 
@@ -315,9 +313,8 @@ library, with nothing in the app's own log.
 correctly on the television — and no amount of device testing could ever have found it. It was the
 shape the macro emitted until **2026-08-16**, latent for exactly as long as the desktop build could
 not open a libcurl at all, and it surfaced on the FIRST plex.tv call, i.e. sign-in, i.e. the first
-thing a new user of the Mac bundle does. `docs/macos-app.md` §2 is the account — a numbered
-ITEM under *What had to change for it to work at all*, not a heading; that file has no numbered
-headings, so grep it for `variadic` rather than hunting for a `## 2`.
+thing a new user of the desktop simulator does. The account of what had to change for it to work is
+in `docs/agent-reference.md` — grep it for `variadic`.
 
 Two things follow for you. First: **check the ellipsis position in every variadic declaration in
 the diff.** `dynlib_wrapper!` has exactly two arms, and the variadic one (the pattern containing
@@ -325,7 +322,7 @@ the diff.** `dynlib_wrapper!` has exactly two arms, and the variadic one (the pa
 drops the ellipsis falls straight through to the ordinary arm and compiles, silently, into the
 wrong convention. There is no error to wait for; the ellipsis in the source is the whole of the
 evidence. Second: when a change touches this seam, the verification that matters
-is **the macOS build** (`make sim` / `make macapp`, host-only, no television), not a device run.
+is **the host simulator build** (`make sim-linux`, host-only, no television), not a device run.
 Recommend it explicitly — and recommend it rather than running it, because neither goal is a pure
 query either (see the constraints). A device-green report is not evidence here;
 `.agents/skills/which-tier/` is the general form of that question.

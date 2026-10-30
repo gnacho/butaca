@@ -7,7 +7,7 @@
 //!
 //! Adding a compression crate would put a new dependency into a `-Z build-std` cross build for one
 //! feature that never ships. zlib is present wherever libcurl and OpenSSL are — which is every
-//! webOS release this app claims, and macOS — and this needs exactly **one** symbol from it.
+//! webOS release this app claims, and the desktop host — and this needs exactly **one** symbol from it.
 //!
 //! # Its own table, and a fallback rather than a failure
 //!
@@ -32,7 +32,7 @@ crate::dynlib! {
     /// ONE symbol. See this module's doc before adding a second: every name added here is a name
     /// that can empty the table on some firmware, and the cost of an empty table is that
     /// diagnostics travel uncompressed rather than that anything fails.
-    z: ["libz.so.1", "libz.so", "libz.1.dylib", "libz.dylib"] {
+    z: ["libz.so.1", "libz.so"] {
         fn compress2(dest: *mut u8, dest_len: *mut c_ulong, src: *const u8, src_len: c_ulong,
                      level: c_int) -> c_int;
     }

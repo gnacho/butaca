@@ -53,8 +53,8 @@ so that a recording of the UI can be COMMITTED to this public repository:
   digits). No household byte can enter a fixture recorded against it, so no scrub pass is needed
   — and `scrub.rs` cannot recognise a title anyway. `--selftest` proves the shapes and the
   determinism (two servers, one seed, byte-identical answers) with no app. Boot the simulator
-  against it with `make sim-shot SIM_PMS=127.0.0.1 SIM_PORT=32499` and any non-empty
-  `$SIM_DIR/butaca-token`.
+  against it (pass `127.0.0.1 32499` to the binary) with any non-empty
+  token in the instance root's `butaca-token`.
 - **`tests/focusfp.sh`** drives eleven focus flows (boot → grid, grid → detail → BACK, the
   Library, Search with a seeded query, detail ↔ person, the Settings family, first-run consent,
   press-and-hold, the player read-out, pointer clicks; flow 10 — root BACK — is a television flow
@@ -107,7 +107,7 @@ since 2026-09-03) — the profile sent to PMS still carries no frame-rate limita
   Copy it from `manifest.local.json.example` and fill it in; `run.py` merges it over the manifest
   at load and refuses to run without it. An `item` key it cannot resolve is **not** fatal — see
   *Running it against your own library*.
-- `run.py` — the runner (Python 3 stdlib only; macOS system `python3` is fine).
+- `run.py` — the runner (Python 3 stdlib only).
 - `fixtures/` — **`make_fixtures.py`, which SYNTHESIZES the media those `item` shapes name** (and
   its own README). If your library has no TrueHD-default-with-AC-3-sibling, no Dolby Vision 8.1
   and no PGS track — nobody's does by accident — this builds all nine shapes from ffmpeg/lavfi on
@@ -895,7 +895,7 @@ bitstream or a hang. `SimpleHTTPRequestHandler` is exactly that server. Ours ans
 and never `200`-with-a-`Range`, and `--selftest` proves the ranged body is the tail of the whole
 body.
 
-**The macOS trap, and it costs an afternoon every time.** The application firewall silently drops
+**The firewall trap, and it costs an afternoon every time.** The application firewall silently drops
 the TV's connections to an ad-hoc python listener — no refusal, no log line, the app's open just
 reads empty, and every assertion then fails as "no line found", which is what a total regression
 looks like. Accept the *allow incoming connections* prompt for this python **once, with a human at

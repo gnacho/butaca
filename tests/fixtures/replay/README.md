@@ -5,9 +5,10 @@ A directory here is one RECORDING (restructure spec §5.3): `manifest.json` (the
 `butaca-rec`. They are regression assertions pinned to the build lineage that recorded them
 (§5.5): `tools/butaca-rec diff` compares two, `tools/butaca-rec check` verifies one against
 `ALPHABET.json`, and `tests/test_harness.py` checks their schema and closed vocabulary on every
-`make check`. **`make check-replay` builds the macOS simulator and executes every committed
+`make check`. **`make check-replay` builds the Linux simulator and executes every committed
 recording in both Targets and Resolve modes.** The same driver (`tests/replay_fixtures.py`) gates
-the macOS Simulator CI job, with outbound networking denied, and retains each run's logs.
+the Linux Simulator CI job and retains each run's logs. The gate
+runs where the fixtures are recorded, so a failure is one a developer can reproduce locally.
 It requires a successful process exit, exactly one clean summary, every difference counter zero,
 and frame/grade counts matching the complete committed ledger. Missing manifests or segments,
 refused fixtures, timeouts, and incomplete replay all fail; no fixture is quarantined or skipped.
@@ -19,10 +20,9 @@ Controlled bootstrap accepts **Home**, **Settings**, and the typed synthetic
 current simulator for Flow 12's complete typed synthetic initial input before boot, using the
 same contract as replay restoration. It remains synthetic: it does not seed an auth file or patch
 a recorded identifier.
-`tests/controlled_bootstrap.py --sim <built-simulator>` exercises normal Home, recording, fresh
-and contrasting-ambient replay with outbound IO denied, malformed-input refusals, and a
-supported-effect discriminator. Its private recording must pass `tools/butaca-rec check`
-before `import`/`rerecord`; a live-mock focus smoke alone is not replay acceptance.
+Replay acceptance also covers malformed-input refusals and the supported-effect discriminator;
+a live-mock focus smoke alone is not replay acceptance. A private recording must pass
+`tools/butaca-rec check` before `import`/`rerecord`.
 
 The hash includes `AppFrameV4{route,overlay,focus,tree,session,consent,initial}`: the press machine, the route/overlay words and the
 focus fingerprint from phase 2, plus — since phase 5b — `tree`, which is `Dispatcher::state_hash`

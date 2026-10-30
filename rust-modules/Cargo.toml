@@ -26,7 +26,7 @@ name = "butaca_modules"
 # nothing about the `.a` the Makefile picks up.
 crate-type = ["staticlib", "rlib"]
 
-# The macOS/desktop UI simulator. Not built by `make`, not shipped, and inert unless its feature is
+# The desktop UI simulator. Not built by `make`, not shipped, and inert unless its feature is
 # on — see the `hostsim` feature below and `src/bin/sim.rs`.
 [[bin]]
 name = "butaca-sim"
@@ -109,7 +109,7 @@ lab-diagnostics = []
 # a mutually-exclusive partner feature; the television is the DEFAULT, and the simulator opts in.
 #
 # What it changes, and nothing else: the media seam (29 symbols that exist only on a television),
-# the GL context request (macOS has no GLES2 driver), the window flags, the keyboard event decode
+# the GL context request (a desktop core profile, not GLES2), the window flags, the keyboard event decode
 # (LG's SDL fork shifts SDL_KeyboardEvent; stock SDL2 does not), and the wayland/glib calls that
 # have no host equivalent. Everything else — all of `ui/`, the whole Plex data layer, the demux
 # orchestration — is compiled identically for both.

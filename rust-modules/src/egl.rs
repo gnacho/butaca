@@ -213,7 +213,7 @@ fn cstr(p: *const c_char) -> String {
 pub(crate) fn probe() {
     let mut lib: Option<Handle> = None;
     let Some(Current { dpy, ctx }) = current_with(&mut |name| resolve(name, &mut lib)) else {
-        // Not a fault on a desktop simulator (no EGL at all on macOS; GLX on Linux/X11) and a
+        // Not a fault on a desktop simulator (no EGL at all on a desktop; GLX on Linux/X11) and a
         // genuine surprise on a television, so say which one this is rather than guessing.
         crate::log(
             "egl: no current EGL context on this thread — SDL is not on an EGL backend here, \
@@ -620,7 +620,7 @@ fn log_gl_extensions() {
 /// Resolved the way everything else here is — through the EGL SDL already mapped, so no new
 /// `DT_NEEDED` — and only when the display advertises the extension; the dev set does (webOS 4.5,
 /// Mali r12p0: `EGL_KHR_fence_sync` in the boot `egl extensions:` line). Absent — or no EGL
-/// context current at all, as on a simulator (none on macOS, GLX on Linux/X11) —
+/// context current at all, as on a simulator (none on a desktop, GLX on Linux/X11) —
 /// [`Fence::insert`] answers `None` and the caller falls back to its frame count.
 ///
 /// Polled with `flags = 0`, never `EGL_SYNC_FLUSH_COMMANDS_BIT_KHR`: a flush in the middle of a frame
@@ -814,7 +814,7 @@ mod tests {
             resolve_with("eglCreateSyncKHR", &mut nothing, &mut mapped),
             Some(0xdead_0000_usize as *mut c_void)
         );
-        // Nothing mapped at all (macOS; GLX without an EGL loaded): nothing resolves.
+        // Nothing mapped at all (a desktop with GLX and no EGL loaded): nothing resolves.
         assert_eq!(
             resolve_with("eglCreateSyncKHR", &mut nothing, &mut nothing),
             None

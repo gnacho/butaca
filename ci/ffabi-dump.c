@@ -29,7 +29,7 @@
  * `nm -S`. Nothing executes, which is the only option for an ARM object on this desk.
  *
  * `-DPLX_FFABI_MAIN` (the HOST table, for the simulator): the same list becomes a printed table,
- * because a host object CAN be run and because macOS `nm` reports every Mach-O size as zero — the
+ * because a host object CAN be run and because a desktop `nm` reports every Mach-O size as zero — the
  * array trick is not merely unnecessary there, it silently yields nothing.
  *
  * **One list, two readers.** A second file would drift, and a drifted ABI table does not fail: it

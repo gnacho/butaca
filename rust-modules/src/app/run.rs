@@ -577,7 +577,7 @@ unsafe fn present_and_swap(
         // opening the theme faces and loading their glyph metrics (`text::warm_fonts_idle`), so
         // a page's first layout does not pay for them inside a transition. A no-op once warm.
         crate::text::warm_fonts_idle(FONT_WARM_SLICE_US, crate::diag::heartbeat::now_us);
-        // Device and macOS presented frames block in swap; WSLg/X11 presented frames use the
+        // Device and desktop presented frames block in swap; WSLg/X11 presented frames use the
         // software budget above. A skipped frame reaches neither path, so sleep here to keep a
         // settled screen from becoming a CPU spinner.
         SDL_Delay(crate::ui::idle::IDLE_POLL_MS);
@@ -1332,7 +1332,7 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
         if app.last_input.wrapping_sub(app.ptr.last_wheel) > 250 {
             app.ptr.last_wheel = app.last_input;
             // **The host reads a DIFFERENT offset, and this one is not the LG-fork
-            // shift `decode_key` documents — it is macOS `libSDL2` again being
+            // shift `decode_key` documents — it is the desktop `libSDL2` again being
             // sdl2-compat forwarding into SDL3.** `SDL_MouseWheelEvent` on real SDL2
             // (what the television runs) carries a plain `Sint32 y` at +20, which is
             // what production code always read. Measured 2026-09-02 by dumping the
@@ -3520,7 +3520,7 @@ mod lifecycle_regression_tests {
                         }
                         Err(e) => panic!("fixture accept: {e}"),
                     };
-                    // Darwin accept inherits the nonblocking listener flag. Reads must wait
+                    // The host's accept inherits the nonblocking listener flag. Reads must wait
                     // for request bytes rather than racing the loopback client's first write.
                     socket.set_nonblocking(false).unwrap();
                     socket

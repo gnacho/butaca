@@ -92,9 +92,9 @@ Four properties, each deliberate:
 It logs one line per connection with the matched request line, so you can see what the app is
 actually asking for, and a summary on exit. `--mode` sets the starting mode; `--control` moves the
 control file. `--selftest` proves the shaper against a loopback transfer and exits, which is also
-how to answer the macOS firewall question below without a television in the room.
+how to answer the firewall question below without a television in the room.
 
-**macOS trap, and it costs an afternoon every time: the application firewall silently drops
+**The firewall trap, and it costs an afternoon every time: the application firewall silently drops
 inbound connections to an ad-hoc python listener** — no refusal, no log line, the TV's open just
 reads empty (verified 2026-08-11: netcond up, mode armed, zero requests logged). The GUI "allow
 incoming connections?" prompt must be accepted ONCE PER PYTHON BINARY, so start netcond with a

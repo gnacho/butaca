@@ -335,15 +335,11 @@ pub struct AVSubtitleRect {
 //
 // One consequence worth knowing: the `cfg(test)` gate is gone. With no link directive the host
 // suite links unconditionally, and a test that calls into FFmpeg now fails by taking `dlopen`'s
-// None branch on Darwin instead of by failing to link.
+// None branch on the host instead of by failing to link.
 crate::dynlib! {
     avformat: [
-        // The ELF the app SHIPS, and the Mach-O the desktop simulator builds beside it
-        // (`HOST=1 ci/build-ffmpeg.sh` — same version, same component list). A candidate
-        // LIST rather than a `cfg`: `dynlib!` already tries each name and reports the ones
-        // it could not open, and only one of these two can ever exist in an app directory.
+        // The ELF the app ships.
         "libavformat-plx.so.63",
-        "libavformat-plx.63.dylib",
     ] {
     // Declared beside libavformat's other entry points because that is the library that DEFINES
     // it. Under `#[link]` the final link resolved every name against every library at once and
@@ -395,12 +391,8 @@ crate::dynlib! {
 }}
 crate::dynlib! {
     avcodec: [
-        // The ELF the app SHIPS, and the Mach-O the desktop simulator builds beside it
-        // (`HOST=1 ci/build-ffmpeg.sh` — same version, same component list). A candidate
-        // LIST rather than a `cfg`: `dynlib!` already tries each name and reports the ones
-        // it could not open, and only one of these two can ever exist in an app directory.
+        // The ELF the app ships.
         "libavcodec-plx.so.63",
-        "libavcodec-plx.63.dylib",
     ] {
     fn avcodec_version() -> c_uint;
     fn av_packet_alloc() -> *mut AVPacket;
@@ -441,12 +433,8 @@ crate::dynlib! {
     // loader resolves by symbol, not by header, so it must move to the library that defines it or
     // the whole avutil table reports Incomplete on every device.
     avutil: [
-        // The ELF the app SHIPS, and the Mach-O the desktop simulator builds beside it
-        // (`HOST=1 ci/build-ffmpeg.sh` — same version, same component list). A candidate
-        // LIST rather than a `cfg`: `dynlib!` already tries each name and reports the ones
-        // it could not open, and only one of these two can ever exist in an app directory.
+        // The ELF the app ships.
         "libavutil-plx.so.61",
-        "libavutil-plx.61.dylib",
     ] {
     fn avutil_version() -> c_uint;
     fn av_malloc(size: usize) -> *mut c_void;
@@ -470,12 +458,8 @@ crate::dynlib! {
 }}
 crate::dynlib! {
     swscale: [
-        // The ELF the app SHIPS, and the Mach-O the desktop simulator builds beside it
-        // (`HOST=1 ci/build-ffmpeg.sh` — same version, same component list). A candidate
-        // LIST rather than a `cfg`: `dynlib!` already tries each name and reports the ones
-        // it could not open, and only one of these two can ever exist in an app directory.
+        // The ELF the app ships.
         "libswscale-plx.so.10",
-        "libswscale-plx.10.dylib",
     ] {
     fn sws_getContext(
         src_w: c_int, src_h: c_int, src_fmt: c_int,
@@ -539,7 +523,7 @@ unsafe fn stream_time_base(s: *mut AVStream) -> AVRational {
 ///
 /// Split from the pointer walk in [`dovi_conf`] on purpose — this half is the only half worth
 /// testing, and it is testable precisely because it never touches FFmpeg. (A test that had to
-/// enter the library would take `dlopen`'s `None` branch on Darwin and pass without executing
+/// enter the library would take `dlopen`'s `None` branch on the host and pass without executing
 /// anything, which is the failure shape `docs/agent-reference.md` warns about by name.)
 ///
 /// A SHORT buffer yields `None` rather than a partial record. FFmpeg allocates these with

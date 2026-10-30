@@ -9,9 +9,9 @@
 //! **The gate is the TARGET, not the `hostsim` feature, and that distinction was paid for.** It
 //! used to be the feature, on the reasoning that the simulator is "the only configuration that
 //! links anything here" — which was true only for as long as no host test reached the drawing
-//! layer. `cargo test --lib` builds an executable too, and macOS `ld64` dead-strips BEFORE it
+//! layer. `cargo test --lib` builds an executable too, and the linker can dead-strip BEFORE it
 //! reports undefined symbols, so a test binary that never made `gfx`/`text`/`svg` reachable linked
-//! happily against nothing but libSystem. Restructure phase 5b ended that: `app/bridge.rs`'s tests
+//! happily against nothing. Restructure phase 5b ended that: `app/bridge.rs`'s tests
 //! stand up the REAL rig — `Bridge` holds a `text::TtfMeasure`, and a real `Dispatcher` mounts real
 //! screens whose `draw` bodies call `gfx` — so those atoms are live, their `extern "C"` GL/SDL_ttf
 //! /nanosvg references become hard undefined symbols, and the default `make check` pass stopped
@@ -73,16 +73,7 @@ fn main() {
     println!("cargo:rustc-link-lib=dylib=SDL2");
     println!("cargo:rustc-link-lib=dylib=SDL2_ttf");
 
-    match target_os.as_str() {
-        "macos" => {
-            // GL entry points come from the framework. The simulator asks for a 4.1 core context;
-            // see `app.rs`'s context-attribute branch for why it cannot ask for GLES2 here.
-            println!("cargo:rustc-link-lib=framework=OpenGL");
-        }
-        _ => {
-            println!("cargo:rustc-link-lib=dylib=GL");
-        }
-    }
+    println!("cargo:rustc-link-lib=dylib=GL");
 
     compile_svg();
 }
@@ -378,7 +369,7 @@ fn git_path(rel: &str) -> Option<PathBuf> {
 ///
 /// A successful pkg-config query may return no `-L` flags because the libraries live on the
 /// linker's default path. That is still discovery success, represented by `Some(vec![])`, so a
-/// normal Linux install does not emit a misleading Homebrew warning.
+/// normal Linux install does not emit the missing-search-path warning above.
 fn sdl_search_paths(target_os: &str) -> Option<Vec<PathBuf>> {
     if target_os == "linux" {
         if !Command::new("pkg-config")
@@ -408,16 +399,7 @@ fn sdl_search_paths(target_os: &str) -> Option<Vec<PathBuf>> {
         return Some(paths);
     }
 
-    if target_os != "macos" {
-        return None;
-    }
-    let out = Command::new("brew").arg("--prefix").output().ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let prefix = String::from_utf8(out.stdout).ok()?;
-    let libdir = Path::new(prefix.trim()).join("lib");
-    libdir.is_dir().then(|| vec![libdir])
+    None
 }
 
 /// Packaging owns the identities; generating the schema here makes adding an install update

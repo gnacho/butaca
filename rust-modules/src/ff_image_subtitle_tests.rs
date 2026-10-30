@@ -3,17 +3,17 @@
 //! Every other `ff` test stays off `av_*`, because the host suite has no FFmpeg to call. This one
 //! cannot: what it grades is a property of `ci/build-ffmpeg.sh`'s configure line, which no pure
 //! function can see. So it loads the host build of that same FFmpeg (`HOST=1 ci/build-ffmpeg.sh`,
-//! staged into `pkg/` by `make check-ffmpeg`) and is `#[ignore]`d everywhere else — an honest
-//! "not run" in `make check`, never a pass that executed nothing.
+//! staged into `pkg/host-ffmpeg/` by `make check-ffmpeg`) and is `#[ignore]`d everywhere else, an
+//! honest "not run" in `make check`, never a pass that executed nothing.
 
 use super::*;
 
-/// Where the host FFmpeg was staged: `PLX_FFMPEG_DIR` (what `make check-ffmpeg` passes), else the
-/// checkout's own `pkg/`.
+/// Where the host FFmpeg was staged: `BUTACA_FFMPEG_DIR` (what `make check-ffmpeg` passes), else
+/// the checkout's own `pkg/host-ffmpeg`.
 fn host_ffmpeg_dir() -> std::path::PathBuf {
-    std::env::var_os("PLX_FFMPEG_DIR")
+    std::env::var_os("BUTACA_FFMPEG_DIR")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../pkg"))
+        .unwrap_or_else(|| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../pkg/host-ffmpeg"))
 }
 
 /// Bind the three libraries exactly as `load_libraries` does — dependency order, one directory —

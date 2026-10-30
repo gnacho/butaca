@@ -39,9 +39,9 @@
 # scope by SONAME when the next one names it. That is ordinary loader behaviour, it needs no build
 # flag to survive quoting, and unlike an rpath it can be asserted from inside the app.
 #
-# HOST=1 BUILDS THE SAME FFMPEG FOR THIS MAC INSTEAD, and it is the same script on purpose.
+# HOST=1 BUILT THE SAME FFMPEG FOR THE DESKTOP HOST INSTEAD, and it was the same script on purpose.
 #
-# The desktop simulator (`make sim`) runs the real app core on macOS, but `ff.rs` dlopens the
+# The desktop simulator (`make sim`) ran the real app core on a desktop, but `ff.rs` dlopens the
 # bundled libraries by absolute path out of the app directory — where they are 32-bit ARM ELF. So
 # the ENTIRE streaming half of the app (the AVIO transports, the HLS demux, the AU queues and
 # therefore the whole adaptive controller) was device-only, and the one instrument that can run
@@ -55,9 +55,10 @@
 # stop demuxing something it can, and the simulator would be answering about a different FFmpeg
 # while looking identical. The cross block is the only difference, and it is three lines.
 #
-# The output is `vendor/ffmpeg-prefix-host` and `libavformat-plx.63.dylib` — Mach-O naming, so
-# nothing here can be confused with the shipped ELF even by basename, and `make ipk`'s
-# `lib*-plx.so.*` glob cannot pick it up.
+# The output is `vendor/ffmpeg-prefix-host` and, on this platform, `libavformat-plx.so.63` with the
+# SAME basename the shipped ARM library has. `ci/stage-host-ffmpeg.sh` therefore stages the host
+# copies into `pkg/host-ffmpeg/` and never into `pkg/`, which is what `FFMPEG_STAGED` fills for a
+# television and what `APP_FILES` puts in an `.ipk`.
 set -eu
 
 VERSION=9.0
@@ -158,7 +159,7 @@ fi
 # that is real: the host dylibs pick up dependencies of packages this project never asked for. In
 # a shared, keyed cache that is worse than untidy, because the key cannot see it: uninstall the
 # package later and a fresh checkout still selects the same work tree, decides the objects are
-# current, and stages dylibs referencing a library that is no longer on the disk. It also makes
+# current, and stages libraries referencing a library that is no longer on the disk. It also makes
 # the two builds agree — the cross build had no such packages to find, so the host one was the
 # only half whose output depended on the machine it was built on.
 #
@@ -171,9 +172,9 @@ fi
 # (`subtitle_image_pgs` in two release audits). `--enable-zlib` is explicit, so configure FAILS if
 # the library is absent instead of quietly building the old behaviour. It links the system
 # `libz.so.1`, present on every firmware inventory `fwsym` holds (platform releases 1.2.0
-# to 11.2.0, zlib 1.2.7 to 1.3.1) and on macOS; `make check-ffmpeg` is the test that holds it in place.
+# to 11.2.0, zlib 1.2.7 to 1.3.1) and on the desktop host.
 if [ -n "$HOST" ]; then
-  # No --arch/--cpu/--target-os: configure detects this Mac, which is the point.
+  # No --arch/--cpu/--target-os: configure detects this machine, which is the point.
   set -- --prefix=/plx
 else
   set -- --prefix=/plx \
@@ -263,7 +264,7 @@ if [ -n "$CACHE_ROOT" ]; then
   WORK="$CACHE_ROOT/ffmpeg/$ARCHTAG-$VERSION-$KEY"
   # One tree, N checkouts, so two of them can arrive at once — a fleet launches its lanes
   # together, which is exactly the case that would have them configure over each other's
-  # half-written Makefile. mkdir is the atomic primitive every POSIX sh has (macOS ships no
+  # half-written Makefile. mkdir is the atomic primitive every POSIX sh has (some hosts ship no
   # flock(1)), the pid lets a lock whose owner died be reclaimed rather than blocking the machine
   # forever, and the wait is bounded well past the ~2 minute cold build.
   LOCK="$WORK.lock"

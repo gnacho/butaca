@@ -993,12 +993,12 @@ pub const GLASS_RIM_LIGHT: [f32; 4] = with_a(WHITE, 0.28);
 /// wrong about the material, and the reference says so in one number.
 ///
 /// A lit edge is lit BY something, so it must move with what is behind it. Measured against the
-/// macOS 26 system tab bar over a hard stripe ground — the top rim's brightness regressed on the
+/// Apple 26 system tab bar over a hard stripe ground — the top rim's brightness regressed on the
 /// page directly above it, column by column:
 ///
 /// | | line | line/face | its own swing | slope vs ground |
 /// |---|---|---|---|---|
-/// | macOS `.regular` | 124 | 1.39 | **23.9%** | 0.25 |
+/// | Apple `.regular` | 124 | 1.39 | **23.9%** | 0.25 |
 /// | ours at 1.0 | 213 | 4.23 | 10.5% | 0.23 |
 /// | ours at 0.6 | 184 | 3.67 | 17.4% | 0.33 |
 /// | **ours at 0.4** | 167 | 3.33 | **22.9%** | 0.39 |
@@ -1120,7 +1120,7 @@ pub const TAB_GLASS_TOP: [f32; 4] = scrim_black(0.20);
 /// A black scrim can only ever subtract, and at the bottom of the range there is nothing left to
 /// subtract from: over a page at L\*0 the bar's face measures exactly the page — 0% Weber — and the
 /// whole container is carried by one pixel of rim. Over L\*20 it is 28% and darker. The system
-/// container this material is answering does the opposite: measured on the real macOS 26 tab bar
+/// container this material is answering does the opposite: measured on the real Apple 26 tab bar
 /// over a near-black page, .071 → .098, **+38% Weber and LIGHTER**. Its edge, meanwhile, is one
 /// antialiased pixel with no rim at all on any ground — it does not need one, because the material
 /// separates itself.
@@ -1156,7 +1156,7 @@ pub const TAB_GLASS_BOT: [f32; 4] = scrim_black(0.36);
 /// are easy to repeat. Reading the page from BELOW the bar samples a brighter part of the hero and
 /// reported −52% Weber; capturing 3 s after a `pat:` change catches the density mid-travel and
 /// reported swings of 30 codes between rungs that are in truth identical. Settled and referenced to
-/// the page directly above it, this bar sits at **−15% Weber** on that hero, against the macOS 26
+/// the page directly above it, this bar sits at **−15% Weber** on that hero, against the Apple 26
 /// tab bar's −27% on its own page — i.e. ours is CLOSER to its backdrop than the reference is to
 /// its own, which is the opposite of the story these numbers were first told to support.
 ///

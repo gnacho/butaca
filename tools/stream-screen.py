@@ -65,7 +65,7 @@
 #                on the SAME install; pin it by hand and they can drift apart in silence,
 #                because a port belonging to the other app answers just as readily as
 #                one belonging to no app at all.
-#     --open   : open the stream URL in the default browser on start (macOS `open`).
+#     --open   : open the stream URL in the default browser on start.
 #     --no-control : stream only; don't open the control channel to the TV.
 #
 # Remote control: the served page captures your keyboard (arrows, Enter=OK,
@@ -932,7 +932,7 @@ if(document.getElementById('remote')){
   // click-through: a click on the streamed picture becomes a Magic-Remote pointer
   // click at the same spot on the TV (the app hit-tests it — cards, buttons, tabs).
   // mousedown, NOT click: a click with any drag motion starts a native image-drag
-  // and the click event never fires (macOS/trackpad especially). mousedown always
+  // and the click event never fires (a trackpad especially). mousedown always
   // fires first, and preventDefault also stops the drag ghost.
   // Bound to the CONTAINER: the picture is the <img> in jpeg mode and the <canvas>
   // in mpeg mode; the container's rect tracks whichever is visible.

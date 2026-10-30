@@ -1,7 +1,7 @@
 ---
 name: ui-sim
 description: >
-  Verify UI and Plex data-layer changes in the macOS or Windows/WSLg desktop simulator. Use it for
+  Verify UI and Plex data-layer changes in the Linux or Windows/WSLg desktop simulator. Use it for
   layout, focus, navigation, screenshots, local app runs, and simulator-based validation when a TV
   is unavailable or unnecessary. It also defines which results still require `tv-session`, including
   TV frame rate, LG decoding, text rasterization, and the video plane.
@@ -14,12 +14,11 @@ description: >
 > (`tools/tv-lock.sh`, the **`tv-lock`** skill): when a device command is refused because another
 > lane holds it, the simulator is usually the answer rather than the queue — N instances run at
 > once, each with its own `BUTACA_RUNTIME_DIR`. Come back to the TV only for what the simulator
-> provably cannot answer (frame rate, text rasterization, LG's decoder, the video plane) — a
-> shorter list on macOS since the streaming pipeline moved onto that simulator on 2026-08-28.
+> provably cannot answer (frame rate, text rasterization, LG's decoder, the video plane).
 > Windows/WSLg's UI-only path stops at the existing host no-video seam.
 
 `butaca-sim` is the same application core the television runs, linked against desktop SDL2 and
-desktop GL. It draws the real interface against your real Plex Media Server on macOS or through
+desktop GL. It draws the real interface against your real Plex Media Server on Linux or through
 WSLg on Windows.
 
 **Why it exists:** the TV serializes the entire dev loop. One set, one app instance, and two
@@ -31,13 +30,15 @@ simulators run at once, each with its own instance root, so parallel agents neve
 ## Build and boot
 
 ```sh
-make sim-macos                 # build with host FFmpeg (cargo; no NDK or cross toolchain)
-make sim-macos-token           # stage the PMS token into the instance root (once per root)
-make sim-macos-shot            # headless: boot, settle, write ONE png, exit
-make sim-macos-run             # interactive: opens a window, Ctrl-C to quit
+make sim-linux                 # build the simulator (cargo; no NDK or cross toolchain)
 ```
 
-The historical `sim`, `sim-token`, `sim-shot`, and `sim-run` names remain macOS aliases.
+`make sim-linux` (spelled `make sim` for short) builds the release simulator binary at
+`rust-modules/target-sim/release/butaca-sim`, honouring `SIM_TDIR`. There is no separate
+`-run`/`-shot`/`-token` target: boot, run, shot and token are done by running that binary directly
+with the `BUTACA_*` environment variables (see "Drive it, then screenshot"), through
+`tools/sim-smoke.py` for one headless capture, or through `tools/xvfb-novnc.sh` for a windowed
+display over noVNC.
 
 ### Windows 11 through WSLg
 
@@ -67,7 +68,6 @@ after staging one. `-PmsHost` overrides the header's PMS host.
 This path deliberately calls `make sim-wsl`, the Windows-facing compatibility alias for the native
 Linux `make sim-linux` target. Both skip bundled host FFmpeg. UI, sign-in, Plex browsing,
 screenshots and remote commands work; playback reaches the existing host "no video path" result.
-Use macOS `make sim-macos` when the demux/clock-sink simulation is required.
 
 ## Watching a headless Linux simulator
 
@@ -89,7 +89,7 @@ can report 60 swaps while Windows visibly updates at only a few FPS. The launche
 state. Close other WSL work, run `wsl.exe --shutdown`, and retry; accept the run only after it says
 `use_gfxredir = 1`.
 
-**Ask for `SIM_W=1920 SIM_H=1080` on any shot you intend to JUDGE.** The window is otherwise sized
+**Ask for a 1920×1080 window (`BUTACA_WIN=1920x1080`) on any shot you intend to JUDGE.** The window is otherwise sized
 to fit the display (`app::boot::desktop_window_size`), and on a 1x screen that divisor lands on 2, so
 every screenshot comes back 960x540 — half the canvas the UI is authored at. A 1px edge-sheen, a
 hairline, a snapped glyph and a specular rim are exactly the things that do not survive that
@@ -98,29 +98,31 @@ may then be larger than the display; for a headless grab that is fine, because t
 window's own framebuffer, not the part of it a compositor happens to show.
 
 ```sh
-make sim-macos-shot SIM_DIR=$D SIM_W=1920 SIM_H=1080 SIM_SHOT=$D/home.png
+BUTACA_RUNTIME_DIR=$D BUTACA_APP_DIR=$PWD/pkg BUTACA_WIN=1920x1080 \
+  BUTACA_SHOT=$D/home.png BUTACA_SHOT_EXIT=1 \
+  rust-modules/target-sim/release/butaca-sim 127.0.0.1 32400
 ```
 
-`SIM_DIR` is the **instance root** — the whole point of the design. Give every concurrent
+`BUTACA_RUNTIME_DIR` is the **instance root** — the whole point of the design. Give every concurrent
 simulator its own:
 
 ```sh
-make sim-macos-shot SIM_DIR=/tmp/sim-a SIM_SHOT=/tmp/sim-a/home.png
-make sim-macos-shot SIM_DIR=/tmp/sim-b SIM_SHOT=/tmp/sim-b/home.png # safe, simultaneously
+BUTACA_RUNTIME_DIR=/tmp/sim-a ... butaca-sim 127.0.0.1 32400
+BUTACA_RUNTIME_DIR=/tmp/sim-b ... butaca-sim 127.0.0.1 32400 # safe, simultaneously
 ```
 
 Inside a root live that instance's dev triggers, its remote FIFO and its event log — the same
 names and the same contents as on the TV, so **every `tv-session` recipe transfers verbatim**.
-With no `SIM_DIR` the root is `/tmp/butaca-sim` (the Makefile's default); `/tmp` is the *device's* root, not this one's.
+With no `BUTACA_RUNTIME_DIR` the root is `/tmp/butaca-sim`; `/tmp` is the *device's* root, not this one's.
 
 **The flavour axis does not reach here.** The TV now carries three installs with three runtime
 roots, so `tv-session` recipes name theirs via `make -s print-rundir FLAVOR=…`; an explicit
 instance root outranks all of that in `paths::resolve_runtime_dir`, so the simulator is steered
-by `SIM_DIR` alone and takes no `FLAVOR`. Translate a device recipe by substituting `$SIM_DIR`
-for whatever runtime root it names — the trigger and log FILE names are identical either way,
+by `BUTACA_RUNTIME_DIR` alone and takes no `FLAVOR`. Translate a device recipe by substituting
+`$D` for whatever runtime root it names — the trigger and log FILE names are identical either way,
 which is what makes the recipes transfer at all.
 
-`SIM_PMS`/`SIM_PORT` default to `src/config.local.h`. The host must be a **numeric IP**:
+The PMS host and port default to `src/config.local.h`. The host must be a **numeric IP**:
 `stream.rs` has no DNS resolver here either.
 
 **A checkout on a mounted volume needs `SIM_TDIR`.** Network shares, SMB mounts and some external
@@ -138,23 +140,21 @@ Only the simulator is rescuable this way. `make` and `make check` build under
 and the host suite still need the repo on a local filesystem. That is usually fine — the whole
 point of the simulator is that it needs neither.
 
-### What a second Mac needs
+### What a second machine needs
 
 On Windows, run `tools/sim.ps1 setup`; use `-PmsHost` for an explicit server and `-StageToken`
 when credentials should be copied from `src/config.local.h`.
 
-Three things, and notably no webOS NDK and no nightly:
+Three things on Linux, and notably no webOS NDK and no nightly for the simulator:
 
-1. `brew install sdl2_ttf cmake pkg-config` — SDL pulls `sdl2-compat`; CMake and pkg-config build
-   the bundled ASS/font stack. The SDL libraries use absolute Homebrew paths, so a copied binary
-   still needs them installed. The simulator also loads the bundled ASS renderer from its staged
-   resources. Build on the machine rather than copying: `build.rs` asks `brew --prefix`, so it is
-   also correct on an Intel Mac where Homebrew lives at `/usr/local`.
+1. `sudo apt install libsdl2-dev libsdl2-ttf-dev cmake pkg-config` — SDL pulls `sdl2-compat`;
+   CMake and pkg-config build the bundled ASS/font stack. The simulator loads the bundled ASS
+   renderer from its staged resources.
 2. **rustup + stable.** Not nightly. `rust-modules/.cargo/config.toml` carries `[unstable]
    build-std`, which looks like it forces nightly, but that table is gated and stable cargo ignores
    it — it only applies to the ARM cross-build, which passes `cargo +nightly` explicitly.
 3. `src/config.local.h` for the PMS host and token. Gitignored, so a fresh clone has none: pass
-   `SIM_PMS=<ip>` and write the token into `$SIM_DIR/butaca-token` by hand.
+   the PMS host on the command line and write the token into `$D/butaca-token` by hand.
 
 ## Boot into a specific screen
 
@@ -165,13 +165,13 @@ under-reports the four triggers named nowhere but their `dev::flag`/`dev::read` 
 owns the screen-to-trigger recipes.
 
 ```sh
-touch $SIM_DIR/butaca-library            # boot into the browse grid
-echo 3 > $SIM_DIR/butaca-library         # ...on section 3
-make sim-macos-shot SIM_DIR=$SIM_DIR
+touch $D/butaca-library            # boot into the browse grid
+echo 3 > $D/butaca-library         # ...on section 3
+# ...then run the binary with BUTACA_SHOT=$D/home.png BUTACA_SHOT_EXIT=1 (see "Drive it")
 ```
 
-Stale triggers change which screen you boot to, silently — same trap as on the device. `make
-sim-clean SIM_DIR=…` resets a root.
+Stale triggers change which screen you boot to, silently — same trap as on the device. `rm -rf $D`
+resets a root.
 
 ## Drive it, then screenshot
 
@@ -191,7 +191,7 @@ exec 3>&-
 
 Shots land in the instance root as **numbered** files (`shot-1.png`, `shot-2.png`, …) so a
 sequence never overwrites one file or races whoever is reading it. `BUTACA_SHOT` only overrides
-the location — the `shot` token works in any session without it, including `make sim-macos-run`.
+the location — the `shot` token works in any session without it, including a windowed run.
 Then look at them — that is the whole point; a shot
 nobody opens has verified nothing.
 
@@ -199,13 +199,13 @@ Tokens: `up`/`down`/`left`/`right`, `ok`, `back`, `play`/`pause`/`stop`, `ck:X,Y
 authored 1920×1080 coords), `okdown`/`okup` (split halves — the only way to drive a press-and-hold
 past `press::LONG_MS`), and `shot` (simulator only).
 
-A desktop keyboard also works directly in `make sim-macos-run`: arrows, RETURN, ESC (`is_ok`/`is_back`
+A desktop keyboard also works directly in a windowed run: arrows, RETURN, ESC (`is_ok`/`is_back`
 have always accepted keyboard keys), plus space=pause, `p`=play, `s`=stop, backspace=BACK.
 
 **`back` at a ROOT is the platform's root press** (`webos::go_home`) — Home's root, the
 who's-watching picker and the QR sign-in — and it does not end the process. **On the simulator it
 is a LOG LINE and nothing else** (`gohome: no LS2 bus off-device …`): there is no webOS launcher to
-hand a Mac window to, so the screen does not change and a `back` too many looks like a key that did
+hand a desktop window to, so the screen does not change and a `back` too many looks like a key that did
 nothing. That is the one part of this behaviour the simulator is structurally blind to; whether the
 television really shows its launcher and brings the SAME PROCESS back is a `tv-session` question —
 and note the contract is the process, not the screen: workers keep running while backgrounded, so a
@@ -306,7 +306,7 @@ That is most UI work, and it is the half that transfers.
 
 Report these ONLY from the device, via the **`tv-session`** skill (and `wake-tv` first):
 
-- **Frame rates, always.** The `--fps` gates are calibrated to the SM9000's Mali. A Mac is a
+- **Frame rates, always.** The `--fps` gates are calibrated to the SM9000's Mali. A desktop is a
   different GPU, driver and compositor. Every simulator heartbeat carries **`sim=1`** and the log's
   first line says so — if you see either, the number is not a perf result. Never quote `fps=` or
   `loop=` from a simulator as evidence about performance.
@@ -321,34 +321,24 @@ Report these ONLY from the device, via the **`tv-session`** skill (and `wake-tv`
   Starfish/ACB seam does not exist off-device, so by default `player::ffi`'s host arm reports the
   seam's own "no video path" failure and pressing Play lands on the app's real failure read-out —
   correct behaviour, not a bug, and a convenient way to look at that screen.
-- ~~**Anything about video.**~~ **Narrowed twice, and the second time is recent.** Arm
-  **`butaca-clocksink`** in the instance root and the seam becomes a plant: access units are
-  accepted and discarded and a presentation clock advances at real time, clamped to the last fed
-  PTS, reporting position at the television's own measured 5 Hz. And since **2026-08-28** the
-  source of those AUs can be a real network stream: `make sim-macos` builds a HOST copy of the
-  bundled FFmpeg (`HOST=1 ci/build-ffmpeg.sh`, staged into `pkg/` as `libavformat-plx.63.dylib`),
-  so `ff.rs` demuxes here. What that makes runnable off-device is everything between the socket
-  and the decoder — both AVIO transports, the HLS demux, the AU queues and their byte-cap
-  backpressure, the feed-ahead throttle, the ABR controller's rung transactions, seek and PTS
-  rebase. A 30 s host run against `tests/serve_fixtures.py` produces `abr:` lines and rung commits.
-  **Nothing decodes**, every heartbeat still carries `sim=1`, and no number taken here is a device
+- **Anything about video.** Arm **`butaca-clocksink`** in the instance root and the seam becomes a
+  plant: access units are accepted and discarded and a presentation clock advances at real time,
+  clamped to the last fed PTS, reporting position at the television's own measured 5 Hz. **Nothing
+  decodes**, every heartbeat still carries `sim=1`, and no number taken here is a device
   measurement.
 - **The video plane and UI transparency.** The wayland non-opaque trick is webOS-only.
-- ~~**plex.tv sign-in.**~~ **This one is FIXED as of 2026-08-16 and is no longer a limitation.**
-  The candidate list gained macOS's `libcurl.4.dylib` (which the dyld shared cache answers with no
-  install), and `dynlib!` learned to bind a variadic C function correctly — Apple's ARM64 ABI puts
-  variadic arguments on the stack, so the old non-variadic `curl_easy_setopt` binding SIGSEGV'd
-  inside libcurl the instant it could open one. The QR flow, discovery and the who's-watching
-  roster all run here now. `make sim-macos-token` is still the faster way into a known server, and is
-  what headless recipes should keep using.
+- ~~**plex.tv sign-in.**~~ **This one is FIXED and is no longer a limitation.** `dynlib!` learned
+  to bind a variadic C function correctly, so the old non-variadic `curl_easy_setopt` binding no
+  longer SIGSEGVs inside libcurl. The QR flow, discovery and the who's-watching roster all run here
+  now. Writing the token into the instance root is still the faster way into a known server.
 - **Anything that smelled like a platform difference.** If a bug appears only in the simulator,
   suspect the simulator first — the seam is real code and it has had real bugs (a missing core-
   profile VAO drew nothing at all; a synthetic key layout mismatch swallowed every FIFO token).
 
 ## The expected workflow
 
-1. Iterate on macOS: change → `make sim-macos-shot` → **look at the image** → repeat. On Windows,
-   use `tools/sim.ps1 shot`. No TV, no
+1. Iterate on the simulator: change → take a shot → **look at the image** → repeat. On Linux, run
+   the binary with `BUTACA_SHOT`; on Windows, use `tools/sim.ps1 shot`. No TV, no
    queue, parallel-safe.
 2. When it looks right, run `make check` (host suite + lint).
 3. Then verify once on the device with **`tv-session`** — and run `./tests/run.py --fps` there if
@@ -363,7 +353,7 @@ device-verified" is a useful, honest status. "Verified" without a TV is not.
   the TV's video plane composites through it; carried into a PNG that alpha gets re-interpreted by
   the viewer and the whole interface blooms over a white page. RGB is the faithful image and the
   one comparable to a device capture.
-- `screencapture` (the macOS tool) works for a quick manual look but is wrong for automation: it
+- `screencapture`-style desktop grab works for a quick manual look but is wrong for automation: it
   needs Screen Recording permission — a GUI prompt that silently yields black frames headlessly —
   and it grabs whatever is actually on screen, so an occluded window or two parallel simulators
   corrupt it. The in-app shot needs no permission, works occluded, and is deterministic.

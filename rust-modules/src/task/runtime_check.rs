@@ -33,7 +33,7 @@ pub(super) fn fatal(dev: bool, policy: Policy, issue: Issue) -> bool {
 }
 
 /// Is this `GL_RENDERER` string a CPU rasterizer? Matched case-insensitively on the names the
-/// desktop drivers report: Apple Software Renderer (macOS), Mesa llvmpipe / softpipe / swrast
+/// desktop drivers report: Apple Software Renderer, Mesa llvmpipe / softpipe / swrast
 /// ("Software Rasterizer"), SwiftShader, and WARP ("Microsoft Basic Render Driver", WSLg's D3D12
 /// fallback). Anything else, the television's Mali included, is hardware.
 pub(crate) fn software_renderer(renderer: &str) -> bool {

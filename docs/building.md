@@ -10,7 +10,7 @@ subsystem has a guide of its own next to the code.
 
 ## Requirements
 
-The ARM/webOS product build requires macOS (x86_64 or arm64) or **arm64** Linux because the webOS
+The ARM/webOS product build requires an Apple host (x86_64 or arm64) or **arm64** Linux because the webOS
 NDK has no x86_64 Linux build. The UI-only simulator also builds on x86_64 Ubuntu through WSLg on
 Windows and needs no webOS NDK; run `tools/sim.ps1 setup` there.
 
@@ -40,9 +40,9 @@ already on `main`) — not just their build output — so it is not part of `--a
 None of the above has to be run by hand: `tools/build-gc.sh --auto` stages the same reclaim on its
 own, gated by free space on the volume (`PLX_GC_MIN_FREE_GIB`, default 20) and, for `--lanes`, by
 a lane idle guard (`PLX_GC_IDLE_MIN`, default 60) so a lane an agent might resume soon is spared.
-It runs from a Claude Code `SessionEnd` hook and from the hourly launchd agent `make disk-watch`
-installs (`tools/install-disk-watch.sh`, macOS only — run it yourself; nothing here installs it
-for you). Logs land in `~/Library/Logs/butaca-build-gc.log` (or `$PLX_GC_LOG`).
+It runs from a Claude Code `SessionEnd` hook; a machine idle between sessions gets the same thing
+from one cron line running `tools/build-gc.sh --auto` hourly. Logs land in
+`${XDG_STATE_HOME:-$HOME/.cache}/butaca/build-gc.log` (or `$PLX_GC_LOG`).
 
 The bundled FFmpeg is not rebuilt per checkout. Its source and object tree is machine-wide under
 `$PLX_BUILD_CACHE` (default `~/.cache/butaca`), keyed by configure flags and toolchain, so a
@@ -74,9 +74,6 @@ the name traps.
 
 The platform entry points are deliberately separate:
 
-- macOS: `make sim-macos`, `make sim-macos-run`, and `make sim-macos-shot`. This build includes
-  host FFmpeg, so the pipeline between the socket and decoder runs on the host. The historical
-  `sim`, `sim-run`, and `sim-shot` names remain aliases for these macOS targets.
 - Linux: `make sim-linux` builds the optimized UI/Plex simulator without host FFmpeg. Run the
   resulting `rust-modules/target-sim/release/butaca-sim` under X11 or Wayland with
   `BUTACA_APP_DIR=pkg` (or use the matching path below a custom `SIM_TDIR`).
@@ -116,11 +113,11 @@ your signed-in simulator on it.
 This is still host evidence: the compositor is not the television's GPU, so it says nothing about
 frame rate, text rasterization or video plane composition.
 
-`.github/workflows/simulators.yml` links and launches the Linux and macOS variants when shared
-simulator inputs change. Linux runs a 1920x1080 screenshot smoke test under Xvfb; macOS performs
-the same smoke test through its native window server. The Windows job parses `tools/sim.ps1` with
-Windows PowerShell 5.1 and PowerShell 7. Hosted Windows runners cannot boot WSLg, so Linux runtime
-coverage is the runtime half of the Windows/WSLg path until a native Windows binary exists.
+`.github/workflows/simulators.yml` links and launches the Linux simulator when shared
+simulator inputs change. Linux runs a 1920x1080 screenshot smoke test under Xvfb. The Windows job
+parses `tools/sim.ps1` with Windows PowerShell 5.1 and PowerShell 7. Hosted Windows runners cannot
+boot WSLg, so Linux runtime coverage is the runtime half of the Windows/WSLg path until a native
+Windows binary exists.
 The workflow is path-filtered, so do not make `Simulator CI` a required status check: GitHub leaves
 a path-skipped required workflow pending. If it must become required, first move the path decision
 inside an always-started workflow and report one aggregate status.

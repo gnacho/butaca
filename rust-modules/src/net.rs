@@ -33,7 +33,7 @@ pub(crate) type curl_slist = c_void;
 
 /// The stable head of `curl_version_info_data`. Passing `CURLVERSION_FIRST` promises to inspect
 /// only these original fields; libcurl extends the struct at the tail for later ages, so this
-/// prefix has the same offsets on the television's 7.53.1 and current macOS.
+/// prefix has the same offsets on the television's 7.53.1 and current host libcurl.
 #[repr(C)]
 pub(crate) struct CurlVersionInfo {
     age: c_int,
@@ -57,18 +57,8 @@ pub(crate) struct CurlVersionInfo {
 // sufficient and what the compiler was already generating. This was hand-written once on the
 // belief that a macro could not express it — the blocker was never the variadics, only the
 // one-symbol-per-wrapper assumption.
-//
-// **The third name is macOS's, and it is what makes the desktop build able to SIGN IN.** The host
-// simulator and the `Butaca.app` bundle run this same module, and on a Mac the two ELF SONAMEs
-// simply do not open — which is why signing in "did not work off-device" and was written up as an
-// unfixable property of the simulator. It was one missing candidate: macOS ships libcurl in the
-// dyld shared cache and `dlopen("libcurl.4.dylib")` resolves it with no install, no Homebrew and
-// nothing to bundle (verified 2026-08-16: the handle opens and `curl_easy_setopt` resolves).
-// It is LAST deliberately — a television never reaches it, so this costs the device nothing but
-// one extra failed `dlopen` in the already-fatal no-curl case, and the candidate list stays
-// ordered by "what the fleet actually answers to" first.
 crate::dynlib! {
-    curl: ["libcurl.so.4", "libcurl.so.5", "libcurl.4.dylib"] {
+    curl: ["libcurl.so.4", "libcurl.so.5"] {
     fn curl_global_init(flags: c_long) -> c_int;
     fn curl_version() -> *const c_char;
     fn curl_version_info(age: c_int) -> *const CurlVersionInfo;
@@ -411,7 +401,7 @@ pub fn global_init() -> bool {
         }
         crate::dynlib::Loaded::NoLibrary => {
             crate::log(
-                "net: no libcurl on this device (tried .so.4, .so.5 and .4.dylib) — \
+                "net: no libcurl on this device (tried .so.4 and .so.5) — \
                  account calls and HTTPS PMS control unavailable",
             );
             false
@@ -1329,7 +1319,7 @@ fn wall_clock_year() -> Option<i64> {
 ///
 /// 51 is `CURLE_PEER_FAILED_VERIFICATION` on the television's 7.53.1: the name check, which
 /// OpenSSL records outside the verify result, so it is decided from the code alone. libcurl 7.62+
-/// retired 51 and reports a name mismatch as 60 with verify result 0 (the macOS host and newer
+/// retired 51 and reports a name mismatch as 60 with verify result 0 (the host and newer
 /// firmwares), so that case says so rather than hide the likeliest cause.
 pub(crate) fn tls_verify_why(rc: c_int, verify: Option<c_long>, year: Option<i64>) -> Option<String> {
     let clock = |what: &str| match year {

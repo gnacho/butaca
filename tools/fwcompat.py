@@ -51,7 +51,7 @@ REPO = Path(__file__).resolve().parent.parent
 DEFAULT_BINARY = REPO / "pkg" / "butaca"
 CACHE = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "butaca" / "fwsym"
 
-# The NDK's readelf understands the target's ELF; the host's may not exist at all on macOS.
+# The NDK's readelf understands the target's ELF; the host's may not exist at all.
 NDK = Path(os.environ.get("WEBOS_SDK", Path.home() / "webos-ndk" / "arm-webos-linux-gnueabi_sdk-buildroot"))
 
 
@@ -86,7 +86,7 @@ def ensure_db(db_arg):
     work = CACHE / "unpack"
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
-    # A .deb is an `ar` archive; macOS ships `ar`, and its data member is tar.xz.
+    # A .deb is an `ar` archive, and its data member is tar.xz.
     subprocess.run(["ar", "x", str(deb), "data.tar.xz"], cwd=work, check=True)
     with tarfile.open(work / "data.tar.xz") as tf:
         tf.extractall(work)  # noqa: S202 - first-party package from a pinned release URL

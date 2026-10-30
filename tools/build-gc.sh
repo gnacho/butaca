@@ -217,8 +217,8 @@ usage: tools/build-gc.sh [MODE] [-n]
   --all           --incremental everywhere plus --lanes, --stale, --orphans and --cache, and the
                   main checkout's vendor build trees. Leaves the main checkout's target dirs
                   themselves in place — `--stale` only removes the superseded hashes inside them.
-  --auto          staged reclaim, driven by free space on this volume, and the mode a hook or
-                  launchd job runs unattended — see `tools/install-disk-watch.sh`. Always runs
+  --auto          staged reclaim, driven by free space on this volume, and the mode a hook or a
+                  cron entry runs unattended. Always runs
                   --orphans first (cheap, safe, unconditional). Below $PLX_GC_MIN_FREE_GIB GiB
                   free (default 20): --incremental, then --worktrees, then --lanes restricted to
                   lanes idle for at least $PLX_GC_IDLE_MIN minutes (default 60, judged by the
@@ -231,7 +231,7 @@ usage: tools/build-gc.sh [MODE] [-n]
                   would not also remove standalone. Single-instance: a mkdir lock
                   (stale-safe, $PLX_GC_LOCK_DIR) means a second --auto exits 0 quietly rather than
                   racing the first. Logs one line per stage to $PLX_GC_LOG (default
-                  ~/Library/Logs/butaca-build-gc.log on macOS,
+                  ~/Library/Logs/butaca-build-gc.log on a launchd host,
                   ${XDG_STATE_HOME:-~/.cache}/butaca/build-gc.log elsewhere), truncated to its
                   last ~200 lines past ~1 MB. `--auto -n` previews every stage the current free
                   space would trigger, deletes nothing, and still takes the lock.
@@ -273,17 +273,13 @@ free_kib() {
   df -Pk "$ROOT" 2>/dev/null | awk 'NR==2{print $4}'
 }
 
-# Where the auto log lives. macOS gets the platform's own log directory; anything else follows
-# the XDG state dir, falling back to ~/.cache like every other dotfile-averse Linux tool here.
-# `PLX_GC_LOG` overrides both, for a caller (or a test) that wants a known path.
+# Where the auto log lives: the XDG state dir, falling back to ~/.cache like every other
+# dotfile-averse tool here. `PLX_GC_LOG` overrides it, for a caller (or a test) that wants a known
+# path.
 gc_log_path() {
   if [ -n "${PLX_GC_LOG-}" ]; then printf '%s' "$PLX_GC_LOG"; return 0; fi
-  case "$(uname -s 2>/dev/null)" in
-    Darwin) printf '%s' "$HOME/Library/Logs/butaca-build-gc.log" ;;
-    *)
-      if [ -n "${XDG_STATE_HOME-}" ]; then printf '%s' "$XDG_STATE_HOME/butaca/build-gc.log"
-      else printf '%s' "$HOME/.cache/butaca/build-gc.log"; fi ;;
-  esac
+  if [ -n "${XDG_STATE_HOME-}" ]; then printf '%s' "$XDG_STATE_HOME/butaca/build-gc.log"
+  else printf '%s' "$HOME/.cache/butaca/build-gc.log"; fi
 }
 # One line per stage. Bounded rather than rotated: this is a diagnostic trail for a human to skim
 # occasionally, not an audit log, so keeping the last ~200 lines once the file crosses ~1 MB is
@@ -498,7 +494,7 @@ checkout_kb() {
 }
 
 # The derived-tree names, in one place. `rust-modules/target*` covers every feature set's dir
-# (target, -release, -sim, -lab, -sym, -macapp, -shots); the vendor entries are the FFmpeg and
+# (target, -release, -sim, -lab, -sym, -shots); the vendor entries are the FFmpeg and
 # Sentry source and object trees, whose only product is the small prefix beside them.
 lane_trees() {
   for d in "$1"/rust-modules/target*; do
@@ -577,7 +573,7 @@ STALE_HOURS=${PLX_GC_STALE_HOURS:-$PLX_GC_STALE_HOURS_DEFAULT}
 case "$STALE_HOURS" in ''|*[!0-9]*) STALE_HOURS=$PLX_GC_STALE_HOURS_DEFAULT ;; esac
 STALE_SECS=$((STALE_HOURS * 3600))
 # A 16-hex-digit run, spelled out one class per position rather than `{16}`: `/bin/sh` here
-# resolves to whatever ships as `awk`, and this script already assumes the BSD/macOS toolchain
+# resolves to whatever ships as `awk`, and this script already assumes the BSD toolchain
 # elsewhere (see the `stat -f` fallbacks below) — an interval expression is not guaranteed
 # portable across every awk this might run under, and a fixed hash width is guaranteed by rustc.
 HASH16_RE='[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'
@@ -841,7 +837,7 @@ build_is_running() {
 # orphan — is answered by the second rule in `in_live_checkout`, not by refusing.
 #
 # Written with temp files rather than `$(…)` around the `case`, and that is not style: **bash 3.2
-# — what macOS ships, and what `#!/bin/sh` resolves to here — cannot parse a `case` inside a
+# — what `#!/bin/sh` resolves to here — cannot parse a `case` inside a
 # command substitution at all.** It scans for the closing paren without parsing, so the `)` ending
 # a case pattern terminates the substitution and the `;;` after it is a syntax error.
 WT_LIST=

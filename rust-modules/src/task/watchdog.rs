@@ -228,7 +228,7 @@ impl LoopWatch {
             #[cfg(feature = "threadcheck")]
             let started = {
                 // Capture on the loop owner, never inside the observer. libc supplies the native
-                // pthread_t ABI (pointer on Darwin, unsigned long on ARM Linux).
+                // pthread_t ABI (pointer on the host, unsigned long on ARM Linux).
                 // fwcompat inventories export both symbols at GLIBC_2.4 across all releases:
                 // libpthread on older firmware, libc after the glibc pthread merge.
                 let main_thread = unsafe { libc::pthread_self() } as usize;

@@ -2015,7 +2015,7 @@ const MODAL_BENCH_PERIOD_MS: u32 = 1500;
 const DEEP_BENCH_PERIOD_MS: u32 = PUSH_BENCH_PERIOD_MS;
 
 /// `/proc/self/status`'s `VmRSS`, in kB — best effort, `0` where the file does not exist (the
-/// macOS simulator host). Not cached: a bench cycle is seconds apart, so one extra file read per
+/// host simulator). Not cached: a bench cycle is seconds apart, so one extra file read per
 /// cycle is noise next to the frame-time work it is timed beside.
 fn read_rss_kb() -> u64 {
     std::fs::read_to_string("/proc/self/status")

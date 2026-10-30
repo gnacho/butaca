@@ -494,9 +494,8 @@ line, real fonts rendering, and the session file rewritten `0600` under the app'
   server-side timer, and dev-manager-desktop ships a first-class "Automatic Developer Mode Renewal"
   dialog for it. Put that in the first-run flow, not in a README.
 - **The realistic install tool is dev-manager-desktop**, not `ares-cli` (which needs npm plus an
-  EOL Node 14–16). dev-manager-desktop is actively maintained, needs no LG SDK, and ships a
-  universal macOS dmg / Windows MSI / Linux packages.
-- **`make deploy` will not work for an unrooted user or contributor.** It scps into the app dir as
+  EOL Node 14–16). dev-manager-desktop is actively maintained, needs no LG SDK, and ships
+  installers for every desktop OS.- **`make deploy` will not work for an unrooted user or contributor.** It scps into the app dir as
   root over port 22; a Dev Mode TV only offers `prisoner` on port 9922, and appinstalld leaves the
   app dir `root:root 775`. An unrooted iteration loop must go through a full ipk install every time.
 
@@ -1260,7 +1259,7 @@ Three traps this cost, all found by measurement rather than reasoning, all silen
    does not hash its output, so after a `RELEASE=1` build it reports the dev build
    *"Finished in 0.04s"* and leaves the release `.a` in place — which `make` then links with no
    comment. Fixed by giving each configuration its own `--target-dir`.
-2. **A stamp file could not drive the relink.** macOS ships GNU make **3.81**, which (a) decides a
+2. **A stamp file could not drive the relink.** GNU make **3.81** (a) decides a
    target's up-to-dateness from a stat taken *before* its prerequisites' recipes run, and (b)
    compares mtimes at **one-second granularity** — a stamp written 0.5 s after the binary compares
    *equal*. Both were observed directly. So the config check runs at **parse** time and **deletes
@@ -1341,7 +1340,7 @@ went green on both 4.x firmwares — and the TV still refused the package:
 GNU `ar` terminates short member names with `/`, so `ar t` on our own ipk showed `debian-binary/`,
 `control.tar.gz/`, `data.tar.gz/`. `appinstalld` looks the members up by exact name and fails the
 package before unpacking anything. `dpkg-deb` and `ares-package` both write the bare names. The
-Makefile's comment — *"the ipk uses the NDK's `ar` (GNU format; macOS BSD `ar` won't work)"* — had
+Makefile's comment — *"the ipk uses the NDK's `ar` (GNU format; a BSD `ar` won't work)"* — had
 it backwards: GNU format is the thing that breaks, and BSD `ar` would have produced a **working**
 ipk. `ci/mkipk.py` now writes the 60-byte `ar` headers itself, which also removes the NDK from the
 packaging path entirely (`make ipk` runs on any host with Python).

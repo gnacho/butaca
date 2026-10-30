@@ -706,7 +706,7 @@ struct ArtWashProgram {
 /// and it needs no preamble there, so this returns an empty string and the sources compile exactly
 /// as they always have.
 ///
-/// A desktop core profile has none of those spellings. macOS caps at 4.1 core and has no GLES
+/// A desktop core profile has none of those spellings. A desktop caps at 4.1 core and has no GLES
 /// driver at all, so the simulator gets GLSL 4.10, where the ES names must be macro-mapped. All
 /// nine were compiled against a real 4.10 context on an M4 to settle this rather than assume it.
 ///
@@ -2910,7 +2910,7 @@ const _: () = assert!(
 ///
 /// **Then 0.7/1.5 was narrowed again to 0.35/0.75, and the reason is that the first comparison was
 /// against the wrong reference.** The scale-matched measurement that blessed 0.7/1.5 was taken
-/// against the macOS 26 tab bar through GlassLab, and matched it almost exactly (0.264 of a stripe
+/// against the Apple 26 tab bar through GlassLab, and matched it almost exactly (0.264 of a stripe
 /// period against its 0.281). But this app's idiom is the TELEVISION, and the references that
 /// matter are iOS and tvOS, where the material is plainly lighter: a phone number is readable
 /// through the Phone app's tab bar, and a tvOS pill leaves the window mullion behind it clearly
@@ -3295,7 +3295,7 @@ const GLASS_EDGE: [f32; 4] = [1.0, 1.0, 1.0, 0.14];
 /// * and it is anti-adaptive: 15.5 retinal codes on a bright ground where the boundary already
 ///   steps 46, and 6.2 on the dark page where the container has nothing else.
 ///
-/// **Do not re-derive this from the macOS reference.** A real system container has no chamfer at
+/// **Do not re-derive this from the Apple reference.** A real system container has no chamfer at
 /// all — one transitional pixel, then dead flat — and it can afford that because its material ADDS
 /// light: measured on the floating tab bar over a near-black page, .071 → .098, i.e. +38% Weber and
 /// *lighter* than the page. A black scrim cannot do that. Ours over the same kind of ground is

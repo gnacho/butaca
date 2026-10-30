@@ -22,7 +22,7 @@ description: >
 > again for the next run; other lanes are waiting on the same set.
 
 > **Before booking the TV: can the simulator answer this?** `make sim` runs the same app core on
-> macOS — real UI, real PMS data, boot triggers, the same FIFO tokens, self-screenshotting, and
+> the desktop — real UI, real PMS data, boot triggers, the same FIFO tokens, self-screenshotting, and
 > several instances at once. Layout, focus, navigation and the whole data layer are answerable
 > there without touching the television, which is a single shared resource. See the **`ui-sim`**
 > skill. Come back here for frame rates, text rasterization, video, the video plane, or a final

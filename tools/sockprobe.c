@@ -1,8 +1,8 @@
 /* sockprobe — the socket semantics the HOST test suite cannot answer.
  *
- * `cargo test` runs on macOS; the app runs on this TV's Linux 3.10/glibc 2.12 ARM. On the two
+ * `cargo test` runs on the host; the app runs on this TV's Linux 3.10/glibc 2.12 ARM. On the two
  * questions that decide where `stream.rs::http_open` publishes its fd, the platforms DISAGREE —
- * verified, not assumed: on Darwin, `shutdown(2)` on a socket still mid-handshake returns 0 AND
+ * verified, not assumed: on the host, `shutdown(2)` on a socket still mid-handshake returns 0 AND
  * makes `connect_timeout` report SUCCESS on a socket that never connected. A host test asserting
  * Linux behaviour here would be worse than no test.
  *
@@ -32,7 +32,7 @@
  *   B. recv woken at 200ms reporting EOF.
  *      => the single-closer interrupt protocol holds on this kernel too.
  *
- * The Darwin contrast that made this probe necessary is worth keeping: there, the same shutdown
+ * The host contrast that made this probe necessary is worth keeping: there, the same shutdown
  * returns 0 AND makes connect_timeout report SUCCESS on a socket that never connected. A host
  * test asserting either platform's behaviour would have been actively misleading.
  */

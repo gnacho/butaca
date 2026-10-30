@@ -105,7 +105,7 @@ class BuildGcTests(unittest.TestCase):
         self.assert_live_refusal(os.getpid(), 0)
 
     def test_live_pgid_without_pid_refuses_every_reclaim(self):
-        # macOS pgrep excludes ancestors by default. Give the lock a controlled child
+        # the host's pgrep excludes ancestors by default. Give the lock a controlled child
         # group instead; its stdin remains open until all refusal checks have finished.
         child = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"],
                                  stdin=subprocess.PIPE, start_new_session=True)
@@ -549,68 +549,6 @@ class BuildGcTests(unittest.TestCase):
             self.assertTrue(s.exists(), "-n deleted a sentinel: " + diagnostic)
         self.assertFalse(Path(env["PLX_GC_LOCK_DIR"]).exists(),
                          "-n took the single-instance lock: " + diagnostic)
-
-
-class InstallDiskWatchTests(unittest.TestCase):
-    """Regression: running the installer FROM a linked worktree must still resolve and launch
-    the MAIN checkout's own `tools/build-gc.sh`, never the worktree's — that worktree can be
-    removed by a squash-merge teardown while the plist it would otherwise have baked in outlives
-    it. Only the resolution is under test; launchd/tmutil are stubbed out entirely."""
-
-    def setUp(self):
-        temp = tempfile.TemporaryDirectory(prefix="install-disk-watch-tests-")
-        self.addCleanup(temp.cleanup)
-        self.root = Path(temp.name).resolve()
-
-    def test_resolves_the_main_checkout_not_the_calling_lane(self):
-        main = self.root / "main"
-        (main / "tools").mkdir(parents=True)
-        for name in ("install-disk-watch.sh", "build-gc.sh"):
-            (main / "tools" / name).write_bytes((ROOT / "tools" / name).read_bytes())
-        (main / "tools" / "install-disk-watch.sh").chmod(0o755)
-
-        home = self.root / "home"
-        (home / "Library/LaunchAgents").mkdir(parents=True)
-        (home / "Library/Logs").mkdir(parents=True)
-        stub_bin = self.root / "bin"
-        stub_bin.mkdir()
-        # `uname` -> Darwin so the script takes the launchd path; `launchctl` is a silent no-op
-        # (this test is about WHICH plist gets written, not about a real gui/$(id -u) domain);
-        # `tmutil` fails `destinationinfo` so the Time Machine block is skipped without needing a
-        # real backup destination on the runner.
-        (stub_bin / "uname").write_text("#!/bin/sh\necho Darwin\n")
-        (stub_bin / "launchctl").write_text("#!/bin/sh\nexit 0\n")
-        (stub_bin / "tmutil").write_text("#!/bin/sh\nexit 1\n")
-        for name in ("uname", "launchctl", "tmutil"):
-            (stub_bin / name).chmod(0o755)
-
-        env = dict(os.environ)
-        env["HOME"] = str(home)
-        env["PATH"] = str(stub_bin) + os.pathsep + env.get("PATH", "")
-
-        subprocess.run(["git", "init", "-q", str(main)], env=env, check=True)
-        (main / "README").write_text("seed\n")
-        subprocess.run(["git", "-C", str(main), "add", "README", "tools"], env=env, check=True)
-        subprocess.run(["git", "-C", str(main), "-c", "user.email=t@t", "-c", "user.name=t",
-                        "commit", "-q", "-m", "seed"], env=env, check=True)
-        subprocess.run(["git", "-C", str(main), "branch", "-m", "main"], env=env, check=True)
-        lane = self.root / "lane0"
-        subprocess.run(["git", "-C", str(main), "worktree", "add", "-q", "-b", "lane0",
-                        str(lane)], env=env, check=True)
-
-        # The installer is invoked FROM the lane, not from `main` — exactly the case that broke:
-        # `ROOT=$(cd "$(dirname "$0")/.." && pwd)` alone would resolve to the LANE.
-        result = subprocess.run(["sh", str(lane / "tools" / "install-disk-watch.sh")],
-                                cwd=lane, env=env, text=True, capture_output=True, timeout=20)
-        diagnostic = result.stdout + result.stderr
-        self.assertEqual(result.returncode, 0, diagnostic)
-        plist = home / "Library/LaunchAgents/com.butaca.build-gc.plist"
-        self.assertTrue(plist.exists(), diagnostic)
-        contents = plist.read_text()
-        self.assertIn(str(main / "tools/build-gc.sh"), contents,
-                      "plist did not point at the main checkout's script:\n" + contents)
-        self.assertNotIn(str(lane), contents,
-                         "plist baked in the calling lane's own path:\n" + contents)
 
 
 class MakeCheckContractTests(unittest.TestCase):

@@ -130,7 +130,7 @@ fn an_address_literal_resolves_without_a_resolver() {
 
     // An out-of-range port FAILS instead of wrapping into a plausible one — 70000 used to dial
     // 4464. Note what this is asserting: `resolve`'s OWN range check, not `AI_NUMERICSERV`'s.
-    // Darwin rejects the service string and glibc does not, so had this been left to the
+    // the host rejects the service string and glibc does not, so had this been left to the
     // resolver the assertion would have passed here and the app would still have truncated on
     // the television. It is the shape this file's own notes warn about — a green host run about
     // a platform difference — and it was caught in review, not by the suite.
@@ -335,7 +335,7 @@ fn a_chain_with_no_live_address_fails_closed_and_leaks_nothing() {
 /// interruptibility the publish-before-connect invariant exists to give.
 ///
 /// The latch is armed here instead of raced, deliberately: `shutdown(2)` aborting a handshake in
-/// progress is TRUE on the TV's kernel and NOT on the Darwin host these tests run on
+/// progress is TRUE on the TV's kernel and NOT on the host these tests run on
 /// (`tools/sockprobe.c`), so timing the real interrupt would be asserting the host's behaviour.
 /// What is portable, and what actually decides the outcome, is the branch — a failed attempt
 /// plus a latched interrupt stops the walk — and `http_shutdown` is the real API that arms it,

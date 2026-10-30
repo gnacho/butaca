@@ -30,7 +30,7 @@
 #     CAP_W (1920)  CAP_H (1080)
 #
 # Requires: bash, ssh, scp, and (only if no SSH key is installed) sshpass.
-#           sips (built into macOS) is used for non-native format conversion.
+#           a desktop image tool is used for non-native format conversion.
 #
 set -euo pipefail
 
