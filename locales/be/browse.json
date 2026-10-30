@@ -500,6 +500,7 @@
   "browse.jellyfin.error_auth": "Сервер не распазнаў гэтае імя карыстальніка або пароль",
   "browse.jellyfin.error_reach": "Не атрымалася дабрацца да сервера — праверце адрас і што ён уключаны",
   "browse.jellyfin.quick_connect_start": "Start Quick Connect",
+  "browse.jellyfin.quick_connect_row": "Sign in with a code",
   "browse.jellyfin.quick_connect_explainer": "Enter this code on another device already signed in to this server. Approve it there and this screen will sign in by itself.",
   "browse.jellyfin.quick_connect_unsupported": "This server is too old for Quick Connect - update it to 10.8 or newer, or use the password form",
   "browse.jellyfin.quick_connect_timeout": "Nobody approved the code in time - start again",

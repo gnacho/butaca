@@ -31,6 +31,10 @@ const F_SERVER: usize = 0;
 const F_USER: usize = 1;
 const F_PASS: usize = 2;
 const ROW_CONNECT: u32 = 3;
+/// The password form's second action: sign in with a code instead. It exists because Settings,
+/// which is where Quick Connect was reachable from, lives behind a session — a first-ever boot
+/// has no way in.
+const ROW_QUICK_CONNECT: u32 = 4;
 /// Quick Connect mode: the server field is row 0 and the *Start* action is row 1.
 const ROW_START_QC: u32 = 1;
 
@@ -163,11 +167,17 @@ impl JfLoginScreen {
             };
             fields = fields.row(Row::new(*label).value(value).value_dim(empty).dim(working));
         }
-        let action = Section::new("").row(
-            Row::new(crate::i18n::msg::settings_plaintext_connect())
-                .chevron(true)
-                .dim(working || !connectable(&self.fields)),
-        );
+        let action = Section::new("")
+            .row(
+                Row::new(crate::i18n::msg::settings_plaintext_connect())
+                    .chevron(true)
+                    .dim(working || !connectable(&self.fields)),
+            )
+            .row(
+                Row::new(crate::i18n::msg::browse_jellyfin_quick_connect_row())
+                    .chevron(true)
+                    .dim(working),
+            );
         vec![fields, action]
     }
 
@@ -226,6 +236,13 @@ impl JfLoginScreen {
                 }
                 self.dirty = true;
             }
+        } else if elem == ROW_QUICK_CONNECT {
+            // The code flow without the detour through Settings. Add mode is what makes this
+            // screen draw the Quick Connect form. On a first boot the server list is empty, so
+            // the worker's `append_server` writes the single entry a sign-in would have written.
+            qc::set_add_mode(true);
+            self.qc_fail = None;
+            self.dirty = true;
         } else if (0..3).contains(&elem) {
             self.editing = Some(elem as usize);
             crate::textinput::start();
@@ -526,7 +543,15 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
                                 qc::cancel();
                             } else {
                                 qc::set_add_mode(false);
-                                fx.push(Fx::Nav(NavOp::Pop));
+                                self.qc_fail = None;
+                                self.dirty = true;
+                                // Back to the password form. Only a copy PUSHED over the page
+                                // that asked has something behind it: the first boot's sign-in
+                                // is the route's root, and popping there would pop nothing, so
+                                // BACK has to mean "give me the other form" instead.
+                                if signin::add_mode() {
+                                    fx.push(Fx::Nav(NavOp::Pop));
+                                }
                                 fx.invalidate(crate::ui::present::Provenance::Input);
                             }
                             Handled::Yes
@@ -763,7 +788,7 @@ mod tests {
         let screen = JfLoginScreen::new(EntryId(9));
         let frame = Rect::new(720.0, 300.0, 520.0, screen.table.measured_height());
         let rows = pointer_rows(&screen.table, frame);
-        assert_eq!(rows.len(), 4, "three edit fields and Connect need stops");
+        assert_eq!(rows.len(), 5, "three edit fields, Connect and the code row need stops");
 
         let mut hit = HitMap::new();
         hit.fill(
