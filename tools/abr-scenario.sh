@@ -31,7 +31,7 @@
 # heartbeat carries `sim=1`. What it CAN answer is the only question this scenario asks — how many
 # times did the controller change its mind, and what did it settle on.
 #
-# netcond binds LOOPBACK here, which also sidesteps the macOS application firewall: the prompt
+# netcond binds LOOPBACK here, which also sidesteps the application firewall: the prompt
 # that silently drops a TV's connections to an ad-hoc python listener never appears for 127.0.0.1.
 set -uo pipefail
 

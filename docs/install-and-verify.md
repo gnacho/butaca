@@ -40,7 +40,7 @@ The route is **set up the TV → connect from your computer → install Butaca**
 
 **webOS Dev Manager is the app on your computer.** It connects to the Developer Mode app on your TV and installs packages for you.
 
-1. [Download the latest webOS Dev Manager](https://github.com/webosbrew/dev-manager-desktop/releases/latest). In **Assets**, choose the installer for your computer: `.dmg` for macOS, `.msi` for Windows, or the appropriate Linux package. The project's [download table](https://github.com/webosbrew/dev-manager-desktop#download) explains the architecture choices. Do not download **Source code**.
+1. [Download the latest webOS Dev Manager](https://github.com/webosbrew/dev-manager-desktop/releases/latest). In **Assets**, choose the Linux package matching your architecture. The project's [download table](https://github.com/webosbrew/dev-manager-desktop#download) explains the architecture choices. Do not download **Source code**.
 2. Install and open Dev Manager. Start its setup wizard to add a TV and select **Use Developer Mode**. Do not select the Homebrew Channel SSH option; that is for an existing rooted setup.
 3. The wizard also lists the TV preparation steps. Since you completed them above, mark them complete and continue to the connection form.
 4. Fill in the connection details:
@@ -168,12 +168,10 @@ A release attaches five files. **For a direct installation, you need the first o
 
 Nothing in this distribution chain is code-signed, so the SHA-256 published with the release is what tells you that the file you downloaded is the file that was published there.
 
-Download `ipk.sha256` from the same release as the `.ipk` and open a terminal in the download folder. Replace `X.Y.Z` with the version you downloaded. On macOS and Windows, compare the printed hash with the one in `ipk.sha256`; on Linux, the check below should report `OK`. **Do not install the package if the hashes do not match.**
+Download `ipk.sha256` from the same release as the `.ipk` and open a terminal in the download folder. Replace `X.Y.Z` with the version you downloaded. Put both files in the same folder and run the check below, which should report `OK`. **Do not install the package if the hashes do not match.**
 
 ```sh
-shasum -a 256 com.butaca_X.Y.Z_arm.ipk              # macOS
-sha256sum -c ipk.sha256                             # Linux, with the checksum asset beside it
-certutil -hashfile com.butaca_X.Y.Z_arm.ipk SHA256  # Windows
+sha256sum -c ipk.sha256
 ```
 
 [Return to direct installation](#option-a-install-butaca-directly) after checking the file.

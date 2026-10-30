@@ -34,7 +34,7 @@ down in the past tense. Go and read them; they are all still in `docs/agent-refe
   number into the run summary rather than asserting it, because "the count is a fact the suite can
   produce about itself."
 - **The `ar` claim was backwards, not merely stale.** The build section "used to say the opposite
-  (\"uses the NDK's `ar` (GNU format; macOS BSD `ar` won't work)\") and had it exactly backwards" —
+  (\"uses the NDK's `ar` (GNU format; a BSD `ar` won't work)\") and had it exactly backwards" —
   the ipk needs no `ar` at all, and GNU `ar` is precisely what produces a package the television
   refuses.
 - **`stream.rs` was libelled by its own docs.** "This line claimed \"no chunked decoding\" long

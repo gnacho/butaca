@@ -22,7 +22,7 @@ pub(super) fn to_annexb(buf: &[u8], is_hevc: bool, param: &[u8]) -> (bool, Vec<u
 //
 // The record is nine plain bytes, so these fixtures ARE the wire format — no builder, no
 // FFmpeg. That is the point: `dovi_conf`'s pointer walk cannot be host-tested (dlopen returns
-// None on Darwin, so a test naming it would pass without executing one line of it), but the
+// None on the host, so a test naming it would pass without executing one line of it), but the
 // parse is where a field could be transposed, and the parse is pure.
 
 /// The nine bytes as the header lays them out, so a fixture reads like the spec table.

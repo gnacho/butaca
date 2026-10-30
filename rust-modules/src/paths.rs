@@ -88,8 +88,8 @@ const LEGACY_APP_DIR: &str = "/media/developer/apps/usr/palm/applications/com.bu
 ///   * a binary copied by hand into the wrong app directory identifies as that directory's app
 ///     rather than lying about which one it is.
 ///
-/// The shape test is STRUCTURAL rather than name-based, exactly like [`macos_bundle_resources`]:
-/// the parent directory is the id only when ITS parent is literally `applications`. That is what
+/// The shape test is STRUCTURAL rather than name-based: the parent directory is the id only when
+/// ITS parent is literally `applications`. That is what
 /// makes both webOS prefixes answer (`/media/developer/apps/…` under Developer Mode and
 /// `/media/cryptofs/apps/…` under the Homebrew Channel) while a host build — where the binary sits
 /// in `target-sim/debug/` and the parent is named `debug` — falls through to the stable id instead
@@ -159,15 +159,6 @@ pub(crate) fn app_dir() -> &'static Path {
             }
         }
         if let Ok(exe) = std::env::current_exe() {
-            // A macOS **application bundle** puts the executable in `Contents/MacOS/` and its
-            // payload in `Contents/Resources/` — the layout every Mac tool, `codesign` included,
-            // expects. So on that one platform "next to the binary" is the wrong answer by one
-            // hop, and getting it wrong is the SILENT font failure this module's doc opens with:
-            // `text.rs` would fall through to a system face and still log `ok=1`.
-            if let Some(res) = macos_bundle_resources(&exe) {
-                crate::log(&format!("appdir: {} (macOS bundle)", res.display()));
-                return res;
-            }
             if let Some(parent) = exe.parent() {
                 if !parent.as_os_str().is_empty() {
                     crate::log(&format!("appdir: {} (from current_exe)", parent.display()));
@@ -187,62 +178,6 @@ pub(crate) fn app_dir() -> &'static Path {
 /// A file shipped inside the ipk, addressed by name.
 pub(crate) fn in_app_dir(name: &str) -> PathBuf {
     app_dir().join(name)
-}
-
-/// `…/Contents/Resources` when `exe` is the executable of a macOS **application bundle**, else
-/// `None` — the one platform where the app's payload is not the executable's own directory.
-///
-/// Structural, not name-based: it asks whether the two directories above the binary are literally
-/// `Contents/MacOS`, which is what makes something a bundle. A `Butaca.app` renamed by the
-/// person it was sent to still answers yes; a loose `butaca-sim` in `target-sim/debug` still
-/// answers no, so the dev loop is untouched.
-///
-/// Must not log — [`runtime_dir`] calls the sibling below and that function's doc explains why a
-/// log there deadlocks the process. Cheap enough to keep both on the same rule.
-#[cfg(target_os = "macos")]
-fn macos_bundle_resources(exe: &Path) -> Option<PathBuf> {
-    let macos = exe.parent()?;
-    if macos.file_name()? != "MacOS" {
-        return None;
-    }
-    let contents = macos.parent()?;
-    if contents.file_name()? != "Contents" {
-        return None;
-    }
-    let res = contents.join("Resources");
-    res.is_dir().then_some(res)
-}
-
-#[cfg(not(target_os = "macos"))]
-fn macos_bundle_resources(_exe: &Path) -> Option<PathBuf> {
-    None
-}
-
-/// Where a **bundled macOS app** keeps everything it writes: `~/Library/Application
-/// Support/Butaca`.
-///
-/// The default runtime root is `/tmp`, which is right on the television and wrong for a Mac app
-/// somebody was sent: `auth.json` lives in this root (see [`session_candidates`]), and `/tmp` is
-/// swept, so the friend would re-do the QR sign-in every few days without ever learning why. The
-/// app bundle itself is not an option either — it may sit in a read-only `/Applications`, and on a
-/// signed bundle writing inside `Contents/` invalidates the signature.
-///
-/// `None` unless this really is a bundle: a plain `make sim-run` keeps taking `/tmp` (or its
-/// `BUTACA_RUNTIME_DIR` instance root) exactly as before, so no harness recipe moves.
-#[cfg(target_os = "macos")]
-fn macos_app_support() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    macos_bundle_resources(&exe)?;
-    let home = std::env::var_os("HOME")?;
-    if home.is_empty() {
-        return None;
-    }
-    Some(PathBuf::from(home).join("Library/Application Support/Butaca"))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn macos_app_support() -> Option<PathBuf> {
-    None
 }
 
 /// Where this instance's RUNTIME surfaces live — the `butaca-*` dev triggers, the remote FIFO,
@@ -281,11 +216,7 @@ fn macos_app_support() -> Option<PathBuf> {
 pub(crate) fn runtime_dir() -> &'static Path {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
     DIR.get_or_init(|| {
-        let d = resolve_runtime_dir(
-            std::env::var_os("BUTACA_RUNTIME_DIR"),
-            macos_app_support(),
-            app_id(),
-        );
+        let d = resolve_runtime_dir(std::env::var_os("BUTACA_RUNTIME_DIR"), app_id());
         ensure_runtime_dir(&d);
         d
     })
@@ -332,12 +263,8 @@ const DEFAULT_RUNTIME_DIR: &str = "/tmp";
 /// test that set the variable and called it would fix the value for every LATER test in the same
 /// binary — including the one asserting that an empty trigger reads as `Some("")`, which resolves
 /// its own write path through this same root. That is the crate-global-seam hazard `testlock`
-/// exists for, and here it is avoidable outright rather than lockable.
-///
-/// `bundled` is the second-choice root for a host build that is a real macOS app bundle (see
-/// [`macos_app_support`]). It is a PARAMETER rather than a call inside, for the same testability
-/// reason: it reads `current_exe` and `HOME`, neither of which a test can pin. `app_id` is a
-/// parameter for the same reason.
+/// exists for, and here it is avoidable outright rather than lockable. `app_id` is a parameter
+/// for the same reason.
 ///
 /// **A flavoured install gets its own root, and the app users get keeps `/tmp` byte for byte.**
 /// Two installs on one television otherwise share one event log (the launching one TRUNCATES it),
@@ -357,11 +284,7 @@ const DEFAULT_RUNTIME_DIR: &str = "/tmp";
 /// that very prefix over these sources, so spelling it would mint a catalog entry for a trigger
 /// that must never exist.) (That function also
 /// grew a file-type filter, which is the second, independent reason.)
-fn resolve_runtime_dir(
-    env: Option<std::ffi::OsString>,
-    bundled: Option<PathBuf>,
-    app_id: &str,
-) -> PathBuf {
+fn resolve_runtime_dir(env: Option<std::ffi::OsString>, app_id: &str) -> PathBuf {
     // Tier-B `cfg!` rather than `#[cfg]`: both arms stay type-checked in every feature set, so the
     // host branch cannot rot while nobody is building the simulator.
     if ENV_STEERABLE {
@@ -369,11 +292,6 @@ fn resolve_runtime_dir(
             if !d.is_empty() {
                 return PathBuf::from(d);
             }
-        }
-        // An explicit instance root still wins — `make sim-shot` and every parallel-simulator
-        // recipe pass one, and a bundle handed a root must honour it.
-        if let Some(p) = bundled {
-            return p;
         }
     }
     if app_id == STABLE_APP_ID {
@@ -727,12 +645,7 @@ mod tests {
             "/repo/rust-modules/target-sim/debug/butaca-sim"
         ))
         .is_none());
-        // The macOS bundle layout, for the same reason.
-        assert!(super::installed_app_id(Path::new(
-            "/A/Butaca.app/Contents/MacOS/butaca-sim"
-        ))
-        .is_none());
-        // …and the real process resolves to SOMETHING, on either platform, without panicking.
+        // …and the real process resolves to SOMETHING without panicking.
         assert!(!super::app_id().is_empty());
     }
 
@@ -779,9 +692,9 @@ mod tests {
         if super::ENV_STEERABLE {
             return; // a host build answers from the environment first; this is the television rule
         }
-        let stable = super::resolve_runtime_dir(None, None, super::STABLE_APP_ID);
-        let debug = super::resolve_runtime_dir(None, None, "com.butaca.debug");
-        let nightly = super::resolve_runtime_dir(None, None, "com.butaca.nightly");
+        let stable = super::resolve_runtime_dir(None, super::STABLE_APP_ID);
+        let debug = super::resolve_runtime_dir(None, "com.butaca.debug");
+        let nightly = super::resolve_runtime_dir(None, "com.butaca.nightly");
         assert_eq!(stable, std::path::Path::new("/tmp"));
         assert_eq!(debug, std::path::Path::new("/tmp/com.butaca.debug"));
         assert_eq!(nightly, std::path::Path::new("/tmp/com.butaca.nightly"));
@@ -809,55 +722,12 @@ mod tests {
     #[test]
     fn absent_or_empty_runtime_root_is_the_television() {
         assert_eq!(
-            super::resolve_runtime_dir(None, None, super::STABLE_APP_ID),
+            super::resolve_runtime_dir(None, super::STABLE_APP_ID),
             std::path::Path::new("/tmp")
         );
         assert_eq!(
-            super::resolve_runtime_dir(Some("".into()), None, super::STABLE_APP_ID),
+            super::resolve_runtime_dir(Some("".into()), super::STABLE_APP_ID),
             std::path::Path::new("/tmp")
-        );
-    }
-
-    /// A macOS app bundle writes under `~/Library/Application Support`, and an explicit instance
-    /// root still beats it. Both halves matter: the first is what keeps a friend's sign-in from
-    /// being swept out of `/tmp`, the second is what keeps `make sim-shot`'s `BUTACA_RUNTIME_DIR`
-    /// authoritative if the binary is ever run out of a bundle by the harness.
-    #[test]
-    fn a_bundled_app_writes_to_its_own_support_dir_unless_told_otherwise() {
-        if !super::ENV_STEERABLE {
-            return; // a television build has neither concept
-        }
-        let sup = std::path::PathBuf::from("/Users/x/Library/Application Support/Butaca");
-        assert_eq!(
-            super::resolve_runtime_dir(None, Some(sup.clone()), super::STABLE_APP_ID),
-            sup
-        );
-        assert_eq!(
-            super::resolve_runtime_dir(Some("".into()), Some(sup.clone()), super::STABLE_APP_ID),
-            sup
-        );
-        assert_eq!(
-            super::resolve_runtime_dir(Some("/run/sim-a".into()), Some(sup), super::STABLE_APP_ID),
-            std::path::Path::new("/run/sim-a")
-        );
-    }
-
-    /// The bundle detector must answer on SHAPE — `…/Contents/MacOS/<exe>` — and must not be
-    /// fooled by a binary that merely sits in a directory called `MacOS`, nor confused by the
-    /// bundle having been renamed. Only meaningful where the function has a body.
-    #[test]
-    #[cfg(target_os = "macos")]
-    fn only_a_real_contents_macos_layout_reads_as_a_bundle() {
-        use std::path::Path;
-        // No `Contents` above it → not a bundle, whatever it is called.
-        assert!(super::macos_bundle_resources(Path::new("/x/MacOS/butaca")).is_none());
-        // Right shape, but `Resources/` does not exist on this filesystem → still None, because
-        // the point of the probe is finding the payload, not recognising a layout.
-        assert!(super::macos_bundle_resources(Path::new("/x/Contents/MacOS/butaca")).is_none());
-        // The dev-loop binary must keep resolving to its own directory.
-        assert!(
-            super::macos_bundle_resources(Path::new("/repo/target-sim/debug/butaca-sim"))
-                .is_none()
         );
     }
 
@@ -869,9 +739,9 @@ mod tests {
         if !super::ENV_STEERABLE {
             return; // a television build cannot be redirected, by design
         }
-        let a = super::resolve_runtime_dir(Some("/run/sim-a".into()), None, super::STABLE_APP_ID)
+        let a = super::resolve_runtime_dir(Some("/run/sim-a".into()), super::STABLE_APP_ID)
             .join("butaca-library");
-        let b = super::resolve_runtime_dir(Some("/run/sim-b".into()), None, super::STABLE_APP_ID)
+        let b = super::resolve_runtime_dir(Some("/run/sim-b".into()), super::STABLE_APP_ID)
             .join("butaca-library");
         assert_ne!(a, b);
         assert!(a.is_absolute() && b.is_absolute());
@@ -887,11 +757,7 @@ mod tests {
             return;
         }
         assert_eq!(
-            super::resolve_runtime_dir(
-                Some("/anywhere".into()),
-                Some("/also/anywhere".into()),
-                super::STABLE_APP_ID
-            ),
+            super::resolve_runtime_dir(Some("/anywhere".into()), super::STABLE_APP_ID),
             std::path::Path::new("/tmp")
         );
     }

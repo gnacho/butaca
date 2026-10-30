@@ -420,7 +420,7 @@ reproduce rather than a rule to obey by quitting.
   `libSDL2-2.0.so.0.4.1`). The inventories `tools/fwcompat.py` reads are symbol lists and can say
   nothing about a table in `.rodata`; comparing another release means harvesting its `libSDL2`.
 * **The simulator's key path is not the television's.** On the host, a synthetic press carries its
-  `wcode` in `SDL_Keysym.mod` under a marker in `windowID`, because macOS `libSDL2` is sdl2-compat
+  `wcode` in `SDL_Keysym.mod` under a marker in `windowID`, because the desktop `libSDL2` is sdl2-compat
   forwarding into SDL3 and the fields it preserves across `SDL_PushEvent` are not the obvious ones —
   `keysym.scancode` and `keysym.unused` are both discarded (`decode_key`'s doc has the measured
   table). Until 2026-08-23 the carrier was `unused`, so **every wcode-only FIFO token was silently

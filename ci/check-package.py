@@ -1059,10 +1059,10 @@ HOSTPATH = re.compile(rb"(?:^|[^A-Za-z0-9/_.-])(/(?:Users|home)/[A-Za-z0-9_./+-]
 # dies when invoked through PATH), so it rides in FFmpeg's recorded configure string. It is
 # identical on every CI runner, which is the reason releases must be BUILT by CI.
 # Jellyfin's own REST endpoints ride in the binary as format strings, and "/Users/" is both a
-# macOS build path and that API's prefix: "/Users/AuthenticateByName" and every "/Users/{user_id}"
+# desktop build path and that API's prefix: "/Users/AuthenticateByName" and every "/Users/{user_id}"
 # template are the service's words, not a machine's. Only those two shapes are exempt.
 # "/Users/Me" is the third: the self route the boot probe asks for. It is exempt ONLY as the whole
-# path (`$`), so a macOS build under an account literally named `Me` would still fail here on
+# path (`$`), so a build under an account literally named `Me` would still fail here on
 # "/Users/Me/<anything>".
 ALLOWED_PATH = re.compile(rb"webos-ndk|^/home/runner/|^/Users/(AuthenticateByName|\{)|^/Users/Me$")
 

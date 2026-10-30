@@ -60,7 +60,7 @@ const A_CTX_MAJOR: c_int = 17;
 const A_CTX_MINOR: c_int = 18;
 const A_CTX_PROFILE_MASK: c_int = 21;
 const CTX_PROFILE_ES: c_int = 0x0004;
-/// `SDL_GL_CONTEXT_PROFILE_CORE` — the simulator's only option on macOS. See the context request.
+/// `SDL_GL_CONTEXT_PROFILE_CORE` — the simulator's only option on a desktop. See the context request.
 const CTX_PROFILE_CORE: c_int = 0x0001;
 // event types
 const SDL_QUIT: u32 = 0x100;
@@ -300,7 +300,7 @@ pub(crate) struct App {
     /// The SDL window (`SDL_CreateWindow`), for the swap.
     win: *mut c_void,
     /// WSLg accepts swap interval 1 on X11/GLX without pacing the compositor. This boot-scoped
-    /// flag enables the host-only software frame budget while leaving native Linux and macOS on
+    /// flag enables the host-only software frame budget while leaving native Linux on
     /// their driver swap behavior.
     #[cfg(all(feature = "hostsim", target_os = "linux"))]
     wslg_frame_pacing: bool,
@@ -427,7 +427,7 @@ fn pre_boot_diagnostics() {
         std::env::var("APPID").unwrap_or_else(|_| "unset".into()),
     ));
     // ...and the app directory on the NEXT line, from `app_dir()` itself, which logs its own
-    // provenance (`from current_exe` / `BUTACA_APP_DIR` / `macOS bundle`) — strictly more than
+    // provenance (`from current_exe` / `BUTACA_APP_DIR`) — strictly more than
     // repeating the path here would say. Forced now rather than left to whoever calls it first,
     // so the two lines are adjacent and the pair is what a triage reader sees at the top.
     //

@@ -62,8 +62,8 @@ mock stops, and PUTs are recorded in the mock write log. Ordinary mode advertise
 `/api/v2/resources` and supplies one synthetic Demo owner in the Home roster, so mock QR sign-in
 can reach Settings without a pre-seeded session.
 
-The app reaches it as any other server: `make sim-shot SIM_PMS=127.0.0.1 SIM_PORT=32499` with
-any non-empty string in `$SIM_DIR/butaca-token` (the token is accepted, never checked).
+The app reaches it as any other server: run the simulator with `127.0.0.1 32499` and
+any non-empty string in the instance root's `butaca-token` (the token is accepted, never checked).
 
 `--plaintext-only-lan` reproduces Sentry BUTACA-10: a person's OWN server (`owned=true`) on
 their LAN, whose owner never turned on port forwarding, so every HTTPS route plex.tv could name

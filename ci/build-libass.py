@@ -51,7 +51,7 @@ def archive(dep, folder):
 
 
 def extract(path, folder):
-    # Keep Python 3.9 compatibility with the macOS system Python. Reject escaping
+    # Keep Python 3.9 compatibility. Reject escaping
     # names/links before extracting the checksum-pinned upstream release.
     with tarfile.open(path) as contents:
         for entry in contents:
@@ -68,38 +68,37 @@ def extract(path, folder):
         contents.extractall(folder)
 
 
-def verify_library(path, darwin, readelf=None):
+# binutils translates its field names, and everything below parses the English ones. CI runs
+# under a C locale and passes; a developer's machine does not, so a Spanish `readelf -h` printed
+# "Máquina:" and the ELF check failed with "could not read ELF machine type".
+TOOL_ENV = dict(os.environ, LC_ALL='C', LANG='C')
+
+
+def verify_library(path, readelf):
     """Prove the bundled font stack stayed private and needs no C++ runtime."""
-    if darwin:
-        load_commands = subprocess.check_output(['otool', '-L', str(path)], text=True).splitlines()[1:]
-        needed = [line.strip().split(' (', 1)[0] for line in load_commands]
-        allowed = {'@loader_path/' + path.name, '/usr/lib/libSystem.B.dylib', '/usr/lib/libiconv.2.dylib'}
-        exports = subprocess.check_output(['nm', '-gU', str(path)], text=True).splitlines()
-        names = [line.split()[-1].removeprefix('_') for line in exports if line.strip()]
-    else:
-        dynamic = subprocess.check_output([readelf, '-d', str(path)], text=True)
-        needed = re.findall(r'\(NEEDED\).*\[([^\]]+)\]', dynamic)
-        # Derive the permitted dynamic loader from the library under test, not
-        # the build host. This keeps host builds portable without allowing a
-        # wrong-architecture artifact to pass the dependency check.
-        header = subprocess.check_output([readelf, '-h', str(path)], text=True)
-        machine = re.search(r'^\s*Machine:\s*(.+)$', header, re.MULTILINE)
-        if not machine:
-            raise ValueError('could not read ELF machine type')
-        host_loader = {
-            'AArch64': 'ld-linux-aarch64.so.1',
-            'Advanced Micro Devices X86-64': 'ld-linux-x86-64.so.2',
-            'ARM': 'ld-linux-armhf.so.3',
-        }.get(machine.group(1).strip())
-        allowed = {'libc.so.6', 'libm.so.6', 'libgcc_s.so.1', 'libpthread.so.0', 'ld-linux.so.3'}
-        if host_loader:
-            allowed.add(host_loader)
-        symbols = subprocess.check_output([readelf, '--dyn-syms', '--wide', str(path)], text=True)
-        names = []
-        for line in symbols.splitlines():
-            fields = line.split()
-            if len(fields) >= 8 and fields[4] in {'GLOBAL', 'WEAK'} and fields[6] != 'UND':
-                names.append(fields[7])
+    dynamic = subprocess.check_output([readelf, '-d', str(path)], text=True, env=TOOL_ENV)
+    needed = re.findall(r'\(NEEDED\).*\[([^\]]+)\]', dynamic)
+    # Derive the permitted dynamic loader from the library under test, not
+    # the build host. This keeps host builds portable without allowing a
+    # wrong-architecture artifact to pass the dependency check.
+    header = subprocess.check_output([readelf, '-h', str(path)], text=True, env=TOOL_ENV)
+    machine = re.search(r'^\s*Machine:\s*(.+)$', header, re.MULTILINE)
+    if not machine:
+        raise ValueError('could not read ELF machine type')
+    host_loader = {
+        'AArch64': 'ld-linux-aarch64.so.1',
+        'Advanced Micro Devices X86-64': 'ld-linux-x86-64.so.2',
+        'ARM': 'ld-linux-armhf.so.3',
+    }.get(machine.group(1).strip())
+    allowed = {'libc.so.6', 'libm.so.6', 'libgcc_s.so.1', 'libpthread.so.0', 'ld-linux.so.3'}
+    if host_loader:
+        allowed.add(host_loader)
+    symbols = subprocess.check_output([readelf, '--dyn-syms', '--wide', str(path)], text=True, env=TOOL_ENV)
+    names = []
+    for line in symbols.splitlines():
+        fields = line.split()
+        if len(fields) >= 8 and fields[4] in {'GLOBAL', 'WEAK'} and fields[6] != 'UND':
+            names.append(fields[7])
     unexpected = set(needed) - allowed
     if unexpected:
         raise ValueError('unexpected runtime dependencies: ' + ', '.join(sorted(unexpected)))
@@ -110,7 +109,6 @@ def verify_library(path, darwin, readelf=None):
 
 def build():
     host = bool(os.environ.get('HOST'))
-    darwin = host and platform.system() == 'Darwin'
     target = 'host' if host else 'arm'
     prefix = ROOT / ('vendor/libass-prefix-host' if host else 'vendor/libass-prefix')
     work = ROOT / ('vendor/libass-build-host' if host else 'vendor/libass-build')
@@ -121,10 +119,10 @@ def build():
     # Host and ARM have separate workspaces and can build concurrently.
     with (work / '.lock').open('w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        build_locked(host, darwin, target, prefix, work, sources)
+        build_locked(host, target, prefix, work, sources)
 
 
-def build_locked(host, darwin, target, prefix, work, sources):
+def build_locked(host, target, prefix, work, sources):
     pins = json.loads(PINS.read_text())
     archives = {d['id']: archive(d, sources) for d in pins}
     env = os.environ.copy()
@@ -152,9 +150,6 @@ def build_locked(host, darwin, target, prefix, work, sources):
         if not all([cc, cxx, ar, ranlib]):
             raise ValueError('host C/C++ compiler, ar and ranlib are required')
         identity = subprocess.check_output([cc, '--version'])
-        if darwin:
-            flags.append('-mmacosx-version-min=11.0')
-            cmake_flags.append('-DCMAKE_OSX_DEPLOYMENT_TARGET=11.0')
     else:
         sdk = Path(os.environ.get('WEBOS_SDK', str(Path.home() / 'webos-ndk/arm-webos-linux-gnueabi_sdk-buildroot'))).resolve()
         cross = sdk / 'bin/arm-webos-linux-gnueabi-'
@@ -236,27 +231,18 @@ def build_locked(host, darwin, target, prefix, work, sources):
         stamp.write_text(key)
     # The facade changes more often than the upstream stack; relinking it does not
     # require a clean FreeType/HarfBuzz rebuild.
-    name = 'libass-plx.0.dylib' if darwin else ('libass-plx-host.so.0' if host else 'libass-plx.so.0')
+    name = 'libass-plx-host.so.0' if host else 'libass-plx.so.0'
     output = prefix / 'lib' / name
     objects = [prefix / 'lib' / n for n in static_names]
     wrapper_flags = [f for f in flags if f != '-fvisibility=hidden']
     command = [cc, *wrapper_flags, '-I' + str(ROOT / 'include'), '-I' + str(prefix / 'include'),
                str(ROOT / 'src/ass.c'), *map(str, objects), '-lm']
-    if darwin:
-        symbols = sorted(set(re.findall(r'\b(plx_ass_\w+)\s*\(', (ROOT / 'include/ass.h').read_text())))
-        if not symbols:
-            raise ValueError('no exported ASS facade functions')
-        exports = work / 'exports.txt'
-        exports.write_text(''.join('_' + s + '\n' for s in symbols))
-        command += ['-dynamiclib', '-liconv', '-Wl,-install_name,@loader_path/' + name,
-                    '-Wl,-exported_symbols_list,' + str(exports)]
-    else:
-        exports = work / 'exports.map'
-        exports.write_text('{ global: plx_ass_*; local: *; };\n')
-        command += ['-shared', '-Wl,-soname,' + name, '-Wl,--no-undefined',
-                    '-Wl,--exclude-libs,ALL', '-Wl,--version-script=' + str(exports)]
+    exports = work / 'exports.map'
+    exports.write_text('{ global: plx_ass_*; local: *; };\n')
+    command += ['-shared', '-Wl,-soname,' + name, '-Wl,--no-undefined',
+                '-Wl,--exclude-libs,ALL', '-Wl,--version-script=' + str(exports)]
     run([*command, '-o', output], env=env)
-    verify_library(output, darwin, shutil.which('readelf') if host else str(cross) + 'readelf')
+    verify_library(output, shutil.which('readelf') if host else str(cross) + 'readelf')
     staged = ROOT / 'pkg' / name
     candidate = staged.with_name(staged.name + '.' + str(os.getpid()) + '.new')
     sidecars = ['.link.map', '.link.trace', '.link.json'] if not host else []
@@ -269,8 +255,6 @@ def build_locked(host, darwin, target, prefix, work, sources):
         if not host:
             run([str(cross) + 'strip', '--strip-unneeded', candidate], env=env)
             run([sys.executable, ROOT / 'ci/stage-link-evidence.py', output, candidate, '--stripped'], env=env)
-        elif darwin:
-            run(['codesign', '--force', '--sign', '-', candidate])
         # Publish the target last. A failed strip, signature or receipt must never
         # leave a new-enough Make target that skips the failed recipe next time.
         for suffix in sidecars:

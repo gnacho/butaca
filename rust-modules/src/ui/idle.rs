@@ -106,7 +106,7 @@ const KEEPALIVE_MS: u32 = 2000;
 
 /// How long the loop sleeps on a frame it decided not to present.
 ///
-/// Device and macOS presented frames block in swap. WSLg/X11 hostsim frames are paced after its
+/// Device and desktop presented frames block in swap. WSLg/X11 hostsim frames are paced after its
 /// nonblocking GLX swap; other Linux backends keep their own swap behaviour. A frame skipped by
 /// this gate reaches none of those paths, so it must sleep here or a settled screen becomes a 100%
 /// CPU spinner. One frame period keeps input polling near the normal presented-frame cadence; the

@@ -68,8 +68,7 @@ built from a different release will be declined rather than misread.
 ### 1.2 Native ASS rendering — redistributed inside this package
 
 `libass-plx.so.0` contains the Butaca facade and this pinned, statically linked stack.
-The macOS simulator uses the same sources in `libass-plx.0.dylib`; the Linux simulator
-uses `libass-plx-host.so.0`.
+The Linux simulator uses the same sources in `libass-plx-host.so.0`.
 
 | Component | Version | Licence |
 |---|---|---|

@@ -37,8 +37,8 @@ truth). The MAC needed for the magic packet comes from `$TV_MAC`, else the gitig
 cached for next time — so the first `wake-tv.sh status` against a live TV is enough to
 arm future wakes. `TV_USER` (root) and `WAKE_TIMEOUT` (180) are the other overrides.
 
-No prerequisites beyond macOS built-ins (`python3` broadcasts the WoL packet — there is
-no `wakeonlan` binary on a stock Mac) and working SSH auth to the TV.
+No prerequisites beyond a stock `python3` (it broadcasts the WoL packet — there is
+no `wakeonlan` binary on a stock host) and working SSH auth to the TV.
 
 ## Gotchas — what standby BREAKS (why you run this first)
 

@@ -195,7 +195,7 @@ pub(crate) struct TrackRow {
 
 /// A byte count as the design writes it — `"32.28 GB"`. **GiB, two decimals**: 34659545780 bytes
 /// reads as 32.28 GB in the mock, which is `/1024³` and not `/1000³` (that would be 34.66). Plex's
-/// own clients, macOS excepted, use the binary units here.
+/// own clients use the binary units here.
 pub(crate) fn fmt_size(bytes: i64) -> Option<String> {
     if bytes <= 0 {
         return None;

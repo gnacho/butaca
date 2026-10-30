@@ -8,7 +8,7 @@ application is Rust under `rust-modules/src/`; `src/main.c` is the boot/crash sh
 properly factored and finished; "only a demo" is never a reason to leave a shortcut behind.
 
 The target is a cross-compiled 32-bit ARM application with a hardware video plane. Host tests and
-the macOS simulator are valuable, but they cannot prove every device behavior.
+the desktop simulator are valuable, but they cannot prove every device behavior.
 
 ## Load the right context
 
@@ -95,9 +95,9 @@ the macOS simulator are valuable, but they cannot prove every device behavior.
   target dirs live outside the repo under `$PLX_FLEET_DIR` and outlive their worktree).
   `docs/agent-reference.md` keeps the measurements behind this. None of this has to be run by
   hand any more: `tools/build-gc.sh --auto` stages the same reclaim on its own, gated by free
-  space and (for `--lanes`) an idle guard, from a `SessionEnd` hook and the optional hourly
-  `make disk-watch` launchd agent — `make disk` stays the report to read before intervening
-  yourself, or when the volume needs relief faster than the automatic trigger provides it.
+  space and (for `--lanes`) an idle guard, from a `SessionEnd` hook or a cron entry. `make disk`
+  stays the report to read before intervening yourself, or when the volume needs relief faster
+  than the automatic trigger provides it.
 - Use the `which-tier` skill to choose between host checks, `ui-sim`, and real-device verification.
   Pixel output, LG text rasterization, video-plane composition, performance, and native playback
   generally need the TV before being called verified.

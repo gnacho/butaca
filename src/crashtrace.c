@@ -27,7 +27,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <unistd.h>
-/* ARM Linux only. macOS declares `ucontext_t` behind `_XOPEN_SOURCE` and calls the routines
+/* ARM Linux only. A desktop declares `ucontext_t` behind `_XOPEN_SOURCE` and calls the routines
  * deprecated, and the host test has no use for it: the register block below is the only reader and
  * it is already `#if defined(__arm__)`. Including it unconditionally would mean the test had to be
  * compiled with different feature macros from the shipping build, which is how a host test starts

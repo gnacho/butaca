@@ -1,4 +1,4 @@
-# macOS
+# Finder metadata
 .DS_Store
 
 # build artifacts
@@ -43,8 +43,7 @@ tests/manifest.local.json
 rust-modules/target/
 rust-modules/target-release/
 rust-modules/target-sim/
-rust-modules/target-macapp/
-# `make LAB=1` and `make LAB=1 sim` — the Lab Diagnostics feature set gets its own build trees for
+# `make LAB=1` — the Lab Diagnostics feature set gets its own build trees for
 # the reason every other feature set does (cargo does not hash its output; see the Makefile).
 rust-modules/target-lab/
 rust-modules/target-sim-lab/
@@ -99,6 +98,8 @@ pkg/.flavor/
 # which stays in the checkout because `release.yml` publishes it as the LGPL corresponding source.
 vendor/ffmpeg-build
 vendor/ffmpeg-prefix
+vendor/ffmpeg-build-host
+vendor/ffmpeg-prefix-host
 vendor/sentry-native-*.tar.gz
 vendor/sentry-native-src
 vendor/sentry-native-build
@@ -120,7 +121,9 @@ vendor/vendor/
 # bump forever in a repo whose reproducibility rests on the pinned tarball.
 pkg/lib*-plx.so.*
 pkg/libass-plx-host.so.0*
-pkg/libass-plx.0.dylib.*.new
+# The host half of the same FFmpeg, staged for the host tests only. It carries the SAME basenames
+# as the shipped ARM libraries, so it lives in its own directory and never in `pkg/` itself.
+pkg/host-ffmpeg/
 pkg/.ffabi-ok
 
 # Session file the app writes next to its payload. The desktop simulator is pointed at
@@ -133,14 +136,6 @@ pkg/auth.json
 # own endpoint; `ci/check-package.py` refuses any non-LAB package that contains it.
 pkg/lab.json
 
-# `make macapp` output: the macOS application bundle, its zip, and the recipient's README copy.
-# Build products, like pkg/butaca and the .ipk above — and the bundle carries ~10 copied
-# Homebrew dylibs, which are neither ours to commit nor meaningful outside the machine that
-# assembled them. ci/mkmacapp.py rebuilds all three in about a minute.
-pkg/Butaca.app/
-pkg/Butaca-*.zip
-pkg/Butaca-README.md
-
 # Generated test media (tests/fixtures/make_fixtures.py, `make fixtures`). The default output
 # root is ~/butaca-fixtures and the generator REFUSES an --out anywhere inside this repo, so
 # these patterns should never match anything — they are here for the case where somebody points
@@ -152,26 +147,13 @@ tests/fixtures/**/*.mp4
 tests/fixtures/**/*.sup
 tests/fixtures/fixtures.json
 # ...except one deliberate 13 KB regression fixture, which is not generated media but the input of
-# `ff_image_subtitle_tests.rs` (`make check-ffmpeg`): mkvmerge's zlib-compressed subtitle tracks.
+# `ff_image_subtitle_tests.rs`: mkvmerge's zlib-compressed subtitle tracks.
 !tests/fixtures/mkv_zlib_subs.mkv
 
 # Python bytecode from the host-side test/tooling scripts.
 __pycache__/
 *.pyc
 
-# The HOST FFmpeg the desktop simulator streams through (ci/build-ffmpeg.sh HOST=1) — derived,
-# ~2 MB of Mach-O, and never shipped: APP_FILES is an explicit list, so it cannot reach an .ipk.
-#
-# SLASHLESS, for exactly the reason spelled out above `vendor/ffmpeg-prefix` — a fleet lane used to
-# SYMLINK these at another checkout's prebuilt trees so it did not rebuild FFmpeg (the shared cache
-# has since made that unnecessary), and a trailing slash matches a directory and NOT a link to one. So the trailing-slash form ignored the real
-# directory and let the symlink through: one `git add -A` on 2026-09-02 committed a machine-local
-# absolute path that resolves to nothing on anyone else's disk, and a later one re-committed it
-# after it had been removed. Both forms are covered without the slash.
-vendor/ffmpeg-build-host
-vendor/ffmpeg-prefix-host
-pkg/*.dylib
-pkg/.ffabi-host-ok
 rust-modules/target-sym/
 rust-modules/target-release-sym/
 pkg/butaca.debug

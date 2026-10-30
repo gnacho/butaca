@@ -21,7 +21,7 @@ the evidence the refactor did not change behaviour, and a non-empty one names th
 
 Requires `make sim` to have been built (honouring `SIM_TDIR` if the lane set one). Never touches
 the television. Each screen gets its own instance root, so several of these can run at once (that
-is the whole point of `SIM_DIR`).
+is the whole point of `BUTACA_RUNTIME_DIR`).
 
 **What it can and cannot see.** A row is the FOCUS fingerprint before and after, so this grades
 where a key moved the user and nothing else. It is blind to the two effects a press has on state no

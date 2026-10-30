@@ -118,12 +118,12 @@ ships, because `-Z build-std` is what ships.
 1. **It cannot run the native libraries, and it no longer fails by failing to LINK.** `ff.rs` used
    to carry `cfg_attr(not(test))`-gated `#[link]` directives, so a host test that called FFmpeg
    died at link time. Everything is on `dynlib!` now, the crate links unconditionally, and such a
-   test instead takes `dlopen`'s `None` branch on Darwin. Same boundary, quieter failure — **a test
+   test instead takes `dlopen`'s `None` branch on the host. Same boundary, quieter failure — **a test
    that "passes" having never entered FFmpeg or GL is the shape to watch for.**
-2. **It runs on Darwin; the app runs on Linux, and they disagree.** `tools/sockprobe.c` exists for
+2. **It runs on the host; the app runs on the TV's Linux, and they disagree.** `tools/sockprobe.c` exists for
    exactly this: on the TV's kernel `shutdown(2)` **does** abort a `connect(2)` in progress, while
-   on Darwin the same call makes `connect_timeout` report *success* on a socket that never
-   connected. A socket assertion passing here is evidence about macOS.
+   on the host the same call makes `connect_timeout` report *success* on a socket that never
+   connected. A socket assertion passing here is evidence about the host, not the TV.
 3. **Some tests are serialized on crate globals**, not parallel. `metadata.rs`'s take `lib.rs`'s
    crate-wide `testlock::serial()`, and so does every owned-screen test that seeds a store —
    an owned screen keeps no focus of its own (the `FocusEngine` does), but `pms`'s catalog statics
@@ -144,7 +144,7 @@ ships, because `-Z build-std` is what ships.
 
 The same app core on desktop SDL2 + desktop GL, drawing the real interface against your real PMS.
 It answers **layout, spacing, focus, navigation, route transitions, every screen, and the whole
-Plex data layer**. Several run at once (`SIM_DIR` instance roots), which is why it — not the
+Plex data layer**. Several run at once (`BUTACA_RUNTIME_DIR` instance roots), which is why it — not the
 television — is where parallel UI work belongs. The `ui-sim` skill is the loop.
 
 It provably cannot answer:
@@ -164,11 +164,11 @@ It provably cannot answer:
 **Two host-only traps that read as your change being broken.** The recipes are `ui-sim`'s; they are
 named here only so you can tell them from a regression in your own edit.
 
-- **`make sim-shot` hangs on a settled screen.** `BUTACA_SHOT_FRAME` (`SIM_FRAME`, default 200)
+- **a headless shot hangs on a settled screen.** `BUTACA_SHOT_FRAME` (default 200)
   counts **presented** frames, and `ui::idle` gates presents — so a screen that settles before
   frame 200 never reaches it. Arm `butaca-noidle` in the instance root, or drive the `shot` FIFO
   token instead, which calls `ui::idle::invalidate()` for you (`shot.rs::request`).
-- **A synthetic `SDL_TEXTINPUT` SIGSEGVs inside SDL** — macOS `libSDL2` is sdl2-compat forwarding
+- **A synthetic `SDL_TEXTINPUT` SIGSEGVs inside SDL** — the desktop `libSDL2` is sdl2-compat forwarding
   into SDL3, whose text event carries a `char *text` where SDL2 carries an inline `char[32]`. No
   Rust panic, no log line, the process is just gone. The FIFO's key and `ck:` tokens are safe
   because every field they set is a scalar. `docs/search.md` §3.
@@ -218,13 +218,13 @@ knows the set is theirs.
 | what you changed | run, in order | what those tiers CANNOT see |
 |---|---|---|
 | **pure logic** — `route/plan.rs`, `plex/`, `metadata.rs`, `browse.rs`, `aq.rs`, `stream.rs` parsing, `ff.rs` helpers | `make check` (+ a new test) → `make sim-shot` if a screen reads it | the native libraries; Linux syscall semantics; whether the value reaches a pixel |
-| **UI layout / spacing / colour / a new screen** (`ui/`) | `make check` → `make sim-shot SIM_W=1920 SIM_H=1080` (`ui-sim`) → **one device capture, looked at** | the fps tier is blind to pixels (the 2026-08-13 watched-mark bug); a FITTED sim shot is 960x540 on a 1x display, layout evidence only — which is what `SIM_W`/`SIM_H` exist for |
+| **UI layout / spacing / colour / a new screen** (`ui/`) | `make check` → a `BUTACA_WIN=1920x1080` simulator shot (`ui-sim`) → **one device capture, looked at** | the fps tier is blind to pixels (the 2026-08-13 watched-mark bug); a FITTED sim shot is 960x540 on a 1x display, layout evidence only — which is what `BUTACA_WIN` exists for |
 | **text rasterization, fonts, the `theme::size` ladder** | `tools/font-hint-audit.py` → device capture | **the simulator is disqualified** — different FreeType; `make check` never rasterizes anything |
 | **anything ANIMATED, or repainting from a CLOCK** | two host tests (runs / rests) → `--fps` with a real `fps_floor`, plus an `fps_ceiling` if the screen settles | `loop_floor` cannot see a stopped animation at all; the simulator cannot see rate |
 | **frame rate / perf** | `profile-tv`: `./tests/run.py --fps` unarmed, or one scene with `--graphics-profile` for pacing + IRQ + HWCNT | never the simulator; only the profile's production leg has quotable FPS; `drift` is reported, never asserted |
 | **player pipeline, demux, Starfish/ACB, the Load payload, `route/decision.rs`** | `make check` (pure `ff.rs` logic) → `./tests/run.py` (synthetic) → `--server` if selection is involved | the synthetic tier bypasses `metadata → plan → apply_plan` and false-PASSes an unread trigger via `engine`'s `_ =>` arm |
 | **track selection, resume, markers, Up Next, `/:/timeline`** | `./tests/run.py --server` — **only** | the synthetic tier reaches none of these; a bare `./tests/run.py` is not evidence about any of them |
-| **FFI / linkage / `dynlib!`** | `tools/fwcompat.py` → `make check` → **`make sim` or `make macapp`** → device | **there is no link error any more**; and the device cannot see an Apple-ABI variadic bug — see below |
+| **FFI / linkage / `dynlib!`** | `tools/fwcompat.py` → `make check` → **`make sim`** → device | **there is no link error any more**; and the device cannot see a variadic-ABI bug — see below |
 | **the release feature configuration** | `cargo +nightly check --lib --no-default-features` → `make RELEASE=1` | `make check`, `make` and `make sim` all build DEV features; a broken `RELEASE=1` is invisible to every one of them |
 | **the Makefile, packaging, the `.ipk`** | `make check` (flavour selftest) → `make ipk` (runs `ci/check-package.py`) → a real `make FLAVOR=… install` | the dev loop is `make deploy`, which scp's into an already-registered app dir and **never exercises the package** |
 
@@ -267,11 +267,11 @@ But it grades **whether the app STARTS and nothing else**, and the inventories a
 it cannot answer anything about strings, struct layouts or code (that is `decompile-tv-lib`, and
 `bind-tv-lib-abi` is the workflow that requires it). The counter-intuitive half: **the host tiers
 catch an FFI bug class the device cannot.** `dynlib!` bound the variadic `curl_easy_setopt` as a
-non-variadic wrapper, which is right about the types and wrong about the convention — Apple's ARM64
-ABI passes variadic arguments on the stack while named ones go in registers. ARM32 and x86-64 pass
+non-variadic wrapper, which is right about the types and wrong about the convention — one ABI
+passes variadic arguments on the stack while named ones go in registers. ARM32 and x86-64 pass
 both ways identically, so it compiled, passed `make check`, ran on the television, and SIGSEGV'd
-inside libcurl's `strlen` on a Mac at the first plex.tv call (found 2026-08-16 building
-`make macapp`; `docs/macos-app.md` §2). No amount of device testing could have found it.
+inside libcurl's `strlen` on the desktop at the first plex.tv call (found 2026-08-16).
+No amount of device testing could have found it.
 
 **The release configuration.** `make check` builds default features; `RELEASE=1` drops both
 `devtools` and `devtriggers`, and that configuration can be broken with the entire host suite

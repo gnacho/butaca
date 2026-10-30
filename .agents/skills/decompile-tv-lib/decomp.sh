@@ -39,7 +39,7 @@ need_ghidra() {
   [ -n "$AH" ] && [ -x "$AH" ] || die "Ghidra headless not found.
   brew install ghidra openjdk@21      # ghidra is a FORMULA, not a cask
   ...or set GHIDRA_HEADLESS=/path/to/analyzeHeadless"
-  [ -n "$JAVA_HOME" ] || die "no JDK. Ghidra is a Java application; macOS /usr/bin/java is a
+  [ -n "$JAVA_HOME" ] || die "no JDK. Ghidra is a Java application; /usr/bin/java is a
   stub that only offers to install one. brew install openjdk@21"
 }
 

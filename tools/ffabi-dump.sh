@@ -33,7 +33,7 @@ OBJ=$(mktemp -t ffabi).o
 trap 'rm -f "$OBJ"' EXIT
 
 # The host path COMPILES AND RUNS the same list instead of reading array sizes out of the symbol
-# table: macOS `nm` reports every Mach-O size as zero ("sizes with --print-size for Mach-O files
+# table: a desktop `nm` reports every Mach-O size as zero ("sizes with --print-size for Mach-O files
 # are always zero"), so the cross trick reads back nothing at all and does so silently.
 if [ -n "${HOST:-}" ]; then
   "$CC" -I "$INC" -std=c11 -DPLX_FFABI_MAIN "$ROOT/ci/ffabi-dump.c" -o "$OBJ"
@@ -44,7 +44,7 @@ fi
 "$CC" $SYSROOT_FLAG -I "$INC" -std=c11 -c "$ROOT/ci/ffabi-dump.c" -o "$OBJ"
 
 # nm -S prints "<value> <size> <type> <name>"; the size is our datum, hex, stored plus one.
-# BSD awk (macOS) has no strtonum, so the hex-to-decimal step goes through the shell.
+# BSD awk has no strtonum, so the hex-to-decimal step goes through the shell.
 "$NM" -S --defined-only "$OBJ" | while read -r _addr size type name; do
   case "$name" in plx_*) ;; *) continue ;; esac
   case "$type" in B|b|D|d|C) ;; *) continue ;; esac

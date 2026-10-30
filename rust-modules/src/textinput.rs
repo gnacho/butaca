@@ -231,7 +231,7 @@ pub(crate) fn start() {
         *addr_of_mut!(STARTED) = true;
         // Anything typed BEFORE the field opened belongs to whatever was on screen then, not to
         // this query. That is not hypothetical on a desktop: SDL2's `SDL_VideoInit` ends with
-        // `if (!SDL_HasScreenKeyboardSupport()) SDL_StartTextInput();`, so on macOS text events
+        // `if (!SDL_HasScreenKeyboardSupport()) SDL_StartTextInput();`, so on a desktop text events
         // are on from boot and every keystroke on Home has been queueing here — without this the
         // first search field to open would come up pre-filled with the user's navigation. On the
         // television the same line means text events are OFF until this call, which is why

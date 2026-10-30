@@ -139,7 +139,7 @@ def _alive(pid: int) -> bool:
 def make_cert(dirpath: str, hostname: str) -> tuple[str, str]:
     """Generate `cert.pem` + `key.pem` and return (cert path, `sha256//…` pin).
 
-    Shells out to `openssl`, which is on every macOS and every CI image, rather than adding a
+    Shells out to `openssl`, which is on every CI image and desktop, rather than adding a
     crypto dependency to a one-file tool. The key never leaves this directory and the directory is
     0700; only the PIN — a hash of the public half — is ever handed to the app.
     """
@@ -216,7 +216,7 @@ class Upnp:
                     if loc not in locations:
                         locations.append(loc)
         except OSError as e:
-            # No multicast route (offline, VPN-only, no default): macOS EHOSTUNREACH /
+            # No multicast route (offline, VPN-only, no default): EHOSTUNREACH /
             # ENETUNREACH. Selftest must still return None with no router in the room; `start`
             # already turns a missing IGD into a status string. Any other OSError is a real
             # failure and must not be swallowed.
@@ -302,7 +302,7 @@ class Upnp:
 def lan_ip() -> str:
     """This machine's address on the LAN the router can reach — the `NewInternalClient` value.
 
-    Taken from a connected UDP socket rather than `gethostbyname(gethostname())`, which on macOS
+    Taken from a connected UDP socket rather than `gethostbyname(gethostname())`, which on a desktop
     answers `127.0.0.1` as often as not and would map the router's port to the router's own idea of
     nowhere.
     """

@@ -1,4 +1,4 @@
-# butaca — native webOS build (cross-compiled from macOS with the webOS NDK)
+# butaca — native webOS build (cross-compiled with the webOS NDK)
 #
 # Toolchain: the webosbrew "native-toolchain" buildroot SDK (GCC 12, glibc 2.12,
 # armv7-a soft-float). Install it once with `make setup-env` (or see the
@@ -179,11 +179,11 @@ print-rundir:   ; @echo '$(RUNDIR)'
 print-eventlog: ; @echo '$(EVENTLOG)'
 print-appport:  ; @echo '$(APPPORT)'
 print-tv:       ; @echo '$(TV)'
-# Where `make sim` put the simulator. It is `$(SIM_TDIR)`-derived and `SIM_TDIR` is deliberately
-# overridable — agents running several simulators at once keep separate target dirs, and the
-# `macapp` build has its own — so a tool that restates the path silently runs another lane's
-# binary. Same argument as `print-appdir`: ask, never restate.
-print-simbin:   ; @printf '%s\n' "$$SIM_MACOS_BIN_ENV"
+# Where `make sim-linux` puts the simulator binary. It is `$(SIM_TDIR)`-derived and `SIM_TDIR` is
+# deliberately overridable — agents running several simulators at once keep separate target dirs —
+# so a tool that restates the path silently runs another lane's binary. Same argument as
+# `print-appdir`: ask, never restate.
+print-simbin:   ; @printf '%s\n' "$$SIM_LINUX_TDIR_ENV/release/butaca-sim"
 # The three queries `ci/test_deploy_manifest.py` asks instead of running `make -p` (which prints a
 # RECURSIVE variable's unexpanded definition — see the ban on it elsewhere in this file — and
 # would in any case hand a host test the SAME string for two different flavours). Defined once
@@ -197,17 +197,10 @@ print-ffmpeg-staged:  ; @echo '$(FFMPEG_STAGED)'
 # it back. It is a report; `tools/build-gc.sh --incremental|--lanes|--all` is the reclaim, and
 # the script's header carries the measurement that motivated all three. Nothing here has to be run
 # by hand anymore: `tools/build-gc.sh --auto` runs the same reclaim on its own, staged by free-space
-# pressure, from a `SessionEnd` hook (`.claude/hooks/build-gc-auto.sh`) and from the per-user
-# launchd agent `disk-watch` installs below — `make disk` remains the report to read when deciding
-# whether to intervene by hand.
+# pressure, from a `SessionEnd` hook (`.claude/hooks/build-gc-auto.sh`); `make disk` remains the
+# report to read when deciding whether to intervene by hand, and a cron line that runs
+# `tools/build-gc.sh --auto` hourly does the same job for a machine idle between sessions.
 disk: ; @./tools/build-gc.sh
-
-# `make disk-watch` — install the per-user launchd agent that runs `tools/build-gc.sh --auto`
-# hourly in the background, so the automatic reclaim above does not depend on a session ending to
-# fire. macOS only; `tools/install-disk-watch.sh` prints the cron equivalent and exits 0 elsewhere.
-# `disk-watch-uninstall` removes it. Neither target touches the TV or any tracked file.
-disk-watch: ; @./tools/install-disk-watch.sh
-disk-watch-uninstall: ; @./tools/install-disk-watch.sh --uninstall
 
 # --- webOS NDK toolchain -----------------------------------------------------
 WEBOS_SDK   ?= $(HOME)/webos-ndk/arm-webos-linux-gnueabi_sdk-buildroot
@@ -218,7 +211,7 @@ WEBOS_SDK   ?= $(HOME)/webos-ndk/arm-webos-linux-gnueabi_sdk-buildroot
 # the file, so the pin has to come through this variable.
 RUST_NIGHTLY ?= nightly
 
-# sha256 helper: coreutils `sha256sum` on Linux, perl `shasum -a 256` on macOS. Both print the
+# sha256 helper: coreutils `sha256sum` where available, otherwise perl `shasum -a 256`. Both print the
 # same "<hex>  <path>" format, so `-c -` works against either.
 SHA256SUM := $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo 'shasum -a 256')
 
@@ -421,7 +414,7 @@ LIBS_REAL = -lSDL2 -lSDL2_ttf -lGLESv2 -lluna-service2 -lglib-2.0 \
 #
 # The cost is real and worth stating: a rebuild after a one-line edit in a lane recompiles the
 # crate rather than patching it. That is seconds per compile against gigabytes per lane.
-# (`export VAR ?= v` on one line is silently a no-op under the make 3.81 macOS ships — measured
+# (`export VAR ?= v` on one line is silently a no-op under GNU make 3.81 — measured
 # here, `$(origin CARGO_INCREMENTAL)` came back `undefined` — so the assignment and the export are
 # two statements.)
 PLX_LINKED_WORKTREE := $(shell test -f .git && echo yes)
@@ -447,8 +440,8 @@ RUST_TDIR      = target$(if $(RELEASE),-release,)$(if $(LAB),-lab,)$(if $(JELLYF
 # `rust-modules/build.rs` reads this ONE variable: set, the binary says `0.6.0`; unset or empty, it
 # says `0.7.0-dev`, the next MINOR — trunk is where features land, so that is what is cut from it
 # next; a patch release comes off an existing minor's own line. Exported (rather than per recipe) so
-# the cross-build, `make check`, `make sim` and `make macapp` cannot answer differently — they run
-# cargo from four places, and the failure of missing one is a mislabelled artifact, not an error.
+# the cross-build, `make check` and `make sim` cannot answer differently — they run cargo from
+# three places, and the failure of missing one is a mislabelled artifact, not an error.
 #
 # It is deliberately NOT in $(RUST_CFG), and `override` is what makes that safe. RELEASE is
 # already in the stamp and gives each configuration its own --target-dir, so a flip through the
@@ -527,7 +520,7 @@ RUST_STAMP     = pkg/.build-config
 RUST_CFG       = features:$(RUST_FEATFLAGS)$(if $(SYMBOLS),+symbols,)$(if $(filter nightly,$(FLAVOR)),+nightly:$(PLX_NIGHTLY_DATE),)
 # Handled by $(shell) during PARSING, and by DELETING the output rather than by timestamps.
 # Both choices are load-bearing, and both were arrived at by measuring the failures:
-#   * A rule cannot do it. macOS ships GNU make 3.81, which decides whether a target is up to date
+#   * A rule cannot do it. GNU make 3.81 decides whether a target is up to date
 #     from a stat taken BEFORE its prerequisites' recipes run, so a stamp written by a recipe is
 #     read with its OLD mtime and the relink is skipped.
 #   * A newer stamp is not enough either. make 3.81 compares mtimes at ONE-SECOND granularity, so
@@ -752,9 +745,9 @@ else
 endif
 NDK_TARBALL = arm-webos-linux-gnueabi_sdk-buildroot_$(NDK_PLAT).tar.bz2
 NDK_URL = https://github.com/webosbrew/native-toolchain/releases/download/$(NDK_REL)/$(NDK_TARBALL)
-# sha256 of the linux-aarch64 tarball (the one CI fetches), verified 2026-08-01. Empty for the
-# darwin assets — `make setup-env` on a dev Mac keeps its existing no-checksum behaviour; CI is
-# where an unverified 156 MB download actually matters.
+# sha256 of the linux-aarch64 tarball (the one CI fetches), verified 2026-08-01. The darwin assets
+# the third-party release also publishes carry no pin here, because this project builds on Linux;
+# the pin exists for the download CI actually makes, where an unverified 156 MB matters.
 NDK_SHA256_linux-aarch64 = 45a2d12ff557457d92cde4fddaa77a6f1090fca03adc43bb74397e5e0c379501
 NDK_SHA256 = $(NDK_SHA256_$(NDK_PLAT))
 
@@ -1080,8 +1073,7 @@ check:
 # both clear the log on the TV), so this is only about not confusing yourself locally.
 # Built into the shell's temp dir rather than the tree: it is a host binary in a repository whose
 # every other artifact is ARM, and one that landed in `src/` or `pkg/` would be a genuinely
-# confusing thing to find. `$(TMPDIR)` is set on macOS and empty on a Linux runner, hence the
-# fallback.
+# confusing thing to find. `$(TMPDIR)` may be unset, hence the fallback.
 CRASHFMT_TEST_BIN := $(or $(TMPDIR),/tmp/)plx-crashfmt-test
 CRASHTRACE_TEST_BIN := $(or $(TMPDIR),/tmp/)plx-crashtrace-test
 PRIVATE_LOG_TEST_BIN := $(or $(TMPDIR),/tmp/)plx-private-log-test
@@ -1278,7 +1270,7 @@ lint:
 	  -A clippy::all \
 	  -D clippy::ifs_same_cond -D clippy::same_functions_in_if_condition -D clippy::if_same_then_else
 
-# ipk assembly: deb-style ar archive; the NDK ar emits GNU format (macOS ar is BSD)
+# ipk assembly: deb-style ar archive; the NDK ar emits GNU format
 # pkg/appinfo.json is the ONE place the version is written; the ipk filename and everything else
 # derive from it, and ci/check-package.py asserts ipkroot/ctl/control still agrees. The registry
 # reads both out of the archive (webosbrew repogen/ipk_file.py), so a mismatch is a rejected
@@ -1464,8 +1456,8 @@ uninstall: tv-lock-require
 threadprobe: tools/threadprobe.c
 	$(CC) $(CFLAGS) -o pkg/threadprobe tools/threadprobe.c -lpthread
 
-# tools/sockprobe.c — socket semantics the host suite can't answer (cargo test runs on macOS, the
-# app runs on Linux, and they disagree about shutdown-during-connect). Same deal: build, scp, run,
+# tools/sockprobe.c — socket semantics the host suite can't answer (shutdown-during-connect
+# differs between the host kernel and the television's). Same deal: build, scp, run,
 # delete.
 sockprobe: tools/sockprobe.c
 	$(CC) $(CFLAGS) -o pkg/sockprobe tools/sockprobe.c -lpthread
@@ -1500,64 +1492,27 @@ mali-irq-sample: tools/mali-irq-sample.c
 # It exists because the TV serializes the whole dev loop: one set, one app instance, and two
 # `tests/run.py` jobs kill each other's app. Several simulators run at once, each with its own
 # instance root, so UI and data-layer work can proceed in parallel. It has NO video (the 29-symbol
-# Starfish/ACB seam does not exist off-device) and its frame rates describe this Mac, not the panel.
+# Starfish/ACB seam does not exist off-device) and its frame rates describe the host, not the panel.
+# The instance root is `BUTACA_RUNTIME_DIR`; the PMS host and port come from `src/config.local.h`,
+# and `tools/sim.ps1` (Windows/WSLg) and `tools/sim-smoke.py` (CI) set the same values the Makefile
+# once spelled out.
 #
-# `SIM_PMS` defaults to the host compiled into src/config.local.h so the common case needs no
-# argument. SIM_DIR is the instance root: give each concurrent simulator a different one.
-# Read one #define out of the gitignored header. `[^"]*`, NOT `.*`: the greedy form captures
-# everything up to the LAST quote on the line, so a trailing comment containing a quote silently
-# puts garbage in the value. tools/tv-session.sh and tests/run.py both already use this form.
-cfg_macro = $(shell sed -n 's/^\#define[ \t]*$(1)[ \t]*"\([^"]*\)".*/\1/p' src/config.local.h 2>/dev/null)
-SIM_PMS  ?= $(call cfg_macro,PMS_HOST)
-SIM_PORT ?= $(shell sed -n 's/^\#define[ \t]*PMS_PORT[ \t]*\([0-9]*\).*/\1/p' src/config.local.h 2>/dev/null)
-SIM_DIR  ?= /tmp/butaca-sim
 # Its OWN target dir, per this file's rule for feature-set splits: `make check` builds default
-# features on nightly, `make sim-macos` builds `hostsim` on the default toolchain. Sharing one dir makes
+# features on nightly, the simulator builds `hostsim` on the default toolchain. Sharing one dir makes
 # each invocation rebuild the crate the other way round.
 #
 # `?=` so it can also come from the environment: a checkout on a network or external volume
-# (/Volumes/…, SMB, some external SSDs) cannot be a cargo target dir at all — those filesystems do
+# (an SMB mount, some external SSDs) cannot be a cargo target dir at all — those filesystems do
 # not implement flock, and cargo fails with "could not create session directory lock file
 # (os error 45)" before compiling anything. Point this at a local path and the checkout can stay
 # where it is:  export SIM_TDIR=$HOME/butaca-sim-target
 SIM_TDIR  ?= rust-modules/target-sim
-SIM_MACOS_BIN = $(SIM_TDIR)$(if $(LAB),-lab,)/debug/butaca-sim
-SIM_MACOS_BIN_ENV = $(SIM_MACOS_BIN)
 SIM_LINUX_TDIR_ENV = $(SIM_TDIR)
-export SIM_MACOS_BIN_ENV SIM_LINUX_TDIR_ENV
-# Which presented frame `sim-shot` grabs. 200 is comfortably past first paint and the poster
-# fetches on a warm cache; raise it if a shot catches a screen mid-load.
-SIM_FRAME ?= 200
-SIM_SHOT  ?= $(SIM_DIR)/shot.png
-# Shared by every sim recipe so the wiring and the error sentence have exactly one copy — the same
-# reason BOOT_SH exists for `run`/`run-stream`.
-# Window size for the simulator, in window POINTS (SDL's window size; the window is ALLOW_HIGHDPI,
-# so on a Retina display the drawable is twice this). Empty = fit the display (see
-# `desktop_window_size`), which on a 1x screen is half the authored canvas and therefore half the
-# resolution of every screenshot. Set both to look at the UI the size it is drawn:
-#   make sim-shot SIM_W=1920 SIM_H=1080
-# For a capture LARGER than the display can hold, set BUTACA_RENDER_SCALE=<1..4> in the
-# environment instead: the frame is then rendered offscreen at that multiple of 1920x1080 (glyphs,
-# icons and artwork rasterised to match) and shots come out at that size (`surface::render_scale`).
-SIM_W ?=
-SIM_H ?=
-SIM_WIN = $(if $(and $(SIM_W),$(SIM_H)),BUTACA_WIN=$(SIM_W)x$(SIM_H),)
-SIM_ENV = BUTACA_RUNTIME_DIR=$(SIM_DIR) BUTACA_APP_DIR=$(CURDIR)/pkg $(SIM_WIN)
-SIM_PRE = mkdir -p $(SIM_DIR); test -n "$(SIM_PMS)" || \
-          { echo "no PMS host — set SIM_PMS=<ip> or add PMS_HOST to src/config.local.h"; exit 1; }
+export SIM_LINUX_TDIR_ENV
 
-# **The simulator needs its own FFmpeg, and that is what makes it able to STREAM.** `ff.rs` opens
-# the bundled libraries by absolute path out of the app directory, where they are 32-bit ARM ELF —
-# so until 2026-08-28 the entire streaming half of the app (both AVIO transports, the HLS demux,
-# the AU queues and therefore the whole adaptive controller) was device-only, and `make sim-macos`
-# logged `ff: FFmpeg unavailable`. `HOST=1 ci/build-ffmpeg.sh` builds the SAME FFmpeg 9.0 from the
-# SAME component list for this Mac; `ci/stage-host-ffmpeg.sh` puts it in pkg/ with loader-relative
-# names. `APP_FILES` is an explicit list, so none of it can reach an .ipk or a television.
-FFMPEG_HOST_PREFIX = vendor/ffmpeg-prefix-host
-FFMPEG_HOST_INC    = $(FFMPEG_HOST_PREFIX)/include
-FFMPEG_HOST_NAMES  = libavutil-plx.61 libavcodec-plx.63 libavformat-plx.63 libswscale-plx.10
-FFMPEG_HOST_STAGED = $(addprefix pkg/,$(addsuffix .dylib,$(FFMPEG_HOST_NAMES)))
-LIBASS_HOST_NAME = $(if $(filter Darwin,$(shell uname -s)),libass-plx.0.dylib,libass-plx-host.so.0)
+# The Linux simulator links a host build of the same pinned ASS renderer and font stack the
+# television ships (`libass-plx-host.so.0`), staged beside the binary like the ARM one.
+LIBASS_HOST_NAME = libass-plx-host.so.0
 LIBASS_HOST_STAGED = pkg/$(LIBASS_HOST_NAME)
 
 $(LIBASS_HOST_STAGED): $(LIBASS_INPUTS)
@@ -1572,51 +1527,44 @@ check-ass: $(LIBASS_HOST_STAGED)
 	cd rust-modules && CARGO_INCREMENTAL=0 BUTACA_APP_DIR="$(CURDIR)/pkg" PATH="$$HOME/.cargo/bin:$$PATH" \
 	  cargo +$(RUST_NIGHTLY) test --lib player::ass::tests -- --include-ignored
 
+# The host half of the same pinned FFmpeg, built by the same script with the cross block skipped.
+# It stages into its OWN directory: the host libraries carry the basenames the shipped ARM ones do,
+# and `pkg/lib*-plx.so.*` is the glob that puts the device libraries in an `.ipk`.
+FFMPEG_HOST_PREFIX = vendor/ffmpeg-prefix-host
+FFMPEG_HOST_INC    = $(FFMPEG_HOST_PREFIX)/include
+FFMPEG_HOST_STAGED = pkg/host-ffmpeg/.staged
+
 $(FFMPEG_HOST_INC)/libavformat/avformat.h: ci/build-ffmpeg.sh
 	HOST=1 ./ci/build-ffmpeg.sh
 
-$(FFMPEG_HOST_STAGED): pkg/%.dylib: $(FFMPEG_HOST_INC)/libavformat/avformat.h ci/stage-host-ffmpeg.sh
+$(FFMPEG_HOST_STAGED): $(FFMPEG_HOST_INC)/libavformat/avformat.h ci/stage-host-ffmpeg.sh
 	@mkdir -p pkg
-	./ci/stage-host-ffmpeg.sh $*
-
-# **`make check-ffmpeg` — the tests that need the bundled FFmpeg itself.** `make check` has no
-# FFmpeg to call, so a property of `ci/build-ffmpeg.sh`'s COMPONENT LIST (which demuxer features,
-# which decoders) is invisible to it. These tests load the host build of that same list and are
-# `#[ignore]`d in the plain suite; the first is the zlib-compressed PGS track that no configure
-# flag change may silently drop again (`ff_image_subtitle_tests.rs`). macOS only, like the staging.
-check-ffmpeg: $(FFMPEG_HOST_STAGED)
-	cd rust-modules && CARGO_INCREMENTAL=0 PLX_FFMPEG_DIR=$(CURDIR)/pkg PATH="$$HOME/.cargo/bin:$$PATH" \
-	  cargo +$(RUST_NIGHTLY) test --lib ff::image_subtitle_tests -- --ignored
-
-# The same ABI gate the cross build runs, at the other pointer width. ci/ffabi-assert.c `#if`s on
-# `__SIZEOF_POINTER__` and carries both tables, so this compile is what holds ff.rs's 64-bit
-# constants in place — and it is the reading that found `AVSubtitleRect`'s field order.
-pkg/.ffabi-host-ok: ci/ffabi-assert.c $(FFMPEG_HOST_INC)/libavformat/avformat.h Makefile
-	@mkdir -p pkg
-	cc -I $(FFMPEG_HOST_INC) -std=c11 -c ci/ffabi-assert.c -o /dev/null
+	./ci/stage-host-ffmpeg.sh
 	@touch $@
 
-# LAB=1 adds the Lab Diagnostics feature here too, and that is not a curiosity: it is the only way
-# to exercise the WHOLE upload path — trigger, snapshot, scrub, gzip, pinned TLS POST, receiver —
-# without a television and without opening a port on the router (`tools/butaca-lab start
-# --hostname 127.0.0.1 --no-upnp`). The simulator reads `lab.json` out of its app dir, which is
-# `pkg/`, which is where `butaca-lab start` writes it. It has its own target dir for the same
-# reason every other feature set does.
-#
-# The host FFmpeg is a prerequisite of BOTH configurations: a lab simulator that cannot demux
-# would exercise the upload path over a playback that never started.
-# Platform build targets are explicit. Keep `sim` as the compatibility spelling for the original
-# macOS simulator; new automation should name the platform it expects.
-sim: sim-macos
+ffmpeg-host: $(FFMPEG_HOST_STAGED)
 
-sim-macos: $(FFMPEG_HOST_STAGED) $(LIBASS_HOST_STAGED) pkg/.ffabi-host-ok
-	cargo build --manifest-path rust-modules/Cargo.toml --target-dir $(SIM_TDIR)$(if $(LAB),-lab,) --features hostsim$(if $(LAB), --features lab-diagnostics,) --bin butaca-sim
+# **`make check-ffmpeg` — the tests that need the bundled FFmpeg itself.** `make check` has no
+# FFmpeg to call, so a property of `ci/build-ffmpeg.sh`'s COMPONENT LIST (which demuxers, which
+# decoders) is invisible to it. These tests load the host build of that same list and are
+# `#[ignore]`d in the plain suite; the first is the zlib-compressed PGS track that no configure
+# flag change may silently drop again (`ff_image_subtitle_tests.rs`). Simulator CI runs this gate.
+.PHONY: check-ffmpeg
+check-ffmpeg: $(FFMPEG_HOST_STAGED)
+	cd rust-modules && CARGO_INCREMENTAL=0 BUTACA_FFMPEG_DIR="$(CURDIR)/pkg/host-ffmpeg" \
+	  PATH="$$HOME/.cargo/bin:$$PATH" cargo +$(RUST_NIGHTLY) test --lib ff::image_subtitle_tests -- --ignored
+
+# `sim` is the Linux simulator. The macOS simulator was retired with its support; the same
+# spelling now names the Linux one, which is what CI and the replay gate build.
+sim: sim-linux
 
 # Full product replay is a renderer-backed host gate. Keep the fast unit suite usable without
 # a window system; Simulator CI runs this same driver against the simulator it just built.
+# The gate builds the Linux simulator, the same release binary a developer runs, so a failure
+# reproduces on their own machine.
 .PHONY: check-replay
-check-replay: sim-macos
-	python3 tests/replay_fixtures.py --sim "$$SIM_MACOS_BIN_ENV"
+check-replay: sim-linux
+	python3 tests/replay_fixtures.py --sim "$$SIM_LINUX_TDIR_ENV/release/butaca-sim"
 
 # **`make screenshots` — the documentation screenshots, regenerated.** Boots the simulator once per
 # scene in `tests/screenshots/scenes.json` against the mock server's DEMO LIBRARY (openly licensed
@@ -1642,7 +1590,7 @@ SHOT_OUT    ?=
 SHOT_CHECK  ?=
 SHOT_HERO   ?=
 SHOT_HERO_VARIANTS ?=
-screenshots-sim: $(FFMPEG_HOST_STAGED) $(LIBASS_HOST_STAGED) pkg/.ffabi-host-ok
+screenshots-sim: $(LIBASS_HOST_STAGED)
 	CARGO_INCREMENTAL=0 cargo build --manifest-path rust-modules/Cargo.toml --target-dir $(SHOT_TDIR) \
 	  --no-default-features --features hostsim,devtriggers --bin butaca-sim
 
@@ -1664,84 +1612,6 @@ sim-linux: $(LIBASS_HOST_STAGED)
 
 # Compatibility spelling used by the Windows launcher and existing documentation.
 sim-wsl: sim-linux
-
-# Explicit macOS operations. The old names remain aliases so existing scripts do not break.
-sim-run: sim-macos-run
-sim-macos-run: sim-macos
-	@$(SIM_PRE)
-	$(SIM_ENV) $(SIM_MACOS_BIN) $(SIM_PMS) $(SIM_PORT)
-
-sim-shot: sim-macos-shot
-sim-macos-shot: sim-macos
-	@$(SIM_PRE)
-	$(SIM_ENV) BUTACA_SHOT=$(SIM_SHOT) BUTACA_SHOT_FRAME=$(SIM_FRAME) BUTACA_SHOT_EXIT=1 \
-	  $(SIM_MACOS_BIN) $(SIM_PMS) $(SIM_PORT)
-	@echo "wrote $(SIM_SHOT)"
-
-# Copy the owner token out of the gitignored header into this instance's root, so the simulator
-# boots straight to a signed-in Home. Same mechanism `tests/run.py` uses on the TV; the value is
-# never echoed. It is a SHORTCUT, not the only way in: plex.tv QR sign-in works on the desktop as
-# of 2026-08-16 (net.rs's candidate list gained macOS's libcurl, and `dynlib!` learned to bind a
-# variadic C function correctly) — this line used to say it could not.
-sim-token: sim-macos-token
-sim-macos-token:
-	@mkdir -p $(SIM_DIR)
-	@printf '%s' '$(call cfg_macro,PMS_TOKEN)' > $(SIM_DIR)/butaca-token
-	@test -s $(SIM_DIR)/butaca-token || { echo "no PMS_TOKEN in src/config.local.h"; rm -f $(SIM_DIR)/butaca-token; exit 1; }
-	@echo "token staged in $(SIM_DIR)"
-
-# `make sim-play` — a REAL playback session on this Mac, with no television and no Plex.
-#
-# Arms the CLOCK SINK (`rust-modules/src/player/ffi_host.rs`): access units are accepted, discarded,
-# and a presentation clock advances at real time, reporting position at the television's own
-# measured 5 Hz. Nothing decodes. What that exercises is everything between the demuxer and the
-# decoder — the AU queues and their byte-cap backpressure, the feed-ahead throttle, the engine's
-# Load/Play sequence, the exported-window video path, the HUD and the position clock — none of
-# which had any host coverage at all before.
-#
-# **The source is a raw Annex-B sample, deliberately.** `sample.h264` bypasses `ff.rs` entirely,
-# which matters because the bundled FFmpeg is an ARM build and `ff.rs`'s struct offsets are
-# hard-coded for 32-bit ARM EABI (`ci/ffabi-assert.c` asserts `AVDictionaryEntry` is two 32-bit
-# pointers). Demuxing on a 64-bit host needs a second offset table and a host FFmpeg 9.0; until
-# then the STREAMING half of the pipeline stays device-only and this target covers the rest.
-#
-# Needs no PMS, so it does not go through SIM_PRE. `SIM_SECS` bounds it.
-SIM_SAMPLE ?=
-SIM_SECS   ?= 20
-sim-play: sim-macos-play
-sim-macos-play: sim-macos
-	@test -n "$(SIM_SAMPLE)" || { echo "SIM_SAMPLE=<file.h264> is required — an Annex-B elementary stream WITH access-unit delimiters, e.g."; \
-	  echo "  ffmpeg -i clip.ts -c:v copy -an -bsf:v h264_metadata=aud=insert -f h264 /tmp/sample.h264"; exit 1; }
-	@mkdir -p $(SIM_DIR)
-	@rm -f $(SIM_DIR)/butaca-playurl $(SIM_DIR)/butaca-events.log
-	@cp $(SIM_SAMPLE) $(SIM_DIR)/sample.h264
-	@touch $(SIM_DIR)/butaca-clocksink $(SIM_DIR)/butaca-autoplay $(SIM_DIR)/butaca-stats
-	$(SIM_ENV) BUTACA_SHOT=$(SIM_SHOT) BUTACA_SHOT_FRAME=$$(( $(SIM_SECS) * 60 )) \
-	  BUTACA_SHOT_EXIT=1 $(SIM_MACOS_BIN) 127.0.0.1 32400 || true
-	@echo "--- $(SIM_DIR)/butaca-events.log ---"
-	@grep -E 'clocksink|bf_split|SMP |vplane|route=player' $(SIM_DIR)/butaca-events.log | head -20
-
-sim-clean: sim-macos-clean
-sim-macos-clean:
-	rm -rf $(SIM_DIR)
-
-# ---------------------------------------------------------------------------------------------
-# Butaca.app — the same host build, packaged as a SELF-CONTAINED macOS application you can send
-# to somebody who has none of this installed. `ci/mkmacapp.py` is the whole recipe and its module
-# doc is the account of the three ways it silently ships broken; `docs/macos-app.md` is the design
-# note (what it can and cannot do — chiefly: no video off-device).
-#
-# Its own target dir, per this file's rule for feature-set splits: this one is `--release
-# --no-default-features --features hostsim`, which is a fourth configuration, and sharing a dir
-# with `sim` would make each invocation rebuild the crate the other way round.
-MACAPP_TDIR ?= rust-modules/target-macapp
-
-macapp:
-	MACAPP_TDIR=$(MACAPP_TDIR) ci/mkmacapp.py
-
-# The artifact to actually send: a ditto archive (which preserves the signature) beside the bundle.
-macapp-zip:
-	MACAPP_TDIR=$(MACAPP_TDIR) ci/mkmacapp.py --zip
 
 # ---------------------------------------------------------------------------------------------
 # `make fixtures` — SYNTHESIZE THE TEST MEDIA. Host-side, and there is NO TELEVISION anywhere in
@@ -1802,5 +1672,5 @@ fetch-profile:
 	-$(SCP) root@$(TV):$(RUNDIR)/butaca-hwcnt.jsonl pkg/butaca-hwcnt.jsonl
 	@ls -l pkg/butaca-*.jsonl 2>/dev/null || echo "no profiler output in $(RUNDIR) on the TV ($(APPID))"
 
-.PHONY: libass libass-host screenshots screenshots-sim demo-library disk symbols all setup-env deploy verify-deploy run run-stream kill check check-unlocked check-ffmpeg lint test ipk clean tv-lock-require threadprobe sockprobe logmprobe mali-hwcnt-probe tv-capture-bench mali-irq-sample butaca-stackwalk sim sim-macos sim-linux sim-wsl sim-run sim-macos-run sim-shot sim-macos-shot sim-token sim-macos-token sim-play sim-macos-play sim-clean sim-macos-clean macapp macapp-zip fixtures fixtures-quick fixtures-pipeline fetch-profile \
+.PHONY: libass libass-host screenshots screenshots-sim demo-library disk symbols all setup-env deploy verify-deploy run run-stream kill check check-unlocked lint test ipk clean tv-lock-require threadprobe sockprobe logmprobe mali-hwcnt-probe tv-capture-bench mali-irq-sample butaca-stackwalk sim sim-linux sim-wsl fixtures fixtures-quick fixtures-pipeline fetch-profile \
 	release-guard lab-guard install uninstall $(QUERY_GOALS)

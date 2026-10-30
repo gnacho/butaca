@@ -13,10 +13,7 @@ feature. The release job is the only CI job that does, and it turns the flag on 
 block** — `RELEASE: "1"`, `release.yml` line 236 — so a grep for the literal `RELEASE=1` does not
 find the build at all: `grep -rnE 'no-default-features|RELEASE=1' .github/` returns exactly two
 hits, `release.yml` lines 252-253, and both are the ASSERTION that the flag took effect, fired
-after `make ipk` has already run. Exactly one other command in the tree drops both features —
-`make macapp` (`ci/mkmacapp.py` line 84: `--release --no-default-features --features hostsim`) —
-and it is neither routine nor the same configuration: it is run to mail somebody a Mac bundle, and
-it puts `hostsim` back on top, which swaps `player::ffi`'s whole seam.
+after `make ipk` has already run.
 
 Measured on this tree, 2026-08-23: **27** `cfg(feature = "devtriggers")` sites and **7**
 `cfg(feature = "devtools")` sites in `rust-modules/src` — every one of them a place where the
@@ -78,8 +75,8 @@ Operation not supported (os error 45)` followed by `error: could not compile but
 (build script)` — i.e. a **false RELEASE-CONFIG BREAK on a tree that compiles perfectly**, on every
 `.rs` write, reported against whatever the author had just touched. A network mount also costs the
 wall clock this hook's whole budget is measured in: the same host suite that runs in 15 s of CPU
-took 1:17 through the mount, cold. `$TMPDIR` is local by construction on macOS (a per-user
-`/var/folders/…/T`), so the lock works and the bytes are fast.
+took 1:17 through the mount, cold. `$TMPDIR` is local by construction (a per-user
+temp dir), so the lock works and the bytes are fast.
 Two consequences to know: it is **cleared on reboot**, so the first edit after a restart pays the
 cold 13 s rather than 0.55 s; and it is no longer the directory `make check` populates, so the two
 no longer warm each other (the shared-dir measurement above still holds — between this hook's own
@@ -302,7 +299,7 @@ def target_dir(env=None, tmp=None):
 
     An explicit `CARGO_TARGET_DIR` wins untouched — same rule as `RUSTFLAGS` and `RUST_NIGHTLY`,
     and the escape hatch for anyone who wants the crate's own `target/` back. Otherwise: one
-    shared directory under `$TMPDIR`, which on macOS is local, per-user, and lockable even when the
+    shared directory under `$TMPDIR`, which is local, per-user, and lockable even when the
     checkout is not (see the docstring's WHERE IT BUILDS).
     """
     env = os.environ if env is None else env

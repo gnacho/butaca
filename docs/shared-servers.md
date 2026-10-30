@@ -476,7 +476,7 @@ publish old credentials. Historical test totals below are snapshots; re-derive t
   per frame) — and the full account now lives where implementers will meet it, in
   **`rust-modules/src/plex/CLAUDE.md`**.
 - **`plex/probe.rs` — the connection policy, pure.** No socket, no thread, no clock, so all of it is
-  host-testable on Darwin. Builds and ranks candidate origins: for a non-owned unmatched local
+  host-testable. Builds and ranks candidate origins: for a non-owned unmatched local
   connection it retains only the advertised HTTPS URI and suppresses both advertised and synthesized
   plaintext; it suppresses every plain-HTTP candidate when the owner set `httpsRequired`, and ranks
   local → remote → relay. It also carries, as doc, the two rules

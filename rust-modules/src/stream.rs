@@ -971,11 +971,11 @@ unsafe fn resolve(host: &str, port: c_int) -> Option<AddrList> {
         return None;
     }
     // The port is range-checked HERE and not left to `AI_NUMERICSERV`, because the two platforms
-    // disagree and the disagreement is SILENT. Darwin rejects an out-of-range numeric service;
+    // disagree and the disagreement is SILENT. The host rejects an out-of-range numeric service;
     // glibc parses it with `strtoul`, applies no range check at all, and hands back
     // `htons(70000)` — port 4464. That is bit for bit the truncation `(port as u16).to_be()` used
     // to do, so trusting the resolver would have MOVED this bug rather than fixed it, and moved it
-    // somewhere worse: `cargo test` runs on Darwin, so the platform that silently truncates is
+    // somewhere worse: `cargo test` runs on the host, so the platform that silently truncates is
     // exactly the one no host test can see. A request that lands on a real service at the wrong
     // port reports nothing anywhere.
     if !(0..=65535).contains(&port) {
@@ -1019,7 +1019,7 @@ enum ConnectFailure {
 ///
 /// * **The fd is published into `hs` BEFORE `connect`**, which is what makes the open interruptible
 ///   at all — see [`http_open`]'s note, where the behaviour is measured on the TV's kernel with
-///   `tools/sockprobe.c` and is NOT what the Darwin host these tests run on does.
+///   `tools/sockprobe.c` and is NOT what the host these tests run on does.
 /// * **Every failed attempt is retired through [`close_owned`], never a bare `close`.** A bare
 ///   close leaves a stale fd NUMBER armed in the atomic for the next `http_shutdown` to shoot after
 ///   the kernel has recycled it into some other thread's socket, and leaves `take_fd` nothing to
@@ -1349,7 +1349,7 @@ fn http_open_with_timeouts(
         //
         // Worth publishing this early only because `shutdown(2)` aborts a handshake in progress on
         // the TV's kernel — measured with `tools/sockprobe.c`, NOT assumed. Linux is documented to
-        // fail this with ENOTCONN and the host (Darwin) does something different again, so the
+        // fail this with ENOTCONN and the host does something different again, so the
         // question could not be settled by reading or by `cargo test`. If that ever stops holding,
         // publishing after `connect_timeout` still buys the 15 s `SO_RCVTIMEO` window, which is
         // the bulk of the win.
@@ -1362,7 +1362,7 @@ fn http_open_with_timeouts(
         // an open aborts that open" true rather than nearly true. Before: `resolve` holds no
         // descriptor, so a teardown during it has nothing to shoot and would otherwise be answered
         // by connecting anyway. After: `connect_any` has a window of its own between `socket()` and
-        // the publish, and — on Darwin, per `tools/sockprobe.c` — an aborted handshake can even
+        // the publish, and — on the host, per `tools/sockprobe.c` — an aborted handshake can even
         // report SUCCESS, which no `connect` return value would catch.
         if hs.interrupted() {
             return Err(HttpOpenError::Aborted); // torn down while resolving; no descriptor existed

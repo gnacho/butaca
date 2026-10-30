@@ -56,7 +56,7 @@ Usage:
 
 Exit code is nonzero if any selected case fails.
 
-No third-party deps -- Python 3 stdlib only (macOS system python3 is fine).
+No third-party deps -- Python 3 stdlib only.
 """
 
 import argparse
@@ -3940,7 +3940,7 @@ def _run_stream_pids(run_cmd=subprocess.run):
     `make -s print-eventlog` rather than written out here — the two installs tail two different
     files, and a mark that stops matching the remote command text reaps nothing at all.
     """
-    # A process argv is an arbitrary byte sequence on POSIX. macOS `ps` normally emits UTF-8, but
+    # A process argv is an arbitrary byte sequence on POSIX. `ps` normally emits UTF-8, but
     # one unrelated local process with a legacy byte used to crash the ENTIRE TV teardown after a
     # passing scene. Decode the process table explicitly and replace only that unprintable byte;
     # the ASCII event-log marker and PID remain exact.
@@ -4935,12 +4935,12 @@ def run_pipeline_case(case, cfg, srv, url_base, verbose):
                       settled, verbose)
     if delta[0] == 0:
         # Every case that reaches the television opens at least one body. Zero means the TV never
-        # connected AT ALL, and on macOS the overwhelmingly likely reason is not the app: the
+        # connected AT ALL, and the overwhelmingly likely reason is not the app: the
         # application firewall drops connections to an ad-hoc python listener silently — no
         # refusal, no log line, the app's open just reads empty. Every assertion then fails as
         # "no line found", which is precisely what a total regression looks like. Say so once.
         print("       NOTE: the fixture server saw NO request from the TV. If this repeats for "
-              "every case, it is almost certainly the macOS application firewall — accept the "
+              "every case, it is almost certainly the application firewall — accept the "
               "'allow incoming connections' prompt for this python once, with a human present.")
     return passed, results, lines
 

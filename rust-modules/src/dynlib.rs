@@ -49,9 +49,9 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 /// because these libraries satisfy each other's imports (libavformat needs libavcodec needs
 /// libavutil) and because the ACB path wants its symbols visible to anything loaded after it.
 ///
-/// From `libc`, not hand-written: the flags are not the same numbers everywhere. `0x100` is
-/// RTLD_GLOBAL on glibc but RTLD_FIRST on Darwin — and this module's unit tests run on Darwin, so
-/// a hardcoded constant would have meant the tests exercised a different mode than the device.
+/// From `libc`, not hand-written: the flags are not the same numbers on every platform, and this
+/// module's unit tests run on the host, so a hardcoded constant would have meant the tests
+/// exercised a different mode than the device.
 const RTLD_NOW_GLOBAL: libc::c_int = RTLD_NOW | RTLD_GLOBAL;
 
 /// An opened library. Not `Drop` — nothing here is ever closed, deliberately: the media libraries
@@ -376,11 +376,7 @@ mod tests {
     /// The host's own C library, so these tests need no fixture and run wherever `cargo test`
     /// does. They grade the LOADER, not FFmpeg — the dev machine has neither libavformat nor a
     /// television, which is exactly why the loader is the part worth testing here.
-    #[cfg(target_os = "macos")]
-    static HOST_LIBC: &[&str] = &["libSystem.B.dylib"];
-    #[cfg(not(target_os = "macos"))]
     static HOST_LIBC: &[&str] = &["libc.so.6"];
-
     /// A SONAME that exists on no platform must report `NoLibrary` rather than opening something.
     /// Cheap, but it is the branch every non-TV host takes, including this test runner.
     #[test]
@@ -444,9 +440,6 @@ mod tests {
     /// mapped candidate is the one reported.
     #[test]
     fn open_loaded_finds_only_what_is_already_mapped() {
-        #[cfg(target_os = "macos")]
-        let mapped = "/usr/lib/libSystem.B.dylib";
-        #[cfg(not(target_os = "macos"))]
         let mapped = "libc.so.6";
         assert!(Handle::open_loaded(&["libbutaca-nope.so.1"]).is_none());
         let (h, name) = Handle::open_loaded(&["libbutaca-nope.so.1", mapped])
@@ -460,13 +453,6 @@ mod tests {
     /// `libthread_db.so.1`. glibc ships the rest in `libc6` itself (`libanl`/`libutil` survive
     /// 2.34's merge as compat stubs; `libBrokenLocale`, the NSS modules and `libresolv` never
     /// moved).
-    #[cfg(target_os = "macos")]
-    const UNMAPPED_CANDIDATES: &[&str] = &[
-        "/usr/lib/libpanel.5.4.dylib",
-        "/usr/lib/libform.5.4.dylib",
-        "/usr/lib/libmenu.5.4.dylib",
-    ];
-    #[cfg(not(target_os = "macos"))]
     const UNMAPPED_CANDIDATES: &[&str] = &[
         "libthread_db.so.1",
         "libBrokenLocale.so.1",

@@ -30,7 +30,7 @@
 
 /* This is a Linux-only ARM firmware diagnostic, so pull in the full glibc surface rather than
  * relying on the compiler's default dialect: O_CLOEXEC (fcntl.h) and mmap64/off64_t (sys/mman.h)
- * are GNU/LFS extensions glibc hides under strict ISO C. macOS's headers expose these
+ * are GNU/LFS extensions glibc hides under strict ISO C. A desktop's headers expose these
  * unconditionally regardless of -std=, which is why this only broke `make check` on the Linux CI
  * runner and not on the dev Mac — see tools/test_tv_capture_bench.py's `-std=c11` harness build.
  */

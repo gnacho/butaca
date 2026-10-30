@@ -313,7 +313,7 @@ Do this first: every later wave's on-device verification is worthless until the 
     *current* part id on a fresh mp4 play.
 17. **Host tests.** The "no host runtime" premise is about running the *app*; it does not apply to
     the logic. **Corrected by §8.a-A1 — the original claim here was wrong.** `cargo +nightly check`
-    on macOS produces exactly **one** error: `libc::__errno_location()` (`capture.rs:219`).
+    on the host produces exactly **one** error: `libc::__errno_location()` (`capture.rs:219`).
     `MSG_NOSIGNAL` (`capture.rs:396`) resolves fine and is *not* a blocker. The second blocker is
     the *link* step, not compilation: the four `#[link]` attrs at `ff.rs:175/220/255/270`
     (`avformat`/`avcodec`/`avutil`/`swscale`). Both are `#[cfg]`-gateable, so the real cost is ~5
@@ -425,8 +425,8 @@ Severities here are the verifiers' corrections, not the original auditors'.
 
 **A1 — `cargo test` on the host is five edits away, and §4.17 names the wrong second blocker.**
 `rust-modules/src/capture.rs:219` (`libc::__errno_location`) is the *only* compile error: I ran
-`cargo check --lib` on macOS and got exactly one, across all 21,002 lines. `MSG_NOSIGNAL`
-(`capture.rs:396`) is **not** a blocker — it resolves on darwin. The real second blocker is the
+`cargo check --lib` on the host and got exactly one, across all 21,002 lines. `MSG_NOSIGNAL`
+(`capture.rs:396`) is **not** a blocker — it resolves on the host. The real second blocker is the
 *link* step: the four `#[link(name = …)]` attributes at `ff.rs:175`, `:220`, `:255`, `:270` inject
 `-lavformat -lavcodec -lavutil -lswscale` into the test binary, which dies with `ld: library
 'avformat' not found`. They are redundant on device — `Makefile:54` already supplies all four on

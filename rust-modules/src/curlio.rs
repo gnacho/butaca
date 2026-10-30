@@ -131,14 +131,13 @@ pub(crate) type CURLM = c_void;
 // ---- the SECOND libcurl table: curl_multi_*, and nothing else --------------------------------
 //
 // Same candidate list as `net.rs`, in the same order, so a set carrying both SONAMEs binds both
-// tables against the same library. The macOS name is last for the same reason it is there: the
-// host simulator and `Butaca.app` run this code, and the host suite below drives real libcurl
-// over plain loopback HTTP.
+// tables against the same library. The host suite below drives real libcurl over plain loopback
+// HTTP.
 crate::dynlib! {
     /// The seven multi-interface symbols, frozen to webOS's oldest libcurl (7.53.1). See this
     /// module's doc before adding an eighth — `curl_multi_poll`/`curl_multi_wakeup` are absent on
-    /// the dev television and present on the Mac.
-    curlmulti: ["libcurl.so.4", "libcurl.so.5", "libcurl.4.dylib"] {
+    /// the dev television and present on the host.
+    curlmulti: ["libcurl.so.4", "libcurl.so.5"] {
     fn curl_multi_init() -> *mut CURLM;
     fn curl_multi_add_handle(multi: *mut CURLM, easy: *mut CURL) -> c_int;
     fn curl_multi_perform(multi: *mut CURLM, running: *mut c_int) -> c_int;
@@ -258,7 +257,7 @@ struct Wake {
 impl Wake {
     /// `pipe(2)` with **both ends** `O_NONBLOCK | FD_CLOEXEC`.
     ///
-    /// `pipe2(2)` would set both atomically but does not exist on Darwin, and this module's host
+    /// `pipe2(2)` would set both atomically but does not exist on the host, and this module's host
     /// suite is the gate — so `pipe` + `fcntl`, which is portable. The CLOEXEC race that `pipe2`
     /// closes needs a concurrent `fork`+`exec`, and this process never does either.
     fn new() -> Option<Wake> {

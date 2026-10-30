@@ -85,8 +85,8 @@ brew install ghidra openjdk@21
 
 - **Ghidra is a FORMULA, not a cask.** `brew install --cask ghidra` fails with *"No Cask with
   this name exists"*.
-- **The JDK is required and macOS does not have one.** Ghidra is a Java application, headless
-  analyzer included; `/usr/bin/java` on macOS is a stub that only offers to install Java, and
+- **The JDK is required and a stock desktop does not have one.** Ghidra is a Java application, headless
+  analyzer included; `/usr/bin/java` is a stub that only offers to install Java, and
   `/usr/libexec/java_home -V` reports *"Unable to locate a Java Runtime"*. Homebrew installs
   `openjdk@21` **keg-only** (deliberately not on `PATH`), which is fine — `decomp.sh` finds it
   and exports `JAVA_HOME` itself.

@@ -9,7 +9,7 @@
 # always shows the current app (tests/screenshots/scenes.json, the `home` scene's `card` output).
 #
 # Needs any headless Chromium: set CHROME, or have Google Chrome, Chromium, or a Playwright
-# browser cache installed, plus `sips` (macOS) or ImageMagick for the JPEG step. The card is a
+# browser cache installed, plus ImageMagick for the JPEG step. The card is a
 # JPEG because WhatsApp drops preview images much over 300 KB; a PNG of it is ~700 KB.
 set -euo pipefail
 
@@ -44,11 +44,8 @@ find_chrome() {
   if [ -n "${CHROME:-}" ]; then echo "$CHROME"; return; fi
   local c
   for c in \
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-    "/Applications/Chromium.app/Contents/MacOS/Chromium" \
     "$(command -v chromium 2>/dev/null || true)" \
     "$(command -v google-chrome 2>/dev/null || true)" \
-    "$HOME"/Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell \
     "$HOME"/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-*/chrome-headless-shell \
     /opt/pw-browsers/chromium*/chrome-linux/chrome; do
     if [ -n "$c" ] && [ -x "$c" ]; then echo "$c"; return; fi
