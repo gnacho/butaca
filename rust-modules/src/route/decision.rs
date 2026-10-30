@@ -5340,6 +5340,58 @@ pub(crate) fn set_up_next_window_s(seconds: i64) -> bool {
     saved
 }
 
+/// **What each series was last watched with**, held as the process copy the resolve worker reads.
+///
+/// A `Mutex<Vec<_>>` rather than a session read for the reason every preference here has a process
+/// copy: the plan runs off the main thread, and `plex::session::peek` would put the session file's
+/// I/O in its path. Restored once at boot beside the other preferences, and written by
+/// [`remember_series_tracks`], which persists first and publishes only on a durable write.
+static SERIES_TRACKS: Mutex<Vec<crate::plex::session::SeriesTracks>> = Mutex::new(Vec::new());
+
+/// What one series was last watched with. Cloned out so the plan never holds the lock while it
+/// weighs streams.
+#[cfg_attr(not(feature = "jellyfin"), allow(dead_code))] // only the Jellyfin plan reads it
+pub(crate) fn series_tracks(series: &str) -> Option<crate::plex::session::SeriesTracks> {
+    if series.is_empty() {
+        return None;
+    }
+    let table = SERIES_TRACKS.lock().unwrap_or_else(|e| e.into_inner());
+    table.iter().find(|t| t.series == series).cloned()
+}
+
+/// Restore the persisted table without writing it back, exactly as
+/// [`restore_up_next_policy`].
+pub(crate) fn restore_series_tracks(entries: &[crate::plex::session::SeriesTracks]) {
+    #[cfg(test)]
+    crate::testlock::assert_held("the series track table (restore_series_tracks)");
+    let mut table = SERIES_TRACKS.lock().unwrap_or_else(|e| e.into_inner());
+    table.clear();
+    table.extend_from_slice(entries);
+}
+
+/// Record one series' pick. Blocking persistence seam, called from the track menu's commit and
+/// never from the draw path; the process copy follows the durable write, so a failed save leaves
+/// the running table describing what is on disk.
+pub(crate) fn remember_series_tracks(entry: crate::plex::session::SeriesTracks) -> bool {
+    #[cfg(test)]
+    crate::testlock::assert_held("the series track table (remember_series_tracks)");
+    if entry.series.is_empty() {
+        return false;
+    }
+    let saved = crate::plex::session::update_with_outcome(|s| Some(s.with_series_tracks(entry.clone())))
+        .is_some_and(|write| matches!(write.classify(),
+            crate::plex::session::async_persistence::CompletionOutcome::Durable(_)));
+    if !saved {
+        return false;
+    }
+    let mut table = SERIES_TRACKS.lock().unwrap_or_else(|e| e.into_inner());
+    table.retain(|t| t.series != entry.series);
+    table.push(entry);
+    let excess = table.len().saturating_sub(crate::plex::session::SeriesTracks::CAP);
+    table.drain(..excess);
+    true
+}
+
 pub(crate) fn set_default_quality(q: Quality) -> bool {
     let q = supported_quality(q);
     let saved = crate::plex::session::update_with_outcome(|s| Some(s.with_playback_quality(q)))

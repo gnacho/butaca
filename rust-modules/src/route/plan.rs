@@ -2207,6 +2207,44 @@ pub(super) fn pick_dp_audio_pref(
     pick_dp_audio_mode(tracks, default_acodec, prefs, DirectPlayMode::Auto)
 }
 
+/// The audio track a series was last watched with, in the picker's own vocabulary.
+///
+/// The language tag outranks the index because stream ids belong to the FILE: a remux or the next
+/// season renumbers them, and only the tag survives that. The remembered track still has to
+/// direct-play, or remembering it would quietly force a transcode nobody asked for.
+#[cfg_attr(not(feature = "jellyfin"), allow(dead_code))] // only the Jellyfin plan calls it
+fn remembered_audio(
+    tracks: &[crate::metadata::Stream],
+    memory: &crate::plex::session::SeriesTracks,
+) -> Option<(i32, String, i64)> {
+    let hit = tracks
+        .iter()
+        .position(|a| !memory.audio_lang.is_empty() && lang_matches(&memory.audio_lang, &a.lang_code))
+        .or_else(|| tracks.iter().position(|a| a.id == memory.audio_index))?;
+    let track = &tracks[hit];
+    audio_direct_plays(DirectPlayMode::Auto, &track.codec, track.channels)
+        .then(|| (hit as i32, track.codec.to_lowercase(), track.id))
+}
+
+/// The subtitle track a series was last watched with. The same tag-then-index rule as
+/// [`remembered_audio`], and the same usability rule as [`pick_dp_subtitle`]: an id the menu
+/// cannot name is not a subtitle worth turning on.
+#[cfg_attr(not(feature = "jellyfin"), allow(dead_code))] // only the Jellyfin plan calls it
+fn remembered_subtitle(
+    subs: &[crate::metadata::Stream],
+    memory: &crate::plex::session::SeriesTracks,
+) -> Option<(i64, i32)> {
+    let hit = subs
+        .iter()
+        .position(|s| !s.external && !memory.sub_lang.is_empty() && lang_matches(&memory.sub_lang, &s.lang_code))
+        .or_else(|| subs.iter().position(|s| !s.external && s.id == memory.sub_index))?;
+    let ord = crate::metadata::sub_render_ordinal(subs, hit);
+    if ord < 0 || subs[hit].id <= 0 || !embedded_subtitle_renderable(&subs[hit].codec) {
+        return None;
+    }
+    Some((subs[hit].id, ord))
+}
+
 pub(super) fn audio_direct_plays(mode: DirectPlayMode, codec: &str, channels: i64) -> bool {
     if mode == DirectPlayMode::Forced {
         crate::plex::DP_AUDIO_CODECS.split(',').any(|c| c.eq_ignore_ascii_case(codec))
@@ -2660,7 +2698,17 @@ fn build_stream_jellyfin(
         .as_ref()
         .map(|p| p.audio.as_slice())
         .unwrap_or(&[]);
-    let audio_sel = pick_dp_audio_pref(tracks, acodec, AudioLangPrefs::default());
+    // What this series was last watched with, when the viewer chose from the track menu. It
+    // outranks the backend's language ladder below, and a show nobody has picked a track for
+    // plans exactly as it did before the table existed.
+    let remembered = plan
+        .playing
+        .as_ref()
+        .and_then(|p| crate::route::series_tracks(&p.show_rk));
+    let audio_sel = remembered
+        .as_ref()
+        .and_then(|m| remembered_audio(tracks, m))
+        .or_else(|| pick_dp_audio_pref(tracks, acodec, AudioLangPrefs::default()));
     // The demuxer's own container list: the DTO's container name is the same fact the Plex lane
     // reads off a part-key extension (`streamable_container` owns the one list, so the two
     // backends cannot disagree).
@@ -2715,14 +2763,24 @@ fn build_stream_jellyfin(
         // subtitle comes up on a direct play exactly as it does on Plex (which reads the server's
         // per-part selection instead — this backend has none). `apply_plan` installs it on the
         // main thread; the client renderer takes the embedded-subtitle ordinal.
-        if let Some((ssid, ord)) = plan.playing.as_ref().and_then(|p| {
-            pick_dp_subtitle_account(
-                &p.subs,
-                &crate::plex::ShowLangPrefs::default(),
-                SubtitleLangPrefs::default(),
-                "",
-            )
-        }) {
+        let sub_pick = plan.playing.as_ref().and_then(|p| {
+            let fallback = || {
+                pick_dp_subtitle_account(
+                    &p.subs,
+                    &crate::plex::ShowLangPrefs::default(),
+                    SubtitleLangPrefs::default(),
+                    "",
+                )
+            };
+            match remembered.as_ref() {
+                // Subtitles off is a choice as much as a language is: this show was watched
+                // with them off, so the file's default does not get to bring them back.
+                Some(m) if m.sub_index == 0 && m.sub_lang.is_empty() => None,
+                Some(m) => remembered_subtitle(&p.subs, m).or_else(fallback),
+                None => fallback(),
+            }
+        });
+        if let Some((ssid, ord)) = sub_pick {
             plan.sub_sid = ssid;
             plan.sub_render_ordinal = Some(ord);
         }
