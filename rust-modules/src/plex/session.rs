@@ -566,8 +566,9 @@ pub struct Session {
     /// Install-wide lip-sync offset in milliseconds, applied to the video feed to compensate
     /// Bluetooth audio latency (positive delays the picture so the audio is heard "ahead").
     /// Absence or garbage is 0 ms. The player's clamp (`route::lip_sync_offset_range_ms`) is the
-    /// one rule the value is held to.
-    #[serde(default, deserialize_with = "de_soft_i64")]
+    /// one rule the value is held to. Skipped on write while 0 so a session persisted before the
+    /// field existed round-trips byte-identical.
+    #[serde(default, deserialize_with = "de_soft_i64", skip_serializing_if = "is_zero")]
     pub(crate) lip_sync_offset_ms: i64,
     /// **Automatically Sign In** — skip the boot who's-watching picker and enter as
     /// [`Session::user`]. Install-wide, not per profile: the boot gate reads it before anyone is
@@ -659,7 +660,7 @@ struct CanonicalSessionPreferences {
     playback_quality: Option<PlaybackQuality>,
     #[serde(default, deserialize_with = "de_soft_direct_play_mode")]
     direct_play_mode: DirectPlayMode,
-    #[serde(default, deserialize_with = "de_soft_i64")]
+    #[serde(default, deserialize_with = "de_soft_i64", skip_serializing_if = "is_zero")]
     lip_sync_offset_ms: i64,
     #[serde(default, deserialize_with = "de_soft_bool")]
     auto_sign_in: bool,
@@ -1787,6 +1788,12 @@ where
         return Ok(0);
     };
     Ok(v.as_i64().unwrap_or(0))
+}
+
+/// `lip_sync_offset_ms`'s skip condition: 0 is the field's default and absence, so a session with
+/// no offset writes no field and round-trips byte-identical to one persisted before it existed.
+fn is_zero(v: &i64) -> bool {
+    *v == 0
 }
 
 /// Playback quality is a preference, not a credential gate. A value written by a newer build or
@@ -4907,6 +4914,44 @@ mod direct_play_mode_tests {
             let prefs: CanonicalSessionPreferences = serde_json::from_value(split_public(&session).unwrap().preferences).unwrap();
             assert_eq!(prefs.direct_play_mode, mode);
         }
+    }
+}
+
+/// Issue #64: `Session::lip_sync_offset_ms` - the persisted Bluetooth lip-sync preference. These
+/// tests pin the field's own contract in isolation (soft-parse, omit-when-zero, round-trip), the
+/// half that keeps a session persisted before the field existed replaying byte-identical.
+#[cfg(test)]
+mod lip_sync_tests {
+    use super::*;
+
+    #[test]
+    fn lip_sync_offset_defaults_softly_and_round_trips() {
+        // Absent and garbage both degrade to 0 ms.
+        for value in [
+            serde_json::json!({}),
+            serde_json::json!({"lip_sync_offset_ms": "future"}),
+            serde_json::json!({"lip_sync_offset_ms": null}),
+        ] {
+            let session: Session = serde_json::from_value(value).unwrap();
+            assert_eq!(session.lip_sync_offset_ms(), 0);
+        }
+        // The default (0) writes NO field, so a session persisted before the field existed
+        // round-trips byte-identical - the property the controlled replay's canonicality gate
+        // depends on.
+        let zero = Session::default();
+        let encoded = serde_json::to_value(&zero).unwrap();
+        assert!(
+            !encoded.as_object().unwrap().contains_key("lip_sync_offset_ms"),
+            "0 ms is omitted: {encoded}"
+        );
+        let round: Session = serde_json::from_value(encoded).unwrap();
+        assert_eq!(round.lip_sync_offset_ms(), 0);
+        // A non-zero offset persists and round-trips.
+        let set = Session::default().with_lip_sync_offset_ms(125);
+        let encoded = serde_json::to_value(&set).unwrap();
+        assert_eq!(encoded["lip_sync_offset_ms"], 125);
+        let round: Session = serde_json::from_value(encoded).unwrap();
+        assert_eq!(round.lip_sync_offset_ms(), 125);
     }
 }
 
