@@ -5112,6 +5112,75 @@ class DepGates(unittest.TestCase):
 
     ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
+    # Every self-test below edits the real tree, and a `finally` is not a guarantee: a SIGKILL, a
+    # CI timeout or a closed laptop skips it and leaves a source file mutated with nobody to put it
+    # back. The marker is written BEFORE the file is touched and carries what is needed to undo it,
+    # so the next run can repair the tree without a human guessing from `git diff`:
+    # `.selftest-backup` holds the bytes to write back, `.selftest-planted` marks a file the test
+    # created and must delete. Two shapes need no file of their own because the move IS the marker:
+    # a `.check-deps-selftest` suffix means a scanned file was set aside and has to come back, and a
+    # `_check_deps_cfg_*` directory is a scratch module tree to remove.
+    BACKUP_SUFFIX = ".selftest-backup"
+    PLANTED_SUFFIX = ".selftest-planted"
+    SET_ASIDE_SUFFIX = ".check-deps-selftest"
+    SCRATCH_DIR_PREFIX = "_check_deps_cfg_"
+
+    @classmethod
+    def _sweep_abandoned_self_tests(cls):
+        """Undo what a killed run left behind, before this run touches the tree.
+
+        Returns `[(path, action)]`, empty when the tree is clean. Walks only `rust-modules/src`,
+        which is where all three writers work."""
+        fixed = []
+        src = os.path.join(cls.ROOT, "rust-modules", "src")
+        for dirpath, dirnames, filenames in os.walk(src):
+            for name in list(dirnames):
+                if name.startswith(cls.SCRATCH_DIR_PREFIX):
+                    scratch = os.path.join(dirpath, name)
+                    shutil.rmtree(scratch, ignore_errors=True)
+                    dirnames.remove(name)
+                    fixed.append((scratch, "removed scratch tree"))
+            for name in filenames:
+                marker = os.path.join(dirpath, name)
+                if name.endswith(cls.BACKUP_SUFFIX):
+                    target = marker[: -len(cls.BACKUP_SUFFIX)]
+                    with open(marker, encoding="utf-8") as f:
+                        original = f.read()
+                    with open(target, "w", encoding="utf-8") as f:
+                        f.write(original)
+                    os.remove(marker)
+                    fixed.append((target, "restored"))
+                elif name.endswith(cls.PLANTED_SUFFIX):
+                    target = marker[: -len(cls.PLANTED_SUFFIX)]
+                    if os.path.exists(target):
+                        os.remove(target)
+                    os.remove(marker)
+                    fixed.append((target, "removed"))
+                elif name.endswith(cls.SET_ASIDE_SUFFIX):
+                    target = marker[: -len(cls.SET_ASIDE_SUFFIX)]
+                    if os.path.exists(target):
+                        # The file never left: the test got as far as putting it back and died
+                        # before deleting its marker. Keep the real file, drop the copy.
+                        os.remove(marker)
+                        fixed.append((target, "kept, stale marker dropped"))
+                    else:
+                        os.replace(marker, target)
+                        fixed.append((target, "put back"))
+        return fixed
+
+    @classmethod
+    def setUpClass(cls):
+        fixed = cls._sweep_abandoned_self_tests()
+        if fixed:
+            # Loud, not silent: the tree was wrong when this run started, and whoever reads this
+            # needs to know a previous run died rather than that a gate found something.
+            print(
+                "test_harness: a previous run was killed mid self-test; the tree has been repaired:",
+                file=sys.stderr,
+            )
+            for path, action in fixed:
+                print(f"  {action}: {os.path.relpath(path, cls.ROOT)}", file=sys.stderr)
+
     def test_check_deps_is_green(self):
         r = subprocess.run([os.path.join(self.ROOT, "ci", "check-deps.sh")], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -5125,6 +5194,9 @@ class DepGates(unittest.TestCase):
         catches a shape without touching a real, permanent source file."""
         target = os.path.join(self.ROOT, "rust-modules", "src", name)
         self.assertFalse(os.path.exists(target), f"stale self-test artifact at {target} — remove it by hand")
+        planted = target + self.PLANTED_SUFFIX
+        with open(planted, "w", encoding="utf-8"):
+            pass
         try:
             with open(target, "w", encoding="utf-8") as f:
                 f.write(content)
@@ -5133,6 +5205,8 @@ class DepGates(unittest.TestCase):
         finally:
             if os.path.exists(target):
                 os.remove(target)
+            if os.path.exists(planted):
+                os.remove(planted)
 
     def _mutate(self, relpath, needle, replacement):
         """Temporarily replace ONE occurrence of `needle` with `replacement` in a REAL tracked
@@ -5146,6 +5220,9 @@ class DepGates(unittest.TestCase):
         with open(target, encoding="utf-8") as f:
             original = f.read()
         self.assertEqual(original.count(needle), 1, f"{needle!r} not found exactly once in {relpath}")
+        backup = target + self.BACKUP_SUFFIX
+        with open(backup, "w", encoding="utf-8") as f:
+            f.write(original)
         try:
             with open(target, "w", encoding="utf-8") as f:
                 f.write(original.replace(needle, replacement, 1))
@@ -5154,12 +5231,17 @@ class DepGates(unittest.TestCase):
         finally:
             with open(target, "w", encoding="utf-8") as f:
                 f.write(original)
+            if os.path.exists(backup):
+                os.remove(backup)
 
     def _prepend(self, relpath, content):
         """Temporarily prepend a valid module-level fixture to a scanned Rust file."""
         target = os.path.join(self.ROOT, "rust-modules", "src", relpath)
         with open(target, encoding="utf-8") as f:
             original = f.read()
+        backup = target + self.BACKUP_SUFFIX
+        with open(backup, "w", encoding="utf-8") as f:
+            f.write(original)
         try:
             with open(target, "w", encoding="utf-8") as f:
                 f.write(content + original)
@@ -5168,6 +5250,83 @@ class DepGates(unittest.TestCase):
         finally:
             with open(target, "w", encoding="utf-8") as f:
                 f.write(original)
+            if os.path.exists(backup):
+                os.remove(backup)
+
+    def test_a_killed_plant_is_removed_by_the_next_run(self):
+        """A killed run skips `finally`, so the marker is the only record of what to undo. The
+        sweep has to delete the file it created and the marker with it."""
+        target = os.path.join(self.ROOT, "rust-modules", "src", "selftest_kill_probe.rs")
+        planted = target + self.PLANTED_SUFFIX
+        self.assertFalse(os.path.exists(target), f"stale probe at {target}")
+        try:
+            with open(target, "w", encoding="utf-8") as f:
+                f.write("pub(crate) fn leftover() {}\n")
+            with open(planted, "w", encoding="utf-8"):
+                pass
+            fixed = self._sweep_abandoned_self_tests()
+            self.assertIn((target, "removed"), fixed)
+            self.assertFalse(os.path.exists(target), "the sweep must delete the planted file")
+            self.assertFalse(os.path.exists(planted), "and the marker that pointed at it")
+        finally:
+            for path in (target, planted):
+                if os.path.exists(path):
+                    os.remove(path)
+
+    def test_a_killed_mutation_is_put_back_from_its_marker(self):
+        """The same for a scratch edit of a real file: the marker carries the bytes to restore, so
+        the next run repairs the file instead of leaving the mutation for a reviewer to find."""
+        target = os.path.join(self.ROOT, "rust-modules", "src", "selftest_restore_probe.rs")
+        backup = target + self.BACKUP_SUFFIX
+        self.assertFalse(os.path.exists(target), f"stale probe at {target}")
+        try:
+            with open(target, "w", encoding="utf-8") as f:
+                f.write("pub(crate) fn mutated() {}\n")
+            with open(backup, "w", encoding="utf-8") as f:
+                f.write("pub(crate) fn original() {}\n")
+            fixed = self._sweep_abandoned_self_tests()
+            self.assertIn((target, "restored"), fixed)
+            with open(target, encoding="utf-8") as f:
+                self.assertEqual(f.read(), "pub(crate) fn original() {}\n")
+            self.assertFalse(os.path.exists(backup), "the marker is consumed by the repair")
+        finally:
+            for path in (target, backup):
+                if os.path.exists(path):
+                    os.remove(path)
+
+    def test_a_killed_rename_is_put_back_by_the_next_run(self):
+        """The set-aside shape: the marker the test used as a scratch name is the whole record, so
+        a file that never came back is restored by moving it home again."""
+        target = os.path.join(self.ROOT, "rust-modules", "src", "selftest_rename_probe.rs")
+        aside = target + self.SET_ASIDE_SUFFIX
+        self.assertFalse(os.path.exists(target), f"stale probe at {target}")
+        try:
+            with open(target, "w", encoding="utf-8") as f:
+                f.write("pub(crate) fn scanned() {}\n")
+            os.replace(target, aside)
+            fixed = self._sweep_abandoned_self_tests()
+            self.assertIn((target, "put back"), fixed)
+            self.assertTrue(os.path.exists(target), "the scanned file has to be back in place")
+            self.assertFalse(os.path.exists(aside), "and the scratch name gone")
+        finally:
+            for path in (target, aside):
+                if os.path.exists(path):
+                    os.remove(path)
+
+    def test_a_killed_run_leaves_a_scratch_module_tree_that_is_removed(self):
+        """`_module_path_fixture` builds its tree inside `rust-modules/src` so the gate sees it.
+        TemporaryDirectory deletes it on the way out, which a kill never reaches."""
+        scratch = os.path.join(self.ROOT, "rust-modules", "src", self.SCRATCH_DIR_PREFIX + "probe")
+        self.assertFalse(os.path.exists(scratch), f"stale scratch tree at {scratch}")
+        try:
+            os.makedirs(scratch)
+            with open(os.path.join(scratch, "entry.rs"), "w", encoding="utf-8") as f:
+                f.write("mod checks;\n")
+            fixed = self._sweep_abandoned_self_tests()
+            self.assertIn((scratch, "removed scratch tree"), fixed)
+            self.assertFalse(os.path.exists(scratch), "the scratch tree must be gone")
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
 
     def test_browse_owner_gate_rejects_a_republished_free_mutator(self):
         """A valid module-level declaration is rejected even without a call site."""
