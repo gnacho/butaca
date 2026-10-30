@@ -1607,7 +1607,7 @@ mod tests {
         impl TempCanonicalRoot {
             fn new(tag: &str) -> TempCanonicalRoot {
                 let dir = std::env::temp_dir().join(format!(
-                    "plxnative-adapter-canonical-{}-{tag}", std::process::id()));
+                    "butaca-adapter-canonical-{}-{tag}", std::process::id()));
                 let _ = std::fs::remove_dir_all(&dir);
                 crate::paths::redirect_persistent_state_root_for_test(Some(dir.clone()));
                 TempCanonicalRoot { dir }
@@ -1793,7 +1793,7 @@ mod tests {
         impl TempCanonicalRoot {
             fn new(tag: &str) -> TempCanonicalRoot {
                 let dir = std::env::temp_dir().join(format!(
-                    "plxnative-adapter-canonical-{}-{tag}", std::process::id()));
+                    "butaca-adapter-canonical-{}-{tag}", std::process::id()));
                 let _ = std::fs::remove_dir_all(&dir);
                 crate::paths::redirect_persistent_state_root_for_test(Some(dir.clone()));
                 TempCanonicalRoot { dir }
@@ -1843,7 +1843,7 @@ mod tests {
         // Plant the v1 SecureEnvelope this host's key service cannot open — the exact shape
         // `plex/session.rs`'s `SecureEnvelope`/`keymanager::Sealed` serialize as (constructed here
         // as raw JSON since both types are private to `plex::session`/`keymanager`).
-        let envelope = br#"{"format":"plxnative-secure-session","version":1,"sealed":{"backend":"keymanager3","key":"plxnative.session.v1","iv":"AAAAAAAAAAAAAAAAAAAAAA==","data":"c2VjcmV0"}}"#;
+        let envelope = br#"{"format":"butaca-secure-session","version":1,"sealed":{"backend":"keymanager3","key":"butaca.session.v1","iv":"AAAAAAAAAAAAAAAAAAAAAA==","data":"c2VjcmV0"}}"#;
         std::fs::write(&fallback_path, envelope).expect("plant the unopenable legacy envelope");
 
         // Launch 1: the legacy read is Locked (unopenable) and the canonical authority is Missing

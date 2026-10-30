@@ -2,7 +2,7 @@
 
 Headless regression tests for the native webOS Plex player. Nothing on the host decodes a frame or
 talks to Starfish/ACB, so every test here drives the **real app on the real TV** via the
-`plxnative-*` dev triggers and asserts on the on-device event log (`plxnative-events.log`) — both
+`butaca-*` dev triggers and asserts on the on-device event log (`butaca-events.log`) — both
 of them inside that install's **runtime root**, which is `/tmp` for the stable install and
 `/tmp/<app id>` for a flavoured one. See *Which install it drives*, below: it decides every path
 on this page, and the default is the **debug** build.
@@ -54,12 +54,12 @@ so that a recording of the UI can be COMMITTED to this public repository:
   — and `scrub.rs` cannot recognise a title anyway. `--selftest` proves the shapes and the
   determinism (two servers, one seed, byte-identical answers) with no app. Boot the simulator
   against it with `make sim-shot SIM_PMS=127.0.0.1 SIM_PORT=32499` and any non-empty
-  `$SIM_DIR/plxnative-token`.
+  `$SIM_DIR/butaca-token`.
 - **`tests/focusfp.sh`** drives eleven focus flows (boot → grid, grid → detail → BACK, the
   Library, Search with a seeded query, detail ↔ person, the Settings family, first-run consent,
   press-and-hold, the player read-out, pointer clicks; flow 10 — root BACK — is a television flow
   and is SKIPPED here) on the simulator against that server, and writes one `.fp` file per flow:
-  every `focus …` fingerprint (`crate::focusprobe`, `plxnative-focus`) and every heartbeat route
+  every `focus …` fingerprint (`crate::focusprobe`, `butaca-focus`) and every heartbeat route
   transition. In phase 0 it is a live-sim SMOKE (the app must survive and fingerprint); from
   phase 2 the flows replay from a committed recording, and from 3b `--resolve` grades the focus
   engine against these lines pointwise.
@@ -129,8 +129,8 @@ it makes a mis-set item a named setup error instead of a mystery failure.
 
 ## Which install it drives (`--flavor`)
 
-Three builds can sit on one television: **`com.beb.plxnative`**, the app users install,
-**`com.beb.plxnative.debug`**, the developer build beside it, and **`com.beb.plxnative.nightly`**,
+Three builds can sit on one television: **`com.butaca`**, the app users install,
+**`com.butaca.debug`**, the developer build beside it, and **`com.butaca.nightly`**,
 the nightly build — each with its own launcher tile, its own sign-in, its own runtime files. They
 are separate apps to SAM, and a run has to drive exactly one of them end to end.
 
@@ -143,7 +143,7 @@ resolved and the flavour it kills, launches, arms triggers in and greps for cann
 closing install A while launching install B reproduces SAM's stale-"running" no-op and then grades
 the other app's log, which is *plausible wrong data*, not a clean failure.
 
-- **The runtime root moved; the names did not.** Every `plxnative-*` trigger, the `plxnative-remote`
+- **The runtime root moved; the names did not.** Every `butaca-*` trigger, the `butaca-remote`
   FIFO and the three `*.log` files are named exactly as before — only the directory they sit in
   changed. Ask for it (`make -s print-rundir FLAVOR=debug`) rather than writing it out.
 - **The root is created `1777` — `mkdir` then an explicit `chmod`** (umask masks `mkdir`'s mode),
@@ -159,13 +159,13 @@ the other app's log, which is *plausible wrong data*, not a clean failure.
 The app's **first** log line names the install that wrote it, before anything can fail:
 
 ```
-install: id=com.beb.plxnative.debug flavour=debug runtime=/tmp/com.beb.plxnative.debug features=dev APPID_env=<value|unset>
-appdir: /media/developer/apps/usr/palm/applications/com.beb.plxnative.debug (from current_exe)
+install: id=com.butaca.debug flavour=debug runtime=/tmp/com.butaca.debug features=dev APPID_env=<value|unset>
+appdir: /media/developer/apps/usr/palm/applications/com.butaca.debug (from current_exe)
 ```
 
 `run.py` grades it as the log arrives and **aborts the whole run**, once and by name, if `id=` is
 not the app id it drove or `features=` is not `dev` (`check_install`). Nothing else can answer that
-question: both binaries are named `plxnative`, and `pkg/plxnative` is a path every flavour *and*
+question: both binaries are named `butaca`, and `pkg/butaca` is a path every flavour *and*
 every configuration writes, so an md5 against the local build proves only that *some* build
 matches. An absent boot line is refused too — it means a deployed binary that predates the line,
 and an unattributable log.
@@ -182,15 +182,15 @@ dev build on the stable id without `ALLOW_DEV_ON_STABLE=1`, so that install *is*
 
 | | scope | matches |
 |---|---|---|
-| `fuser <appdir>/plxnative` | **inode** | exactly the install at that path |
+| `fuser <appdir>/butaca` | **inode** | exactly the install at that path |
 | `luna-send … closeByAppId {"id":…}` | **app id** | exactly that install |
-| `pidof plxnative` | **name** | **both installs** — both binaries are called `plxnative` |
+| `pidof butaca` | **name** | **both installs** — both binaries are called `butaca` |
 
 `make kill` uses the first two and carries `FLAVOR=`, which is what leaves the *other* install
-alone — including its running app. **`pidof plxnative` is no longer a liveness test**: it returns
-two pids, in an order busybox does not promise. Use `fuser <appdir>/plxnative`, or resolve
+alone — including its running app. **`pidof butaca` is no longer a liveness test**: it returns
+two pids, in an order busybox does not promise. Use `fuser <appdir>/butaca`, or resolve
 `readlink /proc/<pid>/exe` per pid. And any match on the app id must be **anchored on a delimiter**:
-`com.beb.plxnative` is a prefix of `com.beb.plxnative.debug`.
+`com.butaca` is a prefix of `com.butaca.debug`.
 
 ## Security
 
@@ -202,7 +202,7 @@ credentials are already in the committed `Makefile`, so the runner shells out to
 
 Every other token the harness uses is **derived from that one at run time and stored nowhere**: the
 managed user's per-server token (below), and a second server's access token (further below). Both
-are written to a `plxnative-*` file in the TV's runtime root and cleared by the same glob wipe —
+are written to a `butaca-*` file in the TV's runtime root and cleared by the same glob wipe —
 before every case, and again by `teardown()` on *every* exit path, including Ctrl-C and a crash.
 
 ## Test identity — runs as a managed user (no watch-history pollution)
@@ -215,21 +215,21 @@ account stays clean. It works without storing any new secret:
   access token** from `GET https://plex.tv/api/servers/<machineId>/shared_servers` (keyed by
   `userID` — which is what `test_user.id` is). The managed user must already have the libraries
   shared with it.
-- That token is used for the `/:/progress` resume seed **and** written to `plxnative-token` in the
+- That token is used for the `/:/progress` resume seed **and** written to `butaca-token` in the
   TV's runtime root. The binary carries **no** token, so this file is the only way an automated run
   gets PMS access at all (see `plex_run`); the **app itself** then plays and scrobbles as the
   managed user, not just the seed. The token value is never printed (redacted to
-  `<…, redacted>`), and `plxnative-token` is cleared between cases like every other trigger.
+  `<…, redacted>`), and `butaca-token` is cleared between cases like every other trigger.
 - Pass **`--owner`** to run as the `config.local.h` owner token instead (history *will* be
   affected). If the overlay has no `test_user`, the runner falls back to owner with a warning.
 
 ## A second server (a friend's shared one)
 
-`plxnative-token` carries exactly **one** token, and a shared server is a **separate
+`butaca-token` carries exactly **one** token, and a shared server is a **separate
 authority**: its own `machineIdentifier`, its own per-(user,server) access token, and a 401 for
 anybody else's. So a screen that shows two sources at once could only ever be checked by hand, one
-capture at a time. `plxnative-servers` is the second credential channel — **purely additive**:
-the primary server is still `plxnative-token` against the compiled-in host, unchanged, and a run
+capture at a time. `butaca-servers` is the second credential channel — **purely additive**:
+the primary server is still `butaca-token` against the compiled-in host, unchanged, and a run
 that names one server behaves exactly as it always did.
 
 **Configure it once**, in the gitignored `manifest.local.json` (the block is optional — delete it if
@@ -265,9 +265,9 @@ server is needed, never *which*):
 ```
 
 - With `shared_server` configured, the runner resolves it **before touching the TV** and writes
-  `plxnative-servers` for those cases only — a JSON array of
-  `{name, machine_id, host, port, token}` — beside `plxnative-token`. Value never on stdout; the
-  printed line is `plxnative-servers: <nas-home @ 10.0.0.9:32400, token redacted>`.
+  `butaca-servers` for those cases only — a JSON array of
+  `{name, machine_id, host, port, token}` — beside `butaca-token`. Value never on stdout; the
+  printed line is `butaca-servers: <nas-home @ 10.0.0.9:32400, token redacted>`.
 - Without it, those cases are **SKIPPED**, with the reason, and appear as `[SKIP]` in the summary —
   an installation with no friend's server is a normal installation. Anything unresolvable *is* a
   loud exit that names it (server no longer shared, no `accessToken`, no address).
@@ -285,8 +285,8 @@ servers: 1 extra server(s) injected, 1 usable
 
 — never a token (`DevServer` has no `Debug`, and `describe()` prints everything but). That pair of
 lines is the headless proof the credentials arrived, and is what a shared-server case can assert on
-before any of its screen exists. `plxnative-servers` is deliberately **not** on `dev.rs`'s `DIAG`
-exemption list: it names a host *and* the token to trust it with, so like `plxnative-token` it marks
+before any of its screen exists. `butaca-servers` is deliberately **not** on `dev.rs`'s `DIAG`
+exemption list: it names a host *and* the token to trust it with, so like `butaca-token` it marks
 the boot automated and skips the who's-watching picker — a run that landed on the picker would grade
 the wrong screen.
 
@@ -406,7 +406,7 @@ A separate mode that guards **UI framerate**, not playback correctness. The app 
 `loop=<n> route=<login|profiles|library|detail|person|search|player|home>
 [overlay=<the topmost surface's own screen name, or `none` on a bare player>]
 fps=<n>` heartbeat; each
-*scene* in the manifest's `fps_scenes` sets its `plxnative-*` triggers (profiler **off**), runs, and
+*scene* in the manifest's `fps_scenes` sets its `butaca-*` triggers (profiler **off**), runs, and
 asserts its gates. This is the automated form of the by-hand FPS hunting that found the hero /
 cast+about / info-panel regressions.
 
@@ -524,7 +524,7 @@ marks pacing invalid if a render-profiler trigger is armed.
     only to separate a frozen animator (~0.5/s, `ui::idle`'s keepalive) from a running one. Raise it
     to a real median the first time it runs green on a television — the scene's own
     `_fps_floor_note` says so, and the neighbours all quote a date.
-  - **`plxnative-search`'s value is a literal query, not a symbolic key.** `run.py` resolves `item`
+  - **`butaca-search`'s value is a literal query, not a symbolic key.** `run.py` resolves `item`
     keys against your overlay; it has no notion of a query, so the manifest carries the text. If
     your library matches nothing for it there are no shelves, and `search-type` degrades to grading
     the tab strip. Change the literal, never the floor.
@@ -539,23 +539,23 @@ marks pacing invalid if a render-profiler trigger is armed.
 1. `make kill` — close the app (luna-send `closeByAppId` + `fuser -k`) **first**.
 2. If the case sets `viewOffset_ms`: `PUT /:/progress` to seed the resume point — done
    **after** the close so the app's `timeline_thread` can't re-scrobble over it.
-3. Create the runtime root (`mkdir` + `chmod 1777`), clear every `plxnative-*` trigger in it,
+3. Create the runtime root (`mkdir` + `chmod 1777`), clear every `butaca-*` trigger in it,
    then write only the ones this case needs.
 4. `make run TV=<tv> RUN_SECS=<n> FLAVOR=<f>` — relaunch, wait, and cat that install's
-   `plxnative-events.log` back.
+   `butaca-events.log` back.
 5. Filter the `smp_cb type=43 num=0 str=` flood and evaluate the assertions.
 
-## The `plxnative-play=<rk>` trigger (added for this harness)
+## The `butaca-play=<rk>` trigger (added for this harness)
 
-Tests use `plxnative-play=<ratingKey>` instead of the fragile `plxnative-detail`. `plxnative-detail`
+Tests use `butaca-play=<ratingKey>` instead of the fragile `butaca-detail`. `butaca-detail`
 only *plays* if the rk is in the home catalog (Continue Watching / hubs); off-catalog it loads
-data-only and never plays. `plxnative-play` fetches the item's metadata fresh (`metadata::load_detail`,
+data-only and never plays. `butaca-play` fetches the item's metadata fresh (`metadata::load_detail`,
 works for **any** rk) and drives the same field-based play path the detail Play button uses
 (`route::play_episode` — generic over movie/episode — + `player::resume_at` + `start_bufferfeed`),
 bypassing the catalog lookup entirely. It honors the server `viewOffset` for resume and logs
-`plxnative-play: rk=<rk> server=<slot> start` so the harness can confirm both halves of the item
-identity that fired. A bare `plxnative-play` keeps the historical current-server behaviour;
-`plxnative-server=<slot>` makes a by-hand/direct-screen run target a registered secondary PMS and
+`butaca-play: rk=<rk> server=<slot> start` so the harness can confirm both halves of the item
+identity that fired. A bare `butaca-play` keeps the historical current-server behaviour;
+`butaca-server=<slot>` makes a by-hand/direct-screen run target a registered secondary PMS and
 fails closed when that slot does not exist. `tools/tv-session.sh up --screen player=<rk> --server
 <slot>` writes the pair without navigating the UI, boots from the signed-in stored roster (rather
 than the singular injected-token server), and exits nonzero unless the log confirms the exact
@@ -684,11 +684,11 @@ Append an entry to `manifest.json` → `cases`:
 }
 ```
 
-`run.py` derives the triggers from `operations` (`play`→`plxnative-play`, `seek`→`plxnative-autoseek`
+`run.py` derives the triggers from `operations` (`play`→`butaca-play`, `seek`→`butaca-autoseek`
 — for `"mode":"rapid"` the op's `script` becomes the trigger content: optional `gap=<ms>` +
 comma-separated steps, absolute `120` or tap-relative `+10`/`-10`, fired one per gap;
-`pause_resume`→one `plxnative-autopause=delay=<ms>,hold=<ms>` script;
-`audio_switch`/`subtitle`→`plxnative-menupick`) and picks the
+`pause_resume`→one `butaca-autopause=delay=<ms>,hold=<ms>` script;
+`audio_switch`/`subtitle`→`butaca-menupick`) and picks the
 per-op assertions from the `op`/`mode`. Track-menu row semantics: **audio tab** row = the
 metadata audio index (0-based, file order); **subtitles tab** row 0 = *Off*, row *r* = subtitle
 index *r−1*.
@@ -713,7 +713,7 @@ sharing. The TV address comes from the overlay's `tv` if you have one, else from
 `.tv-host`, else `--tv`. That is the whole configuration.
 
 **How it works.** `run.py` starts `serve_fixtures.py` on this machine, then arms
-`/tmp/plxnative-playurl` per case — one JSON object carrying the clip's URL **and the Load payload
+`/tmp/butaca-playurl` per case — one JSON object carrying the clip's URL **and the Load payload
 declaration to play it with**:
 
 ```json
@@ -728,13 +728,13 @@ byte for byte; only the *choosing* is bypassed.
 **Why the declaration is carried separately, and why it is the interesting half.** The Starfish
 `Load` payload takes its codecs from `route::stream_vcodec`/`stream_acodec` and its Dolby nodes from
 `stream_dovi`/`stream_immersive` — five fields normally installed together by `route::apply_plan`
-from a PMS decision and replaced together by later route transitions. The older `plxnative-url`
+from a PMS decision and replaced together by later route transitions. The older `butaca-url`
 trigger hands over a URL and nothing else, so a URL-fed 4K HEVC file was declared to the television
 as whatever the route happened to hold. An absent or unsupported audio declaration now fails
 before Load instead of silently declaring AC3.
 The declaration is precisely what governs HEVC-vs-H264 payload selection, LG's `"AC3 PLUS"`
 renaming of E-AC-3, and both Dolby nodes — so a tier that cannot set it cannot test any of them.
-`plxnative-playurl` sets all five in one write (`route::set_stream_declaration`).
+`butaca-playurl` sets all five in one write (`route::set_stream_declaration`).
 
 The matrix carries codec-specific `load_audio` expectations, including `"AC3 PLUS"`, `"AAC"` and
 `"DTS"`. Together with the `load_decl` assertion, these prove that each fixture supplies its
@@ -860,8 +860,8 @@ harness's own close included.
 
 **And the second half — starting the same content *again* — is `pipe_replay_after_eos`**, which
 plays the same clip, lets it end, and restarts it. That needed an app change and got the smallest
-one that works: `/tmp/plxnative-replay[=N]` re-arms `app.rs`'s one-shot `auto_tried` latch N times
-when a `plxnative-playurl` playback reaches EOS, so the next frame goes back through the entry it
+one that works: `/tmp/butaca-replay[=N]` re-arms `app.rs`'s one-shot `auto_tried` latch N times
+when a `butaca-playurl` playback reaches EOS, so the next frame goes back through the entry it
 booted through. `teardown` clears the URL and the `ended` flag on a real stop, and
 `engine::start_bufferfeed` re-reads `dev::playurl()` whenever `route::url()` is empty. One more
 piece was NOT in place until 2026-09-02: the fixture entry asks the route reducer for a start
@@ -918,7 +918,7 @@ clips, served from the host, fed by boot trigger — and a gap becomes a case by
 `make_fixtures.py` and an entry to `pipeline_cases`. Two corrections to how this paragraph used to
 read, both of which would send you down a dead end: the server is **`tests/serve_fixtures.py`**, not
 `python3 -m http.server`, which has no `Range` support and silently corrupts every seek; and the
-trigger is **`plxnative-playurl`**, not `plxnative-url`, because the latter carries no declaration
+trigger is **`butaca-playurl`**, not `butaca-url`, because the latter carries no declaration
 and several of these gaps (HLG, HDR10+, 8-bit HEVC) are *about* what the payload declares. Still
 secondary to the real item shapes, and still to be labelled synthetic:
 
@@ -955,7 +955,7 @@ secondary to the real item shapes, and still to be labelled synthetic:
   human in front of the television is whether the panel engages Dolby Vision at all on the P8 file
   that does direct-play.
   **And since 2026-08-21 the P5 half of that refusal is CONDITIONAL, so read the paragraph above as
-  the behaviour with `plxnative-dv` absent — which is what this suite runs and what a
+  the behaviour with `butaca-dv` absent — which is what this suite runs and what a
   `RELEASE=1` build compiles in.** Arming that trigger makes the Load payload declare the stream
   (`contents.DolbyHdrInfo`, the node LG's own pipeline has parsed all along), and a declared
   single-layer Profile 5 direct-plays *correctly* — so with it armed the P5 item's expectation is a

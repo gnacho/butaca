@@ -88,7 +88,7 @@ pub(crate) use client::JsonDeadlineOutcome;
 pub use client::{Client, IpVersion, StreamUrl};
 // WHERE a server is, as one value. `Origin` is what `register_origin`/`install` take and what a
 // `Client` carries; `Scheme` is re-exported beside it because `dev::DevServer` deserializes one
-// straight out of the `plxnative-servers` trigger.
+// straight out of the `butaca-servers` trigger.
 #[allow(unused_imports)]
 pub use origin::{plex_direct_literal, url_host, CredentialPolicy, Origin, ResolvePin, Scheme};
 // The registry surface. `client`/`client_opt`/`install` keep the exact signatures they had as

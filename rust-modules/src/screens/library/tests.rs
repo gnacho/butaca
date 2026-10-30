@@ -704,7 +704,7 @@ fn discovery_failure_retry_targets_the_source_without_a_section() {
 }
 
 /// **A failed source whose server discovery offers "Connect without encryption?" for asks it**
-/// (PLX-NATIVE-10, code review 3) — the SAME question Home and the sign-in ask
+/// (BUTACA-10, code review 3) — the SAME question Home and the sign-in ask
 /// (`screens::plaintext_question`): the reason says why, *Connect* replaces *Try again* and opens
 /// the question seated on *Not now*, and its *Connect* sends one answer, re-finding this source's
 /// slot. Another server's offer does not change this source's read-out.

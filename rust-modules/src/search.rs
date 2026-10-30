@@ -1020,7 +1020,7 @@ fn pump_with_optional_directory(
     // it is a scan of at most NSRC statuses, and making it conditional on a landing left the one
     // case that can never produce one — an EMPTY roster — parked on `Searching` forever, which is
     // precisely the endless spinner `state_from`'s empty arm exists to prevent. Reachable in
-    // practice: `/tmp/plxnative-search=<q>` forces the route whether or not a server was installed.
+    // practice: `/tmp/butaca-search=<q>` forces the route whether or not a server was installed.
     if landed {
         rebuild(state);
     }

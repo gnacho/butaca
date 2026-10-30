@@ -57,10 +57,10 @@
 //!
 //! # Arming it
 //!
-//! `touch /tmp/plxnative-focus` on the television (or in `PLXNATIVE_RUNTIME_DIR` under the
-//! simulator), then read `focus ` lines out of `/tmp/plxnative-events.log`. The trigger is listed
+//! `touch /tmp/butaca-focus` on the television (or in `BUTACA_RUNTIME_DIR` under the
+//! simulator), then read `focus ` lines out of `/tmp/butaca-events.log`. The trigger is listed
 //! in [`crate::dev`]'s `DIAG` set, so arming the observer does not also change which screen the app
-//! boots to — the same reasoning `plxnative-noidle` carries, and it matters more here: a harness
+//! boots to — the same reasoning `butaca-noidle` carries, and it matters more here: a harness
 //! that wants to characterize the who's-watching picker must not lose the picker by watching it.
 //! `RELEASE=1` drops the `devtriggers` feature, `dev::flag` becomes `false`, and this whole surface
 //! goes quiet.
@@ -172,9 +172,9 @@ pub(crate) struct Hud {
 }
 
 crate::dev::latched_flag!(
-    /// Is the probe armed for this boot? Resolved once, from `/tmp/plxnative-focus`.
+    /// Is the probe armed for this boot? Resolved once, from `/tmp/butaca-focus`.
     ///
-    /// Resolved once rather than per frame for two reasons: `tests/run.py` clears `/tmp/plxnative-*`
+    /// Resolved once rather than per frame for two reasons: `tests/run.py` clears `/tmp/butaca-*`
     /// between cases, so a later read could legitimately find the file gone mid-run; and a per-frame
     /// `exists()` is a syscall this is not worth paying. Call sites may check this before building
     /// arguments — [`sample`] checks it again, so the module is correct on its own.

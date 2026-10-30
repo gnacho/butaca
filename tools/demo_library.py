@@ -17,7 +17,7 @@ Two committed manifests drive it:
   shelves) and, per item, which asset each image is derived from and how (`mode`, `anchor`, `crop`).
 
 Nothing is committed but the manifests: the sources and the derived images live in a cache outside
-the repository (`$PLXNATIVE_DEMO_CACHE`, default `~/.cache/plxnative-demo`, ~390 MB of sources,
+the repository (`$BUTACA_DEMO_CACHE`, default `~/.cache/butaca-demo`, ~390 MB of sources,
 283 MB of it the complete Sintel the player figure plays), so a fresh clone rebuilds them with one
 command. Derivation is ffmpeg with fixed filters and fixed
 encoder settings, so one ffmpeg build derives byte-identical files every time. The clear logos
@@ -44,7 +44,7 @@ ASSETS = ROOT / "tests" / "demo_library" / "assets.json"
 CATALOG = ROOT / "tests" / "demo_library" / "catalog.json"
 CREDITS = ROOT / "docs" / "screenshots" / "CREDITS.md"
 SITE_CREDITS = ROOT / "site" / "credits.html"
-UA = "PlxNativeDemoLibrary/1.0 (+https://github.com/GLinnik21/plex-native-poc)"
+UA = "ButacaDemoLibrary/1.0 (+https://github.com/GLinnik21/plex-native-poc)"
 
 POSTER = (600, 900)
 ART = (1920, 1080)
@@ -52,8 +52,8 @@ THUMB = (1280, 720)
 
 
 def cache_dir():
-    env = os.environ.get("PLXNATIVE_DEMO_CACHE")
-    return pathlib.Path(env) if env else pathlib.Path.home() / ".cache" / "plxnative-demo"
+    env = os.environ.get("BUTACA_DEMO_CACHE")
+    return pathlib.Path(env) if env else pathlib.Path.home() / ".cache" / "butaca-demo"
 
 
 def load():
@@ -549,7 +549,7 @@ def site_credits(assets, catalog, dst=SITE_CREDITS):
 
     used = [name for name in LICENCE_TEXTS if any(a["licence"] == name for a in assets.values())]
     licences = ", ".join(f'<a href="{esc(LICENCE_TEXTS[n])}" rel="license">{esc(n)}</a>' for n in used)
-    repo = "https://github.com/GLinnik21/plx-native/blob/main/"
+    repo = "https://github.com/gnacho/butaca/blob/main/"
     sections = "\n".join(section("film", "Films") + section("series", "Series"))
     page = f"""<!doctype html>
 <!-- Written by `python3 tools/demo_library.py site-credits` (make screenshots) from
@@ -558,29 +558,29 @@ def site_credits(assets, catalog, dst=SITE_CREDITS):
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="Credits and licences for the openly licensed artwork in the PlxNative screenshots." />
-    <title>Artwork credits — PlxNative</title>
-    <link rel="canonical" href="https://plxnative.com/credits.html" />
+    <meta name="description" content="Credits and licences for the openly licensed artwork in the Butaca screenshots." />
+    <title>Artwork credits — Butaca</title>
+    <link rel="canonical" href="https://gnacho.github.io/butaca/credits.html" />
     <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png" />
     <meta name="theme-color" content="#202022" />
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="PlxNative" />
-    <meta property="og:url" content="https://plxnative.com/credits.html" />
-    <meta property="og:title" content="Artwork credits — PlxNative" />
-    <meta property="og:description" content="Credits and licences for the openly licensed artwork in the PlxNative screenshots." />
-    <meta property="og:image" content="https://plxnative.com/media/og-card.jpg" />
+    <meta property="og:site_name" content="Butaca" />
+    <meta property="og:url" content="https://gnacho.github.io/butaca/credits.html" />
+    <meta property="og:title" content="Artwork credits — Butaca" />
+    <meta property="og:description" content="Credits and licences for the openly licensed artwork in the Butaca screenshots." />
+    <meta property="og:image" content="https://gnacho.github.io/butaca/media/og-card.jpg" />
     <meta property="og:image:type" content="image/jpeg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="PlxNative home screen on an LG TV, next to the headline: Plex that feels fast on LG TVs." />
+    <meta property="og:image:alt" content="Butaca home screen on an LG TV, next to the headline: Plex that feels fast on LG TVs." />
     <meta property="og:locale" content="en_US" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Artwork credits — PlxNative" />
-    <meta name="twitter:description" content="Credits and licences for the openly licensed artwork in the PlxNative screenshots." />
-    <meta name="twitter:image" content="https://plxnative.com/media/og-card.jpg" />
-    <meta name="twitter:image:alt" content="PlxNative home screen on an LG TV, next to the headline: Plex that feels fast on LG TVs." />
+    <meta name="twitter:title" content="Artwork credits — Butaca" />
+    <meta name="twitter:description" content="Credits and licences for the openly licensed artwork in the Butaca screenshots." />
+    <meta name="twitter:image" content="https://gnacho.github.io/butaca/media/og-card.jpg" />
+    <meta name="twitter:image:alt" content="Butaca home screen on an LG TV, next to the headline: Plex that feels fast on LG TVs." />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -589,9 +589,9 @@ def site_credits(assets, catalog, dst=SITE_CREDITS):
       <main class="page-root">
         <header class="site-header">
           <div class="header-bar">
-            <a class="brand" href="./" aria-label="Back to PlxNative">
+            <a class="brand" href="./" aria-label="Back to Butaca">
               <span class="brand-mark"><img src="icons/brand-mark.png" alt="" width="22" height="22" /></span>
-              <span class="brand-name"><span class="back-arrow" aria-hidden="true">&larr;</span> PlxNative</span>
+              <span class="brand-name"><span class="back-arrow" aria-hidden="true">&larr;</span> Butaca</span>
             </a>
             <nav class="site-nav" aria-label="Primary navigation">
               <a href="./#feel">Demo</a>
@@ -599,7 +599,7 @@ def site_credits(assets, catalog, dst=SITE_CREDITS):
               <a href="./#showcase">Features</a>
             </nav>
             <div class="header-actions">
-              <a class="header-github" href="https://github.com/GLinnik21/plx-native" aria-label="PlxNative on GitHub">
+              <a class="header-github" href="https://github.com/gnacho/butaca" aria-label="Butaca on GitHub">
                 <svg class="gh-icon" viewBox="0 0 24 24" width="21" height="21" fill="currentColor" aria-hidden="true"><path d="M12 1.5a10.5 10.5 0 0 0-3.32 20.46c.53.1.72-.23.72-.5v-1.76c-2.92.64-3.54-1.4-3.54-1.4-.48-1.22-1.17-1.55-1.17-1.55-.95-.65.07-.64.07-.64 1.06.08 1.61 1.09 1.61 1.09.94 1.6 2.46 1.14 3.06.87.1-.68.37-1.14.67-1.4-2.33-.27-4.78-1.17-4.78-5.2 0-1.15.41-2.09 1.08-2.83-.11-.27-.47-1.34.1-2.79 0 0 .88-.28 2.88 1.08a9.98 9.98 0 0 1 5.24 0c2-1.36 2.88-1.08 2.88-1.08.57 1.45.21 2.52.1 2.79.67.74 1.08 1.68 1.08 2.83 0 4.04-2.46 4.93-4.8 5.19.38.33.72.97.72 1.96v2.9c0 .28.19.62.73.51A10.5 10.5 0 0 0 12 1.5Z"></path></svg>
               </a>
               <a class="header-cta" href="/#install">Install</a>
@@ -610,7 +610,7 @@ def site_credits(assets, catalog, dst=SITE_CREDITS):
         <section class="credits-intro" aria-labelledby="credits-title">
           <h1 id="credits-title">Artwork credits</h1>
           <p class="lead">
-            The screenshots on this site show PlxNative browsing a demo library made entirely of openly
+            The screenshots on this site show Butaca browsing a demo library made entirely of openly
             licensed and public-domain works: open movies by Blender Studio and others.
           </p>
           <p>

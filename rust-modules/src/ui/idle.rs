@@ -186,7 +186,7 @@ static PRESENTS: AtomicU32 = AtomicU32::new(0);
 /// clock (`shot::tick`) reads it; nothing on the television does.
 #[cfg(feature = "hostsim")]
 static LAST_CHANGE: AtomicU32 = AtomicU32::new(0);
-/// Kill switch (`/tmp/plxnative-noidle`), so a device A/B is one file apart and a bad frame on the
+/// Kill switch (`/tmp/butaca-noidle`), so a device A/B is one file apart and a bad frame on the
 /// panel is one `rm` from being ruled out as this feature's fault.
 static ENABLED: AtomicBool = AtomicBool::new(true);
 /// **Is the hardware video plane bound to our sink?** The gate's only non-damage INPUT (spec §4.4,
@@ -200,7 +200,7 @@ static ENABLED: AtomicBool = AtomicBool::new(true);
 /// loop must never poke it, and nothing here re-derives it from the route.
 static VIDEO_PLANE: AtomicBool = AtomicBool::new(false);
 
-/// Turn the gate off for this boot. Read once at startup from `/tmp/plxnative-noidle`.
+/// Turn the gate off for this boot. Read once at startup from `/tmp/butaca-noidle`.
 pub(crate) fn set_enabled(on: bool) {
     ENABLED.store(on, Relaxed);
 }
@@ -1055,7 +1055,7 @@ mod tests {
         assert!(should_present(10_032), "0.6px in a long frame is");
     }
 
-    /// The kill switch must not silently consume the dirty flag — `/tmp/plxnative-noidle` is the
+    /// The kill switch must not silently consume the dirty flag — `/tmp/butaca-noidle` is the
     /// A/B instrument, so arming it has to change the frame RATE and nothing else.
     #[test]
     fn the_kill_switch_leaves_the_dirty_flag_alone() {

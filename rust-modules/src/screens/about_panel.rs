@@ -528,7 +528,7 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::MetadataLi
         // for a surface, which is what this panel's own `Popover` used to hold.
         let appear = f.page_alpha;
         let measure = f.measure;
-        // Named for `/tmp/plxnative-cpuprof` beside the page's own phases, so a slow frame while
+        // Named for `/tmp/butaca-cpuprof` beside the page's own phases, so a slow frame while
         // this sheet is up can be read as the PANEL or as the host under it rather than as one
         // `main.ui` total.
         let field = f.underlay;

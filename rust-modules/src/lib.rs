@@ -1,9 +1,9 @@
-//! PlxNative — an unofficial native Plex client for LG webOS.
+//! Butaca — an unofficial native Plex client for LG webOS.
 //! Copyright © 2026 Gleb Linnik. Licensed under GPL-3.0-or-later; see LICENSE at the repository
 //! root, and THIRD-PARTY-NOTICES.md for the components this links or redistributes.
 //! Not affiliated with, endorsed by, or sponsored by Plex GmbH or LG Electronics.
 //!
-//! plxnative-modules — the Rust app core, built as a staticlib and linked into the C
+//! butaca-modules — the Rust app core, built as a staticlib and linked into the C
 //! boot shim. The crate's C surface is tiny: C calls `plex_run` (app.rs), writes the fallback
 //! image marker through `plx_crash_write_image_marker`, re-enters the native-crash spool through
 //! `plx_sentry_spool_external`, and forwards the two Starfish callbacks (`sf_on_event`/
@@ -19,7 +19,7 @@ mod checkpoint; // the transport-neutral "may I keep waiting?" seam every blocki
 mod cbuf; // fixed NUL-terminated C-string buffer read/write (shared by pms/route/posters)
 mod coldstart; // retires old last-page bookmarks; authenticated cold boots now stay on Home
 mod curlio; // the HTTPS media plane: a remote file pulled by byte range over libcurl-multi (stream.rs is the plaintext-socket twin)
-mod dev; // the /tmp/plxnative-* trigger surface, behind one `devtriggers` feature — read it before adding a trigger
+mod dev; // the /tmp/butaca-* trigger surface, behind one `devtriggers` feature — read it before adding a trigger
 mod devcaps; // what this SoC decodes — the TV's own codec table, read once at boot (the capability profile + direct-play gate derive from it)
 #[macro_use]
 mod diag; // typed usage schema plus log/lab scrub, ring and zlib; native crashes have a separate allowlist
@@ -304,7 +304,7 @@ mod webos; // which webOS this set is — nyx's os_info.json, read once at boot 
 /// **This is a backstop, not the policy.** The policy is that no call site formats a URL into a log
 /// line at all — but that policy was violated for months by one `-> {url}` in `route::retranscode`,
 /// reached by an ordinary audio-track switch, and the app's whole support channel is "send us
-/// `/tmp/plxnative-events.log`". So the class is closed HERE, where every line passes, rather than
+/// `/tmp/butaca-events.log`". So the class is closed HERE, where every line passes, rather than
 /// at the call sites, where the next one is one `format!` away from re-opening it.
 ///
 /// Matches the parameter name rather than the value: the token is a short unstructured alphanumeric
@@ -335,7 +335,7 @@ pub(crate) fn redact_tokens(m: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(out)
 }
 
-/// Append one line to the on-device event log (`/tmp/plxnative-events.log`) — the primary debugging
+/// Append one line to the on-device event log (`/tmp/butaca-events.log`) — the primary debugging
 /// surface (`make run` fetches it). The ONE shared sink; modules bring it in as `use crate::log;`.
 ///
 /// Every line goes through [`redact_tokens`] first — see its doc for why the guard lives here.
@@ -547,9 +547,9 @@ mod private_log_tests {
         }
 
         let mut sink = Sink::default();
-        write_log_line(&mut sink, "install: id=com.beb.plxnative.debug").unwrap();
+        write_log_line(&mut sink, "install: id=com.butaca.debug").unwrap();
         assert_eq!(sink.calls, 1);
-        assert_eq!(sink.bytes, b"install: id=com.beb.plxnative.debug\n");
+        assert_eq!(sink.bytes, b"install: id=com.butaca.debug\n");
     }
 }
 

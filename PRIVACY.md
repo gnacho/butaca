@@ -1,37 +1,37 @@
-# PlxNative Privacy Policy
+# Butaca Privacy Policy
 
-Applies to PlxNative 0.6.0. Last updated 4 September 2026.
+Applies to Butaca 0.6.0. Last updated 4 September 2026.
 
-## Who is responsible for PlxNative data
+## Who is responsible for Butaca data
 
-Gleb Linnik is responsible only for data PlxNative stores locally and for optional reports you
-choose to share. Contact: `support@plxnative.com`.
+Gleb Linnik is responsible only for data Butaca stores locally and for optional reports you
+choose to share. Contact: `hnacho@proton.me`.
 
 ## Plex services
 
-PlxNative is an independent client for Plex. To sign you in, discover servers and provide Plex
+Butaca is an independent client for Plex. To sign you in, discover servers and provide Plex
 account features, the app communicates directly with Plex services. Plex processes information
 received by those services under [Plex’s own Privacy
-Policy](https://www.plex.tv/about/privacy-legal/). PlxNative’s developer does not receive that
+Policy](https://www.plex.tv/about/privacy-legal/). Butaca’s developer does not receive that
 information.
 
 ## Plex Media Servers
 
-To browse and play media, update watch progress and use server features, PlxNative communicates
+To browse and play media, update watch progress and use server features, Butaca communicates
 directly with the Plex Media Servers you select. Those requests are handled by the selected server
-and its operator. PlxNative’s developer does not receive them.
+and its operator. Butaca’s developer does not receive them.
 
 ## Data stored on this television
 
-PlxNative has a developer-only input/frame recorder used to reproduce and test bugs. It is not
+Butaca has a developer-only input/frame recorder used to reproduce and test bugs. It is not
 part of the app you installed: a release build has the developer-trigger inputs, including the
 recorder, compiled out — there is no code path in a release binary that can open, write or read a
-recording, on this television or off it. The unconditional `plxnative-*.log` files are create-only
+recording, on this television or off it. The unconditional `butaca-*.log` files are create-only
 diagnostics, not trigger inputs. The recorder exists only in development builds used to build and
-test PlxNative itself, is started only by explicitly arming it on that build, and its recordings
+test Butaca itself, is started only by explicitly arming it on that build, and its recordings
 never leave the device it was made on.
 
-PlxNative stores your Plex account token and a separate token for each server you use. For every
+Butaca stores your Plex account token and a separate token for each server you use. For every
 profile on your account you have switched to on this television, it also keeps that profile's own
 server access token(s), so a later switch still works with no internet, and, for a PIN-protected
 profile, a one-way check computed from that PIN rather than the PIN itself. It also keeps the
@@ -49,7 +49,7 @@ when a fresh check of the server no longer reaches the same address, at a sign-i
 a profile switch unless the new profile reaches that server at the same address, or when the app
 returns from the background).
 It keeps no bookmark of its own for where you stopped watching: playback position is held by your
-Plex Media Server. The Settings screen can sign out and remove PlxNative data from this television.
+Plex Media Server. The Settings screen can sign out and remove Butaca data from this television.
 
 Those lifetimes differ. Signing out removes the sign-in, the servers registered with it and their
 tokens, every profile's own cached server access token(s) and PIN check, the cached profile
@@ -63,11 +63,11 @@ A queued report is deleted once sent, or at the moment you switch
 its category off or sign out. The event log rotates continuously and the storage snapshot is
 replaced when its bounded status changes. **webOS gives an application no way to run code as it
 is removed**, so the sign-in and the reporting answers can survive an uninstall — use Delete all
-local data before uninstalling if you want nothing of PlxNative left on the television.
+local data before uninstalling if you want nothing of Butaca left on the television.
 
 ## Optional crash reports
 
-Crash reporting is off until you choose to share it. If enabled, PlxNative sends technical crash
+Crash reporting is off until you choose to share it. If enabled, Butaca sends technical crash
 details to Sentry in Germany. A report may include the signal, code addresses, thread information,
 internal component labels, app and webOS versions, television model and hardware compatibility
 details needed to reproduce and symbolicate the failure.
@@ -142,7 +142,7 @@ automatically.
 ## Optional product analytics
 
 Product analytics is a separate choice and is off until you choose to share it. If enabled,
-PlxNative sends typed screen and feature events and broad sign-in and playback outcome classes to
+Butaca sends typed screen and feature events and broad sign-in and playback outcome classes to
 PostHog in Germany. Reports carry a random Analytics ID created when you turn product analytics on
 and may include the app version, webOS version, television model and SoC, and whether the selected
 server is local, remote or relayed. Turning product analytics off, or signing out, deletes the
@@ -155,7 +155,7 @@ Every product analytics event also carries this bounded compatibility and connec
 
 | property | value |
 |---|---|
-| `app_version` | the PlxNative package version |
+| `app_version` | the Butaca package version |
 | `webos_release` | the webOS release reported by nyx |
 | `webos_api` | the webOS API version reported by nyx |
 | `webos_codename` | the webOS firmware family reported by nyx |
@@ -207,8 +207,8 @@ report is sent only when you press Send report; quote the Report ID it showed to
 
 ## Contact and non-affiliation
 
-Privacy questions may be sent to `support@plxnative.com`. Security vulnerabilities may be reported
-privately through GitHub Security Advisories for `GLinnik21/plx-native`.
+Privacy questions may be sent to `hnacho@proton.me`. Security vulnerabilities may be reported
+privately through GitHub Security Advisories for this repository.
 
-PlxNative is an independent, unofficial application. It is not produced by, endorsed by, or
+Butaca is an independent, unofficial application. It is not produced by, endorsed by, or
 affiliated with Plex, Inc. or LG Electronics Inc.

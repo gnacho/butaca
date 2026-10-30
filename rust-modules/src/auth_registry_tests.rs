@@ -866,7 +866,7 @@ fn post_sign_out_registration_keeps_captured_login_client_id() {
     crate::plex::reset_servers_for_test();
 }
 
-// ---- PLX-NATIVE-10: plaintext grants through the registry ----
+// ---- BUTACA-10: plaintext grants through the registry ----
 
 fn lan_source(token: &str) -> SourceRef {
     let mut stored = source("lan-http", true, token);

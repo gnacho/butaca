@@ -48,13 +48,13 @@ use std::sync::atomic::{AtomicI64, Ordering};
 // anchor and the payload to drift apart. For the shipped app the composed bytes and the key order
 // are identical to what every release so far sent — asserted in the tests below, because the
 // webOS 5+ splice path is one this project's 4.5 dev set cannot exercise.
-const PAYLOAD_V: &str = r#"{"args":[{"mediaTransportType":"BUFFERSTREAM","option":{"appId":"@APPID@","externalStreamingInfo":{"contents":{"codec":{"video":"H264"},"esInfo":{"pauseAtDecodeTime":false,"ptsToDecode":0,"seperatedPTS":true},"format":"RAW","provider":"plxnative"},"streamQualityInfo":true,"streamQualityInfoNonFlushable":true,"audioSync":true,"restartStreaming":false,"bufferingCtrInfo":{"bufferMaxLevel":0,"bufferMinLevel":0,"preBufferByte":0,"qBufferLevelAudio":0,"qBufferLevelVideo":0,"srcBufferLevelAudio":{"minimum":1,"maximum":32768},"srcBufferLevelVideo":{"minimum":1,"maximum":8388608}}},"needAudio":false,"queryPosition":false,"lowDelayMode":true,"transmission":{"contentsType":"LIVE"},"adaptiveStreaming":{"audioOnly":false,"maxWidth":1920,"maxHeight":1080,"maxFrameRate":30}}}]}"#;
+const PAYLOAD_V: &str = r#"{"args":[{"mediaTransportType":"BUFFERSTREAM","option":{"appId":"@APPID@","externalStreamingInfo":{"contents":{"codec":{"video":"H264"},"esInfo":{"pauseAtDecodeTime":false,"ptsToDecode":0,"seperatedPTS":true},"format":"RAW","provider":"butaca"},"streamQualityInfo":true,"streamQualityInfoNonFlushable":true,"audioSync":true,"restartStreaming":false,"bufferingCtrInfo":{"bufferMaxLevel":0,"bufferMinLevel":0,"preBufferByte":0,"qBufferLevelAudio":0,"qBufferLevelVideo":0,"srcBufferLevelAudio":{"minimum":1,"maximum":32768},"srcBufferLevelVideo":{"minimum":1,"maximum":8388608}}},"needAudio":false,"queryPosition":false,"lowDelayMode":true,"transmission":{"contentsType":"LIVE"},"adaptiveStreaming":{"audioOnly":false,"maxWidth":1920,"maxHeight":1080,"maxFrameRate":30}}}]}"#;
 // NB: pauseAtDecodeTime stays FALSE here. Kodi uses true, but only alongside its decode-time
 // trigger machinery (setTimeToDecode); with true and no trigger the decoder never starts
 // (verified on-device: Load+Play OK but zero frames decoded). The feed-ahead throttle
 // (MAX_FEED_AHEAD_NS in feed_stream) is the anti-stall mechanism; the other Kodi payload
 // flags are being re-introduced one at a time.
-const PAYLOAD_AV: &str = r#"{"args":[{"mediaTransportType":"BUFFERSTREAM","option":{"appId":"@APPID@","externalStreamingInfo":{"contents":{"codec":{"video":"H264","audio":"AC3"},"esInfo":{"pauseAtDecodeTime":false,"ptsToDecode":0,"seperatedPTS":true},"format":"RAW","provider":"plxnative"},"streamQualityInfo":true,"streamQualityInfoNonFlushable":true,"audioSync":true,"restartStreaming":false,"bufferingCtrInfo":{"bufferMaxLevel":0,"bufferMinLevel":0,"preBufferByte":0,"qBufferLevelAudio":0,"qBufferLevelVideo":0,"srcBufferLevelAudio":{"minimum":1,"maximum":1048576},"srcBufferLevelVideo":{"minimum":1,"maximum":8388608}}},"needAudio":true,"queryPosition":false,"lowDelayMode":false,"transmission":{"contentsType":"LIVE"},"adaptiveStreaming":{"audioOnly":false,"maxWidth":1920,"maxHeight":1080,"maxFrameRate":30}}}]}"#;
+const PAYLOAD_AV: &str = r#"{"args":[{"mediaTransportType":"BUFFERSTREAM","option":{"appId":"@APPID@","externalStreamingInfo":{"contents":{"codec":{"video":"H264","audio":"AC3"},"esInfo":{"pauseAtDecodeTime":false,"ptsToDecode":0,"seperatedPTS":true},"format":"RAW","provider":"butaca"},"streamQualityInfo":true,"streamQualityInfoNonFlushable":true,"audioSync":true,"restartStreaming":false,"bufferingCtrInfo":{"bufferMaxLevel":0,"bufferMinLevel":0,"preBufferByte":0,"qBufferLevelAudio":0,"qBufferLevelVideo":0,"srcBufferLevelAudio":{"minimum":1,"maximum":1048576},"srcBufferLevelVideo":{"minimum":1,"maximum":8388608}}},"needAudio":true,"queryPosition":false,"lowDelayMode":false,"transmission":{"contentsType":"LIVE"},"adaptiveStreaming":{"audioOnly":false,"maxWidth":1920,"maxHeight":1080,"maxFrameRate":30}}}]}"#;
 // Phase 0 HEVC probe payload — identical to PAYLOAD_V but codec video "H265", to isolate
 // the single variable: does StarfishMediaAPIs BUFFERSTREAM decode HEVC on this panel?
 /// **`streamQualityInfoNonFlushable: true` is the presented-frame counter, and it is the only
@@ -67,7 +67,7 @@ const PAYLOAD_AV: &str = r#"{"args":[{"mediaTransportType":"BUFFERSTREAM","optio
 /// millisecond stamps ARE the presented cadence — the number the 5 Hz `vtick` and our GL `fps=`
 /// could never give. Whether this firmware's sink exposes the property is answered by the first
 /// run: libpf logs a pmlog error naming the property if it does not.
-const PAYLOAD_H265: &str = r#"{"args":[{"mediaTransportType":"BUFFERSTREAM","option":{"appId":"@APPID@","externalStreamingInfo":{"contents":{"codec":{"video":"H265"},"esInfo":{"pauseAtDecodeTime":false,"ptsToDecode":0,"seperatedPTS":true},"format":"RAW","provider":"plxnative"},"streamQualityInfo":true,"streamQualityInfoNonFlushable":true,"audioSync":true,"restartStreaming":false,"bufferingCtrInfo":{"bufferMaxLevel":0,"bufferMinLevel":0,"preBufferByte":0,"qBufferLevelAudio":0,"qBufferLevelVideo":0,"srcBufferLevelAudio":{"minimum":1,"maximum":32768},"srcBufferLevelVideo":{"minimum":1,"maximum":8388608}}},"needAudio":false,"queryPosition":false,"lowDelayMode":true,"transmission":{"contentsType":"LIVE"},"adaptiveStreaming":{"audioOnly":false,"maxWidth":3840,"maxHeight":2160,"maxFrameRate":60}}}]}"#;
+const PAYLOAD_H265: &str = r#"{"args":[{"mediaTransportType":"BUFFERSTREAM","option":{"appId":"@APPID@","externalStreamingInfo":{"contents":{"codec":{"video":"H265"},"esInfo":{"pauseAtDecodeTime":false,"ptsToDecode":0,"seperatedPTS":true},"format":"RAW","provider":"butaca"},"streamQualityInfo":true,"streamQualityInfoNonFlushable":true,"audioSync":true,"restartStreaming":false,"bufferingCtrInfo":{"bufferMaxLevel":0,"bufferMinLevel":0,"preBufferByte":0,"qBufferLevelAudio":0,"qBufferLevelVideo":0,"srcBufferLevelAudio":{"minimum":1,"maximum":32768},"srcBufferLevelVideo":{"minimum":1,"maximum":8388608}}},"needAudio":false,"queryPosition":false,"lowDelayMode":true,"transmission":{"contentsType":"LIVE"},"adaptiveStreaming":{"audioOnly":false,"maxWidth":3840,"maxHeight":2160,"maxFrameRate":60}}}]}"#;
 
 // ACCEPTED AUs — what the pipeline took. This is what `app::diagnostics` reports, because a count of
 // attempts reads as healthy throughput through a stall: a full sink retains the AU and it is
@@ -544,7 +544,7 @@ const ENVELOPE_FHD60: SinkEnvelope = SinkEnvelope {
 ///
 /// `maxFrameRate`: **H.264 declares the stream's own rate class** (24/25/30/50/60, never below
 /// the stream; 60 when the rate is unknown) — see the measurement inside; HEVC stays at 60, the
-/// value every Dolby Vision verification was taken under. `/tmp/plxnative-sinkmax=WxH@F`
+/// value every Dolby Vision verification was taken under. `/tmp/butaca-sinkmax=WxH@F`
 /// overrides the whole result so the remaining legs are an A/B with no rebuild. Pure; the
 /// wrappers feed it the route.
 fn sink_envelope(
@@ -565,7 +565,7 @@ fn sink_envelope(
     // On the dev set (webOS 4.10) a 4K H.264 24p direct play declared at 60 makes the pipeline
     // announce `frameRate:24` and then, about a second later, `frameRate:30` for the same stream
     // — a 24p picture on a 30 fps lattice, i.e. pulldown judder the viewer can see. Declared at
-    // 24 or at 30 it announces 24 once and holds it (2026-09-03, `plxnative-sinkmax` A/B, three
+    // 24 or at 30 it announces 24 once and holds it (2026-09-03, `butaca-sinkmax` A/B, three
     // legs; 4K HEVC under 60 announces 24 and holds it, and 1080p H.264 under 60 does too, so
     // the rate is left at 60 for HEVC and for an unknown stream rate). **And the sink's own
     // displayed-frame counter (callback type 47, see the payload note above) put a number on
@@ -590,7 +590,7 @@ fn sink_envelope(
 
 /// The sink envelope for THIS Load, from the route (main thread), with the dev override applied.
 /// **What the two STATIC payloads declare**, as the numbers written into their strings — used on
-/// every arm that sends one (the local-sample feeds and the streamed `/tmp/plxnative-noaudio`
+/// every arm that sends one (the local-sample feeds and the streamed `/tmp/butaca-noaudio`
 /// path), so the `load:` line's `max=` reports what was SENT rather than the streamed builder's
 /// initializer. The test below pins these to the strings themselves.
 fn static_envelope(hevc: bool) -> SinkEnvelope {
@@ -621,7 +621,7 @@ fn sink_envelope_now(ps: &crate::route::PlaybackSession, is_h265: bool) -> SinkE
         if let Some(env) = parse_sinkmax(&spec) {
             #[cfg(feature = "devtriggers")]
             log(&format!(
-                "sinkmax: envelope OVERRIDDEN to {}x{}@{} by /tmp/plxnative-sinkmax",
+                "sinkmax: envelope OVERRIDDEN to {}x{}@{} by /tmp/butaca-sinkmax",
                 env.w, env.h, env.fps
             ));
             return env;
@@ -677,7 +677,7 @@ fn build_av_payload(ps: &crate::route::PlaybackSession, video: &str, audio: &str
     // Real source frame rate (direct-play only; 0 on transcode → skip): give the pipeline the true
     // fps for A/V timing instead of the sink-envelope default, + adaptiveResolution so it adapts if
     // the coded dims change. libpf parses videoFpsValue/videoFpsScale/adaptiveResolution (verified).
-    // `/tmp/plxnative-nofps` withholds the pair, for one experiment: the Dolby Vision display
+    // `/tmp/butaca-nofps` withholds the pair, for one experiment: the Dolby Vision display
     // -management lookup misses because the LUT ring is keyed ONE 90 kHz tick above what the
     // display firmware asks for (measured 2026-08-21 — 38 of 40 misses, written key == requested
     // + 1, with LG's own level-2 KADP logging armed mid-playback). Neither derivation is ours: the
@@ -687,7 +687,7 @@ fn build_av_payload(ps: &crate::route::PlaybackSession, video: &str, audio: &str
     // what it builds that lattice FROM, so it is the one remaining lever on our side.
     if crate::dev::flag("nofps") {
         #[cfg(feature = "devtriggers")]
-        log("esInfo: videoFps WITHHELD by /tmp/plxnative-nofps");
+        log("esInfo: videoFps WITHHELD by /tmp/butaca-nofps");
     } else if let Some((num, den)) = fps_rational(crate::route::stream_fps(ps)) {
         p = p
             .replace(
@@ -744,7 +744,7 @@ fn with_immersive(p: &str, audio: &str, atmos: bool) -> String {
         ));
         return p.to_string();
     }
-    let anchor = r#""provider":"plxnative""#;
+    let anchor = r#""provider":"butaca""#;
     if !p.contains(anchor) {
         log("atmos: payload has no provider anchor — immersive NOT spliced");
         return p.to_string();
@@ -782,7 +782,7 @@ fn with_immersive(p: &str, audio: &str, atmos: bool) -> String {
 ///   the same public configd key independently and route policy requires an exact `true` before
 ///   this function can receive `Declare`.
 ///
-/// The anchor is `"provider":"plxnative"` — the last key of `contents` and, by the test below,
+/// The anchor is `"provider":"butaca"` — the last key of `contents` and, by the test below,
 /// present exactly once in `PAYLOAD_AV`. A `replace` that finds nothing is a silent no-node, which
 /// is why the miss is logged rather than assumed away.
 fn with_dolby_hdr_info(p: &str, video: &str, dv: crate::metadata::DvPresentation) -> String {
@@ -792,7 +792,7 @@ fn with_dolby_hdr_info(p: &str, video: &str, dv: crate::metadata::DvPresentation
     if crate::metadata::dv_node_suppressed() {
         #[cfg(feature = "devtriggers")]
         log(&format!(
-            "dv: DolbyHdrInfo P{} SUPPRESSED by /tmp/plxnative-dvnonode (direct play kept)",
+            "dv: DolbyHdrInfo P{} SUPPRESSED by /tmp/butaca-dvnonode (direct play kept)",
             n.profile_id
         ));
         return p.to_string();
@@ -808,7 +808,7 @@ fn with_dolby_hdr_info(p: &str, video: &str, dv: crate::metadata::DvPresentation
         ));
         return p.to_string();
     }
-    let anchor = r#""provider":"plxnative""#;
+    let anchor = r#""provider":"butaca""#;
     if !p.contains(anchor) {
         log("dv: payload has no provider anchor — DolbyHdrInfo NOT spliced");
         return p.to_string();
@@ -1011,13 +1011,13 @@ fn start_bufferfeed_inner(
     VATT.store(0, Ordering::Relaxed);
     AATT.store(0, Ordering::Relaxed);
     // resolve the URL, in precedence order: route (a selected movie) wins, then
-    // /tmp/plxnative-playurl (a URL + its declaration), then /tmp/plxnative-url (a URL
+    // /tmp/butaca-playurl (a URL + its declaration), then /tmp/butaca-url (a URL
     // alone), then a local sample.
     let mut url = crate::route::url(ps);
     if url.is_empty() {
-        // dev: /tmp/plxnative-playurl — a URL *and the Load declaration to play it with*, with no
+        // dev: /tmp/butaca-playurl — a URL *and the Load declaration to play it with*, with no
         // library item behind it. This is the player-PIPELINE test tier's entry (tests/README.md):
-        // `plxnative-url` below hands over a URL only, which leaves the payload describing
+        // `butaca-url` below hands over a URL only, which leaves the payload describing
         // whatever the route happened to hold — an empty string, i.e. H264 + "AC3" — so a 4K HEVC
         // or a Dolby file could never be declared honestly without Plex. Read HERE rather than at
         // the app.rs entry point because the declaration has to be in `route` before the payload
@@ -1100,10 +1100,10 @@ fn start_bufferfeed_inner(
                 loops: 0,
             }));
         } else {
-            // nothing to play: no selected item, no /tmp/plxnative-url, no local sample. (The old
+            // nothing to play: no selected item, no /tmp/butaca-url, no local sample. (The old
             // baked-in demo-movie fallback is gone — the binary carries no URLs/credentials.)
             #[cfg(feature = "devtriggers")]
-            log("start_bufferfeed: no URL — select an item (or set /tmp/plxnative-url)");
+            log("start_bufferfeed: no URL — select an item (or set /tmp/butaca-url)");
             return Err(crate::route::RouteStartResult::NoRoute);
         }
     }
@@ -1115,7 +1115,7 @@ fn start_bufferfeed_inner(
     // For a streamed direct-play/transcode, pick the Load codecs from the item: video H264 vs
     // H265 (native HEVC direct-play), audio AC3/EAC3/AAC/DTS. (The local sample paths keep their
     // fixed payloads.)
-    // dev A/B: /tmp/plxnative-noaudio feeds video only (needAudio:false + skip es=2) to isolate
+    // dev A/B: /tmp/butaca-noaudio feeds video only (needAudio:false + skip es=2) to isolate
     // whether the audio ES (E-AC3/Atmos) is what stalls the sink on 4K HEVC.
     let no_audio = crate::dev::flag("noaudio");
     crate::ff::set_feed_audio(!no_audio);
@@ -2010,7 +2010,7 @@ pub(crate) const PRES_NONE: i64 = i64::MIN;
 /// What is now open is why the slot the firmware asks for — using, we measured, dualsequencer's
 /// own key — is not in the ring. That points at pairing or at slot lifetime, not at rounding.
 ///
-/// `/tmp/plxnative-ptsnudge=<ns>` is kept because it is the instrument that produced that result
+/// `/tmp/butaca-ptsnudge=<ns>` is kept because it is the instrument that produced that result
 /// and the next candidate value is one run away. Anything from 1 to ~11110 is in range; beyond
 /// that an already-correct frame is pushed a tick the other way.
 fn pts_nudge_ns() -> i64 {
@@ -2824,10 +2824,10 @@ mod payload_tests {
     /// `replace` would splice two nodes into one payload.
     #[test]
     fn the_av_payload_carries_exactly_one_dolby_hdr_info_anchor() {
-        assert_eq!(PAYLOAD_AV.matches(r#""provider":"plxnative""#).count(), 1);
+        assert_eq!(PAYLOAD_AV.matches(r#""provider":"butaca""#).count(), 1);
         // and it really is the last key of `contents` — the next character after it closes the
         // object, so appending a key there stays INSIDE `contents`
-        assert!(PAYLOAD_AV.contains(r#""provider":"plxnative"},"streamQualityInfo""#));
+        assert!(PAYLOAD_AV.contains(r#""provider":"butaca"},"streamQualityInfo""#));
     }
 
     /// **What we actually send for a Profile 5 direct play.** The three fields at the path the
@@ -2840,7 +2840,7 @@ mod payload_tests {
         let base = PAYLOAD_AV.replace(r#""video":"H264""#, r#""video":"H265""#);
         let out = with_dolby_hdr_info(&base, "H265", p5().presentation(true, crate::webos::caps::DvCapability::Supported, true));
         assert!(
-            out.contains(r#""provider":"plxnative","DolbyHdrInfo":{"trackType":"single","encryptionType":"clear","profileId":5}}"#),
+            out.contains(r#""provider":"butaca","DolbyHdrInfo":{"trackType":"single","encryptionType":"clear","profileId":5}}"#),
             "{out}"
         );
         // the trailing `}` above is `contents` closing: the node is the last key INSIDE it, not a
@@ -2864,7 +2864,7 @@ mod payload_tests {
     /// The three ways the node is NOT sent, each of which must leave the payload byte-identical:
     /// a file with no Dolby Vision, a Dolby Vision file we refuse (the dual-layer P7 — declaring a
     /// layer we cannot feed is worse than refusing it), and the disarmed trigger, which is what a
-    /// `RELEASE=1` build compiles in and what every boot without `/tmp/plxnative-dv` does today.
+    /// `RELEASE=1` build compiles in and what every boot without `/tmp/butaca-dv` does today.
     #[test]
     fn nothing_is_spliced_unless_the_stream_is_declared() {
         let p7 = Dovi {
@@ -2891,7 +2891,7 @@ mod payload_tests {
     fn an_atmos_track_splices_immersive_into_contents() {
         let out = with_immersive(PAYLOAD_AV, "AC3 PLUS", true);
         assert!(
-            out.contains(r#""provider":"plxnative","immersive":"ATMOS"}"#),
+            out.contains(r#""provider":"butaca","immersive":"ATMOS"}"#),
             "{out}"
         );
         // the trailing `}` is `contents` closing — the node is INSIDE it, not a sibling of
@@ -2941,7 +2941,7 @@ mod payload_tests {
         );
         assert!(
             out.contains(
-                r#""provider":"plxnative","immersive":"ATMOS","DolbyHdrInfo":{"trackType":"single","encryptionType":"clear","profileId":5}}"#
+                r#""provider":"butaca","immersive":"ATMOS","DolbyHdrInfo":{"trackType":"single","encryptionType":"clear","profileId":5}}"#
             ),
             "{out}"
         );
@@ -3085,7 +3085,7 @@ mod prime_livelock_tests {
     fn a_segment_that_lands_whole_still_starts_the_picture() {
         let _serial = crate::testlock::serial();
         // Arm the host clock sink so `sf_feed` accepts AUs. See `ffi_host::FORCE_ENABLED` for why
-        // this is an explicit override and not the `plxnative-clocksink` trigger file. RESTORED on
+        // this is an explicit override and not the `butaca-clocksink` trigger file. RESTORED on
         // the way out, panic or not: it is a process-global, and leaving it armed would silently
         // change what every later test's `sf_feed` returns.
         struct DisarmSink;
@@ -3671,7 +3671,7 @@ mod lifecycle_clock_tests {
     }
 }
 
-/// **LG App Self Checklist #46 — replay after completion.** A `plxnative-playurl` stream that
+/// **LG App Self Checklist #46 — replay after completion.** A `butaca-playurl` stream that
 /// reaches EOS is started AGAIN, and that second start does not travel the UI's asynchronous
 /// request path: `app.rs` re-arms `auto_tried`, the fixture entry calls `start_playback`, and
 /// `start_bufferfeed_tracked` asks the reducer for a start owner directly. So the phase a

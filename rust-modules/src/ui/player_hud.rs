@@ -752,7 +752,7 @@ pub(crate) fn transport_hidden(ps: &crate::route::PlaybackSession) -> bool {
 /// reason: two independent derivations of one three-way choice is how the two indicators drifted
 /// apart in the first place.
 pub(crate) fn busy(ps: &crate::route::PlaybackSession) -> Busy {
-    // dev: `/tmp/plxnative-failtest` forces the failure read-out — the other half of
+    // dev: `/tmp/butaca-failtest` forces the failure read-out — the other half of
     // `player::failtest_arm`, which shapes WHICH failure. It is forced HERE, on the one impure
     // sampler, rather than in `player::state()`: the pump acts on that state, and a dev switch
     // that made the engine believe it had failed would be testing a different thing than the
@@ -2278,7 +2278,7 @@ mod tests {
             busy_surface(&ps, S::Buffering, false),
             Busy::Readout(StatusKind::Working, c"Buffering\u{2026}")
         );
-        // tapping RIGHT during pre-roll (or `/tmp/plxnative-autoseek`): no picture to mark up
+        // tapping RIGHT during pre-roll (or `/tmp/butaca-autoseek`): no picture to mark up
         assert_eq!(
             busy_surface(&ps, S::Seeking, false),
             Busy::Readout(StatusKind::Working, c"Seeking\u{2026}")

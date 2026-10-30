@@ -355,7 +355,7 @@ impl PersonState {
 pub(crate) fn facts_pending(p: &Person) -> bool {
     // **Bounded by a real ATTEMPT, not only by success.** `!p.profiled` alone is unbounded whenever
     // plex.tv cannot be reached — an offline or LAN-only television, a provider outage, or any
-    // headless boot, where the injected `/tmp/plxnative-token` is a SERVER token that
+    // headless boot, where the injected `/tmp/butaca-token` is a SERVER token that
     // `discover.provider.plex.tv` answers 401. The profile mailbox then re-arms its back-off
     // forever, `profiled` never turns true, and `draw_header` paints five `skeleton_bar`s a frame,
     // each of which calls `idle::invalidate()` — so the whole-frame present gate never closes and
@@ -884,17 +884,17 @@ fn open(
     }
 }
 
-/// `/tmp/plxnative-personbio[=<text>]` — **stand in for the plex.tv biography record**, so the
+/// `/tmp/butaca-personbio[=<text>]` — **stand in for the plex.tv biography record**, so the
 /// person page's header bio and the bio alert panel behind it can be reached headlessly.
 ///
 /// **Why this trigger has to exist.** Everything below the name on this page — roles, dates,
 /// birthplace and the biography itself — comes from `discover.provider.plex.tv`, which is a
-/// different identity from the PMS. An automated boot signs in with `/tmp/plxnative-token`, a
+/// different identity from the PMS. An automated boot signs in with `/tmp/butaca-token`, a
 /// *server* token, and the provider answers that `401`; a real interactive session gets a real
 /// biography and an automated one never does. So neither `tests/run.py` nor `make sim-shot` can
 /// reach a person page with any prose on it at all, and the panel this seeds is by construction
 /// only reachable when there is MORE prose than the header shows. That is the same argument
-/// `/tmp/plxnative-search`'s query seed makes (no harness can type) and `/tmp/plxnative-failtest`'s
+/// `/tmp/butaca-search`'s query seed makes (no harness can type) and `/tmp/butaca-failtest`'s
 /// (no server will refuse on cue) — the screen is real, the route to it is not automatable.
 ///
 /// Empty file = a long built-in sample with paragraph breaks in it, which is the shape that
@@ -933,7 +933,7 @@ fn seed_dev_profile(p: &mut Person) {
     p.profiled = true;
     #[cfg(feature = "devtriggers")]
     crate::log(&format!(
-        "person: DEV bio seeded ({}B) — /tmp/plxnative-personbio",
+        "person: DEV bio seeded ({}B) — /tmp/butaca-personbio",
         p.bio.len()
     ));
 }
@@ -1103,7 +1103,7 @@ impl PersonState {
     }
 }
 
-/// `/tmp/plxnative-personcredits[=<rows>]` — **stand in for the plex.tv FILMOGRAPHY record**, so
+/// `/tmp/butaca-personcredits[=<rows>]` — **stand in for the plex.tv FILMOGRAPHY record**, so
 /// [`crate::ui::filmography`] can be reached headlessly.
 ///
 /// It exists for exactly [`seed_dev_profile`]'s reason and the argument is not repeated here: the
@@ -1210,11 +1210,11 @@ fn seed_dev_credits(state: &mut PersonState) -> bool {
     // Gated: `personcredits` is a `dev::CONTROLLED` name (a controlled/recorded boot may carry
     // it), and `ci/check-package.py`'s dev-trigger-catalog check greps a release binary for that
     // exact vocabulary. This function is already unreachable without `devtriggers` (`arg` above
-    // is always `None`), but the log line's literal `/tmp/plxnative-personcredits` would still
+    // is always `None`), but the log line's literal `/tmp/butaca-personcredits` would still
     // have shipped in the bytes regardless of whether the branch ever ran.
     #[cfg(feature = "devtriggers")]
     crate::log(&format!(
-        "person: DEV credits seeded ({} groups, {} held) — /tmp/plxnative-personcredits",
+        "person: DEV credits seeded ({} groups, {} held) — /tmp/butaca-personcredits",
         p.credits.len(),
         held.len()
     ));

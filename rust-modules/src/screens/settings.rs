@@ -336,7 +336,7 @@ impl RouteSurface {
     /// Settings arm (Privacy & data → Done) and `onboard::leave`'s settings arm (Favorite
     /// libraries → Done/Cancel). Both are correct at the depth the ROOT surface puts them at —
     /// pushed over the Settings root, so the pop reveals it — and both empty the stack when the
-    /// surface was booted ROOTED at that page, which `/tmp/plxnative-settings=privacy|home` does
+    /// surface was booted ROOTED at that page, which `/tmp/butaca-settings=privacy|home` does
     /// (`app/run.rs`'s boot-target match). A `RELEASE` build compiles `dev::read` out and always
     /// roots at `SettingsPage::Root`, so this was never a shipping bug — but a Pop with nothing
     /// under it is a statement the page means ("close me"), not an accident to be guarded against

@@ -1,8 +1,8 @@
-# Help translate PlxNative
+# Help translate Butaca
 
-PlxNative's interface is available in English, Spanish and Belarusian (official Cyrillic
+Butaca's interface is available in English, Spanish and Belarusian (official Cyrillic
 orthography). Help improve a translation or contribute another language through a pull request
-at https://github.com/GLinnik21/plx-native.
+at the upstream project page.
 
 ## Translate a message
 
@@ -61,9 +61,9 @@ the Library's TYPE menu, and the
 collection page's meta line and season marks. When one of these tests fails, shorten
 the wording; do not abbreviate it past readability.
 
-Review the affected screens with the desktop simulator. `PLXNATIVE_LOCALE=es`, `be` or `en`
-selects a language for a simulator launch; `PLXNATIVE_FORMAT_LOCALE=de-DE` exercises separate
-regional formatting. `PLXNATIVE_LOCALE=qps-ploc` expands and accents text to reveal cramped
+Review the affected screens with the desktop simulator. `BUTACA_LOCALE=es`, `be` or `en`
+selects a language for a simulator launch; `BUTACA_FORMAT_LOCALE=de-DE` exercises separate
+regional formatting. `BUTACA_LOCALE=qps-ploc` expands and accents text to reveal cramped
 layouts. These environment overrides do not operate in the shipping TV build.
 
 Open a pull request describing which language and screens changed, and how you checked the

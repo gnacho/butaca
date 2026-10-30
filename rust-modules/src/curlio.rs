@@ -132,7 +132,7 @@ pub(crate) type CURLM = c_void;
 //
 // Same candidate list as `net.rs`, in the same order, so a set carrying both SONAMEs binds both
 // tables against the same library. The macOS name is last for the same reason it is there: the
-// host simulator and `PlxNative.app` run this code, and the host suite below drives real libcurl
+// host simulator and `Butaca.app` run this code, and the host suite below drives real libcurl
 // over plain loopback HTTP.
 crate::dynlib! {
     /// The seven multi-interface symbols, frozen to webOS's oldest libcurl (7.53.1). See this
@@ -702,7 +702,7 @@ impl CurlSource {
         // plane consults a table rather than carrying the pin. Looked up ONCE here; a seek reuses it.
         let (origin, _) = crate::plex::origin::split(url);
         let resolve_entry = crate::net::resolve::entry_for(origin.host(), origin.port());
-        // The offline reproduction (`/tmp/plxnative-nowan`): a name opens only with a pin.
+        // The offline reproduction (`/tmp/butaca-nowan`): a name opens only with a pin.
         if resolve_entry.is_none()
             && crate::net::refuse_name(origin.host(), crate::net::API.connect_s)
         {
@@ -2876,7 +2876,7 @@ mod tests {
         // disturb a table that is already live — which is precisely the claim being made.
         let v = crate::dynlib::load_into(
             None,
-            &["libplxnative-no-such-curl.so.99"],
+            &["libbutaca-no-such-curl.so.99"],
             &[("curl_multi_init", &curlmulti::curl_multi_init)],
         );
         assert!(matches!(v, crate::dynlib::Loaded::NoLibrary));

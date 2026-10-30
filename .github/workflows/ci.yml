@@ -247,7 +247,7 @@ jobs:
         # It grades whether the app STARTS. It says nothing about playback, which above 4.10.0 has
         # never been observed on hardware — see docs/webos5-port.md §4.
         #
-        # pkg/plxnative-storage ships alongside the main binary as of 0.7.0 (the LS2 storage
+        # pkg/butaca-storage ships alongside the main binary as of 0.7.0 (the LS2 storage
         # helper) and gets graded the same way — a helper that fails to exec is as invisible to
         # every other check as the main binary would be.
         run: |
@@ -257,9 +257,9 @@ jobs:
             echo '_Does the process start and do all symbols resolve? Says nothing about playback._'
             echo '```'
             ./tools/fwcompat.py --db /usr/share/webosbrew/compat-checker/data \
-              --min-release 4.4.2 pkg/plxnative
+              --min-release 4.4.2 pkg/butaca
             ./tools/fwcompat.py --db /usr/share/webosbrew/compat-checker/data \
-              --min-release 4.4.2 pkg/plxnative-storage
+              --min-release 4.4.2 pkg/butaca-storage
             # The dlopen'd bundled FFmpeg: nothing above resolves its own DT_NEEDED (#235's
             # libz.so.1). Its sibling libraries ship in pkg/, so --shipped takes them off the list.
             for lib in pkg/lib*-plx.so.*; do
@@ -272,7 +272,7 @@ jobs:
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: plxnative-${{ github.sha }}
+          name: butaca-${{ github.sha }}
           # NB no `pkg/ipk.sha256` here: `make ipk` writes that file only for the stable flavour,
           # because it is a published RELEASE ASSET NAME quoted verbatim in every release note's
           # verification command. This job packages the developer id, so listing it would be a dead

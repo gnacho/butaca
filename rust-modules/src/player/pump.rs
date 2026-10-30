@@ -1382,10 +1382,10 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
             // the addresses). The rule's stated consequence, `SOUND_ERROR_019`, is a literal that
             // exists in NO library on this device.
             //
-            // Ran behind `/tmp/plxnative-atmosacb` first, then measured, then made the default:
+            // Ran behind `/tmp/butaca-atmosacb` first, then measured, then made the default:
             // `rv=1` accepted, 1600 audio AUs fed with `reply=O` and no error of any kind, and the
             // television's own read-out — "Dolby Vision / Dolby Atmos", both lines — photographed
-            // in a DISPLAY capture at 11 s. `/tmp/plxnative-noatmosacb` is the way back out.
+            // in a DISPLAY capture at 11 s. `/tmp/butaca-noatmosacb` is the way back out.
             if crate::route::stream_immersive(ps) && !crate::dev::flag("noatmosacb") {
                 let rv = unsafe { ffi::acb_send_atmos(mt, id.as_ptr()) };
                 super::log(&format!("atmos: acb setMediaAudioData rv={rv}"));

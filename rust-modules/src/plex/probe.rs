@@ -195,7 +195,7 @@ pub enum Outcome {
 /// anything outside `1..=65535`.
 ///
 /// **The narrowing is the point.** `port` arrives from plex.tv (and from the session file, and from
-/// the `plxnative-servers` trigger) as an `i64`, because PMS and plex.tv both string-encode numbers
+/// the `butaca-servers` trigger) as an `i64`, because PMS and plex.tv both string-encode numbers
 /// and every numeric field here goes through the lenient `de_i64` — so what lands in a `Candidate`
 /// is whatever the JSON said, not whatever a port can be. `port as i32` on that WRAPS: an answer of
 /// `4_294_999_696` becomes `32400` and the app dials a port nobody advertised, quietly and with a
@@ -228,7 +228,7 @@ fn tier(c: &Connection) -> Location {
 }
 
 /// The tier of an origin that arrived WITHOUT a plex.tv connection list to read a flag off — the
-/// `plxnative-token` boot, whose host and port are compiled into the C shim. Before this existed
+/// `butaca-token` boot, whose host and port are compiled into the C shim. Before this existed
 /// that path passed `None`, which is "nothing has said" and is the one answer that is certainly
 /// wrong: it left [`Client::link`](super::client::Client::link) unknown, so `abr::bootstrap` never
 /// ran and **Auto could not choose Original on a gigabit LAN** — on the exact boot path the device
@@ -1543,7 +1543,7 @@ mod tests {
         );
     }
 
-    /// PLX-NATIVE-10's shape: an owned server on this LAN whose every HTTPS route failed from the
+    /// BUTACA-10's shape: an owned server on this LAN whose every HTTPS route failed from the
     /// television (the relay included) and whose RFC 1918 plaintext answer verified the machine.
     fn eligible_evidence() -> InsecureEvidence {
         InsecureEvidence {

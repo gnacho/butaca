@@ -69,7 +69,7 @@ on:
       fwcompat:
         description: >
           Run the per-binary firmware-database compatibility check (tools/fwcompat.py) against
-          pkg/plxnative and pkg/plxnative-storage, in addition to webosbrew-ipk-verify. Nightly and
+          pkg/butaca and pkg/butaca-storage, in addition to webosbrew-ipk-verify. Nightly and
           release both pass this true; a non-publishing caller can still opt out.
         type: boolean
         default: false
@@ -179,14 +179,14 @@ jobs:
           # nobody shipped.
           grep -q '+symbols' pkg/.build-config \
             || { echo "::error::SYMBOLS=1 did not take — pkg/.build-config says [$(cat pkg/.build-config)]"; exit 1; }
-          test -s pkg/plxnative.debug \
-            || { echo "::error::pkg/plxnative.debug is missing or empty"; exit 1; }
+          test -s pkg/butaca.debug \
+            || { echo "::error::pkg/butaca.debug is missing or empty"; exit 1; }
           # The build id is what pairs the two. Assert it here rather than trusting the upload:
           # `sentry-cli` will happily accept a .debug whose id matches nothing that shipped.
           idof() { readelf -n "$1" | awk '/Build ID/{print $3}'; }
-          [ "$(idof pkg/plxnative)" = "$(idof pkg/plxnative.debug)" ] \
+          [ "$(idof pkg/butaca)" = "$(idof pkg/butaca.debug)" ] \
             || { echo "::error::build id mismatch between the shipped binary and its .debug"; exit 1; }
-          echo "build-id $(idof pkg/plxnative)"
+          echo "build-id $(idof pkg/butaca)"
           # ...and carry the stamp to the caller's downstream jobs under a NON-HIDDEN name:
           # upload-artifact silently drops dotfiles, so `pkg/.build-config` would never arrive and
           # the release audit would lose the row recording which configuration was built.
@@ -253,8 +253,8 @@ jobs:
         if: inputs.fwcompat
         run: |
           set -euo pipefail
-          ./tools/fwcompat.py --db /usr/share/webosbrew/compat-checker/data --min-release 4.4.2 pkg/plxnative | tee -a "$GITHUB_STEP_SUMMARY"
-          ./tools/fwcompat.py --db /usr/share/webosbrew/compat-checker/data --min-release 4.4.2 pkg/plxnative-storage | tee -a "$GITHUB_STEP_SUMMARY"
+          ./tools/fwcompat.py --db /usr/share/webosbrew/compat-checker/data --min-release 4.4.2 pkg/butaca | tee -a "$GITHUB_STEP_SUMMARY"
+          ./tools/fwcompat.py --db /usr/share/webosbrew/compat-checker/data --min-release 4.4.2 pkg/butaca-storage | tee -a "$GITHUB_STEP_SUMMARY"
           # The bundled FFmpeg libraries are dlopen'd, so neither line above nor webosbrew-ipk-verify
           # (which grades the app and service executables only) resolves THEIR DT_NEEDED against a
           # firmware; #235's `libz.so.1` on libavformat was graded by nobody. `--shipped pkg` takes
@@ -359,7 +359,7 @@ jobs:
           # (the Makefile's IPK_VERSION); a nightly's reported version adds `-nightly-<date>` on
           # top, dated by the `+nightly:<date>` field of pkg/.build-config — the Makefile's record
           # of the date it built with, the same stamp ci/check-package.py grades the binary
-          # against. Stable has no such field and keeps plxnative-source-X.Y.Z. Read through
+          # against. Stable has no such field and keeps butaca-source-X.Y.Z. Read through
           # `ci/check-package.py --print-nightly-date` rather than a second copy of its regex here
           # — see that flag's own comment for why a `sed` twin of it is the thing to avoid.
           version=${ipk##*/"${appid}"_}; version=${version%_arm.ipk}
@@ -367,7 +367,7 @@ jobs:
           label="$version${nightly_date:+-nightly-$nightly_date}"
           [[ "$label" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-nightly-[0-9]{8})?$ ]] \
             || { echo "::error::cannot name the source bundle: got version label '$label' from $ipk"; exit 1; }
-          source="pkg/plxnative-source-$label.tar.gz"
+          source="pkg/butaca-source-$label.tar.gz"
           python3 ci/prepare-source-release.py --inputs "$RUNNER_TEMP/gpl-source-inputs" \
             --output "$source" --rust-toolchain nightly-2026-07-02 --binary "$ipk" --private-values "$private_values"
           snapshot=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_snapshot_sha256"])' "$source.release.json")
@@ -387,6 +387,6 @@ jobs:
             pkg/ipk-verify.md
             pkg/gates.md
             pkg/build-config.txt
-            pkg/plxnative-source-*.tar.gz*
+            pkg/butaca-source-*.tar.gz*
             pkg/source-rebuild.json
           if-no-files-found: error

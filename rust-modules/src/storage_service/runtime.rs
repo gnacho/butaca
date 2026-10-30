@@ -5,7 +5,7 @@ use super::wire::{Descriptor, DESCRIPTOR_NAME, PROTOCOL, SOCKET_NAME};
 use std::path::Path;
 
 pub fn app_identity(executable: &Path) -> Result<&str, ErrorCode> {
-    if executable.file_name().and_then(|n| n.to_str()) != Some("plxnative-storage") {
+    if executable.file_name().and_then(|n| n.to_str()) != Some("butaca-storage") {
         return Err(ErrorCode::Invalid);
     }
     let dir = executable.parent().ok_or(ErrorCode::Invalid)?;
@@ -261,17 +261,17 @@ mod tests {
 
     #[test]
     fn nightly_app_identity() {
-        assert_eq!(app_identity(Path::new("/media/developer/apps/usr/palm/services/com.butaca.nightly.storage/plxnative-storage")), Ok("com.butaca.nightly"));
+        assert_eq!(app_identity(Path::new("/media/developer/apps/usr/palm/services/com.butaca.nightly.storage/butaca-storage")), Ok("com.butaca.nightly"));
     }
 
     #[test]
     fn rejects_foreign_or_malformed_install_paths() {
         for path in [
-            "/usr/palm/services/com.butaca.typo.storage/plxnative-storage",
-            "/usr/palm/services/com.butaca.nightly/plxnative-storage",
-            "/usr/palm/applications/com.butaca.nightly.storage/plxnative-storage",
+            "/usr/palm/services/com.butaca.typo.storage/butaca-storage",
+            "/usr/palm/services/com.butaca.nightly/butaca-storage",
+            "/usr/palm/applications/com.butaca.nightly.storage/butaca-storage",
             "/usr/palm/services/com.butaca.nightly.storage/other",
-            "plxnative-storage",
+            "butaca-storage",
         ] {
             assert_eq!(app_identity(Path::new(path)), Err(ErrorCode::Invalid));
         }

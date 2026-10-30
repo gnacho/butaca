@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""plxnative-rec — inspect, verify and compare recordings (restructure spec §5.3–§5.6).
+"""butaca-rec — inspect, verify and compare recordings (restructure spec §5.3–§5.6).
 
-    plxnative-rec info  <dir>                 frames, event frames, present count, header
-    plxnative-rec check <dir>                 every string value is in the synthetic alphabet
-    plxnative-rec diff  <a> <b> [--unsafe]    the st streams, pointwise; --safe is the default
-    plxnative-rec import <dir> <name>         copy a CHECKED recording into tests/fixtures/replay/<name>
-    plxnative-rec rebaseline <dir> <name> --log <events.log>
+    butaca-rec info  <dir>                 frames, event frames, present count, header
+    butaca-rec check <dir>                 every string value is in the synthetic alphabet
+    butaca-rec diff  <a> <b> [--unsafe]    the st streams, pointwise; --safe is the default
+    butaca-rec import <dir> <name>         copy a CHECKED recording into tests/fixtures/replay/<name>
+    butaca-rec rebaseline <dir> <name> --log <events.log>
                                               REPLACE fixture <name> with a new recording, allowed only
                                               with a DIVERGENCE RECORD derived from the replay's own log
                                               (spec §5.5), and never for an anchor fixture
-    plxnative-rec rerecord <dir> <name>       REPLACE fixture <name> after a SHAPE bump, allowed only when
+    butaca-rec rerecord <dir> <name>       REPLACE fixture <name> after a SHAPE bump, allowed only when
                                               the committed fixture's (schema, state_fp) differs from the
                                               new recording's — i.e. the old artifact can no longer be
                                               LOADED at all. Permitted for an anchor; see below
@@ -24,13 +24,14 @@ anything `check` refuses; the committed fixture is what tests/test_harness.py ve
 "the behaviour changed and the new stream is the truth" — a judgement, which is why it costs a
 divergence record the replay itself produced, and why an ANCHOR refuses it outright (spec §5.5):
 an anchor exists precisely to make a silent behaviour drift impossible. A rerecord says something
-weaker and machine-checkable: the state SHAPE moved (`schema` or `state_fp`), so `Recording::parse`
-refuses the committed artifact before it can grade anything at all, and no divergence record can
-exist because no replay can run. Nothing is being accepted, because nothing could be compared.
-That is why an anchor may be re-recorded and may not be rebaselined, and why this verb verifies the
-condition itself rather than trusting the caller: it reads both headers and refuses when the shape
-did NOT move — which is exactly the case a rebaseline is for. The anchor flag is preserved across
-the replacement, so a re-recorded anchor is still an anchor.
+weaker and machine-checkable: the committed artifact cannot be loaded at all, because the state
+SHAPE moved (`schema` or `state_fp`) or the INITIAL moved (`init.hash`, which covers the session
+identity and so follows a rename), and the decoder refuses it before it can grade anything at all.
+No divergence record can exist because no replay can run. Nothing is being accepted, because
+nothing could be compared. That is why an anchor may be re-recorded and may not be rebaselined,
+and why this verb verifies the condition itself rather than trusting the caller: it reads all three
+fields and refuses when none of them moved — which is exactly the case a rebaseline is for. The
+anchor flag is preserved across the replacement, so a re-recorded anchor is still an anchor.
 """
 import json
 import os
@@ -261,6 +262,22 @@ def cmd_import(d, name):
     return 0
 
 
+def fixture_init_hash(d):
+    """The initial's hash from a recording's manifest, or None when it cannot be read.
+
+    `Recording::parse` accepts a stream by schema and state shape, but the sim decodes the
+    recording's `init` through `Initial::decode`, which refuses a hash this build does not
+    reproduce. That hash covers the session identity, so a rename moves it while schema and
+    state_fp stay put — the artifact then cannot be graded at all, which is the same situation
+    a shape move creates.
+    """
+    try:
+        with open(os.path.join(d, "manifest.json"), encoding="utf-8") as f:
+            return json.load(f)["init"]["hash"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def cmd_rerecord(d, name):
     """Replace a fixture whose committed shape can no longer be loaded (see the module doc)."""
     if check(d):
@@ -277,12 +294,14 @@ def cmd_rerecord(d, name):
         new = json.load(f)
     old_shape = (old.get("schema"), old.get("state_fp"))
     new_shape = (new.get("schema"), new.get("state_fp"))
-    if old_shape == new_shape:
+    old_init = fixture_init_hash(dst)
+    new_init = fixture_init_hash(d)
+    if old_shape == new_shape and old_init == new_init:
         # The committed fixture still LOADS, so a replay can grade it and a divergence record can
         # exist. Replacing it here would be accepting a behaviour change with no evidence, which
         # is the one thing this tool exists to prevent.
-        print("refused: %s still loads (schema=%s state_fp=%s unchanged) — this is a rebaseline, "
-              "not a re-record" % (name, new_shape[0], new_shape[1]))
+        print("refused: %s still loads (schema=%s state_fp=%s init=%s unchanged) — this is a "
+              "rebaseline, not a re-record" % (name, new_shape[0], new_shape[1], new_init))
         return 1
     was_anchor = bool(old.get("anchor"))
     shutil.rmtree(dst)
@@ -298,8 +317,13 @@ def cmd_rerecord(d, name):
         with open(os.path.join(dst, "manifest.json"), "w", encoding="utf-8") as f:
             json.dump(m, f, indent=1, sort_keys=True)
             f.write("\n")
-    print("re-recorded %s: shape %s -> %s%s"
-          % (name, old_shape, new_shape, " (anchor preserved)" if was_anchor else ""))
+    moved = []
+    if old_shape != new_shape:
+        moved.append("shape %s -> %s" % (old_shape, new_shape))
+    if old_init != new_init:
+        moved.append("initial %s -> %s" % (old_init, new_init))
+    print("re-recorded %s: %s%s"
+          % (name, "; ".join(moved), " (anchor preserved)" if was_anchor else ""))
     return 0
 
 

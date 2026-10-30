@@ -75,7 +75,7 @@ def parse_release_line(content: str) -> "tuple[int, int] | None":
 
 
 def expected_dev_version(appinfo_version: str, release_line_content: "str | None") -> "tuple[str | None, str | None]":
-    """The `X.Y.Z-dev` string (no `plxnative@` prefix) `rust-modules/build.rs::emit_version`
+    """The `X.Y.Z-dev` string (no `butaca@` prefix) `rust-modules/build.rs::emit_version`
     reports for a build that is not `RELEASE=1`, derived by the SAME rule build.rs documents —
     the two must never drift, which is exactly what going and re-deriving it separately here
     would risk. The arithmetic itself lives in `ci/version_rule.py::next_version_triplet`, shared
@@ -122,7 +122,7 @@ def nightly_stamp_date(stamp: str) -> "str | None":
     built with `FLAVOR=nightly` — `None` when the field is absent or is not exactly 8 digits.
 
     THE DATE IS GRADED BY VALUE, not by shape. An earlier version of this gate accepted any
-    `[0-9]{8}` in the binary's own `plxnative@X.Y.Z-nightly-YYYYMMDD` string, first with a
+    `[0-9]{8}` in the binary's own `butaca@X.Y.Z-nightly-YYYYMMDD` string, first with a
     trailing `\\b` and then with `(?![0-9])` in its place — and BOTH failed against a real nightly
     build (`0.7.0-nightly-202609192m4m6m8m10m12m14m1`), because `concat!`'s output in `.rodata` is
     packed back to back with no NUL separator: the very next packed string literal in that build
@@ -143,10 +143,10 @@ def nightly_stamp_date(stamp: str) -> "str | None":
 #
 # #138 taught a RELEASE build to fold every `/tmp` trigger away at compile time (`dev::flag`/
 # `dev::read` are `false`/`None` without `devtriggers`, so the branches behind them vanish), and
-# gave `ci/check-package.py` ONE witness of that: `DEV_WITNESS = b"plxnative-noidle"`, a name
-# `dev.rs`'s own `DIAG` array carries as a full, literal `"plxnative-noidle"` string. That witness
+# gave `ci/check-package.py` ONE witness of that: `DEV_WITNESS = b"butaca-noidle"`, a name
+# `dev.rs`'s own `DIAG` array carries as a full, literal `"butaca-noidle"` string. That witness
 # proves DIAG-as-a-whole is gated — but it names only one member of it, and every OTHER
-# `plxnative-*` name `dev.rs` (or a sibling module) treats as part of the trigger surface could
+# `butaca-*` name `dev.rs` (or a sibling module) treats as part of the trigger surface could
 # still leak into a release binary with nothing here to notice. `dev_trigger_catalog` generalises
 # the single witness to the WHOLE vocabulary those two arrays actually declare:
 #
@@ -165,28 +165,28 @@ def nightly_stamp_date(stamp: str) -> "str | None":
 # vocabulary the source actually declares this commit, never a stale snapshot of it.
 DEV_RS = ROOT / "rust-modules/src/dev.rs"
 
-# Names that are real `plxnative-*` bytes in every configuration ON PURPOSE, so a hit here is not a
+# Names that are real `butaca-*` bytes in every configuration ON PURPOSE, so a hit here is not a
 # leak — allowlisted once, with the reason, rather than excluded from the catalog silently.
 RELEASE_LEGITIMATE_TRIGGER_NAMES = {
     # The unconditional runtime sinks `dev.rs`'s own module doc calls out: they are CREATES, never
     # READS, so nothing can arm them as a behaviour switch by writing one. The first three are the
-    # C shim's private logs; `plxnative-diag.log` is the storage worker's group-readable snapshot.
-    "plxnative-events.log", "plxnative-crash.log", "plxnative-stderr.log",
-    "plxnative-diag.log",
+    # C shim's private logs; `butaca-diag.log` is the storage worker's group-readable snapshot.
+    "butaca-events.log", "butaca-crash.log", "butaca-stderr.log",
+    "butaca-diag.log",
     # The remote-key FIFO (`remote.rs`) is a shipped PRODUCTION feature, not a dev trigger, even
     # though `DIAG` also lists it (so that its presence does not suppress the who's-watching
     # picker the way an actual trigger file would).
-    "plxnative-remote",
+    "butaca-remote",
     # `ui/rec.rs:65`'s erasure list — a STABLE/nightly install deletes these leftovers from a
     # devtriggers install that shared the same system `/tmp` (AGENTS.md: `/tmp` is shared across
     # installs in both jail profiles). Deleting a name is not carrying its trigger surface.
-    "plxnative-rec", "plxnative-recplay", "plxnative-app-init", "plxnative-recordings",
+    "butaca-rec", "butaca-recplay", "butaca-app-init", "butaca-recordings",
     # `app/input.rs`'s `delete_all_local_data` erasure list — the SAME rationale as rec.rs's, for
     # the diagnostic sinks a coexisting devtriggers install could have left in the shared `/tmp`:
     # a "delete all my data" action has to clean these up regardless of which build wrote them, so
     # release code names them on purpose.
-    "plxnative-gputime.jsonl", "plxnative-gst.log", "plxnative-hwcnt.jsonl",
-    "plxnative-anim.log",
+    "butaca-gputime.jsonl", "butaca-gst.log", "butaca-hwcnt.jsonl",
+    "butaca-anim.log",
 }
 
 
@@ -199,13 +199,13 @@ def _catalog_name_in_binary(
     Rust `&str` constants are fat pointers (data + length), not NUL-terminated C strings, so the
     compiler is free to lay adjacent literals back to back with no separator at all — and it does:
     a real ARM release build was observed to contain literally
-    `...jsonlplxnative-hwcnt.jsonlloginonboardli...` as one contiguous byte run, no gap anywhere.
+    `...jsonlbutaca-hwcnt.jsonlloginonboardli...` as one contiguous byte run, no gap anywhere.
     A plain `name.encode() in blob` substring test cannot tell "the bare trigger name
-    `plxnative-hwcnt` is compiled in" from "the ALWAYS-legitimate log filename
-    `plxnative-hwcnt.jsonl` (allowlisted above) happens to start with those same bytes" — every
+    `butaca-hwcnt` is compiled in" from "the ALWAYS-legitimate log filename
+    `butaca-hwcnt.jsonl` (allowlisted above) happens to start with those same bytes" — every
     catalog name that is a string-prefix of an allowlisted longer name would misgrade as a leak
-    forever, with no source change able to turn the check green. `plxnative-anim` /
-    `plxnative-anim.log` is the same trap in the other direction.
+    forever, with no source change able to turn the check green. `butaca-anim` /
+    `butaca-anim.log` is the same trap in the other direction.
 
     A trailing word-boundary check (reject the match if the next byte looks like an identifier
     character) does NOT work here, because the packing above proves the byte right after a
@@ -230,17 +230,17 @@ def _catalog_name_in_binary(
 
 
 def parse_dev_trigger_catalog(dev_rs_text: str) -> "set[str]":
-    """Every full `plxnative-<name>` string `dev.rs`'s `CONTROLLED` and `DIAG` arrays declare,
+    """Every full `butaca-<name>` string `dev.rs`'s `CONTROLLED` and `DIAG` arrays declare,
     parsed out of the given source text (a parameter, not a file read, so this can be pinned
     against a fixture independently of whatever `dev.rs` says today — see `_selftest`).
     """
     names: "set[str]" = set()
     controlled = re.search(r"const CONTROLLED: &\[&str\] = &\[(.*?)\];", dev_rs_text, re.S)
     if controlled:
-        names.update(f'plxnative-{n}' for n in re.findall(r'"([a-z0-9_.-]+)"', controlled.group(1)))
+        names.update(f'butaca-{n}' for n in re.findall(r'"([a-z0-9_.-]+)"', controlled.group(1)))
     diag = re.search(r"const DIAG: \[&str; \d+\] = \[(.*?)\];", dev_rs_text, re.S)
     if diag:
-        names.update(re.findall(r'"(plxnative-[a-z0-9_.-]+)"', diag.group(1)))
+        names.update(re.findall(r'"(butaca-[a-z0-9_.-]+)"', diag.group(1)))
     return names
 
 
@@ -259,7 +259,7 @@ def _selftest() -> int:
     variables that no Python test can otherwise see. `make check` runs it, beside `flavor.py`'s.
     """
     maintainer_cases = {
-        "Gleb Linnik <support@plxnative.com>": True,
+        "Gleb Linnik <hnacho@proton.me>": True,
         "Gleb Linnik <GLinnik21@users.noreply.github.com>": True,
         # RFC 5322 permits `+`, but LG's Seller Lounge IPK validator rejects it.
         "Gleb Linnik <23104281+GLinnik21@users.noreply.github.com>": False,
@@ -375,22 +375,22 @@ def _selftest() -> int:
     print(f"check-package: --print-nightly-date CLI {2 - cli_bad}/2 cases correct")
 
     # ...and the actual grade, once a date is in hand: an EXACT substring, the same shape stable's
-    # own `plxnative@X.Y.Z` check already uses, no boundary assumed on either side. This is the
+    # own `butaca@X.Y.Z` check already uses, no boundary assumed on either side. This is the
     # case that defeated both earlier shape rules (`\b`, then `(?![0-9])`): a real nightly binary's
-    # own bytes, `plxnative@0.7.0-nightly-20260919` immediately followed by more digits from the
+    # own bytes, `butaca@0.7.0-nightly-20260919` immediately followed by more digits from the
     # next packed literal with no separator at all. Graded by VALUE, that adjacency is no longer
     # ambiguous — it either is that exact string, or it reports some other date, which must fail.
-    nightly_blob = b"plxnative@0.7.0-nightly-202609192m4m6m8m10m12m14m1"
+    nightly_blob = b"butaca@0.7.0-nightly-202609192m4m6m8m10m12m14m1"
     nightly_blob_cases = {
         ("0.7.0", "20260919"): True,   # the adjacent-literal case above, graded by the real date
         ("0.7.0", "20260920"): False,  # a date one day off must not pass
     }
     nightly_blob_bad = 0
     for (version, date), want in nightly_blob_cases.items():
-        got = f"plxnative@{version}-nightly-{date}".encode() in nightly_blob
+        got = f"butaca@{version}-nightly-{date}".encode() in nightly_blob
         if got != want:
             nightly_blob_bad += 1
-            print(f"  FAIL — plxnative@{version}-nightly-{date} in nightly_blob = {got!r}, want {want!r}")
+            print(f"  FAIL — butaca@{version}-nightly-{date} in nightly_blob = {got!r}, want {want!r}")
     print(f"check-package: nightly exact-substring grading "
           f"{len(nightly_blob_cases) - nightly_blob_bad}/{len(nightly_blob_cases)} cases correct")
 
@@ -406,19 +406,19 @@ const CONTROLLED: &[&str] = &[
 ];
 
 const DIAG: [&str; 6] = [
-    "plxnative-events.log",
-    "plxnative-diag.log",
-    "plxnative-remote",
-    "plxnative-noidle",
-    "plxnative-overdraw",
-    "plxnative-rec",
+    "butaca-events.log",
+    "butaca-diag.log",
+    "butaca-remote",
+    "butaca-noidle",
+    "butaca-overdraw",
+    "butaca-rec",
 ];
 '''
     got_catalog = parse_dev_trigger_catalog(catalog_fixture)
     want_catalog = {
-        "plxnative-rec", "plxnative-recplay", "plxnative-focus", "plxnative-noidle",
-        "plxnative-token", "plxnative-events.log", "plxnative-diag.log", "plxnative-remote",
-        "plxnative-overdraw",
+        "butaca-rec", "butaca-recplay", "butaca-focus", "butaca-noidle",
+        "butaca-token", "butaca-events.log", "butaca-diag.log", "butaca-remote",
+        "butaca-overdraw",
     }
     catalog_bad = 0 if got_catalog == want_catalog else 1
     if catalog_bad:
@@ -428,8 +428,8 @@ const DIAG: [&str; 6] = [
           f"{'1/1' if not catalog_bad else '0/1'} correct")
 
     unconditional_sinks = {
-        "plxnative-events.log", "plxnative-crash.log", "plxnative-stderr.log",
-        "plxnative-diag.log",
+        "butaca-events.log", "butaca-crash.log", "butaca-stderr.log",
+        "butaca-diag.log",
     }
     missing_sinks = unconditional_sinks - RELEASE_LEGITIMATE_TRIGGER_NAMES
     sinks_bad = int(bool(missing_sinks))
@@ -444,40 +444,40 @@ const DIAG: [&str; 6] = [
     # release, vacuously — the exact failure `DEV_WITNESS` shipped as, generalised to a whole set
     # instead of one string), and the historic witness must still be a member of it.
     real_catalog = dev_trigger_catalog()
-    catalog_vacuous = not real_catalog or "plxnative-noidle" not in real_catalog
+    catalog_vacuous = not real_catalog or "butaca-noidle" not in real_catalog
     if catalog_vacuous:
         print(f"  FAIL — dev_trigger_catalog() against the real dev.rs is "
-              f"{sorted(real_catalog) or 'EMPTY'} (missing plxnative-noidle)")
+              f"{sorted(real_catalog) or 'EMPTY'} (missing butaca-noidle)")
     print(f"check-package: dev_trigger_catalog() against the real dev.rs "
           f"{'is non-vacuous' if not catalog_vacuous else 'WENT VACUOUS'}")
 
     # `_catalog_name_in_binary` against the exact adjacency a real ARM release build produced
-    # (2026-09-19): `...jsonlplxnative-hwcnt.jsonlloginonboardli...`, `plxnative-hwcnt.jsonl`
+    # (2026-09-19): `...jsonlbutaca-hwcnt.jsonlloginonboardli...`, `butaca-hwcnt.jsonl`
     # (allowlisted, legitimate) packed with NO separator on either side — the next byte after its
     # own end is `l` from an unrelated `login`, not a boundary. A plain substring test grades the
-    # bare name `plxnative-hwcnt` "found" forever with no source change able to turn it green; a
+    # bare name `butaca-hwcnt` "found" forever with no source change able to turn it green; a
     # trailing-boundary-character test rejects the legitimate occurrence too, for the same reason.
     # This fixture is that literal adjacency, using a small legitimate-name set independent of the
     # real allowlist so the case pins the ALGORITHM rather than today's contents of `dev.rs`.
-    boundary_blob = b"...jsonlplxnative-hwcnt.jsonlloginonboardli..." \
-                    b"...r.logplxnative-anim.logplxnative-gst.logplx..." \
-                    b"...standaloneplxnative-hwcnt!bare-occurrence-with-no-extension..."
-    boundary_legit = {"plxnative-hwcnt.jsonl", "plxnative-anim.log", "plxnative-gst.log"}
+    boundary_blob = b"...jsonlbutaca-hwcnt.jsonlloginonboardli..." \
+                    b"...r.logbutaca-anim.logbutaca-gst.logplx..." \
+                    b"...standalonebutaca-hwcnt!bare-occurrence-with-no-extension..."
+    boundary_legit = {"butaca-hwcnt.jsonl", "butaca-anim.log", "butaca-gst.log"}
     boundary_cases = {
         # every occurrence of the bare name is fully explained by an allowlisted longer name at
         # that exact position: not a hit, even though the byte-run is present in the blob.
-        "plxnative-anim": False,
+        "butaca-anim": False,
         # one occurrence is explained (inside `.jsonl`) but a SECOND, later one is not (it is
         # followed by `!bare-occurrence…`, not any allowlisted extension) — that second one must
         # still be caught: a name is not safe just because it ALSO appears as someone else's
         # prefix somewhere else in the binary.
-        "plxnative-hwcnt": True,
+        "butaca-hwcnt": True,
         # the allowlisted longer names themselves really are present.
-        "plxnative-hwcnt.jsonl": True,
-        "plxnative-anim.log": True,
-        "plxnative-gst.log": True,
+        "butaca-hwcnt.jsonl": True,
+        "butaca-anim.log": True,
+        "butaca-gst.log": True,
         # absent from the fixture entirely.
-        "plxnative-noidle": False,
+        "butaca-noidle": False,
     }
     boundary_bad = 0
     for name, want in boundary_cases.items():
@@ -983,7 +983,7 @@ else:
 # This exists because it happened: v0.2.1 went out with the maintainer's working directory baked
 # into all three bundled FFmpeg libraries — FFmpeg records its whole configure invocation in
 # libavutil — and with it the reproducibility claim in the release notes, on the one number a user
-# has to check an unsigned download. `ci/check-elf.sh` only ever scanned `pkg/plxnative`, so
+# has to check an unsigned download. `ci/check-elf.sh` only ever scanned `pkg/butaca`, so
 # nothing looked at the libraries beside it.
 #
 # The pattern is ANCHORED on a non-path character so ordinary URL fragments do not trip it: the
@@ -1111,33 +1111,33 @@ if shipped:
 # the bytes rather than trusting the command line that produced them.
 #
 # The witness has to be a string only a `devtriggers` build emits, and almost none are: `dev.rs`
-# composes every trigger path as `paths::in_runtime_dir(format!("plxnative-{name}"))` — a bare name
+# composes every trigger path as `paths::in_runtime_dir(format!("butaca-{name}"))` — a bare name
 # joined to a root resolved at RUNTIME, which since the flavour split is not even always `/tmp` — so
 # no full trigger path is a literal anywhere BY THAT ROUTE. The previous witness here was
-# b"plxnative-autoplay" and it matched NOTHING — in EITHER configuration — so from the day it was
+# b"butaca-autoplay" and it matched NOTHING — in EITHER configuration — so from the day it was
 # written this printed "ok — the packaged binary is a RELEASE build" over CI's dev build on every
 # run, while release.yml's stamp grep carried the property alone. `dev.rs`'s DIAG list is the one
-# place the full names are literals, it is `#[cfg(feature = "devtriggers")]`, and `plxnative-noidle`
+# place the full names are literals, it is `#[cfg(feature = "devtriggers")]`, and `butaca-noidle`
 # is not one of the unconditional create-only sinks allowlisted above. Measured on the two shipped
 # artifacts — published v0.3.0 .ipk: 0 occurrences; CI's dev .ipk for 8827d32c: 2.
 #
-# ONE WITNESS NAMES ONLY ITSELF, though: every OTHER `plxnative-*` name `CONTROLLED`/`DIAG` declare
+# ONE WITNESS NAMES ONLY ITSELF, though: every OTHER `butaca-*` name `CONTROLLED`/`DIAG` declare
 # could leak by a route the `format!` argument never takes — a literal spelled directly in code
 # that sits outside the `devtriggers` gate. Two shipped that way before this check existed to catch
-# it: `ui/anim.rs`'s log sink hard-coded `"plxnative-anim.log"` in a function gated only by a
+# it: `ui/anim.rs`'s log sink hard-coded `"butaca-anim.log"` in a function gated only by a
 # runtime flag (always `false` without the feature, but still COMPILED, still IN THE BYTES), and
-# `dev/scenarios.rs`'s disabled-both diagnostic spelled `plxnative-profile`/`plxnative-hwcnt` in an
+# `dev/scenarios.rs`'s disabled-both diagnostic spelled `butaca-profile`/`butaca-hwcnt` in an
 # ungated function for the same reason. `dev_trigger_catalog()` (above) generalises the single
 # witness to the whole vocabulary `CONTROLLED`/`DIAG` name, so a THIRD leak like those two fails
 # here instead of shipping.
-binary = PAYLOAD / "plxnative"
+binary = PAYLOAD / "butaca"
 check(binary.exists(), f"the staged payload carries the binary ({binary.name})")
 
 # THE ID IS THE RULE, and it is graded whatever the stamp says — note the `if IS_STABLE`
 # below sits BESIDE the `BUILD` branch, never inside it.
 #
 # `com.butaca` is what a user installs, so a dev-featured binary under it ships the whole
-# /tmp trigger surface, the world-writable `plxnative-remote` FIFO and the `:8910` listener to the
+# /tmp trigger surface, the world-writable `butaca-remote` FIFO and the `:8910` listener to the
 # public. The Makefile's `release-guard` refuses to BUILD that; this is the same rule on the bytes,
 # which is the half that survives someone reaching for the documented `ALLOW_DEV_ON_STABLE=1`
 # hatch and forgetting.
@@ -1151,7 +1151,7 @@ check(binary.exists(), f"the staged payload carries the binary ({binary.name})")
 # THE GNU BUILD ID, which nothing else in this repo would notice the loss of.
 #
 # It is the only identifier that survives `strip` into the binary a user runs, and therefore the
-# only thing that can match a separated `pkg/plxnative.debug` back to a crash reported from a
+# only thing that can match a separated `pkg/butaca.debug` back to a crash reported from a
 # television. Dropping `-Wl,--build-id=sha1` from the link would break every future symbolication
 # silently: the package builds, installs, runs and crashes exactly as before, and the failure
 # surfaces months later as a debug file that matches nothing — by which time the build that
@@ -1213,11 +1213,11 @@ if binary.exists():
     # applies, so this gate and the binary it grades can never quietly diverge on which arithmetic
     # applies to this checkout.
     #
-    # MATCHED WITH THE `plxnative@` PREFIX, not as a bare number, and that is the difference
+    # MATCHED WITH THE `butaca@` PREFIX, not as a bare number, and that is the difference
     # between grading `PLX_VERSION` and grading whatever digits happen to be in .rodata: the About
     # page and any release note text carry the version too, so a bare-number search was satisfiable
     # by a page the version mechanism never touched. `telemetry::{crashreport,native,playback}`
-    # compose `concat!("plxnative@", env!("PLX_VERSION"))` in every configuration — telemetry is
+    # compose `concat!("butaca@", env!("PLX_VERSION"))` in every configuration — telemetry is
     # ungated on purpose — so this witnesses the emitted value itself.
     #
     # NIGHTLY IS GRADED SEPARATELY. Its package version (`appinfo["version"]`, already checked
@@ -1245,17 +1245,17 @@ if binary.exists():
               "pkg/.build-config carries a +nightly:<8 digit date> field "
               f"(stamp was {STAMP_TEXT.strip()!r})")
         if nightly_date is not None:
-            nightly_expect = f"plxnative@{appinfo['version']}-nightly-{nightly_date}".encode()
+            nightly_expect = f"butaca@{appinfo['version']}-nightly-{nightly_date}".encode()
             nightly_found = nightly_expect in blob
             nightly_msg = (f"the {PACKAGED_ID} binary reports {nightly_expect.decode()} "
                             "(build.rs's PLX_CHANNEL=nightly arm, dated by the pkg/.build-config "
                             "+nightly: stamp)")
             if not nightly_found:
-                # Self-explaining on failure: list what the binary DOES carry after `plxnative@`,
+                # Self-explaining on failure: list what the binary DOES carry after `butaca@`,
                 # rather than leaving the next person to go re-derive it from a raw `strings` dump.
                 seen = [m.decode("utf-8", errors="replace")
-                        for m in re.findall(rb"plxnative@[0-9A-Za-z.\-]{1,40}", blob)[:5]]
-                nightly_msg += f" — plxnative@ strings actually present: {seen}"
+                        for m in re.findall(rb"butaca@[0-9A-Za-z.\-]{1,40}", blob)[:5]]
+                nightly_msg += f" — butaca@ strings actually present: {seen}"
             check(nightly_found, nightly_msg)
         # Nightly is always RELEASE=1 (release-guard refuses otherwise) — grade that on the stamp
         # too, the same way the dev-trigger witness above grades it on the bytes.
@@ -1272,7 +1272,7 @@ if binary.exists():
             # already reported as broken.
             _major, _minor, _ = (int(x) for x in appinfo["version"].split("."))
             _dev_version_str = f"{_major}.{_minor + 1}.0-dev"
-        DEV_VERSION = f"plxnative@{_dev_version_str}".encode()
+        DEV_VERSION = f"butaca@{_dev_version_str}".encode()
         #
         # The id is a rule of its own here too, so it sits BESIDE the stamp branch rather than
         # inside it: whatever configuration produced it, the package users install may not claim a
@@ -1282,7 +1282,7 @@ if binary.exists():
             check(not says_dev,
                   f"the {PACKAGED_ID} binary reports a released version, not {DEV_VERSION.decode()}"
                   " (build.rs adds the suffix unless PLX_RELEASE is set — RELEASE=1 exports it)")
-            check(f'plxnative@{appinfo["version"]}'.encode() in blob,
+            check(f'butaca@{appinfo["version"]}'.encode() in blob,
                   f'the {PACKAGED_ID} binary reports the packaged version ({appinfo["version"]})')
         # ...and the configuration is the other half. A `RELEASE=1` build of ANY flavour reports
         # the exact version — `make FLAVOR=debug RELEASE=1 ipk` is a real combination, the
@@ -1473,8 +1473,8 @@ for loc in staged_locales:
     check(set(staged_loc) == LOCALIZED_KEYS,
           f"staged {loc}/appinfo.json carries exactly {sorted(LOCALIZED_KEYS)} (saw {sorted(staged_loc)})")
     # THE flavour assertion, and the only one that can fail for the debug package alone: a localized
-    # descriptor overrides the top-level one, so a tile reading `PlxNative debug` in English and
-    # `PlxNative` in Korean is two installs that cannot be told apart on a Korean set.
+    # descriptor overrides the top-level one, so a tile reading `Butaca debug` in English and
+    # `Butaca` in Korean is two installs that cannot be told apart on a Korean set.
     check(staged_loc.get("title") == appinfo["title"],
           f'staged {loc}/appinfo.json title == the staged top-level title ({appinfo["title"]!r})')
     if loc in tracked_locales:
@@ -1485,7 +1485,7 @@ for loc in staged_locales:
 print("== ipk payload ==")
 expected = {
     # No sentry-crash: this fork ships no crash daemon (the Makefile is sentry-free).
-    "plxnative", "libass-plx.so.0", "appinfo.json", "icon.png", "largeIcon.png", "splash.png",
+    "butaca", "libass-plx.so.0", "appinfo.json", "icon.png", "largeIcon.png", "splash.png",
     # appfont-cjk.ttf is the fallback face. Its absence is not a cosmetic loss: every Korean,
     # Japanese and Chinese title in the library becomes tofu, which is LG checklist #6 and #48.
     "appfont.ttf", "appfont-bold.ttf", "appfont-cjk.ttf", "OFL.txt",
@@ -1512,7 +1512,7 @@ if data_blob is not None:
         paths = {m.name.lstrip("./") for m in members}
         owners = {(m.uname, m.gname) for m in members}
     check(expected <= names, f"payload carries all {len(expected)} app files")
-    check(modes.get("plxnative") == 0o755,
+    check(modes.get("butaca") == 0o755,
           "native app is executable by its jailed runtime uid")
     check("sentry-crash" not in names,
           "no crash daemon in the archive (this fork ships none)")
@@ -1541,7 +1541,7 @@ if data_blob is not None:
     # STABLE ID AT ALL.** `pkg/lab.json` carries a live bearer secret and an endpoint on the
     # developer's own router (`docs/lab-diagnostics.md`); it reaches the payload only through
     # `make LAB=1`, whose `LAB_FILES` adds it. The failure this catches is a leftover: the file is
-    # written by `tools/plxnative-lab start` and is not removed by anything, so the NEXT ordinary
+    # written by `tools/butaca-lab start` and is not removed by anything, so the NEXT ordinary
     # `make ipk` in that tree would ship it if the Makefile's condition were ever loosened — and
     # the artifact would look completely normal. `LAB` is read from the environment because that
     # is how `make` was invoked; the assertion is one-directional on purpose (a lab build MAY
@@ -1553,11 +1553,11 @@ if data_blob is not None:
     check(not (has_lab and IS_STABLE),
           "the stable id never carries a lab session file")
     # A recording (restructure spec §5.3, `ui/rec.rs`) is the household's every keypress and every
-    # server answer; it lives in the runtime root's plxnative-recordings/ and nothing stages it — but a
+    # server answer; it lives in the runtime root's butaca-recordings/ and nothing stages it — but a
     # package that carried one would look completely normal, so the absence is asserted.
-    rec_paths = [p for p in paths if "plxnative-recordings" in p or p.endswith(".jsonl")]
+    rec_paths = [p for p in paths if "butaca-recordings" in p or p.endswith(".jsonl")]
     check(not rec_paths,
-          "payload carries no recorder artefacts (plxnative-recordings/, *.jsonl): %s" % rec_paths[:3])
+          "payload carries no recorder artefacts (butaca-recordings/, *.jsonl): %s" % rec_paths[:3])
     missing = [loc for loc in tracked_locales
                if f'usr/palm/applications/{appinfo["id"]}/resources/{loc}/appinfo.json' not in paths]
     check(not missing,

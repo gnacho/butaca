@@ -20,7 +20,7 @@ fn concurrent_session_change_after_attachment_rolls_back_only_this_attempt() {
     let temp = session::TempSession::new("recording-attachment-race");
     temp.assert_only_target();
     let root = temp.path().parent().unwrap().to_path_buf();
-    let latest = root.join("plxnative-recordings/latest");
+    let latest = root.join("butaca-recordings/latest");
     std::fs::create_dir_all(&latest).unwrap();
     std::fs::write(
         latest.join("preexisting-sentinel"),
@@ -31,7 +31,7 @@ fn concurrent_session_change_after_attachment_rolls_back_only_this_attempt() {
     std::fs::create_dir(&external).unwrap();
     std::fs::write(external.join("sentinel"), b"keep external target").unwrap();
     std::os::unix::fs::symlink(&external, latest.join("preexisting-link")).unwrap();
-    std::fs::write(root.join("plxnative-recplay"), external.to_str().unwrap()).unwrap();
+    std::fs::write(root.join("butaca-recplay"), external.to_str().unwrap()).unwrap();
 
     let (saved, entropy, deferred) = session::load_capturing_entropy();
     let initial = initial_for(saved, entropy);
@@ -69,7 +69,7 @@ fn concurrent_session_change_after_attachment_rolls_back_only_this_attempt() {
         std::fs::read(external.join("sentinel")).unwrap(),
         b"keep external target"
     );
-    assert!(root.join("plxnative-recplay").exists());
+    assert!(root.join("butaca-recplay").exists());
 
     let (saved, entropy, deferred) = session::load_capturing_entropy();
     let initial = initial_for(saved, entropy);

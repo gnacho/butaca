@@ -13,8 +13,8 @@ use std::time::Duration;
 const EXEC_URI: &str = "luna://org.webosbrew.hbchannel.service/exec";
 #[cfg(all(not(feature = "hostsim"), not(test)))]
 const BUDGET: Duration = Duration::from_secs(10);
-const OK_MARKER: &str = "PLXNATIVE_JAIL_REPAIR_OK_74";
-const NOT_ROOT_MARKER: &str = "PLXNATIVE_JAIL_REPAIR_NOT_ROOT_74";
+const OK_MARKER: &str = "BUTACA_JAIL_REPAIR_OK_74";
+const NOT_ROOT_MARKER: &str = "BUTACA_JAIL_REPAIR_NOT_ROOT_74";
 const HBC_ABSENT_TEXT: &str = "Service does not exist: org.webosbrew.hbchannel.service.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,7 +37,7 @@ impl Failure {
     #[allow(dead_code)]
     pub(crate) const fn message(self) -> &'static str {
         match self {
-            Self::StartFailed => "Could not start the repair. Close and reopen PlxNative to try again.",
+            Self::StartFailed => "Could not start the repair. Close and reopen Butaca to try again.",
             Self::HbcUnavailable => "Homebrew Channel service is unavailable.",
             Self::NotRoot => "Homebrew Channel service is not running as root.",
             Self::CommandFailed => "The sandbox repair command failed.",
@@ -171,8 +171,8 @@ mod tests {
         for output in [
             "",
             "ok",
-            "PLXNATIVE_JAIL_REPAIR_OK_74\n",
-            "PLXNATIVE_JAIL_REPAIR_OK_74 extra",
+            "BUTACA_JAIL_REPAIR_OK_74\n",
+            "BUTACA_JAIL_REPAIR_OK_74 extra",
         ] {
             assert_eq!(
                 repair(|_| Ok(reply(output)), &dir(id), id, || true),
@@ -222,14 +222,14 @@ mod tests {
         let called = std::cell::Cell::new(false);
         for (path, id) in [
             (dir("com.evil"), "com.evil"),
-            (dir("com.beb.plxnative.bad;id"), "com.beb.plxnative.bad;id"),
+            (dir("com.butaca.bad;id"), "com.butaca.bad;id"),
             (
-                PathBuf::from("/tmp/com.beb.plxnative"),
+                PathBuf::from("/tmp/com.butaca"),
                 crate::paths::STABLE_APP_ID,
             ),
             (
                 PathBuf::from(
-                    "/media/developer/apps/usr/palm/applications/com.beb.plxnative.debug",
+                    "/media/developer/apps/usr/palm/applications/com.butaca.debug",
                 ),
                 crate::paths::STABLE_APP_ID,
             ),

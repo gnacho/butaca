@@ -3,7 +3,7 @@
   "version": "0.7.0",
   "vendor": "gnacho",
   "type": "native",
-  "main": "plxnative",
+  "main": "butaca",
   "title": "Butaca",
   "appDescription": "Unofficial native Jellyfin client - not affiliated with Jellyfin",
   "icon": "icon.png",

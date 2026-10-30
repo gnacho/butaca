@@ -38,13 +38,13 @@ fn only_current_inner_instance_can_project_remembered_selection() {
 
 /// **A Pop that would empty the inner stack is the surface's dismissal, not a surface left up
 /// with no page in it.** The configuration is the real one:
-/// `/tmp/plxnative-settings=privacy` roots the surface AT Privacy & data, and that page's
+/// `/tmp/butaca-settings=privacy` roots the surface AT Privacy & data, and that page's
 /// Done (`consent::band_commit`'s Settings arm) emits a bare `Fx::Nav(NavOp::Pop)` — correct
 /// when Privacy sits over the Settings root, and one entry too many here. `NavStack` has no
 /// depth guard of its own, so before the fix this retired the only entry and left `top_mut()`
 /// at `None` while `at_rest()` stayed true: scrim and ground still drawn, input still owned,
 /// no page, no hit stops, and no key that could reach it. `onboard::leave`'s settings arm and
-/// `/tmp/plxnative-settings=home` are the same pair.
+/// `/tmp/butaca-settings=home` are the same pair.
 #[test]
 fn a_pop_that_would_empty_the_stack_dismisses_the_surface_instead() {
     let _g = crate::testlock::serial();

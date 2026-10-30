@@ -41,11 +41,11 @@ the row springs settle. The result is close to 60 FPS, not a claim of a locked
 
 Local evidence bundles:
 
-- `/tmp/plxnative-episode-fps-motion-valid`
-- `/tmp/plxnative-grid-two-pass-collapsed`
-- `/tmp/plxnative-grid-packed-collapsed`
-- `/tmp/plxnative-grid-final-confirmation`
-- `/tmp/plxnative-grid-controls-cull` (final, including `pacing.json`)
+- `/tmp/butaca-episode-fps-motion-valid`
+- `/tmp/butaca-grid-two-pass-collapsed`
+- `/tmp/butaca-grid-packed-collapsed`
+- `/tmp/butaca-grid-final-confirmation`
+- `/tmp/butaca-grid-controls-cull` (final, including `pacing.json`)
 
 ## Changes responsible for the improvement
 

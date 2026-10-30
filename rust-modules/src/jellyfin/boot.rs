@@ -4,7 +4,7 @@
 //! install carries, authenticating against the server it names, and installing the resulting
 //! client for the stores to find. The config is searched in this order, first hit wins:
 //!
-//! 1. `/tmp/plxnative-jellyfin` — the dev trigger, so the on-device harness (and a quick
+//! 1. `/tmp/butaca-jellyfin` — the dev trigger, so the on-device harness (and a quick
 //!    `make run` iteration) can point a build at a server without touching persistent state.
 //!    Like every `/tmp` file on the TV it does not survive a reboot.
 //! 2. `/media/developer/<app id>-jellyfin.json` — the persistent one, beside the session file
@@ -195,7 +195,7 @@ pub(crate) fn try_boot() -> bool {
 pub(crate) fn load_servers() -> Option<ServerList> {
     // 1. the dev trigger
     if let Some(raw) = crate::dev::read("jellyfin") {
-        // Not the literal path: the tmppath gate keeps `/tmp/plxnative-` spellings inside dev.rs,
+        // Not the literal path: the tmppath gate keeps `/tmp/butaca-` spellings inside dev.rs,
         // and `dev::read` already owns that path. The label only feeds the log line.
         return parse_config(&raw, "dev trigger (jellyfin)");
     }

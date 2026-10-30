@@ -11,9 +11,9 @@ description: >
 
 # Crash triage on the TV
 
-> **Alive is a different evidence path.** If `fuser <appdir>/plxnative` still returns a PID but
+> **Alive is a different evidence path.** If `fuser <appdir>/butaca` still returns a PID but
 > `loop=` has stopped or the UI is frozen, use the **`profile-tv`** skill and
-> `tools/plxnative-sample`; a crash report cannot explain a process that never died.
+> `tools/butaca-sample`; a crash report cannot explain a process that never died.
 
 > **Collecting evidence is read-only and needs no lock** (`tools/crash-report.sh`, `tv-session.sh
 > log`) — but the moment you RE-RUN to reproduce, take the television's lock first:
@@ -26,7 +26,7 @@ stack, and unwinds every other Linux LWP remotely through libunwind's ptrace acc
 with function names), attaching and detaching per thread. It records up to 128 frames for the
 crashing thread plus up to 32 for each other thread, registers, modules, Linux/webOS versions and
 build ids. Its transport is disabled; the next
-healthy PlxNative launch sanitises the envelope and sends it from the ordinary telemetry spool.
+healthy Butaca launch sanitises the envelope and sends it from the ordinary telemetry spool.
 That Sentry event **is a
 backtrace** when it contains multiple frames.
 
@@ -80,17 +80,17 @@ All paths are relative to the repo root. The TV address comes from the `Makefile
 
 ## First: which install crashed
 
-Three builds can be on this television — `com.beb.plxnative` (stable, what users install),
-`com.beb.plxnative.debug` (the developer build beside it, and the Makefile's **default**), and
-`com.beb.plxnative.nightly` (the nightly build, its own install beside the other two). Each has
+Three builds can be on this television — `com.butaca` (stable, what users install),
+`com.butaca.debug` (the developer build beside it, and the Makefile's **default**), and
+`com.butaca.nightly` (the nightly build, its own install beside the other two). Each has
 its own app directory, its own runtime root and therefore its own **crash log**, so triaging the
 wrong one produces a clean bill of health for an app that is dying. Ask the Makefile rather than
 typing a path:
 
 ```bash
-make -s print-appid    FLAVOR=debug     # com.beb.plxnative.debug
+make -s print-appid    FLAVOR=debug     # com.butaca.debug
 make -s print-appdir   FLAVOR=debug     # where the binary and the .so files are
-make -s print-rundir   FLAVOR=debug     # /tmp/com.beb.plxnative.debug   (stable: /tmp)
+make -s print-rundir   FLAVOR=debug     # /tmp/com.butaca.debug   (stable: /tmp)
 make -s print-eventlog FLAVOR=debug
 ```
 
@@ -118,13 +118,13 @@ and then dumps stderr, the SAM exit status and the crash-daemon reports.
    before triaging anything.
 2. **Is the deployed binary the one you built?** A standby can truncate an scp mid-deploy.
    The driver md5-compares; on mismatch, symbolized addresses are meaningless. With two
-   installs the check is **necessary but no longer sufficient**: `pkg/plxnative` is a path
+   installs the check is **necessary but no longer sufficient**: `pkg/butaca` is a path
    every flavour and both configurations write, so a MATCH proves the bytes and not the
    install, and a MISMATCH is at least as likely to mean you are pointed at the other app as
    at a bad scp. Settle it with the `install:` line, not by deploying — see the table below.
-   `pidof plxnative` cannot settle it either: both binaries carry that name, so on this
+   `pidof butaca` cannot settle it either: both binaries carry that name, so on this
    busybox set it returns two pids in an order nothing promises. Liveness is
-   `fuser $(make -s print-appdir FLAVOR=<f>)/plxnative`, which is inode-scoped.
+   `fuser $(make -s print-appdir FLAVOR=<f>)/butaca`, which is inode-scoped.
 3. **Did it actually crash?** SAM keeps stale "running" state after a hard kill, so a
    launch can be a silent no-op relaunch. Check the SAM `exit_status` in the driver's
    output: a clean exit shows `exit_status: 0`; `768` is `exit(3)`; a signal death shows
@@ -138,10 +138,10 @@ a path typed from memory reads the wrong app's log without erroring.
 
 | Log | Lifetime |
 |---|---|
-| `<rundir>/plxnative-crash.log` | **append-only, survives the relaunch** — read this after a crash+restart |
-| `<rundir>/plxnative-events.log` | truncated at every launch — after a relaunch it is already gone |
-| `<rundir>/plxnative-stderr.log` | where Rust panics print |
-| `<rundir>/plxnative-diag.log` | atomically replaced storage-stage snapshot, 0640, at most 16 KiB; no account data or paths |
+| `<rundir>/butaca-crash.log` | **append-only, survives the relaunch** — read this after a crash+restart |
+| `<rundir>/butaca-events.log` | truncated at every launch — after a relaunch it is already gone |
+| `<rundir>/butaca-stderr.log` | where Rust panics print |
+| `<rundir>/butaca-diag.log` | atomically replaced storage-stage snapshot, 0640, at most 16 KiB; no account data or paths |
 
 Events, crash and stderr remain 0600. The storage snapshot is group-readable for a shell sharing
 its gid and records build identity, directory write probes and helper/activation outcomes. A failed
@@ -150,7 +150,7 @@ publication preserves the prior snapshot; it is not proof that the current proce
 **The event log's FIRST line names the install**, before anything can fail, so use it to identify the crashing process:
 
 ```
-install: id=com.beb.plxnative.debug flavour=debug runtime=/tmp/com.beb.plxnative.debug features=dev APPID_env=…
+install: id=com.butaca.debug flavour=debug runtime=/tmp/com.butaca.debug features=dev APPID_env=…
 appdir: /media/… (from current_exe)
 ```
 
@@ -175,7 +175,7 @@ and it is worse than none, for the reason in the gotchas below.
   (must be `0`) and the CPU arch tag (must be `v7`); a stale hand-built staticlib is the
   usual cause. No log will tell you this.
 - **SIGABRT / SIGTRAP (6 / 5)** — usually a **Rust panic** crossing the FFI boundary. The
-  PC is inside `abort()` and is worthless; the evidence is `<rundir>/plxnative-stderr.log`.
+  PC is inside `abort()` and is worthless; the evidence is `<rundir>/butaca-stderr.log`.
 - **SIGFPE / SIGSYS (8 / 31)** — arithmetic trap or a rejected system call. They are uncommon,
   but both Sentry and the local tracer cover them so an internal daemon write failure still leaves
   a bounded record.
@@ -201,7 +201,7 @@ own — hence the `touch`. Verified output after that: `plex_run at rust-modules
 
 ## Prove the tracer works before reading its silence
 
-An empty `plxnative-crash.log` means one of two things and they are opposite: nothing crashed, or
+An empty `butaca-crash.log` means one of two things and they are opposite: nothing crashed, or
 the recorder is broken. **Two of the three ways this recorder can be broken have actually happened**
 — it spent seven weeks re-raising nothing, and before that it `_exit(3)`d — and in both cases the
 log looked entirely normal. So when a crash is suspected and the log is empty, fault the app on
@@ -211,7 +211,7 @@ purpose and check the recorder end to end.
 tools/tv-lock.sh acquire --why "prove the crash tracer"
 make deploy                                     # a devtriggers build; RELEASE=1 compiles this out
 RUN=$(make -s print-rundir)
-ssh root@"$(make -s print-tv)" "echo segv > $RUN/plxnative-crashtest"
+ssh root@"$(make -s print-tv)" "echo segv > $RUN/butaca-crashtest"
 make run RUN_SECS=12                            # it will die at once, on purpose
 tools/crash-report.sh                           # the record, symbolized
 ```
@@ -235,12 +235,12 @@ Four things to check, and the third and fourth are the ones no host test can rea
 `ill`, `trap` — go through `raise` and prove five of the seven `sigaction` calls took, but their PC
 points into `raise` and is worth nothing.
 
-**Clear the trigger afterwards.** `tests/run.py` sweeps `plxnative-*` on exit; `make run` does not,
+**Clear the trigger afterwards.** `tests/run.py` sweeps `butaca-*` on exit; `make run` does not,
 so a by-hand session leaves it armed and the next launch dies too — which reads exactly like the
 app having become unlaunchable.
 
 ```bash
-ssh root@"$(make -s print-tv)" "rm -f $RUN/plxnative-crashtest"
+ssh root@"$(make -s print-tv)" "rm -f $RUN/butaca-crashtest"
 ```
 
 ## Gotchas
@@ -254,15 +254,15 @@ ssh root@"$(make -s print-tv)" "rm -f $RUN/plxnative-crashtest"
   backtraces there. Do not confuse LG's absent `crashd` output with the app's shipped
   `sentry-crash` daemon: the latter hands its envelope to the telemetry queue and normally leaves
   no report file behind after a healthy restart. For consent-off/unconfigured builds, use
-  `pkg/plxnative.debug` and `addr2line` on the local fault event.
-- **Older notes say `/tmp/poc-*`.** The app was renamed; the names are all `plxnative-*` now,
+  `pkg/butaca.debug` and `addr2line` on the local fault event.
+- **Older notes say `/tmp/poc-*`.** The app was renamed; the names are all `butaca-*` now,
   and they sit in the install's runtime root rather than always in `/tmp`.
-- **`com.beb.plxnative` is a PREFIX of `com.beb.plxnative.debug`.** Anything that picks a crash
+- **`com.butaca` is a PREFIX of `com.butaca.debug`.** Anything that picks a crash
   block, a maps line or a log by app-directory path must anchor on a delimiter — match `/<id>/`,
   never the bare id — or every stable-id filter silently accepts the debug install's evidence too
   and you symbolize one app's addresses against the other's binary. `src/main.c`'s `bin:` matcher
-  documents the same trap one level down: it tests `/plxnative\n` and `/plxnative ` rather than a
-  bare substring, because the app directory is itself named `…com.beb.plxnative/` and a loose test
+  documents the same trap one level down: it tests `/butaca\n` and `/butaca ` rather than a
+  bare substring, because the app directory is itself named `…com.butaca/` and a loose test
   also matched libraries deployed beside the binary.
 - **A guard-page allocator exists** for memory-corruption hunts (`src/gpdebug.c`, never in
   the normal build) — reach for it when a SIGSEGV moves around between runs.

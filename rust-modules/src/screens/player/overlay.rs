@@ -347,7 +347,7 @@ impl PlayerOverlayScreen {
         }
     }
 
-    /// Resolve `/tmp/plxnative-menupick`'s second field to an absolute row: a plain row number
+    /// Resolve `/tmp/butaca-menupick`'s second field to an absolute row: a plain row number
     /// parses as itself (the original contract); otherwise, on the Audio tab only, it is tried as
     /// a NAMED target (`"boost"`/`"loudness"`) through
     /// [`crate::ui::track_menu::TrackMenuState::row_for_audio_target`]. `None` when neither
@@ -362,7 +362,7 @@ impl PlayerOverlayScreen {
         }
     }
 
-    /// **The headless track pick** (`/tmp/plxnative-menupick=<tab>,<row>`): seat the cursor on
+    /// **The headless track pick** (`/tmp/butaca-menupick=<tab>,<row>`): seat the cursor on
     /// `row` and confirm it, exactly as a viewer's DOWN…DOWN…OK would. It is a method rather than
     /// two calls at the trigger's site because the panel's state is an INSTANCE now — the trigger
     /// presents the surface and the body is mounted at nav commit, a frame later — so the loop

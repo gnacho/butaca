@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build `PlxNative.app` — the app core as a SELF-CONTAINED macOS application.
+"""Build `Butaca.app` — the app core as a SELF-CONTAINED macOS application.
 
 This is the `hostsim` build (`rust-modules/src/bin/sim.rs`): the same UI, the same Plex data layer
 and the same event loop the television runs, wrapped in a bundle that carries its own SDL, its own
@@ -119,16 +119,16 @@ def build_binary(tdir: Path) -> Path:
     """Cargo, release, with BOTH dev features off.
 
     `--no-default-features` drops `devtools` (the on-screen counter) and `devtriggers` (the whole
-    `/tmp/plxnative-*` surface, the remote FIFO and the capture listener). A binary somebody was
+    `/tmp/butaca-*` surface, the remote FIFO and the capture listener). A binary somebody was
     sent must not take instructions from a world-writable directory — and with the feature off
     there is nothing to take: `dev::flag` is `false` and `dev::read` is `None` at COMPILE time.
     """
-    print("==> building plxnative-sim (release, no dev features)")
+    print("==> building butaca-sim (release, no dev features)")
     run("cargo", "build", "--manifest-path", REPO / "rust-modules/Cargo.toml",
         "--target-dir", tdir, "--release", "--no-default-features",
-        "--features", "hostsim", "--bin", "plxnative-sim",
+        "--features", "hostsim", "--bin", "butaca-sim",
         env=dict(os.environ, CARGO_INCREMENTAL="0"))
-    return tdir / "release/plxnative-sim"
+    return tdir / "release/butaca-sim"
 
 
 def write_icon(res: Path):
@@ -153,10 +153,10 @@ def write_plist(contents: Path, ver: str):
     same 1:1 texel contract the television renders under. Without it the OS hands back a
     half-resolution surface and doubles the whole interface."""
     plist = {
-        "CFBundleName": "PlxNative",
-        "CFBundleDisplayName": "PlxNative",
-        "CFBundleExecutable": "PlxNative",
-        "CFBundleIdentifier": "com.beb.plxnative",
+        "CFBundleName": "Butaca",
+        "CFBundleDisplayName": "Butaca",
+        "CFBundleExecutable": "Butaca",
+        "CFBundleIdentifier": "com.butaca",
         "CFBundleIconFile": "AppIcon",
         "CFBundleInfoDictionaryVersion": "6.0",
         "CFBundlePackageType": "APPL",
@@ -166,7 +166,7 @@ def write_plist(contents: Path, ver: str):
         "CFBundleVersion": package_version(),
         # Free-form by definition, and the one plist field that may carry the suffix. It is what
         # Finder's Get Info shows, so "which build is this?" is answerable without launching it.
-        "CFBundleGetInfoString": f"PlxNative {ver}",
+        "CFBundleGetInfoString": f"Butaca {ver}",
         "LSMinimumSystemVersion": "11.0",
         "NSHighResolutionCapable": True,
         "NSHumanReadableCopyright":
@@ -174,7 +174,7 @@ def write_plist(contents: Path, ver: str):
         # macOS 15+ asks before letting an app reach the LAN, and a Plex client that cannot is
         # useless. The string is what the person sees in that prompt, so it says why.
         "NSLocalNetworkUsageDescription":
-            "PlxNative streams from a Plex Media Server on your local network.",
+            "Butaca streams from a Plex Media Server on your local network.",
     }
     (contents / "Info.plist").write_bytes(plistlib.dumps(plist))
 
@@ -259,7 +259,7 @@ def main():
 
     ver = version()
     out = Path(args.out)
-    app = out / "PlxNative.app"
+    app = out / "Butaca.app"
     contents, = (app / "Contents",)
     macos, frameworks, res = contents / "MacOS", contents / "Frameworks", contents / "Resources"
 
@@ -271,8 +271,8 @@ def main():
         shutil.rmtree(app)
     for d in (macos, frameworks, res):
         d.mkdir(parents=True)
-    shutil.copy2(binary, macos / "PlxNative")
-    (macos / "PlxNative").chmod(0o755)
+    shutil.copy2(binary, macos / "Butaca")
+    (macos / "Butaca").chmod(0o755)
 
     # paths::app_dir resolves Contents/Resources: both fonts and the dynamically
     # loaded native subtitle renderer must be placed there.
@@ -286,11 +286,11 @@ def main():
     write_icon(res)
     write_plist(contents, ver)
 
-    bundle_libraries(macos / "PlxNative", frameworks)
+    bundle_libraries(macos / "Butaca", frameworks)
     bundle_dlopened_sdl3(frameworks)
     # One rpath, on the executable: every rewritten reference is `@rpath/<leaf>` and resolves
     # through it, including the ones inside the bundled libraries themselves.
-    run("install_name_tool", "-add_rpath", "@executable_path/../Frameworks", macos / "PlxNative")
+    run("install_name_tool", "-add_rpath", "@executable_path/../Frameworks", macos / "Butaca")
     verify_self_contained(macos, frameworks, res)
 
     # Ad-hoc signing is what is available without a paid Developer ID: it satisfies Apple Silicon's
@@ -304,10 +304,10 @@ def main():
 
     readme = REPO / "docs/macos-app-readme.md"
     if readme.exists():
-        shutil.copy2(readme, out / "PlxNative-README.md")
+        shutil.copy2(readme, out / "Butaca-README.md")
 
     if args.zip:
-        zip_path = out / f"PlxNative-{ver}-{platform.machine()}.zip"
+        zip_path = out / f"Butaca-{ver}-{platform.machine()}.zip"
         zip_path.unlink(missing_ok=True)
         # ditto, not zipfile: it is the tool that preserves the extended attributes and symlink
         # layout a signed bundle needs. A plain zip can arrive with a broken signature.

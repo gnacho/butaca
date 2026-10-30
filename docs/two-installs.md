@@ -1,7 +1,7 @@
 # Two installs on one television
 
 **This document predates the nightly flavour.** A third flavour, `FLAVOR=nightly`
-(`com.beb.plxnative.nightly`, port 8912), has since landed, and nightly is the one flavour that
+(`com.butaca.nightly`, port 8912), has since landed, and nightly is the one flavour that
 feeds a codegen input — `PLX_CHANNEL` / `PLX_NIGHTLY_DATE` into `build.rs`'s reported version. See
 `docs/agent-reference.md` for the current account; the body below still only describes stable and
 debug.
@@ -16,13 +16,13 @@ damage a wrong assumption does, and the first item is the one the whole change e
 safe: **the ACB video bind under a second app id.**
 
 The mechanism is deliberately small. There is one axis — `FLAVOR` — one derived id, one derived
-runtime root, and no codegen input anywhere. `pkg/plxnative` is still one artifact.
+runtime root, and no codegen input anywhere. `pkg/butaca` is still one artifact.
 
 ---
 
 ## 1. What this prevents
 
-`make deploy` scp's a binary into `/media/developer/apps/usr/palm/applications/com.beb.plxnative/`.
+`make deploy` scp's a binary into `/media/developer/apps/usr/palm/applications/com.butaca/`.
 That directory is the app the household watches with. Every deploy overwrote it — with a debug
 build, with a half-finished feature, with whatever was on the branch — and there was no way to keep
 a working copy while developing, because there was exactly one place a copy could go.
@@ -37,13 +37,13 @@ So: two ids, two installs, two tiles.
 
 | | stable | debug |
 | --- | --- | --- |
-| app id | `com.beb.plxnative` | `com.beb.plxnative.debug` |
-| install dir | `…/applications/com.beb.plxnative` | `…/applications/com.beb.plxnative.debug` |
-| runtime root | `/tmp` | `/tmp/com.beb.plxnative.debug` |
-| session file | `/media/developer/com.beb.plxnative-auth.json` | `/media/developer/com.beb.plxnative.debug-auth.json` |
-| launcher title | `PlxNative` | `PlxNative debug` |
+| app id | `com.butaca` | `com.butaca.debug` |
+| install dir | `…/applications/com.butaca` | `…/applications/com.butaca.debug` |
+| runtime root | `/tmp` | `/tmp/com.butaca.debug` |
+| session file | `/media/developer/com.butaca-auth.json` | `/media/developer/com.butaca.debug-auth.json` |
+| launcher title | `Butaca` | `Butaca debug` |
 | launcher artwork | `pkg/icon.png` | `pkg/dev/icon.png` (amber DEV bar; nightly: `pkg/nightly/`, grey NIGHTLY bar) |
-| plex.tv device name | `PlxNative (LG TV)` | `PlxNative debug (LG TV)` |
+| plex.tv device name | `Butaca (LG TV)` | `Butaca debug (LG TV)` |
 
 **`FLAVOR ?= debug`, in the tracked Makefile.** The asymmetry is deliberate and it is the whole
 safety argument: every command in this repo's muscle memory is spelled `make deploy` / `make run` /
@@ -60,10 +60,10 @@ learn any of this, and they are real echo recipes:
 
 ```sh
 make -s print-flavor   FLAVOR=debug     # debug
-make -s print-appid    FLAVOR=debug     # com.beb.plxnative.debug
-make -s print-appdir   FLAVOR=debug     # /media/developer/apps/usr/palm/applications/com.beb.plxnative.debug
-make -s print-rundir   FLAVOR=debug     # /tmp/com.beb.plxnative.debug
-make -s print-eventlog FLAVOR=debug     # /tmp/com.beb.plxnative.debug/plxnative-events.log
+make -s print-appid    FLAVOR=debug     # com.butaca.debug
+make -s print-appdir   FLAVOR=debug     # /media/developer/apps/usr/palm/applications/com.butaca.debug
+make -s print-rundir   FLAVOR=debug     # /tmp/com.butaca.debug
+make -s print-eventlog FLAVOR=debug     # /tmp/com.butaca.debug/butaca-events.log
 make -s print-appport  FLAVOR=debug     # 8911  (the capture listener's port — §3.1)
 make -s print-tv                        # the television's address, expanded
 ```
@@ -74,7 +74,7 @@ then fails, and the tool reports "TV unreachable" against a television that is a
 `tools/tv-session.sh`'s `tv_host()` documents that trap because it hit it.
 
 An unknown value is a parse-time `$(error)`, not a fallback. `make FLAVOR=stabel deploy` would
-otherwise mint a third registered app called `com.beb.plxnative.stabel` on the television — LG's id
+otherwise mint a third registered app called `com.butaca.stabel` on the television — LG's id
 charset accepts it and nothing downstream objects — and the symptom is a mystery tile on a TV
 rather than a message on a terminal.
 
@@ -114,14 +114,14 @@ made it right.
 
 Two consequences, and they are the reason for the design rather than side effects of it:
 
-- **`pkg/plxnative` stays ONE artifact.** Nothing about the flavour reaches codegen. No second
+- **`pkg/butaca` stays ONE artifact.** Nothing about the flavour reaches codegen. No second
   `--target-dir`, no second `pkg/.build-config` stamp, no `cfg!`, no rebuild when you flip
   `FLAVOR`, and — the expensive one — no second FFmpeg build. This project's classic failure is the
   stale artifact make believes is fresh (the Makefile's `pkg/.build-config` comment is the
   account); a compiled-in id would have added a fresh axis of exactly that, on top of the
   `RELEASE=1` axis that already deletes the binary at parse time to stay honest.
 - **A mis-deployed binary tells the truth.** Copy the debug build into the stable directory by hand
-  and it identifies as `com.beb.plxnative`, uses `/tmp`, reads the stable session file and puts the
+  and it identifies as `com.butaca`, uses `/tmp`, reads the stable session file and puts the
   stable id in its Load payload. It is in the wrong place, but it is not *lying about where it is*,
   which is the difference between a bug you can see and a log you cannot trust.
 
@@ -177,13 +177,13 @@ inside a bullet already claiming to be separate. It is written out in full below
   surface already composes on `paths::in_runtime_dir`, moving the root separated all of them at
   once and left every name unchanged — all but the last of these, which composed on nothing and had
   to be moved by hand:
-  - the three logs — `plxnative-events.log` (truncated per launch), `plxnative-crash.log`
-    (append-only), `plxnative-stderr.log`;
-  - all ~40 `plxnative-*` dev triggers, `dev::DIAG` and `dev::any_trigger_present`'s scan;
-  - the `plxnative-remote` FIFO;
-  - the capture listener's file trigger (`plxnative-capture`) and the two profiler JSONLs;
+  - the three logs — `butaca-events.log` (truncated per launch), `butaca-crash.log`
+    (append-only), `butaca-stderr.log`;
+  - all ~40 `butaca-*` dev triggers, `dev::DIAG` and `dev::any_trigger_present`'s scan;
+  - the `butaca-remote` FIFO;
+  - the capture listener's file trigger (`butaca-capture`) and the two profiler JSONLs;
   - the two local Annex-B sample payloads, `sample.h264` and `sample.h265` — the only runtime files
-    that are *not* spelled `plxnative-*`, which is why they have their own door
+    that are *not* spelled `butaca-*`, which is why they have their own door
     (`dev::read_sample`). They took an absolute `/tmp` path until after the split landed, so they
     were the last two surfaces still pinned to a shared root while every other one had moved. Two
     installs reading one sample is harmless in itself; a rule with a hole in it is not, because it
@@ -211,11 +211,11 @@ inside a bullet already claiming to be separate. It is written out in full below
   what could not see this).
 - **The plex.tv identity.** The client identifier is minted per session file, so each install is its
   own authorized device; and `plex::identity::device_name()` appends the flavour, so the account's
-  device list reads `PlxNative (LG TV)` and `PlxNative debug (LG TV)` rather than two entries
+  device list reads `Butaca (LG TV)` and `Butaca debug (LG TV)` rather than two entries
   spelled identically — where revoking "the one on the TV" is a coin flip. The shipped name is
   unchanged, deliberately: it is already in every existing user's device list, and a rename there
   reads as a new, unknown device.
-- **The launcher tile** — its own `title` (`PlxNative debug`) and its own badged artwork from
+- **The launcher tile** — its own `title` (`Butaca debug`) and its own badged artwork from
   `pkg/dev/` (`docs/distribution.md` §10.3).
 - **The capture listener's TCP port.** 8910 for the shipped install, 8911 for a flavoured one
   (`capture::default_port`, and `make -s print-appport` is the same rule for the shell;
@@ -261,7 +261,7 @@ inside a bullet already claiming to be separate. It is written out in full below
   the two fonts — which is small but is not nothing on a partition nobody here has measured (§6.5).
 - **`pkg/splash.png`, deliberately.** Both flavours ship the same 1.5 MB image. A second copy would
   exist to label two seconds of a boot you *just chose from the launcher*, having already read the
-  tile that says `PlxNative debug` under artwork with an amber DEV bar on it. It is the one place
+  tile that says `Butaca debug` under artwork with an amber DEV bar on it. It is the one place
   the flavour is knowingly not carried through, and it is recorded here so nobody re-derives it as
   an oversight.
 - **`requiredMemory: 160`.** SAM's memory budget is claimed once per *registered* app, so two
@@ -272,7 +272,7 @@ inside a bullet already claiming to be separate. It is written out in full below
   and §6.10 records that the ~74 MB was never a measurement at all. 60 was worse than declaring
   nothing, since webOS substitutes 120 for an app that declares none.
 - **The host build tree, deliberately — the one entry here that is not on the television.**
-  `FLAVOR` never reaches codegen (§2), so `pkg/plxnative`,
+  `FLAVOR` never reaches codegen (§2), so `pkg/butaca`,
   the `pkg/.build-config` stamp and the cargo `--target-dir` are one set for both installs — that
   is the point, not an oversight. The consequence to know is at the ipk stage: `make ipk` does
   `rm -rf ipkroot/data/usr` and re-stages, so **exactly one flavour is staged at a time** (which is
@@ -288,16 +288,16 @@ inside a bullet already claiming to be separate. It is written out in full below
 Two are name collisions and the third is a file mode. None of the three produces an error;
 all three produce evidence about the wrong thing, which is worse.
 
-### 4.1 `plxnative-` — why the runtime root's separator is a DOT
+### 4.1 `butaca-` — why the runtime root's separator is a DOT
 
 `dev::any_trigger_present` decides whether the boot is automated by scanning the runtime root for
-entries whose name begins `plxnative-`, and suppressing the who's-watching picker if it finds one.
+entries whose name begins `butaca-`, and suppressing the who's-watching picker if it finds one.
 It is the one surface in `dev.rs` that names no path at all.
 
-A second install's root named `/tmp/plxnative-debug` would therefore sit in `/tmp` reading, to the
+A second install's root named `/tmp/butaca-debug` would therefore sit in `/tmp` reading, to the
 *other* install, as a permanently armed trigger — silently changing which screen the released app
-boots to, with no line in any log. The full app id contains no `plxnative-`, so
-`/tmp/com.beb.plxnative.debug` cannot. That is the first reason.
+boots to, with no line in any log. The full app id contains no `butaca-`, so
+`/tmp/com.butaca.debug` cannot. That is the first reason.
 
 The second is independent, because a failure this quiet deserves two: `any_trigger_present` now
 also requires the entry to be a **file**, so a directory matching the prefix cannot arm anything
@@ -305,15 +305,15 @@ whatever it is called. The host suite grades it (`dev.rs::a_directory_is_not_an_
 holding `testlock::serial()` — the runtime root is a crate global in exactly the sense that lock
 exists for).
 
-### 4.2 `com.beb.plxnative` is a PREFIX of `com.beb.plxnative.debug`
+### 4.2 `com.butaca` is a PREFIX of `com.butaca.debug`
 
-Any match on the app id must be **anchored on a delimiter**. A bare `grep com.beb.plxnative`,
-`case … in com.beb.plxnative*)`, or a `startswith` matches both installs and reports the wrong one
+Any match on the app id must be **anchored on a delimiter**. A bare `grep com.butaca`,
+`case … in com.butaca*)`, or a `startswith` matches both installs and reports the wrong one
 — or kills it.
 
 This is the same shape `src/main.c:57-61` already documents from the other side: the crash tracer
-matches `/proc/self/maps` lines on `/plxnative\n` and `/plxnative ` rather than on the app-directory
-name, precisely because the directory is *itself* called `…com.beb.plxnative/` and a bare substring
+matches `/proc/self/maps` lines on `/butaca\n` and `/butaca ` rather than on the app-directory
+name, precisely because the directory is *itself* called `…com.butaca/` and a bare substring
 test would also match every library deployed beside the binary.
 
 Three scopes are now three different questions, and picking the wrong one is how a tool grades the
@@ -321,12 +321,12 @@ other install:
 
 | test | scope | matches |
 | --- | --- | --- |
-| `pidof plxnative` | **name** | BOTH installs — both binaries are named `plxnative` |
-| `fuser <appdir>/plxnative` | **inode** | exactly one install |
+| `pidof butaca` | **name** | BOTH installs — both binaries are named `butaca` |
+| `fuser <appdir>/butaca` | **inode** | exactly one install |
 | `closeByAppId {"id":…}` | **id** | exactly one install |
 
-`pidof plxnative` returns two pids in an order busybox does not promise, so every liveness check
-built on it had to move to `fuser $(make -s print-appdir)/plxnative` — or to a loop resolving
+`pidof butaca` returns two pids in an order busybox does not promise, so every liveness check
+built on it had to move to `fuser $(make -s print-appdir)/butaca` — or to a loop resolving
 `readlink /proc/<pid>/exe` per pid, when the pid itself is what you need. The Makefile's `CLOSE_SH`
 kills by path for the same reason: a name-based kill (`pidof`, `killall`) takes down the other
 install too.
@@ -382,7 +382,7 @@ install's runtime root, which takes its three logs with it — so pull anything 
 with no hatch gets deleted rather than respected — the legitimate use is reproducing a user's report
 against the shipped id with instrumentation on). `ci/check-package.py` then asserts the same rule on
 the **packaged bytes**, which is the half that survives somebody reaching for the hatch and
-forgetting: the stable package must not contain the `plxnative-noidle` dev witness.
+forgetting: the stable package must not contain the `butaca-noidle` dev witness.
 
 That gate is graded **unconditionally**, outside the build-configuration branch, and the nesting is
 why it is worth a paragraph rather than a clause. `pkg/.build-config` records a feature set, and it
@@ -392,8 +392,8 @@ Nested under that stamp, exactly that combination satisfied `release-guard` (`RE
 non-empty), printed `SKIP — neither shipped configuration`, and would have packaged a dev-trigger
 binary under the released id on an all-green run. "This package carries no dev-trigger surface" is a
 property of the bytes and needs no stamp to grade, so it no longer asks for one. The witness is
-graded from *both* sides for the same reason — the dev leg asserts `plxnative-noidle` is still
-emitted — because the previous witness (`plxnative-autoplay`) matched nothing in *either*
+graded from *both* sides for the same reason — the dev leg asserts `butaca-noidle` is still
+emitted — because the previous witness (`butaca-autoplay`) matched nothing in *either*
 configuration, and so printed `ok` over every build for as long as it existed.
 
 **That dev leg did not actually run until 2026-09-02, and the way it failed is the same shape a
@@ -413,12 +413,12 @@ left ungraded.
 fail:
 
 ```
-install: id=com.beb.plxnative.debug flavour=debug runtime=/tmp/com.beb.plxnative.debug features=dev APPID_env=<value|unset>
-appdir: /media/developer/apps/usr/palm/applications/com.beb.plxnative.debug (from current_exe)
+install: id=com.butaca.debug flavour=debug runtime=/tmp/com.butaca.debug features=dev APPID_env=<value|unset>
+appdir: /media/developer/apps/usr/palm/applications/com.butaca.debug (from current_exe)
 ```
 
-It exists because none of the obvious witnesses work. Both binaries are named `plxnative`, so
-`pidof` cannot tell them apart on this busybox set; `pkg/plxnative` is a path every configuration
+It exists because none of the obvious witnesses work. Both binaries are named `butaca`, so
+`pidof` cannot tell them apart on this busybox set; `pkg/butaca` is a path every configuration
 writes, so an md5 against the local build proves only that *some* flavour of *some* configuration
 matches. `features=` is `dev` or `release`. `APPID_env=` is evidence rather than configuration —
 see §6.2.
@@ -438,7 +438,7 @@ session with the set; several are answerable from one run's event log.
    so no mechanism is claimed here; §7 grades both halves. This paragraph used to say the argument
    locates the app's own compositor window, which was invented — the same sentence `engine.rs`'s
    `@APPID@` comment now refuses to make.
-   Both ids now say `com.beb.plxnative.debug`. If LG's stack keys on the *registered* id and finds
+   Both ids now say `com.butaca.debug`. If LG's stack keys on the *registered* id and finds
    it, this is fine; if anything keys on a hardcoded id, or on a `getenv("APPID")` that disagrees
    with ours, it is not.
    **The failure shape is audio over a black video plane, with no error line anywhere** — exactly
@@ -456,7 +456,7 @@ session with the set; several are answerable from one run's event log.
    *Settled by:* the `APPID_env=` field of the boot `install:` line, in any run's log, on either
    install. `unset` is as interesting an answer as a value, and a value that is *not* the id we
    were installed as is the most interesting of the three.
-3. **Does a second LS2 role file appear?** `/var/palm/ls2-dev/roles/pub/com.beb.plxnative.json`
+3. **Does a second LS2 role file appear?** `/var/palm/ls2-dev/roles/pub/com.butaca.json`
    exists for the stable install and grants `com.webos.media.client.*`, `com.webos.rm.client.*` and
    `com.webos.pipeline.*` (`docs/distribution.md` §3.5). The Dev Mode installer writes it; whether
    `dev/install` writes a second one keyed on the flavoured id has never been observed.

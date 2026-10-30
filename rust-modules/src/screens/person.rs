@@ -1010,7 +1010,7 @@ impl PersonScreen {
     /// person, and the same predicate the `MORE` mark is drawn from — so the mark and the sheet
     /// cannot disagree about whether there is more to read.
     ///
-    /// `pub(crate)` for one caller, `dev::scenarios`' `/tmp/plxnative-bio`: a headless boot presents
+    /// `pub(crate)` for one caller, `dev::scenarios`' `/tmp/butaca-bio`: a headless boot presents
     /// the sheet through the same door the OK press uses, and asking the page first is what stops
     /// the trigger opening a panel an interactive press would have refused. `DetailScreen::
     /// tracks_available` is the precedent and the reason.
@@ -1863,7 +1863,7 @@ mod tests {
     #[cfg(feature = "devtriggers")]
     fn populated_person_geometry_uses_recorded_metrics() {
         let _serial = crate::testlock::serial();
-        let path = crate::paths::in_runtime_dir("plxnative-personbio");
+        let path = crate::paths::in_runtime_dir("butaca-personbio");
         assert!(!path.exists(), "this test needs an isolated runtime root");
         std::fs::write(&path, "A populated biography whose words must pass through the recorded measurement capability. ".repeat(60)).unwrap();
         let (mut store, mut s) = seed(3, 2);

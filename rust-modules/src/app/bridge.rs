@@ -2147,7 +2147,7 @@ pub(crate) fn dismiss_player_overlays(d: &mut Dispatcher<AppHost>) {
 }
 
 /// A live panel's own state, for the dev triggers that drive one by hand
-/// (`plxnative-menupick`) and for the focus probe's `sel=`.
+/// (`butaca-menupick`) and for the focus probe's `sel=`.
 pub(crate) fn player_overlay_mut(
     d: &mut Dispatcher<AppHost>,
 ) -> Option<&mut crate::screens::player::overlay::PlayerOverlayScreen> {
@@ -2906,7 +2906,7 @@ pub(crate) fn owns_input(d: &Dispatcher<AppHost>) -> bool {
 }
 
 /// The topmost surface's heartbeat word, for the dev triggers that have to wait for a particular
-/// page of the family to be up (`plxnative-legaldoc`, `plxnative-alert`).
+/// page of the family to be up (`butaca-legaldoc`, `butaca-alert`).
 pub(crate) fn surface_word(d: &Dispatcher<AppHost>) -> Option<&'static str> {
     d.top_surface_name()
 }

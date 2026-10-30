@@ -1905,7 +1905,7 @@ pub(crate) fn control_phase_label() -> String {
 /// began cannot publish into the route it is destroying — so leaving it latched afterwards
 /// describes a teardown which never finishes.
 ///
-/// It cost LG App Self Checklist #46: a replayed `plxnative-playurl` stream asks
+/// It cost LG App Self Checklist #46: a replayed `butaca-playurl` stream asks
 /// [`begin_route_start`] for an owner directly (no [`begin_playback_request`] resolve in front of
 /// it, because there is no library item behind the fixture), and a latched `Stopping` refused it —
 /// `start_bufferfeed: route reducer refused a start owner`, one Load where the case needs two.
@@ -4288,7 +4288,7 @@ pub(crate) fn sink_max_raster(ps: &PlaybackSession) -> (u16, u16) {
 }
 
 /// The SOURCE raster for a stream the app did not select — the pipeline tier's
-/// `plxnative-playurl` carries it as `source_raster`, the same field its Auto fixtures already
+/// `butaca-playurl` carries it as `source_raster`, the same field its Auto fixtures already
 /// used to size the actuator catalog. One fact, one field: [`sink_max_raster`] reads it from the
 /// same place a PMS-chosen item's dimensions land, so the synthetic tier declares exactly what the
 /// production route would for a file of that size.
@@ -4300,7 +4300,7 @@ pub(crate) fn set_stream_source_raster(ps: &mut PlaybackSession, w: u16, h: u16)
 }
 
 /// The whole Load-payload DECLARATION for a stream the app did not SELECT — the pipeline test
-/// tier's `/tmp/plxnative-playurl` ([`crate::dev::PlayUrl`]), whose entire point is that no PMS
+/// tier's `/tmp/butaca-playurl` ([`crate::dev::PlayUrl`]), whose entire point is that no PMS
 /// chose anything and so `apply_plan` never runs.
 ///
 /// ONE write for the same reason [`set_server_output_declaration`] is one write and [`apply_plan`]
@@ -6941,7 +6941,7 @@ fn jellyfin_retranscode_as(
     let url = c.transcode_url(relative)?;
     let logical = sess(ps);
     let namespace = if logical.is_empty() {
-        format!("plxnative-{rk}")
+        format!("butaca-{rk}")
     } else {
         logical
     };
@@ -7042,7 +7042,7 @@ fn retranscode_as(
     put_selection(cur_sid(ps), cur_part_id(ps), audio_sid, subtitle_sid); // drives encode + burn
     let logical = sess(ps);
     let namespace = if logical.is_empty() {
-        format!("plxnative-{rk}")
+        format!("butaca-{rk}")
     } else {
         logical
     };
@@ -7134,7 +7134,7 @@ fn retranscode_as(
     }
     // NEVER log the URL. `transcode_start_url` ends in `X-Plex-Token=…`, and this line is reached
     // by an ordinary audio-track switch — so the app's own support channel ("send us
-    // /tmp/plxnative-events.log") was asking users to paste a live PMS credential into a public
+    // /tmp/butaca-events.log") was asking users to paste a live PMS credential into a public
     // issue thread. The rk, the track ids and the offset are the whole diagnostic value here; the
     // URL added nothing that is not derivable from them.
     crate::player::log(&format!(

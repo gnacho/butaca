@@ -2,7 +2,7 @@
 
 ## Project
 
-PlxNative is a production-quality native Plex client for rooted LG webOS 4.5 TVs. Most of the
+Butaca is a production-quality native Plex client for rooted LG webOS 4.5 TVs. Most of the
 application is Rust under `rust-modules/src/`; `src/main.c` is the boot/crash shim,
 `src/starfish.c` is the StarfishMediaAPIs/ACB seam, and `src/svg.c` rasterizes SVGs. Keep changes
 properly factored and finished; "only a demo" is never a reason to leave a shortcut behind.

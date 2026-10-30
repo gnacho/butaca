@@ -99,7 +99,7 @@ impl TempCandidates {
     fn new(tag: &str) -> (TempCandidates, Vec<std::path::PathBuf>) {
         use std::os::unix::fs::PermissionsExt;
         let base = std::env::temp_dir().join(format!(
-            "plxnative-runtime-fallback-{tag}-{}",
+            "butaca-runtime-fallback-{tag}-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&base);
@@ -201,7 +201,7 @@ fn write_atomic_refuses_a_symlink_planted_at_the_runtime_dir_candidate() {
     use std::os::unix::fs::{symlink, PermissionsExt};
     let _g = crate::testlock::serial();
     let dir = std::env::temp_dir().join(format!(
-        "plxnative-runtime-symlink-{}",
+        "butaca-runtime-symlink-{}",
         std::process::id()
     ));
     let _ = std::fs::remove_dir_all(&dir);
@@ -241,7 +241,7 @@ fn write_atomic_refuses_a_symlink_planted_at_the_runtime_dir_candidate() {
 fn write_atomic_reports_the_errno_and_parent_stat_per_candidate() {
     use std::os::unix::fs::MetadataExt;
     let _g = crate::testlock::serial();
-    let base = std::env::temp_dir().join(format!("plxnative-write-atomic-diag-{}", std::process::id()));
+    let base = std::env::temp_dir().join(format!("butaca-write-atomic-diag-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     std::fs::create_dir_all(&base).unwrap();
 
@@ -344,7 +344,7 @@ struct TempCanonicalRoot {
 impl TempCanonicalRoot {
     fn new(tag: &str) -> TempCanonicalRoot {
         let dir = std::env::temp_dir().join(format!(
-            "plxnative-session-canonical-{}-{tag}",
+            "butaca-session-canonical-{}-{tag}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
@@ -547,7 +547,7 @@ fn clear_under_a_redirected_legacy_fixture_never_touches_the_canonical_authority
     // every later test in the run — the exact transplant hazard `redirect_for_test`'s own doc
     // comment warns about.
     let dir = std::env::temp_dir().join(format!(
-        "plxnative-session-test-file-guard-{}",
+        "butaca-session-test-file-guard-{}",
         std::process::id()
     ));
     struct RestoreLegacyFixture(std::path::PathBuf);
@@ -691,7 +691,7 @@ fn clear_cleanup_outcome_maps_all_three_arms_and_never_conflates_unconfirmed_wit
 fn clear_reports_a_non_durable_outcome_when_the_canonical_commit_is_refused() {
     let _serial = crate::testlock::serial();
     let dir = std::env::temp_dir().join(format!(
-        "plxnative-session-canonical-not-a-dir-{}",
+        "butaca-session-canonical-not-a-dir-{}",
         std::process::id()
     ));
     // RAII rather than a bare restore at the end: this test does not use `TempCanonicalRoot`
@@ -794,7 +794,7 @@ fn an_unopenable_secure_session_is_preserved_without_plaintext_downgrade() {
         version: 1,
         sealed: crate::keymanager::Sealed {
             backend: crate::keymanager::Backend::Keymanager3,
-            key: "plxnative.session.v1".to_string(),
+            key: "butaca.session.v1".to_string(),
             iv: "AAAAAAAAAAAAAAAAAAAAAA==".to_string(),
             data: "c2VjcmV0".to_string(),
         },
@@ -827,11 +827,11 @@ fn an_unknown_secure_envelope_version_is_locked_and_never_rewritten_as_plaintext
     let _g = crate::testlock::serial();
     let t = TempSession::new("secure-future-version");
     let original = br#"{
-  "format": "plxnative-secure-session",
+  "format": "butaca-secure-session",
   "version": 2,
   "sealed": {
 "backend": "keymanager3",
-"key": "plxnative.session.v2",
+"key": "butaca.session.v2",
 "iv": "future-iv",
 "data": "future-ciphertext"
   }

@@ -47,17 +47,17 @@
 //! sites needs no site identity of its own and the recording stays one line per frame per store.
 //! **(3) It is a SCHEMA change** (`ui::rec::SCHEMA` 1 → 2): a schema-1 recording carries no `land`
 //! records at all, so replaying one under the gate would grade nothing while looking as though it
-//! graded everything. It is refused instead, and `tools/plxnative-rec rerecord` is the verb.
+//! graded everything. It is refused instead, and `tools/butaca-rec rerecord` is the verb.
 //!
 //! Measured on flow 12 (2026-09-10, three runs of three): the recording's single `async` record
 //! sat on frame 1, every replay observed it on frame 0, and because a spring started one frame
 //! earlier never re-converges bit for bit, 927 of 928 frames diverged.
 //!
 //! Arming is at boot only (`Writer::open` refuses any other frame). The directory is the runtime
-//! root's `plxnative-recordings/latest` (not `plxnative-rec/`, which is the trigger FILE's own
+//! root's `butaca-recordings/latest` (not `butaca-rec/`, which is the trigger FILE's own
 //! name) — private, gitignored, refused by the outbound guard; a
 //! committed fixture uses the full synthetic initializer and `tests/mock_pms.py`, then passes
-//! `tools/plxnative-rec`'s closed alphabet and the actual replay gate. This is not all-domain or
+//! `tools/butaca-rec`'s closed alphabet and the actual replay gate. This is not all-domain or
 //! cross-target AppInit acceptance.
 #![allow(clippy::too_many_arguments)]
 
@@ -197,7 +197,7 @@ const RESOLUTION_SHAPE: &str = "ProductResolutionV1{fo:Option<(entry:u32,elem:u3
 /// inventory and `ARG_SHAPE` gains `TracksPanel{page:i32}`. Its PAGE is in the shape deliberately
 /// — that cursor moves nothing else in the app, so without it a replay grades the sheet opening
 /// and closing and nothing between. Every committed fixture is invalidated by each bump, which is
-/// the cost this pin exists to make visible rather than silent — `tools/plxnative-rec rerecord` is
+/// the cost this pin exists to make visible rather than silent — `tools/butaca-rec rerecord` is
 /// the verb (`tests/fixtures/replay/README.md`).
 ///
 /// **The household-evidence bump** is `super::bootstrap::SHAPE`'s, `ControlledHomeInitV2` →
@@ -827,7 +827,7 @@ impl Recplay {
         match mode {
             super::bootstrap::Preflight::Live => Err("controlled recorder requires an explicit mode"),
             super::bootstrap::Preflight::Record => {
-                let dir = crate::paths::runtime_dir().join("plxnative-recordings").join("latest");
+                let dir = crate::paths::runtime_dir().join("butaca-recordings").join("latest");
                 let sink = DirSink::create(&dir).map_err(|_| "cannot create private recording")?;
                 Self::recording_with_sink(initial, Box::new(sink))
             }
@@ -1210,13 +1210,13 @@ impl Recplay {
 }
 
 /// The recorded boot's trigger set against this boot's, as one line naming what is missing and
-/// what is extra (the recorder's own `plxnative-rec` and the replay's `plxnative-recplay` are
+/// what is extra (the recorder's own `butaca-rec` and the replay's `butaca-recplay` are
 /// the expected difference and are not reported). `None` when the sets agree. Dev flags reach
 /// the loop from the filesystem until phase 4 turns them into recorded `Sys` results, so this is
 /// phase 2's assertion that a replay boot was armed the way the recording boot was.
 #[cfg(test)]
 pub(crate) fn triggers_differ(recorded: &[String], now: &[String]) -> Option<String> {
-    let skip = |n: &str| n == "plxnative-rec" || n == "plxnative-recplay";
+    let skip = |n: &str| n == "butaca-rec" || n == "butaca-recplay";
     let missing: Vec<&str> = recorded
         .iter()
         .map(String::as_str)
@@ -2411,13 +2411,13 @@ mod tests {
     fn a_replay_boot_armed_differently_from_the_recording_is_reported() {
         let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
         assert_eq!(
-            triggers_differ(&s(&["plxnative-focus", "plxnative-rec"]), &s(&["plxnative-focus", "plxnative-recplay"])),
+            triggers_differ(&s(&["butaca-focus", "butaca-rec"]), &s(&["butaca-focus", "butaca-recplay"])),
             None,
             "the two driver triggers are the expected difference"
         );
         assert_eq!(
-            triggers_differ(&s(&["plxnative-focus", "plxnative-grid"]), &s(&["plxnative-focus", "plxnative-noidle"])),
-            Some("missing=[plxnative-grid] extra=[plxnative-noidle]".to_string())
+            triggers_differ(&s(&["butaca-focus", "butaca-grid"]), &s(&["butaca-focus", "butaca-noidle"])),
+            Some("missing=[butaca-grid] extra=[butaca-noidle]".to_string())
         );
     }
 

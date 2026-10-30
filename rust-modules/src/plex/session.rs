@@ -175,7 +175,7 @@ pub(crate) fn plex_tv_credential(snapshot_user: &UserRef) -> Option<String> {
 /// every boot, with a fresh `X-Plex-Client-Identifier` each time.
 ///
 /// The first entry is still deliberately OUTSIDE the app install dir: appinstalld replaces
-/// `applications/com.beb.plxnative/` wholesale on every ipk (re)install, which silently signed the
+/// `applications/com.butaca/` wholesale on every ipk (re)install, which silently signed the
 /// user out when the file lived there.
 #[cfg(not(test))]
 fn auth_paths() -> Vec<std::path::PathBuf> {
@@ -231,7 +231,7 @@ fn fallback_file() -> std::path::PathBuf {
     static PATH: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
     PATH.get_or_init(|| {
         let dir = std::env::temp_dir()
-            .join(format!("plxnative-session-fallback-{}", std::process::id()));
+            .join(format!("butaca-session-fallback-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::create_dir_all(&dir);
         dir.join("auth.json")
@@ -347,7 +347,7 @@ impl TempSession {
     /// which profile it is says so with [`TempSession::watching`].
     pub(crate) fn new(tag: &str) -> TempSession {
         let dir =
-            std::env::temp_dir().join(format!("plxnative-session-{}-{tag}", std::process::id()));
+            std::env::temp_dir().join(format!("butaca-session-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("a writable temp dir");
         redirect_for_test(Some(dir.join("auth.json")));
@@ -715,7 +715,7 @@ pub(crate) fn split_canonical(
     // ambiguous v2 write; only the typed field is permitted to carry active credentials.
     if session.extensions.0.contains_key("profiles") { return Err(()); }
     let auth = serde_json::to_string(&CanonicalSessionAuth {
-        format: "plxnative-session-auth".into(),
+        format: "butaca-session-auth".into(),
         version: 2,
         profiles: Some(serde_json::to_value(valid_profiles(session.profiles.clone())).map_err(|_| ())?),
         account_token: session.account_token.clone(),
@@ -773,7 +773,7 @@ pub(crate) fn join_canonical(
     protected: &str,
 ) -> Result<Session, ()> {
     let auth: CanonicalSessionAuth = serde_json::from_str(protected).map_err(|_| ())?;
-    if auth.format != "plxnative-session-auth" || !matches!(auth.version, 1 | 2) {
+    if auth.format != "butaca-session-auth" || !matches!(auth.version, 1 | 2) {
         return Err(());
     }
     let profiles = match (auth.version, auth.profiles) {
@@ -1965,7 +1965,7 @@ impl Session {
     /// Interactive boot with a multi-user Plex Home shows the who's-watching picker unless
     /// Automatically Sign In is on and a profile is already seated.
     ///
-    /// `force_pick` is `/tmp/plxnative-pickuser`: it wins even on an automated boot. An empty
+    /// `force_pick` is `/tmp/butaca-pickuser`: it wins even on an automated boot. An empty
     /// `user.uuid` still raises the picker when the switch is on — that is the abandoned-at-picker
     /// session whose PMS token falls back to the owner. A uuid that is no longer in
     /// [`Session::home_users`] (removed Home user, stale roster) raises it too: the switch is an
@@ -3068,7 +3068,7 @@ fn session_from_read(read: &ReadState) -> Session {
     }
 }
 
-const SECURE_FORMAT: &str = "plxnative-secure-session";
+const SECURE_FORMAT: &str = "butaca-secure-session";
 
 #[derive(Deserialize, Serialize)]
 struct SecureEnvelope {
@@ -3210,7 +3210,7 @@ fn read_legacy_locked() -> ReadState {
     read_legacy_filtered_locked(false)
 }
 
-const FALLBACK_MARKER: &str = "_plxnative_session_fallback";
+const FALLBACK_MARKER: &str = "_butaca_session_fallback";
 /// An in-place sign-out tombstone, distinct from Session's permissive empty object.
 const SESSION_TOMBSTONE: &[u8] = b"null\n";
 
@@ -3926,7 +3926,7 @@ fn has_protected_authority() -> bool {
 }
 
 /// Write `json` to `path` so that whatever reads it sees the WHOLE previous file or the WHOLE new
-/// one — never a truncated one, and never bytes of both. The `plxnative.new` → `mv` dance the
+/// one — never a truncated one, and never bytes of both. The `butaca.new` → `mv` dance the
 /// Makefile's deploy does, for the same reason and against a worse loss: the file being replaced
 /// here is the credentials.
 ///
@@ -4707,7 +4707,7 @@ pub(crate) fn client_id_from_entropy(mut b: [u8; 16]) -> String {
 pub struct Account {
     /// **This device** holds a session: a plex.tv account token, or at least a server + PMS token
     /// it can stream on. The opposite of "offer them Sign in". Note it describes the session ON
-    /// DISK, not the identity currently in use: an automated boot on `/tmp/plxnative-token` streams
+    /// DISK, not the identity currently in use: an automated boot on `/tmp/butaca-token` streams
     /// on an injected token yet still reports the stored account here — deliberately, because the
     /// stored account is exactly what a "Sign out" would clear.
     pub signed_in: bool,

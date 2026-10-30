@@ -11,7 +11,7 @@ Why Python rather than tar flags: the flags differ irreconcilably between GNU ta
 tarfile gives both hosts the same bytes with no branching.
 
 WHICH INSTALL a package is for comes from `$FLAVOR` (see `ci/flavor.py`): unset or `stable` builds
-the app users install, `debug` builds `com.beb.plxnative.debug`, which sits beside it on the same
+the app users install, `debug` builds `com.butaca.debug`, which sits beside it on the same
 television. Every id in the archive — the control `Package:`, `packageinfo.json`, the staged
 `applications/<id>/` directory and the `.ipk` filename — comes from that one transform, and the
 directory is additionally what the installed binary reads to learn which install it is
@@ -83,17 +83,17 @@ STORAGE_PERMISSIONS = ["database.operation", "securitykey.operation"]
 
 def stage_storage_service(repo: Path, data: Path, app: dict) -> Path:
     """Stage the native owner whose installer-generated LS2 name survives app restarts."""
-    executable = repo / "pkg/plxnative-storage"
+    executable = repo / "pkg/butaca-storage"
     if not executable.is_file() or executable.is_symlink():
-        raise SystemExit("native storage helper is missing; build pkg/plxnative-storage first")
+        raise SystemExit("native storage helper is missing; build pkg/butaca-storage first")
     service_id = app["id"] + ".storage"
     target = data / "usr/palm/services" / service_id
     target.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(executable, target / "plxnative-storage")
-    (target / "plxnative-storage").chmod(0o755)
+    shutil.copyfile(executable, target / "butaca-storage")
+    (target / "butaca-storage").chmod(0o755)
     (target / "services.json").write_text(json.dumps({
-        "id": service_id, "description": "PlxNative private storage",
-        "engine": "native", "executable": "plxnative-storage",
+        "id": service_id, "description": "Butaca private storage",
+        "engine": "native", "executable": "butaca-storage",
         "services": [{"name": service_id, "commands": []}],
     }, indent=4) + "\n")
     return target
@@ -113,9 +113,9 @@ def storage_archive_errors(blob: bytes, app_id: str) -> list[str]:
             if any(n.startswith(f"usr/palm/applications/{app_id}/state") for n in members):
                 errors.append("obsolete writable app state is forbidden")
             files = {n for n, m in members.items() if m.isfile() and n.startswith("usr/palm/services/")}
-            if files != {prefix + "services.json", prefix + "plxnative-storage"}:
+            if files != {prefix + "services.json", prefix + "butaca-storage"}:
                 errors.append("service payload must contain exactly this flavor's descriptor and helper")
-            executable = members.get(prefix + "plxnative-storage")
+            executable = members.get(prefix + "butaca-storage")
             if executable is None or not executable.isfile() or executable.mode & 0o7777 != 0o755:
                 errors.append("storage helper must be a regular executable with mode 0755")
             elif executable.uid != 0 or executable.gid != 0:
@@ -131,7 +131,7 @@ def storage_archive_errors(blob: bytes, app_id: str) -> list[str]:
                     continue
                 metadata = json.load(tf.extractfile(member))
                 if name.endswith("services.json"):
-                    if metadata != {"id": service_id, "description": "PlxNative private storage", "engine": "native", "executable": "plxnative-storage", "services": [{"name": service_id, "commands": []}]}:
+                    if metadata != {"id": service_id, "description": "Butaca private storage", "engine": "native", "executable": "butaca-storage", "services": [{"name": service_id, "commands": []}]}:
                         errors.append("service identity/activation-only metadata differs")
                 else:
                     if metadata.get("id") != app_id or metadata.get("requiredPermissions") != STORAGE_PERMISSIONS:
@@ -162,7 +162,7 @@ def add_tree(tf: tarfile.TarFile, src: Path, arc_root: str, skip: set = ()) -> N
         ti.mtime = EPOCH
         # Normalise mode: the binary and directories executable, everything else 0644. Otherwise
         # a stray local chmod changes the archive.
-        ti.mode = 0o755 if (ti.isdir() or p.name in {"plxnative", "plxnative-storage", "sentry-crash"}) else 0o644
+        ti.mode = 0o755 if (ti.isdir() or p.name in {"butaca", "butaca-storage", "sentry-crash"}) else 0o644
         if ti.isfile():
             with open(p, "rb") as fh:
                 tf.addfile(ti, fh)
@@ -218,9 +218,9 @@ def stage_resources(repo: Path, data: Path, app: dict) -> list:
     the version and the id in a file `ci/bump-version.py` has never heard of.
 
     THE FLAVOUR SUFFIX IS REAPPLIED HERE, and it is the whole reason this is a transform rather than
-    a copy. `flavor.appinfo_for` renames a flavoured install's tile `PlxNative debug` precisely so
+    a copy. `flavor.appinfo_for` renames a flavoured install's tile `Butaca debug` precisely so
     two tiles are not a coin flip; a localized descriptor carrying the bare tracked title would
-    override that back to `PlxNative` the moment the set was switched to Korean — restoring the
+    override that back to `Butaca` the moment the set was switched to Korean — restoring the
     ambiguity in exactly the locale nobody developing this app is looking at.
 
     The suffix is read off the transform's OUTPUT rather than re-derived from `flavor.FLAVORS`,

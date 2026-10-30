@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
 
-pub(crate) const FORMAT: &str = "plxnative-state";
+pub(crate) const FORMAT: &str = "butaca-state";
 pub(crate) const SCHEMA: u32 = 1;
 pub(crate) const MAX_LOGICAL_BYTES: usize = 256 * 1024;
 pub(crate) const MAX_ENCODED_BYTES: usize = 512 * 1024;
@@ -1781,7 +1781,7 @@ mod install_identity_tests {
 
     #[test]
     fn unknown_flavors_are_invalid_and_cross_flavor_reads_are_rejected() {
-        assert_eq!(Flavor::from_app_id("com.beb.plxnative.typo"), None);
+        assert_eq!(Flavor::from_app_id("com.butaca.typo"), None);
         let state = CanonicalState::new(Flavor::Nightly, Generation([1; 16]));
         let bytes = state.encode().unwrap();
         assert_eq!(

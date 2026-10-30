@@ -183,7 +183,7 @@ pub enum Picker {
     /// default also covers Login's BACK before a picker is raised. "We cannot say who is asking"
     /// must not resolve to "hand
     /// over the credentials" — a permissive default is the shape of the bug this enum exists to
-    /// fix, and it is what left the dev-only `/tmp/plxnative-login` boot on the wrong side of it.
+    /// fix, and it is what left the dev-only `/tmp/butaca-login` boot on the wrong side of it.
     #[default]
     Boot,
     /// Home's *Change profile*: a profile WAS active, and raising this picker detaches it.
@@ -991,7 +991,7 @@ fn plaintext_offer(d: &Discovery) -> Option<PlaintextVerdict> {
 
 fn login_worker_with_output(epoch: u64, cid: String, ask: &PlaintextAsk, output: &dyn owner::ObservationSink) {
     if !output.live() { return; }
-    // dev: `/tmp/plxnative-readout=<case>` (paired with `/tmp/plxnative-login`, which already
+    // dev: `/tmp/butaca-readout=<case>` (paired with `/tmp/butaca-login`, which already
     // forces this screen with no session) — skip straight to the terminal failure a real run
     // would have reached, with no PIN minted and no call made. `readout_case` reads through
     // `dev::read`, which is compile-time `None` without `devtriggers` — no cfg needed here, per
