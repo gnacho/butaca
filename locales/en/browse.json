@@ -2101,6 +2101,10 @@
     "value": "Start Quick Connect",
     "description": "Jellyfin flavor's Quick Connect sign-in: the action that starts the flow"
   },
+  "browse.jellyfin.quick_connect_row": {
+    "value": "Sign in with a code",
+    "description": "Jellyfin flavor's sign-in form: the second action, which opens the Quick Connect flow without going through Settings"
+  },
   "browse.jellyfin.quick_connect_explainer": {
     "value": "Enter this code on another device already signed in to this server. Approve it there and this screen will sign in by itself.",
     "description": "Jellyfin flavor's Quick Connect sign-in: shown beside the code while waiting for approval"
