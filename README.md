@@ -1,35 +1,21 @@
 # Butaca
 
-**Butaca is a fork of the upstream Plex client for rooted LG webOS televisions, by Gleb Linnik,
-turned into a [Jellyfin](https://jellyfin.org/) client. It draws the
-interface directly on the GPU at 60 fps and plays video on the TV's own decoder. The fork removes
-all telemetry and crash reporting and changes nothing about those promises:
-[privacy](PRIVACY.md).**
+A Jellyfin client that runs natively on LG webOS televisions. Not a web page: the interface is
+drawn straight on the GPU and video goes to the television's own decoder. No Chromium, no
+JavaScript, no web view.
 
-The rest of this README still describes the upstream client this fork is built
-from; the app it documents is the same code under the fork's packaging.
+Almost all of it is Rust. It is in daily use on a 2019 LG set.
 
----
+Get started with the [installation guide](docs/install-and-verify.md).
 
-# Butaca
+## Why native
 
-A fast, unofficial [Plex](https://www.plex.tv/) client for LG webOS televisions. Native, not a web
-page — the interface is drawn straight on the GPU at 60 fps, and video plays on the TV's own decoder.
+The television's built-in apps are web apps. That is why the menus stutter and why opening a poster
+takes a beat too long: the ceiling is not the code, it is the browser underneath it.
 
-*In daily use on a 2019 LG set. Get started with the
-[installation guide](docs/install-and-verify.md).*
-
-## Why this exists
-
-The official Plex app on my old LG is slow. Scrolling a shelf stutters, opening a poster takes a
-beat too long. It behaves like a web page because it is one: a web app running in the television's
-Chromium. Patching it doesn't help — the ceiling isn't the code, it's the browser.
-
-So I threw the browser away.
-
-Butaca draws straight on the GPU and hands video to the same silicon the built-in apps use. No
-Chromium, no JavaScript, no web view. It just draws. Almost all of it is Rust, and I use it every
-day to watch things off my server in the next room.
+So this client does not have one. It draws its own interface, keeps the focus model, and hands the
+video to the same silicon the built-in apps use. A library of a few thousand films moves at the
+speed of the remote, and a screen opens without a spinner because there is no page to load.
 
 ## What it looks like
 
@@ -39,84 +25,100 @@ simulator, browsing a demo library of openly licensed films
 
 ![Home](docs/screenshots/home.jpg)
 
-**Home** — a rotating hero from what you're partway through and what's just landed, shelves under it.
+**Home**: a rotating hero from what you are partway through and what has just landed, with shelves
+under it.
 
 ![Library](docs/screenshots/library.jpg)
 
-**Library** — a library opens on its own shelves: what you're partway through, with the time
-left under the focused card, and what just landed. Further down is the full grid, with sort,
-filter (including unwatched-only) and an A–Z rail down the side
+**Library**: a library opens on its own shelves, with the time left under the focused card, and
+the full grid below with sort, filter (unwatched only among them) and an A to Z rail
 ([pictured here](docs/screenshots/ux-library-grid.jpg)).
 
 ![Search](docs/screenshots/search.jpg)
 
-**Search** — one query across every server you can reach, results grouped by kind.
+**Search**: one query across every server you can reach, results grouped by kind.
 
 ![Player](docs/screenshots/player.jpg)
 
-**Player** — the transport with chapters and track menus, drawn over video the television decodes
-itself. (In this capture the frame under it was decoded by the simulator.)
+**Player**: the transport with chapters and track menus, drawn over video the television decodes
+itself. In this capture the frame underneath was decoded by the simulator.
 
 ## What it does
 
-- **An interface that keeps up with the remote.** 60 fps on the 2019 set I develop on, with
-  frame-rate regression scenes that measure it on the television rather than trusting it.
-- **Sign in on the TV** with an on-screen QR code and pick a Plex Home profile.
-- **Browse and search your libraries** — on your own servers and on ones shared with you. Your
-  servers' libraries, that is, not Plex's catalogue or Watchlist.
-- **Direct play** H.264 and HEVC — 4K, 10-bit, Dolby Vision profiles 5 and 8, E-AC-3 Atmos —
-  decided against your television's own codec table where it publishes one. Anything else the
-  server transcodes, and you can switch a playback to Auto to follow a link whose speed changes.
-- **Everything you expect while watching**: resume, seek and scrub, chapters, audio and subtitle
-  tracks (including image subtitles), Skip Intro, Skip Credits, Up Next with auto-advance, and
-  progress reported back to your server.
+**Runs on a Jellyfin server.** Point it at the address, sign in with the account you already have.
+What stays on disk is an access token, never your password, and the server can revoke it. The Plex
+flavour of the same build is still there for Plex libraries.
+
+**Keeps up with the remote.** The interface is drawn per frame rather than fetched per screen, and
+the project carries frame-rate regression scenes that measure it on a television instead of
+trusting a claim.
+
+**Plays on the television's decoder.** Direct play of H.264 and HEVC, including 4K and 10 bit,
+decided against the codec table the set publishes where it publishes one. Anything the set cannot
+decode is transcoded by the server, and a playback can be switched to Auto to follow a link whose
+speed changes.
+
+**Everything you expect while watching.** Resume, seek and scrub, chapters from the server, audio
+and subtitle tracks including image subtitles, Skip Intro and Skip Credits where the server has the
+markers, Up Next with auto-advance, and progress reported back so the next device knows where you
+were.
+
+**Subtitles drawn by the set, not burned in.** ASS and SSA render natively during direct play,
+with their styles, positioning, overlapping signs and dialogue, karaoke and embedded fonts, and an
+external ASS file keeps its own script. Only transcoded playback falls back to the server's
+burn-in.
+
+**Several servers at once.** Sign in to more than one, and search and browse reach all of them.
+
+**Nothing phones home.** No account with us, no telemetry, no crash reporting, no analytics. The
+only thing it talks to is the server you configured. [`PRIVACY.md`](PRIVACY.md) says it in full.
+
+**Settings that stay short.** Playback quality, Direct Play, audio language, subtitle mode,
+subtitle language, forced subtitles, the language of the interface, and the pages for legal and
+about. Nothing hidden three levels deep.
 
 ## Will it work on my television?
 
-**It needs webOS 4.0 or newer**; older firmware won't start — you'd get a tile that does nothing.
-Past that, it most likely will. I develop and test on a 2019 set, and opt-in usage reports show
-video playing on sets from 2018 through the newest, on webOS 11 — both direct play and server
-transcodes, Developer Mode installs included.
+**It needs webOS 4.0 or newer.** Older firmware will not start.
 
-### Known issues
+Past that, it most likely will: development and testing happen on a 2019 set, and video has been
+seen playing from 2018 sets through the newest. Known problems, with what is actually known about
+each:
 
 | Where | What happens |
 |---|---|
-| **Some 2019 sets on LG's k5lp or k3lp chip**, installed through Developer Mode | Video won't play. On these sets LG's Developer Mode sandbox can withhold a device the video path needs — Kodi and Moonlight hit the same wall. The app checks for it and says so instead of crashing; other sets on the same chip play normally. On a rooted TV with Homebrew Channel, the failure screen offers **Repair**, which applies the Homebrew Channel fix to the sandbox (one owner fixed it this way from a root shell; the button itself hasn't been run on an affected set yet). Without root there is no fix. |
-| **2018 sets on firmware that reports platform release 3.9.3** | Sign-in and browsing work, but video has never been seen to start on one, and no error is reported either: #249. |
-| **Sets on LG's k6hp chip** | A crash seen in opt-in crash reports and not reproduced here, because I have no such set: #174. |
+| **Some 2019 sets on LG's k5lp or k3lp chip**, installed through Developer Mode | Video will not play. LG's Developer Mode sandbox can withhold a device the video path needs, and other native players hit the same wall. The app checks for it and says so instead of crashing. On a rooted set with Homebrew Channel the failure screen offers **Repair**, which applies the Homebrew Channel fix to the sandbox. Without root there is no fix. |
+| **2018 sets on firmware reporting platform release 3.9.3** | Sign-in and browsing work, but video has not been seen to start, and no error is reported. |
+| **Sets on LG's k6hp chip** | A crash seen in reports and not reproduced here, because there is no such set to test on. |
 
-### Rooted or not
+**Root is not needed.** A regular set in Developer Mode runs everything except the Repair above.
+Developer Mode expires and has to be renewed, and when it does LG removes the apps installed
+through it ([how to keep them](docs/install-and-verify.md#important-developer-mode-expires)). A
+rooted set with Homebrew Channel has no expiry.
 
-**No root is needed.** A regular TV in Developer Mode runs everything except the k5lp/k3lp Repair
-above. What Developer Mode costs you is renewal: if the session lapses, LG removes the apps
-installed through it ([how to keep them](docs/install-and-verify.md#important-developer-mode-expires)).
-A rooted TV with Homebrew Channel has no expiry.
-
-If something goes wrong, check [Troubleshooting](docs/troubleshooting.md) first, then
-[tell me what happened](https://github.com/gnacho/butaca/issues) — and if you own one of the
-sets above, it working is as useful a report as it failing.
+If something goes wrong, [Troubleshooting](docs/troubleshooting.md) first, then
+[tell me what happened](https://github.com/gnacho/butaca/issues). If you own one of the sets in
+that table, a report that it works is as useful as one that it fails.
 
 ## Installing
 
 **First time installing an app outside the LG Content Store?** Follow the
 [**step-by-step installation guide**](docs/install-and-verify.md). It starts with a regular LG
-webOS TV, a computer on the same network, and a Plex account with access to your own or a shared
-server. **No root is required.**
+webOS television, a computer on the same network, and a Jellyfin server you can sign in to.
 
 Set up LG Developer Mode and connect with webOS Dev Manager, then choose:
 
-- **Install Butaca directly:** add only Butaca to the TV; install future `.ipk` updates from
+- **Install Butaca directly:** add only Butaca to the set, and install future `.ipk` updates from
   your computer.
-- **Install Homebrew Channel first:** get an app catalogue on the TV, then install Butaca and
-  its updates with the remote.
+- **Install Homebrew Channel first:** get an app catalogue on the television, then install Butaca
+  and its updates with the remote.
 
-**Already have Homebrew Channel?** Find [Butaca in its catalogue](https://repo.webosbrew.org/apps/com.butaca/)
-and select **Install**. Skip the computer setup.
+Then open it, type the address of your Jellyfin server, and sign in with the account you already
+use there. The guide's sign-in step still describes the Plex form; the Jellyfin form asks for the
+address, the user and the password, and keeps a token rather than the password.
 
-**Developer Mode needs periodic renewal.** If it expires and LG disables Developer Mode, apps
-installed through it are removed. Installing Homebrew Channel through Developer Mode does not
-remove that requirement. The guide explains [how to renew the session](docs/install-and-verify.md#important-developer-mode-expires).
+**Already have Homebrew Channel?** Find
+[Butaca in its catalogue](https://repo.webosbrew.org/apps/com.butaca/) and select **Install**.
 
 For manual `.ipk` downloads, [verify the release checksum](docs/install-and-verify.md#verifying-the-package)
 before installing. Homebrew Channel verifies catalogue downloads for you.
@@ -124,69 +126,48 @@ before installing. Homebrew Channel verifies catalogue downloads for you.
 ## Nightly builds
 
 Every day `main` moves, CI cuts a nightly `.ipk` from wherever it stands and publishes it as a
-prerelease. It installs beside the
-regular app as **"Butaca Nightly"** — its own tile, its own sign-in — so trying it never touches
-the release you already trust. The newest one is always the latest entry under the repository releases.
+prerelease. It installs beside the regular app as **Butaca Nightly**, with its own tile and its own
+sign-in, so trying it never touches the release you trust. The newest one is the latest nightly
+release in this repository.
 
-**It is not tested on a television.** It passes the same automated build and packaging checks a
-release does, but nobody has watched it play. It is not in the Homebrew Channel and does not
-update itself — reinstall by hand whenever you want the next one — and each nightly is deleted
-30 days after it is published, so link to a specific `.ipk` at your own risk.
-
-## Privacy
-
-**Your library data never reaches me.** The app talks to your Plex server, to `plex.tv` to sign in,
-and to `discover.provider.plex.tv` for cast biographies.
-
-**Crash reports and usage analytics are off until you turn them on** — two separate first-run
-questions, each answerable with Don't Share, both reversible later under Account → Settings →
-Privacy & data. No title, search term, subtitle line, server name or address can appear in any
-report. [`PRIVACY.md`](PRIVACY.md) is the whole statement, including the schemas.
-
-ASS/SSA subtitles render natively during direct play, including styles, positioning, overlapping
-signs and dialogue, karaoke, and embedded fonts. External ASS files retain their original scripts.
-Transcoded playback continues to use the server's subtitle burn-in.
+**It is not tested on a television.** It passes the same build and packaging checks a release does,
+but nobody has watched it play. It is not in the Homebrew Channel, it does not update itself, and
+each nightly is deleted 30 days after publication, so linking to a specific `.ipk` is a bet on the
+clock.
 
 ## The honest scope
 
-I built this for how *I* watch, so it's narrower than Plex's:
+Built for how one person watches, so it is narrower than a full media centre:
 
-- **Movies and TV shows.** No music, no photos, no live TV or DVR.
-- **No typing in server addresses.** Servers come from your Plex account; set them up on a phone or
-  PC and choose from what's there. Servers reached through Plex's relay, or that require an
-  encrypted connection, are supported but haven't been watched end to end.
-- **One person's spare time.** There will be bugs I haven't hit, because I don't watch the way you do.
+- **Films and television.** No music, no photos, no live television or DVR.
+- **One person's spare time.** There will be bugs that have not been hit here, because nobody
+  watches the way you do.
 
-If that fits, it's genuinely nice to use. If it doesn't, the official app will serve you better.
+If that fits, it is genuinely pleasant to use. If it does not, the official client will serve you
+better.
 
 ## Contributing
 
 Issues and pull requests are welcome, especially from anyone whose television or library differs
-from mine — [**docs/building.md**](docs/building.md) is the build and the test loop, and says what
-hardware I most need help with. Security issues go through [`SECURITY.md`](SECURITY.md) rather than
-a public issue.
+from the one this is developed on. [**docs/building.md**](docs/building.md) is the build and the
+test loop, and says which hardware is most useful to hear about. Security issues go through
+[`SECURITY.md`](SECURITY.md) rather than a public issue.
 
-## Licence
+## Licence and credits
 
-[GPL-3.0-or-later](LICENSE), © 2026 Gleb Linnik and contributors. Butaca is a fork maintained
-at [gnacho/butaca](https://github.com/gnacho/butaca). The Butaca name and its brand
-artwork are excluded — see [`TRADEMARKS.md`](TRADEMARKS.md), which also carries the Plex and LG
-non-affiliation statements.
-Third-party components and their licences are in
-[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) and `licenses/` — notably the app ships its own
-LGPL build of FFmpeg. Those notices and licence texts ship inside the `.ipk` too, so they travel
-with the binary and not only with this repository.
+[GPL-3.0-or-later](LICENSE), © 2026 Gleb Linnik and contributors.
 
-This is an unofficial client, not affiliated with, endorsed by, or sponsored by Plex GmbH or LG
-Electronics. "Plex", "Rotten Tomatoes", "IMDb", "TMDB", "LG" and "webOS" are trademarks of their
-respective owners; where they appear in the app, they identify whose service or score is being shown.
+The playback engine underneath comes from the earlier native webOS Plex client written by Gleb
+Linnik, and this project continues that code; everything above the engine, from the Jellyfin side
+to the interface as it is now, is built here. The GPL notices and copyright holders are kept as the
+licence requires.
 
-## Star history
+The Butaca name and its brand artwork are not covered by that licence, see
+[`TRADEMARKS.md`](TRADEMARKS.md), which also carries the non-affiliation statements for Jellyfin,
+Plex and LG. Third-party components and their licences are in
+[`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) and `licenses/`; the app ships its own LGPL
+build of FFmpeg, and those notices travel inside the `.ipk` rather than only with this repository.
 
-<a href="https://www.star-history.com/?repos=glinnik21%2Fbutaca&type=date&legend=bottom-right">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=glinnik21/butaca&type=date&theme=dark&legend=bottom-right">
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=glinnik21/butaca&type=date&legend=bottom-right">
-    <img alt="Star history chart" src="https://api.star-history.com/chart?repos=glinnik21/butaca&type=date&legend=bottom-right">
-  </picture>
-</a>
+This is an unofficial client, not affiliated with, endorsed by or sponsored by Jellyfin, Plex GmbH
+or LG Electronics. "Jellyfin", "Plex", "LG" and "webOS" are trademarks of their respective owners,
+and where they appear in the app they identify whose service is being shown.
