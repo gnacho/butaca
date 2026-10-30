@@ -1248,9 +1248,10 @@ if binary.exists():
     # MATCHED WITH THE `butaca@` PREFIX, not as a bare number, and that is the difference
     # between grading `PLX_VERSION` and grading whatever digits happen to be in .rodata: the About
     # page and any release note text carry the version too, so a bare-number search was satisfiable
-    # by a page the version mechanism never touched. `telemetry::{crashreport,native,playback}`
-    # compose `concat!("butaca@", env!("PLX_VERSION"))` in every configuration — telemetry is
-    # ungated on purpose — so this witnesses the emitted value itself.
+    # by a page the version mechanism never touched. `plex::identity::VERSION_BADGE` composes
+    # `concat!("butaca@", env!("PLX_VERSION"))` and the run loop logs it before the first frame, so
+    # this witnesses the emitted value itself. The telemetry modules used to compose it; they were
+    # removed, which is why this gate was unsatisfiable until the badge found a real home.
     #
     # NIGHTLY IS GRADED SEPARATELY. Its package version (`appinfo["version"]`, already checked
     # against Cargo.toml above) IS the next-minor-or-patch number — recomputing "next" a second

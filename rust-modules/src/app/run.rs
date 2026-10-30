@@ -99,6 +99,11 @@ impl Frame {
 /// `app.adapters.player.mt()`. Threading a second `&MainThread` beside `&mut App` would have
 /// needed a second token, and minting one is the hole `MainThread::assume` documents.
 pub(crate) unsafe fn run(app: &mut App) {
+    // One line per launch, before anything else can reach the log: the exact build that is
+    // running. It is what a bug report needs first, and it is the string `ci/check-package.py`
+    // grades the packaged binary for, so it must stay ungated and reachable from every
+    // configuration (`identity::VERSION_BADGE` explains why it is a `concat!`).
+    crate::log(&format!("butaca: {} starting", crate::plex::identity::VERSION_BADGE));
     let watchdog = crate::task::watchdog::LoopWatch::start();
     while app.running {
         watchdog.advance();

@@ -54,6 +54,15 @@ pub(crate) fn display_name() -> &'static str {
 /// drift apart.
 pub(crate) const VERSION: &str = env!("PLX_VERSION");
 
+/// The version as it appears at the head of a log: `butaca@X.Y.Z`, with `-nightly-YYYYMMDD` on a
+/// nightly. `ci/check-package.py` grades the packaged binary for exactly this string, so it is a
+/// `concat!` of a literal and `PLX_VERSION` rather than a `format!`: a runtime join leaves no
+/// contiguous bytes in `.rodata` to find, and then the gate would be searching for something the
+/// mechanism it is meant to witness never produces. It used to be composed by the telemetry
+/// modules, which this project removed, so the witness had been unsatisfiable; the startup log
+/// line is the home it has now, and it is deliberately ungated so every configuration carries it.
+pub(crate) const VERSION_BADGE: &str = concat!("butaca@", env!("PLX_VERSION"));
+
 pub(crate) const PLATFORM: &str = "webOS";
 
 /// The OS version — the REAL one, read off the set at boot ([`crate::webos`]), because the app
@@ -287,5 +296,15 @@ mod tests {
             crate::i18n::normalize("en_US\r\nX-Plex-Token: stolen"),
             None
         );
+    }
+
+    /// The packaging gate greps the shipped binary for `butaca@<version>`, so the badge has to be
+    /// that exact concatenation and has to agree with `VERSION`. A `format!` here would satisfy
+    /// this test and fail the gate, which is why the constant itself is the thing composed.
+    #[test]
+    fn the_version_badge_is_the_literal_the_packaging_gate_greps() {
+        assert_eq!(VERSION_BADGE, concat!("butaca@", env!("PLX_VERSION")));
+        assert_eq!(VERSION_BADGE, format!("butaca@{}", VERSION));
+        assert!(VERSION_BADGE.starts_with("butaca@"));
     }
 }
