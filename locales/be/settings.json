@@ -156,6 +156,7 @@
   "settings.audio.detail": "Моўныя налады, сінхранізаваныя з уліковым запісам Plex.",
   "settings.playback.quality": "Прадвызначаная якасць",
   "settings.playback.direct_play": "Прамое прайграванне",
+  "settings.playback.lip_sync": "Audio sync",
   "settings.audio.language": "Пажаданая мова гуку",
   "settings.audio.subtitles": "Субцітры",
   "settings.audio.subtitle_language": "Мова субцітраў",

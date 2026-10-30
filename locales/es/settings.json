@@ -154,6 +154,7 @@
   "settings.audio.detail": "Preferencias de idioma sincronizadas con tu cuenta de Plex.",
   "settings.playback.quality": "Calidad predeterminada",
   "settings.playback.direct_play": "Reproducción directa",
+  "settings.playback.lip_sync": "Sincronización de audio",
   "settings.audio.language": "Idioma de audio preferido",
   "settings.audio.subtitles": "Subtítulos",
   "settings.audio.subtitle_language": "Idioma de los subtítulos",

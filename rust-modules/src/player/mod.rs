@@ -1561,6 +1561,23 @@ pub(crate) fn subtitle_offset_ms() -> i64 {
     i64::from(SUBTITLE_OFFSET_MS.load(Relaxed))
 }
 
+/// The lip-sync offset in nanoseconds, read from the persisted preference
+/// (`route::lip_sync_offset_ms`). POSITIVE delays the picture, the direction Bluetooth audio
+/// latency needs: sound arrives late, so the video waits for it.
+///
+/// **Device-only, unverified.** This is the ONE read point the pump should apply to the video
+/// feed's presentation clock: shifting the video AUs' PTS as they are fed to Starfish in
+/// `pump.rs`, leaving the pipeline-owned audio untouched. That is a demux/sync change the host
+/// cannot exercise — the host test suite and the simulator do not stage FFmpeg, and there is no
+/// Bluetooth audio pipeline to observe a real sync against. What is still missing on the
+/// television is (1) wiring this value into the fed video PTS and (2) proof the shift lands as a
+/// lip correction rather than a rebase artifact. Until that lands, the offset is persisted and
+/// shown in Settings but does not move a playing picture.
+#[allow(dead_code)] // the device-only application point, wired when the pump change lands
+pub(crate) fn lip_sync_offset_ns() -> i64 {
+    crate::route::lip_sync_offset_ms().saturating_mul(1_000_000)
+}
+
 /// The offset in nanoseconds (the unit every cue store speaks).
 fn subtitle_offset_ns() -> i64 {
     subtitle_offset_ms() * 1_000_000

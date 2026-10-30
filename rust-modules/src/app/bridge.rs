@@ -2441,6 +2441,7 @@ pub(crate) fn follow_auth_landing(pages: &mut Dispatcher<AppHost>, bridge: &mut 
             crate::dev::playback_quality_override().unwrap_or_else(|| saved.playback_quality()),
         );
         crate::route::restore_direct_play_mode(saved.direct_play_mode());
+        crate::route::restore_lip_sync_offset_ms(saved.lip_sync_offset_ms());
         crate::player::restore_subtitle_tone(saved.subtitle_tone());
         crate::player::restore_audio_enhancements(saved.audio_enhancements());
         let endpoints = super::boot::install_pms_owned(bridge, &c.origin,
