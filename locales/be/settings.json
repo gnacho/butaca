@@ -265,6 +265,8 @@
   "settings.servers.select.detail": "Выберыце, які наладжаны сервер выкарыстоўвае гэты тэлевізар.",
   "settings.servers.quick": "Хуткае падключэнне",
   "settings.servers.quick.detail": "Дадаць іншы сервер Jellyfin.",
+  "settings.servers.add_password": "Add server with a password",
+  "settings.servers.add_password.detail": "Sign in to another server with a user name and password.",
   "settings.servers.disconnect": "Адключыцца",
   "settings.servers.disconnect.detail": "Выйсці з бягучага сервера.",
   "settings.servers.copy": "Выберыце сервер, да якога падключаецца гэты тэлевізар.",

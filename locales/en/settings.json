@@ -1070,6 +1070,14 @@
     "value": "Add another Jellyfin server.",
     "description": "Settings, account, onboarding or privacy UI: the quick-connect row's detail line."
   },
+  "settings.servers.add_password": {
+    "value": "Add server with a password",
+    "description": "Settings, account, onboarding or privacy UI: the server picker row that opens the password sign-in form to add another server."
+  },
+  "settings.servers.add_password.detail": {
+    "value": "Sign in to another server with a user name and password.",
+    "description": "Settings, account, onboarding or privacy UI: the add-server-by-password row's detail line."
+  },
   "settings.servers.disconnect": {
     "value": "Disconnect",
     "description": "Settings, account, onboarding or privacy UI: the row that signs out of the current server."

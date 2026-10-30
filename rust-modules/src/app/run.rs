@@ -1948,8 +1948,13 @@ fn loop_requests(app: &mut App) {
             #[cfg(feature = "jellyfin")]
             crate::screens::registry::LoopReq::JfQuickConnect => {
                 crate::jellyfin::quick_connect::set_add_mode(true);
-                // Same PUSH rule as the old password add-server door: the form opens over Settings
-                // and BACK returns to it.
+                // PUSH, never nav_root: the form opens over Settings, and BACK returns to it.
+                super::bridge::nav_push(&mut app.pages, AppArg::Login);
+            }
+            #[cfg(feature = "jellyfin")]
+            crate::screens::registry::LoopReq::JfAddServer => {
+                crate::jellyfin::signin::set_add_mode(true);
+                // PUSH, never nav_root: the form opens over Settings, and BACK returns to it.
                 super::bridge::nav_push(&mut app.pages, AppArg::Login);
             }
             #[cfg(feature = "jellyfin")]

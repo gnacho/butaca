@@ -1139,9 +1139,15 @@ pub(crate) enum LoopReq {
     /// Jellyfin flavor only: the Settings root's *Conexión rápida* is Quick Connect — arm
     /// quick-connect mode on the login form and land there; the form shows a server field and a
     /// *Start Quick Connect* action instead of the password fields, and a success appends the
-    /// new server (add-server semantics, replacing the old password add-server door).
+    /// new server.
     #[cfg(feature = "jellyfin")]
     JfQuickConnect,
+    /// Jellyfin flavor only: the server picker's *Add by password* row — arm add-server mode on
+    /// the password sign-in form and land there; a successful connect appends the new server
+    /// instead of replacing. The password door for adding a second server, kept beside Quick
+    /// Connect so neither alternative is lost.
+    #[cfg(feature = "jellyfin")]
+    JfAddServer,
     /// Jellyfin flavor only: the server picker committed a row — sign in against that configured
     /// server (index into `jellyfin::boot`'s list) and make it active.
     #[cfg(feature = "jellyfin")]
