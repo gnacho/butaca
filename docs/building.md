@@ -40,9 +40,9 @@ already on `main`) — not just their build output — so it is not part of `--a
 None of the above has to be run by hand: `tools/build-gc.sh --auto` stages the same reclaim on its
 own, gated by free space on the volume (`PLX_GC_MIN_FREE_GIB`, default 20) and, for `--lanes`, by
 a lane idle guard (`PLX_GC_IDLE_MIN`, default 60) so a lane an agent might resume soon is spared.
-It runs from a Claude Code `SessionEnd` hook and from the hourly launchd agent `make disk-watch`
-installs (`tools/install-disk-watch.sh`, launchd only — run it yourself; nothing here installs it
-for you). Logs land in `~/Library/Logs/butaca-build-gc.log` (or `$PLX_GC_LOG`).
+It runs from a Claude Code `SessionEnd` hook; a machine idle between sessions gets the same thing
+from one cron line running `tools/build-gc.sh --auto` hourly. Logs land in
+`${XDG_STATE_HOME:-$HOME/.cache}/butaca/build-gc.log` (or `$PLX_GC_LOG`).
 
 The bundled FFmpeg is not rebuilt per checkout. Its source and object tree is machine-wide under
 `$PLX_BUILD_CACHE` (default `~/.cache/butaca`), keyed by configure flags and toolchain, so a

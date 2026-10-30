@@ -98,6 +98,8 @@ pkg/.flavor/
 # which stays in the checkout because `release.yml` publishes it as the LGPL corresponding source.
 vendor/ffmpeg-build
 vendor/ffmpeg-prefix
+vendor/ffmpeg-build-host
+vendor/ffmpeg-prefix-host
 vendor/sentry-native-*.tar.gz
 vendor/sentry-native-src
 vendor/sentry-native-build
@@ -119,6 +121,9 @@ vendor/vendor/
 # bump forever in a repo whose reproducibility rests on the pinned tarball.
 pkg/lib*-plx.so.*
 pkg/libass-plx-host.so.0*
+# The host half of the same FFmpeg, staged for the host tests only. It carries the SAME basenames
+# as the shipped ARM libraries, so it lives in its own directory and never in `pkg/` itself.
+pkg/host-ffmpeg/
 pkg/.ffabi-ok
 
 # Session file the app writes next to its payload. The desktop simulator is pointed at

@@ -173,7 +173,7 @@ What keeps that in check:
   tearing one down (see "Collecting the work" below).
 - **`tools/build-gc.sh --auto` runs the same reclaim on its own**, staged by free space on the
   volume and, for `--lanes`, by an idle guard that spares a lane touched inside the last hour —
-  from a `SessionEnd` hook and an optional hourly `make disk-watch` launchd agent. You do not have
+  from a `SessionEnd` hook, or from one cron line for a machine idle between sessions. You do not have
   to remember `make disk` for an ordinary fleet; it stays the report to read when deciding whether
   to intervene by hand, or when a lane needs reclaiming faster than the automatic pressure trigger.
 - **A linked worktree does not write an incremental cache.** The Makefile sets

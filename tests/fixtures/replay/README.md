@@ -20,10 +20,9 @@ Controlled bootstrap accepts **Home**, **Settings**, and the typed synthetic
 current simulator for Flow 12's complete typed synthetic initial input before boot, using the
 same contract as replay restoration. It remains synthetic: it does not seed an auth file or patch
 a recorded identifier.
-`tests/controlled_bootstrap.py --sim <built-simulator>` exercises normal Home, recording, fresh
-and contrasting-ambient replay with outbound IO denied, malformed-input refusals, and a
-supported-effect discriminator. Its private recording must pass `tools/butaca-rec check`
-before `import`/`rerecord`; a live-mock focus smoke alone is not replay acceptance.
+Replay acceptance also covers malformed-input refusals and the supported-effect discriminator;
+a live-mock focus smoke alone is not replay acceptance. A private recording must pass
+`tools/butaca-rec check` before `import`/`rerecord`.
 
 The hash includes `AppFrameV4{route,overlay,focus,tree,session,consent,initial}`: the press machine, the route/overlay words and the
 focus fingerprint from phase 2, plus — since phase 5b — `tree`, which is `Dispatcher::state_hash`

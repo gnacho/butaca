@@ -217,8 +217,8 @@ usage: tools/build-gc.sh [MODE] [-n]
   --all           --incremental everywhere plus --lanes, --stale, --orphans and --cache, and the
                   main checkout's vendor build trees. Leaves the main checkout's target dirs
                   themselves in place — `--stale` only removes the superseded hashes inside them.
-  --auto          staged reclaim, driven by free space on this volume, and the mode a hook or
-                  launchd job runs unattended — see `tools/install-disk-watch.sh`. Always runs
+  --auto          staged reclaim, driven by free space on this volume, and the mode a hook or a
+                  cron entry runs unattended. Always runs
                   --orphans first (cheap, safe, unconditional). Below $PLX_GC_MIN_FREE_GIB GiB
                   free (default 20): --incremental, then --worktrees, then --lanes restricted to
                   lanes idle for at least $PLX_GC_IDLE_MIN minutes (default 60, judged by the
@@ -273,17 +273,13 @@ free_kib() {
   df -Pk "$ROOT" 2>/dev/null | awk 'NR==2{print $4}'
 }
 
-# Where the auto log lives. A launchd host gets the platform's own log directory; anything else follows
-# the XDG state dir, falling back to ~/.cache like every other dotfile-averse Linux tool here.
-# `PLX_GC_LOG` overrides both, for a caller (or a test) that wants a known path.
+# Where the auto log lives: the XDG state dir, falling back to ~/.cache like every other
+# dotfile-averse tool here. `PLX_GC_LOG` overrides it, for a caller (or a test) that wants a known
+# path.
 gc_log_path() {
   if [ -n "${PLX_GC_LOG-}" ]; then printf '%s' "$PLX_GC_LOG"; return 0; fi
-  case "$(uname -s 2>/dev/null)" in
-    Darwin) printf '%s' "$HOME/Library/Logs/butaca-build-gc.log" ;;
-    *)
-      if [ -n "${XDG_STATE_HOME-}" ]; then printf '%s' "$XDG_STATE_HOME/butaca/build-gc.log"
-      else printf '%s' "$HOME/.cache/butaca/build-gc.log"; fi ;;
-  esac
+  if [ -n "${XDG_STATE_HOME-}" ]; then printf '%s' "$XDG_STATE_HOME/butaca/build-gc.log"
+  else printf '%s' "$HOME/.cache/butaca/build-gc.log"; fi
 }
 # One line per stage. Bounded rather than rotated: this is a diagnostic trail for a human to skim
 # occasionally, not an audit log, so keeping the last ~200 lines once the file crosses ~1 MB is

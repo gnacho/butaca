@@ -197,17 +197,10 @@ print-ffmpeg-staged:  ; @echo '$(FFMPEG_STAGED)'
 # it back. It is a report; `tools/build-gc.sh --incremental|--lanes|--all` is the reclaim, and
 # the script's header carries the measurement that motivated all three. Nothing here has to be run
 # by hand anymore: `tools/build-gc.sh --auto` runs the same reclaim on its own, staged by free-space
-# pressure, from a `SessionEnd` hook (`.claude/hooks/build-gc-auto.sh`) and from the per-user
-# launchd agent `disk-watch` installs below — `make disk` remains the report to read when deciding
-# whether to intervene by hand.
+# pressure, from a `SessionEnd` hook (`.claude/hooks/build-gc-auto.sh`); `make disk` remains the
+# report to read when deciding whether to intervene by hand, and a cron line that runs
+# `tools/build-gc.sh --auto` hourly does the same job for a machine idle between sessions.
 disk: ; @./tools/build-gc.sh
-
-# `make disk-watch` — install the per-user launchd agent that runs `tools/build-gc.sh --auto`
-# hourly in the background, so the automatic reclaim above does not depend on a session ending to
-# fire. launchd only; `tools/install-disk-watch.sh` prints the cron equivalent and exits 0 elsewhere.
-# `disk-watch-uninstall` removes it. Neither target touches the TV or any tracked file.
-disk-watch: ; @./tools/install-disk-watch.sh
-disk-watch-uninstall: ; @./tools/install-disk-watch.sh --uninstall
 
 # --- webOS NDK toolchain -----------------------------------------------------
 WEBOS_SDK   ?= $(HOME)/webos-ndk/arm-webos-linux-gnueabi_sdk-buildroot
@@ -752,9 +745,9 @@ else
 endif
 NDK_TARBALL = arm-webos-linux-gnueabi_sdk-buildroot_$(NDK_PLAT).tar.bz2
 NDK_URL = https://github.com/webosbrew/native-toolchain/releases/download/$(NDK_REL)/$(NDK_TARBALL)
-# sha256 of the linux-aarch64 tarball (the one CI fetches), verified 2026-08-01. Empty for the
-# darwin assets — `make setup-env` on a dev Mac keeps its existing no-checksum behaviour; CI is
-# where an unverified 156 MB download actually matters.
+# sha256 of the linux-aarch64 tarball (the one CI fetches), verified 2026-08-01. The darwin assets
+# the third-party release also publishes carry no pin here, because this project builds on Linux;
+# the pin exists for the download CI actually makes, where an unverified 156 MB matters.
 NDK_SHA256_linux-aarch64 = 45a2d12ff557457d92cde4fddaa77a6f1090fca03adc43bb74397e5e0c379501
 NDK_SHA256 = $(NDK_SHA256_$(NDK_PLAT))
 
@@ -1533,6 +1526,33 @@ libass-host: $(LIBASS_HOST_STAGED)
 check-ass: $(LIBASS_HOST_STAGED)
 	cd rust-modules && CARGO_INCREMENTAL=0 BUTACA_APP_DIR="$(CURDIR)/pkg" PATH="$$HOME/.cargo/bin:$$PATH" \
 	  cargo +$(RUST_NIGHTLY) test --lib player::ass::tests -- --include-ignored
+
+# The host half of the same pinned FFmpeg, built by the same script with the cross block skipped.
+# It stages into its OWN directory: the host libraries carry the basenames the shipped ARM ones do,
+# and `pkg/lib*-plx.so.*` is the glob that puts the device libraries in an `.ipk`.
+FFMPEG_HOST_PREFIX = vendor/ffmpeg-prefix-host
+FFMPEG_HOST_INC    = $(FFMPEG_HOST_PREFIX)/include
+FFMPEG_HOST_STAGED = pkg/host-ffmpeg/.staged
+
+$(FFMPEG_HOST_INC)/libavformat/avformat.h: ci/build-ffmpeg.sh
+	HOST=1 ./ci/build-ffmpeg.sh
+
+$(FFMPEG_HOST_STAGED): $(FFMPEG_HOST_INC)/libavformat/avformat.h ci/stage-host-ffmpeg.sh
+	@mkdir -p pkg
+	./ci/stage-host-ffmpeg.sh
+	@touch $@
+
+ffmpeg-host: $(FFMPEG_HOST_STAGED)
+
+# **`make check-ffmpeg` — the tests that need the bundled FFmpeg itself.** `make check` has no
+# FFmpeg to call, so a property of `ci/build-ffmpeg.sh`'s COMPONENT LIST (which demuxers, which
+# decoders) is invisible to it. These tests load the host build of that same list and are
+# `#[ignore]`d in the plain suite; the first is the zlib-compressed PGS track that no configure
+# flag change may silently drop again (`ff_image_subtitle_tests.rs`). Simulator CI runs this gate.
+.PHONY: check-ffmpeg
+check-ffmpeg: $(FFMPEG_HOST_STAGED)
+	cd rust-modules && CARGO_INCREMENTAL=0 BUTACA_FFMPEG_DIR="$(CURDIR)/pkg/host-ffmpeg" \
+	  PATH="$$HOME/.cargo/bin:$$PATH" cargo +$(RUST_NIGHTLY) test --lib ff::image_subtitle_tests -- --ignored
 
 # `sim` is the Linux simulator. The macOS simulator was retired with its support; the same
 # spelling now names the Linux one, which is what CI and the replay gate build.

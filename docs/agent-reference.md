@@ -145,8 +145,8 @@ the pinned Sentry Native cross-build), and `sshpass` (Homebrew, for deploy/run).
   2026-09-18 the same file also sets `[profile.dev] debug = "line-tables-only"` and `debug = false`
   for third-party packages in lanes (main keeps full DWARF). None of this reclaim has to be run by
   hand anymore: `tools/build-gc.sh --auto` runs the same modes on its own, staged by free-space
-  pressure, from a `SessionEnd` hook and the per-user launchd agent `make disk-watch` installs —
-  `make disk` remains the report to read before deciding whether to intervene yourself.)
+  pressure, from a `SessionEnd` hook or a cron entry. `make disk` remains the report to read
+  before deciding whether to intervene yourself.)
   `SYMBOLS` is in the `RUST_CFG` stamp beside `RELEASE`, and it has to be: a debuginfo build and a
   plain one produce **different build ids from identical sources**, so without the stamp
   `make RELEASE=1 ipk` followed by `make RELEASE=1 SYMBOLS=1 symbols` would hand you a `.debug`
@@ -1623,8 +1623,8 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   final present decisions are still computed and graded, with live physical-window protection.
   `AppFrameV4` includes physical Consent and the initial-input digest. Private recordings can contain
   credentials in typed initialization/effects: only explicitly synthetic inputs may become
-  fixtures. `tests/controlled_bootstrap.py` exercises this representative production path with
-  fresh/contrasting roots and outbound IO denied. Blobs, cross-target operation and unsupported
+  fixtures. The replay gate in CI exercises this representative production path with
+  fresh/contrasting roots. Blobs, cross-target operation and unsupported
   domains remain unsupported/open; controlled product replay supports both Targets and Resolve
   modes. The following phase-11/12 description is
   historical, not a claim that current replay falls back to live stores.

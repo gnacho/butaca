@@ -63,8 +63,8 @@ doesn't Just Work.
 ## What `make setup-env` does (and how to do it by hand)
 
 The `setup-env` target downloads the webosbrew **native-toolchain** buildroot SDK
-for your Mac's arch (`darwin-arm64` on Apple Silicon, `darwin-x86_64` on Intel),
-extracts it to `$(WEBOS_SDK)`, and runs its `relocate-sdk.sh`. The relocate step
+for this host's arch (the release publishes `darwin-arm64`, `darwin-x86_64` and
+`linux-aarch64`), extracts it to `$(WEBOS_SDK)`, and runs its `relocate-sdk.sh`. The relocate step
 is **required**: the SDK bakes absolute paths at build time, and `relocate-sdk.sh`
 rewrites them to wherever you extracted it. If you ever move the SDK directory,
 re-run `relocate-sdk.sh` or nothing will compile.
