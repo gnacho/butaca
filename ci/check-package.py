@@ -34,36 +34,61 @@ def lg_maintainer_address(value: str) -> bool:
     return re.fullmatch(r"[^<>]+ <[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}>", value) is not None
 
 
+# The one cargo feature a packaged build may name. `make` composes the stamp's feature half from
+# `RUST_FEATFLAGS`, which can be empty (plain dev), `--no-default-features` (release), `--features
+# lab-diagnostics` (LAB=1) or `--features jellyfin` (JELLYFIN=1), and CI always builds JELLYFIN=1,
+# so the shipped flavour names its feature in the stamp. This is an ALLOWLIST, not a "decode
+# anything": a feature added to the Makefile does not become a shippable configuration until it is
+# named here on purpose. Anything else is a diagnostic/dev build (`lab-diagnostics`, `devtriggers`)
+# that must return None rather than be graded as one of the two shipped configurations it is not.
+SHIPPED_FEATURES = {"jellyfin"}
+
+
 def build_configuration(stamp: str) -> "str | None":
     """Decode `pkg/.build-config` into "dev", "release", or None for anything else.
 
-    THE FEATURE FLAGS ARE ONE FIELD OF SEVERAL, and reading the stamp as a whole string is what
-    silently switched every gate that depends on this off. `RUST_CFG` is `features:$(RUST_FEATFLAGS)`,
-    then `+symbols` when SYMBOLS=1, then `+nightly:<date>` when FLAVOR=nightly, then always
-    `+tel:<hash>` — so the real stamp for an ordinary dev build is `features:+tel:98c4b7d3`, which
-    equals neither of the two literals this was once written against. It matched when it was
-    written; the telemetry field was added later, and from that day the answer was None for EVERY
-    build this project makes. Nothing failed — the callers print "SKIP — neither shipped
-    configuration" and move on — so the dev-trigger gate, the dev-only-library gate and the
-    reported-version gate all graded nothing on every CI run. Exactly the defect class DEV_WITNESS
-    is commented against, a witness that cannot fail, reached by another route. The release cut
-    carries `SYMBOLS=1`, which adds a THIRD field, so repairing the two literals by hand would have
-    left the release job ungraded anyway.
+    Only the FEATURE half is decoded, as a SET OF WORDS, not by comparing the whole field against
+    two literals. `RUST_CFG` is `features:$(RUST_FEATFLAGS)`, then `+symbols` when SYMBOLS=1, then
+    `+nightly:<date>` when FLAVOR=nightly, so the real stamp for the shipped Jellyfin flavour is
+    `features:--no-default-features --features jellyfin+symbols+nightly:20261029`, which equals
+    neither `""` nor `"--no-default-features"`. The two-literals version this replaces matched only
+    while the Makefile wrote an empty or `--no-default-features` feature half; the day CI started
+    naming the `jellyfin` feature, the answer became None for EVERY build this project ships.
+    Nothing failed: the callers print a SKIP and move on, so the dev-trigger gate, the
+    dev-only-library gate and the reported-version gate all graded nothing on every CI run.
+    Exactly the defect class DEV_WITNESS is commented against, a witness that cannot fail, reached
+    by another route.
 
-    Only the FEATURE half is decoded, and matched WHOLE rather than by substring: the "shots"
-    recipe in the Makefile's header is `--no-default-features --features devtriggers`, which a
-    substring test would grade as a release build and then fail for carrying exactly the surface it
-    asked for. `+tel:`, `+symbols` and `+nightly:` are all optional so a stamp written by an older
-    Makefile still decodes, and the feature flags are lazy so they cannot swallow a trailing field.
-    `nightly_stamp_date` reads the `+nightly:` field's VALUE separately — this function only has to
-    not choke on its presence.
+    The rules, applied to the whitespace-split flags field:
+      * no flags -> "dev";
+      * `--no-default-features` present -> "release";
+      * a `--features <list>` is accepted only when EVERY named feature is in
+        `SHIPPED_FEATURES`; any other feature (`lab-diagnostics`, `devtriggers`, the "shots"
+        recipe) returns None, so a diagnostic build is never graded as a shipped one.
+    `+symbols` and `+nightly:` are optional so a stamp written by an older Makefile still decodes,
+    and the feature flags are lazy so they cannot swallow a trailing field. `nightly_stamp_date`
+    reads the `+nightly:` field's VALUE separately; this function only has to not choke on its
+    presence.
     """
     fields = re.fullmatch(
         r"features:(?P<flags>.*?)(?:\+symbols)?(?:\+nightly:[0-9]{8})?(?:\+tel:[0-9a-f]+)?",
         stamp.strip())
     if not fields:
         return None
-    return {"": "dev", "--no-default-features": "release"}.get(fields.group("flags").strip())
+    tokens = fields.group("flags").strip().split()
+    if not tokens:
+        return "dev"
+    no_default = "--no-default-features" in tokens
+    features: "set[str]" = set()
+    for i, token in enumerate(tokens):
+        if token == "--features":
+            j = i + 1
+            while j < len(tokens) and not tokens[j].startswith("--"):
+                features.add(tokens[j])
+                j += 1
+    if not features <= SHIPPED_FEATURES:
+        return None
+    return "release" if no_default else "dev"
 
 
 def parse_release_line(content: str) -> "tuple[int, int] | None":
@@ -285,10 +310,17 @@ def _selftest() -> int:
         # older stamps, from before the telemetry and symbols fields existed
         "features:": "dev",
         "features:--no-default-features": "release",
+        # the shipped Jellyfin flavour: CI builds JELLYFIN=1, so the feature is NAMED in the stamp —
+        # the whole reason the decoder must read features as a word SET, not two whole-field literals.
+        "features:--no-default-features --features jellyfin+symbols+nightly:20261029": "release",  # the real stamp
+        "features:--no-default-features --features jellyfin+symbols+tel:98c4b7d37a4c": "release",
+        "features:--no-default-features --features jellyfin+tel:98c4b7d37a4c": "release",
+        "features:--features jellyfin+tel:98c4b7d37a4c": "dev",
         # configurations that are neither shipped one, and must SAY so rather than be graded
         "features: --features lab-diagnostics+tel:abc123def456": None,          # LAB=1
         "features:--no-default-features --features lab-diagnostics+tel:abc123def456": None,
         "features:--no-default-features --features devtriggers+tel:abc123def456": None,  # shots
+        "features:--no-default-features --features jellyfin devtriggers+tel:abc123def456": None,  # mixed: not all shipped
         # nothing to read
         "": None,
         "garbage": None,
