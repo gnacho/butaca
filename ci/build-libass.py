@@ -68,21 +68,27 @@ def extract(path, folder):
         contents.extractall(folder)
 
 
+# binutils translates its field names, and everything below parses the English ones. CI runs
+# under a C locale and passes; a developer's machine does not, so a Spanish `readelf -h` printed
+# "Máquina:" and the ELF check failed with "could not read ELF machine type".
+TOOL_ENV = dict(os.environ, LC_ALL='C', LANG='C')
+
+
 def verify_library(path, darwin, readelf=None):
     """Prove the bundled font stack stayed private and needs no C++ runtime."""
     if darwin:
-        load_commands = subprocess.check_output(['otool', '-L', str(path)], text=True).splitlines()[1:]
+        load_commands = subprocess.check_output(['otool', '-L', str(path)], text=True, env=TOOL_ENV).splitlines()[1:]
         needed = [line.strip().split(' (', 1)[0] for line in load_commands]
         allowed = {'@loader_path/' + path.name, '/usr/lib/libSystem.B.dylib', '/usr/lib/libiconv.2.dylib'}
-        exports = subprocess.check_output(['nm', '-gU', str(path)], text=True).splitlines()
+        exports = subprocess.check_output(['nm', '-gU', str(path)], text=True, env=TOOL_ENV).splitlines()
         names = [line.split()[-1].removeprefix('_') for line in exports if line.strip()]
     else:
-        dynamic = subprocess.check_output([readelf, '-d', str(path)], text=True)
+        dynamic = subprocess.check_output([readelf, '-d', str(path)], text=True, env=TOOL_ENV)
         needed = re.findall(r'\(NEEDED\).*\[([^\]]+)\]', dynamic)
         # Derive the permitted dynamic loader from the library under test, not
         # the build host. This keeps host builds portable without allowing a
         # wrong-architecture artifact to pass the dependency check.
-        header = subprocess.check_output([readelf, '-h', str(path)], text=True)
+        header = subprocess.check_output([readelf, '-h', str(path)], text=True, env=TOOL_ENV)
         machine = re.search(r'^\s*Machine:\s*(.+)$', header, re.MULTILINE)
         if not machine:
             raise ValueError('could not read ELF machine type')
@@ -94,7 +100,7 @@ def verify_library(path, darwin, readelf=None):
         allowed = {'libc.so.6', 'libm.so.6', 'libgcc_s.so.1', 'libpthread.so.0', 'ld-linux.so.3'}
         if host_loader:
             allowed.add(host_loader)
-        symbols = subprocess.check_output([readelf, '--dyn-syms', '--wide', str(path)], text=True)
+        symbols = subprocess.check_output([readelf, '--dyn-syms', '--wide', str(path)], text=True, env=TOOL_ENV)
         names = []
         for line in symbols.splitlines():
             fields = line.split()

@@ -1614,9 +1614,13 @@ sim-macos: $(FFMPEG_HOST_STAGED) $(LIBASS_HOST_STAGED) pkg/.ffabi-host-ok
 
 # Full product replay is a renderer-backed host gate. Keep the fast unit suite usable without
 # a window system; Simulator CI runs this same driver against the simulator it just built.
+# The gate builds the simulator of the host it runs on, because the recordings are made with
+# that one: on Linux it is the same release binary a developer runs, so a failure reproduces.
+REPLAY_UNAME := $(shell uname -s)
+REPLAY_BIN = $(if $(filter Darwin,$(REPLAY_UNAME)),$$SIM_MACOS_BIN_ENV,$$SIM_LINUX_TDIR_ENV/release/butaca-sim)
 .PHONY: check-replay
-check-replay: sim-macos
-	python3 tests/replay_fixtures.py --sim "$$SIM_MACOS_BIN_ENV"
+check-replay: $(if $(filter Darwin,$(REPLAY_UNAME)),sim-macos,sim-linux)
+	python3 tests/replay_fixtures.py --sim "$(REPLAY_BIN)"
 
 # **`make screenshots` — the documentation screenshots, regenerated.** Boots the simulator once per
 # scene in `tests/screenshots/scenes.json` against the mock server's DEMO LIBRARY (openly licensed

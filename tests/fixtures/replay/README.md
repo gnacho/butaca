@@ -5,9 +5,10 @@ A directory here is one RECORDING (restructure spec §5.3): `manifest.json` (the
 `butaca-rec`. They are regression assertions pinned to the build lineage that recorded them
 (§5.5): `tools/butaca-rec diff` compares two, `tools/butaca-rec check` verifies one against
 `ALPHABET.json`, and `tests/test_harness.py` checks their schema and closed vocabulary on every
-`make check`. **`make check-replay` builds the macOS simulator and executes every committed
+`make check`. **`make check-replay` builds the simulator of the host it runs on and executes every committed
 recording in both Targets and Resolve modes.** The same driver (`tests/replay_fixtures.py`) gates
-the macOS Simulator CI job, with outbound networking denied, and retains each run's logs.
+the Linux Simulator CI job, with outbound networking denied, and retains each run's logs. The gate
+runs where the fixtures are recorded, so a failure is one a developer can reproduce locally.
 It requires a successful process exit, exactly one clean summary, every difference counter zero,
 and frame/grade counts matching the complete committed ledger. Missing manifests or segments,
 refused fixtures, timeouts, and incomplete replay all fail; no fixture is quarantined or skipped.
