@@ -46,17 +46,16 @@ itself. In this capture the frame underneath was decoded by the simulator.
 ## What it does
 
 **Runs on a Jellyfin server.** Point it at the address, sign in with the account you already have.
-What stays on disk is an access token, never your password, and the server can revoke it. The Plex
-flavour of the same build is still there for Plex libraries.
+What stays on disk is an access token, never your password, and the server can revoke it.
 
 **Keeps up with the remote.** The interface is drawn per frame rather than fetched per screen, and
 the project carries frame-rate regression scenes that measure it on a television instead of
 trusting a claim.
 
-**Plays on the television's decoder.** Direct play of H.264 and HEVC, including 4K and 10 bit,
-decided against the codec table the set publishes where it publishes one. Anything the set cannot
-decode is transcoded by the server, and a playback can be switched to Auto to follow a link whose
-speed changes.
+**Plays on the television's decoder.** Direct play of H.264 and HEVC, including 4K, 10 bit and
+Dolby Vision as the server reports it, decided against the codec table the set publishes where it
+publishes one. Anything the set cannot decode is transcoded by the server, and a playback can be
+switched to Auto to follow a link whose speed changes.
 
 **Everything you expect while watching.** Resume, seek and scrub, chapters from the server, audio
 and subtitle tracks including image subtitles, Skip Intro and Skip Credits where the server has the
@@ -68,7 +67,8 @@ with their styles, positioning, overlapping signs and dialogue, karaoke and embe
 external ASS file keeps its own script. Only transcoded playback falls back to the server's
 burn-in.
 
-**Several servers at once.** Sign in to more than one, and search and browse reach all of them.
+**More than one server, one at a time.** Sign in to several and switch between them in Settings,
+each with its own token. The screens show the one that is active.
 
 **Nothing phones home.** No account with us, no telemetry, no crash reporting, no analytics. The
 only thing it talks to is the server you configured. [`PRIVACY.md`](PRIVACY.md) says it in full.
@@ -89,7 +89,7 @@ each:
 |---|---|
 | **Some 2019 sets on LG's k5lp or k3lp chip**, installed through Developer Mode | Video will not play. LG's Developer Mode sandbox can withhold a device the video path needs, and other native players hit the same wall. The app checks for it and says so instead of crashing. On a rooted set with Homebrew Channel the failure screen offers **Repair**, which applies the Homebrew Channel fix to the sandbox. Without root there is no fix. |
 | **2018 sets on firmware reporting platform release 3.9.3** | Sign-in and browsing work, but video has not been seen to start, and no error is reported. |
-| **Sets on LG's k6hp chip** | A crash seen in reports and not reproduced here, because there is no such set to test on. |
+| **Sets on LG's k6hp chip** | A crash reported by owners and not reproduced here, because there is no such set to test on. |
 
 **Root is not needed.** A regular set in Developer Mode runs everything except the Repair above.
 Developer Mode expires and has to be renewed, and when it does LG removes the apps installed
@@ -114,8 +114,8 @@ Set up LG Developer Mode and connect with webOS Dev Manager, then choose:
   and its updates with the remote.
 
 Then open it, type the address of your Jellyfin server, and sign in with the account you already
-use there. The guide's sign-in step still describes the Plex form; the Jellyfin form asks for the
-address, the user and the password, and keeps a token rather than the password.
+use there. The guide covers what happens to the password you type: it is used once, and what the
+app keeps is a token the server can revoke.
 
 **Already have Homebrew Channel?** Find
 [Butaca in its catalogue](https://repo.webosbrew.org/apps/com.butaca/) and select **Install**.
@@ -160,7 +160,8 @@ test loop, and says which hardware is most useful to hear about. Security issues
 The playback engine underneath comes from the earlier native webOS Plex client written by Gleb
 Linnik, and this project continues that code; everything above the engine, from the Jellyfin side
 to the interface as it is now, is built here. The GPL notices and copyright holders are kept as the
-licence requires.
+licence requires. That Plex backend is still in the tree and builds the earlier client when the
+`jellyfin` feature is off, but every package published from this repository is built with it on.
 
 The Butaca name and its brand artwork are not covered by that licence, see
 [`TRADEMARKS.md`](TRADEMARKS.md), which also carries the non-affiliation statements for Jellyfin,
