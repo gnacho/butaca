@@ -26,7 +26,7 @@
 #                     | player=<rk> | login | account | itemmenu
 #   --server <slot>   open detail=/player= on this registered Plex server slot instead of the
 #                     current one; boots through the signed-in stored roster so secondary slots
-#                     exist (an already-armed plxnative-servers also survives with --keep)
+#                     exist (an already-armed butaca-servers also survives with --keep)
 #   --guest           boot as tests/manifest.local.json's managed TEST USER, never the owner.
 #                     Reuses run.py's own identity resolution (fetch_managed_user_token, the
 #                     plex.tv shared_servers lookup) rather than re-deriving it, so the two
@@ -136,7 +136,7 @@ done
 set -- ${_argv[@]+"${_argv[@]}"}
 
 # WHICH INSTALL — asked for, never restated. This file used to carry
-# `APPDIR=/media/developer/apps/usr/palm/applications/com.beb.plxnative` and a matching `APPID=`
+# `APPDIR=/media/developer/apps/usr/palm/applications/com.butaca` and a matching `APPID=`
 # as literals, which was fine while there was one install and became a second source of truth the
 # moment a second one landed: the Makefile derives all of this from FLAVOR, and a copy here would
 # go stale silently, pointing the deploy at one app and the log at another.
@@ -152,7 +152,7 @@ set -- ${_argv[@]+"${_argv[@]}"}
 # APPPORT is the app's capture listener and belongs to the install like everything else here:
 # 8910 for the shipped app, 8911 for a flavoured one, so two installs cannot fight over one
 # socket (`capture::default_port()` is the same rule, and ci/flavor.py --selftest cross-checks
-# them). It is read once and used TWICE below — the content of the `plxnative-capture` trigger
+# them). It is read once and used TWICE below — the content of the `butaca-capture` trigger
 # and the streamer's `--app-port` — because those two must be the same number and a literal in
 # either place is how the picture ends up on one install while the keys go to the other.
 # ONE invocation. `print-flavor` comes back first and answers the Makefile's own default when
@@ -172,7 +172,7 @@ set -- ${_argv[@]+"${_argv[@]}"}
 }
 # The app mkfifos this at boot inside its own runtime root; the NAME is unchanged across flavours,
 # only the directory moved.
-REMOTE_FIFO="$RUNDIR/plxnative-remote"
+REMOTE_FIFO="$RUNDIR/butaca-remote"
 
 STREAM_PID_FILE="$REPO/.tv-stream.pid"
 # --remote's three extra processes. Each gets a pid file so `down` revokes the published URL and
@@ -213,13 +213,13 @@ SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLeve
 tv()  { ssh "${SSH_OPTS[@]}" "root@$HOST" "$@"; }
 tvq() { ssh "${SSH_OPTS[@]}" "root@$HOST" "$@" 2>/dev/null; }
 
-# `pidof plxnative` matched BOTH installs the moment a second flavour landed: the binaries are
-# both named `plxnative`, and it hands back two pids in an order busybox does not promise. `fuser`
+# `pidof butaca` matched BOTH installs the moment a second flavour landed: the binaries are
+# both named `butaca`, and it hands back two pids in an order busybox does not promise. `fuser`
 # on the resolved install's own binary is INODE-scoped, so it answers for exactly the app this
 # invocation is driving. Keep only the digits — busybox prints bare pids, other fusers prefix the
 # path (which has none), so this normalises both to a plain space-separated list.
 app_pids() {
-  tvq "fuser $APPDIR/plxnative" | tr -cs '0-9' ' ' | sed 's/^ *//; s/ *$//'
+  tvq "fuser $APPDIR/butaca" | tr -cs '0-9' ' ' | sed 's/^ *//; s/ *$//'
 }
 
 # ------------------------------------------------------------ the TV lock ----
@@ -292,10 +292,10 @@ is_md5_hash() {
 
 local_binary_hash() {
   local raw hash
-  if raw=$(md5 -q "$REPO/pkg/plxnative" 2>/dev/null); then
+  if raw=$(md5 -q "$REPO/pkg/butaca" 2>/dev/null); then
     :
   else
-    raw=$(md5sum "$REPO/pkg/plxnative" 2>/dev/null) || return 1
+    raw=$(md5sum "$REPO/pkg/butaca" 2>/dev/null) || return 1
   fi
   hash=${raw%%[[:space:]]*}
   [ -z "$hash" ] && { printf '\n'; return 0; }
@@ -305,7 +305,7 @@ local_binary_hash() {
 
 remote_binary_hash() {
   local raw hash
-  raw=$(tvq "md5sum $APPDIR/plxnative") || return 1
+  raw=$(tvq "md5sum $APPDIR/butaca") || return 1
   hash=${raw%%[[:space:]]*}
   [ -z "$hash" ] && { printf '\n'; return 0; }
   is_md5_hash "$hash" || return 1
@@ -313,7 +313,7 @@ remote_binary_hash() {
 }
 
 ensure_binary() {
-  [ -f "$REPO/pkg/plxnative" ] || { bad "no pkg/plxnative — run make"; return 1; }
+  [ -f "$REPO/pkg/butaca" ] || { bad "no pkg/butaca — run make"; return 1; }
   local l t presence
   if ! l=$(local_binary_hash); then
     bad "could not read local binary hash"
@@ -324,7 +324,7 @@ ensure_binary() {
   # from a searchable/readable app directory establishes absence; transport failures and
   # dangling symlinks must not authorize a repair deploy.
   if ! presence=$(tvq "cd '$APPDIR' && [ -r . ] && [ -x . ] || exit 1
-if [ -e plxnative ] || [ -L plxnative ]; then printf 'present\\n'; else printf 'missing\\n'; fi"); then
+if [ -e butaca ] || [ -L butaca ]; then printf 'present\\n'; else printf 'missing\\n'; fi"); then
     bad "could not determine deployed binary presence"
     return 1
   fi
@@ -339,7 +339,7 @@ if [ -e plxnative ] || [ -L plxnative ]; then printf 'present\\n'; else printf '
     missing) t=""; info "deployed binary is missing — repair required" ;;
     *) bad "invalid deployed binary presence response"; return 1 ;;
   esac
-  # This compares BYTES, and `pkg/plxnative` is a path that every flavour and both configurations
+  # This compares BYTES, and `pkg/butaca` is a path that every flavour and both configurations
   # write — so a match says "these are the bytes on my disk right now", never "this is the install
   # I asked for". That second question is settled by assert_install, on the app's own boot line.
   if [ "$l" = "$t" ]; then ok "deployed binary matches local build"; return 0; fi
@@ -380,7 +380,7 @@ if [ -e plxnative ] || [ -L plxnative ]; then printf 'present\\n'; else printf '
 # GLOB-clear, exactly like tests/run.py: a newly-added app trigger can never bleed in
 # from a previous session, and any leftover non-DIAG file also suppresses the picker.
 clear_triggers() {
-  tv "for f in $RUNDIR/plxnative-*; do case \"\$f\" in *.log) ;; *) rm -f \"\$f\";; esac; done" 2>/dev/null
+  tv "for f in $RUNDIR/butaca-*; do case \"\$f\" in *.log) ;; *) rm -f \"\$f\";; esac; done" 2>/dev/null
   ok "triggers cleared ($RUNDIR)"
 }
 
@@ -389,7 +389,7 @@ push_token() {
   local tok
   tok=$(sed -n 's/.*PMS_TOKEN *"\([^"]*\)".*/\1/p' "$REPO/src/config.local.h" 2>/dev/null | head -1)
   [ -n "$tok" ] || { bad "no PMS_TOKEN in src/config.local.h (gitignored) — boot will hit QR sign-in"; return 1; }
-  printf '%s' "$tok" | tv "cat > $RUNDIR/plxnative-token" || return 1
+  printf '%s' "$tok" | tv "cat > $RUNDIR/butaca-token" || return 1
   ok "token injected (value not printed)"
 }
 
@@ -495,7 +495,7 @@ assert_running() {
 }
 
 # The event log's own first line names the install that wrote it. Check it, because nothing else
-# can: both binaries are called `plxnative`, and `pkg/plxnative` is a path every flavour and every
+# can: both binaries are called `butaca`, and `pkg/butaca` is a path every flavour and every
 # configuration writes, so the md5 above proves only "some flavour of some configuration". Without
 # this, driving the wrong install produces a full page of green ticks against the other app's log.
 assert_install() {
@@ -587,8 +587,8 @@ configure_direct_screen() {
   # reason `--server 1` could otherwise select a slot the same command had just erased.
   no_token=1
   case "$direct_kind" in
-    player) direct_marker="plxnative-play: rk=$direct_rk server=$server_slot start" ;;
-    detail) direct_marker="plxnative-detail: rk=$direct_rk server=$server_slot start" ;;
+    player) direct_marker="butaca-play: rk=$direct_rk server=$server_slot start" ;;
+    detail) direct_marker="butaca-detail: rk=$direct_rk server=$server_slot start" ;;
   esac
 }
 
@@ -617,9 +617,9 @@ await_direct_screen() {
   while [ "$waited" -le "$max_wait_s" ]; do
     snapshot=$(tvq "
       if grep -F '$marker' $EVENTLOG >/dev/null 2>&1; then echo marker=1; fi
-      if grep -F 'plxnative-$direct_kind: refused:' $EVENTLOG >/dev/null 2>&1; then echo refused=1; fi
+      if grep -F 'butaca-$direct_kind: refused:' $EVENTLOG >/dev/null 2>&1; then echo refused=1; fi
       grep -oE 'route=[a-z]+' $EVENTLOG 2>/dev/null | tail -1
-      if fuser $APPDIR/plxnative >/dev/null 2>&1; then echo alive=1; fi
+      if fuser $APPDIR/butaca >/dev/null 2>&1; then echo alive=1; fi
     ")
     marker_seen=0; route_seen=0; refused_seen=0; alive=0
     printf '%s\n' "$snapshot" | grep -qx 'marker=1' && marker_seen=1
@@ -635,7 +635,7 @@ await_direct_screen() {
         ;;
       refused)
         bad "$direct_kind rk=$direct_rk on server $server_slot was explicitly refused"
-        info "see the plxnative-$direct_kind: refused line in $EVENTLOG"
+        info "see the butaca-$direct_kind: refused line in $EVENTLOG"
         return 1
         ;;
       dead)
@@ -712,42 +712,42 @@ cmd_up() {
     home)      want_route=home ;;
     # The picker is what an ORDINARY boot shows: it needs the stored session and NO
     # automation. An injected token suppresses it (token beats session), and
-    # plxnative-pickuser forces it only to auto-pick a tile and move straight on — so
+    # butaca-pickuser forces it only to auto-pick a tile and move straight on — so
     # neither reaches it. Hence: no token, no triggers.
     # The session is PER-INSTALL (paths::session_candidates names auth.json for the app id,
     # and the legacy in-app-dir entry is offered only to the shipped install), so this screen
     # is reachable on the flavour that signed itself in and lands on QR on the other. That is
     # the design — two installs are two devices to the account — not a broken picker.
     profiles)  no_token=1; want_route=profiles ;;
-    login)     files+=("plxnative-login="); want_route=login ;;
+    login)     files+=("butaca-login="); want_route=login ;;
     # The account sheet and the card menu are SURFACES on the shared ModalStack since
     # UI-restructure phase 10, not routes: the heartbeat prints the host page as `route=` and
     # the surface's own `Screen::name` as ` overlay=`. Both halves are named, because the host
     # page alone is Home — true from the first heartbeat of any boot — so naming only it would
     # grade a refused trigger as a success. `tests/manifest.json` re-keyed its `home-acct-glass`
     # and `item-menu` scenes the same way and for the same reason.
-    account)   files+=("plxnative-acct="); want_route=home; want_overlay=account ;;
+    account)   files+=("butaca-acct="); want_route=home; want_overlay=account ;;
     # the press-and-hold card menu: the trigger snaps into the grid and holds the focused
     # card for us, because a real hold is a live gesture no boot trigger can express
-    itemmenu)  files+=("plxnative-itemmenu="); want_route=home; want_overlay=itemmenu ;;
-    library)   files+=("plxnative-library="); want_route=library ;;
-    library=*) files+=("plxnative-library=${screen#*=}"); want_route=library ;;
-    detail=*)  files+=("plxnative-detail=${screen#*=}"); want_route=detail ;;
-    collection=*) files+=("plxnative-collection=${screen#*=}"); want_route=collection ;;
+    itemmenu)  files+=("butaca-itemmenu="); want_route=home; want_overlay=itemmenu ;;
+    library)   files+=("butaca-library="); want_route=library ;;
+    library=*) files+=("butaca-library=${screen#*=}"); want_route=library ;;
+    detail=*)  files+=("butaca-detail=${screen#*=}"); want_route=detail ;;
+    collection=*) files+=("butaca-collection=${screen#*=}"); want_route=collection ;;
     # the person page has no boot trigger of its own — it is REACHED, by opening a movie's
     # detail page, walking focus down to Cast & Crew (a movie's second section) and pressing
     # OK on the first headshot. So the rk here is the MOVIE's, not the person's.
-    person=*)  files+=("plxnative-detail=${screen#*=}" "plxnative-detailsec=1" "plxnative-detailok=")
+    person=*)  files+=("butaca-detail=${screen#*=}" "butaca-detailsec=1" "butaca-detailok=")
                want_route=person ;;
-    player=*)  files+=("plxnative-play=${screen#*=}"); want_route=player ;;
+    player=*)  files+=("butaca-play=${screen#*=}"); want_route=player ;;
     *) echo "unknown --screen: $screen" >&2; exit 2 ;;
   esac
-  [ "$server_set" = 1 ] && files+=("plxnative-server=$server_slot")
+  [ "$server_set" = 1 ] && files+=("butaca-server=$server_slot")
   # capture trigger is DIAG-exempt: arming the live view must not suppress the picker.
   # The content is the port to listen on, and it is written EXPLICITLY rather than left empty
   # (which would fall through to the app's own default) so that the number the app binds and the
   # number the streamer dials are the one variable resolved at the top of this file.
-  [ -n "$stream" ] && files+=("plxnative-capture=$APPPORT")
+  [ -n "$stream" ] && files+=("butaca-capture=$APPPORT")
 
   # A caller who typed --guest gets a REFUSAL, not a silently different identity, the moment the
   # chosen screen/server turns out to force the stored-session boot instead (profiles; any
@@ -778,9 +778,9 @@ cmd_up() {
       echo "  (no boot triggers for this screen)"
     fi
     if [ "$push_guest" = 1 ]; then
-      echo "  would run: printf '%s' '<guest token, not printed>' | ssh root@$HOST 'cat > $RUNDIR/plxnative-token'"
+      echo "  would run: printf '%s' '<guest token, not printed>' | ssh root@$HOST 'cat > $RUNDIR/butaca-token'"
     elif [ "$push_owner" = 1 ]; then
-      echo "  would run: printf '%s' '<owner token from src/config.local.h, not printed>' | ssh root@$HOST 'cat > $RUNDIR/plxnative-token'"
+      echo "  would run: printf '%s' '<owner token from src/config.local.h, not printed>' | ssh root@$HOST 'cat > $RUNDIR/butaca-token'"
     else
       echo "  would inject: nothing ($identity_desc)"
     fi
@@ -822,7 +822,7 @@ cmd_up() {
   fi
 
   if [ "$push_guest" = 1 ]; then
-    printf '%s' "$GUEST_TOKEN" | tv "cat > $RUNDIR/plxnative-token" \
+    printf '%s' "$GUEST_TOKEN" | tv "cat > $RUNDIR/butaca-token" \
       && ok "guest token injected (value not printed)" \
       || { bad "failed to inject the guest token"; exit 1; }
   elif [ "$push_owner" = 1 ]; then
@@ -923,13 +923,13 @@ cmd_selftest() {
   local direct_kind="" direct_rk="" direct_marker=""
   configure_direct_screen >/dev/null || { bad "direct-screen selftest setup failed"; return 1; }
   [ "$no_token" = 1 ] || { bad "--server did not select the stored-roster boot"; return 1; }
-  [ "$direct_marker" = "plxnative-play: rk=5469 server=1 start" ] || {
+  [ "$direct_marker" = "butaca-play: rk=5469 server=1 start" ] || {
     bad "wrong player identity marker: $direct_marker"; return 1;
   }
 
   screen=detail=42; server_slot=0; no_token=0; direct_kind=""; direct_rk=""; direct_marker=""
   configure_direct_screen >/dev/null || { bad "detail selftest setup failed"; return 1; }
-  [ "$direct_marker" = "plxnative-detail: rk=42 server=0 start" ] || {
+  [ "$direct_marker" = "butaca-detail: rk=42 server=0 start" ] || {
     bad "wrong detail identity marker: $direct_marker"; return 1;
   }
 
@@ -1056,7 +1056,7 @@ cmd_status() {
   [ -n "$pid" ] && ok "app running (pid $pid)" || bad "app not running"
   assert_install || true
   assert_route "" || true
-  tvq "ls $RUNDIR/plxnative-* 2>/dev/null | grep -v '\.log\$' | sed 's|.*/||'" \
+  tvq "ls $RUNDIR/butaca-* 2>/dev/null | grep -v '\.log\$' | sed 's|.*/||'" \
     | while read -r t; do [ -n "$t" ] && info "armed: $t"; done
   local ver
   ver=$(curl -s -m 2 "http://127.0.0.1:8909/version" 2>/dev/null)
@@ -1235,7 +1235,7 @@ cmd_sound() {
 # there (`nohup sh -c 'sleep TTL; sh restore'`), so a harness that dies, a Mac that sleeps and an
 # ssh that drops all end with the television back online without anybody's help. `on` runs the
 # same restore and kills the watchdog. Idempotent both ways. The marker is outside the
-# `plxnative-*` prefix, like the lock, so it neither suppresses the picker nor gets swept.
+# `butaca-*` prefix, like the lock, so it neither suppresses the picker nor gets swept.
 #
 # Two things this cannot claim, stated so nobody grades them from it: a REJECT is not what a
 # real router does with its uplink down (that is usually silence), and the jail's resolver view

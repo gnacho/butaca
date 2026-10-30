@@ -1,5 +1,5 @@
 //! **crate::i18n::msg::settings_plaintext_question() — the one question, and every surface that asks it**
-//! (PLX-NATIVE-10).
+//! (BUTACA-10).
 //!
 //! Four surfaces ask it: the sign-in read-out, Home's and a Library source's failure read-out
 //! (when the server that failed is one discovery OFFERED — `plex::grant::offers`), and Settings'

@@ -446,7 +446,7 @@
     }
   },
   "widgets.reason.jail_help": {
-    "value": "Repair requires a rooted TV and Homebrew Channel access. See github.com/GLinnik21/plx-native/issues/74 for help.",
+    "value": "Repair requires a rooted TV and Homebrew Channel access. See github.com/gnacho/butaca/issues/74 for help.",
     "description": "reason jail_help"
   },
   "widgets.tracks.empty": {
@@ -485,7 +485,7 @@
     }
   },
   "widgets.panel.jail": {
-    "value": "this install's sandbox blocks access to /dev/rtkmem; PlxNative can offer a confirmed repair through rooted Homebrew Channel access",
+    "value": "this install's sandbox blocks access to /dev/rtkmem; Butaca can offer a confirmed repair through rooted Homebrew Channel access",
     "description": "panel jail"
   },
   "widgets.panel.refused": {
@@ -549,11 +549,11 @@
     "description": "reason forced_playback_help"
   },
   "widgets.repair.question": {
-    "value": "Repair PlxNative’s sandbox?",
+    "value": "Repair Butaca’s sandbox?",
     "description": "repair question"
   },
   "widgets.repair.body": {
-    "value": "Use Homebrew Channel’s root access to update PlxNative’s sandbox with LG’s native profile. This requires a rooted TV. Close and reopen PlxNative afterward.",
+    "value": "Use Homebrew Channel’s root access to update Butaca’s sandbox with LG’s native profile. This requires a rooted TV. Close and reopen Butaca afterward.",
     "description": "repair body"
   },
   "widgets.repair.action": {
@@ -573,7 +573,7 @@
     "description": "repair completed"
   },
   "widgets.repair.reopen": {
-    "value": "Close and reopen PlxNative before playing video.",
+    "value": "Close and reopen Butaca before playing video.",
     "description": "repair reopen"
   },
   "widgets.repair.failed": {
@@ -581,7 +581,7 @@
     "description": "repair failed"
   },
   "widgets.repair.start_failed": {
-    "value": "Could not start the repair. Close and reopen PlxNative to try again.",
+    "value": "Could not start the repair. Close and reopen Butaca to try again.",
     "description": "repair start_failed"
   },
   "widgets.repair.hbc_unavailable": {

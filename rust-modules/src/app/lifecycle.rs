@@ -1540,7 +1540,7 @@ mod root_back_tests {
 
     /// **The one that matters (issue #16).** The root press asks the platform for its Home screen.
     ///
-    /// Observed RED against the shipped `back_at_root`, which raised the "Exit PlxNative?" alert
+    /// Observed RED against the shipped `back_at_root`, which raised the "Exit Butaca?" alert
     /// and asked webOS for nothing: `left: 0, right: 1`.
     #[test]
     fn back_at_home_root_shows_the_platform_home() {

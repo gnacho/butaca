@@ -132,7 +132,7 @@ pub(crate) type CURLM = c_void;
 //
 // Same candidate list as `net.rs`, in the same order, so a set carrying both SONAMEs binds both
 // tables against the same library. The macOS name is last for the same reason it is there: the
-// host simulator and `PlxNative.app` run this code, and the host suite below drives real libcurl
+// host simulator and `Butaca.app` run this code, and the host suite below drives real libcurl
 // over plain loopback HTTP.
 crate::dynlib! {
     /// The seven multi-interface symbols, frozen to webOS's oldest libcurl (7.53.1). See this
@@ -702,7 +702,7 @@ impl CurlSource {
         // plane consults a table rather than carrying the pin. Looked up ONCE here; a seek reuses it.
         let (origin, _) = crate::plex::origin::split(url);
         let resolve_entry = crate::net::resolve::entry_for(origin.host(), origin.port());
-        // The offline reproduction (`/tmp/plxnative-nowan`): a name opens only with a pin.
+        // The offline reproduction (`/tmp/butaca-nowan`): a name opens only with a pin.
         if resolve_entry.is_none()
             && crate::net::refuse_name(origin.host(), crate::net::API.connect_s)
         {
@@ -1122,6 +1122,7 @@ impl CurlSource {
     /// Drain the multi handle's message queue. Only reached with `running == 0`, so the transfer
     /// IS over whether or not a DONE message is waiting for us.
     fn reap(&mut self) {
+        let mut saw_done = false;
         loop {
             let mut left: c_int = 0;
             let m = unsafe { curl_multi_info_read(self.multi, &mut left) };
@@ -1130,6 +1131,7 @@ impl CurlSource {
             }
             unsafe {
                 if (*m).msg == CURLMSG_DONE {
+                    saw_done = true;
                     self.rc = msg_result(m);
                     self.failed = self.rc != 0;
                 }
@@ -1137,6 +1139,22 @@ impl CurlSource {
             if left == 0 {
                 break;
             }
+        }
+        if !saw_done {
+            // The one retirement path that cannot explain itself: `running == 0` with an empty
+            // message queue leaves the easy handle without a verdict, yet everything downstream
+            // reads it as the end of the media (issue #74). Record how much of the body had
+            // arrived so the next cut says whether libcurl lost the transfer or genuinely
+            // finished it.
+            crate::player::log(&format!(
+                "curlio: multi idle with no DONE message (off={} size={})",
+                self.off, self.size
+            ));
+        } else if self.rc != 0 {
+            crate::player::log(&format!(
+                "curlio: transfer retired rc={} (off={} size={})",
+                self.rc, self.off, self.size
+            ));
         }
         self.done = true;
     }
@@ -2858,7 +2876,7 @@ mod tests {
         // disturb a table that is already live — which is precisely the claim being made.
         let v = crate::dynlib::load_into(
             None,
-            &["libplxnative-no-such-curl.so.99"],
+            &["libbutaca-no-such-curl.so.99"],
             &[("curl_multi_init", &curlmulti::curl_multi_init)],
         );
         assert!(matches!(v, crate::dynlib::Loaded::NoLibrary));
@@ -2964,6 +2982,37 @@ mod tests {
 
     /// Issue #74: the transport retired the transfer after delivering only part of the body it had
     /// announced. That is a truncation, and the demuxer must be told so, never handed EOF.
+    #[test]
+    fn a_multi_that_goes_idle_without_a_done_message_says_so() {
+        let Some(_gate) = curl_gate() else { return };
+        with_server(RangeMode::Honour, |port, _, _| {
+            let mut src =
+                CurlSource::open(&format!("http://127.0.0.1:{port}/f.mkv"), 0).expect("open");
+            let log = crate::events_log();
+            let before = std::fs::metadata(&log).map_or(0, |m| m.len());
+            // What libcurl leaves behind when it retires the easy handle without a verdict: the
+            // queue is empty and `running` came back zero. Issue #74 needs that stated in the log,
+            // because from here on the demuxer reads it as the end of the media.
+            src.done = false;
+            src.failed = false;
+            src.off = 1024;
+            src.reap();
+            assert!(src.done, "the transfer is over either way");
+            assert!(!src.failed, "no verdict means no failure to report");
+            let tail = std::fs::read(&log)
+                .map(|b| String::from_utf8_lossy(&b[before as usize..]).into_owned())
+                .expect("event log readable");
+            let line = tail
+                .lines()
+                .find(|l| l.contains("multi idle with no DONE message"))
+                .unwrap_or_else(|| panic!("no retirement line in the log tail: {tail:?}"));
+            assert!(
+                line.contains("off=1024"),
+                "the byte count is the point of the line: {line}"
+            );
+        });
+    }
+
     #[test]
     fn a_body_that_stops_short_is_not_reported_as_clean_eof() {
         let Some(_gate) = curl_gate() else { return };

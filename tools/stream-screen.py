@@ -6,7 +6,7 @@
 # TWO frame sources (--source, default auto):
 #
 #   app     — the app's OWN capture stream (crate::capture, enabled by touching
-#             `plxnative-capture` in that install's RUNTIME ROOT on the TV before
+#             `butaca-capture` in that install's RUNTIME ROOT on the TV before
 #             launch — /tmp for the stable install, /tmp/<app id> for a flavoured one;
 #             see --runtime-dir): the app GPU-downscales its GLES frames and pushes
 #             JPEGs over TCP :8910 for the shipped install, :8911 for a flavoured one
@@ -52,7 +52,7 @@
 #     --fps    : cap the loop to at most N fps (default: unthrottled = as fast as
 #                the service returns, ~2-3 fps). Lower it to reduce TV/CPU load.
 #     --runtime-dir : the on-device RUNTIME ROOT of the install to drive — where its
-#                `plxnative-*` dev triggers, its logs and the remote FIFO live.
+#                `butaca-*` dev triggers, its logs and the remote FIFO live.
 #                Default: whatever `make -s print-rundir` answers, i.e. the Makefile's
 #                own FLAVOR, which is tracked as `debug` — so an unqualified run drives
 #                the developer install, and `make -s print-rundir FLAVOR=stable`
@@ -71,9 +71,9 @@
 # Remote control: the served page captures your keyboard (arrows, Enter=OK,
 # Backspace/Esc=Back, PgUp/PgDn=CH, P=Play/Pause, S=Stop) and shows clickable
 # buttons; each POSTs to /key, which a held SSH connection writes into the app's
-# on-device FIFO — `plxnative-remote`, inside that install's runtime root (see
+# on-device FIFO — `butaca-remote`, inside that install's runtime root (see
 # --runtime-dir) — and the app (crate::remote) drains it each frame and injects the
-# key. Requires the plxnative app to be running (it creates the FIFO at boot).
+# key. Requires the butaca app to be running (it creates the FIFO at boot).
 # External input injection can't reach the app: the wayland compositor only reads a
 # fixed evdev device set, and LG's keymanager luna API injects into the web-app layer,
 # not our SDL/wayland path — hence the in-app FIFO.
@@ -105,8 +105,8 @@ REPO_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file
 
 
 # ---- which INSTALL this session drives ---------------------------------------
-# Two builds now live on one television — `com.beb.plxnative`, the one users install,
-# and `com.beb.plxnative.debug` beside it — and each keeps its `plxnative-*` dev
+# Two builds now live on one television — `com.butaca`, the one users install,
+# and `com.butaca.debug` beside it — and each keeps its `butaca-*` dev
 # triggers, its three logs and the remote FIFO in its OWN runtime root: `/tmp` for the
 # stable install, `/tmp/<app id>` for a flavoured one. The Makefile owns that rule
 # (RUNDIR), so ASK it rather than restate it a fourth time.
@@ -159,7 +159,7 @@ def resolve_install(runtime_dir: str = "", fifo: str = "") -> dict:
         if runtime_dir != root:
             # An explicit root that is not the flavour make just answered for. The only
             # other root the Makefile can produce is stable's — so ask for that triple
-            # too, because writing `com.beb.plxnative` here would be a fourth copy of a
+            # too, because writing `com.butaca` here would be a fourth copy of a
             # string that already lives in the Makefile, paths.rs and ci/flavor.py.
             # Anything else is an install this repo did not build, and saying so beats
             # guessing an id off the directory name.
@@ -170,10 +170,10 @@ def resolve_install(runtime_dir: str = "", fifo: str = "") -> dict:
             # run that says it cannot name the port than one that quietly probes 8911.
             port = st[2] if hit else ""
         root = runtime_dir
-    # `plxnative-remote` is the app's own filename and did NOT move — only the
+    # `butaca-remote` is the app's own filename and did NOT move — only the
     # directory holding it did (crate::remote still mkfifos exactly this name).
     if root and not fifo:
-        fifo = os.path.join(root, "plxnative-remote")
+        fifo = os.path.join(root, "butaca-remote")
     if fifo and not root:
         root = os.path.dirname(fifo)
     return {"appid": appid or "?", "root": root or "?", "fifo": fifo,
@@ -711,7 +711,7 @@ def source_supervisor(hub: FrameHub, stats: dict, args, w, h, min_interval_ms, r
 
 
 # ---- remote control: write key tokens into the app's on-device FIFO ----------
-# The app (crate::remote) drains `plxnative-remote` — in ITS OWN runtime root, which is
+# The app (crate::remote) drains `butaca-remote` — in ITS OWN runtime root, which is
 # /tmp for the stable install and /tmp/<app id> for a flavoured one — each frame, and
 # pushes each token as a synthetic SDL key. We hold ONE persistent SSH connection
 # running a writer loop and feed it tokens on stdin — no per-key SSH handshake. The
@@ -754,8 +754,8 @@ def writer_loop(fifo: str) -> str:
     """The held-SSH writer: one token per stdin line, into the app's FIFO.
 
     The path is a PARAMETER because it moved. This was the literal
-    `/tmp/plxnative-remote` until two installs began sharing one television: a
-    flavoured install's FIFO is `/tmp/<app id>/plxnative-remote`, and a driver still
+    `/tmp/butaca-remote` until two installs began sharing one television: a
+    flavoured install's FIFO is `/tmp/<app id>/butaca-remote`, and a driver still
     writing the stable path fails in the worst possible shape — `[ -p ]` finds nothing
     and `continue` swallows the token silently, once per key, while /key has already
     answered `sent` to the page. Keys that vanish with a success message are harder to
@@ -838,7 +838,7 @@ def make_handler(hub: FrameHub, sink, tshub: TsHub = None, jsmpeg_js: bytes = b"
                  install: dict = None):
     # `install` is what resolve_install() worked out: which of the two builds sharing
     # this television this session is actually on the wire to. Nothing else served here
-    # says so — both binaries are called `plxnative` and both pages look identical — so
+    # says so — both binaries are called `butaca` and both pages look identical — so
     # /version and the page footer carry it.
     install = install or {"appid": "?", "root": "?", "fifo": ""}
     class H(BaseHTTPRequestHandler):
@@ -1202,7 +1202,7 @@ def main():
                          "(~10-19fps) on this SoC. Default 960x540.")
     ap.add_argument("--source", default="auto", choices=["auto", "app", "service"],
                     help="frame source: 'app' = the in-app stream (fast, UI plane only; "
-                         "needs `plxnative-capture` in the install's runtime root on the "
+                         "needs `butaca-capture` in the install's runtime root on the "
                          "TV, see --runtime-dir), 'service' = the luna "
                          "capture service (~3fps, sees the video plane), 'auto' (default) "
                          "= app when its port answers, else service, switching back "
@@ -1226,7 +1226,7 @@ def main():
     ap.add_argument("--fps", type=float, default=0.0, help="cap loop to N fps (0 = unthrottled)")
     ap.add_argument("--runtime-dir", default=None, metavar="DIR",
                     help="on-device runtime root of the install to drive — where its "
-                         "plxnative-* triggers, logs and the remote FIFO live. Default: "
+                         "butaca-* triggers, logs and the remote FIFO live. Default: "
                          "`make -s print-rundir`, i.e. the Makefile's FLAVOR, tracked as "
                          "debug. Use `make -s print-rundir FLAVOR=stable` (= /tmp) for the "
                          "install users have.")

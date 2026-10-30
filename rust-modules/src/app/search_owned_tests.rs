@@ -751,7 +751,7 @@ fn owned_search_walks_the_shared_strip_to_the_chip_and_back_to_the_field() {
     assert_eq!(d.focus(), Some(field), "▼ off the bar lands on the field, whatever pill it was on");
 }
 
-/// What the `/tmp/plxnative-search[=<query>]` boot trigger now does, once the retired legacy
+/// What the `/tmp/butaca-search[=<query>]` boot trigger now does, once the retired legacy
 /// screen's own `enter()` no longer exists to seed it: write the query into the STORE before the
 /// fresh `SearchScreen`'s first `sync()` ever runs, stand on Search exactly as an interactive
 /// arrival does, and let that first sync pick the query up off `AppViews.search` exactly as an

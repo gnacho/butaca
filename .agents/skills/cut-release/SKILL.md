@@ -66,35 +66,35 @@ binary you are about to publish. Mixing a query with a real goal is not a query 
 Whenever you assert something about "the release build", prove the bytes first:
 
 ```sh
-md5 -q pkg/plxnative
+md5 -q pkg/butaca
 sshpass -p alpine ssh root@$(cat .tv-host) \
-  "md5sum /media/developer/apps/usr/palm/applications/com.beb.plxnative/plxnative"
+  "md5sum /media/developer/apps/usr/palm/applications/com.butaca/butaca"
 ```
 
 **That id is spelled out on purpose, and it is the STABLE one.** This is the most-copied "prove the
 bytes" idiom in the repo, and there is now a second install on the same television —
-`com.beb.plxnative.debug`, the developer build, which is what an unflavoured `make deploy` targets.
+`com.butaca.debug`, the developer build, which is what an unflavoured `make deploy` targets.
 Pasted into a debug context this command silently compares against the wrong app and reports a
 mismatch (or, worse, a match) about a binary nobody is releasing. **A release is always the stable
 id**, so leave the literal alone here; anywhere else, get the path from
 `make -s print-appdir FLAVOR=<f>`. And note the hash is now weaker evidence than it reads as:
-`pkg/plxnative` is a path every flavour and both configurations write, so a match proves the bytes
+`pkg/butaca` is a path every flavour and both configurations write, so a match proves the bytes
 and not the install. The **first line of the event log** is the witness that names both —
-`install: id=com.beb.plxnative flavour=- … features=release` — where `features=release` is the
+`install: id=com.butaca flavour=- … features=release` — where `features=release` is the
 direct answer to "is this the shipped configuration?". (The stable install prints `flavour=-`, not
 `flavour=stable`: the field is derived by stripping the stable id off the running one, so the app
 users get has nothing left to name.)
 
 ## The stable id is a release-only id, and the Makefile enforces it
 
-`com.beb.plxnative` is the id users install. There is now a second install on the same
-television — `com.beb.plxnative.debug`, the developer build — and **that one is the Makefile's
+`com.butaca` is the id users install. There is now a second install on the same
+television — `com.butaca.debug`, the developer build — and **that one is the Makefile's
 default**, so every release command below has to say `FLAVOR=stable` out loud. A release is always
 the stable id and always `RELEASE=1`; the other combination is refused:
 
 ```
 $ make FLAVOR=stable ipk
-refusing to put a DEV build on com.beb.plxnative — that id is what users install.
+refusing to put a DEV build on com.butaca — that id is what users install.
   release build:      make FLAVOR=stable RELEASE=1 ipk
   developer install:  make ipk          (FLAVOR=stable is not the default)
   really meant it:    make FLAVOR=stable ALLOW_DEV_ON_STABLE=1 ipk
@@ -105,7 +105,7 @@ The parenthetical names the flavour you **asked for**, not the default — readi
 add `FLAVOR=stable` is backwards; the developer install is the one you get by typing nothing.)
 
 This is §2 seen from the other side: a dev-featured binary under the shipped id carries the whole
-`/tmp` trigger surface, the world-writable `plxnative-remote` FIFO and the `:8910` capture
+`/tmp` trigger surface, the world-writable `butaca-remote` FIFO and the `:8910` capture
 listener (8910 is the *stable* install's port; debug defaults to 8911 and nightly to 8912, which
 is exactly why the shipped id carrying a listener **at all** is the thing being ruled out here).
 Before the split that could only happen by publishing by hand, which is how v0.2.1's defects got
@@ -224,7 +224,7 @@ python3 ci/check-package.py        # the gate: versions, ar layout, descriptors,
 ```
 
 `FLAVOR=stable` is what makes this the shipped id: unflavoured it packages
-`com.beb.plxnative.debug`, whose `.ipk` filename, `appinfo.json` and staged directory all carry the
+`com.butaca.debug`, whose `.ipk` filename, `appinfo.json` and staged directory all carry the
 debug id — and `make ipk` only writes `pkg/ipk.sha256` for the stable flavour, so a debug package
 cannot quietly overwrite the hash a release note quotes.
 
@@ -294,7 +294,7 @@ gh run view <id> --json jobs --jq '.jobs[] | "\(.name): \(.conclusion)"'
 be `github-actions[bot]`, never a person:
 
 ```sh
-gh api repos/GLinnik21/plx-native/releases/tags/vX.Y.Z --jq '.assets[] | "\(.name) \(.uploader.login)"'
+gh api repos/gnacho/butaca/releases/tags/vX.Y.Z --jq '.assets[] | "\(.name) \(.uploader.login)"'
 ```
 
 ### 5. Verify what the public can actually download
@@ -317,7 +317,7 @@ Two things are worth reading rather than assuming:
 
 ```sh
 git -C . fetch origin main && git show origin/main:docs/release-audits/vX.Y.Z.md | head -40
-gh api repos/GLinnik21/plx-native/releases/tags/vX.Y.Z --jq '.assets[]|"\(.name) \(.uploader.login)"'
+gh api repos/gnacho/butaca/releases/tags/vX.Y.Z --jq '.assets[]|"\(.name) \(.uploader.login)"'
 ```
 
 An audit whose generated block is still the template's placeholder means the release did not go
@@ -329,10 +329,10 @@ Deploying over ssh does not exercise the package. Install the real `.ipk` — th
 packaging bugs were found that `make deploy` could never have surfaced:
 
 ```sh
-scp pkg/com.beb.plxnative_X.Y.Z_arm.ipk root@$(cat .tv-host):/tmp/
+scp pkg/com.butaca_X.Y.Z_arm.ipk root@$(cat .tv-host):/tmp/
 ssh root@$(cat .tv-host) "script -qc \"luna-send -i -a com.webos.appInstallService \
   luna://com.webos.appInstallService/dev/install \
-  '{\\\"id\\\":\\\"com.beb.plxnative\\\",\\\"ipkUrl\\\":\\\"/tmp/com.beb.plxnative_X.Y.Z_arm.ipk\\\",\\\"subscribe\\\":true}'\" /dev/null"
+  '{\\\"id\\\":\\\"com.butaca\\\",\\\"ipkUrl\\\":\\\"/tmp/com.butaca_X.Y.Z_arm.ipk\\\",\\\"subscribe\\\":true}'\" /dev/null"
 ```
 
 **Both ids here are the stable one, deliberately** — this step is the release going onto the id
@@ -342,16 +342,16 @@ bringing an install up, and wrong here, because it replaces the packaged binary 
 and the whole point of this step is that the **package** is what runs.
 
 Wake the TV first (`wake-tv` skill). Then launch it and read the event log: its first line is
-`install: id=com.beb.plxnative flavour=- … features=release` — check the id and `features=` there
-rather than inferring them, since both builds' binaries are named `plxnative` — the next line names
+`install: id=com.butaca flavour=- … features=release` — check the id and `features=` there
+rather than inferring them, since both builds' binaries are named `butaca` — the next line names
 the firmware, and a release build must leave **only** the three `*.log` files in the stable runtime
 root, `/tmp`. No FIFO, no `:8910` listener. That is the release build's whole premise and it is
 worth re-checking every time, by hash.
 
-If the developer install is also on this television you will see a `/tmp/com.beb.plxnative.debug`
+If the developer install is also on this television you will see a `/tmp/com.butaca.debug`
 directory beside those logs: that is the *other* install's runtime root, not a leak from this one.
 It is named for the app id — the reason the separator is a dot and not a hyphen — so it matches no
-`plxnative-*` glob and cannot be mistaken for a trigger by the check or by the app.
+`butaca-*` glob and cannot be mistaken for a trigger by the check or by the app.
 
 ### 7. Tell the people who are waiting
 
@@ -360,7 +360,7 @@ The listing and the submission are separate artifacts from the release and both 
 - **`webosbrew/apps-repo` PR** — the body argues for the requirements line. When compatibility
   changes, that argument changes. It has previously sat for weeks defending a ceiling that had
   already been removed.
-- **`packages/com.beb.plxnative.yml`** — the description thousands of channel users read before
+- **`packages/com.butaca.yml`** — the description thousands of channel users read before
   installing. Its "please read before installing" section is where the honest limits live.
 - **A comment on the PR** if the reviewer is waiting on something this release affects.
 

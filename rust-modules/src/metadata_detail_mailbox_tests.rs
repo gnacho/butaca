@@ -588,7 +588,7 @@ fn controlled_cancelled_detail_ack_is_recorded_and_recovers_capacity() {
         "detailok":true, "filmography":true, "personcredits":9, "nowan":true});
     for trigger in ["detail", "detailsec", "detailok", "filmography", "personcredits", "nowan"] {
         value["triggers"].as_array_mut().unwrap()
-            .push(serde_json::json!(format!("plxnative-{trigger}")));
+            .push(serde_json::json!(format!("butaca-{trigger}")));
     }
     let initial = crate::app::bootstrap::Initial::from_value(value).unwrap();
     crate::app::bootstrap::stores::init(&initial, false);

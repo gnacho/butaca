@@ -79,7 +79,7 @@ resource list, which an offline boot does not have). A pin is built ONLY when th
 encodes the stored `address` (v4 or the eight-group v6 spelling), so it is a pure function of the
 hostname; `register_origin`/`install` take it, the `Client` carries it for the control plane, and
 `net::resolve` holds an append-only table the media plane (`curlio`) consults by host and port.
-TLS validation is untouched: the name stays in the URL and in SNI. `/tmp/plxnative-nowan` makes
+TLS validation is untouched: the name stays in the URL and in SNI. `/tmp/butaca-nowan` makes
 every unpinned name fail as a dead resolver would, which is how the case is reproduced on a desk.
 **Since issue #95 the DISCOVERY PROBE is pinned too, not only the winning `Client`.**
 `auth::race_batch` builds a `ResolvePin` for each `https://…plex.direct` candidate from the same
@@ -125,7 +125,7 @@ issue #95 itself.
 
 **"May a credential go to this origin" has ONE answer: `grant::credential_allowed`** (or
 `grant::allowed_under` where a pure function receives the policy). It is the build's
-`CredentialPolicy` OR a live `PlaintextGrant` for that exact origin (PLX-NATIVE-10). Whoever puts a
+`CredentialPolicy` OR a live `PlaintextGrant` for that exact origin (BUTACA-10). Whoever puts a
 particular SERVER's token on an origin — registry and endpoint admission — asks
 `grant::allowed_for(policy, machine_id, origin)`: a grant admits only the machine it was minted
 for. A remembered (cached) origin asks `grant::remembered_allowed`: the policy alone, never a

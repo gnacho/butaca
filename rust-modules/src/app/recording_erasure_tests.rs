@@ -18,24 +18,24 @@ fn owned_recording_files_are_erased_after_quiescence_and_leftovers_are_acked() {
         let outside = root.join("unrelated-recording");
         std::fs::create_dir(&outside).unwrap();
         std::fs::write(outside.join("sentinel"), b"synthetic sentinel").unwrap();
-        let recording = root.join("plxnative-recordings");
+        let recording = root.join("butaca-recordings");
         let sink = crate::ui::rec::DirSink::create(&recording.join("latest")).unwrap();
         let initial = bootstrap::Initial::synthetic_home(17, 32517, None).unwrap();
         let mut rec = recorder::Recplay::recording_with_sink(&initial, Box::new(sink)).unwrap();
         rec.tick(0, 0.0); // deliberately still buffered when the confirmed command arrives
         std::os::unix::fs::symlink(&outside, recording.join("external-link")).unwrap();
-        std::os::unix::fs::symlink(outside.join("sentinel"), root.join("plxnative-app-init"))
+        std::os::unix::fs::symlink(outside.join("sentinel"), root.join("butaca-app-init"))
             .unwrap();
-        std::fs::write(root.join("plxnative-recplay"), outside.to_str().unwrap()).unwrap();
+        std::fs::write(root.join("butaca-recplay"), outside.to_str().unwrap()).unwrap();
         if partial {
-            std::fs::create_dir(root.join("plxnative-rec")).unwrap();
+            std::fs::create_dir(root.join("butaca-rec")).unwrap();
             std::fs::write(
-                root.join("plxnative-rec/keep"),
+                root.join("butaca-rec/keep"),
                 b"unexpected control directory",
             )
             .unwrap();
         } else {
-            std::fs::write(root.join("plxnative-rec"), b"").unwrap();
+            std::fs::write(root.join("butaca-rec"), b"").unwrap();
         }
 
         let mut bridge = Bridge::for_session_test(crate::auth::SessionInit::captured(Session {
@@ -93,8 +93,8 @@ fn owned_recording_files_are_erased_after_quiescence_and_leftovers_are_acked() {
         );
         assert!(!temp.path().exists());
         assert!(!recording.exists());
-        assert!(std::fs::symlink_metadata(root.join("plxnative-app-init")).is_err());
-        assert!(!root.join("plxnative-recplay").exists());
+        assert!(std::fs::symlink_metadata(root.join("butaca-app-init")).is_err());
+        assert!(!root.join("butaca-recplay").exists());
         assert_eq!(
             std::fs::read(outside.join("sentinel")).unwrap(),
             b"synthetic sentinel"

@@ -3,18 +3,18 @@
 **Diagnostics status: BUILT and DEVICE-VERIFIED on the dev set, 2026-08-26** (against `main`
 @5a8ef2ef). The whole chain —
 a **physical BLUE press** on the Magic Remote → snapshot → scrub → gzip → pinned TLS POST from the
-television's own libcurl → receiver → `plxnative-lab logs` — has run on the LG 49SM9000PLA. §11 is
+television's own libcurl → receiver → `butaca-lab logs` — has run on the LG 49SM9000PLA. §11 is
 what that did and did not prove; §12 records the separately verified public leg through the router.
 
 **Lab Control status: BUILT and HOST-VERIFIED, not yet device-verified.** The same lab package can
-hold an outbound pinned HTTPS poll, receive ordered app-input commands from `plxnative-lab send`,
+hold an outbound pinned HTTPS poll, receive ordered app-input commands from `butaca-lab send`,
 dispatch them on the SDL main thread and acknowledge delivery. It adds no dependency. The remaining
 proof is an `.ipk` installed on a Cloud Test Lab set and one command/ack round trip (§11).
 
 LG Cloud Test Lab rents us physical sets on webOS/SoC combinations nobody here owns. It gives a
 picture and a virtual remote, and **no console, no ssh, no stdout, no way to download a file**. We
 can reproduce a bug on a k8hpp webOS 10 set and watch it happen, and the agent fixing it cannot see
-one line of `plxnative-events.log`.
+one line of `butaca-events.log`.
 
 This is the bridge: a lab-only build presses its own log out through the internet to a receiver on
 the developer's Mac and optionally holds an outbound command poll. Commands come back only as the
@@ -64,12 +64,12 @@ And two constraints that shape everything below:
 ## 2. Topology
 
 ```
-Cloud Test Lab TV  ──HTTPS POST / long poll──▶  lab.plxnative.com:39443
+Cloud Test Lab TV  ──HTTPS POST / long poll──▶  lab.example.invalid:39443
                    ◀── bounded command response ──┘          (same outbound connection)
                                             │
                                         Keenetic  ──UPnP IGD AddPortMapping (temporary)
                                             │
-                                    Mac:<ephemeral>  ──▶  plxnative-lab  ──▶  ~/.plxnative-lab/…
+                                    Mac:<ephemeral>  ──▶  butaca-lab  ──▶  ~/.butaca-lab/…
                                                                                     │
                                                                           the coding agent reads
 ```
@@ -89,7 +89,7 @@ authenticates the receiver to the television. Redirects are disabled.
 
 ```
 POST /v1/diag HTTP/1.1
-Host: lab.plxnative.com:39443
+Host: lab.example.invalid:39443
 Authorization: Bearer <session secret, 32 random bytes, base64url>
 X-Plx-Session: <session id, 8 hex>
 Content-Type: application/x-ndjson
@@ -108,7 +108,7 @@ control POST routes, every path and method is a bare 404.
 
 ```json
 {"kind":"envelope","seq":3,"session":"a1b2c3d4","sent_at_ms":812433,
- "app":{"version":"0.4.1","id":"com.beb.plxnative.debug","flavour":"debug",
+ "app":{"version":"0.4.1","id":"com.butaca.debug","flavour":"debug",
         "features":["lab-diagnostics","devtools"],"uptime_ms":812433},
  "device":{"webos_release":"10.3.1","codename":"…","api":"…","model":"OLED55C1",
            "board":"k8hpp","panel":"3840x2160","drawable":"1920x1080"},
@@ -229,17 +229,17 @@ poll and starving sign-in or diagnostics.
 
 ## 5. Transport security: pin, don't trust the world
 
-The Mac has no CA-issued certificate and getting one for `lab.plxnative.com` means ACME plumbing,
+The Mac has no CA-issued certificate and getting one for `lab.example.invalid` means ACME plumbing,
 renewals and a private key on a laptop. The cheaper and *stronger* answer for a two-party private
 channel:
 
-* `plxnative-lab start` generates a **fresh self-signed cert per session** (`openssl`, already on
+* `butaca-lab start` generates a **fresh self-signed cert per session** (`openssl`, already on
   macOS) and computes its **SPKI SHA-256 pin**.
 * The lab build sets `CURLOPT_PINNEDPUBLICKEY = "sha256//<base64>"` with `SSL_VERIFYPEER=0` /
   `VERIFYHOST=0`. libcurl checks the pin **independently of** VERIFYPEER (documented), and
   `CURLOPT_PINNEDPUBLICKEY` is 7.39+, against the dev set's 7.53.1 — so this reaches every firmware
   the app already claims.
-* No private key ships in PlxNative; the app carries a 32-byte hash. Only that one endpoint's key
+* No private key ships in Butaca; the app carries a 32-byte hash. Only that one endpoint's key
   is accepted, which is a narrower trust root than the public CA set.
 
 `net.rs` change: the body of `request` gains an internal `pin: Option<&CStr>` parameter; the
@@ -318,7 +318,7 @@ which appears nowhere in this tree and is unbound.
 **The design absorbs every outcome**, which is why none of this blocked the build:
 
 * the trigger is a **list in `lab.json`** (`trigger_wcodes` / `trigger_syms`), so trying another
-  code is a repack, not a rebuild — `plxnative-lab start --trigger 489,488` writes it. It stays a
+  code is a repack, not a rebuild — `butaca-lab start --trigger 489,488` writes it. It stays a
   list now that the codes are known, because 486–489 is one remote on one firmware and a rented
   set may spell them differently or not send them at all;
 * the **account-menu and player-overflow rows** reach the same upload with the D-pad alone, which
@@ -328,33 +328,33 @@ which appears nowhere in this tree and is unbound.
   own key binding. The recipe is `docs/remote-keys.md` §7, run through this bridge instead of over
   ssh.
 
-The default in `plxnative-lab start` is **489**, the measured BLUE. `406` survives only as a unit
+The default in `butaca-lab start` is **489**, the measured BLUE. `406` survives only as a unit
 test's fixture in `lab/config.rs` — it was the original guess (the CEA-2014 / webOS web-runtime
 keycode for BLUE) and it was wrong, which is the whole lesson of this section.
 
-## 8. Receiver — `tools/plxnative-lab`, python3 stdlib only
+## 8. Receiver — `tools/butaca-lab`, python3 stdlib only
 
 Matches the repo's existing tool idiom (`tools/netcond.py`, `tools/stream-screen.py`): one file, no
 dependencies, `--selftest`.
 
 ```
-plxnative-lab start [--port 39443] [--no-upnp] [--json]
-plxnative-lab status [--json]
-plxnative-lab send down down ok wait:1000 diag [--timeout 30] [--no-wait]
-plxnative-lab clear
-plxnative-lab logs [--follow] [--since 5m] [--seq N]
-plxnative-lab stop
+butaca-lab start [--port 39443] [--no-upnp] [--json]
+butaca-lab status [--json]
+butaca-lab send down down ok wait:1000 diag [--timeout 30] [--no-wait]
+butaca-lab clear
+butaca-lab logs [--follow] [--since 5m] [--seq N]
+butaca-lab stop
 ```
 
 `start` generates the session (id, secret, cert, pin), binds `0.0.0.0:<ephemeral>`, creates the UPnP
-mapping, writes `~/.plxnative-lab/session.json` + `receiver.pid`, forks to the background and prints
+mapping, writes `~/.butaca-lab/session.json` + `receiver.pid`, forks to the background and prints
 one JSON object containing the credentials **and the exact `make` line to build the matching ipk**.
 It refuses to start if a session is already live (one session, by design).
 
 `status --json` is the agent's poll:
 
 ```json
-{"receiver":"listening","endpoint":"lab.plxnative.com:39443","upnp":"mapped",
+{"receiver":"listening","endpoint":"lab.example.invalid:39443","upnp":"mapped",
  "dns_matches":true,"tv":"recent upload","uploads":3,"tv_control":"connected",
  "last_poll_age_s":2,"queued":0,"inflight":null,
  "last_upload_age_s":14,"webos":"10.3.1","board":"k8hpp","model":"OLED55C1",
@@ -370,7 +370,7 @@ is not redelivered on a later relaunch. It cannot recall a response the app has 
 
 `logs` prints the newest snapshot's records as JSONL to stdout (gunzipped); `--follow` blocks and
 emits each new upload as it lands; `--since 5m` filters by record
-timestamp. Uploads are stored verbatim under `~/.plxnative-lab/uploads/NNNN-<unix>.jsonl.gz` — the
+timestamp. Uploads are stored verbatim under `~/.butaca-lab/uploads/NNNN-<unix>.jsonl.gz` — the
 agent can also just read those.
 
 **Hardening** (the exposed surface is the whole internet for the life of the session): the public
@@ -383,7 +383,7 @@ path; `stop` verifies deletion with `GetSpecificPortMappingEntry`.
 
 **UPnP IGD** is SSDP `M-SEARCH` → device description → `WANIPConnection`/`WANPPPConnection` control
 URL → `AddPortMapping` (1 h lease, renewed while running) / `DeletePortMapping`, plus
-`GetExternalIPAddress` compared against the `lab.plxnative.com` A record — that comparison is the
+`GetExternalIPAddress` compared against the `lab.example.invalid` A record — that comparison is the
 only cheap check that the path actually exists before a tester spends a lab hour on it.
 
 ---
@@ -391,13 +391,13 @@ only cheap check that the path actually exists before a tester spends a lab hour
 ## 9. Build and deploy loop
 
 ```
-plxnative-lab start                       # prints session + the make line below
+butaca-lab start                       # prints session + the make line below
 make LAB=1 FLAVOR=debug ipk               # bakes pkg/lab.json into the package
-   → upload pkg/com.beb.plxnative.debug_0.4.1_arm.ipk to Cloud Test Lab and install it
-plxnative-lab status                       # wait for tv_control: connected
-plxnative-lab send down down ok wait:1000 diag
-plxnative-lab logs --follow               # the agent watches
-plxnative-lab stop                        # mapping removed
+   → upload pkg/com.butaca.debug_0.4.1_arm.ipk to Cloud Test Lab and install it
+butaca-lab status                       # wait for tv_control: connected
+butaca-lab send down down ok wait:1000 diag
+butaca-lab logs --follow               # the agent watches
+butaca-lab stop                        # mapping removed
 ```
 
 `LAB=1` sets `RUST_FEATFLAGS += --features lab-diagnostics` and its own `RUST_TDIR=target-lab` —
@@ -419,7 +419,7 @@ id, is a packaging error**, which is where this class of mistake gets caught rat
 **In:** the feature flag, the ring + tap, the snapshot envelope from `Diag`/`webos`/`devcaps`, the
 scrub pass, pinned gzip upload on a worker, the account-menu row **and** the configurable colour-key
 arm, the toast, the pinned HTTPS long-poll worker + main-thread mailbox, bounded ordered command
-queue/redelivery/ack, loopback-only enqueue/status/clear, `plxnative-lab
+queue/redelivery/ack, loopback-only enqueue/status/clear, `butaca-lab
 start/status/send/clear/logs/stop` with
 UPnP, and `LAB=1` packaging + the two package assertions.
 
@@ -447,21 +447,21 @@ not pretending the old filesystem contract exists.
   that the toast sits inside the safe area and clear of the stats panel.
 * All four feature configurations type-check clean under `warnings = "deny"`: default,
   `--no-default-features`, `+lab-diagnostics`, and `--no-default-features +lab-diagnostics`.
-* `tools/plxnative-lab selftest` — a real TLS listener with a freshly generated certificate, a real
+* `tools/butaca-lab selftest` — a real TLS listener with a freshly generated certificate, a real
   gzip upload accepted and stored, upload refusals, command enqueue, ordered delivery, redelivery
   before ack, advancement after ack, status, grammar refusal and stale-session refusal. Wired into
   `make check`.
 * Lab Control's Rust tests cover response parsing, bounded waits and the worker↔main-thread mailbox.
   Both default and `+lab-diagnostics` configurations compile under `warnings = "deny"`; the control
   module and its persistent worker do not exist in the former.
-* **The whole chain, end to end, on loopback**: `plxnative-lab start --hostname 127.0.0.1
+* **The whole chain, end to end, on loopback**: `butaca-lab start --hostname 127.0.0.1
   --no-upnp` → `make LAB=1 sim` → `k:0,406` down the remote FIFO → the app logged
   `lab: snapshot seq=1 reason=key route=login` and `lab: uploaded seq=1 4689B -> 2053B (gzip)
-  status=200`, and `plxnative-lab logs` printed the envelope and 44 records. The toast was
+  status=200`, and `butaca-lab logs` printed the envelope and 44 records. The toast was
   screenshotted reading *Diagnostics uploaded / 2 KB sent*.
 * The **network path exists**: the Keenetic answers SSDP (`http://<router>:1900/ctl/IPConn`),
-  reports its external address, and `lab.plxnative.com` resolves to exactly that address. Checked
-  by `plxnative-lab selftest`'s closing note and by `status`'s `dns_matches`.
+  reports its external address, and `lab.example.invalid` resolves to exactly that address. Checked
+  by `butaca-lab selftest`'s closing note and by `status`'s `dns_matches`.
 
 **Verified ON THE DEV TELEVISION** (LG 49SM9000PLA, webOS 4.10.2), 2026-08-26, under the
 `tv-lock`, `make LAB=1 FLAVOR=debug deploy`:
@@ -513,12 +513,12 @@ default build. Re-run it after any change here, or give the matrix a LAB leg.
 
 **It works.** Measured 2026-08-26, in this order, so none of it is inference:
 
-1. `plxnative-lab start` discovered the Keenetic's IGD (`http://<router>:1900/ctl/IPConn`,
+1. `butaca-lab start` discovered the Keenetic's IGD (`http://<router>:1900/ctl/IPConn`,
    `WANIPConnection:1`) and **`AddPortMapping` succeeded** — not the tool trusting its own return
    value: a raw `GetSpecificPortMappingEntry` read back
    `NewInternalPort <the ephemeral local port> / NewInternalClient 203.0.113.7 / NewEnabled 1 /
-   NewLeaseDuration 3600 / NewPortMappingDescription plxnative-lab`.
-2. The router's external address equals what `lab.plxnative.com` resolves to (`status`'s
+   NewLeaseDuration 3600 / NewPortMappingDescription butaca-lab`.
+2. The router's external address equals what `lab.example.invalid` resolves to (`status`'s
    `dns_matches: true`).
 3. **A phone on LTE — off the LAN entirely — reached the receiver**, got the expected certificate
    warning (the self-signed cert of §5, which is the thing the app pins) and then the receiver's

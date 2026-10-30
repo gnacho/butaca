@@ -1,5 +1,5 @@
 [package]
-name = "plxnative-modules"
+name = "butaca-modules"
 # THE version, in three places that ci/check-package.py keeps in step: here, pkg/appinfo.json
 # (which the ipk derives its filename and control entry from), and the X-Plex-Version this client
 # reports to both Plex services via src/plex/identity.rs. What the app reports is DERIVED from this
@@ -13,13 +13,13 @@ edition = "2021"
 # provenance a webosbrew reviewer reads. The manifest asserting nothing while the root said MIT
 # was a contradiction with no upside.
 license = "GPL-3.0-or-later"
-description = "Application core for PlxNative — an unofficial native Plex client for LG webOS."
-repository = "https://github.com/GLinnik21/plx-native"
+description = "Application core for Butaca — an unofficial native Plex client for LG webOS."
+repository = "https://github.com/gnacho/butaca"
 
 # Static library linked into the C app (hybrid migration): each ported module
 # exposes the same C ABI its src/*.h declares, so the C code calls it unchanged.
 [lib]
-name = "plxnative_modules"
+name = "butaca_modules"
 # `staticlib` is what the Makefile links into the ARM binary. `rlib` is additionally required so
 # the host simulator binary below can depend on this same crate as a Rust library — a bin target
 # cannot link a staticlib-only crate. It costs the cross build one extra artifact and changes
@@ -29,13 +29,13 @@ crate-type = ["staticlib", "rlib"]
 # The macOS/desktop UI simulator. Not built by `make`, not shipped, and inert unless its feature is
 # on — see the `hostsim` feature below and `src/bin/sim.rs`.
 [[bin]]
-name = "plxnative-sim"
+name = "butaca-sim"
 path = "src/bin/sim.rs"
 required-features = ["hostsim"]
 
 [[bin]]
-name = "plxnative-storage"
-path = "src/bin/plxnative-storage.rs"
+name = "butaca-storage"
+path = "src/bin/butaca-storage.rs"
 
 [features]
 # On by default, so every ordinary `make`, every `make test` and every on-device harness run
@@ -47,7 +47,7 @@ default = ["devtools", "devtriggers", "threadcheck"]
 # is the only test this project has, so a release build must not differ from the tested one in
 # any way that could change behaviour, only in what it paints.
 devtools = []
-# The `/tmp/plxnative-*` trigger surface, the remote FIFO and the live capture listener — see
+# The `/tmp/butaca-*` trigger surface, the remote FIFO and the live capture listener — see
 # src/dev.rs. This one DOES change behaviour, which is exactly why it is a second feature rather
 # than more things under `devtools`: that name promises draw-only, and the promise is worth
 # keeping. Both are default-on and both are dropped by the same `--no-default-features`, so the

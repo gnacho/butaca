@@ -42,7 +42,7 @@ class DeployManifest(unittest.TestCase):
                 # No sentry-handler carve-out: this fork's Makefile ships no crash handler
                 # (the 0.6.x line removed it with the reporting surface).
                 ffmpeg_libs = make_print("print-ffmpeg-staged", flavor)
-                carve_outs = {"pkg/plxnative", *ffmpeg_libs}
+                carve_outs = {"pkg/butaca", *ffmpeg_libs}
                 # LAB_FILES is empty unless LAB=1 is passed, and this test never sets it — so the
                 # session file never appears in either list here, and is asserted separately below.
                 expected = [f for f in app_files if f not in carve_outs]

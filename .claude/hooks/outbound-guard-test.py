@@ -83,7 +83,7 @@ CASES = [
     (BLOCK, 'git -C /repo commit -m "wake %s first"' % FAKE_MAC),         # subcommand behind -C
     (BLOCK, 'git tag -a v0.3.0 -m "cut against %s"' % FAKE_TV),
     (BLOCK, 'gh pr create --title "player: fix seek" --body "reproduced on %s"' % FAKE_TV),
-    (BLOCK, 'gh -R GLinnik21/plx-native issue comment 22 --body "user id %s"' % FAKE_USERID),
+    (BLOCK, 'gh -R gnacho/butaca issue comment 22 --body "user id %s"' % FAKE_USERID),
     (BLOCK, 'gh release create v0.3.0 --notes "verified against %s"' % FAKE_PMS),
     (BLOCK, "gh api repos/x/y/issues/1/comments -f body='the TV is %s'" % FAKE_TV),
     (BLOCK, 'gh pr comment 5 --body "token %s"' % FAKE_TOKEN),
@@ -130,7 +130,7 @@ CASES = [
     (ALLOW, 'curl -s "http://%s:32400/library/sections?X-Plex-Token=%s"' % (FAKE_PMS, FAKE_TOKEN)),
     (ALLOW, 'curl -s "https://plex.tv/api/v2/resources?X-Plex-Token=%s"' % FAKE_TOKEN),
     (ALLOW, 'gh release view v0.2.1 --json body --jq .body'),             # --json body is a READ
-    (ALLOW, 'gh api repos/GLinnik21/plx-native/releases/tags/v0.2.1 --jq ".assets[].name"'),
+    (ALLOW, 'gh api repos/gnacho/butaca/releases/tags/v0.2.1 --jq ".assets[].name"'),
     (ALLOW, 'gh pr view 49 --json body,title'),
     (ALLOW, 'gh release download v0.2.1 -D /tmp/rel'),
     (ALLOW, 'git push origin main'),                                      # deliberately not a gate
@@ -230,12 +230,12 @@ def file_payload_case():
 
 
 def recording_case():
-    """The restructure's privacy rules (spec §5.6): a `plxnative-recordings/` descendant is refused by
+    """The restructure's privacy rules (spec §5.6): a `butaca-recordings/` descendant is refused by
     PATH wherever it sits; a payload carrying the envelope grammar is refused by CONTENT; the one
     exception is a file under tests/fixtures/replay/ whose every string is in the synthetic
     alphabet — and a fixture with a household string in it is refused even there."""
     ok = True
-    rec_dir = os.path.join(ROOT, "plxnative-recordings")
+    rec_dir = os.path.join(ROOT, "butaca-recordings")
     os.makedirs(rec_dir, exist_ok=True)
     line = '{"f":1,"t":"st","hash":42}\n'
     with open(os.path.join(rec_dir, "rec-0000.jsonl"), "w") as f:
@@ -281,8 +281,8 @@ def recording_case():
                 '"text":[115,48,49,50,51,52,53,54,55],"sz":28,"bold":false},"bits":1}\n')
     bad_metric_paths.append("tests/fixtures/replay/duplicate-metric/rec-0000.jsonl")
     for cmd, want in (
-        ("gh release upload v1 plxnative-recordings/rec-0000.jsonl", BLOCK),
-        ("gh release upload v1 /tmp/anything/plxnative-recordings/rec-0000.jsonl", BLOCK),
+        ("gh release upload v1 butaca-recordings/rec-0000.jsonl", BLOCK),
+        ("gh release upload v1 /tmp/anything/butaca-recordings/rec-0000.jsonl", BLOCK),
         ("gh pr create --body-file notes.jsonl", BLOCK),
         ("gh pr create --body '{\"f\":3,\"t\":\"st\",\"hash\":1}'", BLOCK),
         ("git add tests/fixtures/replay/demo/rec-0000.jsonl", ALLOW),

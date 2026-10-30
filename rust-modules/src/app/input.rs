@@ -1052,7 +1052,7 @@ mod delete_all_tests {
         fn persistent(&self) -> Vec<std::path::PathBuf> {
             ["lastplace.json", "telemetry.json", "telemetry-spool.bin", "telemetry-crashmark.json"]
                 .iter()
-                .map(|name| self.0.join("persistent").join(format!(".com.beb.plxnative.debug-{name}")))
+                .map(|name| self.0.join("persistent").join(format!(".com.butaca.debug-{name}")))
                 .collect()
         }
         fn runtime(&self) -> std::path::PathBuf {
@@ -1089,7 +1089,7 @@ mod delete_all_tests {
             std::fs::write(path, b"x").unwrap();
         }
         let log = tv.runtime().join(crate::paths::runtime_file::EVENTS);
-        let rec = tv.runtime().join("plxnative-rec");
+        let rec = tv.runtime().join("butaca-rec");
         std::fs::write(&log, b"x").unwrap();
         std::fs::write(&rec, b"x").unwrap();
         let _erofs = crate::storage::UnlinkFaultForTest::install(&tv.0, libc::EROFS);
@@ -1335,7 +1335,7 @@ pub(crate) fn key_back(
 /// **It does not end the process, and nothing about a BACK press does any more.** The remote's own
 /// EXIT key still terminates (LG checklist item 38), and a script that wants the app closed uses
 /// SAM's `closeByAppId` exactly as `make kill`, `tests/run.py` and `tools/tv-session.sh` already do.
-/// That is why the old `/tmp/plxnative-noexitconfirm` bypass went with the alert: it existed to let
+/// That is why the old `/tmp/butaca-noexitconfirm` bypass went with the alert: it existed to let
 /// a headless caller quit by pressing BACK, and BACK is no longer a quit for anybody.
 pub(crate) fn back_at_root() {
     if crate::webos::take_root_press() {

@@ -44,8 +44,8 @@ CASES = [
     (BLOCK, "tools/tv-session.sh sound on"),
     (BLOCK, "tools/tv-session.sh sound status"),
     (BLOCK, "tools/capture-screen.sh out.png DISPLAY"),
-    (BLOCK, "ssh root@192.0.2.10 'cat /tmp/plxnative-events.log'"),
-    (BLOCK, "sshpass -p alpine scp pkg/plxnative root@192.0.2.10:/tmp/"),
+    (BLOCK, "ssh root@192.0.2.10 'cat /tmp/butaca-events.log'"),
+    (BLOCK, "sshpass -p alpine scp pkg/butaca root@192.0.2.10:/tmp/"),
     (BLOCK, "echo hi && make deploy"),
     (BLOCK, "./tests/run.py --fps | tee out.log"),
     (BLOCK, "for f in stable debug; do ssh root@1.2.3.4 fuser x; done"),
@@ -125,7 +125,7 @@ def blocked(cmd):
 # checkout there), so it names its lane by prefixing `PLX_TV_LOCK_LANE=<its worktree>` on the
 # command itself. These cases run the SAME decision `main()` makes — classify, then resolve a
 # lane with `lane_from_command()`, then check `lease_for()` — against a throwaway mirror directory,
-# never the real `~/.plxnative/tv-lock` a live `tools/tv-lock.sh` writes to.
+# never the real `~/.butaca/tv-lock` a live `tools/tv-lock.sh` writes to.
 import shutil
 import tempfile
 import time as _time

@@ -1106,7 +1106,7 @@ mod tests {
         #[cfg(feature = "jellyfin")]
         assert!(auth.contains("Authorization: MediaBrowser Client=\"Butaca\""));
         #[cfg(not(feature = "jellyfin"))]
-        assert!(auth.contains("Authorization: MediaBrowser Client=\"PlxNative\""));
+        assert!(auth.contains("Authorization: MediaBrowser Client=\"Butaca\""));
         // Key order in the body is serde_json's (alphabetical without preserve_order) — assert
         // the two fields, not one literal, so the test does not hinge on serializer internals.
         assert!(auth.contains(r#""Username":"demo""#));

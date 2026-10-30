@@ -149,24 +149,24 @@
    },
    "settings": "root",
    "triggers": [
-    "plxnative-app-init",
-    "plxnative-rec",
-    "plxnative-focus",
-    "plxnative-noidle",
-    "plxnative-settings"
+    "butaca-app-init",
+    "butaca-rec",
+    "butaca-focus",
+    "butaca-noidle",
+    "butaca-settings"
    ],
    "version": 1
   },
-  "hash": 10529155205723157907,
+  "hash": 324141929508931181,
   "probe": "controlled=home version=1"
  },
  "schema": 3,
  "state_fp": 380541232516096414,
  "triggers": [
-  "plxnative-app-init",
-  "plxnative-rec",
-  "plxnative-focus",
-  "plxnative-noidle",
-  "plxnative-settings"
+  "butaca-app-init",
+  "butaca-rec",
+  "butaca-focus",
+  "butaca-noidle",
+  "butaca-settings"
  ]
 }

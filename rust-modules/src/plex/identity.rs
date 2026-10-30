@@ -7,7 +7,7 @@
 //!
 //! | field       | plex.tv said        | the PMS said     |
 //! |-------------|---------------------|------------------|
-//! | Product     | `Plex for webOS`    | `PlxNative`      |
+//! | Product     | `Plex for webOS`    | `Butaca`      |
 //! | Version     | `1.0`               | `0.1.0`          |
 //! | Device      | `LG TV`             | `webOS`          |
 //! | Device-Name | `Plex (LG webOS)`   | `Living Room TV` |
@@ -33,7 +33,7 @@
 //! once from `/dev/urandom` and persisted by [`session`](super::session).
 
 /// The product name. Unique, and not `Plex …` anything.
-pub(crate) const PRODUCT: &str = "PlxNative";
+pub(crate) const PRODUCT: &str = "Butaca";
 
 /// The display name this build shows servers (`Client="..."` and the dashboard's session list):
 /// the fork's own build says Butaca there (issue #35), the Plex backend keeps the product name.
@@ -108,8 +108,8 @@ pub(crate) const VENDOR: &str = "LG";
 pub(crate) fn device_name() -> &'static str {
     static NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     NAME.get_or_init(|| match crate::paths::flavour() {
-        None => "PlxNative (LG TV)".to_string(),
-        Some(f) => format!("PlxNative {f} (LG TV)"),
+        None => "Butaca (LG TV)".to_string(),
+        Some(f) => format!("Butaca {f} (LG TV)"),
     })
 }
 
@@ -167,7 +167,7 @@ mod tests {
     ///
     /// A release commit leaves every tracked file at the version it just published, so every
     /// developer build after it reported that exact number: to `X-Plex-Version` on the account's
-    /// authorized-devices list, to Sentry as `plxnative@X.Y.Z`, and on the diagnostics panel that
+    /// authorized-devices list, to Sentry as `butaca@X.Y.Z`, and on the diagnostics panel that
     /// is designed to be photographed into a bug report. Nothing downstream could tell the shipped
     /// binary from a working tree. So a non-release build names the version it is working TOWARDS,
     /// suffixed — `0.5.0` published, `0.6.0-dev` in the tree, the next MINOR because trunk is where
@@ -254,10 +254,10 @@ mod tests {
     fn only_a_flavoured_install_renames_the_device() {
         let name = super::device_name();
         match crate::paths::flavour() {
-            None => assert_eq!(name, "PlxNative (LG TV)"),
+            None => assert_eq!(name, "Butaca (LG TV)"),
             Some(f) => assert!(name.contains(f), "{name:?} does not name the {f} install"),
         }
-        assert!(name.starts_with("PlxNative"));
+        assert!(name.starts_with("Butaca"));
     }
 
     /// On the host there is no `/var/run/nyx/os_info.json`, so this exercises exactly the

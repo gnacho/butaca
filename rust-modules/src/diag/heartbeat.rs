@@ -13,11 +13,11 @@
 //!
 //! Phase timing and present-to-present pacing are armed, and the split is the measurement's
 //! cost: the eight phases and the two peaks need a clock read per phase, so they hide behind
-//! `plxnative-framedrop`; every other field is a counter somebody already keeps, so it prints in
+//! `butaca-framedrop`; every other field is a counter somebody already keeps, so it prints in
 //! every build. The one §8.4 names and this module does NOT have is `allocs=` — see
 //! `heartbeat_tail`'s doc for why a counting allocator was not invented to fill it.
 //!
-//! Armed by `plxnative-framedrop[=<ms>]`; unarmed, every stamp is the frame's origin and every
+//! Armed by `butaca-framedrop[=<ms>]`; unarmed, every stamp is the frame's origin and every
 //! phase reads 0.0 — the counter is never read, so an unarmed frame pays nothing.
 
 #[cfg(not(test))]
@@ -340,7 +340,7 @@ impl Instruments {
     /// … fps=<n> [load= snap= period=] [worstframe= worstprep=] carried= dropped= budget= evicted_hot= [frame_n= frame_gt16= frame_gt33= frame_gt50= frame_gt100= frame_max= frame_p95= frame_p99=] [rec=] [sim=1]
     /// ```
     ///
-    /// * `worstframe=`/`worstprep=` are the ARMED pair (`plxnative-framedrop`) and stay LAST of
+    /// * `worstframe=`/`worstprep=` are the ARMED pair (`butaca-framedrop`) and stay LAST of
     ///   the graded fields — `tests/run.py`'s `WORST_RE` anchors on `worstframe=` and `FPS_RE` on
     ///   `fps=`, both with a lazy `.*?` in front, so a field may be appended after them and never
     ///   inserted between `loop=`/`route=`/`overlay=`.

@@ -193,7 +193,7 @@ fn fetch_once(id: ServerId, c: &Client) {
         return;
     };
     let mut sub = Subscription::from_wire(mc.my_plex_subscription);
-    // dev: /tmp/plxnative-nopass — pretend the server answered "no Plex Pass". The dev server
+    // dev: /tmp/butaca-nopass — pretend the server answered "no Plex Pass". The dev server
     // has one, so every Pass-conditional surface (the facts row's HDR warning, the read-out's
     // capsule, the stats Server row) is otherwise unreachable on the only TV we own. It applies
     // to EVERY server, deliberately: it is a "what does a free server look like" switch, not a
@@ -201,7 +201,7 @@ fn fetch_once(id: ServerId, c: &Client) {
     // accessor is on per-frame paths and `dev::flag` is a filesystem stat.
     if crate::dev::flag("nopass") {
         #[cfg(feature = "devtriggers")]
-        crate::log("pms: /tmp/plxnative-nopass — reporting subscription as No");
+        crate::log("pms: /tmp/butaca-nopass — reporting subscription as No");
         sub = Subscription::No;
     }
     store(id, sub, &mc.version);

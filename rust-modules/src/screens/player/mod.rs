@@ -2543,7 +2543,7 @@ mod repair_confirmation_tests {
                 else { std::fs::remove_file(&self.0).unwrap(); }
             }
         }
-        let path = crate::paths::in_runtime_dir("plxnative-failtest");
+        let path = crate::paths::in_runtime_dir("butaca-failtest");
         let previous = match std::fs::read(&path) {
             Ok(bytes) => Some(bytes),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,

@@ -2078,7 +2078,7 @@ fn the_hero_countdown_restarts_when_the_last_modal_is_dismissed() {
     );
 }
 
-/// `HomeCmd::PinHero` — the screenshot pipeline's hero pin (`/tmp/plxnative-heropin=<n>`) —
+/// `HomeCmd::PinHero` — the screenshot pipeline's hero pin (`/tmp/butaca-heropin=<n>`) —
 /// selects that slot and HOLDS it: the auto-advance never fires, however long the page sits
 /// uncovered, so a capture taken at any settled moment shows the same billboard.
 #[test]
@@ -2101,7 +2101,7 @@ fn a_pinned_hero_never_auto_advances() {
     assert_eq!(s.carousel.as_ref().map(|(_, rk)| rk.as_str()), Some("2"));
 }
 
-/// **A signed-in person has a consent path from Home** (PLX-NATIVE-10, code review 3). A failed
+/// **A signed-in person has a consent path from Home** (BUTACA-10, code review 3). A failed
 /// Home while discovery offers "Connect without encryption?" for a server says why in the reason
 /// slot and makes *Connect* the primary; *Connect* asks the SHARED question
 /// (`screens::plaintext_question`) seated on *Not now* instead of retrying, and only its answer

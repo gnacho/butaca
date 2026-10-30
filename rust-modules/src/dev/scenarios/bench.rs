@@ -1,12 +1,12 @@
 //! The stress-bench oscillators' own state — counted, deterministic twins of `navosc`/`modalosc`
-//! (`/tmp/plxnative-pushbench[=<n>[,<ratingKey>]]`, `/tmp/plxnative-modalbench[=<n>]`). Where
+//! (`/tmp/butaca-pushbench[=<n>[,<ratingKey>]]`, `/tmp/butaca-modalbench[=<n>]`). Where
 //! those two bounce forever so a device FPS scene can sample a settled ramp, a bench runs a FIXED
 //! `n` (default 100) push→settle→pop or present→settle→dismiss cycles through the real bridge
 //! entry points, rotating a target list, logging one `bench:` event-log line per cycle
 //! (`super::bench_frame_tick`'s doc has the wire format), and then stopping — the harness grades
 //! the whole run, not a sampled window of an unbounded one.
 //!
-//! A third bench, [`DeepBench`] (`/tmp/plxnative-deepbench[=<depth>[,<ratingKey>]]`), does not
+//! A third bench, [`DeepBench`] (`/tmp/butaca-deepbench[=<depth>[,<ratingKey>]]`), does not
 //! round-trip: it pushes `depth` pages with no pop in between, then pops all the way back to the
 //! root one page at a time, so the harness can grade whether a page transition's cost or a
 //! session's memory holds flat as the real nav stack goes ninety-plus entries deep rather than
@@ -300,7 +300,7 @@ pub(crate) fn bench_target_index(targets_len: usize, cycle: u32) -> usize {
 }
 
 // =================================================================================================
-// push bench (`/tmp/plxnative-pushbench`)
+// push bench (`/tmp/butaca-pushbench`)
 // =================================================================================================
 
 /// The push bench's rotation, in the order it cycles. `Detail`/`Person` are only ever in the
@@ -364,7 +364,7 @@ impl PushBench {
 }
 
 // =================================================================================================
-// modal bench (`/tmp/plxnative-modalbench`)
+// modal bench (`/tmp/butaca-modalbench`)
 // =================================================================================================
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -388,7 +388,7 @@ impl ModalTarget {
 
 pub(crate) struct ModalBench {
     pub(crate) clock: BenchClock,
-    /// The item menu leg's ratingKey. `plxnative-modalbench=<n>,<rk>` carries it directly; an
+    /// The item menu leg's ratingKey. `butaca-modalbench=<n>,<rk>` carries it directly; an
     /// empty value falls back to `navosc`'s own ratingKey exactly as the push bench's Detail leg
     /// does, via `app::boot::boot` — see `modalbench_value`'s doc for why a scene that wants the
     /// item menu without navosc's own competing bounce should prefer the direct form.
@@ -426,7 +426,7 @@ impl ModalBench {
 }
 
 // =================================================================================================
-// deep bench (`/tmp/plxnative-deepbench`)
+// deep bench (`/tmp/butaca-deepbench`)
 // =================================================================================================
 
 /// One step's direction in [`DeepBench`]'s single walk down and back up the stack.

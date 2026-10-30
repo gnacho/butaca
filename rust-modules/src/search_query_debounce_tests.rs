@@ -275,7 +275,7 @@ fn a_landing_from_the_previous_query_is_discarded_but_still_releases_the_fetch()
 
 /// A screen that can never be answered must not spin forever. With no server registered nothing
 /// can land, so a `State` recomputed only on a landing would sit on `Searching` for good — and
-/// this is reachable: `/tmp/plxnative-search=<q>` forces the route whether or not a server was
+/// this is reachable: `/tmp/butaca-search=<q>` forces the route whether or not a server was
 /// ever installed.
 #[test]
 fn an_empty_roster_settles_instead_of_spinning_forever() {

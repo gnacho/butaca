@@ -13,7 +13,7 @@ friend's, not the maintainer's, and they were not a party to any of it.
 
 That is the shape this guards: not malice and not carelessness, but an agent being helpful with a
 value it can read. A memory file is not in the loop at the moment a PR body is composed; a
-PreToolUse hook is. github.com/GLinnik21/plx-native is PUBLIC.
+PreToolUse hook is. github.com/gnacho/butaca is PUBLIC.
 
 WHAT IT COSTS. Classification is pure string work over the command line, and nothing is opened —
 not the gitignored files, not even the repo root — unless a segment is first graded outbound, so
@@ -212,7 +212,7 @@ PRIVATE_FILES = (
     "pkg/auth.json",
     # The Lab Diagnostics session (`docs/lab-diagnostics.md`): a bearer secret, a certificate pin
     # and an endpoint that is the developer's own static address. Written by
-    # `tools/plxnative-lab start`, staged into a `make LAB=1` package, and gitignored — the exact
+    # `tools/butaca-lab start`, staged into a `make LAB=1` package, and gitignored — the exact
     # shape of thing this hook exists to keep out of a PR body.
     "pkg/lab.json",
     # The telemetry endpoints and credentials (`docs/telemetry.md` when it exists). The DSN's public
@@ -230,7 +230,7 @@ PRIVATE_FILES = (
 # recording taken against a real server carries the household's every keypress and every server
 # answer. Matched by path COMPONENT wherever the directory sits (the runtime root on the set, a
 # fetched copy under /tmp, a checkout).
-PRIVATE_DIRS = ("plxnative-recordings",)
+PRIVATE_DIRS = ("butaca-recordings",)
 
 # The recording envelope's grammar (`ui/rec.rs`): a payload that carries it is a recording
 # leaving the machine, whatever it is called. The ONE exception the hook computes itself: a file
@@ -966,7 +966,7 @@ def named_private_paths(seg, root, cwd):
                 seen.add(rel)
                 hits.append((rel, how))
             if under_private_dir(t) and ("<recording>", how) not in hits:
-                hits.append(("<recording> (a plxnative-recordings/ directory: a recording never leaves "
+                hits.append(("<recording> (a butaca-recordings/ directory: a recording never leaves "
                              "this machine)", how))
             elif os.path.isfile(rp) and under_fixture_dir(rp, root):
                 try:
@@ -1124,7 +1124,7 @@ def main():
     lines.append("  (the value itself is not printed — putting it in this transcript is the same "
                  "leak by a shorter route)")
     sys.stderr.write("\n".join(lines) + "\n\n" + (
-        "github.com/GLinnik21/plx-native is PUBLIC. On 2026-08-14 four PR bodies (#28-31) carried a\n"
+        "github.com/gnacho/butaca is PUBLIC. On 2026-08-14 four PR bodies (#28-31) carried a\n"
         "third party's Plex server address, port, machineIdentifier and handle. All four were\n"
         "redacted, but GitHub keeps PR-body edit history, so those values are permanently public —\n"
         "and they were the FRIEND's, not this project's to publish.\n"

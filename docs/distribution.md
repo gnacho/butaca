@@ -37,7 +37,7 @@ answers what a QA pass would find.
 4. `X-Plex-Product: Plex for webOS` — Plex's own first-party naming pattern, on a platform that has an official Plex app.
 5. ~~Release builds bake in the developer's LAN IP and home-directory paths.~~ **CLEARED:** release
    CI has no local config and the artifact gates inspect the compiled bytes.
-6. ~~The release opens the squattable `/tmp/plxnative-remote`.~~ **CLEARED:** the whole developer
+6. ~~The release opens the squattable `/tmp/butaca-remote`.~~ **CLEARED:** the whole developer
    trigger/FIFO/capture surface is compiled out and asserted absent from release artifacts.
 7. ~~Only the Dev Mode prefix can retain fonts and login.~~ **CLEARED:** font assets are packaged
    and persistent state uses the probed Dev Mode/Homebrew/retail candidate order in §3.5. Store
@@ -53,16 +53,16 @@ Native is first-class — Moonlight (SDL2/C), Kodi, RetroArch and IHSplay all sh
 
 ### 1.1 The submission is one file
 
-Fork `webosbrew/apps-repo`, add `packages/com.beb.plxnative.yml`, open a PR. The filename stem must
+Fork `webosbrew/apps-repo`, add `packages/com.butaca.yml`, open a PR. The filename stem must
 equal the manifest `id` (`repogen/lintpkg.py` hard-errors otherwise). Schema is
 `content/schemas/packages/PackageInfo.json`, draft 2020-12, **`additionalProperties: false`**:
 
 ```yaml
-title: PlxNative                       # required, <=30 chars
+title: Butaca                       # required, <=30 chars
 shortDescription: Native client for Plex Media Server   # optional, <=80 chars
 iconUri: https://…/icon160.png         # required; https: or data:, must return 200
 detailIconUri: https://…/icon320.png   # optional, 320px convention
-manifestUrl: https://github.com/<you>/<repo>/releases/latest/download/com.beb.plxnative.manifest.json
+manifestUrl: https://github.com/<you>/<repo>/releases/latest/download/com.butaca.manifest.json
 category: multimedia                   # required
 pool: main                             # required; main = MUST be open source
 requirements:
@@ -83,9 +83,9 @@ the manifest you host yourself.
 `installedSize`. `type` enum includes `native`. Generate it rather than hand-writing it:
 
 ```
-webosbrew-gen-manifest -p pkg/com.beb.plxnative_0.1.0_arm.ipk \
+webosbrew-gen-manifest -p pkg/com.butaca_0.1.0_arm.ipk \
   -i https://…/icon160.png -l https://github.com/<you>/<repo> -r false \
-  -o com.beb.plxnative.manifest.json
+  -o com.butaca.manifest.json
 ```
 
 (from `webosbrew/dev-toolbox-cli`). It reads id/version/type/title out of the ipk's embedded
@@ -112,7 +112,7 @@ anywhere in this chain — sha256 over HTTPS is the entire integrity story.
 
 ### 1.4 This is where this project gets caught
 
-Our actual `DT_NEEDED` (verified with the NDK readelf on `pkg/plxnative`):
+Our actual `DT_NEEDED` (verified with the NDK readelf on `pkg/butaca`):
 
 ```
 libSDL2-2.0.so.0  libSDL2_ttf-2.0.so.0  libGLESv2.so.2  libluna-service2.so.3  libglib-2.0.so.0
@@ -140,7 +140,7 @@ graceful on-device failure, not a `SIGSEGV`.
 has never been run:
 
 ```
-webosbrew-ipk-verify --details --fw-releases '>=4.0, <5.0' pkg/com.beb.plxnative_0.1.0_arm.ipk
+webosbrew-ipk-verify --details --fw-releases '>=4.0, <5.0' pkg/com.butaca_0.1.0_arm.ipk
 ```
 
 ### 1.5 The four repository rules — one of which is new and directly relevant
@@ -403,7 +403,7 @@ runtime; denial on a retail/store install falls back to the app-owned 0600 sessi
 not turn root into a requirement.
 
 **Device-proven 2026-08-01 on the 49SM9000PLA.** The running app is `Uid: 6910`, `Gid: 5000`,
-`CapEff: 0`, chrooted to `/var/palm/jail/com.beb.plxnative`, with `libplayerAPIs`, `libAcbAPI`,
+`CapEff: 0`, chrooted to `/var/palm/jail/com.butaca`, with `libplayerAPIs`, `libAcbAPI`,
 `libmali`, `libEGL/GLESv2`, `libwayland-webos-client`, `libavformat.so.57` and `libcurl.so.5` all
 mapped from inside that chroot. Root on the dev TV buys the **ssh dev loop**, not app privilege.
 
@@ -425,7 +425,7 @@ groups video,audio,luna,compositor,crashd,se
 ```
 
 The media stack is permitted by an **LS2 role file the Dev Mode installer writes automatically** —
-nothing we declare. On the device, `/var/palm/ls2-dev/roles/pub/com.beb.plxnative.json` grants
+nothing we declare. On the device, `/var/palm/ls2-dev/roles/pub/com.butaca.json` grants
 `com.webos.media.client.*`, `com.webos.rm.client.*`, `com.webos.pipeline.*` with in/outbound to
 `com.webos.media`. That is exactly the surface StarfishMediaAPIs needs, and it is why **no
 `requiredPermissions` entry is needed for playback itself** (neither Kodi nor Moonlight declares
@@ -536,10 +536,10 @@ world-readable `/tmp` on the TV across many runs.
   the GitHub noreply alias, and `ci/check-package.py` now asserts the field is not a personal
   mailbox, so it cannot come back by an edit nobody reviews.
 
-**What a public build would leak (verified by `strings` on `pkg/plxnative` and inside the ipk):**
+**What a public build would leak (verified by `strings` on `pkg/butaca` and inside the ipk):**
 
 1. `PMS_HOST` — `PMS_HOST` from `config.local.h` is compiled in. *(Only used on the
-   `/tmp/plxnative-token` automation branch — `app.rs:436-438` — so a public build with no
+   `/tmp/butaca-token` automation branch — `app.rs:436-438` — so a public build with no
    `config.local.h` compiles the `"YOUR_PMS_HOST"` placeholder and never uses it. Still, don't ship a
    binary built on this machine.)*
    **Measured 2026-08-02, and better than this list implied: the TOKEN never reaches the binary.**
@@ -550,7 +550,7 @@ world-readable `/tmp` on the TV across many runs.
    is present, so `make ipk` on this machine still produces a fully valid, correctly-hashed
    package with that address inside it and every check passing. Release comes from CI.
 2. ~~~40~~ **252** `/Users/gleblinnik/…` panic paths — **FIXED 2026-08-02**, count corrected by
-   measurement (`strings -a pkg/plxnative | grep -c /Users/`): 113 from `-Z build-std` compiling
+   measurement (`strings -a pkg/butaca | grep -c /Users/`): 113 from `-Z build-std` compiling
    std out of `$RUSTUP_HOME`, 139 from dependency panic locations under `$CARGO_HOME`. 250 of the
    252 are in `.rodata`, which is why **`strip` does not touch them** — this section used to list
    the two as adjacent chores and they are independent fixes. The Makefile now always sets
@@ -566,7 +566,7 @@ world-readable `/tmp` on the TV across many runs.
 
 **Runtime surfaces that must not ship enabled:**
 
-- `remote.rs:36-38` mkfifos `/tmp/plxnative-remote` and drains it every frame on **every boot with
+- `remote.rs:36-38` mkfifos `/tmp/butaca-remote` and drains it every frame on **every boot with
   no trigger gate** (`app.rs:1603`). *Corrected 2026-08-01:* the requested `0o666` is masked by the
   process umask (0022), so the live FIFO on the device is `prw-r--r-- 6910:5000` — another uid can
   **read** it (stealing whatever the host driver writes) but cannot drive the UI through it. The
@@ -575,10 +575,10 @@ world-readable `/tmp` on the TV across many runs.
   is already at that path. Any process that creates its own 0666 FIFO there first owns the UI.
   Fix: gate it behind a dev feature, and `stat` the path and refuse anything not owned by our euid.
 - `capture.rs:208` binds `INADDR_ANY` with no authentication.
-- **`/tmp` is the shared system `/tmp`, in the production jail too** — so the whole `/tmp/plxnative-*`
+- **`/tmp` is the shared system `/tmp`, in the production jail too** — so the whole `/tmp/butaca-*`
   trigger surface is squattable by any co-resident process on an ordinary unrooted TV.
-  `/tmp/plxnative-token` beats the stored session outright (`app.rs:362`), and any unrecognised
-  `plxnative-*` file suppresses the who's-watching picker (`app.rs:402-413`). The clean fix is a
+  `/tmp/butaca-token` beats the stored session outright (`app.rs:362`), and any unrecognised
+  `butaca-*` file suppresses the who's-watching picker (`app.rs:402-413`). The clean fix is a
   cargo feature the release build does not enable, so a public binary reads nothing from `/tmp`.
 - **A crash writes a ~200 MB core into the app directory.** The tracer (now `src/crashtrace.c`)
   restores `SIG_DFL` and re-raises, the jail sets `setrlimit CORE INF INF`, and
@@ -823,7 +823,7 @@ Four obligations attach that we don't currently meet:
 
 Naming: their guidelines list *"Use `for Plex` following the name of your application, provided that
 the name of your application is unique"* under **You may**, and *"Use Plex or derivatives thereof in
-the name of your application"* under **You may not**. `PlxNative` is a vowel-dropped "Plex" and sits
+the name of your application"* under **You may not**. `Butaca` is a vowel-dropped "Plex" and sits
 near the "derivatives / misspellings" line — grey, low risk, cheap to eliminate. Precedent is
 reassuring: PlexKodiConnect (1.3k stars, "Plex" literally in the name) and Plezy (3k stars, four app
 stores, listed as *"Plezy for Plex"*) both run unmolested. The one Plex DMCA found (2024-03-11,
@@ -833,7 +833,7 @@ stores, listed as *"Plezy for Plex"*) both run unmolested. The one Plex DMCA fou
 `X-Plex-Device-Name: Plex (LG webOS)`). That is exactly Plex's own first-party pattern (their
 documented sample value is `"Plex for Roku"`), it surfaces in the account's authorized-devices list,
 and LG **has** an official Plex app — so a server owner has no way to tell it isn't Plex's. Also
-note `client.rs` uses a *different* product string (`PlxNative`): the plex.tv-facing and PMS-facing
+note `client.rs` uses a *different* product string (`Butaca`): the plex.tv-facing and PMS-facing
 identities disagree. *(Small caution: PMS transcode/direct-play decisions can key off client
 identity, so re-run the player suite after renaming.)*
 
@@ -919,7 +919,7 @@ Listed because each could change a decision above.
    unresolved part is an end-to-end run against a remote/shared server on real TV firmware.
 8. **What should the app do on unsupported firmware?** `requirements.webosRelease` does **not** hide
    the app from a webOS 6 user browsing the channel (§1.4). It needs a graceful failure.
-9. **Support model.** A Dev Mode user has no shell, so "send me `/tmp/plxnative-events.log`" doesn't
+9. **Support model.** A Dev Mode user has no shell, so "send me `/tmp/butaca-events.log`" doesn't
    work as a bug-report path.
 10. ~~**`requiredMemory: 60`** vs a measured ~74 MB peak.~~ **RESOLVED 2026-08-22 — the “~74 MB” was never a measurement.** It was an uncited sentence written into this very section (“things nobody has verified”) and then copied verbatim into five other files, where it reads as established. The real figure, taken on the dev set (M16p3, webOS 4.10.2) from a `features=release` build via `VmHWM`: **35 MB** at boot, **119 MB** browsing Home/detail, **155,292 kB ≈ 152 MiB peak** with playback. Note `VmRSS` on this TV already INCLUDES Mali pages — proven arithmetically, `smaps_rollup` 38,540 kB + `/proc/gpu` 20,159×4 kB = 119,176 kB against `VmRSS` 119,044 kB — so roughly two thirds of the footprint is texture memory and adding `/proc/gpu` on top double-counts. `requiredMemory` is now **160**; it was raised because webOS substitutes a default of **120** when the field is absent or ≤ 0, which made 60 strictly worse than declaring nothing at all.
 
@@ -988,7 +988,7 @@ Listed because each could change a decision above.
    regardless. Both fixed, and the host-path assertion was split out of the config-dependent ones so
    it runs on a dev machine too — it had never once executed against a real build.
    ~~Replace the control-file Maintainer~~ **DONE**, plus `Homepage`/`License`, all three asserted.
-10. ~~Put the whole `/tmp/plxnative-*` surface behind a cargo feature~~ **DONE.** New `devtriggers`
+10. ~~Put the whole `/tmp/butaca-*` surface behind a cargo feature~~ **DONE.** New `devtriggers`
     feature (a *second* feature, not more things under `devtools`, whose stated contract is
     draw-only — that promise is worth keeping) and a new `src/dev.rs` every read goes through.
     Verified on the built ARM binary: a `RELEASE=1` build's only `/tmp` strings are its three log
@@ -1025,7 +1025,7 @@ Listed because each could change a decision above.
 15. ~~Add `Installed-Size`~~ (done, §9) / ~~add `Homepage` / `License`~~ **DONE 2026-08-02, and
     asserted** / ~~strip the binary~~ **DONE**: measured 7,835,376 → 5,495,476 (−2.34 MB, 30%),
     `Installed-Size` 10117 → 7781 KiB, ipk 4.85 MB. Only the **staged** copy is stripped, never
-    `pkg/plxnative` — `tools/crash-report.sh` symbolizes against that local binary *and* md5-compares
+    `pkg/butaca` — `tools/crash-report.sh` symbolizes against that local binary *and* md5-compares
     it to the on-TV copy, so stripping in place would break the identity check and lose function
     names from every release crash report. ~~make the ipk reproducible~~ (done — byte-identical
     rebuilds, re-verified after the strip landed).
@@ -1053,7 +1053,7 @@ between here and a release, and none of them is code:
   executed: no CI run, no Release, no tag. The NDK action's cache and relocate step, the toolbox
   `.deb` download, the pip install, the arm64 runner — all unexecuted. The first run should not be
   the release path.
-- **Write `packages/com.beb.plxnative.yml` in a fork of `webosbrew/apps-repo`** and open the PR.
+- **Write `packages/com.butaca.yml` in a fork of `webosbrew/apps-repo`** and open the PR.
   **DRAFTED — `docs/webosbrew-package.yml` is the ready file**; copy it into the fork under that
   name. Schema re-verified against upstream 2026-08-04: required keys are `title`, `iconUri`,
   `manifestUrl`, `category`, `pool`, `description`; `shortDescription` is capped at 80 characters;
@@ -1135,11 +1135,11 @@ be committed, tagged and pushed by hand, which is the sequence this exists to re
 
 ---
 
-## 7b. A release is always `com.beb.plxnative` — and a flavoured artifact must never become one
+## 7b. A release is always `com.butaca` — and a flavoured artifact must never become one
 
-Since 2026-08-21 this tree can package two ids. `com.beb.plxnative` is the app users install: it is
+Since 2026-08-21 this tree can package two ids. `com.butaca` is the app users install: it is
 the id in every manifest, every channel listing, every release asset name and every `ipk.sha256`.
-`com.beb.plxnative.debug` is the developer build that lives beside it on one television, and it has
+`com.butaca.debug` is the developer build that lives beside it on one television, and it has
 no release, no published hash and no listing — ever. `docs/two-installs.md` is the full account;
 what matters here is that the packaging path knows the difference and says so.
 
@@ -1159,7 +1159,7 @@ others do not:
   mechanism rather than a rule.
 - **`ci/check-package.py` grades the same thing on the packaged BYTES**, which is the half that
   survives somebody reaching for the hatch and forgetting: the stable package must not contain the
-  `plxnative-noidle` dev witness. It also derives the packaged id from the staged
+  `butaca-noidle` dev witness. It also derives the packaged id from the staged
   `applications/<dir>` name rather than from the tracked `pkg/appinfo.json`, because assuming the
   stable id would make every path below it grade a debug package **vacuously** — an empty `rglob`
   prints nothing, fails nothing, and reports success.
@@ -1187,9 +1187,9 @@ needs a tty over plain ssh, and given `-i` because the subscription is the only 
 
 ```sh
 luna-send -i -a com.webos.appInstallService luna://com.webos.appInstallService/dev/install \
-  '{"id":"com.beb.plxnative.debug","ipkUrl":"/tmp/com.beb.plxnative.debug_<version>_arm.ipk","subscribe":true}'
+  '{"id":"com.butaca.debug","ipkUrl":"/tmp/com.butaca.debug_<version>_arm.ipk","subscribe":true}'
 luna-send -i -a com.webos.appInstallService luna://com.webos.appInstallService/dev/remove \
-  '{"id":"com.beb.plxnative.debug","subscribe":true}'
+  '{"id":"com.butaca.debug","subscribe":true}'
 ```
 
 `install` **deploys afterwards, deliberately**: `appinstalld` replaces `applications/<id>/`
@@ -1256,7 +1256,7 @@ one in any way that could change behaviour, only in what it paints.
 
 Three traps this cost, all found by measurement rather than reasoning, all silent:
 
-1. **Both feature sets wrote the same `libplxnative_modules.a`.** Cargo fingerprints the build but
+1. **Both feature sets wrote the same `libbutaca_modules.a`.** Cargo fingerprints the build but
    does not hash its output, so after a `RELEASE=1` build it reports the dev build
    *"Finished in 0.04s"* and leaves the release `.a` in place — which `make` then links with no
    comment. Fixed by giving each configuration its own `--target-dir`.
@@ -1264,7 +1264,7 @@ Three traps this cost, all found by measurement rather than reasoning, all silen
    target's up-to-dateness from a stat taken *before* its prerequisites' recipes run, and (b)
    compares mtimes at **one-second granularity** — a stamp written 0.5 s after the binary compares
    *equal*. Both were observed directly. So the config check runs at **parse** time and **deletes
-   `pkg/plxnative`** when the configuration changes; "the target does not exist" is not a timestamp
+   `pkg/butaca`** when the configuration changes; "the target does not exist" is not a timestamp
    comparison and cannot be defeated by either.
 3. **`make RELEASE=1 && make deploy` deploys a DEV binary** — the second invocation has no
    `RELEASE`, so it rebuilds and ships that. The flag must be on *every* invocation that produces
@@ -1322,11 +1322,11 @@ project whose whole verification philosophy is that the device is the real gate.
 `usr/palm/applications/<id>/appinfo.json` (the *application*) and
 `usr/palm/packages/<id>/packageinfo.json` (the *package*, which tells `appinstalld` what app ids the
 package owns). Ours had only the first. Confirmed against the device: all 12 store apps and **both
-Homebrew Channel apps** on the dev TV carry a `usr/palm/packages/` entry — `com.beb.plxnative` was
+Homebrew Channel apps** on the dev TV carry a `usr/palm/packages/` entry — `com.butaca` was
 the only application on the box without one, precisely because it was scp'd rather than installed.
 `webosbrew-ipk-verify` opens that file first and reports the miss as
 
-    Failed to open com.beb.plxnative_0.1.0_arm.ipk: No such file or directory (os error 2)
+    Failed to open com.butaca_0.1.0_arm.ipk: No such file or directory (os error 2)
 
 — the *ipk's* name, not the member's, so it reads like a corrupt or missing archive rather than a
 missing member. `ci/mkipk.py` now synthesises it from `pkg/appinfo.json`, keeping the version
@@ -1335,7 +1335,7 @@ single-sourced.
 **Bug 2 — GNU `ar` writes member names LG will not read.** With the descriptor added the verifier
 went green on both 4.x firmwares — and the TV still refused the package:
 
-    AppInstallD TASK_ERROR {"app_id":"com.beb.plxnative","error_code":-5,
+    AppInstallD TASK_ERROR {"app_id":"com.butaca","error_code":-5,
                             "error_text":"Failed to extract package"}
 
 GNU `ar` terminates short member names with `/`, so `ar t` on our own ipk showed `debian-binary/`,
@@ -1366,7 +1366,7 @@ survives the rewrite (two consecutive `make RELEASE=1 ipk` runs agree byte for b
 
 **Cost of the miss, had it shipped:** the manifest's sha256 would have matched, the download would
 have succeeded, and every install would have failed at extraction — on a channel where the
-developer has no shell on the user's TV and `/tmp/plxnative-events.log` is unreachable (§6.9).
+developer has no shell on the user's TV and `/tmp/butaca-events.log` is unreachable (§6.9).
 
 ---
 
@@ -1475,7 +1475,7 @@ tracked, cut from the SAME master by the same script:
 python3 tools/mkicons.py assets/logo-master.png --out-dir=pkg/dev --sizes=80,130 --badge=DEV
 ```
 
-The nightly install (`com.beb.plxnative.nightly`) is a third tile beside both, so it wears its own
+The nightly install (`com.butaca.nightly`) is a third tile beside both, so it wears its own
 set, `pkg/nightly/`, in the palette's cool grey (`COOL_200`, `#cdd3dd`) with the derived dark ink —
 cut the same way:
 
@@ -1544,7 +1544,7 @@ Plex: `plex.tv/about/privacy-legal/plex-terms-of-service/`,
 `plex.tv/about/privacy-legal/plex-trademarks-and-guidelines/`, `developer.plex.tv`, forum announcement 2025-09-15.
 Third-party marks: Rotten Tomatoes Developer Network (archive 2025-02-19), Fandango Data Feed Terms
 (archive 2024-11-05), `themoviedb.org/api-terms-of-use` (rev. 2023-10-20).
-On-device evidence: `.abi-cache/libavcodec.so.57.89.100` build-config string; NDK `readelf -d pkg/plxnative`;
+On-device evidence: `.abi-cache/libavcodec.so.57.89.100` build-config string; NDK `readelf -d pkg/butaca`;
 fontTools dumps of `pkg/appfont*.ttf`; `tar tzf ipkroot/data.tar.gz`.
 
 ---
@@ -1641,14 +1641,14 @@ each carrying exactly two properties, UTF-8 without BOM:
 
 ```json
 {
-  "title": "PlxNative",
+  "title": "Butaca",
   "appDescription": "비공식 네이티브 Plex 클라이언트 - Plex와 제휴 관계가 없습니다"
 }
 ```
 
 Three decisions in that file are deliberate and each has a gate behind it in `ci/check-package.py`:
 
-* **The title is NOT translated.** `PlxNative` is the brand `TRADEMARKS.md` reserves, and LG's own
+* **The title is NOT translated.** `Butaca` is the brand `TRADEMARKS.md` reserves, and LG's own
   listing shows it verbatim. Every locale carries the same string.
 * **Exactly two properties.** A third would be `pkg/appinfo.json` duplicated — the version would
   then live in a file `ci/bump-version.py`, the release tag guard and every version assertion in
@@ -1685,9 +1685,9 @@ scp-based dev loop never needed. **Consequence worth stating: the localized desc
 *install*, not a deploy.
 
 **The flavour suffix is reapplied when staging, and that is the non-obvious half.**
-`ci/flavor.py` renames a flavoured install's tile `PlxNative debug` precisely so two tiles on one
+`ci/flavor.py` renames a flavoured install's tile `Butaca debug` precisely so two tiles on one
 set are not a coin flip. A localized descriptor carrying the bare tracked title would override that
-back to `PlxNative` the moment the set was switched to Korean — restoring the ambiguity in exactly
+back to `Butaca` the moment the set was switched to Korean — restoring the ambiguity in exactly
 the locale nobody developing this app is looking at. `stage_resources` reads the suffix off
 `flavor.appinfo_for`'s **output** rather than re-deriving it, so there is still one place that
 decides what a flavoured title looks like, and it raises rather than guesses if that rule ever
@@ -1722,7 +1722,7 @@ section closed anything at all.
    (`make FLAVOR=debug install` — an *install*, not a deploy: the descriptors are packaged, not
    scp'd), then switch the television to 한국어 in *Settings → General → Language → Menu Language*
    and look at the launcher tile and the app's entry in the app list. The tile title should still
-   read `PlxNative debug` (the brand is not translated, and the flavour suffix must survive); the
+   read `Butaca debug` (the brand is not translated, and the flavour suffix must survive); the
    *description*, wherever this firmware surfaces one, should be Korean.
 2. **Does SAM need a restart or a reinstall to notice?** webOS OSE's own documentation warns that
    SAM may cache the contents of `appinfo.json` at boot. If the tile does not change on a live

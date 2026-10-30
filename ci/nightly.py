@@ -14,7 +14,7 @@ Four subcommands, each independently testable as a pure function plus a thin CLI
 
   plan        — today's version/label/tag, the previous nightly tag, and whether to skip.
   notes       — render the release body (markdown, no hard wrapping, absolute links only).
-  latest-json — what `plxnative.com/nightly/latest.json` serves; `{"available": false}` if none.
+  latest-json: what the nightly channel's latest.json serves; `{"available": false}` if none.
   prune       — delete nightly releases (and their tags) older than N days, keeping the newest.
 
 `--selftest` runs the pure-logic tests below `make check` also runs (see `ci/flavor.py` for the
@@ -197,8 +197,8 @@ def render_notes(*, label: str, sha: str, prev_tag: "str | None", ipk: str, sha2
 
     return "\n\n".join([
         f"Automatic build of `main` at [`{short_sha}`]({commit_link}). It installs beside "
-        "PlxNative as a separate app, \"PlxNative Nightly\", with its own launcher tile and its "
-        "own sign-in — your regular PlxNative install is untouched.",
+        "Butaca as a separate app, \"Butaca Nightly\", with its own launcher tile and its "
+        "own sign-in — your regular Butaca install is untouched.",
 
         "**This build has not been tested on a television.** It passed the same automated checks "
         "a release does — the ARM cross-build, the packaging gates, and the firmware loader "
@@ -215,8 +215,7 @@ def render_notes(*, label: str, sha: str, prev_tag: "str | None", ipk: str, sha2
         f"Download `{ipk}` below and install it with "
         "[dev-manager-desktop](https://github.com/webosbrew/dev-manager-desktop) — no rooted "
         "television is needed. Nightly builds are not distributed through the Homebrew Channel and "
-        "do not update automatically; the newest one is always linked from "
-        "[plxnative.com/nightly/latest.json](https://plxnative.com/nightly/latest.json).\n\n"
+        "do not update automatically; the newest one is always the latest nightly release in this repository.\n\n"
         f"```\n{sha256}  {ipk}\n```\n\n"
         "This package bundles FFmpeg under LGPL-2.1-or-later; the complete corresponding source is "
         "attached below. Nightly builds are deleted after 30 days.",
@@ -380,11 +379,11 @@ def _selftest() -> int:
     # notes rendering
     body = render_notes(
         label="0.7.0-nightly-20260919", sha="abc1234def5678900000000000000000000000",
-        prev_tag="nightly/v0.7.0-nightly-20260918", ipk="plxnative-v0.7.0-nightly-20260919.ipk",
-        sha256="deadbeef" * 8, repo="GLinnik21/plx-native",
+        prev_tag="nightly/v0.7.0-nightly-20260918", ipk="butaca-v0.7.0-nightly-20260919.ipk",
+        sha256="deadbeef" * 8, repo="gnacho/butaca",
         changes=["- session: one in-memory cache owned by the session module (#136)"],
     )
-    check("PlxNative Nightly" in body, "notes name the nightly tile")
+    check("Butaca Nightly" in body, "notes name the nightly tile")
     check("**This build has not been tested on a television.**" in body,
           "notes carry the untested-on-TV warning in bold")
     check("## Changes since 0.7.0-nightly-20260918" in body,
@@ -392,7 +391,7 @@ def _selftest() -> int:
     check("session: one in-memory cache" in body, "notes carry the passed-in change lines")
     check("compare/nightly/v0.7.0-nightly-20260918...nightly/v0.7.0-nightly-20260919" in body,
           "notes link the compare view between the two tags")
-    check(f"deadbeef{'deadbeef' * 7}  plxnative-v0.7.0-nightly-20260919.ipk" in body,
+    check(f"deadbeef{'deadbeef' * 7}  butaca-v0.7.0-nightly-20260919.ipk" in body,
           "notes carry the sha256 code block with the exact ipk name")
     check("LGPL-2.1-or-later" in body and "deleted after 30 days" in body,
           "notes carry the LGPL notice and the retention promise")
@@ -400,7 +399,7 @@ def _selftest() -> int:
           "the first paragraph is not internally hard-wrapped")
     first_notes = render_notes(
         label="0.7.0-nightly-20260919", sha="0" * 40, prev_tag=None,
-        ipk="plxnative-v0.7.0-nightly-20260919.ipk", sha256="0" * 64, repo="GLinnik21/plx-native",
+        ipk="butaca-v0.7.0-nightly-20260919.ipk", sha256="0" * 64, repo="gnacho/butaca",
         changes=[],
     )
     check("First nightly." in first_notes, "no prev_tag -> 'First nightly.'")
@@ -412,14 +411,14 @@ def _selftest() -> int:
     fake_release = {
         "tag_name": "nightly/v0.7.0-nightly-20260919",
         "target_commitish": "abc1234def5678900000000000000000000000",
-        "html_url": "https://github.com/GLinnik21/plx-native/releases/tag/nightly%2Fv0.7.0-nightly-20260919",
+        "html_url": "https://github.com/gnacho/butaca/releases/tag/nightly%2Fv0.7.0-nightly-20260919",
         "assets": [
-            {"name": "plxnative-v0.7.0-nightly-20260919.ipk",
+            {"name": "butaca-v0.7.0-nightly-20260919.ipk",
              "browser_download_url": "https://example.invalid/ipk"},
             {"name": "nightly.sha256", "browser_download_url": "https://example.invalid/sha256"},
         ],
     }
-    payload = latest_json_payload(fake_release, "deadbeef  plxnative-v0.7.0-nightly-20260919.ipk\n")
+    payload = latest_json_payload(fake_release, "deadbeef  butaca-v0.7.0-nightly-20260919.ipk\n")
     check(payload["version"] == "0.7.0-nightly-20260919", "latest.json version is the bare label")
     check(payload["tag"] == "nightly/v0.7.0-nightly-20260919", "latest.json tag is the full ref")
     check(payload["date"] == "20260919", "latest.json date is pulled from the label")

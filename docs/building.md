@@ -1,4 +1,4 @@
-# Building PlxNative
+# Building Butaca
 
 The build, the two installs, the device loop and the test tiers — everything a contributor needs
 that a television owner does not. The
@@ -24,8 +24,8 @@ Windows and needs no webOS NDK; run `tools/sim.ps1 setup` there.
 make setup-env
 rustup toolchain install nightly --component rust-src --component clippy
 brew install cmake sshpass        # or your distribution's equivalent
-make                              # builds pkg/plxnative — a developer build
-make ipk                          # pkg/com.beb.plxnative.debug_<version>_arm.ipk
+make                              # builds pkg/butaca — a developer build
+make ipk                          # pkg/com.butaca.debug_<version>_arm.ipk
 ```
 
 ## Disk, and the build cache
@@ -42,16 +42,16 @@ own, gated by free space on the volume (`PLX_GC_MIN_FREE_GIB`, default 20) and, 
 a lane idle guard (`PLX_GC_IDLE_MIN`, default 60) so a lane an agent might resume soon is spared.
 It runs from a Claude Code `SessionEnd` hook and from the hourly launchd agent `make disk-watch`
 installs (`tools/install-disk-watch.sh`, macOS only — run it yourself; nothing here installs it
-for you). Logs land in `~/Library/Logs/plxnative-build-gc.log` (or `$PLX_GC_LOG`).
+for you). Logs land in `~/Library/Logs/butaca-build-gc.log` (or `$PLX_GC_LOG`).
 
 The bundled FFmpeg is not rebuilt per checkout. Its source and object tree is machine-wide under
-`$PLX_BUILD_CACHE` (default `~/.cache/plxnative`), keyed by configure flags and toolchain, so a
+`$PLX_BUILD_CACHE` (default `~/.cache/butaca`), keyed by configure flags and toolchain, so a
 fresh clone gets its own prefix in seconds rather than minutes.
 
 ## Two flavours, and the default is the developer one
 
 That is why the filename above says `.debug`. The app can be installed twice on one television:
-`com.beb.plxnative`, the id in every release and what users install, and `com.beb.plxnative.debug`
+`com.butaca`, the id in every release and what users install, and `com.butaca.debug`
 beside it, with its own launcher tile, sign-in and log. `FLAVOR` chooses which one every TV-facing
 target talks to, and the checked-in default is `debug`.
 
@@ -60,7 +60,7 @@ command typed from muscle memory should be able to overwrite it. So the shippabl
 asked for by name:
 
 ```sh
-make FLAVOR=stable RELEASE=1 ipk   # pkg/com.beb.plxnative_<version>_arm.ipk — what a release publishes
+make FLAVOR=stable RELEASE=1 ipk   # pkg/com.butaca_<version>_arm.ipk — what a release publishes
 ```
 
 `make FLAVOR=stable ipk` on its own is refused: the stable id is release-only. Add
@@ -78,8 +78,8 @@ The platform entry points are deliberately separate:
   host FFmpeg, so the pipeline between the socket and decoder runs on the host. The historical
   `sim`, `sim-run`, and `sim-shot` names remain aliases for these macOS targets.
 - Linux: `make sim-linux` builds the optimized UI/Plex simulator without host FFmpeg. Run the
-  resulting `rust-modules/target-sim/release/plxnative-sim` under X11 or Wayland with
-  `PLXNATIVE_APP_DIR=pkg` (or use the matching path below a custom `SIM_TDIR`).
+  resulting `rust-modules/target-sim/release/butaca-sim` under X11 or Wayland with
+  `BUTACA_APP_DIR=pkg` (or use the matching path below a custom `SIM_TDIR`).
 - Windows/WSLg: `tools/sim.ps1 build|run|shot|send`, backed by the `make sim-wsl` compatibility
   alias for `sim-linux`. It adds dependency setup, isolated assets/runtime state and WSLg checks.
 

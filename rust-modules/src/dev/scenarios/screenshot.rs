@@ -57,7 +57,7 @@ impl ScreenshotArms {
     }
 }
 
-/// `/tmp/plxnative-stillclock=<ms>` — hold every free-running clock animator (`motion::Phase`:
+/// `/tmp/butaca-stillclock=<ms>` — hold every free-running clock animator (`motion::Phase`:
 /// spinners, stall timers) at `<ms>` elapsed. A waiting screen then draws one fixed picture and
 /// comes to rest, which is what a settled capture needs; springs and ramps are untouched, they
 /// settle on their own.
@@ -68,7 +68,7 @@ pub(crate) fn arm_stillclock() {
     if let Some(v) = crate::dev::read("stillclock") {
         let ms = v.parse().unwrap_or(0);
         crate::ui::motion::hold_phase_clocks(Some(ms));
-        crate::log(&format!("motion: free-running clocks held at {ms} ms by /tmp/plxnative-stillclock"));
+        crate::log(&format!("motion: free-running clocks held at {ms} ms by /tmp/butaca-stillclock"));
     }
 }
 
@@ -122,7 +122,7 @@ fn parse_type(v: &str) -> Option<LibraryType> {
     })
 }
 
-/// `/tmp/plxnative-libtype=<movies|shows|seasons|episodes|collections>` — on the Library page,
+/// `/tmp/butaca-libtype=<movies|shows|seasons|episodes|collections>` — on the Library page,
 /// choose that TYPE menu value the way its row does, once the section's listing is there. Done
 /// when the page's committed listing REPORTS that type; `libgrid` and `libmenu` wait for it, so a
 /// seat or a menu lands on the listing this trigger asked for.
@@ -156,7 +156,7 @@ pub(crate) fn libtype_arm(app: &mut App, fr: &Frame) {
     }
 }
 
-/// `/tmp/plxnative-libgrid=<row>,<col>` — on the Library page, seat focus on that grid card once
+/// `/tmp/butaca-libgrid=<row>,<col>` — on the Library page, seat focus on that grid card once
 /// the grid has landed. Done when the page REPORTS focus there.
 pub(crate) fn libgrid_arm(app: &mut App, fr: &Frame) {
     if !app.scenarios.shots.libtype_done {
@@ -171,7 +171,7 @@ pub(crate) fn libgrid_arm(app: &mut App, fr: &Frame) {
     }
 }
 
-/// `/tmp/plxnative-libshelf=<shelf>,<col>` — on the Library page, seat focus on card `<col>` of
+/// `/tmp/butaca-libshelf=<shelf>,<col>` — on the Library page, seat focus on card `<col>` of
 /// hub shelf `<shelf>` (0 is Continue Watching when there is one) once the shelves have landed.
 /// Focus on a lower shelf scrolls the ones above it up under the tab bar. Done when the page
 /// REPORTS focus there.
@@ -240,7 +240,7 @@ impl SeatArm {
     }
 }
 
-/// `/tmp/plxnative-libmenu=<sort|filter|type>[,<rest ms>]` — on the Library page, open that toolbar
+/// `/tmp/butaca-libmenu=<sort|filter|type>[,<rest ms>]` — on the Library page, open that toolbar
 /// menu, after `libgrid` (if armed) has seated its focus and, with a rest period, once the page has
 /// stopped moving ([`at_rest`]). Done when the menu SURFACE is up.
 pub(crate) fn libmenu_arm(app: &mut App, fr: &Frame) {
@@ -282,7 +282,7 @@ pub(crate) fn libmenu_arm(app: &mut App, fr: &Frame) {
     }
 }
 
-/// `/tmp/plxnative-clockstop=<ms>` — simulator only: stop the clock sink at that movie position
+/// `/tmp/butaca-clockstop=<ms>` — simulator only: stop the clock sink at that movie position
 /// and leave the transport PLAYING, so the player holds a moment of playback that pausing would
 /// change (the Up Next tile, which exists only while playing). Logs once when the playhead is
 /// there. The stop is a stall of the sink's own making (`ffi_host.rs::stop_clock_at`), re-armed

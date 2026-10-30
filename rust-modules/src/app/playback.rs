@@ -262,7 +262,7 @@ pub(crate) fn enter_player(
     }
 }
 
-/// The ONE start-playback ritual (detail OK, home episode OK, and the plxnative-autoplay/
+/// The ONE start-playback ritual (detail OK, home episode OK, and the butaca-autoplay/
 /// -detailplay/-play dev triggers all share it): arm the resume point BEFORE the first
 /// Load (direct-play av_seek / transcode &offset restart), start the engine, record the
 /// Stop/BACK/EOS return target, reset the HUD focus cursor, and show the HUD. A missed step
@@ -482,7 +482,7 @@ pub(crate) unsafe fn commit_info_press(
 /// `route::commit_audio_selection`/`commit_subtitle_selection` take the playback session's `&mut`,
 /// which no screen has (§2.2) — the panel returns a
 /// [`TrackCommit`](crate::ui::track_menu::TrackCommit) and this is where it lands, from the
-/// overlay's `PlayerReq` and from the headless `plxnative-menupick` trigger alike.
+/// overlay's `PlayerReq` and from the headless `butaca-menupick` trigger alike.
 pub(crate) fn commit_track(
     ps: &mut crate::route::PlaybackSession,
     commit: crate::ui::track_menu::TrackCommit,

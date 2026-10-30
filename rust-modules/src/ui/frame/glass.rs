@@ -15,7 +15,7 @@ pub(crate) struct GlassPlan {
     /// frame's material. The strip borrows it during paint; the Bridge never owns a second copy.
     tab: TabBand,
     /// The dev backdrop-glass load dial and the blurred-transition prototype beside it
-    /// (`/tmp/plxnative-glassload`, `/tmp/plxnative-navblur`).
+    /// (`/tmp/butaca-glassload`, `/tmp/butaca-navblur`).
     dial: Dial,
 }
 
@@ -63,12 +63,12 @@ impl GlassPlan {
         self.tab.set_face(face);
     }
 
-    /// Arm the load dial from `/tmp/plxnative-glassload`'s content.
+    /// Arm the load dial from `/tmp/butaca-glassload`'s content.
     pub(crate) fn configure_dial(&mut self, spec: &str) {
         self.dial.configure(spec);
     }
 
-    /// Arm the blurred-transition prototype from `/tmp/plxnative-navblur`'s content.
+    /// Arm the blurred-transition prototype from `/tmp/butaca-navblur`'s content.
     pub(crate) fn configure_navblur(&mut self, spec: &str) {
         self.dial.configure_navblur(spec);
     }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize PlxNative's raw Mali HWCNT JSONL without third-party packages."""
+"""Summarize Butaca's raw Mali HWCNT JSONL without third-party packages."""
 
 from __future__ import annotations
 
