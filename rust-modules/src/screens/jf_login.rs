@@ -577,14 +577,6 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
                         Handled::No
                     }
                 }
-                crate::ui::machine::InputKind::Text(ref edit) if self.editing.is_some() => {
-                    let field = self.editing.expect("guarded editing field");
-                    if delete_text(&mut self.fields[field], &edit) {
-                        self.dirty = true;
-                        fx.invalidate(crate::ui::present::Provenance::Input);
-                    }
-                    Handled::Yes
-                }
                 _ => Handled::No,
             },
             _ => Handled::No,
