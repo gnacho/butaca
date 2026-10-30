@@ -1135,10 +1135,12 @@ pub(crate) enum LoopReq {
     /// Lab builds only, and it changes no route: the tester stays where they were and the toast
     /// says what happened.
     AccountSendDiagnostics,
-    /// Jellyfin flavor only: the Settings root's *Conexión rápida* — arm add-server mode and land
-    /// on the sign-in form; a successful connect appends the new server instead of replacing.
+    /// Jellyfin flavor only: the Settings root's *Conexión rápida* is Quick Connect — arm
+    /// quick-connect mode on the login form and land there; the form shows a server field and a
+    /// *Start Quick Connect* action instead of the password fields, and a success appends the
+    /// new server (add-server semantics, replacing the old password add-server door).
     #[cfg(feature = "jellyfin")]
-    JfAddServer,
+    JfQuickConnect,
     /// Jellyfin flavor only: the server picker committed a row — sign in against that configured
     /// server (index into `jellyfin::boot`'s list) and make it active.
     #[cfg(feature = "jellyfin")]

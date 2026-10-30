@@ -34,6 +34,21 @@ pub(crate) struct AuthUser {
     pub(crate) name: String,
 }
 
+/// `POST /QuickConnect/Initiate` / `GET /QuickConnect/Connect` — one Quick Connect request's
+/// state. Only what the flow reads is declared: the `Secret` (the poll/authenticate credential),
+/// the `Code` the viewer types on another device, and the `Authenticated` flag the poll waits on.
+/// The other members (`DeviceId`, `DeviceName`, `AppName`, `AppVersion`, `DateAdded`) are
+/// deliberately undeclared — this app does not read them, and `serde_json` ignores the rest.
+#[derive(Debug, Deserialize)]
+pub(crate) struct QuickConnectResult {
+    #[serde(rename = "Authenticated", default)]
+    pub(crate) authenticated: bool,
+    #[serde(rename = "Secret")]
+    pub(crate) secret: String,
+    #[serde(rename = "Code")]
+    pub(crate) code: String,
+}
+
 /// `GET /Users/{userId}/Views` — the library list (Jellyfin's counterpart of PMS
 /// `/library/sections`). Each view is one browsable library; its `Id` is the `ParentId` a
 /// section listing is scoped by.
@@ -61,6 +76,13 @@ pub(crate) struct ViewDto {
 pub(crate) struct PublicInfo {
     #[serde(rename = "ServerName")]
     pub(crate) server_name: String,
+    /// The server's machine id — the Plex `machineIdentifier` counterpart.
+    #[serde(rename = "Id", default)]
+    pub(crate) id: String,
+    /// Dotted `Major.Minor.Patch` version — `client::quick_connect_supported` reads it to gate
+    /// Quick Connect on 10.8+.
+    #[serde(rename = "Version", default)]
+    pub(crate) version: String,
 }
 
 /// A paged listing: `/Users/{userId}/Items`, `/Items/Latest`, resume and search all answer in

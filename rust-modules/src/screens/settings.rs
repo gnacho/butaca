@@ -1295,7 +1295,7 @@ impl RootPage {
             Action::SelectServer => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Servers))),
             #[cfg(feature = "jellyfin")]
             Action::QuickConnect => {
-                fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::JfAddServer)))
+                fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::JfQuickConnect)))
             }
             #[cfg(feature = "jellyfin")]
             Action::Disconnect => {
