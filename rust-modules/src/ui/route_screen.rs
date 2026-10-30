@@ -916,6 +916,29 @@ impl RouteLayout {
             (actions_top - theme::space::MD - top).max(0.0))
     }
 
+    /// The clickable box of the crumb — the chevron, the gap and the word — so the pointer target
+    /// and the drawing cannot drift apart.
+    ///
+    /// It is the DRAWN extent, not a padded rectangle around it: [`Self::draw_crumb`] lays the mark
+    /// out at the narrative's left edge and the word after its ink, and this is that same span. The
+    /// height is the whole band, because a caption is a small target for a pointer.
+    pub(crate) fn crumb_rect(self, back_to: &str, measure: &dyn Measure) -> Rect {
+        let (_, ink_r) = icons::ink_x(Icon::ChevronLeft);
+        let x = self.narrative.x + CRUMB_MARK * ink_r + theme::space::XS;
+        let word_w = measure.width_str(back_to, theme::size::CAPTION, false);
+        let w = (x - self.narrative.x) + word_w;
+        Rect::new(self.narrative.x, self.narrative.y, w.min(self.narrative.w), CRUMB_BAND)
+    }
+
+    /// The Home word's box in the action band: the right-hand end of [`Self::action`], as wide as
+    /// the word needs and never narrower than a control, so the pointer reaches it as easily as the
+    /// band's own buttons.
+    pub(crate) fn home_rect(self, label: &str, measure: &dyn Measure) -> Rect {
+        let word_w = measure.width_str(label, theme::size::CAPTION, false) + theme::space::SM * 2.0;
+        let w = word_w.max(self.action.h).min(self.action.w);
+        Rect::new(self.action.x + self.action.w - w, self.action.y, w, self.action.h)
+    }
+
     fn draw_crumb(self, p: Painter, top: f32, back_to: &str, measure: &dyn Measure) {
         let h = CRUMB_BAND;
         let cy = top + h * 0.5;

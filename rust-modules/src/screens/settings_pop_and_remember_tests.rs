@@ -239,3 +239,71 @@ fn the_remembered_seats_are_part_of_the_hash() {
         Some(FocusTarget::FirstInGroup(GroupId(0)))
     ));
 }
+
+/// The wordmark crumb is a pointer target the surface owns, not a page: a click on it walks the
+/// inner stack exactly as BACK and LEFT do, and it declines at the root so the container answers
+/// (`RouteSurface`'s BACK branch makes the same two decisions).
+#[cfg(feature = "jellyfin")]
+#[test]
+fn clicking_the_crumb_walks_back_to_the_settings_root() {
+    let mut s = RouteSurface::new(
+        EntryId(7),
+        InstanceId(0),
+        Family::Settings,
+        SettingsPage::Root,
+        crate::pms::HubsSnapshot::empty_for_test().view(),
+    );
+    step(&mut s, ScreenEvent::Mount, None);
+    // The Jellyfin root's first row opens the server picker: any pushed page will do, this
+    // test is about where the crumb click goes once the stack is deeper than its root.
+    let servers_row = FocusKey {
+        entry: EntryId(7),
+        elem: 0,
+    };
+    step(&mut s, ScreenEvent::FocusMoved {
+        from: None,
+        to: servers_row,
+        by: crate::ui::screen::By::Dir,
+    }, Some(servers_row));
+    step(&mut s, ScreenEvent::Activate(servers_row.elem), Some(servers_row));
+    assert_eq!(s.inner.depth(), 2, "the server picker is up");
+    let out = step(
+        &mut s,
+        ScreenEvent::Activate(crate::screens::registry::HEADER_CRUMB),
+        Some(servers_row),
+    );
+    assert_eq!(s.inner.depth(), 1, "the crumb walked back to the root");
+    // `request` pops the INNER stack in place: the surface keeps its own entry and emits
+    // nothing above it, so the only thing to assert is that it did not dismiss itself.
+    assert!(
+        !out.iter()
+            .any(|st| matches!(&st.fx, Fx::Nav(NavOp::Dismiss(_)))),
+        "the crumb walks the stack, it does not retire the surface"
+    );
+}
+
+/// Home sits in the header for the pointer only, and it names no route: a page cannot retire the
+/// stack, so the click becomes an application request (BACK at the root is the keyboard's road).
+#[test]
+fn clicking_home_asks_the_application_to_retire_the_route() {
+    let mut s = RouteSurface::new(
+        EntryId(7),
+        InstanceId(0),
+        Family::Settings,
+        SettingsPage::Root,
+        crate::pms::HubsSnapshot::empty_for_test().view(),
+    );
+    step(&mut s, ScreenEvent::Mount, None);
+    let out = step(
+        &mut s,
+        ScreenEvent::Activate(crate::screens::registry::HEADER_HOME),
+        None,
+    );
+    assert!(
+        out.iter().any(|st| matches!(
+            &st.fx,
+            Fx::App(AppFx::Loop(crate::screens::registry::LoopReq::GoHome))
+        )),
+        "only the application can retire the route and land on Home"
+    );
+}

@@ -1928,6 +1928,11 @@ fn loop_requests(app: &mut App) {
             crate::screens::registry::LoopReq::OnboardDone => {
                 enter_home_from_onboard(&mut app.pages);
             }
+            // The header's Home word. Same reset as the end of onboarding; the difference is only
+            // who asked for it.
+            crate::screens::registry::LoopReq::GoHome => {
+                super::input::go_home(&mut app.pages);
+            }
             // Phase 10, the profile menu's five rows. The surface has already asked the container
             // to dismiss it in the same drain — what is left is the part a screen may not do.
             //

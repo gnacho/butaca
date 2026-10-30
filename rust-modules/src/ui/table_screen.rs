@@ -74,6 +74,17 @@ impl<'a> Header<'a> {
     pub fn paint(&self, p: Painter, measure: &dyn Measure) {
         self.layout.draw_narrative(p, self.crumb, self.title, self.copy, self.copy_size, measure);
     }
+
+    /// The Home word, right-aligned inside the box [`RouteLayout::home_rect`] hands back. Drawing
+    /// and the pointer stop share that one box, so what a person aims at is what they see.
+    pub fn paint_home(&self, p: Painter, label: &str, rect: Rect, measure: &dyn Measure) {
+        let w = measure.width_str(label, theme::size::CAPTION, false).min(rect.w);
+        let cy = rect.y + rect.h * 0.5;
+        let ty = cy - measure.cap_h(theme::size::CAPTION) * 0.5;
+        crate::ui::text_view::TextView::new(label, theme::size::CAPTION, theme::TEXT_TERTIARY)
+            .max_lines(1)
+            .draw(p, Rect::new(rect.x + rect.w - w, ty, w, rect.h));
+    }
 }
 
 impl<H: Host> Focusable<H> for Header<'_> {
@@ -291,6 +302,14 @@ impl BandPart<'_> {
 /// is the same number; the library cannot name the registry).
 pub const BAND_BASE: u32 = 0x4000_0000;
 
+/// The header's two pointer targets: the breadcrumb that goes back, and the Home word. They live
+/// in the same reserved range as the band and the alert so a screen's own row elements, which all
+/// sit far below, cannot collide with them. `screens::registry::HEADER_CRUMB`/`HEADER_HOME` are the
+/// same numbers (the registry is the layer that receives the click).
+pub const CRUMB_ELEM: u32 = 0x4000_0200;
+/// See [`CRUMB_ELEM`].
+pub const HOME_ELEM: u32 = 0x4000_0201;
+
 impl<H: Host> Focusable<H> for BandPart<'_>
 where
     H::Elem: IndexElem,
@@ -396,6 +415,9 @@ pub struct TableScreen<'a> {
     pub table: TablePart<'a>,
     /// The action band (rules 2, 4, 6, 7), `None` for a screen whose every row is a door.
     pub band: Option<BandPart<'a>>,
+    /// Whether the header offers the Home word in its action band. Opt-in per screen: only the
+    /// ones a person reaches deep inside the app ask for the shortcut back to the top.
+    pub home: bool,
 }
 
 impl<'a> TableScreen<'a> {
@@ -413,7 +435,15 @@ impl<'a> TableScreen<'a> {
                 has_band: false,
             },
             band: None,
+            home: false,
         }
+    }
+
+    /// Offer the Home word in the header's action band (pointer only: the keyboard already leaves
+    /// by BACK and LEFT, so the control never enters the focus model).
+    pub fn with_home(mut self) -> Self {
+        self.home = true;
+        self
     }
 
     /// The table in a frame of the screen's own (first run's `content`, not the sectioned inset).
@@ -505,7 +535,43 @@ where
         composed_prepare(self, b, cx)
     }
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, H>, _rect: Rect) {
-        composed_draw(self, f)
+        composed_draw(self, f);
+        // The header's two targets are POINTER ONLY (`Hover::Ignore`): the keyboard already leaves
+        // a screen with BACK and LEFT, and a focus stop up here would put an element in the engine's
+        // model that no arrow can reach. Their rectangles come from the same functions the drawing
+        // uses, so the clickable box is the drawn one.
+        let p = f.painter;
+        let entry = self.table.entry;
+        if let Some(back) = self.header.crumb {
+            let rect = self.header.layout.crumb_rect(back, f.measure);
+            f.stop(
+                p,
+                Stop {
+                    key: FocusKey { entry, elem: H::Elem::of_index(CRUMB_ELEM) },
+                    rect,
+                    rest_rect: rect,
+                    clip: rect,
+                    hover: Hover::Ignore,
+                    activate: Activate::Direct,
+                },
+            );
+        }
+        if self.home {
+            let label = crate::i18n::msg::browse_chrome_home();
+            let rect = self.header.layout.home_rect(label, f.measure);
+            self.header.paint_home(p, label, rect, f.measure);
+            f.stop(
+                p,
+                Stop {
+                    key: FocusKey { entry, elem: H::Elem::of_index(HOME_ELEM) },
+                    rect,
+                    rest_rect: rect,
+                    clip: rect,
+                    hover: Hover::Ignore,
+                    activate: Activate::Direct,
+                },
+            );
+        }
     }
 }
 
@@ -637,6 +703,16 @@ where
 pub struct DocumentScreen<'a> {
     pub header: Header<'a>,
     pub doc: DocumentPart<'a>,
+    /// See [`TableScreen::home`]: opt-in, pointer only.
+    pub home: bool,
+}
+
+impl<'a> DocumentScreen<'a> {
+    /// Offer the Home word in the header's action band (pointer only).
+    pub fn with_home(mut self) -> Self {
+        self.home = true;
+        self
+    }
 }
 
 impl<'a> DocumentScreen<'a> {
@@ -652,6 +728,7 @@ impl<'a> DocumentScreen<'a> {
                 group,
                 entry,
             },
+            home: false,
         }
     }
 
@@ -714,7 +791,40 @@ where
         composed_prepare(self, b, cx)
     }
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, H>, _rect: Rect) {
-        composed_draw(self, f)
+        composed_draw(self, f);
+        // Same two pointer targets as `TableScreen`, for the same reason (see there).
+        let p = f.painter;
+        let entry = self.doc.entry;
+        if let Some(back) = self.header.crumb {
+            let rect = self.header.layout.crumb_rect(back, f.measure);
+            f.stop(
+                p,
+                Stop {
+                    key: FocusKey { entry, elem: H::Elem::of_index(CRUMB_ELEM) },
+                    rect,
+                    rest_rect: rect,
+                    clip: rect,
+                    hover: Hover::Ignore,
+                    activate: Activate::Direct,
+                },
+            );
+        }
+        if self.home {
+            let label = crate::i18n::msg::browse_chrome_home();
+            let rect = self.header.layout.home_rect(label, f.measure);
+            self.header.paint_home(p, label, rect, f.measure);
+            f.stop(
+                p,
+                Stop {
+                    key: FocusKey { entry, elem: H::Elem::of_index(HOME_ELEM) },
+                    rect,
+                    rest_rect: rect,
+                    clip: rect,
+                    hover: Hover::Ignore,
+                    activate: Activate::Direct,
+                },
+            );
+        }
     }
 }
 

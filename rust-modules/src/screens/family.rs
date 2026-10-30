@@ -81,9 +81,6 @@ pub(crate) enum SettingsPage {
     /// The Jellyfin flavor's server picker (list of configured servers, OK switches).
     #[cfg(feature = "jellyfin")]
     Servers,
-    /// The Jellyfin flavor's self-contained privacy statement.
-    #[cfg(feature = "jellyfin")]
-    LanPrivacy,
 }
 
 impl ScreenArg for SettingsPage {
@@ -103,8 +100,6 @@ impl ScreenArg for SettingsPage {
             SettingsPage::Document(_) => 105,
             #[cfg(feature = "jellyfin")]
             SettingsPage::Servers => 112,
-            #[cfg(feature = "jellyfin")]
-            SettingsPage::LanPrivacy => 113,
         })
     }
     fn title(&self) -> Option<&str> {
@@ -141,7 +136,7 @@ impl LogicalState for SettingsPage {
             | SettingsPage::Legal
             | SettingsPage::About => 0,
             #[cfg(feature = "jellyfin")]
-            SettingsPage::Servers | SettingsPage::LanPrivacy => 0,
+            SettingsPage::Servers => 0,
             SettingsPage::Document(i) => *i,
         });
     }
@@ -157,8 +152,6 @@ impl LogicalState for SettingsPage {
             SettingsPage::About => "about",
             #[cfg(feature = "jellyfin")]
             SettingsPage::Servers => "servers",
-            #[cfg(feature = "jellyfin")]
-            SettingsPage::LanPrivacy => "lan-privacy",
             SettingsPage::Document(_) => "document",
         });
         if let SettingsPage::Document(i) = self {
@@ -323,8 +316,6 @@ mod tests {
             SettingsPage::Document(0),
             #[cfg(feature = "jellyfin")]
             SettingsPage::Servers,
-            #[cfg(feature = "jellyfin")]
-            SettingsPage::LanPrivacy,
         ];
         let mut ids: Vec<u32> = pages.iter().map(|p| crate::ui::screen::ScreenArg::id(p).0).collect();
         ids.sort_unstable();

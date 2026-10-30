@@ -924,9 +924,16 @@ pub(crate) fn enter_home_from_onboard(pages: &mut crate::ui::dispatch::Dispatche
     // re-runs off `browse`'s section generation — which `apply_pins` (the editor's one commit
     // write) has already bumped. Nothing to kick here; Home builds from the answer on its first
     // frame.
-    //
-    // `Root(Home)` IS the reset: it retires every entry, the onboarding gate included, and mints
-    // Home as the sole survivor.
+    go_home(pages);
+}
+
+/// The header's Home word: the same reset the end of onboarding performs, now reachable from any
+/// screen that offers the shortcut.
+///
+/// `Root(Home)` IS the reset: it retires every entry, the surface the click came from included,
+/// and mints Home as the sole survivor. It is also why this cannot be a screen's own `Fx::Nav`:
+/// the stack that has to go is the host's, not the page's.
+pub(crate) fn go_home(pages: &mut crate::ui::dispatch::Dispatcher<super::bridge::AppHost>) {
     super::bridge::nav_root_if_unsettled(pages, AppArg::Home);
 }
 

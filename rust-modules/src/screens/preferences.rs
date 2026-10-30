@@ -131,7 +131,7 @@ impl PreferencesPage {
             None => (crate::i18n::msg::settings_title(), self.kind_title(), &self.table),
         };
         TableScreen::new(Header::new(RouteLayout::screen(), Some(crumb), title, &self.copy),
-            table, GroupId(0), self.entry)
+            table, GroupId(0), self.entry).with_home()
     }
     /// Draw one level through `p` and hand back the focus stops it registered.
     fn draw_level(&self, f: &DrawFrame<'_, '_, InnerHost>, level: Option<Field>, p: Painter) -> Vec<crate::ui::screen::Stop<u32>> {

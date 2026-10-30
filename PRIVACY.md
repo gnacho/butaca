@@ -56,7 +56,7 @@ by your server, which is also what carries it to another device.
 
 ## Signing out, deleting, uninstalling
 
-**Disconnect**, the last row of the Servers section in Settings, removes the active server's entry:
+**Disconnect**, the last row of the Servers page in Settings, removes the active server's entry:
 its address, its user, its token and the device identifier it was given. If another server is left,
 the app signs in to that one. If none is left, it erases the file and returns to the sign-in form.
 
@@ -71,8 +71,10 @@ No crash reports, no analytics, no usage counters, no identifiers of any kind, a
 you watch beyond the server the app points at. The reporting subsystem the earlier Plex client
 carried was removed from this tree, so there is no code here that could send such a thing anywhere.
 
-Settings → Privacy shows the same promise in one paragraph. If the two ever disagree, this page is
-the one that is correct, and that disagreement is a bug worth reporting.
+There is no switch to turn this off, because there is no reporting code left to switch off: the
+subsystem is not in the tree, not merely disabled. If this page and the app ever disagree about what
+leaves the television, this page is the one that counts, and the disagreement is a bug worth
+reporting.
 
 ## If you build the Plex flavour
 
