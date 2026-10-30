@@ -353,6 +353,32 @@ unsafe fn prepare_window(app: &mut App, fr: &mut Frame) {
             }
         }
     }
+    // ---- the OLED idle screen (issue #66) -------------------------------------------
+    //
+    // Decided before the gate, so the clock's once-a-minute relocation can invalidate the
+    // very frame it moves on, and the close can leave the loop cleanly. Active playback
+    // (`fr.player` + presenting + not paused) is never idle; a paused frame and a menu get
+    // the owner's 3-minute and 2-minute thresholds respectively.
+    {
+        let paused = crate::app::lifecycle::paused();
+        let playing = fr.player && !paused && crate::player::is_playing(&app.player.session);
+        match crate::ui::idle_screen::stage(fr.now, app.last_input, playing, paused) {
+            crate::ui::idle_screen::Stage::Close => {
+                // Set and fall through: the rest of this frame still owes the compositor its
+                // per-frame `opaque_route` and the shutdown path its clean exit.
+                app.running = false;
+            }
+            crate::ui::idle_screen::Stage::Clock { pos } => {
+                if app.idle_pos != Some(pos) {
+                    app.idle_pos = Some(pos);
+                    crate::ui::idle::invalidate();
+                }
+            }
+            crate::ui::idle_screen::Stage::None => {
+                app.idle_pos = None;
+            }
+        }
+    }
     // ---- whole-frame present gate (`ui::idle`) --------------------------------------
     // A screen with nothing moving on it does not need to be re-sent to the panel. This
     // skips `glViewport`…`SDL_GL_SwapWindow` WHOLESALE — it is not dirty-RECTANGLE
@@ -2445,6 +2471,12 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                     crate::lab::draw(app.diagnostics.frame_if_shown());
                     #[cfg(feature = "threadcheck")]
                     crate::ui::runtime_warning::draw(app.boot_initial.is_some());
+                    // The OLED idle screen, last of all: true black over the page, the HUD and a
+                    // frozen paused frame, with the dim clock. Its draw reads the wall clock, so it
+                    // is reached only on a frame `prepare_window` selected to present (it did).
+                    if let Some(pos) = app.idle_pos {
+                        crate::ui::idle_screen::draw(crate::ui::Painter::root(), pos);
+                    }
                 });
             });
     (vx, vy, vw, vh)
@@ -2933,6 +2965,7 @@ mod lifecycle_regression_tests {
         crate::player::SHARED.reset_session();
         let app = App {
             last_input: Default::default(),
+            idle_pos: None,
             loop_t: Default::default(),
             iters_ct: Default::default(),
             loop_shown: Default::default(),

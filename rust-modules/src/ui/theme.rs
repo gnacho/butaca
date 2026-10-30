@@ -453,6 +453,15 @@ pub const SURFACE_APP: [f32; 4] = NEUTRAL_500;
 /// Same stop as [`SURFACE_APP`] so the rising page and the cover are one surface. Different role:
 /// this hides the plane. It is not atmosphere, so [`scrim`] is the wrong token.
 pub const PLANE_COVER: [f32; 4] = SURFACE_APP;
+/// **The OLED idle screen's field** (issue #66): TRUE black, darker than any surface. Every static
+/// surface in this app rests at [`SURFACE_APP`] or above, and an OLED left on a settled menu for
+/// hours burns that grey into the panel; the idle screen therefore covers it with zero-emission
+/// black rather than a darker grey. It is the only role that resolves to the raw `BLACK` stop.
+pub const IDLE_OLED_BLACK: [f32; 4] = BLACK;
+/// **The idle screen's clock ink** (issue #66): a dim white, bright enough to read at the couch but
+/// far below the caption ladder, so the one glyph on an otherwise black OLED contributes the
+/// minimum light.
+pub const IDLE_CLOCK_INK: [f32; 4] = with_a(WHITE, 0.16);
 /// GL clear color — 3-float (`frame_clear` takes r,g,b, no alpha). The app's DEFAULT base, and
 /// [`SURFACE_APP`] itself rather than a second copy of its code: browsing screens clear to the
 /// Apple-TV gray, which is what makes a route change read as a seamless dip. Home overdraws it

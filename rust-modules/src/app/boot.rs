@@ -1270,6 +1270,7 @@ pub(crate) unsafe fn construct(
     if !controlled { crate::lab::start_control(); }
     let mut app = App {
         last_input,
+        idle_pos: None,
         loop_t,
         iters_ct,
         loop_shown,

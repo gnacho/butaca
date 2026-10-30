@@ -228,6 +228,10 @@ pub(crate) struct Adapters {
 /// Nothing here becomes `pub` — only as wide as the crate.
 pub(crate) struct App {
     last_input: u32,
+    /// The idle screen's clock position while it is up (`None` = not idle). Tracked so the clock's
+    /// once-a-minute relocation invalidates the present gate exactly when it moves, instead of
+    /// every frame (which would pin 60 fps on a screen that exists to save the panel).
+    idle_pos: Option<usize>,
     loop_t: u32,
     iters_ct: i32,
     loop_shown: i32,
