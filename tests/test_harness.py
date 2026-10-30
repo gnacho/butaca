@@ -5112,59 +5112,119 @@ class DepGates(unittest.TestCase):
 
     ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
+    @classmethod
+    def setUpClass(cls):
+        """Build ONE disposable mirror of the files `ci/check-deps.sh` reads, and run every
+        self-test mutation against it. A planted violation or a `_mutate` scratch therefore never
+        touches a tracked source: the real tree stays byte-identical whatever happens, and an
+        aborted run (Ctrl-C / kill, which skips the `finally` restores) corrupts only this mirror,
+        which `addClassCleanup` discards."""
+        cls._mirror = tempfile.mkdtemp(prefix="check_deps_mirror_")
+        cls.addClassCleanup(shutil.rmtree, cls._mirror, ignore_errors=True)
+        mirror_rust = os.path.join(cls._mirror, "rust-modules")
+        os.makedirs(mirror_rust, exist_ok=True)
+        shutil.copytree(os.path.join(cls.ROOT, "rust-modules", "src"),
+                        os.path.join(mirror_rust, "src"))
+        for rel in ("Cargo.toml", "build.rs"):
+            shutil.copy(os.path.join(cls.ROOT, "rust-modules", rel), os.path.join(mirror_rust, rel))
+        cargo_cfg = os.path.join(cls.ROOT, "rust-modules", ".cargo")
+        if os.path.isdir(cargo_cfg):
+            shutil.copytree(cargo_cfg, os.path.join(mirror_rust, ".cargo"))
+        shutil.copy(os.path.join(cls.ROOT, "Makefile"), cls._mirror)
+        mirror_ci = os.path.join(cls._mirror, "ci")
+        os.makedirs(mirror_ci, exist_ok=True)
+        shutil.copytree(os.path.join(cls.ROOT, "ci", "allow"), os.path.join(mirror_ci, "allow"))
+        shutil.copy(os.path.join(cls.ROOT, "ci", "rust_test_modules.py"), mirror_ci)
+
+    def _src(self, relpath):
+        """The mirror path for a `rust-modules/src`-relative file."""
+        return os.path.join(self._mirror, "rust-modules", "src", relpath)
+
+    def _check_deps(self):
+        """Run ci/check-deps.sh against the mirror (see `PLX_CHECK_ROOT`)."""
+        env = dict(os.environ)
+        env["PLX_CHECK_ROOT"] = self._mirror
+        return subprocess.run([os.path.join(self.ROOT, "ci", "check-deps.sh")],
+                              capture_output=True, text=True, env=env)
+
     def test_check_deps_is_green(self):
+        # The REAL tree, not the mirror: this is the assertion that the committed sources are green.
         r = subprocess.run([os.path.join(self.ROOT, "ci", "check-deps.sh")], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
+    def test_aborted_self_test_leaves_the_tracked_tree_clean(self):
+        """The mutation lands on the mirror, never on a tracked source, so a hard-killed run
+        (Ctrl-C / kill, which skips the finally restores) cannot corrupt the tree. Simulate that:
+        rewrite a tracked file's MIRROR copy in a subprocess that dies with os._exit (no finally),
+        then prove the real file is byte-identical to before."""
+        real = os.path.join(self.ROOT, "rust-modules", "src", "browse", "mod.rs")
+        with open(real, encoding="utf-8") as f:
+            before = f.read()
+        mirror_target = self._src(os.path.join("browse", "mod.rs"))
+        code = (
+            "import os, sys\n"
+            "p = sys.argv[1]\n"
+            "with open(p, encoding='utf-8') as f:\n"
+            "    s = f.read()\n"
+            "with open(p, 'w', encoding='utf-8') as f:\n"
+            "    f.write(s.replace('    pub(crate) fn cur(&self) -> usize {',"
+            " '    pub fn cur(&self) -> usize {', 1))\n"
+            "os._exit(1)\n"
+        )
+        subprocess.run([sys.executable, "-c", code, mirror_target], check=False)
+        with open(real, encoding="utf-8") as f:
+            self.assertEqual(f.read(), before)
+        # Restore the MIRROR copy (the parent may) so later tests in the class see a pristine tree.
+        with open(mirror_target, "w", encoding="utf-8") as f:
+            f.write(before)
+
     def _plant(self, name, content):
         """Write `content` to a temp file under rust-modules/src that no ci/allow/*.txt names,
-        run ci/check-deps.sh against the real tree with it present, and guarantee removal even if
+        run ci/check-deps.sh against the mirror with it present, and guarantee removal even if
         the assertion that follows fails. An orphan .rs file with no `mod` statement pointing at
         it is invisible to cargo (nothing declares it part of the crate) but not to `find … -name
         '*.rs'`, which is all these gates scan with — so this is the cheapest way to prove a gate
         catches a shape without touching a real, permanent source file."""
-        target = os.path.join(self.ROOT, "rust-modules", "src", name)
-        self.assertFalse(os.path.exists(target), f"stale self-test artifact at {target} — remove it by hand")
+        target = self._src(name)
         try:
             with open(target, "w", encoding="utf-8") as f:
                 f.write(content)
-            return subprocess.run([os.path.join(self.ROOT, "ci", "check-deps.sh")],
-                                   capture_output=True, text=True)
+            return self._check_deps()
         finally:
             if os.path.exists(target):
                 os.remove(target)
 
     def _mutate(self, relpath, needle, replacement):
-        """Temporarily replace ONE occurrence of `needle` with `replacement` in a REAL tracked
-        file, run ci/check-deps.sh, then unconditionally restore the original bytes — even if the
-        assertion that follows fails. Unlike `_plant`'s orphan-file trick, `mutators-visibility`
-        greps a DECLARATION LINE inside one of the seven specific legacy-store files by path, not
-        a `find … -name '*.rs'` sweep, so an orphan file elsewhere in the tree is invisible to it
-        by design; a scratch mutation of the real file's own content is what "plants a
-        pub(crate) fn set_cur in a temp copy" (the D3 brief's own words) has to mean here."""
-        target = os.path.join(self.ROOT, "rust-modules", "src", relpath)
+        """Temporarily replace ONE occurrence of `needle` with `replacement` in a COPY of a tracked
+        file, run ci/check-deps.sh against the mirror, then unconditionally restore the copy — even
+        if the assertion that follows fails. Unlike `_plant`'s orphan-file trick,
+        `mutators-visibility` greps a DECLARATION LINE inside one of the seven specific
+        legacy-store files by path, not a `find … -name '*.rs'` sweep, so an orphan file elsewhere
+        in the tree is invisible to it by design; a scratch mutation of the file's own content is
+        what "plants a pub(crate) fn set_cur in a temp copy" (the D3 brief's own words) has to mean
+        here. The mutation lands on the mirror, never on the tracked file, so a killed run cannot
+        corrupt the tree."""
+        target = self._src(relpath)
         with open(target, encoding="utf-8") as f:
             original = f.read()
         self.assertEqual(original.count(needle), 1, f"{needle!r} not found exactly once in {relpath}")
         try:
             with open(target, "w", encoding="utf-8") as f:
                 f.write(original.replace(needle, replacement, 1))
-            return subprocess.run([os.path.join(self.ROOT, "ci", "check-deps.sh")],
-                                   capture_output=True, text=True)
+            return self._check_deps()
         finally:
             with open(target, "w", encoding="utf-8") as f:
                 f.write(original)
 
     def _prepend(self, relpath, content):
-        """Temporarily prepend a valid module-level fixture to a scanned Rust file."""
-        target = os.path.join(self.ROOT, "rust-modules", "src", relpath)
+        """Temporarily prepend a valid module-level fixture to a copy of a scanned Rust file."""
+        target = self._src(relpath)
         with open(target, encoding="utf-8") as f:
             original = f.read()
         try:
             with open(target, "w", encoding="utf-8") as f:
                 f.write(content + original)
-            return subprocess.run([os.path.join(self.ROOT, "ci", "check-deps.sh")],
-                                  capture_output=True, text=True)
+            return self._check_deps()
         finally:
             with open(target, "w", encoding="utf-8") as f:
                 f.write(original)
@@ -5296,17 +5356,12 @@ impl BrowseScopeFixture {
         self.assertIn("ok — browse-owner", r.stdout)
 
     def test_browse_owner_gate_fails_closed_when_a_scanner_input_is_missing(self):
-        target = os.path.join(self.ROOT, "rust-modules", "src", "browse", "view.rs")
+        target = self._src(os.path.join("browse", "view.rs"))
         hidden = target + ".check-deps-selftest"
         self.assertTrue(os.path.exists(target), f"missing scanner fixture {target}")
-        self.assertFalse(os.path.exists(hidden), f"stale self-test artifact at {hidden}")
         try:
             os.replace(target, hidden)
-            r = subprocess.run(
-                [os.path.join(self.ROOT, "ci", "check-deps.sh")],
-                capture_output=True,
-                text=True,
-            )
+            r = self._check_deps()
         finally:
             if os.path.exists(hidden):
                 os.replace(hidden, target)
@@ -5371,7 +5426,7 @@ impl ViewStateOwnerGateFixture {
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def _module_path_fixture(self, production_reference):
-        source = os.path.join(self.ROOT, "rust-modules", "src")
+        source = os.path.join(self._mirror, "rust-modules", "src")
         with tempfile.TemporaryDirectory(prefix="_check_deps_cfg_", dir=source) as directory:
             declaration = '#[cfg(test)]\n#[allow(dead_code)]\n#[path = "support.rs"]\npub(crate) mod checks;\n'
             if production_reference:
@@ -5381,9 +5436,8 @@ impl ViewStateOwnerGateFixture {
             target = os.path.join(directory, "support.rs")
             with open(target, "w", encoding="utf-8") as output:
                 output.write('pub fn helper() { std::thread::spawn(|| {}); let _ = 0.5f32.powf(2.4); }\n')
-            result = subprocess.run([os.path.join(self.ROOT, "ci", "check-deps.sh")],
-                                    capture_output=True, text=True)
-            return result, os.path.relpath(target, self.ROOT)
+            result = self._check_deps()
+            return result, os.path.relpath(target, self._mirror)
 
     def test_cfg_test_path_modules_are_excluded_from_production_gates(self):
         result, target = self._module_path_fixture(False)
