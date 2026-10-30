@@ -80,27 +80,15 @@ impl Page {
 static PRIVACY: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| [
     crate::i18n::msg::settings_legal_privacy_responsible(),
     crate::i18n::msg::settings_legal_privacy_responsible_body(),
-    crate::i18n::msg::settings_legal_privacy_plex(),
-    crate::i18n::msg::settings_legal_privacy_plex_body(),
-    crate::i18n::msg::settings_legal_privacy_plex_link(),
     crate::i18n::msg::settings_legal_privacy_servers(),
     crate::i18n::msg::settings_legal_privacy_servers_body(),
     crate::i18n::msg::settings_legal_privacy_local(),
     crate::i18n::msg::settings_legal_privacy_local_body(),
     crate::i18n::msg::settings_legal_privacy_plaintext_body(),
-    crate::i18n::msg::settings_legal_privacy_crashes(),
-    crate::i18n::msg::settings_legal_privacy_crashes_body(),
-    crate::i18n::msg::settings_legal_privacy_signin_body(),
-    crate::i18n::msg::settings_legal_privacy_analytics(),
-    crate::i18n::msg::settings_legal_privacy_analytics_body(),
-    crate::i18n::msg::settings_legal_privacy_excluded(),
-    crate::i18n::msg::settings_legal_privacy_excluded_body(),
+    crate::i18n::msg::settings_legal_privacy_noreports(),
+    crate::i18n::msg::settings_legal_privacy_noreports_body(),
     crate::i18n::msg::settings_legal_privacy_retention(),
     crate::i18n::msg::settings_legal_privacy_retention_body(),
-    crate::i18n::msg::settings_legal_privacy_choices(),
-    crate::i18n::msg::settings_legal_privacy_choices_body(),
-    crate::i18n::msg::settings_legal_privacy_processing(),
-    crate::i18n::msg::settings_legal_privacy_processing_body(),
     crate::i18n::msg::settings_legal_privacy_uninstall(),
     crate::i18n::msg::settings_legal_privacy_uninstall_body(),
     crate::i18n::msg::settings_legal_privacy_contact(),
@@ -552,19 +540,11 @@ mod tests {
     /// wording: each names a fact about this application that the document was silently wrong or
     /// silent about, and each was RED when it was written.
     ///
-    /// * Nothing in the persisted session carries a playhead: `session.rs` has no such field, and
-    ///   position is read from and reported to the server. **Do not cite `coldstart.rs` as the
-    ///   evidence** — what it retired is `lastplace.json`, the last-PAGE/route bookmark (which
-    ///   Detail or Library screen a cold boot reopened), which is a different artefact that was
-    ///   conflated with a playhead when this test was written.
-    /// * `session.rs` persists `recent_searches` — the exact search terms, per Home profile — plus
-    ///   per-server tokens and server addresses. None were listed.
-    /// * There are TWO identifiers and they never travel together: `install_id` goes to PostHog
-    ///   only (`telemetry/sender.rs`) and `errors_id` to Sentry only, as `user.id`
-    ///   (`telemetry/sentry.rs::attach_user`). The policy used to promise that a crash report
-    ///   "carries no installation identifier" and "cannot be linked to any other report"; both
-    ///   became false the day the crash-report id was added, and the assertion below is what
-    ///   would have caught a policy that still said so.
+    /// * Nothing in the persisted session carries a playhead: the server holds playback position.
+    /// * This fork ships no telemetry: there is no Sentry, no PostHog, no crash reporting, no
+    ///   product analytics and no identifiers, and its only traffic is to the Jellyfin server the
+    ///   user configured. The policy must say so, and must never mention Sentry, PostHog or the
+    ///   identifiers the removed reporting carried.
     /// * The sign-in is stored OUTSIDE the app directory on purpose (`paths.rs`), so it survives a
     ///   reinstall. "Uninstall removes everything" would have been false.
     ///
@@ -578,36 +558,26 @@ mod tests {
             "nothing in the session schema stores a playhead; the server holds position"
         );
         for claim in [
-            "recent searches",
-            "Analytics ID",
-            "Crash report ID",
-            "RETENTION",
-            "WHERE DATA IS PROCESSED",
+            "Jellyfin",
+            "access token",
+            "device identifier",
+            "NO REPORTS",
             "UNINSTALLING",
         ] {
             assert!(p.contains(claim), "the policy never mentions {claim:?}");
         }
         for stale in [
-            "carries no installation identifier",
-            "cannot be linked",
-            "cannot be found or deleted",
-            // consent and both identifiers END with the sign-in since 2026-09-04
-            "NOT removed by signing out",
+            "Sentry",
+            "PostHog",
+            "Analytics ID",
+            "Crash report ID",
+            "optional report",
         ] {
             assert!(
                 !p.contains(stale),
-                "the policy still claims crash reports are anonymous: {stale:?}"
+                "the policy still mentions telemetry this fork removed: {stale:?}"
             );
         }
-        // The two identifier names the Settings rows use are the names the policy uses.
-        assert!(p.contains("Settings shows it as your Crash report ID"));
-        assert!(p.contains("Settings shows that identifier as your Analytics ID"));
-        // …and the policy says what `auth::forget_account` does to them.
-        assert!(p.contains("signing out removes them with it"));
-        // Every profile switched to on this television keeps its own offline access: a server
-        // token and, for a PIN-protected profile, a one-way check of the PIN — never the PIN.
-        assert!(p.contains("server access token"), "the policy never mentions per-profile offline access");
-        assert!(p.contains("PIN"), "the policy never mentions the PIN check");
     }
 
     #[test]
@@ -651,12 +621,14 @@ mod tests {
         );
     }
 
+    /// The privacy notice draws the boundary it actually has: requests go to the Jellyfin server
+    /// the user configured and to whoever operates it, and the developer receives none of them.
     #[test]
-    fn plex_boundary_is_explicit() {
+    fn server_boundary_is_explicit() {
         assert!(PRIVACY.contains(
-            "Plex processes information received by those services under Plex’s own Privacy Policy"
+            "Those requests are handled by that server and by whoever operates it"
         ));
-        assert!(PRIVACY.contains("https://www.plex.tv/about/privacy-legal/"));
+        assert!(PRIVACY.contains("The developer of Butaca receives none of them"));
         assert!(!TRADEMARKS.contains("used under licence"));
     }
 

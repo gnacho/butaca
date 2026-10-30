@@ -412,27 +412,15 @@
     "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.responsible"
   },
   "settings.legal.privacy.responsible_body": {
-    "value": "Gleb Linnik is responsible only for data Butaca stores locally and for optional reports you choose to share.",
+    "value": "Gleb Linnik is responsible only for the data Butaca stores locally on this television.",
     "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.responsible_body"
-  },
-  "settings.legal.privacy.plex": {
-    "value": "PLEX SERVICES",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.plex"
-  },
-  "settings.legal.privacy.plex_body": {
-    "value": "Butaca is an independent client for Plex. To sign you in, discover servers and provide Plex account features, the app communicates directly with Plex services. Plex processes information received by those services under Plex’s own Privacy Policy. Butaca’s developer does not receive that information.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.plex_body"
-  },
-  "settings.legal.privacy.plex_link": {
-    "value": "Plex Privacy Policy: https://www.plex.tv/about/privacy-legal/",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.plex_link"
   },
   "settings.legal.privacy.servers": {
     "value": "PLEX MEDIA SERVERS",
     "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.servers"
   },
   "settings.legal.privacy.servers_body": {
-    "value": "To browse and play media, update watch progress and use server features, Butaca communicates directly with the Plex Media Servers you select. Those requests are handled by the selected server and its operator. Butaca’s developer does not receive them.",
+    "value": "To sign you in, browse and play media, report progress and use server features, Butaca talks directly to the Jellyfin server you configure, and to nothing else. Those requests are handled by that server and by whoever operates it. The developer of Butaca receives none of them.",
     "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.servers_body"
   },
   "settings.legal.privacy.local": {
@@ -440,63 +428,31 @@
     "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.local"
   },
   "settings.legal.privacy.local_body": {
-    "value": "Butaca stores your Plex account token and a separate token for each server you use. For every profile you have switched to on this television, it also keeps that profile's own server access token(s) and, for a PIN-protected profile, a one-way check computed from that PIN rather than the PIN itself. It also keeps the addresses and identifiers of those servers, the profile names and pictures on your account (pictures and other downloaded artwork are cached as bounded files for reuse across restarts), your Home library choices, your recent searches, your playback quality, Direct Play and app language preferences, and local technical logs: a small rotating event log and a bounded storage status snapshot. It also stores your answers to the two optional-reporting questions, the random Crash report ID if you turned crash reports on, the random Analytics ID if you turned product analytics on, any report waiting to be sent, and a marker recording how much of the crash log has already been read. It keeps no bookmark of its own for where you stopped watching: playback position is held by your Plex Media Server. Delete all local data in Settings signs out and removes Butaca data from this television.",
+    "value": "Butaca keeps, for each server you sign in to, an access token, the address of that server and a device identifier the server uses to recognise this television. It also keeps your playback preferences, the language of the interface, and local technical logs: a small rotating event log, an append-only crash log and a stderr log. Your password is never stored: it is used once to obtain the token and written nowhere.",
     "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.local_body"
   },
-  "settings.legal.privacy.crashes": {
-    "value": "OPTIONAL CRASH REPORTS",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.crashes"
+  "settings.legal.privacy.noreports": {
+    "value": "NO REPORTS, NO ANALYTICS",
+    "description": "Section heading in the privacy notice: this build sends no crash reports or analytics."
   },
-  "settings.legal.privacy.crashes_body": {
-    "value": "If enabled, technical crash details are sent to Sentry in Germany. They can include the signal, code addresses, thread information and device compatibility details. Each report carries a random Crash report ID created on this television when you turned crash reports on, so that repeated crashes under one Crash report ID are counted once rather than once each. It is not derived from your Plex account, your television or anything about you, and it is never sent with product analytics. Settings shows it as your Crash report ID while crash reports are on.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.crashes_body"
-  },
-  "settings.legal.privacy.analytics": {
-    "value": "OPTIONAL PRODUCT ANALYTICS",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.analytics"
-  },
-  "settings.legal.privacy.analytics_body": {
-    "value": "If enabled, screen and feature events and broad sign-in and playback outcomes are sent to PostHog in Germany with a random Analytics ID created when you turned product analytics on. Settings shows that identifier as your Analytics ID while product analytics is on.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.analytics_body"
-  },
-  "settings.legal.privacy.excluded": {
-    "value": "NEVER INCLUDED",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.excluded"
-  },
-  "settings.legal.privacy.excluded_body": {
-    "value": "Titles, Plex accounts, searches, server names or addresses, tokens, subtitle text and exact viewing history are not included in either optional report type. Both choices are independent and can be changed at any time in Settings.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.excluded_body"
+  "settings.legal.privacy.noreports_body": {
+    "value": "This build sends no crash reports, no analytics and no telemetry anywhere. There is no account with the developer, no identifier attached to this television, and no question to answer on first run, because there is nothing to opt into. The only traffic it generates is to the server you configured.",
+    "description": "Body of the no-reports section of the privacy notice: this build sends no telemetry and its only traffic goes to the server the user configured."
   },
   "settings.legal.privacy.retention": {
     "value": "RETENTION",
     "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.retention"
   },
   "settings.legal.privacy.retention_body": {
-    "value": "Different things here have different lifetimes, so this is stated for each. Your sign-in, the servers registered with it and their tokens, every profile's own cached server access token(s) and PIN check, cached profile pictures and other downloaded artwork, and your answers about unencrypted connections, are removed when you sign out. Your answers to the two optional-reporting questions, and the Crash report ID and Analytics ID if they exist, belong to that sign-in: signing out removes them with it, and whoever signs in next is asked afresh. Switching between the profiles of one Plex account is not a sign-out and keeps all of it, including the server access token(s) and PIN check cached for a profile you are not currently using, so that profile can be switched to again with no internet. A report waiting to be sent is deleted once it is sent, and a queued report of a category you switch off, or that you sign out of, is deleted at that moment; one report that the sender had already picked up at that moment may still be sent, and no further report is picked up after it. The event log rotates continuously and the storage snapshot is replaced when its bounded status changes. Delete all local data removes all of it. A report that has already been sent is held by the service that received it, under that service’s own retention schedule; write to the contact below to ask what those periods currently are. The app language preference belongs to this television and is kept when you sign out; Delete all local data resets it.",
+    "value": "Your sign-in, the servers registered with it and their tokens, and the device identifier are removed when you sign out. The event log and the stderr log are truncated at every launch, and the crash log only grows until Delete all local data removes it.",
     "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.retention_body"
-  },
-  "settings.legal.privacy.choices": {
-    "value": "YOUR CHOICES AND HOW TO ASK",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.choices"
-  },
-  "settings.legal.privacy.choices_body": {
-    "value": "Both optional reports are off until you turn them on, and either can be turned off again at any time in Settings. A one-off sign-in problem report is sent only when you press Send report. Delete all local data removes what Butaca stored on this television; it does not reach anything already sent. To ask what crash reports or product analytics hold for your installation, or to have them deleted, write to the contact below and quote your Crash report ID or Analytics ID from Settings, or the Report ID shown after a one-off report. Each identifier is the only handle its reports carry. Turning a category off deletes its identifier from this television, and so does signing out; reports already sent keep the old one, so copy it down first if you intend to ask for their deletion.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.choices_body"
-  },
-  "settings.legal.privacy.processing": {
-    "value": "WHERE DATA IS PROCESSED",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.processing"
-  },
-  "settings.legal.privacy.processing_body": {
-    "value": "Optional crash reports are processed by Sentry in Germany and optional product analytics by PostHog in Germany. Plex processes what its own services receive under Plex’s Privacy Policy. A Plex Media Server you connect to may be located anywhere and is operated by whoever runs it, not by Butaca’s developer.",
-    "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.processing_body"
   },
   "settings.legal.privacy.uninstall": {
     "value": "UNINSTALLING",
     "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.uninstall"
   },
   "settings.legal.privacy.uninstall_body": {
-    "value": "Removing Butaca removes the application, but webOS gives an application no way to run code as it is removed, so anything kept outside the application’s own directory can survive. Your sign-in is deliberately kept there so that reinstalling does not sign you out. Your optional-reporting answers and their Crash report ID and Analytics ID are kept with that sign-in, so that a decision you have already made is not put to you again after a reinstall. Your app language preference is also kept there. Use Delete all local data BEFORE uninstalling if you want nothing of Butaca left on this television.",
+    "value": "Removing Butaca removes the application, but webOS gives an application no way to run code as it is removed, so anything kept outside the application’s own directory can survive. Your sign-in is deliberately kept there so that reinstalling does not sign you out. Your app language preference is also kept there. Use Delete all local data BEFORE uninstalling if you want nothing of Butaca left on this television.",
     "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.uninstall_body"
   },
   "settings.legal.privacy.contact": {
@@ -896,11 +852,7 @@
   },
   "settings.legal.privacy.plaintext_body": {
     "description": "In-app privacy disclosure, aligned with PRIVACY.md.",
-    "value": "For a server you were asked about, Butaca also keeps whether you allowed an unencrypted connection on your home network, for the Plex account that answered. Only the answer is stored. The permission itself is never stored and ends when a fresh check no longer reaches the same server address, at sign-in or sign-out, at a profile switch unless the new profile reaches that server at the same address, or when the app returns from the background."
-  },
-  "settings.legal.privacy.signin_body": {
-    "description": "In-app privacy disclosure, aligned with PRIVACY.md.",
-    "value": "If signing in fails, the same channel can carry a sign-in problem report: which sign-in step failed (or which fixed kind of failure inside the app stopped it), how the connection answered (an error class with its HTTP status or network error number), rounded try counts and durations, how many codes were shown, and, when a sign-in could not be saved, a storage failure class, which key-service step it stopped at and the key service's own numeric error code, fixed storage-helper failure stages and error codes, storage-candidate errno numbers (never file paths or owners), the app version and when it happened. It never includes your account name, tokens, PIN, sign-in code or network addresses. With crash reports on, it is sent automatically under your Crash report ID, and the sign-in screen shows its Report ID. Otherwise it is sent only if you press Send report on the sign-in screen, once, without any Crash report ID and with a random Report ID that identifies only that one report."
+    "value": "Butaca allows an unencrypted connection only to a literal IP address on your local network, never to a hostname or a remote address."
   },
   "settings.consent.preview.incident": {
     "value": "\n\nSign-in problem report (automatically only when error reporting is on; otherwise only when you press Send report, and then without the crash report identifier):\n",
