@@ -372,17 +372,16 @@ enable it) — verified absent from the binary. `rustc-literal-escaper`, `proc_m
 
 ### 2.6 Native crash capture
 
-**Sentry Native 0.16.6** — Copyright (c) 2019 Sentry and individual contributors. Licence:
-**MIT** (`licenses/MIT.txt`). Its client library is statically linked into `butaca`; the
-out-of-process `sentry-crash` handler is shipped beside it. The handler is built with its HTTP
-transport disabled: it writes a crash envelope for Butaca's consent-aware sender to deliver on
-the next launch. The source is patched for webOS's glibc 2.12 syscall surface and the 32-bit ARM
-APCS frame layout; the pinned source hash and complete patch are in `ci/build-sentry-native.sh` and
-`vendor/sentry-native/webos-arm32.patch`.
+The crash record comes from code carried in this repository, not from a bundled SDK:
+`src/crashtrace.c` installs the handler for the fatal signals, writes the record to the
+television's runtime directory and re-raises the signal so the process still dies with its original
+status, while `src/crashfmt.h` holds the formatting and the maps-line decision that
+`ci/crashfmt-test.c` grades on its own. Licence: **GPL-3.0-or-later**, the same as the rest of
+Butaca. No third-party crash library is linked into `butaca`, and the package ships no crash
+daemon: both left with the telemetry.
 
-**libunwind** (the copy vendored by Sentry Native) — Copyright (c) 2002 Hewlett-Packard Co.
-Licence: **MIT** (`licenses/MIT.txt`). It is statically linked into both the client and crash
-handler and is used to initialise the ARM unwind machinery outside signal context.
+`tools/butaca-stackwalk.c` reads those records offline. It is a development tool and is not part of
+the package.
 
 ---
 
