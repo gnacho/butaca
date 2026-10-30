@@ -47,5 +47,11 @@ pub(super) fn execute(command: PreferenceCmd) {
                 crate::ui::idle::invalidate();
             });
         }
+        PreferenceCmd::LipSync { offset_ms, reply } => {
+            let _ = crate::storage_worker::submit_retained(move || {
+                let _ = reply.send(crate::route::set_lip_sync_offset_ms(offset_ms));
+                crate::ui::idle::invalidate();
+            });
+        }
     }
 }

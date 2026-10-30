@@ -78,6 +78,7 @@ pub(crate) enum PreferenceCmd {
     },
     Quality { quality: crate::plex::session::PlaybackQuality, reply: std::sync::mpsc::Sender<bool> },
     DirectPlay { mode: crate::plex::session::DirectPlayMode, reply: std::sync::mpsc::Sender<bool> },
+    LipSync { offset_ms: i64, reply: std::sync::mpsc::Sender<bool> },
     Language { language: crate::i18n::Preference, reply: std::sync::mpsc::Sender<bool> },
 }
 
@@ -1135,8 +1136,16 @@ pub(crate) enum LoopReq {
     /// Lab builds only, and it changes no route: the tester stays where they were and the toast
     /// says what happened.
     AccountSendDiagnostics,
-    /// Jellyfin flavor only: the Settings root's *Conexión rápida* — arm add-server mode and land
-    /// on the sign-in form; a successful connect appends the new server instead of replacing.
+    /// Jellyfin flavor only: the Settings root's *Conexión rápida* is Quick Connect — arm
+    /// quick-connect mode on the login form and land there; the form shows a server field and a
+    /// *Start Quick Connect* action instead of the password fields, and a success appends the
+    /// new server.
+    #[cfg(feature = "jellyfin")]
+    JfQuickConnect,
+    /// Jellyfin flavor only: the server picker's *Add by password* row — arm add-server mode on
+    /// the password sign-in form and land there; a successful connect appends the new server
+    /// instead of replacing. The password door for adding a second server, kept beside Quick
+    /// Connect so neither alternative is lost.
     #[cfg(feature = "jellyfin")]
     JfAddServer,
     /// Jellyfin flavor only: the server picker committed a row — sign in against that configured

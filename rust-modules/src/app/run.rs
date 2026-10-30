@@ -353,6 +353,32 @@ unsafe fn prepare_window(app: &mut App, fr: &mut Frame) {
             }
         }
     }
+    // ---- the OLED idle screen (issue #66) -------------------------------------------
+    //
+    // Decided before the gate, so the clock's once-a-minute relocation can invalidate the
+    // very frame it moves on, and the close can leave the loop cleanly. Active playback
+    // (`fr.player` + presenting + not paused) is never idle; a paused frame and a menu get
+    // the owner's 3-minute and 2-minute thresholds respectively.
+    {
+        let paused = crate::app::lifecycle::paused();
+        let playing = fr.player && !paused && crate::player::is_playing(&app.player.session);
+        match crate::ui::idle_screen::stage(fr.now, app.last_input, playing, paused) {
+            crate::ui::idle_screen::Stage::Close => {
+                // Set and fall through: the rest of this frame still owes the compositor its
+                // per-frame `opaque_route` and the shutdown path its clean exit.
+                app.running = false;
+            }
+            crate::ui::idle_screen::Stage::Clock { pos } => {
+                if app.idle_pos != Some(pos) {
+                    app.idle_pos = Some(pos);
+                    crate::ui::idle::invalidate();
+                }
+            }
+            crate::ui::idle_screen::Stage::None => {
+                app.idle_pos = None;
+            }
+        }
+    }
     // ---- whole-frame present gate (`ui::idle`) --------------------------------------
     // A screen with nothing moving on it does not need to be re-sent to the panel. This
     // skips `glViewport`…`SDL_GL_SwapWindow` WHOLESALE — it is not dirty-RECTANGLE
@@ -522,10 +548,6 @@ unsafe fn present_and_swap(
         // One increment, then nothing: re-ask EGL for the back buffer's AGE after real
         // presents have happened. The boot reading is 0 by construction. See `egl.rs`.
         crate::egl::late_probe();
-        #[cfg(feature = "devtools")]
-        {
-            app.buffer_flip_count = (app.buffer_flip_count + 1) % 60;
-        }
         app.instr.mark(crate::diag::heartbeat::Phase::Swap); // swap
         // Inside the gate: `frame_end` is the end of a DRAWN frame. Counting frames the
         // idle gate skipped would pace the profiler's once-per-N-frames log off frames
@@ -1946,10 +1968,15 @@ fn loop_requests(app: &mut App) {
             // The Jellyfin flavor's Settings root: *Conexión rápida* arms add-server mode and lands
             // on the sign-in form; the picker and *Desconectar* switch/remove the active server.
             #[cfg(feature = "jellyfin")]
+            crate::screens::registry::LoopReq::JfQuickConnect => {
+                crate::jellyfin::quick_connect::set_add_mode(true);
+                // PUSH, never nav_root: the form opens over Settings, and BACK returns to it.
+                super::bridge::nav_push(&mut app.pages, AppArg::Login);
+            }
+            #[cfg(feature = "jellyfin")]
             crate::screens::registry::LoopReq::JfAddServer => {
                 crate::jellyfin::signin::set_add_mode(true);
-                // PUSH, never nav_root: the form opened over Settings, and BACK must hand the
-                // user back to it - a root here strands them on the form (#56).
+                // PUSH, never nav_root: the form opens over Settings, and BACK returns to it.
                 super::bridge::nav_push(&mut app.pages, AppArg::Login);
             }
             #[cfg(feature = "jellyfin")]
@@ -2442,33 +2469,6 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                         drop(_visible_walk);
                         app.glass.draw_nav_blur();
                         app.glass.draw_dial();
-                        // The on-screen counter, off the player route (chrome over video). It draws
-                        // the last completed `fps=` window — frames actually swapped, not loop
-                        // iterations. It necessarily HOLDS its last painted value on a settled
-                        // screen until the ordinary keepalive buys another present; waking the
-                        // renderer for the diagnostic would falsify the number it is showing.
-                        //
-                        // NOT in a release build (`make RELEASE=1` → --no-default-features). This
-                        // costs the fps scenes nothing: they grade the once/sec heartbeat in the
-                        // EVENT LOG, never the pixels, so `loop_floor`/`fps_floor`/`fps_ceiling`
-                        // are unaffected by whether the digits are painted.
-                        // A supersampled simulator render (`surface::render_scale`) exists to be
-                        // captured, so it leaves the diagnostic digits out of the picture.
-                        #[cfg(feature = "devtools")]
-                        if crate::surface::render_scale() == 1 {
-                            let fps_col = if app.buffer_flip_count < 30 {
-                                crate::ui::theme::DIAG_FLIP_A
-                            } else {
-                                crate::ui::theme::DIAG_FLIP_B
-                            };
-                            crate::gfx::draw_number(
-                                app.fps_shown,
-                                SCR_W as f32 - 70.0,
-                                64.0,
-                                46.0,
-                                fps_col.as_ptr(),
-                            );
-                        }
                     }
                     crate::ui::anim::draw_overlay(); // dev diagnostic overlay (all routes)
                                                      // The lab upload read-out, over everything, on every route — including the
@@ -2476,6 +2476,12 @@ pub(crate) unsafe fn draw(app: &mut App, fr: &mut Frame) -> (i32, i32, i32, i32)
                     crate::lab::draw(app.diagnostics.frame_if_shown());
                     #[cfg(feature = "threadcheck")]
                     crate::ui::runtime_warning::draw(app.boot_initial.is_some());
+                    // The OLED idle screen, last of all: true black over the page, the HUD and a
+                    // frozen paused frame, with the dim clock. Its draw reads the wall clock, so it
+                    // is reached only on a frame `prepare_window` selected to present (it did).
+                    if let Some(pos) = app.idle_pos {
+                        crate::ui::idle_screen::draw(crate::ui::Painter::root(), pos);
+                    }
                 });
             });
     (vx, vy, vw, vh)
@@ -2690,7 +2696,7 @@ pub(crate) unsafe fn heartbeat(app: &mut App, fr: &mut Frame) {
             if crate::dev::scenarios::imagecache_stats_armed() {
                 super::adapters::poster::log_cache_stats();
             }
-            // once/sec render heartbeat — greppable without reading the on-screen counter.
+            // once/sec render heartbeat, greppable from the log alone.
             // The harness parses `loop=(\d+) route=(\w+)(?: overlay=(\w+))?` (tests/run.py), so
             // the player's overlay tag stays right after route= and worstframe= stays LAST.
             //
@@ -2761,13 +2767,8 @@ pub(crate) unsafe fn heartbeat(app: &mut App, fr: &mut Frame) {
             // is the app's liveness signal and `pos=` is anchored to it, so it must not read 0
             // on a screen that is merely idle. The pair is the diagnostic — `loop=62 fps=0` is
             // a settled screen doing its job, `loop=0` is an app in trouble, and `fps=0` on its
-            // own is not a fault at all. The dev on-screen counter draws this same drained
-            // value, cached below; it never reads a second presentation counter.
+            // own is not a fault at all.
             let pres = crate::ui::idle::take_presents();
-            #[cfg(feature = "devtools")]
-            {
-                app.fps_shown = pres.min(i32::MAX as u32) as i32;
-            }
             // dev: which LOAD-DIAL step these frames belong to, the blur refreshes
             // actually TAKEN in that second. Absent unless the dial is armed, and placed
             // after `fps=` / before
@@ -2969,16 +2970,13 @@ mod lifecycle_regression_tests {
         crate::player::SHARED.reset_session();
         let app = App {
             last_input: Default::default(),
+            idle_pos: None,
             loop_t: Default::default(),
             iters_ct: Default::default(),
             loop_shown: Default::default(),
-            #[cfg(feature = "devtools")]
-            fps_shown: Default::default(),
             play_prev: None,
             running: Default::default(),
             window_activity: crate::system::WindowActivity::new(),
-            #[cfg(feature = "devtools")]
-            buffer_flip_count: Default::default(),
             down_sym: Default::default(),
             modal_repeat: RepeatGate::IDLE,
             diagnostics: Default::default(),

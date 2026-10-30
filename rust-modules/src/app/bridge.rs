@@ -2413,6 +2413,16 @@ pub(crate) fn follow_auth_landing(pages: &mut Dispatcher<AppHost>, bridge: &mut 
         nav_root_if_unsettled(pages, AppArg::Home);
         return;
     }
+    // Quick Connect's landing mirrors the password form's: the worker has installed the client
+    // and persisted the config, so reset the stores and land on Home.
+    #[cfg(feature = "jellyfin")]
+    if crate::jellyfin::quick_connect::take_ready() {
+        crate::jellyfin::quick_connect::set_add_mode(false);
+        let endpoints = super::boot::activate_server_owned(bridge);
+        execute_endpoint_outcomes(pages, endpoints);
+        nav_root_if_unsettled(pages, AppArg::Home);
+        return;
+    }
     // The Plex phase machine below does not apply to a signed-in Jellyfin session: left to run,
     // its `_ => nav_root_if_unsettled(Login)` tail re-roots the sign-in form right on top of the
     // add-server PUSH, wiping the stack that BACK pops back to Settings - the second half of the
@@ -2431,6 +2441,7 @@ pub(crate) fn follow_auth_landing(pages: &mut Dispatcher<AppHost>, bridge: &mut 
             crate::dev::playback_quality_override().unwrap_or_else(|| saved.playback_quality()),
         );
         crate::route::restore_direct_play_mode(saved.direct_play_mode());
+        crate::route::restore_lip_sync_offset_ms(saved.lip_sync_offset_ms());
         crate::player::restore_subtitle_tone(saved.subtitle_tone());
         crate::player::restore_audio_enhancements(saved.audio_enhancements());
         let endpoints = super::boot::install_pms_owned(bridge, &c.origin,

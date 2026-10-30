@@ -628,6 +628,10 @@
     "value": "Direct Play",
     "description": "Settings, consent or sign-in UI: settings.playback.direct_play"
   },
+  "settings.playback.lip_sync": {
+    "value": "Audio sync",
+    "description": "Settings, consent or sign-in UI: settings.playback.lip_sync"
+  },
   "settings.audio.language": {
     "value": "Preferred audio language",
     "description": "Settings, consent or sign-in UI: settings.audio.language"
@@ -1065,6 +1069,14 @@
   "settings.servers.quick.detail": {
     "value": "Add another Jellyfin server.",
     "description": "Settings, account, onboarding or privacy UI: the quick-connect row's detail line."
+  },
+  "settings.servers.add_password": {
+    "value": "Add server with a password",
+    "description": "Settings, account, onboarding or privacy UI: the server picker row that opens the password sign-in form to add another server."
+  },
+  "settings.servers.add_password.detail": {
+    "value": "Sign in to another server with a user name and password.",
+    "description": "Settings, account, onboarding or privacy UI: the add-server-by-password row's detail line."
   },
   "settings.servers.disconnect": {
     "value": "Disconnect",

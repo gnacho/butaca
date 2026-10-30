@@ -356,6 +356,11 @@ pub const CONTROL_SPENT_FILL: [f32; 4] = mix(COOL_0, NEUTRAL_500, 1.0 - CONTROL_
 /// to the state that still has the caret to help it — see `field::draw`'s `ink_target`.
 pub const FIELD_EDITING_INK: [f32; 4] = TEXT_PRIMARY;
 
+/// The cool-tinted selected-row fill while a table field accepts text. Reuses [`COOL_150`]
+/// rather than the default near-white [`ACCENT`], so editing is visibly distinct without a stroke or
+/// a new palette stop; the existing near-black accent ink remains legible over it.
+pub const TABLE_FIELD_EDITING_FILL: [f32; 4] = COOL_150;
+
 /// The Search query field's **focused-but-not-editing** ink — the `hot` cross-fade's bright
 /// endpoint for the one state that has no caret, no keyboard and (since 2026-09-04) no plate to
 /// carry focus instead. Pure `WHITE`, not `TEXT_PRIMARY`/[`FIELD_EDITING_INK`]'s near-white
@@ -453,6 +458,15 @@ pub const SURFACE_APP: [f32; 4] = NEUTRAL_500;
 /// Same stop as [`SURFACE_APP`] so the rising page and the cover are one surface. Different role:
 /// this hides the plane. It is not atmosphere, so [`scrim`] is the wrong token.
 pub const PLANE_COVER: [f32; 4] = SURFACE_APP;
+/// **The OLED idle screen's field** (issue #66): TRUE black, darker than any surface. Every static
+/// surface in this app rests at [`SURFACE_APP`] or above, and an OLED left on a settled menu for
+/// hours burns that grey into the panel; the idle screen therefore covers it with zero-emission
+/// black rather than a darker grey. It is the only role that resolves to the raw `BLACK` stop.
+pub const IDLE_OLED_BLACK: [f32; 4] = BLACK;
+/// **The idle screen's clock ink** (issue #66): a dim white, bright enough to read at the couch but
+/// far below the caption ladder, so the one glyph on an otherwise black OLED contributes the
+/// minimum light.
+pub const IDLE_CLOCK_INK: [f32; 4] = with_a(WHITE, 0.16);
 /// GL clear color — 3-float (`frame_clear` takes r,g,b, no alpha). The app's DEFAULT base, and
 /// [`SURFACE_APP`] itself rather than a second copy of its code: browsing screens clear to the
 /// Apple-TV gray, which is what makes a route change read as a seamless dip. Home overdraws it
@@ -926,10 +940,6 @@ pub const CONTROL_DANGER_IDLE_FILL: [f32; 4] = mix(CONTROL_IDLE_FILL, DANGER, DA
 /// an idle destructive control (a tinted plate AND a tinted label) because at ten feet the plate
 /// alone is a shade of grey; the label is what names the action.
 pub const CONTROL_DANGER_IDLE_INK: [f32; 4] = DANGER;
-/// Dev counter's two human-visible buffer phases. The renderer holds each for 30 returned swaps,
-/// so motion is visible instead of red/green frames blending into yellow at panel refresh rate.
-pub const DIAG_FLIP_A: [f32; 4] = GREEN_400;
-pub const DIAG_FLIP_B: [f32; 4] = RED_400;
 /// Stats-for-Nerds delivery budget that covers the current media demand. This is not a generic
 /// success colour: the diagnostic plot uses it only for the literal `budget >= demand` state.
 pub const DIAG_LINK_SUSTAINS: [f32; 4] = GREEN_400;

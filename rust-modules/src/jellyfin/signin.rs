@@ -101,6 +101,11 @@ pub(crate) fn normalize_url(raw: &str) -> String {
 /// Answers `Err(fail)` synchronously for those; `Ok(())` means the worker is out and [`phase`]
 /// is `Working` until [`take_ready`] or the next [`take_outcome`].
 pub(crate) fn start(url_raw: &str, user: &str, password: &str) -> Result<(), Fail> {
+    // `EPOCH`/`PHASE` are crate globals a retry mutates; a test that starts an attempt outside
+    // `crate::testlock::serial()` races the other sign-in tests on the same counter — see
+    // `lib.rs::testlock`.
+    #[cfg(test)]
+    crate::testlock::assert_held("the jellyfin sign-in store (start)");
     let url = normalize_url(url_raw);
     let Some(origin) = crate::plex::Origin::parse(&url) else {
         return Err(Fail::Parse);
@@ -186,6 +191,11 @@ pub(crate) fn take_ready() -> bool {
 /// Back to a clean form — the sign-out path, and the screen's own "edit these answers" after a
 /// failure. Bumps the epoch so an attempt still in flight cannot come back as a success.
 pub(crate) fn reset() {
+    // `EPOCH`/`MAIL`/`PHASE` are crate globals; a test that flips them outside
+    // `crate::testlock::serial()` lands in the middle of some other module's test — see
+    // `lib.rs::testlock`.
+    #[cfg(test)]
+    crate::testlock::assert_held("the jellyfin sign-in store (reset)");
     EPOCH.fetch_add(1, Ordering::SeqCst);
     if let Ok(mut slot) = MAIL.lock() {
         *slot = None;
@@ -250,6 +260,10 @@ mod tests {
 
     #[test]
     fn a_stale_outcome_is_discarded() {
+        // MUTATES the shared `EPOCH`/`MAIL` globals, so it holds the lock `serial()` guards
+        // them with — the parse test beside it reads `EPOCH` and asserts it did not move, and a
+        // store here without the lock lands between that read and its assertion.
+        let _guard = crate::testlock::serial();
         // An answer from epoch N arriving while the counter sits at N+1 is a slow attempt
         // coming home after a retry: take_outcome must drop it, not fail the fresh form.
         let epoch = EPOCH.load(Ordering::SeqCst);

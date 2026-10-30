@@ -2097,6 +2097,22 @@
     "value": "Couldn't reach the server — check the address and that it's on",
     "description": "Jellyfin flavor's sign-in form or library UI: browse.jellyfin.error_reach"
   },
+  "browse.jellyfin.quick_connect_start": {
+    "value": "Start Quick Connect",
+    "description": "Jellyfin flavor's Quick Connect sign-in: the action that starts the flow"
+  },
+  "browse.jellyfin.quick_connect_explainer": {
+    "value": "Enter this code on another device already signed in to this server. Approve it there and this screen will sign in by itself.",
+    "description": "Jellyfin flavor's Quick Connect sign-in: shown beside the code while waiting for approval"
+  },
+  "browse.jellyfin.quick_connect_unsupported": {
+    "value": "This server is too old for Quick Connect - update it to 10.8 or newer, or use the password form",
+    "description": "Jellyfin flavor's Quick Connect sign-in: the server is older than 10.8"
+  },
+  "browse.jellyfin.quick_connect_timeout": {
+    "value": "Nobody approved the code in time - start again",
+    "description": "Jellyfin flavor's Quick Connect sign-in: the poll ran out without approval"
+  },
   "browse.jellyfin.verdict_refused": {
     "value": "Jellyfin refused playback ({code})",
     "args": {

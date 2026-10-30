@@ -18,7 +18,7 @@
 
 use super::client::JfClient;
 use super::dto::{BaseItemDto, MediaSourceDto, PersonDto};
-use crate::metadata::{Cast, Chapter, Detail, Episode, Season, Stream};
+use crate::metadata::{Cast, Chapter, Detail, Dovi, Episode, Season, Stream};
 use crate::plex::ServerId;
 
 /// The whole detail fetch for one item — `metadata::fetch_full`'s Jellyfin arm. `None` is the
@@ -122,12 +122,14 @@ pub(crate) fn playing_item(
     let mut subs = Vec::new();
     let mut video_fps = 0.0;
     let (mut width, mut height) = (0, 0);
+    let mut dovi = Dovi::NONE;
     for st in src.map(|s| s.streams.as_slice()).unwrap_or(&[]) {
         match st.kind.as_str() {
             "Video" if width == 0 => {
                 width = st.width.unwrap_or(0) as i64;
                 height = st.height.unwrap_or(0) as i64;
                 video_fps = st.real_frame_rate.unwrap_or(0.0) as f64;
+                dovi = dovi_from_range(st.video_range_type.as_deref());
             }
             "Audio" => audio.push(convert_stream(st)),
             "Subtitle" => subs.push(convert_stream(st)),
@@ -148,9 +150,9 @@ pub(crate) fn playing_item(
         container: src.and_then(|s| s.container.clone()).unwrap_or_default(),
         height,
         bitrate: src.and_then(|s| s.bitrate).unwrap_or(0) / 1_000,
-        // VideoRangeType carries no DV layering — `detail_from_dto`'s note. All-zero refuses
-        // nothing, which is the gate's honest "the server said nothing".
-        dovi: Default::default(),
+        // Derived from `VideoRangeType` (see `dovi_from_range`): DV present, base layer named
+        // when the string names one, and bare `DOVI` read as Profile 5 (single-layer IPT-PQ).
+        dovi,
         markers: c
             .media_segments(rk)
             .map(|s| convert_segments(&s))
@@ -257,11 +259,7 @@ fn detail_from_dto(it: &BaseItemDto, sid: ServerId) -> Detail {
         aspect_ratio: 0.0,
         video: None,
         hdr: false,
-        // Dolby Vision layering is NOT derived from Jellyfin's `VideoRangeType` ("DOVI…" strings
-        // carry no profile/level the gate can act on), so `Dovi` stays at its all-zero "the
-        // server said nothing" — which `base_layer_unusable` deliberately never convicts. The
-        // direct-play gate then answers from the plain codec/resolution, and DV files are the
-        // on-device validation item this comment names.
+        // `fill_streams` derives the DV layering from `VideoRangeType` (like `part`/`vcodec`).
         dovi: Default::default(),
         art: if it.backdrop_tags.is_empty() {
             String::new()
@@ -331,6 +329,7 @@ fn fill_streams(it: &BaseItemDto, d: &mut Detail) {
                         .video_range_type
                         .as_deref()
                         .is_some_and(|t| !t.eq_ignore_ascii_case("sdr"));
+                    d.dovi = dovi_from_range(st.video_range_type.as_deref());
                     d.video = Some(s);
                 }
             }
@@ -343,6 +342,50 @@ fn fill_streams(it: &BaseItemDto, d: &mut Detail) {
             "Subtitle" => d.subs.push(s),
             _ => {}
         }
+    }
+}
+
+/// `VideoRangeType` → the Dolby Vision layering the play gate can act on.
+///
+/// Jellyfin names the base layer's cross-compatibility in the string (`DOVIWithHDR10`,
+/// `DOVIWithHLG`, `DOVIWithSDR` → `bl_compat` 1 / 4 / 2) but only ever reports DV presence,
+/// never a profile number. The ONE spelling that does name the profile is bare `DOVI`: it says
+/// the file declares NO HDR10, HLG or SDR base layer, which is exactly the shape of a
+/// **Profile 5** (a single IPT-PQ layer with nothing an ordinary decoder can fall back on).
+/// Reading it as profile 5 is not inventing a profile — it is the only reading consistent with
+/// what the string says — and it makes the gate treat the file exactly as a Plex P5 item:
+/// declared to the panel when the set supports DV, refused otherwise, never played as a bare
+/// base layer.
+///
+/// **What the assumption costs.** If the file were actually a dual-layer Profile 7 whose base
+/// layer Jellyfin failed to name (so it too shows as bare `DOVI`), we would declare it as
+/// single-layer P5: the panel reads the base layer as IPT-PQ and shows a wrong picture, where
+/// the honest `NotDv` fallback would have degraded to the (HDR10) base layer instead. The
+/// `WithHDR10`/`WithHLG`/`WithSDR` spellings do NOT make this assumption: their base layer is
+/// named and displayable, so `profile` stays 0 (unknown) and they play through that base layer
+/// — the string cannot tell a single-layer P8 from a dual-layer P7, and the base layer is a
+/// correct picture either way.
+fn dovi_from_range(video_range_type: Option<&str>) -> Dovi {
+    let Some(t) = video_range_type else {
+        return Dovi::NONE;
+    };
+    let t = t.trim().to_ascii_uppercase();
+    if !t.starts_with("DOVI") {
+        return Dovi::NONE;
+    }
+    let (profile, bl_compat) = match t.as_str() {
+        "DOVI" => (5, 0),         // no base layer at all = single-layer IPT-PQ (Profile 5)
+        "DOVIWITHHDR10" => (0, 1), // HDR10 base layer
+        "DOVIWITHSDR" => (0, 2),   // SDR base layer
+        "DOVIWITHHLG" => (0, 4),   // HLG base layer
+        _ => (0, 0),               // an unrecognised DOVI spelling: no profile the gate can name
+    };
+    Dovi {
+        present: true,
+        profile,
+        bl_compat,
+        el_present: false,
+        ..Dovi::NONE
     }
 }
 
@@ -613,12 +656,128 @@ mod tests {
         assert!((d.video_fps - 24.0).abs() < 0.01);
         assert!((d.aspect_ratio - 2.4).abs() < 0.01);
         assert!(d.hdr);
-        assert!(!d.dovi.present); // VideoRangeType is never read as DV layering
+        assert!(!d.dovi.present); // "HDR10" is not a DOVI range
         assert_eq!(d.audio.len(), 1);
         assert_eq!(d.audio[0].index, 1);
         assert!(d.audio[0].default);
         assert_eq!(d.subs.len(), 1);
         assert!(d.subs[0].external);
+    }
+
+    #[test]
+    fn a_dovi_range_derives_the_dv_layering() {
+        let it: BaseItemDto = serde_json::from_str(
+            r#"{"Id":"d1","Name":"DV","Type":"Movie",
+                "MediaSources":[{"Id":"ms2","Container":"mkv","MediaStreams":[
+                    {"Type":"Video","Codec":"hevc","Index":0,"Width":3840,"Height":2160,
+                     "VideoRangeType":"DOVIWithHDR10"}]}]}"#,
+        )
+        .unwrap();
+        let d = detail_from_dto(&it, ServerId::from_raw(0));
+        assert!(d.dovi.present);
+        assert_eq!(d.dovi.bl_compat, 1); // HDR10 base layer
+        assert_eq!(d.dovi.profile, 0); // a named base layer names no profile
+        assert!(!d.dovi.el_present);
+        assert!(d.hdr);
+
+        // bare DOVI declares no compatible base layer at all — read as Profile 5 (see the note)
+        let it: BaseItemDto = serde_json::from_str(
+            r#"{"Id":"d2","Name":"DV5","Type":"Movie",
+                "MediaSources":[{"Id":"ms3","MediaStreams":[
+                    {"Type":"Video","Codec":"hevc","Index":0,"VideoRangeType":"DOVI"}]}]}"#,
+        )
+        .unwrap();
+        let d = detail_from_dto(&it, ServerId::from_raw(0));
+        assert!(d.dovi.present);
+        assert_eq!(d.dovi.bl_compat, 0);
+        assert_eq!(d.dovi.profile, 5);
+
+        // the two other named base layers map to their compat ids, and non-DOVI stays silent
+        for (range, compat) in [("DOVIWithHLG", 4), ("DOVIWithSDR", 2)] {
+            let it: BaseItemDto = serde_json::from_str(&format!(
+                r#"{{"Id":"d3","Name":"DV","Type":"Movie",
+                    "MediaSources":[{{"Id":"ms4","MediaStreams":[
+                        {{"Type":"Video","Codec":"hevc","Index":0,"VideoRangeType":"{range}"}}]}}]}}"#
+            ))
+            .unwrap();
+            let d = detail_from_dto(&it, ServerId::from_raw(0));
+            assert!(d.dovi.present, "range {range}");
+            assert_eq!(d.dovi.bl_compat, compat, "range {range}");
+        }
+
+        let it: BaseItemDto = serde_json::from_str(
+            r#"{"Id":"d4","Name":"SDR","Type":"Movie",
+                "MediaSources":[{"Id":"ms5","MediaStreams":[
+                    {"Type":"Video","Codec":"hevc","Index":0,"VideoRangeType":"SDR"}]}]}"#,
+        )
+        .unwrap();
+        let d = detail_from_dto(&it, ServerId::from_raw(0));
+        assert!(!d.dovi.present);
+    }
+
+    /// Bare `DOVI` is the whole point of issue #77: it names no base layer, so it must never
+    /// fall through to `NotDv` (feeding IPT-PQ to an ordinary HEVC decoder shows wrong colours).
+    /// The converter reads it as Profile 5, so the plan carries it to the same decision a Plex P5
+    /// item gets: declared to the panel when we say so, refused otherwise.
+    #[test]
+    fn a_bare_dovi_range_is_declared_as_profile_5_not_played_as_a_base_layer() {
+        use crate::metadata::DvPresentation;
+        use crate::webos::caps::DvCapability::Supported;
+
+        let dovi = dovi_from_range(Some("DOVI"));
+        assert_eq!((dovi.profile, dovi.bl_compat, dovi.el_present), (5, 0, false));
+        assert!(dovi.base_layer_unusable(), "IPT-PQ has no base layer to fall back on");
+
+        // withheld signal (or unconfirmed support): refuse, never NotDv
+        assert_eq!(
+            dovi.presentation(false, Supported, true),
+            DvPresentation::Refuse("no cross-compatible base layer")
+        );
+        assert_eq!(dovi.presentation(false, Supported, true).declared(), None);
+
+        // signal + confirmed support + hevc: declare Profile 5 to the panel
+        let declared = dovi.presentation(true, Supported, true).declared();
+        assert_eq!(declared.map(|n| n.profile_id), Some(5));
+    }
+
+    #[test]
+    fn dovi_from_range_pins_the_honest_partial_record() {
+        // the detail path above covers the mapping end-to-end; this pins the shared helper the
+        // `playing_item` path uses: a named base layer keeps profile 0 (unknown), bare `DOVI`
+        // reads as Profile 5, and a non-DOVI or absent range reads as no DV at all.
+        assert_eq!(dovi_from_range(Some("DOVIWithHDR10")).bl_compat, 1);
+        assert_eq!(dovi_from_range(Some("doviwithhlg")).bl_compat, 4); // case-insensitive
+        assert_eq!(dovi_from_range(Some("DOVI")).bl_compat, 0);
+        assert_eq!(dovi_from_range(Some("DOVI")).profile, 5);
+        assert!(dovi_from_range(Some("DOVIWithHDR10")).present);
+        assert_eq!(dovi_from_range(Some("DOVIWithHDR10")).profile, 0);
+        assert!(!dovi_from_range(Some("DOVIWithHDR10")).el_present);
+        assert_eq!(dovi_from_range(Some("HDR10")), Dovi::NONE);
+        assert_eq!(dovi_from_range(Some("HDR10Plus")), Dovi::NONE);
+        assert_eq!(dovi_from_range(None), Dovi::NONE);
+    }
+
+    #[test]
+    fn a_jellyfin_leaf_owns_a_file_so_the_languages_column_is_available() {
+        // Issue #33: the Languages MORE panel is gated on `Detail::has_own_file()` (a non-empty
+        // `part`). On Jellyfin a leaf's `part` is the MediaSource id, not a path, so a movie with
+        // media sources MUST own a file and enable Languages; a show container has no file of its
+        // own and hides the column BY DESIGN.
+        let it: BaseItemDto = serde_json::from_str(
+            r#"{"Id":"m1","Name":"Movie","Type":"Movie",
+                "MediaSources":[{"Id":"ms1","MediaStreams":[
+                    {"Type":"Video","Codec":"hevc","Index":0}]}]}"#,
+        )
+        .unwrap();
+        let d = detail_from_dto(&it, ServerId::from_raw(0));
+        assert!(d.has_own_file(), "a Jellyfin movie with a media source owns a file");
+
+        let show: BaseItemDto = serde_json::from_str(
+            r#"{"Id":"s1","Name":"Show","Type":"Series","ChildCount":3}"#,
+        )
+        .unwrap();
+        let d = detail_from_dto(&show, ServerId::from_raw(0));
+        assert!(!d.has_own_file(), "a Jellyfin show has no file of its own");
     }
 
     #[test]

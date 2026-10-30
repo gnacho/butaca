@@ -71,6 +71,8 @@ pub(crate) mod search;
 // The sign-in flow only exists on the flavor build: its persistence half (`boot::save_config`,
 // `device_id_persistent`) is cfg-gated to it, and a Plex build has no form to drive it.
 #[cfg(feature = "jellyfin")]
+pub(crate) mod quick_connect;
+#[cfg(feature = "jellyfin")]
 pub(crate) mod signin;
 
 pub(crate) use client::{AuthError, AuthOk, JfClient};

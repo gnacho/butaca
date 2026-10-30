@@ -34,6 +34,21 @@ pub(crate) struct AuthUser {
     pub(crate) name: String,
 }
 
+/// `POST /QuickConnect/Initiate` / `GET /QuickConnect/Connect` — one Quick Connect request's
+/// state. Only what the flow reads is declared: the `Secret` (the poll/authenticate credential),
+/// the `Code` the viewer types on another device, and the `Authenticated` flag the poll waits on.
+/// The other members (`DeviceId`, `DeviceName`, `AppName`, `AppVersion`, `DateAdded`) are
+/// deliberately undeclared — this app does not read them, and `serde_json` ignores the rest.
+#[derive(Debug, Deserialize)]
+pub(crate) struct QuickConnectResult {
+    #[serde(rename = "Authenticated", default)]
+    pub(crate) authenticated: bool,
+    #[serde(rename = "Secret")]
+    pub(crate) secret: String,
+    #[serde(rename = "Code")]
+    pub(crate) code: String,
+}
+
 /// `GET /Users/{userId}/Views` — the library list (Jellyfin's counterpart of PMS
 /// `/library/sections`). Each view is one browsable library; its `Id` is the `ParentId` a
 /// section listing is scoped by.
@@ -61,6 +76,13 @@ pub(crate) struct ViewDto {
 pub(crate) struct PublicInfo {
     #[serde(rename = "ServerName")]
     pub(crate) server_name: String,
+    /// The server's machine id — the Plex `machineIdentifier` counterpart.
+    #[serde(rename = "Id", default)]
+    pub(crate) id: String,
+    /// Dotted `Major.Minor.Patch` version — `client::quick_connect_supported` reads it to gate
+    /// Quick Connect on 10.8+.
+    #[serde(rename = "Version", default)]
+    pub(crate) version: String,
 }
 
 /// A paged listing: `/Users/{userId}/Items`, `/Items/Latest`, resume and search all answer in
@@ -146,6 +168,34 @@ pub(crate) struct BaseItemDto {
     /// Season/folder only: how many leaves it holds (Plex's `leafCount`).
     #[serde(rename = "ChildCount")]
     pub(crate) child_count: Option<i64>,
+    /// The trickplay manifest, present only when the server generated trickplay images AND the
+    /// query asked for them (`Fields=Trickplay`). Outer key is the tile width as a string ("320"),
+    /// inner key the sprite-sheet index; each value describes one sheet's grid and interval.
+    /// Empty/absent means the item has no trickplay.
+    #[serde(rename = "Trickplay", default)]
+    pub(crate) trickplay: std::collections::BTreeMap<String, std::collections::BTreeMap<String, TrickplayInfoDto>>,
+}
+
+/// One sprite sheet of the trickplay manifest (`BaseItemDto::trickplay`). Width/Height are a
+/// single thumbnail's pixels, TileWidth/TileHeight the grid (thumbnails per row/column),
+/// Interval the milliseconds between thumbnails, Bandwidth the sheet's peak bits/second. Mirrors
+/// Jellyfin's `TrickplayInfoDto` field-for-field; only what the seek-bar reader needs is declared.
+#[derive(Debug, Deserialize)]
+pub(crate) struct TrickplayInfoDto {
+    #[serde(rename = "Width")]
+    pub(crate) width: i32,
+    #[serde(rename = "Height")]
+    pub(crate) height: i32,
+    #[serde(rename = "TileWidth")]
+    pub(crate) tile_width: i32,
+    #[serde(rename = "TileHeight")]
+    pub(crate) tile_height: i32,
+    #[serde(rename = "ThumbnailCount")]
+    pub(crate) thumbnail_count: i32,
+    #[serde(rename = "Interval")]
+    pub(crate) interval: i32,
+    #[serde(rename = "Bandwidth")]
+    pub(crate) bandwidth: i32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -308,8 +358,9 @@ pub(crate) struct MediaStreamDto {
     #[serde(rename = "BitDepth")]
     pub(crate) bit_depth: Option<i32>,
     /// "SDR" | "HDR10" | "HDR10Plus" | "HLG" | "DOVI" | "DOVIWithHDR10" | … — the `hdr` flag's
-    /// whole input. Anything that is not SDR is HDR for the tone-mapping warning; the finer
-    /// Dolby Vision layering (`metadata::Dovi`) is NOT derived from it — see convert's note.
+    /// whole input. Anything that is not SDR is HDR for the tone-mapping warning; the base-layer
+    /// Dolby Vision layering (`metadata::Dovi`) is derived from the `DOVI…` spellings by
+    /// `detail::dovi_from_range` (present + base-layer compat; bare `DOVI` reads as Profile 5).
     #[serde(rename = "VideoRangeType")]
     pub(crate) video_range_type: Option<String>,
     #[serde(rename = "Width")]

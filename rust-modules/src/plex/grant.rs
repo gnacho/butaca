@@ -147,6 +147,8 @@ struct Unsaved {
 }
 
 fn moved() {
+    #[cfg(test)]
+    crate::testlock::assert_held("the plaintext grant table (revision)");
     REVISION.fetch_add(1, Ordering::AcqRel);
 }
 

@@ -5,10 +5,12 @@
     butaca-rec check <dir>                 every string value is in the synthetic alphabet
     butaca-rec diff  <a> <b> [--unsafe]    the st streams, pointwise; --safe is the default
     butaca-rec import <dir> <name>         copy a CHECKED recording into tests/fixtures/replay/<name>
-    butaca-rec rebaseline <dir> <name> --log <events.log>
+    butaca-rec rebaseline <dir> <name> --log <events.log> [--reason <text>]
                                               REPLACE fixture <name> with a new recording, allowed only
                                               with a DIVERGENCE RECORD derived from the replay's own log
-                                              (spec §5.5), and never for an anchor fixture
+                                              (spec §5.5). A non-anchor needs only the record; an ANCHOR
+                                              additionally needs a written --reason (both are refused if
+                                              either piece is missing)
     butaca-rec rerecord <dir> <name>       REPLACE fixture <name> after a SHAPE bump, allowed only when
                                               the committed fixture's (schema, state_fp) differs from the
                                               new recording's — i.e. the old artifact can no longer be
@@ -22,16 +24,20 @@ anything `check` refuses; the committed fixture is what tests/test_harness.py ve
 
 **`rerecord` vs `rebaseline`, which is the whole reason there are two verbs.** A rebaseline says
 "the behaviour changed and the new stream is the truth" — a judgement, which is why it costs a
-divergence record the replay itself produced, and why an ANCHOR refuses it outright (spec §5.5):
-an anchor exists precisely to make a silent behaviour drift impossible. A rerecord says something
-weaker and machine-checkable: the committed artifact cannot be loaded at all, because the state
-SHAPE moved (`schema` or `state_fp`) or the INITIAL moved (`init.hash`, which covers the session
-identity and so follows a rename), and the decoder refuses it before it can grade anything at all.
-No divergence record can exist because no replay can run. Nothing is being accepted, because
-nothing could be compared. That is why an anchor may be re-recorded and may not be rebaselined,
-and why this verb verifies the condition itself rather than trusting the caller: it reads all three
-fields and refuses when none of them moved — which is exactly the case a rebaseline is for. The
-anchor flag is preserved across the replacement, so a re-recorded anchor is still an anchor.
+divergence record the replay itself produced, and why an ANCHOR needs a written `--reason` on top
+of that record (spec §5.5): an anchor exists precisely to make a silent behaviour drift impossible,
+so re-baselining one demands BOTH the machine's own witness that the artifact replays and diverges
+(the `replay: diverge` line, never the caller's word) AND a written justification, saved in the
+fixture's `divergence.json` as the trail of a deliberate change. A non-anchor rebaseline still
+needs only the divergence record. A rerecord says something weaker and machine-checkable: the
+committed artifact cannot be loaded at all, because the state SHAPE moved (`schema` or `state_fp`)
+or the INITIAL moved (`init.hash`, which covers the session identity and so follows a rename), and
+the decoder refuses it before it can grade anything at all. No divergence record can exist because
+no replay can run. Nothing is being accepted, because nothing could be compared. That is why an
+anchor may be re-recorded without a reason, and re-baselined only WITH one, and why rerecord
+verifies the condition itself rather than trusting the caller: it reads all three fields and refuses
+when none of them moved — which is exactly the case a rebaseline is for. The anchor flag is
+preserved across both replacements, so a re-recorded or re-baselined anchor is still an anchor.
 """
 import json
 import os
@@ -329,21 +335,29 @@ def cmd_rerecord(d, name):
 
 DIVERGE_RE = re.compile(r"^replay: diverge f=(\d+) expected=(0x[0-9a-f]+) got=(0x[0-9a-f]+) inputs=(\d+)")
 DONE_RE = re.compile(r"^replay: done .*verdict=(SAME|DIVERGED)")
+REFUSED_RE = re.compile(r"^replay: REFUSED")
 RESULT_DIFFS_RE = re.compile(r"\bresult_diffs=(\d+)\b")
 EFFECT_DIFFS_RE = re.compile(r"\beffect_diffs=(\d+)\b")
 INPUT_DIFFS_RE = re.compile(r"\binput_diffs=(\d+)\b")
 
 
-def divergence_record(fixture_dir, log_path):
+def divergence_record(fixture_dir, log_path, allow_refused=False):
     """The record CI verifies before a rebaseline lands (spec §5.5): the first diverging frame,
     the event kinds recorded on it, and both state-shape fingerprints — derived from the replay
     driver's OWN log lines, which is the only witness that a divergence was observed rather than
-    asserted. Returns (record, reason) with one of them None."""
+    asserted. Returns (record, reason) with one of them None.
+
+    `allow_refused` admits a replay that diverged on a state frame and then REFUSED instead of
+    reaching `done` — the `replay measurement table miss` a newly measured string causes — where
+    the `replay: diverge` line is still the evidence and the refusal the confirmation the artifact
+    no longer grades cleanly. Only the anchor re-baseline passes it; an ordinary rebaseline still
+    demands a clean `replay: done … verdict=DIVERGED`."""
     header, frames = load(fixture_dir)
     with open(log_path, encoding="utf-8") as f:
         lines = f.read().splitlines()
     verdict = None
     first = None
+    refused = None
     for ln in lines:
         # The adoption record below proves a STATE divergence only. Do not erase a result
         # mismatch by selecting some later state hash from the same log. Either witness is
@@ -369,7 +383,9 @@ def divergence_record(fixture_dir, log_path):
         m = DIVERGE_RE.match(ln)
         if m and first is None:
             first = m
-    if verdict != "DIVERGED":
+        if REFUSED_RE.match(ln):
+            refused = ln
+    if verdict != "DIVERGED" and not (allow_refused and first is not None and refused is not None):
         return None, "the log carries no `replay: done … verdict=DIVERGED` line"
     if first is None:
         return None, "the log reports DIVERGED but carries no `replay: diverge` line"
@@ -389,19 +405,22 @@ def divergence_record(fixture_dir, log_path):
     }, None
 
 
-def cmd_rebaseline(d, name, log_path):
+def cmd_rebaseline(d, name, log_path, reason):
     dst = os.path.join(FIXTURES, name)
     if not os.path.isdir(dst):
         print("refused: no fixture %s to rebaseline (use import)" % name)
         return 1
+    is_anchor = False
     with open(os.path.join(dst, "manifest.json"), encoding="utf-8") as f:
-        if json.load(f).get("anchor"):
-            print("refused: %s is an ANCHOR fixture; an anchor is never rebaselined" % name)
-            return 1
+        is_anchor = bool(json.load(f).get("anchor"))
+    if is_anchor and reason is None:
+        print("refused: %s is an ANCHOR fixture; re-baselining an anchor needs BOTH a divergence "
+              "record (--log) and a written reason (--reason)" % name)
+        return 1
     if log_path is None:
         print("refused: a rebaseline needs a divergence record (--log <the replay's events log>)")
         return 1
-    record, why = divergence_record(dst, log_path)
+    record, why = divergence_record(dst, log_path, allow_refused=is_anchor)
     if record is None:
         print("refused: %s" % why)
         return 1
@@ -410,16 +429,28 @@ def cmd_rebaseline(d, name, log_path):
         return 1
     with open(os.path.join(d, "manifest.json"), encoding="utf-8") as f:
         record["to_state_fp"] = json.load(f).get("state_fp")
+    if reason:
+        record["reason"] = reason
     for n in os.listdir(dst):
         if n == "manifest.json" or (n.startswith("rec-") and n.endswith(".jsonl")):
             os.remove(os.path.join(dst, n))
     for n in sorted(os.listdir(d)):
         if n == "manifest.json" or (n.startswith("rec-") and n.endswith(".jsonl")):
             shutil.copy(os.path.join(d, n), os.path.join(dst, n))
+    if is_anchor:
+        # An anchor stays an anchor: the deliberate re-baseline is why it could be replaced, not
+        # a demotion. The reason lives in divergence.json beside the divergence record.
+        with open(os.path.join(dst, "manifest.json"), encoding="utf-8") as f:
+            m = json.load(f)
+        m["anchor"] = True
+        with open(os.path.join(dst, "manifest.json"), "w", encoding="utf-8") as f:
+            json.dump(m, f, indent=1, sort_keys=True)
+            f.write("\n")
     with open(os.path.join(dst, "divergence.json"), "w", encoding="utf-8") as f:
         json.dump(record, f, indent=2, sort_keys=True)
         f.write("\n")
-    print("rebaselined %s from %s (first diverging frame %d)" % (name, d, record["first_frame"]))
+    print("rebaselined %s from %s (first diverging frame %d)%s" % (
+        name, d, record["first_frame"], " - anchor preserved" if is_anchor else ""))
     return 0
 
 
@@ -440,7 +471,8 @@ def main(argv):
         return cmd_rerecord(argv[2], argv[3])
     if cmd == "rebaseline" and len(argv) >= 4:
         log_path = argv[argv.index("--log") + 1] if "--log" in argv[4:] and argv.index("--log") + 1 < len(argv) else None
-        return cmd_rebaseline(argv[2], argv[3], log_path)
+        reason = argv[argv.index("--reason") + 1] if "--reason" in argv[4:] and argv.index("--reason") + 1 < len(argv) else None
+        return cmd_rebaseline(argv[2], argv[3], log_path, reason)
     print(__doc__)
     return 2
 

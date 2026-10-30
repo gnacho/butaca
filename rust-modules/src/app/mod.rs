@@ -228,16 +228,16 @@ pub(crate) struct Adapters {
 /// Nothing here becomes `pub` — only as wide as the crate.
 pub(crate) struct App {
     last_input: u32,
+    /// The idle screen's clock position while it is up (`None` = not idle). Tracked so the clock's
+    /// once-a-minute relocation invalidates the present gate exactly when it moves, instead of
+    /// every frame (which would pin 60 fps on a screen that exists to save the panel).
+    idle_pos: Option<usize>,
     loop_t: u32,
     iters_ct: i32,
     loop_shown: i32,
-    #[cfg(feature = "devtools")]
-    fps_shown: i32,
     play_prev: Option<(i64, u32)>,
     running: bool,
     window_activity: crate::system::WindowActivity,
-    #[cfg(feature = "devtools")]
-    buffer_flip_count: u8,
     /// The sym we believe is PHYSICALLY DOWN right now — set by a fresh key-down, cleared by its
     /// key-up. It tells a real hardware auto-repeat from a PHANTOM one, which this television emits
     /// routinely: over the system keyboard the panel does not deliver a key-up for the press that

@@ -563,6 +563,13 @@ pub struct Session {
     /// Install-wide original-stream override; malformed/future values remain automatic.
     #[serde(default, deserialize_with = "de_soft_direct_play_mode")]
     pub(crate) direct_play_mode: DirectPlayMode,
+    /// Install-wide lip-sync offset in milliseconds, applied to the video feed to compensate
+    /// Bluetooth audio latency (positive delays the picture so the audio is heard "ahead").
+    /// Absence or garbage is 0 ms. The player's clamp (`route::lip_sync_offset_range_ms`) is the
+    /// one rule the value is held to. Skipped on write while 0 so a session persisted before the
+    /// field existed round-trips byte-identical.
+    #[serde(default, deserialize_with = "de_soft_i64", skip_serializing_if = "is_zero")]
+    pub(crate) lip_sync_offset_ms: i64,
     /// **Automatically Sign In** — skip the boot who's-watching picker and enter as
     /// [`Session::user`]. Install-wide, not per profile: the boot gate reads it before anyone is
     /// seated this run. Absence is **off**, which is today's picker. Enabling it from Settings
@@ -653,6 +660,8 @@ struct CanonicalSessionPreferences {
     playback_quality: Option<PlaybackQuality>,
     #[serde(default, deserialize_with = "de_soft_direct_play_mode")]
     direct_play_mode: DirectPlayMode,
+    #[serde(default, deserialize_with = "de_soft_i64", skip_serializing_if = "is_zero")]
+    lip_sync_offset_ms: i64,
     #[serde(default, deserialize_with = "de_soft_bool")]
     auto_sign_in: bool,
     #[serde(default, deserialize_with = "de_soft_vec")]
@@ -689,6 +698,7 @@ impl Default for CanonicalSessionPreferences {
             language: crate::i18n::Preference::System,
             playback_quality: None,
             direct_play_mode: DirectPlayMode::Auto,
+            lip_sync_offset_ms: 0,
             auto_sign_in: false,
             last_library: Vec::new(),
             library_sorts: Vec::new(),
@@ -734,6 +744,7 @@ fn split_public(session: &Session) -> Result<crate::storage::state::PublicPayloa
         language: session.language,
         playback_quality: session.playback_quality,
         direct_play_mode: session.direct_play_mode,
+        lip_sync_offset_ms: session.lip_sync_offset_ms,
         auto_sign_in: session.auto_sign_in,
         last_library: session.last_library.clone(),
         library_sorts: session.library_sorts.clone(),
@@ -801,6 +812,7 @@ pub(crate) fn join_canonical(
         language: preferences.language,
         playback_quality: preferences.playback_quality,
         direct_play_mode: preferences.direct_play_mode,
+        lip_sync_offset_ms: preferences.lip_sync_offset_ms,
         auto_sign_in: preferences.auto_sign_in,
         last_library: preferences.last_library,
         library_sorts: preferences.library_sorts,
@@ -827,6 +839,7 @@ fn public_session(public: &crate::storage::state::PublicPayload) -> Session {
         language: preferences.language,
         playback_quality: preferences.playback_quality,
         direct_play_mode: preferences.direct_play_mode,
+        lip_sync_offset_ms: preferences.lip_sync_offset_ms,
         auto_sign_in: preferences.auto_sign_in,
         last_library: preferences.last_library,
         library_sorts: preferences.library_sorts,
@@ -1765,6 +1778,24 @@ where D: Deserializer<'de> {
     Ok(serde_json::from_value(value).unwrap_or_default())
 }
 
+/// The lip-sync offset is a preference too: garbage degrades to 0 ms rather than failing the
+/// enclosing [`Session`].
+fn de_soft_i64<'de, D>(d: D) -> Result<i64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let Ok(v) = serde_json::Value::deserialize(d) else {
+        return Ok(0);
+    };
+    Ok(v.as_i64().unwrap_or(0))
+}
+
+/// `lip_sync_offset_ms`'s skip condition: 0 is the field's default and absence, so a session with
+/// no offset writes no field and round-trips byte-identical to one persisted before it existed.
+fn is_zero(v: &i64) -> bool {
+    *v == 0
+}
+
 /// Playback quality is a preference, not a credential gate. A value written by a newer build or
 /// damaged by a hand edit therefore degrades to the legacy-safe Original mode rather than making
 /// the enclosing [`Session`] disappear.
@@ -1881,6 +1912,17 @@ impl Session {
     pub(crate) fn with_direct_play_mode(&self, mode: DirectPlayMode) -> Self {
         let mut next = self.clone();
         next.direct_play_mode = mode;
+        next
+    }
+
+    /// The persisted lip-sync offset, already clamped by the writer.
+    pub(crate) fn lip_sync_offset_ms(&self) -> i64 {
+        self.lip_sync_offset_ms
+    }
+
+    pub(crate) fn with_lip_sync_offset_ms(&self, offset_ms: i64) -> Self {
+        let mut next = self.clone();
+        next.lip_sync_offset_ms = offset_ms;
         next
     }
 
@@ -4872,6 +4914,44 @@ mod direct_play_mode_tests {
             let prefs: CanonicalSessionPreferences = serde_json::from_value(split_public(&session).unwrap().preferences).unwrap();
             assert_eq!(prefs.direct_play_mode, mode);
         }
+    }
+}
+
+/// Issue #64: `Session::lip_sync_offset_ms` - the persisted Bluetooth lip-sync preference. These
+/// tests pin the field's own contract in isolation (soft-parse, omit-when-zero, round-trip), the
+/// half that keeps a session persisted before the field existed replaying byte-identical.
+#[cfg(test)]
+mod lip_sync_tests {
+    use super::*;
+
+    #[test]
+    fn lip_sync_offset_defaults_softly_and_round_trips() {
+        // Absent and garbage both degrade to 0 ms.
+        for value in [
+            serde_json::json!({}),
+            serde_json::json!({"lip_sync_offset_ms": "future"}),
+            serde_json::json!({"lip_sync_offset_ms": null}),
+        ] {
+            let session: Session = serde_json::from_value(value).unwrap();
+            assert_eq!(session.lip_sync_offset_ms(), 0);
+        }
+        // The default (0) writes NO field, so a session persisted before the field existed
+        // round-trips byte-identical - the property the controlled replay's canonicality gate
+        // depends on.
+        let zero = Session::default();
+        let encoded = serde_json::to_value(&zero).unwrap();
+        assert!(
+            !encoded.as_object().unwrap().contains_key("lip_sync_offset_ms"),
+            "0 ms is omitted: {encoded}"
+        );
+        let round: Session = serde_json::from_value(encoded).unwrap();
+        assert_eq!(round.lip_sync_offset_ms(), 0);
+        // A non-zero offset persists and round-trips.
+        let set = Session::default().with_lip_sync_offset_ms(125);
+        let encoded = serde_json::to_value(&set).unwrap();
+        assert_eq!(encoded["lip_sync_offset_ms"], 125);
+        let round: Session = serde_json::from_value(encoded).unwrap();
+        assert_eq!(round.lip_sync_offset_ms(), 125);
     }
 }
 

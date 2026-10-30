@@ -686,6 +686,7 @@ impl SessionAdapter {
                 crate::jellyfin::boot::erase_config();
                 crate::jellyfin::uninstall();
                 crate::jellyfin::signin::reset();
+                crate::jellyfin::quick_connect::reset();
             }
             let diagnostics = all_local;
             #[cfg(test)]

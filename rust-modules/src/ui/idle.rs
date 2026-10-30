@@ -570,7 +570,7 @@ pub(crate) fn should_present(now: u32) -> bool {
     if changed || VIDEO_PLANE.load(Relaxed) {
         return true;
     }
-    let keepalive = KEEPALIVE_MS != 0 && now.wrapping_sub(LAST_PRESENT.load(Relaxed)) >= KEEPALIVE_MS;
+    let keepalive = keepalive_due(now, LAST_PRESENT.load(Relaxed));
     if !keepalive {
         // A skipped frame takes nothing (`take_page_damage` runs on drawn frames); an own count
         // cannot normally exist here (an invalidate would have made the frame present), so this
@@ -616,6 +616,15 @@ pub(crate) fn note_present(now: u32) {
     PRESENTS.fetch_add(1, Relaxed);
     #[cfg(feature = "devtriggers")]
     super::card_motion_metrics::presented(now);
+}
+
+/// Is the keepalive due at `now`, given the last present at `last_present`? The wrap-safe half of
+/// [`should_present`]'s keepalive term: `wrapping_sub` reads the ~49-day tick wrap as a small
+/// elapsed, never ~4 billion ms. Pure in its arguments, so the wrap arithmetic is graded directly
+/// rather than through [`should_present`]'s process-global DIRTY/WAKE/DAMAGE_GEN inputs.
+#[inline]
+fn keepalive_due(now: u32, last_present: u32) -> bool {
+    KEEPALIVE_MS != 0 && now.wrapping_sub(last_present) >= KEEPALIVE_MS
 }
 
 /// Presents since the last call — drained once a second into the heartbeat as `fps=`, which is the
@@ -958,20 +967,18 @@ mod tests {
 
     /// The tick counter wraps every ~49 days, and the keepalive is the one place the gate does
     /// arithmetic on it. Straight subtraction would read ~4 billion ms across the wrap and pin the
-    /// loop presenting forever; the reverse case must err toward presenting, not stall.
+    /// loop presenting forever; the reverse case must err toward presenting, not stall. The term is
+    /// pure arithmetic on `now` and the last present, so it is graded directly instead of through
+    /// `should_present`, whose process-global DIRTY/WAKE/DAMAGE_GEN inputs another unlocked test can
+    /// flip and turn the negative case into a false present.
     #[test]
     fn tick_wrap_is_arithmetically_sound() {
-        let _g = fresh();
-        note_present(u32::MAX - 10);
-        frame_begin(1.0 / 60.0);
-        // 16 ms past the wrap: elapsed is 16, not 4e9 — the keepalive is not due
-        assert!(!should_present(5));
-        // and it still comes due on time across that same wrap
-        assert!(should_present((u32::MAX - 10).wrapping_add(KEEPALIVE_MS)));
-        // a tick BEFORE the last present is only reachable at a wrap — repaint, never stall
-        LAST_PRESENT.store(5, Relaxed);
-        frame_begin(1.0 / 60.0);
-        assert!(should_present(u32::MAX - 10));
+        // 16 ms past the wrap: elapsed is 16, not 4e9 - the keepalive is not due.
+        assert!(!keepalive_due(5, u32::MAX - 10));
+        // And it still comes due on time across that same wrap.
+        assert!(keepalive_due((u32::MAX - 10).wrapping_add(KEEPALIVE_MS), u32::MAX - 10));
+        // A tick BEFORE the last present is only reachable at a wrap - repaint, never stall.
+        assert!(keepalive_due(u32::MAX - 10, 5));
     }
 
     #[test]

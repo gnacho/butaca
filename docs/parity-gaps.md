@@ -559,13 +559,9 @@ player, transport and tracks auditors, and is counted once in the themes above.
   *Verified:* Confirmed: widgets.rs:52-64 inside the shared card() composite is the only per-poster badge and draws Icon::UnwatchedAngle only when m.unwatched && m.resume_ms == 0; nothing marks a watched item. Icon::Check exists and is already rendered elsewhere — icons.rs:16/37, drawn by table.rs:304 (TableView row check) and library.rs:904 (the Unwatched toolbar chip's icon). Data partial, more favourable than the auditor states: for movies/episodes 'watched' is already derivable today as !m.unwatched, since pms.rs:117-120 sets unwatched = (view_count == 0) for kind 0/3. Only shows/seasons need new state 
 
 - **No live clock** — `polish` / `small`  
-  The official home shows the current time top-right ('6:39 PM'). Our top chrome carries only the profile chip and the tab track; the FPS counter occupies that corner instead.  
+  The official home shows the current time top-right ('6:39 PM'). Our top chrome carries only the profile chip and the tab track; that corner is empty today.  
   *Where:* rust-modules/src/ui/fmt.rs (a time-of-day formatter over libc localtime_r) + rust-modules/src/ui/home.rs home_draw (and ui/library.rs for parity). No endpoint.  
-  *Verified:* Confirmed: home_draw (home.rs:818-830) is Backdrop/Hero/Grid + draw_chip + draw_tab_row and nothing else on the top band; library.rs:894 draws the same row. fmt.rs:40 clock(ms) is the PLAYBACK clock ('1:23:45'/'3:45'), used by chapters_panel.rs:151 and player_hud.rs:29. No wall-clock read exists anywhere in rust-modules/src: no localtime/strftime/gmtime/SystemTime/UNIX_EPOCH hits; the only time reads are monotonic Instant (capture.rs, task.rs:150, player/threads.rs:58) and SDL_GetTicks. Confirming the auditor's corner note: app.rs:2462-2463 draws the dev FPS number at SCR_W-70, y=64 on every n
-
-#### TV show / season / episode detail page
-
-*Already implemented here: 19 reference features.*
+  *Verified:* Confirmed: home_draw (home.rs:818-830) is Backdrop/Hero/Grid + draw_chip + draw_tab_row and nothing else on the top band; library.rs:894 draws the same row. fmt.rs:40 clock(ms) is the PLAYBACK clock ('1:23:45'/'3:45'), used by chapters_panel.rs:151 and player_hud.rs:29. No wall-clock read exists anywhere in rust-modules/src: no localtime/strftime/gmtime/SystemTime/UNIX_EPOCH hits; the only time reads are monotonic Instant (capture.rs, task.rs:150, player/threads.rs:58) and SDL_GetTicks. *
 
 - **No episode-level detail page — the hero always describes the show, never the focused episode** — `major` / `medium`  
   The official client's episode page puts the EPISODE in the hero: episode title in bold, a metadata line "S5 E25 · May 7, 2009 · 21m · TV-14 · [20 min left]", the episode summary, and "Directed by …". Ours always renders the show container: `draw_hero` reads `metadata::current()` (which is the show), so the title, meta line ("TV Show · genre · genre · TV-14"), synopsis, date and runtime are all show-level, and they do not change when episode focus moves through the filmstrip. Per-episode text exists only as small captions under each still.  
