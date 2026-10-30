@@ -310,7 +310,7 @@ pub(crate) struct MediaStreamDto {
     /// "SDR" | "HDR10" | "HDR10Plus" | "HLG" | "DOVI" | "DOVIWithHDR10" | … — the `hdr` flag's
     /// whole input. Anything that is not SDR is HDR for the tone-mapping warning; the base-layer
     /// Dolby Vision layering (`metadata::Dovi`) is derived from the `DOVI…` spellings by
-    /// `detail::dovi_from_range` (present + base-layer compat, never a profile).
+    /// `detail::dovi_from_range` (present + base-layer compat; bare `DOVI` reads as Profile 5).
     #[serde(rename = "VideoRangeType")]
     pub(crate) video_range_type: Option<String>,
     #[serde(rename = "Width")]
