@@ -210,7 +210,7 @@ it before a deploy.
 But there is **no host *runtime*** — nothing above decodes a frame or touches Starfish/ACB (`ff.rs`
 once gated `#[link]` directives out of `cfg(test)` to keep the pure logic host-testable; with
 everything on `dynlib!` those are gone, so a test that actually calls FFmpeg now fails by taking
-`dlopen`'s `None` branch on Darwin rather than by failing to link), and the host is Darwin while the TV is
+`dlopen`'s `None` branch on the host rather than by failing to link), and the host differs from the TV,
 Linux, which is why `tools/sockprobe.c` exists. So anything about *playback behaviour* is only
 observable on device: deploy and read `/tmp/butaca-events.log` (feed stats, bind steps,
 seek/rebase, `RECEIVE_GOOD_VIDEO`). The `tests/` harness drives real playback per case — see the root

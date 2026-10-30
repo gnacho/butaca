@@ -105,7 +105,7 @@ class BuildGcTests(unittest.TestCase):
         self.assert_live_refusal(os.getpid(), 0)
 
     def test_live_pgid_without_pid_refuses_every_reclaim(self):
-        # macOS pgrep excludes ancestors by default. Give the lock a controlled child
+        # the host's pgrep excludes ancestors by default. Give the lock a controlled child
         # group instead; its stdin remains open until all refusal checks have finished.
         child = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"],
                                  stdin=subprocess.PIPE, start_new_session=True)

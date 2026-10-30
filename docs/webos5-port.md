@@ -82,7 +82,7 @@ release. 317 MB, entirely offline.
 
 That is the substitute for hardware for every question of the form *"does this exist on webOS 5,
 and will the binary load?"* — which turns out to be most of the port. `tools/fwcompat.py` reads it
-directly and runs on macOS:
+directly and runs on the host:
 
 ```sh
 tools/fwcompat.py                                   # grade pkg/butaca on all 14 releases
@@ -136,7 +136,7 @@ Measured effect, `tools/fwcompat.py`: **OK on 2 releases before, OK on 9 after.*
 Two consequences worth knowing:
 
 - The `cfg(test)` gate on `ff.rs`'s `#[link]` directives went with them. Host tests link
-  unconditionally now; a call into FFmpeg fails by taking `dlopen`'s `None` branch on Darwin.
+  unconditionally now; a call into FFmpeg fails by taking `dlopen`'s `None` branch on the host.
 - `avformat_version` moved from the avutil block to the avformat block. Under `#[link]` the
   grouping was cosmetic because the final link resolved every name at once; `dlsym` searches one
   handle and its dependency chain, and libavutil does not depend on libavformat.
@@ -347,7 +347,7 @@ Re-checked 2026-08-05; unchanged from the 2026-07-28 survey in `docs/distributio
 - **LG TV Simulator** — "Native apps are not supported (only web apps are supported)", verbatim.
   Latest v1.5.0 simulates webOS 6.0 and up, so it would not cover 5.x even if it could.
 - **LG TV Emulator** — deprecated ("From webOS TV 22, Emulator will not be provided"), x86-64
-  guest under VirtualBox, macOS support is "Intel chip (Apple silicon is not supported)". A
+  guest under VirtualBox, host support is "Intel chip (Apple silicon is not supported)". A
   webOS 5.0.0 image *is* listed — a small correction to §3.4a — but it is x86, so an armv7 ELF
   cannot execute on it regardless.
 - **webOS OSE** (2.28.0) — ships no `libAcbAPI` and no `libplayerAPIs`; those are LG's proprietary

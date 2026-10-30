@@ -5829,7 +5829,7 @@ fn track_alpha_for(ground: [f32; 3]) -> f32 {
 ///
 /// The ceiling is what decides how dark this bar is allowed to get over bright artwork, and it is
 /// the one remaining number between our material and the reference. Measured on a stripe ground:
-/// the macOS 26 tab bar's face sits at 89 against a page of 127 (−27% Weber) and, over four
+/// the Apple 26 tab bar's face sits at 89 against a page of 127 (−27% Weber) and, over four
 /// different grounds, its face barely moves at all — 92, 94, 92, 96 — while ours swings 47…84 and
 /// reaches −60%. Their material has ONE density and converges every backdrop toward a fixed grey;
 /// ours re-solves per frame against [`TRACK_INK_CONTRAST`] and, over a bright hero, spends the
@@ -5922,7 +5922,7 @@ fn track_rim(density: f32) -> ([f32; 4], [f32; 4]) {
 /// It exists because the ramp's ceiling is the one number that decides whether the edge reads as a
 /// LIT EDGE or as a drawn white outline, and it had never been held against the reference. Measured
 /// on a stripe ground: how much of the ground's swing the top rim carries is 0.23 for us and 0.25
-/// for the macOS tab bar — i.e. ours is not flat and never was, which was the standing suspicion.
+/// for the Apple tab bar — i.e. ours is not flat and never was, which was the standing suspicion.
 /// What differs is the LEVEL. Their rim sits at 124 against a page of 127 and a face of 89; ours at
 /// 212 against a page of 124 and a face of 53. Relative to its own brightness their edge varies by
 /// 24% and ours by 10%, which is the whole of why theirs reads as the material catching a lamp and

@@ -39,9 +39,9 @@
 # scope by SONAME when the next one names it. That is ordinary loader behaviour, it needs no build
 # flag to survive quoting, and unlike an rpath it can be asserted from inside the app.
 #
-# HOST=1 BUILDS THE SAME FFMPEG FOR THIS MAC INSTEAD, and it is the same script on purpose.
+# HOST=1 BUILT THE SAME FFMPEG FOR THE DESKTOP HOST INSTEAD, and it was the same script on purpose.
 #
-# The desktop simulator (`make sim`) runs the real app core on macOS, but `ff.rs` dlopens the
+# The desktop simulator (`make sim`) ran the real app core on a desktop, but `ff.rs` dlopens the
 # bundled libraries by absolute path out of the app directory — where they are 32-bit ARM ELF. So
 # the ENTIRE streaming half of the app (the AVIO transports, the HLS demux, the AU queues and
 # therefore the whole adaptive controller) was device-only, and the one instrument that can run
@@ -171,7 +171,7 @@ fi
 # (`subtitle_image_pgs` in two release audits). `--enable-zlib` is explicit, so configure FAILS if
 # the library is absent instead of quietly building the old behaviour. It links the system
 # `libz.so.1`, present on every firmware inventory `fwsym` holds (platform releases 1.2.0
-# to 11.2.0, zlib 1.2.7 to 1.3.1) and on macOS; `make check-ffmpeg` is the test that holds it in place.
+# to 11.2.0, zlib 1.2.7 to 1.3.1) and on the desktop host.
 if [ -n "$HOST" ]; then
   # No --arch/--cpu/--target-os: configure detects this Mac, which is the point.
   set -- --prefix=/plx
@@ -263,7 +263,7 @@ if [ -n "$CACHE_ROOT" ]; then
   WORK="$CACHE_ROOT/ffmpeg/$ARCHTAG-$VERSION-$KEY"
   # One tree, N checkouts, so two of them can arrive at once — a fleet launches its lanes
   # together, which is exactly the case that would have them configure over each other's
-  # half-written Makefile. mkdir is the atomic primitive every POSIX sh has (macOS ships no
+  # half-written Makefile. mkdir is the atomic primitive every POSIX sh has (some hosts ship no
   # flock(1)), the pid lets a lock whose owner died be reclaimed rather than blocking the machine
   # forever, and the wait is bounded well past the ~2 minute cold build.
   LOCK="$WORK.lock"

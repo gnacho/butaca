@@ -4,7 +4,7 @@
 # Code SessionEnd firing (`.claude/hooks/build-gc-auto.sh`) — a machine idle between sessions, or
 # running some other tool entirely, still gets swept.
 #
-# MACOS ONLY. launchd is the platform's own scheduler and the one already running every other
+# LAUNCHD ONLY. launchd is the platform's own scheduler and the one already running every other
 # per-user background agent on this host; there is no reason to reimplement a poller. On any other
 # OS this prints the cron line that does the same job and exits 0 — a non-zero exit here would
 # make this the one setup step that fails a fresh Linux dev machine outright, for a feature that
@@ -57,7 +57,7 @@ for a in "$@"; do
 
 usage: tools/install-disk-watch.sh [--uninstall]
 
-  (no flag)    install the hourly launchd agent (macOS only; prints the cron equivalent and
+  (no flag)    install the hourly launchd agent (launchd only; prints the cron equivalent and
                exits 0 on every other OS)
   --uninstall  bootout and remove it
 USAGE
@@ -75,9 +75,9 @@ cron_line() {
 
 if [ "$(uname -s 2>/dev/null)" != "Darwin" ]; then
   if [ -n "$UNINSTALL" ]; then
-    echo "install-disk-watch: launchd is macOS-only; nothing to uninstall on $(uname -s 2>/dev/null || echo unknown)."
+    echo "install-disk-watch: launchd is unavailable on this host; nothing to uninstall on $(uname -s 2>/dev/null || echo unknown)."
   else
-    echo "install-disk-watch: launchd is macOS-only. Equivalent cron entry (crontab -e):"
+    echo "install-disk-watch: launchd is unavailable on this host. Equivalent cron entry (crontab -e):"
     echo "  $(cron_line)"
   fi
   exit 0

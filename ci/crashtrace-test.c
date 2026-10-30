@@ -29,7 +29,7 @@
  *
  * # What it CANNOT see, stated plainly
  *
- * **`/proc/self/maps` does not exist on macOS**, so `scan_maps` returns immediately and the
+ * **`/proc/self/maps` does not exist on a desktop host**, so `scan_maps` returns immediately and the
  * `at:`/`bin:` lines are never produced here. Their DECISION is graded by the pure test; their
  * plumbing is graded only on a television, and the assertions below are conditional on the file
  * existing so this test tells the truth on either host.
@@ -163,7 +163,7 @@ static void one_case(const char *name, int sig, const char *signame, enum how ho
     }
 
     /* The `at:`/`bin:` lines need TWO things, and the second one was missing from this condition
-     * until 2026-09-02: `/proc/self/maps`, which macOS does not have, AND a fault context the
+     * until 2026-09-02: `/proc/self/maps`, which a desktop host does not have, AND a fault context the
      * handler can actually read. `plx_crash` reads `pc`/`lr` only under `__arm__` — off the target
      * it deliberately records `pc=0x0 lr=0x0` rather than pretending to have measured them — so a
      * maps scan for address zero matches no mapping and emits neither line, by design.

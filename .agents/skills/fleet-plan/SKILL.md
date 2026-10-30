@@ -67,8 +67,8 @@ queue is invisible in the plan you wrote.
   at once."* The lease is one directory on the television, with no flavour in it — deliberately.
 - **Everyone else goes to the simulator** — the **`ui-sim`** skill. N instances run at once, and it
   answers layout, focus, navigation, every screen and the whole Plex data layer. Give each lane
-  **its own `SIM_DIR`**: it defaults to `/tmp/butaca-sim` (`Makefile:845`) and is passed straight
-  through as that instance's `BUTACA_RUNTIME_DIR`, so two lanes on the default share one token
+  **its own instance root** (`BUTACA_RUNTIME_DIR`), which defaults to `/tmp/butaca-sim` and is
+  passed straight through, so two lanes on the default share one token
   file, one remote FIFO and one event log.
 - Say the assignment **out loud in every prompt**, including the lanes that don't get it. "No
   device access" is information a worker acts on; silence is a worker that tries `make deploy`,
@@ -155,7 +155,7 @@ it".
 ## 4. `make check` only — a full build fills the disk
 
 Every worktree gets its own cargo target dir per feature set — `RUST_TDIR` = `target` /
-`target-release`, `SIM_TDIR` = `target-sim`, `MACAPP_TDIR` = `target-macapp`, all under
+`target-release`, `SIM_TDIR` = `target-sim`, all under
 `rust-modules/` — and its own `vendor/ffmpeg-prefix` (the expensive FFmpeg build tree is shared;
 see below). **`make disk` is the current number for every checkout at once; read it there.** Two
 things about that number are counter-intuitive. A lane under `.claude/worktrees/` sits *inside* the
@@ -196,8 +196,7 @@ the Makefile) but do not expect N lanes' `make check` calls to finish in paralle
 tool directly, so none of them enters `ci/build-ffmpeg.sh`. The FFmpeg build is reached down exactly
 one chain — `pkg/butaca` → the Rust staticlib → `pkg/.ffabi-ok` → the header rule at
 `Makefile:416` — which means a bare `make`, `make all`, `make deploy`, `make ipk` and `make test`
-all build it and `make check` cannot. (`make macapp` does **not**: `ci/mkmacapp.py` never mentions
-FFmpeg. It costs a fourth cargo target dir, 125 MB, and nothing else.)
+all build it and `make check` cannot.
 
 Keep each lane's build trees **outside** the worktree:
 
@@ -285,7 +284,7 @@ cannot be reached once they are running — a hazard you meant to mention is a h
 2. THE TELEVISION: <this lane has NO device access | this lane owns the TV>. With no access: no
    ssh/scp/sshpass, no `make deploy|run|test|kill|install`, no `tests/run.py`, no
    `tools/tv-session.sh`, no `tools/capture-screen.sh` (a PreToolUse hook refuses them). Verify on
-   the simulator — the `ui-sim` skill — with your own root: `make sim-shot SIM_DIR=/tmp/sim-<lane>`.
+   the simulator — the `ui-sim` skill — with your own root: `BUTACA_RUNTIME_DIR=/tmp/sim-<lane>`.
 3. DISK. `make check` ONLY. Never bare `make`, `make all`, `make deploy`, `make ipk` — each
    cross-builds FFmpeg into this worktree (a built lane here measures 1.2–4.8 GB). First:
    `export CARGO_TARGET_DIR=$HOME/plx-fleet/<lane>/target SIM_TDIR=$HOME/plx-fleet/<lane>/target-sim`

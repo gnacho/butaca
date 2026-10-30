@@ -45,7 +45,7 @@ pub(crate) fn rd_u32(ev: &[u8], off: usize) -> u32 {
 /// # The simulator's carrier moved, because the old one was silently DEAD
 ///
 /// A synthetic press from the remote FIFO has to get its wcode across `SDL_PushEvent`, and on the
-/// host that queue is not SDL2's: macOS `libSDL2` is **sdl2-compat forwarding into SDL3**, so every
+/// host that queue is not SDL2's: the desktop `libSDL2` is **sdl2-compat forwarding into SDL3**, so every
 /// pushed event is converted out and back. Measured 2026-08-23 by dumping the polled bytes of a
 /// press whose every spare field carried a distinct value:
 ///

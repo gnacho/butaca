@@ -92,7 +92,7 @@ fn aq_init_cap(q: *mut AuQueue, cap: c_long) {
 /// time even if the wall clock steps (NTP correction; this TV's own pmlog clock is documented as
 /// running skewed) — a REALTIME-based timed wait can block far past its 10 ms deadline on a
 /// backward step, which is exactly the TCP-window-collapse this drain-while-parked mechanism
-/// exists to prevent. `pthread_condattr_setclock` does not exist on macOS, so the host build (and
+/// exists to prevent. `pthread_condattr_setclock` does not exist on the host, so the host build (and
 /// its tests, which check the drain LOGIC, not clock robustness) keeps the default REALTIME
 /// clock — matched by [`aq_park_deadline`]'s `#[cfg]` twin.
 #[cfg(target_os = "linux")]

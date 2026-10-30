@@ -151,7 +151,7 @@ strip_strings_and_comments() {
 # entry is.
 #
 # The index is built by `awk` rather than a `while read` + `case` loop because **bash 3.2 — what
-# macOS ships, and what `#!/usr/bin/env bash` resolves to here — cannot parse a `case` inside a
+# `#!/usr/bin/env bash` may resolve to here — cannot parse a `case` inside a
 # `$( … )` at all**: it scans for the closing paren without parsing, so the `)` ending a case
 # pattern terminates the substitution and the `;;` after it is a syntax error. One process reads
 # every list, which is what we wanted anyway.

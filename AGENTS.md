@@ -8,7 +8,7 @@ application is Rust under `rust-modules/src/`; `src/main.c` is the boot/crash sh
 properly factored and finished; "only a demo" is never a reason to leave a shortcut behind.
 
 The target is a cross-compiled 32-bit ARM application with a hardware video plane. Host tests and
-the macOS simulator are valuable, but they cannot prove every device behavior.
+the desktop simulator are valuable, but they cannot prove every device behavior.
 
 ## Load the right context
 

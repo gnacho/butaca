@@ -224,7 +224,7 @@ should be published *after* `connect`, on the grounds that Linux fails `shutdown
 socket with ENOTCONN and so the handshake window is uninterruptible anyway. `tools/sockprobe.c`
 (new) says otherwise on this kernel: `shutdown` returns 0 and the handshake dies at 200 ms instead
 of running its 1200 ms deadline. The plan's original `socket()` publication was right. Note this
-could not have been settled on the host — `cargo test` runs on Darwin, where the same call returns
+could not have been settled on the host — `cargo test` runs on the host, where the same call returns
 0 **and makes `connect_timeout` report success on a socket that never connected.** Three platforms'
 worth of divergence in one syscall.
 

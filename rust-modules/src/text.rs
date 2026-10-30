@@ -668,7 +668,7 @@ enum Link {
     Cjk = 1,
     /// The television's own `DroidSansFallback.ttf`. Free insurance behind the bundled face —
     /// measured on webOS 4.10.0 as covering the same Hangul/Han/Kana ground — and it costs
-    /// nothing when it is absent, as it is on the desktop simulator and the macOS app.
+    /// nothing when it is absent, as it is on the desktop simulator.
     ///
     /// **That measurement is ONE television and cannot be generalised.** `tools/fwcompat.py`
     /// grades symbols, not filesystems, so it has nothing to say about a font PATH on the other 13
@@ -1980,7 +1980,7 @@ mod tests {
     //!
     //! What these CANNOT see, and the reason a device capture is still required: whether the
     //! composite is aligned, hinted and snapped correctly on the panel. `cargo test` runs on
-    //! Darwin against a different FreeType, and the simulator renders through desktop GL — the ♪
+    //! the host against a different FreeType, and the simulator renders through desktop GL — the ♪
     //! regression that named this unit was found by a photograph, not by a test.
 
     use super::*;

@@ -3175,7 +3175,7 @@ def main(argv=None):
             print("     ./tests/serve_fixtures.py --root %s --port 8020" % root)
             print("   Each case then arms /tmp/butaca-playurl with a URL into that server")
             print("   plus the `declare` block recorded beside the file in fixtures.json.")
-            print("   Start it ONCE with a human at the keyboard: the macOS application")
+            print("   Start it ONCE with a human at the keyboard: the application")
             print("   firewall drops the TV's connections to a new python listener silently.")
         else:
             print("\n   Next: add TWO Plex libraries with the 'Personal Media' agents —")

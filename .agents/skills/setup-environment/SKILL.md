@@ -2,7 +2,7 @@
 name: setup-environment
 description: >
   Set up (or repair) the cross-compile build environment for this native webOS TV
-  app on a macOS host — the webOS NDK toolchain, the Rust nightly + rust-src needed
+  app on a build host — the webOS NDK toolchain, the Rust nightly + rust-src needed
   for the static lib, and the sysroot the Makefile links against. Use this whenever
   the build environment isn't ready or is broken: a fresh clone, a new machine, a
   teammate onboarding, or errors like "arm-webos-linux-gnueabi-gcc: command not
@@ -16,7 +16,7 @@ description: >
 
 # Set up the webOS build environment
 
-This app is cross-compiled from macOS to a 32-bit ARM webOS TV. "Setting up the
+This app is cross-compiled to a 32-bit ARM webOS TV. "Setting up the
 environment" means getting three things in place so `make` works:
 
 1. **The webOS NDK** — a buildroot cross-toolchain (GCC 12, glibc 2.12, armv7-a

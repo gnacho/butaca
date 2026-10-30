@@ -45,7 +45,7 @@ script="$main/tools/build-gc.sh"
 
 # Where the launched job's own stdout/stderr goes — belt-and-suspenders beside `--auto`'s own
 # internal one-line-per-stage log (`gc_log` inside build-gc.sh), for the rare crash that happens
-# before that function is ever reached. Mirrors that function's own path resolution (macOS vs.
+# before that function is ever reached. Mirrors that function's own path resolution (launchd vs.
 # XDG vs. plain ~/.cache) rather than importing it, since this hook must not depend on sourcing
 # the script it is about to detach.
 if [ -n "${PLX_GC_LOG-}" ]; then

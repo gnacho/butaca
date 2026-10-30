@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Production controlled-Home gate on macOS. No builds, devices or household network.
+"""Production controlled-Home gate with OS-level outbound denial. No builds, devices or household network.
 
 The mock is stopped before replay. sandbox-exec denies all outbound networking; a listener
 also counts primary-endpoint attempts. Runtime roots/evidence are retained, never cleaned.
@@ -31,7 +31,7 @@ def main():
     binary = str(Path(args.sim).resolve())
     sandbox = '/usr/bin/sandbox-exec'
     if not Path(sandbox).is_file():
-        raise RuntimeError('this gate requires the macOS outbound-IO sandbox')
+        raise RuntimeError('this gate requires the sandbox-exec outbound-IO sandbox')
     out = Path(tempfile.mkdtemp(prefix='codex-controlled-bootstrap-gate-', dir='/tmp'))
     owned = []
     stopped = threading.Event()

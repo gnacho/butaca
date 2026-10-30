@@ -273,7 +273,7 @@ pub(crate) unsafe fn menu_play_tick(
 /// calls `start_playback`, which reaches `player::adapter`/`player::engine` and, through them,
 /// the real `player::ffi::sf_load`/`vp_mode`/`vp_create_window` `extern "C"` declarations. Those
 /// resolve only against the television's own `libplayerAPIs`/ACB seam (via the Makefile's C link)
-/// or against `player/ffi_host.rs`'s `hostsim` stand-ins; a bare `cargo test --lib` on macOS has
+/// or against `player/ffi_host.rs`'s `hostsim` stand-ins; a bare `cargo test --lib` on the host has
 /// neither, so an ungated module here made every `player::ffi` wrapper a hard undefined symbol in
 /// the DEFAULT feature pass the moment this test made that call chain reachable — a bare `make
 /// check` failed to link with `_sf_load`/`_vp_create_window`/`_vp_mode` undefined. This is the

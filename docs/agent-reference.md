@@ -8,7 +8,7 @@ coding agents. The concise, always-loaded project contract is `AGENTS.md`; Claud
 A **real, native Plex client for LG webOS 4.5 TVs** — built toward production quality, not a
 throwaway. **Build proper, reusable, well-factored components and finish them** — a shortcut is
 never justified by "it's only a demo." See `rust-modules/src/ui/CLAUDE.md` for how the UI is
-expected to be built. It's cross-compiled from macOS and sideloaded onto a rooted 32-bit ARM TV,
+expected to be built. It's cross-compiled and sideloaded onto a rooted 32-bit ARM TV,
 renders an Apple-TV-style gallery/shelf UI with SDL2 + OpenGL ES 2, and plays video from a Plex
 Media Server (PMS) entirely in-app.
 
@@ -63,14 +63,10 @@ the pinned Sentry Native cross-build), and `sshpass` (Homebrew, for deploy/run).
   and *two* tables, which was true while the app read the television's FFmpeg and had to select a
   table per firmware; bundling collapsed that into a single equality (`ffabi-assert.c` opens by
   asserting `LIBAVFORMAT_VERSION_MAJOR == 63`), and the vendored trees are gone.
-  **Since 2026-08-28 there ARE two tables again, and the axis is POINTER WIDTH rather than
-  version.** `make sim-macos` builds the same FFmpeg 9.0 from the same component list for this Mac
-  (`HOST=1 ci/build-ffmpeg.sh` → `vendor/ffmpeg-prefix-host`, staged into `pkg/` as
-  `libavformat-plx.63.dylib`) so the simulator can demux at all, and `ffabi-assert.c` `#if`s on
-  `__SIZEOF_POINTER__`, each half compiled against its own build's headers. That is not the old
-  runtime major-selected table returning: this picks between two ABIs of ONE version at COMPILE
-  time, on evidence the compiler holds — and deriving the second half is what found
-  `AVSubtitleRect` modelled with `flags` in the wrong place.
+  **ffabi-assert.c is what proves `ff.rs`'s ABI table**: it re-derives every offset against the
+  headers the shipped libraries were built from. It still `#if`s on `__SIZEOF_POINTER__` and
+  carries a host half, but only the target half is compiled now that the host FFmpeg build is gone
+  — deriving the host half is what found `AVSubtitleRect` modelled with `flags` in the wrong place.
 - `make deploy` — ships the binary and the native crash handler through a `.new` + `mv` dance (a
   running process holds their inodes), the bundled FFmpeg libraries with a retirement loop for any
   previous major, and — since 2026-09-02 — **everything else in ONE scp from `DEPLOY_FILES`**,
@@ -184,16 +180,6 @@ the pinned Sentry Native cross-build), and `sshpass` (Homebrew, for deploy/run).
   headers by hand. Neither bug is visible from the other's side: `webosbrew-ipk-verify` reads a
   GNU-named archive fine, and the TV never gets far enough to miss a descriptor. `check-package.py`
   now asserts both. Full account: `docs/distribution.md` §9.
-- `make macapp` / `make macapp-zip` — **`pkg/Butaca.app`: the app as a self-contained macOS
-  application**, for sending to somebody who has none of this installed. Same `hostsim` core the
-  simulator runs, built `--release --no-default-features` (so no dev counter, no `/tmp` trigger
-  surface, no FIFO, no capture listener), with every non-system dylib copied in and rewritten to
-  `@rpath`, ad-hoc codesigned. It signs in with the real QR flow and browses a real server; **it
-  cannot play video** — the Starfish/ACB seam does not exist off-device, so Play lands on the app's
-  failure read-out, exactly as in the simulator. Apple Silicon only, LAN only. `ci/mkmacapp.py` is
-  the recipe (its module doc names the three ways a Mac bundle silently ships broken);
-  `docs/macos-app.md` is the design note, and `docs/macos-app-readme.md` is what ships beside the
-  zip for the recipient.
 - **`FLAVOR`** selects **WHICH INSTALL** every TV-facing target talks to. Three builds live on one
   television: `stable` (`com.butaca` — the app users install, the id in every release,
   manifest and channel listing), `debug` (`com.butaca.debug` — the day-to-day developer
@@ -262,7 +248,7 @@ the pinned Sentry Native cross-build), and `sshpass` (Homebrew, for deploy/run).
   EVERY invocation that produces or ships the binary (`make RELEASE=1 deploy`, **not**
   `make RELEASE=1 && make deploy`, which rebuilds as dev and ships that). `deploy`/`ipk` echo
   which configuration they shipped. Switching configuration DELETES `pkg/butaca` at Makefile
-  parse time — deliberately: make 3.81 on macOS compares mtimes at one-second granularity and
+  parse time — deliberately: make 3.81 compares mtimes at one-second granularity and
   decides staleness from a stat taken before prerequisites run, so no stamp-mtime scheme works.
   Each feature set also gets its own `--target-dir`, because cargo does not hash its output and
   would otherwise report the dev build fresh while the release `.a` sat at that path.
@@ -294,7 +280,7 @@ the pinned Sentry Native cross-build), and `sshpass` (Homebrew, for deploy/run).
   `ci/check-package.py` refuses any non-LAB package that carries it). The receiver logs the PEER
   ADDRESS of every request, which is the only thing that tells "the television reached me from the
   internet" apart from "something on the LAN hairpinned". It composes with `RELEASE=1`
-  and with `make sim-macos`, each getting its own `--target-dir` for the reason every other feature set
+  and with the simulator, each getting its own `--target-dir` for the reason every other feature set
   does. Full account: **`docs/lab-diagnostics.md`**. The trigger is a code LIST in that file rather
   than a constant, and the reason is worth carrying: the colour buttons are **`wcode` 486 RED /
   487 GREEN / 488 YELLOW / 489 BLUE** (device-measured 2026-08-26), while the STANDARD evdev
@@ -312,7 +298,7 @@ cross-linker — but `-Z build-std` + `-C target-cpu=cortex-a9` is load-bearing:
 ARMv6 codegen emits the CP15 barrier that SIGILLs on the A53; see the Makefile comment). Headers
 come from `include/` (the TV's SDL2 2.0.x-fork headers, kept ahead of the sysroot's newer copies
 so we compile against the ABI the TV runs). The ipk needs **no `ar` at all** — `ci/mkipk.py` writes
-the archive itself; this line used to say the opposite ("uses the NDK's `ar` (GNU format; macOS BSD
+the archive itself; this line used to say the opposite ("uses the NDK's `ar` (GNU format; a BSD
 `ar` won't work)") and had it exactly backwards, see the ipk bullet below. The old `zig cc` path is
 gone.
 
@@ -343,11 +329,11 @@ kills the process at `exec()` — before `main`, before the event log exists. So
 - **A VARIADIC C function keeps its `...`, in the position `curl.h` puts it** —
   `fn curl_easy_setopt_ptr = "curl_easy_setopt"(h: *mut CURL, opt: c_int, ..., v: *const c_void)`.
   Naming the trailing argument's concrete type is right and is how one C symbol is bound as three
-  wrappers; moving it *before* the ellipsis is a different CALLING CONVENTION, because **Apple's
-  ARM64 ABI passes variadic arguments on the stack** while named ones go in registers. ARM32 and
-  x86-64 pass both ways identically, so this compiles, passes `make check`, runs on the television
-  — and SIGSEGVs inside libcurl's `strlen` on a Mac, at the first plex.tv call. It was the shape
-  the macro emitted until 2026-08-16; `docs/macos-app.md` §2 is the account.
+  wrappers; moving it *before* the ellipsis is a different CALLING CONVENTION, because **one ABI
+  passes variadic arguments on the stack** while named ones go in registers. ARM32 and x86-64 pass
+  both ways identically, so this compiles, passes `make check`, runs on the television — and
+  SIGSEGVs inside libcurl's `strlen` on a desktop, at the first plex.tv call. It was the shape the
+  macro emitted until 2026-08-16.
 
 **FFmpeg is a third unlinked family, and it is no longer a version question at all: the app BUNDLES
 its own and PINS it.** This doc used to file FFmpeg beside curl and ACB as "SONAME moves,
@@ -662,7 +648,7 @@ which the linking section explains is load-bearing rather than tidy.
   proves the shaper against a loopback transfer with no television in the room. Point the app at it by editing `PMS_PORT` in the gitignored `src/config.local.h` and
   `make deploy` (host/port are compiled into `main.c`). **Pick a port Plex is not already on** — it
   binds `127.0.0.1:32401` itself, and the more specific bind wins, so the proxy is silently bypassed.
-  **And the macOS application firewall silently drops the TV's connections to the ad-hoc python
+  **And the desktop application firewall silently drops the TV's connections to the ad-hoc python
   listener** (verified 2026-08-11: netcond up, mode armed, zero requests logged, the TV's probe gets
   an empty read) — the "allow incoming connections?" GUI prompt must be clicked once per python
   path, so start netcond BEFORE going headless, and treat "netcond logs nothing" as this, not as a
@@ -739,10 +725,10 @@ which the linking section explains is load-bearing rather than tidy.
   router-side alternative (Keenetic's per-client "No Internet access" policy) is manual and was
   not needed.
 - `tools/sockprobe.c` — standalone ARM diagnostic (`make sockprobe`, scp, run, delete) for socket
-  semantics **the host suite cannot answer**: `cargo test` runs on Darwin, the app on Linux, and
+  semantics **the host suite cannot answer**: `cargo test` runs on the host, the app on Linux, and
   they disagree. Measured 2026-07-28: on this kernel `shutdown(2)` **does** abort a `connect(2)`
   in progress (rv=0, handshake dies at once) — which is why `stream.rs::http_open` publishes its fd
-  at `socket()`. On Darwin the same call instead makes `connect_timeout` report *success* on a
+  at `socket()`. On the host the same call instead makes `connect_timeout` report *success* on a
   socket that never connected. Reach for this before asserting any syscall behaviour from memory.
 - `tools/logmprobe.c` — standalone ARM diagnostic (`make logmprobe`, scp, run, delete) for LG's
   **KADP log masks, on a RUNNING app**. It exists because of one specific trap that cost a day:
@@ -1107,8 +1093,8 @@ behaviour; real GL copies, glyphs and presentation still need a device capture w
 > skill: `fleet-plan`.** The lock schedules; it does not plan — two lanes that both want the set
 > still run in series, and that queue is invisible in the plan you wrote. The one line to carry
 > without opening it: the television is the scheduling constraint, **a lane is a CHECKOUT** (so a
-> second worktree on the same Mac is a second lane, however the prompt describes it), give device
-> access to at most one and send every other lane to `make sim-macos` or `tools/sim.ps1`. Telling two prompts "you own the
+> second worktree on the same machine is a second lane, however the prompt describes it), give device
+> access to at most one and send every other lane to `make sim-linux` or `tools/sim.ps1`. Telling two prompts "you own the
 > television exclusively" is *not* a mutex — each is true when written and false the moment the
 > second one starts, which is the 2026-08-21 collision that was caught by luck rather than by
 > anything failing loudly. **A subagent proves which lane it is by prefixing
@@ -1190,11 +1176,11 @@ you get without waking a television. What it covers today, by module:
   **(1) It cannot run the native libraries, and it no longer fails by FAILING TO LINK.** `ff.rs`
   used to carry four `cfg_attr(not(test))`-gated `#[link]` directives, so a host test that called
   FFmpeg died at link time; those directives are gone (everything goes through `dynlib!` now), the
-  crate links unconditionally, and such a test instead takes `dlopen`'s `None` branch on Darwin.
+  crate links unconditionally, and such a test instead takes `dlopen`'s `None` branch on the host.
   Same boundary, quieter failure — a test that "passes" having never entered FFmpeg or GL is the
-  shape to watch for. **(2) It runs on Darwin; the app runs on Linux, and they disagree**
+  shape to watch for. **(2) It runs on the host; the app runs on Linux, and they disagree**
   — see `tools/sockprobe.c` above, where `shutdown`-during-`connect` behaves oppositely on the two
-  kernels. A socket assertion that passes here is evidence about macOS, not about the TV.
+  kernels. A socket assertion that passes here is evidence about the host, not about the TV.
   **(3) Some app async seams remain process-wide**, so some tests are serialized rather than parallel:
   `metadata.rs`'s test that drives `set_current_for_test` still takes `lib.rs`'s crate-wide
   `testlock::serial()` — not because its own state is global any more (`MetadataState` and
@@ -1220,7 +1206,7 @@ you get without waking a television. What it covers today, by module:
   running real frames — whose Browse owner reaches `sync_roster`, which resets that owner's table
   on any source the live registry does not hold, i.e. on every Browse fixture in the suite.
 
-**Tier 1.5 — the desktop simulator (`make sim-macos` or `tools/sim.ps1`), which DOES draw pixels
+**Tier 1.5 — the desktop simulator (`make sim-linux` or `tools/sim.ps1`), which DOES draw pixels
 on the host.** This tier
 did not exist before 2026-08-14, and the line below used to read "there is no host *runtime*" flatly
 — that is now wrong for the UI half and right for everything else. `butaca-sim` is the same app
@@ -1232,39 +1218,31 @@ harness jobs kill each other — while N simulators run side by side, each point
 instance root (`BUTACA_RUNTIME_DIR`, which is where the triggers, FIFO and event log now come
 from; unset it and everything resolves to `/tmp` exactly as before). It answers layout, focus,
 navigation, every screen, and the whole Plex data layer.
-**On macOS, since 2026-08-28 it STREAMS — real HTTP, real demux, real HLS, the real adaptive
-controller.** `make sim-macos` builds a HOST copy of the same bundled FFmpeg 9.0 from the same
-`ci/build-ffmpeg.sh` component list (`HOST=1`, into `vendor/ffmpeg-prefix-host`, staged into
-`pkg/` as `libavformat-plx.63.dylib` beside the ARM `.so.63`), and `ff.rs` carries a second ABI
-table selected on `target_pointer_width` with `ci/ffabi-assert.c` holding both. Arm
-`butaca-clocksink` (`player/ffi_host.rs` — AUs accepted and discarded, a presentation clock
-clamped to the last fed PTS, position reported at the television's measured 5 Hz) and the whole
-pipeline between the socket and the decoder runs on the Mac: both AVIO transports, `ff.rs`'s
-demux, the AU queues and their byte-cap backpressure, the feed-ahead throttle, rung transactions,
-seek. The Windows `sim-wsl` target deliberately omits FFmpeg and stops at the host no-video seam.
-Measured the day the macOS path landed: 94 `abr:` lines and a rung commit in one 30 s host run against
-`tests/serve_fixtures.py`. Until then this half was device-only and `make sim-macos` said so
-(`ff: FFmpeg unavailable — the app runs, playback will refuse`), which is why the ABR work was
-pinned to the one-television mutex.
+The simulator deliberately omits FFmpeg and stops at the host no-video seam, so the streaming
+half of the pipeline — real HTTP, real demux, real HLS, the real adaptive controller — stays
+device-only. Arm `butaca-clocksink` (`player/ffi_host.rs` — AUs accepted and discarded, a
+presentation clock clamped to the last fed PTS, position reported at the television's measured 5
+Hz) to exercise the AU queues and their byte-cap backpressure, the feed-ahead throttle and rung
+transactions on the host, without a real stream.
 It still CANNOT answer frame rate (different
 GPU — every simulator heartbeat carries **`sim=1`** so a pasted log cannot be mistaken for a
 device measurement), text rasterization, the cached modal ground (its frame cache is off —
 `frame cache: … cache off`), or anything about **LG's decoder** — resource-allocation
 refusals, the ACB video-plane bind, the Load payload's Dolby declaration, `SOUND_ERROR_019`, frame
 pacing, which codecs the panel takes. Nothing decodes: the clock sink throws every AU away, and a
-Mac decodes things that television will not and the reverse. Without the trigger, Play still lands
+desktop decodes things that television will not and the reverse. Without the trigger, Play still lands
 on the real failure read-out, which is what the UI work wants to see.
 Bugs it has already found in DEVICE code: the glyph upload
 ignored `SDL_Surface::pitch` (`text.rs`), `dev`/`remote`/`log` all hardcoded `/tmp`, and — from
 deriving the ABI table at a second pointer width — `AVSubtitleRect` was modelled with `flags`
 last where the header puts it before `type`, so `type_` read `flags` and on 64-bit `flags` landed
 one word past the end of the struct.
-**Two macOS-host traps that read as your change being broken.** (1) **`make sim-macos-shot` HANGS on a
-settled screen** — `SIM_FRAME` is a count of *presented* frames (`shot.rs`, and `app.rs` says the
+**Two simulator-host traps that read as your change being broken.** (1) **a settled-screen shot
+HANGS** — `BUTACA_SHOT_FRAME` is a count of *presented* frames (`shot.rs`, and `app.rs` says the
 same at the `shot` token: "presented frames only accrue when something repaints"), and `ui::idle`
 gates presents, so a screen that settles before frame N never reaches N. Arm
-`butaca-noidle` in the instance root first; three agents lost time to this in one day. (2) macOS
-`libSDL2` is **sdl2-compat forwarding into SDL3**, so pushing a synthetic **`SDL_TEXTINPUT`** through
+`butaca-noidle` in the instance root first; three agents lost time to this in one day. (2) the
+desktop `libSDL2` is **sdl2-compat forwarding into SDL3**, so pushing a synthetic **`SDL_TEXTINPUT`** through
 `SDL_PushEvent` SIGSEGVs *inside SDL* — SDL3's text event carries a `char *text` where SDL2 carries
 an inline `char[32]`, and the shim dereferences it. No Rust panic, no log line, the process is just
 gone. The remote FIFO's key and `ck:` tokens are safe because every field they set is a scalar; see

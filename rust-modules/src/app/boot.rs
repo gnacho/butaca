@@ -20,7 +20,7 @@ use super::*;
 /// Falls back to the canvas size if SDL cannot answer, which is the behaviour this replaced.
 #[cfg(feature = "hostsim")]
 pub(crate) fn desktop_window_size() -> (c_int, c_int) {
-    // `BUTACA_WIN=<w>x<h>` overrides the fit entirely — `make sim-shot SIM_W=1920 SIM_H=1080`.
+    // `BUTACA_WIN=<w>x<h>` overrides the fit entirely.
     // It exists because the fit below is chosen for a HUMAN looking at a window, and a screenshot
     // is not that: on a 1x display the divisor lands on 2 and every shot comes back 960x540, which
     // is half the canvas the UI is authored at. A hairline, a 1px edge-sheen and a snapped glyph
@@ -460,8 +460,8 @@ pub(crate) unsafe fn construct(
             ));
         }
     }
-    // The television has a real GLES2 driver (a shim over libmali). macOS has none at all —
-    // Apple ships desktop GL only, capped at 4.1 core — so asking for ES here fails context
+    // The television has a real GLES2 driver (a shim over libmali). A desktop has none at all —
+    // it ships desktop GL only, capped at 4.1 core — so asking for ES here fails context
     // creation outright. 4.1 core is the closest thing that exists, and it is a superset for
     // everything this renderer does: a real VBO (never client arrays) and RGBA/UNSIGNED_BYTE
     // textures, both core-profile-legal. The shader sources are adapted at compile time by

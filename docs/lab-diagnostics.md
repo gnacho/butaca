@@ -234,7 +234,7 @@ renewals and a private key on a laptop. The cheaper and *stronger* answer for a 
 channel:
 
 * `butaca-lab start` generates a **fresh self-signed cert per session** (`openssl`, already on
-  macOS) and computes its **SPKI SHA-256 pin**.
+  the host) and computes its **SPKI SHA-256 pin**.
 * The lab build sets `CURLOPT_PINNEDPUBLICKEY = "sha256//<base64>"` with `SSL_VERIFYPEER=0` /
   `VERIFYHOST=0`. libcurl checks the pin **independently of** VERIFYPEER (documented), and
   `CURLOPT_PINNEDPUBLICKEY` is 7.39+, against the dev set's 7.53.1 — so this reaches every firmware
@@ -248,7 +248,7 @@ existing `request` passes `None` (no behaviour change, one line), and the `#[cfg
 before push, per `docs/agent-reference.md`, because it touches the curl seam.
 
 **Compression** is `compress2` from libz, bound through `dynlib!` as its own one-symbol table (libz
-is present wherever libcurl and OpenSSL are, and on macOS). All-or-nothing loading means a set
+is present wherever libcurl and OpenSSL are, and on the host). All-or-nothing loading means a set
 without it simply sends `Content-Encoding: identity` — the fallback is a header, not a failure.
 
 **Authentication** is a bearer secret over that pinned channel, compared with a constant-time

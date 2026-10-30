@@ -2,7 +2,7 @@
 """Replay every committed product recording through a built simulator, in both modes.
 
 The simulator owns parsing, controlled bootstrap, recorded ingress, and every frame grade.
-macOS additionally denies outbound networking with sandbox-exec. Evidence roots are retained.
+Evidence roots are retained.
 """
 import argparse
 import json
@@ -74,9 +74,6 @@ def run_fixture(binary, assets, fixture, mode, output, timeout):
     env = dict(os.environ, BUTACA_RUNTIME_DIR=str(runtime), BUTACA_APP_DIR=str(assets),
                BUTACA_WIN='1920x1080')
     command = [str(binary), '127.0.0.1', '9']
-    if sys.platform == 'darwin':
-        command = ['/usr/bin/sandbox-exec', '-p',
-                   '(version 1)(allow default)(deny network-outbound)'] + command
     with (runtime / 'sim.out').open('wb') as out:
         try:
             process = subprocess.run(command, env=env, stdout=out, stderr=subprocess.STDOUT,

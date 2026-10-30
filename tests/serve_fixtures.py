@@ -38,7 +38,7 @@ one per pipeline-tier run and stops it in teardown.
 
     ./tests/serve_fixtures.py --root tests/fixtures/out --port 8020
 
-macOS trap, and it costs an afternoon every time: the **application firewall silently drops the
+the firewall trap, and it costs an afternoon every time: the **application firewall silently drops the
 TV's connections to an ad-hoc python listener** — no refusal, no log line, the TV's open just reads
 empty. The same shape bit `tools/netcond.py` (verified 2026-08-11). The GUI prompt "allow incoming
 connections?" must be accepted once per python binary, so start this ONCE with a human at the
@@ -656,14 +656,14 @@ def lan_ip(peer=None):
     """This machine's address as the TV will reach it.
 
     A UDP `connect` picks the interface the routing table would use without sending anything.
-    `gethostbyname(gethostname())` is the obvious alternative and is wrong on macOS — it answers
+    `gethostbyname(gethostname())` is the obvious alternative and is wrong on a desktop — it answers
     127.0.0.1 on a machine with a perfectly good LAN address, and the app cannot resolve names
     anyway (`stream.rs` takes a dotted quad only), so a loopback answer here produces a URL the
     television will never connect to.
 
     When `peer` is the television, connect to THAT rather than 8.8.8.8: a VPN default route
     otherwise advertises a utun address the set cannot route to, the app logs `HTTP request
-    failed`, and the harness reports 0 bodies — the same shape as the macOS firewall trap.
+    failed`, and the harness reports 0 bodies — the same shape as the firewall trap.
     """
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
