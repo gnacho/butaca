@@ -18,7 +18,7 @@ use crate::screens::registry::AppLike;
 use crate::ui::machine::{Cx, Effects, EntryId, FocusKey, Fx, GroupId, Handled, Machine, NavOp};
 use crate::ui::route_screen::{RouteGround, RouteLayout};
 use crate::ui::screen::{
-    At, Dir, DrawFrame, Focusable, Placed, Screen, ScreenEvent, Step,
+    At, Dir, DrawFrame, Focusable, Placed, Screen, ScreenEvent, Step, Stop,
 };
 use crate::ui::table_screen::{Header, TableScreen};
 use crate::ui::table::{Row, Section, TableView};
@@ -105,6 +105,14 @@ impl JfLoginScreen {
         // nothing to seat on.
         screen.rebuild();
         screen
+    }
+
+    fn selection_fill(&self) -> [f32; 4] {
+        if self.editing.is_some() {
+            theme::TABLE_FIELD_EDITING_FILL
+        } else {
+            theme::ACCENT
+        }
     }
 
     fn view(&self) -> TableScreen<'_> {
@@ -284,6 +292,37 @@ fn connectable(fields: &[String; 3]) -> bool {
     !fields[F_SERVER].trim().is_empty() && !fields[F_USER].trim().is_empty()
 }
 
+/// The pointer stops must use the same frame the table was actually drawn in. This screen lays
+/// out its table to the measured row height rather than the default `TableScreen` frame.
+fn pointer_rows(table: &TableView, frame: Rect) -> Vec<(u32, Rect)> {
+    (0..table.n_rows())
+        .filter(|&i| table.next_selectable(i, 0) == Some(i))
+        .filter_map(|i| table.row_frame(frame, i).map(|rect| (i as u32, rect)))
+        .collect()
+}
+
+/// Hover moves focus except while the text keyboard is active; clicks still focus and activate.
+fn pointer_stop(
+    entry: EntryId,
+    elem: u32,
+    rect: Rect,
+    clip: Rect,
+    keyboard_active: bool,
+) -> Stop<u32> {
+    Stop {
+        key: FocusKey { entry, elem },
+        rect,
+        rest_rect: rect,
+        clip,
+        hover: if keyboard_active {
+            crate::ui::screen::Hover::OnlyIfFocused
+        } else {
+            crate::ui::screen::Hover::Focus
+        },
+        activate: crate::ui::screen::Activate::Direct,
+    }
+}
+
 /// What the keyboard committed, appended to the field being edited. Newlines and control
 /// characters are dropped — the panel's Enter ends editing through the key path, so text
 /// carrying one is paste debris, not intent.
@@ -295,6 +334,32 @@ fn commit_text(fields: &mut [String; 3], editing: Option<usize>, text: &str) -> 
     }
     fields[f].push_str(&clean);
     true
+}
+
+/// Apply the two deletion commands whether they arrive as raw desktop keys or typed-edit events.
+fn delete_text(field: &mut String, edit: &crate::ui::machine::TextEdit) -> bool {
+    use crate::ui::machine::TextEdit;
+    match edit {
+        TextEdit::Backspace => field.pop().is_some(),
+        TextEdit::Clear => {
+            let changed = !field.is_empty();
+            field.clear();
+            changed
+        }
+        _ => false,
+    }
+}
+
+impl JfLoginScreen {
+    fn end_editing(&mut self) -> bool {
+        self.editing.take().is_some()
+    }
+
+    /// Enter is normalized to `Key::Ok`; consuming it here prevents the table's activation path
+    /// from reopening the field after the keyboard is dismissed.
+    fn close_editing_on_key(&mut self, key: crate::ui::machine::Key) -> bool {
+        key == crate::ui::machine::Key::Ok && self.end_editing()
+    }
 }
 
 /// The reason line under the narrative — one sentence per failure, worded for a couch, not a
@@ -406,7 +471,7 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
                 // The panel's edit protocol: while a field edit is up, OK commits and closes the
                 // keyboard instead of re-activating the row beneath it.
                 if self.editing.is_some() {
-                    self.editing = None;
+                    self.end_editing();
                     crate::textinput::stop();
                     fx.invalidate(crate::ui::present::Provenance::Input);
                     Handled::Yes
@@ -416,23 +481,33 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
                 }
             }
             ScreenEvent::Input(input) => match input.kind {
-                // While editing, backspace/clear arrive as keys and edit the field; OK and BACK
-                // both commit and close (Activate handles OK's row half, this is the raw key).
-                InputKind::Key { key, sym, edge: Edge::Down, .. } => {
+                // While editing, Enter/OK closes in this key path; backspace/clear edit the field,
+                // and BACK also commits and closes it.
+                InputKind::Key { key, sym, edge: Edge::Down | Edge::Repeat, .. } => {
+                    if self.close_editing_on_key(key) {
+                        crate::textinput::stop();
+                        fx.invalidate(crate::ui::present::Provenance::Input);
+                        return Handled::Yes;
+                    }
                     if let Some(f) = self.editing {
-                        // The panel's edit protocol, per search's key handler: backspace and
-                        // clear arrive as keys (the system keyboard's own codes), the printable
-                        // text as SDL_TEXTINPUT.
-                        match (key, sym) {
-                            (Key::Other, crate::ui::consts::SDLK_BACKSPACE) => {
-                                self.fields[f].pop();
-                                self.dirty = true;
+                        // Backspace/Clear may be delivered as ordinary keys (the system keyboard's
+                        // protocol) or as typed-edit events (the desktop editing path). Repeats
+                        // matter for a held delete key, while printable text still arrives as an
+                        // SDL_TEXTINPUT commit drained on Tick.
+                        let edit = match sym {
+                            crate::ui::consts::SDLK_BACKSPACE => {
+                                Some(crate::ui::machine::TextEdit::Backspace)
                             }
-                            (Key::Other, crate::ui::consts::SDLK_CLEAR) => {
-                                self.fields[f].clear();
-                                self.dirty = true;
+                            crate::ui::consts::SDLK_CLEAR => {
+                                Some(crate::ui::machine::TextEdit::Clear)
                             }
-                            _ => {}
+                            _ => None,
+                        };
+                        if edit
+                            .as_ref()
+                            .is_some_and(|edit| delete_text(&mut self.fields[f], edit))
+                        {
+                            self.dirty = true;
                         }
                         fx.invalidate(crate::ui::present::Provenance::Input);
                         Handled::Yes
@@ -466,6 +541,14 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
                     } else {
                         Handled::No
                     }
+                }
+                crate::ui::machine::InputKind::Text(ref edit) if self.editing.is_some() => {
+                    let field = self.editing.expect("guarded editing field");
+                    if delete_text(&mut self.fields[field], &edit) {
+                        self.dirty = true;
+                        fx.invalidate(crate::ui::present::Provenance::Input);
+                    }
+                    Handled::Yes
                 }
                 _ => Handled::No,
             },
@@ -591,7 +674,17 @@ impl<H: AppLike> Screen<H> for JfLoginScreen {
             layout.content.w,
             h,
         );
-        self.table.draw(p, frame, f.measure);
+        self.table
+            .draw_with_selection_fill(p, frame, f.measure, self.selection_fill());
+        // `TableScreen` normally registers each drawn row as a hit stop in its Part::draw. This
+        // screen owns a custom narrative/layout, so it paints the shared table directly and must
+        // publish those same stops itself; without them pointer clicks never reach the fields.
+        for (i, rect) in pointer_rows(&self.table, frame) {
+            f.stop(
+                p,
+                pointer_stop(self.entry, i, rect, frame, self.editing.is_some()),
+            );
+        }
         let working = if in_quick_connect() {
             qc::phase() == qc::Phase::Working
         } else {
@@ -663,6 +756,158 @@ mod tests {
     }
 
     #[test]
+    fn every_login_field_has_a_pointer_stop_matching_its_drawn_row() {
+        use crate::ui::hit::{HitMap, pointer_gaps};
+        use crate::ui::machine::{EntryId, FocusKey};
+
+        let screen = JfLoginScreen::new(EntryId(9));
+        let frame = Rect::new(720.0, 300.0, 520.0, screen.table.measured_height());
+        let rows = pointer_rows(&screen.table, frame);
+        assert_eq!(rows.len(), 4, "three edit fields and Connect need stops");
+
+        let mut hit = HitMap::new();
+        hit.fill(
+            rows.iter()
+                .map(|&(i, rect)| {
+                    pointer_stop(EntryId(9), i, rect, frame, screen.editing.is_some())
+                })
+                .collect(),
+        );
+        hit.swap();
+        let controls: Vec<_> = rows
+            .iter()
+            .map(|&(i, rect)| {
+                (
+                    FocusKey {
+                        entry: EntryId(9),
+                        elem: i,
+                    },
+                    rect,
+                )
+            })
+            .collect();
+        assert!(pointer_gaps(&mut hit, EntryId(9), &controls).is_empty());
+    }
+
+    #[test]
+    fn pointer_hover_moves_focus_when_keyboard_is_inactive() {
+        use crate::ui::hit::{HitMap, PointerKind};
+        use crate::ui::machine::{EntryId, FocusKey};
+
+        let screen = JfLoginScreen::new(EntryId(9));
+        let frame = Rect::new(720.0, 300.0, 520.0, screen.table.measured_height());
+        let rows = pointer_rows(&screen.table, frame);
+        let mut hit = HitMap::new();
+        hit.fill(
+            rows.iter()
+                .map(|&(i, rect)| {
+                    pointer_stop(EntryId(9), i, rect, frame, screen.editing.is_some())
+                })
+                .collect(),
+        );
+        hit.swap();
+
+        let selected = FocusKey { entry: EntryId(9), elem: F_SERVER as u32 };
+        let target = FocusKey { entry: EntryId(9), elem: F_USER as u32 };
+        let rect = rows.iter().find(|(elem, _)| *elem == target.elem).unwrap().1;
+        let (x, y) = (rect.cx(), rect.cy());
+
+        let moved = hit.resolve(Some(EntryId(9)), PointerKind::Move, x, y, Some(selected));
+        assert_eq!(moved.hit, Some(target));
+        assert_eq!(moved.focus, Some(target), "idle hover should move focus");
+
+        let clicked = hit.resolve(Some(EntryId(9)), PointerKind::Click, x, y, Some(selected));
+        assert_eq!(clicked.focus, Some(target), "a click must still move focus");
+        assert_eq!(clicked.activate.map(|(key, _)| key), Some(target));
+    }
+
+    #[test]
+    fn pointer_hover_keeps_focus_while_keyboard_is_active() {
+        use crate::ui::hit::{HitMap, PointerKind};
+        use crate::ui::machine::{EntryId, FocusKey};
+
+        let mut screen = JfLoginScreen::new(EntryId(9));
+        screen.editing = Some(F_SERVER);
+        let frame = Rect::new(720.0, 300.0, 520.0, screen.table.measured_height());
+        let rows = pointer_rows(&screen.table, frame);
+        let mut hit = HitMap::new();
+        hit.fill(
+            rows.iter()
+                .map(|&(i, rect)| {
+                    pointer_stop(EntryId(9), i, rect, frame, screen.editing.is_some())
+                })
+                .collect(),
+        );
+        hit.swap();
+
+        let selected = FocusKey {
+            entry: EntryId(9),
+            elem: F_SERVER as u32,
+        };
+        let target = FocusKey {
+            entry: EntryId(9),
+            elem: F_USER as u32,
+        };
+        let rect = rows
+            .iter()
+            .find(|(elem, _)| *elem == target.elem)
+            .unwrap()
+            .1;
+        let (x, y) = (rect.cx(), rect.cy());
+
+        let moved = hit.resolve(Some(EntryId(9)), PointerKind::Move, x, y, Some(selected));
+        assert_eq!(moved.hit, Some(target));
+        assert_eq!(
+            moved.focus, None,
+            "hover must not steal focus while editing"
+        );
+
+        let clicked = hit.resolve(Some(EntryId(9)), PointerKind::Click, x, y, Some(selected));
+        assert_eq!(
+            clicked.focus,
+            Some(target),
+            "clicks still move focus while editing"
+        );
+        assert_eq!(clicked.activate.map(|(key, _)| key), Some(target));
+    }
+
+    #[test]
+    fn editing_a_text_field_uses_a_distinct_subtle_selection_fill() {
+        let mut screen = JfLoginScreen::new(EntryId(9));
+        assert_eq!(screen.selection_fill(), theme::ACCENT);
+        screen.editing = Some(F_SERVER);
+        assert_eq!(screen.selection_fill(), theme::TABLE_FIELD_EDITING_FILL);
+        let max_channel_delta = theme::TABLE_FIELD_EDITING_FILL
+            .iter()
+            .zip(theme::ACCENT)
+            .map(|(editing, focused)| (*editing - focused).abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            max_channel_delta >= 0.1,
+            "editing tint should be visibly distinct"
+        );
+    }
+
+    #[test]
+    fn enter_closes_text_editing_and_leaves_focus_on_the_field() {
+        use crate::ui::machine::Key;
+
+        let mut screen = JfLoginScreen::new(EntryId(9));
+        screen.table.sel = F_USER as i32;
+        screen.editing = Some(F_USER);
+
+        assert!(screen.close_editing_on_key(Key::Ok));
+        assert_eq!(screen.editing, None);
+        assert_eq!(screen.table.sel, F_USER as i32, "focus stays parked for hover");
+        assert_eq!(screen.selection_fill(), theme::ACCENT, "the editing cue is removed");
+        assert!(!screen.close_editing_on_key(Key::Ok), "a closed field is not reopened");
+
+        screen.editing = Some(F_USER);
+        assert!(!screen.close_editing_on_key(Key::Down));
+        assert_eq!(screen.editing, Some(F_USER), "navigation keys do not dismiss editing");
+    }
+
+    #[test]
     fn committed_text_drops_control_characters() {
         let mut fields: [String; 3] = Default::default();
         assert!(commit_text(&mut fields, Some(F_SERVER), "192.168.\n1.20"));
@@ -670,5 +915,17 @@ mod tests {
         // …and with no edit in flight, text is dropped rather than smeared across field 0.
         assert!(!commit_text(&mut fields, None, "junk"));
         assert_eq!(fields[F_SERVER], "192.168.1.20");
+    }
+
+    #[test]
+    fn backspace_deletes_one_unicode_character_and_clear_empties_the_field() {
+        use crate::ui::machine::TextEdit;
+
+        let mut value = "mañana".to_owned();
+        assert!(delete_text(&mut value, &TextEdit::Backspace));
+        assert_eq!(value, "mañan");
+        assert!(delete_text(&mut value, &TextEdit::Clear));
+        assert!(value.is_empty());
+        assert!(!delete_text(&mut value, &TextEdit::Backspace));
     }
 }

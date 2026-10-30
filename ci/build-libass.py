@@ -79,7 +79,21 @@ def verify_library(path, darwin, readelf=None):
     else:
         dynamic = subprocess.check_output([readelf, '-d', str(path)], text=True)
         needed = re.findall(r'\(NEEDED\).*\[([^\]]+)\]', dynamic)
+        # Derive the permitted dynamic loader from the library under test, not
+        # the build host. This keeps host builds portable without allowing a
+        # wrong-architecture artifact to pass the dependency check.
+        header = subprocess.check_output([readelf, '-h', str(path)], text=True)
+        machine = re.search(r'^\s*Machine:\s*(.+)$', header, re.MULTILINE)
+        if not machine:
+            raise ValueError('could not read ELF machine type')
+        host_loader = {
+            'AArch64': 'ld-linux-aarch64.so.1',
+            'Advanced Micro Devices X86-64': 'ld-linux-x86-64.so.2',
+            'ARM': 'ld-linux-armhf.so.3',
+        }.get(machine.group(1).strip())
         allowed = {'libc.so.6', 'libm.so.6', 'libgcc_s.so.1', 'libpthread.so.0', 'ld-linux.so.3'}
+        if host_loader:
+            allowed.add(host_loader)
         symbols = subprocess.check_output([readelf, '--dyn-syms', '--wide', str(path)], text=True)
         names = []
         for line in symbols.splitlines():
