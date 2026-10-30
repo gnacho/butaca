@@ -30,16 +30,17 @@ class BundleTests(unittest.TestCase):
             'rust-modules/Cargo.toml': (b'[package]\nlicense = "GPL-3.0-or-later"\n', 0o644),
             'rust-modules/Cargo.lock': (b'version = 4\n', 0o644),
             'pkg/appinfo.json': (b'{"id":"com.example.test"}', 0o644),
-            'vendor/sentry-native/webos-arm32.patch': (b'patch source', 0o644),
+            'vendor/nanosvg/nanosvg.h': (b'nanosvg source', 0o644),
+            'vendor/nanosvg/upstream.patch': (b'patch source', 0o644),
         }
         deps = []
-        for name in ['ffmpeg', 'sentry-native', 'cargo-vendor', 'rust-runtime']:
+        for name in ['ffmpeg', 'cargo-vendor', 'rust-runtime']:
             path = 'dependencies/' + name + '/source.txt'
             data = ('editable source for ' + name).encode()
             self.contents[path] = data, 0o644
             deps.append({'id': name, 'version': 'pinned-test', 'license': 'MIT',
                          'sources': [{'path': path, 'sha256': digest(data)}], 'recipes': ['Makefile'],
-                         'patches': ['vendor/sentry-native/webos-arm32.patch'] if name == 'sentry-native' else []})
+                         'patches': ['vendor/nanosvg/upstream.patch'] if name == 'cargo-vendor' else []})
         self.manifest = {'schema': 1, 'license': 'GPL-3.0-or-later', 'dependencies': deps,
                          'build_environment': {'compiler': 'fixture'}, 'git_commit': 'a' * 40}
         self.refresh()
@@ -106,7 +107,7 @@ class BundleTests(unittest.TestCase):
             self.check()
 
     def test_missing_patch(self):
-        del self.contents['vendor/sentry-native/webos-arm32.patch']
+        del self.contents['vendor/nanosvg/upstream.patch']
         self.refresh()
         with self.assertRaisesRegex(ValueError, 'recipe/patch'):
             self.check()
@@ -312,7 +313,6 @@ class BundleTests(unittest.TestCase):
         self.assertIn(str(destination / 'rust-modules/cargo-vendor'),
                       (destination / 'rust-modules/.cargo/config.toml').read_text())
         self.assertTrue((destination / 'vendor/ffmpeg-build/source.txt').is_file())
-        self.assertTrue((destination / 'vendor/source.txt').is_file())
         for name in ['libass', 'freetype', 'fribidi', 'harfbuzz']:
             self.assertEqual((destination / 'vendor/libass-sources' / (name + '.tar.xz')).read_bytes(),
                              b'corresponding source')
