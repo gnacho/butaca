@@ -92,6 +92,30 @@ Several simulators run side by side, which the television cannot — prefer it f
 data-layer work. It **cannot** answer frame rate (different GPU), text rasterization, or anything
 about LG's decoder and video plane. Those need the set.
 
+### Watching a simulator from another machine
+
+For anything where the screen itself is the subject (a focus ring that jumps, a panel that opens in
+the wrong place, a layout at 1920x1080) the simulator is easier to trust when it is seen live rather
+than through screenshots. `tools/xvfb-novnc.sh` runs the Linux simulator on a headless `Xvfb`
+display and serves that display to a browser:
+
+    tools/xvfb-novnc.sh start          # Xvfb + x11vnc + websockify
+    BUTACA_APP_DIR=pkg DISPLAY=:99 rust-modules/target-sim/release/butaca-sim
+    tools/xvfb-novnc.sh url            # the page to open
+
+`status` reports the three processes, `stop` tears them down, and pids and logs live under
+`BUTACA_XVFB_STATE_DIR` (`/tmp/butaca-xvfb` by default). Sizes and ports are settable:
+`BUTACA_XVFB_WIDTH`, `BUTACA_XVFB_HEIGHT`, `BUTACA_XVFB_DEPTH`, `BUTACA_VNC_PORT`,
+`BUTACA_NOVNC_PORT`, plus `BUTACA_XVFB_DISPLAY` and `BUTACA_NOVNC_WEB`.
+
+**The display has no password, and that is why `x11vnc` binds to loopback only.** `--host ADDRESS`
+widens the noVNC page, which is the only piece worth exposing beyond the machine, and only on a
+network you trust. Opening the VNC port instead hands anyone who reaches it a live desktop with
+your signed-in simulator on it.
+
+This is still host evidence: the compositor is not the television's GPU, so it says nothing about
+frame rate, text rasterization or video plane composition.
+
 `.github/workflows/simulators.yml` links and launches the Linux and macOS variants when shared
 simulator inputs change. Linux runs a 1920x1080 screenshot smoke test under Xvfb; macOS performs
 the same smoke test through its native window server. The Windows job parses `tools/sim.ps1` with

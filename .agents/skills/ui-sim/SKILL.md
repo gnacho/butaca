@@ -69,6 +69,16 @@ Linux `make sim-linux` target. Both skip bundled host FFmpeg. UI, sign-in, Plex 
 screenshots and remote commands work; playback reaches the existing host "no video path" result.
 Use macOS `make sim-macos` when the demux/clock-sink simulation is required.
 
+## Watching a headless Linux simulator
+
+`tools/xvfb-novnc.sh start|stop|status|url` runs the Linux simulator on an `Xvfb` display and serves
+it as a noVNC page, for judging the screen itself rather than a screenshot: focus movement, panel
+placement, layout at 1920x1080. Start the script, run `rust-modules/target-sim/release/butaca-sim`
+with `DISPLAY=:99` and `BUTACA_APP_DIR=pkg`, then open the printed URL. `x11vnc` stays on loopback
+because the display has no password; `--host` widens only the web page. Settings live in
+`BUTACA_XVFB_*`, `BUTACA_VNC_PORT` and `BUTACA_NOVNC_PORT`, state in `/tmp/butaca-xvfb`. Host
+evidence only: no frame rate, no LG text rasterization, no video plane.
+
 Check `glxinfo -B` before interpreting local smoothness: `Device: D3D12 (<GPU>)` and
 `Accelerated: yes` prove WSLg is using the GPU; `llvmpipe`, `softpipe`, or `Accelerated: no` do not.
 The result is still host evidence and never a television FPS result.
