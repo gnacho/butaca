@@ -555,7 +555,7 @@ impl<H: PlayerLike + crate::screens::registry::MetadataLike> Machine<H> for Play
                 // …and the Up Next countdown, which arms on APPEARANCE and is dropped with the
                 // segment. Stepped for the whole route, not per-overlay: the countdown must keep
                 // running whichever panel is up (`up_next::tick`).
-                self.up_next.tick(self.slot, tick.ms);
+                self.up_next.tick(self.slot, tick.ms, crate::route::up_next_auto_advances());
                 // The scrub gesture's whole per-frame half — `app/run.rs`'s old
                 // per-loop-iteration block, now on this screen's own Tick: the continuous
                 // accelerating advance with its lost-keyup safety commit, then the tap debounce.

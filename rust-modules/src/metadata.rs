@@ -75,7 +75,7 @@ impl<'a> MetadataView<'a> {
         }
         let dur_ms = crate::player::duration_ns() / 1_000_000;
         let pos_ms = crate::player::playpos_ns() / 1_000_000;
-        tail_marker(pos_ms, dur_ms)
+        tail_marker_with(pos_ms, dur_ms, crate::route::up_next_window_ms())
     }
     pub(crate) fn alt_copies(&self, sid: crate::plex::ServerId, rk: &str) -> &'a [AltCopy] {
         alt_copies(self.state, sid, rk)
@@ -1180,14 +1180,17 @@ fn mark_skipped(state: &mut MetadataState, m: Marker) {
 /// that said "credits start at 41:03" must not be second-guessed at 30s-before-end), and only
 /// when the item is long enough that its tail is clearly an ending (> 3x the window, so a short
 /// clip does not spend a third of its runtime offering the next one).
-pub(crate) const TAIL_WINDOW_MS: i64 = 30_000;
-
 /// The pure half of [`MetadataView::synthesized_tail_marker`] — the window geometry alone, host-testable.
-pub(crate) fn tail_marker(pos_ms: i64, dur_ms: i64) -> Option<Marker> {
-    if dur_ms < TAIL_WINDOW_MS * 3 {
+/// `window_ms` is the user's `Up Next` timing (`route::up_next_window_ms`), whose default is
+/// [`crate::plex::session::UP_NEXT_WINDOW_DEFAULT_S`]. There is no second constant here on purpose:
+/// a default spelled in two places drifts. The guard scales with it, so a short episode
+/// never spends a third of its running time offering a card, and a window of zero (the card at the
+/// very end) would leave nothing to show, hence `None`.
+pub(crate) fn tail_marker_with(pos_ms: i64, dur_ms: i64, window_ms: i64) -> Option<Marker> {
+    if window_ms <= 0 || dur_ms < window_ms * 3 {
         return None;
     }
-    let start_ms = dur_ms - TAIL_WINDOW_MS;
+    let start_ms = dur_ms - window_ms;
     (pos_ms >= start_ms).then_some(Marker {
         kind: MarkerKind::Credits,
         start_ms,
@@ -4440,30 +4443,33 @@ mod marker_tests {
     }
 
     /// The Plex-Pass-free tail: a server without credits detection ships no markers, so the last
-    /// [`TAIL_WINDOW_MS`] of an episode stands in as the credits segment (final, ending at the
-    /// duration) — the geometry Up Next arms from. Short items never grow one: a 60s clip
-    /// offering "next" for half its runtime is worse than no offer.
+    /// window of an episode (30s by default) stands in as the credits segment (final, ending at
+    /// the duration) — the geometry Up Next arms from. Short items never grow one: a 60s clip
+    /// offering "next" for half its runtime is worse than no offer. The window is the user's, so
+    /// the geometry is asserted against the configured value rather than a constant.
     #[test]
     fn the_tail_window_stands_in_for_undetected_credits() {
+        let w = crate::plex::session::UP_NEXT_WINDOW_DEFAULT_S * 1_000;
+        let tail = |pos_ms, dur_ms| tail_marker_with(pos_ms, dur_ms, w);
         let dur = 22 * 60 * 1000; // a 22-minute episode
-        assert!(tail_marker(0, dur).is_none(), "the open");
+        assert!(tail(0, dur).is_none(), "the open");
         assert!(
-            tail_marker(dur - TAIL_WINDOW_MS - 1, dur).is_none(),
+            tail(dur - w - 1, dur).is_none(),
             "one ms before the window"
         );
-        let m = tail_marker(dur - TAIL_WINDOW_MS, dur).expect("inclusive at the window edge");
+        let m = tail(dur - w, dur).expect("inclusive at the window edge");
         assert_eq!((m.kind, m.final_seg), (MarkerKind::Credits, true));
-        assert_eq!((m.start_ms, m.end_ms), (dur - TAIL_WINDOW_MS, dur));
+        assert_eq!((m.start_ms, m.end_ms), (dur - w, dur));
         assert!(
-            tail_marker(dur - 1, dur).is_some(),
+            tail(dur - 1, dur).is_some(),
             "the last frame still offers it"
         );
         assert!(
-            tail_marker(80_000, 89_999).is_none(),
+            tail(80_000, 89_999).is_none(),
             "short items never grow a tail"
         );
         assert!(
-            tail_marker(0, 0).is_none(),
+            tail(0, 0).is_none(),
             "no duration published (a transcode mid-probe)"
         );
     }
