@@ -146,3 +146,19 @@ fn the_play_automatically_retry_resolves_under_auto_not_the_failed_force() {
     assert_eq!(retry_context_with(&ps, 123, Some(DirectPlayMode::Auto)).direct_play_mode, DirectPlayMode::Auto);
     assert_eq!(retry_context_with(&ps, 123, Some(DirectPlayMode::Auto)).resume_ns, 123);
 }
+
+#[test]
+fn lip_sync_offset_clamps_to_the_range_and_round_trips() {
+    let _serial = crate::testlock::serial();
+    let previous = lip_sync_offset_ms();
+    assert_eq!(lip_sync_offset_range_ms(), (LIP_SYNC_MIN_MS, LIP_SYNC_MAX_MS));
+    assert_eq!(clamp_lip_sync_offset_ms(0), 0);
+    assert_eq!(clamp_lip_sync_offset_ms(25), 25);
+    assert_eq!(clamp_lip_sync_offset_ms(5_000), LIP_SYNC_MAX_MS);
+    assert_eq!(clamp_lip_sync_offset_ms(-5_000), LIP_SYNC_MIN_MS);
+    restore_lip_sync_offset_ms(125);
+    assert_eq!(lip_sync_offset_ms(), 125);
+    restore_lip_sync_offset_ms(10_000);
+    assert_eq!(lip_sync_offset_ms(), LIP_SYNC_MAX_MS, "restore clamps too");
+    restore_lip_sync_offset_ms(previous);
+}

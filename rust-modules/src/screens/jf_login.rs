@@ -12,6 +12,7 @@
 #![cfg(feature = "jellyfin")]
 
 use crate::jellyfin::signin::{self, Fail, Phase};
+use crate::jellyfin::quick_connect as qc;
 use super::family::table_focus;
 use crate::screens::registry::AppLike;
 use crate::ui::machine::{Cx, Effects, EntryId, FocusKey, Fx, GroupId, Handled, Machine, NavOp};
@@ -30,6 +31,8 @@ const F_SERVER: usize = 0;
 const F_USER: usize = 1;
 const F_PASS: usize = 2;
 const ROW_CONNECT: u32 = 3;
+/// Quick Connect mode: the server field is row 0 and the *Start* action is row 1.
+const ROW_START_QC: u32 = 1;
 
 fn labels() -> [&'static str; 3] {
     [
@@ -37,6 +40,14 @@ fn labels() -> [&'static str; 3] {
         crate::i18n::msg::browse_jellyfin_user_name(),
         crate::i18n::msg::browse_jellyfin_password(),
     ]
+}
+
+/// Quick Connect mode: armed by the Settings *Conexión rápida* action before this screen is
+/// pushed. The form then shows one server field and a *Start Quick Connect* action; once the
+/// worker posts the code, the narrative shows it instead of the password explainer. The password
+/// path is untouched: a normal push of this screen has the flag off and behaves exactly as before.
+fn in_quick_connect() -> bool {
+    qc::add_mode()
 }
 /// What an untouched field says. The server's is an example (the one thing a person must invent
 /// is also the one with a shape worth showing); the other two state their requirement.
@@ -52,6 +63,9 @@ pub(crate) struct JfLoginScreen {
     /// The last failed attempt's reason — from `signin`'s phase, or a validation the screen
     /// itself did (empty fields) without ever starting one.
     fail: Option<Fail>,
+    /// The Quick Connect failure, separate from `fail` because its vocabulary is a superset
+    /// (`Unsupported`, `TimedOut`) the password form has no words for.
+    qc_fail: Option<qc::Fail>,
     /// Rebuild the table's rows next tick — text landed, or the phase changed under them.
     dirty: bool,
     spin_ms: f32,
@@ -79,6 +93,7 @@ impl JfLoginScreen {
             fields,
             editing: None,
             fail: None,
+            qc_fail: None,
             dirty: false,
             spin_ms: 0.0,
             logo_tex: 0,
@@ -119,6 +134,9 @@ impl JfLoginScreen {
     /// The form as table sections: one section of fields, one of the action. Rebuilt on change
     /// only — `TableView`'s springs live across these, `slide=true` keeps the pill where it was.
     fn build_rows(&self) -> Vec<Section> {
+        if in_quick_connect() {
+            return self.build_rows_qc();
+        }
         let working = signin::phase() == Phase::Working;
         let mut fields = Section::new("");
         for (i, label) in labels().iter().enumerate() {
@@ -145,6 +163,31 @@ impl JfLoginScreen {
         vec![fields, action]
     }
 
+    /// The Quick Connect form: one server field and a *Start* action. Once the worker has posted
+    /// the code, the action dims and the narrative (not this table) shows the code.
+    fn build_rows_qc(&self) -> Vec<Section> {
+        let working = qc::phase() != qc::Phase::Editing;
+        let code_shown = qc::code().is_some();
+        let empty = self.fields[F_SERVER].is_empty();
+        let value = if empty {
+            crate::i18n::msg::browse_jellyfin_hint_address().to_string()
+        } else {
+            self.fields[F_SERVER].clone()
+        };
+        let fields = Section::new("").row(
+            Row::new(crate::i18n::msg::browse_jellyfin_server())
+                .value(value)
+                .value_dim(empty)
+                .dim(working),
+        );
+        let action = Section::new("").row(
+            Row::new(crate::i18n::msg::browse_jellyfin_quick_connect_start())
+                .chevron(true)
+                .dim(working || code_shown || self.fields[F_SERVER].trim().is_empty()),
+        );
+        vec![fields, action]
+    }
+
     fn rebuild(&mut self) {
         let rows = self.build_rows();
         let sel = self.table.sel;
@@ -154,6 +197,10 @@ impl JfLoginScreen {
 
     /// OK (or the pointer) landed on a row. Rows 0..3 are fields; row 3 is Connect.
     fn activate(&mut self, elem: u32, fx: &mut Effects<'_, impl AppLike>) {
+        if in_quick_connect() {
+            self.activate_qc(elem, fx);
+            return;
+        }
         if signin::phase() == Phase::Working {
             return; // an attempt is out; the form is inert until it answers
         }
@@ -173,6 +220,28 @@ impl JfLoginScreen {
             }
         } else if (0..3).contains(&elem) {
             self.editing = Some(elem as usize);
+            crate::textinput::start();
+        }
+        fx.invalidate(crate::ui::present::Provenance::Input);
+    }
+
+    /// OK on the Quick Connect form: row 0 edits the server field, row 1 starts the flow.
+    fn activate_qc(&mut self, elem: u32, fx: &mut Effects<'_, impl AppLike>) {
+        if qc::phase() != qc::Phase::Editing {
+            return; // an attempt is out; the form is inert until it answers
+        }
+        if elem == ROW_START_QC {
+            if self.fields[F_SERVER].trim().is_empty() {
+                self.qc_fail = Some(qc::Fail::Parse);
+            } else {
+                match qc::start(&self.fields[F_SERVER]) {
+                    Err(f) => self.qc_fail = Some(f),
+                    Ok(()) => self.qc_fail = None,
+                }
+            }
+            self.dirty = true;
+        } else if elem == F_SERVER as u32 {
+            self.editing = Some(F_SERVER);
             crate::textinput::start();
         }
         fx.invalidate(crate::ui::present::Provenance::Input);
@@ -246,6 +315,19 @@ fn fail_text(f: Fail) -> &'static str {
     }
 }
 
+/// The reason line for a Quick Connect failure. Reuses the password form's words for the shared
+/// reasons and adds the two only Quick Connect has: an old server and a poll that ran out.
+fn qc_fail_text(f: qc::Fail) -> &'static str {
+    match f {
+        qc::Fail::Parse => crate::i18n::msg::browse_jellyfin_error_address(),
+        qc::Fail::Plaintext => crate::i18n::msg::browse_jellyfin_error_https(),
+        qc::Fail::Unsupported => crate::i18n::msg::browse_jellyfin_quick_connect_unsupported(),
+        qc::Fail::TimedOut => crate::i18n::msg::browse_jellyfin_quick_connect_timeout(),
+        qc::Fail::Refused => crate::i18n::msg::browse_jellyfin_error_auth(),
+        qc::Fail::Unreachable => crate::i18n::msg::browse_jellyfin_error_reach(),
+    }
+}
+
 impl crate::ui::machine::LogicalState for JfLoginScreen {
     fn write(&self, c: &mut crate::ui::machine::Canon) {
         c.u32(self.table.sel as u32);
@@ -277,20 +359,38 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
                 // Mirror the flow's phase into the one fact the draw reads. Editing means no
                 // attempt has failed since the last keypress; a stale failure is cleared the
                 // moment a new attempt runs.
-                match signin::phase() {
-                    Phase::Working | Phase::Ready => {
-                        if self.fail.is_some() {
-                            self.fail = None;
-                            self.dirty = true;
+                if in_quick_connect() {
+                    match qc::phase() {
+                        qc::Phase::Working | qc::Phase::Ready => {
+                            if self.qc_fail.is_some() {
+                                self.qc_fail = None;
+                                self.dirty = true;
+                            }
                         }
-                    }
-                    Phase::Failed(f) => {
-                        if self.fail != Some(f) {
-                            self.fail = Some(f);
-                            self.dirty = true;
+                        qc::Phase::Failed(f) => {
+                            if self.qc_fail != Some(f) {
+                                self.qc_fail = Some(f);
+                                self.dirty = true;
+                            }
                         }
+                        qc::Phase::Editing => {}
                     }
-                    Phase::Editing => {}
+                } else {
+                    match signin::phase() {
+                        Phase::Working | Phase::Ready => {
+                            if self.fail.is_some() {
+                                self.fail = None;
+                                self.dirty = true;
+                            }
+                        }
+                        Phase::Failed(f) => {
+                            if self.fail != Some(f) {
+                                self.fail = Some(f);
+                                self.dirty = true;
+                            }
+                        }
+                        Phase::Editing => {}
+                    }
                 }
                 if self.dirty {
                     self.rebuild();
@@ -343,12 +443,26 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
                         // mode and hand the user back there (#56). The invalidate is load-bearing:
                         // structural ops apply at the frame's NAV COMMIT, and an idle loop renders
                         // no frame - without it the parked pop sat uncommitted forever.
-                        if signin::add_mode() {
+                        if in_quick_connect() {
+                            // Quick Connect: BACK during the poll cancels it (the form keeps the
+                            // remote and shows why it stopped); BACK while editing disarms the
+                            // mode and pops back to Settings, exactly as add-server does.
+                            if qc::phase() != qc::Phase::Editing {
+                                qc::cancel();
+                            } else {
+                                qc::set_add_mode(false);
+                                fx.push(Fx::Nav(NavOp::Pop));
+                                fx.invalidate(crate::ui::present::Provenance::Input);
+                            }
+                            Handled::Yes
+                        } else if signin::add_mode() {
                             signin::set_add_mode(false);
                             fx.push(Fx::Nav(NavOp::Pop));
                             fx.invalidate(crate::ui::present::Provenance::Input);
+                            Handled::Yes
+                        } else {
+                            Handled::No
                         }
-                        Handled::Yes
                     } else {
                         Handled::No
                     }
@@ -423,20 +537,50 @@ impl<H: AppLike> Screen<H> for JfLoginScreen {
                 .draw(p, Rect::new(nar.x, y, nar.w, theme::size::DISPLAY as f32 * 1.3));
             y += theme::size::DISPLAY as f32 * 1.6;
         }
-        TextView::new(crate::i18n::msg::browse_jellyfin_sign_in_title(), theme::size::TITLE, theme::TEXT_HEADING)
-            .bold()
-            .draw(p, Rect::new(nar.x, y, nar.w, theme::size::TITLE as f32 * 1.4));
-        y += theme::size::TITLE as f32 * 1.4 + theme::space::SM;
-        TextView::new(
-            crate::i18n::msg::browse_jellyfin_sign_in_explainer(),
-            theme::size::LABEL,
-            theme::TEXT_SECONDARY,
-        )
-        .draw(p, Rect::new(nar.x, y, nar.w, theme::size::LABEL as f32 * 3.2));
-        y += theme::size::LABEL as f32 * 3.2 + theme::space::MD;
-        if let Some(fail) = self.fail {
-            TextView::new(fail_text(fail), theme::size::LABEL, theme::DANGER)
-                .draw(p, Rect::new(nar.x, y, nar.w, theme::size::LABEL as f32 * 3.2));
+        if in_quick_connect() {
+            // Quick Connect: the code becomes the headline once the worker posts it; before that
+            // the title still reads as the sign-in screen.
+            match qc::code() {
+                Some(code) => {
+                    TextView::new(&code, theme::size::DISPLAY, theme::TEXT_HEADING)
+                        .bold()
+                        .draw(p, Rect::new(nar.x, y, nar.w, theme::size::DISPLAY as f32 * 1.3));
+                    y += theme::size::DISPLAY as f32 * 1.4;
+                }
+                None => {
+                    TextView::new(crate::i18n::msg::browse_jellyfin_sign_in_title(), theme::size::TITLE, theme::TEXT_HEADING)
+                        .bold()
+                        .draw(p, Rect::new(nar.x, y, nar.w, theme::size::TITLE as f32 * 1.4));
+                    y += theme::size::TITLE as f32 * 1.4 + theme::space::SM;
+                }
+            }
+            TextView::new(
+                crate::i18n::msg::browse_jellyfin_quick_connect_explainer(),
+                theme::size::LABEL,
+                theme::TEXT_SECONDARY,
+            )
+            .draw(p, Rect::new(nar.x, y, nar.w, theme::size::LABEL as f32 * 3.2));
+            y += theme::size::LABEL as f32 * 3.2 + theme::space::MD;
+            if let Some(f) = self.qc_fail {
+                TextView::new(qc_fail_text(f), theme::size::LABEL, theme::DANGER)
+                    .draw(p, Rect::new(nar.x, y, nar.w, theme::size::LABEL as f32 * 3.2));
+            }
+        } else {
+            TextView::new(crate::i18n::msg::browse_jellyfin_sign_in_title(), theme::size::TITLE, theme::TEXT_HEADING)
+                .bold()
+                .draw(p, Rect::new(nar.x, y, nar.w, theme::size::TITLE as f32 * 1.4));
+            y += theme::size::TITLE as f32 * 1.4 + theme::space::SM;
+            TextView::new(
+                crate::i18n::msg::browse_jellyfin_sign_in_explainer(),
+                theme::size::LABEL,
+                theme::TEXT_SECONDARY,
+            )
+            .draw(p, Rect::new(nar.x, y, nar.w, theme::size::LABEL as f32 * 3.2));
+            y += theme::size::LABEL as f32 * 3.2 + theme::space::MD;
+            if let Some(fail) = self.fail {
+                TextView::new(fail_text(fail), theme::size::LABEL, theme::DANGER)
+                    .draw(p, Rect::new(nar.x, y, nar.w, theme::size::LABEL as f32 * 3.2));
+            }
         }
 
         // The form, vertically centred in the content column, with the working spinner beside it.
@@ -448,7 +592,12 @@ impl<H: AppLike> Screen<H> for JfLoginScreen {
             h,
         );
         self.table.draw(p, frame, f.measure);
-        if signin::phase() == Phase::Working {
+        let working = if in_quick_connect() {
+            qc::phase() == qc::Phase::Working
+        } else {
+            signin::phase() == Phase::Working
+        };
+        if working {
             Spinner::new(frame.cx(), frame.y - theme::space::XL, 15.0)
                 .phase(self.spin_ms as u32)
                 .tint(theme::TEXT_SECONDARY)

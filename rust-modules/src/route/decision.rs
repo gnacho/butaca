@@ -11,7 +11,7 @@
 use crate::plex::ServerId;
 use crate::pms::PmsMovie;
 use std::os::raw::c_char;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU8, Ordering};
 use std::sync::Mutex;
 use super::plan::*;
 
@@ -5204,6 +5204,51 @@ pub(crate) fn set_direct_play_mode(mode: DirectPlayMode) -> bool {
         .is_some_and(|write| matches!(write.classify(),
             crate::plex::session::async_persistence::CompletionOutcome::Durable(_)));
     if saved { restore_direct_play_mode(mode); crate::ui::idle::invalidate(); }
+    saved
+}
+
+/// Install-wide lip-sync offset in milliseconds, applied to the video feed to compensate
+/// Bluetooth audio latency (positive delays the picture). A preference, not session state, so it
+/// lives beside [`DIRECT_PLAY_MODE`] and [`QUALITY`] as a process-wide atomic.
+static LIP_SYNC_OFFSET_MS: AtomicI64 = AtomicI64::new(0);
+
+/// The clamp range the picker and the writer both obey. Bluetooth audio latency sits well inside
+/// this; the bounds exist so a hand-edited value cannot ask the pump for a nonsense shift.
+pub(crate) const LIP_SYNC_MIN_MS: i64 = -500;
+pub(crate) const LIP_SYNC_MAX_MS: i64 = 500;
+/// The picker's step, and the granularity the clamp round-trips to.
+pub(crate) const LIP_SYNC_STEP_MS: i64 = 25;
+
+pub(crate) fn lip_sync_offset_ms() -> i64 {
+    LIP_SYNC_OFFSET_MS.load(Ordering::Relaxed)
+}
+
+/// The one range rule: the picker offers steps within it and the writer clamps to it.
+pub(crate) fn lip_sync_offset_range_ms() -> (i64, i64) {
+    (LIP_SYNC_MIN_MS, LIP_SYNC_MAX_MS)
+}
+
+pub(crate) fn clamp_lip_sync_offset_ms(offset_ms: i64) -> i64 {
+    offset_ms.clamp(LIP_SYNC_MIN_MS, LIP_SYNC_MAX_MS)
+}
+
+/// Restore the persisted preference without writing it back, exactly as
+/// [`restore_direct_play_mode`]. The `#[cfg(test)]` lock guard mirrors that function's: the atomic
+/// is a process global read without a lock, so a test writing it mid another test's read flakes.
+pub(crate) fn restore_lip_sync_offset_ms(offset_ms: i64) {
+    #[cfg(test)]
+    crate::testlock::assert_held("the lip-sync offset (restore_lip_sync_offset_ms)");
+    LIP_SYNC_OFFSET_MS.store(clamp_lip_sync_offset_ms(offset_ms), Ordering::Relaxed);
+}
+
+/// Blocking persistence seam; Settings dispatches it on the storage worker, exactly as
+/// [`set_direct_play_mode`].
+pub(crate) fn set_lip_sync_offset_ms(offset_ms: i64) -> bool {
+    let offset_ms = clamp_lip_sync_offset_ms(offset_ms);
+    let saved = crate::plex::session::update_with_outcome(|s| Some(s.with_lip_sync_offset_ms(offset_ms)))
+        .is_some_and(|write| matches!(write.classify(),
+            crate::plex::session::async_persistence::CompletionOutcome::Durable(_)));
+    if saved { restore_lip_sync_offset_ms(offset_ms); crate::ui::idle::invalidate(); }
     saved
 }
 

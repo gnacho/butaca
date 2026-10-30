@@ -1,0 +1,12 @@
+{
+  "expected": "0xed8a017bd34a24c3",
+  "first_frame": 470,
+  "from_state_fp": 380541232516096414,
+  "got": "0x73d36ad329c24794",
+  "preceding_event_kinds": [
+    "in",
+    "in"
+  ],
+  "reason": "Re-record for the added Audio sync (lip-sync offset) field in Settings > Playback, which adds a row and a new Width measurement. Captured at ~26 fps on this machine; span and stages unchanged.",
+  "to_state_fp": 380541232516096414
+}

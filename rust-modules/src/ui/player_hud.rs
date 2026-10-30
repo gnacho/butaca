@@ -1464,6 +1464,13 @@ pub(crate) fn draw_playbar(p: Painter, bar: Playbar, measure: &dyn crate::ui::ma
     } else {
         0.0
     };
+    // Trickplay thumbnail (issue #65) - the preview still that would sit ABOVE the playhead while
+    // scrubbing, fed from the scrub fraction `frac`. NOT drawn here: the data layer exists
+    // (Jellyfin `jellyfin::client::trickplay_info`, Plex `plex::bif::parse_bif_index`), but drawing
+    // it needs (1) an async fetch + decode of the one frame - `/Videos/{id}/Trickplay/{width}/
+    // {index}.jpg` for Jellyfin, `/library/parts/{id}/indexes/sd/{offsetMs}` for Plex - that must
+    // not block this draw thread, and (2) a cached texture just above `(hx, sy)` shown only while
+    // `bar.knob` is `Held`. Until that lands the scrubber keeps its numeric clock only.
     p.rect(Rect::new(sx, sy, sw, sh), sh * 0.5, track, track, 0.0);
     let fw = (sw as f64 * frac) as f32;
     if fw > sh * 0.5 {

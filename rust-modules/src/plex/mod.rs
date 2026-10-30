@@ -39,6 +39,11 @@ pub(crate) const SIDECAR_MAX_BYTES: usize = 4 * 1024 * 1024;
 mod timeline;
 mod transcoder;
 
+/// The Plex BIF index parser (video preview thumbnails). Data layer only: it turns the index
+/// table of `GET /library/parts/{id}/indexes/sd` into timestamp→offset entries; fetching and
+/// decoding the frames is deliberately not here.
+mod bif;
+
 // The server's self-description (version + Plex Pass tristate), refreshed by `install` on every
 // session path. pub(crate) because it is a DIAGNOSTICS surface with readers outside this layer
 // (`app::diagnostics`, `player::error_shape`) — and deliberately nothing else: see its module doc for

@@ -16,11 +16,11 @@
 //! LAN address. **The token is never logged** — parse failures name the endpoint, which is the
 //! part of the path before the query string.
 
-use super::dto::{AuthResponse, AuthUser, BaseItemDto, ItemsResult, ViewsResult};
+use super::dto::{AuthResponse, AuthUser, BaseItemDto, ItemsResult, QuickConnectResult, TrickplayInfoDto, ViewsResult};
 use crate::http;
 use crate::plex::Origin;
 use serde::de::DeserializeOwned;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Mutex, RwLock};
 
 /// What a stored token resolves to: the account it was minted for. Narrower than [`AuthOk`]
@@ -102,6 +102,20 @@ struct TokenState {
     /// The display name the sign-in answered (`AuthOk.user_name`) — the Home chip reads it
     /// (`Session::account`'s jellyfin arm), so a signed-in user never sees "Sign in".
     user_name: String,
+}
+
+/// Parse a dotted `Major.Minor[.Patch...]` version string and compare it against a floor. Used
+/// only to gate Quick Connect (10.8.0). A malformed or shorter-than-two-component version answers
+/// false, so a server that reports no parseable version is treated as not supporting the feature.
+fn version_at_least(version: &str, major: u32, minor: u32) -> bool {
+    let mut parts = version.split('.');
+    let maj = parts.next().and_then(|p| p.trim().parse::<u32>().ok());
+    let min = parts.next().and_then(|p| p.trim().parse::<u32>().ok());
+    match (maj, min) {
+        (Some(m), _) if m > major => true,
+        (Some(m), Some(n)) if m == major && n >= minor => true,
+        _ => false,
+    }
 }
 
 impl JfClient {
@@ -194,6 +208,136 @@ impl JfClient {
             user_name: ok.user_name.clone(),
         });
         Ok(ok)
+    }
+
+    /// `POST /QuickConnect/Initiate` — start a Quick Connect session. Unauthenticated: the
+    /// identity header names the device, and the answer's `Secret`/`Code` are the session
+    /// credential, not a user token. `None` on transport failure, a non-2xx (401 = Quick Connect
+    /// disabled on the server), or unparseable JSON.
+    pub(crate) fn quick_connect_initiate(&self) -> Option<QuickConnectResult> {
+        let id = self.identity_header();
+        let reply = http::request(
+            &self.origin,
+            "/QuickConnect/Initiate",
+            http::Method::Post,
+            &[id.as_str()],
+            None,
+        )?;
+        if !reply.ok() {
+            crate::log(&format!("jellyfin: QuickConnect/Initiate answered {}", reply.status));
+            return None;
+        }
+        match serde_json::from_slice::<QuickConnectResult>(&reply.body) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                crate::log(&format!(
+                    "jellyfin: QuickConnect/Initiate answered {} bytes that will not parse — {e}",
+                    reply.body.len()
+                ));
+                None
+            }
+        }
+    }
+
+    /// `GET /QuickConnect/Connect?secret=` — the poll: has this Quick Connect request been
+    /// authorized on another device yet? The `secret` is what `quick_connect_initiate` returned;
+    /// it rides in the query because this route authenticates on the secret alone. `None` on
+    /// transport failure, non-2xx (404 = unknown secret), or unparseable JSON.
+    pub(crate) fn quick_connect_state(&self, secret: &str) -> Option<QuickConnectResult> {
+        let id = self.identity_header();
+        let path = format!("/QuickConnect/Connect?secret={secret}");
+        let reply = http::request(&self.origin, &path, http::Method::Get, &[id.as_str()], None)?;
+        if !reply.ok() {
+            crate::log(&format!(
+                "jellyfin: QuickConnect/Connect answered {}",
+                reply.status
+            ));
+            return None;
+        }
+        match serde_json::from_slice::<QuickConnectResult>(&reply.body) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                crate::log(&format!(
+                    "jellyfin: QuickConnect/Connect answered {} bytes that will not parse — {e}",
+                    reply.body.len()
+                ));
+                None
+            }
+        }
+    }
+
+    /// `POST /Users/AuthenticateWithQuickConnect` — trade an AUTHORIZED Quick Connect secret for
+    /// the access token. Answers the same `AuthenticationResult` shape as
+    /// [`authenticate_by_name`], and installs the token exactly as that method does. A 400/401/403
+    /// (not authorized, unknown secret, disabled) folds into `Unauthorized` so the flow can fall
+    /// back to the password form without inventing a fourth failure word.
+    pub(crate) fn authenticate_with_quick_connect(&self, secret: &str) -> Result<AuthOk, AuthError> {
+        let body = serde_json::json!({ "Secret": secret });
+        let id = self.identity_header();
+        let reply = match http::request_post_json(
+            &self.origin,
+            "/Users/AuthenticateWithQuickConnect",
+            &[id.as_str()],
+            body.to_string().as_bytes(),
+        ) {
+            Some(r) => r,
+            None => return Err(AuthError::Unreachable),
+        };
+        if matches!(reply.status, 400 | 401 | 403) {
+            return Err(AuthError::Unauthorized);
+        }
+        if !reply.ok() {
+            crate::log(&format!(
+                "jellyfin: AuthenticateWithQuickConnect answered {}",
+                reply.status
+            ));
+            return Err(AuthError::Unreachable);
+        }
+        let parsed: AuthResponse = match serde_json::from_slice(&reply.body) {
+            Ok(p) => p,
+            Err(e) => {
+                crate::log(&format!(
+                    "jellyfin: AuthenticateWithQuickConnect answered {} bytes that will not parse — {e}",
+                    reply.body.len()
+                ));
+                return Err(AuthError::Unreachable);
+            }
+        };
+        let ok = AuthOk {
+            token: parsed.access_token,
+            user_id: parsed.user.id,
+            user_name: parsed.user.name,
+            server_id: parsed.server_id,
+        };
+        *self.token.write().unwrap() = Some(TokenState {
+            token: ok.token.clone(),
+            user_id: ok.user_id.clone(),
+            user_name: ok.user_name.clone(),
+        });
+        Ok(ok)
+    }
+
+    /// Whether this server can answer Quick Connect (added in Jellyfin 10.8.0). Reads the public
+    /// system info WITHOUT a token — `GET /System/Info/Public` is unauthenticated by design — and
+    /// compares the reported version against the floor. A malformed or absent version answers
+    /// false, which falls back to the password login rather than gambling on a route that 404s.
+    pub(crate) fn quick_connect_supported(&self) -> bool {
+        let Some(reply) = http::request(
+            &self.origin,
+            "/System/Info/Public",
+            http::Method::Get,
+            &[crate::http::ACCEPT_JSON],
+            None,
+        ) else {
+            return false;
+        };
+        if !reply.ok() {
+            return false;
+        }
+        let Ok(info) = serde_json::from_slice::<super::dto::PublicInfo>(&reply.body) else {
+            return false;
+        };
+        version_at_least(&info.version, 10, 8)
     }
 
     /// Adopt a token an earlier run persisted: install it, then ask the server who it belongs to.
@@ -608,6 +752,25 @@ impl JfClient {
             "/Users/{user_id}/Items/{item_id}?Fields={}&EnableImageTypes=Primary,Backdrop",
             Self::DETAIL_FIELDS
         ))
+    }
+
+    /// The item's trickplay manifest (`GET /Users/{uid}/Items/{id}?Fields=Trickplay`), or `None`
+    /// when the server has generated none. The outer key is the tile width as a string ("320");
+    /// the seek-bar reader picks a width and fetches the sheet at
+    /// `/Videos/{id}/Trickplay/{width}/{index}.jpg`. Data layer only: fetching and decoding the
+    /// sheets is deliberately NOT here.
+    pub(crate) fn trickplay_info(
+        &self,
+        item_id: &str,
+    ) -> Option<BTreeMap<String, BTreeMap<String, TrickplayInfoDto>>> {
+        let user_id = self.user_id()?;
+        let dto: BaseItemDto =
+            self.get_json(&format!("/Users/{user_id}/Items/{item_id}?Fields=Trickplay"))?;
+        if dto.trickplay.is_empty() {
+            None
+        } else {
+            Some(dto.trickplay)
+        }
     }
 
     /// A show's seasons (`GET /Shows/{id}/Seasons`).
@@ -1605,5 +1768,133 @@ mod tests {
         assert!(a_q.contains("NameStartsWith=A"));
         assert!(a_q.contains("Limit=0"));
         assert!(reqs[27].lines().next().unwrap().contains("NameStartsWith=Z"));
+    }
+
+    /// Quick Connect: Initiate is an unauthenticated POST carrying only the device identity, and
+    /// the answer's Secret/Code parse out of the result.
+    #[test]
+    fn quick_connect_initiate_posts_identity_and_parses_secret_and_code() {
+        let server = MockServer::start(vec![(
+            200,
+            r#"{"Secret":"qc-secret-1","Code":"123456","Authenticated":false}"#,
+        )]);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        let res = client.quick_connect_initiate().expect("initiate parses");
+        assert_eq!(res.secret, "qc-secret-1");
+        assert_eq!(res.code, "123456");
+        assert!(!res.authenticated);
+
+        let reqs = server.finish();
+        assert_eq!(reqs.len(), 1);
+        let head = reqs[0].lines().next().unwrap();
+        assert!(head.starts_with("POST /QuickConnect/Initiate HTTP/1.1"), "{head}");
+        assert!(reqs[0].contains("Authorization: MediaBrowser Client="), "identity rides along");
+        assert!(!reqs[0].contains("Token="), "unauthenticated: no token is minted yet");
+    }
+
+    /// The full Quick Connect dance: Initiate, then poll Connect until Authenticated, then trade
+    /// the secret for the token on AuthenticateWithQuickConnect.
+    #[test]
+    fn quick_connect_polls_state_then_authenticates_with_the_secret() {
+        let server = MockServer::start(vec![
+            (200, r#"{"Secret":"qc-secret-1","Code":"123456","Authenticated":false}"#),
+            (200, r#"{"Secret":"qc-secret-1","Code":"123456","Authenticated":false}"#),
+            (200, r#"{"Secret":"qc-secret-1","Code":"123456","Authenticated":true}"#),
+            (200, AUTH_OK),
+        ]);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        let initiated = client.quick_connect_initiate().unwrap();
+        assert!(!initiated.authenticated);
+
+        let not_yet = client.quick_connect_state(&initiated.secret).unwrap();
+        assert!(!not_yet.authenticated, "still waiting");
+        let approved = client.quick_connect_state(&initiated.secret).unwrap();
+        assert!(approved.authenticated, "authorized on the other device");
+
+        let ok = client.authenticate_with_quick_connect(&initiated.secret).unwrap();
+        assert_eq!(ok.user_id, "u-1");
+        assert_eq!(ok.token, "tok-1");
+
+        let reqs = server.finish();
+        assert_eq!(reqs.len(), 4);
+        assert!(reqs[1].starts_with("GET /QuickConnect/Connect?secret=qc-secret-1 HTTP/1.1"));
+        assert!(reqs[2].starts_with("GET /QuickConnect/Connect?secret=qc-secret-1 HTTP/1.1"));
+        assert!(reqs[3].starts_with("POST /Users/AuthenticateWithQuickConnect HTTP/1.1"));
+        assert!(reqs[3].contains(r#""Secret":"qc-secret-1""#));
+    }
+
+    /// A refused or not-yet-authorized AuthenticateWithQuickConnect answers Unauthorized, so the
+    /// flow can fall back to the password form instead of inventing a fourth failure word.
+    #[test]
+    fn quick_connect_authenticate_refusal_is_unauthorized() {
+        let server = MockServer::start(vec![(400, "{}")]);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        match client.authenticate_with_quick_connect("qc-secret-1") {
+            Err(AuthError::Unauthorized) => {}
+            other => panic!("expected Unauthorized, got {other:?}"),
+        }
+        server.finish();
+    }
+
+    /// Quick Connect is gated on the server's public version: 10.8+ advertises it, anything older
+    /// or absent does not.
+    #[test]
+    fn quick_connect_supported_reads_the_public_version() {
+        let new = MockServer::start(vec![(200, r#"{"ServerName":"attic","Version":"10.11.11"}"#)]);
+        let new_client = JfClient::new(Origin::http("127.0.0.1", new.port as i32), "dev-1".into());
+        assert!(new_client.quick_connect_supported());
+        new.finish();
+
+        let old = MockServer::start(vec![(200, r#"{"ServerName":"attic","Version":"10.7.7"}"#)]);
+        let old_client = JfClient::new(Origin::http("127.0.0.1", old.port as i32), "dev-1".into());
+        assert!(!old_client.quick_connect_supported());
+        old.finish();
+
+        let absent = MockServer::start(vec![(200, r#"{"ServerName":"attic"}"#)]);
+        let absent_client = JfClient::new(Origin::http("127.0.0.1", absent.port as i32), "dev-1".into());
+        assert!(!absent_client.quick_connect_supported());
+        absent.finish();
+    }
+
+    #[test]
+    fn version_at_least_parses_dotted_versions_and_fails_closed() {
+        assert!(version_at_least("10.8.0", 10, 8));
+        assert!(version_at_least("10.11.11", 10, 8));
+        assert!(version_at_least("11.0.0", 10, 8));
+        assert!(!version_at_least("10.7.7", 10, 8));
+        assert!(version_at_least("10.8", 10, 8));
+        assert!(!version_at_least("10.8", 10, 9));
+        assert!(!version_at_least("", 10, 8));
+        assert!(!version_at_least("not-a-version", 10, 8));
+    }
+
+    /// Trickplay: the manifest parses from the item detail, an empty one answers None, and the
+    /// query asks for the field explicitly.
+    #[test]
+    fn trickplay_manifest_parses_and_an_empty_one_is_none() {
+        let server = MockServer::start(vec![
+            (200, AUTH_OK),
+            (200, r#"{"Id":"mv-1","Name":"Movie","Type":"Movie","Trickplay":{"320":{"0":{"Width":320,"Height":180,"TileWidth":10,"TileHeight":10,"ThumbnailCount":100,"Interval":10000,"Bandwidth":123456}}}}"#),
+        ]);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        client.authenticate_by_name("demo", "").unwrap();
+
+        let info = client.trickplay_info("mv-1").expect("manifest parses");
+        let sheet = info.get("320").unwrap().get("0").unwrap();
+        assert_eq!(sheet.width, 320);
+        assert_eq!(sheet.height, 180);
+        assert_eq!(sheet.tile_width, 10);
+        assert_eq!(sheet.interval, 10000);
+        let reqs = server.finish();
+        assert!(reqs[1].starts_with("GET /Users/u-1/Items/mv-1?Fields=Trickplay HTTP/1.1"), "{}", reqs[1]);
+
+        let empty = MockServer::start(vec![
+            (200, AUTH_OK),
+            (200, r#"{"Id":"mv-2","Name":"NoTp","Type":"Movie","Trickplay":{}}"#),
+        ]);
+        let client2 = JfClient::new(Origin::http("127.0.0.1", empty.port as i32), "dev-1".into());
+        client2.authenticate_by_name("demo", "").unwrap();
+        assert!(client2.trickplay_info("mv-2").is_none(), "no trickplay generated");
+        empty.finish();
     }
 }

@@ -1968,10 +1968,15 @@ fn loop_requests(app: &mut App) {
             // The Jellyfin flavor's Settings root: *Conexión rápida* arms add-server mode and lands
             // on the sign-in form; the picker and *Desconectar* switch/remove the active server.
             #[cfg(feature = "jellyfin")]
+            crate::screens::registry::LoopReq::JfQuickConnect => {
+                crate::jellyfin::quick_connect::set_add_mode(true);
+                // PUSH, never nav_root: the form opens over Settings, and BACK returns to it.
+                super::bridge::nav_push(&mut app.pages, AppArg::Login);
+            }
+            #[cfg(feature = "jellyfin")]
             crate::screens::registry::LoopReq::JfAddServer => {
                 crate::jellyfin::signin::set_add_mode(true);
-                // PUSH, never nav_root: the form opened over Settings, and BACK must hand the
-                // user back to it - a root here strands them on the form (#56).
+                // PUSH, never nav_root: the form opens over Settings, and BACK returns to it.
                 super::bridge::nav_push(&mut app.pages, AppArg::Login);
             }
             #[cfg(feature = "jellyfin")]

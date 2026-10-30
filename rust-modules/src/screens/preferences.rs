@@ -27,16 +27,17 @@ pub(crate) const SHAPE: &str = "PreferencesV2{kind:u8,picker:u8,selection:u32,bu
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind { Playback, AudioSubtitles }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Field { Quality, DirectPlay, AudioLanguage, SubtitleMode, SubtitleLanguage, ForcedSubtitles }
+enum Field { Quality, DirectPlay, LipSync, AudioLanguage, SubtitleMode, SubtitleLanguage, ForcedSubtitles }
 impl Field {
     fn title(self) -> &'static str { match self {
         Self::Quality => crate::i18n::msg::settings_playback_quality(), Self::DirectPlay => crate::i18n::msg::settings_playback_direct_play(),
+        Self::LipSync => crate::i18n::msg::settings_playback_lip_sync(),
         Self::AudioLanguage => crate::i18n::msg::settings_audio_language(), Self::SubtitleMode => crate::i18n::msg::settings_audio_subtitles(),
         Self::SubtitleLanguage => crate::i18n::msg::settings_audio_subtitle_language(), Self::ForcedSubtitles => crate::i18n::msg::settings_audio_forced_subtitles(),
     }}
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Value { Quality(Quality), DirectPlay(DirectPlayMode), Language(String), Mode(i64), Forced(i64) }
+enum Value { Quality(Quality), DirectPlay(DirectPlayMode), LipSync(i64), Language(String), Mode(i64), Forced(i64) }
 #[derive(Clone)]
 enum Action { Open(Field), Pick(Value), Retry }
 struct State {
@@ -167,6 +168,7 @@ impl PreferencesPage {
         let command = match value {
             Value::Quality(quality) => PreferenceCmd::Quality { quality, reply },
             Value::DirectPlay(mode) => PreferenceCmd::DirectPlay { mode, reply },
+            Value::LipSync(offset_ms) => PreferenceCmd::LipSync { offset_ms, reply },
             _ => return,
         };
         self.pending = Some(Pending::Local(rx)); self.state.busy = true;
@@ -185,6 +187,7 @@ impl PreferencesPage {
         match field {
             Field::Quality => Value::Quality(self.state.quality),
             Field::DirectPlay => Value::DirectPlay(self.state.direct_play),
+            Field::LipSync => Value::LipSync(crate::route::lip_sync_offset_ms()),
             Field::AudioLanguage => Value::Language(p.and_then(|p| p.stated_language.clone()).unwrap_or_default()),
             Field::SubtitleLanguage => Value::Language(p.and_then(|p| p.subtitle_language.clone()).unwrap_or_default()),
             Field::SubtitleMode => Value::Mode(p.map_or(0, |p| p.subtitle_mode)),
@@ -197,6 +200,16 @@ impl PreferencesPage {
                 .map(|q| (q.label().into(), Value::Quality(*q))).collect(),
             Field::DirectPlay => [DirectPlayMode::Auto, DirectPlayMode::Forced, DirectPlayMode::Disabled]
                 .into_iter().map(|m| (mode_label(m).into(), Value::DirectPlay(m))).collect(),
+            Field::LipSync => {
+                let (min, max) = crate::route::lip_sync_offset_range_ms();
+                let mut result = Vec::new();
+                let mut ms = min;
+                while ms <= max {
+                    result.push((lip_sync_label(ms), Value::LipSync(ms)));
+                    ms += crate::route::LIP_SYNC_STEP_MS;
+                }
+                result
+            }
             Field::SubtitleMode => [(crate::i18n::msg::settings_audio_manual(), 0), (crate::i18n::msg::settings_audio_foreign(), 1), (crate::i18n::msg::settings_audio_always(), 2)]
                 .into_iter().map(|(label, mode)| (label.into(), Value::Mode(mode))).collect(),
             Field::ForcedSubtitles => [crate::i18n::msg::settings_audio_prefer_regular(), crate::i18n::msg::settings_audio_prefer_forced(), crate::i18n::msg::settings_audio_only_forced(), crate::i18n::msg::settings_audio_only_regular()]
@@ -227,7 +240,7 @@ impl PreferencesPage {
         // The field list is rebuilt at every level: it is the parent a picker slides over.
         let mut section = Section::new("");
         let fields: &[Field] = match self.state.kind {
-            Kind::Playback => &[Field::Quality, Field::DirectPlay],
+            Kind::Playback => &[Field::Quality, Field::DirectPlay, Field::LipSync],
             Kind::AudioSubtitles if self.snapshot.is_some() => &[Field::AudioLanguage, Field::SubtitleMode, Field::SubtitleLanguage, Field::ForcedSubtitles],
             _ => &[],
         };
@@ -297,7 +310,7 @@ impl PreferencesPage {
     }
     fn commit(&mut self, value: Value, fx: &mut Effects<'_, InnerHost>) {
         match value {
-            Value::Quality(_) | Value::DirectPlay(_) => self.save_local(value, fx),
+            Value::Quality(_) | Value::DirectPlay(_) | Value::LipSync(_) => self.save_local(value, fx),
             value => {
                 let mut update = PreferenceUpdate::default();
                 match (self.state.picker, value) {
@@ -357,6 +370,11 @@ impl PreferencesPage {
 }
 fn mode_label(mode: DirectPlayMode) -> &'static str {
     match mode { DirectPlayMode::Auto => crate::i18n::msg::settings_playback_auto(), DirectPlayMode::Forced => crate::i18n::msg::settings_playback_forced(), DirectPlayMode::Disabled => crate::i18n::msg::settings_playback_disabled() }
+}
+
+/// The lip-sync picker's row label: `0 ms` at the centre, a signed value off it.
+fn lip_sync_label(ms: i64) -> String {
+    if ms == 0 { "0 ms".to_string() } else { format!("{ms:+} ms") }
 }
 impl Machine<InnerHost> for PreferencesPage {
     type Ev = ScreenEvent<InnerHost>;
