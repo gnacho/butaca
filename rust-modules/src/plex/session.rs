@@ -529,6 +529,11 @@ pub struct Session {
     /// that never re-sorted anything serializes exactly as it did before the field existed.
     #[serde(default, deserialize_with = "de_soft_vec", skip_serializing_if = "Vec::is_empty")]
     pub library_sorts: Vec<LibrarySorts>,
+    /// **The audio and subtitle track a series was last watched with** — see
+    /// [`SeriesTracks`]. Written from the player's track menu, read when the next episode of the
+    /// same series is planned. Soft-parsed and omitted while empty, like every list here.
+    #[serde(default, deserialize_with = "de_soft_vec", skip_serializing_if = "Vec::is_empty")]
+    pub series_tracks: Vec<SeriesTracks>,
     /// **Every profile this television has switched to, with the credentials that switch
     /// resolved** — so the who's-watching picker can seat a household member with plex.tv
     /// unreachable. Written by the profile switch on every ONLINE success (replace-by-uuid), read
@@ -682,6 +687,8 @@ struct CanonicalSessionPreferences {
     last_library: Vec<LastLibrary>,
     #[serde(default, deserialize_with = "de_soft_vec", skip_serializing_if = "Vec::is_empty")]
     library_sorts: Vec<LibrarySorts>,
+    #[serde(default, deserialize_with = "de_soft_vec", skip_serializing_if = "Vec::is_empty")]
+    series_tracks: Vec<SeriesTracks>,
     #[serde(default, deserialize_with = "de_soft_hero_blur")]
     last_hero_blur: Option<[[f32; 3]; 4]>,
     #[serde(default = "default_true", deserialize_with = "de_soft_bool_on")]
@@ -718,6 +725,7 @@ impl Default for CanonicalSessionPreferences {
             auto_sign_in: false,
             last_library: Vec::new(),
             library_sorts: Vec::new(),
+            series_tracks: Vec::new(),
             last_hero_blur: None,
             trailer_autoplay: true,
             subtitle_tone: SubtitleTone::White,
@@ -766,6 +774,7 @@ fn split_public(session: &Session) -> Result<crate::storage::state::PublicPayloa
         auto_sign_in: session.auto_sign_in,
         last_library: session.last_library.clone(),
         library_sorts: session.library_sorts.clone(),
+        series_tracks: session.series_tracks.clone(),
         last_hero_blur: session.last_hero_blur,
         trailer_autoplay: session.trailer_autoplay,
         subtitle_tone: session.subtitle_tone,
@@ -836,6 +845,7 @@ pub(crate) fn join_canonical(
         auto_sign_in: preferences.auto_sign_in,
         last_library: preferences.last_library,
         library_sorts: preferences.library_sorts,
+        series_tracks: preferences.series_tracks,
         last_hero_blur: preferences.last_hero_blur,
         trailer_autoplay: preferences.trailer_autoplay,
         subtitle_tone: preferences.subtitle_tone,
@@ -865,6 +875,7 @@ fn public_session(public: &crate::storage::state::PublicPayload) -> Session {
         auto_sign_in: preferences.auto_sign_in,
         last_library: preferences.last_library,
         library_sorts: preferences.library_sorts,
+        series_tracks: preferences.series_tracks,
         last_hero_blur: preferences.last_hero_blur,
         trailer_autoplay: preferences.trailer_autoplay,
         subtitle_tone: preferences.subtitle_tone,
@@ -1617,6 +1628,60 @@ impl LastLibrary {
             key,
         extensions: Default::default(),
         });
+    }
+}
+
+/// One series' remembered track pair: the audio stream and the subtitle stream last in use.
+///
+/// Stream ids belong to the FILE, so the language tag travels beside the index and the next
+/// episode matches on the tag first. A remux, a second season or the same show at another
+/// quality renumbers the streams, and only the tag survives that.
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
+#[serde(default)]
+pub struct SeriesTracks {
+    pub series: String,
+    pub audio_lang: String,
+    pub audio_index: i64,
+    pub sub_lang: String,
+    /// 0 = subtitles off, which is a choice worth remembering too.
+    pub sub_index: i64,
+    #[serde(flatten, default, skip_serializing_if = "OpaqueExtensions::is_empty")]
+    pub(crate) extensions: OpaqueExtensions,
+}
+
+impl SeriesTracks {
+    /// Series remembered at once. A viewer follows a handful of shows at a time; the cap keeps a
+    /// television that has watched for years from growing the public payload (256 KiB for
+    /// everything, `storage::state`). Roughly 110 bytes an entry, so a full table is about 4 KiB.
+    pub const CAP: usize = 32;
+    /// Longest series id carried. Ids are server GUIDs.
+    const MAX_SERIES: usize = 96;
+
+    fn is_storable(&self) -> bool {
+        !self.series.is_empty() && self.series.len() <= Self::MAX_SERIES
+    }
+}
+
+impl Session {
+    /// What one series was last watched with, if it was watched with a menu pick.
+    pub(crate) fn series_tracks(&self, series: &str) -> Option<&SeriesTracks> {
+        if series.is_empty() {
+            return None;
+        }
+        self.series_tracks.iter().find(|t| t.series == series)
+    }
+
+    /// Record a series' pair as the most recent, evicting the oldest past [`SeriesTracks::CAP`].
+    pub(crate) fn with_series_tracks(&self, entry: SeriesTracks) -> Self {
+        let mut next = self.clone();
+        if !entry.is_storable() {
+            return next;
+        }
+        next.series_tracks.retain(|t| t.series != entry.series);
+        next.series_tracks.push(entry);
+        let excess = next.series_tracks.len().saturating_sub(SeriesTracks::CAP);
+        next.series_tracks.drain(..excess);
+        next
     }
 }
 
@@ -5103,6 +5168,68 @@ mod up_next_preference_tests {
         assert_eq!(encoded["up_next_window_s"], 45);
         let round: Session = serde_json::from_value(encoded).unwrap();
         assert_eq!(round.up_next_window_s(), 45);
+    }
+}
+
+/// Issue #88: `Session::series_tracks` — the audio and subtitle a series was last watched with,
+/// keyed by the series id the plan asks about. Install-wide (not per profile): the pick is a
+/// property of how the household watches a show, and it is the same one any profile would make
+/// on that file.
+#[cfg(test)]
+mod series_tracks_tests {
+    use super::*;
+
+    fn pick(series: &str, audio: &str, audio_index: i64) -> SeriesTracks {
+        SeriesTracks {
+            series: series.into(),
+            audio_lang: audio.into(),
+            audio_index,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_series_pick_round_trips_and_an_empty_table_is_the_omission() {
+        let encoded = serde_json::to_value(Session::default()).unwrap();
+        assert!(
+            !encoded.as_object().unwrap().contains_key("series_tracks"),
+            "no picks is the omission: {encoded}"
+        );
+        let session = Session::default().with_series_tracks(pick("series9", "spa", 2));
+        let encoded = serde_json::to_value(&session).unwrap();
+        let round: Session = serde_json::from_value(encoded).unwrap();
+        let stored = round.series_tracks("series9").expect("the pick survives the file");
+        assert_eq!((stored.audio_lang.as_str(), stored.audio_index), ("spa", 2));
+        assert!(round.series_tracks("series8").is_none(), "nothing is shared between shows");
+    }
+
+    #[test]
+    fn a_second_pick_for_the_same_series_replaces_the_first() {
+        let session = Session::default()
+            .with_series_tracks(pick("series9", "spa", 2))
+            .with_series_tracks(pick("series9", "eng", 1));
+        let stored = session.series_tracks("series9").expect("one entry");
+        assert_eq!(stored.audio_lang, "eng", "the latest pick is the one that counts");
+        assert_eq!(session.series_tracks.len(), 1, "replaced, not appended");
+    }
+
+    #[test]
+    fn the_table_is_bounded_and_drops_the_oldest_show() {
+        let mut session = Session::default();
+        for i in 0..=SeriesTracks::CAP {
+            session = session.with_series_tracks(pick(&format!("series{i}"), "spa", 1));
+        }
+        assert_eq!(session.series_tracks.len(), SeriesTracks::CAP);
+        assert!(session.series_tracks("series0").is_none(), "the oldest show is the one evicted");
+        assert!(session.series_tracks(&format!("series{}", SeriesTracks::CAP)).is_some());
+    }
+
+    #[test]
+    fn a_hand_edited_table_falls_back_to_empty_and_an_unnamed_series_reads_none() {
+        let session: Session = serde_json::from_value(serde_json::json!({"series_tracks": "future"}))
+            .expect("garbage in one field never costs the session");
+        assert!(session.series_tracks.is_empty());
+        assert!(session.series_tracks("").is_none(), "an empty series id matches nothing");
     }
 }
 

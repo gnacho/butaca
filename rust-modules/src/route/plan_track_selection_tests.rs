@@ -758,3 +758,97 @@ fn known_audio_channels_cannot_fall_back_to_an_unknown_codec_default() {
     track.channels = 6;
     assert_eq!(pick_dp_audio_eligible(&[track], "aac", AudioLangPrefs::default(), |c, n| caps.audio_supports(c, n)), Some((0, "aac".into(), 1)));
 }
+
+// Issue #88: a series reopens with the tracks it was last watched with. The stored id belongs to
+// the FILE (container stream ids are per-file), so the language tag is what travels; the id is the
+// fallback for a re-encode whose tags moved. Everything below is pure: the table itself is
+// `plex::session::SeriesTracks`.
+
+use crate::plex::session::SeriesTracks;
+
+fn remembered(series: &str, audio: &str, audio_index: i64) -> SeriesTracks {
+    SeriesTracks {
+        series: series.into(),
+        audio_lang: audio.into(),
+        audio_index,
+        ..Default::default()
+    }
+}
+
+fn remembered_subs(sub_lang: &str, sub_index: i64) -> SeriesTracks {
+    SeriesTracks { sub_lang: sub_lang.into(), sub_index, ..remembered("series9", "", 0) }
+}
+
+#[test]
+fn a_series_reopens_the_audio_it_was_watched_with() {
+    // The file's default is English; last time this show was watched in Spanish.
+    let tracks = [trk(101, "aac", "eng", true), trk(102, "aac", "spa", false)];
+    assert_eq!(
+        remembered_audio(&tracks, &remembered("series9", "spa", 102)),
+        Some((1, "aac".into(), 102)),
+        "the remembered tag outranks the file's default flag"
+    );
+}
+
+#[test]
+fn the_remembered_tag_matches_every_spelling_of_the_language() {
+    // Stored as an ISO tag, reported by the container as a three-letter code.
+    let tracks = [trk(101, "aac", "eng", true), trk(102, "aac", "spa", false)];
+    assert_eq!(
+        remembered_audio(&tracks, &remembered("series9", "es-ES", 999)).map(|(_, _, id)| id),
+        Some(102),
+        "es-ES and spa are the same language, and the stale id must not win"
+    );
+}
+
+#[test]
+fn a_pick_falls_back_to_the_stream_id_when_the_language_tag_changed() {
+    // Same re-encode, but the container now calls the Spanish track "fra" by mistake.
+    let tracks = [trk(101, "aac", "eng", true), trk(102, "aac", "fra", false)];
+    assert_eq!(
+        remembered_audio(&tracks, &remembered("series9", "spa", 102)).map(|(_, _, id)| id),
+        Some(102),
+        "an id that still exists is better than nothing"
+    );
+}
+
+#[test]
+fn an_empty_tag_only_matches_on_the_id() {
+    let tracks = [trk(101, "aac", "eng", true), trk(102, "aac", "fra", false)];
+    assert_eq!(remembered_audio(&tracks, &remembered("series9", "", 102)).map(|(_, _, id)| id), Some(102));
+    assert_eq!(remembered_audio(&tracks, &remembered("series9", "", 999)), None);
+}
+
+#[test]
+fn a_remembered_audio_that_cannot_direct_play_is_not_offered() {
+    // TrueHD does not direct play: the plan must not carry it just because it was chosen once.
+    let tracks = [trk(101, "truehd", "spa", false), trk(102, "aac", "eng", true)];
+    assert_eq!(remembered_audio(&tracks, &remembered("series9", "spa", 101)), None);
+}
+
+#[test]
+fn the_remembered_subtitle_wins_over_the_language_rules() {
+    let subs = [sub(11, 3, "spa", false), sub(12, 4, "eng", false)];
+    assert_eq!(
+        remembered_subtitle(&subs, &remembered_subs("eng", 12)),
+        Some((12, 1)),
+        "the renderer counts embedded streams, not document order"
+    );
+}
+
+#[test]
+fn a_sidecar_cannot_be_remembered_as_a_subtitle() {
+    // A sidecar has no demux ordinal, so there is nothing the client renderer could turn on.
+    let subs = [sub(10, 7, "spa", true)];
+    assert_eq!(remembered_subtitle(&subs, &remembered_subs("spa", 10)), None);
+}
+
+#[test]
+fn a_remembered_subtitle_the_menu_cannot_name_is_ignored() {
+    let subs = [sub(0, 3, "spa", false)];
+    assert_eq!(
+        remembered_subtitle(&subs, &remembered_subs("spa", 0)),
+        None,
+        "an id the menu cannot name is not a subtitle worth turning on"
+    );
+}

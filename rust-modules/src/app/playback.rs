@@ -511,6 +511,40 @@ pub(crate) fn commit_track(
     }
 }
 
+/// Record what a series was last watched with, after the menu's pick has landed.
+///
+/// [`commit_track`] already applied the pick, so this reads the pair back off the session instead
+/// of the request: what gets stored then describes what the player is actually carrying. The
+/// series comes from the playing item, the same id the plan asks "what follows" with (issue #112).
+fn remember_series_pick(ps: &crate::route::PlaybackSession, bridge: &super::bridge::Bridge) {
+    let Some(playing) = bridge.metadata_view().playing() else {
+        return;
+    };
+    if playing.show_rk.is_empty() {
+        return;
+    }
+    let audio_index = crate::route::cur_audio_sid(ps);
+    let sub_index = crate::route::cur_sub_sid(ps);
+    if audio_index == 0 && sub_index == 0 {
+        return;
+    }
+    let lang_of = |streams: &[crate::metadata::Stream], id: i64| {
+        streams
+            .iter()
+            .find(|s| s.id == id)
+            .map(|s| s.lang_code.clone())
+            .unwrap_or_default()
+    };
+    crate::route::remember_series_tracks(crate::plex::session::SeriesTracks {
+        series: playing.show_rk.clone(),
+        audio_lang: lang_of(&playing.audio, audio_index),
+        audio_index,
+        sub_lang: lang_of(&playing.subs, sub_index),
+        sub_index,
+        ..Default::default()
+    });
+}
+
 pub(crate) fn player_requests(
     repair: &mut crate::player::machine::RepairAttempt,
     ps: &mut crate::route::PlaybackSession,
@@ -568,7 +602,10 @@ pub(crate) fn player_requests(
             // `repause_at` is an `App` field, which is exactly why this is a request.
             PlayerReq::CommitSeek(ns) => commit_seek(ns, repause_at),
             PlayerReq::More(action) => apply_more_action(ps, pa, bridge, action),
-            PlayerReq::CommitTrack(commit) => commit_track(ps, commit),
+            PlayerReq::CommitTrack(commit) => {
+                commit_track(ps, commit);
+                remember_series_pick(ps, bridge);
+            }
             PlayerReq::ArmInfoPress => {
                 press.begin_ctl(now);
                 *ok_armed = true;
