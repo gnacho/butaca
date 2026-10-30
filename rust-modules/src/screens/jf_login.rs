@@ -70,6 +70,11 @@ pub(crate) struct JfLoginScreen {
     /// The Quick Connect failure, separate from `fail` because its vocabulary is a superset
     /// (`Unsupported`, `TimedOut`) the password form has no words for.
     qc_fail: Option<qc::Fail>,
+    /// Whether this screen was pushed with the code flow already armed, which is what the
+    /// Settings action does. BACK then means "back to Settings"; when the mode was armed from
+    /// this screen's own code row instead, BACK means "back to the password form", because on a
+    /// first boot this screen is the route root and a pop would go nowhere.
+    code_pushed: bool,
     /// Rebuild the table's rows next tick — text landed, or the phase changed under them.
     dirty: bool,
     spin_ms: f32,
@@ -98,6 +103,7 @@ impl JfLoginScreen {
             editing: None,
             fail: None,
             qc_fail: None,
+            code_pushed: qc::add_mode(),
             dirty: false,
             spin_ms: 0.0,
             logo_tex: 0,
@@ -139,6 +145,10 @@ impl JfLoginScreen {
     fn reset_for_entry(&mut self) {
         self.ground.reset();
         self.editing = None;
+        // Re-read on every entry: the Settings action arms the mode BEFORE pushing this screen,
+        // the code row on this screen arms it after, and only the first of the two has somewhere
+        // to pop back to.
+        self.code_pushed = qc::add_mode();
         crate::textinput::stop();
         self.dirty = true;
     }
@@ -545,11 +555,11 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
                                 qc::set_add_mode(false);
                                 self.qc_fail = None;
                                 self.dirty = true;
-                                // Back to the password form. Only a copy PUSHED over the page
-                                // that asked has something behind it: the first boot's sign-in
-                                // is the route's root, and popping there would pop nothing, so
+                                // Back to the password form, or back to Settings when this copy
+                                // was pushed over the page that asked. The route's root is this
+                                // screen on a first boot, so popping there would pop nothing and
                                 // BACK has to mean "give me the other form" instead.
-                                if signin::add_mode() {
+                                if self.code_pushed || signin::add_mode() {
                                     fx.push(Fx::Nav(NavOp::Pop));
                                 }
                                 fx.invalidate(crate::ui::present::Provenance::Input);
