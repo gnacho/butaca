@@ -79,6 +79,9 @@ impl ServersPage {
     /// one carries the check), then a separate section with the *Add by password* row that starts
     /// the password sign-in form in add-server mode. Two doors to a second server, kept apart: the
     /// Settings root's Quick Connect row, and this password row.
+    ///
+    /// The sign-out row lives here rather than on the Settings root: it is an action about the
+    /// account this page lists, and the root reads better as the two doors that add a server.
     fn sections(servers: &[ServerEntry], active: usize) -> Vec<Section> {
         let mut servers_section = Section::new("");
         for (i, server) in servers.iter().enumerate() {
@@ -93,7 +96,12 @@ impl ServersPage {
                 .detail(crate::i18n::msg::settings_servers_add_password_detail())
                 .chevron(true),
         );
-        vec![servers_section, add_section]
+        let sign_out_section = Section::new("").row(
+            Row::new(crate::i18n::msg::settings_servers_disconnect())
+                .detail(crate::i18n::msg::settings_servers_disconnect_detail())
+                .destructive(true),
+        );
+        vec![servers_section, add_section, sign_out_section]
     }
 
     fn view(&self) -> TableScreen<'_> {
@@ -108,6 +116,7 @@ impl ServersPage {
             GroupId(0),
             self.entry,
         )
+        .with_home()
     }
 
     fn activate(&mut self, row: i32, fx: &mut Effects<'_, InnerHost>) {
@@ -116,6 +125,10 @@ impl ServersPage {
         } else if row as usize == self.count {
             // The *Add by password* row, the flat index right after the server rows.
             fx.push(Fx::App(AppFx::Loop(LoopReq::JfAddServer)));
+        } else if row as usize == self.count + 1 {
+            // The sign-out row, last: it takes the active entry away and lands on the sign-in
+            // screen, which is what the Settings root's row used to do.
+            fx.push(Fx::App(AppFx::Loop(LoopReq::JfDisconnectServer)));
         }
     }
 }
@@ -220,7 +233,7 @@ mod tests {
         );
         assert_eq!(page.count, 2);
         let rows: Vec<_> = page.table.sections.iter().flat_map(|s| &s.rows).collect();
-        assert_eq!(rows.len(), 3, "two server rows plus the add row");
+        assert_eq!(rows.len(), 4, "two server rows, the add row and sign out");
         assert_eq!(rows[0].label, "gleb");
         assert_eq!(rows[0].detail, "http://10.0.0.2:8096");
         assert!(!rows[0].checked);
@@ -228,6 +241,7 @@ mod tests {
         assert!(rows[1].checked, "the active server carries the check");
         assert_eq!(rows[2].label, crate::i18n::msg::settings_servers_add_password());
         assert!(rows[2].ticon.is_some(), "the add row wears the drill-in chevron");
+        assert_eq!(rows[3].label, crate::i18n::msg::settings_servers_disconnect());
     }
 
     /// A switch request names the list index of the pressed row.
@@ -272,5 +286,28 @@ mod tests {
             })
             .collect();
         assert_eq!(reqs, vec![LoopReq::JfAddServer]);
+    }
+
+    /// The sign-out row is the one after *Add by password*, and it asks the loop to drop the
+    /// active entry: the same request the Settings root used to raise.
+    #[test]
+    fn activating_the_sign_out_row_requests_a_disconnect() {
+        let mut page = ServersPage::with_servers(
+            EntryId(0),
+            vec![server("http://10.0.0.2:8096", "a"), server("http://10.0.0.3:8096", "b")],
+            0,
+        );
+        let mut out = Vec::new();
+        let mut present = Present::new();
+        let mut fx = Effects::new(&mut out, MachineId::Instance(InstanceId(0)), &mut present);
+        page.activate(3, &mut fx); // two server rows, the add row, then sign out
+        let reqs: Vec<_> = out
+            .iter()
+            .filter_map(|st| match &st.fx {
+                Fx::App(AppFx::Loop(req)) => Some(*req),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(reqs, vec![LoopReq::JfDisconnectServer]);
     }
 }

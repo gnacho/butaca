@@ -1115,6 +1115,11 @@ pub(crate) enum LoopReq {
     OnboardDone,
     /// The first-run Favourites screen's BACK: the profile picker. Same retirement.
     OnboardBack,
+    /// The header's Home word was clicked: retire the route and land on Home. A screen may not
+    /// name `AppArg`, so the click becomes this request and the loop performs it, exactly as it
+    /// does for [`Self::OnboardDone`]. No keyboard path needs it: BACK and LEFT already leave every
+    /// screen, and this is the pointer's shortcut for the same journey.
+    GoHome,
     /// **Phase 10, the profile menu's five rows.** `screens::account_menu` is a surface on the
     /// shared `ModalStack` and owns its own rows, cursor and dismissal — but not one of the five
     /// things a row DOES. Three call `crate::auth` and then flip `app.route` (a screen may not
@@ -1222,6 +1227,18 @@ pub(crate) mod word {
 pub(crate) const BAND: u32 = 0x4000_0000;
 /// The decision alert's two answers (Cancel, Delete), above the band.
 pub(crate) const ALERT: u32 = 0x4000_0100;
+/// The header's back chevron and Home word, above the alert. Same numbers as
+/// `ui::table_screen::CRUMB_ELEM`/`HOME_ELEM`, which is where the stops are published.
+pub(crate) const HEADER_CRUMB: u32 = 0x4000_0200;
+/// See [`HEADER_CRUMB`].
+pub(crate) const HEADER_HOME: u32 = 0x4000_0201;
+
+const _: () = assert!(
+    HEADER_CRUMB == crate::ui::table_screen::CRUMB_ELEM
+        && HEADER_HOME == crate::ui::table_screen::HOME_ELEM,
+    "the header targets are published by ui::table_screen and received by this screen dispatch; \
+     keep the two constants numerically identical"
+);
 
 const _: () = assert!(
     BAND == crate::ui::table_screen::BAND_BASE,

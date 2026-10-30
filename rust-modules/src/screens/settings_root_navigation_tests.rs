@@ -714,25 +714,20 @@ fn turning_an_unencrypted_connection_on_asks_the_shared_question_first() {
     crate::plex::reset_servers_for_test();
 }
 
-/// The Jellyfin flavor's root replaces the Plex-era pages entirely: a *Servidores* section (select,
-/// quick connect, disconnect) and a *Privacidad* row, and nothing else.
+/// The Jellyfin flavor's root replaces the Plex-era pages entirely: one *Servidores* section with
+/// the two doors that add a server, and nothing else. Signing out and the privacy page are not
+/// here: the first belongs to the server list, the second to `PRIVACY.md`.
 #[cfg(feature = "jellyfin")]
 #[test]
-fn the_jellyfin_root_offers_only_the_servers_and_privacy_rows() {
+fn the_jellyfin_root_offers_only_the_two_server_doors() {
     let _g = crate::testlock::serial();
     let _sess = scratch_session("jellyfin-root-rows");
     let root = RootPage::new(EntryId(0), cx(None).views);
     assert_eq!(
         root.rows,
-        vec![
-            Action::SelectServer,
-            Action::QuickConnect,
-            Action::Disconnect,
-            Action::LanPrivacy,
-        ],
-        "the Jellyfin root carries exactly the four new rows, and none of the Plex-era ones"
+        vec![Action::SelectServer, Action::QuickConnect],
+        "the Jellyfin root carries the two server doors, and none of the Plex-era rows"
     );
-    assert_eq!(root.table.sections.len(), 2, "a Servers section and a Privacy section");
-    assert_eq!(root.table.sections[0].rows.len(), 3, "select / quick connect / disconnect");
-    assert_eq!(root.table.sections[1].rows.len(), 1, "one privacy row");
+    assert_eq!(root.table.sections.len(), 1, "a single Servers section");
+    assert_eq!(root.table.sections[0].rows.len(), 2, "select and quick connect");
 }

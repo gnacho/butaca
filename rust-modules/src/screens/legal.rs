@@ -166,6 +166,7 @@ impl LegalIndex {
             GroupId(0),
             self.entry,
         )
+        .with_home()
     }
 
     fn open(&self, row: i32, fx: &mut Effects<'_, InnerHost>) {
@@ -341,24 +342,6 @@ impl DocumentPage {
         }
     }
 
-    /// The Jellyfin flavor's self-contained privacy statement — one honest paragraph, no legal
-    /// links, pushed straight from the Settings root's *Privacidad* row.
-    #[cfg(feature = "jellyfin")]
-    pub(crate) fn lan_privacy(entry: EntryId) -> Self {
-        Self {
-            entry,
-            reader: DocumentReader::new(),
-            crumb: crate::i18n::msg::settings_title(),
-            title: crate::i18n::msg::settings_privacy_lan(),
-            subtitle: crate::i18n::msg::settings_privacy_lan_copy(),
-            body: Cow::Borrowed(crate::i18n::msg::settings_privacy_lan_body()),
-            qr: None,
-            guide_caption: None,
-            word: "privacy",
-            state: DocState { which: 0xfd, pos: 0 },
-        }
-    }
-
     fn document_frame(&self) -> Rect {
         RouteLayout::screen().document(true)
     }
@@ -454,7 +437,8 @@ impl Screen<InnerHost> for DocumentPage {
             body.as_ref(),
             GroupId(0),
             *entry,
-        );
+        )
+        .with_home();
         v.doc.frame = document_frame;
         Part::<InnerHost>::draw(&mut v, f, Rect::FULL);
     }
@@ -494,24 +478,6 @@ mod tests {
         assert_eq!(format!("https://{}", page.body.replace('\n', "")), crate::i18n::CONTRIBUTE_URL,
             "a viewer who cannot scan the QR needs the same complete address in text");
         assert!(page.body.lines().nth(1).unwrap().starts_with('/'));
-    }
-
-    /// The Jellyfin flavor's privacy page is self-contained catalog text: its title, subtitle and
-    /// body are exactly the catalog's `settings.privacy.lan.*` strings.
-    #[cfg(feature = "jellyfin")]
-    #[test]
-    fn the_lan_privacy_page_renders_its_text_from_the_catalog() {
-        let page = DocumentPage::lan_privacy(EntryId(0));
-        assert_eq!(page.title, crate::i18n::msg::settings_privacy_lan());
-        assert_eq!(page.subtitle, crate::i18n::msg::settings_privacy_lan_copy());
-        assert_eq!(page.body.as_ref(), crate::i18n::msg::settings_privacy_lan_body());
-        assert!(
-            page.body.contains("local network")
-                && page.body.contains("no telemetry")
-                && page.body.contains("no analytics"),
-            "the privacy statement says what leaves (nothing) and what it has (no account, \
-             telemetry or analytics)"
-        );
     }
 
     #[test]

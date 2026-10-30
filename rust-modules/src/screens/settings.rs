@@ -444,8 +444,6 @@ fn mount_page(
         SettingsPage::Favourites => Box::new(super::onboard::OnboardScreen::settings(entry, cx.views)),
         #[cfg(feature = "jellyfin")]
         SettingsPage::Servers => Box::new(super::servers::ServersPage::new(entry)),
-        #[cfg(feature = "jellyfin")]
-        SettingsPage::LanPrivacy => Box::new(super::legal::DocumentPage::lan_privacy(entry)),
     }
 }
 
@@ -660,6 +658,19 @@ impl<H: DirectoryLike> Machine<H> for RouteSurface {
                     fx,
                 );
                 fx.invalidate(Provenance::Input);
+                Handled::Yes
+            }
+            // The header's two pointer targets, answered here rather than by the page: every page of
+            // this family shares this entry, and both actions are about the surface's own stack (go
+            // back one page, or leave it entirely for Home), which only the surface can request.
+            ScreenEvent::Activate(e)
+                if *e == crate::screens::registry::HEADER_CRUMB && self.inner.depth() > 1 =>
+            {
+                self.request(NavOp::Pop, cx, fx);
+                Handled::Yes
+            }
+            ScreenEvent::Activate(e) if *e == crate::screens::registry::HEADER_HOME => {
+                fx.push(Fx::App(AppFx::Loop(crate::screens::registry::LoopReq::GoHome)));
                 Handled::Yes
             }
             ScreenEvent::Activate(e) => self.step_top(ScreenEvent::Activate(*e), cx, fx),
@@ -939,12 +950,6 @@ enum Action {
     /// Jellyfin flavor: add another server through the sign-in form.
     #[cfg(feature = "jellyfin")]
     QuickConnect,
-    /// Jellyfin flavor: sign out of the current server.
-    #[cfg(feature = "jellyfin")]
-    Disconnect,
-    /// Jellyfin flavor: open the self-contained privacy statement.
-    #[cfg(feature = "jellyfin")]
-    LanPrivacy,
 }
 
 /// The Settings root: a table of destinations, every row a door (no band; rule 9 in full).
@@ -1145,22 +1150,9 @@ impl RootPage {
                 Row::new(crate::i18n::msg::settings_servers_quick())
                     .detail(crate::i18n::msg::settings_servers_quick_detail())
                     .chevron(true),
-            )
-            .row(
-                Row::new(crate::i18n::msg::settings_servers_disconnect())
-                    .detail(crate::i18n::msg::settings_servers_disconnect_detail())
-                    .destructive(true),
             );
-        actions.extend([Action::SelectServer, Action::QuickConnect, Action::Disconnect]);
+        actions.extend([Action::SelectServer, Action::QuickConnect]);
         sections.push(servers);
-        sections.push(
-            Section::new(crate::i18n::msg::settings_privacy_section()).row(
-                Row::new(crate::i18n::msg::settings_privacy_lan())
-                    .detail(crate::i18n::msg::settings_privacy_lan_detail())
-                    .chevron(true),
-            ),
-        );
-        actions.push(Action::LanPrivacy);
         self.rows = actions;
         self.table.compact = false;
         self.table.header_ink = theme::TEXT_READING;
@@ -1297,12 +1289,6 @@ impl RootPage {
             Action::QuickConnect => {
                 fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::JfQuickConnect)))
             }
-            #[cfg(feature = "jellyfin")]
-            Action::Disconnect => {
-                fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::JfDisconnectServer)))
-            }
-            #[cfg(feature = "jellyfin")]
-            Action::LanPrivacy => fx.push(Fx::Nav(NavOp::Push(SettingsPage::LanPrivacy))),
         }
     }
 }
@@ -1588,7 +1574,7 @@ impl LanguagePage {
             crate::i18n::msg::settings_language_copy()
         };
         TableScreen::new(Header::new(RouteLayout::screen(), Some(crate::i18n::msg::settings_title()),
-            crate::i18n::msg::settings_language_title(), copy), &self.table, GroupId(0), self.entry)
+            crate::i18n::msg::settings_language_title(), copy), &self.table, GroupId(0), self.entry).with_home()
     }
 
     fn activate(&mut self, row: u32, fx: &mut Effects<'_, InnerHost>) {
