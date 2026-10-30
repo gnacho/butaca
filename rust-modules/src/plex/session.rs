@@ -570,6 +570,16 @@ pub struct Session {
     /// field existed round-trips byte-identical.
     #[serde(default, deserialize_with = "de_soft_i64", skip_serializing_if = "is_zero")]
     pub(crate) lip_sync_offset_ms: i64,
+    /// What an episode ending does. `Auto` starts the next one when the Up Next countdown runs
+    /// out, `Ask` leaves the card up until the user acts on it, and `Off` never offers it, so the
+    /// credits roll and the player stays where it is. Skipped on write while `Auto`, so a session
+    /// persisted before the field existed round-trips byte-identical.
+    #[serde(default, deserialize_with = "de_soft_up_next_policy", skip_serializing_if = "UpNextPolicy::is_auto")]
+    pub(crate) up_next_policy: UpNextPolicy,
+    /// Seconds before the end at which the Up Next card appears where the server marks no credits
+    /// segment (credits detection is a server feature). Skipped on write while at its default.
+    #[serde(default, deserialize_with = "de_soft_up_next_window", skip_serializing_if = "Option::is_none")]
+    pub(crate) up_next_window_s: Option<i64>,
     /// **Automatically Sign In** — skip the boot who's-watching picker and enter as
     /// [`Session::user`]. Install-wide, not per profile: the boot gate reads it before anyone is
     /// seated this run. Absence is **off**, which is today's picker. Enabling it from Settings
@@ -662,6 +672,10 @@ struct CanonicalSessionPreferences {
     direct_play_mode: DirectPlayMode,
     #[serde(default, deserialize_with = "de_soft_i64", skip_serializing_if = "is_zero")]
     lip_sync_offset_ms: i64,
+    #[serde(default, deserialize_with = "de_soft_up_next_policy", skip_serializing_if = "UpNextPolicy::is_auto")]
+    up_next_policy: UpNextPolicy,
+    #[serde(default, deserialize_with = "de_soft_up_next_window", skip_serializing_if = "Option::is_none")]
+    up_next_window_s: Option<i64>,
     #[serde(default, deserialize_with = "de_soft_bool")]
     auto_sign_in: bool,
     #[serde(default, deserialize_with = "de_soft_vec")]
@@ -699,6 +713,8 @@ impl Default for CanonicalSessionPreferences {
             playback_quality: None,
             direct_play_mode: DirectPlayMode::Auto,
             lip_sync_offset_ms: 0,
+            up_next_policy: UpNextPolicy::default(),
+            up_next_window_s: None,
             auto_sign_in: false,
             last_library: Vec::new(),
             library_sorts: Vec::new(),
@@ -745,6 +761,8 @@ fn split_public(session: &Session) -> Result<crate::storage::state::PublicPayloa
         playback_quality: session.playback_quality,
         direct_play_mode: session.direct_play_mode,
         lip_sync_offset_ms: session.lip_sync_offset_ms,
+        up_next_policy: session.up_next_policy,
+        up_next_window_s: session.up_next_window_s,
         auto_sign_in: session.auto_sign_in,
         last_library: session.last_library.clone(),
         library_sorts: session.library_sorts.clone(),
@@ -813,6 +831,8 @@ pub(crate) fn join_canonical(
         playback_quality: preferences.playback_quality,
         direct_play_mode: preferences.direct_play_mode,
         lip_sync_offset_ms: preferences.lip_sync_offset_ms,
+        up_next_policy: preferences.up_next_policy,
+        up_next_window_s: preferences.up_next_window_s,
         auto_sign_in: preferences.auto_sign_in,
         last_library: preferences.last_library,
         library_sorts: preferences.library_sorts,
@@ -840,6 +860,8 @@ fn public_session(public: &crate::storage::state::PublicPayload) -> Session {
         playback_quality: preferences.playback_quality,
         direct_play_mode: preferences.direct_play_mode,
         lip_sync_offset_ms: preferences.lip_sync_offset_ms,
+        up_next_policy: preferences.up_next_policy,
+        up_next_window_s: preferences.up_next_window_s,
         auto_sign_in: preferences.auto_sign_in,
         last_library: preferences.last_library,
         library_sorts: preferences.library_sorts,
@@ -982,6 +1004,37 @@ pub(crate) enum DirectPlayMode {
     Forced,
     Disabled,
 }
+
+/// What an episode ending does — see [`Session::up_next_policy`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum UpNextPolicy {
+    /// Start the next episode when the countdown runs out. The default, and what the app did
+    /// before the preference existed.
+    #[default]
+    Auto,
+    /// Leave the card up and wait for the user to act on it.
+    Ask,
+    /// Never offer the next episode: the credits roll and playback stays where it is.
+    Off,
+}
+
+impl UpNextPolicy {
+    /// Whether this is the default, which is also the value the file omits.
+    pub(crate) fn is_auto(&self) -> bool {
+        matches!(self, Self::Auto)
+    }
+}
+
+/// Seconds before the end at which the Up Next card appears where the server marks no credits.
+/// The picker's step, and the value the file omits, are both the same number.
+pub(crate) const UP_NEXT_WINDOW_DEFAULT_S: i64 = 30;
+/// The clamp the picker and the writer both obey: below it the card is a flash, above it the card
+/// covers a short episode.
+pub(crate) const UP_NEXT_WINDOW_MIN_S: i64 = 5;
+pub(crate) const UP_NEXT_WINDOW_MAX_S: i64 = 90;
+pub(crate) const UP_NEXT_WINDOW_STEP_S: i64 = 5;
+
 
 /// Persisted quality names are a file-format contract and must survive refactors.
 #[derive(Serialize, Deserialize, Default, Clone, Copy, Debug, PartialEq, Eq)]
@@ -1778,8 +1831,28 @@ where D: Deserializer<'de> {
     Ok(serde_json::from_value(value).unwrap_or_default())
 }
 
+/// A policy written by a newer build falls back to `Auto`, which is what the app did before the
+/// preference existed rather than an invented refusal to play anything.
+fn de_soft_up_next_policy<'de, D>(d: D) -> Result<UpNextPolicy, D::Error>
+where D: Deserializer<'de> {
+    let value = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
+}
+
 /// The lip-sync offset is a preference too: garbage degrades to 0 ms rather than failing the
 /// enclosing [`Session`].
+/// Absence, null or garbage all mean "not configured", which is the default window rather than
+/// zero seconds: a zero window would put the card up on the last frame and read as "never offered".
+fn de_soft_up_next_window<'de, D>(d: D) -> Result<Option<i64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let Ok(v) = serde_json::Value::deserialize(d) else {
+        return Ok(None);
+    };
+    Ok(v.as_i64())
+}
+
 fn de_soft_i64<'de, D>(d: D) -> Result<i64, D::Error>
 where
     D: Deserializer<'de>,
@@ -1923,6 +1996,31 @@ impl Session {
     pub(crate) fn with_lip_sync_offset_ms(&self, offset_ms: i64) -> Self {
         let mut next = self.clone();
         next.lip_sync_offset_ms = offset_ms;
+        next
+    }
+
+    /// What an episode ending does, already clamped by the writer.
+    pub(crate) fn up_next_policy(&self) -> UpNextPolicy {
+        self.up_next_policy
+    }
+
+    pub(crate) fn with_up_next_policy(&self, policy: UpNextPolicy) -> Self {
+        let mut next = self.clone();
+        next.up_next_policy = policy;
+        next
+    }
+
+    /// Seconds before the end at which the card appears where the server marks no credits.
+    /// The configured window, or the default where none was written.
+    pub(crate) fn up_next_window_s(&self) -> i64 {
+        self.up_next_window_s.unwrap_or(UP_NEXT_WINDOW_DEFAULT_S)
+    }
+
+    /// Writing the default clears the key instead of storing it, so "never configured" and
+    /// "configured back to 30" stay the same file.
+    pub(crate) fn with_up_next_window_s(&self, seconds: i64) -> Self {
+        let mut next = self.clone();
+        next.up_next_window_s = (seconds != UP_NEXT_WINDOW_DEFAULT_S).then_some(seconds);
         next
     }
 
@@ -4952,6 +5050,59 @@ mod lip_sync_tests {
         assert_eq!(encoded["lip_sync_offset_ms"], 125);
         let round: Session = serde_json::from_value(encoded).unwrap();
         assert_eq!(round.lip_sync_offset_ms(), 125);
+    }
+}
+
+/// Issue #89: `Session::up_next_policy` and `Session::up_next_window_s` - what an episode ending
+/// does, and how early the card appears where the server marks no credits. The same contract as
+/// the lip-sync pair: soft parse (a value from a newer build must not refuse to play anything),
+/// omit the default so a session persisted before the fields existed round-trips byte-identical,
+/// and round-trip anything else.
+#[cfg(test)]
+mod up_next_preference_tests {
+    use super::*;
+
+    #[test]
+    fn up_next_policy_defaults_softly_and_round_trips() {
+        for value in [
+            serde_json::json!({}),
+            serde_json::json!({"up_next_policy": "future"}),
+            serde_json::json!({"up_next_policy": 7}),
+        ] {
+            let session: Session = serde_json::from_value(value).unwrap();
+            assert_eq!(session.up_next_policy(), UpNextPolicy::Auto);
+        }
+        let encoded = serde_json::to_value(Session::default()).unwrap();
+        assert!(
+            !encoded.as_object().unwrap().contains_key("up_next_policy"),
+            "Auto is the omission: {encoded}"
+        );
+        for policy in [UpNextPolicy::Ask, UpNextPolicy::Off] {
+            let encoded = serde_json::to_value(Session::default().with_up_next_policy(policy)).unwrap();
+            let round: Session = serde_json::from_value(encoded).unwrap();
+            assert_eq!(round.up_next_policy(), policy);
+        }
+    }
+
+    #[test]
+    fn up_next_window_defaults_softly_and_round_trips() {
+        for value in [
+            serde_json::json!({}),
+            serde_json::json!({"up_next_window_s": "future"}),
+            serde_json::json!({"up_next_window_s": null}),
+        ] {
+            let session: Session = serde_json::from_value(value).unwrap();
+            assert_eq!(session.up_next_window_s(), UP_NEXT_WINDOW_DEFAULT_S);
+        }
+        let encoded = serde_json::to_value(Session::default()).unwrap();
+        assert!(
+            !encoded.as_object().unwrap().contains_key("up_next_window_s"),
+            "the default window is the omission: {encoded}"
+        );
+        let encoded = serde_json::to_value(Session::default().with_up_next_window_s(45)).unwrap();
+        assert_eq!(encoded["up_next_window_s"], 45);
+        let round: Session = serde_json::from_value(encoded).unwrap();
+        assert_eq!(round.up_next_window_s(), 45);
     }
 }
 

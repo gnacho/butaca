@@ -3656,6 +3656,7 @@ mod lifecycle_regression_tests {
                     final_seg: true,
                 }),
                 20,
+                true,
             );
             let mut fr = Frame::begin(&self.app.player.session, self.app.bridge.metadata_view());
             fr.now = 20 + crate::ui::up_next::COUNTDOWN_MS;

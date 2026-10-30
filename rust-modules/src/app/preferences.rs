@@ -53,5 +53,17 @@ pub(super) fn execute(command: PreferenceCmd) {
                 crate::ui::idle::invalidate();
             });
         }
+        PreferenceCmd::UpNext { policy, reply } => {
+            let _ = crate::storage_worker::submit_retained(move || {
+                let _ = reply.send(crate::route::set_up_next_policy(policy));
+                crate::ui::idle::invalidate();
+            });
+        }
+        PreferenceCmd::UpNextWindow { seconds, reply } => {
+            let _ = crate::storage_worker::submit_retained(move || {
+                let _ = reply.send(crate::route::set_up_next_window_s(seconds));
+                crate::ui::idle::invalidate();
+            });
+        }
     }
 }
