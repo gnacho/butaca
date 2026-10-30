@@ -236,9 +236,8 @@ the pinned Sentry Native cross-build), and `sshpass` (Homebrew, for deploy/run).
   definition, so `TV` comes back as the literal
   `$(strip $(shell cat .tv-host …))` and every ssh built from it fails against a live television.
   Full account (predates nightly): **`docs/two-installs.md`**.
-- **`RELEASE=1`** drops **all three** default cargo features: `devtools` (the on-screen counter — the
-  last completed `fps=` present window, held until an ordinary present repaints it; the feature is
-  contracted to be draw-only and never wakes an idle screen) and `devtriggers` (the whole `/tmp` surface, the remote
+- **`RELEASE=1`** drops **all three** default cargo features: `devtools` (draw-only dev chrome, which today only
+  stamps the feature name into a recording) and `devtriggers` (the whole `/tmp` surface, the remote
   FIFO and the capture listener — see `rust-modules/src/dev.rs`),
   plus `threadcheck` (the main-thread violation checker). **It also decides WHICH VERSION
   THE BINARY SAYS IT IS**: the Makefile exports `PLX_RELEASE`, and `rust-modules/build.rs` publishes
@@ -458,7 +457,7 @@ video shows through.
 
 **UI (the Rust app core — the frame loop in `app/run.rs::run`, entered via `plex_run()` in `app/mod.rs` after `app/boot.rs::boot()`):** SDL2 window + GLES2
 context. All UI is drawn with two tiny shaders — an SDF rounded-rect/triangle shader (cards, focus
-glow, HUD widgets, seven-segment FPS) and a text shader that samples SDL2_ttf-rendered glyph
+glow, HUD widgets) and a text shader that samples SDL2_ttf-rendered glyph
 textures (cached by string+size). Critically-damped springs animate focus scale and shelf scroll.
 Fonts are `appfont.ttf` / `appfont-bold.ttf` deployed next to the binary. (Wayland surface setup +
 input decoding live in `system.rs` / `app/events.rs` + `app/input.rs`, not the C shim — see the gotchas below.)

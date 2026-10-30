@@ -1,6 +1,6 @@
 //! GLES2 rendering foundation (was src/gfx.c). Three shader programs (SDF
 //! rrect/tri/focus, 4-corner ambient gradient, textured RGBA), the draw primitives,
-//! the spring helper, and the seven-segment FPS digits. All GLES2 calls; state is
+//! the spring helper. All GLES2 calls; state is
 //! main-thread statics. link_program/use_prog are also used by text.rs (crate path).
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_uint, c_void};
@@ -1722,68 +1722,6 @@ pub(crate) fn spring_zeta(pos: *mut f32, vel: *mut f32, target: f32, k: f32, zet
         *pos = target + e * (a * c + b * s);
         *vel = e * ((b * wd - z * w * a) * c - (a * wd + z * w * b) * s);
         crate::ui::idle::note_spring(*pos, target, *vel); // see the note in `spring`
-    }
-}
-
-// --- seven-segment FPS digits (quads) ---
-//
-// The counter's ONLY caller is `app.rs`'s `#[cfg(feature = "devtools")]` draw site, so these three
-// items carry the same gate. Without it `--no-default-features` (i.e. `make RELEASE=1`, and the
-// macOS app bundle) fails the build outright rather than merely warning: `[lints.rust] warnings =
-// "deny"` in Cargo.toml turns the three `dead_code` findings into errors, and nothing in the dev
-// configuration can see that — the feature is on in every ordinary `make`, `make check` and
-// harness run.
-#[cfg(feature = "devtools")]
-const SEG: [u8; 10] = [0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F];
-
-#[cfg(feature = "devtools")]
-fn draw_digit(d: i32, x: f32, y: f32, s: f32, col: *const f32) {
-    let w = 0.16 * s;
-    // segments: 0 top,1 tr,2 br,3 bottom,4 bl,5 tl,6 mid — each {x,y,w,h}
-    let g: [[f32; 4]; 7] = [
-        [0.0, 0.0, 1.0, 0.0],
-        [1.0, 0.0, 0.0, 0.5],
-        [1.0, 0.5, 0.0, 0.5],
-        [0.0, 1.0, 1.0, 0.0],
-        [0.0, 0.5, 0.0, 0.5],
-        [0.0, 0.0, 0.0, 0.5],
-        [0.0, 0.5, 1.0, 0.0],
-    ];
-    for i in 0..7 {
-        if (SEG[d as usize] >> i) & 1 == 0 {
-            continue;
-        }
-        let sx = x + g[i][0] * s - w / 2.0;
-        let sy = y + g[i][1] * s - w / 2.0;
-        let sw = g[i][2] * s + w;
-        let sh = g[i][3] * s + w;
-        draw_rect(
-            sx,
-            sy,
-            sw,
-            sh,
-            2.0,
-            (w + 4.0) / 2.0 - 2.0,
-            col,
-            col,
-            0.0,
-            1.0,
-        );
-    }
-}
-
-#[cfg(feature = "devtools")]
-pub(crate) fn draw_number(mut n: i32, right_x: f32, y: f32, s: f32, col: *const f32) {
-    n = n.clamp(0, 999);
-    let adv = s + 0.55 * s;
-    let mut x = right_x - adv;
-    loop {
-        draw_digit(n % 10, x, y, s, col);
-        n /= 10;
-        x -= adv;
-        if n <= 0 {
-            break;
-        }
     }
 }
 

@@ -1094,24 +1094,11 @@ pub(crate) unsafe fn construct(
     let loop_t = t0;
     let iters_ct = 0i32;
     let loop_shown = 0i32;
-    // The dev number painted in the top-right corner. Unlike `loop_shown`, this is a real
-    // presentation rate: the same completed-window value the heartbeat publishes as `fps=`.
-    // It is updated only when that heartbeat drains PRESENTS, so pixels and logs cannot
-    // disagree by observing two different counters. On a settled screen the number changes
-    // only when the ordinary keepalive next buys a frame; the diagnostic must never defeat
-    // the present gate merely to repaint itself.
-    #[cfg(feature = "devtools")]
-    let fps_shown = 0i32;
     // (media ns, SDL ticks) at the previous heartbeat, for `play=` below. `None` while
     // nothing is presenting, so the first beat of a playback reports no rate rather than a
     // fabricated one.
     let play_prev: Option<(i64, u32)> = None;
     let running = true;
-    // Dev-only panel proof: advance a red/green counter phase only after SDL_GL_SwapWindow
-    // returns. Hold each colour for 30 swaps: per-buffer alternation blends yellow at 60 Hz,
-    // while this ~2 Hz change is human-visible and still freezes immediately with presentation.
-    #[cfg(feature = "devtools")]
-    let buffer_flip_count = 0u8;
 
     // All that is left of `HeldKey` on the loop's side (phase 10) — see `App::down_sym`.
     let down_sym = 0u32;
@@ -1286,13 +1273,9 @@ pub(crate) unsafe fn construct(
         loop_t,
         iters_ct,
         loop_shown,
-        #[cfg(feature = "devtools")]
-        fps_shown,
         play_prev,
         running,
         window_activity: crate::system::WindowActivity::new(),
-        #[cfg(feature = "devtools")]
-        buffer_flip_count,
         down_sym,
         modal_repeat,
         diagnostics: crate::app::diagnostics::Diagnostics::default(),

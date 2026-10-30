@@ -926,10 +926,6 @@ pub const CONTROL_DANGER_IDLE_FILL: [f32; 4] = mix(CONTROL_IDLE_FILL, DANGER, DA
 /// an idle destructive control (a tinted plate AND a tinted label) because at ten feet the plate
 /// alone is a shade of grey; the label is what names the action.
 pub const CONTROL_DANGER_IDLE_INK: [f32; 4] = DANGER;
-/// Dev counter's two human-visible buffer phases. The renderer holds each for 30 returned swaps,
-/// so motion is visible instead of red/green frames blending into yellow at panel refresh rate.
-pub const DIAG_FLIP_A: [f32; 4] = GREEN_400;
-pub const DIAG_FLIP_B: [f32; 4] = RED_400;
 /// Stats-for-Nerds delivery budget that covers the current media demand. This is not a generic
 /// success colour: the diagnostic plot uses it only for the literal `budget >= demand` state.
 pub const DIAG_LINK_SUSTAINS: [f32; 4] = GREEN_400;
