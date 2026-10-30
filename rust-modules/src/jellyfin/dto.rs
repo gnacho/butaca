@@ -168,6 +168,34 @@ pub(crate) struct BaseItemDto {
     /// Season/folder only: how many leaves it holds (Plex's `leafCount`).
     #[serde(rename = "ChildCount")]
     pub(crate) child_count: Option<i64>,
+    /// The trickplay manifest, present only when the server generated trickplay images AND the
+    /// query asked for them (`Fields=Trickplay`). Outer key is the tile width as a string ("320"),
+    /// inner key the sprite-sheet index; each value describes one sheet's grid and interval.
+    /// Empty/absent means the item has no trickplay.
+    #[serde(rename = "Trickplay", default)]
+    pub(crate) trickplay: std::collections::BTreeMap<String, std::collections::BTreeMap<String, TrickplayInfoDto>>,
+}
+
+/// One sprite sheet of the trickplay manifest (`BaseItemDto::trickplay`). Width/Height are a
+/// single thumbnail's pixels, TileWidth/TileHeight the grid (thumbnails per row/column),
+/// Interval the milliseconds between thumbnails, Bandwidth the sheet's peak bits/second. Mirrors
+/// Jellyfin's `TrickplayInfoDto` field-for-field; only what the seek-bar reader needs is declared.
+#[derive(Debug, Deserialize)]
+pub(crate) struct TrickplayInfoDto {
+    #[serde(rename = "Width")]
+    pub(crate) width: i32,
+    #[serde(rename = "Height")]
+    pub(crate) height: i32,
+    #[serde(rename = "TileWidth")]
+    pub(crate) tile_width: i32,
+    #[serde(rename = "TileHeight")]
+    pub(crate) tile_height: i32,
+    #[serde(rename = "ThumbnailCount")]
+    pub(crate) thumbnail_count: i32,
+    #[serde(rename = "Interval")]
+    pub(crate) interval: i32,
+    #[serde(rename = "Bandwidth")]
+    pub(crate) bandwidth: i32,
 }
 
 #[derive(Debug, Deserialize)]

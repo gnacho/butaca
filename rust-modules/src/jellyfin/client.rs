@@ -16,11 +16,11 @@
 //! LAN address. **The token is never logged** — parse failures name the endpoint, which is the
 //! part of the path before the query string.
 
-use super::dto::{AuthResponse, AuthUser, BaseItemDto, ItemsResult, QuickConnectResult, ViewsResult};
+use super::dto::{AuthResponse, AuthUser, BaseItemDto, ItemsResult, QuickConnectResult, TrickplayInfoDto, ViewsResult};
 use crate::http;
 use crate::plex::Origin;
 use serde::de::DeserializeOwned;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Mutex, RwLock};
 
 /// What a stored token resolves to: the account it was minted for. Narrower than [`AuthOk`]
@@ -752,6 +752,25 @@ impl JfClient {
             "/Users/{user_id}/Items/{item_id}?Fields={}&EnableImageTypes=Primary,Backdrop",
             Self::DETAIL_FIELDS
         ))
+    }
+
+    /// The item's trickplay manifest (`GET /Users/{uid}/Items/{id}?Fields=Trickplay`), or `None`
+    /// when the server has generated none. The outer key is the tile width as a string ("320");
+    /// the seek-bar reader picks a width and fetches the sheet at
+    /// `/Videos/{id}/Trickplay/{width}/{index}.jpg`. Data layer only: fetching and decoding the
+    /// sheets is deliberately NOT here.
+    pub(crate) fn trickplay_info(
+        &self,
+        item_id: &str,
+    ) -> Option<BTreeMap<String, BTreeMap<String, TrickplayInfoDto>>> {
+        let user_id = self.user_id()?;
+        let dto: BaseItemDto =
+            self.get_json(&format!("/Users/{user_id}/Items/{item_id}?Fields=Trickplay"))?;
+        if dto.trickplay.is_empty() {
+            None
+        } else {
+            Some(dto.trickplay)
+        }
     }
 
     /// A show's seasons (`GET /Shows/{id}/Seasons`).
@@ -1847,5 +1866,35 @@ mod tests {
         assert!(!version_at_least("10.8", 10, 9));
         assert!(!version_at_least("", 10, 8));
         assert!(!version_at_least("not-a-version", 10, 8));
+    }
+
+    /// Trickplay: the manifest parses from the item detail, an empty one answers None, and the
+    /// query asks for the field explicitly.
+    #[test]
+    fn trickplay_manifest_parses_and_an_empty_one_is_none() {
+        let server = MockServer::start(vec![
+            (200, AUTH_OK),
+            (200, r#"{"Id":"mv-1","Name":"Movie","Type":"Movie","Trickplay":{"320":{"0":{"Width":320,"Height":180,"TileWidth":10,"TileHeight":10,"ThumbnailCount":100,"Interval":10000,"Bandwidth":123456}}}}"#),
+        ]);
+        let client = JfClient::new(Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+        client.authenticate_by_name("demo", "").unwrap();
+
+        let info = client.trickplay_info("mv-1").expect("manifest parses");
+        let sheet = info.get("320").unwrap().get("0").unwrap();
+        assert_eq!(sheet.width, 320);
+        assert_eq!(sheet.height, 180);
+        assert_eq!(sheet.tile_width, 10);
+        assert_eq!(sheet.interval, 10000);
+        let reqs = server.finish();
+        assert!(reqs[1].starts_with("GET /Users/u-1/Items/mv-1?Fields=Trickplay HTTP/1.1"), "{}", reqs[1]);
+
+        let empty = MockServer::start(vec![
+            (200, AUTH_OK),
+            (200, r#"{"Id":"mv-2","Name":"NoTp","Type":"Movie","Trickplay":{}}"#),
+        ]);
+        let client2 = JfClient::new(Origin::http("127.0.0.1", empty.port as i32), "dev-1".into());
+        client2.authenticate_by_name("demo", "").unwrap();
+        assert!(client2.trickplay_info("mv-2").is_none(), "no trickplay generated");
+        empty.finish();
     }
 }
