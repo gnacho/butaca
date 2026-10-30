@@ -58,6 +58,12 @@ jobs:
         env:
           CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
         run: make sim-linux SIM_TDIR=rust-modules/target-sim-ci
+      - name: Install nightly Rust
+        # `make check-ffmpeg` runs the host suite's FFmpeg-backed tests on the toolchain `make
+        # check` uses; the simulator above builds on the runner's default one. `rust-src` is not
+        # optional: rust-modules/.cargo/config.toml sets `[unstable] build-std` for every nightly
+        # cargo run, host tests included — the same component ci.yml's host checks install.
+        run: rustup toolchain install nightly --profile minimal --component rust-src
       - name: Host ASS renderer tests
         # Pinned-renderer glyph pixels, cancellation and source-lifecycle regressions. This job is
         # the only CI that builds libass for the host, so it is the only one that can run them.
