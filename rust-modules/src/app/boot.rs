@@ -417,6 +417,16 @@ pub(crate) unsafe fn construct(
     deferred: Option<crate::plex::session::DeferredLoad>,
     launch_params: Option<String>,
 ) -> Result<App, c_int> {
+    // The build's own name on one line, before any store is opened: a support report is about ONE
+    // packaged binary, and this is the only place that names the artifact beside the commit it came
+    // from. `ci/check-package.py` grades the `butaca@` literal in the binary's bytes, so the shape
+    // of this line is a contract, not decoration: keep the prefix and the version adjacent.
+    log(concat!(
+        "boot: butaca@",
+        env!("PLX_VERSION"),
+        " sha=",
+        env!("PLX_BUILD_SHA")
+    ));
     let controlled = preflight.controlled();
     if let Some(initial) = &initial {
         super::bootstrap::stores::init(initial, preflight.replay());

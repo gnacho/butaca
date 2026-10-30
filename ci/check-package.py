@@ -63,7 +63,47 @@ def build_configuration(stamp: str) -> "str | None":
         stamp.strip())
     if not fields:
         return None
-    return {"": "dev", "--no-default-features": "release"}.get(fields.group("flags").strip())
+    return classify_flags(fields.group("flags"))
+
+
+# THE FEATURES THE PUBLISHED PACKAGES CARRY, and the whole reason this is a list rather than "any
+# `--features` word goes". `RUST_FEATFLAGS` also appends `--features lab-diagnostics` (LAB=1) and
+# `--features devtriggers` (the `shots` recipe), and grading either of those as a shipped build is
+# how a diagnostics surface ends up certified as a release. Adding a feature that really ships
+# means adding it here, and that is the point: the day a release carries something new, this line
+# is where someone has to say so out loud.
+SHIPPED_FEATURES = frozenset({"jellyfin"})
+
+
+def classify_flags(flags: str) -> "str | None":
+    """Decode the `features:` half: "dev", "release", or None when it is neither.
+
+    READ AS WORDS, NOT AS ONE STRING. `RUST_FEATFLAGS` is `--no-default-features` (RELEASE only)
+    followed by `--features <word>` for each feature switched on, so every CI build in this
+    repository carries `--features jellyfin` on top: matching the flags against the two literals
+    they used to be left EVERY published package decoding as None, which is what turned the
+    nightly green while its gates graded nothing. `--features jellyfin` alone is the dev flavor
+    built with the Jellyfin backend, and it decodes "dev" because that is the configuration it is.
+
+    Anything carrying a feature outside [`SHIPPED_FEATURES`], any token that is not part of the
+    `--features` grammar, and any flags that do not start at the beginning are None: that is how
+    the diagnostic builds keep their gates skipped instead of graded.
+    """
+    words = flags.split()
+    if not words:
+        return "dev"
+    release = words[0] == "--no-default-features"
+    if release:
+        words = words[1:]
+    features = set()
+    while words:
+        if len(words) < 2 or words[0] != "--features":
+            return None
+        features.update(words[1].split(","))
+        words = words[2:]
+    if features - SHIPPED_FEATURES:
+        return None
+    return "release" if release else "dev"
 
 
 def parse_release_line(content: str) -> "tuple[int, int] | None":
@@ -282,6 +322,15 @@ def _selftest() -> int:
         "features:+symbols+tel:98c4b7d37a4c": "dev",
         # the nightly cut: RELEASE=1 (so --no-default-features), SYMBOLS=1, and the dated field
         "features:--no-default-features+symbols+nightly:20260919+tel:98c4b7d37a4c": "release",
+        # what CI actually writes: `RUST_FEATFLAGS` appends the Jellyfin backend to every build,
+        # so the flags are a list of words rather than either of the two literals above
+        "features:--no-default-features --features jellyfin+symbols+tel:98c4b7d37a4c": "release",
+        "features:--no-default-features --features jellyfin+symbols+nightly:20261029"
+        "+tel:98c4b7d37a4c": "release",                                          # the nightly cut
+        "features:--no-default-features --features jellyfin+tel:98c4b7d37a4c": "release",
+        "features: --features jellyfin+tel:98c4b7d37a4c": "dev",                # JELLYFIN=1, no RELEASE
+        "features:--no-default-features --features jellyfin --features jellyfin+tel:98c4b7d37a4c":
+            "release",
         # older stamps, from before the telemetry and symbols fields existed
         "features:": "dev",
         "features:--no-default-features": "release",
@@ -289,6 +338,10 @@ def _selftest() -> int:
         "features: --features lab-diagnostics+tel:abc123def456": None,          # LAB=1
         "features:--no-default-features --features lab-diagnostics+tel:abc123def456": None,
         "features:--no-default-features --features devtriggers+tel:abc123def456": None,  # shots
+        "features:--no-default-features --features jellyfin --features lab-diagnostics"
+        "+tel:abc123def456": None,                                              # JELLYFIN=1 LAB=1
+        "features:--features": None,                                            # a flag with no word
+        "features:--no-default-features jellyfin+tel:abc123def456": None,        # not the grammar
         # nothing to read
         "": None,
         "garbage": None,
@@ -1216,9 +1269,11 @@ if binary.exists():
     # MATCHED WITH THE `butaca@` PREFIX, not as a bare number, and that is the difference
     # between grading `PLX_VERSION` and grading whatever digits happen to be in .rodata: the About
     # page and any release note text carry the version too, so a bare-number search was satisfiable
-    # by a page the version mechanism never touched. `telemetry::{crashreport,native,playback}`
-    # compose `concat!("butaca@", env!("PLX_VERSION"))` in every configuration — telemetry is
-    # ungated on purpose — so this witnesses the emitted value itself.
+    # by a page the version mechanism never touched. `app::boot::construct` opens every session log
+    # with `concat!("boot: butaca@", env!("PLX_VERSION"), " sha=", env!("PLX_BUILD_SHA"))`, one
+    # line, ungated, before any store is opened, so this witnesses the emitted value itself. (The
+    # string used to be composed by the telemetry modules, deleted with the reporting subsystem in
+    # #22, which is why the gate briefly had no witness to find.)
     #
     # NIGHTLY IS GRADED SEPARATELY. Its package version (`appinfo["version"]`, already checked
     # against Cargo.toml above) IS the next-minor-or-patch number — recomputing "next" a second
