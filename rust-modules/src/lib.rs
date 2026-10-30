@@ -186,6 +186,44 @@ pub(crate) mod testlock {
         }
     }
 
+    /// Install, exactly once, a panic hook that reports a test panic as raw text instead of
+    /// letting the default hook Debug-format the payload.
+    ///
+    /// The default hook formats a non-`&str`/`&String` payload with `{:?}`. When that payload's
+    /// `Debug` impl itself panics, the hook panics while handling the first panic, and the runtime
+    /// aborts the whole suite with "thread panicked while processing panic" (SIGABRT) instead of
+    /// reporting one named, failed test. This hook prints the thread name, the `Location` and the
+    /// payload as raw text (`&str`/`String` via their `Display` semantics, never `{:?}`) and then
+    /// returns, so the panic unwinds normally and libtest names the failing test.
+    ///
+    /// Installed from [`serial`], the one door every test that touches a process global passes
+    /// through, so it is in place before any such test can panic, and the `Once` makes the
+    /// installation idempotent no matter how many tests reach it.
+    pub(crate) fn install_panic_hook() {
+        use std::sync::Once;
+        static ONCE: Once = Once::new();
+        ONCE.call_once(|| {
+            std::panic::set_hook(Box::new(|info| {
+                let name = std::thread::current()
+                    .name()
+                    .unwrap_or("<unnamed>")
+                    .to_string();
+                let location = match info.location() {
+                    Some(l) => format!("{}:{}:{}", l.file(), l.line(), l.column()),
+                    None => "unknown location".to_string(),
+                };
+                let payload = if let Some(s) = info.payload().downcast_ref::<&str>() {
+                    (*s).to_string()
+                } else if let Some(s) = info.payload().downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "non-string panic payload (withheld to avoid a formatting cascade)".to_string()
+                };
+                eprintln!("panic in test thread {name} at {location}: {payload}");
+            }));
+        });
+    }
+
     /// Take the lock, or PANIC if this thread already holds it.
     ///
     /// The re-entrancy check is not a nicety. [`GLOBALS`] is a plain mutex, so a test that takes
@@ -196,6 +234,7 @@ pub(crate) mod testlock {
     /// of wall clock and was indistinguishable from a slow build from the outside. A deadlock and
     /// a panic are the same bug; only one of them names itself.
     pub(crate) fn serial() -> Serial {
+        install_panic_hook();
         assert!(
             !held(),
             "testlock::serial() taken twice on one thread — the second take would deadlock the \
@@ -291,6 +330,30 @@ pub(crate) mod testlock {
             })
             .join();
             assert!(attempt.is_err(), "the re-entrant take must panic");
+        }
+
+        /// A payload whose `Debug` impl itself panics. The default panic hook formats a non-string
+        /// payload with `{:?}`, so this payload makes the hook panic while handling the first
+        /// panic, and the runtime aborts the suite (SIGABRT) instead of naming one failed test.
+        struct DebugBomb;
+        impl std::fmt::Debug for DebugBomb {
+            fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                panic!("debug formatting cascades into a double panic")
+            }
+        }
+
+        /// A test panic with a bomb payload must be caught and named, not abort the process. The
+        /// hook `install_panic_hook` prints raw text (never `{:?}`), so this bomb does not
+        /// cascade: the probe thread panics, `join` returns `Err`, and the suite carries on.
+        #[test]
+        fn a_debug_bomb_payload_panics_and_is_named_instead_of_aborting() {
+            super::install_panic_hook();
+            let attempt = std::thread::Builder::new()
+                .name("debug-bomb-probe".into())
+                .spawn(|| std::panic::panic_any(DebugBomb))
+                .expect("spawn")
+                .join();
+            assert!(attempt.is_err(), "the bomb payload must panic on its own thread");
         }
     }
 }
