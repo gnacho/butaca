@@ -5252,6 +5252,94 @@ pub(crate) fn set_lip_sync_offset_ms(offset_ms: i64) -> bool {
     saved
 }
 
+/// What an episode ending does. A process-wide atomic beside [`LIP_SYNC_OFFSET_MS`] for the same
+/// reason: the player reads it while drawing the control row, and a lock there would be a lock in
+/// the draw path.
+static UP_NEXT_POLICY: AtomicU8 = AtomicU8::new(0);
+
+/// Seconds before the end at which the Up Next card appears where the server marks no credits.
+static UP_NEXT_WINDOW_S: AtomicI64 =
+    AtomicI64::new(crate::plex::session::UP_NEXT_WINDOW_DEFAULT_S);
+
+pub(crate) fn up_next_policy() -> crate::plex::session::UpNextPolicy {
+    match UP_NEXT_POLICY.load(Ordering::Relaxed) {
+        1 => crate::plex::session::UpNextPolicy::Ask,
+        2 => crate::plex::session::UpNextPolicy::Off,
+        _ => crate::plex::session::UpNextPolicy::Auto,
+    }
+}
+
+/// Whether the countdown may arm: `Ask` leaves the card up and waits, `Off` never shows it.
+pub(crate) fn up_next_auto_advances() -> bool {
+    matches!(up_next_policy(), crate::plex::session::UpNextPolicy::Auto)
+}
+
+/// Whether the card is offered at all. Reads the policy once so the draw, the hit map and the
+/// countdown cannot disagree within a frame.
+pub(crate) fn up_next_offered() -> bool {
+    !matches!(up_next_policy(), crate::plex::session::UpNextPolicy::Off)
+}
+
+pub(crate) fn up_next_window_s() -> i64 {
+    UP_NEXT_WINDOW_S.load(Ordering::Relaxed)
+}
+
+/// The window in milliseconds, which is what the marker arithmetic speaks.
+pub(crate) fn up_next_window_ms() -> i64 {
+    up_next_window_s() * 1_000
+}
+
+pub(crate) fn up_next_window_range_s() -> (i64, i64) {
+    (
+        crate::plex::session::UP_NEXT_WINDOW_MIN_S,
+        crate::plex::session::UP_NEXT_WINDOW_MAX_S,
+    )
+}
+
+pub(crate) fn clamp_up_next_window_s(seconds: i64) -> i64 {
+    let (min, max) = up_next_window_range_s();
+    seconds.clamp(min, max)
+}
+
+/// Restore the persisted preference without writing it back, exactly as
+/// [`restore_lip_sync_offset_ms`].
+pub(crate) fn restore_up_next_policy(policy: crate::plex::session::UpNextPolicy) {
+    #[cfg(test)]
+    crate::testlock::assert_held("the up-next policy (restore_up_next_policy)");
+    UP_NEXT_POLICY.store(match policy {
+        crate::plex::session::UpNextPolicy::Auto => 0,
+        crate::plex::session::UpNextPolicy::Ask => 1,
+        crate::plex::session::UpNextPolicy::Off => 2,
+    }, Ordering::Relaxed);
+}
+
+/// Blocking persistence seam; Settings dispatches it on the storage worker.
+pub(crate) fn set_up_next_policy(policy: crate::plex::session::UpNextPolicy) -> bool {
+    let saved = crate::plex::session::update_with_outcome(|s| Some(s.with_up_next_policy(policy)))
+        .is_some_and(|write| matches!(write.classify(),
+            crate::plex::session::async_persistence::CompletionOutcome::Durable(_)));
+    if saved { restore_up_next_policy(policy); }
+    saved
+}
+
+/// Restore the persisted window without writing it back, exactly as
+/// [`restore_up_next_policy`].
+pub(crate) fn restore_up_next_window_s(seconds: i64) {
+    #[cfg(test)]
+    crate::testlock::assert_held("the up-next window (restore_up_next_window_s)");
+    UP_NEXT_WINDOW_S.store(clamp_up_next_window_s(seconds), Ordering::Relaxed);
+}
+
+/// Blocking persistence seam; Settings dispatches it on the storage worker.
+pub(crate) fn set_up_next_window_s(seconds: i64) -> bool {
+    let seconds = clamp_up_next_window_s(seconds);
+    let saved = crate::plex::session::update_with_outcome(|s| Some(s.with_up_next_window_s(seconds)))
+        .is_some_and(|write| matches!(write.classify(),
+            crate::plex::session::async_persistence::CompletionOutcome::Durable(_)));
+    if saved { restore_up_next_window_s(seconds); }
+    saved
+}
+
 pub(crate) fn set_default_quality(q: Quality) -> bool {
     let q = supported_quality(q);
     let saved = crate::plex::session::update_with_outcome(|s| Some(s.with_playback_quality(q)))

@@ -74,8 +74,8 @@ each with its own token. The screens show the one that is active.
 only thing it talks to is the server you configured. [`PRIVACY.md`](PRIVACY.md) says it in full.
 
 **Settings that stay short.** Playback quality, Direct Play, audio language, subtitle mode,
-subtitle language, forced subtitles, the language of the interface, and the pages for legal and
-about. Nothing hidden three levels deep.
+subtitle language, forced subtitles, what happens when an episode ends, the language of the
+interface, and the pages for legal and about. Nothing hidden three levels deep.
 
 ## Will it work on my television?
 

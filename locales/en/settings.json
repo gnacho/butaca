@@ -632,6 +632,26 @@
     "value": "Audio sync",
     "description": "Settings, consent or sign-in UI: settings.playback.lip_sync"
   },
+  "settings.playback.up_next": {
+    "value": "Next episode",
+    "description": "Settings, consent or sign-in UI: settings.playback.up_next"
+  },
+  "settings.playback.up_next_auto": {
+    "value": "Play automatically",
+    "description": "Settings, consent or sign-in UI: settings.playback.up_next_auto"
+  },
+  "settings.playback.up_next_ask": {
+    "value": "Ask first",
+    "description": "Settings, consent or sign-in UI: settings.playback.up_next_ask"
+  },
+  "settings.playback.up_next_off": {
+    "value": "Do not offer",
+    "description": "Settings, consent or sign-in UI: settings.playback.up_next_off"
+  },
+  "settings.playback.up_next_window": {
+    "value": "Up Next card timing",
+    "description": "Settings, consent or sign-in UI: settings.playback.up_next_window"
+  },
   "settings.audio.language": {
     "value": "Preferred audio language",
     "description": "Settings, consent or sign-in UI: settings.audio.language"

@@ -162,3 +162,32 @@ fn lip_sync_offset_clamps_to_the_range_and_round_trips() {
     assert_eq!(lip_sync_offset_ms(), LIP_SYNC_MAX_MS, "restore clamps too");
     restore_lip_sync_offset_ms(previous);
 }
+
+/// Issue #89: the up-next preference pair. The clamp is the one rule the picker and the writer
+/// share, and the policy is read every frame by the draw path, so both are pinned here rather
+/// than only through the Settings page.
+#[test]
+fn up_next_policy_and_window_clamp_and_restore() {
+    let _serial = crate::testlock::serial();
+    let previous = (up_next_policy(), up_next_window_s());
+    assert_eq!(
+        up_next_window_range_s(),
+        (crate::plex::session::UP_NEXT_WINDOW_MIN_S, crate::plex::session::UP_NEXT_WINDOW_MAX_S)
+    );
+    assert_eq!(clamp_up_next_window_s(0), crate::plex::session::UP_NEXT_WINDOW_MIN_S);
+    assert_eq!(clamp_up_next_window_s(45), 45);
+    assert_eq!(clamp_up_next_window_s(10_000), crate::plex::session::UP_NEXT_WINDOW_MAX_S);
+    restore_up_next_window_s(45);
+    assert_eq!(up_next_window_s(), 45);
+    assert_eq!(up_next_window_ms(), 45_000, "the marker arithmetic speaks milliseconds");
+    restore_up_next_window_s(0);
+    assert_eq!(up_next_window_s(), crate::plex::session::UP_NEXT_WINDOW_MIN_S, "restore clamps too");
+
+    restore_up_next_policy(crate::plex::session::UpNextPolicy::Ask);
+    assert_eq!(up_next_policy(), crate::plex::session::UpNextPolicy::Ask);
+    assert!(up_next_offered() && !up_next_auto_advances(), "Ask offers the card and waits");
+    restore_up_next_policy(crate::plex::session::UpNextPolicy::Off);
+    assert!(!up_next_offered(), "Off offers nothing, so the row falls back to Skip or the discs");
+    restore_up_next_policy(previous.0);
+    restore_up_next_window_s(previous.1);
+}

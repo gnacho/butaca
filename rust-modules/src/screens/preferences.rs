@@ -27,17 +27,19 @@ pub(crate) const SHAPE: &str = "PreferencesV2{kind:u8,picker:u8,selection:u32,bu
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind { Playback, AudioSubtitles }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Field { Quality, DirectPlay, LipSync, AudioLanguage, SubtitleMode, SubtitleLanguage, ForcedSubtitles }
+enum Field { Quality, DirectPlay, LipSync, UpNext, UpNextWindow, AudioLanguage, SubtitleMode, SubtitleLanguage, ForcedSubtitles }
 impl Field {
     fn title(self) -> &'static str { match self {
         Self::Quality => crate::i18n::msg::settings_playback_quality(), Self::DirectPlay => crate::i18n::msg::settings_playback_direct_play(),
         Self::LipSync => crate::i18n::msg::settings_playback_lip_sync(),
+        Self::UpNext => crate::i18n::msg::settings_playback_up_next(),
+        Self::UpNextWindow => crate::i18n::msg::settings_playback_up_next_window(),
         Self::AudioLanguage => crate::i18n::msg::settings_audio_language(), Self::SubtitleMode => crate::i18n::msg::settings_audio_subtitles(),
         Self::SubtitleLanguage => crate::i18n::msg::settings_audio_subtitle_language(), Self::ForcedSubtitles => crate::i18n::msg::settings_audio_forced_subtitles(),
     }}
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Value { Quality(Quality), DirectPlay(DirectPlayMode), LipSync(i64), Language(String), Mode(i64), Forced(i64) }
+enum Value { Quality(Quality), DirectPlay(DirectPlayMode), LipSync(i64), UpNext(crate::plex::session::UpNextPolicy), Window(i64), Language(String), Mode(i64), Forced(i64) }
 #[derive(Clone)]
 enum Action { Open(Field), Pick(Value), Retry }
 struct State {
@@ -169,6 +171,8 @@ impl PreferencesPage {
             Value::Quality(quality) => PreferenceCmd::Quality { quality, reply },
             Value::DirectPlay(mode) => PreferenceCmd::DirectPlay { mode, reply },
             Value::LipSync(offset_ms) => PreferenceCmd::LipSync { offset_ms, reply },
+            Value::UpNext(policy) => PreferenceCmd::UpNext { policy, reply },
+            Value::Window(seconds) => PreferenceCmd::UpNextWindow { seconds, reply },
             _ => return,
         };
         self.pending = Some(Pending::Local(rx)); self.state.busy = true;
@@ -188,6 +192,8 @@ impl PreferencesPage {
             Field::Quality => Value::Quality(self.state.quality),
             Field::DirectPlay => Value::DirectPlay(self.state.direct_play),
             Field::LipSync => Value::LipSync(crate::route::lip_sync_offset_ms()),
+            Field::UpNext => Value::UpNext(crate::route::up_next_policy()),
+            Field::UpNextWindow => Value::Window(crate::route::up_next_window_s()),
             Field::AudioLanguage => Value::Language(p.and_then(|p| p.stated_language.clone()).unwrap_or_default()),
             Field::SubtitleLanguage => Value::Language(p.and_then(|p| p.subtitle_language.clone()).unwrap_or_default()),
             Field::SubtitleMode => Value::Mode(p.map_or(0, |p| p.subtitle_mode)),
@@ -207,6 +213,21 @@ impl PreferencesPage {
                 while ms <= max {
                     result.push((lip_sync_label(ms), Value::LipSync(ms)));
                     ms += crate::route::LIP_SYNC_STEP_MS;
+                }
+                result
+            }
+            Field::UpNext => [
+                crate::plex::session::UpNextPolicy::Auto,
+                crate::plex::session::UpNextPolicy::Ask,
+                crate::plex::session::UpNextPolicy::Off,
+            ].into_iter().map(|p| (up_next_label(p).into(), Value::UpNext(p))).collect(),
+            Field::UpNextWindow => {
+                let (min, max) = crate::route::up_next_window_range_s();
+                let mut result = Vec::new();
+                let mut s = min;
+                while s <= max {
+                    result.push((format!("{s} s"), Value::Window(s)));
+                    s += crate::plex::session::UP_NEXT_WINDOW_STEP_S;
                 }
                 result
             }
@@ -239,13 +260,18 @@ impl PreferencesPage {
         self.state.values.clear(); self.actions.clear();
         // The field list is rebuilt at every level: it is the parent a picker slides over.
         let mut section = Section::new("");
-        let fields: &[Field] = match self.state.kind {
-            Kind::Playback => &[Field::Quality, Field::DirectPlay, Field::LipSync],
-            Kind::AudioSubtitles if self.snapshot.is_some() => &[Field::AudioLanguage, Field::SubtitleMode, Field::SubtitleLanguage, Field::ForcedSubtitles],
-            _ => &[],
+        let fields: Vec<Field> = match self.state.kind {
+            // The window configures a card that "Do not offer" never draws, so the row goes with it.
+            Kind::Playback => {
+                let mut f = vec![Field::Quality, Field::DirectPlay, Field::LipSync, Field::UpNext];
+                if crate::route::up_next_offered() { f.push(Field::UpNextWindow); }
+                f
+            }
+            Kind::AudioSubtitles if self.snapshot.is_some() => vec![Field::AudioLanguage, Field::SubtitleMode, Field::SubtitleLanguage, Field::ForcedSubtitles],
+            _ => Vec::new(),
         };
         let mut list_values = Vec::new(); let mut list_actions = Vec::new();
-        for &field in fields {
+        for &field in &fields {
             let value = self.value_label(field);
             let mut row = Row::new(field.title()).value(&value).chevron(true).dim(self.state.busy);
             if field == Field::Quality && self.state.direct_play == DirectPlayMode::Forced {
@@ -310,7 +336,8 @@ impl PreferencesPage {
     }
     fn commit(&mut self, value: Value, fx: &mut Effects<'_, InnerHost>) {
         match value {
-            Value::Quality(_) | Value::DirectPlay(_) | Value::LipSync(_) => self.save_local(value, fx),
+            Value::Quality(_) | Value::DirectPlay(_) | Value::LipSync(_)
+            | Value::UpNext(_) | Value::Window(_) => self.save_local(value, fx),
             value => {
                 let mut update = PreferenceUpdate::default();
                 match (self.state.picker, value) {
@@ -370,6 +397,16 @@ impl PreferencesPage {
 }
 fn mode_label(mode: DirectPlayMode) -> &'static str {
     match mode { DirectPlayMode::Auto => crate::i18n::msg::settings_playback_auto(), DirectPlayMode::Forced => crate::i18n::msg::settings_playback_forced(), DirectPlayMode::Disabled => crate::i18n::msg::settings_playback_disabled() }
+}
+
+/// The next-episode picker's row label. `Auto` is spelled out rather than left as "Automatic":
+/// the card counts down and starts the episode on its own, and that is worth saying plainly.
+fn up_next_label(policy: crate::plex::session::UpNextPolicy) -> &'static str {
+    match policy {
+        crate::plex::session::UpNextPolicy::Auto => crate::i18n::msg::settings_playback_up_next_auto(),
+        crate::plex::session::UpNextPolicy::Ask => crate::i18n::msg::settings_playback_up_next_ask(),
+        crate::plex::session::UpNextPolicy::Off => crate::i18n::msg::settings_playback_up_next_off(),
+    }
 }
 
 /// The lip-sync picker's row label: `0 ms` at the centre, a signed value off it.

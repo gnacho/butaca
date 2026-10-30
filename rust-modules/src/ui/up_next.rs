@@ -86,14 +86,17 @@ pub(crate) fn is_shown(slot: crate::ui::player_hud::ControlSlot) -> bool {
 /// It arms on APPEARANCE, never on focus: the tile's whole promise is that it starts the next
 /// episode on its own. Focus only ever [`cancel`]s it.
 impl Countdown {
-pub(crate) fn tick(&mut self, slot: crate::ui::player_hud::ControlSlot, now: u32) {
+/// `auto` is the user's policy, read by the caller so this stays free of globals: with the card
+/// set to wait for a decision nothing arms, and the tile stays up as a plain "OK to play" target
+/// (the same shape [`cancel`] leaves behind) until the segment ends.
+pub(crate) fn tick(&mut self, slot: crate::ui::player_hud::ControlSlot, now: u32, auto: bool) {
     if !is_shown(slot) {
         // segment over (or the queue emptied): drop the deadline AND the cancel latch, so the
         // next episode's credits arm normally instead of inheriting this one's refusal
         self.reset();
         return;
     }
-    if self.deadline == 0 && !self.cancelled {
+    if auto && self.deadline == 0 && !self.cancelled {
         self.deadline = now.wrapping_add(COUNTDOWN_MS).max(1);
     }
 }
@@ -380,6 +383,28 @@ mod tests {
                 "focus off the row is the user driving the transport, whatever btn still says"
             );
         }
+    }
+
+    /// The card that waits for a decision: the clock never arms, and no later frame pushes a
+    /// deadline forward either. A countdown that has been refused stays refused when the policy
+    /// flips mid-segment, because `cancel` is a latch and `tick` only arms an unarmed clock.
+    #[test]
+    fn a_card_set_to_wait_for_a_decision_never_arms_its_own_clock() {
+        let credits = crate::ui::player_hud::ControlSlot::UpNext(crate::metadata::Marker {
+            kind: crate::metadata::MarkerKind::Credits,
+            start_ms: 0,
+            end_ms: 60_000,
+            final_seg: true,
+        });
+        let mut c = Countdown::default();
+        for now in [16u32, 1_000, 60_000] {
+            c.tick(credits, now, false);
+            assert!(!c.armed(), "waiting for a decision means no clock at {now} ms");
+            assert!(!c.expired(now + COUNTDOWN_MS + 1), "and it never expires");
+        }
+        c.tick(credits, 70_000, true);
+        assert!(c.armed(), "the automatic policy is what arms it");
+        assert!(c.expired(80_000));
     }
 
     /// The overlay term, which no focus state can stand in for: an open panel never moves the ring,

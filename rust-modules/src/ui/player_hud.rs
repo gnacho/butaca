@@ -638,7 +638,11 @@ pub(crate) fn slot_for(marker: Option<crate::metadata::Marker>, has_next: bool) 
 /// handlers and the draw, so re-deriving per call site let a keypress dispatch to a control that
 /// the same frame then declined to draw.
 pub(crate) fn slot(ps: &crate::route::PlaybackSession, meta: crate::metadata::MetadataView<'_>) -> ControlSlot {
-    let has_next = crate::route::up_next(ps).is_some();
+    // A policy of "do not offer" is expressed as no next episode at all, which is what the rest of
+    // this function and `slot_for` already understand: the row then falls back to the Skip pill (a
+    // server-marked credits segment is still skippable) or to the discs, and no synthetic tail is
+    // invented for a card nobody will see.
+    let has_next = crate::route::up_next(ps).is_some() && crate::route::up_next_offered();
     // Server marker first; the synthesized tail only exists where credits DETECTION does not
     // (a Plex Pass server feature) — see `metadata::synthesized_tail_marker`.
     let m = meta.active_marker(ps).or_else(|| meta.synthesized_tail_marker(ps, has_next));
