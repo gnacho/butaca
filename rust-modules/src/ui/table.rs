@@ -826,6 +826,17 @@ impl TableView {
     }
 
     pub fn draw(&self, p: Painter, frame: Rect, measure: &dyn crate::ui::machine::Measure) {
+        self.draw_with_selection_fill(p, frame, measure, theme::ACCENT);
+    }
+
+    /// Draw with an owner-supplied selected-row fill, keeping all other table states shared.
+    pub(crate) fn draw_with_selection_fill(
+        &self,
+        p: Painter,
+        frame: Rect,
+        measure: &dyn crate::ui::machine::Measure,
+        selection_fill: [f32; 4],
+    ) {
         if self.n_rows() == 0 {
             Label::new(
                 crate::i18n::msg::widgets_tracks_empty_c().as_ptr(),
@@ -868,7 +879,7 @@ impl TableView {
                 pill,
                 PILL_RAD,
                 PILL_RAD,
-                crate::ui::ACCENT,
+                selection_fill,
             );
         }
 

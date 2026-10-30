@@ -291,6 +291,10 @@ fn compile_svg() {
         .arg(&out)
         .arg("-O2")
         .arg("-fPIC")
+        // Rust's host link uses `-nodefaultlibs`; on AArch64 glibc, GCC's default
+        // stack protector pulls `__stack_chk_guard` from the dynamic loader, which
+        // rustc does not add as an explicit link dependency.
+        .arg("-fno-stack-protector")
         // Matches the Makefile's include set for this file.
         .arg(format!("-I{}", repo.join("src").display()))
         .arg(format!("-I{}", repo.join("vendor/nanosvg").display()))
