@@ -136,6 +136,8 @@ pub(crate) fn user_agent() -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::{VERSION, VERSION_BADGE};
+
     /// Read the same `RELEASE_LINE` marker `build.rs::release_line` reads, so this test's
     /// expectation tracks that function's behavior instead of assuming trunk unconditionally.
     /// `None` on trunk (no marker); `Some((major, minor))` on a maintenance branch.
