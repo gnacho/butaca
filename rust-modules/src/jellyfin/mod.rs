@@ -35,12 +35,15 @@
 //! Plex's `X-Plex-Token` may ride only TLS, because every PMS is reachable through a
 //! `*.plex.direct` certificate. Jellyfin has no equivalent: a home Jellyfin server is plain HTTP
 //! on a LAN address in the overwhelming majority of installs, so `crate::http`'s credential gate
-//! was extended with a Jellyfin-only relaxation — its credential shapes (the
+//! carries a Jellyfin-only relaxation — its credential shapes (the
 //! `Authorization: MediaBrowser` header, and the `api_key=` query that media/image/stream
-//! URLs still carry) may cross plaintext ONLY to an address that cannot route off the LAN
-//! (`crate::http::is_lan_host`); everywhere else stays refused. That is a considered weakening of
-//! the transport floor for this backend alone, and it is why the onboarding asks for an IP
-//! literal rather than a hostname.
+//! URLs still carry) may cross plaintext ONLY to the address the credential was issued for: the
+//! origin of the installed client, the one signed in against (and itself a literal that cannot
+//! route off the LAN, `crate::http::is_lan_host`). Another LAN address is refused like anywhere
+//! else, no installed client means no relaxation at all, and a server that moves comes back
+//! through sign-in, which re-anchors the address. That is a considered weakening of the
+//! transport floor for this backend alone, and it is why the onboarding asks for an IP literal
+//! rather than a hostname.
 //!
 //! ## Units, spelled out once
 //!
@@ -109,6 +112,46 @@ pub(crate) fn uninstall() {
 }
 
 /// The installed client, `None` until the boot flow authenticates (and again after sign-out).
+/// The host half of the Jellyfin plaintext relaxation — [`crate::http`]'s credential gate
+/// calls this from its `Credential::Jellyfin` arm. Scope: plaintext credential shapes may cross
+/// ONLY to the address the credential was issued for, the origin of the installed client (the
+/// one signed in against, the address the persisted config carries). Another LAN address is
+/// denied even a hop away on the same subnet; with no client installed the answer is no (fail
+/// closed); and the address itself must still be a literal that cannot route off the LAN.
+pub(crate) fn plaintext_host_allowed(origin: &crate::plex::Origin) -> bool {
+    client().is_some_and(|installed| {
+        origin.host() == installed.origin().host()
+            && crate::http::is_lan_host(installed.origin().host())
+    })
+}
+
 pub(crate) fn client() -> Option<&'static JfClient> {
     *CLIENT.read().unwrap_or_else(|e| e.into_inner())
+}
+
+#[cfg(test)]
+mod plaintext_scope_tests {
+    use super::*;
+
+    /// The relaxation is an allow-list of ONE address, not of the LAN: the signed-in host passes,
+    /// a neighbour LAN address and a hostname are refused, and with the client retired the whole
+    /// thing fails closed.
+    #[test]
+    fn the_lan_relaxation_reaches_only_the_signed_in_address() {
+        install(JfClient::new(
+            crate::plex::Origin::http("192.168.1.20", 8096),
+            "dev-1".into(),
+        ));
+        let registered = crate::plex::Origin::http("192.168.1.20", 8096);
+        let neighbour = crate::plex::Origin::http("192.168.1.99", 8096);
+        let named = crate::plex::Origin::parse("http://jellyfin.local:8096").expect("parse");
+        assert!(plaintext_host_allowed(&registered));
+        assert!(!plaintext_host_allowed(&neighbour));
+        assert!(!plaintext_host_allowed(&named), "a hostname is never the carve-out");
+        uninstall();
+        assert!(
+            !plaintext_host_allowed(&registered),
+            "no installed client, no relaxation: fail closed"
+        );
+    }
 }

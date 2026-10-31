@@ -369,7 +369,7 @@ fn carries_credential(path: &str, headers: &[&str]) -> bool {
 /// v6 loopback/ULA/link-local. A HOSTNAME (even `jellyfin.local`) is not on this list on
 /// purpose: it requires a resolver round-trip to classify, the answer can lie (rebinding), and
 /// the sign-in form asks for an address, not a name.
-fn is_lan_host(host: &str) -> bool {
+pub(crate) fn is_lan_host(host: &str) -> bool {
     use std::net::IpAddr;
     match host.parse::<IpAddr>() {
         Ok(IpAddr::V4(a)) => {
@@ -396,10 +396,12 @@ pub(crate) fn credential_transport_allowed_by_policy(
         Credential::Plex => crate::plex::grant::allowed_under(policy, origin),
         // Jellyfin has no *.plex.direct equivalent: a home server is plain HTTP on a LAN
         // address in the overwhelming majority of installs, so its credential shapes may cross
-        // plaintext ONLY to an address that cannot route off the LAN. TLS, a developer build and
-        // a live consented grant admit everything the Plex arm admits.
+        // plaintext ONLY to the address the credential was issued for — the installed client's
+        // origin, the one signed in against (`jellyfin::plaintext_host_allowed`). TLS, a
+        // developer build and a live consented grant admit everything the Plex arm admits.
         Credential::Jellyfin => {
-            crate::plex::grant::allowed_under(policy, origin) || is_lan_host(origin.host())
+            crate::plex::grant::allowed_under(policy, origin)
+                || crate::jellyfin::plaintext_host_allowed(origin)
         }
     }
 }
