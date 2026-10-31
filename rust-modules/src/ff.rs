@@ -2960,6 +2960,51 @@ unsafe fn parse_extradata(ed: *const u8, len: usize, is_hevc: bool) -> (Vec<u8>,
     }
 }
 
+/// The `avc3` fourcc: an H.264 sample entry whose SPS/PPS live IN the samples (ISO 14496-15)
+/// rather than in an `avcC` box like `avc1`. FFmpeg leaves `codecpar.extradata` empty for it,
+/// which is exactly the gap the in-band fallback below closes.
+const TAG_AVC3: u32 = u32::from_be_bytes(*b"avc3");
+
+/// Append the SPS (type 7) / PPS (type 8) NALs carried in-band by one length-prefixed H.264
+/// sample to `blob` (4-byte start code + payload), once each, so a stream that repeats its
+/// parameter sets at every keyframe does not grow the prepend blob without bound. Returns true
+/// when `blob` changed.
+///
+/// Byte-bounded and panic-free: a length field that claims more bytes than the sample holds stops
+/// the walk exactly like [`packet_to_annexb`], so corrupt or truncated server data can never index
+/// past the slice. The sample is AVCC-length-prefixed (the `nls` the demuxer already uses), which
+/// is the format an `avc3` sample entry carries its in-band parameter sets in.
+fn harvest_inband_params(d: &[u8], nls: usize, blob: &mut Vec<u8>) -> bool {
+    let mut changed = false;
+    let mut i = 0usize;
+    while i + nls <= d.len() {
+        let mut nl = 0usize;
+        for k in 0..nls {
+            nl = (nl << 8) | d[i + k] as usize;
+        }
+        i += nls;
+        let Some(end) = nal_end(i, nl, d.len()) else {
+            break;
+        };
+        let nal = &d[i..end];
+        let nal_type = nal[0] & 0x1f;
+        if nal_type == 7 || nal_type == 8 {
+            // Dedup by the exact start-code + payload run, so a repeated parameter set is not
+            // appended twice. The blob holds nothing else, so the window match is unambiguous.
+            if !blob
+                .windows(4 + nal.len())
+                .any(|w| w[..4] == [0, 0, 0, 1] && &w[4..] == nal)
+            {
+                blob.extend_from_slice(&[0, 0, 0, 1]);
+                blob.extend_from_slice(nal);
+                changed = true;
+            }
+        }
+        i = end;
+    }
+    changed
+}
+
 static SEI_STRIPPED: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 
 /// True if this HEVC NAL is an SEI (prefix=39 / suffix=40) carrying a user-data-registered
@@ -8261,16 +8306,22 @@ pub(crate) fn demux(
                 // parameter sets on this 3.3 build (it leaves the keyframe starting with SEI), so we
                 // build the AU from the codecpar extradata; libavformat still owns demux + seeking.
                 let is_hevc = (*vcp).codec_id == AV_CODEC_ID_HEVC;
-                let (param_blob, nal_len_size) = parse_extradata(
+                // `avc3` (no avcC box) carries its H.264 SPS/PPS IN the samples; the decoder still
+                // needs them prepended at keyframes, so harvest them from the samples instead of
+                // returning an empty parameter-set blob (which makes the decoder fail with
+                // `non-existing PPS 0 referenced`).
+                let in_band_params = !is_hevc && (*vcp).codec_tag == TAG_AVC3;
+                let (mut param_blob, nal_len_size) = parse_extradata(
                     (*vcp).extradata,
                     (*vcp).extradata_size.max(0) as usize,
                     is_hevc,
                 );
                 crate::player::log(&format!(
-                    "ff: param_sets={} bytes nal_len={} is_hevc={}",
+                    "ff: param_sets={} bytes nal_len={} is_hevc={} in_band={}",
                     param_blob.len(),
                     nal_len_size,
-                    is_hevc
+                    is_hevc,
+                    in_band_params
                 ));
                 let mut aubuf: Vec<u8> = Vec::with_capacity(4 * 1024 * 1024);
 
@@ -8353,6 +8404,16 @@ pub(crate) fn demux(
                     }
                     let si = (*pkt).stream_index;
                     if si == vi {
+                        // avc3: harvest any in-band SPS/PPS this sample carries before conversion,
+                        // so the keyframe's prepended parameter-set blob grows as the stream plays
+                        // and `param_sets` stays > 0 for the decoder.
+                        if in_band_params && !(*pkt).data.is_null() {
+                            harvest_inband_params(
+                                std::slice::from_raw_parts((*pkt).data, (*pkt).size.max(0) as usize),
+                                nal_len_size,
+                                &mut param_blob,
+                            );
+                        }
                         let is_key = packet_to_annexb(
                             (*pkt).data,
                             (*pkt).size.max(0) as usize,
@@ -8715,6 +8776,10 @@ mod abr_reject_tests;
 #[cfg(test)]
 #[path = "ff_packet_framing_tests.rs"]
 mod packet_framing_tests;
+
+#[cfg(test)]
+#[path = "ff_avc3_param_tests.rs"]
+mod avc3_param_tests;
 
 #[cfg(test)]
 #[path = "ff_aac_timestamp_tests.rs"]
