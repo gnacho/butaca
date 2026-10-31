@@ -62,7 +62,7 @@ pub(crate) mod session;
 // `(host, port)` pair — read its module doc before adding a call site, in particular the bracket
 // invariant that keeps `host()` (the resolver's node) and `authority()` (URL serialization) from
 // being confused for one another.
-pub(crate) mod origin;
+pub(crate) use crate::origin;
 
 // Which of a server's advertised addresses are worth dialling, and in what order. PURE policy over
 // an `account::Resource` — no socket, no thread — so the rules that decide reachability are gradeable
@@ -95,7 +95,7 @@ pub use client::{Client, IpVersion, StreamUrl};
 // `Client` carries; `Scheme` is re-exported beside it because `dev::DevServer` deserializes one
 // straight out of the `butaca-servers` trigger.
 #[allow(unused_imports)]
-pub use origin::{plex_direct_literal, url_host, CredentialPolicy, Origin, ResolvePin, Scheme};
+pub(crate) use crate::origin::{plex_direct_literal, url_host, CredentialPolicy, Origin, ResolvePin, Scheme};
 // The registry surface. `client`/`client_opt`/`install` keep the exact signatures they had as
 // singleton accessors, so every call site outside `plex/` reads unchanged; `client_for`,
 // `register`, `set_current` and `ServerId` are the multi-server additions.

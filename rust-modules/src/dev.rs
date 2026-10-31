@@ -283,7 +283,7 @@ pub(crate) fn guard_log_only() -> bool {
 /// armed, [`crate::net`], [`crate::curlio`] and [`crate::stream`] refuse any host that is not a
 /// numeric literal, at the point where they would otherwise hand it to a resolver, and return the
 /// same error a failed resolution returns. A name reaches the wire only when the request carries a
-/// resolve pin ([`crate::plex::ResolvePin`]) — which is exactly what the fix provides, so the same
+/// resolve pin ([`crate::origin::ResolvePin`]) — which is exactly what the fix provides, so the same
 /// trigger shows the defect red and the fix green with no network condition arranged anywhere.
 ///
 /// Content `slow` first sleeps the connect budget an API call would have spent waiting on a dead
@@ -723,7 +723,7 @@ pub(crate) struct DevServer {
     /// deliberately: a typo'd scheme that quietly meant `http` would be a run grading the thing it
     /// was armed to test as working.
     #[serde(default)]
-    pub(crate) scheme: crate::plex::Scheme,
+    pub(crate) scheme: crate::origin::Scheme,
     /// Proven connection class for a conditioned test origin.
     ///
     /// A LAN proxy can stand in front of a remote PMS so the harness can shape the whole media
@@ -747,7 +747,7 @@ pub(crate) struct DevServer {
     /// advertises beside a `plex.direct` `uri`, which is what a stored session persists. This is
     /// how a headless run puts a pinned TLS origin through the registry (`/tmp/butaca-nowan`
     /// beside it is the offline reproduction). It is validated exactly as a session's address is
-    /// ([`crate::plex::ResolvePin::for_origin`]): a value the `host` label does not encode pins
+    /// ([`crate::origin::ResolvePin::for_origin`]): a value the `host` label does not encode pins
     /// nothing. Omitted: no pin, unchanged behaviour for every overlay written before it existed.
     #[serde(default, alias = "address_pin", alias = "resolve")]
     pub(crate) pin: String,
@@ -812,32 +812,32 @@ impl DevServer {
     }
     /// Are these credentials complete enough to reach the server at all?
     ///
-    /// The port is judged by [`crate::plex::probe::dial_port`], not by `> 0`: `app.rs` registers
+    /// The port is judged by [`crate::origin::dial_port`], not by `> 0`: `app.rs` registers
     /// every server that passes this with `s.port as c_int`, and this file is a hand-written JSON
     /// blob under `/tmp` — an out-of-range `i64` wraps in that cast into a port nobody wrote down.
     pub(crate) fn usable(&self) -> bool {
         !self.token.is_empty() && self.origin().is_some()
     }
 
-    /// **Where this server is** — the [`crate::plex::Origin`] to register it at, `None` when the
+    /// **Where this server is** — the [`crate::origin::Origin`] to register it at, `None` when the
     /// trigger did not write enough to dial.
     ///
     /// The port goes through `probe::dial_port` for the reason [`DevServer::usable`] gives: this
     /// is a hand-written JSON blob under `/tmp`, and `port as i32` wraps an out-of-range `i64`
     /// into a plausible-looking one.
-    pub(crate) fn origin(&self) -> Option<crate::plex::Origin> {
+    pub(crate) fn origin(&self) -> Option<crate::origin::Origin> {
         if self.host.is_empty() {
             return None;
         }
-        crate::plex::probe::dial_port(self.port)
-            .map(|p| crate::plex::Origin::new(self.scheme, &self.host, p))
+        crate::origin::dial_port(self.port)
+            .map(|p| crate::origin::Origin::new(self.scheme, &self.host, p))
     }
 
     /// The resolve pin for [`DevServer::origin`], from the `pin` field — `None` when absent or
     /// when the label does not encode it.
-    pub(crate) fn resolve_pin(&self) -> Option<crate::plex::ResolvePin> {
+    pub(crate) fn resolve_pin(&self) -> Option<crate::origin::ResolvePin> {
         let origin = self.origin()?;
-        crate::plex::ResolvePin::for_origin(&origin, &self.pin)
+        crate::origin::ResolvePin::for_origin(&origin, &self.pin)
     }
 }
 
@@ -1282,7 +1282,7 @@ mod tests {
         let plain = one(r#"{"machine_id":"m","host":"10.0.0.2","port":32400,"token":"t"}"#);
         assert_eq!(
             plain.scheme,
-            crate::plex::Scheme::Http,
+            crate::origin::Scheme::Http,
             "an overlay that says nothing means http"
         );
         assert_eq!(

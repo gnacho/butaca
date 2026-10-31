@@ -10,7 +10,7 @@ use super::*;
 /// they grade it through `crate::http`'s plaintext arm, i.e. through the composition that runs
 /// in production, which is strictly more than the wrapper could say.
 pub(super) fn loopback_get(port: u16) -> Option<crate::http::Reply> {
-    let o = crate::plex::Origin::http("127.0.0.1", port as i32);
+    let o = crate::origin::Origin::http("127.0.0.1", port as i32);
     crate::http::request(&o, "/x", crate::http::Method::Get, &[], None)
 }
 

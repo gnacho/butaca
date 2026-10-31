@@ -83,7 +83,7 @@ mod tests {
                     ..Default::default()
                 }),
                 crate::auth::settled_probe(
-                    &crate::plex::probe::plan(resource, crate::plex::CredentialPolicy::HttpsOnly),
+                    &crate::plex::probe::plan(resource, crate::origin::CredentialPolicy::HttpsOnly),
                     crate::plex::probe::Outcome::Reachable,
                     Some(crate::plex::probe::Location::Local),
                     Some(address.into()),
@@ -608,8 +608,8 @@ mod tests {
             crate::plex::reset_servers_for_test();
             session::save(&stored_admin());
             let before = std::fs::read(tmp.path()).unwrap();
-            let origin = crate::plex::Origin::parse("https://192-0-2-10.h.plex.direct:32400").unwrap();
-            let pin = crate::plex::ResolvePin::for_origin(&origin, "192.0.2.10").unwrap();
+            let origin = crate::origin::Origin::parse("https://192-0-2-10.h.plex.direct:32400").unwrap();
+            let pin = crate::origin::ResolvePin::for_origin(&origin, "192.0.2.10").unwrap();
             let mut rig = live(stored_admin(), &mt);
             let candidate_origin = origin.base();
             rig.session_adapter.inject_fixture_work(1, move |output, input| {

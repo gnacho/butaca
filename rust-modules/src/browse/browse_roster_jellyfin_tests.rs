@@ -9,7 +9,7 @@ use super::*;
 fn install_bare_jellyfin_client() {
     // No HTTP wanted: adoption reads only the client's EXISTENCE. Port 1 is never dialed.
     let client = crate::jellyfin::JfClient::new(
-        crate::plex::Origin::http("127.0.0.1", 1),
+        crate::origin::Origin::http("127.0.0.1", 1),
         "dev-1".into(),
     );
     crate::jellyfin::install(client);

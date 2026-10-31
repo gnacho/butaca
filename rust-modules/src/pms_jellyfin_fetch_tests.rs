@@ -14,7 +14,7 @@ const MOVIE: &str = r#"{"Id":"m1","Name":"A Film","Type":"Movie","ImageTags":{"P
 
 fn installed_client(port: u16) -> &'static crate::jellyfin::JfClient {
     let client = crate::jellyfin::JfClient::new(
-        crate::plex::Origin::http("127.0.0.1", port as i32),
+        crate::origin::Origin::http("127.0.0.1", port as i32),
         "dev-1".into(),
     );
     client.authenticate_by_name("demo", "").unwrap();

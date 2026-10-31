@@ -715,7 +715,7 @@ fn a_failed_source_over_an_offered_server_asks_the_shared_question() {
     let _guard = crate::testlock::serial();
     crate::plex::reset_servers_for_test();
     crate::plex::grant::reset_for_test();
-    let sid = crate::plex::register_pinned_with_client_id("lan-machine", &crate::plex::Origin::http("192.168.1.50", 32400), "", None, "client", Default::default());
+    let sid = crate::plex::register_pinned_with_client_id("lan-machine", &crate::origin::Origin::http("192.168.1.50", 32400), "", None, "client", Default::default());
     let mut fixture = Fixture::new();
     fixture.listing = crate::stores::browse::ListingSnapshot::empty_for_test();
     fixture.directory = crate::browse::view::DirectorySnapshot::fixture_source(4, sid,

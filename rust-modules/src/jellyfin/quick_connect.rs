@@ -97,7 +97,7 @@ pub(crate) fn cancel() {
 /// `Working` until [`take_ready`] or the next [`take_outcome`].
 pub(crate) fn start(url_raw: &str) -> Result<(), Fail> {
     let url = super::signin::normalize_url(url_raw);
-    let Some(origin) = crate::plex::Origin::parse(&url) else {
+    let Some(origin) = crate::origin::Origin::parse(&url) else {
         return Err(Fail::Parse);
     };
     // The identity header is a credential shape even before it carries a token, so this is the
@@ -229,23 +229,23 @@ mod tests {
     fn plaintext_credentials_off_the_lan_are_refused_before_the_wire() {
         // The SHIPPED rule is graded here, not this (dev-featured) build's: `devtriggers` relaxes
         // the gate for lab work, so the test asks the policy directly with the relaxation off.
-        let origin = crate::plex::Origin::parse("http://203.0.113.10:8096").unwrap();
+        let origin = crate::origin::Origin::parse("http://203.0.113.10:8096").unwrap();
         assert!(
             !crate::http::credential_transport_allowed_by_policy(
                 &origin,
                 "/QuickConnect/Initiate",
                 &["Authorization: MediaBrowser …"],
-                crate::plex::CredentialPolicy::HttpsOnly,
+                crate::origin::CredentialPolicy::HttpsOnly,
             ),
             "a public address over http must not carry the identity"
         );
-        let lan = crate::plex::Origin::parse("http://192.168.1.20:8096").unwrap();
+        let lan = crate::origin::Origin::parse("http://192.168.1.20:8096").unwrap();
         assert!(
             crate::http::credential_transport_allowed_by_policy(
                 &lan,
                 "/QuickConnect/Initiate",
                 &["Authorization: MediaBrowser …"],
-                crate::plex::CredentialPolicy::HttpsOnly,
+                crate::origin::CredentialPolicy::HttpsOnly,
             ),
             "…while the LAN literal stays allowed"
         );

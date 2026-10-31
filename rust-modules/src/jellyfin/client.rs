@@ -18,7 +18,7 @@
 
 use super::dto::{AuthResponse, AuthUser, BaseItemDto, ItemsResult, QuickConnectResult, TrickplayInfoDto, ViewsResult};
 use crate::http;
-use crate::plex::Origin;
+use crate::origin::Origin;
 use serde::de::DeserializeOwned;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Mutex, RwLock};

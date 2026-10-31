@@ -619,11 +619,11 @@ pub(super) fn activate_server_owned(
     // routes control and media requests through the matching transport.
 pub(super) fn install_pms_owned(
     bridge: &mut super::bridge::Bridge,
-    origin: &crate::plex::Origin,
+    origin: &crate::origin::Origin,
     address: &str,
     token: &str,
     tier: Option<crate::plex::probe::Location>,
-    pin: Option<&crate::plex::ResolvePin>,
+    pin: Option<&crate::origin::ResolvePin>,
     install: &crate::auth::owner::ReadyInstall,
 ) -> crate::stores::EndpointRefreshSet {
     if let crate::auth::owner::ReadyInstall::PrimaryAndExtras(extras) = install {
@@ -973,7 +973,7 @@ pub(crate) unsafe fn construct(
     let forced_login = !controlled && crate::dev::scenarios::login_forced();
     let dev_primary = (!forced_login && !dev_token.is_empty()).then(|| {
         let origin = crate::dev::scenarios::pms_origin()
-            .unwrap_or_else(|| crate::plex::Origin::http(&host_s, pms_port));
+            .unwrap_or_else(|| crate::origin::Origin::http(&host_s, pms_port));
         crate::plex::session::ServerRef {
             address: origin.host().to_owned(), port: i64::from(origin.port()),
             origin_url: origin.base(), token: dev_token.clone(),
