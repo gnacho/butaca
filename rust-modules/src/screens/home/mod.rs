@@ -2577,7 +2577,7 @@ fn hero_content(hero: &PmsMovie, source: &str, p: Painter, dx: f32, measure: &dy
     };
     let title_h = hero_logo::band_h(LogoRung::Hero);
     let meta = if episode {
-        let mut text = crate::ui::fmt::episode_address(i64::from(hero.season_index), i64::from(hero.ep_index));
+        let mut text = crate::ui::fmt::episode_address(i64::from(hero.season_index), i64::from(hero.ep_index)).to_string();
         if !text.is_empty() && !hero.title.is_empty() {
             text.push_str(" \u{b7} ");
         }
