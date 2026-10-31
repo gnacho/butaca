@@ -380,7 +380,10 @@ ensure_tar() {
   if ! tarball_ok "$cand"; then
     rm -f "$cand"
     echo "ffmpeg: fetching $VERSION"
-    curl -fsSL "https://ffmpeg.org/releases/ffmpeg-$VERSION.tar.xz" -o "$cand"
+    # Same retry policy build-libass.py gives its tarballs: CI proved the release hosts can
+  # drop a connection for minutes (#150, #151), and one blind fetch fails the whole job.
+  curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 30 \
+    "https://ffmpeg.org/releases/ffmpeg-$VERSION.tar.xz" -o "$cand"
   fi
   mv "$cand" "$TAR"
 }

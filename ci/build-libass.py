@@ -40,7 +40,7 @@ def archive(dep, folder):
     fd, candidate = tempfile.mkstemp(prefix=target.name + '.', dir=folder)
     os.close(fd)
     try:
-        run(['curl', '-fL', '--retry', '3', '--connect-timeout', '30',
+        run(['curl', '-fL', '--retry', '5', '--retry-delay', '3', '--connect-timeout', '30',
              dep['url'], '-o', candidate])
         if digest(Path(candidate)) != dep['sha256']:
             raise ValueError('source checksum mismatch: ' + dep['archive'])
