@@ -70,7 +70,7 @@ requirements:
 description: |                         # required; Markdown, every <img> must be https
   …
 funding:
-  github: [ GLinnik21 ]                # optional
+  github: [ gnacho ]                # optional
 ```
 
 There is deliberately **no place in the YAML for a version, ipk URL or hash** — those live only in
