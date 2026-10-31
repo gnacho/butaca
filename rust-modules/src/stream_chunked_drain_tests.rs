@@ -467,3 +467,29 @@ fn drain_mid_body_eof_is_a_transport_error() {
         panic!("park-time mid-body FIN must surface as a drain error, not idle-done");
     });
 }
+
+/// `hs_next_chunk` over a size line preloaded into `buf`, with the fd still closed so the helper
+/// can never fall through to a socket read once the bytes are consumed.
+fn parse_size_line(line: &[u8]) -> Option<i64> {
+    let mut hs = http_stream_boxed();
+    hs.buf[..line.len()].copy_from_slice(line);
+    hs.blen = line.len() as c_int;
+    hs.bpos = 0;
+    unsafe { hs_next_chunk(&mut *hs, None, &mut Pacer::new(&mut NoCheckpoint)).unwrap() }
+}
+
+#[test]
+fn chunk_size_line_parses_thirteen_hex_digits() {
+    // 0xAAAAAAAAAAAAA (thirteen hex digits) is the largest size the parser must accept.
+    assert_eq!(
+        parse_size_line(b"AAAAAAAAAAAAA\r\n"),
+        Some(0xAAAA_AAAA_AAAAA)
+    );
+}
+
+#[test]
+fn chunk_size_line_over_thirteen_hex_digits_is_malformed() {
+    // A 14th hex digit is a size line no server would frame; the parser must report it as a bad
+    // chunk (the negative sentinel the read path already treats as an error), not wrap the size.
+    assert_eq!(parse_size_line(b"BBBBBBBBBBBBBB\r\n"), Some(-1));
+}

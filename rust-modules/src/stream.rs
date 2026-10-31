@@ -502,6 +502,12 @@ unsafe fn hs_getb(
 }
 
 /// next chunk-size line (skips trailing CRLF + extensions). Some(0)=last chunk.
+///
+/// The size accumulates hex digit by digit. Thirteen digits is the cap — `2^52`, far past any
+/// chunk a server would ever frame — and a 14th hex digit is a malformed size line, signalled
+/// with the same negative sentinel the callers already treat as a bad chunk. Bounding the digit
+/// count also keeps the accumulation from wrapping in a release build, where `i64` arithmetic
+/// silently overflows.
 unsafe fn hs_next_chunk(
     hs: &mut HttpStream,
     deadline: Option<Instant>,
@@ -519,6 +525,7 @@ unsafe fn hs_next_chunk(
     }
     let mut sz: i64 = 0;
     let mut any = false;
+    let mut ndig = 0;
     loop {
         let d = match b {
             b'0'..=b'9' => (b - b'0') as i64,
@@ -526,6 +533,10 @@ unsafe fn hs_next_chunk(
             b'A'..=b'F' => (b - b'A' + 10) as i64,
             _ => break,
         };
+        ndig += 1;
+        if ndig > 13 {
+            return Ok(Some(-1));
+        }
         sz = sz * 16 + d;
         any = true;
         match hs_getb(hs, deadline, pacer)? {
