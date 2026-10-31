@@ -1,5 +1,5 @@
-//! Hub operations (impl Client): the home shelves, the dedicated Continue Watching /
-//! Promoted hubs, and search. All return `.hub[]`.
+//! Hub operations (impl Client): the home shelves, dedicated Continue Watching, and search.
+//! All return `.hub[]`.
 //!
 //! **A hub does NOT always carry its items in `.metadata[]`** — this line said it did, which is
 //! the exact misconception that renders two of the search screen's five shelves as nothing at
@@ -92,15 +92,6 @@ impl Client {
             .str("ratingKey", rating_key)
             .build();
         (200..300).contains(&self.put(&path))
-    }
-
-    /// GET /hubs/promoted?count=… — the home screen's featured rows.
-    pub fn promoted(&self, count: i64) -> Option<MediaContainer> {
-        self.get_json(
-            &QueryBuilder::new("/hubs/promoted")
-                .int("count", count)
-                .build(),
-        )
     }
 
     /// GET /hubs/search?query=…[&limit=…][&sectionId=…]&includeCollections=1 — the search screen

@@ -207,11 +207,6 @@ pub(crate) const LANGUAGES: &[Language] = &[
     Language { code: "zh-TW", name: "臺語" },
 ];
 
-/// Preserve unfamiliar account values verbatim, including region codes from newer clients.
-pub(crate) fn label(code: &str) -> &str {
-    LANGUAGES.iter().find(|language| language.code == code).map_or(code, |language| language.name)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,14 +218,5 @@ mod tests {
         assert_eq!(codes.len(), LANGUAGES.len());
         assert!(LANGUAGES.iter().all(|v| matches!(v.code.len(), 2 | 5) && !v.name.is_empty()));
         assert!(!["xx", "xn", "es-419"].iter().any(|v| codes.contains(v)));
-    }
-
-    #[test]
-    fn regional_names_and_unfamiliar_saved_values_are_preserved() {
-        assert_eq!(label("fr-CA"), "Français Canadien");
-        assert_eq!(label("en-GB"), "English (UK)");
-        assert_eq!(label("es-419"), "es-419");
-        assert_eq!(label("new-language"), "new-language");
-        assert_eq!(label(""), "");
     }
 }

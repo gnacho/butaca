@@ -137,6 +137,7 @@ impl AudioPreferencesCache {
             self.changed.notify_all();
         }
     }
+    #[cfg_attr(test, allow(dead_code))]
     fn clear_profile(&self) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if state.key.is_some() || state.entry.is_some() || state.flight.is_some() {
@@ -348,11 +349,6 @@ impl AccountClient {
     /// it (`telemetry::incident::classify`). **No account call here answers `Option` any more**:
     /// an `Option` folded "plex.tv refused this identity" into "plex.tv never answered", which is
     /// how a managed profile's 401 read as nothing at all (#132). See [`CallEvidence`].
-    pub fn create_pin(&self) -> Result<Pin, CallEvidence> {
-        let url = format!("{}/api/v2/pins?strong=false", plex_tv());
-        decode_evidence("POST", &url, self.post_raw(&url))
-    }
-
     pub(crate) fn create_pin_with(&self, timeouts: crate::net::Timeouts) -> Result<Pin, CallEvidence> {
         let url = format!("{}/api/v2/pins?strong=false", plex_tv());
         let response = crate::net::request_evidence(&url, &self.headers(), "POST", Some(b""),
@@ -408,11 +404,6 @@ impl AccountClient {
     /// the remote.** A managed profile's token gets 401 here (TV session 8, #132): that is plex.tv
     /// saying this identity cannot list the household, and no retry or connection check changes
     /// it. `Err` keeps the status ([`refused_identity`]) so the roster worker can say so.
-    pub fn home_users(&self) -> Result<Vec<HomeUser>, CallEvidence> {
-        let hu: HomeUsers = self.get_evidence(&format!("{}/api/v2/home/users", plex_tv()))?;
-        Ok(hu.users)
-    }
-
     pub(crate) fn home_users_with(&self, timeouts: crate::net::Timeouts)
         -> Result<Vec<HomeUser>, CallEvidence> {
         let hu: HomeUsers = self.get_evidence_with(
@@ -593,7 +584,7 @@ mod evidence_tests {
         let became_unreachable = plex_tv_recently_unreachable();
         // Restore globals before an expected RED assertion can unwind.
         *LAST_UNREACHABLE.lock().unwrap() = None;
-        *LAST_REACHABLE.lock().unwrap() = None;
+        
         assert!(!became_unreachable, "HTTP/2 refusal must not poison the outage memo");
         assert!(matches!(switch_response(SWITCH, response), Ok(SwitchOutcome::Refused(s)) if s == status));
         if pin_is_gone(status) {
@@ -632,7 +623,7 @@ mod evidence_tests {
           }
         }
         *LAST_UNREACHABLE.lock().unwrap() = None;
-        *LAST_REACHABLE.lock().unwrap() = None;
+        
     }
 
     #[test]
@@ -648,11 +639,10 @@ mod evidence_tests {
         }
         for status in [None, Some(200), Some(500)] {
             *LAST_UNREACHABLE.lock().unwrap() = None;
-            *LAST_REACHABLE.lock().unwrap() = None;
+            
             let response = failure(status, Some(32));
             note_response_contact(SWITCH, &response);
             assert!(!plex_tv_recently_unreachable(), "size policy is not an outage");
-            assert_eq!(plex_tv_recently_reachable(), status.is_some());
             assert!(switch_response(SWITCH, response).is_err(), "must not become offline-eligible Unreachable");
             assert!(poll_response(SWITCH, failure(status, Some(32))).is_err());
         }
@@ -662,7 +652,7 @@ mod evidence_tests {
         note_response_contact(SWITCH, &failure(None, Some(32)));
         assert_eq!(*LAST_UNREACHABLE.lock().unwrap(), previous, "local limit must not refresh an old outage memo");
         *LAST_UNREACHABLE.lock().unwrap() = None;
-        *LAST_REACHABLE.lock().unwrap() = None;
+        
     }
 
     #[test]
@@ -670,7 +660,6 @@ mod evidence_tests {
         let _serial = crate::testlock::serial();
         let malformed = Ok(Resp { status: 200, body: b"not json".to_vec() });
         note_response_contact(SWITCH, &malformed);
-        assert!(plex_tv_recently_reachable());
         assert!(matches!(switch_response(SWITCH, malformed), Ok(SwitchOutcome::Unreachable)));
         assert!(matches!(switch_response(SWITCH, Ok(Resp { status: 200, body: br#"{"authToken":"synthetic-token"}"#.to_vec() })), Ok(SwitchOutcome::Switched(_))));
         assert!(matches!(poll_response(SWITCH, Ok(Resp { status: 200, body: br#"{"authToken":null}"#.to_vec() })), Ok(PinPoll::Pending)));
@@ -686,7 +675,7 @@ mod evidence_tests {
             });
         }
         *LAST_UNREACHABLE.lock().unwrap() = None;
-        *LAST_REACHABLE.lock().unwrap() = None;
+        
     }
 
     #[test]
@@ -726,12 +715,7 @@ mod evidence_tests {
 /// Only the plex.tv host is recorded. `discover.provider.plex.tv` shares this transport and is
 /// a different service on a different name; its silence says nothing about the account API.
 static LAST_UNREACHABLE: Mutex<Option<Instant>> = Mutex::new(None);
-static LAST_REACHABLE: Mutex<Option<Instant>> = Mutex::new(None);
 const UNREACHABLE_MEMO: Duration = Duration::from_secs(45);
-/// The positive memo lives longer: it answers "is a network round trip worth starting" for work
-/// that is optional (an avatar refresh), and a link that answered within the last few minutes
-/// is a link.
-const REACHABLE_MEMO: Duration = Duration::from_secs(300);
 
 fn note_contact(url: &str, answered: bool) {
     if !url.starts_with(plex_tv()) {
@@ -740,21 +724,6 @@ fn note_contact(url: &str, answered: bool) {
     let now = Instant::now();
     let mut g = LAST_UNREACHABLE.lock().unwrap_or_else(|e| e.into_inner());
     *g = if answered { None } else { Some(now) };
-    drop(g);
-    if answered {
-        *LAST_REACHABLE.lock().unwrap_or_else(|e| e.into_inner()) = Some(now);
-    }
-}
-
-/// Did plex.tv ANSWER within the last [`REACHABLE_MEMO`], with nothing failing since? The
-/// question for optional network work: `false` at a cold boot, where nothing is known yet, so
-/// a refresh never blocks a worker on a link nobody has proven.
-pub fn plex_tv_recently_reachable() -> bool {
-    if plex_tv_recently_unreachable() {
-        return false;
-    }
-    let g = LAST_REACHABLE.lock().unwrap_or_else(|e| e.into_inner());
-    g.is_some_and(|t| t.elapsed() < REACHABLE_MEMO)
 }
 
 /// Did the account API fail to answer within the last [`UNREACHABLE_MEMO`], with nothing
@@ -800,18 +769,15 @@ mod reachability_tests {
     fn the_memos_say_unreachable_beats_reachable_and_nothing_is_known_at_boot() {
         let _g = crate::testlock::serial();
         *LAST_UNREACHABLE.lock().unwrap() = None;
-        *LAST_REACHABLE.lock().unwrap() = None;
-        assert!(!plex_tv_recently_reachable(), "nothing proven yet");
+        
         assert!(!plex_tv_recently_unreachable());
         note_contact(PLEX_TV, true);
-        assert!(plex_tv_recently_reachable());
         note_contact(PLEX_TV, false);
         assert!(plex_tv_recently_unreachable());
-        assert!(!plex_tv_recently_reachable(), "a failure since the answer wins");
         note_contact("https://discover.provider.plex.tv/x", true);
         assert!(plex_tv_recently_unreachable(), "another host says nothing about plex.tv");
         *LAST_UNREACHABLE.lock().unwrap() = None;
-        *LAST_REACHABLE.lock().unwrap() = None;
+        
     }
 }
 
@@ -1106,6 +1072,7 @@ where S: FnOnce(Box<dyn FnOnce() + Send>) -> bool,
     if !spawned { cache.cancel(&cancel); }
 }
 
+#[cfg_attr(test, allow(dead_code))]
 pub(crate) fn warm_audio_preferences(client_id: String, credential: String,
     user: super::session::UserRef, generation: u32) {
     if client_id.is_empty() || credential.is_empty() { return; }
@@ -1118,6 +1085,7 @@ pub(crate) fn warm_audio_preferences(client_id: String, credential: String,
         move || current.is_current());
 }
 
+#[cfg_attr(test, allow(dead_code))]
 pub(crate) fn publish_audio_preferences_profile(user: Option<&super::session::UserRef>,
     generation: u32) {
     match user {
@@ -1221,15 +1189,13 @@ impl AccountUser {
 // ---- serde DTOs (only the fields the app consumes; all optional to tolerate shape drift) ----
 
 /// A link PIN (`/api/v2/pins`). `code` feeds both the QR (`app.plex.tv/auth`) and the typed
-/// `plex.tv/link` fallback; `auth_token` is the account token once authorized.
+/// `plex.tv/link` fallback.
 #[derive(Deserialize, Default)]
 pub struct Pin {
     #[serde(default)]
     pub id: i64,
     #[serde(default)]
     pub code: String,
-    #[serde(rename = "authToken", default)]
-    pub auth_token: Option<String>,
     #[serde(rename = "expiresIn", default)]
     pub expires_in: i64,
     /// URL of a server-rendered QR PNG for this pin — the exact QR the official apps show, so we
@@ -1386,8 +1352,6 @@ pub struct HomeUser {
     pub thumb: String,
     #[serde(default)]
     pub admin: bool,
-    #[serde(default)]
-    pub restricted: bool,
     #[serde(default)]
     pub protected: bool,
 }

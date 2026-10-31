@@ -221,6 +221,7 @@ pub(crate) fn encode_ip(ip: Option<IpVersion>) -> u8 {
         Some(IpVersion::V6) => 2,
     }
 }
+#[cfg(test)]
 pub(crate) fn decode_ip(c: u8) -> Option<IpVersion> {
     match c {
         1 => Some(IpVersion::V4),
@@ -402,6 +403,7 @@ impl Client {
     /// atomically inside the registration write itself instead. This method remains a plain,
     /// unconditional setter for tests that want to seed a tier directly (e.g. to grade
     /// `finish_profile_switch` against a known-good roster) without going through the registry.
+    #[cfg(test)]
     pub fn set_link(&self, l: Location) {
         self.link.store(encode_link(Some(l)), Relaxed);
     }
@@ -409,6 +411,7 @@ impl Client {
     /// back to `None`/unknown, unlike [`Client::apply_connection`]'s "leave unchanged" semantics.
     /// Superseded in production by `apply_connection`/`ConnectionFacts` (#95 step 8); this stays a
     /// direct test seam.
+    #[cfg(test)]
     pub fn set_connection(&self, l: Location, ip_version: Option<IpVersion>) {
         self.set_link(l);
         self.ip_version.store(encode_ip(ip_version), Relaxed);
@@ -432,6 +435,7 @@ impl Client {
     pub fn link(&self) -> Option<Location> {
         decode_link(self.link.load(Relaxed))
     }
+    #[cfg(test)]
     pub fn ip_version(&self) -> Option<IpVersion> {
         decode_ip(self.ip_version.load(Relaxed))
     }
@@ -626,11 +630,6 @@ impl Client {
         }
     }
 
-    /// GET raw bytes (image transcode / sidecar sub) — caller decodes.
-    pub(super) fn get_bytes(&self, path_no_token: &str) -> Option<Vec<u8>> {
-        self.body_2xx_bulk(path_no_token, &[], BULK_ART_MAX_BYTES)
-    }
-
     /// A size-bounded body on either transport, with a finite stalled-transfer timeout.
     pub(super) fn get_sidecar_bytes(&self, path_no_token: &str) -> Option<Vec<u8>> {
         if !self.may_send() { return None; }
@@ -648,7 +647,7 @@ impl Client {
     ///
     /// Its only caller is the poster store, and the reason is structural rather than stylistic:
     /// there, the built `/photo/:/transcode?…&X-Plex-Token=…` path *is* the LRU key, so the key
-    /// and the request must be the same bytes. Routing it through [`Client::get_bytes`] would
+    /// and the request must be the same bytes. A token-appending helper would
     /// append a second token — a URL with two `X-Plex-Token` params, whose meaning is the
     /// server's business and not ours. `pub(crate)` because `app/adapters/poster.rs` lives outside this
     /// module tree; it exists so that file stops calling `crate::stream` behind this layer's
@@ -690,12 +689,7 @@ impl Client {
         }
     }
 
-    /// GET whose body is discarded (transcode decision / stop registration side effects).
-    pub(super) fn get_void(&self, path_no_token: &str) {
-        let _ = self.send(path_no_token, Method::Get, &[]);
-    }
-
-    /// [`Client::get_void`], but reporting whether the request actually reached the server and came
+    /// Reports whether the request actually reached the server and came
     /// back accepted. For the body-less **writes** whose caller is off the main thread and has no
     /// other way to know — see [`super::library::Client::scrobble`]. `false` covers a refused or
     /// timed-out connect as much as a rejected status, which is the distinction that matters here:
@@ -723,30 +717,6 @@ impl Client {
             .map(|reply| reply.status)
     }
 
-    /// Deadline-bearing GET status for one phase of a larger media transaction.
-    pub(super) fn get_status_until(
-        &self,
-        path_no_token: &str,
-        deadline: std::time::Instant,
-    ) -> Option<i32> {
-        match self.send_until(path_no_token, Method::Get, &[], deadline) {
-            http::RequestOutcome::Response(reply) => Some(reply.status),
-            http::RequestOutcome::Deadline | http::RequestOutcome::Transport(_) => None,
-        }
-    }
-
-    /// Deadline-bearing POST status for one phase of a larger media transaction.
-    pub(super) fn post_status_until(
-        &self,
-        path_no_token: &str,
-        deadline: std::time::Instant,
-    ) -> Option<i32> {
-        match self.send_until(path_no_token, Method::Post, &[], deadline) {
-            http::RequestOutcome::Response(reply) => Some(reply.status),
-            http::RequestOutcome::Deadline | http::RequestOutcome::Transport(_) => None,
-        }
-    }
-
     /// PUT (no body) — returns the HTTP status (all `select_streams` reads), or `-1` when the
     /// request never completed. `-1` is the value the `stream.rs` wrapper this replaced always
     /// returned for a transport failure, and it is kept because a caller reading a status must not
@@ -765,9 +735,8 @@ impl Client {
     /// rejected status — a revoked token 401s and a sleeping server answers nothing at all, and
     /// neither of those may read as a committed resume point.
     ///
-    /// There is no discarding `post_void` beside it (as `get_void` sits beside `get_ok`): the
-    /// timeline is the only body-less POST in the layer, so a twin that dropped the outcome would
-    /// be a method with no callers.
+    /// There is no discarding `post_void` beside it: the timeline is the only body-less POST in
+    /// the layer, so a twin that dropped the outcome would be a method with no callers.
     pub(super) fn post_ok(&self, path_no_token: &str) -> bool {
         self.body_2xx(path_no_token, Method::Post, &[]).is_some()
     }
@@ -903,9 +872,11 @@ impl StreamUrl {
 
     /// The host to DIAL — bare, never bracketed. `crate::stream` takes this; a URL takes
     /// [`StreamUrl::to_url`].
+    #[cfg(test)]
     pub fn host(&self) -> &str {
         self.origin.host()
     }
+    #[cfg(test)]
     pub fn port(&self) -> i32 {
         self.origin.port()
     }

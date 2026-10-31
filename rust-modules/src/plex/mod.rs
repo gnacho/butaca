@@ -6,15 +6,9 @@
 //! transport (`crate::http`) are centralised in `client.rs`, so no op file can bypass them.
 //! Response bodies deserialize into `serde` DTOs (`models.rs`).
 //!
-//! The WHOLE surface is live: `plex::install` is called at boot/login (`app.rs`, `auth.rs`);
-//! the read layer (`pms`/`metadata`/`posters`/`detail`) and the playback layer (`route.rs`
-//! decision/start/stop/selection, PlayQueue/identity, and the player's `/:/timeline`) all go
-//! through `client()` (history: `docs/plex-api-migration.md`). The module-wide allow covers
-//! the ops written ahead of a UI feature (browse/leaves — no callers yet). `search` had one
-//! too until the Search screen landed and `crate::search` began calling it; the name was left
-//! in this list for several commits afterwards, long enough for a test-manifest note to cite
-//! it as the check for whether that screen existed.
-#![allow(dead_code)]
+//! The read layer (`pms`/`metadata`/`posters`/`detail`) and the playback layer (`route.rs`
+//! decision/start/stop/selection, PlayQueue/identity, and the player's `/:/timeline`) use this
+//! typed client (history: `docs/plex-api-migration.md`).
 
 mod client;
 pub(crate) mod identity; // ONE X-Plex-* identity for both transports (plex.tv headers + PMS query)
@@ -39,11 +33,6 @@ pub(crate) const SIDECAR_MAX_BYTES: usize = 4 * 1024 * 1024;
 mod timeline;
 mod transcoder;
 
-/// The Plex BIF index parser (video preview thumbnails). Data layer only: it turns the index
-/// table of `GET /library/parts/{id}/indexes/sd` into timestamp→offset entries; fetching and
-/// decoding the frames is deliberately not here.
-mod bif;
-
 // The server's self-description (version + Plex Pass tristate), refreshed by `install` on every
 // session path. pub(crate) because it is a DIAGNOSTICS surface with readers outside this layer
 // (`app::diagnostics`, `player::error_shape`) — and deliberately nothing else: see its module doc for
@@ -55,6 +44,7 @@ pub(crate) mod serverinfo;
 // pub(crate): the login/boot code (app.rs) + the UI screens construct these directly.
 pub(crate) mod account;
 pub(crate) mod languages;
+#[allow(dead_code)]
 pub(crate) mod session;
 
 // WHERE a server is, as one value: scheme + host + port, parsed from a URL and never assembled
@@ -82,6 +72,7 @@ pub(crate) mod pins;
 // The plex.tv METADATA PROVIDER (`discover.provider.plex.tv`) — a third service, but one that
 // shares the account API's transport + identity headers exactly, so it only adds an
 // `impl AccountClient` block (same pattern as the PMS op files above).
+#[cfg_attr(test, allow(dead_code))]
 pub(crate) mod discover;
 
 // The re-exports are the public surface the call sites import.
@@ -91,25 +82,26 @@ pub(crate) use client::JsonDeadlineOutcome;
 // report trace's packed attempt snapshot; with nothing left to read them, the re-export goes.
 #[allow(unused_imports)]
 pub use client::{Client, IpVersion, StreamUrl};
-// WHERE a server is, as one value. `Origin` is what `register_origin`/`install` take and what a
+// WHERE a server is, as one value. `Origin` is what `register_origin` takes and what a
 // `Client` carries; `Scheme` is re-exported beside it because `dev::DevServer` deserializes one
 // straight out of the `butaca-servers` trigger.
 #[allow(unused_imports)]
 pub(crate) use crate::origin::{plex_direct_literal, url_host, CredentialPolicy, Origin, ResolvePin, Scheme};
-// The registry surface. `client`/`client_opt`/`install` keep the exact signatures they had as
-// singleton accessors, so every call site outside `plex/` reads unchanged; `client_for`,
-// `register`, `set_current` and `ServerId` are the multi-server additions.
+// The registry surface. `client_for`, `register`, `set_current` and `ServerId` are the
+// multi-server additions.
 #[allow(unused_imports)]
 pub use servers::{
-    client, client_for, client_opt, commit_if_current, commit_reachability_if_current,
+    client_for, client_opt, commit_if_current, commit_reachability_if_current,
     count as server_count, current as current_server, describe as describe_server,
-    describe_name as describe_server_name, facts as server_facts, ids as server_ids, install,
+    facts as server_facts, ids as server_ids,
     facts_gen as server_facts_gen, is_household, owner_credit,
     probe_result as server_probe_result, publish_probe_result, register,
     roster_gen as server_roster_gen, same_item, set_current, Grant, GrantEvidence,
     ServerFacts,
     ServerId, MAX_SERVERS,
 };
+#[cfg(test)]
+pub use servers::{client, describe_name as describe_server_name};
 // Sign-out. `pub(crate)` like the function itself: retiring the whole table is `auth::sign_out`'s
 // to call and nothing else's — a caller that merely wants to stop using a server wants
 // `set_current`, and one that wants to forget a share wants plex.tv to stop granting it.
@@ -228,5 +220,5 @@ pub use timeline::{queue_index_of, QueueRow};
 // the connection. Forced mode retains software feed limits and uses a separate PMS profile.
 #[allow(unused_imports)]
 pub use transcoder::{
-    DP_AUDIO_CODECS, DP_SUBTITLE_CODECS, LinkPolicy, is_dp_audio, is_dp_audio_track, is_dp_subtitle, link_policy,
+    DP_AUDIO_CODECS, DP_SUBTITLE_CODECS, LinkPolicy, is_dp_audio_track, is_dp_subtitle, link_policy,
 };

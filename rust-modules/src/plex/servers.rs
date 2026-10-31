@@ -240,12 +240,14 @@ impl GrantEvidence {
     }
 
     /// Our own server: owned, with nobody else's id on it.
+    #[cfg(test)]
     pub fn ours() -> Self {
         Self { owned: true, ..Self::default() }
     }
 
     /// A grant this account does not own and about which plex.tv volunteered no household
     /// evidence — the shape a legacy record deserializes to, and what a test means by "a share".
+    #[cfg(test)]
     pub fn outside() -> Self {
         Self::default()
     }
@@ -263,6 +265,7 @@ impl GrantEvidence {
     /// server was meant made an assertion pass for the wrong reason: before this type, `false`
     /// only meant "not owned", which is true of the household's server too, so the two cases were
     /// spelled identically and a fixture could not say which it meant.
+    #[cfg(test)]
     pub fn household(owner_id: i64) -> Self {
         Self { owned: false, home: true, owner_id }
     }
@@ -510,6 +513,7 @@ pub fn set_current(id: ServerId) -> bool {
 /// The CURRENT server's `Client`. Panics unless at least one credential-eligible server has been
 /// installed and selected; recovery-only origins deliberately do not satisfy that precondition.
 /// The panic message is retained for compatibility with the singleton this replaced.
+#[cfg(test)]
 pub fn client() -> &'static Client {
     client_opt().expect("plex::install not called")
 }
@@ -795,6 +799,7 @@ fn describe_locked(id: ServerId, name: &str, credit: Option<&str>, grant: GrantE
 /// the "I know nothing about the grant" arm of [`describe_locked`]. A name-only describer that
 /// passed `""` would un-attribute a friend's share the moment its friendly name arrived: the exact
 /// shape of the `owned` bug this function was written to close, one field over.
+#[cfg(test)]
 pub fn describe_name(id: ServerId, name: &str) {
     let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
     let grant = facts(id)
@@ -903,6 +908,7 @@ fn activate(id: ServerId, credential_eligible: bool) {
 /// registration sets it (otherwise there is nothing usable for `client()` to answer with). Use
 /// [`set_current`] to switch, or [`install`], which is the session path and retargets whenever
 /// the supplied origin is credential-eligible.
+#[cfg_attr(test, allow(dead_code))]
 pub fn register(machine_id: &str, host: &str, port: i32, token: &str) -> ServerId {
     register_origin(machine_id, &Origin::http(host, port), token, None, ConnectionFacts::default())
 }
@@ -981,6 +987,7 @@ pub(crate) fn register_origin(
 ///
 /// So: **no test in this crate may call [`register`] or [`register_origin`]**. The two seams here
 /// are the whole test surface, and neither loads a session nor spawns anything.
+#[cfg(test)]
 pub(crate) fn register_with_client_id(
     machine_id: &str,
     host: &str,
@@ -1190,25 +1197,6 @@ fn register_lazy(
         origin.log_form()
     ));
     id
-}
-
-/// Install for a (re)login / profile switch — the SESSION path. **Signature grew a
-/// [`ConnectionFacts`] parameter (#95 step 8)**: the caller who
-/// already knows which tier won discovery, and at what address, now hands it to the same write
-/// that registers the server rather than setting it in a second call this function's old callers
-/// sometimes skipped. `ConnectionFacts::default()` reproduces the exact old behaviour (nothing
-/// set, nothing changed).
-///
-/// The caller has an address and no machine id (a stored session, or what the login resolved),
-/// so the same address is the same server: a second call for it swaps the token in place exactly
-/// as the old singleton did — which is every install this app makes today, and why nothing about
-/// a single-server session changed. A call naming a DIFFERENT address now registers a second slot
-/// and makes it current when its origin is credential-eligible. An ineligible stored origin is
-/// retained tokenless with an [`Outcome::InsecureOnly`] result, so ordinary endpoint discovery
-/// can repair it without ever making that origin the credentialed current client.
-pub fn install(origin: &Origin, token: &str, pin: Option<&ResolvePin>, connection: ConnectionFacts) {
-    let id = register_origin("", origin, token, pin, connection);
-    set_current(id); // eligible session installs retarget; recovery-only metadata is refused
 }
 
 /// **Profile switch.** Blank every live token and hide every non-current slot before the new

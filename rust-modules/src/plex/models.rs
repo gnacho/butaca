@@ -29,8 +29,6 @@ pub struct MediaContainer {
     pub size: i64,
     #[serde(rename = "totalSize", default, deserialize_with = "de_i64")]
     pub total_size: i64,
-    #[serde(default, deserialize_with = "de_i64")]
-    pub offset: i64,
     /// GET /identity — the server's stable id (the PlayQueue `server://{id}/…` uri needs it).
     #[serde(rename = "machineIdentifier", default)]
     pub machine_identifier: String,
@@ -313,9 +311,6 @@ pub struct Metadata {
     /// metadata even without `includeExtras=1`.
     #[serde(rename = "primaryExtraKey", default)]
     pub primary_extra_key: String,
-    /// Nested extras, only with `?includeExtras=1`. Same rows as `GET …/extras`.
-    #[serde(rename = "Extras", default)]
-    pub extras: Option<ExtrasHub>,
     /// **The only PORTABLE identity Plex issues** — `plex://movie/6856…291d`, the metadata
     /// provider's id, identical on every server that ever matched this film. Everything else
     /// item-shaped (`ratingKey`, `librarySectionID`, `Part.key`, `Stream.id`) is a server-local
@@ -356,8 +351,6 @@ pub struct Metadata {
     pub collection_sort: Option<i64>,
     #[serde(default)]
     pub tagline: String,
-    #[serde(default)]
-    pub studio: String,
     #[serde(rename = "originallyAvailableAt", default)]
     pub originally_available_at: String,
     #[serde(default, deserialize_with = "de_i64")]
@@ -371,8 +364,6 @@ pub struct Metadata {
     pub index: i64, // season/episode number
     #[serde(rename = "childCount", default, deserialize_with = "de_i64")]
     pub child_count: i64,
-    #[serde(rename = "updatedAt", default, deserialize_with = "de_i64")]
-    pub updated_at: i64,
     #[serde(rename = "parentIndex", default, deserialize_with = "de_i64")]
     pub parent_index: i64,
     #[serde(rename = "parentRatingKey", default, deserialize_with = "de_route_key")]
@@ -500,19 +491,12 @@ pub struct Media {
     /// Lenient because PMS string-encodes numerics on some endpoints. Descriptive only.
     #[serde(rename = "aspectRatio", default, deserialize_with = "de_f64")]
     pub aspect_ratio: f64,
-    /// The video codec's PROFILE, lower-case — `"main 10"` for 10-bit HEVC (probed live). Rendered
-    /// as `HEVC (Main 10)` by the Track-information panel. Descriptive only: no playback decision
-    /// reads it, and the profile that matters to the decoder rides the Load payload's own fields.
-    #[serde(rename = "videoProfile", default)]
-    pub video_profile: String,
     #[serde(rename = "Part", default)]
     pub part: Vec<MediaPart>,
 }
 
 #[derive(Deserialize, Default)]
 pub struct MediaPart {
-    #[serde(default, deserialize_with = "de_i64")]
-    pub id: i64,
     #[serde(default, deserialize_with = "de_route_key")]
     pub key: String, // /library/parts/{id}/{changestamp}/file.mkv
     /// /decision only: the MDE verdict for this part — "directplay" | "transcode" | "copy"
@@ -658,7 +642,7 @@ pub struct Stream {
     /// `"dolby digital plus + dolby atmos"`, confirmed on the wire 2026-08-21. Neither
     /// `audioChannelLayout` (`"5.1(side)"`) nor `title` (null) carries it, so a client that
     /// checked those would silently never badge an Atmos track. On a VIDEO stream it is
-    /// `"main 10"` and matches [`Media::video_profile`].
+    /// `"main 10"` and matches the video codec profile.
     #[serde(default)]
     pub profile: String,
     /// Video stream only: bits per component — `10` on a Main 10 HEVC source.
@@ -671,8 +655,6 @@ pub struct Stream {
     pub channels: i64,
     #[serde(rename = "audioChannelLayout", default)]
     pub audio_channel_layout: String,
-    #[serde(rename = "displayTitle", default)]
-    pub display_title: String,
     #[serde(default)]
     pub title: String,
     #[serde(rename = "hearingImpaired", default, deserialize_with = "de_i64")]
@@ -699,7 +681,7 @@ pub struct Stream {
 }
 
 /// A tag row — `Genre[]`, `Country[]`, `Role[]`, `Director[]`, `Writer[]`. The three PEOPLE
-/// arrays carry six attributes, all of them modelled here; verified live 2026-07-29:
+/// arrays carry six attributes, with the consumed fields modelled here; verified live 2026-07-29:
 /// `{"id":161,"filter":"actor=161","tag":"Idina Menzel","tagKey":"5d77682a…","count":3,
 ///   "role":"Elsa (voice)","thumb":"https://metadata-static.plex.tv/…jpg"}`.
 /// [`id`](Tag::id)/[`tag_key`](Tag::tag_key) are what make the person page reachable — either is
@@ -728,16 +710,6 @@ pub struct Tag {
     /// alternate `personId` (both forms verified live against the same record).
     #[serde(rename = "tagKey", default, deserialize_with = "de_route_key")]
     pub tag_key: String,
-    /// Collection identity shared by collection rows, search hits and member `Collection[]` tags.
-    /// Empty means absent, matching every other string field on this tolerant record.
-    #[serde(default, deserialize_with = "de_str")]
-    pub guid: String,
-    /// The server's own ready-made listing filter for this tag, e.g. `"actor=161"` /
-    /// `"director=459"` — append it to `/library/sections/{k}/all?` to list ONE section's items
-    /// for this person. Carries the tag's ROLE in the library (actor vs director vs writer),
-    /// which `id` alone does not.
-    #[serde(default, deserialize_with = "de_str")]
-    pub filter: String,
     /// How many items in this library carry the tag — Plex's count badge. NOT emitted by every
     /// server (this one omits it on `Role[]`), so 0 means "unknown", never "none".
     #[serde(default, deserialize_with = "de_i64")]
@@ -746,7 +718,7 @@ pub struct Tag {
     //
     // `/hubs/search` returns its `actor`, `director` and `collection` hubs as `Directory[]` of
     // exactly this shape (measured live — see `Hub::directory`), so the cast-credit tag and the
-    // search hit are one type rather than two that would drift. The three fields below are the
+    // search hit are one type rather than two that would drift. The two fields below are the
     // ones only the search producer sets; a `Role[]` entry leaves them empty and nothing reads
     // them there.
     /// The listing this tag opens — `/library/sections/1/all?collection=6068`. The only handle a
@@ -755,14 +727,6 @@ pub struct Tag {
     pub key: String,
     #[serde(rename = "librarySectionID", default, deserialize_with = "de_i64")]
     pub library_section_id: i64,
-    /// Why this result, when it is not a direct term match: `section` (the same title in several
-    /// sections), `originalTitle`, or another hub's identifier — searching "arnold" returns films
-    /// with `reason: actor`. Kept because a shelf that mixes direct and inferred hits without
-    /// saying so reads as the server being wrong.
-    #[serde(default, deserialize_with = "de_str")]
-    pub reason: String,
-    #[serde(rename = "reasonTitle", default, deserialize_with = "de_str")]
-    pub reason_title: String,
 }
 
 impl Tag {
@@ -788,8 +752,6 @@ pub struct Chapter {
     pub index: i64,
     #[serde(rename = "startTimeOffset", default, deserialize_with = "de_i64")]
     pub start_time_offset: i64,
-    #[serde(rename = "endTimeOffset", default, deserialize_with = "de_i64")]
-    pub end_time_offset: i64,
     #[serde(default)]
     pub tag: String,
     #[serde(default)]
@@ -881,14 +843,6 @@ impl From<String> for HexColor {
             (v & 0xff) as f32 / 255.0,
         ])
     }
-}
-
-/// `includeExtras=1` nests extras as `Extras.Metadata[]` — the same clip rows `GET …/extras`
-/// returns at the container root.
-#[derive(Deserialize, Default)]
-pub struct ExtrasHub {
-    #[serde(rename = "Metadata", default)]
-    pub metadata: Vec<Metadata>,
 }
 
 /// `OnDeck`'s envelope. Its `Metadata` is a single **object**, not the array every other nested hub
@@ -1341,9 +1295,9 @@ mod tests {
     /// built from — and every field the search screen reads off one must survive the round trip.
     ///
     /// A person carries `tagKey` (the portable guid that `discover.provider.plex.tv` answers to)
-    /// and an ABSOLUTE `metadata-static.plex.tv` `thumb`; a collection instead carries its own
-    /// `collection://` guid plus a server-local tag `id`, `filter` and listing `key`, but no
-    /// `ratingKey` or artwork. A screen that keys every tag by person `tagKey` still silently loses
+    /// and an ABSOLUTE `metadata-static.plex.tv` `thumb`; a collection instead carries a
+    /// server-local tag `id` and listing `key`, but no `ratingKey` or artwork. A screen that keys
+    /// every tag by person `tagKey` still silently loses
     /// every collection.
     #[test]
     fn person_and_collection_hits_keep_their_distinct_portable_identities() {
@@ -1356,12 +1310,7 @@ mod tests {
         assert_eq!(p.tag_key, "5d776827151a60001f24ab18");
         assert_eq!((p.id, p.count), (921, 5));
         assert_eq!(p.key, "/library/sections/1/all?actor=921");
-        assert_eq!(p.filter, "actor=921");
         assert_eq!(p.library_section_id, 1);
-        assert_eq!(
-            (p.reason.as_str(), p.reason_title.as_str()),
-            ("section", "Movies")
-        );
         assert!(
             p.thumb.starts_with("https://"),
             "a person thumb is ABSOLUTE, not a PMS path"
@@ -1374,14 +1323,9 @@ mod tests {
         assert_eq!(c.tag, "Wallace & Gromit Collection");
         assert_eq!((c.id, c.count), (6068, 6));
         assert_eq!(c.key, "/library/sections/1/all?collection=6068");
-        assert_eq!(c.filter, "collection=6068");
         assert_eq!(c.tag_key, "", "a collection guid is not a person tagKey");
-        assert_eq!(
-            c.guid,
-            "collection://10c9bd0a-40ce-400c-bf57-dfd4009bb216"
-        );
         assert_eq!(c.thumb, "", "…and no artwork of its own");
-        // `is_person` consumes person identity only; collection resolution uses `guid`, then id.
+        // `is_person` consumes person identity only; collection resolution uses id and key.
         assert!(c.is_person("6068", ""), "the server-local id still matches");
         assert!(
             !c.is_person("", "5d776827151a60001f24ab18"),
@@ -1508,10 +1452,7 @@ mod tests {
             ("role", &n.role),
             ("thumb", &n.thumb),
             ("tagKey", &n.tag_key),
-            ("filter", &n.filter),
             ("key", &n.key),
-            ("reason", &n.reason),
-            ("reasonTitle", &n.reason_title),
         ] {
             assert_eq!(
                 got, "",
@@ -1522,14 +1463,8 @@ mod tests {
         assert_eq!((n.id, n.count), (921, 5));
         // …and the intact row is exactly what it would have been on its own
         assert_eq!(rows[1].tag, "Wallace Shawn");
-        assert_eq!(
-            (rows[1].reason.as_str(), rows[1].reason_title.as_str()),
-            ("section", "Movies")
-        );
 
         // The same leniency the other way: a stringly-typed number is a string, not a failure.
-        // `reasonTitle` is a LIBRARY NAME, and a library called "2024" is one PMS is free to send
-        // as a bare number for.
         let json = br#"{"MediaContainer":{"Hub":[
           {"type":"collection","hubIdentifier":"collection","title":"Collections","size":1,"Directory":[
             {"tag":1998,"key":"/library/sections/3/all?collection=7","reasonTitle":2024,"id":7}]}]}}"#;
@@ -1537,7 +1472,7 @@ mod tests {
             .expect("lenient parse")
             .media_container;
         let c = &search_hub(&mc, "collection").directory[0];
-        assert_eq!((c.tag.as_str(), c.reason_title.as_str()), ("1998", "2024"));
+        assert_eq!(c.tag, "1998");
     }
 
     /// A one-character query is a **200 with every hub empty** — not an error, and not an absent
