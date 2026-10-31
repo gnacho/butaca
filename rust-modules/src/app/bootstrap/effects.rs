@@ -28,7 +28,8 @@ fn home_command(command: &crate::screens::registry::HomeCmd) -> Value {
         HomeCmd::FocusGrid { row,col } => json!({"focus_grid":[row,col]}),
         HomeCmd::Hero => json!("hero"),
         HomeCmd::FocusStrip(tab) => json!({"focus_strip":match tab {
-            HomeTab::Home => "home", HomeTab::Movies => "movies", HomeTab::Shows => "shows", HomeTab::Search => "search" }}),
+            HomeTab::Home => "home", HomeTab::Movies => "movies", HomeTab::Shows => "shows",
+            HomeTab::Videos => "videos", HomeTab::Search => "search" }}),
         HomeCmd::Flip(delta) => json!({"flip":delta}),
         HomeCmd::SelectHero(index) => json!({"select_hero":index}),
         HomeCmd::PinHero(index) => json!({"pin_hero":index}),
@@ -225,6 +226,7 @@ fn home_request(req: &crate::screens::registry::HomeReq) -> Value {
                 HomeTab::Home => "home",
                 HomeTab::Movies => "movies",
                 HomeTab::Shows => "shows",
+                HomeTab::Videos => "videos",
                 HomeTab::Search => "search",
             }
         ]),
@@ -453,6 +455,7 @@ mod tests {
             (HomeReq::Tab(HomeTab::Home), json!({"home":["tab","home"]})),
             (HomeReq::Tab(HomeTab::Movies), json!({"home":["tab","movies"]})),
             (HomeReq::Tab(HomeTab::Shows), json!({"home":["tab","shows"]})),
+            (HomeReq::Tab(HomeTab::Videos), json!({"home":["tab","videos"]})),
             (HomeReq::Tab(HomeTab::Search), json!({"home":["tab","search"]})),
             (
                 HomeReq::Play { sid, rk: "9".into(), resume_ns: 42 },

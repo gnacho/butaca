@@ -66,8 +66,8 @@ pub(crate) fn is_recently_added_hub(hub_identifier: &str) -> bool {
         "home.videos.recent",
         "home.photos.recent",
     ];
-    const PER_LIBRARY_PREFIXES: [&str; 3] =
-        ["movie.recentlyadded.", "show.recentlyadded.", "tv.recentlyadded."];
+    const PER_LIBRARY_PREFIXES: [&str; 4] =
+        ["movie.recentlyadded.", "show.recentlyadded.", "tv.recentlyadded.", "video.recent."];
     WHOLE_SERVER.contains(&hub_identifier)
         || PER_LIBRARY_PREFIXES.iter().any(|p| hub_identifier.starts_with(p))
 }

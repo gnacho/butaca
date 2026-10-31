@@ -7,6 +7,7 @@
   "browse.chrome.home": "Галоўная",
   "browse.kind.movies": "Фільмы",
   "browse.kind.tv_shows": "Серыялы",
+  "browse.kind.other_videos": "Іншае відэа",
   "browse.kind.shows": "Серыялы",
   "browse.kind.movie": "Фільм",
   "browse.kind.show": "Серыял",
@@ -141,6 +142,13 @@
   "browse.library.shared_unreachable": "Агульны доступ ад {owner} · ваш сервер працуе спраўна.",
   "browse.library.no_movies": "У бібліятэцы {library} няма фільмаў",
   "browse.library.no_shows": "У бібліятэцы {library} няма серыялаў",
+  "browse.library.no_videos": "У бібліятэцы {library} няма відэа",
+  "browse.library.videos": {
+    "one": "{count} відэа",
+    "few": "{count} відэа",
+    "many": "{count} відэа",
+    "other": "{count} відэа"
+  },
   "browse.search.people": {
     "one": "{count} асоба",
     "few": "{count} асобы",
@@ -198,6 +206,7 @@
   "browse.kind.episodes": "Серыі",
   "browse.kind.collections": "Калекцыі",
   "browse.kind.films": "Фільмы",
+  "browse.kind.videos": "Відэа",
   "browse.kind.tv_shows_sentence": "Серыялы",
   "browse.home.continue_watching": "Працягнуць прагляд",
   "browse.diagnostics.title": "Дыягностыка",

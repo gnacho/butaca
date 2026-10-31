@@ -7,6 +7,7 @@
   "browse.chrome.home": "Inicio",
   "browse.kind.movies": "Películas",
   "browse.kind.tv_shows": "Series",
+  "browse.kind.other_videos": "Otros vídeos",
   "browse.kind.shows": "Series",
   "browse.kind.movie": "Película",
   "browse.kind.show": "Serie",
@@ -136,6 +137,12 @@
   "browse.library.shared_unreachable": "Compartido por {owner} · tu servidor funciona correctamente.",
   "browse.library.no_movies": "No hay películas en {library}",
   "browse.library.no_shows": "No hay series en {library}",
+  "browse.library.no_videos": "No hay vídeos en {library}",
+  "browse.library.videos": {
+    "one": "{count} vídeo",
+    "many": "{count} vídeos",
+    "other": "{count} vídeos"
+  },
   "browse.search.people": {
     "one": "{count} persona",
     "many": "{count} personas",
@@ -188,6 +195,7 @@
   "browse.kind.episodes": "Episodios",
   "browse.kind.collections": "Colecciones",
   "browse.kind.films": "Películas",
+  "browse.kind.videos": "Vídeos",
   "browse.kind.tv_shows_sentence": "Series",
   "browse.home.continue_watching": "Continuar viendo",
   "browse.diagnostics.title": "Diagnósticos",

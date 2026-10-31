@@ -1100,6 +1100,26 @@ mod tests {
     }
 
     #[test]
+    fn an_other_videos_clip_hub_is_a_playable_section_shelf() {
+        let json = r#"{"MediaContainer":{"Hub":[
+          {"hubIdentifier":"video.recent.3","title":"Recently Added","type":"clip","size":2,
+           "key":"/library/sections/3/all?sort=addedAt:desc","Metadata":[
+             {"ratingKey":"1","type":"movie","subtype":"clip","title":"Clip A","thumb":"/a"},
+             {"ratingKey":"2","type":"movie","subtype":"clip","title":"Clip B","thumb":"/b"}]},
+          {"hubIdentifier":"video.inprogress.3","title":"Continue Watching","type":"clip","size":1,
+           "key":"/library/sections/3/all?sort=lastViewedAt:desc","Metadata":[
+             {"ratingKey":"3","type":"movie","subtype":"clip","title":"Clip C","thumb":"/c"}]}
+        ]}}"#;
+        let shelves = parse_hubs(&container(json), ServerId::from_raw(0), 3);
+        assert_eq!(shelves.len(), 2);
+        assert_eq!(shelves[0].title, "Recently Added");
+        assert_eq!(shelves[0].items.len(), 2);
+        assert!(shelves[0].items.iter().all(|item| item.kind == 0));
+        assert!(!shelves[0].is_continue);
+        assert!(shelves[1].is_continue, "video.inprogress is the section deck");
+    }
+
+    #[test]
     fn collection_metadata_is_dropped_but_collection_shelves_of_movies_survive() {
         let json = r#"{"MediaContainer":{"Hub":[
           {"hubIdentifier":"movie.recentlyadded.1","title":"Recently Added","type":"mixed",

@@ -334,12 +334,12 @@ impl LibraryType {
         #[cfg(feature = "jellyfin")]
         if crate::jellyfin::client().is_some() {
             return match kind {
-                SecKind::Movie => &[Self::Primary, Self::Collections],
+                SecKind::Movie | SecKind::Video => &[Self::Primary, Self::Collections],
                 SecKind::Show => &[Self::Primary, Self::Seasons, Self::Episodes],
             };
         }
         match kind {
-            SecKind::Movie => &[Self::Primary, Self::Collections],
+            SecKind::Movie | SecKind::Video => &[Self::Primary, Self::Collections],
             SecKind::Show => &[Self::Primary, Self::Seasons, Self::Episodes, Self::Collections],
         }
     }
@@ -352,6 +352,7 @@ impl LibraryType {
         match (self, kind) {
             (Self::Primary, SecKind::Movie) => crate::i18n::msg::browse_kind_movies_in(locale),
             (Self::Primary, SecKind::Show) => crate::i18n::msg::browse_kind_tv_shows_in(locale),
+            (Self::Primary, SecKind::Video) => crate::i18n::msg::browse_kind_other_videos_in(locale),
             (Self::Seasons, _) => crate::i18n::msg::browse_kind_seasons_in(locale),
             (Self::Episodes, _) => crate::i18n::msg::browse_kind_episodes_in(locale),
             (Self::Collections, _) => crate::i18n::msg::browse_kind_collections_in(locale),
@@ -365,6 +366,7 @@ impl LibraryType {
         match (self, kind) {
             (Self::Primary, SecKind::Movie) => crate::i18n::msg::browse_library_no_movies(library),
             (Self::Primary, SecKind::Show) => crate::i18n::msg::browse_library_no_shows(library),
+            (Self::Primary, SecKind::Video) => crate::i18n::msg::browse_library_no_videos(library),
             (Self::Seasons, _) => crate::i18n::msg::browse_library_no_seasons(library),
             (Self::Episodes, _) => crate::i18n::msg::browse_library_no_episodes(library),
             (Self::Collections, _) => crate::i18n::msg::browse_library_no_collections(library),
@@ -376,7 +378,7 @@ impl LibraryType {
     /// one, and still are; a TV library's shows name `type=2` explicitly, as they always did.
     pub(crate) fn plex_type(self, kind: SecKind) -> Option<i64> {
         match (self, kind) {
-            (Self::Primary, SecKind::Movie) => None,
+            (Self::Primary, SecKind::Movie | SecKind::Video) => None,
             (Self::Primary, SecKind::Show) => Some(2),
             (Self::Seasons, _) => Some(3),
             (Self::Episodes, _) => Some(4),
@@ -680,7 +682,7 @@ impl SecState {
         if self.unwatched {
             let key = match (section_kind, self.library_type) {
                 (SecKind::Show, LibraryType::Primary | LibraryType::Seasons) => "unwatchedLeaves",
-                _ => "unwatched",
+                (SecKind::Movie | SecKind::Video | SecKind::Show, _) => "unwatched",
             };
             filters.push((key.into(), "1".into()));
         }
@@ -3059,19 +3061,13 @@ fn ensure_sections_with(
 /// projection, shared by the blocking discovery above and the worker below, so the two can never
 /// disagree about which sections exist.
 ///
-/// `artist`/`photo` are KEPT. They used to be dropped here as "not browsable", and that quietly
-/// disabled the one growth case the tab projection is written for: a friend sharing a type you do
-/// not own can only add a pill if that type reaches the table at all. They browse like any other
-/// section (the listing, its server-driven sorts and the A–Z rail are type-agnostic), and this
-/// account's own `/hubs` already puts a *Recently Added Music* shelf on Home, so the content was at
-/// the top level before it had a tab. What is still missing is the level BELOW the grid — an artist
-/// opens the movie detail page, which has nothing to play — and that belongs to whoever builds the
-/// music level, not to the strip.
+/// A section's kind comes from [`SecKind::of_section`]: its Plex `type`, plus the agent and scanner
+/// that distinguish Other Videos from Movies. Types without a playable level are dropped here.
 fn project_sections(mc: &crate::plex::MediaContainer) -> Vec<(i64, String, SecKind)> {
     mc.directory
         .iter()
         .filter_map(|d| {
-            let kind = SecKind::from_wire(&d.kind)?; // a type this product has no level for at all
+            let kind = SecKind::of_section(d)?; // a type this product has no level for at all
             d.key
                 .parse::<i64>()
                 .ok()
@@ -3088,7 +3084,7 @@ fn project_sections(mc: &crate::plex::MediaContainer) -> Vec<(i64, String, SecKi
 /// pill, and with one value a second type would silently ride the *Movies* pill and its content
 /// would be unreachable from the strip.
 ///
-/// **Movies and shows are the whole list, deliberately.** `artist` and `photo` briefly appeared
+/// **Movies, shows and Other Videos are the whole list, deliberately.** `artist` and `photo` briefly appeared
 /// here — the reasoning was that a friend sharing a type you do not own is the growth case the tab
 /// projection exists for, and dropping those at the wire made that case unreachable. It shipped, and
 /// a *Music* tab duly appeared on the dev set (owner verdict, 2026-08-14: "Music was just a tab in a
@@ -3101,28 +3097,39 @@ fn project_sections(mc: &crate::plex::MediaContainer) -> Vec<(i64, String, SecKi
 pub(crate) enum SecKind {
     Movie,
     Show,
+    /// Plex's Other Videos library: a movie-typed section filed without a metadata agent.
+    Video,
 }
 
 impl SecKind {
-    /// The wire's `Directory.type`, or `None` for a type this product draws no level for —
-    /// `artist`, `photo`, and everything else PMS can serve. See the type's own doc: this returning
-    /// `None` is what keeps an unplayable library out of the strip, the Sources panel and the grid
-    /// in one place, rather than at three call sites that can disagree.
-    pub(crate) fn from_wire(s: &str) -> Option<SecKind> {
-        match s {
+    /// The kind of a `/library/sections` row. Other Videos shares the `movie` wire type, so its
+    /// agent and scanner make the distinction. Missing or ambiguous fields stay Movies, as before.
+    pub(crate) fn of_section(section: &crate::plex::LibrarySection) -> Option<SecKind> {
+        match section.kind.as_str() {
+            "movie" if section.is_other_videos() => Some(SecKind::Video),
             "movie" => Some(SecKind::Movie),
             "show" => Some(SecKind::Show),
             _ => None,
         }
     }
-    /// The wire code this type was parsed FROM — the inverse of [`from_wire`](Self::from_wire), and
-    /// the key `plex::session::TypedLib` records a remembered library under. A `&'static str` from
-    /// this table rather than an enum discriminant, so a reordered `SecKind` cannot silently
-    /// repoint a record an older build wrote.
+    /// The app's own persisted code for a kind, not the Plex `Directory.type`. Other Videos is
+    /// classified by [`of_section`](Self::of_section) because its Plex type is `movie` too.
+    pub(crate) fn from_wire(s: &str) -> Option<SecKind> {
+        match s {
+            "movie" => Some(SecKind::Movie),
+            "show" => Some(SecKind::Show),
+            "video" => Some(SecKind::Video),
+            _ => None,
+        }
+    }
+    /// The inverse of [`from_wire`](Self::from_wire), and the key `plex::session::TypedLib`
+    /// records a remembered library under. A new string for Video keeps old Movie and Show records
+    /// on their original libraries.
     pub(crate) fn wire(self) -> &'static str {
         match self {
             SecKind::Movie => "movie",
             SecKind::Show => "show",
+            SecKind::Video => "video",
         }
     }
     /// The same thing as a standalone label ("Films"), for a row whose count has not landed yet.
@@ -3130,6 +3137,23 @@ impl SecKind {
         match self {
             SecKind::Movie => crate::i18n::msg::browse_kind_films(),
             SecKind::Show => crate::i18n::msg::browse_kind_tv_shows_sentence(),
+            SecKind::Video => crate::i18n::msg::browse_kind_videos(),
+        }
+    }
+    /// This kind's stable position in `TAB_KINDS` and the per-kind snapshot arrays.
+    pub(crate) const fn slot(self) -> usize {
+        match self {
+            SecKind::Movie => 0,
+            SecKind::Show => 1,
+            SecKind::Video => 2,
+        }
+    }
+    /// The number written to canonical replay state. Existing Movie and Show values stay pinned.
+    pub(crate) const fn canon(self) -> u32 {
+        match self {
+            SecKind::Movie => 0,
+            SecKind::Show => 1,
+            SecKind::Video => 2,
         }
     }
 }
@@ -3148,7 +3172,7 @@ const PLAYS_SORT_KEY: &str = "viewCount";
 /// rather than silently inheriting `true`.
 fn kind_offers_plays_sort(kind: SecKind) -> bool {
     match kind {
-        SecKind::Movie | SecKind::Show => true,
+        SecKind::Movie | SecKind::Show | SecKind::Video => true,
     }
 }
 
@@ -3226,7 +3250,7 @@ fn activate_source_of(_i: usize) {
 
 /// Every type this product has a pill for, in strip order. A pill is only DRAWN when the
 /// favourite set can fill it — see [`tab_kinds`] — so this is the vocabulary, not the strip.
-pub(crate) const TAB_KINDS: [SecKind; 2] = [SecKind::Movie, SecKind::Show];
+pub(crate) const TAB_KINDS: [SecKind; 3] = [SecKind::Movie, SecKind::Show, SecKind::Video];
 
 // ---- favourites: the ONE control, it governs the WHOLE APP, and it is PER PROFILE ------------
 //
@@ -3332,6 +3356,7 @@ fn count_line(count: i64, kind: SecKind) -> String {
         match kind {
             SecKind::Movie => crate::i18n::msg::browse_person_films(count),
             SecKind::Show => crate::i18n::msg::browse_person_shows(count),
+            SecKind::Video => crate::i18n::msg::browse_library_videos(count),
         }
     } else {
         kind.plural().to_string()
@@ -3893,6 +3918,9 @@ mod home_and_tabs_tests;
 #[path = "browse_reachability_tests.rs"]
 mod reachability_tests;
 
+#[cfg(test)]
+#[path = "browse_section_kind_tests.rs"]
+mod section_kind_tests;
 
 #[cfg(test)]
 mod library_type_tests;
