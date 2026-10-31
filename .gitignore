@@ -156,6 +156,7 @@ __pycache__/
 
 rust-modules/target-sym/
 rust-modules/target-release-sym/
+rust-modules/target-release-jellyfin-sym/
 pkg/butaca.debug
 pkg/telemetry.local.json
 tests/fixtures/softfloat/arm.tbl
