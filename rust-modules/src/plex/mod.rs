@@ -80,7 +80,6 @@ pub(crate) use client::ArtFetch;
 pub(crate) use client::JsonDeadlineOutcome;
 // The one link/IP ⇄ u8 encode/decode pair — shared by `Client`'s own atomics and the removed
 // report trace's packed attempt snapshot; with nothing left to read them, the re-export goes.
-#[allow(unused_imports)]
 pub use client::{Client, IpVersion, StreamUrl};
 // WHERE a server is, as one value. `Origin` is what `register_origin` takes and what a
 // `Client` carries; `Scheme` is re-exported beside it because `dev::DevServer` deserializes one
@@ -96,7 +95,7 @@ pub use servers::{
     facts as server_facts, ids as server_ids,
     facts_gen as server_facts_gen, is_household, owner_credit,
     probe_result as server_probe_result, publish_probe_result, register,
-    roster_gen as server_roster_gen, same_item, set_current, Grant, GrantEvidence,
+    roster_gen as server_roster_gen, same_item, set_current, GrantEvidence,
     ServerFacts,
     ServerId, MAX_SERVERS,
 };
@@ -105,7 +104,6 @@ pub use servers::{client, describe_name as describe_server_name};
 // Sign-out. `pub(crate)` like the function itself: retiring the whole table is `auth::sign_out`'s
 // to call and nothing else's — a caller that merely wants to stop using a server wants
 // `set_current`, and one that wants to forget a share wants plex.tv to stop granting it.
-#[allow(unused_imports)]
 pub(crate) use servers::{finish_profile_switch, id_of_machine, revoke_all, revoke_for_profile_switch};
 pub(crate) use servers::regrade_credentials;
 // The registry as a TEST FIXTURE, for suites outside this module (`route.rs` grades which server a
@@ -114,9 +112,7 @@ pub(crate) use servers::regrade_credentials;
 // and `reset_servers_for_test` is what keeps the table a per-test fixture instead of a growing
 // process-global holding clients whose loopback ports closed when their test returned. Both must be
 // called under `crate::testlock::serial`.
-#[allow(unused_imports)]
 pub use models::*;
-#[allow(unused_imports)]
 pub use params::*;
 #[cfg(test)]
 pub(crate) use servers::{
@@ -125,7 +121,6 @@ pub(crate) use servers::{
 };
 // Only reached from `auth::register_observed_origin`'s `#[cfg(test)]` arm and from test files, so
 // a plain `cargo check --lib` (which builds no test code at all) sees no caller.
-#[allow(unused_imports)]
 pub(crate) use servers::register_pinned_with_client_id;
 
 /// Evidence from the authenticated admission request made when an identity winner is considered
@@ -206,19 +201,14 @@ pub(crate) fn admit_source(source: &session::SourceRef, client_id: &str) -> Endp
 pub(crate) use servers::{
     register_captured_origin_with_connection, register_origin, ConnectionFacts,
 };
-// The projected play-queue row + the identity rule that locates one: op-file items rather than
-// wire DTOs, so they are re-exported by name (route.rs names the row in `Plan`/`QueueInfo` — the
-// rest of `timeline` is reached through `Client`'s methods and needs none).
-#[allow(unused_imports)]
-pub use timeline::{queue_index_of, QueueRow};
+// The projected play-queue row is an op-file item rather than a wire DTO, so it is re-exported
+// by name. Route.rs names it in `Plan`/`QueueInfo`; the rest of `timeline` is reached through
+// `Client`'s methods and needs none.
+pub use timeline::QueueRow;
 // DP_AUDIO_CODECS rides along for `devcaps`, which intersects it with the device's own codec
 // table — normal routing and its profile read the same codec and channel limits.
-// `DP_SUBTITLE_CODECS` / `is_dp_subtitle` are the subtitle twin: the profile's `subtitleCodec=`
-// list and route's MDE `subtitleStreamID` gate, so a selected PGS cannot be advertised in one
-// and omitted from the other.
+// `is_dp_subtitle` is the subtitle twin: the profile's `subtitleCodec=` list and route's MDE
+// `subtitleStreamID` gate, so a selected PGS cannot be advertised in one and omitted from the other.
 // `is_dp_audio_track` checks normal codec/channel eligibility, while `link_policy` constrains
 // the connection. Forced mode retains software feed limits and uses a separate PMS profile.
-#[allow(unused_imports)]
-pub use transcoder::{
-    DP_AUDIO_CODECS, DP_SUBTITLE_CODECS, LinkPolicy, is_dp_audio_track, is_dp_subtitle, link_policy,
-};
+pub use transcoder::{DP_AUDIO_CODECS, LinkPolicy, is_dp_audio_track, is_dp_subtitle, link_policy};

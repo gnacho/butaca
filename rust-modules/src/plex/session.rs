@@ -44,9 +44,7 @@
 //! - [`clear`] (sign-out) drops the cached `Arc` immediately — it holds the very account/server
 //!   tokens sign-out means to get rid of.
 //! - Other domains of the same record (consent) are not in this cache and their writes never
-//!   touch it. `async_persistence`'s own `CACHE`/`LOCKED_STATE` are a separate, currently-unwired
-//!   engine (see its doc) — when it is wired, its coordinator must install into and drop THIS
-//!   cache rather than keep a second copy of the session live.
+//!   touch it.
 use super::origin::Origin;
 use super::probe::Location;
 pub(crate) use crate::librecord::{OpaqueExtensions, TypedLib};
@@ -725,7 +723,6 @@ impl Default for CanonicalSessionPreferences {
 /// The returned public object is still protected by the helper-owned private DB8 kind, but it is
 /// deliberately readable while Keymanager is unavailable.  The returned string contains every
 /// credential and all unknown extensions and must only cross the authenticated helper socket.
-#[allow(dead_code)] // Connected by the Stage B Session adapter.
 pub(crate) fn split_canonical(
     session: &Session,
 ) -> Result<(crate::storage::state::PublicPayload, String), ()> {
@@ -789,7 +786,6 @@ fn split_public(session: &Session) -> Result<crate::storage::state::PublicPayloa
 /// Public preferences degrade independently: one malformed optional setting must not discard a
 /// valid token bundle.  The protected half is strict because accepting the wrong auth schema as a
 /// session would turn corruption into an authenticated state.
-#[allow(dead_code)] // Connected by the Stage B Session adapter.
 pub(crate) fn join_canonical(
     public: &crate::storage::state::PublicPayload,
     protected: &str,
@@ -1094,19 +1090,6 @@ impl SubtitleTone {
         SubtitleTone::DarkGrey,
         SubtitleTone::Charcoal,
     ];
-
-    /// Canonical English tone label for diagnostics and compatibility callers.
-    /// Localized picker rows map this typed tone through the UI catalog.
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            SubtitleTone::White => "White",
-            SubtitleTone::Silver => "Silver",
-            SubtitleTone::LightGrey => "Light gray",
-            SubtitleTone::Grey => "Gray",
-            SubtitleTone::DarkGrey => "Dark gray",
-            SubtitleTone::Charcoal => "Charcoal",
-        }
-    }
 
     /// An in-memory index back to a rung — out of range is `White`, never a neighbouring rung,
     /// for the reason `Quality::from_index` gives: the ladder can grow or shrink.
@@ -1561,13 +1544,6 @@ pub struct LastLibrary {
 }
 
 impl LastLibrary {
-    /// This profile's remembered library for `kind`, as `(machine_id, key)`.
-    pub fn get(&self, kind: &str) -> Option<(&str, i64)> {
-        self.libs
-            .iter()
-            .find(|l| l.kind == kind)
-            .map(|l| (l.machine_id.as_str(), l.key))
-    }
     /// Record a choice, replacing this type's entry rather than appending beside it.
     ///
     /// **A library with no machine id is not recorded and CLEARS the entry**, rather than being
@@ -1620,14 +1596,6 @@ impl SeriesTracks {
 }
 
 impl Session {
-    /// What one series was last watched with, if it was watched with a menu pick.
-    pub(crate) fn series_tracks(&self, series: &str) -> Option<&SeriesTracks> {
-        if series.is_empty() {
-            return None;
-        }
-        self.series_tracks.iter().find(|t| t.series == series)
-    }
-
     /// Record a series' pair as the most recent, evicting the oldest past [`SeriesTracks::CAP`].
     pub(crate) fn with_series_tracks(&self, entry: SeriesTracks) -> Self {
         let mut next = self.clone();
@@ -2001,7 +1969,6 @@ impl Session {
 
     /// The effective persisted playback quality. Absence is the literal legacy migration rule:
     /// builds that predate the field played Original, so they continue to play Original.
-    #[allow(dead_code)]
     pub(crate) fn direct_play_mode(&self) -> DirectPlayMode { self.direct_play_mode }
 
     pub(crate) fn with_direct_play_mode(&self, mode: DirectPlayMode) -> Self {
@@ -2116,33 +2083,6 @@ impl Session {
         let mut next = self.clone();
         next.audio_enhancements = enhancements;
         next
-    }
-
-    /// Interactive boot with a multi-user Plex Home shows the who's-watching picker unless
-    /// Automatically Sign In is on and a profile is already seated.
-    ///
-    /// `force_pick` is `/tmp/butaca-pickuser`: it wins even on an automated boot. An empty
-    /// `user.uuid` still raises the picker when the switch is on — that is the abandoned-at-picker
-    /// session whose PMS token falls back to the owner. A uuid that is no longer in
-    /// [`Session::home_users`] (removed Home user, stale roster) raises it too: the switch is an
-    /// opt-in to skip the list for someone still on it, not a licence to boot leftover tokens.
-    pub(crate) fn boot_shows_picker(&self, automated: bool, force_pick: bool) -> bool {
-        if !self.can_go_local() || self.home_users.len() <= 1 {
-            return false;
-        }
-        if force_pick {
-            return true;
-        }
-        if automated {
-            return false;
-        }
-        !(self.auto_sign_in && self.seated_in_roster())
-    }
-
-    /// True when [`Session::user`]'s uuid names someone still on the cached Plex Home roster.
-    pub(crate) fn seated_in_roster(&self) -> bool {
-        !self.user.uuid.is_empty()
-            && self.home_users.iter().any(|u| u.uuid == self.user.uuid)
     }
 
     /// True once we have a LAN server + a usable PMS token — i.e. we can run offline.
@@ -2302,21 +2242,6 @@ impl Session {
             .unwrap_or(true)
     }
 
-    /// One source by `machineIdentifier` — the only key that identifies a server.
-    pub fn source(&self, machine_id: &str) -> Option<&SourceRef> {
-        if machine_id.is_empty() {
-            return None; // an unknown id must not match the entries that have none either
-        }
-        self.sources.iter().find(|s| s.machine_id == machine_id)
-    }
-    /// Our own server's entry in the roster, if discovery reached one.
-    pub fn owned_source(&self) -> Option<&SourceRef> {
-        self.sources.iter().find(|s| s.owned)
-    }
-    /// The shares — every source that is not ours, in discovery order.
-    pub fn shared_sources(&self) -> impl Iterator<Item = &SourceRef> {
-        self.sources.iter().filter(|s| !s.owned)
-    }
     /// One profile's Home selection, or `None` for a profile that has never been asked. The
     /// difference is load-bearing — see [`Session::home_pins`].
     pub fn pins_for(&self, user: &str) -> Option<&HomePins> {
@@ -3751,15 +3676,7 @@ pub(crate) fn update_guarded_with_outcome(
 /// exactly the 0.6.3 symptom AUTH-03 exists to end. `fence` returning `false` refuses the write
 /// entirely (`Err`), before anything reaches disk.
 ///
-/// Fresh authority without an account credential writes nothing (mirrors
-/// `async_persistence::Coordinator::admit_with`'s `account_token.is_empty()` refusal).
-pub(crate) fn replace_after_reauthentication_with_outcome(
-    fence: impl FnOnce(&Session) -> bool,
-    edit: impl FnOnce(&Session) -> Session,
-) -> Result<Option<async_persistence::LiveWrite>, ()> {
-    replace_after_reauthentication_guarded_with_outcome(fence, edit, || true)
-}
-
+/// Fresh authority without an account credential writes nothing.
 pub(crate) fn replace_after_reauthentication_guarded_with_outcome(
     fence: impl FnOnce(&Session) -> bool,
     edit: impl FnOnce(&Session) -> Session,
@@ -4869,11 +4786,6 @@ pub struct Account {
     /// on an injected token yet still reports the stored account here — deliberately, because the
     /// stored account is exactly what a "Sign out" would clear.
     pub signed_in: bool,
-    /// Profile switching is possible. It needs the **plex.tv account token**: both the Plex Home
-    /// roster and the per-user tokens come from plex.tv, so a server-only session cannot switch
-    /// (`auth::start_switch` refuses one outright). Deliberately NOT gated on the roster length —
-    /// see `home_users`' note on why an empty roster means "unknown", not "there are none".
-    pub can_switch: bool,
     /// Who we may say the user is: the active managed profile, else the account owner off the
     /// persisted roster. `None` = signed in but nameless (no roster has ever landed), which is a
     /// missing name and not a missing user — say "Account", never "Sign in".
@@ -4887,15 +4799,8 @@ impl Session {
     /// and therefore never got a profile written at all.
     ///
     /// **`home_users` being empty means "unknown", not "none".** It is only ever filled by a
-    /// sign-in or a "Change profile", and a *failed* fetch at sign-in persists an empty vec
-    /// (`auth.rs`'s `finish_sign_in`, which logs the failure's grade), so "never fetched", "fetch
-    /// failed" and "genuinely empty" are one value. Anything deciding on it must treat empty as
-    /// "ask" — which is why [`Account::can_switch`] keeps the switch row: that row is what
-    /// re-fetches the roster, and hiding it on an empty one would be a one-way door out of a Plex
-    /// Home created later. When the re-fetch fails too, the picker reads out why and BACK leaves
-    /// it (#132); a REFUSAL over nothing cached is then remembered for that identity
-    /// (`auth::owner::SessionSnapshot::switch_refused`), and it is `screens::account_menu`, not
-    /// this, that hides the row on it.
+    /// sign-in or a "Change profile", and a failed fetch at sign-in persists an empty vec, so
+    /// "never fetched", "fetch failed" and "genuinely empty" are one value.
     pub fn account(&self, active: Option<&UserRef>) -> Account {
         let named = |t: &str| Some(t.to_string()).filter(|t| !t.is_empty());
         // the roster hop searches for a NAMED admin, then any named entry — a `find(admin)` whose
@@ -4920,12 +4825,11 @@ impl Session {
         #[cfg(feature = "jellyfin")]
         if let Some(client) = crate::jellyfin::client() {
             if let Some(name) = client.user_name() {
-                return Account { signed_in: true, can_switch: false, name: Some(name) };
+                return Account { signed_in: true, name: Some(name) };
             }
         }
         Account {
             signed_in: !self.account_token.is_empty() || self.can_go_local(),
-            can_switch: !self.account_token.is_empty(),
             name,
         }
     }
@@ -4961,7 +4865,6 @@ mod cache_tests;
 
 // Storage-facing capability only. Session owner admission is integrated in Stage B.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[allow(dead_code)]
 pub(crate) enum SaveAuthority { PublicOnly, Routine, FreshReauthentication }
 
 /// Test-only witness of the authority the last [`save_locked_with_authority`] call actually used —
@@ -5007,10 +4910,7 @@ pub(crate) fn reset_reads_for_test() {
 #[allow(dead_code)]
 pub(crate) mod persistence;
 
-#[cfg(test)]
-mod migration_tests;
-
-#[allow(dead_code)] // Stage B connects typed owner admission/completions.
+#[allow(dead_code)]
 pub(crate) mod async_persistence;
 mod install_preferences;
 
@@ -5151,9 +5051,11 @@ mod series_tracks_tests {
         let session = Session::default().with_series_tracks(pick("series9", "spa", 2));
         let encoded = serde_json::to_value(&session).unwrap();
         let round: Session = serde_json::from_value(encoded).unwrap();
-        let stored = round.series_tracks("series9").expect("the pick survives the file");
+        let stored = round.series_tracks.iter().find(|entry| entry.series == "series9")
+            .expect("the pick survives the file");
         assert_eq!((stored.audio_lang.as_str(), stored.audio_index), ("spa", 2));
-        assert!(round.series_tracks("series8").is_none(), "nothing is shared between shows");
+        assert!(round.series_tracks.iter().all(|entry| entry.series != "series8"),
+            "nothing is shared between shows");
     }
 
     #[test]
@@ -5161,7 +5063,8 @@ mod series_tracks_tests {
         let session = Session::default()
             .with_series_tracks(pick("series9", "spa", 2))
             .with_series_tracks(pick("series9", "eng", 1));
-        let stored = session.series_tracks("series9").expect("one entry");
+        let stored = session.series_tracks.iter().find(|entry| entry.series == "series9")
+            .expect("one entry");
         assert_eq!(stored.audio_lang, "eng", "the latest pick is the one that counts");
         assert_eq!(session.series_tracks.len(), 1, "replaced, not appended");
     }
@@ -5173,8 +5076,9 @@ mod series_tracks_tests {
             session = session.with_series_tracks(pick(&format!("series{i}"), "spa", 1));
         }
         assert_eq!(session.series_tracks.len(), SeriesTracks::CAP);
-        assert!(session.series_tracks("series0").is_none(), "the oldest show is the one evicted");
-        assert!(session.series_tracks(&format!("series{}", SeriesTracks::CAP)).is_some());
+        assert!(session.series_tracks.iter().all(|entry| entry.series != "series0"),
+            "the oldest show is the one evicted");
+        assert!(session.series_tracks.iter().any(|entry| entry.series == format!("series{}", SeriesTracks::CAP)));
     }
 
     #[test]
@@ -5182,7 +5086,6 @@ mod series_tracks_tests {
         let session: Session = serde_json::from_value(serde_json::json!({"series_tracks": "future"}))
             .expect("garbage in one field never costs the session");
         assert!(session.series_tracks.is_empty());
-        assert!(session.series_tracks("").is_none(), "an empty series id matches nothing");
     }
 }
 

@@ -1,7 +1,6 @@
 //! Session-file backward compatibility: origins, tier, playback quality, and auto-sign-in.
 
 use super::*;
-#[allow(unused_imports)]
 use super::test_support::*;
 
 /// **THE COMPATIBILITY GATE: a session file written by 0.4.1 must still boot.**
@@ -49,11 +48,11 @@ fn a_session_file_written_before_origins_existed_still_boots_as_plain_http() {
         s.sources.len()
     );
     assert_eq!(
-        s.owned_source().unwrap().origin().unwrap().base(),
+        s.sources.iter().find(|x| x.owned).unwrap().origin().unwrap().base(),
         "http://192.168.0.10:32400"
     );
     assert_eq!(
-        s.source("bbbb2222").unwrap().origin().unwrap().base(),
+        s.sources.iter().find(|x| x.machine_id == "bbbb2222").unwrap().origin().unwrap().base(),
         "http://203.0.113.9:31234"
     );
 }
@@ -373,7 +372,6 @@ fn the_subtitle_tone_is_white_when_absent_or_unknown_and_round_trips_every_rung(
     for (i, tone) in SubtitleTone::LADDER.iter().enumerate() {
         assert_eq!(tone.index() as usize, i);
         assert_eq!(SubtitleTone::from_index(i as u8), *tone);
-        assert!(!tone.label().is_empty());
     }
     assert_eq!(SubtitleTone::from_index(200), SubtitleTone::White, "out of range is white");
 }

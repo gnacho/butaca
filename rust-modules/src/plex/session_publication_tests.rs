@@ -1,10 +1,5 @@
 //! `CurrentProfile` publication: one writer, no resource-scope allocator, generation carried as-is.
 
-#[allow(unused_imports)]
-use super::*;
-#[allow(unused_imports)]
-use super::test_support::*;
-
 #[test]
 fn profile_publication_has_one_writer_and_no_resource_scope_allocator() {
     let source = include_str!("session.rs");

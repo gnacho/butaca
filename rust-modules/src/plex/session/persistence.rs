@@ -7,7 +7,7 @@
 use crate::storage::{
     CommitReceipt, CommitStage, Record, RecordKey, RecordState, RecordStore, StoreError,
 };
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::storage::wire::ProtectionRequest;
 use crate::storage::{
@@ -43,7 +43,6 @@ pub(crate) enum CanonicalRead {
     /// An earlier canonical migration already owns these opaque bytes. Never search other files.
     Pending {
         revision: u64,
-        envelope: String,
     },
     Blocked(StoreError),
 }
@@ -82,67 +81,12 @@ pub(crate) fn path() -> PathBuf {
     root().join("session.json")
 }
 
-pub(crate) fn cleanup_temporaries() -> Result<(), StoreError> {
-    #[cfg(all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(test)
-    ))]
-    {
-        // DB8 has no app-owned rename temporaries. Legacy paths are retired explicitly after the
-        // helper has verified the committed destination; absence of the old app/state directory
-        // is normal on a fresh install and must not turn sign-out into a cleanup failure.
-        Ok(())
-    }
-    #[cfg(not(all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(test)
-    )))]
-    {
-        store()?.cleanup(RecordKey::Session)
-    }
-}
-
 fn store() -> Result<impl RecordStore, StoreError> {
     crate::paths::ensure_persistent_state_root().map_err(|error| StoreError::Io {
         stage: crate::storage::CommitStage::ParentOpen,
         errno: error.raw_os_error().unwrap_or(0),
     })?;
     crate::storage::open(root())
-}
-
-fn load_legacy_json_at(root: PathBuf) -> CanonicalRead {
-    match std::fs::symlink_metadata(&root) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => CanonicalRead::Missing,
-        Err(error) => CanonicalRead::Blocked(StoreError::Io {
-            stage: CommitStage::ParentOpen,
-            errno: error.raw_os_error().unwrap_or(0),
-        }),
-        Ok(metadata) if !metadata.is_dir() => CanonicalRead::Blocked(StoreError::RootNotDirectory),
-        Ok(_) => {
-            let store = match crate::storage::open(root) {
-                Ok(store) => store,
-                Err(error) => return CanonicalRead::Blocked(error),
-            };
-            match store.load(RecordKey::Session) {
-                Ok(None) => CanonicalRead::Missing,
-                Ok(Some(record)) => match record.state {
-                    RecordState::Data { payload } => CanonicalRead::Data {
-                        revision: record.revision,
-                        payload,
-                    },
-                    RecordState::Cleared => CanonicalRead::Cleared {
-                        revision: record.revision,
-                        language: super::install_preferences::load().unwrap_or_default(),
-                    },
-                },
-                Err(error) => CanonicalRead::Blocked(error),
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -230,9 +174,8 @@ pub(crate) fn load_helper_with(transport: &mut dyn client::Transport) -> Canonic
             }
             if snapshot.state.migrations.session.progress != MigrationProgress::Complete {
                 return match snapshot.state.migrations.session.pending_import {
-                    Some(envelope) => CanonicalRead::Pending {
+                    Some(_) => CanonicalRead::Pending {
                         revision: snapshot.state.revision,
-                        envelope,
                     },
                     None => CanonicalRead::Missing,
                 };
@@ -710,7 +653,6 @@ fn helper_commit_with(
 #[cfg(test)]
 mod db8_policy_tests {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
 
     #[test]
     fn helper_timeout_is_unavailable_not_invalid_schema() {
@@ -782,49 +724,9 @@ mod db8_policy_tests {
         assert_eq!(next["future_preference"], current["future_preference"]);
     }
 
-    #[test]
-    fn previous_json_wrapper_yields_its_nested_session_payload_and_tombstone() {
-        let _serial = crate::testlock::serial();
-        let root = std::env::temp_dir().join(format!(
-            "butaca-prior-session-wrapper-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let store = crate::storage::open(root.clone()).unwrap();
-        let payload = r#"{"client_id":"legacy-client","account_token":"legacy-token"}"#;
-        assert_eq!(
-            store.commit(RecordKey::Session, &Record::data(7, payload.into())),
-            Ok(CommitReceipt::Durable)
-        );
-        match load_legacy_json_at(root.clone()) {
-            CanonicalRead::Data {
-                revision,
-                payload: actual,
-            } => {
-                assert_eq!(revision, 7);
-                assert_eq!(actual, payload);
-            }
-            _ => panic!("the wrapper was not decoded as Session data"),
-        }
-        assert_eq!(
-            store.commit(RecordKey::Session, &Record::cleared(8)),
-            Ok(CommitReceipt::Durable)
-        );
-        assert!(matches!(
-            load_legacy_json_at(root.clone()),
-            CanonicalRead::Cleared { revision: 8, .. }
-        ));
-        drop(store);
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    /// `bootstrap()` and `cleanup_after_confirmed_clear()` must search and sweep the pre-DB8
-    /// canonical JSON wrapper identically on ARM, so both funnel through this one helper rather
-    /// than each carrying its own `insert(0, path())`. This is callable unconditionally (it is
-    /// pure path arithmetic), so a host test can prove the shared assembly directly instead of
-    /// only trusting that the two ARM-gated call sites still agree.
+    /// ARM legacy cleanup puts the pre-DB8 canonical JSON wrapper first through this one helper
+    /// rather than carrying its own `insert(0, path())`. This is callable unconditionally (it is
+    /// pure path arithmetic), so a host test can prove the shared assembly directly.
     #[test]
     fn arm_candidate_assembly_puts_the_canonical_wrapper_first() {
         let mut candidates = vec![PathBuf::from("/some/legacy/auth.json")];
@@ -1042,302 +944,6 @@ pub(crate) fn write_session(
     }
 }
 
-/// Legacy keys belong to exactly this identity. Missing metadata means Anonymous because that
-/// was the only registration used before the field existed. Opening never tries another owner.
-#[derive(Clone, Copy, Debug, Default, serde::Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum LegacyIdentity {
-    AppId,
-    Named,
-    #[default]
-    Anonymous,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum LegacyOpenError {
-    Unavailable,
-    IdentityRefused,
-    Authentication,
-}
-
-/// Resource adapter seam for the final legacy Keymanager identity bridge. Implementations must
-/// request `identity` exactly, authenticate the envelope, and return plaintext only after success.
-/// The envelope is deliberately not Debug and must not be logged or included in an error.
-pub(crate) trait LegacyOpener {
-    fn open(
-        &mut self,
-        identity: LegacyIdentity,
-        sealed: &serde_json::Value,
-    ) -> Result<Vec<u8>, LegacyOpenError>;
-}
-
-pub(crate) enum LegacySession {
-    /// A neutralized sign-out candidate; neither an import nor a canonical clear request.
-    Missing,
-    Data(super::Session),
-    Cleared,
-}
-
-pub(crate) fn decode_legacy_session(
-    bytes: &[u8],
-    opener: &mut dyn LegacyOpener,
-) -> Result<LegacySession, StoreError> {
-    decode_legacy_at_depth(bytes, opener, 0)
-}
-
-fn decode_legacy_at_depth(
-    bytes: &[u8],
-    opener: &mut dyn LegacyOpener,
-    depth: u8,
-) -> Result<LegacySession, StoreError> {
-    if depth > 2 {
-        return Err(StoreError::InvalidSchema);
-    }
-    let mut value: serde_json::Value =
-        serde_json::from_slice(bytes).map_err(|_| StoreError::InvalidSchema)?;
-    if value.is_null() {
-        return Ok(LegacySession::Missing);
-    }
-    if !value.is_object() {
-        return Err(StoreError::InvalidSchema);
-    }
-    value
-        .as_object_mut()
-        .unwrap()
-        .remove(super::FALLBACK_MARKER);
-    match value.get("format").and_then(serde_json::Value::as_str) {
-        Some("butaca-record") => {
-            match crate::storage::parse_record(bytes, RecordKey::Session)?.state {
-                RecordState::Data { payload } => {
-                    decode_legacy_at_depth(payload.as_bytes(), opener, depth + 1)
-                }
-                RecordState::Cleared => Ok(LegacySession::Cleared),
-            }
-        }
-        Some("butaca-secure-session") => {
-            if value.get("version").and_then(serde_json::Value::as_u64) != Some(1) {
-                return Err(StoreError::UnsupportedVersion);
-            }
-            let sealed = value
-                .get("sealed")
-                .filter(|v| v.is_object())
-                .ok_or(StoreError::InvalidSchema)?;
-            // Retain old unauthenticated/unknown algorithms; neither is a plaintext migration.
-            if sealed.get("backend").and_then(serde_json::Value::as_str) != Some("keymanager3") {
-                return Err(StoreError::UnknownFormat);
-            }
-            let identity = match sealed.get("identity") {
-                None => LegacyIdentity::Anonymous,
-                Some(identity) => serde_json::from_value(identity.clone())
-                    .map_err(|_| StoreError::UnknownFormat)?,
-            };
-            let plaintext = opener.open(identity, sealed).map_err(|error| match error {
-                LegacyOpenError::Unavailable => StoreError::HelperUnavailable,
-                LegacyOpenError::IdentityRefused | LegacyOpenError::Authentication => {
-                    StoreError::AuthLocked
-                }
-            })?;
-            decode_legacy_at_depth(&plaintext, opener, depth + 1)
-        }
-        Some(_) => Err(StoreError::UnknownFormat),
-        None if value.get("format").is_some() => Err(StoreError::UnknownFormat),
-        None => serde_json::from_value(value)
-            .map(LegacySession::Data)
-            .map_err(|_| StoreError::InvalidSchema),
-    }
-}
-
-/// Migration uses the same canonical reader/writer as ordinary operations. A blocked read can
-/// never authorize a legacy import, and a historical operation receipt alone cannot retire it.
-pub(crate) trait MigrationStore {
-    fn load(&mut self) -> CanonicalRead;
-    fn import(&mut self, session: &super::Session) -> CanonicalCommit;
-    fn clear(&mut self) -> CanonicalCommit;
-}
-
-pub(crate) struct HelperMigration<'a> {
-    pub(crate) transport: &'a mut dyn client::Transport,
-    pub(crate) major: u32,
-}
-impl MigrationStore for HelperMigration<'_> {
-    fn load(&mut self) -> CanonicalRead {
-        load_helper_with(self.transport)
-    }
-    fn import(&mut self, session: &super::Session) -> CanonicalCommit {
-        commit_session_with(
-            session,
-            true,
-            super::SaveAuthority::Routine,
-            self.major,
-            self.transport,
-        )
-    }
-    fn clear(&mut self) -> CanonicalCommit {
-        let loaded = match client::load_with(self.transport) {
-            Ok(value) => value,
-            Err(error) => return CanonicalCommit::Failed(helper_error(error)),
-        };
-        let operation = match Generation::random() {
-            Ok(operation) => operation,
-            Err(_) => return CanonicalCommit::Failed(StoreError::HelperUnavailable),
-        };
-        helper_commit_for_app_with(
-            self.transport,
-            match &loaded {
-                HelperLoad::Missing => None,
-                HelperLoad::Present(snapshot) => expected(snapshot),
-            },
-            operation,
-            WireMutation::ClearTenure {},
-        )
-    }
-}
-
-struct FileMigration;
-impl MigrationStore for FileMigration {
-    fn load(&mut self) -> CanonicalRead {
-        load()
-    }
-    fn import(&mut self, session: &super::Session) -> CanonicalCommit {
-        match serde_json::to_string(session) {
-            Ok(payload) => commit_data(payload),
-            Err(_) => CanonicalCommit::Failed(StoreError::InvalidSchema),
-        }
-    }
-    fn clear(&mut self) -> CanonicalCommit {
-        commit_cleared()
-    }
-}
-
-pub(crate) struct Bootstrap {
-    pub(crate) state: CanonicalRead,
-    /// Runtime use must not label imported credentials saved before this receipt is durable.
-    pub(crate) migration: Option<CanonicalCommit>,
-    pub(crate) cleanup_failed: bool,
-}
-
-/// Files are inputs only. The caller chooses a canonical backend before entering this loop;
-/// helper absence, timeout, corruption, locked auth and unknown schema never select FileMigration.
-pub(crate) fn bootstrap_with(
-    store: &mut dyn MigrationStore,
-    opener: &mut dyn LegacyOpener,
-    candidates: &[PathBuf],
-) -> Bootstrap {
-    let canonical = store.load();
-    if let CanonicalRead::Pending { envelope, .. } = &canonical {
-        return match decode_legacy_session(envelope.as_bytes(), opener) {
-            Ok(legacy) => finish_import(store, legacy, None),
-            Err(error) => blocked_bootstrap(error),
-        };
-    }
-    if !matches!(canonical, CanonicalRead::Missing) {
-        return Bootstrap {
-            state: canonical,
-            migration: None,
-            cleanup_failed: false,
-        };
-    }
-    let fallback_revoked = super::fallback_revoked_at(candidates);
-    for candidate in candidates {
-        let bytes = match crate::storage::read_owned_bytes(candidate) {
-            Ok(None) => continue,
-            Ok(Some((bytes, true))) => bytes,
-            Ok(Some((_, false))) => return blocked_bootstrap(StoreError::RecordUnsafeMode),
-            Err(error) => return blocked_bootstrap(error),
-        };
-        if fallback_revoked && super::marked_fallback(&bytes) { continue; }
-        let legacy = match decode_legacy_session(&bytes, opener) {
-            Ok(LegacySession::Missing) => continue,
-            Ok(value) => value,
-            Err(error) => return blocked_bootstrap(error),
-        };
-        return finish_import(store, legacy, Some((candidate, &bytes)));
-    }
-    Bootstrap {
-        state: CanonicalRead::Missing,
-        migration: None,
-        cleanup_failed: false,
-    }
-}
-
-/// Compare each schema half without flattening opaque protected extensions into Session fields.
-fn same_session_contents(expected: &super::Session, actual: &super::Session) -> bool {
-    super::protected_fields_equal(expected, actual)
-        && matches!((super::split_public(expected), super::split_public(actual)),
-            (Ok(expected), Ok(actual)) if expected == actual)
-}
-
-fn finish_import(
-    store: &mut dyn MigrationStore,
-    legacy: LegacySession,
-    source: Option<(&Path, &[u8])>,
-) -> Bootstrap {
-    let receipt = match &legacy {
-        LegacySession::Missing => return Bootstrap {
-            state: CanonicalRead::Missing,
-            migration: None,
-            cleanup_failed: false,
-        },
-        LegacySession::Data(session) => store.import(session),
-        LegacySession::Cleared => store.clear(),
-    };
-    let readback = store.load();
-    let exact = match (&legacy, &readback) {
-        (LegacySession::Cleared, CanonicalRead::Cleared { .. }) => true,
-        (
-            LegacySession::Data(expected),
-            CanonicalRead::Opened {
-                session: actual, ..
-            },
-        ) => same_session_contents(expected, actual),
-        (LegacySession::Data(expected), CanonicalRead::Data { payload, .. }) => {
-            serde_json::from_str::<super::Session>(payload)
-                .ok()
-                .is_some_and(|actual| same_session_contents(expected, &actual))
-        }
-        _ => false,
-    };
-    let durable = matches!(receipt, CanonicalCommit::Durable { verified: true, .. });
-    let cleanup_failed = durable
-        && exact
-        && source.is_some_and(|(candidate, bytes)| !retire_exact_candidate(candidate, bytes));
-    let state = if durable && exact {
-        readback
-    } else {
-        match receipt {
-            CanonicalCommit::Failed(error) => CanonicalRead::Blocked(error),
-            CanonicalCommit::ProtectionFailed(_) => CanonicalRead::Blocked(StoreError::AuthLocked),
-            _ => CanonicalRead::Blocked(StoreError::HelperUnavailable),
-        }
-    };
-    return Bootstrap {
-        state,
-        migration: Some(receipt),
-        cleanup_failed,
-    };
-}
-
-fn blocked_bootstrap(error: StoreError) -> Bootstrap {
-    Bootstrap {
-        state: CanonicalRead::Blocked(error),
-        migration: None,
-        cleanup_failed: false,
-    }
-}
-
-fn retire_exact_candidate(path: &Path, expected: &[u8]) -> bool {
-    if !matches!(crate::storage::read_owned_bytes(path), Ok(Some((ref current,true))) if current == expected)
-    {
-        return false;
-    }
-    if std::fs::remove_file(path).is_err() {
-        return false;
-    }
-    path.parent()
-        .and_then(|parent| std::fs::File::open(parent).ok())
-        .is_some_and(|directory| directory.sync_all().is_ok())
-}
-
 /// The previous canonical JSON wrapper (`path()`, the pre-DB8 `session.json`) outranks older
 /// bare candidates on ARM: it is a recognized migration source in its own right and must be
 /// searched (on boot) and swept (on sign-out) ahead of the plain legacy files. Both call sites
@@ -1345,40 +951,6 @@ fn retire_exact_candidate(path: &Path, expected: &[u8]) -> bool {
 /// cannot drift apart again.
 fn insert_arm_canonical_wrapper(candidates: &mut Vec<PathBuf>) {
     candidates.insert(0, path());
-}
-
-pub(crate) fn bootstrap(opener: &mut dyn LegacyOpener) -> Bootstrap {
-    #[cfg(not(test))]
-    let candidates = crate::paths::session_migration_candidates();
-    #[cfg(test)]
-    let candidates = super::auth_paths();
-    #[cfg(all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(test)
-    ))]
-    {
-        let mut candidates = candidates;
-        insert_arm_canonical_wrapper(&mut candidates);
-        bootstrap_with(
-            &mut HelperMigration {
-                transport: &mut client::NativeTransport,
-                major: crate::webos::info().major,
-            },
-            opener,
-            &candidates,
-        )
-    }
-    #[cfg(not(all(
-        target_os = "linux",
-        target_arch = "arm",
-        not(feature = "hostsim"),
-        not(test)
-    )))]
-    {
-        bootstrap_with(&mut FileMigration, opener, &candidates)
-    }
 }
 
 /// The result of [`cleanup_after_confirmed_clear`], distinguishing the two failure modes that a
