@@ -295,7 +295,7 @@ pub(super) fn shelf_label(shelf: &crate::browse::section_hubs::Shelf, col: usize
     let Some(item) = shelf.items.get(col) else { return card_row::TileLabel::title("") };
     if shelf.landscape {
         let name = if item.title.is_empty() || item.title == item.show_title {
-            crate::ui::fmt::episode_address(item.season_index as i64, item.ep_index as i64)
+            crate::ui::fmt::episode_address(item.season_index as i64, item.ep_index as i64).to_string()
         } else { item.title.clone() };
         let fact = if shelf.is_continue && item.resume_frac().is_some() {
             crate::ui::fmt::time_left(item.dur_ns / 1_000_000 - item.resume_ms)
