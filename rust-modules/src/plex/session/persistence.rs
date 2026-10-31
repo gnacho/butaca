@@ -114,12 +114,6 @@ fn store() -> Result<impl RecordStore, StoreError> {
     crate::storage::open(root())
 }
 
-/// Read the versioned JSON record used by the pre-DB8 0.6.6 candidates without creating it.
-/// Its wrapper is decoded here; callers must never feed the wrapper itself to `Session`.
-pub(crate) fn load_legacy_json() -> CanonicalRead {
-    load_legacy_json_at(root())
-}
-
 fn load_legacy_json_at(root: PathBuf) -> CanonicalRead {
     match std::fs::symlink_metadata(&root) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => CanonicalRead::Missing,
@@ -352,21 +346,6 @@ pub(crate) fn commit_cleared() -> CanonicalCommit {
         };
         commit(Record::cleared(revision))
     }
-}
-
-/// Exact-payload migration. The caller owns keymanager semantics and legacy cleanup; this helper
-/// only commits the bytes and reports whether cleanup may proceed.
-pub(crate) fn migrate_exact(source: &Path, payload: &[u8]) -> (CanonicalCommit, PathBuf) {
-    let payload = match std::str::from_utf8(payload) {
-        Ok(payload) => payload.to_owned(),
-        Err(_) => {
-            return (
-                CanonicalCommit::Failed(StoreError::InvalidUtf8),
-                source.to_path_buf(),
-            )
-        }
-    };
-    (commit_data(payload), source.to_path_buf())
 }
 
 /// Import an already decoded migration input through the same backend used by bootstrap.
@@ -626,14 +605,6 @@ pub(super) fn reset_cleared_language_with(transport: &mut dyn client::Transport)
 
 pub(super) fn reset_cleared_language() -> CanonicalCommit {
     reset_cleared_language_with(&mut client::NativeTransport)
-}
-
-fn helper_commit(
-    expected: Option<(&str, state::Expected)>,
-    operation: Generation,
-    mutation: WireMutation,
-) -> CanonicalCommit {
-    helper_commit_for_app_with(&mut client::NativeTransport, expected, operation, mutation)
 }
 
 fn helper_commit_for_app_with(
@@ -1474,30 +1445,6 @@ pub(crate) fn cleanup_after_confirmed_clear() -> ClearCleanupOutcome {
     } else {
         ClearCleanupOutcome::LegacyRetireFailed
     }
-}
-
-#[cfg(test)]
-pub(crate) fn uncertain_helper_reply_for_test(reconcile: bool) -> super::async_persistence::CompletionOutcome {
-    use crate::storage::wire::{failure, ReconcileStatus};
-    let mut transport = |request| {
-        if reconcile && matches!(request, crate::storage::wire::Request::Commit { .. }) {
-            return Err(client::ClientError::Unavailable);
-        }
-        failure::remember(failure::Stage::Wire, None);
-        failure::update(|f| f.helper = Some(failure::Detail::new(failure::Stage::Db8, Some(-3963))));
-        Ok(if reconcile {
-            Response::Reconcile { status: ReconcileStatus::Unknown, db_rev: None, applied: None, protection: None }
-        } else {
-            Response::Commit { status: CommitStatus::Unavailable, db_rev: None, state: None,
-                applied: None, verified: false, protection: None }
-        })
-    };
-    let commit = helper_commit_with(&mut transport, state::Flavor::Stable, None,
-        Generation([2; 16]), WireMutation::ClearTenure {});
-    assert!(matches!(commit, CanonicalCommit::Uncertain { .. }));
-    // The diagnostic must travel with the commit, not a later thread-local observation.
-    failure::clear();
-    super::async_persistence::LiveWrite::canonical(commit, None).classify()
 }
 
 #[cfg(test)]

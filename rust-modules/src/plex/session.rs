@@ -958,17 +958,6 @@ pub(crate) fn set_auto_sign_in(on: bool) -> bool {
     })
 }
 
-/// Persist hero trailer autoplay. Same write door as [`set_auto_sign_in`].
-#[cfg(test)]
-pub(crate) fn set_trailer_autoplay(on: bool) -> bool {
-    update(|cur| {
-        if cur.trailer_autoplay == on {
-            return None;
-        }
-        Some(cur.with_trailer_autoplay(on))
-    })
-}
-
 /// Persist the subtitle tone through [`update`], merging with the current disk record.
 pub(crate) fn set_subtitle_tone(tone: SubtitleTone) -> bool {
     update(|cur| {
@@ -2081,12 +2070,6 @@ impl Session {
 
     pub(crate) fn trailer_autoplay(&self) -> bool {
         self.trailer_autoplay
-    }
-
-    pub(crate) fn with_trailer_autoplay(&self, on: bool) -> Self {
-        let mut next = self.clone();
-        next.trailer_autoplay = on;
-        next
     }
 
     /// The answer `account` (`grant::account_key`) recorded for one server —
@@ -3823,11 +3806,6 @@ fn save_locked_outcome(s: &Session) -> async_persistence::LiveWrite {
 /// the instant it hit the disk. Passing the mode through `OpenOptionsExt` means it never *exists*
 /// in a permissive mode, which a chmod after the write cannot promise.
 pub fn save(s: &Session) {
-    let _io = io();
-    let _ = save_locked_with_authority(s, SaveAuthority::FreshReauthentication);
-}
-
-pub(crate) fn save_fresh_reauthentication(s: &Session) {
     let _io = io();
     let _ = save_locked_with_authority(s, SaveAuthority::FreshReauthentication);
 }
