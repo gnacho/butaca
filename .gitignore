@@ -156,6 +156,10 @@ __pycache__/
 
 rust-modules/target-sym/
 rust-modules/target-release-sym/
+# The storage helper's target dir lives at the repo root, OUTSIDE the scanned package tree (see
+# STORAGE_TDIR in the Makefile and `#146`): under make -j4 the lib cargo's fingerprint walk must
+# never see what the storage cargo is staging and deleting inside it.
+target-storage/
 rust-modules/target-release-jellyfin-sym/
 pkg/butaca.debug
 pkg/telemetry.local.json

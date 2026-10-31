@@ -688,8 +688,17 @@ $(RUST_LIB): LICENSE $(RUST_INPUTS) rust-modules/Cargo.toml rust-modules/Cargo.l
 # `.link.trace`/`.link.json` sidecar existed anywhere `stage-link-evidence.py` could find one,
 # even by its content-hash fallback (`04801c22`). A dedicated target dir makes the two cargo
 # invocations share nothing, so neither can observe the other's fingerprint state.
-STORAGE_TDIR = $(RUST_TDIR)-storage
-STORAGE_BIN = rust-modules/$(STORAGE_TDIR)/$(RUST_TARGET)/release/butaca-storage
+#
+# THE DIR LIVES OUTSIDE `rust-modules/` as well (`04801c22` kept it inside, as a sibling of the
+# lib's own target dir). Cargo's build-script fingerprint walk covers the whole package tree and
+# only skips the directory literally named `target` — a `target-*` sibling is walked like any
+# other source. Under `make -j4` the lib's walk and the storage's link run concurrently, and the
+# walk caught the transient `rmeta…` staging dirs cargo creates and deletes inside the storage
+# target dir mid-walk: "failed to determine package fingerprint for build script", os error 2,
+# Error 101, run 41137642370 job 124344061154 (`#146`). Outside the package tree the walk never
+# sees the storage dir at all, and the two invocations still share nothing.
+STORAGE_TDIR = ../target-storage/$(RUST_TDIR)
+STORAGE_BIN = target-storage/$(RUST_TDIR)/$(RUST_TARGET)/release/butaca-storage
 pkg/butaca-storage: LICENSE $(RUST_INPUTS) rust-modules/Cargo.toml rust-modules/Cargo.lock rust-modules/build.rs ci/install-identities.json Makefile ci/arm-cc.py ci/check-link-evidence.py
 	cd rust-modules && PATH="$$HOME/.cargo/bin:$$PATH" $(RUST_ENV) \
 	  CARGO_TARGET_ARM_UNKNOWN_LINUX_GNUEABI_LINKER='$(CC)' \
