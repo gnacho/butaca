@@ -274,11 +274,11 @@ pub struct Metadata {
     pub preferences: Preferences,
     #[serde(rename = "type", default)]
     pub kind: String, // movie|show|season|episode|clip
-    #[serde(rename = "ratingKey", default)]
+    #[serde(rename = "ratingKey", default, deserialize_with = "de_route_key")]
     pub rating_key: String,
     /// `/library/metadata/{rk}` for a leaf, `/library/metadata/{rk}/children` for a show/season.
     /// Extras matching also reads this against `primaryExtraKey` (docs/pms-api.md §4 extras).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_route_key")]
     pub key: String,
     /// Clip extras only: `trailer` / `behindTheScenes` / `sceneOrSample` / …
     #[serde(default)]
@@ -353,11 +353,11 @@ pub struct Metadata {
     pub updated_at: i64,
     #[serde(rename = "parentIndex", default, deserialize_with = "de_i64")]
     pub parent_index: i64,
-    #[serde(rename = "parentRatingKey", default)]
+    #[serde(rename = "parentRatingKey", default, deserialize_with = "de_route_key")]
     pub parent_rating_key: String, // season → its show
     #[serde(rename = "parentTitle", default)]
     pub parent_title: String, // season → show title; episode → season title
-    #[serde(rename = "grandparentRatingKey", default)]
+    #[serde(rename = "grandparentRatingKey", default, deserialize_with = "de_route_key")]
     pub grandparent_rating_key: String, // episode → its show
     #[serde(rename = "grandparentTitle", default)]
     pub grandparent_title: String, // episode → show title
@@ -491,7 +491,7 @@ pub struct Media {
 pub struct MediaPart {
     #[serde(default, deserialize_with = "de_i64")]
     pub id: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "de_route_key")]
     pub key: String, // /library/parts/{id}/{changestamp}/file.mkv
     /// /decision only: the MDE verdict for this part — "directplay" | "transcode" | "copy"
     /// (Media/container carry no decision; the part is the authoritative one).
@@ -704,7 +704,7 @@ pub struct Tag {
     pub id: i64,
     /// Plex's global person guid (`"5d77682aeb5d26001f1de4b0"`) — stable across servers, and the
     /// alternate `personId` (both forms verified live against the same record).
-    #[serde(rename = "tagKey", default, deserialize_with = "de_str")]
+    #[serde(rename = "tagKey", default, deserialize_with = "de_route_key")]
     pub tag_key: String,
     /// Collection identity shared by collection rows, search hits and member `Collection[]` tags.
     /// Empty means absent, matching every other string field on this tolerant record.
@@ -729,7 +729,7 @@ pub struct Tag {
     // them there.
     /// The listing this tag opens — `/library/sections/1/all?collection=6068`. The only handle a
     /// COLLECTION hit gives you: those carry no `tagKey`, no `thumb` and no `ratingKey`.
-    #[serde(default, deserialize_with = "de_str")]
+    #[serde(default, deserialize_with = "de_route_key")]
     pub key: String,
     #[serde(rename = "librarySectionID", default, deserialize_with = "de_i64")]
     pub library_section_id: i64,
@@ -1021,6 +1021,42 @@ pub(super) fn de_str<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D
         Some(StrIntFloatBool::B(b)) => b.to_string(),
         None => String::new(),
     })
+}
+
+/// A route key the server handed us, safe to interpolate back into a request path: ids
+/// (`ratingKey` and friends) and `/library/...` paths whose bytes are
+/// `[A-Za-z0-9./_-]`. Anything else — a `?` that would truncate the path into a query, a `&`
+/// that would inject a parameter, spaces, percent-escapes, control or non-ASCII bytes, or an
+/// over-long blob — comes back EMPTY, which every consumer already treats as "no route" rather
+/// than a request. The value only ever rides back to the server that sent it, so this is
+/// request-shape hygiene at the parse boundary, not a trust boundary.
+pub(super) fn de_route_key<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let raw = de_str(d)?;
+    Ok(if is_route_key(&raw) { raw } else { String::new() })
+}
+
+fn is_route_key(s: &str) -> bool {
+    if s.is_empty() || s.len() > 200 {
+        return false;
+    }
+    let plain = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'.' | b'_' | b'-');
+    // Directory keys carry their own query (`/library/sections/1/all?actor=921`): the server
+    // authored it, the app forwards it verbatim. ONE `?` separates it; its charset stays on the
+    // list, so a bare `?` (truncation), spaces, `%`, control and non-ASCII bytes still refuse.
+    let path = match s.split_once('?') {
+        Some((p, q)) => {
+            if q.is_empty()
+                || !q
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'=' | b'&' | b'/' | b'.' | b'_' | b'-'))
+            {
+                return false;
+            }
+            p
+        }
+        None => s,
+    };
+    !path.is_empty() && path.bytes().all(plain)
 }
 
 /// Accept `{…}` OR `[{…}]` (D-1) and return the first, or None.
@@ -1536,5 +1572,42 @@ mod tests {
                 "input {raw}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod route_key_allowlist_tests {
+    use super::*;
+
+    #[derive(Deserialize)]
+    struct Probe {
+        #[serde(default, deserialize_with = "de_route_key")]
+        key: String,
+    }
+
+    fn key_of(raw: &str) -> String {
+        serde_json::from_str::<Probe>(raw).expect("parse").key
+    }
+
+    #[test]
+    fn route_keys_are_allow_listed_at_the_deserialization_boundary() {
+        assert_eq!(key_of(r#"{"key":"12345"}"#), "12345");
+        assert_eq!(
+            key_of(r#"{"key":"/library/parts/1/1/file.mkv"}"#),
+            "/library/parts/1/1/file.mkv"
+        );
+        assert_eq!(key_of(r#"{"key":"?next=/evil"}"#), "", "a ? would truncate the path into a query");
+        assert_eq!(
+            key_of(r#"{"key":"/library/sections/1/all?actor=921"}"#),
+            "/library/sections/1/all?actor=921",
+            "a directory key's query IS the key, and its charset is on the list",
+        );
+        assert_eq!(key_of(r#"{"key":"/x?"}"#), "", "an empty query is truncation");
+        assert_eq!(key_of(r#"{"key":"1&x=2"}"#), "", "a & would inject a parameter");
+        assert_eq!(key_of(r#"{"key":"a b"}"#), "", "a space would split the request line");
+        assert_eq!(key_of(r#"{"key":"café"}"#), "", "non-ASCII is not on the list");
+        assert_eq!(key_of(r#"{"key":"%2F..%2F"}"#), "", "percent-escapes are not on the list");
+        let long = "a".repeat(201);
+        assert_eq!(key_of(&format!(r#"{{"key":"{long}"}}"#)), "", "over-long is refused");
     }
 }
