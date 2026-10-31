@@ -16,7 +16,7 @@ use crate::player::threads::SendPtr;
 use crate::player::SHARED;
 use crate::stream::HttpStream;
 use std::ffi::CString;
-use std::os::raw::{c_char, c_int, c_uchar, c_uint, c_void};
+use std::os::raw::{c_char, c_int, c_long, c_uchar, c_uint, c_void};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Once;
 
@@ -2958,6 +2958,51 @@ unsafe fn parse_extradata(ed: *const u8, len: usize, is_hevc: bool) -> (Vec<u8>,
         }
         (blob, nls)
     }
+}
+
+/// The `avc3` fourcc: an H.264 sample entry whose SPS/PPS live IN the samples (ISO 14496-15)
+/// rather than in an `avcC` box like `avc1`. FFmpeg leaves `codecpar.extradata` empty for it,
+/// which is exactly the gap the in-band fallback below closes.
+const TAG_AVC3: u32 = u32::from_be_bytes(*b"avc3");
+
+/// Append the SPS (type 7) / PPS (type 8) NALs carried in-band by one length-prefixed H.264
+/// sample to `blob` (4-byte start code + payload), once each, so a stream that repeats its
+/// parameter sets at every keyframe does not grow the prepend blob without bound. Returns true
+/// when `blob` changed.
+///
+/// Byte-bounded and panic-free: a length field that claims more bytes than the sample holds stops
+/// the walk exactly like [`packet_to_annexb`], so corrupt or truncated server data can never index
+/// past the slice. The sample is AVCC-length-prefixed (the `nls` the demuxer already uses), which
+/// is the format an `avc3` sample entry carries its in-band parameter sets in.
+fn harvest_inband_params(d: &[u8], nls: usize, blob: &mut Vec<u8>) -> bool {
+    let mut changed = false;
+    let mut i = 0usize;
+    while i + nls <= d.len() {
+        let mut nl = 0usize;
+        for k in 0..nls {
+            nl = (nl << 8) | d[i + k] as usize;
+        }
+        i += nls;
+        let Some(end) = nal_end(i, nl, d.len()) else {
+            break;
+        };
+        let nal = &d[i..end];
+        let nal_type = nal[0] & 0x1f;
+        if nal_type == 7 || nal_type == 8 {
+            // Dedup by the exact start-code + payload run, so a repeated parameter set is not
+            // appended twice. The blob holds nothing else, so the window match is unambiguous.
+            if !blob
+                .windows(4 + nal.len())
+                .any(|w| w[..4] == [0, 0, 0, 1] && &w[4..] == nal)
+            {
+                blob.extend_from_slice(&[0, 0, 0, 1]);
+                blob.extend_from_slice(nal);
+                changed = true;
+            }
+        }
+        i = end;
+    }
+    changed
 }
 
 static SEI_STRIPPED: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
@@ -7706,6 +7751,116 @@ fn open_input_failure_note(r: c_int, lane_aborted: bool) -> String {
     }
 }
 
+/// **How far the AUDIO lane may run past its soft cap while the video lane is starved** (upstream
+/// #600/#874): the mirror image of a video-side pre-audio headroom grant, and, unlike a one-shot
+/// grant, a standing rule rather than a latch.
+///
+/// A container whose muxer stored its audio ahead of its video (the reported film: ~48 s of
+/// 768 kbit/s E-AC-3 before the first video block, whose timestamp is still 0) fills the audio lane
+/// (`player::engine`'s `AQ_AUDIO_BYTES`, 1 MiB, ~10.9 s of that audio) before the first video
+/// packet is read. The demuxer parked in `aq_push` on it, nothing drains audio before the pipeline
+/// has video to start its clock on, and the first video block was never read: a start that buffered
+/// forever.
+///
+/// That skew does not end at the first video block: a muxer that wrote audio 48 s ahead keeps it
+/// for the whole file, so the audio lane has to hold ~the whole skew for the whole film, and the
+/// demuxer must never park on it while the consumer is short of VIDEO: before Play the clock needs
+/// `PRIME_VIDEO_MAX_NS` of it, afterwards the pump refills the video lane to its feed-ahead target
+/// (`MAX_FEED_AHEAD_NS`). So every audio push past the 1 MiB soft cap is admitted, up to this hard
+/// ceiling, **while the video lane holds less than `MAX_FEED_AHEAD_NS` of media**
+/// ([`audio_push_gate`], `aq::PushGate`), and parks (timed, see `PushGate`) otherwise. Nothing is
+/// granted or latched: the soft cap is back as soon as the video lane is stocked or the audio lane
+/// drains under it, so an ordinary file (which never has 1 MiB of audio queued while its video is
+/// starved) never sees any of this.
+///
+/// **The ceiling is base + this = 1 MiB + 16 MiB = 17 MiB.** It is a bound, not a measurement of
+/// what a file needs: 16 MiB holds ~2.9 min of 768 kbit/s E-AC-3, while a file whose video never
+/// comes cannot grow the lane without limit on a RAM-tight 32-bit set. Audio is the cheap lane per
+/// second, which is why it is smaller than a video-side grant would be.
+///
+/// **At the ceiling the stream fails** (`demux_io_failed`, the same surface as a late-audio
+/// failure) when the consumer provably cannot have started: the video read in this open or seek
+/// spans less than `PRIME_VIDEO_MAX_NS`. That test deliberately does not use the audio lane's pops:
+/// the engine pops audio before any video exists, so a pop proves nothing about a clock that has not
+/// started. Once the video read spans the prime depth the clock may be running and the audio lane is
+/// draining at real time, so a ceiling reached then (an audio-only stretch, a sparse video track) is
+/// an ordinary full-lane park, not a failure.
+const AUDIO_AHEAD_HEADROOM: c_long = 16 * 1024 * 1024;
+
+/// How much video the consumer has been given since the open or seek: the pts span from the first
+/// video AU pushed to the latest. [`audio_push_gate`] consults it to decide whether the clock can
+/// have started (`fail_at_ceiling`): before the span covers the engine's prime depth the audio lane
+/// cannot drain at real time, so an audio lane pinned at its ceiling is a spinner nobody can leave.
+#[derive(Default)]
+struct VideoReach {
+    first_ns: Option<i64>,
+    last_ns: i64,
+}
+
+impl VideoReach {
+    /// A video AU at `pts_ns` was pushed since the open or seek.
+    fn pushed(&mut self, pts_ns: i64) {
+        self.first_ns.get_or_insert(pts_ns);
+        self.last_ns = self.last_ns.max(pts_ns);
+    }
+
+    /// How much video the consumer has been given since the open or seek (0 before the first AU).
+    fn reach_ns(&self) -> i64 {
+        self.first_ns.map_or(0, |f| (self.last_ns - f).max(0))
+    }
+}
+
+/// The admission rule for an audio push past the audio lane's soft cap: see
+/// [`AUDIO_AHEAD_HEADROOM`]. `video_reach_ns` is [`VideoReach::reach_ns`].
+fn audio_push_gate(video_lane: *mut AuQueue, video_reach_ns: i64) -> crate::aq::PushGate {
+    crate::aq::PushGate {
+        other: video_lane,
+        starved_below_ns: crate::player::engine::MAX_FEED_AHEAD_NS,
+        headroom: AUDIO_AHEAD_HEADROOM,
+        fail_at_ceiling: video_reach_ns < crate::player::engine::PRIME_VIDEO_MAX_NS,
+    }
+}
+
+#[cfg(test)]
+mod audio_ahead_tests {
+    use super::*;
+
+    /// The audio gate fails at its ceiling only while the video read since the open or seek is
+    /// shorter than the engine's prime, restarts with a seek, and always asks for the video lane to
+    /// be starved below the pump's own feed-ahead target.
+    #[test]
+    fn the_audio_gate_follows_how_much_video_the_consumer_has_been_given() {
+        let prime = crate::player::engine::PRIME_VIDEO_MAX_NS;
+        let mut h = VideoReach::default();
+        assert_eq!(h.reach_ns(), 0);
+        let lane = std::ptr::null_mut();
+        assert!(audio_push_gate(lane, h.reach_ns()).fail_at_ceiling, "no video yet: the clock cannot start");
+        h.pushed(1_000);
+        h.pushed(1_000 + prime - 1);
+        assert!(audio_push_gate(lane, h.reach_ns()).fail_at_ceiling, "just under the prime depth");
+        h.pushed(1_000 + prime);
+        let g = audio_push_gate(lane, h.reach_ns());
+        assert!(!g.fail_at_ceiling, "the prime depth has been read: the clock may be running");
+        assert_eq!(g.starved_below_ns, crate::player::engine::MAX_FEED_AHEAD_NS);
+        assert_eq!(g.headroom, AUDIO_AHEAD_HEADROOM);
+        h = VideoReach::default();
+        assert_eq!(h.reach_ns(), 0, "a seek starts the count over");
+    }
+
+    /// The audio bound's geometry: the ceiling is base plus headroom, the reported film's 48 s of
+    /// 768 kbit/s fits with room, the top of the codec's range does not run unbounded.
+    #[test]
+    fn the_audio_ceiling_holds_the_reported_film_and_not_everything() {
+        let cap = crate::player::aq_caps().1 + AUDIO_AHEAD_HEADROOM as i64;
+        assert_eq!(cap, 17 * 1024 * 1024);
+        let bytes = |kbit: f64, secs: f64| (kbit * 1e3 / 8.0 * secs) as i64;
+        assert!(bytes(768.0, 48.0) < cap, "the reported 48 s lead");
+        assert!(bytes(768.0, 48.0) > crate::player::aq_caps().1, "and the base cap alone cannot hold it");
+        assert!(bytes(768.0, 180.0) > AUDIO_AHEAD_HEADROOM as i64 && bytes(768.0, 170.0) < AUDIO_AHEAD_HEADROOM as i64, "16 MiB is ~2.9 min of 768 kbit/s");
+        assert!(bytes(6_000.0, 60.0) > cap, "a bound, not a promise");
+    }
+}
+
 /// The demux thread body (spawned by `engine::start_bufferfeed`).
 ///
 /// Takes an [`Origin`](crate::plex::Origin) rather than a `(host, port)` pair because **the scheme
@@ -8192,16 +8347,22 @@ pub(crate) fn demux(
                 // parameter sets on this 3.3 build (it leaves the keyframe starting with SEI), so we
                 // build the AU from the codecpar extradata; libavformat still owns demux + seeking.
                 let is_hevc = (*vcp).codec_id == AV_CODEC_ID_HEVC;
-                let (param_blob, nal_len_size) = parse_extradata(
+                // `avc3` (no avcC box) carries its H.264 SPS/PPS IN the samples; the decoder still
+                // needs them prepended at keyframes, so harvest them from the samples instead of
+                // returning an empty parameter-set blob (which makes the decoder fail with
+                // `non-existing PPS 0 referenced`).
+                let in_band_params = !is_hevc && (*vcp).codec_tag == TAG_AVC3;
+                let (mut param_blob, nal_len_size) = parse_extradata(
                     (*vcp).extradata,
                     (*vcp).extradata_size.max(0) as usize,
                     is_hevc,
                 );
                 crate::player::log(&format!(
-                    "ff: param_sets={} bytes nal_len={} is_hevc={}",
+                    "ff: param_sets={} bytes nal_len={} is_hevc={} in_band={}",
                     param_blob.len(),
                     nal_len_size,
-                    is_hevc
+                    is_hevc,
+                    in_band_params
                 ));
                 let mut aubuf: Vec<u8> = Vec::with_capacity(4 * 1024 * 1024);
 
@@ -8212,6 +8373,10 @@ pub(crate) fn demux(
                     free_avio(avio);
                     break;
                 }
+
+                // Video pts span pushed since this open or seek: what `audio_push_gate` reads to
+                // decide whether the clock can have started (see `AUDIO_AHEAD_HEADROOM`).
+                let mut video_reach = VideoReach::default();
 
                 // INNER read loop
                 loop {
@@ -8267,6 +8432,9 @@ pub(crate) fn demux(
                             "ff: seek {}s rv={sr}",
                             seek_ns / 1_000_000_000
                         ));
+                        // A seek restarts the video reach: the audio gate's `fail_at_ceiling` must
+                        // judge the NEW position, not the pre-seek span.
+                        video_reach = VideoReach::default();
                     }
                     let r = av_read_frame(fmt, pkt);
                     if frame_read_failed(&mut state, r) {
@@ -8277,6 +8445,16 @@ pub(crate) fn demux(
                     }
                     let si = (*pkt).stream_index;
                     if si == vi {
+                        // avc3: harvest any in-band SPS/PPS this sample carries before conversion,
+                        // so the keyframe's prepended parameter-set blob grows as the stream plays
+                        // and `param_sets` stays > 0 for the decoder.
+                        if in_band_params && !(*pkt).data.is_null() {
+                            harvest_inband_params(
+                                std::slice::from_raw_parts((*pkt).data, (*pkt).size.max(0) as usize),
+                                nal_len_size,
+                                &mut param_blob,
+                            );
+                        }
                         let is_key = packet_to_annexb(
                             (*pkt).data,
                             (*pkt).size.max(0) as usize,
@@ -8316,22 +8494,27 @@ pub(crate) fn demux(
                         }
                         PUSHED_ANY.store(true, Ordering::Relaxed);
                         SHARED.hls_video_tail_ns.store(pts, Ordering::Release);
+                        video_reach.pushed(pts);
                     } else if si == ai && FEED_AUDIO.load(Ordering::Relaxed) {
                         let ast = *streams.add(ai as usize);
                         let pts = pts_ns(pkt, ast);
+                        // The audio lane runs past its soft cap while the video lane is starved
+                        // ([`AUDIO_AHEAD_HEADROOM`]); the gate is what makes that decision, here.
+                        let gate = audio_push_gate(aq_p, video_reach.reach_ns());
                         let pushed = if let Some((freq_idx, chan_cfg)) = aac_adts {
                             // prepend a 7-byte ADTS header so LG's decoder can frame the raw AAC
                             let plen = (*pkt).size as usize;
                             let mut framed = Vec::with_capacity(7 + plen);
                             framed.extend_from_slice(&adts_header(freq_idx, chan_cfg, plen));
                             framed.extend_from_slice(std::slice::from_raw_parts((*pkt).data, plen));
-                            crate::aq::aq_push_with_drain(
+                            crate::aq::aq_push_gated(
                                 aqa_p,
                                 framed.as_ptr(),
                                 framed.len() as c_int,
                                 pts,
                                 1,
                                 2,
+                                gate,
                                 || state.drain_wire(),
                             )
                         } else if dts_audio {
@@ -8343,23 +8526,40 @@ pub(crate) fn demux(
                                 av_packet_unref(pkt);
                                 break;
                             };
-                            crate::aq::aq_push_with_drain(
-                                aqa_p, core.as_ptr(), core.len() as c_int, pts, 1, 2,
+                            crate::aq::aq_push_gated(
+                                aqa_p, core.as_ptr(), core.len() as c_int, pts, 1, 2, gate,
                                 || state.drain_wire(),
                             )
                         } else {
-                            crate::aq::aq_push_with_drain(
+                            crate::aq::aq_push_gated(
                                 aqa_p,
                                 (*pkt).data,
                                 (*pkt).size,
                                 pts,
                                 1,
                                 2,
+                                gate,
                                 || state.drain_wire(),
                             )
                             // AUDIO lane
                         };
                         av_packet_unref(pkt);
+                        if pushed == crate::aq::PUSH_CEILING {
+                            // The audio lane is at its ceiling, the video lane is starved and the
+                            // video read so far cannot prime the clock: parking would be a spinner
+                            // nobody can leave. Fail the way the video side does, so the route
+                            // recovers (Auto Original -> HLS) or the failure read-out shows.
+                            crate::player::log(&format!(
+                                "ff: no usable video after {} bytes of audio queued (ceiling {} = base + the {} byte audio headroom; {} ms of video read); failing the stream",
+                                crate::aq::aq_bytes(aqa_p),
+                                crate::aq::aq_cap(aqa_p) + AUDIO_AHEAD_HEADROOM,
+                                AUDIO_AHEAD_HEADROOM,
+                                video_reach.reach_ns() / 1_000_000
+                            ));
+                            SHARED.demux_failed.store(true, Ordering::Release);
+                            SHARED.demux_io_failed.store(true, Ordering::Release);
+                            break;
+                        }
                         if pushed != 0 {
                             break;
                         }
@@ -8618,6 +8818,10 @@ mod abr_reject_tests;
 #[cfg(test)]
 #[path = "ff_packet_framing_tests.rs"]
 mod packet_framing_tests;
+
+#[cfg(test)]
+#[path = "ff_avc3_param_tests.rs"]
+mod avc3_param_tests;
 
 #[cfg(test)]
 #[path = "ff_aac_timestamp_tests.rs"]

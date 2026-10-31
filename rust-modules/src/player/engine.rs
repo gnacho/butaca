@@ -1907,13 +1907,13 @@ const PRIME_NS: i64 = 700_000_000;
 // start anyway once video buffers PRIME_VIDEO_MAX_NS without audio (audioless / briefly starved),
 // so a genuinely audioless region can't hang.
 const PRIME_AUDIO_NS: i64 = 300_000_000;
-const PRIME_VIDEO_MAX_NS: i64 = 2_500_000_000;
+pub(crate) const PRIME_VIDEO_MAX_NS: i64 = 2_500_000_000;
 // Feed-ahead throttle (Kodi-parity): keep the VIDEO lane at most this far ahead of the presented
 // position (SHARED.pres_fed) instead of feeding greedily to BufferFull. Bounding the buffer to
 // ~1.6s (was ~10-20s: aq 6MB + the pipeline's own ~8MB) makes seeks flush far less, keeps the
 // clock from running ahead, and cuts latency. AUDIO gets a looser bound so it can ride slightly
 // ahead (audio buffer is cheap and it's the master clock) without unbounded race on odd muxes.
-const MAX_FEED_AHEAD_NS: i64 = 1_600_000_000;
+pub(crate) const MAX_FEED_AHEAD_NS: i64 = 1_600_000_000;
 const AUDIO_SLACK_NS: i64 = 2_000_000_000;
 // A fed pts this far below a lane's high-water is a stale pre-seek AU (past the B-frame reorder
 // distance) → drop it rather than feed a backward jump.
