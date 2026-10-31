@@ -1,5 +1,4 @@
-//! The Jellyfin flavor's sign-in screen: a form, not a QR (flavor `jellyfin` only — this module
-//! does not exist on a Plex build). Three fields (server, user name, password) and a Connect row,
+//! The Jellyfin sign-in screen: a form, not a QR. Three fields (server, user name, password) and a Connect row,
 //! drawn with the settings-table widget so focus, scrolling and the selection pill come from code
 //! that already ships. OK on a field raises the television's own keyboard (`crate::textinput`);
 //! OK again — or BACK — commits it. The connect itself is [`crate::jellyfin::signin`]'s worker;
@@ -9,8 +8,6 @@
 //! heartbeat stays byte-identical, spec §15.3), and the boot gate and the account menu's sign-in
 //! both land here exactly as they landed on `Route::Login` before. BACK stays swallowed — a
 //! first-ever boot has nothing behind this screen, same rule the QR screen documents.
-#![cfg(feature = "jellyfin")]
-
 use crate::jellyfin::signin::{self, Fail, Phase};
 use crate::jellyfin::quick_connect as qc;
 use super::family::table_focus;
@@ -615,9 +612,9 @@ impl<H: AppLike> Focusable<H> for JfLoginScreen {
 
 impl<H: AppLike> Screen<H> for JfLoginScreen {
     fn name(&self) -> &'static str {
-        // The heartbeat word stays the QR screen's route word (spec §15.3): on this build the
-        // login route IS this screen, and a different spelling would unselect its fps scenes.
-        "login"
+        // The heartbeat word stays the established login route word (spec §15.3): a different
+        // spelling would unselect its fps scenes.
+        super::registry::word::LOGIN
     }
     fn state(&self) -> &dyn crate::ui::machine::LogicalState {
         self
@@ -632,8 +629,8 @@ impl<H: AppLike> Screen<H> for JfLoginScreen {
         crate::gfx::frame_clear(theme::CLEAR_RGB.0, theme::CLEAR_RGB.1, theme::CLEAR_RGB.2);
         let p = f.painter;
         // The sign-in screen is the first thing a new user sees, before Home has any artwork to
-        // lend it — `Painter::root()`, not `p`, for the ground, the same rule `screens::login`
-        // documents for its own mounting.
+        // lend it - `Painter::root()`, not `p`, for the ground, the same rule the other route
+        // screens follow for their own mounting.
         self.ground.draw_default(Painter::root());
         let env = Env::inert();
         let layout = RouteLayout::screen();

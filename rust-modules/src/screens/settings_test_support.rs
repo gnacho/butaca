@@ -23,7 +23,6 @@ use crate::ui::fixture::FixtureMeasure;
 // thing that carries one. Writing it as `ui::machine::By` compiles nowhere and is invisible
 // to every non-test gate, since this module is `cfg(test)`.
 use crate::ui::machine::{FocusRead, InputOwner, PressRead};
-#[cfg(not(feature = "jellyfin"))]
 use crate::ui::machine::{Edge, InputEvent, InputKind, Source};
 use crate::ui::present::Present;
 
@@ -122,50 +121,8 @@ pub(super) fn scratch_session(tag: &str) -> crate::plex::session::TempSession {
     crate::plex::session::TempSession::new(tag)
 }
 
-pub(super) fn multi_user_session(tag: &str) -> crate::plex::session::TempSession {
-    let t = crate::plex::session::TempSession::new(tag);
-    crate::plex::session::save(&crate::plex::session::Session {
-        client_id: "cid-test".into(),
-        account_token: "acct".into(),
-        server: crate::plex::session::ServerRef {
-            address: "192.168.0.10".into(),
-            port: 32400,
-            token: "t".into(),
-            ..Default::default()
-        },
-        user: crate::plex::session::UserRef {
-            uuid: "u-0".into(),
-            token: "ut".into(),
-            title: "Admin".into(),
-            ..Default::default()
-        },
-        home_users: vec![
-            crate::plex::session::HomeUserRef {
-                uuid: "u-0".into(),
-                title: "Admin".into(),
-                admin: true,
-                ..Default::default()
-            },
-            crate::plex::session::HomeUserRef {
-                uuid: "u-1".into(),
-                title: "Kid".into(),
-                ..Default::default()
-            },
-        ],
-        ..Default::default()
-    });
-    t.watching("u-0");
-    t
-}
-
-/// Signed-in with a Plex Home roster, row 3 is Automatically Sign In (after Favorite libraries,
-/// Privacy & data, Legal notices).
-#[cfg(not(feature = "jellyfin"))]
-pub(super) const AUTO_SIGN_IN_ROW: u32 = 3;
-
 /// Run the push spring to rest on 16 ms frames — bounded, so a spring that never settles
 /// fails the test rather than hanging the suite.
-#[cfg(not(feature = "jellyfin"))]
 pub(super) fn settle(s: &mut RouteSurface) {
     for i in 1..600u32 {
         step(
@@ -186,7 +143,6 @@ pub(super) fn settle(s: &mut RouteSurface) {
 /// A BACK press as the dispatcher delivers one. `at_edge` is `false` because this harness
 /// has no engine to have produced an edge rule; the surface's arm is deliberately blind to
 /// the flag (see its comment), so the two roads are one event here.
-#[cfg(not(feature = "jellyfin"))]
 pub(super) fn back_key() -> ScreenEvent<InnerHost> {
     ScreenEvent::Input(InputEvent {
         at: Tick::default(),

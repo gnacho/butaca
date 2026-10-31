@@ -505,12 +505,10 @@ pub(crate) fn direct_trigger_server() -> Result<crate::plex::ServerId, String> {
 }
 
 // ---- boot, and the loop's own between-frame state ---------------------------------------------
-/// Which screen the boot gate landed on — see the gate itself in `plex_run`, which is where the
-/// order of its four cases is argued.
+/// Which screen the boot gate landed on: controlled fixture Home, live Jellyfin Home, or sign-in.
 pub(crate) enum BootTo {
     Home,
     Login,
-    Profiles,
 }
 
 /// Extract the deep-link item id from a webOS launch-params JSON body (the envelope SAM hands
@@ -576,16 +574,6 @@ pub(crate) fn captured_session_for_boot(saved: crate::plex::session::Session,
     dev_primary: Option<crate::plex::session::ServerRef>,
     extras: Vec<crate::plex::session::SourceRef>) -> crate::auth::SessionInit {
     crate::auth::SessionInit::captured_boot(saved, dev_primary, extras)
-}
-
-fn captured_dev_sources(servers: &[crate::dev::DevServer]) -> Vec<crate::plex::session::SourceRef> {
-    servers.iter().filter(|s| s.usable()).filter_map(|s| {
-        let origin = s.origin()?;
-        Some(crate::plex::session::SourceRef { machine_id: s.machine_id.clone(), name: s.name.clone(),
-            address: s.resolve_pin().map_or_else(|| s.host.clone(), |pin| pin.addr().to_string()),
-            port: s.port, origin_url: origin.base(), token: s.token.clone(),
-            shared_by: s.handle.clone(), owned: s.handle.is_empty(), tier: s.tier, ..Default::default() })
-    }).collect()
 }
 
     // Everything that has to happen when the server `plex::client()` answers with CHANGES —
@@ -859,63 +847,21 @@ pub(crate) unsafe fn construct(
     crate::gfx::init_image();
     crate::gfx::init_blur();
     // One-time libcurl bind + init (main thread) before any threaded HTTPS call. A false here
-    // means this device has no libcurl we can bind, so plex.tv sign-in will not work — the app
-    // still runs, and `net::global_init` has already said so in the event log.
+    // means this device has no libcurl we can bind, so HTTPS Jellyfin sign-in will not work - the
+    // app still runs, and `net::global_init` has already said so in the event log.
     let _ = crate::net::global_init();
 
-    // NO token is compiled into this binary. PMS access comes from the signed-in session,
-    // or — for automated runs only (the regression harness, headless captures) — from the
-    // /tmp/butaca-token dev trigger. The value is NEVER logged (only that one is in effect).
+    // NO token is compiled into this binary. Controlled recordings inject their own fixture
+    // identity. Live onboarding reads only the Jellyfin configuration.
+    // Controlled recordings inject their fixture identity. Live boot never reads a Plex token.
     let dev_token = match &initial {
         Some(initial) => {
             let crate::auth::owner::BootstrapAuthority::DevPms { primary, .. } = &initial.session.authority
                 else { unreachable!("preflight validated authority") };
             primary.token.clone()
         }
-        _ => crate::dev::scenarios::dev_token(),
+        _ => String::new(),
     };
-    // dev: /tmp/butaca-servers — credentials for a SECOND (third, …) server, so an automated
-    // run can reach a friend's SHARED server beside the one above. A shared server is its own
-    // authority: its own machineIdentifier, its own per-(user,server) access token, and a 401
-    // for anybody else's — which is precisely what ONE `butaca-token` cannot express, and
-    // why no two-source state could be graded headlessly before this.
-    //
-    // ADDITIVE and nothing more. The primary is still `butaca-token` (or the stored session)
-    // against the configured host/port (or the explicit dev-only pms-origin fixture override),
-    // so an ordinary run that names one server behaves as before. `dev::servers()` is the accessor — memoized, so the harness's
-    // /tmp wipe cannot change what this boot was handed — and `dev::DevServer` is the shape.
-    //
-    // It is NOT on the DIAG exemption list (`dev.rs`), deliberately: unlike a log or the anim
-    // overlay, this file names a host AND the token to trust it with, so it must mark the boot
-    // automated and skip the who's-watching picker exactly as `butaca-token` does. A run
-    // that landed on the picker instead of Home would grade the wrong screen.
-    //
-    // Tokens are never logged: `DevServer` has no `Debug`, and `describe()` prints all of it
-    // except the token.
-    let dev_servers = if controlled { Ok(Vec::new()) } else { crate::dev::servers() };
-    match &dev_servers {
-        // `_e`: the only reader is the gated log line (see `dev.rs` on why literals are gated).
-        Err(_e) => {
-            #[cfg(feature = "devtriggers")]
-            log(&format!("servers: /tmp/butaca-servers IGNORED — not valid JSON: {_e}"));
-        }
-        Ok(v) if !v.is_empty() => {
-            let usable = v.iter().filter(|s| s.usable()).count();
-            for (i, s) in v.iter().enumerate() {
-                let creds = if s.usable() {
-                    "ok"
-                } else {
-                    "MISSING (empty host/port or token)"
-                };
-                log(&format!("servers: #{i} {} creds={creds}", s.describe()));
-            }
-            log(&format!(
-                "servers: {} extra server(s) injected, {usable} usable",
-                v.len()
-            ));
-        }
-        Ok(_) => {}
-    }
     let host_s = std::ffi::CStr::from_ptr(pms_host)
         .to_string_lossy()
         .into_owned();
@@ -924,7 +870,7 @@ pub(crate) unsafe fn construct(
     //
     // **No `ui::login::init()` / `ui::profiles::init()` here any more (phase 6 retirement).**
     // Both calls used to allocate the legacy `Scene` statics `ui::login`/`ui::profiles` drew
-    // from; `screens::login::LoginScreen`/`screens::profiles::ProfilesScreen` are owned
+    // from; `screens::jf_login::JfLoginScreen`/`screens::profiles::ProfilesScreen` are owned
     // `Screen`s constructed fresh by `AppMounter::mount` on each entry (`app/bridge.rs`) and
     // read no module global at all, so nothing left in the boot path calls into either legacy
     // module's `scene()` and the `.expect("…::init not called")` guard those calls carried is no
@@ -951,14 +897,10 @@ pub(crate) unsafe fn construct(
     let automated_boot = || controlled || crate::dev::any_trigger_present();
 
     // Boot gate. Order matters:
-    //  1. /tmp/butaca-login forces the QR login screen (to exercise the flow on demand).
-    //  2. /tmp/butaca-token (the harness / headless runs) beats the stored session — automation
-    //     must run as the injected test identity no matter who is signed in on the TV.
-    //  3. A stored session (offline-capable LAN server) → Home. A multi-user Plex Home roster
-    //     still goes through the who's-watching picker first on interactive boots, unless
-    //     Automatically Sign In is on and a profile is already seated (that skip is an explicit
-    //     opt-in, PIN included). Automated boots and a roster of one still skip the picker.
-    //  4. Nothing → the QR sign-in flow (no credentials are compiled in — like a real client).
+    //  1. /tmp/butaca-login forces the Jellyfin sign-in screen on demand.
+    //  2. Controlled recordings activate their injected fixture identity.
+    //  3. A stored Jellyfin configuration authenticates and goes Home.
+    //  4. Nothing else goes to Jellyfin sign-in. Live boot never loads a Plex session.
     // The destination itself is [`BootTo`], at module scope with the rest of the vocabulary.
     //
     // dev: /tmp/butaca-pickuser=<index> — force the boot picker even on an automated boot and
@@ -966,7 +908,7 @@ pub(crate) unsafe fn construct(
     let pick_user: Option<usize> = if controlled { None } else { crate::dev::scenarios::pickuser_index() };
     let session = match &initial {
         Some(initial) => initial.session.persisted.clone(),
-        None => crate::plex::session::load(),
+        None => crate::plex::session::Session::default(),
     };
     #[cfg(not(test))]
     crate::i18n::initialize(session.language, controlled);
@@ -982,8 +924,7 @@ pub(crate) unsafe fn construct(
     });
     let session_init = match &initial {
         Some(initial) => initial.session.clone(),
-        None => captured_session_for_boot(session.clone(), dev_primary,
-            captured_dev_sources(&dev_servers.unwrap_or_default())),
+        None => captured_session_for_boot(session.clone(), dev_primary, Vec::new()),
     };
     let mut bridge = if controlled {
         super::bridge::Bridge::controlled_home(crate::diag::heartbeat::now_us,
@@ -1021,11 +962,8 @@ pub(crate) unsafe fn construct(
         pages: &mut crate::ui::dispatch::Dispatcher<super::bridge::AppHost>,
         rec: &mut super::recorder::Recplay| {
         if forced_login {
-        super::bridge::execute_session_command(pages, crate::auth::SessionCmd::StartLogin);
-        pages.frame_with(bridge, crate::ui::machine::Tick::default(), Vec::new(), Vec::new(),
-            rec, false);
         #[cfg(feature = "devtriggers")]
-        log("boot: /tmp/butaca-login — starting QR login");
+        log("boot: /tmp/butaca-login - starting Jellyfin sign-in");
         BootTo::Login
     } else if !dev_token.is_empty() {
         // `Origin::http` names the assumption out loud: the host and port compiled into the
@@ -1067,9 +1005,8 @@ pub(crate) unsafe fn construct(
             BootTo::Home
         } else { BootTo::Login }
     } else if crate::jellyfin::boot::try_boot() {
-        // The Jellyfin flavor's whole boot: a config file named a server, the server took
-        // the credentials, the client is installed. On a Plex build this arm is a constant
-        // `false` (the function says so at its definition), so this chain is unchanged there.
+        // The live Jellyfin boot: a config file named a server, the server accepted the
+        // credentials, and the client is installed.
         // The store resets mirror `activate_server`: the boot gate must never carry the
         // previous user's cached grid, shelves, searches or queued view-state writes, and
         // the refetch is what fills Home now that the client is installed.
@@ -1089,61 +1026,8 @@ pub(crate) unsafe fn construct(
             rec, false);
         log("boot: jellyfin config — signed in, to Home");
         BootTo::Home
-    // A Plex stored session is never this flavor's to boot from: a Jellyfin install does
-    // not write one, and a legacy file left by a Plex build under the same appid must not
-    // walk this boot into a server-less Plex Home. The Jellyfin flavor reaches Home through
-    // `try_boot` above — which has already installed the client — or not at all.
-    } else if session.can_go_local() && !cfg!(feature = "jellyfin") {
-        if session.boot_shows_picker(automated_boot(), pick_user.is_some()) {
-            // The Session owner installs the avatar read client and retained grants, publishes
-            // the captured profile, then owns the picker/refresh flows. It does NOT issue the
-            // Ready handoff before a viewer is selected. Boot BACK therefore retains its
-            // protected/unknown-profile refusal policy rather than silently entering Home.
-            super::bridge::execute_session_command(pages,
-                crate::auth::SessionCmd::StartSwitch(crate::auth::Picker::Boot));
-            pages.frame_with(bridge, crate::ui::machine::Tick::default(), Vec::new(), Vec::new(),
-                rec, false);
-            log("boot: stored session — who's watching");
-            BootTo::Profiles
-        } else {
-            // The owner restores the granted roster and publishes WHO is watching before
-            // install_pms can read any per-profile stores. Stored boot does not re-save its
-            // credentials. This is the normal bounded dispatcher drain over the same owner
-            // and queue later moved into App, not a recursive bootstrap reducer.
-            super::bridge::execute_session_command(pages, crate::auth::SessionCmd::ResumeStored);
-            pages.frame_with(bridge, crate::ui::machine::Tick::default(), Vec::new(), Vec::new(),
-                rec, false);
-            if let Some(ready) = bridge.take_session_ready() {
-                let endpoints = install_pms_owned(bridge, &ready.origin, &ready.address,
-                    &ready.token, ready.tier, ready.pin.as_ref(), &ready.install);
-                super::bridge::execute_endpoint_outcomes(pages, endpoints);
-                // Refresh only AFTER installing the captured primary, so a fast accepted
-                // endpoint observation cannot be overwritten by that older boot snapshot.
-                super::bridge::execute_session_command(pages, crate::auth::SessionCmd::RefreshRoster);
-                pages.frame_with(bridge, crate::ui::machine::Tick::default(), Vec::new(), Vec::new(),
-                    rec, false);
-                if session.auto_sign_in()
-                    && session.home_users.len() > 1
-                    && session.seated_in_roster()
-                    && !automated_boot()
-                    && pick_user.is_none()
-                {
-                    log("boot: stored session — auto sign-in");
-                } else {
-                    log("boot: stored session — local server (offline-capable)");
-                }
-                BootTo::Home
-            } else {
-                super::bridge::execute_session_command(pages, crate::auth::SessionCmd::StartLogin);
-                log("boot: stored session could not be activated — starting QR sign-in");
-                BootTo::Login
-            }
-        }
     } else {
-        super::bridge::execute_session_command(pages, crate::auth::SessionCmd::StartLogin);
-        pages.frame_with(bridge, crate::ui::machine::Tick::default(), Vec::new(), Vec::new(),
-            rec, false);
-        log("boot: no session — starting QR sign-in");
+        log("boot: no Jellyfin session - starting sign-in");
         BootTo::Login
     }
     };
@@ -1155,10 +1039,6 @@ pub(crate) unsafe fn construct(
         crate::player::acb_init(&mt);
         crate::ff::boot(); // Live playback resource boot; controlled Home cannot invoke ABI probes.
     }
-                       // dev: /tmp/butaca-logintest validates the plex.tv account path end-to-end on the device — a
-                       // real typed create_pin() through the libcurl transport + DTO deserialize. Logs only the
-                       // public pin id + code length + that authToken is still null (never a token/secret).
-    if !controlled { crate::dev::scenarios::arm_logintest(); }
     // dev: the animation-diagnostic overlay is OFF by default; /tmp/butaca-anim enables it (its
     // trace goes to /tmp/butaca-anim.log, a separate stream from the main event log)
     if !controlled { crate::dev::scenarios::arm_anim(); }
@@ -1410,8 +1290,8 @@ pub(crate) unsafe fn construct(
     let acct_tried = false; // dev: /tmp/butaca-acct opens the profile menu once
     let ptr = Pointer::IDLE;
 
-    // Initial route from the boot gate: Login when we have no usable creds, Profiles for the
-    // boot who's-watching picker, else Home.
+    // Initial route from the boot gate: Jellyfin sign-in when we have no usable credentials,
+    // else Home.
     //
     // …and Home is intercepted by the first-run question when this profile has never been
     // asked it and the roster holds more than one source (`screens::onboard`). It belongs HERE as
@@ -1448,10 +1328,7 @@ pub(crate) unsafe fn construct(
                 AppArg::Home
             }
         }
-        // Both of these enter the `Route::Login | Route::Profiles` block below, which asks as
-        // soon as the account is authorized — earlier than here, and before the picker.
         BootTo::Login => AppArg::Login,
-        BootTo::Profiles => AppArg::Profiles,
     };
     // (dev: /tmp/butaca-acct used to open the profile menu HERE, beside a
     // `route = Route::Account { over: BarHost::Home }`. The menu is a `ModalStack` surface since
@@ -1461,8 +1338,8 @@ pub(crate) unsafe fn construct(
     // rows own resume. Never override this route from an old last-page bookmark. The cleanup is
     // intentionally unconditional so automated and ordinary upgrades retire the same state.
     crate::coldstart::retire();
-    // Launch-param deep link: seed only when the boot gate landed on Home ITSELF — a Login,
-    // Profiles or Onboard landing owns the screen, and a detail page pushed over it would
+    // Launch-param deep link: seed only when the boot gate landed on Home ITSELF - a Login
+    // or Onboard landing owns the screen, and a detail page pushed over it would
     // strand BACK. Dropping the id in those cases is the issue's "fall back to Home, no error
     // loop" contract. Parsed here (not in the frame arm) so malformed params cost one
     // serde_json call at boot, never a per-frame one.

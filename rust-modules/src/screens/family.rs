@@ -75,11 +75,11 @@ pub(crate) enum SettingsPage {
     /// The Legal index.
     Legal,
     /// About Butaca, a document pushed straight from the root.
+    #[cfg(test)]
     About,
     /// One Legal document, by index into `screens::legal`'s page list.
     Document(u8),
     /// The Jellyfin flavor's server picker (list of configured servers, OK switches).
-    #[cfg(feature = "jellyfin")]
     Servers,
 }
 
@@ -96,9 +96,9 @@ impl ScreenArg for SettingsPage {
             SettingsPage::Contribute => 111,
             SettingsPage::Favourites => 101,
             SettingsPage::Legal => 103,
+            #[cfg(test)]
             SettingsPage::About => 104,
             SettingsPage::Document(_) => 105,
-            #[cfg(feature = "jellyfin")]
             SettingsPage::Servers => 112,
         })
     }
@@ -133,9 +133,9 @@ impl LogicalState for SettingsPage {
             | SettingsPage::Playback
             | SettingsPage::AudioSubtitles
             | SettingsPage::Favourites
-            | SettingsPage::Legal
-            | SettingsPage::About => 0,
-            #[cfg(feature = "jellyfin")]
+            | SettingsPage::Legal => 0,
+            #[cfg(test)]
+            SettingsPage::About => 0,
             SettingsPage::Servers => 0,
             SettingsPage::Document(i) => *i,
         });
@@ -149,8 +149,8 @@ impl LogicalState for SettingsPage {
             SettingsPage::AudioSubtitles => "audio-subtitles",
             SettingsPage::Favourites => "favourites",
             SettingsPage::Legal => "legal",
+            #[cfg(test)]
             SettingsPage::About => "about",
-            #[cfg(feature = "jellyfin")]
             SettingsPage::Servers => "servers",
             SettingsPage::Document(_) => "document",
         });
@@ -312,9 +312,9 @@ mod tests {
             SettingsPage::AudioSubtitles,
             SettingsPage::Favourites,
             SettingsPage::Legal,
+            #[cfg(test)]
             SettingsPage::About,
             SettingsPage::Document(0),
-            #[cfg(feature = "jellyfin")]
             SettingsPage::Servers,
         ];
         let mut ids: Vec<u32> = pages.iter().map(|p| crate::ui::screen::ScreenArg::id(p).0).collect();

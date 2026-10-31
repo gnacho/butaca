@@ -275,51 +275,25 @@ fn composed_owner_favourites_footer_survives_left_down_and_idle_frames() {
     assert_eq!(d.nav.input_owner(), Some(InputOwner::Entry(id)));
 }
 
-/// **The composition, at depth.** Signed out, the Settings root's rows are Privacy & data
-/// / Legal notices / About, so OK on row 1 pushes the Legal index; LEFT off that index's
-/// column then runs the whole chain — edge rule, synthetic BACK, the surface's own pop —
-/// and lands back on the Settings root with the surface still up and still owning input.
-#[cfg(not(feature = "jellyfin"))]
+/// LEFT on the server picker pops back to the Jellyfin root without dismissing Settings.
 #[test]
 fn left_inside_the_family_pops_the_inner_stack_and_never_dismisses_the_surface() {
     let _g = crate::testlock::serial();
     let _sess = scratch_session("composed-left-inner");
     let (mut d, mut rig, id) = opened();
-    assert!(
-        path(&d, id).starts_with("settings/root:"),
-        "{}",
-        path(&d, id)
-    );
+    assert!(path(&d, id).starts_with("settings/root:"), "{}", path(&d, id));
 
-    seat(&mut d, id, 1);
+    seat(&mut d, id, 0);
     frame(&mut d, &mut rig, 32, vec![key(Key::Ok, tick(32))]);
-    assert!(
-        path(&d, id).contains("/legal:"),
-        "OK on Legal notices pushed the index: {}",
-        path(&d, id)
-    );
+    assert!(path(&d, id).contains("/servers:"), "OK opened the server picker: {}", path(&d, id));
 
     seat(&mut d, id, 0);
     frame(&mut d, &mut rig, 48, vec![key(Key::Left, tick(48))]);
     let p = path(&d, id);
-    assert!(
-        !p.contains("/legal:"),
-        "LEFT popped the index off the surface's stack: {p}"
-    );
-    assert!(
-        p.starts_with("settings/root:"),
-        "…and landed on the Settings root: {p}"
-    );
-    assert_ne!(
-        d.nav.modals.top().unwrap().phase,
-        Phase::Closing,
-        "a LEFT the surface answered is not the container's BACK"
-    );
-    assert_eq!(
-        d.nav.input_owner(),
-        Some(InputOwner::Entry(id)),
-        "…and the surface still owns input"
-    );
+    assert!(!p.contains("/servers:"), "LEFT popped the picker: {p}");
+    assert!(p.starts_with("settings/root:"), "and landed on the Settings root: {p}");
+    assert_ne!(d.nav.modals.top().unwrap().phase, Phase::Closing);
+    assert_eq!(d.nav.input_owner(), Some(InputOwner::Entry(id)));
     assert_eq!(rig.roots, 0, "nothing reached the platform");
 }
 
@@ -354,79 +328,6 @@ fn left_at_the_surfaces_own_root_dismisses_it() {
     assert_eq!(
         rig.roots, 0,
         "a surface dismissal is not the platform's BACK"
-    );
-}
-
-/// **Regression, end to end: OK on Settings' second row must not reopen Legal already seated on
-/// Legal's own second row.** Traced to every page in this family sharing the surface's outer
-/// `EntryId` and `GroupId(0)` (`RouteSurface::run_inner`, `FocusTarget`'s doc on `screen.rs`): a
-/// push used to ask the engine for `FocusTarget::ContainerGroup`, whose `Seat::Remembered` policy
-/// read `remembered_in(entry, GroupId(0))` back regardless of which page was ASKING — so the row
-/// the Settings root's own table remembered (from the real DOWN press below) leaked straight into
-/// the freshly pushed Legal index. On a real TV this put focus on Legal's second row instead of
-/// its first the moment OK was pressed on Settings' second row.
-///
-/// This drives a REAL `Down` press rather than the `seat` helper used elsewhere in this file:
-/// `Dispatcher::set_focus` deliberately remembers no group (`ui/dispatch.rs`'s doc on `set_focus`),
-/// which is exactly the state that makes `Seat::Remembered` a no-op and hides this bug — the
-/// `settings_test_support.rs` helpers have no focus engine at all and create an empty remembered
-/// snapshot, so neither can observe this regression; only a real key through the real engine
-/// leaves a real remembered cursor for `ContainerGroup` to (wrongly) read back.
-///
-/// Fixture choice: the SIGNED-OUT root, like every other test in this file — its second row
-/// (`elem: 1`) is Legal notices. A signed-in root prepends Favourites and moves Legal to index 2,
-/// which would still prove the same thing but is not what `opened()` boots here.
-#[cfg(not(feature = "jellyfin"))]
-#[test]
-fn a_real_push_seats_the_new_page_fresh_and_a_pop_restores_the_row_that_opened_it() {
-    let _g = crate::testlock::serial();
-    let _sess = scratch_session("composed-push-seat-regression");
-    let (mut d, mut rig, id) = opened();
-    assert!(
-        path(&d, id).starts_with("settings/root:"),
-        "{}",
-        path(&d, id)
-    );
-
-    // Mounting the surface already seats row 0 (its own `Enter::Fresh`); one real DOWN moves
-    // focus — and the engine's remembered cursor for `(id, GroupId(0))` — to row 1.
-    frame(&mut d, &mut rig, 16, vec![key(Key::Down, tick(16))]);
-    let legal_row = d.focus().expect("a row is focused after a real DOWN");
-    assert_eq!(legal_row.elem, 1, "row 1 is Legal notices in the signed-out fixture");
-
-    frame(&mut d, &mut rig, 32, vec![key(Key::Ok, tick(32))]);
-    assert!(
-        path(&d, id).contains("/legal:"),
-        "OK on Legal notices pushed the index: {}",
-        path(&d, id)
-    );
-    assert_eq!(
-        d.focus().map(|k| k.elem),
-        Some(0),
-        "the pushed Legal index must seat on ITS OWN first row, not Settings root's remembered \
-         row 1 — the leak `ContainerGroup`'s `Seat::Remembered` used to produce"
-    );
-
-    // The leak, when present, survives an idle frame too — the seat is not a one-frame fluke.
-    frame(&mut d, &mut rig, 48, vec![]);
-    assert_eq!(
-        d.focus().map(|k| k.elem),
-        Some(0),
-        "…and the fresh seat holds after an idle frame"
-    );
-
-    frame(&mut d, &mut rig, 64, vec![key(Key::Back, tick(64))]);
-    let p = path(&d, id);
-    assert!(!p.contains("/legal:"), "BACK popped the index off the surface's stack: {p}");
-    assert!(
-        p.starts_with("settings/root:"),
-        "…and landed back on the Settings root: {p}"
-    );
-    assert_eq!(
-        d.focus(),
-        Some(legal_row),
-        "BACK restores the parent to the row that opened it, unaffected by this fix (the pop \
-         path's own `FocusTarget::Elem`)"
     );
 }
 
@@ -577,53 +478,3 @@ fn force_warning_engine_focus_confirms_only_the_chosen_answer() {
     crate::route::restore_direct_play_mode(previous);
 }
 
-/// Owner report: entering Audio & Subtitles from the Settings root landed focus on the LAST row
-/// of the loaded table. The page mounts empty (its rows arrive with the account receipt), so the
-/// push's `FirstInGroup` found no group to seat — and the engine kept the ROOT page's key. Every
-/// page in this family shares the surface's `EntryId`, so that stale key (the Audio & Subtitles
-/// row, the root's last) read as a row of the new page once rows landed and was clamped onto
-/// the new table's last row. Drive the real push from the real root row.
-#[cfg(not(feature = "jellyfin"))]
-#[test]
-fn audio_subtitles_pushed_from_the_root_seats_its_first_row_when_rows_land() {
-    use crate::plex::account::{AudioPreferences, PreferenceRequest};
-    use registry::{AccountPreferenceReply, PreferenceCmd};
-    let _g = crate::testlock::serial();
-    let _sess = multi_user_session("composed-audio-push-first-row");
-    let previous = crate::plex::session::current_snapshot();
-    struct RestoreProfile(std::sync::Arc<crate::plex::session::CurrentProfile>);
-    impl Drop for RestoreProfile {
-        fn drop(&mut self) {
-            crate::plex::session::publish_profile_for_test(self.0.user.clone(), self.0.generation);
-        }
-    }
-    let _restore = RestoreProfile(previous);
-    let user = crate::plex::session::UserRef { id: 7, uuid: "audio-push-fixture".into(),
-        ..Default::default() };
-    crate::plex::session::publish_profile_for_test(Some(user.clone()), 72);
-    let (request, snapshot) = PreferenceRequest::fixture_for_test(user, 72, AudioPreferences::default());
-    let (mut d, mut rig, id) = opened();
-    // Audio & Subtitles is the root's last row: walk DOWN until focus stops moving.
-    let mut ms = 32;
-    let mut last = d.focus();
-    loop {
-        frame(&mut d, &mut rig, ms, vec![key(Key::Down, tick(ms))]);
-        ms += 16;
-        if d.focus() == last { break; }
-        last = d.focus();
-        assert!(ms < 1000, "the root must end");
-    }
-    let audio_row = last.expect("a root row is focused").elem;
-    assert!(audio_row > 3, "the premise: the root row sits below the loaded table's extent");
-    frame(&mut d, &mut rig, ms, vec![key(Key::Ok, tick(ms))]);
-    assert!(path(&d, id).contains("/audio-subtitles:"), "OK pushed Audio & Subtitles: {}", path(&d, id));
-    frame(&mut d, &mut rig, ms + 16, vec![]);
-    let Some(PreferenceCmd::Load { reply }) = rig.preference_commands.pop() else {
-        panic!("the pushed page must ask its host for the initial load");
-    };
-    reply.send(AccountPreferenceReply { request: Some(request), outcome: Ok(snapshot) }).unwrap();
-    frame(&mut d, &mut rig, ms + 32, vec![]);
-    frame(&mut d, &mut rig, ms + 48, vec![]);
-    assert_eq!(d.focus(), Some(FocusKey { entry: id, elem: 0 }),
-        "the first landed rows seat the top row, not the root's stale row {audio_row} clamped to the last");
-}

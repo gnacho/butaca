@@ -448,7 +448,7 @@ fn session_registry_then_terminal_waits_for_queued_commit_replies() {
 }
 
 #[test]
-fn session_replies_cross_the_production_queued_drain_with_exact_correlation() {
+fn back_replies_cross_the_production_queued_drain_with_exact_correlation() {
     use crate::auth::owner::{Command, ReplyTo, SessionEvent};
     use crate::ui::dispatch::Tap;
     struct Replies(Vec<(u32, u32, bool)>);
@@ -457,10 +457,6 @@ fn session_replies_cross_the_production_queued_drain_with_exact_correlation() {
             if let Fx::Deliver(MachineId::Instance(instance),
                 Delivery::Screen(ScreenEvent::Async(req, message))) = &stamped.fx {
                 match message {
-                    AppMsg::RestartReply { correlation, accepted } => {
-                        assert_eq!(req.0, *correlation);
-                        self.0.push((instance.0, *correlation, *accepted));
-                    }
                     AppMsg::BackReply { correlation, resumed } => {
                         assert_eq!(req.0, *correlation);
                         self.0.push((instance.0, *correlation, *resumed));
@@ -477,8 +473,6 @@ fn session_replies_cross_the_production_queued_drain_with_exact_correlation() {
     let mut dispatcher = Dispatcher::<AppHost>::new();
     let mut replies = Replies(Vec::new());
     for command in [
-        Command::RestartWait { phase: crate::auth::Phase::Waiting, qr_generation: 9,
-            reply: ReplyTo { instance: 41, correlation: 7 } },
         Command::BackAtRoot { reply: ReplyTo { instance: 42, correlation: 8 } },
     ] {
         dispatcher.emit(MachineId::Nav, Fx::Deliver(MachineId::Session,
@@ -486,7 +480,7 @@ fn session_replies_cross_the_production_queued_drain_with_exact_correlation() {
     }
     assert!(replies.0.is_empty());
     dispatcher.frame_with(&mut rig, Tick::default(), Vec::new(), Vec::new(), &mut replies, false);
-    assert_eq!(replies.0, [(41, 7, false), (42, 8, false)]);
+    assert_eq!(replies.0, [(42, 8, false)]);
     assert_eq!(rig.session_adapter.fixture_resources().back_results, [false]);
     assert_eq!(rig.session.read().0.phase, crate::auth::Phase::Idle);
 }

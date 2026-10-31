@@ -1075,7 +1075,6 @@ pub(crate) enum DetailRefreshPhase {
 /// The application's messages (spec §3.1).
 pub(crate) enum AppMsg {
     Session(crate::auth::owner::SessionEvent),
-    RestartReply { correlation: u32, accepted: bool },
     SelectionReply { correlation: u32, accepted: bool, flow_epoch: u64 },
     BackReply { correlation: u32, resumed: bool },
     Store(StoreCmd),
@@ -1133,7 +1132,6 @@ pub(crate) enum LoopReq {
     /// Every one of them ALSO gets a `Fx::Nav(NavOp::Dismiss)` from the screen in the same drain,
     /// which is the legacy `on_ok`'s own "close, then return the action" in the order a container
     /// can express it.
-    AccountChangeProfile,
     AccountSignIn,
     AccountSignOut,
     /// PRESENTS the Settings surface over the same page, so the host route does not move.
@@ -1148,21 +1146,17 @@ pub(crate) enum LoopReq {
     /// quick-connect mode on the login form and land there; the form shows a server field and a
     /// *Start Quick Connect* action instead of the password fields, and a success appends the
     /// new server.
-    #[cfg(feature = "jellyfin")]
     JfQuickConnect,
     /// Jellyfin flavor only: the server picker's *Add by password* row — arm add-server mode on
     /// the password sign-in form and land there; a successful connect appends the new server
     /// instead of replacing. The password door for adding a second server, kept beside Quick
     /// Connect so neither alternative is lost.
-    #[cfg(feature = "jellyfin")]
     JfAddServer,
     /// Jellyfin flavor only: the server picker committed a row — sign in against that configured
     /// server (index into `jellyfin::boot`'s list) and make it active.
-    #[cfg(feature = "jellyfin")]
     JfSwitchServer(usize),
     /// Jellyfin flavor only: the Settings root's *Desconectar* — remove the active server's
     /// credentials and land on the sign-in gate (or switch to the survivor, if any remain).
-    #[cfg(feature = "jellyfin")]
     JfDisconnectServer,
 }
 
@@ -1176,7 +1170,7 @@ impl<H: Host<Elem = u32, Fx = AppFx, Msg = AppMsg>> AppLike for H {}
 /// from the screen that owns the frame.
 ///
 /// **`LOGIN`/`PROFILES` are phase 6's addition, and they are `route=` words, not `overlay=` ones**
-/// — the QR sign-in and the who's-watching picker are app-stack PAGES (`AppArg::Login` /
+/// - sign-in and the legacy profile picker are app-stack PAGES (`AppArg::Login` /
 /// `AppArg::Profiles`, flat variants since phase 12 folded the page alphabet in here), never a
 /// surface on the `ModalStack`, exactly as first-run Favourites was in 5b. They MUST stay the
 /// literal strings `"login"`/`"profiles"`, and the reason changed shape in D1 rather than going
@@ -1205,7 +1199,7 @@ pub(crate) mod word {
     pub(crate) const PRIVACY: &str = "privacy";
     pub(crate) const LEGAL: &str = "legal";
     pub(crate) const ONBOARD: &str = "onboard";
-    /// The QR sign-in (`screens::login::LoginScreen`). Same spelling as `app::words::route_word`'s
+    /// Jellyfin sign-in (`screens::jf_login::JfLoginScreen`). Same spelling as `app::words::route_word`'s
     /// `AppArg::Login` arm — see this module's doc for why that equality is load-bearing.
     pub(crate) const LOGIN: &str = "login";
     /// The who's-watching picker (`screens::profiles::ProfilesScreen`). Same spelling as
@@ -1815,13 +1809,9 @@ where
             // reset (see `input::enter_profiles_from_onboard`'s doc for the same argument made
             // about `screens::onboard` in 5b).
             AppArg::Login => {
-                // The Jellyfin flavor's sign-in is a different screen wearing this route - its
-                // own module, mounted in place of the QR screen on this build (the route word,
-                // and so the heartbeat and its fps scenes, stays "login").
-                #[cfg(feature = "jellyfin")]
-                { Box::new(crate::screens::jf_login::JfLoginScreen::new(entry)) }
-                #[cfg(not(feature = "jellyfin"))]
-                { Box::new(crate::screens::login::LoginScreen::new(entry, H::auth(cx))) }
+                // Jellyfin owns the only sign-in surface. The route word, and so the heartbeat
+                // and its fps scenes, stays "login".
+                Box::new(crate::screens::jf_login::JfLoginScreen::new(entry))
             }
             AppArg::Profiles => {
                 let screen = crate::screens::profiles::ProfilesScreen::new(entry, H::auth(cx));

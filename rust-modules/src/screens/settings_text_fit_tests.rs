@@ -23,34 +23,12 @@ fn overflowing(page: &str, table: &TableView, out: &mut Vec<String>) {
     out.extend(table.elided_rows(frame_w, &ShippedMeasure, HEADROOM).into_iter().map(|e| format!("{page}: {e}")));
 }
 
-/// The root rows only a signed-in (and multi-user) account sees, built exactly as
-/// `RootPage::rebuild` builds them; the signed-out rows come from a real `RootPage`.
-#[cfg(not(feature = "jellyfin"))]
-fn signed_in_root_rows() -> TableView {
-    let mut table = TableView::new();
-    table.compact = false;
-    let rows = [
-        Row::new(msg::settings_libraries_title()).detail(msg::settings_libraries_detail())
-            .value(msg::settings_libraries_count(88)).chevron(true),
-        Row::new(msg::settings_auto_sign_in_title()).detail(msg::settings_auto_sign_in_detail()).toggle(false),
-        Row::new(msg::settings_auto_sign_in_title()).detail(msg::settings_auto_sign_in_detail()).toggle(true),
-        Row::new(msg::settings_trailers_title()).detail(msg::settings_trailers_detail()).toggle(false),
-        Row::new(msg::settings_trailers_title()).detail(msg::settings_trailers_detail()).toggle(true),
-        Row::new(msg::settings_audio_title()).detail(msg::settings_audio_detail()).chevron(true),
-    ];
-    table.set_sections(vec![rows.into_iter().fold(Section::new(""), Section::row)], 0, false);
-    table
-}
-
-#[cfg(not(feature = "jellyfin"))]
 #[test]
-fn every_settings_row_fits_its_column_in_every_language() {
+fn every_language_row_fits_its_column_in_every_language() {
     let mut out = Vec::new();
     for language in LANGUAGES {
         let _guard = language_on_this_thread_for_test(language);
         let tag = language.tag();
-        overflowing(&format!("{tag} root"), &RootPage::new(EntryId(0), test_support::cx(None).views).table, &mut out);
-        overflowing(&format!("{tag} root (signed in)"), &signed_in_root_rows(), &mut out);
         overflowing(&format!("{tag} language"), &LanguagePage::new(EntryId(0)).table, &mut out);
     }
     assert!(out.is_empty(), "rows the television would end in an ellipsis:\n  {}", out.join("\n  "));

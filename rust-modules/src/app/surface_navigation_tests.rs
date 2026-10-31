@@ -145,7 +145,8 @@ fn switching_profile_leaves_the_container_holding_nothing_of_the_previous_profil
     super::frame(&mut d, &mut rig, tick(1000), vec![]);
     assert!(d.nav.tabs.stack.is_pending(), "the push reached the stack's own pending, mid fade-out");
 
-    switch_profile(&mut d);
+    d.reset_for_profile();
+    d.request(MachineId::Nav, NavOp::Root(AppArg::Profiles));
     assert!(!d.nav.tabs.stack.is_pending(), "the reset drops it rather than letting it apply later");
     assert!(d.nav.tabs.stack.entries.is_empty(), "the reset itself emptied the tree");
 
@@ -399,7 +400,6 @@ fn player_diagnostics_hide_behind_any_open_player_overlay() {
 /// Phase 5b: the Settings surface is PRESENTED on the tree, owns input from its first frame,
 /// names the heartbeat word of its top page, walks its own stack on BACK (root → Legal →
 /// back → root) and only then lets the container dismiss it — with the app's page untouched.
-#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn the_settings_surface_owns_input_and_walks_its_own_stack() {
     let _g = crate::testlock::serial();
@@ -414,7 +414,7 @@ fn the_settings_surface_owns_input_and_walks_its_own_stack() {
     assert_eq!(overlay_word(&d), Some("settings"));
     assert_ne!(d.nav.input_owner(), home_owner, "Settings takes input from its Home host");
     assert!(host_frozen(&d));
-    // DOWN, DOWN to Legal notices (Favourites is absent signed out: Privacy, Legal, About)
+    // OK on the first row opens the Jellyfin server picker.
     let mut t = 2;
     let mut press = |d: &mut Dispatcher<AppHost>, rig: &mut Bridge, key: Key| {
         let ev = script_key(key, tick(t));
@@ -423,9 +423,8 @@ fn the_settings_surface_owns_input_and_walks_its_own_stack() {
         frame(d, rig, AppArg::Home, tick(t), vec![]);
         t += 1;
     };
-    press(&mut d, &mut rig, Key::Down);
     press(&mut d, &mut rig, Key::Ok);
-    assert_eq!(overlay_word(&d), Some("legal"), "OK on Legal notices pushed the index");
+    assert_eq!(overlay_word(&d), Some("servers"), "OK opened the server picker");
     press(&mut d, &mut rig, Key::Back);
     assert_eq!(overlay_word(&d), Some("settings"), "BACK popped the inner stack");
     assert!(settings_up(&d));
