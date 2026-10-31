@@ -399,7 +399,7 @@ fn language_survives_ordinary_signout_fresh_login_and_relaunch() {
 
     // Only a new authentication may repopulate credentials; it inherits the retained language.
     fresh_login.account_token = "different-test-account".into();
-    save_fresh_reauthentication(&fresh_login);
+    save(&fresh_login);
     redirect_for_test(None);
     crate::i18n::set_saved_preference(Preference::System);
     let relaunched = load_with_id(|| panic!("fresh login already persisted its client id"));
@@ -1975,7 +1975,7 @@ fn fresh_outage_signin_after_signout_survives_restart() {
     let _ = clear();
     assert!(fallback_revoked_at(&auth_paths()));
     let newer = Session { account_token: "new-signin".into(), ..signed_in() };
-    save_fresh_reauthentication(&newer);
+    save(&newer);
     redirect_for_test(None); // restart: no in-memory revocation or cache
     assert_eq!(session_from_read(&with_io_for_test(read_live_locked)).account_token, "new-signin");
 }
