@@ -7,7 +7,6 @@
 //! must be retried rather than latched forever. Replaces `session_write_rev_tests.rs`.
 
 use super::*;
-#[allow(unused_imports)]
 use super::test_support::*;
 use super::test_support::TempSession;
 

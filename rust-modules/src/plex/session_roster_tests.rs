@@ -2,65 +2,7 @@
 //! search history scoping, roster-refresh authorization, and household/PIN identity.
 
 use super::*;
-#[allow(unused_imports)]
 use super::test_support::*;
-
-#[test]
-fn boot_shows_picker_table() {
-    let multi_off = dialable_home(2, "u-0", false);
-    assert!(
-        multi_off.boot_shows_picker(false, false),
-        "multi-user interactive still raises the picker when the switch is off"
-    );
-    assert!(
-        !multi_off.boot_shows_picker(true, false),
-        "an automated boot still skips the picker"
-    );
-    assert!(
-        multi_off.boot_shows_picker(true, true),
-        "pickuser forces the picker even on an automated boot"
-    );
-
-    let multi_on = dialable_home(2, "u-0", true);
-    assert!(
-        multi_on.home_users[0].protected,
-        "u-0 is the PIN-protected admin in this fixture"
-    );
-    assert!(
-        !multi_on.boot_shows_picker(false, false),
-        "the switch skips the picker when a profile is seated, PIN included"
-    );
-    assert!(
-        multi_on.boot_shows_picker(false, true),
-        "pickuser still forces the picker when the switch is on"
-    );
-
-    let abandoned = dialable_home(2, "", true);
-    assert!(
-        abandoned.boot_shows_picker(false, false),
-        "an empty uuid still raises the picker so the owner's token is not handed out"
-    );
-
-    let gone = dialable_home(2, "u-gone", true);
-    assert!(
-        gone.boot_shows_picker(false, false),
-        "a uuid no longer on the roster still raises the picker — leftover tokens are not a seat"
-    );
-
-    let solo = dialable_home(1, "u-0", false);
-    assert!(
-        !solo.boot_shows_picker(false, false),
-        "a one-person account already skips the picker"
-    );
-    assert!(!dialable_home(1, "u-0", true).boot_shows_picker(false, false));
-
-    let mut undialable = dialable_home(2, "u-0", false);
-    undialable.server = ServerRef::default();
-    assert!(
-        !undialable.boot_shows_picker(false, false),
-        "this helper is not the QR path: no local session, no picker"
-    );
-}
 
 /// The other side of the gate: once an origin IS written down it is what gets dialled, and it
 /// beats the address pair beside it. That is not a tie-break for its own sake — for an https
@@ -139,7 +81,7 @@ fn the_roster_round_trips_through_the_session_file_format() {
     let s: Session = serde_json::from_slice(&serde_json::to_vec(&s).unwrap()).expect("re-read");
 
     assert_eq!(s.sources.len(), 2);
-    let own = s.owned_source().expect("our own server is in the roster");
+    let own = s.sources.iter().find(|source| source.owned).expect("our own server is in the roster");
     assert_eq!(
         (own.machine_id.as_str(), own.address.as_str()),
         ("aaaa1111", "192.168.0.10")
@@ -150,7 +92,9 @@ fn the_roster_round_trips_through_the_session_file_format() {
     );
 
     let share = s
-        .source("bbbb2222")
+        .sources
+        .iter()
+        .find(|source| source.machine_id == "bbbb2222")
         .expect("keyed by machineIdentifier, not by index");
     assert_eq!((share.address.as_str(), share.port), ("203.0.113.9", 31234));
     assert_eq!(
@@ -159,7 +103,7 @@ fn the_roster_round_trips_through_the_session_file_format() {
     );
     assert_eq!(share.shared_by, "friend");
     assert!(!share.owned && share.dialable());
-    assert_eq!(s.shared_sources().count(), 1);
+    assert_eq!(s.sources.iter().filter(|source| !source.owned).count(), 1);
 
     let mine = s
         .pins_for("u-7")
@@ -182,7 +126,6 @@ fn the_roster_round_trips_through_the_session_file_format() {
         s.pins_for("u-9").is_none(),
         "another profile has an answer of its own, or none"
     );
-    assert!(s.source("").is_none() && s.source("nope").is_none());
 
     // and the token is not printable by accident — `describe` is the only formatter there is
     assert!(
@@ -314,11 +257,11 @@ fn a_single_server_session_behaves_as_it_always_has() {
     );
     // the roster agrees with the primary rather than competing with it
     assert_eq!(
-        s.owned_source().map(|x| x.address.as_str()),
+        s.sources.iter().find(|source| source.owned).map(|x| x.address.as_str()),
         Some(s.server.address.as_str())
     );
-    assert_eq!(s.shared_sources().count(), 0);
-    assert!(s.account(None).signed_in && s.account(None).can_switch);
+    assert_eq!(s.sources.iter().filter(|source| !source.owned).count(), 0);
+    assert!(s.account(None).signed_in);
 }
 
 /// The Search screen's recent terms are ordinary session content: they survive a write/read

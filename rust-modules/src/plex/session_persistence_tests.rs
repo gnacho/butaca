@@ -2,7 +2,6 @@
 //! preservation, concurrent read-modify-write, and torn-write safety.
 
 use super::*;
-#[allow(unused_imports)]
 use super::test_support::*;
 use super::test_support::TempSession;
 
@@ -587,7 +586,7 @@ fn clear_under_a_redirected_legacy_fixture_never_touches_the_canonical_authority
 /// (`paths::session_migration_candidates()`, plus the pre-DB8 canonical JSON wrapper on ARM),
 /// which is a strict superset of the legacy `auth_paths()` list `clear()`'s own loop sweeps.
 ///
-/// **On the honesty of this test**: `persistence::bootstrap`/`cleanup_after_confirmed_clear`
+/// **On the honesty of this test**: `persistence::cleanup_after_confirmed_clear`
 /// deliberately substitute `super::auth_paths()` for the real
 /// `paths::session_migration_candidates()` under `#[cfg(test)]` (see both functions' own
 /// `#[cfg(test)]`/`#[cfg(not(test))]` split), for the same test-hermeticity reason `TempSession`
@@ -1229,7 +1228,6 @@ fn fallback_never_outranks_present_or_untrusted_canonical_state() {
     for read in [
         (|| C::Pending {
             revision: 1,
-            envelope: "opaque".into(),
         }) as fn() -> C,
         || C::Locked {
             revision: 1,

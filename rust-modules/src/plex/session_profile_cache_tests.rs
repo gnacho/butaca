@@ -2,7 +2,6 @@
 //! and persistence across a save/load round trip.
 
 use super::*;
-#[allow(unused_imports)]
 use super::test_support::*;
 
 #[test]
