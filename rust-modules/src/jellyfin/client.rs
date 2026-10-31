@@ -202,7 +202,7 @@ impl JfClient {
             user_name: parsed.user.name,
             server_id: parsed.server_id,
         };
-        *self.token.write().unwrap() = Some(TokenState {
+        *self.token.write().unwrap_or_else(|e| e.into_inner()) = Some(TokenState {
             token: ok.token.clone(),
             user_id: ok.user_id.clone(),
             user_name: ok.user_name.clone(),
@@ -309,7 +309,7 @@ impl JfClient {
             user_name: parsed.user.name,
             server_id: parsed.server_id,
         };
-        *self.token.write().unwrap() = Some(TokenState {
+        *self.token.write().unwrap_or_else(|e| e.into_inner()) = Some(TokenState {
             token: ok.token.clone(),
             user_id: ok.user_id.clone(),
             user_name: ok.user_name.clone(),
@@ -349,7 +349,7 @@ impl JfClient {
     /// already rejected. This is the whole reason a password no longer has to live on disk.
     pub(crate) fn adopt_token(&self, token: &str) -> Result<TokenUser, AuthError> {
         let install = |user_id: &str, user_name: &str| {
-            *self.token.write().unwrap() = Some(TokenState {
+            *self.token.write().unwrap_or_else(|e| e.into_inner()) = Some(TokenState {
                 token: token.to_string(),
                 user_id: user_id.to_string(),
                 user_name: user_name.to_string(),
@@ -363,17 +363,17 @@ impl JfClient {
         let reply = match http::request(&self.origin, "/Users/Me", http::Method::Get, &refs, None) {
             Some(r) => r,
             None => {
-                *self.token.write().unwrap() = None;
+                *self.token.write().unwrap_or_else(|e| e.into_inner()) = None;
                 return Err(AuthError::Unreachable);
             }
         };
         if reply.status == 401 || reply.status == 403 {
-            *self.token.write().unwrap() = None;
+            *self.token.write().unwrap_or_else(|e| e.into_inner()) = None;
             return Err(AuthError::Unauthorized);
         }
         if !reply.ok() {
             crate::log(&format!("jellyfin: GET /Users/Me answered {}", reply.status));
-            *self.token.write().unwrap() = None;
+            *self.token.write().unwrap_or_else(|e| e.into_inner()) = None;
             return Err(AuthError::Unreachable);
         }
         let me: AuthUser = match serde_json::from_slice(&reply.body) {
@@ -383,7 +383,7 @@ impl JfClient {
                     "jellyfin: GET /Users/Me answered {} bytes that will not parse — {e}",
                     reply.body.len()
                 ));
-                *self.token.write().unwrap() = None;
+                *self.token.write().unwrap_or_else(|e| e.into_inner()) = None;
                 return Err(AuthError::Unreachable);
             }
         };
@@ -397,7 +397,7 @@ impl JfClient {
     /// The signed-in user's display name, once the login landed (None before it). The account
     /// chip reads it: a Jellyfin install has no Plex session to name itself from.
     pub(crate) fn user_name(&self) -> Option<String> {
-        self.token.read().unwrap().as_ref().map(|t| t.user_name.clone())
+        self.token.read().unwrap_or_else(|e| e.into_inner()).as_ref().map(|t| t.user_name.clone())
     }
 
     /// The authed headers for a control request: token + identity in the ONE `Authorization`
@@ -413,7 +413,7 @@ impl JfClient {
     /// with `api_key=` are deliberately untouched: those routes still honour it.
     fn authed_headers(&self) -> Option<[String; 2]> {
         let token = {
-            let state = self.token.read().unwrap();
+            let state = self.token.read().unwrap_or_else(|e| e.into_inner());
             state.as_ref()?.token.clone()
         };
         let identity = self.identity_header();
@@ -875,7 +875,7 @@ impl JfClient {
             // Not a failure — a Logo/Art request must be built from its own path by the caller.
             crate::log("jellyfin: image_path called with png=1 (clearLogo path); serving JPEG box");
         }
-        let token = self.token.read().unwrap().as_ref()?.token.clone();
+        let token = self.token.read().unwrap_or_else(|e| e.into_inner()).as_ref()?.token.clone();
         // `src_path` is sometimes bare (`/Items/{id}/Images/Backdrop/0`, built by
         // [`super::convert`]) and sometimes already query-bearing (`…/Primary?tag=…`), so the
         // sizing/auth query hangs off whichever separator is right. Appending `&` to a path with
@@ -893,7 +893,7 @@ impl JfClient {
     /// `media_source_id` pins the VERSION (Jellyfin's `part`): empty means the server's default
     /// source, which is also the right answer when the detail fetch found exactly one.
     pub(crate) fn direct_stream_url(&self, item_id: &str, media_source_id: &str) -> Option<String> {
-        let token = self.token.read().unwrap().as_ref()?.token.clone();
+        let token = self.token.read().unwrap_or_else(|e| e.into_inner()).as_ref()?.token.clone();
         let ms = if media_source_id.is_empty() {
             String::new()
         } else {
@@ -958,7 +958,7 @@ impl JfClient {
     /// built path — the HLS playlist and every segment it lists are fetched by URL alone, with
     /// no header slot to carry a token in.
     pub(crate) fn transcode_url(&self, transcoding_url: &str) -> Option<String> {
-        let token = self.token.read().unwrap().as_ref()?.token.clone();
+        let token = self.token.read().unwrap_or_else(|e| e.into_inner()).as_ref()?.token.clone();
         let sep = if transcoding_url.contains('?') { "&" } else { "?" };
         Some(format!(
             "{}{}{}api_key={token}",
@@ -1200,7 +1200,7 @@ impl JfClient {
     }
 
     fn user_id(&self) -> Option<String> {
-        Some(self.token.read().unwrap().as_ref()?.user_id.clone())
+        Some(self.token.read().unwrap_or_else(|e| e.into_inner()).as_ref()?.user_id.clone())
     }
 }
 

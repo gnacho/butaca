@@ -7970,7 +7970,7 @@ pub(crate) fn demux(
                             subs.len()
                         ));
                     }
-                    *SHARED.track_names.lock().unwrap() = crate::player::TrackNames { audio, subs };
+                    *SHARED.track_names.lock().unwrap_or_else(|e| e.into_inner()) = crate::player::TrackNames { audio, subs };
                 }
                 let vi =
                     av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, std::ptr::null_mut(), 0);
