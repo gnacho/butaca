@@ -115,7 +115,7 @@ fn meta_line(collection: &Collection) -> CString {
 pub(crate) fn member_label(item: &PmsMovie) -> String {
     match item.kind {
         2 if item.season_index > 0 => crate::i18n::msg::browse_collection_season_mark(item.season_index as i64),
-        3 => crate::ui::fmt::episode_address(item.season_index as i64, item.ep_index as i64),
+        3 => crate::ui::fmt::episode_address(item.season_index as i64, item.ep_index as i64).to_string(),
         _ => String::new(),
     }
 }
@@ -126,7 +126,7 @@ pub(crate) fn member_caption(item: &PmsMovie) -> TileLabel {
         let caption = match (item.show_title.is_empty(), address.is_empty()) {
             (false, false) => format!("{} · {}", item.show_title, address),
             (false, true) => item.show_title.clone(),
-            (true, false) => address,
+            (true, false) => address.to_string(),
             (true, true) => String::new(),
         };
         return TileLabel::titled(&item.title, &caption);

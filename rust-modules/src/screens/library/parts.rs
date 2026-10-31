@@ -35,7 +35,7 @@ pub(super) fn grid_art(item: &crate::pms::PmsMovie) -> Art<'_> {
 pub(super) fn grid_label(item: &crate::pms::PmsMovie) -> card_row::TileLabel {
     if item.kind == 3 {
         let name = if item.title.is_empty() || item.title == item.show_title {
-            crate::ui::fmt::episode_address(item.season_index as i64, item.ep_index as i64)
+            crate::ui::fmt::episode_address(item.season_index as i64, item.ep_index as i64).to_string()
         } else { item.title.clone() };
         // The shared still overlay already names the show and episode address on the artwork.
         // Focus reveals the episode title and release date, as it does on an episode shelf.

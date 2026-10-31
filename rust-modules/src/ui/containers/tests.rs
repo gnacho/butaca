@@ -1108,12 +1108,18 @@ fn a_surface_spring_and_a_page_spring_are_told_apart_by_the_idle_gate() {
 /// dispatcher asserts it on every presenting frame of a debug build; this is the named test.
 #[test]
 fn prepare_does_not_change_the_logical_state_hash() {
+    // `NoTap` does not want the state hash (§5.4), so this test arms it through the same
+    // capability a recording tap uses.
+    struct WantsState;
+    impl crate::ui::dispatch::Tap<FixtureHost> for WantsState {
+        fn wants_state(&self) -> bool { true }
+    }
     let (mut d, mut rig, _) = booted();
     // an event frame that presents: `r.state_hash` is taken after the drains and BEFORE prepare
     // and draw; the hash after the frame must be the same number
-    let r = d.frame(&mut rig, tick(16), vec![key(Key::Ok, tick(16))], vec![], &mut NoTap);
+    let r = d.frame(&mut rig, tick(16), vec![key(Key::Ok, tick(16))], vec![], &mut WantsState);
     assert!(r.presented, "the key invalidated");
-    let pre_prepare = r.state_hash.expect("an event frame hashes");
+    let pre_prepare = r.state_hash.expect("a state-wanting tap hashes the event frame");
     assert_eq!(d.state_hash(), pre_prepare);
 }
 

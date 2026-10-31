@@ -76,6 +76,26 @@ pub(crate) fn clock(ms: i64) -> String {
     }
 }
 
+/// The memo behind [`episode_address`] — a per-thread render cache, the same shape as
+/// `text::FittedLines`. The address is a pure function of `(season, index)` and the CURRENT
+/// language, so it is cached on that triple: a hit clones the stored `Rc` (a refcount bump, no
+/// allocation) instead of rebuilding the `Vec`, the two i18n strings and the join every frame.
+///
+/// The LANGUAGE is part of the key because the same numbers must read differently per catalog,
+/// and tests resolve the locale PER THREAD (`i18n::language_on_this_thread_for_test`) — a
+/// language-less memo would hand a Be-reading test the En address a previous test cached. The
+/// pseudo locale is its own `Language` variant, so expanded `[!! … !!]` labels cannot collide
+/// with English either. `512` is the same ceiling `FittedLines` keeps; a screen's live addresses
+/// are dozens, so it only bounds a session that browses thousands of episodes.
+#[derive(Default)]
+struct AddressMemo {
+    entries: std::collections::HashMap<(i64, i64, crate::i18n::Language), std::rc::Rc<str>>,
+}
+
+thread_local! {
+    static ADDRESS_MEMO: std::cell::RefCell<AddressMemo> = Default::default();
+}
+
 /// An episode's ADDRESS inside its show — `"S2, E3"`, with no title. The detail page's hero meta
 /// line draws it bare (the title band above it already IS the episode's name, so repeating it there
 /// would be the one line on the page that says nothing new), and [`episode_kicker`] is this plus the
@@ -96,15 +116,28 @@ pub(crate) fn clock(ms: i64) -> String {
 /// The MIDDOT is what separates this from [`episode_ordinal`]'s `S1, E3`, and the two are kept
 /// apart deliberately: this one is a printed mark on artwork, sized and inked as its own line,
 /// while the ordinal is a run inside sentences elsewhere in the app.
-pub(crate) fn episode_address(season: i64, index: i64) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    if season > 0 {
-        parts.push(crate::i18n::msg::core_season(season));
-    }
-    if index > 0 {
-        parts.push(crate::i18n::msg::core_episode(index));
-    }
-    parts.join(" \u{b7} ")
+pub(crate) fn episode_address(season: i64, index: i64) -> std::rc::Rc<str> {
+    let key = (season, index, crate::i18n::current().language());
+    ADDRESS_MEMO.with(|slot| {
+        let mut memo = slot.borrow_mut();
+        if let Some(hit) = memo.entries.get(&key) {
+            std::rc::Rc::clone(hit)
+        } else {
+            let mut parts: Vec<String> = Vec::new();
+            if season > 0 {
+                parts.push(crate::i18n::msg::core_season(season));
+            }
+            if index > 0 {
+                parts.push(crate::i18n::msg::core_episode(index));
+            }
+            let built: std::rc::Rc<str> = std::rc::Rc::from(parts.join(" \u{b7} "));
+            if memo.entries.len() >= 512 {
+                memo.entries.clear();
+            }
+            memo.entries.insert(key, std::rc::Rc::clone(&built));
+            built
+        }
+    })
 }
 
 /// A collection's size — `"1 item"`, `"12 items"`. ONE formatter for the collection page's meta
@@ -190,7 +223,7 @@ pub(crate) fn resolution(res: &str, width: i64, height: i64) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::resolution;
+    use super::{episode_address, resolution};
 
     /// The mapping is fed PMS's own values, and PMS string-encodes them — including the ones that
     /// look like integers ("1080"), which is the case that must come out as "1080p" and not as a
@@ -224,6 +257,28 @@ mod tests {
         );
         assert_eq!(resolution("", 0, 1080).as_deref(), Some("1080p")); // width absent → from height
         assert_eq!(resolution("", 0, 0), None); // no video at all (a show container) → no badge
+    }
+
+    /// The frame-loop hot path calls `episode_address` once per visible tile; identical inputs
+    /// must reuse the cached allocation rather than rebuild it, and the LANGUAGE is part of the
+    /// key so a per-thread locale change reads the right catalog instead of a stale one.
+    #[test]
+    fn episode_address_memo_reuses_identical_inputs_and_keys_on_language() {
+        let en = episode_address(2, 3);
+        assert_eq!(&*en, "S2 · E3");
+        assert!(std::rc::Rc::ptr_eq(&en, &episode_address(2, 3)),
+            "identical inputs must reuse the cached value, not rebuild it each call");
+
+        let be = crate::i18n::language_on_this_thread_for_test(crate::i18n::Preference::Be);
+        let be_addr = episode_address(2, 3);
+        assert_eq!(&*be_addr, "С2 · Э3", "the same numbers must read in the other language");
+        assert!(!std::rc::Rc::ptr_eq(&en, &be_addr), "language is part of the memo key");
+        drop(be);
+
+        let en_again = episode_address(2, 3);
+        assert_eq!(&*en_again, "S2 · E3");
+        assert!(std::rc::Rc::ptr_eq(&en, &en_again),
+            "returning to English must restore the English cache entry");
     }
 }
 

@@ -141,10 +141,20 @@ impl Reply {
 /// failing (`plex/CLAUDE.md`), so this constant is shared rather than spelled per call site.
 pub(crate) const ACCEPT_JSON: &str = "Accept: application/json";
 
+/// The response-body ceiling for a BULK/JSON read (library catalogs, hubs, search). A healthy PMS
+/// answer can be large, but a hostile one must not inflate an unbounded allocation past the
+/// process's 160 MB telemetry budget (issue #131).
+pub(crate) const BULK_JSON_MAX_BYTES: usize = 64 * 1024 * 1024;
+
+/// The response-body ceiling for artwork/images fetched through the BULK path. The poster store
+/// re-caps committed files at imgcache's 4 MiB AFTER download; this bounds the in-flight read
+/// itself, which is the allocation a hostile server could otherwise inflate without limit.
+pub(crate) const BULK_ART_MAX_BYTES: usize = 8 * 1024 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BodyPolicy {
     Api,
-    Bulk,
+    Bulk { max: usize },
     Probe { max: usize, timeout_s: i32 },
     Deadline { at: std::time::Instant },
 }
@@ -210,14 +220,27 @@ pub(crate) fn request_post_json(
 
 /// A PMS request whose response size is content-dependent. Only the TLS arm differs from
 /// [`request`]: it keeps the connect timeout and disables the 25 s whole-transfer deadline.
+/// `max_body` is the response-body ceiling on BOTH arms: the caller names the budget that fits
+/// what it asked for ([`BULK_JSON_MAX_BYTES`] for JSON, [`BULK_ART_MAX_BYTES`] for artwork), and
+/// a body past it fails the read closed rather than truncating.
 pub(crate) fn request_bulk(
     origin: &Origin,
     path: &str,
     method: Method,
     headers: &[&str],
+    max_body: usize,
     pin: Option<&ResolvePin>,
 ) -> Option<Reply> {
-    request_with(origin, path, method, headers, BodyPolicy::Bulk, pin, &[]).response()
+    request_with(
+        origin,
+        path,
+        method,
+        headers,
+        BodyPolicy::Bulk { max: max_body },
+        pin,
+        &[],
+    )
+    .response()
 }
 
 /// A small control-plane request inside an already-running transaction reserve. Plaintext composes
@@ -562,15 +585,6 @@ fn plaintext(
             method.as_str(),
             req_body,
         ),
-        _ if !req_body.is_empty() => crate::stream::http_open_body(
-            &mut *hs,
-            host_c.as_ptr(),
-            origin.port(),
-            path_c.as_ptr(),
-            extra_ptr,
-            method.as_str(),
-            req_body,
-        ),
         _ => crate::stream::http_open(
             &mut *hs,
             host_c.as_ptr(),
@@ -609,12 +623,16 @@ fn plaintext(
             // exactly-full body followed by EOF from a body that is actually too large, without
             // ever extending `body` past the cap.
             let room = match body_policy {
-                BodyPolicy::Probe { max, .. } => max.saturating_sub(body.len()),
-                BodyPolicy::Api | BodyPolicy::Bulk | BodyPolicy::Deadline { .. } => chunk.len(),
+                BodyPolicy::Probe { max, .. } | BodyPolicy::Bulk { max } => {
+                    max.saturating_sub(body.len())
+                }
+                BodyPolicy::Api | BodyPolicy::Deadline { .. } => chunk.len(),
             };
             let want = match body_policy {
-                BodyPolicy::Probe { .. } => chunk.len().min(room.saturating_add(1)),
-                BodyPolicy::Api | BodyPolicy::Bulk | BodyPolicy::Deadline { .. } => chunk.len(),
+                BodyPolicy::Probe { .. } | BodyPolicy::Bulk { .. } => {
+                    chunk.len().min(room.saturating_add(1))
+                }
+                BodyPolicy::Api | BodyPolicy::Deadline { .. } => chunk.len(),
             };
             let (n, read_deadline_owner) = match body_policy {
                 BodyPolicy::Deadline { at } => {
@@ -655,7 +673,9 @@ fn plaintext(
             if n == 0 {
                 break;
             }
-            if matches!(body_policy, BodyPolicy::Probe { .. }) && n as usize > room {
+            if matches!(body_policy, BodyPolicy::Probe { .. } | BodyPolicy::Bulk { .. })
+                && n as usize > room
+            {
                 overflowed = true;
                 break;
             }
@@ -735,7 +755,7 @@ fn tls(
     let body: Option<&[u8]> = matches!(method, Method::Post).then_some(&[][..]);
     let (timeouts, max_body, caller_owns_timeout) = match body_policy {
         BodyPolicy::Api => (crate::net::API, None, false),
-        BodyPolicy::Bulk => (crate::net::BULK, None, false),
+        BodyPolicy::Bulk { max } => (crate::net::BULK, Some(max), false),
         BodyPolicy::Deadline { at } => {
             let now = std::time::Instant::now();
             if now >= at {
@@ -1067,6 +1087,59 @@ mod tests {
 
         let origin = Origin::http("127.0.0.1", port as i32);
         assert!(request_probe(&origin, "/identity", Method::Get, &[ACCEPT_JSON], 4, 1, None).is_err());
+        server.join().expect("server");
+    }
+
+    /// The BULK ceiling is the same FAIL-CLOSED read the probe ceiling is: a body past it aborts
+    /// the transfer (no truncation, no panic), so a hostile PMS answering a catalog read with an
+    /// unbounded body cannot drive the process past its memory budget.
+    #[test]
+    fn a_bulk_body_past_the_ceiling_is_refused_on_plaintext() {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("address").port();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept");
+            let mut request = [0u8; 1024];
+            let _ = socket.read(&mut request).expect("request");
+            // Five body bytes against a four-byte ceiling: the read must stop and fail, not buffer.
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nabcde",
+                )
+                .expect("response");
+        });
+
+        let origin = Origin::http("127.0.0.1", port as i32);
+        assert!(request_bulk(&origin, "/identity", Method::Get, &[ACCEPT_JSON], 4, None).is_none());
+        server.join().expect("server");
+    }
+
+    /// A BULK body that fits under the ceiling completes: the ceiling is a refusal point, not a
+    /// clamp that would silently drop bytes from a healthy response.
+    #[test]
+    fn a_bulk_body_within_the_ceiling_completes_on_plaintext() {
+        use std::io::{Read, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("address").port();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept");
+            let mut request = [0u8; 1024];
+            let _ = socket.read(&mut request).expect("request");
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nabcd",
+                )
+                .expect("response");
+        });
+
+        let origin = Origin::http("127.0.0.1", port as i32);
+        let reply = request_bulk(&origin, "/identity", Method::Get, &[ACCEPT_JSON], 4, None)
+            .expect("a within-ceiling body completes");
+        assert_eq!(reply.status, 200);
+        assert_eq!(reply.body, b"abcd");
         server.join().expect("server");
     }
 
