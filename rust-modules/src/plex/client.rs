@@ -28,7 +28,7 @@ use std::sync::RwLock;
 
 /// `Accept: application/json`, from [`crate::http`] — one spelling for both transports, and
 /// without the CRLF the raw socket used to want (each transport frames its own headers now).
-use crate::http::ACCEPT_JSON;
+use crate::http::{ACCEPT_JSON, BULK_ART_MAX_BYTES, BULK_JSON_MAX_BYTES};
 
 /// A deadline-bearing JSON request after the client has applied the HTTP-success and parser
 /// contract. The completed response remains attached even when it is non-2xx or malformed; the
@@ -498,8 +498,10 @@ impl Client {
 
     /// The status-preserving read twin of [`Client::send`] for a content-dependent PMS body. On
     /// HTTPS it keeps the connect deadline but has no 25 s whole-transfer cutoff; on plaintext it
-    /// is the same socket policy `stream.rs` has always used.
-    fn send_bulk(&self, path_no_token: &str, headers: &[&str]) -> Option<http::Reply> {
+    /// is the same socket policy `stream.rs` has always used. `max_body` is the response-body
+    /// ceiling the caller's content needs ([`crate::http::BULK_JSON_MAX_BYTES`] for JSON,
+    /// [`crate::http::BULK_ART_MAX_BYTES`] for artwork), enforced on either transport.
+    fn send_bulk(&self, path_no_token: &str, headers: &[&str], max_body: usize) -> Option<http::Reply> {
         if !self.may_send() { return None; }
         let owned = pms_headers(headers);
         let headers: Vec<&str> = owned.iter().map(String::as_str).collect();
@@ -508,13 +510,14 @@ impl Client {
             &self.with_token(path_no_token),
             Method::Get,
             &headers,
+            max_body,
             self.resolve_pin.as_ref(),
         )
     }
 
     /// The 2xx-folding twin of [`Client::send_bulk`] used by ordinary content-dependent reads.
-    fn body_2xx_bulk(&self, path_no_token: &str, headers: &[&str]) -> Option<Vec<u8>> {
-        let r = self.send_bulk(path_no_token, headers)?;
+    fn body_2xx_bulk(&self, path_no_token: &str, headers: &[&str], max_body: usize) -> Option<Vec<u8>> {
+        let r = self.send_bulk(path_no_token, headers, max_body)?;
         r.ok().then_some(r.body)
     }
 
@@ -535,7 +538,7 @@ impl Client {
         let mut request_headers = Vec::with_capacity(headers.len() + 1);
         request_headers.push(ACCEPT_JSON);
         request_headers.extend_from_slice(headers);
-        let body = self.body_2xx_bulk(path_no_token, &request_headers)?;
+        let body = self.body_2xx_bulk(path_no_token, &request_headers, BULK_JSON_MAX_BYTES)?;
         match serde_json::from_slice::<Envelope>(&body) {
             Ok(e) => Some(e.media_container),
             Err(e) => {
@@ -563,7 +566,7 @@ impl Client {
     /// meanings. This deliberately sits beside, rather than changes, the long-standing `get_json`
     /// collapse used by all other PMS reads.
     pub(super) fn get_json_status(&self, path_no_token: &str) -> JsonStatusOutcome {
-        let Some(reply) = self.send_bulk(path_no_token, &[ACCEPT_JSON]) else {
+        let Some(reply) = self.send_bulk(path_no_token, &[ACCEPT_JSON], BULK_JSON_MAX_BYTES) else {
             return JsonStatusOutcome::Transport;
         };
         let parsed = if reply.ok() {
@@ -625,7 +628,7 @@ impl Client {
 
     /// GET raw bytes (image transcode / sidecar sub) — caller decodes.
     pub(super) fn get_bytes(&self, path_no_token: &str) -> Option<Vec<u8>> {
-        self.body_2xx_bulk(path_no_token, &[])
+        self.body_2xx_bulk(path_no_token, &[], BULK_ART_MAX_BYTES)
     }
 
     /// A size-bounded body on either transport, with a finite stalled-transfer timeout.
@@ -678,6 +681,7 @@ impl Client {
             path_with_token,
             Method::Get,
             &headers,
+            BULK_ART_MAX_BYTES,
             self.resolve_pin.as_ref(),
         ) {
             Some(r) if r.ok() => ArtFetch::Bytes(r.body),
