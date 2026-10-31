@@ -49,6 +49,7 @@
 //!   cache rather than keep a second copy of the session live.
 use super::origin::Origin;
 use super::probe::Location;
+pub(crate) use crate::librecord::{OpaqueExtensions, TypedLib};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::sync::Mutex;
@@ -394,23 +395,6 @@ impl Drop for TempSession {
         let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
-
-#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
-pub(crate) struct OpaqueExtensions(pub(crate) BTreeMap<String, Value>);
-
-impl OpaqueExtensions {
-    fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-}
-
-impl std::fmt::Debug for OpaqueExtensions {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("<opaque extensions>")
-    }
-}
-
 
 /// The full persisted session. Empty fields mean "not logged in yet" for that stage.
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -1582,22 +1566,6 @@ pub struct LastLibrary {
     /// the same convention [`HomePins`] and [`RecentSearches`] use, and for the same reason.
     pub user: String,
     pub libs: Vec<TypedLib>,
-    #[serde(flatten, default, skip_serializing_if = "OpaqueExtensions::is_empty")]
-    pub(crate) extensions: OpaqueExtensions,
-
-}
-
-/// One remembered library, tagged with the TYPE whose tab it answers for.
-///
-/// `kind` is the wire's own `Directory.type` string (`movie` / `show`) rather than an enum
-/// discriminant, so a reordered `SecKind` cannot silently repoint an entry written by an older
-/// build — the same reason [`PinnedLib`] keys on a machine id rather than a roster position.
-#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
-#[serde(default)]
-pub struct TypedLib {
-    pub kind: String,
-    pub machine_id: String,
-    pub key: i64,
     #[serde(flatten, default, skip_serializing_if = "OpaqueExtensions::is_empty")]
     pub(crate) extensions: OpaqueExtensions,
 

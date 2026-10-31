@@ -3122,7 +3122,7 @@ impl SecKind {
             _ => None,
         }
     }
-    /// The inverse of [`from_wire`](Self::from_wire), and the key `plex::session::TypedLib`
+    /// The inverse of [`from_wire`](Self::from_wire), and the key `crate::librecord::TypedLib`
     /// records a remembered library under. A new string for Video keeps old Movie and Show records
     /// on their original libraries.
     pub(crate) fn wire(self) -> &'static str {

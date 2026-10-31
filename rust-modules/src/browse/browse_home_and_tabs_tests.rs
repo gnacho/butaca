@@ -1207,7 +1207,7 @@ fn the_movies_tab_prefers_the_households_library_over_a_friends() {
         let user = crate::plex::session::current_profile_key();
         next.last_library.retain(|l| l.user != user);
         let mut libs = crate::plex::session::LastLibrary { user, ..Default::default() };
-        libs.libs.push(crate::plex::session::TypedLib {
+        libs.libs.push(crate::librecord::TypedLib {
             kind: SecKind::Movie.wire().to_string(),
             machine_id: "nas-home".into(),
             key: 1,
