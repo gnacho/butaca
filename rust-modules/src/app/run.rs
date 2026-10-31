@@ -4013,6 +4013,24 @@ mod lifecycle_regression_tests {
         }
     }
 
+    /// Settle until a condition holds, stepping the app until it does. The lifecycle rig drives
+    /// REAL worker threads (fixture server, session teardown), so a fixed step count has no
+    /// bound on how many frames the handoff needs — on a loaded CI box the fixed `settle` was
+    /// observed losing the race (upstream #1111). Wait on the condition itself, never on the
+    /// step count, the same discipline `poll_until` applies in wall-clock units. The extra
+    /// `settle` after the condition lets the follow-up frames (route commit, dip-out) drain
+    /// before the assertions read the tree.
+    fn settle_until(app: &mut App, t: &mut u32, reason: &str, mut ready: impl FnMut(&App) -> bool) {
+        for _ in 0..5000 {
+            step(app, t, vec![]);
+            if ready(app) {
+                settle(app, t);
+                return;
+            }
+        }
+        panic!("{reason}");
+    }
+
     /// **Press Play, and let the plan land INSIDE the player push's dip-out** — the order the
     /// television produces whenever the resolve is quicker than the 140 ms fade. `start_playback`
     /// pushes the player while the plan is still resolving; the next frame's dip-out PREPARES the
@@ -4101,7 +4119,12 @@ mod lifecycle_regression_tests {
         let origin = play_with_a_landing_inside_the_dip(&mut rig, &mut t);
         assert!(crate::route::up_next(&rig.app.player.session).is_none(), "a film: nothing queued");
         crate::player::SHARED.ended.store(true, std::sync::atomic::Ordering::Relaxed);
-        settle(&mut rig.app, &mut t);
+        settle_until(
+            &mut rig.app,
+            &mut t,
+            "the player never exited after end of stream",
+            |app| super::super::bridge::player(&app.pages).is_none(),
+        );
         assert!(
             rig.app.route().same_instance(&detail_arg(rig.sid)),
             "end of stream landed on {:?}, not the detail page",
