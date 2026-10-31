@@ -168,6 +168,10 @@ pub trait Tap<H: Host> {
     fn present(&mut self, _f: u64, _bit: bool, _why: Option<super::present::Provenance>) {}
     /// After the frame's drains, on a frame that had events: the logical-state hash.
     fn state(&mut self, _f: u64, _hash: u64) {}
+    /// Whether `state` is consumed this frame. The dispatcher folds the full Canon tree and
+    /// queue only when a tap says it wants the hash — `NoTap` and an unarmed recorder do not,
+    /// so release frames skip the most expensive fold with no consumer (§5.4).
+    fn wants_state(&self) -> bool { false }
     /// After the drains: the engine's resolved focus for the input owner, as
     /// `(entry, index, group)`.
     fn focus(&mut self, _f: u64, _focus: Option<(u32, u32, Option<u32>)>) {}
@@ -320,7 +324,7 @@ pub struct FrameReport {
     /// Bodies that DREW this frame, in draw order — the cold-open clock's STOP.
     pub drawn: Vec<InstanceId>,
     pub dropped_deliveries: u32,
-    /// The logical-state hash, on an event frame.
+    /// The logical-state hash, on an event frame the tap wanted (§5.4); `None` otherwise.
     pub state_hash: Option<u64>,
     /// The host fold this frame (§8.3): what the page beneath the surfaces did.
     pub host_update: Option<HostUpdate>,
@@ -1041,7 +1045,7 @@ where
         }
         tap.focus(f, self.focus_record());
         let timers_fired = report.steps_pre > 0 && event_frame;
-        if event_frame || timers_fired {
+        if (event_frame || timers_fired) && tap.wants_state() {
             let h = self.state_hash();
             tap.state(f, h);
             report.state_hash = Some(h);
