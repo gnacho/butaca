@@ -1522,9 +1522,7 @@ impl Bridge {
                 }
                 self.session_adapter.coordinator(action);
             }
-            SessionFx::RestartReply { to, accepted } => out.push(Fx::Deliver(
-                MachineId::Instance(InstanceId(to.instance)), Delivery::Screen(ScreenEvent::Async(
-                    RequestId(to.correlation), AppMsg::RestartReply { correlation: to.correlation, accepted })))),
+            SessionFx::RestartReply { .. } => {}
             SessionFx::SelectionReply { to, accepted, flow_epoch } => out.push(Fx::Deliver(
                 MachineId::Instance(InstanceId(to.instance)), Delivery::Screen(ScreenEvent::Async(
                     RequestId(to.correlation), AppMsg::SelectionReply { correlation: to.correlation, accepted, flow_epoch })))),
@@ -2701,16 +2699,6 @@ pub(crate) fn nav_pop_to(d: &mut Dispatcher<AppHost>, entry: EntryId) {
 pub(crate) fn nav_cancel(d: &mut Dispatcher<AppHost>) -> bool {
     let Some(top) = d.nav.top_page().map(|e| e.id) else { return false };
     d.nav.tabs.stack.cancel(top)
-}
-
-/// **Seat the who's-watching picker for a PROFILE SWITCH** — the one door, so that dropping the
-/// outgoing profile's pages cannot be forgotten at one of the sites that switch.
-///
-/// `reset_for_profile` had no production caller at all before D1; see
-/// `switching_profile_leaves_the_container_holding_nothing_of_the_previous_profile`.
-pub(crate) fn switch_profile(d: &mut Dispatcher<AppHost>) {
-    d.reset_for_profile();
-    d.request(MachineId::Nav, NavOp::Root(AppArg::Profiles));
 }
 
 /// **The OS took the screen** (SDL `0x103`/`0x104`): the tree is PARKED (§9, §12.1).

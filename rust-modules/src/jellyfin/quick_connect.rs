@@ -210,7 +210,7 @@ pub(crate) fn reset() {
     set_phase(Phase::Editing);
 }
 
-#[cfg(all(test, feature = "jellyfin"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -227,6 +227,11 @@ mod tests {
 
     #[test]
     fn plaintext_credentials_off_the_lan_are_refused_before_the_wire() {
+        let _guard = crate::testlock::serial();
+        crate::jellyfin::install(JfClient::new(
+            crate::origin::Origin::http("192.168.1.20", 8096),
+            "dev-test".into(),
+        ));
         // The SHIPPED rule is graded here, not this (dev-featured) build's: `devtriggers` relaxes
         // the gate for lab work, so the test asks the policy directly with the relaxation off.
         let origin = crate::origin::Origin::parse("http://203.0.113.10:8096").unwrap();
@@ -249,10 +254,12 @@ mod tests {
             ),
             "…while the LAN literal stays allowed"
         );
+        crate::jellyfin::uninstall();
     }
 
     #[test]
     fn a_stale_outcome_is_discarded() {
+        let _guard = crate::testlock::serial();
         let epoch = EPOCH.load(Ordering::SeqCst);
         *MAIL.lock().unwrap() = Some(Outcome {
             epoch,

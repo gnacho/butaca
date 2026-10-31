@@ -1,36 +1,19 @@
-//! The **profile menu** — a registered `Style::Sheet` surface on the shared `ModalStack`, opened
-//! from the top-left profile chip. Switch Plex Home profile ("Change profile" → who's-watching),
-//! "Sign out", "Sign in", Settings, and — in a lab build — "Send diagnostics".
+//! The **account menu** - a registered `Style::Sheet` surface on the shared `ModalStack`, opened
+//! from the top-left profile chip. Jellyfin sign-out or sign-in, Settings, and - in a lab build -
+//! "Send diagnostics". No Plex profile action is offered.
 //!
-//! **Navigation owns its lifetime, its phase, its input scope and its dim.** It was
-//! `ui/account_menu.rs` — a `Popover` plus three `static mut`s (`POP`, `TABLE`, `ROWS`) driven by
-//! a `Route::Account { over: BarHost }` and a `key_account` ladder in the loop — until restructure
-//! phase 10. What that route existed for is exactly what a surface gives for free: the page under
-//! the panel stays on screen and stays the top PAGE, so there is nothing to name and nowhere to
-//! "close back to". `BarHost` and the route variant are gone with it.
+//! **Navigation owns its lifetime, its phase, its input scope and its dim.** The page under the
+//! panel stays on screen and stays the top PAGE, so there is nothing to name and nowhere to close
+//! back to.
 //!
-//! Two things stay here that a reader may expect to find elsewhere, and both are deliberate:
-//!
-//! **The rows are a function of the account state, and that state is the persisted session** —
-//! `Session::account`, read at mount and refreshed when the visible session changes. It used to be
-//! `session::current().is_some()`, which is a *sentinel*, not a fact: the single-user (no Plex
-//! Home) path leaves the active profile an empty `UserRef`, so every surface deciding on its
-//! emptiness told a signed-in owner they were signed out. `peek`, not `load`: a menu opening must
-//! never be able to WRITE the session file (`ci/check-deps.sh`'s `sessionwrite` gate).
-//!
-//! **[`chip_label`] lives here, beside the rows it has to agree with.** `ui/widgets.rs`'s
-//! `profile_chip` labelled itself from `title.is_empty()`, so on a single-user account the two
-//! surfaces disagreed on one screen: the menu headed itself with the owner's name while the chip
-//! that opens it said "Sign in". Fixed 2026-08-23 by MOVING THE WORDS to one resolver rather than
-//! writing the match a second time; two surfaces cannot drift on a question only one of them
-//! answers. That is why `ui/widgets.rs` and `app/chrome.rs` both call INTO this module — the one
-//! place in the tree where `ui/` names `screens/` in production code, and a debt that dies with
-//! `profile_chip`'s standalone re-derivation when the frame plan lands (phase 11).
+//! The rows come only from the installed Jellyfin client. A legacy Plex session is never an
+//! account source. [`chip_label`] stays beside the rows because the app chrome and this menu must
+//! agree on the account words they present.
 
 use std::borrow::Cow;
 
 use crate::plex::session::Account;
-use crate::screens::registry::{AppFx, AppLike, AuthLike, LoopReq};
+use crate::screens::registry::{AppFx, AppLike, LoopReq};
 use crate::ui::frame::Budget;
 use crate::ui::machine::{
     Canon, Cx, Edge, Effects, EntryId, FocusKey, Fx, GroupId, Handled, InputKind, Key,
@@ -47,7 +30,6 @@ use crate::ui::Rect;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Action {
     None,
-    ChangeProfile,
     SignIn,
     SignOut,
     /// **Settings** — the reachable owner of Home sources, Privacy, Legal notices and About
@@ -73,35 +55,14 @@ const PANEL_RAD: f32 = 24.0;
 pub(crate) const SHAPE: &str =
     "AccountMenu{header:str,rows:[u32],sel:u32,table:TableViewMotion}";
 
-/// The rows for an account state, in order. Signed out, the only truthful action is signing in;
-/// offering "Change profile" there dead-ends in an empty who's-watching screen. Signed in, "Sign
-/// in" is a lie, so it is never offered — "Change profile" is, whenever plex.tv can serve a roster.
-///
-/// `switch_refused` is the Session's published verdict that it CANNOT for the identity in use
-/// ([`crate::auth::owner::SessionSnapshot::switch_refused`]): plex.tv refused this identity a
-/// roster with nothing cached, or the session is a dev-token one. The row is hidden then, the same
-/// way a server-only session's is — it would open #132's read-out and nothing else. No verdict
-/// (never asked, plex.tv unreachable) keeps the row, because the row is what asks.
-fn rows_for(acc: &Account, switch_refused: bool) -> &'static [Action] {
-    // The lab row is a THIRD axis rather than an append, so every row set stays a `&'static`
-    // slice and [`action_at`]'s index mapping keeps working unchanged. Six arms is the price of
-    // not allocating a row vector per open; the alternative was a `Vec` in a static.
-    match (
-        acc.signed_in,
-        acc.can_switch && !switch_refused,
-        crate::lab::menu_row_enabled(),
-    ) {
-        (false, _, false) => &[Action::SignIn, Action::Settings],
-        (false, _, true) => &[Action::SignIn, Action::Settings, Action::SendDiagnostics],
-        (true, true, false) => &[Action::ChangeProfile, Action::SignOut, Action::Settings],
-        (true, true, true) => &[
-            Action::ChangeProfile,
-            Action::SignOut,
-            Action::Settings,
-            Action::SendDiagnostics,
-        ],
-        (true, false, false) => &[Action::SignOut, Action::Settings],
-        (true, false, true) => &[Action::SignOut, Action::Settings, Action::SendDiagnostics],
+/// The rows for a Jellyfin account state, in order. Signed out offers sign-in; signed in offers
+/// sign-out. Settings and the compile-time lab action are independent of account state.
+fn rows_for(signed_in: bool) -> &'static [Action] {
+    match (signed_in, crate::lab::menu_row_enabled()) {
+        (false, false) => &[Action::SignIn, Action::Settings],
+        (false, true) => &[Action::SignIn, Action::Settings, Action::SendDiagnostics],
+        (true, false) => &[Action::SignOut, Action::Settings],
+        (true, true) => &[Action::SignOut, Action::Settings, Action::SendDiagnostics],
     }
 }
 
@@ -131,7 +92,6 @@ pub(crate) fn chip_label(acc: &Account) -> String {
 
 fn label(a: Action) -> &'static str {
     match a {
-        Action::ChangeProfile => crate::i18n::msg::settings_account_change_profile(),
         Action::SignIn => crate::i18n::msg::settings_account_sign_in(),
         Action::SignOut => crate::i18n::msg::settings_account_sign_out(),
         Action::Settings => crate::i18n::msg::settings_account_settings(),
@@ -142,13 +102,12 @@ fn label(a: Action) -> &'static str {
 
 /// Rows that leave for another screen carry the drill-in chevron; "Sign out" acts in place.
 fn drills_in(a: Action) -> bool {
-    matches!(a, Action::ChangeProfile | Action::SignIn | Action::Settings)
+    matches!(a, Action::SignIn | Action::Settings)
 }
 
 /// Rows whose action ends something in place. Never where the menu's focus starts
-/// ([`crate::ui::table::TableView::opening_row`]): with *Change profile* hidden (a refused roster, a
-/// server-only session) *Sign out* is the FIRST row, and a stray OK on a freshly opened menu must
-/// not sign anyone out.
+/// ([`crate::ui::table::TableView::opening_row`]): *Sign out* is the FIRST row while signed in,
+/// and a stray OK on a freshly opened menu must not sign anyone out.
 fn destructive(a: Action) -> bool {
     matches!(a, Action::SignOut)
 }
@@ -193,12 +152,6 @@ pub(crate) struct AccountMenuScreen {
     header: String,
     rows: &'static [Action],
     table: TableView,
-    /// Rebuild on visible session landings as well as the initial mount. Focus keys name
-    /// actions, not row positions, so a landing cannot turn an armed Settings press into Sign out.
-    session_watch: crate::plex::session::VisibleSessionWatch,
-    /// The Session's published switch verdict the rows were built on
-    /// ([`crate::auth::owner::SessionSnapshot::switch_refused`]) — a change rebuilds them.
-    switch_refused: bool,
     built: bool,
 }
 
@@ -210,63 +163,30 @@ impl AccountMenuScreen {
             rows: &[],
             table: TableView::new(),
             built: false,
-            session_watch: Default::default(),
-            switch_refused: false,
         }
     }
 
-    /// Capture a settled session without blocking storage.
-    fn build(&mut self, switch_refused: bool) {
+    /// Build only from the installed Jellyfin client. A legacy Plex session is never an
+    /// account source for this menu.
+    fn build(&mut self) {
         if self.built {
             return;
         }
-        // The Jellyfin flavor: no Plex session ever settles here (nothing loads one), so the
-        // guard below would leave the panel EMPTY forever. The account facts live on the
-        // installed client — the same source `Session::account`'s jellyfin arm reads, with the
-        // same precedence: a signed-in Jellyfin user outranks any Plex session on disk.
-        #[cfg(feature = "jellyfin")]
-        if let Some(client) = crate::jellyfin::client() {
-            if let Some(name) = client.user_name() {
-                self.built = true;
-                let acc = crate::plex::session::Account {
-                    signed_in: true,
-                    can_switch: false,
-                    name: Some(name.clone()),
-                };
-                self.switch_refused = switch_refused;
-                self.rows = rows_for(&acc, switch_refused);
-                self.header = name;
-                let mut sec = Section::new(self.header.clone());
-                for a in self.rows {
-                    sec = sec.row(Row::new(label(*a)).chevron(drills_in(*a)).destructive(destructive(*a)));
-                }
-                self.table.compact = true;
-                self.table.open_sections(vec![sec]);
-                return;
-            }
-        }
-        let Some(sess) = crate::plex::session::peek_settled() else { return };
         self.built = true;
         let selected = action_at(self.rows, self.table.sel);
-        let cur = crate::plex::session::current();
-        let acc = sess.account(cur.as_ref());
-        self.switch_refused = switch_refused;
-        self.rows = rows_for(&acc, switch_refused);
-        self.header = acc.name.unwrap_or_else(|| crate::i18n::msg::settings_account_title().to_string());
+        let name = crate::jellyfin::client().and_then(|client| client.user_name());
+        let signed_in = name.is_some();
+        self.rows = rows_for(signed_in);
+        self.header = name.unwrap_or_else(|| crate::i18n::msg::settings_account_title().to_string());
         let mut sec = Section::new(self.header.clone());
         for a in self.rows {
             sec = sec.row(Row::new(label(*a)).chevron(drills_in(*a)).destructive(destructive(*a)));
         }
-        // small one-word action list — BODY labels, not menu-size HEADLINE bold
         self.table.compact = true;
-        // The action that was focused keeps its row when it survives the rebuild; otherwise (the
-        // first build, or the row was taken away under an open menu) the menu OPENS afresh.
         match self.rows.iter().position(|a| *a == selected) {
             Some(row) => self.table.set_sections(vec![sec], row as i32, false),
             None => self.table.open_sections(vec![sec]),
         }
-        // `rows` *is* the index→action map, so it must stay one-to-one with what was built above;
-        // a row appended here and not to `rows_for` is exactly the drift this replaced.
         debug_assert_eq!(self.rows.len() as i32, self.table.n_rows());
     }
 
@@ -287,7 +207,6 @@ impl AccountMenuScreen {
         // reaches `crate::lab`. None of them is expressible as a `Fx::Nav`, which is why they are
         // requests rather than effects a screen performs itself (§2.1, §14).
         let req = match act {
-            Action::ChangeProfile => Some(LoopReq::AccountChangeProfile),
             Action::SignIn => Some(LoopReq::AccountSignIn),
             Action::SignOut => Some(LoopReq::AccountSignOut),
             Action::Settings => Some(LoopReq::AccountSettings),
@@ -312,19 +231,15 @@ impl AccountMenuScreen {
     }
 }
 
-impl<H: AuthLike> Machine<H> for AccountMenuScreen {
+impl<H: AppLike> Machine<H> for AccountMenuScreen {
     type Ev = ScreenEvent<H>;
     fn step(&mut self, ev: &Self::Ev, cx: &Cx<'_, H>, fx: &mut Effects<'_, H>) -> Handled {
-        let switch_refused = H::auth(cx).0.switch_refused;
         match ev {
-            ScreenEvent::Mount => self.build(switch_refused),
+            ScreenEvent::Mount => self.build(),
             ScreenEvent::Tick(tick) => {
-                if self.session_watch.changed() || switch_refused != self.switch_refused {
-                    self.built = false;
-                }
                 if !self.built {
-                    self.build(switch_refused);
-                    if self.built { fx.invalidate(crate::ui::present::Provenance::Landing(crate::ui::machine::MachineId::Session)); }
+                    self.build();
+                    fx.invalidate(crate::ui::present::Provenance::Landing(crate::ui::machine::MachineId::Session));
                 }
                 self.table.sel = cx
                     .focus
@@ -419,7 +334,7 @@ impl<H: AppLike> Focusable<H> for AccountMenuScreen {
     }
 }
 
-impl<H: AuthLike> Screen<H> for AccountMenuScreen {
+impl<H: AppLike> Screen<H> for AccountMenuScreen {
     fn as_any(&self) -> Option<&dyn std::any::Any> {
         Some(self)
     }
@@ -490,407 +405,22 @@ impl LogicalState for AccountMenuScreen {
     }
 }
 
-/// The (account state → header + rows) table, which is the whole of this module's history: the
-/// words the menu says about the user, and the actions it maps them to.
-///
-/// All eleven moved by NAME from `ui/account_menu.rs` (restructure phase 10). They drive the pure
-/// functions — `Session::account`, [`rows_for`], [`action_at`] — with sessions built in the test,
-/// so they touch no global and need no lock; the seventh drives the live `session::set_current`
-/// and takes `crate::testlock::serial()` for its whole body.
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plex::session::{HomeUserRef, ServerRef, Session, UserRef};
 
-    /// A host whose only view is the Session publication — the one fact the menu reads off it.
-    struct MenuHost;
-    impl crate::ui::machine::Host for MenuHost {
-        type Arg = super::super::family::SettingsPage;
-        type Fx = AppFx;
-        type Msg = crate::screens::registry::AppMsg;
-        type Elem = u32;
-        type Views<'a> = crate::auth::SessionRead<'a>;
-        type Init = super::super::family::NoInit;
-        type Memory = ();
-    }
-    impl AuthLike for MenuHost {
-        fn auth<'a>(cx: &Cx<'a, Self>) -> crate::auth::SessionRead<'a> {
-            cx.views
-        }
-    }
-
-    fn published(switch_refused: bool) -> crate::auth::owner::SessionSnapshot {
-        crate::auth::owner::SessionSnapshot {
-            flow_epoch: 0, phase: crate::auth::Phase::Ready, qr_generation: 0,
-            code: std::sync::Arc::from(""), png: std::sync::Arc::from(Vec::<u8>::new()),
-            code_replaced: false, users: std::sync::Arc::from(Vec::new()),
-            error: std::sync::Arc::from(""), pin_denied: false, profile: None,
-            scope: crate::auth::owner::ProfileScope(0), delete_leftovers: 0,
-            persistence_warning: None, link_trouble: false,
-            discovery_retry: None, plaintext: None,
-            switch_refused, readout_back_resumes: false,
-        }
-    }
-
-    fn tick(menu: &mut AccountMenuScreen, read: &crate::auth::owner::SessionSnapshot) {
-        use crate::ui::machine::{InputOwner, MachineId, Tick};
-        let cx = Cx::<MenuHost> {
-            views: read.read(),
-            tick: Tick::default(), measure: &crate::ui::fixture::FixtureMeasure,
-            press: Default::default(), focus: Default::default(),
-            owner: InputOwner::Entry(EntryId(0)),
-        };
-        let mut out = Vec::new();
-        let mut present = crate::ui::present::Present::new();
-        let mut fx = Effects::new(&mut out, MachineId::Session, &mut present);
-        menu.step(&ScreenEvent::Tick(Tick::default()), &cx, &mut fx);
-    }
-
-    /// #132's dead end, not led into: once the Session KNOWS switching is unavailable for the
-    /// identity in use (plex.tv refused its roster with nothing cached, or a dev-token session),
-    /// *Change profile* is not offered — hidden, the idiom this menu already uses for a server-only
-    /// session. No verdict keeps the row: it is what asks plex.tv again. A verdict landing while
-    /// the menu is open rebuilds it.
     #[test]
-    fn a_known_switch_refusal_hides_change_profile_and_no_verdict_keeps_it() {
-        let s = local(Session { account_token: "acct".into(), ..Default::default() });
-        let acc = s.account(None);
-        assert_eq!(rows_for(&acc, true).iter().map(|a| label(*a)).collect::<Vec<_>>(),
-            vec!["Sign out", "Settings"]);
-        assert_eq!(rows_for(&acc, false)[0], Action::ChangeProfile);
-
-        let _serial = crate::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("account-menu-verdict");
-        crate::plex::session::save(&s);
+    fn signed_out_menu_offers_jellyfin_sign_in_and_settings() {
+        let _guard = crate::testlock::serial();
+        crate::jellyfin::uninstall();
         let mut menu = AccountMenuScreen::new(EntryId(0));
-        tick(&mut menu, &published(false));
-        assert!(menu.rows.contains(&Action::ChangeProfile), "rig: switching is offered");
-        tick(&mut menu, &published(true));
-        assert!(!menu.rows.contains(&Action::ChangeProfile),
-            "a verdict landing under an open menu takes the row away");
-        assert!(menu.rows.contains(&Action::SignOut));
-    }
-
-    /// **A menu never opens with its focus on a destructive action.** #237 hid *Change profile*
-    /// on a refused roster, which left *Sign out* as the first row — and the menu seats its focus on
-    /// the first row, so one stray OK signed the user out (seen on the TV). The opening row skips
-    /// destructive rows; so does the fallback when the focused row is taken away under an open
-    /// menu (the verdict landing while *Change profile* is focused).
-    #[test]
-    fn a_refused_roster_never_opens_the_menu_on_sign_out() {
-        let _serial = crate::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("account-menu-safe-open");
-        crate::plex::session::save(&local(Session { account_token: "acct".into(),
-            ..Default::default() }));
-
-        let mut menu = AccountMenuScreen::new(EntryId(0));
-        tick(&mut menu, &published(true));
-        assert!(!menu.rows.contains(&Action::ChangeProfile), "rig: the roster was refused");
-        assert_eq!(menu.rows[0], Action::SignOut, "rig: Sign out is the first row");
-        assert_ne!(action_at(menu.rows, menu.sel()), Action::SignOut,
-            "the menu opened focused on Sign out");
-        assert_eq!(action_at(menu.rows, menu.sel()), Action::Settings);
-        assert_eq!(menu.opening_action(), Action::Settings,
-            "the focus fallback lands on Sign out");
-
-        // The verdict landing under an open menu whose focus sits on Change profile.
-        let mut menu = AccountMenuScreen::new(EntryId(0));
-        tick(&mut menu, &published(false));
-        assert_eq!(action_at(menu.rows, menu.sel()), Action::ChangeProfile, "rig");
-        tick(&mut menu, &published(true));
-        assert_eq!(action_at(menu.rows, menu.sel()), Action::Settings,
-            "a removed row's focus fell onto Sign out");
-    }
-
-    fn owner(title: &str) -> HomeUserRef {
-        HomeUserRef {
-            title: title.to_string(),
-            admin: true,
-            ..Default::default()
-        }
-    }
-    fn managed(title: &str) -> HomeUserRef {
-        HomeUserRef {
-            title: title.to_string(),
-            ..Default::default()
-        }
-    }
-    #[test]
-    fn session_refresh_rebuilds_an_open_account_menu() {
-        let _serial = crate::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("account-menu-refresh");
-        let mut saved = local(Session { client_id: "synthetic-client".into(),
-            account_token: "synthetic-token".into(), ..Default::default() });
-        saved.home_users = vec![HomeUserRef { title: "Synthetic owner".into(), admin: true,
-            ..Default::default() }];
-        crate::plex::session::install_transient_for_test(true);
-        let mut menu = AccountMenuScreen::new(EntryId(0));
-        menu.build(false);
+        menu.build();
+        assert_eq!(menu.rows, &[Action::SignIn, Action::Settings]);
         assert!(!menu.rows.contains(&Action::SignOut));
-        crate::plex::session::save(&saved);
-        tick(&mut menu, &published(false));
-        assert!(menu.rows.contains(&Action::SignOut));
-        assert!(!menu.rows.contains(&Action::SignIn));
-        assert_eq!(menu.header, "Synthetic owner");
     }
 
-    #[test]
-    fn session_refresh_preserves_action_identity_when_rows_move() {
-        let _serial = crate::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("account-action-identity");
-        let mut menu = AccountMenuScreen::new(EntryId(0));
-        menu.build(false);
-        let settings_key = Action::Settings as u32;
-        assert_eq!(menu.row_of(settings_key), Some(1));
-        crate::plex::session::save(&local(Session { client_id: "synthetic-client".into(),
-            account_token: "synthetic-token".into(), ..Default::default() }));
-        menu.built = false;
-        menu.build(false);
-        assert_eq!(menu.row_of(settings_key), Some(2));
-        assert_eq!(menu.row_of(Action::SignIn as u32), None,
-            "an old Sign in key cannot become the new Sign out action");
-    }
-
-    /// A session that can reach its server, i.e. one the app actually boots into Home on.
-    fn local(mut s: Session) -> Session {
-        s.server = ServerRef {
-            address: "192.0.2.10".into(),
-            port: 32400,
-            token: "srv".into(),
-            ..Default::default()
-        };
-        s
-    }
-    fn menu(s: &Session, active: Option<&UserRef>) -> (String, Vec<&'static str>) {
-        let acc = s.account(active);
-        let rows = rows_for(&acc, false);
-        (
-            acc.name.unwrap_or_else(|| crate::i18n::msg::settings_account_title().to_string()),
-            rows.iter().map(|a| label(*a)).collect(),
-        )
-    }
-
-    /// No session at all: the one honest ACCOUNT action is signing in, with Settings beside it so
-    /// privacy, legal and diagnostics remain reachable without an account.
-    #[test]
-    fn signed_out_profile_menu_does_not_offer_playback_diagnostics() {
-        let (name, rows) = menu(&Session::default(), None);
-        assert_eq!(name, "Account");
-        assert_eq!(rows, vec!["Sign in", "Settings"]);
-    }
-
-    /// THE BUG: a signed-in account with no Plex Home never gets a profile written, so the active
-    /// UserRef is empty — which must read as "signed in, unnamed roster entry aside", never as
-    /// "signed out". The roster's admin entry is what names it.
-    #[test]
-    fn signed_in_without_plex_home_is_named_and_never_offered_sign_in() {
-        let s = local(Session {
-            account_token: "acct".into(),
-            home_users: vec![owner("Gleb")],
-            ..Default::default()
-        });
-        let (name, rows) = menu(&s, Some(&UserRef::default()));
-        assert_eq!(name, "Gleb");
-        assert_eq!(rows, vec!["Change profile", "Sign out", "Settings"]);
-    }
-
-    /// A picked managed profile names the header even though the roster also could.
-    #[test]
-    fn active_profile_outranks_the_roster_owner() {
-        let s = local(Session {
-            account_token: "acct".into(),
-            home_users: vec![owner("Gleb"), managed("Kid")],
-            ..Default::default()
-        });
-        let active = UserRef {
-            title: "Kid".into(),
-            ..Default::default()
-        };
-        let (name, rows) = menu(&s, Some(&active));
-        assert_eq!(name, "Kid");
-        assert_eq!(rows, vec!["Change profile", "Sign out", "Settings"]);
-    }
-
-    /// The roster hop looks for a NAMED entry, admin first: an admin tile that happens to carry an
-    /// empty title must not swallow the name sitting behind it (find-then-filter, the very shape of
-    /// bug this change exists to remove).
-    #[test]
-    fn an_unnamed_admin_does_not_hide_a_named_roster_entry() {
-        let s = local(Session {
-            account_token: "acct".into(),
-            home_users: vec![owner(""), managed("Kid")],
-            ..Default::default()
-        });
-        assert_eq!(menu(&s, Some(&UserRef::default())).0, "Kid");
-    }
-
-    /// An empty roster is UNKNOWN, not "no profiles" (a failed fetch persists an empty vec), so the
-    /// row that re-fetches it stays — hiding it would strand a Plex Home created later.
-    #[test]
-    fn unknown_roster_keeps_the_switch_row_and_says_account() {
-        let s = local(Session {
-            account_token: "acct".into(),
-            ..Default::default()
-        });
-        let (name, rows) = menu(&s, Some(&UserRef::default()));
-        assert_eq!(name, "Account");
-        assert_eq!(rows, vec!["Change profile", "Sign out", "Settings"]);
-    }
-
-    /// A server-only session (no plex.tv token) is still signed IN — it is streaming — but cannot
-    /// switch profiles, because the roster and per-user tokens both come from plex.tv. Only a
-    /// legacy/hand-written auth.json reaches this today (`login_thread` stores the account token
-    /// before discovery), which is exactly why it is pinned rather than assumed away.
-    #[test]
-    fn server_only_session_can_sign_out_but_not_switch() {
-        let s = local(Session {
-            user: UserRef {
-                title: "Gleb".into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        });
-        let (name, rows) = menu(&s, None);
-        assert_eq!(name, "Gleb");
-        assert_eq!(rows, vec!["Sign out", "Settings"]);
-    }
-
-    /// The seam the mount actually uses: the crate-global active profile really does reach the
-    /// header, and clearing it (sign-out) really does fall back through the persisted session.
-    /// Takes `testlock::serial()` for the whole test — the publication resource is process-global.
-    #[test]
-    fn the_live_profile_global_feeds_the_header() {
-        let _serial = crate::testlock::serial();
-        let restore = crate::plex::session::current_snapshot();
-        let s = local(Session {
-            account_token: "acct".into(),
-            home_users: vec![owner("Gleb"), managed("Kid")],
-            ..Default::default()
-        });
-        crate::plex::session::publish_profile_for_test(Some(UserRef {
-            title: "Kid".into(),
-            ..Default::default()
-        }), 41);
-        let picked = menu(&s, crate::plex::session::current().as_ref()).0;
-        crate::plex::session::publish_profile_for_test(None, 42);
-        let cleared = menu(&s, crate::plex::session::current().as_ref()).0;
-        crate::plex::session::publish_profile_for_test(restore.user.clone(), restore.generation);
-        assert_eq!(picked, "Kid");
-        assert_eq!(cleared, "Gleb");
-    }
-
-    /// **The chip and the menu, on one account state.** The chip used to answer this from
-    /// `current().title.is_empty()` and so told a signed-in owner with no Plex Home to sign in; the
-    /// menu behind that same press already headed itself "Gleb" and offered "Sign out". One
-    /// resolver now, and this is the test that says the two agree.
-    #[test]
-    fn the_chip_and_its_menu_say_the_same_thing_about_the_account() {
-        // THE BUG: single-user account, empty active profile, named by the roster's admin entry
-        let s = local(Session {
-            account_token: "acct".into(),
-            home_users: vec![owner("Gleb")],
-            ..Default::default()
-        });
-        let acc = s.account(Some(&UserRef::default()));
-        assert_eq!(chip_label(&acc), "Gleb");
-        assert_eq!(
-            chip_label(&acc),
-            menu(&s, Some(&UserRef::default())).0,
-            "chip and header, one name"
-        );
-        assert!(
-            !rows_for(&acc, false).contains(&Action::SignIn),
-            "…and the menu never offered Sign in"
-        );
-
-        // signed in, no roster has ever landed: a missing NAME, not a missing user
-        let nameless = local(Session {
-            account_token: "acct".into(),
-            ..Default::default()
-        })
-        .account(None);
-        assert_eq!(chip_label(&nameless), crate::i18n::msg::settings_account_title());
-
-        // Signed out: the chip says exactly what the ACCOUNT row behind it says. That row is
-        // first, and the assertion is on `[0]` rather than on the whole set — the set also carries
-        // Settings, which is not an account action and which the chip has never claimed to speak
-        // for.
-        let out = Session::default().account(None);
-        assert_eq!(chip_label(&out), label(Action::SignIn));
-        assert_eq!(rows_for(&out, false)[0], Action::SignIn);
-    }
-
-    /// Settings is about the SOFTWARE rather than the account and is offered in every state.
-    #[test]
-    fn the_rows_that_need_no_account_are_offered_in_every_account_state() {
-        // LG's Privacy Guideline requires the privacy notice to be reachable IN the app, and the
-        // one state where it is easiest to forget is signed OUT — where someone who cannot get past
-        // the QR screen has still received a copy of this software. Asserted across every row set
-        // rather than on one, because `rows_for` is a six-arm match and five of the arms are the
-        // easy ones.
-        for s in [
-            Session::default(),
-            local(Session {
-                account_token: "acct".into(),
-                ..Default::default()
-            }),
-            local(Session::default()),
-        ] {
-            let rows = rows_for(&s.account(None), false);
-            assert!(
-                rows.contains(&Action::Settings),
-                "no Settings row in {rows:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn settings_is_reachable_in_every_account_state() {
-        for s in [
-            Session::default(),
-            local(Session {
-                account_token: "acct".into(),
-                ..Default::default()
-            }),
-            local(Session::default()),
-        ] {
-            let rows = rows_for(&s.account(None), false);
-            assert!(
-                rows.iter().any(|a| label(*a) == "Settings"),
-                "no Settings row in {rows:?}"
-            );
-        }
-    }
-
-    /// Every row set maps position → action by the list it drew, and anything off the end is None
-    /// (not the other set's action at that index, which is exactly what the old fixed 0/1 map did).
-    #[test]
-    fn selection_maps_by_the_drawn_row_list() {
-        let signed_out = rows_for(&Session::default().account(None), false);
-        assert_eq!(action_at(signed_out, 0), Action::SignIn);
-        assert_eq!(action_at(signed_out, 1), Action::Settings);
-        assert_eq!(action_at(signed_out, 2), Action::None);
-        let s = local(Session {
-            account_token: "acct".into(),
-            ..Default::default()
-        });
-        let full = rows_for(&s.account(None), false);
-        assert_eq!(action_at(full, 0), Action::ChangeProfile);
-        assert_eq!(action_at(full, 1), Action::SignOut);
-        assert_eq!(action_at(full, 2), Action::Settings);
-        assert_eq!(action_at(full, 3), Action::None);
-        assert_eq!(action_at(full, -1), Action::None);
-        let no_switch = rows_for(&local(Session::default()).account(None), false);
-        assert_eq!(action_at(no_switch, 0), Action::SignOut);
-        assert_eq!(action_at(no_switch, 1), Action::Settings);
-        assert_eq!(action_at(no_switch, 2), Action::None);
-    }
-    #[cfg(feature = "jellyfin")]
     #[test]
     fn the_jellyfin_client_builds_the_menu_without_a_plex_session() {
-        // The TV bug on the 0.7 line, re-pinned on 0.8: in the Jellyfin flavor no Plex session
-        // ever settles, so `build` waited on `peek_settled` forever and the chip opened an
-        // EMPTY panel.
         let _guard = crate::testlock::serial();
         let server = crate::jellyfin::MockServer::start(vec![
             (200, r#"{"User":{"Id":"u-1","Name":"demo"},"AccessToken":"tok-1","ServerId":"srv-1","SessionInfo":null}"#.to_string()),
@@ -901,15 +431,25 @@ mod tests {
         crate::jellyfin::install(client);
 
         let mut menu = AccountMenuScreen::new(EntryId(0));
-        menu.build(false);
-        assert!(menu.built, "the jellyfin arm builds without a settled Plex session");
+        menu.build();
+        assert!(menu.built);
         assert_eq!(menu.header, "demo");
-        assert!(menu.rows.contains(&Action::SignOut));
-        assert!(menu.rows.contains(&Action::Settings));
+        assert_eq!(menu.rows, &[Action::SignOut, Action::Settings]);
 
         crate::jellyfin::uninstall();
         let _ = server.finish();
     }
 
+    #[test]
+    fn selection_maps_by_the_drawn_row_list() {
+        let signed_out = rows_for(false);
+        assert_eq!(action_at(signed_out, 0), Action::SignIn);
+        assert_eq!(action_at(signed_out, 1), Action::Settings);
+        assert_eq!(action_at(signed_out, 2), Action::None);
+        let signed_in = rows_for(true);
+        assert_eq!(action_at(signed_in, 0), Action::SignOut);
+        assert_eq!(action_at(signed_in, 1), Action::Settings);
+        assert_eq!(action_at(signed_in, 2), Action::None);
+        assert_eq!(action_at(signed_in, -1), Action::None);
+    }
 }
-

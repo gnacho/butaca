@@ -6,8 +6,6 @@
 //!
 //! Modeled on `screens::legal::LegalIndex` (a list of rows, OK activates, BACK pops the surface's
 //! own stack) and `screens::settings::LanguagePage` (the `.checked` active marker).
-#![cfg(feature = "jellyfin")]
-
 use std::borrow::Cow;
 
 use crate::jellyfin::boot::ServerEntry;

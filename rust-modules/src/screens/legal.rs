@@ -99,6 +99,7 @@ static FFMPEG: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(crat
 static SOURCE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| crate::i18n::msg::settings_legal_source_body(env!("PLX_BUILD_SHA")));
 static TRADEMARKS: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(crate::i18n::msg::settings_legal_trademarks_body);
 static CONTACT: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(crate::i18n::msg::settings_legal_contact_body);
+#[cfg(test)]
 static ABOUT: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| crate::i18n::msg::settings_about_body(env!("PLX_BUILD_SHA"), env!("PLX_VERSION")));
 
 // ---------------------------------------------------------------------------------------------
@@ -300,6 +301,7 @@ impl DocumentPage {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn about(entry: EntryId) -> Self {
         Self {
             entry,

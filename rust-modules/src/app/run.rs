@@ -1942,21 +1942,11 @@ fn loop_requests(app: &mut App) {
             // No `enter()` on any of the three route flips (phase 6): naming the route is the
             // whole of mounting the owned screen it lands on — see
             // `enter_profiles_from_onboard`'s doc.
-            crate::screens::registry::LoopReq::AccountChangeProfile => {
-                super::bridge::execute_session_command(&mut app.pages,
-                    crate::auth::SessionCmd::StartSwitch(crate::auth::Picker::ChangeProfile));
-                // **`switch_profile`, not a bare `Root(Profiles)`.** Every page of the outgoing
-                // profile is dropped with its `ReturnState` and its body — see
-                // `switching_profile_leaves_the_container_holding_nothing_of_the_previous_profile`.
-                super::bridge::switch_profile(&mut app.pages);
-            }
             crate::screens::registry::LoopReq::AccountSignIn => {
-                super::bridge::execute_session_command(&mut app.pages, crate::auth::SessionCmd::StartLogin);
                 super::bridge::nav_root(&mut app.pages, AppArg::Login);
             }
             crate::screens::registry::LoopReq::AccountSignOut => {
-                super::bridge::execute_session_command(&mut app.pages, crate::auth::SessionCmd::SignOut);
-                super::bridge::nav_root(&mut app.pages, AppArg::Login);
+                jellyfin_disconnect_server(app);
             }
             // The host route does NOT move: Settings is a surface presented over the same page,
             // and its Privacy, Legal and Favourite-libraries children are pages of that surface's
@@ -1975,24 +1965,20 @@ fn loop_requests(app: &mut App) {
             }
             // The Jellyfin flavor's Settings root: *Conexión rápida* arms add-server mode and lands
             // on the sign-in form; the picker and *Desconectar* switch/remove the active server.
-            #[cfg(feature = "jellyfin")]
             crate::screens::registry::LoopReq::JfQuickConnect => {
                 crate::jellyfin::quick_connect::set_add_mode(true);
                 // PUSH, never nav_root: the form opens over Settings, and BACK returns to it.
                 super::bridge::nav_push(&mut app.pages, AppArg::Login);
             }
-            #[cfg(feature = "jellyfin")]
             crate::screens::registry::LoopReq::JfAddServer => {
                 crate::jellyfin::signin::set_add_mode(true);
                 // PUSH, never nav_root: the form opens over Settings, and BACK returns to it.
                 super::bridge::nav_push(&mut app.pages, AppArg::Login);
             }
-            #[cfg(feature = "jellyfin")]
             crate::screens::registry::LoopReq::JfSwitchServer(i) => {
                 jellyfin_switch_server(app, i);
                 super::bridge::dismiss_surfaces(&mut app.pages);
             }
-            #[cfg(feature = "jellyfin")]
             crate::screens::registry::LoopReq::JfDisconnectServer => {
                 jellyfin_disconnect_server(app);
             }
@@ -2000,7 +1986,6 @@ fn loop_requests(app: &mut App) {
     }
 }
 
-#[cfg(feature = "jellyfin")]
 fn jellyfin_switch_server(app: &mut App, i: usize) {
     let Some(list) = crate::jellyfin::boot::load_servers() else {
         return;
@@ -2018,7 +2003,6 @@ fn jellyfin_switch_server(app: &mut App, i: usize) {
 /// *Desconectar*: retire the active server's credentials. With servers remaining the first
 /// survivor is signed in and made active (the same switch path); with none the config is erased
 /// and the app lands on the sign-in gate.
-#[cfg(feature = "jellyfin")]
 fn jellyfin_disconnect_server(app: &mut App) {
     let Some(remaining) = crate::jellyfin::boot::remove_active() else {
         return;

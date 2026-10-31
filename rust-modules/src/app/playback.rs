@@ -1575,8 +1575,10 @@ mod player_return_tests {
             "…and it named a real entry while the page was there",
         );
 
-        // The switch every profile pick performs: the tree keeps nothing of the outgoing profile.
-        bridge::switch_profile(&mut p.d);
+        // A profile reset keeps nothing of the outgoing profile.
+        p.d.reset_for_profile();
+        p.d.request(crate::ui::machine::MachineId::Nav,
+            crate::ui::machine::NavOp::Root(AppArg::Profiles));
         p.settle();
         assert!(p.d.nav.entry(stale.entry).is_none(), "the origin entry is gone");
 

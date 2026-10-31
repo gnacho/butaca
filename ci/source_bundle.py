@@ -83,12 +83,18 @@ def tracked_sources(root, private_values=()):
     pre-build credential check sees the same bytes the release step will.
     """
     listing = subprocess.check_output(['git', '-C', str(root), 'ls-files', '-s', '-z'])
+    deleted = set(subprocess.check_output(
+        ['git', '-C', str(root), 'ls-files', '--deleted', '-z']).decode().split('\0'))
     for item in listing.decode().split('\0'):
         if not item:
             continue
         metadata, name = item.split('\t', 1)
         if metadata.split()[0] == '160000':
             fail('submodule needs explicit source support: ' + name)
+        # A deliberate worktree deletion is absent from the next source bundle too. It remains in
+        # the index until the owner stages it, and is not a missing input to reconstruct.
+        if name in deleted:
+            continue
         # Deliberate allowlist: untracked files and gitignored inputs never enter here.
         if not allowed(name):
             continue

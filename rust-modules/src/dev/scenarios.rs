@@ -286,26 +286,6 @@ impl ReadoutCase {
     }
 }
 
-/// `/tmp/butaca-logintest` — validate the plex.tv account path end to end on the device.
-pub(crate) fn arm_logintest() {
-    if crate::dev::flag("logintest") {
-        let _ = crate::task::spawn_small("logintest", || {
-            let sess = crate::plex::session::load();
-            let ac = crate::plex::account::AccountClient::new(&sess.client_id, None);
-            match ac.create_pin() {
-                Ok(p) => crate::log(&format!(
-                    "logintest: create_pin ok id={} code_len={} authToken_null={}",
-                    p.id,
-                    p.code.len(),
-                    p.auth_token.is_none()
-                )),
-                Err(evidence) => crate::log(&format!("logintest: create_pin FAILED ({})",
-                    crate::plex::account::describe_evidence(&evidence))),
-            }
-        });
-    }
-}
-
 /// `/tmp/butaca-stillclock=<ms>` — see [`screenshot::arm_stillclock`].
 pub(crate) fn arm_stillclock() {
     screenshot::arm_stillclock();

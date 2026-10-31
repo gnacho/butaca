@@ -6,7 +6,6 @@ use super::*;
 #[allow(unused_imports)]
 use super::test_support::*;
 use crate::ui::present::Present;
-#[cfg(not(feature = "jellyfin"))]
 use crate::ui::screen::By;
 
 #[test]
@@ -85,7 +84,6 @@ fn a_pop_that_would_empty_the_stack_dismisses_the_surface_instead() {
 /// forwarded Pop is an ordinary inner pop and the surface stays up. Without this, "dismiss on
 /// Pop" would be indistinguishable from "dismiss on every Pop", which would take Privacy's
 /// Done straight out of Settings instead of back to its root.
-#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn a_pop_with_a_page_under_it_pops_the_inner_stack_and_stays_up() {
     let _g = crate::testlock::serial();
@@ -99,25 +97,25 @@ fn a_pop_with_a_page_under_it_pops_the_inner_stack_and_stays_up() {
         crate::pms::HubsSnapshot::empty_for_test().view(),
     );
     step(&mut s, ScreenEvent::Mount, None);
-    let legal_row = FocusKey {
+    let server_row = FocusKey {
         entry: EntryId(7),
-        elem: 1,
+        elem: 0,
     };
     step(
         &mut s,
         ScreenEvent::FocusMoved {
             from: None,
-            to: legal_row,
+            to: server_row,
             by: By::Dir,
         },
-        Some(legal_row),
+        Some(server_row),
     );
     step(
         &mut s,
-        ScreenEvent::Activate(legal_row.elem),
-        Some(legal_row),
+        ScreenEvent::Activate(server_row.elem),
+        Some(server_row),
     );
-    assert_eq!(s.inner.depth(), 2, "Legal is up");
+    assert_eq!(s.inner.depth(), 2, "server picker is up");
 
     let out = forwarded(&mut s, Fx::Nav(NavOp::Pop));
     assert!(
@@ -142,14 +140,13 @@ fn a_pop_with_a_page_under_it_pops_the_inner_stack_and_stays_up() {
 /// hashed identically and then behaved differently the moment BACK was pressed: the second
 /// assertion is that divergence, arriving one frame later at the re-seat, with nothing in the
 /// record able to say why.
-#[cfg(not(feature = "jellyfin"))]
 #[test]
 fn the_remembered_seats_are_part_of_the_hash() {
     let _g = crate::testlock::serial();
     let _sess = scratch_session("surface-seat-hash");
-    let legal_row = FocusKey {
+    let server_row = FocusKey {
         entry: EntryId(0),
-        elem: 1,
+        elem: 0,
     };
 
     let mut seated = RouteSurface::new(
@@ -165,15 +162,15 @@ fn the_remembered_seats_are_part_of_the_hash() {
         &mut seated,
         ScreenEvent::FocusMoved {
             from: None,
-            to: legal_row,
+            to: server_row,
             by: By::Dir,
         },
-        Some(legal_row),
+        Some(server_row),
     );
     step(
         &mut seated,
-        ScreenEvent::Activate(legal_row.elem),
-        Some(legal_row),
+        ScreenEvent::Activate(server_row.elem),
+        Some(server_row),
     );
 
     let mut unseated = RouteSurface::new(
@@ -189,12 +186,12 @@ fn the_remembered_seats_are_part_of_the_hash() {
         &mut unseated,
         ScreenEvent::FocusMoved {
             from: None,
-            to: legal_row,
+            to: server_row,
             by: By::Dir,
         },
-        Some(legal_row),
+        Some(server_row),
     );
-    step(&mut unseated, ScreenEvent::Activate(legal_row.elem), None);
+    step(&mut unseated, ScreenEvent::Activate(server_row.elem), None);
 
     assert_eq!(
         seated.inner.depth(),
@@ -228,7 +225,7 @@ fn the_remembered_seats_are_part_of_the_hash() {
             _ => None,
         })
     };
-    assert!(matches!(seat_of(&a), Some(FocusTarget::Elem(k)) if k == legal_row));
+    assert!(matches!(seat_of(&a), Some(FocusTarget::Elem(k)) if k == server_row));
     // `unseated` never remembered a row for the entry it's popping back to, so `request` falls
     // to its default arm — `FirstInGroup`, not `ContainerGroup`, since `ContainerGroup` would
     // resolve through `Seat::Remembered` and could read back whatever the shared entry's group 0
@@ -243,7 +240,6 @@ fn the_remembered_seats_are_part_of_the_hash() {
 /// The wordmark crumb is a pointer target the surface owns, not a page: a click on it walks the
 /// inner stack exactly as BACK and LEFT do, and it declines at the root so the container answers
 /// (`RouteSurface`'s BACK branch makes the same two decisions).
-#[cfg(feature = "jellyfin")]
 #[test]
 fn clicking_the_crumb_walks_back_to_the_settings_root() {
     let mut s = RouteSurface::new(

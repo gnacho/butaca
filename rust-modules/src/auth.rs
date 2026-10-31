@@ -107,8 +107,6 @@ pub enum Phase {
     Deleted,
 }
 
-pub(crate) fn discovery_trouble() -> &'static str { crate::i18n::msg::browse_auth_discovery_trouble() }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum DiscoveryRetryRun { Resources, HomeUsers }
 

@@ -49,8 +49,7 @@ use crate::ui::table::{Row, Section, TableView};
 use crate::ui::table_screen::{Header, TableScreen};
 use crate::ui::{theme, Painter, Rect};
 
-use super::family::{inner_cx, table_focus, InnerHost, SettingsPage, ALERT_GROUP};
-use super::plaintext_question::{self, AlertStep, PlaintextAlert};
+use super::family::{inner_cx, table_focus, InnerHost, SettingsPage};
 use super::registry::{word, AppFx, DirectoryLike};
 
 /// Which ceremony the surface carries.
@@ -439,10 +438,10 @@ fn mount_page(
         SettingsPage::Playback => Box::new(super::preferences::PreferencesPage::new(entry, super::preferences::Kind::Playback)),
         SettingsPage::AudioSubtitles => Box::new(super::preferences::PreferencesPage::new(entry, super::preferences::Kind::AudioSubtitles)),
         SettingsPage::Legal => Box::new(super::legal::LegalIndex::new(entry)),
+        #[cfg(test)]
         SettingsPage::About => Box::new(super::legal::DocumentPage::about(entry)),
         SettingsPage::Document(i) => Box::new(super::legal::DocumentPage::legal(entry, i)),
         SettingsPage::Favourites => Box::new(super::onboard::OnboardScreen::settings(entry, cx.views)),
-        #[cfg(feature = "jellyfin")]
         SettingsPage::Servers => Box::new(super::servers::ServersPage::new(entry)),
     }
 }
@@ -932,77 +931,28 @@ impl Mounter<InnerHost> for RouteSurface {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Action {
-    Language,
-    DeleteAllLocalData,
-    Playback,
-    AudioSubtitles,
-    Favourites,
-    Legal,
-    AutoSignIn,
-    TrailerAutoplay,
-    /// A server's "connect without encryption" switch — the index into
-    /// [`RootPage::plaintext_rows`].
-    Plaintext(usize),
-    About,
-    /// Jellyfin flavor: open the server picker.
-    #[cfg(feature = "jellyfin")]
     SelectServer,
-    /// Jellyfin flavor: add another server through the sign-in form.
-    #[cfg(feature = "jellyfin")]
     QuickConnect,
 }
 
-/// The Settings root: a table of destinations, every row a door (no band; rule 9 in full).
+/// The Settings root: the two Jellyfin server doors and no Plex account actions.
 pub(crate) struct RootPage {
     entry: EntryId,
     table: TableView,
     rows: Vec<Action>,
     state: RootState,
-    session_watch: crate::plex::session::VisibleSessionWatch,
-    session_snapshot: std::sync::Arc<crate::plex::session::Session>,
-    pending_auto: Option<(bool, crate::storage_worker::TypedTicket<bool>)>,
-    pending_trailer: Option<(bool, crate::storage_worker::TypedTicket<bool>)>,
-    /// The servers the signed-in account answered crate::i18n::msg::settings_plaintext_question() for, then the
-    /// ones discovery offers it for and nobody has answered, by row — the `(machine_id, allowed)`
-    /// each switch shows.
-    plaintext_rows: Vec<(String, bool)>,
-    /// A switch flipped here and not yet reflected by the answers it reads (`grant::choices`):
-    /// shown optimistically until they agree.
-    pending_plaintext: Option<(String, bool)>,
-    /// The shared question (`screens::plaintext_question`), asked when a switch is turned ON.
-    alert: PlaintextAlert,
-    /// `grant::revision` as last read — an offer or an answer landing rebuilds the rows.
-    grant_seen: u64,
 }
 
 struct RootState {
     sel: i32,
-    auto_sign_in: bool,
-    trailer_autoplay: bool,
-    language: crate::i18n::Preference,
-    /// Each unencrypted-connection switch, in row order. Written to the canon only when there is
-    /// one, so every other root's digest is unchanged.
-    plaintext: Vec<bool>,
 }
 
 impl LogicalState for RootState {
     fn write(&self, w: &mut Canon) {
-        w.u32(self.sel as u32).bool(self.auto_sign_in).bool(self.trailer_autoplay).str(self.language.tag());
-        if !self.plaintext.is_empty() {
-            w.u32(self.plaintext.len() as u32);
-            for &on in &self.plaintext {
-                w.bool(on);
-            }
-        }
+        w.u32(self.sel as u32);
     }
     fn probe(&self, out: &mut String) {
-        out.push_str(&format!(
-            "root sel={} auto_sign_in={} trailer_autoplay={} language={}",
-            self.sel, self.auto_sign_in, self.trailer_autoplay, self.language.tag()
-        ));
-        if !self.plaintext.is_empty() {
-            out.push_str(&format!(" plaintext={:?}", self.plaintext));
-        }
+        out.push_str(&format!("root sel={}", self.sel));
     }
 }
 
@@ -1012,134 +962,13 @@ impl RootPage {
             entry,
             table: TableView::new(),
             rows: Vec::new(),
-            session_watch: Default::default(),
-            session_snapshot: Default::default(),
-            pending_auto: None, pending_trailer: None,
-            plaintext_rows: Vec::new(),
-            pending_plaintext: None,
-            alert: PlaintextAlert::new(ALERT_GROUP, super::registry::ALERT, super::registry::ALERT + 1),
-            grant_seen: crate::grant::revision(),
-            state: RootState {
-                sel: 0,
-                auto_sign_in: false,
-                trailer_autoplay: true,
-                language: crate::i18n::Preference::System,
-                plaintext: Vec::new(),
-            },
+            state: RootState { sel: 0 },
         };
         s.rebuild(0, directory);
         s
     }
 
-    fn rebuild(&mut self, sel: i32, directory: crate::stores::browse::DirectoryView<'_>) {
-        // The Plex root is built first on every flavor; the Jellyfin flavor then REPLACES it with
-        // its own servers-and-privacy root. Building both keeps the Plex body compiled (and its
-        // Action variants "constructed") on the flavor build, avoiding an unreachable-code lint
-        // from a gated early return, while leaving the Plex build's output byte-identical.
-        self.rebuild_plex(sel, directory);
-        #[cfg(feature = "jellyfin")]
-        self.rebuild_jellyfin(sel, directory);
-    }
-
-    /// The Plex flavor's root (unchanged): libraries, privacy, system and playback sections.
-    fn rebuild_plex(&mut self, sel: i32, directory: crate::stores::browse::DirectoryView<'_>) {
-        if let Some(snapshot) = crate::plex::session::peek_settled() {
-            self.session_snapshot = snapshot;
-        }
-        let sess = &self.session_snapshot;
-        let signed_in = sess.account(crate::plex::session::current().as_ref()).signed_in;
-        let auto_sign_in = self.pending_auto.as_ref().map_or_else(|| sess.auto_sign_in(), |(value, _)| *value);
-        let trailer_autoplay = self.pending_trailer.as_ref().map_or_else(|| sess.trailer_autoplay(), |(value, _)| *value);
-        let multi_user = sess.home_users.len() > 1;
-        self.state.auto_sign_in = auto_sign_in;
-        self.state.trailer_autoplay = trailer_autoplay;
-        self.state.language = crate::i18n::saved_preference();
-
-        let mut actions = Vec::new();
-        let mut sections = Vec::new();
-        if signed_in {
-            let n = directory.pinned_count();
-            // The section is Libraries and the row is Favorite libraries: the switch governs the
-            // whole app — Home's shelves, the top tab strip and the Library's Sources picker.
-            sections.push(
-                Section::new(crate::i18n::msg::settings_libraries_section()).row(
-                    Row::new(crate::i18n::msg::settings_libraries_title())
-                        .detail(crate::i18n::msg::settings_libraries_detail())
-                        .value(crate::i18n::msg::settings_libraries_count(n as i64))
-                        .chevron(true),
-                ),
-            );
-            actions.push(Action::Favourites);
-            if let Some(servers) = self.plaintext_section(&mut actions) {
-                sections.push(servers);
-            }
-        }
-        sections.push(
-            Section::new(crate::i18n::msg::settings_privacy_section())
-                .row(
-                    Row::new(crate::i18n::msg::settings_consent_delete())
-                        .detail(crate::i18n::msg::settings_consent_delete_detail())
-                        .destructive(true)
-                        .chevron(true),
-                )
-                .row(
-                    Row::new(crate::i18n::msg::settings_legal_title())
-                        .detail(crate::i18n::msg::settings_legal_detail())
-                        .chevron(true),
-                ),
-        );
-        actions.extend([Action::DeleteAllLocalData, Action::Legal]);
-        let mut system = Section::new(crate::i18n::msg::settings_system_section());
-        // A one-person account already skips the picker; the switch only changes a multi-user boot.
-        if signed_in && multi_user {
-            system = system.row(
-                Row::new(crate::i18n::msg::settings_auto_sign_in_title())
-                    .detail(crate::i18n::msg::settings_auto_sign_in_detail())
-                    .toggle(auto_sign_in),
-            );
-            actions.push(Action::AutoSignIn);
-        }
-        if signed_in {
-            system = system.row(
-                Row::new(crate::i18n::msg::settings_trailers_title())
-                    .detail(crate::i18n::msg::settings_trailers_detail())
-                    .toggle(trailer_autoplay),
-            );
-            actions.push(Action::TrailerAutoplay);
-        }
-        system = system.row(
-            Row::new(crate::i18n::msg::settings_about_title())
-                .detail(crate::i18n::msg::settings_about_detail())
-                .chevron(true),
-        );
-        system = system.row(Row::new(crate::i18n::msg::settings_language_title())
-            .detail(crate::i18n::msg::settings_language_detail())
-            .value(preference_name(self.state.language)).chevron(true));
-        sections.push(system);
-        actions.extend([Action::About, Action::Language]);
-        let mut playback = Section::new(crate::i18n::msg::settings_playback_section()).row(
-            Row::new(crate::i18n::msg::settings_playback_title()).detail(crate::i18n::msg::settings_playback_detail()).chevron(true));
-        actions.push(Action::Playback);
-        if signed_in {
-            playback = playback.row(Row::new(crate::i18n::msg::settings_audio_title())
-                .detail(crate::i18n::msg::settings_audio_detail()).chevron(true));
-            actions.push(Action::AudioSubtitles);
-        }
-        sections.push(playback);
-        self.rows = actions;
-        self.table.compact = false;
-        self.table.header_ink = theme::TEXT_READING;
-        self.table.set_sections(sections, sel, false);
-        self.table.list_focused = true;
-    }
-
-    /// The Jellyfin flavor's root: a *Servidores* section (select, quick connect, disconnect) and
-    /// a *Privacidad* row. No Plex-era pages are offered — the flavor follows the television's
-    /// language, has no Plex account, no trailer autoplay and no Plex playback/audio preferences.
-    #[cfg(feature = "jellyfin")]
-    fn rebuild_jellyfin(&mut self, sel: i32, _directory: crate::stores::browse::DirectoryView<'_>) {
-        let mut actions = Vec::new();
-        let mut sections = Vec::new();
+    fn rebuild(&mut self, sel: i32, _directory: crate::stores::browse::DirectoryView<'_>) {
         let servers = Section::new(crate::i18n::msg::settings_servers_section())
             .row(
                 Row::new(crate::i18n::msg::settings_servers_select())
@@ -1151,68 +980,11 @@ impl RootPage {
                     .detail(crate::i18n::msg::settings_servers_quick_detail())
                     .chevron(true),
             );
-        actions.extend([Action::SelectServer, Action::QuickConnect]);
-        sections.push(servers);
-        self.rows = actions;
+        self.rows = vec![Action::SelectServer, Action::QuickConnect];
         self.table.compact = false;
         self.table.header_ink = theme::TEXT_READING;
-        self.table.set_sections(sections, sel, false);
+        self.table.set_sections(vec![servers], sel, false);
         self.table.list_focused = true;
-    }
-
-    /// **Unencrypted connections**: one switch per server the signed-in account answered
-    /// crate::i18n::msg::settings_plaintext_question() for (`grant::choices` — this session's answers over the
-    /// session file's, for THIS account only), so an allowed one is here to turn off again — and,
-    /// switched off, one per server discovery offers the question for that nobody has answered
-    /// (`grant::offers`), so a signed-in person whose server went plaintext-only has a place to
-    /// say yes. The detail line states what the switch means first, then — quietly — whether a
-    /// grant carries the server right now; `None` when there is nothing to show.
-    fn plaintext_section(&mut self, actions: &mut Vec<Action>) -> Option<Section> {
-        use crate::plex::session::PlaintextChoice;
-        let sess = &self.session_snapshot;
-        crate::grant::adopt_legacy_consent(sess);
-        let answered = crate::grant::choices(sess);
-        let mut rows: Vec<(String, bool)> = answered
-            .iter()
-            .filter(|(_, choice)| *choice != PlaintextChoice::Undecided)
-            .map(|(machine, choice)| (machine.clone(), choice.allows()))
-            .collect();
-        for offer in crate::grant::offers() {
-            if plaintext_question::asks(Some(&offer)) && !rows.iter().any(|(m, _)| *m == offer.machine_id) {
-                rows.push((offer.machine_id, false));
-            }
-        }
-        // The optimistic value holds until the answers read agree with it.
-        if let Some((machine, on)) = &self.pending_plaintext {
-            match rows.iter_mut().find(|(m, _)| m == machine) {
-                Some(row) if row.1 == *on => self.pending_plaintext = None,
-                Some(row) => row.1 = *on,
-                None => {}
-            }
-        }
-        self.plaintext_rows = rows;
-        self.state.plaintext = self.plaintext_rows.iter().map(|(_, on)| *on).collect();
-        if self.plaintext_rows.is_empty() {
-            return None;
-        }
-        let mut section = Section::new(crate::i18n::msg::settings_plaintext_section());
-        let offers = crate::grant::offers();
-        for (i, (machine, on)) in self.plaintext_rows.iter().enumerate() {
-            // An offered server was never reached, so the session file does not know it yet:
-            // the name discovery settled with comes first.
-            let name = offers
-                .iter()
-                .find(|o| o.machine_id == *machine && !o.name.is_empty())
-                .map(|o| o.name.as_str())
-                .or_else(|| sess.sources.iter()
-                    .find(|s| s.machine_id == *machine && !s.name.is_empty())
-                    .map(|s| s.name.as_str()))
-                .unwrap_or(crate::i18n::msg::settings_plaintext_server());
-            let connected = *on && crate::grant::granted_origin(machine).is_some();
-            section = section.row(Row::new(name).detail(plaintext_question::settings_detail(*on, connected)).toggle(*on));
-            actions.push(Action::Plaintext(i));
-        }
-        Some(section)
     }
 
     fn view(&self) -> TableScreen<'_> {
@@ -1221,12 +993,7 @@ impl RootPage {
                 RouteLayout::screen(),
                 None,
                 crate::i18n::msg::settings_title(),
-                // The flavor's root names its own truth, not Plex's account sync.
-                if cfg!(feature = "jellyfin") {
-                    crate::i18n::msg::settings_root_jellyfin_copy()
-                } else {
-                    crate::i18n::msg::settings_root_copy()
-                },
+                crate::i18n::msg::settings_root_jellyfin_copy(),
             ),
             &self.table,
             GroupId(0),
@@ -1234,88 +1001,17 @@ impl RootPage {
         )
     }
 
-    fn activate(&mut self, row: i32, directory: crate::stores::browse::DirectoryView<'_>,
+    fn activate(&mut self, row: i32, _directory: crate::stores::browse::DirectoryView<'_>,
         fx: &mut Effects<'_, InnerHost>) {
         let Some(&action) = usize::try_from(row).ok().and_then(|i| self.rows.get(i)) else {
             return;
         };
         match action {
-            Action::AutoSignIn => {
-                let on = !self.state.auto_sign_in;
-                if let Ok(ticket) = crate::plex::session::queue_update_ticket(move |current|
-                    (current.auto_sign_in() != on).then(|| current.with_auto_sign_in(on))) {
-                    self.pending_auto = Some((on, ticket));
-                }
-                self.rebuild(self.table.sel, directory);
-            }
-            Action::TrailerAutoplay => {
-                let on = !self.state.trailer_autoplay;
-                if let Ok(ticket) = crate::plex::session::queue_update_ticket(move |current|
-                    (current.trailer_autoplay() != on).then(|| current.with_trailer_autoplay(on))) {
-                    self.pending_trailer = Some((on, ticket));
-                }
-                self.rebuild(self.table.sel, directory);
-            }
-            Action::Plaintext(i) => {
-                use crate::plex::session::PlaintextChoice;
-                let Some((machine, on)) = self.plaintext_rows.get(i).cloned() else { return };
-                if !on {
-                    // ON asks first — the same question the sign-in and the failure read-outs
-                    // put, seated on *Not now*; only its *Connect* allows (`alert_answer`).
-                    let sid = crate::plex::id_of_machine(&machine);
-                    self.alert.open(&machine, sid, MachineId::Instance(InstanceId(0)), fx);
-                    return;
-                }
-                // OFF is immediate: `grant::record` withdraws the grant NOW, before the
-                // preferences write lands, and records the revocation for this account.
-                crate::log("settings: unencrypted connections turned off for one server");
-                let account = crate::grant::account_key(&self.session_snapshot);
-                if crate::grant::record(&account, &machine, PlaintextChoice::Revoked).is_ok() {
-                    self.pending_plaintext = Some((machine, false));
-                }
-                self.rebuild(self.table.sel, directory);
-            }
-            Action::Playback => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Playback))),
-            Action::AudioSubtitles => fx.push(Fx::Nav(NavOp::Push(SettingsPage::AudioSubtitles))),
-            Action::Favourites => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Favourites))),
-            Action::Legal => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Legal))),
-            Action::About => fx.push(Fx::Nav(NavOp::Push(SettingsPage::About))),
-            Action::DeleteAllLocalData => {
-                self.alert.open_delete();
-            }
-            Action::Language => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Language))),
-            #[cfg(feature = "jellyfin")]
             Action::SelectServer => fx.push(Fx::Nav(NavOp::Push(SettingsPage::Servers))),
-            #[cfg(feature = "jellyfin")]
             Action::QuickConnect => {
                 fx.push(Fx::App(AppFx::Loop(super::registry::LoopReq::JfQuickConnect)))
             }
         }
-    }
-}
-
-impl RootPage {
-    /// The question was answered: send the one command it became (a *Connect* shows the switch
-    /// on at once; Session records it and re-finds the server), and hand focus back to the table.
-    fn alert_answer(&mut self, cmd: Option<crate::auth::SessionCmd>,
-        directory: crate::stores::browse::DirectoryView<'_>,
-        fx: &mut Effects<'_, InnerHost>) {
-        if let Some(cmd) = cmd {
-            if matches!(cmd, crate::auth::SessionCmd::EraseLocal) {
-                fx.push(Fx::App(super::registry::AppFx::Loop(
-                    super::registry::LoopReq::DeleteAllLocalData)));
-            } else {
-                if let crate::auth::SessionCmd::AnswerPlaintext { machine_id, choice, .. } = &cmd {
-                    if choice.allows() {
-                        self.pending_plaintext = Some((machine_id.clone(), true));
-                    }
-                }
-                fx.push(Fx::App(super::registry::AppFx::Session(cmd)));
-            }
-        }
-        plaintext_question::enter_group(fx, MachineId::Instance(InstanceId(0)), GroupId(0));
-        self.rebuild(self.table.sel, directory);
-        fx.invalidate(Provenance::Input);
     }
 }
 
@@ -1327,52 +1023,14 @@ impl Machine<InnerHost> for RootPage {
         cx: &Cx<'_, InnerHost>,
         fx: &mut Effects<'_, InnerHost>,
     ) -> Handled {
-        match self.alert.step(ev, cx) {
-            AlertStep::Pass => {}
-            AlertStep::Done(handled) => return handled,
-            AlertStep::Answer(cmd) => {
-                self.alert_answer(cmd, cx.views, fx);
-                return Handled::Yes;
-            }
-        }
         match ev {
             ScreenEvent::Enter(_) => {
-                // a return from a child: the favourite count may have changed
                 let sel = self.table.sel;
                 self.rebuild(sel, cx.views);
                 Handled::Yes
             }
             ScreenEvent::Tick(t) => {
-                let mut landed = self.session_watch.changed();
-                for pending in [&mut self.pending_auto, &mut self.pending_trailer] {
-                    if pending.as_ref().is_some_and(|(_, ticket)| !matches!(ticket.try_recv(),
-                        Err(std::sync::mpsc::TryRecvError::Empty))) {
-                        // Read AFTER the receipt: the worker may have installed Locked/Blocked
-                        // while this Tick was polling. Retain a consumed receipt's local value
-                        // until authority settles; subsequent polls see Disconnected.
-                        if let Some(snapshot) = crate::plex::session::peek_settled() {
-                            self.session_snapshot = snapshot;
-                            *pending = None;
-                            landed = true;
-                        }
-                    }
-                }
-                // An offer or an answer landed (`grant::revision`): the switches re-read.
-                let revision = crate::grant::revision();
-                if revision != self.grant_seen {
-                    self.grant_seen = revision;
-                    landed = true;
-                }
-                if self.alert.is_open() && !self.alert.subject().is_some_and(|m|
-                    self.plaintext_rows.iter().any(|(row, on)| row == m && !on)) {
-                    // the server the question is about left the list, or is on already
-                    self.alert.withdraw();
-                }
-                self.alert.update(t.dt());
-                if landed { self.rebuild(self.table.sel, cx.views); fx.invalidate(crate::ui::present::Provenance::Landing(MachineId::Session)); }
-
-                self.table
-                    .update(t.dt(), RouteLayout::screen().sectioned_table().h);
+                self.table.update(t.dt(), RouteLayout::screen().sectioned_table().h);
                 Handled::Yes
             }
             ScreenEvent::FocusMoved { to, .. } => {
@@ -1385,15 +1043,13 @@ impl Machine<InnerHost> for RootPage {
                 Handled::Yes
             }
             ScreenEvent::Input(crate::ui::machine::InputEvent {
-                kind:
-                    crate::ui::machine::InputKind::Key {
-                        key: Key::Right,
-                        at_edge: true,
-                        ..
-                    },
+                kind: crate::ui::machine::InputKind::Key {
+                    key: Key::Right,
+                    at_edge: true,
+                    ..
+                },
                 ..
             }) => {
-                // rule 8: RIGHT on a row that opens nested content enters it, exactly as OK does
                 if let Some(k) = cx.focus.current {
                     if self.table.row_opens(k.elem as i32) {
                         self.activate(k.elem as i32, cx.views, fx);
@@ -1406,48 +1062,7 @@ impl Machine<InnerHost> for RootPage {
     }
 }
 
-/// The table's focus, unless the question is open — then its two answers ALONE (a modal traps
-/// focus, §7.3 step 7), exactly as Privacy & data's delete alert.
-impl Focusable<InnerHost> for RootPage {
-    fn groups(&self, cx: &Cx<'_, InnerHost>, out: &mut Vec<GroupSpec>) {
-        if !self.alert.groups(out) {
-            Focusable::<InnerHost>::groups(&self.view(), cx, out)
-        }
-    }
-    fn group_of(&self, key: &u32, cx: &Cx<'_, InnerHost>) -> Option<GroupId> {
-        match self.alert.group_of(*key) {
-            Some(answer) => answer,
-            None => Focusable::<InnerHost>::group_of(&self.view(), key, cx),
-        }
-    }
-    fn neighbour(&self, key: FocusKey<u32>, dir: Dir, cx: &Cx<'_, InnerHost>) -> Step<u32> {
-        match self.alert.neighbour(key, dir) {
-            Some(step) => step,
-            None => Focusable::<InnerHost>::neighbour(&self.view(), key, dir, cx),
-        }
-    }
-    fn place(&self, key: &u32, cx: &Cx<'_, InnerHost>, at: At) -> Option<Placed> {
-        match self.alert.place(*key) {
-            Some(placed) => placed,
-            None => Focusable::<InnerHost>::place(&self.view(), key, cx, at),
-        }
-    }
-    fn reconcile(&self, want: FocusKey<u32>, cx: &Cx<'_, InnerHost>) -> FocusKey<u32> {
-        if let Some(key) = self.alert.reconcile(want) {
-            return key;
-        }
-        if self.alert.owns(want.elem) {
-            return FocusKey { entry: self.entry, elem: self.table.sel.max(0) as u32 };
-        }
-        Focusable::<InnerHost>::reconcile(&self.view(), want, cx)
-    }
-    fn seat(&self, g: GroupId, from: Placed, cx: &Cx<'_, InnerHost>) -> FocusKey<u32> {
-        match self.alert.seat(g, self.entry) {
-            Some(key) => key,
-            None => Focusable::<InnerHost>::seat(&self.view(), g, from, cx),
-        }
-    }
-}
+crate::focusable_via_view!(RootPage, InnerHost, view);
 
 impl Screen<InnerHost> for RootPage {
     fn name(&self) -> &'static str {
@@ -1463,7 +1078,6 @@ impl Screen<InnerHost> for RootPage {
     fn draw(&mut self, f: &mut DrawFrame<'_, '_, InnerHost>) {
         let mut v = self.view();
         crate::ui::screen::Part::<InnerHost>::draw(&mut v, f, Rect::FULL);
-        self.alert.draw(f, self.entry);
     }
     fn render(&self) -> RenderStrategy {
         RenderStrategy::Page

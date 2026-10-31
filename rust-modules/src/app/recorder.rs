@@ -1608,7 +1608,7 @@ mod tests {
                 let rect=stop.rect.intersect(stop.clip);
                 vec![bridge::pointer_input(rect.x+rect.w/2.0,rect.y+rect.h/2.0,tick)]
             } else if f>0 && f<4 {
-                bridge::script_key(if f==1 {Key::Down} else {Key::Right},tick)
+                bridge::script_key(if f==2 {Key::Left} else {Key::Right},tick)
             } else { Vec::new() };
             let pointer=input.iter().any(|e|matches!(e.kind,InputKind::Pointer{..}));
             rec.tick(tick.ms,0.016);
@@ -1743,8 +1743,8 @@ mod tests {
                 crate::screens::family::SettingsPage::Root));
             let mut states=Vec::new();
             let mut focuses=Vec::new();
-            for (f,key) in [None,Some(Key::Down),Some(Key::Ok),Some(Key::Left),
-                Some(Key::Ok),Some(Key::Left)].into_iter().enumerate() {
+            for (f,key) in [None,Some(Key::Right),Some(Key::Left),Some(Key::Right),
+                Some(Key::Left),Some(Key::Right)].into_iter().enumerate() {
                 let tick=Tick {ms:f as u32*100,dt_us:16000};
                 let input=if matches!(rec,Recplay::Replaying(_)) {
                     rec.replay_inputs().iter().map(|v|decode_input(v).unwrap()).collect()
@@ -1769,7 +1769,7 @@ mod tests {
         let mut rec=Recplay::recording_with_sink(&initial,Box::new(sink)).unwrap();
         let (states,focuses,queries)=run(&mut rec,false);
         let _ = &queries;
-        assert_ne!(focuses[1],focuses[2],"entering the pushed page moves the focus (table row to document)");
+        assert_ne!(states[1],states[2],"opening and leaving the server picker changes the page state");
         assert_eq!(focuses[1],focuses[3],"return must remember the trailing answer");
         assert_eq!(focuses[3],focuses[5],"second round trip");
         // The geometry-query half of this property (a real pointer resolution) lives in

@@ -93,7 +93,6 @@ enum ConfigFile {
 ///
 /// Runs BEFORE the main loop on the boot thread: a blocking round-trip here delays the first
 /// frame by one LAN request, which is the honest price of knowing whether Home can fill.
-#[cfg(feature = "jellyfin")]
 pub(crate) fn try_boot() -> bool {
     let Some(cfg) = active_server() else {
         return false;
@@ -105,7 +104,6 @@ pub(crate) fn try_boot() -> bool {
 /// password-era file, mint one with the password first), and install the client on success. This
 /// is the one place the boot gate and the Settings "switch server" action share — a switch is a
 /// boot against a different entry of the same list.
-#[cfg(feature = "jellyfin")]
 pub(crate) fn authenticate_server(entry: &ServerEntry) -> bool {
     let Some(origin) = crate::origin::Origin::parse(&entry.url) else {
         crate::log("jellyfin: config ignored — url is not a parseable http(s) origin");
@@ -162,7 +160,6 @@ pub(crate) fn authenticate_server(entry: &ServerEntry) -> bool {
 /// the harness's business and must not invent a config beside the session. A miss (no persistent
 /// list, or no entry for this url and user) is silent: the boot that called this has already
 /// signed in, and the only cost is asking again next time.
-#[cfg(feature = "jellyfin")]
 fn remember_token(entry: &ServerEntry, token: &str) {
     let Some(mut list) = load_servers_persistent() else {
         return;
@@ -182,16 +179,8 @@ fn remember_token(entry: &ServerEntry, token: &str) {
     save_servers(&list.servers, list.active);
 }
 
-/// The Plex build has no Jellyfin boot arm; the gate call site is unconditional, so this is the
-/// flavor's absence spelled as a function. Not dead code — app.rs calls it on every boot.
-#[cfg(not(feature = "jellyfin"))]
-pub(crate) fn try_boot() -> bool {
-    false
-}
-
 /// Read the configured server list, in the same order the boot gate searches: the dev trigger
 /// first, then the persistent file beside the session.
-#[cfg(feature = "jellyfin")]
 pub(crate) fn load_servers() -> Option<ServerList> {
     // 1. the dev trigger
     if let Some(raw) = crate::dev::read("jellyfin") {
@@ -205,7 +194,6 @@ pub(crate) fn load_servers() -> Option<ServerList> {
 
 /// The persistent file only (the `/tmp` trigger is the harness's business, not the form's nor the
 /// picker's).
-#[cfg(feature = "jellyfin")]
 fn load_servers_persistent() -> Option<ServerList> {
     let path = persistent_config_path();
     let raw = std::fs::read_to_string(&path).ok()?;
@@ -214,7 +202,6 @@ fn load_servers_persistent() -> Option<ServerList> {
 
 /// Parse either the list shape or the flat legacy shape into a [`ServerList`], validating that
 /// every entry names a url and a user.
-#[cfg(feature = "jellyfin")]
 fn parse_config(raw: &str, where_from: &str) -> Option<ServerList> {
     let list = match serde_json::from_str::<ConfigFile>(raw) {
         Ok(ConfigFile::List(list)) => list,
@@ -248,7 +235,6 @@ fn parse_config(raw: &str, where_from: &str) -> Option<ServerList> {
 }
 
 /// The active server, if the configured list names one.
-#[cfg(feature = "jellyfin")]
 pub(crate) fn active_server() -> Option<ServerEntry> {
     let list = load_servers()?;
     list.servers.get(list.active).cloned()
@@ -258,7 +244,6 @@ pub(crate) fn active_server() -> Option<ServerEntry> {
 /// token store, and [`ServerEntry::password`] is `None` on everything this writes. 0600 like every
 /// secret this install keeps; a failed write is reported, not retried — the session still runs, the
 /// next boot simply asks again.
-#[cfg(feature = "jellyfin")]
 pub(crate) fn save_servers(servers: &[ServerEntry], active: usize) -> bool {
     let body = serde_json::json!({
         "servers": servers,
@@ -283,7 +268,6 @@ pub(crate) fn save_servers(servers: &[ServerEntry], active: usize) -> bool {
 /// Write the config the boot arm reads, after the sign-in form's first successful auth — a fresh
 /// single server REPLACES the whole list and becomes active. What it keeps is the token the server
 /// just minted: the password the user typed is not written anywhere.
-#[cfg(feature = "jellyfin")]
 pub(crate) fn save_config(url: &str, user: &str, token: &str, device_id: &str) -> bool {
     save_servers(
         &[ServerEntry {
@@ -299,7 +283,6 @@ pub(crate) fn save_config(url: &str, user: &str, token: &str, device_id: &str) -
 
 /// Append a newly signed-in server to the list and make it active (the Settings "Conexión rápida"
 /// half of [`save_config`], which replaces instead).
-#[cfg(feature = "jellyfin")]
 pub(crate) fn append_server(url: &str, user: &str, token: &str, device_id: &str) -> bool {
     let mut list = load_servers().unwrap_or(ServerList {
         servers: Vec::new(),
@@ -321,7 +304,6 @@ pub(crate) fn append_server(url: &str, user: &str, token: &str, device_id: &str)
 /// Remove the active server from the list and return what remains (the first survivor becomes the
 /// new active pointer). The caller decides whether to [`save_servers`] the remainder or
 /// [`erase_config`] an empty list.
-#[cfg(feature = "jellyfin")]
 pub(crate) fn remove_active() -> Option<ServerList> {
     let mut list = load_servers()?;
     remove_active_from(&mut list);
@@ -329,14 +311,12 @@ pub(crate) fn remove_active() -> Option<ServerList> {
 }
 
 /// The pure append step: push an entry and point `active` at it.
-#[cfg(feature = "jellyfin")]
 fn append_to(list: &mut ServerList, entry: ServerEntry) {
     list.servers.push(entry);
     list.active = list.servers.len() - 1;
 }
 
 /// The pure disconnect step: retire the active entry, the first survivor becomes the pointer.
-#[cfg(feature = "jellyfin")]
 fn remove_active_from(list: &mut ServerList) {
     if list.active < list.servers.len() {
         list.servers.remove(list.active);
@@ -346,7 +326,6 @@ fn remove_active_from(list: &mut ServerList) {
 
 /// Drop the persisted config — the sign-out path's half of [`save_config`], so a television that
 /// signs out asks for a server again instead of silently returning to the last one.
-#[cfg(feature = "jellyfin")]
 pub(crate) fn erase_config() {
     if std::fs::remove_file(persistent_config_path()).is_ok() {
         crate::log("jellyfin: config erased");
@@ -358,7 +337,6 @@ pub(crate) fn erase_config() {
 /// gone); the password half is empty for every file this build wrote, and the form hands it back
 /// as an empty field rather than as a secret it does not have. Read from the persistent file only:
 /// the `/tmp` trigger is the harness's business, not the form's.
-#[cfg(feature = "jellyfin")]
 pub(crate) fn stored_config() -> Option<(String, String, String)> {
     let list = load_servers_persistent()?;
     let cfg = list.servers.get(list.active)?;
@@ -374,7 +352,6 @@ pub(crate) fn stored_config() -> Option<(String, String, String)> {
 /// install, so the config and the session age exactly alike. A steerable (hostsim) build answers
 /// inside its instance root instead, for that function's own reason: concurrent simulators must
 /// not share one sign-in, and `/media/developer` is not writable off-device anyway.
-#[cfg(feature = "jellyfin")]
 pub(crate) fn persistent_config_path() -> std::path::PathBuf {
     if crate::paths::ENV_STEERABLE {
         return crate::paths::in_runtime_dir("jellyfin.json");
@@ -387,7 +364,6 @@ pub(crate) fn persistent_config_path() -> std::path::PathBuf {
 
 /// Read the persisted device id, or mint and persist one. A failed write degrades to a per-boot
 /// random id — the server grows a device entry per boot, which is untidy, not broken.
-#[cfg(feature = "jellyfin")]
 pub(crate) fn device_id_persistent() -> String {
     // Same steering as `persistent_config_path`: off-device (the simulator) the id lives in the
     // runtime dir, because /media/developer exists only on a television.
@@ -413,7 +389,6 @@ pub(crate) fn device_id_persistent() -> String {
 }
 
 /// 16 bytes of `/dev/urandom` as hex — the same mint the Plex session applies to its client id.
-#[cfg(feature = "jellyfin")]
 fn mint_device_id() -> String {
     let mut b = [0u8; 16];
     let filled = std::fs::File::open("/dev/urandom")
@@ -431,7 +406,7 @@ fn mint_device_id() -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
-#[cfg(all(test, feature = "jellyfin"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

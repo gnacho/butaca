@@ -136,14 +136,12 @@ fn contribution_is_focusable_and_right_opens_the_guide() {
     assert!(crate::ui::qr::QrCode::new(crate::i18n::CONTRIBUTE_URL).is_ok());
 }
 
-#[cfg(not(feature = "jellyfin"))]
 #[test]
-fn signed_out_settings_reaches_language_and_back_restores_it_after_contribution() {
+fn settings_back_restores_language_after_contribution() {
     let _guard = crate::testlock::serial();
     let _session = scratch_session("language-back");
-    let mut surface = RouteSurface::new(EntryId(0), InstanceId(0), Family::Settings, SettingsPage::Root, crate::pms::HubsSnapshot::empty_for_test().view());
+    let mut surface = RouteSurface::new(EntryId(0), InstanceId(0), Family::Settings, SettingsPage::Language, crate::pms::HubsSnapshot::empty_for_test().view());
     step(&mut surface, ScreenEvent::Mount, None);
-    step(&mut surface, ScreenEvent::Activate(3), None);
     assert_eq!(surface.inner.top().unwrap().arg, SettingsPage::Language);
     settle(&mut surface);
     let contribution = FocusKey { entry: EntryId(0), elem: 4 };

@@ -166,67 +166,6 @@ fn carried_dev_ready_is_not_handed_off_after_erase() {
     assert!(witnessed, "actual Ready effect must be carried after activation ACK");
 }
 
-#[test]
-// Plex-only: the assertion drives the QR screen's "Try again" action. A Jellyfin build mounts
-// `screens::jf_login` for the login route, whose Activate starts the Jellyfin form flow, not a
-// clean account Login — the dev-token retry this grades has no counterpart on that backend.
-#[cfg(not(feature = "jellyfin"))]
-fn mounted_login_try_again_recovers_dev_boundary_errors_through_revoke_ack() {
-    use crate::auth::owner::{BootstrapAuthority, CommitAdmission, CommitReply, SessionEvent, SessionWork};
-    use crate::plex::session::{Session, ServerRef};
-    use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
-    let _lock = crate::testlock::serial();
-    for failures in [1, 2] {
-        let saved = Session { client_id: "synthetic-device".into(),
-            account_token: "synthetic-saved-a".into(), ..Default::default() };
-        let dev = ServerRef { address: "127.0.0.2".into(), port: 32400,
-            token: "synthetic-dev-b".into(), ..Default::default() };
-        let mut rig = Bridge::for_session_test(super::super::boot::captured_session_for_boot(saved, Some(dev), Vec::new()));
-        let mut d = Dispatcher::<AppHost>::new();
-        for attempt in 0..failures {
-            let state = rig.session.snapshot_init();
-            let (command, epoch) = if attempt == 0 {
-                (crate::auth::SessionCmd::ActivateDevBootstrap, state.epoch)
-            } else { (crate::auth::SessionCmd::StartLogin, state.epoch + 1) };
-            execute_session_command(&mut d, command);
-            // Inject an explicit negative resource reply through the real queue. No native
-            // failure is claimed: this grades the ACK/UI protocol, not Revoke's infallible IO.
-            d.emit(MachineId::Session, Fx::Deliver(MachineId::Session,
-                Delivery::Machine(AppMsg::Session(SessionEvent::Commit(CommitReply {
-                    req: state.next_req + 1, epoch, arrival: 0,
-                    admission: CommitAdmission::StaleAuthority,
-                })))));
-            frame(&mut rig, &mut d);
-            assert_eq!(rig.auth_read().0.phase, crate::auth::Phase::Error);
-            assert!(matches!(rig.session.snapshot_init().authority, BootstrapAuthority::DevPms { .. }));
-            assert!(rig.session.snapshot_init().pending.is_empty());
-        }
-        d.request(MachineId::Nav, NavOp::Root(AppArg::Login));
-        frame(&mut rig, &mut d);
-        assert_eq!(d.top_screen().unwrap().name(), "login");
-        assert_eq!(d.focus_record().unwrap().1, 0, "real Error action is focused");
-        let instance = d.top_page().unwrap();
-        let ran = Arc::new(AtomicBool::new(false));
-        let signal = Arc::clone(&ran);
-        let req = rig.session.snapshot_init().next_req + 2;
-        rig.session_adapter.inject_fixture_work(req, move |_, input| {
-            let SessionWork::Login { client_id } = input else { panic!("retry must start clean account Login") };
-            assert_eq!(client_id, "synthetic-device");
-            signal.store(true, Ordering::Release);
-        });
-        d.emit(MachineId::Input, Fx::Deliver(MachineId::Instance(instance),
-            Delivery::Screen(ScreenEvent::Activate(0))));
-        frame(&mut rig, &mut d);
-        assert!(ran.load(Ordering::Acquire), "mounted Try again must cross revoke ACK and launch clean Login");
-        let state = rig.session.snapshot_init();
-        assert!(matches!(state.authority, BootstrapAuthority::Account { ref extras } if extras.is_empty()));
-        assert!(state.persisted.account_token.is_empty());
-        assert!(state.committed_credentials.account_token.is_empty());
-        assert!(rig.session_adapter.fixture_resources().registry_writes.iter()
-            .any(|p| matches!(p, crate::auth::owner::RegistryPlan::Revoke)));
-    }
-}
-
 struct Cleanup<'a>(&'a crate::task::MainThread);
 
 #[test]
