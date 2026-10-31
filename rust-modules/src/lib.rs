@@ -41,6 +41,7 @@ mod jellyfin;
 mod imgcache; // bounded persistent artwork cache shared by every image source
 mod keymanager; // public LS2 key stores: keymanager3, legacy Palm service, or unavailable
 mod lab; // Cloud Lab bridge: pinned diagnostic uploads + optional outbound command long-poll
+mod librecord; // backend-neutral remembered-library records shared outside Plex session storage
 mod metadata; // item detail data layer (detail page): full metadata + seasons/episodes + cast + related
 mod net; // HTTPS client over the TV's libcurl (plex.tv account/login calls — stream.rs can't do TLS/DNS)
 mod origin;

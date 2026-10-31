@@ -781,7 +781,7 @@ fn online_profile_switch_preserves_the_uuids_existing_cached_extensions() {
         .find(|p| p.uuid == "u-kid")
         .cloned()
         .expect("cached_session seeds a u-kid profile");
-    previous.extensions = session::OpaqueExtensions(std::collections::BTreeMap::from([(
+    previous.extensions = crate::librecord::OpaqueExtensions(std::collections::BTreeMap::from([(
         "futureField".to_string(),
         serde_json::json!("kept from an earlier build"),
     )]));
