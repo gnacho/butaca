@@ -136,7 +136,7 @@ const CURLOPT_PINNEDPUBLICKEY: c_int = 10230;
 const CURLOPT_CAINFO: c_int = 10065;
 /// `CURLOPTTYPE_SLISTPOINT + 203`: a `curl_slist` of `host:port:address` entries that pre-populate
 /// the DNS cache, so the named host is never resolved. Present since 7.21.3; the entry syntax the
-/// television's 7.53.1 parses is documented on [`crate::plex::ResolvePin::entry`]. See [`resolve`].
+/// television's 7.53.1 parses is documented on [`crate::origin::ResolvePin::entry`]. See [`resolve`].
 const CURLOPT_RESOLVE: c_int = 10203;
 /// `CURLE_UNKNOWN_OPTION` — what `curl_easy_setopt` answers for an option id this libcurl was
 /// built without. The one `setopt` result in this module that is NOT fatal: see [`resolve`].
@@ -999,8 +999,8 @@ pub(crate) fn request_tls(
 }
 
 /// `resolve` is a ready-made `CURLOPT_RESOLVE` entry (`host:port:address`, see
-/// [`crate::plex::ResolvePin::entry`]) for the URL's own host, or `None` to let the resolver
-/// answer. Every request whose origin carries a [`crate::plex::ResolvePin`] passes one; plex.tv
+/// [`crate::origin::ResolvePin::entry`]) for the URL's own host, or `None` to let the resolver
+/// answer. Every request whose origin carries a [`crate::origin::ResolvePin`] passes one; plex.tv
 /// calls pass `None`, and that is the difference the `nowan` trigger grades (see [`refuse_name`]).
 #[allow(clippy::too_many_arguments)]
 fn request_tls_result(
@@ -1044,7 +1044,7 @@ fn request_tls_evidence(
     // The offline reproduction: with `/tmp/butaca-nowan` armed, a name reaches the wire only
     // with a pin. This is the ONE place every easy request passes (`request_result` enters here
     // directly), which is why the gate is here and not on `request_tls`.
-    if resolve.is_none() && refuse_name(crate::plex::url_host(url), t.connect_s) {
+    if resolve.is_none() && refuse_name(crate::origin::url_host(url), t.connect_s) {
         return Err(RequestError::Transport.into());
     }
     let ua =
@@ -1517,7 +1517,7 @@ pub(crate) fn refuse_name(host: &str, connect_s: c_long) -> bool {
 /// The table holds one entry per server address this process has ever pinned — a handful.
 pub(crate) mod resolve {
     use super::{c_int, Mutex, Ordering, CURLE_UNKNOWN_OPTION};
-    use crate::plex::ResolvePin;
+    use crate::origin::ResolvePin;
 
     static PINS: Mutex<Vec<ResolvePin>> = Mutex::new(Vec::new());
 
@@ -1921,14 +1921,14 @@ mod request_tests {
             return;
         }
         let ran = with_ok_server("[::1]:0", |port, accepts| {
-            let pin = crate::plex::ResolvePin::for_test(
+            let pin = crate::origin::ResolvePin::for_test(
                 "no-such-host.invalid",
                 port as i32,
                 "::1".parse().unwrap(),
             );
             let entry = resolve::entry_of(&pin);
             assert_eq!(
-                curl_version_num() >= crate::plex::origin::CURL_RESOLVE_BRACKETS_SINCE,
+                curl_version_num() >= crate::origin::CURL_RESOLVE_BRACKETS_SINCE,
                 entry.ends_with(":[::1]"),
                 "entry {entry:?} for curl {:#x}",
                 curl_version_num()

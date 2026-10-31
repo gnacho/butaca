@@ -181,7 +181,7 @@ impl Initial {
         -> Result<Self, &'static str> {
         if port == 0 { return Err("invalid synthetic port"); }
         let saved = crate::plex::session::Session { client_id:format!("s{seed:08x}"), ..Default::default() };
-        let origin = crate::plex::Origin::http("127.0.0.1", i32::from(port));
+        let origin = crate::origin::Origin::http("127.0.0.1", i32::from(port));
         let primary = crate::plex::session::ServerRef { address:"127.0.0.1".into(), port:i64::from(port),
             origin_url:origin.base(),token:format!("s{:08x}",seed.wrapping_add(1)),
             tier:Some(crate::plex::probe::Location::Local), ..Default::default() };
@@ -203,7 +203,7 @@ impl Initial {
         let (saved, entropy, deferred) = crate::plex::session::load_capturing_entropy();
         let primary = (!token.is_empty()).then(|| crate::plex::session::ServerRef {
             address: host.into(), port: i64::from(port),
-            origin_url: crate::plex::Origin::http(host, port).base(), token,
+            origin_url: crate::origin::Origin::http(host, port).base(), token,
             tier: Some(crate::plex::probe::configured_tier(host)), ..Default::default()
         });
         let initial = Self { version: 1,
@@ -239,7 +239,7 @@ impl Initial {
             != serde_json::to_value(s).map_err(|_| "invalid initial Session")? {
             return Err("incoherent initial Session");
         }
-        if crate::plex::Origin::parse(&primary.origin_url).is_none() || primary.token.is_empty() || !extras.is_empty() {
+        if crate::origin::Origin::parse(&primary.origin_url).is_none() || primary.token.is_empty() || !extras.is_empty() {
             return Err("unsupported Home server binding");
         }
         if s.persisted.client_id.is_empty() { return Err("missing initial identity"); }

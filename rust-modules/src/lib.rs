@@ -43,6 +43,7 @@ mod keymanager; // public LS2 key stores: keymanager3, legacy Palm service, or u
 mod lab; // Cloud Lab bridge: pinned diagnostic uploads + optional outbound command long-poll
 mod metadata; // item detail data layer (detail page): full metadata + seasons/episodes + cast + related
 mod net; // HTTPS client over the TV's libcurl (plex.tv account/login calls — stream.rs can't do TLS/DNS)
+mod origin;
 mod paths; // where the app's own files live — /proc/self/exe, not a hardcoded install prefix
 mod person; // person/actor page data layer: the header handed in by the cast row + /library/people/{id}/media
 mod collection; // collection page model: tag resolution, header metadata and paged members

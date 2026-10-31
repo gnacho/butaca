@@ -896,7 +896,7 @@ mod tests {
             (200, r#"{"User":{"Id":"u-1","Name":"demo"},"AccessToken":"tok-1","ServerId":"srv-1","SessionInfo":null}"#.to_string()),
         ]);
         let client = crate::jellyfin::JfClient::new(
-            crate::plex::Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
+            crate::origin::Origin::http("127.0.0.1", server.port as i32), "dev-1".into());
         client.authenticate_by_name("demo", "").unwrap();
         crate::jellyfin::install(client);
 

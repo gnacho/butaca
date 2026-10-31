@@ -107,7 +107,7 @@ pub(crate) fn start(url_raw: &str, user: &str, password: &str) -> Result<(), Fai
     #[cfg(test)]
     crate::testlock::assert_held("the jellyfin sign-in store (start)");
     let url = normalize_url(url_raw);
-    let Some(origin) = crate::plex::Origin::parse(&url) else {
+    let Some(origin) = crate::origin::Origin::parse(&url) else {
         return Err(Fail::Parse);
     };
     // The identity header is a credential shape even before it carries a token (client.rs says
@@ -236,23 +236,23 @@ mod tests {
         // The SHIPPED rule is graded here, not this (dev-featured) build's: `devtriggers` relaxes
         // the gate for lab work, so the test asks the policy directly with the relaxation off —
         // exactly what a release .ipk ships.
-        let origin = crate::plex::Origin::parse("http://203.0.113.10:8096").unwrap();
+        let origin = crate::origin::Origin::parse("http://203.0.113.10:8096").unwrap();
         assert!(
             !crate::http::credential_transport_allowed_by_policy(
                 &origin,
                 "/Users/AuthenticateByName",
                 &["Authorization: MediaBrowser …"],
-                crate::plex::CredentialPolicy::HttpsOnly,
+                crate::origin::CredentialPolicy::HttpsOnly,
             ),
             "a public address over http must not carry the password"
         );
-        let lan = crate::plex::Origin::parse("http://192.168.1.20:8096").unwrap();
+        let lan = crate::origin::Origin::parse("http://192.168.1.20:8096").unwrap();
         assert!(
             crate::http::credential_transport_allowed_by_policy(
                 &lan,
                 "/Users/AuthenticateByName",
                 &["Authorization: MediaBrowser …"],
-                crate::plex::CredentialPolicy::HttpsOnly,
+                crate::origin::CredentialPolicy::HttpsOnly,
             ),
             "…while the LAN literal the PoC targets stays allowed"
         );

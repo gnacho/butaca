@@ -67,7 +67,7 @@
 //! cannot, because libcurl owns that framing and `net.rs` sees only the assembled body. The gap is
 //! narrower than it looks: `plex::client::get_json` logs the status, the byte count and serde's own
 //! error whenever a 2xx will not parse, over either transport.
-use crate::plex::{CredentialPolicy, Origin, Scheme, ResolvePin};
+use crate::origin::{CredentialPolicy, Origin, Scheme, ResolvePin};
 
 /// The verb. Three, because three is what the Plex control plane uses: reads, the body-less
 /// `PUT /library/parts/{id}` that selects a track server-side, and the POSTs whose params ride the

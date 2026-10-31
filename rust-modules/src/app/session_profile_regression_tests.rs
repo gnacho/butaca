@@ -74,7 +74,7 @@ mod tests {
         let _g = crate::testlock::serial();
         crate::plex::reset_servers_for_test();
         crate::plex::grant::reset_for_test();
-        let origin = crate::plex::Origin::http("192.168.0.10", 32400);
+        let origin = crate::origin::Origin::http("192.168.0.10", 32400);
         crate::plex::grant::mint(crate::plex::grant::scope(), "lan-http", &origin,
             &crate::plex::grant::eligible_evidence_for_test()).unwrap();
         let mut rig = profile_rig(false);
@@ -224,7 +224,7 @@ mod tests {
                 ..Default::default()
             };
             (Some(source), crate::auth::settled_probe(
-                &crate::plex::probe::plan(resource, crate::plex::CredentialPolicy::HttpsOnly),
+                &crate::plex::probe::plan(resource, crate::origin::CredentialPolicy::HttpsOnly),
                 crate::plex::probe::Outcome::Reachable, Some(crate::plex::probe::Location::Local),
                 Some(address.into())))
         }

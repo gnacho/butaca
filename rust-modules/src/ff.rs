@@ -2059,7 +2059,7 @@ struct BlockingDeadline {
 }
 
 impl TransportWatchdog {
-    fn for_origin(origin: &crate::plex::Origin) -> Self {
+    fn for_origin(origin: &crate::origin::Origin) -> Self {
         let inactivity = if origin.is_tls() {
             crate::curlio::media_stall_budget()
         } else {
@@ -2754,7 +2754,7 @@ extern "C" fn seek_cb(op: *mut c_void, offset: i64, whence: c_int) -> i64 {
                 path,
             } => {
                 crate::stream::http_close(*hs);
-                let origin = crate::plex::Origin::http(&host.to_string_lossy(), *port);
+                let origin = crate::origin::Origin::http(&host.to_string_lossy(), *port);
                 let from = path.to_string_lossy().into_owned();
                 let req = crate::stream::redirect::Request {
                     origin: &origin,
@@ -3631,7 +3631,7 @@ fn hls_open_curl(
 /// stay on the PMS origin. Also returns the resource the open landed on: a playlist's children
 /// resolve against it, not against the path that was requested.
 fn hls_open_plain(
-    origin: &crate::plex::Origin,
+    origin: &crate::origin::Origin,
     request_path: &str,
     aq: *mut AuQueue,
     net: &mut HlsNet,
@@ -3724,7 +3724,7 @@ fn open_curl_hop(
 /// on the curl source. Publishes the same two diagnostics the TLS arm of `demux` does.
 fn open_plain_progressive(
     hs_p: *mut HttpStream,
-    origin: &crate::plex::Origin,
+    origin: &crate::origin::Origin,
     path: &str,
     aq_p: *mut AuQueue,
 ) -> Result<(Src, i64), MediaOpenFail> {
@@ -4730,7 +4730,7 @@ struct HlsCursor {
 }
 
 fn hls_cursor_open(
-    origin: &crate::plex::Origin,
+    origin: &crate::origin::Origin,
     path: &str,
     aq: *mut AuQueue,
     net: &mut HlsNet,
@@ -6139,7 +6139,7 @@ unsafe fn hls_prefetch_same_encoder(
 }
 
 fn hls_demux(
-    origin: &crate::plex::Origin,
+    origin: &crate::origin::Origin,
     path: &str,
     acodec: &str,
     abr: Option<(crate::route::HlsAbrControl, crate::route::WorkerTicket)>,
@@ -7863,14 +7863,14 @@ mod audio_ahead_tests {
 
 /// The demux thread body (spawned by `engine::start_bufferfeed`).
 ///
-/// Takes an [`Origin`](crate::plex::Origin) rather than a `(host, port)` pair because **the scheme
+/// Takes an [`Origin`](crate::origin::Origin) rather than a `(host, port)` pair because **the scheme
 /// decides the transport**: `http` reads through the Engine's `stream.rs` socket, `https` through
 /// [`crate::curlio`]. An origin is parsed from a URL and never rebuilt from an address, which is
 /// what keeps the `plex.direct` hostname TLS validates against intact all the way down here
 /// (`plex/origin.rs`). `hs` is still passed on both paths — it is the Engine's, and it stays
 /// unused (fd = -1, published as `SHARED.hs_ptr`) when the origin turns out to be https.
 pub(crate) fn demux(
-    origin: crate::plex::Origin,
+    origin: crate::origin::Origin,
     path: String,
     acodec: String,
     abr: Option<(crate::route::HlsAbrControl, crate::route::WorkerTicket)>,

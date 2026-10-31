@@ -86,7 +86,7 @@ mod tests {
                             ..SourceRef::default()
                         };
                         (Some(fresh), crate::auth::settled_probe(
-                            &crate::plex::probe::plan(resource, crate::plex::CredentialPolicy::HttpsOnly),
+                            &crate::plex::probe::plan(resource, crate::origin::CredentialPolicy::HttpsOnly),
                             crate::plex::probe::Outcome::Reachable,
                             Some(crate::plex::probe::Location::Local),
                             Some("192.0.2.10".into())))

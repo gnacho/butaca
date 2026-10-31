@@ -15,8 +15,8 @@
 //! `(host, port)` still could not say is the SCHEME, which is this type's reason for existing.
 //!
 //! It is not a complete description of the servers plex.tv actually advertises, and the gap is not
-//! cosmetic. [`super::probe`] builds ranked candidates from an account's `/api/v2/resources`, and
-//! the one field that says where a candidate really is is [`Candidate::url`](super::probe::Candidate::url)
+//! cosmetic. [`crate::plex::probe`] builds ranked candidates from an account's `/api/v2/resources`, and
+//! the one field that says where a candidate really is is [`Candidate::url`](crate::plex::probe::Candidate::url)
 //! — **not** `Candidate::address`. plex.tv advertises the `plex.direct` HOSTNAME in `uri` while
 //! `address` stays the dotted quad hiding behind it, and `probe`'s own doc says outright that
 //! "https to the bare IP fails validation by design": the certificate is issued for
@@ -25,7 +25,7 @@
 //! like it speaks TLS and cannot: it is exactly the bug this type is here to make unwriteable.
 //!
 //! **So an `Origin` is PARSED from a URL, never assembled from an address.** [`Origin::parse`] is
-//! the front door, [`super::probe::Candidate::origin`] is the one that matters, and
+//! the front door, [`crate::plex::probe::Candidate::origin`] is the one that matters, and
 //! [`Origin::http`] is the deliberately-named plaintext constructor — every remaining caller of
 //! *that* is a place that still assumes cleartext, and `Origin::http(` is the grep that finds them.
 //!
@@ -52,12 +52,12 @@
 //!   to, and a PMS with no port in its URL is a PMS on the default port.
 //! * **Only `http` and `https` are recognised.** [`Origin::parse`] refuses anything else rather
 //!   than inventing a meaning for it.
-use super::probe::dial_port;
+#![allow(dead_code)]
 
-/// Which transport an origin names. Lives here rather than in [`super::probe`] because it is a
+/// Which transport an origin names. Lives here rather than in [`crate::plex::probe`] because it is a
 /// property of an ORIGIN; probe merely *ranks* it, and re-exports this type for that.
 ///
-/// **Ordered best-first, and the derived `Ord` IS that preference** — [`super::probe::candidates`]
+/// **Ordered best-first, and the derived `Ord` IS that preference** — [`crate::plex::probe::candidates`]
 /// sorts on it directly.
 ///
 /// **The two declarations were the other way round until the TLS control plane landed**, and this
@@ -100,8 +100,25 @@ impl Scheme {
 /// The port a PMS origin means when its URL names none. See the module doc: 32400, not 80/443.
 pub const DEFAULT_PORT: i32 = 32400;
 
+/// A port this client could actually dial, narrowed to the `i32` the transport takes — `None` for
+/// anything outside `1..=65535`.
+///
+/// **The narrowing is the point.** `port` arrives from plex.tv (and from the session file, and from
+/// the `butaca-servers` trigger) as an `i64`, because PMS and plex.tv both string-encode numbers
+/// and every numeric field here goes through the lenient `de_i64` — so what lands in a `Candidate`
+/// is whatever the JSON said, not whatever a port can be. `port as i32` on that WRAPS: an answer of
+/// `4_294_999_696` becomes `32400` and the app dials a port nobody advertised, quietly and with a
+/// plausible-looking result. Every site that turns an advertised port into a connection goes
+/// through here.
+///
+/// Out of range drops the CANDIDATE, never the server: another of its addresses may still be
+/// dialable, and the same rule already applies to an address this transport cannot speak to.
+pub fn dial_port(p: i64) -> Option<i32> {
+    (1..=65535).contains(&p).then_some(p as i32)
+}
+
 /// **The build's half of "may a credential ride this origin".** The question itself has ONE
-/// answer, `super::grant::credential_allowed` (or `grant::allowed_under` in a pure function that
+/// answer, `crate::plex::grant::credential_allowed` (or `grant::allowed_under` in a pure function that
 /// receives this value): this policy, OR a live consented plaintext grant for that exact origin
 /// (BUTACA-10). Every caller that used to carry its own `cfg!(feature = "devtriggers")` (the
 /// http guard, the curlio media twin, the probe activation gate) now goes through it, and
@@ -125,7 +142,7 @@ pub const DEFAULT_PORT: i32 = 32400;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CredentialPolicy {
     /// A store build: only a TLS origin may carry a credential by policy — the one exception, a
-    /// live consented plaintext grant, is `super::grant`'s, never this type's.
+    /// live consented plaintext grant, is `crate::plex::grant`'s, never this type's.
     HttpsOnly,
     /// A developer build: any origin may, matching every build's behaviour before this type
     /// existed.
@@ -330,9 +347,9 @@ pub fn split(url: &str) -> (Origin, &str) {
 /// The HOST of a URL, **bare** — a borrowed view for a caller that only wants to look at the host
 /// and has no use for an owned [`Origin`].
 ///
-/// Its one caller is [`super::probe`]'s ranking, which asks whether a candidate's host is a numeric
+/// Its one caller is [`crate::plex::probe`]'s ranking, which asks whether a candidate's host is a numeric
 /// literal or a name that needs resolving — and it must ask that of the URL's host and **not** of
-/// [`Candidate::address`](super::probe::Candidate::address), which is the dotted quad hiding behind
+/// [`Candidate::address`](crate::plex::probe::Candidate::address), which is the dotted quad hiding behind
 /// a `plex.direct` NAME. This lives here so that there is exactly one reading of a URL in the
 /// codebase; probe used to carry a second copy of it.
 pub fn url_host(url: &str) -> &str {
@@ -418,7 +435,7 @@ impl<'a> Parts<'a> {
 /// and that name resolves only through Plex's public wildcard zone. Discovery ranks TLS first and
 /// persists the winner, so a LAN server is normally stored under that name — and on a LAN whose
 /// uplink is down it can no longer be found, although it is one hop away. The plaintext twin
-/// [`super::probe::candidates`] synthesizes for exactly this case cannot carry a token in a store
+/// [`crate::plex::probe::candidates`] synthesizes for exactly this case cannot carry a token in a store
 /// build (`crate::http::credential_transport_allowed`), so the only offline route is the TLS name
 /// with its address supplied locally. That is this type.
 ///
@@ -525,7 +542,7 @@ impl ResolvePin {
 /// `192-168-0-10.<label>.plex.direct` → `192.168.0.10`; eight dash-joined hex groups → the v6
 /// address. Only the FIRST label is read; the hash label and the zone are checked for shape, not
 /// meaning. This is the reverse of a mapping plex.tv performs and is used as a cross-check against
-/// an address it advertised — never to build a hostname ([`super::probe`]'s rule stands).
+/// an address it advertised — never to build a hostname ([`crate::plex::probe`]'s rule stands).
 pub fn plex_direct_literal(host: &str) -> Option<std::net::IpAddr> {
     let host = unbracket(host);
     let rest = host.strip_suffix(".plex.direct")?;

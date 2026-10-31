@@ -15,7 +15,8 @@ use crate::plex::probe::{
     self, Candidate, HttpsRoutes, InsecureEvidence, Outcome, PlaintextEligibility, ProbePlan, RouteOutcome,
 };
 use crate::plex::session::{self, PlaintextChoice, ProfileCreds, ServerRef, Session, SourceRef, UserRef};
-use crate::plex::{CredentialPolicy, Origin, ServerId};
+use crate::origin::{CredentialPolicy, Origin};
+use crate::plex::ServerId;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
@@ -267,7 +268,7 @@ pub struct ReadyCreds {
     /// The origin's resolve pin, read off the same stored record ([`session::ServerRef::resolve_pin`])
     /// so the install this hands off dials the LAN name with no resolver, exactly as the boot
     /// gate does.
-    pub pin: Option<crate::plex::ResolvePin>,
+    pub pin: Option<crate::origin::ResolvePin>,
 }
 
 /// Append a line to the shared on-device event log (never a token — only ids/counts/status).
@@ -722,14 +723,14 @@ fn retire_grant_on_https(machine_id: &str, origin: &Origin) {
 /// the IP family from it silently produced `None` on every real boot. The stored/advertised
 /// address is the one value that is actually a literal.
 pub(crate) fn install_captured_registry(origin: &Origin, address: &str, token: &str,
-    tier: Option<probe::Location>, pin: Option<&crate::plex::ResolvePin>, extras: &[SourceRef],
+    tier: Option<probe::Location>, pin: Option<&crate::origin::ResolvePin>, extras: &[SourceRef],
     client_id: Option<&str>) {
     // Applies `connection` atomically, inside the same registration write, on whichever branch
     // runs (#95 step 8) — the primary and every extra used to register first and set the
     // connection facts in a SEPARATE call afterward, which is exactly the gap `ConnectionFacts`
     // exists to close.
     let register = |machine: &str, origin: &Origin, token: &str,
-        pin: Option<&crate::plex::ResolvePin>, connection: crate::plex::ConnectionFacts| {
+        pin: Option<&crate::origin::ResolvePin>, connection: crate::plex::ConnectionFacts| {
         if let Some(cid) = client_id {
             crate::plex::register_captured_origin_with_connection(machine, origin, token, pin, cid,
                 connection)
@@ -859,7 +860,7 @@ fn register_observed_origin(
     machine_id: &str,
     origin: &Origin,
     token: &str,
-    pin: Option<&crate::plex::ResolvePin>,
+    pin: Option<&crate::origin::ResolvePin>,
     connection: crate::plex::ConnectionFacts,
     client_id: &str,
 ) -> ServerId {
@@ -868,7 +869,7 @@ fn register_observed_origin(
 }
 
 fn apply_candidate_activation(candidate: CandidateActivation, client_id: &str) {
-    let pin = crate::plex::ResolvePin::for_origin(&candidate.origin, &candidate.address);
+    let pin = crate::origin::ResolvePin::for_origin(&candidate.origin, &candidate.address);
     let connection = crate::plex::ConnectionFacts::new(
         Some(candidate.location),
         Some(if candidate.ipv6 {
@@ -1892,11 +1893,11 @@ fn classify(status: i32, body: &[u8], want_machine_id: &str) -> Outcome {
 ///
 /// `pin`, when [`race_batch`] built one for this candidate, is forwarded to
 /// [`crate::http::request_probe`] exactly as `apply_candidate_activation` forwards one to
-/// `register_origin` — the same [`crate::plex::ResolvePin`], used one step earlier: at the DIAL
+/// `register_origin` — the same [`crate::origin::ResolvePin`], used one step earlier: at the DIAL
 /// that decides the winner, not only at the registration of one already decided.
 fn get_identity(
     origin: &Origin,
-    pin: Option<&crate::plex::ResolvePin>,
+    pin: Option<&crate::origin::ResolvePin>,
     budget: Duration,
 ) -> ProbeReply {
     match crate::http::request_probe(
@@ -1995,7 +1996,7 @@ impl AdmissionBudget {
 }
 
 type ProbeDial = Arc<
-    dyn Fn(&Origin, Option<&crate::plex::ResolvePin>, Duration) -> ProbeReply + Send + Sync + 'static,
+    dyn Fn(&Origin, Option<&crate::origin::ResolvePin>, Duration) -> ProbeReply + Send + Sync + 'static,
 >;
 type ProbeJob = Box<dyn FnOnce() + Send + 'static>;
 
@@ -2198,7 +2199,7 @@ fn race_batch(
         // which pins the same way after one already has. `None` for a plaintext candidate (a pin
         // belongs to a TLS name only) or an unmatched/undecodable label; the request then resolves
         // through DNS exactly as before.
-        let pin = crate::plex::ResolvePin::for_origin(&origin, &c.address);
+        let pin = crate::origin::ResolvePin::for_origin(&origin, &c.address);
         let job = Box::new(move || {
             let (outcome, route) = dial(&origin, pin.as_ref(), budget).grade(&machine_id);
             let on_time = Instant::now() <= deadline;

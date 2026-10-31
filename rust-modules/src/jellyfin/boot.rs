@@ -107,7 +107,7 @@ pub(crate) fn try_boot() -> bool {
 /// boot against a different entry of the same list.
 #[cfg(feature = "jellyfin")]
 pub(crate) fn authenticate_server(entry: &ServerEntry) -> bool {
-    let Some(origin) = crate::plex::Origin::parse(&entry.url) else {
+    let Some(origin) = crate::origin::Origin::parse(&entry.url) else {
         crate::log("jellyfin: config ignored — url is not a parseable http(s) origin");
         return false;
     };

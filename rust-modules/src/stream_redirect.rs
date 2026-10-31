@@ -37,7 +37,7 @@ use super::{
     CONNECT_TIMEOUT_MS, MEDIA_RECV_TIMEOUT_MS, MEDIA_SEND_TIMEOUT_MS,
 };
 use crate::checkpoint::Checkpoint;
-use crate::plex::{Origin, Scheme};
+use crate::origin::{Origin, Scheme};
 
 /// Hops followed after the first request. The first request plus this many redirects is the most
 /// a media open will send before failing with [`FollowError::TooManyHops`] — the same bound

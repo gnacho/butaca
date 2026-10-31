@@ -618,7 +618,7 @@ fn the_unencrypted_connection_switch_shows_the_grant_and_revokes_it_at_once() {
         ..Default::default()
     });
     crate::plex::session::save(&saved);
-    let lan = crate::plex::Origin::http("192.168.0.10", 32400);
+    let lan = crate::origin::Origin::http("192.168.0.10", 32400);
     crate::plex::grant::mint(crate::plex::grant::scope(), "lan-machine", &lan,
         &crate::plex::grant::eligible_evidence_for_test()).unwrap();
 
@@ -636,7 +636,7 @@ fn the_unencrypted_connection_switch_shows_the_grant_and_revokes_it_at_once() {
     let mut fx = Effects::new(&mut out, MachineId::Session, &mut present);
     root.activate(row as i32, cx(None).views, &mut fx);
     assert_eq!(crate::plex::grant::granted_origin("lan-machine"), None, "revoked before the write lands");
-    assert!(!crate::plex::grant::allowed_under(crate::plex::CredentialPolicy::HttpsOnly, &lan));
+    assert!(!crate::plex::grant::allowed_under(crate::origin::CredentialPolicy::HttpsOnly, &lan));
     assert_eq!(root.state.plaintext, vec![false], "the switch shows the answer optimistically");
     let drawn = root.table.sections.iter().flat_map(|s| &s.rows).nth(row).unwrap();
     assert_eq!(drawn.toggle, Some(false));

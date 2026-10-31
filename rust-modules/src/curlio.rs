@@ -699,7 +699,7 @@ impl CurlSource {
         }
         // The resolve pin, by this URL's host and port — see `net::resolve` for why the media
         // plane consults a table rather than carrying the pin. Looked up ONCE here; a seek reuses it.
-        let (origin, _) = crate::plex::origin::split(url);
+        let (origin, _) = crate::origin::split(url);
         let resolve_entry = crate::net::resolve::entry_for(origin.host(), origin.port());
         // The offline reproduction (`/tmp/butaca-nowan`): a name opens only with a pin.
         if resolve_entry.is_none()
@@ -756,7 +756,7 @@ impl CurlSource {
         if !media_url_allowed(url) {
             return Err(OpenErr::Local);
         }
-        let (origin, _) = crate::plex::origin::split(url);
+        let (origin, _) = crate::origin::split(url);
         let resolve_entry = crate::net::resolve::entry_for(origin.host(), origin.port());
         if resolve_entry.is_none()
             && crate::net::refuse_name(origin.host(), crate::net::API.connect_s)
@@ -1591,13 +1591,13 @@ fn sample_throughput_with_reservation(
 }
 
 fn media_url_allowed(url: &str) -> bool {
-    let (origin, path) = crate::plex::origin::split(url);
+    let (origin, path) = crate::origin::split(url);
     crate::http::credential_transport_allowed(&origin, path, &[])
 }
 
 #[cfg(test)]
-fn media_url_allowed_by_policy(url: &str, policy: crate::plex::CredentialPolicy) -> bool {
-    let (origin, path) = crate::plex::origin::split(url);
+fn media_url_allowed_by_policy(url: &str, policy: crate::origin::CredentialPolicy) -> bool {
+    let (origin, path) = crate::origin::split(url);
     crate::http::credential_transport_allowed_by_policy(&origin, path, &[], policy)
 }
 
@@ -1839,15 +1839,15 @@ mod tests {
     fn lower_media_layer_refuses_plaintext_credentials_in_store_policy() {
         assert!(!media_url_allowed_by_policy(
             "http://192.0.2.1:32400/video.mkv?X-Plex-Token=secret",
-            crate::plex::CredentialPolicy::HttpsOnly,
+            crate::origin::CredentialPolicy::HttpsOnly,
         ));
         assert!(media_url_allowed_by_policy(
             "https://example.invalid/video.mkv?X-Plex-Token=secret",
-            crate::plex::CredentialPolicy::HttpsOnly,
+            crate::origin::CredentialPolicy::HttpsOnly,
         ));
         assert!(media_url_allowed_by_policy(
             "http://192.0.2.1:32400/video.mkv?X-Plex-Token=secret",
-            crate::plex::CredentialPolicy::AllowPlaintext,
+            crate::origin::CredentialPolicy::AllowPlaintext,
         ));
     }
 
@@ -1929,7 +1929,7 @@ mod tests {
                 "unpinned, the name resolves to nothing"
             );
             assert_eq!(accepts.load(Ordering::Acquire), 0);
-            let pin = crate::plex::ResolvePin::for_test(
+            let pin = crate::origin::ResolvePin::for_test(
                 "no-such-host.invalid",
                 port as i32,
                 "127.0.0.1".parse().unwrap(),

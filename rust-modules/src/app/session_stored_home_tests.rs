@@ -54,7 +54,7 @@ fn inject_roster_terminal(rig: &mut Bridge, expected: crate::auth::SessionIdenti
         output.progress(crate::auth::AuthProgress::Registry(crate::auth::RegistryProgress::Settled {
             epoch, expected: Some(expected.clone()),
             probe: crate::auth::settled_probe(
-                &crate::plex::probe::plan(&resource, crate::plex::CredentialPolicy::HttpsOnly),
+                &crate::plex::probe::plan(&resource, crate::origin::CredentialPolicy::HttpsOnly),
                 crate::plex::probe::Outcome::Reachable, Some(crate::plex::probe::Location::Local),
                 Some("127.0.0.4".into())),
         })).unwrap();

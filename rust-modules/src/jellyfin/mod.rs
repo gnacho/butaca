@@ -118,7 +118,7 @@ pub(crate) fn uninstall() {
 /// one signed in against, the address the persisted config carries). Another LAN address is
 /// denied even a hop away on the same subnet; with no client installed the answer is no (fail
 /// closed); and the address itself must still be a literal that cannot route off the LAN.
-pub(crate) fn plaintext_host_allowed(origin: &crate::plex::Origin) -> bool {
+pub(crate) fn plaintext_host_allowed(origin: &crate::origin::Origin) -> bool {
     client().is_some_and(|installed| {
         origin.host() == installed.origin().host()
             && crate::http::is_lan_host(installed.origin().host())
@@ -139,12 +139,12 @@ mod plaintext_scope_tests {
     #[test]
     fn the_lan_relaxation_reaches_only_the_signed_in_address() {
         install(JfClient::new(
-            crate::plex::Origin::http("192.168.1.20", 8096),
+            crate::origin::Origin::http("192.168.1.20", 8096),
             "dev-1".into(),
         ));
-        let registered = crate::plex::Origin::http("192.168.1.20", 8096);
-        let neighbour = crate::plex::Origin::http("192.168.1.99", 8096);
-        let named = crate::plex::Origin::parse("http://jellyfin.local:8096").expect("parse");
+        let registered = crate::origin::Origin::http("192.168.1.20", 8096);
+        let neighbour = crate::origin::Origin::http("192.168.1.99", 8096);
+        let named = crate::origin::Origin::parse("http://jellyfin.local:8096").expect("parse");
         assert!(plaintext_host_allowed(&registered));
         assert!(!plaintext_host_allowed(&neighbour));
         assert!(!plaintext_host_allowed(&named), "a hostname is never the carve-out");

@@ -777,7 +777,7 @@ fn issue_95_account(with_relay: bool) -> Resource {
 /// the pinning-specific fixture.
 fn issue_95_dial(
     origin: &Origin,
-    _pin: Option<&crate::plex::ResolvePin>,
+    _pin: Option<&crate::origin::ResolvePin>,
     _budget: Duration,
 ) -> (i32, Vec<u8>) {
     match (origin.host(), origin.is_tls()) {
@@ -982,7 +982,7 @@ fn insecure_only_copy_is_one_shared_const_naming_the_fixable_cause() {
 /// router, which would otherwise make this exact candidate NXDOMAIN.
 fn issue_95_dial_pinned(
     origin: &Origin,
-    pin: Option<&crate::plex::ResolvePin>,
+    pin: Option<&crate::origin::ResolvePin>,
     budget: Duration,
 ) -> (i32, Vec<u8>) {
     if origin.host() == "192-168-1-50.h.plex.direct" && origin.is_tls() {
@@ -1380,7 +1380,7 @@ fn a_candidate_whose_label_does_not_encode_its_own_address_gets_no_pin() {
         candidates: vec![mismatched],
         policy: CredentialPolicy::HttpsOnly,
     };
-    let seen_pin: Arc<Mutex<Option<Option<crate::plex::ResolvePin>>>> = Arc::new(Mutex::new(None));
+    let seen_pin: Arc<Mutex<Option<Option<crate::origin::ResolvePin>>>> = Arc::new(Mutex::new(None));
     let seen_pin_by_dial = Arc::clone(&seen_pin);
     let dial: ProbeDial = status_dial(move |_origin, pin, _budget| {
         *seen_pin_by_dial.lock().unwrap() = Some(pin.cloned());
@@ -1759,7 +1759,7 @@ fn every_advertised_address_is_dialable_and_only_an_impossible_port_is_not() {
     // do differ, which is why this is a value rather than a bool.
     assert_eq!(
         dial_target(&at("203.0.113.9")),
-        Some(crate::plex::Origin::http("203.0.113.9", 32400))
+        Some(crate::origin::Origin::http("203.0.113.9", 32400))
     );
     assert_eq!(
         dial_target(&cand(Scheme::Https, "203-0-113-9.h.plex.direct", 31234)).map(|o| o.base()),
@@ -2421,7 +2421,7 @@ fn insecure_only_evidence_tells_an_absent_relay_from_a_failed_one() {
 /// host (the hostname variant below re-addresses it): every plaintext candidate but the remote
 /// custom one answers `/identity` for the machine, every HTTPS route is dead. `relay` switches
 /// the relay back on and lets it verify.
-fn plx10_dial(origin: &Origin, _pin: Option<&crate::plex::ResolvePin>, _budget: Duration) -> (i32, Vec<u8>) {
+fn plx10_dial(origin: &Origin, _pin: Option<&crate::origin::ResolvePin>, _budget: Duration) -> (i32, Vec<u8>) {
     match (origin.host(), origin.is_tls()) {
         ("custom.example.net", false) => (400, Vec::new()),
         ("relay.example.net", true) => (200, identity_json("issue95mid")),
@@ -2446,7 +2446,7 @@ fn plx10_discover(resource: Resource, ask: &PlaintextAsk) -> (Resolution, Vec<(S
 fn plx10_discover_with(
     resource: Resource,
     ask: &PlaintextAsk,
-    dial: fn(&Origin, Option<&crate::plex::ResolvePin>, Duration) -> (i32, Vec<u8>),
+    dial: fn(&Origin, Option<&crate::origin::ResolvePin>, Duration) -> (i32, Vec<u8>),
     answer: impl Fn(&SourceRef) -> crate::plex::EndpointAdmission,
 ) -> (Resolution, Vec<(String, String)>, Vec<SettledProbe>) {
     let dial: ProbeDial = status_dial(dial);
@@ -2575,7 +2575,7 @@ fn plx10_an_https_origin_refused_at_admission_is_not_a_reason_to_go_plaintext() 
     let _g = crate::testlock::serial();
     crate::plex::reset_servers_for_test();
     crate::plex::grant::reset_for_test();
-    fn dial(origin: &Origin, _pin: Option<&crate::plex::ResolvePin>, _budget: Duration) -> (i32, Vec<u8>) {
+    fn dial(origin: &Origin, _pin: Option<&crate::origin::ResolvePin>, _budget: Duration) -> (i32, Vec<u8>) {
         match (origin.host(), origin.is_tls()) {
             ("192-168-1-50.h.plex.direct", true) => (200, identity_json("issue95mid")),
             ("192.168.1.50", false) => (200, identity_json("issue95mid")),
@@ -2604,11 +2604,11 @@ fn plx10_an_https_origin_refused_at_admission_is_not_a_reason_to_go_plaintext() 
 fn plx10_a_fresh_verdict_that_does_not_reach_the_granted_origin_revokes_the_grant() {
     let _g = crate::testlock::serial();
     let allowed = PlaintextAsk::undecided().with("issue95mid", PlaintextChoice::Allowed);
-    let silent = |_: &Origin, _: Option<&crate::plex::ResolvePin>, _: Duration| (0, Vec::new());
+    let silent = |_: &Origin, _: Option<&crate::origin::ResolvePin>, _: Duration| (0, Vec::new());
     for (label, resource, dial) in [
         ("no longer eligible", {
             let mut r = issue_95_account(false); r.public_address_matches = false; r
-        }, plx10_dial as fn(&Origin, Option<&crate::plex::ResolvePin>, Duration) -> (i32, Vec<u8>)),
+        }, plx10_dial as fn(&Origin, Option<&crate::origin::ResolvePin>, Duration) -> (i32, Vec<u8>)),
         ("no longer answers", issue_95_account(false), silent),
     ] {
         crate::plex::reset_servers_for_test();

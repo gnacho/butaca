@@ -195,8 +195,8 @@ pub(crate) fn dev_token() -> String {
 
 /// Optional primary endpoint for a synthetic PMS fixture. Used only with the explicitly
 /// injected dev token; a persisted account is never redirected. Absent in shipping builds.
-pub(crate) fn pms_origin() -> Option<crate::plex::Origin> {
-    crate::dev::read("pms-origin").and_then(|s| crate::plex::Origin::parse(s.trim()))
+pub(crate) fn pms_origin() -> Option<crate::origin::Origin> {
+    crate::dev::read("pms-origin").and_then(|s| crate::origin::Origin::parse(s.trim()))
 }
 
 crate::dev::latched_flag! { pub(crate) fn imagecache_stats_armed = "imagecache-stats"; }
