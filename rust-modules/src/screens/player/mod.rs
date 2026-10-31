@@ -424,7 +424,7 @@ impl PlayerScreen {
     /// hiding it. It stays down until a bound key raises it, exactly like an UP-hide.
     pub(crate) fn set_hud_policy(&mut self, policy: HudPolicy) {
         if self.hud_policy == HudPolicy::Hidden && policy != HudPolicy::Hidden {
-            self.hud.dismissed = true;
+            self.hud.dismiss();
         }
         self.hud_policy = policy;
     }
@@ -586,13 +586,12 @@ impl<H: PlayerLike + crate::screens::registry::MetadataLike> Machine<H> for Play
                     // once a click has seated the gesture on it — a drag that began anywhere else
                     // must not capture the bar the moment it passes over it.
                     InputKind::Drag { x, .. } => self.handle_drag(*x, input.at.ms),
-                    // Pointer MOTION over the bare transport raises it and clears a hand
-                    // dismissal, which is how a Magic Remote user finds the HUD over full-screen
-                    // video. `app/run.rs`'s own motion arm did this and then RETURNED, so the page
+                    // Pointer MOTION over the bare transport raises it. After a hand dismissal the
+                    // HUD requires deliberate net displacement, so Magic Remote sub-pixel drift cannot
+                    // re-arm it. `app/run.rs`'s own motion arm did this and then RETURNED, so the page
                     // never saw a pointer event at all.
-                    InputKind::Pointer { .. } => {
-                        self.hud.dismissed = false;
-                        self.hud.extend(input.at.ms, input::HUD_LINGER_MS);
+                    InputKind::Pointer { x, y, .. } => {
+                        self.hud.note_pointer_motion(*x, *y, input.at.ms);
                         self.publish();
                         Handled::Yes
                     }
@@ -933,7 +932,7 @@ impl PlayerScreen {
             self.scrub.disengage();
         }
         if hide {
-            self.hud.dismissed = true;
+            self.hud.dismiss();
         } else {
             self.hud.extend(now, input::HUD_LINGER_MS);
         }
@@ -2374,6 +2373,19 @@ mod scrub_ownership_tests {
         crate::player::SHARED.pb_state.store(was, Relaxed);
     }
 
+    #[test]
+    fn micro_motion_does_not_reveal_a_dismissed_hud() {
+        let _g = crate::testlock::serial();
+        let _f = Fixture::new(false);
+        let mut page = page_on_the_bar();
+        page.hud.dismissed = true;
+        for (ms, x, y) in [(1_000, 100.0, 100.0), (1_010, 100.25, 100.0), (1_020, 100.25, 100.25)] {
+            pointer(&mut page, InputKind::Pointer { x, y, hit: None }, ms);
+            assert!(page.hud.dismissed, "sub-pixel drift at {ms} must not clear the dismissal");
+            assert_eq!(page.hud.until, 0, "sub-pixel drift at {ms} must not extend the HUD");
+        }
+    }
+
     /// **(c) The scrubber's stop is a SEEK target, and a drag previews across it.**
     ///
     /// The pointer half of the same gesture. A click on the bar puts the preview under the
@@ -2400,10 +2412,11 @@ mod scrub_ownership_tests {
             map.swap();
             map.note_dpad();
 
-            // All four ck events enter before another frame can paint. Motion reveals the HUD
-            // state, but click still resolves against the LAST presented frame's empty hit map.
-            pointer(&mut page, InputKind::Pointer { x: 1400.0, y, hit: None }, 1_000);
-            assert!(!page.hud.dismissed && page.hud_up(TestHost::session(&cx), 1_000));
+            // All four ck events enter before another frame can paint. Deliberate motion reveals
+            // the HUD state, but click still resolves against the LAST presented frame's empty map.
+            pointer(&mut page, InputKind::Pointer { x: 1396.0, y, hit: None }, 1_000);
+            pointer(&mut page, InputKind::Pointer { x: 1400.0, y, hit: None }, 1_010);
+            assert!(!page.hud.dismissed && page.hud_up(TestHost::session(&cx), 1_010));
             let hit = map.resolve(Some(ENTRY), PointerKind::Click, 1400.0, y, None);
             assert!(hit.hit.is_none());
             let (_, reqs) = pointer(&mut page, InputKind::Click { x: 1400.0, y, hit: None }, 1_000);

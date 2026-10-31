@@ -185,6 +185,9 @@ impl HudNav {
 /// module's own snapshot of the cursor plus a computed `visible`, built beside this one at
 /// the tail of the loop.
 pub(crate) struct HudState {
+    /// Origin of the pointer motion waiting to prove intent after a hand dismissal. Net displacement
+    /// from this point must reach 4 logical px; sub-pixel drift around it never accumulates into a reveal.
+    pointer_origin: Option<(f32, f32)>,
     /// the focus cursor, reset per session by `start_playback`
     pub(crate) nav: HudNav,
     /// **The auto-hide deadline, as an absolute `SDL_GetTicks` instant** — `0` = expired.
@@ -223,6 +226,7 @@ pub(crate) struct HudState {
 impl HudState {
     /// Focus at rest, no timer, nothing dismissed, no segment seen yet, discs in the control row.
     pub(crate) const IDLE: HudState = HudState {
+        pointer_origin: None,
         nav: HudNav::HOME,
         until: 0,
         dismissed: false,
@@ -250,6 +254,33 @@ impl HudState {
         if want > self.until {
             self.until = want;
         }
+    }
+
+    /// Hand-dismiss the transport and start a fresh pointer-intent measurement. Movement that
+    /// already happened must not count towards revealing the HUD the user just chose to hide.
+    pub(crate) fn dismiss(&mut self) {
+        self.dismissed = true;
+        self.pointer_origin = None;
+    }
+
+    /// Extend an active HUD on any pointer motion. A dismissed HUD instead waits for 4 logical px
+    /// of net displacement from the first ignored event, so sub-pixel jitter cannot wake it.
+    pub(crate) fn note_pointer_motion(&mut self, x: f32, y: f32, now: u32) {
+        if !self.dismissed {
+            self.pointer_origin = None;
+            self.extend(now, HUD_LINGER_MS);
+            return;
+        }
+        let Some((ox, oy)) = self.pointer_origin else {
+            self.pointer_origin = Some((x, y));
+            return;
+        };
+        if (x - ox).abs() + (y - oy).abs() < 4.0 {
+            return;
+        }
+        self.dismissed = false;
+        self.pointer_origin = None;
+        self.extend(now, HUD_LINGER_MS);
     }
 
     /// A fresh key the app BINDS has arrived: record what the transport LOOKED like to the user,
@@ -535,6 +566,33 @@ mod hud_visibility_tests {
         assert_eq!(hud.until, pinned, "the 4.5 s linger must not cut the 60 s pin");
         hud.extend(1_000 + HUD_HEADLESS_MS, HUD_LINGER_MS);
         assert!(hud.until > pinned, "…but a later deadline still extends it");
+    }
+
+    #[test]
+    fn a_dismissed_hud_requires_net_pointer_displacement_not_accumulated_jitter() {
+        let mut hud = HudState::IDLE;
+        hud.dismiss();
+        hud.note_pointer_motion(100.0, 100.0, 1_000);
+        for (x, y) in [(100.25, 100.0), (100.0, 100.25), (100.25, 100.25), (100.0, 100.0)] {
+            hud.note_pointer_motion(x, y, 1_010);
+            assert!(hud.dismissed, "jitter around the origin must never accumulate into a reveal");
+            assert_eq!(hud.until, 0);
+        }
+        hud.note_pointer_motion(102.0, 100.0, 1_020);
+        assert!(hud.dismissed, "two pixels of net travel are still below the threshold");
+        hud.note_pointer_motion(102.0, 102.0, 1_030);
+        assert!(!hud.dismissed, "four pixels of net travel are deliberate motion");
+        assert_eq!(hud.until, 1_030 + HUD_LINGER_MS);
+    }
+
+    #[test]
+    fn an_active_hud_still_extends_on_sub_pixel_pointer_motion() {
+        let mut hud = HudState::IDLE;
+        hud.note_pointer_motion(100.0, 100.0, 1_000);
+        assert_eq!(hud.until, 1_000 + HUD_LINGER_MS);
+        hud.note_pointer_motion(100.25, 100.25, 2_000);
+        assert_eq!(hud.until, 2_000 + HUD_LINGER_MS);
+        assert!(!hud.dismissed);
     }
 
     /// A fresh offer takes the control row FROM REST — and clearing the dismissal is half of "on
