@@ -608,8 +608,8 @@ fn the_unencrypted_connection_switch_shows_the_grant_and_revokes_it_at_once() {
     let _g = crate::testlock::serial();
     let _sess = multi_user_session("root-plaintext-switch");
     crate::plex::reset_servers_for_test();
-    crate::plex::grant::reset_for_test();
-    let account = crate::plex::grant::account_key(&crate::plex::session::peek());
+    crate::grant::reset_for_test();
+    let account = crate::grant::account_key(&crate::plex::session::peek());
     assert!(!account.is_empty(), "the fixture session is signed in");
     let mut saved = crate::plex::session::peek().with_plaintext_choice(&account, "lan-machine", PlaintextChoice::Allowed);
     saved.sources.push(crate::plex::session::SourceRef {
@@ -619,8 +619,8 @@ fn the_unencrypted_connection_switch_shows_the_grant_and_revokes_it_at_once() {
     });
     crate::plex::session::save(&saved);
     let lan = crate::origin::Origin::http("192.168.0.10", 32400);
-    crate::plex::grant::mint(crate::plex::grant::scope(), "lan-machine", &lan,
-        &crate::plex::grant::eligible_evidence_for_test()).unwrap();
+    crate::grant::mint(crate::grant::scope(), "lan-machine", &lan,
+        &crate::grant::eligible_evidence_for_test()).unwrap();
 
     let mut root = RootPage::new(EntryId(0), cx(None).views);
     let row = root.rows.iter().position(|a| matches!(a, Action::Plaintext(0)))
@@ -635,15 +635,15 @@ fn the_unencrypted_connection_switch_shows_the_grant_and_revokes_it_at_once() {
     let mut present = Present::new();
     let mut fx = Effects::new(&mut out, MachineId::Session, &mut present);
     root.activate(row as i32, cx(None).views, &mut fx);
-    assert_eq!(crate::plex::grant::granted_origin("lan-machine"), None, "revoked before the write lands");
-    assert!(!crate::plex::grant::allowed_under(crate::origin::CredentialPolicy::HttpsOnly, &lan));
+    assert_eq!(crate::grant::granted_origin("lan-machine"), None, "revoked before the write lands");
+    assert!(!crate::grant::allowed_under(crate::origin::CredentialPolicy::HttpsOnly, &lan));
     assert_eq!(root.state.plaintext, vec![false], "the switch shows the answer optimistically");
     let drawn = root.table.sections.iter().flat_map(|s| &s.rows).nth(row).unwrap();
     assert_eq!(drawn.toggle, Some(false));
     assert_eq!(drawn.detail, "Not allowed. Only encrypted connections.");
     crate::storage_worker::drain_for_test();
     assert_eq!(crate::plex::session::peek().plaintext_choice(&account, "lan-machine"), PlaintextChoice::Revoked);
-    crate::plex::grant::reset_for_test();
+    crate::grant::reset_for_test();
     crate::plex::reset_servers_for_test();
 }
 
@@ -669,8 +669,8 @@ fn turning_an_unencrypted_connection_on_asks_the_shared_question_first() {
     let _g = crate::testlock::serial();
     let _sess = multi_user_session("root-plaintext-ask");
     crate::plex::reset_servers_for_test();
-    crate::plex::grant::reset_for_test();
-    crate::plex::grant::offered(crate::plex::grant::scope(), crate::plex::grant::PlaintextVerdict {
+    crate::grant::reset_for_test();
+    crate::grant::offered(crate::grant::scope(), crate::grant::PlaintextVerdict {
         machine_id: "lan-machine".into(), name: "Basement".into(), shared_by: String::new(),
         eligibility: crate::plex::probe::PlaintextEligibility::Eligible, choice: PlaintextChoice::Undecided,
     });
@@ -688,7 +688,7 @@ fn turning_an_unencrypted_connection_on_asks_the_shared_question_first() {
     root.activate(row as i32, cx(None).views, &mut fx);
     assert!(root.alert.is_open(), "ON asks before anything is recorded");
     assert_eq!(root.state.plaintext, vec![false]);
-    assert!(crate::plex::grant::choices(&crate::plex::session::peek()).is_empty(),
+    assert!(crate::grant::choices(&crate::plex::session::peek()).is_empty(),
         "nothing is recorded yet");
     let mut groups = Vec::new();
     Focusable::<InnerHost>::groups(&root, &cx(None), &mut groups);
@@ -710,7 +710,7 @@ fn turning_an_unencrypted_connection_on_asks_the_shared_question_first() {
     assert_eq!(answers, [PlaintextChoice::Allowed]);
     assert!(!root.alert.is_open());
     assert_eq!(root.state.plaintext, vec![true], "the switch shows the answer optimistically");
-    crate::plex::grant::reset_for_test();
+    crate::grant::reset_for_test();
     crate::plex::reset_servers_for_test();
 }
 

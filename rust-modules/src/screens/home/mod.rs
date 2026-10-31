@@ -351,7 +351,7 @@ pub(crate) struct HomeScreen {
     snap: Spring,
     status_ms: f32,
     /// The plaintext-only server the failure read-out speaks about, when discovery offers the
-    /// question for one (`plex::grant::offers`) — not logical state: it is the grant table's.
+    /// question for one (`grant::offers`) — not logical state: it is the grant table's.
     plaintext: OfferWatch,
     /// The question, asked from the read-out's *Connect*.
     plaintext_alert: PlaintextAlert,
@@ -1611,7 +1611,7 @@ impl LogicalState for HomeScreen {
             snap_target: _,
             visible_activation: _, cta_available: _, strip_chosen: _, snap: _, status_ms: _,
             hero_pop: _, backdrop: _, grid: _,
-            // The plaintext question is the grant table's (`plex::grant::offers`), which no
+            // The plaintext question is the grant table's (`grant::offers`), which no
             // recording can raise, and its alert only paints over a failed read-out.
             plaintext: _, plaintext_alert: _ } = self;
         c.f32(self.snap_target)

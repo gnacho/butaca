@@ -2483,15 +2483,15 @@ fn plx10_offer(resolved: &Resolution) -> Option<&PlaintextVerdict> {
 fn plx10_before_consent_an_eligible_lan_answer_is_offered_and_no_token_goes_over_plaintext() {
     let _g = crate::testlock::serial();
     crate::plex::reset_servers_for_test();
-    crate::plex::grant::reset_for_test();
+    crate::grant::reset_for_test();
     let (resolved, admitted) = plx10_discover(issue_95_account(false), &PlaintextAsk::undecided());
     assert!(admitted.iter().all(|(url, _)| url.starts_with("https://")), "{admitted:?}");
     let verdict = plx10_offer(&resolved).expect("an insecure-only verdict");
     assert_eq!(verdict.eligibility, probe::PlaintextEligibility::Eligible);
     assert_eq!(verdict.choice, PlaintextChoice::Undecided);
     assert!(verdict.offers());
-    assert!(crate::plex::grant::granted_machines().is_empty());
-    assert!(!crate::plex::grant::allowed_under(
+    assert!(crate::grant::granted_machines().is_empty());
+    assert!(!crate::grant::allowed_under(
         CredentialPolicy::HttpsOnly, &Origin::http("192.168.1.50", 32400)));
 
     // Declined is recorded, never offered as a question again, and still mints nothing.
@@ -2500,7 +2500,7 @@ fn plx10_before_consent_an_eligible_lan_answer_is_offered_and_no_token_goes_over
     assert!(admitted.is_empty(), "{admitted:?}");
     let verdict = plx10_offer(&resolved).expect("an insecure-only verdict");
     assert_eq!(verdict.choice, PlaintextChoice::Declined);
-    assert!(crate::plex::grant::granted_machines().is_empty());
+    assert!(crate::grant::granted_machines().is_empty());
     crate::plex::reset_servers_for_test();
 }
 
@@ -2511,18 +2511,18 @@ fn plx10_before_consent_an_eligible_lan_answer_is_offered_and_no_token_goes_over
 fn plx10_after_consent_the_token_goes_only_to_the_exact_verified_origin() {
     let _g = crate::testlock::serial();
     crate::plex::reset_servers_for_test();
-    crate::plex::grant::reset_for_test();
+    crate::grant::reset_for_test();
     let allowed = PlaintextAsk::undecided().with("issue95mid", PlaintextChoice::Allowed);
     let (resolved, admitted) = plx10_discover(issue_95_account(false), &allowed);
     assert_eq!(admitted, vec![("http://192.168.1.50:32400".to_owned(), "tok-95".to_owned())]);
     let Resolved::Reached(found) = resolved.outcome else { panic!("consent must reach the server") };
     assert_eq!(found[0].origin_url, "http://192.168.1.50:32400");
     let store = CredentialPolicy::HttpsOnly;
-    assert!(crate::plex::grant::allowed_under(store, &Origin::http("192.168.1.50", 32400)));
-    assert!(!crate::plex::grant::allowed_under(store, &Origin::http("192.168.1.50", 32401)));
-    assert!(!crate::plex::grant::allowed_under(store, &Origin::http("192.168.1.51", 32400)));
-    assert!(!crate::plex::grant::allowed_under(store, &Origin::http("custom.example.net", 443)));
-    crate::plex::grant::reset_for_test();
+    assert!(crate::grant::allowed_under(store, &Origin::http("192.168.1.50", 32400)));
+    assert!(!crate::grant::allowed_under(store, &Origin::http("192.168.1.50", 32401)));
+    assert!(!crate::grant::allowed_under(store, &Origin::http("192.168.1.51", 32400)));
+    assert!(!crate::grant::allowed_under(store, &Origin::http("custom.example.net", 443)));
+    crate::grant::reset_for_test();
     crate::plex::reset_servers_for_test();
 }
 
@@ -2555,10 +2555,10 @@ fn plx10_consent_never_downgrades_an_ineligible_topology() {
     ];
     for (label, resource) in variants {
         crate::plex::reset_servers_for_test();
-        crate::plex::grant::reset_for_test();
+        crate::grant::reset_for_test();
         let (resolved, admitted) = plx10_discover(resource, &allowed);
         assert!(admitted.iter().all(|(url, _)| url.starts_with("https://")), "{label}: {admitted:?}");
-        assert!(crate::plex::grant::granted_machines().is_empty(), "{label}: a grant was minted");
+        assert!(crate::grant::granted_machines().is_empty(), "{label}: a grant was minted");
         assert!(plx10_offer(&resolved).is_none_or(|v| !v.offers()), "{label}: offered");
     }
     crate::plex::reset_servers_for_test();
@@ -2574,7 +2574,7 @@ fn plx10_consent_never_downgrades_an_ineligible_topology() {
 fn plx10_an_https_origin_refused_at_admission_is_not_a_reason_to_go_plaintext() {
     let _g = crate::testlock::serial();
     crate::plex::reset_servers_for_test();
-    crate::plex::grant::reset_for_test();
+    crate::grant::reset_for_test();
     fn dial(origin: &Origin, _pin: Option<&crate::origin::ResolvePin>, _budget: Duration) -> (i32, Vec<u8>) {
         match (origin.host(), origin.is_tls()) {
             ("192-168-1-50.h.plex.direct", true) => (200, identity_json("issue95mid")),
@@ -2590,7 +2590,7 @@ fn plx10_an_https_origin_refused_at_admission_is_not_a_reason_to_go_plaintext() 
             crate::plex::EndpointAdmission::Usable
         });
     assert!(admitted.iter().all(|(url, _)| url.starts_with("https://")), "{admitted:?}");
-    assert!(crate::plex::grant::granted_machines().is_empty(), "a grant was minted");
+    assert!(crate::grant::granted_machines().is_empty(), "a grant was minted");
     assert!(plx10_offer(&resolved).is_none_or(|v| !v.offers()), "offered");
     crate::plex::reset_servers_for_test();
 }
@@ -2612,16 +2612,16 @@ fn plx10_a_fresh_verdict_that_does_not_reach_the_granted_origin_revokes_the_gran
         ("no longer answers", issue_95_account(false), silent),
     ] {
         crate::plex::reset_servers_for_test();
-        crate::plex::grant::reset_for_test();
+        crate::grant::reset_for_test();
         let _ = plx10_discover(issue_95_account(false), &allowed);
-        assert_eq!(crate::plex::grant::granted_machines(), vec!["issue95mid".to_owned()], "{label}");
+        assert_eq!(crate::grant::granted_machines(), vec!["issue95mid".to_owned()], "{label}");
         let (_, admitted, settled) = plx10_discover_with(resource, &allowed, dial,
             |_| crate::plex::EndpointAdmission::Usable);
         assert!(admitted.is_empty(), "{label}: {admitted:?}");
         publish_settled_probes(&settled);
-        assert!(crate::plex::grant::granted_machines().is_empty(), "{label}: the grant survived");
+        assert!(crate::grant::granted_machines().is_empty(), "{label}: the grant survived");
     }
-    crate::plex::grant::reset_for_test();
+    crate::grant::reset_for_test();
     crate::plex::reset_servers_for_test();
 }
 

@@ -33,7 +33,7 @@ impl LibraryScreen {
         overlay
     }
 
-    /// Follow the offer for the failed source's server (`plex::grant::offers`), and take the
+    /// Follow the offer for the failed source's server (`grant::offers`), and take the
     /// question down once the read-out it was asked from no longer asks about that server.
     pub(super) fn watch_plaintext<H: LibraryLike>(&mut self, cx: &Cx<'_, H>) {
         use super::super::plaintext_question::{asks, Near};

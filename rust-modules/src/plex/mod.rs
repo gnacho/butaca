@@ -70,9 +70,9 @@ pub(crate) use crate::origin;
 // 8-second timeout and a probe that answers as the wrong machine.
 pub(crate) mod probe;
 
-// **May a credential go to this origin** — the one authority every credential consumer asks, and
-// the consented, network- and identity-bound plaintext grants behind its answer (see its doc).
-pub(crate) mod grant;
+// Compatibility alias for Plex internals. The credential authority and plaintext consent
+// lifecycle live in crate::grant so shared HTTP transport code need not import through Plex.
+pub(crate) use crate::grant;
 
 // Which libraries feed Home, PER PROFILE. Pure policy over the section table and one profile's
 // persisted answer — no store, no screen — so the household default, the recorded answer and the
@@ -115,6 +115,7 @@ pub use servers::{
 // `set_current`, and one that wants to forget a share wants plex.tv to stop granting it.
 #[allow(unused_imports)]
 pub(crate) use servers::{finish_profile_switch, id_of_machine, revoke_all, revoke_for_profile_switch};
+pub(crate) use servers::regrade_credentials;
 // The registry as a TEST FIXTURE, for suites outside this module (`route.rs` grades which server a
 // `/:/timeline` POST reaches). `register_for_test` skips the `session::load` the public `register`
 // does — that call mints and PERSISTS a device uuid, which a host test has no business writing —

@@ -714,7 +714,7 @@ fn a_failed_source_over_an_offered_server_asks_the_shared_question() {
     use super::super::plaintext_question::connect;
     let _guard = crate::testlock::serial();
     crate::plex::reset_servers_for_test();
-    crate::plex::grant::reset_for_test();
+    crate::grant::reset_for_test();
     let sid = crate::plex::register_pinned_with_client_id("lan-machine", &crate::origin::Origin::http("192.168.1.50", 32400), "", None, "client", Default::default());
     let mut fixture = Fixture::new();
     fixture.listing = crate::stores::browse::ListingSnapshot::empty_for_test();
@@ -722,8 +722,8 @@ fn a_failed_source_over_an_offered_server_asks_the_shared_question() {
         crate::browse::SrcGroup { name: "Cinema server".into(), handle: String::new(),
             state: crate::browse::SourceState::Unreachable, tier: None }, SecFetch::Failed);
     let mut page = fixture.screen();
-    let offer = |machine: &str| crate::plex::grant::offered(crate::plex::grant::scope(),
-        crate::plex::grant::PlaintextVerdict { machine_id: machine.into(), name: "nas".into(), shared_by: String::new(),
+    let offer = |machine: &str| crate::grant::offered(crate::grant::scope(),
+        crate::grant::PlaintextVerdict { machine_id: machine.into(), name: "nas".into(), shared_by: String::new(),
             eligibility: crate::plex::probe::PlaintextEligibility::Eligible, choice: PlaintextChoice::Undecided });
     let tick = |page: &mut LibraryScreen| {
         let mut out = Vec::new();
@@ -758,7 +758,7 @@ fn a_failed_source_over_an_offered_server_asks_the_shared_question() {
         _ => None,
     }).collect();
     assert_eq!(answers, [(PlaintextChoice::Allowed, Some(sid))]);
-    crate::plex::grant::reset_for_test();
+    crate::grant::reset_for_test();
     crate::plex::reset_servers_for_test();
 }
 

@@ -16,7 +16,7 @@
 //! rides every hop. Log lines carry an origin and a query-less path, never a query.
 //!
 //! **Every plaintext hop that would carry a credential asks the credential authority first**
-//! (`crate::http::credential_transport_allowed`, i.e. `plex::grant`) — the first request, every
+//! (`crate::http::credential_transport_allowed`, i.e. `grant`) — the first request, every
 //! followed hop, and every reopen a seek makes. A plaintext media stream opened under a consented
 //! grant therefore stops at its next request once that grant is revoked: [`FollowError::Refused`],
 //! with nothing dialled.

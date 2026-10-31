@@ -63,7 +63,7 @@ fn instance_profile_worker_completes_offline_policy_on_its_own_landing() {
         adapter.launch(RequestId(1), SessionWorkKey { epoch, op: SessionOp::ProfileSwitch },
             true, |job| { job(); true }, move |output| {
                 profile_switch_worker_with_output(epoch, expected, stored, tile, None,
-                    false, &crate::plex::grant::PlaintextAsk::undecided(), &output,
+                    false, &crate::grant::PlaintextAsk::undecided(), &output,
                     |_, _, _| SwitchOutcome::Unreachable);
             }).unwrap();
     }

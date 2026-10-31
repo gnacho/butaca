@@ -29,7 +29,7 @@ fn a_seated_profile_is_recorded_under_the_roster_uuid() {
 /// The plaintext twin may answer first, but the store POLICY alone cannot make it live: under
 /// `HttpsOnly` only an https origin can carry a credential, while a developer build keeps its lab
 /// plaintext. A store build's one plaintext exception is a consented grant, and that is not this
-/// policy's to give: `plex::grant::credential_allowed` (or `allowed_under`, where the policy is a
+/// policy's to give: `grant::credential_allowed` (or `allowed_under`, where the policy is a
 /// parameter) is the one answer, and it consults the grant table on top of this rule.
 /// Superseded `activation_allowed_by_policy`, deleted with the race-semantics change.
 #[test]

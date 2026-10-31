@@ -416,21 +416,21 @@ pub(crate) fn credential_transport_allowed_by_policy(
 ) -> bool {
     match credential_carried(path, headers) {
         Credential::None => true,
-        Credential::Plex => crate::plex::grant::allowed_under(policy, origin),
+        Credential::Plex => crate::grant::allowed_under(policy, origin),
         // Jellyfin has no *.plex.direct equivalent: a home server is plain HTTP on a LAN
         // address in the overwhelming majority of installs, so its credential shapes may cross
         // plaintext ONLY to the address the credential was issued for — the installed client's
         // origin, the one signed in against (`jellyfin::plaintext_host_allowed`). TLS, a
         // developer build and a live consented grant admit everything the Plex arm admits.
         Credential::Jellyfin => {
-            crate::plex::grant::allowed_under(policy, origin)
+            crate::grant::allowed_under(policy, origin)
                 || crate::jellyfin::plaintext_host_allowed(origin)
         }
     }
 }
 
 /// The shared control/media credential boundary: a request that carries a credential reaches the
-/// wire only when THE authority (`plex::grant`) says its origin may carry one — TLS, a developer
+/// wire only when THE authority (`grant`) says its origin may carry one — TLS, a developer
 /// build, or a live consented grant for exactly this plaintext origin. Asked per request, so a
 /// revoked grant stops the next request, whoever queued it and whenever. The log names neither
 /// URL nor token.

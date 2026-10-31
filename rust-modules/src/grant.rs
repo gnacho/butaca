@@ -49,7 +49,7 @@
 //! [`roster_replaced`] change the table at once, and the authority is asked when a request STARTS: every request that starts after
 //! the change — queued, retried, a cached token-bearing URL, a media reopen — is refused at the
 //! transport, and the registry re-grades every published client
-//! ([`super::servers::regrade_credentials`]), blanking the token of any whose origin may no
+//! ([`crate::plex::regrade_credentials`]), blanking the token of any whose origin may no
 //! longer carry one. A request already on the wire is not interrupted: it completes (or fails)
 //! with the credential it started with, and nothing after it gets a new one. A refusal also moves
 //! the consent generation, so a discovery that captured *Allowed* before it cannot mint the grant
@@ -71,12 +71,22 @@
 //! current generations ([`offered`]). The consent surfaces — the sign-in read-out, Home's and the
 //! Library's failure read-out, Settings' *Unencrypted connections* — read [`offers`]; an offer is
 //! never a grant, and dies with the generations exactly as a grant does.
+//!
+//! ## Backend boundary
+//!
+//! [`credential_allowed`] and [`allowed_under`] are the backend-neutral transport authority used
+//! by both Plex and Jellyfin. The consent lifecycle below is still Plex-specific: discovery
+//! evidence comes from `crate::plex::probe`, consent persistence uses `crate::plex::session`, and
+//! registry invalidation goes through `crate::plex`. [`UpgradeRetry`] also shares `crate::pms`'s
+//! backoff. Those dependencies remain unchanged until B2 rewires the Plex lifecycle.
+//! `Session::owner_identity` stays in Plex session storage.
+#![allow(dead_code)]
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-use super::origin::{CredentialPolicy, Origin, Scheme};
-use super::probe::{AddressScope, InsecureEvidence, PlaintextEligibility};
-use super::session::{PlaintextChoice, PlaintextConsent, Session};
+use crate::origin::{CredentialPolicy, Origin, Scheme};
+use crate::plex::probe::{AddressScope, InsecureEvidence, PlaintextEligibility};
+use crate::plex::session::{PlaintextChoice, PlaintextConsent, Session};
 
 /// The generations a grant is bound to — captured by a discovery worker when it starts, so a grant
 /// it mints after the identity or the network moved is dead on arrival.
@@ -237,8 +247,8 @@ pub(crate) fn allowed_under(policy: CredentialPolicy, origin: &Origin) -> bool {
 }
 
 /// **May `machine_id`'s credential go to `origin`** — the question for whoever is about to put a
-/// server's own token on an origin: registry admission (`super::servers`), endpoint admission
-/// (`super::admit_source_until`). A grant admits only the server it was minted for, so another
+/// server's own token on an origin: registry admission (`crate::plex`), endpoint admission
+/// (`crate::plex::admit_source_until`). A grant admits only the server it was minted for, so another
 /// machine whose address collides with a granted origin (a DHCP reshuffle, a share advertising
 /// the same private address) never gets its token sent there. An empty `machine_id` names no
 /// server, and no grant admits it.
@@ -377,7 +387,7 @@ fn mint_consented(
     moved();
     if replaced {
         // The server's previous origin (it moved on the LAN) may be published with a token.
-        super::servers::regrade_credentials();
+        crate::plex::regrade_credentials();
     }
     if !already {
         // The authority only — never the machine id (a household fingerprint) nor the token.
@@ -581,7 +591,7 @@ fn refuse(machine_id: &str) {
     COUNT.store(grants.len(), Ordering::Release);
     drop(grants);
     if removed {
-        super::servers::regrade_credentials();
+        crate::plex::regrade_credentials();
         crate::log("security: plaintext credentials withdrawn for one server");
     }
 }
@@ -625,7 +635,7 @@ pub(crate) fn record(
 /// it would have replaced is keyed to a sign-in that is gone.
 fn persist(answer: Answer) {
     let Answer { account, machine_id, choice } = answer.clone();
-    super::session::queue_update_settled(
+    crate::plex::session::queue_update_settled(
         move |current| {
             (account_key(current) == account
                 && current.plaintext_choice(&account, &machine_id) != choice)
@@ -725,7 +735,7 @@ pub(crate) fn adopt_legacy_consent(session: &Session) -> bool {
     {
         return false;
     }
-    super::session::queue_update(move |current| {
+    crate::plex::session::queue_update(move |current| {
         if account_key(current) != account || legacy_account_key(&current.account_token) != legacy {
             return None;
         }
@@ -766,7 +776,7 @@ impl PlaintextAsk {
     /// the persisted answers that account gave, overlaid by this launch's. A worker with no account
     /// token (a fresh sign-in) captures none.
     pub(crate) fn capture(account_token: &str) -> Self {
-        let session = super::session::peek();
+        let session = crate::plex::session::peek();
         adopt_legacy_consent(&session);
         let consent = CONSENT.load(Ordering::Acquire);
         Self {
@@ -849,7 +859,7 @@ impl UpgradeRetry {
         let mut machines = take_stranded();
         machines.extend(self.poll(now, revision(), granted_machines));
         for machine in machines {
-            if let Some(sid) = super::servers::id_of_machine(&machine) {
+            if let Some(sid) = crate::plex::id_of_machine(&machine) {
                 let _ = out.insert(crate::stores::EndpointRefresh { sid });
             }
         }
@@ -918,7 +928,7 @@ fn retain(keep: impl Fn(&PlaintextGrant) -> bool) -> bool {
     COUNT.store(grants.len(), Ordering::Release);
     drop(grants);
     if removed {
-        super::servers::regrade_credentials();
+        crate::plex::regrade_credentials();
         moved();
     }
     removed
@@ -978,7 +988,7 @@ mod tests {
             account_token: token.into(),
             home_users: owner
                 .into_iter()
-                .map(|id| super::super::session::HomeUserRef {
+                .map(|id| crate::plex::session::HomeUserRef {
                     id,
                     admin: true,
                     ..Default::default()

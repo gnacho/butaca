@@ -2,13 +2,13 @@
 //! (BUTACA-10).
 //!
 //! Four surfaces ask it: the sign-in read-out, Home's and a Library source's failure read-out
-//! (when the server that failed is one discovery OFFERED — `plex::grant::offers`), and Settings'
+//! (when the server that failed is one discovery OFFERED — `grant::offers`), and Settings'
 //! *Unencrypted connections* switch turned on. They share this module rather than a copy each:
 //! the question and its body, the two verbs (seated on *Not now*), which primary a verdict earns
 //! on a read-out ([`asks`]), the reason line under it ([`reason`]), and the ONE command an answer
 //! becomes ([`PlaintextQuestion::answer`] → `auth::SessionCmd::AnswerPlaintext`). The Session
 //! owner records it for the signed-in account and, on *Connect*, re-finds the server so a fresh
-//! probe can mint the grant (`plex::grant`).
+//! probe can mint the grant (`grant`).
 //!
 //! The sign-in screen hosts the question on its own alert (it shares that sheet with the report
 //! question and the Details card). Every other surface holds a [`PlaintextAlert`] — the question
@@ -426,7 +426,7 @@ pub(crate) enum AlertStep {
 }
 
 /// The offer a signed-in failure read-out speaks about, as its host caches it — the verdict and
-/// its reason line — re-read only when the grant table moved (`plex::grant::revision`) or the
+/// its reason line — re-read only when the grant table moved (`grant::revision`) or the
 /// server the read-out is about changed.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct OfferWatch {
@@ -448,12 +448,12 @@ impl OfferWatch {
     /// Re-read the offer for `machine` (`near` says whether another will do); `true` when what
     /// the read-out shows changed.
     pub(crate) fn refresh(&mut self, machine: Option<&str>, near: Near) -> bool {
-        let key = (crate::plex::grant::revision(), machine.map(str::to_owned));
+        let key = (crate::grant::revision(), machine.map(str::to_owned));
         if self.seen.as_ref() == Some(&key) {
             return false;
         }
         self.seen = Some(key);
-        let offers = crate::plex::grant::offers();
+        let offers = crate::grant::offers();
         let at = offers.iter().position(|v| Some(v.machine_id.as_str()) == machine)
             .or_else(|| (near == Near::First && !offers.is_empty()).then_some(0));
         let next = at.and_then(|i| offers.into_iter().nth(i)).map(|v| {
