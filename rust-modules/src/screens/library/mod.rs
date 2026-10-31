@@ -188,7 +188,7 @@ pub(crate) struct LibraryScreen {
     ground: crate::ui::widgets::PageGround,
     ground_seeded: bool,
     /// The failed source's server, when discovery offers the question for it
-    /// (`plex::grant::offers`) — the grant table's, not logical state.
+    /// (`grant::offers`) — the grant table's, not logical state.
     plaintext: super::plaintext_question::OfferWatch,
     /// The question, asked from the failed read-out's *Connect*.
     plaintext_alert: super::plaintext_question::PlaintextAlert,

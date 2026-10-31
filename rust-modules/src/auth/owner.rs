@@ -117,7 +117,7 @@ pub(crate) enum SessionWork {
 
 impl SessionWork {
     /// The plex.tv account token this work runs for — empty for a sign-in, which has none yet.
-    /// What `plex::grant::PlaintextAsk::capture` keys the person's answers by.
+    /// What `grant::PlaintextAsk::capture` keys the person's answers by.
     pub(crate) fn account_token(&self) -> &str {
         match self {
             Self::Login { .. } => "",
@@ -174,7 +174,7 @@ pub(crate) enum Command {
     /// — every consent surface sends this one command. On the sign-in read-out it answers the
     /// offer shown there ([`SessionInit::plaintext`]; another machine is inert) and an *Allowed*
     /// retries the discovery. Signed in, it answers a server Home, the Library or Settings showed
-    /// (`plex::grant::offers`, or an earlier answer), and an *Allowed* re-finds `sid`'s endpoint —
+    /// (`grant::offers`, or an earlier answer), and an *Allowed* re-finds `sid`'s endpoint —
     /// or the whole roster when the server has no slot — so a fresh probe can mint the grant.
     AnswerPlaintext {
         machine_id: String,
@@ -550,8 +550,8 @@ pub(crate) enum SessionFx {
     SelectionReply { to: ReplyTo, accepted: bool, flow_epoch: u64 },
     BackReply { to: ReplyTo, resumed: bool },
     /// Record the person's plaintext answer for one server: this launch's grant authority
-    /// (`plex::grant::answer`) and the persisted choice (`Session::plaintext_consent`), under
-    /// `account` — `plex::grant::account_key` of the account signed in when it was given.
+    /// (`grant::answer`) and the persisted choice (`Session::plaintext_consent`), under
+    /// `account` — `grant::account_key` of the account signed in when it was given.
     PlaintextAnswer { machine_id: String, choice: crate::plex::session::PlaintextChoice, account: String },
 }
 
@@ -2360,7 +2360,7 @@ impl SessionMachine {
     fn retry(&mut self, emit: &mut impl FnMut(SessionFx)) -> bool {
         use crate::plex::session::PlaintextChoice;
         if self.state.phase == Phase::Error {
-            let account = crate::plex::grant::account_key(&self.state.persisted);
+            let account = crate::grant::account_key(&self.state.persisted);
             let answered = self.state.plaintext.as_ref().filter(|v| v.offers()
                 && matches!(v.choice, PlaintextChoice::Declined | PlaintextChoice::Revoked));
             if let (Some(v), false) = (answered, account.is_empty()) {
@@ -2374,7 +2374,7 @@ impl SessionMachine {
 
     /// **The answer to "Connect without encryption?"** — recorded through
     /// [`SessionFx::PlaintextAnswer`] first, so the work an *Allowed* starts captures it
-    /// (`plex::grant::PlaintextAsk`).
+    /// (`grant::PlaintextAsk`).
     ///
     /// On the sign-in read-out it must answer the server shown there: *Connect* retries the
     /// discovery, *Not now* re-words the read-out (its primary becomes *Try again*, which
@@ -2384,7 +2384,7 @@ impl SessionMachine {
     fn answer_plaintext(&mut self, machine_id: &str, choice: crate::plex::session::PlaintextChoice,
         sid: Option<crate::plex::ServerId>, emit: &mut impl FnMut(SessionFx)) -> bool {
         use crate::plex::session::PlaintextChoice;
-        let account = crate::plex::grant::account_key(&self.state.persisted);
+        let account = crate::grant::account_key(&self.state.persisted);
         if account.is_empty() || machine_id.is_empty() || choice == PlaintextChoice::Undecided {
             return false;
         }
@@ -3963,7 +3963,7 @@ mod tests {
     #[test]
     fn a_signed_in_answer_is_recorded_for_the_account_and_re_finds_the_server() {
         use crate::plex::session::PlaintextChoice;
-        let key = crate::plex::grant::account_key(&local_session().persisted);
+        let key = crate::grant::account_key(&local_session().persisted);
         let sid = crate::plex::ServerId::from_raw(3);
         let mut owner = SessionMachine::from_init(local_session());
         let fx = step(&mut owner, SessionEvent::Command(Command::AnswerPlaintext {

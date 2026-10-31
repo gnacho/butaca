@@ -971,7 +971,7 @@ pub(crate) struct RootPage {
     pending_plaintext: Option<(String, bool)>,
     /// The shared question (`screens::plaintext_question`), asked when a switch is turned ON.
     alert: PlaintextAlert,
-    /// `plex::grant::revision` as last read — an offer or an answer landing rebuilds the rows.
+    /// `grant::revision` as last read — an offer or an answer landing rebuilds the rows.
     grant_seen: u64,
 }
 
@@ -1018,7 +1018,7 @@ impl RootPage {
             plaintext_rows: Vec::new(),
             pending_plaintext: None,
             alert: PlaintextAlert::new(ALERT_GROUP, super::registry::ALERT, super::registry::ALERT + 1),
-            grant_seen: crate::plex::grant::revision(),
+            grant_seen: crate::grant::revision(),
             state: RootState {
                 sel: 0,
                 auto_sign_in: false,
@@ -1170,14 +1170,14 @@ impl RootPage {
     fn plaintext_section(&mut self, actions: &mut Vec<Action>) -> Option<Section> {
         use crate::plex::session::PlaintextChoice;
         let sess = &self.session_snapshot;
-        crate::plex::grant::adopt_legacy_consent(sess);
-        let answered = crate::plex::grant::choices(sess);
+        crate::grant::adopt_legacy_consent(sess);
+        let answered = crate::grant::choices(sess);
         let mut rows: Vec<(String, bool)> = answered
             .iter()
             .filter(|(_, choice)| *choice != PlaintextChoice::Undecided)
             .map(|(machine, choice)| (machine.clone(), choice.allows()))
             .collect();
-        for offer in crate::plex::grant::offers() {
+        for offer in crate::grant::offers() {
             if plaintext_question::asks(Some(&offer)) && !rows.iter().any(|(m, _)| *m == offer.machine_id) {
                 rows.push((offer.machine_id, false));
             }
@@ -1196,7 +1196,7 @@ impl RootPage {
             return None;
         }
         let mut section = Section::new(crate::i18n::msg::settings_plaintext_section());
-        let offers = crate::plex::grant::offers();
+        let offers = crate::grant::offers();
         for (i, (machine, on)) in self.plaintext_rows.iter().enumerate() {
             // An offered server was never reached, so the session file does not know it yet:
             // the name discovery settled with comes first.
@@ -1208,7 +1208,7 @@ impl RootPage {
                     .find(|s| s.machine_id == *machine && !s.name.is_empty())
                     .map(|s| s.name.as_str()))
                 .unwrap_or(crate::i18n::msg::settings_plaintext_server());
-            let connected = *on && crate::plex::grant::granted_origin(machine).is_some();
+            let connected = *on && crate::grant::granted_origin(machine).is_some();
             section = section.row(Row::new(name).detail(plaintext_question::settings_detail(*on, connected)).toggle(*on));
             actions.push(Action::Plaintext(i));
         }
@@ -1269,8 +1269,8 @@ impl RootPage {
                 // OFF is immediate: `grant::record` withdraws the grant NOW, before the
                 // preferences write lands, and records the revocation for this account.
                 crate::log("settings: unencrypted connections turned off for one server");
-                let account = crate::plex::grant::account_key(&self.session_snapshot);
-                if crate::plex::grant::record(&account, &machine, PlaintextChoice::Revoked).is_ok() {
+                let account = crate::grant::account_key(&self.session_snapshot);
+                if crate::grant::record(&account, &machine, PlaintextChoice::Revoked).is_ok() {
                     self.pending_plaintext = Some((machine, false));
                 }
                 self.rebuild(self.table.sel, directory);
@@ -1358,7 +1358,7 @@ impl Machine<InnerHost> for RootPage {
                     }
                 }
                 // An offer or an answer landed (`grant::revision`): the switches re-read.
-                let revision = crate::plex::grant::revision();
+                let revision = crate::grant::revision();
                 if revision != self.grant_seen {
                     self.grant_seen = revision;
                     landed = true;

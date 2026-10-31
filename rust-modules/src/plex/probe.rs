@@ -748,7 +748,7 @@ pub(crate) struct InsecureEvidence {
 /// the first condition that failed. Every value is a telemetry code (`plaintext_eligibility`).
 ///
 /// Eligibility is necessary, never sufficient: a credential still goes to a plaintext origin only
-/// under a live `plex::grant::PlaintextGrant`, which is minted from an eligible verdict AND the
+/// under a live `grant::PlaintextGrant`, which is minted from an eligible verdict AND the
 /// person's recorded consent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum PlaintextEligibility {

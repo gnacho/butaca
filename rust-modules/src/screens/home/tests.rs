@@ -2113,7 +2113,7 @@ fn a_pinned_hero_never_auto_advances() {
 fn a_failed_home_over_an_offered_server_asks_the_shared_question() {
     use crate::plex::session::PlaintextChoice;
     let _guard = crate::testlock::serial();
-    crate::plex::grant::reset_for_test();
+    crate::grant::reset_for_test();
     let mut state = crate::pms::PmsState::default();
     let adapter = std::sync::Arc::new(crate::pms::PmsAdapter::default());
     crate::pms::seed_for_test(&mut state, &adapter, 0, crate::pms::HubState::Failed);
@@ -2121,11 +2121,11 @@ fn a_failed_home_over_an_offered_server_asks_the_shared_question() {
     let view = snapshot.view();
     let mut s = screen(view);
     let entry = s.entry;
-    let verdict = crate::plex::grant::PlaintextVerdict {
+    let verdict = crate::grant::PlaintextVerdict {
         machine_id: "lan-machine".into(), name: "Home".into(), shared_by: String::new(),
         eligibility: crate::plex::probe::PlaintextEligibility::Eligible, choice: PlaintextChoice::Undecided,
     };
-    crate::plex::grant::offered(crate::plex::grant::scope(), verdict.clone());
+    crate::grant::offered(crate::grant::scope(), verdict.clone());
     step(&mut s, view, None, &ScreenEvent::Tick(Tick::default()));
     let measure = FixtureMeasure;
     let overlay = status_overlay(view, &s.plaintext).unwrap();
@@ -2162,7 +2162,7 @@ fn a_failed_home_over_an_offered_server_asks_the_shared_question() {
     assert_eq!(answers, [PlaintextChoice::Allowed]);
     assert!(!s.plaintext_alert.is_open());
 
-    crate::plex::grant::answer("account", "lan-machine", PlaintextChoice::Declined);
+    crate::grant::answer("account", "lan-machine", PlaintextChoice::Declined);
     step(&mut s, view, None, &ScreenEvent::Tick(Tick::default()));
     let overlay = status_overlay(view, &s.plaintext).unwrap();
     assert_eq!(overlay.action, Some(plaintext_question::try_again()));
@@ -2171,7 +2171,7 @@ fn a_failed_home_over_an_offered_server_asks_the_shared_question() {
     let (_, retried, _) = step(&mut s, view, hero, &ScreenEvent::Activate(HERO_PLAY_ELEM));
     assert!(retries(&retried), "an answered question is not put again from a failure");
     assert!(!s.plaintext_alert.is_open());
-    crate::plex::grant::reset_for_test();
+    crate::grant::reset_for_test();
 }
 
 // ---- linked collection shelves (#205) -------------------------------------------------------

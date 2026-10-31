@@ -29,6 +29,7 @@ mod ff; // THE demuxer — the FFmpeg 9.0 this app BUNDLES and pins (majors 63/6
 mod focusprobe; // dev: one diffable line naming everything app.rs's key ladder can move, logged when it changes
 mod fontcov; // which codepoints a font file can draw, read from its cmap — text.rs's fallback chain, and the host gate that stops tofu shipping
 mod gfx;
+mod grant; // credential transport authority and consented plaintext grants
 #[cfg(feature = "devtriggers")]
 mod gpu_timer; // async EXT_disjoint_timer_query timing; no glFinish on the timing path
 mod hls; // strict parser/auth/timeline for the measured one-variant PMS HLS shape

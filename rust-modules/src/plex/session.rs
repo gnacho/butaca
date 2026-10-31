@@ -612,7 +612,7 @@ pub struct Session {
     ///
     /// This is a CHOICE, never a transport grant: nothing here says which address was used or
     /// lets a plaintext origin be reactivated from disk. A credential goes to a plaintext origin
-    /// only under a live `plex::grant::PlaintextGrant`, minted in-process from a FRESH eligible
+    /// only under a live `grant::PlaintextGrant`, minted in-process from a FRESH eligible
     /// probe and this answer together (`docs/shared-servers.md`). An absent entry is "never
     /// asked".
     ///
@@ -1548,7 +1548,7 @@ impl PlaintextChoice {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PlaintextConsent {
     pub machine_id: String,
-    /// The account that answered - `plex::grant::account_key`, the roster admin's stable plex.tv
+    /// The account that answered - `grant::account_key`, the roster admin's stable plex.tv
     /// id, or the legacy token fingerprint when that id is unavailable. An entry is honoured only
     /// while that account is signed in; one with no account (or another's) reads as never asked.
     #[serde(default)]
@@ -2089,7 +2089,7 @@ impl Session {
         next
     }
 
-    /// The answer `account` (`plex::grant::account_key`) recorded for one server —
+    /// The answer `account` (`grant::account_key`) recorded for one server —
     /// [`PlaintextChoice::Undecided`] when it was never asked (see [`Session::plaintext_consent`]).
     pub(crate) fn plaintext_choice(&self, account: &str, machine_id: &str) -> PlaintextChoice {
         self.plaintext_consent
@@ -2603,7 +2603,7 @@ pub(crate) fn queue_update_ticket(edit: impl FnOnce(&Session) -> Option<Session>
 }
 
 /// [`queue_update_ticket`] for an edit whose LANDING matters — a consent refusal
-/// (`plex::grant::record`), which must not be lost to a failed write. `settled` runs on the
+/// (`grant::record`), which must not be lost to a failed write. `settled` runs on the
 /// storage worker once the attempt is over: `true` when the file holds the edit afterwards (it
 /// already did, or the write persisted) or the edit no longer applies (a sign-out or another
 /// account replaced the one it was queued for), `false` when the store could not be read or the

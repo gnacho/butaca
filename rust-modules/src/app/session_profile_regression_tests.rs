@@ -73,18 +73,18 @@ mod tests {
     fn a_refused_profile_switch_leaves_the_live_plaintext_grant_alone() {
         let _g = crate::testlock::serial();
         crate::plex::reset_servers_for_test();
-        crate::plex::grant::reset_for_test();
+        crate::grant::reset_for_test();
         let origin = crate::origin::Origin::http("192.168.0.10", 32400);
-        crate::plex::grant::mint(crate::plex::grant::scope(), "lan-http", &origin,
-            &crate::plex::grant::eligible_evidence_for_test()).unwrap();
+        crate::grant::mint(crate::grant::scope(), "lan-http", &origin,
+            &crate::grant::eligible_evidence_for_test()).unwrap();
         let mut rig = profile_rig(false);
         let mut d = Dispatcher::<AppHost>::new();
         inject(&mut rig, RefusedIo);
         command(&mut rig, &mut d, SessionCmd::SelectProfile { index: 0, pin: None });
         let records = rig.session_adapter.take_results();
         frame(&mut rig, &mut d, records);
-        assert_eq!(crate::plex::grant::granted_origin("lan-http"), Some(origin));
-        crate::plex::grant::reset_for_test();
+        assert_eq!(crate::grant::granted_origin("lan-http"), Some(origin));
+        crate::grant::reset_for_test();
         crate::plex::reset_servers_for_test();
     }
 

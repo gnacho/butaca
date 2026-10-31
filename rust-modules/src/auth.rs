@@ -10,7 +10,7 @@
 //! Stored Home, picker and explicit developer bootstrap use the same owner, with distinct typed
 //! authority. Network/PIN derivation remain worker operations; offline policy is retained below.
 use crate::plex::account::{AccountClient, CallEvidence, HomeUser, PinPoll, Resource, SwitchOutcome};
-use crate::plex::grant::PlaintextAsk;
+use crate::grant::PlaintextAsk;
 use crate::plex::probe::{
     self, Candidate, HttpsRoutes, InsecureEvidence, Outcome, PlaintextEligibility, ProbePlan, RouteOutcome,
 };
@@ -29,7 +29,7 @@ pub(crate) use owner::{SessionInit, SessionMachine, SessionRead};
 /// requesting owner/adapter; workers can only observe cancellation and publish stream facts.
 ///
 /// `ask` is the person's plaintext consent and the grant generations, captured by the adapter on
-/// main when it admitted this work (`plex::grant::PlaintextAsk`).
+/// main when it admitted this work (`grant::PlaintextAsk`).
 pub(crate) fn run_session_work(key: owner::SessionWorkKey,
     input: owner::SessionWork, ask: PlaintextAsk, output: &dyn owner::ObservationSink) {
     fn identity(value: owner::Identity) -> SessionIdentity {
@@ -671,11 +671,11 @@ pub(crate) fn execute_session_registry(plan: &owner::RegistryPlan, client_id: &s
         owner::RegistryPlan::Install { sources, primary, replace } => {
             if *replace {
                 // The profile's identity changes HERE, at the commit, with the tokens: grants
-                // survive only for the exact origins this roster installs (`plex::grant`).
+                // survive only for the exact origins this roster installs (`grant`).
                 let installing: Vec<(String, Origin)> = sources.iter()
                     .filter_map(|s| s.origin().map(|origin| (s.machine_id.clone(), origin)))
                     .collect();
-                crate::plex::grant::roster_replaced(&installing);
+                crate::grant::roster_replaced(&installing);
                 crate::plex::revoke_for_profile_switch();
             }
             let installed = install_roster(sources, *primary, client_id);
@@ -703,14 +703,14 @@ pub(crate) fn execute_session_registry(plan: &owner::RegistryPlan, client_id: &s
     true
 }
 
-/// **The HTTPS upgrade lands.** A server on a plaintext grant (`crate::plex::grant`) whose
+/// **The HTTPS upgrade lands.** A server on a plaintext grant (`crate::grant`) whose
 /// endpoint just registered at a TLS origin needs plaintext no more: the grant is withdrawn, so
 /// nothing — a queued request, a cached URL, a reconnect — can put the credential back on the old
 /// origin. Called after the registration, outside the registry's write lock, which the grant's
 /// re-grade takes.
 fn retire_grant_on_https(machine_id: &str, origin: &Origin) {
-    if origin.is_tls() && crate::plex::grant::granted_origin(machine_id).is_some() {
-        crate::plex::grant::revoke(machine_id);
+    if origin.is_tls() && crate::grant::granted_origin(machine_id).is_some() {
+        crate::grant::revoke(machine_id);
         crate::log("security: server verified over HTTPS — plaintext upgrade complete");
     }
 }
@@ -2488,11 +2488,11 @@ fn publish_settled_probe(probe: &SettledProbe) {
     // one point every discovery path publishes through, so a token is never left standing for an
     // origin the latest probe did not re-prove.
     if probe.outcome != Outcome::Reachable {
-        crate::plex::grant::revoke(&probe.machine_id);
+        crate::grant::revoke(&probe.machine_id);
     }
     // …and an offer lives exactly as long as the latest verdict is still insecure-only.
     if probe.outcome != Outcome::InsecureOnly {
-        crate::plex::grant::withdraw_offer(&probe.machine_id);
+        crate::grant::withdraw_offer(&probe.machine_id);
     }
     let Some((id, client)) = crate::plex::server_ids()
         .filter_map(|id| crate::plex::client_for(id).map(|client| (id, client)))
@@ -2588,19 +2588,19 @@ fn probe_server(plan: &ProbePlan, dial: &dyn Fn(&Origin) -> (i32, Vec<u8>)) -> R
     Reach::No
 }
 
-/// One insecure-only server, as the read-out needs it — `plex::grant` owns the type, because the
+/// One insecure-only server, as the read-out needs it — `grant` owns the type, because the
 /// consent surfaces outside sign-in read it from the grant table's offers.
-pub(crate) use crate::plex::grant::PlaintextVerdict;
+pub(crate) use crate::grant::PlaintextVerdict;
 
 /// **A verified plaintext answer becomes usable only under a grant.** The race holds plaintext
 /// aside until every HTTPS route, the relay included, has settled ([`probe_server_racing`]); what
 /// comes back as [`Reach::InsecureOnly`] is turned into [`Reach::At`] here exactly when `ask` — the
 /// person's consent, captured at the worker's spawn site — allows this server AND
-/// `plex::grant::mint` finds the fresh verdict eligible. Anything else leaves it insecure-only, so
+/// `grant::mint` finds the fresh verdict eligible. Anything else leaves it insecure-only, so
 /// no admission, registration or token follows. A dev build whose policy already allows plaintext
 /// never reaches this (its candidates are eligible at synthesis).
 ///
-/// A verdict left insecure-only is published as the server's OFFER (`plex::grant::offered`) —
+/// A verdict left insecure-only is published as the server's OFFER (`grant::offered`) —
 /// eligible ones become the question every consent surface can ask, anything else withdraws it.
 ///
 /// `plan` is the WHOLE plan and `rejected` the origins admission already refused for this server
@@ -2629,7 +2629,7 @@ fn settle_plaintext(
             Reach::At(c, origin)
         }
         Err(_) => {
-            crate::plex::grant::offered(ask.scope(),
+            crate::grant::offered(ask.scope(),
                 plaintext_verdict(res, plan, &evidence, household, ask));
             Reach::InsecureOnly(c, routes)
         }
@@ -2753,10 +2753,10 @@ fn resolve_roster_using_admission(
             }
             // A consented plaintext origin that did not admit served nothing: its grant goes with
             // it, so a token is not left standing for an origin this run rejected.
-            if crate::plex::grant::granted_origin(&s.machine_id)
+            if crate::grant::granted_origin(&s.machine_id)
                 .is_some_and(|granted| granted.base() == s.origin_url)
             {
-                crate::plex::grant::revoke(&s.machine_id);
+                crate::grant::revoke(&s.machine_id);
             }
             let origin = s.origin_url;
             if rejected_origins.contains(&origin) { break Reach::No; }
@@ -3902,9 +3902,9 @@ impl<S: FnOnce(&AccountClient, &str, Option<&str>) -> SwitchOutcome> ProfileWork
         if rejected.iter().any(|rejected| rejected == &origin.base()) { return None; }
         // A cached origin is an address remembered from disk, not an authority: one the build's
         // policy does not credential is never re-credentialed here, grant or no grant
-        // (`plex::grant::remembered_allowed`). The fresh probe above it already dialled every
+        // (`grant::remembered_allowed`). The fresh probe above it already dialled every
         // granted origin; one it did not reach stays unreached.
-        if !crate::plex::grant::remembered_allowed(CredentialPolicy::build(), &origin) { return None; }
+        if !crate::grant::remembered_allowed(CredentialPolicy::build(), &origin) { return None; }
         let plan = probe::plan(resource, CredentialPolicy::build());
         let pin = cached.resolve_pin();
         let budget = if cached.tier == Some(probe::Location::Local) {

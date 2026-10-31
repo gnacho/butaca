@@ -852,8 +852,8 @@ unsafe fn ingest_sdl_event_with_window(app: &mut App, fr: &mut Frame,
             // Nothing proves the television is still on the network the person allowed
             // unencrypted connections on: every plaintext grant ends here, and each server that
             // lost one is queued for a fresh discovery (requested by the upgrade retry's frame
-            // step) that re-proves eligibility before minting again (`plex::grant`).
-            crate::plex::grant::network_changed();
+            // step) that re-proves eligibility before minting again (`grant`).
+            crate::grant::network_changed();
             // Reacquire only on DID foreground, before playback restoration and rendering.
             restore_window(app.win);
             crate::ui::idle::invalidate();
@@ -2280,7 +2280,7 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         // is owed either way. Invalidates from inside, per landing.
         let endpoints = app.bridge.viewstate_pump();
         super::bridge::execute_endpoint_outcomes(&mut app.pages, endpoints);
-        // A server on a plaintext grant keeps trying HTTPS (`plex::grant::UpgradeRetry`): its
+        // A server on a plaintext grant keeps trying HTTPS (`grant::UpgradeRetry`): its
         // endpoint re-discovery races every HTTPS route first and retires the grant when one
         // verifies. Route-unconditional — the upgrade is owed whatever is on screen.
         let upgrades = app.plaintext_upgrade.due(fr.now);
@@ -3211,7 +3211,7 @@ mod lifecycle_regression_tests {
 
             app.pages.suspend();
             app.window_activity.event(0x104);
-            let revision = crate::plex::grant::revision();
+            let revision = crate::grant::revision();
             let mut fr = Frame::begin(&app.player.session, app.bridge.metadata_view());
             for value in app.rec.replay_inputs() {
                 unsafe { replay_inject(&mut app, &mut fr, &value); }
@@ -3219,7 +3219,7 @@ mod lifecycle_regression_tests {
             assert!(!app.pages.nav.suspended, "recorded foreground reaches the navigation owner");
             assert!(!app.window_activity.allow_present(true),
                 "a recording cannot authorize EGL presentation while the real window is backgrounded");
-            assert_eq!(crate::plex::grant::revision(), revision,
+            assert_eq!(crate::grant::revision(), revision,
                 "recorded foreground has no network-grant authority");
 
             // The actual compositor's startup pair may arrive at another frame. It
@@ -3232,7 +3232,7 @@ mod lifecycle_regression_tests {
             assert_eq!(restored_windows, 1, "only the real DID foreground restores native handles");
             assert!(app.window_activity.allow_present(true));
             assert!(app.inputs.is_empty(), "ambient keys cannot enter the recorded scenario");
-            assert_eq!(crate::plex::grant::revision(), revision);
+            assert_eq!(crate::grant::revision(), revision);
             app.rec.present(true);
             Tap::focus(&mut app.rec, 1, None);
             assert!(app.rec.end_frame(&|| 7));

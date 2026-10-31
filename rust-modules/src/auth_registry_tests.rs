@@ -881,7 +881,7 @@ fn lan_source(token: &str) -> SourceRef {
 fn a_stored_plaintext_source_stays_tokenless_without_a_fresh_grant() {
     let _g = crate::testlock::serial();
     crate::plex::reset_servers_for_test();
-    crate::plex::grant::reset_for_test();
+    crate::grant::reset_for_test();
     let id = install_stored_source(&lan_source("stored-token"), CredentialPolicy::HttpsOnly);
     assert!(crate::plex::client_opt().is_none());
     assert!(crate::plex::client_for(id).unwrap()
@@ -898,9 +898,9 @@ fn a_stored_plaintext_source_stays_tokenless_without_a_fresh_grant() {
 fn another_server_at_a_granted_origin_registers_tokenless() {
     let _g = crate::testlock::serial();
     crate::plex::reset_servers_for_test();
-    crate::plex::grant::reset_for_test();
-    crate::plex::grant::mint(crate::plex::grant::scope(), "lan-http", &Origin::http("192.168.0.10", 32400),
-        &crate::plex::grant::eligible_evidence_for_test()).unwrap();
+    crate::grant::reset_for_test();
+    crate::grant::mint(crate::grant::scope(), "lan-http", &Origin::http("192.168.0.10", 32400),
+        &crate::grant::eligible_evidence_for_test()).unwrap();
     let mut other = lan_source("other-token");
     other.machine_id = "other-http".into();
     let id = install_stored_source(&other, CredentialPolicy::HttpsOnly);
@@ -908,7 +908,7 @@ fn another_server_at_a_granted_origin_registers_tokenless() {
         .image_transcode_path("/thumb", 2, 2, false).ends_with("X-Plex-Token="),
         "another machine was credentialed on the granted origin");
     assert_eq!(crate::plex::server_probe_result(id), Some(Outcome::InsecureOnly));
-    crate::plex::grant::reset_for_test();
+    crate::grant::reset_for_test();
     crate::plex::reset_servers_for_test();
 }
 
@@ -921,11 +921,11 @@ fn a_roster_commit_leaves_in_flight_asks_and_other_offers_live() {
     use crate::plex::session::PlaintextChoice;
     let _g = crate::testlock::serial();
     crate::plex::reset_servers_for_test();
-    crate::plex::grant::reset_for_test();
-    let evidence = crate::plex::grant::eligible_evidence_for_test();
+    crate::grant::reset_for_test();
+    let evidence = crate::grant::eligible_evidence_for_test();
     let other = Origin::http("192.168.0.20", 32400);
-    let ask = crate::plex::grant::PlaintextAsk::undecided().with("other-http", PlaintextChoice::Allowed);
-    crate::plex::grant::offered(crate::plex::grant::scope(), crate::plex::grant::PlaintextVerdict {
+    let ask = crate::grant::PlaintextAsk::undecided().with("other-http", PlaintextChoice::Allowed);
+    crate::grant::offered(crate::grant::scope(), crate::grant::PlaintextVerdict {
         machine_id: "offered-http".into(), name: "Den".into(), shared_by: String::new(),
         eligibility: crate::plex::probe::PlaintextEligibility::Eligible, choice: PlaintextChoice::Undecided,
     });
@@ -934,11 +934,11 @@ fn a_roster_commit_leaves_in_flight_asks_and_other_offers_live() {
     assert!(execute_session_registry(&owner::RegistryPlan::Install {
         sources: vec![installed], primary: Some(0), replace: true,
     }, "registry-test-client"));
-    assert!(crate::plex::grant::offer("offered-http").is_some(), "the commit cleared another server's offer");
+    assert!(crate::grant::offer("offered-http").is_some(), "the commit cleared another server's offer");
     assert_eq!(ask.settle("other-http", &other, &evidence), Ok(()),
         "the switch's own late probe could not mint");
-    assert_eq!(crate::plex::grant::granted_origin("other-http"), Some(other));
-    crate::plex::grant::reset_for_test();
+    assert_eq!(crate::grant::granted_origin("other-http"), Some(other));
+    crate::grant::reset_for_test();
     crate::plex::reset_servers_for_test();
 }
 
@@ -950,24 +950,24 @@ fn a_roster_commit_leaves_in_flight_asks_and_other_offers_live() {
 fn revoking_a_grant_blanks_the_published_client_in_place() {
     let _g = crate::testlock::serial();
     let origin = Origin::http("192.168.0.10", 32400);
-    let evidence = crate::plex::grant::eligible_evidence_for_test();
+    let evidence = crate::grant::eligible_evidence_for_test();
     for end in ["revoke", "network", "identity"] {
         crate::plex::reset_servers_for_test();
-        crate::plex::grant::reset_for_test();
-        crate::plex::grant::mint(crate::plex::grant::scope(), "lan-http", &origin, &evidence).unwrap();
+        crate::grant::reset_for_test();
+        crate::grant::mint(crate::grant::scope(), "lan-http", &origin, &evidence).unwrap();
         let id = install_stored_source(&lan_source("granted-token"), CredentialPolicy::HttpsOnly);
         let held = crate::plex::client_opt().expect("the grant makes the slot current");
         assert!(held.image_transcode_path("/thumb", 2, 2, false).ends_with("X-Plex-Token=granted-token"));
         match end {
-            "revoke" => assert!(crate::plex::grant::revoke("lan-http")),
-            "network" => crate::plex::grant::network_changed(),
-            _ => crate::plex::grant::identity_changed(),
+            "revoke" => assert!(crate::grant::revoke("lan-http")),
+            "network" => crate::grant::network_changed(),
+            _ => crate::grant::identity_changed(),
         }
         assert!(held.image_transcode_path("/thumb", 2, 2, false).ends_with("X-Plex-Token="), "{end}");
         assert!(crate::plex::client_opt().is_none(), "{end}");
         assert_eq!(crate::plex::server_probe_result(id), Some(Outcome::InsecureOnly), "{end}");
     }
-    crate::plex::grant::reset_for_test();
+    crate::grant::reset_for_test();
     crate::plex::reset_servers_for_test();
 }
 
@@ -981,17 +981,17 @@ fn revoking_a_grant_blanks_the_published_client_in_place() {
 fn a_network_change_requests_rediscovery_of_the_servers_it_stranded() {
     let _g = crate::testlock::serial();
     let origin = Origin::http("192.168.0.10", 32400);
-    let evidence = crate::plex::grant::eligible_evidence_for_test();
+    let evidence = crate::grant::eligible_evidence_for_test();
     for end in ["network", "identity"] {
         crate::plex::reset_servers_for_test();
-        crate::plex::grant::reset_for_test();
-        crate::plex::grant::mint(crate::plex::grant::scope(), "lan-http", &origin, &evidence).unwrap();
+        crate::grant::reset_for_test();
+        crate::grant::mint(crate::grant::scope(), "lan-http", &origin, &evidence).unwrap();
         let id = install_stored_source(&lan_source("granted-token"), CredentialPolicy::HttpsOnly);
-        let mut clock = crate::plex::grant::UpgradeRetry::default();
+        let mut clock = crate::grant::UpgradeRetry::default();
         assert_eq!(clock.due(0).iter().count(), 0, "armed on the first step, not due");
         match end {
-            "network" => crate::plex::grant::network_changed(),
-            _ => crate::plex::grant::identity_changed(),
+            "network" => crate::grant::network_changed(),
+            _ => crate::grant::identity_changed(),
         }
         let due: Vec<_> = clock.due(16).iter().map(|r| r.sid).collect();
         if end == "network" {
@@ -1001,7 +1001,7 @@ fn a_network_change_requests_rediscovery_of_the_servers_it_stranded() {
             assert!(due.is_empty(), "{end}");
         }
     }
-    crate::plex::grant::reset_for_test();
+    crate::grant::reset_for_test();
     crate::plex::reset_servers_for_test();
 }
 
@@ -1011,10 +1011,10 @@ fn a_network_change_requests_rediscovery_of_the_servers_it_stranded() {
 fn an_https_endpoint_commit_retires_the_plaintext_grant() {
     let _g = crate::testlock::serial();
     crate::plex::reset_servers_for_test();
-    crate::plex::grant::reset_for_test();
+    crate::grant::reset_for_test();
     let origin = Origin::http("192.168.0.10", 32400);
-    crate::plex::grant::mint(crate::plex::grant::scope(), "lan-http", &origin,
-        &crate::plex::grant::eligible_evidence_for_test()).unwrap();
+    crate::grant::mint(crate::grant::scope(), "lan-http", &origin,
+        &crate::grant::eligible_evidence_for_test()).unwrap();
     let stored = lan_source("profile-token");
     let id = install_stored_source(&stored, CredentialPolicy::HttpsOnly);
     let expected = ClientLifecycle::capture(crate::plex::client_for(id).unwrap()).logical(id.raw());
@@ -1024,8 +1024,8 @@ fn an_https_endpoint_commit_retires_the_plaintext_grant() {
     assert!(execute_session_registry(&owner::RegistryPlan::Endpoint { expected, source: upgraded },
         "registry-test-client"));
 
-    assert_eq!(crate::plex::grant::granted_origin("lan-http"), None);
-    assert!(!crate::plex::grant::allowed_under(CredentialPolicy::HttpsOnly, &origin));
+    assert_eq!(crate::grant::granted_origin("lan-http"), None);
+    assert!(!crate::grant::allowed_under(CredentialPolicy::HttpsOnly, &origin));
     let active = crate::plex::client_opt().expect("the HTTPS origin is current");
     assert!(active.origin().is_tls());
     assert!(active.image_transcode_path("/thumb", 2, 2, false).ends_with("X-Plex-Token=profile-token"));
@@ -1039,18 +1039,18 @@ fn an_https_endpoint_commit_retires_the_plaintext_grant() {
 fn an_https_install_commit_retires_the_plaintext_grant() {
     let _g = crate::testlock::serial();
     crate::plex::reset_servers_for_test();
-    crate::plex::grant::reset_for_test();
+    crate::grant::reset_for_test();
     let origin = Origin::http("192.168.0.10", 32400);
-    crate::plex::grant::mint(crate::plex::grant::scope(), "lan-http", &origin,
-        &crate::plex::grant::eligible_evidence_for_test()).unwrap();
+    crate::grant::mint(crate::grant::scope(), "lan-http", &origin,
+        &crate::grant::eligible_evidence_for_test()).unwrap();
     let mut upgraded = lan_source("profile-token");
     upgraded.origin_url = "https://192-168-0-10.example.test:32400".into();
     upgraded.tier = Some(probe::Location::Local);
     assert!(execute_session_registry(&owner::RegistryPlan::Install {
         sources: vec![upgraded], primary: Some(0), replace: false,
     }, "registry-test-client"));
-    assert_eq!(crate::plex::grant::granted_origin("lan-http"), None);
-    assert!(!crate::plex::grant::allowed_under(CredentialPolicy::HttpsOnly, &origin));
+    assert_eq!(crate::grant::granted_origin("lan-http"), None);
+    assert!(!crate::grant::allowed_under(CredentialPolicy::HttpsOnly, &origin));
     crate::plex::reset_servers_for_test();
 }
 
@@ -1061,22 +1061,22 @@ fn an_https_install_commit_retires_the_plaintext_grant() {
 fn a_profile_switch_commit_keeps_only_the_grants_it_installs() {
     let _g = crate::testlock::serial();
     crate::plex::reset_servers_for_test();
-    crate::plex::grant::reset_for_test();
-    let evidence = crate::plex::grant::eligible_evidence_for_test();
+    crate::grant::reset_for_test();
+    let evidence = crate::grant::eligible_evidence_for_test();
     let lan = Origin::http("192.168.0.10", 32400);
     let other = Origin::http("192.168.0.20", 32400);
-    let before = crate::plex::grant::scope();
-    crate::plex::grant::mint(before, "lan-http", &lan, &evidence).unwrap();
-    crate::plex::grant::mint(before, "other-http", &other, &evidence).unwrap();
+    let before = crate::grant::scope();
+    crate::grant::mint(before, "lan-http", &lan, &evidence).unwrap();
+    crate::grant::mint(before, "other-http", &other, &evidence).unwrap();
     let mut installed = lan_source("kid-token");
     installed.tier = Some(probe::Location::Local);
     assert!(execute_session_registry(&owner::RegistryPlan::Install {
         sources: vec![installed], primary: Some(0), replace: true,
     }, "registry-test-client"));
-    assert_eq!(crate::plex::grant::granted_origin("lan-http"), Some(lan.clone()));
-    assert_eq!(crate::plex::grant::granted_origin("other-http"), None);
+    assert_eq!(crate::grant::granted_origin("lan-http"), Some(lan.clone()));
+    assert_eq!(crate::grant::granted_origin("other-http"), None);
     let active = crate::plex::client_opt().expect("the kept grant keeps the slot current");
     assert!(active.image_transcode_path("/thumb", 2, 2, false).ends_with("X-Plex-Token=kid-token"));
-    crate::plex::grant::reset_for_test();
+    crate::grant::reset_for_test();
     crate::plex::reset_servers_for_test();
 }

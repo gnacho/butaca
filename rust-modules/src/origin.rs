@@ -118,7 +118,7 @@ pub fn dial_port(p: i64) -> Option<i32> {
 }
 
 /// **The build's half of "may a credential ride this origin".** The question itself has ONE
-/// answer, `crate::plex::grant::credential_allowed` (or `grant::allowed_under` in a pure function that
+/// answer, `crate::grant::credential_allowed` (or `grant::allowed_under` in a pure function that
 /// receives this value): this policy, OR a live consented plaintext grant for that exact origin
 /// (BUTACA-10). Every caller that used to carry its own `cfg!(feature = "devtriggers")` (the
 /// http guard, the curlio media twin, the probe activation gate) now goes through it, and
@@ -142,7 +142,7 @@ pub fn dial_port(p: i64) -> Option<i32> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CredentialPolicy {
     /// A store build: only a TLS origin may carry a credential by policy — the one exception, a
-    /// live consented plaintext grant, is `crate::plex::grant`'s, never this type's.
+    /// live consented plaintext grant, is `crate::grant`'s, never this type's.
     HttpsOnly,
     /// A developer build: any origin may, matching every build's behaviour before this type
     /// existed.
