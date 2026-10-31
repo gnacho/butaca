@@ -27,9 +27,6 @@ use super::probe::Location;
 /// the device profile. Forced mode instead uses the implemented software feed formats and
 /// its separate profile, without conservative device bounds.
 pub const DP_AUDIO_CODECS: &str = "aac,ac3,eac3,dts";
-pub fn is_dp_audio(codec: &str) -> bool {
-    crate::devcaps::caps().audio_has(codec)
-}
 
 /// Codec and channel check for an actual selected track. Codec-only membership is insufficient
 /// on devices whose DTS decoder stops at 5.1 or whose AAC decoder stops at stereo.
@@ -239,11 +236,7 @@ fn profile_for_delivery(caps: &crate::devcaps::Caps, delivery: TranscodeDelivery
     )
 }
 
-fn profile_for(caps: &crate::devcaps::Caps) -> String {
-    profile_for_delivery(caps, TranscodeDelivery::ProgressiveMkv)
-}
-
-/// The profile for THIS device — [`profile_for`] over the boot-probed caps snapshot.
+/// The profile for THIS device, built over the boot-probed caps snapshot.
 fn profile_extra(delivery: TranscodeDelivery) -> String {
     profile_for_delivery(crate::devcaps::caps(), delivery)
 }
@@ -1139,10 +1132,10 @@ mod tests {
     #[test]
     fn dts_is_device_gated_and_channel_limited_in_both_profiles() {
         let mut caps = Caps::assumed();
-        assert!(!super::profile_for(&caps).contains("dts"));
+        assert!(!super::profile_for_delivery(&caps, super::TranscodeDelivery::ProgressiveMkv).contains("dts"));
         caps.audio.push_str(",dts");
         caps.audio_channels.insert("dts".into(), 6);
-        let profile = super::profile_for(&caps);
+        let profile = super::profile_for_delivery(&caps, super::TranscodeDelivery::ProgressiveMkv);
         assert!(list_of(&profile, "audioCodec=").contains(&"dts".into()));
         assert!(list_of(target_of(&profile), "audioCodec=").contains(&"dts".into()));
         assert!(profile.contains("scope=videoAudioCodec&scopeName=dts&type=upperBound&name=audio.channels&value=6&replace=true"));
@@ -1174,7 +1167,7 @@ mod tests {
             audio: "aac,ac3,eac3".into(),
             audio_channels: Default::default(),
         };
-        let p = super::profile_for(&caps);
+        let p = super::profile_for_delivery(&caps, super::TranscodeDelivery::ProgressiveMkv);
         assert!(!p.contains("hevc"), "hevc must not appear anywhere in {p}");
         let dp = p.split("add-transcode-target").next().unwrap();
         assert_eq!(list_of(dp, "videoCodec="), ["h264"]);
@@ -1202,7 +1195,7 @@ mod tests {
                 audio_channels: Default::default(),
             },
         ] {
-            let p = super::profile_for(&caps);
+            let p = super::profile_for_delivery(&caps, super::TranscodeDelivery::ProgressiveMkv);
             let video = list_of(target_of(&p), "videoCodec=");
             assert_eq!(
                 video.first().map(String::as_str),
@@ -1225,7 +1218,7 @@ mod tests {
             audio: "aac".into(),
             audio_channels: Default::default(),
         };
-        let p = super::profile_for(&caps);
+        let p = super::profile_for_delivery(&caps, super::TranscodeDelivery::ProgressiveMkv);
         let dp = p.split("add-transcode-target").next().unwrap();
         assert_eq!(list_of(dp, "audioCodec="), ["aac"]);
         assert_eq!(list_of(target_of(&p), "audioCodec="), ["aac"]);
@@ -1236,7 +1229,7 @@ mod tests {
     /// here and omitted from `/decision`, or the other way around.
     #[test]
     fn the_direct_play_subtitle_list_is_the_shared_constant() {
-        let p = super::profile_for(&Caps::assumed());
+        let p = super::profile_for_delivery(&Caps::assumed(), super::TranscodeDelivery::ProgressiveMkv);
         assert!(
             p.contains(&format!("subtitleCodec={})", super::DP_SUBTITLE_CODECS)),
             "profile must interpolate DP_SUBTITLE_CODECS verbatim: {p}"
@@ -1258,7 +1251,7 @@ mod tests {
     #[test]
     fn the_assumed_profile_is_byte_identical_to_the_shipped_one() {
         assert_eq!(
-            super::profile_for(&Caps::assumed()),
+            super::profile_for_delivery(&Caps::assumed(), super::TranscodeDelivery::ProgressiveMkv),
             "add-direct-play-profile(type=videoProfile&container=mkv,mp4&videoCodec=h264,hevc\
              &audioCodec=aac,ac3,eac3&subtitleCodec=srt,subrip,ass,ssa,mov_text,movtext,webvtt,text,pgs,hdmv_pgs_subtitle,vobsub,dvd,dvd_subtitle,dvdsub,dvb_subtitle,dvbsub)\
              +add-limitation(scope=videoCodec&scopeName=*&type=upperBound&name=video.width&value=3840&replace=true)\
