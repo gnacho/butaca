@@ -5,7 +5,7 @@
 //! adapter; no unavailable helper response authorizes a file-backend fallback.
 
 use crate::storage::{
-    CommitReceipt, CommitStage, Record, RecordKey, RecordState, RecordStore, StoreError,
+    CommitReceipt, CommitStage, Record, RecordKey, RecordStore, StoreError,
 };
 use std::path::PathBuf;
 
@@ -123,11 +123,11 @@ pub(crate) fn load() -> CanonicalRead {
         match store.load(RecordKey::Session) {
             Ok(None) => CanonicalRead::Missing,
             Ok(Some(record)) => match record.state {
-                RecordState::Data { payload } => CanonicalRead::Data {
+                crate::storage::RecordState::Data { payload } => CanonicalRead::Data {
                     revision: record.revision,
                     payload,
                 },
-                RecordState::Cleared => CanonicalRead::Cleared {
+                crate::storage::RecordState::Cleared => CanonicalRead::Cleared {
                     revision: record.revision,
                     language: super::install_preferences::load().unwrap_or_default(),
                 },
