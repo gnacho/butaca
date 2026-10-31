@@ -44,7 +44,7 @@ ASSETS = ROOT / "tests" / "demo_library" / "assets.json"
 CATALOG = ROOT / "tests" / "demo_library" / "catalog.json"
 CREDITS = ROOT / "docs" / "screenshots" / "CREDITS.md"
 SITE_CREDITS = ROOT / "site" / "credits.html"
-UA = "ButacaDemoLibrary/1.0 (+https://github.com/GLinnik21/plex-native-poc)"
+UA = "ButacaDemoLibrary/1.0 (https://github.com/gnacho/butaca)"
 
 POSTER = (600, 900)
 ART = (1920, 1080)
