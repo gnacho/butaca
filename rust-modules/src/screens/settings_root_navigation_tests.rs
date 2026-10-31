@@ -609,7 +609,7 @@ fn the_unencrypted_connection_switch_shows_the_grant_and_revokes_it_at_once() {
     let _sess = multi_user_session("root-plaintext-switch");
     crate::plex::reset_servers_for_test();
     crate::plex::grant::reset_for_test();
-    let account = crate::plex::grant::account_key(&crate::plex::session::peek().account_token);
+    let account = crate::plex::grant::account_key(&crate::plex::session::peek());
     assert!(!account.is_empty(), "the fixture session is signed in");
     let mut saved = crate::plex::session::peek().with_plaintext_choice(&account, "lan-machine", PlaintextChoice::Allowed);
     saved.sources.push(crate::plex::session::SourceRef {
@@ -688,7 +688,7 @@ fn turning_an_unencrypted_connection_on_asks_the_shared_question_first() {
     root.activate(row as i32, cx(None).views, &mut fx);
     assert!(root.alert.is_open(), "ON asks before anything is recorded");
     assert_eq!(root.state.plaintext, vec![false]);
-    assert!(crate::plex::grant::choices(&[], &crate::plex::session::peek().account_token).is_empty(),
+    assert!(crate::plex::grant::choices(&crate::plex::session::peek()).is_empty(),
         "nothing is recorded yet");
     let mut groups = Vec::new();
     Focusable::<InnerHost>::groups(&root, &cx(None), &mut groups);

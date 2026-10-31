@@ -76,7 +76,7 @@ use std::sync::Mutex;
 
 use super::origin::{CredentialPolicy, Origin, Scheme};
 use super::probe::{AddressScope, InsecureEvidence, PlaintextEligibility};
-use super::session::{PlaintextChoice, PlaintextConsent};
+use super::session::{PlaintextChoice, PlaintextConsent, Session};
 
 /// The generations a grant is bound to — captured by a discovery worker when it starts, so a grant
 /// it mints after the identity or the network moved is dead on arrival.
@@ -157,13 +157,23 @@ pub(crate) fn revision() -> u64 {
     REVISION.load(Ordering::Acquire)
 }
 
-/// **The account half of a consent's key** — a fingerprint of the plex.tv account token: the
-/// first 64 bits of SHA-256 over a domain tag and the token, hex. One-way, so the public
-/// preferences file that stores it says nothing usable about the credential; stable for as long
-/// as that sign-in lasts, so every profile of the account shares the answer. Empty for an empty
-/// token, and an empty key matches nothing — an answer that cannot be bound to an account is not
-/// honoured. A fresh sign-in (a new token) is therefore asked again: the closed direction.
-pub(crate) fn account_key(account_token: &str) -> String {
+/// **The account half of a consent's key** - the roster admin's stable plex.tv account id, so a
+/// fresh token for the same owner keeps every profile's answer. Sessions written before that id
+/// was persisted fall back to the legacy token fingerprint. An empty key matches nothing.
+pub(crate) fn account_key(session: &Session) -> String {
+    account_key_for(session.owner_identity(), &session.account_token)
+}
+
+fn account_key_for(owner: Option<i64>, account_token: &str) -> String {
+    if account_token.is_empty() {
+        return String::new();
+    }
+    owner.map_or_else(|| legacy_account_key(account_token), |id| format!("plex-tv:{id}"))
+}
+
+/// The key written by older builds: the first 64 bits of SHA-256 over a domain tag and the token,
+/// hex. It is also the migration proof: only a row matching the current token may be adopted.
+fn legacy_account_key(account_token: &str) -> String {
     if account_token.is_empty() {
         return String::new();
     }
@@ -617,7 +627,7 @@ fn persist(answer: Answer) {
     let Answer { account, machine_id, choice } = answer.clone();
     super::session::queue_update_settled(
         move |current| {
-            (account_key(&current.account_token) == account
+            (account_key(current) == account
                 && current.plaintext_choice(&account, &machine_id) != choice)
                 .then(|| current.with_plaintext_choice(&account, &machine_id, choice))
         },
@@ -668,24 +678,75 @@ fn rewrite_unsaved(now: u32) {
     }
 }
 
-/// **What the person has answered, as the account `account_token` belongs to** — the persisted
-/// answers in `persisted` that carry its [`account_key`], overlaid by this launch's. The one
-/// reading of consent: [`PlaintextAsk::capture`] and Settings' list both use it.
-pub(crate) fn choices(persisted: &[PlaintextConsent], account_token: &str) -> Vec<(String, PlaintextChoice)> {
-    let account = account_key(account_token);
+/// **What the person has answered, as this session's account** - the persisted answers carrying
+/// its [`account_key`], plus a legacy row still awaiting adoption, overlaid by this launch's.
+pub(crate) fn choices(session: &Session) -> Vec<(String, PlaintextChoice)> {
+    choices_for(&session.plaintext_consent, session.owner_identity(), &session.account_token)
+}
+
+fn choices_for(
+    persisted: &[PlaintextConsent],
+    owner: Option<i64>,
+    account_token: &str,
+) -> Vec<(String, PlaintextChoice)> {
+    let account = account_key_for(owner, account_token);
     if account.is_empty() {
         return Vec::new();
     }
+    let legacy = legacy_account_key(account_token);
     let mut choices: Vec<(String, PlaintextChoice)> = persisted
         .iter()
         .filter(|c| c.account == account)
         .map(|c| (c.machine_id.clone(), c.choice))
         .collect();
+    if account != legacy {
+        for c in persisted.iter().filter(|c| c.account == legacy) {
+            if !choices.iter().any(|(machine, _)| *machine == c.machine_id) {
+                choices.push((c.machine_id.clone(), c.choice));
+            }
+        }
+    }
     for a in ANSWERS.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|a| a.account == account) {
         choices.retain(|(m, _)| *m != a.machine_id);
         choices.push((a.machine_id.clone(), a.choice));
     }
     choices
+}
+
+/// Adopt matching token-stamped rows on their first read. The worker revalidates both identities
+/// under the session IO lock, so a sign-in cannot redirect the migration. Once one write lands,
+/// later reads find no legacy row and queue nothing.
+pub(crate) fn adopt_legacy_consent(session: &Session) -> bool {
+    let account = account_key(session);
+    let legacy = legacy_account_key(&session.account_token);
+    if account.is_empty()
+        || account == legacy
+        || !session.plaintext_consent.iter().any(|c| c.account == legacy)
+    {
+        return false;
+    }
+    super::session::queue_update(move |current| {
+        if account_key(current) != account || legacy_account_key(&current.account_token) != legacy {
+            return None;
+        }
+        let mut next = current.clone();
+        let mut changed = false;
+        let mut consents = Vec::with_capacity(next.plaintext_consent.len());
+        for mut consent in next.plaintext_consent.drain(..) {
+            if consent.account == legacy {
+                changed = true;
+                if current.plaintext_consent.iter().any(|c|
+                    c.account == account && c.machine_id == consent.machine_id)
+                {
+                    continue;
+                }
+                consent.account = account.clone();
+            }
+            consents.push(consent);
+        }
+        next.plaintext_consent = consents;
+        changed.then_some(next)
+    })
 }
 
 /// **What one discovery run may do with an eligible plaintext answer** — the generations and the
@@ -706,8 +767,13 @@ impl PlaintextAsk {
     /// token (a fresh sign-in) captures none.
     pub(crate) fn capture(account_token: &str) -> Self {
         let session = super::session::peek();
+        adopt_legacy_consent(&session);
         let consent = CONSENT.load(Ordering::Acquire);
-        Self { scope: scope(), consent, choices: choices(&session.plaintext_consent, account_token) }
+        Self {
+            scope: scope(),
+            consent,
+            choices: choices_for(&session.plaintext_consent, session.owner_identity(), account_token),
+        }
     }
 
     /// The generations this capture may mint and offer under.
@@ -907,6 +973,21 @@ mod tests {
         Origin::http("192.168.0.10", 32400)
     }
 
+    fn account_session(owner: Option<i64>, token: &str) -> Session {
+        Session {
+            account_token: token.into(),
+            home_users: owner
+                .into_iter()
+                .map(|id| super::super::session::HomeUserRef {
+                    id,
+                    admin: true,
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
     /// The pure admission rule: only the exact origin, only under the current generations.
     #[test]
     fn a_grant_admits_only_its_exact_origin_under_the_current_generations() {
@@ -1064,31 +1145,83 @@ mod tests {
     }
 
     /// **Consent is the account's.** An answer recorded under one account's key is honoured for
-    /// that account — on any of its profiles — and for no other: a different plex.tv account on the
-    /// same television (or no account at all) captures nothing, and is asked again.
+    /// that account - on any of its profiles - and for no other.
     #[test]
     fn consent_is_honoured_only_for_the_account_that_gave_it() {
         let _g = crate::testlock::serial();
         reset_for_test();
-        let owner = account_key("owner-token");
-        assert_eq!(owner.len(), 16);
-        assert_ne!(owner, account_key("other-token"));
-        assert_eq!(account_key(""), "");
-        let persisted = vec![PlaintextConsent {
-            machine_id: "m".into(),
-            account: owner.clone(),
-            choice: PlaintextChoice::Allowed,
-            extensions: Default::default(),
-        }];
-        assert_eq!(choices(&persisted, "owner-token"), vec![("m".to_owned(), PlaintextChoice::Allowed)]);
-        assert!(choices(&persisted, "other-token").is_empty());
-        assert!(choices(&persisted, "").is_empty());
-        answer(&account_key("other-token"), "m", PlaintextChoice::Declined);
-        assert_eq!(choices(&persisted, "owner-token"), vec![("m".to_owned(), PlaintextChoice::Allowed)],
+        let owner_session = account_session(Some(41), "owner-token");
+        let other_session = account_session(Some(42), "other-token");
+        let owner = account_key(&owner_session);
+        let other = account_key(&other_session);
+        assert_eq!(owner, "plex-tv:41");
+        assert_ne!(owner, other);
+        assert_eq!(account_key(&account_session(Some(41), "")), "");
+        let owner_session = owner_session.with_plaintext_choice(&owner, "m", PlaintextChoice::Allowed);
+        let mut other_session = other_session;
+        other_session.plaintext_consent = owner_session.plaintext_consent.clone();
+        assert_eq!(choices(&owner_session), vec![("m".to_owned(), PlaintextChoice::Allowed)]);
+        assert!(choices(&other_session).is_empty());
+        answer(&other, "m", PlaintextChoice::Declined);
+        assert_eq!(choices(&owner_session), vec![("m".to_owned(), PlaintextChoice::Allowed)],
             "another account's answer does not overlay this one's");
-        assert_eq!(choices(&persisted, "other-token"), vec![("m".to_owned(), PlaintextChoice::Declined)]);
+        assert_eq!(choices(&other_session), vec![("m".to_owned(), PlaintextChoice::Declined)]);
         answer("", "n", PlaintextChoice::Allowed);
-        assert!(choices(&[], "").is_empty(), "an answer with no account is never honoured");
+        assert!(choices(&account_session(None, "")).is_empty(),
+            "an answer with no account is never honoured");
+        reset_for_test();
+    }
+
+    #[test]
+    fn consent_survives_re_sign_in_by_the_same_owner() {
+        let _g = crate::testlock::serial();
+        reset_for_test();
+        let before = account_session(Some(41), "old-token");
+        let after = account_session(Some(41), "new-token");
+        let account = account_key(&before);
+        assert_eq!(account, account_key(&after));
+        let before = before.with_plaintext_choice(&account, "m", PlaintextChoice::Allowed);
+        let mut after = after;
+        after.plaintext_consent = before.plaintext_consent;
+        assert_eq!(choices(&after), vec![("m".to_owned(), PlaintextChoice::Allowed)]);
+        reset_for_test();
+    }
+
+    #[test]
+    fn a_legacy_consent_is_adopted_exactly_once() {
+        use crate::plex::session::TempSession;
+        let _g = crate::testlock::serial();
+        let _sess = TempSession::new("grant-consent-adoption");
+        reset_for_test();
+        let legacy = legacy_account_key("token");
+        let mut session = account_session(Some(41), "token");
+        session.client_id = "cid".into();
+        let session = session.with_plaintext_choice(&legacy, "m", PlaintextChoice::Allowed);
+        crate::plex::session::save(&session);
+        assert_eq!(choices(&session), vec![("m".to_owned(), PlaintextChoice::Allowed)]);
+        assert!(adopt_legacy_consent(&session));
+        crate::storage_worker::drain_for_test();
+        let adopted = crate::plex::session::peek();
+        let stable = account_key(&adopted);
+        assert_ne!(stable, legacy);
+        assert_eq!(adopted.plaintext_choice(&stable, "m"), PlaintextChoice::Allowed);
+        assert_eq!(adopted.plaintext_choice(&legacy, "m"), PlaintextChoice::Undecided);
+        assert!(!adopt_legacy_consent(&adopted), "the next read has nothing to migrate");
+        crate::storage_worker::drain_for_test();
+        assert_eq!(crate::plex::session::peek().plaintext_consent, adopted.plaintext_consent);
+        reset_for_test();
+    }
+
+    #[test]
+    fn consent_falls_back_to_the_token_fingerprint_without_an_owner_id() {
+        let _g = crate::testlock::serial();
+        reset_for_test();
+        let session = account_session(None, "token");
+        let account = account_key(&session);
+        assert_eq!(account, legacy_account_key("token"));
+        assert_eq!(account.len(), 16);
+        let session = session.with_plaintext_choice(&account, "m", PlaintextChoice::Allowed);
+        assert_eq!(choices(&session), vec![("m".to_owned(), PlaintextChoice::Allowed)]);
         reset_for_test();
     }
 
@@ -1103,7 +1236,7 @@ mod tests {
         let ask = PlaintextAsk::undecided().with("m", PlaintextChoice::Allowed);
         ask.settle("m", &lan(), &eligible()).expect("consented and eligible");
         assert_eq!(granted_origin("m"), Some(lan()));
-        answer(&account_key("t"), "m", PlaintextChoice::Revoked);
+        answer(&account_key(&account_session(None, "t")), "m", PlaintextChoice::Revoked);
         assert_eq!(granted_origin("m"), None);
         assert_eq!(ask.settle("m", &lan(), &eligible()), Err(MintRefusal::Stale));
         assert_eq!(granted_origin("m"), None, "the in-flight capture re-granted a revoked server");
@@ -1125,12 +1258,12 @@ mod tests {
         let _sess = TempSession::new("grant-unsaved-refusal");
         crate::plex::reset_servers_for_test();
         reset_for_test();
-        let account = account_key("acct");
+        let account = account_key(&account_session(None, "acct"));
         // The store cannot be read: an empty client id is the locked/blocked read.
         crate::plex::session::save(&Session::default());
         record(&account, "m", PlaintextChoice::Revoked).expect("queued");
         crate::storage_worker::drain_for_test();
-        assert_eq!(choices(&[], "acct"), vec![("m".to_owned(), PlaintextChoice::Revoked)],
+        assert_eq!(choices(&account_session(None, "acct")), vec![("m".to_owned(), PlaintextChoice::Revoked)],
             "the refusal holds this launch at once");
         // The store reads again — still holding the answer the refusal replaced.
         let readable = Session { client_id: "cid".into(), account_token: "acct".into(), ..Default::default() };
@@ -1156,14 +1289,14 @@ mod tests {
         let _sess = TempSession::new("grant-unsaved-identity");
         crate::plex::reset_servers_for_test();
         reset_for_test();
-        let old = account_key("old-acct");
+        let old = account_key(&account_session(None, "old-acct"));
         // The store cannot be read: the refusal's write fails and stays queued.
         crate::plex::session::save(&Session::default());
         record(&old, "m", PlaintextChoice::Revoked).expect("queued");
         crate::storage_worker::drain_for_test();
         // Sign-out, then another account signs in and allows its own server.
         identity_changed();
-        let new = account_key("new-acct");
+        let new = account_key(&account_session(None, "new-acct"));
         let next = Session { client_id: "cid".into(), account_token: "new-acct".into(), ..Default::default() }
             .with_plaintext_choice(&new, "n", PlaintextChoice::Allowed);
         crate::plex::session::save(&next);
@@ -1226,7 +1359,7 @@ mod tests {
         offered(scope(), verdict(PlaintextEligibility::Eligible));
         assert!(revision() > rev, "an offer moves the revision");
         assert_eq!(offer("m").map(|v| v.choice), Some(PlaintextChoice::Undecided));
-        answer(&account_key("t"), "m", PlaintextChoice::Declined);
+        answer(&account_key(&account_session(None, "t")), "m", PlaintextChoice::Declined);
         assert_eq!(offer("m").map(|v| v.choice), Some(PlaintextChoice::Declined));
         offered(scope(), verdict(PlaintextEligibility::NotLocal));
         assert!(offers().is_empty(), "an ineligible verdict withdraws it");

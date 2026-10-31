@@ -1170,7 +1170,8 @@ impl RootPage {
     fn plaintext_section(&mut self, actions: &mut Vec<Action>) -> Option<Section> {
         use crate::plex::session::PlaintextChoice;
         let sess = &self.session_snapshot;
-        let answered = crate::plex::grant::choices(&sess.plaintext_consent, &sess.account_token);
+        crate::plex::grant::adopt_legacy_consent(sess);
+        let answered = crate::plex::grant::choices(sess);
         let mut rows: Vec<(String, bool)> = answered
             .iter()
             .filter(|(_, choice)| *choice != PlaintextChoice::Undecided)
@@ -1268,7 +1269,7 @@ impl RootPage {
                 // OFF is immediate: `grant::record` withdraws the grant NOW, before the
                 // preferences write lands, and records the revocation for this account.
                 crate::log("settings: unencrypted connections turned off for one server");
-                let account = crate::plex::grant::account_key(&self.session_snapshot.account_token);
+                let account = crate::plex::grant::account_key(&self.session_snapshot);
                 if crate::plex::grant::record(&account, &machine, PlaintextChoice::Revoked).is_ok() {
                     self.pending_plaintext = Some((machine, false));
                 }

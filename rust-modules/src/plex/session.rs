@@ -1564,9 +1564,9 @@ impl PlaintextChoice {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PlaintextConsent {
     pub machine_id: String,
-    /// The account that answered — `plex::grant::account_key`, a one-way fingerprint of its
-    /// plex.tv token. An entry is honoured only while that account is signed in; one with no
-    /// account (or another's) reads as never asked.
+    /// The account that answered - `plex::grant::account_key`, the roster admin's stable plex.tv
+    /// id, or the legacy token fingerprint when that id is unavailable. An entry is honoured only
+    /// while that account is signed in; one with no account (or another's) reads as never asked.
     #[serde(default)]
     pub account: String,
     pub choice: PlaintextChoice,
@@ -2265,6 +2265,13 @@ impl Session {
             .find(|u| u.uuid == self.user.uuid)
             .map(|u| u.admin)
             .unwrap_or(false)
+    }
+
+    /// The plex.tv account id of the owner, from the roster's admin row. Unlike [`UserRef::id`],
+    /// this does not change when a managed profile is selected. Zero means an old session did not
+    /// persist the id, so callers keep their token-based fallback.
+    pub(crate) fn owner_identity(&self) -> Option<i64> {
+        self.home_users.iter().find(|u| u.admin && u.id != 0).map(|u| u.id)
     }
 
     /// **Everyone in this house, as plex.tv account ids** — the input to

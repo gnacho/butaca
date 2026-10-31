@@ -2360,7 +2360,7 @@ impl SessionMachine {
     fn retry(&mut self, emit: &mut impl FnMut(SessionFx)) -> bool {
         use crate::plex::session::PlaintextChoice;
         if self.state.phase == Phase::Error {
-            let account = crate::plex::grant::account_key(&self.state.persisted.account_token);
+            let account = crate::plex::grant::account_key(&self.state.persisted);
             let answered = self.state.plaintext.as_ref().filter(|v| v.offers()
                 && matches!(v.choice, PlaintextChoice::Declined | PlaintextChoice::Revoked));
             if let (Some(v), false) = (answered, account.is_empty()) {
@@ -2384,7 +2384,7 @@ impl SessionMachine {
     fn answer_plaintext(&mut self, machine_id: &str, choice: crate::plex::session::PlaintextChoice,
         sid: Option<crate::plex::ServerId>, emit: &mut impl FnMut(SessionFx)) -> bool {
         use crate::plex::session::PlaintextChoice;
-        let account = crate::plex::grant::account_key(&self.state.persisted.account_token);
+        let account = crate::plex::grant::account_key(&self.state.persisted);
         if account.is_empty() || machine_id.is_empty() || choice == PlaintextChoice::Undecided {
             return false;
         }
@@ -3963,7 +3963,7 @@ mod tests {
     #[test]
     fn a_signed_in_answer_is_recorded_for_the_account_and_re_finds_the_server() {
         use crate::plex::session::PlaintextChoice;
-        let key = crate::plex::grant::account_key("synthetic-account");
+        let key = crate::plex::grant::account_key(&local_session().persisted);
         let sid = crate::plex::ServerId::from_raw(3);
         let mut owner = SessionMachine::from_init(local_session());
         let fx = step(&mut owner, SessionEvent::Command(Command::AnswerPlaintext {
