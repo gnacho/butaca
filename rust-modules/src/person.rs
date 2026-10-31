@@ -1518,27 +1518,6 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
             }
             return;
         }
-        let controlled = crate::app::bootstrap::stores::active();
-        let session = if controlled { None } else { crate::plex::session::peek_settled() };
-        if !controlled && session.as_ref().is_none_or(|s| s.client_id.is_empty()) { return; }
-        let profile = i == F_PROFILE;
-        adapter.fetch[i].claim();
-        let worker_adapter = Arc::clone(adapter);
-        let spawned = crate::app::bootstrap::stores::admit(serde_json::json!({
-            "store":"person","slot":i,"gen":generation,"arg":arg,"guid":guid}), ||
-            crate::task::spawn_small("person", move || {
-            // filled OUTSIDE the guard so a panicking fetch still lands — as a FAILURE (None), not
-            // as an empty biography / an empty filmography
-            let what = if profile {
-                Landing::Profile(if controlled { None } else { catch_unwind(|| fetch_profile(&arg[0], session.as_deref().expect("settled spawn identity"))).unwrap_or(None) })
-            } else {
-                Landing::Credits(if controlled { None } else { catch_unwind(|| fetch_credits(&arg[0], session.as_deref().expect("settled spawn identity"))).unwrap_or(None) })
-            };
-            worker_adapter.land(i, generation, what);
-        }));
-        if !spawned {
-            adapter.fetch[i].release();
-        }
         return;
     }
     let Some((sid, kind)) = un_fx(i) else { return };
@@ -1647,41 +1626,6 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
         // by itself.
         adapter.fetch[i].release();
     }
-}
-
-/// WORKER THREAD: the blocking plex.tv biography request, using the settled identity captured
-/// before spawning. Storage recovery is observed by the owner before retrying these requests.
-#[cfg(not(test))]
-fn fetch_profile(guid: &str, s: &crate::plex::session::Session) -> Option<crate::plex::discover::PersonProfile> {
-    let tok = (!s.account_token.is_empty()).then_some(s.account_token.as_str());
-    crate::plex::account::AccountClient::new(&s.client_id, tok).person_profile(guid)
-}
-
-/// WORKER THREAD: the blocking plex.tv filmography request. [`fetch_profile`]'s twin in every
-/// respect — same identity, same session read, same host — so the two share a spawn arm.
-#[cfg(not(test))]
-fn fetch_credits(guid: &str, s: &crate::plex::session::Session) -> Option<Vec<crate::plex::discover::CreditGroup>> {
-    let tok = (!s.account_token.is_empty()).then_some(s.account_token.as_str());
-    crate::plex::account::AccountClient::new(&s.client_id, tok).person_credits(guid)
-}
-
-/// HOST SUITE: [`fetch_profile`]'s cut, for its reason — this reaches libcurl.
-#[cfg(test)]
-fn fetch_credits(_guid: &str, _session: &crate::plex::session::Session) -> Option<Vec<crate::plex::discover::CreditGroup>> {
-    None
-}
-
-/// HOST SUITE: this is the crate's TLS seam, and the dev Mac has no libcurl to satisfy it — a test
-/// that merely *reaches* this function fails to **link**, not to assert (the boundary the root
-/// `docs/agent-reference.md` calls structural limit #1, and the reason `ff.rs` cfg-gates its `#[link]`s). `pump`
-/// is called by tests, so the reference has to be cut here rather than avoided by discipline.
-/// Everything downstream of the request — the mailbox, the generation guard, the unknown-vs-failed
-/// distinction and the roles mapping — is exercised directly through the adapter landing,
-/// [`PersonState::pump`] and [`roles_line`],
-/// which is where the logic worth testing actually lives.
-#[cfg(test)]
-fn fetch_profile(_guid: &str, _session: &crate::plex::session::Session) -> Option<crate::plex::discover::PersonProfile> {
-    None
 }
 
 // ---- the Jellyfin backend's answers -----------------------------------------------------------

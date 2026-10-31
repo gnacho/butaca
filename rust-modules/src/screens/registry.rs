@@ -60,22 +60,7 @@ pub(crate) enum AppFx {
     ItemMenu(ItemMenuReq),
 }
 
-/// A private live receipt. Requests contain account credentials and are intentionally unsupported
-/// by the controlled recorder/replay codec; the bridge must reject them before execution.
-pub(crate) struct AccountPreferenceReply {
-    pub request: Option<crate::plex::account::PreferenceRequest>,
-    pub outcome: Result<crate::plex::account::PreferenceSnapshot, crate::plex::account::PreferenceError>,
-}
-
 pub(crate) enum PreferenceCmd {
-    /// Capture the live profile only after admission: even session::peek can schedule storage IO.
-    Load { reply: std::sync::mpsc::Sender<AccountPreferenceReply> },
-    Save {
-        request: crate::plex::account::PreferenceRequest,
-        base: crate::plex::account::PreferenceSnapshot,
-        update: crate::plex::account::PreferenceUpdate,
-        reply: std::sync::mpsc::Sender<AccountPreferenceReply>,
-    },
     Quality { quality: crate::plex::session::PlaybackQuality, reply: std::sync::mpsc::Sender<bool> },
     DirectPlay { mode: crate::plex::session::DirectPlayMode, reply: std::sync::mpsc::Sender<bool> },
     LipSync { offset_ms: i64, reply: std::sync::mpsc::Sender<bool> },
@@ -1540,7 +1525,7 @@ pub(crate) enum AppArg {
     Settings(SettingsPage),
 }
 
-pub(crate) const ARG_SHAPE: &str = "AppArg{Login,Profiles,Onboard,Home,Library,Search,Player,Content:{Detail{sid:u32,rk:str},Person{sid:u32,key:str,guid:str,name:str,thumb:str},Filmography{sid:u32,key:str},Collection{sid:u32,rk:str,sec:i64,tag:i64,name:str}},Settings:SettingsPage{Root,Playback,AudioSubtitles,Favourites,Legal,About,Document(u8),Language,Contribute},LibraryMenu{host:u32,target:{epoch:u32,sid:u32,section:u64},kind:u32,anchor:[u32;4]},\
+pub(crate) const ARG_SHAPE: &str = "AppArg{Login,Profiles,Onboard,Home,Library,Search,Player,Content:{Detail{sid:u32,rk:str},Person{sid:u32,key:str,guid:str,name:str,thumb:str},Filmography{sid:u32,key:str},Collection{sid:u32,rk:str,sec:i64,tag:i64,name:str}},Settings:SettingsPage{Root,Playback,Favourites,Legal,About,Document(u8),Language,Contribute},LibraryMenu{host:u32,target:{epoch:u32,sid:u32,section:u64},kind:u32,anchor:[u32;4]},\
      PlayerOverlay{Tracks(tab:i32),Info,Chapters,More(quality:bool)},\
      AltSources{host:u32,sid:u32,rk:str,anchor:[u32;4]},\
      TracksPanel{page:i32},AboutPanel,PersonBio,CollectionAbout,AccountMenu,\
@@ -2095,8 +2080,9 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 // Localization's Settings pages then join it as LocalizationSettingsV4, with the language
 // picker's busy state and the login report alert (0x677d_0944_ef25_3900 before the collections).
 // The fork's sync drops the consent and incident-report screens from the inventory: the pin
-// above was 0x668c_44dc_797c_5b0f with them.
-const SCREEN_SHAPES_PIN: u64 = 0xab1b_123e_0a85_9621;
+// above was 0x668c_44dc_797c_5b0f with them. The Jellyfin-only conversion then retires the
+// Settings AudioSubtitles page from the shape (0xab1b_123e_0a85_9621 before it).
+const SCREEN_SHAPES_PIN: u64 = 0xd4f7_ab4b_d0e9_e119;
 
 #[cfg(test)]
 mod arg_tests {

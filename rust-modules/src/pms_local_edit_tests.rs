@@ -153,8 +153,8 @@ fn a_removed_deck_card_leaves_the_shelves_behind_it_correctly_addressed() {
 
 /// An item on no shelf at all — a Library-grid or Related page press — must not re-commit Home
 /// for nothing: the return value is what tells `viewstate` whether anything on screen moved, and
-/// a commit here would free the catalog strings out from under a live `hub_title` borrow for no
-/// reason at all.
+/// a commit here would free the shelf-title strings out from under a live borrow for no reason
+/// at all.
 #[test]
 fn an_item_on_no_shelf_reports_no_edit_and_recommits_nothing() {
     let _g = crate::testlock::serial();

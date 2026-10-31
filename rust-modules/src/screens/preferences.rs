@@ -1,12 +1,10 @@
-//! Playback defaults and Plex account preferences on the shared Settings table.
-//! The confirmed account snapshot stays with this screen; workers return receipts and never
-//! mutate the UI. A picker edits one field, and a failed save leaves the confirmed value intact.
-//! A picker is this page's own submenu over the confirmed snapshot it edits, so it is a second
-//! table rather than a page of the surface's stack — but it moves on the family's one push spring
+//! Playback defaults on the shared Settings table.
+//! A picker edits one field, and a failed save leaves the confirmed value intact.
+//! A picker is this page's own submenu over the confirmed value it edits, so it is a second
+//! table rather than a page of the surface's stack - but it moves on the family's one push spring
 //! (`route_screen::RoutePush`, the surface's own), sliding in and out exactly like a pushed page.
 use std::borrow::Cow;
 use std::sync::mpsc::{self, Receiver};
-use crate::plex::account::{PreferenceError, PreferenceRequest, PreferenceSnapshot, PreferenceUpdate};
 use crate::route::{DirectPlayMode, Quality};
 use crate::ui::decision_prompt::{DecisionPrompt, PromptStep};
 use crate::ui::frame::Budget;
@@ -19,29 +17,27 @@ use crate::ui::table_screen::{Header, TableScreen};
 use crate::ui::route_screen::{RouteLayout, RoutePush};
 use crate::ui::{theme, Painter, Rect};
 use super::family::{table_focus, InnerHost, ALERT_GROUP};
-use super::registry::{AccountPreferenceReply, AppFx, PreferenceCmd, ALERT};
+use super::registry::{AppFx, PreferenceCmd, ALERT};
 
 pub(crate) const SHAPE: &str = "PreferencesV2{kind:u8,picker:u8,selection:u32,busy:bool,status:str,quality:u8,direct_play:u8,confirm:bool,affirm:bool,alert_scroll:u32,values:[str]}";
 
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Kind { Playback, AudioSubtitles }
+pub(crate) enum Kind { Playback }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Field { Quality, DirectPlay, LipSync, UpNext, UpNextWindow, AudioLanguage, SubtitleMode, SubtitleLanguage, ForcedSubtitles }
+enum Field { Quality, DirectPlay, LipSync, UpNext, UpNextWindow }
 impl Field {
     fn title(self) -> &'static str { match self {
         Self::Quality => crate::i18n::msg::settings_playback_quality(), Self::DirectPlay => crate::i18n::msg::settings_playback_direct_play(),
         Self::LipSync => crate::i18n::msg::settings_playback_lip_sync(),
         Self::UpNext => crate::i18n::msg::settings_playback_up_next(),
         Self::UpNextWindow => crate::i18n::msg::settings_playback_up_next_window(),
-        Self::AudioLanguage => crate::i18n::msg::settings_audio_language(), Self::SubtitleMode => crate::i18n::msg::settings_audio_subtitles(),
-        Self::SubtitleLanguage => crate::i18n::msg::settings_audio_subtitle_language(), Self::ForcedSubtitles => crate::i18n::msg::settings_audio_forced_subtitles(),
     }}
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Value { Quality(Quality), DirectPlay(DirectPlayMode), LipSync(i64), UpNext(crate::plex::session::UpNextPolicy), Window(i64), Language(String), Mode(i64), Forced(i64) }
+enum Value { Quality(Quality), DirectPlay(DirectPlayMode), LipSync(i64), UpNext(crate::plex::session::UpNextPolicy), Window(i64) }
 #[derive(Clone)]
-enum Action { Open(Field), Pick(Value), Retry }
+enum Action { Open(Field), Pick(Value) }
 struct State {
     kind: Kind, picker: Option<Field>, selected: i32, busy: bool, status: String,
     quality: Quality, direct_play: DirectPlayMode, values: Vec<String>,
@@ -61,7 +57,6 @@ impl LogicalState for State {
     }
 }
 enum Pending {
-    Account(Receiver<AccountPreferenceReply>),
     Local(Receiver<bool>),
 }
 
@@ -79,10 +74,7 @@ pub(crate) struct PreferencesPage {
     state: State,
     parent_row: i32,
     copy: String,
-    request: Option<PreferenceRequest>,
-    snapshot: Option<PreferenceSnapshot>,
     pending: Option<Pending>,
-    retry: Option<PreferenceUpdate>,
     alert: DecisionPrompt,
 }
 impl PreferencesPage {
@@ -92,14 +84,14 @@ impl PreferencesPage {
             state: State { kind, picker: None, selected: 0, busy: false, status: String::new(),
                 quality: crate::route::quality(), direct_play: crate::route::direct_play_mode(),
                 values: Vec::new(), confirming: false, affirmative: false, alert_scroll: 0 },
-            parent_row: 0, copy: String::new(), request: None, snapshot: None, pending: None, retry: None,
+            parent_row: 0, copy: String::new(), pending: None,
             alert: DecisionPrompt::new(ALERT_GROUP, ALERT, ALERT + 1, crate::i18n::msg::settings_cancel_c(), crate::i18n::msg::settings_playback_enable_force_c()) };
         s.rebuild(0);
         s
     }
     fn kind_title(&self) -> &'static str {
         match self.state.kind {
-            Kind::Playback => crate::i18n::msg::settings_playback_title(), Kind::AudioSubtitles => crate::i18n::msg::settings_audio_title(),
+            Kind::Playback => crate::i18n::msg::settings_playback_title(),
         }
     }
     /// The table focus and activation act on: the open picker's, else the field list.
@@ -116,7 +108,6 @@ impl PreferencesPage {
             } else { Cow::Borrowed(&self.state.status) };
         }
         match self.state.kind {
-            Kind::AudioSubtitles => Cow::Borrowed(crate::i18n::msg::settings_audio_account_note()),
             Kind::Playback if self.state.direct_play == DirectPlayMode::Forced => Cow::Borrowed(crate::i18n::msg::settings_playback_force_note()),
             Kind::Playback => Cow::Borrowed(crate::i18n::msg::settings_playback_copy()),
         }
@@ -146,25 +137,6 @@ impl PreferencesPage {
                 FocusTarget::Elem(FocusKey { entry: self.entry, elem: self.active().sel.max(0) as u32 })
             } else { FocusTarget::ContainerGroup(group) } }))));
     }
-    fn load(&mut self, fx: &mut Effects<'_, InnerHost>) {
-        self.request = None;
-        self.retry = None;
-        self.start_account(None, fx);
-    }
-    fn start_account(&mut self, update: Option<PreferenceUpdate>, fx: &mut Effects<'_, InnerHost>) {
-        if self.pending.is_some() { return; }
-        self.retry = update.clone();
-        let (reply, rx) = mpsc::channel();
-        let command = match (update, self.request.clone(), self.snapshot.clone()) {
-            (Some(update), Some(request), Some(base)) => PreferenceCmd::Save { request, base, update, reply },
-            _ => PreferenceCmd::Load { reply },
-        };
-        self.state.status = if matches!(&command, PreferenceCmd::Save { .. }) {
-            crate::i18n::msg::settings_audio_saving()
-        } else { crate::i18n::msg::settings_audio_loading() }.into();
-        self.pending = Some(Pending::Account(rx)); self.state.busy = true;
-        fx.push(Fx::App(AppFx::Preferences(command)));
-    }
     fn save_local(&mut self, value: Value, fx: &mut Effects<'_, InnerHost>) {
         let (reply, rx) = mpsc::channel();
         let command = match value {
@@ -173,31 +145,18 @@ impl PreferencesPage {
             Value::LipSync(offset_ms) => PreferenceCmd::LipSync { offset_ms, reply },
             Value::UpNext(policy) => PreferenceCmd::UpNext { policy, reply },
             Value::Window(seconds) => PreferenceCmd::UpNextWindow { seconds, reply },
-            _ => return,
         };
         self.pending = Some(Pending::Local(rx)); self.state.busy = true;
         self.state.status = crate::i18n::msg::settings_playback_saving().into();
         fx.push(Fx::App(AppFx::Preferences(command)));
     }
-    fn start_initial_load(&mut self, fx: &mut Effects<'_, InnerHost>) -> bool {
-        if self.state.kind == Kind::AudioSubtitles && self.request.is_none()
-            && self.snapshot.is_none() && self.pending.is_none() && self.state.status.is_empty() {
-            self.load(fx);
-            true
-        } else { false }
-    }
     fn current_value(&self, field: Field) -> Value {
-        let p = self.snapshot.as_ref().map(|s| &s.preferences);
         match field {
             Field::Quality => Value::Quality(self.state.quality),
             Field::DirectPlay => Value::DirectPlay(self.state.direct_play),
             Field::LipSync => Value::LipSync(crate::route::lip_sync_offset_ms()),
             Field::UpNext => Value::UpNext(crate::route::up_next_policy()),
             Field::UpNextWindow => Value::Window(crate::route::up_next_window_s()),
-            Field::AudioLanguage => Value::Language(p.and_then(|p| p.stated_language.clone()).unwrap_or_default()),
-            Field::SubtitleLanguage => Value::Language(p.and_then(|p| p.subtitle_language.clone()).unwrap_or_default()),
-            Field::SubtitleMode => Value::Mode(p.map_or(0, |p| p.subtitle_mode)),
-            Field::ForcedSubtitles => Value::Forced(p.map_or(0, |p| p.subtitle_forced)),
         }
     }
     fn options(&self, field: Field) -> Vec<(String, Value)> {
@@ -231,20 +190,6 @@ impl PreferencesPage {
                 }
                 result
             }
-            Field::SubtitleMode => [(crate::i18n::msg::settings_audio_manual(), 0), (crate::i18n::msg::settings_audio_foreign(), 1), (crate::i18n::msg::settings_audio_always(), 2)]
-                .into_iter().map(|(label, mode)| (label.into(), Value::Mode(mode))).collect(),
-            Field::ForcedSubtitles => [crate::i18n::msg::settings_audio_prefer_regular(), crate::i18n::msg::settings_audio_prefer_forced(), crate::i18n::msg::settings_audio_only_forced(), crate::i18n::msg::settings_audio_only_regular()]
-                .into_iter().enumerate().map(|(i, s)| (s.into(), Value::Forced(i as i64))).collect(),
-            Field::AudioLanguage | Field::SubtitleLanguage => {
-                let mut result = vec![(if field == Field::AudioLanguage { crate::i18n::msg::settings_audio_original() } else { crate::i18n::msg::settings_audio_no_preference() }.into(), Value::Language(String::new()))];
-                result.extend(crate::plex::languages::LANGUAGES.iter()
-                    .map(|l| (l.name.to_string(), Value::Language(l.code.to_string()))));
-                let current = self.current_value(field);
-                if !result.iter().any(|(_, v)| *v == current) {
-                    if let Value::Language(code) = current { result.push((code.clone(), Value::Language(code))); }
-                }
-                result
-            }
         }
     }
     fn value_label(&self, field: Field) -> String {
@@ -267,8 +212,6 @@ impl PreferencesPage {
                 if crate::route::up_next_offered() { f.push(Field::UpNextWindow); }
                 f
             }
-            Kind::AudioSubtitles if self.snapshot.is_some() => vec![Field::AudioLanguage, Field::SubtitleMode, Field::SubtitleLanguage, Field::ForcedSubtitles],
-            _ => Vec::new(),
         };
         let mut list_values = Vec::new(); let mut list_actions = Vec::new();
         for &field in &fields {
@@ -277,13 +220,7 @@ impl PreferencesPage {
             if field == Field::Quality && self.state.direct_play == DirectPlayMode::Forced {
                 row = row.detail(crate::i18n::msg::settings_playback_overridden());
             }
-            if field == Field::AudioLanguage && self.snapshot.as_ref().is_some_and(|s| s.preferences.auto_select_audio == Some(false)) {
-                row = row.detail(crate::i18n::msg::settings_audio_selection_off());
-            }
             section = section.row(row); list_values.push(value); list_actions.push(Action::Open(field));
-        }
-        if self.state.kind == Kind::AudioSubtitles && !self.state.busy && !self.state.status.is_empty() {
-            section = section.row(Row::new(crate::i18n::msg::settings_audio_retry()).detail(crate::i18n::msg::settings_audio_retry_detail())); list_actions.push(Action::Retry);
         }
         let list_sel = if self.state.picker.is_some() { self.parent_row } else { selected };
         for table in [&mut self.table, &mut self.picker_table] {
@@ -326,11 +263,6 @@ impl PreferencesPage {
                 }
                 self.commit(value, fx); self.close_picker(fx);
             }
-            Action::Retry => {
-                if let Some(update) = self.retry.clone() { self.start_account(Some(update), fx); }
-                else { self.load(fx); }
-                self.rebuild(self.active().sel);
-            }
         }
         fx.invalidate(crate::ui::present::Provenance::Input);
     }
@@ -338,31 +270,11 @@ impl PreferencesPage {
         match value {
             Value::Quality(_) | Value::DirectPlay(_) | Value::LipSync(_)
             | Value::UpNext(_) | Value::Window(_) => self.save_local(value, fx),
-            value => {
-                let mut update = PreferenceUpdate::default();
-                match (self.state.picker, value) {
-                    (Some(Field::AudioLanguage), Value::Language(v)) => {
-                        update.audio_language = Some(v); update.auto_select_audio = Some(true);
-                    }
-                    (Some(Field::SubtitleLanguage), Value::Language(v)) => update.subtitle_language = Some(v),
-                    (_, Value::Mode(v)) => {
-                        update.subtitle_mode = Some(v);
-                        if v > 0 { update.auto_select_audio = Some(true); }
-                    },
-                    (_, Value::Forced(v)) => update.subtitle_forced = Some(v),
-                    _ => return,
-                }
-                self.start_account(Some(update), fx);
-            }
         }
     }
-    fn poll(&mut self, fx: &mut Effects<'_, InnerHost>) -> bool {
-        enum Receipt { Account(AccountPreferenceReply), Local(bool), Failed }
+    fn poll(&mut self) -> bool {
+        enum Receipt { Local(bool), Failed }
         let receipt = match &self.pending {
-            Some(Pending::Account(rx)) => match rx.try_recv() {
-                Ok(result) => Some(Receipt::Account(result)),
-                Err(mpsc::TryRecvError::Disconnected) => Some(Receipt::Failed), _ => None,
-            },
             Some(Pending::Local(ticket)) => match ticket.try_recv() {
                 Ok(result) => Some(Receipt::Local(result)),
                 Err(mpsc::TryRecvError::Disconnected) => Some(Receipt::Failed), _ => None,
@@ -372,23 +284,6 @@ impl PreferencesPage {
         let Some(receipt) = receipt else { return false; };
         self.pending = None; self.state.busy = false;
         match receipt {
-            Receipt::Account(reply) => {
-                if reply.request.as_ref().is_some_and(|request| !request.is_current()) {
-                    self.snapshot = None; self.state.picker = None; self.load(fx);
-                } else if let Some(request) = reply.request {
-                    self.request = Some(request);
-                    match reply.outcome {
-                        Ok(snapshot) => { self.snapshot = Some(snapshot); self.retry = None; self.state.status.clear(); }
-                        Err(error) => {
-                            if error == PreferenceError::Stale { self.retry = None; }
-                            self.state.status = crate::i18n::msg::settings_audio_error_retry(error.message());
-                        }
-                    }
-                } else {
-                    self.request = None; self.snapshot = None; self.retry = None;
-                    self.state.status = crate::i18n::msg::settings_audio_sign_in_again().into();
-                }
-            }
             Receipt::Local(true) => self.state.status.clear(),
             Receipt::Local(false) | Receipt::Failed => self.state.status = crate::i18n::msg::settings_playback_save_failed().into(),
         }
@@ -432,21 +327,12 @@ impl Machine<InnerHost> for PreferencesPage {
         }
         match ev {
             ScreenEvent::Enter(_) => {
-                if self.start_initial_load(fx) {
-                    self.rebuild(self.active().sel); fx.invalidate(crate::ui::present::Provenance::Input);
-                }
                 Handled::No
             }
             ScreenEvent::Tick(t) => {
                 self.alert.update(t.dt());
-                let started = self.start_initial_load(fx);
-                let stale = self.request.as_ref().is_some_and(|r| !r.is_current());
-                if stale {
-                    self.snapshot = None; self.pending = None; self.state.busy = false;
-                    self.state.picker = None; self.load(fx);
-                }
                 let had_rows = self.active().n_rows() > 0;
-                if self.poll(fx) || stale || started || self.state.quality != crate::route::quality()
+                if self.poll() || self.state.quality != crate::route::quality()
                     || self.state.direct_play != crate::route::direct_play_mode() {
                     self.rebuild(self.active().sel);
                     // An empty loading table had no engine seat. Give its first landing (or
@@ -522,7 +408,7 @@ impl Focusable<InnerHost> for PreferencesPage {
 
 impl Screen<InnerHost> for PreferencesPage {
     fn name(&self) -> &'static str {
-        match self.state.kind { Kind::Playback => "settings-playback", Kind::AudioSubtitles => "settings-audio" }
+        match self.state.kind { Kind::Playback => "settings-playback" }
     }
     fn state(&self) -> &dyn LogicalState {
         &self.state
@@ -599,24 +485,6 @@ mod tests {
         assert_eq!(crate::route::direct_play_mode(), DirectPlayMode::Auto);
     }
     #[test]
-    fn account_constructor_is_inert_and_first_enter_emits_one_load_effect() {
-        let _serial = crate::testlock::serial();
-        let mut page = PreferencesPage::new(EntryId(0), Kind::AudioSubtitles);
-        assert!(page.pending.is_none());
-        assert!(page.request.is_none());
-        assert!(page.state.status.is_empty());
-        let mut emitted = Vec::new(); let mut present = Present::new();
-        let mut fx = Effects::new(&mut emitted, MachineId::Instance(InstanceId(0)), &mut present);
-        let cx = context(0);
-        page.step(&ScreenEvent::Enter(Enter::Fresh { focus: FocusTarget::ContainerGroup(GroupId(0)) }), &cx, &mut fx);
-        page.step(&ScreenEvent::Tick(Tick::default()), &cx, &mut fx);
-        assert!(page.state.busy);
-        assert!(page.request.is_none(), "the screen never captures live credentials");
-        assert_eq!(emitted.iter().filter(|event| matches!(&event.fx,
-            Fx::App(AppFx::Preferences(PreferenceCmd::Load { .. })))).count(), 1);
-    }
-
-    #[test]
     fn confirming_force_emits_a_preference_effect_without_executing_it() {
         let _serial = crate::testlock::serial();
         let previous = crate::route::direct_play_mode();
@@ -635,17 +503,6 @@ mod tests {
         crate::route::restore_direct_play_mode(previous);
     }
 
-    #[test]
-    fn both_language_pickers_offer_the_full_catalog_and_an_empty_preference() {
-        let _serial = crate::testlock::serial();
-        let page = PreferencesPage::new(EntryId(0), Kind::Playback);
-        for field in [Field::AudioLanguage, Field::SubtitleLanguage] {
-            let options = page.options(field);
-            assert_eq!(options.len(), crate::plex::languages::LANGUAGES.len() + 1);
-            assert_eq!(options[0].1, Value::Language(String::new()));
-            assert!(options.len() > 100);
-        }
-    }
     /// Owner report: Direct Play / Default Quality (and every Audio & Subtitles picker) switched
     /// to the next screen instantly. A picker is this page's own submenu, so it must run the
     /// family's push spring — in on open, back out on close with the picker still drawn.

@@ -920,18 +920,6 @@ fn project(
         }
     }
 
-    // Counted up front (not while looping) because `localized_hub_title`'s per-type "Recently
-    // Added Movies" wording is only right for a `home.<type>.recent` hub that names exactly ONE
-    // library — the moment PMS mints a second hub under the SAME identifier (one household with
-    // two TV libraries: `home_keeps_recently_added_rows_for_two_same_type_libraries`), both need
-    // the per-library "Recently Added in {library}" form to stay distinguishable, and neither
-    // hub can tell that from itself alone.
-    let mut hub_identifier_counts: std::collections::HashMap<&str, usize> =
-        std::collections::HashMap::new();
-    for hub in &mc.hub {
-        *hub_identifier_counts.entry(hub.hub_identifier.as_str()).or_insert(0) += 1;
-    }
-
     for hub in &mc.hub {
         if hub.kind != "mixed" && !listable(&hub.kind) {
             continue;
@@ -943,20 +931,8 @@ fn project(
         if items.is_empty() {
             continue;
         }
-        let library = hub
-            .metadata
-            .iter()
-            .find(|m| !m.library_section_title.is_empty())
-            .map(|m| m.library_section_title.as_str())
-            .unwrap_or("");
-        let identifier_is_unique =
-            hub_identifier_counts.get(hub.hub_identifier.as_str()).copied().unwrap_or(0) <= 1;
         out.shelves.push(Shelf {
-            title: crate::plex::hub_title::localized_hub_title(
-                crate::plex::hub_title::Scope::Home { library, identifier_is_unique },
-                &hub.hub_identifier,
-                &hub.title,
-            ),
+            title: hub.title.clone(),
             hub_id: hub.hub_identifier.clone(),
             key: hub.key.clone(),
             items,
@@ -2270,7 +2246,7 @@ fn reset_with_scope(state: &mut PmsState, adapter: &Arc<PmsAdapter>, scope: &Bro
     // Adopt the retained pin semantics with the empty commit below: a change from BEFORE this reset
     // is already reflected in "nothing", so it is not owed a re-merge. Left unadopted, the next
     // `pump` "caught up" on a scope some other era had moved and re-committed — freeing the HUBS
-    // strings out from under a `hub_title` borrow held across that pump, which is how the test suite
+    // strings out from under a shelf-title borrow held across that pump, which is how the test suite
     // read freed memory whenever another module's `browse::reset` ran in between.
     adopt_browse_scope(state, scope);
     commit(state, (Vec::new(), Vec::new(), Vec::new()));
