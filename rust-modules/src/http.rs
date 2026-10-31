@@ -560,15 +560,6 @@ fn plaintext(
             method.as_str(),
             req_body,
         ),
-        _ if !req_body.is_empty() => crate::stream::http_open_body(
-            &mut *hs,
-            host_c.as_ptr(),
-            origin.port(),
-            path_c.as_ptr(),
-            extra_ptr,
-            method.as_str(),
-            req_body,
-        ),
         _ => crate::stream::http_open(
             &mut *hs,
             host_c.as_ptr(),
