@@ -251,7 +251,7 @@ fn include_types(kind: SecKind, library_type: LibraryType) -> &'static str {
         "BoxSet"
     } else {
         match kind {
-            SecKind::Movie => "Movie",
+            SecKind::Movie | SecKind::Video => "Movie",
             SecKind::Show => "Series",
         }
     }

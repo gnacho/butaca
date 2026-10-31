@@ -82,10 +82,15 @@ impl ChromeSnapshot {
             self.keys.push(STRIP_BASE);
             for i in 0..directory.tab_count() {
                 let Some(kind) = directory.tab_kind(i) else { continue };
-                self.labels.push(match kind { SecKind::Movie => crate::i18n::msg::browse_kind_movies(), SecKind::Show => crate::i18n::msg::browse_kind_tv_shows() }.into());
+                self.labels.push(match kind {
+                    SecKind::Movie => crate::i18n::msg::browse_kind_movies(),
+                    SecKind::Show => crate::i18n::msg::browse_kind_tv_shows(),
+                    SecKind::Video => crate::i18n::msg::browse_kind_other_videos(),
+                }.into());
                 self.keys.push(STRIP_BASE + match kind {
                     SecKind::Movie => 1,
                     SecKind::Show => 2,
+                    SecKind::Video => 5,
                 });
             }
             self.labels.push(String::new());
@@ -114,7 +119,7 @@ impl ChromeSnapshot {
     }
 
     pub(crate) fn library_selection(&self, kind: SecKind) -> u32 {
-        let elem = STRIP_BASE + match kind { SecKind::Movie => 1, SecKind::Show => 2 };
+        let elem = STRIP_BASE + match kind { SecKind::Movie => 1, SecKind::Show => 2, SecKind::Video => 5 };
         self.keys.iter().position(|key| *key == elem).unwrap_or(0) as u32
     }
 
@@ -223,6 +228,20 @@ mod tests {
         snapshot.members(0, None, 0.0, &mut members);
         assert_eq!(members.iter().map(|member| member.elem).collect::<Vec<_>>(),
             vec![STRIP_BASE + 4, STRIP_BASE, STRIP_BASE + 1, STRIP_BASE + 2, STRIP_BASE + 3]);
+    }
+
+    #[test]
+    fn other_videos_publishes_its_own_type_destination() {
+        let directory = directory(&[SecKind::Movie, SecKind::Show, SecKind::Video]);
+        let mut snapshot = ChromeSnapshot {
+            profile_generation: Some(crate::plex::session::current_gen()), ..Default::default()
+        };
+        snapshot.refresh(&crate::ui::fixture::FixtureMeasure, directory.view());
+        assert_eq!(snapshot.keys, vec![STRIP_BASE, STRIP_BASE + 1, STRIP_BASE + 2, STRIP_BASE + 5, STRIP_BASE + 3]);
+        assert_eq!(snapshot.labels, ["Home", "Movies", "TV Shows", "Other Videos", ""]);
+        assert_eq!(pill_at(directory.view(), 3), Pill::Section(SecKind::Video));
+        assert_eq!(pill_of(directory.view(), Pill::Section(SecKind::Video)), Some(3));
+        assert_eq!(snapshot.library_selection(SecKind::Video), 3);
     }
 
     #[test]

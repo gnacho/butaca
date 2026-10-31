@@ -123,6 +123,28 @@ pub struct LibrarySection {
     /// firstCharacter rows: the letter's item count (PMS string-encodes it).
     #[serde(default, deserialize_with = "de_i64")]
     pub size: i64,
+    /// A library section's metadata agent. Together with `scanner`, this distinguishes Plex's
+    /// Other Videos libraries from Movies libraries, whose wire `type` is also `movie`.
+    #[serde(default, deserialize_with = "de_str")]
+    pub agent: String,
+    /// A library section's scanner. Empty when the server does not send one.
+    #[serde(default, deserialize_with = "de_str")]
+    pub scanner: String,
+}
+
+const NONE_AGENTS: [&str; 2] = ["tv.plex.agents.none", "com.plexapp.agents.none"];
+const VIDEO_FILES_SCANNER: &str = "plex video files";
+
+impl LibrarySection {
+    /// Whether this section is Plex's Other Videos library: a `movie` type, a none agent and the
+    /// Plex Video Files scanner. Both metadata fields are required, so an older or partial answer
+    /// stays Movies instead of moving a curated library to a different pill.
+    pub(crate) fn is_other_videos(&self) -> bool {
+        let scanner = self.scanner.trim().to_ascii_lowercase();
+        self.kind == "movie"
+            && NONE_AGENTS.iter().any(|none| self.agent.trim().eq_ignore_ascii_case(none))
+            && scanner.starts_with(VIDEO_FILES_SCANNER)
+    }
 }
 
 /// `MediaContainer.Meta` — present with `includeMeta=1` on `/library/sections/{k}/all`.

@@ -31,6 +31,10 @@
     "value": "TV Shows",
     "description": "browse kind tv_shows"
   },
+  "browse.kind.other_videos": {
+    "value": "Other Videos",
+    "description": "Plex's Other Videos library type, used by the type pill and library listing"
+  },
   "browse.kind.shows": {
     "value": "Shows",
     "description": "browse kind shows"
@@ -433,6 +437,16 @@
     },
     "description": "browse person shows"
   },
+  "browse.library.videos": {
+    "value": {
+      "one": "{count} video",
+      "other": "{count} videos"
+    },
+    "args": {
+      "count": "i64"
+    },
+    "description": "Count of items in an Other Videos library"
+  },
   "browse.person.library_one": {
     "value": "{titles} in this library",
     "args": {
@@ -538,6 +552,13 @@
       "library": "str"
     },
     "description": "browse library no_shows"
+  },
+  "browse.library.no_videos": {
+    "value": "No videos in {library}",
+    "args": {
+      "library": "str"
+    },
+    "description": "Empty read-out for an Other Videos library"
   },
   "browse.search.people": {
     "value": {
@@ -726,6 +747,10 @@
   "browse.kind.films": {
     "value": "Films",
     "description": "browse kind films"
+  },
+  "browse.kind.videos": {
+    "value": "Videos",
+    "description": "Plural noun for items in an Other Videos library"
   },
   "browse.kind.tv_shows_sentence": {
     "value": "TV shows",

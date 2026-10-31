@@ -537,6 +537,7 @@ impl Bridge {
         match tab {
             HomeTab::Movies => self.directory.view().preferred(crate::browse::SecKind::Movie).is_some(),
             HomeTab::Shows => self.directory.view().preferred(crate::browse::SecKind::Show).is_some(),
+            HomeTab::Videos => self.directory.view().preferred(crate::browse::SecKind::Video).is_some(),
             _ => true,
         }
     }
@@ -2604,6 +2605,7 @@ pub(crate) fn nav_tab(
                     Pill::Search => HomeTab::Search,
                     Pill::Section(crate::browse::SecKind::Movie) => HomeTab::Movies,
                     Pill::Section(crate::browse::SecKind::Show) => HomeTab::Shows,
+                    Pill::Section(crate::browse::SecKind::Video) => HomeTab::Videos,
                 };
                 rig.home_command(HomeCmd::FocusStrip(want));
             }
@@ -2611,6 +2613,7 @@ pub(crate) fn nav_tab(
         }
         HomeTab::Movies => { rig.enter_library(crate::browse::SecKind::Movie); AppArg::Library }
         HomeTab::Shows => { rig.enter_library(crate::browse::SecKind::Show); AppArg::Library }
+        HomeTab::Videos => { rig.enter_library(crate::browse::SecKind::Video); AppArg::Library }
         HomeTab::Search => AppArg::Search,
     };
     nav_peer(d, arg, ret);

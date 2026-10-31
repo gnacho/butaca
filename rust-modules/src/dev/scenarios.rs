@@ -986,6 +986,7 @@ fn grid_library_search_heroidx_arm(app: &mut App, _fr: &mut Frame) {
         if let Some(s) = crate::dev::read("library") {
             let kind = match s.parse::<usize>().unwrap_or(0) {
                 1 => crate::stores::browse::SecKind::Show,
+                2 => crate::stores::browse::SecKind::Video,
                 _ => crate::stores::browse::SecKind::Movie,
             };
             app.bridge.enter_library(kind);
@@ -1895,6 +1896,7 @@ pub(crate) fn nav_osc_tick(app: &mut App, now: u32) {
                 if let Some(kind) = app.bridge.browse_directory().tab_kind(0) {
                     let tab = match kind {
                         crate::stores::browse::SecKind::Show => HomeTab::Shows,
+                        crate::stores::browse::SecKind::Video => HomeTab::Videos,
                         _ => HomeTab::Movies,
                     };
                     crate::app::bridge::nav_tab(&mut app.pages, &mut app.bridge, tab, None, None);
@@ -2100,6 +2102,7 @@ fn push_bench_open(app: &mut App, target: bench::PushTarget) -> bench::PushTarge
             if let Some(kind) = app.bridge.browse_directory().tab_kind(0) {
                 let tab = match kind {
                     crate::stores::browse::SecKind::Show => HomeTab::Shows,
+                    crate::stores::browse::SecKind::Video => HomeTab::Videos,
                     _ => HomeTab::Movies,
                 };
                 crate::app::bridge::nav_tab(&mut app.pages, &mut app.bridge, tab, None, None);

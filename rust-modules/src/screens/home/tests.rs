@@ -118,13 +118,14 @@ fn every_tab_pill_round_trips_through_the_focus_packing() {
         (STRIP_HOME_ELEM, HomeReq::Tab(HomeTab::Home)),
         (STRIP_MOVIES_ELEM, HomeReq::Tab(HomeTab::Movies)),
         (STRIP_SHOWS_ELEM, HomeReq::Tab(HomeTab::Shows)),
+        (STRIP_VIDEOS_ELEM, HomeReq::Tab(HomeTab::Videos)),
         (STRIP_SEARCH_ELEM, HomeReq::Tab(HomeTab::Search)),
         (STRIP_ACCOUNT_ELEM, HomeReq::Account),
     ];
     for (elem, want) in cases {
         assert_eq!(HomeScreen::request_for_strip(elem), Some(want));
     }
-    assert_eq!(HomeScreen::request_for_strip(STRIP_ACCOUNT_ELEM + 1), None);
+    assert_eq!(HomeScreen::request_for_strip(STRIP_VIDEOS_ELEM + 1), None);
     for page_key in [HERO_PLAY_ELEM, HERO_INFO_ELEM, FIRST_ITEM_ELEM] {
         assert_eq!(HomeScreen::request_for_strip(page_key), None);
     }
@@ -1780,6 +1781,7 @@ fn addressed_focus_commands_reseat_only_through_enter_fresh() {
         (HomeTab::Home, STRIP_HOME_ELEM),
         (HomeTab::Movies, STRIP_MOVIES_ELEM),
         (HomeTab::Shows, STRIP_SHOWS_ELEM),
+        (HomeTab::Videos, STRIP_VIDEOS_ELEM),
         (HomeTab::Search, STRIP_SEARCH_ELEM),
     ] {
         let (_, strip, _) = step(

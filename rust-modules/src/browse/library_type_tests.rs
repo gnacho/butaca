@@ -216,4 +216,22 @@ mod tests {
         assert!(requests[4].contains("/library/sections/2/firstCharacter?type=4"));
         server.join().unwrap();
     }
+
+    #[test]
+    fn an_other_videos_library_has_the_movie_listing_shape() {
+        assert_eq!(LibraryType::offered(SecKind::Video), LibraryType::offered(SecKind::Movie));
+        assert_eq!(LibraryType::Primary.plex_type(SecKind::Video), None);
+        assert_eq!(LibraryType::Collections.plex_type(SecKind::Video), Some(18));
+        let state = SecState { unwatched: true, ..Default::default() };
+        assert_eq!(state.query_filters(SecKind::Video), vec![("unwatched".into(), "1".into())]);
+    }
+
+    #[test]
+    fn an_other_videos_library_has_its_own_labels() {
+        let _en = crate::i18n::language_on_this_thread_for_test(crate::i18n::Preference::En);
+        assert_eq!(LibraryType::Primary.title(SecKind::Video), "Other Videos");
+        assert_eq!(LibraryType::Primary.empty_readout(SecKind::Video, "Home Clips"), "No videos in Home Clips");
+        assert_eq!(count_line(12, SecKind::Video), "12 videos");
+        assert_eq!(count_line(-1, SecKind::Video), "Videos");
+    }
 }

@@ -76,6 +76,7 @@ fn stamp_kind(stamp: &mut Stamp, kind: Option<crate::browse::SecKind>) {
         None => 0,
         Some(crate::browse::SecKind::Movie) => 1,
         Some(crate::browse::SecKind::Show) => 2,
+        Some(crate::browse::SecKind::Video) => 3,
     });
 }
 
@@ -258,7 +259,7 @@ fn type_draft(section_kind: SecKind, current: LibraryType) -> MenuDraft {
     }
     let mut stamp = Stamp::default();
     stamp.tag(13);
-    stamp.tag(u8::from(section_kind == SecKind::Show));
+    stamp.tag(match section_kind { SecKind::Movie => 0, SecKind::Show => 1, SecKind::Video => 2 });
     stamp.u32(current.code());
     MenuDraft { stamp: stamp.finish(), sections: vec![section], rows, selected }
 }

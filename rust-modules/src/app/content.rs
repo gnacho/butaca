@@ -865,6 +865,7 @@ fn home_tab_available(
     let kind = match tab {
         HomeTab::Movies => Some(crate::stores::browse::SecKind::Movie),
         HomeTab::Shows => Some(crate::stores::browse::SecKind::Show),
+        HomeTab::Videos => Some(crate::stores::browse::SecKind::Video),
         _ => None,
     };
     kind.is_none_or(|kind| directory.tab_of_kind(kind).is_some())
@@ -1077,7 +1078,25 @@ mod library_publication_tests {
 
         assert!(home_tab_available(directory.view(), HomeTab::Movies));
         assert!(!home_tab_available(directory.view(), HomeTab::Shows));
+        assert!(!home_tab_available(directory.view(), HomeTab::Videos));
         assert!(home_tab_available(directory.view(), HomeTab::Home));
+
+        let videos = crate::stores::browse::DirectorySnapshot::fixture(8, 0, vec![
+            crate::stores::browse::SectionView {
+                sid: Some(sid),
+                key: 12,
+                kind: crate::stores::browse::SecKind::Video,
+                row: crate::stores::browse::SrcRow {
+                    section: 0,
+                    title: "Home Clips".into(),
+                    pinned: true,
+                    current: true,
+                    ..Default::default()
+                },
+            },
+        ]);
+        assert!(home_tab_available(videos.view(), HomeTab::Videos));
+        assert!(!home_tab_available(videos.view(), HomeTab::Movies));
     }
 
     #[test]
