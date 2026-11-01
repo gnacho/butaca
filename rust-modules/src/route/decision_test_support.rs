@@ -104,7 +104,7 @@ pub(super) fn fresh_registry(ps: &mut PlaybackSession) -> crate::testlock::Seria
     restore_direct_play_mode(DirectPlayMode::Auto);
     // Issue #266: `ResolveEnv::snapshot` reads the enhancement preference from a global, so a
     // test that set it must not leak an enhanced resolve into the next one.
-    crate::player::restore_audio_enhancements(crate::plex::AudioEnhancements::NONE);
+    crate::player::restore_audio_enhancements(crate::playback::AudioEnhancements::NONE);
     crate::player::reset_route_requests_for_test(ps);
     crate::registry::reset_for_test();
     crate::player::clear_original_failure();

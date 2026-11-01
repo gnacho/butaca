@@ -131,7 +131,7 @@ pub(crate) struct PlaybackSession {
     /// a seek is not, so a seek rebuilds from what is stored here and a pick replaces it (and asks
     /// the pump for a fresh transcode when the answer actually changed). Nothing measures a link
     /// or moves a rung on its own — the adaptive switch is not here.
-    cur_contract: crate::plex::EncodeContract,
+    cur_contract: crate::playback::EncodeContract,
     /// What the last successful transcode decision actually did with the Plex Pass audio DSP
     /// (issue #266) — distinct from `cur_contract.audio`, which is what the accepted decision
     /// carried. Installed by `apply_plan` from `Plan::enhancement`; reset to `Off` by a new
@@ -318,7 +318,7 @@ pub(crate) struct PlaybackSession {
     /// resolves. Read through [`up_next`], which lends a `&'static`.
     up_next: Option<UpNext>,
     /// The whole queue behind the item now playing — the playing row included, in queue order,
-    /// projected to `plex::QueueRow` ON THE RESOLVE WORKER (a `Metadata` row carries its entire
+    /// projected to `crate::playback::QueueRow` ON THE RESOLVE WORKER (a `Metadata` row carries its entire
     /// Media/Part/Stream/Role tree; a show's queue is dozens of them, and this device is 32-bit).
     /// Same lifecycle as `up_next`: installed by `apply_plan`, retired by `request_play`.
     ///
@@ -326,7 +326,7 @@ pub(crate) struct PlaybackSession {
     /// so even a whole show is tens of KB. The capping that matters is the DRAWING (a still per row
     /// is a GL texture); that belongs to the overlay, and `apply_plan` deliberately warms only
     /// `up_next`'s.
-    queue: Vec<crate::plex::QueueRow>,
+    queue: Vec<crate::playback::QueueRow>,
     /// **This frame's millisecond stamp, mirrored from [`crate::player::machine::Player::now_ms`]**
     /// (spec §4.1), whose `set_now` is its ONLY writer — the loop calls it once per iteration from
     /// the same `fr.now` every other phase of the frame reads.
@@ -385,7 +385,7 @@ impl PlaybackSession {
         tsession: String::new(),
         play_verdict: None,
         resolve_failed: false,
-        cur_contract: crate::plex::EncodeContract::original(false, crate::plex::AudioEnhancements::NONE),
+        cur_contract: crate::playback::EncodeContract::original(false, crate::playback::AudioEnhancements::NONE),
         cur_enhancement: EnhancementOutcome::Off,
         cur_src: (0, 0, 0),
         cur_transport_kbps: 0,
@@ -778,7 +778,7 @@ pub(crate) enum RouteApplyResult {
 struct AppliedRouteProjection {
     url: String,
     tsession: String,
-    contract: crate::plex::EncodeContract,
+    contract: crate::playback::EncodeContract,
     enhancement: EnhancementOutcome,
     auto_original_watched: bool,
     auto_original: Option<AutoOriginalCandidate>,
@@ -901,7 +901,7 @@ pub(crate) struct TimelineLease {
 struct TimelineSnapshot {
     sid: ServerId,
     rating_key: String,
-    state: crate::plex::TimelineState,
+    state: crate::playback::TimelineState,
     time_ms: i64,
     duration_ms: i64,
     session: String,
@@ -2713,17 +2713,17 @@ impl HlsAbrControl {
             &self.rating_key,
             &encoder_session,
             &encoder_session,
-            crate::plex::TranscodeOffset::from_micros(offset_micros),
+            crate::playback::TranscodeOffset::from_micros(offset_micros),
             self.audio_stream_id,
             self.subtitle_stream_id,
-            crate::plex::EncodeContract {
+            crate::playback::EncodeContract {
                 remux: false,
                 no_video_copy: true,
                 ceiling: Some(rung.ceiling()),
-                delivery: crate::plex::TranscodeDelivery::FixedHls {
+                delivery: crate::playback::TranscodeDelivery::FixedHls {
                     seconds_per_segment: self.seconds_per_segment,
                 },
-                audio: crate::plex::AudioEnhancements::NONE,
+                audio: crate::playback::AudioEnhancements::NONE,
             },
         );
         // The deadline-bearing path preserves the cause where it is issued. A completed HTTP
@@ -2920,10 +2920,10 @@ fn auto_original_features(ps: &PlaybackSession) -> crate::abr::SourceFeatures {
 pub(crate) fn hls_abr_control(ps: &PlaybackSession) -> Option<(HlsAbrControl, WorkerTicket)> {
     if forced_direct_play(ps) { return None; }
     let seconds_per_segment = match cur_delivery(ps) {
-        crate::plex::TranscodeDelivery::FixedHls {
+        crate::playback::TranscodeDelivery::FixedHls {
             seconds_per_segment,
         } => seconds_per_segment,
-        crate::plex::TranscodeDelivery::ProgressiveMkv => return None,
+        crate::playback::TranscodeDelivery::ProgressiveMkv => return None,
     };
     let live = active_hls();
     let ticket = live
@@ -3029,7 +3029,7 @@ pub(crate) fn auto_original_watch(ps: &PlaybackSession) -> Option<AutoOriginalWa
         || !s.cur_auto_original_watched
         || !matches!(
             s.cur_contract.delivery,
-            crate::plex::TranscodeDelivery::ProgressiveMkv
+            crate::playback::TranscodeDelivery::ProgressiveMkv
         )
     {
         return None;
@@ -3072,7 +3072,7 @@ pub(crate) fn arm_auto_fixture(
         s.url = original_url.to_owned();
         s.cur_rk = "__auto_fixture__".into();
         s.sess = "auto-fixture".into();
-        s.cur_contract.delivery = crate::plex::TranscodeDelivery::ProgressiveMkv;
+        s.cur_contract.delivery = crate::playback::TranscodeDelivery::ProgressiveMkv;
         s.cur_contract.ceiling = None;
         // **Saying the source raster out loud is load-bearing rather than cosmetic**: an unknown
         // one is treated as unbounded (`HlsActuatorCatalog::limited_to`), which makes the 4K
@@ -3138,7 +3138,7 @@ pub(crate) fn arm_auto_fixture(
         // grade. Original recovery has its own end-to-end fixture with `start_hls == false`.
         s.auto_original = None;
         s.cur_contract.remux = false;
-        s.cur_contract.delivery = crate::plex::TranscodeDelivery::FixedHls {
+        s.cur_contract.delivery = crate::playback::TranscodeDelivery::FixedHls {
             seconds_per_segment: 2,
         };
         s.cur_contract.ceiling = Some(rung.ceiling());
@@ -3279,7 +3279,7 @@ fn install_auto_hls(
     { let s = &mut *ps; {
         s.cur_auto_original_watched = false;
         s.cur_contract.remux = false;
-        s.cur_contract.delivery = crate::plex::TranscodeDelivery::FixedHls {
+        s.cur_contract.delivery = crate::playback::TranscodeDelivery::FixedHls {
             seconds_per_segment: 2,
         };
         s.cur_contract.ceiling = Some(rung.ceiling());
@@ -3348,14 +3348,14 @@ pub(crate) fn recover_auto_to_original(ps: &mut PlaybackSession, offset_secs: i6
 pub(super) enum RecoveryFlavour {
     Direct,
     /// A codec-preserving remux carrying these enhancement params (`NONE` for a plain remux).
-    Remux(crate::plex::AudioEnhancements),
+    Remux(crate::playback::AudioEnhancements),
 }
 
 /// The enhancement a recovery to `candidate` should carry: the offer is evaluated against the
 /// family of the route being BUILT (`candidate.direct ? Direct : Remux`), never the live one —
 /// during an HLS recovery the live contract still says `FixedHls` (family `Other`, never offered)
 /// and is only overwritten once the replacement is published.
-fn recovery_want(ps: &PlaybackSession, candidate: &AutoOriginalCandidate) -> crate::plex::AudioEnhancements {
+fn recovery_want(ps: &PlaybackSession, candidate: &AutoOriginalCandidate) -> crate::playback::AudioEnhancements {
     // `pass`/`subtitle_shown`/`refused` are the live session's own facts, identical to `facts(ps)`;
     // only `base`/`carried` differ, because this candidate is not yet `ps.auto_original`/`cur_audio`.
     let facts = EnhancementFacts {
@@ -3376,7 +3376,7 @@ fn recovery_want(ps: &PlaybackSession, candidate: &AutoOriginalCandidate) -> cra
 /// the codec-preserving remux carrying the params — the same shape the resolve would have built.
 pub(super) fn recovery_flavour(
     candidate: &AutoOriginalCandidate,
-    want: crate::plex::AudioEnhancements,
+    want: crate::playback::AudioEnhancements,
 ) -> RecoveryFlavour {
     if candidate.direct && !want.any() {
         RecoveryFlavour::Direct
@@ -3443,7 +3443,7 @@ pub(crate) fn recover_auto_to_original_for(
         RecoveryFlavour::Direct => match admit_or_plain_remux(ps, &candidate, expected, cause) {
             AdmitOrPlainRemux::Admitted => RecoveryFlavour::Direct,
             AdmitOrPlainRemux::PlainRemux => {
-                RecoveryFlavour::Remux(crate::plex::AudioEnhancements::NONE)
+                RecoveryFlavour::Remux(crate::playback::AudioEnhancements::NONE)
             }
         },
         remux => remux,
@@ -3491,7 +3491,7 @@ pub(crate) fn recover_auto_to_original_for(
                 );
             }
             AdmitOrPlainRemux::PlainRemux => {
-                let none = crate::plex::AudioEnhancements::NONE;
+                let none = crate::playback::AudioEnhancements::NONE;
                 match prepare_original_remux(ps, &candidate, expected, offset_secs, watched, none, true)?
                 {
                     OriginalRemux::Prepared(replacement, _outcome) => replacement,
@@ -3657,7 +3657,7 @@ fn recover_original_direct(
     { let s = &mut *ps; {
         s.url = source_url;
         s.tsession.clear();
-        s.cur_contract = crate::plex::EncodeContract::original(false, crate::plex::AudioEnhancements::NONE);
+        s.cur_contract = crate::playback::EncodeContract::original(false, crate::playback::AudioEnhancements::NONE);
         s.cur_enhancement = outcome;
         s.cur_auto_original_watched = watched;
         s.cur_audio = candidate.audio.clone();
@@ -3953,7 +3953,7 @@ pub(crate) fn rollback_original_recovery(ps: &mut PlaybackSession) -> Option<Ori
             .ceiling
             .and_then(crate::abr::Rung::from_ceiling),
     ) {
-        (crate::plex::TranscodeDelivery::FixedHls { .. }, Some(rung)) => Some(rung),
+        (crate::playback::TranscodeDelivery::FixedHls { .. }, Some(rung)) => Some(rung),
         _ => None,
     };
     // `subtitle_sid`/`auto_original` are not part of what a rollback undoes (see the doc comment
@@ -4239,7 +4239,7 @@ pub(crate) fn set_stream_codecs(ps: &mut PlaybackSession, vc: &str, ac: &str) {
 ///
 /// * direct play / remux (`ProgressiveMkv`): the SOURCE's own coded size (`cur_src`), since the
 ///   file's elementary stream is what gets fed;
-/// * a fixed quality's HLS: the source capped by that quality's [`crate::plex::Ceiling`] — PMS
+/// * a fixed quality's HLS: the source capped by that quality's [`crate::playback::Ceiling`] — PMS
 ///   never upscales, so the smaller of the two is the largest picture it can send;
 /// * Auto: the bounding box of every FEASIBLE actuator (`HlsActuatorCatalog::widest_feasible_raster`),
 ///   because a rung commit never re-issues `Load` and the controller may climb to the 4K point
@@ -4252,8 +4252,8 @@ pub(crate) fn sink_max_raster(ps: &PlaybackSession) -> (u16, u16) {
     let clamp = |v: i64| u16::try_from(v).unwrap_or(u16::MAX);
     let source = (clamp(s.cur_src.1), clamp(s.cur_src.2));
     match s.cur_contract.delivery {
-        crate::plex::TranscodeDelivery::ProgressiveMkv => source,
-        crate::plex::TranscodeDelivery::FixedHls { .. } => {
+        crate::playback::TranscodeDelivery::ProgressiveMkv => source,
+        crate::playback::TranscodeDelivery::FixedHls { .. } => {
             if applied_quality() == Quality::Auto {
                 auto_catalog(ps).widest_feasible_raster()
             } else {
@@ -4386,11 +4386,11 @@ pub(crate) fn is_remux(ps: &PlaybackSession) -> bool {
 /// (`Unverified`/`Refused`/`Off` say nothing was provably added to this stream, so a caller
 /// quoting the params must not claim them). Read by the diagnostics Audio row's suffix, which used
 /// to read the unfiltered ask and gate it on `cur_enhancement_label(ps) == Some("applied")` itself.
-pub(crate) fn applied_audio_enhancements(ps: &PlaybackSession) -> crate::plex::AudioEnhancements {
+pub(crate) fn applied_audio_enhancements(ps: &PlaybackSession) -> crate::playback::AudioEnhancements {
     if ps.cur_enhancement == EnhancementOutcome::Applied {
         ps.cur_contract.audio
     } else {
-        crate::plex::AudioEnhancements::NONE
+        crate::playback::AudioEnhancements::NONE
     }
 }
 /// **Narrow diagnostics accessor** — deliberately not `pub(crate) fn cur_enhancement`, which would
@@ -4413,10 +4413,10 @@ fn is_no_video_copy(ps: &PlaybackSession) -> bool {
 /// The quality ceiling THIS playback was resolved under — read by the two query rebuilds
 /// ([`transcode_seek`], [`retranscode`]) so a rung picked mid-film cannot reshape the encode
 /// already on screen. See [`PlaybackSession::cur_contract`].
-fn cur_ceiling(ps: &PlaybackSession) -> Option<crate::plex::Ceiling> {
+fn cur_ceiling(ps: &PlaybackSession) -> Option<crate::playback::Ceiling> {
     ps.cur_contract.ceiling
 }
-fn cur_delivery(ps: &PlaybackSession) -> crate::plex::TranscodeDelivery {
+fn cur_delivery(ps: &PlaybackSession) -> crate::playback::TranscodeDelivery {
     ps.cur_contract.delivery
 }
 
@@ -4426,7 +4426,7 @@ fn cur_delivery(ps: &PlaybackSession) -> crate::plex::TranscodeDelivery {
 pub(crate) fn is_segmented_hls(ps: &PlaybackSession) -> bool {
     matches!(
         cur_delivery(ps),
-        crate::plex::TranscodeDelivery::FixedHls { .. }
+        crate::playback::TranscodeDelivery::FixedHls { .. }
     )
 }
 pub(crate) fn source_vcodec(ps: &PlaybackSession) -> String {
@@ -4499,7 +4499,7 @@ impl ScrobbleWork {
                 self.client.is_some_and(|c| {
                     c.timeline(&crate::plex::TimelineReport {
                         rating_key: &rk,
-                        state: crate::plex::TimelineState::Stopped,
+                        state: crate::playback::TimelineState::Stopped,
                         time_ms: t_ms,
                         duration_ms: d_ms,
                         session: &self.session,
@@ -4877,7 +4877,7 @@ pub(crate) fn transcode_seek(ps: &mut PlaybackSession, offset_secs: i64) -> Opti
         &rk,
         &replacement,
         &replacement,
-        crate::plex::TranscodeOffset::from_seconds(offset_secs.max(0)),
+        crate::playback::TranscodeOffset::from_seconds(offset_secs.max(0)),
         cur_audio_sid(ps),
         cur_sub_sid(ps),
         ps.cur_contract,
@@ -5071,7 +5071,7 @@ use crate::cbuf::set as set_c; // shared fixed-C-buffer write (the session's HUD
 /// So a rung is spent the way [`crate::plex::link_policy`] spends the relay tier: **deny the two
 /// flavors that ship the file at its own rate, leaving the one flavor whose whole point is that
 /// the server picks the rate** ([`quality_policy`]). Only then does the rung's number reach the
-/// wire, as [`crate::plex::Ceiling`] on the re-encode query.
+/// wire, as [`crate::playback::Ceiling`] on the re-encode query.
 ///
 /// # The ladder, and why these rungs
 ///
@@ -5110,7 +5110,7 @@ pub(crate) fn available_quality_ladder() -> &'static [Quality] {
 impl Quality {
     /// The bound this rung imposes. Original has none; Auto also has no fixed ceiling because its
     /// adaptive owner selects one dynamically once that path is ready.
-    pub(crate) fn ceiling(self) -> Option<crate::plex::Ceiling> {
+    pub(crate) fn ceiling(self) -> Option<crate::playback::Ceiling> {
         let (max_kbps, max_w, max_h) = match self {
             Quality::Auto | Quality::Original => return None,
             Quality::P1080High => (20000, 1920, 1080),
@@ -5119,7 +5119,7 @@ impl Quality {
             Quality::P720Low => (2000, 1280, 720),
             Quality::P480 => (720, 854, 480),
         };
-        Some(crate::plex::Ceiling {
+        Some(crate::playback::Ceiling {
             max_kbps,
             max_w,
             max_h,
@@ -5566,11 +5566,11 @@ fn apply_quality_choice(ps: &mut PlaybackSession, q: Quality) {
                 && (!is_transcoding(ps) || is_remux(ps))));
     let adaptive = auto_uses_hls(q, auto_original);
     let delivery = if adaptive {
-        crate::plex::TranscodeDelivery::FixedHls {
+        crate::playback::TranscodeDelivery::FixedHls {
             seconds_per_segment: 2,
         }
     } else {
-        crate::plex::TranscodeDelivery::ProgressiveMkv
+        crate::playback::TranscodeDelivery::ProgressiveMkv
     };
     let starting_rung = adaptive.then(|| {
         crate::abr::hls_reentry_rung(
@@ -5599,7 +5599,7 @@ fn apply_quality_choice(ps: &mut PlaybackSession, q: Quality) {
         // the right-hand side did not already say — a leftover from the `auto_remote_original`
         // refactor, where the two really were different.
         s.cur_auto_original_watched = auto_original;
-        if matches!(delivery, crate::plex::TranscodeDelivery::FixedHls { .. }) {
+        if matches!(delivery, crate::playback::TranscodeDelivery::FixedHls { .. }) {
             s.cur_contract.remux = false;
         }
     } };
@@ -5715,14 +5715,14 @@ pub(super) fn measure_remote_remux(
     source_kbps: i64,
     // Issue #266: the DSP the play-path decision will carry on this same session, so the sample
     // is the remux that plays (`build_stream`'s `pre_audio`); `NONE` without Plex Pass.
-    audio: crate::plex::AudioEnhancements,
+    audio: crate::playback::AudioEnhancements,
 ) -> RemuxProbe {
     let spec_for = |audio| {
         transcode_spec(
             rk,
             session,
             session,
-            crate::plex::TranscodeOffset::Fresh,
+            crate::playback::TranscodeOffset::Fresh,
             audio_stream_id,
             subtitle_stream_id,
             enhanced_remux_contract(audio),
@@ -5736,7 +5736,7 @@ pub(super) fn measure_remote_remux(
         // enhanced registration, exactly as the play path's own fallback does.
         note_enhancement_refused(" in remote remux preflight; fell back", audio);
         enhancement_refused = true;
-        spec = spec_for(crate::plex::AudioEnhancements::NONE);
+        spec = spec_for(crate::playback::AudioEnhancements::NONE);
         decision = client.transcode_decision(&spec);
     }
     let Some(decision) = decision else {
@@ -5887,7 +5887,7 @@ pub(super) struct QueueInfo {
     pub(super) id: String,
     pub(super) item_id: String,
     pub(super) up_next: Option<UpNext>,
-    pub(super) rows: Vec<crate::plex::QueueRow>,
+    pub(super) rows: Vec<crate::playback::QueueRow>,
 }
 
 /// The queued next episode. Main-thread only, and — like `metadata::playing()` (via
@@ -5911,7 +5911,7 @@ pub(crate) fn up_next(ps: &PlaybackSession) -> Option<&UpNext> {
 /// to keep a row past the call clones it out (`with_queue(|q| q.get(i).cloned())`); the borrow
 /// checker cannot police a `&'static`, but it does police this.
 #[allow(dead_code)] // nothing reads the rows yet — the queue overlay that draws them is its own batch
-pub(crate) fn with_queue<R>(ps: &PlaybackSession, f: impl FnOnce(&[crate::plex::QueueRow]) -> R) -> R {
+pub(crate) fn with_queue<R>(ps: &PlaybackSession, f: impl FnOnce(&[crate::playback::QueueRow]) -> R) -> R {
     f(&ps.queue)
 }
 
@@ -6005,7 +6005,7 @@ impl ResolveEnv {
     pub(super) fn set_preview(&mut self, preview: bool) {
         self.preview = preview;
         if preview {
-            self.audio_enhancements = crate::plex::AudioEnhancements::NONE;
+            self.audio_enhancements = crate::playback::AudioEnhancements::NONE;
         }
     }
 
@@ -6481,7 +6481,7 @@ fn rescue_retry_context(ps: &PlaybackSession, resume_ns: i64) -> RetryContext {
 /// Apply a retry's enhancement decision to the resolve environment it is about to hand the worker.
 fn apply_retry_enhancement(env: &mut ResolveEnv, retry: RetryContext) {
     if retry.suppress_enhancement {
-        env.audio_enhancements = crate::plex::AudioEnhancements::NONE;
+        env.audio_enhancements = crate::playback::AudioEnhancements::NONE;
     }
 }
 
@@ -6820,7 +6820,7 @@ fn apply_plan(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::Meta
             resolved_as_preview: preview,
         };
     } };
-    if let (crate::plex::TranscodeDelivery::FixedHls { .. }, Some(rung)) = (
+    if let (crate::playback::TranscodeDelivery::FixedHls { .. }, Some(rung)) = (
         ps.cur_contract.delivery,
         ps
             .cur_contract
@@ -6892,7 +6892,7 @@ fn prepare_original_remux(
     expected: &WorkerTicket,
     offset_secs: i64,
     watched: bool,
-    audio: crate::plex::AudioEnhancements,
+    audio: crate::playback::AudioEnhancements,
     known_refused: bool,
 ) -> Option<OriginalRemux> {
     let c = cur_client(ps)?;
@@ -6919,7 +6919,7 @@ fn prepare_original_remux(
             &rk,
             &replacement,
             &replacement,
-            crate::plex::TranscodeOffset::from_seconds(offset_secs.max(0)),
+            crate::playback::TranscodeOffset::from_seconds(offset_secs.max(0)),
             candidate_audio_sid,
             subtitle,
             enhanced_remux_contract(audio),
@@ -6941,7 +6941,7 @@ fn prepare_original_remux(
             return Some(OriginalRemux::RefusedToDirect);
         }
         enhancement_refused = true;
-        audio = crate::plex::AudioEnhancements::NONE;
+        audio = crate::playback::AudioEnhancements::NONE;
         spec = spec_for(audio);
         decision = c.transcode_decision(&spec);
     }
@@ -7021,7 +7021,7 @@ pub(crate) fn retranscode_for(ps: &mut PlaybackSession, expected: &WorkerTicket,
     }
     if matches!(
         cur_delivery(ps),
-        crate::plex::TranscodeDelivery::FixedHls { .. }
+        crate::playback::TranscodeDelivery::FixedHls { .. }
     ) {
         let live = sync_active_hls_to_session(ps);
         if live.as_ref().is_some_and(|(ticket, _)| ticket != expected) {
@@ -7041,7 +7041,7 @@ pub(crate) fn retranscode_for(ps: &mut PlaybackSession, expected: &WorkerTicket,
 /// (another capable track the candidate can carry) makes [`enhancement_step`] `NotInvolved`
 /// because the params already match, and its legacy reload lands here; rebuilding that as a
 /// re-encode would silently drop the enhancement the viewer still has switched on.
-fn retranscode_contract(ps: &PlaybackSession) -> crate::plex::EncodeContract {
+fn retranscode_contract(ps: &PlaybackSession) -> crate::playback::EncodeContract {
     // A ceiling means a fixed rung was picked, and an enhanced remux is uncapped by definition:
     // keeping it would erase the cap the picker shows (I5).
     let keep_enhanced = live_family(ps) == RouteFamily::Remux
@@ -7051,7 +7051,7 @@ fn retranscode_contract(ps: &PlaybackSession) -> crate::plex::EncodeContract {
     if keep_enhanced {
         return enhanced_remux_contract(want_live(ps));
     }
-    crate::plex::EncodeContract {
+    crate::playback::EncodeContract {
         remux: false,
         delivery: cur_delivery(ps),
         no_video_copy: is_no_video_copy(ps),
@@ -7167,7 +7167,7 @@ fn retranscode_as(
     ps: &mut PlaybackSession,
     expected: &WorkerTicket,
     offset_secs: i64,
-    contract: crate::plex::EncodeContract,
+    contract: crate::playback::EncodeContract,
 ) -> Option<String> {
 
     if forced_direct_play(ps) { return None; }
@@ -7179,7 +7179,7 @@ fn retranscode_as(
     // Snapshot the desired contract, but publish none of it before PMS has answered and the full
     // worker/action ticket still owns the route. This prevents a failed `/decision` from making
     // diagnostics claim the requested 22 Mbps while the old 1.1 Mbps encoder still serves bytes.
-    let crate::plex::EncodeContract {
+    let crate::playback::EncodeContract {
         remux,
         delivery,
         ceiling,
@@ -7203,7 +7203,7 @@ fn retranscode_as(
                     .map_or_else(|| ps.src_acodec.clone(), |a| a.codec.clone())
             },
         )
-    } else if matches!(delivery, crate::plex::TranscodeDelivery::FixedHls { .. }) {
+    } else if matches!(delivery, crate::playback::TranscodeDelivery::FixedHls { .. }) {
         ("h264".to_owned(), "aac".to_owned())
     } else {
         (
@@ -7223,7 +7223,7 @@ fn retranscode_as(
         &rk,
         &qsess,
         &qsess,
-        crate::plex::TranscodeOffset::from_seconds(offset_secs.max(0)),
+        crate::playback::TranscodeOffset::from_seconds(offset_secs.max(0)),
         audio_sid,
         subtitle_sid,
         contract,
@@ -7254,7 +7254,7 @@ fn retranscode_as(
     let output_codecs = decision_codecs(&decision).unwrap_or((fallback_vcodec, fallback_acodec));
     let url = c.transcode_start_url(&sp).to_url();
     let replacement_installed = match (delivery, ceiling.and_then(crate::abr::Rung::from_ceiling)) {
-        (crate::plex::TranscodeDelivery::FixedHls { .. }, Some(rung)) => {
+        (crate::playback::TranscodeDelivery::FixedHls { .. }, Some(rung)) => {
             replace_active_hls_for(expected, &qsess, &url, rung, None).is_some()
         }
         _ => replace_active_encoder_for(expected, &qsess).is_some(),
@@ -7332,7 +7332,7 @@ pub(super) fn live_family(ps: &PlaybackSession) -> RouteFamily {
     if !is_transcoding(ps) {
         RouteFamily::Direct
     } else if ps.cur_contract.remux
-        && ps.cur_contract.delivery == crate::plex::TranscodeDelivery::ProgressiveMkv
+        && ps.cur_contract.delivery == crate::playback::TranscodeDelivery::ProgressiveMkv
     {
         RouteFamily::Remux
     } else {
@@ -7358,9 +7358,9 @@ pub(super) fn facts(ps: &PlaybackSession) -> EnhancementFacts<'_> {
 /// Under a fixed rung nothing is: the enhanced route is an uncapped remux, so wanting it there
 /// would override the bitrate cap the viewer picked (I5) — the quality refresh already queued
 /// rebuilds that route as a capped re-encode without the params.
-fn want_live(ps: &PlaybackSession) -> crate::plex::AudioEnhancements {
+fn want_live(ps: &PlaybackSession) -> crate::playback::AudioEnhancements {
     if !enhancement_quality() {
-        return crate::plex::AudioEnhancements::NONE;
+        return crate::playback::AudioEnhancements::NONE;
     }
     desired_audio(crate::player::audio_enhancements(), audio_enhancements_offered_live(ps))
 }
@@ -7373,10 +7373,10 @@ fn enhancement_quality() -> bool {
 
 /// The one shape an enhanced Original takes: a codec-preserving progressive-MKV remux, video
 /// copied (I7 keeps DV, the only `no_video_copy` source, out of the offer), no ceiling.
-fn enhanced_remux_contract(audio: crate::plex::AudioEnhancements) -> crate::plex::EncodeContract {
-    crate::plex::EncodeContract {
+fn enhanced_remux_contract(audio: crate::playback::AudioEnhancements) -> crate::playback::EncodeContract {
+    crate::playback::EncodeContract {
         remux: true,
-        delivery: crate::plex::TranscodeDelivery::ProgressiveMkv,
+        delivery: crate::playback::TranscodeDelivery::ProgressiveMkv,
         no_video_copy: false,
         ceiling: None,
         audio,
@@ -7390,7 +7390,7 @@ pub(crate) enum EnhancementStep {
     /// legacy reload) runs.
     NotInvolved,
     /// Rebuild as this remux — on with new params, or a remux candidate's plain remux.
-    Remux(crate::plex::EncodeContract),
+    Remux(crate::playback::EncodeContract),
     /// The enhancement is no longer wanted and the candidate direct-plays: return to it.
     ReleaseToDirect,
 }
@@ -7414,7 +7414,7 @@ pub(crate) fn enhancement_step(ps: &PlaybackSession) -> EnhancementStep {
         return match ps.auto_original.as_ref() {
             Some(candidate) if candidate.direct => EnhancementStep::ReleaseToDirect,
             Some(_) => EnhancementStep::Remux(enhanced_remux_contract(
-                crate::plex::AudioEnhancements::NONE,
+                crate::playback::AudioEnhancements::NONE,
             )),
             None => EnhancementStep::NotInvolved,
         };
@@ -7473,7 +7473,7 @@ pub(crate) fn legacy_action(ps: &PlaybackSession) -> LegacyAction {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ClaimPrimary {
     ReleaseToDirect,
-    Remux(crate::plex::EncodeContract),
+    Remux(crate::playback::EncodeContract),
     /// The displaced pick's own legacy reload ([`legacy_action`]).
     Legacy,
     /// Today's rebuild, exactly: [`retranscode_for`].
@@ -7665,7 +7665,7 @@ pub(crate) fn honour_displaced_pick(ps: &mut PlaybackSession, displaced_pick: bo
 /// **Menu display truth.** While a user action is queued or in flight the rows show what the
 /// preference is asking of the live route; once settled they show what the server APPLIED. A
 /// claim-time rejection therefore shows what actually plays, and pressing the row again retries.
-pub(crate) fn displayed_audio_enhancements(ps: &PlaybackSession) -> crate::plex::AudioEnhancements {
+pub(crate) fn displayed_audio_enhancements(ps: &PlaybackSession) -> crate::playback::AudioEnhancements {
     let in_flight = {
         let control = PLAYER_CONTROL.lock().unwrap_or_else(|e| e.into_inner());
         control.pending_user.is_some() || control.phase != ControlPhase::Stable
@@ -7690,7 +7690,7 @@ pub(crate) fn audio_enhancements_offered_live(ps: &PlaybackSession) -> bool {
 /// **The Audio tab's one question, answered once.** `Some(displayed)` when the rows are offered at
 /// all, `None` when they are absent — the exact `offered.then(|| displayed(...))` every menu-side
 /// caller was computing for itself from the two predicates above.
-pub(crate) fn menu_enhancements(ps: &PlaybackSession) -> Option<crate::plex::AudioEnhancements> {
+pub(crate) fn menu_enhancements(ps: &PlaybackSession) -> Option<crate::playback::AudioEnhancements> {
     audio_enhancements_offered_live(ps).then(|| displayed_audio_enhancements(ps))
 }
 
@@ -7727,7 +7727,7 @@ pub(crate) struct EnhTestFixture {
     /// Takes precedence over `applied.any()` alone, but `refused` wins if both are set.
     pub(crate) unverified: bool,
     /// The contract's own `audio` — what the live route has actually applied.
-    pub(crate) applied: crate::plex::AudioEnhancements,
+    pub(crate) applied: crate::playback::AudioEnhancements,
     /// Force `displayed_audio_enhancements`'s in-flight branch (a user edit queued, not yet
     /// settled), so it reads `want_live` instead of `cur_contract.audio`.
     pub(crate) in_flight: bool,
@@ -7745,7 +7745,7 @@ impl Default for EnhTestFixture {
             subtitle_shown: false,
             refused: false,
             unverified: false,
-            applied: crate::plex::AudioEnhancements::NONE,
+            applied: crate::playback::AudioEnhancements::NONE,
             in_flight: false,
         }
     }
@@ -7768,9 +7768,9 @@ pub(crate) fn enhancement_test_session(route: EnhTestFixture) -> (PlaybackSessio
     } else {
         EnhancementOutcome::Off
     };
-    ps.cur_contract = crate::plex::EncodeContract {
+    ps.cur_contract = crate::playback::EncodeContract {
         remux: matches!(route.remux, Some(true)),
-        delivery: crate::plex::TranscodeDelivery::ProgressiveMkv,
+        delivery: crate::playback::TranscodeDelivery::ProgressiveMkv,
         no_video_copy: false,
         ceiling: None,
         audio: route.applied,
@@ -7850,7 +7850,7 @@ pub(crate) fn commit_audio_selection(ps: &mut PlaybackSession, audio: CarriedAud
         RouteFamily::Other => {
             if matches!(
                 cur_delivery(ps),
-                crate::plex::TranscodeDelivery::FixedHls { .. }
+                crate::playback::TranscodeDelivery::FixedHls { .. }
             ) {
                 ps.auto_original = None;
             }
@@ -7929,7 +7929,7 @@ pub(crate) fn commit_subtitle_selection(
         RouteFamily::Other => {
             if matches!(
                 cur_delivery(ps),
-                crate::plex::TranscodeDelivery::FixedHls { .. }
+                crate::playback::TranscodeDelivery::FixedHls { .. }
             ) {
                 let s = &mut *ps;
                 if stream_id == 0 {
@@ -8014,7 +8014,7 @@ pub(crate) fn begin_timeline_reporting(ps: &PlaybackSession) -> Option<TimelineL
 /// retired; transient Applying/Resolving phases skip a hybrid report without borrowing Session.
 fn timeline_snapshot(
     lease: &TimelineLease,
-    state: crate::plex::TimelineState,
+    state: crate::playback::TimelineState,
     time_ms: i64,
     duration_ms: i64,
 ) -> Option<TimelineSnapshot> {
@@ -8055,7 +8055,7 @@ fn timeline_snapshot(
 /// snapshot.
 pub(crate) fn report_timeline(
     lease: &TimelineLease,
-    state: crate::plex::TimelineState,
+    state: crate::playback::TimelineState,
     t_ms: i64,
     d_ms: i64,
 ) -> bool {

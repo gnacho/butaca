@@ -1617,9 +1617,9 @@ const ENH_BOOST_DIALOG: u8 = 1;
 const ENH_NORMALIZE_LOUDNESS: u8 = 2;
 
 /// The current preference (see [`AUDIO_ENHANCEMENTS`]).
-pub(crate) fn audio_enhancements() -> crate::plex::AudioEnhancements {
+pub(crate) fn audio_enhancements() -> crate::playback::AudioEnhancements {
     let bits = AUDIO_ENHANCEMENTS.load(Relaxed);
-    crate::plex::AudioEnhancements {
+    crate::playback::AudioEnhancements {
         boost_dialog: bits & ENH_BOOST_DIALOG != 0,
         normalize_loudness: bits & ENH_NORMALIZE_LOUDNESS != 0,
     }
@@ -1627,7 +1627,7 @@ pub(crate) fn audio_enhancements() -> crate::plex::AudioEnhancements {
 
 /// Restore the persisted preference without writing it back — boot and the credentials handoff,
 /// the same two places [`restore_subtitle_tone`] is called from.
-pub(crate) fn restore_audio_enhancements(a: crate::plex::AudioEnhancements) {
+pub(crate) fn restore_audio_enhancements(a: crate::playback::AudioEnhancements) {
     let bits = if a.boost_dialog { ENH_BOOST_DIALOG } else { 0 }
         | if a.normalize_loudness { ENH_NORMALIZE_LOUDNESS } else { 0 };
     AUDIO_ENHANCEMENTS.store(bits, Relaxed);
@@ -1635,7 +1635,7 @@ pub(crate) fn restore_audio_enhancements(a: crate::plex::AudioEnhancements) {
 
 /// Select a preference on the main thread and retain its persistence for the shared storage
 /// worker, exactly as [`set_subtitle_tone`] does.
-pub(crate) fn set_audio_enhancements(a: crate::plex::AudioEnhancements) {
+pub(crate) fn set_audio_enhancements(a: crate::playback::AudioEnhancements) {
     restore_audio_enhancements(a);
     persist_audio_enhancements(a);
 }
@@ -1643,14 +1643,14 @@ pub(crate) fn set_audio_enhancements(a: crate::plex::AudioEnhancements) {
 /// **The Audio tab's toggle rows land here** (issue #266): persist the preference, then bring the
 /// playing route in line with it. The reconcile itself defers behind a pending Original trial, so
 /// a toggle during one applies to whichever route that trial settles on.
-pub(crate) fn request_audio_enhancement(ps: &mut crate::route::PlaybackSession, a: crate::plex::AudioEnhancements) {
+pub(crate) fn request_audio_enhancement(ps: &mut crate::route::PlaybackSession, a: crate::playback::AudioEnhancements) {
     set_audio_enhancements(a);
     crate::route::reconcile_enhancement(ps, false);
     // the rows' checkmarks move on this — see `route::persist_quality_choice`
     crate::ui::idle::invalidate();
 }
 
-fn persist_audio_enhancements(a: crate::plex::AudioEnhancements) {
+fn persist_audio_enhancements(a: crate::playback::AudioEnhancements) {
     let _ = crate::storage_worker::submit_retained(move || crate::plex::session::set_audio_enhancements(a));
 }
 

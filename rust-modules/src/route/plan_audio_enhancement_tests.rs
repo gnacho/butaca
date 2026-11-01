@@ -13,7 +13,7 @@ use super::test_support::*;
 use super::test_support::apply_plan;
 use crate::plex::serverinfo::Subscription;
 
-const PREF: crate::plex::AudioEnhancements = crate::plex::AudioEnhancements {
+const PREF: crate::playback::AudioEnhancements = crate::playback::AudioEnhancements {
     boost_dialog: false,
     normalize_loudness: true,
 };
@@ -92,7 +92,7 @@ fn assert_direct_no_params(r: &Resolve) {
     assert!(!r.plan.url.contains("start.mkv"), "{}", r.plan.url);
     assert!(r.plan.tsession.is_empty());
     assert!(!any_param(&r.requests), "no request may carry a param: {:?}", r.requests);
-    assert_eq!(r.plan.contract.audio, crate::plex::AudioEnhancements::NONE);
+    assert_eq!(r.plan.contract.audio, crate::playback::AudioEnhancements::NONE);
     assert_eq!(r.plan.enhancement, EnhancementOutcome::Off);
 }
 
@@ -243,7 +243,7 @@ fn dv_unusable_base_is_direct_no_params() {
     unusable.dovi = p5();
     assert!(unusable.dovi.base_layer_unusable());
     assert!(!enhancements_offered(&facts(&unusable), RouteFamily::Direct));
-    assert_eq!(desired_audio(PREF, enhancements_offered(&facts(&unusable), RouteFamily::Direct)), crate::plex::AudioEnhancements::NONE);
+    assert_eq!(desired_audio(PREF, enhancements_offered(&facts(&unusable), RouteFamily::Direct)), crate::playback::AudioEnhancements::NONE);
 }
 
 #[test]
@@ -296,7 +296,7 @@ fn fixed_720p_rung_no_params() {
     });
     assert!(r.plan.auto_original.is_none(), "a fixed rung captures no Original candidate");
     assert!(!any_param(&r.requests), "{:?}", r.requests);
-    assert_eq!(r.plan.contract.audio, crate::plex::AudioEnhancements::NONE);
+    assert_eq!(r.plan.contract.audio, crate::playback::AudioEnhancements::NONE);
     crate::registry::reset_for_test();
 }
 
@@ -310,9 +310,9 @@ fn remote_auto_hls_no_params() {
         client.set_link(crate::plex::probe::Location::Remote);
         env.quality = Quality::Auto;
     });
-    assert!(matches!(r.plan.contract.delivery, crate::plex::TranscodeDelivery::FixedHls { .. }), "precondition: HLS");
+    assert!(matches!(r.plan.contract.delivery, crate::playback::TranscodeDelivery::FixedHls { .. }), "precondition: HLS");
     assert!(!any_param(&r.requests), "{:?}", r.requests);
-    assert_eq!(r.plan.contract.audio, crate::plex::AudioEnhancements::NONE);
+    assert_eq!(r.plan.contract.audio, crate::playback::AudioEnhancements::NONE);
     crate::registry::reset_for_test();
 }
 
@@ -325,7 +325,7 @@ fn relay_no_params() {
         client.set_link(crate::plex::probe::Location::Relay);
     });
     assert!(!any_param(&r.requests), "{:?}", r.requests);
-    assert_eq!(r.plan.contract.audio, crate::plex::AudioEnhancements::NONE);
+    assert_eq!(r.plan.contract.audio, crate::playback::AudioEnhancements::NONE);
     crate::registry::reset_for_test();
 }
 
@@ -394,7 +394,7 @@ fn assert_fell_back_to_direct(r: &Resolve) {
     assert!(r.plan.url.contains("/library/parts/") && !r.plan.url.contains("start.mkv"), "{}", r.plan.url);
     assert!(r.plan.tsession.is_empty());
     assert!(!r.plan.contract.remux);
-    assert_eq!(r.plan.contract.audio, crate::plex::AudioEnhancements::NONE);
+    assert_eq!(r.plan.contract.audio, crate::playback::AudioEnhancements::NONE);
     assert_eq!(r.plan.enhancement, EnhancementOutcome::Refused);
     assert_eq!(r.plan.acodec, "ac3", "the direct play's own source codec again");
     assert_eq!(mde_lines(&r.requests).len(), 2, "MDE re-issued before the Part: {:?}", r.requests);
@@ -478,8 +478,8 @@ fn remote_probe_fallback(mode: EnhMode) {
     assert!(r.plan.url.contains("start.mkv"), "the Original remux, not HLS: {} {:?}", r.plan.url, r.requests);
     assert!(!r.plan.url.contains(".m3u8"), "{}", r.plan.url);
     assert!(r.plan.contract.remux, "an Original remux");
-    assert_eq!(r.plan.contract.delivery, crate::plex::TranscodeDelivery::ProgressiveMkv);
-    assert_eq!(r.plan.contract.audio, crate::plex::AudioEnhancements::NONE);
+    assert_eq!(r.plan.contract.delivery, crate::playback::TranscodeDelivery::ProgressiveMkv);
+    assert_eq!(r.plan.contract.audio, crate::playback::AudioEnhancements::NONE);
     assert_eq!(query_param(&r.plan.url, "normalizeLoudness"), None, "{}", r.plan.url);
     assert_eq!(query_param(&r.plan.url, "boostDialog"), None, "{}", r.plan.url);
     assert_eq!(r.plan.enhancement, EnhancementOutcome::Refused);
@@ -523,5 +523,5 @@ fn aac51_source_outcome_unverified() {
     assert_eq!(classify_outcome(Some(&mc), Some(&copyable), PREF), EnhancementOutcome::Applied);
     assert_eq!(classify_outcome(Some(&mc), Some(&not_copyable), PREF), EnhancementOutcome::Unverified);
     assert_eq!(classify_outcome(None, Some(&copyable), PREF), EnhancementOutcome::Unverified);
-    assert_eq!(classify_outcome(Some(&mc), Some(&copyable), crate::plex::AudioEnhancements::NONE), EnhancementOutcome::Off);
+    assert_eq!(classify_outcome(Some(&mc), Some(&copyable), crate::playback::AudioEnhancements::NONE), EnhancementOutcome::Off);
 }

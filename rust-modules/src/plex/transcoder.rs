@@ -14,9 +14,10 @@
 //! must not Original (PMS 1.43 503s a Part without a registered decision) and may still remux
 //! or re-encode via a separate `transcode_decision`. The ABR deadline-bearing twin retains
 //! HTTP, deadline and transport causes for route policy.
+use crate::playback::{Ceiling, TranscodeDelivery};
 use super::client::{Client, JsonDeadlineOutcome, QueryBuilder, StreamUrl};
 use super::models::MediaContainer;
-use super::params::{Ceiling, TranscodeDelivery, TranscodeSpec};
+use super::params::TranscodeSpec;
 use super::probe::Location;
 
 /// The AUDIO codec set the buffer-feed PIPELINE decodes. This is the software half of a
@@ -569,11 +570,10 @@ impl Client {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        link_policy, Ceiling, Client, LinkPolicy, Location, TranscodeDelivery, TranscodeSpec,
-    };
+    use super::{link_policy, Client, LinkPolicy, Location, TranscodeSpec};
     use crate::devcaps::Caps;
-    use crate::plex::{AudioEnhancements, EncodeContract, Origin, ServerId};
+    use crate::playback::{AudioEnhancements, Ceiling, EncodeContract, TranscodeDelivery};
+    use crate::plex::{Origin, ServerId};
 
     // ---- the universal-transcoder query: who is allowed to COPY ---------------------------
 
@@ -609,7 +609,7 @@ mod tests {
             },
             audio_stream_id: 0,
             subtitle_stream_id: 0,
-            offset: crate::plex::TranscodeOffset::Fresh,
+            offset: crate::playback::TranscodeOffset::Fresh,
         }
     }
 
@@ -998,7 +998,7 @@ mod tests {
         s.contract.delivery = TranscodeDelivery::FixedHls {
             seconds_per_segment: 2,
         };
-        s.offset = crate::plex::TranscodeOffset::from_micros(2_002_000);
+        s.offset = crate::playback::TranscodeOffset::from_micros(2_002_000);
         let q = a_client().transcode_query(&s);
         assert!(q.contains("offset=2.002000"), "{q}");
         assert_eq!(q.matches("offset=").count(), 1, "{q}");

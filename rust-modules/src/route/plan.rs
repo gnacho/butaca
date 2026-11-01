@@ -336,17 +336,17 @@ pub(super) fn classify_prime_decision(
 /// [`build_stream`] runs on the resolve worker and must take it from [`ResolveEnv`], while
 /// [`retranscode`] runs on the main thread and reads the live selection. A read inside here would
 /// be a `static` touched from a worker. Folding the four (now five, with issue #266's
-/// [`AudioEnhancements`](crate::plex::AudioEnhancements)) into one [`EncodeContract`] argument is
+/// [`AudioEnhancements`](crate::playback::AudioEnhancements)) into one [`EncodeContract`] argument is
 /// what keeps every caller stating the whole shape at once rather than four/five positional bools
 /// and options a reader has to keep straight by position.
 pub(super) fn transcode_spec<'a>(
     rk: &'a str,
     session: &'a str,
     encoder_session: &'a str,
-    offset: crate::plex::TranscodeOffset,
+    offset: crate::playback::TranscodeOffset,
     aud: i64,
     sub: i64,
-    contract: crate::plex::EncodeContract,
+    contract: crate::playback::EncodeContract,
 ) -> crate::plex::TranscodeSpec<'a> {
     crate::plex::TranscodeSpec {
         rating_key: rk,
@@ -421,7 +421,7 @@ pub(super) fn supported_quality(q: Quality) -> Quality {
 ///   neither carries a cap the server could come in under. What survives is the re-encode, which
 ///   is the only flavor that can honour the ask at all.
 ///
-/// **Unmeasured fails CLOSED** ([`crate::plex::Ceiling::admits`] holds the full argument): `0` is
+/// **Unmeasured fails CLOSED** ([`crate::playback::Ceiling::admits`] holds the full argument): `0` is
 /// "the server did not say", and the only way to honour an explicit ask about a file you have not
 /// measured is to route it where the server applies the bound for you. That is the opposite of
 /// [`video_direct_plays`]'s unknown-passes rule, and deliberately so: a device bound is a
@@ -553,13 +553,13 @@ pub(super) fn enhancements_offered(f: &EnhancementFacts, target: RouteFamily) ->
 /// offered, `NONE` everywhere else. Every contract that reaches the wire passes through here, so
 /// a preference can never leak onto a route the predicate refused.
 pub(super) fn desired_audio(
-    pref: crate::plex::AudioEnhancements,
+    pref: crate::playback::AudioEnhancements,
     offered: bool,
-) -> crate::plex::AudioEnhancements {
+) -> crate::playback::AudioEnhancements {
     if offered {
         pref
     } else {
-        crate::plex::AudioEnhancements::NONE
+        crate::playback::AudioEnhancements::NONE
     }
 }
 
@@ -579,7 +579,7 @@ pub(super) fn renders_subtitle(
 /// enhanced route is a remux by definition (M1: PMS answers the params with a Part transcode —
 /// video copy, audio re-encoded with the DSP), so asking for one denies direct play and nothing
 /// else.
-pub(super) fn enhancement_policy(audio: crate::plex::AudioEnhancements) -> crate::plex::LinkPolicy {
+pub(super) fn enhancement_policy(audio: crate::playback::AudioEnhancements) -> crate::plex::LinkPolicy {
     crate::plex::LinkPolicy {
         direct_play: !audio.any(),
         remux: true,
@@ -602,7 +602,7 @@ pub(super) enum Fallback {
 /// the outcome is then graded `Unverified` by [`classify_outcome`].
 pub(super) fn enhancement_fallback(
     mc: Option<&crate::plex::MediaContainer>,
-    audio: crate::plex::AudioEnhancements,
+    audio: crate::playback::AudioEnhancements,
 ) -> Fallback {
     if audio.is_none() {
         return Fallback::Keep;
@@ -620,7 +620,7 @@ pub(super) fn enhancement_fallback(
 /// Log + diag the server's refusal of an enhanced ask, from whichever call site first learns of
 /// it. `context` is the site-specific tail after the shared "enhancement: refused/ignored by
 /// server" opening, so every site keeps the exact log sentence it always had.
-pub(super) fn note_enhancement_refused(context: &str, _audio: crate::plex::AudioEnhancements) {
+pub(super) fn note_enhancement_refused(context: &str, _audio: crate::playback::AudioEnhancements) {
     crate::player::log(&format!("enhancement: refused/ignored by server{context}"));
 }
 
@@ -643,7 +643,7 @@ fn decision_audio(mc: &crate::plex::MediaContainer) -> Option<&str> {
 pub(super) fn classify_outcome(
     mc: Option<&crate::plex::MediaContainer>,
     carried: Option<&CarriedAudio>,
-    audio: crate::plex::AudioEnhancements,
+    audio: crate::playback::AudioEnhancements,
 ) -> super::decision::EnhancementOutcome {
     use super::decision::EnhancementOutcome;
     if audio.is_none() {
@@ -815,7 +815,7 @@ pub(crate) struct UpNext {
 /// returns just the movie itself (verified live — total count 1), and "up next" is a show idea.
 /// The gate belongs HERE, on the one-item control — the retained row list is deliberately not
 /// episode-gated, because a queue list has to be able to show whatever the queue holds.
-pub(super) fn up_next_of(r: &crate::plex::QueueRow) -> Option<UpNext> {
+pub(super) fn up_next_of(r: &crate::playback::QueueRow) -> Option<UpNext> {
     if r.kind != "episode" || r.rk.is_empty() {
         return None;
     }
@@ -910,7 +910,7 @@ pub(crate) struct ResolveEnv {
     /// It comes off the LOADED DETAIL (`metadata::current().bitrate`, `Media[0]`) when that detail
     /// is this item, which is the ordinary path: a card's OK opens the detail page and Play is
     /// pressed there. **Playing straight from a shelf leaves it `0`**, and `0` fails closed (see
-    /// [`crate::plex::Ceiling::admits`]) — so with a rung selected, such a play routes to the
+    /// [`crate::playback::Ceiling::admits`]) — so with a rung selected, such a play routes to the
     /// re-encode rather than guessing the file is small enough. Carrying the bitrate on
     /// `PlayingItem` instead would measure every path, and is named as the follow-up in this
     /// unit's PR: that store is `metadata.rs`'s, not this lane's.
@@ -923,7 +923,7 @@ pub(crate) struct ResolveEnv {
     /// request like the quality: the worker must not read the atomic the main thread moves. Only
     /// ever reaches the wire through [`desired_audio`]. A preview and a start-failure retry
     /// capture `NONE` (`request_play_inner`).
-    pub audio_enhancements: crate::plex::AudioEnhancements,
+    pub audio_enhancements: crate::playback::AudioEnhancements,
     /// `serverinfo::subscription_of(sid)` at the request — for the OFFERING of the enhancement only
     /// (I1/I8), never a flavour or profile input.
     pub pass: crate::plex::serverinfo::Subscription,
@@ -974,7 +974,7 @@ pub(super) fn detail_describes(d: &crate::metadata::Detail, sid: ServerId, rk: &
 /// `Detail::video` is the stream's own record and carries its own bitrate; it is `None` for a show
 /// that never got an episode backfill and for an audio-only part, and PMS omits the field often
 /// enough that the whole-file fallback has to stay. Falling back is the conservative direction,
-/// which is the right one here — see [`crate::plex::Ceiling::admits`].
+/// which is the right one here — see [`crate::playback::Ceiling::admits`].
 pub(super) fn source_kbps(d: &crate::metadata::Detail) -> i64 {
     match d.video.as_ref().map(|v| v.bitrate) {
         Some(b) if b > 0 => b,
@@ -983,7 +983,7 @@ pub(super) fn source_kbps(d: &crate::metadata::Detail) -> i64 {
 }
 
 /// Rate the quality ceiling judges for this play. A trailer extra is a different file from the
-/// loaded parent: using the movie's 4K figure (or 0, which [`crate::plex::Ceiling::admits`]
+/// loaded parent: using the movie's 4K figure (or 0, which [`crate::playback::Ceiling::admits`]
 /// fails closed on) would force every non-Auto rung through the encoder.
 pub(super) fn resolve_src_kbps(
     d: Option<&crate::metadata::Detail>,
@@ -1046,14 +1046,14 @@ pub(crate) struct Plan {
     /// `contents.immersive` node. Set on the DIRECT-PLAY branch only, for the same reason `dovi`
     /// is: it describes the FILE's own elementary stream.
     pub immersive: bool,
-    /// The encode's flavor/delivery/ceiling/audio-DSP shape — see [`crate::plex::EncodeContract`].
+    /// The encode's flavor/delivery/ceiling/audio-DSP shape — see [`crate::playback::EncodeContract`].
     /// Was four independent fields (`remux`, `delivery`, `no_video_copy`, `ceiling`) until issue
     /// #266 needed a fifth that only ever means anything alongside `remux == true`; one value
     /// installed as [`Session::cur_contract`] is what lets a seek or a track switch rebuild the
     /// exact same query instead of four/five fields that could drift out of the coupling that
     /// matters (`no_video_copy` only under re-encode, `ceiling` only under re-encode, `audio` only
     /// under remux — see the field docs on `EncodeContract` itself).
-    pub contract: crate::plex::EncodeContract,
+    pub contract: crate::playback::EncodeContract,
     /// The audio track this plan carries, installed as `Session::cur_audio` (the one source of the
     /// timeline's `audioStreamID`). `CarriedAudio::from_stream` of the fetched stream the route
     /// names; [`CarriedAudio::named`] (id only, every fact unknown) when the route names an id
@@ -1111,7 +1111,7 @@ pub(crate) struct Plan {
     /// the episode queued after this one, straight off the `continuous=1` PlayQueue
     pub up_next: Option<UpNext>,
     /// that same PlayQueue's whole returned window, projected on the worker (see `queue`)
-    pub queue: Vec<crate::plex::QueueRow>,
+    pub queue: Vec<crate::playback::QueueRow>,
 }
 
 
@@ -1544,7 +1544,7 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     };
     // What the remote remux probe must sample: "the remux we would actually play" includes its
     // audio DSP, and the play path reuses the probe's session.
-    let pre_audio = plan.auto_original.as_ref().map_or(crate::plex::AudioEnhancements::NONE, |c| {
+    let pre_audio = plan.auto_original.as_ref().map_or(crate::playback::AudioEnhancements::NONE, |c| {
         enhancement_for(Some(c), if c.direct { RouteFamily::Direct } else { RouteFamily::Remux })
     });
     // **Cold start, decided in one place.** Feasibility first (is Original even possible for this
@@ -1641,7 +1641,7 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
             quality_policy(playback_quality, false, env.src_kbps, src_w, src_h),
         );
         directplay = false;
-        plan.contract.delivery = crate::plex::TranscodeDelivery::FixedHls {
+        plan.contract.delivery = crate::playback::TranscodeDelivery::FixedHls {
             seconds_per_segment: 2,
         };
         let rung = decision
@@ -1691,7 +1691,7 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     let audio = if remux && !adaptive && !probe_refused_enhancement {
         enhancement_for(plan.auto_original.as_ref(), RouteFamily::Remux)
     } else {
-        crate::plex::AudioEnhancements::NONE
+        crate::playback::AudioEnhancements::NONE
     };
     // Remembered for the fallback: a refused enhancement restores the route it decorated.
     let enhanced_from_direct = audio.any() && directplay;
@@ -1768,7 +1768,7 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
         plan.acodec = achosen;
     } else if matches!(
         plan.contract.delivery,
-        crate::plex::TranscodeDelivery::FixedHls { .. }
+        crate::playback::TranscodeDelivery::FixedHls { .. }
     ) {
         plan.vcodec = "h264".into();
         plan.acodec = "aac".into();
@@ -1812,7 +1812,7 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
         rk,
         &session,
         &session,
-        crate::plex::TranscodeOffset::Fresh,
+        crate::playback::TranscodeOffset::Fresh,
         encode_audio,
         env.sub_sid,
         plan.contract,
@@ -1827,7 +1827,7 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
         // Refused outright, or ignored (audio `copy` despite the params): rebuild once without
         // the enhancement, on the same session, and remember that this server said no.
         note_enhancement_refused("; fell back", audio);
-        plan.contract.audio = crate::plex::AudioEnhancements::NONE;
+        plan.contract.audio = crate::playback::AudioEnhancements::NONE;
         plan.enhancement = super::decision::EnhancementOutcome::Refused;
         if enhanced_from_direct {
             // Back to the direct play the enhancement decorated. The MDE is re-asked first so the
@@ -1848,7 +1848,7 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
             rk,
             &session,
             &session,
-            crate::plex::TranscodeOffset::Fresh,
+            crate::playback::TranscodeOffset::Fresh,
             encode_audio,
             env.sub_sid,
             plan.contract,
@@ -2673,7 +2673,7 @@ fn build_stream_jellyfin(
             plan.url = url;
             plan.vcodec = "h264".into();
             plan.acodec = "aac".into();
-            plan.contract.delivery = crate::plex::TranscodeDelivery::FixedHls {
+            plan.contract.delivery = crate::playback::TranscodeDelivery::FixedHls {
                 seconds_per_segment: 6,
             };
             // The SERVER's session id — the transcode's kill handle and the progress quote.

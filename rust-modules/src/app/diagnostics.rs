@@ -1908,10 +1908,10 @@ mod tests {
     #[test]
     fn audio_row_suffix_only_when_applied() {
         let _g = crate::testlock::serial();
-        let both = crate::plex::AudioEnhancements { boost_dialog: true, normalize_loudness: true };
+        let both = crate::playback::AudioEnhancements { boost_dialog: true, normalize_loudness: true };
         for (applied, refused, expect_suffix) in [
             (both, false, true),   // Applied: cur_enhancement derives Applied from `applied.any()`
-            (crate::plex::AudioEnhancements::NONE, false, false), // Off: nothing asked
+            (crate::playback::AudioEnhancements::NONE, false, false), // Off: nothing asked
             (both, true, false),   // Refused: asked, but the server did not honour it
         ] {
             let ps = EnhTestSession::new(EnhTestFixture { applied, refused, ..Default::default() });
@@ -1935,7 +1935,7 @@ mod tests {
     #[test]
     fn route_line_shows_refused_and_unverified() {
         let _g = crate::testlock::serial();
-        let asked = crate::plex::AudioEnhancements { boost_dialog: true, normalize_loudness: false };
+        let asked = crate::playback::AudioEnhancements { boost_dialog: true, normalize_loudness: false };
         let d = crate::player::Diag::default();
 
         {
