@@ -188,7 +188,7 @@ pub(crate) unsafe fn run(app: &mut App) {
         app.bridge.publish_playback(&app.player.session, was_player);
         // The container runs its frame: the pending navigation's commit (at `PageDip`'s floor),
         // then the owned screens' inputs, ticks, timers and effects. `app/bridge.rs` is the seam.
-        let supplied = match app.rec.replay_results(|id| app.bridge.recorded_client(id)) {
+        let supplied = match app.rec.replay_results() {
             Ok(results) => results,
             Err(reason) => {
                 crate::log(&format!("replay: REFUSED — {reason}"));

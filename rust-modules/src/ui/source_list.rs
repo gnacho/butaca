@@ -84,30 +84,12 @@ pub(crate) enum Tail {
 fn state_word(s: SourceState) -> Option<&'static str> {
     match s {
         SourceState::NotProbed | SourceState::Reachable => None,
-        SourceState::Unauthorized => Some(unauthorized()),
         SourceState::Unreachable => Some(unreachable()),
-        SourceState::InsecureOnly => Some(insecure_only()),
     }
 }
 
-/// The server answered and **refused our token**: a sharing-grant problem, never a network one.
-///
-/// It has to read as a different KIND of fault from [`unreachable`], because it has a different
-/// remedy and the wrong word costs the user an evening — "not reachable" sends somebody to look at
-/// a router for something no router was ever part of. The remedy is in this same panel, one row
-/// down: *Check for new shares* is the `/api/v2/resources` refetch that reissues the per-(user,
-/// server) `accessToken`, which is why this run does not have to carry an instruction as well.
-fn unauthorized() -> &'static str { crate::i18n::msg::widgets_source_unauthorized() }
 /// Did not answer at all — refused, timed out, or unresolvable.
 fn unreachable() -> &'static str { crate::i18n::msg::widgets_source_unreachable() }
-/// Answered, verified as the right machine, but only over a transport this build may not put a
-/// credential on without the person's consent (issue #95, BUTACA-10). A different kind of fault from [`unreachable`] again — the server IS
-/// there, it is the connection to it that has to change (HTTPS), not the server itself.
-///
-/// Deliberately NOT the consent flow's "without encryption" wording: this row names a state no
-/// question can change (the server was ineligible, or not yet offered); an eligible server is
-/// asked through `screens::plaintext_question`, and a granted one reads as connected.
-fn insecure_only() -> &'static str { crate::i18n::msg::widgets_source_insecure() }
 
 /// The word a WORKING group's connection tier is said in — `None` when there is nothing worth
 /// saying.
@@ -132,23 +114,10 @@ fn tier_word(t: Location) -> Option<&'static str> {
 
 /// May this group's libraries be OPENED? The question [`Section::dim`] actually asks.
 ///
-/// **[`SrcGroup::reachable`] is still the read for three of the four states, and wrong for the
-/// fourth** — which is the whole reason the state widened. That method answers the old two-state
-/// question, so `NotProbed` comes back `true` (correctly: a group nobody has dialled must not open
-/// dimmed) and so does `Unauthorized`, not because it is browsable but because a `bool` had no way
-/// to say otherwise. A server that answered and refused our token has nothing behind it, so it dims
-/// exactly as an unreachable one does; only the WORD differs, because only the remedy differs.
-///
-/// Written as an exhaustive match rather than `reachable() && state != Unauthorized`, so that a
-/// fifth state has to be given an answer here instead of quietly inheriting one.
+/// The read is [`SrcGroup::reachable`]: `NotProbed` comes back `true`, correctly — a group nobody
+/// has dialled must not open dimmed.
 fn usable(g: &SrcGroup) -> bool {
-    match g.state {
-        SourceState::NotProbed | SourceState::Reachable | SourceState::Unreachable => g.reachable(),
-        SourceState::Unauthorized => false,
-        // Verified alive, but nothing behind it is browsable in this build — same shape as
-        // Unauthorized, a different remedy (HTTPS to the server, not a fresh grant).
-        SourceState::InsecureOnly => false,
-    }
+    g.reachable()
 }
 
 /// The group header's ACCESSORY: `[state] · [tier] · handle`, in that order.
@@ -272,16 +241,14 @@ mod tests {
         }
     }
 
-    /// **The four states, as four different sentences.** The two that say nothing say nothing for
-    /// two different reasons (see [`state_word`]), and the two that speak must not be confusable:
-    /// a 401 is a sharing-grant problem whose remedy is in this panel, and calling it "not
-    /// reachable" sends the user to look at a router.
+    /// **The three states, as the sentences they earn.** The two that say nothing say nothing for
+    /// the same reason (see [`state_word`]): the one fault that speaks is the only sentence left
+    /// since the 401/InsecureOnly states went with the Plex arm (#166).
     #[test]
     fn every_source_state_gets_its_own_word() {
         let words: Vec<String> = [
             SourceState::NotProbed,
             SourceState::Reachable,
-            SourceState::Unauthorized,
             SourceState::Unreachable,
         ]
         .iter()
@@ -292,30 +259,7 @@ mod tests {
             "nobody has dialled: nothing is wrong, so nothing is said"
         );
         assert_eq!(words[1], "friend", "a working source states only its owner");
-        assert_eq!(words[2], "Not authorized \u{b7} friend");
-        assert_eq!(words[3], "Not reachable \u{b7} friend");
-        assert_ne!(
-            words[2], words[3],
-            "the two faults are told apart, or the remedy is a guess"
-        );
-    }
-
-    /// Issue #95 plan §4/S9: `InsecureOnly` is a FIFTH sentence, told apart from `Unreachable`
-    /// (the server is alive, just not over a transport this build can use) and it dims the group
-    /// exactly as `Unauthorized` does — `reachable() == false`, unlike the two silent states.
-    #[test]
-    fn insecure_only_gets_its_own_word_and_dims_like_unauthorized() {
-        assert_eq!(
-            accessory(&group(SourceState::InsecureOnly, None, "friend")),
-            "Not secure \u{b7} friend"
-        );
-        assert!(!group(SourceState::InsecureOnly, None, "friend").reachable());
-        assert!(!usable(&group(SourceState::InsecureOnly, None, "friend")));
-        assert_ne!(
-            accessory(&group(SourceState::InsecureOnly, None, "friend")),
-            accessory(&group(SourceState::Unreachable, None, "friend")),
-            "verified-but-plaintext and never-answered must read as different faults"
-        );
+        assert_eq!(words[2], "Not reachable \u{b7} friend");
     }
 
     /// The state LEADS, so the run that gives way under the accessory's elision is the handle — and
@@ -354,9 +298,9 @@ mod tests {
         );
     }
 
-    /// **The dim is `usable`, never `reachable()`.** That method answers the OLD question, in which
-    /// an answered-and-refused server comes back `true` — so a panel that dimmed on it would draw a
-    /// group with nothing browsable behind it as though it were live.
+    /// **The dim is `usable`, never `reachable()`.** The two names stay apart so a future state
+    /// that answers but cannot be browsed has to pick a side explicitly (its last two arms went
+    /// with the Plex arm, #166).
     #[test]
     fn only_the_states_with_something_behind_them_stay_lit() {
         let u = |s| usable(&group(s, None, "friend"));
@@ -365,15 +309,7 @@ mod tests {
             "a group nobody has dialled must not open dimmed"
         );
         assert!(u(SourceState::Reachable));
-        assert!(
-            !u(SourceState::Unauthorized),
-            "there is nothing browsable behind a 401"
-        );
         assert!(!u(SourceState::Unreachable));
-        assert!(
-            group(SourceState::Unauthorized, None, "friend").reachable(),
-            "…and this is exactly the answer that made the fourth state worth its own arm"
-        );
     }
 
     include!("source_list_contract_tests.rs");

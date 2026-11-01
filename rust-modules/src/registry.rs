@@ -191,16 +191,18 @@ pub struct ServerFacts {
     /// `sourceTitle` plex.tv did not send is still a share, and a Plex Home managed user does not
     /// "own" the household server they watch every day.
     ///
-    /// **It is the WIRE fact and not the household verdict**, which is why it sits beside
-    /// [`ServerFacts::home`] and [`ServerFacts::owner_id`] rather than being replaced by one:
-    /// every consumer that legitimately wants "does this account own it" keeps reading this, and
-    /// a consumer asking "is this our household's" asks [`is_household`] with all three.
+    /// **Frozen evidence (#166 unpinning)**: the one reader of the three grant-evidence fields
+    /// (the browse roster's household grading) went with the Plex arm, and auth still publishes
+    /// them whole. Kept as the registry's canonical durable reduction, exactly as written.
+    #[cfg_attr(not(test), expect(dead_code))]
     pub owned: bool,
-    /// plex.tv's `home` on the resource, carried through unedited — see [`Grant::home`]. Evidence
-    /// for [`is_household`], never a verdict on its own.
+    /// plex.tv's `home` on the resource, carried through unedited — see [`Grant::home`]. Frozen
+    /// evidence; see [`ServerFacts::owned`].
+    #[cfg_attr(not(test), expect(dead_code))]
     pub home: bool,
     /// plex.tv's `ownerId` — the account that owns the server, `0` on our own and `0` when
-    /// plex.tv sent none. Evidence for [`is_household`], compared against the Home roster.
+    /// plex.tv sent none. Frozen evidence; see [`ServerFacts::owned`].
+    #[cfg_attr(not(test), expect(dead_code))]
     pub owner_id: i64,
 }
 
@@ -229,7 +231,9 @@ pub struct GrantEvidence {
 impl GrantEvidence {
     /// What this carried evidence says as a [`Grant`], for [`is_household`]. `source_title` is
     /// empty because the rule does not read it — [`owner_credit`] does, and a credit has already
-    /// been decided by the time evidence is carried.
+    /// been decided by the time evidence is carried. The production grader (the browse roster's
+    /// household verdict) went with the Plex arm (#166); tests still grade through it.
+    #[cfg_attr(not(test), expect(dead_code))]
     pub fn grant(&self) -> Grant<'static> {
         Grant { owned: self.owned, home: self.home, owner_id: self.owner_id, source_title: "" }
     }
@@ -287,8 +291,8 @@ pub struct Grant<'a> {
 /// **Is this grant OUR HOUSEHOLD'S?** — our own server, or one that reaches us through the Plex
 /// Home this session belongs to.
 ///
-/// `household` is the plex.tv account ids of the Home's members — `session::Session::household_ids`,
-/// which is the `/api/v2/home/users` ROSTER and nothing else: the admin, every managed user, and
+/// `household` is the plex.tv account ids of the Home's members — the `/api/v2/home/users`
+/// ROSTER and nothing else: the admin, every managed user, and
 /// every ordinary account that has joined the Home. **Two signals, and they are not equals: the
 /// second only speaks when the first cannot.**
 ///
@@ -305,7 +309,7 @@ pub struct Grant<'a> {
 ///   reading we want, "this grant is a Home grant", has never been observed TRUE by anybody here.
 ///
 /// **So `home` is consulted only for a session that cannot enumerate its own house** — `household`
-/// empty, which `session::Session::household_ids` is built so as to mean exactly that and nothing
+/// empty, which the `/api/v2/home/users` roster read is built so as to mean exactly that and nothing
 /// else: a roster from a file written before `HomeUserRef::id` existed, or a sign-in whose
 /// `/api/v2/home/users` has not landed yet. An undocumented flag must not be able to take a credit
 /// away from a friend's share on the strength of a name — that is the ONE way this rule can regress
@@ -440,6 +444,7 @@ fn probe_code(outcome: Outcome) -> u8 {
     }
 }
 
+#[cfg_attr(not(test), expect(dead_code))]
 fn probe_of_code(code: u8) -> Option<Outcome> {
     match code {
         1 => Some(Outcome::Reachable),
@@ -538,9 +543,9 @@ pub fn roster_gen() -> u32 {
 /// description (the "Shared by …" credit, and the machine name as a describer stated it) and not
 /// merely which servers are in the table.
 ///
-/// **Not every published field moves it**, and the exception is deliberate:
-/// [`commit_reachability_if_current`] can merge a fresher machine NAME — the server naming itself,
-/// on a path that runs per request — without bumping this. A cache that needs to follow that has
+/// **Not every published field moves it**, and the exception is deliberate: the per-request
+/// name-merging commit (the browse Plex arm's, #166) could refresh a machine NAME — the server
+/// naming itself — without bumping this. A cache that needs to follow that has
 /// the facts POINTER to key on; making a per-request commit move a counter that
 /// `pms::sync_roster` rebuilds Home's whole source table on would be a poor trade for a field Home
 /// does not draw.
@@ -587,7 +592,10 @@ pub fn facts(id: ServerId) -> Option<&'static ServerFacts> {
 /// The last aggregate probe result for this live server, or `None` when nobody has probed its
 /// current identity/address lifecycle. Candidate-level wrong-machine answers are normally folded
 /// into [`Outcome::Unreachable`] by the coordinator; the full enum is encoded so this boundary
-/// remains total if another prober publishes its raw answer in the future.
+/// remains total if another prober publishes its raw answer in the future. The one production
+/// reader (the browse roster's reachability grading) went with the Plex arm (#166); the auth
+/// install paths' InsecureOnly publication is still graded through it in tests.
+#[cfg_attr(not(test), expect(dead_code))]
 pub fn probe_result(id: ServerId) -> Option<Outcome> {
     let i = id.index()?;
     client_for(id)?;
@@ -609,67 +617,11 @@ pub fn publish_probe_result(id: ServerId, outcome: Outcome) {
     crate::ui::idle::invalidate();
 }
 
-/// Publish what a generic PMS request proved, but only if the slot still names the exact client
-/// lifecycle that performed it. The pointer distinguishes an address re-point; `token_gen`
-/// distinguishes an in-place retoken/profile change. Both are checked while [`WRITE`] excludes
-/// registration and revocation, closing the check-then-publish race a caller-side validation has.
-///
-/// A generic failure cannot distinguish HTTP status from transport/parse failure. Preserve a
-/// concurrently-published [`Outcome::Unauthorized`] under the same lock; success is definitive.
-/// The callback receives that canonical outcome and commits the caller's local view before the
-/// lock is released. `name`, when present, is merged into the same lifecycle transaction.
-pub fn commit_reachability_if_current<R>(
-    id: ServerId,
-    expected: &'static Client,
-    token_gen: u32,
-    ok: bool,
-    name: Option<&str>,
-    commit: impl FnOnce(Outcome) -> R,
-) -> Option<R> {
-    let w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
-    let i = current_lifecycle_index(id, expected, token_gen)?;
-    let outcome = if ok {
-        Outcome::Reachable
-    } else {
-        // A generic request cannot distinguish HTTP status from transport/parse failure, so it
-        // must not overwrite the more specific identity-probe verdict with a plain Unreachable —
-        // true of Unauthorized already, and equally true of InsecureOnly (issue #95): the server
-        // IS answering, just not over a transport this build can put a credential on.
-        match probe_of_code(PROBES[i].load(Ordering::Acquire)) {
-            Some(Outcome::Unauthorized) => Outcome::Unauthorized,
-            Some(Outcome::InsecureOnly) => Outcome::InsecureOnly,
-            _ => Outcome::Unreachable,
-        }
-    };
-    PROBES[i].store(probe_code(outcome), Ordering::Release);
-    if let Some(name) = name.filter(|name| !name.is_empty()) {
-        let old = facts(id);
-        let merged = ServerFacts {
-            name: pick(name, old.map(|f| f.name.as_str())),
-            handle: old.map(|f| f.handle.clone()).unwrap_or_default(),
-            // The grant EVIDENCE is carried through whole, for the same reason the credit is: a
-            // server naming itself over `GET /` learned a machine name and nothing whatever about
-            // whose grant this is. Dropping `home`/`owner_id` here would un-household the
-            // household's own server the moment its friendly name arrived — the `owned` bug
-            // `describe_name` documents, two fields over.
-            owned: old.map(|f| f.owned).unwrap_or(true),
-            home: old.map(|f| f.home).unwrap_or(false),
-            owner_id: old.map(|f| f.owner_id).unwrap_or(0),
-        };
-        FACTS[i].store(Box::into_raw(Box::new(merged)), Ordering::Release);
-    }
-    // The callback is deliberately inside WRITE: registration/revocation cannot move the client
-    // between this validation and the caller's local rows/state commit. It must not re-enter the
-    // registry; callers keep it to their own main-thread stores.
-    let committed = commit(outcome);
-    drop(w);
-    crate::ui::idle::invalidate();
-    Some(committed)
-}
-
 /// Commit lifecycle-bound data that does not itself prove reachability (menu directories, for
-/// example). Validation and callback share [`WRITE`] for the same reason as
-/// [`commit_reachability_if_current`]. The callback must not re-enter this registry.
+/// example). Validation and callback share [`WRITE`] for the same reason the deleted
+/// reachability commit did (the browse Plex arm's, #166): registration/revocation cannot move
+/// the client between this validation and the caller's commit. The callback must not re-enter
+/// this registry.
 pub fn commit_if_current<R>(
     id: ServerId,
     expected: &'static Client,
@@ -709,9 +661,9 @@ fn current_lifecycle_index(
 ///
 /// `name` still merges, because a machine NAME genuinely arrives from two describers in either
 /// order and empty there really does mean "I did not learn one". A server naming itself over
-/// `GET /` reaches the table through [`commit_reachability_if_current`] (which merges the name and
-/// carries the existing handle and ownership under the same lock); [`describe_name`] is the same
-/// idea for a caller that has only a name and no request to publish alongside it.
+/// `GET /` used to reach the table through the browse arm's reachability commit (which merged the
+/// name and carried the existing handle and ownership under the same lock, #166); [`describe_name`]
+/// is the same idea for a caller that has only a name and no request to publish alongside it.
 ///
 /// This also enforces the half of the rule it can always see for itself, `owned ⇒ nobody is
 /// credited`, so no describer — the `butaca-servers` dev trigger, a future one — can put a
@@ -775,9 +727,9 @@ fn describe_locked(id: ServerId, name: &str, credit: Option<&str>, grant: GrantE
 /// server itself (`GET /` → `friendlyName`) and knows nothing whatever about the grant.
 ///
 /// **It has no production caller today** and is kept because it is the correct shape for that
-/// describer to reappear in: the live one, `Client::friendly_name`'s landing, publishes through
-/// [`commit_reachability_if_current`] instead, which merges the name under the same lock and for
-/// the same reasons.
+/// describer to reappear in: the live one, the server naming itself over `GET /`, merged its
+/// name through the browse arm's reachability commit (the same lock, the same reasons), which
+/// went with the Plex arm (#166).
 ///
 /// It exists because [`describe`]'s `owned` has no "unknown" spelling, so a name-only describer has
 /// to pass SOMETHING — and its call site of the day computed it as `handle.is_empty()`, which is
@@ -1396,12 +1348,6 @@ pub(crate) fn reset_for_test() {
     CURRENT.store(ServerId::UNSET.0 as u32, Ordering::Release);
 }
 
-/// Assert from a cross-module lifecycle test that its local commit callback still owns WRITE.
-#[cfg(test)]
-pub(crate) fn write_held_for_test() -> bool {
-    WRITE.try_lock().is_err()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1745,22 +1691,6 @@ mod tests {
     }
 
     /// A generic request's failure cannot disprove a more specific identity-probe verdict — true
-    /// of `Unauthorized` already ([`aggregate_probe_results_follow_a_slot_and_reset_on_repoint`]
-    /// doesn't cover it directly either, but the doc above `commit_reachability_if_current` does),
-    /// and equally true of `InsecureOnly` (issue #95): a generic failure must not read as the
-    /// coarser Unreachable once the identity probe already knows the server answers, just not
-    /// securely.
-    #[test]
-    fn a_generic_failure_preserves_insecure_only_rather_than_widening_to_unreachable() {
-        let _g = fresh();
-        let id = reg("mach-insecure-2", "10.0.0.1", "tok-a");
-        publish_probe_result(id, Outcome::InsecureOnly);
-        let client = client_for(id).unwrap();
-        let outcome = commit_reachability_if_current(id, client, client.token_gen(), false, None, |o| o);
-        assert_eq!(outcome, Some(Outcome::InsecureOnly));
-        assert_eq!(probe_result(id), Some(Outcome::InsecureOnly));
-    }
-
     /// A different server is a NEW slot, never a silent retarget of the old one — the singleton's
     /// defining limitation. `current` stays where it was until something moves it, and both
     /// clients remain individually reachable by id.
@@ -1853,8 +1783,9 @@ mod tests {
 
     /// The roster half: [`ids`] walks every registered slot in registration order (that IS the
     /// granted roster), and [`describe`] merges the machine NAME rather than replacing it — the two
-    /// describers of a name (plex.tv's roster, and the server naming itself, which arrives through
-    /// [`commit_reachability_if_current`]) land in either order without either blanking the other.
+    /// describers of a name (plex.tv's roster, and the server naming itself, which used to arrive
+    /// through the browse arm's reachability commit, #166) land in either order without either
+    /// blanking the other.
     ///
     /// The CREDIT is the field that does not merge, and
     /// [`an_authoritative_describe_can_take_a_credit_away_again`] is where that is graded: every

@@ -19,13 +19,6 @@ impl TestBrowse {
         self.state.reset_owned(&self.adapter);
     }
 
-
-        pub(super) fn sync_roster(&mut self) {
-        if self.state.sync_roster_owned().retire_adapter {
-            self.adapter = Arc::new(BrowseAdapter::default());
-        }
-    }
-
     pub(super) fn seed_sources(&mut self, sources: Vec<BrowseSource>) {
         self.reset();
         self.state.sources = sources;
@@ -104,62 +97,6 @@ impl TestBrowse {
         )
     }
 }
-pub(super) struct RegisteredCleanup;
-impl Drop for RegisteredCleanup {
-    fn drop(&mut self) {
-        crate::registry::reset_for_test();
-    }
-}
-pub(super) fn registered_source(
-) -> (RegisteredCleanup, TestBrowse, ServerId, &'static crate::plex::Client) {
-    crate::registry::reset_for_test();
-    let sid = crate::registry::register_with_client_id("browse-life", "10.0.0.1", 32400, "old", "cid");
-    assert!(crate::registry::set_current(sid));
-    let mut source = a_source("original", "", true);
-    source.sid = sid;
-    source.sections_done = false;
-    let mut browse = TestBrowse::default();
-    browse.seed_sources(vec![source]);
-    (
-        RegisteredCleanup,
-        browse,
-        sid,
-        crate::registry::client_for(sid).unwrap(),
-    )
-}
-pub(super) fn registered_page_source(
-) -> (RegisteredCleanup, TestBrowse, ServerId, &'static crate::plex::Client) {
-    let (cleanup, mut browse, sid, client) = registered_source();
-    if let Some(source) = browse.state.source_mut(0) {
-        source.sections_done = true;
-        source.counts_done = true;
-    }
-    browse.append_sections(0, vec![(1, "Movies".into(), SecKind::Movie)]);
-    (cleanup, browse, sid, client)
-}
-pub(super) fn registered_resident_page_source(
-) -> (RegisteredCleanup, TestBrowse, ServerId, &'static crate::plex::Client) {
-    let (cleanup, mut browse, sid, client) = registered_page_source();
-    let state = browse.state.state_mut(0).unwrap();
-    state.fetch = SecFetch::Ready;
-    state.total = 1;
-    (cleanup, browse, sid, client)
-}
-pub(super) fn queue_success_from(
-    browse: &mut TestBrowse,
-    client: &'static crate::plex::Client,
-    token_gen: u32,
-) {
-    let landing = SrcLanding {
-        client: super::DiscClient::Plex(client),
-        token_gen,
-        name: "stale-name".into(),
-        what: SrcWhat::Sections(Some(vec![(99, "Stale Library".into(), SecKind::Movie)])),
-    };
-    *browse.adapter.src_result.lock().unwrap_or_else(|e| e.into_inner()) =
-        Some((browse.state.table_epoch(), 0, landing));
-    let _ = browse.state.land_discovery_owned(&browse.adapter);
-}
 // ---- the three-state fetch machine ---------------------------------------------------------
 //
 // These drive the same owned pump core that reports to `ui::idle`'s process-global flag — the
@@ -168,12 +105,6 @@ pub(super) fn queue_success_from(
 // row and no sections; `maybe_spawn` returns before it can reach the network, so nothing here
 // spawns a worker.
 
-/// One default state with no section table, used by store-only tests that never land a page.
-pub(super) fn seed_one_section(browse: &mut TestBrowse) {
-    browse.reset();
-    *browse.adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    browse.state.states = vec![SecState::default()];
-}
 // ---- the SOURCE's own state, one layer up ---------------------------------------------------
 //
 // Same three states, one layer up, and graded through the per-source flags rather than through
@@ -196,12 +127,7 @@ pub(super) fn seed_one_source(
     // is registered here. It makes `cur_source_idx`'s empty-table fallback resolve to this row.
     browse.seed_sources(vec![BrowseSource {
         sid: crate::registry::current(),
-        client_addr: 0,
-        token_gen: 0,
         machine_id: "mach-0".into(),
-        owned: true,
-        home: false,
-        owner_id: 0,
         household: true,
         name: "nas-home".into(),
         handle: "friend".into(),
@@ -226,18 +152,10 @@ pub(super) fn seed_one_source(
 pub(super) fn a_source(name: &str, handle: &str, reachable: bool) -> BrowseSource {
     BrowseSource {
         sid: ServerId::UNSET,
-        client_addr: 0,
-        token_gen: 0,
-        // the machine id doubles as the fixture's identity, and OWNERSHIP follows the handle
-        // here (a fixture, not the product rule — `sync_roster` takes `owned` from the roster,
-        // because a share whose `sourceTitle` plex.tv did not send is still a share)
+        // the machine id doubles as the fixture's identity
         machine_id: name.to_string(),
-        owned: handle.is_empty(),
-        home: false,
-        owner_id: 0,
-        // The fixture's household verdict follows its ownership for the same reason: a fixture
-        // that volunteers no `ownerId` says nothing plex.tv did not say, and `is_household` on
-        // that evidence is exactly raw `owned`. A managed-profile fixture sets all three.
+        // A fixture that volunteers an owner handle is a share (never the household's), the
+        // same reading the Sources list draws from the credit.
         household: handle.is_empty(),
         name: name.into(),
         handle: handle.into(),
@@ -263,23 +181,15 @@ pub(super) fn a_source(name: &str, handle: &str, reachable: bool) -> BrowseSourc
 /// copies that had grown here, in `ui::onboard` and in `auth`; the local alias is kept only so
 /// the dozens of call sites below still read as pinning THIS module's per-profile answer.
 pub(super) use crate::plex::session::TempSession as TempPins;
-/// The Plex Home ADMIN's plex.tv account id, as `/api/v2/resources` reports it in `ownerId` on
-/// the family server. Synthetic: a real account id never belongs in a public repository.
-pub(super) const ADMIN_ID: i64 = 4_242;
 
-/// **The household's own server as a MANAGED or Guest profile is granted it** — the shape
-/// [`a_source`] cannot express, because it derives everything it knows from the handle.
+/// **The household's own server as a MANAGED or Guest profile sees it** — the shape
+/// [`a_source`] cannot express, because it derives the verdict from the handle.
 ///
-/// `owned:false`, because that is what plex.tv answers such a profile about the family machine;
-/// the admin's `ownerId`, which is the signal `is_household` actually decides on; `home:true`
-/// beside it; and no credit, because a household server is credited to nobody (`owner_credit`).
-/// All three evidence fields are stated, because a fixture that sets only one of them is
-/// describing a grant that cannot occur.
+/// `household:true` beside no credit, because a household server is credited to nobody
+/// (`owner_credit`): what the pins rules read is the verdict alone now that the grant evidence
+/// the roster used to carry went with the Plex arm (#166).
 pub(super) fn a_household_source(name: &str) -> BrowseSource {
     BrowseSource {
-        owned: false,
-        home: true,
-        owner_id: ADMIN_ID,
         household: true,
         ..a_source(name, "", true)
     }

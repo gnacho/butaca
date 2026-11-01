@@ -106,8 +106,6 @@ extern "C" {
 pub(crate) mod adapters;
 pub(crate) mod boot;
 pub(crate) mod bootstrap;
-#[cfg(test)]
-pub(crate) use bootstrap::HomeIo;
 /// **"Stats for nerds"** — the diagnostics read-out (phase 10, was `ui/stats.rs`). Here rather
 /// than in `ui/` because it is written from `player::Diag`, `route`, `plex::identity`, `webos`
 /// and `devcaps` — application facts — and because its state is now an `App` field.

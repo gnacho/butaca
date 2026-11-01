@@ -914,11 +914,10 @@ impl Recplay {
 
     /// `None` selects the live adapter; `Some(empty)` is a recorded frame with NO arrivals and
     /// must never fall back to a live mailbox. Decode the whole frame before delivering any of it.
-    /// The caller must supply the bootstrap's recorded-client bindings; there is no registry
-    /// lookup or best-effort rebinding here. Controlled boot installs the mapping explicitly.
+    /// A result names the controlled world's own client vocabulary; there is no registry lookup
+    /// or best-effort rebinding here.
     pub(crate) fn replay_results(
         &self,
-        mut client: impl FnMut(u32) -> Option<&'static crate::plex::Client>,
     ) -> Result<Option<super::bridge::AppResults>, &'static str> {
         let Self::Replaying(replay) = self else { return Ok(None) };
         let Some(frame) = replay.rec.frames.get(replay.at) else { return Ok(Some(Vec::new())) };
@@ -934,12 +933,12 @@ impl Recplay {
                 return Err("unsupported result envelope");
             }
             let msg = if discovery {
-                let result = crate::browse::record::decode(envelope.payload, &mut client)?;
+                let result = crate::browse::record::decode(envelope.payload)?;
                 if result.request_id() != envelope.req { return Err("result request mismatch"); }
                 crate::screens::registry::AppMsg::Store(crate::stores::StoreCmd::Browse(
                     crate::stores::browse::BrowseCmd::Discovery(result)))
             } else {
-                let result = crate::pms::record::decode(envelope.payload, &mut client)?;
+                let result = crate::pms::record::decode(envelope.payload)?;
                 if result.request_id() != envelope.req { return Err("result request mismatch"); }
                 crate::screens::registry::AppMsg::HubsResult(result)
             };
@@ -2122,9 +2121,9 @@ mod tests {
                 effect_diffs: 0, started: false, failure: None,
             })
         };
-        assert!(Recplay::Off.replay_results(|_| None).unwrap().is_none());
-        assert!(boot(vec![]).replay_results(|_| None).unwrap().unwrap().is_empty());
-        let decoded = boot(expected.clone()).replay_results(|_| None).unwrap().unwrap();
+        assert!(Recplay::Off.replay_results().unwrap().is_none());
+        assert!(boot(vec![]).replay_results().unwrap().unwrap().is_empty());
+        let decoded = boot(expected.clone()).replay_results().unwrap().unwrap();
         assert_eq!(decoded.len(), 2);
         for ((got_addr, msg), expected) in decoded.iter().zip(&expected) {
             assert_eq!(*got_addr, addr);
@@ -2136,7 +2135,7 @@ mod tests {
             let mut invalid = expected[1].clone();
             invalid[key] = value;
             // A good first record does not authorize a partially decoded frame.
-            assert!(boot(vec![expected[0].clone(), invalid]).replay_results(|_| None).is_err());
+            assert!(boot(vec![expected[0].clone(), invalid]).replay_results().is_err());
         }
         // The state hash matches in EVERY case. It cannot excuse an unconsumed or changed result.
         for (order, count) in [(vec![0, 1], 0), (vec![1, 0], 2), (vec![0], 1),
@@ -2219,7 +2218,7 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0]["req"], request);
         assert_eq!(results[0]["to"], "store:1");
-        let decoded = crate::pms::record::decode(results[0]["payload"].clone(), |_| None).unwrap();
+        let decoded = crate::pms::record::decode(results[0]["payload"].clone()).unwrap();
         assert_eq!(decoded.request_id(), request);
         assert_eq!(results[0]["payload"]["build"]["shelves"][0]["items"].as_array().unwrap().len(), 3);
         for event in ["mount", "enter"] {
@@ -2239,7 +2238,7 @@ mod tests {
             result_at: 0, effect_at: 0, input_at: 0, input_diffs: 0,
             effect_diffs: 0, started: false, failure: None,
         });
-        let supplied = replay.replay_results(|_| None).unwrap().unwrap();
+        let supplied = replay.replay_results().unwrap().unwrap();
         rig.queue_hubs_landing_for_test(Some(9));
         let before = rig.hubs_catalog_gen_for_test();
         super::super::bridge::frame_with_results(&mut d, &mut rig,

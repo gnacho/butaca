@@ -44,8 +44,8 @@
 //! that replaces it, and it holds for every source that lands later rather than only for the
 //! second call.
 use crate::registry::ServerId;
-use crate::plex::SectionQuery;
 use crate::pms::PmsMovie;
+#[cfg(feature = "jellyfin")]
 use std::panic::catch_unwind;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -59,6 +59,7 @@ const PAGE: usize = 60;
 /// unreachable SHARE is a state the Sources list states in words and nobody is waiting on. Each
 /// attempt can also park a worker in `connect(2)` for its full timeout, so a short backoff would
 /// keep one thread permanently occupied for a server that is simply switched off.
+#[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
 const SRC_RETRY_CD: u32 = 600; // ~10 s at 60 fps
 
 // ---- the granted roster: the SOURCE dimension of the table ----------------------------------
@@ -85,77 +86,30 @@ pub(crate) enum SourceState {
     NotProbed,
     /// Answered, and it was the machine we asked for.
     Reachable,
-    /// Answered with 401. A token problem, never a network one — the remedy is a fresh
-    /// `/api/v2/resources`, not another address.
-    ///
-    Unauthorized,
     /// Did not answer: refused, timed out, or unresolvable.
+    #[cfg_attr(all(not(test), not(feature = "jellyfin")), expect(dead_code))]
     Unreachable,
-    /// Answered, verified — the right machine — but only over a transport this build can never
-    /// put a credential on (issue #95, plan §4). Not [`Self::Reachable`]: nothing is browsable
-    /// behind it. Not [`Self::Unreachable`] either: the server is alive, and saying it is not
-    /// sends the user to look at a router for nothing.
-    InsecureOnly,
 }
 
-/// One SOURCE the table is addressed by — a server this account has been granted. Comes from the
-/// [server registry](crate::registry::ids), which is the granted roster: a server is registered
-/// only once plex.tv (or the `butaca-servers` dev trigger) handed us a token for it.
+/// One SOURCE the table is addressed by. The roster is exactly one source — the Jellyfin
+/// install — adopted by [`BrowseState::sync_roster_owned`] when its client is installed.
 #[derive(Clone)]
 pub(crate) struct BrowseSource {
-    /// The registry slot every fetch for this source's sections is issued through.
+    /// The source's fixed slot; for the one roster entry it is [`crate::jellyfin::SERVER_ID`].
     pub(crate) sid: ServerId,
-    /// Exact client lifecycle behind `sid`; slot ids survive repoint and therefore are not enough
-    /// to decide whether completed discovery still belongs here.
-    client_addr: usize,
-    token_gen: u32,
-    /// The server's `machineIdentifier` — the ONLY key a Home selection can be PERSISTED under
-    /// (`plex::pins`), because a roster position reshuffles and an address moves. `""` until the
-    /// registry has learned it, which is a source whose pins live for this run only.
+    /// The server's `machineIdentifier` key for Home-selection persistence (`plex::pins`).
+    /// `""` — Jellyfin's ServerId is not wired into `plex::pins`, so its Home selection lives
+    /// for the run only.
     pub(crate) machine_id: String,
-    /// This account owns the server. Not derivable from an empty [`BrowseSource::handle`] — a
-    /// share whose `sourceTitle` plex.tv did not send is still a share.
-    ///
-    /// It stays the RAW wire flag, and it is **no longer what the first-run default or the tab
-    /// destination read**: both ask [`BrowseSource::household`], because a Plex Home managed
-    /// profile is told `owned:false` about its own family server. This remains the answer to
-    /// "does this ACCOUNT own it", which is a real question several other readers still have, and
-    /// the two are kept apart on purpose.
-    pub(crate) owned: bool,
-    /// plex.tv's `home` on the grant, carried verbatim from the registry's [`ServerFacts`].
-    /// Evidence for [`household`](Self::household); never read on its own.
-    pub(crate) home: bool,
-    /// plex.tv's `ownerId` on the grant, carried verbatim. Evidence for
-    /// [`household`](Self::household); `0` means plex.tv named nobody and never matches a
-    /// household member.
-    pub(crate) owner_id: i64,
-    /// **Is this OUR HOUSEHOLD'S server?** — [`crate::registry::is_household`]'s verdict on the three
-    /// carried evidence fields above plus the Plex Home roster
-    /// ([`crate::plex::session::Session::household_ids`]).
-    ///
-    /// A cached DERIVATION, not a fact from the wire, and it lives here rather than on
-    /// `SourceRef`/`ServerFacts` for one reason: those carry evidence, which is durable, while
-    /// this depends on a roster that arrives separately and can change under it. Keeping the
-    /// verdict where the roster is already re-read is what lets `BrowseState`'s own readers stay
-    /// self-contained instead of each re-deriving it from a session they would have to fetch.
-    ///
-    /// **Recomputed by the source-fact sync** ([`BrowseState::sync_roster_owned`]), beside the
-    /// `owned` it sits next to — so it follows a roster ingest, a re-describe and a newly
-    /// appearing source, which is every path that changes the evidence.
-    ///
-    /// It also follows a **Home-roster arrival that changes no source fact**, which needed its own
-    /// trigger: [`BrowseState::discovery_needs_pump`] read the registry and never the session, so
-    /// `/api/v2/home/users` landing alone — the one event that can reclassify every source at once
-    /// while every `ServerFacts` stays byte-identical — never reached the sync at all. That gate
-    /// now compares this cached verdict against a freshly graded one, and the sync answers a
-    /// change by re-resolving the WHOLE pin table.
+    /// **Is this OUR HOUSEHOLD'S server?** The login IS the grant on the one roster source, so
+    /// this is `true` by construction.
     ///
     /// **Who reads it**: the first-run/Settings pin default (`BrowseState::lib_refs` →
     /// `plex::pins`) and the tab destination's tiebreak ([`BrowseState::section_of_kind`]).
     pub(crate) household: bool,
     /// The MACHINE name ("nas-home") — the Sources list's group header, and the only place in the
-    /// app a machine is named. Learned from the roster, else from the server naming itself
-    /// (`Client::friendly_name`); `""` until one of those lands.
+    /// app a machine is named. Arrives with discovery, off `/System/Info/Public`; `""` until it
+    /// lands.
     pub(crate) name: String,
     /// The owner's plex.tv handle ("friend"); **empty on your own server**, where the absence of an
     /// owner is drawn as the absence of a run rather than as an empty one.
@@ -165,13 +119,8 @@ pub(crate) struct BrowseSource {
     /// has stopped answering keeps every section it had learned and every pin on them: its group
     /// dims whole and still reads `On`, because nothing was unpinned. Hiding it would read as a
     /// revoked share.
-    ///
-    /// Was a `bool`; see [`SourceState`] for why it is not any more. Auth publishes the precise
-    /// discovery result through the server registry; ordinary browse requests write their coarser
-    /// answer through [`BrowseSource::set_reachable`].
     pub(crate) state: SourceState,
-    /// Which tier of connection actually won — local, remote, or Plex's relay tunnel. Restored
-    /// from the persisted winner at boot and replaced by auth when a new race settles. The Sources
+    /// Which tier of connection actually won — local, remote, or Plex's relay tunnel. The Sources
     /// list only renders it beside [`SourceState::Reachable`], so an offline source retains the
     /// route metadata needed for retry/playback policy without claiming that route works now.
     pub(crate) tier: Option<crate::plex::probe::Location>,
@@ -193,70 +142,18 @@ impl BrowseSource {
     /// would otherwise open dimmed"*. Anything that needs to tell "not yet" from "yes" must read
     /// [`BrowseSource::state`] and say so, which is the entire reason the state exists.
     pub(crate) fn reachable(&self) -> bool {
-        !matches!(self.state, SourceState::Unreachable | SourceState::InsecureOnly)
+        !matches!(self.state, SourceState::Unreachable)
     }
     /// Record a generic PMS request that answered or did not. A failed request cannot distinguish
-    /// HTTP status from transport/parse failure, so it preserves an Unauthorized or InsecureOnly
-    /// result supplied by the identity prober; a successful request is enough evidence to clear
-    /// any failure.
+    /// HTTP status from transport/parse failure.
     #[cfg(test)]
     pub(crate) fn set_reachable(&mut self, ok: bool) {
-        // A generic PMS request folds status/transport/parse errors into one `None`, so it cannot
-        // disprove the more specific 401/InsecureOnly result the identity prober already
-        // observed. Only a successful request clears either; the auth coordinator can explicitly
-        // replace it with a later aggregate Unreachable result through the registry.
         if ok {
             self.state = SourceState::Reachable;
-        } else if !matches!(self.state, SourceState::Unauthorized | SourceState::InsecureOnly) {
+        } else {
             self.state = SourceState::Unreachable;
         }
     }
-    /// Mirror the registry's canonical result after it atomically merged a generic request with
-    /// any more-specific identity-probe answer.
-    fn set_probe_outcome(&mut self, outcome: crate::plex::probe::Outcome) {
-        self.state = source_state(Some(outcome));
-    }
-}
-
-fn source_state(outcome: Option<crate::plex::probe::Outcome>) -> SourceState {
-    match outcome {
-        None => SourceState::NotProbed,
-        Some(crate::plex::probe::Outcome::Reachable) => SourceState::Reachable,
-        Some(crate::plex::probe::Outcome::Unauthorized) => SourceState::Unauthorized,
-        Some(
-            crate::plex::probe::Outcome::WrongServer | crate::plex::probe::Outcome::Unreachable,
-        ) => SourceState::Unreachable,
-        Some(crate::plex::probe::Outcome::InsecureOnly) => SourceState::InsecureOnly,
-    }
-}
-
-fn source_snapshot(sid: ServerId) -> Option<(SourceState, Option<crate::plex::probe::Location>)> {
-    let client = crate::registry::client_for(sid)?;
-    let token_gen = client.token_gen();
-    // Probe publication follows set_link, so read the acquire-backed result before the tier. The
-    // second lookup rejects a re-point or in-place retoken between those two reads.
-    let state = source_state(crate::registry::probe_result(sid));
-    let tier = client.link();
-    crate::registry::client_for(sid)
-        .filter(|now| std::ptr::eq(*now, client) && now.token_gen() == token_gen)
-        .map(|_| (state, tier))
-}
-
-/// [`BrowseSource::household`]'s one derivation: the carried grant evidence, graded against the
-/// Plex Home roster by the rule that owns the question.
-///
-/// It is a free function rather than a method so that it reads the evidence and NOTHING else —
-/// in particular not the cached verdict it is about to overwrite.
-fn household_verdict(source: &BrowseSource, household: &[i64]) -> bool {
-    crate::registry::is_household(
-        crate::registry::GrantEvidence {
-            owned: source.owned,
-            home: source.home,
-            owner_id: source.owner_id,
-        }
-        .grant(),
-        household,
-    )
 }
 
 // ---- section table (discovered per source) ---------------------------------------------------
@@ -773,45 +670,10 @@ impl BrowseState {
             && !self.sources.iter().any(|s| s.sid == crate::jellyfin::SERVER_ID) {
             return true;
         }
-        let live: Vec<ServerId> = crate::registry::ids().collect();
-        if live.len() != self.sources.len()
-            || self.sources.iter().zip(&live).any(|(source, sid)| source.sid != *sid) {
-            return true;
-        }
-        // **The Plex Home roster is the one input to this gate that is not in the registry.**
-        // `/api/v2/home/users` lands on its own schedule and changes no `ServerFacts` at all, so
-        // every other test below is blind to it — and it is the answer that decides whether a
-        // managed profile's family server is the household's or a stranger's. Without this the
-        // sync it guards was simply never reached on a roster arrival, and the source stayed
-        // misgraded until something else happened to move a fact. `peek()` is a lock and an `Arc`
-        // clone over a live cache (`plex/CLAUDE.md`), not a file read, which is what makes it
-        // affordable on a per-frame gate.
-        let household = crate::plex::session::peek().household_ids();
-        for source in &self.sources {
-            if source.household != household_verdict(source, &household) {
-                return true;
-            }
-            let now = crate::registry::client_for(source.sid);
-            if source.client_addr != now.map_or(0, |client| client as *const _ as usize)
-                || source.token_gen != now.map_or(0, |client| client.token_gen()) {
-                return true;
-            }
-            if let Some((state, tier)) = source_snapshot(source.sid) {
-                if source.state != state || source.tier != tier {
-                    return true;
-                }
-            }
-            if let Some(facts) = crate::registry::facts(source.sid) {
-                if (source.name.is_empty() && !facts.name.is_empty())
-                    || source.handle != facts.handle || source.owned != facts.owned
-                    || source.home != facts.home || source.owner_id != facts.owner_id {
-                    return true;
-                }
-            }
-            if source.machine_id.is_empty() || source.retry_cd > 0 {
-                return true;
-            }
-        }
+        // The Plex registry diff that used to open this gate for share arrivals went with the
+        // Plex roster (#166): the roster has exactly one source, the Jellyfin install, and both
+        // of its edges (installed-but-unadopted above, gone-but-listed via the length diff) are
+        // covered by the checks that remain.
         !adapter.src_fetching.load(Ordering::SeqCst)
             && self.sources.iter().any(|source| !source.sections_done || !source.counts_done)
     }
@@ -851,6 +713,7 @@ impl BrowseState {
     fn states_mut(&mut self) -> &mut Vec<SecState> {
         &mut self.states
     }
+    #[cfg_attr(all(not(test), not(feature = "jellyfin")), expect(dead_code))]
     fn source_mut(&mut self, i: usize) -> Option<&mut BrowseSource> {
         self.sources.get_mut(i)
     }
@@ -886,6 +749,7 @@ impl BrowseState {
         self.sections_gen = self.sections_gen.wrapping_add(1);
         self.refresh_tab_shape();
     }
+    #[cfg_attr(all(not(test), not(feature = "jellyfin")), expect(dead_code))]
     fn bump_source_facts_gen(&mut self) {
         self.src_facts_gen = self.src_facts_gen.wrapping_add(1);
     }
@@ -1156,34 +1020,6 @@ impl BrowseState {
             self.retry_cd = 0;
         }
         self.sources[index].retry_cd = 0;
-        true
-    }
-    fn apply_source_outcome(
-        &mut self,
-        src: usize,
-        client: &'static crate::plex::Client,
-        outcome: crate::plex::probe::Outcome,
-    ) -> bool {
-        if self.sources.get(src).map(|source| source.sid) != Some(client.id()) {
-            return false;
-        }
-        let next = source_state(Some(outcome));
-        let Some(source) = self
-            .sources
-            .get_mut(src)
-            .filter(|source| source.sid == client.id())
-        else {
-            return false;
-        };
-        if source.state == next {
-            return true;
-        }
-        source.set_probe_outcome(outcome);
-        if outcome == crate::plex::probe::Outcome::Reachable {
-            source.retry_cd = 0;
-        }
-        self.bump_source_facts_gen();
-        crate::ui::idle::invalidate();
         true
     }
     /// The current section's source is the Jellyfin server AND its client is installed. The
@@ -1594,6 +1430,7 @@ impl BrowseState {
         session.pins_for(user).cloned()
     }
 
+    #[cfg_attr(all(not(test), not(feature = "jellyfin")), expect(dead_code))]
     fn resolve_pins_from(&mut self, session: &crate::plex::session::Session, user: &str) -> bool {
         self.load_remembered(session, user);
         let record = self.pin_record_for(session, user);
@@ -1648,11 +1485,13 @@ impl BrowseState {
         let record = self.pin_record_for(session, user);
         self.reconcile_pins(record)
     }
+    #[cfg_attr(all(not(test), not(feature = "jellyfin")), expect(dead_code))]
     fn resolve_pins(&mut self) {
         let session = crate::plex::session::peek();
         let user = crate::plex::session::current_profile_key();
         self.resolve_pins_from(&session, &user);
     }
+    #[cfg_attr(all(not(test), not(feature = "jellyfin")), expect(dead_code))]
     fn append_sections_with(&mut self, source: usize, list: Vec<(i64, String, SecKind)>,
         preferences: Option<&crate::plex::session::Session>) {
         let fresh: Vec<_> = list.into_iter().filter(|(key, _, _)| {
@@ -1796,149 +1635,94 @@ impl BrowseState {
             return Default::default();
         }
         adapter.src_fetching.store(false, Ordering::SeqCst);
-        let SrcLanding { client, token_gen, name, what } = landing;
-        let ok = match &what {
-            SrcWhat::Sections(list) => list.is_some(),
-            SrcWhat::Counts(counts) => !counts.is_empty(),
-        };
-        // The Jellyfin client is a process-lifetime install with no registry reachability to
-        // merge into: the landing applies straight to its source slot, the same shape 0.6.x's
-        // separate mailbox committed, and its retirement is the roster rebuild that removes the
-        // source wholesale.
+        #[cfg(not(feature = "jellyfin"))]
+        {
+            // No roster exists without the Jellyfin world, so nothing can land here.
+            let _ = (source_index, landing, preferences);
+            return Default::default();
+        }
         #[cfg(feature = "jellyfin")]
-        if matches!(client, DiscClient::Jellyfin(_)) {
-            {
-                let (prior, name_was_empty) = self.sources.get(source_index)
-                    .map(|source| (source.state, source.name.is_empty()))
-                    .unzip();
-                let next = if ok { SourceState::Reachable } else { SourceState::Unreachable };
-                if prior != Some(next) {
-                    if let Some(source) = self.source_mut(source_index) {
-                        source.state = next;
-                    }
-                    self.bump_source_facts_gen(); // the group dims, or comes back
+        {
+            // The Jellyfin client is a process-lifetime install with no registry reachability
+            // to merge into: the landing applies straight to its source slot, the same shape
+            // 0.6.x's separate mailbox committed, and its retirement is the roster rebuild that
+            // removes the source wholesale. It is also the only roster there is: the Plex share
+            // rows and their registry commit went with the Plex arm (#166).
+            let SrcLanding { name, what, .. } = landing;
+            let ok = match &what {
+                SrcWhat::Sections(list) => list.is_some(),
+                SrcWhat::Counts(counts) => !counts.is_empty(),
+            };
+            let (prior, name_was_empty) = self.sources.get(source_index)
+                .map(|source| (source.state, source.name.is_empty()))
+                .unzip();
+            let next = if ok { SourceState::Reachable } else { SourceState::Unreachable };
+            if prior != Some(next) {
+                if let Some(source) = self.source_mut(source_index) {
+                    source.state = next;
                 }
-                if !name.is_empty() && name_was_empty == Some(true) {
-                    if let Some(source) = self.source_mut(source_index) {
-                        source.name = name.clone();
-                    }
-                    self.bump_source_facts_gen(); // the group's header exists now
+                self.bump_source_facts_gen(); // the group dims, or comes back
+            }
+            if !name.is_empty() && name_was_empty == Some(true) {
+                if let Some(source) = self.source_mut(source_index) {
+                    source.name = name.clone();
                 }
-                match what {
-                    SrcWhat::Sections(list) => {
-                        let answered = list.is_some();
-                        crate::log(&format!(
-                            "browse: jellyfin sections landed: {:?} (answered={answered})",
-                            list.as_ref().map(|l| l.len())
-                        ));
-                        self.append_sections_with(
-                            source_index, list.unwrap_or_default(), preferences);
-                        // The sort menu is Jellyfin's fixed vocabulary, handed to each of this
-                        // source's section states at the first landing — the moment Plex's
-                        // server-driven menus arrive too (this backend's includeMeta).
-                        for index in 0..self.sections.len() {
-                            if self.sections[index].src != source_index {
-                                continue;
-                            }
-                            if let Some(state) = self.state_mut(index) {
-                                if state.sorts.is_empty() {
-                                    state.sorts = std::sync::Arc::new(
-                                        crate::jellyfin::browse::sorts());
-                                }
-                            }
+                self.bump_source_facts_gen(); // the group's header exists now
+            }
+            match what {
+                SrcWhat::Sections(list) => {
+                    let answered = list.is_some();
+                    crate::log(&format!(
+                        "browse: jellyfin sections landed: {:?} (answered={answered})",
+                        list.as_ref().map(|l| l.len())
+                    ));
+                    self.append_sections_with(
+                        source_index, list.unwrap_or_default(), preferences);
+                    // The sort menu is Jellyfin's fixed vocabulary, handed to each of this
+                    // source's section states at the first landing.
+                    for index in 0..self.sections.len() {
+                        if self.sections[index].src != source_index {
+                            continue;
                         }
-                        if let Some(source) = self.source_mut(source_index) {
-                            source.sections_done = answered;
-                            source.retry_cd = if answered { 0 } else { SRC_RETRY_CD };
-                        }
-                        if !answered {
-                            crate::log(
-                                "browse: jellyfin source did not answer — its group reads unreachable");
+                        if let Some(state) = self.state_mut(index) {
+                            if state.sorts.is_empty() {
+                                state.sorts = std::sync::Arc::new(
+                                    crate::jellyfin::browse::sorts());
+                            }
                         }
                     }
-                    SrcWhat::Counts(counts) => {
-                        // EMPTY is a failure, not an answer: the worker pushes one entry per
-                        // request that succeeded, so a server that stopped answering mid-probe
-                        // yields nothing.
-                        let answered = !counts.is_empty();
-                        for section in self.sections.iter_mut()
-                            .filter(|section| section.src == source_index) {
-                            if let Some((_, count)) =
-                                counts.iter().find(|(key, _)| *key == section.key) {
-                                section.count = *count;
-                            }
+                    if let Some(source) = self.source_mut(source_index) {
+                        source.sections_done = answered;
+                        source.retry_cd = if answered { 0 } else { SRC_RETRY_CD };
+                    }
+                    if !answered {
+                        crate::log(
+                            "browse: jellyfin source did not answer — its group reads unreachable");
+                    }
+                }
+                SrcWhat::Counts(counts) => {
+                    // EMPTY is a failure, not an answer: the worker pushes one entry per
+                    // request that succeeded, so a server that stopped answering mid-probe
+                    // yields nothing.
+                    let answered = !counts.is_empty();
+                    for section in self.sections.iter_mut()
+                        .filter(|section| section.src == source_index) {
+                        if let Some((_, count)) =
+                            counts.iter().find(|(key, _)| *key == section.key) {
+                            section.count = *count;
                         }
-                        if answered {
-                            self.bump_source_facts_gen();
-                        }
-                        if let Some(source) = self.source_mut(source_index) {
-                            source.counts_done = answered;
-                            source.retry_cd = if answered { 0 } else { SRC_RETRY_CD };
-                        }
+                    }
+                    if answered {
+                        self.bump_source_facts_gen();
+                    }
+                    if let Some(source) = self.source_mut(source_index) {
+                        source.counts_done = answered;
+                        source.retry_cd = if answered { 0 } else { SRC_RETRY_CD };
                     }
                 }
             }
-            return crate::stores::StoreOutcome { changed: true };
+            crate::stores::StoreOutcome { changed: true }
         }
-        let client = match client {
-            DiscClient::Plex(client) => client,
-            #[cfg(feature = "jellyfin")]
-            DiscClient::Jellyfin(_) => unreachable!("the Jellyfin arm above returns"),
-        };
-        let fact_name = (!name.is_empty()).then_some(name.as_str());
-        let committed = crate::registry::commit_reachability_if_current(
-            client.id(), client, token_gen, ok, fact_name, |outcome| {
-                if !self.apply_source_outcome(source_index, client, outcome) {
-                    return false;
-                }
-                if !name.is_empty() {
-                    if let Some(source) = self.source_mut(source_index) {
-                        source.name = name.clone();
-                    }
-                    self.bump_source_facts_gen();
-                }
-                match what {
-                    SrcWhat::Sections(list) => {
-                        let answered = list.is_some();
-                        self.append_sections_with(
-                            source_index, list.unwrap_or_default(), preferences);
-                        if let Some(source) = self.source_mut(source_index) {
-                            source.sections_done = answered;
-                            source.retry_cd = if answered { 0 } else { SRC_RETRY_CD };
-                        }
-                        if !answered {
-                            let who = self.sources.get(source_index)
-                                .map(|source| source.name.clone()).unwrap_or_default();
-                            crate::log(&format!(
-                                "browse: source {source_index} ({who}) did not answer — its group reads unreachable"
-                            ));
-                        }
-                    }
-                    SrcWhat::Counts(counts) => {
-                        let answered = !counts.is_empty();
-                        for section in self.sections.iter_mut()
-                            .filter(|section| section.src == source_index) {
-                            if let Some((_, count)) =
-                                counts.iter().find(|(key, _)| *key == section.key) {
-                                section.count = *count;
-                            }
-                        }
-                        if answered {
-                            self.bump_source_facts_gen();
-                        }
-                        if let Some(source) = self.source_mut(source_index) {
-                            source.counts_done = answered;
-                            source.retry_cd = if answered { 0 } else { SRC_RETRY_CD };
-                        }
-                    }
-                }
-                true
-            },
-        );
-        if committed != Some(true) {
-            return Default::default();
-        }
-        crate::stores::StoreOutcome { changed: true }
     }
     fn refresh_tab_shape(&mut self) {
         let mask = TAB_KINDS.iter().enumerate().fold(0u32, |mask, (i, &kind)| {
@@ -1985,142 +1769,41 @@ impl BrowseState {
         let generation = crate::plex::session::visible_generation();
         let session_changed = self.session_generation != generation;
         self.session_generation = generation;
-        let live: Vec<ServerId> = crate::registry::ids().collect();
-        // The Plex Home roster, read ONCE for the whole sync: `peek()` is a write-through cache
-        // over the persisted session (`plex/CLAUDE.md`), so this is a lock and an `Arc` clone
-        // rather than a file read — but it is still per sync and not per source.
-        let session = crate::plex::session::peek();
-        let household = session.household_ids();
+        // The Plex share roster that used to drive this sync went with the Plex discovery arm
+        // (#166): the roster is now exactly one source, the Jellyfin install, so the whole
+        // ingest reduces to its two edges — retire on sign-out, adopt on install. Everything
+        // else this loop used to reconcile (registry lifecycles, probe states, ServerFacts,
+        // household verdicts) belonged to the share rows and is gone with them.
+        // Without that world there is no install to sign out of, so nothing ever retires.
+        #[cfg(not(feature = "jellyfin"))]
+        let retire_adapter = false;
+        #[cfg(feature = "jellyfin")]
         let retire_adapter = self.sources.iter().any(|source| {
-            if live.contains(&source.sid) {
-                return false;
-            }
-            // The Jellyfin source is not in the Plex roster — `live` is EMPTY in this flavour —
-            // so the bare roster test would retire it on every sync, resetting the table it had
-            // just been adopted into (and every section that landed meanwhile). It is live for
-            // exactly as long as its client is installed; sign-out retires it through this arm.
-            #[cfg(feature = "jellyfin")]
+            // The Jellyfin source is not in any fetched roster — it is live for exactly as long
+            // as its client is installed; sign-out retires it through this arm.
             if source.sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
                 return false;
             }
             true
         });
         let mut changed = retire_adapter;
-        // Did any source change SIDE of the household line in this pass? That, and not a changed
-        // `ServerFacts`, is what the pin defaults and the tab destination are derived from.
-        let mut reclassified = false;
         if retire_adapter {
             self.reset_with(|| {});
         }
         let known = self.sources.len();
-        for sid in live {
-            match self.sources.iter().position(|source| source.sid == sid) {
-                Some(index) => {
-                    let now = crate::registry::client_for(sid);
-                    let client_addr = now.map_or(0, |client| client as *const _ as usize);
-                    let token_gen = now.map_or(0, |client| client.token_gen());
-                    let mut changes = 0;
-                    let source = &mut self.sources[index];
-                    if source.client_addr != client_addr || source.token_gen != token_gen {
-                        source.client_addr = client_addr;
-                        source.token_gen = token_gen;
-                        source.sections_done = false;
-                        source.counts_done = false;
-                        source.retry_cd = 0;
-                        changes += 1;
-                    }
-                    if let Some((state, tier)) = source_snapshot(sid) {
-                        if source.state != state || source.tier != tier {
-                            source.state = state;
-                            source.tier = tier;
-                            changes += 1;
-                        }
-                    }
-                    if let Some(facts) = crate::registry::facts(sid) {
-                        if source.name.is_empty() && !facts.name.is_empty() {
-                            source.name = facts.name.clone();
-                            changes += 1;
-                        }
-                        if source.handle != facts.handle || source.owned != facts.owned
-                            || source.home != facts.home || source.owner_id != facts.owner_id {
-                            source.handle = facts.handle.clone();
-                            source.owned = facts.owned;
-                            source.home = facts.home;
-                            source.owner_id = facts.owner_id;
-                            changes += 1;
-                        }
-                    }
-                    // Derived AFTER the evidence above lands, and unconditionally: the roster this
-                    // is graded against arrives on its own schedule, so an unchanged `ServerFacts`
-                    // does not mean an unchanged verdict.
-                    let household_now = household_verdict(source, &household);
-                    if source.household != household_now {
-                        source.household = household_now;
-                        reclassified = true;
-                        changes += 1;
-                    }
-                    let machine_id = machine_of(sid);
-                    if source.machine_id != machine_id {
-                        source.machine_id = machine_id;
-                        changes += 1;
-                    }
-                    self.src_facts_gen = self.src_facts_gen.wrapping_add(changes);
-                    if changes != 0 {
-                        changed = true;
-                        crate::ui::idle::invalidate();
-                    }
-                }
-                None => {
-                    let facts = crate::registry::facts(sid);
-                    let owned = facts.map(|facts| facts.owned).unwrap_or(true);
-                    // An undescribed slot is the session's own server (`servers::describe_name`
-                    // says why that is not a guess), so it carries no third-party evidence.
-                    let home = facts.is_some_and(|facts| facts.home);
-                    let owner_id = facts.map_or(0, |facts| facts.owner_id);
-                    let (name, handle) = facts.map(|facts| {
-                        (facts.name.clone(), facts.handle.clone())
-                    }).unwrap_or_default();
-                    let Some((state, tier)) = source_snapshot(sid) else { continue };
-                    self.sources.push(BrowseSource {
-                        sid,
-                        client_addr: crate::registry::client_for(sid)
-                            .map_or(0, |client| client as *const _ as usize),
-                        token_gen: crate::registry::client_for(sid)
-                            .map_or(0, |client| client.token_gen()),
-                        machine_id: machine_of(sid),
-                        owned, home, owner_id,
-                        household: crate::registry::is_household(
-                            crate::registry::GrantEvidence { owned, home, owner_id }.grant(),
-                            &household,
-                        ),
-                        name, handle, state, tier,
-                        sections_done: false, counts_done: false, retry_cd: 0,
-                    });
-                    self.bump_source_facts_gen();
-                    changed = true;
-                }
-            }
-        }
         // The Jellyfin source: one server, adopted once, owned by definition (the login IS the
         // grant — there is no plex.tv to describe it). `machine_id` stays empty because
         // Jellyfin's ServerId is not wired into `plex::pins`, so its Home selection lives for
         // the run only; `name` arrives with discovery, off `/System/Info/Public`. Lifecycle
-        // fields are zero: the steady-state arm reads them through `client_for`, which is `None`
-        // for this slot, and `None` maps to the same zeros — no churn. `household` is `true` by
-        // the same "the login is the grant" reasoning, which is also what the evidence
-        // derivation settles on for `owned:true`.
+        // fields are zero: there is no registry lifecycle to read them from. `household` is
+        // `true` by the same "the login is the grant" reasoning.
         #[cfg(feature = "jellyfin")]
         if crate::jellyfin::client().is_some()
             && !self.sources.iter().any(|s| s.sid == crate::jellyfin::SERVER_ID)
         {
             self.sources.push(BrowseSource {
                 sid: crate::jellyfin::SERVER_ID,
-                client_addr: 0,
-                token_gen: 0,
                 machine_id: String::new(),
-                owned: true,
-                home: false,
-                owner_id: 0,
                 household: true,
                 name: String::new(),
                 handle: String::new(),
@@ -2135,11 +1818,10 @@ impl BrowseState {
         if self.sources.len() != known {
             crate::log(&format!("browse: roster now {} source(s)", self.sources.len()));
         }
-        if reclassified || session_changed {
-            // **A source changed sides, so the WHOLE pin table is re-resolved** — `pins::resolve`
-            // is a whole-table function on purpose (its own doc: the never-empty floor is a
-            // question about the table, not about a row), and one source's reclassification moves
-            // `household_type` for every library of its kind on every other source too.
+        if session_changed {
+            // **The session moved under the table, so the WHOLE pin table is re-resolved** —
+            // `pins::resolve` is a whole-table function on purpose (its own doc: the
+            // never-empty floor is a question about the table, not about a row).
             //
             // Only the rows nobody has answered about actually move: a recorded answer beats the
             // default in both directions, which is exactly what makes a late roster able to
@@ -2149,9 +1831,10 @@ impl BrowseState {
             // DESTINATION is derived live by `section_of_kind`, so it follows the same bump
             // without a cache of its own. It bumps only when a row actually MOVED — a
             // reclassification that moves none publishes nothing new to the section table, and
-            // the source facts it did move have their own generation, bumped above.
+            // the source facts it did move have their own generation.
             if crate::plex::session::peek_settled().is_some() {
-                self.reconcile_pins_from(&session, &crate::plex::session::current_profile_key());
+                self.reconcile_pins_from(&crate::plex::session::peek(),
+                    &crate::plex::session::current_profile_key());
             }
             changed = true;
         }
@@ -2223,72 +1906,66 @@ impl BrowseState {
         if adapter.src_fetching.load(Ordering::SeqCst) {
             return;
         }
-        let ready = |source: &BrowseSource| source.retry_cd == 0;
-        let mut pick = self.sources.iter().enumerate().find_map(|(index, source)| {
-            (ready(source) && !source.sections_done).then(|| {
-                #[cfg(feature = "jellyfin")]
-                if source.sid == crate::jellyfin::SERVER_ID {
-                    crate::log("browse: jellyfin sections fetch picked");
-                }
-                (index, source.sid, SrcJob::Sections, source.name.is_empty())
-            })
-        });
-        if pick.is_none() {
-            for index in 0..self.sources.len() {
-                if !ready(&self.sources[index]) || self.sources[index].counts_done {
-                    continue;
-                }
-                let keys: Vec<i64> = self.sections.iter()
-                    .filter(|section| section.src == index).map(|section| section.key).collect();
-                if keys.is_empty() {
-                    self.sources[index].counts_done = true;
-                    continue;
-                }
-                pick = Some((index, self.sources[index].sid, SrcJob::Counts(keys),
-                    self.sources[index].name.is_empty()));
-                break;
-            }
-        }
-        let Some((source, sid, job, want_name)) = pick else { return };
-        // The Jellyfin source's client lives outside the Plex registry, and its count probe
-        // needs each library's KIND beside its key (that backend filters counts by item type,
-        // where Plex asks a section key alone) — so the job is re-packed with the kinds the
-        // table already holds before the request is built.
-        // The guard is load-bearing: the jellyfin slot is 0, which test fixtures also hand to
-        // `register_for_test` Plex clients — an absent jellyfin client must fall THROUGH.
         #[cfg(feature = "jellyfin")]
-        if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
-            let jc = crate::jellyfin::client().expect("guarded above");
-            let job = match job {
-                SrcJob::Counts(keys) => SrcJob::JfCounts(
-                    keys.iter()
-                        .filter_map(|k| self.sections.iter()
-                            .find(|s| s.src == source && s.key == *k)
-                            .map(|s| (*k, s.kind)))
-                        .collect(),
-                ),
-                other => other,
-            };
-            let request = DiscoveryRequest {
-                epoch: self.table_epoch(), si: source, client: DiscClient::Jellyfin(jc),
-                token_gen: 0, job, want_name, adapter: Arc::clone(adapter),
-            };
-            adapter.src_fetching.store(true, Ordering::SeqCst);
-            if !launch(request) {
-                self.discovery_spawn_refused_owned(adapter, source);
+        {
+            // The roster has exactly one source — the Jellyfin install — so this pick is the
+            // whole story; a build without that world has no sources and never launches
+            // anything.
+            let ready = |source: &BrowseSource| source.retry_cd == 0;
+            let mut pick = self.sources.iter().enumerate().find_map(|(index, source)| {
+                (ready(source) && !source.sections_done).then(|| {
+                    if source.sid == crate::jellyfin::SERVER_ID {
+                        crate::log("browse: jellyfin sections fetch picked");
+                    }
+                    (index, source.sid, SrcJob::Sections, source.name.is_empty())
+                })
+            });
+            if pick.is_none() {
+                for index in 0..self.sources.len() {
+                    if !ready(&self.sources[index]) || self.sources[index].counts_done {
+                        continue;
+                    }
+                    let keys: Vec<i64> = self.sections.iter()
+                        .filter(|section| section.src == index).map(|section| section.key).collect();
+                    if keys.is_empty() {
+                        self.sources[index].counts_done = true;
+                        continue;
+                    }
+                    pick = Some((index, self.sources[index].sid, SrcJob::Counts(keys),
+                        self.sources[index].name.is_empty()));
+                    break;
+                }
             }
-            return;
+            let Some((source, sid, job, want_name)) = pick else { return };
+            // The Jellyfin source's count probe needs each library's KIND beside its key (that
+            // backend filters counts by item type), so the job is re-packed with the kinds the
+            // table already holds before the request is built.
+            if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+                let jc = crate::jellyfin::client().expect("guarded above");
+                let job = match job {
+                    SrcJob::Counts(keys) => SrcJob::JfCounts(
+                        keys.iter()
+                            .filter_map(|k| self.sections.iter()
+                                .find(|s| s.src == source && s.key == *k)
+                                .map(|s| (*k, s.kind)))
+                            .collect(),
+                    ),
+                    other => other,
+                };
+                let request = DiscoveryRequest {
+                    epoch: self.table_epoch(), si: source, client: DiscClient::Jellyfin(jc),
+                    token_gen: 0, job, want_name, adapter: Arc::clone(adapter),
+                };
+                adapter.src_fetching.store(true, Ordering::SeqCst);
+                if !launch(request) {
+                    self.discovery_spawn_refused_owned(adapter, source);
+                }
+            }
         }
-        let Some(client) = crate::registry::client_for(sid) else { return };
-        let request = DiscoveryRequest {
-            epoch: self.table_epoch(), si: source, client: DiscClient::Plex(client),
-            token_gen: client.token_gen(), job, want_name, adapter: Arc::clone(adapter),
-        };
-        adapter.src_fetching.store(true, Ordering::SeqCst);
-        if !launch(request) {
-            self.discovery_spawn_refused_owned(adapter, source);
-        }
+        #[cfg(not(feature = "jellyfin"))]
+        let _ = launch;
     }
+    #[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
     fn discovery_spawn_refused_owned(&mut self, adapter: &BrowseAdapter, source: usize) {
         adapter.src_fetching.store(false, Ordering::SeqCst);
         if let Some(source) = self.source_mut(source) {
@@ -2305,11 +1982,6 @@ impl BrowseState {
         });
         let Some((epoch, source, landing)) = taken else { return Default::default() };
         self.apply_discovery(epoch, source, landing, None, adapter)
-    }
-    #[cfg(test)]
-    fn land_discovery_owned(&mut self, adapter: &Arc<BrowseAdapter>)
-        -> crate::stores::StoreOutcome {
-        self.land_discovery_owned_with_gate(adapter, crate::ui::landgate::fixture_gate())
     }
 
     fn land_directory_owned_with_gate<T>(
@@ -2581,6 +2253,9 @@ struct PageResult {
 struct DirectoryResult<T> {
     epoch: u32,
     sec: usize,
+    /// The builder's client arm; the landing's validator matches on it. Only the Jellyfin arm
+    /// builds one since the Plex fetch went (#166).
+    #[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
     client: DiscClient,
     library_type: LibraryType,
     /// Letters flights only (issue #37): the filter combination the probe ran under, stamped on
@@ -2597,14 +2272,10 @@ struct DirectoryResult<T> {
 /// us the server's own display name.
 #[derive(Clone)]
 struct SrcLanding {
-    /// Exact registry lifecycle the worker dialled. Slot id alone survives both re-point and
-    /// profile changes; pointer identity catches the former and token_gen catches in-place retoken.
-    /// The Jellyfin arm keeps the same fields but its "lifecycle" is the install itself: the
-    /// client is one leaked-static for the whole install, and its retirement removes the source
-    /// from the roster wholesale.
-    client: DiscClient,
+    /// The request's token generation, carried through to the encoded wire verbatim.
     token_gen: u32,
-    /// `GET /`'s `friendlyName`, or "" when it was already known or the server did not answer
+    /// `/System/Info/Public`'s `ServerName`, or "" when it was already known or the server did
+    /// not answer
     name: String,
     what: SrcWhat,
 }
@@ -2612,29 +2283,12 @@ struct SrcLanding {
 enum SrcWhat {
     /// `GET /library/sections`. `None` is the FAILURE sentinel — the source is marked unreachable
     /// and whatever sections it had already contributed are left exactly where they are.
+    #[cfg_attr(all(not(test), not(feature = "jellyfin")), expect(dead_code))]
     Sections(Option<Vec<(i64, String, SecKind)>>),
     /// The unfiltered item count per library, **by section KEY** rather than by index: the table
     /// may have grown between the spawn and the landing, and a key is stable inside one source.
+    #[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
     Counts(Vec<(i64, i64)>),
-}
-
-/// `MediaContainer.Directory[]` → the (key, title, kind) rows this app can browse. The ONE
-/// projection, shared by the replay-ledger discovery landing and its worker, so the two can
-/// never disagree about which sections exist.
-///
-/// A section's kind comes from [`SecKind::of_section`]: its Plex `type`, plus the agent and scanner
-/// that distinguish Other Videos from Movies. Types without a playable level are dropped here.
-fn project_sections(mc: &crate::plex::MediaContainer) -> Vec<(i64, String, SecKind)> {
-    mc.directory
-        .iter()
-        .filter_map(|d| {
-            let kind = SecKind::of_section(d)?; // a type this product has no level for at all
-            d.key
-                .parse::<i64>()
-                .ok()
-                .map(|k| (k, d.title.clone(), kind))
-        })
-        .collect()
 }
 
 /// A library section's TYPE — the product's closed type list, and the unit the tab projection
@@ -2663,16 +2317,6 @@ pub(crate) enum SecKind {
 }
 
 impl SecKind {
-    /// The kind of a `/library/sections` row. Other Videos shares the `movie` wire type, so its
-    /// agent and scanner make the distinction. Missing or ambiguous fields stay Movies, as before.
-    pub(crate) fn of_section(section: &crate::plex::LibrarySection) -> Option<SecKind> {
-        match section.kind.as_str() {
-            "movie" if section.is_other_videos() => Some(SecKind::Video),
-            "movie" => Some(SecKind::Movie),
-            "show" => Some(SecKind::Show),
-            _ => None,
-        }
-    }
     /// The app's own persisted code for a kind, not the Plex `Directory.type`. Other Videos is
     /// classified by [`of_section`](Self::of_section) because its Plex type is `movie` too.
     pub(crate) fn from_wire(s: &str) -> Option<SecKind> {
@@ -2817,13 +2461,6 @@ pub(crate) const TAB_KINDS: [SecKind; 3] = [SecKind::Movie, SecKind::Show, SecKi
 /// [`library_pins`] and `Session::home_pins` both turn on. Written by [`resolve_pins`] and
 /// [`record_pins`], cleared by [`reset`]; never read from the file per frame.
 
-/// One source's `machineIdentifier` as the registry knows it, `""` while nobody has learned it.
-fn machine_of(sid: ServerId) -> String {
-    crate::registry::client_for(sid)
-        .map(|c| c.machine_id().to_string())
-        .unwrap_or_default()
-}
-
 /// The section table as the pin rules see it, in table order.
 // ---- the Sources list's data, projected ------------------------------------------------------
 //
@@ -2856,7 +2493,7 @@ impl SrcGroup {
     /// The old two-state question. See [`BrowseSource::reachable`] — `NotProbed` answers `true`
     /// here too, and for the same reason: a group nobody has dialled must not open dimmed.
     pub(crate) fn reachable(&self) -> bool {
-        !matches!(self.state, SourceState::Unreachable | SourceState::InsecureOnly)
+        !matches!(self.state, SourceState::Unreachable)
     }
 }
 
@@ -2902,19 +2539,20 @@ fn count_line(count: i64, kind: SecKind) -> String {
 /// the owning BrowseStore: the roster is a handful of servers and none of it is on a user's
 /// critical path.
 /// Which backend a discovery request dials. The Jellyfin client lives outside the Plex
-/// registry, so its slot is captured here at the spawn site exactly as the Plex arm captures
-/// its `&'static Client`.
+/// registry, so its slot is captured here at the spawn site (the Plex arm's `&'static Client`
+/// went with the Plex discovery arm, #166).
 #[derive(Clone, Copy)]
 enum DiscClient {
-    Plex(&'static crate::plex::Client),
     #[cfg(feature = "jellyfin")]
     Jellyfin(&'static crate::jellyfin::JfClient),
 }
 
 enum SrcJob {
     /// its section list
+    #[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
     Sections,
     /// the unfiltered item count of each of its libraries, by section key
+    #[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
     Counts(Vec<i64>),
     /// The Jellyfin count probe: each library's key WITH its kind, which that backend's
     /// include_types vocabulary needs (the Plex probe filters by section key alone).
@@ -2925,10 +2563,13 @@ enum SrcJob {
 pub(crate) struct DiscoveryRequest {
     epoch: u32,
     si: usize,
+    /// The one roster arm's client; the request can only be built when that world is installed.
+    #[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
     client: DiscClient,
     token_gen: u32,
     job: SrcJob,
     want_name: bool,
+    #[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
     adapter: Arc<BrowseAdapter>,
 }
 
@@ -2937,16 +2578,8 @@ impl DiscoveryRequest {
         serde_json::json!({
             "epoch": self.epoch,
             "source": self.si,
-            "sid": match self.client {
-                DiscClient::Plex(c) => c.id().raw(),
-                #[cfg(feature = "jellyfin")]
-                DiscClient::Jellyfin(_) => crate::jellyfin::SERVER_ID.raw(),
-            },
-            "client": match self.client {
-                DiscClient::Plex(c) => c.instance_gen(),
-                #[cfg(feature = "jellyfin")]
-                DiscClient::Jellyfin(_) => 0,
-            },
+            "sid": crate::jellyfin::SERVER_ID.raw(),
+            "client": 0,
             "token_gen": self.token_gen,
             "name": self.want_name,
             "sections": matches!(self.job, SrcJob::Sections),
@@ -2960,6 +2593,7 @@ impl DiscoveryRequest {
     }
 }
 
+#[cfg(feature = "jellyfin")]
 pub(crate) fn execute_discovery(request: DiscoveryRequest) -> bool {
     let DiscoveryRequest {
         epoch,
@@ -2973,56 +2607,21 @@ pub(crate) fn execute_discovery(request: DiscoveryRequest) -> bool {
     let is_sections = matches!(job, SrcJob::Sections);
     spawn_discovery(move || {
         let landing = catch_unwind(move || {
-            // the server naming ITSELF, so a roster that never reached plex.tv still heads its
+            let DiscClient::Jellyfin(jc) = client;
+            // the server naming ITSELF, so a roster that never reached the network still heads its
             // group with a machine name. One request, once, per source.
-            let name = match (client, want_name) {
-                (DiscClient::Plex(c), true) => c.friendly_name().unwrap_or_default(),
-                #[cfg(feature = "jellyfin")]
-                (DiscClient::Jellyfin(jc), true) => jc.server_name().unwrap_or_default(),
-                _ => String::new(),
-            };
-            let what = match (client, job) {
-                (DiscClient::Plex(client), SrcJob::Sections) => {
-                    SrcWhat::Sections(client.sections().map(|mc| project_sections(&mc)))
-                }
-                (DiscClient::Plex(client), SrcJob::Counts(keys)) => {
-                    let mut out = Vec::new();
-                    for k in keys {
-                        // size=0: PMS answers with `totalSize` and no items at all, so a
-                        // library's count costs a header rather than a page.
-                        let q = SectionQuery {
-                            section_key: k,
-                            sort: "",
-                            filters: &[],
-                            start: 0,
-                            size: 0,
-                            include_meta: false,
-                        };
-                        if let Some(mc) = client.section_items_query(&q) {
-                            out.push((k, mc.total_size));
-                        }
-                    }
-                    SrcWhat::Counts(out)
-                }
-                // The Jellyfin arm reads through its own client's vocabulary; the landing keeps
-                // the same `SrcWhat` mailboxes, so the commit below cannot tell the difference.
-                #[cfg(feature = "jellyfin")]
-                (DiscClient::Jellyfin(jc), SrcJob::Sections) => {
+            let name = if want_name { jc.server_name().unwrap_or_default() } else { String::new() };
+            let what = match job {
+                SrcJob::Sections => {
                     SrcWhat::Sections(crate::jellyfin::browse::fetch_sections(jc))
                 }
-                #[cfg(feature = "jellyfin")]
-                (DiscClient::Jellyfin(jc), SrcJob::JfCounts(keys)) => {
+                SrcJob::JfCounts(keys) => {
                     SrcWhat::Counts(crate::jellyfin::browse::fetch_counts(jc, &keys))
                 }
-                #[cfg(feature = "jellyfin")]
-                (DiscClient::Jellyfin(_), SrcJob::Counts(_)) => unreachable!(
+                SrcJob::Counts(_) => unreachable!(
                     "the pick re-packs a Jellyfin count job as JfCounts before launch"),
-                #[cfg(feature = "jellyfin")]
-                (DiscClient::Plex(_), SrcJob::JfCounts(_)) => unreachable!(
-                    "JfCounts is only built on the Jellyfin pick arm"),
             };
             SrcLanding {
-                client,
                 token_gen,
                 name,
                 what,
@@ -3038,7 +2637,6 @@ pub(crate) fn execute_discovery(request: DiscoveryRequest) -> bool {
                 SrcWhat::Counts(Vec::new())
             };
             SrcLanding {
-                client,
                 token_gen,
                 name: String::new(),
                 what,
@@ -3048,6 +2646,13 @@ pub(crate) fn execute_discovery(request: DiscoveryRequest) -> bool {
     })
 }
 
+#[cfg(not(feature = "jellyfin"))]
+pub(crate) fn execute_discovery(_request: DiscoveryRequest) -> bool {
+    // No roster exists without the Jellyfin world, so nothing can build a request to launch.
+    false
+}
+
+#[cfg(feature = "jellyfin")]
 fn spawn_discovery(job: impl FnOnce() + Send + 'static) -> bool {
     #[cfg(test)]
     if REFUSE_DISCOVERY_FOR_TEST.with(|flag| flag.get()) {
@@ -3056,34 +2661,59 @@ fn spawn_discovery(job: impl FnOnce() + Send + 'static) -> bool {
     crate::task::spawn_small("sources", job)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "jellyfin"))]
 thread_local! {
     static REFUSE_DISCOVERY_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// Supply a transport observation, retaining the actual source epoch and captured lifecycle.
+/// Supply a discovery observation. The roster only ever carries the Jellyfin install now, so a
+/// test that names a synthetic slot seeds the row itself instead of asking a registry to adopt
+/// it (the registry-ingest fixture went with the Plex arm, #166).
 #[cfg(test)]
 pub(crate) fn queue_discovery_for_owner_test(
     state: &mut BrowseState,
     adapter: &Arc<BrowseAdapter>,
-    client: &'static crate::plex::Client,
-    token_gen: u32,
+    sid: ServerId,
     ok: bool,
 ) {
     crate::testlock::assert_held("discovery observation fixture");
     let _ = state.sync_roster_owned();
-    let si = state.sources.iter().position(|source| source.sid == client.id()).unwrap();
+    let si = match state.sources.iter().position(|source| source.sid == sid) {
+        Some(index) => index,
+        None => {
+            seed_source_for_owner_test(state, sid);
+            state.sources.len() - 1
+        }
+    };
     let what = SrcWhat::Sections(ok.then(Vec::new));
     *adapter.src_result.lock().unwrap_or_else(|e| e.into_inner()) = Some((
         state.table_epoch(),
         si,
         SrcLanding {
-            client: DiscClient::Plex(client),
-            token_gen,
+            token_gen: 0,
             name: String::new(),
             what,
         },
     ));
+}
+
+/// Seed one synthetic source row, discovery still owed.
+#[cfg(test)]
+pub(crate) fn seed_source_for_owner_test(state: &mut BrowseState, sid: ServerId) {
+    crate::testlock::assert_held("a synthetic browse source row");
+    state.sources.push(BrowseSource {
+        sid,
+        machine_id: String::new(),
+        household: true,
+        name: String::new(),
+        handle: String::new(),
+        state: SourceState::NotProbed,
+        tier: None,
+        sections_done: false,
+        counts_done: false,
+        retry_cd: 0,
+    });
+    state.bump_source_facts_gen();
 }
 
 #[cfg(test)]
@@ -3126,12 +2756,7 @@ pub(crate) fn seed_sources_for_owner_test(
             } else {
                 ServerId::from_raw(index as u16)
             },
-            client_addr: 0,
-            token_gen: 0,
             machine_id: format!("mach-{index}"),
-            owned: index == 0,
-            home: false,
-            owner_id: 0,
             household: index == 0,
             name: if index == 0 {
                 "nas-home".into()
@@ -3162,12 +2787,7 @@ pub(crate) fn seed_pins_for_owner_test(state: &mut BrowseState, pinned: &[bool])
     state.reset_with(|| {});
     state.sources = vec![BrowseSource {
         sid: crate::registry::current(),
-        client_addr: 0,
-        token_gen: 0,
         machine_id: "mach-test".into(),
-        owned: true,
-        home: false,
-        owner_id: 0,
         household: true,
         name: "nas-home".into(),
         handle: String::new(),
@@ -3252,16 +2872,11 @@ pub(crate) fn seed_registered_table_for_owner_test(
     crate::testlock::assert_held("an owned browse section table (seed_registered_table_for_test)");
     seed_two_source_table_for_owner_test(state);
     for (index, sid) in sids.into_iter().enumerate() {
-        let client = crate::registry::client_for(sid).expect("registered fixture source");
         let source = state.source_mut(index).unwrap();
         source.sid = sid;
-        source.machine_id = client.machine_id().to_owned();
-        source.client_addr = client as *const _ as usize;
-        source.token_gen = client.token_gen();
-        crate::registry::describe(sid, &source.name, &source.handle,
-            crate::registry::GrantEvidence {
-                owned: source.owned, home: source.home, owner_id: source.owner_id,
-            });
+        if let Some(client) = crate::registry::client_for(sid) {
+            source.machine_id = client.machine_id().to_owned();
+        }
     }
     for section in &mut state.states {
         section.letters_done = true;
@@ -3342,14 +2957,6 @@ mod fetch_state_tests;
 #[cfg(test)]
 #[path = "browse_home_and_tabs_tests.rs"]
 mod home_and_tabs_tests;
-
-#[cfg(test)]
-#[path = "browse_reachability_tests.rs"]
-mod reachability_tests;
-
-#[cfg(test)]
-#[path = "browse_section_kind_tests.rs"]
-mod section_kind_tests;
 
 #[cfg(test)]
 mod library_type_tests;
