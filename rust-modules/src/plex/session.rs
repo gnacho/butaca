@@ -1273,14 +1273,6 @@ impl ServerRef {
         Origin::parse(&self.origin_url)
             .unwrap_or_else(|| Origin::http(&self.address, self.port as i32))
     }
-
-    /// The DNS answer this file already holds for its origin: `address` beside a `plex.direct`
-    /// name that encodes it. `None` for a legacy plaintext record or any origin whose address the
-    /// name does not vouch for — see [`super::origin::ResolvePin`]. It is what lets a stored
-    /// session boot against the household's own server with no resolver at all.
-    pub fn resolve_pin(&self) -> Option<super::origin::ResolvePin> {
-        super::origin::ResolvePin::for_origin(&self.origin(), &self.address)
-    }
 }
 
 /// One server this identity can browse — our own or a friend's share. What discovery resolved:

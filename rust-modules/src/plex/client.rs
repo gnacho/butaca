@@ -350,7 +350,11 @@ impl Client {
     pub(crate) fn instance_gen(&self) -> u32 { self.instance_gen }
     /// Resource capability only. Revocation is irreversible for this incarnation and never
     /// changes a logical result; a controlled replay must supply that result through ingress.
+    /// The one caller was the controlled DevPms install's replay arm, gone with that world
+    /// (#166); the replay tests still deny IO through it.
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn disable_data_io(&self) { self.data_io_disabled.store(true, Relaxed); }
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn denied_data_requests(&self) -> u32 { self.denied_data_requests.load(Relaxed) }
     fn may_send(&self) -> bool {
         if !self.data_io_disabled.load(Relaxed) { return true; }

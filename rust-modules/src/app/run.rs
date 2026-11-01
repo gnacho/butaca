@@ -3096,7 +3096,7 @@ mod lifecycle_regression_tests {
         use crate::ui::machine::{Fx, MachineId, NavOp};
         let _serial = crate::testlock::serial();
         let mut app = app();
-        let encoded = super::super::synthetic_home_initial(1, 32517, Some("flow12".into())).unwrap();
+        let encoded = super::super::synthetic_home_initial(1, 32517, Some("flow12=itm1".into())).unwrap();
         app.boot_initial = Some(serde_json::from_str(&encoded).unwrap());
         app.pages.emit(MachineId::Nav, Fx::Nav(NavOp::Root(AppArg::Home)));
         let mut fr = Frame::begin(&app.player.session, app.bridge.metadata_view());
@@ -3110,7 +3110,7 @@ mod lifecycle_regression_tests {
         assert!(app.scenarios.content_boot.is_some());
         frame(&mut app, fr.now + 16);
         assert!(matches!(app.pages.top_arg(), Some(AppArg::Content(
-            crate::screens::registry::ContentArg::Detail { rk, .. })) if rk == "1001"));
+            crate::screens::registry::ContentArg::Detail { rk, .. })) if rk == "itm1"));
     }
 
     #[cfg(feature = "devtriggers")]

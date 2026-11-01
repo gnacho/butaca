@@ -569,13 +569,6 @@ mod deeplink_tests {
     }
 }
 
-/// Pure capture boundary shared by actual boot and owner bootstrap regression fixtures.
-pub(crate) fn captured_session_for_boot(saved: crate::plex::session::Session,
-    dev_primary: Option<crate::plex::session::ServerRef>,
-    extras: Vec<crate::plex::session::SourceRef>) -> crate::auth::SessionInit {
-    crate::auth::SessionInit::captured_boot(saved, dev_primary, extras)
-}
-
     // Everything that has to happen when the server `plex::client()` answers with CHANGES —
     // whether because a new identity signed in or because the user walked into another source.
     // EVERY store below is keyed to whichever server was current when it was filled, and none
@@ -595,28 +588,6 @@ pub(super) fn activate_server_owned(
     let _ = bridge.hubs_run(crate::stores::hubs::HubsCmd::RefetchHubs);
     let _ = bridge.browse_discover_pump();
     log("pms: catalog activation queued");
-}
-
-    // Install the PMS client (the read layer AND the playback path) as the CURRENT server,
-    // then fetch the catalog. Used by the boot gate and again when a login resolves; a later
-    // call for the same address just swaps the token (profile switch).
-    // Takes an ORIGIN and not a `(host, port)` pair: the pair cannot say `https`, and the host
-    // a certificate is issued for is the `plex.direct` NAME rather than the address behind it
-    // (`plex::origin`). Discovery and persisted sessions may supply either scheme; the client
-    // routes control and media requests through the matching transport.
-pub(super) fn install_pms_owned(
-    bridge: &mut super::bridge::Bridge,
-    origin: &crate::origin::Origin,
-    address: &str,
-    token: &str,
-    tier: Option<crate::plex::probe::Location>,
-    pin: Option<&crate::origin::ResolvePin>,
-    install: &crate::auth::owner::ReadyInstall,
-) {
-    if let crate::auth::owner::ReadyInstall::PrimaryAndExtras(extras) = install {
-        crate::auth::install_captured_registry(origin, address, token, tier, pin, extras, None);
-    }
-    activate_server_owned(bridge)
 }
 /// Everything before the loop: SDL and the window, GL, text, the poster workers, the boot gate
 /// (login / token / session / picker), every dev trigger read once, and the `App` literal —
@@ -663,7 +634,7 @@ pub(super) fn apply_deferred_capture(rec: &mut super::recorder::Recplay,
 }
 
 pub(crate) unsafe fn construct(
-    pms_host: *const c_char, pms_port: c_int, mt: crate::task::MainThread,
+    _pms_host: *const c_char, _pms_port: c_int, mt: crate::task::MainThread,
     preflight: super::bootstrap::Preflight, initial: Option<super::bootstrap::Initial>,
     deferred: Option<crate::plex::session::DeferredLoad>,
     launch_params: Option<String>,
@@ -851,20 +822,10 @@ pub(crate) unsafe fn construct(
     let _ = crate::net::global_init();
 
     // NO token is compiled into this binary. Controlled recordings inject their own fixture
-    // identity. Live onboarding reads only the Jellyfin configuration.
-    // Controlled recordings inject their fixture identity. Live boot never reads a Plex token.
-    // The Jellyfin controlled world carries NO Plex dev token: its boot arm installs the client
-    // from the Initial's own identity, so `dev_primary` stays out of its way.
-    let dev_token = match &initial {
-        Some(initial) => match &initial.session.authority {
-            crate::auth::owner::BootstrapAuthority::DevPms { primary, .. } => primary.token.clone(),
-            _ => String::new(),
-        },
-        _ => String::new(),
-    };
-    let host_s = std::ffi::CStr::from_ptr(pms_host)
-        .to_string_lossy()
-        .into_owned();
+    // identity. Live onboarding reads only the Jellyfin configuration. The Jellyfin controlled
+    // world carries NO Plex dev token: its boot arm installs the client from the Initial's own
+    // identity. The C shim's host/port pair names nothing this function reads anymore — the
+    // Plex dev world that configured an address from it is gone (#166).
 
     // UI infra + poster workers always come up — the owned login/profiles screens use them too.
     //
@@ -900,7 +861,8 @@ pub(crate) unsafe fn construct(
     //  1. /tmp/butaca-login forces the Jellyfin sign-in screen on demand.
     //  2. Controlled recordings activate their injected fixture identity.
     //  3. A stored Jellyfin configuration authenticates and goes Home.
-    //  4. Nothing else goes to Jellyfin sign-in. Live boot never loads a Plex session.
+    //  4. Nothing else goes to Jellyfin sign-in. Live boot never loads a Plex session, and the
+    //     Plex dev-token world (ActivateDevBootstrap) is gone with the DevPms authority.
     // The destination itself is [`BootTo`], at module scope with the rest of the vocabulary.
     //
     let session = match &initial {
@@ -910,18 +872,9 @@ pub(crate) unsafe fn construct(
     #[cfg(not(test))]
     crate::i18n::initialize(session.language, controlled);
     let forced_login = !controlled && crate::dev::scenarios::login_forced();
-    let dev_primary = (!forced_login && !dev_token.is_empty()).then(|| {
-        let origin = crate::dev::scenarios::pms_origin()
-            .unwrap_or_else(|| crate::origin::Origin::http(&host_s, pms_port));
-        crate::plex::session::ServerRef {
-            address: origin.host().to_owned(), port: i64::from(origin.port()),
-            origin_url: origin.base(), token: dev_token.clone(),
-            tier: Some(crate::plex::probe::configured_tier(origin.host())), ..Default::default()
-        }
-    });
     let session_init = match &initial {
         Some(initial) => initial.session.clone(),
-        None => captured_session_for_boot(session.clone(), dev_primary, Vec::new()),
+        None => crate::auth::SessionInit::captured(session.clone()),
     };
     let mut bridge = if controlled {
         super::bridge::Bridge::controlled_home(crate::diag::heartbeat::now_us,
@@ -954,7 +907,6 @@ pub(crate) unsafe fn construct(
     // Unlike every other boot override on this page, this one calls the real persisting setter —
     // see `dev::scenarios::arm_audio_enhancements`'s own doc for why.
     if !controlled { crate::dev::scenarios::arm_audio_enhancements(); }
-    let primary_binding = initial.as_ref().map(|initial| initial.primary_client);
     // The Jellyfin controlled world's client identity, lifted once: the boot arm below installs
     // it unprobed (`JfClient::synthetic`), so recording and replay construct the exact world the
     // typed Initial names — no config file, no network round-trip, no /tmp trigger. `None`
@@ -967,7 +919,7 @@ pub(crate) unsafe fn construct(
     });
     #[cfg(not(feature = "jellyfin"))]
     let jf_world: Option<(String, String, String, String)> = None;
-    // Lifted beside `jf_world` for the same reason `primary_binding` is: the closure borrows,
+    // Lifted beside `jf_world` for the same reason: the closure borrows,
     // and `initial` itself moves into the `App`.
     let jf_device = initial.as_ref().map(|i| i.session.persisted.client_id.clone());
     let activate_session = |bridge: &mut super::bridge::Bridge,
@@ -1006,44 +958,6 @@ pub(crate) unsafe fn construct(
         pages.frame_with(bridge, crate::ui::machine::Tick::default(), Vec::new(), Vec::new(),
             rec, false);
         BootTo::Home
-    } else if !dev_token.is_empty() {
-        // `Origin::http` names the assumption out loud: the host and port compiled into the
-        // C shim are a plaintext address, with no scheme to read off them.
-        //
-        // The tier is classified from that address rather than left `None`. There is no
-        // plex.tv connection list on this path to read a `local` flag off, and `None` means
-        // "nothing has said" — which left every automated run unable to reach Auto's Original
-        // bootstrap, since `abr::bootstrap` is only consulted once a tier exists. See
-        // `probe::configured_tier` for why address shape is honest enough here.
-        let tier = crate::plex::probe::configured_tier(&host_s);
-        log(&format!(
-            "boot: dev token — link={tier:?} (classified from the configured address)"
-        ));
-        super::bridge::execute_session_command(pages, crate::auth::SessionCmd::ActivateDevBootstrap);
-        pages.frame_with(bridge, crate::ui::machine::Tick::default(), Vec::new(), Vec::new(),
-            rec, false);
-        if let Some(ready) = bridge.take_session_ready() {
-            if controlled {
-                if bridge.bind_primary(primary_binding.expect("controlled initial binding")).is_err() {
-                    log("bootstrap: primary resource binding refused");
-                    return BootTo::Login;
-                }
-                use crate::stores::{StoreCmd, StoreWork};
-                use crate::ui::machine::{Fx, MachineId};
-                use crate::screens::registry::AppFx;
-                for cmd in [
-                    StoreCmd::Browse(crate::stores::browse::BrowseCmd::Reset),
-                    StoreCmd::Hubs(crate::stores::hubs::HubsCmd::Reset),
-                    StoreCmd::Hubs(crate::stores::hubs::HubsCmd::RefetchHubs),
-                ] { pages.emit(MachineId::Nav, Fx::App(AppFx::Store(cmd.store(), cmd))); }
-                pages.emit(MachineId::Nav, Fx::App(AppFx::StoreWork(StoreWork::BrowseDiscovery)));
-                pages.frame_with(bridge, crate::ui::machine::Tick::default(), Vec::new(), Vec::new(), rec, false);
-            } else {
-                install_pms_owned(bridge, &ready.origin, &ready.address,
-                    &ready.token, ready.tier, ready.pin.as_ref(), &ready.install);
-            }
-            BootTo::Home
-        } else { BootTo::Login }
     } else if crate::jellyfin::boot::try_boot() {
         // The live Jellyfin boot: a config file named a server, the server accepted the
         // credentials, and the client is installed.

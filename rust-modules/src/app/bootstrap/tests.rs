@@ -131,53 +131,6 @@ fn screen_input_codec_retains_full_time_source_edge_and_hit_identity() {
     assert_ne!(effects::input(&pointer(None)).unwrap(),effects::input(&pointer(Some(1))).unwrap());
 }
 
-fn activate(bridge: &mut super::super::bridge::Bridge) {
-    let mut dispatcher = crate::ui::dispatch::Dispatcher::<super::super::bridge::AppHost>::new();
-    super::super::bridge::execute_session_command(&mut dispatcher,crate::auth::SessionCmd::ActivateDevBootstrap);
-    dispatcher.frame_with(bridge,Tick::default(),Vec::new(),Vec::new(),&mut crate::ui::dispatch::NoTap,false);
-    assert!(bridge.take_session_ready().is_some());
-}
-
-#[test]
-fn normal_and_controlled_activation_publish_the_owner_supplied_scope() {
-    let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("controlled-profile-boundary");
-    session.assert_only_target();
-    let before = std::fs::read(session.path()).unwrap();
-    struct RegistryCleanup;
-    impl Drop for RegistryCleanup { fn drop(&mut self) { crate::registry::reset_for_test(); } }
-    let _cleanup = RegistryCleanup;
-    crate::registry::reset_for_test();
-    let mt = unsafe { crate::task::MainThread::assume() };
-    let initial = Initial::synthetic_home(19,9,None).unwrap();
-    let mut live = super::super::bridge::Bridge::new(
-        ||0, initial.session.clone(), &mt);
-    activate(&mut live);
-    let live_view = live.profile_resource_view().unwrap();
-    let live_owner = live.snapshot_session_init();
-    assert_eq!(live_view.generation,live_owner.profile_scope.0);
-    assert_ne!(live_view.generation,0);
-    let ambient = crate::plex::session::current_snapshot();
-    crate::registry::reset_for_test();
-    crate::plex::Client::restore_generation_seed(initial.primary_client).unwrap();
-    let mut controlled = super::super::bridge::Bridge::controlled_home(||0,&initial,&mt,true);
-    let retained = controlled.profile_resource_view().unwrap();
-    activate(&mut controlled);
-    let scoped = controlled.profile_resource_view().unwrap();
-    assert_eq!(scoped.generation,controlled.snapshot_session_init().profile_scope.0);
-    assert_eq!(scoped.generation,live_view.generation);
-    assert_eq!(serde_json::to_value(&scoped.user).unwrap(),serde_json::to_value(&live_view.user).unwrap());
-    assert_eq!(retained.generation,0,"old scoped resource read remains immutable");
-    assert!(std::sync::Arc::ptr_eq(&ambient,&crate::plex::session::current_snapshot()),"scoped replay never replaces ambient publication");
-    assert_eq!(std::fs::read(session.path()).unwrap(),before);
-    controlled.bind_primary(initial.primary_client).unwrap();
-    let client = controlled.recorded_client(initial.primary_client).unwrap();
-    assert_eq!(client.denied_data_requests(),0);
-    assert!(client.fetch_built("/synthetic").is_none(),"poster HTTP arm is denied too");
-    assert_eq!(client.denied_data_requests(),1);
-    assert_eq!(controlled.controlled_failure(),Some("unrecorded client IO attempted"));
-}
-
 /// **Stage B regression, device-affecting.** Before `0d466527` (stage B), `stores::init` ended
 /// with `crate::metadata::record::reset(initial.content.is_some())`, arming the crate-global
 /// `Tracker` for controlled-content recording of detail terminals. Stage B deleted that line with
@@ -238,7 +191,7 @@ fn whole_record_preflight_rejects_bad_late_results_and_markers_without_resources
     record.frames[0].st = Some(0);
     record.frames.push(crate::ui::rec::Frame { f:1,tick:Some(Tick {ms:16,dt_us:16000}),
         results:vec![json!({"f":1,"t":"async","to":"store:1","req":1,"payload":{
-            "kind":"hubs","version":1,"gen":1,"seq":1,"sid":0,"client":1,"token_gen":1,"build":null}})],
+            "kind":"hubs","version":1,"gen":1,"seq":1,"sid":0,"client":0,"token_gen":0,"build":null}})],
         lands:vec![(1,1,1)],st:Some(0),present:Some(false),snapshot_pending:Some(true),..Default::default() });
     super::super::recorder::validate_controlled(&record,&initial).unwrap();
     record.frames[1].present = None;
@@ -286,13 +239,18 @@ fn controlled_hubs_commands_preserve_normal_store_notice_bookkeeping() {
 #[cfg(feature = "jellyfin")]
 fn controlled_admission_records_real_discovery_spawn_refusal() {
     let _serial = crate::testlock::serial();
+    // The flavor's launch lane is the installed client: the discovery pick only fires for the
+    // jellyfin SERVER_ID once a client exists (browse_roster_jellyfin_tests).
+    crate::jellyfin::install(crate::jellyfin::JfClient::new(
+        crate::origin::Origin::http("127.0.0.1", 1), "dev-1".into()));
     let mt = unsafe { crate::task::MainThread::assume() };
     let publisher = crate::plex::session::ProfilePublisher::scoped(&mt);
     let mut io = HomeIo { replay:false,preferences:Default::default(),requests:Vec::new(),admissions:Default::default(),
         failure:None,profile:publisher.snapshot() };
     let stores = crate::stores::Stores::default();
-    stores.browse.borrow_mut().seed_source_for_test(crate::registry::ServerId::from_raw(1));
+    stores.browse.borrow_mut().seed_source_for_test(crate::jellyfin::SERVER_ID);
     io.discovery_owned_with(&stores, &mut |_| false);
+    crate::jellyfin::uninstall();
     assert_eq!(io.requests.len(), 1);
     assert_eq!(io.requests[0]["admitted"], serde_json::json!(false), "real refusal must be recorded");
 }

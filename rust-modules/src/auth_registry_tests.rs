@@ -110,30 +110,6 @@ fn stored_credential_policy_rejection_retains_insecure_recovery_metadata() {
     crate::registry::reset_for_test();
 }
 
-/// #95 step 8 / A2: the boot primary install (`install_captured_registry`, what
-/// `RegistryPlan::DevInstall` and the boot gate's `install_pms_owned` both call) derives the
-/// IP family from the ADVERTISED ADDRESS, not `origin.host()` — a `plex.direct` origin's host
-/// is a certificate NAME `IpVersion::of_host` cannot parse as a literal, which is exactly why
-/// R3(a) found this reading unknown on every real boot before the fix. The stored tier is
-/// applied in the same write.
-#[test]
-fn a_boot_primary_install_of_a_plex_direct_origin_derives_ip_from_the_stored_address() {
-    let _g = crate::testlock::serial();
-    crate::registry::reset_for_test();
-    let origin = Origin::parse("https://192-168-1-50.h4sh.plex.direct:32400").unwrap();
-    install_captured_registry(&origin, "192.168.1.50", "tok",
-        Some(probe::Location::Local), None, &[], Some("cid"));
-    let id = crate::registry::current();
-    let client = crate::registry::client_for(id).expect("the primary is registered and current");
-    assert_eq!(client.link(), Some(probe::Location::Local), "the stored tier");
-    assert_eq!(
-        client.ip_version(),
-        Some(crate::plex::IpVersion::V4),
-        "derived from the address, not the plex.direct hostname `origin.host()` carries"
-    );
-    crate::registry::reset_for_test();
-}
-
 /// Our own server registers first and is the primary, whatever order plex.tv listed the account
 /// in — because the registry makes the first registration `current` when nothing is yet, so the
 /// ordering is what stops a boot coming up pointed at a friend's server and building Home from

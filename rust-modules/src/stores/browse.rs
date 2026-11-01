@@ -593,10 +593,13 @@ mod contract_tests {
     #[cfg(feature = "jellyfin")]
     fn direct_controlled_discovery_mutates_only_the_addressed_owner() {
         let _guard = crate::testlock::serial();
+        // The flavor's launch lane is the installed client: the discovery pick only fires for
+        // the jellyfin SERVER_ID once a client exists (browse_roster_jellyfin_tests). The
+        // source is NOT seeded — the sync's adoption IS the roster change the gen bump grades.
+        crate::jellyfin::install(crate::jellyfin::JfClient::new(
+            crate::origin::Origin::http("127.0.0.1", 1), "dev-1".into()));
         let selected = crate::stores::Stores::default();
         let decoy = crate::stores::Stores::default();
-        let sid = crate::registry::ServerId::from_raw(1);
-        selected.browse.borrow_mut().seed_source_for_test(sid);
         let selected_before = selected.browse.borrow().source_list_gen_for_test();
         let decoy_before = decoy.browse.borrow().source_list_gen_for_test();
 
@@ -605,6 +608,7 @@ mod contract_tests {
             launches += 1;
             false
         });
+        crate::jellyfin::uninstall();
 
         assert_eq!(launches, 1);
         assert_ne!(selected.browse.borrow().source_list_gen_for_test(), selected_before,

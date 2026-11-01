@@ -220,11 +220,9 @@ impl crate::screens::registry::MetadataLike for AppHost {
 pub(crate) struct Bridge {
     session_cache_generation: u64,
     home_io: Option<super::bootstrap::HomeIo>,
-    recorded_clients: std::collections::BTreeMap<u32, &'static crate::plex::Client>,
     initial_subhash: u64,
     session: crate::auth::SessionMachine,
     session_adapter: super::adapters::session::SessionAdapter,
-    session_ready: Option<(u64, crate::auth::owner::ProfileScope, crate::plex::session::ServerRef, String, crate::auth::owner::ReadyInstall)>,
     stores: crate::stores::Stores,
     mounter: AppMounter,
     /// This frame's publication of the playback session — see `AppViews::session`. Refreshed by
@@ -301,9 +299,9 @@ impl Bridge {
         self.session_adapter.recording_retired_for_erasure(failed);
     }
     pub(crate) fn controlled_failure(&self) -> Option<&'static str> {
-        if self.recorded_clients.values().any(|client| client.denied_data_requests() != 0) {
-            return Some("unrecorded client IO attempted");
-        }
+        // The recorded-clients denial half went with the DevPms controlled install (#166): the
+        // jellyfin world has no registry instances to police, and the replay denial contract
+        // rides the fixture client's own counters (`plex/library.rs`).
         self.home_io.as_ref().and_then(|io| io.failure)
     }
     pub(crate) fn take_resource_requests(&mut self) -> Vec<serde_json::Value> {
@@ -408,11 +406,9 @@ impl Bridge {
         Self {
             session_cache_generation: crate::plex::session::visible_generation(),
             home_io: None,
-            recorded_clients: std::collections::BTreeMap::new(),
             initial_subhash: 0,
             session: crate::auth::SessionMachine::from_init(init),
             session_adapter,
-            session_ready: None,
             stores,
             mounter: AppMounter::default(),
             playback: crate::route::PlaybackSession::IDLE,
@@ -464,18 +460,7 @@ impl Bridge {
     /// Cached logical Session hash, including pending work even when its UI read is unchanged.
     pub fn session_subhash(&self) -> u64 { self.session.subhash() }
     pub(crate) fn initial_subhash(&self) -> u64 { self.initial_subhash }
-    #[cfg(test)]
-    pub(crate) fn profile_resource_view(&self) -> Option<std::sync::Arc<crate::plex::session::CurrentProfile>> {
-        self.session_adapter.profile_resource_view()
-    }
     pub(crate) fn snapshot_session_init(&self) -> crate::auth::SessionInit { self.session.snapshot_init() }
-
-    pub(crate) fn take_session_ready(&mut self) -> Option<crate::auth::ReadyCreds> {
-        let (epoch, scope, server, token, install) = self.session_ready.take()?;
-        if !self.session.ready_is_current(epoch, scope) { return None; }
-        Some(crate::auth::ReadyCreds { origin: server.origin(), address: server.address.clone(),
-            token, install, tier: server.tier, pin: server.resolve_pin() })
-    }
 
     pub(crate) fn take_content_reqs(&mut self) -> Vec<(MachineId, ContentReq, ReturnState<u32, PageMemory>)> {
         std::mem::take(&mut self.content_reqs)
@@ -1090,20 +1075,6 @@ impl Bridge {
         self.take_hubs_results()
     }
 
-    pub(crate) fn bind_primary(&mut self, recorded: u32) -> Result<(), &'static str> {
-        let resource = crate::registry::client_opt().ok_or("missing controlled primary")?;
-        if resource.instance_gen() != recorded || resource.id().raw() != 0 {
-            return Err("initial primary binding mismatch");
-        }
-        if self.recorded_clients.insert(recorded, resource).is_some() {
-            return Err("duplicate initial primary binding");
-        }
-        Ok(())
-    }
-    #[cfg_attr(not(test), expect(dead_code))]
-    pub(crate) fn recorded_client(&self, id: u32) -> Option<&'static crate::plex::Client> {
-        self.recorded_clients.get(&id).copied()
-    }
     /// Does [`Rig::draw_chrome`] paint the shared top bar for this argument? Pulled out of that
     /// method as its own named predicate — rather than inlined as a `matches!` — for two reasons:
     /// it is DERIVED from `ScreenArg::chrome()` (`AppArg::chrome` in `screens/registry.rs`, which
@@ -1443,15 +1414,15 @@ impl Bridge {
                     }
                 }
             }
-            SessionFx::Ready { epoch, scope, server, token, install } => {
-                if self.session.ready_is_current(epoch, scope) {
-                    self.session_ready = Some((epoch, scope, server, token, install));
-                }
-            }
+            // The credentials handoff (`SessionFx::Ready`) has no consumer anymore: both of
+            // `take_session_ready`'s readers — the boot gate's dev-token arm and the Plex arm
+            // of `follow_auth_landing` — went with the DevPms world (#166). The owner-side
+            // Ready machinery stays until the plex.tv sign-in world itself is cut; its
+            // emissions land here and are dropped.
+            SessionFx::Ready { .. } => {}
             // Erase is ordered work, not a stale asynchronous completion: a subsequent login
             // may already have advanced the epoch, but cannot skip deleting old credentials.
             SessionFx::Erase { epoch, all_local, .. } => {
-                self.session_ready = None;
                 if let Some(leftovers) = self.session_adapter.begin_erase(epoch, all_local, &mut self.stores.metadata) {
                     deliver(SessionEvent::Erased { epoch, leftovers });
                 }
@@ -2346,40 +2317,7 @@ pub(crate) fn follow_auth_landing(pages: &mut Dispatcher<AppHost>, bridge: &mut 
     if crate::jellyfin::client().is_some() {
         return;
     }
-    if let Some(c) = bridge.take_session_ready() {
-        // A sign-out followed by a fresh sign-in can replace the session without restarting the
-        // process. Re-read only at this one credentials handoff so the old account's in-memory
-        // preference cannot leak into the new session.
-        let saved = crate::plex::session::peek();
-        crate::route::restore_quality(
-            crate::dev::playback_quality_override().unwrap_or_else(|| saved.playback_quality()),
-        );
-        crate::route::restore_direct_play_mode(saved.direct_play_mode());
-        crate::route::restore_lip_sync_offset_ms(saved.lip_sync_offset_ms());
-        crate::route::restore_up_next_policy(saved.up_next_policy());
-        crate::route::restore_up_next_window_s(saved.up_next_window_s());
-        crate::route::restore_series_tracks(saved.series_tracks.as_slice());
-        crate::player::restore_subtitle_tone(saved.subtitle_tone());
-        crate::player::restore_audio_enhancements(saved.audio_enhancements());
-        super::boot::install_pms_owned(bridge, &c.origin,
-            &c.address, &c.token, c.tier, c.pin.as_ref(), &c.install);
-        // **A new user must never be able to walk BACK into the previous one's pages**, which is
-        // the fourth store an identity change must not survive beside the `browse`/`pms`/`person`
-        // resets `install_pms` performs. It was `trail.reset()`, which emptied the loop's mirror
-        // and left the CONTAINER's entries — bodies, `ReturnState`s and all — exactly where they
-        // were, because `sync_page` only ever moved the top. `reset_for_profile` is the whole tree.
-        pages.reset_for_profile();
-        bridge.refresh_browse_directory();
-        if crate::stores::browse::onboard::asks(bridge.browse_directory()) {
-            crate::log("login: server installed — asking which sources feed Home");
-            // no `enter()`: rooting the stack at the page is what mounts the owned screen
-            // (`boot.rs`), and a ROOT is right because the sweep above has just emptied the tree.
-            nav_root_if_unsettled(pages, AppArg::Onboard);
-        } else {
-            crate::log("login: server installed — entering Home");
-            nav_root_if_unsettled(pages, AppArg::Home);
-        }
-    } else if bridge.auth_read().0.persistence_warning.is_some() {
+    if bridge.auth_read().0.persistence_warning.is_some() {
         // A fresh save could not be confirmed durable: keep the report reachable before
         // consent/profile routing, exactly as 0.6.6 did — the warning is answered on the login
         // screen itself (AUTH-03), not by moving on as if it were acknowledged.
@@ -3032,8 +2970,7 @@ mod recording_erasure_tests;
 
 #[cfg(test)]
 #[cfg(test)]
-#[path = "session_dev_bootstrap_tests.rs"]
-mod session_dev_bootstrap_tests;
+
 
 #[cfg(test)]
 #[cfg(test)]

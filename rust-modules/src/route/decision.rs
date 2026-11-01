@@ -171,7 +171,7 @@ pub(crate) struct PlaybackSession {
     /// It used to be `cur_auto_remote_original` and to carry `Location::Remote`, on the argument
     /// that a Local link "needs no throughput proof". That is true of the PRE-FLIGHT question —
     /// whether to spend a probe before choosing Original — and false of the runtime one:
-    /// `Location` is decided from the address shape (`plex::probe::configured_tier`) and describes
+    /// `Location` is decided from the address shape and describes
     /// TOPOLOGY, which does not imply throughput. Wi-Fi, powerline, a busy switch or a second
     /// stream in the house all produce a LAN that cannot carry a 10 Mbps source.
     ///
