@@ -24,10 +24,6 @@ mod servers;
 mod hubs;
 mod library;
 pub(crate) mod collections;
-/// The one client-side hub-title override rule (issue #12): shared by Home's whole-catalog merge
-/// (`crate::pms`) and a library's own `/hubs/sections/{id}` shelves (`crate::browse::section_hubs`)
-/// so neither reimplements or drifts from the other's id table.
-pub(crate) mod hub_title;
 /// Whole-file text subtitles are bounded before transport allocation and parsing.
 pub(crate) const SIDECAR_MAX_BYTES: usize = 4 * 1024 * 1024;
 mod timeline;
@@ -43,7 +39,6 @@ pub(crate) mod serverinfo;
 // `Client` above (own host + HTTPS transport), so it's its own `AccountClient`, not an `impl`.
 // pub(crate): the login/boot code (app.rs) + the UI screens construct these directly.
 pub(crate) mod account;
-pub(crate) mod languages;
 #[allow(dead_code)]
 pub(crate) mod session;
 
@@ -69,9 +64,9 @@ pub(crate) use crate::grant;
 // never-empty floor are graded on the host rather than observed on a television.
 pub(crate) mod pins;
 
-// The plex.tv METADATA PROVIDER (`discover.provider.plex.tv`) — a third service, but one that
-// shares the account API's transport + identity headers exactly, so it only adds an
-// `impl AccountClient` block (same pattern as the PMS op files above).
+// The person/filmography wire DTOs (`PersonProfile`, `CreditGroup`, …). The plex.tv metadata
+// provider client that used to live here is gone (Jellyfin-only); the Jellyfin person backend in
+// `crate::person` builds these from `BaseItemDto` answers.
 #[cfg_attr(test, allow(dead_code))]
 pub(crate) mod discover;
 

@@ -3253,11 +3253,6 @@ mod preference_effect_tests {
             let mut bridge = Bridge::controlled_home(|| 0, &initial, &mt, replay);
             let mut emitted = Vec::new(); let mut present = Present::new();
             let mut out = Effects::new(&mut emitted, MachineId::Instance(InstanceId(1)), &mut present);
-            let (reply, receipt) = mpsc::channel();
-            bridge.app_effect(MachineId::Instance(InstanceId(1)),
-                AppFx::Preferences(PreferenceCmd::Load { reply }), &mut out);
-            assert!(matches!(receipt.try_recv(), Err(TryRecvError::Disconnected)),
-                "controlled account load must drop the reply without capturing a live profile");
             for save_quality in [false, true] {
                 let (reply, receipt) = mpsc::channel();
                 let command = if save_quality {

@@ -274,13 +274,18 @@ included (`rust-modules/src/plex/client.rs`'s
 `pms_headers_carry_the_literal_selected_ui_language_be_included` test pins that for all three
 shipped tags) — that part of the earlier record stands. What changed is that neither
 `screens/home/mod.rs` nor a library's own browse grid renders `hub.title` unconditionally:
-`plex::hub_title::localized_hub_title` sits between a PMS `Hub` and the row the screen draws, at
+`plex::hub_title::localized_hub_title` sat between a PMS `Hub` and the row the screen drew, at
 BOTH call sites — Home's whole-catalog merge (`pms.rs::project`, one row per source, `/hubs`) and
 a library's own shelves (`browse::section_hubs::parse_hubs`, `/hubs/sections/{id}`) — one shared
-table so the two cannot drift apart. It overrides the title, **unconditionally** (not gated on
-whether the selected tag happens to be one PMS translates), for a hubIdentifier this catalog
-recognizes, and the override differs by **scope** because PMS itself titles the "Recently Added"
-family differently at the two endpoints (§3 vs §3a):
+table so the two could not drift apart. **RETIRED 2026-10-31 (Jellyfin-only conversion): the
+module is deleted and both call sites render `Hub.title` verbatim again.** The table and its
+reasoning stay on this page as the record of what was tried and why; the per-tag coverage gap it
+papered over is PMS's to fix.
+
+It overrode the title **unconditionally** (not gated on whether the selected tag happens to be
+one PMS translates), for a hubIdentifier the catalog recognized, and the override differed by
+**scope** because PMS itself titles the "Recently Added" family differently at the two endpoints
+(§3 vs §3a):
 
 | scope | hubIdentifier | client-side override | locale key |
 |---|---|---|---|
@@ -312,10 +317,11 @@ catalog has not specifically enumerated — a rotating genre/actor rail, a colle
 there is still no substitute catalog for arbitrary server-owned text, and no live evidence (this
 file, `docs/plex-openapi.json`, or the repo's own fixtures) that those families need one. Tests:
 `pms_multi_source_merge_tests.rs`'s `a_recently_added_library_hub_renders_the_be_catalog_string_under_a_be_ui`,
-`one_movie_and_one_tv_library_get_the_natural_per_type_recently_added_titles`,
-`a_lone_movie_library_renders_the_be_per_type_catalog_string_under_a_be_ui`, and
-`an_unrecognized_hub_identifier_keeps_the_pms_title_verbatim` (Home scope); `section_hubs.rs`'s
-`a_be_ui_localizes_the_section_recently_added_hub_and_leaves_an_unknown_one_alone` (Section scope).
+`an_unrecognized_hub_identifier_keeps_the_pms_title_verbatim` (Home scope). The retired override's
+own tests (`a_recently_added_library_hub_renders_the_be_catalog_string_under_a_be_ui`,
+`a_lone_movie_library_renders_the_be_per_type_catalog_string_under_a_be_ui`,
+`a_be_ui_localizes_the_section_recently_added_hub_and_leaves_an_unknown_one_alone`) were removed
+with the table.
 This cannot be verified further against a live PMS from here (the mock server under
 `tests/mock_pms.py` does not model per-string translation coverage, by design — see its own header
 comment); do not infer a different PMS-side fallback chain (e.g. "falls back to the account's
@@ -369,9 +375,9 @@ Measured on this server, and every one of these is a thing the OpenAPI spec does
   "Toy Story Collection" in the same column as "Recently Added".
 * **PMS titles a `*.recentlyadded.<id>` hub plain "Recently Added" here — no library name**,
   unlike the same hubIdentifier on the whole-server `/hubs` (§3's "Recently Added in Movies").
-  This route is already scoped to one library, so there is nothing to disambiguate. This app's own
-  client-side override (§3's table, Section row) reproduces that: `browse.library.hub.recently_added`,
-  not `browse.home.hub.recently_added_in`.
+  This route is already scoped to one library, so there is nothing to disambiguate. (The app's
+  §3 override table once reproduced that client-side with `browse.library.hub.recently_added`;
+  retired 2026-10-31 — titles render verbatim at both scopes now.)
 
 **The trap worth carrying: two of these hubs CHANGE IDENTITY BETWEEN REQUESTS.** The genre and
 the actor/director shelves rotate their subject on every call — six consecutive requests

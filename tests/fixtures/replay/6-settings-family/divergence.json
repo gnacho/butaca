@@ -1,9 +1,0 @@
-{
-  "expected": "0x5612d7ccd6aebb66",
-  "first_frame": 21,
-  "from_state_fp": 380541232516096414,
-  "got": "0x6059d555c33051af",
-  "preceding_event_kinds": [],
-  "reason": "phase A of the Jellyfin-only pivot (#166): settings offers only Jellyfin server actions",
-  "to_state_fp": 380541232516096414
-}

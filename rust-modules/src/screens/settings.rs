@@ -436,7 +436,6 @@ fn mount_page(
         SettingsPage::Language => Box::new(LanguagePage::new(entry)),
         SettingsPage::Contribute => Box::new(super::legal::DocumentPage::contribute(entry)),
         SettingsPage::Playback => Box::new(super::preferences::PreferencesPage::new(entry, super::preferences::Kind::Playback)),
-        SettingsPage::AudioSubtitles => Box::new(super::preferences::PreferencesPage::new(entry, super::preferences::Kind::AudioSubtitles)),
         SettingsPage::Legal => Box::new(super::legal::LegalIndex::new(entry)),
         #[cfg(test)]
         SettingsPage::About => Box::new(super::legal::DocumentPage::about(entry)),

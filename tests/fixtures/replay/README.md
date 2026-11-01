@@ -74,8 +74,9 @@ that is early WAITS for its frame, the frame a landing is due polls for a bounde
 that is late, unrecorded (`extra`) or never produced (`missing`) is reported and rides the
 verdict as `land_diffs`.
 
-The **anchors** include `1-boot-home-chip-grid`, `6-settings-family` (Privacy toggle and Legal
-document navigation), and `12-filmography-detail-return` (the owned Filmography surface, a
+The **anchors** include `1-boot-home-chip-grid`, `6-settings-family` (the Settings root's
+SelectServer door: the Servers page entered, one navigation focus step inside, and the BACK
+step out), and `12-filmography-detail-return` (the owned Filmography surface, a
 library-matched credit opened in Detail, and both BACK steps). Phase 7 rerecorded the existing anchors
 after an observed loader refusal and added the content-return anchor. **Phase 11 rerecorded all
 three onto schema 2**, which carries the landing schedule above. **The product Resolve milestone
@@ -92,7 +93,12 @@ Person page is pushed before Detail's replacement capture.
 controlled-replay coverage. Flow 12 has typed initial state, exact synchronous admissions,
 recorded content results, and denied resource execution. This bounded support does not imply
 all-domain acceptance. Editing manifest fingerprints or state hashes is never a replacement for
-rerecording. The D1 results below describe that earlier build, not current all-domain acceptance.
+rerecording. The Settings anchor now walks the root's SelectServer door: enter the Servers
+page, one navigation focus step, BACK out. The earlier Privacy/Legal walk pressed OK on rows
+the current root no longer has, and the actions the current rows open emit loop effects the
+controlled contract refuses, so it was re-recorded with `tools/butaca-rec rerecord` (state
+shape 380541232516096414 -> 13852987339565759636, anchor preserved). The D1 results below
+describe that earlier build, not current all-domain acceptance.
 
 **Historical Phase 12 (D1) rerecorded all three again**, and it is the cleanest example of what `rerecord` is
 for: `enum Route` was folded into `AppArg`, so `ARG_SHAPE` lost its nested `Legacy:Route{…}` and

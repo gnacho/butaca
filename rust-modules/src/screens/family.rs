@@ -68,8 +68,6 @@ pub(crate) enum SettingsPage {
     Contribute,
     /// Install-wide playback defaults.
     Playback,
-    /// Plex account audio and subtitle preferences.
-    AudioSubtitles,
     /// Favorite libraries — the onboard screen in Settings mode.
     Favourites,
     /// The Legal index.
@@ -91,7 +89,6 @@ impl ScreenArg for SettingsPage {
         ScreenId(match self {
             SettingsPage::Root => 100,
             SettingsPage::Playback => 108,
-            SettingsPage::AudioSubtitles => 109,
             SettingsPage::Language => 110,
             SettingsPage::Contribute => 111,
             SettingsPage::Favourites => 101,
@@ -131,7 +128,6 @@ impl LogicalState for SettingsPage {
             | SettingsPage::Language
             | SettingsPage::Contribute
             | SettingsPage::Playback
-            | SettingsPage::AudioSubtitles
             | SettingsPage::Favourites
             | SettingsPage::Legal => 0,
             #[cfg(test)]
@@ -146,7 +142,6 @@ impl LogicalState for SettingsPage {
             SettingsPage::Language => "language",
             SettingsPage::Contribute => "contribute",
             SettingsPage::Playback => "playback",
-            SettingsPage::AudioSubtitles => "audio-subtitles",
             SettingsPage::Favourites => "favourites",
             SettingsPage::Legal => "legal",
             #[cfg(test)]
@@ -309,7 +304,6 @@ mod tests {
             SettingsPage::Language,
             SettingsPage::Contribute,
             SettingsPage::Playback,
-            SettingsPage::AudioSubtitles,
             SettingsPage::Favourites,
             SettingsPage::Legal,
             #[cfg(test)]

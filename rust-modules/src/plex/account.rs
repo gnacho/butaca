@@ -28,9 +28,6 @@ use std::time::{Duration, Instant};
 // while the PMS DTOs keep theirs as `i64`.
 use super::models::{de_bool, de_i64, de_str, de_vec};
 
-mod preferences;
-pub(crate) use preferences::{PreferenceError, PreferenceRequest, PreferenceSnapshot, PreferenceUpdate};
-
 const PLEX_TV: &str = "https://plex.tv";
 
 /// plex.tv's base URL: [`PLEX_TV`], or — in a dev build only — a LOOPBACK stand-in named by
@@ -267,13 +264,14 @@ impl AccountClient {
         h
     }
 
-    /// `pub(super)` so the sibling op file `discover.rs` can add its `impl AccountClient` block on
-    /// top of this ONE transport + identity choke point instead of hand-rolling a second one.
-    pub(super) fn get<T: DeserializeOwned>(&self, url: &str) -> Option<T> {
+    /// HOST SUITE: the plain decode seam, kept for the response-policy tests below after the
+    /// provider client (`discover.rs`) stopped needing it in production builds.
+    #[cfg(test)]
+    fn get<T: DeserializeOwned>(&self, url: &str) -> Option<T> {
         decode("GET", url, self.get_raw(url).ok()?)
     }
 
-    /// [`Self::get`], keeping what the call observed when it yields nothing — see [`CallEvidence`].
+    /// [`Self::get_evidence`], keeping what the call observed when it yields nothing — see [`CallEvidence`].
     fn get_evidence<T: DeserializeOwned>(&self, url: &str) -> Result<T, CallEvidence> {
         decode_evidence("GET", url, self.get_raw(url))
     }

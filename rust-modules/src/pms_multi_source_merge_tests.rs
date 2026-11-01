@@ -26,9 +26,10 @@ fn home_group_identity_uses_provider_and_server_not_title_or_position() {
 
 #[test]
 fn home_keeps_recently_added_rows_for_two_same_type_libraries() {
-    // `librarySectionTitle` is present on every real PMS item (`docs/pms-api.md` §2) — set here
-    // so `localized_hub_title`'s "Recently Added in {library}" override reproduces PMS's own
-    // per-library disambiguation exactly, rather than only being exercised on the fallback path.
+    // `librarySectionTitle` is present on every real PMS item (`docs/pms-api.md` §2). Shelf
+    // titles render verbatim now (the client-side hub-title override table is gone), so this
+    // fixture pins PMS's own per-library disambiguation passing through untouched: two hubs
+    // under the SAME identifier keep the two distinct titles PMS minted.
     let body = r#"{"MediaContainer":{"Hub":[
         {"type":"show","hubIdentifier":"home.television.recent",
          "title":"Recently Added in TV","key":"/hubs/home/recentlyAdded?type=2&sectionID=1",
@@ -62,13 +63,11 @@ fn home_keeps_recently_added_rows_for_two_same_type_libraries() {
     );
 }
 
-/// Reviewer correction to issue #12's fix: a `home.<type>.recent` hub PMS mints because a
-/// household owns exactly ONE library of that type reads more naturally by type ("Recently Added
-/// Movies") than by library name ("Recently Added in Movies") — the per-library form stays
-/// reserved for the case directly above, where PMS is disambiguating between two same-type
-/// libraries by minting the identifier twice. A household with one movie library and one TV
-/// library gets one `home.movies.recent` hub and one `home.television.recent` hub, each the
-/// ONLY hub under its own identifier, so both take the per-type wording.
+/// With shelf titles rendering verbatim (the client-side hub-title override table is gone), the
+/// distinction issue #12's fix used to draw is PMS's own to make: whatever titles the server
+/// minted pass through untouched. A household with one movie library and one TV library gets
+/// one `home.movies.recent` hub and one `home.television.recent` hub, each the ONLY hub under
+/// its own identifier; this pins those per-type titles arriving exactly as PMS spelled them.
 #[test]
 fn one_movie_and_one_tv_library_get_the_natural_per_type_recently_added_titles() {
     let body = r#"{"MediaContainer":{"Hub":[
@@ -95,60 +94,10 @@ fn one_movie_and_one_tv_library_get_the_natural_per_type_recently_added_titles()
     );
 }
 
-/// Issue #12: a Belarusian UI showed some Home hub titles in Belarusian and others in whatever
-/// PMS's own per-string coverage for `be` happened to answer. `localized_hub_title` closes that
-/// for every STANDARD hub by overriding `Hub.title` client-side — unconditionally, the same way
-/// Continue Watching's title never came from PMS at all — while a hub this catalog does not
-/// recognize keeps drawing PMS's own text verbatim (checked below).
-#[test]
-fn a_recently_added_library_hub_renders_the_be_catalog_string_under_a_be_ui() {
-    let _thread_locale = crate::i18n::language_on_this_thread_for_test(crate::i18n::Preference::Be);
-    let body = r#"{"MediaContainer":{"Hub":[
-        {"type":"movie","hubIdentifier":"movie.recentlyadded.1",
-         "title":"Recently Added in Movies","key":"/library/sections/1/all?sort=addedAt:desc",
-         "Metadata":[{"ratingKey":"1","librarySectionID":"1","librarySectionTitle":"Movies",
-                      "type":"movie","title":"A Film","thumb":"/t.jpg","art":"/a.jpg"}]}
-    ]}}"#;
-    let mc = serde_json::from_str::<crate::plex::Envelope>(body)
-        .expect("a PMS body with a per-library Recently Added hub parses")
-        .media_container;
-    let build = project(&mc, &crate::plex::MediaContainer::default(), sid(0));
-
-    assert_eq!(build.shelves.len(), 1);
-    assert_eq!(
-        build.shelves[0].title, "Нядаўна дададзена ў «Movies»",
-        "a be UI renders THIS client's be string for a known hubIdentifier, not PMS's own \
-         (possibly untranslated) title"
-    );
-}
-
-/// The `be` half of the per-type correction above: a household's only movie library still gets
-/// the per-type "Recently Added Movies" wording (`browse.home.hub.recently_added_movies`), not
-/// the per-library `{library}`-interpolated form, under a `be` UI.
-#[test]
-fn a_lone_movie_library_renders_the_be_per_type_catalog_string_under_a_be_ui() {
-    let _thread_locale = crate::i18n::language_on_this_thread_for_test(crate::i18n::Preference::Be);
-    let body = r#"{"MediaContainer":{"Hub":[
-        {"type":"movie","hubIdentifier":"home.movies.recent",
-         "title":"Recently Added Movies","key":"/hubs/home/recentlyAdded?type=1",
-         "Metadata":[{"ratingKey":"1","librarySectionID":"1","librarySectionTitle":"Movies",
-                      "type":"movie","title":"A Film","thumb":"/m.jpg","art":"/m-art.jpg"}]}
-    ]}}"#;
-    let mc = serde_json::from_str::<crate::plex::Envelope>(body)
-        .expect("a PMS body with a lone whole-server Recently Added hub parses")
-        .media_container;
-    let build = project(&mc, &crate::plex::MediaContainer::default(), sid(0));
-
-    assert_eq!(build.shelves.len(), 1);
-    assert_eq!(
-        build.shelves[0].title, "Нядаўна дададзеныя фільмы",
-        "a be UI renders THIS client's be per-type string, not the per-library form"
-    );
-}
-
-/// The other half of the same rule: a hubIdentifier this catalog does not enumerate — a custom
-/// collection shelf, a promoted rail PMS mints under an id this app has never seen — keeps
-/// drawing PMS's own `title` verbatim, in any language, exactly as it did before this change.
+/// A hubIdentifier this catalog does not enumerate — a custom collection shelf, a promoted rail
+/// PMS mints under an id this app has never seen — keeps drawing PMS's own `title` verbatim, in
+/// any language, exactly as it always did. With the client-side hub-title override table gone,
+/// this is now the rule for EVERY hub, recognized or not; the test stays as the verbatim pin.
 #[test]
 fn an_unrecognized_hub_identifier_keeps_the_pms_title_verbatim() {
     let _thread_locale = crate::i18n::language_on_this_thread_for_test(crate::i18n::Preference::Be);
