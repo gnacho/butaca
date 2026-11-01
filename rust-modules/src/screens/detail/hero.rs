@@ -1136,9 +1136,9 @@ mod tests {
     #[test]
     fn the_pass_note_judges_the_items_own_server_not_the_browsed_one() {
         let _guard = crate::testlock::serial();
-        crate::plex::reset_servers_for_test();
-        let own = crate::plex::register_for_test("own", "127.0.0.1", 1, "t", "c1");
-        let shared = crate::plex::register_for_test("shared", "127.0.0.2", 2, "t", "c2");
+        crate::registry::reset_for_test();
+        let own = crate::registry::register_with_client_id("own", "127.0.0.1", 1, "t", "c1");
+        let shared = crate::registry::register_with_client_id("shared", "127.0.0.2", 2, "t", "c2");
         crate::plex::serverinfo::store_for_test(
             own,
             crate::plex::serverinfo::Subscription::Yes,
@@ -1165,7 +1165,7 @@ mod tests {
             item_subscription(&ours),
             crate::plex::serverinfo::Subscription::Yes
         );
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     #[test]
@@ -1379,7 +1379,7 @@ mod tests {
     #[test]
     fn the_optimistic_flip_settles_a_leaf_at_once_and_a_container_a_round_trip_late() {
         let _guard = crate::testlock::serial();
-        let sid = crate::plex::ServerId::UNSET;
+        let sid = crate::registry::ServerId::UNSET;
         crate::metadata::set_current_for_test(test_store().state_mut(), Some(Detail {
             sid,
             rk: "movie".into(),

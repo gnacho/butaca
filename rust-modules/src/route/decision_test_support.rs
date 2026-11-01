@@ -106,7 +106,7 @@ pub(super) fn fresh_registry(ps: &mut PlaybackSession) -> crate::testlock::Seria
     // test that set it must not leak an enhanced resolve into the next one.
     crate::player::restore_audio_enhancements(crate::plex::AudioEnhancements::NONE);
     crate::player::reset_route_requests_for_test(ps);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     crate::player::clear_original_failure();
     g
 }
@@ -114,9 +114,9 @@ pub(super) fn fresh_registry(ps: &mut PlaybackSession) -> crate::testlock::Seria
 /// A `ServerId` naming a slot nothing is registered in — so `client_for` answers `None` and
 /// `build_stream` takes its no-client exit without opening a socket.
 pub(super) fn unregistered_sid() -> ServerId {
-    let id = ServerId::from_raw((crate::plex::MAX_SERVERS - 1) as u16);
+    let id = ServerId::from_raw((crate::registry::MAX_SERVERS - 1) as u16);
     assert!(
-        crate::plex::client_for(id).is_none(),
+        crate::registry::client_for(id).is_none(),
         "the test needs an EMPTY slot"
     );
     id

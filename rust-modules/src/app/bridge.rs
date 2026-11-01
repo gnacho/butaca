@@ -617,7 +617,7 @@ impl Bridge {
 
     /// Restore a detail page that is about to mount to a `Spot` no `ReturnState` holds — see
     /// [`crate::screens::registry::DetailSeed`].
-    pub(crate) fn seed_detail(&mut self, sid: crate::plex::ServerId, rk: &str, spot: crate::metadata::Spot) {
+    pub(crate) fn seed_detail(&mut self, sid: crate::registry::ServerId, rk: &str, spot: crate::metadata::Spot) {
         self.mounter.seed = Some(crate::screens::registry::DetailSeed { sid, rk: rk.to_string(), spot });
     }
 
@@ -1044,7 +1044,7 @@ impl Bridge {
     #[cfg(test)]
     pub(crate) fn seed_registered_browse_for_test(
         &mut self,
-        sids: [crate::plex::ServerId; 2],
+        sids: [crate::registry::ServerId; 2],
     ) {
         self.stores.browse.borrow_mut().seed_registered_table_for_test(sids);
         self.refresh_browse_directory();
@@ -1062,7 +1062,7 @@ impl Bridge {
     #[cfg(test)]
     pub(crate) fn seed_hubs_for_directory_test(
         &mut self,
-        sid: crate::plex::ServerId,
+        sid: crate::registry::ServerId,
         items: usize,
         hub_state: crate::pms::HubState,
     ) {
@@ -1091,7 +1091,7 @@ impl Bridge {
     }
 
     pub(crate) fn bind_primary(&mut self, recorded: u32) -> Result<(), &'static str> {
-        let resource = crate::plex::client_opt().ok_or("missing controlled primary")?;
+        let resource = crate::registry::client_opt().ok_or("missing controlled primary")?;
         if resource.instance_gen() != recorded || resource.id().raw() != 0 {
             return Err("initial primary binding mismatch");
         }
@@ -2091,7 +2091,7 @@ pub(crate) fn player_overlay_mut(
 pub(crate) fn open_content_panel(
     d: &mut Dispatcher<AppHost>,
     host: InstanceId,
-    subject: Option<(crate::plex::ServerId, &str)>,
+    subject: Option<(crate::registry::ServerId, &str)>,
     panel: crate::screens::registry::ContentPanel,
 ) {
     // WHICH surface a panel is — its style and its argument — is the registry's
@@ -2144,7 +2144,7 @@ pub(crate) fn card_menu_arg(
 /// rather than a catalog row: no row to carry, and `loaded_episode` set for the filmstrip so the
 /// dispatch routes Play from Start and the scrobble through that page's own episode path.
 fn strip_menu_arg(
-    sid: crate::plex::ServerId,
+    sid: crate::registry::ServerId,
     rk: &str,
     kind: ItemMenuKind,
     host: EntryId,
@@ -2526,7 +2526,7 @@ fn nav_peer(d: &mut Dispatcher<AppHost>, arg: AppArg, ret: Option<ReturnState<u3
 /// SEED (`DetailSeed`) exactly as it rode on the trail node's `Spot` before.
 pub(crate) fn open_detail(
     d: &mut Dispatcher<AppHost>, rig: &mut Bridge,
-    sid: crate::plex::ServerId, rk: &str, season: Option<std::os::raw::c_int>,
+    sid: crate::registry::ServerId, rk: &str, season: Option<std::os::raw::c_int>,
     ret: Option<ReturnState<u32, PageMemory>>,
 ) {
     use crate::ui::screen::ScreenArg;

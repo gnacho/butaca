@@ -127,15 +127,15 @@ fn registry_probe_state_and_tier_seed_and_update_the_browse_source() {
     struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::registry::reset_for_test();
         }
     }
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     let _cleanup = Cleanup;
     let mut browse = TestBrowse::default();
 
-    let sid = crate::plex::register_for_test("mach-A", "10.0.0.1", 32400, "tok", "cid");
-    crate::plex::client_for(sid)
+    let sid = crate::registry::register_with_client_id("mach-A", "10.0.0.1", 32400, "tok", "cid");
+    crate::registry::client_for(sid)
         .unwrap()
         .set_link(crate::plex::probe::Location::Remote);
     browse.sync_roster();
@@ -149,7 +149,7 @@ fn registry_probe_state_and_tier_seed_and_update_the_browse_source() {
         Some(crate::plex::probe::Location::Remote)
     );
 
-    crate::plex::publish_probe_result(sid, crate::plex::probe::Outcome::Unauthorized);
+    crate::registry::publish_probe_result(sid, crate::plex::probe::Outcome::Unauthorized);
     browse.sync_roster();
     assert_eq!(browse.state.sources()[0].state, SourceState::Unauthorized);
     assert_eq!(
@@ -158,15 +158,15 @@ fn registry_probe_state_and_tier_seed_and_update_the_browse_source() {
         "cached route metadata is retained"
     );
 
-    crate::plex::client_for(sid)
+    crate::registry::client_for(sid)
         .unwrap()
         .set_link(crate::plex::probe::Location::Relay);
-    crate::plex::publish_probe_result(sid, crate::plex::probe::Outcome::Reachable);
+    crate::registry::publish_probe_result(sid, crate::plex::probe::Outcome::Reachable);
     browse.sync_roster();
     assert_eq!(browse.state.sources()[0].state, SourceState::Reachable);
     assert_eq!(browse.state.sources()[0].tier, Some(crate::plex::probe::Location::Relay));
 
-    crate::plex::publish_probe_result(sid, crate::plex::probe::Outcome::Unreachable);
+    crate::registry::publish_probe_result(sid, crate::plex::probe::Outcome::Unreachable);
     browse.sync_roster();
     assert_eq!(browse.state.sources()[0].state, SourceState::Unreachable);
     assert_eq!(
@@ -384,8 +384,8 @@ fn a_watched_edit_reaches_every_section_and_only_the_right_server() {
     let _g = crate::testlock::serial();
     let mut browse = TestBrowse::default();
     seed_one_section(&mut browse);
-    let sid = crate::plex::ServerId::UNSET;
-    let other = crate::plex::ServerId::from_raw(1);
+    let sid = crate::registry::ServerId::UNSET;
+    let other = crate::registry::ServerId::from_raw(1);
     let row = |sid, rk: &str, resume: i64| {
         let mut m = PmsMovie::default();
         m.sid = sid;

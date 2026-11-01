@@ -112,7 +112,7 @@ fn owned_recording_files_are_erased_after_quiescence_and_leftovers_are_acked() {
             "missing files are idempotent; an unremoved control directory remains reported"
         );
         session::ProfilePublisher::new(&mt).publish(None, 0);
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 }
 

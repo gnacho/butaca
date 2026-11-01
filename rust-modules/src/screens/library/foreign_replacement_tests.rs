@@ -44,7 +44,7 @@ struct Publication {
 impl Publication {
     fn replace(
         stores: &crate::stores::Stores,
-        sids: [crate::plex::ServerId; 2],
+        sids: [crate::registry::ServerId; 2],
         current: usize,
     ) -> Self {
         stores.browse.borrow_mut().seed_registered_table_for_test(sids);
@@ -156,14 +156,14 @@ fn foreign_table_replacement_during_grid_query_mounts_incoming_engine_focus_and_
     struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::registry::reset_for_test();
         }
     }
     let _cleanup = Cleanup;
-    crate::plex::reset_servers_for_test();
-    let own = crate::plex::register_for_test("foreign-own", "127.0.0.1", 9, "synthetic", "fixture");
+    crate::registry::reset_for_test();
+    let own = crate::registry::register_with_client_id("foreign-own", "127.0.0.1", 9, "synthetic", "fixture");
     let shared =
-        crate::plex::register_for_test("foreign-shared", "127.0.0.1", 10, "synthetic", "fixture");
+        crate::registry::register_with_client_id("foreign-shared", "127.0.0.1", 10, "synthetic", "fixture");
     for incoming_index in [0, 2] {
         let stores = crate::stores::Stores::default();
         let outgoing = Publication::replace(&stores, [own, shared], 0);

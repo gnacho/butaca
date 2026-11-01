@@ -75,7 +75,8 @@
 //! source, resolved rather than given; [`Person::guid`] is the `tagKey` and is the ONLY thing
 //! plex.tv answers to — the numeric id 404s there (`"Invalid value provided for metadataId!"`).
 //! Keep all three; do not collapse them.
-use crate::plex::{ServerId, Tag};
+use crate::registry::ServerId;
+use crate::plex::Tag;
 use crate::pms::{parse_item, PmsMovie};
 use std::panic::catch_unwind;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -199,7 +200,7 @@ pub(crate) struct Person {
     /// [`Person::key`] means anything on. A personId is server-local exactly like a ratingKey
     /// (docs/shared-servers.md §1), so `key` alone names a person on no machine in particular once
     /// a share is registered; the pair is the identity, compared through
-    /// [`crate::plex::same_item`]. `guid` needs no such scoping: it is plex.tv's, and global.
+    /// [`crate::registry::same_item`]. `guid` needs no such scoping: it is plex.tv's, and global.
     ///
     /// It is NOT "the server this page reads" any more — that is every entry of [`Person::srcs`].
     /// What it still decides is the header (`Art::Person` fetches the headshot from it) and the
@@ -392,7 +393,7 @@ const NKIND: usize = 3;
 /// The two fetches that are not per-server: plex.tv's biography and plex.tv's filmography, both of
 /// which are already global (module doc). They sit past every per-source mailbox, which is what
 /// keeps [`un_fx`] total.
-const F_PROFILE: usize = crate::plex::MAX_SERVERS * NKIND;
+const F_PROFILE: usize = crate::registry::MAX_SERVERS * NKIND;
 /// The FILMOGRAPHY — `{DISCOVER}/library/people/{tagKey}/credits`. Global for [`F_PROFILE`]'s
 /// reason and then some: it is a fact about the person's CAREER, which no server has an opinion
 /// about at all. What the servers contribute is the AVAILABILITY join, and that rides on the
@@ -407,13 +408,13 @@ const NFETCH: usize = F_CREDITS + 1;
 /// **Keyed on the registry SLOT, never on a position in [`Person::srcs`].** A slot is stable for
 /// the life of the process, so a worker's landing is applied to the server it asked even if the
 /// source list is rebuilt under it; an index into a `Vec` would silently start meaning a different
-/// machine. [`crate::plex::MAX_SERVERS`] is the registry's own ceiling, imported rather than
+/// machine. [`crate::registry::MAX_SERVERS`] is the registry's own ceiling, imported rather than
 /// restated — a second 16 here would go out of bounds the day that one moves.
 fn fx(sid: ServerId, k: usize) -> Option<usize> {
     let slot = sid
         .is_set()
         .then(|| sid.raw() as usize)
-        .filter(|&s| s < crate::plex::MAX_SERVERS)?;
+        .filter(|&s| s < crate::registry::MAX_SERVERS)?;
     Some(slot * NKIND + k)
 }
 
@@ -646,7 +647,7 @@ impl PersonState {
 /// that explicit boundary prevents an open page retaining a revoked share or missing a new one.
 fn sources(origin: ServerId, key: &str, name: &str) -> Vec<Src> {
     let mut out: Vec<Src> = Vec::new();
-    for sid in crate::plex::server_ids().chain(std::iter::once(origin)) {
+    for sid in crate::registry::ids().chain(std::iter::once(origin)) {
         if fx(sid, K_RESOLVE).is_none() || out.iter().any(|s| s.sid == sid) {
             continue;
         }
@@ -804,7 +805,7 @@ fn set_watched_local(state: &mut PersonState, sid: ServerId, rk: &str, on: bool)
         .flat_map(|s| s.shelves.iter_mut())
         .flat_map(|sh| sh.items.iter_mut())
     {
-        if crate::plex::same_item((m.sid, &m.rk), (sid, rk)) {
+        if crate::registry::same_item((m.sid, &m.rk), (sid, rk)) {
             crate::pms::set_watched(m, on);
             hit = true;
         }
@@ -846,7 +847,7 @@ fn open(
     if state
         .current
         .as_ref()
-        .is_some_and(|p| crate::plex::same_item((p.sid, p.key.as_str()), (sid, key)))
+        .is_some_and(|p| crate::registry::same_item((p.sid, p.key.as_str()), (sid, key)))
     {
         return;
     }
@@ -878,7 +879,7 @@ fn open(
         profile_tried: false,
         credits: Vec::new(),
         credited: false,
-        roster_gen: crate::plex::server_roster_gen(),
+        roster_gen: crate::registry::roster_gen(),
     });
     // A page with NO source at all has already answered — see `resettle`'s fold. Deriving it
     // here rather than hardcoding `landed: false` is what keeps that rule in one place.
@@ -1230,7 +1231,7 @@ fn seed_dev_credits(state: &mut PersonState) -> bool {
 /// Rebuild an open page's per-source projection at an exact registry identity boundary. Header
 /// profile facts survive; server-derived shelves and every old worker/mailbox do not.
 fn sync_roster(state: &mut PersonState, adapter: &PersonAdapter) -> bool {
-    let gen = crate::plex::server_roster_gen();
+    let gen = crate::registry::roster_gen();
     let Some((old, sid, key, name)) =
         state.current().map(|p| (p.roster_gen, p.sid, p.key.clone(), p.name.clone()))
     else {
@@ -1566,7 +1567,7 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
     // slot re-pointed mid-request cannot redirect a fetch already out (`plex::servers` leaks each
     // client precisely so the reference stays live), and a worker that asked which server is
     // current would answer for whichever machine the user has since walked onto.
-    let Some(c) = crate::plex::client_for(sid) else {
+    let Some(c) = crate::registry::client_for(sid) else {
         // a source whose slot holds no client has nothing to contribute right now — back off rather
         // than re-asking every frame; `pump` retries by itself
         state.retry_cd[i] = RETRY_FRAMES;
@@ -2200,7 +2201,7 @@ mod tests {
         }
         for replay in [false, true] {
             let _session = crate::plex::session::TempSession::new("controlled-person-recovery");
-            crate::plex::reset_servers_for_test();
+            crate::registry::reset_for_test();
             let saved = crate::plex::session::peek();
             crate::plex::session::install_transient_for_test(true);
             let initial = crate::app::bootstrap::Initial::synthetic_home(23, 32517, None).unwrap();
@@ -2230,7 +2231,7 @@ mod tests {
     fn session_refresh_retries_person_metadata_after_storage_recovers() {
         let _g = crate::testlock::serial();
         let _session = crate::plex::session::TempSession::new("person-session-refresh");
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
         let saved = crate::plex::session::peek();
         crate::plex::session::install_transient_for_test(true);
         let mut owner = Owner::default();
@@ -2249,7 +2250,7 @@ mod tests {
     fn filmography_preserves_provider_identity_without_a_local_library_copy() {
         let mut owner = Owner::default();
         let _g = crate::testlock::serial();
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
         owner.reset();
         owner.open(S0, "1001", "", "s00000001", "");
         owner.state.install_credits_for_test(&[("Actor", 4)]);
@@ -2260,17 +2261,17 @@ mod tests {
         assert!(rows.iter().all(|r| r.local.is_none()),
             "provider identity survives even when no PMS can supply a local ratingKey");
         owner.reset();
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     #[test]
     fn an_open_person_rebuilds_exact_sources_when_the_profile_roster_changes() {
         let mut owner = Owner::default();
         let _g = crate::testlock::serial();
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
         owner.reset();
-        let a = crate::plex::register_for_test("person-a", "127.0.0.1", 1, "a", "cid");
-        let b = crate::plex::register_for_test("person-b", "127.0.0.1", 2, "b", "cid");
+        let a = crate::registry::register_with_client_id("person-a", "127.0.0.1", 1, "a", "cid");
+        let b = crate::registry::register_with_client_id("person-b", "127.0.0.1", 2, "b", "cid");
         owner.open(a, "7", "plex://person/7", "Actor", "");
         assert_eq!(
             owner.current()
@@ -2288,8 +2289,8 @@ mod tests {
             old_gen,
             media(vec![movie_on(b, "4")], Vec::new()),
         );
-        crate::plex::revoke_for_profile_switch();
-        let c = crate::plex::register_for_test("person-c", "127.0.0.1", 3, "c", "cid");
+        crate::registry::revoke_for_profile_switch();
+        let c = crate::registry::register_with_client_id("person-c", "127.0.0.1", 3, "c", "cid");
         assert!(owner.sync_roster());
         assert_eq!(
             owner.current()
@@ -2315,7 +2316,7 @@ mod tests {
             .all(|s| s.items.is_empty()));
 
         owner.reset();
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     /// A [`Landing::Media`] payload the way a worker builds one — totals = lens, i.e. an uncapped
@@ -3063,12 +3064,12 @@ mod tests {
     struct FreshRegistry(#[allow(dead_code)] crate::testlock::Serial);
     impl Drop for FreshRegistry {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::registry::reset_for_test();
         }
     }
     fn fresh_registry() -> FreshRegistry {
         let g = crate::testlock::serial();
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
         FreshRegistry(g)
     }
 
@@ -3081,8 +3082,8 @@ mod tests {
         // `register_for_test`, not the public `register`: the latter resolves the device id through
         // `session::load`, which mints and PERSISTS a uuid on a host that has no session file.
         let own =
-            crate::plex::register_for_test("mach-own", "10.0.0.1", 32400, "tok", "cid-person-test");
-        let friend = crate::plex::register_for_test(
+            crate::registry::register_with_client_id("mach-own", "10.0.0.1", 32400, "tok", "cid-person-test");
+        let friend = crate::registry::register_with_client_id(
             "mach-friend",
             "10.0.0.2",
             32400,
@@ -3143,8 +3144,8 @@ mod tests {
         let mut owner = Owner::default();
         let _g = fresh_registry();
         let own =
-            crate::plex::register_for_test("mach-own", "10.0.0.1", 32400, "tok", "cid-person-test");
-        let friend = crate::plex::register_for_test(
+            crate::registry::register_with_client_id("mach-own", "10.0.0.1", 32400, "tok", "cid-person-test");
+        let friend = crate::registry::register_with_client_id(
             "mach-friend",
             "10.0.0.2",
             32400,
@@ -3206,8 +3207,8 @@ mod tests {
         let mut owner = Owner::default();
         let _g = fresh_registry();
         let own =
-            crate::plex::register_for_test("mach-own", "10.0.0.1", 32400, "tok", "cid-person-test");
-        let friend = crate::plex::register_for_test(
+            crate::registry::register_with_client_id("mach-own", "10.0.0.1", 32400, "tok", "cid-person-test");
+        let friend = crate::registry::register_with_client_id(
             "mach-friend",
             "10.0.0.2",
             32400,
@@ -3251,8 +3252,8 @@ mod tests {
         let mut owner = Owner::default();
         let _g = fresh_registry();
         let own =
-            crate::plex::register_for_test("mach-own", "10.0.0.1", 32400, "tok", "cid-person-test");
-        let friend = crate::plex::register_for_test(
+            crate::registry::register_with_client_id("mach-own", "10.0.0.1", 32400, "tok", "cid-person-test");
+        let friend = crate::registry::register_with_client_id(
             "mach-friend",
             "10.0.0.2",
             32400,

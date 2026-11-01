@@ -62,10 +62,10 @@
 //! log, which for a table of 16 and a household of one or two servers is a great many sign-outs
 //! inside one process.
 
-use super::client::Client;
-use super::origin::{CredentialPolicy, Origin, ResolvePin};
-use super::probe::{Location, Outcome};
-use super::IpVersion;
+use crate::origin::{CredentialPolicy, Origin, ResolvePin};
+use crate::plex::Client;
+use crate::plex::IpVersion;
+use crate::plex::probe::{Location, Outcome};
 use std::sync::atomic::{AtomicPtr, AtomicU32, AtomicU8, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
@@ -100,7 +100,7 @@ impl ConnectionFacts {
 /// Slot ceiling. A Plex account's server list is a handful (own + shared); past this, a
 /// registration is refused and logged rather than growing a table the hot path indexes.
 ///
-/// `pub` because [`super::serverinfo`] holds one entry PER SERVER in a flat array indexed
+/// `pub` because [`crate::plex::serverinfo`] holds one entry PER SERVER in a flat array indexed
 /// by [`ServerId::raw`], and a second, independent ceiling there is a silent out-of-bounds
 /// waiting to happen: this is the number that decides which ids can ever exist. `crate::person`
 /// keys its per-source mailboxes the same way and is OUTSIDE this module tree, which is what
@@ -390,7 +390,7 @@ static ACTIVE: AtomicU32 = AtomicU32::new(0);
 /// carries an empty token. A later eligible re-point flips this bit in the same registry write.
 static CREDENTIAL_ELIGIBLE: AtomicU32 = AtomicU32::new(0);
 /// The subset of [`CREDENTIAL_ELIGIBLE`] whose eligibility rests on a plaintext grant
-/// (`super::grant`) rather than the policy alone — the slots [`regrade_credentials`] re-asks when
+/// (`crate::grant`) rather than the policy alone — the slots [`regrade_credentials`] re-asks when
 /// a grant ends. Written with the eligibility bit, in the same registry write.
 static ON_GRANT: AtomicU32 = AtomicU32::new(0);
 /// Monotone epoch of the active roster's identity. It moves when a slot appears/disappears or is
@@ -596,7 +596,7 @@ pub fn probe_result(id: ServerId) -> Option<Outcome> {
 }
 
 /// Publish what the completed server race proved. The winning tier is the neighbouring
-/// [`Client::link`](super::client::Client::link) fact and is written by the same auth coordinator.
+/// [`Client::link`](crate::registry::client::Client::link) fact and is written by the same auth coordinator.
 /// A no-op for an inactive/unknown slot, so a late auth worker cannot resurrect a revoked source.
 #[cfg_attr(not(test), expect(dead_code))]
 pub fn publish_probe_result(id: ServerId, outcome: Outcome) {
@@ -916,7 +916,7 @@ pub fn register(machine_id: &str, host: &str, port: i32, token: &str) -> ServerI
 /// is not something that can be rebuilt from an address afterwards: plex.tv advertises a server's
 /// TLS origin as the `plex.direct` HOSTNAME while its `address` stays the dotted quad behind it,
 /// and the certificate is issued for the name. So an origin has to be carried from where it was
-/// parsed ([`super::probe::Candidate::origin`]) all the way to here, and the pair-shaped entry
+/// parsed ([`crate::plex::probe::Candidate::origin`]) all the way to here, and the pair-shaped entry
 /// points are kept only for callers that genuinely have nothing but an address.
 ///
 /// `pin` is the origin's [`ResolvePin`] when the caller holds the address plex.tv advertised
@@ -935,8 +935,8 @@ pub(crate) fn register_captured_origin_with_connection(machine_id: &str, origin:
         machine_id, origin, token, pin, connection, policy, &|| client_id.to_owned(),
     );
     #[cfg(not(test))]
-    if super::grant::allowed_for(policy, machine_id, origin) {
-        super::serverinfo::refresh(id);
+    if crate::grant::allowed_for(policy, machine_id, origin) {
+        crate::plex::registry_seam::refresh_serverinfo(id);
     }
     id
 }
@@ -957,12 +957,12 @@ pub(crate) fn register_origin(
     // Boot/credential completion has already supplied the install identity. Registration also
     // runs inside frames, so a new or re-pointed slot may only consult the cached snapshot.
     let id = register_lazy(machine_id, origin, token, pin, connection, policy, &|| {
-        super::session::peek().client_id.clone()
+        crate::plex::session::peek().client_id.clone()
     });
     // Both this cached-identity path and the captured-identity path refresh the server's
     // self-description. The worker is single-flighted per server; registration never waits.
-    if super::grant::allowed_for(policy, machine_id, origin) {
-        super::serverinfo::refresh(id);
+    if crate::grant::allowed_for(policy, machine_id, origin) {
+        crate::plex::registry_seam::refresh_serverinfo(id);
     }
     id
 }
@@ -977,7 +977,7 @@ pub(crate) fn register_origin(
 ///
 /// 1. The public [`register`] resolves the device id through `session::peek`; a cache miss can
 ///    queue a storage refresh. Pure registry tests supply the id instead.
-/// 2. [`register`] also fires [`serverinfo::refresh`](super::serverinfo::refresh), which spawns a
+/// 2. [`register`] also fires [`serverinfo::refresh`](crate::plex::serverinfo::refresh), which spawns a
 ///    worker that really opens a socket. Tests of the registry must not acquire that unrelated
 ///    network side effect or depend on worker scheduling. (`stream::http_stream_boxed` now zeros
 ///    its 64 KiB buffer directly on the heap; this seam remains necessary for isolation.)
@@ -1079,7 +1079,7 @@ fn register_lazy(
     let found = (floor..n)
         .map(|i| ServerId(i as u16))
         .find(|&id| populated(id).is_some_and(|c| same_server(c, machine_id, origin)));
-    // THE authority (`super::grant`): TLS, a developer build, or a live consented grant for this
+    // THE authority (`crate::grant`): TLS, a developer build, or a live consented grant for this
     // SERVER at this exact plaintext origin — the machine this registration is for (a legacy
     // id-less call adopting a slot is that slot's machine; with none known, no grant applies).
     // Asked under the write lock, so a revocation that lands after this line re-grades the slot
@@ -1088,8 +1088,8 @@ fn register_lazy(
         Some(c) if machine_id.is_empty() => c.machine_id(),
         _ => machine_id,
     };
-    let credential_eligible = super::grant::allowed_for(policy, grant_machine, origin);
-    let on_grant = super::grant::rests_on_grant(policy, grant_machine, origin);
+    let credential_eligible = crate::grant::allowed_for(policy, grant_machine, origin);
+    let on_grant = crate::grant::rests_on_grant(policy, grant_machine, origin);
     let admitted_token = if credential_eligible { token } else { "" };
 
     if let Some(id) = found {
@@ -1132,8 +1132,9 @@ fn register_lazy(
             PROBES[id.0 as usize].store(PROBE_UNKNOWN, Ordering::Release);
             publish(
                 id,
-                Client::new(id, mid, origin.clone(), admitted_token, &client_id)
-                    .with_resolve_pin(pin.cloned()),
+                crate::plex::registry_seam::new_client(
+                    id, mid, origin.clone(), admitted_token, &client_id, pin.cloned(),
+                ),
             );
             ROSTER_GEN.fetch_add(1, Ordering::AcqRel);
         } else {
@@ -1173,8 +1174,9 @@ fn register_lazy(
     PROBES[n].store(PROBE_UNKNOWN, Ordering::Release);
     publish(
         id,
-        Client::new(id, machine_id, origin.clone(), admitted_token, &client_id)
-            .with_resolve_pin(pin.cloned()),
+        crate::plex::registry_seam::new_client(
+            id, machine_id, origin.clone(), admitted_token, &client_id, pin.cloned(),
+        ),
     );
     COUNT.store(n + 1, Ordering::Release); // after the pointer: a visible count implies a live slot
     if let Some(fresh) = populated(id) {
@@ -1295,7 +1297,7 @@ pub(crate) fn revoke_all() {
     crate::testlock::assert_held("the plex server registry (revoke_all)");
     // Every plaintext grant dies with the identity that consented. First, and outside WRITE: its
     // re-grade takes the same lock.
-    super::grant::identity_changed();
+    crate::grant::identity_changed();
     let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
     let n = COUNT.load(Ordering::Acquire);
     let floor = FLOOR.load(Ordering::Acquire);
@@ -1328,7 +1330,7 @@ pub(crate) fn revoke_all() {
 }
 
 /// **Re-ask the grant table for every client a grant was carrying** ([`ON_GRANT`]), after a plaintext grant was
-/// revoked or died (`super::grant`'s revocation paths). A client whose origin may no longer carry
+/// revoked or died (`crate::grant`'s revocation paths). A client whose origin may no longer carry
 /// a credential has its token blanked IN PLACE — every `&'static Client` already handed out
 /// follows along, so a worker mid-request can at worst send a tokenless request — and is marked
 /// ineligible and [`Outcome::InsecureOnly`], exactly what [`register_lazy`] records for a stored
@@ -1344,7 +1346,7 @@ pub(crate) fn regrade_credentials() {
         let Some(i) = id.index() else { continue };
         let bit = 1u32 << i;
         if ON_GRANT.load(Ordering::Acquire) & bit == 0
-            || super::grant::granted_now(c.machine_id(), c.origin())
+            || crate::grant::granted_now(c.machine_id(), c.origin())
         {
             continue;
         }
@@ -1426,13 +1428,10 @@ mod tests {
         Fresh(g)
     }
 
-    /// The token as the wire would carry it — `with_token` is the only reader of the field.
+    /// The token as the wire would carry it — `with_token` is the only reader of the field, and it
+    /// is `pub(super)` inside the Plex layer, so the test reads it through the registry seam.
     fn token_of(c: &Client) -> String {
-        c.with_token("/x")
-            .rsplit('=')
-            .next()
-            .unwrap_or_default()
-            .to_owned()
+        crate::plex::registry_seam::client_token_for_test(c)
     }
 
     fn reg(machine_id: &str, host: &str, token: &str) -> ServerId {

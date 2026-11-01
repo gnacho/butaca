@@ -1,7 +1,7 @@
 //! The physically owned Person model and fetch transport (`docs/stores-as-machines.md`). Each
 //! production `Bridge` owns one [`PersonStore`]; no free selector can connect two Bridges.
 
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 use crate::ui::machine::{Cx, Effects, Handled, Host, Machine};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;

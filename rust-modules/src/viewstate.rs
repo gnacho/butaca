@@ -101,7 +101,7 @@
 //! worker, and its notice. Reset rotates the adapter, and request IDs fence malformed or stale
 //! completions even within one adapter. There is no process-global ViewState transport or state.
 
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 use std::panic::catch_unwind;
 use std::sync::{Arc, Mutex};
 
@@ -307,7 +307,7 @@ impl ViewStateState {
     let jellyfin = sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some();
     #[cfg(not(feature = "jellyfin"))]
     let jellyfin = false;
-    if crate::plex::client_for(sid).is_none() && !jellyfin {
+    if crate::registry::client_for(sid).is_none() && !jellyfin {
         crate::log(&format!(
             "viewstate: rk={rk} {} DROPPED — server {} is not registered",
             w.name(),
@@ -440,7 +440,7 @@ fn edit_local_with_owners(
 impl ViewStateState {
     fn coalesce(&mut self, sid: ServerId, rk: &str, w: Write) {
     let fam = w.family();
-    self.queue.retain(|r| !(crate::plex::same_item((r.sid, &r.rk), (sid, rk)) && r.w.family() == fam));
+    self.queue.retain(|r| !(crate::registry::same_item((r.sid, &r.rk), (sid, rk)) && r.w.family() == fam));
     }
 
 /// Spend one frame of the refused-spawn ladder; true when the next attempt is due. Split out so the
@@ -496,7 +496,7 @@ impl ViewStateState {
             self.sent = Some(req);
             continue;
         }
-        let Some(c) = crate::plex::client_for(req.sid) else {
+        let Some(c) = crate::registry::client_for(req.sid) else {
             crate::log(&format!(
                 "viewstate: rk={} {} DROPPED — server {} left the registry while queued",
                 req.rk,
@@ -752,7 +752,7 @@ fn fan_out(
     guid: &str,
     w: Write,
 ) -> Vec<(ServerId, String)> {
-    let sources: Vec<ServerId> = crate::plex::server_ids().collect();
+    let sources: Vec<ServerId> = crate::registry::ids().collect();
     if sources.len() < 2 {
         // A one-server install pays NOTHING for this feature: no guid lookup, no query, no line in
         // the log. Checked before the lookup below for exactly that reason.
@@ -774,7 +774,7 @@ fn fan_out(
         // `dst`, not a second `c`: shadowing the item's own client inside the one loop that writes
         // to OTHER machines is how a key ends up posted to the wrong server, which is the exact
         // failure this whole function is arranged around.
-        let Some(dst) = crate::plex::client_for(id) else {
+        let Some(dst) = crate::registry::client_for(id) else {
             continue;
         };
         let ok = w.perform(dst, &key);
@@ -817,7 +817,7 @@ fn ask_sources(sources: &[ServerId], guid: &str) -> Vec<Answer> {
     sources
         .iter()
         .map(|&id| {
-            let keys = crate::plex::client_for(id)
+            let keys = crate::registry::client_for(id)
                 .and_then(|c| c.find_by_guid(guid))
                 .map(|mc| {
                     mc.metadata
@@ -854,8 +854,8 @@ fn fanout_targets(origin: (ServerId, &str), answers: &[Answer]) -> Vec<(ServerId
             let pair = (*id, k.as_str());
             let listed = out
                 .iter()
-                .any(|(s, e)| crate::plex::same_item((*s, e), pair));
-            if listed || crate::plex::same_item(pair, origin) {
+                .any(|(s, e)| crate::registry::same_item((*s, e), pair));
+            if listed || crate::registry::same_item(pair, origin) {
                 continue;
             }
             out.push((*id, k.clone()));
@@ -906,8 +906,8 @@ mod tests {
     #[test]
     fn owner_callback_receives_the_optimistic_browse_edit_before_run_returns() {
         let _g = crate::testlock::serial();
-        crate::plex::reset_servers_for_test();
-        let sid = crate::plex::register_for_test(
+        crate::registry::reset_for_test();
+        let sid = crate::registry::register_with_client_id(
             "viewstate-owner", "127.0.0.1", 9, "synthetic", "fixture");
         let mut store = crate::stores::viewstate::ViewStateStore::default();
         store.hold_inflight_for_test(sid, "held");
@@ -955,14 +955,14 @@ mod tests {
         assert!(metadata_store.take_notice().is_some(),
             "the optimistic edit reaches {} before run returns", crate::stores::StoreId::Metadata.name());
         assert!(store.take_notice().is_some(), "the owning ViewState store notices its command");
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     #[test]
     fn stores_route_the_optimistic_edit_to_the_addressed_browse_owner() {
         let _g = crate::testlock::serial();
-        crate::plex::reset_servers_for_test();
-        let sid = crate::plex::register_for_test(
+        crate::registry::reset_for_test();
+        let sid = crate::registry::register_with_client_id(
             "viewstate-stores-owner", "127.0.0.1", 9, "synthetic", "fixture");
         let mut selected = crate::stores::Stores::default();
         selected.browse.borrow_mut().seed_registered_table_for_test([sid, sid]);
@@ -984,7 +984,7 @@ mod tests {
         assert!(decoy.browse.borrow_mut().listing_snapshot().view().item(0).is_none(),
             "the unaddressed decoy is not used by the owner-aware callback");
         drop((selected, decoy));
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     #[test]

@@ -265,7 +265,7 @@ impl CollectionScreen {
     fn item_index(&self, collection: &Collection, elem: u32) -> Option<usize> {
         if self.indexed(collection) { return self.elems.iter().position(|&e| e == elem); }
         let identity = self.cards.get(elem)?;
-        collection.items.iter().position(|item| crate::plex::same_item(
+        collection.items.iter().position(|item| crate::registry::same_item(
             (identity.sid, identity.rk.as_str()), (item.sid, item.rk.as_str())))
     }
 
@@ -766,7 +766,7 @@ mod tests {
 
     fn item(rk: &str) -> PmsMovie { PmsMovie { rk: rk.into(), title: rk.into(), ..Default::default() } }
     fn set() -> CollectionRef {
-        CollectionRef { sid: crate::plex::ServerId::UNSET, rk: "50001".into(), sec: 1, tag: 7, name: "Set".into() }
+        CollectionRef { sid: crate::registry::ServerId::UNSET, rk: "50001".into(), sec: 1, tag: 7, name: "Set".into() }
     }
     fn seeded() -> (crate::stores::collection::CollectionStore, CollectionScreen) {
         let mut store = crate::stores::collection::CollectionStore::default();

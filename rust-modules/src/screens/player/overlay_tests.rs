@@ -706,7 +706,7 @@ fn the_player_panels_dim_through_the_container_from_the_playing_items_corners() 
     let mut store = crate::stores::metadata::MetadataStore::default();
     assert!(store.run(crate::stores::metadata::MetadataCmd::InstallPlaying(Some(crate::metadata::PlayingItem {
         container: String::new(),
-        sid: crate::plex::ServerId::from_raw(0), rk: "rk".into(), show_rk: String::new(), audio: Vec::new(), subs: Vec::new(),
+        sid: crate::registry::ServerId::from_raw(0), rk: "rk".into(), show_rk: String::new(), audio: Vec::new(), subs: Vec::new(),
         video_fps: 0.0, width: 0, height: 0, bitrate: 0, dovi: Default::default(),
         markers: Vec::new(), chapters: Vec::new(), blur: Some(corners),
     }))));

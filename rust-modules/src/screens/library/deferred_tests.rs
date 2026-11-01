@@ -37,17 +37,17 @@ struct Fixture {
     listing: crate::stores::browse::ListingSnapshot,
     directory: crate::stores::browse::DirectorySnapshot,
     hubs: crate::stores::browse::HubsSnapshot,
-    sids: [crate::plex::ServerId; 2],
+    sids: [crate::registry::ServerId; 2],
     _session: crate::plex::session::TempSession,
 }
 impl Fixture {
     fn new() -> Self {
         let session = crate::plex::session::TempSession::new("library-deferred-ports");
         session.watching("u-library-deferred-ports");
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
         let own =
-            crate::plex::register_for_test("deferred-own", "127.0.0.1", 9, "synthetic", "fixture");
-        let shared = crate::plex::register_for_test(
+            crate::registry::register_with_client_id("deferred-own", "127.0.0.1", 9, "synthetic", "fixture");
+        let shared = crate::registry::register_with_client_id(
             "deferred-shared",
             "127.0.0.1",
             10,
@@ -138,7 +138,7 @@ impl Fixture {
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 }
 fn apply(

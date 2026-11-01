@@ -3,7 +3,7 @@
 //! main-thread state, worker adapter and notice while `crate::browse` retains the core
 //! implementation.
 
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 use crate::ui::machine::{Cx, Effects, Handled, Machine};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
@@ -489,7 +489,7 @@ mod contract_tests {
     #[test]
     fn snapshots_and_an_idle_pump_are_quiet() {
         let _guard = crate::testlock::serial();
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
         let stores = crate::stores::Stores::default();
         let _ = stores.take_notices();
         let before = stores.browse.borrow().gen();
@@ -509,7 +509,7 @@ mod contract_tests {
     #[test]
     fn hubs_housekeeping_notices_only_a_new_publication() {
         let _guard = crate::testlock::serial();
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
         let mut browse = BrowseStore::default();
         browse.seed_two_source_table_for_test();
         browse.seed_shelves_for_test(0, &["published"], 1);
@@ -543,10 +543,10 @@ mod contract_tests {
         let _guard = crate::testlock::serial();
         let session = crate::plex::session::TempSession::new("browse-preowner");
         session.watching("u-browse-preowner");
-        crate::plex::reset_servers_for_test();
-        let sid = crate::plex::register_for_test(
+        crate::registry::reset_for_test();
+        let sid = crate::registry::register_with_client_id(
             "browse-preowner", "127.0.0.1", 9, "synthetic", "fixture");
-        let client = crate::plex::client_for(sid).unwrap();
+        let client = crate::registry::client_for(sid).unwrap();
         let stores = crate::stores::Stores::default();
         stores.browse.borrow_mut().queue_discovery_for_test(
             client, client.token_gen(), false);
@@ -558,19 +558,19 @@ mod contract_tests {
             "one discovery landing owes one notice on the addressed Browse owner");
         assert_eq!(stores.browse.borrow_mut().discover_pump().changed, false,
             "the transferred adapter result is consumed exactly once");
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     #[test]
     fn controlled_discovery_apply_and_directory_landing_each_bump_exactly_once() {
         let _guard = crate::testlock::serial();
-        crate::plex::reset_servers_for_test();
-        let sid = crate::plex::register_for_test(
+        crate::registry::reset_for_test();
+        let sid = crate::registry::register_with_client_id(
             "browse-owned-landings", "127.0.0.1", 9, "synthetic", "fixture");
         let stores = crate::stores::Stores::default();
         stores.browse.borrow_mut().seed_registered_table_for_test([sid, sid]);
         let _ = stores.take_notices();
-        let client = crate::plex::client_for(sid).unwrap();
+        let client = crate::registry::client_for(sid).unwrap();
 
         stores.browse.borrow_mut().queue_discovery_for_test(
             client, client.token_gen(), true);
@@ -590,18 +590,18 @@ mod contract_tests {
         assert_eq!(stores.take_notices(), [(StoreId::Browse, before_directory + 1)]);
         assert!(stores.take_notices().is_empty());
 
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     #[test]
     fn reset_rotates_the_adapter_away_from_a_late_old_worker() {
         let _guard = crate::testlock::serial();
-        crate::plex::reset_servers_for_test();
-        let sid = crate::plex::register_for_test(
+        crate::registry::reset_for_test();
+        let sid = crate::registry::register_with_client_id(
             "browse-reset-worker", "127.0.0.1", 9, "synthetic", "fixture");
         let stores = crate::stores::Stores::default();
         stores.browse.borrow_mut().seed_registered_table_for_test([sid, sid]);
-        let client = crate::plex::client_for(sid).unwrap();
+        let client = crate::registry::client_for(sid).unwrap();
         stores.browse.borrow_mut().prepare_page_for_test(sid);
         let old = Arc::clone(&stores.browse.borrow().adapter);
         let (release, landed) = stores.browse.borrow_mut()
@@ -619,24 +619,24 @@ mod contract_tests {
         assert!(crate::browse::adapter_fetching_for_test(&new),
             "a retired worker must not clear the replacement flight");
 
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     #[test]
     fn roster_removal_rotates_transport_away_from_a_held_old_worker() {
         let _guard = crate::testlock::serial();
-        crate::plex::reset_servers_for_test();
-        let sid = crate::plex::register_for_test(
+        crate::registry::reset_for_test();
+        let sid = crate::registry::register_with_client_id(
             "browse-roster-retire", "127.0.0.1", 9, "synthetic", "fixture");
         let stores = crate::stores::Stores::default();
         stores.browse.borrow_mut().seed_registered_table_for_test([sid, sid]);
-        let client = crate::plex::client_for(sid).unwrap();
+        let client = crate::registry::client_for(sid).unwrap();
         stores.browse.borrow_mut().prepare_page_for_test(sid);
         let old = Arc::clone(&stores.browse.borrow().adapter);
         let (release, landed) = stores.browse.borrow_mut()
             .spawn_page_for_test(client, "retired-by-roster");
 
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
         assert!(stores.browse.borrow_mut().pump().changed);
         let new = Arc::clone(&stores.browse.borrow().adapter);
         assert!(!Arc::ptr_eq(&old, &new),
@@ -653,12 +653,12 @@ mod contract_tests {
     #[test]
     fn extracted_discovery_result_cannot_clear_the_post_reset_source_flight() {
         let _guard = crate::testlock::serial();
-        crate::plex::reset_servers_for_test();
-        let sid = crate::plex::register_for_test(
+        crate::registry::reset_for_test();
+        let sid = crate::registry::register_with_client_id(
             "browse-result-retire", "127.0.0.1", 9, "synthetic", "fixture");
         let stores = crate::stores::Stores::default();
         stores.browse.borrow_mut().seed_registered_table_for_test([sid, sid]);
-        let client = crate::plex::client_for(sid).unwrap();
+        let client = crate::registry::client_for(sid).unwrap();
         stores.browse.borrow_mut().queue_discovery_for_test(
             client, client.token_gen(), true);
         let result = stores.browse.borrow_mut().take_discovery().unwrap();
@@ -676,7 +676,7 @@ mod contract_tests {
         assert!(crate::browse::adapter_src_fetching_for_test(&replacement),
             "a result extracted from the retired adapter must not release the new source flight");
 
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     #[test]
@@ -685,12 +685,12 @@ mod contract_tests {
         // `sync_roster_owned` also watches the process-global session generation. Keep it settled
         // so the exact notice count below grades this roster addition, not an async session read.
         let _session = crate::plex::session::TempSession::new("controlled-roster-spawn-refused");
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
         let stores = crate::stores::Stores::default();
         let _ = stores.take_notices();
         let before_notice = stores.browse.borrow().gen();
         let before_sources = stores.browse.borrow().source_list_gen_for_test();
-        crate::plex::register_for_test(
+        crate::registry::register_with_client_id(
             "", "127.0.0.1", 9, "synthetic", "fixture");
         let mut launches = 0;
         stores.browse_controlled_discover(&mut |_| {
@@ -719,18 +719,18 @@ mod contract_tests {
         assert_eq!(crate::ui::idle::take_local_damage(), 0,
             "an empty-to-empty machine identity must not invalidate the settled frame");
 
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     #[test]
     fn direct_controlled_discovery_mutates_only_the_addressed_owner() {
         let _guard = crate::testlock::serial();
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
         let selected = crate::stores::Stores::default();
         let decoy = crate::stores::Stores::default();
         let selected_before = selected.browse.borrow().source_list_gen_for_test();
         let decoy_before = decoy.browse.borrow().source_list_gen_for_test();
-        crate::plex::register_for_test(
+        crate::registry::register_with_client_id(
             "", "127.0.0.1", 9, "synthetic", "fixture");
 
         let mut launches = 0;
@@ -749,6 +749,6 @@ mod contract_tests {
             "the direct call owes exactly one notice from the addressed Browse owner");
         assert!(decoy.take_notices().is_empty());
 
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 }

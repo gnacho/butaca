@@ -24,15 +24,15 @@ fn a_compact_library_menu_holds_a_frozen_host_and_gives_it_back_on_dismissal() {
     struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::registry::reset_for_test();
         }
     }
     let _cleanup = Cleanup;
     let session = crate::plex::session::TempSession::new("library-host-freeze");
     session.watching("u-library-host-freeze");
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test("freeze-own", "127.0.0.1", 9, "synthetic", "fixture");
-    crate::plex::set_current(sid);
+    crate::registry::reset_for_test();
+    let sid = crate::registry::register_with_client_id("freeze-own", "127.0.0.1", 9, "synthetic", "fixture");
+    crate::registry::set_current(sid);
     let base = crate::ui::popover::host_users_for_test();
     let users = || crate::ui::popover::host_users_for_test() - base;
 
@@ -119,15 +119,15 @@ fn a_host_page_spring_under_an_open_panel_is_host_motion() {
     struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::registry::reset_for_test();
         }
     }
     let _cleanup = Cleanup;
     let session = crate::plex::session::TempSession::new("library-host-motion");
     session.watching("u-library-host-motion");
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test("motion-own", "127.0.0.1", 9, "synthetic", "fixture");
-    crate::plex::set_current(sid);
+    crate::registry::reset_for_test();
+    let sid = crate::registry::register_with_client_id("motion-own", "127.0.0.1", 9, "synthetic", "fixture");
+    crate::registry::set_current(sid);
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     rig.stores.browse.borrow_mut().seed_registered_table_for_test([sid, sid]);

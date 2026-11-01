@@ -52,8 +52,8 @@ fn resolve(
 ) -> Resolve {
     assert!(crate::net::global_init() && crate::curlio::available());
     let (port, done, server) = enhancement_pms(mde, mode, media_bytes);
-    let sid = crate::plex::register_for_test("enh-pms", "127.0.0.1", port, "token", "enh-client");
-    let client = crate::plex::client_for(sid).unwrap();
+    let sid = crate::registry::register_with_client_id("enh-pms", "127.0.0.1", port, "token", "enh-client");
+    let client = crate::registry::client_for(sid).unwrap();
     client.set_link(crate::plex::probe::Location::Local);
     let mut env = ResolveEnv::snapshot(ps, crate::stores::metadata::MetadataStore::default().view(), sid, "rk-enh");
     env.quality = Quality::Original;
@@ -135,7 +135,7 @@ fn pass_capable_ac3_local_original_is_enhanced_remux() {
     apply_plan(&mut ps, r.plan, "rk-enh");
     assert_eq!(ps.cur_enhancement, EnhancementOutcome::Applied);
     assert_eq!(ps.cur_contract.audio, PREF);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 #[test]
@@ -147,7 +147,7 @@ fn no_pass_is_direct_no_params() {
         env.pass = Subscription::No;
     });
     assert_direct_no_params(&r);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 #[test]
@@ -159,7 +159,7 @@ fn unknown_subscription_is_direct_no_params() {
         env.pass = Subscription::Unknown;
     });
     assert_direct_no_params(&r);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 #[test]
@@ -170,7 +170,7 @@ fn incapable_track_is_direct_no_params() {
     let r = resolve(&mut ps, MDE_DIRECTPLAY, EnhMode::Honor("ac3"), 0, MKV, "ac3",
         |sid| fourk_item(sid, vec![track(1, "ac3", 2, false)]), |_, _| {});
     assert_direct_no_params(&r);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 /// No fetched track list: the plan names the server default (no id), whose facts are unknown —
@@ -185,7 +185,7 @@ fn server_default_audio_none_is_direct_no_params() {
     assert_direct_no_params(&r);
     assert_eq!(r.plan.audio, None);
     assert!(r.plan.auto_original.as_ref().is_some_and(|c| c.audio.is_none()));
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 /// No fetched track list, but a transcode still NAMES an id (a retry's / the session's earlier
@@ -206,7 +206,7 @@ fn named_unfetched_audio_keeps_its_id_and_fails_closed() {
     assert!(audio.codec.is_empty() && !audio.can_normalize_loudness && !audio.immersive);
     apply_plan(&mut ps, r.plan, "rk-enh");
     assert_eq!(cur_audio_sid(&ps), 42);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 #[test]
@@ -226,7 +226,7 @@ fn dv_declared_p8_is_direct_no_params() {
         "precondition: the P8 direct play declares DolbyHdrInfo",
     );
     assert_direct_no_params(&r);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 /// I7's other half, at the predicate: a base whose DV base layer is not self-displayable is never
@@ -256,7 +256,7 @@ fn embedded_default_subtitle_is_direct_no_params() {
         |_, _| {});
     assert!(r.plan.sub_render_ordinal.is_some(), "precondition: the embedded subtitle is shown");
     assert_direct_no_params(&r);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 #[test]
@@ -283,7 +283,7 @@ fn server_selected_external_srt_is_direct_sidecar_restored() {
     apply_plan(&mut ps, r.plan, "rk-enh");
     assert!(crate::player::sidecar::selected(), "the server's sidecar is restored on the direct play");
     crate::player::sidecar::deselect();
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 #[test]
@@ -297,7 +297,7 @@ fn fixed_720p_rung_no_params() {
     assert!(r.plan.auto_original.is_none(), "a fixed rung captures no Original candidate");
     assert!(!any_param(&r.requests), "{:?}", r.requests);
     assert_eq!(r.plan.contract.audio, crate::plex::AudioEnhancements::NONE);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 #[test]
@@ -313,7 +313,7 @@ fn remote_auto_hls_no_params() {
     assert!(matches!(r.plan.contract.delivery, crate::plex::TranscodeDelivery::FixedHls { .. }), "precondition: HLS");
     assert!(!any_param(&r.requests), "{:?}", r.requests);
     assert_eq!(r.plan.contract.audio, crate::plex::AudioEnhancements::NONE);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 #[test]
@@ -326,7 +326,7 @@ fn relay_no_params() {
     });
     assert!(!any_param(&r.requests), "{:?}", r.requests);
     assert_eq!(r.plan.contract.audio, crate::plex::AudioEnhancements::NONE);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 #[test]
@@ -338,7 +338,7 @@ fn forced_direct_play_no_params() {
         env.direct_play_mode = DirectPlayMode::Forced;
     });
     assert_direct_no_params(&r);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 /// A hero preview is direct play or nothing, so marking the env as a preview must drop the
@@ -352,7 +352,7 @@ fn preview_never_carries_params() {
         env.set_preview(true);
     });
     assert_direct_no_params(&r);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 /// The carried track is the one the route NAMES on the wire (the direct-play pick), not the
@@ -369,7 +369,7 @@ fn carried_track_is_encode_audio_not_audio_sel() {
             |env, _| env.audio_sid = 1);
         assert_eq!(r.plan.auto_original.as_ref().and_then(|c| c.audio.as_ref()).map(|a| a.sid), Some(2));
         assert_eq!(any_param(&r.requests), want_params, "truehd={truehd_capable} ac3={ac3_capable}: {:?}", r.requests);
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 }
 
@@ -385,7 +385,7 @@ fn payload_codec_from_decision_else_ac3() {
         assert!(r.plan.contract.audio.any(), "{mode:?}");
         assert_eq!(r.plan.acodec, want, "{mode:?}");
         assert_ne!(r.plan.acodec, "eac3", "the source codec is silent audio");
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 }
 
@@ -410,7 +410,7 @@ fn refusal_falls_back_to_direct_refused() {
     assert_fell_back_to_direct(&r);
     apply_plan(&mut ps, r.plan, "rk-enh");
     assert_eq!(ps.cur_enhancement, EnhancementOutcome::Refused);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 #[test]
@@ -420,7 +420,7 @@ fn ignored_params_audio_copy_falls_back_refused() {
     let _g = fresh_registry(&mut ps);
     let r = resolve(&mut ps, MDE_DIRECTPLAY, EnhMode::Ignore, 0, MKV, "ac3", ac3_item, |_, _| {});
     assert_fell_back_to_direct(&r);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 /// A remux-family Original (an `.avi`, so no MDE) on a Remote link: the probe samples the remux
@@ -452,7 +452,7 @@ fn remote_probe_and_play_decision_carry_same_params() {
         query_param(decisions[1], "X-Plex-Session-Identifier"),
     );
     assert_enhanced(&r);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 /// The remote remux probe is the FIRST decision the enhanced ask reaches, so a server that refuses
@@ -494,7 +494,7 @@ fn remote_probe_fallback(mode: EnhMode) {
     assert!(r.plan.verdict.is_none(), "a refused ENHANCEMENT is not a refused playback");
     apply_plan(&mut ps, r.plan, "rk-enh");
     assert_eq!(ps.cur_enhancement, EnhancementOutcome::Refused);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 #[test]

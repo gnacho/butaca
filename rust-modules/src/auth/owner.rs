@@ -127,7 +127,7 @@ pub(crate) enum Command {
         machine_id: String,
         choice: crate::plex::session::PlaintextChoice,
         #[serde(with = "super::observation::optional_server_id")]
-        sid: Option<crate::plex::ServerId>,
+        sid: Option<crate::registry::ServerId>,
     },
 }
 

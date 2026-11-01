@@ -788,14 +788,14 @@ fn the_shelf_flow_is_frozen_unless_the_shelves_hold_focus_with_the_keyboard_down
 // ---- the borrowed-source annotation -----------------------------------------------------------
 
 /// Three sources on one shelf: the household's own, and two shares with different handles.
-fn shared_shelf(fixture: &mut Fixture) -> [crate::plex::ServerId; 3] {
-    crate::plex::reset_servers_for_test();
-    let own = crate::plex::register_for_test("own-machine", "127.0.0.1", 1, "own", "annotation");
-    let a = crate::plex::register_for_test("share-a", "127.0.0.1", 2, "a", "annotation");
-    let b = crate::plex::register_for_test("share-b", "127.0.0.1", 3, "b", "annotation");
-    crate::plex::describe_server(own, "own-machine", "", crate::plex::GrantEvidence::ours());
-    crate::plex::describe_server(a, "share-a", "friend", crate::plex::GrantEvidence::outside());
-    crate::plex::describe_server(b, "share-b", "other", crate::plex::GrantEvidence::outside());
+fn shared_shelf(fixture: &mut Fixture) -> [crate::registry::ServerId; 3] {
+    crate::registry::reset_for_test();
+    let own = crate::registry::register_with_client_id("own-machine", "127.0.0.1", 1, "own", "annotation");
+    let a = crate::registry::register_with_client_id("share-a", "127.0.0.1", 2, "a", "annotation");
+    let b = crate::registry::register_with_client_id("share-b", "127.0.0.1", 3, "b", "annotation");
+    crate::registry::describe(own, "own-machine", "", crate::registry::GrantEvidence::ours());
+    crate::registry::describe(a, "share-a", "friend", crate::registry::GrantEvidence::outside());
+    crate::registry::describe(b, "share-b", "other", crate::registry::GrantEvidence::outside());
     let item = |sid| Item::Media(crate::pms::PmsMovie { sid, rk: format!("annotated-{sid:?}"),
         title: "Synthetic result".into(), ..Default::default() });
     fixture.query("annotated").shelves(vec![
@@ -866,7 +866,7 @@ fn the_owner_annotation_swaps_its_words_only_while_it_is_invisible() {
     for i in 480..560 { frame(&mut screen, &fixture, &engine, i); }
     assert_eq!(screen.owner_row, Some(1), "the annotation belongs to the row the cursor is in");
     assert_eq!(screen.owner, "", "…and that row's item is the household's own");
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 /// Legacy `results.rs`'s `a_settled_annotation_goes_quiet_and_a_moving_one_does_not` — the other
@@ -898,5 +898,5 @@ fn a_settled_annotation_goes_quiet_and_a_moving_one_does_not() {
         assert!(!frame(&mut screen, &fixture, &engine, 600 + i),
             "frame {i}: a settled annotation asked for a repaint");
     }
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }

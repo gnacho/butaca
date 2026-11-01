@@ -17,7 +17,7 @@
 use std::ffi::CString;
 
 use crate::person::{Person, NSHELF};
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 use crate::pms::PmsMovie;
 use crate::stores::person::PersonCmd;
 use crate::ui::card_row::{self, CardRow, RowStyle};
@@ -654,7 +654,7 @@ impl PersonScreen {
 
     fn person<'a, H: PersonLike>(&self, cx: &Cx<'a, H>) -> Option<&'a Person> {
         H::person(cx).current().filter(|p| {
-            crate::plex::same_item((p.sid, p.key.as_str()), (self.sid, self.key.as_str()))
+            crate::registry::same_item((p.sid, p.key.as_str()), (self.sid, self.key.as_str()))
         })
     }
 
@@ -744,7 +744,7 @@ impl PersonScreen {
         let id = self.cards.get(elem)?;
         for kind in 0..NSHELF {
             if let Some(col) = p.shelf(kind).iter().position(|m| {
-                crate::plex::same_item((m.sid, m.rk.as_str()), (id.sid, id.rk.as_str()))
+                crate::registry::same_item((m.sid, m.rk.as_str()), (id.sid, id.rk.as_str()))
             }) {
                 return Some(Located::Shelf(kind, col));
             }
@@ -1017,7 +1017,7 @@ impl PersonScreen {
     /// The scenario has no frame capability; it reads the header's last measured answer and
     /// waits for the next measure after a store invalidation, just as the painted header does.
     pub(crate) fn bio_available(&self, view: crate::person::PersonView<'_>) -> bool {
-        view.current().is_some_and(|person| crate::plex::same_item(
+        view.current().is_some_and(|person| crate::registry::same_item(
             (person.sid, person.key.as_str()), (self.sid, self.key.as_str())))
             && self.bio_more()
     }
@@ -2609,11 +2609,11 @@ mod tests {
         ServerId,
         ServerId,
     ) {
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
         let origin =
-            crate::plex::register_for_test("person-pending-origin", "127.0.0.1", 1, "a", "cid");
+            crate::registry::register_with_client_id("person-pending-origin", "127.0.0.1", 1, "a", "cid");
         let share =
-            crate::plex::register_for_test("person-pending-share", "127.0.0.1", 2, "b", "cid");
+            crate::registry::register_with_client_id("person-pending-share", "127.0.0.1", 2, "b", "cid");
         let mut store = crate::stores::person::PersonStore::default();
         store.run(PersonCmd::Open { sid: origin, key: "161".into(),
             guid: "5d77682aeb5d26001f1de4b0".into(), name: "Idina Menzel".into(),
@@ -2726,7 +2726,7 @@ mod tests {
             "the same frame's dispatcher reconcile can seat the available card"
         );
         store.run(PersonCmd::Close);
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     #[test]
@@ -2762,7 +2762,7 @@ mod tests {
         );
         assert!(!returned.return_pending);
         store.run(PersonCmd::Close);
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     #[test]
@@ -2793,7 +2793,7 @@ mod tests {
             focus_of(&returned, &store, 0, 0)
         );
         store.run(PersonCmd::Close);
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     /// Returning to a retained Person A first reclaims the single-slot store from Person B. That
@@ -2804,11 +2804,11 @@ mod tests {
     #[test]
     fn retained_back_holds_the_known_card_key_until_the_requested_person_lands() {
         let _serial = crate::testlock::serial();
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
         let origin =
-            crate::plex::register_for_test("person-return-origin", "127.0.0.1", 1, "a", "cid");
+            crate::registry::register_with_client_id("person-return-origin", "127.0.0.1", 1, "a", "cid");
         let share =
-            crate::plex::register_for_test("person-return-share", "127.0.0.1", 2, "b", "cid");
+            crate::registry::register_with_client_id("person-return-share", "127.0.0.1", 2, "b", "cid");
         let mut store = crate::stores::person::PersonStore::default();
         store.run(PersonCmd::Open { sid: origin, key: "161".into(),
             guid: "5d77682aeb5d26001f1de4b0".into(), name: "Idina Menzel".into(),
@@ -2947,7 +2947,7 @@ mod tests {
             "the reordered landing resolves the preserved identity"
         );
         store.run(PersonCmd::Close);
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     /// The same delayed interval exists after the dispatcher's body cap evicts the Person screen:
@@ -2956,8 +2956,8 @@ mod tests {
     #[test]
     fn cold_remount_holds_the_memory_interner_key_until_reordered_shelves_land() {
         let _serial = crate::testlock::serial();
-        crate::plex::reset_servers_for_test();
-        let sid = crate::plex::register_for_test("person-cold-return", "127.0.0.1", 1, "a", "cid");
+        crate::registry::reset_for_test();
+        let sid = crate::registry::register_with_client_id("person-cold-return", "127.0.0.1", 1, "a", "cid");
         let mut store = crate::stores::person::PersonStore::default();
         store.run(PersonCmd::Open { sid, key: "161".into(),
             guid: "5d77682aeb5d26001f1de4b0".into(), name: "Idina Menzel".into(),
@@ -3046,7 +3046,7 @@ mod tests {
             Some("m1")
         );
         store.run(PersonCmd::Close);
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     #[test]

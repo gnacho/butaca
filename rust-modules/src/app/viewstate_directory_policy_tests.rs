@@ -9,8 +9,8 @@ use super::test_support::{directory_policy_fixture, DirectoryPolicyCleanup};
 #[test]
 fn viewstate_optimistic_home_edit_keeps_the_frame_directory_policy() {
     let _guard = crate::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test(
+    crate::registry::reset_for_test();
+    let sid = crate::registry::register_with_client_id(
         "bridge-viewstate-directory", "127.0.0.1", 9, "synthetic", "fixture");
     let _cleanup = DirectoryPolicyCleanup;
     let mut rig = Bridge::for_test(|| 0);
@@ -86,7 +86,7 @@ fn reset_fences_a_late_old_viewstate_worker_from_the_post_reset_request() {
         "a completion from the retired adapter must not satisfy the replacement request");
 }
 
-fn person_open(sid: crate::plex::ServerId, name: &str) -> crate::stores::person::PersonCmd {
+fn person_open(sid: crate::registry::ServerId, name: &str) -> crate::stores::person::PersonCmd {
     crate::stores::person::PersonCmd::Open {
         sid,
         key: "person-key".into(),
@@ -96,7 +96,7 @@ fn person_open(sid: crate::plex::ServerId, name: &str) -> crate::stores::person:
     }
 }
 
-fn person_item(sid: crate::plex::ServerId, rk: &str, watched: bool) -> crate::pms::PmsMovie {
+fn person_item(sid: crate::registry::ServerId, rk: &str, watched: bool) -> crate::pms::PmsMovie {
     crate::pms::PmsMovie {
         sid,
         rk: rk.into(),
@@ -121,7 +121,7 @@ fn separate_bridges_do_not_share_any_person_owner_state_or_notice() {
     let _guard = crate::testlock::serial();
     let mut first = Bridge::for_test(|| 0);
     let mut second = Bridge::for_test(|| 0);
-    let sid = crate::plex::ServerId::from_raw(0);
+    let sid = crate::registry::ServerId::from_raw(0);
 
     first.person_run(person_open(sid, "first-owner"));
     first.stores.person.seed_ownership_fixture_for_test();
@@ -150,7 +150,7 @@ fn separate_bridges_do_not_share_any_person_owner_state_or_notice() {
 fn person_reset_rotates_the_adapter_and_fences_a_late_old_worker() {
     let _guard = crate::testlock::serial();
     let mut bridge = Bridge::for_test(|| 0);
-    let sid = crate::plex::ServerId::from_raw(0);
+    let sid = crate::registry::ServerId::from_raw(0);
     bridge.person_run(person_open(sid, "old-person"));
     let old_adapter = bridge.stores.person.adapter_for_test();
     let finish_old_worker = bridge.stores.person.late_completion_for_test();
@@ -172,7 +172,7 @@ fn person_reset_rotates_the_adapter_and_fences_a_late_old_worker() {
 fn person_store_notifies_only_when_a_command_actually_changed_state() {
     let _guard = crate::testlock::serial();
     let mut bridge = Bridge::for_test(|| 0);
-    let sid = crate::plex::ServerId::from_raw(0);
+    let sid = crate::registry::ServerId::from_raw(0);
     bridge.person_run(person_open(sid, "reader"));
     bridge.stores.person.install_for_test(vec![person_item(sid, "movie", false)], Vec::new());
     let _ = bridge.stores.person.take_notice();
@@ -206,7 +206,7 @@ fn addressed_person_store_command_changes_and_notifies_only_its_bridge() {
     let _guard = crate::testlock::serial();
     let mut first = Bridge::for_test(|| 0);
     let mut second = Bridge::for_test(|| 0);
-    let sid = crate::plex::ServerId::from_raw(0);
+    let sid = crate::registry::ServerId::from_raw(0);
     first.person_run(person_open(sid, "first-reader"));
     second.person_run(person_open(sid, "second-reader"));
     first.stores.person.install_for_test(vec![person_item(sid, "movie", false)], Vec::new());
@@ -230,7 +230,7 @@ fn addressed_person_store_command_changes_and_notifies_only_its_bridge() {
 fn profile_activation_clears_the_same_bridge_person_before_a_new_mount() {
     let _guard = crate::testlock::serial();
     let mut bridge = Bridge::for_test(|| 0);
-    let sid = crate::plex::ServerId::from_raw(0);
+    let sid = crate::registry::ServerId::from_raw(0);
     bridge.person_run(person_open(sid, "outgoing-profile"));
     assert!(bridge.person_view().current().is_some());
 
@@ -243,8 +243,8 @@ fn profile_activation_clears_the_same_bridge_person_before_a_new_mount() {
 #[test]
 fn viewstate_optimistic_edit_mutates_only_its_bridge_person_store() {
     let _guard = crate::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test(
+    crate::registry::reset_for_test();
+    let sid = crate::registry::register_with_client_id(
         "bridge-person-viewstate", "127.0.0.1", 9, "synthetic", "fixture");
     let mut first = Bridge::for_test(|| 0);
     let mut second = Bridge::for_test(|| 0);
@@ -269,7 +269,7 @@ fn viewstate_optimistic_edit_mutates_only_its_bridge_person_store() {
         "ViewState's callback must address the Person owner beside its own queue");
     assert_eq!(first.stores.take_notices().iter().filter(|(id, _)| *id == StoreId::Person).count(), 1);
     assert_eq!(second.stores.take_notices().iter().filter(|(id, _)| *id == StoreId::Person).count(), 0);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 /// Detail owns the press decision, but the Bridge owns the retained Browse directory needed
@@ -280,7 +280,7 @@ fn detail_watch_activation_dispatches_the_addressed_store_effect_in_the_press_fr
     use crate::ui::dispatch::Tap;
 
     struct ViewStateDispatch {
-        sid: crate::plex::ServerId,
+        sid: crate::registry::ServerId,
         app_effects: usize,
         store_deliveries: usize,
     }
@@ -317,8 +317,8 @@ fn detail_watch_activation_dispatches_the_addressed_store_effect_in_the_press_fr
     }
 
     let _guard = crate::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test(
+    crate::registry::reset_for_test();
+    let sid = crate::registry::register_with_client_id(
         "bridge-detail-viewstate", "127.0.0.1", 9, "synthetic", "fixture");
     let _cleanup = DirectoryPolicyCleanup;
     let route = AppArg::Content(ContentArg::Detail { sid, rk: "movie".into() });
@@ -362,10 +362,10 @@ fn detail_watch_activation_dispatches_the_addressed_store_effect_in_the_press_fr
 #[test]
 fn search_capture_and_pump_keep_the_frame_directory_policy() {
     let _guard = crate::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let own = crate::plex::register_for_test(
+    crate::registry::reset_for_test();
+    let own = crate::registry::register_with_client_id(
         "bridge-search-own", "127.0.0.1", 9, "synthetic", "fixture");
-    let hidden = crate::plex::register_for_test(
+    let hidden = crate::registry::register_with_client_id(
         "bridge-search-hidden", "127.0.0.1", 10, "synthetic", "fixture");
     let _cleanup = DirectoryPolicyCleanup;
     let mut rig = Bridge::for_test(|| 0);
@@ -412,8 +412,8 @@ fn search_capture_and_pump_keep_the_frame_directory_policy() {
 #[test]
 fn separate_bridges_do_not_share_any_search_owner_state_or_notice() {
     let _guard = crate::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let server = crate::plex::register_for_test(
+    crate::registry::reset_for_test();
+    let server = crate::registry::register_with_client_id(
         "bridge-search-landing", "127.0.0.1", 11, "synthetic", "landing");
     let _cleanup = DirectoryPolicyCleanup;
     let mut first = Bridge::for_test(|| 0);
@@ -481,8 +481,8 @@ fn separate_bridges_do_not_share_any_search_owner_state_or_notice() {
 #[test]
 fn search_reset_rotates_the_adapter_and_fences_a_late_old_worker() {
     let _guard = crate::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let server = crate::plex::register_for_test(
+    crate::registry::reset_for_test();
+    let server = crate::registry::register_with_client_id(
         "bridge-search-late-worker", "127.0.0.1", 12, "synthetic", "late-worker");
     let _cleanup = DirectoryPolicyCleanup;
     let mut bridge = Bridge::for_test(|| 0);
@@ -525,8 +525,8 @@ fn search_reset_rotates_the_adapter_and_fences_a_late_old_worker() {
 #[test]
 fn metadata_reset_rotates_the_adapter_and_fences_a_late_old_worker() {
     let _guard = crate::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test(
+    crate::registry::reset_for_test();
+    let sid = crate::registry::register_with_client_id(
         "bridge-metadata-late-worker", "127.0.0.1", 15, "synthetic", "late-worker");
     let _cleanup = DirectoryPolicyCleanup;
     let mut bridge = Bridge::for_test(|| 0);

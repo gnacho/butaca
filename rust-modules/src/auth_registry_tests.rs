@@ -20,19 +20,19 @@ fn source(machine_id: &str, owned: bool, token: &str) -> SourceRef {
 
 fn install_stored_source(source: &SourceRef, policy: CredentialPolicy) -> ServerId {
     let origin = source.origin().expect("stored source has a well-formed origin");
-    let id = crate::plex::register_pinned_with_client_id_and_policy(
+    let id = crate::registry::register_pinned_with_client_id_and_policy(
         &source.machine_id,
         &origin,
         &source.token,
         source.resolve_pin().as_ref(),
         "stored-install-test",
-        crate::plex::ConnectionFacts::new(
+        crate::registry::ConnectionFacts::new(
             source.tier,
             crate::plex::IpVersion::of_host(&source.address),
         ),
         policy,
     );
-    crate::plex::describe_server(id, &source.name, &source.shared_by, grant_of(source));
+    crate::registry::describe(id, &source.name, &source.shared_by, grant_of(source));
     id
 }
 
@@ -49,35 +49,35 @@ fn install_stored_source(source: &SourceRef, policy: CredentialPolicy) -> Server
 #[test]
 fn stored_credential_policy_https_only_does_not_activate_plaintext_with_its_credential() {
     let _g = crate::testlock::serial();
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     let mut previously_live = source("stored-http", true, "previous-token");
     previously_live.origin_url = "https://stored.example.test:32400".into();
     install_stored_source(&previously_live, CredentialPolicy::HttpsOnly);
-    assert!(crate::plex::client_opt().is_some());
+    assert!(crate::registry::client_opt().is_some());
 
     let mut stored = source("stored-http", true, "stored-token");
     stored.origin_url = "http://192.0.2.10:32400".into();
 
     let id = install_stored_source(&stored, CredentialPolicy::HttpsOnly);
 
-    assert!(crate::plex::client_opt().is_none(), "plaintext must not become the current credentialed client");
-    assert_eq!(crate::plex::server_probe_result(id), Some(Outcome::InsecureOnly));
-    crate::plex::reset_servers_for_test();
+    assert!(crate::registry::client_opt().is_none(), "plaintext must not become the current credentialed client");
+    assert_eq!(crate::registry::probe_result(id), Some(Outcome::InsecureOnly));
+    crate::registry::reset_for_test();
 }
 
 #[test]
 fn stored_credential_policy_covers_legacy_address_and_port_that_synthesizes_http() {
     let _g = crate::testlock::serial();
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     let legacy = source("legacy-http", true, "legacy-token");
     assert!(legacy.origin_url.is_empty());
     assert!(!legacy.origin().expect("legacy fallback").is_tls());
 
     let id = install_stored_source(&legacy, CredentialPolicy::HttpsOnly);
 
-    assert!(crate::plex::client_opt().is_none(), "the synthesized HTTP origin is governed by the same gate");
-    assert_eq!(crate::plex::server_probe_result(id), Some(Outcome::InsecureOnly));
-    crate::plex::reset_servers_for_test();
+    assert!(crate::registry::client_opt().is_none(), "the synthesized HTTP origin is governed by the same gate");
+    assert_eq!(crate::registry::probe_result(id), Some(Outcome::InsecureOnly));
+    crate::registry::reset_for_test();
 }
 
 #[test]
@@ -85,29 +85,29 @@ fn stored_credential_policy_allow_plaintext_keeps_dev_installation_usable() {
     let _g = crate::testlock::serial();
     let stored = source("dev-http", true, "developer-token");
 
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     install_stored_source(&stored, CredentialPolicy::HttpsOnly);
-    assert!(crate::plex::client_opt().is_none(), "the store policy rejects the same source");
+    assert!(crate::registry::client_opt().is_none(), "the store policy rejects the same source");
 
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     let id = install_stored_source(&stored, CredentialPolicy::AllowPlaintext);
-    assert_eq!(crate::plex::current_server(), id);
-    assert!(crate::plex::client_opt().is_some(), "developer builds keep plaintext support");
-    crate::plex::reset_servers_for_test();
+    assert_eq!(crate::registry::current(), id);
+    assert!(crate::registry::client_opt().is_some(), "developer builds keep plaintext support");
+    crate::registry::reset_for_test();
 }
 
 #[test]
 fn stored_credential_policy_rejection_retains_insecure_recovery_metadata() {
     let _g = crate::testlock::serial();
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     let stored = source("recover-http", false, "stored-token");
 
     let id = install_stored_source(&stored, CredentialPolicy::HttpsOnly);
 
-    assert_eq!(crate::plex::server_ids().collect::<Vec<_>>(), vec![id]);
-    assert_eq!(crate::plex::server_facts(id).map(|f| f.name.as_str()), Some("recover-http"));
-    assert_eq!(crate::plex::server_probe_result(id), Some(Outcome::InsecureOnly));
-    crate::plex::reset_servers_for_test();
+    assert_eq!(crate::registry::ids().collect::<Vec<_>>(), vec![id]);
+    assert_eq!(crate::registry::facts(id).map(|f| f.name.as_str()), Some("recover-http"));
+    assert_eq!(crate::registry::probe_result(id), Some(Outcome::InsecureOnly));
+    crate::registry::reset_for_test();
 }
 
 /// #95 step 8 / A2: the boot primary install (`install_captured_registry`, what
@@ -119,19 +119,19 @@ fn stored_credential_policy_rejection_retains_insecure_recovery_metadata() {
 #[test]
 fn a_boot_primary_install_of_a_plex_direct_origin_derives_ip_from_the_stored_address() {
     let _g = crate::testlock::serial();
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     let origin = Origin::parse("https://192-168-1-50.h4sh.plex.direct:32400").unwrap();
     install_captured_registry(&origin, "192.168.1.50", "tok",
         Some(probe::Location::Local), None, &[], Some("cid"));
-    let id = crate::plex::current_server();
-    let client = crate::plex::client_for(id).expect("the primary is registered and current");
+    let id = crate::registry::current();
+    let client = crate::registry::client_for(id).expect("the primary is registered and current");
     assert_eq!(client.link(), Some(probe::Location::Local), "the stored tier");
     assert_eq!(
         client.ip_version(),
         Some(crate::plex::IpVersion::V4),
         "derived from the address, not the plex.direct hostname `origin.host()` carries"
     );
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 /// Our own server registers first and is the primary, whatever order plex.tv listed the account

@@ -2,7 +2,7 @@
 //! Button, CircleButton, TabPill, TransportButton, PageDots, Badge, plus the shared art-card
 //! core (`card`/`draw_card`) and the poster-resolve helper. (Multi-line text wrapping
 //! now lives in the `TextView` primitive in `text_view.rs`.)
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 use crate::pms::PmsMovie;
 use crate::ui::label::{HAlign, Label, VAlign};
 use crate::ui::text_view::TextView;
@@ -2474,7 +2474,7 @@ pub(crate) fn profile_chip_with(p: Painter, data: ProfileChipRead<'_>, chip_expa
     p.focus_shadow(r, d * 0.5, e);
     let mut drew = false;
     if !thumb_s.is_empty() {
-        let (t, tw, th) = resolve_tex_wh_on(crate::plex::current_server(), thumb_s, 128, 128, 0);
+        let (t, tw, th) = resolve_tex_wh_on(crate::registry::current(), thumb_s, 128, 128, 0);
         if t != 0 {
             // the same crop the profile picker's `Art::Thumb` avatars take, so one person's
             // picture is framed alike on the chip and on the picker

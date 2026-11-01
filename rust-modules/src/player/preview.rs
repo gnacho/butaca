@@ -45,7 +45,7 @@
 //! the plan is about 958 KiB (`ui/frame/render_set.rs`). 958 / 64 is 14.96, so the ceiling is 14
 //! admitted Loads, under the ratio rather than on it. Do not quote 14 as a television result.
 
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 
 /// Admitted Loads per process, from the source arithmetic above. Not a device measurement.
 pub(crate) const CYCLE_BUDGET: u32 = 14;

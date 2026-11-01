@@ -23,7 +23,7 @@
 //! modules. `ci/allow/mutators.txt`'s `# count: 0` already
 //! proves no PRODUCTION line outside `pms`/`stores::hubs` spells the old direct-call form; this
 //! is the part that keyword-level `pub(super)` genuinely cannot add on top of that count.
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 use std::os::raw::c_int;
 use std::panic::catch_unwind;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -74,7 +74,7 @@ pub struct PmsMovie {
     /// WHICH SERVER this row came from. Every other identity on it — `rk`, `show_rk`, `part` — is a
     /// server-local key that a second server reuses from 1 (docs/shared-servers.md §2 measured the
     /// collision), so the row is only addressable as the PAIR `(sid, rk)`; see
-    /// [`crate::plex::same_item`]. Stamped by [`parse_item`] from a value the SPAWNING thread
+    /// [`crate::registry::same_item`]. Stamped by [`parse_item`] from a value the SPAWNING thread
     /// captured, never from `plex::current_server()` inside the worker — `parse_item` runs on the
     /// hub, page and person workers, and by the time one of them parses, "the current server" may
     /// already be a different machine than the one whose bytes it is holding.
@@ -250,7 +250,7 @@ pub(crate) fn movie(state: &PmsState, i: usize) -> Option<&PmsMovie> {
 pub(crate) fn index_of_rk(state: &PmsState, sid: ServerId, rk: &str) -> c_int {
     catalog(state)
         .iter()
-        .position(|m| crate::plex::same_item((m.sid, &m.rk), (sid, rk)))
+        .position(|m| crate::registry::same_item((m.sid, &m.rk), (sid, rk)))
         .map(|i| i as c_int)
         .unwrap_or(-1)
 }
@@ -554,7 +554,7 @@ impl<'a> HubsView<'a> {
     /// Server-scoped catalog lookup by `(sid, rk)`, over the retained publication rather than a
     /// global — see [`index_of_rk`]'s doc for why the scan must not compare `rk` alone.
     pub(crate) fn find(self, sid: ServerId, rk: &str) -> Option<&'a PmsMovie> {
-        self.data.items.iter().find(|m| crate::plex::same_item((m.sid, &m.rk), (sid, rk)))
+        self.data.items.iter().find(|m| crate::registry::same_item((m.sid, &m.rk), (sid, rk)))
     }
 }
 
@@ -689,7 +689,7 @@ fn edit_item_with_scope(
 /// [`edit_item_with_scope`] on ONE source's projection. Pure — no statics, no I/O — so the rule is
 /// graded on the host rather than inferred from a screenshot.
 fn apply_edit(b: &mut SourceBuild, sid: ServerId, rk: &str, edit: LocalEdit) -> bool {
-    let mine = |m: &PmsMovie| crate::plex::same_item((m.sid, &m.rk), (sid, rk));
+    let mine = |m: &PmsMovie| crate::registry::same_item((m.sid, &m.rk), (sid, rk));
     match edit {
         LocalEdit::Watched(on) => {
             let mut hit = false;
@@ -1106,7 +1106,7 @@ fn merge_with_scope(srcs: &[Src], scope: &BrowseScope) -> HubBuild {
             // NB the pool holds `HeroSlot`s, so the index is `s.idx` — unit 12's hero-ordering work
             // and unit 3's identity work landed in this same expression from opposite directions.
             if new_pool.iter().any(|s| {
-                crate::plex::same_item((new_cat[s.idx].sid, &new_cat[s.idx].rk), (m.sid, &m.rk))
+                crate::registry::same_item((new_cat[s.idx].sid, &new_cat[s.idx].rk), (m.sid, &m.rk))
             }) {
                 continue;
             }
@@ -1218,7 +1218,7 @@ impl Src {
     }
 
     fn new(sid: ServerId, handle: String) -> Src {
-        let client = crate::plex::client_for(sid);
+        let client = crate::registry::client_for(sid);
         Src {
             sid,
             client,
@@ -1235,7 +1235,7 @@ impl Src {
 }
 
 fn refresh_src_lifecycle(s: &mut Src) -> bool {
-    let client = crate::plex::client_for(s.sid);
+    let client = crate::registry::client_for(s.sid);
     let token_gen = client.map_or(0, |c| c.token_gen());
     let same = match (s.client, client) {
         (Some(a), Some(b)) => std::ptr::eq(a, b) && s.token_gen == token_gen,
@@ -1489,11 +1489,11 @@ fn roster_with_scope(scope: &BrowseScope) -> Vec<(ServerId, String)> {
     let (pinned, known) = home_server_sets(&scope.pins);
     let mut own: Vec<(ServerId, String)> = Vec::new();
     let mut shared: Vec<(ServerId, String)> = Vec::new();
-    for sid in crate::plex::server_ids() {
-        if crate::plex::client_for(sid).is_none() || !feeds_home(sid, &pinned, &known) {
+    for sid in crate::registry::ids() {
+        if crate::registry::client_for(sid).is_none() || !feeds_home(sid, &pinned, &known) {
             continue;
         }
-        let handle = crate::plex::server_facts(sid)
+        let handle = crate::registry::facts(sid)
             .map(|f| f.handle.clone())
             .unwrap_or_default();
         if handle.is_empty() {
@@ -1527,7 +1527,7 @@ fn roster_key_with_scope(scope: &BrowseScope) -> u64 {
     if crate::jellyfin::client().is_some() {
         return u64::MAX;
     }
-    ((crate::plex::server_roster_gen() as u64) << 32) | u64::from(scope.cache_key())
+    ((crate::registry::roster_gen() as u64) << 32) | u64::from(scope.cache_key())
 }
 
 #[cfg(test)]
@@ -1560,7 +1560,7 @@ fn adopt_browse_scope(state: &mut PmsState, scope: &BrowseScope) {
 /// copy onto every shelf and hero row, so a credit re-graded by a roster refresh is exactly a
 /// change this table must rebuild for — and the roster epoch alone cannot see one.
 fn facts_key() -> u32 {
-    crate::plex::server_facts_gen()
+    crate::registry::facts_gen()
 }
 
 /// Bring the source table in line with the roster: a surviving source keeps everything it has
@@ -1730,7 +1730,7 @@ fn kick_with(gen: u32, adapter: &PmsAdapter, s: &mut Src, launch: impl FnOnce(Hu
         crate::log(&format!("hubs: source {} fetching (off-thread, jellyfin)", sid.raw()));
         return;
     }
-    let Some(c) = crate::plex::client_for(s.sid) else {
+    let Some(c) = crate::registry::client_for(s.sid) else {
         landed_fail(s);
         return;
     };
@@ -2007,7 +2007,7 @@ fn step_landings_with_scope(state: &mut PmsState, adapter: &PmsAdapter, dt: Opti
             continue; // its source left the roster while it was out
         };
         let lifecycle_matches = l.client.is_none_or(|client| match client.resource {
-            HubClientRef::Plex(resource) => crate::plex::client_for(l.sid)
+            HubClientRef::Plex(resource) => crate::registry::client_for(l.sid)
                 .is_some_and(|now| std::ptr::eq(now, resource) && now.token_gen() == l.token_gen),
             // The Jellyfin client is a single leaked-static: it is the same resource for the
             // whole install, and its retirement (uninstall) removes the source from the roster
@@ -2177,7 +2177,7 @@ pub(crate) fn seed_two_library_home_for_test(
 #[cfg(test)]
 fn seed_with_scope_for_test(state: &mut PmsState, adapter: &Arc<PmsAdapter>, sid: ServerId, items: usize, hub_state: HubState, scope: &BrowseScope) {
     reset_with_scope(state, adapter, scope);
-    let handle = crate::plex::server_facts(sid)
+    let handle = crate::registry::facts(sid)
         .map(|facts| facts.handle.clone())
         .unwrap_or_default();
     let mut s = Src::new(sid, handle);

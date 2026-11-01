@@ -55,7 +55,7 @@
 //! dormancy at all — and the screen that draws the shelves is what woke it.
 #![allow(dead_code)] // the accessors are Landing 3's; see the Dormant note above
 
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 use crate::pms::{listable, parse_item, PmsMovie, MAX_SHELF_ITEMS};
 use std::panic::catch_unwind;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -399,7 +399,7 @@ impl super::BrowseState {
         let Some(sid) = self.section_sid(sec) else {
             return;
         };
-        let Some(client) = crate::plex::client_for(sid) else {
+        let Some(client) = crate::registry::client_for(sid) else {
             return;
         };
         let token_gen = client.token_gen();
@@ -445,7 +445,7 @@ impl super::BrowseState {
         }
         let still_current = self
             .section_sid(result.sec)
-            .and_then(crate::plex::client_for)
+            .and_then(crate::registry::client_for)
             .map(|client| {
                 std::ptr::eq(client, result.client) && client.token_gen() == result.token_gen
             })
@@ -584,7 +584,7 @@ fn edit_watched(shelves: &mut Arc<Vec<Shelf>>, sid: ServerId, rk: &str, on: bool
     if !shelves
         .iter()
         .flat_map(|shelf| shelf.items.iter())
-        .any(|item| crate::plex::same_item((item.sid, &item.rk), (sid, rk)))
+        .any(|item| crate::registry::same_item((item.sid, &item.rk), (sid, rk)))
     {
         return false;
     }
@@ -592,7 +592,7 @@ fn edit_watched(shelves: &mut Arc<Vec<Shelf>>, sid: ServerId, rk: &str, on: bool
         .iter_mut()
         .flat_map(|shelf| shelf.items.iter_mut())
     {
-        if crate::plex::same_item((item.sid, &item.rk), (sid, rk)) {
+        if crate::registry::same_item((item.sid, &item.rk), (sid, rk)) {
             crate::pms::set_watched(item, on);
         }
     }
@@ -604,7 +604,7 @@ fn drop_from_deck(shelves: &mut Arc<Vec<Shelf>>, sid: ServerId, rk: &str) -> boo
         .iter()
         .filter(|shelf| shelf.is_continue)
         .flat_map(|shelf| shelf.items.iter())
-        .any(|item| crate::plex::same_item((item.sid, &item.rk), (sid, rk)))
+        .any(|item| crate::registry::same_item((item.sid, &item.rk), (sid, rk)))
     {
         return false;
     }
@@ -614,7 +614,7 @@ fn drop_from_deck(shelves: &mut Arc<Vec<Shelf>>, sid: ServerId, rk: &str) -> boo
         let before = shelf.items.len();
         shelf
             .items
-            .retain(|item| !crate::plex::same_item((item.sid, &item.rk), (sid, rk)));
+            .retain(|item| !crate::registry::same_item((item.sid, &item.rk), (sid, rk)));
         hit |= shelf.items.len() != before;
     }
     shelves.retain(|shelf| !shelf.items.is_empty());

@@ -45,7 +45,7 @@
 mod refresh;
 
 use crate::img;
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 use crate::ui::machine::PosterKey;
 use crate::ui::tex::{self, Decoded, PosterError, PosterReady, Tex, Uploader, Warm};
 use std::os::raw::{c_int, c_uchar, c_uint};
@@ -537,7 +537,7 @@ fn built_key(srv: ServerId, path: &str, w: c_int, h: c_int, png: bool) -> Option
         }
         return Some(s);
     }
-    let c = crate::plex::client_for(srv)?;
+    let c = crate::registry::client_for(srv)?;
     let s = memo.get_or_build(srv.raw(), path, w, h, png, c.token_gen(), || {
         transcode_request(c, path, w, h, png)
     });
@@ -844,7 +844,7 @@ fn lookup(srv: ServerId, key_s: &str, touch: Touch) -> (Hit, Warm) {
     let decline = touch == Touch::Draw && crate::ui::card_motion::declines_request();
     let mut g = store();
     let cache_gen = crate::imgcache::generation();
-    let token_gen = crate::plex::client_for(srv).map_or(0, |c| c.token_gen());
+    let token_gen = crate::registry::client_for(srv).map_or(0, |c| c.token_gen());
     // hit?
     for i in 0..PT_CAP {
         if g.slots[i].cache_gen == cache_gen && g.slots[i].token_gen == token_gen && slot_matches(&g.slots[i], srv, key_s.as_bytes()) {
@@ -1340,7 +1340,7 @@ impl ArtFail {
 /// **Why the SERVER is half the key.** With a friend's share registered beside our own, the
 /// interesting failure is the asymmetric one — ours answers and the share does not, because it is
 /// asleep or its token was revoked — and a cause-only latch would spend its single line on
-/// whichever failed first and hide the other for the rest of the process. [`crate::plex::MAX_SERVERS`]
+/// whichever failed first and hide the other for the rest of the process. [`crate::registry::MAX_SERVERS`]
 /// is 16, so the extra dimension is one `u32` of bits per slot.
 ///
 /// **What is deliberately NOT in the line: the key.** It is a `/photo/:/transcode?…` path ending in
@@ -1356,10 +1356,10 @@ fn warn_fetch_failed(srv: ServerId, cause: ArtFail) {
     // `u16::MAX`, and the three store entry points take a raw key from any caller, so a slot's id
     // is not guaranteed to name a registry entry. Everything that does not name one shares the
     // last word.
-    const NWORD: usize = crate::plex::MAX_SERVERS + 1;
+    const NWORD: usize = crate::registry::MAX_SERVERS + 1;
     static LOGGED: [AtomicU32; NWORD] = [const { AtomicU32::new(0) }; NWORD];
     let bit = 1u32 << cause as u32;
-    let word = &LOGGED[(srv.raw() as usize).min(crate::plex::MAX_SERVERS)];
+    let word = &LOGGED[(srv.raw() as usize).min(crate::registry::MAX_SERVERS)];
     // fetch_or, not load-then-store: this loop runs on more than one thread (`posters_init` spawns
     // two), so two workers can reach the same cause for the same server at once and only
     // the one that flipped the bit may write the line.
@@ -1519,7 +1519,7 @@ fn poster_worker() {
                     warn_fetch_failed(srv, ArtFail::NoServer);
                 }
             }
-        } else if let Some(client) = crate::plex::client_for(srv)
+        } else if let Some(client) = crate::registry::client_for(srv)
             .filter(|c| cache_gen == crate::imgcache::generation() && c.token_gen() == token_gen)
         {
             let loaded = load_art(client, srv, &key_s, cache_gen, |b| {
@@ -1663,7 +1663,7 @@ mod tests {
     struct Fresh(#[allow(dead_code)] crate::testlock::Serial);
     impl Drop for Fresh {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::registry::reset_for_test();
             reset_key_memo();
         }
     }
@@ -1671,10 +1671,10 @@ mod tests {
     /// `session::load`, which mints and PERSISTS a uuid on a host that has no session file.
     fn one_server() -> (Fresh, ServerId, &'static str) {
         let g = crate::testlock::serial();
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
         reset_key_memo();
         let tok = "tok-poster-test";
-        let sid = crate::plex::register_for_test(
+        let sid = crate::registry::register_with_client_id(
             "poster-test",
             "127.0.0.1",
             32400,
@@ -1875,7 +1875,7 @@ mod tests {
         let (_fresh, sid, tok) = one_server();
         crate::ui::card_motion::begin_frame(crate::app::clock::now());
         let path = key_for(sid, "/library/metadata/42/thumb", 2, 2, 0);
-        let old_generation = crate::plex::client_for(sid).unwrap().token_gen();
+        let old_generation = crate::registry::client_for(sid).unwrap().token_gen();
         {
             let mut g = store();
             g.slots = [Pslot::ZERO; PT_CAP];
@@ -1887,9 +1887,9 @@ mod tests {
             set_key(slot, &path);
             slot.state = P_EVICTED;
         }
-        let repointed = crate::plex::register_for_test("poster-test", "127.0.0.2", 32400, tok, "cid-poster-test");
+        let repointed = crate::registry::register_with_client_id("poster-test", "127.0.0.2", 32400, tok, "cid-poster-test");
         assert_eq!(repointed, sid);
-        let current_generation = crate::plex::client_for(sid).unwrap().token_gen();
+        let current_generation = crate::registry::client_for(sid).unwrap().token_gen();
         assert_ne!(current_generation, old_generation);
         assert_eq!(lookup(sid, &path, Touch::Draw).1, Warm::Claimed);
         assert!(store().slots.iter().any(|s| s.state == P_WANT
@@ -1911,7 +1911,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::plex::client_for(sid).unwrap().token_gen();
+            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
             set_key(slot, &path);
             slot.state = P_DECODED;
             slot.px = 0;
@@ -1966,7 +1966,7 @@ mod tests {
             slot.state = P_READY;
             slot.srv = srv;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::plex::client_for(srv).unwrap().token_gen();
+            slot.token_gen = crate::registry::client_for(srv).unwrap().token_gen();
             set_key(slot, &path);
         }
 
@@ -2103,7 +2103,7 @@ mod tests {
             let mut g = store();
             g.slots = [Pslot::ZERO; PT_CAP];
             g.quit = false;
-            let gen = crate::plex::client_for(srv).unwrap().token_gen();
+            let gen = crate::registry::client_for(srv).unwrap().token_gen();
             let cache_gen = crate::imgcache::generation();
             for (i, path) in [&path0, &path1].into_iter().enumerate() {
                 let slot = &mut g.slots[i];
@@ -2247,7 +2247,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::plex::client_for(sid).unwrap().token_gen();
+            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
             set_key(slot, &path);
             slot.state = P_RETRY;
             slot.retry_at = Some(crate::app::clock::now().wrapping_add(30_000));
@@ -2288,7 +2288,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::plex::client_for(sid).unwrap().token_gen();
+            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
             set_key(slot, &path);
             slot.state = P_EVICTED;
             // No eviction history, so the cooldown gate would admit this re-arm. That isolates
@@ -2332,7 +2332,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::plex::client_for(sid).unwrap().token_gen();
+            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
             set_key(slot, &path);
             slot.state = P_RETRY;
             slot.attempts = 1;
@@ -2382,7 +2382,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::plex::client_for(sid).unwrap().token_gen();
+            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
             set_key(slot, &path);
             slot.state = P_READY;
         }
@@ -2430,7 +2430,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::plex::client_for(sid).unwrap().token_gen();
+            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
             set_key(slot, &path);
             slot.state = P_READY;
         }
@@ -2520,7 +2520,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::plex::client_for(sid).unwrap().token_gen();
+            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
             set_key(slot, &path);
             slot.state = P_EVICTED;
         }
@@ -2571,7 +2571,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::plex::client_for(sid).unwrap().token_gen();
+            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
             set_key(slot, &path);
             slot.state = P_EVICTED;
             slot.evict_attempts = 1;
@@ -2613,7 +2613,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::plex::client_for(sid).unwrap().token_gen();
+            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
             set_key(slot, &path);
             slot.state = P_EVICTED;
             slot.evict_attempts = 1;
@@ -2663,7 +2663,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::plex::client_for(sid).unwrap().token_gen();
+            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
             set_key(slot, &path);
             slot.state = P_READY;
         }
@@ -2733,7 +2733,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::plex::client_for(sid).unwrap().token_gen();
+            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
             set_key(slot, &path);
             slot.state = P_READY;
             slot.evicted_at = Some(0);
@@ -2877,7 +2877,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::plex::client_for(sid).unwrap().token_gen();
+            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
             set_key(slot, &path);
             slot.state = P_READY;
         }

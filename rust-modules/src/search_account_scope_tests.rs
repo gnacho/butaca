@@ -16,7 +16,7 @@ fn signing_into_a_second_account_searches_its_slots_and_not_the_retired_ones() {
     register(&mut owner, 2);
     assert_eq!(slots(), vec![0, 1]);
 
-    crate::plex::revoke_all();
+    crate::registry::revoke_all();
     assert!(
         slots().is_empty(),
         "there is nothing to ask while signed out"
@@ -27,7 +27,7 @@ fn signing_into_a_second_account_searches_its_slots_and_not_the_retired_ones() {
         "and the retired records reach neither the merge nor the verdict"
     );
 
-    let sid = crate::plex::register_for_test(
+    let sid = crate::registry::register_with_client_id(
         "search-test-next",
         "127.0.0.1",
         1,
@@ -62,8 +62,8 @@ fn a_profile_hole_searches_exact_live_ids_and_supersedes_the_previous_profiles_a
     }]));
     owner.state.state = State::Ready;
 
-    crate::plex::revoke_for_profile_switch();
-    let restored = crate::plex::register_for_test(
+    crate::registry::revoke_for_profile_switch();
+    let restored = crate::registry::register_with_client_id(
         "search-test-2",
         "127.0.0.1",
         1,

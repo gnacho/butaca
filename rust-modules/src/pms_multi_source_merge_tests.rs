@@ -209,7 +209,7 @@ fn every_row_a_source_projects_is_stamped_with_the_server_it_was_asked_of() {
     let b2 = project(&parse(body("1", "Theirs")), &empty, theirs);
     let (m1, m2) = (&b.shelves[0].items[0], &b2.shelves[0].items[0]);
     assert!(
-        !crate::plex::same_item((m1.sid, &m1.rk), (m2.sid, &m2.rk)),
+        !crate::registry::same_item((m1.sid, &m1.rk), (m2.sid, &m2.rk)),
         "one ratingKey from two servers must never alias"
     );
 
@@ -587,10 +587,10 @@ fn a_source_that_leaves_the_roster_stops_contributing() {
 fn an_equal_size_roster_replacement_has_a_different_cache_key_and_source_table() {
     let _g = crate::testlock::serial();
     let mut o = Owner::default();
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     reset(&mut o.state, &o.adapter);
-    let a = crate::plex::register_for_test("pms-a", "127.0.0.1", 1, "a", "cid");
-    let b = crate::plex::register_for_test("pms-b", "127.0.0.1", 2, "b", "cid");
+    let a = crate::registry::register_with_client_id("pms-a", "127.0.0.1", 1, "a", "cid");
+    let b = crate::registry::register_with_client_id("pms-b", "127.0.0.1", 2, "b", "cid");
     sync_roster(&mut o.state);
     let before = roster_key();
     assert_eq!(
@@ -598,10 +598,10 @@ fn an_equal_size_roster_replacement_has_a_different_cache_key_and_source_table()
         [a, b]
     );
 
-    crate::plex::revoke_for_profile_switch();
-    let c = crate::plex::register_for_test("pms-c", "127.0.0.1", 3, "c", "cid");
+    crate::registry::revoke_for_profile_switch();
+    let c = crate::registry::register_with_client_id("pms-c", "127.0.0.1", 3, "c", "cid");
     assert_eq!(
-        crate::plex::server_count(),
+        crate::registry::count(),
         2,
         "the replacement deliberately preserves count"
     );
@@ -617,7 +617,7 @@ fn an_equal_size_roster_replacement_has_a_different_cache_key_and_source_table()
     );
 
     reset(&mut o.state, &o.adapter);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 /// **The pin's grain is a LIBRARY, and `/hubs` is a whole-SERVER request.** So the server-level
@@ -673,9 +673,9 @@ fn an_unpinned_library_keeps_its_items_off_home_even_when_its_server_feeds_it() 
 fn equal_generation_browse_owners_rebuild_the_pms_home_projection() {
     let _guard = crate::testlock::serial();
     let mut o = Owner::default();
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     reset(&mut o.state, &o.adapter);
-    let sid = crate::plex::register_for_test(
+    let sid = crate::registry::register_with_client_id(
         "equal-generation-home", "127.0.0.1", 9, "synthetic", "fixture");
     let alpha = two_library_directory(sid, true);
     let beta = two_library_directory(sid, false);
@@ -691,7 +691,7 @@ fn equal_generation_browse_owners_rebuild_the_pms_home_projection() {
     assert_eq!(rks(&o.state, 0), ["beta"],
         "the PMS cache must not alias an independent equal-generation owner");
     reset(&mut o.state, &o.adapter);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 /// **The pin store is the seam, and "no pinned library" only means something for a server whose
@@ -799,14 +799,14 @@ fn the_budget_is_shared_so_neither_source_starves_the_other() {
 fn a_corrected_credit_restamps_the_shelves_home_already_built() {
     let _g = crate::testlock::serial();
     let mut o = Owner::default();
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     reset(&mut o.state, &o.adapter);
-    let s = crate::plex::register_for_test("pms-credit", "127.0.0.1", 1, "t", "cid");
+    let s = crate::registry::register_with_client_id("pms-credit", "127.0.0.1", 1, "t", "cid");
     assert_eq!(s, sid(0), "a fresh registry hands out slot 0");
 
     // what a build without the rule published: the household's own server, wearing the account
     // holder's handle, with shelves already merged from it
-    crate::plex::describe_server(s, "Mac mini", "admin", crate::plex::GrantEvidence::outside());
+    crate::registry::describe(s, "Mac mini", "admin", crate::registry::GrantEvidence::outside());
     seed(&mut o.state, vec![src(
         0,
         "admin",
@@ -816,7 +816,7 @@ fn a_corrected_credit_restamps_the_shelves_home_already_built() {
     assert_eq!(hub_source(&o.state, 0), "admin");
 
     // the roster refresh re-grades it — and there is deliberately NO landing after this
-    crate::plex::describe_server(s, "Mac mini", "", crate::plex::GrantEvidence::outside());
+    crate::registry::describe(s, "Mac mini", "", crate::registry::GrantEvidence::outside());
     sync_roster(&mut o.state);
 
     assert_eq!(
@@ -832,7 +832,7 @@ fn a_corrected_credit_restamps_the_shelves_home_already_built() {
     );
 
     reset(&mut o.state, &o.adapter);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 /// The same split over catalog ROWS, which is the cap the shelves' items come out of.

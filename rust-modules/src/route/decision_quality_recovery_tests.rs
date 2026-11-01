@@ -313,14 +313,14 @@ fn a_local_auto_original_is_supervised_exactly_like_a_remote_one() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     restore_quality(Quality::Auto);
-    let sid = crate::plex::register_for_test(
+    let sid = crate::registry::register_with_client_id(
         "machine-local-watch",
         "<peer-host-1>.example.invalid",
         32400,
         "token",
         "test-client-id",
     );
-    crate::plex::client_for(sid)
+    crate::registry::client_for(sid)
         .expect("server installed")
         .set_link(crate::plex::probe::Location::Local);
     apply_plan(&mut ps, 
@@ -345,7 +345,7 @@ fn a_local_auto_original_is_supervised_exactly_like_a_remote_one() {
     );
     restore_quality(Quality::Original);
     reset_session(&mut ps);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 #[test]
@@ -548,7 +548,7 @@ fn a_transcode_seek_swaps_to_a_fresh_physical_session_and_retires_the_old_one() 
         }
     });
 
-    let sid = crate::plex::register_for_test(
+    let sid = crate::registry::register_with_client_id(
         "seek-session-test",
         "127.0.0.1",
         port,
@@ -604,7 +604,7 @@ fn a_transcode_seek_swaps_to_a_fresh_physical_session_and_retires_the_old_one() 
     restore_quality(Quality::Original);
     reset_session(&mut ps);
     install_active_encoder("");
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 /// A `/decision` response is preparation, not publication. PMS can close the connection or
@@ -644,7 +644,7 @@ fn a_failed_retranscode_decision_leaves_the_live_route_unchanged() {
         }
     });
 
-    let sid = crate::plex::register_for_test(
+    let sid = crate::registry::register_with_client_id(
         "failed-retranscode-test",
         "127.0.0.1",
         port,
@@ -709,7 +709,7 @@ fn a_failed_retranscode_decision_leaves_the_live_route_unchanged() {
     restore_quality(Quality::Original);
     reset_session(&mut ps);
     install_active_encoder("");
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 /// Exact user sequence from the device trace: Auto HLS commits a replacement encoder, a
@@ -1057,7 +1057,7 @@ fn a_remux_recovery_keeps_hls_until_frames_and_rolls_back_the_replacement() {
             .expect("publish rollback requests");
     });
 
-    let sid = crate::plex::register_for_test(
+    let sid = crate::registry::register_with_client_id(
         "remux-recovery",
         "127.0.0.1",
         port,
@@ -1141,7 +1141,7 @@ fn a_remux_recovery_keeps_hls_until_frames_and_rolls_back_the_replacement() {
     restore_quality(Quality::Original);
     reset_session(&mut ps);
     install_active_encoder("");
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     crate::player::reset_audio_track();
     crate::player::reset_subtitle();
 }
@@ -1688,7 +1688,7 @@ fn an_installed_cold_direct_route_closes_its_logical_resource_at_teardown() {
         }
         tx.send(requests).unwrap();
     });
-    let sid = crate::plex::register_for_test(
+    let sid = crate::registry::register_with_client_id(
         "cold-direct-owner",
         "127.0.0.1",
         port,
@@ -1733,7 +1733,7 @@ fn an_installed_cold_direct_route_closes_its_logical_resource_at_teardown() {
 
     reset_session(&mut ps);
     install_active_encoder("");
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 /// #266 follow-up: the Auto watchdog already probes this exact Part on this exact identity on its
@@ -1788,14 +1788,14 @@ fn automatic_recovery_issues_no_part_admission_before_the_trial() {
         tx.send(requests).expect("publish observation");
     });
 
-    let sid = crate::plex::register_for_test(
+    let sid = crate::registry::register_with_client_id(
         "auto-no-admission",
         "127.0.0.1",
         port,
         "token",
         "auto-no-admission-client",
     );
-    let client = crate::plex::client_for(sid).expect("test server installed");
+    let client = crate::registry::client_for(sid).expect("test server installed");
     let logical_url = client
         .direct_play_url("/library/parts/1/file.mkv", "auto-no-admission-logical")
         .to_url();
@@ -1846,7 +1846,7 @@ fn automatic_recovery_issues_no_part_admission_before_the_trial() {
     restore_quality(Quality::Original);
     reset_session(&mut ps);
     install_active_encoder("");
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     crate::player::reset_audio_track();
     crate::player::reset_subtitle();
 }
@@ -1907,14 +1907,14 @@ fn a_confirmed_direct_recovery_remains_seekable_after_hls_is_retired() {
         all_tx.send(requests).expect("publish direct lifecycle");
     });
 
-    let sid = crate::plex::register_for_test(
+    let sid = crate::registry::register_with_client_id(
         "direct-recovery",
         "127.0.0.1",
         port,
         "token",
         "direct-client",
     );
-    let client = crate::plex::client_for(sid).expect("test server installed");
+    let client = crate::registry::client_for(sid).expect("test server installed");
     let logical_url = client
         .direct_play_url("/library/parts/1/file.mkv", "direct-logical")
         .to_url();
@@ -2015,7 +2015,7 @@ fn a_confirmed_direct_recovery_remains_seekable_after_hls_is_retired() {
     restore_quality(Quality::Original);
     reset_session(&mut ps);
     install_active_encoder("");
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     crate::player::reset_audio_track();
     crate::player::reset_subtitle();
 }
@@ -2088,14 +2088,14 @@ fn stopping_a_pending_direct_recovery_closes_its_resource_once() {
         tx.send(requests).expect("publish stop requests");
     });
 
-    let sid = crate::plex::register_for_test(
+    let sid = crate::registry::register_with_client_id(
         "direct-pending-stop",
         "127.0.0.1",
         port,
         "token",
         "direct-stop-client",
     );
-    let candidate_url = crate::plex::client_for(sid)
+    let candidate_url = crate::registry::client_for(sid)
         .unwrap()
         .direct_play_url("/library/parts/1/file.mkv", "direct-stop-logical")
         .to_url();
@@ -2152,7 +2152,7 @@ fn stopping_a_pending_direct_recovery_closes_its_resource_once() {
     restore_quality(Quality::Original);
     reset_session(&mut ps);
     install_active_encoder("");
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     crate::player::reset_audio_track();
     crate::player::reset_subtitle();
 }
@@ -2295,14 +2295,14 @@ fn local_auto_preserves_the_candidate_needed_to_leave_a_fixed_rung() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     restore_quality(Quality::Auto);
-    let sid = crate::plex::register_for_test(
+    let sid = crate::registry::register_with_client_id(
         "machine-local",
         "<peer-host-1>.example.invalid",
         32400,
         "token",
         "test-client-id",
     );
-    crate::plex::client_for(sid)
+    crate::registry::client_for(sid)
         .expect("server installed")
         .set_link(crate::plex::probe::Location::Local);
     apply_plan(&mut ps, 
@@ -2338,7 +2338,7 @@ fn local_auto_preserves_the_candidate_needed_to_leave_a_fixed_rung() {
 
     reset_session(&mut ps);
     restore_quality(Quality::Original);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 /// Returning from a fixed rung to Auto on a Local server must not confuse "the link needs no
@@ -2351,14 +2351,14 @@ fn local_auto_keeps_hls_when_original_is_infeasible() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     restore_quality(Quality::P720);
-    let sid = crate::plex::register_for_test(
+    let sid = crate::registry::register_with_client_id(
         "machine-local-infeasible",
         "<peer-host-1>.example.invalid",
         32400,
         "token",
         "test-client-id",
     );
-    crate::plex::client_for(sid)
+    crate::registry::client_for(sid)
         .expect("server installed")
         .set_link(crate::plex::probe::Location::Local);
     apply_plan(&mut ps, 
@@ -2398,7 +2398,7 @@ fn local_auto_keeps_hls_when_original_is_infeasible() {
     reset_session(&mut ps);
     restore_quality(Quality::Original);
     install_active_encoder("");
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 /// The exact remote-control sequence from a 4K Original session: Manual 1080p replaces it
@@ -2508,14 +2508,14 @@ fn original_to_auto_restarts_the_worker_to_arm_the_watchdog() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     restore_quality(Quality::Original);
-    let sid = crate::plex::register_for_test(
+    let sid = crate::registry::register_with_client_id(
         "machine-local-original-auto",
         "<peer-host-1>.example.invalid",
         32400,
         "token",
         "test-client-id",
     );
-    crate::plex::client_for(sid)
+    crate::registry::client_for(sid)
         .expect("server installed")
         .set_link(crate::plex::probe::Location::Local);
     apply_plan(&mut ps, 
@@ -2576,7 +2576,7 @@ fn original_to_auto_restarts_the_worker_to_arm_the_watchdog() {
     reset_session(&mut ps);
     restore_quality(Quality::Original);
     crate::player::reset_route_requests_for_test(&ps);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 #[test]
@@ -2585,14 +2585,14 @@ fn auto_to_an_admitting_fixed_rung_restarts_the_worker_to_remove_the_watchdog() 
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     restore_quality(Quality::Auto);
-    let sid = crate::plex::register_for_test(
+    let sid = crate::registry::register_with_client_id(
         "machine-auto-fixed-direct",
         "<peer-host-1>.example.invalid",
         32400,
         "token",
         "test-client-id",
     );
-    crate::plex::client_for(sid)
+    crate::registry::client_for(sid)
         .expect("server installed")
         .set_link(crate::plex::probe::Location::Local);
     apply_plan(&mut ps, 
@@ -2642,7 +2642,7 @@ fn auto_to_an_admitting_fixed_rung_restarts_the_worker_to_remove_the_watchdog() 
     reset_session(&mut ps);
     restore_quality(Quality::Original);
     crate::player::reset_route_requests_for_test(&ps);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 /// Manual Original is not Auto, but it is still a zero-encode route and must be recoverable

@@ -3435,7 +3435,7 @@ mod lifecycle_regression_tests {
 
     struct Rig {
         app: App,
-        sid: crate::plex::ServerId,
+        sid: crate::registry::ServerId,
         release: mpsc::Sender<()>,
         entered: mpsc::Receiver<()>,
         requests: Arc<Mutex<Vec<String>>>,
@@ -3471,7 +3471,7 @@ mod lifecycle_regression_tests {
         /// `successor: false` serves a one-row queue — a film, with no Up Next to hand off to — so
         /// an end of stream leaves the player instead of starting the next item.
         fn serving(successor: bool) -> Option<Rig> {
-            crate::plex::reset_servers_for_test();
+            crate::registry::reset_for_test();
             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
             listener.set_nonblocking(true).unwrap();
             let port = listener.local_addr().unwrap().port();
@@ -3553,11 +3553,11 @@ mod lifecycle_regression_tests {
                 None => {
                     // See the doc comment above: nothing past this point has run yet, so undoing
                     // the initial reset is the whole cleanup owed.
-                    crate::plex::reset_servers_for_test();
+                    crate::registry::reset_for_test();
                     return None;
                 }
             };
-            let sid = crate::plex::register_for_test(
+            let sid = crate::registry::register_with_client_id(
                 "lifecycle-fixture",
                 "127.0.0.1",
                 port as i32,
@@ -3666,7 +3666,7 @@ mod lifecycle_regression_tests {
             }
             crate::player::SHARED.reset_session();
             crate::route::reset_player_control_for_test(&self.app.player.session);
-            crate::plex::reset_servers_for_test();
+            crate::registry::reset_for_test();
         }
     }
 
@@ -4043,7 +4043,7 @@ mod lifecycle_regression_tests {
         event
     }
 
-    fn detail_arg(sid: crate::plex::ServerId) -> AppArg {
+    fn detail_arg(sid: crate::registry::ServerId) -> AppArg {
         AppArg::Content(crate::screens::registry::ContentArg::Detail { sid, rk: "1".into() })
     }
 

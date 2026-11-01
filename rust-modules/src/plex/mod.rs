@@ -14,10 +14,12 @@ mod client;
 pub(crate) mod identity; // ONE X-Plex-* identity for both transports (plex.tv headers + PMS query)
 pub(crate) mod models;
 mod params;
-// WHICH servers exist and which one is current. `client()`/`client_opt()` live here now (they
-// mean "the current server"); `client.rs` is just the type. See its module doc for why the hot
-// path is an atomic pointer table rather than a lock.
-mod servers;
+// WHICH servers exist and which one is current. The SERVER REGISTRY itself now lives in
+// `crate::registry` (backend-neutral: `ServerId`, `ServerFacts` and the per-slot state machine are
+// shared vocabulary — the Jellyfin backend names its one server in the same slot model), and the
+// private alias below keeps the in-layer `super::servers::…` spellings resolving unchanged.
+// `client()`/`client_opt()` still mean "the current server"; `client.rs` is just the type.
+use crate::registry as servers;
 
 // Op files below only add `impl Client { … }` blocks (Rust allows multiple impls of one
 // type across a crate) — declared here so those methods compile onto `Client`.
@@ -54,7 +56,38 @@ pub(crate) mod probe;
 
 // Compatibility alias for Plex internals. The credential authority and plaintext consent
 // lifecycle live in crate::grant so shared HTTP transport code need not import through Plex.
-pub(crate) use crate::grant;
+// (Unused since the server registry moved to crate::registry — its `super::grant` calls went
+// with it — so the alias is gone.)
+
+// The ONE door the out-of-layer registry (crate::registry) has back into this layer's private
+// surface: minting a slot `Client` (its constructor and the resolve-pin builder are `pub(super)`
+// on purpose) and triggering the self-description refresh. Pure forwarding, same calls in the
+// same order as the in-layer spellings — no behavior of its own.
+pub(crate) mod registry_seam {
+    use super::{Client, ServerId};
+    use crate::origin::{Origin, ResolvePin};
+
+    pub(crate) fn new_client(
+        id: ServerId,
+        machine_id: &str,
+        origin: Origin,
+        token: &str,
+        client_id: &str,
+        pin: Option<ResolvePin>,
+    ) -> Client {
+        Client::new(id, machine_id, origin, token, client_id).with_resolve_pin(pin)
+    }
+
+    pub(crate) fn refresh_serverinfo(id: ServerId) {
+        super::serverinfo::refresh(id);
+    }
+
+    /// Test-only read of the slot client's token (`with_token` is `pub(super)` by design).
+    #[cfg(test)]
+    pub(crate) fn client_token_for_test(c: &Client) -> String {
+        c.with_token("/x").rsplit('=').next().unwrap_or_default().to_owned()
+    }
+}
 
 // Which libraries feed Home, PER PROFILE. Pure policy over the section table and one profile's
 // persisted answer — no store, no screen — so the household default, the recorded answer and the
@@ -72,26 +105,15 @@ pub use client::{Client, IpVersion, StreamUrl};
 // straight out of the `butaca-servers` trigger.
 #[allow(unused_imports)]
 pub(crate) use crate::origin::{plex_direct_literal, url_host, CredentialPolicy, Origin, ResolvePin, Scheme};
-// The registry surface. `client_for`, `register`, `set_current` and `ServerId` are the
-// multi-server additions.
+// The registry surface THIS LAYER still names through `super::…` / `crate::plex::…` — the
+// crate-wide surface lives in `crate::registry` since the move out of plex/ (`super::servers::…`
+// spellings resolve through the alias above).
 #[allow(unused_imports)]
 pub use servers::{
-    client_for, client_opt, commit_if_current, commit_reachability_if_current,
-    count as server_count, current as current_server, describe as describe_server,
-    facts as server_facts, ids as server_ids,
-    facts_gen as server_facts_gen, is_household, owner_credit,
-    probe_result as server_probe_result, publish_probe_result, register,
-    roster_gen as server_roster_gen, same_item, set_current, GrantEvidence,
-    ServerFacts,
-    ServerId, MAX_SERVERS,
+    client_for, current as current_server, count as server_count, same_item, ServerId,
 };
-#[cfg(test)]
-pub use servers::{client, describe_name as describe_server_name};
-// Sign-out. `pub(crate)` like the function itself: retiring the whole table is `auth::sign_out`'s
-// to call and nothing else's — a caller that merely wants to stop using a server wants
-// `set_current`, and one that wants to forget a share wants plex.tv to stop granting it.
-pub(crate) use servers::{finish_profile_switch, id_of_machine, revoke_all, revoke_for_profile_switch};
-pub(crate) use servers::regrade_credentials;
+#[allow(unused_imports)]
+pub(crate) use servers::ConnectionFacts;
 // The registry as a TEST FIXTURE, for suites outside this module (`route.rs` grades which server a
 // `/:/timeline` POST reaches). `register_for_test` skips the `session::load` the public `register`
 // does — that call mints and PERSISTS a device uuid, which a host test has no business writing —
@@ -104,27 +126,10 @@ pub use models::*;
 // through it.
 pub(crate) use models::de_i64;
 pub use params::*;
-#[cfg(test)]
-pub(crate) use servers::{
-    register_pinned_with_client_id_and_policy, register_with_client_id as register_for_test,
-    reset_for_test as reset_servers_for_test, write_held_for_test,
-};
-// Only reached from `auth::register_observed_origin`'s `#[cfg(test)]` arm and from test files, so
-// a plain `cargo check --lib` (which builds no test code at all) sees no caller.
-pub(crate) use servers::register_pinned_with_client_id;
-
-// #95 step 8: connection facts applied AT registration, atomically with the registry write. See
-// `servers::ConnectionFacts`'s doc for why `None` means "leave unchanged" rather than "unknown".
-// `register_origin` took the `ConnectionFacts` parameter directly rather than keeping a
-// connection-less twin beside it — every production caller already knows a tier (or `None`) at
-// registration time. `register_captured_origin_with_connection` is reached only from production
-// call sites that are themselves feature-conditional today; `#[allow]` keeps a
-// `--no-default-features` `cargo check` (which builds no test code) from flagging it as dead while
-// it still has a real, if narrower, production caller.
-#[allow(unused_imports)]
-pub(crate) use servers::{
-    register_captured_origin_with_connection, register_origin, ConnectionFacts,
-};
+// The registry's test-fixture surface (`register_with_client_id`, `reset_for_test`,
+// `write_held_for_test`, `register_pinned_with_client_id*`) and the registration entry points
+// (`register_origin`, `register_captured_origin_with_connection`) moved to `crate::registry`
+// with the registry itself — callers import them there.
 // The projected play-queue row is an op-file item rather than a wire DTO, so it is re-exported
 // by name. Route.rs names it in `Plan`/`QueueInfo`; the rest of `timeline` is reached through
 // `Client`'s methods and needs none.

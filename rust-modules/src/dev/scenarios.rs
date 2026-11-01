@@ -123,7 +123,7 @@ pub(crate) struct Scenarios {
     pub(crate) play_tried: bool,
     /// `/tmp/butaca-play=<rk>` between its ASYNC request and the landing it plays from:
     /// `(server, ratingKey, the frame clock at which the wait gives up)`. See [`play_arm`].
-    pub(crate) play_await: Option<(crate::plex::ServerId, String, u32)>,
+    pub(crate) play_await: Option<(crate::registry::ServerId, String, u32)>,
     pub(crate) menu_tried: bool,
     pub(crate) menupick_tried: bool,
     /// dev: the row `/tmp/butaca-menupick` still owes the track menu, as its RAW second field
@@ -490,7 +490,7 @@ pub(crate) fn replay_trigger_value() -> Option<String> {
 pub(crate) struct ContentBoot {
     /// The page this boot is waiting for, as its own identity. It was a `ui::trail::Node` — a
     /// whole history entry — for the `(sid, rk)` pair and the `Spot`'s season inside it.
-    sid: crate::plex::ServerId,
+    sid: crate::registry::ServerId,
     rk: String,
     season: Option<i64>,
     down: u32,
@@ -507,7 +507,7 @@ pub(crate) struct ContentBoot {
 }
 
 impl ContentBoot {
-    fn controlled(sid: crate::plex::ServerId, input: &crate::app::bootstrap::ContentInitial) -> Self {
+    fn controlled(sid: crate::registry::ServerId, input: &crate::app::bootstrap::ContentInitial) -> Self {
         Self { sid, rk: input.detail.clone(), season:None, down:input.detailsec, right:0,
             activate:input.detailok, filmography:input.filmography, bio:false,
             waiting_person:false, ready_seen:false }
@@ -518,7 +518,7 @@ impl ContentBoot {
             if *sid == self.sid && *rk == self.rk)
     }
 
-    pub(crate) fn new(sid: crate::plex::ServerId, rk: String) -> Self {
+    pub(crate) fn new(sid: crate::registry::ServerId, rk: String) -> Self {
         Self {
             sid,
             rk,
@@ -690,8 +690,8 @@ pub(crate) fn advance_content_boot(app: &mut App, fr: &Frame) {
     app.scenarios.content_boot = Some(boot);
 }
 
-fn detail_boot_ready(sid: crate::plex::ServerId, rk: &str, want_season: Option<i64>,
-    loaded: Option<(crate::plex::ServerId, &str, Option<i64>)>, detail_loading: bool, season_loading: bool) -> bool {
+fn detail_boot_ready(sid: crate::registry::ServerId, rk: &str, want_season: Option<i64>,
+    loaded: Option<(crate::registry::ServerId, &str, Option<i64>)>, detail_loading: bool, season_loading: bool) -> bool {
     !detail_loading && !season_loading && loaded.is_some_and(|(server, key, season)|
         server == sid && key == rk && want_season.is_none_or(|wanted| season == Some(wanted)))
 }
@@ -702,7 +702,7 @@ mod content_boot_tests {
 
     #[test]
     fn delayed_detail_and_season_landings_do_not_consume_headless_directions() {
-        let sid = crate::plex::ServerId::UNSET;
+        let sid = crate::registry::ServerId::UNSET;
         let mut boot = ContentBoot { sid, rk: "1001".into(), season: Some(2), down: 2, right: 1,
             activate: true, filmography: false, bio: false, waiting_person: false, ready_seen: false };
         let ready_for = |loaded, d, sl| detail_boot_ready(sid, "1001", Some(2), loaded, d, sl);
@@ -1196,7 +1196,7 @@ fn play_await_tick(app: &mut App, fr: &mut Frame) {
         return;
     }
     let leaf = app.bridge.metadata_view().current()
-        .filter(|d| crate::plex::same_item((d.sid, &d.rk), (sid, &rk)))
+        .filter(|d| crate::registry::same_item((d.sid, &d.rk), (sid, &rk)))
         .map(|d| {
             if !d.part.is_empty() {
                 (d.part.clone(), d.vcodec.clone(), d.acodec.clone(), d.title.clone(), d.resume_ms, d.dur_ms)
@@ -1732,7 +1732,7 @@ pub(crate) fn controlled_each_frame(app: &mut App, fr: &mut Frame) -> bool {
         && fr.now.wrapping_sub(app.t0) > 500 {
         app.scenarios.detail_tried = true;
         if let Some(input) = app.boot_initial.as_ref().and_then(|init| init.content.as_ref()) {
-            let sid = crate::plex::ServerId::from_raw(0);
+            let sid = crate::registry::ServerId::from_raw(0);
             app.scenarios.content_boot = Some(ContentBoot::controlled(sid, input));
             crate::app::bridge::open_detail(&mut app.pages, &mut app.bridge, sid, &input.detail, None, None);
         }
@@ -1757,7 +1757,7 @@ pub(crate) fn nav_osc_tick(app: &mut App, now: u32) {
             AppArg::Home if !app.scenarios.dev.nav_osc_rk.is_empty() => {
                 let rk = app.scenarios.dev.nav_osc_rk.clone();
                 crate::app::bridge::open_detail(&mut app.pages, &mut app.bridge,
-                    crate::plex::current_server(), &rk, None, None);
+                    crate::registry::current(), &rk, None, None);
             }
             AppArg::Content(_) => crate::app::bridge::nav_pop(&mut app.pages),
             AppArg::Home => {
@@ -1947,7 +1947,7 @@ fn push_bench_open(app: &mut App, target: bench::PushTarget) -> bench::PushTarge
         bench::PushTarget::Detail => {
             let rk = app.scenarios.push_bench.as_ref().unwrap().rk.clone();
             crate::app::bridge::open_detail(&mut app.pages, &mut app.bridge,
-                crate::plex::current_server(), &rk, None, None);
+                crate::registry::current(), &rk, None, None);
             bench::PushTarget::Detail
         }
         bench::PushTarget::Person => {
@@ -2067,7 +2067,7 @@ fn modal_bench_open(app: &mut App, target: bench::ModalTarget) {
         bench::ModalTarget::ItemMenu => {
             let Some(host) = app.pages.nav.top_page().map(|e| e.id) else { return };
             let rk = app.scenarios.modal_bench.as_ref().unwrap().rk.clone();
-            let sid = crate::plex::current_server();
+            let sid = crate::registry::current();
             let anchor_rect = crate::screens::item_menu::fallback_anchor();
             let arg = ItemMenuArg {
                 sid,
@@ -2161,7 +2161,7 @@ fn deep_bench_open(app: &mut App, target: bench::PushTarget) -> bench::PushTarge
         bench::PushTarget::Detail => {
             let rk = app.scenarios.deep_bench.as_ref().unwrap().rk.clone();
             crate::app::bridge::open_detail(&mut app.pages, &mut app.bridge,
-                crate::plex::current_server(), &rk, None, None);
+                crate::registry::current(), &rk, None, None);
             bench::PushTarget::Detail
         }
         bench::PushTarget::Person => {

@@ -119,14 +119,14 @@ impl TestBrowse {
 pub(super) struct RegisteredCleanup;
 impl Drop for RegisteredCleanup {
     fn drop(&mut self) {
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 }
 pub(super) fn registered_source(
 ) -> (RegisteredCleanup, TestBrowse, ServerId, &'static crate::plex::Client) {
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test("browse-life", "10.0.0.1", 32400, "old", "cid");
-    assert!(crate::plex::set_current(sid));
+    crate::registry::reset_for_test();
+    let sid = crate::registry::register_with_client_id("browse-life", "10.0.0.1", 32400, "old", "cid");
+    assert!(crate::registry::set_current(sid));
     let mut source = a_source("original", "", true);
     source.sid = sid;
     source.sections_done = false;
@@ -136,7 +136,7 @@ pub(super) fn registered_source(
         RegisteredCleanup,
         browse,
         sid,
-        crate::plex::client_for(sid).unwrap(),
+        crate::registry::client_for(sid).unwrap(),
     )
 }
 pub(super) fn registered_page_source(
@@ -291,7 +291,7 @@ pub(super) fn seed_one_section(browse: &mut TestBrowse) {
 }
 /// Land what a worker would post for the CURRENT query: `total < 0` is the failure sentinel.
 pub(super) fn land_page(browse: &mut TestBrowse, total: i64, items: usize) {
-    let client = crate::plex::client();
+    let client = crate::registry::client();
     let r = PageResult {
         client: super::DiscClient::Plex(client),
         token_gen: client.token_gen(),
@@ -310,7 +310,7 @@ pub(super) fn land_page(browse: &mut TestBrowse, total: i64, items: usize) {
 /// for the CURRENT section — used to exercise the client-side "Plays" sort augmentation
 /// (issue #146) that runs where this landing is applied.
 pub(super) fn land_page_with_sorts(browse: &mut TestBrowse, sorts: Vec<SortEntry>) {
-    let client = crate::plex::client();
+    let client = crate::registry::client();
     let r = PageResult {
         client: super::DiscClient::Plex(client),
         token_gen: client.token_gen(),
@@ -346,7 +346,7 @@ pub(super) fn seed_one_source(
     // The CURRENT server's id, registered or not — see `seed_sources_for_test` for why nothing
     // is registered here. It makes `cur_source_idx`'s empty-table fallback resolve to this row.
     browse.seed_sources(vec![BrowseSource {
-        sid: crate::plex::current_server(),
+        sid: crate::registry::current(),
         client_addr: 0,
         token_gen: 0,
         machine_id: "mach-0".into(),

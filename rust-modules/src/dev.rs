@@ -344,10 +344,10 @@ fn parse_server_slot(s: &str) -> Result<u16, String> {
         .trim()
         .parse::<u16>()
         .map_err(|_| format!("{s:?} is not a server slot"))?;
-    if (slot as usize) >= crate::plex::MAX_SERVERS {
+    if (slot as usize) >= crate::registry::MAX_SERVERS {
         return Err(format!(
             "server slot {slot} is outside 0..{}",
-            crate::plex::MAX_SERVERS
+            crate::registry::MAX_SERVERS
         ));
     }
     Ok(slot)

@@ -49,7 +49,7 @@
 //! [`roster_replaced`] change the table at once, and the authority is asked when a request STARTS: every request that starts after
 //! the change — queued, retried, a cached token-bearing URL, a media reopen — is refused at the
 //! transport, and the registry re-grades every published client
-//! ([`crate::plex::regrade_credentials`]), blanking the token of any whose origin may no
+//! ([`crate::registry::regrade_credentials`]), blanking the token of any whose origin may no
 //! longer carry one. A request already on the wire is not interrupted: it completes (or fails)
 //! with the credential it started with, and nothing after it gets a new one. A refusal also moves
 //! the consent generation, so a discovery that captured *Allowed* before it cannot mint the grant
@@ -454,7 +454,7 @@ fn retain(keep: impl Fn(&PlaintextGrant) -> bool) -> bool {
     COUNT.store(grants.len(), Ordering::Release);
     drop(grants);
     if removed {
-        crate::plex::regrade_credentials();
+        crate::registry::regrade_credentials();
         moved();
     }
     removed

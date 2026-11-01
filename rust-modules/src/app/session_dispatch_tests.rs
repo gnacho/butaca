@@ -11,10 +11,10 @@ fn browse_tab_generation_is_owned_and_chrome_never_replays_a_stale_shape() {
     let _guard = crate::testlock::serial();
     let session = crate::plex::session::TempSession::new("bridge-browse-tabs");
     session.watching("u-bridge-browse-tabs");
-    crate::plex::reset_servers_for_test();
-    let own = crate::plex::register_for_test(
+    crate::registry::reset_for_test();
+    let own = crate::registry::register_with_client_id(
         "bridge-tabs-own", "127.0.0.1", 9, "synthetic", "fixture");
-    let shared = crate::plex::register_for_test(
+    let shared = crate::registry::register_with_client_id(
         "bridge-tabs-shared", "127.0.0.1", 10, "synthetic", "fixture");
     let mut rig = Bridge::for_test(|| 0);
     rig.stores.browse.borrow_mut().seed_registered_table_for_test([own, shared]);
@@ -39,7 +39,7 @@ fn browse_tab_generation_is_owned_and_chrome_never_replays_a_stale_shape() {
     assert_eq!(rig.chrome.labels().generation, changed_gen,
         "capturing again must not republish the owner's old tab generation");
     assert!(!rig.chrome.labels().labels.iter().any(|label| label == "TV Shows"));
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 // Dev-only: this fixture drives a plaintext loopback PMS with a real, token-bearing registered
@@ -54,7 +54,7 @@ fn production_bridges_do_not_share_browse_state_or_landings() {
     let _guard = crate::testlock::serial();
     let session = crate::plex::session::TempSession::new("bridge-browse-owners");
     session.watching("u-bridge-browse-owners");
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("loopback bind");
     let port = listener.local_addr().unwrap().port();
     let (accepted_tx, accepted_rx) = std::sync::mpsc::sync_channel(0);
@@ -81,9 +81,9 @@ fn production_bridges_do_not_share_browse_state_or_landings() {
         socket.write_all(head.as_bytes()).unwrap();
         socket.write_all(body).unwrap();
     });
-    let own = crate::plex::register_for_test(
+    let own = crate::registry::register_with_client_id(
         "bridge-browse-own", "127.0.0.1", 9, "synthetic", "fixture");
-    let shared = crate::plex::register_for_test(
+    let shared = crate::registry::register_with_client_id(
         "bridge-browse-shared", "127.0.0.1", port as i32, "synthetic", "fixture");
     let mut first = Bridge::for_test(|| 0);
     let mut second = Bridge::for_test(|| 0);
@@ -133,6 +133,6 @@ fn production_bridges_do_not_share_browse_state_or_landings() {
     assert_eq!(notices.0, 1,
         "capture publication and notice drain must coalesce one page into one StoreChanged");
     assert!(first.stores.take_notices().is_empty());
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 

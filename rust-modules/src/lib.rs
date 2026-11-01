@@ -52,6 +52,7 @@ mod collection; // collection page model: tag resolution, header metadata and pa
 mod player; // buffer-feed video engine (was playback.c) — step 5
 mod plex; // typed Plex API layer (rust-modules/src/plex/) — one method per PMS operation (the live READ layer; playback ops still in route.rs)
 mod pms;
+mod registry; // the SERVER REGISTRY: which servers exist, which is current, and the per-slot facts — the sid vocabulary shared by every backend (moved out of plex/)
 // Pure RELEASE_LINE-parsing helpers, `include!`d verbatim by build.rs so `cargo test --lib`
 // actually runs their unit tests (see the module for why). Nothing in the app itself calls
 // them at runtime — the version rule they implement is applied once, at compile time, by
@@ -152,7 +153,7 @@ pub(crate) mod testlock {
     //! (`install_for_test`, `set_current_for_test`, `begin_detail_for_test`,
     //! `land_detail_for_test`), `search.rs` (`publish_shelves_for_test`,
     //! `debounce_elapsed_for_test`) and `pms.rs`'s own eleven sites — and so does every entry point of
-    //! the server registry a test can reach: `plex::servers::register_with_client_id` (and the
+    //! the server registry a test can reach: `registry::register_with_client_id` (and the
     //! `register_lazy` seam it and its sibling test constructors share), `revoke_all`,
     //! `set_current` and `reset_for_test`. A three-run `make check` plus a ten-run
     //! `--test-threads 16` stress at this coverage level turned up no test that had been writing a

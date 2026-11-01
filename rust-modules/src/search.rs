@@ -28,7 +28,7 @@
 //!
 //! Search is single-server: `/hubs/search` answers for the machine you asked, and
 //! `docs/shared-servers.md` states that nothing aggregates server-side — the merge is the client's
-//! job. So this fans out one query per [`crate::plex::server_ids`] and merges into the shelves
+//! job. So this fans out one query per [`crate::registry::ids`] and merges into the shelves
 //! below, which is why every [`Item`] carries its own `ServerId`.
 //!
 //! The merge is **round robin** ([`merge`]), not source-by-source the way Home groups its shelves.
@@ -89,7 +89,7 @@
 //! a worker spawned before the reset can only ever complete into the retired mailbox it captured.
 #![allow(dead_code)]
 
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 use crate::pms::{parse_item, PmsMovie};
 use std::panic::catch_unwind;
 use std::sync::Arc;
@@ -445,7 +445,7 @@ const SHELF_MAX: usize = crate::ui::card_row::MAX_ROW_ITEMS;
 
 /// Fetch-slot ceiling — the registry's own `MAX_SERVERS`, named rather than copied, so raising the
 /// ceiling cannot leave this module quietly never asking the extra servers.
-const NSRC: usize = crate::plex::MAX_SERVERS;
+const NSRC: usize = crate::registry::MAX_SERVERS;
 
 /// What one source's finished fetch delivers. `None` means the fetch FAILED (transport, parse, or
 /// a panicking worker) and must be retried — kept distinguishable from a successful answer that
@@ -529,7 +529,7 @@ impl Source {
 /// window is not necessarily contiguous. Collecting at most 16 indices is the honest shape.
 fn slots() -> Vec<usize> {
     #[allow(unused_mut)] // the jellyfin arm below pushes
-    let mut out: Vec<usize> = crate::plex::server_ids()
+    let mut out: Vec<usize> = crate::registry::ids()
         .filter_map(|id| ((id.raw() as usize) < NSRC).then_some(id.raw() as usize))
         .collect();
     // The Jellyfin backend's one server lives outside the Plex registry; its slot is appended
@@ -718,7 +718,7 @@ impl SearchState {
         crate::testlock::assert_held("the search store (publish_shelves_for_test)");
         // A published catalog represents completed source answers, not merely painted rows over
         // still-pending requests. Keep it valid when a real owned-screen Tick pumps the store.
-        self.visible = crate::plex::server_roster_gen();
+        self.visible = crate::registry::roster_gen();
         snapshot_favs(self);
         for i in slots() {
             let items = std::array::from_fn(|k| {
@@ -817,7 +817,7 @@ fn set_watched_local(state: &mut SearchState, sid: ServerId, rk: &str, on: bool)
     let mut hit = false;
     let mut flip = |it: &mut Item| {
         if let Item::Media(m) = it {
-            if crate::plex::same_item((m.sid, &m.rk), (sid, rk)) {
+            if crate::registry::same_item((m.sid, &m.rk), (sid, rk)) {
                 crate::pms::set_watched(m, on);
                 hit = true;
             }
@@ -830,7 +830,7 @@ fn set_watched_local(state: &mut SearchState, sid: ServerId, rk: &str, on: bool)
         // A write outside the visible result cap must not clone a retained catalog it cannot
         // change. The catalog itself is bounded by KINDS × SHELF_MAX, never library-sized.
         if shelves.iter().flat_map(|s| &s.items).any(|it| matches!(it,
-            Item::Media(m) if crate::plex::same_item((m.sid, &m.rk), (sid, rk)))) {
+            Item::Media(m) if crate::registry::same_item((m.sid, &m.rk), (sid, rk)))) {
             for it in Arc::make_mut(shelves).iter_mut().flat_map(|s| &mut s.items) { flip(it); }
         }
     }
@@ -935,7 +935,7 @@ fn pump_with_optional_directory(
     gate: &crate::ui::landgate::Gate,
 ) -> bool {
     let live = slots();
-    let visible = crate::plex::server_roster_gen();
+    let visible = crate::registry::roster_gen();
     let roster_changed = state.visible != visible;
     state.visible = visible;
     if roster_changed {
@@ -1265,7 +1265,7 @@ fn maybe_spawn(state: &mut SearchState, adapter: &Arc<SearchAdapter>, i: usize) 
             // sectionId 0 = every section, which `opt_int` sends by omitting it. The Search screen
             // is deliberately account-wide: `sectionId` only RANKS (measured — every other
             // section's rows still come back), so it could not scope this even if we wanted it to.
-            let mc = crate::plex::client_for(sid)?.search(&q, LIMIT, 0)?;
+            let mc = crate::registry::client_for(sid)?.search(&q, LIMIT, 0)?;
             Some(project(&mc, sid, &favs))
         })
         .unwrap_or(None);
@@ -1401,7 +1401,7 @@ fn tag_hit(t: &crate::plex::Tag, sid: ServerId, favs: &[(ServerId, i64, bool)]) 
 /// else. Called beside the Browse `BrowseCmd::Reset` command.
 fn reset(state: &mut SearchState, adapter: &Arc<SearchAdapter>) {
     supersede(state, adapter);
-    state.visible = crate::plex::server_roster_gen();
+    state.visible = crate::registry::roster_gen();
     state.query = None;
     state.shelves = None;
     state.state = State::Idle;

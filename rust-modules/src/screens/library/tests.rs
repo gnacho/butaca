@@ -46,7 +46,7 @@ const OWNER: InputOwner = InputOwner::Entry(ENTRY);
 #[test]
 fn page_memory_shares_1200_keys_and_preserves_older_snapshots() {
     let _guard = crate::testlock::serial();
-    let sid = crate::plex::ServerId::from_raw(1);
+    let sid = crate::registry::ServerId::from_raw(1);
     let section = LibrarySectionIdentity { sid, key: 7 };
     let mut page = LibraryScreen::new(ENTRY, InstanceId(20), SecKind::Movie);
     for index in 0..1200 {
@@ -202,7 +202,7 @@ fn grid_paint_window_keeps_cards_above_the_centered_tab_track() {
 fn duplicate_across_pages_keeps_full_projection_recovery_metadata() {
     let _guard = crate::testlock::serial();
     let mut fixture = Fixture::new();
-    let sid = crate::plex::ServerId::from_raw(0);
+    let sid = crate::registry::ServerId::from_raw(0);
     let movie = |i| crate::pms::PmsMovie { sid, rk: format!("duplicate-test-{i}"), ..Default::default() };
     let mut items = (0..120).map(movie).collect::<Vec<_>>();
     items[85] = items[5].clone();
@@ -273,7 +273,7 @@ fn large_listing_publication_work_is_bounded_by_initial_slots_then_changed_page(
     const TOTAL: usize = 10_000;
     const PAGE: usize = 60;
     let mut fixture = Fixture::new();
-    let sid = crate::plex::ServerId::from_raw(0);
+    let sid = crate::registry::ServerId::from_raw(0);
     let movies = |start: usize| (start..start + PAGE).map(|i| crate::pms::PmsMovie {
         sid, rk: format!("large-{i}"), title: format!("Large {i}"), ..Default::default()
     }).collect::<Vec<_>>();
@@ -341,7 +341,7 @@ fn derived_grid_indexes_survive_reorder_truncation_clear_and_restore() {
 fn down_from_a_missing_final_row_column_clamps_to_the_last_item() {
     let _guard = crate::testlock::serial();
     let mut fixture = Fixture::new();
-    let sid = crate::plex::ServerId::from_raw(0);
+    let sid = crate::registry::ServerId::from_raw(0);
     fixture.listing = crate::browse::view::ListingSnapshot::fixture(sid,
         (0..8).map(|i| Some(crate::pms::PmsMovie { sid, rk: format!("{i}"), ..Default::default() })).collect(),
         Vec::new());
@@ -400,7 +400,7 @@ fn owned_rail_keeps_the_fixed_legacy_origin_and_short_window() {
     let _guard = crate::testlock::serial();
     for n in [9, 30] {
         let mut fixture = Fixture::new();
-        let sid = crate::plex::ServerId::from_raw(0);
+        let sid = crate::registry::ServerId::from_raw(0);
         fixture.listing = crate::browse::view::ListingSnapshot::fixture(sid,
             (0..36).map(|i| Some(crate::pms::PmsMovie { sid, rk: format!("{i}"), ..Default::default() })).collect(),
             (0..n).map(|i| (format!("{i}"), 1)).collect());
@@ -420,7 +420,7 @@ fn retry_stop_matches_the_shared_measured_status_action_with_and_without_reason(
     for owner in ["", "friend"] {
         let mut fixture = Fixture::new();
         fixture.listing = crate::stores::browse::ListingSnapshot::empty_for_test();
-        fixture.directory = crate::browse::view::DirectorySnapshot::fixture_source(4, crate::plex::ServerId::from_raw(7),
+        fixture.directory = crate::browse::view::DirectorySnapshot::fixture_source(4, crate::registry::ServerId::from_raw(7),
             crate::browse::SrcGroup { name: "Cinema server".into(), handle: owner.into(),
                 state: crate::browse::SourceState::Unreachable, tier: None }, SecFetch::Failed);
         let page = fixture.screen();
@@ -455,7 +455,7 @@ fn a_failed_library_section_and_a_failed_home_share_the_verdict_and_the_row() {
     for owner in ["", "friend"] {
         let mut fixture = Fixture::new();
         fixture.listing = crate::stores::browse::ListingSnapshot::empty_for_test();
-        fixture.directory = crate::browse::view::DirectorySnapshot::fixture_source(4, crate::plex::ServerId::from_raw(7),
+        fixture.directory = crate::browse::view::DirectorySnapshot::fixture_source(4, crate::registry::ServerId::from_raw(7),
             crate::browse::SrcGroup { name: "Cinema server".into(), handle: owner.into(),
                 state: crate::browse::SourceState::Unreachable, tier: None }, SecFetch::Failed);
         let page = fixture.screen();
@@ -484,7 +484,7 @@ fn a_fully_discovered_missing_kind_finishes_its_fade_and_has_no_foreign_grid() {
     let _guard = crate::testlock::serial();
     let mut fixture = Fixture::new();
     fixture.directory = crate::browse::view::DirectorySnapshot::fixture(1, 0, vec![
-        crate::browse::view::SectionView { sid: Some(crate::plex::ServerId::from_raw(0)), key: 1,
+        crate::browse::view::SectionView { sid: Some(crate::registry::ServerId::from_raw(0)), key: 1,
             kind: SecKind::Movie, row: crate::browse::SrcRow { section: 0, title: "Cinema".into(),
                 pinned: true, current: true, ..Default::default() } }]);
     let mut page = LibraryScreen::new(ENTRY, InstanceId(19), SecKind::Show);
@@ -549,7 +549,7 @@ fn owned_card_stops_clip_pointer_hits_and_hold_the_engine_item() {
         &mut Effects::new(&mut out, MachineId::Instance(InstanceId(19)), &mut present));
     assert!(out.iter().any(|effect| matches!(&effect.fx,
         Fx::App(AppFx::Library(LibraryReq::ItemMenu { sid, rk, from_deck: false }))
-            if *sid == crate::plex::ServerId::from_raw(0) && rk == "2")));
+            if *sid == crate::registry::ServerId::from_raw(0) && rk == "2")));
     assert!(input.hit.resolve(Some(EntryId(99)), PointerKind::Click, stop.rect.cx(), y, Some(chosen)).miss,
         "a menu owner cannot click through to a retained Library stop");
 }
@@ -648,16 +648,16 @@ fn pending_semantic_commits_change_the_library_state_hash() {
     let mut page = LibraryScreen::new(ENTRY, InstanceId(19), SecKind::Movie);
     let empty = hash(&page);
     let section = SectionTarget { epoch: 1, index: 0,
-        identity: LibrarySectionIdentity { sid: crate::plex::ServerId::from_raw(0), key: 1 }, kind: SecKind::Movie };
+        identity: LibrarySectionIdentity { sid: crate::registry::ServerId::from_raw(0), key: 1 }, kind: SecKind::Movie };
     page.pending.request_section(section.clone());
     let with_section = hash(&page);
     assert_ne!(empty, with_section, "a next-frame section commit must enter canonical state");
     page.pending.request_section(SectionTarget { epoch: 2, ..section.clone() });
     assert_ne!(with_section, hash(&page), "epoch refusal changes the next commit");
     page.pending.request_section(SectionTarget { identity: LibrarySectionIdentity {
-        sid: crate::plex::ServerId::from_raw(1), key: 1 }, ..section });
+        sid: crate::registry::ServerId::from_raw(1), key: 1 }, ..section });
     assert_ne!(with_section, hash(&page), "same section key on another server is a different commit");
-    let target = GridTarget { epoch: 1, sid: crate::plex::ServerId::from_raw(0), section: 1, query: 1 };
+    let target = GridTarget { epoch: 1, sid: crate::registry::ServerId::from_raw(0), section: 1, query: 1 };
     let actions = [GridAction::Unwatched { desired: true }, GridAction::Unwatched { desired: false },
         GridAction::Sort { key: "titleSort".into(), desc: false }, GridAction::Sort { key: "titleSort".into(), desc: true },
         GridAction::Sort { key: "addedAt".into(), desc: true }, GridAction::Genre { id: None },
@@ -685,7 +685,7 @@ pub(super) struct Fixture {
 fn discovery_failure_retry_targets_the_source_without_a_section() {
     let _guard = crate::testlock::serial();
     let mut fixture = Fixture::new();
-    let sid = crate::plex::ServerId::from_raw(7);
+    let sid = crate::registry::ServerId::from_raw(7);
     fixture.listing = crate::stores::browse::ListingSnapshot::empty_for_test();
     fixture.directory = crate::browse::view::DirectorySnapshot::fixture_source(4, sid,
         crate::browse::SrcGroup { name: "Cinema server".into(), handle: "friend".into(),
@@ -850,7 +850,7 @@ impl Fixture {
     }
 
     pub(super) fn new() -> Self {
-        let sid = crate::plex::ServerId::from_raw(0);
+        let sid = crate::registry::ServerId::from_raw(0);
         let listing = crate::browse::view::ListingSnapshot::fixture(sid, (0..36).map(|i|
             Some(crate::pms::PmsMovie { sid, rk: format!("{}", i + 1), title: format!("s{i:04x}"), ..Default::default() })).collect(),
             vec![("A".into(), 18), ("Z".into(), 18)]);
@@ -998,7 +998,7 @@ fn removed_grid_key_keeps_its_typed_master_detail_reconciliation_path() {
     let mut fixture = Fixture::new();
     let mut page = fixture.screen();
     let original = page.key(page.pair.detail.elem_at(17).unwrap());
-    let sid = crate::plex::ServerId::from_raw(0);
+    let sid = crate::registry::ServerId::from_raw(0);
     fixture.listing = crate::browse::view::ListingSnapshot::fixture(sid,
         (0..35).map(|i| Some(crate::pms::PmsMovie { sid, rk: format!("{}", i + 100), ..Default::default() })).collect(),
         vec![("A".into(), 18), ("Z".into(), 17)]);
@@ -1027,7 +1027,7 @@ fn direct_rail_activation_jumps_even_when_the_letter_was_already_selected() {
 fn sort_chosen_during_section_fade_commits_to_the_incoming_library() {
     let _guard = crate::testlock::serial();
     let mut fixture = Fixture::new();
-    let sid = crate::plex::ServerId::from_raw(0);
+    let sid = crate::registry::ServerId::from_raw(0);
     fixture.directory = crate::browse::view::DirectorySnapshot::fixture(1, 0, (0..2).map(|i|
         crate::browse::view::SectionView { sid: Some(sid), key: i as i64 + 1, kind: SecKind::Movie,
             row: crate::browse::SrcRow { section: i, title: format!("s{i:04x}"), pinned: true, current: i == 0, ..Default::default() } }).collect());
@@ -1075,7 +1075,7 @@ fn a_single_favourite_library_draws_no_selector() {
     let _guard = crate::testlock::serial();
     let mut fixture = Fixture::new();
     fixture.directory = crate::browse::view::DirectorySnapshot::fixture(1, 0, vec![
-        crate::browse::view::SectionView { sid: Some(crate::plex::ServerId::from_raw(0)), key: 1,
+        crate::browse::view::SectionView { sid: Some(crate::registry::ServerId::from_raw(0)), key: 1,
             kind: SecKind::Movie, row: crate::browse::SrcRow { section: 0, title: "Cinema".into(),
                 pinned: true, current: true, ..Default::default() } }]);
     let page = fixture.screen();
@@ -1097,7 +1097,7 @@ fn a_single_favourite_library_draws_no_selector() {
 fn favorite_library_row_uses_shared_strip_geometry_and_incoming_type() {
     let _guard = crate::testlock::serial();
     let mut fixture = Fixture::new();
-    let sid = crate::plex::ServerId::from_raw(0);
+    let sid = crate::registry::ServerId::from_raw(0);
     fixture.directory = crate::browse::view::DirectorySnapshot::fixture(1, 0, (0..4).map(|i|
         crate::browse::view::SectionView { sid: Some(sid), key: i as i64 + 1,
             kind: if i < 2 { SecKind::Movie } else { SecKind::Show },
@@ -1200,7 +1200,7 @@ fn the_page_glyph_and_the_librarys_live_tab_strip_never_overlap() {
     // populates `self.libraries` for 2+ candidates (see
     // `favorite_library_row_uses_shared_strip_geometry_and_incoming_type` above; a single
     // favourite clears it), so this is the minimal fixture that actually turns the strip on.
-    let sid = crate::plex::ServerId::from_raw(0);
+    let sid = crate::registry::ServerId::from_raw(0);
     let sections = vec![
         crate::browse::view::SectionView { sid: Some(sid), key: 1, kind: SecKind::Movie,
             row: crate::browse::SrcRow { section: 0, title: "Cinema".into(), pinned: true, current: true, ..Default::default() } },

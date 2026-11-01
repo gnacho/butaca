@@ -46,19 +46,19 @@ fn loopback_pms(machine: &str, bodies: Vec<&'static str>) -> Pms {
                 "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
         }
     });
-    let sid = crate::plex::register_for_test(machine, "127.0.0.1", port, "", "fixture");
+    let sid = crate::registry::register_with_client_id(machine, "127.0.0.1", port, "", "fixture");
     Pms { requests, sid }
 }
 
 /// A browse store holding one movie library on `pms`, as discovery would leave it.
 #[cfg(feature = "devtriggers")]
 fn movies_on(pms: &Pms, machine: &str) -> TestBrowse {
-    assert!(crate::plex::set_current(pms.sid));
+    assert!(crate::registry::set_current(pms.sid));
     let mut source = a_source(machine, "", true);
     source.sid = pms.sid;
     // As a finished discovery leaves it: the roster sync must see this client as the one the
     // table was built against, or it re-runs discovery and that request eats a scripted answer.
-    let client = crate::plex::client_for(pms.sid).unwrap();
+    let client = crate::registry::client_for(pms.sid).unwrap();
     source.client_addr = client as *const _ as usize;
     source.token_gen = client.token_gen();
     let mut browse = TestBrowse::default();
@@ -93,7 +93,7 @@ fn a_chosen_sort_survives_a_restart() {
     let _g = crate::testlock::serial();
     let session = TempPins::new("sort-memory");
     session.watching("u-sorter");
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     let _cleanup = RegisteredCleanup;
 
     // ---- the first run: the viewer sorts Movies by Plays, most-played first -----------------
@@ -116,7 +116,7 @@ fn a_chosen_sort_survives_a_restart() {
     drop(browse);
 
     // ---- the restart: a cold session cache read from disk, and a brand-new store -------------
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     crate::plex::session::redirect_for_test(Some(session.path()));
     let _ = crate::plex::session::peek();
     crate::storage_worker::drain_for_test();
@@ -146,7 +146,7 @@ fn a_remembered_sort_the_menu_no_longer_offers_falls_back_to_the_default() {
     let _g = crate::testlock::serial();
     let session = TempPins::new("sort-memory-gone");
     session.watching("u-sorter");
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     let _cleanup = RegisteredCleanup;
     crate::plex::session::update(|current| {
         let mut next = current.clone();

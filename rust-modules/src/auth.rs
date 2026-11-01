@@ -13,7 +13,7 @@ use self::observation::Resource;
 use crate::plex::probe::{self, Outcome, PlaintextEligibility};
 use crate::plex::session::{self, PlaintextChoice, ProfileCreds, Session, SourceRef};
 use crate::origin::Origin;
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 
 pub(crate) mod owner;
 pub(crate) mod observation;
@@ -286,7 +286,7 @@ impl ClientLifecycle {
         owner::ServerLifecycle { sid, instance_gen: self.client.instance_gen(), token_gen: self.token_gen }
     }
     pub(crate) fn is_current(self, expected: owner::ServerLifecycle) -> bool {
-        self.logical(expected.sid) == expected && crate::plex::commit_if_current(
+        self.logical(expected.sid) == expected && crate::registry::commit_if_current(
             ServerId::from_raw(expected.sid), self.client, self.token_gen, || ()).is_some()
     }
 }
@@ -307,10 +307,10 @@ pub(crate) fn execute_session_registry(plan: &owner::RegistryPlan, client_id: &s
                     .filter_map(|s| s.origin().map(|origin| (s.machine_id.clone(), origin)))
                     .collect();
                 crate::grant::roster_replaced(&installing);
-                crate::plex::revoke_for_profile_switch();
+                crate::registry::revoke_for_profile_switch();
             }
             let installed = install_roster(sources, *primary, client_id);
-            if *replace { crate::plex::finish_profile_switch(&installed); }
+            if *replace { crate::registry::finish_profile_switch(&installed); }
             for source in sources {
                 if let Some(origin) = source.origin() { retire_grant_on_https(&source.machine_id, &origin); }
             }
@@ -346,28 +346,28 @@ pub(crate) fn install_captured_registry(origin: &Origin, address: &str, token: &
     // connection facts in a SEPARATE call afterward, which is exactly the gap `ConnectionFacts`
     // exists to close.
     let register = |machine: &str, origin: &Origin, token: &str,
-        pin: Option<&crate::origin::ResolvePin>, connection: crate::plex::ConnectionFacts| {
+        pin: Option<&crate::origin::ResolvePin>, connection: crate::registry::ConnectionFacts| {
         if let Some(cid) = client_id {
-            crate::plex::register_captured_origin_with_connection(machine, origin, token, pin, cid,
+            crate::registry::register_captured_origin_with_connection(machine, origin, token, pin, cid,
                 connection)
         } else {
             register_observed_origin(machine, origin, token, pin, connection, &session::peek().client_id)
         }
     };
     let primary_connection =
-        crate::plex::ConnectionFacts::new(tier, crate::plex::IpVersion::of_host(address));
+        crate::registry::ConnectionFacts::new(tier, crate::plex::IpVersion::of_host(address));
     let id = register("", origin, token, pin, primary_connection);
-    crate::plex::set_current(id);
+    crate::registry::set_current(id);
     for source in extras {
         let Some(origin) = source.origin() else { continue };
         if source.token.is_empty() { continue; }
-        let connection = crate::plex::ConnectionFacts::new(
+        let connection = crate::registry::ConnectionFacts::new(
             source.tier,
             crate::plex::IpVersion::of_host(&source.address),
         );
         let id = register(&source.machine_id, &origin, &source.token,
             source.resolve_pin().as_ref(), connection);
-        crate::plex::describe_server(id, &source.name, &source.shared_by, grant_of(source));
+        crate::registry::describe(id, &source.name, &source.shared_by, grant_of(source));
     }
 }
 
@@ -377,10 +377,10 @@ fn register_observed_origin(
     origin: &Origin,
     token: &str,
     pin: Option<&crate::origin::ResolvePin>,
-    connection: crate::plex::ConnectionFacts,
+    connection: crate::registry::ConnectionFacts,
     client_id: &str,
 ) -> ServerId {
-    crate::plex::register_captured_origin_with_connection(
+    crate::registry::register_captured_origin_with_connection(
         machine_id, origin, token, pin, client_id, connection)
 }
 
@@ -462,8 +462,8 @@ pub(crate) struct SettledProbe {
     address: Option<String>,
 }
 /// The grant evidence a persisted [`SourceRef`] carries, for the registry describers.
-fn grant_of(source: &SourceRef) -> crate::plex::GrantEvidence {
-    crate::plex::GrantEvidence {
+fn grant_of(source: &SourceRef) -> crate::registry::GrantEvidence {
+    crate::registry::GrantEvidence {
         owned: source.owned,
         home: source.home,
         owner_id: source.owner_id,
@@ -482,7 +482,7 @@ fn install_roster(sources: &[SourceRef], primary: Option<usize>, client_id: &str
         // Applied atomically inside the same write (#95 step 8) — a re-pointed slot's fresh
         // `Client` gets its connection facts from THIS call rather than a separate one after.
         let connection =
-            crate::plex::ConnectionFacts::new(s.tier, crate::plex::IpVersion::of_host(&s.address));
+            crate::registry::ConnectionFacts::new(s.tier, crate::plex::IpVersion::of_host(&s.address));
         let id = register_observed_origin(&s.machine_id, &origin, &s.token,
             s.resolve_pin().as_ref(), connection, client_id);
         if !id.is_set() {
@@ -500,9 +500,9 @@ fn install_roster(sources: &[SourceRef], primary: Option<usize>, client_id: &str
         //
         // `owned` comes from the roster rather than from an empty handle: a share whose
         // `sourceTitle` plex.tv did not send is still a share.
-        crate::plex::describe_server(id, &s.name, &s.shared_by, grant_of(s));
+        crate::registry::describe(id, &s.name, &s.shared_by, grant_of(s));
         if primary == Some(i) {
-            crate::plex::set_current(id);
+            crate::registry::set_current(id);
         }
     }
     installed

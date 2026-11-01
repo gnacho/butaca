@@ -9,7 +9,7 @@
 //! belongs in `decision.rs`.
 
 use crate::metadata::lang_matches;
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 use std::sync::atomic::Ordering;
 
 use super::decision::{
@@ -954,10 +954,10 @@ pub(crate) struct ResolveEnv {
 /// one server, so a bare-rk match against a colliding item on the other machine would hand the
 /// ceiling the wrong file's bitrate.
 pub(super) fn detail_describes(d: &crate::metadata::Detail, sid: ServerId, rk: &str) -> bool {
-    crate::plex::same_item((d.sid, &d.rk), (sid, rk))
+    crate::registry::same_item((d.sid, &d.rk), (sid, rk))
         || d.on_deck
             .as_ref()
-            .is_some_and(|ep| crate::plex::same_item((d.sid, &ep.rk), (sid, rk)))
+            .is_some_and(|ep| crate::registry::same_item((d.sid, &ep.rk), (sid, rk)))
 }
 
 
@@ -996,7 +996,7 @@ pub(super) fn resolve_src_kbps(
     if let Some(extra) = d
         .extras
         .iter()
-        .find(|e| crate::plex::same_item((d.sid, e.rk.as_str()), (sid, rk)))
+        .find(|e| crate::registry::same_item((d.sid, e.rk.as_str()), (sid, rk)))
     {
         return extra.bitrate;
     }
@@ -1168,7 +1168,7 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     }
     let forced = env.direct_play_mode == DirectPlayMode::Forced;
     let playback_quality = if forced { Quality::Original } else { env.quality };
-    let client = match crate::plex::client_for(env.sid) {
+    let client = match crate::registry::client_for(env.sid) {
         Some(c) => c,
         None => return plan,
     };
