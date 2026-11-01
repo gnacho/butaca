@@ -478,14 +478,6 @@ fn take_root_press_at(now: std::time::Instant) -> bool {
     true
 }
 
-/// **Hand a claim back**, for the press that turned out not to be a root press after all — the one
-/// on the sign-in screen or the picker that DID have somewhere to go inside the app. Without this
-/// the cooldown would swallow the real root BACK the user presses a moment later on the Home they
-/// were just returned to.
-pub(crate) fn release_root_press() {
-    *LAST_REQUEST.lock().unwrap_or_else(|e| e.into_inner()) = None;
-}
-
 /// The Home launcher's app id.
 ///
 /// Community tier (webosbrew's commands cheatsheet and the widely copied
@@ -518,19 +510,19 @@ mod go_home_tests {
     fn a_claim_speaks_for_exactly_the_cooldown_and_not_a_moment_longer() {
         let _g = crate::testlock::serial();
         let base = Instant::now();
-        release_root_press();
+    *LAST_REQUEST.lock().unwrap_or_else(|e| e.into_inner()) = None;
         assert!(take_root_press_at(base), "a cold latch admits the press");
         assert!(
             !take_root_press_at(base + COOLDOWN / 2),
             "…and speaks for the whole cooldown"
         );
-        release_root_press();
+    *LAST_REQUEST.lock().unwrap_or_else(|e| e.into_inner()) = None;
         assert!(take_root_press_at(base));
         assert!(
             take_root_press_at(base + COOLDOWN),
             "…but not past its end: a first attempt that achieved nothing stays retryable"
         );
-        release_root_press();
+    *LAST_REQUEST.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
     /// The other half, through the real entry points: a burst of taps is ONE platform call, and a
@@ -538,7 +530,7 @@ mod go_home_tests {
     #[test]
     fn a_burst_of_root_presses_is_one_platform_call_and_a_release_undoes_the_claim() {
         let _g = crate::testlock::serial();
-        release_root_press();
+    *LAST_REQUEST.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let before = home_requests();
         for _ in 0..5 {
             if take_root_press() {
@@ -550,12 +542,12 @@ mod go_home_tests {
             before + 1,
             "five taps must not queue five platform calls"
         );
-        release_root_press();
+    *LAST_REQUEST.lock().unwrap_or_else(|e| e.into_inner()) = None;
         assert!(
             take_root_press(),
             "a handed-back claim must not swallow the next root press"
         );
-        release_root_press();
+    *LAST_REQUEST.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 }
 

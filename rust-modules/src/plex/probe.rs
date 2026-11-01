@@ -494,24 +494,6 @@ pub(crate) enum RouteOutcome {
 }
 
 impl RouteOutcome {
-    pub(crate) fn code(self) -> &'static str {
-        match self {
-            Self::Absent => "absent",
-            Self::NotAttempted => "not_attempted",
-            Self::Timeout => "timeout",
-            Self::Dns => "dns",
-            Self::Tls => "tls",
-            Self::Refused => "refused",
-            Self::TransportOther => "transport_other",
-            Self::Unknown => "unknown",
-            Self::Unauthorized => "unauthorized",
-            Self::WrongServer => "wrong_server",
-            Self::Answered4xx => "answered_4xx",
-            Self::Answered5xx => "answered_5xx",
-            Self::AnsweredOther => "answered_other",
-            Self::Verified => "verified",
-        }
-    }
 
     /// A transport failure, through the incident report's own classifier so the two vocabularies
     /// cannot drift: `None` is a failure no layer could attach evidence to. Connection refused is
@@ -644,16 +626,6 @@ pub(crate) enum AddressFamily {
 }
 
 impl AddressScope {
-    pub(crate) fn code(self) -> &'static str {
-        match self {
-            Self::Private => "private",
-            Self::LinkLocal => "link_local",
-            Self::UniqueLocal => "unique_local",
-            Self::Loopback => "loopback",
-            Self::Public => "public",
-            Self::Name => "name",
-        }
-    }
 
     fn of_v4(a: std::net::Ipv4Addr) -> Self {
         if a.is_loopback() {
@@ -701,13 +673,6 @@ impl AddressScope {
 }
 
 impl AddressFamily {
-    pub(crate) fn code(self) -> &'static str {
-        match self {
-            Self::V4 => "v4",
-            Self::V6 => "v6",
-            Self::Unknown => "unknown",
-        }
-    }
 }
 
 /// **Why a server settled as insecure-only, as closed facts** — the evidence the
@@ -888,25 +853,6 @@ impl InsecureEvidence {
         }
     }
 
-    /// The same facts as one log line of closed codes.
-    pub(crate) fn log_form(&self) -> String {
-        format!(
-            "https_lan={} https_public={} https_custom={} https_relay={} plaintext_local={} \
-             public_address_matches={} owned={} https_required={} plaintext_scope={} plaintext_family={} \
-             eligibility={}",
-            self.https.lan_plex_direct.code(),
-            self.https.public_plex_direct.code(),
-            self.https.custom_https.code(),
-            self.https.relay.code(),
-            self.plaintext_local,
-            self.public_address_matches,
-            self.owned,
-            self.https_required,
-            self.plaintext_scope.code(),
-            self.plaintext_family.code(),
-            self.plaintext_eligibility().code(),
-        )
-    }
 }
 
 /// The plan for one server: identity to verify, token to send, addresses to try.

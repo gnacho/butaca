@@ -1529,7 +1529,7 @@ fn p1_adapter_does_not_complete_an_erase_with_an_incomplete_sweep() {
         (file.file().parent().unwrap(), 0o500), (file.file().as_path(), 0o400),
     ]);
     let mt = unsafe { crate::task::MainThread::assume() };
-    let mut adapter = crate::app::adapters::session::SessionAdapter::live_resources_for_test(&mt, false);
+    let mut adapter = crate::app::adapters::session::SessionAdapter::live_resources_for_test(&mt);
     let mut meta = crate::stores::metadata::MetadataStore::default();
     assert!(adapter.begin_erase(1, false, &mut meta).is_none());
     crate::storage_worker::drain_for_test();

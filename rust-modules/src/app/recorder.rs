@@ -2508,24 +2508,6 @@ mod tests {
     }
 
     #[test]
-    fn session_discriminates_product_hash_with_all_other_terms_equal() {
-        let _guard = crate::testlock::serial();
-        let base = super::super::bridge::Bridge::for_test(|| 0);
-        let mut other = super::super::bridge::Bridge::for_test(|| 0);
-        let initial = base.session_subhash();
-        let hash = record_session_frame(&base).frames[0].st.unwrap();
-        assert_eq!(initial, other.session_subhash());
-        assert_eq!(hash, record_session_frame(&other).frames[0].st.unwrap());
-        session_command(&mut other, crate::auth::SessionCmd::DismissPinError);
-        assert_eq!(initial, other.session_subhash(), "no-op Session command retains cached hash");
-        assert_eq!(hash, record_session_frame(&other).frames[0].st.unwrap());
-        session_command(&mut other, crate::auth::SessionCmd::NoteDeleteLeftovers(1));
-        assert_ne!(initial, other.session_subhash(), "real owner transition changes logical Session");
-        assert_ne!(hash, record_session_frame(&other).frames[0].st.unwrap(),
-            "same press/route/overlay/focus/tree cannot hide a changed Session");
-    }
-
-    #[test]
     fn session_recorded_hash_is_graded_through_the_same_run_tail() {
         let _guard = crate::testlock::serial();
         let base = super::super::bridge::Bridge::for_test(|| 0);

@@ -2,6 +2,7 @@
 //! re-keying, endpoint recovery, revoked/surviving grants, and primary drift repair.
 
 use super::*;
+use crate::plex::session::UserRef;
 #[allow(unused_imports)]
 use super::test_support::*;
 
@@ -290,33 +291,6 @@ fn switching_profile_re_keys_every_source_and_drops_the_ones_not_granted() {
 /// discarded that winner. The selected profile owns both halves of the answer — its grant
 /// token and the endpoint verified with that token — so they must land together.
 #[test]
-fn profile_activation_keeps_a_fresh_wan_winner_instead_of_the_cached_lan_origin() {
-    let mut cached = source("ours", true, "owner-token");
-    cached.address = "192.0.2.10".into();
-    cached.origin_url = "http://192.0.2.10:32400".into();
-
-    let mut wan = source("ours", true, "profile-token");
-    wan.address = "203.0.113.9".into();
-    wan.origin_url = "https://203-0-113-9.example.test:32400".into();
-    wan.tier = Some(probe::Location::Remote);
-
-    let resources = vec![resource(
-        r#"{"name":"ours","clientIdentifier":"ours","provides":"server","owned":true,
-            "accessToken":"profile-token"}"#,
-    )];
-    let next = profile_sources(&[cached], &[wan], &resources, &[]);
-
-    assert_eq!(next.len(), 1);
-    assert_eq!(next[0].token, "profile-token");
-    assert_eq!(next[0].address, "203.0.113.9");
-    assert_eq!(next[0].origin_url, "https://203-0-113-9.example.test:32400");
-    assert_eq!(next[0].tier, Some(probe::Location::Remote));
-}
-
-/// Network recovery may fetch the connection list with the install owner's account token,
-/// even though the active managed profile has its own PMS token. Only route facts may cross
-/// that seam: copying the Resource credential would make the next request run as the owner.
-#[test]
 fn endpoint_recovery_repoints_an_existing_source_without_replacing_profile_grants() {
     let mut cached = source("ours", true, "managed-profile-token");
     cached.address = "203.0.113.9".into();
@@ -372,41 +346,6 @@ fn endpoint_recovery_repairs_a_stored_plaintext_primary_to_https() {
     assert_eq!(session.sources[0].origin_url, "https://192-0-2-10.example.plex.direct:32400");
 }
 
-#[test]
-fn endpoint_recovery_cannot_introduce_a_server_outside_the_profile_roster() {
-    let cached = source("ours", true, "profile-token");
-    let mut session = Session {
-        server: server_ref(&cached),
-        sources: vec![cached],
-        ..Default::default()
-    };
-    let fresh_share = source("owner-only-share", false, "owner-token");
-
-    assert!(apply_refreshed_endpoint(&mut session, "owner-only-share", &fresh_share).is_none());
-    assert_eq!(session.sources.len(), 1);
-    assert_eq!(session.sources[0].machine_id, "ours");
-}
-
-#[test]
-fn profile_activation_keeps_a_cached_surviving_share_credential_live() {
-    let stored = vec![
-        source("revoked-primary", true, "old-owner"),
-        source("surviving-share", false, "old-share"),
-    ];
-    let resources = vec![resource(
-        r#"{"name":"club","clientIdentifier":"surviving-share","provides":"server",
-            "owned":false,"sourceTitle":"friend","accessToken":"profile-share"}"#,
-    )];
-
-    let next = profile_sources(&stored, &[], &resources, &[]);
-
-    assert_eq!(next.len(), 1);
-    assert_eq!(next[0].machine_id, "surviving-share");
-    assert_eq!(next[0].token, "profile-share",
-        "the profile's own resource grant remains cached for offline seating");
-    assert!(next[0].dialable(),
-        "authenticated admission selects the primary without disabling secondary grants");
-}
 
 /// **A Plex Home managed user's own household server must not be credited to the admin.**
 ///

@@ -92,7 +92,6 @@ fn refresh_chrome(
 
 #[derive(Clone, Copy)]
 pub(crate) struct AppViews<'a> {
-    pub(crate) auth: crate::auth::SessionRead<'a>,
     pub(crate) hubs: crate::pms::HubsView<'a>,
     pub(crate) listing: crate::stores::browse::ListingView<'a>,
     pub(crate) directory: crate::stores::browse::DirectoryView<'a>,
@@ -122,7 +121,7 @@ impl Bridge {
     /// [`Self::views`] reading `session` as the playback publication — what a test rig with no
     /// player of its own passes.
     pub(crate) fn views_with<'a>(&'a self, session: &'a crate::route::PlaybackSession) -> AppViews<'a> {
-        AppViews { auth: self.session.read(), hubs: self.hubs.view(), listing: self.listing.view(),
+        AppViews { hubs: self.hubs.view(), listing: self.listing.view(),
             directory: self.directory.view(), section_hubs: self.section_hubs.view(),
             search: self.search.view(), metadata: self.stores.metadata_view(),
             person: self.stores.person_view(), collection: self.stores.collection_view(), session }
@@ -177,7 +176,6 @@ impl crate::screens::registry::CollectionLike for AppHost {
 }
 
 impl crate::screens::registry::AuthLike for AppHost {
-    fn auth<'a>(cx: &Cx<'a, Self>) -> crate::auth::SessionRead<'a> { cx.views.auth }
 }
 
 impl crate::auth::owner::SessionHost for AppHost {
@@ -1208,8 +1206,7 @@ impl Rig<AppHost> for Bridge {
     fn split(&mut self) -> Split<'_, AppHost> {
         Split {
             mounter: &mut self.mounter,
-            views: AppViews { auth: self.session.read(),
-                hubs: self.hubs.view(),
+            views: AppViews { hubs: self.hubs.view(),
                 listing: self.listing.view(),
                 directory: self.directory.view(),
                 section_hubs: self.section_hubs.view(), search: self.search.view(), metadata: self.stores.metadata_view(), person: self.stores.person_view(), collection: self.stores.collection_view(), session: &self.playback,
@@ -1225,24 +1222,13 @@ impl Rig<AppHost> for Bridge {
                 SessionEvent::Result(envelope) if !self.session_adapter.admitted(envelope) => return Handled::No,
                 SessionEvent::Admission(reply) if !reply.accepted
                     && self.session_adapter.resource_admitted(reply) => return Handled::No,
-                SessionEvent::Command(crate::auth::owner::Command::BackAtRoot { .. })
-                    if !self.session_adapter.claim_root_press() => return Handled::No,
                 _ => {}
             }
-            // The owner reads its retained publication, not a borrow through its own mutable
-            // field. Every other view still comes from this same Bridge frame boundary.
-            let publication = self.session.publication();
-            let cx = parts.cx::<AppHost>(AppViews { auth: publication.read(),
+            let cx = parts.cx::<AppHost>(AppViews {
                 hubs: self.hubs.view(), listing: self.listing.view(), directory: self.directory.view(),
                 section_hubs: self.section_hubs.view(), search: self.search.view(), metadata: self.stores.metadata_view(), person: self.stores.person_view(), collection: self.stores.collection_view(), session: &self.playback,
             }, &self.measure);
-            let handled = self.session.step(event, &cx, fx);
-            // #132: the owner logs nothing, and the Profiles screen cannot see a read-out that
-            // existed before it mounted — so the one step that ENTERED it is announced here.
-            if let Some(line) = crate::auth::owner::roster_readout_entered(&publication, &self.session.publication()) {
-                crate::log(&line);
-            }
-            return handled;
+            return self.session.step(event, &cx, fx);
         }
         let store = match msg {
             AppMsg::Store(cmd) => cmd.store(),
@@ -1482,9 +1468,7 @@ impl Bridge {
             }
             SessionFx::Capture { req, epoch, request } => {
                 if self.session.read_is_current(req, epoch, request) {
-                    if let Some(reply) = self.session_adapter.begin_capture(req, epoch, request) {
-                        deliver(SessionEvent::Read(reply));
-                    }
+                    deliver(SessionEvent::Read(self.session_adapter.capture(req, epoch, request)));
                 }
             }
             SessionFx::Work { req, key, admission, input } => {
@@ -1522,18 +1506,8 @@ impl Bridge {
                 }
                 self.session_adapter.coordinator(action);
             }
-            SessionFx::RestartReply { .. } => {}
-            SessionFx::SelectionReply { to, accepted, flow_epoch } => out.push(Fx::Deliver(
-                MachineId::Instance(InstanceId(to.instance)), Delivery::Screen(ScreenEvent::Async(
-                    RequestId(to.correlation), AppMsg::SelectionReply { correlation: to.correlation, accepted, flow_epoch })))),
             SessionFx::PlaintextAnswer { machine_id, choice, account } => {
                 crate::app::adapters::session::record_plaintext_answer(&account, &machine_id, choice);
-            }
-            SessionFx::BackReply { to, resumed } => {
-                self.session_adapter.finish_back(resumed);
-                out.push(Fx::Deliver(MachineId::Instance(InstanceId(to.instance)),
-                    Delivery::Screen(ScreenEvent::Async(RequestId(to.correlation),
-                        AppMsg::BackReply { correlation: to.correlation, resumed }))));
             }
         }
     }
@@ -1625,9 +1599,6 @@ impl Bridge {
         let mut results: AppResults = self.session_adapter.take_results().into_iter()
             .map(|envelope| (envelope.addr, AppMsg::Session(crate::auth::owner::SessionEvent::Result(envelope))))
             .collect();
-        if let Some(reply) = self.session_adapter.take_capture() {
-            results.push((reply.addr, AppMsg::Session(crate::auth::owner::SessionEvent::Read(reply))));
-        }
         self.session_adapter.cancel_superseded_commits(|req, epoch, arrival|
             self.session.commit_is_current(req, epoch, arrival));
         if let Some(completed) = self.session_adapter.take_committed() {
@@ -2475,28 +2446,6 @@ pub(crate) fn follow_auth_landing(pages: &mut Dispatcher<AppHost>, bridge: &mut 
             // A Ready decision can still await its queued disk/registry ACK. Keep the current
             // flow page until the exact owner handoff is available.
             crate::auth::Phase::Ready => {}
-            crate::auth::Phase::Profiles | crate::auth::Phase::Switching => {
-                // No `enter()`-on-change guard any more (phase 6): the picker is an owned screen,
-                // so a route that is ALREADY `Profiles` mints nothing (`bridge::frame`'s
-                // `Some(_) => {}` arm) and the existing instance's state — the roster cursor, an
-                // open PIN pad — rides across this assignment untouched, exactly as it did behind
-                // the old guard; a route that is NOT yet `Profiles` gets a fresh `ProfilesScreen`
-                // the moment the tree follows it, which is the whole of what `ui::profiles::
-                // enter()` used to reset by hand.
-                //
-                // **`nav_root_if_unsettled` is a genuine no-op once the picker is the settled
-                // root — not merely "cheap".** The old comment here claimed calling a bare
-                // `Root(Profiles)` every frame was free because `Root`'s own `PopTo(root)` arm
-                // "did nothing" when the root already matched; it still restarted the `PageDip`
-                // transition from wherever its alpha was, every single frame, so the dip never
-                // reached `Idle`. Worse, `Root` and the strip's pill press shared one arm back
-                // then, so once Login (never retired) sat under the mint, this same call retired
-                // and re-minted `Profiles` every frame too. `Root` now truly replaces (§stack.rs)
-                // and `NavStack::request` drops an exactly-redundant request before it touches the
-                // transition at all, so the guard here is what lets the NEXT line ask "has the
-                // picker actually landed" honestly.
-                nav_root_if_unsettled(pages, AppArg::Profiles);
-            }
             _ => {
                 nav_root_if_unsettled(pages, AppArg::Login);
             }
@@ -3133,9 +3082,6 @@ fn _measure_is_object_safe(m: &dyn Measure, s: &CStr) -> f32 {
 mod session_protocol_tests;
 
 #[cfg(test)]
-#[path = "session_profile_regression_tests.rs"]
-mod session_profile_regression_tests;
-
 #[cfg(test)]
 #[path = "session_resource_tests.rs"]
 mod session_resource_tests;
@@ -3144,13 +3090,6 @@ mod session_resource_tests;
 mod recording_erasure_tests;
 
 #[cfg(test)]
-#[path = "session_controller_regression_tests.rs"]
-mod session_controller_regression_tests;
-
-#[cfg(test)]
-#[path = "session_picker_regression_tests.rs"]
-mod session_picker_regression_tests;
-
 #[cfg(test)]
 #[path = "session_dev_bootstrap_tests.rs"]
 mod session_dev_bootstrap_tests;
@@ -3158,10 +3097,6 @@ mod session_dev_bootstrap_tests;
 #[cfg(test)]
 #[path = "session_endpoint_policy_tests.rs"]
 mod session_endpoint_policy_tests;
-
-#[cfg(test)]
-#[path = "session_stored_home_tests.rs"]
-mod session_stored_home_tests;
 
 #[cfg(test)]
 #[path = "bridge_test_support.rs"]

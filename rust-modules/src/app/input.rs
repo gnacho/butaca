@@ -6,12 +6,12 @@
 //! family — Settings root, Legal, first-run/Settings consent, the Home-sources editor — is now
 //! owned `Screen`s mounted through `app::bridge`, and their keys reach them as `InputEvent`s the
 //! loop hands the dispatcher before this ladder is ever consulted; see the deleted-function notes
-//! near `key_onboarding` and `enter_profiles_from_onboard` for what used to live here. What this
+//! near `key_onboarding` for what used to live here. What this
 //! file keeps of consent is only the boot-time GATE deciding *when* to open the screen
 //! (`maybe_ask_consent`), never an arm that reads its keys.
 //!
 //! **Phase 6 (2026-09-07) did the same to the QR sign-in and the who's-watching picker.** Both
-//! are owned screens now (`screens::login`/`screens::profiles`), so `key_onboarding` itself —
+//! are owned screens now (`screens::login` was the other), so `key_onboarding` itself —
 //! along with the pure `onboarding_back`/`OnboardBack`/`profiles_pin_pad_open` rule it called —
 //! is gone; see the note where it stood. Their root BACK now goes directly to Session; its
 //! adapter owns the platform claim/result. The loop retains the phase→route follower and
@@ -843,39 +843,9 @@ mod unsupported_key_tests {
     }
 }
 
-/// What the root press does once `auth::cancel` has answered.
-///
-/// A plan rather than a bool so the production code visibly OWNS each call and the log line names
-/// what was decided. It used to have a third arm, `RestartAndHome`, because `auth::cancel`
-/// invalidated the running sign-in BEFORE deciding whether it could back out, so a `false` on the
-/// QR screen left a dead poller behind a live code and the press had to `auth::retry` on the way
-/// out. That ordering was issue #30 and is gone: a refused `cancel` changes nothing (`auth::cancel`'s
-/// doc, `a_refused_back_leaves_the_live_pin_poll_running`), so the flow it refused to leave is
-/// still running and a restart here would DISCARD it — a fresh code over a poll the user's phone may
-/// already have answered. Retired 2026-09-04 on Codex's integrated review.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum AfterCancel {
-    /// There was somewhere to go inside the app; the main loop's phase→route follower takes it
-    /// from here. Nothing to ask the platform for.
-    BackedOut,
-    /// Nowhere to go inside the app, and nothing was disturbed. Straight to the television's Home.
-    Home,
-}
-
-/// The whole of the rule, pure so the pairing with the log line is gradeable: a `cancel` that
-/// backed out is not a root press after all; one that refused leaves everything as it was and hands
-/// the screen to the television.
-pub(crate) fn after_cancel(backed_out: bool) -> AfterCancel {
-    if backed_out {
-        AfterCancel::BackedOut
-    } else {
-        AfterCancel::Home
-    }
-}
-
 // `key_onboarding`, `OnboardBack`, `onboarding_back` and `profiles_pin_pad_open` stood here.
 // **Phase 6 retired all four.** Login and Who's Watching are OWNED screens now
-// (`screens::login`/`screens::profiles`, mounted through `app::bridge`), so their keys are
+// (owned screens mounted through `app::bridge`), so their keys are
 // `InputEvent`s the loop hands the dispatcher before this ladder is ever consulted — the same
 // coexistence rule phase 5b applied to the Settings family and to first-run Favourites, above.
 // Login/Profiles now distinguish local pad BACK from root themselves, then send the addressed
@@ -887,19 +857,6 @@ pub(crate) fn after_cancel(backed_out: bool) -> AfterCancel {
 // PAGE of the surface's own stack now, so the surface's top page IS the input owner and the
 // question is `Dispatcher::owns_input` (spec §11: this test module dissolves into `input_owner()`).
 // `commit_onboarding` went with them: the first-run screen arms and commits its own press.
-
-/// BACK from Shared Sources returns to the identity step and records no source answer. Starting a
-/// ChangeProfile flow re-seeds the roster from the owner's captured session, so this is a
-/// real usable picker rather than a static screen with no worker behind it.
-///
-/// **No `ui::profiles::enter()`** (phase 6, mirroring first-run Favourites' own removal in 5b):
-/// the picker is an OWNED screen now, and naming the route is the whole of mounting a fresh one —
-/// `AppMounter::mount` constructs a new `ProfilesScreen` the moment the tree follows this route.
-pub(crate) fn enter_profiles_from_onboard(pages: &mut crate::ui::dispatch::Dispatcher<super::bridge::AppHost>) {
-    super::bridge::execute_session_command(pages,
-        crate::auth::SessionCmd::StartSwitch(crate::auth::Picker::ChangeProfile));
-    super::bridge::nav_root_if_unsettled(pages, AppArg::Profiles);
-}
 
 /// Leave the first-run question for Home — `LoopReq::OnboardDone`.
 ///

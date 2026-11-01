@@ -144,11 +144,6 @@ fn classify_endpoint_response(status: i32, parsed: bool) -> EndpointAdmission {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn endpoint_admission_from_reply(status: i32, body: &[u8]) -> EndpointAdmission {
-    classify_endpoint_response(status, serde_json::from_slice::<models::Envelope>(body).is_ok())
-}
-
 /// Validate a freshly reached source with `GET /library/sections`, using the source's own token,
 /// origin and resolve pin through the ordinary PMS client/transport boundary.
 pub(crate) fn admit_source_until(source: &session::SourceRef, client_id: &str,
@@ -178,12 +173,6 @@ pub(crate) fn admit_source_until(source: &session::SourceRef, client_id: &str,
     }
 }
 
-pub(crate) fn admit_source(source: &session::SourceRef, client_id: &str) -> EndpointAdmission {
-    let deadline = std::time::Instant::now()
-        .checked_add(std::time::Duration::from_secs(10))
-        .unwrap_or_else(std::time::Instant::now);
-    admit_source_until(source, client_id, deadline)
-}
 // #95 step 8: connection facts applied AT registration, atomically with the registry write. See
 // `servers::ConnectionFacts`'s doc for why `None` means "leave unchanged" rather than "unknown".
 // `register_origin` took the `ConnectionFacts` parameter directly rather than keeping a

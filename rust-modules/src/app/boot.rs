@@ -870,7 +870,7 @@ pub(crate) unsafe fn construct(
     //
     // **No `ui::login::init()` / `ui::profiles::init()` here any more (phase 6 retirement).**
     // Both calls used to allocate the legacy `Scene` statics `ui::login`/`ui::profiles` drew
-    // from; `screens::jf_login::JfLoginScreen`/`screens::profiles::ProfilesScreen` are owned
+    // from; `screens::jf_login::JfLoginScreen` is owned
     // `Screen`s constructed fresh by `AppMounter::mount` on each entry (`app/bridge.rs`) and
     // read no module global at all, so nothing left in the boot path calls into either legacy
     // module's `scene()` and the `.expect("…::init not called")` guard those calls carried is no
@@ -903,9 +903,6 @@ pub(crate) unsafe fn construct(
     //  4. Nothing else goes to Jellyfin sign-in. Live boot never loads a Plex session.
     // The destination itself is [`BootTo`], at module scope with the rest of the vocabulary.
     //
-    // dev: /tmp/butaca-pickuser=<index> — force the boot picker even on an automated boot and
-    // auto-select that roster tile once it's up (headless exercise of the who's-watching flow).
-    let pick_user: Option<usize> = if controlled { None } else { crate::dev::scenarios::pickuser_index() };
     let session = match &initial {
         Some(initial) => initial.session.persisted.clone(),
         None => crate::plex::session::Session::default(),
@@ -1471,7 +1468,6 @@ pub(crate) unsafe fn construct(
         scenarios: crate::dev::scenarios::Scenarios {
             #[cfg(feature = "devtriggers")]
             poster_gate: Default::default(),
-            pick_user,
             home_osc_last,
             hero_osc_last,
             home_fold_osc_last,
