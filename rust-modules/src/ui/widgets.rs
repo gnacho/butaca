@@ -7210,7 +7210,7 @@ impl Button {
         if matches!(self.style, ControlStyle::Keyline) && !self.focused {
             let rad = r.h * 0.5;
             // the knockout: stroke colour first, then the interior inset by it — the SDF has no
-            // stroke-only mode (`keyline_chip` / `pass_capsule`'s construction); `bg` here is
+            // stroke-only mode (`keyline_chip`'s construction); `bg` here is
             // `colors()`'s translucent interior, not a repaint of the ground (there is none over
             // live video — see `theme::PILL_KEYLINE_BG`)
             p.rrect(r, rad, rad, theme::PILL_KEYLINE);
@@ -7395,118 +7395,6 @@ const BADGE_ICON_GAP: f32 = theme::space::XS;
 /// pixel width [`badge`] will occupy for `text` (+ `icon`) — the layout companion (e.g. reserving
 /// the inline-chip run so a row label elides before it). The icon's band is added OUTSIDE the
 /// short-tag floor, so a bare "CC" still measures its minimum and a glyphed chip still fits both.
-// ---- The PLEX PASS capsule (`Details Screen.dc.html` / `Player Screen.dc.html`) --------------
-//
-// The name set in type — deliberately NO logo artwork: this is an unofficial client, and the
-// badge is a referential use of the words alone (the same reasoning `plex::identity` documents
-// for the product name). Height matches [`BADGE_H`] so it shares a badge row's optical line.
-// **Two product surfaces, both places the name changes what the user does next** (see
-// `theme::PASS_GOLD`'s doc for the docs-derived rule): FILLED in the playback-failed read-out
-// (pure black ground), OUTLINE in the detail facts row's Pass-gated states. Non-interactive in
-// both; it is [`theme::PASS_GOLD`]'s only consumer.
-//
-// **Re-spec'd 2026-08-12** to the geometry BOTH mock files now carry (which is what makes it a
-// decision rather than a drift): an 8px rounded rect at a 2px stroke, `size::CAPTION` bold at
-// `.06em` — up from a full-pill silhouette, a 1.5px stroke and `size::MICRO` at `.12em`. The
-// silhouette is no longer what separates it from a technical chip; the GOLD is, and the label
-// now sits on the couch-legibility floor instead of below it. (The Player Screen's comment
-// beside the filled form still says "full pill radius" against its own `border-radius:8px` —
-// the CSS is the artifact and the comment is stale.)
-
-/// Letter-tracking for the capsule label: the design's `.06em` of [`theme::size::CAPTION`]. The
-/// text renderer has no letter-spacing, so the label is drawn per character.
-const PASS_TRACK: f32 = theme::size::CAPTION as f32 * 0.06;
-/// The label inset. The design states `padding: 0 13px 0 15px` and **that asymmetry does not
-/// port** — honouring the reasoning, not the literal. The mock is asymmetric because CSS emits a
-/// letter-space after the LAST character too, so it takes that trailing space off the right pad to
-/// keep the label optically centred; its own comment says exactly that. Our renderer tracks
-/// BETWEEN characters only ([`pass_label_w`] counts `n − 1` gaps), so there is no trailing space to
-/// compensate for, and copying 15/13 would push the ink 1px right of centre — off-centre in the
-/// opposite direction from the thing the design was correcting. 14/14 keeps the SUM, and therefore
-/// the drawn width and every layout measured from it, byte-identical.
-const PASS_PAD_X: f32 = 14.0;
-/// Corner radius and stroke — `border-radius: 8px`, `inset 0 0 0 2px`.
-const PASS_RAD: f32 = 8.0;
-const PASS_STROKE: f32 = 2.0;
-/// The label, "PLEX PASS", **pre-split into per-character `CStr` literals** — the tracking is
-/// applied by advancing the pen between them, so the label is nine one-character draws.
-/// Compile-time constants rather than nine `CString::new` allocations per call: `pass_capsule_w`
-/// alone walks them, and the capsule is now on the detail hero for every converting item on a
-/// proven-Pass-less server (not only an HDR one) as well as in the failure read-out, so this ran
-/// ~18 small allocations a frame for a string that never changes.
-const PASS_CHARS: [&std::ffi::CStr; 9] = [c"P", c"L", c"E", c"X", c" ", c"P", c"A", c"S", c"S"];
-
-/// The label's own drawn width, **memoised** — the pens below re-measure per character anyway, so
-/// only the total is worth holding. Main-thread only, like every other layout memo here.
-///
-/// A safe atomic (bits of the `f32` held in a `u32`) rather than `static mut` — the same
-/// `AtomicU32` this file already uses for the diagnostic counters and
-/// [`VEIL_TEX`], applied to a float memo.
-static PASS_W: AtomicU32 = AtomicU32::new(0);
-
-fn pass_label_w(measure: &dyn crate::ui::machine::Measure) -> f32 {
-    // The width reads 0 until `init_text` has run (a live `TtfMeasure`) — never cache a pre-init
-    // measurement (the same guard `ctrl_slot`'s width memo keeps, and for the same reason). Under
-    // replay the threaded `Measure` is a `TableMeasure`, which answers from the recorded table
-    // rather than 0, so the memo is populated on its first call there too.
-    let memo = f32::from_bits(PASS_W.load(Relaxed));
-    if memo > 0.0 {
-        return memo;
-    }
-    let mut w = 0.0;
-    for c in PASS_CHARS {
-        w += measure.width(c, theme::size::CAPTION, true);
-    }
-    if w <= 0.0 {
-        return 0.0;
-    }
-    w += PASS_TRACK * (PASS_CHARS.len() - 1) as f32;
-    PASS_W.store(w.to_bits(), Relaxed);
-    w
-}
-
-/// Layout width of the capsule — for right-anchoring and row flow.
-pub(crate) fn pass_capsule_w(measure: &dyn crate::ui::machine::Measure) -> f32 {
-    pass_label_w(measure) + 2.0 * PASS_PAD_X
-}
-
-/// Draw the capsule with its LEFT edge at `x`, centred on `cy`; returns its width.
-///
-/// `filled: false` is the OUTLINE form — a [`PASS_STROKE`] ring of pass-gold with a gold label and
-/// **nothing inside it** ([`Painter::rring`]), which is the mock's `box-shadow: inset 0 0 0 2px
-/// var(--pass-gold)` with no `background`. It is the default everywhere a surface sits behind it,
-/// and it no longer has to be told what that surface is: the knockout it replaces painted the
-/// interior in a `bg` the caller named, which over the detail hero's backdrop meant a gold-ringed
-/// dark BOX rather than a hairline.
-///
-/// `filled: true` is the FILLED form — pass-gold fill, near-black label — used in exactly one
-/// place, the playback-failed read-out, where the ground is pure black and an outline would read
-/// as a hole.
-pub(crate) fn pass_capsule(
-    p: Painter,
-    x: f32,
-    cy: f32,
-    filled: bool,
-    measure: &dyn crate::ui::machine::Measure,
-) -> f32 {
-    let w = pass_capsule_w(measure);
-    let r = Rect::new(x, cy - BADGE_H * 0.5, w, BADGE_H);
-    let ink = if filled {
-        p.rrect(r, PASS_RAD, PASS_RAD, theme::PASS_GOLD);
-        theme::PASS_GOLD_INK
-    } else {
-        p.rring(r, PASS_RAD, PASS_STROKE, theme::PASS_GOLD);
-        theme::PASS_GOLD
-    };
-    let ty = crate::text::text_vcenter_y(theme::size::CAPTION, 1, cy);
-    let mut cx = x + PASS_PAD_X;
-    for c in PASS_CHARS {
-        p.text(c.as_ptr(), cx, ty, theme::size::CAPTION, ink, 0, 1);
-        cx += measure.width(c, theme::size::CAPTION, true) + PASS_TRACK;
-    }
-    w
-}
-
 pub(crate) fn badge_w(
     text: &str,
     icon: Option<crate::ui::icons::Icon>,

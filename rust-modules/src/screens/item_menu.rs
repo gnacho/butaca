@@ -70,15 +70,15 @@ pub(crate) enum Action {
     GoToItem(String),
     /// open the SHOW page with that season selected (`season <= 0` = no season to select)
     GoToShow(String, c_int),
-    /// `/:/scrobble` — the ✓ row. **The verb is the ROW's, never the item's state read back**:
-    /// there is no bool here to invert, because a part-watched item offers BOTH rows and has no
-    /// single "other end" to derive. See [`Action::watch_write`].
+    /// mark the item watched — the ✓ row. **The verb is the ROW's, never the item's state read
+    /// back**: there is no bool here to invert, because a part-watched item offers BOTH rows and
+    /// has no single "other end" to derive. See [`Action::watch_write`].
     MarkWatched(String),
-    /// `/:/unscrobble` — the − row. Twin of [`Action::MarkWatched`].
+    /// mark the item unwatched — the − row. Twin of [`Action::MarkWatched`].
     MarkUnwatched(String),
     /// play this leaf ignoring its resume point
     PlayFromStart(String),
-    /// play the item's already-loaded trailer extra — never the parent, never a PMS fetch
+    /// play the item's already-loaded trailer extra — never the parent, never a server fetch
     PlayTrailer {
         rk: String,
         part: String,
@@ -87,9 +87,9 @@ pub(crate) enum Action {
         title: String,
     },
     /// hide this item from the Continue Watching deck — the server-side
-    /// `removeFromContinueWatching`. **Keeps the resume point**: it is a hide, not a reset, so
-    /// playing the item again picks up where it left off (see
-    /// `plex::Client::remove_from_continue_watching`).
+    /// removeFromContinueWatching-equivalent. **Keeps the resume point**: it is a hide, not a
+    /// reset, so playing the item again picks up where it left off (each backend names its own
+    /// call; `viewstate` performs the write for the item's server).
     RemoveFromDeck(String),
 }
 

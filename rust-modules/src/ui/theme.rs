@@ -845,23 +845,6 @@ pub const ROUTE_GROUND_FALLBACK: [[f32; 4]; 4] =
     [ATMOS_WARM_GREY, ATMOS_CHARCOAL, ATMOS_UMBER, ATMOS_ASH];
 /// Warm amber Continue-Watching progress fill (Plex-specific; no player equivalent). `#fab82e`.
 pub const RESUME_FILL: [f32; 4] = with_a(AMBER_300, 0.95);
-/// Plex's own "Plex Pass" gold, `#e5a00d` — a BRAND REFERENCE, not a palette member
-/// (`Plex Pass Awareness.dc.html`, "the amber decision"). Two ambers exist ON PURPOSE and stay
-/// two tokens: [`RESUME_FILL`] is ours and tunable; this one names somebody else's colour and
-/// must not drift when the first is retuned. They never meet: progress fill lives on card art;
-/// pass-gold appears on exactly TWO surfaces, both derived from Plex's own Pass docs (the owner's
-/// directive — design as visual baseline, logic from the docs): the failure read-out's filled
-/// capsule, and the detail facts row's two Pass-gated states (`detail::play_note`, the docs-derived
-/// truth table — hardware conversion and HDR tone mapping are both Pass-gated server features, and
-/// the warning outranks the soft note because a wrong picture outranks a slower one). Every use of
-/// the name is load-bearing,
-/// which is the trademark position. [`crate::ui::widgets::pass_capsule`] is its only consumer
-/// besides ink; a line carries at most one gold thing, and warning severity is never amber — it
-/// is carried by glyph, stroke and contrast.
-pub const PASS_GOLD: [f32; 4] = AMBER_500;
-/// Near-black ink over a [`PASS_GOLD`] fill — the error read-out's FILLED capsule, the one place
-/// the capsule fills (on pure black an outline has no ground and reads as a hole). `#1a1204`.
-pub const PASS_GOLD_INK: [f32; 4] = AMBER_950;
 /// Unfilled track behind the Continue-Watching resume bar — the full-bleed card-bottom rail. A
 /// hair lighter than the player scrubber's so the amber reads against a bright poster.
 pub const RESUME_TRACK: [f32; 4] = with_a(WHITE, 0.22);
