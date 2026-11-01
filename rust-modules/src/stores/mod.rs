@@ -173,18 +173,10 @@ impl Stores {
     ) {
         let browse = std::rc::Rc::clone(&self.browse);
         let hubs = &mut self.hubs;
-        let person = &mut self.person;
-        let collection = &mut self.collection;
-        let search = &mut self.search;
-        let metadata = &mut self.metadata;
         self.viewstate.borrow_mut().pump_with_gate(
             &self.landgate,
             &mut |cmd| browse.borrow_mut().run(cmd),
             &mut |hubcmd| hubs.run_with_directory(hubcmd, directory),
-            &mut |cmd| person.run(cmd),
-            &mut |cmd| collection.run(cmd),
-            &mut |cmd| search.run_with_directory(cmd, directory),
-            &mut |cmd| metadata.run(cmd),
         )
     }
 

@@ -23,9 +23,6 @@ pub(crate) enum ViewStateCmd {
         write: crate::viewstate::Write,
         /// The originating Detail page, if this press should reconcile one after the burst.
         detail: Option<DetailRefresh>,
-        /// Portable item identity when the caller has the exact item's guid; empty asks the worker
-        /// to resolve it from `(sid, rk)`.
-        guid: String,
     },
     Reset,
 }
@@ -89,14 +86,9 @@ impl ViewStateStore {
         gate: &crate::ui::landgate::Gate,
         browse: &mut dyn FnMut(crate::stores::browse::BrowseCmd) -> bool,
         hubs: &mut dyn FnMut(crate::stores::hubs::HubsCmd) -> super::StoreOutcome,
-        person: &mut dyn FnMut(crate::stores::person::PersonCmd) -> bool,
-        collection: &mut dyn FnMut(crate::stores::collection::CollectionCmd) -> bool,
-        search: &mut dyn FnMut(crate::stores::search::SearchCmd) -> bool,
-        metadata: &mut dyn FnMut(crate::stores::metadata::MetadataCmd) -> bool,
     ) {
         let busy = self.state.is_busy();
-        self.state.pump_with_gate(&self.adapter, gate,
-            browse, hubs, person, collection, search, metadata);
+        self.state.pump_with_gate(&self.adapter, gate, browse, hubs);
         if busy != self.state.is_busy() {
             self.bump();
         }

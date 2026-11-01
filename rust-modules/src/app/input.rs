@@ -495,33 +495,27 @@ pub(super) unsafe fn apply_item_action<R: super::playback::PlaybackResources>(
                     keep: Some(rk.clone()),
                 })
             });
-            // NO GUID from here, and deliberately: a catalog row carries none, and the guid the
-            // detail page is holding belongs to the SHOW when this rk is one of its episodes. A
-            // guid that is merely close marks a DIFFERENT title watched on every other source, so
-            // `viewstate` looks the right one up from `(sid, rk)` on its own worker instead.
+            // The item is addressed by its exact `(sid, rk)` pair; the optimistic edit lands on
+            // every surface that draws that pair before the request leaves the machine.
             bridge.viewstate_run(crate::stores::viewstate::ViewStateCmd::Request {
-                sid, rk: rk.to_string(), write: w, detail, guid: String::new(),
+                sid, rk: rk.to_string(), write: w, detail,
             });
         }
         Action::RemoveFromDeck(rk) => {
-            // A HIDE, not a reset: the server keeps the item's `viewOffset`, so the card leaves
-            // the shelf while the resume point survives and playing it again picks up where it
-            // left off. That is why this is NOT `unscrobble`, which would throw the position
-            // away. See `plex::Client::remove_from_continue_watching`.
+            // A HIDE, not a reset: the server keeps the item's resume point, so the card leaves
+            // the shelf while the position survives and playing it again picks up where it
+            // left off. That is why this is NOT the unwatched write, which throws the position
+            // away (`viewstate::Write::RemoveFromDeck` -> `JfClient::clear_resume`).
             //
             // The card leaves the deck on THIS frame (`pms::LocalEdit::LeftTheDeck` — it must
             // not still sit under the user's cursor after they removed it) and the refetch
-            // follows the write. The shelf is sourced from `/hubs/continueWatching`, which is
-            // the hub this action actually affects — built from `/hubs`'s `home.continue` it
-            // would come back still listing the item (see `pms::project`).
+            // follows the write. The shelf is sourced from the Continue Watching deck, which is
+            // the source this action actually affects.
             //
             // No detail refresh: this row exists only on a Continue Watching card.
-            // No guid, and it would be ignored if there were one: a deck removal does not follow
-            // the title across sources (`viewstate::Write::propagates`) — your Continue Watching
-            // row is yours, and hiding a friend's item from it is not a claim about their deck.
             bridge.viewstate_run(crate::stores::viewstate::ViewStateCmd::Request {
                 sid, rk: rk.to_string(), write: crate::viewstate::Write::RemoveFromDeck,
-                detail: None, guid: String::new(),
+                detail: None,
             });
         }
         Action::PlayFromStart(rk) => {
