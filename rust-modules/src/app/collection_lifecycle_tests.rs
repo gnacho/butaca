@@ -1,34 +1,32 @@
-//! Collection store lifecycle: generation isolation, terminal-state projection, and tag→rk
-//! publication. These stay at the app boundary so they exercise the physically owned store the
+//! Collection store lifecycle: generation isolation, terminal-state projection, and reset
+//! semantics. These stay at the app boundary so they exercise the physically owned store the
 //! Bridge exposes, matching the Person lifecycle coverage beside this file.
 
 use crate::collection::{CollectionStatus, CollectionTarget};
+use crate::collection::CollectionRef;
 use crate::plex::ServerId;
 use crate::stores::collection::CollectionCmd;
 
-fn open(store: &mut crate::stores::collection::CollectionStore, rk: &str, tag: i64) {
-    store.run(CollectionCmd::Open { target: CollectionTarget { id: crate::plex::collections::CollectionRef {
-        sid: ServerId::UNSET, rk: rk.into(), sec: 8, tag, name: "Fixture Collection".into() },
+fn open(store: &mut crate::stores::collection::CollectionStore, rk: &str) {
+    store.run(CollectionCmd::Open { target: CollectionTarget { id: CollectionRef {
+        sid: ServerId::UNSET, rk: rk.into(), sec: 8, tag: 0, name: "Fixture Collection".into() },
         want: crate::collection::PAGE_SIZE } });
 }
 
 #[test]
-fn stale_generation_is_dropped_and_tag_resolution_publishes_the_rating_key() {
+fn stale_generation_is_dropped_and_the_current_one_lands() {
     let mut store = crate::stores::collection::CollectionStore::default();
-    open(&mut store, "", 77);
+    open(&mut store, "50077");
     let old = store.generation_for_test();
     let adapter = store.adapter_for_test();
-    open(&mut store, "", 88);
-    adapter.land_resolved_for_test(old, "50077");
+    open(&mut store, "50088");
+    adapter.land_missing_for_test(old);
     assert!(!store.take_landing_for_test(), "a stale landing changes no visible model");
-    assert_eq!(store.view().current().unwrap().id.tag, 88);
-    assert!(store.view().current().unwrap().id.rk.is_empty());
+    assert_eq!(store.view().current().unwrap().id.rk, "50088");
 
     let current = store.generation_for_test();
-    adapter.land_resolved_for_test(current, "50088");
-    assert!(store.take_landing_for_test());
-    assert_eq!(store.view().current().unwrap().id.rk, "50088",
-        "the tag-only identity publishes its resolved collection ratingKey");
+    adapter.land_missing_for_test(current);
+    assert!(store.take_landing_for_test(), "the current generation's answer lands");
 }
 
 #[test]
@@ -40,7 +38,7 @@ fn denied_missing_empty_and_transport_map_to_distinct_screen_states() {
         ("transport", 3, CollectionStatus::Failed),
     ] {
         let mut store = crate::stores::collection::CollectionStore::default();
-        open(&mut store, "50001", 77);
+        open(&mut store, "50001");
         let generation = store.generation_for_test();
         let adapter = store.adapter_for_test();
         match land {
@@ -57,14 +55,14 @@ fn denied_missing_empty_and_transport_map_to_distinct_screen_states() {
 #[test]
 fn a_profile_or_server_reset_drops_the_page_and_its_in_flight_answer() {
     let mut store = crate::stores::collection::CollectionStore::default();
-    open(&mut store, "50001", 77);
+    open(&mut store, "50001");
     let old = store.generation_for_test();
     let old_adapter = store.adapter_for_test();
     assert!(store.run(CollectionCmd::Reset), "a reset with a page open is a change");
     assert!(store.view().current().is_none(), "the previous identity's collection is gone");
-    open(&mut store, "50001", 77);
+    open(&mut store, "50001");
     assert!(store.generation_for_test() > old, "the reopened page is a new generation");
-    old_adapter.land_resolved_for_test(old, "50001");
+    old_adapter.land_missing_for_test(old);
     assert!(!store.take_landing_for_test(),
         "an answer fetched under the previous profile never lands on the new page");
     assert!(store.view().current().unwrap().status == CollectionStatus::Loading);

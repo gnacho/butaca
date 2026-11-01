@@ -475,7 +475,7 @@ pub(crate) enum ContentArg {
     Detail { sid: crate::plex::ServerId, rk: String },
     Person { sid: crate::plex::ServerId, key: String, guid: String, name: String, thumb: String },
     Filmography { sid: crate::plex::ServerId, key: String },
-    Collection(crate::plex::collections::CollectionRef),
+    Collection(crate::collection::CollectionRef),
 }
 
 impl crate::ui::machine::LogicalState for ContentArg {
@@ -518,9 +518,6 @@ pub(crate) enum DetailIdentity {
     Related { sid: crate::plex::ServerId, rk: String },
     Cast { sid: crate::plex::ServerId, key: String, guid: String, name: String, role: String },
     Extra { sid: crate::plex::ServerId, rk: String },
-    /// A card of the collection shelf. Its own variant rather than `Related`: the two shelves are
-    /// different rows, and a movie that moves between them across a refetch is a different card.
-    CollectionMember { sid: crate::plex::ServerId, rk: String },
 }
 
 #[derive(Clone, Debug)]
@@ -722,7 +719,6 @@ impl crate::ui::machine::LogicalState for DetailIdentity {
             Self::Related { sid, rk } => { c.u32(2).u32(u32::from(sid.raw())).str(rk); }
             Self::Cast { sid, key, guid, name, role } => { c.u32(3).u32(u32::from(sid.raw())).str(key).str(guid).str(name).str(role); }
             Self::Extra { sid, rk } => { c.u32(5).u32(u32::from(sid.raw())).str(rk); }
-            Self::CollectionMember { sid, rk } => { c.u32(6).u32(u32::from(sid.raw())).str(rk); }
         }
     }
     fn probe(&self, out: &mut String) { out.push_str("detail_identity"); }
@@ -839,7 +835,7 @@ fn write_home_hub(hub: &HomeHubIdentity, c: &mut crate::ui::machine::Canon) {
     }
 }
 
-pub(crate) const PAGE_MEMORY_SHAPE: &str = "PageMemory{None,Detail:{spot:Spot{section:i32,col:i32,ep_text:bool,saved_col:[i32;8],season:Option<i64>},next_elem:u32,keys:[{identity:DetailIdentity{Season(sid:u32,show:str,rk:str),Episode(sid:u32,rk:str,text:bool),Related(sid:u32,rk:str),Cast(sid:u32,key:str,guid:str,name:str,role:str),Extra(sid:u32,rk:str),CollectionMember(sid:u32,rk:str),Slot(u32)},elem:u32}]},Person:{next_card_elem:u32,header_marked:bool,card_keys:[{sid:ServerId,rk:String,elem:u32}]},Collection:{next_elem:u32,header_marked:bool,card_keys:[{sid:ServerId,rk:String,elem:u32}]},Filmography:{next_elem:u32,department:String,keys:[{department:String,catalog_id:Option<String>,elem:u32}],preview:Option<(String,String)>},Home:{next_group:u32,next_elem:u32,groups:[{identity:HomeHubIdentity{ContinueWatching,Identifier{sid:ServerId,id:String,key:String},Key{sid:ServerId,key:String},Ephemeral{generation:u32,ordinal:u32}},group:u32}],items:[{identity:HomeItemIdentity{Item{hub:HomeHubIdentity,sid:ServerId,rk:String},Slot{hub:HomeHubIdentity,generation:u32,ordinal:u32}},elem:u32,last_row:u32,last_col:u32}],carousel:Option<(ServerId,String)>,strip_chosen:bool,scroll_y:f32,row_scroll:[(group:u32,scroll:f32)]},Library:{next_elem:u32,section:Option<{sid:ServerId,key:i64}>,scroll:f32,keys:[{identity:LibraryIdentity,elem:u32,last_group:u32,last_index:u32}],shelf_scroll:[(hub:String,scroll:f32)],epoch:Option<u32>,query:Option<u32>,grid_reset_pending:bool,viewports:[LibraryViewport{epoch:u32,section:{sid:u32,key:u64},scroll:f32,shelves:[(id:str,x:f32)]}]}}";
+pub(crate) const PAGE_MEMORY_SHAPE: &str = "PageMemory{None,Detail:{spot:Spot{section:i32,col:i32,ep_text:bool,saved_col:[i32;7],season:Option<i64>},next_elem:u32,keys:[{identity:DetailIdentity{Season(sid:u32,show:str,rk:str),Episode(sid:u32,rk:str,text:bool),Related(sid:u32,rk:str),Cast(sid:u32,key:str,guid:str,name:str,role:str),Extra(sid:u32,rk:str),Slot(u32)},elem:u32}]},Person:{next_card_elem:u32,header_marked:bool,card_keys:[{sid:ServerId,rk:String,elem:u32}]},Collection:{next_elem:u32,header_marked:bool,card_keys:[{sid:ServerId,rk:String,elem:u32}]},Filmography:{next_elem:u32,department:String,keys:[{department:String,catalog_id:Option<String>,elem:u32}],preview:Option<(String,String)>},Home:{next_group:u32,next_elem:u32,groups:[{identity:HomeHubIdentity{ContinueWatching,Identifier{sid:ServerId,id:String,key:String},Key{sid:ServerId,key:String},Ephemeral{generation:u32,ordinal:u32}},group:u32}],items:[{identity:HomeItemIdentity{Item{hub:HomeHubIdentity,sid:ServerId,rk:String},Slot{hub:HomeHubIdentity,generation:u32,ordinal:u32}},elem:u32,last_row:u32,last_col:u32}],carousel:Option<(ServerId,String)>,strip_chosen:bool,scroll_y:f32,row_scroll:[(group:u32,scroll:f32)]},Library:{next_elem:u32,section:Option<{sid:ServerId,key:i64}>,scroll:f32,keys:[{identity:LibraryIdentity,elem:u32,last_group:u32,last_index:u32}],shelf_scroll:[(hub:String,scroll:f32)],epoch:Option<u32>,query:Option<u32>,grid_reset_pending:bool,viewports:[LibraryViewport{epoch:u32,section:{sid:u32,key:u64},scroll:f32,shelves:[(id:str,x:f32)]}]}}";
 
 /// Effects cross the screen/loop boundary; screens do not poll one another's pending latches.
 pub(crate) enum ContentReq {
@@ -2062,6 +2058,13 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 /// **Detail collection shelf** (`0x38a9_2955_0af8_72f6` → this): detail `Spot.saved_col` grows an
 /// eighth identity-keyed slot for the collection shelf, and `DetailIdentity` grows
 /// `CollectionMember`. Re-record replay fixtures like any other shape-pin bump.
+///
+/// **Plex collections removal** (`0xd4f7_ab4b_d0e9_e119` → this): the promoted-hub collection
+/// links die with the PMS collection reads — the Library shelf loses `heading`,
+/// `DetailIdentity` loses `CollectionMember`, detail `Spot.saved_col` drops back to seven
+/// slots, and the metadata `Detail` record loses `collection`. The collection PAGE stays (it is
+/// the Jellyfin BoxSet detail route); only the Plex-only surfaces leave. Re-record replay
+/// fixtures like any other shape-pin bump.
 #[cfg(test)]
 // Playback/account preference pages add their arguments and logical state to the inventory.
 // The Library's TYPE transaction now names a listing type by code (`LibraryType{code:u32}`) since
@@ -2074,7 +2077,7 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 // The fork's sync drops the consent and incident-report screens from the inventory: the pin
 // above was 0x668c_44dc_797c_5b0f with them. The Jellyfin-only conversion then retires the
 // Settings AudioSubtitles page from the shape (0xab1b_123e_0a85_9621 before it).
-const SCREEN_SHAPES_PIN: u64 = 0xd4f7_ab4b_d0e9_e119;
+const SCREEN_SHAPES_PIN: u64 = 0x8f98_af11_eb39_bb08;
 
 #[cfg(test)]
 mod arg_tests {
@@ -2153,7 +2156,7 @@ mod arg_tests {
                 name: String::new(), thumb: String::new(),
             }),
             AppArg::Content(crate::screens::registry::ContentArg::Collection(
-                crate::plex::collections::CollectionRef::by_tag(crate::plex::ServerId::UNSET, 0, 1, ""),
+                crate::collection::CollectionRef { sid: crate::plex::ServerId::UNSET, rk: String::new(), sec: 0, tag: 1, name: String::new() },
             )),
             AppArg::Login,
             AppArg::Profiles,
@@ -2170,7 +2173,7 @@ mod arg_tests {
     #[test]
     fn collection_content_arg_has_the_pinned_canonical_field_order() {
         let sid = crate::plex::ServerId::from_raw(7);
-        let arg = ContentArg::Collection(crate::plex::collections::CollectionRef {
+        let arg = ContentArg::Collection(crate::collection::CollectionRef {
             sid, rk: "50077".into(), sec: 8, tag: 77, name: "Fixture".into(),
         });
         let mut expected = Canon::new();
@@ -2181,10 +2184,10 @@ mod arg_tests {
     #[test]
     fn collection_identity_never_compares_a_tag_with_a_rating_key() {
         let sid = crate::plex::ServerId::from_raw(2);
-        let by_rk = |rk: &str, tag| ContentArg::Collection(crate::plex::collections::CollectionRef {
+        let by_rk = |rk: &str, tag| ContentArg::Collection(crate::collection::CollectionRef {
             sid, rk: rk.into(), sec: 4, tag, name: "A".into(),
         });
-        // The rule itself is `CollectionRef::same_collection`'s (graded in `plex::collections`);
+        // The rule itself is `CollectionRef::same_collection's (graded in `crate::collection`);
         // this pins that a page argument asks it rather than a copy.
         assert!(by_rk("50077", 77).same_item(&by_rk("50077", 99)),
             "two resolved arguments compare their ratingKey");
@@ -2207,10 +2210,10 @@ mod arg_tests {
 
     #[test]
     fn collection_is_its_own_page_identity() {
-        let a = AppArg::Content(ContentArg::Collection(crate::plex::collections::CollectionRef {
+        let a = AppArg::Content(ContentArg::Collection(crate::collection::CollectionRef {
             sid: crate::plex::ServerId::UNSET, rk: "50001".into(), sec: 1, tag: 1, name: "A".into(),
         }));
-        let b = AppArg::Content(ContentArg::Collection(crate::plex::collections::CollectionRef {
+        let b = AppArg::Content(ContentArg::Collection(crate::collection::CollectionRef {
             sid: crate::plex::ServerId::UNSET, rk: "50001".into(), sec: 1, tag: 9, name: "Renamed".into(),
         }));
         assert_eq!(a.id(), ScreenId(23));

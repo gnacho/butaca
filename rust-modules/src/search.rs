@@ -259,12 +259,12 @@ impl CollectionHit {
 
     /// The collection page this hit opens: ratingKey first (the page loads it directly), with the
     /// section + tag id carried as the second identity the page resolves by when no ratingKey is
-    /// available (`plex::collections::resolve_tag`). `None` when neither identity is whole: a
+    /// item id when the link carries one. `None` when neither identity is whole: a
     /// guess would open a page for nothing.
     pub(crate) fn route(&self) -> Option<crate::screens::registry::ContentArg> {
         let by_tag = self.tag > 0 && self.item.sec > 0;
         (!self.item.rk.is_empty() || by_tag).then(|| crate::screens::registry::ContentArg::Collection(
-            crate::plex::collections::CollectionRef {
+            crate::collection::CollectionRef {
                 sid: self.item.sid,
                 rk: self.item.rk.clone(),
                 sec: self.item.sec,

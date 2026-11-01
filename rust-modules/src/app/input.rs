@@ -183,7 +183,7 @@ pub(crate) unsafe fn activate_card(
 }
 
 fn collection_content_arg(mm: &crate::pms::PmsMovie) -> crate::screens::registry::ContentArg {
-    crate::screens::registry::ContentArg::Collection(crate::plex::collections::CollectionRef::by_rk(
+    crate::screens::registry::ContentArg::Collection(crate::collection::CollectionRef::by_rk(
         mm.sid, &mm.rk, mm.sec, &mm.title))
 }
 

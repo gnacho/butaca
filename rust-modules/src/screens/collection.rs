@@ -5,7 +5,7 @@
 use std::ffi::CString;
 
 use crate::collection::{Collection, CollectionOrder, CollectionStatus, CollectionTarget, PAGE_SIZE};
-use crate::plex::collections::CollectionRef;
+use crate::collection::CollectionRef;
 use crate::pms::PmsMovie;
 use crate::stores::collection::CollectionCmd;
 use crate::ui::card_row::{self, TileLabel};
@@ -442,8 +442,8 @@ impl CollectionScreen {
             // tile the Library grid draws for the same collection — its mark and its name.
             crate::ui::collection_tile::draw(p, art, art, theme::CARD_RING_RAD, name);
         } else {
-            widgets::card_named(p, art, Art::Thumb { sid: collection.id.sid, key: &collection.thumb, res: ART_RES },
-                Some(name), theme::CARD_RING_RAD, false, 1.0, 0.0);
+            widgets::card(p, art, Art::Thumb { sid: collection.id.sid, key: &collection.thumb, res: ART_RES },
+                theme::CARD_RING_RAD, false, 1.0, 0.0);
         }
         if collection.status == CollectionStatus::Ready {
             card_row::draw_heading(p, crate::i18n::msg::browse_collection_items(), order_note(collection),

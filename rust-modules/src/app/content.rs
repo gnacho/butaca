@@ -793,7 +793,7 @@ mod search_action_tests {
             tag: 7 });
         let req = |sid, rk: &str, tag| SearchReq::Collection { sid, rk: rk.into(), tag };
         assert!(search_target(&hit, &req(a, "50007", 7)) == Some(AppArg::Content(ContentArg::Collection(
-            crate::plex::collections::CollectionRef { sid: a, rk: "50007".into(), sec: 1, tag: 7, name: "Shorts".into() }))));
+            crate::collection::CollectionRef { sid: a, rk: "50007".into(), sec: 1, tag: 7, name: "Shorts".into() }))));
         assert!(search_target(&hit, &req(b, "50007", 7)).is_none(), "another server's key");
         assert!(search_target(&hit, &req(a, "50008", 7)).is_none(), "a stale selection");
         assert!(search_target(&hit, &SearchReq::Detail { sid: a, rk: "50007".into() }).is_none(),
@@ -802,7 +802,7 @@ mod search_action_tests {
         let tag = Item::Collection(crate::search::CollectionHit::from_tag(
             &TagHit { sid: a, id: "7".into(), sec: 1, name: "Shorts".into(), ..Default::default() }));
         assert!(search_target(&tag, &req(a, "", 7)) == Some(AppArg::Content(ContentArg::Collection(
-            crate::plex::collections::CollectionRef::by_tag(a, 1, 7, "Shorts")))));
+            crate::collection::CollectionRef { sid: a, rk: String::new(), sec: 1, tag: 7, name: "Shorts".into() }))));
         assert!(search_target(&tag, &req(a, "", 8)).is_none());
         crate::plex::reset_servers_for_test();
     }
@@ -911,7 +911,7 @@ mod library_publication_tests {
             section: 2,
             col: 3,
             ep_text: true,
-            saved_col: [0, 1, 3, 0, 0, 0, 0, 0],
+            saved_col: [0, 1, 3, 0, 0, 0, 0],
             season: Some(2),
         };
         let focus = crate::ui::machine::FocusKey { entry, elem: 3003 };

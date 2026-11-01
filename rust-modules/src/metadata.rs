@@ -1,6 +1,5 @@
 //! Item detail data layer for the detail page: full metadata (genres, cast, crew,
-//! audio/subtitle streams), the TV season/episode hierarchy, and the related hubs (a member
-//! movie's collection hub split out into its own shelf) — fetched on demand into a single
+//! audio/subtitle streams), and the TV season/episode hierarchy — fetched on demand into a single
 //! CURRENT item. Idiomatic Rust (String/Vec), like the browse catalog (pms.rs) — the fixed C
 //! buffers from the C port are gone.
 use std::os::raw::c_int;
@@ -217,8 +216,7 @@ impl MetadataAdapter {
 /// list that will never arrive (see `ui::detail::spot_season_gate`).
 #[derive(Clone, Default, PartialEq, Debug)]
 pub(crate) struct Spot {
-    /// section id (0 hero, 1 tabs, 2 episodes, 3 related, 4 cast, 5 about, 6 extras,
-    /// 7 collection).
+    /// section id (0 hero, 1 tabs, 2 episodes, 3 related, 4 cast, 5 about, 6 extras).
     /// Indexed by identity, not visual position — see [`SPOT_SECTION_SLOTS`].
     pub(crate) section: c_int,
     /// focused item within that section
@@ -849,9 +847,9 @@ pub(crate) struct Episode {
     pub(crate) acodec: String, // Media[0].audioCodec
 }
 
-/// One slot per [`Spot`] section id. Section 6 is extras, 7 the collection shelf. Do not shrink
-/// this without a migration of remembered columns.
-pub(crate) const SPOT_SECTION_SLOTS: usize = 8;
+/// One slot per [`Spot`] section id. Section 6 is extras. Do not shrink this without a migration
+/// of remembered columns.
+pub(crate) const SPOT_SECTION_SLOTS: usize = 7;
 
 /// One extra row. Play fields match [`Episode`]. A row with an empty part is still a shelf tile;
 /// OK refuses it.
@@ -1038,43 +1036,9 @@ impl Season {
 /// asking the next caller to remember `plex::current_server()` is the wrong answer here.
 pub(crate) type Related = crate::pms::PmsMovie;
 
-/// The collection shelf holds at most this many members — the Related shelf's own bound.
-pub(crate) const COLLECTION_MAX: usize = RELATED_MAX;
-
-/// A member movie's collection, split out of `/related`. PMS answers a member with a
-/// `collection.related.*` hub that lists the WHOLE collection in the collection's own order, the
-/// item itself included (a live probe, `docs/pms-api.md`). Detail draws it as its own shelf above
-/// Related, headed by a link to the collection page, so the members are never also Related tiles.
-///
-/// The collection is named by its TAG id, not its rating key — the hub's key filters the section
-/// by `tagId` — so the page opens with `(section, tag, title)` and the collection store resolves
-/// the rating key from the section's collection listing.
-#[derive(Clone, Default)]
-#[derive(serde::Serialize, serde::Deserialize)]
-pub(crate) struct CollectionShelf {
-    pub(crate) title: String,
-    pub(crate) section: i64,
-    pub(crate) tag: i64,
-    /// Server order, the page's own item included and unmarked, capped at [`COLLECTION_MAX`].
-    pub(crate) members: Vec<Related>,
-    /// Every member the collection holds — the heading's "· N" — which `members` may cap.
-    #[serde(default)]
-    pub(crate) count: usize,
-}
-
-impl CollectionShelf {
-    /// Where the shelf's linked heading leads: the collection by section and tag, for the
-    /// collection store to resolve.
-    pub(crate) fn link(&self, sid: crate::plex::ServerId) -> crate::plex::collections::CollectionRef {
-        crate::plex::collections::CollectionRef::by_tag(sid, self.section, self.tag, &self.title)
-    }
-}
-
-/// What `/related` becomes on a Detail page: the item's own collection (when it shares one with
-/// another title) and the flattened Related row, which never repeats a collection member.
+/// What `/related` becomes on a Detail page: the flattened Related row.
 #[derive(Default)]
 pub(crate) struct RelatedRows {
-    pub(crate) collection: Option<CollectionShelf>,
     pub(crate) related: Vec<Related>,
 }
 
@@ -1518,10 +1482,6 @@ pub(crate) struct Detail {
     pub(crate) on_deck: Option<Episode>,
     pub(crate) cur_season: usize,
     pub(crate) related: Vec<Related>,
-    /// The item's collection shelf ([`CollectionShelf`]); `None` for a non-member, a lone member
-    /// and every show/episode page.
-    #[serde(default)]
-    pub(crate) collection: Option<CollectionShelf>,
     pub(crate) chapters: Vec<Chapter>,
     pub(crate) markers: Vec<Marker>, // intro / credits segments (leaf items only)
     pub(crate) ratings: Vec<Rating>, // review scores, critic-first (see convert_ratings)
@@ -1708,10 +1668,7 @@ fn set_watched_local(state: &mut MetadataState, sid: crate::plex::ServerId, rk: 
         // a hub that lists an item alongside itself is not something this function should trust
         // itself to rule out.
         let mut hit = false;
-        // The collection shelf's members are other items' tiles too (the loaded item's own tile
-        // among them), so they move with the same pass.
-        let members = d.collection.iter_mut().flat_map(|c| c.members.iter_mut());
-        for m in d.related.iter_mut().chain(members) {
+        for m in d.related.iter_mut() {
             if crate::plex::same_item((m.sid, &m.rk), (sid, rk)) {
                 // the shared three-field flip (`watched`/`unwatched`/`resume_ms` move together, or
                 // the tile wears the progress bar it had before and shows no tick at all)
@@ -2025,7 +1982,6 @@ fn fetch_detail(sid: crate::plex::ServerId, rk: &str) -> Option<(Detail, String)
             .map(convert_episode),
         cur_season: 0,
         related: Vec::new(),
-        collection: None,
         chapters: convert_chapters(&it.chapter),
         markers: convert_markers(&it.marker),
         ratings: convert_ratings(&it),
@@ -3082,33 +3038,18 @@ fn fetch_related(sid: crate::plex::ServerId, rk: &str) -> RelatedRows {
 /// that shows six.
 const RELATED_MAX: usize = 20;
 
-/// `/related`'s response for item `rk` → the page's collection shelf and Related row. **PURE**,
-/// split out of [`fetch_related`] so the things that can be wrong here are host-testable: which
-/// fields survive the copy, the collection split, the de-duplication across hubs, and the caps.
-///
-/// The FIRST `collection.related.*` hub becomes the collection shelf ([`collection_shelf`]) and
-/// takes no part in the Related row; its members — the item itself included — seed the
-/// de-duplication, so no member is also a Related tile. A second collection hub, which a film in
-/// two collections would carry, stays in the flattened row as before.
+/// `/related`'s response for item `rk` → the flattened Related row. **PURE**, split out of
+/// [`fetch_related`] so the things that can be wrong here are host-testable: which fields survive
+/// the copy, the de-duplication across hubs, and the caps.
 ///
 /// De-duplication is across the WHOLE response and not per hub, which is the point of it: PMS's
 /// related hubs overlap heavily ("Similar Movies" and "More with <actor>" routinely name the same
 /// film), and a flattened strip that listed it twice would put two tiles of one title side by side.
 fn related_rows(mc: &crate::plex::MediaContainer, sid: crate::plex::ServerId, rk: &str) -> RelatedRows {
-    let own = mc.hub.iter().position(|h| {
-        crate::plex::collections::related_collection_hub(&h.hub_identifier, &h.key).is_some()
-    });
     let mut seen = std::collections::HashSet::new();
     seen.insert(rk.to_string());
-    if let Some(h) = own.map(|i| &mc.hub[i]) {
-        seen.extend(h.metadata.iter().map(|x| x.rating_key.clone()));
-    }
-    let collection = own.and_then(|i| collection_shelf(&mc.hub[i], sid, rk));
     let mut out = Vec::new();
-    for (i, h) in mc.hub.iter().enumerate() {
-        if Some(i) == own {
-            continue;
-        }
+    for h in &mc.hub {
         for x in &h.metadata {
             if !crate::pms::listable(&x.kind) || x.rating_key.is_empty()
                 || !seen.insert(x.rating_key.clone()) {
@@ -3121,44 +3062,11 @@ fn related_rows(mc: &crate::plex::MediaContainer, sid: crate::plex::ServerId, rk
             // flight and the rows in hand belong to the machine that was asked.
             out.push(crate::pms::parse_item(x, sid));
             if out.len() >= RELATED_MAX {
-                return RelatedRows { collection, related: out };
+                return RelatedRows { related: out };
             }
         }
     }
-    RelatedRows { collection, related: out }
-}
-
-/// One `collection.related.*` hub → the collection shelf, or `None` when the item is the
-/// collection's only listed member: a shelf of the page's own poster is no way to a collection.
-/// Members keep server order, the item's own tile included, capped at [`COLLECTION_MAX`].
-fn collection_shelf(
-    h: &crate::plex::Hub,
-    sid: crate::plex::ServerId,
-    rk: &str,
-) -> Option<CollectionShelf> {
-    let (section, tag) = crate::plex::collections::related_collection_hub(&h.hub_identifier, &h.key)?;
-    let mut seen = std::collections::HashSet::new();
-    let listed: Vec<&crate::plex::Metadata> = h
-        .metadata
-        .iter()
-        .filter(|x| {
-            crate::pms::listable(&x.kind) && !x.rating_key.is_empty()
-                && seen.insert(x.rating_key.as_str())
-        })
-        .collect();
-    // The heading's count is the collection's, not the shelf's: the hub's total when the server
-    // sent one, else every member it listed — both before the shelf's cap.
-    let count = h.total().max(listed.len());
-    let members: Vec<Related> = listed.into_iter()
-        .take(COLLECTION_MAX)
-        .map(|x| crate::pms::parse_item(x, sid))
-        .collect();
-    if members.iter().all(|m| m.rk == rk) {
-        return None;
-    }
-    // A key that named no section falls back to the members' own library.
-    let section = if section > 0 { section } else { members.iter().map(|m| m.sec).find(|s| *s > 0).unwrap_or(0) };
-    Some(CollectionShelf { title: h.title.clone(), section, tag, members, count })
+    RelatedRows { related: out }
 }
 
 /// The full detail fetch for `rk` (movie or show): item metadata + cast + streams, plus — for
@@ -3242,7 +3150,6 @@ fn fetch_full(sid: crate::plex::ServerId, rk: &str) -> Option<Detail> {
             (related, extras)
         });
         d.related = related.related;
-        d.collection = related.collection;
         match extras {
             Some(rows) => {
                 extras_src = "extras";
@@ -3266,7 +3173,6 @@ fn fetch_full(sid: crate::plex::ServerId, rk: &str) -> Option<Detail> {
         extras_src = "skip";
         let related = fetch_related(sid, rk);
         d.related = related.related;
-        d.collection = related.collection;
     }
     // The item's IDENTITY and the SHAPE of what came back — never its title. `scrub_local` runs
     // on every line in every build, but nothing in a line distinguishes a programme title from
@@ -3275,9 +3181,9 @@ fn fetch_full(sid: crate::plex::ServerId, rk: &str) -> Option<Detail> {
     // from the day it was added until phase 11 — `'{}'` with `d.title` in it, on every detail
     // open, in a log the maintainer routinely pastes into a public issue.
     crate::player::log(&format!(
-        "detail: sid={} rk={} show={} genres={} cast={} crew={} seasons={} eps={} related={} collection={} audio={} subs={} trailer={} extras={} ms={}",
+        "detail: sid={} rk={} show={} genres={} cast={} crew={} seasons={} eps={} related={} audio={} subs={} trailer={} extras={} ms={}",
         d.sid.raw(), d.rk, d.is_show, d.genres.len(), d.cast.len(), d.crew.len(), d.seasons.len(), d.episodes.len(),
-        d.related.len(), d.collection.as_ref().map_or(0, |c| c.members.len()), d.audio.len(), d.subs.len(), u8::from(d.trailer().is_some()), extras_src, t0.elapsed().as_millis()
+        d.related.len(), d.audio.len(), d.subs.len(), u8::from(d.trailer().is_some()), extras_src, t0.elapsed().as_millis()
     ));
     Some(d)
 }
