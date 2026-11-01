@@ -217,29 +217,6 @@ impl Client {
         self.get_json(&format!("/library/people/{person_id}/media"))
     }
 
-    /// GET /:/scrobble — mark watched without a playback time (docs/pms-api.md §timeline).
-    /// On a show/season it marks every leaf watched. Returns whether the server took it.
-    ///
-    /// The verdict used to be discarded (`get_void`), which was harmless while the call was inline
-    /// on the frame loop and the blocking refetch behind it re-read the truth a moment later. It is
-    /// not harmless now: the write runs on a worker (`crate::viewstate`) whose only report to the
-    /// main thread is this bool, and "the server never answered" is the case the whole move exists
-    /// for. It does NOT distinguish a 200 from a 404 — `get_ok` is `http_get`'s own success — which
-    /// is the honest limit of a GET whose body carries nothing.
-    pub fn scrobble(&self, rating_key: &str) -> bool {
-        self.get_ok(&format!(
-            "/:/scrobble?key={rating_key}&identifier=com.plexapp.plugins.library"
-        ))
-    }
-
-    /// GET /:/unscrobble — mark unwatched (clears viewCount + viewOffset). Reports like
-    /// [`Client::scrobble`].
-    pub fn unscrobble(&self, rating_key: &str) -> bool {
-        self.get_ok(&format!(
-            "/:/unscrobble?key={rating_key}&identifier=com.plexapp.plugins.library"
-        ))
-    }
-
     /// Fetch a SIDECAR subtitle (`Stream.key`, i.e. `/library/streams/{id}`) for the client
     /// renderer. The endpoint takes `encoding` and `format` (docs/plex-openapi.json). ASS/SSA
     /// requests only UTF-8 re-encoding, preserving styles, drawings and overlapping events.

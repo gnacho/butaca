@@ -3576,7 +3576,6 @@ impl DetailScreen {
                                 rk: d.rk.clone(),
                                 keep: None,
                             }),
-                            guid: d.guid.clone(),
                         }),
                     )));
                 }
@@ -3598,7 +3597,6 @@ impl DetailScreen {
                                 rk: d.rk.clone(),
                                 keep: None,
                             }),
-                            guid: d.guid.clone(),
                         }),
                     )));
                 }

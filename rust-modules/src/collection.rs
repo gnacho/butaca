@@ -97,16 +97,15 @@ pub(crate) struct Collection {
     offset: usize,
     want: usize,
     header_ready: bool,
-    client_key: Option<(u32, u32)>,
 }
 
 impl Collection {
     /// A collection opened (or reopened) with nothing landed yet: its title is the link's name
     /// until the header replaces it.
-    fn loading(id: CollectionRef, want: usize, client_key: Option<(u32, u32)>) -> Self {
+    fn loading(id: CollectionRef, want: usize) -> Self {
         Self { title: id.name.clone(), id, summary: String::new(), thumb: String::new(),
             child_count: 0, order: None, items: Vec::new(), total: 0, status: CollectionStatus::Loading,
-            more: true, offset: 0, want, header_ready: false, client_key }
+            more: true, offset: 0, want, header_ready: false }
     }
 
     /// Whether the header (title, art, summary) has landed — before it, an empty `thumb` is not
@@ -155,8 +154,7 @@ impl CollectionState {
                     return current.want != old || retry;
                 }
                 self.supersede(adapter);
-                let client_key = crate::registry::client_for(target.id.sid).map(|c| (c.instance_gen(), c.token_gen()));
-                self.current = Some(Collection::loading(target.id, target.want.max(PAGE_SIZE), client_key));
+                self.current = Some(Collection::loading(target.id, target.want.max(PAGE_SIZE)));
                 true
             }
             CollectionCmd::Close | CollectionCmd::Reset => {
@@ -179,18 +177,8 @@ impl CollectionState {
         }
     }
 
-    fn refresh_if_client_changed(&mut self, adapter: &CollectionAdapter) -> bool {
-        let Some(c) = self.current.as_ref() else { return false };
-        let now = crate::registry::client_for(c.id.sid).map(|x| (x.instance_gen(), x.token_gen()));
-        if now == c.client_key { return false; }
-        let (id, want) = (c.id.clone(), c.want);
-        self.supersede(adapter);
-        self.current = Some(Collection::loading(id, want, now));
-        true
-    }
-
     pub(crate) fn pump_with_gate(&mut self, adapter: &Arc<CollectionAdapter>, gate: &crate::ui::landgate::Gate) -> bool {
-        let mut changed = self.refresh_if_client_changed(adapter);
+        let mut changed = false;
         if self.retry_cd > 0 { self.retry_cd -= 1; }
         let reply = crate::app::bootstrap::stores::take_store_landing(
             gate, crate::stores::StoreId::Collection, "collection", 0, &adapter.fetch);
