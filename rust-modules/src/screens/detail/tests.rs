@@ -188,7 +188,7 @@ fn clear() {
     // empty one — the addressed store cannot MIS-answer, but it can answer for an item a later
     // test happens to reuse the pair of.
     test_store().run(crate::stores::metadata::MetadataCmd::AltInstall {
-        sid: crate::plex::ServerId::UNSET,
+        sid: crate::registry::ServerId::UNSET,
         rk: String::new(),
         copies: Vec::new(),
     });
@@ -1080,9 +1080,9 @@ fn a_pointer_lands_on_the_capsule_the_unfurl_drew() {
 fn hero_action_row_hit_matches_the_drawn_controls_at_every_set_size() {
     let _guard = crate::testlock::serial();
     use crate::ui::hit::{HitMap, PointerKind};
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test("hero-hit-own", "127.0.0.1", 1, "t", "c1");
-    let other = crate::plex::register_for_test("hero-hit-other", "127.0.0.1", 2, "t", "c2");
+    crate::registry::reset_for_test();
+    let sid = crate::registry::register_with_client_id("hero-hit-own", "127.0.0.1", 1, "t", "c1");
+    let other = crate::registry::register_with_client_id("hero-hit-other", "127.0.0.1", 2, "t", "c2");
     let measure = crate::ui::fixture::FixtureMeasure;
     let context = cx(&measure, None);
     let mut sizes = std::collections::BTreeSet::new();
@@ -1195,7 +1195,7 @@ fn hero_action_row_hit_matches_the_drawn_controls_at_every_set_size() {
         assert_eq!(cases, 192);
     }
     clear();
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 /// **A pointer click must not be able to reach the hero row — Play included — while full-trailer
@@ -2023,8 +2023,8 @@ fn leaving_the_page_resets_play_once_state_alongside_the_existing_preview_fields
 #[test]
 fn a_watch_disc_press_emits_an_addressed_viewstate_effect_without_global_apply() {
     let _guard = crate::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test("detail-watch", "127.0.0.1", 1, "t", "c");
+    crate::registry::reset_for_test();
+    let sid = crate::registry::register_with_client_id("detail-watch", "127.0.0.1", 1, "t", "c");
     crate::metadata::set_current_for_test(test_store().state_mut(), Some(Detail {
         sid,
         rk: "movie".into(),
@@ -2053,7 +2053,7 @@ fn a_watch_disc_press_emits_an_addressed_viewstate_effect_without_global_apply()
     assert!(!test_store().view().current().unwrap().watched,
         "the screen must not call the process-global compatibility facade itself");
     clear();
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 #[test]

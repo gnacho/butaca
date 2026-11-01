@@ -288,7 +288,7 @@ pub(super) trait PlaybackResources {
     fn request_episode(&mut self, ps: &mut crate::route::PlaybackSession,
         meta: &mut crate::stores::metadata::MetadataStore, rk: &str) -> bool;
     fn describe_movie(&mut self, meta: &mut crate::stores::metadata::MetadataStore,
-        sid: crate::plex::ServerId, rk: &str);
+        sid: crate::registry::ServerId, rk: &str);
     fn prepare_start(&mut self, ps: &mut crate::route::PlaybackSession,
         pa: &mut crate::player::adapter::PlayerAdapter, resume_ns: i64) -> bool;
 }
@@ -305,7 +305,7 @@ impl PlaybackResources for LivePlaybackResources {
         request_loaded_episode(ps, meta, rk)
     }
     fn describe_movie(&mut self, meta: &mut crate::stores::metadata::MetadataStore,
-        sid: crate::plex::ServerId, rk: &str) {
+        sid: crate::registry::ServerId, rk: &str) {
         meta.run(crate::stores::metadata::MetadataCmd::SetNowPlaying(None));
         meta.run(crate::stores::metadata::MetadataCmd::RequestDetail { sid, rk: rk.to_string() });
     }
@@ -835,7 +835,7 @@ pub(crate) fn play_up_next(
     // the finished episode created, so it lives on that episode's server.
     let sid = bridge.metadata_view().playing()
         .map(|p| p.sid)
-        .unwrap_or_else(crate::plex::current_server);
+        .unwrap_or_else(crate::registry::current);
     bridge.metadata_mut().run(crate::stores::metadata::MetadataCmd::RetirePlaying);
     bridge.metadata_mut().run(crate::stores::metadata::MetadataCmd::RequestDetail { sid: sid, rk: rk.to_string() });
     start_playback(
@@ -971,7 +971,7 @@ fn apply_info_action(
                 // down below.
                 let sid = bridge.metadata_view().playing()
                     .map(|p| p.sid)
-                    .unwrap_or_else(crate::plex::current_server);
+                    .unwrap_or_else(crate::registry::current);
                 exit_player(ps, pa, refresh_hubs_at, pages);
                 // A LANDING, not a navigation, so the page is SHOWN rather than pushed blindly:
                 // the exit above has usually already put this very page on top (the show playback
@@ -1279,7 +1279,7 @@ mod delete_local_data_tests {
 mod player_return_tests {
     use super::super::bridge::{self, AppHost, Bridge};
     use super::{enter_player, return_from_player, Origin};
-    use crate::plex::ServerId;
+    use crate::registry::ServerId;
     use crate::screens::registry::{AppArg, ContentArg, PageMemory};
     use crate::ui::dispatch::Dispatcher;
     use crate::ui::fixture::tick;
@@ -1310,7 +1310,7 @@ mod player_return_tests {
 
     impl Pages {
         fn new() -> Self {
-            crate::plex::reset_servers_for_test();
+            crate::registry::reset_for_test();
             Self {
                 d: Dispatcher::<AppHost>::new(),
                 rig: Bridge::for_test(|| 0),
@@ -1411,7 +1411,7 @@ mod player_return_tests {
                 "…and to the SAME entry, not a second copy of that kind of page",
             );
         }
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     /// A detail return names the SAME ITEM that was mounted — the whole reason the origin was a
@@ -1438,7 +1438,7 @@ mod player_return_tests {
         p.back_out();
         assert_eq!(p.top_entry(), ours, "the exit named the entry that was mounted");
         assert!(p.top().same_instance(&detail(A, "7")));
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     /// **The page comes back at the spot it was left at** — the half the old module could not
@@ -1479,7 +1479,7 @@ mod player_return_tests {
             Some(left_on),
             "…and so did the cursor, which is what the spot is a description of",
         );
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     /// **Up Next must not rewrite the return page.** An auto-advance starts a NEW item while the
@@ -1513,7 +1513,7 @@ mod player_return_tests {
             show,
             "four auto-advances later, still the show page",
         );
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     /// **The push is the product's dip, and the player is asked for twice inside it** — once by
@@ -1551,7 +1551,7 @@ mod player_return_tests {
             None,
             "an unseeded player mount inherits no origin from the earlier session",
         );
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     /// **An origin that is no longer on the stack falls back to Home** — the anti-strand floor
@@ -1598,7 +1598,7 @@ mod player_return_tests {
             "a stranded return lands on Home rather than on nothing: {:?}",
             p.top().id(),
         );
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     #[test]
@@ -1615,7 +1615,7 @@ mod player_return_tests {
         p.back_out();
         assert_eq!(p.top_entry(), before, "a GUID is sufficient identity for the retained Person");
         assert!(p.top().same_instance(&arg));
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     /// A live content entry carrying no item/person identity is not the stale-entry case. The
@@ -1640,6 +1640,6 @@ mod player_return_tests {
             p.back_out();
             assert!(matches!(p.top(), AppArg::Home));
         }
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 }

@@ -743,7 +743,7 @@ mod review_actions_tests;
 mod tests {
     use super::*;
     use crate::browse::{SecKind, SourceState};
-    use crate::plex::ServerId;
+    use crate::registry::ServerId;
     use crate::ui::fixture::FixtureMeasure;
     use crate::ui::machine::{FocusRead, Host, InputOwner, PressRead, Tick};
     use crate::ui::screen::ScreenArg;

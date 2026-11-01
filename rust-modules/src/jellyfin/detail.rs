@@ -19,7 +19,7 @@
 use super::client::JfClient;
 use super::dto::{BaseItemDto, MediaSourceDto, PersonDto};
 use crate::metadata::{Cast, Chapter, Detail, Dovi, Episode, Season, Stream};
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 
 /// The whole detail fetch for one item — `metadata::fetch_full`'s Jellyfin arm. `None` is the
 /// same contract as there: the page keeps what it had (or, mounted fresh, the catalog row's

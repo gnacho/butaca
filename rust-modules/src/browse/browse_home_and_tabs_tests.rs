@@ -1239,22 +1239,22 @@ fn a_home_roster_arriving_late_re_resolves_the_pin_table() {
     struct Fresh(#[allow(dead_code)] crate::testlock::Serial);
     impl Drop for Fresh {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::registry::reset_for_test();
         }
     }
     let _g = Fresh(crate::testlock::serial());
     let t = TempPins::new("late-roster");
     t.watching("u-managed");
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 
     // Both grants arrive `owned:false` — the family server included, which is what plex.tv tells
     // a managed profile. `home:false` on both, because this account is a Plex Home admin's and
     // that flag was measured `false` on every grant it has; `ownerId` is the whole signal.
-    let house = crate::plex::register_for_test("mac-mini", "127.0.0.1", 41001, "tok", "cid");
-    let friend = crate::plex::register_for_test("nas-home", "127.0.0.1", 41002, "tok", "cid");
-    let grant = |owner_id| crate::plex::GrantEvidence { owned: false, home: false, owner_id };
-    crate::plex::describe_server(house, "Mac mini", "", grant(ADMIN_ID));
-    crate::plex::describe_server(friend, "nas-home", "friend", grant(ADMIN_ID + 1));
+    let house = crate::registry::register_with_client_id("mac-mini", "127.0.0.1", 41001, "tok", "cid");
+    let friend = crate::registry::register_with_client_id("nas-home", "127.0.0.1", 41002, "tok", "cid");
+    let grant = |owner_id| crate::registry::GrantEvidence { owned: false, home: false, owner_id };
+    crate::registry::describe(house, "Mac mini", "", grant(ADMIN_ID));
+    crate::registry::describe(friend, "nas-home", "friend", grant(ADMIN_ID + 1));
 
     let mut browse = TestBrowse::default();
     browse.sync_roster();

@@ -60,8 +60,8 @@ impl Live {
     fn start_with_parts(mode: EnhMode, media_bytes: usize, parts: PartAnswer) -> Self {
         assert!(crate::net::global_init() && crate::curlio::available());
         let (port, done, server) = enhancement_pms_parts(MDE_DIRECTPLAY, mode, media_bytes, parts);
-        let sid = crate::plex::register_for_test("enh-live", "127.0.0.1", port, "token", "enh-client");
-        crate::plex::client_for(sid).unwrap().set_link(crate::plex::probe::Location::Local);
+        let sid = crate::registry::register_with_client_id("enh-live", "127.0.0.1", port, "token", "enh-client");
+        crate::registry::client_for(sid).unwrap().set_link(crate::plex::probe::Location::Local);
         crate::plex::serverinfo::store_for_test(sid, Subscription::Yes, "1.43.4");
         Live { sid, port, done, server }
     }
@@ -70,7 +70,7 @@ impl Live {
     fn finish(self) -> Vec<String> {
         self.done.send(()).unwrap();
         let requests = self.server.join().unwrap();
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
         requests
     }
 }

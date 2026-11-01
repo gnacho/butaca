@@ -4,7 +4,7 @@
 
 use crate::collection::{CollectionStatus, CollectionTarget};
 use crate::collection::CollectionRef;
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 use crate::stores::collection::CollectionCmd;
 
 fn open(store: &mut crate::stores::collection::CollectionStore, rk: &str) {

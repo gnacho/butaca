@@ -88,13 +88,13 @@ pub(super) struct Fresh(#[allow(dead_code)] crate::testlock::Serial);
 
 impl Drop for Fresh {
     fn drop(&mut self) {
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 }
 
 pub(super) fn fresh() -> Fresh {
     let g = crate::testlock::serial();
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     Fresh(g)
 }
 
@@ -113,7 +113,7 @@ pub(super) fn hold_off(owner: &mut Owner) {
 /// public `register`: the latter mints and PERSISTS a device uuid.
 pub(super) fn register(owner: &mut Owner, n: usize) {
     for i in 0..n {
-        crate::plex::register_for_test(
+        crate::registry::register_with_client_id(
             &format!("search-test-{i}"),
             "127.0.0.1",
             1,
@@ -124,7 +124,7 @@ pub(super) fn register(owner: &mut Owner, n: usize) {
     // Test setup finishes before any seeded mailbox/status. Production learns this boundary
     // from its first pump; fixtures that inject a landing directly must mark the just-built
     // roster as already observed so that first pump grades the landing rather than setup.
-    owner.state.visible = crate::plex::server_roster_gen();
+    owner.state.visible = crate::registry::roster_gen();
     assert_eq!(nsrc(), n);
 }
 

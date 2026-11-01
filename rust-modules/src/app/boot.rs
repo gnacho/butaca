@@ -453,14 +453,14 @@ mod replay_budget_tests {
 /// to one PMS, so falling back could open a different item on another server.
 pub(crate) fn resolve_direct_server(
     requested: Option<Result<u16, String>>,
-    current: crate::plex::ServerId,
-    registered: impl Fn(crate::plex::ServerId) -> bool,
-) -> Result<crate::plex::ServerId, String> {
+    current: crate::registry::ServerId,
+    registered: impl Fn(crate::registry::ServerId) -> bool,
+) -> Result<crate::registry::ServerId, String> {
     let Some(slot) = requested else {
         return Ok(current);
     };
     let raw = slot?;
-    let sid = crate::plex::ServerId::from_raw(raw);
+    let sid = crate::registry::ServerId::from_raw(raw);
     registered(sid)
         .then_some(sid)
         .ok_or_else(|| format!("server slot {raw} is not registered"))
@@ -475,8 +475,8 @@ mod direct_server_tests {
 
     #[test]
     fn an_explicit_direct_screen_server_never_falls_back_to_current() {
-        let current = crate::plex::ServerId::from_raw(0);
-        let secondary = crate::plex::ServerId::from_raw(1);
+        let current = crate::registry::ServerId::from_raw(0);
+        let secondary = crate::registry::ServerId::from_raw(1);
         assert_eq!(
             resolve_direct_server(None, current, |_| false),
             Ok(current),
@@ -496,11 +496,11 @@ mod direct_server_tests {
     }
 }
 
-pub(crate) fn direct_trigger_server() -> Result<crate::plex::ServerId, String> {
+pub(crate) fn direct_trigger_server() -> Result<crate::registry::ServerId, String> {
     resolve_direct_server(
         crate::dev::server_slot(),
-        crate::plex::current_server(),
-        |sid| crate::plex::client_for(sid).is_some(),
+        crate::registry::current(),
+        |sid| crate::registry::client_for(sid).is_some(),
     )
 }
 

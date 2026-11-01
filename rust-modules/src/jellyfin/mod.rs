@@ -78,7 +78,7 @@ pub(crate) use client::{AuthError, AuthOk, JfClient};
 pub(crate) use convert::{boxset_from_dto, movie_from_dto};
 pub(crate) use dto::{BaseItemDto, ItemsResult, ViewDto};
 
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 
 /// The registry slot the PoC's one Jellyfin server answers to. Jellyfin item ids are GUIDs and
 /// cannot collide with a Plex ratingKey the way two Plex servers' integer keys do, but the row

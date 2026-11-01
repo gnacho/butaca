@@ -10,11 +10,11 @@ use super::test_support::land;
 fn request_addresses_do_not_alias_across_sources_or_profile_resets() {
     let _g = crate::testlock::serial();
     let mut o = Owner::default();
-    crate::plex::reset_servers_for_test();
-    let a_sid = crate::plex::register_for_test("request-a", "a.invalid", 32400, "test", "cid");
-    let b_sid = crate::plex::register_for_test("request-b", "b.invalid", 32400, "test", "cid");
-    let ca = crate::plex::client_for(a_sid).unwrap();
-    let cb = crate::plex::client_for(b_sid).unwrap();
+    crate::registry::reset_for_test();
+    let a_sid = crate::registry::register_with_client_id("request-a", "a.invalid", 32400, "test", "cid");
+    let b_sid = crate::registry::register_with_client_id("request-b", "b.invalid", 32400, "test", "cid");
+    let ca = crate::registry::client_for(a_sid).unwrap();
+    let cb = crate::registry::client_for(b_sid).unwrap();
     let mut first = Src::new(a_sid, String::new());
     let mut second = Src::new(b_sid, String::new());
     let mint = || o.adapter.next_request.fetch_add(1, Ordering::Relaxed);
@@ -32,7 +32,7 @@ fn request_addresses_do_not_alias_across_sources_or_profile_resets() {
     ids.sort_unstable();
     ids.dedup();
     assert_eq!(ids.len(), 4);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 /// A refused spawn and a failed landing both arm the backoff ladder, and a failed landing
@@ -41,14 +41,14 @@ fn request_addresses_do_not_alias_across_sources_or_profile_resets() {
 fn refused_and_failed_landings_arm_the_backoff_and_retain_the_catalog() {
     let _g = crate::testlock::serial();
     let mut o = Owner::default();
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     reset(&mut o.state, &o.adapter);
     let mut missing = Src::new(sid(0), String::new());
     kick_with(o.state.hub_gen, &o.adapter, &mut missing, |_| panic!("missing client cannot spawn"));
     assert_eq!(missing.state, HubState::Failed);
     assert_eq!(missing.retry_s, RETRY_MIN_S);
 
-    let id = crate::plex::register_for_test("endpoint-hub", "127.0.0.1", 9, "synthetic", "cid");
+    let id = crate::registry::register_with_client_id("endpoint-hub", "127.0.0.1", 9, "synthetic", "cid");
     let mut s = Src::new(id, String::new());
     kick_with(o.state.hub_gen, &o.adapter, &mut s, |_| false);
     assert!(!s.fetching);
@@ -60,16 +60,16 @@ fn refused_and_failed_landings_arm_the_backoff_and_retain_the_catalog() {
     assert!(!outcome.changed, "a failed landing retains the last successful catalog");
     assert_eq!(o.state.srcs[0].retry_n, 2);
     reset(&mut o.state, &o.adapter);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 #[test]
 fn a_prepared_request_keeps_its_original_context_without_running_an_adapter() {
     let _g = crate::testlock::serial();
     let mut o = Owner::default();
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test("request", "old.invalid", 32400, "old", "cid");
-    let client = crate::plex::client_for(sid).unwrap();
+    crate::registry::reset_for_test();
+    let sid = crate::registry::register_with_client_id("request", "old.invalid", 32400, "old", "cid");
+    let client = crate::registry::client_for(sid).unwrap();
     let token_gen = client.token_gen();
     let mut source = Src::new(sid, String::new());
     source.last = Some(build_test(2));
@@ -85,7 +85,7 @@ fn a_prepared_request_keeps_its_original_context_without_running_an_adapter() {
     assert_eq!(source.last.as_ref().unwrap().shelves[0].items.len(), 2);
     assert_eq!(source.seq, 23);
     client.set_token("new");
-    assert_eq!(crate::plex::register_for_test("request", "new.invalid", 32400, "new", "cid"), sid);
+    assert_eq!(crate::registry::register_with_client_id("request", "new.invalid", 32400, "new", "cid"), sid);
     reset(&mut o.state, &o.adapter); // a different account epoch must not retag the request already handed out
     assert_ne!(o.state.hub_gen, generation);
     let result = request.complete(None);
@@ -97,7 +97,7 @@ fn a_prepared_request_keeps_its_original_context_without_running_an_adapter() {
     };
     assert!(std::ptr::eq(resource, client));
     assert!(result.build.is_none(), "a failed request is not an empty success");
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 #[test]
@@ -169,16 +169,16 @@ fn a_captured_batch_is_still_rejected_after_an_identity_reset() {
 #[test]
 fn a_same_slot_repoint_drops_the_old_flight_and_rearms_home() {
     let _g = crate::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test("home-life", "10.0.0.1", 32400, "old", "cid");
-    let old = crate::plex::client_for(sid).unwrap();
+    crate::registry::reset_for_test();
+    let sid = crate::registry::register_with_client_id("home-life", "10.0.0.1", 32400, "old", "cid");
+    let old = crate::registry::client_for(sid).unwrap();
     let old_gen = old.token_gen();
     let mut s = Src::new(sid, String::new());
     s.state = HubState::Ready;
     s.fetching = true;
     s.last = Some(build_test(2));
     assert_eq!(
-        crate::plex::register_for_test("home-life", "10.0.0.2", 32400, "new", "cid"),
+        crate::registry::register_with_client_id("home-life", "10.0.0.2", 32400, "new", "cid"),
         sid
     );
 
@@ -189,9 +189,9 @@ fn a_same_slot_repoint_drops_the_old_flight_and_rearms_home() {
         s.last.is_some(),
         "old shelves remain until the fresh lifecycle answers"
     );
-    assert!(!crate::plex::client_for(sid)
+    assert!(!crate::registry::client_for(sid)
         .is_some_and(|now| { std::ptr::eq(now, old) && now.token_gen() == old_gen }));
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 #[test]

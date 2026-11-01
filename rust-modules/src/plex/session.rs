@@ -2792,8 +2792,8 @@ mod cache_timing_tests {
         let _serial = crate::testlock::serial();
         let _session = test_support::TempSession::new("register-frame-no-load");
         let _frame = crate::task::FrameScope::enter();
-        crate::plex::register_origin("frame-client", &crate::plex::Origin::http("127.0.0.1", 32400),
-            "", None, crate::plex::ConnectionFacts::default());
+        crate::registry::register_origin("frame-client", &crate::plex::Origin::http("127.0.0.1", 32400),
+            "", None, crate::registry::ConnectionFacts::default());
     }
 
     #[test]

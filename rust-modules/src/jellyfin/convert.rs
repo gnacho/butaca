@@ -15,7 +15,7 @@
 //! under a key that no longer names the current image.
 
 use super::dto::BaseItemDto;
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 use crate::pms::PmsMovie;
 use std::os::raw::c_int;
 

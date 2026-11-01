@@ -38,7 +38,7 @@ impl LibraryScreen {
     pub(super) fn watch_plaintext<H: LibraryLike>(&mut self, cx: &Cx<'_, H>) {
         use super::super::plaintext_question::{asks, Near};
         let machine = (self.readout == Readout::Failed)
-            .then(|| H::directory(cx).source().and_then(|(sid, _)| crate::plex::client_for(*sid)))
+            .then(|| H::directory(cx).source().and_then(|(sid, _)| crate::registry::client_for(*sid)))
             .flatten()
             .map(|client| client.machine_id());
         self.plaintext.refresh(machine, Near::Only);

@@ -6,7 +6,7 @@
 //! the other Search publications. Registry counters are the cheap first gate; the cached exact
 //! Browse projection distinguishes independent owners whose local generations happen to match.
 
-use crate::plex::{ServerId, MAX_SERVERS};
+use crate::registry::{ServerId, MAX_SERVERS};
 use std::cell::RefCell;
 use std::sync::Arc;
 
@@ -26,7 +26,7 @@ pub(crate) struct ScopeSource {
     /// plex.tv's `ownerId` on the grant, carried from the registry's `ServerFacts`. Evidence for
     /// [`household`](Self::household).
     pub(crate) owner_id: i64,
-    /// **Is this our household's server?** — [`crate::plex::is_household`] on the evidence above
+    /// **Is this our household's server?** — [`crate::registry::is_household`] on the evidence above
     /// plus the Plex Home roster, cached at publication like every other fact here.
     ///
     /// Search is grant-scoped and does not filter on it (`plex/CLAUDE.md`: a browsing preference
@@ -143,16 +143,16 @@ fn read_key() -> Key {
     let mut roster = [ServerId::UNSET; MAX_SERVERS];
     let mut facts = [0; MAX_SERVERS];
     let mut roster_len = 0;
-    for (i, sid) in crate::plex::server_ids().enumerate().take(MAX_SERVERS) {
+    for (i, sid) in crate::registry::ids().enumerate().take(MAX_SERVERS) {
         roster[i] = sid;
-        facts[i] = crate::plex::server_facts(sid).map_or(0, |f| std::ptr::from_ref(f) as usize);
+        facts[i] = crate::registry::facts(sid).map_or(0, |f| std::ptr::from_ref(f) as usize);
         roster_len += 1;
     }
     Key {
-        roster_gen: crate::plex::server_roster_gen(),
+        roster_gen: crate::registry::roster_gen(),
         roster_len,
         roster,
-        facts_gen: crate::plex::server_facts_gen(),
+        facts_gen: crate::registry::facts_gen(),
         facts,
         sections_gen: 0,
         source_list_gen: 0,
@@ -173,16 +173,16 @@ fn read_registry_key() -> Key {
     let mut roster = [ServerId::UNSET; MAX_SERVERS];
     let mut facts = [0; MAX_SERVERS];
     let mut roster_len = 0;
-    for (i, sid) in crate::plex::server_ids().enumerate().take(MAX_SERVERS) {
+    for (i, sid) in crate::registry::ids().enumerate().take(MAX_SERVERS) {
         roster[i] = sid;
-        facts[i] = crate::plex::server_facts(sid).map_or(0, |f| std::ptr::from_ref(f) as usize);
+        facts[i] = crate::registry::facts(sid).map_or(0, |f| std::ptr::from_ref(f) as usize);
         roster_len += 1;
     }
     Key {
-        roster_gen: crate::plex::server_roster_gen(),
+        roster_gen: crate::registry::roster_gen(),
         roster_len,
         roster,
-        facts_gen: crate::plex::server_facts_gen(),
+        facts_gen: crate::registry::facts_gen(),
         facts,
         sections_gen: 0,
         source_list_gen: 0,
@@ -239,25 +239,25 @@ impl ScopeCache {
 /// third-party evidence, which is not a guess — the only registration that does not describe is
 /// the session path, whose server is the account's own.
 fn grant_of(
-    facts: Option<&'static crate::plex::ServerFacts>,
+    facts: Option<&'static crate::registry::ServerFacts>,
     registered_first: bool,
-) -> crate::plex::GrantEvidence {
+) -> crate::registry::GrantEvidence {
     match facts {
-        Some(f) => crate::plex::GrantEvidence {
+        Some(f) => crate::registry::GrantEvidence {
             owned: f.owned,
             home: f.home,
             owner_id: f.owner_id,
         },
-        None => crate::plex::GrantEvidence { owned: registered_first, home: false, owner_id: 0 },
+        None => crate::registry::GrantEvidence { owned: registered_first, home: false, owner_id: 0 },
     }
 }
 
 fn build() -> SourceScopeSnapshot {
-    let first = crate::plex::server_ids().next();
+    let first = crate::registry::ids().next();
     let household = crate::plex::session::peek().household_ids();
-    let sources = crate::plex::server_ids()
+    let sources = crate::registry::ids()
         .map(|sid| {
-            let facts = crate::plex::server_facts(sid);
+            let facts = crate::registry::facts(sid);
             // Registration order is the only honest ownership answer before the roster has
             // described a slot; the session server is registered first.
             let grant = grant_of(facts, Some(sid) == first);
@@ -269,7 +269,7 @@ fn build() -> SourceScopeSnapshot {
                 owned: grant.owned,
                 home: grant.home,
                 owner_id: grant.owner_id,
-                household: crate::plex::is_household(grant.grant(), &household),
+                household: crate::registry::is_household(grant.grant(), &household),
                 // A browse source that has not been adopted has not failed yet.
                 live: true,
             }
@@ -283,10 +283,10 @@ fn build() -> SourceScopeSnapshot {
 fn build_with_directory(
     directory: crate::stores::browse::DirectoryView<'_>,
 ) -> SourceScopeSnapshot {
-    let first = crate::plex::server_ids().next();
+    let first = crate::registry::ids().next();
     let household = crate::plex::session::peek().household_ids();
-    let sources = crate::plex::server_ids().map(|sid| {
-        let facts = crate::plex::server_facts(sid);
+    let sources = crate::registry::ids().map(|sid| {
+        let facts = crate::registry::facts(sid);
         let grant = grant_of(facts, Some(sid) == first);
         ScopeSource {
             sid,
@@ -296,7 +296,7 @@ fn build_with_directory(
             owned: grant.owned,
             home: grant.home,
             owner_id: grant.owner_id,
-            household: crate::plex::is_household(grant.grant(), &household),
+            household: crate::registry::is_household(grant.grant(), &household),
             live: directory.sources().iter().find(|source| source.0 == sid)
                 .map(|source| source.1.reachable()).unwrap_or(true),
         }
@@ -313,9 +313,9 @@ mod tests {
         let _serial = crate::testlock::serial();
         let _reset = Reset;
         let _session = crate::plex::session::TempSession::new("scope-session-refresh");
-        crate::plex::reset_servers_for_test();
-        let sid = crate::plex::register_for_test("scope-house", "127.0.0.1", 9, "t", "scope");
-        crate::plex::describe_server(sid, "Synthetic house", "", crate::plex::GrantEvidence {
+        crate::registry::reset_for_test();
+        let sid = crate::registry::register_with_client_id("scope-house", "127.0.0.1", 9, "t", "scope");
+        crate::registry::describe(sid, "Synthetic house", "", crate::registry::GrantEvidence {
             owned: false, home: false, owner_id: 123,
         });
         crate::plex::session::install_transient_for_test(true);
@@ -357,13 +357,13 @@ mod tests {
             }],
             ..Default::default()
         });
-        crate::plex::reset_servers_for_test();
-        let house = crate::plex::register_for_test("scope-house", "127.0.0.1", 1, "t", "scope");
-        let share = crate::plex::register_for_test("scope-share", "127.0.0.1", 2, "t", "scope");
-        crate::plex::describe_server(house, "Mac mini", "", crate::plex::GrantEvidence {
+        crate::registry::reset_for_test();
+        let house = crate::registry::register_with_client_id("scope-house", "127.0.0.1", 1, "t", "scope");
+        let share = crate::registry::register_with_client_id("scope-share", "127.0.0.1", 2, "t", "scope");
+        crate::registry::describe(house, "Mac mini", "", crate::registry::GrantEvidence {
             owned: false, home: true, owner_id: ADMIN_ID,
         });
-        crate::plex::describe_server(share, "nas-home", "friend", crate::plex::GrantEvidence {
+        crate::registry::describe(share, "nas-home", "friend", crate::registry::GrantEvidence {
             owned: false, home: false, owner_id: FRIEND_ID,
         });
 
@@ -380,8 +380,8 @@ mod tests {
     fn source_scope_uses_the_supplied_directory_instead_of_browse_globals() {
         let _serial = crate::testlock::serial();
         let _reset = Reset;
-        crate::plex::reset_servers_for_test();
-        let sid = crate::plex::register_for_test(
+        crate::registry::reset_for_test();
+        let sid = crate::registry::register_with_client_id(
             "retained-machine", "127.0.0.1", 9, "retained", "scope");
         let directory = crate::stores::browse::DirectorySnapshot::fixture(3, 0, vec![
             crate::stores::browse::SectionView {
@@ -408,8 +408,8 @@ mod tests {
     fn equal_generation_browse_owners_publish_their_own_search_scope() {
         let _serial = crate::testlock::serial();
         let _reset = Reset;
-        crate::plex::reset_servers_for_test();
-        let sid = crate::plex::register_for_test(
+        crate::registry::reset_for_test();
+        let sid = crate::registry::register_with_client_id(
             "equal-generation-scope", "127.0.0.1", 9, "synthetic", "scope");
         let directory = |title: &str| crate::stores::browse::DirectorySnapshot::fixture(
             7,
@@ -456,8 +456,8 @@ mod tests {
     fn two_owners_do_not_share_the_scope_memo() {
         let _serial = crate::testlock::serial();
         let _reset = Reset;
-        crate::plex::reset_servers_for_test();
-        let sid = crate::plex::register_for_test(
+        crate::registry::reset_for_test();
+        let sid = crate::registry::register_with_client_id(
             "shared-key-scope", "127.0.0.1", 9, "shared", "scope");
         let directory = |title: &str| crate::stores::browse::DirectorySnapshot::fixture(4, 0, vec![
             crate::stores::browse::SectionView {
@@ -500,7 +500,7 @@ mod tests {
 
     impl Drop for Reset {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::registry::reset_for_test();
             crate::plex::session::publish_profile_for_test(None,
                 crate::plex::session::current_gen().wrapping_add(1));
         }
@@ -512,10 +512,10 @@ mod tests {
         ServerId,
         ServerId,
     ) {
-        crate::plex::reset_servers_for_test();
-        let own = crate::plex::register_for_test("own-machine", "127.0.0.1", 1, "own", "scope");
+        crate::registry::reset_for_test();
+        let own = crate::registry::register_with_client_id("own-machine", "127.0.0.1", 1, "own", "scope");
         let share =
-            crate::plex::register_for_test("share-machine", "127.0.0.1", 2, "share", "scope");
+            crate::registry::register_with_client_id("share-machine", "127.0.0.1", 2, "share", "scope");
         let stores = crate::stores::Stores::default();
         stores.browse.borrow_mut().seed_registered_table_for_test([own, share]);
         let mut directory = crate::stores::browse::DirectorySnapshot::default();
@@ -540,7 +540,7 @@ mod tests {
         assert!(!old.sources()[1].owned);
         assert!(old.sources()[0].live && old.sources()[1].live);
 
-        crate::plex::describe_server(share, "renamed-share", "new-friend", crate::plex::GrantEvidence::outside());
+        crate::registry::describe(share, "renamed-share", "new-friend", crate::registry::GrantEvidence::outside());
         stores.browse.borrow_mut().append_section_for_test(
             1, 9, "Archive", crate::browse::SecKind::Movie);
         stores.capture_browse(&mut directory);
@@ -568,8 +568,8 @@ mod tests {
     fn source_addition_publishes_a_new_roster_projection() {
         let _serial = crate::testlock::serial();
         let _reset = Reset;
-        crate::plex::reset_servers_for_test();
-        let own = crate::plex::register_for_test("own-machine", "127.0.0.1", 1, "own", "scope");
+        crate::registry::reset_for_test();
+        let own = crate::registry::register_with_client_id("own-machine", "127.0.0.1", 1, "own", "scope");
         let stores = crate::stores::Stores::default();
         stores.browse.borrow_mut().seed_sources_for_test(1, true);
         let mut directory = crate::stores::browse::DirectorySnapshot::default();
@@ -578,7 +578,7 @@ mod tests {
         let old = cache.snapshot_with_directory(directory.view());
 
         let share =
-            crate::plex::register_for_test("share-machine", "127.0.0.1", 2, "share", "scope");
+            crate::registry::register_with_client_id("share-machine", "127.0.0.1", 2, "share", "scope");
         let next = cache.snapshot_with_directory(directory.view());
 
         assert_eq!(old.sources().len(), 1);
@@ -612,7 +612,7 @@ mod tests {
         let before = read_key_with_directory(directory.view());
         assert!(old.sources().iter().all(|source| source.live));
 
-        crate::plex::describe_server(share, "renamed-share", "new-friend", crate::plex::GrantEvidence::outside());
+        crate::registry::describe(share, "renamed-share", "new-friend", crate::registry::GrantEvidence::outside());
         let described = cache.snapshot_with_directory(directory.view());
         let after = read_key_with_directory(directory.view());
         assert!(!old.same_publication(&described), "a described source is a new sentence");
@@ -642,10 +642,10 @@ mod tests {
         let cache = ScopeCache::default();
         let old = cache.snapshot_with_directory(directory.view());
 
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
         let replacement =
-            crate::plex::register_for_test("replacement", "127.0.0.1", 3, "replacement", "scope");
-        let other = crate::plex::register_for_test("other", "127.0.0.1", 4, "other", "scope");
+            crate::registry::register_with_client_id("replacement", "127.0.0.1", 3, "replacement", "scope");
+        let other = crate::registry::register_with_client_id("other", "127.0.0.1", 4, "other", "scope");
         assert_ne!(old_share, replacement);
         stores.browse_run(crate::stores::browse::BrowseCmd::Reset);
         stores.capture_browse(&mut directory);

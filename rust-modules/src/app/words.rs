@@ -68,7 +68,7 @@ pub(crate) fn route_word(route: &AppArg) -> &'static str {
 #[cfg(test)]
 pub(crate) fn every_route() -> [AppArg; 9] {
     use crate::screens::registry::ContentArg;
-    let sid = crate::plex::ServerId::UNSET;
+    let sid = crate::registry::ServerId::UNSET;
     [
         AppArg::Login,
         AppArg::Onboard,

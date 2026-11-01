@@ -2177,15 +2177,15 @@ mod tests {
         struct Cleanup;
         impl Drop for Cleanup {
             fn drop(&mut self) {
-                crate::plex::reset_servers_for_test();
+                crate::registry::reset_for_test();
             }
         }
-        crate::plex::reset_servers_for_test();
-        let own = crate::plex::register_for_test(
+        crate::registry::reset_for_test();
+        let own = crate::registry::register_with_client_id(
             "recorder-owned", "127.0.0.1", 9, "synthetic", "fixture");
-        let shared = crate::plex::register_for_test(
+        let shared = crate::registry::register_with_client_id(
             "recorder-shared", "127.0.0.1", 10, "synthetic", "fixture");
-        crate::plex::set_current(own);
+        crate::registry::set_current(own);
         let _cleanup = Cleanup;
         let mut rig = super::super::bridge::Bridge::for_test(|| 0);
         rig.seed_registered_browse_for_test([own, shared]);

@@ -1607,7 +1607,7 @@ mod enhancement_menu_tests {
 
     fn teardown(ps: &crate::route::PlaybackSession) {
         reset_player_control_for_test(ps);
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     // ---- absent: I1-I7 ---------------------------------------------------------------------

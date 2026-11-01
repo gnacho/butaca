@@ -370,8 +370,8 @@ fn a_session_written_before_household_evidence_falls_back_to_raw_owned() {
     assert_eq!(household, [111_111], "the roster is unaffected by the source shape");
     for source in &s.sources {
         assert_eq!(
-            crate::plex::is_household(
-                crate::plex::GrantEvidence {
+            crate::registry::is_household(
+                crate::registry::GrantEvidence {
                     owned: source.owned, home: source.home, owner_id: source.owner_id,
                 }
                 .grant(),

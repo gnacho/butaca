@@ -146,7 +146,7 @@ pub struct HeroLogo<'a> {
     /// server that holds the item, and `rk` names an item on that machine alone — resolving it
     /// against whichever server is current drew no logo at all for a borrowed hero, which is how
     /// this was reported ("detail page does not show logo image").
-    sid: crate::plex::ServerId,
+    sid: crate::registry::ServerId,
     title: &'a str,
     rung: LogoRung,
     align: HAlign,
@@ -156,7 +156,7 @@ impl<'a> HeroLogo<'a> {
     /// `rk` is the ratingKey whose clearLogo to draw — for an episode hero that is the SHOW's
     /// (episodes have no clearLogo asset; keying to the episode 404s straight into a text fallback
     /// of the wrong title). `title` is the run drawn when there is no logo.
-    pub fn new(sid: crate::plex::ServerId, rk: &'a str, title: &'a str, rung: LogoRung) -> Self {
+    pub fn new(sid: crate::registry::ServerId, rk: &'a str, title: &'a str, rung: LogoRung) -> Self {
         Self {
             rk,
             sid,

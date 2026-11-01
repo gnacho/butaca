@@ -1287,7 +1287,7 @@ fn abandoned_resolves_retire_the_streaming_resources_they_created() {
         }
         tx.send(requests).unwrap();
     });
-    let sid = crate::plex::register_for_test(
+    let sid = crate::registry::register_with_client_id(
         "stale-resolve",
         "127.0.0.1",
         port,
@@ -1351,7 +1351,7 @@ fn abandoned_resolves_retire_the_streaming_resources_they_created() {
         assert!(request.contains("closeResourceSession=1"), "{request}");
     }
 
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     reset_session(&mut ps);
 }
 
@@ -1641,7 +1641,7 @@ fn source_probe_reuses_live_hls_resource_instead_of_entering_adhoc_mde() {
         write_partial(&mut socket, probe_bytes);
     });
 
-    let sid = crate::plex::register_for_test(
+    let sid = crate::registry::register_with_client_id(
         "probe-lifecycle",
         "127.0.0.1",
         port,
@@ -1701,7 +1701,7 @@ fn source_probe_reuses_live_hls_resource_instead_of_entering_adhoc_mde() {
 
     server.join().unwrap();
     install_active_encoder("");
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     reset_session(&mut ps);
 }
 
@@ -1741,7 +1741,7 @@ fn a_rejected_original_probe_keeps_hls_and_produces_no_capacity_observation() {
             .expect("server refusal");
     });
 
-    let sid = crate::plex::register_for_test(
+    let sid = crate::registry::register_with_client_id(
         "probe-bodyless",
         "127.0.0.1",
         port,
@@ -1788,7 +1788,7 @@ fn a_rejected_original_probe_keeps_hls_and_produces_no_capacity_observation() {
 
     server.join().unwrap();
     install_active_encoder("");
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     reset_session(&mut ps);
 }
 
@@ -1827,7 +1827,7 @@ fn a_source_sample_from_a_superseded_hls_resource_is_discarded() {
         write_partial(&mut socket, probe_bytes);
     });
 
-    let sid = crate::plex::register_for_test(
+    let sid = crate::registry::register_with_client_id(
         "probe-stale",
         "127.0.0.1",
         port,
@@ -1871,7 +1871,7 @@ fn a_source_sample_from_a_superseded_hls_resource_is_discarded() {
 
     server.join().unwrap();
     install_active_encoder("");
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     reset_session(&mut ps);
 }
 
@@ -1930,14 +1930,14 @@ fn cold_source_preflight_uses_the_playback_identity_and_does_not_close_it() {
         tx.send(requests).expect("publish cold request set");
     });
 
-    let sid = crate::plex::register_for_test(
+    let sid = crate::registry::register_with_client_id(
         "probe-cold",
         "127.0.0.1",
         port,
         "tok",
         "cid-probe-cold",
     );
-    let client = crate::plex::client_for(sid).expect("test server installed");
+    let client = crate::registry::client_for(sid).expect("test server installed");
     let url = client
         .direct_play_url("/library/parts/1/file.mkv", "cold-logical")
         .to_url();
@@ -1963,7 +1963,7 @@ fn cold_source_preflight_uses_the_playback_identity_and_does_not_close_it() {
     );
 
     server.join().unwrap();
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     reset_session(&mut ps);
 }
 
@@ -2080,7 +2080,7 @@ fn the_preview_tells_a_container_remux_apart_from_a_re_encode() {
 #[test]
 fn on_deck_hevc_p5_preview_uses_the_selected_episodes_codec() {
     // `playback_preview_with_capability_for_test` reads the process-global quality ceiling
-    // (`quality()`) and the server registry (`crate::plex::client_for`), same as
+    // (`quality()`) and the server registry (`crate::registry::client_for`), same as
     // `the_preview_tells_a_container_remux_apart_from_a_re_encode` above it. Without this guard
     // another thread's test can move either between the two assertions below and flip
     // DirectPlay/Converts out from under this one — see `crate::testlock` for why the lock (not a

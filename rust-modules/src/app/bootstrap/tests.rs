@@ -145,9 +145,9 @@ fn normal_and_controlled_activation_publish_the_owner_supplied_scope() {
     session.assert_only_target();
     let before = std::fs::read(session.path()).unwrap();
     struct RegistryCleanup;
-    impl Drop for RegistryCleanup { fn drop(&mut self) { crate::plex::reset_servers_for_test(); } }
+    impl Drop for RegistryCleanup { fn drop(&mut self) { crate::registry::reset_for_test(); } }
     let _cleanup = RegistryCleanup;
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     let mt = unsafe { crate::task::MainThread::assume() };
     let initial = Initial::synthetic_home(19,9,None).unwrap();
     let mut live = super::super::bridge::Bridge::new(
@@ -158,7 +158,7 @@ fn normal_and_controlled_activation_publish_the_owner_supplied_scope() {
     assert_eq!(live_view.generation,live_owner.profile_scope.0);
     assert_ne!(live_view.generation,0);
     let ambient = crate::plex::session::current_snapshot();
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     crate::plex::Client::restore_generation_seed(initial.primary_client).unwrap();
     let mut controlled = super::super::bridge::Bridge::controlled_home(||0,&initial,&mt,true);
     let retained = controlled.profile_resource_view().unwrap();
@@ -191,7 +191,7 @@ fn normal_and_controlled_activation_publish_the_owner_supplied_scope() {
 #[test]
 fn controlled_home_arms_the_detail_tracker_when_content_initial_is_present() {
     let _serial = crate::testlock::serial();
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     let mt = unsafe { crate::task::MainThread::assume() };
     let mut initial = Initial::synthetic_home(41, 17, None).unwrap();
     initial.content = Some(ContentInitial {
@@ -201,7 +201,7 @@ fn controlled_home_arms_the_detail_tracker_when_content_initial_is_present() {
     crate::app::bootstrap::stores::init(&initial, false);
     crate::ui::landgate::arm_recording();
     let mut bridge = super::super::bridge::Bridge::controlled_home(||0,&initial,&mt,false);
-    let sid = crate::plex::ServerId::UNSET;
+    let sid = crate::registry::ServerId::UNSET;
     crate::app::bootstrap::stores::begin(Default::default(), Default::default());
     let gen = crate::metadata::begin_detail_for_test(bridge.metadata_mut().adapter_ref(), sid, "show");
     {
@@ -217,7 +217,7 @@ fn controlled_home_arms_the_detail_tracker_when_content_initial_is_present() {
     crate::app::bootstrap::stores::finish();
     crate::ui::landgate::disarm();
     crate::app::bootstrap::stores::reset_for_test();
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 fn recording(initial: &Initial) -> Recording {
@@ -262,7 +262,7 @@ fn whole_record_preflight_rejects_bad_late_results_and_markers_without_resources
 #[test]
 fn controlled_hubs_commands_preserve_normal_store_notice_bookkeeping() {
     let _serial = crate::testlock::serial();
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     let mt = unsafe { crate::task::MainThread::assume() };
     let publisher = crate::plex::session::ProfilePublisher::scoped(&mt);
     let mut io = HomeIo { replay:true,preferences:Default::default(),requests:Vec::new(),admissions:Default::default(),
@@ -284,9 +284,9 @@ fn controlled_hubs_commands_preserve_normal_store_notice_bookkeeping() {
 #[test]
 fn controlled_admission_records_real_discovery_spawn_refusal() {
     let _serial = crate::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test("s00000001", "127.0.0.1", 9, "s00000002", "s00000003");
-    assert!(crate::plex::set_current(sid));
+    crate::registry::reset_for_test();
+    let sid = crate::registry::register_with_client_id("s00000001", "127.0.0.1", 9, "s00000002", "s00000003");
+    assert!(crate::registry::set_current(sid));
     let mt = unsafe { crate::task::MainThread::assume() };
     let publisher = crate::plex::session::ProfilePublisher::scoped(&mt);
     let mut io = HomeIo { replay:false,preferences:Default::default(),requests:Vec::new(),admissions:Default::default(),
@@ -295,17 +295,17 @@ fn controlled_admission_records_real_discovery_spawn_refusal() {
     io.discovery_owned_with(&stores, &mut |_| false);
     assert_eq!(io.requests.len(), 1);
     assert_eq!(io.requests[0]["admitted"], serde_json::json!(false), "real refusal must be recorded");
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 #[test]
 fn controlled_admission_records_real_hubs_spawn_refusal() {
     let _serial = crate::testlock::serial();
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     let mut hubs = crate::stores::hubs::HubsStore::default();
     assert!(hubs.run(crate::stores::hubs::HubsCmd::Reset).changed);
-    let sid = crate::plex::register_for_test("s00000001", "127.0.0.1", 9, "s00000002", "s00000003");
-    assert!(crate::plex::set_current(sid));
+    let sid = crate::registry::register_with_client_id("s00000001", "127.0.0.1", 9, "s00000002", "s00000003");
+    assert!(crate::registry::set_current(sid));
     let mt = unsafe { crate::task::MainThread::assume() };
     let publisher = crate::plex::session::ProfilePublisher::scoped(&mt);
     let mut io = HomeIo { replay:false,preferences:Default::default(),requests:Vec::new(),admissions:Default::default(),
@@ -313,7 +313,7 @@ fn controlled_admission_records_real_hubs_spawn_refusal() {
     assert!(crate::pms::with_refused_fetches_for_test(|| io.hubs(&mut hubs, Some(crate::stores::hubs::HubsCmd::RefetchHubs), 0.0)).changed);
     assert_eq!(io.requests.len(), 1);
     assert_eq!(io.requests[0]["admitted"], serde_json::json!(false), "real refusal must be recorded");
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 

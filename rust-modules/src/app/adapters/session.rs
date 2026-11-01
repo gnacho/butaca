@@ -323,16 +323,16 @@ impl SessionAdapter {
             // (`ConnectionFacts::default()` is a no-op when `primary.tier` is unknown), deriving
             // the IP family from the stored ADDRESS rather than `origin.host()` — a `plex.direct`
             // origin's host is a certificate NAME, which `IpVersion::of_host` cannot parse.
-            let connection = crate::plex::ConnectionFacts::new(
+            let connection = crate::registry::ConnectionFacts::new(
                 primary.tier,
                 crate::plex::IpVersion::of_host(&primary.address),
             );
-            let id = crate::plex::register_pinned_with_client_id("", &origin,
+            let id = crate::registry::register_pinned_with_client_id("", &origin,
                 &primary.token, primary.resolve_pin().as_ref(), client_id, connection);
             if self.replay_resources {
-                if let Some(client) = crate::plex::client_for(id) { client.disable_data_io(); }
+                if let Some(client) = crate::registry::client_for(id) { client.disable_data_io(); }
             }
-            crate::plex::set_current(id);
+            crate::registry::set_current(id);
             return permit.reply(CommitAdmission::RegistryOnly);
         }
         if !self.commit_current(permit.request(), plan) {
@@ -466,7 +466,7 @@ impl SessionAdapter {
         meta: &mut crate::stores::metadata::MetadataStore) -> Option<usize> {
         if matches!(self.resources, Resources::Live { .. }) {
             for commit in &self.commits { commit.cancelled.store(true, Ordering::Release); }
-            crate::plex::revoke_all();
+            crate::registry::revoke_all();
             crate::plex::session::revoke_cached_session();
             // The Jellyfin flavor's sign-out retires ITS credential instead of a Plex PIN: the
             // config file goes (the next boot asks again), the installed client is retired (the
@@ -969,7 +969,7 @@ mod tests {
         let begin = source.split("pub(crate) fn begin_erase(").nth(1).unwrap()
             .split("fn submit_erase(").next().unwrap();
         let submitted = begin.find("self.submit_erase()").unwrap();
-        assert!(begin.find("crate::plex::revoke_all()").unwrap() < submitted);
+        assert!(begin.find("crate::registry::revoke_all()").unwrap() < submitted);
         assert!(begin.find("crate::plex::session::revoke_cached_session()").unwrap() < submitted);
         let worker = source.split("fn submit_erase(").nth(1).unwrap()
             .split("pub(crate) fn take_erased(").next().unwrap();

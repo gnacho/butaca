@@ -895,10 +895,10 @@ mod tests {
     fn endpoint_outcomes_leave_onboard_in_the_same_tick_as_discovery() {
         let _g = crate::testlock::serial();
         let _t = TempSession::new("endpoint-onboard");
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
         let mut browse = BrowseFixture::new();
-        let sid = crate::plex::register_for_test("endpoint-onboard", "127.0.0.1", 9, "synthetic", "cid");
-        let client = crate::plex::client_for(sid).unwrap();
+        let sid = crate::registry::register_with_client_id("endpoint-onboard", "127.0.0.1", 9, "synthetic", "cid");
+        let client = crate::registry::client_for(sid).unwrap();
         let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
         browse.stores.browse.borrow_mut().queue_discovery_for_test(
@@ -915,7 +915,7 @@ mod tests {
         assert!(effects.iter().any(|effect| matches!(effect.fx,
             Fx::App(AppFx::StoreWork(StoreWork::BrowseDiscovery)))));
         assert_eq!(s.table_gen, source_list_gen, "rebuild was not deferred");
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     fn key_ok_down() -> ScreenEvent<InnerHost> {
@@ -1697,9 +1697,9 @@ mod tests {
     /// is worth recording exactly why that road was abandoned rather than silently dropped: a real
     /// dispatcher delivers a real `ScreenEvent::Tick` every frame, and `OnboardScreen`'s own Tick
     /// arm schedules the owned discovery pass, whose `sync_roster` half retires any
-    /// source not present in `crate::plex::server_ids()`'s LIVE roster (`browse::mod.rs`'s own
+    /// source not present in `crate::registry::ids()`'s LIVE roster (`browse::mod.rs`'s own
     /// words: "Roster removal is an identity boundary, not a failed fetch"). `seed_pins_for_test`
-    /// stamps its fabricated source with `crate::plex::current_server()` — a real-looking id
+    /// stamps its fabricated source with `crate::registry::current()` — a real-looking id
     /// nothing has actually registered — so the very first real Tick wiped the seeded roster back
     /// to zero rows, which read as "there is nowhere left to focus" and not as a focus-engine
     /// question at all. Registering a fake-but-live server to satisfy `sync_roster` shifted the

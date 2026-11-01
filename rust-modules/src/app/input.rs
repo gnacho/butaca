@@ -80,7 +80,7 @@ impl Pointer {
 /// itself.
 #[derive(Clone)]
 pub(crate) struct MenuPlayAwait {
-    sid: crate::plex::ServerId,
+    sid: crate::registry::ServerId,
     /// The rk the press is actually waiting for: the SHOW's, for both the show and season arms
     /// (a season's own `rk` names no page of its own — see `activate_card`'s original comment,
     /// preserved on [`menu_play_tick`]).
@@ -211,7 +211,7 @@ pub(crate) unsafe fn menu_play_tick(
         return;
     }
     let landed = bridge.metadata_view().current()
-        .map(|d| crate::plex::same_item((d.sid, &d.rk), (sid, &expect)))
+        .map(|d| crate::registry::same_item((d.sid, &d.rk), (sid, &expect)))
         .unwrap_or(false);
     if !landed {
         // Give up once the addressed request has SETTLED without landing this item (a failed or
@@ -305,12 +305,12 @@ mod activate_card_tests {
                 // SAFETY: captured from `bridge` just above, which outlives this guard for the
                 // whole test body.
                 unsafe { &mut *self.0 }.metadata_mut().run(crate::stores::metadata::MetadataCmd::Clear);
-                crate::plex::reset_servers_for_test();
+                crate::registry::reset_for_test();
             }
         }
         let _cleanup = Cleanup(&mut bridge as *mut _);
-        crate::plex::reset_servers_for_test();
-        let sid = crate::plex::register_for_test("press-frame", "127.0.0.1", 1, "t", "c-press-frame");
+        crate::registry::reset_for_test();
+        let sid = crate::registry::register_with_client_id("press-frame", "127.0.0.1", 1, "t", "c-press-frame");
         let mm = crate::pms::PmsMovie { sid, rk: "show-1".into(), kind: 1, ..Default::default() };
 
         unsafe {

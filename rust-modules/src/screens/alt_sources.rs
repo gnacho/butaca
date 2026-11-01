@@ -83,7 +83,7 @@
 use std::borrow::Cow;
 
 use crate::metadata::AltCopy;
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 use crate::screens::registry::{AppLike, AppMsg, ContentArg, PageMemory};
 use crate::ui::consts::{SCR_H, SCR_W};
 use crate::ui::frame::Budget;
@@ -242,7 +242,7 @@ pub(crate) fn rows(list: &[AltCopy], here_sid: ServerId, here_rk: &str) -> Vec<A
     // not — and they are the ones that decide which row wears the tick and which press does nothing.
     let here = list
         .iter()
-        .position(|c| crate::plex::same_item((c.sid, &c.rk), (here_sid, here_rk)));
+        .position(|c| crate::registry::same_item((c.sid, &c.rk), (here_sid, here_rk)));
     let mut idx: Vec<usize> = (0..list.len()).collect();
     idx.sort_by(|&a, &b| {
         let (ca, cb) = (&list[a], &list[b]);
@@ -295,7 +295,7 @@ pub(crate) fn action_at(rows: &[AltRow], sel: i32, here_sid: ServerId, here_rk: 
     let Some(row) = usize::try_from(sel).ok().and_then(|i| rows.get(i)) else {
         return Action::None;
     };
-    if crate::plex::same_item((row.sid, &row.rk), (here_sid, here_rk)) || row.rk.is_empty() {
+    if crate::registry::same_item((row.sid, &row.rk), (here_sid, here_rk)) || row.rk.is_empty() {
         return Action::None;
     }
     Action::Open {

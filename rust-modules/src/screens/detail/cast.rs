@@ -3,7 +3,7 @@
 use std::ffi::CString;
 
 use crate::metadata::Detail;
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 use crate::ui::card_row::{self, CardRow, RowStyle};
 use crate::ui::label::{HAlign, Label, VAlign};
 use crate::ui::machine::{GroupId, Measure};

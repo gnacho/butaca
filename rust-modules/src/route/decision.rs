@@ -8,7 +8,7 @@
 //! but as of this split it still contains none: the one wall-clock field this module owned
 //! (`PlaybackSession::auto_last_switch`) is now a frame-tick millisecond stamp, not an `Instant`.
 
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 use crate::pms::PmsMovie;
 use std::os::raw::c_char;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU8, Ordering};
@@ -2131,7 +2131,7 @@ fn finish_encoder_cleanup_check(
 }
 
 fn run_encoder_cleanup_check(check: EncoderCleanupCheck) {
-    let Some(client) = crate::plex::client_for(check.sid) else {
+    let Some(client) = crate::registry::client_for(check.sid) else {
         let stop_accepted = check.stop_needed.then_some(false);
         finish_encoder_cleanup_check(check, None, stop_accepted, None);
         return;
@@ -2603,7 +2603,7 @@ impl HlsAbrControl {
             return OriginalProbeResult::Stale;
         }
         let url = if self.fixture_base.is_empty() {
-            let Some(client) = crate::plex::client_for(self.sid) else {
+            let Some(client) = crate::registry::client_for(self.sid) else {
                 return OriginalProbeResult::Failed {
                     failure: OriginalProbeFailure::Other,
                 };
@@ -2703,7 +2703,7 @@ impl HlsAbrControl {
                 encoder_session,
             });
         }
-        let Some(client) = crate::plex::client_for(self.sid) else {
+        let Some(client) = crate::registry::client_for(self.sid) else {
             return Err(PrimeRefusal::Session);
         };
         // PMS exposes the two session fields separately, but the overlap TV spike proved it
@@ -2780,7 +2780,7 @@ impl HlsAbrControl {
         observed: (crate::abr::ObservedHlsVariant, u32),
         transition: impl FnOnce() -> Option<T>,
     ) -> Result<(T, WorkerTicket), HlsCommitRefusal> {
-        if self.fixture_base.is_empty() && crate::plex::client_for(self.sid).is_none() {
+        if self.fixture_base.is_empty() && crate::registry::client_for(self.sid).is_none() {
             return Err(HlsCommitRefusal::Session);
         }
         replace_active_hls_with(
@@ -4153,7 +4153,7 @@ pub(crate) fn swap_cur_sid_for_test(ps: &mut PlaybackSession, sid: ServerId) -> 
 /// — every in-playback PMS call in this file goes through one of the two, and none through
 /// `client_opt()`, which answers with whatever server is CURRENT rather than the one playing.
 fn cur_client(ps: &PlaybackSession) -> Option<&'static crate::plex::Client> {
-    crate::plex::client_for(cur_sid(ps))
+    crate::registry::client_for(cur_sid(ps))
 }
 /// Projection: the wire id of the carried audio track, `0` for "server default / none" — the
 /// pre-#266 shape of this accessor, kept so every existing caller that only ever wanted the id
@@ -5560,7 +5560,7 @@ fn apply_quality_choice(ps: &mut PlaybackSession, q: Quality) {
         crate::player::request_adaptive_reload(ps);
         return;
     }
-    let location = crate::plex::client_for(cur_sid(ps)).and_then(|client| client.link());
+    let location = crate::registry::client_for(cur_sid(ps)).and_then(|client| client.link());
     // A direct Remote already on screen is itself stronger evidence than a second prefix fetch:
     // selecting Auto must not start an encoder under a movie which is currently arriving as
     // Original. A fresh Remote play is measured in `build_stream`; an existing transcode has no
@@ -5878,7 +5878,7 @@ pub(super) fn put_selection(sid: ServerId, part: i64, aud: i64, sub: i64) {
     if part <= 0 {
         return;
     }
-    let c = match crate::plex::client_for(sid) {
+    let c = match crate::registry::client_for(sid) {
         Some(c) => c,
         None => return,
     };
@@ -6097,7 +6097,7 @@ fn playback_preview_with_capability(
     // promise "Direct Play" for a source the rung is about to send to an encoder, which is the
     // exact mismatch this preview's doc says it exists to avoid. `d.bitrate`/`width`/`height` are
     // `Media[0]`'s, i.e. the same numbers `ResolveEnv` hands the resolve.
-    let location = crate::plex::client_for(d.sid).and_then(|client| client.link());
+    let location = crate::registry::client_for(d.sid).and_then(|client| client.link());
     // A detail page has not downloaded the file yet, so it reports what can preserve the source,
     // not a fictitious failed bandwidth result. Remote Auto is measured at Play. Relay remains a
     // conversion because its independent link policy refuses both original-rate flavors.
@@ -6142,7 +6142,7 @@ static PLAY_SLOT: Mutex<Option<PlayLanding>> = Mutex::new(None);
 static PLAY_RESUME: Mutex<Option<(u32, i64)>> = Mutex::new(None);
 
 fn retire_plan_resources(resources: AbandonedPlanResources) {
-    let Some(client) = crate::plex::client_for(resources.sid) else {
+    let Some(client) = crate::registry::client_for(resources.sid) else {
         return;
     };
     let worker_ids = resources.identities.clone();
@@ -6220,7 +6220,7 @@ pub(crate) fn arm_play_resume(ps: &mut PlaybackSession, resume_ns: i64) -> bool 
 /// rows carry their own server (the shared-server data-model step), each call site passes `m.sid` /
 /// `d.sid` instead and this helper goes away; it exists so there is exactly ONE line to change.
 pub(crate) fn surface_sid() -> ServerId {
-    crate::plex::current_server()
+    crate::registry::current()
 }
 
 /// MAIN THREAD, NON-BLOCKING. On acceptance, publishes the HUD strings immediately, supersedes an
@@ -7714,7 +7714,7 @@ pub(crate) fn menu_enhancements(ps: &PlaybackSession) -> Option<crate::plex::Aud
 /// This is the one door: it drives every input `audio_enhancements_offered_live`/
 /// `displayed_audio_enhancements` read (I1-I7), registers a throwaway server carrying the given
 /// Plex Pass tristate, and returns the session plus that server's id so the caller can
-/// `crate::plex::reset_servers_for_test()` when done. Caller holds `crate::testlock::serial()`.
+/// `crate::registry::reset_for_test()` when done. Caller holds `crate::testlock::serial()`.
 #[cfg(test)]
 pub(crate) struct EnhTestFixture {
     pub(crate) pass: crate::plex::serverinfo::Subscription,
@@ -7766,7 +7766,7 @@ impl Default for EnhTestFixture {
 
 #[cfg(test)]
 pub(crate) fn enhancement_test_session(route: EnhTestFixture) -> (PlaybackSession, ServerId) {
-    let sid = crate::plex::register_for_test("enh-menu-test", "127.0.0.1", 1, "token", "enh-menu-client");
+    let sid = crate::registry::register_with_client_id("enh-menu-test", "127.0.0.1", 1, "token", "enh-menu-client");
     crate::plex::serverinfo::store_for_test(sid, route.pass, "1.43.4");
 
     let mut ps = PlaybackSession::IDLE;
@@ -8080,7 +8080,7 @@ pub(crate) fn report_timeline(
     let Some(report) = timeline_snapshot(lease, state, t_ms, d_ms) else {
         return false;
     };
-    let c = match crate::plex::client_for(report.sid) {
+    let c = match crate::registry::client_for(report.sid) {
         Some(c) => c,
         None => return true,
     };

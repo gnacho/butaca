@@ -4,8 +4,8 @@ use super::*;
 use std::ffi::CString;
 use super::tests::Fixture;
 
-fn sid(n: u16) -> crate::plex::ServerId {
-    crate::plex::ServerId::from_raw(n)
+fn sid(n: u16) -> crate::registry::ServerId {
+    crate::registry::ServerId::from_raw(n)
 }
 
 fn group(name: &str, handle: &str, state: crate::browse::SourceState,
@@ -13,7 +13,7 @@ fn group(name: &str, handle: &str, state: crate::browse::SourceState,
     crate::browse::SrcGroup { name: name.into(), handle: handle.into(), state, tier }
 }
 
-fn section(source: crate::plex::ServerId, key: i64, index: usize, title: &str, current: bool)
+fn section(source: crate::registry::ServerId, key: i64, index: usize, title: &str, current: bool)
     -> crate::browse::view::SectionView {
     crate::browse::view::SectionView { sid: Some(source), key, kind: SecKind::Movie,
         row: crate::browse::SrcRow { section: index, title: title.into(), pinned: true, current,

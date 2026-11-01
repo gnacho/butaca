@@ -3175,16 +3175,16 @@ mod tests {
         }
         impl Drop for Fresh {
             fn drop(&mut self) {
-                crate::plex::reset_servers_for_test();
+                crate::registry::reset_for_test();
             }
         }
         let g = crate::testlock::serial();
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
         let _fresh = Fresh { _g: g };
-        crate::route::swap_cur_sid_for_test(&mut ps, crate::plex::ServerId::UNSET);
+        crate::route::swap_cur_sid_for_test(&mut ps, crate::registry::ServerId::UNSET);
 
         let reg =
-            |m: &str, host: &str| crate::plex::register_for_test(m, host, 32400, "tok", "cid");
+            |m: &str, host: &str| crate::registry::register_with_client_id(m, host, 32400, "tok", "cid");
         let (ours, theirs) = (reg("mach-A", "10.0.0.1"), reg("mach-B", "10.0.0.2"));
         // the slot arrays outlive `reset_servers_for_test` — start from the boot state explicitly
         store_for_test(ours, Sub::Unknown, "");
@@ -3193,7 +3193,7 @@ mod tests {
         store_for_test(ours, Sub::Yes, "1.43.3.10861-cd85035e7");
         store_for_test(theirs, Sub::No, "1.32.0.6918-free");
         // …and browsing a share does NOT re-point `current`, which is the whole trap
-        assert!(crate::plex::set_current(ours));
+        assert!(crate::registry::set_current(ours));
 
         crate::route::swap_cur_sid_for_test(&mut ps, theirs);
         assert_eq!(
@@ -3216,7 +3216,7 @@ mod tests {
         );
 
         // the inverse polarity: playing from OUR Pass'd server while `current` sits on the share
-        assert!(crate::plex::set_current(theirs));
+        assert!(crate::registry::set_current(theirs));
         crate::route::swap_cur_sid_for_test(&mut ps, ours);
         assert_eq!(
             playing_subscription(&ps),
@@ -3237,7 +3237,7 @@ mod tests {
 
         // before the first play there is no playing server, and "we have not heard" is the honest
         // answer — never slot 0's, and never a blamed subscription
-        crate::route::swap_cur_sid_for_test(&mut ps, crate::plex::ServerId::UNSET);
+        crate::route::swap_cur_sid_for_test(&mut ps, crate::registry::ServerId::UNSET);
         assert_eq!(playing_subscription(&ps), Sub::Unknown);
         assert!(
             !error_shape(

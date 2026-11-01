@@ -24,12 +24,12 @@ use super::test_support::*;
 #[test]
 fn a_mounted_detail_page_follows_a_corrected_credit() {
     let _serial = crate::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let house = crate::plex::register_for_test("md-house", "127.0.0.1", 1, "t", "cid");
+    crate::registry::reset_for_test();
+    let house = crate::registry::register_with_client_id("md-house", "127.0.0.1", 1, "t", "cid");
 
     // what a build without the rule published: the household's own server wearing the account
     // holder's handle
-    crate::plex::describe_server(house, "Mac mini", "admin", crate::plex::GrantEvidence::outside());
+    crate::registry::describe(house, "Mac mini", "admin", crate::registry::GrantEvidence::outside());
     set_current_for_test(test_state(), Some(Detail {
         sid: house,
         rk: "42".into(),
@@ -38,7 +38,7 @@ fn a_mounted_detail_page_follows_a_corrected_credit() {
     assert_eq!(current(test_state()).unwrap().source(), "admin");
 
     // the roster refresh re-grades it, with nothing touching the mounted page
-    crate::plex::describe_server(house, "Mac mini", "", crate::plex::GrantEvidence::outside());
+    crate::registry::describe(house, "Mac mini", "", crate::registry::GrantEvidence::outside());
     assert_eq!(
         current(test_state()).unwrap().source(),
         "",
@@ -46,8 +46,8 @@ fn a_mounted_detail_page_follows_a_corrected_credit() {
     );
 
     // and a share is still credited, so this is not a blanket clear
-    let friend = crate::plex::register_for_test("md-friend", "127.0.0.1", 2, "t", "cid");
-    crate::plex::describe_server(friend, "nas-home", "friend", crate::plex::GrantEvidence::outside());
+    let friend = crate::registry::register_with_client_id("md-friend", "127.0.0.1", 2, "t", "cid");
+    crate::registry::describe(friend, "nas-home", "friend", crate::registry::GrantEvidence::outside());
     set_current_for_test(test_state(), Some(Detail {
         sid: friend,
         rk: "318".into(),
@@ -56,7 +56,7 @@ fn a_mounted_detail_page_follows_a_corrected_credit() {
     assert_eq!(current(test_state()).unwrap().source(), "friend");
 
     set_current_for_test(test_state(), None);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 #[test]
@@ -288,7 +288,7 @@ fn the_playing_item_cache_hits_only_for_the_same_item_on_the_same_server() {
     );
     assert!(cached_playing(test_state(), SRV_A, "43").is_none());
     assert!(
-        cached_playing(test_state(), crate::plex::ServerId::UNSET, "42").is_none(),
+        cached_playing(test_state(), crate::registry::ServerId::UNSET, "42").is_none(),
         "unscoped names neither"
     );
 

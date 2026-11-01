@@ -821,7 +821,7 @@ fn fps_milli_str(fps_milli: i64) -> String {
 
 fn connection_line(ps: &crate::route::PlaybackSession) -> String {
     let sid = crate::route::cur_sid(ps);
-    let Some(client) = crate::plex::client_for(sid) else {
+    let Some(client) = crate::registry::client_for(sid) else {
         return crate::i18n::msg::browse_diagnostics_standalone().to_string();
     };
     let tier = match client.link() {
@@ -1897,7 +1897,7 @@ mod tests {
     impl Drop for EnhTestSession {
         fn drop(&mut self) {
             reset_player_control_for_test(&self.ps);
-            crate::plex::reset_servers_for_test();
+            crate::registry::reset_for_test();
         }
     }
 

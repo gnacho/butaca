@@ -1,7 +1,7 @@
 //! The crop an art tile samples (`art_uv`): every picture keeps its own aspect in its tile.
 
 use super::*;
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 use crate::ui::card_row::RowStyle;
 
 /// The cast row's circle, at rest and popped. The shape is what matters; the position is not.

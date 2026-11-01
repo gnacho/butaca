@@ -268,8 +268,8 @@ fn a_relay_link_and_a_user_ceiling_compose_to_the_stricter_of_the_two() {
 /// The server half is graded on both arms: a ratingKey names an item only within one server.
 #[test]
 fn the_loaded_detail_describes_its_own_key_and_its_on_deck_episodes() {
-    let a = crate::plex::ServerId::from_raw(1);
-    let b = crate::plex::ServerId::from_raw(2);
+    let a = crate::registry::ServerId::from_raw(1);
+    let b = crate::registry::ServerId::from_raw(2);
     let show = crate::metadata::Detail {
         sid: a,
         rk: "100".into(),
@@ -304,7 +304,7 @@ fn the_loaded_detail_describes_its_own_key_and_its_on_deck_episodes() {
 
 #[test]
 fn a_trailer_play_judges_the_extra_file_not_the_parent_or_zero() {
-    let a = crate::plex::ServerId::from_raw(1);
+    let a = crate::registry::ServerId::from_raw(1);
     let movie = crate::metadata::Detail {
         sid: a,
         rk: "7".into(),

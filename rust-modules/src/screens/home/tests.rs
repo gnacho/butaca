@@ -470,7 +470,7 @@ fn status_action_geometry_does_not_inherit_the_previous_hero_pop_or_slide() {
     let snapshot = crate::pms::hubs_snapshot(&state);
     let mut s = screen(snapshot.view());
     for _ in 0..80 { s.hero_pop.step(Some(0), 0.016); }
-    s.outgoing = Some((crate::plex::ServerId::UNSET, "old".into()));
+    s.outgoing = Some((crate::registry::ServerId::UNSET, "old".into()));
     s.hero_slide.jump(0.5);
     let key = FocusKey { entry: s.entry, elem: HERO_PLAY_ELEM };
     let mut context = cx(snapshot.view(), Some(key));
@@ -1257,15 +1257,15 @@ fn down_from_the_first_shelf_chooses_the_next_shelf_not_the_folded_hero() {
     let mut s = screen(snapshot.view());
     let second_elem = s.elem_for(HomeItemIdentity::Item {
         hub: HomeHubIdentity::Key {
-            sid: crate::plex::ServerId::UNSET,
+            sid: crate::registry::ServerId::UNSET,
             key: "/hubs/second".into(),
         },
-        sid: crate::plex::ServerId::UNSET,
+        sid: crate::registry::ServerId::UNSET,
         rk: "second".into(),
     });
     s.rows.push(HubProjection {
         identity: HomeHubIdentity::Key {
-            sid: crate::plex::ServerId::UNSET,
+            sid: crate::registry::ServerId::UNSET,
             key: "/hubs/second".into(),
         },
         group: GroupId(FIRST_HUB_GROUP + 1),
@@ -1320,15 +1320,15 @@ fn repeated_item_keys_are_scoped_by_hub_identity() {
     let mut s = HomeScreen::new(EntryId(7), InstanceId(9));
     let a = HomeItemIdentity::Item {
         hub: HomeHubIdentity::ContinueWatching,
-        sid: crate::plex::ServerId::UNSET,
+        sid: crate::registry::ServerId::UNSET,
         rk: "7".into(),
     };
     let b = HomeItemIdentity::Item {
         hub: HomeHubIdentity::Key {
-            sid: crate::plex::ServerId::UNSET,
+            sid: crate::registry::ServerId::UNSET,
             key: "/hubs/new".into(),
         },
-        sid: crate::plex::ServerId::UNSET,
+        sid: crate::registry::ServerId::UNSET,
         rk: "7".into(),
     };
     let ka = s.elem_for(a.clone());
@@ -1357,10 +1357,10 @@ fn memory_round_trip_preserves_registries_and_carousel_identity() {
     a.group_for(&hub);
     a.elem_for(HomeItemIdentity::Item {
         hub,
-        sid: crate::plex::ServerId::UNSET,
+        sid: crate::registry::ServerId::UNSET,
         rk: "42".into(),
     });
-    a.carousel = Some((crate::plex::ServerId::UNSET, "42".into()));
+    a.carousel = Some((crate::registry::ServerId::UNSET, "42".into()));
     a.strip_chosen = true;
     let memory = match <HomeScreen as Screen<TestHost>>::memory(&a) {
         PageMemory::Home(m) => m,
@@ -1384,7 +1384,7 @@ fn activation_across_the_snap_midpoint_is_not_a_canonical_collision() {
     let mut hero_picture = screen(snapshot.view());
     let mut grid_picture = screen(snapshot.view());
     for s in [&mut hero_picture, &mut grid_picture] {
-        s.carousel = Some((crate::plex::ServerId::UNSET, "2".into()));
+        s.carousel = Some((crate::registry::ServerId::UNSET, "2".into()));
         s.snap_target = 1.0;
         s.visible_activation = Some(HERO_PLAY_ELEM);
     }
@@ -1413,7 +1413,7 @@ fn the_home_census_covers_input_motion_and_current_projection() {
         |s| s.hero_slide.pos = 0.4,
         |s| s.hero_slide.vel = 1.0,
         |s| s.hero_dir = -1.0,
-        |s| s.outgoing = Some((crate::plex::ServerId::UNSET, "old".into())),
+        |s| s.outgoing = Some((crate::registry::ServerId::UNSET, "old".into())),
         |s| s.grid.scroll_y.vel = 1.0,
         |s| s.grid.scroll_target = 100.0,
         |s| s.rows[0].elems.swap(0, 1),
@@ -1440,7 +1440,7 @@ fn paint_only_backdrop_and_spinner_state_do_not_change_the_canonical_hash() {
     b.status_ms = 900.0;
     b.backdrop.art.pos = 0.5;
     assert_eq!(a.hash(), b.hash());
-    a.carousel = Some((crate::plex::ServerId::UNSET, "a".into()));
+    a.carousel = Some((crate::registry::ServerId::UNSET, "a".into()));
     assert_ne!(a.hash(), b.hash());
 }
 
@@ -1563,7 +1563,7 @@ fn continue_watching_commit_plays_while_an_ordinary_shelf_opens_detail() {
         |r| matches!(r, HomeReq::Play { rk, .. } if rk == "1")
     ));
     s.rows[0].identity = HomeHubIdentity::Key {
-        sid: crate::plex::ServerId::UNSET,
+        sid: crate::registry::ServerId::UNSET,
         key: "/hubs/recent".into(),
     };
     let (_, detail, _) = step(
@@ -1667,7 +1667,7 @@ fn quick_down_then_ok_activates_the_hero_still_visible_before_the_snap_midpoint(
     crate::pms::seed_for_test(&mut state, &adapter, 2, crate::pms::HubState::Ready);
     let snapshot = crate::pms::hubs_snapshot(&state);
     let mut s = screen(snapshot.view());
-    s.carousel = Some((crate::plex::ServerId::UNSET, "2".into()));
+    s.carousel = Some((crate::registry::ServerId::UNSET, "2".into()));
     let hero = FocusKey {
         entry: s.entry,
         elem: HERO_PLAY_ELEM,

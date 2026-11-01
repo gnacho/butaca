@@ -12,7 +12,7 @@ use std::ffi::CString;
 use std::os::raw::c_int;
 
 use crate::person::{Credit, Department};
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 use crate::ui::card_row;
 use crate::ui::consts::*;
 use crate::ui::frame::Budget;
@@ -205,7 +205,7 @@ impl FilmographyScreen {
         person: crate::person::PersonView<'_>,
     ) -> Self {
         let person = person.current().filter(|person| {
-            crate::plex::same_item((person.sid, person.key.as_str()), (sid, key.as_str()))
+            crate::registry::same_item((person.sid, person.key.as_str()), (sid, key.as_str()))
         });
         let mut screen = Self {
             entry,
@@ -239,7 +239,7 @@ impl FilmographyScreen {
 
     fn person<'a, H: PersonLike>(&self, cx: &Cx<'a, H>) -> Option<&'a crate::person::Person> {
         H::person(cx).current().filter(|p| {
-            crate::plex::same_item((p.sid, p.key.as_str()), (self.sid, self.key.as_str()))
+            crate::registry::same_item((p.sid, p.key.as_str()), (self.sid, self.key.as_str()))
         })
     }
 
@@ -518,7 +518,7 @@ impl FilmographyScreen {
                 .iter()
                 .map(|c| {
                     let sub = match c.local.as_ref().and_then(|(sid, _)| {
-                        crate::plex::server_facts(*sid).map(|f| f.name.clone())
+                        crate::registry::facts(*sid).map(|f| f.name.clone())
                     }) {
                         Some(name) if c.role.is_empty() => name,
                         Some(name) => format!("{} · {}", c.role, name),

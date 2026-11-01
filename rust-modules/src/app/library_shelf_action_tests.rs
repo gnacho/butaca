@@ -13,17 +13,17 @@ fn shelf_physical_hold_captures_engine_item_deck_flag_and_bridge_rest_opener() {
     struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::registry::reset_for_test();
         }
     }
     let _cleanup = Cleanup;
     for row in 0..2 {
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
         let own =
-            crate::plex::register_for_test("shelf-own", "127.0.0.1", 9, "synthetic", "fixture");
+            crate::registry::register_with_client_id("shelf-own", "127.0.0.1", 9, "synthetic", "fixture");
         let shared =
-            crate::plex::register_for_test("shelf-shared", "127.0.0.1", 10, "synthetic", "fixture");
-        crate::plex::set_current(own);
+            crate::registry::register_with_client_id("shelf-shared", "127.0.0.1", 10, "synthetic", "fixture");
+        crate::registry::set_current(own);
         let mut d = Dispatcher::<AppHost>::new();
         let mut rig = Bridge::for_test(|| 0);
         rig.stores.browse.borrow_mut().seed_registered_table_for_test([own, shared]);

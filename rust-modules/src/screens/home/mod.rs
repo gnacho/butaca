@@ -154,7 +154,7 @@ struct Backdrop {
     outgoing_art: Spring,
     tex: (u32, f32, f32),
     outgoing_tex: (u32, f32, f32),
-    keyed: Option<(crate::plex::ServerId, String)>,
+    keyed: Option<(crate::registry::ServerId, String)>,
 }
 
 impl Backdrop {
@@ -175,7 +175,7 @@ impl Backdrop {
         hero: Option<HeroRef<'_>>,
         outgoing: Option<HeroRef<'_>>,
         grid_item: Option<&PmsMovie>,
-        selected: Option<&(crate::plex::ServerId, String)>,
+        selected: Option<&(crate::registry::ServerId, String)>,
         snap: f32,
         dt: f32,
     ) {
@@ -303,8 +303,8 @@ pub(crate) struct HomeScreen {
     restore_reveal: bool,
 
     /// Selected hero ITEM identity. It is data, not focus.
-    carousel: Option<(crate::plex::ServerId, String)>,
-    outgoing: Option<(crate::plex::ServerId, String)>,
+    carousel: Option<(crate::registry::ServerId, String)>,
+    outgoing: Option<(crate::registry::ServerId, String)>,
     hero_flip_cd: f32,
     hero_slide: Spring,
     hero_dir: f32,
@@ -517,17 +517,17 @@ impl HomeScreen {
         self.reconcile_carousel(view);
     }
 
-    fn identity_of(item: &PmsMovie) -> Option<(crate::plex::ServerId, String)> {
+    fn identity_of(item: &PmsMovie) -> Option<(crate::registry::ServerId, String)> {
         (!item.rk.is_empty()).then(|| (item.sid, item.rk.clone()))
     }
 
-    fn same_item(item: &PmsMovie, identity: &(crate::plex::ServerId, String)) -> bool {
+    fn same_item(item: &PmsMovie, identity: &(crate::registry::ServerId, String)) -> bool {
         item.sid == identity.0 && item.rk == identity.1
     }
 
     fn hero_by_identity<'a>(
         view: HubsView<'a>,
-        identity: &(crate::plex::ServerId, String),
+        identity: &(crate::registry::ServerId, String),
     ) -> Option<HeroRef<'a>> {
         (0..view.hero_count())
             .filter_map(|i| view.hero(i))
@@ -727,7 +727,7 @@ impl HomeScreen {
             self.snap_target = 0.0;
             self.snap.jump(0.0);
         }
-        let current = crate::plex::client_for(crate::plex::current_server()).map(|c| c.machine_id());
+        let current = crate::registry::client_for(crate::registry::current()).map(|c| c.machine_id());
         if self.plaintext.refresh(current, Near::First) {
             fx.invalidate(Provenance::Landing(fx.from()));
         }
@@ -994,7 +994,7 @@ impl HomeScreen {
             // asks the shared question rather than retrying what cannot succeed.
             if let Some(v) = self.plaintext.verdict() {
                 let machine = v.machine_id.clone();
-                let sid = crate::plex::id_of_machine(&machine);
+                let sid = crate::registry::id_of_machine(&machine);
                 self.plaintext_alert.open(&machine, sid, MachineId::Instance(self.instance), fx);
                 fx.invalidate(Provenance::Input);
             }

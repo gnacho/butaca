@@ -84,7 +84,7 @@ pub(crate) fn decode(value: serde_json::Value,
     #[cfg(feature = "jellyfin")]
     let (client, token_gen) = if wire.sid == crate::jellyfin::SERVER_ID.raw()
         && wire.client == 0 && wire.token_gen == 0
-        && crate::plex::server_ids().next().is_none()
+        && crate::registry::ids().next().is_none()
     {
         let Some(jc) = crate::jellyfin::client() else { return Err("no jellyfin client installed") };
         (super::DiscClient::Jellyfin(jc), 0)

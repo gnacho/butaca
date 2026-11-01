@@ -13,7 +13,7 @@ pub(crate) enum HubsCmd {
     /// The profile/account switch.
     Reset,
     /// The optimistic half of a view-state write on the hub catalog (`pms::LocalEdit`).
-    EditItem { sid: crate::plex::ServerId, rk: String, edit: crate::pms::LocalEdit },
+    EditItem { sid: crate::registry::ServerId, rk: String, edit: crate::pms::LocalEdit },
 }
 
 pub(crate) use crate::pms::Landing as HubsResult;
@@ -88,7 +88,7 @@ impl HubsStore {
     #[cfg(test)]
     pub(crate) fn seed_for_directory_test(
         &mut self,
-        sid: crate::plex::ServerId,
+        sid: crate::registry::ServerId,
         items: usize,
         hub_state: crate::pms::HubState,
         directory: crate::stores::browse::DirectoryView<'_>,
@@ -101,7 +101,7 @@ impl HubsStore {
     #[cfg(test)]
     pub(crate) fn seed_two_library_home_for_test(
         &mut self,
-        sid: crate::plex::ServerId,
+        sid: crate::registry::ServerId,
         directory: crate::stores::browse::DirectoryView<'_>,
     ) {
         crate::pms::seed_two_library_home_for_test(&mut self.state, sid, directory);
@@ -257,7 +257,7 @@ mod contract_tests {
         }
     }
 
-    fn section(sid: crate::plex::ServerId, section: usize, pinned: bool)
+    fn section(sid: crate::registry::ServerId, section: usize, pinned: bool)
         -> crate::stores::browse::SectionView {
         crate::stores::browse::SectionView {
             sid: Some(sid),
@@ -276,10 +276,10 @@ mod contract_tests {
     #[test]
     fn controlled_hubs_uses_the_supplied_directory() {
         let _guard = crate::testlock::serial();
-        crate::plex::reset_servers_for_test();
-        let own = crate::plex::register_for_test(
+        crate::registry::reset_for_test();
+        let own = crate::registry::register_with_client_id(
             "hubs-owned", "127.0.0.1", 9, "synthetic", "fixture");
-        let hidden = crate::plex::register_for_test(
+        let hidden = crate::registry::register_with_client_id(
             "hubs-hidden", "127.0.0.1", 10, "synthetic", "fixture");
         let directory = crate::stores::browse::DirectorySnapshot::fixture(
             7, 0, vec![section(own, 0, true), section(hidden, 1, false)]);
@@ -297,7 +297,7 @@ mod contract_tests {
         assert_eq!(launched, [own.raw()],
             "the retained pin table excludes the unpinned source");
         let _ = store.controlled_with_directory(Some(HubsCmd::Reset), 0.0, directory.view(), &mut ignored);
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 
     /// **The two-owner regression.** A worker captures a clone of its owner's `Arc<PmsAdapter>`

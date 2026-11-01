@@ -110,7 +110,7 @@ fn run() {
 /// Profile changes retain disk images but retire their old request credentials. A client can
 /// also be replaced at a new origin without changing the account's disk-cache epoch.
 fn grant_is_current(job: &Job) -> bool {
-    crate::plex::client_for(job.client.id()).is_some_and(|live|
+    crate::registry::client_for(job.client.id()).is_some_and(|live|
         std::ptr::eq(live, job.client) && live.token_gen() == job.token_gen)
 }
 
@@ -124,9 +124,9 @@ mod tests {
     #[test]
     fn refreshes_are_bounded_deduplicated_and_retired_with_the_account() {
         let _guard = crate::testlock::serial();
-        crate::plex::reset_servers_for_test();
-        let sid = crate::plex::register_for_test("refresh-fixture", "127.0.0.1", 1, "fixture", "fixture");
-        let client = crate::plex::client_for(sid).unwrap();
+        crate::registry::reset_for_test();
+        let sid = crate::registry::register_with_client_id("refresh-fixture", "127.0.0.1", 1, "fixture", "fixture");
+        let client = crate::registry::client_for(sid).unwrap();
         let old_grant = job(client, 0, 1);
         assert!(grant_is_current(&old_grant));
         let job = |i, epoch| job(client, i, epoch);
@@ -145,8 +145,8 @@ mod tests {
         assert_eq!(q.epoch, 2);
         q.running = false;
         assert!(!q.push(job(1, 2)));
-        crate::plex::register_for_test("refresh-fixture", "127.0.0.1", 1, "changed-grant", "fixture");
+        crate::registry::register_with_client_id("refresh-fixture", "127.0.0.1", 1, "changed-grant", "fixture");
         assert!(!grant_is_current(&old_grant), "queued old-profile credentials must never refresh");
-        crate::plex::reset_servers_for_test();
+        crate::registry::reset_for_test();
     }
 }

@@ -239,13 +239,13 @@ fn composed_owner_favourites_footer_survives_left_down_and_idle_frames() {
     struct ResetSources;
     impl Drop for ResetSources {
         fn drop(&mut self) {
-            crate::plex::reset_servers_for_test();
+            crate::registry::reset_for_test();
         }
     }
     let _reset = ResetSources;
-    crate::plex::reset_servers_for_test();
-    let a = crate::plex::register_for_test("focus-a", "127.0.0.1", 9, "synthetic", "focus-test");
-    let b = crate::plex::register_for_test("focus-b", "127.0.0.1", 9, "synthetic", "focus-test");
+    crate::registry::reset_for_test();
+    let a = crate::registry::register_with_client_id("focus-a", "127.0.0.1", 9, "synthetic", "focus-test");
+    let b = crate::registry::register_with_client_id("focus-b", "127.0.0.1", 9, "synthetic", "focus-test");
     // The existing fixture pins client identities and marks sections/counts complete:
     // the real Onboard Tick can poll discovery without spawning network work.
     let mut rig = SurfaceRig::new();

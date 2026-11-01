@@ -4,7 +4,7 @@
 //! [`CollectionState::pump_with_gate`]. The page is the shared collections route: a Jellyfin
 //! BoxSet open and a search collection hit both land here.
 
-use crate::plex::ServerId;
+use crate::registry::ServerId;
 use crate::pms::PmsMovie;
 use std::panic::catch_unwind;
 use std::sync::Arc;
@@ -155,7 +155,7 @@ impl CollectionState {
                     return current.want != old || retry;
                 }
                 self.supersede(adapter);
-                let client_key = crate::plex::client_for(target.id.sid).map(|c| (c.instance_gen(), c.token_gen()));
+                let client_key = crate::registry::client_for(target.id.sid).map(|c| (c.instance_gen(), c.token_gen()));
                 self.current = Some(Collection::loading(target.id, target.want.max(PAGE_SIZE), client_key));
                 true
             }
@@ -170,7 +170,7 @@ impl CollectionState {
                 let Some(c) = self.current.as_mut() else { return false };
                 let mut hit = false;
                 for item in c.items.iter_mut()
-                    .filter(|item| crate::plex::same_item((item.sid, &item.rk), (sid, &rk))) {
+                    .filter(|item| crate::registry::same_item((item.sid, &item.rk), (sid, &rk))) {
                     crate::pms::set_watched(item, on);
                     hit = true;
                 }
@@ -181,7 +181,7 @@ impl CollectionState {
 
     fn refresh_if_client_changed(&mut self, adapter: &CollectionAdapter) -> bool {
         let Some(c) = self.current.as_ref() else { return false };
-        let now = crate::plex::client_for(c.id.sid).map(|x| (x.instance_gen(), x.token_gen()));
+        let now = crate::registry::client_for(c.id.sid).map(|x| (x.instance_gen(), x.token_gen()));
         if now == c.client_key { return false; }
         let (id, want) = (c.id.clone(), c.want);
         self.supersede(adapter);

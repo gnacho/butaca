@@ -48,7 +48,8 @@
 //! the old synchronous discovery's early-return was the only thing preventing that; appending is the property
 //! that replaces it, and it holds for every source that lands later rather than only for the
 //! second call.
-use crate::plex::{SectionQuery, ServerId};
+use crate::registry::ServerId;
+use crate::plex::SectionQuery;
 use crate::pms::{parse_item, PmsMovie};
 use std::panic::catch_unwind;
 #[cfg(test)]
@@ -105,7 +106,7 @@ pub(crate) enum SourceState {
 }
 
 /// One SOURCE the table is addressed by — a server this account has been granted. Comes from the
-/// [server registry](crate::plex::server_ids), which is the granted roster: a server is registered
+/// [server registry](crate::registry::ids), which is the granted roster: a server is registered
 /// only once plex.tv (or the `butaca-servers` dev trigger) handed us a token for it.
 #[derive(Clone)]
 pub(crate) struct BrowseSource {
@@ -135,7 +136,7 @@ pub(crate) struct BrowseSource {
     /// [`household`](Self::household); `0` means plex.tv named nobody and never matches a
     /// household member.
     pub(crate) owner_id: i64,
-    /// **Is this OUR HOUSEHOLD'S server?** — [`crate::plex::is_household`]'s verdict on the three
+    /// **Is this OUR HOUSEHOLD'S server?** — [`crate::registry::is_household`]'s verdict on the three
     /// carried evidence fields above plus the Plex Home roster
     /// ([`crate::plex::session::Session::household_ids`]).
     ///
@@ -237,13 +238,13 @@ fn source_state(outcome: Option<crate::plex::probe::Outcome>) -> SourceState {
 }
 
 fn source_snapshot(sid: ServerId) -> Option<(SourceState, Option<crate::plex::probe::Location>)> {
-    let client = crate::plex::client_for(sid)?;
+    let client = crate::registry::client_for(sid)?;
     let token_gen = client.token_gen();
     // Probe publication follows set_link, so read the acquire-backed result before the tier. The
     // second lookup rejects a re-point or in-place retoken between those two reads.
-    let state = source_state(crate::plex::server_probe_result(sid));
+    let state = source_state(crate::registry::probe_result(sid));
     let tier = client.link();
-    crate::plex::client_for(sid)
+    crate::registry::client_for(sid)
         .filter(|now| std::ptr::eq(*now, client) && now.token_gen() == token_gen)
         .map(|_| (state, tier))
 }
@@ -254,8 +255,8 @@ fn source_snapshot(sid: ServerId) -> Option<(SourceState, Option<crate::plex::pr
 /// It is a free function rather than a method so that it reads the evidence and NOTHING else —
 /// in particular not the cached verdict it is about to overwrite.
 fn household_verdict(source: &BrowseSource, household: &[i64]) -> bool {
-    crate::plex::is_household(
-        crate::plex::GrantEvidence {
+    crate::registry::is_household(
+        crate::registry::GrantEvidence {
             owned: source.owned,
             home: source.home,
             owner_id: source.owner_id,
@@ -612,7 +613,7 @@ impl SecItems {
     }
     /// A read scan first: an optimistic edit must not clone unrelated retained pages.
     fn set_watched(&mut self, sid: ServerId, rk: &str, on: bool) -> bool {
-        let matches = |m: &PmsMovie| crate::plex::same_item((m.sid, &m.rk), (sid, rk));
+        let matches = |m: &PmsMovie| crate::registry::same_item((m.sid, &m.rk), (sid, rk));
         let mut hit = false;
         for p in 0..self.pages.len() {
             if !self.pages[p]
@@ -830,7 +831,7 @@ impl BrowseState {
             && !self.sources.iter().any(|s| s.sid == crate::jellyfin::SERVER_ID) {
             return true;
         }
-        let live: Vec<ServerId> = crate::plex::server_ids().collect();
+        let live: Vec<ServerId> = crate::registry::ids().collect();
         if live.len() != self.sources.len()
             || self.sources.iter().zip(&live).any(|(source, sid)| source.sid != *sid) {
             return true;
@@ -848,7 +849,7 @@ impl BrowseState {
             if source.household != household_verdict(source, &household) {
                 return true;
             }
-            let now = crate::plex::client_for(source.sid);
+            let now = crate::registry::client_for(source.sid);
             if source.client_addr != now.map_or(0, |client| client as *const _ as usize)
                 || source.token_gen != now.map_or(0, |client| client.token_gen()) {
                 return true;
@@ -858,7 +859,7 @@ impl BrowseState {
                     return true;
                 }
             }
-            if let Some(facts) = crate::plex::server_facts(source.sid) {
+            if let Some(facts) = crate::registry::facts(source.sid) {
                 if (source.name.is_empty() && !facts.name.is_empty())
                     || source.handle != facts.handle || source.owned != facts.owned
                     || source.home != facts.home || source.owner_id != facts.owner_id {
@@ -1204,7 +1205,7 @@ impl BrowseState {
             .get(self.cur())
             .map(|section| section.src)
             .or_else(|| {
-                let sid = crate::plex::current_server();
+                let sid = crate::registry::current();
                 self.sources.iter().position(|source| source.sid == sid)
             })
             .filter(|&index| index < self.sources.len())
@@ -1274,7 +1275,7 @@ impl BrowseState {
         let Some(sid) = self.section_sid(current) else {
             return;
         };
-        let Some(client) = crate::plex::client_for(sid) else {
+        let Some(client) = crate::registry::client_for(sid) else {
             return;
         };
         let token_gen = client.token_gen();
@@ -2022,7 +2023,7 @@ impl BrowseState {
             DiscClient::Jellyfin(_) => unreachable!("the Jellyfin arm above returns"),
         };
         let fact_name = (!name.is_empty()).then_some(name.as_str());
-        let committed = crate::plex::commit_reachability_if_current(
+        let committed = crate::registry::commit_reachability_if_current(
             client.id(), client, token_gen, ok, fact_name, |outcome| {
                 if !self.apply_source_outcome(source_index, client, outcome) {
                     return false;
@@ -2121,7 +2122,7 @@ impl BrowseState {
         let generation = crate::plex::session::visible_generation();
         let session_changed = self.session_generation != generation;
         self.session_generation = generation;
-        let live: Vec<ServerId> = crate::plex::server_ids().collect();
+        let live: Vec<ServerId> = crate::registry::ids().collect();
         // The Plex Home roster, read ONCE for the whole sync: `peek()` is a write-through cache
         // over the persisted session (`plex/CLAUDE.md`), so this is a lock and an `Arc` clone
         // rather than a file read — but it is still per sync and not per source.
@@ -2152,7 +2153,7 @@ impl BrowseState {
         for sid in live {
             match self.sources.iter().position(|source| source.sid == sid) {
                 Some(index) => {
-                    let now = crate::plex::client_for(sid);
+                    let now = crate::registry::client_for(sid);
                     let client_addr = now.map_or(0, |client| client as *const _ as usize);
                     let token_gen = now.map_or(0, |client| client.token_gen());
                     let mut changes = 0;
@@ -2172,7 +2173,7 @@ impl BrowseState {
                             changes += 1;
                         }
                     }
-                    if let Some(facts) = crate::plex::server_facts(sid) {
+                    if let Some(facts) = crate::registry::facts(sid) {
                         if source.name.is_empty() && !facts.name.is_empty() {
                             source.name = facts.name.clone();
                             changes += 1;
@@ -2207,7 +2208,7 @@ impl BrowseState {
                     }
                 }
                 None => {
-                    let facts = crate::plex::server_facts(sid);
+                    let facts = crate::registry::facts(sid);
                     let owned = facts.map(|facts| facts.owned).unwrap_or(true);
                     // An undescribed slot is the session's own server (`servers::describe_name`
                     // says why that is not a guess), so it carries no third-party evidence.
@@ -2219,14 +2220,14 @@ impl BrowseState {
                     let Some((state, tier)) = source_snapshot(sid) else { continue };
                     self.sources.push(BrowseSource {
                         sid,
-                        client_addr: crate::plex::client_for(sid)
+                        client_addr: crate::registry::client_for(sid)
                             .map_or(0, |client| client as *const _ as usize),
-                        token_gen: crate::plex::client_for(sid)
+                        token_gen: crate::registry::client_for(sid)
                             .map_or(0, |client| client.token_gen()),
                         machine_id: machine_of(sid),
                         owned, home, owner_id,
-                        household: crate::plex::is_household(
-                            crate::plex::GrantEvidence { owned, home, owner_id }.grant(),
+                        household: crate::registry::is_household(
+                            crate::registry::GrantEvidence { owned, home, owner_id }.grant(),
                             &household,
                         ),
                         name, handle, state, tier,
@@ -2415,7 +2416,7 @@ impl BrowseState {
             }
             return;
         }
-        let Some(client) = crate::plex::client_for(sid) else { return };
+        let Some(client) = crate::registry::client_for(sid) else { return };
         let request = DiscoveryRequest {
             epoch: self.table_epoch(), si: source, client: DiscClient::Plex(client),
             token_gen: client.token_gen(), job, want_name, adapter: Arc::clone(adapter),
@@ -2484,7 +2485,7 @@ impl BrowseState {
             #[cfg(feature = "jellyfin")]
             DiscClient::Jellyfin(_) => unreachable!("the Jellyfin arm above returns"),
         };
-        crate::plex::commit_if_current(client.id(), client, token_gen, || {
+        crate::registry::commit_if_current(client.id(), client, token_gen, || {
             if self.section_sid(sec) == Some(client.id()) {
                 if let Some(state) = self.state_mut(sec) {
                     if state.library_type != library_type {
@@ -2581,7 +2582,7 @@ impl BrowseState {
             }
             return;
         }
-        let Some(client) = crate::plex::client_for(sid) else { return };
+        let Some(client) = crate::registry::client_for(sid) else { return };
         let token_gen = client.token_gen();
         adapter.fetching.store(true, Ordering::SeqCst);
         let worker_adapter = Arc::clone(adapter);
@@ -2732,7 +2733,7 @@ impl BrowseState {
             };
             if let Some(source) = self.sections.get(result.sec).map(|section| section.src) {
                 let token_gen = result.token_gen;
-                let _ = crate::plex::commit_reachability_if_current(
+                let _ = crate::registry::commit_reachability_if_current(
                     client.id(), client, token_gen, result.total >= 0, None, |outcome| {
                         if !self.apply_source_outcome(source, client, outcome) {
                             return false;
@@ -2976,20 +2977,20 @@ fn ensure_sections_with(
     fetch: impl FnOnce(&crate::plex::Client) -> Option<Vec<(i64, String, SecKind)>>,
 ) -> usize {
     state.sync_roster_owned();
-    let cur_sid = crate::plex::current_server();
+    let cur_sid = crate::registry::current();
     let Some(si) = state.sources().iter().position(|s| s.sid == cur_sid) else {
         return state.sections().len();
     };
     if state.sources()[si].sections_done {
         return state.sections().len();
     }
-    let Some(client) = crate::plex::client_for(cur_sid) else {
+    let Some(client) = crate::registry::client_for(cur_sid) else {
         return state.sections().len();
     };
     let token_gen = client.token_gen();
     let found = catch_unwind(AssertUnwindSafe(|| fetch(client))).unwrap_or(None);
     let ok = found.is_some();
-    let committed = crate::plex::commit_reachability_if_current(
+    let committed = crate::registry::commit_reachability_if_current(
         cur_sid,
         client,
         token_gen,
@@ -3250,7 +3251,7 @@ pub(crate) const TAB_KINDS: [SecKind; 3] = [SecKind::Movie, SecKind::Show, SecKi
 
 /// One source's `machineIdentifier` as the registry knows it, `""` while nobody has learned it.
 fn machine_of(sid: ServerId) -> String {
-    crate::plex::client_for(sid)
+    crate::registry::client_for(sid)
         .map(|c| c.machine_id().to_string())
         .unwrap_or_default()
 }
@@ -3549,7 +3550,7 @@ pub(crate) fn seed_sources_for_owner_test(
 ) {
     crate::testlock::assert_held("an owned browse section table (seed_sources_for_test)");
     state.reset_with(|| {});
-    let current = crate::plex::current_server();
+    let current = crate::registry::current();
     state.sources = (0..n)
         .map(|index| BrowseSource {
             sid: if index == 0 {
@@ -3592,7 +3593,7 @@ pub(crate) fn seed_pins_for_owner_test(state: &mut BrowseState, pinned: &[bool])
     crate::testlock::assert_held("an owned browse section table (seed_pins_for_test)");
     state.reset_with(|| {});
     state.sources = vec![BrowseSource {
-        sid: crate::plex::current_server(),
+        sid: crate::registry::current(),
         client_addr: 0,
         token_gen: 0,
         machine_id: "mach-test".into(),
@@ -3683,14 +3684,14 @@ pub(crate) fn seed_registered_table_for_owner_test(
     crate::testlock::assert_held("an owned browse section table (seed_registered_table_for_test)");
     seed_two_source_table_for_owner_test(state);
     for (index, sid) in sids.into_iter().enumerate() {
-        let client = crate::plex::client_for(sid).expect("registered fixture source");
+        let client = crate::registry::client_for(sid).expect("registered fixture source");
         let source = state.source_mut(index).unwrap();
         source.sid = sid;
         source.machine_id = client.machine_id().to_owned();
         source.client_addr = client as *const _ as usize;
         source.token_gen = client.token_gen();
-        crate::plex::describe_server(sid, &source.name, &source.handle,
-            crate::plex::GrantEvidence {
+        crate::registry::describe(sid, &source.name, &source.handle,
+            crate::registry::GrantEvidence {
                 owned: source.owned, home: source.home, owner_id: source.owner_id,
             });
     }

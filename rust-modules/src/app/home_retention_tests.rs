@@ -71,7 +71,7 @@ fn home_requests_keep_the_emitting_instance_and_captured_return_memory() {
     use crate::screens::registry::{HomeGroupKey, HomeHubIdentity, HomeItemIdentity, HomeItemKey, HomeMemory, HomeTab};
     let _guard = crate::testlock::serial();
     let mut rig = Bridge::for_test(|| 0);
-    let sid = crate::plex::ServerId::UNSET;
+    let sid = crate::registry::ServerId::UNSET;
     let groups = vec![HomeHubIdentity::ContinueWatching,
         HomeHubIdentity::Identifier { sid, id: "recent".into(), key: "/hubs/recent".into() },
         HomeHubIdentity::Key { sid, key: "/library/collections/7/children".into() },
@@ -309,16 +309,16 @@ fn library_detail_return_restores_engine_card_and_viewport_after_stack_eviction(
     let _guard = crate::testlock::serial();
     struct RegistryCleanup;
     impl Drop for RegistryCleanup {
-        fn drop(&mut self) { crate::plex::reset_servers_for_test(); }
+        fn drop(&mut self) { crate::registry::reset_for_test(); }
     }
     let _cleanup = RegistryCleanup;
     let session = crate::plex::session::TempSession::new("owned-library-return");
     session.watching("u-owned-library-return");
     for evict in [false, true] {
-        crate::plex::reset_servers_for_test();
-        let sid = crate::plex::register_for_test("library-return-own", "127.0.0.1", 9, "synthetic", "fixture");
-        let shared = crate::plex::register_for_test("library-return-shared", "127.0.0.1", 10, "synthetic", "fixture");
-        crate::plex::set_current(sid);
+        crate::registry::reset_for_test();
+        let sid = crate::registry::register_with_client_id("library-return-own", "127.0.0.1", 9, "synthetic", "fixture");
+        let shared = crate::registry::register_with_client_id("library-return-shared", "127.0.0.1", 10, "synthetic", "fixture");
+        crate::registry::set_current(sid);
         let mut d = Dispatcher::<AppHost>::new();
         let mut rig = Bridge::for_test(|| 0);
         rig.stores.browse.borrow_mut().seed_registered_table_for_test([sid, shared]);
@@ -608,10 +608,10 @@ fn store_work_is_addressed_and_idle_polling_does_not_invent_a_change() {
 #[test]
 fn onboard_frame_lands_owned_discovery_before_capturing_its_directory() {
     let _guard = crate::testlock::serial();
-    crate::plex::reset_servers_for_test();
-    let sid = crate::plex::register_for_test(
+    crate::registry::reset_for_test();
+    let sid = crate::registry::register_with_client_id(
         "onboard-same-tick", "127.0.0.1", 9, "synthetic", "fixture");
-    let client = crate::plex::client_for(sid).unwrap();
+    let client = crate::registry::client_for(sid).unwrap();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     rig.stores.browse.borrow_mut().queue_discovery_for_test(
@@ -625,17 +625,17 @@ fn onboard_frame_lands_owned_discovery_before_capturing_its_directory() {
         "the pre-capture owner pump publishes discovery to Onboard in the same tick");
     assert_eq!(rig.browse_directory().sources()[0].0, sid);
     assert_eq!(rig.browse_directory().discovery(), crate::browse::SecFetch::Ready);
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
 
 #[test]
 fn controlled_discovery_recaptures_the_directory_in_its_delivery_turn() {
     let _guard = crate::testlock::serial();
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
     let mut rig = Bridge::for_test(|| 0);
-    let sid = crate::plex::register_for_test(
+    let sid = crate::registry::register_with_client_id(
         "same-turn-discovery", "127.0.0.1", 9, "synthetic", "fixture");
-    let client = crate::plex::client_for(sid).unwrap();
+    let client = crate::registry::client_for(sid).unwrap();
     rig.stores.browse.borrow_mut().queue_discovery_for_test(
         client, client.token_gen(), true);
     let result = rig.stores.browse.borrow_mut().take_discovery().unwrap();
@@ -664,5 +664,5 @@ fn controlled_discovery_recaptures_the_directory_in_its_delivery_turn() {
 
     assert_eq!(rig.browse_directory().sources().len(), 1,
         "the result is visible to the following screen Tick, not the next frame capture");
-    crate::plex::reset_servers_for_test();
+    crate::registry::reset_for_test();
 }
