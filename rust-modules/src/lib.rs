@@ -47,6 +47,7 @@ mod metadata; // item detail data layer (detail page): full metadata + seasons/e
 mod net; // HTTPS client over the TV's libcurl (plex.tv account/login calls — stream.rs can't do TLS/DNS)
 mod origin;
 mod paths; // where the app's own files live — /proc/self/exe, not a hardcoded install prefix
+mod playback; // backend-neutral playback vocabulary: encode contract, delivery/offset, audio DSP flags, quality ceiling, timeline state, queue rows (moved out of plex/)
 mod person; // person/actor page data layer: the header handed in by the cast row + /library/people/{id}/media
 mod collection; // collection page model: tag resolution, header metadata and paged members
 mod player; // buffer-feed video engine (was playback.c) — step 5

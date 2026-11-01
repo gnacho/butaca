@@ -172,9 +172,9 @@ impl Rung {
         LADDER.into_iter().find(|r| r.kbps() == kbps)
     }
 
-    pub(crate) fn ceiling(self) -> crate::plex::Ceiling {
+    pub(crate) fn ceiling(self) -> crate::playback::Ceiling {
         let (width, height) = self.raster();
-        crate::plex::Ceiling {
+        crate::playback::Ceiling {
             max_kbps: i64::from(self.kbps()),
             max_w: i64::from(width),
             max_h: i64::from(height),
@@ -203,7 +203,7 @@ impl Rung {
     /// Recover the controller's starting rung from the exact ceiling stored in the playback
     /// route. Auto owns only these canonical values; an arbitrary/manual ceiling is not an ABR
     /// state and therefore has no answer here.
-    pub(crate) fn from_ceiling(ceiling: crate::plex::Ceiling) -> Option<Self> {
+    pub(crate) fn from_ceiling(ceiling: crate::playback::Ceiling) -> Option<Self> {
         LADDER
             .iter()
             .copied()
@@ -435,7 +435,7 @@ impl HlsActuatorCatalog {
     /// forbidden zero-pixel picture. PMS omits source dimensions often enough that the other
     /// reading would empty the catalog and park Auto on whatever the floor happens to be, which is
     /// the opposite of what a missing field justifies. (This is the mirror image of
-    /// `plex::Ceiling::admits`, where an unmeasured source fails CLOSED — deliberately: there, `0`
+    /// `crate::playback::Ceiling::admits`, where an unmeasured source fails CLOSED — deliberately: there, `0`
     /// is being asked to honour an explicit user instruction, and here it is being asked to
     /// forbid a device capability nobody has contradicted.)
     pub(crate) fn limited_to(mut self, device: (u16, u16), source: (u16, u16)) -> Self {

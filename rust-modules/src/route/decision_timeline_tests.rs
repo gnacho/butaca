@@ -103,7 +103,7 @@ fn the_timeline_reaches_the_server_the_item_came_from_not_the_current_one() {
     let lease_b = begin_timeline_reporting(&ps).expect("B timeline lease");
     assert!(report_timeline(
         &lease_b,
-        crate::plex::TimelineState::Playing,
+        crate::playback::TimelineState::Playing,
         1_000,
         2_000,
     ));
@@ -132,7 +132,7 @@ fn the_timeline_reaches_the_server_the_item_came_from_not_the_current_one() {
     let lease_a = begin_timeline_reporting(&ps).expect("A timeline lease");
     assert!(report_timeline(
         &lease_a,
-        crate::plex::TimelineState::Stopped,
+        crate::playback::TimelineState::Stopped,
         0,
         2_000,
     ));
@@ -223,7 +223,7 @@ fn replacement_timeline_waits_for_the_announced_old_stop_boundary() {
     let lease = begin_timeline_reporting(&ps).expect("replacement reporter lease");
     let (done_tx, done_rx) = std::sync::mpsc::channel();
     let replacement = std::thread::spawn(move || {
-        let sent = report_timeline(&lease, crate::plex::TimelineState::Playing, 1_000, 20_000);
+        let sent = report_timeline(&lease, crate::playback::TimelineState::Playing, 1_000, 20_000);
         let _ = done_tx.send(sent);
     });
 
@@ -332,7 +332,7 @@ fn timeline_lease_cannot_cross_engine_teardown() {
     );
     install_active_encoder("wire-old");
     let old = begin_timeline_reporting(&ps).expect("old reporter");
-    let before = timeline_snapshot(&old, crate::plex::TimelineState::Playing, 1_000, 2_000)
+    let before = timeline_snapshot(&old, crate::playback::TimelineState::Playing, 1_000, 2_000)
         .expect("old projection");
     assert_eq!(before.rating_key, "rk-old");
     assert_eq!(before.session, "wire-old");
@@ -340,7 +340,7 @@ fn timeline_lease_cannot_cross_engine_teardown() {
 
     begin_engine_teardown(true);
     assert!(
-        timeline_snapshot(&old, crate::plex::TimelineState::Playing, 1_500, 2_000).is_none(),
+        timeline_snapshot(&old, crate::playback::TimelineState::Playing, 1_500, 2_000).is_none(),
         "an old reporter must not sample any field after its Engine is retired"
     );
     reset_player_control_for_test(&ps);

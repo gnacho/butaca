@@ -94,14 +94,14 @@ fn apply_plan_installs_contract_outcome_audio() {
         can_normalize_loudness: true,
         immersive: false,
     };
-    let audio = crate::plex::AudioEnhancements { boost_dialog: true, normalize_loudness: false };
+    let audio = crate::playback::AudioEnhancements { boost_dialog: true, normalize_loudness: false };
     apply_plan(
         &mut ps,
         Plan {
             url: "https://example.invalid/start.mkv".into(),
             acodec: "ac3".into(),
             src_acodec: "truehd".into(),
-            contract: crate::plex::EncodeContract { audio, ..Default::default() },
+            contract: crate::playback::EncodeContract { audio, ..Default::default() },
             enhancement: EnhancementOutcome::Applied,
             audio: Some(carried.clone()),
             ..Default::default()
@@ -123,7 +123,7 @@ fn apply_plan_installs_contract_outcome_audio() {
         },
         "rk-plain",
     );
-    assert_eq!(ps.cur_contract.audio, crate::plex::AudioEnhancements::NONE);
+    assert_eq!(ps.cur_contract.audio, crate::playback::AudioEnhancements::NONE);
     assert_eq!(ps.cur_enhancement, EnhancementOutcome::Off);
     assert_eq!(ps.cur_audio, None, "no fabricated track from the flat codec fields");
 }
@@ -179,7 +179,7 @@ fn remux_review_http_200_refusal_never_gets_media() {
     assert!(crate::net::global_init() && crate::curlio::available());
     let (port, done, server) = selection_probe_pms(true, 0);
     let sid = crate::registry::register_with_client_id("refused-probe", "127.0.0.1", port, "token", "refused-probe-client");
-    let sample = measure_remote_remux(crate::registry::client_for(sid).unwrap(), "rk", "refused-session", 2, 0, 320, crate::plex::AudioEnhancements::NONE).sample;
+    let sample = measure_remote_remux(crate::registry::client_for(sid).unwrap(), "rk", "refused-session", 2, 0, 320, crate::playback::AudioEnhancements::NONE).sample;
     done.send(()).unwrap();
     let requests = server.join().unwrap();
     assert!(sample.is_none());

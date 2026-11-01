@@ -148,7 +148,7 @@ pub(crate) fn timeline_thread(
     lease: crate::route::TimelineLease,
     stop: std::sync::Arc<ReportStop>,
 ) {
-    use crate::plex::TimelineState;
+    use crate::playback::TimelineState;
     loop {
         if stop.wait_or_stop(REPORT_INTERVAL_S) {
             return;

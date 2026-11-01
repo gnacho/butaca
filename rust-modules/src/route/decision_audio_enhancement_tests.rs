@@ -13,11 +13,11 @@ use super::test_support::*;
 use super::test_support::apply_plan;
 use crate::plex::serverinfo::Subscription;
 
-const PREF: crate::plex::AudioEnhancements = crate::plex::AudioEnhancements {
+const PREF: crate::playback::AudioEnhancements = crate::playback::AudioEnhancements {
     boost_dialog: false,
     normalize_loudness: true,
 };
-const NONE: crate::plex::AudioEnhancements = crate::plex::AudioEnhancements::NONE;
+const NONE: crate::playback::AudioEnhancements = crate::playback::AudioEnhancements::NONE;
 
 fn track(sid: i64, ordinal: i32, codec: &str, channels: i64, capable: bool, immersive: bool) -> CarriedAudio {
     CarriedAudio {
@@ -78,7 +78,7 @@ impl Live {
 #[derive(Clone, Copy)]
 enum Delivery {
     Direct,
-    Remux(crate::plex::AudioEnhancements),
+    Remux(crate::playback::AudioEnhancements),
     Hls,
 }
 
@@ -96,7 +96,7 @@ fn install(
         Delivery::Direct => (
             format!("http://127.0.0.1:{port}/library/parts/960001/1/file.mkv"),
             String::new(),
-            crate::plex::EncodeContract::default(),
+            crate::playback::EncodeContract::default(),
             EnhancementOutcome::Off,
         ),
         Delivery::Remux(a) => (
@@ -108,8 +108,8 @@ fn install(
         Delivery::Hls => (
             format!("http://127.0.0.1:{port}/video/:/transcode/universal/start.m3u8"),
             "enh-hls-1".to_owned(),
-            crate::plex::EncodeContract {
-                delivery: crate::plex::TranscodeDelivery::FixedHls { seconds_per_segment: 2 },
+            crate::playback::EncodeContract {
+                delivery: crate::playback::TranscodeDelivery::FixedHls { seconds_per_segment: 2 },
                 ceiling: Some(crate::abr::Rung::P1080High.ceiling()),
                 ..Default::default()
             },
@@ -142,7 +142,7 @@ fn install(
 
 /// The toggle row minus persistence (`request_audio_enhancement` also retains a session write,
 /// which a host test must not aim at the developer's real session file).
-fn toggle(ps: &mut PlaybackSession, a: crate::plex::AudioEnhancements) -> bool {
+fn toggle(ps: &mut PlaybackSession, a: crate::playback::AudioEnhancements) -> bool {
     crate::player::restore_audio_enhancements(a);
     reconcile_enhancement(ps, false)
 }
@@ -269,7 +269,7 @@ fn recovery_flavour_uses_candidate_family_not_live_hls() {
     crate::player::restore_audio_enhancements(PREF);
     let cand = candidate(true, a1(), None);
     install(&mut ps, &live, Delivery::Hls, a1(), Some(cand.clone()), 0);
-    assert!(matches!(ps.cur_contract.delivery, crate::plex::TranscodeDelivery::FixedHls { .. }));
+    assert!(matches!(ps.cur_contract.delivery, crate::playback::TranscodeDelivery::FixedHls { .. }));
     assert_eq!(recovery_flavour(&cand, recovery_want(&ps, &cand)), RecoveryFlavour::Remux(PREF));
     crate::player::restore_audio_enhancements(NONE);
     assert_eq!(recovery_flavour(&cand, recovery_want(&ps, &cand)), RecoveryFlavour::Direct);

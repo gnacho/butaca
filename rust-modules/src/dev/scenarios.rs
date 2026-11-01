@@ -315,9 +315,9 @@ pub(crate) fn arm_noidle() {
 pub(crate) fn arm_audio_enhancements() {
     let Some(v) = crate::dev::read("audioenh") else { return };
     let a = match v.trim() {
-        "off" => crate::plex::AudioEnhancements::NONE,
-        "boost" => crate::plex::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
-        "loudness" => crate::plex::AudioEnhancements { boost_dialog: false, normalize_loudness: true },
+        "off" => crate::playback::AudioEnhancements::NONE,
+        "boost" => crate::playback::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
+        "loudness" => crate::playback::AudioEnhancements { boost_dialog: false, normalize_loudness: true },
         #[allow(unused_variables)]
         other => {
             #[cfg(feature = "devtriggers")]

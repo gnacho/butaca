@@ -109,7 +109,7 @@ pub(crate) struct TrackMenuState {
     /// [`Self::offset_ms`]/[`Self::tone`] — a run of toggle presses inside one open counts from
     /// what THIS panel last drew, and [`Self::rebuild`] is the only writer, on every (re)build of
     /// the Audio tab (`new`/`focus_tab`).
-    enhance_shown: Option<crate::plex::AudioEnhancements>,
+    enhance_shown: Option<crate::playback::AudioEnhancements>,
     /// The Audio tab's focused row identity, banked across a live rows-VANISH: the enhancement
     /// offer can drop for a poll or two on a route change this menu never asked for (a subtitle
     /// switched on mid-play, a momentary refusal) and return before the viewer presses anything.
@@ -141,7 +141,7 @@ pub(crate) enum TrackCommit {
     /// bits regardless of which row was pressed. Built from [`TrackMenuState::enhance_shown`],
     /// never re-derived from `ps` here — the panel owns its own rows, not the playback (see this
     /// enum's own doc).
-    AudioEnhancement(crate::plex::AudioEnhancements),
+    AudioEnhancement(crate::playback::AudioEnhancements),
     /// `sidecar_key` is `Some` when the pick is an EXTERNAL text subtitle the client can draw
     /// on direct play (`metadata::Stream::sidecar_renderable`): it has no demuxer ordinal
     /// (`render_ordinal` is -1), so the loop hands it to `player::sidecar` beside the unchanged
@@ -339,7 +339,7 @@ impl TrackMenuState {
             // pick below is never mistaken for one of these by position arithmetic.
             return match self.audio_targets.get(sel.max(0) as usize).copied() {
                 target @ (Some(AudioRowTarget::Boost) | Some(AudioRowTarget::Loudness)) => {
-                    let mut a = self.enhance_shown.unwrap_or(crate::plex::AudioEnhancements::NONE);
+                    let mut a = self.enhance_shown.unwrap_or(crate::playback::AudioEnhancements::NONE);
                     if target == Some(AudioRowTarget::Boost) {
                         a.boost_dialog = !a.boost_dialog;
                     } else {
@@ -532,7 +532,7 @@ impl TrackMenuState {
     /// `self.audio_targets` is empty then ([`Self::rebuild`]'s Subtitles arm clears it, and the
     /// constructor never populates it first), so the lookup misses and the fallback below —
     /// landing on the checked track — is exactly the existing open/switch behaviour.
-    fn rebuild_audio(&mut self, enhance_shown: Option<crate::plex::AudioEnhancements>, meta: metadata::MetadataView<'_>, slide: bool) {
+    fn rebuild_audio(&mut self, enhance_shown: Option<crate::playback::AudioEnhancements>, meta: metadata::MetadataView<'_>, slide: bool) {
         let prev_target = self.audio_targets.get(self.table.sel.max(0) as usize).copied();
         // The offer is about to VANISH (Some -> None): bank the toggle row identity before
         // `self.audio_targets` drops it, so a later return restores it instead of reading
@@ -1768,7 +1768,7 @@ mod enhancement_menu_tests {
         let _g = crate::testlock::serial();
         let (menu, ps) = audio_tab(EnhTestFixture {
             remux: Some(true),
-            applied: crate::plex::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
+            applied: crate::playback::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
             ..Default::default()
         });
         assert!(menu.enhance_shown.is_some());
@@ -1817,7 +1817,7 @@ mod enhancement_menu_tests {
         assert_eq!(
             outcome,
             TrackOk::Commit {
-                commit: TrackCommit::AudioEnhancement(crate::plex::AudioEnhancements {
+                commit: TrackCommit::AudioEnhancement(crate::playback::AudioEnhancements {
                     boost_dialog: true,
                     normalize_loudness: false,
                 }),
@@ -1831,7 +1831,7 @@ mod enhancement_menu_tests {
         assert_eq!(
             outcome,
             TrackOk::Commit {
-                commit: TrackCommit::AudioEnhancement(crate::plex::AudioEnhancements::NONE),
+                commit: TrackCommit::AudioEnhancement(crate::playback::AudioEnhancements::NONE),
                 keep_open: true,
             }
         );
@@ -1843,23 +1843,23 @@ mod enhancement_menu_tests {
         let _g = crate::testlock::serial();
         // Settled (no user edit queued): the row reads what the contract actually APPLIED.
         let (menu, ps) = audio_tab(EnhTestFixture {
-            applied: crate::plex::AudioEnhancements { boost_dialog: false, normalize_loudness: true },
+            applied: crate::playback::AudioEnhancements { boost_dialog: false, normalize_loudness: true },
             ..Default::default()
         });
         assert_eq!(
             menu.enhance_shown,
-            Some(crate::plex::AudioEnhancements { boost_dialog: false, normalize_loudness: true }),
+            Some(crate::playback::AudioEnhancements { boost_dialog: false, normalize_loudness: true }),
         );
         teardown(&ps);
         drop(_g);
 
         // In flight (a user edit queued, not yet settled): the row reads the DESIRED preference.
         let _g = crate::testlock::serial();
-        let desired = crate::plex::AudioEnhancements { boost_dialog: true, normalize_loudness: true };
+        let desired = crate::playback::AudioEnhancements { boost_dialog: true, normalize_loudness: true };
         crate::player::set_audio_enhancements(desired);
         let (menu, ps) = audio_tab(EnhTestFixture { in_flight: true, ..Default::default() });
         assert_eq!(menu.enhance_shown, Some(desired));
-        crate::player::set_audio_enhancements(crate::plex::AudioEnhancements::NONE);
+        crate::player::set_audio_enhancements(crate::playback::AudioEnhancements::NONE);
         teardown(&ps);
     }
 
@@ -1870,7 +1870,7 @@ mod enhancement_menu_tests {
         // `self.enhance_shown = Some(a)` leaves a freshly-picked row in, before the server has
         // answered.
         let (mut menu, ps_ok) = audio_tab(EnhTestFixture {
-            applied: crate::plex::AudioEnhancements { boost_dialog: false, normalize_loudness: true },
+            applied: crate::playback::AudioEnhancements { boost_dialog: false, normalize_loudness: true },
             ..Default::default()
         });
         assert_eq!(menu.table.sections[1].rows[1].toggle, Some(true));
@@ -1903,7 +1903,7 @@ mod enhancement_menu_tests {
     fn live_update_preserves_focus_on_the_toggled_row_not_the_checked_track() {
         let _g = crate::testlock::serial();
         let (mut menu, ps_before) = audio_tab(EnhTestFixture {
-            applied: crate::plex::AudioEnhancements { boost_dialog: false, normalize_loudness: false },
+            applied: crate::playback::AudioEnhancements { boost_dialog: false, normalize_loudness: false },
             ..Default::default()
         });
         // Row 0 is the one audio track (checked/active); row 1 is Boost dialog. Move the ENGINE's
@@ -1915,7 +1915,7 @@ mod enhancement_menu_tests {
         // request (mirrors the server's async `EnhancementOutcome` landing), delivered the way
         // `update` is fed every frame: a fresh `&PlaybackSession`, not a rebuild the panel triggers.
         let (ps_after, _sid2) = enhancement_test_session(EnhTestFixture {
-            applied: crate::plex::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
+            applied: crate::playback::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
             ..Default::default()
         });
         let store = one_track_store();
@@ -2039,7 +2039,7 @@ mod enhancement_menu_tests {
             let _g = crate::testlock::serial();
             let _guard = language_on_this_thread_for_test(language);
             let (menu, ps) = audio_tab(EnhTestFixture {
-                applied: crate::plex::AudioEnhancements { boost_dialog: true, normalize_loudness: true },
+                applied: crate::playback::AudioEnhancements { boost_dialog: true, normalize_loudness: true },
                 ..Default::default()
             });
             out.extend(
