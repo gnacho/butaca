@@ -281,7 +281,8 @@ pub(crate) struct Bridge {
 }
 
 impl Bridge {
-    #[cfg(all(test, not(feature = "jellyfin")))]
+    // Its only readers are the recorder's product tests, which are Jellyfin-world gated.
+    #[cfg(all(test, feature = "jellyfin"))]
     pub(crate) fn measurement_queries(&self)->Vec<crate::ui::rec::MetricKey> { self.measure.queries() }
     pub(crate) fn prepare_measurements(&mut self, replay: Option<&std::collections::HashMap<crate::ui::rec::MetricKey,u32>>) {
         self.measure.prepare(replay);
@@ -380,7 +381,7 @@ impl Bridge {
         }, stores)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "jellyfin"))]
     fn for_session_test(init: crate::auth::SessionInit) -> Self {
         static FIXTURE: crate::ui::fixture::FixtureMeasure = crate::ui::fixture::FixtureMeasure;
         let adapter = super::adapters::session::SessionAdapter::fixture_with(init.persisted.clone());
@@ -392,7 +393,7 @@ impl Bridge {
         })
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "jellyfin"))]
     fn with_publications(measure: &'static dyn Measure, now_us: fn() -> u64,
         init: crate::auth::SessionInit, session_adapter: super::adapters::session::SessionAdapter,
         reads: StorePublications) -> Self {
@@ -1507,7 +1508,7 @@ impl Bridge {
         )).collect()
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "jellyfin"))]
     pub(crate) fn settle_session_io_for_test(&mut self, d: &mut Dispatcher<AppHost>) {
         for _ in 0..32 {
             if !self.session_adapter.persistence_pending() { return; }
@@ -3041,7 +3042,9 @@ mod person_lifecycle_tests;
 #[path = "collection_lifecycle_tests.rs"]
 mod collection_lifecycle_tests;
 
-#[cfg(test)]
+// The controlled preferences contract boots the synthetic Jellyfin world, which
+// `Initial::validate` refuses without the feature.
+#[cfg(all(test, feature = "jellyfin"))]
 mod preference_effect_tests {
     use super::*;
     use crate::screens::registry::PreferenceCmd;

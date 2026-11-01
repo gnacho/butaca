@@ -2,7 +2,10 @@
 //! by the fresh-root simulator artifact; these tests do not claim native rendering or network.
 use super::*;
 
+/// The synthetic home IS the Jellyfin world: `Initial::validate` refuses its bootstrap
+/// authority without the feature, so a controlled-world test cannot even boot.
 #[test]
+#[cfg(feature = "jellyfin")]
 fn filmography_initial_requires_complete_typed_inputs() {
     let mut value = serde_json::to_value(Initial::synthetic_home(1, 32498, None).unwrap()).unwrap();
     value["content"] = serde_json::json!({"detail":"1001", "detailsec":1,
@@ -16,7 +19,9 @@ fn filmography_initial_requires_complete_typed_inputs() {
     assert!(Initial::from_value(value).is_err());
 }
 
+/// Jellyfin world gate: the synthetic home cannot validate its authority without the feature.
 #[test]
+#[cfg(feature = "jellyfin")]
 fn content_resources_deny_execution_and_require_exact_admissions() {
     let _guard = crate::testlock::serial();
     let initial = Initial::synthetic_home(1, 32498, None).unwrap();
@@ -54,7 +59,9 @@ fn controlled_script_input_roundtrips_without_claiming_a_physical_key() {
     }
 }
 
+/// Jellyfin world gate: the synthetic home cannot validate its authority without the feature.
 #[test]
+#[cfg(feature = "jellyfin")]
 fn settings_initial_is_typed_hashed_and_bound_to_its_trigger() {
     let initial = Initial::synthetic_home(17, 32517, Some("root".into())).unwrap();
     assert_eq!(initial.settings.as_deref(), Some("root"));
@@ -75,6 +82,7 @@ fn settings_initial_is_typed_hashed_and_bound_to_its_trigger() {
     assert_ne!(plain.hash(), initial.hash());
 }
 use crate::ui::machine::{InputEvent, InputKind, Key, Edge, Source, Tick};
+#[cfg(feature = "jellyfin")]
 use serde_json::json;
 
 #[test]
@@ -86,7 +94,9 @@ fn committed_replay_initials_remain_canonical_and_hash_bound() {
     // canonical-and-hash-bound property is pinned again.
 }
 
+/// Jellyfin world gate: the synthetic home cannot validate its authority without the feature.
 #[test]
+#[cfg(feature = "jellyfin")]
 fn typed_initial_roundtrip_and_hidden_input_hash_are_complete() {
     let initial = Initial::synthetic_home(17, 32517, None).unwrap();
     let value = serde_json::to_value(&initial).unwrap();
@@ -140,7 +150,9 @@ fn screen_input_codec_retains_full_time_source_edge_and_hit_identity() {
 /// terminal at all (`drain_live` -> `Some(([], drain))`), and the device-side validator rejected
 /// `{"data":[]}` as "noncanonical detail replies". This pins `Bridge::controlled_home` actually
 /// arming its own `MetadataStore`'s Tracker from `initial.content.is_some()`.
+/// Jellyfin world gate: the synthetic home cannot validate its authority without the feature.
 #[test]
+#[cfg(feature = "jellyfin")]
 fn controlled_home_arms_the_detail_tracker_when_content_initial_is_present() {
     let _serial = crate::testlock::serial();
     crate::registry::reset_for_test();
@@ -172,6 +184,7 @@ fn controlled_home_arms_the_detail_tracker_when_content_initial_is_present() {
     crate::registry::reset_for_test();
 }
 
+#[cfg(feature = "jellyfin")]
 fn recording(initial: &Initial) -> Recording {
     let mut header = crate::ui::rec::Header::new(super::super::recorder::state_fp(),initial);
     header.init_data = serde_json::to_value(initial).unwrap();
@@ -181,7 +194,9 @@ fn recording(initial: &Initial) -> Recording {
         metrics:Default::default(),stopped_at:None }
 }
 
+/// Jellyfin world gate: the synthetic home cannot validate its authority without the feature.
 #[test]
+#[cfg(feature = "jellyfin")]
 fn whole_record_preflight_rejects_bad_late_results_and_markers_without_resources() {
     let initial = Initial::synthetic_home(23,32517,None).unwrap();
     let mut record = recording(&initial);

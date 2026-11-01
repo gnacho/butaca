@@ -211,7 +211,7 @@ impl SessionAdapter {
             publisher: crate::plex::session::ProfilePublisher::new(_mt),
         })
     }
-    #[cfg(test)]
+    #[cfg(all(test, feature = "jellyfin"))]
     pub(crate) fn live_recording_resources_for_test(mt: &crate::task::MainThread, root: std::path::PathBuf) -> Self {
         assert!(root.is_absolute() && root.is_dir());
         let mut adapter = Self::live_resources_for_test(mt);
@@ -300,8 +300,7 @@ impl SessionAdapter {
         self.commit_with_disk(permit, &completed.plan, Some(completed.disk))
     }
 
-    #[cfg(test)]
-    #[cfg(test)]
+    #[cfg(all(test, feature = "jellyfin"))]
     pub(crate) fn persistence_pending(&self) -> bool { !self.commits.is_empty() || !self.erasures.is_empty() }
 
     pub(crate) fn commit(&mut self, permit: CommitPermit<'_>, plan: &CommitPlan) -> CommitReply {

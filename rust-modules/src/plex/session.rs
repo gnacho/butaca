@@ -322,6 +322,7 @@ impl TempSession {
     }
 
     /// Resource tests assert the actual read/write/clear candidate list before touching it.
+    #[cfg(all(test, feature = "jellyfin"))]
     pub(crate) fn assert_only_target(&self) {
         crate::testlock::assert_held("Session scratch resource target");
         assert_eq!(auth_paths(), vec![self.path()]);

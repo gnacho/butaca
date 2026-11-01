@@ -361,12 +361,15 @@ mod tests {
     use super::*;
     // `test_state`/`test_adapter` are `pub(super)` in `crate::metadata::test_support`, i.e.
     // visible to `crate::metadata` and every descendant — this module included.
-    use super::super::test_support::{test_state, test_adapter};
+    use super::super::test_support::test_adapter;
+    #[cfg(feature = "jellyfin")]
+    use super::super::test_support::test_state;
 
     fn reset(enabled: bool) {
         reset_tracker_for_test(test_adapter(), enabled);
     }
 
+    #[cfg(feature = "jellyfin")]
     fn controlled(replay: bool) {
         crate::app::bootstrap::stores::reset_for_test();
         super::super::clear(test_state(), test_adapter());
@@ -377,6 +380,7 @@ mod tests {
         reset(true);
     }
 
+    #[cfg(feature = "jellyfin")]
     fn request(rk: &str, launched: bool, replay: bool) -> u32 {
         let mut req = 0;
         request_detail_with_spawn(test_adapter(), crate::registry::ServerId::from_raw(0), rk, |gen| {
@@ -409,7 +413,10 @@ mod tests {
         assert!(checked > 0, "fixture 12 carries no metadata replies");
     }
 
+    /// Staged through `controlled()`, which boots the synthetic Jellyfin home; refused without
+    /// the feature.
     #[test]
+    #[cfg(feature = "jellyfin")]
     fn p2_real_spawn_refusal_replays_exactly_once() {
         let _guard = crate::testlock::serial();
         use crate::app::bootstrap::stores;
@@ -442,7 +449,10 @@ mod tests {
         assert_eq!(test_adapter().detail_landing.inflight(detail_addr(req).to), 0);
     }
 
+    /// Staged through `controlled()`, which boots the synthetic Jellyfin home; refused without
+    /// the feature.
     #[test]
+    #[cfg(feature = "jellyfin")]
     fn p2_refusal_sequence_follows_worker_completion_and_cancel_consumes_once() {
         let _guard = crate::testlock::serial();
         use crate::app::bootstrap::stores;
@@ -476,7 +486,10 @@ mod tests {
         }
     }
 
+    /// Staged through `controlled()`, which boots the synthetic Jellyfin home; refused without
+    /// the feature.
     #[test]
+    #[cfg(feature = "jellyfin")]
     fn p2_cancellation_validator_handles_result_before_later_same_frame_effect() {
         let _guard = crate::testlock::serial();
         use crate::app::bootstrap::stores;
@@ -498,7 +511,10 @@ mod tests {
         assert_eq!(validator.last_seq, 2);
     }
 
+    /// Staged through `controlled()`, which boots the synthetic Jellyfin home; refused without
+    /// the feature.
     #[test]
+    #[cfg(feature = "jellyfin")]
     fn p2_publication_before_cancel_frees_capacity_before_next_pump() {
         let _guard = crate::testlock::serial();
         use crate::app::bootstrap::stores;
