@@ -86,9 +86,6 @@ pub struct MediaContainer {
     pub transcode_decision_text: String,
     #[serde(rename = "generalDecisionText", default, deserialize_with = "de_str")]
     pub general_decision_text: String,
-    /// `?includeMeta=1` on a section listing — the server-driven Sort/Filter menus.
-    #[serde(rename = "Meta", default)]
-    pub meta: Option<Meta>,
     /// `GET /` (the server root) only: does the server's OWNER hold a Plex Pass? Bool on PMS 1.43
     /// (probed live 2026-08-10), and lenient like every flag here because PMS string-encodes
     /// freely. `Option`, not a defaulted 0: a server old enough not to say must stay UNKNOWN —
@@ -116,9 +113,6 @@ pub struct LibrarySection {
     pub kind: String, // movie | show | artist
     #[serde(default)]
     pub title: String,
-    /// firstCharacter rows: the letter's item count (PMS string-encodes it).
-    #[serde(default, deserialize_with = "de_i64")]
-    pub size: i64,
     /// A library section's metadata agent. Together with `scanner`, this distinguishes Plex's
     /// Other Videos libraries from Movies libraries, whose wire `type` is also `movie`.
     #[serde(default, deserialize_with = "de_str")]
@@ -141,39 +135,6 @@ impl LibrarySection {
             && NONE_AGENTS.iter().any(|none| self.agent.trim().eq_ignore_ascii_case(none))
             && scanner.starts_with(VIDEO_FILES_SCANNER)
     }
-}
-
-/// `MediaContainer.Meta` — present with `includeMeta=1` on `/library/sections/{k}/all`.
-#[derive(Deserialize, Default)]
-pub struct Meta {
-    #[serde(rename = "Type", default)]
-    pub types: Vec<MetaType>,
-}
-
-/// One browsable type of the section (movie / show / season / episode / folder) with its
-/// server-defined sort menu. The `active:true` entry matches the current `type=` of the
-/// listing. (The wire also carries a `Filter[]` menu — docs/pms-api.md §2b — modelled again
-/// when the v1.5 facet menu consumes it; DTOs here keep only consumed fields.)
-#[derive(Deserialize, Default)]
-pub struct MetaType {
-    #[serde(default, deserialize_with = "de_i64")]
-    pub active: i64, // bool on the wire; de_i64 folds true/false/"1"
-    #[serde(rename = "Sort", default)]
-    pub sort: Vec<SortOption>,
-}
-
-/// One sort menu entry. `descKey` carries the server's descending expression when it is
-/// different from appending `:desc` (Show ordering reverses the show, not each episode).
-#[derive(Deserialize, Default)]
-pub struct SortOption {
-    #[serde(default)]
-    pub key: String, // "titleSort"
-    #[serde(rename = "descKey", default)]
-    pub desc_key: String,
-    #[serde(rename = "defaultDirection", default)]
-    pub default_direction: String, // "asc" | "desc"
-    #[serde(default)]
-    pub title: String, // display: "Title"
 }
 
 #[derive(Deserialize, Default)]

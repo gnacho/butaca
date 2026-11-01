@@ -822,7 +822,6 @@ mod tests {
     #[test]
     fn sort_refresh_updates_icon_and_the_next_action_direction() {
         let sorts = vec![SortEntry {
-            desc_key: String::new(),
             key: "titleSort".into(),
             title: "Title".into(),
             default_desc: false,
@@ -863,8 +862,8 @@ mod tests {
             kind: LibraryMenuKind::Sort, anchor: [0; 4],
         });
         let mut sorts = vec![
-            SortEntry { key: "titleSort".into(), desc_key: String::new(), title: "Title".into(), default_desc: false },
-            SortEntry { key: "addedAt".into(), desc_key: String::new(), title: "Added".into(), default_desc: true },
+            SortEntry { key: "titleSort".into(), title: "Title".into(), default_desc: false },
+            SortEntry { key: "addedAt".into(), title: "Added".into(), default_desc: true },
         ];
         menu.apply_draft(sort_draft(&sorts, 0, false));
         let identities = menu.identities.clone();
