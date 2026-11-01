@@ -5,63 +5,6 @@ use super::*;
 #[allow(unused_imports)]
 use super::test_support::*;
 
-/// THE bug: a failed first page armed the retry cooldown and nothing else, so `total` stayed
-/// -1, `loading_initial()` stayed true and the Library grid spun with no way out — for the
-/// rest of the session, on the user's own server. The failure must now be a STATE the screen
-/// can see, and the spinner must stop.
-#[test]
-fn a_failed_first_page_leaves_the_section_failed_and_not_loading() {
-    let _g = crate::testlock::serial();
-    let (_cleanup, mut browse, _, _) = registered_page_source();
-    land_page(&mut browse, -1, 0);
-    assert_eq!(browse.fetch_state(), SecFetch::Failed);
-    assert!(
-        !browse.loading_initial(),
-        "the grid must stop spinning on a failure"
-    );
-    assert_eq!(
-        browse.state.cur_state().unwrap().total,
-        -1,
-        "…with nothing to show, which is what makes it the SCREEN's failure too"
-    );
-}
-/// A served page is Ready, and stays the plain "here are your items" state.
-#[test]
-fn a_served_page_leaves_the_section_ready() {
-    let _g = crate::testlock::serial();
-    let (_cleanup, mut browse, _, _) = registered_page_source();
-    land_page(&mut browse, 3, 3);
-    assert_eq!(browse.fetch_state(), SecFetch::Ready);
-    assert!(!browse.loading_initial());
-    assert_eq!(browse.state.cur_state().unwrap().total, 3);
-}
-/// An EMPTY answer is an answer — `Ready`, never `Failed`. The library really does hold
-/// nothing (an unwatched filter that matches none, a section still being scanned), and the
-/// grid's own "Nothing here matches" line is the right read-out. This is `StatusKind::Empty`'s
-/// rule, stated in the state machine so a screen cannot get it wrong.
-#[test]
-fn an_empty_but_successful_listing_is_ready_not_failed() {
-    let _g = crate::testlock::serial();
-    let (_cleanup, mut browse, _, _) = registered_page_source();
-    land_page(&mut browse, 0, 0);
-    assert_eq!(browse.fetch_state(), SecFetch::Ready);
-    assert_eq!(browse.state.cur_state().unwrap().total, 0,
-        "an empty library is an answer, not a fault");
-    assert!(!browse.loading_initial());
-}
-/// A failure belongs to the query it was fetched for. Re-query (a sort/filter/section change
-/// wipes the store) and the section is Loading again, not stuck wearing the old failure —
-/// otherwise the read-out would blame a listing the user has already replaced.
-#[test]
-fn a_requery_clears_a_previous_failure() {
-    let _g = crate::testlock::serial();
-    let (_cleanup, mut browse, _, _) = registered_page_source();
-    land_page(&mut browse, -1, 0);
-    assert_eq!(browse.fetch_state(), SecFetch::Failed);
-    browse.state.requery();
-    assert_eq!(browse.fetch_state(), SecFetch::Loading);
-    assert!(browse.loading_initial());
-}
 /// THE bug, one layer up: `ensure_sections` folded every failure into an empty table, so the
 /// screen saw exactly what it sees before the first request — no section, no state, and
 /// `fetch_state()` answering `Loading` out of its `unwrap_or` — and spun forever with no way
@@ -229,99 +172,6 @@ fn a_source_arriving_late_appends_and_moves_no_existing_index() {
     );
 }
 
-// ---- client-side "Plays" sort (issue #146) --------------------------------------------------
-//
-// Measured against the owner's PMS 1.43.4: `includeMeta=1` never advertises a play-count sort
-// on ANY section type, but the server DOES honour `sort=viewCount:desc`/`:asc` on movie and
-// show sections and returns correctly ordered rows — and an unrecognised sort key 500s the
-// whole listing. So this entry is appended CLIENT-SIDE, gated on the section KIND the browse
-// table already carries, never guessed from a string.
-
-/// A movie section that does not advertise the key gains exactly one "Plays" row, defaulting
-/// to descending (most-played first) — the direction the feature exists for.
-#[test]
-fn a_movie_section_without_a_server_advertised_plays_sort_gains_exactly_one_descending_entry() {
-    let _g = crate::testlock::serial();
-    let (_cleanup, mut browse, _, _) = registered_page_source(); // section 0 is SecKind::Movie
-    land_page_with_sorts(&mut browse, vec![SortEntry {
-        key: "titleSort".into(), desc_key: String::new(),
-        title: "Title".into(),
-        default_desc: false,
-    }]);
-    let sorts = browse.state.cur_state().unwrap().sorts.clone();
-    assert_eq!(sorts.len(), 2, "the advertised sort plus exactly one client-side entry");
-    let plays = sorts
-        .iter()
-        .find(|sort| sort.key == "viewCount")
-        .expect("a Plays entry for a movie section");
-    assert_eq!(plays.title, "Plays");
-    assert!(plays.default_desc, "most-played first by default");
-}
-
-/// The server proved `sort=viewCount:desc` on show sections too (their own play count, not
-/// their episodes'), so a show section gains the same client-side entry.
-#[test]
-fn a_show_section_without_a_server_advertised_plays_sort_gains_it_too() {
-    let _g = crate::testlock::serial();
-    let (_cleanup, mut browse, _, _) = registered_page_source_of_kind(SecKind::Show);
-    land_page_with_sorts(&mut browse, vec![SortEntry {
-        key: "titleSort".into(), desc_key: String::new(),
-        title: "Title".into(),
-        default_desc: false,
-    }]);
-    let sorts = browse.state.cur_state().unwrap().sorts.clone();
-    assert!(
-        sorts
-            .iter()
-            .any(|sort| sort.key == "viewCount" && sort.title == "Plays" && sort.default_desc),
-        "a show section must gain the entry too: {:?}",
-        sorts.iter().map(|s| &s.key).collect::<Vec<_>>()
-    );
-}
-
-/// A section that ALREADY advertises `viewCount` (a future PMS) must not gain a duplicate row.
-#[test]
-fn a_section_that_already_advertises_view_count_gains_no_duplicate() {
-    let _g = crate::testlock::serial();
-    let (_cleanup, mut browse, _, _) = registered_page_source();
-    land_page_with_sorts(&mut browse, vec![
-        SortEntry { key: "titleSort".into(), desc_key: String::new(), title: "Title".into(), default_desc: false },
-        SortEntry { key: "viewCount".into(), desc_key: String::new(), title: "Plays".into(), default_desc: true },
-    ]);
-    let sorts = browse.state.cur_state().unwrap().sorts.clone();
-    assert_eq!(
-        sorts.iter().filter(|sort| sort.key == "viewCount").count(),
-        1,
-        "a server that starts advertising the key itself must not produce two rows"
-    );
-}
-
-/// Picking the entry must round-trip to exactly the key/direction pair the server was proven
-/// to honour — `viewCount:desc` — through the same `sort_idx`/`sort_desc` fields the listing
-/// query is built from.
-#[test]
-fn selecting_the_plays_sort_builds_the_proven_viewcount_desc_query() {
-    let _g = crate::testlock::serial();
-    let (_cleanup, mut browse, _, _) = registered_page_source();
-    land_page_with_sorts(&mut browse, vec![SortEntry {
-        key: "titleSort".into(), desc_key: String::new(),
-        title: "Title".into(),
-        default_desc: false,
-    }]);
-    assert!(browse.state.set_sort_by_key("viewCount", true));
-    let snapshot = browse.state.listing_snapshot();
-    let view = snapshot.view();
-    let picked = &view.sorts()[view.sort_index()];
-    assert_eq!(picked.key, "viewCount");
-    assert!(view.sort_desc());
-    let query_sort = format!(
-        "{}:{}",
-        picked.key,
-        if view.sort_desc() { "desc" } else { "asc" }
-    );
-    assert_eq!(query_sort, "viewCount:desc");
-}
-
 /// `SecKind` is the closed, exhaustively-matched gate the "Plays" sort is added behind — and
 /// it has no `Artist`/`Photo` variant at all: `SecKind::from_wire` already drops those
 /// directory types before they can become a `BrowseSection`, so there is no path into the
@@ -331,23 +181,4 @@ fn selecting_the_plays_sort_builds_the_proven_viewcount_desc_query() {
 fn artist_and_photo_sections_have_no_seckind_and_so_cannot_reach_the_plays_sort_gate() {
     assert_eq!(SecKind::from_wire("artist"), None);
     assert_eq!(SecKind::from_wire("photo"), None);
-}
-
-#[test]
-fn season_and_episode_lists_use_only_their_server_advertised_sorts() {
-    let _g = crate::testlock::serial();
-    for library_type in [LibraryType::Seasons, LibraryType::Episodes] {
-        let (_cleanup, mut browse, _, _) = registered_page_source_of_kind(SecKind::Show);
-        assert!(browse.state.set_library_type(library_type));
-        land_page_with_sorts(&mut browse, vec![SortEntry {
-            key: "show.titleSort,episode.index".into(),
-            desc_key: "show.titleSort:desc,episode.index".into(),
-            title: "Show".into(),
-            default_desc: true,
-        }]);
-        let state = browse.state.cur_state().unwrap();
-        assert_eq!(state.sorts.len(), 1, "Plays was proven only for movies and shows");
-        assert_eq!(state.sorts[0].key, "show.titleSort,episode.index");
-        assert!(state.sort_desc, "the active type's advertised default direction survives landing");
-    }
 }

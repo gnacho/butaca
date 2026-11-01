@@ -99,8 +99,8 @@ fn menu_side_actions_keep_source_sort_and_filter_row_identity() {
     let _guard = crate::testlock::serial();
     let mut sort = LibraryMenu::new(EntryId(7), menu_arg(LibraryMenuKind::Sort, [0; 4]));
     let sorts = vec![
-        SortEntry { key: "titleSort".into(), desc_key: String::new(), title: "Title".into(), default_desc: false },
-        SortEntry { key: "addedAt".into(), desc_key: String::new(), title: "Added".into(), default_desc: true },
+        SortEntry { key: "titleSort".into(), title: "Title".into(), default_desc: false },
+        SortEntry { key: "addedAt".into(), title: "Added".into(), default_desc: true },
     ];
     sort.apply_draft(sort_draft(&sorts, 0, false));
     let sort_key = sort.rows[1].key;

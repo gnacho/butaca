@@ -13,25 +13,20 @@
 //! `Mutex` mailbox + generation atomics (a re-query supersedes in-flight landings), applied
 //! on the main thread by [`pump`] once a frame while the Library screen is up.
 //!
-//! The sort/filter MENUS are server-driven: the first page of a section is requested with
-//! `includeMeta=1` and the response's `Meta.Type[]` supplies the Sort entries; the genre
-//! value list is fetched lazily (`kick_genres`) when the filter menu first opens. Nothing
-//! menu-shaped is hardcoded, with one measured exception: PMS 1.43.4 never advertises a
-//! play-count sort in `Meta.Type[].Sort` on any section type, yet it DOES honour
-//! `sort=viewCount:desc`/`:asc` on movie and show sections (an unrecognised key 500s the whole
-//! listing, so this is not something to guess at for a section type that hasn't been proven).
-//! [`with_plays_sort`] appends that one client-side entry where [`SecKind`] proves it works,
-//! and only once, in case a future server starts advertising the key itself (issue #146).
+//! The sort/filter MENUS are server-shaped but arrive with the section's data: Jellyfin's
+//! `SortBy` vocabulary is fixed (`jellyfin::browse::sorts`, landed with the first page) and the
+//! genre value list is fetched lazily (`kick_genres`) when the filter menu first opens. The
+//! PMS-side menu discovery (`includeMeta=1`), its client-side Plays entry and the remembered-sort
+//! page re-ask went with the PMS browse arm (#166 pass 3).
 //!
 //! The CHOSEN sort of a library's own listing is remembered across restarts, per profile, by
 //! (machine id, section key) and by the sort's KEY, never its menu position
-//! (`plex::session::Session::library_sorts`, issue #278). It is applied on the section's first
-//! page only after that page's menu has offered the key again — the discovery request never
-//! carries it, for the 500 above — and the unsorted discovery page is then never published
-//! ([`fetch_listing_page`]). A key the menu no longer offers falls back silently to the default.
+//! (`plex::session::Session::library_sorts`, issue #278). The PMS page worker that re-asked the
+//! first page in a remembered order is gone with the PMS arm; the recording side
+//! ([`BrowseState::note_sort_choice`]) stays, because the persisted session shapes are shared.
 //!
 //! [`BrowseState`] is main-thread-only; worker threads touch only their owning store adapter's
-//! mailboxes + atomics and the `&'static` Plex client.
+//! mailboxes + atomics and the client captured at the spawn site.
 //!
 //! ## The table addresses (SOURCE, section), not a section
 //!
@@ -50,10 +45,8 @@
 //! second call.
 use crate::registry::ServerId;
 use crate::plex::SectionQuery;
-use crate::pms::{parse_item, PmsMovie};
+use crate::pms::PmsMovie;
 use std::panic::catch_unwind;
-#[cfg(test)]
-use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -374,19 +367,6 @@ impl LibraryType {
         }
     }
 
-    /// The `type=` a listing of this type sends in a section of `kind`, or `None` for the
-    /// section's own default listing. A movie library's films have always been asked for without
-    /// one, and still are; a TV library's shows name `type=2` explicitly, as they always did.
-    pub(crate) fn plex_type(self, kind: SecKind) -> Option<i64> {
-        match (self, kind) {
-            (Self::Primary, SecKind::Movie | SecKind::Video) => None,
-            (Self::Primary, SecKind::Show) => Some(2),
-            (Self::Seasons, _) => Some(3),
-            (Self::Episodes, _) => Some(4),
-            (Self::Collections, _) => Some(18),
-        }
-    }
-
     /// Do the Unwatched and Genre filters apply? A collection has no watch state of its own and
     /// no genre, so both are hidden — and not sent — while collections are listed. The section's
     /// Unwatched switch is kept for when its own type is listed again (a genre never survives a
@@ -406,29 +386,14 @@ impl LibraryType {
     }
 }
 
-/// One sort-menu entry (from `Meta.Type[].Sort` — server-driven).
+/// One sort-menu entry. The menu itself is the backend's: Jellyfin's `SortBy` vocabulary is
+/// fixed (`jellyfin::browse::sorts`) and lands with the first page; the PMS server-driven menu
+/// (`Meta.Type[].Sort`) and its query-token machinery went with the PMS browse arm (#166 pass 3).
 #[derive(Clone)]
 pub(crate) struct SortEntry {
-    pub(crate) key: String,   // "titleSort"
-    pub(crate) desc_key: String,
+    pub(crate) key: String,   // "SortName"
     pub(crate) title: String, // "Title"
     pub(crate) default_desc: bool,
-}
-
-impl SortEntry {
-    fn query(&self, desc: bool) -> String {
-        if !desc {
-            if self.key.contains(',') { self.key.clone() } else { format!("{}:asc", self.key) }
-        } else if !self.desc_key.is_empty() {
-            self.desc_key.clone()
-        } else if let Some((first, rest)) = self.key.split_once(',') {
-            // Show ordering reverses the show name while its seasons and episodes keep
-            // their natural order. Older menus may omit the explicit descending key.
-            format!("{first}:desc,{rest}")
-        } else {
-            format!("{}:desc", self.key)
-        }
-    }
 }
 
 /// The filter combination a letters probe describes (issue #37): Jellyfin's per-letter counts
@@ -562,6 +527,8 @@ impl SecItems {
         self.len = 0;
     }
     /// Size to the listing: pages are kept where they still fit, dropped past the new end.
+    /// Only the Jellyfin page landing calls these; dead (and expected) without the feature.
+    #[cfg_attr(all(not(feature = "jellyfin"), not(test)), expect(dead_code))]
     fn resize(&mut self, total: usize) {
         if total == self.len {
             return;
@@ -586,6 +553,7 @@ impl SecItems {
     }
     /// Place `m` at `i`; a page is allocated on its first item. Out of range is ignored (the
     /// listing shrank under a fetch, which the next page reconciles).
+    #[cfg_attr(all(not(feature = "jellyfin"), not(test)), expect(dead_code))]
     fn set(&mut self, i: usize, m: PmsMovie) {
         if i >= self.len {
             return;
@@ -671,29 +639,6 @@ impl Default for SecState {
     }
 }
 
-impl SecState {
-    fn query_filters(&self, section_kind: SecKind) -> Vec<(String, String)> {
-        let mut filters = Vec::new();
-        if let Some(kind) = self.library_type.plex_type(section_kind) {
-            filters.push(("type".into(), kind.to_string()));
-        }
-        if !self.library_type.filters() {
-            return filters;
-        }
-        if self.unwatched {
-            let key = match (section_kind, self.library_type) {
-                (SecKind::Show, LibraryType::Primary | LibraryType::Seasons) => "unwatchedLeaves",
-                (SecKind::Movie | SecKind::Video | SecKind::Show, _) => "unwatched",
-            };
-            filters.push((key.into(), "1".into()));
-        }
-        if let Some(genre) = &self.genre {
-            filters.push(("genre".into(), genre.id.clone()));
-        }
-        filters
-    }
-}
-
 /// The main-thread state of Browse. Worker mailboxes and their single-flight atomics live in the
 /// sibling [`BrowseAdapter`]; everything whose identity belongs to a Browse instance lives here.
 #[derive(Clone)]
@@ -752,7 +697,6 @@ pub(crate) struct BrowseAdapter {
     genre_result: Mutex<Option<DirectoryResult<GenreEntry>>>,
     letter_result: Mutex<Option<DirectoryResult<(String, i64)>>>,
     src_result: Mutex<Option<(u32, usize, SrcLanding)>>,
-    hubs: section_hubs::HubAdapter,
 }
 
 pub(crate) struct RosterSync {
@@ -771,7 +715,6 @@ impl Default for BrowseAdapter {
             genre_result: Mutex::new(None),
             letter_result: Mutex::new(None),
             src_result: Mutex::new(None),
-            hubs: Default::default(),
         }
     }
 }
@@ -782,9 +725,8 @@ impl BrowseAdapter {
         *self.genre_result.lock().unwrap_or_else(|e| e.into_inner()) = None;
         *self.letter_result.lock().unwrap_or_else(|e| e.into_inner()) = None;
         *self.src_result.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        *self.hubs.result.lock().unwrap_or_else(|e| e.into_inner()) = None;
         for flag in [&self.fetching, &self.genre_fetching, &self.letters_fetching,
-            &self.src_fetching, &self.hubs.fetching] {
+            &self.src_fetching] {
             flag.store(false, Ordering::SeqCst);
         }
     }
@@ -880,7 +822,6 @@ impl BrowseState {
             || adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()).is_some()
             || adapter.genre_result.lock().unwrap_or_else(|e| e.into_inner()).is_some()
             || adapter.letter_result.lock().unwrap_or_else(|e| e.into_inner()).is_some()
-            || adapter.hubs.result.lock().unwrap_or_else(|e| e.into_inner()).is_some()
             || self.states.iter().any(|state| state.hubs.needs_tick()) {
             return true;
         }
@@ -1186,20 +1127,6 @@ impl BrowseState {
             Some(next)
         });
     }
-    /// The remembered sort to restore on section `i`'s FIRST page, if any: only while its menu
-    /// is still unknown (`sorts` empty — the page that asks `includeMeta=1`) and only for the
-    /// library's own listing. Whether the server still offers the key is decided in the worker,
-    /// against the menu that page brings back ([`fetch_listing_page`]).
-    fn restore_for(&self, i: usize) -> Option<Restore> {
-        let state = self.states.get(i)?;
-        if !state.sorts.is_empty() || state.library_type != LibraryType::Primary {
-            return None;
-        }
-        let section = self.sections.get(i)?;
-        let machine = &self.sources.get(section.src)?.machine_id;
-        let (sort, desc) = self.sort_memory.get(machine, section.key)?;
-        Some(Restore { kind: section.kind, sort: sort.to_string(), desc })
-    }
     fn cur_source_idx(&self) -> Option<usize> {
         self.sections
             .get(self.cur())
@@ -1259,58 +1186,6 @@ impl BrowseState {
         crate::ui::idle::invalidate();
         true
     }
-    fn kick_directory<T: Send + 'static>(
-        &self,
-        adapter: &Arc<BrowseAdapter>,
-        done: bool,
-        flag: fn(&BrowseAdapter) -> &AtomicBool,
-        mail: fn(&BrowseAdapter) -> &Mutex<Option<DirectoryResult<T>>>,
-        dir: &'static str,
-        project: fn(&crate::plex::LibrarySection) -> Option<T>,
-    ) {
-        let current = self.cur();
-        if self.states.get(current).is_none() || done {
-            return;
-        }
-        let Some(sid) = self.section_sid(current) else {
-            return;
-        };
-        let Some(client) = crate::registry::client_for(sid) else {
-            return;
-        };
-        let token_gen = client.token_gen();
-        if flag(&adapter).swap(true, Ordering::SeqCst) {
-            return;
-        }
-        let key = self.sections[current].key;
-        let library_type = self.states[current].library_type;
-        let metadata_type = library_type.plex_type(self.sections[current].kind);
-        let epoch = self.table_epoch();
-        let worker_adapter = Arc::clone(&adapter);
-        let spawned = crate::task::spawn_small("directory", move || {
-            let list = catch_unwind(|| {
-                let mut values = Vec::new();
-                if let Some(container) = client.section_directory(key, dir, metadata_type) {
-                    values.extend(container.directory.iter().filter_map(project));
-                }
-                values
-            })
-            .unwrap_or_default();
-            *mail(&worker_adapter).lock().unwrap_or_else(|e| e.into_inner()) = Some(DirectoryResult {
-                epoch,
-                sec: current,
-                client: DiscClient::Plex(client),
-                token_gen,
-                library_type,
-                #[cfg(feature = "jellyfin")]
-                letters_filter: None,
-                list,
-            });
-        });
-        if !spawned {
-            flag(&adapter).store(false, Ordering::SeqCst);
-        }
-    }
     /// The current section's source is the Jellyfin server AND its client is installed. The
     /// installed-client guard is load-bearing on every arm that keys on the slot alone: slot 0
     /// is also a valid Plex slot in this build (every host fixture).
@@ -1320,7 +1195,7 @@ impl BrowseState {
             && crate::jellyfin::client().is_some()
     }
 
-    /// [`kick_directory`]'s Jellyfin twin: same single-flight, epoch and mailbox discipline,
+    /// The section-directory fetch: same single-flight, epoch and mailbox discipline,
     /// but the list arrives ALREADY projected (`jellyfin::browse` owns the mapping) and the
     /// landing carries the process-lifetime client instead of a registry slot.
     #[cfg(feature = "jellyfin")]
@@ -1354,7 +1229,6 @@ impl BrowseState {
                 epoch,
                 sec: current,
                 client: DiscClient::Jellyfin(jc),
-                token_gen: 0,
                 library_type,
                 letters_filter,
                 list,
@@ -1378,12 +1252,9 @@ impl BrowseState {
                 |jc, key, _kind| crate::jellyfin::browse::fetch_genres(jc, key).unwrap_or_default());
             return;
         }
-        self.kick_directory(adapter, done, |a| &a.genre_fetching, |a| &a.genre_result, "genre", |directory| {
-            (!directory.key.is_empty() && !directory.title.is_empty()).then(|| GenreEntry {
-                id: directory.key.clone(),
-                title: directory.title.clone(),
-            })
-        });
+        // The Plex section-directory lane went with the PMS browse arm (#166 pass 3).
+        #[cfg(not(feature = "jellyfin"))]
+        let _ = (done, adapter);
     }
     fn kick_letters(&self, adapter: &Arc<BrowseAdapter>) {
         let done = self
@@ -1415,17 +1286,9 @@ impl BrowseState {
                 });
             return;
         }
-        self.kick_directory(
-            adapter,
-            done,
-            |a| &a.letters_fetching,
-            |a| &a.letter_result,
-            "firstCharacter",
-            |directory| {
-                (!directory.key.is_empty() && directory.size > 0)
-                    .then(|| (directory.title.clone(), directory.size))
-            },
-        );
+        // The Plex firstCharacter lane went with the PMS browse arm (#166 pass 3).
+        #[cfg(not(feature = "jellyfin"))]
+        let _ = (done, adapter);
     }
     pub(crate) fn addressed_with_adapter(
         &mut self,
@@ -1473,7 +1336,7 @@ impl BrowseState {
                 }
             }
             LibraryWork::Hubs { may_publish } => {
-                self.hubs_kick(index, adapter);
+                self.hubs_kick(index);
                 self.hubs_commit_staged(index, may_publish)
             }
             work => {
@@ -2338,7 +2201,7 @@ impl BrowseState {
                 true
             }
             BrowseCmd::HubsInvalidateAll => {
-                self.hubs_invalidate_all(adapter);
+                self.hubs_invalidate_all();
                 true
             }
             BrowseCmd::SetWatchedLocal { sid, rk, on } => {
@@ -2443,6 +2306,12 @@ impl BrowseState {
         let Some((epoch, source, landing)) = taken else { return Default::default() };
         self.apply_discovery(epoch, source, landing, None, adapter)
     }
+    #[cfg(test)]
+    fn land_discovery_owned(&mut self, adapter: &Arc<BrowseAdapter>)
+        -> crate::stores::StoreOutcome {
+        self.land_discovery_owned_with_gate(adapter, crate::ui::landgate::fixture_gate())
+    }
+
     fn land_directory_owned_with_gate<T>(
         &mut self,
         gate: &crate::ui::landgate::Gate,
@@ -2459,101 +2328,74 @@ impl BrowseState {
         if result.epoch != self.table_epoch() {
             return false;
         }
-        #[cfg(feature = "jellyfin")]
-        let DirectoryResult { sec, client, token_gen, library_type, letters_filter, list, .. } = result;
-        #[cfg(not(feature = "jellyfin"))]
-        let DirectoryResult { sec, client, token_gen, library_type, list, .. } = result;
         // The Jellyfin landing applies straight to its section state — a process-lifetime
-        // install has no registry lifecycle to validate against.
+        // install has no registry lifecycle to validate against. The Plex arm went with the PMS
+        // browse arm (#166 pass 3); without the feature there is no lane that can land here.
         #[cfg(feature = "jellyfin")]
-        if matches!(client, DiscClient::Jellyfin(_)) {
-            let applied = if self.section_sid(sec) == Some(crate::jellyfin::SERVER_ID) {
-                match self.state_mut(sec) {
-                    Some(state) if state.library_type == library_type => {
-                        apply(state, list, letters_filter);
-                        true
+        {
+            let DirectoryResult { epoch: _, sec, client, library_type, letters_filter, list } = result;
+            if matches!(client, DiscClient::Jellyfin(_)) {
+                let applied = if self.section_sid(sec) == Some(crate::jellyfin::SERVER_ID) {
+                    match self.state_mut(sec) {
+                        Some(state) if state.library_type == library_type => {
+                            apply(state, list, letters_filter);
+                            true
+                        }
+                        _ => false,
                     }
-                    _ => false,
-                }
-            } else {
-                false
-            };
-            return applied;
-        }
-        let client = match client {
-            DiscClient::Plex(client) => client,
-            #[cfg(feature = "jellyfin")]
-            DiscClient::Jellyfin(_) => unreachable!("the Jellyfin arm above returns"),
-        };
-        crate::registry::commit_if_current(client.id(), client, token_gen, || {
-            if self.section_sid(sec) == Some(client.id()) {
-                if let Some(state) = self.state_mut(sec) {
-                    if state.library_type != library_type {
-                        return false;
-                    }
-                    apply(state, list, None);
-                    return true;
-                }
+                } else {
+                    false
+                };
+                return applied;
             }
             false
-        }).unwrap_or(false)
-    }
-    #[cfg(test)]
-    fn land_discovery_owned(&mut self, adapter: &Arc<BrowseAdapter>)
-        -> crate::stores::StoreOutcome {
-        self.land_discovery_owned_with_gate(adapter, crate::ui::landgate::fixture_gate())
-    }
-    #[cfg(test)]
-    fn land_directory_owned<T>(&mut self, flag: &AtomicBool,
-        mail: &Mutex<Option<DirectoryResult<T>>>,
-        apply: impl FnOnce(&mut SecState, Vec<T>, Option<LettersFilter>)) -> bool {
-        self.land_directory_owned_with_gate(crate::ui::landgate::fixture_gate(), flag, mail, apply)
+        }
+        #[cfg(not(feature = "jellyfin"))]
+        {
+            let _ = (result, apply);
+            false
+        }
     }
     fn maybe_spawn_owned(&mut self, adapter: &Arc<BrowseAdapter>) {
         if adapter.fetching.load(Ordering::SeqCst) || self.retry_cd > 0 {
             return;
         }
         let current = self.cur();
-        let Some(state) = self.states.get(current) else { return };
-        let Some(section) = self.sections.get(current) else { return };
-        let start = if state.total < 0 {
-            0
-        } else {
-            let (lo, hi) = self.want;
-            let hi = hi.min(state.total as usize);
-            let mut page = (lo / PAGE) * PAGE;
-            let mut found = None;
-            while page < hi {
-                if state.items.page_missing(page / PAGE) {
-                    found = Some(page);
-                    break;
-                }
-                page += PAGE;
-            }
-            let Some(found) = found else { return };
-            found
-        };
-        let include_meta = state.sorts.is_empty();
-        let sort = state.sorts.get(state.sort_idx)
-            .map(|sort| sort.query(state.sort_desc))
-            .unwrap_or_default();
-        let filters = state.query_filters(section.kind);
-        // Every listing but the section's own default is ordered by the menu it has just
-        // discovered — seasons and episodes by Show, collections by the Title they declare.
-        let confirm_sort = state.library_type != LibraryType::Primary;
-        let restore = self.restore_for(current);
-        let gen = self.query_gen();
-        let key = section.key;
-        let Some(sid) = self.section_sid(current) else { return };
+        if self.states.get(current).is_none() || self.sections.get(current).is_none() {
+            return;
+        }
         // The Jellyfin lane reads through its own client and menu vocabulary: the sort menu is
         // this backend's fixed list (`jellyfin::browse::sorts`), landed with the first page, so
-        // the query below takes the RAW sort key and the descending flag separately — Jellyfin
-        // sends `SortOrder` as its own parameter, where Plex encodes direction into the token.
-        // The guard is load-bearing: the jellyfin slot is 0, which test fixtures also hand to
-        // `register_for_test` Plex clients — an absent jellyfin client must fall THROUGH.
+        // the query takes the RAW sort key and the descending flag separately. The guard is
+        // load-bearing: the jellyfin slot is 0, which test fixtures also hand to
+        // `register_for_test` Plex clients — an absent jellyfin client must fall THROUGH (into
+        // nothing: the PMS page worker went with the PMS browse arm, #166 pass 3).
         #[cfg(feature = "jellyfin")]
-        if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
-            let jc = crate::jellyfin::client().expect("guarded above");
+        {
+            let Some(state) = self.states.get(current) else { return };
+            let Some(section) = self.sections.get(current) else { return };
+            let start = if state.total < 0 {
+                0
+            } else {
+                let (lo, hi) = self.want;
+                let hi = hi.min(state.total as usize);
+                let mut page = (lo / PAGE) * PAGE;
+                let mut found = None;
+                while page < hi {
+                    if state.items.page_missing(page / PAGE) {
+                        found = Some(page);
+                        break;
+                    }
+                    page += PAGE;
+                }
+                let Some(found) = found else { return };
+                found
+            };
+            let gen = self.query_gen();
+            let key = section.key;
+            let Some(sid) = self.section_sid(current) else { return };
+            if sid != crate::jellyfin::SERVER_ID { return; }
+            let Some(jc) = crate::jellyfin::client() else { return };
             let sort_key = state.sorts.get(state.sort_idx)
                 .map(|sort| sort.key.clone())
                 .unwrap_or_default();
@@ -2573,36 +2415,15 @@ impl BrowseState {
                 }).unwrap_or((Vec::new(), -1));
                 *worker_adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()) =
                     Some(PageResult {
-                        client: DiscClient::Jellyfin(jc), token_gen: 0,
-                        gen, sec: current, start, items, total, sorts: None, restored: None,
+                        gen, sec: current, start, items, total,
                     });
             });
             if !spawned {
                 adapter.fetching.store(false, Ordering::SeqCst);
             }
-            return;
         }
-        let Some(client) = crate::registry::client_for(sid) else { return };
-        let token_gen = client.token_gen();
-        adapter.fetching.store(true, Ordering::SeqCst);
-        let worker_adapter = Arc::clone(adapter);
-        let spawned = crate::task::spawn_small("page", move || {
-            let page = catch_unwind(|| {
-                let query = SectionQuery {
-                    section_key: key, sort: &sort, filters: &filters,
-                    start: start as i64, size: PAGE as i64, include_meta,
-                };
-                fetch_listing_page(client, sid, &query, confirm_sort, restore.as_ref())
-            }).unwrap_or_else(|_| ListingPage::failed());
-            *worker_adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()) =
-                Some(PageResult {
-                    client: DiscClient::Plex(client), token_gen, gen, sec: current, start,
-                    items: page.items, total: page.total, sorts: page.sorts, restored: page.restored,
-                });
-        });
-        if !spawned {
-            adapter.fetching.store(false, Ordering::SeqCst);
-        }
+        #[cfg(not(feature = "jellyfin"))]
+        let _ = adapter;
     }
     pub(crate) fn controlled_discover_owned(
         &mut self,
@@ -2630,8 +2451,7 @@ impl BrowseState {
         let discovery = self.land_discovery_owned_with_gate(adapter, gate);
         changed |= discovery.changed;
         self.maybe_discover_owned(adapter, &mut execute_discovery);
-        changed |= self.hubs_land(adapter, gate);
-        changed |= self.hubs_tick_all(adapter);
+        changed |= self.hubs_tick_all();
         changed |= self.land_directory_owned_with_gate(
             gate,
             &adapter.genre_fetching, &adapter.genre_result, |state, list, _filter| {
@@ -2656,244 +2476,78 @@ impl BrowseState {
                 #[cfg(not(feature = "jellyfin"))]
                 let _ = filter;
             });
-        let page = crate::stores::take_landing(gate, crate::stores::StoreId::Browse, || {
+        // The page landing is the Jellyfin lane's alone now (the PMS page worker went with the
+        // PMS browse arm, #166 pass 3): the same store splice, minus the registry-lifecycle
+        // validation (a process-lifetime install has none) and plus the static sort menu, which
+        // is this backend's includeMeta — it lands with the first page. A page fetch is also
+        // EVIDENCE ABOUT THE SERVER: with one source it is the only reachability evidence after
+        // discovery at all.
+        #[cfg(feature = "jellyfin")]
+        if let Some(result) = crate::stores::take_landing(gate, crate::stores::StoreId::Browse, || {
             adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()).take()
-        });
-        if let Some(result) = page {
+        }) {
             crate::ui::idle::invalidate();
             adapter.fetching.store(false, Ordering::SeqCst);
-            // The Jellyfin lane: the same store splice as the Plex landing, minus the
-            // registry-lifecycle validation (a process-lifetime install has none) and plus the
-            // static sort menu, which is this backend's includeMeta — it lands with the first
-            // page, the moment Plex's menus arrive too. A page fetch is also EVIDENCE ABOUT THE
-            // SERVER — the Plex lane's own rule, and with one source it is the only reachability
-            // evidence after discovery at all.
-            #[cfg(feature = "jellyfin")]
-            if matches!(result.client, DiscClient::Jellyfin(_)) {
-                if let Some(src) = self.sections.get(result.sec).map(|section| section.src) {
-                    let next = if result.total >= 0 {
-                        SourceState::Reachable
-                    } else {
-                        SourceState::Unreachable
-                    };
-                    let moved = self.sources.get(src)
-                        .is_some_and(|source| source.sid == crate::jellyfin::SERVER_ID
-                            && source.state != next);
-                    if moved {
-                        if let Some(source) = self.source_mut(src) {
-                            source.state = next;
-                        }
-                        self.bump_source_facts_gen();
+            if let Some(src) = self.sections.get(result.sec).map(|section| section.src) {
+                let next = if result.total >= 0 {
+                    SourceState::Reachable
+                } else {
+                    SourceState::Unreachable
+                };
+                let moved = self.sources.get(src)
+                    .is_some_and(|source| source.sid == crate::jellyfin::SERVER_ID
+                        && source.state != next);
+                if moved {
+                    if let Some(source) = self.source_mut(src) {
+                        source.state = next;
                     }
+                    self.bump_source_facts_gen();
                 }
-                if result.total < 0 {
-                    // the fetch FAILED — leave the store exactly as it was and back off before
-                    // retrying; one wifi hiccup must not blank a populated grid
-                    self.retry_cd = 120; // ~2s at 60fps
-                    if result.gen == self.query_gen() {
-                        if let Some(state) = self.state_mut(result.sec) {
-                            if state.fetch != SecFetch::Failed {
-                                state.fetch = SecFetch::Failed;
-                                changed = true;
-                            }
-                        }
-                    }
-                } else if result.gen == self.query_gen() {
-                    if let Some(state) = self.state_mut(result.sec) {
-                        // the server answered: Ready even at total 0 — an empty library is an
-                        // answer, never a fault
-                        state.fetch = SecFetch::Ready;
-                        if state.sorts.is_empty() {
-                            // Collections lands the one-sort menu (box sets sort by name alone);
-                            // every other type lands the backend's full fixed vocabulary.
-                            state.sorts = std::sync::Arc::new(
-                                if state.library_type == LibraryType::Collections {
-                                    crate::jellyfin::browse::collection_sorts()
-                                } else {
-                                    crate::jellyfin::browse::sorts()
-                                });
-                        }
-                        if state.total != result.total {
-                            state.total = result.total;
-                            state.items.resize(result.total as usize);
-                        }
-                        for (offset, item) in result.items.into_iter().enumerate() {
-                            state.items.set(result.start + offset, item);
-                        }
-                        changed = true;
-                    }
-                }
-                self.maybe_spawn_owned(adapter);
-                return crate::stores::StoreOutcome { changed };
             }
-            let client = match result.client {
-                DiscClient::Plex(client) => client,
-                #[cfg(feature = "jellyfin")]
-                DiscClient::Jellyfin(_) => unreachable!("the Jellyfin arm above returns"),
-            };
-            if let Some(source) = self.sections.get(result.sec).map(|section| section.src) {
-                let token_gen = result.token_gen;
-                let _ = crate::registry::commit_reachability_if_current(
-                    client.id(), client, token_gen, result.total >= 0, None, |outcome| {
-                        if !self.apply_source_outcome(source, client, outcome) {
-                            return false;
+            if result.total < 0 {
+                // the fetch FAILED — leave the store exactly as it was and back off before
+                // retrying; one wifi hiccup must not blank a populated grid
+                self.retry_cd = 120; // ~2s at 60fps
+                if result.gen == self.query_gen() {
+                    if let Some(state) = self.state_mut(result.sec) {
+                        if state.fetch != SecFetch::Failed {
+                            state.fetch = SecFetch::Failed;
+                            changed = true;
                         }
-                        if result.total < 0 {
-                            self.retry_cd = 120;
-                            if result.gen == self.query_gen() {
-                                if let Some(state) = self.state_mut(result.sec) {
-                                    if state.fetch != SecFetch::Failed {
-                                        state.fetch = SecFetch::Failed;
-                                        changed = true;
-                                    }
-                                }
-                            }
-                        } else if result.gen == self.query_gen() {
-                            let kind = self.section_kind(result.sec);
-                            if let Some(state) = self.state_mut(result.sec) {
-                                state.fetch = SecFetch::Ready;
-                                if let Some(sorts) = result.sorts {
-                                    if state.sorts.is_empty() {
-                                        let sorts = if state.library_type == LibraryType::Primary {
-                                            match kind {
-                                                Some(kind) => with_plays_sort(sorts, kind),
-                                                None => sorts,
-                                            }
-                                        } else {
-                                            state.sort_desc = sorts.first().is_some_and(|sort| sort.default_desc);
-                                            sorts
-                                        };
-                                        // The page was fetched in a remembered order (#278): the
-                                        // menu must show the order the grid is actually in.
-                                        if let Some((key, desc)) = &result.restored {
-                                            if let Some(index) = sorts.iter().position(|sort| &sort.key == key) {
-                                                state.sort_idx = index;
-                                                state.sort_desc = *desc;
-                                            }
-                                        }
-                                        state.sorts = Arc::new(sorts);
-                                    }
-                                }
-                                if state.total != result.total {
-                                    state.total = result.total;
-                                    state.items.resize(state.total as usize);
-                                }
-                                for (offset, item) in result.items.into_iter().enumerate() {
-                                    state.items.set(result.start + offset, item);
-                                }
-                                changed = true;
-                            }
-                        }
-                        true
-                    });
+                    }
+                }
+            } else if result.gen == self.query_gen() {
+                if let Some(state) = self.state_mut(result.sec) {
+                    // the server answered: Ready even at total 0 — an empty library is an
+                    // answer, never a fault
+                    state.fetch = SecFetch::Ready;
+                    if state.sorts.is_empty() {
+                        // Collections lands the one-sort menu (box sets sort by name alone);
+                        // every other type lands the backend's full fixed vocabulary.
+                        state.sorts = std::sync::Arc::new(
+                            if state.library_type == LibraryType::Collections {
+                                crate::jellyfin::browse::collection_sorts()
+                            } else {
+                                crate::jellyfin::browse::sorts()
+                            });
+                    }
+                    if state.total != result.total {
+                        state.total = result.total;
+                        state.items.resize(result.total as usize);
+                    }
+                    for (offset, item) in result.items.into_iter().enumerate() {
+                        state.items.set(result.start + offset, item);
+                    }
+                    changed = true;
+                }
             }
         }
         self.maybe_spawn_owned(adapter);
         crate::stores::StoreOutcome { changed }
     }
-    #[cfg(test)]
-    pub(crate) fn pump_owned(&mut self, adapter: &Arc<BrowseAdapter>)
-        -> crate::stores::StoreOutcome {
-        self.pump_owned_with_gate(adapter, crate::ui::landgate::fixture_gate())
-    }
 }
 
 // ---- fetch plumbing (generation + single-flight + mailboxes) --------------------------------
-
-/// A remembered sort to put the first page in, once its menu proves the server still offers it —
-/// see [`fetch_listing_page`]. Built by [`BrowseState::restore_for`] from
-/// [`crate::plex::session::Session::library_sorts`].
-struct Restore {
-    kind: SecKind,
-    sort: String,
-    desc: bool,
-}
-
-/// One page's answer from [`fetch_listing_page`].
-struct ListingPage {
-    items: Vec<PmsMovie>,
-    /// `totalSize`; **negative = the fetch failed** (see [`PageResult::total`]).
-    total: i64,
-    sorts: Option<Vec<SortEntry>>,
-    /// The remembered `(sort key, descending)` this page was fetched in, when a [`Restore`] was
-    /// asked for and the menu offered its key — what the landing points the menu at.
-    restored: Option<(String, bool)>,
-}
-
-impl ListingPage {
-    fn failed() -> Self {
-        Self { items: Vec::new(), total: -1, sorts: None, restored: None }
-    }
-}
-
-/// The advertised menu entry to restore `restore.sort` through, or the client-side Plays entry
-/// where [`with_plays_sort`] would have added it — the same gate, so a key the landing's menu
-/// will not show is never sent. `None` means the server no longer offers it.
-fn restorable(sorts: &[SortEntry], restore: &Restore) -> Option<SortEntry> {
-    sorts.iter().find(|sort| sort.key == restore.sort).cloned().or_else(|| {
-        (restore.sort == PLAYS_SORT_KEY && kind_offers_plays_sort(restore.kind))
-            .then(|| plays_sort_entry(String::new()))
-    })
-}
-
-fn fetch_listing_page(
-    client: &crate::plex::Client,
-    sid: ServerId,
-    query: &SectionQuery<'_>,
-    confirm_sort: bool,
-    restore: Option<&Restore>,
-) -> ListingPage {
-    let Some(mut container) = client.section_items_query(query) else {
-        return ListingPage::failed();
-    };
-    let sorts: Option<Vec<SortEntry>> = container.meta.as_ref().and_then(|meta| {
-        meta.types.iter().find(|kind| kind.active != 0)
-            .or_else(|| meta.types.first()).map(|kind| kind.sort.iter()
-                .filter(|sort| !sort.key.is_empty()).map(|sort| SortEntry {
-                    key: sort.key.clone(),
-                    desc_key: sort.desc_key.clone(),
-                    title: if sort.title.is_empty() { sort.key.clone() } else { sort.title.clone() },
-                    default_desc: sort.default_direction == "desc",
-                }).collect())
-    });
-    // Seasons and episodes advertise Show ordering first, while an unsorted /all answer
-    // arrives in title order. Publish only after ordering by the menu we just discovered;
-    // later pages use that same key, so no page boundary can duplicate or skip an episode.
-    if confirm_sort && query.include_meta && query.sort.is_empty() {
-        if let Some(first) = sorts.as_ref().and_then(|sorts| sorts.first()) {
-            let sort = first.query(first.default_desc);
-            let sorted = SectionQuery { sort: &sort, include_meta: false, ..*query };
-            let Some(sorted_container) = client.section_items_query(&sorted) else {
-                return ListingPage::failed();
-            };
-            container = sorted_container;
-        }
-    }
-    // **A remembered sort (#278) is applied the same way, and only the same way.** The saved key
-    // is never sent on the discovery request itself: an unrecognised sort key 500s the WHOLE
-    // listing, and a key the server offered last month (or the client-side Plays sort on a PMS
-    // that stopped honouring it) would then fail the section's first page on every launch, with
-    // no menu ever landing to choose anything else from. So the menu is discovered first and the
-    // page re-asked in the remembered order only when that menu still offers the key; the
-    // unsorted page is never published, so the grid shows no reorder. If the sorted re-ask
-    // FAILS, the unsorted page stands in the default order rather than failing the section —
-    // a remembered preference must never be the reason a library cannot open.
-    let mut restored = None;
-    if let (Some(restore), true) = (restore, query.include_meta && query.sort.is_empty()) {
-        if let Some(entry) = sorts.as_deref().and_then(|sorts| restorable(sorts, restore)) {
-            let sort = entry.query(restore.desc);
-            let sorted = SectionQuery { sort: &sort, include_meta: false, ..*query };
-            if let Some(sorted_container) = client.section_items_query(&sorted) {
-                container = sorted_container;
-                restored = Some((restore.sort.clone(), restore.desc));
-            }
-        }
-    }
-    let total = if container.total_size > 0 { container.total_size }
-        else { query.start + container.metadata.len() as i64 };
-    let items = container.metadata.iter().map(|item| parse_item(item, sid)).collect();
-    ListingPage { items, total, sorts, restored }
-}
 
 /// Bumped whenever the section table's SHAPE changes — a source's sections appended, or the whole
 /// table wiped by [`reset`]. Label/measurement caches keyed on the table (the tab strip's pill
@@ -2908,12 +2562,10 @@ fn fetch_listing_page(
 /// Frames left before another page fetch may spawn after a FAILED one (main-thread; pump
 /// decrements). Stops a fast-failing network from spawning a worker per frame.
 
+/// Dead without the feature: no lane fills the page mailbox, but the Jellyfin build's
+/// landing shape is this struct, so it is frozen rather than made `#[cfg]`.
+#[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
 struct PageResult {
-    /// Exact registry lifecycle the worker dialled. Section/query generations do not move when a
-    /// slot is re-pointed or retokened, so both pointer identity and token generation are needed.
-    /// The Jellyfin arm keeps the same fields but its "lifecycle" is the install itself.
-    client: DiscClient,
-    token_gen: u32,
     gen: u32,
     sec: usize,
     start: usize,
@@ -2921,21 +2573,18 @@ struct PageResult {
     /// totalSize of the listing; **negative = the fetch FAILED** — pump must not touch the
     /// store (a transient network error once wiped a whole populated section to "empty").
     total: i64,
-    sorts: Option<Vec<SortEntry>>, // Some when the fetch carried includeMeta=1
-    /// Some when the page was fetched in a remembered sort — see [`ListingPage::restored`].
-    restored: Option<(String, bool)>,
 }
 // menu-data landings carry the table EPOCH so a landing spawned before a [`reset`] (profile
-// switch) can never populate the NEW user's state at the same index
+// switch) can never populate the NEW user's state at the same index. Dead without the feature
+// (no lane lands a directory), frozen for the same reason as [`PageResult`].
+#[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
 struct DirectoryResult<T> {
     epoch: u32,
     sec: usize,
     client: DiscClient,
-    token_gen: u32,
     library_type: LibraryType,
     /// Letters flights only (issue #37): the filter combination the probe ran under, stamped on
-    /// the landing so the store can tell a stale table from a fresh one. Genres and Plex's
-    /// query-independent `firstCharacter` flights leave it `None`.
+    /// the landing so the store can tell a stale table from a fresh one.
     #[cfg(feature = "jellyfin")]
     letters_filter: Option<crate::browse::LettersFilter>,
     list: Vec<T>,
@@ -2969,55 +2618,9 @@ enum SrcWhat {
     Counts(Vec<(i64, i64)>),
 }
 
-/// Legacy synchronous harness retained only for lifecycle regression fixtures. Production section
-/// discovery is uniformly `kick → worker → mailbox → commit` via [`discover_pump`].
-#[cfg(test)]
-fn ensure_sections_with(
-    state: &mut BrowseState,
-    fetch: impl FnOnce(&crate::plex::Client) -> Option<Vec<(i64, String, SecKind)>>,
-) -> usize {
-    state.sync_roster_owned();
-    let cur_sid = crate::registry::current();
-    let Some(si) = state.sources().iter().position(|s| s.sid == cur_sid) else {
-        return state.sections().len();
-    };
-    if state.sources()[si].sections_done {
-        return state.sections().len();
-    }
-    let Some(client) = crate::registry::client_for(cur_sid) else {
-        return state.sections().len();
-    };
-    let token_gen = client.token_gen();
-    let found = catch_unwind(AssertUnwindSafe(|| fetch(client))).unwrap_or(None);
-    let ok = found.is_some();
-    let committed = crate::registry::commit_reachability_if_current(
-        cur_sid,
-        client,
-        token_gen,
-        ok,
-        None,
-        |outcome| {
-            if state.sources().get(si).map(|s| s.sid) != Some(client.id()) {
-                return false;
-            }
-            state.append_sections_with(si, found.unwrap_or_default(), None);
-            if let Some(s) = state.source_mut(si) {
-                s.sections_done = ok;
-                s.set_probe_outcome(outcome);
-                s.retry_cd = if ok { 0 } else { SRC_RETRY_CD };
-            }
-            true
-        },
-    );
-    if committed != Some(true) {
-        return state.sections().len();
-    }
-    state.sections().len()
-}
-
 /// `MediaContainer.Directory[]` → the (key, title, kind) rows this app can browse. The ONE
-/// projection, shared by the blocking discovery above and the worker below, so the two can never
-/// disagree about which sections exist.
+/// projection, shared by the replay-ledger discovery landing and its worker, so the two can
+/// never disagree about which sections exist.
 ///
 /// A section's kind comes from [`SecKind::of_section`]: its Plex `type`, plus the agent and scanner
 /// that distinguish Other Videos from Movies. Types without a playable level are dropped here.
@@ -3114,41 +2717,6 @@ impl SecKind {
             SecKind::Video => 2,
         }
     }
-}
-
-/// PMS's own sort key for play count — never advertised by `includeMeta=1` (measured against
-/// PMS 1.43.4, on movie and show sections alike) but honoured by the server on both when sent
-/// directly, sorting movies by their view count and shows by their own. An unrecognised key
-/// 500s the whole listing, which is why [`with_plays_sort`] never sends this for a kind that
-/// hasn't been proven to accept it.
-const PLAYS_SORT_KEY: &str = "viewCount";
-
-/// Whether the server is proven to honour [`PLAYS_SORT_KEY`] for this section kind. An
-/// exhaustive match rather than a wildcard default: [`SecKind`]'s own doc says a third variant
-/// (`Artist`/`Photo`) belongs in "the commit that builds its level", and when that lands this
-/// match must fail to compile until someone decides whether the new kind belongs here too,
-/// rather than silently inheriting `true`.
-fn kind_offers_plays_sort(kind: SecKind) -> bool {
-    match kind {
-        SecKind::Movie | SecKind::Show | SecKind::Video => true,
-    }
-}
-
-/// Append the client-side "Plays" sort where the server is proven to honour it, unless it is
-/// already in the advertised list (a future PMS that starts advertising `viewCount` itself
-/// must not produce two rows). Descending by default — most-played first, the direction the
-/// feature exists for.
-fn with_plays_sort(mut sorts: Vec<SortEntry>, kind: SecKind) -> Vec<SortEntry> {
-    if kind_offers_plays_sort(kind) && !sorts.iter().any(|sort| sort.key == PLAYS_SORT_KEY) {
-        sorts.push(plays_sort_entry(crate::i18n::msg::browse_library_plays().into()));
-    }
-    sorts
-}
-
-/// The client-side Plays entry. The title is a parameter so the page worker, which only needs
-/// the entry's QUERY to restore a remembered sort ([`restorable`]), never reads the locale.
-fn plays_sort_entry(title: String) -> SortEntry {
-    SortEntry { key: PLAYS_SORT_KEY.into(), desc_key: String::new(), title, default_desc: true }
 }
 
 /// Point the app's CURRENT server at the source of section `i`, and drop the per-server state that
@@ -3746,54 +3314,6 @@ pub(crate) fn seed_query_choices_for_owner_test(
 }
 
 #[cfg(test)]
-pub(crate) fn prepare_page_for_owner_test(state: &mut BrowseState, sid: ServerId) {
-    for source in &mut state.sources {
-        source.sections_done = true;
-        source.counts_done = true;
-    }
-    state.cur = state.sections.iter().position(|section| {
-        state.sources.get(section.src).map(|source| source.sid) == Some(sid)
-    }).expect("a section for the requested server");
-    state.want = (0, 1);
-    let current = state.cur();
-    let section = state.state_mut(current).unwrap();
-    section.fetch = SecFetch::Loading;
-    section.total = -1;
-    section.items.clear();
-}
-
-#[cfg(test)]
-pub(crate) fn queue_genre_for_owner_test(
-    state: &mut BrowseState,
-    adapter: &BrowseAdapter,
-    client: &'static crate::plex::Client,
-) {
-    prepare_page_for_owner_test(state, client.id());
-    let sec = state.cur();
-    state.state_mut(sec).unwrap().total = 0;
-    adapter.genre_fetching.store(true, Ordering::SeqCst);
-    *adapter.genre_result.lock().unwrap_or_else(|e| e.into_inner()) =
-        Some(DirectoryResult {
-            epoch: state.table_epoch(), sec, client: DiscClient::Plex(client),
-            token_gen: client.token_gen(),
-            library_type: state.states[sec].library_type,
-            #[cfg(feature = "jellyfin")]
-            letters_filter: None,
-            list: vec![GenreEntry { id: "new".into(), title: "New Genre".into() }],
-        });
-}
-
-#[cfg(test)]
-pub(crate) fn adapter_has_page_for_test(adapter: &BrowseAdapter) -> bool {
-    adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()).is_some()
-}
-
-#[cfg(test)]
-pub(crate) fn adapter_fetching_for_test(adapter: &BrowseAdapter) -> bool {
-    adapter.fetching.load(Ordering::SeqCst)
-}
-
-#[cfg(test)]
 pub(crate) fn set_adapter_src_fetching_for_test(adapter: &BrowseAdapter, fetching: bool) {
     adapter.src_fetching.store(fetching, Ordering::SeqCst);
 }
@@ -3801,43 +3321,6 @@ pub(crate) fn set_adapter_src_fetching_for_test(adapter: &BrowseAdapter, fetchin
 #[cfg(test)]
 pub(crate) fn adapter_src_fetching_for_test(adapter: &BrowseAdapter) -> bool {
     adapter.src_fetching.load(Ordering::SeqCst)
-}
-
-#[cfg(test)]
-
-#[cfg(test)]
-pub(crate) fn set_adapter_fetching_for_test(adapter: &BrowseAdapter, fetching: bool) {
-    adapter.fetching.store(fetching, Ordering::SeqCst);
-}
-
-#[cfg(test)]
-pub(crate) fn spawn_owned_page_for_test(
-    state: &BrowseState,
-    adapter: &Arc<BrowseAdapter>,
-    client: &'static crate::plex::Client,
-    title: &str,
-) -> (std::sync::mpsc::SyncSender<()>, std::sync::mpsc::Receiver<()>) {
-    let sec = state.cur();
-    let sid = state.section_sid(sec).expect("an active test section");
-    assert_eq!(sid, client.id());
-    let gen = state.query_gen();
-    let token_gen = client.token_gen();
-    let title = title.to_string();
-    let worker_adapter = Arc::clone(adapter);
-    let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
-    let (done_tx, done_rx) = std::sync::mpsc::sync_channel(0);
-    adapter.fetching.store(true, Ordering::SeqCst);
-    assert!(crate::task::spawn_small("browse-owner-test", move || {
-        release_rx.recv().expect("test releases worker");
-        *worker_adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()) =
-            Some(PageResult {
-                client: DiscClient::Plex(client), token_gen, gen, sec, start: 0,
-                items: vec![PmsMovie { sid, title, ..Default::default() }],
-                total: 1, sorts: None, restored: None,
-            });
-        done_tx.send(()).expect("test receives worker completion");
-    }));
-    (release_tx, done_rx)
 }
 
 #[cfg(test)]
@@ -3880,7 +3363,7 @@ mod localized_type_tests {
     use super::{LibraryType, SecKind};
 
     #[test]
-    fn library_type_titles_translate_without_changing_the_pms_query_type() {
+    fn library_type_titles_translate_per_locale() {
         use crate::i18n::{LocaleContext, Preference};
         for (preference, expected) in [
             (Preference::En, ["Movies", "Collections", "TV Shows", "Seasons", "Episodes", "Collections"]),
@@ -3890,10 +3373,8 @@ mod localized_type_tests {
             let locale = LocaleContext::resolve(preference, None, None, None, None);
             let rows = LibraryType::offered(SecKind::Movie).iter().map(|&t| (t, SecKind::Movie))
                 .chain(LibraryType::offered(SecKind::Show).iter().map(|&t| (t, SecKind::Show)));
-            let wire = [None, Some(18), Some(2), Some(3), Some(4), Some(18)];
-            for (((kind, section), wire_type), title) in rows.zip(wire).zip(expected) {
+            for ((kind, section), title) in rows.zip(expected) {
                 assert_eq!(kind.title_in(section, &locale), title);
-                assert_eq!(kind.plex_type(section), wire_type);
             }
         }
     }

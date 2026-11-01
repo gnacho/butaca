@@ -54,13 +54,6 @@ impl Client {
     /// rotate their subject on every call, sometimes answering empty and vanishing from the drawn
     /// set. A refetch legitimately returns a different shelf count and different ids with nothing
     /// changed on the server, which is a fact about this endpoint rather than about any caller.
-    pub fn library_hubs(&self, section_key: i64, count: i64) -> Option<MediaContainer> {
-        self.get_json(
-            &QueryBuilder::new(&format!("/hubs/sections/{section_key}"))
-                .int("count", count)
-                .build(),
-        )
-    }
 
     /// GET /hubs/continueWatching?count=… — the dedicated Continue Watching hub.
     pub fn continue_watching(&self, count: i64) -> Option<MediaContainer> {

@@ -19,15 +19,6 @@ impl TestBrowse {
         self.state.reset_owned(&self.adapter);
     }
 
-    pub(super) fn pump(&mut self) -> crate::stores::StoreOutcome {
-        let roster = self.state.sync_roster_owned();
-        if roster.retire_adapter {
-            self.adapter = Arc::new(BrowseAdapter::default());
-        }
-        let mut outcome = self.state.pump_owned(&self.adapter);
-        outcome.changed |= roster.changed;
-        outcome
-    }
 
         pub(super) fn sync_roster(&mut self) {
         if self.state.sync_roster_owned().retire_adapter {
@@ -104,9 +95,6 @@ impl TestBrowse {
         })
     }
 
-    pub(super) fn fetch_state(&self) -> SecFetch {
-        self.state.cur_state().map_or(SecFetch::Loading, |state| state.fetch)
-    }
 
     pub(super) fn first_run_asks(&self) -> bool {
         let session = crate::plex::session::peek();
@@ -141,24 +129,12 @@ pub(super) fn registered_source(
 }
 pub(super) fn registered_page_source(
 ) -> (RegisteredCleanup, TestBrowse, ServerId, &'static crate::plex::Client) {
-    registered_page_source_of_kind(SecKind::Movie)
-}
-/// Same as [`registered_page_source`], but for a chosen section kind — used to prove the
-/// "Plays" sort gate (issue #146) behaves the same for `Show` as it does for `Movie`.
-pub(super) fn registered_page_source_of_kind(
-    kind: SecKind,
-) -> (RegisteredCleanup, TestBrowse, ServerId, &'static crate::plex::Client) {
     let (cleanup, mut browse, sid, client) = registered_source();
     if let Some(source) = browse.state.source_mut(0) {
         source.sections_done = true;
         source.counts_done = true;
     }
-    let title = match kind {
-        SecKind::Movie => "Movies",
-        SecKind::Show => "TV Shows",
-        SecKind::Video => "Other Videos",
-    };
-    browse.append_sections(0, vec![(1, title.into(), kind)]);
+    browse.append_sections(0, vec![(1, "Movies".into(), SecKind::Movie)]);
     (cleanup, browse, sid, client)
 }
 pub(super) fn registered_resident_page_source(
@@ -167,21 +143,6 @@ pub(super) fn registered_resident_page_source(
     let state = browse.state.state_mut(0).unwrap();
     state.fetch = SecFetch::Ready;
     state.total = 1;
-    state.items = SecItems::from_vec(vec![Some(PmsMovie::default())]);
-    (cleanup, browse, sid, client)
-}
-pub(super) fn registered_directory_source(
-) -> (RegisteredCleanup, TestBrowse, ServerId, &'static crate::plex::Client)
-{
-    let (cleanup, mut browse, sid, client) = registered_page_source();
-    let state = browse.state.state_mut(0).unwrap();
-    state.genres = Arc::new(vec![GenreEntry {
-        id: "new".into(),
-        title: "New Genre".into(),
-    }]);
-    state.letters = Arc::new(vec![("N".into(), 7)]);
-    state.genres_done = false;
-    state.letters_done = false;
     (cleanup, browse, sid, client)
 }
 pub(super) fn queue_success_from(
@@ -199,82 +160,6 @@ pub(super) fn queue_success_from(
         Some((browse.state.table_epoch(), 0, landing));
     let _ = browse.state.land_discovery_owned(&browse.adapter);
 }
-pub(super) fn queue_page_from(
-    browse: &mut TestBrowse,
-    client: &'static crate::plex::Client,
-    token_gen: u32,
-) {
-    *browse.adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()) = Some(PageResult {
-        client: super::DiscClient::Plex(client),
-        token_gen,
-        gen: browse.state.query_gen(),
-        sec: 0,
-        start: 0,
-        items: Vec::new(),
-        total: 0,
-        sorts: None,
-     restored: None,
-        });
-    browse.adapter.fetching.store(true, Ordering::SeqCst);
-    let _outcome = browse.pump();
-}
-pub(super) fn queue_directories_from(
-    browse: &mut TestBrowse,
-    client: &'static crate::plex::Client,
-    token_gen: u32,
-) {
-    let epoch = browse.state.table_epoch();
-    *browse.adapter.genre_result.lock().unwrap_or_else(|e| e.into_inner()) = Some(DirectoryResult {
-        library_type: browse.state.states[0].library_type,
-            #[cfg(feature = "jellyfin")]
-            letters_filter: None,
-        epoch,
-        sec: 0,
-        client: super::DiscClient::Plex(client),
-        token_gen,
-        list: vec![GenreEntry {
-            id: "stale".into(),
-            title: "Stale Genre".into(),
-        }],
-    });
-    *browse.adapter.letter_result.lock().unwrap_or_else(|e| e.into_inner()) = Some(DirectoryResult {
-        library_type: browse.state.states[0].library_type,
-            #[cfg(feature = "jellyfin")]
-            letters_filter: None,
-        epoch,
-        sec: 0,
-        client: super::DiscClient::Plex(client),
-        token_gen,
-        list: vec![("S".into(), 99)],
-    });
-    browse.adapter.genre_fetching.store(true, Ordering::SeqCst);
-    browse.adapter.letters_fetching.store(true, Ordering::SeqCst);
-    browse.state.land_directory_owned(
-        &browse.adapter.genre_fetching, &browse.adapter.genre_result, |st, list, _filter| {
-        st.genres_done = true;
-        st.genres = Arc::new(list);
-    });
-    browse.state.land_directory_owned(
-        &browse.adapter.letters_fetching, &browse.adapter.letter_result, |st, list, filter| {
-        st.letters_done = true;
-        st.letters = Arc::new(list);
-        #[cfg(feature = "jellyfin")]
-        {
-            st.letters_filter = filter;
-        }
-        #[cfg(not(feature = "jellyfin"))]
-        let _ = filter;
-    });
-}
-pub(super) fn assert_new_directories_survive(browse: &TestBrowse) {
-    let state = browse.state.states().first().unwrap();
-    assert_eq!(state.genres.len(), 1);
-    assert_eq!(state.genres[0].id, "new");
-    assert_eq!(state.genres[0].title, "New Genre");
-    assert_eq!(*state.letters, vec![("N".into(), 7)]);
-    assert!(!state.genres_done);
-    assert!(!state.letters_done);
-}
 // ---- the three-state fetch machine ---------------------------------------------------------
 //
 // These drive the same owned pump core that reports to `ui::idle`'s process-global flag — the
@@ -288,42 +173,6 @@ pub(super) fn seed_one_section(browse: &mut TestBrowse) {
     browse.reset();
     *browse.adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()) = None;
     browse.state.states = vec![SecState::default()];
-}
-/// Land what a worker would post for the CURRENT query: `total < 0` is the failure sentinel.
-pub(super) fn land_page(browse: &mut TestBrowse, total: i64, items: usize) {
-    let client = crate::registry::client();
-    let r = PageResult {
-        client: super::DiscClient::Plex(client),
-        token_gen: client.token_gen(),
-        gen: browse.state.query_gen(),
-        sec: 0,
-        start: 0,
-        items: (0..items).map(|_| PmsMovie::default()).collect(),
-        total,
-        sorts: None,
-        restored: None,
-    };
-    *browse.adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
-    let _outcome = browse.pump();
-}
-/// Same as [`land_page`], but carrying a server-advertised sort list (as `includeMeta=1` would)
-/// for the CURRENT section — used to exercise the client-side "Plays" sort augmentation
-/// (issue #146) that runs where this landing is applied.
-pub(super) fn land_page_with_sorts(browse: &mut TestBrowse, sorts: Vec<SortEntry>) {
-    let client = crate::registry::client();
-    let r = PageResult {
-        client: super::DiscClient::Plex(client),
-        token_gen: client.token_gen(),
-        gen: browse.state.query_gen(),
-        sec: browse.state.cur(),
-        start: 0,
-        items: Vec::new(),
-        total: 0,
-        sorts: Some(sorts),
-        restored: None,
-    };
-    *browse.adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
-    let _outcome = browse.pump();
 }
 // ---- the SOURCE's own state, one layer up ---------------------------------------------------
 //

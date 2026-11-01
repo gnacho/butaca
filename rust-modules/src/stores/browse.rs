@@ -227,15 +227,6 @@ impl BrowseStore {
     }
 
     #[cfg(test)]
-    pub(crate) fn spawn_page_for_test(
-        &mut self,
-        client: &'static crate::plex::Client,
-        title: &str,
-    ) -> (std::sync::mpsc::SyncSender<()>, std::sync::mpsc::Receiver<()>) {
-        crate::browse::spawn_owned_page_for_test(&self.state, &self.adapter, client, title)
-    }
-
-    #[cfg(test)]
     pub(crate) fn seed_items_for_test(&mut self, count: usize) {
         crate::browse::seed_items_for_owner_test(&mut self.state, count);
     }
@@ -337,24 +328,6 @@ impl BrowseStore {
         crate::browse::queue_discovery_for_owner_test(
             &mut self.state, &self.adapter, client, token_gen, ok);
     }
-
-    #[cfg(test)]
-    pub(crate) fn prepare_page_for_test(&mut self, sid: ServerId) {
-        crate::browse::prepare_page_for_owner_test(&mut self.state, sid);
-    }
-
-    // Dev-only: used only by `app/bridge.rs`'s `production_bridges_do_not_share_browse_state_or_landings`,
-    // gated under `devtriggers` (see that test's own comment).
-    #[cfg(all(test, feature = "devtriggers"))]
-    pub(crate) fn has_page_result_for_test(&self) -> bool {
-        crate::browse::adapter_has_page_for_test(&self.adapter)
-    }
-
-    #[cfg(test)]
-    fn queue_genre_for_test(&mut self, client: &'static crate::plex::Client) {
-        crate::browse::queue_genre_for_owner_test(&mut self.state, &self.adapter, client);
-    }
-
 
     #[cfg(test)]
     fn source_list_gen_for_test(&self) -> u32 {
@@ -557,7 +530,7 @@ mod contract_tests {
     }
 
     #[test]
-    fn controlled_discovery_apply_and_directory_landing_each_bump_exactly_once() {
+    fn controlled_discovery_apply_bumps_exactly_once() {
         let _guard = crate::testlock::serial();
         crate::registry::reset_for_test();
         let sid = crate::registry::register_with_client_id(
@@ -577,72 +550,7 @@ mod contract_tests {
         assert_eq!(stores.take_notices(), [(StoreId::Browse, before_discovery + 1)]);
         assert!(stores.take_notices().is_empty());
 
-        stores.browse.borrow_mut().queue_genre_for_test(client);
-        let before_directory = stores.browse.borrow().gen();
-        assert!(stores.browse.borrow_mut().pump().changed,
-            "a current directory landing is an observable Browse change");
-        assert_eq!(stores.browse.borrow().gen(), before_directory + 1);
-        assert_eq!(stores.take_notices(), [(StoreId::Browse, before_directory + 1)]);
-        assert!(stores.take_notices().is_empty());
-
         crate::registry::reset_for_test();
-    }
-
-    #[test]
-    fn reset_rotates_the_adapter_away_from_a_late_old_worker() {
-        let _guard = crate::testlock::serial();
-        crate::registry::reset_for_test();
-        let sid = crate::registry::register_with_client_id(
-            "browse-reset-worker", "127.0.0.1", 9, "synthetic", "fixture");
-        let stores = crate::stores::Stores::default();
-        stores.browse.borrow_mut().seed_registered_table_for_test([sid, sid]);
-        let client = crate::registry::client_for(sid).unwrap();
-        stores.browse.borrow_mut().prepare_page_for_test(sid);
-        let old = Arc::clone(&stores.browse.borrow().adapter);
-        let (release, landed) = stores.browse.borrow_mut()
-            .spawn_page_for_test(client, "retired-result");
-
-        stores.browse.borrow_mut().run(BrowseCmd::Reset);
-        let new = Arc::clone(&stores.browse.borrow().adapter);
-        assert!(!Arc::ptr_eq(&old, &new), "reset must rotate worker transport identity");
-        crate::browse::set_adapter_fetching_for_test(&new, true);
-        release.send(()).unwrap();
-        landed.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
-        assert!(crate::browse::adapter_has_page_for_test(&old));
-        assert!(!crate::browse::adapter_has_page_for_test(&new),
-            "a retired worker must not overwrite the replacement mailbox");
-        assert!(crate::browse::adapter_fetching_for_test(&new),
-            "a retired worker must not clear the replacement flight");
-
-        crate::registry::reset_for_test();
-    }
-
-    #[test]
-    fn roster_removal_rotates_transport_away_from_a_held_old_worker() {
-        let _guard = crate::testlock::serial();
-        crate::registry::reset_for_test();
-        let sid = crate::registry::register_with_client_id(
-            "browse-roster-retire", "127.0.0.1", 9, "synthetic", "fixture");
-        let stores = crate::stores::Stores::default();
-        stores.browse.borrow_mut().seed_registered_table_for_test([sid, sid]);
-        let client = crate::registry::client_for(sid).unwrap();
-        stores.browse.borrow_mut().prepare_page_for_test(sid);
-        let old = Arc::clone(&stores.browse.borrow().adapter);
-        let (release, landed) = stores.browse.borrow_mut()
-            .spawn_page_for_test(client, "retired-by-roster");
-
-        crate::registry::reset_for_test();
-        assert!(stores.browse.borrow_mut().pump().changed);
-        let new = Arc::clone(&stores.browse.borrow().adapter);
-        assert!(!Arc::ptr_eq(&old, &new),
-            "source removal must retire the adapter before any replacement work is admitted");
-        crate::browse::set_adapter_fetching_for_test(&new, true);
-        release.send(()).unwrap();
-        landed.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
-        assert!(crate::browse::adapter_has_page_for_test(&old));
-        assert!(!crate::browse::adapter_has_page_for_test(&new));
-        assert!(crate::browse::adapter_fetching_for_test(&new));
-
     }
 
     #[test]

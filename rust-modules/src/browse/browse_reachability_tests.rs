@@ -343,34 +343,6 @@ fn one_source_resolves_both_permanent_type_destinations() {
         "…and the Source chip's own condition is false"
     );
 }
-/// A failure landing from a SUPERSEDED query must not blame the current one: the user has
-/// already changed sort/filter/section, a fresh fetch is on its way, and marking the new query
-/// Failed would show a failure read-out over a listing that is still perfectly healthy.
-#[test]
-fn a_stale_failure_landing_does_not_blame_the_current_query() {
-    let _g = crate::testlock::serial();
-    let (_cleanup, mut browse, _, client) = registered_page_source();
-    let stale = browse.state.query_gen();
-    browse.state.bump_gen(); // the query moved on under the in-flight fetch
-    let r = PageResult {
-        client: super::DiscClient::Plex(client),
-        token_gen: client.token_gen(),
-        gen: stale,
-        sec: 0,
-        start: 0,
-        items: Vec::new(),
-        total: -1,
-        sorts: None,
-     restored: None,
-        };
-    *browse.adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
-    let _outcome = browse.pump();
-    assert_eq!(
-        browse.fetch_state(),
-        SecFetch::Loading,
-        "the current query has not answered yet — it has not failed"
-    );
-}
 /// The optimistic edit behind the browse grid's context menu — three properties in one, because
 /// they are one press: the mark flips on the frame it is pressed, it flips in EVERY section's
 /// store rather than only the one on screen, and a row on another SERVER with the same key is
