@@ -74,7 +74,6 @@ pub(crate) struct DevFlags {
 pub(crate) struct Scenarios {
     #[cfg(feature = "devtriggers")]
     pub(crate) poster_gate: poster_gate::Scene,
-    pub(crate) pick_user: Option<usize>,
     pub(crate) home_osc_last: u32,
     pub(crate) hero_osc_last: u32,
     pub(crate) home_fold_osc_last: u32,
@@ -203,87 +202,6 @@ crate::dev::latched_flag! { pub(crate) fn imagecache_stats_armed = "imagecache-s
 crate::dev::latched_flag! {
     /// RAM-only control leg for cache performance comparisons; absent in shipping builds.
     pub(crate) fn imagecache_bypass_armed = "imagecache-bypass";
-}
-
-/// `/tmp/butaca-pickuser=<index>` — force the boot picker and auto-select that roster tile.
-pub(crate) fn pickuser_index() -> Option<usize> {
-    crate::dev::read("pickuser").and_then(|s| s.parse().ok())
-}
-
-/// `/tmp/butaca-readout=<case>` — boot straight into a chosen page-filling `Failed` read-out
-/// for the read-out glyph work's own visual verification (spec "1A"), with NO network call and no
-/// account touched: paired with `butaca-login` (which already forces `BootTo::Login` with no
-/// session), `login_worker_with_output` reads this ONCE at the top of the worker thread and, for
-/// every case named here, skips straight to `auth::output_failed` with a canned caption instead
-/// of minting a PIN or discovering
-/// anything — the exact same terminal path a real failure reaches, so `LoginScreen`'s `Phase:::
-/// Error` draw, `readout_kind` and `readout_glyph` are exercised UNMODIFIED. Every value below is
-/// the one `auth::discovery_failure`'s table would have built for the same cause; see that
-/// function and `telemetry::incident::IncidentContext::readout_glyph`'s doc for why each case maps
-/// to the glyph it does. `Home`, `Library` and `ProfileSwitch` read-outs are NOT covered by this
-/// trigger — they are not reached through the sign-in worker, and short-circuiting their own
-/// stores/session state the same way needs plumbing this pass did not reach; verify a glyph in
-/// that family through `StatusOverlay`'s host geometry tests and its shared `page()` code path
-/// instead (the same function every case here also draws through).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ReadoutCase {
-    PinCreate,
-    PinExpired,
-    Authorization,
-    DiscoveryNoServers,
-    DiscoveryRefused,
-    DiscoveryServersSilent,
-    DiscoveryPlexTvDns,
-    DiscoveryPlexTvTls,
-    DiscoveryPlexTvAnswered,
-    DiscoveryPlexTvOther,
-    DiscoveryInsecureOnly,
-    SaveFailed,
-}
-
-pub(crate) fn readout_case() -> Option<ReadoutCase> {
-    crate::dev::read("readout").and_then(|s| match s.trim() {
-        "pin_create" => Some(ReadoutCase::PinCreate),
-        "pin_expired" => Some(ReadoutCase::PinExpired),
-        "authorization" => Some(ReadoutCase::Authorization),
-        "discovery_no_servers" => Some(ReadoutCase::DiscoveryNoServers),
-        "discovery_refused" => Some(ReadoutCase::DiscoveryRefused),
-        "discovery_servers_silent" => Some(ReadoutCase::DiscoveryServersSilent),
-        "discovery_plextv_dns" => Some(ReadoutCase::DiscoveryPlexTvDns),
-        "discovery_plextv_tls" => Some(ReadoutCase::DiscoveryPlexTvTls),
-        "discovery_plextv_answered" => Some(ReadoutCase::DiscoveryPlexTvAnswered),
-        "discovery_plextv_other" => Some(ReadoutCase::DiscoveryPlexTvOther),
-        "discovery_insecure_only" => Some(ReadoutCase::DiscoveryInsecureOnly),
-        "save_failed" => Some(ReadoutCase::SaveFailed),
-        _ => None,
-    })
-}
-
-impl ReadoutCase {
-    /// The canned caption `login_worker_with_output` feeds `output_failed` in place of the real
-    /// network calls — see [`readout_case`]'s doc.
-    pub(crate) fn canned_login_failure(self) -> std::borrow::Cow<'static, str> {
-        use crate::i18n::msg;
-        match self {
-            Self::PinCreate => msg::browse_auth_plex_unreachable().into(),
-            Self::PinExpired => msg::browse_auth_timeout().into(),
-            Self::Authorization => msg::browse_auth_signin_refused().into(),
-            Self::DiscoveryNoServers => msg::browse_auth_no_servers().into(),
-            Self::DiscoveryRefused => msg::browse_auth_refused().into(),
-            Self::DiscoveryServersSilent => msg::browse_auth_servers_unreachable().into(),
-            Self::DiscoveryPlexTvDns => msg::browse_auth_plex_dns_retry(1).into(),
-            Self::DiscoveryPlexTvTls => msg::browse_auth_plex_tls().into(),
-            Self::DiscoveryPlexTvAnswered => msg::browse_auth_plex_unavailable().into(),
-            Self::DiscoveryPlexTvOther => msg::browse_auth_plex_connect_retry(1).into(),
-            Self::DiscoveryInsecureOnly => msg::browse_auth_insecure().into(),
-            // The real "Couldn't save your sign-in" warning arrives through a different path
-            // (`persistence_warning`, drawn by `LoginScreen::draw_warning`) — this case takes the
-            // ordinary `Phase::Error` route instead, which draws a different caption ("Couldn't
-            // sign in") but the SAME page-placed `Failed` layout and the SAME `KeyBadgeAlert`
-            // glyph, which is the only thing this trigger exists to show.
-            Self::SaveFailed => msg::browse_login_failed().into(),
-        }
-    }
 }
 
 /// `/tmp/butaca-stillclock=<ms>` — see [`screenshot::arm_stillclock`].
@@ -1829,35 +1747,6 @@ pub(crate) fn controlled_each_frame(app: &mut App, fr: &mut Frame) -> bool {
 // governs production per-page work too (`update_home_chrome`) and is not itself a dev arm.
 // =================================================================================================
 
-/// `/tmp/butaca-pickuser=<index>` — auto-select that roster tile once the who's-watching
-/// picker is up. Called from `app::run::update` at the position the arm always occupied.
-pub(crate) fn pickuser_tick(app: &mut App) {
-    if !(matches!(app.route(), AppArg::Profiles)
-        && app.scenarios.pick_user.is_some()
-        && app.bridge.auth_read().0.phase == crate::auth::Phase::Profiles
-        && !app.bridge.auth_read().0.users.is_empty())
-    {
-        return;
-    }
-    let idx = app.scenarios.pick_user.take().unwrap();
-    // **Ask the SAME question `screens::profiles::ProfilesScreen::select` asks before acting**,
-    // because this call site cannot reach that method to ask it FOR us — see the phase-9 report
-    // this arm's comment used to carry for the full account of why a protected roster index
-    // refuses here rather than attempting a PIN-less switch plex.tv would refuse anyway.
-    let protected = app.bridge.auth_read().0.users.get(idx).map(|u| u.protected).unwrap_or(false);
-    if protected {
-        crate::log(&format!(
-            "pickuser: roster index {idx} is PROTECTED — refusing rather than attempting \
-             a PIN-less switch plex.tv would refuse anyway; this trigger has no door onto \
-             the owned picker's own PIN pad yet"
-        ));
-    } else {
-        crate::log(&format!("pickuser: auto-selecting roster index {idx}"));
-        crate::app::bridge::execute_session_command(&mut app.pages,
-            crate::auth::SessionCmd::SelectProfile { index: idx, pin: None });
-    }
-}
-
 /// `/tmp/butaca-navosc` — bounce the route Home↔Library (or Home↔a named detail page) on a
 /// timer. Called from `app::run::land_results` at the position the arm always occupied.
 pub(crate) fn nav_osc_tick(app: &mut App, now: u32) {
@@ -2469,64 +2358,4 @@ pub(crate) fn app_init_value() -> Option<Result<serde_json::Value, &'static str>
 #[cfg(not(feature = "devtriggers"))]
 pub(crate) fn app_init_value() -> Option<Result<serde_json::Value, &'static str>> {
     None
-}
-
-// =================================================================================================
-// onboarding report arms — sign-in trouble and the consent decision, for the ui-sim captures of
-// the incident offer. Both produce REAL state through the production seams: the sign-in trouble
-// is evidence handed to the same producers a failed request feeds, and the consent state is a
-// real record installed at boot. Nothing here paints a screen directly.
-// =================================================================================================
-
-/// The synthetic failure `butaca-signinfail` stands for: a name that did not resolve, the
-/// commonest way a television "has no internet". A `net::RequestFailure` like the one libcurl's
-/// `CURLE_COULDNT_RESOLVE_HOST` produces, planted only into the one call it replaces — never into
-/// `net`'s own records, which other callers read as real evidence (0.6.6's reason, kept).
-fn synthetic_dns_failure() -> crate::net::RequestFailure {
-    crate::net::RequestFailure {
-        cause: crate::net::RequestError::Transport,
-        status: None,
-        body_limit: None,
-        curl_rc: Some(6),
-    }
-}
-
-fn signinfail_spec() -> Option<String> {
-    if cfg!(test) { return None; }
-    crate::dev::read("signinfail")
-}
-
-/// `/tmp/butaca-signinfail[=error]` — every sign-in code request fails as an unresolvable
-/// plex.tv would. Re-read at each attempt, so *Try again* fails the same way until it is removed.
-/// `None` means "make the real request".
-pub(crate) fn signin_trouble_create()
-    -> Option<Result<crate::plex::account::Pin, crate::plex::account::CallEvidence>> {
-    match signinfail_spec()?.as_str() {
-        "" | "error" => {
-            crate::log("dev: signinfail — the sign-in code request fails (synthetic DNS failure)");
-            Some(Err(Err(synthetic_dns_failure())))
-        }
-        _ => None,
-    }
-}
-
-/// `/tmp/butaca-signinfail=stall` — the code is real, but every poll of it goes unanswered, so
-/// the wait reaches the stalled rule (`auth::LINK_TROUBLE_AFTER`) exactly as a dropped link would.
-pub(crate) fn signin_trouble_poll() -> Option<crate::plex::account::PinPoll> {
-    (signinfail_spec()?.as_str() == "stall")
-        .then(|| crate::plex::account::PinPoll::Unreachable(Err(synthetic_dns_failure())))
-}
-
-/// `/tmp/butaca-signinfail=resources|resources-blip` — fail the plex.tv resource listing on
-/// every attempt, or on its first attempt only. The latter exercises the in-place retry while the
-/// sign-in screen remains in Discovering.
-pub(crate) fn signin_trouble_resources()
-    -> Option<Result<Vec<crate::plex::account::Resource>, crate::plex::account::CallEvidence>> {
-    static BLIPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    match signinfail_spec()?.as_str() {
-        "resources" => Some(Err(Err(synthetic_dns_failure()))),
-        "resources-blip" if !BLIPPED.swap(true, std::sync::atomic::Ordering::AcqRel) =>
-            Some(Err(Err(synthetic_dns_failure()))),
-        _ => None,
-    }
 }

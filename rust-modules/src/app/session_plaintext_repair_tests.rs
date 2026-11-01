@@ -66,7 +66,7 @@ mod tests {
         init.epoch = u64::from(u32::MAX) + 91;
         let epoch = init.epoch;
         let mut rig = Bridge::for_session_test(init);
-        rig.session_adapter = crate::app::adapters::session::SessionAdapter::live_resources_for_test(&mt, false);
+        rig.session_adapter = crate::app::adapters::session::SessionAdapter::live_resources_for_test(&mt);
         rig.session_adapter.inject_fixture_work(1, move |output, input| {
             std::thread::spawn(move || {
                 let SessionWork::Endpoint { session, expected, lifecycle, machine_id } = input

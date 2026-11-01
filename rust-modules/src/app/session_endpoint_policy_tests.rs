@@ -44,7 +44,7 @@ mod tests {
             init.epoch = u64::from(u32::MAX) + 81;
             let epoch = init.epoch;
             let mut rig = Bridge::for_session_test(init);
-            rig.session_adapter = crate::app::adapters::session::SessionAdapter::live_resources_for_test(&mt, false);
+            rig.session_adapter = crate::app::adapters::session::SessionAdapter::live_resources_for_test(&mt);
             if scenario != 0 {
                 rig.session_adapter.inject_fixture_work(1, move |output, input| {
                     std::thread::spawn(move || {

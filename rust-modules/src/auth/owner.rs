@@ -46,14 +46,9 @@ pub(super) fn write_purpose(w: &mut Canon, purpose: PersistencePurpose) {
 
 fn write_op(w: &mut Canon, op: SessionOp) {
     match op {
-        SessionOp::Login => { w.u8(0); }
-        SessionOp::Rediscover => { w.u8(1); }
-        SessionOp::HomeRoster => { w.u8(2); }
         SessionOp::ServerRoster => { w.u8(3); }
-        SessionOp::ProfileSwitch => { w.u8(4); }
         SessionOp::Endpoint(sid) => { w.u8(5).u32(u32::from(sid)); }
         SessionOp::Ready => { w.u8(6); }
-        SessionOp::Picker => { w.u8(7); }
         SessionOp::DevBoundary => { w.u8(8); }
     }
 }
@@ -105,25 +100,17 @@ pub(crate) trait ObservationSink {
 /// Fully captured worker input. No native pointer or closure can be serialized into work.
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum SessionWork {
-    Login { client_id: String },
-    Rediscover { client_id: String, account_token: String },
-    HomeRoster { client_id: String, account_token: String, expected: Identity },
     ServerRoster { session: PersistedSession, expected: Identity },
-    ProfileSwitch { session: PersistedSession, expected: Identity, tile: UserTile,
-        pin: Option<String>, recently_unreachable: bool },
     Endpoint { session: PersistedSession, expected: Identity, lifecycle: ServerLifecycle,
         machine_id: String },
 }
 
 impl SessionWork {
-    /// The plex.tv account token this work runs for — empty for a sign-in, which has none yet.
+    /// The plex.tv account token this work runs for.
     /// What `grant::PlaintextAsk::capture` keys the person's answers by.
     pub(crate) fn account_token(&self) -> &str {
         match self {
-            Self::Login { .. } => "",
-            Self::Rediscover { account_token, .. } | Self::HomeRoster { account_token, .. } => account_token,
-            Self::ServerRoster { session, .. } | Self::ProfileSwitch { session, .. }
-                | Self::Endpoint { session, .. } => &session.account_token,
+            Self::ServerRoster { session, .. } | Self::Endpoint { session, .. } => &session.account_token,
         }
     }
 }
@@ -153,29 +140,20 @@ pub(crate) enum Command {
     ActivateDevBootstrap,
     /// Restore the captured single-user boot authority without re-saving its credentials.
     ResumeStored,
-    StartLogin,
-    Retry,
-    RestartWait { phase: Phase, qr_generation: u64, reply: ReplyTo },
-    StartSwitch(Picker),
-    SelectProfile { index: usize, pin: Option<String> },
-    SelectProfileWithReply { index: usize, pin: Option<String>, reply: ReplyTo },
-    DismissPinError,
-    BackAtRoot { reply: ReplyTo },
+    TakeReady,
+    /// Answer the currently shown [`PersistenceWarning`]. A key that does not match the warning
+    /// currently held is inert — it may be stale (a newer warning replaced it).
+    AcknowledgePersistenceWarning { key: PersistenceWarningKey },
     SignOut,
     EraseLocal,
     NoteDeleteLeftovers(usize),
     RefreshRoster,
     RequestEndpoint { #[serde(with = "super::observation::server_id")] sid: crate::plex::ServerId },
-    TakeReady,
-    /// Answer the currently shown [`PersistenceWarning`]. A key that does not match the warning
-    /// currently held is inert — it may be stale (a newer warning replaced it).
-    AcknowledgePersistenceWarning { key: PersistenceWarningKey },
     /// The person's answer to "Connect without encryption?" (or Settings' switch) for one server
-    /// — every consent surface sends this one command. On the sign-in read-out it answers the
-    /// offer shown there ([`SessionInit::plaintext`]; another machine is inert) and an *Allowed*
-    /// retries the discovery. Signed in, it answers a server Home, the Library or Settings showed
-    /// (`grant::offers`, or an earlier answer), and an *Allowed* re-finds `sid`'s endpoint —
-    /// or the whole roster when the server has no slot — so a fresh probe can mint the grant.
+    /// — every consent surface sends this one command. Signed in, it answers a server Home, the
+    /// Library or Settings showed (`grant::offers`, or an earlier answer), and an *Allowed*
+    /// re-finds `sid`'s endpoint — or the whole roster when the server has no slot — so a fresh
+    /// probe can mint the grant.
     AnswerPlaintext {
         machine_id: String,
         choice: crate::plex::session::PlaintextChoice,
@@ -184,11 +162,7 @@ pub(crate) enum Command {
     },
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
-pub(crate) struct ReplyTo { pub instance: u32, pub correlation: u32 }
-
-/// Ordered application/coordinator work; the owner describes it without invoking another
-/// machine, platform API or global publication from inside its transition.
+/// Ordered application/coordinator work; the owner describes it without invoking another/// machine, platform API or global publication from inside its transition.
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub(crate) enum CoordinatorAction {
     LocalDataErased,
@@ -342,12 +316,7 @@ pub(crate) struct CommitDelta {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub(crate) enum DevCommitDelta { Activated, StartAccount { login_req: u32 } }
-
-/// The picker's read-outs when it has no tiles and cannot get any. Neutral wording, drawn as a
-/// failed read-out on the picker itself (`screens/profiles.rs`), never as a sign-in failure.
-pub(crate) fn roster_unreachable() -> &'static str { crate::i18n::msg::browse_auth_roster_unreachable() }
-pub(crate) fn roster_refused() -> &'static str { crate::i18n::msg::browse_auth_roster_refused() }
+pub(crate) enum DevCommitDelta { Activated }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum BootstrapAuthority {
@@ -478,22 +447,16 @@ impl CommitPermit<'_> {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum CaptureIntent {
-    Login,
-    Profile { tile: UserTile, pin: Option<String> },
     Endpoint { sid: u16 },
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub(crate) enum SessionReadRequest {
-    LoginClientId,
-    ProfilePolicy,
     Endpoint { sid: u16 },
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum SessionReadValue {
-    LoginClientId(String),
-    ProfilePolicy { recently_unreachable: bool },
     Endpoint(Option<EndpointCapture>),
 }
 
@@ -546,9 +509,6 @@ pub(crate) enum SessionFx {
     PublishProfile(ProfilePublication),
     Erase { req: u32, epoch: u64, all_local: bool },
     Coordinator(CoordinatorAction),
-    RestartReply { to: ReplyTo, accepted: bool },
-    SelectionReply { to: ReplyTo, accepted: bool, flow_epoch: u64 },
-    BackReply { to: ReplyTo, resumed: bool },
     /// Record the person's plaintext answer for one server: this launch's grant authority
     /// (`grant::answer`) and the persisted choice (`Session::plaintext_consent`), under
     /// `account` — `grant::account_key` of the account signed in when it was given.
@@ -601,7 +561,7 @@ pub(crate) struct ServerLifecycle {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum SessionOp { Login, Rediscover, HomeRoster, ServerRoster, ProfileSwitch, Endpoint(u16), Ready, Picker, DevBoundary }
+pub(crate) enum SessionOp { ServerRoster, Endpoint(u16), Ready, DevBoundary }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct SessionWorkKey {
@@ -730,40 +690,6 @@ pub(crate) struct SessionInit {
 }
 
 impl SessionInit {
-    /// The picker is showing #132's read-out: nobody to offer, and a reason why.
-    fn roster_readout_up(&self) -> bool {
-        is_roster_readout(self.phase, &self.users, &self.error)
-    }
-
-    /// Is the picker on screen one that has nobody to offer and is no longer waiting to? Then no
-    /// profile boundary can be crossed from it — nobody can be handed the remote — and BACK
-    /// resumes whatever session is behind it rather than stranding the person on Sign out
-    /// (#132). A picker with tiles, or with a roster request still in flight, is not this.
-    fn roster_dead_end(&self) -> bool {
-        self.phase == Phase::Profiles && self.users.is_empty()
-            && !self.pending.values().any(|pending| pending.key.op == SessionOp::HomeRoster)
-    }
-
-    /// Whether BACK from a [dead end](Self::roster_dead_end) resumes a session inside the app:
-    /// the dev session it never left, or a stored one it can reach. Otherwise BACK is the root
-    /// press and the television takes the screen.
-    fn dead_end_resumes(&self) -> bool {
-        matches!(self.authority, BootstrapAuthority::DevPms { .. })
-            || self.committed_credentials.merge_into(&self.persisted).can_go_local()
-    }
-
-    /// [`SessionSnapshot::switch_refused`]: the identity a roster was refused to (with nothing
-    /// cached) is still the one in use.
-    fn switch_refused(&self) -> bool {
-        self.switch_refused_for.as_ref().is_some_and(|id| id.matches(&self.persisted))
-    }
-
-    /// Put up #132's refused read-out and remember the verdict for this identity.
-    fn refuse_switch(&mut self) {
-        self.error = roster_refused().into();
-        self.switch_refused_for = Some(Identity::of(&self.persisted));
-    }
-
     pub fn captured(persisted: PersistedSession) -> Self {
         let committed_credentials = CredentialPatch::of(&persisted);
         let disk_identity = Identity::of(&persisted);
@@ -805,11 +731,6 @@ pub(super) fn write_plaintext_verdict(w: &mut Canon, v: &super::PlaintextVerdict
 pub(super) fn write_user(w: &mut Canon, user: &UserRef) {
     w.u64(user.id as u64).str(&user.uuid).str(&user.title).str(&user.thumb).str(&user.token);
     w.option(user.plex_tv_token.as_ref(), |w, t| { w.str(t); });
-}
-
-pub(super) fn write_tile(w: &mut Canon, user: &UserTile) {
-    w.u64(user.id as u64).str(&user.uuid).str(&user.title).str(&user.thumb)
-        .bool(user.protected).bool(user.admin);
 }
 
 pub(super) fn write_profile(w: &mut Canon, profile: &crate::plex::session::ProfileCreds) {
@@ -904,8 +825,7 @@ impl LogicalState for SessionInit {
                 w.u8(1); write_server(w, primary); write_sources(w, extras);
             }
         }
-        w.u8(match self.phase { Phase::Idle => 0, Phase::Creating => 1, Phase::Waiting => 2,
-            Phase::Discovering => 3, Phase::Profiles => 4, Phase::Switching => 5,
+        w.u8(match self.phase { Phase::Idle => 0,
             Phase::Ready => 6, Phase::Error => 7, Phase::Deleted => 8 });
         w.u8(match self.picker { Picker::Boot => 0, Picker::SignedIn => 1, Picker::ChangeProfile => 2 });
         write_persisted(w, &self.persisted);
@@ -938,12 +858,6 @@ impl LogicalState for SessionInit {
                 AdmissionState::Accepted(id) => { w.u8(2).u32(id.0); }
             }
             w.option(pending.capture.as_ref(), |w, capture| match capture {
-                CaptureIntent::Login => { w.u8(0); }
-                CaptureIntent::Profile { tile, pin } => {
-                    w.u8(1).u64(tile.id as u64).str(&tile.uuid).str(&tile.title).str(&tile.thumb)
-                        .bool(tile.protected).bool(tile.admin);
-                    w.option(pin.as_ref(), |w, pin| { w.str(pin); });
-                }
                 CaptureIntent::Endpoint { sid } => { w.u8(2).u32(u32::from(*sid)); }
             });
         }
@@ -969,14 +883,12 @@ impl LogicalState for SessionInit {
             let delta = &commit.delta;
             w.option(delta.dev.as_ref(), |w, dev| { match dev {
                 DevCommitDelta::Activated => { w.u8(0); }
-                DevCommitDelta::StartAccount { login_req } => { w.u8(1).u32(*login_req); }
             } });
             w.option(delta.credentials.as_ref(), |w, patch| {
                 write_persisted(w, &patch.merge_into(&PersistedSession::default()));
             });
             w.option(delta.phase, |w, phase| { w.u8(match phase {
-                Phase::Idle => 0, Phase::Creating => 1, Phase::Waiting => 2,
-                Phase::Discovering => 3, Phase::Profiles => 4, Phase::Switching => 5,
+                Phase::Idle => 0,
                 Phase::Ready => 6, Phase::Error => 7, Phase::Deleted => 8,
             }); });
             w.option(delta.picker, |w, picker| { w.u8(match picker {
@@ -1026,126 +938,23 @@ impl LogicalState for SessionMachine {
 /// Derived UI facts only. Credentials and writable controller state are not part of the view.
 #[derive(PartialEq, Eq)]
 pub(crate) struct SessionSnapshot {
-    pub flow_epoch: u64,
     pub phase: Phase,
-    pub qr_generation: u64,
-    pub code: Arc<str>,
-    pub png: Arc<[u8]>,
-    pub code_replaced: bool,
-    pub users: Arc<[UserTile]>,
-    pub error: Arc<str>,
-    pub pin_denied: bool,
-    pub profile: Option<ProfileRead>,
-    pub scope: ProfileScope,
     pub delete_leftovers: usize,
     pub persistence_warning: Option<PersistenceWarning>,
-    /// plex.tv is not answering the polls of the code on screen.
-    pub link_trouble: bool,
-    pub discovery_retry: Option<super::DiscoveryRetryProgress>,
-    /// The failure read-out's plaintext offer — see [`SessionInit::plaintext`]. The screen reads
-    /// the server's name and owner from it; nothing here leaves the device.
-    pub plaintext: Option<super::PlaintextVerdict>,
-    /// **Switching profiles is known to be unavailable for the identity in use** — its roster
-    /// was refused with nothing cached (plex.tv's verdict, or a dev-token session that has no
-    /// account to ask with). The account menu hides *Change profile* on it; no verdict
-    /// (unreachable, never asked) keeps the row, because that row is what asks.
-    pub switch_refused: bool,
-    /// **BACK from the roster read-out resumes a session inside the app** — the one fact the
-    /// read-out needs to offer a *Back* control whose press does what the BACK key does. When
-    /// it is `false` the key hands the screen to the television, and a *Back* pill saying
-    /// otherwise would lie.
-    pub readout_back_resumes: bool,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-pub(crate) struct ProfileRead {
-    pub uuid: String,
-    pub title: String,
-    pub thumb: String,
 }
 
 #[derive(Clone, Copy)]
 pub(crate) struct SessionRead<'a>(pub &'a SessionSnapshot);
 
-/// [`SessionSnapshot::roster_readout`]'s condition, for a reader that holds the fields rather
-/// than the snapshot (the Profiles screen keeps its own copies between frames).
-pub(crate) fn is_roster_readout(phase: Phase, users: &[UserTile], error: &str) -> bool {
-    phase == Phase::Profiles && users.is_empty() && !error.is_empty()
-}
-
-/// The log line owed when one session step moves the publication INTO the roster read-out
-/// (#132), or `None`. The owner logs nothing itself; the bridge, which runs every session step,
-/// writes this between the publication before and after that step. It is decided HERE — at the
-/// publication boundary — and not by the Profiles screen, because the screen only ever sees the
-/// state it was mounted on: a dev-token Change profile is refused synchronously, so the read-out
-/// already exists at mount and a screen-side "it just changed" gate never fires (TV, PR #212).
-/// A worker's failure line carries the HTTP status; this one carries what the person is told,
-/// and fires on every path in, including the ones that made no request at all.
-pub(crate) fn roster_readout_entered(before: &SessionSnapshot, after: &SessionSnapshot) -> Option<String> {
-    let reason = after.roster_readout()?;
-    if before.roster_readout() == Some(reason) { return None; }
-    Some(format!("profiles: no profiles to offer — {reason} (BACK returns)"))
-}
-
 impl SessionSnapshot {
     pub fn read(&self) -> SessionRead<'_> { SessionRead(self) }
-    /// **#132's read-out**: a picker with nobody to offer and a reason why. The ONE predicate —
-    /// the Profiles screen draws it, stops its spinner on it, and [`roster_readout_entered`]
-    /// announces it; three copies of the condition are how a screen ends up still spinning under
-    /// a read-out it drew.
-    pub fn roster_readout(&self) -> Option<&str> {
-        is_roster_readout(self.phase, &self.users, &self.error).then_some(&*self.error)
-    }
     fn from_state(state: &SessionInit) -> Self {
-        Self::from_state_counted(state, None, &mut |_| {})
+        Self { phase: state.phase, delete_leftovers: state.delete_leftovers,
+            persistence_warning: state.persistence_warning }
     }
     fn matches_state(&self, state: &SessionInit) -> bool {
-        self.flow_epoch == state.epoch && self.phase == state.phase && self.qr_generation == state.qr_gen
-            && &*self.code == state.pin_code.as_str() && &*self.png == state.qr_png.as_slice()
-            && &*self.users == state.users.as_slice() && &*self.error == state.error.as_str()
-            && self.code_replaced == state.code_replaced && self.pin_denied == state.pin_denied
-            && self.scope == state.profile_scope && self.delete_leftovers == state.delete_leftovers
+        self.phase == state.phase && self.delete_leftovers == state.delete_leftovers
             && self.persistence_warning == state.persistence_warning
-            && self.link_trouble == state.link_trouble
-            && self.discovery_retry == state.discovery_retry
-            && self.plaintext == state.plaintext
-            && self.switch_refused == state.switch_refused()
-            && self.readout_back_resumes == (state.roster_readout_up() && state.roster_dead_end()
-                && state.dead_end_resumes())
-            && match (&self.profile, &state.active_profile) {
-                (None, None) => true,
-                (Some(read), Some(profile)) => read.uuid == profile.uuid
-                    && read.title == profile.title && read.thumb == profile.thumb,
-                _ => false,
-            }
-    }
-    fn from_state_counted(state: &SessionInit, previous: Option<&Self>, built: &mut impl FnMut(usize)) -> Self {
-        let code = previous.filter(|old| &*old.code == state.pin_code.as_str())
-            .map(|old| Arc::clone(&old.code)).unwrap_or_else(|| {
-                built(0); Arc::from(state.pin_code.as_str())
-            });
-        let png = previous.filter(|old| &*old.png == state.qr_png.as_slice())
-            .map(|old| Arc::clone(&old.png)).unwrap_or_else(|| {
-                built(1); Arc::from(state.qr_png.as_slice())
-            });
-        let users = previous.filter(|old| &*old.users == state.users.as_slice())
-            .map(|old| Arc::clone(&old.users)).unwrap_or_else(|| {
-                built(2); Arc::from(state.users.as_slice())
-            });
-        let error = previous.filter(|old| &*old.error == state.error.as_str())
-            .map(|old| Arc::clone(&old.error)).unwrap_or_else(|| Arc::from(state.error.as_str()));
-        Self { flow_epoch: state.epoch, phase: state.phase, qr_generation: state.qr_gen,
-            code, png, code_replaced: state.code_replaced, users,
-            error, pin_denied: state.pin_denied,
-            profile: state.active_profile.as_ref().map(|p| ProfileRead {
-                uuid: p.uuid.clone(), title: p.title.clone(), thumb: p.thumb.clone(),
-            }), scope: state.profile_scope, delete_leftovers: state.delete_leftovers,
-            persistence_warning: state.persistence_warning,
-            link_trouble: state.link_trouble, discovery_retry: state.discovery_retry,
-            plaintext: state.plaintext.clone(),
-            switch_refused: state.switch_refused(),
-            readout_back_resumes: state.roster_readout_up() && state.roster_dead_end()
-                && state.dead_end_resumes() }
     }
 }
 
@@ -1154,8 +963,6 @@ pub(crate) struct SessionMachine {
     publication: Arc<SessionSnapshot>,
     subhash: u64,
     logical_dirty: bool,
-    #[cfg(test)]
-    publication_payload_allocations: [usize; 3],
 }
 
 impl SessionMachine {
@@ -1166,8 +973,7 @@ impl SessionMachine {
         state.write(&mut canon);
         let subhash = canon.finish();
         let publication = Arc::new(SessionSnapshot::from_state(&state));
-        Self { state, publication, subhash, logical_dirty: true,
-            #[cfg(test)] publication_payload_allocations: [0; 3] }
+        Self { state, publication, subhash, logical_dirty: true }
     }
     // Required controlled-init boundary; full AppInit capture remains a following stage.
     pub fn snapshot_init(&self) -> SessionInit { self.state.clone() }
@@ -1208,8 +1014,6 @@ impl SessionMachine {
         let Some(pending) = self.state.pending.get(&req) else { return false };
         if pending.key.epoch != epoch || !pending.expected.matches(&self.state.persisted) { return false; }
         match (&pending.capture, request) {
-            (Some(CaptureIntent::Login), SessionReadRequest::LoginClientId)
-            | (Some(CaptureIntent::Profile { .. }), SessionReadRequest::ProfilePolicy) => true,
             (Some(CaptureIntent::Endpoint { sid: a }), SessionReadRequest::Endpoint { sid: b }) => *a == b,
             _ => false,
         }
@@ -1279,9 +1083,9 @@ impl SessionMachine {
         // over it (AUTH-03) — acknowledging is what re-admits `needs_ready_commit`.
         if self.state.persistence_warning.is_some() { return false; }
         let Some(req) = self.allocate(SessionOp::Ready, None) else {
-            self.state.phase = Phase::Profiles;
+            self.state.phase = Phase::Error;
             self.state.apply_pending = false;
-            self.state.error = crate::i18n::msg::browse_auth_switch_retry().to_string().into();
+            self.state.error = crate::i18n::msg::browse_auth_authority_failed().into();
             self.replace_publication();
             return true;
         };
@@ -1318,37 +1122,6 @@ impl SessionMachine {
             authority: crate::plex::session::SaveAuthority::Routine }, CommitDelta {
                 dev: Some(DevCommitDelta::Activated), ..Default::default()
             }, emit)
-    }
-
-    fn begin_dev_account(&mut self, emit: &mut impl FnMut(SessionFx)) -> bool {
-        if self.state.pending_erase.is_some() || self.state.epoch.checked_add(1).is_none()
-            || self.state.next_req.checked_add(2).is_none()
-            || self.state.pending_commit.as_ref().is_some_and(|c|
-                matches!(c.delta.dev, Some(DevCommitDelta::StartAccount { .. }))) { return false; }
-        self.advance_epoch(emit).expect("dev login epoch preflight");
-        self.publish_profile(None, emit);
-        self.state.phase = Phase::Creating;
-        self.state.apply_pending = false;
-        self.state.error.clear();
-        let req = self.allocate(SessionOp::DevBoundary, None).expect("two-slot preflight");
-        let login_req = self.allocate(SessionOp::Login, None).expect("two-slot preflight");
-        self.begin_commit(req, 0, true, CommitPlan { registry_client_id: self.state.persisted.client_id.clone(),
-            expected_disk: self.state.disk_identity.clone(),
-            credentials: None, lifecycle: None, registry: vec![RegistryPlan::Revoke],
-            purpose: PersistencePurpose::Background, writes_durable: false,
-            authority: crate::plex::session::SaveAuthority::Routine }, CommitDelta {
-                dev: Some(DevCommitDelta::StartAccount { login_req }), ..Default::default()
-            }, emit);
-        self.replace_publication();
-        true
-    }
-
-    fn start_reserved_login(&mut self, req: u32, emit: &mut impl FnMut(SessionFx)) {
-        let client_id = self.state.persisted.client_id.clone();
-        if client_id.is_empty() {
-            self.state.pending.get_mut(&req).expect("reserved login").capture = Some(CaptureIntent::Login);
-            emit(SessionFx::Capture { req, epoch: self.state.epoch, request: SessionReadRequest::LoginClientId });
-        } else { self.emit_work(req, SessionWork::Login { client_id }, emit); }
     }
 
     fn resume_stored(&mut self, emit: &mut impl FnMut(SessionFx)) -> bool {
@@ -1457,23 +1230,14 @@ impl SessionMachine {
         };
         self.state.persistence_purpose = None;
         if !reply.admission.accepted() {
-            if let Some(DevCommitDelta::StartAccount { login_req }) = commit.delta.dev {
-                self.retire(login_req, emit);
-            }
             let op = self.state.pending.remove(&reply.req).unwrap().key.op;
             match op {
-                SessionOp::Login | SessionOp::Rediscover => self.fail_login(crate::i18n::msg::browse_auth_finish_failed(), emit),
-                SessionOp::ProfileSwitch | SessionOp::Ready => {
-                    self.state.phase = Phase::Profiles;
-                    self.state.apply_pending = false;
-                    self.state.error = crate::i18n::msg::browse_auth_switch_failed().into();
-                }
-                SessionOp::HomeRoster | SessionOp::ServerRoster | SessionOp::Endpoint(_) | SessionOp::Picker => {}
-                SessionOp::DevBoundary => {
+                SessionOp::Ready | SessionOp::DevBoundary => {
                     self.state.phase = Phase::Error;
                     self.state.apply_pending = false;
                     self.state.error = crate::i18n::msg::browse_auth_authority_failed().into();
                 }
+                SessionOp::ServerRoster | SessionOp::Endpoint(_) => {}
             }
             emit(SessionFx::Retire { req: reply.req });
             if let Some(receipt) = commit.receipt { emit(SessionFx::Acknowledge(vec![receipt])); }
@@ -1482,23 +1246,14 @@ impl SessionMachine {
             return true;
         }
         let delta = commit.delta;
-        if let Some(dev) = &delta.dev {
-            match dev {
-                DevCommitDelta::Activated => {
-                    if let BootstrapAuthority::DevPms { primary, .. } = &self.state.authority {
-                        let primary = primary.clone();
-                        self.state.phase = Phase::Ready;
-                        self.state.apply_pending = false;
-                        self.publish_profile(None, emit);
-                        emit(SessionFx::Ready { epoch: self.state.epoch, scope: self.state.profile_scope,
-                            token: primary.token.clone(), server: primary, install: ReadyInstall::AlreadyInstalled });
-                    }
-                }
-                DevCommitDelta::StartAccount { login_req } => {
-                    self.state.authority = BootstrapAuthority::Account { extras: Vec::new() };
-                    self.state.signin_active = true;
-                    self.start_reserved_login(*login_req, emit);
-                }
+        if let Some(DevCommitDelta::Activated) = &delta.dev {
+            if let BootstrapAuthority::DevPms { primary, .. } = &self.state.authority {
+                let primary = primary.clone();
+                self.state.phase = Phase::Ready;
+                self.state.apply_pending = false;
+                self.publish_profile(None, emit);
+                emit(SessionFx::Ready { epoch: self.state.epoch, scope: self.state.profile_scope,
+                    token: primary.token.clone(), server: primary, install: ReadyInstall::AlreadyInstalled });
             }
         }
         if let Some(patch) = delta.credentials {
@@ -1619,16 +1374,6 @@ impl SessionMachine {
         } else {
             // This is an unsequenced, never-admitted refusal. Accepted requests (including ones
             // without a first observation) cannot enter this branch.
-            match pending.key.op {
-                SessionOp::Login => self.fail_login(crate::i18n::msg::browse_auth_start_failed(), emit),
-                SessionOp::Rediscover => self.fail_login(crate::i18n::msg::browse_auth_rediscover_failed(), emit),
-                SessionOp::ProfileSwitch => {
-                    self.state.phase = Phase::Profiles;
-                    self.state.error = crate::i18n::msg::browse_auth_switch_retry().to_string().into();
-                }
-                SessionOp::HomeRoster => self.fail_empty_home_roster(roster_unreachable()),
-                _ => {}
-            }
             self.retire(req, emit);
             self.replace_publication();
         }
@@ -1707,9 +1452,7 @@ impl SessionMachine {
             envelope.outcome = SessionArrival::Dropped;
         }
         if self.accepts(&envelope) {
-            if !self.apply_qr_observation(&envelope, emit) {
-                self.apply_resource_observation(&envelope, emit);
-            }
+            self.apply_resource_observation(&envelope, emit);
         }
         if let Some(commit) = &mut self.state.pending_commit {
             assert!(commit.req == receipt.addr.req.0 && commit.epoch == receipt.key.epoch
@@ -1755,88 +1498,6 @@ impl SessionMachine {
         true
     }
 
-    fn start_switch(&mut self, picker: Picker, emit: &mut impl FnMut(SessionFx)) -> bool {
-        if matches!(self.state.authority, BootstrapAuthority::DevPms { .. }) {
-            // A dev-token session has no account behind it to list a roster with. The account
-            // menu still offers *Change profile* (it reads the on-disk sign-in), and the app has
-            // already routed to the picker by the time this runs — so refusing SILENTLY left that
-            // route with nothing behind it: a spinner that never ends and a BACK that could not
-            // leave (#132, TV session 8). Say so on the picker instead; `back` returns.
-            // `picker` is deliberately not recorded: nothing is detached here, so there is no
-            // picker-kind rule for `back` to apply, and BACK restores this session state exactly.
-            if self.state.phase != Phase::Ready || self.state.pending_erase.is_some() { return false; }
-            let _ = picker;
-            self.state.phase = Phase::Profiles;
-            self.state.users.clear();
-            self.state.refuse_switch();
-            self.replace_publication();
-            return true;
-        }
-        if self.state.pending_erase.is_some() { return false; }
-        if self.advance_epoch(emit).is_none() { return false; }
-        if self.state.persisted.account_token.is_empty() {
-            self.fail_login(crate::i18n::msg::browse_auth_signed_out(), emit);
-            self.replace_publication();
-            return true;
-        }
-        if super::detaches_active_profile(picker) { self.publish_profile(None, emit); }
-        self.state.error.clear();
-        if self.state.users.is_empty() {
-            self.state.users = self.state.persisted.home_users.iter().map(UserTile::of_ref).collect();
-        }
-        self.state.phase = Phase::Profiles;
-        self.state.picker = picker;
-        if let Some(req) = self.allocate(SessionOp::Picker, None) {
-            let initial_profile = picker == Picker::Boot && self.state.active_profile.is_none()
-                && self.state.persisted.can_go_local();
-            let mut registry = Vec::new();
-            if initial_profile {
-                registry.push(RegistryPlan::Primary { server: self.state.persisted.server.clone(),
-                    token: self.state.persisted.pms_token().into() });
-            }
-            registry.push(RegistryPlan::Install {
-                sources: self.state.persisted.sources.clone(), primary: None, replace: false,
-            });
-            let plan = CommitPlan { registry_client_id: self.state.persisted.client_id.clone(),
-                expected_disk: self.state.disk_identity.clone(),
-                credentials: None, lifecycle: None, registry,
-                purpose: PersistencePurpose::Background, writes_durable: false,
-                authority: crate::plex::session::SaveAuthority::Routine };
-            self.begin_commit(req, 0, true, plan, CommitDelta {
-                activate_profile: initial_profile, ..Default::default()
-            }, emit);
-        }
-        self.refresh_roster(emit);
-        if let Some(req) = self.allocate(SessionOp::HomeRoster, None) {
-            self.emit_work(req, SessionWork::HomeRoster { client_id: self.state.persisted.client_id.clone(),
-                account_token: self.state.persisted.account_token.clone(),
-                expected: Identity::of(&self.state.persisted) }, emit);
-        }
-        self.replace_publication();
-        true
-    }
-
-    fn select_profile(&mut self, index: usize, pin: Option<String>, emit: &mut impl FnMut(SessionFx)) -> bool {
-        if self.state.pending_erase.is_some() { return false; }
-        let Some(tile) = self.state.users.get(index).cloned() else { return false };
-        if self.state.next_req.checked_add(1).is_none() { return false; }
-        if self.advance_epoch(emit).is_none() { return false; }
-        let same_user = super::may_reuse_seated_profile(&self.state.persisted, &tile, pin.as_deref());
-        if same_user {
-            self.state.error.clear();
-            self.state.phase = Phase::Ready;
-            self.state.apply_pending = true;
-        } else {
-            self.state.phase = Phase::Switching;
-            self.state.pin_denied = false;
-            let req = self.allocate(SessionOp::ProfileSwitch, None).expect("request preflight");
-            self.state.pending.get_mut(&req).unwrap().capture = Some(CaptureIntent::Profile { tile, pin });
-            emit(SessionFx::Capture { req, epoch: self.state.epoch, request: SessionReadRequest::ProfilePolicy });
-        }
-        self.replace_publication();
-        true
-    }
-
     fn request_endpoint(&mut self, sid: crate::plex::ServerId, emit: &mut impl FnMut(SessionFx)) -> bool {
         let sid = sid.raw();
         if usize::from(sid) >= crate::plex::MAX_SERVERS
@@ -1847,64 +1508,6 @@ impl SessionMachine {
         let Some(req) = self.allocate(SessionOp::Endpoint(sid), None) else { return false };
         self.state.pending.get_mut(&req).unwrap().capture = Some(CaptureIntent::Endpoint { sid });
         emit(SessionFx::Capture { req, epoch: self.state.epoch, request: SessionReadRequest::Endpoint { sid } });
-        true
-    }
-
-    fn back(&mut self, reply: ReplyTo, emit: &mut impl FnMut(SessionFx)) -> bool {
-        // AUTH-03: while an unacknowledged persistence warning is showing, BACK must not clear it
-        // or resume — clearing it here would silently re-admit `needs_ready_commit`/`take_ready`
-        // on the next frame (a second, routine save over the still-unconfirmed fresh one) and, for
-        // a held Final handoff, would release it without the explicit acknowledgement the warning
-        // exists to require. Only the labelled Continue (`acknowledge_persistence_warning`) may
-        // clear it; BACK here is the platform root press only.
-        if self.state.persistence_warning.is_some() {
-            emit(SessionFx::BackReply { to: reply, resumed: false });
-            return true;
-        }
-        let dead_end = self.state.roster_dead_end();
-        if dead_end {
-            if let BootstrapAuthority::DevPms { primary, .. } = &self.state.authority {
-                // Nothing was detached or re-pointed (see `start_switch`): re-announce the dev
-                // session exactly as its activation did.
-                let primary = primary.clone();
-                self.state.phase = Phase::Ready;
-                self.state.error.clear();
-                emit(SessionFx::Ready { epoch: self.state.epoch, scope: self.state.profile_scope,
-                    token: primary.token.clone(), server: primary, install: ReadyInstall::AlreadyInstalled });
-                emit(SessionFx::BackReply { to: reply, resumed: true });
-                self.replace_publication();
-                return true;
-            }
-        }
-        let stored = self.state.committed_credentials.merge_into(&self.state.persisted);
-        // A dead-end picker offered nobody, so the picker-kind rule (`may_resume`: the
-        // Change-profile picker is a root, so BACK cannot skip a PIN) has no boundary to guard.
-        // Only "is there a session to go back to" remains — `dead_end_resumes`, the same answer
-        // the read-out publishes so its *Back* control is offered exactly when this resumes.
-        let resumable = if dead_end { self.state.dead_end_resumes() } else { super::resumable(&stored, self.state.picker) };
-        if !resumable || self.state.epoch.checked_add(1).is_none() {
-            emit(SessionFx::BackReply { to: reply, resumed: false });
-            return true;
-        }
-        self.advance_epoch(emit).expect("epoch preflight");
-        if std::mem::take(&mut self.state.signin_active) {
-        }
-        self.state.persisted = stored;
-        self.state.phase = Phase::Ready;
-        self.state.apply_pending = true;
-        self.state.pin_code.clear();
-        self.state.qr_png.clear();
-        self.state.qr_gen = 0;
-        self.state.users.clear();
-        self.state.error.clear();
-        self.state.pin_denied = false;
-        self.state.authorized_in_flow = false;
-        self.state.persistence_warning = None;
-        self.state.held_handoff = None;
-        self.state.persistence_warning_answered = false;
-        self.state.code_replaced = false;
-        emit(SessionFx::BackReply { to: reply, resumed: true });
-        self.replace_publication();
         true
     }
 
@@ -1939,14 +1542,13 @@ impl SessionMachine {
     }
 
     fn erased(&mut self, epoch: u64, leftovers: usize, emit: &mut impl FnMut(SessionFx)) -> bool {
-        let Some((expected, sign_in)) = self.state.pending_erase else { return false };
+        let Some((expected, _sign_in)) = self.state.pending_erase else { return false };
         if expected != epoch || self.state.epoch != epoch { return false; }
         self.state.pending_erase = None;
         self.state.disk_identity = Identity::of(&self.state.persisted);
         self.state.delete_leftovers = leftovers;
         self.state.phase = Phase::Deleted;
-        if sign_in { self.restart_login(true, emit); }
-        else { emit(SessionFx::Coordinator(CoordinatorAction::LocalDataErased)); }
+        emit(SessionFx::Coordinator(CoordinatorAction::LocalDataErased));
         self.replace_publication();
         true
     }
@@ -1958,18 +1560,6 @@ impl SessionMachine {
         if pending.key.epoch != reply.epoch || !pending.expected.matches(&self.state.persisted) { return false; }
         let Some(intent) = pending.capture.clone() else { return false };
         let input = match (intent, &reply.value) {
-            (CaptureIntent::Login, SessionReadValue::LoginClientId(client_id)) if !client_id.is_empty() => {
-                if self.state.disk_identity.client_id.is_empty() {
-                    self.state.disk_identity.client_id = client_id.clone();
-                }
-                self.state.persisted.client_id = client_id.clone();
-                self.state.committed_credentials.client_id = client_id.clone();
-                self.state.pending.get_mut(&req).unwrap().expected = Identity::of(&self.state.persisted);
-                SessionWork::Login { client_id: client_id.clone() }
-            }
-            (CaptureIntent::Profile { tile, pin }, SessionReadValue::ProfilePolicy { recently_unreachable }) =>
-                SessionWork::ProfileSwitch { session: self.state.persisted.clone(),
-                    expected: Identity::of(&self.state.persisted), tile, pin, recently_unreachable: *recently_unreachable },
             (CaptureIntent::Endpoint { sid }, SessionReadValue::Endpoint(Some(captured)))
                 if captured.lifecycle.sid == sid && self.state.persisted.sources.iter().any(|source|
                     source.machine_id == captured.machine_id && source.dialable()) => {
@@ -1981,48 +1571,11 @@ impl SessionMachine {
                 self.retire(req, emit);
                 return true;
             }
-            (CaptureIntent::Login, SessionReadValue::LoginClientId(_)) => {
-                self.fail_login(crate::i18n::msg::browse_auth_start_failed(), emit);
-                self.retire(req, emit);
-                self.replace_publication();
-                return true;
-            }
-            _ => return false,
         };
         let pending = self.state.pending.get_mut(&req).unwrap();
         pending.capture = None;
         self.emit_work(req, input, emit);
         true
-    }
-
-    fn roster_plan(next: &PersistedSession, probes: &[super::SettledProbe]) -> Vec<RegistryPlan> {
-        let primary = next.sources.iter().position(|source| source.machine_id == next.server.machine_id);
-        let mut plans = vec![RegistryPlan::Install { sources: next.sources.clone(), primary, replace: true }];
-        plans.extend(probes.iter().cloned().map(RegistryPlan::Probe));
-        plans
-    }
-
-    /// A roster request ended without tiles. With cached tiles on screen nothing changes — they
-    /// are still the household, and offline switching reads them. With NONE, the picker says so
-    /// on its own route: `Phase::Profiles` with the reason in `error` and no tiles is the
-    /// read-out `screens/profiles.rs` draws, and [`SessionInit::roster_dead_end`] is what lets BACK leave
-    /// it. It used to be `fail_login`, i.e. `Phase::Error` — which the app routes to the SIGN-IN
-    /// screen ("Couldn't sign in", whose Try again starts a new QR sign-in) for a person who is
-    /// signed in, and whose BACK the Change-profile picker's root rule then refused (#132).
-    fn fail_empty_home_roster(&mut self, reason: &str) {
-        if self.state.users.is_empty() && self.state.phase == Phase::Profiles {
-            self.state.error = reason.to_owned();
-        }
-    }
-
-    /// [`Self::fail_empty_home_roster`] for plex.tv's VERDICT: over nothing cached it is the dead
-    /// end itself, so it is also remembered for this identity and the account menu stops offering
-    /// the way in (`SessionInit::refuse_switch`). Over cached tiles it changes nothing, like any
-    /// other empty answer.
-    fn refuse_empty_home_roster(&mut self) {
-        if self.state.users.is_empty() && self.state.phase == Phase::Profiles {
-            self.state.refuse_switch();
-        }
     }
 
     fn apply_resource_observation(&mut self, envelope: &SessionEnvelope,
@@ -2033,64 +1586,18 @@ impl SessionMachine {
         let pending = &self.state.pending[&req];
         if !pending.expected.matches(&self.state.persisted) { return false; }
         let SessionArrival::Data(data) = &envelope.outcome else {
-            if pending.key.op == SessionOp::ProfileSwitch && pending.phase == StreamPhase::Running {
-                self.state.phase = Phase::Profiles;
-                self.state.pin_denied = false;
-                self.state.error = crate::i18n::msg::browse_auth_switch_retry().to_string().into();
-            } else if pending.key.op == SessionOp::HomeRoster {
-                self.fail_empty_home_roster(roster_unreachable());
-            }
             self.retire(req, emit);
             self.replace_publication();
             return true;
         };
         let mut delta = CommitDelta::default();
-        // Purpose is decided by the op, not by whether the write happens to be a credential
-        // patch: a background authorisation refresh must never read as proof of a saved login.
-        // Login/Rediscover's SignedIn write is the DISCOVERY save — the FINAL one is take_ready's,
-        // once the picker/Ready decision has been made.
-        let purpose = match pending.key.op {
-            SessionOp::Login | SessionOp::Rediscover => PersistencePurpose::Discovery,
-            SessionOp::ProfileSwitch => PersistencePurpose::Profile,
-            _ => PersistencePurpose::Background,
-        };
-        // A PEEK, never a consume: a discovery/rediscovery write must not spend the fresh
-        // authority the FINAL write (take_ready) needs (AUTH-04). Only take_ready consumes it.
-        let authority = if matches!(pending.key.op, SessionOp::Login | SessionOp::Rediscover)
-            && self.state.authorized_in_flow {
-            crate::plex::session::SaveAuthority::FreshReauthentication
-        } else { crate::plex::session::SaveAuthority::Routine };
+        let purpose = PersistencePurpose::Background;
+        let authority = crate::plex::session::SaveAuthority::Routine;
         let mut plan = CommitPlan { registry_client_id: self.state.persisted.client_id.clone(),
             expected_disk: self.state.disk_identity.clone(),
             credentials: None, registry: Vec::new(), lifecycle: pending.lifecycle,
             purpose, writes_durable: false, authority };
         match &**data {
-            Observation::Login(super::LoginProgress::SignedIn { server, sources, users, .. }) => {
-                let mut next = self.state.persisted.clone();
-                next.server = server.clone();
-                next.sources = sources.clone();
-                next.home_users = users.iter().map(super::UserTile::to_ref).collect();
-                // A fresh QR sign-in's account token is the owner's plex.tv credential. Keep it
-                // on the owner profile too; rediscovery can belong to a managed active profile
-                // and must not overwrite that profile's switch credential with the owner's.
-                if pending.key.op == SessionOp::Login && !next.account_token.is_empty() {
-                    next.user.plex_tv_token = Some(next.account_token.clone());
-                }
-                let patch = CredentialPatch::of(&next);
-                delta.credentials = Some(patch.clone());
-                plan.credentials = Some(patch);
-                delta.roster_answered = !users.is_empty();
-                if users.len() > 1 {
-                    delta.phase = Some(Phase::Profiles);
-                    delta.picker = Some(Picker::SignedIn);
-                    delta.users = Some(users.clone());
-                } else {
-                    delta.phase = Some(Phase::Ready);
-                    delta.ready = Some(true);
-                }
-                delta.complete_signin = true;
-            }
-            Observation::Login(_) => return false,
             Observation::Registry(progress) => {
                 if pending.key.op == SessionOp::ServerRoster
                     && !self.state.persisted.active_profile_is_admin() {
@@ -2119,33 +1626,6 @@ impl SessionMachine {
                             RegistryPlan::Install { sources: sources.clone(), primary: *primary, replace: false },
                     });
                 }
-            }
-            Observation::HomeRoster(progress) => {
-                // `None`: no verdict (no answer, a 5xx, a body that would not read). `Some([])`:
-                // plex.tv's verdict that this account has no roster to offer — it answered with
-                // nobody, or refused the identity (a managed profile's token gets 401 from
-                // `/api/v2/home/users`; see `auth::grade_roster`). Neither is committed: an empty
-                // answer written over a cached roster would erase what offline switching reads.
-                let users = match &progress.users {
-                    Some(users) if !users.is_empty() => users,
-                    graded => {
-                        if graded.is_none() {
-                            self.fail_empty_home_roster(roster_unreachable());
-                        } else {
-                            self.refuse_empty_home_roster();
-                        }
-                        self.retire(req, emit);
-                        self.replace_publication();
-                        return true;
-                    }
-                };
-                let mut next = self.state.persisted.clone();
-                next.home_users = users.iter().map(super::UserTile::to_ref).collect();
-                let patch = CredentialPatch::of(&next);
-                delta.credentials = Some(patch.clone());
-                delta.users = Some(users.clone());
-                delta.roster_answered = true;
-                plan.credentials = Some(patch);
             }
             Observation::ServerRoster(progress) => match &progress.outcome {
                 super::ServerRosterOutcome::Unreachable => {
@@ -2203,45 +1683,6 @@ impl SessionMachine {
                     }
                 }
             },
-            Observation::ProfileSwitch(progress) => match &progress.outcome {
-                super::ProfileSwitchOutcomeProgress::Failed { error, pin_denied } => {
-                    self.state.error = error.clone();
-                    self.state.pin_denied = *pin_denied;
-                    self.state.phase = Phase::Profiles;
-                    self.retire(req, emit);
-                    self.replace_publication();
-                    return true;
-                }
-                super::ProfileSwitchOutcomeProgress::Ready { delta: profile, probes } => {
-                    let mut next = self.state.persisted.clone();
-                    super::merge_profile_delta(&mut next, profile.clone());
-                    delta.credentials = Some(CredentialPatch::of(&next));
-                    delta.phase = Some(Phase::Ready);
-                    delta.ready = Some(true);
-                    delta.clear_error = true;
-                    delta.profile_seated = true;
-                    plan.registry = Self::roster_plan(&next, probes);
-                }
-            },
-            Observation::ProfileRoster(progress) => {
-                let mut next = self.state.persisted.clone();
-                let sources = super::profile_sources(&next.sources, &progress.reached,
-                    &progress.resources, &next.household_ids());
-                let Some(primary) = sources.iter()
-                    .find(|s| s.machine_id == next.server.machine_id && s.dialable())
-                    .or_else(|| sources.iter().find(|s| s.dialable())).cloned() else {
-                    self.retire(req, emit);
-                    return true;
-                };
-                next.sources = sources;
-                next.server = super::server_ref(&primary);
-                next.user.token = primary.token;
-                next.refresh_profile_record();
-                let patch = CredentialPatch::of(&next);
-                delta.credentials = Some(patch.clone());
-                if !self.state.apply_pending { plan.credentials = Some(patch); }
-                plan.registry = Self::roster_plan(&next, &progress.probes);
-            }
             Observation::Endpoint(progress) => {
                 let Some(lifecycle) = pending.lifecycle else { return false; };
                 match &progress.fresh {
@@ -2289,98 +1730,13 @@ impl SessionMachine {
 
     /// Start/restart is one owner decision. Check both counters before cancelling anything:
     /// exhaustion must not detach the still-live operation or reuse its resource address.
-    fn restart_login(&mut self, fresh_login: bool, emit: &mut impl FnMut(SessionFx)) -> bool {
-        if matches!(self.state.authority, BootstrapAuthority::DevPms { .. }) {
-            return (fresh_login || self.state.phase == Phase::Error) && self.begin_dev_account(emit);
-        }
-        if self.state.pending_erase.is_some() { return false; }
-        let Some(epoch) = self.state.epoch.checked_add(1) else { return false };
-        if self.state.next_req.checked_add(1).is_none() { return false; }
-        let discovery = !fresh_login && super::retry_kind(self.state.phase,
-            self.state.authorized_in_flow) == super::RetryKind::Discovery;
-        let _fresh_attempt = fresh_login || super::restart_is_a_new_attempt(self.state.signin_active);
-        let requests = self.state.pending.keys().copied().collect();
-        self.discard_owned_envelopes(emit);
-        self.state.pending.clear();
-        self.state.epoch = epoch;
-        self.state.discovery_retry = None;
-        emit(SessionFx::Cancel { requests, epoch });
-        if discovery {
-            self.state.phase = Phase::Discovering;
-            self.state.error.clear();
-            // 0.6.6 parity (`discovery-warning-not-cleared-on-retry-or-fresh-success`): a restart
-            // begins a fresh discovery attempt under a NEW epoch, so a warning (or a held handoff)
-            // left over from the attempt being retried can never be released or acknowledged by
-            // anything this new epoch does — it would sit stale forever. A rediscovery restart
-            // clears both, the same way the fresh-attempt branch below already does.
-            self.state.persistence_warning = None;
-            self.state.held_handoff = None;
-            self.state.persistence_warning_answered = false;
-        } else {
-            self.state.persisted = self.state.committed_credentials.merge_into(&self.state.persisted);
-            self.state.phase = Phase::Creating;
-            self.state.picker = Picker::Boot;
-            self.state.pin_code.clear();
-            self.state.qr_png.clear();
-            self.state.users.clear();
-            self.state.error.clear();
-            self.state.pin_denied = false;
-            self.state.authorized_in_flow = false;
-            self.state.persistence_warning = None;
-            self.state.held_handoff = None;
-            self.state.persistence_warning_answered = false;
-            self.state.apply_pending = false;
-            self.state.code_replaced = false;
-            self.state.qr_gen = 0;
-        }
-        self.state.signin_active = true;
-        self.state.link_trouble = false;
-        self.state.plaintext = None;
-        let op = if discovery { SessionOp::Rediscover } else { SessionOp::Login };
-        let req = self.allocate(op, None).expect("request exhaustion checked before transition");
-        let client_id = self.state.persisted.client_id.clone();
-        let input = if discovery {
-            SessionWork::Rediscover { client_id, account_token: self.state.persisted.account_token.clone() }
-        } else { SessionWork::Login { client_id } };
-        if !discovery && self.state.persisted.client_id.is_empty() {
-            self.state.pending.get_mut(&req).unwrap().capture = Some(CaptureIntent::Login);
-            emit(SessionFx::Capture { req, epoch, request: SessionReadRequest::LoginClientId });
-        } else {
-            self.emit_work(req, input, emit);
-        }
-        self.replace_publication();
-        true
-    }
-
-    /// **The sign-in read-out's *Try again*.** Over an eligible server the person said *Not now*
-    /// to (or turned off), it is also how they are asked again — Settings, where a signed-in person
-    /// changes that answer, is out of reach before sign-in — so the answer is withdrawn (recorded
-    /// `Undecided`, through the same [`SessionFx::PlaintextAnswer`]) BEFORE the retry's work
-    /// captures the answers, and the retry that follows asks.
-    fn retry(&mut self, emit: &mut impl FnMut(SessionFx)) -> bool {
-        use crate::plex::session::PlaintextChoice;
-        if self.state.phase == Phase::Error {
-            let account = crate::grant::account_key(&self.state.persisted);
-            let answered = self.state.plaintext.as_ref().filter(|v| v.offers()
-                && matches!(v.choice, PlaintextChoice::Declined | PlaintextChoice::Revoked));
-            if let (Some(v), false) = (answered, account.is_empty()) {
-                emit(SessionFx::PlaintextAnswer {
-                    machine_id: v.machine_id.clone(), choice: PlaintextChoice::Undecided, account,
-                });
-            }
-        }
-        self.restart_login(false, emit)
-    }
-
     /// **The answer to "Connect without encryption?"** — recorded through
     /// [`SessionFx::PlaintextAnswer`] first, so the work an *Allowed* starts captures it
     /// (`grant::PlaintextAsk`).
     ///
-    /// On the sign-in read-out it must answer the server shown there: *Connect* retries the
-    /// discovery, *Not now* re-words the read-out (its primary becomes *Try again*, which
-    /// withdraws the answer and asks again — [`Self::retry`]) and starts nothing. Signed in (Home's or the Library's read-out, Settings), any server may be
-    /// answered; an *Allowed* re-finds `sid`'s endpoint, or the whole roster without one. Nothing
-    /// is recorded without an account to bind it to.
+    /// Signed in (Home's or the Library's read-out, Settings), any server may be answered; an
+    /// *Allowed* re-finds `sid`'s endpoint, or the whole roster without one, so a fresh probe can
+    /// mint the grant. Nothing is recorded without an account to bind it to.
     fn answer_plaintext(&mut self, machine_id: &str, choice: crate::plex::session::PlaintextChoice,
         sid: Option<crate::plex::ServerId>, emit: &mut impl FnMut(SessionFx)) -> bool {
         use crate::plex::session::PlaintextChoice;
@@ -2388,22 +1744,7 @@ impl SessionMachine {
         if account.is_empty() || machine_id.is_empty() || choice == PlaintextChoice::Undecided {
             return false;
         }
-        let on_sign_in = self.state.phase == Phase::Error;
-        if on_sign_in && !self.state.plaintext.as_ref().is_some_and(|v| v.machine_id == machine_id) {
-            return false;
-        }
         emit(SessionFx::PlaintextAnswer { machine_id: machine_id.to_owned(), choice, account });
-        if on_sign_in {
-            if choice.allows() {
-                return self.restart_login(false, emit);
-            }
-            if let Some(verdict) = self.state.plaintext.as_mut() {
-                verdict.choice = choice;
-                self.state.error = super::insecure_only_copy(Some(verdict)).into_owned();
-            }
-            self.replace_publication();
-            return true;
-        }
         if choice.allows() {
             let _ = match sid {
                 Some(sid) => self.request_endpoint(sid, emit),
@@ -2413,127 +1754,6 @@ impl SessionMachine {
         true
     }
 
-    /// End the flow on the error read-out.
-    fn fail_login(&mut self, message: &str, _emit: &mut impl FnMut(SessionFx)) {
-        if std::mem::take(&mut self.state.signin_active) {
-            // The sign-in's telemetry coordinator effects went with the telemetry module.
-        }
-        self.state.error = message.to_owned();
-        self.state.phase = Phase::Error;
-        self.state.plaintext = None;
-        self.state.persistence_warning = None;
-        self.state.held_handoff = None;
-        self.state.persistence_warning_answered = false;
-        self.state.link_trouble = false;
-        self.state.discovery_retry = None;
-        self.state.authorized_in_flow = false;
-    }
-
-    /// QR observations need no external commit. SignedIn and registry/profile facts go through
-    /// the separate resource commit protocol, rather than treating their side effects as reads.
-    fn apply_qr_observation(&mut self, envelope: &SessionEnvelope,
-        emit: &mut impl FnMut(SessionFx)) -> bool {
-        if !self.accepts(envelope)
-            || !matches!(envelope.key.op, SessionOp::Login | SessionOp::Rediscover) {
-            return false;
-        }
-        let req = envelope.addr.req.0;
-        if !self.state.pending[&req].expected.matches(&self.state.persisted) { return false; }
-        match &envelope.outcome {
-            SessionArrival::Refused | SessionArrival::Dropped => {
-                if !envelope.terminal { return false; }
-                let message = match (envelope.key.op, &envelope.outcome) {
-                    (SessionOp::Rediscover, SessionArrival::Refused) =>
-                        crate::i18n::msg::browse_auth_rediscover_failed(),
-                    (_, SessionArrival::Refused) => crate::i18n::msg::browse_auth_start_failed(),
-                    _ => crate::i18n::msg::browse_auth_finish_failed(),
-                };
-                self.fail_login(message, emit);
-            }
-            SessionArrival::Data(data) => {
-                let super::observation::Observation::Login(progress) = &**data else { return false };
-                use super::LoginProgress;
-                let (epoch, terminal) = match progress {
-                    LoginProgress::CodeReplacing { epoch }
-                    | LoginProgress::CodeReady { epoch, .. }
-                    | LoginProgress::Authorized { epoch, .. }
-                    | LoginProgress::DiscoveryTrouble { epoch, .. }
-                    | LoginProgress::DiscoveryRetrySettled { epoch, .. }
-                    | LoginProgress::LinkTrouble { epoch, .. } => (*epoch, false),
-                    LoginProgress::Failed { epoch, .. } => (*epoch, true),
-                    LoginProgress::SignedIn { .. } => return false,
-                };
-                if epoch != envelope.key.epoch || terminal != envelope.terminal { return false; }
-                match progress {
-                    LoginProgress::CodeReplacing { .. } => {
-                        if envelope.key.op != SessionOp::Login { return false; }
-                        self.state.phase = Phase::Creating;
-                        self.state.pin_code.clear();
-                        self.state.qr_png.clear();
-                        self.state.code_replaced = true;
-                        // The worker's miss count is per code: a fresh code starts clean.
-                        self.state.link_trouble = false;
-                    }
-                    LoginProgress::CodeReady { code, qr_png, .. } => {
-                        if envelope.key.op != SessionOp::Login { return false; }
-                        let Some(next) = self.state.next_qr.checked_add(1) else {
-                            self.fail_login(crate::i18n::msg::browse_auth_start_failed(), emit);
-                            self.state.pending.remove(&req);
-                            emit(SessionFx::Cancel { requests: vec![req], epoch: self.state.epoch });
-                            emit(SessionFx::Retire { req });
-                            self.replace_publication();
-                            return true;
-                        };
-                        self.state.next_qr = next;
-                        self.state.qr_gen = next;
-                        self.state.pin_code = code.clone();
-                        self.state.qr_png = qr_png.clone();
-                        self.state.phase = Phase::Waiting;
-                    }
-                    LoginProgress::Authorized { token, .. } => {
-                        if envelope.key.op != SessionOp::Login { return false; }
-                        self.state.persisted.account_token = token.clone();
-                        self.state.authorized_in_flow = true;
-                        self.state.link_trouble = false;
-                        self.state.discovery_retry = None;
-                        self.state.error.clear();
-                        self.state.phase = Phase::Discovering;
-                        self.state.pending.get_mut(&req).unwrap().expected = Identity::of(&self.state.persisted);
-                    }
-                    LoginProgress::DiscoveryTrouble { progress, .. } => {
-                        if !matches!(envelope.key.op, SessionOp::Login | SessionOp::Rediscover) {
-                            return false;
-                        }
-                        self.state.discovery_retry = Some(*progress);
-                    }
-                    LoginProgress::DiscoveryRetrySettled { run, .. } => {
-                        if !matches!(envelope.key.op, SessionOp::Login | SessionOp::Rediscover) {
-                            return false;
-                        }
-                        if self.state.discovery_retry.is_some_and(|retry| retry.run == *run) {
-                            self.state.discovery_retry = None;
-                        }
-                    }
-                    LoginProgress::LinkTrouble { .. } => {
-                        if envelope.key.op != SessionOp::Login { return false; }
-                        self.state.link_trouble = true;
-                    }
-                    LoginProgress::Failed { message, plaintext, .. } => {
-                        self.fail_login(message, emit);
-                        self.state.plaintext = plaintext.clone();
-                    }
-                    LoginProgress::SignedIn { .. } => unreachable!(),
-                }
-            }
-        }
-        if envelope.terminal {
-            self.state.pending.remove(&req);
-        } else {
-            self.state.pending.get_mut(&req).unwrap().last_arrival = Some(envelope.arrival);
-        }
-        self.replace_publication();
-        true
-    }
 
     /// The checked allocator is independent from the full-width auth epoch. Exhaustion cannot
     /// reuse an address, including when a cancelled worker still owns a Landing reservation.
@@ -2571,16 +1791,8 @@ impl SessionMachine {
     }
 
     fn replace_publication(&mut self) {
-        // Compare borrowed fields first: constructing a throwaway snapshot here would copy
-        // QR/roster payloads even if equality then retained all of the old handles.
         if self.publication.matches_state(&self.state) { return; }
-        let next = SessionSnapshot::from_state_counted(&self.state, Some(&self.publication), &mut |field| {
-            #[cfg(test)]
-            { self.publication_payload_allocations[field] += 1; }
-            #[cfg(not(test))]
-            { let _ = field; }
-        });
-        self.publication = Arc::new(next);
+        self.publication = Arc::new(SessionSnapshot::from_state(&self.state));
     }
 }
 
@@ -2595,37 +1807,15 @@ impl<H: SessionHost> crate::ui::machine::Machine<H> for SessionMachine {
         let handled = match ev {
             SessionEvent::Command(Command::ActivateDevBootstrap) => self.activate_dev(&mut emit),
             SessionEvent::Command(Command::ResumeStored) => self.resume_stored(&mut emit),
-            SessionEvent::Command(Command::StartLogin) => self.restart_login(true, &mut emit),
-            SessionEvent::Command(Command::Retry) => self.retry(&mut emit),
             SessionEvent::Command(Command::TakeReady) => self.take_ready(&mut emit),
             SessionEvent::Command(Command::AcknowledgePersistenceWarning { key }) =>
                 self.acknowledge_persistence_warning(*key, &mut emit),
-            SessionEvent::Command(Command::StartSwitch(picker)) => self.start_switch(*picker, &mut emit),
-            SessionEvent::Command(Command::SelectProfile { index, pin }) => self.select_profile(*index, pin.clone(), &mut emit),
-            SessionEvent::Command(Command::SelectProfileWithReply { index, pin, reply }) => {
-                let accepted = self.select_profile(*index, pin.clone(), &mut emit);
-                emit(SessionFx::SelectionReply { to: *reply, accepted, flow_epoch: self.state.epoch });
-                true
-            }
-            SessionEvent::Command(Command::BackAtRoot { reply }) => self.back(*reply, &mut emit),
             SessionEvent::Command(Command::SignOut) => self.erase(true, &mut emit),
             SessionEvent::Command(Command::EraseLocal) => self.erase(false, &mut emit),
             SessionEvent::Command(Command::RefreshRoster) => self.refresh_roster(&mut emit),
             SessionEvent::Command(Command::RequestEndpoint { sid }) => self.request_endpoint(*sid, &mut emit),
             SessionEvent::Command(Command::AnswerPlaintext { machine_id, choice, sid }) =>
                 self.answer_plaintext(machine_id, *choice, *sid, &mut emit),
-            SessionEvent::Command(Command::RestartWait { phase, qr_generation, reply }) => {
-                let accepted = matches!(self.state.authority, BootstrapAuthority::Account { .. })
-                    && super::restart_permitted(Some((*phase, *qr_generation)),
-                    (self.state.phase, self.state.qr_gen)) && self.restart_login(false, &mut emit);
-                emit(SessionFx::RestartReply { to: *reply, accepted });
-                true
-            }
-            SessionEvent::Command(Command::DismissPinError) => {
-                self.state.pin_denied = false;
-                self.replace_publication();
-                true
-            }
             SessionEvent::Command(Command::NoteDeleteLeftovers(count)) => {
                 self.state.delete_leftovers = *count;
                 self.replace_publication();
@@ -2693,32 +1883,6 @@ mod tests {
 
 
 
-    fn roster_envelope(owner: &mut SessionMachine, req: u32, key: SessionWorkKey,
-        users: Option<Vec<UserTile>>) -> SessionEnvelope {
-        owner.state.pending.get_mut(&req).unwrap().admission = AdmissionState::Accepted(AdmissionId(req));
-        let expected = super::super::SessionIdentity::of(&owner.state.persisted);
-        SessionEnvelope {
-            addr: Addr { to: MachineId::Session, req: crate::ui::machine::RequestId(req) },
-            key, admission: AdmissionId(req), arrival: 1, terminal: true, lifecycle: None,
-            outcome: SessionArrival::Data(Arc::new(super::super::observation::Observation::HomeRoster(
-                super::super::HomeRosterProgress { epoch: key.epoch, expected, users }))),
-        }
-    }
-
-
-
-    fn qr_event(owner: &SessionMachine, req: u32, arrival: u64,
-        progress: super::super::LoginProgress, terminal: bool) -> SessionEnvelope {
-        SessionEnvelope {
-            addr: Addr { to: MachineId::Session, req: crate::ui::machine::RequestId(req) },
-            key: owner.state.pending[&req].key,
-            admission: AdmissionId(req),
-            arrival, terminal, lifecycle: None,
-            outcome: SessionArrival::Data(Arc::new(super::super::observation::Observation::Login(progress))),
-        }
-    }
-
-
     use super::*;
 
     struct OwnerHost;
@@ -2769,97 +1933,6 @@ mod tests {
     }
 
 
-    /// A dialable `ServerRef` matching [`local_session`]'s own — for a `SignedIn` observation that
-    /// must make `can_go_local()` true afterwards (a `Default::default()` server has no address,
-    /// so `server_dialable()` refuses it regardless of the token).
-    fn local_server() -> crate::plex::session::ServerRef {
-        crate::plex::session::ServerRef { address: "127.0.0.1".into(), port: 32400,
-            token: "synthetic-token".into(), ..Default::default() }
-    }
-
-
-    /// AUTH-03/AUTH-04 rig: a session mid-flow, discovering with a completed PIN authorization
-    /// already recorded (`authorized_in_flow`) and one live `Login` request awaiting its
-    /// `SignedIn` observation — the shape `restart_login`+`Authorized` would have produced, built
-    /// directly so the test owns its own state root with no disk, no fixture and no Bridge.
-    fn discovering_after_authorization() -> SessionInit {
-        let mut init = local_session();
-        let req = init.next_req.checked_add(1).unwrap();
-        init.next_req = req;
-        init.phase = Phase::Discovering;
-        init.authorized_in_flow = true;
-        init.pending.insert(req, Pending {
-            key: SessionWorkKey { epoch: init.epoch, op: SessionOp::Login },
-            expected: Identity::of(&init.persisted), lifecycle: None, last_arrival: None,
-            phase: StreamPhase::Running, capture: None,
-            admission: AdmissionState::Awaiting(AdmissionId(req)),
-        });
-        init
-    }
-
-
-    /// Same rig as [`discovering_after_authorization`], but seeded with an already-established,
-    /// UNPROTECTED profile identity (`user.uuid`/`committed_credentials`) — the "reopened session"
-    /// shape `back-bypasses-persistence-warning-ack`/AUTH-04 both describe (a Rediscover of a
-    /// session that is already fully signed in as a specific, unprotected profile), which is what
-    /// makes `super::resumable` actually answer TRUE rather than being refused on `Picker::Boot`'s
-    /// "nobody has said who they are" default (an empty `user.uuid` reads as protected
-    /// unconditionally — see [`crate::plex::session::Session::active_profile_is_protected`]).
-    fn reopened_after_authorization() -> SessionInit {
-        let mut init = discovering_after_authorization();
-        init.persisted.user.uuid = "u-1".into();
-        init.persisted.home_users = vec![crate::plex::session::HomeUserRef {
-            uuid: "u-1".into(), protected: false, ..Default::default() }];
-        init.committed_credentials = CredentialPatch::of(&init.persisted);
-        // The pending Login request's `expected` identity was captured before this mutation —
-        // recompute it, or `apply_resource_observation`'s `pending.expected.matches(&persisted)`
-        // fence silently drops the SignedIn observation this rig exists to deliver.
-        for pending in init.pending.values_mut() {
-            pending.expected = Identity::of(&init.persisted);
-        }
-        init
-    }
-
-
-    /// Drives a fresh sign-in all the way to a held Final handoff with an unacknowledged warning
-    /// showing (the discovery write lands durably, the final write does not) — the shared setup
-    /// behind every `discovery-warning-not-cleared-on-retry-or-fresh-success` regression below.
-    fn owner_with_held_final_warning() -> SessionMachine {
-        use crate::plex::session::async_persistence::{
-            CompletionOutcome, Failure, Operation, PersistOutcome, PersistenceCompletion,
-        };
-        let mut owner = SessionMachine::from_init(reopened_after_authorization());
-        let req = owner.state.next_req;
-        let epoch = owner.state.epoch;
-        let signed_in = qr_event(&owner, req, 1, super::super::LoginProgress::SignedIn {
-            epoch, server: local_server(), sources: Vec::new(),
-            users: vec![UserTile { uuid: "u-1".into(), protected: false,
-                title: "Only user".into(), ..Default::default() }],
-        }, true);
-        step(&mut owner, SessionEvent::Result(signed_in));
-        let discovery_reply = CommitReply { req, epoch, arrival: 1,
-            admission: CommitAdmission::Admitted { revision: 1, purpose: PersistencePurpose::Discovery } };
-        step(&mut owner, SessionEvent::Commit(discovery_reply));
-        let discovery_durable = PersistenceCompletion { req, epoch, arrival: 1, revision: 1,
-            purpose: PersistencePurpose::Discovery,
-            outcome: CompletionOutcome::Durable(Operation::Write {
-                outcome: PersistOutcome::PersistedPlaintext, verified: true, protection: None }) };
-        step(&mut owner, SessionEvent::Persistence(discovery_durable));
-        step(&mut owner, SessionEvent::Command(Command::TakeReady));
-        let final_req = owner.state.next_req;
-        let final_reply = CommitReply { req: final_req, epoch, arrival: 0,
-            admission: CommitAdmission::Admitted { revision: 2, purpose: PersistencePurpose::Final } };
-        step(&mut owner, SessionEvent::Commit(final_reply));
-        let final_failed = PersistenceCompletion { req: final_req, epoch, arrival: 0, revision: 2,
-            purpose: PersistencePurpose::Final,
-            outcome: CompletionOutcome::Failed(Failure::Persistence(PersistOutcome::WriteFailed)) };
-        step(&mut owner, SessionEvent::Persistence(final_failed));
-        assert!(owner.state.held_handoff.is_some(), "rig: the Ready handoff is held");
-        assert!(owner.state.persistence_warning.is_some(), "rig: a Final warning is showing");
-        owner
-    }
-
-
     fn assert_non_admin_roster_refresh_is_probe_only(mut owner: SessionMachine) {
         let before = CredentialPatch::of(&owner.state.persisted);
         let (activate, reconcile) = land_account_roster_refresh(&mut owner);
@@ -2895,35 +1968,6 @@ mod tests {
         assert!(reconcile.registry.iter().any(|plan|
             matches!(plan, RegistryPlan::Install { sources, .. }
                 if sources.iter().any(|source| source.token == "account-server-token"))));
-    }
-
-
-    fn empty_roster_change_profile(users: Option<Vec<UserTile>>) -> (SessionMachine, Vec<SessionFx>) {
-        let mut owner = SessionMachine::from_init(local_session());
-        assert!(owner.state.persisted.home_users.is_empty(), "rig: nothing cached to show");
-        let effects = step(&mut owner, SessionEvent::Command(Command::StartSwitch(Picker::ChangeProfile)));
-        let (req, key) = effects.iter().find_map(|fx| match fx {
-            SessionFx::Work { req, key, input: SessionWork::HomeRoster { .. }, .. } => Some((*req, *key)),
-            _ => None,
-        }).expect("Change profile fetches the Home roster");
-        assert_eq!(owner.state.phase, Phase::Profiles);
-        settle_picker_commit(&mut owner, &effects);
-        let envelope = roster_envelope(&mut owner, req, key, users);
-        let effects = step(&mut owner, SessionEvent::Result(envelope));
-        (owner, effects)
-    }
-
-
-    /// The picker's own registry-only commit is in flight until answered, and a roster result
-    /// arriving behind it is QUEUED rather than applied — settle it the way the adapter would.
-    fn settle_picker_commit(owner: &mut SessionMachine, effects: &[SessionFx]) {
-        let (req, epoch) = effects.iter().find_map(|fx| match fx {
-            SessionFx::Commit { req, epoch, .. } => Some((*req, *epoch)),
-            _ => None,
-        }).expect("rig: the picker commits its registry plan");
-        step(owner, SessionEvent::Commit(CommitReply { req, epoch, arrival: 0,
-            admission: CommitAdmission::RegistryOnly }));
-        assert!(owner.state.pending_commit.is_none(), "rig: nothing is left in flight");
     }
 
 
@@ -3002,46 +2046,6 @@ mod tests {
         step(&mut a, SessionEvent::Command(Command::NoteDeleteLeftovers(0)));
         assert_eq!(a.read().0.delete_leftovers, 0, "a clean sweep replaces the earlier count");
         assert_eq!(retained.read().0.delete_leftovers, 3, "retained reads stay coherent");
-    }
-
-
-    #[test]
-    fn scalar_and_noop_transitions_do_not_temporarily_rebuild_shared_payloads() {
-        let mut init = captured_session();
-        init.phase = Phase::Waiting;
-        init.pin_code = "AAAA".into();
-        init.qr_png = vec![1, 2, 3];
-        init.qr_gen = 1;
-        init.next_qr = 1;
-        init.users = vec![UserTile { title: "Synthetic user".into(), ..Default::default() }];
-        init.pending.insert(1, Pending { key: SessionWorkKey { epoch: 1, op: SessionOp::Login },
-            expected: Identity::of(&init.persisted), lifecycle: None, last_arrival: None,
-            phase: StreamPhase::Running, capture: None, admission: AdmissionState::Accepted(AdmissionId(1)) });
-        let mut owner = SessionMachine::from_init(init);
-        let old = owner.publication();
-        step(&mut owner, SessionEvent::Command(Command::NoteDeleteLeftovers(2)));
-        assert_eq!(owner.publication_payload_allocations, [0; 3],
-            "scalar publication changes must not allocate then discard copies of code/PNG/users");
-        assert!(Arc::ptr_eq(&old.code, &owner.publication.code));
-        assert!(Arc::ptr_eq(&old.png, &owner.publication.png));
-        assert!(Arc::ptr_eq(&old.users, &owner.publication.users));
-        let scalar = owner.publication();
-        step(&mut owner, SessionEvent::Command(Command::NoteDeleteLeftovers(2)));
-        step(&mut owner, SessionEvent::Command(Command::DismissPinError));
-        assert_eq!(owner.publication_payload_allocations, [0; 3]);
-        assert!(Arc::ptr_eq(&scalar, &owner.publication()));
-        let code = qr_event(&owner, 1, 1, super::super::LoginProgress::CodeReady {
-            epoch: 1, code: "BBBB".into(), qr_png: vec![4, 5, 6],
-        }, false);
-        step(&mut owner, SessionEvent::Result(code));
-        assert_eq!(owner.publication_payload_allocations, [1, 1, 0], "only changed payloads allocate");
-        assert_eq!(&*old.code, "AAAA");
-        assert_eq!(&*old.png, &[1, 2, 3]);
-        assert_eq!(old.qr_generation, 1);
-        assert_eq!(&*owner.publication.code, "BBBB");
-        assert_eq!(&*owner.publication.png, &[4, 5, 6]);
-        assert_eq!(owner.publication.qr_generation, 2);
-        assert!(Arc::ptr_eq(&old.users, &owner.publication.users));
     }
 
 
@@ -3171,585 +2175,6 @@ mod tests {
     }
 
 
-    /// AUTH-03. Port of 0.6.6's
-    /// `a_fresh_sign_in_over_an_unanswered_envelope_survives_the_next_launch`
-    /// (`plex/session.rs:8662`) into the 0.7 owner: the DISCOVERY write (the SignedIn observation)
-    /// lands durably here, so it raises no warning — it is the FINAL write, `take_ready`'s, that
-    /// fails to confirm durable, and THAT is what must be held behind an acknowledgement rather
-    /// than announced as `SessionFx::Ready`.
-    #[test]
-    fn fresh_save_warning_requires_acknowledgement_before_the_handoff() {
-        use crate::plex::session::async_persistence::{
-            CompletionOutcome, Failure, Operation, PersistOutcome, PersistenceCompletion,
-        };
-        let mut owner = SessionMachine::from_init(discovering_after_authorization());
-        let req = owner.state.next_req;
-        let epoch = owner.state.epoch;
-        assert!(owner.state.authorized_in_flow, "the rig starts with a completed PIN authorization");
-
-        // The SignedIn observation begins a DISCOVERY commit, on a PEEKED fresh authority (not
-        // consumed yet — AUTH-04's own guarantee).
-        let signed_in = qr_event(&owner, req, 1, super::super::LoginProgress::SignedIn {
-            epoch, server: Default::default(), sources: Vec::new(),
-            users: vec![UserTile { title: "Only user".into(), ..Default::default() }],
-        }, true);
-        let effects = step(&mut owner, SessionEvent::Result(signed_in));
-        let Some(SessionFx::Commit { plan, .. }) = effects.iter().find(|fx| matches!(fx, SessionFx::Commit { .. })) else {
-            panic!("SignedIn must begin a commit");
-        };
-        assert_eq!(plan.purpose, PersistencePurpose::Discovery);
-        assert_eq!(plan.authority, crate::plex::session::SaveAuthority::FreshReauthentication);
-        assert!(owner.state.authorized_in_flow, "a discovery commit only PEEKS the authority");
-
-        let discovery_reply = CommitReply { req, epoch, arrival: 1,
-            admission: CommitAdmission::Admitted { revision: 1, purpose: PersistencePurpose::Discovery } };
-        let effects = step(&mut owner, SessionEvent::Commit(discovery_reply));
-        assert!(!effects.iter().any(|fx| matches!(fx, SessionFx::Ready { .. })),
-            "a discovery admission never announces Ready");
-        let discovery_durable = PersistenceCompletion { req, epoch, arrival: 1, revision: 1,
-            purpose: PersistencePurpose::Discovery,
-            outcome: CompletionOutcome::Durable(Operation::Write {
-                outcome: PersistOutcome::PersistedPlaintext, verified: true, protection: None }) };
-        step(&mut owner, SessionEvent::Persistence(discovery_durable));
-        assert!(owner.state.persistence_warning.is_none(), "the discovery write DID land durably");
-
-        // take_ready now issues the FINAL commit, consuming the authority exactly once.
-        let effects = step(&mut owner, SessionEvent::Command(Command::TakeReady));
-        let Some(SessionFx::Commit { plan: final_plan, .. }) =
-            effects.iter().find(|fx| matches!(fx, SessionFx::Commit { .. })) else {
-            panic!("TakeReady must begin the final commit");
-        };
-        assert_eq!(final_plan.purpose, PersistencePurpose::Final);
-        assert_eq!(final_plan.authority, crate::plex::session::SaveAuthority::FreshReauthentication);
-        assert!(!owner.state.authorized_in_flow, "the final commit consumes the authority");
-
-        let final_req = owner.state.next_req;
-        let final_reply = CommitReply { req: final_req, epoch, arrival: 0,
-            admission: CommitAdmission::Admitted { revision: 2, purpose: PersistencePurpose::Final } };
-        let effects = step(&mut owner, SessionEvent::Commit(final_reply));
-        assert!(!effects.iter().any(|fx| matches!(fx, SessionFx::Ready { .. })),
-            "a FRESH admission is held, not announced, until its durability is known");
-        assert!(owner.state.held_handoff.is_some(), "the Ready handoff is held for this commit");
-
-        // The final write's OWN completion fails to confirm durable: this is the AUTH-03 gate.
-        let final_failed = PersistenceCompletion { req: final_req, epoch, arrival: 0, revision: 2,
-            purpose: PersistencePurpose::Final,
-            outcome: CompletionOutcome::Failed(Failure::Persistence(PersistOutcome::WriteFailed)) };
-        let effects = step(&mut owner, SessionEvent::Persistence(final_failed));
-        assert!(!effects.iter().any(|fx| matches!(fx, SessionFx::Ready { .. })),
-            "MUTATION M1 TARGET: skipping the gate would announce Ready right here");
-        assert_eq!(owner.state.persistence_warning.map(|w| w.site), Some(PersistenceWarningSite::Final));
-        assert_eq!(owner.publication().persistence_warning.map(|w| w.site), Some(PersistenceWarningSite::Final),
-            "the warning must reach the UI-facing publication, not only internal state");
-        assert!(!owner.state.commit_phase.proves_saved_login,
-            "no saved/final claim before the user acknowledges");
-
-        let warning_key = owner.state.persistence_warning.unwrap().key;
-        let wrong = PersistenceWarningKey { epoch: warning_key.epoch, req: warning_key.req + 1 };
-        assert!(!step(&mut owner, SessionEvent::Command(Command::AcknowledgePersistenceWarning { key: wrong }))
-            .iter().any(|fx| matches!(fx, SessionFx::Ready { .. })));
-        assert!(owner.state.persistence_warning.is_some(), "a mismatched key must not clear the warning");
-
-        let effects = step(&mut owner,
-            SessionEvent::Command(Command::AcknowledgePersistenceWarning { key: warning_key }));
-        assert_eq!(effects.iter().filter(|fx| matches!(fx, SessionFx::Ready { .. })).count(), 1,
-            "acknowledging releases exactly the ONE held handoff, exactly once");
-        assert!(owner.state.persistence_warning.is_none());
-        assert!(owner.state.held_handoff.is_none());
-    }
-
-
-    #[test]
-    fn fresh_owner_sign_in_records_the_account_token_as_its_plex_tv_credential() {
-        let mut owner = SessionMachine::from_init(discovering_after_authorization());
-        let req = owner.state.next_req;
-        let epoch = owner.state.epoch;
-        let signed_in = qr_event(&owner, req, 1, super::super::LoginProgress::SignedIn {
-            epoch, server: local_server(), sources: Vec::new(),
-            users: vec![UserTile { title: "Only user".into(), ..Default::default() }],
-        }, true);
-        let effects = step(&mut owner, SessionEvent::Result(signed_in));
-        let plan = effects.iter().find_map(|fx| match fx {
-            SessionFx::Commit { plan, .. } => Some(plan),
-            _ => None,
-        }).expect("SignedIn must begin its discovery commit");
-        let credentials = plan.credentials.as_ref().expect("fresh sign-in commits credentials");
-        assert!(!credentials.account_token.is_empty());
-        assert_eq!(credentials.user.plex_tv_token.as_deref(),
-            Some(credentials.account_token.as_str()));
-    }
-
-    #[test]
-    fn one_continue_enters_when_discovery_and_final_storage_are_unavailable() {
-        use crate::plex::session::async_persistence::{
-            CompletionOutcome, Failure, PersistenceCompletion,
-        };
-        let mut owner = SessionMachine::from_init(discovering_after_authorization());
-        let req = owner.state.next_req;
-        let epoch = owner.state.epoch;
-        let signed_in = qr_event(&owner, req, 1, super::super::LoginProgress::SignedIn {
-            epoch, server: local_server(), sources: Vec::new(),
-            users: vec![UserTile { title: "Synthetic user".into(), ..Default::default() }],
-        }, true);
-        step(&mut owner, SessionEvent::Result(signed_in));
-        step(&mut owner, SessionEvent::Commit(CommitReply { req, epoch, arrival: 1,
-            admission: CommitAdmission::Admitted {
-                revision: 1, purpose: PersistencePurpose::Discovery,
-            } }));
-        let failed = CompletionOutcome::Failed(Failure::Storage(
-            crate::storage::StoreError::HelperUnavailable));
-        step(&mut owner, SessionEvent::Persistence(PersistenceCompletion {
-            req, epoch, arrival: 1, revision: 1,
-            purpose: PersistencePurpose::Discovery, outcome: failed,
-        }));
-        let discovery_warning = owner.publication().persistence_warning.unwrap();
-        assert_eq!(discovery_warning.site, PersistenceWarningSite::Discovery);
-        assert!(owner.state.held_handoff.is_none());
-        step(&mut owner, SessionEvent::Command(Command::AcknowledgePersistenceWarning {
-            key: discovery_warning.key,
-        }));
-        assert!(owner.needs_ready_commit());
-        let effects = step(&mut owner, SessionEvent::Command(Command::TakeReady));
-        let final_req = effects.iter().find_map(|fx| match fx {
-            SessionFx::Commit { req, plan, .. }
-                if plan.purpose == PersistencePurpose::Final => Some(*req),
-            _ => None,
-        }).expect("accepted Continue must reach the final commit");
-        // The authorization already answered its one Continue, so the Final commit's own reply
-        // must publish immediately rather than hold a handoff behind a completion that may never
-        // arrive — see `one_continue_survives_a_lost_final_completion` for that failure mode alone.
-        let commit_effects = step(&mut owner, SessionEvent::Commit(CommitReply {
-            req: final_req, epoch, arrival: 0,
-            admission: CommitAdmission::Admitted {
-                revision: 2, purpose: PersistencePurpose::Final,
-            },
-        }));
-        assert!(owner.state.held_handoff.is_none(),
-            "an already-answered authorization must not hold a handoff on the Final commit");
-        let effects = step(&mut owner, SessionEvent::Persistence(PersistenceCompletion {
-            req: final_req, epoch, arrival: 0, revision: 2,
-            purpose: PersistencePurpose::Final, outcome: failed,
-        }));
-        assert!(!effects.iter().any(|fx| matches!(fx, SessionFx::Ready { .. })),
-            "Ready already fired at the commit reply; a later completion must not repeat it");
-        let entered_after_one_continue = commit_effects.iter().chain(effects.iter())
-            .any(|fx| matches!(fx, SessionFx::Ready { .. }));
-        let second_warning = owner.publication().persistence_warning;
-        // Distinguish the duplicate-warning trap from an infinite owner-level dead end.
-        if let Some(warning) = second_warning {
-            assert_eq!(warning.site, PersistenceWarningSite::Final);
-            assert_ne!(warning.key, discovery_warning.key);
-            let effects = step(&mut owner, SessionEvent::Command(
-                Command::AcknowledgePersistenceWarning { key: warning.key }));
-            assert_eq!(effects.iter().filter(|fx| matches!(fx, SessionFx::Ready { .. })).count(), 1);
-        }
-        assert!(entered_after_one_continue && second_warning.is_none(),
-            "one Continue must enter the app without asking the same unsaved-login question again");
-    }
-
-    #[test]
-    fn one_continue_survives_a_lost_final_completion() {
-        use crate::plex::session::async_persistence::{
-            CompletionOutcome, Failure, PersistenceCompletion,
-        };
-        let mut owner = SessionMachine::from_init(discovering_after_authorization());
-        let req = owner.state.next_req;
-        let epoch = owner.state.epoch;
-        let signed_in = qr_event(&owner, req, 1, super::super::LoginProgress::SignedIn {
-            epoch, server: local_server(), sources: Vec::new(),
-            users: vec![UserTile { title: "Synthetic user".into(), ..Default::default() }],
-        }, true);
-        step(&mut owner, SessionEvent::Result(signed_in));
-        step(&mut owner, SessionEvent::Commit(CommitReply { req, epoch, arrival: 1,
-            admission: CommitAdmission::Admitted {
-                revision: 1, purpose: PersistencePurpose::Discovery,
-            } }));
-        let failed = CompletionOutcome::Failed(Failure::Storage(
-            crate::storage::StoreError::HelperUnavailable));
-        step(&mut owner, SessionEvent::Persistence(PersistenceCompletion {
-            req, epoch, arrival: 1, revision: 1,
-            purpose: PersistencePurpose::Discovery, outcome: failed,
-        }));
-        let discovery_warning = owner.publication().persistence_warning.unwrap();
-        step(&mut owner, SessionEvent::Command(Command::AcknowledgePersistenceWarning {
-            key: discovery_warning.key,
-        }));
-        assert!(owner.state.persistence_warning_answered,
-            "acknowledging must record that this authorization already answered");
-        let effects = step(&mut owner, SessionEvent::Command(Command::TakeReady));
-        let final_req = effects.iter().find_map(|fx| match fx {
-            SessionFx::Commit { req, plan, .. }
-                if plan.purpose == PersistencePurpose::Final => Some(*req),
-            _ => None,
-        }).expect("accepted Continue must reach the final commit");
-        // No `SessionEvent::Persistence` follows this reply at all — the completion is LOST.
-        let effects = step(&mut owner, SessionEvent::Commit(CommitReply {
-            req: final_req, epoch, arrival: 0,
-            admission: CommitAdmission::Admitted {
-                revision: 2, purpose: PersistencePurpose::Final,
-            },
-        }));
-        assert!(effects.iter().any(|fx| matches!(fx, SessionFx::Ready { .. })),
-            "an already-answered authorization must enter on the Final commit reply itself, \
-             not wait on a completion that may never arrive");
-        assert!(owner.state.held_handoff.is_none(),
-            "nothing may still be held once Ready has already been announced");
-    }
-
-
-    /// AUTH-04. Port of 0.6.6's
-    /// `a_routine_save_of_a_reopened_session_does_not_spend_fresh_reauthentication_authority`
-    /// (`plex/session.rs:8761`): a DISCOVERY failure must not spend the fresh authority the FINAL
-    /// write still needs, and must not let `take_ready` run at all until acknowledged.
-    #[test]
-    fn a_discovery_failure_cannot_spend_or_authorize_the_final_fresh_save() {
-        use crate::plex::session::async_persistence::{CompletionOutcome, Failure, Operation,
-            PersistOutcome, PersistenceCompletion};
-        let mut owner = SessionMachine::from_init(discovering_after_authorization());
-        let req = owner.state.next_req;
-        let epoch = owner.state.epoch;
-
-        let signed_in = qr_event(&owner, req, 1, super::super::LoginProgress::SignedIn {
-            epoch, server: Default::default(), sources: Vec::new(),
-            users: vec![UserTile { title: "Only user".into(), ..Default::default() }],
-        }, true);
-        step(&mut owner, SessionEvent::Result(signed_in));
-        let discovery_reply = CommitReply { req, epoch, arrival: 1,
-            admission: CommitAdmission::Admitted { revision: 1, purpose: PersistencePurpose::Discovery } };
-        step(&mut owner, SessionEvent::Commit(discovery_reply));
-        assert!(owner.state.authorized_in_flow, "the discovery admission only PEEKED the authority");
-
-        let discovery_failed = PersistenceCompletion { req, epoch, arrival: 1, revision: 1,
-            purpose: PersistencePurpose::Discovery,
-            outcome: CompletionOutcome::Failed(Failure::Persistence(PersistOutcome::WriteFailed)) };
-        step(&mut owner, SessionEvent::Persistence(discovery_failed));
-        assert_eq!(owner.state.persistence_warning.map(|w| w.site), Some(PersistenceWarningSite::Discovery));
-        assert!(owner.state.authorized_in_flow,
-            "MUTATION M3 TARGET: a discovery failure must not have spent the fresh authority");
-
-        // Blocked: an unacknowledged warning must refuse TakeReady outright.
-        assert!(!owner.needs_ready_commit(), "a live warning must suppress the ready-commit signal");
-        let effects = step(&mut owner, SessionEvent::Command(Command::TakeReady));
-        assert!(!effects.iter().any(|fx| matches!(fx, SessionFx::Commit { .. })),
-            "MUTATION M4 TARGET: take_ready must not begin a commit over an unacknowledged warning");
-
-        let warning_key = owner.state.persistence_warning.unwrap().key;
-        step(&mut owner, SessionEvent::Command(Command::AcknowledgePersistenceWarning { key: warning_key }));
-        assert!(owner.state.persistence_warning.is_none());
-
-        // Acknowledging a DISCOVERY warning (no held handoff behind it) re-admits TakeReady, and
-        // the authority the discovery failure did NOT spend is still there for the real final write.
-        let effects = step(&mut owner, SessionEvent::Command(Command::TakeReady));
-        let Some(SessionFx::Commit { plan, .. }) = effects.iter().find(|fx| matches!(fx, SessionFx::Commit { .. })) else {
-            panic!("the acknowledged flow must be able to reach its final commit");
-        };
-        assert_eq!(plan.purpose, PersistencePurpose::Final);
-        assert_eq!(plan.authority, crate::plex::session::SaveAuthority::FreshReauthentication,
-            "the authority a discovery failure never spent is still available to the final write");
-        assert!(!owner.state.authorized_in_flow, "this final commit consumes it now");
-
-        let final_req = owner.state.next_req;
-        let admitted = CommitReply { req: final_req, epoch, arrival: 0,
-            admission: CommitAdmission::Admitted { revision: 2, purpose: PersistencePurpose::Final } };
-        // This authorization already answered its one Continue (the discovery warning above), so
-        // the final commit's own reply publishes immediately rather than hold a handoff behind a
-        // completion that may never arrive (`one_continue_survives_a_lost_final_completion`).
-        let effects = step(&mut owner, SessionEvent::Commit(admitted));
-        assert!(effects.iter().any(|fx| matches!(fx, SessionFx::Ready { .. })),
-            "an already-answered authorization releases Ready on the final commit reply itself");
-        let durable = PersistenceCompletion { req: final_req, epoch, arrival: 0, revision: 2,
-            purpose: PersistencePurpose::Final,
-            outcome: CompletionOutcome::Durable(Operation::Write {
-                outcome: PersistOutcome::PersistedPlaintext, verified: true, protection: None }) };
-        let effects = step(&mut owner, SessionEvent::Persistence(durable));
-        assert!(!effects.iter().any(|fx| matches!(fx, SessionFx::Ready { .. })),
-            "Ready already fired at the commit reply; the later durable completion must not repeat it");
-
-        // A LATER, ordinary Ready-op commit (a ready profile re-applying itself) must never carry
-        // fresh authority again — the flag was spent once and stays spent.
-        owner.state.apply_pending = true;
-        owner.state.phase = Phase::Ready;
-        let effects = step(&mut owner, SessionEvent::Command(Command::TakeReady));
-        let Some(SessionFx::Commit { plan: routine_plan, .. }) =
-            effects.iter().find(|fx| matches!(fx, SessionFx::Commit { .. })) else {
-            panic!("the second Ready-op commit must still be reachable");
-        };
-        assert_eq!(routine_plan.authority, crate::plex::session::SaveAuthority::Routine,
-            "the authority was spent once; a later Ready-op commit is Routine");
-    }
-
-
-    /// Regression for `back-bypasses-persistence-warning-ack`: `back()` used to treat a fresh
-    /// account as `resumable` and unconditionally clear `persistence_warning`/`held_handoff` and
-    /// zero `authorized_in_flow`, which silently re-admitted `needs_ready_commit`/`take_ready` on
-    /// the very next frame (a second, ROUTINE save over a fresh write that never confirmed durable)
-    /// and, for a held Final handoff, released it without the acknowledgement the warning exists
-    /// to require. BACK while a warning is showing must be inert except for the platform root
-    /// press: `resumed: false`, warning/handoff/authority untouched, no `Commit`/`Ready` emitted.
-    /// MUTATION for `back-bypasses-persistence-warning-ack`: delete the
-    /// `if self.state.persistence_warning.is_some() { .. }` early-return this test guards at the
-    /// top of `back()` — this test must then fail (the warning clears and, in the Final-site half,
-    /// a `Ready` is emitted with no acknowledgement).
-    #[test]
-    fn back_at_root_does_not_bypass_an_unacknowledged_persistence_warning() {
-        use crate::plex::session::async_persistence::{
-            CompletionOutcome, Failure, Operation, PersistOutcome, PersistenceCompletion,
-        };
-        let reply = ReplyTo { instance: 0, correlation: 0 };
-
-        // --- Discovery-site warning: the authority is only PEEKED so far (AUTH-04's guarantee),
-        // and BACK must not spend it or clear the warning either.
-        let mut owner = SessionMachine::from_init(reopened_after_authorization());
-        let req = owner.state.next_req;
-        let epoch = owner.state.epoch;
-        let signed_in = qr_event(&owner, req, 1, super::super::LoginProgress::SignedIn {
-            epoch, server: local_server(), sources: Vec::new(),
-            users: vec![UserTile { uuid: "u-1".into(), protected: false, title: "Only user".into(), ..Default::default() }],
-        }, true);
-        step(&mut owner, SessionEvent::Result(signed_in));
-        let discovery_reply = CommitReply { req, epoch, arrival: 1,
-            admission: CommitAdmission::Admitted { revision: 1, purpose: PersistencePurpose::Discovery } };
-        step(&mut owner, SessionEvent::Commit(discovery_reply));
-        let discovery_failed = PersistenceCompletion { req, epoch, arrival: 1, revision: 1,
-            purpose: PersistencePurpose::Discovery,
-            outcome: CompletionOutcome::Failed(Failure::Persistence(PersistOutcome::WriteFailed)) };
-        step(&mut owner, SessionEvent::Persistence(discovery_failed));
-        assert!(owner.state.persistence_warning.is_some(), "rig: a Discovery warning is showing");
-        assert!(owner.state.authorized_in_flow, "rig: the authority is still unspent");
-        assert!(owner.state.committed_credentials.merge_into(&owner.state.persisted).can_go_local(),
-            "rig: the discovery write's own admission already published the signed-in credentials \
-             (`apply_commit_reply`'s `writes_credentials` branch runs on ADMISSION, not completion), \
-             so BACK's `resumable()` check really is exercised here rather than short-circuited");
-
-        let effects = step(&mut owner, SessionEvent::Command(Command::BackAtRoot { reply }));
-        assert!(owner.state.persistence_warning.is_some(),
-            "MUTATION TARGET: BACK must not clear an unacknowledged warning");
-        assert!(owner.state.authorized_in_flow,
-            "BACK must not spend the fresh authority the final write still needs");
-        assert!(!effects.iter().any(|fx| matches!(fx, SessionFx::Ready { .. } | SessionFx::Commit { .. })),
-            "BACK over a live warning must not begin or announce any save");
-        assert!(effects.iter().any(|fx| matches!(fx, SessionFx::BackReply { resumed: false, .. })),
-            "BACK is refused (root press only), not a resume");
-
-        // --- Final-site warning with a held handoff: acknowledging is the ONLY door that may
-        // release it (`acknowledge_persistence_warning` / `release_held_handoff`); BACK must not.
-        let mut owner = SessionMachine::from_init(reopened_after_authorization());
-        let req = owner.state.next_req;
-        let epoch = owner.state.epoch;
-        let signed_in = qr_event(&owner, req, 1, super::super::LoginProgress::SignedIn {
-            epoch, server: local_server(), sources: Vec::new(),
-            users: vec![UserTile { uuid: "u-1".into(), protected: false, title: "Only user".into(), ..Default::default() }],
-        }, true);
-        step(&mut owner, SessionEvent::Result(signed_in));
-        let discovery_reply = CommitReply { req, epoch, arrival: 1,
-            admission: CommitAdmission::Admitted { revision: 1, purpose: PersistencePurpose::Discovery } };
-        step(&mut owner, SessionEvent::Commit(discovery_reply));
-        let discovery_durable = PersistenceCompletion { req, epoch, arrival: 1, revision: 1,
-            purpose: PersistencePurpose::Discovery,
-            outcome: CompletionOutcome::Durable(Operation::Write {
-                outcome: PersistOutcome::PersistedPlaintext, verified: true, protection: None }) };
-        step(&mut owner, SessionEvent::Persistence(discovery_durable));
-        step(&mut owner, SessionEvent::Command(Command::TakeReady));
-        let final_req = owner.state.next_req;
-        let final_reply = CommitReply { req: final_req, epoch, arrival: 0,
-            admission: CommitAdmission::Admitted { revision: 2, purpose: PersistencePurpose::Final } };
-        step(&mut owner, SessionEvent::Commit(final_reply));
-        assert!(owner.state.held_handoff.is_some(), "rig: the Ready handoff is held for this commit");
-        let final_failed = PersistenceCompletion { req: final_req, epoch, arrival: 0, revision: 2,
-            purpose: PersistencePurpose::Final,
-            outcome: CompletionOutcome::Failed(Failure::Persistence(PersistOutcome::WriteFailed)) };
-        step(&mut owner, SessionEvent::Persistence(final_failed));
-        assert!(owner.state.persistence_warning.is_some(), "rig: a Final warning is showing");
-
-        let effects = step(&mut owner, SessionEvent::Command(Command::BackAtRoot { reply }));
-        assert!(owner.state.persistence_warning.is_some(),
-            "MUTATION TARGET: BACK must not clear an unacknowledged Final-site warning");
-        assert!(owner.state.held_handoff.is_some(),
-            "MUTATION TARGET: BACK must not release a held handoff without acknowledgement");
-        assert!(!effects.iter().any(|fx| matches!(fx, SessionFx::Ready { .. } | SessionFx::Commit { .. })),
-            "BACK over a held Final handoff must not announce Ready or begin a second save");
-        assert!(effects.iter().any(|fx| matches!(fx, SessionFx::BackReply { resumed: false, .. })));
-    }
-
-
-    /// Regression for `discovery-warning-not-cleared-on-retry-or-fresh-success` (0.6.6's
-    /// `persistence_warning_generation_and_attempt_bound_every_ack_and_report`), first half: a
-    /// discovery RETRY (`restart_login`'s `Retry` path) begins a brand-new attempt under a new
-    /// epoch, so a Discovery-site warning left over from the attempt being retried can never be
-    /// acknowledged by anything the new attempt does — it must be cleared at the restart, not left
-    /// to strand `take_ready` (`needs_ready_commit` refuses while any warning is live) once the
-    /// retry itself succeeds.
-    /// MUTATION TARGET: drop the `self.state.persistence_warning = None;` this test guards in
-    /// `restart_login`'s `if discovery { .. }` arm.
-    #[test]
-    fn a_discovery_retry_clears_a_stale_warning_from_the_attempt_it_replaces() {
-        use crate::plex::session::async_persistence::{
-            CompletionOutcome, Failure, PersistOutcome, PersistenceCompletion,
-        };
-        let mut owner = SessionMachine::from_init(discovering_after_authorization());
-        let req = owner.state.next_req;
-        let epoch = owner.state.epoch;
-        let signed_in = qr_event(&owner, req, 1, super::super::LoginProgress::SignedIn {
-            epoch, server: local_server(), sources: Vec::new(),
-            users: vec![UserTile { title: "Only user".into(), ..Default::default() }],
-        }, true);
-        step(&mut owner, SessionEvent::Result(signed_in));
-        let discovery_reply = CommitReply { req, epoch, arrival: 1,
-            admission: CommitAdmission::Admitted { revision: 1, purpose: PersistencePurpose::Discovery } };
-        step(&mut owner, SessionEvent::Commit(discovery_reply));
-        let discovery_failed = PersistenceCompletion { req, epoch, arrival: 1, revision: 1,
-            purpose: PersistencePurpose::Discovery,
-            outcome: CompletionOutcome::Failed(Failure::Persistence(PersistOutcome::WriteFailed)) };
-        step(&mut owner, SessionEvent::Persistence(discovery_failed));
-        assert!(owner.state.persistence_warning.is_some(), "rig: a Discovery warning is showing");
-        // `retry_kind` needs a phase that reads as Discovery-retriable; the rig is already
-        // `Phase::Discovering` from `discovering_after_authorization`.
-        // `retry_kind` reads `(phase, authorized_in_flow)`; a single-user `SignedIn` already
-        // advances phase to `Ready` by the time its OWN write's completion can raise a warning
-        // (`delta.phase` applies at commit ADMISSION, before any completion exists), so nothing
-        // in this crate can reach a live Discovery warning with the phase still `Discovering` —
-        // this rig sets it back deliberately to isolate `restart_login`'s DISCOVERY arm, exactly
-        // as the retry decision would see mid-flight for a *multi-worker* discovery (a resource
-        // fetch retried while the earlier attempt's OWN persistence write is still unacknowledged)
-        // rather than depending on today's one call sequence to happen to produce that phase.
-        owner.state.phase = Phase::Discovering;
-        assert_eq!(super::super::retry_kind(owner.state.phase, owner.state.authorized_in_flow),
-            super::super::RetryKind::Discovery, "rig: Retry must resolve to the DISCOVERY arm here");
-        step(&mut owner, SessionEvent::Command(Command::Retry));
-        assert!(owner.state.persistence_warning.is_none(),
-            "MUTATION TARGET: a discovery restart must clear the stale warning it is replacing");
-        assert!(owner.state.held_handoff.is_none());
-    }
-
-
-    /// A fresh write admitted over a READABLE record whose write then definitely failed leaves
-    /// that record on disk, so the next fresh write must be fenced on it rather than on the
-    /// identity that never landed (otherwise every retry this run is `StaleAuthority`).
-    #[test]
-    fn a_durable_superseded_write_advances_only_the_disk_fence() {
-        use crate::plex::session::async_persistence::{CompletionOutcome, Operation, PersistOutcome};
-        let mut owner = SessionMachine::from_init(captured_session());
-        let before = owner.state.disk_identity.clone();
-        let mut after = before.clone();
-        after.account_token = "superseded-durable-token".into();
-        let trusted = Identity::of(&owner.state.persisted);
-        let outcome = CompletionOutcome::Durable(Operation::Write {
-            outcome: PersistOutcome::PersistedPlaintext, verified: true, protection: None });
-        assert!(owner.observe_disk_write(&before, &after, outcome));
-        assert!(owner.state.disk_identity == after);
-        assert!(Identity::of(&owner.state.persisted) == trusted, "disk evidence is not login authority");
-        assert!(!owner.observe_disk_write(&before, &after, outcome), "duplicate receipt is inert");
-    }
-
-
-    #[test]
-    fn a_failed_fresh_write_restores_the_disk_identity_it_never_replaced() {
-        use crate::plex::session::async_persistence::{
-            CompletionOutcome, Failure, PersistOutcome, PersistenceCompletion,
-        };
-        let mut owner = SessionMachine::from_init(discovering_after_authorization());
-        owner.state.disk_identity = Identity { client_id: "synthetic-client".into(),
-            account_token: "synthetic-revoked-account".into(), profile_uuid: "old".into() };
-        let before = owner.state.disk_identity.clone();
-        let req = owner.state.next_req;
-        let epoch = owner.state.epoch;
-        let signed_in = qr_event(&owner, req, 1, super::super::LoginProgress::SignedIn {
-            epoch, server: local_server(), sources: Vec::new(),
-            users: vec![UserTile { title: "Only user".into(), ..Default::default() }],
-        }, true);
-        step(&mut owner, SessionEvent::Result(signed_in));
-        step(&mut owner, SessionEvent::Commit(CommitReply { req, epoch, arrival: 1,
-            admission: CommitAdmission::Admitted { revision: 1, purpose: PersistencePurpose::Discovery } }));
-        assert!(owner.state.disk_identity != before, "rig: admission re-bases on the new identity");
-        step(&mut owner, SessionEvent::Persistence(PersistenceCompletion { req, epoch, arrival: 1,
-            revision: 1, purpose: PersistencePurpose::Discovery,
-            outcome: CompletionOutcome::Failed(Failure::Persistence(PersistOutcome::WriteFailed)) }));
-        assert!(owner.state.disk_identity == before,
-            "MUTATION TARGET: a definite failure must restore the identity still on disk");
-        assert!(owner.state.persistence_warning.is_some());
-    }
-
-
-    /// Second half of `discovery-warning-not-cleared-on-retry-or-fresh-success`: a LATER fresh
-    /// discovery write landing durably supersedes an earlier failure warning outright (0.6.6's
-    /// "a later fresh success supersedes a failure warning"), even without going through
-    /// `restart_login` at all — pinning `apply_persistence_completion`'s own `superseded` branch
-    /// rather than only the `restart_login` door the test above exercises.
-    /// MUTATION TARGET: drop the `let superseded = …` clearing in `apply_persistence_completion`'s
-    /// `if durable { .. }` arm.
-    #[test]
-    fn a_later_durable_fresh_completion_supersedes_a_showing_warning_directly() {
-        use crate::plex::session::async_persistence::{
-            CompletionOutcome, Operation, PersistOutcome, PersistenceCompletion,
-        };
-        let mut owner = SessionMachine::from_init(discovering_after_authorization());
-        let req = owner.state.next_req;
-        let epoch = owner.state.epoch;
-        // Manufacture a showing warning directly (no restart), keeping `admitted_persistence`
-        // fenced so the very next completion below is accepted as this same operation's verdict.
-        owner.state.persistence_warning = Some(PersistenceWarning {
-            key: PersistenceWarningKey { epoch, req }, site: PersistenceWarningSite::Discovery, helper: None, candidate_errnos: [None; 8], persistence: None });
-        owner.state.admitted_persistence = Some(AdmittedPersistence {
-            req, epoch, arrival: 0, revision: 1, purpose: Some(PersistencePurpose::Discovery),
-            fresh: true, site: PersistenceWarningSite::Discovery });
-        let durable = PersistenceCompletion { req, epoch, arrival: 0, revision: 1,
-            purpose: PersistencePurpose::Discovery,
-            outcome: CompletionOutcome::Durable(Operation::Write {
-                outcome: PersistOutcome::PersistedPlaintext, verified: true, protection: None }) };
-        step(&mut owner, SessionEvent::Persistence(durable));
-        assert!(owner.state.persistence_warning.is_none(),
-            "MUTATION TARGET: a later durable fresh write must supersede the earlier warning");
-    }
-
-
-    /// Third half of `discovery-warning-not-cleared-on-retry-or-fresh-success`: `StartSwitch` (and
-    /// by the same code path `resume_stored`) issues a ROUTINE `activate_profile` commit, whose
-    /// `apply_commit_reply` arm must not release a handoff still held behind a DIFFERENT,
-    /// unacknowledged warning — that release belongs to `acknowledge_persistence_warning` alone.
-    /// MUTATION TARGET: drop the `self.state.persistence_warning.is_none()` guard this test pins
-    /// in `apply_commit_reply`'s non-fresh `activate_profile` arm (reverting to an unconditional
-    /// `self.release_held_handoff(emit)`).
-    #[test]
-    fn start_switch_does_not_release_a_handoff_held_behind_an_unacknowledged_warning() {
-        let mut owner = owner_with_held_final_warning();
-        let held_before = owner.state.held_handoff;
-        let effects = step(&mut owner, SessionEvent::Command(Command::StartSwitch(Picker::Boot)));
-        let Some((switch_req, switch_epoch)) = effects.iter().find_map(|fx| match fx {
-            SessionFx::Commit { req, epoch, .. } => Some((*req, *epoch)),
-            _ => None,
-        }) else {
-            panic!("rig: StartSwitch(Boot) must begin its own (registry-only) commit");
-        };
-        let switch_reply = CommitReply { req: switch_req, epoch: switch_epoch, arrival: 0,
-            admission: CommitAdmission::RegistryOnly };
-        let effects = step(&mut owner, SessionEvent::Commit(switch_reply));
-        assert!(!effects.iter().any(|fx| matches!(fx, SessionFx::Ready { .. })),
-            "MUTATION TARGET: no Ready may be announced for the unrelated held handoff before \
-             its own warning is acknowledged");
-        assert_eq!(owner.state.held_handoff, held_before,
-            "the handoff held behind the still-showing warning must be untouched");
-        assert!(owner.state.persistence_warning.is_some(), "the warning itself is still unanswered");
-    }
-
-
-    #[test]
-    fn disk_comparison_identity_is_not_a_worker_or_back_input() {
-        let src = include_str!("owner.rs");
-        let production = src.split("\n#[cfg(test)]\nmod tests").next().unwrap();
-        // Explicit function-body list, not a transitive call-graph claim. apply_read may update
-        // an empty comparison client-id from a resource reply; it never reads its token for work.
-        for name in ["start_reserved_login", "restart_login", "start_switch", "select_profile",
-            "back", "request_endpoint", "refresh_roster", "emit_work", "work_is_current"] {
-            let marker = format!("fn {name}(");
-            let start = production.find(&marker).unwrap();
-            let rest = &production[start..];
-            let end = rest.find("\n    }").unwrap();
-            // start_switch also emits a no-save registry commit. Its exact comparison-field
-            // projection is allowed; no other use in these worker/BACK constructors is.
-            let body = rest[..end].replace("expected_disk: self.state.disk_identity.clone(),", "");
-            assert!(!body.contains("disk_identity"), "comparison identity reached {name}");
-        }
-    }
 
 
     /// Issue #95 step 6, the owner-dedup half: a stored plaintext session's repair loop is
@@ -3871,89 +2296,10 @@ mod tests {
     }
 
 
-    #[test]
-    fn owned_qr_transition_retains_coherent_reads_and_ignores_duplicate_arrivals() {
-        let mut owner = SessionMachine::from_init(captured_session());
-        let mut effects = Vec::new();
-        assert!(owner.restart_login(true, &mut |fx| effects.push(fx)));
-        let epoch = owner.state.epoch;
-        let req = owner.state.next_req;
-        let code = qr_event(&owner, req, 1, super::super::LoginProgress::CodeReady {
-            epoch, code: "synthetic-code-a".into(), qr_png: vec![1, 2, 3],
-        }, false);
-        assert!(owner.apply_qr_observation(&code, &mut |fx| effects.push(fx)));
-        let retained = owner.publication();
-        assert!(!owner.apply_qr_observation(&code, &mut |fx| effects.push(fx)));
-        assert!(Arc::ptr_eq(&retained, &owner.publication()));
-        let replacement = qr_event(&owner, req, 2, super::super::LoginProgress::CodeReady {
-            epoch, code: "synthetic-code-b".into(), qr_png: vec![4, 5],
-        }, false);
-        assert!(owner.apply_qr_observation(&replacement, &mut |fx| effects.push(fx)));
-        assert_eq!(&*retained.code, "synthetic-code-a");
-        assert_eq!(&*retained.png, &[1, 2, 3]);
-        assert_eq!(retained.qr_generation, 1);
-        assert_eq!(&*owner.read().0.code, "synthetic-code-b");
-        assert_eq!(&*owner.read().0.png, &[4, 5]);
-        assert_eq!(owner.read().0.qr_generation, 2);
-    }
 
 
-    #[test]
-    fn request_exhaustion_cannot_cancel_the_live_qr_operation() {
-        let mut owner = SessionMachine::from_init(captured_session());
-        assert!(owner.restart_login(true, &mut |_| {}));
-        owner.state.next_req = u32::MAX;
-        let before = owner.publication();
-        let mut canon = Canon::new();
-        owner.write(&mut canon);
-        let hash = canon.finish();
-        assert!(!owner.restart_login(true, &mut |_| panic!("exhaustion must not emit cancellation")));
-        let mut canon = Canon::new();
-        owner.write(&mut canon);
-        assert_eq!(hash, canon.finish());
-        assert!(Arc::ptr_eq(&before, &owner.publication()));
-        assert_eq!(owner.state.pending.len(), 1);
-    }
 
 
-    #[test]
-    fn qr_allocator_exhaustion_fails_and_retires_the_admitted_request() {
-        let mut owner = SessionMachine::from_init(captured_session());
-        assert!(owner.restart_login(true, &mut |_| {}));
-        let req = owner.state.next_req;
-        let epoch = owner.state.epoch;
-        owner.state.next_qr = u64::MAX;
-        let code = qr_event(&owner, req, 1, super::super::LoginProgress::CodeReady {
-            epoch, code: "synthetic-code".into(), qr_png: vec![1, 2, 3],
-        }, false);
-        let mut effects = Vec::new();
-        let handled = owner.apply_qr_observation(&code, &mut |fx| effects.push(fx));
-        assert_eq!(owner.state.phase, Phase::Error, "exhaustion must settle the spinner as failure");
-        assert!(handled);
-        assert_eq!(owner.state.next_qr, u64::MAX);
-        assert_eq!(owner.state.qr_gen, 0, "no generation is reused or published");
-        assert!(owner.state.pending.is_empty());
-        assert!(!owner.state.signin_active);
-        assert!(effects.iter().any(|fx| matches!(fx,
-            SessionFx::Cancel { requests, .. } if requests == &[req])));
-        assert!(effects.iter().any(|fx| matches!(fx, SessionFx::Retire { req: retired } if *retired == req)));
-        assert!(!owner.apply_qr_observation(&code, &mut |_| panic!("retired request emitted again")));
-    }
-
-
-    #[test]
-    fn request_only_changes_affect_canonical_state_without_ui_damage() {
-        let mut owner = SessionMachine::from_init(captured_session());
-        let publication = owner.publication();
-        let mut canon = Canon::new();
-        owner.write(&mut canon);
-        let before = canon.finish();
-        owner.allocate(SessionOp::HomeRoster, None).unwrap();
-        let mut canon = Canon::new();
-        owner.write(&mut canon);
-        assert_ne!(before, canon.finish());
-        assert!(Arc::ptr_eq(&publication, &owner.publication()));
-    }
 
 
     /// **A signed-in person has a consent path too.** Outside the sign-in read-out the answer is
@@ -3987,127 +2333,6 @@ mod tests {
         let fx = step(&mut owner, SessionEvent::Command(Command::AnswerPlaintext {
             machine_id: "lan-machine".into(), choice: PlaintextChoice::Allowed, sid: Some(sid) }));
         assert!(fx.is_empty(), "no account, nothing to bind the answer to");
-    }
-
-
-    #[test]
-    fn independent_owners_construct_without_io_or_a_global_lock() {
-        let mut a = SessionMachine::from_init(captured_session());
-        let mut init = captured_session();
-        init.phase = Phase::Profiles;
-        init.epoch = u32::MAX as u64 + 7;
-        let mut b = SessionMachine::from_init(init);
-        assert_eq!(a.allocate(SessionOp::Login, None), Some(1));
-        assert_eq!(b.allocate(SessionOp::HomeRoster, None), Some(1));
-        assert_eq!(a.read().0.phase, Phase::Idle);
-        assert_eq!(b.read().0.phase, Phase::Profiles);
-        assert_eq!(b.state.pending[&1].key.epoch, u32::MAX as u64 + 7);
-        a.state.next_req = u32::MAX;
-        assert!(a.allocate(SessionOp::Login, None).is_none());
-        assert_eq!(b.allocate(SessionOp::ServerRoster, None), Some(2));
-    }
-
-
-    #[test]
-    fn private_init_round_trip_preserves_owned_decisions_and_probe_omits_secrets() {
-        let mut init = captured_session();
-        init.pin_code = "synthetic-code".into();
-        init.qr_png = vec![1, 2, 3];
-        init.persisted.account_token = "synthetic-token".into();
-        init.next_qr = 91;
-        init.qr_gen = 90;
-        init.epoch = u32::MAX as u64 + 2;
-        let a = SessionMachine::from_init(init);
-        let encoded = serde_json::to_vec(&a.snapshot_init()).unwrap();
-        let b = SessionMachine::from_init(serde_json::from_slice(&encoded).unwrap());
-        let (mut ca, mut cb) = (Canon::new(), Canon::new());
-        a.write(&mut ca); b.write(&mut cb);
-        assert_eq!(ca.finish(), cb.finish());
-        assert_eq!(&*b.read().0.png, &[1, 2, 3]);
-        let mut probe = String::new();
-        b.probe(&mut probe);
-        assert!(!probe.contains("synthetic"));
-    }
-
-
-    #[test]
-    fn queued_running_terminal_is_revalidated_after_ready_ack_seats_new_profile() {
-        let mut init = captured_session();
-        init.phase = Phase::Switching;
-        init.persisted.account_token = "synthetic-account".into();
-        init.persisted.user.uuid = "old-profile".into();
-        let mut owner = SessionMachine::from_init(init);
-        let req = owner.allocate(SessionOp::ProfileSwitch, None).unwrap();
-        owner.state.pending.get_mut(&req).unwrap().admission = AdmissionState::Accepted(AdmissionId(req));
-        let epoch = owner.state.epoch;
-        let expected = super::super::SessionIdentity::of(&owner.state.persisted);
-        let make = |arrival, terminal, outcome| SessionEnvelope {
-            addr: Addr { to: MachineId::Session, req: crate::ui::machine::RequestId(req) },
-            key: SessionWorkKey { epoch, op: SessionOp::ProfileSwitch },
-            admission: AdmissionId(req), arrival, terminal, lifecycle: None,
-            outcome: SessionArrival::Data(Arc::new(super::super::observation::Observation::ProfileSwitch(
-                super::super::ProfileSwitchProgress { epoch, expected: expected.clone(), outcome }))),
-        };
-        let ready = make(1, false, super::super::ProfileSwitchOutcomeProgress::Ready {
-            delta: super::super::ProfileDelta {
-                user: UserRef { uuid: "new-profile".into(), token: "new-token".into(), ..Default::default() },
-                server: Default::default(), sources: Vec::new(), cache: None,
-            }, probes: Vec::new(),
-        });
-        let terminal = make(2, true, super::super::ProfileSwitchOutcomeProgress::Failed {
-            error: "stale-running-failure".into(), pin_denied: true,
-        });
-        assert!(owner.accepts(&terminal), "terminal body genuinely valid in old Running state");
-        let effects = step(&mut owner, SessionEvent::Result(ready.clone()));
-        assert!(effects.iter().any(|fx| matches!(fx, SessionFx::Commit { .. })));
-        assert!(step(&mut owner, SessionEvent::Result(terminal.clone())).is_empty());
-        assert_eq!(owner.state.inbox.len(), 1);
-        let acked = step(&mut owner, SessionEvent::Commit(CommitReply { req, epoch, arrival: 1,
-            admission: CommitAdmission::Admitted { revision: 1, purpose: PersistencePurpose::Final } }));
-        assert_eq!(owner.state.phase, Phase::Ready);
-        assert_eq!(owner.state.persisted.user.uuid, "new-profile");
-        assert!(owner.state.pending[&req].phase == StreamPhase::ProfileSeated);
-        assert!(!owner.accepts(&terminal), "same body is invalid at the changed FIFO head");
-        let seated = owner.publication();
-        let effects = step(&mut owner, SessionEvent::Pump);
-        assert!(owner.state.pending.is_empty());
-        assert!(owner.state.pending_commit.is_none());
-        assert_eq!(owner.state.phase, Phase::Ready);
-        assert_eq!(owner.state.persisted.user.uuid, "new-profile");
-        assert!(!owner.state.pin_denied);
-        assert!(owner.state.error.is_empty());
-        assert!(Arc::ptr_eq(&seated, &owner.publication()));
-        assert!(effects.iter().all(|fx| matches!(fx, SessionFx::Retire { .. } | SessionFx::Acknowledge(_))),
-            "rejected terminal must not emit another commit/profile publication/Ready");
-        let receipts: Vec<_> = acked.iter().chain(&effects).filter_map(|fx| match fx {
-            SessionFx::Acknowledge(receipts) => Some(receipts.as_slice()), _ => None,
-        }).flatten().copied().collect();
-        assert!(receipts == [Receipt::of(&ready), Receipt::of(&terminal)]);
-    }
-
-
-    #[test]
-    fn envelope_validation_keeps_full_epoch_and_exact_destination() {
-        use crate::ui::machine::RequestId;
-        let mut init = captured_session();
-        init.epoch = 0x1_0000_0001;
-        let mut owner = SessionMachine::from_init(init);
-        let req = owner.allocate(SessionOp::Login, None).unwrap();
-        owner.state.pending.get_mut(&req).unwrap().admission = AdmissionState::Accepted(AdmissionId(req));
-        let mut envelope = SessionEnvelope {
-            addr: Addr { to: MachineId::Session, req: RequestId(req) },
-            key: SessionWorkKey { epoch: 1, op: SessionOp::Login },
-            admission: AdmissionId(req),
-            arrival: 0, terminal: true, lifecycle: None, outcome: SessionArrival::Dropped,
-        };
-        assert!(!owner.accepts(&envelope), "low epoch bits are not identity");
-        envelope.key.epoch = 0x1_0000_0001;
-        assert!(owner.accepts(&envelope));
-        envelope.addr.to = MachineId::Player;
-        assert!(!owner.accepts(&envelope));
-        envelope.addr.to = MachineId::Session;
-        envelope.addr.req = RequestId(req + 1);
-        assert!(!owner.accepts(&envelope));
     }
 
 
@@ -4288,116 +2513,6 @@ mod tests {
 
 
     #[test]
-    fn same_user_take_ready_keeps_an_unavailable_secondary_live_and_cached() {
-        let _g = crate::testlock::serial();
-        let primary = crate::plex::session::SourceRef {
-            machine_id: "a".into(), name: "Primary A".into(), owned: true,
-            token: "kid-a-token".into(), address: "10.0.0.8".into(), port: 32400,
-            origin_url: "https://10-0-0-8.example.plex.direct:32400".into(),
-            tier: Some(crate::plex::probe::Location::Local), ..Default::default()
-        };
-        let secondary = crate::plex::session::SourceRef {
-            machine_id: "b".into(), name: "Secondary B".into(),
-            token: "kid-b-token".into(), address: "10.0.0.9".into(), port: 32400,
-            origin_url: "https://10-0-0-9.example.plex.direct:32400".into(),
-            tier: Some(crate::plex::probe::Location::Remote), ..Default::default()
-        };
-        let user = UserRef { uuid: "u-kid".into(), title: "Kid".into(),
-            token: primary.token.clone(), ..Default::default() };
-        let mut persisted = PersistedSession {
-            client_id: "synthetic-client".into(), account_token: "account-token".into(),
-            server: super::super::server_ref(&primary), user: UserRef { uuid: "u-admin".into(),
-                token: "admin-token".into(), ..Default::default() },
-            home_users: vec![crate::plex::session::HomeUserRef { uuid: "u-kid".into(),
-                title: "Kid".into(), admin: false, ..Default::default() }],
-            sources: vec![primary.clone()], ..Default::default()
-        };
-        persisted.remember_profile(crate::plex::session::ProfileCreds {
-            uuid: user.uuid.clone(), user: user.clone(), server: super::super::server_ref(&primary),
-            sources: vec![primary.clone(), secondary.clone()], pin: None,
-            extensions: Default::default(),
-        });
-        let mut init = SessionInit::captured(persisted);
-        init.phase = Phase::Switching;
-        init.users = vec![UserTile { uuid: "u-kid".into(), title: "Kid".into(), ..Default::default() }];
-        let mut owner = SessionMachine::from_init(init);
-        let req = owner.allocate(SessionOp::ProfileSwitch, None).unwrap();
-        owner.state.pending.get_mut(&req).unwrap().admission = AdmissionState::Accepted(AdmissionId(req));
-        let epoch = owner.state.epoch;
-        let expected = super::super::SessionIdentity::of(&owner.state.persisted);
-        let mut tokenless_secondary = secondary.clone();
-        tokenless_secondary.token.clear();
-        let ready = SessionEnvelope {
-            addr: Addr { to: MachineId::Session, req: crate::ui::machine::RequestId(req) },
-            key: SessionWorkKey { epoch, op: SessionOp::ProfileSwitch }, admission: AdmissionId(req),
-            arrival: 1, terminal: false, lifecycle: None,
-            outcome: SessionArrival::Data(Arc::new(super::super::observation::Observation::ProfileSwitch(
-                super::super::ProfileSwitchProgress { epoch, expected,
-                    outcome: super::super::ProfileSwitchOutcomeProgress::Ready {
-                        delta: super::super::ProfileDelta {
-                            server: super::super::server_ref(&primary),
-                            sources: vec![primary.clone(), tokenless_secondary], user: user.clone(),
-                            cache: Some(crate::plex::session::ProfileCreds {
-                                uuid: user.uuid.clone(), user: user.clone(),
-                                server: super::super::server_ref(&primary),
-                                sources: vec![primary.clone(), secondary.clone()], pin: None,
-                                extensions: Default::default(),
-                            }),
-                        },
-                        probes: Vec::new(),
-                    },
-                }))),
-        };
-        let effects = step(&mut owner, SessionEvent::Result(ready));
-        let reply = effects.iter().find_map(|effect| match effect {
-            SessionFx::Commit { req, epoch, arrival, .. } => Some(CommitReply {
-                req: *req, epoch: *epoch, arrival: *arrival, admission: CommitAdmission::RegistryOnly,
-            }),
-            _ => None,
-        }).expect("the profile switch must commit");
-        step(&mut owner, SessionEvent::Commit(reply));
-
-        let next_identity = super::super::SessionIdentity::of(&owner.state.persisted);
-        let resources = vec![
-            crate::plex::account::Resource { name: primary.name.clone(),
-                client_identifier: primary.machine_id.clone(), provides: "server".into(),
-                owned: true, access_token: primary.token.clone(), ..Default::default() },
-            crate::plex::account::Resource { name: secondary.name.clone(),
-                client_identifier: secondary.machine_id.clone(), provides: "server".into(),
-                access_token: secondary.token.clone(), ..Default::default() },
-        ];
-        let roster = SessionEnvelope {
-            addr: Addr { to: MachineId::Session, req: crate::ui::machine::RequestId(req) },
-            key: SessionWorkKey { epoch, op: SessionOp::ProfileSwitch }, admission: AdmissionId(req),
-            arrival: 2, terminal: true, lifecycle: None,
-            outcome: SessionArrival::Data(Arc::new(super::super::observation::Observation::ProfileRoster(
-                super::super::ProfileRosterProgress { epoch, expected: next_identity,
-                    resources, reached: vec![primary.clone()], probes: Vec::new() }))),
-        };
-        let effects = step(&mut owner, SessionEvent::Result(roster));
-        let reply = effects.iter().find_map(|effect| match effect {
-            SessionFx::Commit { req, epoch, arrival, .. } => Some(CommitReply {
-                req: *req, epoch: *epoch, arrival: *arrival, admission: CommitAdmission::RegistryOnly,
-            }),
-            _ => None,
-        }).expect("the unavailable-secondary roster must commit");
-        step(&mut owner, SessionEvent::Commit(reply));
-
-        step(&mut owner, SessionEvent::Command(Command::SelectProfile { index: 0, pin: None }));
-        let effects = step(&mut owner, SessionEvent::Command(Command::TakeReady));
-        let final_plan = effects.iter().find_map(|effect| match effect {
-            SessionFx::Commit { plan, .. } => Some(plan), _ => None,
-        }).expect("the same-user shortcut must pass through take_ready");
-        let patch = final_plan.credentials.as_ref().expect("take_ready saves the live session");
-        assert_eq!(patch.sources.iter().find(|source| source.machine_id == "b").unwrap().token,
-            "kid-b-token", "B remains live even though its identity probe was unavailable");
-        assert_eq!(patch.profiles.iter().find(|profile| profile.uuid == "u-kid").unwrap()
-            .sources.iter().find(|source| source.machine_id == "b").unwrap().token,
-            "kid-b-token", "take_ready must not overwrite the cached profile with a tokenless B");
-    }
-
-
-    #[test]
     fn unknown_roster_profile_refresh_keeps_profile_credentials_and_publishes_probes() {
         let _g = crate::testlock::serial();
         assert_non_admin_roster_refresh_is_probe_only(roster_refresh_fixture("u-unknown", vec![
@@ -4541,267 +2656,5 @@ mod tests {
     }
 
 
-    /// Issue #132's production half: a signed-in account whose cached roster is EMPTY (a failed
-    /// fetch at sign-in persists an empty vec) presses *Change profile*, and the roster fetch fails
-    /// again — plex.tv refusing the token (401, answered as `Some(vec![])`) or never answering
-    /// (`None`). The picker must read out a failure on ITS OWN route (phase stays `Profiles`, with
-    /// the reason in `error`), not flip to `Phase::Error`, which the profiles screen does not draw
-    /// — that left an endless spinner. And BACK must hand back the still-valid session: no picker
-    /// was ever offered, so no profile boundary was crossed.
-    /// PR #212 review (P2, "the last spinner frame stays visible"): the step that lands a failed
-    /// roster must itself request a frame. Once the read-out replaces the spinner nothing on the
-    /// Profiles screen is moving, so if this step did not damage Present the spinner's final
-    /// frame would sit there until the keepalive redraw.
-    #[test]
-    fn landing_a_failed_roster_requests_the_frame_that_draws_the_readout() {
-        use crate::ui::machine::{Cx, Effects, InputOwner, EntryId, Machine, Tick};
-        let _g = crate::testlock::serial();
-        for users in [None, Some(Vec::new())] {
-            let mut owner = SessionMachine::from_init(local_session());
-            let effects = step(&mut owner, SessionEvent::Command(Command::StartSwitch(Picker::ChangeProfile)));
-            let (req, key) = effects.iter().find_map(|fx| match fx {
-                SessionFx::Work { req, key, input: SessionWork::HomeRoster { .. }, .. } => Some((*req, *key)),
-                _ => None,
-            }).expect("Change profile fetches the Home roster");
-            settle_picker_commit(&mut owner, &effects);
-            let envelope = roster_envelope(&mut owner, req, key, users);
-
-            let publication = owner.publication();
-            let cx = Cx::<OwnerHost> { views: publication.read(), tick: Tick::default(),
-                measure: &crate::ui::fixture::FixtureMeasure, press: Default::default(),
-                focus: Default::default(), owner: InputOwner::Entry(EntryId(0)) };
-            let mut present = crate::ui::present::Present::new();
-            let _ = present.take(0); // the spinner's last frame has been presented
-            assert!(!present.peek(0), "rig: nothing is owed before the result lands");
-            let mut sink = Vec::new();
-            owner.step(&SessionEvent::Result(envelope), &cx,
-                &mut Effects::new(&mut sink, MachineId::Session, &mut present));
-            assert!(owner.read().0.roster_readout().is_some(), "rig: the read-out is up");
-            assert!(present.peek(0), "the step that raises the read-out must request its frame");
-        }
-    }
-
-
-    #[test]
-    fn change_profile_with_no_roster_reads_out_the_failure_and_back_resumes_the_session() {
-        let _g = crate::testlock::serial();
-        for (users, reason) in [
-            (None, roster_unreachable()),
-            (Some(Vec::new()), roster_refused()),
-        ] {
-            let (mut owner, _) = empty_roster_change_profile(users);
-            assert_eq!(owner.state.phase, Phase::Profiles,
-                "the failure is read out on the picker's own route, not as a sign-in Error");
-            assert!(owner.state.users.is_empty());
-            assert_eq!(owner.state.error, reason);
-            assert!(owner.state.persisted.home_users.is_empty(), "no roster is invented or committed");
-            let reply = ReplyTo { instance: 0, correlation: 7 };
-            let effects = step(&mut owner, SessionEvent::Command(Command::BackAtRoot { reply }));
-            assert!(effects.iter().any(|fx| matches!(fx, SessionFx::BackReply { resumed: true, .. })),
-                "BACK from a picker that never offered a profile resumes the session behind it");
-            assert_eq!(owner.state.phase, Phase::Ready);
-            assert!(owner.state.apply_pending, "the resume goes through the ordinary Ready handoff");
-            assert!(owner.state.error.is_empty());
-        }
-    }
-
-
-    /// A refused roster must not wipe a CACHED one (it is what offline switching reads), and a
-    /// picker that HAS tiles is still a root: BACK stays refused there.
-    #[test]
-    fn a_refused_roster_keeps_cached_tiles_and_the_picker_stays_a_root() {
-        let _g = crate::testlock::serial();
-        let mut init = local_session();
-        init.persisted.home_users = vec![crate::plex::session::HomeUserRef {
-            uuid: "cached-user".into(), title: "Cached".into(), ..Default::default() }];
-        let mut owner = SessionMachine::from_init(init);
-        let effects = step(&mut owner, SessionEvent::Command(Command::StartSwitch(Picker::ChangeProfile)));
-        let (req, key) = effects.iter().find_map(|fx| match fx {
-            SessionFx::Work { req, key, input: SessionWork::HomeRoster { .. }, .. } => Some((*req, *key)),
-            _ => None,
-        }).unwrap();
-        settle_picker_commit(&mut owner, &effects);
-        let envelope = roster_envelope(&mut owner, req, key, Some(Vec::new()));
-        let effects = step(&mut owner, SessionEvent::Result(envelope));
-        assert!(!effects.iter().any(|fx| matches!(fx, SessionFx::Commit { .. })),
-            "an answer with nobody in it is not committed over the cached roster");
-        assert_eq!(owner.state.users.len(), 1);
-        assert_eq!(owner.state.persisted.home_users.len(), 1);
-        assert!(owner.state.error.is_empty());
-        let reply = ReplyTo { instance: 0, correlation: 7 };
-        let effects = step(&mut owner, SessionEvent::Command(Command::BackAtRoot { reply }));
-        assert!(effects.iter().any(|fx| matches!(fx, SessionFx::BackReply { resumed: false, .. })),
-            "with tiles on screen the Change-profile picker is still the root it always was");
-    }
-
-
-    /// Issue #132 as TV session 8 actually hit it: a dev-token (`DevPms`) boot, where the account
-    /// menu still offers *Change profile* from the on-disk sign-in. The owner used to refuse the
-    /// switch silently — no roster worker, no log line — while the app routed to the picker
-    /// anyway: an endless spinner with an inert BACK. The refusal is now the same read-out, and
-    /// BACK re-announces the dev session exactly as its activation did.
-    #[test]
-    fn a_dev_session_change_profile_says_it_cannot_switch_and_back_returns() {
-        let _g = crate::testlock::serial();
-        let saved = PersistedSession { client_id: "synthetic-client".into(), ..Default::default() };
-        let mut owner = SessionMachine::from_init(SessionInit::captured_boot(saved, Some(local_server()), Vec::new()));
-        let effects = step(&mut owner, SessionEvent::Command(Command::ActivateDevBootstrap));
-        let (req, epoch) = effects.iter().find_map(|fx| match fx {
-            SessionFx::Commit { req, epoch, .. } => Some((*req, *epoch)),
-            _ => None,
-        }).expect("rig: the dev boundary commits");
-        step(&mut owner, SessionEvent::Commit(CommitReply { req, epoch, arrival: 0,
-            admission: CommitAdmission::RegistryOnly }));
-        assert_eq!(owner.state.phase, Phase::Ready, "rig: the dev session is up");
-
-        let before = owner.publication();
-        step(&mut owner, SessionEvent::Command(Command::StartSwitch(Picker::ChangeProfile)));
-        assert_eq!(owner.state.phase, Phase::Profiles,
-            "the picker the app just routed to must have a state behind it");
-        assert_eq!(owner.state.error, roster_refused());
-        assert!(owner.state.users.is_empty());
-        // TV, PR #212: this read-out exists BEFORE the Profiles screen mounts, so only the step
-        // that entered it can announce it — and it must, once.
-        let entered = owner.publication();
-        assert_eq!(roster_readout_entered(&before, &entered).as_deref(),
-            Some(format!("profiles: no profiles to offer — {} (BACK returns)", roster_refused()).as_str()));
-        assert_eq!(roster_readout_entered(&entered, &entered), None, "announced once, not per step");
-
-        let reply = ReplyTo { instance: 0, correlation: 7 };
-        let effects = step(&mut owner, SessionEvent::Command(Command::BackAtRoot { reply }));
-        assert_eq!(roster_readout_entered(&entered, &owner.publication()), None, "leaving is not entering");
-        assert!(effects.iter().any(|fx| matches!(fx, SessionFx::BackReply { resumed: true, .. })));
-        assert!(effects.iter().any(|fx| matches!(fx, SessionFx::Ready {
-            install: ReadyInstall::AlreadyInstalled, .. })), "BACK hands the dev session back");
-        assert_eq!(owner.state.phase, Phase::Ready);
-        assert!(owner.state.error.is_empty());
-        assert!(!before.switch_refused, "nothing has been refused before anybody asked");
-        assert!(owner.publication().switch_refused,
-            "the refusal outlives the read-out, so the menu stops offering it");
-    }
-
-
-    /// The account menu must not lead into #132's dead end once the app KNOWS it is one: plex.tv
-    /// refused this identity a roster and nothing is cached to switch from. The verdict outlives
-    /// the picker (BACK resumes the same identity), while "no verdict" — plex.tv unreachable —
-    /// publishes none, because the menu row is what asks again.
-    #[test]
-    fn a_refused_roster_with_nothing_cached_is_published_as_the_identitys_switch_verdict() {
-        let _g = crate::testlock::serial();
-        for (users, refused) in [(None, false), (Some(Vec::new()), true)] {
-            let (mut owner, _) = empty_roster_change_profile(users);
-            let read = owner.publication();
-            assert_eq!(read.switch_refused, refused, "verdict on the read-out itself");
-            assert!(read.readout_back_resumes,
-                "a stored, dialable session is behind the picker: BACK resumes it");
-            let reply = ReplyTo { instance: 0, correlation: 7 };
-            step(&mut owner, SessionEvent::Command(Command::BackAtRoot { reply }));
-            assert_eq!(owner.state.phase, Phase::Ready, "rig: BACK resumed");
-            assert_eq!(owner.publication().switch_refused, refused,
-                "the same identity is still refused once the picker has gone");
-            owner.state.persisted.user.uuid = "another-profile".into();
-            owner.replace_publication();
-            assert!(!owner.publication().switch_refused,
-                "a different identity has not been refused anything");
-        }
-    }
-
-
-    /// The verdict belongs to the identity's LIFECYCLE, not to one call site. Signing out ends
-    /// the identity, so it forgets the verdict: signing back into the same account in the same
-    /// process yields the same `Identity`, and a surviving verdict would hide *Change profile*
-    /// until restart even after that login brought a roster.
-    #[test]
-    fn signing_out_forgets_the_switch_verdict() {
-        let _g = crate::testlock::serial();
-        let (mut owner, _) = empty_roster_change_profile(Some(Vec::new()));
-        assert!(owner.publication().switch_refused, "rig: the verdict is recorded");
-        let account = owner.state.persisted.clone();
-        step(&mut owner, SessionEvent::Command(Command::SignOut));
-        assert!(owner.state.switch_refused_for.is_none(), "sign-out ends the identity and its verdict");
-        // The same account, signed back in: nothing refused it in this sign-in.
-        owner.state.persisted = account;
-        owner.replace_publication();
-        assert!(!owner.publication().switch_refused);
-    }
-
-
-    /// Any AUTHORITATIVE roster clears the verdict — a sign-in's own roster as much as the
-    /// picker's refresh — because both answer the question the verdict recorded. A sign-in that
-    /// brought no roster answered nothing, and keeps it.
-    #[test]
-    fn a_sign_in_that_brings_a_roster_clears_the_switch_verdict() {
-        let _g = crate::testlock::serial();
-        for (users, cleared) in [
-            (vec![UserTile { uuid: "u-1".into(), title: "Only user".into(), ..Default::default() }], true),
-            (Vec::new(), false),
-        ] {
-            let mut init = reopened_after_authorization();
-            init.switch_refused_for = Some(Identity::of(&init.persisted));
-            let mut owner = SessionMachine::from_init(init);
-            assert!(owner.publication().switch_refused, "rig: the verdict is recorded");
-            let req = owner.state.next_req;
-            let epoch = owner.state.epoch;
-            let signed_in = qr_event(&owner, req, 1, super::super::LoginProgress::SignedIn {
-                epoch, server: local_server(), sources: Vec::new(), users }, true);
-            step(&mut owner, SessionEvent::Result(signed_in));
-            step(&mut owner, SessionEvent::Commit(CommitReply { req, epoch, arrival: 1,
-                admission: CommitAdmission::Admitted { revision: 1, purpose: PersistencePurpose::Discovery } }));
-            assert!(owner.state.pending_commit.is_none(), "rig: the sign-in committed");
-            assert_eq!(owner.publication().switch_refused, !cleared);
-            assert_eq!(owner.state.switch_refused_for.is_none(), cleared);
-        }
-    }
-
-
-    /// A refusal over a CACHED roster is no dead end — offline switching reads the cache (#132,
-    /// #164) — so it is neither committed over the cache nor published as a verdict.
-    #[test]
-    fn a_refusal_over_a_cached_roster_is_not_a_switch_verdict() {
-        let _g = crate::testlock::serial();
-        let mut init = local_session();
-        init.persisted.home_users = vec![crate::plex::session::HomeUserRef {
-            uuid: "cached-user".into(), title: "Cached".into(), ..Default::default() }];
-        let mut owner = SessionMachine::from_init(init);
-        let effects = step(&mut owner, SessionEvent::Command(Command::StartSwitch(Picker::ChangeProfile)));
-        let (req, key) = effects.iter().find_map(|fx| match fx {
-            SessionFx::Work { req, key, input: SessionWork::HomeRoster { .. }, .. } => Some((*req, *key)),
-            _ => None,
-        }).unwrap();
-        settle_picker_commit(&mut owner, &effects);
-        let envelope = roster_envelope(&mut owner, req, key, Some(Vec::new()));
-        step(&mut owner, SessionEvent::Result(envelope));
-        assert_eq!(owner.state.persisted.home_users.len(), 1, "the cache survives the refusal");
-        assert!(!owner.publication().switch_refused);
-    }
-
-
-    /// With no dialable session stored, BACK from the read-out hands the screen to the television
-    /// — so the read-out must not offer a *Back* that claims to stay in the app.
-    #[test]
-    fn a_readout_with_no_session_behind_it_says_back_does_not_resume() {
-        let _g = crate::testlock::serial();
-        let mut persisted = local_session().persisted;
-        persisted.server = Default::default();
-        let mut owner = SessionMachine::from_init(SessionInit::captured(persisted));
-        let effects = step(&mut owner, SessionEvent::Command(Command::StartSwitch(Picker::ChangeProfile)));
-        let (req, key) = effects.iter().find_map(|fx| match fx {
-            SessionFx::Work { req, key, input: SessionWork::HomeRoster { .. }, .. } => Some((*req, *key)),
-            _ => None,
-        }).expect("rig: an account token is enough to ask for a roster");
-        if effects.iter().any(|fx| matches!(fx, SessionFx::Commit { .. })) {
-            settle_picker_commit(&mut owner, &effects);
-        }
-        let envelope = roster_envelope(&mut owner, req, key, Some(Vec::new()));
-        step(&mut owner, SessionEvent::Result(envelope));
-        let read = owner.publication();
-        assert_eq!(read.roster_readout(), Some(roster_refused()), "rig: the read-out is up");
-        assert!(!read.readout_back_resumes);
-        let reply = ReplyTo { instance: 0, correlation: 7 };
-        let effects = step(&mut owner, SessionEvent::Command(Command::BackAtRoot { reply }));
-        assert!(effects.iter().any(|fx| matches!(fx, SessionFx::BackReply { resumed: false, .. })),
-            "the published fact and BACK's own decision are one answer");
-    }
 
 }
-

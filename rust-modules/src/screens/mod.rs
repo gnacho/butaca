@@ -31,7 +31,6 @@ pub(crate) mod jf_login; // Jellyfin sign-in - a server/user/password form, not 
 pub(crate) mod onboard;
 pub(crate) mod plaintext_question;
 pub(crate) mod player;
-pub(crate) mod profiles;
 pub(crate) mod registry;
 pub(crate) mod settings;
 pub(crate) mod servers; // the Jellyfin flavor's server picker - gated inside, like jf_login

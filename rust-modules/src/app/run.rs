@@ -1800,7 +1800,7 @@ pub(crate) unsafe fn land_results(app: &mut App, fr: &mut Frame) {
         // called from here and from the two tests that used to keep their own inline copy of this
         // exact `match` (see that function's doc for why sharing it, rather than restating it, is
         // what makes those tests prove anything).
-        if matches!(app.route(), AppArg::Login | AppArg::Profiles) {
+        if matches!(app.route(), AppArg::Login) {
             super::bridge::follow_auth_landing(&mut app.pages, &mut app.bridge);
         }
         // dev: an `acct` step on the LOAD DIAL asks for the REAL Account popover, so the
@@ -1875,12 +1875,12 @@ pub(super) fn finish_local_erasure(bridge: &super::bridge::Bridge,
 /// The request-to-performer boundary for root navigation. The live loop and owned-screen
 /// tests consume the same emitted enum here, without constructing a native App or a route oracle.
 pub(super) fn reduce_navigation_request(request: crate::screens::registry::LoopReq,
-    pages: &mut crate::ui::dispatch::Dispatcher<super::bridge::AppHost>)
+    _pages: &mut crate::ui::dispatch::Dispatcher<super::bridge::AppHost>)
     -> Result<(), crate::screens::registry::LoopReq> {
     match request {
         // Root BACK belongs to platform Home; first-run Onboard BACK has an in-app destination.
         crate::screens::registry::LoopReq::BackAtRoot => back_at_root(),
-        crate::screens::registry::LoopReq::OnboardBack => enter_profiles_from_onboard(pages),
+        crate::screens::registry::LoopReq::OnboardBack => back_at_root(),
         other => return Err(other),
     }
     Ok(())
@@ -2037,8 +2037,6 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         // and whatever per-frame animation the legacy `ui::login`/`ui::profiles` scenes used to
         // step belongs to their `Screen::step`/`prepare` on a `Tick` the dispatcher already
         // delivers every frame through `bridge::frame` — not a second call from this function.
-        // dev: /tmp/butaca-pickuser=<index> — `crate::dev::scenarios::pickuser_tick`.
-        crate::dev::scenarios::pickuser_tick(app);
         // **The bare route, for every screen below** — `page_of` stood on each of these three
         // guards while a popover was a ROUTE that had to be resolved onto the page beneath it.
         // Neither menu is a route since phase 10, so a `Route` names exactly one page. Whether
@@ -2997,7 +2995,6 @@ mod lifecycle_regression_tests {
             scenarios: crate::dev::scenarios::Scenarios {
             #[cfg(feature = "devtriggers")]
             poster_gate: Default::default(),
-                pick_user: Default::default(),
                 home_osc_last: Default::default(),
                 hero_osc_last: Default::default(),
                 home_fold_osc_last: Default::default(),

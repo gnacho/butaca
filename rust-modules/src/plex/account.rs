@@ -9,7 +9,7 @@
 //! needs DNS + TLS that the plain-HTTP PMS socket can't do. Every call is **blocking**, so callers
 //! run it on a background thread (the login-poll / discovery / switch threads), never the SDL loop.
 //!
-//! Tokens (`Pin.auth_token`, `Resource.access_token`, `SwitchedUser.auth_token`) are secrets: they
+//! Tokens (`Resource.access_token`) are secrets: they
 //! are never logged here and never printed by callers. What IS logged, on a failure only, is the
 //! **status**, the **shape** of the endpoint that returned it, and — for a body that will not
 //! deserialize — serde's error category and position. See [`decode`] for why the status is worth a
@@ -264,32 +264,13 @@ impl AccountClient {
         h
     }
 
-    /// HOST SUITE: the plain decode seam, kept for the response-policy tests below after the
-    /// provider client (`discover.rs`) stopped needing it in production builds.
-    #[cfg(test)]
-    fn get<T: DeserializeOwned>(&self, url: &str) -> Option<T> {
-        decode("GET", url, self.get_raw(url).ok()?)
-    }
-
-    /// [`Self::get_evidence`], keeping what the call observed when it yields nothing — see [`CallEvidence`].
-    fn get_evidence<T: DeserializeOwned>(&self, url: &str) -> Result<T, CallEvidence> {
-        decode_evidence("GET", url, self.get_raw(url))
-    }
-
     fn get_evidence_with<T: DeserializeOwned>(&self, url: &str, timeouts: crate::net::Timeouts)
         -> Result<T, CallEvidence> {
         let response = crate::net::request_evidence(url, &self.headers(), "GET", None,
             timeouts, false, None, None);
-        note_response_contact(url, &response);
         decode_evidence("GET", url, response)
     }
 
-    fn get_raw(&self, url: &str) -> Result<crate::net::Resp, crate::net::RequestFailure> {
-        let resp = crate::net::request_evidence(url, &self.headers(), "GET", None,
-            crate::net::API, false, None, None);
-        note_response_contact(url, &resp);
-        resp
-    }
 
     /// GET /api/v2/user — the active Plex Home profile's account-level audio preference.
     ///
@@ -317,7 +298,6 @@ impl AccountClient {
         let url = format!("{}/api/v2/user", plex_tv());
         let response = crate::net::request_evidence(&url, &self.headers(), "GET", None,
             timeouts, false, None, None);
-        note_response_contact(&url, &response);
         match response {
             Err(failure) if failure.cause == crate::net::RequestError::TimedOut =>
                 AudioPreferencesOutcome::TimedOut,
@@ -328,62 +308,7 @@ impl AccountClient {
         }
     }
 
-    /// Complete responses or safe incomplete-response evidence. No body ceiling is enabled here.
-    fn post_raw(&self, url: &str) -> Result<crate::net::Resp, crate::net::RequestFailure> {
-        let resp = crate::net::request_evidence(url, &self.headers(), "POST", Some(b""),
-            crate::net::API, false, None, None);
-        note_response_contact(url, &resp);
-        resp
-    }
-
-    // ---- login (PIN/QR) ----
-
-    /// POST /api/v2/pins — create a link PIN. `strong=false` yields a short human-typeable `code`
-    /// (for the `plex.tv/link` fallback) alongside the QR; the returned `auth_token` is null until
-    /// the user authorizes it on another device.
-    ///
-    /// When it fails, what the request observed — the sign-in flow's onboarding report classifies
-    /// it (`telemetry::incident::classify`). **No account call here answers `Option` any more**:
-    /// an `Option` folded "plex.tv refused this identity" into "plex.tv never answered", which is
-    /// how a managed profile's 401 read as nothing at all (#132). See [`CallEvidence`].
-    pub(crate) fn create_pin_with(&self, timeouts: crate::net::Timeouts) -> Result<Pin, CallEvidence> {
-        let url = format!("{}/api/v2/pins?strong=false", plex_tv());
-        let response = crate::net::request_evidence(&url, &self.headers(), "POST", Some(b""),
-            timeouts, false, None, None);
-        note_response_contact(&url, &response);
-        decode_evidence("POST", &url, response)
-    }
-
-    /// GET /api/v2/pins/{id} — poll a pending PIN, GRADED. `Pin.auth_token` becomes `Some` once
-    /// the user approves it (scans the QR / enters the code + signs in); poll until then, or until
-    /// the pin stops existing.
-    ///
-    /// **It returns [`PinPoll`] rather than `Option<Pin>` because the caller has to tell a dead
-    /// pin from a bad moment**, and an `Option` cannot. See [`PinPoll::Gone`].
-    pub fn poll_pin(&self, id: i64) -> PinPoll {
-        let url = format!("{}/api/v2/pins/{id}", plex_tv());
-        // Polling did not update the reachability memo; preserve that policy.
-        let response = crate::net::request_evidence(&url, &self.headers(), "GET", None,
-            crate::net::API, false, None, None);
-        poll_response(&url, response)
-            .expect("uncapped account request cannot report a local body limit")
-    }
-
     // ---- server discovery ----
-
-    /// GET /api/v2/resources — the account's servers (+ shared), each with its connection list and a
-    /// per-server `access_token`. Requires the account token. `includeHttps`/`includeRelay` surface
-    /// the LAN + relay connections so we can pick a local one for offline play; `includeIPv6` adds
-    /// the v6 connections, which are *ranked last* rather than used first (`probe.rs`) — we ask for
-    /// them so the ranking is choosing between a known set instead of a set plex.tv edited for us.
-    ///
-    /// A failure keeps its evidence: the onboarding report classifies it, and a refusal
-    /// ([`refused_identity`]) is a statement about the token rather than the network.
-    pub fn resources(&self) -> Result<Vec<Resource>, CallEvidence> {
-        self.get_evidence(&format!(
-            "{}/api/v2/resources?includeHttps=1&includeRelay=1&includeIPv6=1", plex_tv()
-        ))
-    }
 
     pub(crate) fn resources_with(&self, timeouts: crate::net::Timeouts)
         -> Result<Vec<Resource>, CallEvidence> {
@@ -391,415 +316,11 @@ impl AccountClient {
             "{}/api/v2/resources?includeHttps=1&includeRelay=1&includeIPv6=1", plex_tv()
         ), timeouts)
     }
-
-    // ---- Plex Home managed users ----
-
-    /// GET /api/v2/home/users — the Home (managed) users for the account: the "who's watching"
-    /// roster. Requires the (admin) account token.
-    ///
-    /// **Graded, because "refused" and "unreachable" are different answers to the person holding
-    /// the remote.** A managed profile's token gets 401 here (TV session 8, #132): that is plex.tv
-    /// saying this identity cannot list the household, and no retry or connection check changes
-    /// it. `Err` keeps the status ([`refused_identity`]) so the roster worker can say so.
-    pub(crate) fn home_users_with(&self, timeouts: crate::net::Timeouts)
-        -> Result<Vec<HomeUser>, CallEvidence> {
-        let hu: HomeUsers = self.get_evidence_with(
-            &format!("{}/api/v2/home/users", plex_tv()), timeouts)?;
-        Ok(hu.users)
-    }
-
-    /// POST /api/v2/home/users/{uuid}/switch[?pin=NNNN] — exchange the admin token for the chosen
-    /// user's own token (the thing PMS scopes watch state by). `pin` is required for a `protected`
-    /// user, ignored otherwise.
-    ///
-    /// **Graded, because the caller has to tell "plex.tv said no" from "plex.tv never answered".**
-    /// The first is a verdict about the PIN or token and ends the switch; the second is a fact
-    /// about the network, answered from previously cached credentials by the profile worker.
-    /// An `Option` folded those into one `None`, which is how a house with no internet could not
-    /// pick a profile at all (2026-09-06). A received 4xx remains authoritative even if its body
-    /// could not finish. The uncapped domain API is unchanged; enabling limits later requires
-    /// a distinct domain failure path rather than projecting a local policy failure to offline.
-    pub fn switch_user(&self, uuid: &str, pin: Option<&str>) -> SwitchOutcome {
-        let q = match pin {
-            Some(p) if !p.is_empty() => format!("?pin={p}"),
-            _ => String::new(),
-        };
-        let url = format!("{}/api/v2/home/users/{uuid}/switch{q}", plex_tv());
-        switch_response(&url, self.post_raw(&url))
-            .expect("uncapped account request cannot report a local body limit")
-    }
 }
 
-fn response_status(response: &Result<crate::net::Resp, crate::net::RequestFailure>) -> Option<u16> {
-    match response { Ok(resp) => Some(resp.status), Err(failure) => failure.status }
-}
 
-/// A size policy failure has no authority to say the service is offline. Keep it fallible for
-/// future limited callers; today's public methods pass max_body=None and cannot reach this Err.
-fn complete_response(response: Result<crate::net::Resp, crate::net::RequestFailure>)
-    -> Result<Option<crate::net::Resp>, crate::net::RequestFailure> {
-    match response {
-        Ok(resp) => Ok(Some(resp)),
-        Err(failure) if failure.body_limit.is_some() => Err(failure),
-        Err(_) => Ok(None),
-    }
-}
 
-fn poll_response(url: &str, response: Result<crate::net::Resp, crate::net::RequestFailure>)
-    -> Result<PinPoll, crate::net::RequestFailure> {
-        if let Some(status) = response_status(&response).filter(|status| pin_is_gone(*status)) {
-            log_status_failure("GET", url, status);
-            return Ok(PinPoll::Gone);
-        }
-        let failure = response.as_ref().err().copied();
-        let Some(resp) = complete_response(response)? else {
-            return Ok(PinPoll::Unreachable(Err(failure.expect("an incomplete response is a failure"))));
-        };
-        // Gone statuses are handled before body decoding, including incomplete responses;
-        // decode logs complete HTTP/body failures using the same safe status logger.
-        //
-        // **[`PinToken`], not [`Pin`], and the narrowness is the point.** This response is the one
-        // place the account credential can ever appear, and a poll that cannot parse it is
-        // indistinguishable from a poll that was never answered — which is the whole shape of the
-        // bug this module is being changed for. `Pin` also carries `id`, `code` and `expiresIn`,
-        // none of which the poll uses and any of which could change TYPE on the service side (a
-        // number arriving as a string is exactly what PMS does elsewhere); that would fail the
-        // whole deserialization and hide a token that was sitting right there. Creation still
-        // takes the wide DTO, because it genuinely needs those fields and its failure is immediate
-        // and visible.
-        let status = resp.status;
-        Ok(match decode::<PinToken>("GET", url, resp) {
-            Some(p) => match p.auth_token {
-                Some(t) if !t.is_empty() => PinPoll::Authorized(t),
-                _ => PinPoll::Pending,
-            },
-            None => PinPoll::Unreachable(Ok(status)),
-        })
-}
 
-fn switch_response(url: &str, response: Result<crate::net::Resp, crate::net::RequestFailure>)
-    -> Result<SwitchOutcome, crate::net::RequestFailure> {
-        if let Some(status @ 400..=499) = response_status(&response) {
-            log_status_failure("POST", url, status);
-            return Ok(SwitchOutcome::Refused(status));
-        }
-        let Some(resp) = complete_response(response)? else { return Ok(SwitchOutcome::Unreachable); };
-        Ok(match decode::<SwitchedUser>("POST", url, resp) {
-            Some(u) if !u.auth_token.is_empty() => SwitchOutcome::Switched(u),
-            // A completed request the service declined, or one it answered with a body that is
-            // not a switched user. 4xx is plex.tv's verdict (401 is the wrong PIN); anything
-            // else — a 5xx, a 2xx that did not parse — is the service failing us, which for the
-            // caller's purposes is the same as not answering: retryable, and answerable offline.
-            _ => SwitchOutcome::Unreachable,
-        })
-}
-
-fn note_response_contact(url: &str, response: &Result<crate::net::Resp, crate::net::RequestFailure>) {
-    match response {
-        Ok(_) => note_contact(url, true),
-        Err(failure) if failure.status.is_some() => note_contact(url, true),
-        Err(failure) if failure.body_limit.is_some() => {}, // no observation about reachability
-        Err(_) => note_contact(url, false),
-    }
-}
-
-/// How `/api/v2/home/users/{uuid}/switch` came back — see [`AccountClient::switch_user`].
-pub enum SwitchOutcome {
-    /// 2xx with a token: the profile's own credential.
-    Switched(SwitchedUser),
-    /// plex.tv returned an authoritative 4xx refusal, even if its response body did not
-    /// complete; 401 is a wrong-PIN verdict when a PIN was submitted.
-    Refused(u16),
-    /// No usable answer: a transport failure, a 5xx, or a 2xx body that did not parse.
-    Unreachable,
-}
-
-#[cfg(test)]
-pub(crate) fn test_refusal_evidence(status: u16, response: Result<crate::net::Resp, crate::net::RequestFailure>) {
-    evidence_tests::assert_refusal_evidence(status, response);
-}
-
-#[cfg(test)]
-mod evidence_tests {
-    use super::*;
-    use crate::net::{RequestError, RequestFailure, Resp};
-
-    const SWITCH: &str = "https://plex.tv/api/v2/home/users/synthetic/switch";
-
-    /// #132: a managed profile's 401 on `/api/v2/home/users` is a verdict about the identity, and
-    /// must stay one through the evidence — an incomplete transfer included — while a timeout or
-    /// an unreadable 200 is not. The log phrase carries the status and never a URL.
-    #[test]
-    fn a_refused_identity_is_told_apart_from_no_answer() {
-        let timed_out = RequestFailure { cause: RequestError::TimedOut, status: None, body_limit: None, curl_rc: Some(28) };
-        let cut_401 = RequestFailure { cause: RequestError::Transport, status: Some(401), body_limit: None, curl_rc: Some(56) };
-        assert_eq!(refused_identity(&Ok(401)), Some(401));
-        assert_eq!(refused_identity(&Ok(403)), Some(403));
-        assert_eq!(refused_identity(&Err(cut_401)), Some(401));
-        assert_eq!(refused_identity(&Ok(200)), None, "an unreadable 200 is not a refusal");
-        assert_eq!(refused_identity(&Ok(503)), None);
-        assert_eq!(refused_identity(&Err(timed_out)), None);
-        assert_eq!(describe_evidence(&Ok(401)), "HTTP 401, identity refused");
-        assert_eq!(describe_evidence(&Ok(200)), "HTTP 200, body unreadable");
-        assert_eq!(describe_evidence(&Ok(503)), "HTTP 503");
-        assert_eq!(describe_evidence(&Err(cut_401)), "HTTP 401, transfer incomplete");
-        assert_eq!(describe_evidence(&Err(timed_out)), "no answer (timed out)");
-        let dns = RequestFailure { cause: RequestError::Transport, status: None, body_limit: None, curl_rc: Some(6) };
-        assert_eq!(describe_evidence(&Err(dns)), "no answer (curl rc=6)");
-    }
-
-    #[test]
-    fn account_retryability_is_closed_over_status_and_curl_evidence() {
-        let failure = |rc| Err(RequestFailure { cause: RequestError::Transport, status: None,
-            body_limit: None, curl_rc: rc });
-        for evidence in [failure(Some(6)), failure(Some(7)), failure(Some(28)), failure(Some(35)),
-            Ok(408), Ok(429), Ok(500), Ok(502), Ok(503), Ok(504)] {
-            assert!(transient(&evidence), "{evidence:?}");
-        }
-        for evidence in [failure(Some(60)), failure(Some(77)), failure(Some(90)), failure(None),
-            Ok(200), Ok(400), Ok(401), Ok(403), Ok(404)] {
-            assert!(!transient(&evidence), "{evidence:?}");
-        }
-    }
-
-    fn failure(status: Option<u16>, body_limit: Option<usize>) -> Result<Resp, RequestFailure> {
-        Err(RequestFailure { cause: RequestError::Transport, status, body_limit, curl_rc: Some(56) })
-    }
-
-    fn http2_reset_policy(status: u16) {
-        let _serial = crate::testlock::serial();
-        for rc in [16, 55, 92] {
-            assert_refusal_evidence(status, crate::net::test_response_failure(rc, 0, status.into(), false));
-        }
-    }
-
-    pub(super) fn assert_refusal_evidence(status: u16, response: Result<Resp, RequestFailure>) {
-        crate::testlock::assert_held("auth response policy test");
-        let failure = response.as_ref().err().copied().expect("incomplete HTTP response");
-        set_unreachable_for_test(true);
-        note_response_contact(SWITCH, &response);
-        let became_unreachable = plex_tv_recently_unreachable();
-        // Restore globals before an expected RED assertion can unwind.
-        *LAST_UNREACHABLE.lock().unwrap() = None;
-        
-        assert!(!became_unreachable, "HTTP/2 refusal must not poison the outage memo");
-        assert!(matches!(switch_response(SWITCH, response), Ok(SwitchOutcome::Refused(s)) if s == status));
-        if pin_is_gone(status) {
-            assert!(matches!(poll_response(SWITCH, Err(failure)), Ok(PinPoll::Gone)));
-        }
-    }
-
-    #[test]
-    fn http2_reset_401_remains_refused() { http2_reset_policy(401); }
-    #[test]
-    fn http2_reset_403_remains_refused() { http2_reset_policy(403); }
-    #[test]
-    fn http2_reset_404_remains_gone() { http2_reset_policy(404); }
-    #[test]
-    fn http2_reset_410_remains_gone() { http2_reset_policy(410); }
-
-    #[test]
-    fn incomplete_refusal_survives_real_transport_and_preserves_contact() {
-        let _serial = crate::testlock::serial();
-        assert!(crate::net::global_init());
-        for status in [401, 403, 404, 410] {
-          for limit in [None, Some(4)] {
-            let reply = format!("HTTP/1.1 {status} Refused\r\nContent-Length: 1000\r\nConnection: close\r\n\r\nshort");
-            crate::net::with_test_response(reply.into_bytes(), false, |url| {
-                let client = AccountClient::new("synthetic-client", None);
-                let response = if let Some(limit) = limit {
-                    crate::net::request_evidence(url, &client.headers(), "POST", Some(b""), crate::net::API, false, Some(limit), None)
-                } else { client.post_raw(url) };
-                assert_eq!(response_status(&response), Some(status));
-                set_unreachable_for_test(true);
-                // Logical service identity is fixed; transport above is loopback only.
-                note_response_contact(SWITCH, &response);
-                assert!(!plex_tv_recently_unreachable());
-                assert!(matches!(switch_response(SWITCH, response), Ok(SwitchOutcome::Refused(s)) if s == status));
-            });
-          }
-        }
-        *LAST_UNREACHABLE.lock().unwrap() = None;
-        
-    }
-
-    #[test]
-    fn limits_remain_non_offline_and_refusal_or_gone_takes_precedence() {
-        let _serial = crate::testlock::serial();
-        for status in [401, 403] {
-            assert!(matches!(switch_response(SWITCH, failure(Some(status), Some(32))), Ok(SwitchOutcome::Refused(s)) if s == status));
-        }
-        for status in [404, 410] {
-            for limit in [None, Some(32)] {
-                assert!(matches!(poll_response(SWITCH, failure(Some(status), limit)), Ok(PinPoll::Gone)));
-            }
-        }
-        for status in [None, Some(200), Some(500)] {
-            *LAST_UNREACHABLE.lock().unwrap() = None;
-            
-            let response = failure(status, Some(32));
-            note_response_contact(SWITCH, &response);
-            assert!(!plex_tv_recently_unreachable(), "size policy is not an outage");
-            assert!(switch_response(SWITCH, response).is_err(), "must not become offline-eligible Unreachable");
-            assert!(poll_response(SWITCH, failure(status, Some(32))).is_err());
-        }
-        note_response_contact(SWITCH, &failure(None, None));
-        assert!(plex_tv_recently_unreachable(), "genuine no-response failure retains old policy");
-        let previous = *LAST_UNREACHABLE.lock().unwrap();
-        note_response_contact(SWITCH, &failure(None, Some(32)));
-        assert_eq!(*LAST_UNREACHABLE.lock().unwrap(), previous, "local limit must not refresh an old outage memo");
-        *LAST_UNREACHABLE.lock().unwrap() = None;
-        
-    }
-
-    #[test]
-    fn complete_response_policy_and_provider_decoding_are_unchanged() {
-        let _serial = crate::testlock::serial();
-        let malformed = Ok(Resp { status: 200, body: b"not json".to_vec() });
-        note_response_contact(SWITCH, &malformed);
-        assert!(matches!(switch_response(SWITCH, malformed), Ok(SwitchOutcome::Unreachable)));
-        assert!(matches!(switch_response(SWITCH, Ok(Resp { status: 200, body: br#"{"authToken":"synthetic-token"}"#.to_vec() })), Ok(SwitchOutcome::Switched(_))));
-        assert!(matches!(poll_response(SWITCH, Ok(Resp { status: 200, body: br#"{"authToken":null}"#.to_vec() })), Ok(PinPoll::Pending)));
-        assert!(matches!(poll_response(SWITCH, Ok(Resp { status: 200, body: br#"{"authToken":"synthetic-token"}"#.to_vec() })), Ok(PinPoll::Authorized(_))));
-        assert!(crate::net::global_init());
-        for body in [br#"[{"provides":"server","connections":null}]"#.as_slice(), br#"{"users":[]}"#.as_slice()] {
-            let mut reply = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
-            reply.extend_from_slice(body);
-            crate::net::with_test_response(reply, false, |url| {
-                let client = AccountClient::new("synthetic-client", None);
-                if body[0] == b'[' { assert_eq!(client.get::<Vec<Resource>>(url).unwrap().len(), 1); }
-                else { assert!(client.get::<HomeUsers>(url).unwrap().users.is_empty()); }
-            });
-        }
-        *LAST_UNREACHABLE.lock().unwrap() = None;
-        
-    }
-
-    #[test]
-    fn an_overflowing_valid_prefix_is_never_a_token_or_grant_response() {
-        let _serial = crate::testlock::serial();
-        assert!(crate::net::global_init());
-        for prefix in [br#"{"authToken":"synthetic-secret"}"#.as_slice(), br#"[{"accessToken":"synthetic-secret"}]"#.as_slice()] {
-            let mut body = prefix.to_vec(); body.extend([b' '; 128]);
-            let mut reply = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
-            reply.extend(body);
-            crate::net::with_test_response(reply, false, |url| {
-                let response = crate::net::request_evidence(url, &[], "GET", None, crate::net::API, false, Some(prefix.len()), None);
-                let failure = switch_response(SWITCH, response).err().expect("prefix cannot authorize");
-                assert_eq!(failure.status, Some(200));
-                assert_eq!(failure.body_limit, Some(prefix.len()));
-                assert!(!format!("{failure:?}").contains("synthetic-secret"));
-                assert!(complete_response(Err(failure)).is_err(), "DTO parser cannot receive the prefix");
-            });
-        }
-    }
-}
-
-// ---- plex.tv reachability, remembered ----
-
-/// When plex.tv last failed to answer this process at all — so a caller can decide whether a
-/// round trip is worth its timeout.
-///
-/// One question, asked by the profile switch: with the uplink down, a resolver that times out
-/// (the usual shape of "the internet is off" behind a live router) costs the whole connect budget
-/// per attempt, and the picker's own roster refresh has typically already paid it while the person
-/// was reading the screen. This memo lets the switch go to its cache FIRST when plex.tv was
-/// unreachable moments ago, and to plex.tv first — the authority — the rest of the time. It is
-/// deliberately short-lived ([`UNREACHABLE_MEMO`]): a link that came back is trusted again within
-/// the minute, and a stale "unreachable" can only ever route one pick through credentials that a
-/// successful switch had already vouched for.
-///
-/// Only the plex.tv host is recorded. `discover.provider.plex.tv` shares this transport and is
-/// a different service on a different name; its silence says nothing about the account API.
-static LAST_UNREACHABLE: Mutex<Option<Instant>> = Mutex::new(None);
-const UNREACHABLE_MEMO: Duration = Duration::from_secs(45);
-
-fn note_contact(url: &str, answered: bool) {
-    if !url.starts_with(plex_tv()) {
-        return;
-    }
-    let now = Instant::now();
-    let mut g = LAST_UNREACHABLE.lock().unwrap_or_else(|e| e.into_inner());
-    *g = if answered { None } else { Some(now) };
-}
-
-/// Did the account API fail to answer within the last [`UNREACHABLE_MEMO`], with nothing
-/// answering since?
-pub fn plex_tv_recently_unreachable() -> bool {
-    let g = LAST_UNREACHABLE.lock().unwrap_or_else(|e| e.into_inner());
-    g.is_some_and(|t| t.elapsed() < UNREACHABLE_MEMO)
-}
-
-/// Seed the memo. Callers hold `crate::testlock::serial()`: this is a process global.
-#[cfg(test)]
-pub(crate) fn set_unreachable_for_test(unreachable: bool) {
-    let mut g = LAST_UNREACHABLE.lock().unwrap_or_else(|e| e.into_inner());
-    *g = unreachable.then(Instant::now);
-}
-
-#[cfg(test)]
-mod reachability_tests {
-    use super::*;
-
-    /// The `plextv` stand-in is loopback-only: a trigger file must never be able to aim the
-    /// account API (and the token it carries) at any other host.
-    #[test]
-    fn only_a_loopback_http_origin_may_stand_in_for_plex_tv() {
-        assert!(loopback_http("http://127.0.0.1:32612"));
-        assert!(loopback_http("http://localhost:8080/"));
-        for refused in [
-            "https://127.0.0.1:32612",
-            "http://127.0.0.1",
-            "http://127.0.0.1:",
-            "http://127.0.0.1:80@evil.example",
-            "http://127.0.0.1:123456",
-            "http://127.0.0.2:80",
-            "http://localhost.evil.example:80",
-            "https://plex.tv",
-        ] {
-            assert!(!loopback_http(refused), "{refused} must be refused");
-        }
-    }
-
-    /// Process globals — serialized on the crate-wide lock.
-    #[test]
-    fn the_memos_say_unreachable_beats_reachable_and_nothing_is_known_at_boot() {
-        let _g = crate::testlock::serial();
-        *LAST_UNREACHABLE.lock().unwrap() = None;
-        
-        assert!(!plex_tv_recently_unreachable());
-        note_contact(PLEX_TV, true);
-        note_contact(PLEX_TV, false);
-        assert!(plex_tv_recently_unreachable());
-        note_contact("https://discover.provider.plex.tv/x", true);
-        assert!(plex_tv_recently_unreachable(), "another host says nothing about plex.tv");
-        *LAST_UNREACHABLE.lock().unwrap() = None;
-        
-    }
-}
-
-/// How a poll of a pending link pin came back — the four states the sign-in flow has to tell
-/// apart, which an `Option<Pin>` folds into two.
-///
-/// **[`PinPoll::Gone`] is the one that could not be said before, and it is the whole point.**
-/// plex.tv answers a poll of a pin that has expired — or never existed, or was minted under a
-/// different `X-Plex-Client-Identifier` — with `404 {"code":1020,"message":"Code not found or
-/// expired"}` (measured against the live service 2026-09-03, alongside the `expiresIn: 900` a
-/// fresh pin is created with). The old `poll_pin` returned `None` for that AND for a Wi-Fi drop,
-/// so the sign-in flow could not distinguish "there is nothing left to wait for" from "ask again
-/// in two seconds" — and kept a dead QR code on screen, waiting for a pin plex.tv had forgotten.
-pub enum PinPoll {
-    /// 200, `authToken` still null: nobody has authorized this code yet.
-    Pending,
-    /// 200 with a non-empty `authToken` — the account credential. The only success.
-    Authorized(String),
-    /// This pin no longer exists. Nothing will ever come back for it; mint another.
-    Gone,
-    /// Nothing usable came back and the pin may well still be alive: a transport failure, a 5xx,
-    /// or a 2xx body that did not parse. Retryable. Carries what the request observed, which the
-    /// stalled-wait report classifies.
-    Unreachable(CallEvidence),
-}
 
 /// What an account request observed when it produced nothing usable: `Ok(status)` for a complete
 /// response that was refused or would not decode, `Err` for `net`'s own failure. Closed evidence
@@ -814,16 +335,6 @@ pub type CallEvidence = Result<u16, crate::net::RequestFailure>;
 /// as a connection problem sends the person looking for a network fault that does not exist.
 pub fn refuses_identity(status: u16) -> bool {
     matches!(status, 401 | 403)
-}
-
-/// [`refuses_identity`] over a failed call's evidence: the refusing status, when there is one.
-/// An incomplete transfer still carries the status it received (`RequestFailure::status`).
-pub fn refused_identity(evidence: &CallEvidence) -> Option<u16> {
-    let status = match evidence {
-        Ok(status) => Some(*status),
-        Err(failure) => failure.status,
-    };
-    status.filter(|status| refuses_identity(*status))
 }
 
 /// Whether repeating an account call may turn this observation into a usable answer.
@@ -875,21 +386,6 @@ fn decode_evidence<T: DeserializeOwned>(verb: &str, url: &str,
     }
 }
 
-/// Does this status mean the pin itself is finished, as opposed to the request having been?
-///
-/// **404 is the one plex.tv actually sends, and this list says only what the evidence says.** A
-/// measured 404 (`code 1020`, "Code not found or expired") is the service telling us this id no
-/// longer exists; 410 is the same statement by HTTP's own definition. **400 was here for one
-/// review round and is not any more**: a 400 is a rejection of the REQUEST — headers, syntax, a
-/// service-side validation change — and minting a replacement pin cannot fix any of those, so
-/// reading it as expiry would burn every automatic regeneration in seconds against a fault that
-/// regeneration does not address. It goes back to the retryable side, where the caller's own
-/// deadline bounds it and `decode` has already logged the status.
-///
-/// Anything else — notably a 5xx — is a fact about the service at this instant, not about the pin.
-fn pin_is_gone(status: u16) -> bool {
-    matches!(status, 404 | 410)
-}
 
 /// Status + body → the typed DTO, with a LOG LINE for each of the two ways that fails.
 ///
@@ -905,7 +401,7 @@ fn pin_is_gone(status: u16) -> bool {
 /// pretending it contacted a Plex Media Server. The status is what separates those outcomes, and
 /// this function is where it exists.
 ///
-/// QR uses `net::https_get_public` and grades `r.ok()` itself. Switch refusal and poll Gone
+/// The sign-in flow used to grade `r.ok()` itself. Switch refusal and poll Gone
 /// classify received status before decoding, including incomplete responses. Every typed body
 /// decoded here (including `discover.rs`) belongs to a complete transfer; failures carry no prefix.
 fn decode<T: DeserializeOwned>(verb: &str, url: &str, resp: crate::net::Resp) -> Option<T> {
@@ -1185,32 +681,6 @@ impl AccountUser {
 
 // ---- serde DTOs (only the fields the app consumes; all optional to tolerate shape drift) ----
 
-/// A link PIN (`/api/v2/pins`). `code` feeds both the QR (`app.plex.tv/auth`) and the typed
-/// `plex.tv/link` fallback.
-#[derive(Deserialize, Default)]
-pub struct Pin {
-    #[serde(default)]
-    pub id: i64,
-    #[serde(default)]
-    pub code: String,
-    #[serde(rename = "expiresIn", default)]
-    pub expires_in: i64,
-    /// URL of a server-rendered QR PNG for this pin — the exact QR the official apps show, so we
-    /// display it directly instead of hand-building (and mis-encoding) a deep link.
-    #[serde(default)]
-    pub qr: String,
-}
-
-/// The poll of a pending pin, read as narrowly as it can be: the credential and nothing else.
-///
-/// See [`AccountClient::poll_pin`] for why this is not [`Pin`]. Every field of a DTO is a way for
-/// the parse to fail, and on this endpoint a failed parse is a sign-in that never completes.
-#[derive(Deserialize, Default)]
-struct PinToken {
-    #[serde(rename = "authToken", default)]
-    auth_token: Option<String>,
-}
-
 /// One account server/resource (`/api/v2/resources`) — owned **and** shared alike; `owned` is the
 /// only thing that tells them apart, and it is a preference here, never a wall.
 ///
@@ -1324,38 +794,9 @@ pub struct Connection {
     pub ipv6: bool,
 }
 
-/// `/api/v2/home/users` envelope.
-#[derive(Deserialize, Default)]
-struct HomeUsers {
-    #[serde(default)]
-    users: Vec<HomeUser>,
-}
-
-/// A Plex Home managed user — one tile on the "who's watching" screen. `protected` = has a PIN;
-/// `thumb` is the avatar URL (plex.tv HTTPS — shown via the PMS image proxy).
-#[derive(Deserialize, Default)]
-pub struct HomeUser {
-    #[serde(default)]
-    pub id: i64,
-    #[serde(default)]
-    pub uuid: String,
-    #[serde(default)]
-    pub title: String,
-    // NOTE: only fields that are always present AND non-null in the response — plex.tv sends
-    // `null` for absent strings (e.g. `username`/`email` on managed users), and serde's `default`
-    // does NOT cover an explicit `null`, so a nullable String field fails the whole parse. `title`
-    // and `thumb` are always concrete strings; anything nullable is deliberately omitted.
-    #[serde(default)]
-    pub thumb: String,
-    #[serde(default)]
-    pub admin: bool,
-    #[serde(default)]
-    pub protected: bool,
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{endpoint_shape, pin_is_gone, AccountClient, Pin, Resource};
+    use super::{endpoint_shape, AccountClient, Resource};
     use std::time::Duration;
 
     fn audio_user(id: i64, uuid: &str) -> super::super::session::UserRef {
@@ -1577,44 +1018,6 @@ mod tests {
         assert_eq!(sent, super::super::identity::language());
     }
 
-    /// **A poll of a pin that is finished is a 404, and it has to be told apart from a bad
-    /// moment.** Measured against the live service on 2026-09-03: an unknown id, an expired one,
-    /// and a live one polled under the wrong `X-Plex-Client-Identifier` all answer
-    /// `404 {"errors":[{"code":1020,"message":"Code not found or expired"}]}`. A 5xx says nothing
-    /// about the pin at all, so it must stay retryable — reading it as an ending would throw away
-    /// a code the user may be halfway through typing into their phone.
-    #[test]
-    fn only_a_status_about_the_pin_itself_ends_the_wait() {
-        assert!(pin_is_gone(404), "what plex.tv actually sends");
-        assert!(
-            pin_is_gone(410),
-            "and the same statement in HTTP's own words"
-        );
-        for still_worth_asking in [400, 429, 500, 502, 503, 504] {
-            assert!(
-                !pin_is_gone(still_worth_asking),
-                "{still_worth_asking} is a fact about the request or the service, not about \
-                 this code — and a replacement pin would not fix any of them"
-            );
-        }
-    }
-
-    /// **A poll must find the token whatever else the body is doing.** Drift in a field the poll
-    /// never reads — `id` arriving as a string, say, which is exactly what PMS does on its own
-    /// endpoints — used to fail the whole deserialization, and a failed parse on THIS endpoint is
-    /// a sign-in that never completes while the user's phone says it did.
-    #[test]
-    fn the_poll_reads_the_credential_out_of_a_body_whose_other_fields_have_drifted() {
-        let drifted = br#"{"id":"581637088","code":42,"expiresIn":"900","brandNew":{"x":[1]},
-                           "authToken":"account-token"}"#;
-        let p: super::PinToken = serde_json::from_slice(drifted).expect("the token survives");
-        assert_eq!(p.auth_token.as_deref(), Some("account-token"));
-        // …and an unauthorized poll is still simply the absence of one, not a parse failure.
-        let pending: super::PinToken =
-            serde_json::from_slice(br#"{"authToken":null}"#).expect("pending parses");
-        assert!(pending.auth_token.is_none());
-    }
-
     /// The log's shape rule, on the exact URLs this file and `discover.rs` build. Both halves are
     /// asserted: the route survives (or the line stops saying which call failed) and every
     /// identifier does not — the pin id redeems the account token, the `?pin=` is a managed user's
@@ -1659,32 +1062,6 @@ mod tests {
     }
 
     /// Why the parse-failure line logs serde's CATEGORY and position instead of the message: the
-    /// message quotes the value it choked on, and the values these endpoints return include the
-    /// account token (`Pin::auth_token`). A `{e}` here would put a body field in the event log —
-    /// the file users are asked to attach to a bug report.
-    #[test]
-    fn a_serde_error_message_quotes_the_value_and_the_category_does_not() {
-        // Matched rather than `unwrap_err`, which needs `T: Debug` — `Pin` has none, and a DTO
-        // that carries a token is one to keep out of a formatter anyway.
-        let e = match serde_json::from_slice::<Pin>(br#"{"id":"a-value-from-the-body"}"#) {
-            Ok(_) => panic!("a string where an i64 is expected must not parse"),
-            Err(e) => e,
-        };
-        assert!(
-            e.to_string().contains("a-value-from-the-body"),
-            "serde quotes the value: {e}"
-        );
-        assert_eq!(
-            format!("{:?}", e.classify()),
-            "Data",
-            "the category names the KIND of failure only"
-        );
-        assert!(
-            e.line() > 0 || e.column() > 0,
-            "position is the other half that is safe to log"
-        );
-    }
-
     /// The real `/api/v2/resources` shape, both kinds of server in one array: ours (`owned`, with
     /// `sourceTitle`/`ownerId` sent as explicit **nulls**) and a share (`owned:false`, a handle in
     /// `sourceTitle`, `httpsRequired:false`). Shaped on the live response measured 2026-08-11
@@ -1881,17 +1258,4 @@ mod tests {
         assert!(g.owned && g.source_title.is_empty() && g.owner_id == 0);
         assert_eq!(super::super::servers::owner_credit(g, &household), "");
     }
-}
-
-/// Result of a user switch — carries `auth_token`, the per-user token PMS scopes watch state by.
-#[derive(Deserialize, Default)]
-pub struct SwitchedUser {
-    #[serde(default)]
-    pub id: i64,
-    #[serde(default)]
-    pub uuid: String,
-    #[serde(default)]
-    pub title: String,
-    #[serde(rename = "authToken", alias = "authenticationToken", default)]
-    pub auth_token: String,
 }

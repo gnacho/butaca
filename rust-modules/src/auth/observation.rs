@@ -6,13 +6,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub(crate) enum Observation {
-    Login(LoginProgress),
     Registry(RegistryProgress),
-    HomeRoster(HomeRosterProgress),
     ServerRoster(ServerRosterProgress),
     Endpoint(EndpointFact),
-    ProfileSwitch(ProfileSwitchProgress),
-    ProfileRoster(ProfileRosterProgress),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -31,47 +27,8 @@ pub(crate) struct EndpointFact {
 
 impl Observation {
     pub(crate) fn write(&self, w: &mut crate::ui::machine::Canon) {
-        use owner::{write_profile, write_server, write_sources, write_tile, write_user};
+        use owner::write_sources;
         match self {
-            Self::Login(progress) => {
-                w.u8(0);
-                match progress {
-                    LoginProgress::CodeReplacing { epoch } => { w.u8(0).u64(*epoch); }
-                    LoginProgress::CodeReady { epoch, code, qr_png } => {
-                        w.u8(1).u64(*epoch).str(code).seq(qr_png.len());
-                        for byte in qr_png { w.u8(*byte); }
-                    }
-                    LoginProgress::Authorized { epoch, token } => { w.u8(2).u64(*epoch).str(token); }
-                    LoginProgress::DiscoveryTrouble { epoch, progress } => {
-                        w.u8(6).u64(*epoch)
-                            .u8(match progress.run {
-                                super::DiscoveryRetryRun::Resources => 0,
-                                super::DiscoveryRetryRun::HomeUsers => 1,
-                            })
-                            .u32(progress.misses).u32(progress.elapsed_ms);
-                    }
-                    LoginProgress::DiscoveryRetrySettled { epoch, run } => {
-                        w.u8(7).u64(*epoch).u8(match run {
-                            super::DiscoveryRetryRun::Resources => 0,
-                            super::DiscoveryRetryRun::HomeUsers => 1,
-                        });
-                    }
-                    LoginProgress::Failed { epoch, message, plaintext } => {
-                        w.u8(3).u64(*epoch).str(message);
-                        // Appended only when present, so a failure without one keeps its digest.
-                        if let Some(verdict) = plaintext {
-                            owner::write_plaintext_verdict(w, verdict);
-                        }
-                    }
-                    LoginProgress::LinkTrouble { epoch } => {
-                        w.u8(5).u64(*epoch);
-                    }
-                    LoginProgress::SignedIn { epoch, server, sources, users } => {
-                        w.u8(4).u64(*epoch); write_server(w, server); write_sources(w, sources);
-                        w.seq(users.len()); for user in users { write_tile(w, user); }
-                    }
-                }
-            }
             Self::Registry(progress) => {
                 w.u8(1);
                 match progress {
@@ -92,12 +49,6 @@ impl Observation {
                         write_sources(w, sources); w.option(*primary, |w, p| { w.u64(p as u64); });
                     }
                 }
-            }
-            Self::HomeRoster(progress) => {
-                w.u8(2).u64(progress.epoch); write_identity(w, &progress.expected);
-                w.option(progress.users.as_ref(), |w, users| {
-                    w.seq(users.len()); for user in users { write_tile(w, user); }
-                });
             }
             Self::ServerRoster(progress) => {
                 w.u8(3).u64(progress.epoch); write_identity(w, &progress.expected);
@@ -120,41 +71,12 @@ impl Observation {
                 w.option(progress.fresh.as_ref(), |w, source| write_sources(w, std::slice::from_ref(source)));
                 w.option(progress.probe.as_ref(), write_probe);
             }
-            Self::ProfileSwitch(progress) => {
-                w.u8(5).u64(progress.epoch); write_identity(w, &progress.expected);
-                match &progress.outcome {
-                    ProfileSwitchOutcomeProgress::Failed { error, pin_denied } => { w.u8(0).str(error).bool(*pin_denied); }
-                    ProfileSwitchOutcomeProgress::Ready { delta, probes } => {
-                        w.u8(1); write_server(w, &delta.server); write_sources(w, &delta.sources);
-                        write_user(w, &delta.user); w.option(delta.cache.as_ref(), write_profile);
-                        write_probes(w, probes);
-                    }
-                }
-            }
-            Self::ProfileRoster(progress) => {
-                w.u8(6).u64(progress.epoch); write_identity(w, &progress.expected);
-                write_resources(w, &progress.resources); write_sources(w, &progress.reached);
-                write_probes(w, &progress.probes);
-            }
         }
     }
 
     pub(crate) fn matches_request(&self, pending: &owner::Pending, terminal: bool) -> bool {
-        use owner::{SessionOp, StreamPhase};
+        use owner::SessionOp;
         let (epoch, expected, compatible) = match self {
-            Self::Login(p) => {
-                let login = matches!(pending.key.op, SessionOp::Login | SessionOp::Rediscover);
-                match p {
-                    LoginProgress::CodeReplacing { epoch } | LoginProgress::CodeReady { epoch, .. }
-                    | LoginProgress::Authorized { epoch, .. } | LoginProgress::LinkTrouble { epoch, .. } =>
-                        (*epoch, None, pending.key.op == SessionOp::Login && !terminal),
-                    LoginProgress::DiscoveryTrouble { epoch, .. }
-                    | LoginProgress::DiscoveryRetrySettled { epoch, .. } =>
-                        (*epoch, None, login && !terminal),
-                    LoginProgress::Failed { epoch, .. } | LoginProgress::SignedIn { epoch, .. } =>
-                        (*epoch, None, login && terminal),
-                }
-            }
             Self::Registry(p) => {
                 let (epoch, expected) = match p {
                     RegistryProgress::Activate { epoch, expected, .. }
@@ -162,23 +84,15 @@ impl Observation {
                     | RegistryProgress::Install { epoch, expected, .. } => (*epoch, expected.as_ref()),
                 };
                 let compatible = match pending.key.op {
-                    SessionOp::Login | SessionOp::Rediscover => expected.is_none(),
                     SessionOp::ServerRoster => expected.is_some(),
                     _ => false,
                 };
                 (epoch, expected, compatible && !terminal)
             }
-            Self::HomeRoster(p) => (p.epoch, Some(&p.expected),
-                pending.key.op == SessionOp::HomeRoster && terminal),
             Self::ServerRoster(p) => (p.epoch, Some(&p.expected),
                 pending.key.op == SessionOp::ServerRoster && terminal),
             Self::Endpoint(p) => (p.epoch, Some(&p.expected),
                 pending.key.op == SessionOp::Endpoint(p.sid) && terminal),
-            Self::ProfileSwitch(p) => (p.epoch, Some(&p.expected),
-                pending.key.op == SessionOp::ProfileSwitch && pending.phase == StreamPhase::Running
-                    && (terminal || matches!(p.outcome, ProfileSwitchOutcomeProgress::Ready { .. }))),
-            Self::ProfileRoster(p) => (p.epoch, Some(&p.expected),
-                pending.key.op == SessionOp::ProfileSwitch && pending.phase == StreamPhase::ProfileSeated && terminal),
         };
         compatible && epoch == pending.key.epoch && expected.is_none_or(|expected|
             expected.client_id == pending.expected.client_id
@@ -188,12 +102,8 @@ impl Observation {
 
     pub(crate) fn from_transport(value: AuthProgress) -> (Self, Option<ClientLifecycle>) {
         let observation = match value {
-            AuthProgress::Login(p) => Self::Login(p),
             AuthProgress::Registry(p) => Self::Registry(p),
-            AuthProgress::HomeRoster(p) => Self::HomeRoster(p),
             AuthProgress::ServerRoster(p) => Self::ServerRoster(p),
-            AuthProgress::ProfileSwitch(p) => Self::ProfileSwitch(p),
-            AuthProgress::ProfileRoster(p) => Self::ProfileRoster(p),
             AuthProgress::Endpoint(p) => return (Self::Endpoint(EndpointFact {
                 epoch: p.epoch, expected: p.expected, sid: p.id.raw(),
                 machine_id: p.machine_id, fresh: p.fresh, probe: p.probe,
@@ -210,6 +120,7 @@ fn write_identity(w: &mut crate::ui::machine::Canon, identity: &SessionIdentity)
 #[cfg(test)]
 mod identity_canon_tests {
     use super::*;
+    use crate::plex::session::UserRef;
 
     #[test]
     fn observation_identity_canon_is_three_fields_without_legacy_authority_tag() {

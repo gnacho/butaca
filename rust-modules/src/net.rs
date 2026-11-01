@@ -739,217 +739,14 @@ pub(crate) mod test_ca_bundle {
     static BUNDLE: Mutex<Option<String>> = Mutex::new(None);
 
     /// Point every `request_result` call at `path` (a PEM CA bundle) until cleared. Caller must
-    /// hold `crate::testlock::serial()` for the duration any dial using it can run.
-    pub(crate) fn set(path: Option<&str>) {
-        *BUNDLE.lock().unwrap_or_else(|e| e.into_inner()) = path.map(str::to_owned);
-    }
 
     pub(crate) fn get() -> Option<String> {
         BUNDLE.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 }
 
-/// Real loopback PMS doubles for driving the discovery-probe race through the REAL curl/TLS
-/// stack (`auth::get_identity` → `http::request_probe` → `net::request_result_evidence`, unmodified) rather
-/// than a fake [`auth::ProbeDial`] closure. `test_ca_bundle` above is the other half: it is how
-/// curl is told to trust the certificate [`mint_cert`] mints here — the same PEM, so a real TLS
-/// handshake against [`spawn_dual_protocol`] genuinely verifies.
-// Not `pub(crate) mod` directly: `ci/check-deps.sh`'s `threads` gate only recognises a bare
-// `#[cfg(test)]` + `mod ` pair when deciding a block is test-only and skipping the real
-// `std::thread::spawn` calls inside it (`spawn_dual_protocol`/`spawn_plain_only`, standing in for
-// a loopback PMS peer) — the same convention the `mutators` gate above already relies on. A `pub`
-// or `pub(crate)` qualifier on the `mod` line does not match that pattern, so the module stays
-// private and every item the rest of the crate needs is re-exported below instead.
-#[cfg(test)]
-mod loopback_pms {
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    use std::sync::{Arc, Once};
-
-    /// A minted self-signed certificate, the key rustls needs to terminate TLS with it, and its
-    /// PEM form for `test_ca_bundle::set`.
-    pub(crate) struct TestCert {
-        cert_der: rustls::pki_types::CertificateDer<'static>,
-        key_der: rustls::pki_types::PrivateKeyDer<'static>,
-        pub(crate) pem: String,
-    }
-
-    /// Mint a self-signed cert whose SAN list is exactly `names`. rcgen tells a dotted IPv4
-    /// literal apart from a DNS label itself, so a caller passing `["127.0.0.1"]` gets an IP SAN
-    /// and one passing a `plex.direct`-shaped dashed label gets a DNS SAN — the E2E tests need
-    /// both, one per candidate that dials this loopback double a different way.
-    pub(crate) fn mint_cert(names: &[&str]) -> TestCert {
-        let subject_alt_names: Vec<String> = names.iter().map(|s| s.to_string()).collect();
-        let rcgen::CertifiedKey { cert, signing_key } =
-            rcgen::generate_simple_self_signed(subject_alt_names).expect("test cert generation");
-        let pem = cert.pem();
-        let cert_der = cert.der().clone();
-        let key_der = rustls::pki_types::PrivateKeyDer::from(signing_key);
-        TestCert {
-            cert_der,
-            key_der,
-            pem,
-        }
-    }
-
-    /// Mint a CA and a leaf it issues, the leaf valid exactly over `[not_before, not_after]`
-    /// (`(year, month, day)`), the SAN list exactly `names`. `pem` is the **CA**: that is what a
-    /// client is told to trust, and the server presents only the leaf — the shape of a real
-    /// `*.plex.direct` certificate, and the only way to give a test a leaf whose validity window
-    /// excludes "now" (a wrong television clock) while the trust anchor stays valid.
-    pub(crate) fn mint_ca_issued_cert(
-        names: &[&str],
-        not_before: (i32, u8, u8),
-        not_after: (i32, u8, u8),
-    ) -> TestCert {
-        use rcgen::{BasicConstraints, CertificateParams, IsCa, KeyPair, KeyUsagePurpose};
-        let ca_key = KeyPair::generate().expect("ca key");
-        let mut ca_params = CertificateParams::new(Vec::<String>::new()).expect("ca params");
-        // Distinct subjects: rcgen defaults both to the same CN, which makes OpenSSL read the leaf
-        // as self-signed ("error 18") and refuse to chain it to the CA.
-        ca_params.distinguished_name.push(rcgen::DnType::CommonName, "Butaca test CA");
-        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-        ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
-        let ca = ca_params.self_signed(&ca_key).expect("ca cert");
-
-        let leaf_key = KeyPair::generate().expect("leaf key");
-        let mut leaf_params =
-            CertificateParams::new(names.iter().map(|s| s.to_string()).collect::<Vec<_>>())
-                .expect("leaf params");
-        leaf_params.distinguished_name.push(rcgen::DnType::CommonName, "plex.direct test leaf");
-        leaf_params.extended_key_usages = vec![rcgen::ExtendedKeyUsagePurpose::ServerAuth];
-        leaf_params.not_before = rcgen::date_time_ymd(not_before.0, not_before.1, not_before.2);
-        leaf_params.not_after = rcgen::date_time_ymd(not_after.0, not_after.1, not_after.2);
-        let issuer = rcgen::Issuer::new(ca_params, ca_key);
-        let leaf = leaf_params.signed_by(&leaf_key, &issuer).expect("leaf cert");
-        TestCert {
-            cert_der: leaf.der().clone(),
-            key_der: rustls::pki_types::PrivateKeyDer::from(leaf_key),
-            pem: ca.pem(),
-        }
-    }
-
-    fn ring_provider_once() {
-        static ONCE: Once = Once::new();
-        ONCE.call_once(|| {
-            let _ = rustls::crypto::ring::default_provider().install_default();
-        });
-    }
-
-    fn tls_config(cert: &TestCert) -> Arc<rustls::ServerConfig> {
-        ring_provider_once();
-        let certs = vec![cert.cert_der.clone()];
-        let key = cert.key_der.clone_key();
-        let cfg = rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(certs, key)
-            .expect("test tls server config");
-        Arc::new(cfg)
-    }
-
-    fn http_ok(body: &[u8]) -> Vec<u8> {
-        let mut out = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            body.len()
-        )
-        .into_bytes();
-        out.extend_from_slice(body);
-        out
-    }
-
-    /// Drain one HTTP/1.1 request off `r` before answering — the probe's `/identity` GET has no
-    /// body, so this only needs to find the header terminator, not parse anything. Bounded and
-    /// best-effort: nothing here sends a request built to defeat it.
-    fn drain_request(r: &mut impl Read) {
-        let mut buf = [0u8; 4096];
-        let mut seen = Vec::new();
-        loop {
-            let Ok(n) = r.read(&mut buf) else { return };
-            if n == 0 {
-                return;
-            }
-            seen.extend_from_slice(&buf[..n]);
-            if seen.windows(4).any(|w| w == b"\r\n\r\n") || seen.len() > 64 * 1024 {
-                return;
-            }
-        }
-    }
-
-    /// A loopback PMS double that answers the SAME body over either transport on ONE port —
-    /// exactly what `plex::probe::candidates` assumes when it synthesizes a plaintext twin at the
-    /// advertised connection's own address and port. Peeks the first byte: `0x16` is a TLS
-    /// handshake record, anything else is treated as plaintext HTTP.
-    pub(crate) fn spawn_dual_protocol(cert: Arc<TestCert>, body: Vec<u8>) -> u16 {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind dual-protocol listener");
-        let port = listener.local_addr().unwrap().port();
-        let tls_cfg = tls_config(&cert);
-        std::thread::spawn(move || {
-            for stream in listener.incoming() {
-                let Ok(mut sock) = stream else { continue };
-                let tls_cfg = Arc::clone(&tls_cfg);
-                let body = body.clone();
-                std::thread::spawn(move || {
-                    let mut peek = [0u8; 1];
-                    let is_tls = matches!(sock.peek(&mut peek), Ok(1) if peek[0] == 0x16);
-                    if is_tls {
-                        let Ok(mut conn) = rustls::ServerConnection::new(tls_cfg) else {
-                            return;
-                        };
-                        let mut tls = rustls::Stream::new(&mut conn, &mut sock);
-                        drain_request(&mut tls);
-                        let _ = tls.write_all(&http_ok(&body));
-                        let _ = tls.flush();
-                    } else {
-                        drain_request(&mut sock);
-                        let _ = sock.write_all(&http_ok(&body));
-                    }
-                });
-            }
-        });
-        port
-    }
-
-    /// A loopback double that only ever speaks plaintext HTTP — for the "HTTPS fails" E2E
-    /// scenario, where a TLS ClientHello against this listener must fail the handshake (there is
-    /// no `rustls::ServerConnection` here to answer it) while a plain request still succeeds.
-    ///
-    /// A ClientHello (first byte `0x16`) gets what a plaintext-only web server sends it — a bare
-    /// `400` — so curl fails the HANDSHAKE at once rather than stalling until its timeout while
-    /// `drain_request` waits for a header terminator a ClientHello never contains.
-    pub(crate) fn spawn_plain_only(body: Vec<u8>) -> u16 {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind plaintext listener");
-        let port = listener.local_addr().unwrap().port();
-        std::thread::spawn(move || {
-            for stream in listener.incoming() {
-                let Ok(mut sock) = stream else { continue };
-                let body = body.clone();
-                std::thread::spawn(move || {
-                    let mut first = [0u8; 1];
-                    if matches!(sock.peek(&mut first), Ok(1)) && first[0] == 0x16 {
-                        let _ = sock.write_all(
-                            b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                        );
-                        return;
-                    }
-                    drain_request(&mut sock);
-                    let _ = sock.write_all(&http_ok(&body));
-                });
-            }
-        });
-        port
-    }
-
-    /// A loopback port nothing listens on: bind, read back the ephemeral port, then drop the
-    /// listener — so a candidate dialled here gets a deterministic refused connection rather than
-    /// a merely-unassigned one.
-    pub(crate) fn dead_port() -> u16 {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind dead-port probe");
-        listener.local_addr().unwrap().port()
-    }
-}
-#[cfg(test)]
-pub(crate) use loopback_pms::{dead_port, mint_ca_issued_cert, mint_cert, spawn_dual_protocol, spawn_plain_only};
-
+// The loopback TLS doubles that once verified the race through the real curl stack went
+// with the discovery tests that used them; `Tls` remains the transport vocabulary.
 /// **How the peer is verified.** Three modes, and they are an enum rather than an
 /// `Option<&str>` for one reason: the pinned one turns CA verification OFF, so "pinned" and
 /// "CA-verified" are opposites that a bare string parameter let a caller hold at the same time.
@@ -1470,10 +1267,6 @@ const TELEMETRY_MAX_REPLY: usize = 4096;
 /// Redirect-following HTTPS GET for a PUBLIC, credential-free resource. The QR image fetch is the
 /// only caller: at most five HTTP(S)-only redirects are followed, and an HTTPS request may never
 /// downgrade. Account/PMS requests keep redirects off because replayed headers/URLs carry tokens.
-pub fn https_get_public(url: &str) -> Option<Resp> {
-    request(url, &[], "GET", None, API, true, None, None)
-}
-
 /// The `nowan` gate shared by the three resolver doors ([`request_tls_result`],
 /// [`crate::curlio`] and [`crate::stream`]): `true` when `/tmp/butaca-nowan` is armed and
 /// `host` is a NAME rather than a literal, i.e. when a dead resolver would have refused it. The
@@ -1587,20 +1380,6 @@ pub(crate) mod resolve {
 }
 
 #[cfg(test)]
-pub(crate) fn with_test_response(reply: Vec<u8>, stall: bool, check: impl FnOnce(&str)) {
-    request_tests::with_response(reply, stall, check);
-}
-
-/// Test-only input at the curl completion boundary, not a simulated wire exchange.
-#[cfg(test)]
-pub(crate) fn test_response_failure(rc: c_int, info_rc: c_int, code: c_long, redirects: bool)
-    -> Result<Resp, RequestFailure> {
-    let mut sink = BodySink::new(None);
-    sink.push(b"synthetic partial body");
-    finish_response(rc, info_rc, code, redirects, None, sink)
-}
-
-#[cfg(test)]
 mod request_tests {
     use super::*;
 
@@ -1698,7 +1477,12 @@ mod request_tests {
             assert_eq!(failure.status, Some(status));
             assert_eq!(failure.cause, RequestError::Transport);
             assert_eq!(failure.body_limit, None);
-            crate::plex::account::test_refusal_evidence(status, Err(failure));
+            let evidence: crate::plex::account::CallEvidence = Err(failure.clone());
+            let observed = match &evidence { Ok(status) => Some(*status), Err(f) => f.status };
+            assert_eq!(
+                observed.filter(|status| crate::plex::account::refuses_identity(*status)),
+                matches!(status, 401 | 403).then_some(status),
+                "an incomplete transfer keeps the refusal verdict the status carries");
             peer.0.stdin.take().unwrap().write_all(b"\n").unwrap();
             assert!(peer.0.wait().unwrap().success());
         }

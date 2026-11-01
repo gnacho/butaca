@@ -1045,7 +1045,6 @@ impl<H: LibraryLike> DirectoryLike for H {
 
 /// Session's immutable frame publication; playback retains its separate `session` view.
 pub(crate) trait AuthLike: AppLike + Sized {
-    fn auth<'a>(cx: &Cx<'a, Self>) -> crate::auth::SessionRead<'a>;
 }
 
 /// An item's server reconciliation obligation. Detail owns this independently of its cancellable
@@ -1060,8 +1059,6 @@ pub(crate) enum DetailRefreshPhase {
 /// The application's messages (spec §3.1).
 pub(crate) enum AppMsg {
     Session(crate::auth::owner::SessionEvent),
-    SelectionReply { correlation: u32, accepted: bool, flow_epoch: u64 },
-    BackReply { correlation: u32, resumed: bool },
     Store(StoreCmd),
     StoreWork(StoreWork),
     HubsResult(crate::stores::hubs::HubsResult),
@@ -1187,9 +1184,6 @@ pub(crate) mod word {
     /// Jellyfin sign-in (`screens::jf_login::JfLoginScreen`). Same spelling as `app::words::route_word`'s
     /// `AppArg::Login` arm — see this module's doc for why that equality is load-bearing.
     pub(crate) const LOGIN: &str = "login";
-    /// The who's-watching picker (`screens::profiles::ProfilesScreen`). Same spelling as
-    /// `app::words::route_word`'s `AppArg::Profiles` arm — see this module's doc.
-    pub(crate) const PROFILES: &str = "profiles";
 }
 
 /// An element key for a route-family screen: table rows are their index; the action band's
@@ -1497,6 +1491,7 @@ pub(crate) enum AppArg {
     /// plex.tv sign-in (QR) — shown when there is no usable session.
     Login,
     /// The "who's watching" Plex Home picker.
+    #[cfg_attr(not(test), expect(dead_code, reason = "ARG_SHAPE is frozen and the picker route         died with the plex.tv account flow; the variant stays for the recorded-shape census only"))]
     Profiles,
     /// **"Which libraries do you want?"** — the *Favorite libraries* screen, the third and last
     /// onboarding page and the only one that is not about credentials: which of the granted
@@ -1721,7 +1716,7 @@ where
         arg: &AppArg,
         ret: &ReturnState<u32, PageMemory>,
         cx: &Cx<'_, H>,
-        fx: &mut Effects<'_, H>,
+        _fx: &mut Effects<'_, H>,
     ) -> Box<dyn Screen<H>> {
         let entry = match cx.owner {
             crate::ui::machine::InputOwner::Entry(e) => e,
@@ -1798,13 +1793,10 @@ where
                 // and its fps scenes, stays "login".
                 Box::new(crate::screens::jf_login::JfLoginScreen::new(entry))
             }
-            AppArg::Profiles => {
-                let screen = crate::screens::profiles::ProfilesScreen::new(entry, H::auth(cx));
-                fx.push(crate::ui::machine::Fx::App(AppFx::Session(
-                    crate::auth::SessionCmd::DismissPinError,
-                )));
-                Box::new(screen)
-            }
+            // The who's-watching picker died with the plex.tv account flow (Jellyfin-only pivot,
+            // #166): nothing constructs this route any more, and `ARG_SHAPE` keeps the variant
+            // because the recorded-shape census is frozen. A mount here is a routing bug.
+            AppArg::Profiles => unreachable!("the profiles route has no mount without the plex.tv account flow"),
             AppArg::Home => {
                 let mut page = crate::screens::home::HomeScreen::new(entry, id);
                 if let PageMemory::Home(memory) = &ret.memory { page.restore(memory); }

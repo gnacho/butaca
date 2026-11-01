@@ -1578,7 +1578,7 @@ mod player_return_tests {
         // A profile reset keeps nothing of the outgoing profile.
         p.d.reset_for_profile();
         p.d.request(crate::ui::machine::MachineId::Nav,
-            crate::ui::machine::NavOp::Root(AppArg::Profiles));
+            crate::ui::machine::NavOp::Root(AppArg::Onboard));
         p.settle();
         assert!(p.d.nav.entry(stale.entry).is_none(), "the origin entry is gone");
 
