@@ -1,26 +1,17 @@
-//! Wire DTOs for a person's biography and filmography.
+//! The person screen's DTO vocabulary: `PersonProfile`, `CreditType`, `CreditGroup`, `Credit`,
+//! `CreditItem`.
 //!
-//! This module USED to be the plex.tv metadata provider (`discover.provider.plex.tv`) client:
-//! `AccountClient::person_profile`/`person_credits` fetched the biography half of a person the
-//! local PMS does not have, plus the global filmography. Those fetch paths are GONE (the app is
-//! Jellyfin-only; `person.rs`'s Plex spawn arm was removed with them). What survives is the DTO
-//! vocabulary the person screen is shaped around — `PersonProfile`, `CreditGroup`, `Credit`,
-//! `CreditItem`, `CreditType` — which the Jellyfin backend's pure mappers (`person.rs`'s
-//! `jf_profile_from`, `jf_shelf`, `jf_roles`) build from `BaseItemDto` answers and the mailbox
-//! landings carry. The wire facts in the field docs below describe the plex.tv responses these
-//! types were modelled from; they remain the reference for why each field is optional and what
-//! each id space meant, and are kept verbatim so re-reading a captured response stays possible.
+//! These are the old `plex/discover.rs` wire DTOs, modelled on the plex.tv metadata provider's
+//! responses. That client is gone (Jellyfin-only) and the vocabulary is what survives:
+//! `jf_profile_from` and `fetch_profile_jf` build it from `BaseItemDto` answers, and the mailbox
+//! landings carry it. The wire facts in the field docs below describe the plex.tv responses the
+//! types were modelled from; they stay verbatim as the reference for why each field is optional
+//! and what each id space meant, so re-reading a captured response remains possible.
 //!
-//! Two facts worth keeping (each cost a probe when the provider was live):
-//! * Only the `tagKey` guid addressed a person here; the numeric `Tag::id` PMS accepts elsewhere
-//!   answered `404` on this endpoint. The two id spaces are the local library's and plex.tv's.
-//! * `Accept: application/json` was load-bearing: without it the provider answered XML, exactly
-//!   like PMS does.
-use serde::Deserialize;
-
-use super::models::de_i64;
-
-// ---- serde DTOs (only the fields the page consumes; all optional to tolerate shape drift) ----
+//! The types live in their own module rather than flat in `person` because the page's DISPLAY
+//! model already defines a `Credit` there; the qualified `types::Credit` keeps the two vocabularies
+//! unambiguous at every use site.
+use crate::plex::de_i64;
 
 /// One person as plex.tv knows them. Every field is optional: a living person has no
 /// [`died_at`](PersonProfile::died_at), a person plex.tv has no record for has nothing at all, and
@@ -30,9 +21,8 @@ use super::models::de_i64;
 /// `External[]` is the social handles (`facebook`/`instagram`/`twitter`) — see the person page's
 /// module docs for why a TV does not show them. Serde ignores unknown fields, so adding one back is
 /// a field, not a migration.
-#[derive(Deserialize, Default)]
-#[derive(serde::Serialize)]
-pub struct PersonProfile {
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+pub(crate) struct PersonProfile {
     #[serde(default)]
     pub title: String,
     /// The biography — the whole reason this endpoint is called. Several paragraphs of prose,
@@ -66,9 +56,8 @@ pub struct PersonProfile {
 /// has no display name for a department, where it repeats the raw `type` verbatim
 /// (`"costume-makeup"`, seen live on Peter Sallis). `crate::person::roles_line` is what cleans that
 /// up; do not print `title` raw.
-#[derive(Deserialize, Default)]
-#[derive(serde::Serialize)]
-pub struct CreditType {
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+pub(crate) struct CreditType {
     #[serde(rename = "type", default)]
     pub kind: String,
     #[serde(default)]
@@ -83,9 +72,8 @@ pub struct CreditType {
 /// `title` is the display form and repeats the raw `type` slug when the provider has no display
 /// name for a department (`"costume-makeup"`, live on Peter Sallis) — exactly the trap
 /// [`CreditType`] carries, and it is cleaned by the same [`crate::person::pretty_department`].
-#[derive(Deserialize, Default)]
-#[derive(serde::Serialize)]
-pub struct CreditGroup {
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+pub(crate) struct CreditGroup {
     #[serde(rename = "type", default)]
     pub kind: String,
     #[serde(default)]
@@ -99,9 +87,8 @@ pub struct CreditGroup {
 }
 
 /// One credit inside a department: what they were in it, and the item itself.
-#[derive(Deserialize, Default)]
-#[derive(serde::Serialize)]
-pub struct Credit {
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+pub(crate) struct Credit {
     /// The billing order the provider sorted the cast by. Modelled because it is on the wire and
     /// costs nothing; the screen sorts by YEAR, so nothing reads it yet.
     #[serde(default, deserialize_with = "de_i64")]
@@ -121,9 +108,8 @@ pub struct Credit {
 /// id and its `thumb` an `image.tmdb.org` URL, so neither addresses anything on a PMS; what does
 /// cross is [`guid`](CreditItem::guid), which is the metadata provider's global id and the key both
 /// sides of the availability join speak (`plex::Metadata::guid` on the library side).
-#[derive(Deserialize, Default)]
-#[derive(serde::Serialize)]
-pub struct CreditItem {
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+pub(crate) struct CreditItem {
     #[serde(rename = "type", default)]
     pub kind: String,
     #[serde(default)]
@@ -149,10 +135,11 @@ pub struct CreditItem {
     /// `https://metadata-static.plex.tv/…`, never a PMS path. That is not a reason to skip the
     /// artwork: `app::adapters::poster::built_key` URL-encodes exactly such a URL into a
     /// `/photo/:/transcode?url=…` request and the SERVER fetches it, which is the same path the
-    /// Search screen's `actor` headshots already take (`app/adapters/poster.rs`'s own tests pin it). This
-    /// module's first draft asserted the opposite in a comment — "a tmdb URL no PMS transcoder will
-    /// serve" — and hard-coded an empty plate on the strength of it, which is why the Filmography
-    /// shipped with no posters at all. Nothing was measured before that claim was written down.
+    /// Search screen's `actor` headshots already take (`app/adapters/poster.rs`'s own tests pin it).
+    /// This module's first draft asserted the opposite in a comment — "a tmdb URL no PMS transcoder
+    /// will serve" — and hard-coded an empty plate on the strength of it, which is why the
+    /// Filmography shipped with no posters at all. Nothing was measured before that claim was
+    /// written down.
     #[serde(default)]
     pub thumb: String,
 }

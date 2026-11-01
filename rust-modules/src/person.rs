@@ -44,12 +44,13 @@
 //!   then. Per source, because a `ratingKey` csv means nothing on another machine, and filtered on
 //!   the SOURCE's own local id, not the origin's.
 //! * **[`F_PROFILE`]** — the biography, from plex.tv: `GET
-//!   discover.provider.plex.tv/library/people/{tagKey}` over the TLS+DNS `net.rs` path (see
-//!   `plex/discover.rs` for the wire facts). **Deliberately still single.** It is already GLOBAL —
+//!   discover.provider.plex.tv/library/people/{tagKey}` over the TLS+DNS `net.rs` path (the
+//!   wire facts are the field docs on the DTO vocabulary (`person::types`) below). **Deliberately still
+//!   single.** It is already GLOBAL —
 //!   plex.tv answers about the person, not about anybody's library — so fanning it out would be the
 //!   same request N times for one answer.
 //! * **[`F_CREDITS`]** — the filmography, from the same host: `GET
-//!   …/library/people/{tagKey}/credits` → `CreditGroup[]`. Global for exactly [`F_PROFILE`]'s
+//!   …/library/people/{tagKey}/credits` → `types::CreditGroup[]`. Global for exactly [`F_PROFILE`]'s
 //!   reason and then some, since a person's CAREER is not a fact any server has an opinion about.
 //!   What the servers contribute to it is the availability JOIN, and that rides on the [`K_MEDIA`]
 //!   answers this page already makes — so it adds one request per person, not one per source. The
@@ -79,6 +80,11 @@ use crate::pms::{parse_item, PmsMovie};
 use std::panic::catch_unwind;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+
+// The person screen's DTO vocabulary (`types::PersonProfile`, `types::CreditType`, `types::CreditGroup`, `Credit`,
+// `types::CreditItem`) lives in the `types` child module. The page's DISPLAY model already owns a
+// top-level `Credit`, so the DTO names stay qualified as `types::...` at every use site.
+pub(crate) mod types;
 
 /// Per-shelf item cap. A `CardRow` owns exactly [`crate::ui::card_row::MAX_ROW_ITEMS`] focus-scale
 /// springs and `scale(i)` clamps past the end, so an item beyond the cap would draw with the last
@@ -257,7 +263,7 @@ pub(crate) struct Person {
     /// The filmography as plex.tv sent it — every department, in the provider's own order, with
     /// nothing folded, sorted or joined. The DISPLAY model is [`filmography`], derived on demand,
     /// because its availability column is a function of the sources and changes under it.
-    credits: Vec<crate::plex::discover::CreditGroup>,
+    credits: Vec<types::CreditGroup>,
     /// the credits fetch has ANSWERED at least once — including the answer "no credits", which is
     /// an empty vector. [`Person::profiled`]'s twin, and the gate the Filmography entry row is
     /// drawn on: an entry naming no count is an entry that cannot promise a list.
@@ -449,11 +455,11 @@ enum Landing {
     /// One source's own `personId`. `Some("")` = answered, and this server has never heard of them.
     Resolve(Option<String>),
     Media(Option<MediaLanding>),
-    Profile(Option<crate::plex::discover::PersonProfile>),
+    Profile(Option<types::PersonProfile>),
     /// The whole filmography, ungrouped and unsorted — the display model is derived on the main
     /// thread by [`filmography`], because the AVAILABILITY half of it changes every time a source
     /// lands and cannot be baked into a worker's answer.
-    Credits(Option<Vec<crate::plex::discover::CreditGroup>>),
+    Credits(Option<Vec<types::CreditGroup>>),
     Roles(Option<RolesLanding>),
 }
 
@@ -1169,10 +1175,10 @@ fn seed_dev_credits(state: &mut PersonState) -> bool {
                 String::new(),
             ),
         };
-        crate::plex::discover::Credit {
+        types::Credit {
             order: i as i64,
             role: format!("Character {i}"),
-            item: Some(crate::plex::discover::CreditItem {
+            item: Some(types::CreditItem {
                 kind: "movie".into(),
                 title,
                 // one row per department is deliberately UNDATED, which is the sort's own edge
@@ -1199,7 +1205,7 @@ fn seed_dev_credits(state: &mut PersonState) -> bool {
         ("Writer", 2),
     ]
         .iter()
-        .map(|(title, rows)| crate::plex::discover::CreditGroup {
+        .map(|(title, rows)| types::CreditGroup {
             kind: title.to_lowercase(),
             title: title.to_string(),
             size: *rows as i64,
@@ -1408,10 +1414,10 @@ fn apply_landing(state: &mut PersonState, i: usize, what: Landing) -> bool {
 /// department — the CALLER joins them (the header's dotted run, the bio panel's `", "`), because
 /// two screens want two different separators for the same list.
 ///
-/// `CreditType.title` is the display name — **except** when the provider has none, where it repeats
+/// `types::CreditType.title` is the display name — **except** when the provider has none, where it repeats
 /// the raw slug (`"costume-makeup"`, live on Peter Sallis). A leading lower-case letter is what
 /// gives that away, so those are un-slugged and title-cased rather than printed as typed.
-pub(crate) fn roles_line(prof: &crate::plex::discover::PersonProfile) -> Vec<String> {
+pub(crate) fn roles_line(prof: &types::PersonProfile) -> Vec<String> {
     prof.credit_types
         .iter()
         .filter_map(|c| {
@@ -1430,8 +1436,8 @@ pub(crate) fn roles_line(prof: &crate::plex::discover::PersonProfile) -> Vec<Str
 /// A department name as the provider hands it over → the display form.
 ///
 /// Extracted from [`roles_line`] because the FILMOGRAPHY's tabs have the identical problem on the
-/// identical data: `CreditGroup::title` repeats the raw `type` slug (`"costume-makeup"`) wherever
-/// the provider has no display name, exactly as `CreditType::title` does. Two screens un-slugging
+/// identical data: `types::CreditGroup::title` repeats the raw `type` slug (`"costume-makeup"`) wherever
+/// the provider has no display name, exactly as `types::CreditType::title` does. Two screens un-slugging
 /// the same wire field two ways is how "Costume Makeup" and "costume-makeup" end up on one page.
 pub(crate) fn pretty_department(raw: &str) -> String {
     raw.split(['-', '_', ' '])
@@ -1644,14 +1650,14 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
 /// what leaves that untouched. Jellyfin has no departments and no birthplace on the record;
 /// both stay empty, which the header draws as absent rather than as a blank line.
 #[cfg(feature = "jellyfin")]
-fn jf_profile_from(it: &crate::jellyfin::BaseItemDto) -> crate::plex::discover::PersonProfile {
+fn jf_profile_from(it: &crate::jellyfin::BaseItemDto) -> types::PersonProfile {
     let date = |v: &Option<String>| {
         v.as_deref()
             .and_then(|s| s.split('T').next())
             .unwrap_or_default()
             .to_string()
     };
-    crate::plex::discover::PersonProfile {
+    types::PersonProfile {
         title: it.name.clone(),
         summary: it.overview.clone().unwrap_or_default(),
         born_at: date(&it.premiere_date),
@@ -1713,7 +1719,7 @@ fn jf_roles(
 /// WORKER THREAD: the Jellyfin biography. The detail fetch answers the person's own record; the
 /// mapping is the whole job.
 #[cfg(feature = "jellyfin")]
-fn fetch_profile_jf(person_id: &str) -> Option<crate::plex::discover::PersonProfile> {
+fn fetch_profile_jf(person_id: &str) -> Option<types::PersonProfile> {
     crate::jellyfin::client()?.item_detail(person_id).map(|it| jf_profile_from(&it))
 }
 
@@ -1837,13 +1843,13 @@ pub(crate) struct Credit {
     pub(crate) catalog_id: String,
     pub(crate) title: String,
     /// **The poster, as an ABSOLUTE URL on somebody else's host** — see
-    /// [`crate::plex::discover::CreditItem::thumb`]. Carried through to the row rather than dropped
+    /// [`types::CreditItem::thumb`]. Carried through to the row rather than dropped
     /// because `posters` proxies exactly this through the current server's photo transcoder; the
     /// first version of the screen threw it away on an unverified claim that it could not.
     pub(crate) thumb: String,
     /// the character or job, `""` where the provider named none
     pub(crate) role: String,
-    /// `0` = the wire carried no year. See [`crate::plex::discover::CreditItem::year`] for why that
+    /// `0` = the wire carried no year. See [`types::CreditItem::year`] for why that
     /// is not "upcoming".
     pub(crate) year: i32,
     /// **The library match**: which server holds this credit and under which `ratingKey`, or `None`
@@ -1858,7 +1864,7 @@ pub(crate) struct Department {
     /// the display name, un-slugged by [`pretty_department`]
     pub(crate) title: String,
     /// the department's OWN count — what the pill states. Not `rows.len()` where the provider gave
-    /// a size and sent fewer rows, and never [`crate::plex::discover::CreditType`]'s number.
+    /// a size and sent fewer rows, and never [`types::CreditType`]'s number.
     pub(crate) total: usize,
     pub(crate) rows: Vec<Credit>,
 }
@@ -1877,7 +1883,7 @@ pub(crate) struct Department {
 /// missing claim to be unreleased, and the wire cannot tell the two apart until the model carries a
 /// release DATE beside the year.
 pub(crate) fn filmography(p: &Person) -> Vec<Department> {
-    let dept = |g: &crate::plex::discover::CreditGroup| {
+    let dept = |g: &types::CreditGroup| {
         let raw = if g.title.is_empty() {
             &g.kind
         } else {
@@ -1906,7 +1912,7 @@ pub(crate) fn filmography(p: &Person) -> Vec<Department> {
     };
     // "Other" is the provider's own group name, so a group already called that folds with the thin
     // ones rather than sitting beside a second Other.
-    let is_thin = |g: &crate::plex::discover::CreditGroup, d: &Department| {
+    let is_thin = |g: &types::CreditGroup, d: &Department| {
         d.total < FOLD || g.kind.eq_ignore_ascii_case("other")
     };
     let mut kept: Vec<Department> = Vec::new();
@@ -1948,7 +1954,7 @@ pub(crate) fn filmography(p: &Person) -> Vec<Department> {
 /// existing at all. Separate from [`filmography`] because the entry row is drawn every frame and
 /// that function folds, sorts and joins a few hundred rows; this walks a handful of group headers.
 ///
-/// It is the credits response's OWN count, never [`crate::plex::discover::CreditType`]'s — see that
+/// It is the credits response's OWN count, never [`types::CreditType`]'s — see that
 /// type's doc for the two numbers and why spending the wrong one is a promise the list breaks.
 pub(crate) fn filmography_total(p: &Person) -> usize {
     p.credits
@@ -2009,22 +2015,21 @@ fn match_local(p: &Person, id: &str) -> Option<(ServerId, String)> {
 #[cfg(test)]
 impl PersonState {
 pub(crate) fn install_credits_for_test(&mut self, groups: &[(&str, usize)]) {
-    use crate::plex::discover::{Credit, CreditGroup, CreditItem};
     let Some(p) = self.current.as_mut() else {
         return;
     };
     p.credits = groups
         .iter()
         .enumerate()
-        .map(|(department, (title, n))| CreditGroup {
+        .map(|(department, (title, n))| types::CreditGroup {
             kind: title.to_lowercase(),
             title: title.to_string(),
             size: *n as i64,
             credits: (0..*n)
-                .map(|i| Credit {
+                .map(|i| types::Credit {
                     order: i as i64,
                     role: format!("Part {i}"),
-                    item: Some(CreditItem {
+                    item: Some(types::CreditItem {
                         rating_key: format!("s{:08x}", ((department as u32) << 16) | i as u32),
                         kind: "movie".into(),
                         title: format!("{title} {i}"),
@@ -2120,7 +2125,7 @@ pub(crate) fn late_completion_for_test(
     let generation = self.generation;
     Box::new(move || {
         adapter.land(F_PROFILE, generation, Landing::Profile(Some(
-            crate::plex::discover::PersonProfile {
+            types::PersonProfile {
                 summary: "late-old-worker".into(),
                 ..Default::default()
             },
@@ -2688,8 +2693,8 @@ mod tests {
     /// spawns NO worker: one would reach for a PMS client that isn't installed and for a plex.tv
     /// these tests must never touch, and a stray background thread also perturbs the process-wide
     /// fd count `stream.rs`'s tests assert on. Call it before every `owner.pump()`.
-    fn profile(bio: &str, born: &str, died: &str) -> crate::plex::discover::PersonProfile {
-        crate::plex::discover::PersonProfile {
+    fn profile(bio: &str, born: &str, died: &str) -> types::PersonProfile {
+        types::PersonProfile {
             summary: bio.to_string(),
             born_at: born.to_string(),
             died_at: died.to_string(),
@@ -2891,7 +2896,7 @@ mod tests {
         owner.land(
             F_PROFILE,
             gen,
-            Landing::Profile(Some(crate::plex::discover::PersonProfile::default())),
+            Landing::Profile(Some(types::PersonProfile::default())),
         );
         assert!(owner.pump());
         let p = owner.current().unwrap();
@@ -3295,11 +3300,11 @@ mod tests {
     /// Sallis's `costume-makeup`) are un-slugged rather than printed as typed.
     #[test]
     fn the_roles_line_prettifies_slugs_and_caps_the_list() {
-        let ct = |kind: &str, title: &str| crate::plex::discover::CreditType {
+        let ct = |kind: &str, title: &str| types::CreditType {
             kind: kind.to_string(),
             title: title.to_string(),
         };
-        let mut prof = crate::plex::discover::PersonProfile::default();
+        let mut prof = types::PersonProfile::default();
         prof.credit_types = vec![
             ct("actor", "Actor"),
             ct("writer", "Writer"),
@@ -3319,7 +3324,7 @@ mod tests {
         );
 
         assert_eq!(
-            roles_line(&crate::plex::discover::PersonProfile::default()),
+            roles_line(&types::PersonProfile::default()),
             Vec::<String>::new()
         );
     }
