@@ -610,7 +610,7 @@ pub(crate) fn hub_item(state: &PmsState, hub: usize, col: usize) -> Option<&PmsM
 /// No reconcile call here, and none is owed anywhere: [`commit`] performs the re-selection and the
 /// repaint itself, at the only moment the catalog those surfaces index into actually moves.
 fn request_refetch_hubs_with_scope(state: &mut PmsState, adapter: &Arc<PmsAdapter>, scope: &BrowseScope,
-    launch: &mut dyn FnMut(HubRequest) -> bool) -> crate::stores::EndpointRefreshSet {
+    launch: &mut dyn FnMut(HubRequest) -> bool) {
     // A test reaching this outside `crate::testlock::serial()` races some other module's test — see
     // `lib.rs::testlock`.
     #[cfg(test)]
@@ -623,13 +623,11 @@ fn request_refetch_hubs_with_scope(state: &mut PmsState, adapter: &Arc<PmsAdapte
     // single-flight latches here cannot double-apply anything — and without it a source whose
     // worker was in flight across this call would stay latched and never fetch again. An
     // authoritative request supersedes any older flight, so release every latch here.
-    let mut endpoints = crate::stores::EndpointRefreshSet::default();
     for s in srcs.iter_mut() {
         s.fetching = false;
-        if let Some(request) = retry_now_with(gen, adapter, s, launch) { endpoints.insert(request); }
+        retry_now_with(gen, adapter, s, launch);
     }
     state.srcs = srcs;
-    endpoints
 }
 
 /// A local, **optimistic** edit to what the shelves say about one item — applied before the write
@@ -1328,7 +1326,7 @@ const RETRY_MAX_S: f32 = 30.0;
 
 /// Wait before attempt `fails + 1`: 2s, 4s, 8s, 16s, then 30s forever. Pure — host-tested.
 pub(crate) fn backoff_secs(fails: u32) -> f32 {
-    crate::plex::account::backoff(fails.saturating_sub(1),
+    crate::net::backoff(fails.saturating_sub(1),
         std::time::Duration::from_secs_f32(RETRY_MIN_S),
         std::time::Duration::from_secs_f32(RETRY_MAX_S)).as_secs_f32()
 }
@@ -1675,7 +1673,7 @@ fn landed_ok(s: &mut Src, b: SourceBuild) {
 }
 
 /// Record one source's failure: keep whatever it last answered with and arm ITS next attempt.
-fn landed_fail(s: &mut Src) -> crate::stores::EndpointRefresh {
+fn landed_fail(s: &mut Src) {
     s.retry_n = s.retry_n.saturating_add(1);
     s.retry_s = backoff_secs(s.retry_n);
     s.state = HubState::Failed;
@@ -1688,11 +1686,6 @@ fn landed_fail(s: &mut Src) -> crate::stores::EndpointRefresh {
         s.retry_n,
         s.retry_s
     ));
-    // Retrying this Client can recover a transient outage, but not a network-topology change:
-    // after Wi-Fi→LAN the same machine may need a different connection from its plex.tv Resource.
-    // The application owns discovery. Return the request until source locks are released;
-    // the caller propagates it alongside the unchanged store verdict.
-    crate::stores::EndpointRefresh { sid: s.sid }
 }
 
 /// Step one source's retry countdown by `dt` seconds; true when its next attempt is due. Split out
@@ -1708,9 +1701,9 @@ fn retry_due(s: &mut Src, dt: f32) -> bool {
 /// loop would draw no frames while the loading spinner is supposed to be visible.
 /// Keep request admission/state identical when another adapter holds the request instead of
 /// launching a worker. The returned admission decision still controls latch release/backoff.
-fn kick_with(gen: u32, adapter: &PmsAdapter, s: &mut Src, launch: impl FnOnce(HubRequest) -> bool) -> Option<crate::stores::EndpointRefresh> {
+fn kick_with(gen: u32, adapter: &PmsAdapter, s: &mut Src, launch: impl FnOnce(HubRequest) -> bool) {
     if s.fetching {
-        return None; // one in flight already — its spinner is the honest answer
+        return; // one in flight already — its spinner is the honest answer
     }
     // CAPTURE AT THE SPAWN SITE. The worker is handed this server's own `&'static Client` and its
     // slot id; it never asks which server is current, and a slot re-pointed mid-request cannot
@@ -1726,31 +1719,32 @@ fn kick_with(gen: u32, adapter: &PmsAdapter, s: &mut Src, launch: impl FnOnce(Hu
     if s.sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
         let c = crate::jellyfin::client().expect("guarded above");
         let Some(request) = s.begin_request(HubClientRef::Jellyfin(c), 0, 0, gen,
-            || adapter.next_request.fetch_add(1, Ordering::Relaxed)) else { return None };
+            || adapter.next_request.fetch_add(1, Ordering::Relaxed)) else { return };
         let sid = request.sid;
         let spawned = launch(request);
         if !spawned {
             s.fetching = false;
-            return Some(landed_fail(s));
+            landed_fail(s);
+            return;
         }
         crate::log(&format!("hubs: source {} fetching (off-thread, jellyfin)", sid.raw()));
-        return None;
+        return;
     }
     let Some(c) = crate::plex::client_for(s.sid) else {
-        return Some(landed_fail(s));
+        landed_fail(s);
+        return;
     };
     let Some(request) = s.begin_request(HubClientRef::Plex(c), c.instance_gen(), c.token_gen(), gen,
-        || adapter.next_request.fetch_add(1, Ordering::Relaxed)) else { return None };
+        || adapter.next_request.fetch_add(1, Ordering::Relaxed)) else { return };
     let sid = request.sid;
     let spawned = launch(request);
     if !spawned {
         // nothing will ever fill the mailbox (the thread limit refused us), so release the latch
         // here and back off — `pump` will try again on the ladder.
         s.fetching = false;
-        Some(landed_fail(s))
+        landed_fail(s);
     } else {
         crate::log(&format!("hubs: source {} fetching (off-thread)", sid.raw()));
-        None
     }
 }
 
@@ -1788,7 +1782,7 @@ pub(crate) fn with_refused_fetches_for_test<R>(f: impl FnOnce() -> R) -> R {
     f()
 }
 
-fn retry_now_with(gen: u32, adapter: &PmsAdapter, s: &mut Src, launch: &mut dyn FnMut(HubRequest) -> bool) -> Option<crate::stores::EndpointRefresh> {
+fn retry_now_with(gen: u32, adapter: &PmsAdapter, s: &mut Src, launch: &mut dyn FnMut(HubRequest) -> bool) {
     s.retry_n = 0;
     s.retry_s = 0.0;
     kick_with(gen, adapter, s, launch)
@@ -1797,20 +1791,18 @@ fn retry_now_with(gen: u32, adapter: &PmsAdapter, s: &mut Src, launch: &mut dyn 
 /// The Retry control's kick: try every source again NOW, from the bottom of the ladder — a person
 /// who asks for it should never be made to sit out a 30-second automatic wait. A no-op for any
 /// source whose fetch is already in flight.
-fn request_retry(state: &mut PmsState, adapter: &Arc<PmsAdapter>) -> crate::stores::EndpointRefreshSet {
+fn request_retry(state: &mut PmsState, adapter: &Arc<PmsAdapter>) {
     // Same test-only catalog guard as `request_refetch_hubs` — the catalog is `PmsState`, a
     // field of the per-`Bridge` `HubsStore`, not a crate-global; see `lib.rs::testlock` and D5.
     #[cfg(test)]
     crate::testlock::assert_held("the pms hub catalog (request_retry)");
     let gen = state.hub_gen;
     let mut srcs = std::mem::take(&mut state.srcs);
-    let mut endpoints = crate::stores::EndpointRefreshSet::default();
     let mut launch = |r| spawn_fetch(adapter, r);
     for s in srcs.iter_mut() {
-        if let Some(request) = retry_now_with(gen, adapter, s, &mut launch) { endpoints.insert(request); }
+        retry_now_with(gen, adapter, s, &mut launch);
     }
     state.srcs = srcs;
-    endpoints
 }
 
 /// Move the worker mailbox into one owned batch. No source or catalog state changes here.
@@ -1825,13 +1817,13 @@ pub(crate) fn take_landings(adapter: &PmsAdapter) -> Vec<Landing> {
 /// offline replay mode: retry scheduling and worker spawning remain live.
 #[cfg(test)]
 fn pump_with_landings(state: &mut PmsState, adapter: &Arc<PmsAdapter>, dt: f32,
-    take: impl FnOnce() -> Vec<Landing>) -> crate::stores::EndpointRefreshSet {
+    take: impl FnOnce() -> Vec<Landing>) {
     step_landings(state, adapter, Some(dt), take)
 }
 
 /// Test-only compatibility tick for fixtures without a retained directory.
 #[cfg(test)]
-pub(crate) fn tick(state: &mut PmsState, adapter: &Arc<PmsAdapter>, dt: f32) -> crate::stores::EndpointRefreshSet {
+pub(crate) fn tick(state: &mut PmsState, adapter: &Arc<PmsAdapter>, dt: f32) {
     // Same test-only catalog guard as `request_refetch_hubs` — the catalog is `PmsState`, a
     // field of the per-`Bridge` `HubsStore`, not a crate-global; see `lib.rs::testlock` and D5.
     #[cfg(test)]
@@ -1846,7 +1838,7 @@ pub(crate) fn tick_with_directory(
     adapter: &Arc<PmsAdapter>,
     dt: f32,
     directory: crate::stores::browse::DirectoryView<'_>,
-) -> crate::stores::EndpointRefreshSet {
+) {
     #[cfg(test)]
     crate::testlock::assert_held("the pms hub catalog (owned tick)");
     let mut launch = |r| spawn_fetch(adapter, r);
@@ -1857,7 +1849,7 @@ pub(crate) fn tick_with_directory(
 /// An addressed arrival may update the catalog behind another page, but must not advance retry
 /// timers or start a new hubs fetch there. The visible Home alone owes the store's tick.
 #[cfg(test)]
-fn apply_landing(state: &mut PmsState, adapter: &Arc<PmsAdapter>, landing: &Landing) -> crate::stores::EndpointRefreshSet {
+fn apply_landing(state: &mut PmsState, adapter: &Arc<PmsAdapter>, landing: &Landing) {
     #[cfg(test)]
     crate::testlock::assert_held("the pms hub catalog (apply_landing)");
     step_landings(state, adapter, None, || vec![landing.clone()])
@@ -1867,8 +1859,8 @@ fn apply_landing(state: &mut PmsState, adapter: &Arc<PmsAdapter>, landing: &Land
 #[cfg(test)]
 pub(crate) fn land(state: &mut PmsState, adapter: &Arc<PmsAdapter>, landing: &Landing) -> crate::stores::StoreOutcome {
     let before = state.catalog_gen;
-    let endpoints = apply_landing(state, adapter, landing);
-    crate::stores::StoreOutcome { changed: state.catalog_gen != before, endpoints }
+    apply_landing(state, adapter, landing);
+    crate::stores::StoreOutcome { changed: state.catalog_gen != before }
 }
 
 /// Apply one addressed landing under the same retained directory policy the frame publishes.
@@ -1880,9 +1872,9 @@ pub(crate) fn land_with_directory(
 ) -> crate::stores::StoreOutcome {
     let before = state.catalog_gen;
     let mut launch = |r| spawn_fetch(adapter, r);
-    let endpoints = step_landings_with_scope(state, adapter, None, || vec![landing.clone()],
+    step_landings_with_scope(state, adapter, None, || vec![landing.clone()],
         &BrowseScope::retained(directory), &mut launch);
-    crate::stores::StoreOutcome { changed: state.catalog_gen != before, endpoints }
+    crate::stores::StoreOutcome { changed: state.catalog_gen != before }
 }
 
 /// `stores::hubs::HubsStore`'s one door onto every [`HubsCmd`](crate::stores::hubs::HubsCmd) (D3):
@@ -1917,10 +1909,8 @@ fn run_with_scope(
     match cmd {
         HubsCmd::RefetchHubs => {
             let mut launch = |r| spawn_fetch(adapter, r);
-            crate::stores::StoreOutcome {
-                changed: true,
-                endpoints: request_refetch_hubs_with_scope(state, adapter, scope, &mut launch),
-            }
+            request_refetch_hubs_with_scope(state, adapter, scope, &mut launch);
+            crate::stores::StoreOutcome { changed: true }
         }
         HubsCmd::Retry => run_without_browse(state, adapter, cmd),
         HubsCmd::EditItem { sid, rk, edit } => crate::stores::StoreOutcome::changed(
@@ -1935,8 +1925,10 @@ fn run_with_scope(
 fn run_without_browse(state: &mut PmsState, adapter: &Arc<PmsAdapter>, cmd: crate::stores::hubs::HubsCmd) -> crate::stores::StoreOutcome {
     use crate::stores::hubs::HubsCmd;
     match cmd {
-        HubsCmd::Retry =>
-            crate::stores::StoreOutcome { changed: true, endpoints: request_retry(state, adapter) },
+        HubsCmd::Retry => {
+            request_retry(state, adapter);
+            crate::stores::StoreOutcome { changed: true }
+        },
         #[cfg(test)]
         HubsCmd::EditItem { sid, rk, edit } =>
             crate::stores::StoreOutcome::changed(edit_item(state, sid, &rk, edit)),
@@ -1967,44 +1959,40 @@ fn controlled_work_with_scope(state: &mut PmsState, adapter: &Arc<PmsAdapter>, c
     use crate::stores::hubs::HubsCmd;
     let before = state.catalog_gen;
     let command = cmd.is_some();
-    let endpoints = match cmd {
+    match cmd {
         Some(HubsCmd::RefetchHubs) => request_refetch_hubs_with_scope(state, adapter, scope, launch),
         Some(HubsCmd::Retry) => {
             let gen = state.hub_gen;
             let mut srcs = std::mem::take(&mut state.srcs);
-            let mut endpoints = crate::stores::EndpointRefreshSet::default();
             for source in srcs.iter_mut() {
-                if let Some(request) = retry_now_with(gen, adapter, source, launch) { endpoints.insert(request); }
+                retry_now_with(gen, adapter, source, launch);
             }
             state.srcs = srcs;
-            endpoints
         }
         Some(HubsCmd::Reset) => {
             reset_with_scope(state, adapter, scope);
-            crate::stores::EndpointRefreshSet::default()
         }
         Some(other) => return run_with_scope(state, adapter, other, scope),
         None => step_landings_with_scope(state, adapter, Some(dt), Vec::new, scope, launch),
     };
-    crate::stores::StoreOutcome { changed: command || before != state.catalog_gen, endpoints }
+    crate::stores::StoreOutcome { changed: command || before != state.catalog_gen }
 }
 
 #[cfg(test)]
-fn step_landings(state: &mut PmsState, adapter: &Arc<PmsAdapter>, dt: Option<f32>, take: impl FnOnce() -> Vec<Landing>) -> crate::stores::EndpointRefreshSet {
+fn step_landings(state: &mut PmsState, adapter: &Arc<PmsAdapter>, dt: Option<f32>, take: impl FnOnce() -> Vec<Landing>) {
     let mut launch = |r| spawn_fetch(adapter, r);
     step_landings_with(state, adapter, dt, take, &mut launch)
 }
 
 #[cfg(test)]
 fn step_landings_with(state: &mut PmsState, adapter: &Arc<PmsAdapter>, dt: Option<f32>, take: impl FnOnce() -> Vec<Landing>,
-    launch: &mut dyn FnMut(HubRequest) -> bool) -> crate::stores::EndpointRefreshSet {
+    launch: &mut dyn FnMut(HubRequest) -> bool) {
     step_landings_with_scope(state, adapter, dt, take, &BrowseScope::standalone(), launch)
 }
 
 fn step_landings_with_scope(state: &mut PmsState, adapter: &PmsAdapter, dt: Option<f32>, take: impl FnOnce() -> Vec<Landing>,
     scope: &BrowseScope,
-    launch: &mut dyn FnMut(HubRequest) -> bool) -> crate::stores::EndpointRefreshSet {
-    let mut endpoints = crate::stores::EndpointRefreshSet::default();
+    launch: &mut dyn FnMut(HubRequest) -> bool) {
     sync_roster_with_scope(state, scope);
     let landed = take();
     let any_landed = !landed.is_empty();
@@ -2042,7 +2030,7 @@ fn step_landings_with_scope(state: &mut PmsState, adapter: &PmsAdapter, dt: Opti
                 landed_ok(s, b);
                 dirty = true;
             }
-            None => { endpoints.insert(landed_fail(s)); }
+            None => landed_fail(s),
         }
     }
     // Anything but Ready with nothing in flight is a state only a fetch can leave: Failed (with a
@@ -2051,7 +2039,7 @@ fn step_landings_with_scope(state: &mut PmsState, adapter: &PmsAdapter, dt: Opti
     if let Some(dt) = dt {
         for s in srcs.iter_mut() {
             if s.state != HubState::Ready && !s.fetching && retry_due(s, dt) {
-                if let Some(request) = kick_with(cur, adapter, s, &mut *launch) { endpoints.insert(request); }
+                kick_with(cur, adapter, s, &mut *launch);
             }
         }
     }
@@ -2083,7 +2071,6 @@ fn step_landings_with_scope(state: &mut PmsState, adapter: &PmsAdapter, dt: Opti
             hub_count(state)
         ));
     }
-    endpoints
 }
 
 /// A source that has answered with `n` placeholder rows in one shelf (test fixture). Only the SHAPE

@@ -1061,28 +1061,6 @@ mod tests {
     /// exists for) can be reached one way, and that way forces the transcode branch. This pins
     /// the join between `probe`'s ranking and this policy: they must speak the same `Location`,
     /// and the last-ranked tier must be the restricted one.
-    #[test]
-    fn a_server_reachable_only_by_relay_forces_the_transcode_branch() {
-        let res: super::super::account::Resource = serde_json::from_str(
-            r#"{"name":"cgnat-share","clientIdentifier":"cccc3333","provides":"server","owned":false,
-                "connections":[{"protocol":"https","address":"plex-relay.example.net","port":8443,
-                 "uri":"https://plex-relay.example.net:8443","local":false,"relay":true}]}"#,
-        )
-        .expect("fixture parses");
-
-        let cs = super::super::probe::candidates(&res, crate::plex::CredentialPolicy::HttpsOnly);
-        assert_eq!(cs.len(), 1, "a relay gets no plain-http twin: {cs:#?}");
-        assert_eq!(cs[0].location, Location::Relay);
-
-        let p = link_policy(Some(cs[0].location));
-        assert_eq!(
-            p,
-            LinkPolicy {
-                direct_play: false,
-                remux: false
-            }
-        );
-    }
 
     // ---- the capability profile ----------------------------------------------------------
 

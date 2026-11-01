@@ -1515,35 +1515,6 @@ impl BrowseState {
         crate::ui::idle::invalidate();
         true
     }
-    #[cfg(test)]
-    pub(crate) fn prepare_discovery_replay_for_test(
-        &mut self,
-        adapter: &BrowseAdapter,
-        sid: ServerId,
-        epoch: u32,
-    ) {
-        self.reset_owned(adapter);
-        self.sync_roster_owned();
-        let source = self.sources.iter_mut().find(|source| source.sid == sid)
-            .expect("registered replay source");
-        // The replay fixture starts from the same already-known name on both passes. The live
-        // pass publishes the landed name into the process registry; deriving the replay seed from
-        // that mutated registry would otherwise change `want_name` in frame zero.
-        source.name = "original".into();
-        source.sections_done = false;
-        source.counts_done = true;
-        self.epoch = epoch;
-        adapter.src_fetching.store(false, Ordering::SeqCst);
-    }
-    #[cfg(test)]
-    pub(crate) fn discovery_policy_for_test(&self, adapter: &BrowseAdapter) -> (bool, u32, bool) {
-        let source = self.sources.first().expect("a replay source");
-        (
-            adapter.src_fetching.load(Ordering::SeqCst),
-            source.retry_cd,
-            source.sections_done,
-        )
-    }
     fn library_pins(&self) -> Vec<(usize, i64, bool)> {
         let mut out: Vec<(usize, i64, bool)> = self.sections
             .iter()
@@ -1972,7 +1943,6 @@ impl BrowseState {
         // source wholesale.
         #[cfg(feature = "jellyfin")]
         if matches!(client, DiscClient::Jellyfin(_)) {
-            let mut endpoints = crate::stores::EndpointRefreshSet::default();
             {
                 let (prior, name_was_empty) = self.sources.get(source_index)
                     .map(|source| (source.state, source.name.is_empty()))
@@ -2044,10 +2014,7 @@ impl BrowseState {
                     }
                 }
             }
-            if !ok {
-                endpoints.insert(crate::stores::EndpointRefresh { sid: crate::jellyfin::SERVER_ID });
-            }
-            return crate::stores::StoreOutcome { changed: true, endpoints };
+            return crate::stores::StoreOutcome { changed: true };
         }
         let client = match client {
             DiscClient::Plex(client) => client,
@@ -2107,11 +2074,7 @@ impl BrowseState {
         if committed != Some(true) {
             return Default::default();
         }
-        let mut endpoints = crate::stores::EndpointRefreshSet::default();
-        if !ok {
-            endpoints.insert(crate::stores::EndpointRefresh { sid: client.id() });
-        }
-        crate::stores::StoreOutcome { changed: true, endpoints }
+        crate::stores::StoreOutcome { changed: true }
     }
     fn refresh_tab_shape(&mut self) {
         let mask = TAB_KINDS.iter().enumerate().fold(0u32, |mask, (i, &kind)| {
@@ -2656,11 +2619,6 @@ impl BrowseState {
         self.maybe_discover_owned(adapter, &mut execute_discovery);
         outcome
     }
-    #[cfg(test)]
-    pub(crate) fn discover_pump_owned(&mut self, adapter: &Arc<BrowseAdapter>)
-        -> crate::stores::StoreOutcome {
-        self.discover_pump_owned_with_gate(adapter, crate::ui::landgate::fixture_gate())
-    }
     pub(crate) fn pump_owned_with_gate(
         &mut self,
         adapter: &Arc<BrowseAdapter>,
@@ -2670,7 +2628,6 @@ impl BrowseState {
         self.retry_cd = self.retry_cd.saturating_sub(1);
         let discovery = self.land_discovery_owned_with_gate(adapter, gate);
         changed |= discovery.changed;
-        let endpoints = discovery.endpoints;
         self.maybe_discover_owned(adapter, &mut execute_discovery);
         changed |= self.hubs_land(adapter, gate);
         changed |= self.hubs_tick_all(adapter);
@@ -2766,7 +2723,7 @@ impl BrowseState {
                     }
                 }
                 self.maybe_spawn_owned(adapter);
-                return crate::stores::StoreOutcome { changed, endpoints };
+                return crate::stores::StoreOutcome { changed };
             }
             let client = match result.client {
                 DiscClient::Plex(client) => client,
@@ -2831,7 +2788,7 @@ impl BrowseState {
             }
         }
         self.maybe_spawn_owned(adapter);
-        crate::stores::StoreOutcome { changed, endpoints }
+        crate::stores::StoreOutcome { changed }
     }
     #[cfg(test)]
     pub(crate) fn pump_owned(&mut self, adapter: &Arc<BrowseAdapter>)
@@ -3533,18 +3490,6 @@ fn spawn_discovery(job: impl FnOnce() + Send + 'static) -> bool {
 #[cfg(test)]
 thread_local! {
     static REFUSE_DISCOVERY_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-#[cfg(test)]
-pub(crate) fn with_refused_discovery_for_test<R>(f: impl FnOnce() -> R) -> R {
-    struct Restore(bool);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            REFUSE_DISCOVERY_FOR_TEST.with(|flag| flag.set(self.0));
-        }
-    }
-    let _restore = Restore(REFUSE_DISCOVERY_FOR_TEST.with(|flag| flag.replace(true)));
-    f()
 }
 
 /// Supply a transport observation, retaining the actual source epoch and captured lifecycle.

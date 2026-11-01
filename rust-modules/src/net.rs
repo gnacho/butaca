@@ -21,6 +21,7 @@
 //! and `NOSIGNAL` is set because we call from threads. Response bodies never carry into a log here.
 #![allow(non_camel_case_types)]
 use std::cell::UnsafeCell;
+use std::time::Duration;
 use std::ffi::CString;
 use std::mem::MaybeUninit;
 use std::os::raw::{c_char, c_int, c_long, c_uint, c_void};
@@ -499,6 +500,10 @@ pub struct Resp {
     pub body: Vec<u8>,
 }
 impl Resp {
+    #[cfg_attr(
+        not(feature = "lab-diagnostics"),
+        expect(dead_code, reason = "only the lab uploader reads it")
+    )]
     pub fn ok(&self) -> bool {
         (200..300).contains(&self.status)
     }
@@ -525,6 +530,28 @@ pub(crate) struct RequestFailure {
     /// the device in `telemetry::incident`'s link class; a DNS failure and a TLS refusal are the
     /// two answers a failed sign-in most needs told apart.
     pub curl_rc: Option<i32>,
+}
+
+
+/// What a closed account-shaped request observed when it produced nothing usable: `Ok(status)`
+/// for a complete response that was refused or would not decode, `Err` for `net`'s own failure.
+/// Closed evidence only. Formerly `plex::account`'s evidence type; its remaining readers are
+/// this module's transport-evidence tests.
+#[cfg_attr(not(test), expect(dead_code))]
+pub type CallEvidence = Result<u16, RequestFailure>;
+
+/// Is this a status by which the remote refused the IDENTITY a request carried, as opposed to
+/// failing to serve it? Pinned by the h2-reset transport-evidence test.
+#[cfg_attr(not(test), expect(dead_code))]
+pub fn refuses_identity(status: u16) -> bool {
+    matches!(status, 401 | 403)
+}
+
+/// Shared capped geometric delay. Neutral retry-ladder helper (formerly `plex::account`'s);
+/// `pms.rs`'s hub-retry backoff is its one live consumer.
+pub(crate) fn backoff(misses: u32, base: Duration, ceiling: Duration) -> Duration {
+    let factor = 1u32.checked_shl(misses.min(30)).unwrap_or(u32::MAX);
+    base.checked_mul(factor).unwrap_or(ceiling).min(ceiling)
 }
 
 impl From<RequestError> for RequestFailure {
@@ -817,6 +844,7 @@ fn request_tls_result(
 
 /// Opt-in detailed twin; compatibility callers project only the original cause above.
 #[allow(clippy::too_many_arguments)]
+#[cfg_attr(not(test), expect(dead_code))]
 pub(crate) fn request_evidence(
     url: &str, headers: &[String], verb: &str, body: Option<&[u8]>, t: Timeouts,
     follow_redirects: bool, max_body: Option<usize>, resolve: Option<&str>,
@@ -1477,10 +1505,10 @@ mod request_tests {
             assert_eq!(failure.status, Some(status));
             assert_eq!(failure.cause, RequestError::Transport);
             assert_eq!(failure.body_limit, None);
-            let evidence: crate::plex::account::CallEvidence = Err(failure.clone());
+            let evidence: CallEvidence = Err(failure.clone());
             let observed = match &evidence { Ok(status) => Some(*status), Err(f) => f.status };
             assert_eq!(
-                observed.filter(|status| crate::plex::account::refuses_identity(*status)),
+                observed.filter(|status| refuses_identity(*status)),
                 matches!(status, 401 | 403).then_some(status),
                 "an incomplete transfer keeps the refusal verdict the status carries");
             peer.0.stdin.take().unwrap().write_all(b"\n").unwrap();

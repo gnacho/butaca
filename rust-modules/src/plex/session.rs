@@ -96,16 +96,9 @@ impl ProfilePublisher {
         }
     }
     pub(crate) fn publish(&mut self, user: Option<UserRef>, generation: u32) {
-        #[cfg(test)]
+        // The plex.tv audio-preference warm hook went with the account surface; publication is
+        // the plain profile swap now.
         self.publish_with(user, generation, |_, _| {});
-        #[cfg(not(test))]
-        self.publish_with(user, generation, |user, generation| {
-            super::account::publish_audio_preferences_profile(user.as_ref(), generation);
-            let Some(user) = user else { return; };
-            let client_id = peek().client_id.clone();
-            let Some(credential) = plex_tv_credential(&user) else { return; };
-            super::account::warm_audio_preferences(client_id, credential, user, generation);
-        });
     }
     fn publish_with<W>(&mut self, user: Option<UserRef>, generation: u32, warm: W)
     where W: FnOnce(Option<UserRef>, u32) {
@@ -141,29 +134,6 @@ pub fn current() -> Option<UserRef> {
 /// The generation assigned by the Session owner and published with this profile.
 pub fn current_gen() -> u32 {
     current_snapshot().generation
-}
-
-/// Credential for a plex.tv call made on behalf of one captured active-profile snapshot.
-///
-/// New sessions carry the profile's own account-service token explicitly. The only fallback is
-/// for legacy owner sessions written before that field existed: the stored and captured profile
-/// must be the same identity, and the persisted roster must prove owner scope. A managed or
-/// unknown legacy profile therefore skips the optional call instead of borrowing either the
-/// owner's account token or its own unrelated PMS token.
-pub(crate) fn plex_tv_credential(snapshot_user: &UserRef) -> Option<String> {
-    if let Some(token) = snapshot_user.plex_tv_token.as_ref()
-        .filter(|token| !token.trim().is_empty())
-    {
-        return Some(token.clone());
-    }
-    let stored = peek();
-    let same_profile = if snapshot_user.uuid.is_empty() {
-        stored.user.uuid.is_empty() && snapshot_user.id == stored.user.id
-    } else {
-        snapshot_user.uuid == stored.user.uuid
-    };
-    (same_profile && stored.active_profile_is_admin())
-        .then(|| stored.account_token.clone()).filter(|token| !token.is_empty())
 }
 
 /// Session file locations, best first — see [`crate::paths::session_candidates`] for why this is a
@@ -238,15 +208,6 @@ fn fallback_file() -> std::path::PathBuf {
     .clone()
 }
 
-/// The same process-global scratch path [`fallback_file`] resolves to, exposed to other modules'
-/// test code (the adapter regression test for the Finding 1 canonical-verdict path) so it can
-/// snapshot and restore the file rather than leaving residue for whichever other test falls
-/// through to it next.
-#[cfg(test)]
-pub(crate) fn fallback_file_for_test() -> std::path::PathBuf {
-    fallback_file()
-}
-
 /// A whole CANDIDATE LIST a test wants `auth_paths()` to answer, distinct from [`TEST_FILE`]'s
 /// single scratch path. [`TEST_FILE`] can only ever stand for the ONE file a fixture like
 /// [`TempSession`] owns; it cannot represent "several candidates, some unwritable, in a specific
@@ -305,13 +266,6 @@ pub(crate) fn redirect_for_test(p: Option<std::path::PathBuf>) {
     // A test swapping the scratch file changes what `peek` answers just as surely as a write
     // does — a cache primed against the old file must not survive the swap. See `CACHE`.
     replace_cache(Cached::Unloaded, None, true);
-}
-
-/// Snapshot the current [`TEST_FILE`] redirect so a caller can restore it exactly with
-/// `redirect_for_test`, rather than assuming `None` is always the value to go back to.
-#[cfg(test)]
-pub(crate) fn redirect_snapshot_for_test() -> Option<std::path::PathBuf> {
-    TEST_FILE.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 /// **A signed-in session at a scratch path, taken back on drop — THE guard, not one of several.**
@@ -1204,11 +1158,13 @@ impl PinVerifier {
     /// as long as a `u32` can count.
     pub const MAX_ITERS: u32 = 4 * Self::ITERS;
 
+    #[cfg_attr(not(test), expect(dead_code))]
     /// A fresh verifier for `pin`, under a salt read from `/dev/urandom`.
     pub fn new(pin: &str) -> PinVerifier {
         Self::with_salt(pin, &random_bytes::<16>())
     }
 
+    #[cfg_attr(not(test), expect(dead_code))]
     fn with_salt(pin: &str, salt: &[u8]) -> PinVerifier {
         let hash = crate::sha256::pbkdf2_hmac_sha256(pin.as_bytes(), salt, Self::ITERS);
         PinVerifier {
@@ -1219,6 +1175,7 @@ impl PinVerifier {
         }
     }
 
+    #[cfg_attr(not(test), expect(dead_code))]
     /// Does `pin` reproduce this verifier? A malformed record (no salt, an un-hex hash, a zero
     /// count) verifies NOTHING rather than everything — the failure direction a lock must have.
     pub fn verify(&self, pin: &str) -> bool {
@@ -1233,6 +1190,7 @@ impl PinVerifier {
     }
 }
 
+#[cfg_attr(not(test), expect(dead_code))]
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
@@ -1410,6 +1368,7 @@ impl SourceRef {
     /// Everything about this source except the token, for the event log. The machine id is left
     /// out entirely — it is a permanent household fingerprint (`app::diagnostics`), and the event log is
     /// the file we ask users to send us.
+    #[cfg_attr(not(test), expect(dead_code))]
     pub fn describe(&self) -> String {
         // Three states, not two: `owned` is plex.tv's flag about this ACCOUNT, and a source that is
         // not ours may still credit nobody — the household's own server seen by a managed profile,
@@ -1508,12 +1467,6 @@ pub(crate) enum PlaintextChoice {
     /// Turned off in Settings after it had been allowed. Distinct from `Declined` only so the
     /// read-out and the report can say which: both refuse the same way.
     Revoked,
-}
-
-impl PlaintextChoice {
-    pub(crate) fn allows(self) -> bool {
-        self == Self::Allowed
-    }
 }
 
 /// One server's recorded [`PlaintextChoice`].
@@ -2028,6 +1981,7 @@ impl Session {
         self.auto_sign_in
     }
 
+    #[cfg_attr(not(test), expect(dead_code))]
     /// Record the Settings switch while leaving every unrelated session field intact.
     pub(crate) fn with_auto_sign_in(&self, on: bool) -> Self {
         let mut next = self.clone();
@@ -2037,32 +1991,6 @@ impl Session {
 
     pub(crate) fn trailer_autoplay(&self) -> bool {
         self.trailer_autoplay
-    }
-
-    /// The answer `account` (`grant::account_key`) recorded for one server —
-    /// [`PlaintextChoice::Undecided`] when it was never asked (see [`Session::plaintext_consent`]).
-    pub(crate) fn plaintext_choice(&self, account: &str, machine_id: &str) -> PlaintextChoice {
-        self.plaintext_consent
-            .iter()
-            .find(|c| c.account == account && c.machine_id == machine_id)
-            .map_or(PlaintextChoice::Undecided, |c| c.choice)
-    }
-
-    /// Record one server's answer for `account`, leaving that account's other servers alone.
-    /// `Undecided` forgets it. Another account's answers are dropped on the way: they could never
-    /// be honoured again while this one answers, and the file keeps only the live account's.
-    pub(crate) fn with_plaintext_choice(&self, account: &str, machine_id: &str, choice: PlaintextChoice) -> Self {
-        let mut next = self.clone();
-        next.plaintext_consent.retain(|c| c.account == account && c.machine_id != machine_id);
-        if choice != PlaintextChoice::Undecided && !machine_id.is_empty() && !account.is_empty() {
-            next.plaintext_consent.push(PlaintextConsent {
-                machine_id: machine_id.to_owned(),
-                account: account.to_owned(),
-                choice,
-                extensions: Default::default(),
-            });
-        }
-        next
     }
 
     pub(crate) fn subtitle_tone(&self) -> SubtitleTone {
@@ -2130,6 +2058,7 @@ impl Session {
         }
     }
 
+    #[cfg_attr(not(test), expect(dead_code))]
     /// **Is the profile currently watching the one [`Session::account_token`] belongs to?**
     ///
     /// That token is the account OWNER's (the Plex Home admin's). It is written once, by the QR
@@ -2433,6 +2362,7 @@ fn cached_arm(state: std::sync::Arc<ReadState>, now: std::time::Instant) -> Cach
 }
 
 /// A cache hit as of `now`, if one exists. Never takes [`IO`].
+#[cfg_attr(not(test), expect(dead_code))]
 fn cached_at(now: std::time::Instant) -> Option<std::sync::Arc<ReadState>> {
     match &*CACHE.lock().unwrap_or_else(|e| e.into_inner()) {
         Cached::Unloaded | Cached::Revoked => None,
@@ -2447,6 +2377,7 @@ fn cached_at(now: std::time::Instant) -> Option<std::sync::Arc<ReadState>> {
 /// already carry, so a cache-filling read is covered by the scrubber exactly as an uncached one
 /// always was. The retry anchor is at least `now` and at least the read's completion time, so a
 /// slow read cannot consume its own cache lifetime before the next frame gets to use it.
+#[cfg_attr(not(test), expect(dead_code))]
 fn refresh_locked(now: std::time::Instant) -> std::sync::Arc<ReadState> {
     refresh_if_current_locked(now, None)
 }
@@ -2509,35 +2440,6 @@ pub(crate) fn queue_update_ticket(edit: impl FnOnce(&Session) -> Option<Session>
         })
     }))
 }
-
-/// [`queue_update_ticket`] for an edit whose LANDING matters — a consent refusal
-/// (`grant::record`), which must not be lost to a failed write. `settled` runs on the
-/// storage worker once the attempt is over: `true` when the file holds the edit afterwards (it
-/// already did, or the write persisted) or the edit no longer applies (a sign-out or another
-/// account replaced the one it was queued for), `false` when the store could not be read or the
-/// write failed — the caller's cue to try again.
-pub(crate) fn queue_update_settled(
-    edit: impl FnOnce(&Session) -> Option<Session> + Send + 'static,
-    settled: impl FnOnce(bool) + Send + 'static,
-) {
-    let expected = peek();
-    let tenure = REVOCATION_GENERATION.load(std::sync::atomic::Ordering::Acquire);
-    drop(crate::storage_worker::submit_retained(move || {
-        let (mut read, mut moot) = (false, false);
-        let write = update_with_outcome(|current| {
-            if REVOCATION_GENERATION.load(std::sync::atomic::Ordering::Acquire) != tenure
-                || (!expected.client_id.is_empty() && (current.client_id != expected.client_id
-                    || current.account_token != expected.account_token)) {
-                moot = true;
-                return None;
-            }
-            read = true;
-            edit(current)
-        });
-        settled(moot || write.map_or(read, |w| w.outcome.persisted()));
-    }));
-}
-
 /// Read the persisted session without minting or preference edits. A worker may migrate a marked
 /// fallback into recovered canonical storage. For readers that merely want to know what the
 /// session says (the account surfaces, and now every per-frame reader too):
@@ -3141,6 +3043,7 @@ pub(crate) fn forget_pins_for_test(user: &str) {
 /// [`peek`] with the lock already held — the read half every entry point here shares. Used only
 /// where an owned, mutable `Session` is genuinely needed ([`forget_pins_for_test`]); everything
 /// else wants the cached, `Arc`-shared [`peek`].
+#[cfg_attr(not(test), expect(dead_code))]
 fn peek_locked() -> Session {
     session_from_read(&read_live_locked())
 }
@@ -3425,26 +3328,9 @@ fn publish_identities(s: &Session) {
 /// Load the persisted session, ensuring a stable `client_id` exists (generated + saved on first
 /// boot). Never returns an error — a missing/corrupt file degrades to a fresh, logged-out session.
 /// Falls back to the pre-relocation path once and re-saves at the new one (migration).
+#[cfg_attr(not(test), expect(dead_code))]
 pub fn load() -> Session {
     load_with_id(new_client_id)
-}
-
-/// Resolve the install identifier on the persistence worker before starting a QR attempt.
-/// A revoked cache stays revoked: reading its old install id never republishes its credentials.
-/// If storage is unavailable, reuse one process-local id; persist only over Missing/Cleared.
-pub(crate) fn load_login_client_id() -> String {
-    let _io = io();
-    let read = read_live_locked();
-    if let ReadState::Ready { session, .. } = &read {
-        if !session.client_id.is_empty() { return session.client_id.clone(); }
-    }
-    static FALLBACK: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    let id = FALLBACK.get_or_init(new_client_id).clone();
-    if matches!(read, ReadState::Missing | ReadState::Cleared { .. }) {
-        let fresh = Session { client_id: id.clone(), ..session_from_read(&read) };
-        save_locked(&fresh);
-    }
-    id
 }
 
 /// A captured loader resource action, not serialized initialization. Dropping it has no effect.
@@ -3515,6 +3401,7 @@ pub(crate) fn load_capturing_entropy() -> (Session, Option<[u8; 16]>, DeferredLo
 /// read-modify-write, so a save is never built from a read that was not taken in the same `IO`
 /// critical section as the write it might cause — the no-lost-update invariant `IO`'s own doc
 /// states, which caching must not weaken.
+#[cfg_attr(not(test), expect(dead_code))]
 fn established(read: &ReadState) -> bool {
     matches!(
         read,
@@ -3522,6 +3409,7 @@ fn established(read: &ReadState) -> bool {
     )
 }
 
+#[cfg_attr(not(test), expect(dead_code))]
 fn load_with_id(mint: impl FnOnce() -> String) -> Session {
     if cache_revoked() { return Session::default(); }
     let now = std::time::Instant::now();
@@ -3722,13 +3610,14 @@ fn save_locked_outcome(s: &Session) -> async_persistence::LiveWrite {
 /// `0666 & !umask` (0644 here), so a fallback token file would be readable by every other uid from
 /// the instant it hit the disk. Passing the mode through `OpenOptionsExt` means it never *exists*
 /// in a permissive mode, which a chmod after the write cannot promise.
+#[cfg_attr(not(test), expect(dead_code))]
 pub fn save(s: &Session) {
     let _io = io();
     let _ = save_locked_with_authority(s, SaveAuthority::FreshReauthentication);
 }
 
-/// [`save`] with the lock already held. Ordinary read-modify-writes never ask for fresh login
-/// authority; only [`save`] and its confirmed-auth adapter may do so.
+/// Save with the lock already held. Ordinary read-modify-writes never ask for fresh login
+/// authority; only the confirmed-auth adapter may do so.
 fn save_locked(s: &Session) {
     let _ = save_locked_with_authority(s, SaveAuthority::Routine);
 }
@@ -3834,6 +3723,7 @@ fn save_locked_with_authority(
 /// rather than risk serving a value the disk does not hold. **Not** used on the canonical path —
 /// see the comment at its one non-durable call site for why a legacy write there can't be trusted
 /// as the record either way.
+#[cfg_attr(not(test), expect(dead_code))]
 fn install_or_drop_after_write(s: &Session, legacy: Option<bool>, authority: SaveAuthority, generation: u64) {
     match legacy {
         Some(sealed) => {
@@ -4357,6 +4247,7 @@ fn clear_cleanup_outcome(outcome: persistence::ClearCleanupOutcome) -> ClearOutc
 ///
 /// This is an ordinary sign-out: the install-wide language survives it. The erase queue calls
 /// [`clear_for_erase`] directly, which also serves "Delete all local data" and its retries.
+#[cfg_attr(not(test), expect(dead_code))]
 pub fn clear() -> ClearOutcome {
     let report = clear_for_erase(false, None);
     if report.preference_failures.is_empty() { report.outcome } else { ClearOutcome::NotDurable }
@@ -4853,6 +4744,7 @@ mod roster_tests;
 
 #[cfg(test)]
 #[path = "session_persistence_tests.rs"]
+#[cfg_attr(not(test), expect(dead_code))]
 mod persistence_tests;
 
 #[cfg(test)]
@@ -4872,16 +4764,6 @@ pub(crate) enum SaveAuthority { PublicOnly, Routine, FreshReauthentication }
 /// canonical verdict but not which door produced it.
 #[cfg(test)]
 static LAST_WRITE_AUTHORITY: Mutex<Option<SaveAuthority>> = Mutex::new(None);
-
-#[cfg(test)]
-pub(crate) fn last_write_authority_for_test() -> Option<SaveAuthority> {
-    *LAST_WRITE_AUTHORITY.lock().unwrap_or_else(|e| e.into_inner())
-}
-
-#[cfg(test)]
-pub(crate) fn reset_last_write_authority_for_test() {
-    *LAST_WRITE_AUTHORITY.lock().unwrap_or_else(|e| e.into_inner()) = None;
-}
 
 #[cfg(test)]
 thread_local! {

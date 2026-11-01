@@ -583,7 +583,7 @@ pub(crate) fn captured_session_for_boot(saved: crate::plex::session::Session,
     // being fetched from server B: the same catalog index opening a different film.
 pub(super) fn activate_server_owned(
     bridge: &mut super::bridge::Bridge,
-) -> crate::stores::EndpointRefreshSet {
+) {
     bridge.browse_run(crate::stores::browse::BrowseCmd::Reset);
     bridge.refresh_browse_directory();
     bridge.search_run(crate::stores::search::SearchCmd::Reset);
@@ -592,10 +592,9 @@ pub(super) fn activate_server_owned(
     bridge.collection_run(crate::stores::collection::CollectionCmd::Reset);
     bridge.viewstate_run(crate::stores::viewstate::ViewStateCmd::Reset);
     bridge.metadata_run(crate::stores::metadata::MetadataCmd::Reset);
-    let mut endpoints = bridge.hubs_run(crate::stores::hubs::HubsCmd::RefetchHubs).endpoints;
-    endpoints.merge(bridge.browse_discover_pump().endpoints);
+    let _ = bridge.hubs_run(crate::stores::hubs::HubsCmd::RefetchHubs);
+    let _ = bridge.browse_discover_pump();
     log("pms: catalog activation queued");
-    endpoints
 }
 
     // Install the PMS client (the read layer AND the playback path) as the CURRENT server,
@@ -613,7 +612,7 @@ pub(super) fn install_pms_owned(
     tier: Option<crate::plex::probe::Location>,
     pin: Option<&crate::origin::ResolvePin>,
     install: &crate::auth::owner::ReadyInstall,
-) -> crate::stores::EndpointRefreshSet {
+) {
     if let crate::auth::owner::ReadyInstall::PrimaryAndExtras(extras) = install {
         crate::auth::install_captured_registry(origin, address, token, tier, pin, extras, None);
     }
@@ -995,9 +994,8 @@ pub(crate) unsafe fn construct(
                 pages.emit(MachineId::Nav, Fx::App(AppFx::StoreWork(StoreWork::BrowseDiscovery)));
                 pages.frame_with(bridge, crate::ui::machine::Tick::default(), Vec::new(), Vec::new(), rec, false);
             } else {
-                let endpoints = install_pms_owned(bridge, &ready.origin, &ready.address,
+                install_pms_owned(bridge, &ready.origin, &ready.address,
                     &ready.token, ready.tier, ready.pin.as_ref(), &ready.install);
-                super::bridge::execute_endpoint_outcomes(pages, endpoints);
             }
             BootTo::Home
         } else { BootTo::Login }
@@ -1442,7 +1440,6 @@ pub(crate) unsafe fn construct(
         menu_play_await: None,
         prev,
         refresh_hubs_at,
-        plaintext_upgrade: Default::default(),
         ev,
         remote,
         win,

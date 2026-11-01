@@ -1519,10 +1519,7 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
             && !matches!(app.route(), AppArg::Player)
         {
             app.refresh_hubs_at = 0;
-            super::bridge::execute_endpoint_outcomes(
-                &mut app.pages,
-                app.bridge.hubs_run(crate::stores::hubs::HubsCmd::RefetchHubs).endpoints,
-            );
+            let _ = app.bridge.hubs_run(crate::stores::hubs::HubsCmd::RefetchHubs);
             // …and every library's OWN shelves, for the same reason and at the same moment:
             // a finished playback moves Continue Watching and watch state, so invalidate each
             // Bridge-owned Browse store through `Bridge::browse_run`.
@@ -1995,8 +1992,7 @@ fn jellyfin_switch_server(app: &mut App, i: usize) {
     };
     if crate::jellyfin::boot::authenticate_server(&entry) {
         crate::jellyfin::boot::save_servers(&list.servers, i);
-        let endpoints = super::boot::activate_server_owned(&mut app.bridge);
-        super::bridge::execute_endpoint_outcomes(&mut app.pages, endpoints);
+        super::boot::activate_server_owned(&mut app.bridge);
     }
 }
 
@@ -2018,8 +2014,7 @@ fn jellyfin_disconnect_server(app: &mut App) {
         let active = remaining.active;
         if let Some(entry) = remaining.servers.get(active).cloned() {
             if crate::jellyfin::boot::authenticate_server(&entry) {
-                let endpoints = super::boot::activate_server_owned(&mut app.bridge);
-                super::bridge::execute_endpoint_outcomes(&mut app.pages, endpoints);
+                super::boot::activate_server_owned(&mut app.bridge);
             }
         }
         super::bridge::dismiss_surfaces(&mut app.pages);
@@ -2260,13 +2255,7 @@ pub(crate) unsafe fn update(app: &mut App, fr: &mut Frame) {
         // unconditional for the same reason as the two pumps around it — the user can walk off
         // Home or off the detail page between pressing and the server answering, and the refresh
         // is owed either way. Invalidates from inside, per landing.
-        let endpoints = app.bridge.viewstate_pump();
-        super::bridge::execute_endpoint_outcomes(&mut app.pages, endpoints);
-        // A server on a plaintext grant keeps trying HTTPS (`grant::UpgradeRetry`): its
-        // endpoint re-discovery races every HTTPS route first and retires the grant when one
-        // verifies. Route-unconditional — the upgrade is owed whatever is on screen.
-        let upgrades = app.plaintext_upgrade.due(fr.now);
-        super::bridge::execute_endpoint_outcomes(&mut app.pages, upgrades);
+        app.bridge.viewstate_pump();
         app.bridge.person_pump();
         app.bridge.collection_pump();
         if let Some(target) = app.bridge.take_detail_refresh() {
@@ -2983,7 +2972,6 @@ mod lifecycle_regression_tests {
             menu_play_await: Default::default(),
             prev: Default::default(),
             refresh_hubs_at: Default::default(),
-            plaintext_upgrade: Default::default(),
             ev: [0; 128],
             remote: Default::default(),
             win: Default::default(),

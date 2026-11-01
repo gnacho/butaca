@@ -333,16 +333,6 @@ impl BrowseStore {
 
 
     #[cfg(test)]
-    pub(crate) fn prepare_discovery_replay_for_test(&mut self, sid: ServerId, epoch: u32) {
-        self.state.prepare_discovery_replay_for_test(&self.adapter, sid, epoch);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn discovery_policy_for_test(&self) -> (bool, u32, bool) {
-        self.state.discovery_policy_for_test(&self.adapter)
-    }
-
-    #[cfg(test)]
     pub(crate) fn queue_discovery_for_test(
         &mut self,
         client: &'static crate::plex::Client,
@@ -416,15 +406,15 @@ pub(crate) enum LibraryWork {
     Retry,
 }
 
-impl<H: super::StoreEffectHost> Machine<H> for BrowseStore {
+impl<H: crate::ui::machine::Host> Machine<H> for BrowseStore {
     type Ev = StoreEv<BrowseCmd>;
-    fn step(&mut self, ev: &Self::Ev, _cx: &Cx<'_, H>, fx: &mut Effects<'_, H>) -> Handled {
+    fn step(&mut self, ev: &Self::Ev, _cx: &Cx<'_, H>, _fx: &mut Effects<'_, H>) -> Handled {
         match ev {
             StoreEv::Cmd(c) => {
                 self.run(c.clone());
             }
             StoreEv::Pump { .. } => {
-                self.pump_with_gate(&crate::ui::landgate::Gate::default()).endpoints.emit(fx);
+                let _outcome = self.pump_with_gate(&crate::ui::landgate::Gate::default());
             }
         }
         Handled::Yes
@@ -561,13 +551,12 @@ mod contract_tests {
         stores.browse.borrow_mut().queue_discovery_for_test(
             client, client.token_gen(), false);
         let before_landing = stores.browse.borrow().gen();
-        let endpoints = stores.browse.borrow_mut().discover_pump();
-        assert_eq!(endpoints.endpoints.iter().map(|request| request.sid).collect::<Vec<_>>(), [sid]);
+        let _outcome = stores.browse.borrow_mut().discover_pump();
         assert_eq!(stores.browse.borrow().gen(), before_landing + 1);
         assert_eq!(stores.browse.borrow().take_notice(), Some(before_landing + 1));
         assert_eq!(stores.browse.borrow().take_notice(), None,
             "one discovery landing owes one notice on the addressed Browse owner");
-        assert_eq!(stores.browse.borrow_mut().discover_pump().endpoints.iter().count(), 0,
+        assert_eq!(stores.browse.borrow_mut().discover_pump().changed, false,
             "the transferred adapter result is consumed exactly once");
         crate::plex::reset_servers_for_test();
     }

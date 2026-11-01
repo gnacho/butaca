@@ -21,36 +21,6 @@ pub(super) fn two_server_json() -> &'static str {
                       "off":[{"machine_id":"aaaa1111","key":1}]}]}"#
 }
 
-pub(super) fn dialable_home(users: usize, uuid: &str, auto: bool) -> Session {
-    let home_users = (0..users)
-        .map(|i| HomeUserRef {
-            uuid: format!("u-{i}"),
-            title: format!("User {i}"),
-            protected: i == 0,
-            admin: i == 0,
-            ..Default::default()
-        })
-        .collect();
-    Session {
-        client_id: "c".into(),
-        account_token: "acct".into(),
-        server: ServerRef {
-            address: "192.168.0.10".into(),
-            port: 32400,
-            token: "t".into(),
-            ..Default::default()
-        },
-        user: UserRef {
-            uuid: uuid.into(),
-            token: "ut".into(),
-            ..Default::default()
-        },
-        home_users,
-        auto_sign_in: auto,
-        ..Default::default()
-    }
-}
-
 // ---- The FILE half: one writer at a time, and a whole file or none of it -------------------
 //
 // Everything below drives the real `save`/`peek`/`update` against a real file, so it needs a

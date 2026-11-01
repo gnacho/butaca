@@ -24,53 +24,14 @@
 
 use crate::ui::machine::StoreOrd;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct EndpointRefresh { pub sid: crate::plex::ServerId }
-
-/// Advisory requests in first-observation order. Invalid IDs are rejected, never remapped.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[must_use]
-pub(crate) struct EndpointRefreshSet {
-    ids: [crate::plex::ServerId; crate::plex::MAX_SERVERS],
-    len: usize,
-}
-
-impl Default for EndpointRefreshSet {
-    fn default() -> Self { Self { ids: [crate::plex::ServerId::UNSET; crate::plex::MAX_SERVERS], len: 0 } }
-}
-
-impl EndpointRefreshSet {
-    pub(crate) fn insert(&mut self, request: EndpointRefresh) -> bool {
-        if request.sid.raw() as usize >= crate::plex::MAX_SERVERS
-            || self.ids[..self.len].contains(&request.sid) { return false; }
-        self.ids[self.len] = request.sid;
-        self.len += 1;
-        true
-    }
-    pub(crate) fn merge(&mut self, other: Self) {
-        for request in other.iter() { self.insert(request); }
-    }
-    pub(crate) fn iter(&self) -> impl Iterator<Item = EndpointRefresh> + '_ {
-        self.ids[..self.len].iter().map(|&sid| EndpointRefresh { sid })
-    }
-    pub(crate) fn emit<H: StoreEffectHost>(self, fx: &mut crate::ui::machine::Effects<'_, H>) {
-        for request in self.iter() { fx.push(crate::ui::machine::Fx::App(H::endpoint_refresh(request))); }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[must_use]
 pub(crate) struct StoreOutcome {
     pub changed: bool,
-    pub endpoints: EndpointRefreshSet,
 }
 
 impl StoreOutcome {
-    pub(crate) fn changed(changed: bool) -> Self { Self { changed, ..Self::default() } }
-}
-
-pub(crate) trait StoreEffectHost: crate::ui::machine::Host {
-    fn endpoint_refresh(request: EndpointRefresh) -> Self::Fx;
+    pub(crate) fn changed(changed: bool) -> Self { Self { changed } }
 }
 
 pub(crate) mod browse;
@@ -209,7 +170,7 @@ impl Stores {
     pub(crate) fn viewstate_pump(
         &mut self,
         directory: browse::DirectoryView<'_>,
-    ) -> EndpointRefreshSet {
+    ) {
         let browse = std::rc::Rc::clone(&self.browse);
         let hubs = &mut self.hubs;
         let person = &mut self.person;
@@ -497,50 +458,3 @@ pub(crate) fn take_landings<T>(gate: &crate::ui::landgate::Gate, id: StoreId,
 }
 
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn endpoint_sets_preserve_first_observation_order_and_capacity() {
-        let request = |id| EndpointRefresh { sid: crate::plex::ServerId::from_raw(id) };
-        let mut first = EndpointRefreshSet::default();
-        assert_eq!(first.iter().count(), 0);
-        assert!(!first.insert(request(u16::MAX)));
-        assert!(!first.insert(request(crate::plex::MAX_SERVERS as u16)));
-        first.insert(request(3)); first.insert(request(1)); first.insert(request(3));
-        let mut second = EndpointRefreshSet::default();
-        second.insert(request(1)); second.insert(request(2)); second.insert(request(0));
-        first.merge(second);
-        assert_eq!(first.iter().map(|r| r.sid.raw()).collect::<Vec<_>>(), [3, 1, 2, 0]);
-        for id in 0..crate::plex::MAX_SERVERS { first.insert(request(id as u16)); }
-        assert_eq!(first.iter().count(), crate::plex::MAX_SERVERS);
-        assert!(first.iter().count() <= crate::ui::machine::MAX_EMIT_PER_STEP as usize);
-        first.merge(first);
-        assert_eq!(first.iter().count(), crate::plex::MAX_SERVERS);
-    }
-    #[test]
-    fn data_layers_do_not_execute_auth_endpoint_recovery() {
-        for file in ["pms.rs", "browse/mod.rs", "viewstate.rs"] {
-            let source = std::fs::read_to_string(
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(file),
-            ).unwrap();
-            assert!(!source.contains("crate::auth::request_endpoint_refresh("),
-                "{file} still executes endpoint recovery instead of returning a neutral outcome");
-        }
-    }
-    use super::*;
-
-    // `a_command_raises_one_notice_and_a_steady_store_none` (the global `apply(StoreCmd::Metadata
-    // (Clear))` regression) and `generic_dispatch_rejects_all_physically_owned_stores` (which
-    // proved the same global `apply` panicked for the already-owned stores) are deleted: the
-    // free `apply`/`take_notices`/`gen` dispatcher they tested no longer exists anywhere in
-    // production code. Every store — Metadata included, as of this layer — now dispatches
-    // through its own per-owner `run`/`step`, so there is no shared router left to grade.
-
-    #[test]
-    fn the_ordinal_round_trips_for_every_store() {
-        for id in StoreId::ALL {
-            assert_eq!(StoreId::from_ord(id.ord()), Some(id));
-        }
-        assert_eq!(StoreId::from_ord(StoreOrd(7)), None);
-    }
-}
