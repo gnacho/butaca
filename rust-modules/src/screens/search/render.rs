@@ -1,6 +1,5 @@
 //! Paint from the instance and its retained frame views. No live Search/roster/focus reads.
 use super::*;
-use crate::search::scope::{ScopeSource, SourceScopeSnapshot};
 use crate::ui::card_row::{self, TileLabel};
 use crate::ui::consts::{MARGIN_X, SCR_H, SCR_W};
 use crate::ui::label::{HAlign, Label, VAlign};
@@ -23,8 +22,6 @@ pub(super) struct Resources {
     head: CString,
     run_w: f32,
     head_w: f32,
-    scope: Option<SourceScopeSnapshot>,
-    scope_line: Option<CString>,
     recents: Option<crate::search::recents::RecentsSnapshot>,
     recent_runs: Vec<CString>,
     titles: [CString; 5],
@@ -62,23 +59,6 @@ impl Resources {
             } else {
                 cx.measure.width(&self.head, theme::size::HERO, true)
             };
-        }
-        let scope = H::search(cx).scope();
-        if self
-            .scope
-            .as_ref()
-            .is_none_or(|old| !old.same_publication(scope))
-        {
-            self.scope_line = scope_text(scope.sources()).map(|line| {
-                cstring(&elide(
-                    &line,
-                    layout::FIELD.w,
-                    theme::size::CAPTION,
-                    false,
-                    cx.measure,
-                ))
-            });
-            self.scope = Some(scope.clone());
         }
         let recents = H::search(cx).recents();
         if self
@@ -260,17 +240,6 @@ fn field<H: SearchLike>(screen: &SearchScreen, f: &mut DrawFrame<'_, '_, H>, p: 
             );
         }
     }
-    if let Some(line) = &data.scope_line {
-        Label::new(line.as_ptr(), theme::size::CAPTION, theme::TEXT_TERTIARY).draw(
-            p,
-            Rect::new(
-                rect.x,
-                layout::SCOPE_Y - screen.scroll.pos,
-                rect.w,
-                layout::SCOPE_H,
-            ),
-        );
-    }
     stop(screen, FIELD, ElemKind::Bare, f, p);
 }
 
@@ -423,18 +392,7 @@ pub(super) fn tile<H: SearchLike>(
         _ => None,
     };
     if focused {
-        let sid = match item {
-            Item::Media(media) => media.sid,
-            Item::Tag(tag) => tag.sid,
-            Item::Collection(hit) => hit.item.sid,
-        };
-        let handle = view
-            .scope()
-            .sources()
-            .iter()
-            .find(|source| source.sid == sid && !source.household)
-            .map_or("", |source| source.handle.as_str());
-        let fact = subtitle(model.kind, item, handle);
+        let fact = subtitle(model.kind, item);
         card_row::draw_focused(
             p,
             art,
@@ -466,16 +424,13 @@ pub(super) fn tile<H: SearchLike>(
     );
 }
 
-/// What a result tile draws. A collection always draws through `Art::Poster` with its row, so the
-/// shared card composite decides between its poster (custom, or #274's fan for the server's
-/// composite) and the shared neutral collection tile (`ui::collection_tile`, for a row with no
-/// thumb) — this screen draws no collection face of its own. A tag-shaped collection hit is
-/// already a thumb-less collection row by the time it lands (`search::CollectionHit::from_tag`).
+/// What a result tile draws. Media rows draw through `Art::Still`/`Art::Poster`; people and
+/// collections are tag rows — a person draws the `Art::Person` face, a row with no thumb draws
+/// the shared neutral poster placeholder, and anything else draws `Art::Thumb`.
 fn tile_art(kind: Kind, item: &Item) -> Art<'_> {
     match (kind, item) {
         (Kind::Episode, Item::Media(media)) => Art::Still(Some(media)),
         (_, Item::Media(media)) => Art::Poster(Some(media)),
-        (_, Item::Collection(hit)) => Art::Poster(Some(&hit.item)),
         (Kind::Person, Item::Tag(tag)) => Art::Person {
             sid: tag.sid,
             key: &tag.thumb,
@@ -638,108 +593,18 @@ fn heading_flow(
     dx
 }
 
-fn subtitle(kind: Kind, item: &Item, handle: &str) -> String {
-    let mut parts = Vec::new();
+fn subtitle(kind: Kind, item: &Item) -> String {
     match item {
         Item::Media(media) if kind == Kind::Episode => {
             let date = crate::ui::fmt::pretty_date(&media.aired, media.year as i64);
             if !date.is_empty() {
-                parts.push(date);
+                date
+            } else {
+                String::new()
             }
         }
-        Item::Media(media) if media.year > 0 => parts.push(media.year.to_string()),
-        // a collection is its size, in the one formatter every collection surface shares
-        Item::Collection(hit) => parts.push(crate::ui::fmt::item_count(hit.item.child_count)),
-        _ => {}
-    }
-    if !handle.is_empty() {
-        parts.push(handle.into());
-    }
-    parts.join(" · ")
-}
-
-fn source_label(source: &ScopeSource) -> String {
-    if source.household {
-        return if source.name.is_empty() {
-            crate::i18n::msg::browse_search_your_server().into()
-        } else {
-            source.name.clone()
-        };
-    }
-    let named: Vec<_> = source
-        .libraries
-        .iter()
-        .filter(|name| !name.is_empty())
-        .collect();
-    if named.len() == 1 {
-        named[0].clone()
-    } else if !source.handle.is_empty() {
-        source.handle.clone()
-    } else {
-        crate::i18n::msg::browse_search_shared_server().into()
-    }
-}
-fn join(names: &[String]) -> String {
-    match names {
-        [] => String::new(),
-        [one] => one.clone(),
-        [a, b] => crate::i18n::msg::browse_search_join(a, b),
-        _ => crate::i18n::msg::browse_search_join(&names[..names.len() - 1].join(", "), names.last().unwrap()),
-    }
-}
-fn name_set(sources: &[&ScopeSource]) -> String {
-    let shares: Vec<_> = sources.iter().filter(|source| !source.household).collect();
-    if shares.len() <= 2 {
-        return join(
-            &sources
-                .iter()
-                .map(|source| source_label(source))
-                .collect::<Vec<_>>(),
-        );
-    }
-    let libraries = shares
-        .iter()
-        .map(|source| {
-            source
-                .libraries
-                .iter()
-                .filter(|name| !name.is_empty())
-                .count()
-        })
-        .sum::<usize>();
-    let mut names: Vec<_> = sources
-        .iter()
-        .filter(|source| source.household)
-        .map(|source| source_label(source))
-        .collect();
-    names.push(if libraries > 0 {
-        crate::i18n::msg::browse_search_shared_libraries(libraries as i64)
-    } else {
-        crate::i18n::msg::browse_search_shared_sources(shares.len() as i64)
-    });
-    join(&names)
-}
-fn scope_text(sources: &[ScopeSource]) -> Option<String> {
-    if sources.is_empty() {
-        return None;
-    }
-    let (live, down): (Vec<_>, Vec<_>) = sources.iter().partition(|source| source.live);
-    if down.is_empty() {
-        let mut line = crate::i18n::msg::browse_search_searching(&name_set(&live));
-        let mut shares = live
-            .iter()
-            .filter(|source| !source.household && !source.handle.is_empty());
-        if let (2, Some(source), None) = (live.len(), shares.next(), shares.next()) {
-            if source_label(source) != source.handle {
-                line.push_str(" · ");
-                line.push_str(&source.handle);
-            }
-        }
-        Some(line)
-    } else if live.is_empty() {
-        Some(crate::i18n::msg::browse_search_unreachable(&name_set(&down)))
-    } else {
-        Some(crate::i18n::msg::browse_search_partial(&name_set(&live), &name_set(&down)))
+        Item::Media(media) if media.year > 0 => media.year.to_string(),
+        _ => String::new(),
     }
 }
 
@@ -775,54 +640,6 @@ mod tests {
 
     use crate::search::{Item, Kind, State, TagHit};
 
-    fn own(name: &str) -> ScopeSource {
-        ScopeSource {
-            sid: crate::registry::ServerId::UNSET,
-            name: name.into(),
-            libraries: Vec::new(),
-            handle: String::new(),
-            owned: true,
-            home: false,
-            owner_id: 0,
-            household: true,
-            live: true,
-        }
-    }
-    fn share(lib: &str, handle: &str) -> ScopeSource {
-        ScopeSource {
-            sid: crate::registry::ServerId::UNSET,
-            name: "a-hostname".into(),
-            libraries: vec![lib.into()],
-            handle: handle.into(),
-            owned: false,
-            home: false,
-            owner_id: 0,
-            household: false,
-            live: true,
-        }
-    }
-    /// A managed/Guest profile's own household server: plex.tv sends it `owned: false` (the
-    /// account does not own it) but it is the viewer's own family server, not a stranger's share —
-    /// `is_household` (`plex/servers.rs:272`) is true and `owner_credit` deliberately returns no
-    /// handle for it (`plex/servers.rs:253-280`'s doc table). It must take the same branch `own`
-    /// does: named when it has a name, "your server" when it does not.
-    fn household(name: &str) -> ScopeSource {
-        ScopeSource {
-            sid: crate::registry::ServerId::UNSET,
-            name: name.into(),
-            libraries: Vec::new(),
-            handle: String::new(),
-            owned: false,
-            home: true,
-            owner_id: 111_111,
-            household: true,
-            live: true,
-        }
-    }
-    fn down(mut source: ScopeSource) -> ScopeSource {
-        source.live = false;
-        source
-    }
     fn cs(s: &str) -> CString {
         CString::new(s).expect("test literal")
     }
@@ -847,8 +664,7 @@ mod tests {
     }
 
     #[test]
-    fn the_scope_block_is_one_line_because_the_minimum_hint_lives_in_the_field() {
-        assert_eq!(layout::SCOPE_H, theme::size::CAPTION as f32 * 1.35);
+    fn the_one_more_keystroke_hint_shows_only_at_the_minimum_minus_one() {
         assert!(ghost_shown("a"));
         assert!(!ghost_shown(""));
         assert!(!ghost_shown("ab"));
@@ -998,198 +814,6 @@ mod tests {
     }
 
     #[test]
-    fn one_source_is_named_and_only_no_source_is_silent() {
-        assert_eq!(
-            scope_text(&[own("nas-home")]).unwrap(),
-            "Searching nas-home"
-        );
-        assert_eq!(scope_text(&[own("")]).unwrap(), "Searching your server");
-        assert_eq!(
-            scope_text(&[share("Film Club", "friend")]).unwrap(),
-            "Searching Film Club"
-        );
-        assert_eq!(
-            scope_text(&[down(own("nas-home"))]).unwrap(),
-            "nas-home unreachable"
-        );
-        assert_eq!(scope_text(&[]), None);
-    }
-
-    /// A managed/Guest profile's household server was the whole bug: `source_label`/`name_set` read
-    /// raw `owned`, which plex.tv sends `false` for a household grant, so with no other source in
-    /// scope the line fell through to the library-count branch and, with an empty handle, read the
-    /// literal "a shared server" — describing the viewer's own family server as a stranger's. The
-    /// fix reads `household` instead, so a lone household source takes the same branch `own` does.
-    #[test]
-    fn a_household_profiles_only_source_is_named_not_read_as_a_shared_server() {
-        assert_eq!(
-            scope_text(&[household("nas-home")]).unwrap(),
-            "Searching nas-home"
-        );
-        assert_eq!(
-            scope_text(&[household("")]).unwrap(),
-            "Searching your server"
-        );
-    }
-
-    /// With a household source AND a genuine friend's share in scope, only the friend is a "share":
-    /// the friend keeps its handle attribution and its place in the shared-library count, while the
-    /// household source is named exactly like an owned server and never counted as shared. This is
-    /// the case the doc table at `plex/servers.rs:253-280` draws the line on — household and a
-    /// friend's share are graded differently — and the wording must not blur it.
-    #[test]
-    fn a_household_source_is_named_while_a_friends_share_stays_credited_and_counted() {
-        assert_eq!(
-            scope_text(&[household("nas-home"), share("Film Club", "friend")]).unwrap(),
-            "Searching nas-home and Film Club · friend"
-        );
-        let many = vec![
-            household("nas-home"),
-            share("A", "ann"),
-            share("B", "bob"),
-            share("C", "cat"),
-        ];
-        assert_eq!(
-            scope_text(&many).unwrap(),
-            "Searching nas-home and 3 shared libraries",
-            "the household source must not inflate — or hide inside — the shared-library count"
-        );
-    }
-
-    /// An unnamed, unhandled friend's share must still read as "a shared server" even when a
-    /// household source is also in scope — the household branch must not accidentally swallow the
-    /// external-share fallback wording.
-    #[test]
-    fn an_unnamed_friends_share_still_reads_as_a_shared_server_beside_a_household_source() {
-        assert_eq!(
-            scope_text(&[household("nas-home"), share("", "")]).unwrap(),
-            "Searching nas-home and a shared server"
-        );
-    }
-
-    #[test]
-    fn two_live_sources_name_both_and_attribute_the_share() {
-        assert_eq!(
-            scope_text(&[own("nas-home"), share("Film Club", "friend")]).unwrap(),
-            "Searching nas-home and Film Club · friend"
-        );
-    }
-
-    #[test]
-    fn a_share_is_named_by_its_library_and_never_by_its_hostname() {
-        let t = scope_text(&[own("nas-home"), share("Film Club", "friend")]).unwrap();
-        assert!(t.contains("Film Club"));
-        assert!(!t.contains("a-hostname"));
-        assert!(t.contains("nas-home"));
-        let mut two = share("Film Club", "friend");
-        two.libraries = vec!["Film Club".into(), "Archive".into()];
-        let t = scope_text(&[own("nas-home"), two]).unwrap();
-        assert_eq!(t, "Searching nas-home and friend");
-        assert_eq!(t.matches("friend").count(), 1);
-    }
-
-    #[test]
-    fn many_shares_collapse_to_a_count_rather_than_becoming_a_list() {
-        let mk = |lib: &str, handle: &str| share(lib, handle);
-        let many = vec![
-            own("nas-home"),
-            mk("A", "ann"),
-            mk("B", "bob"),
-            mk("C", "cat"),
-        ];
-        assert_eq!(
-            scope_text(&many).unwrap(),
-            "Searching nas-home and 3 shared libraries"
-        );
-        let mut blank = vec![
-            own("nas-home"),
-            share("", "ann"),
-            share("", "bob"),
-            share("", "cat"),
-        ];
-        for source in blank.iter_mut().skip(1) {
-            source.libraries.clear();
-        }
-        assert_eq!(
-            scope_text(&blank).unwrap(),
-            "Searching nas-home and 3 shared sources"
-        );
-    }
-
-    #[test]
-    fn a_share_with_no_handle_is_named_but_not_attributed() {
-        assert_eq!(
-            scope_text(&[own("nas-home"), share("Film Club", "")]).unwrap(),
-            "Searching nas-home and Film Club"
-        );
-    }
-
-    #[test]
-    fn an_unreachable_source_names_itself_and_what_is_left() {
-        assert_eq!(
-            scope_text(&[own("nas-home"), down(share("Film Club", "friend"))]).unwrap(),
-            "Film Club unreachable · results from nas-home only"
-        );
-    }
-
-    #[test]
-    fn your_own_server_going_quiet_reads_the_same_way() {
-        assert_eq!(
-            scope_text(&[down(own("nas-home")), share("Film Club", "friend")]).unwrap(),
-            "nas-home unreachable · results from Film Club only"
-        );
-    }
-
-    #[test]
-    fn with_nothing_answering_there_is_no_results_from_clause_to_write() {
-        assert_eq!(
-            scope_text(&[down(own("nas-home")), down(share("Film Club", "friend"))]).unwrap(),
-            "nas-home and Film Club unreachable"
-        );
-    }
-
-    #[test]
-    fn three_sources_list_plainly_and_attribute_none_of_them() {
-        assert_eq!(
-            scope_text(&[
-                own("nas-home"),
-                share("Film Club", "friend"),
-                share("Archive", "pal")
-            ])
-            .unwrap(),
-            "Searching nas-home, Film Club and Archive"
-        );
-    }
-
-    #[test]
-    fn two_shares_are_named_but_neither_is_attributed() {
-        assert_eq!(
-            scope_text(&[share("Film Club", "friend"), share("Archive", "pal")]).unwrap(),
-            "Searching Film Club and Archive"
-        );
-    }
-
-    #[test]
-    fn an_unnamed_source_still_produces_a_sentence() {
-        assert_eq!(
-            scope_text(&[own(""), share("Film Club", "friend")]).unwrap(),
-            "Searching your server and Film Club · friend"
-        );
-        assert_eq!(
-            scope_text(&[own("nas-home"), share("", "")]).unwrap(),
-            "Searching nas-home and a shared server"
-        );
-    }
-
-    #[test]
-    fn an_undescribed_roster_does_not_call_every_machine_yours() {
-        assert_eq!(
-            scope_text(&[own(""), share("", "")]).unwrap(),
-            "Searching your server and a shared server"
-        );
-    }
-
-    #[test]
     fn the_empty_state_preserves_state_and_region_copy() {
         assert_eq!(
             empty_state(State::Ready, false),
@@ -1269,14 +893,13 @@ mod tests {
     }
 
     #[test]
-    fn a_caption_identifies_the_result_and_names_a_borrowed_source_last() {
+    fn a_caption_identifies_the_result() {
         let film = Item::Media(crate::pms::PmsMovie {
             title: "Wallace & Gromit".into(),
             year: 2005,
             ..Default::default()
         });
-        assert_eq!(subtitle(Kind::Movie, &film, ""), "2005");
-        assert_eq!(subtitle(Kind::Movie, &film, "friend"), "2005 · friend");
+        assert_eq!(subtitle(Kind::Movie, &film), "2005");
         let ep = Item::Media(crate::pms::PmsMovie {
             kind: 3,
             title: "A Grand Day Out".into(),
@@ -1286,11 +909,7 @@ mod tests {
             aired: "1989-11-04".into(),
             ..Default::default()
         });
-        assert_eq!(subtitle(Kind::Episode, &ep, ""), "11/4/1989");
-        assert_eq!(
-            subtitle(Kind::Episode, &ep, "friend"),
-            "11/4/1989 · friend"
-        );
+        assert_eq!(subtitle(Kind::Episode, &ep), "11/4/1989");
         let undated = Item::Media(crate::pms::PmsMovie {
             kind: 3,
             title: "A Grand Day Out".into(),
@@ -1298,58 +917,24 @@ mod tests {
             ep_index: 3,
             ..Default::default()
         });
-        assert_eq!(subtitle(Kind::Episode, &undated, ""), "");
-        assert_eq!(subtitle(Kind::Episode, &undated, "friend"), "friend");
+        assert_eq!(subtitle(Kind::Episode, &undated), "");
         let bare = Item::Media(crate::pms::PmsMovie {
             title: "Untitled".into(),
             ..Default::default()
         });
-        assert_eq!(subtitle(Kind::Movie, &bare, ""), "");
-        assert_eq!(subtitle(Kind::Movie, &bare, "friend"), "friend");
+        assert_eq!(subtitle(Kind::Movie, &bare), "");
         let person = Item::Tag(TagHit {
             name: "Peter Sallis".into(),
             count: 9,
             ..Default::default()
         });
-        assert_eq!(subtitle(Kind::Person, &person, ""), "");
-        // a tag-shaped collection lands as a collection hit carrying the tag's count
-        let tagged = |count| Item::Collection(crate::search::CollectionHit::from_tag(&TagHit {
-            count,
-            ..Default::default()
-        }));
-        assert_eq!(subtitle(Kind::Collection, &tagged(4), ""), "4 items");
-        assert_eq!(subtitle(Kind::Collection, &tagged(1), ""), "1 item");
-        // a collection that arrived as a full row reads its childCount through the shared
-        // formatter — an empty collection is "0 items", as on its own page
-        let full = |child_count| Item::Collection(crate::search::CollectionHit {
-            item: crate::pms::PmsMovie { child_count, kind: crate::pms::KIND_COLLECTION, ..Default::default() },
+        assert_eq!(subtitle(Kind::Person, &person), "");
+        // a BoxSet's caption is its extent, in the one formatter every collection surface shares
+        let set = Item::Tag(TagHit {
+            name: "Shorts".into(),
+            count: 12,
             ..Default::default()
         });
-        assert_eq!(subtitle(Kind::Collection, &full(12), ""), "12 items");
-        assert_eq!(subtitle(Kind::Collection, &full(1), "friend"), "1 item · friend");
-        assert_eq!(subtitle(Kind::Collection, &full(0), ""), "0 items");
-    }
-
-    /// Every collection result reaches the shared card as `Art::Poster` with a kind-4 row, which
-    /// is what makes the card draw the shared neutral tile (`ui::collection_tile`) when the row has
-    /// no thumb and the poster (or the fan) when it has one. A tag-shaped hit is one of these by
-    /// the time it lands (`search::CollectionHit::from_tag`).
-    #[test]
-    fn a_thumbless_collection_hit_reaches_the_card_as_a_neutral_collection_row() {
-        let full = Item::Collection(crate::search::CollectionHit {
-            item: crate::pms::PmsMovie { title: "Shorts".into(), kind: crate::pms::KIND_COLLECTION,
-                ..Default::default() },
-            tag: 7,
-        });
-        assert!(matches!(tile_art(Kind::Collection, &full),
-            Art::Poster(Some(m)) if m.kind == crate::pms::KIND_COLLECTION && m.thumb.is_empty()
-                && m.title == "Shorts"));
-        let with_art = Item::Collection(crate::search::CollectionHit {
-            item: crate::pms::PmsMovie { thumb: "/library/metadata/50007/thumb/1".into(),
-                kind: crate::pms::KIND_COLLECTION, ..Default::default() },
-            tag: 7,
-        });
-        assert!(matches!(tile_art(Kind::Collection, &with_art),
-            Art::Poster(Some(m)) if !m.thumb.is_empty()));
+        assert_eq!(subtitle(Kind::Collection, &set), "");
     }
 }

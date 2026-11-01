@@ -130,7 +130,11 @@ impl Stores {
     }
 
     pub(crate) fn search_snapshot(&self, directory: browse::DirectoryView<'_>) -> search::SearchSnapshot {
-        self.search.snapshot_with_directory(directory)
+        // The scope publication died with the Plex registry fan-out; the snapshot no longer reads
+        // the directory. The parameter stays because every caller captures it at the same frame
+        // boundary for the run/pump paths, which still do (favourites ranking).
+        let _ = directory;
+        self.search.snapshot()
     }
 
     /// Controlled discovery against this aggregate's Browse owner.

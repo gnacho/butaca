@@ -56,16 +56,8 @@ impl SearchStore {
     }
 
     /// Capture the store publication at the dispatcher frame boundary, not during paint.
-    #[cfg(test)]
     pub(crate) fn snapshot(&self) -> SearchSnapshot {
         self.state.snapshot()
-    }
-
-    pub(crate) fn snapshot_with_directory(
-        &self,
-        directory: crate::stores::browse::DirectoryView<'_>,
-    ) -> SearchSnapshot {
-        self.state.snapshot_with_directory(directory)
     }
 
     #[cfg(test)]

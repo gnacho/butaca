@@ -701,23 +701,6 @@ pub struct Tag {
     /// alternate `personId` (both forms verified live against the same record).
     #[serde(rename = "tagKey", default, deserialize_with = "de_route_key")]
     pub tag_key: String,
-    /// How many items in this library carry the tag — Plex's count badge. NOT emitted by every
-    /// server (this one omits it on `Role[]`), so 0 means "unknown", never "none".
-    #[serde(default, deserialize_with = "de_i64")]
-    pub count: i64,
-    // ---- the SECOND producer of this record: a search hub's `Directory[]` ----
-    //
-    // `/hubs/search` returns its `actor`, `director` and `collection` hubs as `Directory[]` of
-    // exactly this shape (measured live — see `Hub::directory`), so the cast-credit tag and the
-    // search hit are one type rather than two that would drift. The two fields below are the
-    // ones only the search producer sets; a `Role[]` entry leaves them empty and nothing reads
-    // them there.
-    /// The listing this tag opens — `/library/sections/1/all?collection=6068`. The only handle a
-    /// COLLECTION hit gives you: those carry no `tagKey`, no `thumb` and no `ratingKey`.
-    #[serde(default, deserialize_with = "de_route_key")]
-    pub key: String,
-    #[serde(rename = "librarySectionID", default, deserialize_with = "de_i64")]
-    pub library_section_id: i64,
 }
 
 impl Tag {
@@ -1283,13 +1266,11 @@ mod tests {
     }
 
     /// The `Directory[]` row is a [`super::Tag`] — the SAME record the detail page's cast row is
-    /// built from — and every field the search screen reads off one must survive the round trip.
+    /// built from — and every field the app reads off one must survive the round trip.
     ///
     /// A person carries `tagKey` (the portable guid that `discover.provider.plex.tv` answers to)
     /// and an ABSOLUTE `metadata-static.plex.tv` `thumb`; a collection instead carries a
-    /// server-local tag `id` and listing `key`, but no `ratingKey` or artwork. A screen that keys
-    /// every tag by person `tagKey` still silently loses
-    /// every collection.
+    /// server-local tag `id`, but no `ratingKey` or artwork.
     #[test]
     fn person_and_collection_hits_keep_their_distinct_portable_identities() {
         let mc = serde_json::from_slice::<Envelope>(SEARCH_WALLACE)
@@ -1299,9 +1280,7 @@ mod tests {
         let p = &search_hub(&mc, "actor").directory[0];
         assert_eq!(p.tag, "Wallace Shawn");
         assert_eq!(p.tag_key, "5d776827151a60001f24ab18");
-        assert_eq!((p.id, p.count), (921, 5));
-        assert_eq!(p.key, "/library/sections/1/all?actor=921");
-        assert_eq!(p.library_section_id, 1);
+        assert_eq!(p.id, 921);
         assert!(
             p.thumb.starts_with("https://"),
             "a person thumb is ABSOLUTE, not a PMS path"
@@ -1312,8 +1291,7 @@ mod tests {
 
         let c = &search_hub(&mc, "collection").directory[0];
         assert_eq!(c.tag, "Wallace & Gromit Collection");
-        assert_eq!((c.id, c.count), (6068, 6));
-        assert_eq!(c.key, "/library/sections/1/all?collection=6068");
+        assert_eq!(c.id, 6068);
         assert_eq!(c.tag_key, "", "a collection guid is not a person tagKey");
         assert_eq!(c.thumb, "", "…and no artwork of its own");
         // `is_person` consumes person identity only; collection resolution uses id and key.
@@ -1340,10 +1318,9 @@ mod tests {
     /// with `count: 3` — because the hub is a union of per-section tag listings, which is also
     /// what `reason: "section"` is saying.
     ///
-    /// Left alone that draws him twice in Cast & Crew, and a merge that keeps the first row
-    /// reports 5 credits for a person who has 8. Neither is visible from a single row, which is
-    /// why the shape is pinned here rather than left for the shelf to discover: dedupe on
-    /// `tagKey`/`id`, and SUM the counts.
+    /// Left alone that draws him twice in Cast & Crew. Neither is visible from a single row,
+    /// which is why the shape is pinned here rather than left for the shelf to discover: the
+    /// rows are one person under the same identity, and the merge dedupes on `tagKey`/`id`.
     #[test]
     fn one_person_arrives_once_per_library_section_with_a_per_section_count() {
         let mc = serde_json::from_slice::<Envelope>(SEARCH_WALLACE)
@@ -1365,14 +1342,6 @@ mod tests {
             shawn[0].tag_key, shawn[1].tag_key,
             "…and the same portable guid"
         );
-        assert_ne!(shawn[0].library_section_id, shawn[1].library_section_id);
-        assert_eq!(
-            shawn[0].count + shawn[1].count,
-            8,
-            "the whole truth is the SUM, not the first row"
-        );
-        // `key` is per-section too, so it is not an identity either — it is where that row leads
-        assert_ne!(shawn[0].key, shawn[1].key);
     }
 
     /// Every number in a search hub, string-encoded — the encoding PMS is free to switch to per
@@ -1398,7 +1367,7 @@ mod tests {
             .expect("lenient parse")
             .media_container;
         let p = &search_hub(&mc, "actor").directory[0];
-        assert_eq!((p.id, p.count, p.library_section_id), (921, 5, 1));
+        assert_eq!(p.id, 921);
         assert_eq!(search_hub(&mc, "actor").size, 1);
 
         let m = &search_hub(&mc, "movie").metadata[0];
@@ -1441,7 +1410,6 @@ mod tests {
             ("role", &n.role),
             ("thumb", &n.thumb),
             ("tagKey", &n.tag_key),
-            ("key", &n.key),
         ] {
             assert_eq!(
                 got, "",
@@ -1449,7 +1417,7 @@ mod tests {
             );
         }
         // the numbers beside them are untouched — this is a per-field leniency, not a dropped row
-        assert_eq!((n.id, n.count), (921, 5));
+        assert_eq!(n.id, 921);
         // …and the intact row is exactly what it would have been on its own
         assert_eq!(rows[1].tag, "Wallace Shawn");
 

@@ -700,9 +700,6 @@ fn search_target(item: &crate::search::Item, request: &crate::screens::registry:
                 .then(|| AppArg::Content(ContentArg::Person { sid: *sid, key: current.clone(),
                     guid: item.tag_key.clone(), name: item.name.clone(), thumb: item.thumb.clone() }))
         }
-        (crate::search::Item::Collection(hit), SearchReq::Collection { sid, rk, tag })
-            if hit.item.sid == *sid && hit.item.rk == *rk && hit.tag == *tag =>
-            hit.route().map(AppArg::Content),
         _ => None,
     }
 }
@@ -726,7 +723,7 @@ fn search_requests(app: &mut App) {
                 // call chip_activate's legacy Search editing-state teardown a second time.
                 bridge::open_account_menu(&mut app.pages);
             }
-            SearchReq::Detail { .. } | SearchReq::Person { .. } | SearchReq::Collection { .. } => {
+            SearchReq::Detail { .. } | SearchReq::Person { .. } => {
                 let Some((item, _)) = app.bridge.search_selection(&app.pages, entry, ret.focus) else { continue };
                 let Some(target) = search_target(&item, &request) else { continue };
                 bridge::nav_push_with_return(&mut app.pages, target, ret);
@@ -776,34 +773,6 @@ mod search_action_tests {
             assert!(search_target(&tag, &SearchReq::Detail { sid: a, rk: key.into() }).is_none());
         }
         assert!(search_target(&Item::Tag(TagHit::default()), &person(Default::default(), "", "")).is_none());
-        crate::registry::reset_for_test();
-    }
-
-    /// OK on a collection hit opens the COLLECTION page — never the item detail its ratingKey would
-    /// otherwise address — with the retained hit's full identity: ratingKey, section, tag id, name.
-    #[test]
-    fn a_collection_hit_opens_the_collection_page_with_its_retained_identity() {
-        let _serial = crate::testlock::serial();
-        crate::registry::reset_for_test();
-        let a = crate::registry::register_with_client_id("coll-a", "127.0.0.1", 1, "synthetic", "fixture");
-        let b = crate::registry::register_with_client_id("coll-b", "127.0.0.1", 2, "synthetic", "fixture");
-        let hit = Item::Collection(crate::search::CollectionHit {
-            item: crate::pms::PmsMovie { sid: a, rk: "50007".into(), sec: 1, title: "Shorts".into(),
-                kind: crate::pms::KIND_COLLECTION, ..Default::default() },
-            tag: 7 });
-        let req = |sid, rk: &str, tag| SearchReq::Collection { sid, rk: rk.into(), tag };
-        assert!(search_target(&hit, &req(a, "50007", 7)) == Some(AppArg::Content(ContentArg::Collection(
-            crate::collection::CollectionRef { sid: a, rk: "50007".into(), sec: 1, tag: 7, name: "Shorts".into() }))));
-        assert!(search_target(&hit, &req(b, "50007", 7)).is_none(), "another server's key");
-        assert!(search_target(&hit, &req(a, "50008", 7)).is_none(), "a stale selection");
-        assert!(search_target(&hit, &SearchReq::Detail { sid: a, rk: "50007".into() }).is_none(),
-            "a collection never opens as an item detail");
-        // the tag-shaped fallback: no ratingKey, resolved on the page by section + tag id
-        let tag = Item::Collection(crate::search::CollectionHit::from_tag(
-            &TagHit { sid: a, id: "7".into(), sec: 1, name: "Shorts".into(), ..Default::default() }));
-        assert!(search_target(&tag, &req(a, "", 7)) == Some(AppArg::Content(ContentArg::Collection(
-            crate::collection::CollectionRef { sid: a, rk: String::new(), sec: 1, tag: 7, name: "Shorts".into() }))));
-        assert!(search_target(&tag, &req(a, "", 8)).is_none());
         crate::registry::reset_for_test();
     }
 }

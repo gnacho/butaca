@@ -241,11 +241,6 @@ impl BrowseStore {
     }
 
     #[cfg(test)]
-    pub(crate) fn seed_sources_for_test(&mut self, count: usize, reachable: bool) {
-        crate::browse::seed_sources_for_owner_test(&mut self.state, count, reachable);
-    }
-
-    #[cfg(test)]
     pub(crate) fn seed_pins_for_test(&mut self, pinned: &[bool]) {
         crate::browse::seed_pins_for_owner_test(&mut self.state, pinned);
     }
