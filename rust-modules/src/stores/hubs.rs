@@ -73,9 +73,6 @@ impl HubsStore {
     pub(crate) fn state(&self) -> &crate::pms::PmsState { &self.state }
 
     #[cfg(test)]
-    pub(crate) fn state_mut(&mut self) -> &mut crate::pms::PmsState { &mut self.state }
-
-    #[cfg(test)]
     pub(crate) fn adapter_for_test(&self) -> Arc<crate::pms::PmsAdapter> { Arc::clone(&self.adapter) }
 
     /// Test hook: put this owner in a known place — one source, `items` rows in one shelf. Mirrors
@@ -168,10 +165,10 @@ impl HubsStore {
         directory: crate::stores::browse::DirectoryView<'_>,
     ) -> super::StoreOutcome {
         let before = self.state.catalog_gen;
-        let endpoints = crate::pms::tick_with_directory(&mut self.state, &self.adapter, dt, directory);
+        crate::pms::tick_with_directory(&mut self.state, &self.adapter, dt, directory);
         let changed = self.state.catalog_gen != before;
         if changed { self.bump(); }
-        super::StoreOutcome { changed, endpoints }
+        super::StoreOutcome { changed }
     }
 
     /// Test-only standalone shape for bootstrap fixtures with no Browse directory.

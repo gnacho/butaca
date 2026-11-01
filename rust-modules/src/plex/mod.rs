@@ -12,7 +12,7 @@
 
 mod client;
 pub(crate) mod identity; // ONE X-Plex-* identity for both transports (plex.tv headers + PMS query)
-mod models;
+pub(crate) mod models;
 mod params;
 // WHICH servers exist and which one is current. `client()`/`client_opt()` live here now (they
 // mean "the current server"); `client.rs` is just the type. See its module doc for why the hot
@@ -34,11 +34,9 @@ mod transcoder;
 // why subscription state must never become a routing input.
 pub(crate) mod serverinfo;
 
-// The plex.tv ACCOUNT surface (login/discovery/home-users) — a separate service from the PMS
-// `Client` above (own host + HTTPS transport), so it's its own `AccountClient`, not an `impl`.
-// pub(crate): the login/boot code (app.rs) + the UI screens construct these directly.
-pub(crate) mod account;
-#[allow(dead_code)]
+// The persisted session record and its one read-modify-write door. pub(crate): the boot code
+// (app.rs), the preference editors and the stores' read paths all touch it — through the doors
+// this module documents, never the fields directly.
 pub(crate) mod session;
 
 // WHERE a server is, as one value: scheme + host + port, parsed from a URL and never assembled
@@ -114,61 +112,6 @@ pub(crate) use servers::{
 // Only reached from `auth::register_observed_origin`'s `#[cfg(test)]` arm and from test files, so
 // a plain `cargo check --lib` (which builds no test code at all) sees no caller.
 pub(crate) use servers::register_pinned_with_client_id;
-
-/// Evidence from the authenticated admission request made when an identity winner is considered
-/// for primary. Reaching `/identity` proves the machine; this proves the exact per-(profile,
-/// machine) token can browse it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum EndpointAdmission {
-    Usable,
-    Refused(i32),
-    Http(i32),
-    Timeout,
-    Transport,
-    InsecureOnly,
-    Malformed,
-}
-
-fn classify_endpoint_response(status: i32, parsed: bool) -> EndpointAdmission {
-    if matches!(status, 401 | 403) {
-        EndpointAdmission::Refused(status)
-    } else if !(200..300).contains(&status) {
-        EndpointAdmission::Http(status)
-    } else if parsed {
-        EndpointAdmission::Usable
-    } else {
-        EndpointAdmission::Malformed
-    }
-}
-
-/// Validate a freshly reached source with `GET /library/sections`, using the source's own token,
-/// origin and resolve pin through the ordinary PMS client/transport boundary.
-pub(crate) fn admit_source_until(source: &session::SourceRef, client_id: &str,
-    overall_deadline: std::time::Instant) -> EndpointAdmission {
-    let Some(origin) = source.origin() else { return EndpointAdmission::Transport };
-    if !grant::credential_allowed_for(&source.machine_id, &origin) {
-        return EndpointAdmission::InsecureOnly;
-    }
-    let client = Client::new(ServerId::UNSET, &source.machine_id, origin, &source.token, client_id)
-        .with_resolve_pin(source.resolve_pin());
-    let now = std::time::Instant::now();
-    if now >= overall_deadline { return EndpointAdmission::Timeout; }
-    let attempt_budget = if source.tier == Some(probe::Location::Local) {
-        std::time::Duration::from_secs(5)
-    } else {
-        std::time::Duration::from_secs(10)
-    };
-    let deadline = now
-        .checked_add(attempt_budget)
-        .unwrap_or(overall_deadline)
-        .min(overall_deadline);
-    match client.get_json_with_headers_until("/library/sections", &[], deadline) {
-        JsonDeadlineOutcome::Response { reply, parsed } =>
-            classify_endpoint_response(reply.status, parsed.is_some()),
-        JsonDeadlineOutcome::Deadline => EndpointAdmission::Timeout,
-        JsonDeadlineOutcome::Transport => EndpointAdmission::Transport,
-    }
-}
 
 // #95 step 8: connection facts applied AT registration, atomically with the registry write. See
 // `servers::ConnectionFacts`'s doc for why `None` means "leave unchanged" rather than "unknown".

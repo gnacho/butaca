@@ -85,14 +85,9 @@ pub(crate) fn language() -> Option<&'static str> {
 pub(crate) const DEVICE: &str = "LG webOS TV";
 pub(crate) const MODEL: &str = "LG webOS TV";
 
-/// Who MADE the hardware. The one field in this file that is a fact about the panel rather than a
-/// claim about this app, and it is safe to state because it is not a choice: the binary is
-/// cross-compiled for LG's webOS, links LG's `libplayerAPIs`, and starts on nothing else.
-///
-/// It rides the **plex.tv** headers only. That surface is the account's authorized-device list,
-/// where a user picks their television out of a column of them and revokes it — the place the
-/// vendor is worth reading. PMS is told what it acts on instead (`Client::playback_identity`), and
-/// it acts on the codec profile, not on who built the set. See that method's doc for the split.
+/// Who MADE the hardware. Canon-only since the plex.tv account surface went away: the
+/// authorized-device header that named the vendor is gone, and the identity tests pin the value.
+#[cfg_attr(not(test), expect(dead_code))]
 pub(crate) const VENDOR: &str = "LG";
 
 /// The FRIENDLY name, which is what a user actually reads in plex.tv's device list and in the

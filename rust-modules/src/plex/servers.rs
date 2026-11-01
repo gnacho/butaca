@@ -82,7 +82,7 @@ use std::sync::Mutex;
 /// `LINK_UNKNOWN`/`IP_UNKNOWN` regardless (`Client::new`), so `None` there is simply "still
 /// unknown" — the same value it would have been with no `Connection` at all.
 ///
-/// Not `plex::account::Connection` (the plex.tv resources API shape `Connection.uri`/`.address`
+/// Not the recorded-observation `Connection` (the frozen canon shape `Connection.uri`/`.address`
 /// this module's own doc talks about) — deliberately a different, narrower type so the registry
 /// write never has to reach into that wire struct.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -227,11 +227,6 @@ pub struct GrantEvidence {
 }
 
 impl GrantEvidence {
-    /// The evidence half of a wire row, dropping only the handle.
-    pub fn of(g: Grant<'_>) -> Self {
-        Self { owned: g.owned, home: g.home, owner_id: g.owner_id }
-    }
-
     /// What this carried evidence says as a [`Grant`], for [`is_household`]. `source_title` is
     /// empty because the rule does not read it — [`owner_credit`] does, and a credit has already
     /// been decided by the time evidence is carried.
@@ -270,7 +265,6 @@ impl GrantEvidence {
         Self { owned: false, home: true, owner_id }
     }
 }
-
 /// One `/api/v2/resources` row reduced to **whose server it is** — the four fields the credit rule
 /// reads, and nothing else. `account::Resource::grant` is the one place a wire row becomes one of
 /// these; everything downstream (`auth`'s three ingest sites, this module's tests) takes the
@@ -286,6 +280,7 @@ pub struct Grant<'a> {
     /// plex.tv's `ownerId`: the account id of whoever owns the server, `0` on our own.
     pub owner_id: i64,
     /// plex.tv's `sourceTitle`: the owner's handle, empty when plex.tv did not name them.
+    #[cfg_attr(not(test), expect(dead_code))]
     pub source_title: &'a str,
 }
 
@@ -360,6 +355,7 @@ pub fn is_household(g: Grant<'_>, household: &[i64]) -> bool {
 /// Every "Shared by …" in the app is [`crate::ui::fmt::shared_by`] applied to
 /// [`ServerFacts::handle`], and this is the only function that decides what goes into that field —
 /// see `docs/shared-servers.md` §13.
+#[cfg_attr(not(test), expect(dead_code))]
 pub fn owner_credit<'a>(g: Grant<'a>, household: &[i64]) -> &'a str {
     if is_household(g, household) {
         ""
@@ -602,6 +598,7 @@ pub fn probe_result(id: ServerId) -> Option<Outcome> {
 /// Publish what the completed server race proved. The winning tier is the neighbouring
 /// [`Client::link`](super::client::Client::link) fact and is written by the same auth coordinator.
 /// A no-op for an inactive/unknown slot, so a late auth worker cannot resurrect a revoked source.
+#[cfg_attr(not(test), expect(dead_code))]
 pub fn publish_probe_result(id: ServerId, outcome: Outcome) {
     let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
     let Some(i) = id.index().filter(|_| client_for(id).is_some()) else {

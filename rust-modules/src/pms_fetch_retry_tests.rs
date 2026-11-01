@@ -35,27 +35,29 @@ fn request_addresses_do_not_alias_across_sources_or_profile_resets() {
     crate::plex::reset_servers_for_test();
 }
 
+/// A refused spawn and a failed landing both arm the backoff ladder, and a failed landing
+/// retains the catalog: it rewrites no shelf, so the store verdict is unchanged.
 #[test]
-fn endpoint_outcomes_cover_missing_client_refusal_and_failed_arrival() {
+fn refused_and_failed_landings_arm_the_backoff_and_retain_the_catalog() {
     let _g = crate::testlock::serial();
     let mut o = Owner::default();
     crate::plex::reset_servers_for_test();
     reset(&mut o.state, &o.adapter);
     let mut missing = Src::new(sid(0), String::new());
-    assert_eq!(kick_with(o.state.hub_gen, &o.adapter, &mut missing, |_| panic!("missing client cannot spawn")).unwrap().sid, sid(0));
+    kick_with(o.state.hub_gen, &o.adapter, &mut missing, |_| panic!("missing client cannot spawn"));
     assert_eq!(missing.state, HubState::Failed);
     assert_eq!(missing.retry_s, RETRY_MIN_S);
 
     let id = crate::plex::register_for_test("endpoint-hub", "127.0.0.1", 9, "synthetic", "cid");
     let mut s = Src::new(id, String::new());
-    assert_eq!(kick_with(o.state.hub_gen, &o.adapter, &mut s, |_| false).unwrap().sid, id);
+    kick_with(o.state.hub_gen, &o.adapter, &mut s, |_| false);
     assert!(!s.fetching);
     assert_eq!(s.retry_s, RETRY_MIN_S);
     seed(&mut o.state, vec![s]);
     land(&o.state, &o.adapter, id.raw(), None);
     let result = take_landings(&o.adapter).pop().unwrap();
     let outcome = super::land(&mut o.state, &o.adapter, &result);
-    assert_eq!(outcome.endpoints.iter().map(|r| r.sid).collect::<Vec<_>>(), [id]);
+    assert!(!outcome.changed, "a failed landing retains the last successful catalog");
     assert_eq!(o.state.srcs[0].retry_n, 2);
     reset(&mut o.state, &o.adapter);
     crate::plex::reset_servers_for_test();

@@ -560,8 +560,7 @@ pub(crate) fn pump_with_gate(
     collection: &mut dyn FnMut(crate::stores::collection::CollectionCmd) -> bool,
     search: &mut dyn FnMut(crate::stores::search::SearchCmd) -> bool,
     metadata: &mut dyn FnMut(crate::stores::metadata::MetadataCmd) -> bool,
-) -> crate::stores::EndpointRefreshSet {
-    let mut endpoints = crate::stores::EndpointRefreshSet::default();
+) {
     let due = self.retry_tick();
     // the landing GATE (§3.3 step 3, `ui::landgate`): under a replay the server's answer is taken
     // on the frame the recording took it on. The retry tick and `kick` below stay outside it.
@@ -608,17 +607,16 @@ pub(crate) fn pump_with_gate(
         self.kick(adapter);
     }
     if self.is_busy() {
-        return endpoints; // a burst still has writes to send — one refresh at the end of it, not per write
+        return; // a burst still has writes to send
     }
     let refresh_hubs = std::mem::take(&mut self.want_hubs);
     if refresh_hubs {
-        endpoints.merge(hubs(crate::stores::hubs::HubsCmd::RefetchHubs).endpoints);
+        let _refetched = hubs(crate::stores::hubs::HubsCmd::RefetchHubs);
         // the same staleness, one screen over: a library's own shelves carry watch state and its
         // own Continue Watching row, so the burst that made Home's hubs stale made these stale too
         browse(crate::stores::browse::BrowseCmd::HubsInvalidateAll);
         crate::ui::idle::invalidate();
     }
-    endpoints
 }
 
 #[cfg(test)]
@@ -631,33 +629,28 @@ pub(crate) fn pump(
     collection: &mut dyn FnMut(crate::stores::collection::CollectionCmd) -> bool,
     search: &mut dyn FnMut(crate::stores::search::SearchCmd) -> bool,
     metadata: &mut dyn FnMut(crate::stores::metadata::MetadataCmd) -> bool,
-) -> crate::stores::EndpointRefreshSet {
+) {
     self.pump_with_gate(adapter, crate::ui::landgate::fixture_gate(), browse, hubs, person, collection,
         search, metadata)
-}
-
-#[cfg(test)]
-pub(crate) fn owe_hubs_refresh_for_test(&mut self) {
-    self.want_hubs = true;
-}
-
-#[cfg(test)]
-pub(crate) fn hold_inflight_for_test(&mut self, sid: ServerId, rk: &str) {
-        let id = self.mint_request_id();
-        self.sent = Some(Req {
-            id,
-            sid,
-            rk: rk.into(),
-            w: Write::Watched,
-            detail: None,
-            guid: String::new(),
-        });
 }
 
 /// Drain the addressed Detail reconciliation only after this owner's burst is idle.
 pub(crate) fn take_detail_refresh(&mut self) -> Option<crate::stores::viewstate::DetailRefresh> {
     if self.is_busy() { return None; }
     self.want_detail.take()
+}
+
+#[cfg(test)]
+pub(crate) fn hold_inflight_for_test(&mut self, sid: ServerId, rk: &str) {
+    let id = self.mint_request_id();
+    self.sent = Some(Req {
+        id,
+        sid,
+        rk: rk.into(),
+        w: Write::Watched,
+        detail: None,
+        guid: String::new(),
+    });
 }
 }
 
@@ -1036,22 +1029,6 @@ mod tests {
         assert_eq!(person.len(), 1, "the fan-out reaches the supplied Person owner callback");
             }
 
-    #[test]
-    fn endpoint_outcomes_survive_the_viewstate_refetch_pump() {
-        let _g = crate::testlock::serial();
-        let _session = crate::plex::session::TempSession::new("endpoint-viewstate");
-        crate::plex::reset_servers_for_test();
-                let sid = crate::plex::register_for_test("endpoint-viewstate", "127.0.0.1", 9, "synthetic", "cid");
-        let mut stores = crate::stores::Stores::default();
-        stores.viewstate.borrow_mut().owe_hubs_refresh_for_test();
-        let directory = crate::stores::browse::DirectorySnapshot::default();
-        let endpoints = crate::pms::with_refused_fetches_for_test(||
-            stores.viewstate_pump(directory.view()));
-        assert_eq!(endpoints.iter().map(|r| r.sid).collect::<Vec<_>>(), [sid]);
-        assert_eq!(stores.viewstate_pump(directory.view()).iter().count(), 0,
-            "refetch is consumed once");
-                crate::plex::reset_servers_for_test();
-    }
     use super::*;
 
     // Tests that touch the remaining compatibility stores hold the crate-wide serial lock. The

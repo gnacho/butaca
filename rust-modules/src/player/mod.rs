@@ -1131,6 +1131,17 @@ pub(crate) fn restore_state_for_test(raw: u8) {
     SHARED.pb_state.store(raw, Relaxed);
 }
 
+/// Same contract as [`swap_state_for_test`] for the seek-in-flight flag: `state()` reads it
+/// directly, `request_seek` arms it, and only a pump pass (or a `reset_session`) clears it —
+/// which a test that armed a seek owes no later reader. Callers must hold
+/// `crate::testlock::serial()`: this is a crate global.
+#[cfg(test)]
+pub(crate) fn swap_seeking_for_test(v: bool) -> bool {
+    let prev = SHARED.seeking.load(Relaxed);
+    SHARED.seeking.store(v, Relaxed);
+    prev
+}
+
 // ---- diagnostics --------------------------------------------------------------------------
 
 pub(crate) use engine::aq_caps;

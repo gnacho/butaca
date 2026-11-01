@@ -146,6 +146,7 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
     s.finish()
 }
 
+#[cfg_attr(not(test), expect(dead_code))]
 /// HMAC-SHA-256 (RFC 2104) with the inner and outer keyed states returned, because PBKDF2 keys
 /// the same password thousands of times and the two key pads are the part worth computing once.
 #[derive(Clone)]
@@ -155,6 +156,7 @@ struct HmacKey {
 }
 
 impl HmacKey {
+    #[cfg_attr(not(test), expect(dead_code))]
     fn new(key: &[u8]) -> Self {
         let mut k = [0u8; 64];
         if key.len() > 64 {
@@ -191,6 +193,7 @@ pub fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
     HmacKey::new(key).mac(msg)
 }
 
+#[cfg_attr(not(test), expect(dead_code))]
 /// PBKDF2-HMAC-SHA-256 (RFC 8018 §5.2), one 32-byte block — the derived length a verifier needs.
 /// `iters` of 0 is treated as 1: an iteration count that ran nothing would make every PIN match.
 pub fn pbkdf2_hmac_sha256(password: &[u8], salt: &[u8], iters: u32) -> [u8; 32] {
@@ -209,6 +212,7 @@ pub fn pbkdf2_hmac_sha256(password: &[u8], salt: &[u8], iters: u32) -> [u8; 32] 
     out
 }
 
+#[cfg_attr(not(test), expect(dead_code))]
 /// Equality that spends the same time whichever byte differs first. A verifier compare is the
 /// one place in this crate where an early-out equality would say something about the secret.
 pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {

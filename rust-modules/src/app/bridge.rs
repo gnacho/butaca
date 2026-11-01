@@ -184,29 +184,10 @@ impl crate::auth::owner::SessionHost for AppHost {
     }
 }
 
-impl crate::stores::StoreEffectHost for AppHost {
-    fn endpoint_refresh(request: crate::stores::EndpointRefresh) -> AppFx {
-        AppFx::Session(crate::auth::SessionCmd::RequestEndpoint { sid: request.sid })
-    }
-}
-
 /// Queue an application command on the same drain as screen effects and worker observations.
 pub(crate) fn execute_session_command(d: &mut Dispatcher<AppHost>, command: crate::auth::SessionCmd) {
     d.emit(MachineId::Nav, Fx::Deliver(MachineId::Session,
         Delivery::Machine(AppMsg::Session(crate::auth::owner::SessionEvent::Command(command)))));
-}
-
-pub(crate) fn execute_endpoint_outcomes(d: &mut Dispatcher<AppHost>, endpoints: crate::stores::EndpointRefreshSet) {
-    execute_endpoint_outcomes_with(endpoints, |command| execute_session_command(d, command));
-}
-
-fn execute_endpoint_outcomes_with(
-    endpoints: crate::stores::EndpointRefreshSet,
-    mut execute: impl FnMut(crate::auth::SessionCmd),
-) {
-    for request in endpoints.iter() {
-        execute(crate::auth::SessionCmd::RequestEndpoint { sid: request.sid });
-    }
 }
 
 impl crate::screens::registry::PlayerLike for AppHost {
@@ -997,7 +978,7 @@ impl Bridge {
         self.stores.viewstate_run(cmd, self.directory.view())
     }
 
-    pub(crate) fn viewstate_pump(&mut self) -> crate::stores::EndpointRefreshSet {
+    pub(crate) fn viewstate_pump(&mut self) {
         self.stores.viewstate_pump(self.directory.view())
     }
 
@@ -1216,12 +1197,8 @@ impl Rig<AppHost> for Bridge {
     }
     fn deliver(&mut self, to: MachineId, msg: &AppMsg, parts: &CxParts<u32>, fx: &mut Effects<'_, AppHost>) -> Handled {
         if let AppMsg::Session(event) = msg {
-            use crate::auth::owner::SessionEvent;
             if to != MachineId::Session { return Handled::No; }
             match event {
-                SessionEvent::Result(envelope) if !self.session_adapter.admitted(envelope) => return Handled::No,
-                SessionEvent::Admission(reply) if !reply.accepted
-                    && self.session_adapter.resource_admitted(reply) => return Handled::No,
                 _ => {}
             }
             let cx = parts.cx::<AppHost>(AppViews {
@@ -1251,28 +1228,23 @@ impl Rig<AppHost> for Bridge {
             match msg {
                 AppMsg::Store(StoreCmd::Hubs(cmd)) => {
                     let directory = self.directory.view();
-                    io.hubs_with_directory(&mut self.stores.hubs, Some(cmd.clone()), 0.0, directory)
-                        .endpoints.emit(fx);
+                    let _ = io.hubs_with_directory(&mut self.stores.hubs, Some(cmd.clone()), 0.0, directory);
                     return Handled::Yes;
                 }
                 AppMsg::Store(StoreCmd::Browse(crate::stores::browse::BrowseCmd::Discovery(result))) => {
-                    let mut endpoints = crate::stores::EndpointRefreshSet::default();
                     let outcome = self.stores.browse.borrow_mut()
                         .apply_discovery(result, &io.preferences);
-                    endpoints.merge(outcome.endpoints);
                     // Results are ingested after the frame's ordinary publication capture. Make
                     // the retained directory visible to Onboard's Tick in this same dispatcher
                     // turn instead of leaving the newly discovered rows one frame behind.
                     if outcome.changed {
                         self.stores.browse.borrow_mut().capture_directory(&mut self.directory);
                     }
-                    endpoints.emit(fx);
                     return Handled::Yes;
                 }
                 AppMsg::StoreWork(crate::stores::StoreWork::Hubs) => {
                     let directory = self.directory.view();
-                    io.hubs_with_directory(&mut self.stores.hubs, None, parts.tick.dt(), directory)
-                        .endpoints.emit(fx);
+                    let _ = io.hubs_with_directory(&mut self.stores.hubs, None, parts.tick.dt(), directory);
                     return Handled::Yes;
                 }
                 AppMsg::StoreWork(crate::stores::StoreWork::BrowseDiscovery) => {
@@ -1312,29 +1284,26 @@ impl Rig<AppHost> for Bridge {
             }
             AppMsg::Store(StoreCmd::Hubs(c)) => {
                 let directory = self.directory.view();
-                self.stores.hubs.run_with_directory(c.clone(), directory)
-                    .endpoints.emit(fx);
+                let _ = self.stores.hubs.run_with_directory(c.clone(), directory);
                 Handled::Yes
             }
             AppMsg::Store(cmd) => step_store(cmd, &cx, fx),
             AppMsg::HubsResult(result) => {
                 let directory = self.directory.view();
-                self.stores.hubs.land_with_directory(result, directory)
-                    .endpoints.emit(fx);
+                let _ = self.stores.hubs.land_with_directory(result, directory);
                 Handled::Yes
             }
             AppMsg::StoreWork(crate::stores::StoreWork::Hubs) => {
                 let directory = self.directory.view();
-                self.stores.hubs.tick_with_directory(parts.tick.dt(), directory)
-                    .endpoints.emit(fx);
+                let _ = self.stores.hubs.tick_with_directory(parts.tick.dt(), directory);
                 Handled::Yes
             }
             AppMsg::StoreWork(crate::stores::StoreWork::BrowseDiscovery) => {
-                self.stores.browse.borrow_mut().discover_pump_with_gate(&self.stores.landgate).endpoints.emit(fx);
+                let _ = self.stores.browse.borrow_mut().discover_pump_with_gate(&self.stores.landgate);
                 Handled::Yes
             }
             AppMsg::StoreWork(crate::stores::StoreWork::Browse) => {
-                self.stores.browse.borrow_mut().pump_with_gate(&self.stores.landgate).endpoints.emit(fx);
+                let _ = self.stores.browse.borrow_mut().pump_with_gate(&self.stores.landgate);
                 Handled::Yes
             }
             AppMsg::StoreWork(crate::stores::StoreWork::Search { dt_us }) => {
@@ -1432,11 +1401,10 @@ impl Bridge {
     /// Resource execution returns typed deliveries to the existing FIFO. In particular a
     /// commit acknowledgement never recursively steps the owner outside drain/carry budgets.
     fn session_effect(&mut self, effect: crate::auth::owner::SessionFx, out: &mut Effects<'_, AppHost>) {
-        use crate::auth::owner::{SessionEvent, SessionFx, AdmissionReply};
-        use crate::ui::machine::{Addr, RequestId};
+        use crate::auth::owner::{SessionEvent, SessionFx};
+        use crate::ui::machine::RequestId;
         if let Some(io) = &mut self.home_io {
-            if matches!(effect, SessionFx::Capture { .. } | SessionFx::Work { .. }
-                | SessionFx::Coordinator(_) | SessionFx::Erase { .. }) {
+            if matches!(effect, SessionFx::Coordinator(_) | SessionFx::Erase { .. }) {
                 io.failure = Some("unsupported controlled Home Session operation");
                 return;
             }
@@ -1466,19 +1434,6 @@ impl Bridge {
             SessionFx::Cancel { requests, .. } => {
                 for req in requests { self.session_adapter.cancel(RequestId(req)); }
             }
-            SessionFx::Capture { req, epoch, request } => {
-                if self.session.read_is_current(req, epoch, request) {
-                    deliver(SessionEvent::Read(self.session_adapter.capture(req, epoch, request)));
-                }
-            }
-            SessionFx::Work { req, key, admission, input } => {
-                if self.session.work_is_current(req, key, admission) {
-                    let reply = self.session_adapter.start_work(RequestId(req), key, admission, input)
-                        .err().unwrap_or(AdmissionReply { addr: Addr { to: MachineId::Session, req: RequestId(req) },
-                            key, correlation: admission, accepted: true });
-                    deliver(SessionEvent::Admission(reply));
-                }
-            }
             SessionFx::PublishProfile(publication) => {
                 if self.session.publication_is_current(&publication) {
                     self.session_adapter.publish_profile(publication);
@@ -1505,9 +1460,6 @@ impl Bridge {
                     self.reqs.push(LoopReq::LocalDataErased);
                 }
                 self.session_adapter.coordinator(action);
-            }
-            SessionFx::PlaintextAnswer { machine_id, choice, account } => {
-                crate::app::adapters::session::record_plaintext_answer(&account, &machine_id, choice);
             }
         }
     }
@@ -1594,11 +1546,7 @@ impl Bridge {
     }
 
     fn take_live_results(&mut self) -> AppResults {
-        // Landing sequence within auth is authoritative. Do not sort it by request ID:
-        // profile Ready and its late roster can be separated by other requests' progress.
-        let mut results: AppResults = self.session_adapter.take_results().into_iter()
-            .map(|envelope| (envelope.addr, AppMsg::Session(crate::auth::owner::SessionEvent::Result(envelope))))
-            .collect();
+        let mut results: AppResults = Vec::new();
         self.session_adapter.cancel_superseded_commits(|req, epoch, arrival|
             self.session.commit_is_current(req, epoch, arrival));
         if let Some(completed) = self.session_adapter.take_committed() {
@@ -1681,8 +1629,7 @@ fn frame_ingest(
     if rig.home_io.is_none() {
         crate::storage_worker::pump_retained();
         rig.land_session_cache();
-        let outcome = rig.stores.browse_discover_pump();
-        execute_endpoint_outcomes(d, outcome.endpoints);
+        let _ = rig.stores.browse_discover_pump();
     }
     let (browse_changed, hubs_changed, search_changed) = rig.capture_views(d);
     rig.capture_chrome(d);
@@ -1718,11 +1665,9 @@ fn frame_ingest(
     // driving again. `ModalStack::tick` and `Dispatcher`'s per-surface step and draw open one
     // scope each (§4.4) now; the page's tick runs in none.
     let results = take(rig);
-    let session_records: Vec<_> = results.iter().filter_map(|(addr, message)| match message {
-        AppMsg::Session(crate::auth::owner::SessionEvent::Result(envelope)) => Some((*addr, envelope.clone())),
-        _ => None,
-    }).collect();
-    rig.session_adapter.validate_supplied(&session_records)
+    // No session envelopes can exist any more (the roster/endpoint workers are gone); the
+    // recorded-ingest shape check stays for the contract's empty batch.
+    rig.session_adapter.validate_supplied(&[])
         .expect("Session ingest requires an exactly addressed, admitted transfer batch");
     let report = d.frame_with(rig, tick, inputs, results, tap, false);
     d.prune(&report.unmounted);
@@ -2378,8 +2323,7 @@ pub(crate) fn follow_auth_landing(pages: &mut Dispatcher<AppHost>, bridge: &mut 
     #[cfg(feature = "jellyfin")]
     if crate::jellyfin::signin::take_ready() {
         crate::jellyfin::signin::set_add_mode(false);
-        let endpoints = super::boot::activate_server_owned(bridge);
-        execute_endpoint_outcomes(pages, endpoints);
+        super::boot::activate_server_owned(bridge);
         nav_root_if_unsettled(pages, AppArg::Home);
         return;
     }
@@ -2388,8 +2332,7 @@ pub(crate) fn follow_auth_landing(pages: &mut Dispatcher<AppHost>, bridge: &mut 
     #[cfg(feature = "jellyfin")]
     if crate::jellyfin::quick_connect::take_ready() {
         crate::jellyfin::quick_connect::set_add_mode(false);
-        let endpoints = super::boot::activate_server_owned(bridge);
-        execute_endpoint_outcomes(pages, endpoints);
+        super::boot::activate_server_owned(bridge);
         nav_root_if_unsettled(pages, AppArg::Home);
         return;
     }
@@ -2417,9 +2360,8 @@ pub(crate) fn follow_auth_landing(pages: &mut Dispatcher<AppHost>, bridge: &mut 
         crate::route::restore_series_tracks(saved.series_tracks.as_slice());
         crate::player::restore_subtitle_tone(saved.subtitle_tone());
         crate::player::restore_audio_enhancements(saved.audio_enhancements());
-        let endpoints = super::boot::install_pms_owned(bridge, &c.origin,
+        super::boot::install_pms_owned(bridge, &c.origin,
             &c.address, &c.token, c.tier, c.pin.as_ref(), &c.install);
-        execute_endpoint_outcomes(pages, endpoints);
         // **A new user must never be able to walk BACK into the previous one's pages**, which is
         // the fourth store an identity change must not survive beside the `browse`/`pms`/`person`
         // resets `install_pms` performs. It was `trail.reset()`, which emptied the loop's mirror
@@ -3083,8 +3025,6 @@ mod session_protocol_tests;
 
 #[cfg(test)]
 #[cfg(test)]
-#[path = "session_resource_tests.rs"]
-mod session_resource_tests;
 #[cfg(test)]
 #[path = "recording_erasure_tests.rs"]
 mod recording_erasure_tests;
@@ -3095,17 +3035,11 @@ mod recording_erasure_tests;
 mod session_dev_bootstrap_tests;
 
 #[cfg(test)]
-#[path = "session_endpoint_policy_tests.rs"]
-mod session_endpoint_policy_tests;
-
 #[cfg(test)]
 #[path = "bridge_test_support.rs"]
 mod test_support;
 
 #[cfg(test)]
-#[path = "session_plaintext_repair_tests.rs"]
-mod session_plaintext_repair_tests;
-
 #[cfg(test)]
 #[path = "session_dispatch_tests.rs"]
 mod session_dispatch_tests;

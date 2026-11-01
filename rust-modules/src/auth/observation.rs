@@ -99,18 +99,6 @@ impl Observation {
                 && expected.account_token == pending.expected.account_token
                 && expected.profile_uuid == pending.expected.profile_uuid)
     }
-
-    pub(crate) fn from_transport(value: AuthProgress) -> (Self, Option<ClientLifecycle>) {
-        let observation = match value {
-            AuthProgress::Registry(p) => Self::Registry(p),
-            AuthProgress::ServerRoster(p) => Self::ServerRoster(p),
-            AuthProgress::Endpoint(p) => return (Self::Endpoint(EndpointFact {
-                epoch: p.epoch, expected: p.expected, sid: p.id.raw(),
-                machine_id: p.machine_id, fresh: p.fresh, probe: p.probe,
-            }), p.lifecycle),
-        };
-        (observation, None)
-    }
 }
 
 fn write_identity(w: &mut crate::ui::machine::Canon, identity: &SessionIdentity) {
@@ -177,15 +165,17 @@ fn write_resources(w: &mut crate::ui::machine::Canon, resources: &[Resource]) {
     }
 }
 
-/// The account parser remains authoritative. Serialize its complete existing data shape without
-/// changing account.rs or substituting a smaller grant model for its real policy inputs.
+use std::sync::Arc;
+
+pub(crate) use crate::plex::models::{Connection, Resource};
+
 pub(super) mod resources {
     use super::*;
     use serde::ser::{SerializeSeq, SerializeStruct};
 
     struct ResourceRead<'a>(&'a Resource);
-    struct ConnectionRead<'a>(&'a crate::plex::account::Connection);
-    struct ConnectionsRead<'a>(&'a [crate::plex::account::Connection]);
+    struct ConnectionRead<'a>(&'a Connection);
+    struct ConnectionsRead<'a>(&'a [Connection]);
 
     impl Serialize for ConnectionRead<'_> {
         fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -304,17 +294,6 @@ pub(super) mod address {
     }
 }
 
-pub(super) mod server_id {
-    use super::*;
-    pub fn serialize<S: serde::Serializer>(value: &ServerId, serializer: S) -> Result<S::Ok, S::Error> {
-        value.raw().serialize(serializer)
-    }
-    pub fn deserialize<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<ServerId, D::Error> {
-        u16::deserialize(deserializer).map(ServerId::from_raw)
-    }
-}
-
-/// [`server_id`] for an optional slot.
 pub(super) mod optional_server_id {
     use super::*;
     pub fn serialize<S: serde::Serializer>(value: &Option<ServerId>, serializer: S) -> Result<S::Ok, S::Error> {

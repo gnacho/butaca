@@ -35,6 +35,7 @@ use crate::http::{ACCEPT_JSON, BULK_ART_MAX_BYTES, BULK_JSON_MAX_BYTES};
 /// route can therefore classify it without consulting a clock after the fact.
 pub(crate) enum JsonDeadlineOutcome {
     Response {
+        #[cfg_attr(not(test), expect(dead_code))]
         reply: http::Reply,
         parsed: Option<MediaContainer>,
     },
@@ -225,12 +226,9 @@ pub(crate) fn decode_ip(c: u8) -> Option<IpVersion> {
 use super::identity::{device_name, DEVICE, MODEL, PROVIDES};
 
 impl Client {
-    #[cfg(test)]
-    pub(crate) fn client_id_for_test(&self) -> &str { &self.client_id }
-
+    /// Called only before constructing controlled resources in an empty registry.
     pub(crate) fn capture_generation_seed() -> u32 { GEN_SEQ.load(Relaxed) }
 
-    /// Called only before constructing controlled resources in an empty registry.
     pub(crate) fn restore_generation_seed(seed: u32) -> Result<(), &'static str> {
         if seed == 0 || super::server_count() != 0 { return Err("invalid client initialization boundary"); }
         GEN_SEQ.store(seed, Relaxed);

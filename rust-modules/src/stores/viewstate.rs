@@ -93,28 +93,13 @@ impl ViewStateStore {
         collection: &mut dyn FnMut(crate::stores::collection::CollectionCmd) -> bool,
         search: &mut dyn FnMut(crate::stores::search::SearchCmd) -> bool,
         metadata: &mut dyn FnMut(crate::stores::metadata::MetadataCmd) -> bool,
-    ) -> super::EndpointRefreshSet {
+    ) {
         let busy = self.state.is_busy();
-        let endpoints = self.state.pump_with_gate(&self.adapter, gate,
+        self.state.pump_with_gate(&self.adapter, gate,
             browse, hubs, person, collection, search, metadata);
         if busy != self.state.is_busy() {
             self.bump();
         }
-        endpoints
-    }
-
-    #[cfg(test)]
-    pub(crate) fn pump(
-        &mut self,
-        browse: &mut dyn FnMut(crate::stores::browse::BrowseCmd) -> bool,
-        hubs: &mut dyn FnMut(crate::stores::hubs::HubsCmd) -> super::StoreOutcome,
-        person: &mut dyn FnMut(crate::stores::person::PersonCmd) -> bool,
-        collection: &mut dyn FnMut(crate::stores::collection::CollectionCmd) -> bool,
-        search: &mut dyn FnMut(crate::stores::search::SearchCmd) -> bool,
-        metadata: &mut dyn FnMut(crate::stores::metadata::MetadataCmd) -> bool,
-    ) -> super::EndpointRefreshSet {
-        self.pump_with_gate(crate::ui::landgate::fixture_gate(), browse, hubs, person, collection, search,
-            metadata)
     }
 
     pub(crate) fn take_detail_refresh(&mut self) -> Option<DetailRefresh> {
@@ -124,11 +109,6 @@ impl ViewStateStore {
     #[cfg(test)]
     pub(crate) fn hold_inflight_for_test(&mut self, sid: ServerId, rk: &str) {
         self.state.hold_inflight_for_test(sid, rk);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn owe_hubs_refresh_for_test(&mut self) {
-        self.state.owe_hubs_refresh_for_test();
     }
 
     #[cfg(test)]

@@ -1557,3 +1557,57 @@ mod route_key_allowlist_tests {
         assert_eq!(key_of(&format!(r#"{{"key":"{long}"}}"#)), "", "over-long is refused");
     }
 }
+
+/// Canon-only wire shapes since the plex.tv account surface was removed: the session-protocol
+/// observation digest is frozen (SessionInit::write layout), so the recorded observation
+/// vocabulary and the `/api/v2/resources` rows it named survive here with no producer. The
+/// lenient adapters are `plex::models`' — the shapes must keep tolerating exactly what the
+/// account API used to send, because old recordings are replayed against this code.
+#[derive(serde::Deserialize, Default)]
+pub(crate) struct Resource {
+    #[serde(default, deserialize_with = "de_str")]
+    pub name: String,
+    #[serde(rename = "clientIdentifier", default, deserialize_with = "de_str")]
+    pub client_identifier: String,
+    #[serde(default, deserialize_with = "de_str")]
+    pub provides: String,
+    #[serde(default, deserialize_with = "de_bool")]
+    pub owned: bool,
+    #[serde(rename = "accessToken", default, deserialize_with = "de_str")]
+    pub access_token: String,
+    #[serde(rename = "sourceTitle", default)]
+    pub source_title: Option<String>,
+    #[serde(rename = "ownerId", default, deserialize_with = "de_i64")]
+    pub owner_id: i64,
+    #[serde(default, deserialize_with = "de_bool")]
+    pub home: bool,
+    #[serde(default, deserialize_with = "de_bool")]
+    pub presence: bool,
+    #[serde(rename = "publicAddressMatches", default, deserialize_with = "de_bool")]
+    pub public_address_matches: bool,
+    #[serde(rename = "httpsRequired", default, deserialize_with = "de_bool")]
+    pub https_required: bool,
+    #[serde(default, deserialize_with = "de_vec")]
+    pub connections: Vec<Connection>,
+}
+
+/// Canon-only: one recorded address of a recorded [`Resource`].
+#[derive(serde::Deserialize, Default)]
+pub(crate) struct Connection {
+    #[serde(default, deserialize_with = "de_str")]
+    pub protocol: String,
+    #[serde(default, deserialize_with = "de_str")]
+    pub address: String,
+    #[serde(default, deserialize_with = "de_i64")]
+    pub port: i64,
+    #[serde(default, deserialize_with = "de_str")]
+    pub uri: String,
+    #[serde(default, deserialize_with = "de_bool")]
+    pub local: bool,
+    #[serde(default, deserialize_with = "de_bool")]
+    pub relay: bool,
+    #[serde(rename = "IPv6", default, deserialize_with = "de_bool")]
+    pub ipv6: bool,
+}
+
+

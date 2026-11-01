@@ -29,11 +29,7 @@ impl TestBrowse {
         outcome
     }
 
-    pub(super) fn discover_pump(&mut self) -> crate::stores::StoreOutcome {
-        self.state.discover_pump_owned(&self.adapter)
-    }
-
-    pub(super) fn sync_roster(&mut self) {
+        pub(super) fn sync_roster(&mut self) {
         if self.state.sync_roster_owned().retire_adapter {
             self.adapter = Arc::new(BrowseAdapter::default());
         }

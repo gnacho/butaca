@@ -1331,44 +1331,8 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
         .filter(|p| !p.show_rk.is_empty())
         .and_then(|p| client.show_language_prefs(&p.show_rk))
         .unwrap_or_default();
-    // Capture identity and generation as ONE publication. The credential helper keeps plex.tv
-    // and PMS authority separate and permits the owner account-token fallback only for a proven
-    // legacy owner session.
-    let active_profile = crate::plex::session::current_snapshot();
-    let mut account_subtitles = None;
-    let account_audio = match active_profile.user.as_ref() {
-        Some(user) => match crate::plex::session::plex_tv_credential(user) {
-            Some(credential) => {
-                let stored_session = crate::plex::session::peek();
-                if stored_session.client_id.is_empty() {
-                    AccountAudioLanguage::NoCredential
-                } else {
-                    match crate::plex::account::AccountClient::audio_preferences(
-                        &stored_session.client_id, &credential, user, active_profile.generation,
-                    ) {
-                        crate::plex::account::AudioPreferencesOutcome::Available(prefs) => {
-                            account_subtitles = Some((prefs.subtitle_language.clone(), prefs.subtitle_mode, prefs.subtitle_forced));
-                            match prefs.language {
-                            Some(language) => AccountAudioLanguage::Set(language),
-                            None => AccountAudioLanguage::NotSet {
-                                auto_select_audio: prefs.auto_select_audio,
-                                stated_language: prefs.stated_language,
-                            },
-                        } },
-                        crate::plex::account::AudioPreferencesOutcome::TimedOut =>
-                            AccountAudioLanguage::TimedOut,
-                        crate::plex::account::AudioPreferencesOutcome::Failed =>
-                            AccountAudioLanguage::Unavailable,
-                    }
-                }
-            }
-            None => AccountAudioLanguage::NoCredential,
-        },
-        None => AccountAudioLanguage::NoCredential,
-    };
     // every audio pick below (direct play, remux, re-encode) ranks against these same prefs
-    let audio_prefs = AudioLangPrefs { show: show_prefs.audio.as_deref(),
-        account: account_audio.language() };
+    let audio_prefs = AudioLangPrefs { show: show_prefs.audio.as_deref() };
     let audio_sel = if env.audio_sid > 0 {
         tracks.iter().enumerate().find(|(_, t)| t.id == env.audio_sid
             && audio_direct_plays(env.direct_play_mode, &t.codec, t.channels))
@@ -1396,9 +1360,6 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
             }
         ));
     }
-    if !rk.is_empty() {
-        crate::player::log(&account_audio_language_log(&account_audio, tracks, audio_sel.as_ref()));
-    }
     // the language of the audio that will play — what "shown with foreign audio" is judged by
     let audio_lang: String = audio_sel
         .as_ref()
@@ -1411,24 +1372,18 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     // The show's own pref wins over the account's — the same precedence `pick_dp_subtitle_account`
     // gives them below — so the Subtitles menu's "yours" grouping never disagrees with what was
     // actually picked.
-    plan.sub_pref_lang = show_prefs
-        .subtitle
-        .clone()
-        .or_else(|| account_subtitles.as_ref().and_then(|(language, _, _)| language.clone()));
+    plan.sub_pref_lang = show_prefs.subtitle.clone();
     // ONE subtitle decision for the three places below (MDE handshake, the Original candidate,
     // the direct-play plan), so they cannot disagree about what will be on screen.
     let sub_pick = plan
         .playing
         .as_ref()
         .and_then(|p| {
-            let account = account_subtitles.as_ref().map(|(language, mode, forced)| SubtitleLangPrefs {
-                language: language.as_deref(), mode: *mode, forced: *forced,
-            }).unwrap_or_default();
             if let Some(id) = env.subtitle_override {
                 p.subs.iter().position(|s| s.id == id && !s.external && embedded_subtitle_renderable(&s.codec))
                     .and_then(|i| (id > 0).then_some((id, crate::metadata::sub_render_ordinal(&p.subs, i))))
             } else {
-                pick_dp_subtitle_account(&p.subs, &show_prefs, account, &audio_lang)
+                pick_dp_subtitle_account(&p.subs, &show_prefs, &audio_lang)
             }
         });
     if sub_pick.is_some()
@@ -2022,89 +1977,15 @@ fn fill_direct_plan(
 }
 
 
-/// The Plex language preferences an audio pick honours, most specific first: the SHOW's
-/// `audioLanguage` (its Advanced dialog, #160), then the active profile's enabled
-/// `defaultAudioLanguage` (#203). There is deliberately no built-in language: one
-/// used to sit here as a hard-coded English, and it opened a French user's French-default MKVs
-/// in English whenever an English track existed (#202).
+/// The Plex language preferences an audio pick honours: the SHOW's `audioLanguage` (its
+/// Advanced dialog, #160). There is deliberately no built-in language: one used to sit here as a
+/// hard-coded English, and it opened a French user's French-default MKVs in English whenever an
+/// English track existed (#202). The account rung (the active profile's plex.tv
+/// `defaultAudioLanguage`, #203) went with the plex.tv account surface.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct AudioLangPrefs<'a> {
     /// `audioLanguage`, e.g. `"hu-HU"`. `""` / `"-1"` mean "Account default", i.e. unset here.
     pub show: Option<&'a str>,
-    /// The active Plex profile's `defaultAudioLanguage`, e.g. `"fr"`.
-    pub account: Option<&'a str>,
-}
-
-/// What happened while resolving the active profile's plex.tv audio preference. Keeping this
-/// separate from [`AudioLangPrefs`] preserves the reason an account rung was unavailable for the
-/// one per-resolve diagnostic without retaining credentials or identity data.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum AccountAudioLanguage {
-    NoCredential,
-    TimedOut,
-    Unavailable,
-    /// plex.tv answered but offered no language to use; the fields say which half was missing.
-    NotSet { auto_select_audio: Option<bool>, stated_language: Option<String> },
-    Set(String),
-}
-
-impl AccountAudioLanguage {
-    fn language(&self) -> Option<&str> {
-        match self {
-            Self::Set(language) => Some(language),
-            Self::NoCredential | Self::TimedOut | Self::Unavailable | Self::NotSet { .. } => None,
-        }
-    }
-}
-
-/// The account-language resolver diagnostic. This is pure so every emitted outcome stays
-/// host-testable; it intentionally contains only the language code, never account identity.
-fn account_audio_language_log(
-    account: &AccountAudioLanguage,
-    tracks: &[crate::metadata::Stream],
-    audio_sel: Option<&(i32, String, i64)>,
-) -> String {
-    match account {
-        AccountAudioLanguage::NoCredential => {
-            "route: account audio language — no plex.tv credential for this profile".into()
-        }
-        AccountAudioLanguage::Unavailable => {
-            "route: account audio language — unavailable (request failed)".into()
-        }
-        AccountAudioLanguage::TimedOut => {
-            "route: account audio language — unavailable (timed out)".into()
-        }
-        AccountAudioLanguage::NotSet { auto_select_audio: Some(true), .. } => {
-            "route: account audio language — not set".into()
-        }
-        AccountAudioLanguage::NotSet { auto_select_audio, stated_language } => format!(
-            "route: account audio language — automatic audio selection {} (language {})",
-            if auto_select_audio.is_some() { "off" } else { "not reported" },
-            stated_language.as_deref().unwrap_or("not set"),
-        ),
-        AccountAudioLanguage::Set(lang) => {
-            let picked_language = audio_sel
-                .and_then(|(i, _, _)| usize::try_from(*i).ok())
-                .and_then(|i| tracks.get(i))
-                .is_some_and(|track| lang_matches(lang, &track.lang_code));
-            let matching_track = |track: &crate::metadata::Stream| {
-                lang_matches(lang, &track.lang_code)
-            };
-            let direct_playable_match = tracks.iter().any(|track| {
-                matching_track(track) && crate::plex::is_dp_audio_track(&track.codec, track.channels)
-            });
-            let outcome = if picked_language {
-                "playing that track"
-            } else if direct_playable_match {
-                "outranked by the PMS selection or show preference"
-            } else if tracks.iter().any(matching_track) {
-                "a track in it exists but is not direct-playable; using the usual order"
-            } else {
-                "no track in it; using the usual order"
-            };
-            format!("route: account prefers audio {lang} — {outcome}")
-        }
-    }
 }
 
 impl<'a> AudioLangPrefs<'a> {
@@ -2112,7 +1993,6 @@ impl<'a> AudioLangPrefs<'a> {
     fn in_order(self) -> impl Iterator<Item = &'a str> {
         self.show
             .into_iter()
-            .chain(self.account)
             .map(str::trim)
             .filter(|l| !l.is_empty() && *l != "-1")
     }
@@ -2426,26 +2306,9 @@ fn mde_subtitle_id_of(subs: &[crate::metadata::Stream], pick: Option<(i64, i32)>
 }
 
 
-/// Account subtitle defaults; each explicit show field overrides its inherited counterpart.
-/// PMS per-part selection always wins. Automatic picks stay embedded/client-rendered: selecting
-/// an account default never requests a subtitle burn on the transcode path.
-#[derive(Clone, Copy, Default)]
-pub(super) struct SubtitleLangPrefs<'a> {
-    pub language: Option<&'a str>,
-    pub mode: i64,
-    pub forced: i64,
-}
-
-#[cfg(test)]
-pub(super) fn pick_dp_subtitle_pref(
-    subs: &[crate::metadata::Stream], prefs: &crate::plex::ShowLangPrefs, audio_lang: &str,
-) -> Option<(i64, i32)> {
-    pick_dp_subtitle_account(subs, prefs, SubtitleLangPrefs::default(), audio_lang)
-}
-
 fn pick_dp_subtitle_account(
     subs: &[crate::metadata::Stream], prefs: &crate::plex::ShowLangPrefs,
-    account: SubtitleLangPrefs<'_>, audio_lang: &str,
+    audio_lang: &str,
 ) -> Option<(i64, i32)> {
     if let Some(pick) = pick_dp_subtitle(subs) {
         return Some(pick);
@@ -2453,8 +2316,8 @@ fn pick_dp_subtitle_account(
     if subs.iter().any(|s| s.selected) {
         return None;
     }
-    let mode = if prefs.subtitle_mode == -1 { account.mode } else { i64::from(prefs.subtitle_mode) };
-    let lang = prefs.subtitle.as_deref().or(account.language)?;
+    let mode = i64::from(prefs.subtitle_mode);
+    let lang = prefs.subtitle.as_deref()?;
     let want = match mode {
         2 => true,
         1 => !audio_lang.is_empty() && !lang_matches(lang, audio_lang),
@@ -2467,18 +2330,14 @@ fn pick_dp_subtitle_account(
         let ord = crate::metadata::sub_render_ordinal(subs, i);
         (ord >= 0 && subs[i].id > 0).then_some((subs[i].id, ord))
     };
-    let prefer_forced = account.forced == 1 || account.forced == 2;
-    let tiers: [&dyn Fn(&crate::metadata::Stream) -> bool; 3] = [
-        &|s| s.forced == prefer_forced && !s.sdh,
-        &|s| s.forced == prefer_forced,
+    let tiers: [&dyn Fn(&crate::metadata::Stream) -> bool; 2] = [
+        &|s| !s.sdh,
         &|_| true,
     ];
     tiers.iter().find_map(|tier| {
         (0..subs.len())
             .filter(|&i| !subs[i].external && embedded_subtitle_renderable(&subs[i].codec)
                 && lang_matches(lang, &subs[i].lang_code)
-                && (account.forced != 2 || subs[i].forced)
-                && (account.forced != 3 || !subs[i].forced)
                 && tier(&subs[i]))
             .find_map(embedded)
     })
@@ -2768,7 +2627,6 @@ fn build_stream_jellyfin(
                 pick_dp_subtitle_account(
                     &p.subs,
                     &crate::plex::ShowLangPrefs::default(),
-                    SubtitleLangPrefs::default(),
                     "",
                 )
             };

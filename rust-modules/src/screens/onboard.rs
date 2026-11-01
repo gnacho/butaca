@@ -903,8 +903,7 @@ mod tests {
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
         browse.stores.browse.borrow_mut().queue_discovery_for_test(
             client, client.token_gen(), false);
-        let outcome = browse.stores.browse_discover_pump();
-        assert_eq!(outcome.endpoints.iter().map(|request| request.sid).collect::<Vec<_>>(), [sid]);
+        let _ = browse.stores.browse_discover_pump();
         let directory = browse.capture();
         let source_list_gen = directory.source_list_gen();
         let (_, effects) = step_ev(
