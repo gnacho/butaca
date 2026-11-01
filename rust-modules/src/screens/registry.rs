@@ -183,10 +183,6 @@ pub(crate) enum SearchReq {
     Detail { sid: crate::registry::ServerId, rk: String },
     Person { sid: crate::registry::ServerId, key: String, guid: String, name: String, thumb: String },
     ItemMenu { sid: crate::registry::ServerId, rk: String },
-    /// OK on a Collections-shelf hit. `rk` is the collection's ratingKey (empty for a tag-shaped
-    /// hit from a server that ignored `includeCollections`), `tag` its tag id; both are checked
-    /// against the retained selection before the route is built from it.
-    Collection { sid: crate::registry::ServerId, rk: String, tag: i64 },
     Tab(HomeTab),
     Account,
 }

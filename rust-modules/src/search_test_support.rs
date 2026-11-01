@@ -12,8 +12,6 @@ pub(super) fn merge_favs(sources: &[Source]) -> Vec<Shelf> {
     merge(sources, NO_FAVS)
 }
 
-pub(super) use crate::plex::{Hub, MediaContainer, Metadata, Tag};
-
 /// A standalone owned Search fixture for the split test modules below — the whole point being
 /// that a second one built beside it shares nothing: no query, no shelves, no landing, no
 /// notice. Fields are `pub(super)` so a sibling test module (a descendant of `search`, exactly
@@ -126,23 +124,6 @@ pub(super) fn register(owner: &mut Owner, n: usize) {
     // roster as already observed so that first pump grades the landing rather than setup.
     owner.state.visible = crate::registry::roster_gen();
     assert_eq!(nsrc(), n);
-}
-
-pub(super) fn hub(id: &str, kind: &str) -> Hub {
-    Hub {
-        hub_identifier: id.to_string(),
-        kind: kind.to_string(),
-        ..Default::default()
-    }
-}
-
-pub(super) fn meta(kind: &str, rk: &str, title: &str) -> Metadata {
-    Metadata {
-        kind: kind.to_string(),
-        rating_key: rk.to_string(),
-        title: title.to_string(),
-        ..Default::default()
-    }
 }
 
 pub(super) fn media(rk: &str) -> Item {

@@ -373,8 +373,6 @@ fn search_capture_and_pump_keep_the_frame_directory_policy() {
     rig.capture_views(&mut pages);
     assert!(rig.directory.view().sections().is_empty(),
         "a fresh Bridge owner starts empty");
-    assert!(rig.search.view().scope().sources().iter().all(|source| source.libraries.is_empty()),
-        "Search capture must describe the same retained directory as the rest of the frame");
 
     let directory = directory_policy_fixture(own, hidden);
     rig.directory = directory.clone();

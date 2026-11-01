@@ -8,28 +8,26 @@
 //!
 //! ## The endpoint, and what it actually returns
 //!
-//! `GET /hubs/search?query=…&limit=…` ([`crate::plex::Client::search`], written long before this
-//! screen and dead until now). The spec says it "is intended to be very fast, and called as the
-//! user types", which is the design this store is built for. Three things were measured against
-//! PMS 1.43.3 rather than taken from the spec, each of which decides something here:
+//! The Jellyfin backend answers the settled query with one flat `/Items?searchTerm=` page plus a
+//! people lookup, and `jellyfin::search` shelves it into this store's mailbox shape. Two of the
+//! constants here were measured against the PMS endpoint this store was originally built for
+//! rather than taken from a spec, and both still decide something:
 //!
-//! - **A one-character query returns every hub empty.** So [`MIN_QUERY`] is 2, and the first
-//!   keystroke of every search costs no round trip at all.
-//! - **Hub ORDER moves per query** — `sta` ranks people first, `star` ranks films first. So the
+//! - **A one-character query was answered with every hub empty**, so [`MIN_QUERY`] is 2 and the
+//!   first keystroke of every search costs no round trip at all.
+//! - **Hub order moved per query on that wire** — `sta` ranked people first, `star` films. So the
 //!   shelf order here is FIXED ([`KINDS`]) and ranking is honoured only *inside* a shelf.
 //!   Reordering shelves per keystroke would move the row under the user's focus while they type.
-//! - **Items arrive in two different containers** — see [`crate::plex::Hub::directory`]. That is
-//!   why [`Item`] is an enum instead of one struct. Collections are asked for with
-//!   `includeCollections=1`, which makes them full `Metadata[]` rows ([`Item::Collection`]) rather
-//!   than tag rows; a server that ignores the flag still sends tags, which [`project`] turns into
-//!   the same [`Item::Collection`] once folded.
+//!
+//! [`Item`] is an enum rather than one struct because a source's answer carries different shapes
+//! per shelf: media rows open a detail page, people and collections are tag rows that open their
+//! own arms.
 //!
 //! ## Multi-source
 //!
-//! Search is single-server: `/hubs/search` answers for the machine you asked, and
-//! `docs/shared-servers.md` states that nothing aggregates server-side — the merge is the client's
-//! job. So this fans out one query per [`crate::registry::ids`] and merges into the shelves
-//! below, which is why every [`Item`] carries its own `ServerId`.
+//! The store fans out one query per live source slot ([`slots`]) and merges into the shelves
+//! below, which is why every [`Item`] carries its own `ServerId`. The Jellyfin backend's one
+//! server is the only production source; the fan-out shape is what lets a test seed more.
 //!
 //! The merge is **round robin** ([`merge`]), not source-by-source the way Home groups its shelves.
 //! Home groups because a shelf there BELONGS to a source and adjacency is what says so; a search
@@ -90,13 +88,12 @@
 #![allow(dead_code)]
 
 use crate::registry::ServerId;
-use crate::pms::{parse_item, PmsMovie};
+use crate::pms::PmsMovie;
 use std::panic::catch_unwind;
 use std::sync::Arc;
 
 pub(crate) mod view;
 pub(crate) mod recents;
-pub(crate) mod scope;
 
 /// Below this many characters the server answers with nothing, so asking is pure latency.
 /// Measured, not guessed — see the module doc.
@@ -162,116 +159,43 @@ impl Kind {
     }
 }
 
-/// A person or collection result: the `Directory[]` shape, which carries no `ratingKey` and — for
-/// a collection — no artwork either. Kept distinct from [`PmsMovie`] rather than flattened into
-/// it, because the two open different screens and a struct with half its fields permanently empty
-/// invites code that forgets which half it is holding.
+/// A person or collection result, as `jellyfin::search` files both: a row that carries no
+/// `ratingKey`, kept distinct from [`PmsMovie`] rather than flattened into it, because the two
+/// open different screens and a struct with half its fields permanently empty invites code that
+/// forgets which half it is holding.
 ///
-/// It is a projection of [`crate::plex::Tag`] — the SAME record the detail page's cast row is
-/// built from, which is what lets a search hit be handed to the person page unchanged (and lets
-/// `Tag::is_person` match one against a credit).
+/// The backend builds one per BoxSet and per person, so `merge` and every tile path draw both
+/// shelves through the same struct.
 #[derive(Clone, Default)]
 pub(crate) struct TagHit {
     pub(crate) sid: ServerId,
     pub(crate) name: String,
-    /// plex.tv's global person guid — the only portable identity here, and the only id
-    /// `discover.provider.plex.tv` answers to. Empty on a collection.
+    /// Empty on this backend — the portable person guid was the plex.tv wire's concept. A row is
+    /// identified by [`TagHit::id`] instead.
     pub(crate) tag_key: String,
-    /// The server-local numeric tag id, as a string. Dense from 1 and meaningless off this server.
+    /// The server-local tag id as a string: the Jellyfin GUID for a person or BoxSet, stable on
+    /// its own server and meaningless off it.
     pub(crate) id: String,
     /// The artwork source, to be handed to the poster store **verbatim** — there is no second
     /// image route to build, and `posters::poster_key` is where the whole story is written down.
     ///
-    /// **A person's is ABSOLUTE**: `https://metadata-static.plex.tv/…jpg`, a host `stream.rs` can
-    /// never dial (no DNS, no TLS). It does not need to. The URL goes in as the `url=` value of
-    /// `/photo/:/transcode`, percent-encoded whole, the request goes to our own PMS, and the
-    /// server fetches it over TLS for us. Verified live against PMS 1.43.3 (2026-08-14): `200
-    /// image/jpeg` at exactly the requested size.
-    ///
-    /// **A collection's is EMPTY**, and that is the server's answer, not a parse gap — a
-    /// `/hubs/search` `collection` row carries no `thumb` and no `ratingKey`, only `key`, a tag
-    /// `id` and a `collection://` guid. An empty source is refused by `poster_key` rather than
-    /// turned into a request (the bare `url=` is a 404 here, and a shelf of them would spend the
-    /// store on failures), so the tile draws the skeleton face the design specifies for art the
-    /// server has not given us.
-    ///
-    /// The search request now asks with `includeCollections=1`, which makes the server send the
-    /// collection hub as full rows — [`Item::Collection`], with a `thumb` and a `ratingKey` — so a
-    /// tag-shaped collection hit only reaches this struct from a server that ignored the flag, and
-    /// only until [`project`] has folded it: it then becomes an [`Item::Collection`] too
-    /// ([`CollectionHit::from_tag`]), whose page resolves the tag id to a ratingKey and artwork.
+    /// EMPTY means the tile draws the skeleton face the design specifies for art the server has
+    /// not given us: an empty source is refused by `poster_key` rather than turned into a
+    /// request, so the store is never spent on failures.
     pub(crate) thumb: String,
-    /// The listing this tag opens — `/library/sections/1/all?collection=6068`.
+    /// The listing this row opens. Empty on this backend — the person and collection pages are
+    /// their own arms, and until a row carries a listing path a press on it opens nothing.
     pub(crate) key: String,
-    /// The `librarySectionID` of the first row folded into this hit, 0 when the server sent none.
-    /// Only a COLLECTION tag reads it: a collection lives in one library, and its tag id resolves
-    /// to a collection only within that library ([`CollectionHit::from_tag`]).
+    /// The library section the row came from, 0 on this backend: hits carry no section grain on
+    /// one virtual library.
     pub(crate) sec: i64,
-    /// How many items carry it, for the caption line.
+    /// How many items carry it, for the caption line — a BoxSet's ChildCount is the "N items".
     pub(crate) count: i64,
-    /// **Does any FAVOURITE library contribute to this tag?** Ranking only — it never removes a
+    /// **Does any FAVOURITE library contribute to this row?** Ranking only — it never removes a
     /// row (§6: a browsing preference is not an authorization boundary), and it never touches
-    /// [`TagHit::count`], which stays grant-wide because "12 films" must keep meaning every film
-    /// the user can play.
-    ///
-    /// It has to be carried rather than derived, and that is the whole reason this field exists:
-    /// the wire's `Tag` has a `library_section_id` ([`crate::plex::Tag`]) and this projection drops
-    /// it, because a tag arrives once per SECTION and the two folds below — per response, then
-    /// across servers — sum those rows into one. After the fold there is no section left to ask
-    /// about. So the bit is attached before the first fold and **OR'd** at both: a person in one
-    /// favourite library and one non-favourite is favourite-ranked, which is the honest answer.
+    /// [`TagHit::count`]. The bit is attached by the backend that built the row and OR'd across
+    /// sources by [`merge`]; this backend has one virtual library, so its rows carry `false`.
     pub(crate) fav: bool,
-}
-
-/// A collection result as the server sends it when asked with `includeCollections=1`
-/// ([`crate::plex::Client::search`]): a full `type=collection` `Metadata[]` row. The row itself is
-/// the ordinary card DTO ([`crate::pms::KIND_COLLECTION`], so the poster, the ambient blur and the
-/// poster store's keying are the ones every other tile uses); the two numbers beside it are the
-/// one [`PmsMovie`] has no field for and the collection route needs (its `child_count` is the
-/// caption's "N items").
-#[derive(Clone, Default)]
-pub(crate) struct CollectionHit {
-    /// `kind == KIND_COLLECTION`; `rk` is the collection's ratingKey, `sec` its library.
-    pub(crate) item: PmsMovie,
-    /// The collection's TAG id (`index`) — a different id space from `item.rk`
-    /// (docs/pms-api.md §2b). 0 when the server sent none.
-    pub(crate) tag: i64,
-}
-
-impl CollectionHit {
-    /// WORKER THREAD: one `type=collection` search row.
-    pub(crate) fn from_row(m: &crate::plex::Metadata, sid: ServerId) -> Self {
-        Self { item: parse_item(m, sid), tag: m.index }
-    }
-
-    /// WORKER THREAD: one FOLDED tag-shaped collection hit — the answer of a server that ignored
-    /// `includeCollections=1`. It becomes the same kind-4 row a full hit carries, with no
-    /// ratingKey: the tag's name, section, artwork (none, in practice) and count, so the card, the
-    /// caption and the route treat both shapes alike. A tag id that is not a positive number
-    /// leaves `tag` 0, and with no ratingKey either the hit has no [`CollectionHit::route`].
-    pub(crate) fn from_tag(t: &TagHit) -> Self {
-        Self {
-            item: PmsMovie { sid: t.sid, sec: t.sec, title: t.name.clone(), thumb: t.thumb.clone(),
-                kind: crate::pms::KIND_COLLECTION, child_count: t.count.max(0), ..Default::default() },
-            tag: t.id.parse::<i64>().ok().filter(|tag| *tag > 0).unwrap_or(0),
-        }
-    }
-
-    /// The collection page this hit opens: ratingKey first (the page loads it directly), with the
-    /// section + tag id carried as the second identity the page resolves by when no ratingKey is
-    /// item id when the link carries one. `None` when neither identity is whole: a
-    /// guess would open a page for nothing.
-    pub(crate) fn route(&self) -> Option<crate::screens::registry::ContentArg> {
-        let by_tag = self.tag > 0 && self.item.sec > 0;
-        (!self.item.rk.is_empty() || by_tag).then(|| crate::screens::registry::ContentArg::Collection(
-            crate::collection::CollectionRef {
-                sid: self.item.sid,
-                rk: self.item.rk.clone(),
-                sec: self.item.sec,
-                tag: self.tag,
-                name: self.item.title.clone(),
-            }))
-    }
 }
 
 #[derive(Clone)]
@@ -279,10 +203,8 @@ pub(crate) enum Item {
     /// A movie, show or episode: the ordinary card DTO, so every existing tile path draws it
     /// unchanged — resume bar, watched mark, ambient blur and all.
     Media(PmsMovie),
+    /// A person or collection row (see [`TagHit`]).
     Tag(TagHit),
-    /// A collection result (see [`CollectionHit`]): a full row — the normal case — or a
-    /// tag-shaped row from a server that ignores `includeCollections`, converted once folded.
-    Collection(CollectionHit),
 }
 
 impl Item {
@@ -290,24 +212,22 @@ impl Item {
         match self {
             Item::Media(m) => &m.title,
             Item::Tag(t) => &t.name,
-            Item::Collection(c) => &c.item.title,
         }
     }
     pub(crate) fn sid(&self) -> ServerId {
         match self {
             Item::Media(m) => m.sid,
             Item::Tag(t) => t.sid,
-            Item::Collection(c) => c.item.sid,
         }
     }
 
     /// **Is this hit from a favourite library?** — the ranking key, and the two variants answer it
     /// from different places for a reason worth knowing before "simplifying" it.
     ///
-    /// A MEDIA hit keeps its own `librarySectionID` (`PmsMovie::sec`) all the way through, and
-    /// nothing folds two of them together, so the bit is derivable at merge time from the same
-    /// snapshot Home joins against. A TAG's section is destroyed by the fold, so its bit is
-    /// attached upstream in [`tag_hit`] and carried — see [`TagHit::fav`].
+    /// A MEDIA hit keeps its own library id (`PmsMovie::sec`) all the way through, and nothing
+    /// folds two of them together, so the bit is derivable at merge time from the same snapshot
+    /// Home joins against. A TAG's bit is attached by the backend that built the row and carried
+    /// — see [`TagHit::fav`].
     ///
     /// Unknown ranks as a FAVOURITE, in both directions (`sec == 0`, or a library the section table
     /// has not enumerated yet), which is [`crate::pms`]'s rule at the same join and for the same
@@ -317,7 +237,6 @@ impl Item {
         match self {
             Item::Tag(t) => t.fav,
             Item::Media(m) => section_is_fav(favs, m.sid, m.sec),
-            Item::Collection(c) => section_is_fav(favs, c.item.sid, c.item.sec),
         }
     }
 }
@@ -600,10 +519,6 @@ pub(crate) struct SearchState {
 
     /// One per registry slot; see [`Source`]. The worker's two halves live in [`SearchAdapter`].
     src: [Source; NSRC],
-
-    /// This owner's memo of the built [`scope::SourceScopeSnapshot`] (`search/scope.rs`). Interior
-    /// mutable because `snapshot`/`snapshot_with_directory` are reached through `&self`.
-    scope_cache: scope::ScopeCache,
 }
 
 impl Default for SearchState {
@@ -619,7 +534,6 @@ impl Default for SearchState {
             settle_us: 0,
             armed: false,
             src: [const { Source::EMPTY }; NSRC],
-            scope_cache: scope::ScopeCache::default(),
         }
     }
 }
@@ -645,24 +559,12 @@ impl SearchState {
     }
 
     pub(crate) fn snapshot(&self) -> view::SearchSnapshot {
-        self.snapshot_with_scope(self.scope_cache.snapshot())
-    }
-
-    pub(crate) fn snapshot_with_directory(
-        &self,
-        directory: crate::stores::browse::DirectoryView<'_>,
-    ) -> view::SearchSnapshot {
-        self.snapshot_with_scope(self.scope_cache.snapshot_with_directory(directory))
-    }
-
-    fn snapshot_with_scope(&self, scope: scope::SourceScopeSnapshot) -> view::SearchSnapshot {
         view::SearchSnapshot::from_parts(
             self.query.clone(),
             self.shelves.clone(),
             self.state,
             self.gen,
             recents::snapshot(),
-            scope,
         )
     }
 
@@ -682,7 +584,6 @@ impl SearchState {
         cmd: crate::stores::search::SearchCmd,
         directory: crate::stores::browse::DirectoryView<'_>,
     ) -> bool {
-        self.scope_cache.snapshot_with_directory(directory);
         run_with_optional_directory(self, adapter, cmd, Some(directory))
     }
 
@@ -1141,12 +1042,12 @@ fn merge_refs(sources: &[&Source], favs: &[(ServerId, i64, bool)]) -> Vec<Shelf>
         for d in 0..deepest {
             for v in &live {
                 let Some(it) = v.get(d) else { continue };
-                // **The same person on two servers is one person.** `project` folds per RESPONSE,
-                // so it cannot see across sources — and this is the only place both are in hand.
-                // `same_tag`'s doc already claimed the round-robin merge brought them together;
-                // nothing here acted on it, so a shared actor drew twice with a split count.
+                // **The same person on two servers is one person.** Each source's answer arrives
+                // already shelved by its backend, which cannot see across sources — this is the
+                // only place every source's rows are in hand, so this fold is the one that makes
+                // the claim true.
                 //
-                // `tagKey` is what makes it safe across machines: `same_tag` compares the local id
+                // `same_tag` is what makes it safe across machines: it compares the local id
                 // only within one server, so two servers' id 921 stay two people.
                 if let Item::Tag(t) = it {
                     if let Some(prev) = items.iter_mut().find_map(|e| match e {
@@ -1239,15 +1140,10 @@ fn maybe_spawn(state: &mut SearchState, adapter: &Arc<SearchAdapter>, i: usize) 
     }
     let Some(q) = terms(state.query()) else { return };
     let q = q.to_string();
-    // `sid` is captured HERE, on the main thread, and resolved through `client_for` on the worker.
-    // A worker that read `client()` would search whichever server the user had wandered off to by
-    // the time it was scheduled, and file the answers under this slot's id.
+    // `sid` is captured HERE, on the main thread, and resolved on the worker: the jellyfin arm
+    // below answers only when the slot IS the backend's server.
     let sid = ServerId::from_raw(i as u16);
     let gen = state.gen;
-    // …and so is the favourite table, for the same reason and by the same rule: a worker that asked
-    // `browse` what was current would answer with a table from a different moment than the query it
-    // was given. `pump` rejects a landing taken under a snapshot that has since moved.
-    let favs = favs(state);
     adapter.fetch[i].claim();
     crate::log(&format!("search: q[{}ch] sid={i} asking limit={LIMIT}", q.chars().count()));
     let worker_adapter = Arc::clone(adapter);
@@ -1255,18 +1151,18 @@ fn maybe_spawn(state: &mut SearchState, adapter: &Arc<SearchAdapter>, i: usize) 
         // the mailbox is filled OUTSIDE the guard so a panicking fetch still lands — as a FAILURE
         // (None), not as an answer of "this server has nothing"
         let what = catch_unwind(|| {
-            // The Jellyfin backend answers one flat item page instead of a hub list; the
-            // shelfing moves into `jellyfin::search` and the mailbox shape is unchanged. Same
-            // account-wide scope: no ParentId, the whole library.
+            // The Jellyfin backend answers one flat item page plus a people lookup; the shelfing
+            // lives in `jellyfin::search` and the mailbox shape is unchanged. Account-wide scope:
+            // no ParentId, the whole library.
             #[cfg(feature = "jellyfin")]
             if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
                 return crate::jellyfin::search::search(crate::jellyfin::client()?, &q, LIMIT);
             }
-            // sectionId 0 = every section, which `opt_int` sends by omitting it. The Search screen
-            // is deliberately account-wide: `sectionId` only RANKS (measured — every other
-            // section's rows still come back), so it could not scope this even if we wanted it to.
-            let mc = crate::registry::client_for(sid)?.search(&q, LIMIT, 0)?;
-            Some(project(&mc, sid, &favs))
+            // No other source can answer: an uninstalled backend leaves the slot silent, and a
+            // test that wants an answer injects one through the mailbox directly.
+            #[cfg(not(feature = "jellyfin"))]
+            let _ = (&sid, &q);
+            None
         })
         .unwrap_or(None);
         land(&worker_adapter, i, gen, what);
@@ -1279,75 +1175,9 @@ fn maybe_spawn(state: &mut SearchState, adapter: &Arc<SearchAdapter>, i: usize) 
     }
 }
 
-/// WORKER THREAD: one server's `/hubs/search` response, projected into [`KINDS`] order.
-///
-/// A search response carries EVERY hub type the server knows about — 17 of them on this set, most
-/// empty — so anything that is not one of ours is dropped. `actor` and `director` both land on the
-/// Person shelf, in hub order, which is the ONE place the "one shelf, two hubs" rule of
-/// [`Kind::hubs`] is actually applied.
-fn project(
-    mc: &crate::plex::MediaContainer,
-    sid: ServerId,
-    favs: &[(ServerId, i64, bool)],
-) -> Projection {
-    let mut out: Projection = Default::default();
-    for hub in &mc.hub {
-        let Some(k) = kind_index(hub) else { continue };
-        // Both containers, because a hub answers in one or the other and which one is per hub TYPE,
-        // not per response (`Hub::directory`). Walking both is how this stops being a thing to
-        // remember.
-        for m in &hub.metadata {
-            // `includeCollections=1` puts the collection hub's rows HERE, as full rows
-            // ([`CollectionHit`]); every other type is the ordinary card.
-            out[k].push(if m.kind == "collection" {
-                Item::Collection(CollectionHit::from_row(m, sid))
-            } else {
-                Item::Media(parse_item(m, sid))
-            });
-        }
-        for t in &hub.directory {
-            let hit = tag_hit(t, sid, favs);
-            // **A tag arrives once per LIBRARY SECTION**, measured: a person in both the Movies and
-            // the TV Shows library comes back as two rows with the same `id` and `tagKey`, each
-            // carrying that section's own `count`. Drawn raw that is the same face twice; keeping
-            // only the first reports 5 credits for someone with 8.
-            //
-            // So fold on identity and SUM the counts. `tagKey` first because it is global — the
-            // same person on two SERVERS is also one person, and the round-robin merge will bring
-            // both here — with the local `id` as the fallback for a row that carries no guid, which
-            // a collection never does.
-            match out[k].iter_mut().find_map(|i| match i {
-                Item::Tag(e) if same_tag(e, &hit) => Some(e),
-                _ => None,
-            }) {
-                Some(e) => {
-                    e.count += hit.count;
-                    // the FIRST of the two folds this bit has to survive — OR, never overwrite, so
-                    // a person in one favourite section and one non-favourite is favourite-ranked
-                    e.fav |= hit.fav;
-                    // whichever row happened to carry artwork wins; a section that has none
-                    // must not blank a face the other section supplied
-                    if e.thumb.is_empty() {
-                        e.thumb = hit.thumb;
-                    }
-                }
-                None => out[k].push(Item::Tag(hit)),
-            }
-        }
-    }
-    // Once folded, a tag-shaped collection hit is a collection like any full row, so nothing past
-    // this point has a second representation of one to handle.
-    if let Some(k) = KINDS.iter().position(|kind| *kind == Kind::Collection) {
-        for item in &mut out[k] {
-            if let Item::Tag(tag) = item { *item = Item::Collection(CollectionHit::from_tag(tag)); }
-        }
-    }
-    out
-}
-
-/// Are these two rows the same tag? `tagKey` is plex.tv's and global; `id` is server-local and
-/// dense from 1, so it may only be compared **within one server** — two servers' id 921 are two
-/// different people, and folding on it across sources would merge strangers.
+/// Are these two rows the same tag? `tagKey` was plex.tv's and global; `id` is server-local, so it
+/// may only be compared **within one server** — two servers' id 921 are two different people, and
+/// folding on it across sources would merge strangers.
 fn same_tag(a: &TagHit, b: &TagHit) -> bool {
     if !a.tag_key.is_empty() && !b.tag_key.is_empty() {
         return a.tag_key == b.tag_key;
@@ -1358,43 +1188,6 @@ fn same_tag(a: &TagHit, b: &TagHit) -> bool {
     // one row — one of them losing their name and both their counts summed — which is worse than
     // the duplicate it was there to prevent.
     a.sid == b.sid && !a.id.is_empty() && a.id == b.id && a.name == b.name
-}
-
-/// Which shelf a hub feeds, or `None` for one this screen does not draw (`album`, `artist`,
-/// `track`, `playlist`, `tag`, …).
-///
-/// Matched on `hubIdentifier` — the stable, locale-independent name — with `type` as a fallback:
-/// on `/hubs/search` this server sets both to the same slug (as does `plex-openapi.json`'s own
-/// worked example), so the fallback costs nothing and covers a server that prefixes one of them.
-fn kind_index(hub: &crate::plex::Hub) -> Option<usize> {
-    KINDS.iter().position(|k| {
-        k.hubs()
-            .iter()
-            .any(|h| *h == hub.hub_identifier || *h == hub.kind)
-    })
-}
-
-/// WORKER THREAD: one `Directory[]` entry as a search hit.
-///
-/// The numeric id is carried as a STRING and left empty when the server sent none, because 0 is
-/// "absent" on the wire (`Tag::id`) and a literal `"0"` downstream would address a person that does
-/// not exist — the same trap `Tag::is_person` documents from the other side.
-fn tag_hit(t: &crate::plex::Tag, sid: ServerId, favs: &[(ServerId, i64, bool)]) -> TagHit {
-    TagHit {
-        sid,
-        fav: section_is_fav(favs, sid, t.library_section_id),
-        name: t.tag.clone(),
-        tag_key: t.tag_key.clone(),
-        id: if t.id != 0 {
-            t.id.to_string()
-        } else {
-            String::new()
-        },
-        thumb: t.thumb.clone(),
-        key: t.key.clone(),
-        sec: t.library_section_id,
-        count: t.count,
-    }
 }
 
 /// Drop everything — the account changed, so both the query and the results belong to someone

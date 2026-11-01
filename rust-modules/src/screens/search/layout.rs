@@ -14,13 +14,11 @@ pub(crate) const FIELD: Rect = Rect {
     w: SCR_W - 2.0 * MARGIN_X,
     h: 80.0,
 };
-pub(super) const SCOPE_Y: f32 = FIELD.y + FIELD.h + 12.0;
 /// See [`FIELD`]'s doc: also reachable as `crate::screens::search::CONTENT_TOP`. Value pinned at
 /// 300.0 — the overscan audit and `top()`'s own layering both depend on it.
 pub(crate) const CONTENT_TOP: f32 = 300.0;
 pub(super) const HEAD_TO_ROW: f32 = 60.0;
 pub(super) const KEYBOARD_H: f32 = 324.0;
-pub(super) const SCOPE_H: f32 = crate::ui::theme::size::CAPTION as f32 * 1.35;
 pub(super) const CLEAR_H: f32 = 60.0;
 pub(super) const RECENT_CAP: usize = crate::search::recents::CAP;
 
@@ -242,19 +240,6 @@ mod tests {
             reveal(0.0, &ALL, 99),
             0.0,
             "a shelf that is not there cannot scroll the page"
-        );
-    }
-
-    /// Legacy `ui/search/mod.rs`'s `the_content_line_clears_the_documents_head`: the document's
-    /// head is the field plus its scope line, and both are measured off [`FIELD`] — so this is the
-    /// one assertion that keeps the three numbers agreeing when any of them moves. Without it
-    /// shelf 0's heading would be drawn over the scope line at rest.
-    #[test]
-    fn the_content_line_clears_the_documents_head() {
-        let head_bottom = SCOPE_Y + SCOPE_H;
-        assert!(
-            CONTENT_TOP > head_bottom,
-            "content starts at {CONTENT_TOP} inside a head that ends at {head_bottom}"
         );
     }
 

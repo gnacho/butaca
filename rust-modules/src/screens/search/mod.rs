@@ -207,9 +207,6 @@ impl SearchScreen {
             for (slot, item) in shelf.items.iter().enumerate() {
                 let identity = match item {
                     Item::Media(media) if !media.rk.is_empty() => Identity::Media(shelf.kind, media.sid, media.rk.clone()),
-                    Item::Collection(hit) if !hit.item.rk.is_empty() => Identity::Media(shelf.kind, hit.item.sid, hit.item.rk.clone()),
-                    // a tag-shaped collection keys on its tag id, as it did while it was a tag
-                    Item::Collection(hit) if hit.tag > 0 => Identity::Tag(shelf.kind, hit.item.sid, hit.tag.to_string()),
                     Item::Tag(tag) if !tag.tag_key.is_empty() || (!tag.id.is_empty() && tag.id != "0") =>
                         Identity::Tag(shelf.kind, tag.sid, if tag.tag_key.is_empty() { tag.id.clone() } else { tag.tag_key.clone() }),
                     _ => Identity::Slot(shelf.kind, view.query_gen(), slot),
@@ -281,12 +278,6 @@ impl SearchScreen {
                     fx.push(Fx::App(AppFx::Search(if held {
                         SearchReq::ItemMenu { sid: media.sid, rk: media.rk.clone() }
                     } else { SearchReq::Detail { sid: media.sid, rk: media.rk.clone() } })));
-                }
-                // A collection opens its page; it has no item menu, so a hold does the same.
-                Item::Collection(hit) if hit.route().is_some() => {
-                    self.remember(fx);
-                    fx.push(Fx::App(AppFx::Search(SearchReq::Collection {
-                        sid: hit.item.sid, rk: hit.item.rk.clone(), tag: hit.tag })));
                 }
                 Item::Tag(tag) if row.kind == Kind::Person && !held => {
                     let key = if tag.id.is_empty() || tag.id == "0" { &tag.tag_key } else { &tag.id };
@@ -543,18 +534,15 @@ impl SearchScreen {
         let colours = cx.focus.current.and_then(|key| self.rows.iter().enumerate().find_map(|(row, model)|
             model.elems.iter().position(|elem| *elem == key.elem).and_then(|col|
                 H::search(cx).shelves().get(row)?.items.get(col)).and_then(|item| match item {
-                    Item::Media(media) if media.has_blur => Some(media.blur),
-                    Item::Collection(hit) if hit.item.has_blur => Some(hit.item.blur), _ => None,
+                    Item::Media(media) if media.has_blur => Some(media.blur), _ => None,
                 })));
         self.ground.key(colours, crate::ui::widgets::PageGround::CARD_W, tick.dt());
-        let target = cx.focus.current.and_then(|key| self.rows.iter().enumerate().find_map(|(row, model)|
-            model.elems.iter().position(|elem| *elem == key.elem).map(|col| (row, col))));
-        let view = H::search(cx);
-        let handle = target.and_then(|(row, col)| view.shelves().get(row)?.items.get(col))
-            .and_then(|item| view.scope().sources().iter().find(|source| source.sid == item.sid()))
-            .map_or("", |source| source.handle.as_str());
-        let target_row = target.map(|(row, _)| row);
-        let settled = self.owner_row == target_row && self.owner == handle;
+        let target_row = cx.focus.current.and_then(|key| self.rows.iter()
+            .position(|row| row.elems.contains(&key.elem)));
+        // The scope publication died with the Plex registry fan-out: one Jellyfin server has no
+        // per-source credit to name. The owner annotation's state fields stay in the recorded
+        // shape (`SHAPE` is frozen), permanently at rest on their defaults.
+        let settled = self.owner_row == target_row && self.owner.is_empty();
         // The three springs this instance owns are stepped through the shared reporting
         // integrator, so each one keeps the present gate awake exactly while it is visibly
         // travelling and goes quiet the frame it arrives (`ui/motion.rs`'s rest test —
@@ -572,10 +560,9 @@ impl SearchScreen {
             crate::ui::motion::spring(&mut self.owner_alpha.pos, &mut self.owner_alpha.vel, owner,
                 k_scale, tick, &mut present);
         }
-        if !settled && self.owner_alpha.pos < OWNER_FLOOR {
+        if !settled {
             self.owner_row = target_row;
-            self.owner.clear(); self.owner.push_str(handle);
-            fx.invalidate(Provenance::Input);
+            self.owner.clear();
         }
     }
 

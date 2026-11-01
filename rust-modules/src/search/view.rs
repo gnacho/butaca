@@ -8,7 +8,6 @@ pub(crate) struct SearchSnapshot {
     state: State,
     query_gen: u32,
     recents: super::recents::RecentsSnapshot,
-    scope: super::scope::SourceScopeSnapshot,
 }
 
 impl Default for SearchSnapshot {
@@ -19,23 +18,21 @@ impl Default for SearchSnapshot {
             state: State::Idle,
             query_gen: 0,
             recents: Default::default(),
-            scope: Default::default(),
         }
     }
 }
 
 impl SearchSnapshot {
-    /// Built by `SearchState::snapshot`/`snapshot_with_directory` — the only callers, since the
-    /// fields here are otherwise private to this module.
+    /// Built by `SearchState::snapshot` — the only caller, since the fields here are otherwise
+    /// private to this module.
     pub(crate) fn from_parts(
         query: Option<Arc<str>>,
         shelves: Option<Arc<Vec<Shelf>>>,
         state: State,
         query_gen: u32,
         recents: super::recents::RecentsSnapshot,
-        scope: super::scope::SourceScopeSnapshot,
     ) -> Self {
-        Self { query, shelves, state, query_gen, recents, scope }
+        Self { query, shelves, state, query_gen, recents }
     }
 
     pub(crate) fn view(&self) -> SearchView<'_> { SearchView(self) }
@@ -54,7 +51,6 @@ impl SearchSnapshot {
         self.state == other.state && self.query_gen == other.query_gen
             && same(&self.query, &other.query) && same(&self.shelves, &other.shelves)
             && self.recents.same_publication(&other.recents)
-            && self.scope.same_publication(&other.scope)
     }
 }
 
@@ -71,7 +67,6 @@ impl<'a> SearchView<'a> {
     pub(crate) fn state(self) -> State { self.0.state }
     pub(crate) fn query_gen(self) -> u32 { self.0.query_gen }
     pub(crate) fn recents(self) -> &'a super::recents::RecentsSnapshot { &self.0.recents }
-    pub(crate) fn scope(self) -> &'a super::scope::SourceScopeSnapshot { &self.0.scope }
 }
 
 #[cfg(test)]
@@ -131,7 +126,6 @@ mod tests {
         assert!(old.same_publication(&another));
         assert!(Arc::ptr_eq(old.query.as_ref().unwrap(), another.query.as_ref().unwrap()));
         assert!(Arc::ptr_eq(old.shelves.as_ref().unwrap(), another.shelves.as_ref().unwrap()));
-        assert!(old.view().scope().same_publication(another.view().scope()));
         fx.set_query("wallace  ");
         let spaced = fx.snapshot();
         assert!(!old.same_publication(&spaced), "raw field edits are a publication change");

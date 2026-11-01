@@ -1,56 +1,8 @@
-//! Cross-source shelf merge, favourite ranking, and hub/tag/kind shelf building.
+//! Cross-source shelf merge, favourite ranking, and tag shelf building.
 
 use super::*;
 #[allow(unused_imports)]
 use super::test_support::*;
-
-/// The wire's hub order is NOT the drawn order: the server reranks its hubs per query (`sta`
-/// puts people first, `star` puts films first), and a shelf that moved under the user's focus
-/// mid-word is the bug `KINDS` exists to prevent. Both person hubs feed ONE shelf, and every
-/// hub this screen does not draw is dropped rather than mis-filed.
-#[test]
-fn hubs_map_onto_the_fixed_shelf_order_and_actor_plus_director_are_one_shelf() {
-    let mut mc = MediaContainer::default();
-    let mut director = hub("director", "director");
-    director.directory = vec![Tag {
-        tag: "Nick Park".into(),
-        id: 7,
-        ..Default::default()
-    }];
-    let mut actor = hub("actor", "actor");
-    actor.directory = vec![Tag {
-        tag: "Peter Sallis".into(),
-        id: 6059,
-        ..Default::default()
-    }];
-    let mut movie = hub("movie", "movie");
-    movie.metadata = vec![meta("movie", "1971", "A Close Shave")];
-    let mut album = hub("album", "album");
-    album.metadata = vec![meta("album", "9", "Not A Shelf")];
-    // wire order: people first, then a film, then a hub with no shelf at all
-    mc.hub = vec![actor, director, movie, album];
-
-    let p = project(&mc, ServerId::UNSET, NO_FAVS);
-    assert_eq!(p[0].len(), 1, "Movies");
-    assert!(p[1].is_empty() && p[2].is_empty(), "TV Shows / Episodes");
-    assert_eq!(
-        p[3].iter().map(|i| i.title()).collect::<Vec<_>>(),
-        ["Peter Sallis", "Nick Park"],
-        "actor and director are ONE shelf, in hub order"
-    );
-    assert!(p[4].is_empty(), "Collections");
-
-    // …and the drawn order is KINDS, whatever the wire said
-    let sh = merge_favs(&[Source {
-        status: Status::Answered,
-        items: p,
-        ..Source::EMPTY
-    }]);
-    assert_eq!(
-        sh.iter().map(|s| s.kind).collect::<Vec<_>>(),
-        [Kind::Movie, Kind::Person]
-    );
-}
 
 /// The same person on two SERVERS is one person. `project` folds per response, so it
 /// cannot see across sources — [`merge`] is the only place both are in hand, and until it did
@@ -177,33 +129,36 @@ fn ranking_is_stable_so_each_servers_own_order_survives_the_pass() {
 }
 
 /// **A tag that straddles the two is favourite-ranked, and its count stays grant-wide.** The
-/// bit is OR'd at both folds; the number is summed at both. Those are different operations on
-/// one row and conflating them is how "12 films" would silently become 5.
+/// bit is OR'd at the fold; the number is summed. Those are different operations on one row
+/// and conflating them is how "12 films" would silently become 5.
 #[test]
 fn a_tag_in_a_favourite_and_a_non_favourite_library_ranks_favourite_and_keeps_its_whole_count()
 {
     let sid = ServerId::from_raw(0);
-    let tag = |section: i64, count: i64| crate::plex::Tag {
-        tag: "Wallace Shawn".into(),
+    // The same person as two rows, one per library section: the favourite first, as the
+    // round robin would deliver the sections.
+    let row = |count: i64, fav: bool| Item::Tag(TagHit {
+        sid,
+        name: "Wallace Shawn".into(),
         tag_key: "gid-1".into(),
-        id: 921,
+        id: "921".into(),
         count,
-        library_section_id: section,
+        fav,
         ..Default::default()
-    };
-    let mc = crate::plex::MediaContainer {
-        hub: vec![crate::plex::Hub {
-            hub_identifier: "actor".into(),
-            kind: "actor".into(),
-            directory: vec![tag(9, 5), tag(1, 3)],
-            ..Default::default()
-        }],
-        ..Default::default()
-    };
+    });
+    let mut p: Projection = Default::default();
+    p[3].push(row(5, false));
+    p[3].push(row(3, true));
+    let sources = [Source {
+        status: Status::Answered,
+        items: p,
+        ..Source::EMPTY
+    }];
     let favs = [(sid, 1i64, true), (sid, 9i64, false)];
-    let p = project(&mc, sid, &favs);
-    let people = &p[3];
-    assert_eq!(people.len(), 1, "one person, folded across the two sections");
+    let sh = merge(&sources, &favs);
+    let people = &sh.iter().find(|s| s.kind == Kind::Person)
+        .expect("a Person shelf").items;
+    assert_eq!(people.len(), 1, "one person, folded across the two rows");
     let Item::Tag(t) = &people[0] else {
         panic!("a person is a Tag row")
     };
@@ -288,50 +243,51 @@ fn an_unclassified_row_ranks_as_a_favourite_rather_than_being_demoted() {
     );
 }
 
-/// **A person in two libraries is one person.** The server answers per library SECTION, so the
-/// same actor comes back twice with the same identity and each section's own `count` — which
-/// drew the same face twice, and would have reported 5 credits for someone with 8 had the
-/// duplicate simply been dropped. Device-observed before it was fixed.
+/// **A person in two libraries is one person.** A source can carry the same actor as two rows
+/// with the same identity and each section's own `count` — which drew the same face twice, and
+/// would have reported 5 credits for someone with 8 had the duplicate simply been dropped.
+/// Device-observed before it was fixed.
 #[test]
 fn a_tag_that_arrives_once_per_library_section_folds_into_one_row_with_the_counts_summed() {
-    let mut mc = MediaContainer::default();
-    let mut actor = hub("actor", "actor");
-    actor.directory = vec![
+    let rows = vec![
         // the Movies section: no artwork on this row
-        Tag {
-            tag: "Wallace Shawn".into(),
-            id: 921,
+        Item::Tag(TagHit {
+            sid: ServerId::UNSET,
+            name: "Wallace Shawn".into(),
+            id: "921".into(),
             tag_key: "gid-1".into(),
             count: 5,
             ..Default::default()
-        },
+        }),
         // …and the TV Shows section, same person, and this is the row with a headshot
-        Tag {
-            tag: "Wallace Shawn".into(),
-            id: 4471,
+        Item::Tag(TagHit {
+            sid: ServerId::UNSET,
+            name: "Wallace Shawn".into(),
+            id: "4471".into(),
             tag_key: "gid-1".into(),
             count: 3,
             thumb: "/t.jpg".into(),
             ..Default::default()
-        },
+        }),
         // a different person who happens to share the FIRST one's local id in another section
-        Tag {
-            tag: "Dee Wallace".into(),
-            id: 921,
+        Item::Tag(TagHit {
+            sid: ServerId::UNSET,
+            name: "Dee Wallace".into(),
+            id: "921".into(),
             tag_key: "gid-2".into(),
             count: 2,
             ..Default::default()
-        },
+        }),
     ];
-    mc.hub = vec![actor];
+    let sh = merge_favs(&[answered(3, rows)]);
 
-    let p = project(&mc, ServerId::UNSET, NO_FAVS);
     assert_eq!(
-        p[3].iter().map(|i| i.title()).collect::<Vec<_>>(),
+        sh.iter().find(|s| s.kind == Kind::Person).expect("a Person shelf")
+            .items.iter().map(|i| i.title()).collect::<Vec<_>>(),
         ["Wallace Shawn", "Dee Wallace"],
         "one row per PERSON, and a shared local id does not merge two of them"
     );
-    let Item::Tag(first) = &p[3][0] else {
+    let Item::Tag(first) = &sh.iter().find(|s| s.kind == Kind::Person).unwrap().items[0] else {
         panic!("a person is a Tag row")
     };
     assert_eq!(
@@ -341,64 +297,6 @@ fn a_tag_that_arrives_once_per_library_section_folds_into_one_row_with_the_count
     assert_eq!(
         first.thumb, "/t.jpg",
         "a section with no artwork must not blank a face another supplied"
-    );
-}
-
-/// A hub answers in `Metadata[]` OR `Directory[]` depending on its TYPE (`Hub::directory`), and
-/// the two become different `Item` variants. The numeric tag id is carried as a string and left
-/// EMPTY when the server sent none — a literal "0" would address a person that does not exist.
-#[test]
-fn a_directory_hub_becomes_a_tag_hit_and_a_metadata_hub_a_card() {
-    let sid = ServerId::from_raw(3);
-    let mut mc = MediaContainer::default();
-    let mut people = hub("actor", "actor");
-    people.directory = vec![
-        Tag {
-            tag: "Peter Sallis".into(),
-            tag_key: "5d7768268718ba001e311be6".into(),
-            id: 6059,
-            thumb: "https://metadata-static.plex.tv/x.jpg".into(),
-            count: 4,
-            ..Default::default()
-        },
-        // a COLLECTION-shaped entry: no tagKey, no thumb, no numeric id — only a listing key
-        Tag {
-            tag: "Aardman".into(),
-            key: "/library/sections/1/all?collection=6068".into(),
-            ..Default::default()
-        },
-    ];
-    let mut movie = hub("movie", "movie");
-    movie.metadata = vec![meta("movie", "1971", "A Close Shave")];
-    mc.hub = vec![people, movie];
-
-    let p = project(&mc, sid, NO_FAVS);
-    let Item::Media(m) = &p[0][0] else {
-        panic!("a Metadata[] row must be a card")
-    };
-    assert_eq!(
-        (m.rk.as_str(), m.sid),
-        ("1971", sid),
-        "the row is stamped with the server that ANSWERED"
-    );
-    let Item::Tag(t) = &p[3][0] else {
-        panic!("a Directory[] row must be a tag hit")
-    };
-    assert_eq!(
-        (t.id.as_str(), t.tag_key.as_str(), t.count, t.sid),
-        ("6059", "5d7768268718ba001e311be6", 4, sid)
-    );
-    let Item::Tag(c) = &p[3][1] else {
-        panic!("a Directory[] row must be a tag hit")
-    };
-    assert!(
-        c.id.is_empty(),
-        "id 0 is 'the server sent none', never the person numbered 0"
-    );
-    assert!(c.tag_key.is_empty() && c.thumb.is_empty());
-    assert_eq!(
-        c.key, "/library/sections/1/all?collection=6068",
-        "the only handle a collection gives you"
     );
 }
 
@@ -458,65 +356,4 @@ fn a_person_shelf_counts_people_and_everything_else_counts_results() {
     // Cardinal rules apply to the absolute value, including negative wire counts.
     assert_eq!((crate::ui::fmt::item_count(0), crate::ui::fmt::item_count(-1)),
         ("0 items".to_owned(), "-1 item".to_owned()));
-}
-
-/// **`includeCollections=1` hands the Collections shelf full rows**, and those are KIND-4 cards
-/// carrying both of a collection's ids: the ratingKey (`/library/collections/{rk}`, what the page
-/// loads) and the tag id (`index`, a DIFFERENT number — docs/pms-api.md §2b). The rest of the
-/// response is unchanged by the flag, so a film on the same answer is still an ordinary card.
-#[test]
-fn collection_rows_become_kind_four_hits_and_other_rows_stay_ordinary_cards() {
-    let sid = ServerId::from_raw(3);
-    let mut collection = hub("collection", "collection");
-    collection.metadata = vec![Metadata {
-        index: 7,
-        child_count: 12,
-        library_section_id: 1,
-        thumb: "/library/collections/50007/composite/1700000000".into(),
-        ..meta("collection", "50007", "Aardman Shorts")
-    }];
-    let mut movie = hub("movie", "movie");
-    movie.metadata = vec![meta("movie", "1971", "A Close Shave")];
-    let mc = MediaContainer { hub: vec![collection, movie], ..Default::default() };
-
-    let p = project(&mc, sid, NO_FAVS);
-    let Item::Collection(hit) = &p[4][0] else { panic!("a collection row is a collection hit") };
-    assert_eq!(hit.item.kind, crate::pms::KIND_COLLECTION);
-    assert_eq!((hit.item.sid, hit.item.rk.as_str(), hit.item.sec), (sid, "50007", 1));
-    assert_eq!((hit.tag, hit.item.child_count), (7, 12));
-    assert_eq!(hit.item.thumb, "/library/collections/50007/composite/1700000000");
-    assert_eq!(p[4][0].title(), "Aardman Shorts");
-    assert_eq!(hit.route(), Some(crate::screens::registry::ContentArg::Collection(crate::collection::CollectionRef {
-        sid, rk: "50007".into(), sec: 1, tag: 7, name: "Aardman Shorts".into() })));
-    let Item::Media(film) = &p[0][0] else { panic!("a film stays an ordinary card") };
-    assert_eq!((film.kind, film.rk.as_str()), (0, "1971"));
-}
-
-/// A server that IGNORES the flag still answers tag-shaped `Directory[]` rows — no ratingKey.
-/// Once folded they land as the same collection hit a full row makes: a thumb-less kind-4 row
-/// with the tag's name, section and count, routed by section + tag id. With no section or no tag
-/// id there is nothing to resolve, so there is no route.
-#[test]
-fn a_tag_shaped_collection_hit_routes_by_section_and_tag_id() {
-    let sid = ServerId::from_raw(3);
-    let mut collection = hub("collection", "collection");
-    collection.directory = vec![Tag {
-        tag: "Aardman Shorts".into(),
-        id: 7,
-        library_section_id: 1,
-        count: 12,
-        key: "/library/sections/1/all?collection=7".into(),
-        ..Default::default()
-    }];
-    let mc = MediaContainer { hub: vec![collection], ..Default::default() };
-    let p = project(&mc, sid, NO_FAVS);
-    let Item::Collection(hit) = &p[4][0] else { panic!("a folded collection tag is a collection hit") };
-    assert_eq!(hit.item.kind, crate::pms::KIND_COLLECTION);
-    assert_eq!((hit.item.rk.as_str(), hit.item.thumb.as_str(), hit.item.child_count), ("", "", 12));
-    assert_eq!(p[4][0].title(), "Aardman Shorts");
-    assert_eq!(hit.route(), Some(crate::screens::registry::ContentArg::Collection(
-        crate::collection::CollectionRef { sid, rk: String::new(), sec: 1, tag: 7, name: "Aardman Shorts".into() })));
-    let no_section = crate::search::CollectionHit { item: PmsMovie { sec: 0, ..hit.item.clone() }, ..hit.clone() };
-    assert!(no_section.route().is_none(), "no section");
-    assert!(crate::search::CollectionHit { tag: 0, ..hit.clone() }.route().is_none(), "no tag id");
 }
