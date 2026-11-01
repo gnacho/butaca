@@ -49,6 +49,11 @@ rust-modules/target-lab/
 rust-modules/target-sim-lab/
 # `make screenshots-sim` — the documentation-screenshot simulator (hostsim + devtriggers).
 rust-modules/target-sim-shots/
+# The #166 replay-flip verification lanes: the two one-shot lib checks the flip's
+# verification names (--no-default-features and --features jellyfin), each with its own
+# target dir so neither evicts the other's cache.
+rust-modules/target-jf16-a/
+rust-modules/target-jf16-b/
 # pkg/butaca-storage's own target dir, deliberately separate from $(RUST_TDIR) — see the
 # Makefile's STORAGE_TDIR comment. One glob for every RELEASE/LAB/SYMBOLS combination.
 rust-modules/target*-storage/

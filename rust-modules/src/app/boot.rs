@@ -853,12 +853,13 @@ pub(crate) unsafe fn construct(
     // NO token is compiled into this binary. Controlled recordings inject their own fixture
     // identity. Live onboarding reads only the Jellyfin configuration.
     // Controlled recordings inject their fixture identity. Live boot never reads a Plex token.
+    // The Jellyfin controlled world carries NO Plex dev token: its boot arm installs the client
+    // from the Initial's own identity, so `dev_primary` stays out of its way.
     let dev_token = match &initial {
-        Some(initial) => {
-            let crate::auth::owner::BootstrapAuthority::DevPms { primary, .. } = &initial.session.authority
-                else { unreachable!("preflight validated authority") };
-            primary.token.clone()
-        }
+        Some(initial) => match &initial.session.authority {
+            crate::auth::owner::BootstrapAuthority::DevPms { primary, .. } => primary.token.clone(),
+            _ => String::new(),
+        },
         _ => String::new(),
     };
     let host_s = std::ffi::CStr::from_ptr(pms_host)
@@ -954,6 +955,21 @@ pub(crate) unsafe fn construct(
     // see `dev::scenarios::arm_audio_enhancements`'s own doc for why.
     if !controlled { crate::dev::scenarios::arm_audio_enhancements(); }
     let primary_binding = initial.as_ref().map(|initial| initial.primary_client);
+    // The Jellyfin controlled world's client identity, lifted once: the boot arm below installs
+    // it unprobed (`JfClient::synthetic`), so recording and replay construct the exact world the
+    // typed Initial names — no config file, no network round-trip, no /tmp trigger. `None`
+    // without the feature: that build cannot construct the world at all.
+    #[cfg(feature = "jellyfin")]
+    let jf_world = initial.as_ref().and_then(|initial| match &initial.session.authority {
+        crate::auth::owner::BootstrapAuthority::DevJf { origin, token, user_id, user_name } =>
+            Some((origin.clone(), token.clone(), user_id.clone(), user_name.clone())),
+        _ => None,
+    });
+    #[cfg(not(feature = "jellyfin"))]
+    let jf_world: Option<(String, String, String, String)> = None;
+    // Lifted beside `jf_world` for the same reason `primary_binding` is: the closure borrows,
+    // and `initial` itself moves into the `App`.
+    let jf_device = initial.as_ref().map(|i| i.session.persisted.client_id.clone());
     let activate_session = |bridge: &mut super::bridge::Bridge,
         pages: &mut crate::ui::dispatch::Dispatcher<super::bridge::AppHost>,
         rec: &mut super::recorder::Recplay| {
@@ -961,6 +977,35 @@ pub(crate) unsafe fn construct(
         #[cfg(feature = "devtriggers")]
         log("boot: /tmp/butaca-login - starting Jellyfin sign-in");
         BootTo::Login
+    } else if let Some((origin, token, user_id, user_name)) = &jf_world {
+        // The controlled Jellyfin world: install the fixture client and fill Home through the
+        // SAME store commands the Plex controlled arm issues (the recorded admissions and
+        // results are what replay answers them with). No session-owner activation runs —
+        // `activate_dev` refuses this authority, there is no registry primary to bind, and the
+        // recorded-result decoders bind this flavor's clients through the install itself.
+        let Some(origin) = crate::origin::Origin::parse(origin) else {
+            log("bootstrap: REFUSED — invalid controlled Jellyfin origin");
+            return BootTo::Login;
+        };
+        // The device id is minted from the fixture identity, never the host: two boots of one
+        // recording describe themselves to the mock identically.
+        let client = crate::jellyfin::JfClient::synthetic(origin,
+            jf_device.clone().unwrap_or_default(),
+            token.clone(), user_id.clone(), user_name.clone());
+        crate::jellyfin::install(client);
+        log("boot: controlled jellyfin world — client installed, to Home");
+        use crate::stores::{StoreCmd, StoreWork};
+        use crate::ui::machine::{Fx, MachineId};
+        use crate::screens::registry::AppFx;
+        for cmd in [
+            StoreCmd::Browse(crate::stores::browse::BrowseCmd::Reset),
+            StoreCmd::Hubs(crate::stores::hubs::HubsCmd::Reset),
+            StoreCmd::Hubs(crate::stores::hubs::HubsCmd::RefetchHubs),
+        ] { pages.emit(MachineId::Nav, Fx::App(AppFx::Store(cmd.store(), cmd))); }
+        pages.emit(MachineId::Nav, Fx::App(AppFx::StoreWork(StoreWork::BrowseDiscovery)));
+        pages.frame_with(bridge, crate::ui::machine::Tick::default(), Vec::new(), Vec::new(),
+            rec, false);
+        BootTo::Home
     } else if !dev_token.is_empty() {
         // `Origin::http` names the assumption out loud: the host and port compiled into the
         // C shim are a plaintext address, with no scheme to read off them.

@@ -1513,12 +1513,19 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
                 return;
             }
             adapter.fetch[i].claim();
-            let worker_adapter = Arc::clone(adapter);
-            let spawned = crate::task::spawn_small("person", move || {
-                // filled OUTSIDE the guard so a panicking fetch still lands — as a FAILURE (None),
-                // not as an empty biography
-                let prof = catch_unwind(|| fetch_profile_jf(&arg[0])).unwrap_or(None);
-                worker_adapter.land(i, generation, Landing::Profile(prof));
+            // Same controlled-resource rule the Plex local arms below live under: a controlled
+            // boot records (or replays) the spawn answer, and the landing's admission evidence
+            // is what its recorded terminal is fenced by. Global slot: no client/sid/local in
+            // the request — the same shape `validate_admission` spells for global person rows.
+            let spawned = crate::app::bootstrap::stores::admit(serde_json::json!({
+                "store":"person","slot":i,"gen":generation,"arg":arg,"guid":guid}), move || {
+                let worker_adapter = Arc::clone(adapter);
+                crate::task::spawn_small("person", move || {
+                    // filled OUTSIDE the guard so a panicking fetch still lands — as a FAILURE
+                    // (None), not as an empty biography
+                    let prof = catch_unwind(|| fetch_profile_jf(&arg[0])).unwrap_or(None);
+                    worker_adapter.land(i, generation, Landing::Profile(prof));
+                })
             });
             if !spawned {
                 adapter.fetch[i].release();
@@ -1541,21 +1548,31 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
         if kind == K_RESOLVE {
             return;
         }
+        // The source's own local id rides the recorded request exactly as the Plex arm's does
+        // (this backend's roles worker matches credit rows by key, so the value is carried, not
+        // consumed) — and the controlled admission's client identity is the Jellyfin world's 0,
+        // mirroring discovery/hubs/metadata.
+        let local = p.srcs.iter().find(|s| s.sid == sid)
+            .and_then(|s| s.local.clone()).unwrap_or_default();
         let pkey = p.key.clone();
         adapter.fetch[i].claim();
-        let worker_adapter = Arc::clone(adapter);
-        let spawned = crate::task::spawn_small("person", move || {
-            // same contract as the Plex arms: a panicking worker lands as a FAILURE, never as an
-            // empty filmography or silently-missing credit names
-            let what = match kind {
-                K_MEDIA => Landing::Media(
-                    catch_unwind(|| person_media_jf(sid, &arg[0])).unwrap_or(None),
-                ),
-                _ => Landing::Roles(
-                    catch_unwind(|| person_roles_jf(&pkey, &arg)).unwrap_or(None),
-                ),
-            };
-            worker_adapter.land(i, generation, what);
+        let spawned = crate::app::bootstrap::stores::admit(serde_json::json!({
+            "store":"person","slot":i,"gen":generation,"arg":arg,"guid":guid,
+            "local":local,"client":0,"sid":sid.raw()}), move || {
+            let worker_adapter = Arc::clone(adapter);
+            crate::task::spawn_small("person", move || {
+                // same contract as the Plex arms: a panicking worker lands as a FAILURE, never as an
+                // empty filmography or silently-missing credit names
+                let what = match kind {
+                    K_MEDIA => Landing::Media(
+                        catch_unwind(|| person_media_jf(sid, &arg[0])).unwrap_or(None),
+                    ),
+                    _ => Landing::Roles(
+                        catch_unwind(|| person_roles_jf(&pkey, &arg)).unwrap_or(None),
+                    ),
+                };
+                worker_adapter.land(i, generation, what);
+            })
         });
         if !spawned {
             adapter.fetch[i].release();
@@ -1736,9 +1753,18 @@ fn person_media_jf(sid: ServerId, person_id: &str) -> Option<MediaLanding> {
             jf_shelf(&movies.items, movies.total, sid),
             jf_shelf(&shows.items, shows.total, sid),
         ],
-        // The cross-source availability join is plex.tv-guid vocabulary; a Jellyfin item has no
-        // guid, so the index that join reads stays empty.
-        matches: Vec::new(),
+        // The cross-source availability join reads a (guid, ratingKey) index. That vocabulary
+        // has no plex.tv guid behind it on this backend — but the filmography query here IS a
+        // library query, so every row it returns is an item this server holds, and the honest
+        // index joins each id to ITSELF: `match_local` and `seed_dev_credits` read the same
+        // shape, a Jellyfin id is its own guid for that purpose, and a filmography row carries
+        // the availability mark and the chevron a library-held credit has on the other backend.
+        matches: movies
+            .items
+            .iter()
+            .chain(shows.items.iter())
+            .map(|it| (it.id.clone(), it.id.clone()))
+            .collect(),
     })
 }
 

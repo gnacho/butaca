@@ -57,16 +57,37 @@ pub(crate) fn decode(
 ) -> Result<Landing, &'static str> {
     let p: Payload = serde_json::from_value(value).map_err(|_| "invalid hubs result")?;
     if p.kind != "hubs" || p.version != 1 { return Err("unsupported hubs result"); }
-    let resolved = match p.client {
+    // The Jellyfin flavor's own result vocabulary: instance 0, no token rotation, the one
+    // installed client. The guard falls THROUGH to the Plex arm when no client is installed, so
+    // the ambiguity with Plex slot 0 (the same raw id test fixtures hand to `register_for_test`)
+    // resolves the way `pms::kick_with`'s guard does.
+    #[cfg(feature = "jellyfin")]
+    let resolved = if p.client == Some(0) && p.token_gen == 0
+        && p.sid.raw() == crate::jellyfin::SERVER_ID.raw()
+        && crate::jellyfin::client().is_some()
+    {
+        Some(LandingClient { instance: 0,
+            resource: super::HubClientRef::Jellyfin(crate::jellyfin::client().expect("guarded above")) })
+    } else {
+        decode_plex(&p, &mut client)?
+    };
+    #[cfg(not(feature = "jellyfin"))]
+    let resolved = decode_plex(&p, &mut client)?;
+    Ok(Landing { gen: p.gen, seq: p.seq, sid: p.sid, client: resolved,
+        token_gen: p.token_gen, build: p.build })
+}
+
+/// The Plex arm of [`decode`]: resolve the recorded instance id through the explicit mapping.
+fn decode_plex(p: &Payload, client: &mut impl FnMut(u32) -> Option<&'static crate::plex::Client>)
+    -> Result<Option<LandingClient>, &'static str> {
+    match p.client {
         Some(id) => {
             let c = client(id).ok_or("unresolved hubs client")?;
             if c.id() != p.sid { return Err("wrong hubs client server"); }
-            Some(LandingClient { instance: id, resource: super::HubClientRef::Plex(c) })
+            Ok(Some(LandingClient { instance: id, resource: super::HubClientRef::Plex(c) }))
         }
-        None => None,
-    };
-    Ok(Landing { gen: p.gen, seq: p.seq, sid: p.sid, client: resolved,
-        token_gen: p.token_gen, build: p.build })
+        None => Ok(None),
+    }
 }
 
 pub(super) mod server_id {

@@ -80,7 +80,9 @@ pub(crate) fn decode(value: serde_json::Value,
     // A Jellyfin wire names SERVER_ID (raw 0) with client 0 and token_gen 0. Slot 0 is also a
     // valid Plex slot, but the two flavors never mix in one process: a Plex build has no
     // Jellyfin client (no wire can name it), and a Jellyfin build has no Plex registry to bind
-    // against — so in each flavor the arm is unambiguous.
+    // against — so in each flavor the arm is unambiguous. The replay gate runs THIS arm since
+    // the #166 flip: its controlled boot installs the Jellyfin client and never a Plex registry
+    // entry, so the empty-registry guard below is the same fact stated where it is consumed.
     #[cfg(feature = "jellyfin")]
     let (client, token_gen) = if wire.sid == crate::jellyfin::SERVER_ID.raw()
         && wire.client == 0 && wire.token_gen == 0

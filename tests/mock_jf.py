@@ -628,7 +628,12 @@ class Handler(BaseHTTPRequestHandler):
             })
 
         # ---- token-required routes ------------------------------------------------------
-        if self._token(query) != lib.token:
+        # Accepted, never checked — mock_pms's own rule for the synthetic world's credentials
+        # (its `butaca-token` line): the carrier SHAPE is what the client's correctness lives on,
+        # and the 401 below is the absence answer. The controlled replay world's fixture client
+        # (#166 flip) carries a token the mock cannot have minted, and a recording must reach the
+        # same answers a real sign-in would.
+        if not self._token(query):
             return self._send_json(401, {})
 
         if path == "/Users/Me" and method == "GET":
@@ -840,8 +845,9 @@ class Handler(BaseHTTPRequestHandler):
         return self._send_json(200, row)
 
     def item_image(self, lib, item_id, kind_path, query):
-        # The built path carries api_key=… as its only credential (client.rs' rule).
-        if self._token(query) != lib.token:
+        # The built path carries api_key=… as its only credential (client.rs' rule). Accepted,
+        # never checked — the same rule as every token-required route above.
+        if not self._token(query):
             return self._send_json(401, {})
         if not kind_path.startswith(("Primary", "Backdrop", "Logo", "Art", "Thumb")):
             return self._send_json(404, {})

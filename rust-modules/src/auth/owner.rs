@@ -285,6 +285,13 @@ pub(crate) enum DevCommitDelta { Activated }
 pub(crate) enum BootstrapAuthority {
     Account { extras: Vec<crate::plex::session::SourceRef> },
     DevPms { primary: crate::plex::session::ServerRef, extras: Vec<crate::plex::session::SourceRef> },
+    /// The controlled Jellyfin world (#166 replay flip). There is no plex.tv account surface
+    /// behind it: no registry install, no token rotation, no profile machinery — the typed
+    /// Initial carries the exact client identity the controlled boot installs unprobed, and
+    /// every fetch the recording admits rides that one origin. `activate_dev` refuses it, so
+    /// the owner never leaves `Idle` in this world; the boot arm reads the identity itself.
+    /// Values are synthetic (see `Initial::synthetic_home`), never household bytes.
+    DevJf { origin: String, token: String, user_id: String, user_name: String },
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -745,6 +752,9 @@ impl LogicalState for SessionInit {
             BootstrapAuthority::DevPms { primary, extras } => {
                 w.u8(1); write_server(w, primary); write_sources(w, extras);
             }
+            BootstrapAuthority::DevJf { origin, token, user_id, user_name } => {
+                w.u8(2); w.str(origin).str(token).str(user_id).str(user_name);
+            }
         }
         w.u8(match self.phase { Phase::Idle => 0,
             Phase::Ready => 6, Phase::Error => 7, Phase::Deleted => 8 });
@@ -1017,6 +1027,9 @@ impl SessionMachine {
     fn activate_dev(&mut self, emit: &mut impl FnMut(SessionFx)) -> bool {
         if self.state.phase != Phase::Idle || self.state.pending_commit.is_some()
             || self.state.pending_erase.is_some() { return false; }
+        // DevJf deliberately refuses: the Jellyfin world has no plex.tv/registry resource
+        // operation to execute, so its boot arm never issues this command (and the owner stays
+        // Idle through the whole controlled run).
         let BootstrapAuthority::DevPms { primary, extras } = &self.state.authority else { return false };
         let registry = vec![RegistryPlan::DevInstall { primary: primary.clone(), extras: extras.clone(),
             client_id: self.state.persisted.client_id.clone() }];
@@ -1216,6 +1229,7 @@ impl SessionMachine {
                 install: ReadyInstall::PrimaryAndExtras(match &self.state.authority {
                     BootstrapAuthority::Account { extras } => extras.clone(),
                     BootstrapAuthority::DevPms { .. } => Vec::new(),
+                    BootstrapAuthority::DevJf { .. } => Vec::new(),
                 }) });
         }
     }

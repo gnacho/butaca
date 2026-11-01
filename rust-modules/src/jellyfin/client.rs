@@ -128,6 +128,22 @@ impl JfClient {
         }
     }
 
+    /// The controlled replay world's constructor (#166 replay flip): an ALREADY-authenticated
+    /// client built from the typed Initial's identity, with no network round-trip of any kind.
+    /// The controlled boot must construct the exact world the recording replays, and a
+    /// `/Users/Me` probe here would be an unrecorded request replay can never answer. The
+    /// values themselves are synthetic (`Initial::synthetic_home` invents them from the seed);
+    /// the recording's data fetches are what proves the world real.
+    pub(crate) fn synthetic(origin: Origin, device_id: String, token: String,
+        user_id: String, user_name: String) -> JfClient {
+        JfClient {
+            origin,
+            device_id,
+            token: RwLock::new(Some(TokenState { token, user_id, user_name })),
+            announced: Mutex::new(BTreeSet::new()),
+        }
+    }
+
     pub(crate) fn origin(&self) -> &Origin {
         &self.origin
     }
