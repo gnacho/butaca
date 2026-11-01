@@ -219,3 +219,21 @@ three were recorded afresh on shape `10638452537178981056`, imported with `tools
 import`, marked anchor again, and passed Targets and Resolve with zero difference counters. The
 alphabet gains the mock's audio-enhancement codecs (`aac`, `hevc`) and the client-localized hub
 titles (`Recently Added Movies`, `Recently Added TV`).
+
+**The #166 replay flip (Jellyfin flavor).** The controlled world's backend moved from Plex to
+Jellyfin: `BootstrapAuthority` gained `DevJf` (the synthetic server identity the controlled boot
+installs unprobed), the census moved to `ControlledHomeInitV7` / `SessionInitV6`, and
+`recorder::features()` stamps the flavor, so the gate's simulator builds with
+`--features hostsim,jellyfin` and a Plex artifact cannot even load (features mismatch, then
+shape). All three anchors were observed being refused, then re-recorded with
+`tools/butaca-rec rerecord` against shape `15045375032104265367` — still against a mock on
+`127.0.0.1:32498`, now `tests/mock_jf.py` — and passed Targets and Resolve with every difference
+counter at zero. The recordings carry the Jellyfin resource vocabulary end to end: discovery and
+hubs results bind the installed `JfClient` (instance 0, no token rotation), every content
+admission names client 0, and Flow 12's filmography OK opens a library-held credit's real detail
+(the Jellyfin filmography query is a library query, so its rows join to themselves in the
+availability index). The Settings anchor's Servers page walk is unchanged and safe: with no
+configured servers the page renders the two static rows, the DOWN step lands on the Disconnect
+row, and neither press emits a loop effect. The alphabet gains the mock's shapes (32-hex GUIDs,
+image routes, `jf.*` hub ids, ratings and codecs, hub/episode/duration/date/audio-label
+formats) recorded under `_sources.jellyfin_shapes`.

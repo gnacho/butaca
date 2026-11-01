@@ -3317,9 +3317,23 @@ fn request_detail(adapter: &std::sync::Arc<MetadataAdapter>, sid: crate::registr
     request_detail_with_spawn(adapter, sid, rk, |gen| {
         let rk = rk.to_string();
         let adapter = std::sync::Arc::clone(adapter);
+        // The recorded client identity mirrors the discovery/hubs vocabulary: the Jellyfin
+        // source's single client is instance 0 (it has no registry slot behind it), and every
+        // other source carries its Plex registry instance as before. `null` would record a
+        // resource the replay validator can never match.
+        #[cfg(feature = "jellyfin")]
+        let client = if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+            serde_json::json!(0)
+        } else {
+            crate::registry::client_for(sid).map(|c| serde_json::json!(c.instance_gen()))
+                .unwrap_or(serde_json::Value::Null)
+        };
+        #[cfg(not(feature = "jellyfin"))]
+        let client = crate::registry::client_for(sid).map(|c| serde_json::json!(c.instance_gen()))
+            .unwrap_or(serde_json::Value::Null);
         crate::app::bootstrap::stores::admit(serde_json::json!({"store":"metadata",
             "sid":sid.raw(),"rk":rk,"gen":gen,
-            "client":crate::registry::client_for(sid).map(|c| c.instance_gen())}), || {
+            "client":client}), || {
             // See `MetadataAdapter::run_held_detail_fetches_for_test`: a test runs the fetch
             // when it chooses, never on a thread racing its assertions.
             #[cfg(test)]

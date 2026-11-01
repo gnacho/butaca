@@ -138,7 +138,17 @@ pub(crate) fn validate_admission(value: &serde_json::Value, client: u32) -> Resu
 /// so pre-consent recordings cannot provide canonical initial input. Name the new census here
 /// to refuse those artifacts at the shape boundary and permit a genuine fresh recording.
 /// V6 / SessionInitV5 adds the captured language preference; controlled System resolves to en-US/24-hour.
-pub(crate) const SHAPE: &str = "ControlledHomeInitV6{locale:capturedSessionPreference_systemEnUS24,version:u32,session:SessionInitV5,home:HubsInitialV1,clock_start:u32,entropy:Captured(Option<[u8;16]>)|Seeded(u32),primary_client:u32,automated:bool,settings:Option<root|privacy|legal>,triggers:[str]};HomeEffectsV1{from:MachineId,kind:Fx,payload:complete_supported_payload};OwnedInputV1{ms:u32,dt_us:u32,source:Source,body:InputKind};DiscoveryResultV1{epoch:u32,source:u32,sid:u16,client:u32,token_gen:u32,name:str,what:Sections|Counts}";
+///
+/// **V7 / `SessionInitV6` (the controlled world's backend).** `BootstrapAuthority` gained
+/// `DevJf{origin,token,user_id,user_name}` — the Jellyfin synthetic world the replay campaign
+/// (#166) records against — written as tag `u8(2)` in `SessionInit`'s own census. The term
+/// moves for the V3/V4 reason: `session` is spelled here as a NAME, so a variant space that
+/// grew inside it is invisible unless the name moves too, hence `SessionInitV6` and the
+/// `ControlledHomeInitV7` that carries it. The DevPms/Account tags and their bytes are
+/// untouched, but a recording must now name a census that knows the world it booted; fixtures
+/// recorded before this census are refused at the shape boundary and re-recorded (all three
+/// anchors moved to the Jellyfin flavor in the same change).
+pub(crate) const SHAPE: &str = "ControlledHomeInitV7{locale:capturedSessionPreference_systemEnUS24,version:u32,session:SessionInitV6,home:HubsInitialV1,clock_start:u32,entropy:Captured(Option<[u8;16]>)|Seeded(u32),primary_client:u32,automated:bool,settings:Option<root|privacy|legal>,triggers:[str]};HomeEffectsV1{from:MachineId,kind:Fx,payload:complete_supported_payload};OwnedInputV1{ms:u32,dt_us:u32,source:Source,body:InputKind};DiscoveryResultV1{epoch:u32,source:u32,sid:u16,client:u32,token_gen:u32,name:str,what:Sections|Counts}";
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum Entropy {
     /// Actual bytes used by normal first-boot minting, or no draw for an existing identity.
@@ -182,10 +192,31 @@ impl Initial {
         if port == 0 { return Err("invalid synthetic port"); }
         let saved = crate::plex::session::Session { client_id:format!("s{seed:08x}"), ..Default::default() };
         let origin = crate::origin::Origin::http("127.0.0.1", i32::from(port));
-        let primary = crate::plex::session::ServerRef { address:"127.0.0.1".into(), port:i64::from(port),
-            origin_url:origin.base(),token:format!("s{:08x}",seed.wrapping_add(1)),
-            tier:Some(crate::plex::probe::Location::Local), ..Default::default() };
-        let initial = Self { version:1, session:crate::auth::SessionInit::captured_boot(saved,Some(primary),Vec::new()),
+        // The flavor IS the synthetic world: a build carrying the `jellyfin` feature records a
+        // Jellyfin controlled world (the #166 replay flip), a build without one records the Plex
+        // world exactly as before. The recorder stamps the flavor into the recording header
+        // (`recorder::features`), so the two artifact families can never be cross-loaded by
+        // accident. All identity strings are invented here from the seed — never read off a
+        // server — and stay inside the fixture alphabet's `s[0-9a-f]{8}` shape.
+        #[cfg(feature = "jellyfin")]
+        let session = {
+            let mut session = crate::auth::SessionInit::captured_boot(saved, None, Vec::new());
+            session.authority = crate::auth::owner::BootstrapAuthority::DevJf {
+                origin: origin.base(),
+                token: format!("s{:08x}", seed.wrapping_add(1)),
+                user_id: format!("s{:08x}", seed.wrapping_add(2)),
+                user_name: format!("s{:08x}", seed.wrapping_add(3)),
+            };
+            session
+        };
+        #[cfg(not(feature = "jellyfin"))]
+        let session = {
+            let primary = crate::plex::session::ServerRef { address:"127.0.0.1".into(), port:i64::from(port),
+                origin_url:origin.base(),token:format!("s{:08x}",seed.wrapping_add(1)),
+                tier:Some(crate::plex::probe::Location::Local), ..Default::default() };
+            crate::auth::SessionInit::captured_boot(saved,Some(primary),Vec::new())
+        };
+        let initial = Self { version:1, session,
             home:crate::pms::initial::Initial::fresh(),clock_start:0,
             entropy:Entropy::Seeded(seed),primary_client:1,automated:true,settings:settings.clone(),
             content:None, triggers:vec!["butaca-app-init".into(),"butaca-rec".into(),
@@ -194,6 +225,14 @@ impl Initial {
         if settings.is_some() { initial.triggers.push("butaca-settings".into()); }
         initial.validate()?;
         Ok(initial)
+    }
+    /// The client identity a controlled world's recorded resource traffic carries: the Plex
+    /// world's primary registry instance, or the Jellyfin world's single client (instance 0 —
+    /// one install, no registry behind it, nothing to rotate). `validate` forbids a Plex
+    /// primary_client of 0, so the two vocabularies never collide.
+    pub(crate) fn recorded_client(&self) -> u32 {
+        if matches!(&self.session.authority, crate::auth::owner::BootstrapAuthority::DevJf { .. }) { 0 }
+        else { self.primary_client }
     }
     pub(crate) fn capture_home(host: &str, port: i32) -> Result<(Self, Option<crate::plex::session::DeferredLoad>), &'static str> {
         if let Some(value) = crate::dev::scenarios::app_init_value() {
@@ -231,17 +270,49 @@ impl Initial {
             || s.active_profile.is_some() || s.profile_scope.0 != 0 {
             return Err("initial state is not a pre-effect boot");
         }
-        let BootstrapAuthority::DevPms { primary, extras } = &s.authority else {
-            return Err("unsupported replay bootstrap authority");
+        // The world's backend authority decides what "a server binding" even is. DevPms keeps
+        // its Plex checks byte for byte; DevJf is the replay campaign's synthetic Jellyfin
+        // world, refused outright in a build that cannot construct it.
+        let content_detail_ok = match &s.authority {
+            BootstrapAuthority::DevPms { primary, extras } => {
+                let reconstructed = crate::auth::SessionInit::captured_boot(s.persisted.clone(), Some(primary.clone()), extras.clone());
+                if serde_json::to_value(&reconstructed).map_err(|_| "invalid initial Session")?
+                    != serde_json::to_value(s).map_err(|_| "invalid initial Session")? {
+                    return Err("incoherent initial Session");
+                }
+                if crate::origin::Origin::parse(&primary.origin_url).is_none() || primary.token.is_empty() || !extras.is_empty() {
+                    return Err("unsupported Home server binding");
+                }
+                |content: &str| content == "1001"
+            }
+            BootstrapAuthority::DevJf { origin, token, user_id, user_name } => {
+                if !cfg!(feature = "jellyfin") { return Err("unsupported replay bootstrap authority"); }
+                // captured_boot has no DevJf constructor (it is not a Plex binding at all), so
+                // the reconstruction re-imposes the authority it names; everything AROUND it
+                // must still round-trip byte for byte.
+                let mut reconstructed = crate::auth::SessionInit::captured_boot(s.persisted.clone(), None, Vec::new());
+                reconstructed.authority = s.authority.clone();
+                if serde_json::to_value(&reconstructed).map_err(|_| "invalid initial Session")?
+                    != serde_json::to_value(s).map_err(|_| "invalid initial Session")? {
+                    return Err("incoherent initial Session");
+                }
+                // A loopback origin is the synthetic contract (the recording harness owns the
+                // server there); the client identity must be complete because the boot installs
+                // it WITHOUT a probe — there is no round-trip to fill any of it in later.
+                if crate::origin::Origin::parse(origin).is_none()
+                    || token.is_empty() || user_id.is_empty() || user_name.is_empty() {
+                    return Err("unsupported Jellyfin server binding");
+                }
+                // The typed detail input names the item the detail page opens: on this backend
+                // that is the server's own GUID for it, which no product code can derive, so the
+                // contract is "a non-empty id the recording proves real" instead of Plex's
+                // pinned first-movie ratingKey.
+                |content: &str| !content.is_empty()
+            }
+            BootstrapAuthority::Account { .. } => {
+                return Err("unsupported replay bootstrap authority");
+            }
         };
-        let reconstructed = crate::auth::SessionInit::captured_boot(s.persisted.clone(), Some(primary.clone()), extras.clone());
-        if serde_json::to_value(&reconstructed).map_err(|_| "invalid initial Session")?
-            != serde_json::to_value(s).map_err(|_| "invalid initial Session")? {
-            return Err("incoherent initial Session");
-        }
-        if crate::origin::Origin::parse(&primary.origin_url).is_none() || primary.token.is_empty() || !extras.is_empty() {
-            return Err("unsupported Home server binding");
-        }
         if s.persisted.client_id.is_empty() { return Err("missing initial identity"); }
         if self.settings.as_deref().is_some_and(|value|
             !matches!(value, "root" | "privacy" | "legal")) {
@@ -253,7 +324,7 @@ impl Initial {
         }
         let content_triggers = ["detail", "detailsec", "detailok", "filmography", "personcredits", "nowan"];
         if let Some(content) = &self.content {
-            if content.detail != "1001" || content.detailsec != 1 || !content.detailok
+            if !content_detail_ok(&content.detail) || content.detailsec != 1 || !content.detailok
                 || !content.filmography || content.personcredits != 9 || !content.nowan
                 || self.settings.is_some() {
                 return Err("unsupported initial content input");

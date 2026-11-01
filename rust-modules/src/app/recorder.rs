@@ -443,9 +443,9 @@ pub(crate) fn validate_controlled(recording: &Recording, initial: &super::bootst
                     result
                 }
                 Some("hubs") => (crate::stores::StoreId::Hubs,
-                    crate::pms::record::validate_binding(envelope.payload, initial.primary_client)?),
+                    crate::pms::record::validate_binding(envelope.payload, initial.recorded_client())?),
                 Some("discovery") => (crate::stores::StoreId::Browse,
-                    crate::browse::record::validate_binding(envelope.payload, initial.primary_client)?),
+                    crate::browse::record::validate_binding(envelope.payload, initial.recorded_client())?),
                 _ => return Err("unsupported controlled result family"),
             };
             if envelope.f != frame.f || envelope.t != "async" || envelope.req != req
@@ -467,11 +467,11 @@ pub(crate) fn validate_controlled(recording: &Recording, initial: &super::bootst
                 if initial.content.is_none() || effect["from"] != "Cache" || effect["e"] != "App" {
                     return Err("invalid content resource origin");
                 }
-                super::bootstrap::stores::validate_admission(&effect["payload"], initial.primary_client)?;
+                super::bootstrap::stores::validate_admission(&effect["payload"], initial.recorded_client())?;
             }
             if effect["e"] == "Request" {
                 if effect["from"] != "Cache" { return Err("invalid admission origin"); }
-                super::bootstrap::validate_admission(&effect["payload"], initial.primary_client)?;
+                super::bootstrap::validate_admission(&effect["payload"], initial.recorded_client())?;
             }
             if effect["f"] != frame.f || effect["t"] != "eff"
                 || effect.get("payload").is_none() || effect["payload"].get("unsupported").is_some()
@@ -1243,6 +1243,12 @@ pub(crate) fn features() -> Vec<String> {
     }
     if cfg!(feature = "hostsim") {
         v.push("hostsim".into());
+    }
+    // The backend flavor, stamped next to the rest: a recording names the world it was taken
+    // against, so a Plex artifact can never be loaded by the Jellyfin replay build or vice
+    // versa — the first half of the #166 flip's refusal story (the census names the other).
+    if cfg!(feature = "jellyfin") {
+        v.push("jellyfin".into());
     }
     if cfg!(feature = "lab-diagnostics") {
         v.push("lab-diagnostics".into());
@@ -2355,7 +2361,10 @@ mod tests {
         // The 0.8 sync moves it: ControlledHomeInitV6's captured locale and SessionInitV5 ride
         // the bootstrap shape now (consent stays OUT — the pin above this comment's history is
         // the pre-removal one, 0x4c8f_ce4c_6d05_abaa).
-        assert_eq!(crate::ui::rec::state_fp(APP_SHAPES), 0xc194_c127_5b79_c008);
+        // The #166 replay flip moves it again: ControlledHomeInitV7 carries SessionInitV6, whose
+        // BootstrapAuthority gained the DevJf controlled world (0xc194_c127_5b79_c008 was the
+        // pre-flip pin).
+        assert_eq!(crate::ui::rec::state_fp(APP_SHAPES), 0xd856_b773_431c_67ba);
     }
 
     /// The gate at the REAL hubs landing site, through the recording the driver loads: a result
@@ -2550,7 +2559,9 @@ mod tests {
         // post-removal pin. Any later shape change must update it in the same commit.
         // The 0.8 sync moved it once: the bootstrap shape gained the captured locale and
         // SessionInitV5 (0x4c8f_ce4c_6d05_abaa was the pre-locale post-removal pin).
-        assert_eq!(crate::ui::rec::state_fp(APP_SHAPES), 0xc194_c127_5b79_c008);
+        // The #166 replay flip moved it again: the bootstrap shape names SessionInitV6 /
+        // ControlledHomeInitV7 (0xc194_c127_5b79_c008 was the pre-flip pin).
+        assert_eq!(crate::ui::rec::state_fp(APP_SHAPES), 0xd856_b773_431c_67ba);
         // Dropping any one of the surviving shapes changes the fingerprint, so a recording
         // graded under this census is refused the moment a shape moves.
         let mut short = APP_SHAPES.to_vec();

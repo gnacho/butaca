@@ -50,7 +50,7 @@ fn main() {
             let port = args.next().and_then(|value| value.parse::<u16>().ok()).ok_or("invalid port")?;
             let settings = match args.next() {
                 None => None,
-                Some(value) if value == "flow12" => Some(value),
+                Some(value) if value == "flow12" || value.starts_with("flow12=") => Some(value),
                 Some(value) if value.starts_with("settings=") =>
                     Some(value.trim_start_matches("settings=").to_string()),
                 Some(_) => return Err("unsupported synthetic initial argument"),

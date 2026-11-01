@@ -489,10 +489,23 @@ fn finish_recording(rec: &mut recorder::Recplay, gate: &crate::ui::landgate::Gat
 #[cfg(feature = "hostsim")]
 pub fn synthetic_home_initial(seed: u32, port: u16, settings: Option<String>)
     -> Result<String, &'static str> {
-    let content = settings.as_deref() == Some("flow12");
-    let mut initial = bootstrap::Initial::synthetic_home(seed, port, if content { None } else { settings })?;
-    if content {
-        initial.content = Some(bootstrap::ContentInitial { detail:"1001".into(), detailsec:1,
+    // `flow12` keeps its bare spelling for the Plex world (the seeded mock's first movie is
+    // ALWAYS ratingKey 1001). The Jellyfin world's item ids are the server's own GUIDs, which
+    // nothing here can derive, so the harness names one: `flow12=<item id>`.
+    let flow12 = settings.as_deref().is_some_and(|v| v == "flow12" || v.starts_with("flow12="));
+    let detail = if flow12 {
+        let id = settings.as_deref().and_then(|v| v.strip_prefix("flow12=")).unwrap_or("");
+        if id.is_empty() {
+            if cfg!(feature = "jellyfin") {
+                return Err("the Jellyfin synthetic world needs flow12=<item id> — it cannot invent one");
+            }
+            "1001".to_string()
+        } else { id.to_string() }
+    } else { "1001".to_string() };
+    let mut initial = bootstrap::Initial::synthetic_home(seed, port,
+        if flow12 { None } else { settings })?;
+    if flow12 {
+        initial.content = Some(bootstrap::ContentInitial { detail, detailsec:1,
             detailok:true, filmography:true, personcredits:9, nowan:true });
         for name in ["detail", "detailsec", "detailok", "filmography", "personcredits", "nowan"] {
             initial.triggers.push(format!("butaca-{name}"));
