@@ -1629,7 +1629,7 @@ mod player_return_tests {
             AppArg::Content(ContentArg::Person { sid: A, key: String::new(), guid: String::new(),
                 name: String::new(), thumb: String::new() }),
             AppArg::Content(ContentArg::Filmography { sid: A, key: String::new() }),
-            AppArg::Content(ContentArg::Collection(crate::plex::collections::CollectionRef::by_tag(A, 0, 0, ""))),
+            AppArg::Content(ContentArg::Collection(crate::collection::CollectionRef { sid: A, rk: String::new(), sec: 0, tag: 0, name: String::new() })),
         ] {
             let mut p = Pages::new();
             p.stand_on(AppArg::Home).stand_on(origin);

@@ -42,16 +42,6 @@ pub(crate) enum JsonDeadlineOutcome {
     Transport,
 }
 
-/// A JSON read that preserves whether PMS answered and, if it did, its HTTP status.
-/// Ordinary reads intentionally keep using `Option<MediaContainer>`; collection screens need to
-/// tell an unshared library (403) from a missing collection (404) and a dead server.
-pub(super) enum JsonStatusOutcome {
-    Response {
-        status: i32,
-        parsed: Option<MediaContainer>,
-    },
-    Transport,
-}
 
 /// The headers shared by EVERY PMS operation, over either transport. `X-Plex-Language` belongs
 /// here rather than in [`Client::playback_identity`]: it selects server-returned metadata for
@@ -563,34 +553,6 @@ impl Client {
                 ));
                 None
             }
-        }
-    }
-
-    /// Status-preserving GET for operations whose UI gives authorization and absence different
-    /// meanings. This deliberately sits beside, rather than changes, the long-standing `get_json`
-    /// collapse used by all other PMS reads.
-    pub(super) fn get_json_status(&self, path_no_token: &str) -> JsonStatusOutcome {
-        let Some(reply) = self.send_bulk(path_no_token, &[ACCEPT_JSON], BULK_JSON_MAX_BYTES) else {
-            return JsonStatusOutcome::Transport;
-        };
-        let parsed = if reply.ok() {
-            match serde_json::from_slice::<Envelope>(&reply.body) {
-                Ok(envelope) => Some(envelope.media_container),
-                Err(error) => {
-                    crate::log(&format!(
-                        "pms: GET {} answered {} bytes that will not parse — {error}",
-                        path_no_token.split('?').next().unwrap_or(path_no_token),
-                        reply.body.len()
-                    ));
-                    None
-                }
-            }
-        } else {
-            None
-        };
-        JsonStatusOutcome::Response {
-            status: reply.status,
-            parsed,
         }
     }
 

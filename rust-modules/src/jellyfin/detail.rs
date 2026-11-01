@@ -234,7 +234,6 @@ fn detail_from_dto(it: &BaseItemDto, sid: ServerId) -> Detail {
         sid,
         rk: it.id.clone(),
         is_favorite,
-        collection: None,
         extras: Vec::new(),
         trailer_rk: String::new(),
         // One server on this backend: no attribution to draw, and no portable cross-server

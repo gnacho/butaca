@@ -78,7 +78,7 @@ pub(crate) fn every_route() -> [AppArg; 9] {
         AppArg::Content(ContentArg::Person {
             sid, key: String::new(), guid: String::new(), name: String::new(), thumb: String::new(),
         }),
-        AppArg::Content(ContentArg::Collection(crate::plex::collections::CollectionRef::by_tag(sid, 0, 1, ""))),
+        AppArg::Content(ContentArg::Collection(crate::collection::CollectionRef { sid, rk: String::new(), sec: 0, tag: 1, name: String::new() })),
         AppArg::Search,
         AppArg::Player,
     ]

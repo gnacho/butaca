@@ -25,8 +25,6 @@ pub struct MediaContainer {
     pub metadata: Vec<Metadata>,
     #[serde(rename = "Hub", default)]
     pub hub: Vec<Hub>,
-    #[serde(default, deserialize_with = "de_i64")]
-    pub size: i64,
     #[serde(rename = "totalSize", default, deserialize_with = "de_i64")]
     pub total_size: i64,
     /// GET /identity — the server's stable id (the PlayQueue `server://{id}/…` uri needs it).
@@ -344,11 +342,6 @@ pub struct Metadata {
     pub content_rating: String,
     #[serde(default)]
     pub summary: String,
-    /// A collection's member order, as its owner set it in Plex: `0` release date, `1`
-    /// alphabetical, `2` custom (python-plexapi's `Collection.collectionSort`). Absent on every
-    /// other row, and on a collection whose server did not send it.
-    #[serde(rename = "collectionSort", default, deserialize_with = "de_opt_i64")]
-    pub collection_sort: Option<i64>,
     #[serde(default)]
     pub tagline: String,
     #[serde(rename = "originallyAvailableAt", default)]
@@ -382,8 +375,6 @@ pub struct Metadata {
     pub view_count: i64, // present only once watched ≥1× (absent = unwatched)
     #[serde(default)]
     pub thumb: String,
-    #[serde(rename = "parentThumb", default)]
-    pub parent_thumb: String,
     #[serde(default)]
     pub art: String,
     #[serde(rename = "grandparentThumb", default)]
@@ -1406,8 +1397,6 @@ mod tests {
         let mc = serde_json::from_slice::<Envelope>(json)
             .expect("lenient parse")
             .media_container;
-        assert_eq!(mc.size, 2);
-
         let p = &search_hub(&mc, "actor").directory[0];
         assert_eq!((p.id, p.count, p.library_section_id), (921, 5, 1));
         assert_eq!(search_hub(&mc, "actor").size, 1);

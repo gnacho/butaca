@@ -42,7 +42,6 @@
 //! ~140 bytes (an ordinary relative thumb) to ~177 (an absolute headshot — see [`built_key`])
 //! into a fixed [`PT_KEYLEN`]-byte array (see [`Pslot::key`]), and a `u16` compare is also the
 //! cheaper half of the per-frame identity scan, so it goes first.
-mod fan;
 mod refresh;
 
 use crate::img;
@@ -540,11 +539,6 @@ fn built_key(srv: ServerId, path: &str, w: c_int, h: c_int, png: bool) -> Option
     }
     let c = crate::plex::client_for(srv)?;
     let s = memo.get_or_build(srv.raw(), path, w, h, png, c.token_gen(), || {
-        // A server-generated collection composite is replaced by the app's baked fan: one
-        // synthetic key per collection and stamp, whatever box the consumer draws it in.
-        if let Some(fan) = fan::fan_key(path) {
-            return fan;
-        }
         transcode_request(c, path, w, h, png)
     });
     if s.len() > KEY_MAX {
@@ -555,7 +549,7 @@ fn built_key(srv: ServerId, path: &str, w: c_int, h: c_int, png: bool) -> Option
 }
 
 /// The transcoder request for `path` drawn in a `w`×`h` logical box — the one builder behind
-/// every store key and the fan baker's member fetches, so both name the same bytes on disk.
+/// every store key, so equal keys name equal bytes on disk.
 /// Supersampled simulator renders (`surface::render_scale`, 1 on a television) ask the server
 /// for the pixels they will draw; the logical box stays the caller's.
 fn transcode_request(c: &crate::plex::Client, path: &str, w: c_int, h: c_int, png: bool) -> String {
@@ -1471,102 +1465,6 @@ fn load_art<T>(
     out
 }
 
-/// The worker's real [`fan::FanIo`]: the baked PNG under its own disk key, the collection's
-/// first members from the server that owns it, and each member poster through [`load_art`].
-struct WorkerFanIo<'a> {
-    client: &'a crate::plex::Client,
-    srv: ServerId,
-    rk: &'a str,
-    cache_gen: u64,
-    disk: Option<crate::imgcache::DiskKey>,
-    /// The grant the slot was built under, and the profile whose namespace `disk` is filed in.
-    token_gen: u32,
-    profile: String,
-}
-
-impl WorkerFanIo<'_> {
-    /// Is the identity this bake started under still the one in force? The members a server
-    /// lists depend on whose token asked, and a profile switch retokens the SAME `Client` in
-    /// place and publishes the new profile separately — so a bake that straddles a switch may
-    /// have listed one profile's members while `disk` names the other's namespace. Such a bake
-    /// is still delivered to its (now unreachable) old-grant slot, but never filed on disk.
-    fn still_current(&self) -> bool {
-        self.cache_gen == crate::imgcache::generation()
-            && self.client.token_gen() == self.token_gen
-            && crate::plex::session::current_profile_key() == self.profile
-    }
-}
-
-impl fan::FanIo for WorkerFanIo<'_> {
-    fn cached(&mut self) -> Option<Vec<u8>> {
-        let k = self.disk.as_ref()?;
-        crate::imgcache::read_at(self.cache_gen, k).map(|c| c.bytes)
-    }
-    fn discard(&mut self) {
-        if let Some(k) = &self.disk {
-            crate::imgcache::remove_at(self.cache_gen, k);
-        }
-    }
-    fn members(&mut self) -> fan::Got<fan::Members> {
-        use crate::plex::collections::CollectionOutcome as O;
-        match self.client.collection_children(self.rk, 0, fan::FAN_MEMBERS as i64) {
-            O::Ok(page) => fan::Got::Ok(
-                page.metadata
-                    .into_iter()
-                    .map(|m| (m.thumb, m.ultra_blur_colors.and_then(|c| c.corners())))
-                    .collect(),
-            ),
-            O::Denied | O::Missing => fan::Got::Final,
-            O::Transport => fan::Got::Transient,
-        }
-    }
-    fn poster(&mut self, thumb: &str) -> fan::Got<fan::Rgba> {
-        if self.cache_gen != crate::imgcache::generation() {
-            return fan::Got::Final;
-        }
-        // The box and builder a portrait card asks for the same poster with, so a member already
-        // on screen (or on disk) is a cache hit rather than a second transcode at another size.
-        let (w, h) = crate::ui::widgets::POSTER_RES;
-        let path = transcode_request(self.client, thumb, w, h, false);
-        let loaded = load_art(self.client, self.srv, &path, self.cache_gen, |b| {
-            crate::img::img_decode_owned(b).map(|(w, h, px)| fan::Rgba { w, h, px })
-        });
-        match loaded.art {
-            Some(poster) => fan::Got::Ok(poster),
-            None if loaded.transient => fan::Got::Transient,
-            None => fan::Got::Final,
-        }
-    }
-    fn persist(&mut self, png: &[u8]) {
-        if !self.still_current() {
-            return;
-        }
-        if let Some(k) = &self.disk {
-            crate::imgcache::write_at(self.cache_gen, k, png);
-        }
-    }
-}
-
-/// Bake (or reload) one collection's fan. The disk namespace adds the active profile to the
-/// server identity because the members a server lists depend on whose restrictions apply.
-fn bake_fan(
-    client: &crate::plex::Client,
-    srv: ServerId,
-    rk: &str,
-    stamp: &str,
-    cache_gen: u64,
-    token_gen: u32,
-) -> fan::Got<fan::Rgba> {
-    let profile = crate::plex::session::current_profile_key();
-    let disk = if crate::dev::scenarios::imagecache_bypass_armed() {
-        None
-    } else {
-        let namespace = format!("{}|profile:{profile}", disk_namespace(client));
-        crate::imgcache::classify_baked(&namespace, fan::FAN_KIND, rk, stamp, fan::FAN_W, fan::FAN_H)
-    };
-    fan::bake(&mut WorkerFanIo { client, srv, rk, cache_gen, disk, token_gen, profile })
-}
-
 /// BACKGROUND worker: claim a request, read disk or fetch and decode off-lock, publish pixels.
 /// RAM/GPU residency stays bounded independently of the number of persistent images.
 fn poster_worker() {
@@ -1624,29 +1522,16 @@ fn poster_worker() {
         } else if let Some(client) = crate::plex::client_for(srv)
             .filter(|c| cache_gen == crate::imgcache::generation() && c.token_gen() == token_gen)
         {
-            if let Some((rk, stamp)) = fan::parse_fan_key(&key_s) {
-                match bake_fan(client, srv, rk, stamp, cache_gen, token_gen) {
-                    fan::Got::Ok(out) => {
-                        px = img::img_malloc_copy(&out.px, || format!("{}x{} collection {rk} fan", out.w, out.h));
-                        (w, h) = (out.w as c_int, out.h as c_int);
-                    }
-                    fan::Got::Final => crate::log(&format!(
-                        "posters: collection {rk} has no usable member art - its card draws the neutral tile"
-                    )),
-                    fan::Got::Transient => transient = true,
-                }
-            } else {
-                let loaded = load_art(client, srv, &key_s, cache_gen, |b| {
-                    let (mut dw, mut dh) = (0, 0);
-                    let p = img::img_decode_rgba(b.as_ptr(), b.len() as c_int, &mut dw, &mut dh);
-                    (!p.is_null()).then_some((p, dw, dh))
-                });
-                if let Some((p, dw, dh)) = loaded.art {
-                    (px, w, h) = (p, dw, dh);
-                }
-                stale = loaded.stale.map(|k| (client, k));
-                transient = loaded.transient;
+            let loaded = load_art(client, srv, &key_s, cache_gen, |b| {
+                let (mut dw, mut dh) = (0, 0);
+                let p = img::img_decode_rgba(b.as_ptr(), b.len() as c_int, &mut dw, &mut dh);
+                (!p.is_null()).then_some((p, dw, dh))
+            });
+            if let Some((p, dw, dh)) = loaded.art {
+                (px, w, h) = (p, dw, dh);
             }
+            stale = loaded.stale.map(|k| (client, k));
+            transient = loaded.transient;
         } else {
             transient = cache_gen == crate::imgcache::generation();
             warn_fetch_failed(srv, ArtFail::NoServer);
@@ -1903,86 +1788,6 @@ mod tests {
             "",
             "an empty source must not become a request"
         );
-    }
-
-    /// A collection whose thumb is the server's generated 2×2 composite is served as OUR fan
-    /// (one synthetic, token-free key per collection and stamp, whatever box the consumer asks
-    /// for); a custom collection poster keeps the ordinary transcode path.
-    #[test]
-    fn a_server_composite_is_routed_to_the_fan_and_a_custom_poster_is_not() {
-        let (_g, sid, _) = one_server();
-        let composite = "/library/collections/901/composite/1700000000?width=400&height=600";
-        let fan = key_for(sid, composite, 250, 375, 0);
-        assert_eq!(fan, "/plx/fan/901/1700000000");
-        assert_eq!(key_for(sid, composite, 180, 270, 0), fan, "every card size shares one bake");
-        assert!(!fan.contains("X-Plex-Token"), "a baked key must carry no credential: {fan}");
-        assert_eq!(fan::parse_fan_key(&fan), Some(("901", "1700000000")));
-
-        let restamped = key_for(sid, "/library/collections/901/composite/1700000999", 250, 375, 0);
-        assert_ne!(restamped, fan, "a new stamp must be a new key, and so a new bake");
-
-        let custom = key_for(sid, "/library/metadata/901/thumb/1700000000", 250, 375, 0);
-        assert!(
-            custom.starts_with("/photo/:/transcode?") && custom.contains("thumb%2F1700000000"),
-            "a custom collection poster is used unchanged: {custom}"
-        );
-    }
-
-    /// Only a COLLECTION's composite becomes a fan. Playlists and other PMS objects also have
-    /// generated `/composite/` thumbs; rerouting them would list a playlist's ratingKey as a
-    /// collection (a 404, so a card with no art at all) instead of drawing the server's picture.
-    #[test]
-    fn other_composites_keep_the_ordinary_transcode_path() {
-        let (_g, sid, _) = one_server();
-        for thumb in [
-            "/playlists/77/composite/1700000000",
-            "/playlists/77/composite/1700000000?width=400&height=400",
-            "/library/metadata/77/composite/1700000000",
-            "/library/sections/2/composite/1700000000",
-            "/library/collections/77/composite/1700000000/extra",
-            "/library/collections//composite/1700000000",
-        ] {
-            let key = key_for(sid, thumb, 250, 375, 0);
-            assert!(fan::parse_fan_key(&key).is_none(), "{thumb} must not be a fan: {key}");
-            assert!(key.starts_with("/photo/:/transcode?"), "{thumb} is transcoded as-is: {key}");
-        }
-    }
-
-    /// A fan bake that straddles a profile switch must not file its members under either
-    /// profile's disk namespace: the switch retokens the same `Client` in place and publishes the
-    /// new profile separately, so either change mid-bake means the listing and the namespace may
-    /// belong to different people (a managed profile shown the owner's restricted posters).
-    #[test]
-    fn a_fan_bake_is_not_persisted_across_a_retoken_or_a_profile_switch() {
-        struct Restore(std::sync::Arc<crate::plex::session::CurrentProfile>);
-        impl Drop for Restore {
-            fn drop(&mut self) {
-                crate::plex::session::publish_profile_for_test(self.0.user.clone(), self.0.generation);
-            }
-        }
-        let (_g, sid, _) = one_server();
-        let _restore = Restore(crate::plex::session::current_snapshot());
-        let profile = |uuid: &str| crate::plex::session::UserRef { uuid: uuid.into(), ..Default::default() };
-        crate::plex::session::publish_profile_for_test(Some(profile("profile-a")), 7);
-        let client = crate::plex::client_for(sid).unwrap();
-        let io = |c| WorkerFanIo {
-            client: c,
-            srv: sid,
-            rk: "901",
-            cache_gen: crate::imgcache::generation(),
-            disk: None,
-            token_gen: c.token_gen(),
-            profile: crate::plex::session::current_profile_key(),
-        };
-
-        let started = io(client);
-        assert!(started.still_current(), "an undisturbed bake may persist");
-        crate::plex::session::publish_profile_for_test(Some(profile("profile-b")), 8);
-        assert!(!started.still_current(), "the profile moved under the bake");
-
-        let started = io(client);
-        client.set_token("tok-profile-b");
-        assert!(!started.still_current(), "the grant moved under the bake");
     }
 
     /// The cliff absolute URLs brought within sight, and the reason [`poster_key`] gates on

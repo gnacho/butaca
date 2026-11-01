@@ -492,8 +492,6 @@ pub(crate) struct HubRef<'a> {
     pub(crate) identity: Option<HubIdentity<'a>>,
     pub(crate) title: &'a str,
     pub(crate) source: &'a str,
-    /// Every item the shelf's listing holds (0 when unknown); `items` is the capped page.
-    pub(crate) total: usize,
     pub(crate) items: &'a [PmsMovie],
 }
 
@@ -544,7 +542,7 @@ impl<'a> HubsView<'a> {
         let end = row.start.checked_add(row.len)?;
         Some(HubRef {
             identity: stable_hub_identity(row, &self.data.items),
-            title: &row.title, source: &row.source, total: row.total,
+            title: &row.title, source: &row.source,
             items: self.data.items.get(row.start..end)?,
         })
     }
@@ -2285,29 +2283,6 @@ pub(crate) fn seed_grid_for_test(state: &mut PmsState, adapter: &Arc<PmsAdapter>
     source.shelves = (0..rows).map(|row| {
         let mut shelf = build_test(items).shelves.remove(0);
         shelf.hub_id = format!("test.row.{row}");
-        shelf
-    }).collect();
-    let build = merge(&state.srcs);
-    commit(state, build);
-}
-
-/// [`seed_grid_for_test`] with each row's provider identity named: `(hubIdentifier, key, title)`.
-/// A linked collection shelf is a `custom.collection.*` row, so its fixtures need both halves.
-#[cfg(test)]
-pub(crate) fn seed_named_hubs_for_test(
-    state: &mut PmsState,
-    adapter: &Arc<PmsAdapter>,
-    items: usize,
-    rows: &[(&str, &str, &str)],
-) {
-    crate::testlock::assert_held("the pms hub catalog (seed_named_hubs_for_test)");
-    seed_for_test(state, adapter, items, HubState::Ready);
-    let source = state.srcs[0].last.as_mut().unwrap();
-    source.shelves = rows.iter().map(|(hub_id, key, title)| {
-        let mut shelf = build_test(items).shelves.remove(0);
-        shelf.hub_id = (*hub_id).into();
-        shelf.key = (*key).into();
-        shelf.title = (*title).into();
         shelf
     }).collect();
     let build = merge(&state.srcs);
