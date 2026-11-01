@@ -64,12 +64,6 @@ pub(crate) use crate::grant;
 // never-empty floor are graded on the host rather than observed on a television.
 pub(crate) mod pins;
 
-// The person/filmography wire DTOs (`PersonProfile`, `CreditGroup`, …). The plex.tv metadata
-// provider client that used to live here is gone (Jellyfin-only); the Jellyfin person backend in
-// `crate::person` builds these from `BaseItemDto` answers.
-#[cfg_attr(test, allow(dead_code))]
-pub(crate) mod discover;
-
 // The re-exports are the public surface the call sites import.
 pub(crate) use client::ArtFetch;
 pub(crate) use client::JsonDeadlineOutcome;
@@ -108,6 +102,10 @@ pub(crate) use servers::regrade_credentials;
 // process-global holding clients whose loopback ports closed when their test returned. Both must be
 // called under `crate::testlock::serial`.
 pub use models::*;
+// The i64 wire-fold helper is shared, not plex-private: the person screen's DTO vocabulary
+// (crate::person, where the old discover.rs types now live) deserializes its optional i64s
+// through it.
+pub(crate) use models::de_i64;
 pub use params::*;
 #[cfg(test)]
 pub(crate) use servers::{

@@ -892,7 +892,7 @@ fn de_f64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
 /// string-encoded int (PMS does this: e.g. `size:"40"`, `streamType:"2"`), dropping every
 /// item in the response. This keeps one field's-worth of degradation (and actually recovers a
 /// stringy int rather than zeroing it). Applied to every i64 in a parsed DTO.
-pub(super) fn de_i64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
+pub(crate) fn de_i64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
     enum IntFloatStrBool {
