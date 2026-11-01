@@ -2,7 +2,7 @@
 //! related, plus the two part-level playback ops (stream selection, direct-play target).
 use super::client::{Client, QueryBuilder, StreamUrl};
 use super::models::{MediaContainer, Metadata};
-use super::params::{SectionQuery, StreamSelection};
+use super::params::StreamSelection;
 
 fn sidecar_key_allowed(key: &str) -> bool {
     let Some(tail) = key.strip_prefix("/library/streams/") else { return false; };
@@ -12,26 +12,6 @@ fn sidecar_key_allowed(key: &str) -> bool {
 }
 
 impl Client {
-    /// GET /library/sections (D-3: spec-canonical is /library/sections/all; keep the
-    /// known-working bare path). Read `.directory[]` for {kind, key}.
-    pub fn sections(&self) -> Option<MediaContainer> {
-        self.get_json("/library/sections")
-    }
-
-    /// GET / — what this server calls itself (`friendlyName`), or `None` when it did not answer
-    /// or answered with no name. The Sources list heads each server's group with it, which is the
-    /// only place in the app a MACHINE is named.
-    ///
-    /// Same endpoint `serverinfo`'s version/Plex-Pass probe uses, deliberately not folded into it:
-    /// that one is a process-global fact about the CURRENT server refreshed on every session path,
-    /// this is a per-server string a roster row needs once. Sharing the state would mean the last
-    /// server discovered renamed the one you are signed in to.
-    pub fn friendly_name(&self) -> Option<String> {
-        self.get_json("/")
-            .map(|mc| mc.friendly_name)
-            .filter(|s| !s.is_empty())
-    }
-
     /// GET /library/all?guid=… — **does THIS server hold this film, and under which key?**
     ///
     /// The one query in the app that crosses libraries rather than naming one, which is why the
@@ -68,25 +48,6 @@ impl Client {
             q = q.int("type", t);
         }
         self.get_json(&q.build())
-    }
-
-    /// Sorted/filtered/paged section listing — the Library browse grid's one fetch.
-    /// `GET /library/sections/{k}/all?includeMeta=1&sort=…&genre=…&X-Plex-Container-Start&Size`
-    /// → `.metadata[]` + `total_size` (+ `.meta` when `include_meta`).
-    pub fn section_items_query(&self, q: &SectionQuery) -> Option<MediaContainer> {
-        let mut b = QueryBuilder::new(format!("/library/sections/{}/all", q.section_key));
-        if q.include_meta {
-            b = b.int("includeMeta", 1);
-        }
-        b = b.opt_str("sort", q.sort);
-        for (k, v) in q.filters {
-            b = b.str(k, v);
-        }
-        let path = b
-            .int("X-Plex-Container-Start", q.start)
-            .int("X-Plex-Container-Size", q.size)
-            .build();
-        self.get_json(&path)
     }
 
     /// GET /library/sections/{key}/{directory} — a secondary directory: the filter value

@@ -23,7 +23,7 @@ fn section(source: crate::registry::ServerId, key: i64, index: usize, title: &st
 /// **The headline case.** `DirectorySnapshot::capture_from` copies the section table with no
 /// tier/state filter, and `LibraryScreen::sync` (mod.rs) filters favourites on `sid.is_some()`
 /// alone — neither a source's connection tier nor its probe state reaches the selector at all.
-/// So every `Location` (plus "no tier yet", `None`) crossed with every `SourceState` — 4x5 = 20
+/// So every `Location` (plus "no tier yet", `None`) crossed with every `SourceState` — 4x3 = 12
 /// cells — must draw the SAME outcome: no selector at F=1, and at F=2 exactly two pills whose
 /// labels never change with the cell. That invariance, not any one cell, is what this pins.
 #[test]
@@ -32,8 +32,8 @@ fn every_connection_tier_and_source_state_draws_the_same_selector() {
     use crate::browse::SourceState;
     use crate::plex::probe::Location;
     let tiers = [None, Some(Location::Local), Some(Location::Remote), Some(Location::Relay)];
-    let states = [SourceState::NotProbed, SourceState::Reachable, SourceState::Unauthorized,
-        SourceState::Unreachable, SourceState::InsecureOnly];
+    let states = [SourceState::NotProbed, SourceState::Reachable,
+        SourceState::Unreachable];
     let sid_a = sid(0);
     let sid_b = sid(1);
     let expected_a = CString::new("Movies A").unwrap();

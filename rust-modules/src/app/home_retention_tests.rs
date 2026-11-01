@@ -568,7 +568,7 @@ fn supplied_home_results_use_the_dispatcher_without_consuming_live_arrivals() {
     let captured = rig.take_hubs_results().pop().unwrap();
     let AppMsg::HubsResult(result) = captured.1 else { unreachable!() };
     let payload = crate::pms::record::encode(&result);
-    let decoded = crate::pms::record::decode(payload, |_| None).unwrap();
+    let decoded = crate::pms::record::decode(payload).unwrap();
     rig.stores.hubs.queue_test_landing(Some(9));
 
     frame_with_results(&mut d, &mut rig, AppArg::Home, tick(0), vec![],
@@ -605,17 +605,18 @@ fn store_work_is_addressed_and_idle_polling_does_not_invent_a_change() {
     }
 }
 
+/// The launch lane is the Jellyfin world's (the pick requires its installed client); the
+/// recorded fixtures grade this contract end to end.
 #[test]
+#[cfg(feature = "jellyfin")]
 fn onboard_frame_lands_owned_discovery_before_capturing_its_directory() {
     let _guard = crate::testlock::serial();
     crate::registry::reset_for_test();
     let sid = crate::registry::register_with_client_id(
         "onboard-same-tick", "127.0.0.1", 9, "synthetic", "fixture");
-    let client = crate::registry::client_for(sid).unwrap();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
-    rig.stores.browse.borrow_mut().queue_discovery_for_test(
-        client, client.token_gen(), true);
+    rig.stores.browse.borrow_mut().queue_discovery_for_test(sid, true);
 
     assert!(rig.browse_directory().sources().is_empty(),
         "the queued result has not been published before the frame");
@@ -628,20 +629,20 @@ fn onboard_frame_lands_owned_discovery_before_capturing_its_directory() {
     crate::registry::reset_for_test();
 }
 
+/// Same flavor bound as `onboard_frame_lands_owned_discovery_before_capturing_its_directory`.
 #[test]
+#[cfg(feature = "jellyfin")]
 fn controlled_discovery_recaptures_the_directory_in_its_delivery_turn() {
     let _guard = crate::testlock::serial();
     crate::registry::reset_for_test();
     let mut rig = Bridge::for_test(|| 0);
     let sid = crate::registry::register_with_client_id(
         "same-turn-discovery", "127.0.0.1", 9, "synthetic", "fixture");
-    let client = crate::registry::client_for(sid).unwrap();
-    rig.stores.browse.borrow_mut().queue_discovery_for_test(
-        client, client.token_gen(), true);
+    rig.stores.browse.borrow_mut().queue_discovery_for_test(sid, true);
     let result = rig.stores.browse.borrow_mut().take_discovery().unwrap();
     let mt = unsafe { crate::task::MainThread::assume() };
     let publisher = crate::plex::session::ProfilePublisher::scoped(&mt);
-    rig.home_io = Some(crate::app::HomeIo {
+    rig.home_io = Some(crate::app::bootstrap::HomeIo {
         replay: false,
         preferences: Default::default(),
         requests: Vec::new(),

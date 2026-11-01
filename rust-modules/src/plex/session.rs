@@ -1083,8 +1083,8 @@ pub struct RecentSearches {
 #[derive(Serialize, Deserialize, Default, Clone)]
 #[serde(default)]
 pub struct HomeUserRef {
-    /// This member's plex.tv **account id** (`/api/v2/home/users[].id`) — the identity
-    /// [`Session::household_ids`] hands the "Shared by …" rule, and the reason it is here at all.
+    /// This member's plex.tv **account id** (`/api/v2/home/users[].id`) — the identity the
+    /// "Shared by …" rule used to grade against, and the reason it is here at all.
     /// It is the SAME id space as `account::Resource::owner_id`: the admin's row carries the id
     /// `/api/v2/user` reports for the account itself (measured 2026-09-03 on the dev account), so
     /// "does this server's owner live in this house" is an integer comparison rather than a
@@ -2127,14 +2127,6 @@ impl Session {
     /// way regardless: the ids present still decide their own cases, and the ones missing fall
     /// through to the same "outside the house" default an un-enumerable roster gets, one member at
     /// a time instead of all at once.
-    pub fn household_ids(&self) -> Vec<i64> {
-        self.home_users
-            .iter()
-            .map(|u| u.id)
-            .filter(|&id| id != 0)
-            .collect()
-    }
-
     /// **Is the profile this session would resume as behind a PIN?**
     ///
     /// The other flag on the same roster row as [`Session::active_profile_is_admin`], read for the

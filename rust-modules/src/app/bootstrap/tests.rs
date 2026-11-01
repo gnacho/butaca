@@ -173,9 +173,8 @@ fn normal_and_controlled_activation_publish_the_owner_supplied_scope() {
     controlled.bind_primary(initial.primary_client).unwrap();
     let client = controlled.recorded_client(initial.primary_client).unwrap();
     assert_eq!(client.denied_data_requests(),0);
-    assert!(client.sections().is_none(),"real Client GET is denied before HTTP");
     assert!(client.fetch_built("/synthetic").is_none(),"poster HTTP arm is denied too");
-    assert_eq!(client.denied_data_requests(),2);
+    assert_eq!(client.denied_data_requests(),1);
     assert_eq!(controlled.controlled_failure(),Some("unrecorded client IO attempted"));
 }
 
@@ -281,21 +280,21 @@ fn controlled_hubs_commands_preserve_normal_store_notice_bookkeeping() {
     }
 }
 
+/// The launch lane is the Jellyfin world's (the pick requires its installed client), so this
+/// admission contract only exists in that flavor; the recorded fixtures grade it end to end.
 #[test]
+#[cfg(feature = "jellyfin")]
 fn controlled_admission_records_real_discovery_spawn_refusal() {
     let _serial = crate::testlock::serial();
-    crate::registry::reset_for_test();
-    let sid = crate::registry::register_with_client_id("s00000001", "127.0.0.1", 9, "s00000002", "s00000003");
-    assert!(crate::registry::set_current(sid));
     let mt = unsafe { crate::task::MainThread::assume() };
     let publisher = crate::plex::session::ProfilePublisher::scoped(&mt);
     let mut io = HomeIo { replay:false,preferences:Default::default(),requests:Vec::new(),admissions:Default::default(),
         failure:None,profile:publisher.snapshot() };
     let stores = crate::stores::Stores::default();
+    stores.browse.borrow_mut().seed_source_for_test(crate::registry::ServerId::from_raw(1));
     io.discovery_owned_with(&stores, &mut |_| false);
     assert_eq!(io.requests.len(), 1);
     assert_eq!(io.requests[0]["admitted"], serde_json::json!(false), "real refusal must be recorded");
-    crate::registry::reset_for_test();
 }
 
 #[test]

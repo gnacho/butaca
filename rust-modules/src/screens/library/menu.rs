@@ -81,12 +81,12 @@ fn stamp_kind(stamp: &mut Stamp, kind: Option<crate::browse::SecKind>) {
 }
 
 fn stamp_state(stamp: &mut Stamp, state: crate::browse::SourceState) {
+    // The tag numbers keep their historical values (the 401/InsecureOnly states went with the
+    // Plex arm, #166) so recorded stamps stay comparable.
     stamp.tag(match state {
         crate::browse::SourceState::NotProbed => 0,
         crate::browse::SourceState::Reachable => 1,
-        crate::browse::SourceState::Unauthorized => 2,
         crate::browse::SourceState::Unreachable => 3,
-        crate::browse::SourceState::InsecureOnly => 4,
     });
 }
 

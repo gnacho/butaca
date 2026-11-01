@@ -1100,6 +1100,7 @@ impl Bridge {
         }
         Ok(())
     }
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn recorded_client(&self, id: u32) -> Option<&'static crate::plex::Client> {
         self.recorded_clients.get(&id).copied()
     }

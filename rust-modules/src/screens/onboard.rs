@@ -898,11 +898,9 @@ mod tests {
         crate::registry::reset_for_test();
         let mut browse = BrowseFixture::new();
         let sid = crate::registry::register_with_client_id("endpoint-onboard", "127.0.0.1", 9, "synthetic", "cid");
-        let client = crate::registry::client_for(sid).unwrap();
         let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
-        browse.stores.browse.borrow_mut().queue_discovery_for_test(
-            client, client.token_gen(), false);
+        browse.stores.browse.borrow_mut().queue_discovery_for_test(sid, false);
         let _ = browse.stores.browse_discover_pump();
         let directory = browse.capture();
         let source_list_gen = directory.source_list_gen();

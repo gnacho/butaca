@@ -19,24 +19,13 @@ pub struct MediaContainer {
     /// `show` example): `episodeSort`, `audioLanguage`, `subtitleLanguage`, … — see [`Setting`].
     #[serde(rename = "Setting", default)]
     pub setting: Vec<Setting>,
-    #[serde(rename = "Directory", default)]
-    pub directory: Vec<LibrarySection>,
     #[serde(rename = "Metadata", default)]
     pub metadata: Vec<Metadata>,
     #[serde(rename = "Hub", default)]
     pub hub: Vec<Hub>,
-    #[serde(rename = "totalSize", default, deserialize_with = "de_i64")]
-    pub total_size: i64,
     /// GET /identity — the server's stable id (the PlayQueue `server://{id}/…` uri needs it).
     #[serde(rename = "machineIdentifier", default)]
     pub machine_identifier: String,
-    /// GET / — what the server calls ITSELF ("nas-home"). The MACHINE name, and so the one string
-    /// the Sources list heads a server's group with; the app says the owner's HANDLE everywhere
-    /// else ("people in content, machines in settings"). Read off the PMS rather than plex.tv on
-    /// purpose: a server that answers can always name itself, including on a boot that never
-    /// reached plex.tv at all.
-    #[serde(rename = "friendlyName", default, deserialize_with = "de_str")]
-    pub friendly_name: String,
     /// POST /playQueues response ids (0 = absent) — the timeline's playQueueID/playQueueItemID.
     #[serde(rename = "playQueueID", default, deserialize_with = "de_i64")]
     pub play_queue_id: i64,
@@ -101,40 +90,6 @@ pub struct MediaContainer {
     /// (`serverinfo.rs`); every other endpoint simply omits it.
     #[serde(default)]
     pub version: String,
-}
-
-/// Doubles as the generic `Directory[]` row: a library section ({key,type,title}), a secondary
-/// directory entry, or a filter value ({key = tag id, title}).
-#[derive(Deserialize, Default)]
-pub struct LibrarySection {
-    #[serde(default)]
-    pub key: String, // "1" — parse to i64 at the call site (keep raw)
-    #[serde(rename = "type", default)]
-    pub kind: String, // movie | show | artist
-    #[serde(default)]
-    pub title: String,
-    /// A library section's metadata agent. Together with `scanner`, this distinguishes Plex's
-    /// Other Videos libraries from Movies libraries, whose wire `type` is also `movie`.
-    #[serde(default, deserialize_with = "de_str")]
-    pub agent: String,
-    /// A library section's scanner. Empty when the server does not send one.
-    #[serde(default, deserialize_with = "de_str")]
-    pub scanner: String,
-}
-
-const NONE_AGENTS: [&str; 2] = ["tv.plex.agents.none", "com.plexapp.agents.none"];
-const VIDEO_FILES_SCANNER: &str = "plex video files";
-
-impl LibrarySection {
-    /// Whether this section is Plex's Other Videos library: a `movie` type, a none agent and the
-    /// Plex Video Files scanner. Both metadata fields are required, so an older or partial answer
-    /// stays Movies instead of moving a curated library to a different pill.
-    pub(crate) fn is_other_videos(&self) -> bool {
-        let scanner = self.scanner.trim().to_ascii_lowercase();
-        self.kind == "movie"
-            && NONE_AGENTS.iter().any(|none| self.agent.trim().eq_ignore_ascii_case(none))
-            && scanner.starts_with(VIDEO_FILES_SCANNER)
-    }
 }
 
 #[derive(Deserialize, Default)]
