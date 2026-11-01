@@ -577,43 +577,13 @@ fn hero_facts(d: &Detail) -> (String, Option<String>) {
     )
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum PlayNote {
-    Quiet,
-    Soft,
-    Warn,
-}
-
-fn play_note(
-    preview: crate::route::Preview,
-    hdr: bool,
-    subscription: crate::plex::serverinfo::Subscription,
-) -> PlayNote {
-    let converts = preview == crate::route::Preview::Converts;
-    let no_pass = subscription == crate::plex::serverinfo::Subscription::No;
-    if converts && no_pass && hdr {
-        PlayNote::Warn
-    } else if converts && no_pass {
-        PlayNote::Soft
-    } else {
-        PlayNote::Quiet
-    }
-}
-
-fn item_subscription(d: &Detail) -> crate::plex::serverinfo::Subscription {
-    crate::plex::serverinfo::subscription_of(d.sid)
-}
-
-const FACTS_GLYPH_D: f32 = theme::size::CAPTION as f32;
 fn converts_on_server_c() -> &'static CStr { crate::i18n::msg::browse_detail_converts_c() }
 
 #[derive(Clone, Copy)]
 enum Bit {
     Word(&'static CStr, [f32; 4], c_int),
     Sep(f32),
-    Glyph,
     Air(f32),
-    Capsule,
 }
 
 const FACTS_BITS: usize = 8;
@@ -631,37 +601,19 @@ fn play_mode_bits(d: &Detail, after: bool) -> ([Bit; FACTS_BITS], usize) {
     if after {
         push(Bit::Sep(theme::space::MD));
     }
-    match play_note(preview, d.hdr, item_subscription(d)) {
-        PlayNote::Quiet => push(Bit::Word(
-            match preview {
-                crate::route::Preview::DirectPlay => crate::i18n::msg::browse_detail_direct_play_c(),
-                crate::route::Preview::Remux => crate::i18n::msg::browse_detail_direct_stream_c(),
-                crate::route::Preview::Converts => converts_on_server_c(),
-            },
-            crate::ui::detail_layout::FACTS_INK,
-            0,
-        )),
-        PlayNote::Soft => {
-            push(Bit::Word(converts_on_server_c(), crate::ui::detail_layout::FACTS_INK, 0));
-            push(Bit::Sep(theme::space::SM));
-            push(Bit::Word(
-                crate::i18n::msg::browse_detail_hardware_needs_c(),
-                theme::TEXT_SECONDARY,
-                0,
-            ));
-            push(Bit::Air(theme::space::SM));
-            push(Bit::Capsule);
-        }
-        PlayNote::Warn => {
-            push(Bit::Glyph);
-            push(Bit::Air(theme::space::SM));
-            push(Bit::Word(c"HDR \u{2192} SDR", theme::TEXT_SECONDARY, 1));
-            push(Bit::Sep(theme::space::SM));
-            push(Bit::Word(crate::i18n::msg::browse_detail_tonemap_needs_c(), theme::TEXT_SECONDARY, 0));
-            push(Bit::Air(theme::space::SM));
-            push(Bit::Capsule);
-        }
-    }
+    // The facts row names only HOW the item will play. The old Plex Pass annotation chain
+    // (the "no Pass" soft/warn notes and their capsule) rode a `serverinfo` fact no Jellyfin
+    // server can answer, so on this codebase's only live flavor it never drew; the capsule
+    // vocabulary went with it (see `ui::widgets` history).
+    push(Bit::Word(
+        match preview {
+            crate::route::Preview::DirectPlay => crate::i18n::msg::browse_detail_direct_play_c(),
+            crate::route::Preview::Remux => crate::i18n::msg::browse_detail_direct_stream_c(),
+            crate::route::Preview::Converts => converts_on_server_c(),
+        },
+        crate::ui::detail_layout::FACTS_INK,
+        0,
+    ));
     (bits, n)
 }
 
@@ -669,9 +621,7 @@ fn bit_w(bit: Bit, measure: &dyn crate::ui::machine::Measure) -> f32 {
     match bit {
         Bit::Word(text, _, bold) => measure.width(text, theme::size::CAPTION, bold != 0),
         Bit::Sep(gap) => 2.0 * gap + measure.width(c"\u{b7}", theme::size::CAPTION, false),
-        Bit::Glyph => FACTS_GLYPH_D,
         Bit::Air(gap) => gap,
-        Bit::Capsule => crate::ui::widgets::pass_capsule_w(measure),
     }
 }
 
@@ -688,8 +638,6 @@ fn draw_play_mode(
     after: bool,
     measure: &dyn crate::ui::machine::Measure,
 ) -> f32 {
-    let (top, baseline) = crate::text::text_cap_band(theme::size::CAPTION, 0);
-    let cy = y + (top + baseline) * 0.5;
     let (bits, n) = play_mode_bits(d, after);
     let mut bx = x;
     for bit in &bits[..n] {
@@ -709,17 +657,7 @@ fn draw_play_mode(
                 );
                 bx += bit_w(*bit, measure);
             }
-            Bit::Glyph => {
-                crate::ui::icons::draw(
-                    p,
-                    crate::ui::icons::Icon::Alert,
-                    Rect::new(bx, cy - FACTS_GLYPH_D * 0.5, FACTS_GLYPH_D, FACTS_GLYPH_D),
-                    theme::TEXT_SECONDARY,
-                );
-                bx += FACTS_GLYPH_D;
-            }
             Bit::Air(gap) => bx += gap,
-            Bit::Capsule => bx += crate::ui::widgets::pass_capsule(p, bx, cy, false, measure),
         }
     }
     bx - x
@@ -1113,59 +1051,6 @@ mod tests {
             converts_on_server_c().to_str().unwrap(),
             crate::ui::fmt::converts_on_server()
         );
-    }
-
-    #[test]
-    fn how_it_plays_resolves_the_full_docs_truth_table() {
-        use crate::plex::serverinfo::Subscription::{No, Unknown, Yes};
-        use crate::route::Preview::{Converts, DirectPlay, Remux};
-        for preview in [DirectPlay, Remux, Converts] {
-            for hdr in [false, true] {
-                for subscription in [Unknown, No, Yes] {
-                    let expected = match (preview, hdr, subscription) {
-                        (Converts, true, No) => PlayNote::Warn,
-                        (Converts, false, No) => PlayNote::Soft,
-                        _ => PlayNote::Quiet,
-                    };
-                    assert_eq!(play_note(preview, hdr, subscription), expected);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn the_pass_note_judges_the_items_own_server_not_the_browsed_one() {
-        let _guard = crate::testlock::serial();
-        crate::registry::reset_for_test();
-        let own = crate::registry::register_with_client_id("own", "127.0.0.1", 1, "t", "c1");
-        let shared = crate::registry::register_with_client_id("shared", "127.0.0.2", 2, "t", "c2");
-        crate::plex::serverinfo::store_for_test(
-            own,
-            crate::plex::serverinfo::Subscription::Yes,
-            "1",
-        );
-        crate::plex::serverinfo::store_for_test(
-            shared,
-            crate::plex::serverinfo::Subscription::No,
-            "1",
-        );
-        let borrowed = Detail {
-            sid: shared,
-            ..Default::default()
-        };
-        let ours = Detail {
-            sid: own,
-            ..Default::default()
-        };
-        assert_eq!(
-            item_subscription(&borrowed),
-            crate::plex::serverinfo::Subscription::No
-        );
-        assert_eq!(
-            item_subscription(&ours),
-            crate::plex::serverinfo::Subscription::Yes
-        );
-        crate::registry::reset_for_test();
     }
 
     #[test]

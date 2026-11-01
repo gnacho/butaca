@@ -4135,19 +4135,6 @@ pub(crate) fn cur_rk(ps: &PlaybackSession) -> String {
 pub(crate) fn cur_sid(ps: &PlaybackSession) -> ServerId {
     ps.cur_sid
 }
-/// Test-only: install the playing item's server directly, returning the previous value to restore.
-///
-/// In production [`PlaybackSession::cur_sid`] has exactly one writer — `apply_plan` — and a `Plan` cannot
-/// be built outside this module, so a suite elsewhere that needs "this is playing from the share"
-/// sets it through here rather than widening `Plan` for a test. `player::playing_subscription` is
-/// the reader that needs it: the failure read-out's Plex Pass claim is about the server the failing
-/// item came from, and there is no other way to say which that is. It returns the previous value
-/// because it began life as a swap of a crate global; since phase 9 the session is the caller's own
-/// value, so putting it back is the caller's convenience rather than an obligation to other tests.
-#[cfg(test)]
-pub(crate) fn swap_cur_sid_for_test(ps: &mut PlaybackSession, sid: ServerId) -> ServerId {
-    { let s = &mut *ps; std::mem::replace(&mut s.cur_sid, sid) }
-}
 /// The `Client` for the currently-playing item's server, `None` before the first play (or after a
 /// plan that never resolved). The main-thread twin of `client_for(env.sid)` on the resolve worker
 /// — every in-playback PMS call in this file goes through one of the two, and none through

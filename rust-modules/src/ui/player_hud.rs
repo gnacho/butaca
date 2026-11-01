@@ -931,10 +931,6 @@ pub(crate) fn draw_readout(
 //  * the support facts (version · firmware · set · failure code) — one dim footer line at the
 //    foot of the screen, always; there is no *Details* control.
 
-/// The subscription's name in the one note that states it ("This server has no Plex Pass"). A
-/// product name, so it is not translated.
-const PLEX_PASS: &str = "Plex Pass";
-
 /// The support line's cap top this far above the canvas bottom — inside the safe area's
 /// bottom margin band's upper edge, clear of the row by construction, and
 /// `the_diagnostics_footer_sits_below_the_row_inside_the_safe_bottom_band` fails if a taller row or
@@ -1022,9 +1018,7 @@ impl FailureReadout {
         use crate::player::FailureKind;
         let policy = e.kind == FailureKind::PlaybackPolicy && !e.detail.is_empty();
         let reason: &str = if policy { &e.detail } else { e.readout };
-        let note: Option<String> = if e.no_pass {
-            Some(crate::i18n::msg::widgets_failure_no_pass(PLEX_PASS))
-        } else if policy || e.detail.is_empty() {
+        let note: Option<String> = if policy || e.detail.is_empty() {
             None
         } else {
             Some(e.detail.to_string())

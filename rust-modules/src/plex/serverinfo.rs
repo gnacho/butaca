@@ -194,11 +194,12 @@ fn fetch_once(id: ServerId, c: &Client) {
     };
     let mut sub = Subscription::from_wire(mc.my_plex_subscription);
     // dev: /tmp/butaca-nopass — pretend the server answered "no Plex Pass". The dev server
-    // has one, so every Pass-conditional surface (the facts row's HDR warning, the read-out's
-    // capsule, the stats Server row) is otherwise unreachable on the only TV we own. It applies
-    // to EVERY server, deliberately: it is a "what does a free server look like" switch, not a
-    // per-server override. Checked here, once per fetch, rather than in `subscription()` — that
-    // accessor is on per-frame paths and `dev::flag` is a filesystem stat.
+    // has one, so the stats Server row is otherwise stuck on "has a Pass" on the only TV we
+    // own. It applies to EVERY server, deliberately: it is a "what does a free server look
+    // like" switch, not a per-server override. Checked here, once per fetch, rather than in
+    // `subscription()` — that accessor is on per-frame paths and `dev::flag` is a filesystem
+    // stat. (The old Pass-conditional UX the trigger used to reach — the detail facts row's
+    // warning and the failure read-out's capsule — went with #166.)
     if crate::dev::flag("nopass") {
         #[cfg(feature = "devtriggers")]
         crate::log("pms: /tmp/butaca-nopass — reporting subscription as No");
@@ -251,8 +252,8 @@ fn store(id: ServerId, sub: Subscription, version: &str) {
 /// Test-only: publish one server's answer without a round trip.
 ///
 /// [`store`] is this module's private seam, and the suites that need it are the ones grading its
-/// READERS — `player::playing_subscription` and `screens::detail::hero::item_subscription`, both of which
-/// answer "whose server is this item on" and neither of which can reach a real PMS. Callers must
+/// READERS — `route`'s Pass-gated audio-enhancement offering and `app::diagnostics`' stats Server
+/// row, neither of which can reach a real PMS on the host. Callers must
 /// hold `crate::testlock::serial()`: the slot arrays are crate globals, and they deliberately
 /// outlive `servers::reset_for_test` (they are keyed on the SLOT, not on the client), so a test
 /// must seed every slot it reads rather than assume a boot state.
