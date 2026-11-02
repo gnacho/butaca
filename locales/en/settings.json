@@ -63,10 +63,6 @@
     "value": "Version, copyright and project information.",
     "description": "Settings, account, onboarding or privacy UI: settings.about.detail"
   },
-  "settings.root.copy": {
-    "value": "Manage this television and your Plex profile. Audio and subtitle language preferences sync with your Plex account; playback defaults and the app language apply to this television.",
-    "description": "Settings, account, onboarding or privacy UI: settings.root.copy"
-  },
   "settings.libraries.count": {
     "value": {
       "one": "{count} favorite",
@@ -207,14 +203,6 @@
     "value": "Share product analytics?",
     "description": "Settings, account, onboarding or privacy UI: settings.consent.product.title"
   },
-  "settings.consent.crash.body": {
-    "value": "If Butaca crashes, or signing in fails, it can send technical details that help find and fix the problem. Reports may include the signal, code addresses, thread information and device compatibility details, or which sign-in step failed and how the connection answered, plus a random crash report identifier, created when you turn this on and deleted when you turn it off or sign out, so that repeated crashes under one crash report identifier are counted once rather than once each. They never include titles, Plex accounts, searches, server names or addresses, tokens, subtitle text, or the product analytics identifier.",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.crash.body"
-  },
-  "settings.consent.product.body": {
-    "value": "Butaca can share which screens and features are used and broad sign-in and playback outcomes. Reports carry a random Analytics ID, created when you turn this on and deleted when you turn it off or sign out, and can include the app version, webOS version, television model and SoC, and whether a selected server is local, remote or relayed. They never include titles, Plex accounts, searches, server names or addresses, tokens, subtitle text, or exact viewing history.",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.product.body"
-  },
   "settings.consent.crash.row": {
     "value": "Crash reports",
     "description": "Settings, account, onboarding or privacy UI: settings.consent.crash.row"
@@ -311,10 +299,6 @@
     "value": "The random identifier attached to product analytics from this sign-in, and how to have those events deleted.",
     "description": "Settings, account, onboarding or privacy UI: settings.consent.analytics_subtitle"
   },
-  "settings.consent.policy_subtitle": {
-    "value": "How Butaca handles local data, Plex services and optional reporting.",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.policy_subtitle"
-  },
   "settings.consent.crash_subtitle": {
     "value": "What is actually sent: the exact fields a crash or error report can carry — only when error reporting is on.",
     "description": "Settings, account, onboarding or privacy UI: settings.consent.crash_subtitle"
@@ -400,7 +384,7 @@
     "description": "Settings, account, onboarding or privacy UI: settings.legal.section"
   },
   "settings.legal.copy": {
-    "value": "Read the notices that apply to this build, its open-source components and its relationship with Plex and LG.",
+    "value": "Read the notices that apply to this build, its open-source components and its relationship with LG.",
     "description": "Settings, account, onboarding or privacy UI: settings.legal.copy"
   },
   "settings.about.subtitle": {
@@ -416,7 +400,7 @@
     "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.responsible_body"
   },
   "settings.legal.privacy.servers": {
-    "value": "PLEX MEDIA SERVERS",
+    "value": "JELLYFIN SERVERS",
     "description": "Settings, account, onboarding or privacy UI: settings.legal.privacy.servers"
   },
   "settings.legal.privacy.servers_body": {
@@ -472,7 +456,7 @@
     "description": "Settings, account, onboarding or privacy UI: settings.legal.trademarks.body"
   },
   "settings.legal.contact.body": {
-    "value": "Privacy questions may be sent to github.com/gnacho/butaca/issues.\n\nSecurity vulnerabilities may be reported privately through GitHub Security Advisories for gnacho/butaca. Please do not include Plex tokens, server addresses or personal media information in a report.",
+    "value": "Privacy questions may be sent to github.com/gnacho/butaca/issues.\n\nSecurity vulnerabilities may be reported privately through GitHub Security Advisories for gnacho/butaca. Please do not include access tokens, server addresses or personal media information in a report.",
     "description": "Settings, account, onboarding or privacy UI: settings.legal.contact.body"
   },
   "settings.legal.opensource.body": {
@@ -521,27 +505,11 @@
       "contact": "str"
     }
   },
-  "settings.consent.analytics.present": {
-    "value": "YOUR ANALYTICS ID\n\n{id}\n\nWHAT IT IS\n\nA random identifier created on this television when you turned product analytics on. It is attached to analytics events so they can be counted as coming from one Analytics ID: one uninterrupted opt-in on one television. It is not derived from your Plex account, your television or anything about you, and it is never sent with crash reports, which carry a separate Crash report ID of their own.\n\nHOW TO HAVE THESE EVENTS DELETED\n\nWrite to {contact} and quote the identifier above. It is the only handle these events carry, so a request without it cannot be matched to anything.\n\nHOW IT ENDS\n\nTurning product analytics off deletes this identifier, and turning analytics on again creates a different one. Signing out removes it as well, and the next person to sign in is asked afresh; so does Delete all local data. Events already sent keep the old identifier, which is why it is worth copying down before you turn analytics off if you intend to ask for their deletion.",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.analytics.present",
-    "args": {
-      "contact": "str",
-      "id": "str"
-    }
-  },
   "settings.consent.errors.absent": {
     "value": "NO CRASH REPORT ID\n\nCrash reports are off, so this installation has no crash report identifier and is sending no crash or error reports.\n\nAn identifier is created only when you turn crash reports on, and deleting it is what turning them off does. If you had crash reports on before and want reports from that period deleted, write to {contact} — but note that the identifier they carry was destroyed when crash reports were turned off, so it can no longer be looked up from this television.",
     "description": "Settings, account, onboarding or privacy UI: settings.consent.errors.absent",
     "args": {
       "contact": "str"
-    }
-  },
-  "settings.consent.errors.present": {
-    "value": "YOUR CRASH REPORT ID\n\n{id}\n\nWHAT IT IS\n\nA random identifier created on this television when you turned crash reports on. It is attached to every crash and error report so that repeated crashes under one Crash report ID are counted once, which is what tells a problem that hit many people apart from one television that hit it many times. It is not derived from your Plex account, your television or anything about you, and it is never sent with product analytics, which has a separate Analytics ID of its own.\n\nHOW TO HAVE THESE REPORTS DELETED\n\nWrite to {contact} and quote the identifier above. It is the only handle these reports carry, so a request without it cannot be matched to anything.\n\nHOW IT ENDS\n\nTurning crash reports off deletes this identifier, and turning them on again creates a different one. Signing out removes it as well, and the next person to sign in is asked afresh; so does Delete all local data. Reports already sent keep the old identifier, which is why it is worth copying down before you turn crash reports off if you intend to ask for their deletion.",
-    "description": "Settings, account, onboarding or privacy UI: settings.consent.errors.present",
-    "args": {
-      "contact": "str",
-      "id": "str"
     }
   },
   "settings.consent.preview.usage_heading": {
@@ -571,10 +539,6 @@
   "settings.audio.title": {
     "value": "Audio & subtitles",
     "description": "Settings, consent or sign-in UI: settings.audio.title"
-  },
-  "settings.audio.detail": {
-    "value": "Language preferences synced with your Plex account.",
-    "description": "Settings, consent or sign-in UI: settings.audio.detail"
   },
   "settings.playback.quality": {
     "value": "Default quality",
@@ -632,10 +596,6 @@
     "value": "Advanced override. Playback may fail or crash; automatic fallback is off. Return to Auto if problems occur.",
     "description": "Settings, consent or sign-in UI: settings.playback.force_note"
   },
-  "settings.audio.account_note": {
-    "value": "Saved to this Plex profile and shared with your other Plex apps. Changes may take time to affect playback; selections already made for an item still take priority.",
-    "description": "Settings, consent or sign-in UI: settings.audio.account_note"
-  },
   "settings.playback.copy": {
     "value": "Playback defaults for this television. Quality is also available in the player's More menu. Changes here apply to the next playback.",
     "description": "Settings, consent or sign-in UI: settings.playback.copy"
@@ -647,14 +607,6 @@
   "settings.playback.force_question": {
     "value": "Force Direct Play?",
     "description": "Settings, consent or sign-in UI: settings.playback.force_question"
-  },
-  "settings.audio.saving": {
-    "value": "Saving to your Plex account…",
-    "description": "Settings, consent or sign-in UI: settings.audio.saving"
-  },
-  "settings.audio.loading": {
-    "value": "Loading your Plex account preferences…",
-    "description": "Settings, consent or sign-in UI: settings.audio.loading"
   },
   "settings.playback.saving": {
     "value": "Saving playback preference…",
@@ -704,10 +656,6 @@
     "value": "Overridden by Force Direct Play: Original quality.",
     "description": "Settings, consent or sign-in UI: settings.playback.overridden"
   },
-  "settings.audio.selection_off": {
-    "value": "Automatic selection is off in Plex. Choosing a language enables it.",
-    "description": "Settings, consent or sign-in UI: settings.audio.selection_off"
-  },
   "settings.audio.retry": {
     "value": "Retry",
     "description": "Settings, consent or sign-in UI: settings.audio.retry"
@@ -715,10 +663,6 @@
   "settings.audio.retry_detail": {
     "value": "Try the account request again.",
     "description": "Settings, consent or sign-in UI: settings.audio.retry_detail"
-  },
-  "settings.audio.sign_in_again": {
-    "value": "Sign in to this Plex profile again to edit its account preferences.",
-    "description": "Settings, consent or sign-in UI: settings.audio.sign_in_again"
   },
   "settings.playback.save_failed": {
     "value": "Could not save or load this preference. Please try again.",
@@ -749,16 +693,12 @@
     "description": "Settings, consent or sign-in UI: settings.plaintext.question"
   },
   "settings.plaintext.body": {
-    "value": "Your Plex sign-in will travel without encryption over this network, to this server only.",
+    "value": "Your Jellyfin sign-in will travel without encryption over this network, to this server only.",
     "description": "Settings, consent or sign-in UI: settings.plaintext.body"
   },
   "settings.plaintext.section": {
     "value": "Unencrypted connections",
     "description": "Settings, consent or sign-in UI: settings.plaintext.section"
-  },
-  "settings.plaintext.server": {
-    "value": "Plex server",
-    "description": "Settings, consent or sign-in UI: settings.plaintext.server"
   },
   "settings.plaintext.denied": {
     "value": "Not allowed. Only encrypted connections.",
@@ -795,10 +735,6 @@
   "settings.login.report_body": {
     "value": "The report says which sign-in step failed and how the connection answered, storage failure stages and error numbers, plus the app version. It never includes your account name, tokens, PIN, sign-in code or network addresses.",
     "description": "Settings, consent or sign-in UI: settings.login.report_body"
-  },
-  "settings.login.unreachable": {
-    "value": "Can’t reach Plex. Check your TV’s internet connection.",
-    "description": "Settings, consent or sign-in UI: settings.login.unreachable"
   },
   "settings.login.report_sending": {
     "value": "Sending report…",
