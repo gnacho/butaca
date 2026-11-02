@@ -1113,8 +1113,8 @@ pub struct ProfileCreds {
     #[serde(deserialize_with = "de_soft_vec")]
     pub sources: Vec<SourceRef>,
     /// Present for a protected profile: the PIN plex.tv accepted at the last online switch, as a
-    /// verifier. Absent for an unprotected profile — and absent for a protected one whose last
-    /// switch predates this field, which [`Session::cached_profile`] treats as "cannot verify",
+    /// verifier. Absent for an unprotected profile - and absent for a protected one whose last
+    /// switch predates this field, which the loader treats as "cannot verify",
     /// never as "no PIN".
     pub pin: Option<PinVerifier>,
     #[serde(flatten, default, skip_serializing_if = "OpaqueExtensions::is_empty")]
