@@ -131,11 +131,7 @@ pub use params::*;
 // (`register_origin`, `register_captured_origin_with_connection`) moved to `crate::registry`
 // with the registry itself — callers import them there.
 // The projected play-queue row and the rest of the encode/timeline vocabulary moved to
-// `crate::playback`; route/ and every other consumer name it there now. Two names stay reachable
-// through `crate::plex::` ONLY for consumers this pass may not touch: `plex/session.rs` names
-// `AudioEnhancements` (frozen file), and `jellyfin/profile.rs` names `Ceiling` (frozen tree). The
-// playback-vocab surgery retires both aliases when those files requalify.
-pub use crate::playback::{AudioEnhancements, Ceiling};
+// `crate::playback`; route/, `plex/session.rs` and `jellyfin/profile.rs` name it there now.
 // DP_AUDIO_CODECS rides along for `devcaps`, which intersects it with the device's own codec
 // table — normal routing and its profile read the same codec and channel limits.
 // `is_dp_subtitle` is the subtitle twin: the profile's `subtitleCodec=` list and route's MDE

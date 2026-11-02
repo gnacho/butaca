@@ -28,7 +28,7 @@
 /// The DeviceProfile as a JSON body, ready to POST. `ceiling` is the user's quality rung when
 /// one is set (`route::Quality::ceiling()`): it becomes `MaxStreamingBitrate`, so a picked rung
 /// binds the transcode the same way `maxVideoBitrate` binds a Plex one.
-pub(crate) fn device_profile(ceiling: Option<crate::plex::Ceiling>) -> serde_json::Value {
+pub(crate) fn device_profile(ceiling: Option<crate::playback::Ceiling>) -> serde_json::Value {
     let caps = crate::devcaps::caps();
     let max_bps = ceiling
         .map(|c| c.max_kbps.saturating_mul(1_000))
@@ -102,7 +102,7 @@ pub(crate) fn device_profile(ceiling: Option<crate::plex::Ceiling>) -> serde_jso
 /// RESUME's transcode (the HLS playlist is cut from that position server-side); a fresh start
 /// passes 0 and the field simply says so.
 pub(crate) fn playback_info_body(
-    ceiling: Option<crate::plex::Ceiling>,
+    ceiling: Option<crate::playback::Ceiling>,
     start_ticks: i64,
 ) -> serde_json::Value {
     serde_json::json!({
@@ -124,7 +124,7 @@ pub(crate) fn playback_info_body(
 /// ignored), and a query-string spelling is ignored too. The plain builder keeps every field it
 /// always had, so the resolve path's answer is byte-for-byte what it was.
 pub(crate) fn playback_info_body_for(
-    ceiling: Option<crate::plex::Ceiling>,
+    ceiling: Option<crate::playback::Ceiling>,
     start_ticks: i64,
     media_source_id: &str,
     audio_index: Option<i32>,
@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn a_quality_rung_becomes_max_streaming_bitrate() {
-        let c = crate::plex::Ceiling { max_kbps: 8_000, max_w: 1920, max_h: 1080 };
+        let c = crate::playback::Ceiling { max_kbps: 8_000, max_w: 1920, max_h: 1080 };
         let p = device_profile(Some(c));
         assert_eq!(p["MaxStreamingBitrate"], 8_000_000);
         let p = device_profile(None);
