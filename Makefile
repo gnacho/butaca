@@ -1124,7 +1124,7 @@ check-unlocked: lint check-localization
 	@# this costs a few seconds warm rather than a rebuild.
 	@set -e; d=$$(mktemp -d /tmp/butaca-check.XXXXXX); trap 'rm -rf "'"$$d"'"' EXIT; \
 	cd rust-modules && PATH="$$HOME/.cargo/bin:$$PATH" BUTACA_RUNTIME_DIR="$$d" \
-	  cargo +$(RUST_NIGHTLY) test --lib --features hostsim
+	  cargo +$(RUST_NIGHTLY) test --lib --features hostsim,jellyfin
 	@# ...and the THIRD feature set, `lab-diagnostics`, TYPE-CHECKED. It is not in the default set
 	@# at all (that is what makes it unshippable by forgetting a flag), so nothing above compiles a
 	@# line of `lab/` or of `ui/lab_toast.rs` — and until 2026-09-10 nothing anywhere did: not this
