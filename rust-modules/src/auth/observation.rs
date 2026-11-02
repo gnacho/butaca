@@ -74,30 +74,12 @@ impl Observation {
         }
     }
 
-    pub(crate) fn matches_request(&self, pending: &owner::Pending, terminal: bool) -> bool {
-        use owner::SessionOp;
-        let (epoch, expected, compatible) = match self {
-            Self::Registry(p) => {
-                let (epoch, expected) = match p {
-                    RegistryProgress::Activate { epoch, expected, .. }
-                    | RegistryProgress::Settled { epoch, expected, .. }
-                    | RegistryProgress::Install { epoch, expected, .. } => (*epoch, expected.as_ref()),
-                };
-                let compatible = match pending.key.op {
-                    SessionOp::ServerRoster => expected.is_some(),
-                    _ => false,
-                };
-                (epoch, expected, compatible && !terminal)
-            }
-            Self::ServerRoster(p) => (p.epoch, Some(&p.expected),
-                pending.key.op == SessionOp::ServerRoster && terminal),
-            Self::Endpoint(p) => (p.epoch, Some(&p.expected),
-                pending.key.op == SessionOp::Endpoint(p.sid) && terminal),
-        };
-        compatible && epoch == pending.key.epoch && expected.is_none_or(|expected|
-            expected.client_id == pending.expected.client_id
-                && expected.account_token == pending.expected.account_token
-                && expected.profile_uuid == pending.expected.profile_uuid)
+    pub(crate) fn matches_request(&self, _pending: &owner::Pending, _terminal: bool) -> bool {
+        // Every variant this stream can still carry reported on the roster/endpoint/registry
+        // workers the plex.tv account surface lost (#190), and the union of #190 and #45 left
+        // the owner no work that any worker observes — so nothing ever matches a pending
+        // request any more.
+        false
     }
 }
 
@@ -108,7 +90,7 @@ fn write_identity(w: &mut crate::ui::machine::Canon, identity: &SessionIdentity)
 #[cfg(test)]
 mod identity_canon_tests {
     use super::*;
-    use crate::plex::session::UserRef;
+    use crate::plex::session::{Session, UserRef};
 
     #[test]
     fn observation_identity_canon_is_three_fields_without_legacy_authority_tag() {

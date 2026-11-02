@@ -67,7 +67,7 @@ fn an_undialable_stored_origin_is_refused_not_repaired() {
         let s = bad(origin);
         assert!(!s.can_go_local(), "{origin} is not something to boot on");
         assert!(
-            !s.sources[0].dialable(),
+            s.sources[0].origin().is_none() || s.sources[0].token.is_empty(),
             "{origin} is not something to register"
         );
     }
@@ -102,7 +102,7 @@ fn the_roster_round_trips_through_the_session_file_format() {
         "the sharing grant, not the account token"
     );
     assert_eq!(share.shared_by, "friend");
-    assert!(!share.owned && share.dialable());
+    assert!(!share.owned && share.origin().is_some() && !share.token.is_empty());
     assert_eq!(s.sources.iter().filter(|source| !source.owned).count(), 1);
 
     let mine = s
@@ -186,8 +186,8 @@ fn a_corrupt_or_absent_roster_never_costs_the_session() {
 /// value that is impossible.
 ///
 /// Both gates the value reaches are stated here, because they fail differently and one does not
-/// imply the other: a bad ROSTER entry costs that entry (`dialable`, which
-/// `auth::install_roster` filters on before registering), while a bad PRIMARY costs the resume
+/// imply the other: a bad ROSTER entry costs that entry (no origin to dial and no token to
+/// register with), while a bad PRIMARY costs the resume
 /// (`can_go_local`, the one gate in front of `plex::install`) and lands the app on sign-in.
 #[test]
 fn a_port_no_socket_could_take_is_refused_rather_than_wrapped() {
@@ -201,11 +201,11 @@ fn a_port_no_socket_could_take_is_refused_rather_than_wrapped() {
     )
     .unwrap();
     assert!(
-        !s.sources[0].dialable(),
+        s.sources[0].origin().is_none(),
         "32400 is what that number wraps to — it must not be dialled"
     );
     assert!(
-        s.sources[1].dialable(),
+        s.sources[1].origin().is_some() && !s.sources[1].token.is_empty(),
         "…and the entry beside it is untouched"
     );
     assert!(
@@ -400,68 +400,3 @@ fn only_the_account_owners_own_profile_may_refresh_the_roster_with_the_account_t
     assert!(!home("u-nobody").active_profile_is_admin());
 }
 
-/// entered at all (`auth::cancel`).
-///
-/// The two "the roster cannot say" answers deliberately disagree with the test above's. An
-/// unknown uuid is NOT the owner, because that question's wrong answer is somebody else's
-/// credentials; the same uuid IS treated as protected, because this question's wrong answer is
-/// a bypassed PIN and being wrong the other way costs one profile pick.
-#[test]
-fn a_stored_profile_behind_a_pin_is_reported_as_protected() {
-    let home = |uuid: &str| Session {
-        client_id: "cid".into(),
-        account_token: "acct".into(),
-        user: UserRef {
-            uuid: uuid.into(),
-            ..Default::default()
-        },
-        home_users: vec![
-            HomeUserRef {
-                uuid: "u-owner".into(),
-                title: "Gleb".into(),
-                admin: true,
-                protected: true,
-                ..Default::default()
-            },
-            HomeUserRef {
-                uuid: "u-kid".into(),
-                title: "Kid".into(),
-                ..Default::default()
-            },
-        ],
-        ..Default::default()
-    };
-    assert!(
-        home("u-owner").active_profile_is_protected(),
-        "the adult tile carries the PIN"
-    );
-    assert!(
-        !home("u-kid").active_profile_is_protected(),
-        "a managed profile with no PIN"
-    );
-
-    // **A session that names NO profile answers protected too**, which is the half that reads
-    // as harmless and is not: it is what a sign-in abandoned at the picker leaves on disk (the
-    // account token, the server and the roster are persisted the moment they exist; the pick
-    // never happened), and `pms_token()` on it is the OWNER's server token. The very next boot
-    // raises a picker over that file — a roster of >1 is exactly what it has — so answering
-    // "not protected" here put the owner's credentials behind BACK by a second road.
-    let mut abandoned = home("u-owner");
-    abandoned.user = UserRef::default();
-    assert!(
-        abandoned.active_profile_is_protected(),
-        "no profile chosen is not 'no PIN to be behind'"
-    );
-    let solo = Session {
-        client_id: "cid".into(),
-        account_token: "acct".into(),
-        ..Default::default()
-    };
-    assert!(solo.active_profile_is_protected());
-
-    // …and a uuid the roster does not name is treated as protected.
-    let mut unknown = home("u-owner");
-    unknown.home_users.clear();
-    assert!(unknown.active_profile_is_protected());
-    assert!(home("u-nobody").active_profile_is_protected());
-}

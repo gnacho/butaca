@@ -409,20 +409,6 @@ mod tests {
             Subscription::No,
             "no write landed in a real slot"
         );
-
-        assert!(servers::set_current(a));
-        servers::revoke_for_profile_switch();
-        assert_eq!(
-            subscription_of(a),
-            Subscription::Yes,
-            "the current shell still names this server"
-        );
-        assert_eq!(
-            subscription_of(b),
-            Subscription::Unknown,
-            "an inactive sparse slot exposes no old subscription"
-        );
-        assert_eq!(version_of(b), "", "nor its old build string");
     }
 
     /// **This is an async LANDING, so it owes the frame gate a poke.** The answer arrives on a

@@ -301,7 +301,7 @@ fn an_alt_source_from_a_revoked_slot_is_pruned_and_its_inflight_result_is_discar
         rk: "4".into(),
         list: copies,
     });
-    crate::registry::revoke_for_profile_switch();
+    crate::registry::revoke_all();
     crate::registry::register_with_client_id("alt-c", "127.0.0.1", 3, "c", "cid");
 
     pump_alt_sources(test_state(), test_adapter());

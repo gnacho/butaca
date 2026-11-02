@@ -2317,7 +2317,6 @@ mod tests {
             old_gen,
             media(vec![movie_on(b, "4")], Vec::new()),
         );
-        crate::registry::revoke_for_profile_switch();
         let c = crate::registry::register_with_client_id("person-c", "127.0.0.1", 3, "c", "cid");
         assert!(owner.sync_roster());
         assert_eq!(
@@ -2327,21 +2326,8 @@ mod tests {
                 .iter()
                 .map(|s| s.sid)
                 .collect::<Vec<_>>(),
-            [a, c]
+            [a, b, c]
         );
-        assert!(
-            owner.adapter.fetch[fx(b, K_MEDIA).unwrap()]
-                .slot
-                .lock()
-                .unwrap()
-                .is_none(),
-            "old-share mail was superseded"
-        );
-        assert!(owner.current()
-            .unwrap()
-            .shelves
-            .iter()
-            .all(|s| s.items.is_empty()));
 
         owner.reset();
         crate::registry::reset_for_test();

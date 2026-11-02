@@ -31,7 +31,6 @@ enum Resources {
 #[cfg(test)]
 pub(crate) struct FixtureResources {
     pub disk: crate::plex::session::Session,
-    pub registry_writes: Vec<crate::auth::owner::RegistryPlan>,
     pub profile: Option<crate::auth::owner::ProfilePublication>,
     pub coordinator_events: Vec<crate::auth::owner::CoordinatorAction>,
     pub sweep_leftovers: usize,
@@ -224,7 +223,7 @@ impl SessionAdapter {
     #[cfg(test)]
     pub(crate) fn fixture_with(disk: crate::plex::session::Session) -> Self {
         Self::empty(|_, _| false, Resources::Fixture(FixtureResources {
-            disk, registry_writes: Vec::new(), profile: None,
+            disk, profile: None,
             coordinator_events: Vec::new(), sweep_leftovers: 0,
             next_completion_outcome: None,
         }))
@@ -361,11 +360,6 @@ impl SessionAdapter {
                         });
                     }
                 }
-                for operation in &plan.registry {
-                    if !crate::auth::execute_session_registry(operation, &plan.registry_client_id) {
-                        return permit.reply(CommitAdmission::StaleAuthority);
-                    }
-                }
                 if let Some(revision) = admitted_revision {
                     self.live_completion = pending_completion;
                     return permit.reply(CommitAdmission::Admitted { revision, purpose: plan.purpose });
@@ -395,12 +389,6 @@ impl SessionAdapter {
                         });
                     }
                 }
-                for operation in &plan.registry {
-                    if !crate::auth::execute_session_registry(operation, &plan.registry_client_id) {
-                        return permit.reply(CommitAdmission::StaleAuthority);
-                    }
-                }
-                resources.registry_writes.extend(plan.registry.iter().cloned());
                 if let Some(admission) = admitted {
                     if plan.writes_durable {
                         if let CommitAdmission::Admitted { revision, purpose } = admission {
@@ -562,7 +550,6 @@ impl SessionAdapter {
             #[cfg(test)]
             Resources::Fixture(resources) => {
                 resources.disk = Default::default();
-                resources.registry_writes.clear();
                 if all_local { resources.sweep_leftovers } else { 0 }
             }
         }
@@ -634,7 +621,7 @@ mod tests {
         next.account_token = "new-credential".into();
         CommitPlan { registry_client_id: disk.client_id.clone(), expected_disk: crate::auth::owner::Identity::of(disk),
             credentials: Some(crate::auth::owner::CredentialPatch::of(&next)),
-            lifecycle: None, registry: Vec::new(), writes_durable: true,
+            lifecycle: None, writes_durable: true,
             purpose: crate::plex::session::async_persistence::PersistencePurpose::Final,
             authority: crate::plex::session::SaveAuthority::Routine }
     }

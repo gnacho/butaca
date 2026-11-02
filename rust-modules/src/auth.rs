@@ -11,7 +11,7 @@
 //! authority. Network/PIN derivation remain worker operations; offline policy is retained below.
 use self::observation::Resource;
 use crate::plex::probe::{self, Outcome, PlaintextEligibility};
-use crate::plex::session::{PlaintextChoice, ProfileCreds, Session, SourceRef};
+use crate::plex::session::{PlaintextChoice, SourceRef};
 use crate::origin::Origin;
 use crate::registry::ServerId;
 
@@ -106,31 +106,6 @@ pub struct UserTile {
 
 /// Append a line to the shared on-device event log (never a token — only ids/counts/status).
 
-/// Every seating of a PIN-free profile also writes its cache record, whichever path seated it —
-/// the switch worker writes protected ones because only it holds a PIN to verify against, but an
-/// unprotected profile's record is the session itself, so a stored sign-in that predates the cache
-/// becomes seatable offline the first time it is used, with no online switch required.
-fn remember_unprotected_active(sess: &mut Session) {
-    // An existing record (protected or not) follows the session; only a MISSING record for an
-    // unprotected profile is created here.
-    sess.refresh_profile_record();
-    if sess.user.uuid.is_empty()
-        || sess.pms_token().is_empty()
-        || sess.active_profile_is_protected()
-        || sess.cached_profile(&sess.user.uuid).is_some()
-    {
-        return;
-    }
-    sess.remember_profile(ProfileCreds {
-        uuid: sess.user.uuid.clone(),
-        user: sess.user.clone(),
-        server: sess.server.clone(),
-        sources: sess.sources.clone(),
-        pin: None,
-        extensions: Default::default(),
-    });
-}
-
 /// The credential identity a worker captured at its spawn. It is validation only: accepted
 /// observations patch the latest controller/disk value field-by-field and never write this stale
 /// snapshot back over preferences that changed while the request was in flight.
@@ -143,7 +118,7 @@ pub(crate) struct SessionIdentity {
 
 impl SessionIdentity {
     #[cfg(test)]
-    pub(crate) fn of(s: &Session) -> Self {
+    pub(crate) fn of(s: &crate::plex::session::Session) -> Self {
         Self {
             client_id: s.client_id.clone(),
             account_token: s.account_token.clone(),
@@ -217,7 +192,7 @@ pub(crate) enum ServerRosterOutcome {
     Unreachable,
     /// Nothing was found to REGISTER, but at least the probes themselves ran (R2/A5) — `settled`
     /// carries every one, empty only when there was truly nothing to probe (no server named at
-    /// all). The owner commits these as registry-only [`RegistryPlan::Probe`]s: the roster itself
+    /// all). The owner commits these as observation-only probes: the roster itself
     /// is unchanged, so there is nothing to write to disk.
     NoReachable { settled: Vec<SettledProbe> },
     Reconcile {
@@ -268,52 +243,6 @@ impl ClientLifecycle {
         self.logical(expected.sid) == expected && crate::registry::commit_if_current(
             ServerId::from_raw(expected.sid), self.client, self.token_gen, || ()).is_some()
     }
-}
-
-/// Native registry effects executed only by the Session resource adapter, after its borrowed
-/// owner permit and (for an endpoint) exact captured Client lifecycle have been validated.
-pub(crate) fn execute_session_registry(plan: &owner::RegistryPlan, client_id: &str) -> bool {
-    let owner::RegistryPlan::Install { sources, primary, replace } = plan;
-    if *replace {
-        // The profile's identity changes HERE, at the commit, with the tokens: grants
-        // survive only for the exact origins this roster installs (`grant`).
-        let installing: Vec<(String, Origin)> = sources.iter()
-            .filter_map(|s| s.origin().map(|origin| (s.machine_id.clone(), origin)))
-            .collect();
-        crate::grant::roster_replaced(&installing);
-        crate::registry::revoke_for_profile_switch();
-    }
-    let installed = install_roster(sources, *primary, client_id);
-    if *replace { crate::registry::finish_profile_switch(&installed); }
-    for source in sources {
-        if let Some(origin) = source.origin() { retire_grant_on_https(&source.machine_id, &origin); }
-    }
-    true
-}
-
-/// **The HTTPS upgrade lands.** A server on a plaintext grant (`crate::grant`) whose
-/// endpoint just registered at a TLS origin needs plaintext no more: the grant is withdrawn, so
-/// nothing — a queued request, a cached URL, a reconnect — can put the credential back on the old
-/// origin. Called after the registration, outside the registry's write lock, which the grant's
-/// re-grade takes.
-fn retire_grant_on_https(machine_id: &str, origin: &Origin) {
-    if origin.is_tls() && crate::grant::granted_origin(machine_id).is_some() {
-        crate::grant::revoke(machine_id);
-        crate::log("security: server verified over HTTPS — plaintext upgrade complete");
-    }
-}
-
-/// Register with the identity captured by the owner, including before a fresh login is durable.
-fn register_observed_origin(
-    machine_id: &str,
-    origin: &Origin,
-    token: &str,
-    pin: Option<&crate::origin::ResolvePin>,
-    connection: crate::registry::ConnectionFacts,
-    client_id: &str,
-) -> ServerId {
-    crate::registry::register_captured_origin_with_connection(
-        machine_id, origin, token, pin, client_id, connection)
 }
 
 pub(crate) enum ReadoutSurface {
@@ -394,6 +323,7 @@ pub(crate) struct SettledProbe {
     address: Option<String>,
 }
 /// The grant evidence a persisted [`SourceRef`] carries, for the registry describers.
+#[cfg(test)]
 fn grant_of(source: &SourceRef) -> crate::registry::GrantEvidence {
     crate::registry::GrantEvidence {
         owned: source.owned,
@@ -401,61 +331,6 @@ fn grant_of(source: &SourceRef) -> crate::registry::GrantEvidence {
         owner_id: source.owner_id,
     }
 }
-/// Owned entries are registered FIRST even when `primary` is `None` — see [`registration_order`].
-fn install_roster(sources: &[SourceRef], primary: Option<usize>, client_id: &str) -> Vec<ServerId> {
-    let order = registration_order(sources);
-    let mut installed = Vec::with_capacity(order.len());
-    for &i in &order {
-        let s = &sources[i];
-        // `registration_order` already filtered on `usable()`, which IS `origin().is_some()` —
-        // so this `else` is unreachable today and is a `continue` rather than an `expect` because
-        // a roster entry has never been allowed to cost more than itself (`de_soft_vec`).
-        let Some(origin) = s.origin() else { continue };
-        // Applied atomically inside the same write (#95 step 8) — a re-pointed slot's fresh
-        // `Client` gets its connection facts from THIS call rather than a separate one after.
-        let connection =
-            crate::registry::ConnectionFacts::new(s.tier, crate::plex::IpVersion::of_host(&s.address));
-        let id = register_observed_origin(&s.machine_id, &origin, &s.token,
-            s.resolve_pin().as_ref(), connection, client_id);
-        if !id.is_set() {
-            continue;
-        }
-        installed.push(id);
-        // …and say WHOSE it is. Registering without this was the bug that made the whole shared-
-        // source feature invisible on the only path a real user takes: `ServerFacts` stayed unset,
-        // so every source read as owned with no handle, and each surface then correctly drew
-        // nothing — no "Shared by" on a detail page, no handle on a shelf heading or the Source
-        // chip, no owner on a failure read-out, and a friend's library pinned to Home by the
-        // ownership default. It looked like five separate features not working. The one
-        // `describe_server` call that existed was in `app.rs`'s DEV-TRIGGER path, which is exactly
-        // why a headless capture showed the handle and a signed-in television did not.
-        //
-        // `owned` comes from the roster rather than from an empty handle: a share whose
-        // `sourceTitle` plex.tv did not send is still a share.
-        crate::registry::describe(id, &s.name, &s.shared_by, grant_of(s));
-        if primary == Some(i) {
-            crate::registry::set_current(id);
-        }
-    }
-    installed
-}
-
-/// Which roster entries to register, and in what order: the ones that can actually be dialled,
-/// **ours first**.
-///
-/// The order is load-bearing, not tidiness. The registry makes the FIRST registration current when
-/// nothing is current yet (`servers.rs`), which is exactly the state a boot is in — so a roster
-/// that happens to list a share first would silently come up pointed at the friend's server, and
-/// Home would be built from their library. Stable, so plex.tv's own order survives inside each
-/// group.
-fn registration_order(sources: &[SourceRef]) -> Vec<usize> {
-    let mut order: Vec<usize> = (0..sources.len())
-        .filter(|&i| sources[i].dialable())
-        .collect();
-    order.sort_by_key(|&i| !sources[i].owned);
-    order
-}
-
 #[cfg(test)]
 #[path = "auth_registry_tests.rs"]
 mod registry_tests;

@@ -20,16 +20,14 @@ fn source(machine_id: &str, owned: bool, token: &str) -> SourceRef {
 
 fn install_stored_source(source: &SourceRef, policy: CredentialPolicy) -> ServerId {
     let origin = source.origin().expect("stored source has a well-formed origin");
+    let pin = crate::origin::ResolvePin::for_origin(&origin, &source.address);
     let id = crate::registry::register_pinned_with_client_id_and_policy(
         &source.machine_id,
         &origin,
         &source.token,
-        source.resolve_pin().as_ref(),
+        pin.as_ref(),
         "stored-install-test",
-        crate::registry::ConnectionFacts::new(
-            source.tier,
-            crate::plex::IpVersion::of_host(&source.address),
-        ),
+        crate::registry::ConnectionFacts::default(),
         policy,
     );
     crate::registry::describe(id, &source.name, &source.shared_by, grant_of(source));
@@ -110,26 +108,3 @@ fn stored_credential_policy_rejection_retains_insecure_recovery_metadata() {
     crate::registry::reset_for_test();
 }
 
-/// Our own server registers first and is the primary, whatever order plex.tv listed the account
-/// in — because the registry makes the first registration `current` when nothing is yet, so the
-/// ordering is what stops a boot coming up pointed at a friend's server and building Home from
-/// their library.
-#[test]
-fn our_own_server_leads_the_roster_however_plex_tv_ordered_it() {
-    let roster = vec![
-        source("share-1", false, "t1"),
-        source("ours", true, "t2"),
-        source("share-2", false, "t3"),
-    ];
-    assert_eq!(
-        registration_order(&roster),
-        vec![1, 0, 2],
-        "ours first, then plex.tv's own order"
-    );
-    // an entry with no credential (or no address) cannot be dialled, so it is not registered —
-    // registering it would put a `Client` in the table that 401s everything asked of it
-    let mut half = roster.clone();
-    half[0].token.clear();
-    half[2].address.clear();
-    assert_eq!(registration_order(&half), vec![1]);
-}

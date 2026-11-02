@@ -48,52 +48,6 @@ fn signing_into_a_second_account_searches_its_slots_and_not_the_retired_ones() {
     assert_eq!(live_sources(&owner.state, &slots()).len(), 1);
 }
 
-#[test]
-fn a_profile_hole_searches_exact_live_ids_and_supersedes_the_previous_profiles_answers() {
-    let _g = fresh();
-    let mut owner = Owner::default();
-    register(&mut owner, 3);
-    hold_off(&mut owner);
-    owner.state.query = Some(Arc::from("wallace"));
-    owner.state.src[0].status = Status::Answered;
-    owner.state.shelves = Some(Arc::new(vec![Shelf {
-        kind: Kind::Movie,
-        items: vec![media("old-profile")],
-    }]));
-    owner.state.state = State::Ready;
-
-    crate::registry::revoke_for_profile_switch();
-    let restored = crate::registry::register_with_client_id(
-        "search-test-2",
-        "127.0.0.1",
-        1,
-        "new",
-        "cid-search-test",
-    );
-    assert_eq!(restored.raw(), 2);
-    assert_eq!(
-        slots(),
-        vec![0, 2],
-        "the inactive middle share is not replaced by a range"
-    );
-
-    assert!(
-        owner.pump(0.0),
-        "membership changed the result state and therefore repaints"
-    );
-    assert_eq!(owner.state.state(), State::Searching);
-    assert!(
-        owner.state.shelves().is_empty(),
-        "old-profile tiles disappear before a new source lands"
-    );
-    let live = live_sources(&owner.state, &slots());
-    assert_eq!(live.len(), 2);
-    assert!(
-        live.iter().all(|s| s.status == Status::Pending),
-        "old-profile answers were superseded"
-    );
-}
-
 /// **A favourite edit under a resident query supersedes it and re-arms the fetch.** Search
 /// watched the ROSTER generation alone and the favourite answer moves without it — discovery
 /// appending a library, and `apply_pins` recording an edit, both bump `SECTIONS_GEN`, and this
