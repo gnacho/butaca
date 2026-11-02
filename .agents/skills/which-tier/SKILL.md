@@ -135,7 +135,7 @@ ships, because `-Z build-std` is what ships.
    that obligation**, and reach for `testlock` rather than a fresh local mutex when the global is
    shared across modules. Since 2026-09-10 the lock records the holding THREAD and the stores
    assert it (`testlock::assert_held` in `browse::reset`/`append_sections`,
-   `plex::servers::reset_for_test` and the app frame trunk), so a write without the guard is a
+   `crate::registry::reset_for_test` and the app frame trunk), so a write without the guard is a
    deterministic panic in the offending test instead of an intermittent failure in a bystander —
    which is how the `app::chrome` strip flake was finally attributed to three unguarded
    `app::heartbeat_word_tests` cases.

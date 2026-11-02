@@ -312,8 +312,8 @@ library, with nothing in the app's own log.
 **ARM32 and x86-64 pass both ways identically.** So this compiles, passes `make check`, and runs
 correctly on the television — and no amount of device testing could ever have found it. It was the
 shape the macro emitted until **2026-08-16**, latent for exactly as long as the desktop build could
-not open a libcurl at all, and it surfaced on the FIRST plex.tv call, i.e. sign-in, i.e. the first
-thing a new user of the desktop simulator does. The account of what had to change for it to work is
+not open a libcurl at all, and it surfaced on the first network call a fresh desktop session makes
+(the plex.tv sign-in back then; the Jellyfin sign-in today). The account of what had to change for it to work is
 in `docs/agent-reference.md` — grep it for `variadic`.
 
 Two things follow for you. First: **check the ellipsis position in every variadic declaration in
