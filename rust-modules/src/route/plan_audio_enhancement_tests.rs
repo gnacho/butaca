@@ -515,7 +515,7 @@ fn remote_probe_ignored_falls_back_to_remux() {
 /// but a device whose caps bound AAC to 2 channels does.
 #[test]
 fn aac51_source_outcome_unverified() {
-    let mc: crate::plex::MediaContainer = serde_json::from_str(
+    let mc: crate::media::MediaContainer = serde_json::from_str(
         r#"{"Metadata":[{"Media":[{"Part":[{"decision":"transcode","Stream":[{"streamType":1,"decision":"copy"},{"streamType":2,"codec":"ac3","decision":"transcode"}]}]}]}]}"#,
     ).unwrap();
     let copyable = CarriedAudio::from_stream(&track(1, "ac3", 2, true), 0);

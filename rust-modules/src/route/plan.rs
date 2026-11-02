@@ -311,7 +311,7 @@ pub(crate) enum PrimeRefusal {
 pub(super) fn classify_prime_decision(
     session_active: bool,
     outcome: crate::plex::JsonDeadlineOutcome,
-) -> Result<crate::plex::MediaContainer, PrimeRefusal> {
+) -> Result<crate::media::MediaContainer, PrimeRefusal> {
     if !session_active {
         return Err(PrimeRefusal::Session);
     }
@@ -601,7 +601,7 @@ pub(super) enum Fallback {
 /// `Keep`: the same "no answer is not a refusal" rule every other transcode start follows, and
 /// the outcome is then graded `Unverified` by [`classify_outcome`].
 pub(super) fn enhancement_fallback(
-    mc: Option<&crate::plex::MediaContainer>,
+    mc: Option<&crate::media::MediaContainer>,
     audio: crate::playback::AudioEnhancements,
 ) -> Fallback {
     if audio.is_none() {
@@ -625,7 +625,7 @@ pub(super) fn note_enhancement_refused(context: &str, _audio: crate::playback::A
 }
 
 /// The audio lane's own stream decision off a `/decision` body (`copy`/`transcode`), if it says.
-fn decision_audio(mc: &crate::plex::MediaContainer) -> Option<&str> {
+fn decision_audio(mc: &crate::media::MediaContainer) -> Option<&str> {
     mc.metadata
         .first()
         .and_then(|m| m.first_part())
@@ -641,7 +641,7 @@ fn decision_audio(mc: &crate::plex::MediaContainer) -> Option<&str> {
 /// from what would have happened anyway: `Unverified` (M2's AAC 5.1 under the measured profile).
 /// No answer at all is `Unverified` for the same reason.
 pub(super) fn classify_outcome(
-    mc: Option<&crate::plex::MediaContainer>,
+    mc: Option<&crate::media::MediaContainer>,
     carried: Option<&CarriedAudio>,
     audio: crate::playback::AudioEnhancements,
 ) -> super::decision::EnhancementOutcome {
@@ -666,7 +666,7 @@ pub(super) fn classify_outcome(
 /// PURE: the codec pair the server's /decision OUTPUT actually declares, or None if it names
 /// neither. The Load payload must match this, not the source file — a transcode changes the
 /// codec and rate, and describing the source to the decoder gives silent audio.
-pub(super) fn decision_codecs(mc: &crate::plex::MediaContainer) -> Option<(String, String)> {
+pub(super) fn decision_codecs(mc: &crate::media::MediaContainer) -> Option<(String, String)> {
     let streams = mc
         .metadata
         .first()
@@ -762,7 +762,7 @@ impl PlayVerdict {
 /// restates the code ("Neither direct play nor conversion is available") while
 /// `transcodeDecisionText` names the actual cause. The general one is the fallback for a server
 /// that sends only it.
-pub(super) fn refusal(mc: &crate::plex::MediaContainer) -> Option<String> {
+pub(super) fn refusal(mc: &crate::media::MediaContainer) -> Option<String> {
     if mc.general_decision_code != Some(DECISION_UNPLAYABLE) {
         return None;
     }
@@ -2307,7 +2307,7 @@ fn mde_subtitle_id_of(subs: &[crate::metadata::Stream], pick: Option<(i64, i32)>
 
 
 fn pick_dp_subtitle_account(
-    subs: &[crate::metadata::Stream], prefs: &crate::plex::ShowLangPrefs,
+    subs: &[crate::metadata::Stream], prefs: &crate::media::ShowLangPrefs,
     audio_lang: &str,
 ) -> Option<(i64, i32)> {
     if let Some(pick) = pick_dp_subtitle(subs) {
@@ -2626,7 +2626,7 @@ fn build_stream_jellyfin(
             let fallback = || {
                 pick_dp_subtitle_account(
                     &p.subs,
-                    &crate::plex::ShowLangPrefs::default(),
+                    &crate::media::ShowLangPrefs::default(),
                     "",
                 )
             };

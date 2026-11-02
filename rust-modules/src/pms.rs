@@ -288,7 +288,7 @@ pub(crate) fn urlenc_str(src: &str) -> String {
 /// outright) is that a worker reads no statics. It is also the only correct answer — the current
 /// server can change while a page fetch is in flight, and the rows in hand belong to the machine
 /// that was asked, not to whichever one is current when they finish parsing.
-pub(crate) fn parse_item(it: &crate::plex::Metadata, sid: ServerId) -> PmsMovie {
+pub(crate) fn parse_item(it: &crate::media::Metadata, sid: ServerId) -> PmsMovie {
     let mut m = PmsMovie {
         sid,
         sec: it.library_section_id,
@@ -877,12 +877,12 @@ fn fetch_source_jellyfin(c: &'static crate::jellyfin::JfClient, sid: ServerId) -
 /// Pure — no statics, no I/O, no knowledge of any other source; `sid` is the server the two
 /// containers came from, stamped onto every row it builds.
 fn project(
-    mc: &crate::plex::MediaContainer,
-    cw: &crate::plex::MediaContainer,
+    mc: &crate::media::MediaContainer,
+    cw: &crate::media::MediaContainer,
     sid: ServerId,
 ) -> SourceBuild {
     // need a poster to show it in a shelf
-    let keep = |it: &crate::plex::Metadata| {
+    let keep = |it: &crate::media::Metadata| {
         if !listable(&it.kind) { return None; }
         let m = parse_item(it, sid);
         (!m.title.is_empty() && !m.thumb.is_empty()).then_some(m)

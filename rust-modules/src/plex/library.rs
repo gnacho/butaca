@@ -55,7 +55,7 @@ impl Client {
     /// ready-made `fastKey` listing URL) and the `firstCharacter` per-letter index.
     /// → `.directory[]`.
     /// `metadata_type` scopes genre values and letter counts to the same flat listing as
-    pub fn show_language_prefs(&self, show_rk: &str) -> Option<crate::plex::ShowLangPrefs> {
+    pub fn show_language_prefs(&self, show_rk: &str) -> Option<crate::media::ShowLangPrefs> {
         if show_rk.is_empty() || !show_rk.bytes().all(|b| b.is_ascii_digit()) {
             return None; // a key is server data: only ever a plain ratingKey
         }
@@ -69,12 +69,12 @@ impl Client {
         };
         let metadata = read(&path)?;
         if let Some(found) = metadata.metadata.into_iter().next()
-            .and_then(|m| crate::plex::ShowLangPrefs::from_settings(&m.preferences.setting))
+            .and_then(|m| crate::media::ShowLangPrefs::from_settings(&m.preferences.setting))
         {
             return Some(found);
         }
         let tree = read(&format!("/library/metadata/{show_rk}/tree"))?;
-        crate::plex::ShowLangPrefs::from_settings(&tree.setting)
+        crate::media::ShowLangPrefs::from_settings(&tree.setting)
     }
 
     /// GET /library/metadata/{rating_key} → the single item (`.metadata[0]`), or None.

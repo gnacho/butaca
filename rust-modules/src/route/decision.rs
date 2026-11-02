@@ -5766,7 +5766,7 @@ pub(super) struct RemuxProbe {
 
 /// MDE handshake result. `None` from [`server_decision`] means the body was missing or unusable:
 /// the caller must not Original, but remux is still allowed. `Part.decision=transcode` is a
-/// container change, not a video-copy veto — see [`crate::plex::MediaPart::video_forbids_copy`].
+/// container change, not a video-copy veto — see [`crate::media::MediaPart::video_forbids_copy`].
 pub(super) struct MdeVerdict {
     pub(super) original: bool,
     pub(super) video_forbids_copy: bool,
@@ -5797,7 +5797,7 @@ pub(super) fn server_decision(
     mde_verdict(&mc)
 }
 
-fn mde_verdict(mc: &crate::plex::MediaContainer) -> Option<MdeVerdict> {
+fn mde_verdict(mc: &crate::media::MediaContainer) -> Option<MdeVerdict> {
     if refusal(mc).is_some() { return None; }
     // Part.decision is the Original-vs-not verdict (Media/container carry none). Video copy
     // is the VIDEO stream's own decision — Part=transcode + video=copy is a remux.

@@ -30,12 +30,12 @@ pub(super) fn test_adapter() -> &'static std::sync::Arc<MetadataAdapter> {
 
 // ---- convert_streams: the Dolby Vision record's survival ------------------------------
 
-pub(super) fn video_stream(dovi: Option<(i64, i64, i64)>) -> crate::plex::Stream {
+pub(super) fn video_stream(dovi: Option<(i64, i64, i64)>) -> crate::media::Stream {
     let (present, profile, compat, el) = match dovi {
         Some((profile, compat, el)) => (1, profile, compat, el),
         None => (0, 0, 0, 0),
     };
-    crate::plex::Stream {
+    crate::media::Stream {
         stream_type: 1,
         codec: "hevc".into(),
         dovi_present: present,

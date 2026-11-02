@@ -11,7 +11,7 @@
 //! The types live in their own module rather than flat in `person` because the page's DISPLAY
 //! model already defines a `Credit` there; the qualified `types::Credit` keeps the two vocabularies
 //! unambiguous at every use site.
-use crate::plex::de_i64;
+use crate::media::de_i64;
 
 /// One person as plex.tv knows them. Every field is optional: a living person has no
 /// [`died_at`](PersonProfile::died_at), a person plex.tv has no record for has nothing at all, and

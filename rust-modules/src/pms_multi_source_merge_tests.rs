@@ -40,10 +40,10 @@ fn home_keeps_recently_added_rows_for_two_same_type_libraries() {
          "Metadata":[{"ratingKey":"202","librarySectionID":"2","librarySectionTitle":"TV HDR",
                       "type":"show","title":"HDR Show","thumb":"/hdr.jpg","art":"/hdr-art.jpg"}]}
     ]}}"#;
-    let mc = serde_json::from_str::<crate::plex::Envelope>(body)
+    let mc = serde_json::from_str::<crate::media::Envelope>(body)
         .expect("the two-library PMS response parses")
         .media_container;
-    let build = project(&mc, &crate::plex::MediaContainer::default(), sid(0));
+    let build = project(&mc, &crate::media::MediaContainer::default(), sid(0));
     let (items, hubs, _) = merge(&[src(0, "", HubState::Ready, Some(build))]);
 
     assert_eq!(hubs.len(), 2, "both same-type library shelves reach Home");
@@ -80,10 +80,10 @@ fn one_movie_and_one_tv_library_get_the_natural_per_type_recently_added_titles()
          "Metadata":[{"ratingKey":"101","librarySectionID":"2","librarySectionTitle":"TV",
                       "type":"show","title":"TV Show","thumb":"/tv.jpg","art":"/tv-art.jpg"}]}
     ]}}"#;
-    let mc = serde_json::from_str::<crate::plex::Envelope>(body)
+    let mc = serde_json::from_str::<crate::media::Envelope>(body)
         .expect("the one-movie-one-tv PMS response parses")
         .media_container;
-    let build = project(&mc, &crate::plex::MediaContainer::default(), sid(0));
+    let build = project(&mc, &crate::media::MediaContainer::default(), sid(0));
 
     assert_eq!(build.shelves.len(), 2);
     assert_eq!(
@@ -107,10 +107,10 @@ fn an_unrecognized_hub_identifier_keeps_the_pms_title_verbatim() {
          "Metadata":[{"ratingKey":"5","librarySectionID":"1","librarySectionTitle":"Movies",
                       "type":"movie","title":"A Film","thumb":"/t.jpg","art":"/a.jpg"}]}
     ]}}"#;
-    let mc = serde_json::from_str::<crate::plex::Envelope>(body)
+    let mc = serde_json::from_str::<crate::media::Envelope>(body)
         .expect("a PMS body with an unrecognized (custom-collection-shaped) hub parses")
         .media_container;
-    let build = project(&mc, &crate::plex::MediaContainer::default(), sid(0));
+    let build = project(&mc, &crate::media::MediaContainer::default(), sid(0));
 
     assert_eq!(build.shelves.len(), 1);
     assert_eq!(
@@ -134,10 +134,10 @@ fn a_mixed_section_hub_keeps_its_identity_when_the_leading_library_changes() {
         }}]}}}}"#)
     };
     let projection = |wire: String| {
-        let mc = serde_json::from_str::<crate::plex::Envelope>(&wire)
+        let mc = serde_json::from_str::<crate::media::Envelope>(&wire)
             .expect("the mixed-library PMS response parses")
             .media_container;
-        let build = project(&mc, &crate::plex::MediaContainer::default(), sid(0));
+        let build = project(&mc, &crate::media::MediaContainer::default(), sid(0));
         let (items, hubs, _) = merge(&[src(0, "", HubState::Ready, Some(build))]);
         let identity = match stable_hub_identity(&hubs[0], &items) {
             Some(HubIdentity::Identifier { sid, id, key }) => {
@@ -182,11 +182,11 @@ fn every_row_a_source_projects_is_stamped_with_the_server_it_was_asked_of() {
         )
     };
     let parse = |s: String| {
-        serde_json::from_str::<crate::plex::Envelope>(&s)
+        serde_json::from_str::<crate::media::Envelope>(&s)
             .expect("a PMS body parses")
             .media_container
     };
-    let empty = crate::plex::MediaContainer::default();
+    let empty = crate::media::MediaContainer::default();
     let ours = sid(3);
 
     let b = project(&parse(body("1", "Ours")), &empty, ours);

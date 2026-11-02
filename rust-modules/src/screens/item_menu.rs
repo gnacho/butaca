@@ -1112,7 +1112,7 @@ mod tests {
     fn a_related_tile_off_the_wire_gets_the_row_set_its_state_earns() {
         let row = |json: &str| {
             let body = format!(r#"{{"MediaContainer":{{"Hub":[{{"Metadata":[{json}]}}]}}}}"#);
-            let mc = serde_json::from_str::<crate::plex::Envelope>(&body)
+            let mc = serde_json::from_str::<crate::media::Envelope>(&body)
                 .expect("parses")
                 .media_container;
             crate::pms::parse_item(&mc.hub[0].metadata[0], crate::registry::ServerId::UNSET)
