@@ -266,7 +266,7 @@ impl Client {
     /// `GET /` — the server root: its self-description envelope (version, capabilities, and the
     /// owner's `myPlexSubscription`). The two fields consumed live on the shared `MediaContainer`
     /// (see `models.rs`) so the ordinary envelope parse serves this too.
-    fn server_root(&self) -> Option<super::models::MediaContainer> {
+    fn server_root(&self) -> Option<crate::media::MediaContainer> {
         self.get_json("/")
     }
 }
@@ -274,7 +274,7 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plex::models::Envelope;
+    use crate::media::Envelope;
 
     /// The tristate mapping is the module's contract: absence is UNKNOWN (an old server that
     /// never says must not read as free), zero is a real "no", anything else a real "yes" — and

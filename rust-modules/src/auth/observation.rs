@@ -158,7 +158,7 @@ use std::sync::Arc;
 /// through it, and the frozen `resources` serde adapters + `write_resources` below type their
 /// Canon-only vocabulary with it. The models types themselves are Canon-only since #190 (no
 /// producer; old recordings deserialize them).
-pub(crate) use crate::plex::models::{Connection, Resource};
+pub(crate) use crate::media::{Connection, Resource};
 
 pub(super) mod resources {
     use super::*;

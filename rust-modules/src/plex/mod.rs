@@ -4,7 +4,7 @@
 //! method (see `docs/plex-api-design.md` + `docs/plex-api-catalog.md`). Percent-encoding
 //! (`crate::pms::urlenc_str`), the `X-Plex-Token` injection, and the origin-aware HTTP(S)
 //! transport (`crate::http`) are centralised in `client.rs`, so no op file can bypass them.
-//! Response bodies deserialize into `serde` DTOs (`models.rs`).
+//! Response bodies deserialize into `serde` DTOs (`crate::media`).
 //!
 //! The read layer (`pms`/`metadata`/`posters`/`detail`) and the playback layer (`route.rs`
 //! decision/start/stop/selection, PlayQueue/identity, and the player's `/:/timeline`) use this
@@ -12,7 +12,6 @@
 
 mod client;
 pub(crate) mod identity; // ONE X-Plex-* identity for both transports (plex.tv headers + PMS query)
-pub(crate) mod models;
 mod params;
 // WHICH servers exist and which one is current. The SERVER REGISTRY itself now lives in
 // `crate::registry` (backend-neutral: `ServerId`, `ServerFacts` and the per-slot state machine are
@@ -120,11 +119,11 @@ pub(crate) use servers::ConnectionFacts;
 // and `reset_servers_for_test` is what keeps the table a per-test fixture instead of a growing
 // process-global holding clients whose loopback ports closed when their test returned. Both must be
 // called under `crate::testlock::serial`.
-pub use models::*;
+pub use crate::media::*;
 // The i64 wire-fold helper is shared, not plex-private: the person screen's DTO vocabulary
 // (crate::person, where the old discover.rs types now live) deserializes its optional i64s
 // through it.
-pub(crate) use models::de_i64;
+pub(crate) use crate::media::de_i64;
 pub use params::*;
 // The registry's test-fixture surface (`register_with_client_id`, `reset_for_test`,
 // `write_held_for_test`, `register_pinned_with_client_id*`) and the registration entry points

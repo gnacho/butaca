@@ -9,7 +9,7 @@
 //! always sends; they then arrive as full `.metadata[]` rows).
 //! See [`super::Hub::directory`] for the per-type split and [`Client::search`] for the endpoint.
 use super::client::{Client, QueryBuilder};
-use super::models::MediaContainer;
+use crate::media::MediaContainer;
 
 impl Client {
     /// GET /hubs?count=…&excludeContinueWatching=1 → `.hub[]`.

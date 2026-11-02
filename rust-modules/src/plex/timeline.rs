@@ -92,7 +92,7 @@ impl Client {
 impl QueueRow {
     /// Consume a queue `Metadata` row into its lean projection. BY VALUE: the strings are moved,
     /// not cloned, and the rest of the row's tree is dropped as this returns.
-    fn of(m: super::models::Metadata, sid: super::ServerId) -> QueueRow {
+    fn of(m: crate::media::Metadata, sid: super::ServerId) -> QueueRow {
         // `Media[0]` / `Media[0].Part[0]`, the same pick `Metadata::first_part` makes — by value,
         // so the other versions and their Stream lists die here.
         let (vcodec, acodec, part) = match m.media.into_iter().next() {
@@ -165,7 +165,7 @@ fn next_after<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plex::models::Envelope;
+    use crate::media::Envelope;
 
     /// The server the fixture queues belong to. A PlayQueue is per-server by construction, so one
     /// slot for a whole queue is exactly the real shape.
@@ -415,7 +415,7 @@ impl PlayQueueResult {
     /// The WHOLE response→result mapping, kept out of `create_play_queue` so the host tests grade
     /// the code that ships instead of a copy of it (only the request build is left up there).
     fn of(
-        mc: super::models::MediaContainer,
+        mc: crate::media::MediaContainer,
         sid: super::ServerId,
         rating_key: &str,
     ) -> PlayQueueResult {
