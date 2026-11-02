@@ -183,8 +183,10 @@ impl SessionAdapter {
             }
         }
     }
-    /// Controlled Home executes only its captured DevInstall resource operation. It cannot
-    /// launch account workers, mint identity, write credentials, or invoke platform coordination.
+    /// Controlled Home executes NO resource operation: the owner never leaves Idle in the
+    /// synthetic Jellyfin world (#166), so any commit that reaches the adapter is stale
+    /// authority. It cannot launch account workers, mint identity, write credentials, or invoke
+    /// platform coordination.
     pub(crate) fn controlled_home(mt: &crate::task::MainThread, replay: bool) -> Self {
         let mut adapter = Self::empty(|_, _| false, Resources::Live {
             publisher: crate::plex::session::ProfilePublisher::scoped(mt),
@@ -209,7 +211,7 @@ impl SessionAdapter {
             publisher: crate::plex::session::ProfilePublisher::new(_mt),
         })
     }
-    #[cfg(test)]
+    #[cfg(all(test, feature = "jellyfin"))]
     pub(crate) fn live_recording_resources_for_test(mt: &crate::task::MainThread, root: std::path::PathBuf) -> Self {
         assert!(root.is_absolute() && root.is_dir());
         let mut adapter = Self::live_resources_for_test(mt);
@@ -235,8 +237,8 @@ impl SessionAdapter {
     }
 
     fn commit_current(&self, _req: u32, _plan: &CommitPlan) -> bool {
-        // The roster/endpoint plans this validated are gone with the plex.tv account surface;
-        // the remaining registry plans (DevInstall/Install) carry no per-request lifecycle.
+        // The registry plans this validated are gone with the plex.tv account surface;
+        // the remaining registry plan (Install) carries no per-request lifecycle.
         true
     }
 
@@ -298,8 +300,7 @@ impl SessionAdapter {
         self.commit_with_disk(permit, &completed.plan, Some(completed.disk))
     }
 
-    #[cfg(test)]
-    #[cfg(test)]
+    #[cfg(all(test, feature = "jellyfin"))]
     pub(crate) fn persistence_pending(&self) -> bool { !self.commits.is_empty() || !self.erasures.is_empty() }
 
     pub(crate) fn commit(&mut self, permit: CommitPermit<'_>, plan: &CommitPlan) -> CommitReply {
@@ -309,31 +310,12 @@ impl SessionAdapter {
     fn commit_with_disk(&mut self, permit: CommitPermit<'_>, plan: &CommitPlan,
         disk: Option<DiskCommit>) -> CommitReply {
 
-        use crate::auth::owner::{CommitAdmission, RegistryPlan};
+        use crate::auth::owner::CommitAdmission;
         if self.controlled_home {
-            if plan.credentials.is_some() || plan.lifecycle.is_some() || plan.registry.len() != 1 {
-                return permit.reply(CommitAdmission::StaleAuthority);
-            }
-            let RegistryPlan::DevInstall { primary, extras, client_id } = &plan.registry[0] else {
-                return permit.reply(CommitAdmission::StaleAuthority);
-            };
-            if !extras.is_empty() { return permit.reply(CommitAdmission::StaleAuthority); }
-            let origin = primary.origin();
-            // #95 step 8 / A1+A2: apply the connection facts inside the same registration write
-            // (`ConnectionFacts::default()` is a no-op when `primary.tier` is unknown), deriving
-            // the IP family from the stored ADDRESS rather than `origin.host()` — a `plex.direct`
-            // origin's host is a certificate NAME, which `IpVersion::of_host` cannot parse.
-            let connection = crate::registry::ConnectionFacts::new(
-                primary.tier,
-                crate::plex::IpVersion::of_host(&primary.address),
-            );
-            let id = crate::registry::register_pinned_with_client_id("", &origin,
-                &primary.token, primary.resolve_pin().as_ref(), client_id, connection);
-            if self.replay_resources {
-                if let Some(client) = crate::registry::client_for(id) { client.disable_data_io(); }
-            }
-            crate::registry::set_current(id);
-            return permit.reply(CommitAdmission::RegistryOnly);
+            // The controlled world's only resource operation was the DevPms DevInstall, and the
+            // dev activation that issued it is gone with that world (#166): the owner never
+            // leaves Idle here, so any commit that still arrives is stale authority.
+            return permit.reply(CommitAdmission::StaleAuthority);
         }
         if !self.commit_current(permit.request(), plan) {
             return permit.reply(CommitAdmission::StaleAuthority);

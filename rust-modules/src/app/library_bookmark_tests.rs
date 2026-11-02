@@ -121,6 +121,7 @@ fn retired_library_entry_seeds_its_previous_section_card_and_viewport() {
     struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
+            crate::jellyfin::uninstall();
             crate::registry::reset_for_test();
         }
     }
@@ -128,14 +129,16 @@ fn retired_library_entry_seeds_its_previous_section_card_and_viewport() {
     let session = crate::plex::session::TempSession::new("library-bookmark-return");
     session.watching("u-library-bookmark-return");
     crate::registry::reset_for_test();
-    let sid =
-        crate::registry::register_with_client_id("bookmark-own", "127.0.0.1", 9, "synthetic", "fixture");
-    let shared =
-        crate::registry::register_with_client_id("bookmark-shared", "127.0.0.1", 10, "synthetic", "fixture");
-    crate::registry::set_current(sid);
+    // The flavor's world: one server, the installed client. A seeded source naming any other
+    // sid is retired by the first roster sync (browse_roster_jellyfin_tests), so the fixture
+    // table rides the jellyfin SERVER_ID, and the section switch below (A -> B) stays within
+    // that one server's own sections.
+    crate::jellyfin::install(crate::jellyfin::JfClient::new(
+        crate::origin::Origin::http("127.0.0.1", 1), "dev-1".into()));
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
-    rig.stores.browse.borrow_mut().seed_registered_table_for_test([sid, shared]);
+    rig.stores.browse.borrow_mut().seed_registered_table_for_test([
+        crate::jellyfin::SERVER_ID; 2]);
     rig.refresh_browse_directory();
     rig.browse_run(crate::stores::browse::BrowseCmd::SetCur(0));
     rig.stores.browse.borrow_mut().seed_items_for_test(120);
@@ -194,7 +197,7 @@ fn retired_library_entry_seeds_its_previous_section_card_and_viewport() {
         unreachable!()
     };
     assert_ne!(menu_entry, old_entry);
-    select(&mut d, &rig, 2);
+    select(&mut d, &rig, 1);
     let mut saves = Saves::default();
     for i in 81..120 {
         frame_with_tap(
@@ -211,14 +214,14 @@ fn retired_library_entry_seeds_its_previous_section_card_and_viewport() {
         "section switching must emit the outgoing A snapshot through the StoreCmd drain");
     assert_eq!(
         rig.directory.view().current(),
-        Some(2),
+        Some(1),
         "the actual deferred transaction enters section B"
     );
     d.request(MachineId::Nav, NavOp::Dismiss(menu_entry));
     rig.stores.browse.borrow_mut().seed_items_for_test(120);
     // B's shelves answer too (none): a section reveal, and a bookmark's re-entry seat, wait on
     // them rather than on the listing alone.
-    rig.stores.browse.borrow_mut().seed_shelves_for_test(2, &[], 4);
+    rig.stores.browse.borrow_mut().seed_shelves_for_test(1, &[], 4);
     frame(&mut d, &mut rig, AppArg::Library, tick(120), vec![]);
     Bridge::library_command(
         &mut d,
@@ -228,10 +231,6 @@ fn retired_library_entry_seeds_its_previous_section_card_and_viewport() {
         frame(&mut d, &mut rig, AppArg::Library, tick(i), vec![]);
     }
     let (b_item, _) = rig.library_selection(&d, old_entry, d.focus()).unwrap();
-    assert_ne!(
-        b_item.sid, item.sid,
-        "same rating-key namespace on two actual servers"
-    );
     for i in 200..210 {
         let (_, report) = frame_with_tap(
             &mut d,
@@ -246,11 +245,17 @@ fn retired_library_entry_seeds_its_previous_section_card_and_viewport() {
     assert!(saves.0.iter().any(|(target, cursor)| target.sid == b_item.sid
         && matches!(&cursor.at, crate::stores::browse::CursorAt::ItemKey { sid, rk, slot: 19 } if *sid == b_item.sid && rk == &b_item.rk)),
         "outgoing WillLeave must emit B's snapshot before its engine memory is retired");
+    // One server now: the old cross-server rating-key-namespace assert has no subject (the
+    // multi-source namespace contract lives on in pms_multi_source_merge_tests). What must
+    // still hold is that A and B each saved under their OWN section address.
+    let saved_sections: std::collections::BTreeSet<i64> = saves.0.iter().map(|(t, _)| t.section).collect();
+    assert!(saved_sections.len() >= 2, "A and B each saved under their own section");
     assert!(
         d.nav.entry(old_entry).is_none(),
         "the test must retire, not merely evict, the old entry"
     );
-    rig.enter_library(crate::stores::browse::SecKind::Movie);
+    // B is the one server's Show section now, so the re-entry opens the Show library.
+    rig.enter_library(crate::stores::browse::SecKind::Show);
     for i in 210..290 {
         frame(&mut d, &mut rig, AppArg::Library, tick(i), vec![]);
     }

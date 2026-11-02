@@ -187,6 +187,7 @@ fn library_sweep_visits_the_whole_document_and_reverses_at_its_ends() {
     struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
+            crate::jellyfin::uninstall();
             crate::registry::reset_for_test();
         }
     }
@@ -194,13 +195,15 @@ fn library_sweep_visits_the_whole_document_and_reverses_at_its_ends() {
     let session = crate::plex::session::TempSession::new("library-diagnostic-sweep");
     session.watching("u-library-diagnostic-sweep");
     crate::registry::reset_for_test();
-    let sid = crate::registry::register_with_client_id("sweep-own", "127.0.0.1", 9, "synthetic", "fixture");
-    let shared =
-        crate::registry::register_with_client_id("sweep-shared", "127.0.0.1", 10, "synthetic", "fixture");
-    crate::registry::set_current(sid);
+    // The flavor's world: one server, the installed client. A seeded source naming any other
+    // sid is retired by the first roster sync (browse_roster_jellyfin_tests), so the fixture
+    // table rides the jellyfin SERVER_ID.
+    crate::jellyfin::install(crate::jellyfin::JfClient::new(
+        crate::origin::Origin::http("127.0.0.1", 1), "dev-1".into()));
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
-    rig.stores.browse.borrow_mut().seed_registered_table_for_test([sid, shared]);
+    rig.stores.browse.borrow_mut().seed_registered_table_for_test([
+        crate::jellyfin::SERVER_ID; 2]);
     rig.refresh_browse_directory();
     rig.browse_run(crate::stores::browse::BrowseCmd::ApplyPins(vec![
         (0, true),

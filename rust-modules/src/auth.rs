@@ -11,7 +11,7 @@
 //! authority. Network/PIN derivation remain worker operations; offline policy is retained below.
 use self::observation::Resource;
 use crate::plex::probe::{self, Outcome, PlaintextEligibility};
-use crate::plex::session::{self, PlaintextChoice, ProfileCreds, Session, SourceRef};
+use crate::plex::session::{PlaintextChoice, ProfileCreds, Session, SourceRef};
 use crate::origin::Origin;
 use crate::registry::ServerId;
 
@@ -102,27 +102,6 @@ pub struct UserTile {
     pub uuid: String,
     pub protected: bool, // needs a PIN
     pub admin: bool,
-}
-/// PMS credentials the main loop installs once the flow resolves.
-pub struct ReadyCreds {
-    pub(crate) install: owner::ReadyInstall,
-    /// **Where the primary server is** — an [`Origin`], not a `(host, port)` pair, because the
-    /// pair cannot say `https` and the host a certificate is issued for is not the address behind
-    /// it (`plex::origin`). Read straight off the stored [`session::ServerRef`], which is the
-    /// value discovery wrote and the one `can_go_local` gates.
-    pub origin: Origin,
-    /// The advertised address BEHIND `origin` — a dotted quad or v6 literal, never a
-    /// `plex.direct` hostname. `plex::IpVersion::of_host` can classify this even when `origin`'s
-    /// own host is a certificate NAME it cannot parse as an address (#95 step 8 / R3(a)).
-    pub address: String,
-    pub token: String,
-    /// The tier that won discovery, restored only after the main thread installs/re-points the
-    /// client because a fresh client deliberately starts with an unknown link.
-    pub tier: Option<probe::Location>,
-    /// The origin's resolve pin, read off the same stored record ([`session::ServerRef::resolve_pin`])
-    /// so the install this hands off dials the LAN name with no resolver, exactly as the boot
-    /// gate does.
-    pub pin: Option<crate::origin::ResolvePin>,
 }
 
 /// Append a line to the shared on-device event log (never a token — only ids/counts/status).
@@ -294,27 +273,20 @@ impl ClientLifecycle {
 /// Native registry effects executed only by the Session resource adapter, after its borrowed
 /// owner permit and (for an endpoint) exact captured Client lifecycle have been validated.
 pub(crate) fn execute_session_registry(plan: &owner::RegistryPlan, client_id: &str) -> bool {
-    match plan {
-        owner::RegistryPlan::DevInstall { primary, extras, client_id } => {
-            install_captured_registry(&primary.origin(), &primary.address, &primary.token,
-                primary.tier, primary.resolve_pin().as_ref(), extras, Some(client_id));
-        }
-        owner::RegistryPlan::Install { sources, primary, replace } => {
-            if *replace {
-                // The profile's identity changes HERE, at the commit, with the tokens: grants
-                // survive only for the exact origins this roster installs (`grant`).
-                let installing: Vec<(String, Origin)> = sources.iter()
-                    .filter_map(|s| s.origin().map(|origin| (s.machine_id.clone(), origin)))
-                    .collect();
-                crate::grant::roster_replaced(&installing);
-                crate::registry::revoke_for_profile_switch();
-            }
-            let installed = install_roster(sources, *primary, client_id);
-            if *replace { crate::registry::finish_profile_switch(&installed); }
-            for source in sources {
-                if let Some(origin) = source.origin() { retire_grant_on_https(&source.machine_id, &origin); }
-            }
-        }
+    let owner::RegistryPlan::Install { sources, primary, replace } = plan;
+    if *replace {
+        // The profile's identity changes HERE, at the commit, with the tokens: grants
+        // survive only for the exact origins this roster installs (`grant`).
+        let installing: Vec<(String, Origin)> = sources.iter()
+            .filter_map(|s| s.origin().map(|origin| (s.machine_id.clone(), origin)))
+            .collect();
+        crate::grant::roster_replaced(&installing);
+        crate::registry::revoke_for_profile_switch();
+    }
+    let installed = install_roster(sources, *primary, client_id);
+    if *replace { crate::registry::finish_profile_switch(&installed); }
+    for source in sources {
+        if let Some(origin) = source.origin() { retire_grant_on_https(&source.machine_id, &origin); }
     }
     true
 }
@@ -328,46 +300,6 @@ fn retire_grant_on_https(machine_id: &str, origin: &Origin) {
     if origin.is_tls() && crate::grant::granted_origin(machine_id).is_some() {
         crate::grant::revoke(machine_id);
         crate::log("security: server verified over HTTPS — plaintext upgrade complete");
-    }
-}
-
-/// Shared resource installer. Dev boot supplies its captured device identity so registration
-/// cannot mint/read a session file; legacy boot callers can use the already-loaded session cache.
-///
-/// `address` is the advertised address BEHIND `origin` (#95 step 8 / R3(a)): `origin.host()` is
-/// usually a `plex.direct` certificate NAME that `IpVersion::of_host` cannot parse, so deriving
-/// the IP family from it silently produced `None` on every real boot. The stored/advertised
-/// address is the one value that is actually a literal.
-pub(crate) fn install_captured_registry(origin: &Origin, address: &str, token: &str,
-    tier: Option<probe::Location>, pin: Option<&crate::origin::ResolvePin>, extras: &[SourceRef],
-    client_id: Option<&str>) {
-    // Applies `connection` atomically, inside the same registration write, on whichever branch
-    // runs (#95 step 8) — the primary and every extra used to register first and set the
-    // connection facts in a SEPARATE call afterward, which is exactly the gap `ConnectionFacts`
-    // exists to close.
-    let register = |machine: &str, origin: &Origin, token: &str,
-        pin: Option<&crate::origin::ResolvePin>, connection: crate::registry::ConnectionFacts| {
-        if let Some(cid) = client_id {
-            crate::registry::register_captured_origin_with_connection(machine, origin, token, pin, cid,
-                connection)
-        } else {
-            register_observed_origin(machine, origin, token, pin, connection, &session::peek().client_id)
-        }
-    };
-    let primary_connection =
-        crate::registry::ConnectionFacts::new(tier, crate::plex::IpVersion::of_host(address));
-    let id = register("", origin, token, pin, primary_connection);
-    crate::registry::set_current(id);
-    for source in extras {
-        let Some(origin) = source.origin() else { continue };
-        if source.token.is_empty() { continue; }
-        let connection = crate::registry::ConnectionFacts::new(
-            source.tier,
-            crate::plex::IpVersion::of_host(&source.address),
-        );
-        let id = register(&source.machine_id, &origin, &source.token,
-            source.resolve_pin().as_ref(), connection);
-        crate::registry::describe(id, &source.name, &source.shared_by, grant_of(source));
     }
 }
 

@@ -54,6 +54,10 @@ rust-modules/target-sim-shots/
 # target dir so neither evicts the other's cache.
 rust-modules/target-jf16-a/
 rust-modules/target-jf16-b/
+# WP44B's fix lane: the no-jellyfin lib test/check target dir the verification names,
+# plus the same name as one make check step resolved it from the repo root.
+rust-modules/target-jf16-check/
+/target-jf16-check/
 # pkg/butaca-storage's own target dir, deliberately separate from $(RUST_TDIR) — see the
 # Makefile's STORAGE_TDIR comment. One glob for every RELEASE/LAB/SYMBOLS combination.
 rust-modules/target*-storage/

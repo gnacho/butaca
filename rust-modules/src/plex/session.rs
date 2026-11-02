@@ -322,6 +322,7 @@ impl TempSession {
     }
 
     /// Resource tests assert the actual read/write/clear candidate list before touching it.
+    #[cfg(all(test, feature = "jellyfin"))]
     pub(crate) fn assert_only_target(&self) {
         crate::testlock::assert_held("Session scratch resource target");
         assert_eq!(auth_paths(), vec![self.path()]);
@@ -1272,14 +1273,6 @@ impl ServerRef {
     pub fn origin(&self) -> Origin {
         Origin::parse(&self.origin_url)
             .unwrap_or_else(|| Origin::http(&self.address, self.port as i32))
-    }
-
-    /// The DNS answer this file already holds for its origin: `address` beside a `plex.direct`
-    /// name that encodes it. `None` for a legacy plaintext record or any origin whose address the
-    /// name does not vouch for — see [`super::origin::ResolvePin`]. It is what lets a stored
-    /// session boot against the household's own server with no resolver at all.
-    pub fn resolve_pin(&self) -> Option<super::origin::ResolvePin> {
-        super::origin::ResolvePin::for_origin(&self.origin(), &self.address)
     }
 }
 

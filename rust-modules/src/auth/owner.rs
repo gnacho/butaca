@@ -48,7 +48,6 @@ fn write_op(w: &mut Canon, op: SessionOp) {
         SessionOp::ServerRoster => { w.u8(3); }
         SessionOp::Endpoint(sid) => { w.u8(5).u32(u32::from(sid)); }
         SessionOp::Ready => { w.u8(6); }
-        SessionOp::DevBoundary => { w.u8(8); }
     }
 }
 
@@ -110,7 +109,6 @@ pub(crate) struct CredentialPatch {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum Command {
-    ActivateDevBootstrap,
     TakeReady,
     /// Answer the currently shown [`PersistenceWarning`]. A key that does not match the warning
     /// currently held is inert — it may be stale (a newer warning replaced it).
@@ -139,7 +137,6 @@ pub(crate) enum CoordinatorAction {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum RegistryPlan {
-    DevInstall { primary: crate::plex::session::ServerRef, extras: Vec<crate::plex::session::SourceRef>, client_id: String },
     Install { sources: Vec<crate::plex::session::SourceRef>, primary: Option<usize>, replace: bool },
 }
 
@@ -261,7 +258,6 @@ pub(crate) struct CommitPlan {
 /// controller snapshot: unchanged fields remain solely in SessionInit.
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub(crate) struct CommitDelta {
-    pub dev: Option<DevCommitDelta>,
     pub credentials: Option<CredentialPatch>,
     pub phase: Option<Phase>,
     pub picker: Option<Picker>,
@@ -279,12 +275,8 @@ pub(crate) struct CommitDelta {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub(crate) enum DevCommitDelta { Activated }
-
-#[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum BootstrapAuthority {
     Account { extras: Vec<crate::plex::session::SourceRef> },
-    DevPms { primary: crate::plex::session::ServerRef, extras: Vec<crate::plex::session::SourceRef> },
     /// The controlled Jellyfin world (#166 replay flip). There is no plex.tv account surface
     /// behind it: no registry install, no token rotation, no profile machinery — the typed
     /// Initial carries the exact client identity the controlled boot installs unprobed, and
@@ -489,7 +481,7 @@ pub(crate) struct ServerLifecycle {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum SessionOp { ServerRoster, Endpoint(u16), Ready, DevBoundary }
+pub(crate) enum SessionOp { ServerRoster, Endpoint(u16), Ready }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct SessionWorkKey {
@@ -634,20 +626,6 @@ impl SessionInit {
             delete_leftovers: 0,
             link_trouble: false, discovery_retry: None, plaintext: None, switch_refused_for: None }
     }
-
-    pub fn captured_boot(saved: PersistedSession, primary: Option<crate::plex::session::ServerRef>,
-        extras: Vec<crate::plex::session::SourceRef>) -> Self {
-        let mut init = Self::captured(saved);
-        if let Some(primary) = primary {
-            let clean = CredentialPatch::of(&PersistedSession {
-                client_id: init.persisted.client_id.clone(), ..Default::default()
-            });
-            init.persisted = clean.merge_into(&init.persisted);
-            init.committed_credentials = clean;
-            init.authority = BootstrapAuthority::DevPms { primary, extras };
-        } else { init.authority = BootstrapAuthority::Account { extras }; }
-        init
-    }
 }
 
 pub(super) fn write_plaintext_verdict(w: &mut Canon, v: &super::PlaintextVerdict) {
@@ -749,9 +727,6 @@ impl LogicalState for SessionInit {
             .str(&self.disk_identity.profile_uuid);
         match &self.authority {
             BootstrapAuthority::Account { extras } => { w.u8(0); write_sources(w, extras); }
-            BootstrapAuthority::DevPms { primary, extras } => {
-                w.u8(1); write_server(w, primary); write_sources(w, extras);
-            }
             BootstrapAuthority::DevJf { origin, token, user_id, user_name } => {
                 w.u8(2); w.str(origin).str(token).str(user_id).str(user_name);
             }
@@ -812,9 +787,6 @@ impl LogicalState for SessionInit {
                 .bool(commit.writes_credentials);
             w.option(commit.receipt.as_ref(), |w, receipt| receipt.write(w));
             let delta = &commit.delta;
-            w.option(delta.dev.as_ref(), |w, dev| { match dev {
-                DevCommitDelta::Activated => { w.u8(0); }
-            } });
             w.option(delta.credentials.as_ref(), |w, patch| {
                 write_persisted(w, &patch.merge_into(&PersistedSession::default()));
             });
@@ -921,10 +893,6 @@ impl SessionMachine {
     pub fn read(&self) -> SessionRead<'_> { self.publication.read() }
     pub fn publication(&self) -> Arc<SessionSnapshot> { Arc::clone(&self.publication) }
     pub fn subhash(&self) -> u64 { self.subhash }
-    pub fn ready_is_current(&self, epoch: u64, scope: ProfileScope) -> bool {
-        self.state.epoch == epoch && self.state.profile_scope == scope
-            && self.state.phase == Phase::Ready && !self.state.apply_pending
-    }
 
     pub fn needs_ready_commit(&self) -> bool {
         self.state.phase == Phase::Ready && self.state.apply_pending && self.state.pending_commit.is_none()
@@ -1024,25 +992,6 @@ impl SessionMachine {
         }, emit)
     }
 
-    fn activate_dev(&mut self, emit: &mut impl FnMut(SessionFx)) -> bool {
-        if self.state.phase != Phase::Idle || self.state.pending_commit.is_some()
-            || self.state.pending_erase.is_some() { return false; }
-        // DevJf deliberately refuses: the Jellyfin world has no plex.tv/registry resource
-        // operation to execute, so its boot arm never issues this command (and the owner stays
-        // Idle through the whole controlled run).
-        let BootstrapAuthority::DevPms { primary, extras } = &self.state.authority else { return false };
-        let registry = vec![RegistryPlan::DevInstall { primary: primary.clone(), extras: extras.clone(),
-            client_id: self.state.persisted.client_id.clone() }];
-        let Some(req) = self.allocate(SessionOp::DevBoundary, None) else { return false };
-        self.begin_commit(req, 0, true, CommitPlan { registry_client_id: self.state.persisted.client_id.clone(),
-            expected_disk: self.state.disk_identity.clone(),
-            credentials: None, lifecycle: None, registry,
-            purpose: PersistencePurpose::Background, writes_durable: false,
-            authority: crate::plex::session::SaveAuthority::Routine }, CommitDelta {
-                dev: Some(DevCommitDelta::Activated), ..Default::default()
-            }, emit)
-    }
-
     /// Settle a durability verdict ONLY if it still describes the write this owner is waiting on.
     ///
     /// Fenced by request, epoch, arrival and revision together. A completion that fails the fence
@@ -1133,7 +1082,7 @@ impl SessionMachine {
         if !reply.admission.accepted() {
             let op = self.state.pending.remove(&reply.req).unwrap().key.op;
             match op {
-                SessionOp::Ready | SessionOp::DevBoundary => {
+                SessionOp::Ready => {
                     self.state.phase = Phase::Error;
                     self.state.apply_pending = false;
                     self.state.error = crate::i18n::msg::browse_auth_authority_failed().into();
@@ -1147,16 +1096,6 @@ impl SessionMachine {
             return true;
         }
         let delta = commit.delta;
-        if let Some(DevCommitDelta::Activated) = &delta.dev {
-            if let BootstrapAuthority::DevPms { primary, .. } = &self.state.authority {
-                let primary = primary.clone();
-                self.state.phase = Phase::Ready;
-                self.state.apply_pending = false;
-                self.publish_profile(None, emit);
-                emit(SessionFx::Ready { epoch: self.state.epoch, scope: self.state.profile_scope,
-                    token: primary.token.clone(), server: primary, install: ReadyInstall::AlreadyInstalled });
-            }
-        }
         if let Some(patch) = delta.credentials {
             self.state.persisted = patch.merge_into(&self.state.persisted);
             if commit.writes_credentials {
@@ -1228,7 +1167,6 @@ impl SessionMachine {
                 server: self.state.persisted.server.clone(), token: self.state.persisted.pms_token().into(),
                 install: ReadyInstall::PrimaryAndExtras(match &self.state.authority {
                     BootstrapAuthority::Account { extras } => extras.clone(),
-                    BootstrapAuthority::DevPms { .. } => Vec::new(),
                     BootstrapAuthority::DevJf { .. } => Vec::new(),
                 }) });
         }
@@ -1442,7 +1380,6 @@ impl<H: SessionHost> crate::ui::machine::Machine<H> for SessionMachine {
         let before = self.publication();
         let mut emit = |effect| fx.push(Fx::App(H::session_effect(effect)));
         let handled = match ev {
-            SessionEvent::Command(Command::ActivateDevBootstrap) => self.activate_dev(&mut emit),
             SessionEvent::Command(Command::TakeReady) => self.take_ready(&mut emit),
             SessionEvent::Command(Command::AcknowledgePersistenceWarning { key }) =>
                 self.acknowledge_persistence_warning(*key, &mut emit),

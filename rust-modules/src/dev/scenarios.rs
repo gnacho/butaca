@@ -180,24 +180,6 @@ pub(crate) fn login_forced() -> bool {
     crate::dev::flag("login")
 }
 
-/// `/tmp/butaca-token` — the harness/headless test identity, read once. Never logged.
-pub(crate) fn dev_token() -> String {
-    match crate::dev::read("token") {
-        Some(s) if !s.is_empty() => {
-            #[cfg(feature = "devtriggers")]
-            crate::log("token: using /tmp/butaca-token (test identity)");
-            s
-        }
-        _ => String::new(),
-    }
-}
-
-/// Optional primary endpoint for a synthetic PMS fixture. Used only with the explicitly
-/// injected dev token; a persisted account is never redirected. Absent in shipping builds.
-pub(crate) fn pms_origin() -> Option<crate::origin::Origin> {
-    crate::dev::read("pms-origin").and_then(|s| crate::origin::Origin::parse(s.trim()))
-}
-
 crate::dev::latched_flag! { pub(crate) fn imagecache_stats_armed = "imagecache-stats"; }
 crate::dev::latched_flag! {
     /// RAM-only control leg for cache performance comparisons; absent in shipping builds.

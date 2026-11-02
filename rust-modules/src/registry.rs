@@ -957,7 +957,9 @@ pub(crate) fn register_with_client_id(
 /// PIN, and for grading [`ConnectionFacts`]'s "leave unchanged on retoken" / "sets both on
 /// re-point" semantics (#95 step 8). Same contract as every `_with_client_id` seam: no session
 /// file, no worker — a caller that genuinely knows nothing about the connection passes
-/// `ConnectionFacts::default()` explicitly.
+/// `ConnectionFacts::default()` explicitly. Its product callers were the DevPms installs, gone
+/// with that world (#166); the roster install rides `register_observed_origin`.
+#[cfg(test)]
 pub(crate) fn register_pinned_with_client_id(
     machine_id: &str,
     origin: &Origin,

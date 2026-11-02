@@ -192,15 +192,13 @@ impl Initial {
         if port == 0 { return Err("invalid synthetic port"); }
         let saved = crate::plex::session::Session { client_id:format!("s{seed:08x}"), ..Default::default() };
         let origin = crate::origin::Origin::http("127.0.0.1", i32::from(port));
-        // The flavor IS the synthetic world: a build carrying the `jellyfin` feature records a
-        // Jellyfin controlled world (the #166 replay flip), a build without one records the Plex
-        // world exactly as before. The recorder stamps the flavor into the recording header
-        // (`recorder::features`), so the two artifact families can never be cross-loaded by
+        // The synthetic world IS the flavor's (the #166 replay flip): a Jellyfin controlled
+        // world. The recorder stamps the flavor into the recording header
+        // (`recorder::features`), so the artifact families can never be cross-loaded by
         // accident. All identity strings are invented here from the seed — never read off a
         // server — and stay inside the fixture alphabet's `s[0-9a-f]{8}` shape.
-        #[cfg(feature = "jellyfin")]
         let session = {
-            let mut session = crate::auth::SessionInit::captured_boot(saved, None, Vec::new());
+            let mut session = crate::auth::SessionInit::captured(saved);
             session.authority = crate::auth::owner::BootstrapAuthority::DevJf {
                 origin: origin.base(),
                 token: format!("s{:08x}", seed.wrapping_add(1)),
@@ -208,13 +206,6 @@ impl Initial {
                 user_name: format!("s{:08x}", seed.wrapping_add(3)),
             };
             session
-        };
-        #[cfg(not(feature = "jellyfin"))]
-        let session = {
-            let primary = crate::plex::session::ServerRef { address:"127.0.0.1".into(), port:i64::from(port),
-                origin_url:origin.base(),token:format!("s{:08x}",seed.wrapping_add(1)),
-                tier:Some(crate::plex::probe::Location::Local), ..Default::default() };
-            crate::auth::SessionInit::captured_boot(saved,Some(primary),Vec::new())
         };
         let initial = Self { version:1, session,
             home:crate::pms::initial::Initial::fresh(),clock_start:0,
@@ -234,19 +225,15 @@ impl Initial {
         if matches!(&self.session.authority, crate::auth::owner::BootstrapAuthority::DevJf { .. }) { 0 }
         else { self.primary_client }
     }
-    pub(crate) fn capture_home(host: &str, port: i32) -> Result<(Self, Option<crate::plex::session::DeferredLoad>), &'static str> {
+    pub(crate) fn capture_home(_host: &str, _port: i32) -> Result<(Self, Option<crate::plex::session::DeferredLoad>), &'static str> {
         if let Some(value) = crate::dev::scenarios::app_init_value() {
             return Self::from_value(value?).map(|initial| (initial, None));
         }
-        let token = crate::dev::scenarios::dev_token();
+        // No token is read here: the controlled Jellyfin world carries its fixture identity in
+        // the typed Initial (`app_init_value`), and a live capture has no Plex session to name.
         let (saved, entropy, deferred) = crate::plex::session::load_capturing_entropy();
-        let primary = (!token.is_empty()).then(|| crate::plex::session::ServerRef {
-            address: host.into(), port: i64::from(port),
-            origin_url: crate::origin::Origin::http(host, port).base(), token,
-            tier: Some(crate::plex::probe::configured_tier(host)), ..Default::default()
-        });
         let initial = Self { version: 1,
-            session: crate::auth::SessionInit::captured_boot(saved, primary, Vec::new()),
+            session: crate::auth::SessionInit::captured(saved),
             clock_start: 0, entropy: Entropy::Captured(entropy),
             primary_client: crate::plex::Client::capture_generation_seed(),
             automated: crate::dev::any_trigger_present(),
@@ -270,27 +257,16 @@ impl Initial {
             || s.active_profile.is_some() || s.profile_scope.0 != 0 {
             return Err("initial state is not a pre-effect boot");
         }
-        // The world's backend authority decides what "a server binding" even is. DevPms keeps
-        // its Plex checks byte for byte; DevJf is the replay campaign's synthetic Jellyfin
-        // world, refused outright in a build that cannot construct it.
+        // The world's backend authority decides what "a server binding" even is. DevJf is the
+        // replay campaign's synthetic Jellyfin world, refused outright in a build that cannot
+        // construct it.
         let content_detail_ok = match &s.authority {
-            BootstrapAuthority::DevPms { primary, extras } => {
-                let reconstructed = crate::auth::SessionInit::captured_boot(s.persisted.clone(), Some(primary.clone()), extras.clone());
-                if serde_json::to_value(&reconstructed).map_err(|_| "invalid initial Session")?
-                    != serde_json::to_value(s).map_err(|_| "invalid initial Session")? {
-                    return Err("incoherent initial Session");
-                }
-                if crate::origin::Origin::parse(&primary.origin_url).is_none() || primary.token.is_empty() || !extras.is_empty() {
-                    return Err("unsupported Home server binding");
-                }
-                |content: &str| content == "1001"
-            }
             BootstrapAuthority::DevJf { origin, token, user_id, user_name } => {
                 if !cfg!(feature = "jellyfin") { return Err("unsupported replay bootstrap authority"); }
-                // captured_boot has no DevJf constructor (it is not a Plex binding at all), so
-                // the reconstruction re-imposes the authority it names; everything AROUND it
-                // must still round-trip byte for byte.
-                let mut reconstructed = crate::auth::SessionInit::captured_boot(s.persisted.clone(), None, Vec::new());
+                // captured() carries the Account authority, so the reconstruction re-imposes
+                // the DevJf authority it names; everything AROUND it must still round-trip
+                // byte for byte.
+                let mut reconstructed = crate::auth::SessionInit::captured(s.persisted.clone());
                 reconstructed.authority = s.authority.clone();
                 if serde_json::to_value(&reconstructed).map_err(|_| "invalid initial Session")?
                     != serde_json::to_value(s).map_err(|_| "invalid initial Session")? {

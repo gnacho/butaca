@@ -1,14 +1,14 @@
+// The attachment race stages the synthetic Jellyfin world (`initial_for` boots
+// `Initial::synthetic_home`), so the whole module is flavor-gated.
+#![cfg(feature = "jellyfin")]
 use super::*;
 use crate::app::{boot, recorder::Recplay};
 use crate::plex::session::{self, Session};
 
-fn initial_for(saved: Session, entropy: Option<[u8; 16]>) -> Initial {
+fn initial_for(entropy: Option<[u8; 16]>) -> Initial {
+    // The world is the flavor's synthetic one as `synthetic_home` built it; only the captured
+    // entropy is re-imposed (the recorder-race fixtures this test drives).
     let mut initial = Initial::synthetic_home(17, 32517, None).unwrap();
-    let crate::auth::owner::BootstrapAuthority::DevPms { primary, .. } = initial.session.authority
-    else {
-        unreachable!()
-    };
-    initial.session = crate::auth::SessionInit::captured_boot(saved, Some(primary), Vec::new());
     initial.entropy = Entropy::Captured(entropy);
     initial.validate().unwrap();
     initial
@@ -33,8 +33,8 @@ fn concurrent_session_change_after_attachment_rolls_back_only_this_attempt() {
     std::os::unix::fs::symlink(&external, latest.join("preexisting-link")).unwrap();
     std::fs::write(root.join("butaca-recplay"), external.to_str().unwrap()).unwrap();
 
-    let (saved, entropy, deferred) = session::load_capturing_entropy();
-    let initial = initial_for(saved, entropy);
+    let (_saved, entropy, deferred) = session::load_capturing_entropy();
+    let initial = initial_for(entropy);
     let mut rec = Recplay::recording_with_sink(
         &initial,
         Box::new(crate::ui::rec::DirSink::create(&latest).unwrap()),
@@ -71,8 +71,8 @@ fn concurrent_session_change_after_attachment_rolls_back_only_this_attempt() {
     );
     assert!(root.join("butaca-recplay").exists());
 
-    let (saved, entropy, deferred) = session::load_capturing_entropy();
-    let initial = initial_for(saved, entropy);
+    let (_saved, entropy, deferred) = session::load_capturing_entropy();
+    let initial = initial_for(entropy);
     let mut retry = Recplay::recording_with_sink(
         &initial,
         Box::new(crate::ui::rec::DirSink::create(&latest).unwrap()),
