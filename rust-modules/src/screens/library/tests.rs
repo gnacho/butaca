@@ -449,7 +449,7 @@ fn retry_stop_matches_the_shared_measured_status_action_with_and_without_reason(
 fn a_failed_library_section_and_a_failed_home_share_the_verdict_and_the_row() {
     use crate::ui::widgets::{StatusKind, StatusOverlay};
     let _guard = crate::testlock::serial();
-    let home = StatusOverlay::new(Rect::FULL, c"Can\u{2019}t reach your Plex server", StatusKind::Failed)
+    let home = StatusOverlay::new(Rect::FULL, c"Can\u{2019}t reach your Jellyfin server", StatusKind::Failed)
         .page(crate::ui::icons::Icon::ServerBadgeMinus)
         .action(c"Try again");
     for owner in ["", "friend"] {
@@ -462,7 +462,7 @@ fn a_failed_library_section_and_a_failed_home_share_the_verdict_and_the_row() {
         let cx = fixture.cx(Some(page.key(RETRY)));
         let (caption, reason) = page.status_text(&cx);
         if owner.is_empty() {
-            assert_eq!(caption.to_str().unwrap(), "Can\u{2019}t reach your Plex server");
+            assert_eq!(caption.to_str().unwrap(), "Can\u{2019}t reach your Jellyfin server");
         }
         let library = page.status_overlay(&cx, &caption, reason.as_deref());
         let (lv, hv) = (library.verdict_band_measured(cx.measure), home.verdict_band_measured(cx.measure));
