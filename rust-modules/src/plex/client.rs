@@ -17,7 +17,7 @@
 //! A `Client` is ONE server. WHICH servers exist, which one is current, and how a `&'static
 //! Client` is handed out live next door in [`super::servers`] — this file is the type, that
 //! file is the table.
-use super::models::{Envelope, MediaContainer};
+use crate::media::{Envelope, MediaContainer};
 use super::origin::Origin;
 use super::probe::Location;
 use super::servers::ServerId;

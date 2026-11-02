@@ -1,7 +1,7 @@
 //! Library operations (impl Client): sections, section queries, metadata, children,
 //! related, plus the two part-level playback ops (stream selection, direct-play target).
 use super::client::{Client, QueryBuilder, StreamUrl};
-use super::models::{MediaContainer, Metadata};
+use crate::media::{MediaContainer, Metadata};
 use super::params::StreamSelection;
 
 fn sidecar_key_allowed(key: &str) -> bool {

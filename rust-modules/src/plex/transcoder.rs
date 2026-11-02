@@ -16,7 +16,7 @@
 //! HTTP, deadline and transport causes for route policy.
 use crate::playback::{Ceiling, TranscodeDelivery};
 use super::client::{Client, JsonDeadlineOutcome, QueryBuilder, StreamUrl};
-use super::models::MediaContainer;
+use crate::media::MediaContainer;
 use super::params::TranscodeSpec;
 use super::probe::Location;
 
