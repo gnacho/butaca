@@ -1,339 +1,48 @@
-# plex/ — the Plex data layer (typed PMS + plex.tv client)
+# plex/ - the surviving Plex wire layer
 
-This is the **typed Plex client**: account/login (`account.rs`, `session.rs`), the HTTP client
-(`client.rs` — one server) and the registry that holds them (`servers.rs` — WHICH servers exist and
-which is current, with `probe.rs` deciding which of a server's addresses is worth dialling),
-library/hubs/metadata reads (`library.rs`/`hubs.rs`/`models.rs`), and the whole
-playback protocol — the MDE/transcode decision + capability profile (`transcoder.rs`), the
-timeline/PlayQueue/identity session ops (`timeline.rs`), stream selection + the direct-play
-target (`library.rs`), with typed request params in `params.rs`. **Every PMS query in the app
-is built here** (the `route/` module holds playback *state* (`decision.rs`) + policy (`plan.rs`),
-never a query string). The
-authoritative REST spec is **`docs/pms-api.md`** (verified) — read it before adding an
-endpoint; don't reverse-engineer PMS from scratch.
+This directory is the remainder of the Plex data layer. The app is Jellyfin-only now: the onboarding,
+the account flow, the profile picker and the legacy session resume are gone, so no product path can
+produce a Plex session any more. What is left is the PMS wire client and the vocabulary its surviving
+callers still use through the backend-neutral dispatch. The whole directory is queued for deletion as
+that dispatch is collapsed; treat it as frozen unless a campaign slice (tracking issue #166) says
+otherwise.
 
-## The guiding principle: direct-play first
+## What is here
 
-The whole point of this client is that **the TV plays the library natively**. Prefer a **direct-play**
-part over a transcode wherever the TV can decode it; when a transcode is unavoidable, request it as a
-**progressive stream the existing demuxer already handles** (H264+AC3 MKV) rather than inventing a new
-container/codec path. Every "just transcode it" shortcut pushes work onto the server *and* degrades
-quality — reach for it only when direct-play genuinely can't work. See `[[server-hevc-encode-gating]]`
-and the `soft-subs` note below for why "direct-play everything" keeps paying off.
+- `client.rs`: request building for PMS endpoints. `with_token` is the only place `X-Plex-Token` is
+  appended; the shared headers (including `X-Plex-Language`) live here, and the TLS/`plex.direct`
+  origin rules are documented on `TlsOrigin`.
+- `params.rs`: query builders for the wire endpoints (`TranscodeSpec`, `StreamSelection`,
+  `TimelineReport`, section queries).
+- `transcoder.rs`: `LinkPolicy`, the direct-play predicates (`is_dp_audio_track`, `is_dp_subtitle`,
+  the codec lists) and the transcode/relay URL construction.
+- `timeline.rs`: timeline reporting, machine identity and the play-queue payloads.
+- `hubs.rs` / `library.rs`: the hub fetches and the section listings (children, related, extras) that
+  the Home catalog and the detail pipeline still ask for.
+- `identity.rs`: the client identity strings, including `VERSION` and the `X-Plex-*` headers the
+  diagnostics panel reports.
+- `serverinfo.rs`: the Server row of the diagnostics panel and `subscription_of` (the Plex Pass
+  verdict; for a Jellyfin session it answers `Unknown`).
+- `probe.rs`: endpoint probing tiers (`configured_tier`, the persisted tier canon).
+- `session.rs`: the playback preferences store (quality, audio, subtitle tone, up-next policy, pins
+  for the shared browse table). Jellyfin flows read and write it, which is why it outlives the rest.
+- `pins.rs`: pinned libraries, consumed by the browse table that both backends share.
+- `persistence.rs`, `install_preferences.rs`: the stores `session.rs` loads and saves through.
 
-## More than one server: the registry (`servers.rs`)
+## What is gone (deleted by the campaign - do not look for it)
 
-**A friend's shared server is not a second address, it is a second AUTHORITY** — its own
-`machineIdentifier`, its own per-(user, server) `accessToken`, its own `ratingKey` space and its own
-watch state. Measured live against a real share (`docs/shared-servers.md` §2): our own server's
-token gets a **401** from it, and its section key `1` is a different library from our section key
-`1`. So this layer is keyed on servers, not on one host and port.
+- `account.rs` and the plex.tv API client: PIN sign-in, QR wait, home-user roster, profile switching.
+- The session owner's sign-in machine: ready handoff, `RegistryPlan::Install`, the profile cache and
+  the protected-profile registry.
+- The DevPms harness (`BootstrapAuthority::DevPms`, `activate_dev`, the synthetic Plex home world).
+- The metadata vocabulary: it moved to `crate::media` (models.rs is no longer here), and the
+  playback vocabulary to `crate::playback`. The server registry lives in `crate::registry`.
 
-`client()` and `client_opt()` still mean what they always did, they just mean **the CURRENT
-credential-eligible server** now — which is why nothing outside `plex/` changed when the
-`OnceLock<Client>` singleton became a table. `client_for(id)` is the multi-server addition;
-`register_origin(machine_id, &Origin, token, Option<&ResolvePin>, ConnectionFacts)` puts a server
-in the table. **`install(&Origin, token, Option<&ResolvePin>, ConnectionFacts)` is the SESSION
-path** (boot, QR login, profile switch) and retargets when the origin may carry a credential — it
-grew the fourth parameter in #95 step 8: `ConnectionFacts{tier, ip}` is
-applied to the published `Client` INSIDE the same registration write that creates or re-points its
-slot, never as a separate post-hoc `set_link`/`set_connection` call a caller could forget or a
-re-point could race. `None` in either field means **leave unchanged**, not "set unknown" — a
-same-origin retoken that knows nothing new about the connection passes `ConnectionFacts::default()`
-and the client's prior tier/IP survive; only a re-point (a genuinely fresh `Client`, which
-`Client::new` starts at `LINK_UNKNOWN`/`IP_UNKNOWN` regardless) or an explicit `Some` actually
-changes what's stored. `register_origin` takes `ConnectionFacts` directly rather than keeping a
-connection-less twin beside it; `register_captured_origin_with_connection` is the `pub(crate)` seam
-that carries it through the other registration paths (dev boot, `install_captured_registry`'s
-primary and extras, the endpoint/roster/candidate-activation handlers in `auth.rs`); every one of
-them derives the IP family from the candidate's own advertised `address`, never `Origin::host()` —
-a `plex.direct` origin's host is a certificate NAME `IpVersion::of_host` cannot parse as a literal,
-which is why that used to read `unknown` on almost every real boot (issue #95's R3(a)).
+## Rules that still hold
 
-**A server's address is an `Origin` — scheme + host + port — and it is PARSED FROM A URL, never
-assembled from an address.** `origin.rs` is the type and the reasoning; the short version is that
-plex.tv advertises a server's TLS origin as the `plex.direct` HOSTNAME (`Connection.uri`) while
-`Connection.address` stays the dotted quad behind it, and the certificate is issued for the name —
-so a control plane carrying only an address can never validate one, however much TLS is added
-underneath it. `probe::Candidate::origin()` is the one derivation, and `Candidate::address` survives
-only as what a log and the Sources panel SAY. Two invariants come with it: `Origin::host()` is
-**always unbracketed** (it is the `getaddrinfo` node) while `Origin::authority()` **always**
-brackets a v6 literal (it is URL serialization) — confusing the two makes URL construction keep
-looking right while name resolution quietly stops working. `register(machine_id, host, port, token)`
-and `Origin::http(host, port)` still exist and are honest about what they mean: **every caller of
-either is a place that still assumes cleartext**, which is what makes them the grep for the TLS
-work. The CONTROL plane no longer makes that assumption: `http.rs` sends an HTTPS origin through
-libcurl. Neither does playback: `StreamUrl` preserves the scheme and `ff.rs` selects `stream.rs`
-for plaintext or `curlio.rs` for HTTPS. One dev-only caller also still throws an origin away:
-`metadata.rs`'s `alt_stand_in_slot` registers a stand-in from `c.host()`/`c.port()` and must move
-to `register_origin`. (It was `ui/alt_sources.rs`'s until restructure phase 10 moved the *Also
-available* store to the data layer beside the resolve that fills it.)
-
-**A `plex.direct` origin is dialled at the address plex.tv advertised beside it, with no DNS.**
-`origin::ResolvePin` (2026-09-05) is the offline-mode fix: the persisted origin for the household's
-own server is normally `https://192-168-0-10.<hash>.plex.direct:32400`, a name only Plex's public
-zone resolves, so a LAN whose uplink was down could not reach a server one hop away — and the
-plaintext twin `probe::candidates` documents as "the offline fallback" cannot carry a token in a
-store build (`http::credential_transport_allowed`; a consented `grant` needs a fresh plex.tv
-resource list, which an offline boot does not have). A pin is built ONLY when the dashed label
-encodes the stored `address` (v4 or the eight-group v6 spelling), so it is a pure function of the
-hostname; `register_origin`/`install` take it, the `Client` carries it for the control plane, and
-`net::resolve` holds an append-only table the media plane (`curlio`) consults by host and port.
-TLS validation is untouched: the name stays in the URL and in SNI. `/tmp/butaca-nowan` makes
-every unpinned name fail as a dead resolver would, which is how the case is reproduced on a desk.
-**Since issue #95 the DISCOVERY PROBE is pinned too, not only the winning `Client`.**
-`auth::race_batch` builds a `ResolvePin` for each `https://…plex.direct` candidate from the same
-`Candidate::address` this module already carries, and hands it down through `auth::get_identity` to
-`http::request_probe`'s TLS arm — the identical mechanism `register_origin`/`install` use, run one
-step earlier, at the DIAL that decides a winner rather than only after one is already decided. That
-is what turns a router's DNS-rebind protection (which answers every `*.plex.direct` name with
-NXDOMAIN, so the probe's own resolver never reaches the LAN candidate) from a permanent relay
-detour into an ordinary pinned LAN HTTPS winner; the plaintext twin's own probe is unaffected — a
-pin belongs to a TLS name, never to a literal — and a candidate whose dashed label does not encode
-its `address` simply gets no pin and resolves through DNS exactly as before.
-
-**The who's-watching pick is seated from `Session::profiles` when plex.tv does not answer.** The
-first real outage (2026-09-06, `docs/measurements/offline-picker-red-tv-2026-09-06.log`) got past
-the pinned origin and then could seat nobody: every pick is a `POST /api/v2/home/users/{uuid}/switch`,
-and the one no-network shortcut (re-picking the active, PIN-free profile) did not cover a house
-whose active profile is the PIN-protected admin. So every ONLINE seating now writes a
-`ProfileCreds` record — user, primary, roster, and for a protected profile a `PinVerifier`
-(PBKDF2-HMAC-SHA-256 under a random salt, `crate::sha256`; never the PIN) — and
-`auth::switch_thread` reads `account::SwitchOutcome`: plex.tv's verdict (`Refused`) ends the
-switch as before, `Unreachable` falls through to `auth::offline_activation`, which seats a cached
-unprotected profile on the pick and a cached protected one on its PIN, and a profile this set has
-never seated online says so: "No internet connection. Pick this profile once while online, and it
-will work offline." (The QR screen carries the same sentence about signing in.) `account::plex_tv_recently_unreachable` (a 45 s
-memo the picker's own roster refresh usually fills) sends the pick to the cache FIRST so an
-outage does not cost a connect timeout per pick. Three simulator runs in `docs/measurements/
-offline-picker-sim-*-2026-09-06.log`, and `tests/run.py`'s `offline_pick_cached` on the set.
-
-**A candidate only becomes the LIVE origin if this build can put a token on it.** The probe race
-used to activate "the first usable answer immediately", and on a LAN the plaintext twin answers
-before the TLS handshake completes — so a store build re-pointed its live server to an origin it
-then refused (`security: refused plaintext PMS credentials`) for the ~100 ms until the https winner
-landed, and whatever was in flight (a hub fetch, the picker's first avatar) failed for good. Issue
-#95's fix is that eligibility is decided once, at synthesis, not asked again at activation:
-`probe::candidates` stamps each `Candidate::credential_eligible` from the `CredentialPolicy` the
-plan was built with, and only an eligible answer can become `first`/`best`/get activated — a
-verified plaintext answer in a store build does **not** count as reached and does not hold back the
-relay leg. If nothing eligible verifies, the result is `Reach::InsecureOnly` (plan §4's precedence:
-`At` > `InsecureOnly` > `Refused` > `No`), which becomes `Outcome::InsecureOnly` /
-`Discovery::InsecureOnly` / `SourceState::InsecureOnly` ("Not secure") — a fifth sentence, told
-apart from `Unreachable`, that **outranks a 401**. Before this it counted as reached, which was
-issue #95 itself.
-
-**"May a credential go to this origin" has ONE answer: `grant::credential_allowed`** (or
-`grant::allowed_under` where a pure function receives the policy). It is the build's
-`CredentialPolicy` OR a live `PlaintextGrant` for that exact origin (BUTACA-10). Whoever puts a
-particular SERVER's token on an origin — registry and endpoint admission — asks
-`grant::allowed_for(policy, machine_id, origin)`: a grant admits only the machine it was minted
-for. A remembered (cached) origin asks `grant::remembered_allowed`: the policy alone, never a
-grant. Nothing else
-asks `CredentialPolicy::may_carry_credential` or `Origin::is_tls` for a credential decision —
-`grep -rn may_carry_credential src/` finds only `grant.rs` (plus doc links). `probe::candidates`
-stamps the policy half at synthesis, and `auth::settle_plaintext` adds the grant half after the
-race. A grant is minted only by discovery, from a FRESH verdict `InsecureEvidence::
-plaintext_eligibility` calls eligible, when the person's recorded answer (`Session::
-plaintext_consent`, captured at the spawn site as `grant::PlaintextAsk`) allows it; it is bound to
-{identity generation, network generation, machine, exact numeric origin}, never persisted, dies on
-sign-in/sign-out, on every DID foreground (which queues each stranded server's endpoint
-re-discovery, requested by `grant::UpgradeRetry::due`), on a refusal (which also moves the consent generation
-a `PlaintextAsk` captured) and on a roster commit that does not install its (machine, origin) —
-a roster commit moves no generation — and a stored `SourceRef` naming a
-plaintext origin registers tokenless until discovery re-mints. Ending a grant re-grades the
-registry (`servers::regrade_credentials` blanks every client a grant was carrying, `ON_GRANT`);
-`grant::UpgradeRetry` re-discovers a granted server on the hub-retry backoff and the HTTPS
-registration retires the grant (`auth::retire_grant_on_https`).
-
-**Online primary selection also proves the token after it proves the machine.** `/identity` is
-deliberately unauthenticated, so a fresh identity winner is only a known endpoint. Before sign-in,
-rediscovery or a profile switch may select it as primary, auth sends `GET /library/sections`
-through that source's exact origin, resolve pin, transport policy and per-machine token. A valid
-empty sections container is success; 401/403, timeout, transport refusal and malformed JSON remain
-distinct evidence, and primary selection continues with the next eligible endpoint/server.
-Secondary servers keep the profile-specific grants plex.tv returned live and cached; their identity
-probes refresh endpoint and reachability facts without making every secondary browse before it can
-be registered. Direct identity candidates settle as one race, and a relay fallback receives its own
-local/remote probe opportunity. Authenticated fallback attempts share a separate 20-second budget,
-with each request still capped at 5 seconds for Local and 10 seconds for Remote/Relay. Only time
-inside those authenticated requests is deducted: identity probing (including later direct/cached
-or relay attempts) and inter-server pacing do not spend admission time. Offline cached-profile
-seating keeps its existing PIN/cache contract.
-
-Slots are keyed on `machineIdentifier` because that is the only identity that survives a server
-changing address — and a registration that has *learned* an id **adopts** an address-only slot
-instead of adding a second one for the same machine.
-
-Three design choices carry the weight, and each is a prevented bug rather than a preference:
-
-- **An atomic-pointer table, not an `RwLock`.** `client()` is a HOT path: `app::adapters::poster::built_key`
-  calls it **three times per key, for every visible art tile, every frame** (~25–40 tiles × 60 fps).
-  A read is one relaxed load, one acquire load, a deref — no lock, no refcount, no allocation. An
-  `RwLock` would add an atomic RMW pair per call plus a fairness stall every time a login writes,
-  and an `Arc` would change every call site's type to buy a refcount bump per tile per frame.
-- **Each slot's `Client` is LEAKED, deliberately.** That is what makes handing out `&'static
-  Client` sound without an `Arc`: the reference a worker took at frame N must still be valid when a
-  re-point lands at frame N+1 with that worker mid-request. Re-pointing publishes a NEW leaked
-  `Client` over the pointer, so the worst case for the old reference is **one request sent to where
-  that server used to be** — never a dangling pointer, which is the failure that has no debugger on
-  this device. The leak is bounded: a handful of small structs, written on login / profile switch /
-  server switch, never per frame.
-- **Token generations come from a process-global sequence, so no two clients ever share one.**
-  `token_gen` was a single process-wide counter, which cannot express "server B's token changed".
-  Its only reader is `app::adapters::poster::built_key`'s memo and that memo compares **one number** — so two
-  servers whose generations happened to agree would mean that the moment `client()` started
-  answering with B, the memo said nothing had changed and served B its cards from **A's memoised,
-  token-bearing paths**. Uniqueness makes "did this number move" also answer "is this even the same
-  server".
-
-## Granted, pinned, reachable — three states, and never the same question
-
-The whole shared-source feature rests on keeping these apart:
-
-- **granted** — plex.tv's answer. `/api/v2/resources` says this account may use this server and
-  hands over the `accessToken` that proves it. Not a setting of ours; it is the owner's decision.
-- **pinned** — the only thing the USER controls, it governs **every browsing surface**, and it is
-  **per Plex Home PROFILE**. The user reads it as **Favorite libraries**; the identifier and the
-  persisted `Session::home_pins` key keep their names on purpose (renaming the key would break
-  rollback, not upgrade). It governed **Home alone** until 2026-09-05 and this paragraph said so;
-  the owner's direction was that the setting affects the whole app. What reads it: Home's shelves,
-  the top tab STRIP (a type with no favourite library draws no pill), and the Library's Sources
-  picker. What does NOT: the browse grid, sort, the A–Z rail and the item pages, which are all
-  downstream of a library you already chose — and **Search**, which stays grant-scoped and only
-  RANKS favourites first, because a browsing preference is not an authorization boundary and
-  removing results would invent a false negative for a film the user owns and can play. The
-  unscoped list survives as `browse::all_source_rows`, which is the Favorite libraries editor's, and
-  is the only way a non-favourite comes back. The rules are `pins.rs` (pure); the store is keyed by
-  the profile's `uuid`; the page that asks once is `AppArg::Onboard` (`Route::Onboard` before
-  restructure phase 12 (D1) retired `enum Route`), first-run *Favorite
-  libraries* — `ui::onboard` through phase 4, `screens::onboard`'s owned `OnboardScreen` since
-  phase 5b (2026-09-07); reached again later from Settings it is a page of that family rather than
-  this same route (`SettingsPage::Favourites` — the enum lives in `screens/family.rs`, not
-  `screens/settings.rs` — hosting the same screen type). Owner's ruling, 2026-08-21 — "it
-  is separate for each profile" — and it hung off the whole `Session` (one per install) before that.
-- **reachable** — a fact about NOW: something answered at one of its addresses, *as the right
-  machine*. It changes while nobody touches anything, and it is never a reason to forget the grant
-  or the pin.
-
-Collapsing any two of them produces a specific wrong behaviour rather than a vague one. A `401` is
-the final answer only when no parallel direct or fallback relay candidate verifies the machine; at
-that point reading it as "unreachable" sends the user to the router when the fix is to refetch
-`/resources` or correct the access policy. An unreachable server read as un-granted drops the
-source out of the Sources list, so there is nothing left to retry.
-A pinned-but-dead source drawn as a shelf is a spinner that never ends — the design's answer is that
-a dead source is **absent** from Home and states itself in its own library section instead.
-
-## Gotchas that bite (all verified in code)
-
-- **A hub's `title` is PMS's own localized text, rendered VERBATIM.** The client-side override
-  table (`plex::hub_title::localized_hub_title`, issue #12) was removed in the Jellyfin-only
-  conversion (2026-10-31): both `pms.rs::project` (Home's `/hubs` merge) and
-  `browse::section_hubs::parse_hubs` (a library's own `/hubs/sections/{id}`) draw `Hub.title`
-  exactly as PMS sent it. The per-tag coverage gap that motivated the override is PMS's again:
-  a UI tag PMS translates only partially (measured live for `be`, `docs/pms-api.md` §3) shows a
-  Home screen mixing that tag with ru/en titles, and the fix belongs server-side or in the
-  catalog of standard ids, not in this client. `home.continue`'s title still never came from PMS
-  (`i18n::msg::browse_home_continue_watching()`, set where the dedicated `/hubs/continueWatching`
-  deck becomes a `HubRow`). The retired table and its reasoning are recorded in
-  `docs/pms-api.md` §3/§3a.
-- **`Connection.local` does not mean what it looks like, and the cost is a probe deadline.** It means
-  "this address is RFC1918", NOT "you are on that LAN" — a share advertises the *owner's*
-  `172.20.x.x`. `publicAddressMatches` is the field that means the latter. For an unmatched
-  non-owned connection, `probe.rs` retains only an advertised HTTPS URI and suppresses plaintext:
-  TLS plus the `/identity` response can authenticate the answer, while plaintext could succeed
-  against a different machine at the same address on our LAN. That is also why a probe must
-  **verify `machineIdentifier` on the response** before accepting a connection, and why `probe.rs`
-  is pure (no socket, no clock): the rules are then gradeable on the dev Mac.
-- **A ceiling is answered by the transcode FLAVOR *first*, and only then by a parameter.** Plex's
-  relay is a ~2 Mbit/s tunnel, so `transcoder::link_policy` denies direct play *and* the container
-  remux over one — the remux is the half that is easy to miss, since it copies the codecs and
-  deliberately sends no cap, i.e. the same bytes at the same rate one layer down. **No relay
-  connection has ever been observed by this codebase**, so that policy is reasoned, not measured;
-  read its doc before touching it.
-  `TranscodeSpec` grew a `ceiling` field on 2026-08-23 and this bullet used to end "and must not
-  grow one" — which was right about a LINK ceiling and wrong as a general rule. A **user-chosen**
-  ceiling (`route::Quality`, the picker in the player's `…` menu, for LG checklist #43 CASE1) is a
-  different input with the identical mechanism: `route::quality_policy` returns the same two flags
-  `link_policy` does, `route::flavors_allowed` composes them so the stricter wins, and only once
-  direct play and the remux are BOTH denied does a rate reach the WIRE. Note the field itself rides
-  EVERY spec, remux included — `transcode_query` reads it on the re-encode branch alone, and the
-  remux branch's silence is an invariant a host test pins, not a `None` you can rely on. The rule that
-  survives unchanged is the ORDER: a number that is not preceded by a flavour refusal does nothing
-  at all, because the flavour it would have bound is the one with no encoder in it.
-- **Capture the server at the SPAWN SITE**, the rule the multi-server work inherits from
-  `route::ResolveEnv` — whose doc says why in general: a worker reads no `static mut`, because the
-  main thread reassigns those under it. "Which server is current" is exactly such a value, and a
-  worker that asks *after* the user switched lands an answer belonging to the other machine's
-  `ratingKey` space. Pass a `ServerId` (or the `&'static Client`) in with the job. One narrow
-  exception exists today and is worth knowing rather than copying: `build_stream` reads
-  `client_opt()` on the resolve worker. That is sound — the registry read is atomic and its clients
-  are never freed — but it means "the current server", not "the server this play started from", and
-  it is the line to change when a play can begin on a server that is not current.
-
-- **Content negotiation: send `Accept: application/json` explicitly.** PMS returns **XML** for
-  `Accept: */*` (or no Accept), and only JSON for an explicit `application/json`. A request that
-  forgets it silently gets XML → the JSON parser finds no `Metadata` → **0 items, empty home**. The
-  raw-socket `stream.rs` used to force `*/*` on every request; the client sends JSON Accept unless the
-  caller overrides it (playback/part/photo endpoints ignore Accept).
-- **PMS string-encodes numbers, so deserializers must be lenient.** Fields like `size`/`viewOffset`/
-  `duration` arrive as JSON **strings** (`"1234"`) on some endpoints and **numbers** on others; some
-  bools (`Stream.default`/`selected`) arrive as `true`/`false` *and* as `"1"`/`"0"`. Every numeric
-  field goes through `de_i64`/`de_f64` (in `models.rs`) whose untagged enum accepts int **and** string
-  **and** bool. Omitting a lenient adapter doesn't just drop one field — serde fails the **whole
-  `MediaContainer`** parse → empty result. When you add a model field, use the lenient adapter.
-- **The session file has FOUR writers and exactly one door for changing part of it.** `session.rs`'s
-  `update(|s| …)` does the read-modify-write under the module's own lock and writes through a
-  sibling tmp + `rename`; `save` is a whole-file REPLACE for the two flows that own the entire file
-  (sign-in, profile switch). Reach for `update` for anything that touches one field — the roster,
-  the search terms — because the others are workers and the two failures are both silent: a lost
-  update resumes the next boot as the wrong profile, and a torn `O_TRUNC` write is an unparseable
-  file, which is a QR code on the next boot rather than a stale roster. The lock (`IO`) is held
-  across the write's `sync_all`, so **nothing per-frame may take it directly** — but a per-frame
-  reader may now call `session::peek()`, because `peek()` is backed by a live in-memory read
-  cache, not a per-call file transaction.
-- **`session::peek()` is a write-through cache over the persisted session, not a fresh read.** A
-  hit is one uncontended `Mutex` lock and an `Arc<Session>` clone — no `IO`, no helper round trip —
-  which is what makes it safe to call every frame (`player::preview::enabled` does). The invariants
-  that keep it correct, all in `session.rs`'s module doc and worth knowing before touching either
-  the cache or a write path:
-  - Cached records come from completed reads or durable writes under `IO`. `Revoked` separately
-    suppresses credentials immediately during a queued sign-out, even if its disk clear fails.
-    Reads and preference edits preserve it; only an explicit proven credential write ends it.
-  - Only `session.rs` writes the session domain of the record; every `persistence::commit_*`/
-    `write_session`/`commit_cleared` caller updates the cache through a read install, proven-write
-    install, cache drop, or local revocation. Read installs cannot undo revocation.
-  - `peek` never takes `IO`, including on a miss. It returns the previous snapshot and schedules
-    one refresh on `storage_worker`'s bounded FIFO. The worker reads and installs under `IO`,
-    then advances a visible-session generation only if the served content changed. The bridge
-    observes it and invalidates on the frame thread. Cached views also observe it through
-    `VisibleSessionWatch` (or include `visible_generation()` in their cache key) and rebuild;
-    invalidating drawing alone cannot refresh a retained value. `peek_settled()` keeps transient
-    reads distinct from an authoritative empty session. Unchanged retries remain quiet. A queued
-    read cannot overwrite a newer write or sign-out.
-  - Writers never read the cache to decide what to write — they always re-read the authority under
-    `IO` first (the fence/OCC check), then install their own proven outcome. A miss can therefore
-    never overwrite a newer concurrent write.
-  - A `Locked`/`Blocked` read (keymanager unavailable, a helper hiccup) is cached only
-    transiently, for `LOCKED_RETRY` (about a second) after completion — never latched forever the way a naive
-    per-field cache once was (the bug PR #120's stopgap shipped and this cache replaced).
-  - Sign-out (`clear()`) drops the cached `Arc` immediately; the tokens it held must not remain
-    reachable in memory after a sign-out just because nothing had overwritten the cache yet.
-  - `plex::session::async_persistence`'s Stage B coordinator is unwired and keeps its own,
-    separate `CACHE` today; when it is wired up, it must install into/drop the cache above
-    (`install_locked`/`drop_cache_locked`, under `IO`) instead of maintaining a second copy of the
-    session.
-- **Track selection is server-side, via `PUT /library/parts/{id}`** (set the chosen audio/subtitle
-  stream + subtitle burn), **not** query params on the stream URL. The server re-selects for the next
-  decision; the client re-requests the part. See `[[audio-subtitle-track-switching]]`.
-- **Subtitles: assume client rendering, not the server.** WebVTT sidecars do **not** deliver on our
-  progressive-MKV pipeline (they come back empty / 501), so during a transcode the only server option
-  is **burn** — which is why direct-play + our own subtitle renderer (see `player/`) is the real
-  answer. Don't add a soft-subtitle path that only works on paper. See `[[soft-subs-during-transcode]]`.
-
-## Where the bytes go next
-
-This layer only *decides and locates*; the actual byte stream (direct-play or transcode) is pulled
-through `stream.rs` or `curlio.rs`, demuxed by `ff.rs`, and fed to Starfish by the `player/` engine
-— see `player/CLAUDE.md` for the Load-payload/codec and subtitle-rendering rules on the other side
-of the handoff. The old hand-rolled `mkv.rs` path is retired.
+- Nothing outside this directory may reach into the wire internals: fields and helpers are
+  `pub(super)`, and callers go through the module re-exports.
+- Recorded replay state pins the persisted shapes (`SessionInit::write` digest). Do not reorder or
+  remove write-only fields without a re-record of the replay fixtures.
+- The campaign slices amend this document when they cut something; an outdated claim here means a
+  slice forgot to update it, not that the code came back.
