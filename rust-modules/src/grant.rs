@@ -30,9 +30,7 @@
 //! * the exact plaintext origin — scheme, NUMERIC private host and port — that verified; a name is
 //!   never granted, because a resolver could answer it with anything;
 //! * the **identity generation** it was minted under ([`identity_changed`]: sign-out, a sign-in
-//!   starting). A roster replacement — a profile switch's commit, a roster refresh — moves no
-//!   generation; it keeps only the grants for the exact `(server, origin)` pairs the new roster
-//!   installs ([`roster_replaced`]);
+//!   starting);
 //! * the **network generation** it was minted under ([`network_changed`]: the app returning to the
 //!   foreground, where nothing proves the television is still on the network it consented on).
 //!   Every server that loses its grant there is queued for a fresh endpoint discovery, which
@@ -45,8 +43,8 @@
 //!
 //! ## Revocation
 //!
-//! [`revoke`], a refusing [`answer`], [`identity_changed`], [`network_changed`] and
-//! [`roster_replaced`] change the table at once, and the authority is asked when a request STARTS: every request that starts after
+//! [`revoke`], a refusing [`answer`], [`identity_changed`] and [`network_changed`] change the
+//! table at once, and the authority is asked when a request STARTS: every request that starts after
 //! the change — queued, retried, a cached token-bearing URL, a media reopen — is refused at the
 //! transport, and the registry re-grades every published client
 //! ([`crate::registry::regrade_credentials`]), blanking the token of any whose origin may no
@@ -60,8 +58,7 @@
 //!
 //! A grant also lives only as long as a FRESH verdict keeps reaching its server: discovery
 //! withdraws it when the latest probe of that server did not reach the granted origin
-//! (`auth::publish_settled_probe`), and retires it when HTTPS verifies
-//! (`auth::retire_grant_on_https`). Nothing here watches the network itself — the platform
+//! (`auth::publish_settled_probe`). Nothing here watches the network itself — the platform
 //! offers this app no network-change signal it subscribes to — so the foreground return is the
 //! one continuity break treated as a new network.
 //!
@@ -308,7 +305,7 @@ pub(crate) fn revoke(machine_id: &str) -> bool {
 }
 
 /// The signed-in identity changed (sign-out, a sign-in starting): every grant and every offer is
-/// dead from this instant. A profile switch is [`roster_replaced`], at its commit.
+/// dead from this instant.
 ///
 /// This launch's answers go with it: a refusal is the account's that
 /// gave it, and one written after this would land in whatever session follows (the next account's,
@@ -339,27 +336,6 @@ pub(crate) fn network_changed() {
         crate::log("security: plaintext credentials withdrawn — network continuity unknown");
     }
     moved();
-}
-
-/// **A roster replacement COMMITTED** (`RegistryPlan::Install { replace: true }` — a profile
-/// switch, its late roster, or a roster refresh; the same commit that blanks every published
-/// token, `plex::servers::revoke_for_profile_switch`). A grant survives only when it names exactly
-/// a `(machine, origin)` the new roster `installed`; every other grant dies here.
-///
-/// No generation moves: the identity a grant is bound to is the ACCOUNT's sign-in
-/// ([`identity_changed`]), which is also what consent is keyed by ([`account_key`]) — every
-/// profile of the account shares the answer, and a grant admits only its own server
-/// ([`allowed_for`]), whose token the registry takes from the roster being installed. So a
-/// discovery captured before the commit (the switch's own probes of its secondary servers) still
-/// mints and offers, and an offer for a server this commit did not touch stays askable; an offer
-/// lives exactly as long as that server's latest verdict (`auth::publish_settled_probe`).
-pub(crate) fn roster_replaced(installed: &[(String, Origin)]) {
-    let removed = retain(|g| {
-        installed.iter().any(|(machine, origin)| *machine == g.machine_id && *origin == g.origin)
-    });
-    if removed {
-        crate::log("security: plaintext credentials withdrawn — the roster no longer installs them");
-    }
 }
 
 /// **Offer `verdict`** — a fresh insecure-only verdict discovery settled under `scope`. An eligible

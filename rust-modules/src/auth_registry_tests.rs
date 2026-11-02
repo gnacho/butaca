@@ -134,26 +134,3 @@ fn a_boot_primary_install_of_a_plex_direct_origin_derives_ip_from_the_stored_add
     crate::registry::reset_for_test();
 }
 
-/// Our own server registers first and is the primary, whatever order plex.tv listed the account
-/// in — because the registry makes the first registration `current` when nothing is yet, so the
-/// ordering is what stops a boot coming up pointed at a friend's server and building Home from
-/// their library.
-#[test]
-fn our_own_server_leads_the_roster_however_plex_tv_ordered_it() {
-    let roster = vec![
-        source("share-1", false, "t1"),
-        source("ours", true, "t2"),
-        source("share-2", false, "t3"),
-    ];
-    assert_eq!(
-        registration_order(&roster),
-        vec![1, 0, 2],
-        "ours first, then plex.tv's own order"
-    );
-    // an entry with no credential (or no address) cannot be dialled, so it is not registered —
-    // registering it would put a `Client` in the table that 401s everything asked of it
-    let mut half = roster.clone();
-    half[0].token.clear();
-    half[2].address.clear();
-    assert_eq!(registration_order(&half), vec![1]);
-}

@@ -48,9 +48,7 @@
 //! its live per-server tokens and the next account browsed, searched and built Home from BOTH.
 //! [`revoke_all`] raises a [`FLOOR`]: every slot below it is dead — invisible to [`ids`], resolved
 //! to `None` by [`client_for`], and blanked to an empty token so a `&'static Client` grabbed before
-//! the sign-out cannot dial with the old one either. [`revoke_for_profile_switch`] uses the same
-//! token blanking without raising the floor: it temporarily deactivates this account's slots, then
-//! the newly granted roster reactivates only the machines that profile may use.
+//! the sign-out cannot dial with the old one either.
 //!
 //! **A revoked slot number is never handed out again**, not even to the same `machineIdentifier`.
 //! [`ServerId`]'s whole contract is that it names one server for the life of the process — it sits
@@ -654,8 +652,8 @@ fn current_lifecycle_index(
 /// not "I learned nothing". So it REPLACES: passing `""` takes a previously published credit off
 /// the server. It has to. Every caller here holds a roster row that has just been graded by the
 /// rule, and the case that matters is precisely the one where the old answer was wrong — a session
-/// file written by a build that stored the raw `sourceTitle`, replayed at boot by
-/// `auth::install_roster`, or a share whose `sourceTitle` plex.tv has stopped sending. Merging the
+/// file written by a build that stored the raw `sourceTitle`, replayed at boot from the persisted
+/// roster, or a share whose `sourceTitle` plex.tv has stopped sending. Merging the
 /// credit made `refreshed_sources`' correction unobservable: it persisted the empty credit
 /// faithfully and the registry kept the stale name for the life of the process.
 ///
@@ -1149,87 +1147,6 @@ fn register_lazy(
     id
 }
 
-/// **Profile switch.** Blank every live token and hide every non-current slot before the new
-/// profile's grants are registered. Unlike [`revoke_all`], this does not raise [`FLOOR`]:
-/// registering a machine the new profile may use reactivates its stable slot, while an omitted
-/// share stays invisible and its previously handed-out `Client` stays tokenless.
-///
-/// The current slot remains visible but tokenless until its new grant is installed. Keeping that
-/// shell is load-bearing for the lock-free `client()` contract: a reader that sampled CURRENT just
-/// before this write must still resolve the slot rather than panic. The switch response already
-/// proved this primary machine is granted to the new profile, so the caller immediately re-tokens
-/// it while holding auth's activation gate.
-pub(crate) fn revoke_for_profile_switch() {
-    let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
-    let live: Vec<ServerId> = ids().collect();
-    let keep = current();
-    let keep_live = client_for(keep).is_some();
-    for id in &live {
-        if let Some(c) = client_for(*id) {
-            c.set_token("");
-        }
-        if let Some(i) = id.index() {
-            // A token outcome belongs to one profile. The next profile starts at NotProbed until
-            // its own request or roster race says otherwise.
-            PROBES[i].store(PROBE_UNKNOWN, Ordering::Release);
-        }
-    }
-    let keep_mask = keep.index().filter(|_| keep_live).map_or(0, |i| 1u32 << i);
-    ACTIVE.store(keep_mask, Ordering::Release);
-    ROSTER_GEN.fetch_add(1, Ordering::AcqRel);
-    if !keep_live {
-        CURRENT.store(ServerId::UNSET.0 as u32, Ordering::Release);
-    }
-    if !live.is_empty() {
-        crate::log(&format!(
-            "plex: {} server(s) revoked — profile changed",
-            live.len()
-        ));
-    }
-    crate::ui::idle::invalidate();
-}
-
-/// Finish a profile/roster replacement with exactly the slots the caller just installed.
-///
-/// [`revoke_for_profile_switch`] temporarily retains `current` as a tokenless shell so a reader
-/// which sampled its id immediately before the revoke cannot resolve a vanished slot. Once the
-/// replacement grants have been published, that bridge must be removed: the old primary may no
-/// longer be granted at all. This is the commit point that turns the temporary union into the
-/// authoritative roster and, when necessary, moves `current` to the first installed survivor.
-pub(crate) fn finish_profile_switch(installed: &[ServerId]) {
-    let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
-    let floor = FLOOR.load(Ordering::Acquire);
-    let mut exact = 0u32;
-    let mut first = ServerId::UNSET;
-    for &id in installed {
-        let Some(i) = id.index() else { continue };
-        if i < floor || populated(id).is_none() {
-            continue;
-        }
-        exact |= 1u32 << i;
-        if !first.is_set() && CREDENTIAL_ELIGIBLE.load(Ordering::Acquire) & (1u32 << i) != 0 {
-            first = id;
-        }
-    }
-
-    let old_current = current();
-    let keep_current = old_current
-        .index()
-        .is_some_and(|i| exact & (1u32 << i) != 0
-            && CREDENTIAL_ELIGIBLE.load(Ordering::Acquire) & (1u32 << i) != 0);
-    let next = if keep_current { old_current } else { first };
-
-    // Every installed slot was already activated, so publishing the new CURRENT first cannot
-    // point at a hidden slot. Removing the bridge second avoids the inverse window: CURRENT still
-    // naming the just-hidden old primary, which would make `client_opt()` transiently return None.
-    CURRENT.store(next.0 as u32, Ordering::Release);
-    let old = ACTIVE.swap(exact, Ordering::AcqRel);
-    if old != exact {
-        ROSTER_GEN.fetch_add(1, Ordering::AcqRel);
-        crate::ui::idle::invalidate();
-    }
-}
-
 /// **Sign-out.** Retire every registered server: `client()` answers with nothing again, [`ids`]
 /// walks nothing, and each slot's token is blanked in place.
 ///
@@ -1670,13 +1587,6 @@ mod tests {
         );
         publish_probe_result(id, Outcome::Unreachable);
         assert_eq!(probe_result(id), Some(Outcome::Unreachable));
-
-        revoke_for_profile_switch();
-        assert_eq!(
-            probe_result(id),
-            None,
-            "a different profile's token starts unprobed"
-        );
     }
 
     /// Issue #95 plan §6: `InsecureOnly` round-trips through the same `probe_code`/`probe_of_code`
@@ -1920,82 +1830,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_profile_switch_reactivates_only_the_new_profiles_granted_servers() {
-        let _g = fresh();
-        let ours = reg("mach-A", "10.0.0.1", "owner-a");
-        let share = reg("mach-B", "10.0.0.2", "owner-b");
-        let old_ours: &'static Client = client_for(ours).unwrap();
-        let old_share: &'static Client = client_for(share).unwrap();
-
-        revoke_for_profile_switch();
-
-        assert_eq!(
-            count(),
-            1,
-            "the current slot remains as a lock-free tokenless shell"
-        );
-        assert_eq!(ids().collect::<Vec<_>>(), vec![ours]);
-        assert_eq!(token_of(client_for(ours).unwrap()), "");
-        assert!(client_for(share).is_none());
-        assert_eq!(token_of(old_ours), "");
-        assert_eq!(
-            token_of(old_share),
-            "",
-            "an omitted share loses the old profile's credential"
-        );
-
-        let again = reg("mach-A", "10.0.0.1", "managed-a");
-        assert_eq!(
-            again, ours,
-            "a profile switch preserves the machine's stable slot"
-        );
-        assert_eq!(ids().collect::<Vec<_>>(), vec![ours]);
-        assert_eq!(token_of(client_for(ours).unwrap()), "managed-a");
-        assert!(
-            client_for(share).is_none(),
-            "the ungranted share stays out of every roster walk"
-        );
-        assert_eq!(
-            token_of(old_share),
-            "",
-            "and even a stale reference remains defanged"
-        );
-        assert!(std::ptr::eq(client(), client_for(ours).unwrap()));
-    }
-
-    #[test]
-    fn a_removed_primary_shell_disappears_after_the_surviving_roster_is_committed() {
-        let _g = fresh();
-        let gone = reg("mach-A", "10.0.0.1", "owner-a");
-        let survivor = reg("mach-B", "10.0.0.2", "owner-b");
-        let stale_gone: &'static Client = client_for(gone).unwrap();
-
-        revoke_for_profile_switch();
-        assert_eq!(
-            ids().collect::<Vec<_>>(),
-            vec![gone],
-            "the old current is only a temporary shell"
-        );
-        assert_eq!(reg("mach-B", "10.0.0.2", "fresh-b"), survivor);
-        set_current(survivor);
-        finish_profile_switch(&[survivor]);
-
-        assert_eq!(count(), 1);
-        assert_eq!(ids().collect::<Vec<_>>(), vec![survivor]);
-        assert!(
-            client_for(gone).is_none(),
-            "a revoked primary is absent from the authoritative roster"
-        );
-        assert_eq!(
-            token_of(stale_gone),
-            "",
-            "its already-issued reference stays defanged"
-        );
-        assert!(std::ptr::eq(client(), client_for(survivor).unwrap()));
-        assert_eq!(token_of(client()), "fresh-b");
-    }
-
     /// The account that signs in next gets FRESH slot numbers, even for a machine the previous
     /// account was also granted. `ServerId` names one server for the life of the process — it sits
     /// in UI state, in routes, in queued jobs, and every per-server store in the app is a flat
@@ -2030,7 +1864,7 @@ mod tests {
 
     /// **A full table answers with a SENTINEL, not with `current()`.** The caller's next line is a
     /// `describe_server`, so the old answer renamed the user's OWN server to whichever share had
-    /// nowhere to go and captioned it "Shared by <friend>" — `auth::install_roster` does exactly
+    /// nowhere to go and captioned it "Shared by <friend>" — the roster install did exactly
     /// this pair, and `pms::sync_roster` had to grow a de-duplication guard for the same value.
     #[test]
     fn a_registration_that_does_not_fit_is_refused_rather_than_aliased_onto_the_current_server() {
@@ -2228,7 +2062,7 @@ mod tests {
         let _g = fresh();
         let a = reg("mach-A", "10.0.0.1", "tok-a");
 
-        // what a build without the rule persisted, replayed by `install_roster` at boot
+        // what a build without the rule persisted, replayed from the session at boot
         describe(a, "Mac mini", "admin", GrantEvidence::outside());
         assert_eq!(facts(a).map(|f| f.handle.as_str()), Some("admin"));
 
@@ -2286,8 +2120,8 @@ mod tests {
     ///
     /// This is the reported bug's own recovery path. A session file written before the rule
     /// existed holds the account holder's raw handle against the household's server;
-    /// `auth::refreshed_sources` re-grades it to no-credit and persists that, and
-    /// `auth::install_roster` republishes the roster as `describe(id, name, "", owned=false)` —
+    /// `auth::refreshed_sources` re-grades it to no-credit and persists that, and the roster
+    /// install republished the roster as `describe(id, name, "", owned=false)` —
     /// which is exactly `owned:false` with an empty credit. While the credit merged, that call
     /// was a no-op and the wrong name outlived every correction for the life of the process.
     ///

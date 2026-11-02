@@ -314,9 +314,7 @@ impl SessionAdapter {
             if plan.credentials.is_some() || plan.lifecycle.is_some() || plan.registry.len() != 1 {
                 return permit.reply(CommitAdmission::StaleAuthority);
             }
-            let RegistryPlan::DevInstall { primary, extras, client_id } = &plan.registry[0] else {
-                return permit.reply(CommitAdmission::StaleAuthority);
-            };
+            let RegistryPlan::DevInstall { primary, extras, client_id } = &plan.registry[0];
             if !extras.is_empty() { return permit.reply(CommitAdmission::StaleAuthority); }
             let origin = primary.origin();
             // #95 step 8 / A1+A2: apply the connection facts inside the same registration write
@@ -380,7 +378,7 @@ impl SessionAdapter {
                     }
                 }
                 for operation in &plan.registry {
-                    if !crate::auth::execute_session_registry(operation, &plan.registry_client_id) {
+                    if !crate::auth::execute_session_registry(operation) {
                         return permit.reply(CommitAdmission::StaleAuthority);
                     }
                 }
@@ -414,7 +412,7 @@ impl SessionAdapter {
                     }
                 }
                 for operation in &plan.registry {
-                    if !crate::auth::execute_session_registry(operation, &plan.registry_client_id) {
+                    if !crate::auth::execute_session_registry(operation) {
                         return permit.reply(CommitAdmission::StaleAuthority);
                     }
                 }

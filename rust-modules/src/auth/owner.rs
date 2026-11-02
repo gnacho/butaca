@@ -45,9 +45,6 @@ pub(super) fn write_purpose(w: &mut Canon, purpose: PersistencePurpose) {
 
 fn write_op(w: &mut Canon, op: SessionOp) {
     match op {
-        SessionOp::ServerRoster => { w.u8(3); }
-        SessionOp::Endpoint(sid) => { w.u8(5).u32(u32::from(sid)); }
-        SessionOp::Ready => { w.u8(6); }
         SessionOp::DevBoundary => { w.u8(8); }
     }
 }
@@ -111,11 +108,6 @@ pub(crate) struct CredentialPatch {
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum Command {
     ActivateDevBootstrap,
-    TakeReady,
-    /// Answer the currently shown [`PersistenceWarning`]. A key that does not match the warning
-    /// currently held is inert — it may be stale (a newer warning replaced it).
-    AcknowledgePersistenceWarning { key: PersistenceWarningKey },
-    SignOut,
     EraseLocal,
     NoteDeleteLeftovers(usize),
     /// The person's answer to "Connect without encryption?" (or Settings' switch) for one server
@@ -140,7 +132,6 @@ pub(crate) enum CoordinatorAction {
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum RegistryPlan {
     DevInstall { primary: crate::plex::session::ServerRef, extras: Vec<crate::plex::session::SourceRef>, client_id: String },
-    Install { sources: Vec<crate::plex::session::SourceRef>, primary: Option<usize>, replace: bool },
 }
 
 /// Which site's fresh save produced the warning being shown to the user — the discovery write
@@ -489,7 +480,7 @@ pub(crate) struct ServerLifecycle {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum SessionOp { ServerRoster, Endpoint(u16), Ready, DevBoundary }
+pub(crate) enum SessionOp { DevBoundary }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct SessionWorkKey {
@@ -926,11 +917,6 @@ impl SessionMachine {
             && self.state.phase == Phase::Ready && !self.state.apply_pending
     }
 
-    pub fn needs_ready_commit(&self) -> bool {
-        self.state.phase == Phase::Ready && self.state.apply_pending && self.state.pending_commit.is_none()
-            && self.state.persistence_warning.is_none()
-    }
-
     pub fn publication_is_current(&self, publication: &ProfilePublication) -> bool {
         publication.epoch == self.state.epoch && publication.scope == self.state.profile_scope
     }
@@ -992,38 +978,6 @@ impl SessionMachine {
         true
     }
 
-    fn take_ready(&mut self, emit: &mut impl FnMut(SessionFx)) -> bool {
-        if self.state.phase != Phase::Ready || !self.state.apply_pending
-            || self.state.pending_commit.is_some() { return false; }
-        // A discovery failure left a warning unacknowledged: the final fresh write must not run
-        // over it (AUTH-03) — acknowledging is what re-admits `needs_ready_commit`.
-        if self.state.persistence_warning.is_some() { return false; }
-        let Some(req) = self.allocate(SessionOp::Ready, None) else {
-            self.state.phase = Phase::Error;
-            self.state.apply_pending = false;
-            self.state.error = crate::i18n::msg::browse_auth_authority_failed().into();
-            self.replace_publication();
-            return true;
-        };
-        let mut next = self.state.persisted.clone();
-        super::remember_unprotected_active(&mut next);
-        let patch = CredentialPatch::of(&next);
-        // Consumed exactly once: a discovery/rediscovery retry only PEEKS this flag
-        // (`apply_resource_observation`), so it cannot spend the authority the final write needs.
-        let authority = if std::mem::take(&mut self.state.authorized_in_flow) {
-            crate::plex::session::SaveAuthority::FreshReauthentication
-        } else { crate::plex::session::SaveAuthority::Routine };
-        let plan = CommitPlan { registry_client_id: self.state.persisted.client_id.clone(),
-            expected_disk: self.state.disk_identity.clone(),
-            credentials: Some(patch.clone()), lifecycle: None,
-            registry: vec![RegistryPlan::Install { sources: next.sources.clone(), primary: None, replace: false }],
-            purpose: PersistencePurpose::Final, writes_durable: true, authority };
-        self.begin_commit(req, 0, true, plan, CommitDelta {
-            credentials: Some(patch), activate_profile: true, ready: Some(false),
-            ..Default::default()
-        }, emit)
-    }
-
     fn activate_dev(&mut self, emit: &mut impl FnMut(SessionFx)) -> bool {
         if self.state.phase != Phase::Idle || self.state.pending_commit.is_some()
             || self.state.pending_erase.is_some() { return false; }
@@ -1052,7 +1006,6 @@ impl SessionMachine {
     fn apply_persistence_completion(
         &mut self,
         completion: crate::plex::session::async_persistence::PersistenceCompletion,
-        emit: &mut impl FnMut(SessionFx),
     ) -> bool {
         use crate::plex::session::async_persistence::CompletionOutcome;
         let Some(admitted) = self.state.admitted_persistence else { return false };
@@ -1081,28 +1034,19 @@ impl SessionMachine {
             let superseded = admitted.fresh && self.state.persistence_warning.is_some();
             if superseded {
                 self.state.persistence_warning = None;
-            }
-            // Release only the handoff THIS completion is for — a routine completion arriving
-            // while an unrelated fresh handoff is held must not free it.
-            let released = self.state.held_handoff == Some(HeldHandoff { epoch: completion.epoch, req: completion.req });
-            if released { self.release_held_handoff(emit); }
-            if superseded || released { self.replace_publication(); }
-        } else if admitted.fresh {
-            if self.state.persistence_warning_answered {
-                // This authorization already had its one unsaved-login question answered
-                // (AUTH-03's field bug: a device unwritable on BOTH Discovery and Final used to
-                // ask it twice). Storage failing again must not ask it a second time — release
-                // whatever handoff this completion was holding so entry proceeds regardless.
-                let released = self.state.held_handoff == Some(HeldHandoff { epoch: completion.epoch, req: completion.req });
-                if released { self.release_held_handoff(emit); self.replace_publication(); }
-            } else {
-                // The final write's own non-durable completion replaces a Discovery warning still
-                // showing (`Discovery` and `Final` never coexist: an unacknowledged Discovery warning
-                // blocks `take_ready`), so the newer one wins by direct overwrite.
-                let warning = PersistenceWarning::from_outcome(correlation_key, admitted.site, &completion.outcome);
-                self.state.persistence_warning = Some(warning);
                 self.replace_publication();
             }
+        } else if admitted.fresh && !self.state.persistence_warning_answered {
+            // This authorization already had its one unsaved-login question answered
+            // (AUTH-03's field bug: a device unwritable on BOTH Discovery and Final used to
+            // ask it twice) — an answered authorization is never asked again, and the handoff
+            // release that used to live here went with the sign-in machine.
+            // The final write's own non-durable completion replaces a Discovery warning still
+            // showing (`Discovery` and `Final` never coexist), so the newer one wins by direct
+            // overwrite.
+            let warning = PersistenceWarning::from_outcome(correlation_key, admitted.site, &completion.outcome);
+            self.state.persistence_warning = Some(warning);
+            self.replace_publication();
         }
         true
     }
@@ -1133,12 +1077,11 @@ impl SessionMachine {
         if !reply.admission.accepted() {
             let op = self.state.pending.remove(&reply.req).unwrap().key.op;
             match op {
-                SessionOp::Ready | SessionOp::DevBoundary => {
+                SessionOp::DevBoundary => {
                     self.state.phase = Phase::Error;
                     self.state.apply_pending = false;
                     self.state.error = crate::i18n::msg::browse_auth_authority_failed().into();
                 }
-                SessionOp::ServerRoster | SessionOp::Endpoint(_) => {}
             }
             emit(SessionFx::Retire { req: reply.req });
             if let Some(receipt) = commit.receipt { emit(SessionFx::Acknowledge(vec![receipt])); }
@@ -1181,27 +1124,6 @@ impl SessionMachine {
             pending.phase = StreamPhase::ProfileSeated;
             self.cancel_obsolete_interests(reply.req, emit);
         }
-        if delta.complete_signin && std::mem::take(&mut self.state.signin_active) {
-        }
-        if delta.activate_profile {
-            if commit.fresh && admit_revision.is_some() && !self.state.persistence_warning_answered {
-                // The fresh write is admitted but not yet confirmed durable: hold the handoff
-                // rather than announce Ready/publish the profile until a completion (or an
-                // acknowledged warning) releases it — the AUTH-03 gate.
-                self.state.held_handoff = Some(HeldHandoff { epoch: commit.epoch, req: commit.req });
-            } else if self.state.persistence_warning.is_none() {
-                // `persistence_warning_answered` true means this authorization already spent its
-                // one Continue: nothing is left to wait for, so a fresh write lands here exactly
-                // like a routine one — publish immediately rather than hold a handoff whose
-                // completion (or loss) would otherwise be the only way out.
-                // 0.6.6 parity (`discovery-warning-not-cleared-on-retry-or-fresh-success`): a
-                // ROUTINE `activate_profile` commit (StartSwitch, …) must not free
-                // a handoff still held behind an unacknowledged warning — that release is
-                // `acknowledge_persistence_warning`'s alone. An unrelated held handoff with NO live
-                // warning (already superseded above, or never one to begin with) is unaffected.
-                self.release_held_handoff(emit);
-            }
-        }
         if commit.terminal {
             self.state.pending.remove(&reply.req);
             emit(SessionFx::Retire { req: reply.req });
@@ -1215,41 +1137,6 @@ impl SessionMachine {
     fn retire(&mut self, req: u32, emit: &mut impl FnMut(SessionFx)) {
         self.state.pending.remove(&req);
         emit(SessionFx::Retire { req });
-    }
-
-    /// The single site that publishes a profile and announces `SessionFx::Ready`. A fresh
-    /// handoff reaches it only once its write is released — durably confirmed, or its warning
-    /// acknowledged; a non-fresh (`Routine`) commit reaches it immediately, exactly as before.
-    fn release_held_handoff(&mut self, emit: &mut impl FnMut(SessionFx)) {
-        self.state.held_handoff = None;
-        self.publish_profile(Some(self.state.persisted.user.clone()), emit);
-        if self.state.phase == Phase::Ready {
-            emit(SessionFx::Ready { epoch: self.state.epoch, scope: self.state.profile_scope,
-                server: self.state.persisted.server.clone(), token: self.state.persisted.pms_token().into(),
-                install: ReadyInstall::PrimaryAndExtras(match &self.state.authority {
-                    BootstrapAuthority::Account { extras } => extras.clone(),
-                    BootstrapAuthority::DevPms { .. } => Vec::new(),
-                    BootstrapAuthority::DevJf { .. } => Vec::new(),
-                }) });
-        }
-    }
-
-    /// The AUTH-03 acknowledgement door: clears the warning and, if a handoff is still held for
-    /// it, releases it — exactly ONE `SessionFx::Ready` for the flow, through
-    /// [`Self::release_held_handoff`], never a second one from here.
-    fn acknowledge_persistence_warning(&mut self, key: PersistenceWarningKey,
-        emit: &mut impl FnMut(SessionFx)) -> bool {
-        if self.state.persistence_warning.map(|warning| warning.key) != Some(key) { return false; }
-        self.state.persistence_warning = None;
-        // This authorization's unsaved-login question is answered now: storage may never gate
-        // entry a second time for it (AUTH-03's field bug). A later failure — Discovery then
-        // Final, or a retry — releases the handoff itself instead of asking again.
-        self.state.persistence_warning_answered = true;
-        if self.state.held_handoff.is_some() {
-            self.release_held_handoff(emit);
-        }
-        self.replace_publication();
-        true
     }
 
     fn advance_epoch(&mut self, emit: &mut impl FnMut(SessionFx)) -> Option<u64> {
@@ -1292,9 +1179,7 @@ impl SessionMachine {
         if !self.accepts(&envelope) && envelope.terminal
             && matches!(envelope.outcome, SessionArrival::Data(_))
             && self.accepts_header(&envelope)
-            && self.state.pending.get(&envelope.addr.req.0).is_some_and(|pending|
-                !matches!(pending.key.op, SessionOp::Endpoint(_))
-                    || pending.lifecycle == envelope.lifecycle)
+            && self.state.pending.contains_key(&envelope.addr.req.0)
         {
             envelope.outcome = SessionArrival::Dropped;
         }
@@ -1420,9 +1305,7 @@ impl SessionMachine {
         if !self.accepts_header(envelope) { return false; }
         let pending = &self.state.pending[&envelope.addr.req.0];
         match &envelope.outcome {
-                SessionArrival::Data(data) => data.matches_request(pending, envelope.terminal)
-                    && (!matches!(pending.key.op, SessionOp::Endpoint(_))
-                        || pending.lifecycle == envelope.lifecycle),
+                SessionArrival::Data(data) => data.matches_request(pending, envelope.terminal),
                 SessionArrival::Dropped | SessionArrival::Refused => envelope.terminal,
         }
     }
@@ -1443,10 +1326,6 @@ impl<H: SessionHost> crate::ui::machine::Machine<H> for SessionMachine {
         let mut emit = |effect| fx.push(Fx::App(H::session_effect(effect)));
         let handled = match ev {
             SessionEvent::Command(Command::ActivateDevBootstrap) => self.activate_dev(&mut emit),
-            SessionEvent::Command(Command::TakeReady) => self.take_ready(&mut emit),
-            SessionEvent::Command(Command::AcknowledgePersistenceWarning { key }) =>
-                self.acknowledge_persistence_warning(*key, &mut emit),
-            SessionEvent::Command(Command::SignOut) => self.erase(true, &mut emit),
             SessionEvent::Command(Command::EraseLocal) => self.erase(false, &mut emit),
             // The roster commands are gone with the plex.tv account surface; the answer command
             // survives only as the alert UI's vocabulary, and there is nothing left to answer:
@@ -1459,7 +1338,7 @@ impl<H: SessionHost> crate::ui::machine::Machine<H> for SessionMachine {
             }
             SessionEvent::Commit(reply) => self.apply_commit_reply(*reply, &mut emit),
             SessionEvent::DiskWrite { before, after, outcome } => self.observe_disk_write(before, after, *outcome),
-            SessionEvent::Persistence(completion) => self.apply_persistence_completion(*completion, &mut emit),
+            SessionEvent::Persistence(completion) => self.apply_persistence_completion(*completion),
             SessionEvent::Erased { epoch, leftovers } => self.erased(*epoch, *leftovers, &mut emit),
             SessionEvent::Pump => {
                 self.state.pump_pending = false;

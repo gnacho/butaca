@@ -1383,28 +1383,6 @@ impl SourceRef {
         };
         format!("{:?} {}:{} ({who})", self.name, self.address, self.port)
     }
-    /// Enough to dial: an address, a **dialable** port, and the credential that server accepts.
-    ///
-    /// The port goes through [`probe::dial_port`](super::probe::dial_port) rather than a bare
-    /// `> 0`, because this is the gate `auth::install_roster` filters on before `register(…,
-    /// s.port as i32, …)` — and the session file is not a trusted input: it is JSON on disk that a
-    /// hand edit, a truncated write or an older build can leave holding anything an `i64` can hold.
-    /// An out-of-range port wraps in that cast; here it costs the entry instead, and `de_soft_vec`
-    /// already establishes that one bad roster entry costs that entry and never the session.
-    ///
-    /// **This is a well-formedness check, not a credential-eligibility one.** A `true` answer says
-    /// only that there is an address, a dialable port and a non-empty token written down — it says
-    /// nothing about whether THIS BUILD may put that token on THIS origin's transport. Issue #95:
-    /// a stored `http://` entry is fully `dialable`. Issue #107 closed the gap that used to sit
-    /// between here and that answer — a plaintext credential over it is refused or not by the one
-    /// authority, `super::grant::credential_allowed` (the build's
-    /// [`CredentialPolicy`](super::CredentialPolicy), or a live consented grant — which a stored
-    /// entry can never supply by itself: grants are not persisted), asked again at registration
-    /// (`servers::register_origin` and its sibling entry points, before the entry can ever become
-    /// the current client) and again at the point of the actual request — never here.
-    pub fn dialable(&self) -> bool {
-        self.origin().is_some() && !self.token.is_empty()
-    }
 
     /// **Where to dial this source**, `None` when there is nothing dialable written down.
     ///
@@ -1876,50 +1854,6 @@ where
 }
 
 impl Session {
-    /// Record (or replace) the cached credentials for one profile — the online switch's write.
-    pub fn remember_profile(&mut self, creds: ProfileCreds) {
-        if creds.uuid.is_empty() {
-            return;
-        }
-        self.profiles.retain(|p| p.uuid != creds.uuid);
-        self.profiles.push(creds);
-    }
-
-    /// Bring the ACTIVE profile's cached record up to date with the session's own user, primary
-    /// and roster — the late half of a switch (`merge_profile_roster`) and a roster refresh both
-    /// change those after the record was first written, and an offline seat from the old copy
-    /// would restore a roster missing the shares found since. The verifier is kept; nothing here
-    /// knows a PIN. No record, no write: an unprotected profile's first record comes from
-    /// `auth::remember_unprotected_active`, a protected one's from the switch that saw its PIN.
-    /// Returns whether the record CHANGED, so a writer that persists only on change (the roster
-    /// refresh) also persists a stale record's repair when the roster itself did not move.
-    pub fn refresh_profile_record(&mut self) -> bool {
-        let uuid = self.user.uuid.clone();
-        if uuid.is_empty() {
-            return false;
-        }
-        let Some(p) = self.profiles.iter_mut().find(|p| p.uuid == uuid) else {
-            return false;
-        };
-        let before = serde_json::to_string(&(&p.user, &p.server, &p.sources)).unwrap_or_default();
-        p.user = self.user.clone();
-        p.server = self.server.clone();
-        p.sources = self.sources.clone();
-        serde_json::to_string(&(&p.user, &p.server, &p.sources)).unwrap_or_default() != before
-    }
-
-    /// The cached credentials for `uuid`, if this television has switched to it online before
-    /// and the entry still names a usable primary. Nothing about a PIN is decided here — the
-    /// caller reads [`ProfileCreds::pin`] against the tile's `protected` flag.
-    pub fn cached_profile(&self, uuid: &str) -> Option<&ProfileCreds> {
-        if uuid.is_empty() {
-            return None;
-        }
-        self.profiles.iter().find(|p| {
-            p.uuid == uuid && !p.user.token.is_empty() && !p.server.origin().host().is_empty()
-        })
-    }
-
     /// The effective persisted playback quality. Absence is the literal legacy migration rule:
     /// builds that predate the field played Original, so they continue to play Original.
     pub(crate) fn direct_play_mode(&self) -> DirectPlayMode { self.direct_play_mode }
@@ -2142,27 +2076,6 @@ impl Session {
     /// cost of being wrong is one profile pick — the picker is still fully usable, and its
     /// *Sign out* pill is reachable with the roster empty.
     ///
-    /// **An EMPTY uuid answers TRUE**, and it is the case worth spelling out, because it reads as
-    /// the harmless one ("no profile chosen, so no PIN to be behind") and is the opposite. A
-    /// sign-in ABANDONED at the who's-watching picker persists exactly that shape: `auth`'s
-    /// `login_thread` saves the account token, the server and the roster the moment they exist —
-    /// deliberately, so that walking away does not cost the whole sign-in — and no profile has been
-    /// picked. Such a session's [`Session::pms_token`] falls back to the OWNER's server token, and
-    /// the next boot raises a picker over it (the gate needs a roster of more than one user, which
-    /// that file has). So "no profile chosen" is not "no PIN": it is *nobody has said who they
-    /// are*, and the picker is that question — which is why it belongs on the same side as an
-    /// unknown uuid rather than opposite it.
-    pub fn active_profile_is_protected(&self) -> bool {
-        if self.user.uuid.is_empty() {
-            return true; // see above — nobody has said who they are
-        }
-        self.home_users
-            .iter()
-            .find(|u| u.uuid == self.user.uuid)
-            .map(|u| u.protected)
-            .unwrap_or(true)
-    }
-
     /// One profile's Home selection, or `None` for a profile that has never been asked. The
     /// difference is load-bearing — see [`Session::home_pins`].
     pub fn pins_for(&self, user: &str) -> Option<&HomePins> {

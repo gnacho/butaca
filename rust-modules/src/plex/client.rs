@@ -389,8 +389,8 @@ impl Client {
     /// this comment used to require raced a re-point (a fresh `Client` starting at
     /// `LINK_UNKNOWN`) against the separate follow-up call, and `ConnectionFacts` is applied
     /// atomically inside the registration write itself instead. This method remains a plain,
-    /// unconditional setter for tests that want to seed a tier directly (e.g. to grade
-    /// `finish_profile_switch` against a known-good roster) without going through the registry.
+    /// unconditional setter for tests that want to seed a tier directly (e.g. to grade a
+    /// known-good roster's link) without going through the registry.
     #[cfg(test)]
     pub fn set_link(&self, l: Location) {
         self.link.store(encode_link(Some(l)), Relaxed);

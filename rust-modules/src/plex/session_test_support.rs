@@ -75,25 +75,3 @@ pub(super) fn signed_in() -> Session {
         ..Default::default()
     }
 }
-
-pub(super) fn creds(uuid: &str, token: &str, pin: Option<&str>) -> ProfileCreds {
-    ProfileCreds {
-        uuid: uuid.into(),
-        user: UserRef {
-            uuid: uuid.into(),
-            token: token.into(),
-            ..Default::default()
-        },
-        server: ServerRef {
-            machine_id: "m".into(),
-            address: "10.0.0.5".into(),
-            port: 32400,
-            token: token.into(),
-            origin_url: "https://10-0-0-5.abc.plex.direct:32400".into(),
-            ..Default::default()
-        },
-        sources: vec![],
-        pin: pin.map(PinVerifier::new),
-        extensions: Default::default(),
-    }
-}

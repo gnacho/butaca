@@ -583,43 +583,6 @@ fn a_source_that_leaves_the_roster_stops_contributing() {
     reset(&mut o.state, &o.adapter);
 }
 
-#[test]
-fn an_equal_size_roster_replacement_has_a_different_cache_key_and_source_table() {
-    let _g = crate::testlock::serial();
-    let mut o = Owner::default();
-    crate::registry::reset_for_test();
-    reset(&mut o.state, &o.adapter);
-    let a = crate::registry::register_with_client_id("pms-a", "127.0.0.1", 1, "a", "cid");
-    let b = crate::registry::register_with_client_id("pms-b", "127.0.0.1", 2, "b", "cid");
-    sync_roster(&mut o.state);
-    let before = roster_key();
-    assert_eq!(
-        o.state.srcs.iter().map(|s| s.sid).collect::<Vec<_>>(),
-        [a, b]
-    );
-
-    crate::registry::revoke_for_profile_switch();
-    let c = crate::registry::register_with_client_id("pms-c", "127.0.0.1", 3, "c", "cid");
-    assert_eq!(
-        crate::registry::count(),
-        2,
-        "the replacement deliberately preserves count"
-    );
-    assert_ne!(
-        roster_key(),
-        before,
-        "the exact registry generation, not count, keys Home"
-    );
-    sync_roster(&mut o.state);
-    assert_eq!(
-        o.state.srcs.iter().map(|s| s.sid).collect::<Vec<_>>(),
-        [a, c]
-    );
-
-    reset(&mut o.state, &o.adapter);
-    crate::registry::reset_for_test();
-}
-
 /// **The pin's grain is a LIBRARY, and `/hubs` is a whole-SERVER request.** So the server-level
 /// gate cannot be the only one: unpinning one library of a two-library server left every one of
 /// its items on Home, which is what the owner hit ("I disabled local server lib from home but
