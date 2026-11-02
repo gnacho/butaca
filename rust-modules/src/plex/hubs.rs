@@ -38,7 +38,7 @@ impl Client {
     /// The sibling of [`Client::home_hubs`], one level down: that one is whole-SERVER and answers
     /// with rows from every library, this one is scoped to a section and quotes the owner's own
     /// table. Verified live against PMS 1.43.3 on 2026-09-05 — `docs/pms-api.md` §3a is the record,
-    /// and five of its findings contradict `docs/plex-openapi.json`. The three that decide code
+    /// and five of its findings contradict `the upstream Plex API reference`. The three that decide code
     /// here:
     ///
     /// * **Items are EMBEDDED** in each hub's `Metadata[]`. The spec's own example shows a nonzero
@@ -73,7 +73,7 @@ impl Client {
     ///
     /// Everything here was measured against this household's PMS 1.43.3 on 2026-08-14 (six
     /// queries, three `sectionId` variants, four `limit` variants), because the endpoint's
-    /// behaviour is not what its parameter names suggest and `docs/plex-openapi.json` is wrong
+    /// behaviour is not what its parameter names suggest and `the upstream Plex API reference` is wrong
     /// about the response shape. The written form is `docs/pms-api.md` §3b.
     ///
     /// * **Items arrive in TWO containers** — `movie`/`show`/`episode`/`album`/`artist`/`track` as

@@ -121,7 +121,7 @@ impl Client {
     /// module passes in. (The server silently KEEPS `Image`, `UltraBlurColors` and `Field` whatever
     /// you ask, so they are not listed — naming them would just read as if they went.)
     ///
-    /// Absent from `docs/plex-openapi.json`, which documents only the single-key form.
+    /// Absent from `the upstream Plex API reference`, which documents only the single-key form.
     pub fn metadata_many(&self, rating_keys: &[&str]) -> Option<MediaContainer> {
         const EXCLUDE_ELEMENTS: &str =
             "Media,Genre,Country,Collection,Director,Writer,Producer,Similar,Chapter,Marker,Guid,Rating,Review,Extras";
@@ -155,7 +155,7 @@ impl Client {
     }
 
     /// Fetch a SIDECAR subtitle (`Stream.key`, i.e. `/library/streams/{id}`) for the client
-    /// renderer. The endpoint takes `encoding` and `format` (docs/plex-openapi.json). ASS/SSA
+    /// renderer. The endpoint takes `encoding` and `format` (the upstream Plex API reference). ASS/SSA
     /// requests only UTF-8 re-encoding, preserving styles, drawings and overlapping events.
     /// Other text formats request UTF-8 SubRip so formats such as SAMI keep their conversion
     /// path. Conversion is the server's and has been seen refusing a FORMAT before (`.vtt` → 501):

@@ -15,7 +15,7 @@ pub struct Envelope {
 /// list (`Directory`), an items/detail list (`Metadata`), or a hub list (`Hub`).
 #[derive(Deserialize, Default)]
 pub struct MediaContainer {
-    /// The item's own SETTINGS, on `/library/metadata/{id}/tree` (`docs/plex-openapi.json`'s
+    /// The item's own SETTINGS, on `/library/metadata/{id}/tree` (`the upstream Plex API reference`'s
     /// `show` example): `episodeSort`, `audioLanguage`, `subtitleLanguage`, … — see [`Setting`].
     #[serde(rename = "Setting", default)]
     pub setting: Vec<Setting>,
@@ -122,7 +122,7 @@ pub struct Hub {
     ///
     /// So Cast & Crew *and* Collections both come through here — Collections only when the request
     /// omits `includeCollections=1`, which moves them to full `Metadata[]` collection rows and which
-    /// `Client::search` always sends. `plex-openapi.json`'s own worked
+    /// `Client::search` always sends. `the upstream API reference`'s own worked
     /// example for `/hubs/search` disagrees — it puts shows under `Directory` — which is why this
     /// was probed live rather than modelled from the spec, and why the split is written down here
     /// instead of being rediscovered the next time a hub looks empty.
@@ -134,7 +134,7 @@ pub struct Hub {
     #[serde(default, deserialize_with = "de_i64")]
     pub size: i64,
     /// How many items the hub's listing holds in ALL, when the hub embeds only a page of them
-    /// (`plex-openapi.json`'s `Hub.totalSize`). A collection hub's member count — the "· N" its
+    /// (`the upstream API reference`'s `Hub.totalSize`). A collection hub's member count — the "· N" its
     /// linked heading carries — is this, or [`Self::size`] when the server sent no total.
     #[serde(rename = "totalSize", default, deserialize_with = "de_i64")]
     pub total_size: i64,
@@ -494,7 +494,7 @@ pub struct Stream {
     // panel gets IS the base layer. `metadata::Dovi` is where they are read together, and its
     // `base_layer_unusable` is the rule.
     //
-    // The field names are NOT in docs/plex-openapi.json — its `stream` schema carries 29
+    // The field names are NOT in the upstream Plex API reference — its `stream` schema carries 29
     // properties and not one DOVI among them, so the spec cannot settle them and neither can
     // pms-api.md. These spellings were probed LIVE against the dev PMS 2026-08-21, by sweeping
     // every movie and episode on it — 540 leaves, of which 28 carry Dolby Vision (8 movies and
@@ -1129,7 +1129,7 @@ mod tests {
     /// containers, and which one depends on the hub's type.**
     ///
     /// `movie`/`show`/`episode` come as `Metadata[]`; `actor`/`director`/`collection` come as
-    /// `Directory[]`. `docs/plex-openapi.json`'s own worked example for this endpoint disagrees —
+    /// `Directory[]`. `the upstream Plex API reference`'s own worked example for this endpoint disagrees —
     /// it files shows under `Directory` — so the split was probed live rather than modelled from
     /// the spec, and this is the test that keeps the live answer.
     ///
