@@ -119,11 +119,9 @@ pub(crate) use servers::ConnectionFacts;
 // and `reset_servers_for_test` is what keeps the table a per-test fixture instead of a growing
 // process-global holding clients whose loopback ports closed when their test returned. Both must be
 // called under `crate::testlock::serial`.
-pub use crate::media::*;
 // The i64 wire-fold helper is shared, not plex-private: the person screen's DTO vocabulary
 // (crate::person, where the old discover.rs types now live) deserializes its optional i64s
 // through it.
-pub(crate) use crate::media::de_i64;
 pub use params::*;
 // The registry's test-fixture surface (`register_with_client_id`, `reset_for_test`,
 // `write_held_for_test`, `register_pinned_with_client_id*`) and the registration entry points

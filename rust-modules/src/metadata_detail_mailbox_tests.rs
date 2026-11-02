@@ -21,7 +21,7 @@ fn a_guid_answer_projects_the_other_servers_own_key_library_and_class() {
         "ratingKey":"5274","type":"movie","title":"another title entirely",
         "guid":"plex://movie/6856893830a4aaafd5c4291d","librarySectionTitle":"Film Club",
         "duration":7020000,"Media":[{"videoResolution":"1080","width":1920,"height":1080}]}]}}"#;
-    let mc = serde_json::from_str::<crate::plex::Envelope>(body)
+    let mc = serde_json::from_str::<crate::media::Envelope>(body)
         .expect("parses")
         .media_container;
 
@@ -65,7 +65,7 @@ fn related_rows_carry_the_watch_state_the_wire_already_had() {
         {"ratingKey":"13","type":"movie","title":"never started","duration":7020000},
         {"ratingKey":"14","type":"show","title":"three in","leafCount":10,"viewedLeafCount":3}
     ]}]}}"#;
-    let mc = serde_json::from_str::<crate::plex::Envelope>(body)
+    let mc = serde_json::from_str::<crate::media::Envelope>(body)
         .expect("parses")
         .media_container;
     let rows = related_rows(&mc, SRV_B, "page").related;
@@ -117,7 +117,7 @@ fn related_rows_do_not_emit_collections_as_movie_cards() {
         {"ratingKey":"50001","type":"collection","title":"A Collection","thumb":"/c"},
         {"ratingKey":"11","type":"movie","title":"A Film","thumb":"/m"}
     ]}]}}"#;
-    let mc = serde_json::from_str::<crate::plex::Envelope>(body).expect("parses").media_container;
+    let mc = serde_json::from_str::<crate::media::Envelope>(body).expect("parses").media_container;
     let rows = related_rows(&mc, SRV_A, "page").related;
     assert_eq!(rows.len(), 1, "the collection row must be filtered out");
     assert_eq!(rows[0].rk, "11");
@@ -144,7 +144,7 @@ fn related_rows_dedupe_across_hubs_and_cap_the_shelf() {
         hub(&[1, 2, 3]),
         hub(&[2, 3, 4])
     );
-    let mc = serde_json::from_str::<crate::plex::Envelope>(&body)
+    let mc = serde_json::from_str::<crate::media::Envelope>(&body)
         .expect("parses")
         .media_container;
     let rows = related_rows(&mc, SRV_A, "page").related;
@@ -158,7 +158,7 @@ fn related_rows_dedupe_across_hubs_and_cap_the_shelf() {
     // a row PMS sent no key for is not a tile — it addresses nothing
     let body =
         r#"{"MediaContainer":{"Hub":[{"Metadata":[{"type":"movie","title":"keyless"}]}]}}"#;
-    let mc = serde_json::from_str::<crate::plex::Envelope>(body)
+    let mc = serde_json::from_str::<crate::media::Envelope>(body)
         .expect("parses")
         .media_container;
     assert!(related_rows(&mc, SRV_A, "page").related.is_empty(), "no ratingKey, no tile");
@@ -170,7 +170,7 @@ fn related_rows_dedupe_across_hubs_and_cap_the_shelf() {
         hub(&many),
         hub(&many)
     );
-    let mc = serde_json::from_str::<crate::plex::Envelope>(&body)
+    let mc = serde_json::from_str::<crate::media::Envelope>(&body)
         .expect("parses")
         .media_container;
     let rows = related_rows(&mc, SRV_A, "page").related;
@@ -187,7 +187,7 @@ fn related_rows_dedupe_across_hubs_and_cap_the_shelf() {
 /// `find_by_guid`), which is what lets a later revision say "not reachable" in the panel.
 #[test]
 fn a_server_without_the_film_contributes_no_row() {
-    let mc = serde_json::from_str::<crate::plex::Envelope>(r#"{"MediaContainer":{"size":0}}"#)
+    let mc = serde_json::from_str::<crate::media::Envelope>(r#"{"MediaContainer":{"size":0}}"#)
         .expect("parses")
         .media_container;
     assert!(

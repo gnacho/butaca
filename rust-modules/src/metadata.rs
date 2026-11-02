@@ -1056,7 +1056,7 @@ pub(crate) struct Chapter {
 /// Parse an item's `Chapter[]` into the app's model — the ONE `plex::Chapter` → [`Chapter`] mapping,
 /// shared by the detail parse and the playing-item store (which must agree: the Chapters strip seeks
 /// with these offsets, so two mappings is two chances to disagree about which item they describe).
-fn convert_chapters(chapters: &[crate::plex::Chapter]) -> Vec<Chapter> {
+fn convert_chapters(chapters: &[crate::media::Chapter]) -> Vec<Chapter> {
     chapters
         .iter()
         .map(|c| Chapter {
@@ -1094,7 +1094,7 @@ pub(crate) struct Marker {
 /// Parse a leaf's `Marker[]` into the app's model, dropping kinds the player has no behaviour for
 /// and any segment whose offsets are not a forward range (a zero-length or inverted marker would
 /// otherwise produce a prompt that can never be satisfied by seeking to its end).
-fn convert_markers(markers: &[crate::plex::Marker]) -> Vec<Marker> {
+fn convert_markers(markers: &[crate::media::Marker]) -> Vec<Marker> {
     markers
         .iter()
         .filter_map(|m| {
@@ -1305,7 +1305,7 @@ pub(crate) struct Rating {
 ///
 /// Rows whose artwork cannot be attributed are dropped, as are non-positive scores: PMS omits a
 /// score it does not have, and `de_f64` defaults that to 0.0, so "0.0" means absent, not zero.
-fn convert_ratings(it: &crate::plex::Metadata) -> Vec<Rating> {
+fn convert_ratings(it: &crate::media::Metadata) -> Vec<Rating> {
     let mut out: Vec<Rating> = if !it.ratings.is_empty() {
         it.ratings
             .iter()
@@ -1453,7 +1453,7 @@ pub(crate) struct Detail {
     pub(crate) art: String,
     pub(crate) thumb: String,
     /// The item's own `UltraBlurColors` corners (tl, tr, br, bl — the ring order
-    /// [`plex::UltraBlurColors::corners`](crate::plex::UltraBlurColors::corners) owns) and whether
+    /// [`plex::UltraBlurColors::corners`](crate::media::UltraBlurColors::corners) owns) and whether
     /// the server sent a usable envelope — what keys the detail page's ambient GROUND. It lives on
     /// the LOADED item and not only on the catalog row because a page opened from the Library grid,
     /// a Related tile or the person page is never in the home catalog (`pms::index_of_rk` searches
@@ -2000,7 +2000,7 @@ fn fetch_detail(sid: crate::registry::ServerId, rk: &str) -> Option<(Detail, Str
 const CREW_JOBS: [CrewRole; 2] = [CrewRole::Director, CrewRole::Writer];
 
 /// The named tags of one crew array, in server order, without the blanks or the repeats.
-fn dedup_tags(tags: &[crate::plex::Tag]) -> Vec<String> {
+fn dedup_tags(tags: &[crate::media::Tag]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for t in tags.iter().filter(|t| !t.tag.is_empty()) {
         if !out.iter().any(|s| s == &t.tag) {
@@ -2018,7 +2018,7 @@ fn dedup_tags(tags: &[crate::plex::Tag]) -> Vec<String> {
 /// merge) the job is already there and is not repeated — "Director, Director" is nobody's credit.
 /// Nameless rows are dropped: a tile with no name and (often) no headshot is a blank circle the
 /// focus can still land on.
-fn crew_credits(it: &crate::plex::Metadata) -> Vec<Cast> {
+fn crew_credits(it: &crate::media::Metadata) -> Vec<Cast> {
     let mut out: Vec<Cast> = Vec::new();
     for (role, list) in CREW_JOBS.iter().zip([&it.director, &it.writer]) {
         let job = role.key();
@@ -2068,7 +2068,7 @@ pub(crate) struct Streams {
     pub(crate) dovi: Dovi,
 }
 
-fn convert_streams(streams: &[crate::plex::Stream]) -> Streams {
+fn convert_streams(streams: &[crate::media::Stream]) -> Streams {
     let (mut audio, mut subs, mut fps) = (Vec::new(), Vec::new(), 0.0);
     let mut hdr = false;
     let mut dovi = Dovi::default();
@@ -2168,17 +2168,17 @@ mod convert_streams_tests {
     #[test]
     fn convert_streams_carries_loudness_capability() {
         let wire = [
-            crate::plex::Stream {
+            crate::media::Stream {
                 stream_type: 2,
                 can_normalize_loudness: true,
                 ..Default::default()
             },
-            crate::plex::Stream {
+            crate::media::Stream {
                 stream_type: 2,
                 can_normalize_loudness: false,
                 ..Default::default()
             },
-            crate::plex::Stream {
+            crate::media::Stream {
                 stream_type: 1,
                 can_normalize_loudness: false,
                 ..Default::default()
@@ -2196,7 +2196,7 @@ mod convert_streams_tests {
 /// same version's technical fields (resolution/size/bitrate — the hero's media badge). Both ride
 /// the ONE version (see `plex::Metadata::primary_media`), and both are borrowed from a show's
 /// first episode by the same call in `fetch_item_streams`, so they can't describe different files.
-fn parse_streams(it: &crate::plex::Metadata, d: &mut Detail) {
+fn parse_streams(it: &crate::media::Metadata, d: &mut Detail) {
     if let Some(m) = it.primary_media() {
         d.video_resolution = m.video_resolution.clone();
         d.width = m.width;
@@ -2847,7 +2847,7 @@ fn fetch_episodes(sid: crate::registry::ServerId, series_rk: &str, season_rk: &s
 /// mapping is host-testable without a PMS — the watched flag in particular is DERIVED, and a
 /// derivation nothing can exercise is how `viewCount` came to be parsed at
 /// `plex/models.rs` and then dropped on the floor here for the whole life of the episode row.
-fn convert_episode(x: &crate::plex::Metadata) -> Episode {
+fn convert_episode(x: &crate::media::Metadata) -> Episode {
     let media0 = x.media.first();
     Episode {
         rk: x.rating_key.clone(),
@@ -2870,7 +2870,7 @@ fn convert_episode(x: &crate::plex::Metadata) -> Episode {
     }
 }
 
-fn convert_extra(x: &crate::plex::Metadata) -> Extra {
+fn convert_extra(x: &crate::media::Metadata) -> Extra {
     Extra {
         rk: x.rating_key.clone(),
         title: x.title.clone(),
@@ -2890,23 +2890,23 @@ fn extra_key_tail(primary: &str) -> &str {
     primary.rsplit('/').next().filter(|s| !s.is_empty()).unwrap_or(primary)
 }
 
-fn extra_matches_primary(x: &crate::plex::Metadata, primary: &str) -> bool {
+fn extra_matches_primary(x: &crate::media::Metadata, primary: &str) -> bool {
     !primary.is_empty()
         && (x.rating_key == extra_key_tail(primary) || (!x.key.is_empty() && x.key == primary))
 }
 
-fn is_trailer_meta(x: &crate::plex::Metadata) -> bool {
+fn is_trailer_meta(x: &crate::media::Metadata) -> bool {
     x.subtype == "trailer" || x.extra_type == 1
 }
 
-fn playable_trailer_meta(x: &crate::plex::Metadata) -> bool {
+fn playable_trailer_meta(x: &crate::media::Metadata) -> bool {
     is_trailer_meta(x) && x.first_part().is_some_and(|p| !p.key.is_empty())
 }
 
 /// Picker winner: a playable trailer, preferring `primaryExtraKey`, else first in server order.
 /// A primary that names a non-trailer (or a trailer with no Part) is ignored.
-fn pick_trailer(rows: &[crate::plex::Metadata], primary: &str) -> Option<Extra> {
-    let playable: Vec<&crate::plex::Metadata> =
+fn pick_trailer(rows: &[crate::media::Metadata], primary: &str) -> Option<Extra> {
+    let playable: Vec<&crate::media::Metadata> =
         rows.iter().filter(|x| playable_trailer_meta(x)).collect();
     playable
         .iter()
@@ -2919,10 +2919,10 @@ fn pick_trailer(rows: &[crate::plex::Metadata], primary: &str) -> Option<Extra> 
 /// First trailer row (playable or not) under the same primary preference — used only when the
 /// picker found none, so we can pay **one** follow-up metadata GET for a missing Part.
 fn trailer_fill_candidate<'a>(
-    rows: &'a [crate::plex::Metadata],
+    rows: &'a [crate::media::Metadata],
     primary: &str,
-) -> Option<&'a crate::plex::Metadata> {
-    let trailers: Vec<&crate::plex::Metadata> = rows
+) -> Option<&'a crate::media::Metadata> {
+    let trailers: Vec<&crate::media::Metadata> = rows
         .iter()
         .filter(|x| is_trailer_meta(x) && !x.rating_key.is_empty())
         .collect();
@@ -2933,7 +2933,7 @@ fn trailer_fill_candidate<'a>(
         .or_else(|| trailers.first().copied())
 }
 
-fn trailer_from_item(it: &crate::plex::Metadata) -> Option<Extra> {
+fn trailer_from_item(it: &crate::media::Metadata) -> Option<Extra> {
     playable_trailer_meta(it).then(|| convert_extra(it))
 }
 
@@ -2946,7 +2946,7 @@ fn fetch_primary_trailer(sid: crate::registry::ServerId, primary: &str) -> Optio
     trailer_from_item(&it)
 }
 
-fn fetch_extras_rows(sid: crate::registry::ServerId, rk: &str) -> Option<Vec<crate::plex::Metadata>> {
+fn fetch_extras_rows(sid: crate::registry::ServerId, rk: &str) -> Option<Vec<crate::media::Metadata>> {
     match crate::registry::client_for(sid).and_then(|c| c.extras(rk)) {
         Some(mc) => Some(mc.metadata),
         None => {
@@ -2962,7 +2962,7 @@ fn fetch_extras_rows(sid: crate::registry::ServerId, rk: &str) -> Option<Vec<cra
 /// row arrived without a Part; never N+1 over the rest of the list.
 fn resolve_trailer(
     sid: crate::registry::ServerId,
-    rows: &[crate::plex::Metadata],
+    rows: &[crate::media::Metadata],
     primary: &str,
 ) -> Option<Extra> {
     if let Some(e) = pick_trailer(rows, primary) {
@@ -2978,7 +2978,7 @@ fn resolve_trailer(
 /// the page promised and then could not focus.
 const EXTRAS_MAX: usize = 32;
 
-fn extras_from_rows(rows: &[crate::plex::Metadata]) -> Vec<Extra> {
+fn extras_from_rows(rows: &[crate::media::Metadata]) -> Vec<Extra> {
     rows.iter()
         .filter(|x| !x.rating_key.is_empty())
         .take(EXTRAS_MAX)
@@ -2991,7 +2991,7 @@ fn extras_from_rows(rows: &[crate::plex::Metadata]) -> Vec<Extra> {
 fn project_extras(
     d: &mut Detail,
     sid: crate::registry::ServerId,
-    rows: &[crate::plex::Metadata],
+    rows: &[crate::media::Metadata],
     primary: &str,
 ) {
     d.extras = extras_from_rows(rows);
@@ -3045,7 +3045,7 @@ const RELATED_MAX: usize = 20;
 /// De-duplication is across the WHOLE response and not per hub, which is the point of it: PMS's
 /// related hubs overlap heavily ("Similar Movies" and "More with <actor>" routinely name the same
 /// film), and a flattened strip that listed it twice would put two tiles of one title side by side.
-fn related_rows(mc: &crate::plex::MediaContainer, sid: crate::registry::ServerId, rk: &str) -> RelatedRows {
+fn related_rows(mc: &crate::media::MediaContainer, sid: crate::registry::ServerId, rk: &str) -> RelatedRows {
     let mut seen = std::collections::HashSet::new();
     seen.insert(rk.to_string());
     let mut out = Vec::new();
@@ -4296,8 +4296,8 @@ pub(crate) fn pump_season(state: &mut MetadataState, adapter: &MetadataAdapter) 
 mod marker_tests {
     use super::*;
 
-    fn wire(kind: &str, start: i64, end: i64, is_final: bool) -> crate::plex::Marker {
-        crate::plex::Marker {
+    fn wire(kind: &str, start: i64, end: i64, is_final: bool) -> crate::media::Marker {
+        crate::media::Marker {
             kind: kind.to_string(),
             start_time_offset: start,
             end_time_offset: end,
@@ -4423,7 +4423,7 @@ mod episode_tests {
     /// through serde on purpose rather than hand-building a `Metadata`: the DTO field and the
     /// mapping are the two halves of this gap, and a hand-built struct would only ever exercise
     /// the half that was already right.
-    fn row(extra: &str) -> crate::plex::Metadata {
+    fn row(extra: &str) -> crate::media::Metadata {
         let json = format!(
             r#"{{"type":"episode","ratingKey":"1804","index":"3","parentIndex":"2",
                  "title":"Ep","duration":"3000000"{extra}}}"#
@@ -4482,8 +4482,8 @@ mod rating_tests {
     use super::*;
 
     /// one `Rating[]` row on the wire
-    fn wire(image: &str, value: f64, kind: &str) -> crate::plex::Rating {
-        crate::plex::Rating {
+    fn wire(image: &str, value: f64, kind: &str) -> crate::media::Rating {
+        crate::media::Rating {
             image: image.to_string(),
             value,
             kind: kind.to_string(),
@@ -4547,7 +4547,7 @@ mod rating_tests {
             RatingArt::TomatoFresh.rank()
         );
         // …so an item that somehow carried both critic tomatoes still badges exactly one
-        let it = crate::plex::Metadata {
+        let it = crate::media::Metadata {
             ratings: vec![
                 wire("rottentomatoes://image.rating.certified", 9.4, "critic"),
                 wire("rottentomatoes://image.rating.ripe", 9.4, "critic"),
@@ -4602,7 +4602,7 @@ mod rating_tests {
     #[test]
     fn the_array_wins_over_the_flat_pair_and_orders_the_row() {
         // Luca, verbatim off the live server 2026-07-29
-        let it = crate::plex::Metadata {
+        let it = crate::media::Metadata {
             ratings: vec![
                 wire("imdb://image.rating", 7.4, "audience"),
                 wire("rottentomatoes://image.rating.ripe", 9.1, "critic"),
@@ -4634,7 +4634,7 @@ mod rating_tests {
     /// cannot rot before the first grid-side caller arrives.
     #[test]
     fn the_flat_pair_is_used_when_the_array_is_absent() {
-        let it = crate::plex::Metadata {
+        let it = crate::media::Metadata {
             rating: 4.0,
             rating_image: "rottentomatoes://image.rating.rotten".to_string(),
             audience_rating: 8.3,
@@ -4651,7 +4651,7 @@ mod rating_tests {
     /// invent a review. An unattributable row must also not take its neighbours down with it.
     #[test]
     fn absent_scores_and_unknown_providers_drop_out() {
-        let it = crate::plex::Metadata {
+        let it = crate::media::Metadata {
             ratings: vec![
                 wire("rottentomatoes://image.rating.ripe", 0.0, "critic"), // absent
                 wire("metacritic://image.rating", 8.8, "critic"),          // unknown provider
@@ -4662,7 +4662,7 @@ mod rating_tests {
         assert_eq!(arts(&convert_ratings(&it)), [RatingArt::Imdb]);
 
         // nothing usable at all → an empty row, and the hero simply draws no badges
-        let empty = crate::plex::Metadata {
+        let empty = crate::media::Metadata {
             rating: 9.1,
             ..Default::default()
         }; // score, no image
@@ -4674,7 +4674,7 @@ mod rating_tests {
     /// critic-first sort has decided which one that is.
     #[test]
     fn a_slot_is_only_badged_once() {
-        let it = crate::plex::Metadata {
+        let it = crate::media::Metadata {
             ratings: vec![
                 wire("rottentomatoes://image.rating.upright", 8.5, "audience"),
                 // a contradictory second critic row: ripe AND rotten for the same item
@@ -4711,11 +4711,11 @@ mod rating_tests {
 mod trailer_tests {
     use super::*;
 
-    fn extra(json: &str) -> crate::plex::Metadata {
+    fn extra(json: &str) -> crate::media::Metadata {
         serde_json::from_str(json).expect("an extras row parses")
     }
 
-    fn trailer(rk: &str, part: &str) -> crate::plex::Metadata {
+    fn trailer(rk: &str, part: &str) -> crate::media::Metadata {
         extra(&format!(
             r#"{{"type":"clip","ratingKey":"{rk}","key":"/library/metadata/{rk}",
                  "subtype":"trailer","extraType":"1","title":"Trailer {rk}",
@@ -4724,14 +4724,14 @@ mod trailer_tests {
         ))
     }
 
-    fn trailer_no_part(rk: &str) -> crate::plex::Metadata {
+    fn trailer_no_part(rk: &str) -> crate::media::Metadata {
         extra(&format!(
             r#"{{"type":"clip","ratingKey":"{rk}","key":"/library/metadata/{rk}",
                  "subtype":"trailer","extraType":"1","title":"Trailer {rk}"}}"#
         ))
     }
 
-    fn bts(rk: &str) -> crate::plex::Metadata {
+    fn bts(rk: &str) -> crate::media::Metadata {
         extra(&format!(
             r#"{{"type":"clip","ratingKey":"{rk}","key":"/library/metadata/{rk}",
                  "subtype":"behindTheScenes","extraType":"5","title":"BTS {rk}",

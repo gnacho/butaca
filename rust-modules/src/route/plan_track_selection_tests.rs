@@ -300,7 +300,7 @@ fn preferred_language_tags_match_both_three_letter_spellings() {
 
 #[test]
 fn show_settings_are_read_out_of_a_setting_list() {
-    use crate::plex::{Setting, ShowLangPrefs};
+    use crate::media::{Setting, ShowLangPrefs};
     let s = |id: &str, v: &str| Setting { id: id.into(), value: v.into() };
     assert_eq!(ShowLangPrefs::from_settings(&[s("episodeSort", "-1")]), None);
     assert_eq!(

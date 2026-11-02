@@ -70,8 +70,8 @@ fn mkv_and_mp4_parts_are_direct_playable() {
 ///     the human line, and a server that stays quiet must not thereby become playable.
 #[test]
 fn a_2000_decision_is_a_refusal_and_quotes_the_reason_the_server_named() {
-    fn mc(json: &[u8]) -> crate::plex::MediaContainer {
-        serde_json::from_slice::<crate::plex::Envelope>(json)
+    fn mc(json: &[u8]) -> crate::media::MediaContainer {
+        serde_json::from_slice::<crate::media::Envelope>(json)
             .expect("parse")
             .media_container
     }

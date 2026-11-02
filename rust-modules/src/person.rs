@@ -76,7 +76,7 @@
 //! plex.tv answers to — the numeric id 404s there (`"Invalid value provided for metadataId!"`).
 //! Keep all three; do not collapse them.
 use crate::registry::ServerId;
-use crate::plex::Tag;
+use crate::media::Tag;
 use crate::pms::{parse_item, PmsMovie};
 use std::panic::catch_unwind;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -697,7 +697,7 @@ fn sources(origin: ServerId, key: &str, name: &str) -> Vec<Src> {
 /// Hubs are matched on either `hubIdentifier` or `type` because `/hubs/search` sends the same token
 /// in both (`the upstream Plex API reference`'s own example), and `Hub::directory` is keyed by that word.
 pub(crate) fn resolve_local(
-    mc: &crate::plex::MediaContainer,
+    mc: &crate::media::MediaContainer,
     name: &str,
     guid: &str,
 ) -> Option<String> {
@@ -1784,7 +1784,7 @@ fn person_roles_jf(person_id: &str, keys: &[String]) -> Option<RolesLanding> {
 /// only THIS person's credit in each — the full record's `Role[]` names every cast member, and the
 /// page wants one line, "what did *this* person play in it".
 ///
-/// Which tag IS this person is [`crate::plex::Tag::is_person`]'s job — both id spaces, because the
+/// Which tag IS this person is [`crate::media::Tag::is_person`]'s job — both id spaces, because the
 /// local id is the `tagKey` guid whenever the credit row carried no number. `id` is the id local to
 /// **the server this response came from** ([`Src::local`]), never the origin's: they are different
 /// numbers for the same person, and filtering a share's response with ours matched nothing while
@@ -1793,7 +1793,7 @@ fn person_roles_jf(person_id: &str, keys: &[String]) -> Option<RolesLanding> {
 /// empty pairs, and `apply` reads a missing key as `""`. Naming their department instead would need
 /// the crew arrays this batch excludes, for a line the mockup does not ask for.
 pub(crate) fn roles_from(
-    mc: &crate::plex::MediaContainer,
+    mc: &crate::media::MediaContainer,
     id: &str,
     guid: &str,
 ) -> Vec<(String, String)> {
@@ -1817,7 +1817,7 @@ pub(crate) fn roles_from(
 ///
 /// `sid` is the server the response came from, stamped onto every row — the fact that survives
 /// [`merge_shelves`] and lets a card three sources deep open on the right machine.
-pub(crate) fn split_by_type(mc: &crate::plex::MediaContainer, sid: ServerId) -> [Shelf; NSHELF] {
+pub(crate) fn split_by_type(mc: &crate::media::MediaContainer, sid: ServerId) -> [Shelf; NSHELF] {
     let mut out: [Shelf; NSHELF] = Default::default();
     for it in &mc.metadata {
         let sh = match it.kind.as_str() {
@@ -1845,7 +1845,7 @@ pub(crate) fn split_by_type(mc: &crate::plex::MediaContainer, sid: ServerId) -> 
 /// A row with no `guid` contributes nothing: the join key is the metadata provider's global id, and
 /// a server old enough to send none simply cannot be joined. That is an ABSENCE of evidence — the
 /// route draws such a credit at full strength with no annotation — never a claim that nobody has it.
-pub(crate) fn guid_index(mc: &crate::plex::MediaContainer) -> Vec<(String, String)> {
+pub(crate) fn guid_index(mc: &crate::media::MediaContainer) -> Vec<(String, String)> {
     mc.metadata
         .iter()
         .filter(|it| matches!(it.kind.as_str(), "movie" | "show"))
@@ -2175,7 +2175,7 @@ pub(crate) struct OwnershipFixture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plex::{Hub, MediaContainer, Metadata};
+    use crate::media::{Hub, MediaContainer, Metadata};
 
     /// Slot 0 — the server every single-source test opens on. A real slot, so its mailboxes exist,
     /// but nothing is registered at it: `maybe_spawn` therefore refuses to dial (`client_for` is
