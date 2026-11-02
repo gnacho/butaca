@@ -11,6 +11,7 @@ fn leaving_after_query_commit_before_arrival_cannot_restore_the_old_query_bookma
     struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
+            crate::jellyfin::uninstall();
             crate::registry::reset_for_test();
         }
     }
@@ -18,19 +19,15 @@ fn leaving_after_query_commit_before_arrival_cannot_restore_the_old_query_bookma
     let session = crate::plex::session::TempSession::new("library-query-leave");
     session.watching("u-library-query-leave");
     crate::registry::reset_for_test();
-    let sid =
-        crate::registry::register_with_client_id("query-leave-own", "127.0.0.1", 9, "synthetic", "fixture");
-    let shared = crate::registry::register_with_client_id(
-        "query-leave-shared",
-        "127.0.0.1",
-        10,
-        "synthetic",
-        "fixture",
-    );
-    crate::registry::set_current(sid);
+    // The flavor's world: one server, the installed client. A seeded source naming any other
+    // sid is retired by the first roster sync (browse_roster_jellyfin_tests), so the fixture
+    // table rides the jellyfin SERVER_ID.
+    crate::jellyfin::install(crate::jellyfin::JfClient::new(
+        crate::origin::Origin::http("127.0.0.1", 1), "dev-1".into()));
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
-    rig.stores.browse.borrow_mut().seed_registered_table_for_test([sid, shared]);
+    rig.stores.browse.borrow_mut().seed_registered_table_for_test([
+        crate::jellyfin::SERVER_ID; 2]);
     rig.refresh_browse_directory();
     rig.browse_run(crate::stores::browse::BrowseCmd::SetCur(0));
     rig.stores.browse.borrow_mut().seed_items_for_test(120);
@@ -125,6 +122,7 @@ fn a_filter_menu_resets_its_covered_library_grid_memory_without_taking_menu_focu
     struct Cleanup;
     impl Drop for Cleanup {
         fn drop(&mut self) {
+            crate::jellyfin::uninstall();
             crate::registry::reset_for_test();
         }
     }
@@ -132,13 +130,15 @@ fn a_filter_menu_resets_its_covered_library_grid_memory_without_taking_menu_focu
     let session = crate::plex::session::TempSession::new("library-covered-query-reset");
     session.watching("u-library-covered-query-reset");
     crate::registry::reset_for_test();
-    let sid = crate::registry::register_with_client_id("query-own", "127.0.0.1", 9, "synthetic", "fixture");
-    let shared =
-        crate::registry::register_with_client_id("query-shared", "127.0.0.1", 10, "synthetic", "fixture");
-    crate::registry::set_current(sid);
+    // The flavor's world: one server, the installed client. A seeded source naming any other
+    // sid is retired by the first roster sync (browse_roster_jellyfin_tests), so the fixture
+    // table rides the jellyfin SERVER_ID.
+    crate::jellyfin::install(crate::jellyfin::JfClient::new(
+        crate::origin::Origin::http("127.0.0.1", 1), "dev-1".into()));
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
-    rig.stores.browse.borrow_mut().seed_registered_table_for_test([sid, shared]);
+    rig.stores.browse.borrow_mut().seed_registered_table_for_test([
+        crate::jellyfin::SERVER_ID; 2]);
     rig.refresh_browse_directory();
     rig.browse_run(crate::stores::browse::BrowseCmd::SetCur(0));
     rig.stores.browse.borrow_mut().seed_items_for_test(120);
@@ -293,7 +293,7 @@ fn a_filter_menu_resets_its_covered_library_grid_memory_without_taking_menu_focu
         .find(|key| {
             matches!(&key.identity,
         crate::screens::registry::LibraryIdentity::Grid { sid: item_sid, rk, section }
-            if *item_sid == sid && rk == "1" && section.key == target.section)
+            if *item_sid == crate::jellyfin::SERVER_ID && rk == "1" && section.key == target.section)
         })
         .unwrap()
         .elem;

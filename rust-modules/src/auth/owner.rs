@@ -30,7 +30,6 @@ impl Receipt {
     fn write(&self, w: &mut Canon) {
         self.addr.to.write_canon(w);
         w.u32(self.addr.req.0).u64(self.arrival).u64(self.key.epoch);
-        write_op(w, self.key.op);
     }
 }
 
@@ -41,12 +40,6 @@ pub(super) fn write_purpose(w: &mut Canon, purpose: PersistencePurpose) {
         PersistencePurpose::Profile => 2,
         PersistencePurpose::Background => 3,
     });
-}
-
-fn write_op(w: &mut Canon, op: SessionOp) {
-    match op {
-        SessionOp::DevBoundary => { w.u8(8); }
-    }
 }
 
 /// Delivery keeps the exact request even though generic non-instance delivery drops its outer
@@ -107,7 +100,6 @@ pub(crate) struct CredentialPatch {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum Command {
-    ActivateDevBootstrap,
     EraseLocal,
     NoteDeleteLeftovers(usize),
     /// The person's answer to "Connect without encryption?" (or Settings' switch) for one server
@@ -129,14 +121,9 @@ pub(crate) enum CoordinatorAction {
     LocalDataErased,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-pub(crate) enum RegistryPlan {
-    DevInstall { primary: crate::plex::session::ServerRef, extras: Vec<crate::plex::session::SourceRef>, client_id: String },
-}
-
 /// Which site's fresh save produced the warning being shown to the user — the discovery write
-/// that ran right after sign-in, or the final write `take_ready` issues once discovery settles.
-/// Both are `FreshReauthentication` writes; only the site differs.
+/// that ran right after sign-in, or the final write the sign-in flow issued once discovery
+/// settles. Both are `FreshReauthentication` writes; only the site differs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum PersistenceWarningSite { Discovery, Final }
 
@@ -235,7 +222,6 @@ pub(crate) struct CommitPlan {
     pub registry_client_id: String,
     pub expected_disk: Identity,
     pub credentials: Option<CredentialPatch>,
-    pub registry: Vec<RegistryPlan>,
     pub lifecycle: Option<ServerLifecycle>,
     /// What a durable write would be FOR. The caller uses this to refuse treating a background
     /// refresh as proof of a saved login, and the completion echoes it back.
@@ -252,7 +238,6 @@ pub(crate) struct CommitPlan {
 /// controller snapshot: unchanged fields remain solely in SessionInit.
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub(crate) struct CommitDelta {
-    pub dev: Option<DevCommitDelta>,
     pub credentials: Option<CredentialPatch>,
     pub phase: Option<Phase>,
     pub picker: Option<Picker>,
@@ -270,17 +255,13 @@ pub(crate) struct CommitDelta {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub(crate) enum DevCommitDelta { Activated }
-
-#[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum BootstrapAuthority {
     Account { extras: Vec<crate::plex::session::SourceRef> },
-    DevPms { primary: crate::plex::session::ServerRef, extras: Vec<crate::plex::session::SourceRef> },
     /// The controlled Jellyfin world (#166 replay flip). There is no plex.tv account surface
     /// behind it: no registry install, no token rotation, no profile machinery — the typed
     /// Initial carries the exact client identity the controlled boot installs unprobed, and
-    /// every fetch the recording admits rides that one origin. `activate_dev` refuses it, so
-    /// the owner never leaves `Idle` in this world; the boot arm reads the identity itself.
+    /// every fetch the recording admits rides that one origin. Nothing in this world issues a
+    /// commit, so the owner never leaves `Idle`; the boot arm reads the identity itself.
     /// Values are synthetic (see `Initial::synthetic_home`), never household bytes.
     DevJf { origin: String, token: String, user_id: String, user_name: String },
 }
@@ -480,12 +461,8 @@ pub(crate) struct ServerLifecycle {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum SessionOp { DevBoundary }
-
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct SessionWorkKey {
     pub epoch: u64,
-    pub op: SessionOp,
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -625,20 +602,6 @@ impl SessionInit {
             delete_leftovers: 0,
             link_trouble: false, discovery_retry: None, plaintext: None, switch_refused_for: None }
     }
-
-    pub fn captured_boot(saved: PersistedSession, primary: Option<crate::plex::session::ServerRef>,
-        extras: Vec<crate::plex::session::SourceRef>) -> Self {
-        let mut init = Self::captured(saved);
-        if let Some(primary) = primary {
-            let clean = CredentialPatch::of(&PersistedSession {
-                client_id: init.persisted.client_id.clone(), ..Default::default()
-            });
-            init.persisted = clean.merge_into(&init.persisted);
-            init.committed_credentials = clean;
-            init.authority = BootstrapAuthority::DevPms { primary, extras };
-        } else { init.authority = BootstrapAuthority::Account { extras }; }
-        init
-    }
 }
 
 pub(super) fn write_plaintext_verdict(w: &mut Canon, v: &super::PlaintextVerdict) {
@@ -740,9 +703,6 @@ impl LogicalState for SessionInit {
             .str(&self.disk_identity.profile_uuid);
         match &self.authority {
             BootstrapAuthority::Account { extras } => { w.u8(0); write_sources(w, extras); }
-            BootstrapAuthority::DevPms { primary, extras } => {
-                w.u8(1); write_server(w, primary); write_sources(w, extras);
-            }
             BootstrapAuthority::DevJf { origin, token, user_id, user_name } => {
                 w.u8(2); w.str(origin).str(token).str(user_id).str(user_name);
             }
@@ -767,7 +727,6 @@ impl LogicalState for SessionInit {
         w.seq(self.pending.len());
         for (&req, pending) in &self.pending {
             w.u32(req).u64(pending.key.epoch);
-            write_op(w, pending.key.op);
             w.str(&pending.expected.client_id).str(&pending.expected.account_token)
                 .str(&pending.expected.profile_uuid);
             w.option(pending.lifecycle, |w, life| { w.u32(life.sid as u32)
@@ -803,9 +762,6 @@ impl LogicalState for SessionInit {
                 .bool(commit.writes_credentials);
             w.option(commit.receipt.as_ref(), |w, receipt| receipt.write(w));
             let delta = &commit.delta;
-            w.option(delta.dev.as_ref(), |w, dev| { match dev {
-                DevCommitDelta::Activated => { w.u8(0); }
-            } });
             w.option(delta.credentials.as_ref(), |w, patch| {
                 write_persisted(w, &patch.merge_into(&PersistedSession::default()));
             });
@@ -912,10 +868,6 @@ impl SessionMachine {
     pub fn read(&self) -> SessionRead<'_> { self.publication.read() }
     pub fn publication(&self) -> Arc<SessionSnapshot> { Arc::clone(&self.publication) }
     pub fn subhash(&self) -> u64 { self.subhash }
-    pub fn ready_is_current(&self, epoch: u64, scope: ProfileScope) -> bool {
-        self.state.epoch == epoch && self.state.profile_scope == scope
-            && self.state.phase == Phase::Ready && !self.state.apply_pending
-    }
 
     pub fn publication_is_current(&self, publication: &ProfilePublication) -> bool {
         publication.epoch == self.state.epoch && publication.scope == self.state.profile_scope
@@ -956,45 +908,6 @@ impl SessionMachine {
         self.commit_is_current(req, epoch, arrival).then_some(CommitPermit {
             req, epoch, arrival, owner: std::marker::PhantomData,
         })
-    }
-
-    fn begin_commit(&mut self, req: u32, arrival: u64, terminal: bool,
-        plan: CommitPlan, delta: CommitDelta, emit: &mut impl FnMut(SessionFx)) -> bool {
-        if self.state.pending_commit.is_some() { return false; }
-        let Some(pending) = self.state.pending.get_mut(&req) else { return false };
-        if pending.key.epoch != self.state.epoch { return false; }
-        pending.last_arrival = Some(arrival);
-        let epoch = pending.key.epoch;
-        let fresh = plan.writes_durable && plan.credentials.is_some()
-            && plan.authority == crate::plex::session::SaveAuthority::FreshReauthentication;
-        self.state.pending_commit = Some(PendingCommit { req, epoch, arrival, terminal,
-            writes_credentials: plan.writes_durable && plan.credentials.is_some(),
-            receipt: None, delta,
-            admitted_revision: None,
-            purpose: plan.writes_durable.then_some(plan.purpose),
-            fresh });
-        self.state.persistence_purpose = Some(plan.purpose);
-        emit(SessionFx::Commit { req, epoch, arrival, plan });
-        true
-    }
-
-    fn activate_dev(&mut self, emit: &mut impl FnMut(SessionFx)) -> bool {
-        if self.state.phase != Phase::Idle || self.state.pending_commit.is_some()
-            || self.state.pending_erase.is_some() { return false; }
-        // DevJf deliberately refuses: the Jellyfin world has no plex.tv/registry resource
-        // operation to execute, so its boot arm never issues this command (and the owner stays
-        // Idle through the whole controlled run).
-        let BootstrapAuthority::DevPms { primary, extras } = &self.state.authority else { return false };
-        let registry = vec![RegistryPlan::DevInstall { primary: primary.clone(), extras: extras.clone(),
-            client_id: self.state.persisted.client_id.clone() }];
-        let Some(req) = self.allocate(SessionOp::DevBoundary, None) else { return false };
-        self.begin_commit(req, 0, true, CommitPlan { registry_client_id: self.state.persisted.client_id.clone(),
-            expected_disk: self.state.disk_identity.clone(),
-            credentials: None, lifecycle: None, registry,
-            purpose: PersistencePurpose::Background, writes_durable: false,
-            authority: crate::plex::session::SaveAuthority::Routine }, CommitDelta {
-                dev: Some(DevCommitDelta::Activated), ..Default::default()
-            }, emit)
     }
 
     /// Settle a durability verdict ONLY if it still describes the write this owner is waiting on.
@@ -1075,14 +988,10 @@ impl SessionMachine {
         };
         self.state.persistence_purpose = None;
         if !reply.admission.accepted() {
-            let op = self.state.pending.remove(&reply.req).unwrap().key.op;
-            match op {
-                SessionOp::DevBoundary => {
-                    self.state.phase = Phase::Error;
-                    self.state.apply_pending = false;
-                    self.state.error = crate::i18n::msg::browse_auth_authority_failed().into();
-                }
-            }
+            self.state.pending.remove(&reply.req);
+            self.state.phase = Phase::Error;
+            self.state.apply_pending = false;
+            self.state.error = crate::i18n::msg::browse_auth_authority_failed().into();
             emit(SessionFx::Retire { req: reply.req });
             if let Some(receipt) = commit.receipt { emit(SessionFx::Acknowledge(vec![receipt])); }
             self.schedule_pump(emit);
@@ -1090,16 +999,6 @@ impl SessionMachine {
             return true;
         }
         let delta = commit.delta;
-        if let Some(DevCommitDelta::Activated) = &delta.dev {
-            if let BootstrapAuthority::DevPms { primary, .. } = &self.state.authority {
-                let primary = primary.clone();
-                self.state.phase = Phase::Ready;
-                self.state.apply_pending = false;
-                self.publish_profile(None, emit);
-                emit(SessionFx::Ready { epoch: self.state.epoch, scope: self.state.profile_scope,
-                    token: primary.token.clone(), server: primary, install: ReadyInstall::AlreadyInstalled });
-            }
-        }
         if let Some(patch) = delta.credentials {
             self.state.persisted = patch.merge_into(&self.state.persisted);
             if commit.writes_credentials {
@@ -1277,19 +1176,6 @@ impl SessionMachine {
         true
     }
 
-    /// The checked allocator is independent from the full-width auth epoch. Exhaustion cannot
-    /// reuse an address, including when a cancelled worker still owns a Landing reservation.
-    fn allocate(&mut self, op: SessionOp, lifecycle: Option<ServerLifecycle>) -> Option<u32> {
-        let req = self.state.next_req.checked_add(1)?;
-        self.state.next_req = req;
-        self.state.pending.insert(req, Pending {
-            key: SessionWorkKey { epoch: self.state.epoch, op },
-            expected: Identity::of(&self.state.persisted), lifecycle,
-            last_arrival: None, phase: StreamPhase::Running, capture: None, admission: AdmissionState::NotRequested,
-        });
-        Some(req)
-    }
-
     /// Admission to logical application, not a resource reservation. Landing owns the latter.
     /// Merely inspecting an invalid envelope must not mutate pending state or its publication.
     fn accepts_header(&self, envelope: &SessionEnvelope) -> bool {
@@ -1325,7 +1211,6 @@ impl<H: SessionHost> crate::ui::machine::Machine<H> for SessionMachine {
         let before = self.publication();
         let mut emit = |effect| fx.push(Fx::App(H::session_effect(effect)));
         let handled = match ev {
-            SessionEvent::Command(Command::ActivateDevBootstrap) => self.activate_dev(&mut emit),
             SessionEvent::Command(Command::EraseLocal) => self.erase(false, &mut emit),
             // The roster commands are gone with the plex.tv account surface; the answer command
             // survives only as the alert UI's vocabulary, and there is nothing left to answer:

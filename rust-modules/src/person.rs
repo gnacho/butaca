@@ -2218,7 +2218,9 @@ mod tests {
         fn supersede(&mut self) { self.state.supersede(&self.adapter); }
     }
 
+    /// The controlled person world boots the synthetic Jellyfin home; refused without the feature.
     #[test]
+    #[cfg(feature = "jellyfin")]
     fn controlled_person_ignores_ambient_session_recovery() {
         let _g = crate::testlock::serial();
         struct ResetTape;

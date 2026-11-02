@@ -11,7 +11,7 @@
 //! authority. Network/PIN derivation remain worker operations; offline policy is retained below.
 use self::observation::Resource;
 use crate::plex::probe::{self, Outcome, PlaintextEligibility};
-use crate::plex::session::{self, PlaintextChoice, SourceRef};
+use crate::plex::session::{PlaintextChoice, SourceRef};
 use crate::origin::Origin;
 use crate::registry::ServerId;
 
@@ -103,27 +103,6 @@ pub struct UserTile {
     pub protected: bool, // needs a PIN
     pub admin: bool,
 }
-/// PMS credentials the main loop installs once the flow resolves.
-pub struct ReadyCreds {
-    pub(crate) install: owner::ReadyInstall,
-    /// **Where the primary server is** — an [`Origin`], not a `(host, port)` pair, because the
-    /// pair cannot say `https` and the host a certificate is issued for is not the address behind
-    /// it (`plex::origin`). Read straight off the stored [`session::ServerRef`], which is the
-    /// value discovery wrote and the one `can_go_local` gates.
-    pub origin: Origin,
-    /// The advertised address BEHIND `origin` — a dotted quad or v6 literal, never a
-    /// `plex.direct` hostname. `plex::IpVersion::of_host` can classify this even when `origin`'s
-    /// own host is a certificate NAME it cannot parse as an address (#95 step 8 / R3(a)).
-    pub address: String,
-    pub token: String,
-    /// The tier that won discovery, restored only after the main thread installs/re-points the
-    /// client because a fresh client deliberately starts with an unknown link.
-    pub tier: Option<probe::Location>,
-    /// The origin's resolve pin, read off the same stored record ([`session::ServerRef::resolve_pin`])
-    /// so the install this hands off dials the LAN name with no resolver, exactly as the boot
-    /// gate does.
-    pub pin: Option<crate::origin::ResolvePin>,
-}
 
 /// Append a line to the shared on-device event log (never a token — only ids/counts/status).
 
@@ -213,7 +192,7 @@ pub(crate) enum ServerRosterOutcome {
     Unreachable,
     /// Nothing was found to REGISTER, but at least the probes themselves ran (R2/A5) — `settled`
     /// carries every one, empty only when there was truly nothing to probe (no server named at
-    /// all). The owner commits these as registry-only [`RegistryPlan::Probe`]s: the roster itself
+    /// all). The owner commits these as observation-only probes: the roster itself
     /// is unchanged, so there is nothing to write to disk.
     NoReachable { settled: Vec<SettledProbe> },
     Reconcile {
@@ -264,71 +243,6 @@ impl ClientLifecycle {
         self.logical(expected.sid) == expected && crate::registry::commit_if_current(
             ServerId::from_raw(expected.sid), self.client, self.token_gen, || ()).is_some()
     }
-}
-
-/// Native registry effects executed only by the Session resource adapter, after its borrowed
-/// owner permit and (for an endpoint) exact captured Client lifecycle have been validated.
-pub(crate) fn execute_session_registry(plan: &owner::RegistryPlan) -> bool {
-    match plan {
-        owner::RegistryPlan::DevInstall { primary, extras, client_id } => {
-            install_captured_registry(&primary.origin(), &primary.address, &primary.token,
-                primary.tier, primary.resolve_pin().as_ref(), extras, Some(client_id));
-        }
-    }
-    true
-}
-
-/// Shared resource installer. Dev boot supplies its captured device identity so registration
-/// cannot mint/read a session file; legacy boot callers can use the already-loaded session cache.
-///
-/// `address` is the advertised address BEHIND `origin` (#95 step 8 / R3(a)): `origin.host()` is
-/// usually a `plex.direct` certificate NAME that `IpVersion::of_host` cannot parse, so deriving
-/// the IP family from it silently produced `None` on every real boot. The stored/advertised
-/// address is the one value that is actually a literal.
-pub(crate) fn install_captured_registry(origin: &Origin, address: &str, token: &str,
-    tier: Option<probe::Location>, pin: Option<&crate::origin::ResolvePin>, extras: &[SourceRef],
-    client_id: Option<&str>) {
-    // Applies `connection` atomically, inside the same registration write, on whichever branch
-    // runs (#95 step 8) — the primary and every extra used to register first and set the
-    // connection facts in a SEPARATE call afterward, which is exactly the gap `ConnectionFacts`
-    // exists to close.
-    let register = |machine: &str, origin: &Origin, token: &str,
-        pin: Option<&crate::origin::ResolvePin>, connection: crate::registry::ConnectionFacts| {
-        if let Some(cid) = client_id {
-            crate::registry::register_captured_origin_with_connection(machine, origin, token, pin, cid,
-                connection)
-        } else {
-            register_observed_origin(machine, origin, token, pin, connection, &session::peek().client_id)
-        }
-    };
-    let primary_connection =
-        crate::registry::ConnectionFacts::new(tier, crate::plex::IpVersion::of_host(address));
-    let id = register("", origin, token, pin, primary_connection);
-    crate::registry::set_current(id);
-    for source in extras {
-        let Some(origin) = source.origin() else { continue };
-        if source.token.is_empty() { continue; }
-        let connection = crate::registry::ConnectionFacts::new(
-            source.tier,
-            crate::plex::IpVersion::of_host(&source.address),
-        );
-        let id = register(&source.machine_id, &origin, &source.token,
-            source.resolve_pin().as_ref(), connection);
-        crate::registry::describe(id, &source.name, &source.shared_by, grant_of(source));
-    }
-}
-
-/// Register with the identity captured by the owner, including before a fresh login is durable.
-fn register_observed_origin(
-    machine_id: &str,
-    origin: &Origin,
-    token: &str,
-    pin: Option<&crate::origin::ResolvePin>,
-    connection: crate::registry::ConnectionFacts,
-    client_id: &str,
-) -> ServerId {
-    crate::registry::register_captured_origin_with_connection(
-        machine_id, origin, token, pin, client_id, connection)
 }
 
 pub(crate) enum ReadoutSurface {
@@ -409,6 +323,7 @@ pub(crate) struct SettledProbe {
     address: Option<String>,
 }
 /// The grant evidence a persisted [`SourceRef`] carries, for the registry describers.
+#[cfg(test)]
 fn grant_of(source: &SourceRef) -> crate::registry::GrantEvidence {
     crate::registry::GrantEvidence {
         owned: source.owned,

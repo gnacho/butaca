@@ -1405,7 +1405,9 @@ mod library_publication_tests {
     /// terminal `Some(false)` — which `pump_restore` answers by dropping the obligation outright.
     /// `refresh_content` now runs `RequestDetail` through `Bridge::metadata_run` in the same
     /// synchronous step that emits the restore, which is what the tap below observes.
+    /// The visible-refresh race is staged on a controlled Bridge, whose world is synthetic Jellyfin.
     #[test]
+    #[cfg(feature = "jellyfin")]
     fn visible_refresh_starts_before_queued_tick_or_store_change_can_consume_it() {
         requested_refresh_after_child(true, true);
     }

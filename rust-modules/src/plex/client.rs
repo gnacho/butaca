@@ -22,7 +22,6 @@ use super::origin::Origin;
 use super::probe::Location;
 use super::servers::ServerId;
 use crate::http::{self, Method};
-use std::net::IpAddr;
 use std::sync::atomic::{AtomicU32, AtomicU8, Ordering::Relaxed};
 use std::sync::RwLock;
 
@@ -164,21 +163,16 @@ fn next_gen() -> u32 {
 const LINK_UNKNOWN: u8 = 0;
 const IP_UNKNOWN: u8 = 0;
 
+/// The IP family a registration proved for a slot's origin. Only the test suite constructs the
+/// concrete values any more — the lib paths that classified hostnames went with the plex.tv
+/// account surface — but the type stays the live field type of [`ConnectionFacts`] and the
+/// wire vocabulary of the packed connection atomics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IpVersion {
+    #[cfg(test)]
     V4,
+    #[cfg(test)]
     V6,
-}
-
-impl IpVersion {
-    /// Classify a numeric peer address without pretending that an unresolved DNS name is IPv4.
-    /// `Origin::host()` is deliberately unbracketed, so both literal forms parse directly.
-    pub fn of_host(host: &str) -> Option<Self> {
-        match host.parse::<IpAddr>().ok()? {
-            IpAddr::V4(_) => Some(Self::V4),
-            IpAddr::V6(_) => Some(Self::V6),
-        }
-    }
 }
 
 /// `Location`/`IpVersion` ⇄ `u8`, so each tier fits in an atomic. **The one encode/decode pair for
@@ -208,7 +202,9 @@ pub(crate) fn decode_link(c: u8) -> Option<Location> {
 pub(crate) fn encode_ip(ip: Option<IpVersion>) -> u8 {
     match ip {
         None => IP_UNKNOWN,
+        #[cfg(test)]
         Some(IpVersion::V4) => 1,
+        #[cfg(test)]
         Some(IpVersion::V6) => 2,
     }
 }
@@ -350,7 +346,11 @@ impl Client {
     pub(crate) fn instance_gen(&self) -> u32 { self.instance_gen }
     /// Resource capability only. Revocation is irreversible for this incarnation and never
     /// changes a logical result; a controlled replay must supply that result through ingress.
+    /// The one caller was the controlled DevPms install's replay arm, gone with that world
+    /// (#166); the replay tests still deny IO through it.
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn disable_data_io(&self) { self.data_io_disabled.store(true, Relaxed); }
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn denied_data_requests(&self) -> u32 { self.denied_data_requests.load(Relaxed) }
     fn may_send(&self) -> bool {
         if !self.data_io_disabled.load(Relaxed) { return true; }
@@ -1038,9 +1038,6 @@ mod tests {
         assert_eq!(c.ip_version(), Some(IpVersion::V4));
         c.set_connection(Location::Relay, Some(IpVersion::V6));
         assert_eq!(c.ip_version(), Some(IpVersion::V6));
-        assert_eq!(IpVersion::of_host("192.0.2.1"), Some(IpVersion::V4));
-        assert_eq!(IpVersion::of_host("2001:db8::1"), Some(IpVersion::V6));
-        assert_eq!(IpVersion::of_host("server.example"), None);
     }
 
     /// The token generation is per-CLIENT (it was a process-global `TOKEN_GEN`). Two properties

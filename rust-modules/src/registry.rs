@@ -89,6 +89,7 @@ pub(crate) struct ConnectionFacts {
     pub ip: Option<IpVersion>,
 }
 
+#[cfg(test)]
 impl ConnectionFacts {
     pub(crate) fn new(tier: Option<Location>, ip: Option<IpVersion>) -> Self {
         Self { tier, ip }
@@ -493,6 +494,7 @@ pub fn current() -> ServerId {
 /// Point `client()` at another registered server. `false` (and no change) for an id that names
 /// no client or only recovery metadata whose origin cannot carry a credential in this build —
 /// retargeting to either would make the hot-path `client()` answer unusable connection state.
+#[cfg(test)]
 pub fn set_current(id: ServerId) -> bool {
     // `CURRENT` is a crate global; a test that flips it outside `crate::testlock::serial()` lands
     // in the middle of some other module's test — see `lib.rs::testlock`.
@@ -673,6 +675,7 @@ fn current_lifecycle_index(
 /// `grant` is the EVIDENCE ([`GrantEvidence`]), authoritative like the credit and for the same
 /// reason: every caller here holds a roster row plex.tv has just answered with, and the case that
 /// matters is the one where the stored answer was wrong.
+#[cfg(test)]
 pub fn describe(id: ServerId, name: &str, handle: &str, grant: GrantEvidence) {
     let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
     describe_locked(id, name, Some(handle), grant);
@@ -688,6 +691,7 @@ pub fn describe(id: ServerId, name: &str, handle: &str, grant: GrantEvidence) {
 /// The read-modify-write is inside the critical section for the ordinary reason: [`describe_name`]
 /// reads `facts` and writes back a value derived from it, and an authoritative describe landing
 /// between the two would be overwritten by the stale credit it had just replaced.
+#[cfg(test)]
 fn describe_locked(id: ServerId, name: &str, credit: Option<&str>, grant: GrantEvidence) {
     let Some(i) = id.index().filter(|_| client_for(id).is_some()) else {
         return;
@@ -755,6 +759,7 @@ pub fn describe_name(id: ServerId, name: &str) {
 }
 
 /// `new` when it says something, else whatever was already known.
+#[cfg(test)]
 fn pick(new: &str, old: Option<&str>) -> String {
     if new.is_empty() {
         old.unwrap_or_default().to_owned()
@@ -872,24 +877,6 @@ pub fn register(machine_id: &str, host: &str, port: i32, token: &str) -> ServerI
 /// beside it (`ResolvePin::for_origin`), `None` otherwise. The registry records it on the
 /// published `Client` for the control plane and in `crate::net::resolve` for the media plane;
 /// that table is append-only, so a pin is never retracted — see its doc for why that is sound.
-/// Captured bootstrap identity: same registry/refresh path, without a lazy session-file read.
-///
-/// Carries connection facts to apply atomically (#95 step 8) — the dev-boot / captured-bootstrap
-/// twin of [`register_origin`]. Every production caller already knows a tier (or `None`) at
-/// registration time, so there is no plain, connection-less variant to keep in sync.
-pub(crate) fn register_captured_origin_with_connection(machine_id: &str, origin: &Origin,
-    token: &str, pin: Option<&ResolvePin>, client_id: &str, connection: ConnectionFacts) -> ServerId {
-    let policy = CredentialPolicy::build();
-    let id = register_lazy(
-        machine_id, origin, token, pin, connection, policy, &|| client_id.to_owned(),
-    );
-    #[cfg(not(test))]
-    if crate::grant::allowed_for(policy, machine_id, origin) {
-        crate::plex::registry_seam::refresh_serverinfo(id);
-    }
-    id
-}
-
 /// Carries connection facts (#95 step 8) to apply to the published `Client` AT registration, in
 /// the same write that creates or re-points its slot — never as a separate post-hoc call a caller
 /// can forget or that a re-point can race. `connection`'s doc explains why `None` means "leave
@@ -955,7 +942,9 @@ pub(crate) fn register_with_client_id(
 /// PIN, and for grading [`ConnectionFacts`]'s "leave unchanged on retoken" / "sets both on
 /// re-point" semantics (#95 step 8). Same contract as every `_with_client_id` seam: no session
 /// file, no worker — a caller that genuinely knows nothing about the connection passes
-/// `ConnectionFacts::default()` explicitly.
+/// `ConnectionFacts::default()` explicitly. Its product callers were the DevPms installs, gone
+/// with that world (#166); the roster install rides `register_observed_origin`.
+#[cfg(test)]
 pub(crate) fn register_pinned_with_client_id(
     machine_id: &str,
     origin: &Origin,

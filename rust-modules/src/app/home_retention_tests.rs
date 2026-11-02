@@ -612,8 +612,11 @@ fn store_work_is_addressed_and_idle_polling_does_not_invent_a_change() {
 fn onboard_frame_lands_owned_discovery_before_capturing_its_directory() {
     let _guard = crate::testlock::serial();
     crate::registry::reset_for_test();
-    let sid = crate::registry::register_with_client_id(
-        "onboard-same-tick", "127.0.0.1", 9, "synthetic", "fixture");
+    // The flavor's roster is the installed client's single SERVER_ID source; the queued
+    // discovery has to name it to survive the pump's roster sync.
+    crate::jellyfin::install(crate::jellyfin::JfClient::new(
+        crate::origin::Origin::http("127.0.0.1", 1), "dev-1".into()));
+    let sid = crate::jellyfin::SERVER_ID;
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     rig.stores.browse.borrow_mut().queue_discovery_for_test(sid, true);
@@ -626,6 +629,7 @@ fn onboard_frame_lands_owned_discovery_before_capturing_its_directory() {
         "the pre-capture owner pump publishes discovery to Onboard in the same tick");
     assert_eq!(rig.browse_directory().sources()[0].0, sid);
     assert_eq!(rig.browse_directory().discovery(), crate::browse::SecFetch::Ready);
+    crate::jellyfin::uninstall();
     crate::registry::reset_for_test();
 }
 

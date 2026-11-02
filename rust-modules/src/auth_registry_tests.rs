@@ -20,16 +20,14 @@ fn source(machine_id: &str, owned: bool, token: &str) -> SourceRef {
 
 fn install_stored_source(source: &SourceRef, policy: CredentialPolicy) -> ServerId {
     let origin = source.origin().expect("stored source has a well-formed origin");
+    let pin = crate::origin::ResolvePin::for_origin(&origin, &source.address);
     let id = crate::registry::register_pinned_with_client_id_and_policy(
         &source.machine_id,
         &origin,
         &source.token,
-        source.resolve_pin().as_ref(),
+        pin.as_ref(),
         "stored-install-test",
-        crate::registry::ConnectionFacts::new(
-            source.tier,
-            crate::plex::IpVersion::of_host(&source.address),
-        ),
+        crate::registry::ConnectionFacts::default(),
         policy,
     );
     crate::registry::describe(id, &source.name, &source.shared_by, grant_of(source));
@@ -107,30 +105,6 @@ fn stored_credential_policy_rejection_retains_insecure_recovery_metadata() {
     assert_eq!(crate::registry::ids().collect::<Vec<_>>(), vec![id]);
     assert_eq!(crate::registry::facts(id).map(|f| f.name.as_str()), Some("recover-http"));
     assert_eq!(crate::registry::probe_result(id), Some(Outcome::InsecureOnly));
-    crate::registry::reset_for_test();
-}
-
-/// #95 step 8 / A2: the boot primary install (`install_captured_registry`, what
-/// `RegistryPlan::DevInstall` and the boot gate's `install_pms_owned` both call) derives the
-/// IP family from the ADVERTISED ADDRESS, not `origin.host()` — a `plex.direct` origin's host
-/// is a certificate NAME `IpVersion::of_host` cannot parse as a literal, which is exactly why
-/// R3(a) found this reading unknown on every real boot before the fix. The stored tier is
-/// applied in the same write.
-#[test]
-fn a_boot_primary_install_of_a_plex_direct_origin_derives_ip_from_the_stored_address() {
-    let _g = crate::testlock::serial();
-    crate::registry::reset_for_test();
-    let origin = Origin::parse("https://192-168-1-50.h4sh.plex.direct:32400").unwrap();
-    install_captured_registry(&origin, "192.168.1.50", "tok",
-        Some(probe::Location::Local), None, &[], Some("cid"));
-    let id = crate::registry::current();
-    let client = crate::registry::client_for(id).expect("the primary is registered and current");
-    assert_eq!(client.link(), Some(probe::Location::Local), "the stored tier");
-    assert_eq!(
-        client.ip_version(),
-        Some(crate::plex::IpVersion::V4),
-        "derived from the address, not the plex.direct hostname `origin.host()` carries"
-    );
     crate::registry::reset_for_test();
 }
 

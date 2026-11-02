@@ -76,9 +76,9 @@ impl Observation {
 
     pub(crate) fn matches_request(&self, _pending: &owner::Pending, _terminal: bool) -> bool {
         // Every variant this stream can still carry reported on the roster/endpoint/registry
-        // workers the plex.tv account surface lost (#190): no observation kind can match the
-        // one work item the owner still admits (the DevPms dev boundary, which no worker
-        // observes), so nothing ever matches a pending request any more.
+        // workers the plex.tv account surface lost (#190), and the union of #190 and #45 left
+        // the owner no work that any worker observes — so nothing ever matches a pending
+        // request any more.
         false
     }
 }
