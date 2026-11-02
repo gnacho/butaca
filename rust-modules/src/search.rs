@@ -345,7 +345,7 @@ const SETTLE_S: f32 = 0.25;
 /// so the debounce is an exact integer comparison rather than a summed `f32`.
 const SETTLE_US_TARGET: u32 = (SETTLE_S * 1_000_000.0) as u32;
 
-/// Items asked for **per hub** — `plex-openapi.json`: "The number of items to return per hub. 3 if
+/// Items asked for **per hub** — `the upstream API reference`: "The number of items to return per hub. 3 if
 /// not specified", which is why the parameter is always sent at all.
 ///
 /// **Per HUB is the word that decides the number, and it is not [`SHELF_MAX`].** A search response

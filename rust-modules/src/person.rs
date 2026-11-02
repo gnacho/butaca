@@ -100,7 +100,7 @@ const SHELF_MAX: usize = crate::ui::card_row::MAX_ROW_ITEMS;
 const MAX_ROLES: usize = 3;
 
 /// Items asked of each hub in the cross-server resolve. `/hubs/search`'s `limit` is per-hub and
-/// defaults to **3** (`docs/plex-openapi.json`), which is too few to rely on: a search for a
+/// defaults to **3** (`the upstream Plex API reference`), which is too few to rely on: a search for a
 /// surname returns every actor who shares it, and the one we are joining on has to be among them.
 /// It is not a display list — nothing is drawn from this response but one id.
 const RESOLVE_LIMIT: i64 = 12;
@@ -695,7 +695,7 @@ fn sources(origin: ServerId, key: &str, name: &str) -> Vec<Src> {
 /// `want`, and the server's order decides nothing.
 ///
 /// Hubs are matched on either `hubIdentifier` or `type` because `/hubs/search` sends the same token
-/// in both (`docs/plex-openapi.json`'s own example), and `Hub::directory` is keyed by that word.
+/// in both (`the upstream Plex API reference`'s own example), and `Hub::directory` is keyed by that word.
 pub(crate) fn resolve_local(
     mc: &crate::plex::MediaContainer,
     name: &str,
