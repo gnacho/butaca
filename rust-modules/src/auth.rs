@@ -180,6 +180,8 @@ pub(crate) enum RegistryProgress {
     },
 }
 
+/// Canon-only like `RegistryProgress` above: a roster observation no worker produces, kept for
+/// the frozen observation vocabulary old recordings replay.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) struct ServerRosterProgress {
     epoch: u64,

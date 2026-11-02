@@ -4,6 +4,10 @@
 use super::*;
 use serde::{Deserialize, Serialize};
 
+/// Canon-only since the plex.tv account surface was removed (#190): nothing constructs any
+/// variant any more, but old recordings replay `SessionArrival::Data` payloads of every one of
+/// them, so both their serde shapes and every arm of `write` — part of the frozen
+/// `SessionInit::write` digest those replays pin — must stay exactly as recorded.
 #[derive(Serialize, Deserialize)]
 pub(crate) enum Observation {
     Registry(RegistryProgress),
@@ -11,6 +15,7 @@ pub(crate) enum Observation {
     Endpoint(EndpointFact),
 }
 
+/// Canon-only (no producer): the endpoint arm of the frozen observation vocabulary above.
 #[derive(Serialize, Deserialize)]
 pub(crate) struct EndpointFact {
     pub epoch: u64,
@@ -149,6 +154,10 @@ fn write_resources(w: &mut crate::ui::machine::Canon, resources: &[Resource]) {
 
 use std::sync::Arc;
 
+/// The one live import path into `plex/models.rs` from outside `plex/`: `auth.rs` names `Resource`
+/// through it, and the frozen `resources` serde adapters + `write_resources` below type their
+/// Canon-only vocabulary with it. The models types themselves are Canon-only since #190 (no
+/// producer; old recordings deserialize them).
 pub(crate) use crate::plex::models::{Connection, Resource};
 
 pub(super) mod resources {

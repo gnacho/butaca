@@ -580,8 +580,8 @@ pub struct Session {
     /// and at the credentials handoff; written by `player::set_audio_enhancements`. Soft-parsed
     /// like every preference in this struct: an unknown shape costs the preference, never the
     /// credentials.
-    #[serde(default, deserialize_with = "de_soft_audio_enhancements", skip_serializing_if = "crate::plex::AudioEnhancements::is_none")]
-    pub(crate) audio_enhancements: crate::plex::AudioEnhancements,
+    #[serde(default, deserialize_with = "de_soft_audio_enhancements", skip_serializing_if = "crate::playback::AudioEnhancements::is_none")]
+    pub(crate) audio_enhancements: crate::playback::AudioEnhancements,
     #[serde(flatten, default, skip_serializing_if = "OpaqueExtensions::is_empty")]
     pub(crate) extensions: OpaqueExtensions,
 
@@ -634,8 +634,8 @@ struct CanonicalSessionPreferences {
     subtitle_tone: SubtitleTone,
     #[serde(default, deserialize_with = "de_soft_vec", skip_serializing_if = "Vec::is_empty")]
     plaintext_consent: Vec<PlaintextConsent>,
-    #[serde(default, deserialize_with = "de_soft_audio_enhancements", skip_serializing_if = "crate::plex::AudioEnhancements::is_none")]
-    audio_enhancements: crate::plex::AudioEnhancements,
+    #[serde(default, deserialize_with = "de_soft_audio_enhancements", skip_serializing_if = "crate::playback::AudioEnhancements::is_none")]
+    audio_enhancements: crate::playback::AudioEnhancements,
     /// Parsed only so a future preference does not make the known fields disappear. The shipping
     /// adapter merges these opaque keys from the current DB8 public payload before every rewrite;
     /// they are not promoted into the Session domain object.
@@ -667,7 +667,7 @@ impl Default for CanonicalSessionPreferences {
             trailer_autoplay: true,
             subtitle_tone: SubtitleTone::White,
             plaintext_consent: Vec::new(),
-            audio_enhancements: crate::plex::AudioEnhancements::NONE,
+            audio_enhancements: crate::playback::AudioEnhancements::NONE,
             extensions: BTreeMap::new(),
         }
     }
@@ -921,7 +921,7 @@ pub(crate) fn set_subtitle_tone(tone: SubtitleTone) -> bool {
 
 /// Persist the Plex Pass audio-DSP preference (issue #266) through [`update`], merging with the
 /// current disk record — the same door as [`set_subtitle_tone`].
-pub(crate) fn set_audio_enhancements(enhancements: crate::plex::AudioEnhancements) -> bool {
+pub(crate) fn set_audio_enhancements(enhancements: crate::playback::AudioEnhancements) -> bool {
     update(|cur| {
         if cur.audio_enhancements == enhancements {
             return None;
@@ -1800,14 +1800,14 @@ where
 
 /// The audio-enhancement toggle is a preference too: an unknown shape degrades to both flags
 /// off rather than failing the enclosing [`Session`].
-fn de_soft_audio_enhancements<'de, D>(d: D) -> Result<crate::plex::AudioEnhancements, D::Error>
+fn de_soft_audio_enhancements<'de, D>(d: D) -> Result<crate::playback::AudioEnhancements, D::Error>
 where
     D: Deserializer<'de>,
 {
     let Ok(v) = serde_json::Value::deserialize(d) else {
-        return Ok(crate::plex::AudioEnhancements::NONE);
+        return Ok(crate::playback::AudioEnhancements::NONE);
     };
-    Ok(serde_json::from_value::<crate::plex::AudioEnhancements>(v).unwrap_or(crate::plex::AudioEnhancements::NONE))
+    Ok(serde_json::from_value::<crate::playback::AudioEnhancements>(v).unwrap_or(crate::playback::AudioEnhancements::NONE))
 }
 
 /// A preference switch: garbage degrades to off rather than failing the enclosing [`Session`].
@@ -1921,11 +1921,11 @@ impl Session {
         next
     }
 
-    pub(crate) fn audio_enhancements(&self) -> crate::plex::AudioEnhancements {
+    pub(crate) fn audio_enhancements(&self) -> crate::playback::AudioEnhancements {
         self.audio_enhancements
     }
 
-    pub(crate) fn with_audio_enhancements(&self, enhancements: crate::plex::AudioEnhancements) -> Self {
+    pub(crate) fn with_audio_enhancements(&self, enhancements: crate::playback::AudioEnhancements) -> Self {
         let mut next = self.clone();
         next.audio_enhancements = enhancements;
         next
@@ -2660,20 +2660,20 @@ mod cache_timing_tests {
         let _serial = crate::testlock::serial();
         let _session = test_support::TempSession::new("audio-enhancements");
         save(&test_support::signed_in());
-        assert_eq!(load().audio_enhancements(), crate::plex::AudioEnhancements::NONE, "absent field = NONE");
+        assert_eq!(load().audio_enhancements(), crate::playback::AudioEnhancements::NONE, "absent field = NONE");
 
-        let enh = crate::plex::AudioEnhancements { boost_dialog: true, normalize_loudness: false };
+        let enh = crate::playback::AudioEnhancements { boost_dialog: true, normalize_loudness: false };
         crate::player::set_audio_enhancements(enh);
         crate::storage_worker::drain_for_test();
         let saved = load();
         assert_eq!(saved.audio_enhancements(), enh);
         assert_eq!(saved.client_id, test_support::signed_in().client_id, "merged, not replaced");
 
-        crate::player::restore_audio_enhancements(crate::plex::AudioEnhancements::NONE);
+        crate::player::restore_audio_enhancements(crate::playback::AudioEnhancements::NONE);
         crate::player::restore_audio_enhancements(saved.audio_enhancements());
         assert_eq!(crate::player::audio_enhancements(), enh, "boot restores what was saved");
         assert!(!set_audio_enhancements(enh), "an unchanged preference is not rewritten");
-        crate::player::restore_audio_enhancements(crate::plex::AudioEnhancements::NONE);
+        crate::player::restore_audio_enhancements(crate::playback::AudioEnhancements::NONE);
     }
 
     #[test]
@@ -4871,7 +4871,7 @@ mod audio_enhancements_tests {
     #[test]
     fn audio_enhancements_absent_key_is_none() {
         let session: Session = serde_json::from_value(serde_json::json!({})).unwrap();
-        assert_eq!(session.audio_enhancements(), crate::plex::AudioEnhancements::NONE);
+        assert_eq!(session.audio_enhancements(), crate::playback::AudioEnhancements::NONE);
     }
 
     #[test]
@@ -4888,7 +4888,7 @@ mod audio_enhancements_tests {
             });
             assert_eq!(
                 session.audio_enhancements(),
-                crate::plex::AudioEnhancements::NONE,
+                crate::playback::AudioEnhancements::NONE,
                 "{value}"
             );
         }
@@ -4897,7 +4897,7 @@ mod audio_enhancements_tests {
     #[test]
     fn audio_enhancements_none_not_serialized() {
         let session = Session::default();
-        assert_eq!(session.audio_enhancements(), crate::plex::AudioEnhancements::NONE);
+        assert_eq!(session.audio_enhancements(), crate::playback::AudioEnhancements::NONE);
         let json = serde_json::to_string(&session).unwrap();
         assert!(
             !json.contains("audio_enhancements"),
@@ -4915,9 +4915,9 @@ mod audio_enhancements_tests {
     #[test]
     fn audio_enhancements_round_trip() {
         for enh in [
-            crate::plex::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
-            crate::plex::AudioEnhancements { boost_dialog: false, normalize_loudness: true },
-            crate::plex::AudioEnhancements { boost_dialog: true, normalize_loudness: true },
+            crate::playback::AudioEnhancements { boost_dialog: true, normalize_loudness: false },
+            crate::playback::AudioEnhancements { boost_dialog: false, normalize_loudness: true },
+            crate::playback::AudioEnhancements { boost_dialog: true, normalize_loudness: true },
         ] {
             let session = Session::default().with_audio_enhancements(enh);
             assert_eq!(session.audio_enhancements(), enh);
@@ -4969,7 +4969,7 @@ mod audio_enhancements_tests {
                 .unwrap_or_else(|e| panic!("{}: {e}", manifest_path.display()));
             assert_eq!(
                 session.audio_enhancements(),
-                crate::plex::AudioEnhancements::NONE,
+                crate::playback::AudioEnhancements::NONE,
                 "{}: a fixture predating #266 must default both toggles off",
                 manifest_path.display()
             );

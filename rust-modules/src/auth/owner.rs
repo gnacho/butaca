@@ -56,6 +56,9 @@ pub(crate) struct SessionEnvelope {
     pub outcome: SessionArrival,
 }
 
+/// `Data` is Canon-only since #190: nothing constructs it any more, but old recordings replay
+/// envelopes carrying it, so `Observation` and its serde/Canon vocabulary survive with no
+/// producer (see `super::observation::Observation`).
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) enum SessionArrival {
     Data(#[serde(with = "super::observation::arc")] Arc<super::observation::Observation>),
