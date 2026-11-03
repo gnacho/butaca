@@ -23,16 +23,6 @@ impl Default for Owner {
     }
 }
 
-/// Land whatever the workers left, then tick — the combined pass the legacy Home drove each
-/// frame. Production splits it (the adapter drains with [`take_landings`] and applies through
-/// `apply_landing`; the store's [`tick`] only counts down), so it survives here as the one
-/// driver these landing/back-off contracts are phrased in.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(super) fn pump(state: &mut PmsState, adapter: &Arc<PmsAdapter>, dt: f32) {
-    let a = Arc::clone(adapter);
-    let _outcome = pump_with_landings(state, adapter, dt, move || take_landings(&a));
-}
-
 pub(super) fn pool(state: &PmsState) -> &Vec<HeroSlot> {
     &published_home(state).heroes
 }
@@ -53,30 +43,6 @@ pub(super) fn hero_pool_item(state: &PmsState, i: usize) -> Option<&PmsMovie> {
 /// this.
 pub(super) fn hero_pool_source(state: &PmsState, i: usize) -> &str {
     pool(state).get(i).map(|s| s.source.as_str()).unwrap_or("")
-}
-
-/// title of hub `i` (e.g. "Continue Watching")
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(super) fn hub_title(state: &PmsState, i: usize) -> &str {
-    hubs(state).get(i).map(|h| h.title.as_str()).unwrap_or("")
-}
-
-/// Handle of the server hub `i` came from ("friend"), or **empty** for the signed-in user's
-/// own server — see [`HubRow::source`].
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(super) fn hub_source(state: &PmsState, i: usize) -> &str {
-    hubs(state).get(i).map(|h| h.source.as_str()).unwrap_or("")
-}
-
-/// whether hub `i` is the merged Continue Watching shelf (its tiles play directly on OK, so
-/// the home grid stamps the play-hint badge on them). Matched on the locale-independent
-/// hubIdentifier, through the one identity function the publication itself uses.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(super) fn hub_is_continue(state: &PmsState, i: usize) -> bool {
-    hubs(state)
-        .get(i)
-        .and_then(|h| stable_hub_identity(h, catalog(state)))
-        .is_some_and(|id| matches!(id, HubIdentity::ContinueWatching))
 }
 
 pub(super) fn sid(slot: u16) -> ServerId {
@@ -100,26 +66,6 @@ pub(super) fn seed(state: &mut PmsState, srcs: Vec<Src>) {
     remember_roster(state, &BrowseScope::standalone());
     state.seen_facts = facts_key();
     commit(state, build);
-}
-
-/// A landing from the worker this source has out right now (current generation and seq) — what
-/// a real fetch would post. `None` is a failure.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(super) fn land(state: &PmsState, adapter: &PmsAdapter, slot: u16, build: Option<SourceBuild>) {
-    let s = sid(slot);
-    let seq = state.srcs.iter().find(|x| x.sid == s).map(|x| x.seq).unwrap_or(0);
-    adapter
-        .results
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .push(Landing {
-            gen: state.hub_gen,
-            seq,
-            sid: s,
-            client: None,
-            token_gen: 0,
-            build,
-        });
 }
 
 /// A drawable catalog row of one server. `thumb` is what `project` requires of a row, `art`

@@ -1426,23 +1426,6 @@ pub(crate) fn cancel_adaptive_reload() {
     crate::route::cancel_user_route_intent(crate::route::UserRouteIntent::AdaptiveReload);
 }
 
-/// Whether a route change has scheduled an encoder rebuild. Test-visible so route policy can be
-/// graded independently of the pump's frame timing.
-#[cfg(test)]
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(crate) fn pending_transcode_refresh() -> bool {
-    crate::route::pending_user_route_intent(crate::route::UserRouteIntent::Retranscode)
-}
-
-// Dev-only: used only by `route::decision`'s `#[cfg(feature = "devtriggers")]` tests (a store
-// build's `CredentialPolicy::HttpsOnly` refuses those tests' plaintext loopback PMS fixtures; see
-// the comment on that module's first gated test).
-#[cfg(all(test, feature = "devtriggers"))]
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(crate) fn pending_adaptive_reload() -> bool {
-    crate::route::pending_user_route_intent(crate::route::UserRouteIntent::AdaptiveReload)
-}
-
 /// Route-policy tests share the process-wide player mailbox even though no Engine pumps it.
 /// Empty it between cases so one test's requested handoff cannot become the next test's input.
 #[cfg(test)]

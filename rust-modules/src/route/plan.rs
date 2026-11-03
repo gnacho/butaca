@@ -187,41 +187,6 @@ impl CarriedAudio {
     }
 }
 
-/// The track a route carries, as [`CarriedAudio`] — the fetched stream whose id the route names on
-/// the wire (`audioStreamID` / the PUT / the direct-play pick). `sid <= 0` (server default) or a
-/// track the fetched list does not contain is `None`: facts unknown, and nothing is invented.
-///
-/// `immersive` survives only on a route that feeds the FILE's own audio (`feeds_source` — direct
-/// play), for `Plan::immersive`'s reason: `contents.immersive` describes the elementary stream the
-/// pipeline decodes, and on a remux or a transcode that is the server's output, not this track.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-fn carried_track(
-    tracks: &[crate::metadata::Stream],
-    sid: i64,
-    ordinal: i32,
-    feeds_source: bool,
-) -> Option<CarriedAudio> {
-    let stream = tracks.iter().find(|t| sid > 0 && t.id == sid)?;
-    let mut carried = CarriedAudio::from_stream(stream, ordinal);
-    carried.immersive &= feeds_source;
-    Some(carried)
-}
-
-/// The track a PLAN installs as `Session::cur_audio`: [`carried_track`] when the stream was read,
-/// else [`CarriedAudio::named`] for a nonzero id the route still names on the wire. Unlike an
-/// Original candidate (which stays `None`, so a recovery falls back to the source codec), the
-/// playing session must keep the id it asked for even when nothing else about it is known.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-fn plan_track(
-    tracks: &[crate::metadata::Stream],
-    sid: i64,
-    ordinal: i32,
-    feeds_source: bool,
-) -> Option<CarriedAudio> {
-    carried_track(tracks, sid, ordinal, feeds_source)
-        .or_else(|| (sid != 0).then(|| CarriedAudio::named(sid, ordinal)))
-}
-
 /// Everything needed to restore Auto's zero-video-encode state after HLS. `url` is the cold-start
 /// playback target; `probe_part` is the raw Part key used to bind runtime measurement and direct
 /// playback to the exact live HLS Streaming Resource. `direct` says whether the Part itself is
@@ -459,21 +424,6 @@ pub(super) fn auto_uses_hls(q: Quality, auto_original: bool) -> bool {
 }
 
 
-/// The shared source plan owns both the finite object and its conservation deadline. Keep this
-/// narrow wrapper for the route tests and for converting Plex's signed bitrate into ABR units.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(super) fn remote_probe_plan(source_kbps: i64) -> Option<crate::abr::SourceProbePlan> {
-    crate::abr::source_probe_plan(
-        u32::try_from(source_kbps).ok()?,
-        crate::abr::PROBE_BUDGET_MS,
-    )
-}
-
-
-#[cfg(test)]
-pub(super) fn remote_probe_target_bytes(source_kbps: i64) -> Option<usize> {
-    remote_probe_plan(source_kbps).map(|plan| plan.target_bytes)
-}
 
 /// **Two ceilings mean the stricter one**, per flavor, and this is the only place the two are put
 /// together. A ceiling can only ever REMOVE a flavor: a fast link cannot restore what a low rung
@@ -561,31 +511,6 @@ pub(super) fn desired_audio(
         pref
     } else {
         crate::playback::AudioEnhancements::NONE
-    }
-}
-
-/// Will a subtitle be on screen for this item? The explicit pick, or the sidecar the direct-play
-/// landing restores on its own (`metadata::server_selected_sidecar` — the same predicate
-/// `player::sidecar::restore_server_selection` switches it on with). Mid-play the fact is
-/// `cur_sub_sid != 0` instead; this is the resolve-time half.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(super) fn renders_subtitle(
-    item: Option<&crate::metadata::PlayingItem>,
-    sub_pick: Option<(i64, i32)>,
-) -> bool {
-    sub_pick.is_some() || item.is_some_and(|i| crate::metadata::server_selected_sidecar(i).is_some())
-}
-
-/// The flavour ceiling an enhancement imposes, composed ONLY through [`flavors_allowed`] — the same
-/// door the link and the quality rung go through, so it can only ever remove a flavour. An
-/// enhanced route is a remux by definition (M1: PMS answers the params with a Part transcode —
-/// video copy, audio re-encoded with the DSP), so asking for one denies direct play and nothing
-/// else.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(super) fn enhancement_policy(audio: crate::playback::AudioEnhancements) -> crate::plex::LinkPolicy {
-    crate::plex::LinkPolicy {
-        direct_play: !audio.any(),
-        remux: true,
     }
 }
 
@@ -716,18 +641,7 @@ pub(crate) enum PlayVerdict {
 /// The limitation a Force Direct Play verdict names. Each one carries the same recovery step.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ForcedFailure {
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    NoOriginal,
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    Container,
     Video,
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    Audio,
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    Unauthorized,
-    /// The resolve reached the transcode path, which Force never takes.
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    OpenFailed,
     /// A later audio-track pick needs conversion.
     AudioNeedsConversion,
 }
@@ -740,12 +654,7 @@ impl PlayVerdict {
             Self::Server(sentence) => sentence,
             Self::DirectPlayDisabled => msg::widgets_verdict_direct_play_disabled(),
             Self::Forced(why) => match why {
-                ForcedFailure::NoOriginal => msg::widgets_verdict_forced_no_original(),
-                ForcedFailure::Container => msg::widgets_verdict_forced_container(),
                 ForcedFailure::Video => msg::widgets_verdict_forced_video(),
-                ForcedFailure::Audio => msg::widgets_verdict_forced_audio(),
-                ForcedFailure::Unauthorized => msg::widgets_verdict_forced_unauthorized(),
-                ForcedFailure::OpenFailed => msg::widgets_verdict_forced_open(),
                 ForcedFailure::AudioNeedsConversion => msg::widgets_verdict_forced_audio_conversion(),
             },
         }
@@ -819,30 +728,6 @@ pub(crate) struct UpNext {
 }
 
 
-/// Build the Up Next descriptor from a queue row. Episodes only: `continuous=1` on a movie
-/// returns just the movie itself (verified live — total count 1), and "up next" is a show idea.
-/// The gate belongs HERE, on the one-item control — the retained row list is deliberately not
-/// episode-gated, because a queue list has to be able to show whatever the queue holds.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(super) fn up_next_of(r: &crate::playback::QueueRow) -> Option<UpNext> {
-    if r.kind != "episode" || r.rk.is_empty() {
-        return None;
-    }
-    Some(UpNext {
-        rk: r.rk.clone(),
-        part: r.part.clone(),
-        vcodec: r.vcodec.clone(),
-        acodec: r.acodec.clone(),
-        show_title: r.show_title.clone(),
-        ep_title: r.title.clone(),
-        season: r.season,
-        index: r.index,
-        thumb: r.thumb.clone(),
-        dur_ms: r.dur_ms,
-        resume_ms: r.resume_ms,
-    })
-}
-
 
 /// Build the Up Next descriptor from Jellyfin's `GET /Shows/NextUp` answer (issues #41/#42) —
 /// the episode the server says follows the one now playing, in the same shape the Plex lane
@@ -895,10 +780,6 @@ pub(crate) struct ResolveEnv {
     /// [`Session::cur_sid`]): captured on the main thread with everything else here, because the
     /// resolve worker must not read the current server itself.
     pub sid: ServerId,
-    /// `machine_id`, but only when it was learned from `sid`'s own server (`machine_sid`);
-    /// otherwise empty, so the worker re-asks rather than addressing a queue to the wrong machine.
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub machine_id: String,
     pub audio_sid: i64,
     pub sub_sid: i64,
     /// A retry carries the viewer's explicit Off as well as a positive subtitle id.
@@ -932,15 +813,6 @@ pub(crate) struct ResolveEnv {
     /// ever reaches the wire through [`desired_audio`]. A preview and a start-failure retry
     /// capture `NONE` (`request_play_inner`).
     pub audio_enhancements: crate::playback::AudioEnhancements,
-    /// `serverinfo::subscription_of(sid)` at the request — for the OFFERING of the enhancement only
-    /// (I1/I8), never a flavour or profile input.
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub pass: crate::plex::serverinfo::Subscription,
-    /// Test-only replacement for the process cache. Capability is an explicit policy input in
-    /// regressions; no test mutates the production `OnceLock` or makes the whole host a DV set.
-    #[cfg(test)]
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub(super) dv_capability: Option<crate::webos::caps::DvCapability>,
 }
 
 
@@ -1120,8 +992,6 @@ pub(crate) struct Plan {
     pub verdict: Option<PlayVerdict>,
     /// the episode queued after this one, straight off the `continuous=1` PlayQueue
     pub up_next: Option<UpNext>,
-    /// that same PlayQueue's whole returned window, projected on the worker (see `queue`)
-    pub queue: Vec<crate::playback::QueueRow>,
 }
 
 
@@ -1180,97 +1050,6 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     build_stream_jellyfin(rk, part, vcodec, acodec, env)
 }
 
-
-/// The direct-play plan: the pipeline decodes the SOURCE codecs natively, so the Load payload uses
-/// them (h264/hevc + the chosen audio track's codec). If a specific track was picked (aidx >= 0),
-/// tell the demuxer to feed that stream — by CONTAINER ordinal, not the list position
-/// (audio_ordinal sorts on PMS Stream.index). A function of its own because [`build_stream`]
-/// reaches it twice: the ordinary Original, and an Original whose enhanced remux the server
-/// refused (issue #266's fallback).
-#[allow(clippy::too_many_arguments)]
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-fn fill_direct_plan(
-    plan: &mut Plan,
-    client: &crate::plex::Client,
-    part: &str,
-    session: &str,
-    vcodec: &str,
-    acodec: &str,
-    audio_sel: Option<&(i32, String, i64)>,
-    dovi: crate::metadata::Dovi,
-    dv_decision: crate::metadata::DvDecision,
-    sub_pick: Option<(i64, i32)>,
-) {
-    let (aidx, achosen, asid) = audio_sel.cloned().unwrap_or((-1, acodec.to_string(), 0));
-    // source fps for the Load esInfo — from the playing item's own store (present for the
-    // straight-from-Home path too, which never ran load_detail)
-    let fps = plan.playing.as_ref().map(|p| p.video_fps).unwrap_or(0.0);
-    plan.vcodec = vcodec.to_string();
-    plan.acodec = achosen.clone();
-    plan.fps = fps;
-    // Only here: this is the branch that feeds the FILE's own elementary stream, so it is the
-    // only one whose Load payload may describe the file's Dolby Vision.
-    plan.dovi = dovi;
-    plan.dv_decision = dv_decision;
-    // **Dolby Atmos, and it is the same sentence one codec over.** `contents.immersive` tells
-    // the pipeline that the E-AC3 it is about to decode carries JOC, which is what raises the
-    // television's own Atmos read-out and what puts the sound engine in the right mode.
-    //
-    // Read off the track we ACTUALLY PICKED, not off the part: a film routinely ships an Atmos
-    // 7.1 beside a plain 5.1 and a commentary, and declaring the part's best track while
-    // feeding the user's chosen one is a lie the pipeline has no way to detect. `aidx` is the
-    // list position `audio_sel` chose; with no explicit pick, the server's `selected` flag is
-    // the same track `acodec` came from.
-    //
-    // **Set on this branch only, and the omission on the others is deliberate.** A transcode's
-    // audio is re-encoded and its Atmos is gone, so declaring it would be false. A REMUX copies
-    // the audio and would in fact still carry JOC — but `plan.dovi` already draws the line at
-    // this branch on the same reasoning (a copy's payload describes what the server sends, and
-    // the declaration rides the direct play), and one rule that is occasionally conservative
-    // beats two rules that can disagree. Nothing is lost visibly: an undeclared Atmos plays as
-    // ordinary E-AC3, which is what it does today.
-    plan.immersive = plan
-        .playing
-        .as_ref()
-        .and_then(|p| {
-            if aidx >= 0 {
-                p.audio.get(aidx as usize)
-            } else {
-                p.audio.iter().find(|a| a.selected)
-            }
-        })
-        .is_some_and(|a| a.has_atmos());
-    if plan.immersive {
-        crate::player::log("audio: dolby atmos — declaring contents.immersive=ATMOS");
-    }
-    if aidx >= 0 {
-        // NB this used to call player::set_audio_track, which stores SHARED.desired_audio_idx —
-        // read by the DEMUX THREAD on every reopen. A worker writing it would change the audio
-        // track of whatever is currently on screen. apply_plan does it, on the main thread.
-        plan.feed_audio_ordinal = Some(
-            plan.playing
-                .as_ref()
-                .map(|p| crate::metadata::audio_ordinal(&p.audio, aidx as usize))
-                .unwrap_or(aidx),
-        );
-    }
-    // Record the picked track so the timeline reports what actually plays (sid 0 = default/unknown
-    // → `None`, the param is omitted and the server shows the part default).
-    let ordinal = plan.feed_audio_ordinal.unwrap_or(-1);
-    plan.audio = plan_track(plan.playing.as_ref().map_or(&[][..], |p| &p.audio[..]), asid, ordinal, true);
-    // honour a subtitle the server already has selected for this part (chosen on another
-    // client, or by this app in an earlier session), else the SHOW's subtitle settings —
-    // free here, since the direct-play path renders subtitles itself. apply_plan installs it
-    // on the main thread.
-    if let Some((ssid, ord)) = sub_pick {
-        plan.sub_sid = ssid;
-        plan.sub_render_ordinal = Some(ord);
-    }
-    // direct-play: no transcode session (transcode_session() stays empty). Carry the
-    // session id + identity on the file GET so PMS keys the /status/sessions entry by
-    // SESS (not a token= fallback), keeping the timeline correlation consistent.
-    plan.url = client.direct_play_url(part, session).to_url();
-}
 
 
 /// The Plex language preferences an audio pick honours: the SHOW's `audioLanguage` (its
@@ -1475,52 +1254,6 @@ fn pick_dp_audio_eligible(
     tracks.iter().position(dp_at).map(pick)
 }
 
-/// Stream id named on the remux/re-encode PUT and start.mkv — [`audio_intents`]' ranking, carried
-/// by an encoder instead of a direct play (the first entry with a usable id wins).
-///
-/// A remux COPIES, so this is the smart-DP sibling (`dp_audio_id`) — putting a selected
-/// TrueHD or unsupported DTS track would ship audio the TV cannot decode. `env_audio_sid` is the session/retry
-/// pick and wins on re-encode when set, including a remux leftover sibling (mid-play quality drop
-/// keeps what is already playing); a cold play zeros it (`request_play`). Otherwise:
-///   - [`AudioIntent::Selection`]: that track itself — a re-encode can transcode a selected DTS to
-///     AC3, so naming the sibling would replace English DTS with a foreign AC3 copy;
-///   - [`AudioIntent::Language`]: the direct-play pick when it is already in that language (so
-///     lowering video quality preserves a preferred dub and does not needlessly encode a lossless
-///     sibling), else the first track in it, whatever its codec;
-///   - [`AudioIntent::FileDefault`], or an unusable id: the direct-play pick itself, so a
-///     transcode speaks the language direct play would have — the file's default when it is
-///     direct-playable; `0` when nothing is, and an omitted PUT encodes the part default.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-fn encode_audio_id(
-    remux: bool,
-    dp_audio_id: i64,
-    env_audio_sid: i64,
-    tracks: &[crate::metadata::Stream],
-    prefs: AudioLangPrefs<'_>,
-) -> i64 {
-    if remux {
-        return dp_audio_id;
-    }
-    if env_audio_sid > 0 {
-        return env_audio_sid;
-    }
-    audio_intents(tracks, prefs)
-        .into_iter()
-        .find_map(|intent| match intent {
-            AudioIntent::Selection(i) => Some(tracks[i].id).filter(|&id| id > 0),
-            AudioIntent::Language(l)
-                if tracks.iter().any(|s| s.id == dp_audio_id && lang_matches(l, &s.lang_code)) =>
-            {
-                Some(dp_audio_id)
-            }
-            AudioIntent::Language(l) => {
-                tracks.iter().find(|s| s.id > 0 && lang_matches(l, &s.lang_code)).map(|s| s.id)
-            }
-            AudioIntent::FileDefault => Some(dp_audio_id),
-        })
-        .unwrap_or(dp_audio_id)
-}
-
 
 /// Whether the client can render this embedded subtitle codec.
 fn embedded_subtitle_renderable(codec: &str) -> bool {
@@ -1575,32 +1308,6 @@ pub(super) fn pick_dp_subtitle(subs: &[crate::metadata::Stream]) -> Option<(i64,
     }
     Some((subs[i].id, ord))
 }
-
-/// Stream id named on the MDE `/decision` handshake, or `0`.
-///
-/// [`pick_dp_subtitle`] is what Original will client-render. MDE only sees that id when the
-/// codec is in [`crate::plex::DP_SUBTITLE_CODECS`]: a sidecar, or a selected embedded track
-/// we render but do not advertise (`vplayer`, …), is sent as `0` so MDE evaluates subs off
-/// instead of answering transcode (which then forbids a codec-copy remux).
-#[cfg(test)]
-fn mde_subtitle_stream_id(subs: &[crate::metadata::Stream]) -> i64 {
-    mde_subtitle_id_of(subs, pick_dp_subtitle(subs))
-}
-
-/// [`mde_subtitle_stream_id`] for a subtitle already decided — the resolve decides ONCE
-/// (`pick_dp_subtitle_pref`) and names the result here.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-fn mde_subtitle_id_of(subs: &[crate::metadata::Stream], pick: Option<(i64, i32)>) -> i64 {
-    pick
-        .and_then(|(id, _)| {
-            subs.iter()
-                .find(|s| s.id == id)
-                .filter(|s| crate::plex::is_dp_subtitle(&s.codec))
-                .map(|_| id)
-        })
-        .unwrap_or(0)
-}
-
 
 fn pick_dp_subtitle_account(
     subs: &[crate::metadata::Stream], prefs: &crate::media::ShowLangPrefs,

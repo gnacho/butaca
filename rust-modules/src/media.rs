@@ -15,38 +15,11 @@ pub struct Envelope {
 /// list (`Directory`), an items/detail list (`Metadata`), or a hub list (`Hub`).
 #[derive(Deserialize, Default)]
 pub struct MediaContainer {
-    /// The item's own SETTINGS, on `/library/metadata/{id}/tree` (`the upstream Plex API reference`'s
-    /// `show` example): `episodeSort`, `audioLanguage`, `subtitleLanguage`, … — see [`Setting`].
-    #[serde(rename = "Setting", default)]
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub setting: Vec<Setting>,
     #[serde(rename = "Metadata", default)]
     pub metadata: Vec<Metadata>,
     #[serde(rename = "Hub", default)]
     pub hub: Vec<Hub>,
-    /// GET /identity — the server's stable id (the PlayQueue `server://{id}/…` uri needs it).
-    #[serde(rename = "machineIdentifier", default)]
-    pub machine_identifier: String,
-    /// POST /playQueues response ids (0 = absent) — the timeline's playQueueID/playQueueItemID.
-    #[serde(rename = "playQueueID", default, deserialize_with = "de_i64")]
-    pub play_queue_id: i64,
-    #[serde(
-        rename = "playQueueSelectedItemID",
-        default,
-        deserialize_with = "de_i64"
-    )]
-    pub play_queue_selected_item_id: i64,
-    /// How many items the whole queue holds (the returned `Metadata[]` may be a window of it) —
-    /// the resolve logs how many remain, derived from this and the offset below.
-    #[serde(rename = "playQueueTotalCount", default, deserialize_with = "de_i64")]
-    pub play_queue_total_count: i64,
     /// Position of the selected item within the WHOLE queue (not within the returned window).
-    #[serde(
-        rename = "playQueueSelectedItemOffset",
-        default,
-        deserialize_with = "de_i64"
-    )]
-    pub play_queue_selected_item_offset: i64,
     /// /transcode/universal/decision verdict codes — Option (not defaulted 0) so the route
     /// log distinguishes "absent" from a real code, matching the old find_num scan.
     #[serde(
@@ -55,18 +28,9 @@ pub struct MediaContainer {
         deserialize_with = "de_opt_i64"
     )]
     pub general_decision_code: Option<i64>,
-    #[serde(rename = "mdeDecisionCode", default, deserialize_with = "de_opt_i64")]
-    pub mde_decision_code: Option<i64>,
     /// The TRANSCODE lane's own verdict, beside the general one above (`4007` = "cannot convert
     /// this item"). Same `Option` discipline and for the same reason, doubled here: the pre-flight
     /// refusal is graded on a CODE, and a defaulted 0 would be a code this server never sent.
-    #[serde(
-        rename = "transcodeDecisionCode",
-        default,
-        deserialize_with = "de_opt_i64"
-    )]
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub transcode_decision_code: Option<i64>,
     /// …and the two HUMAN sentences PMS pairs with those codes — "Cannot convert this item.
     /// Implementation for video encoder 'vp9' not found." / "Neither direct play nor conversion is
     /// available." (both probed live against PMS 1.43.3). They are the server's own wording, quoted
@@ -95,23 +59,13 @@ pub struct MediaContainer {
 }
 
 #[derive(Deserialize, Default)]
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub struct Hub {
     #[serde(rename = "type", default)]
     pub kind: String,
     #[serde(rename = "hubIdentifier", default)]
     pub hub_identifier: String, // e.g. home.continue, home.ondeck — stable, locale-independent
-    /// The route this hub's own listing lives at — `/hubs/sections/1/continueWatching/items` for a
-    /// per-section deck, `/library/collections/{id}/children` for a collection.
-    ///
-    /// It exists because on `/hubs/sections/{id}` it is the second half of "is this the Continue
-    /// Watching row" (`browse::section_hubs::shelf_is_continue`): the identifier is what a server
-    /// could plausibly spell differently, the key is the route it must answer at. Nothing follows
-    /// it yet — the items on that route arrive embedded (`docs/pms-api.md` §3a).
     #[serde(default)]
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub key: String,
-    #[serde(default)]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub title: String,
     #[serde(rename = "Metadata", default)]
     pub metadata: Vec<Metadata>,
@@ -136,32 +90,11 @@ pub struct Hub {
     /// about — 17 of them on this set — most with `size: 0`, so this is the field that says which
     /// ones are worth drawing.
     #[serde(default, deserialize_with = "de_i64")]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub size: i64,
-    /// How many items the hub's listing holds in ALL, when the hub embeds only a page of them
-    /// (`the upstream API reference`'s `Hub.totalSize`). A collection hub's member count — the "· N" its
-    /// linked heading carries — is this, or [`Self::size`] when the server sent no total.
-    #[serde(rename = "totalSize", default, deserialize_with = "de_i64")]
-    pub total_size: i64,
 }
 
-impl Hub {
-    /// Every item the hub's listing holds: `totalSize`, else `size`, never negative.
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub fn total(&self) -> usize {
-        self.total_size.max(self.size).max(0) as usize
-    }
-}
 
-/// One of an item's per-item settings — the show page's "Advanced" dialog in Plex Web. Only the
-/// id and the CURRENT value are read; `value` is empty for "Library/Account default".
-#[derive(Deserialize, Default, Clone, Debug)]
-pub struct Setting {
-    #[serde(default, deserialize_with = "de_str")]
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub id: String,
-    #[serde(default, deserialize_with = "de_str")]
-    pub value: String,
-}
 
 /// A SHOW's language settings — its Advanced dialog in Plex Web. `None` / `-1` mean "Account
 /// default", inherited from the active Plex profile when its preferences are available.
@@ -181,40 +114,12 @@ impl Default for ShowLangPrefs {
 }
 
 impl ShowLangPrefs {
-    /// Read the three settings out of a `Setting[]`, or None when it carries none of them (so the
-    /// caller can ask the other endpoint).
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub fn from_settings(settings: &[Setting]) -> Option<ShowLangPrefs> {
-        let get = |id: &str| settings.iter().find(|s| s.id == id).map(|s| s.value.trim());
-        let (a, s, m) = (get("audioLanguage"), get("subtitleLanguage"), get("subtitleMode"));
-        if a.is_none() && s.is_none() && m.is_none() {
-            return None;
-        }
-        // `""` and `"-1"` are both "Account default" — unset as far as this struct is concerned
-        let lang = |v: Option<&str>| v.filter(|v| !v.is_empty() && *v != "-1").map(str::to_string);
-        Some(ShowLangPrefs {
-            audio: lang(a),
-            subtitle: lang(s),
-            subtitle_mode: m.and_then(|m| m.parse().ok()).unwrap_or(-1),
-        })
-    }
 }
 
-/// `Metadata.Preferences`, present when a metadata read asks `includePreferences=1`.
-#[derive(Deserialize, Default)]
-pub struct Preferences {
-    #[serde(rename = "Setting", default)]
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub setting: Vec<Setting>,
-}
 
 /// The movie/show/season/episode item. Missing fields default (Plex omits optionals).
 #[derive(Deserialize, Default)]
 pub struct Metadata {
-    /// Only on a read that asked `includePreferences=1` — see [`Preferences`].
-    #[serde(rename = "Preferences", default)]
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub preferences: Preferences,
     #[serde(rename = "type", default)]
     pub kind: String, // movie|show|season|episode|clip
     #[serde(rename = "ratingKey", default, deserialize_with = "de_route_key")]
@@ -230,11 +135,6 @@ pub struct Metadata {
     /// (verified live 2026-09-12). Lenient: PMS string-encodes numerics on some endpoints.
     #[serde(rename = "extraType", default, deserialize_with = "de_i64")]
     pub extra_type: i64,
-    /// Path of the item's primary extra (`/library/metadata/{rk}`). Present on movie/show
-    /// metadata even without `includeExtras=1`.
-    #[serde(rename = "primaryExtraKey", default)]
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub primary_extra_key: String,
     /// **The only PORTABLE identity Plex issues** — `plex://movie/6856…291d`, the metadata
     /// provider's id, identical on every server that ever matched this film. Everything else
     /// item-shaped (`ratingKey`, `librarySectionID`, `Part.key`, `Stream.id`) is a server-local
@@ -268,18 +168,12 @@ pub struct Metadata {
     pub content_rating: String,
     #[serde(default)]
     pub summary: String,
-    #[serde(default)]
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub tagline: String,
     #[serde(rename = "originallyAvailableAt", default)]
     pub originally_available_at: String,
     #[serde(default, deserialize_with = "de_i64")]
     pub duration: i64, // ms
     #[serde(rename = "viewOffset", default, deserialize_with = "de_i64")]
     pub view_offset: i64, // ms; resume point
-    #[serde(rename = "lastViewedAt", default, deserialize_with = "de_i64")]
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub last_viewed_at: i64, // unix secs; drives Continue Watching recency sort
     /// Collection rows use this as their tag id (distinct from `ratingKey`).
     #[serde(default, deserialize_with = "de_i64")]
     pub index: i64, // season/episode number
@@ -309,58 +203,16 @@ pub struct Metadata {
     pub grandparent_thumb: String,
     #[serde(rename = "Media", default)]
     pub media: Vec<Media>,
-    #[serde(rename = "Genre", default)]
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub genre: Vec<Tag>,
-    #[serde(rename = "Country", default)]
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub country: Vec<Tag>,
-    #[serde(rename = "Director", default)]
-    pub director: Vec<Tag>,
-    #[serde(rename = "Writer", default)]
-    pub writer: Vec<Tag>,
     #[serde(rename = "Role", default)]
     pub role: Vec<Tag>,
     #[serde(rename = "Chapter", default)]
     pub chapter: Vec<Chapter>,
     #[serde(rename = "Marker", default)]
     pub marker: Vec<Marker>,
-    /// POST /playQueues rows only: this row's id within the queue. The up-next lookup walks to
-    /// the row AFTER the one `playQueueSelectedItemID` names, so it must be able to identify
-    /// rows — a ratingKey can repeat in a queue, a playQueueItemID cannot.
-    #[serde(rename = "playQueueItemID", default, deserialize_with = "de_i64")]
-    pub play_queue_item_id: i64,
     // D-1: PMS returns UltraBlurColors as an ARRAY `[{…}]` (the old code reads it as an object
     // and misses it). `de_ultrablur` accepts object OR array and yields the first.
     #[serde(rename = "UltraBlurColors", default, deserialize_with = "de_ultrablur")]
     pub ultra_blur_colors: Option<UltraBlurColors>,
-    /// Review scores, one row per provider — the SUPERSET, and the only form that carries each
-    /// score's provider identity. Present on `/library/metadata/{rk}`; **absent from a section
-    /// listing**, which sends only the flat pair below (verified live 2026-07-29), so both forms
-    /// are parsed and `metadata::convert_ratings` prefers this one.
-    /// `OnDeck` (SHOWS only, and only with `includeOnDeck=1`) — the one episode the server says is
-    /// next to watch, as a whole episode record: thumb, summary, `Media`, `viewOffset`, the lot.
-    ///
-    /// It is the only SHOW-LEVEL answer to "what's next". The client holds one season's episodes at a
-    /// time, so anything it worked out itself would change with the selected season tab — which is
-    /// exactly the bug this field exists to fix.
-    #[serde(rename = "OnDeck", default)]
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub on_deck: Option<OnDeckHub>,
-    #[serde(rename = "Rating", default)]
-    pub ratings: Vec<Rating>,
-    /// The flat critic score (0–10) and the provider/state `image` that goes with it — the legacy
-    /// pair, kept as the fallback for responses that omit `Rating[]`.
-    #[serde(default, deserialize_with = "de_f64")]
-    pub rating: f64,
-    #[serde(rename = "ratingImage", default)]
-    pub rating_image: String,
-    /// The flat audience score + its image (`rottentomatoes://image.rating.upright`, and on some
-    /// items `imdb://image.rating` / `themoviedb://image.rating`).
-    #[serde(rename = "audienceRating", default, deserialize_with = "de_f64")]
-    pub audience_rating: f64,
-    #[serde(rename = "audienceRatingImage", default)]
-    pub audience_rating_image: String,
 }
 
 impl Metadata {
@@ -421,11 +273,6 @@ pub struct Media {
 pub struct MediaPart {
     #[serde(default, deserialize_with = "de_route_key")]
     pub key: String, // /library/parts/{id}/{changestamp}/file.mkv
-    /// /decision only: the MDE verdict for this part — "directplay" | "transcode" | "copy"
-    /// (Media/container carry no decision; the part is the authoritative one).
-    #[serde(default)]
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub decision: String,
     /// The part's absolute path ON THE SERVER's filesystem — the header line of the
     /// Track-information panel. **Not a URL and not reachable from here**: it is the server
     /// operator's own path (`/Volumes/DAS/Movies/…`, probed live), shown because "which file is
@@ -445,18 +292,6 @@ pub struct MediaPart {
 }
 
 impl MediaPart {
-    /// Veto: a remux that copies video is forbidden only when a video `Stream` on this part
-    /// is `decision=transcode`. Silence is not a video re-encode — missing `Stream[]`, `copy`,
-    /// unnamed, or any other spelling leave copy allowed. Library metadata omits
-    /// `Stream.decision`; this reader is for `/decision` bodies. `Part.decision=transcode` is a
-    /// container change: TrueHD-only and Profile 5 are `Part=transcode` with video `copy`
-    /// (`docs/pms-api.md`).
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub fn video_forbids_copy(&self) -> bool {
-        self.stream
-            .iter()
-            .any(|s| s.stream_type == 1 && s.decision == "transcode")
-    }
 }
 
 /// D-2: channels/title/hearingImpaired/audioDescription/forced are real PMS fields the spec
@@ -624,9 +459,6 @@ pub struct Tag {
     pub tag: String,
     #[serde(default, deserialize_with = "de_str")]
     pub role: String, // Role[] only (character name)
-    #[serde(default, deserialize_with = "de_str")]
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub thumb: String, // headshot — on the crew arrays (Director[]/Writer[]) as well as Role[]
     /// The tag's numeric library id — the `personId` of `/library/people/{id}[/media]`, and the
     /// value behind `?actor=<id>` on a section listing. 0 = absent.
     #[serde(default, deserialize_with = "de_i64")]
@@ -689,24 +521,6 @@ pub struct Marker {
     pub is_final: i64,
 }
 
-/// One row of a leaf's `Rating[]` — a single provider's review score.
-///
-/// `image` names BOTH the provider and the icon state (`rottentomatoes://image.rating.ripe`,
-/// `…rating.certified`, `…rating.spilled`, `imdb://image.rating`, `themoviedb://image.rating`),
-/// which is why the badge art is chosen by parsing this string rather than by thresholding
-/// `value` — see `metadata::RatingArt`. `value` is normalised 0–10 by PMS for every provider
-/// (a 91% tomato arrives as 9.1). `kind` is `"critic"` | `"audience"`; note it does NOT identify
-/// the provider — IMDb and TMDB both arrive as `audience` (verified live 2026-07-29).
-#[derive(Deserialize, Default)]
-pub struct Rating {
-    #[serde(default)]
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub image: String,
-    #[serde(default, deserialize_with = "de_f64")]
-    pub value: f64,
-    #[serde(rename = "type", default)]
-    pub kind: String,
-}
 
 #[derive(Deserialize, Default, Clone, Copy)]
 pub struct UltraBlurColors {
@@ -754,31 +568,7 @@ impl From<String> for HexColor {
     }
 }
 
-/// `OnDeck`'s envelope. Its `Metadata` is a single **object**, not the array every other nested hub
-/// in this file uses — precisely the shape inconsistency `plex/CLAUDE.md` warns about, and a strict
-/// field here would fail the WHOLE `MediaContainer` parse (an empty detail page), not just drop the
-/// value. So [`de_on_deck`] accepts either form.
-#[derive(Deserialize, Default)]
-pub struct OnDeckHub {
-    #[serde(rename = "Metadata", default, deserialize_with = "de_on_deck")]
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub metadata: Option<Box<Metadata>>,
-}
 
-/// Accept `OnDeck.Metadata` as an object OR a one-element array, taking the first either way.
-fn de_on_deck<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Box<Metadata>>, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum OneOrMany {
-        One(Box<Metadata>),
-        Many(Vec<Metadata>),
-    }
-    Ok(match Option::<OneOrMany>::deserialize(d)? {
-        Some(OneOrMany::One(m)) => Some(m),
-        Some(OneOrMany::Many(v)) => v.into_iter().next().map(Box::new),
-        None => None,
-    })
-}
 
 /// Lenient f64: a JSON number, a numeric string, or null → 0.0 (matches the old `jfloat`
 /// scrape). Called only when the field is present; a missing field uses `default` (0.0).
@@ -999,89 +789,6 @@ mod tests {
         // own tests), which is the whole reason the accessor has to name WHICH one it returned.
     }
 
-    /// The `/decision` verdict block, in BOTH encodings PMS uses for it. This body is the one the
-    /// player quotes to the user when the server refuses an item before playback, so a strict field
-    /// here would not lose the sentence — it would fail the whole `MediaContainer` and turn a
-    /// server that told us exactly what was wrong into the generic failure this block exists to
-    /// end. The absent case is the third assertion: no code and no sentence, never a confident 0.
-    #[test]
-    fn the_decision_verdict_survives_both_encodings_and_stays_absent_when_unsent() {
-        // shaped on the live PMS 1.43.3 refusal (a VP9 source, no encoder for it)
-        let json = br#"{"MediaContainer":{"size":1,"generalDecisionCode":2000,
-            "generalDecisionText":"Neither direct play nor conversion is available.",
-            "transcodeDecisionCode":4007,
-            "transcodeDecisionText":"Cannot convert this item. Implementation for video encoder 'vp9' not found."}}"#;
-        let mc = serde_json::from_slice::<Envelope>(json)
-            .expect("lenient parse")
-            .media_container;
-        assert_eq!(mc.general_decision_code, Some(2000));
-        assert_eq!(mc.transcode_decision_code, Some(4007));
-        assert_eq!(
-            mc.general_decision_text,
-            "Neither direct play nor conversion is available."
-        );
-        assert!(mc.transcode_decision_text.ends_with("'vp9' not found."));
-
-        // the same body with every number string-encoded (PMS does this per endpoint, not per field)
-        let json =
-            br#"{"MediaContainer":{"generalDecisionCode":"2000","transcodeDecisionCode":"4007",
-            "transcodeDecisionText":"Cannot convert this item."}}"#;
-        let mc = serde_json::from_slice::<Envelope>(json)
-            .expect("lenient parse")
-            .media_container;
-        assert_eq!(
-            (mc.general_decision_code, mc.transcode_decision_code),
-            (Some(2000), Some(4007))
-        );
-        assert_eq!(mc.transcode_decision_text, "Cannot convert this item.");
-        assert_eq!(
-            mc.general_decision_text, "",
-            "a sentence the server never sent is empty, not invented"
-        );
-
-        // a healthy decision names no verdict at all — and absent must stay absent
-        let json = br#"{"MediaContainer":{"size":1,"Metadata":[{"ratingKey":"4"}]}}"#;
-        let mc = serde_json::from_slice::<Envelope>(json)
-            .expect("parse")
-            .media_container;
-        assert_eq!(mc.general_decision_code, None);
-        assert_eq!(mc.transcode_decision_code, None);
-        assert_eq!(
-            (
-                mc.general_decision_text.as_str(),
-                mc.transcode_decision_text.as_str()
-            ),
-            ("", "")
-        );
-    }
-
-    /// `Part.decision=transcode` is a container change. A remux that copies video is forbidden
-    /// only when the VIDEO stream itself is `transcode` — the measured P5 shape was video `copy`.
-    #[test]
-    fn a_transcode_part_forbids_copy_only_when_the_video_stream_is_transcode() {
-        let copy: super::MediaPart = serde_json::from_slice(
-            br#"{"decision":"transcode","Stream":[{"streamType":1,"decision":"copy"},{"streamType":2,"decision":"transcode"}]}"#,
-        )
-        .expect("parse");
-        assert!(
-            !copy.video_forbids_copy(),
-            "audio transcode + video copy is a remux"
-        );
-
-        let video_tc: super::MediaPart = serde_json::from_slice(
-            br#"{"decision":"transcode","Stream":[{"streamType":1,"decision":"transcode"}]}"#,
-        )
-        .expect("parse");
-        assert!(video_tc.video_forbids_copy());
-
-        let unnamed: super::MediaPart =
-            serde_json::from_slice(br#"{"decision":"transcode"}"#).expect("parse");
-        assert!(
-            !unnamed.video_forbids_copy(),
-            "a part with no Stream[] cannot claim the video must re-encode"
-        );
-    }
-
     /// A show container carries no `Media` at all — the accessor must say so rather than panic,
     /// because the detail page asks every item for its primary version.
     #[test]
@@ -1217,10 +924,6 @@ mod tests {
         assert_eq!(p.tag, "Wallace Shawn");
         assert_eq!(p.tag_key, "5d776827151a60001f24ab18");
         assert_eq!(p.id, 921);
-        assert!(
-            p.thumb.starts_with("https://"),
-            "a person thumb is ABSOLUTE, not a PMS path"
-        );
         // …and it is the same record `is_person` matches, by either id space
         assert!(p.is_person("921", ""));
         assert!(p.is_person("", "5d776827151a60001f24ab18"));
@@ -1229,7 +932,6 @@ mod tests {
         assert_eq!(c.tag, "Wallace & Gromit Collection");
         assert_eq!(c.id, 6068);
         assert_eq!(c.tag_key, "", "a collection guid is not a person tagKey");
-        assert_eq!(c.thumb, "", "…and no artwork of its own");
         // `is_person` consumes person identity only; collection resolution uses id and key.
         assert!(c.is_person("6068", ""), "the server-local id still matches");
         assert!(
@@ -1344,7 +1046,6 @@ mod tests {
         for (name, got) in [
             ("tag", &n.tag),
             ("role", &n.role),
-            ("thumb", &n.thumb),
             ("tagKey", &n.tag_key),
         ] {
             assert_eq!(

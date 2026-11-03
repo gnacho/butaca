@@ -242,11 +242,6 @@ fn profile_extra(delivery: TranscodeDelivery) -> String {
     profile_for_delivery(crate::devcaps::caps(), delivery)
 }
 
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-fn forced_direct_profile() -> String {
-    format!("add-direct-play-profile(type=videoProfile&container=mkv,mp4&videoCodec=h264,hevc&audioCodec={DP_AUDIO_CODECS}&subtitleCodec={DP_SUBTITLE_CODECS})")
-}
-
 impl Client {
     /// GET /photo/:/transcode?width&height&minSize=1&url=…[&format=png]&X-Plex-Token — returns
     /// the built PATH (the sole path-returning method): posters uses it as the LRU key AND the
@@ -369,79 +364,7 @@ impl Client {
         q.query()
     }
 
-    /// GET /video/:/transcode/universal/decision with hasMDE=1 + directPlay=1: ask the Media
-    /// Decision Engine whether the item direct-plays given our capability profile. Registers
-    /// the session as a side effect. The caller reads `Part.decision` ("directplay" vs
-    /// "transcode") and the verdict codes off the returned container.
-    ///
-    /// `audio_stream_id` is the track the demuxer will actually feed (0 = omit, PMS uses the
-    /// part default). Smart direct-play names the AAC/AC3/EAC3 sibling here so MDE does not
-    /// veto a TrueHD/DTS default we never intended to play.
-    ///
-    /// `subtitle_stream_id` is always sent: a positive id is an advertised embedded track Original
-    /// will client-render; **0** tells MDE to evaluate with subs off so a selected sidecar or
-    /// unadvertised codec does not force a burn/transcode. (`opt_int` would omit 0.)
-    ///
-    /// `subtitles=none` is the client-rendered mode. Omitting it leaves PMS on `auto`, and
-    /// 1.43.4 HTTP 400s `hasMDE`+`directPlay` when the part already has a selected subtitle
-    /// (`invalid subtitle setting 'auto'`). That `None` fail-closes Original into remux and a
-    /// PUT `subtitleStreamID=0`, which clears the selection. `burn` would force a transcode.
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub fn mde_decision(
-        &self,
-        rating_key: &str,
-        session: &str,
-        audio_stream_id: i64,
-        subtitle_stream_id: i64,
-    ) -> Option<MediaContainer> {
-        self.mde_decision_with_profile(rating_key, session, audio_stream_id, subtitle_stream_id, false)
-    }
 
-    /// Strict Original override: advertise the software feed formats without device limits.
-    /// No transcode target or direct-stream alternative is offered. The caller must still reject
-    /// any verdict other than directplay; a server refusal is not permission to transcode.
-    pub fn mde_decision_forced(
-        &self,
-        rating_key: &str,
-        session: &str,
-        audio_stream_id: i64,
-        subtitle_stream_id: i64,
-    ) -> Option<MediaContainer> {
-        self.mde_decision_with_profile(rating_key, session, audio_stream_id, subtitle_stream_id, true)
-    }
-
-    fn mde_decision_with_profile(
-        &self,
-        rating_key: &str,
-        session: &str,
-        audio_stream_id: i64,
-        subtitle_stream_id: i64,
-        forced: bool,
-    ) -> Option<MediaContainer> {
-        let q = QueryBuilder::new("/video/:/transcode/universal/decision")
-            .str("path", &format!("/library/metadata/{rating_key}"))
-            .int("mediaIndex", 0)
-            .int("partIndex", 0)
-            .str("protocol", "http")
-            .int("hasMDE", 1)
-            .int("directPlay", 1)
-            .int("directStream", i64::from(!forced))
-            .int("directStreamAudio", i64::from(!forced))
-            .int("mediaBufferSize", 20971)
-            .str("session", session)
-            .str("X-Plex-Session-Identifier", session)
-            .opt_int("audioStreamID", audio_stream_id)
-            .int("subtitleStreamID", subtitle_stream_id)
-            .str("subtitles", "none");
-        let q = self
-            .playback_identity(q)
-            .str("X-Plex-Client-Profile-Name", "Generic")
-            .str(
-                "X-Plex-Client-Profile-Extra",
-                &if forced { forced_direct_profile() } else { profile_extra(TranscodeDelivery::ProgressiveMkv) },
-            );
-        self.get_json(&q.build())
-    }
 
     /// Register `spec` with the universal transcoder (the /decision GET — required before
     /// start.mkv will stream; just a query, it never cuts a live streaming connection) and
@@ -1122,15 +1045,6 @@ mod tests {
         assert!(!profile.contains("truehd"));
     }
 
-    #[test]
-    fn force_profile_advertises_engine_formats_without_device_limits_or_transcode() {
-        let p = super::forced_direct_profile();
-        assert_eq!(list_of(&p, "audioCodec="), ["aac", "ac3", "eac3", "dts"]);
-        assert_eq!(list_of(&p, "videoCodec="), ["h264", "hevc"]);
-        assert!(!p.contains("add-limitation"));
-        assert!(!p.contains("transcode-target"));
-        assert!(!p.contains("truehd"));
-    }
 
     /// The other side of issue #22's fallback-chain rule: on a SoC whose table has no HEVC row,
     /// hevc must vanish from BOTH lists — from direct-play (we would feed a stream the panel
@@ -1284,46 +1198,6 @@ mod tests {
         ));
         assert!(q.contains("boostDialog=1"), "{q}");
         assert!(q.contains("normalizeLoudness=1"), "{q}");
-    }
-
-    /// `mde_decision` (`hasMDE=1`, `directPlay=1`) builds its own query from scratch and never
-    /// reads a `TranscodeSpec`/`EncodeContract` at all — M1's rule that these params only ever
-    /// mean anything alongside a remux, pinned structurally rather than by a flag this function
-    /// has no way to read.
-    #[cfg(feature = "devtriggers")]
-    #[test]
-    fn mde_never_carries_enhancements() {
-        use std::io::{BufRead, BufReader, Write};
-
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let port = listener.local_addr().unwrap().port() as i32;
-        let (tx, rx) = std::sync::mpsc::channel();
-        let server = std::thread::spawn(move || {
-            let (mut socket, _) = listener.accept().expect("accept decision");
-            let mut line = String::new();
-            BufReader::new(&socket)
-                .read_line(&mut line)
-                .expect("request line");
-            tx.send(line).expect("publish request");
-            write!(
-                socket,
-                "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-            )
-            .expect("response");
-        });
-
-        let client = Client::new(
-            ServerId::from_raw(1),
-            "mach",
-            Origin::http("127.0.0.1", port),
-            "tok",
-            "cid",
-        );
-        let _ = client.mde_decision("5", "s1", 0, 0);
-        let line = rx.recv().expect("captured decision request");
-        assert!(!line.contains("boostDialog"), "{line}");
-        assert!(!line.contains("normalizeLoudness"), "{line}");
-        server.join().unwrap();
     }
 
     /// `AudioEnhancements::NONE` — every path this PR builds — must not change a single byte of

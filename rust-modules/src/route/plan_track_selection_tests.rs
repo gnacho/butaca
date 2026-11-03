@@ -234,33 +234,6 @@ fn an_external_selected_subtitle_is_left_off() {
 
 
 #[test]
-fn mde_subtitle_stream_id_names_advertised_codecs_and_zeroes_the_rest() {
-    assert_eq!(mde_subtitle_stream_id(&[]), 0);
-    assert_eq!(
-        mde_subtitle_stream_id(&[server_selected(sub(10, 3, "eng", true))]),
-        0,
-        "sidecar → 0"
-    );
-    let mut pgs = server_selected(sub(12, 4, "eng", false));
-    pgs.codec = "pgs".into();
-    assert_eq!(mde_subtitle_stream_id(&[pgs]), 12);
-    let mut mov = server_selected(sub(14, 4, "eng", false));
-    mov.codec = "mov_text".into();
-    assert_eq!(mde_subtitle_stream_id(&[mov]), 14);
-    let mut dvd = server_selected(sub(15, 4, "eng", false));
-    dvd.codec = "dvd_subtitle".into();
-    assert_eq!(mde_subtitle_stream_id(&[dvd]), 15);
-    let mut obscure = server_selected(sub(13, 4, "eng", false));
-    obscure.codec = "vplayer".into();
-    assert_eq!(
-        mde_subtitle_stream_id(&[obscure]),
-        0,
-        "unadvertised but still client-rendered → 0 so MDE does not transcode"
-    );
-}
-
-
-#[test]
 fn no_selected_subtitle_means_subtitles_stay_off() {
     assert_eq!(pick_dp_subtitle(&[]), None);
     let subs = [sub(10, 3, "eng", false), sub(11, 4, "rus", false)];
@@ -281,41 +254,6 @@ fn a_selection_with_no_stream_id_is_left_off_rather_than_half_applied() {
 }
 
 
-/// **A show's preferred audio language beats the file's flag.** The reported case (#160): a
-/// series set to Hungarian whose episodes carry the Hungarian dub as the FILE default beside an
-/// English track opened in English, through a built-in English rung since removed (#202).
-
-#[test]
-fn preferred_language_tags_match_both_three_letter_spellings() {
-    assert!(lang_matches("hu-HU", "hun"));
-    assert!(lang_matches("de-DE", "ger") && lang_matches("de-DE", "deu"));
-    assert!(lang_matches("pt-BR", "por"));
-    assert!(lang_matches("en-GB", "eng"));
-    assert!(!lang_matches("hu-HU", "eng"));
-    assert!(!lang_matches("", "hun"));
-    assert!(!lang_matches("hu-HU", ""));
-}
-
-/// **A show's subtitle settings turn a subtitle on at the start of a direct play.**
-
-#[test]
-fn show_settings_are_read_out_of_a_setting_list() {
-    use crate::media::{Setting, ShowLangPrefs};
-    let s = |id: &str, v: &str| Setting { id: id.into(), value: v.into() };
-    assert_eq!(ShowLangPrefs::from_settings(&[s("episodeSort", "-1")]), None);
-    assert_eq!(
-        ShowLangPrefs::from_settings(&[
-            s("audioLanguage", "hu-HU"),
-            s("subtitleLanguage", ""),
-            s("subtitleMode", "1"),
-        ]),
-        Some(ShowLangPrefs { audio: Some("hu-HU".into()), subtitle: None, subtitle_mode: 1 })
-    );
-    assert_eq!(
-        ShowLangPrefs::from_settings(&[s("audioLanguage", "")]),
-        Some(ShowLangPrefs { audio: None, subtitle: None, subtitle_mode: -1 })
-    );
-}
 
 
 

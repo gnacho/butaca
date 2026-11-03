@@ -344,14 +344,6 @@ impl Client {
         self.token_gen.load(Relaxed)
     }
     pub(crate) fn instance_gen(&self) -> u32 { self.instance_gen }
-    /// Resource capability only. Revocation is irreversible for this incarnation and never
-    /// changes a logical result; a controlled replay must supply that result through ingress.
-    /// The one caller was the controlled DevPms install's replay arm, gone with that world
-    /// (#166); the replay tests still deny IO through it.
-    #[cfg_attr(not(test), expect(dead_code))]
-    pub(crate) fn disable_data_io(&self) { self.data_io_disabled.store(true, Relaxed); }
-    #[cfg_attr(not(test), expect(dead_code))]
-    pub(crate) fn denied_data_requests(&self) -> u32 { self.denied_data_requests.load(Relaxed) }
     fn may_send(&self) -> bool {
         if !self.data_io_disabled.load(Relaxed) { return true; }
         self.denied_data_requests.fetch_add(1, Relaxed);
@@ -699,15 +691,6 @@ impl Client {
     /// the layer, so a twin that dropped the outcome would be a method with no callers.
     pub(super) fn post_ok(&self, path_no_token: &str) -> bool {
         self.body_2xx(path_no_token, Method::Post, &[]).is_some()
-    }
-
-    /// POST → parse the `{ "MediaContainer": … }` envelope — /playQueues (the returned ids).
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub(super) fn post_json(&self, path_no_token: &str) -> Option<MediaContainer> {
-        let body = self.body_2xx(path_no_token, Method::Post, &[ACCEPT_JSON])?;
-        serde_json::from_slice::<Envelope>(&body)
-            .ok()
-            .map(|e| e.media_container)
     }
 
     /// THE token choke point. Appends `X-Plex-Token=…` with the right separator.

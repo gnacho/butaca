@@ -12,26 +12,6 @@ use super::client::{Client, QueryBuilder};
 use crate::media::MediaContainer;
 
 impl Client {
-    /// GET /hubs?count=…&excludeContinueWatching=1 → `.hub[]`.
-    ///
-    /// **`excludeContinueWatching` is NOT a no-op**, which this call and its comment asserted for
-    /// as long as they existed ("D-4: drop the no-op excludeContinueWatching"). Measured against
-    /// this server 2026-08-14: `/hubs?count=12` returns 10 hubs, `&excludeContinueWatching=1`
-    /// returns 8 — it drops `home.continue` and `home.ondeck`.
-    ///
-    /// Sending it is right for us on both counts. Those two hubs are exactly what
-    /// [`continue_watching`] fetches properly (see its doc for why the dedicated endpoint is the
-    /// only honest one), so we parse and discard them today; and with several sources on Home the
-    /// waste is per source per fetch, not once.
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub fn home_hubs(&self, count: i64) -> Option<MediaContainer> {
-        self.get_json(
-            &QueryBuilder::new("/hubs")
-                .int("count", count)
-                .int("excludeContinueWatching", 1)
-                .build(),
-        )
-    }
 
     /// GET /hubs/sections/{sectionId}?count=… — **one LIBRARY's own shelves**, in the order the
     /// server's owner arranged them in *Plex Web → Manage → Libraries → Library Recommended*.
@@ -56,14 +36,6 @@ impl Client {
     /// set. A refetch legitimately returns a different shelf count and different ids with nothing
     /// changed on the server, which is a fact about this endpoint rather than about any caller.
 
-    /// GET /hubs/continueWatching?count=… — the dedicated Continue Watching hub.
-    pub fn continue_watching(&self, count: i64) -> Option<MediaContainer> {
-        self.get_json(
-            &QueryBuilder::new("/hubs/continueWatching")
-                .int("count", count)
-                .build(),
-        )
-    }
 
     /// GET /hubs/search?query=…[&limit=…][&sectionId=…]&includeCollections=1 — the search screen
     /// → `.hub[]`.

@@ -317,16 +317,6 @@ pub(crate) struct PlaybackSession {
     /// that failed). Installed by [`apply_plan`]; [`request_play`] retires it the moment a new item
     /// resolves. Read through [`up_next`], which lends a `&'static`.
     up_next: Option<UpNext>,
-    /// The whole queue behind the item now playing — the playing row included, in queue order,
-    /// projected to `crate::playback::QueueRow` ON THE RESOLVE WORKER (a `Metadata` row carries its entire
-    /// Media/Part/Stream/Role tree; a show's queue is dozens of them, and this device is 32-bit).
-    /// Same lifecycle as `up_next`: installed by `apply_plan`, retired by `request_play`.
-    ///
-    /// Whatever the server sent is kept, uncapped — a projected row is ~300 bytes on this device,
-    /// so even a whole show is tens of KB. The capping that matters is the DRAWING (a still per row
-    /// is a GL texture); that belongs to the overlay, and `apply_plan` deliberately warms only
-    /// `up_next`'s.
-    queue: Vec<crate::playback::QueueRow>,
     /// **This frame's millisecond stamp, mirrored from [`crate::player::machine::Player::now_ms`]**
     /// (spec §4.1), whose `set_now` is its ONLY writer — the loop calls it once per iteration from
     /// the same `fr.now` every other phase of the frame reads.
@@ -419,7 +409,6 @@ impl PlaybackSession {
         title: [0; 128],
         ctxline: [0; 96],
         up_next: None,
-        queue: Vec::new(),
         now_ms: 0,
         preview: false,
         resolved_as_preview: false,
@@ -488,7 +477,6 @@ impl PlaybackSession {
             ctxline,
             up_next,
             now_ms,
-            queue: _,
             preview: _,
             resolved_as_preview,
         } = self;
@@ -537,7 +525,6 @@ impl PlaybackSession {
             ctxline: *ctxline,
             up_next: up_next.clone(),
             now_ms: *now_ms,
-            queue: Vec::new(),
             // A screen copy is not the live preview. The loop reads the real session.
             preview: false,
             resolved_as_preview: *resolved_as_preview,
@@ -2797,21 +2784,6 @@ impl HlsAbrControl {
         })
     }
 
-    /// Route-only compatibility door used by focused route tests. Production uses
-    /// [`Self::commit_transition`] so controller, route and worker-local ownership cannot split.
-    #[cfg(test)]
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub(crate) fn commit(
-        &self,
-        expected: &WorkerTicket,
-        candidate: &PrimedHls,
-        proposal: crate::abr::Proposal,
-        observed: (crate::abr::ObservedHlsVariant, u32),
-    ) -> bool {
-        self.commit_transition(expected, candidate, proposal, observed, || Some(()))
-            .is_ok()
-    }
-
     pub(crate) fn retire(&self, encoder: String) {
         if !self.fixture_base.is_empty() {
             return;
@@ -3157,20 +3129,6 @@ pub(crate) fn arm_auto_fixture(
     ));
     settle_plan_start_in_unit_test(ps, prepare_playback_landing(ps, true));
     Some(url)
-}
-
-/// Main-thread half of the progressive watchdog transaction. The demux worker has stopped at a
-/// packet boundary and published its CONSERVATIVE delivery estimate — not the last window's raw
-/// rate, which is one sample of a distribution; atomically move the route to the best HLS state
-/// that estimate sustains, then build the replacement encoder at the current movie position. The
-/// caller performs the fresh Starfish Load only when this returns a URL.
-// Dev-only: used only by the `#[cfg(feature = "devtriggers")]` tests in this module's `tests`
-// submodule below (see the comment on the first one).
-#[cfg(all(test, feature = "devtriggers"))]
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(crate) fn fallback_auto_to_hls(ps: &mut PlaybackSession, measured_kbps: u32, offset_secs: i64) -> Option<String> {
-    let expected = worker_ticket();
-    fallback_auto_to_hls_for(ps, &expected, measured_kbps, offset_secs)
 }
 
 pub(crate) fn fallback_auto_to_hls_for(
@@ -4226,16 +4184,6 @@ pub(crate) fn stream_immersive(ps: &PlaybackSession) -> bool {
 pub(crate) fn set_stream_acodec(ps: &mut PlaybackSession, codec: &str) {
     { let s = &mut *ps; s.stream_acodec = codec.to_owned() }
 }
-/// Record the streamed item's video+audio codec pair in one write (the Load-payload source of
-/// truth) for route-policy tests that install a synthetic live HLS response.
-#[cfg(test)]
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(crate) fn set_stream_codecs(ps: &mut PlaybackSession, vc: &str, ac: &str) {
-    { let s = &mut *ps; {
-        s.stream_vcodec = vc.to_owned();
-        s.stream_acodec = ac.to_owned();
-    } }
-}
 
 /// **The widest raster this session can put through the decoder**, for the Starfish Load's
 /// `adaptiveStreaming` ceiling — `(0, 0)` when nobody said. Three routes, three answers:
@@ -4407,12 +4355,6 @@ pub(crate) fn cur_enhancement_label(ps: &PlaybackSession) -> Option<&'static str
         EnhancementOutcome::Unverified => Some("unverified"),
         EnhancementOutcome::Refused => Some("refused"),
     }
-}
-/// Did this playback forbid the server a video stream COPY? Read by the seek and audio-switch
-/// rebuilds so the constraint survives them — see [`PlaybackSession::cur_contract`].
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-fn is_no_video_copy(ps: &PlaybackSession) -> bool {
-    ps.cur_contract.no_video_copy
 }
 /// The quality ceiling THIS playback was resolved under — read by the two query rebuilds
 /// ([`transcode_seek`], [`retranscode`]) so a rung picked mid-film cannot reshape the encode
@@ -5549,216 +5491,6 @@ fn apply_quality_choice(ps: &mut PlaybackSession, q: Quality) {
     crate::player::request_transcode_refresh(ps);
 }
 
-/// **One bounded measurement of the actual file, as an observation and nothing more.** It reports
-/// bytes, active duration and whether the target was reached, because all three decide how much
-/// the measurement is worth: a 40 KiB read that finished instantly honestly reports a huge rate
-/// and proves nothing. What it does NOT do is decide anything — [`crate::abr::bootstrap`] owns the
-/// admission rule, so the policy is stated once and is host-testable without a network.
-///
-/// `None` means there is nothing to reason from (no source bitrate, or the transfer never
-/// returned), which is deliberately distinct from a completed slow probe.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(super) fn measure_remote_original(url: &str, source_kbps: i64) -> Option<crate::abr::CapacityObservation> {
-    let Some(plan) = remote_probe_plan(source_kbps) else {
-        crate::player::log(
-            "auto: remote Original unavailable — source bitrate is unknown; using HLS",
-        );
-        return None;
-    };
-    // `url` already names the playback's own identity. Direct play samples the Part; a remux
-    // Original samples start.mkv. A throwaway `source-N` forces an exact miss and makes PMS run a
-    // second AdHoc admission decision whose 500 says nothing about transport capacity.
-    let sample = match crate::curlio::sample_throughput_result(
-        url,
-        plan.target_bytes,
-        std::time::Duration::from_millis(plan.budget_ms),
-        std::time::Duration::from_millis(plan.budget_ms),
-    ) {
-        Ok(sample) => sample,
-        Err(failure) => {
-            crate::player::log(&format!(
-                "auto: remote Original preflight produced no capacity sample failure={failure:?}; using HLS"
-            ));
-            return None;
-        }
-    };
-    let measured = sample.kbps();
-    crate::player::log(&format!(
-        "auto: remote Original probe source={source_kbps}kbps sample={}KiB/{}ms measured={measured}kbps complete={}",
-        sample.bytes / 1024,
-        sample.elapsed.as_millis(),
-        sample.target_reached as i32,
-    ));
-    Some(crate::abr::CapacityObservation {
-        kbps: u32::try_from(measured).unwrap_or(u32::MAX),
-        bytes: u64::try_from(sample.bytes).unwrap_or(0),
-        active_us: u64::try_from(sample.elapsed.as_micros()).unwrap_or(u64::MAX),
-        completed: sample.target_reached,
-    })
-}
-
-/// PMS 1.43 503s a Part GET after a transcode MDE. The Original we would actually play is a
-/// codec-copy remux, so the Remote capacity sample has to be that `start.mkv`, under the same
-/// session identity a direct Part probe uses.
-///
-/// Encoder spin-up stays inside the existing 4s probe budget; a miss fails toward HLS rather
-/// than waiting longer. First-byte wait on this sample is the remux coming up, not a measure of
-/// transport capacity.
-///
-/// Issue #266: with an enhanced `audio` this is the FIRST decision the params reach, so the
-/// server's refusal (or silent ignoring) of them is caught here, not read as "no Original": the
-/// probe re-asks once with `NONE` on the same session — replacing the enhanced registration
-/// before any enhanced `start.mkv` is fetched — samples that plain remux, and reports
-/// [`RemuxProbe::enhancement_refused`] so the play is built without the params and records it.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(super) fn measure_remote_remux(
-    client: &crate::plex::Client,
-    rk: &str,
-    session: &str,
-    audio_stream_id: i64,
-    subtitle_stream_id: i64,
-    source_kbps: i64,
-    // Issue #266: the DSP the play-path decision will carry on this same session, so the sample
-    // is the remux that plays (`build_stream`'s `pre_audio`); `NONE` without Plex Pass.
-    audio: crate::playback::AudioEnhancements,
-) -> RemuxProbe {
-    let spec_for = |audio| {
-        transcode_spec(
-            rk,
-            session,
-            session,
-            crate::playback::TranscodeOffset::Fresh,
-            audio_stream_id,
-            subtitle_stream_id,
-            enhanced_remux_contract(audio),
-        )
-    };
-    let mut spec = spec_for(audio);
-    let mut decision = client.transcode_decision(&spec);
-    let mut enhancement_refused = false;
-    if audio.any() && enhancement_fallback(decision.as_ref(), audio) == Fallback::Retry {
-        // Nothing enhanced has been fetched yet: re-deciding on the same session replaces the
-        // enhanced registration, exactly as the play path's own fallback does.
-        note_enhancement_refused(" in remote remux preflight; fell back", audio);
-        enhancement_refused = true;
-        spec = spec_for(crate::playback::AudioEnhancements::NONE);
-        decision = client.transcode_decision(&spec);
-    }
-    let Some(decision) = decision else {
-        crate::player::log("auto: remote remux preflight had no /decision; using HLS");
-        return RemuxProbe { sample: None, enhancement_refused };
-    };
-    if refusal(&decision).is_some() {
-        crate::player::log("auto: remote remux preflight refused by /decision; using HLS");
-        return RemuxProbe { sample: None, enhancement_refused };
-    }
-    let sample = measure_remote_original(&client.transcode_start_url(&spec).to_url(), source_kbps);
-    if sample.is_none() {
-        // Same playback identity the HLS/remux that follows will register. closeResourceSession=1
-        // would 503 that next start; physical-stop keeps the Streaming Resource.
-        let _ = client.transcode_stop_physical(session);
-    }
-    RemuxProbe { sample, enhancement_refused }
-}
-
-/// What [`measure_remote_remux`] learned: the capacity sample (`None` = no usable sample, fall to
-/// HLS), and whether the server refused or ignored the enhancement it was asked for — in which case
-/// the sample is of the PLAIN remux and the play must be built without the params.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(super) struct RemuxProbe {
-    pub(super) sample: Option<crate::abr::CapacityObservation>,
-    pub(super) enhancement_refused: bool,
-}
-
-/// MDE handshake result. `None` from [`server_decision`] means the body was missing or unusable:
-/// the caller must not Original, but remux is still allowed. `Part.decision=transcode` is a
-/// container change, not a video-copy veto — see [`crate::media::MediaPart::video_forbids_copy`].
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(super) struct MdeVerdict {
-    pub(super) original: bool,
-    pub(super) video_forbids_copy: bool,
-}
-
-/// Ask PMS whether `rk` should direct-play (`original`) or go through start.mkv. None when the
-/// server returns no usable Media decision: the caller must not Original (PMS 1.43 503s a Part
-/// without a registered decision) but may still remux or re-encode via a separate
-/// `transcode_decision`. Registers the session as a side effect.
-///
-/// Takes the `Client` rather than looking one up: this runs on the resolve worker, and `rk` is only
-/// an item on the server the caller resolved from this playback's captured `ServerId`.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(super) fn server_decision(
-    c: &crate::plex::Client,
-    rk: &str,
-    session: &str,
-    audio_stream_id: i64,
-    subtitle_stream_id: i64,
-) -> Option<MdeVerdict> {
-    let mc = match c.mde_decision(rk, session, audio_stream_id, subtitle_stream_id) {
-        Some(mc) => mc,
-        None => {
-            // failed fetch OR unparseable (XML/truncated) body — no Original Part
-            crate::player::log("decision: no/unparseable response -> no Original");
-            return None;
-        }
-    };
-    mde_verdict(&mc)
-}
-
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-fn mde_verdict(mc: &crate::media::MediaContainer) -> Option<MdeVerdict> {
-    if refusal(mc).is_some() { return None; }
-    // Part.decision is the Original-vs-not verdict (Media/container carry none). Video copy
-    // is the VIDEO stream's own decision — Part=transcode + video=copy is a remux.
-    let part = match mc
-        .metadata
-        .first()
-        .and_then(|m| m.media.first())
-        .and_then(|md| md.part.first())
-    {
-        Some(p) => p,
-        None => {
-            crate::player::log(&format!(
-                "decision: no media (general={:?}) -> no Original",
-                mc.general_decision_code
-            ));
-            return None;
-        }
-    };
-    let original = part.decision == "directplay";
-    let video_forbids_copy = part.video_forbids_copy();
-    let video = part
-        .stream
-        .iter()
-        .find(|s| s.stream_type == 1)
-        .map(|s| s.decision.as_str())
-        .unwrap_or("-");
-    crate::player::log(&format!(
-        "decision: part={} video={video} general={:?} mde={:?} -> {}",
-        part.decision,
-        mc.general_decision_code,
-        mc.mde_decision_code,
-        if original {
-            "DIRECT PLAY"
-        } else if video_forbids_copy {
-            "TRANSCODE"
-        } else {
-            "REMUX"
-        }
-    ));
-    Some(MdeVerdict {
-        original,
-        video_forbids_copy,
-    })
-}
-
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(super) fn forced_server_decision(
-    c: &crate::plex::Client, rk: &str, session: &str, audio: i64, sub: i64,
-) -> Option<MdeVerdict> {
-    mde_verdict(&c.mde_decision_forced(rk, session, audio, sub)?)
-}
-
 /// Select the audio + subtitle streams server-side for the current part before a
 /// transcode. The transcoder encodes the part's SELECTED audio and, when a subtitle id is
 /// non-zero, BURNS that subtitle (query-param subtitleStreamID does NOT suppress a
@@ -5789,18 +5521,6 @@ pub(super) fn put_selection(sid: ServerId, part: i64, aud: i64, sub: i64) {
     ));
 }
 
-/// What the queue told us, as owned data for `apply_plan` to install. `machine_id` is `""` when
-/// the cached one is still good.
-#[derive(Default)]
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(super) struct QueueInfo {
-    pub(super) machine_id: String,
-    pub(super) id: String,
-    pub(super) item_id: String,
-    pub(super) up_next: Option<UpNext>,
-    pub(super) rows: Vec<crate::playback::QueueRow>,
-}
-
 /// The queued next episode. Main-thread only, and — like `metadata::playing()` (via
 /// `MetadataView`, which hands out a `&'a` borrow of the owner's state) — it hands out a
 /// reference the Up Next control reads across a frame, so `apply_plan` (main thread) staying its
@@ -5810,104 +5530,6 @@ pub(crate) fn up_next(ps: &PlaybackSession) -> Option<&UpNext> {
     ps.up_next.as_ref()
 }
 
-/// The current playback's queue rows, in queue order, the row now playing among them — locate it
-/// with `plex::queue_index_of(rows, pq_item_id().parse().unwrap_or(0), &cur_rk())`, which is the
-/// ONE implementation of the identity rule (item id, rating key as the fallback). Empty until a
-/// plan lands, and whenever the queue POST failed.
-///
-/// MAIN THREAD ONLY. Unlike [`up_next`] this lends the rows to a closure instead of handing out a
-/// `&'static`, and that is deliberate: `request_play` FREES this Vec as its first act, so a
-/// borrowed row used to start playback would be read after free — exactly the aliasing bug
-/// `request_play_up_next`'s by-value signature exists to make unrepresentable. A caller that wants
-/// to keep a row past the call clones it out (`with_queue(|q| q.get(i).cloned())`); the borrow
-/// checker cannot police a `&'static`, but it does police this.
-#[allow(dead_code)] // nothing reads the rows yet — the queue overlay that draws them is its own batch
-pub(crate) fn with_queue<R>(ps: &PlaybackSession, f: impl FnOnce(&[crate::playback::QueueRow]) -> R) -> R {
-    f(&ps.queue)
-}
-
-/// Create a PlayQueue for `rk` so the session is a first-class, remote-controllable player and
-/// the timeline can carry a real playQueueItemID. Best-effort: on failure the timeline still
-/// works, just without the queue ids (and the player without an Up Next).
-///
-/// PURE: returns owned data for `apply_plan` to install.
-///
-/// **The machine id is THIS server's, three ways, in order.** It goes into
-/// `uri=server://{machineIdentifier}/…`, so naming the wrong server is a POST that either fails or
-/// builds a queue nobody asked for.
-///   1. **The registry's own id for this client** — it is the key the server is filed under, so it
-///      cannot belong to another one. Free, and refreshed whenever the slot is re-pointed.
-///   2. `cached`, which `ResolveEnv` only fills in when the cache was learned from *this* server
-///      (see [`PlaybackSession::machine_sid`]) — the `install(&Origin, token)` path registers with no id, so
-///      for the session's own server rung 1 is empty and this is what saves a round trip.
-///   3. `GET /identity`, whose answer travels back in `QueueInfo::machine_id` for `apply_plan` to
-///      cache against this server.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(super) fn resolve_playqueue(
-    c: &crate::plex::Client,
-    rk: &str,
-    session: &str,
-    cached: &str,
-    continuous: bool,
-) -> QueueInfo {
-    let known = c.machine_id();
-    // `mid` is the FETCHED id and nothing else: apply_plan's "" means "leave the cache alone", and
-    // the first two rungs are already-known values with nothing to write back.
-    let mid = if known.is_empty() && cached.is_empty() {
-        c.machine_identity().unwrap_or_default()
-    } else {
-        String::new()
-    };
-    let effective = if !known.is_empty() {
-        known
-    } else if !mid.is_empty() {
-        &mid
-    } else {
-        cached
-    };
-    if effective.is_empty() {
-        crate::player::log("playqueue: no machineIdentifier (skip)");
-        return QueueInfo::default();
-    }
-    match c.create_play_queue(effective, rk, session, continuous) {
-        Some(q) => {
-            let up_next = q.next.as_ref().and_then(up_next_of);
-            crate::player::log(&format!(
-                "playqueue: id={} item={} remaining={} rows={} next={}",
-                q.id,
-                q.selected_item_id,
-                q.remaining,
-                q.items.len(),
-                up_next
-                    .as_ref()
-                    .map(|u| format!("S{}E{} {}", u.season, u.index, u.rk))
-                    .unwrap_or_else(|| "-".into())
-            ));
-            QueueInfo {
-                machine_id: mid,
-                id: if q.id > 0 {
-                    q.id.to_string()
-                } else {
-                    String::new()
-                },
-                item_id: if q.selected_item_id > 0 {
-                    q.selected_item_id.to_string()
-                } else {
-                    String::new()
-                },
-                up_next,
-                rows: q.items,
-            }
-        }
-        None => {
-            crate::player::log("playqueue: POST failed");
-            QueueInfo {
-                machine_id: mid,
-                ..Default::default()
-            }
-        }
-    }
-}
 
 impl ResolveEnv {
     /// Mark this resolve as a hero preview. A preview is direct play or nothing
@@ -5927,15 +5549,8 @@ impl ResolveEnv {
     /// raised off a merged shelf resolves against the server that shelf's row belongs to rather
     /// than whichever server happens to be current when the worker gets around to asking.
     fn snapshot(ps: &PlaybackSession, meta: crate::metadata::MetadataView<'_>, sid: ServerId, rk: &str) -> ResolveEnv {
-        let s = ps;
         ResolveEnv {
             sid,
-            // the cache only counts when it was learned from the server this play is against
-            machine_id: if s.machine_sid == sid {
-                s.machine_id.clone()
-            } else {
-                String::new()
-            },
             audio_sid: cur_audio_sid(ps),
             sub_sid: cur_sub_sid(ps),
             subtitle_override: None,
@@ -5946,9 +5561,6 @@ impl ResolveEnv {
             omit_queue_continuous: false,
             preview: false,
             audio_enhancements: crate::player::audio_enhancements(),
-            pass: crate::plex::serverinfo::subscription_of(sid),
-            #[cfg(test)]
-            dv_capability: None,
         }
     }
 }
@@ -6239,10 +5851,8 @@ fn request_play_inner(
         // Retire the OUTGOING item's queue before its successor resolves: this names the episode
         // after the one that WAS playing, and leaving it up would offer the Up Next control a
         // stale "next" for the whole resolve window — including, when the user just started that
-        // very episode from here, the one now on screen. The retained rows go with it, for the
         // same reason and because a fresh `Vec` also hands their strings back to the allocator.
         s.up_next = None;
-        s.queue = Vec::new();
         // …and the PREVIOUS item's refusal, for the same reason and one more: `player::state()`
         // derives `Error` from it, so a verdict left standing would put the failure read-out over
         // the item now being resolved. `play_pending()` outranks it for this frame either way, but
@@ -6724,7 +6334,6 @@ fn apply_plan(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::Meta
             title,
             ctxline,
             up_next: plan.up_next,
-            queue: plan.queue,
             // The frame tick is the MACHINE's, not the plan's: a landing replaces the session's
             // contents and must not rewind the stamp `Player::set_now` wrote this iteration.
             now_ms,
@@ -6931,38 +6540,6 @@ pub(crate) fn retranscode_for(ps: &mut PlaybackSession, expected: &WorkerTicket,
         return None;
     }
     jellyfin_retranscode_as(ps, expected, offset_secs)
-}
-
-/// The contract a plain rebuild of the current route asks for: today's delivery, ceiling and
-/// video-copy rule with `remux: false`, and the enhancement run through the one offer predicate
-/// (a re-encode is family `Other`, so NONE) — a pick mid-play never keeps params the offer no
-/// longer covers.
-///
-/// **One exception keeps an ENHANCED remux a remux.** A pick that leaves the offer standing
-/// (another capable track the candidate can carry) makes [`enhancement_step`] `NotInvolved`
-/// because the params already match, and its legacy reload lands here; rebuilding that as a
-/// re-encode would silently drop the enhancement the viewer still has switched on.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-fn retranscode_contract(ps: &PlaybackSession) -> crate::playback::EncodeContract {
-    // A ceiling means a fixed rung was picked, and an enhanced remux is uncapped by definition:
-    // keeping it would erase the cap the picker shows (I5).
-    let keep_enhanced = live_family(ps) == RouteFamily::Remux
-        && ps.cur_contract.ceiling.is_none()
-        && ps.cur_contract.audio.any()
-        && want_live(ps).any();
-    if keep_enhanced {
-        return enhanced_remux_contract(want_live(ps));
-    }
-    crate::playback::EncodeContract {
-        remux: false,
-        delivery: cur_delivery(ps),
-        no_video_copy: is_no_video_copy(ps),
-        ceiling: cur_ceiling(ps),
-        audio: desired_audio(
-            crate::player::audio_enhancements(),
-            enhancements_offered(&facts(ps), RouteFamily::Other),
-        ),
-    }
 }
 
 /// Rebuild the current item under `contract` (issue #266: the whole encode shape, enhancement
@@ -8007,9 +7584,6 @@ pub(crate) mod test_support;
 #[path = "decision_resolve_route_tests.rs"]
 mod resolve_route_tests;
 
-#[cfg(test)]
-#[path = "decision_timeline_tests.rs"]
-mod timeline_tests;
 
 #[cfg(test)]
 #[path = "carried_audio_tests.rs"]

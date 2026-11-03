@@ -422,13 +422,6 @@ impl Machine {
     }
 }
 
-/// Direct-play only. A transcode, remux, or adaptive decision is a refusal, which is how a relay
-/// link (policy denies direct play) is refused without a second check.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(crate) fn accepts_direct_play(direct_play: bool, part_nonempty: bool, adaptive: bool) -> bool {
-    direct_play && part_nonempty && !adaptive
-}
-
 /// Defer the media join while an in-flight Load has not returned. Joining it on the main thread
 /// is the stall Abandoning exists to avoid.
 pub(crate) fn defer_media_join(loading: bool, thread_finished: bool) -> bool {
@@ -1115,15 +1108,6 @@ mod tests {
         assert_eq!(dwell, Some("400"));
         assert_eq!(nop, Some("0"));
         assert_eq!(num, Some("0"));
-    }
-
-    #[test]
-    fn a_relay_link_is_not_a_direct_play() {
-        let policy = crate::plex::link_policy(Some(crate::plex::probe::Location::Relay));
-        assert!(!accepts_direct_play(policy.direct_play, true, false));
-        assert!(accepts_direct_play(true, true, false));
-        assert!(!accepts_direct_play(true, true, true));
-        assert!(!accepts_direct_play(true, false, false));
     }
 
     #[test]
