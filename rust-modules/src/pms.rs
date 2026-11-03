@@ -58,10 +58,6 @@ pub(crate) const MAX_SHELF_ITEMS: usize = 24;
 
 pub(crate) const KIND_COLLECTION: c_int = 4;
 
-pub(crate) fn listable(type_str: &str) -> bool {
-    matches!(type_str, "movie" | "show" | "season" | "episode")
-}
-
 /// Items asked of each hub endpoint, per source. `/hubs?count=` is items-per-hub, so this bounds
 /// a shelf, never the number of shelves.
 const HUB_FETCH_COUNT: i64 = 12;
@@ -74,10 +70,10 @@ pub struct PmsMovie {
     /// WHICH SERVER this row came from. Every other identity on it — `rk`, `show_rk`, `part` — is a
     /// server-local key that a second server reuses from 1 (docs/shared-servers.md §2 measured the
     /// collision), so the row is only addressable as the PAIR `(sid, rk)`; see
-    /// [`crate::registry::same_item`]. Stamped by [`parse_item`] from a value the SPAWNING thread
-    /// captured, never from `plex::current_server()` inside the worker — `parse_item` runs on the
-    /// hub, page and person workers, and by the time one of them parses, "the current server" may
-    /// already be a different machine than the one whose bytes it is holding.
+    /// [`crate::registry::same_item`]. Stamped by the parser that produced the row from a value the
+    /// SPAWNING thread captured, never from `plex::current_server()` inside the worker — the row
+    /// is parsed on a worker thread, and by the time it parses, "the current server" may already
+    /// be a different machine than the one whose bytes it is holding.
     #[serde(with = "record::server_id")]
     pub(crate) sid: ServerId,
     /// The LIBRARY on `sid` this row came from (`librarySectionID`), 0 when the server sent none.
@@ -256,13 +252,6 @@ pub(crate) fn index_of_rk(state: &PmsState, sid: ServerId, rk: &str) -> c_int {
 }
 
 // ---- helpers ----
-/// owned copy of a metadata string with newlines flattened to spaces (single-line UI fields)
-fn clean(s: &str) -> String {
-    s.chars()
-        .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
-        .collect()
-}
-
 /// percent-encode into a String (Rust callers, e.g. app::adapters::poster::built_key)
 pub(crate) fn urlenc_str(src: &str) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
@@ -279,127 +268,9 @@ pub(crate) fn urlenc_str(src: &str) -> String {
     out
 }
 
-/// Parse one Plex `Metadata` item (from a section listing OR a hub) into a catalog row.
-/// pub(crate): the Library browse store (`browse.rs`) and the person page (`person.rs`) map their
-/// listings with it too.
-///
-/// `sid` is the server the response came from and is **passed in, never looked up**: all three
-/// callers run this on a worker thread, and the house rule (`browse.rs`'s spawn site states it
-/// outright) is that a worker reads no statics. It is also the only correct answer — the current
-/// server can change while a page fetch is in flight, and the rows in hand belong to the machine
-/// that was asked, not to whichever one is current when they finish parsing.
-pub(crate) fn parse_item(it: &crate::media::Metadata, sid: ServerId) -> PmsMovie {
-    let mut m = PmsMovie {
-        sid,
-        sec: it.library_section_id,
-        ..Default::default()
-    };
-    m.aired = clean(&it.originally_available_at);
-    m.kind = match it.kind.as_str() {
-        "show" => 1,
-        "season" => 2,
-        "episode" => 3,
-        "collection" => KIND_COLLECTION,
-        _ => 0,
-    };
-    match m.kind {
-        3 => {
-            // episode: parent show = grandparent, season number = parentIndex
-            m.show_rk = clean(&it.grandparent_rating_key);
-            m.season_index = it.parent_index as c_int;
-            m.show_title = clean(&it.grandparent_title);
-            m.ep_index = it.index as c_int;
-        }
-        2 => {
-            // season: parent show = parent, season number = index
-            m.show_rk = clean(&it.parent_rating_key);
-            m.season_index = it.index as c_int;
-            m.show_title = clean(&it.parent_title);
-        }
-        _ => {}
-    }
-    // A COLLECTION HAS NO WATCH OR RESUME STATE of its own, whatever counters the server sends
-    // with it. This is the one place that says so: both flags are false and `resume_ms` is zero
-    // below, and every reader (the poster mark, `resume_frac`, the item menu) trusts the row.
-    //
-    // shows/seasons count leaves (a show with any watched episode is no longer "unwatched");
-    // movies/episodes key on viewCount absence (docs/pms-api.md §2)
-    m.unwatched = match m.kind {
-        1 | 2 => it.viewed_leaf_count == 0 && it.leaf_count > 0,
-        KIND_COLLECTION => false,
-        _ => it.view_count == 0,
-    };
-    // …and DONE is its own question, not the negation of that one: for a container it takes ALL the
-    // leaves, so a show three episodes in is neither (see the `watched` field's doc).
-    m.watched = match m.kind {
-        1 | 2 => it.leaf_count > 0 && it.viewed_leaf_count >= it.leaf_count,
-        KIND_COLLECTION => false,
-        _ => it.view_count > 0,
-    };
-    if m.kind == KIND_COLLECTION {
-        m.child_count = it.child_count.max(0);
-    }
-    m.title = clean(&it.title);
-    m.year = it.year as c_int;
-    m.rating = clean(&it.content_rating);
-    m.dur_ns = if it.duration > 0 {
-        it.duration * 1_000_000
-    } else {
-        0
-    };
-    m.resume_ms = if m.kind == KIND_COLLECTION { 0 } else { it.view_offset };
-    // poster: prefer the show poster for episodes (grandparentThumb) so a landscape
-    // episode still doesn't fill a portrait card
-    let thumb = if it.grandparent_thumb.is_empty() {
-        &it.thumb
-    } else {
-        &it.grandparent_thumb
-    };
-    m.thumb = clean(thumb);
-    // …and the item's OWN thumb, unsubstituted. The line above is right for a POSTER shelf and
-    // wrong for a landscape one, and both exist: an episode's own thumb is a 16:9 still, so Home's
-    // portrait cards want the show poster, while a 420x236 tile wants the still — with the
-    // substitution applied, a search for a show drew the same fanart on every episode in the row.
-    //
-    // Kept as a second field rather than resolved per caller because `parse_item` runs on a worker
-    // and cannot know which shelf will draw the row. Empty on a movie, where `thumb` already IS
-    // the item's own.
-    // **Keyed on the item BEING an episode, not on the show poster existing.** It used to be
-    // `grandparent_thumb.is_empty()`, which is a proxy that fails in the one direction that
-    // matters: an episode whose show has no poster kept its own 16:9 still ONLY in `thumb`, and
-    // `widgets::still_key` prefers `art` over `thumb` — so a landscape tile drew the show's shared
-    // backdrop while the episode's own still sat right there unused, which is the opposite of the
-    // documented still -> art -> poster chain.
-    m.still = if m.kind == 3 {
-        clean(&it.thumb)
-    } else {
-        String::new()
-    };
-    m.art = clean(&it.art);
-    m.summary = clean(&it.summary);
-    m.rk = clean(&it.rating_key);
-    // Media[0]: codecs + Part[0].key (movies/episodes; a show container has none)
-    if let Some(md) = it.media.first() {
-        m.vcodec = clean(&md.video_codec);
-        m.acodec = clean(&md.audio_codec);
-        if let Some(p0) = md.part.first() {
-            m.part = clean(&p0.key);
-        }
-    }
-    // UltraBlurColors -> the ambient gradient. `UltraBlurColors::corners` owns the corner ORDER and
-    // the all-black-envelope guard (shared with the detail store, which keys the same wash off the
-    // LOADED item); `de_ultrablur` already accepted both the array and object shapes PMS returns
-    // (D-1), so blur populates where the old object-only read left it blank.
-    if let Some(blur) = it.ultra_blur_colors.and_then(|u| u.corners()) {
-        m.blur = blur;
-        m.has_blur = true;
-    }
-    m
-}
-
 // The full-library browse path lives in `crate::browse` (the Library screen's per-section
 // PAGED catalog — sparse store + off-thread page fetches via `section_items_query`). This
-// module stays hub-only; `browse` reuses `parse_item` above for its listings.
+// module stays hub-only.
 
 // ---- home hubs: each hub is a titled slice of the catalog ----
 #[derive(Clone, serde::Serialize, serde::Deserialize)]

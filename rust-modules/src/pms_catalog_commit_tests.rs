@@ -6,50 +6,6 @@ use super::*;
 use super::test_support::*;
 
 #[test]
-fn collection_rows_have_their_own_kind_and_unknown_types_are_not_listable() {
-    let row = |kind: &str| crate::media::Metadata {
-        kind: kind.into(), rating_key: "42".into(), title: "Not a movie".into(),
-        thumb: "/poster".into(), ..Default::default()
-    };
-    assert_eq!(parse_item(&row("collection"), sid(0)).kind, 4, "a collection is not a movie");
-    for kind in ["movie", "show", "season", "episode"] {
-        assert!(listable(kind), "{kind} remains listable");
-    }
-    for kind in ["collection", "playlist", "clip", "something-new"] {
-        assert!(!listable(kind), "{kind} must not surface as a playable catalog row");
-    }
-}
-
-/// A collection row keeps its member count (the Library caption's "N items"); no other kind reads
-/// `childCount` into it, so a show's season count never masquerades as one.
-#[test]
-fn a_collection_row_carries_its_member_count() {
-    let row = |kind: &str, child_count: i64| crate::media::Metadata {
-        kind: kind.into(), rating_key: "50001".into(), title: "Trilogy".into(), child_count,
-        ..Default::default()
-    };
-    assert_eq!(parse_item(&row("collection", 3), sid(0)).child_count, 3);
-    assert_eq!(parse_item(&row("collection", -1), sid(0)).child_count, 0, "a nonsense count reads as none");
-    assert_eq!(parse_item(&row("show", 5), sid(0)).child_count, 0);
-}
-
-/// A collection has no watch or resume state of its own, whatever counters the server sends with
-/// it: `parse_item` is the one place that says so, and every reader (the poster mark, the progress
-/// bar, the item menu) trusts the row.
-#[test]
-fn a_collection_row_has_no_watch_or_resume_state() {
-    let row = crate::media::Metadata {
-        kind: "collection".into(), rating_key: "50001".into(), title: "Trilogy".into(),
-        view_count: 2, view_offset: 60_000, duration: 120_000, leaf_count: 3, viewed_leaf_count: 3,
-        ..Default::default()
-    };
-    let m = parse_item(&row, sid(0));
-    assert!(!m.watched && !m.unwatched, "no watched disc and no unwatched triangle");
-    assert_eq!(m.resume_ms, 0, "no resume point");
-    assert_eq!(m.resume_frac(), None, "no progress bar");
-}
-
-#[test]
 #[should_panic(expected = "requires its server in the retained Browse directory")]
 fn a_directory_scoped_hubs_fixture_refuses_an_empty_browse_publication() {
     let _guard = crate::testlock::serial();
@@ -116,78 +72,6 @@ fn home_group_falls_back_to_provider_key_not_label_or_position() {
     hub.hub_id.clear();
     hub.key.clear();
     assert_eq!(stable_hub_identity(&hub, &items), None);
-}
-
-/// **An episode keeps its OWN still even when its show has no poster.** `still` used to be
-/// populated only when `grandparentThumb` was present — a proxy for "this is an episode" that
-/// fails in the one direction that matters. With the show poster absent, the episode's own 16:9
-/// frame survived only in `thumb`, and `widgets::still_key` prefers `art` over `thumb`, so a
-/// landscape tile drew the show's shared backdrop while the episode's own still sat unused:
-/// exactly the "every episode is the same picture" symptom the landscape row was built to end,
-/// reappearing through a different door.
-#[test]
-fn an_episode_keeps_its_own_still_without_a_show_poster() {
-    let ep = |gp: &str| {
-        let it = crate::media::Metadata {
-            kind: "episode".into(),
-            rating_key: "9".into(),
-            title: "The Meeting".into(),
-            thumb: "/ep/still".into(),
-            art: "/show/art".into(),
-            grandparent_thumb: gp.into(),
-            grandparent_title: "The Office".into(),
-            ..Default::default()
-        };
-        parse_item(&it, sid(0))
-    };
-
-    // the show HAS a poster: the poster substitution stands, and the still is kept beside it
-    let with = ep("/show/poster");
-    assert_eq!(with.thumb, "/show/poster", "a portrait card wants the poster");
-    assert_eq!(with.still, "/ep/still");
-    assert_eq!(crate::ui::widgets::still_key(&with), "/ep/still");
-
-    // …and with no show poster the still is STILL the episode's own frame, not the backdrop
-    let without = ep("");
-    assert_eq!(without.thumb, "/ep/still", "nothing to substitute");
-    assert_eq!(
-        without.still, "/ep/still",
-        "the episode's own frame, which the landscape tile is for"
-    );
-    assert_eq!(
-        crate::ui::widgets::still_key(&without),
-        "/ep/still",
-        "…and never the show's shared art, which is the same picture on every episode"
-    );
-
-    // a MOVIE carries no still: its `thumb` already IS its own artwork
-    let film = parse_item(
-        &crate::media::Metadata {
-            kind: "movie".into(),
-            rating_key: "4".into(),
-            title: "Snatch".into(),
-            thumb: "/film/poster".into(),
-            ..Default::default()
-        },
-        sid(0),
-    );
-    assert!(film.still.is_empty());
-}
-
-#[test]
-fn a_flat_season_listing_keeps_its_show_title_and_own_poster() {
-    let season: crate::media::Metadata = serde_json::from_str(r#"{
-        "type":"season", "ratingKey":"17", "title":"Season 2", "index":2,
-        "parentRatingKey":"9", "parentTitle":"Example Show", "thumb":"/season/poster"
-    }"#).unwrap();
-    let item = parse_item(&season, sid(0));
-    assert_eq!(item.show_title, "Example Show",
-        "seasons from different shows need their show name in a flat listing");
-    assert_eq!(item.title, "Season 2");
-    assert_eq!(item.show_rk, "9");
-    assert_eq!(item.season_index, 2);
-    assert_eq!(item.thumb, "/season/poster");
-    assert!(item.still.is_empty());
 }
 
 /// **A ratingKey alone does not name an item once a second server exists.** Both servers

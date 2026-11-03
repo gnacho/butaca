@@ -353,8 +353,8 @@ fn push_sid(s: &mut String, sid: crate::registry::ServerId) {
 
 /// Append a rating key, keeping ASCII alphanumerics and dropping everything else.
 ///
-/// The filter is the redaction rule made structural rather than assumed. `pms::parse_item` fills
-/// `rk` from the wire's `ratingKey`, which PMS sends as a bare number — but this line goes to a log
+/// The filter is the redaction rule made structural rather than assumed. A catalog row's `rk` is
+/// filled from the wire's `ratingKey`, which PMS sends as a bare number — but this line goes to a log
 /// that gets pasted into public issues, and a field that simply trusted the server's string would
 /// be one upstream change away from carrying a path or a title into it. Bounded too, for the same
 /// reason: a key is a handful of digits, so anything longer is not a key.

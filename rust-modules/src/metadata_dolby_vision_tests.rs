@@ -4,8 +4,8 @@
 use super::test_support::*;
 use super::*;
 
-/// **A Dolby Vision record must survive a second video stream that has none.** `fps` and `hdr`
-/// take the LAST `streamType: 1` stream in the part and that is harmless for both; the DV
+/// **A Dolby Vision record must survive a second video stream that has none.** `fps`
+/// takes the LAST `streamType: 1` stream in the part and that is harmless for it; the DV
 /// record is read by `route::video_direct_plays`, so blanking it back to the all-zero default
 /// re-opens the direct-play gate and the file plays in the wrong colours — the exact bug the
 /// gate exists for. No part on the dev server carries two video streams today (all 540 leaves
@@ -45,8 +45,7 @@ fn a_dolby_vision_record_is_not_erased_by_a_later_video_stream() {
 #[test]
 fn a_part_with_no_dolby_vision_reports_no_record() {
     let s = convert_streams(&[video_stream(None)]);
-    let (hdr, dovi) = (s.hdr, s.dovi);
+    let dovi = s.dovi;
     assert_eq!(dovi, Dovi::default());
     assert!(!dovi.base_layer_unusable());
-    assert!(!hdr, "no DV and no PQ/HLG transfer is not HDR");
 }

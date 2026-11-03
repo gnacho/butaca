@@ -284,9 +284,11 @@ mod tests {
         let _guard = crate::testlock::serial();
         let last_local = (crate::registry::MAX_SERVERS * 3) as u32;
         for slot in 0..last_local + 2 {
+            // The K_RESOLVE slots accept NOTHING: their fetch went with the Plex read layer, and
+            // the `Resolve` mail kind no longer deserializes at all.
             let expected = if slot == last_local { "Profile" }
                 else if slot == last_local + 1 { "Credits" }
-                else { ["Resolve", "Media", "Roles"][(slot % 3) as usize] };
+                else { ["", "Media", "Roles"][(slot % 3) as usize] };
             for kind in ["Resolve", "Media", "Roles", "Profile", "Credits"] {
                 let data = json!({"gen":7,"what":{kind:null}});
                 assert_eq!(crate::person::validate_record(slot, &data).is_ok(), kind == expected,

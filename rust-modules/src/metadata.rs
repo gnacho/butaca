@@ -957,12 +957,6 @@ pub(crate) fn extra_play_context(extra: &Extra) -> &'static str {
     }
 }
 
-/// Movie and show detail can show a Trailer control. Episode/season pages do not inherit the
-/// show trailer in this pass, and must not pay extras I/O.
-pub(crate) fn extras_wanted(kind: &str) -> bool {
-    kind == "movie" || kind == "show"
-}
-
 // Deliberately NOT `Default`: every construction site spells every field, so adding one to a
 // season is a compile error at each of them rather than a silent zero (the counts below are
 // exactly the kind of field that reads as a legitimate value when it defaults).
@@ -1007,26 +1001,20 @@ impl Season {
 /// **The data was never missing.** `/related`'s rows are the SAME wire DTO every other listing
 /// parses, carrying `viewCount`, `viewOffset`, `duration`, `type` and `Media[0].Part[0]`;
 /// `fetch_related` simply copied three fields out and dropped the rest. So the fix is not to widen
-/// this struct field by field but to stop having one: [`crate::pms::parse_item`] is the ONE
+/// this struct field by field but to stop having one: `crate::pms::parse_item` WAS the ONE
 /// `plex::Metadata` → row mapping that the hub catalog, the Library grid and the person page
-/// already share, and it owns rules a re-derivation gets wrong. The sharpest is that a related
+/// shared, and it owned rules a re-derivation gets wrong. The sharpest is that a related
 /// **SHOW** is watched on `viewedLeafCount >= leafCount` and never on `viewCount > 0`, so a series
 /// you are three episodes into is neither watched nor unwatched — which is exactly the state whose
 /// menu must offer BOTH write verbs (`ui::widgets::row_watch_state`).
 ///
 /// Carrying `sid` is the second thing this buys, and it is a correctness property rather than a
 /// convenience: a related item is a key on the server THIS PAGE is mounted on, and both servers
-/// number their ratingKeys from 1 (`docs/shared-servers.md` §2). `fetch_related` stamps each row
-/// with the sid it fetched from, so every downstream use — the art request, the context menu's
-/// `SID`, the scrobble — addresses the right machine BY CONSTRUCTION rather than by a comment
-/// asking the next caller to remember `plex::current_server()` is the wrong answer here.
+/// number their ratingKeys from 1 (`docs/shared-servers.md` §2). The fetch that fills the shelf
+/// stamps each row with the sid it fetched from, so every downstream use — the art request, the
+/// context menu's `SID`, the scrobble — addresses the right machine BY CONSTRUCTION rather than by
+/// a comment asking the next caller to remember `plex::current_server()` is the wrong answer here.
 pub(crate) type Related = crate::pms::PmsMovie;
-
-/// What `/related` becomes on a Detail page: the flattened Related row.
-#[derive(Default)]
-pub(crate) struct RelatedRows {
-    pub(crate) related: Vec<Related>,
-}
 
 /// Clone because the playing-item store keeps the played leaf's OWN chapters (see [`PlayingItem`]) —
 /// on the detail-page play path they are cloned from the already-loaded `Detail` rather than refetched.
@@ -1386,10 +1374,11 @@ impl Detail {
     /// (`screens::tracks_panel`) and the Languages column's press gate on the detail page.
     ///
     /// It is `part` rather than `is_show` on purpose. A SHOW container carries no `Media` of its
-    /// own — `parse_streams` backfills its audio/subtitle lists from episode 1 for the About footer
-    /// — so on a show page a track sheet would print episode 1's path, size and bitrate under the
-    /// show's name. That is not a truncation of the truth, it is a different file, and `part` is
-    /// exactly the field that is empty when the item has no file of its own ("Media[0].Part[0].key
+    /// own — the backend's own fetch backfills its audio/subtitle lists from the hero episode for
+    /// the About footer — so on a show page a track sheet would print episode 1's path, size and
+    /// bitrate under the show's name. That is not a truncation of the truth, it is a different
+    /// file, and `part` is exactly the field that is empty when the item has no file of its own
+    /// ("Media[0].Part[0].key
     /// for a leaf (movie/episode); empty for a show").
     ///
     /// The rule lives on the DATA so both the page and the sheet read one answer: phase 10's
@@ -1750,8 +1739,8 @@ pub(crate) fn trailer_now_playing(
 // ---- fetches (all via the typed crate::plex client; serde DTOs, no Value scraping) ----
 //
 // Every one of them takes the `ServerId` rather than reaching for `plex::client()`: they run on the
-// detail/season workers, and the house rule is that a worker reads no statics (`pms::parse_item`
-// carries the same note). It is also what stamps the row — an item fetched from slot 1 must be
+// detail/season workers, and the house rule is that a worker reads no statics. It is also what
+// stamps the row — an item fetched from slot 1 must be
 // recorded as slot 1's whatever `client()` answers with by the time the fetch returns.
 /// The stand-in handle, read ONCE. The trigger surface is boot state, and [`Detail::source`] is
 /// reached from a draw — a `stat` per frame inside one is exactly what `crate::dev`'s doc forbids.
@@ -1775,16 +1764,15 @@ fn dev_source() -> Option<&'static str> {
     None
 }
 
-fn fetch_detail(sid: crate::registry::ServerId, rk: &str) -> Option<(Detail, String)> {
+fn fetch_detail(sid: crate::registry::ServerId, rk: &str) -> Option<Detail> {
     // Jellyfin is the only backend: the store's own full fetch (item + NextUp + seasons + the
-    // hero episode's streams). The extra key has no counterpart there: trailer identity comes
-    // from the DTO itself, so the slot is empty.
+    // hero episode's streams). Trailer identity comes from the DTO itself; the old
+    // `primaryExtraKey` side-channel went with the Plex extras machinery.
     if sid != crate::jellyfin::SERVER_ID {
         return None;
     }
     let c = crate::jellyfin::client()?;
-    let d = crate::jellyfin::detail::fetch_full(c, sid, rk)?;
-    Some((d, String::new()))
+    crate::jellyfin::detail::fetch_full(c, sid, rk)
 }
 
 /// Convert a part's Stream[] into (audio, subs, video_fps, video_is_hdr, dovi) — the ONE
@@ -1803,20 +1791,14 @@ fn fetch_detail(sid: crate::registry::ServerId, rk: &str) -> Option<(Detail, Str
 pub(crate) struct Streams {
     pub(crate) audio: Vec<Stream>,
     pub(crate) subs: Vec<Stream>,
-    /// The part's video track, or `None` for an audio-only part. Carries the per-stream bitrate,
-    /// profile, bit depth and chroma that `fps`/`hdr`/`dovi` alone throw away.
-    pub(crate) video: Option<Stream>,
     /// the video track's `frameRate` (0 = unknown) — feeds the Load esInfo
     pub(crate) fps: f64,
-    pub(crate) hdr: bool,
     pub(crate) dovi: Dovi,
 }
 
 fn convert_streams(streams: &[crate::media::Stream]) -> Streams {
     let (mut audio, mut subs, mut fps) = (Vec::new(), Vec::new(), 0.0);
-    let mut hdr = false;
     let mut dovi = Dovi::default();
-    let mut video: Option<Stream> = None;
     for s in streams {
         let st = Stream {
             id: s.id,
@@ -1846,17 +1828,13 @@ fn convert_streams(streams: &[crate::media::Stream]) -> Streams {
         match s.stream_type {
             1 => {
                 fps = s.frame_rate; // e.g. 23.976 — for the Load esInfo
-                                    // PQ (HDR10) or HLG transfer, or Dolby Vision — the dev PMS sends
-                                    // colorTrc=smpte2084 on its HDR10 items (probed live 2026-08-11)
-                hdr = matches!(s.color_trc.as_str(), "smpte2084" | "arib-std-b67")
-                    || s.dovi_present != 0;
                 // NB a Profile 5 file sends NO colorTrc at all (verified live 2026-08-21: the
                 // dev server's one P5 item omits the field), so `dovi_present` is the only
                 // thing that makes it read as HDR — and the layering fields below are the only
                 // thing that makes it read as unplayable.
                 //
-                // Guarded on `dovi_present`, unlike the two assignments above it, and the
-                // difference is deliberate. `fps` and `hdr` take the LAST video stream in the
+                // Guarded on `dovi_present`, unlike the `fps` assignment above it, and the
+                // difference is deliberate. `fps` takes the LAST video stream in the
                 // part; a Dolby Vision record must instead SURVIVE one, because the direct-play
                 // gate reads it and losing it fails the wrong way — a second `streamType: 1`
                 // stream carrying no DOVI fields (embedded cover art is the shape to expect)
@@ -1878,14 +1856,6 @@ fn convert_streams(streams: &[crate::media::Stream]) -> Streams {
                         rpu_present: s.dovi_rpu_present != 0,
                     };
                 }
-                // The video track ITSELF, kept rather than reduced to `fps`/`hdr`/`dovi`. It is the
-                // only place the stream's own bitrate, profile, bit depth and chroma survive, and
-                // `screens::tracks_panel`'s VIDEO column is built from all four. Guarded like the DV
-                // record and for the same reason — a second `streamType: 1` stream (embedded cover
-                // art is the shape to expect) must not overwrite the real picture's technicals.
-                if video.is_none() {
-                    video = Some(st);
-                }
             }
             2 => audio.push(st),
             3 => subs.push(st),
@@ -1895,9 +1865,7 @@ fn convert_streams(streams: &[crate::media::Stream]) -> Streams {
     Streams {
         audio,
         subs,
-        video,
         fps,
-        hdr,
         dovi,
     }
 }
@@ -1932,41 +1900,6 @@ mod convert_streams_tests {
         assert_eq!(s.audio.len(), 2);
         assert!(s.audio[0].can_normalize_loudness);
         assert!(!s.audio[1].can_normalize_loudness);
-        assert!(!s.video.expect("video track").can_normalize_loudness);
-    }
-}
-
-/// parse an item's Media[0].Part[0].Stream[] into d.audio / d.subs (the About footer), plus that
-/// same version's technical fields (resolution/size/bitrate — the hero's media badge). Both ride
-/// the ONE version (see `plex::Metadata::primary_media`), and both are borrowed from a show's
-/// first episode by the same call in `fetch_item_streams`, so they can't describe different files.
-fn parse_streams(it: &crate::media::Metadata, d: &mut Detail) {
-    if let Some(m) = it.primary_media() {
-        d.video_resolution = m.video_resolution.clone();
-        d.width = m.width;
-        d.height = m.height;
-        d.bitrate = m.bitrate;
-        d.container = m.container.clone();
-        d.aspect_ratio = m.aspect_ratio;
-    }
-    if let Some(p) = it.first_part() {
-        d.file = p.file.clone();
-        d.size = p.size;
-        // The PART's container wins where it has one — a version can hold parts in different
-        // containers, and the part is the thing the panel is describing. `Media.container` is the
-        // fallback, already assigned above.
-        if !p.container.is_empty() {
-            d.container = p.container.clone();
-        }
-        let s = convert_streams(&p.stream);
-        d.audio = s.audio;
-        d.subs = s.subs;
-        d.video = s.video;
-        d.hdr = s.hdr;
-        d.dovi = s.dovi;
-        if s.fps > 0.0 {
-            d.video_fps = s.fps;
-        }
     }
 }
 
@@ -2517,14 +2450,6 @@ mod lang_matches_tests {
     }
 }
 
-/// fetch one item's full metadata and parse its streams into `d` — used to borrow a
-/// show's first-episode audio/subtitle tracks (the show container carries none).
-fn fetch_item_streams(sid: crate::registry::ServerId, rk: &str, d: &mut Detail) {
-    if let Some(it) = crate::registry::client_for(sid).and_then(|c| c.metadata(rk)) {
-        parse_streams(&it, d);
-    }
-}
-
 fn fetch_seasons(sid: crate::registry::ServerId, rk: &str) -> Vec<Season> {
     // The store's own season list, beside fetch_full's: the same data through the same client —
     // without this arm the tab strip read "0 seasons" off the empty Plex registry and the show
@@ -2546,9 +2471,9 @@ fn fetch_seasons(sid: crate::registry::ServerId, rk: &str) -> Vec<Season> {
 /// and no way to ask the tab again. Same rule browse.rs's page fetch carries with its `total < 0`
 /// sentinel ("a wiped-to-empty store here was a review-confirmed bug").
 ///
-/// NB its siblings `fetch_seasons`/`fetch_related` deliberately KEEP the degrade-to-empty: both are
-/// only ever called from `fetch_full`, which builds a Detail from nothing — there is no previous
-/// list there to protect, and neither is worth failing the whole page over.
+/// NB its sibling `fetch_seasons` deliberately KEEPS the degrade-to-empty: both are only ever
+/// called from `fetch_full`, which builds a Detail from nothing — there is no previous list there
+/// to protect, and neither is worth failing the whole page over.
 fn fetch_episodes(sid: crate::registry::ServerId, series_rk: &str, season_rk: &str) -> Option<Vec<Episode>> {
     // Jellyfin addresses a season's episodes by BOTH ids (`/Shows/{series}/Episodes?SeasonId=`),
     // where Plex's `/children` needs the season key alone — that asymmetry is the whole reason
@@ -2561,208 +2486,9 @@ fn fetch_episodes(sid: crate::registry::ServerId, series_rk: &str, season_rk: &s
         .and_then(|c| crate::jellyfin::detail::fetch_episodes(c, series_rk, season_rk))
 }
 
-fn convert_extra(x: &crate::media::Metadata) -> Extra {
-    Extra {
-        rk: x.rating_key.clone(),
-        title: x.title.clone(),
-        subtype: x.subtype.clone(),
-        extra_type: x.extra_type,
-        part: x.first_part().map(|p| p.key.clone()).unwrap_or_default(),
-        vcodec: x.primary_media().map(|m| m.video_codec.clone()).unwrap_or_default(),
-        acodec: x.primary_media().map(|m| m.audio_codec.clone()).unwrap_or_default(),
-        dur_ms: x.duration,
-        bitrate: x.primary_media().map(|m| m.bitrate).unwrap_or(0),
-        thumb: x.thumb.clone(),
-    }
-}
-
-/// Path tail of `primaryExtraKey` (`/library/metadata/9` → `9`). A bare rk is returned as-is.
-fn extra_key_tail(primary: &str) -> &str {
-    primary.rsplit('/').next().filter(|s| !s.is_empty()).unwrap_or(primary)
-}
-
-fn extra_matches_primary(x: &crate::media::Metadata, primary: &str) -> bool {
-    !primary.is_empty()
-        && (x.rating_key == extra_key_tail(primary) || (!x.key.is_empty() && x.key == primary))
-}
-
-fn is_trailer_meta(x: &crate::media::Metadata) -> bool {
-    x.subtype == "trailer" || x.extra_type == 1
-}
-
-fn playable_trailer_meta(x: &crate::media::Metadata) -> bool {
-    is_trailer_meta(x) && x.first_part().is_some_and(|p| !p.key.is_empty())
-}
-
-/// Picker winner: a playable trailer, preferring `primaryExtraKey`, else first in server order.
-/// A primary that names a non-trailer (or a trailer with no Part) is ignored.
-fn pick_trailer(rows: &[crate::media::Metadata], primary: &str) -> Option<Extra> {
-    let playable: Vec<&crate::media::Metadata> =
-        rows.iter().filter(|x| playable_trailer_meta(x)).collect();
-    playable
-        .iter()
-        .copied()
-        .find(|x| extra_matches_primary(x, primary))
-        .or_else(|| playable.first().copied())
-        .map(convert_extra)
-}
-
-/// First trailer row (playable or not) under the same primary preference — used only when the
-/// picker found none, so we can pay **one** follow-up metadata GET for a missing Part.
-fn trailer_fill_candidate<'a>(
-    rows: &'a [crate::media::Metadata],
-    primary: &str,
-) -> Option<&'a crate::media::Metadata> {
-    let trailers: Vec<&crate::media::Metadata> = rows
-        .iter()
-        .filter(|x| is_trailer_meta(x) && !x.rating_key.is_empty())
-        .collect();
-    trailers
-        .iter()
-        .copied()
-        .find(|x| extra_matches_primary(x, primary))
-        .or_else(|| trailers.first().copied())
-}
-
-fn trailer_from_item(it: &crate::media::Metadata) -> Option<Extra> {
-    playable_trailer_meta(it).then(|| convert_extra(it))
-}
-
-fn fetch_primary_trailer(sid: crate::registry::ServerId, primary: &str) -> Option<Extra> {
-    let rk = extra_key_tail(primary);
-    if rk.is_empty() {
-        return None;
-    }
-    let it = crate::registry::client_for(sid).and_then(|c| c.metadata(rk))?;
-    trailer_from_item(&it)
-}
-
-fn fetch_extras_rows(sid: crate::registry::ServerId, rk: &str) -> Option<Vec<crate::media::Metadata>> {
-    match crate::registry::client_for(sid).and_then(|c| c.extras(rk)) {
-        Some(mc) => Some(mc.metadata),
-        None => {
-            crate::log(&format!(
-                "detail: rk={rk} /extras did not answer — trying primaryExtraKey if the parent named one"
-            ));
-            None
-        }
-    }
-}
-
-/// Resolve the Trailer control's extra. At most one follow-up `metadata()` when every trailer
-/// row arrived without a Part; never N+1 over the rest of the list.
-fn resolve_trailer(
-    sid: crate::registry::ServerId,
-    rows: &[crate::media::Metadata],
-    primary: &str,
-) -> Option<Extra> {
-    if let Some(e) = pick_trailer(rows, primary) {
-        return Some(e);
-    }
-    let candidate = trailer_fill_candidate(rows, primary)?;
-    let it = crate::registry::client_for(sid).and_then(|c| c.metadata(&candidate.rating_key))?;
-    let e = convert_extra(&it);
-    e.playable().then_some(e)
-}
-
-/// Shelf cap. The extras element range is the same number, so a dropped tail is never a tile
-/// the page promised and then could not focus.
-const EXTRAS_MAX: usize = 32;
-
-fn extras_from_rows(rows: &[crate::media::Metadata]) -> Vec<Extra> {
-    rows.iter()
-        .filter(|x| !x.rating_key.is_empty())
-        .take(EXTRAS_MAX)
-        .map(convert_extra)
-        .collect()
-}
-
-/// Store every extras row, and the picker winner's rating key. A follow-up metadata GET that
-/// fills a missing Part replaces that row so the shelf tile and the Trailer disc agree.
-fn project_extras(
-    d: &mut Detail,
-    sid: crate::registry::ServerId,
-    rows: &[crate::media::Metadata],
-    primary: &str,
-) {
-    d.extras = extras_from_rows(rows);
-    let Some(winner) = resolve_trailer(sid, rows, primary) else {
-        d.trailer_rk.clear();
-        return;
-    };
-    if let Some(slot) = d.extras.iter_mut().find(|e| e.rk == winner.rk) {
-        if !slot.playable() {
-            *slot = winner.clone();
-        }
-    } else if d.extras.len() < EXTRAS_MAX {
-        d.extras.insert(0, winner.clone());
-    } else {
-        // The winner can be ANY row in server order — `extras_from_rows` already capped the
-        // shelf to `EXTRAS_MAX` before this ran, so a `primaryExtraKey` past that cut would
-        // otherwise leave `trailer_rk` naming a key `d.extras` never carries. `Detail::trailer()`
-        // would then silently fall back to the first playable trailer among the 32 KEPT rows
-        // (or find none), which is not the server's own answer. The winner earns a guaranteed
-        // slot; the shelf's own last tile pays for it instead of the picker's contract.
-        d.extras.pop();
-        d.extras.insert(0, winner.clone());
-    }
-    d.trailer_rk = winner.rk;
-}
-
-fn fetch_related(sid: crate::registry::ServerId, rk: &str) -> RelatedRows {
-    let mc = match crate::registry::client_for(sid).and_then(|c| c.related(rk)) {
-        Some(m) => m,
-        None => {
-            // Same shape as `fetch_seasons` above: the degrade is deliberate, the silence is not —
-            // an item with no related hub and a refused GET both reach `fetch_full`'s `related=0`.
-            crate::log(&format!(
-                "detail: rk={rk} /related did not answer — the related= below is that refusal"
-            ));
-            return RelatedRows::default();
-        }
-    };
-    related_rows(&mc, sid, rk)
-}
-
-/// Related tiles this shelf holds at most. PMS answers `/related` with several titled hubs and we
-/// concatenate them, so without a cap a well-connected film can carry a hundred rows into a strip
-/// that shows six.
-const RELATED_MAX: usize = 20;
-
-/// `/related`'s response for item `rk` → the flattened Related row. **PURE**, split out of
-/// [`fetch_related`] so the things that can be wrong here are host-testable: which fields survive
-/// the copy, the de-duplication across hubs, and the caps.
-///
-/// De-duplication is across the WHOLE response and not per hub, which is the point of it: PMS's
-/// related hubs overlap heavily ("Similar Movies" and "More with <actor>" routinely name the same
-/// film), and a flattened strip that listed it twice would put two tiles of one title side by side.
-fn related_rows(mc: &crate::media::MediaContainer, sid: crate::registry::ServerId, rk: &str) -> RelatedRows {
-    let mut seen = std::collections::HashSet::new();
-    seen.insert(rk.to_string());
-    let mut out = Vec::new();
-    for h in &mc.hub {
-        for x in &h.metadata {
-            if !crate::pms::listable(&x.kind) || x.rating_key.is_empty()
-                || !seen.insert(x.rating_key.clone()) {
-                continue;
-            }
-            // THE shared row mapping, not a three-field copy — see [`Related`]. `sid` is the
-            // server this response came from, passed in and never looked up: `fetch_related` runs
-            // on the detail worker, and the house rule (`pms::parse_item`'s own doc) is that a
-            // worker reads no statics, because "the current server" can change while a fetch is in
-            // flight and the rows in hand belong to the machine that was asked.
-            out.push(crate::pms::parse_item(x, sid));
-            if out.len() >= RELATED_MAX {
-                return RelatedRows { related: out };
-            }
-        }
-    }
-    RelatedRows { related: out }
-}
-
-/// The full detail fetch for `rk` (movie or show): item metadata + cast + streams, plus — for
-/// shows — seasons, the first season's episodes and its stream backfill, plus the related hub.
-/// 2 PMS round-trips for a movie, 5 for a show.
+/// The full detail fetch for `rk` (movie or show): the backend's own full record (item, cast,
+/// streams, and — for shows — on-deck, seasons, episodes and the hero episode's stream backfill),
+/// then the store's own seasons/episodes lists beside it.
 ///
 /// PURE NETWORK + PARSING — it touches no `static mut`, which is what let it run either on the
 /// main thread or on a worker ([`request_detail`]) while a synchronous caller still existed
@@ -2783,11 +2509,11 @@ fn fetch_full(sid: crate::registry::ServerId, rk: &str) -> Option<Detail> {
     // but all four are equally silent in the log without this, and byte-identical to the user
     // never having pressed OK.
     //
-    // Worded as "no metadata" rather than "the GET failed": `fetch_detail` is
-    // `client_for(sid)?.metadata(rk)?`, so this arm is also taken when the server id resolves to no
-    // client at all and no request was ever issued. One line for both is right — the page is equally
+    // Worded as "no metadata" rather than "the GET failed": `fetch_detail` refuses a non-Jellyfin
+    // server id before any request, and an uninstalled client lands as `None` too, so this arm is
+    // also taken when no request was ever issued. One line for both is right — the page is equally
     // empty either way — but it must not assert a round trip that may not have happened.
-    let Some((mut d, primary_extra_key)) = fetch_detail(sid, rk) else {
+    let Some(mut d) = fetch_detail(sid, rk) else {
         crate::log(&format!(
             "detail: rk={rk} sid={sid:?} — no metadata (server unresolved, or it refused)"
         ));
@@ -2806,64 +2532,6 @@ fn fetch_full(sid: crate::registry::ServerId, rk: &str) -> Option<Detail> {
                 Vec::new()
             });
         }
-        // A show carries no streams itself — backfill from ONE episode: the one the hero is
-        // about, which is the one Play starts (`on_deck` when the show has been started, else
-        // its first). Everything downstream reads this as "the show's" media, so borrowing from
-        // a different episode than the button plays would have the chips, the About footer and
-        // "how this plays" describing a file the user is not about to watch.
-        let hero_ep = d.on_deck.as_ref().map(|e| e.rk.clone());
-        let ep = hero_ep.or_else(|| d.episodes.first().map(|e| e.rk.clone()));
-        if let Some(ep_rk) = ep {
-            fetch_item_streams(sid, &ep_rk, &mut d);
-            // NB `part`/`vcodec`/`acodec` are deliberately NOT backfilled. They are the item's OWN
-            // playable file, and "a show has an empty part" is load-bearing elsewhere — `app.rs`'s
-            // play trigger reads it as "this is a show, take the episode's resume point instead",
-            // so filling it here would silently hand a show's duration to an episode's playback.
-            // A consumer that wants to know how the HERO's episode will play asks the episode
-            // (`ui::detail::draw_play_mode`), which is also the only place that knows which
-            // episode the button would start.
-        }
-    }
-    // Movie/show: extras GET overlaps `/related` on a sibling thread so serial depth stays 2 / 5.
-    // Episode/season pages never show the Trailer control, so they must not pay extras I/O.
-    // Spawn failure omits the trailer rather than adding a serial extras hop behind related.
-    let extras_src: &'static str;
-    if extras_wanted(&d.kind) {
-        let (related, extras) = std::thread::scope(|s| {
-            let extras_h = std::thread::Builder::new()
-                .name("detail-extras".into())
-                .spawn_scoped(s, || fetch_extras_rows(sid, rk));
-            let related = fetch_related(sid, rk);
-            let extras = match extras_h {
-                Ok(h) => h.join().ok().flatten(),
-                Err(_) => None,
-            };
-            (related, extras)
-        });
-        d.related = related.related;
-        match extras {
-            Some(rows) => {
-                extras_src = "extras";
-                project_extras(&mut d, sid, &rows, &primary_extra_key);
-            }
-            None => {
-                // Refused extras GET: still try the parent's `primaryExtraKey` (one metadata GET)
-                // so a blip on `/extras` does not hide a trailer the parent already named.
-                // An empty extras *list* is a real answer and must not do this. The filled
-                // trailer is also the shelf's one tile.
-                if let Some(e) = fetch_primary_trailer(sid, &primary_extra_key) {
-                    d.trailer_rk = e.rk.clone();
-                    d.extras = vec![e];
-                    extras_src = "primary";
-                } else {
-                    extras_src = "none";
-                }
-            }
-        }
-    } else {
-        extras_src = "skip";
-        let related = fetch_related(sid, rk);
-        d.related = related.related;
     }
     // The item's IDENTITY and the SHAPE of what came back — never its title. `scrub_local` runs
     // on every line in every build, but nothing in a line distinguishes a programme title from
@@ -2872,9 +2540,9 @@ fn fetch_full(sid: crate::registry::ServerId, rk: &str) -> Option<Detail> {
     // from the day it was added until phase 11 — `'{}'` with `d.title` in it, on every detail
     // open, in a log the maintainer routinely pastes into a public issue.
     crate::player::log(&format!(
-        "detail: sid={} rk={} show={} genres={} cast={} crew={} seasons={} eps={} related={} audio={} subs={} trailer={} extras={} ms={}",
+        "detail: sid={} rk={} show={} genres={} cast={} crew={} seasons={} eps={} related={} audio={} subs={} ms={}",
         d.sid.raw(), d.rk, d.is_show, d.genres.len(), d.cast.len(), d.crew.len(), d.seasons.len(), d.episodes.len(),
-        d.related.len(), d.audio.len(), d.subs.len(), u8::from(d.trailer().is_some()), extras_src, t0.elapsed().as_millis()
+        d.related.len(), d.audio.len(), d.subs.len(), t0.elapsed().as_millis()
     ));
     Some(d)
 }
@@ -4104,210 +3772,6 @@ mod marker_tests {
 #[cfg(test)]
 mod trailer_tests {
     use super::*;
-
-    fn extra(json: &str) -> crate::media::Metadata {
-        serde_json::from_str(json).expect("an extras row parses")
-    }
-
-    fn trailer(rk: &str, part: &str) -> crate::media::Metadata {
-        extra(&format!(
-            r#"{{"type":"clip","ratingKey":"{rk}","key":"/library/metadata/{rk}",
-                 "subtype":"trailer","extraType":"1","title":"Trailer {rk}",
-                 "duration":"120000","Media":[{{"videoCodec":"h264","audioCodec":"aac",
-                 "bitrate":"2500","Part":[{{"key":"{part}"}}]}}]}}"#
-        ))
-    }
-
-    fn trailer_no_part(rk: &str) -> crate::media::Metadata {
-        extra(&format!(
-            r#"{{"type":"clip","ratingKey":"{rk}","key":"/library/metadata/{rk}",
-                 "subtype":"trailer","extraType":"1","title":"Trailer {rk}"}}"#
-        ))
-    }
-
-    fn bts(rk: &str) -> crate::media::Metadata {
-        extra(&format!(
-            r#"{{"type":"clip","ratingKey":"{rk}","key":"/library/metadata/{rk}",
-                 "subtype":"behindTheScenes","extraType":"5","title":"BTS {rk}",
-                 "Media":[{{"Part":[{{"key":"/library/parts/{rk}"}}]}}]}}"#
-        ))
-    }
-
-    #[test]
-    fn extras_wanted_only_for_movie_and_show() {
-        assert!(extras_wanted("movie"));
-        assert!(extras_wanted("show"));
-        assert!(!extras_wanted("episode"));
-        assert!(!extras_wanted("season"));
-        assert!(!extras_wanted(""));
-    }
-
-    #[test]
-    fn empty_extras_picks_none() {
-        assert!(pick_trailer(&[], "/library/metadata/9").is_none());
-        assert!(pick_trailer(&[], "").is_none());
-    }
-
-    #[test]
-    fn only_non_trailers_picks_none() {
-        assert!(pick_trailer(&[bts("1"), bts("2")], "/library/metadata/1").is_none());
-        let featurette = extra(
-            r#"{"type":"clip","ratingKey":"3","subtype":"featurette","extraType":"2",
-                "Media":[{"Part":[{"key":"/p"}]}]}"#,
-        );
-        let interview = extra(
-            r#"{"type":"clip","ratingKey":"4","subtype":"interview","extraType":"3",
-                "Media":[{"Part":[{"key":"/p"}]}]}"#,
-        );
-        assert!(pick_trailer(&[featurette, interview], "").is_none());
-    }
-
-    #[test]
-    fn one_trailer_with_part_wins() {
-        let e = pick_trailer(&[trailer("9", "/library/parts/9")], "").unwrap();
-        assert_eq!(e.rk, "9");
-        assert_eq!(e.part, "/library/parts/9");
-        assert_eq!(e.bitrate, 2500);
-        assert!(e.playable());
-    }
-
-    #[test]
-    fn empty_part_then_playable_trailer_picks_the_second() {
-        let e = pick_trailer(
-            &[trailer_no_part("1"), trailer("2", "/library/parts/2")],
-            "",
-        )
-        .unwrap();
-        assert_eq!(e.rk, "2");
-    }
-
-    #[test]
-    fn primary_extra_key_path_matches_rating_key_tail() {
-        let e = pick_trailer(
-            &[trailer("8", "/p8"), trailer("9", "/p9")],
-            "/library/metadata/9",
-        )
-        .unwrap();
-        assert_eq!(e.rk, "9");
-    }
-
-    #[test]
-    fn primary_extra_key_bare_rk_matches() {
-        let e = pick_trailer(&[trailer("8", "/p8"), trailer("9", "/p9")], "9").unwrap();
-        assert_eq!(e.rk, "9");
-    }
-
-    #[test]
-    fn primary_naming_a_bts_still_picks_the_trailer() {
-        let e = pick_trailer(&[bts("1"), trailer("9", "/p9")], "/library/metadata/1").unwrap();
-        assert_eq!(e.rk, "9");
-        assert_eq!(e.subtype, "trailer");
-    }
-
-    #[test]
-    fn primary_trailer_without_part_loses_to_a_playable_trailer() {
-        let e = pick_trailer(
-            &[trailer_no_part("9"), trailer("8", "/p8")],
-            "/library/metadata/9",
-        )
-        .unwrap();
-        assert_eq!(e.rk, "8");
-    }
-
-    #[test]
-    fn extra_type_1_with_empty_subtype_is_a_trailer() {
-        let row = extra(
-            r#"{"type":"clip","ratingKey":"9","extraType":"1",
-                "Media":[{"Part":[{"key":"/p"}]}]}"#,
-        );
-        let e = pick_trailer(&[row], "").unwrap();
-        assert_eq!(e.rk, "9");
-        assert!(e.subtype.is_empty());
-        assert_eq!(e.extra_type, 1);
-    }
-
-    #[test]
-    fn subtype_trailer_with_extra_type_0_is_a_trailer() {
-        let row = extra(
-            r#"{"type":"clip","ratingKey":"9","subtype":"trailer","extraType":"0",
-                "Media":[{"Part":[{"key":"/p"}]}]}"#,
-        );
-        let e = pick_trailer(&[row], "").unwrap();
-        assert_eq!(e.rk, "9");
-        assert_eq!(e.extra_type, 0);
-    }
-
-    #[test]
-    fn a_failed_extras_get_projects_to_no_trailer_without_failing_the_page() {
-        // Empty extras rows (or a refused GET with no primaryExtraKey) never fail the page.
-        let d = Detail {
-            rk: "movie".into(),
-            kind: "movie".into(),
-            extras: Vec::new(),
-            ..Default::default()
-        };
-        assert!(d.trailer().is_none());
-        assert_eq!(d.rk, "movie");
-        assert!(
-            resolve_trailer(crate::registry::ServerId::UNSET, &[], "").is_none(),
-            "empty extras never fails the page"
-        );
-        assert!(
-            fetch_primary_trailer(crate::registry::ServerId::UNSET, "").is_none(),
-            "no primaryExtraKey → no follow-up GET"
-        );
-    }
-
-    #[test]
-    fn extras_rows_keep_non_trailers_and_caption_them() {
-        let rows = [
-            extra(
-                r#"{"type":"clip","ratingKey":"1","subtype":"behindTheScenes","title":"BTS","thumb":"/t",
-                    "Media":[{"Part":[{"key":"/b"}]}]}"#,
-            ),
-            extra(
-                r#"{"type":"clip","ratingKey":"9","subtype":"trailer",
-                    "Media":[{"Part":[{"key":"/p"}]}]}"#,
-            ),
-        ];
-        let shelf = extras_from_rows(&rows);
-        assert_eq!(shelf.len(), 2);
-        assert_eq!(shelf[0].rk, "1");
-        assert_eq!(shelf[0].thumb, "/t");
-        assert_eq!(shelf[0].caption(), "Behind the Scenes");
-        let mut d = Detail::default();
-        project_extras(&mut d, crate::registry::ServerId::UNSET, &rows, "");
-        assert_eq!(d.trailer().unwrap().rk, "9");
-        assert_eq!(d.extras.len(), 2, "the shelf keeps the featurette");
-        let bare = Extra {
-            title: "No still".into(),
-            subtype: "featurette".into(),
-            ..Default::default()
-        };
-        assert!(bare.thumb.is_empty());
-        assert_eq!(bare.caption(), "Featurette");
-    }
-
-    #[test]
-    fn a_primary_metadata_item_is_kept_only_if_it_is_a_playable_trailer() {
-        assert_eq!(trailer_from_item(&trailer("9", "/p")).unwrap().rk, "9");
-        assert!(
-            trailer_from_item(&bts("1")).is_none(),
-            "primaryExtraKey naming a featurette must not become the Trailer control"
-        );
-        assert!(
-            trailer_from_item(&trailer_no_part("9")).is_none(),
-            "a primary trailer without a Part is not playable"
-        );
-    }
-
-    #[test]
-    fn extra_key_tail_accepts_path_or_bare_rk() {
-        assert_eq!(extra_key_tail("/library/metadata/9"), "9");
-        assert_eq!(extra_key_tail("9"), "9");
-        assert_eq!(extra_key_tail(""), "");
-    }
-
     #[test]
     fn hud_title_falls_back_to_the_parent() {
         let named = Extra {

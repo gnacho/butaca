@@ -313,7 +313,8 @@ pub(crate) fn still_key(m: &PmsMovie) -> &str {
         // **The show's POSTER before its backdrop** (`Library Screens.dc.html` E): "where an
         // episode has no still, the tile falls back to the show's poster in the same frame,
         // cover-fitted, label and all — a crop is better than a row of mixed tile shapes." For an
-        // episode `thumb` IS `grandparentThumb`, the show poster (`pms::parse_item`); for anything
+        // episode `thumb` IS `grandparentThumb`, the show poster (the row conversion's
+        // substitution rule); for anything
         // else it is the item's own artwork, which also outranks a shared backdrop. `art` stays as
         // the last resort rather than the second.
         &m.thumb
@@ -809,7 +810,8 @@ pub(crate) fn poster_mark<T: crate::ui::tile::Tile + ?Sized>(m: &T) -> PosterMar
 ///
 /// The extra rule is exactly "**neither end**", which needs no `kind` test: for a leaf `unwatched`
 /// and `watched` are complements (`viewCount == 0` vs `> 0`), so only a CONTAINER can be neither, and
-/// a container that is neither is one with some leaves viewed and some not (`pms::parse_item`). The
+/// a container that is neither is one with some leaves viewed and some not (the row conversion's
+/// own comparison). The
 /// one other row that lands here is a container the server sent no leaf counts for, where both flags
 /// are false: that item's state is unknown, both verbs are legitimate, and neither LABEL claims a
 /// state — each names the outcome its press produces.

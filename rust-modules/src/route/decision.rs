@@ -5575,7 +5575,7 @@ fn playback_preview_with_capability(
 ) -> Option<Preview> {
     // A SHOW's container carries no file of its own, so the page answers for the episode its Play
     // button would start — the one the hero is already about. Its frame size and audio list are
-    // the show Detail's, which `fetch_item_streams` backfilled from that same episode.
+    // the show Detail's, which the backend's own fetch backfilled from that same episode.
     let (part, vcodec) = match d.on_deck.as_ref().filter(|_| d.part.is_empty()) {
         Some(ep) => (ep.part.as_str(), ep.vcodec.as_str()),
         None => (d.part.as_str(), d.vcodec.as_str()),
