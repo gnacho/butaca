@@ -97,6 +97,8 @@ static CLIENT: std::sync::RwLock<Option<&'static JfClient>> = std::sync::RwLock:
 /// different server) replaces the first — the leaked predecessor stays alive for any worker
 /// still holding it and is simply never handed out again.
 pub(crate) fn install(client: JfClient) {
+    #[cfg(test)]
+    crate::testlock::assert_held("the installed Jellyfin client");
     let leaked: &'static JfClient = Box::leak(Box::new(client));
     *CLIENT.write().unwrap_or_else(|e| e.into_inner()) = Some(leaked);
 }
@@ -134,6 +136,7 @@ mod plaintext_scope_tests {
     /// thing fails closed.
     #[test]
     fn the_lan_relaxation_reaches_only_the_signed_in_address() {
+        let _serial = crate::testlock::serial();
         install(JfClient::new(
             crate::origin::Origin::http("192.168.1.20", 8096),
             "dev-1".into(),
