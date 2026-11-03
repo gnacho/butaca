@@ -257,6 +257,7 @@ fn viewstate_optimistic_edit_mutates_only_its_bridge_person_store() {
     let _guard = crate::testlock::serial();
     crate::registry::reset_for_test();
     let sid = install_backend_for_viewstate();
+    let _cleanup = DirectoryPolicyCleanup;
     let mut first = Bridge::for_test(|| 0);
     let mut second = Bridge::for_test(|| 0);
     for bridge in [&mut first, &mut second] {
@@ -279,7 +280,6 @@ fn viewstate_optimistic_edit_mutates_only_its_bridge_person_store() {
         "ViewState's callback must address the Person owner beside its own queue");
     assert_eq!(first.stores.take_notices().iter().filter(|(id, _)| *id == StoreId::Person).count(), 1);
     assert_eq!(second.stores.take_notices().iter().filter(|(id, _)| *id == StoreId::Person).count(), 0);
-    crate::registry::reset_for_test();
 }
 
 /// Detail owns the press decision, but the Bridge owns the retained Browse directory needed
