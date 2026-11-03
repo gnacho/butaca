@@ -85,21 +85,6 @@ pub(crate) fn original_open_fallback_rung(
         .unwrap_or(fallback)
 }
 
-/// **Cold-start Original admission, and only that.** The measured source prefix must complete and
-/// arrive no slower than the file's average consumption rate.  That is a physical conservation
-/// test: the prefix contributes media at least as quickly as playback removes it.  A finite prefix
-/// is still only evidence about that prefix, so everything after admission remains an observed
-/// trial under [`OriginalModeController`]; no invented multiplier turns it into a capacity claim.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(crate) fn original_sustainable(
-    source_kbps: u32,
-    measured_kbps: u32,
-    complete: bool,
-    _policy: &AbrPolicy,
-) -> bool {
-    source_kbps > 0 && complete && measured_kbps >= source_kbps
-}
-
 /// What a completed source probe settled.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RecoveryVerdict {

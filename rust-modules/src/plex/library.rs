@@ -11,7 +11,6 @@ fn sidecar_key_allowed(key: &str) -> bool {
         && ext.len() <= 10 && ext.bytes().all(|b| b.is_ascii_alphanumeric())
 }
 
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 impl Client {
     /// GET /library/all?guid=… — **does THIS server hold this film, and under which key?**
     ///
@@ -51,33 +50,6 @@ impl Client {
         self.get_json(&q.build())
     }
 
-    /// GET /library/sections/{key}/{directory} — a secondary directory: the filter value
-    /// lists (`genre`/`year`/`decade`/`collection`/…, rows carry the tag id in `key` + a
-    /// ready-made `fastKey` listing URL) and the `firstCharacter` per-letter index.
-    /// → `.directory[]`.
-    /// `metadata_type` scopes genre values and letter counts to the same flat listing as
-    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    pub fn show_language_prefs(&self, show_rk: &str) -> Option<crate::media::ShowLangPrefs> {
-        if show_rk.is_empty() || !show_rk.bytes().all(|b| b.is_ascii_digit()) {
-            return None; // a key is server data: only ever a plain ratingKey
-        }
-        let path = QueryBuilder::new(format!("/library/metadata/{show_rk}"))
-            .int("includePreferences", 1)
-            .build();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1500);
-        let read = |path: &str| match self.get_json_with_headers_until(path, &[], deadline) {
-            super::client::JsonDeadlineOutcome::Response { parsed, .. } => parsed,
-            _ => None,
-        };
-        let metadata = read(&path)?;
-        if let Some(found) = metadata.metadata.into_iter().next()
-            .and_then(|m| crate::media::ShowLangPrefs::from_settings(&m.preferences.setting))
-        {
-            return Some(found);
-        }
-        let tree = read(&format!("/library/metadata/{show_rk}/tree"))?;
-        crate::media::ShowLangPrefs::from_settings(&tree.setting)
-    }
 
     /// GET /library/metadata/{rating_key} → the single item (`.metadata[0]`), or None.
     /// `includeChapters=1` / `includeMarkers=1` — PMS omits BOTH the `Chapter[]` and `Marker[]`
@@ -134,10 +106,6 @@ impl Client {
         self.get_json(&path)
     }
 
-    /// GET /library/metadata/{rating_key}/children (D-5 undocumented but real) → `.metadata[]`.
-    pub fn children(&self, rating_key: &str) -> Option<MediaContainer> {
-        self.get_json(&format!("/library/metadata/{rating_key}/children"))
-    }
 
     /// GET /library/metadata/{rating_key}/related → `.hub[]`.
     pub fn related(&self, rating_key: &str) -> Option<MediaContainer> {
@@ -279,63 +247,6 @@ mod tests {
             if failed_requests > 0 {
                 assert!(!requests.last().unwrap().contains("encoding="), "retry the original file");
             }
-        }
-    }
-
-    #[test]
-    fn show_preferences_do_not_retry_a_transport_failure() {
-        let client = Client::new(
-            crate::plex::ServerId::UNSET, "fixture",
-            crate::plex::Origin::http("127.0.0.1", 9), "", "cid",
-        );
-        client.disable_data_io();
-        assert_eq!(client.show_language_prefs("42"), None);
-        assert_eq!(client.denied_data_requests(), 1, "a failed optional read must not retry");
-    }
-
-    // A failed optional preference read must not spend another ordinary PMS timeout.
-    #[cfg(feature = "devtriggers")]
-    #[test]
-    fn show_preferences_fail_fast_without_retrying_errors() {
-        use std::io::{Read, Write};
-        use std::time::{Duration, Instant};
-        for (status, body, delay) in [
-            ("404 Not Found", "{}", 0),
-            ("200 OK", "not json", 0),
-            ("200 OK", r#"{"MediaContainer":{}}"#, 2200),
-        ] {
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            let port = listener.local_addr().unwrap().port();
-            listener.set_nonblocking(true).unwrap();
-            let server = std::thread::spawn(move || {
-                let end = Instant::now() + Duration::from_millis(2500);
-                let mut requests = 0;
-                while Instant::now() < end {
-                    let Ok((mut socket, _)) = crate::testnet::accept(&listener) else {
-                        std::thread::sleep(Duration::from_millis(5));
-                        continue;
-                    };
-                    socket.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
-                    let mut request = [0; 4096];
-                    let n = socket.read(&mut request).unwrap();
-                    let request = String::from_utf8_lossy(&request[..n]);
-                    assert!(request.contains("Accept: application/json"));
-                    requests += 1;
-                    if requests == 1 { std::thread::sleep(Duration::from_millis(delay)); }
-                    let _ = write!(socket, "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
-                }
-                requests
-            });
-            let client = Client::new(
-                crate::plex::ServerId::UNSET, "fixture",
-                crate::plex::Origin::http("127.0.0.1", port as i32), "", "cid",
-            );
-            let start = Instant::now();
-            assert_eq!(client.show_language_prefs("42"), None);
-            let elapsed = start.elapsed();
-            let requests = server.join().unwrap();
-            assert!(elapsed < Duration::from_millis(1500 + 300), "optional GET delayed play: {elapsed:?}");
-            assert_eq!(requests, 1, "failed preference GET must not fetch the show tree");
         }
     }
 

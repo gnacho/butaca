@@ -775,25 +775,6 @@ struct SourceBuild {
     shelves: Vec<Shelf>,
 }
 
-/// GET one source's hubs and project them. `None` = the request failed (transport, HTTP, or
-/// parse), which is NOT the same as a server with nothing on it (`Some` with an empty build) —
-/// that distinction is the whole reason an empty library reads as Ready and not as an error.
-///
-/// The client AND its `sid` are passed IN, captured at the spawn site: a worker must never ask
-/// which server is current (`browse.rs` states the rule, and a server switch mid-fetch would
-/// otherwise stamp these rows with the other machine's id — the one thing every `(sid, rk)`
-/// comparison downstream then trusts). A `&'static Client` also pins the exact address this fetch
-/// was aimed at even if the registry re-points that slot mid-request.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-fn fetch_source(c: &crate::plex::Client, sid: ServerId) -> Option<SourceBuild> {
-    let mc = c.home_hubs(HUB_FETCH_COUNT)?;
-    // The Continue Watching shelf comes from the DEDICATED hub (see `project`). Its failure fails
-    // THIS SOURCE (`?`) — nothing of it commits and it retries on its own backoff. Losing the most
-    // important shelf to a transient error would be worse than briefly showing the previous one.
-    let cw = c.continue_watching(HUB_FETCH_COUNT)?;
-    Some(project(&mc, &cw, sid))
-}
-
 /// GET the Jellyfin home surface and project it into this source's [`SourceBuild`] (flavor
 /// `jellyfin`). The same two-piece contract as [`fetch_source`]: `None` is a FAILED fetch
 /// (retry on the ladder), `Some` with empty shelves is a server that answered with nothing on
@@ -871,72 +852,6 @@ fn fetch_source_jellyfin(c: &'static crate::jellyfin::JfClient, sid: ServerId) -
         });
     }
     Some(out)
-}
-
-/// Project one source's `/hubs` + `/hubs/continueWatching` responses into its [`SourceBuild`].
-/// Pure — no statics, no I/O, no knowledge of any other source; `sid` is the server the two
-/// containers came from, stamped onto every row it builds.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-fn project(
-    mc: &crate::media::MediaContainer,
-    cw: &crate::media::MediaContainer,
-    sid: ServerId,
-) -> SourceBuild {
-    // need a poster to show it in a shelf
-    let keep = |it: &crate::media::Metadata| {
-        if !listable(&it.kind) { return None; }
-        let m = parse_item(it, sid);
-        (!m.title.is_empty() && !m.thumb.is_empty()).then_some(m)
-    };
-    let mut out = SourceBuild::default();
-
-    // Continue Watching comes from the **dedicated** `/hubs/continueWatching` hub, and `/hubs`'s own
-    // `home.continue` / `home.ondeck` pair is skipped entirely. It used to merge that pair by hand
-    // (in-progress items unified with next-up episodes, deduped by ratingKey) to reproduce the
-    // official-app row — the dedicated hub already IS that row, so the merge was reimplementing a
-    // server-side answer.
-    //
-    // The reason it has to be the dedicated one, though, is `removeFromContinueWatching`: measured on
-    // PMS 1.43.3, that action hides an item from `/hubs/continueWatching` and from `home.ondeck` but
-    // **NOT** from `home.continue` (see `plex::Client::remove_from_continue_watching`). Built from the
-    // pair, this shelf would keep drawing a card the server had been told to hide, and the context
-    // menu's Remove row would look broken while the server had done exactly as asked.
-    for hub in cw.hub.iter() {
-        out.cw = hub
-            .metadata
-            .iter()
-            .filter_map(|it| {
-                keep(it).map(|m| CwItem {
-                    last_viewed_at: it.last_viewed_at,
-                    m,
-                })
-            })
-            .collect();
-        if !out.cw.is_empty() {
-            break; // the first hub that has anything in it IS the deck
-        }
-    }
-
-    for hub in &mc.hub {
-        if hub.kind != "mixed" && !listable(&hub.kind) {
-            continue;
-        }
-        if hub.hub_identifier == "home.continue" || hub.hub_identifier == "home.ondeck" {
-            continue; // superseded by the dedicated hub above
-        }
-        let items: Vec<PmsMovie> = hub.metadata.iter().filter_map(&keep).collect();
-        if items.is_empty() {
-            continue;
-        }
-        out.shelves.push(Shelf {
-            title: hub.title.clone(),
-            hub_id: hub.hub_identifier.clone(),
-            key: hub.key.clone(),
-            items,
-            total: hub.total(),
-        });
-    }
-    out
 }
 
 // ---- the merge: every source, one Home ----------------------------------------------------------
@@ -1349,44 +1264,6 @@ fn hub_state(state: &PmsState) -> HubState {
     }
 }
 
-/// Does this server feed **Home**? The design's one control, and the seam the pin store fills.
-///
-/// `pinned` is every pinned library's server, from `browse::pinned_libraries`. The rule is *not*
-/// "is this server in that list": an EMPTY list means the pin store knows nothing yet, not that
-/// nothing is pinned. `/library/sections` and `/hubs` land independently and asynchronously,
-/// and the never-empty floor (the Home editor's draft refuses to unpin the last library —
-/// `screens::onboard`'s `OnboardScreen::toggle_row` — and `plex::pins` applies the same floor to
-/// a recorded selection)
-/// forbids an empty pinned set — so "empty" can only mean "no
-/// section has been discovered anywhere", and treating it as "nothing is pinned" would leave Home
-/// with no sources at all on the frame it boots.
-///
-/// Pure, so the bootstrap rule is graded rather than observed on a television.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-fn feeds_home(sid: ServerId, pinned: &[ServerId], known: &[ServerId]) -> bool {
-    // **A server whose libraries we have not enumerated yet is UNDECIDED, not unpinned.**
-    //
-    // The pin is a decision about libraries; you cannot have decided against one nobody has
-    // discovered. Section discovery runs on workers and may land after that source's shelves, so
-    // on a fresh boot the share can be in the roster with no known sections yet. Testing
-    // `pinned.contains` there excluded it from Home until you happened to visit the Library, which
-    // is exactly how the owner found it: "it appeared on the home screen only after I watched the
-    // library."
-    //
-    // **"Not enumerated" is no longer the same thing as "no answer", and that is what keeps this
-    // rule honest now a friend's library defaults OFF.** While every granted library defaulted On,
-    // undecided and pinned agreed and this cost nothing. They stopped agreeing when the first-run
-    // route landed, and a Home hub fetch can beat that source's section worker — so the recorded
-    // answer for a source with no rows in the section table is joined in from the retained
-    // directory's favourite table and arrives here as an ordinary
-    // `known`/`pinned` entry. What is left undecided is a library nobody has ever been ASKED
-    // about, which is the case this rule was written for.
-    //
-    // The whole-set emptiness check below is the same rule one level up (nothing discovered
-    // anywhere yet) and is kept for the boot frame before any source has answered.
-    pinned.is_empty() || pinned.contains(&sid) || !known.contains(&sid)
-}
-
 /// The only Browse facts Home consumes. Controlled execution snapshots these from the Bridge's
 /// retained directory. Standalone Home fixtures have no Browse owner and therefore no known pin
 /// table; the normal unknown-library policy remains in force for them.
@@ -1450,22 +1327,6 @@ fn item_pinned(pins: &[(ServerId, i64, bool)], m: &PmsMovie) -> bool {
         Some((_, _, pinned)) => *pinned,
         None => true, // not enumerated yet
     }
-}
-
-/// The two server sets [`feeds_home`] takes, folded out of the retained directory's favourite
-/// table in one pass: `(pinned, known)`. Separated so `feeds_home` stays pure and host-gradeable.
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-fn home_server_sets(pins: &[(ServerId, i64, bool)]) -> (Vec<ServerId>, Vec<ServerId>) {
-    let (mut pinned, mut known) = (Vec::new(), Vec::new());
-    for &(sid, _, is_pinned) in pins {
-        if !known.contains(&sid) {
-            known.push(sid);
-        }
-        if is_pinned && !pinned.contains(&sid) {
-            pinned.push(sid);
-        }
-    }
-    (pinned, known)
 }
 
 /// The sources Home is built from, in display order: our own servers first, then each share, each
@@ -1736,18 +1597,6 @@ thread_local! {
     static REFUSE_FETCH_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-/// Replace only the OS spawn boundary on this test thread, including nested callers in stores.
-#[cfg(test)]
-pub(crate) fn with_refused_fetches_for_test<R>(f: impl FnOnce() -> R) -> R {
-    struct Restore(bool);
-    impl Drop for Restore {
-        fn drop(&mut self) { REFUSE_FETCH_FOR_TEST.with(|flag| flag.set(self.0)); }
-    }
-    let _restore = Restore(REFUSE_FETCH_FOR_TEST.with(|flag| flag.replace(true)));
-    f()
-}
-
 fn retry_now_with(gen: u32, adapter: &PmsAdapter, s: &mut Src, launch: &mut dyn FnMut(HubRequest) -> bool) {
     s.retry_n = 0;
     s.retry_s = 0.0;
@@ -1776,29 +1625,6 @@ pub(crate) fn take_landings(adapter: &PmsAdapter) -> Vec<Landing> {
     std::mem::take(&mut *adapter.results.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
-/// Apply one explicitly supplied batch through the live landing rules — land finished fetches,
-/// then count each source down to its next automatic attempt. The supplier runs after roster
-/// reconciliation, exactly where the live mailbox used to be drained. Keeping it separate lets an
-/// adapter observe or substitute arrivals without a second state-application path. This is NOT an
-/// offline replay mode: retry scheduling and worker spawning remain live.
-#[cfg(test)]
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-fn pump_with_landings(state: &mut PmsState, adapter: &Arc<PmsAdapter>, dt: f32,
-    take: impl FnOnce() -> Vec<Landing>) {
-    step_landings(state, adapter, Some(dt), take)
-}
-
-/// Test-only compatibility tick for fixtures without a retained directory.
-#[cfg(test)]
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(crate) fn tick(state: &mut PmsState, adapter: &Arc<PmsAdapter>, dt: f32) {
-    // Same test-only catalog guard as `request_refetch_hubs` — the catalog is `PmsState`, a
-    // field of the per-`Bridge` `HubsStore`, not a crate-global; see `lib.rs::testlock` and D5.
-    #[cfg(test)]
-    crate::testlock::assert_held("the pms hub catalog (tick)");
-    pump_with_landings(state, adapter, dt, Vec::new)
-}
-
 /// The owned store's tick never consumes the worker mailbox. Arrivals are delivered separately
 /// by the dispatcher; a worker finishing during its drain belongs to the next frame's ingest.
 pub(crate) fn tick_with_directory(
@@ -1812,25 +1638,6 @@ pub(crate) fn tick_with_directory(
     let mut launch = |r| spawn_fetch(adapter, r);
     step_landings_with_scope(state, adapter, Some(dt), Vec::new, &BrowseScope::retained(directory),
         &mut launch)
-}
-
-/// An addressed arrival may update the catalog behind another page, but must not advance retry
-/// timers or start a new hubs fetch there. The visible Home alone owes the store's tick.
-#[cfg(test)]
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-fn apply_landing(state: &mut PmsState, adapter: &Arc<PmsAdapter>, landing: &Landing) {
-    #[cfg(test)]
-    crate::testlock::assert_held("the pms hub catalog (apply_landing)");
-    step_landings(state, adapter, None, || vec![landing.clone()])
-}
-
-/// Test-only compatibility landing for fixtures without a retained directory.
-#[cfg(test)]
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-pub(crate) fn land(state: &mut PmsState, adapter: &Arc<PmsAdapter>, landing: &Landing) -> crate::stores::StoreOutcome {
-    let before = state.catalog_gen;
-    apply_landing(state, adapter, landing);
-    crate::stores::StoreOutcome { changed: state.catalog_gen != before }
 }
 
 /// Apply one addressed landing under the same retained directory policy the frame publishes.
@@ -1946,20 +1753,6 @@ fn controlled_work_with_scope(state: &mut PmsState, adapter: &Arc<PmsAdapter>, c
         None => step_landings_with_scope(state, adapter, Some(dt), Vec::new, scope, launch),
     };
     crate::stores::StoreOutcome { changed: command || before != state.catalog_gen }
-}
-
-#[cfg(test)]
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-fn step_landings(state: &mut PmsState, adapter: &Arc<PmsAdapter>, dt: Option<f32>, take: impl FnOnce() -> Vec<Landing>) {
-    let mut launch = |r| spawn_fetch(adapter, r);
-    step_landings_with(state, adapter, dt, take, &mut launch)
-}
-
-#[cfg(test)]
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-fn step_landings_with(state: &mut PmsState, adapter: &Arc<PmsAdapter>, dt: Option<f32>, take: impl FnOnce() -> Vec<Landing>,
-    launch: &mut dyn FnMut(HubRequest) -> bool) {
-    step_landings_with_scope(state, adapter, dt, take, &BrowseScope::standalone(), launch)
 }
 
 fn step_landings_with_scope(state: &mut PmsState, adapter: &PmsAdapter, dt: Option<f32>, take: impl FnOnce() -> Vec<Landing>,

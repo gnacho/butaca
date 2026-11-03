@@ -257,23 +257,6 @@ mod contract_tests {
         }
     }
 
-#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
-    fn section(sid: crate::registry::ServerId, section: usize, pinned: bool)
-        -> crate::stores::browse::SectionView {
-        crate::stores::browse::SectionView {
-            sid: Some(sid),
-            key: section as i64 + 1,
-            kind: crate::stores::browse::SecKind::Movie,
-            row: crate::stores::browse::SrcRow {
-                section,
-                title: format!("Library {section}"),
-                pinned,
-                current: section == 0,
-                ..Default::default()
-            },
-        }
-    }
-
     
     /// **The two-owner regression.** A worker captures a clone of its owner's `Arc<PmsAdapter>`
     /// before it spawns (`HubsStore::adapter`); nothing about a landing knows which `HubsStore`
