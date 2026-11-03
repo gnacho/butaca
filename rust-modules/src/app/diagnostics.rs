@@ -617,10 +617,7 @@ fn device_rows() -> Vec<Field> {
     // meaning yet: it answers "did the server ever reply", which IS the failure when nothing plays.
     v.push(Field::new(
         crate::i18n::msg::browse_diagnostics_field_server(),
-        server_line(
-            &crate::plex::serverinfo::version(),
-            crate::plex::serverinfo::subscription(),
-        ),
+        server_line(&crate::plex::serverinfo::version()),
     ));
     v
 }
@@ -832,10 +829,7 @@ fn connection_line(ps: &crate::route::PlaybackSession) -> String {
     };
     format!(
         "{tier} · PMS {}",
-        server_line(
-            &crate::plex::serverinfo::version_of(sid),
-            crate::plex::serverinfo::subscription_of(sid),
-        )
+        server_line(&crate::plex::serverinfo::version_of(sid))
     )
 }
 
@@ -1494,20 +1488,13 @@ fn chain(src: String, sent: String, payload: &str) -> String {
 /// "not yet queried" while the `GET /` worker has not landed (an empty version IS that state —
 /// `serverinfo` stores the two fields together).
 ///
-/// A server that answered but never named its subscription (a PMS predating the field) shows its
-/// release alone: the row must not claim a Pass state the server did not state. Pure so every arm
-/// is host-testable without touching the process-global store.
-fn server_line(version: &str, sub: crate::plex::serverinfo::Subscription) -> String {
-    use crate::plex::serverinfo::Subscription as S;
+/// A Jellyfin server has no subscription to report, so the row is the release alone. Pure so every
+/// arm is host-testable without touching the process-global store.
+fn server_line(version: &str) -> String {
     if version.is_empty() {
         return crate::i18n::msg::browse_diagnostics_not_queried().to_string();
     }
-    let v = short_version(version);
-    match sub {
-        S::Yes => crate::i18n::msg::browse_diagnostics_plex_pass(v),
-        S::No => crate::i18n::msg::browse_diagnostics_no_plex_pass(&v),
-        S::Unknown => v.to_string(),
-    }
+    short_version(version).to_string()
 }
 
 /// The PMS release triplet ("1.43.3.10861-cd85035e7" → "1.43.3"). The build/hash carry no support
@@ -3069,24 +3056,16 @@ mod tests {
         assert_eq!(chain(String::new(), String::new(), "—"), "— → —");
     }
 
-    /// The Server row's three arms (issue #22's blind spot made visible). A free server is a FACT
-    /// the row states plainly — the fault-tone assertion lives with the row builder test below —
-    /// and a server that never named its subscription must not be assigned one either way.
+    /// The Server row states the release the server reported, and nothing else: a Jellyfin server
+    /// has no subscription, so there is no Pass state to guess at.
     #[test]
-    fn the_server_row_states_the_pass_tristate_without_guessing() {
-        use crate::plex::serverinfo::Subscription as S;
-        assert_eq!(
-            server_line("1.43.3.10861-cd85035e7", S::Yes),
-            "1.43.3 · Plex Pass"
-        );
-        assert_eq!(
-            server_line("1.43.3.10861-cd85035e7", S::No),
-            "1.43.3 · no Plex Pass"
-        );
-        // fetch never landed: version and subscription are stored together, so empty = unqueried
-        assert_eq!(server_line("", S::Unknown), "not yet queried");
-        // answered, but a PMS old enough not to carry the field: the release alone, no claim
-        assert_eq!(server_line("0.9.12.4", S::Unknown), "0.9.12");
+    fn the_server_row_states_the_release_alone() {
+        // the build and hash carry no support signal, so the row keeps the release triplet
+        assert_eq!(server_line("1.43.3.10861-cd85035e7"), "1.43.3");
+        // fetch never landed: an empty version IS the unqueried state
+        assert_eq!(server_line(""), "not yet queried");
+        // answered with a short release: kept whole
+        assert_eq!(server_line("0.9.12.4"), "0.9.12");
     }
 
     /// The truncation exists for the elide (see [`short_version`]) and must survive whatever
