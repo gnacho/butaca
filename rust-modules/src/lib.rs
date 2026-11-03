@@ -52,9 +52,9 @@ mod playback; // backend-neutral playback vocabulary: encode contract, delivery/
 mod person; // person/actor page data layer: the header handed in by the cast row + /library/people/{id}/media
 mod collection; // collection page model: tag resolution, header metadata and paged members
 mod player; // buffer-feed video engine (was playback.c) — step 5
-mod server; // typed Plex API layer (rust-modules/src/server/) — one method per PMS operation (the live READ layer; playback ops still in route.rs)
+mod server; // typed server API layer (rust-modules/src/server/): one method per server operation (the live READ layer; playback ops still in route.rs)
 mod pms;
-mod registry; // the SERVER REGISTRY: which servers exist, which is current, and the per-slot facts — the sid vocabulary shared by every backend (moved out of plex/)
+mod registry; // the SERVER REGISTRY: which servers exist, which is current, and the per-slot facts, the sid vocabulary shared by every backend
 // Pure RELEASE_LINE-parsing helpers, `include!`d verbatim by build.rs so `cargo test --lib`
 // actually runs their unit tests (see the module for why). Nothing in the app itself calls
 // them at runtime — the version rule they implement is applied once, at compile time, by
