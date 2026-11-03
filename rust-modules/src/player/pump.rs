@@ -583,10 +583,10 @@ fn start_original_trial_reload(
     reload: crate::route::AutoOriginalReload,
     position_ns: i64,
 ) -> bool {
-    let outcome = match reload {
-        crate::route::AutoOriginalReload::Direct => super::engine::reload_at(ps, pa, position_ns),
-        crate::route::AutoOriginalReload::Remux => super::engine::reload_transcode(ps, pa, position_ns),
-    };
+    // A trial reload is always the direct Original now: the remux replacement was the Plex
+    // `/decision` publish, gone with the wire layer.
+    let _ = reload;
+    let outcome = super::engine::reload_at(ps, pa, position_ns);
     if outcome == super::engine::ReloadOutcome::Started {
         return true;
     }

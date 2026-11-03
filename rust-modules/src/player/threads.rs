@@ -153,10 +153,13 @@ pub(crate) fn timeline_thread(
         if stop.wait_or_stop(REPORT_INTERVAL_S) {
             return;
         }
-        let dur = SHARED.duration_ns.load(Ordering::Relaxed);
-        if dur <= 0 {
-            continue;
+        if !crate::route::report_timeline(&lease) {
+            return;
         }
+        // The state/position line stays as the reporter's own heartbeat: the wire POST that used
+        // to ride beside it (the Plex `/:/timeline`) is gone, and the log is where "the reporter
+        // is alive and sampling" remains visible.
+        let dur = SHARED.duration_ns.load(Ordering::Relaxed);
         let t = SHARED.playpos_ns.load(Ordering::Relaxed) / 1_000_000;
         let d = dur / 1_000_000;
         let state = if super::TX.paused.load(Ordering::Relaxed) {
@@ -164,9 +167,6 @@ pub(crate) fn timeline_thread(
         } else {
             TimelineState::Playing
         };
-        if !crate::route::report_timeline(&lease, state, t, d) {
-            return;
-        }
         super::log(&format!(
             "timeline {} t={}s/{}s",
             state.as_str(),

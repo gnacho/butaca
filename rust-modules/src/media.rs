@@ -17,28 +17,6 @@ pub struct Envelope {
 pub struct MediaContainer {
     #[serde(rename = "Metadata", default)]
     pub metadata: Vec<Metadata>,
-    /// Position of the selected item within the WHOLE queue (not within the returned window).
-    /// /transcode/universal/decision verdict codes — Option (not defaulted 0) so the route
-    /// log distinguishes "absent" from a real code, matching the old find_num scan.
-    #[serde(
-        rename = "generalDecisionCode",
-        default,
-        deserialize_with = "de_opt_i64"
-    )]
-    pub general_decision_code: Option<i64>,
-    /// The TRANSCODE lane's own verdict, beside the general one above (`4007` = "cannot convert
-    /// this item"). Same `Option` discipline and for the same reason, doubled here: the pre-flight
-    /// refusal is graded on a CODE, and a defaulted 0 would be a code this server never sent.
-    /// …and the two HUMAN sentences PMS pairs with those codes — "Cannot convert this item.
-    /// Implementation for video encoder 'vp9' not found." / "Neither direct play nor conversion is
-    /// available." (both probed live against PMS 1.43.3). They are the server's own wording, quoted
-    /// verbatim by the player's failure read-out, so they are read but never parsed: the CODE is
-    /// what the app decides on. Absent stays `""` — an empty sentence draws no line at all, which
-    /// is the honest reading of "the server named no reason".
-    #[serde(rename = "transcodeDecisionText", default, deserialize_with = "de_str")]
-    pub transcode_decision_text: String,
-    #[serde(rename = "generalDecisionText", default, deserialize_with = "de_str")]
-    pub general_decision_text: String,
     /// `GET /` (the server root) only: does the server's OWNER hold a Plex Pass? Bool on PMS 1.43
     /// (probed live 2026-08-10), and lenient like every flag here because PMS string-encodes
     /// freely. `Option`, not a defaulted 0: a server old enough not to say must stay UNKNOWN —
@@ -174,10 +152,6 @@ pub struct Stream {
     pub key: String,
     #[serde(default)]
     pub codec: String,
-    /// `/decision` only: this lane's verdict — `"directplay"` | `"transcode"` | `"copy"`.
-    /// [`MediaPart::video_forbids_copy`] is the playback reader; a library metadata body omits it.
-    #[serde(default)]
-    pub decision: String,
     #[serde(default)]
     pub language: String,
     #[serde(rename = "languageCode", default)]

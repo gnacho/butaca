@@ -29,20 +29,6 @@ use std::sync::RwLock;
 /// without the CRLF the raw socket used to want (each transport frames its own headers now).
 use crate::http::{ACCEPT_JSON, BULK_ART_MAX_BYTES, BULK_JSON_MAX_BYTES};
 
-/// A deadline-bearing JSON request after the client has applied the HTTP-success and parser
-/// contract. The completed response remains attached even when it is non-2xx or malformed; the
-/// route can therefore classify it without consulting a clock after the fact.
-pub(crate) enum JsonDeadlineOutcome {
-    Response {
-        #[cfg_attr(not(test), expect(dead_code))]
-        reply: http::Reply,
-        parsed: Option<MediaContainer>,
-    },
-    Deadline,
-    Transport,
-}
-
-
 /// The headers shared by EVERY PMS operation, over either transport. `X-Plex-Language` belongs
 /// here rather than in [`Client::playback_identity`]: it selects server-returned metadata for
 /// browse/search reads too, not only playback protocol calls. Owned strings keep the optional
@@ -422,64 +408,6 @@ impl Client {
 
     // ---- transport choke points: the only code that touches crate::stream ----
 
-    /// The ONE call every choke point below makes — origin, token, transport, in that order.
-    ///
-    /// `path_no_token` goes through [`Client::with_token`] (the token choke point) and then
-    /// through [`crate::http`], which picks the transport from this client's origin. Splitting it
-    /// out is not tidiness: it is what makes "did this request carry the token" and "which
-    /// transport did it take" two questions with one answer each, rather than eight copies of the
-    /// same three lines that a future scheme has to be threaded through one at a time.
-    ///
-    /// Returns the whole [`Reply`](crate::http::Reply) — status included — so each caller applies
-    /// the fold it actually wants. That is the difference this file cares about: the one-shot
-    /// wrapper this used to call folded every non-2xx into `None` for everybody, which is why a
-    /// probe could not tell a 401 from a dead router.
-    fn send(&self, path_no_token: &str, method: Method, headers: &[&str]) -> Option<http::Reply> {
-        if !self.may_send() { return None; }
-        let owned = pms_headers(headers);
-        let headers: Vec<&str> = owned.iter().map(String::as_str).collect();
-        http::request(
-            &self.origin,
-            &self.with_token(path_no_token),
-            method,
-            &headers,
-            self.resolve_pin.as_ref(),
-        )
-    }
-
-    /// [`Self::send`] under a caller-owned absolute transaction deadline. This is for small PMS
-    /// control requests which are only one phase of a reserve-funded media transaction; letting
-    /// each phase start the ordinary API timeout would make the sum unbounded even though the
-    /// controller had admitted a finite spend.
-    fn send_until(
-        &self,
-        path_no_token: &str,
-        method: Method,
-        headers: &[&str],
-        deadline: std::time::Instant,
-    ) -> http::RequestOutcome {
-        if !self.may_send() { return http::RequestOutcome::Transport(None); }
-        let owned = pms_headers(headers);
-        let headers: Vec<&str> = owned.iter().map(String::as_str).collect();
-        http::request_until_outcome(
-            &self.origin,
-            &self.with_token(path_no_token),
-            method,
-            &headers,
-            deadline,
-            self.resolve_pin.as_ref(),
-        )
-    }
-
-    /// A 2xx response body, or `None` — the fold the raw socket used to apply for every caller,
-    /// written once here now that the transport no longer does it. Every read below wants exactly
-    /// this: a non-2xx PMS answer is not a container, and `http_open` has already logged the
-    /// status line (`stream: GET /path status=…`) on the plaintext arm.
-    fn body_2xx(&self, path_no_token: &str, method: Method, headers: &[&str]) -> Option<Vec<u8>> {
-        let r = self.send(path_no_token, method, headers)?;
-        r.ok().then_some(r.body)
-    }
-
     /// The status-preserving read twin of [`Client::send`] for a content-dependent PMS body. On
     /// HTTPS it keeps the connect deadline but has no 25 s whole-transfer cutoff; on plaintext it
     /// is the same socket policy `stream.rs` has always used. `max_body` is the response-body
@@ -546,42 +474,6 @@ impl Client {
         }
     }
 
-    /// The deadline-bearing twin for ABR registration and optional show preferences. Parsing
-    /// and endpoint-safe diagnostics are identical to the ordinary path; only transport policy
-    /// differs.
-    pub(super) fn get_json_with_headers_until(
-        &self,
-        path_no_token: &str,
-        headers: &[&str],
-        deadline: std::time::Instant,
-    ) -> JsonDeadlineOutcome {
-        let mut request_headers = Vec::with_capacity(headers.len() + 1);
-        request_headers.push(ACCEPT_JSON);
-        request_headers.extend_from_slice(headers);
-        match self.send_until(path_no_token, Method::Get, &request_headers, deadline) {
-            http::RequestOutcome::Response(reply) => {
-                let parsed = if reply.ok() {
-                    match serde_json::from_slice::<Envelope>(&reply.body) {
-                        Ok(envelope) => Some(envelope.media_container),
-                        Err(error) => {
-                            crate::log(&format!(
-                                "pms: GET {} answered {} bytes that will not parse — {error}",
-                                path_no_token.split('?').next().unwrap_or(path_no_token),
-                                reply.body.len()
-                            ));
-                            None
-                        }
-                    }
-                } else {
-                    None
-                };
-                JsonDeadlineOutcome::Response { reply, parsed }
-            }
-            http::RequestOutcome::Deadline => JsonDeadlineOutcome::Deadline,
-            http::RequestOutcome::Transport(_) => JsonDeadlineOutcome::Transport,
-        }
-    }
-
     /// A size-bounded body on either transport, with a finite stalled-transfer timeout.
     pub(super) fn get_sidecar_bytes(&self, path_no_token: &str) -> Option<Vec<u8>> {
         if !self.may_send() { return None; }
@@ -623,8 +515,6 @@ impl Client {
         if !self.may_send() {
             return ArtFetch::NoResponse;
         }
-        // NOT `body_2xx`, for the same reason this method exists at all: that helper appends the
-        // token, and this path already ends in one.
         let owned = pms_headers(&[]);
         let headers: Vec<&str> = owned.iter().map(String::as_str).collect();
         match http::request_bulk(
@@ -639,58 +529,6 @@ impl Client {
             Some(r) => ArtFetch::Status(r.status),
             None => ArtFetch::NoResponse,
         }
-    }
-
-    /// Reports whether the request actually reached the server and came
-    /// back accepted. For the body-less **writes** whose caller is off the main thread and has no
-    /// other way to know — see [`super::library::Client::scrobble`]. `false` covers a refused or
-    /// timed-out connect as much as a rejected status, which is the distinction that matters here:
-    /// a share that is asleep answers nothing at all.
-    pub(super) fn get_ok(&self, path_no_token: &str) -> bool {
-        self.body_2xx(path_no_token, Method::Get, &[]).is_some()
-    }
-
-    /// GET whose HTTP status is itself the protocol result. Unlike [`Self::get_ok`], this keeps
-    /// a 404 distinct from transport failure. The universal-transcoder ping uses that exact
-    /// distinction as its physical-session lookup: 200 means present, 404 means absent, while a
-    /// timeout/401/5xx proves neither state. The built path is still private to the Plex layer and
-    /// the token remains behind [`Self::with_token`].
-    pub(super) fn get_status(&self, path_no_token: &str) -> Option<i32> {
-        self.send(path_no_token, Method::Get, &[])
-            .map(|reply| reply.status)
-    }
-
-    /// POST whose HTTP status is the protocol result. The synchronous PMS Streaming Resource
-    /// close uses 200 for "terminated now" and 404 for the idempotent "already absent" case, so
-    /// folding both through [`Self::post_ok`] would lose the exact cleanup certificate its caller
-    /// needs while still confusing transport failure with a server answer.
-    pub(super) fn post_status(&self, path_no_token: &str) -> Option<i32> {
-        self.send(path_no_token, Method::Post, &[])
-            .map(|reply| reply.status)
-    }
-
-    /// PUT (no body) — returns the HTTP status (all `select_streams` reads), or `-1` when the
-    /// request never completed. `-1` is the value the `stream.rs` wrapper this replaced always
-    /// returned for a transport failure, and it is kept because a caller reading a status must not
-    /// mistake "the server refused" for "nothing was sent".
-    pub(super) fn put(&self, path_no_token: &str) -> i32 {
-        self.send(path_no_token, Method::Put, &[])
-            .map_or(-1, |r| r.status)
-    }
-
-    /// POST whose body carries nothing to read — /:/timeline (spec verb; params ride the query
-    /// string) — reporting whether it reached the server and came back accepted.
-    ///
-    /// The POST twin of [`Client::get_ok`], and it exists for the same reason: this is a body-less
-    /// **write**, its caller is off the main thread, and the return value is the only thing that
-    /// can say the write landed. `false` covers a refused or timed-out connect as much as a
-    /// rejected status — a revoked token 401s and a sleeping server answers nothing at all, and
-    /// neither of those may read as a committed resume point.
-    ///
-    /// There is no discarding `post_void` beside it: the timeline is the only body-less POST in
-    /// the layer, so a twin that dropped the outcome would be a method with no callers.
-    pub(super) fn post_ok(&self, path_no_token: &str) -> bool {
-        self.body_2xx(path_no_token, Method::Post, &[]).is_some()
     }
 
     /// THE token choke point. Appends `X-Plex-Token=…` with the right separator.
@@ -741,20 +579,6 @@ impl QueryBuilder {
         self.parts.push(format!("{k}={v}"));
         self
     }
-    pub(super) fn opt_int(self, k: &str, v: i64) -> Self {
-        if v != 0 {
-            self.int(k, v)
-        } else {
-            self
-        }
-    }
-    pub(super) fn opt_str(self, k: &str, v: &str) -> Self {
-        if !v.is_empty() {
-            self.str(k, v)
-        } else {
-            self
-        }
-    }
     pub(super) fn build(self) -> String {
         if self.parts.is_empty() {
             self.path
@@ -762,9 +586,6 @@ impl QueryBuilder {
             let sep = if self.path.contains('?') { '&' } else { '?' };
             format!("{}{sep}{}", self.path, self.parts.join("&"))
         }
-    }
-    pub(super) fn query(self) -> String {
-        self.parts.join("&")
     }
 }
 
@@ -860,52 +681,6 @@ mod tests {
         assert_eq!(decode_ip(0), None);
         assert_eq!(decode_link(200), None);
         assert_eq!(decode_ip(200), None);
-    }
-
-    // Dev-only: this fixture drives a plaintext loopback PMS with a real client that carries a
-    // token, which a store build's `CredentialPolicy::HttpsOnly` refuses before the request ever
-    // reaches the wire (see `http::credential_transport_allowed`) — the connection this test
-    // waits on then never arrives. The store-build case is covered instead by `auth.rs`'s
-    // `e2e_real_curl_*` HTTPS harness.
-    #[cfg(feature = "devtriggers")]
-    #[test]
-    fn malformed_2xx_remains_a_response_after_its_deadline_passes() {
-        use std::io::{Read, Write};
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let port = listener.local_addr().unwrap().port();
-        let server = std::thread::spawn(move || {
-            let (mut socket, _) = listener.accept().expect("accept");
-            let mut request = [0u8; 4096];
-            let _ = socket.read(&mut request).expect("request");
-            socket
-                .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nnot-json",
-                )
-                .expect("response");
-        });
-        let client = Client::new(
-            ServerId::UNSET,
-            "fixture",
-            Origin::http("127.0.0.1", port as i32),
-            "tok",
-            "cid",
-        );
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
-
-        let outcome = client.get_json_with_headers_until("/decision", &[], deadline);
-        server.join().unwrap();
-        let left = deadline.saturating_duration_since(std::time::Instant::now());
-        if !left.is_zero() {
-            std::thread::sleep(left + std::time::Duration::from_millis(10));
-        }
-
-        assert!(matches!(
-            outcome,
-            JsonDeadlineOutcome::Response {
-                reply: http::Reply { status: 200, ref body },
-                parsed: None,
-            } if body == b"not-json"
-        ));
     }
 
     /// IVA extra part keys already carry a query. Appending playback identity with a second

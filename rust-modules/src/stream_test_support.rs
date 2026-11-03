@@ -2,18 +2,6 @@
 
 use super::*;
 
-/// One `GET /x` at a loopback port, through the door the control plane actually uses.
-///
-/// These assertions used to call `stream::http_get`, and they outlived it: what they grade —
-/// that a chunked body is decoded on the READ path, and that a truncated one still reaches its
-/// caller — is a property of `http_open`/`http_read`, not of the wrapper that wrapped them. Now
-/// they grade it through `crate::http`'s plaintext arm, i.e. through the composition that runs
-/// in production, which is strictly more than the wrapper could say.
-pub(super) fn loopback_get(port: u16) -> Option<crate::http::Reply> {
-    let o = crate::origin::Origin::http("127.0.0.1", port as i32);
-    crate::http::request(&o, "/x", crate::http::Method::Get, &[], None)
-}
-
 /// Descriptors currently open in this process. `/dev/fd` works on Linux;
 /// `read_dir` opens one itself, but that is constant between two calls.
 pub(super) fn open_fd_count() -> usize {
@@ -36,18 +24,6 @@ pub(super) fn sockaddr6(ip: std::net::Ipv6Addr, port: u16) -> libc::sockaddr_in6
         s6_addr: ip.octets(),
     };
     sa
-}
-
-/// `connect_timeout` for a v4 address. The real function takes the `(*const sockaddr,
-/// socklen_t)` pair straight out of an `addrinfo`, because the address may now be either
-/// family; the tests below predate that and say what they mean with a `sockaddr_in`.
-pub(super) unsafe fn connect_v4(fd: c_int, sa: &libc::sockaddr_in, timeout_ms: c_int) -> c_int {
-    connect_timeout(
-        fd,
-        sa as *const _ as *const libc::sockaddr,
-        std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
-        timeout_ms,
-    )
 }
 
 pub(super) unsafe fn connect_v6(fd: c_int, sa: &libc::sockaddr_in6, timeout_ms: c_int) -> c_int {

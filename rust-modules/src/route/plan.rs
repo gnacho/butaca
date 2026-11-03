@@ -252,84 +252,22 @@ impl AutoOriginalCandidate {
 /// the caller's backoff turns on. It maps straight onto `crate::abr::RejectCause` and is a
 /// separate type only because `route` must not decide an ABR policy question — it reports which
 /// exit it took, and `ff.rs` translates.
+///
+/// One variant remains: the wire half of priming (the Plex `/decision` that could answer
+/// `Control`, `Deadline` or `Rung`) is gone with the Plex transcoder, so a non-fixture prime can
+/// now only refuse because the session moved or the server client is gone — both `Session`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PrimeRefusal {
     /// The session moved underneath the request: the active encoder changed or the server client
     /// vanished. **Says nothing about the rung**, so it must not arm N11's backoff — the same
     /// reading `origin_changed` already gets one branch later.
     Session,
-    /// The decision API completed without a usable decision: HTTP rejection, malformed success,
-    /// or a transport failure. The typed request chain preserves each as non-deadline evidence;
-    /// all three remain inconclusive about the rung and must not arm its backoff.
-    Control,
-    /// The caller-owned absolute snapshot actually stopped the PMS request. This is the only
-    /// outcome eligible for a reserve retry; observing the clock after any other completed cause
-    /// cannot manufacture it.
-    Deadline,
-    /// PMS was asked for this rung's ceiling and refused it. The one exit that IS about the
-    /// candidate, and the one that should arm the backoff: re-proposing buys the same answer at
-    /// the same price.
-    Rung,
-}
-
-
-pub(super) fn classify_prime_decision(
-    session_active: bool,
-    outcome: crate::plex::JsonDeadlineOutcome,
-) -> Result<crate::media::MediaContainer, PrimeRefusal> {
-    if !session_active {
-        return Err(PrimeRefusal::Session);
-    }
-    match outcome {
-        crate::plex::JsonDeadlineOutcome::Response {
-            parsed: Some(decision),
-            ..
-        } => Ok(decision),
-        crate::plex::JsonDeadlineOutcome::Response { parsed: None, .. }
-        | crate::plex::JsonDeadlineOutcome::Transport => Err(PrimeRefusal::Control),
-        crate::plex::JsonDeadlineOutcome::Deadline => Err(PrimeRefusal::Deadline),
-    }
-}
-
-
-/// This playback's universal-transcoder spec, rebuilt from the module state (rk + session are
-/// borrowed from the caller's locals; audio/subtitle ride the CURRENT selection) — so every
-/// (re)start of the item's transcode carries identical params.
-///
-/// `contract` is an ARGUMENT rather than a read of [`quality`], for the same reason it always was
-/// (back when it was four separate fields — `remux`, `no_video_copy`, `ceiling`, `delivery`):
-/// [`build_stream`] runs on the resolve worker and must take it from [`ResolveEnv`], while
-/// [`retranscode`] runs on the main thread and reads the live selection. A read inside here would
-/// be a `static` touched from a worker. Folding the four (now five, with issue #266's
-/// [`AudioEnhancements`](crate::playback::AudioEnhancements)) into one [`EncodeContract`] argument is
-/// what keeps every caller stating the whole shape at once rather than four/five positional bools
-/// and options a reader has to keep straight by position.
-pub(super) fn transcode_spec<'a>(
-    rk: &'a str,
-    session: &'a str,
-    encoder_session: &'a str,
-    offset: crate::playback::TranscodeOffset,
-    aud: i64,
-    sub: i64,
-    contract: crate::playback::EncodeContract,
-) -> crate::plex::TranscodeSpec<'a> {
-    crate::plex::TranscodeSpec {
-        rating_key: rk,
-        session,
-        encoder_session,
-        contract,
-        audio_stream_id: aud,
-        subtitle_stream_id: sub,
-        offset,
-    }
 }
 
 
 pub(crate) use crate::plex::session::{PlaybackQuality as Quality, DirectPlayMode};
 
 
-/// The ladder IN ORDER, best first. The ONE place row order lives, so the picker's index mapping
-/// cannot drift from what was drawn (`ui::more_menu`'s rule, and its bug).
 pub(crate) const QUALITY_LADDER: [Quality; 7] = [
     Quality::Auto,
     Quality::Original,
@@ -341,7 +279,7 @@ pub(crate) const QUALITY_LADDER: [Quality; 7] = [
 ];
 
 
-/// The explicit support/readiness gate for automatic playback. The measured PMS contract,
+/// The explicit support/readiness gate for automatic playback. The measured server contract,
 /// segmented demux, per-encoder wire identity, prime/commit transaction and single-Load LG
 /// resolution gate are all present. Keeping this named (instead of deleting it after launch)
 /// preserves one fail-closed switch should a future protocol change invalidate that evidence.
@@ -397,21 +335,21 @@ pub(super) fn quality_policy(
     src_kbps: i64,
     src_w: i64,
     src_h: i64,
-) -> crate::plex::LinkPolicy {
+) -> crate::playback::LinkPolicy {
     if q == Quality::Auto {
         return if auto_uses_hls(q, auto_original) {
-            crate::plex::LinkPolicy {
+            crate::playback::LinkPolicy {
                 direct_play: false,
                 remux: false,
             }
         } else {
-            crate::plex::LinkPolicy::UNRESTRICTED
+            crate::playback::LinkPolicy::UNRESTRICTED
         };
     }
     match q.ceiling() {
-        None => crate::plex::LinkPolicy::UNRESTRICTED,
-        Some(c) if c.admits(src_kbps, src_w, src_h) => crate::plex::LinkPolicy::UNRESTRICTED,
-        Some(_) => crate::plex::LinkPolicy {
+        None => crate::playback::LinkPolicy::UNRESTRICTED,
+        Some(c) if c.admits(src_kbps, src_w, src_h) => crate::playback::LinkPolicy::UNRESTRICTED,
+        Some(_) => crate::playback::LinkPolicy {
             direct_play: false,
             remux: false,
         },
@@ -433,10 +371,10 @@ pub(super) fn auto_uses_hls(q: Quality, auto_original: bool) -> bool {
 /// tests grade is literally the composition [`build_stream`] runs — a re-implementation in a test
 /// would agree with itself forever while the shipped path drifted.
 pub(super) fn flavors_allowed(
-    link: crate::plex::LinkPolicy,
-    quality: crate::plex::LinkPolicy,
-) -> crate::plex::LinkPolicy {
-    crate::plex::LinkPolicy {
+    link: crate::playback::LinkPolicy,
+    quality: crate::playback::LinkPolicy,
+) -> crate::playback::LinkPolicy {
+    crate::playback::LinkPolicy {
         direct_play: link.direct_play && quality.direct_play,
         remux: link.remux && quality.remux,
     }
@@ -514,114 +452,6 @@ pub(super) fn desired_audio(
     }
 }
 
-/// What to do with the server's answer to an enhanced decision.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(super) enum Fallback {
-    Keep,
-    /// Build the plan again without the enhancement: the server refused it, or ignored it.
-    Retry,
-}
-
-/// **Pure: did the server honour the enhanced ask?** `Retry` when it refused outright
-/// ([`refusal`]), or when the audio came back `copy` despite the params — an old or
-/// non-conforming PMS that dropped them silently, which would otherwise play the non-enhanced
-/// audio one container down while claiming the enhancement. An unreachable decision (`None`) is
-/// `Keep`: the same "no answer is not a refusal" rule every other transcode start follows, and
-/// the outcome is then graded `Unverified` by [`classify_outcome`].
-pub(super) fn enhancement_fallback(
-    mc: Option<&crate::media::MediaContainer>,
-    audio: crate::playback::AudioEnhancements,
-) -> Fallback {
-    if audio.is_none() {
-        return Fallback::Keep;
-    }
-    let Some(mc) = mc else {
-        return Fallback::Keep;
-    };
-    if refusal(mc).is_some() || decision_audio(mc) == Some("copy") {
-        Fallback::Retry
-    } else {
-        Fallback::Keep
-    }
-}
-
-/// Log + diag the server's refusal of an enhanced ask, from whichever call site first learns of
-/// it. `context` is the site-specific tail after the shared "enhancement: refused/ignored by
-/// server" opening, so every site keeps the exact log sentence it always had.
-pub(super) fn note_enhancement_refused(context: &str, _audio: crate::playback::AudioEnhancements) {
-    crate::player::log(&format!("enhancement: refused/ignored by server{context}"));
-}
-
-/// The audio lane's own stream decision off a `/decision` body (`copy`/`transcode`), if it says.
-fn decision_audio(mc: &crate::media::MediaContainer) -> Option<&str> {
-    mc.metadata
-        .first()
-        .and_then(|m| m.first_part())
-        .and_then(|p| p.stream.iter().find(|s| s.stream_type == 2))
-        .map(|s| s.decision.as_str())
-}
-
-/// Grade a kept enhanced decision (issue #266's `EnhancementOutcome`). `Applied` only when the
-/// server transcoded audio this profile would otherwise have COPIED — the one case where the
-/// transcode is provably the DSP's doing (M2's AC3 2.0). A carried track outside the copy list
-/// (`plex::is_dp_audio_track`, the same caps the profile's `audioCodec`/`audio.channels` lanes are
-/// built from) is transcoded at baseline too, so the ask was delivered but cannot be told apart
-/// from what would have happened anyway: `Unverified` (M2's AAC 5.1 under the measured profile).
-/// No answer at all is `Unverified` for the same reason.
-pub(super) fn classify_outcome(
-    mc: Option<&crate::media::MediaContainer>,
-    carried: Option<&CarriedAudio>,
-    audio: crate::playback::AudioEnhancements,
-) -> super::decision::EnhancementOutcome {
-    use super::decision::EnhancementOutcome;
-    if audio.is_none() {
-        return EnhancementOutcome::Off;
-    }
-    let copyable = carried.is_some_and(|a| crate::plex::is_dp_audio_track(&a.codec, a.channels));
-    match mc.and_then(decision_audio) {
-        Some("transcode") if copyable => EnhancementOutcome::Applied,
-        _ => EnhancementOutcome::Unverified,
-    }
-}
-
-
-/// Read the transcoder's OUTPUT codecs from a /decision response and store them as the stream
-/// codecs the Load payload is built from. The decision's Part.Stream[].codec is the codec each
-/// lane will actually ARRIVE in (it equals the source codec only when that lane is copied).
-/// Assuming "a container remux copies the audio" broke mp4 items whose audio PMS re-encodes to
-/// the transcode-target's AC3: the payload said AAC, the stream carried AC3, and the
-/// configured-for-AAC pipeline played silence (the `movie_hevc_aac_mp4` harness case).
-/// PURE: the codec pair the server's /decision OUTPUT actually declares, or None if it names
-/// neither. The Load payload must match this, not the source file — a transcode changes the
-/// codec and rate, and describing the source to the decoder gives silent audio.
-pub(super) fn decision_codecs(mc: &crate::media::MediaContainer) -> Option<(String, String)> {
-    let streams = mc
-        .metadata
-        .first()
-        .and_then(|m| m.media.first())
-        .and_then(|md| md.part.first())
-        .map(|p| &p.stream)?;
-    let (mut vc, mut ac) = (None, None);
-    for s in streams {
-        match s.stream_type {
-            1 if vc.is_none() && !s.codec.is_empty() => vc = Some(s.codec.to_lowercase()),
-            2 if ac.is_none() && !s.codec.is_empty() => ac = Some(s.codec.to_lowercase()),
-            _ => {}
-        }
-    }
-    match (vc, ac) {
-        (Some(v), Some(a)) => Some((v, a)),
-        _ => None,
-    }
-}
-
-
-/// `generalDecisionCode` 2000 — "Neither direct play nor conversion is available." The server has
-/// adjudicated the whole request and can serve NEITHER lane; there is nothing left for the client
-/// to try, which is what makes it a stop rather than another fallback.
-pub(super) const DECISION_UNPLAYABLE: i64 = 2000;
-
-
 /// **Why a plan leaves without a URL on purpose**, as a typed verdict rather than a sentence.
 ///
 /// The server's own refusal is quoted verbatim ([`PlayVerdict::Server`]: PMS wrote it, in the
@@ -660,37 +490,6 @@ impl PlayVerdict {
         }
     }
 }
-
-/// PURE: the server's pre-flight refusal, or None.
-///
-/// `/decision` is asked BEFORE a byte of video moves, and it can answer "no" — verified live
-/// against PMS 1.43.3 on a VP9 source: `generalDecisionCode 2000` beside
-/// `transcodeDecisionCode 4007, "Cannot convert this item. Implementation for video encoder 'vp9'
-/// not found."`. The app used to parse `general_decision_code` and only LOG it, then hand
-/// `start.mkv` to the pipeline anyway — so a server that had already said no produced "Buffering…"
-/// followed by a generic failure, and the one sentence that explained it was in a log the user
-/// cannot reach.
-///
-/// **The CODE is authoritative and the text is only the human sentence.** Grading on the text would
-/// be grading on server copy that is localised, versioned and free to change; grading on the code
-/// is why a server that refuses without saying why still stops us (`Some("")`).
-///
-/// Of the two sentences the body carries, the TRANSCODE one is preferred: `generalDecisionText`
-/// restates the code ("Neither direct play nor conversion is available") while
-/// `transcodeDecisionText` names the actual cause. The general one is the fallback for a server
-/// that sends only it.
-pub(super) fn refusal(mc: &crate::media::MediaContainer) -> Option<String> {
-    if mc.general_decision_code != Some(DECISION_UNPLAYABLE) {
-        return None;
-    }
-    let text = if !mc.transcode_decision_text.is_empty() {
-        &mc.transcode_decision_text
-    } else {
-        &mc.general_decision_text
-    };
-    Some(text.trim().to_string())
-}
-
 
 /// Fresh opaque session id per playback. Reads the kernel UUID (the TV is Linux); falls
 /// back to a ratingKey + monotonic-counter token if that read fails.
@@ -905,9 +704,6 @@ pub(crate) struct Plan {
     pub url: String,
     pub tsession: String,
     pub sess: String,
-    pub part_id: i64,
-    pub pq_id: String,
-    pub pq_item_id: String,
     pub machine_id: String, // "" = leave the cached one alone
     pub vcodec: String,
     pub acodec: String,
@@ -1023,7 +819,6 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
         // a plan `apply_plan` cannot install an honest `cur_sid` from.
         sid: env.sid,
         direct_play_mode: env.direct_play_mode,
-        part_id: part_id_of(part),
         src_vcodec: vcodec.to_string(),
         src_acodec: acodec.to_string(),
         // **`bool::default()` is `false` and `false` here is a CLAIM** — "this television cannot
@@ -1200,9 +995,9 @@ fn remembered_subtitle(
 
 pub(super) fn audio_direct_plays(mode: DirectPlayMode, codec: &str, channels: i64) -> bool {
     if mode == DirectPlayMode::Forced {
-        crate::plex::DP_AUDIO_CODECS.split(',').any(|c| c.eq_ignore_ascii_case(codec))
+        crate::devcaps::DP_AUDIO_CODECS.split(',').any(|c| c.eq_ignore_ascii_case(codec))
     } else {
-        crate::plex::is_dp_audio_track(codec, channels)
+        crate::devcaps::is_dp_audio_track(codec, channels)
     }
 }
 
@@ -1255,10 +1050,26 @@ fn pick_dp_audio_eligible(
 }
 
 
+/// Subtitle codecs the client Original-renders (`ff.rs` / the track menu) and a selected track
+/// may therefore be advertised with. This was `plex::is_dp_subtitle` (the `subtitleCodec=` list
+/// on the direct-play profile and the gate on MDE's `subtitleStreamID`); the profile and the MDE
+/// gate went with the Plex wire layer, but the RENDER half of the list is still what decides
+/// whether an embedded pick can be drawn instead of triggering a burn. Spellings are the FFmpeg/
+/// Stream.codec aliases tracks arrive as (`movtext` as in Roku; `dvd` beside `vobsub` /
+/// `dvd_subtitle`). Obscure `ff.rs` Plain aliases (`vplayer`, `jacosub`, ...) stay off this list
+/// on purpose — unknown selected codecs take the client-render fallback below rather than a
+/// full re-encode.
+const DP_SUBTITLE_CODECS: &str = "srt,subrip,ass,ssa,mov_text,movtext,webvtt,text,pgs,hdmv_pgs_subtitle,vobsub,dvd,dvd_subtitle,dvdsub,dvb_subtitle,dvbsub";
+
+fn is_dp_subtitle(codec: &str) -> bool {
+    let codec = codec.to_ascii_lowercase();
+    DP_SUBTITLE_CODECS.split(',').any(|c| c == codec)
+}
+
 /// Whether the client can render this embedded subtitle codec.
 fn embedded_subtitle_renderable(codec: &str) -> bool {
     // Advertised bitmap/ASS/text codecs plus ff::sub_kind's raw UTF-8 packet formats.
-    crate::plex::is_dp_subtitle(codec) || matches!(codec,
+    is_dp_subtitle(codec) || matches!(codec,
         "vplayer" | "pjs" | "jacosub" | "microdvd" | "sami" | "realtext" |
         "subviewer" | "subviewer1" | "stl" | "mpl2")
 }
@@ -1351,11 +1162,11 @@ pub(super) fn video_feed_supported(vcodec: &str, dv: crate::metadata::DvPresenta
     matches!(vcodec, "h264" | "hevc") && dv.refusal().is_none()
 }
 
-pub(super) fn direct_play_policy(mode: DirectPlayMode, policy: crate::plex::LinkPolicy) -> crate::plex::LinkPolicy {
+pub(super) fn direct_play_policy(mode: DirectPlayMode, policy: crate::playback::LinkPolicy) -> crate::playback::LinkPolicy {
     match mode {
         DirectPlayMode::Auto => policy,
-        DirectPlayMode::Forced => crate::plex::LinkPolicy { direct_play: true, remux: false },
-        DirectPlayMode::Disabled => crate::plex::LinkPolicy { direct_play: false, remux: policy.remux },
+        DirectPlayMode::Forced => crate::playback::LinkPolicy { direct_play: true, remux: false },
+        DirectPlayMode::Disabled => crate::playback::LinkPolicy { direct_play: false, remux: policy.remux },
     }
 }
 
@@ -1394,7 +1205,7 @@ pub(super) fn direct_play_policy(mode: DirectPlayMode, policy: crate::plex::Link
 /// fits the caps: resolution, bitrate, and the profile's own limitation axes. None of those can say
 /// "Dolby Vision", so a refused Profile 5 came back `Part.decision=transcode` with the video's own
 /// decision `copy` — the same bitstream, the same wrong colours, one container down. `build_stream`
-/// therefore also sets [`crate::plex::TranscodeSpec::no_video_copy`], off `base_layer_unusable` and
+/// therefore also sets [`crate::playback::EncodeContract::no_video_copy`], off `base_layer_unusable` and
 /// never off this gate: a COPY carries no declaration, so it stays wrong even for a profile we are
 /// happy to direct-play. The measurement is in `docs/pms-api.md` §"What the server actually does
 /// with a Dolby Vision source". A server that cannot encode the result is then allowed to say so —
@@ -1465,7 +1276,7 @@ pub(crate) fn playback_preview_of(
     let video = video_direct_plays(vcodec, width, height, dv, crate::devcaps::caps());
     let audio = audio_streams
         .iter()
-        .any(|a| crate::plex::is_dp_audio_track(&a.codec, a.channels));
+        .any(|a| crate::devcaps::is_dp_audio_track(&a.codec, a.channels));
     // Mirrors `build_stream`'s own ladder: the video gate decides whether an ENCODER runs at all,
     // and only once it has passed do the container and the audio decide between pulling the file
     // ourselves and asking the server to repackage it.
@@ -1509,9 +1320,6 @@ fn build_stream_jellyfin(
     let mut plan = Plan {
         sid: env.sid,
         direct_play_mode: env.direct_play_mode,
-        // a Jellyfin MediaSource id is a GUID — no numeric part id exists to carry, and nothing
-        // on this backend reads part_id (it keys Plex's /library/parts selection PUTs)
-        part_id: 0,
         src_vcodec: vcodec.to_string(),
         src_acodec: acodec.to_string(),
         source_decodable: true,
@@ -1713,17 +1521,6 @@ pub(super) fn streamable_container(container: &str, part_key: &str) -> bool {
 }
 
 
-/// Extract the numeric Part id from a Plex part key (/library/parts/{id}/…/file.mkv).
-pub(super) fn part_id_of(part_key: &str) -> i64 {
-    let mut it = part_key.split('/');
-    while let Some(seg) = it.next() {
-        if seg == "parts" {
-            return it.next().and_then(|s| s.parse::<i64>().ok()).unwrap_or(0);
-        }
-    }
-    0
-}
-
 // ---- async resolve: worker computes an owned Plan, main thread installs it ------------------
 // The house idiom (metadata::load_season / browse.rs): generation counter + single-flight +
 // a monotone one-slot mailbox + a per-frame pump that applies on the MAIN thread.
@@ -1733,30 +1530,6 @@ pub(super) fn part_id_of(part_key: &str) -> i64 {
 // that possible broke the seek path and was reverted (docs/async-model-decision.md). That costs
 // nothing here: the freeze is fixed by getting the resolve OFF the loop, and a worker lingering
 // in the background is invisible once the UI has already moved on.
-
-pub(super) struct AbandonedPlanResources {
-    pub(super) sid: ServerId,
-    pub(super) identities: Vec<String>,
-}
-
-pub(super) fn abandoned_plan_resources(plan: &Plan) -> Option<AbandonedPlanResources> {
-    let mut identities = Vec::with_capacity(2);
-    if !plan.tsession.is_empty() {
-        identities.push(plan.tsession.clone());
-    }
-    if !plan.sess.is_empty() && !identities.iter().any(|id| id == &plan.sess) {
-        identities.push(plan.sess.clone());
-    }
-    if identities.is_empty() {
-        None
-    } else {
-        Some(AbandonedPlanResources {
-            sid: plan.sid,
-            identities,
-        })
-    }
-}
-
 
 pub(super) fn take_resume_for(pending: &mut Option<(u32, i64)>, gen: u32) -> i64 {
     match pending.take() {
@@ -1775,9 +1548,6 @@ pub(super) fn take_resume_for(pending: &mut Option<(u32, i64)>, gen: u32) -> i64
 #[path = "plan_test_support.rs"]
 mod test_support;
 
-#[cfg(test)]
-#[path = "plan_session_tests.rs"]
-mod session_tests;
 
 #[cfg(test)]
 #[path = "plan_quality_ceiling_tests.rs"]

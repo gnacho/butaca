@@ -62,10 +62,11 @@ struct RetryContext {
 /// two and the five the outgoing item leaves behind, and a dozen small functions each poked one or
 /// two more on the side — so "what a session IS" was written down nowhere and no writer could be
 /// read against the whole. The failure that shape produced is still documented at the line that
-/// fixed it, in [`build_stream`] — the part id was published by the CALLER after the resolve
-/// returned, so `put_selection`, which runs INSIDE the resolve, addressed the PREVIOUS item's part,
-/// and the server-default subtitle that PUT exists to suppress was burned into the transcode
-/// instead.
+/// fixed it, in [`build_stream`] — the part id used to be published by the CALLER after the
+/// resolve returned, so the server-side selection PUT, which ran INSIDE the resolve, addressed
+/// the PREVIOUS item's part, and the server-default subtitle that PUT existed to suppress was
+/// burned into the transcode instead. (That PUT went with the Plex wire layer; the lesson is
+/// why `part_id` is derived at the top of [`build_stream`] to this day.)
 ///
 /// Route ownership and worker/main route transitions are deliberately not fields here: the
 /// synchronized [`PLAYER_CONTROL`] is their authority. [`ResolveEnv`] exists for the other
@@ -114,9 +115,10 @@ pub(crate) struct PlaybackSession {
     /// an empty plan terminal and retryable instead of falling back to an idle black frame.
     resolve_failed: bool,
     /// This playback's encode shape — flavor, delivery, the no-copy switch, the fixed quality
-    /// ceiling and (issue #266) the Plex Pass audio DSP. A seek or retranscode rebuilds the
-    /// identical start.mkv query from (`cur_rk`, `sess`, the `cur_*_sid` pair, this contract) via
-    /// `plex::TranscodeSpec` — replaces the old stored offset-free TBASE query string.
+    /// ceiling and (issue #266) the audio-DSP flags. A seek or retranscode rebuilds the stream
+    /// from (`cur_rk`, `sess`, the `cur_*_sid` pair, this contract); on the Plex backend that was
+    /// the `TranscodeSpec` query, and on the Jellyfin backend it is the PlaybackInfo body
+    /// (`jellyfin::profile`) — either way the contract, not a stored query string, is the source.
     ///
     /// Was four separate fields (`cur_remux`, `cur_delivery`, `cur_no_video_copy`, `cur_ceiling`),
     /// each carried for the same reason: a seek ([`transcode_seek`]) and an audio switch
@@ -246,7 +248,6 @@ pub(crate) struct PlaybackSession {
     cur_sub_pref_lang: Option<String>,
     /// the playing item's Part id (from the part key), so an audio switch can PUT the
     /// server-side stream selection — the transcoder encodes the part's SELECTED audio.
-    cur_part_id: i64,
     /// Opaque internal playback generation, regenerated on each play_movie/play_episode. It is
     /// also the first encoder's PMS session id. Adaptive replacements keep this app generation
     /// stable but use their own coupled PMS wire id; the active encoder mutex supplies timeline,
@@ -266,9 +267,6 @@ pub(crate) struct PlaybackSession {
     /// round trip.
     machine_id: String,
     machine_sid: ServerId,
-    /// This playback's PlayQueue ids for the timeline (empty if /playQueues failed).
-    pq_id: String,
-    pq_item_id: String,
     /// The item's OWN codecs, as the file has them — captured once per playback and never
     /// overwritten by `apply_decision_codecs`, which replaces `stream_*` with the transcode OUTPUT.
     ///
@@ -354,9 +352,6 @@ pub(super) enum EnhancementOutcome {
     /// Remux, the audio decision was a transcode, and the source codec is in the profile's own
     /// copy list — the params demonstrably did something.
     Applied,
-    /// The audio would have been transcoded anyway (PMS M2's AAC 5.1 case) — asked for, delivered,
-    /// but not provably BECAUSE of the ask.
-    Unverified,
     /// The server refused the params outright, or silently ignored them (audio came back `copy`
     /// despite the ask) — an old or non-conforming PMS.
     Refused,
@@ -392,12 +387,9 @@ impl PlaybackSession {
         cur_audio: None,
         cur_sub_sid: 0,
         cur_sub_pref_lang: None,
-        cur_part_id: 0,
         sess: String::new(),
         machine_id: String::new(),
         machine_sid: ServerId::UNSET,
-        pq_id: String::new(),
-        pq_item_id: String::new(),
         src_vcodec: String::new(),
         src_acodec: String::new(),
         stream_vcodec: String::new(),
@@ -459,12 +451,9 @@ impl PlaybackSession {
             cur_audio,
             cur_sub_sid,
             cur_sub_pref_lang,
-            cur_part_id,
             sess,
             machine_id,
             machine_sid,
-            pq_id,
-            pq_item_id,
             src_vcodec,
             src_acodec,
             stream_vcodec,
@@ -507,12 +496,9 @@ impl PlaybackSession {
             cur_audio: cur_audio.clone(),
             cur_sub_sid: *cur_sub_sid,
             cur_sub_pref_lang: cur_sub_pref_lang.clone(),
-            cur_part_id: *cur_part_id,
             sess: sess.clone(),
             machine_id: machine_id.clone(),
             machine_sid: *machine_sid,
-            pq_id: pq_id.clone(),
-            pq_item_id: pq_item_id.clone(),
             src_vcodec: src_vcodec.clone(),
             src_acodec: src_acodec.clone(),
             stream_vcodec: stream_vcodec.clone(),
@@ -834,8 +820,6 @@ fn publish_applied_route_projection(ps: &PlaybackSession) {
 /// undoes the already-visible quality/subtitle choice.
 fn commit_in_place_route_projection(ps: &PlaybackSession, quality_contract: bool) {
     let projection = route_projection(ps);
-    let audio_stream_id = projection.audio.as_ref().map_or(0, |a| a.sid);
-    let subtitle_stream_id = projection.subtitle_sid;
     let mut control = PLAYER_CONTROL.lock().unwrap_or_else(|e| e.into_inner());
     match control.phase {
         ControlPhase::Stable | ControlPhase::StagingUser(_) | ControlPhase::Completing(_) => {
@@ -854,10 +838,6 @@ fn commit_in_place_route_projection(ps: &PlaybackSession, quality_contract: bool
         }
         _ => return,
     }
-    if let Some(timeline) = control.timeline.as_mut() {
-        timeline.audio_stream_id = audio_stream_id;
-        timeline.subtitle_stream_id = subtitle_stream_id;
-    }
 }
 
 /// Immutable main-thread projection consumed by the periodic timeline worker. `Session` itself is
@@ -868,11 +848,6 @@ fn commit_in_place_route_projection(ps: &PlaybackSession, quality_contract: bool
 struct TimelineProjection {
     sid: ServerId,
     rating_key: String,
-    logical_session: String,
-    play_queue_id: String,
-    play_queue_item_id: String,
-    audio_stream_id: i64,
-    subtitle_stream_id: i64,
 }
 
 /// One reporter's authority to sample the playback which spawned it.
@@ -882,20 +857,6 @@ pub(crate) struct TimelineLease {
     /// Every stop announced before this Engine was published must finish its final old-playback
     /// timeline effect before this reporter may send the replacement playback's first update.
     required_stop: u64,
-}
-
-#[derive(Clone)]
-struct TimelineSnapshot {
-    sid: ServerId,
-    rating_key: String,
-    state: crate::playback::TimelineState,
-    time_ms: i64,
-    duration_ms: i64,
-    session: String,
-    play_queue_id: String,
-    play_queue_item_id: String,
-    audio_stream_id: i64,
-    subtitle_stream_id: i64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1966,215 +1927,6 @@ pub(crate) fn reset_player_control_for_test(ps: &PlaybackSession) {
 /// takes no generation from its caller: there is no value a worker could pass that repeats one.
 pub(super) static ENCODER_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// One exact PMS transcode cleanup observation in flight. `stop_needed` is true only until one
-/// stop request was accepted; after that, completed HLS segments drive exact state checks. PMS
-/// 1.43.4 owns two independently-lived objects: `session=` names the physical encoder, while
-/// `X-Plex-Session-Identifier` names the Streaming Resource charged against the bandwidth
-/// governor. A physical ping=404 proves only the first half. Once it is absent we synchronously
-/// close (or observe 404 for) the second half before releasing this record.
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct EncoderCleanupCheck {
-    sid: ServerId,
-    session: String,
-    stop_needed: bool,
-    physical_absent: bool,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-struct PendingEncoderCleanup {
-    sid: ServerId,
-    session: String,
-    checking: bool,
-    stop_needed: bool,
-    physical_absent: bool,
-}
-
-/// Process-wide because a seek/reload replaces [`HlsAbrControl`] while the server cleanup worker
-/// outlives it. Entries are scoped by server: an unreachable shared PMS must not suppress quality
-/// experiments against a different machine.
-#[derive(Default)]
-struct EncoderCleanupLedger {
-    pending: Vec<PendingEncoderCleanup>,
-}
-
-impl EncoderCleanupLedger {
-    fn remember(&mut self, sid: ServerId, session: &str) -> bool {
-        self.remember_with_state(sid, session, true, false)
-    }
-
-    fn remember_with_state(
-        &mut self,
-        sid: ServerId,
-        session: &str,
-        stop_needed: bool,
-        physical_absent: bool,
-    ) -> bool {
-        if self
-            .pending
-            .iter()
-            .any(|entry| entry.sid == sid && entry.session == session)
-        {
-            return false;
-        }
-        self.pending.push(PendingEncoderCleanup {
-            sid,
-            session: session.to_owned(),
-            checking: false,
-            stop_needed,
-            physical_absent,
-        });
-        true
-    }
-
-    fn is_clear(&self, sid: ServerId) -> bool {
-        !self.pending.iter().any(|entry| entry.sid == sid)
-    }
-
-    /// Claim every unchecked entry for this PMS. A second caller sees `checking=true` and starts
-    /// no duplicate stop or ping while the first network request is in flight.
-    fn take_unchecked(&mut self, sid: ServerId) -> Vec<EncoderCleanupCheck> {
-        self.pending
-            .iter_mut()
-            .filter(|entry| entry.sid == sid && !entry.checking)
-            .map(|entry| {
-                entry.checking = true;
-                EncoderCleanupCheck {
-                    sid: entry.sid,
-                    session: entry.session.clone(),
-                    stop_needed: entry.stop_needed,
-                    physical_absent: entry.physical_absent,
-                }
-            })
-            .collect()
-    }
-
-    /// Publish one completed server observation. Only physical absence plus exact logical
-    /// reconciliation removes an entry. A stop which failed to receive a 2xx is retried when
-    /// later completed media asks for another check; an accepted stop is never re-enqueued merely
-    /// because its asynchronous worker still exists.
-    fn finish(
-        &mut self,
-        check: EncoderCleanupCheck,
-        present: Option<bool>,
-        stop_accepted: Option<bool>,
-        resource_reconciled: Option<bool>,
-    ) {
-        let Some(index) = self
-            .pending
-            .iter()
-            .position(|entry| entry.sid == check.sid && entry.session == check.session)
-        else {
-            return;
-        };
-        let entry = &mut self.pending[index];
-        entry.checking = false;
-        match stop_accepted {
-            Some(true) => entry.stop_needed = false,
-            Some(false) => entry.stop_needed = true,
-            None => {}
-        }
-        if present == Some(false) {
-            entry.physical_absent = true;
-            // A transport-lost stop response can race a worker which did land. Once ping exact-
-            // looks up the physical key as absent, retrying that stop cannot add information.
-            entry.stop_needed = false;
-        }
-        if entry.physical_absent && resource_reconciled == Some(true) {
-            self.pending.swap_remove(index);
-        }
-    }
-}
-
-static ENCODER_CLEANUP: Mutex<EncoderCleanupLedger> = Mutex::new(EncoderCleanupLedger {
-    pending: Vec::new(),
-});
-
-fn finish_encoder_cleanup_check(
-    check: EncoderCleanupCheck,
-    present: Option<bool>,
-    stop_accepted: Option<bool>,
-    resource_reconciled: Option<bool>,
-) {
-    let physical_absent = check.physical_absent || present == Some(false);
-    ENCODER_CLEANUP
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .finish(check, present, stop_accepted, resource_reconciled);
-    match (physical_absent, resource_reconciled, present, stop_accepted) {
-        (true, Some(true), _, _) => crate::player::log(
-            "abr: PMS encoder cleanup reconciled; Streaming Resource is released",
-        ),
-        (true, None, _, _) => crate::player::log(
-            "abr: PMS physical encoder is gone but resource close was inconclusive; retaining cleanup ownership",
-        ),
-        (_, _, _, Some(false)) => crate::player::log(
-            "abr: PMS encoder stop was not accepted; retaining cleanup ownership",
-        ),
-        (_, _, None, _) => crate::player::log(
-            "abr: PMS encoder cleanup ping was inconclusive; retaining cleanup ownership",
-        ),
-        _ => {}
-    }
-}
-
-fn run_encoder_cleanup_check(check: EncoderCleanupCheck) {
-    let Some(client) = crate::registry::client_for(check.sid) else {
-        let stop_accepted = check.stop_needed.then_some(false);
-        finish_encoder_cleanup_check(check, None, stop_accepted, None);
-        return;
-    };
-    let stop_accepted = (check.stop_needed && !check.physical_absent)
-        .then(|| client.transcode_stop(&check.session));
-    let present = if check.physical_absent {
-        Some(false)
-    } else {
-        client.transcode_session_present(&check.session)
-    };
-    let physical_absent = check.physical_absent || present == Some(false);
-    let resource_reconciled = if physical_absent {
-        client.transcode_resource_reconciled(&check.session)
-    } else {
-        None
-    };
-    finish_encoder_cleanup_check(check, present, stop_accepted, resource_reconciled);
-}
-
-/// Start every currently unowned cleanup observation for `sid`. There is no sleep, attempt count
-/// or wall-clock release: an accepted stop is checked once after each later completed HLS segment,
-/// and only physical 404 followed by a successful/idempotent logical close removes it. Network
-/// work stays off the demux thread; if the OS refuses the tiny worker, the already-degraded
-/// fallback performs the same finite check inline.
-fn drive_encoder_cleanup(sid: ServerId) -> bool {
-    let checks = ENCODER_CLEANUP
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take_unchecked(sid);
-    for check in checks {
-        let fallback = check.clone();
-        if !crate::task::spawn_small("abr-cleanup", move || run_encoder_cleanup_check(check)) {
-            run_encoder_cleanup_check(fallback);
-        }
-    }
-    ENCODER_CLEANUP
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .is_clear(sid)
-}
-
-fn request_encoder_cleanup(sid: ServerId, session: &str) {
-    if session.is_empty() {
-        return;
-    }
-    let inserted = ENCODER_CLEANUP
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .remember(sid, session);
-    if inserted {
-        crate::player::log("abr: queued exact PMS encoder cleanup");
-    }
-    let _ = drive_encoder_cleanup(sid);
-}
-
 fn next_encoder_session(logical_session: &str) -> String {
     format!("{logical_session}-abr-{}", next_encoder_generation())
 }
@@ -2424,11 +2176,7 @@ fn is_worker_ticket_current(expected: &WorkerTicket) -> bool {
 #[derive(Clone)]
 pub(crate) struct HlsAbrControl {
     sid: ServerId,
-    rating_key: String,
     logical_session: String,
-    audio_stream_id: i64,
-    subtitle_stream_id: i64,
-    seconds_per_segment: u8,
     pub(crate) initial_rung: crate::abr::Rung,
     /// Response facts carried with the active physical route across seek/reload. They seed the
     /// worker's response state but never alter the request actuator above.
@@ -2456,7 +2204,6 @@ pub(crate) struct HlsAbrControl {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AutoOriginalReload {
     Direct,
-    Remux,
 }
 
 pub(crate) struct PrimedHls {
@@ -2522,25 +2269,16 @@ impl HlsAbrControl {
     }
 
     /// Whether every superseded/rejected physical encoder on this PMS has crossed the server's
-    /// exact cleanup point, without starting a request.
+    /// exact cleanup point, without starting a request. The ledger that tracked those objects
+    /// went with the Plex stop/ping lifecycle; nothing pends, so the answer is always clear.
     pub(crate) fn encoder_cleanup_ready(&self) -> bool {
-        if !self.fixture_base.is_empty() {
-            return true;
-        }
-        ENCODER_CLEANUP
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .is_clear(self.sid)
+        true
     }
 
-    /// Drive one coalesced background ping from a newly completed active HLS quantum. It never
-    /// releases on elapsed time or on the earlier `/stop` acknowledgement.
+    /// Drive one coalesced background check from a newly completed active HLS quantum. Nothing
+    /// pends without the Plex encoder lifecycle, so there is nothing to drive.
     pub(crate) fn observe_encoder_cleanup(&self) -> bool {
-        if self.fixture_base.is_empty() {
-            drive_encoder_cleanup(self.sid)
-        } else {
-            true
-        }
+        true
     }
 
     pub(crate) fn can_recover_original(&self) -> bool {
@@ -2659,9 +2397,9 @@ impl HlsAbrControl {
         expected: &WorkerTicket,
         proposal: crate::abr::Proposal,
         offset_micros: i64,
-        deadline: Option<std::time::Instant>,
+        _deadline: Option<std::time::Instant>,
     ) -> Result<PrimedHls, PrimeRefusal> {
-        self.prime_rung(expected, proposal.rung, offset_micros, deadline)
+        self.prime_rung(expected, proposal.rung, offset_micros, _deadline)
     }
 
     fn prime_rung(
@@ -2669,7 +2407,7 @@ impl HlsAbrControl {
         expected: &WorkerTicket,
         rung: crate::abr::Rung,
         offset_micros: i64,
-        deadline: Option<std::time::Instant>,
+        _deadline: Option<std::time::Instant>,
     ) -> Result<PrimedHls, PrimeRefusal> {
         if !is_worker_ticket_current(expected) {
             return Err(PrimeRefusal::Session);
@@ -2690,68 +2428,13 @@ impl HlsAbrControl {
                 encoder_session,
             });
         }
-        let Some(client) = crate::registry::client_for(self.sid) else {
-            return Err(PrimeRefusal::Session);
-        };
-        // PMS exposes the two session fields separately, but the overlap TV spike proved it
-        // cannot prime a replacement while it shares the old X-Plex id: the first encoder dies
-        // before the candidate produces segment zero. Couple both wire fields per encoder.
-        let spec = transcode_spec(
-            &self.rating_key,
-            &encoder_session,
-            &encoder_session,
-            crate::playback::TranscodeOffset::from_micros(offset_micros),
-            self.audio_stream_id,
-            self.subtitle_stream_id,
-            crate::playback::EncodeContract {
-                remux: false,
-                no_video_copy: true,
-                ceiling: Some(rung.ceiling()),
-                delivery: crate::playback::TranscodeDelivery::FixedHls {
-                    seconds_per_segment: self.seconds_per_segment,
-                },
-                audio: crate::playback::AudioEnhancements::NONE,
-            },
-        );
-        // The deadline-bearing path preserves the cause where it is issued. A completed HTTP
-        // response (including malformed 2xx) and a transport failure are Control; only the timer
-        // which actually stopped the request is Deadline. The active encoder is checked on the far
-        // side of the request so a concurrent route change has priority over every one of them.
-        let decision = match deadline {
-            Some(at) => {
-                let outcome = client.transcode_decision_until(&spec, at);
-                classify_prime_decision(is_worker_ticket_current(expected), outcome)
-            }
-            None => {
-                let decision = client.transcode_decision(&spec);
-                if !is_worker_ticket_current(expected) {
-                    Err(PrimeRefusal::Session)
-                } else {
-                    decision.ok_or(PrimeRefusal::Control)
-                }
-            }
-        };
-        let decision = match decision {
-            Ok(decision) => decision,
-            Err(refusal) => {
-                // A lost response may still have registered both PMS objects. It cannot be allowed
-                // to become the invisible overlap which shrinks the next grant.
-                request_encoder_cleanup(self.sid, &encoder_session);
-                return Err(refusal);
-            }
-        };
-        if !is_worker_ticket_current(expected) {
-            request_encoder_cleanup(self.sid, &encoder_session);
-            return Err(PrimeRefusal::Session);
-        }
-        if refusal(&decision).is_some() {
-            request_encoder_cleanup(self.sid, &encoder_session);
-            return Err(PrimeRefusal::Rung);
-        }
-        Ok(PrimedHls {
-            url: client.transcode_start_url(&spec).to_url(),
-            encoder_session,
-        })
+        // The wire half (the Plex `/decision` registration and its `start.m3u8` URL) is gone
+        // with the Plex transcoder. Every real server now resolves through the Jellyfin backend,
+        // whose slot is not in the Plex registry, so production priming refuses exactly as it
+        // did when `client_for` missed: `Err(Session)`, which says nothing about the rung. The
+        // fixture path stays: the dev ABR rig drives rung transitions without a server.
+        let _ = rung;
+        Err(PrimeRefusal::Session)
     }
 
     /// Publish a successfully primed encoder together with the caller's controller/local state.
@@ -2784,22 +2467,12 @@ impl HlsAbrControl {
         })
     }
 
-    pub(crate) fn retire(&self, encoder: String) {
-        if !self.fixture_base.is_empty() {
-            return;
-        }
-        request_encoder_cleanup(self.sid, &encoder);
-    }
+    /// Retire a superseded or abandoned candidate encoder. The Plex stop+ping lifecycle that
+    /// did the retiring is gone with the transcoder; the Jellyfin backend reaps its own quiet
+    /// encoders (`jellyfin_retranscode_as`'s stop worker), so there is nothing to ask here.
+    pub(crate) fn retire(&self, _encoder: String) {}
 
-    pub(crate) fn abandon(&self, candidate: &str) {
-        if !self.fixture_base.is_empty() {
-            return;
-        }
-        // Returning to the proven cursor has zero media-control cost only if retiring the failed
-        // encoder does not hold the demux worker. The stop+ping lifecycle stays on tiny workers;
-        // the common ledger survives seek/reload and supplies the exact resource-release barrier.
-        request_encoder_cleanup(self.sid, candidate);
-    }
+    pub(crate) fn abandon(&self, _candidate: &str) {}
 }
 
 /// **The feasibility filter, as one object the worker cannot argue with.** Built from two
@@ -2892,12 +2565,6 @@ fn auto_original_features(ps: &PlaybackSession) -> crate::abr::SourceFeatures {
 /// Main-thread capture immediately before spawning the HLS demux worker.
 pub(crate) fn hls_abr_control(ps: &PlaybackSession) -> Option<(HlsAbrControl, WorkerTicket)> {
     if forced_direct_play(ps) { return None; }
-    let seconds_per_segment = match cur_delivery(ps) {
-        crate::playback::TranscodeDelivery::FixedHls {
-            seconds_per_segment,
-        } => seconds_per_segment,
-        crate::playback::TranscodeDelivery::ProgressiveMkv => return None,
-    };
     let live = active_hls();
     let ticket = live
         .as_ref()
@@ -2916,11 +2583,7 @@ pub(crate) fn hls_abr_control(ps: &PlaybackSession) -> Option<(HlsAbrControl, Wo
     Some((
         HlsAbrControl {
             sid: cur_sid(ps),
-            rating_key: cur_rk(ps),
             logical_session: sess(ps),
-            audio_stream_id: cur_audio_sid(ps),
-            subtitle_stream_id: cur_sub_sid(ps),
-            seconds_per_segment,
             initial_rung: live
                 .as_ref()
                 .map(|(_, hls)| hls.rung)
@@ -3394,7 +3057,7 @@ pub(crate) fn recover_auto_to_original_for(
     if expected_encoder.is_empty() {
         return None;
     }
-    let mut rollback = snapshot_route(ps, expected_encoder.clone(), offset_secs);
+    let rollback = snapshot_route(ps, expected_encoder.clone(), offset_secs);
     // A direct trial is only worth starting on a Part the server will actually serve this
     // identity. One the server refuses is reached as its codec-copy remux instead — the shape the
     // resolve builds whenever the server will not direct-play — rather than opened, failed and
@@ -3420,59 +3083,12 @@ pub(crate) fn recover_auto_to_original_for(
         );
     };
 
-    // `/decision` only registers the replacement. Just like a raw Part open, it does not prove
-    // that Starfish can read and decode the resulting MKV. Publish the remux without stopping the
-    // old HLS encoder, then put both exact identities in PendingOriginal; decoded frames retire
-    // HLS, while a failed open restores its client-side route snapshot and retires this unproven
-    // remux. Only the next HLS response establishes PMS-side cursor continuity.
-    let replacement = match prepare_original_remux(
-        ps,
-        &candidate,
-        expected,
-        offset_secs,
-        watched,
-        audio,
-        false,
-    )? {
-        OriginalRemux::Prepared(replacement, _outcome) => replacement,
-        // The server will not apply the params and the candidate direct-plays: the plain
-        // Original IS that direct play, exactly as the resolve's own fallback returns to it —
-        // when the server will serve its Part; otherwise the plain remux of the same Original.
-        OriginalRemux::RefusedToDirect => match admit_or_plain_remux(ps, &candidate, expected, cause) {
-            AdmitOrPlainRemux::Admitted => {
-                return recover_original_direct(
-                    ps,
-                    &candidate,
-                    expected,
-                    rollback,
-                    watched,
-                    cause,
-                    EnhancementOutcome::Refused,
-                );
-            }
-            AdmitOrPlainRemux::PlainRemux => {
-                let none = crate::playback::AudioEnhancements::NONE;
-                match prepare_original_remux(ps, &candidate, expected, offset_secs, watched, none, true)?
-                {
-                    OriginalRemux::Prepared(replacement, _outcome) => replacement,
-                    OriginalRemux::RefusedToDirect => return None,
-                }
-            }
-        },
-    };
-    rollback.replacement_encoder = replacement;
-    set_pending_original(ps, rollback, automatic);
-    crate::player::clear_original_failure();
-    crate::player::log(match cause {
-        RecoveryCause::Automatic => "auto: recovered Original remux; HLS encoder held pending frames",
-        RecoveryCause::ManualOriginal => {
-            "quality: Original restored remux; HLS encoder held pending frames"
-        }
-        RecoveryCause::EnhancementReleased => {
-            "enhancement: released to Original remux; previous encoder held pending frames"
-        }
-    });
-        Some(AutoOriginalReload::Remux)
+    // The remux replacement WAS a Plex `/decision` registration plus its `start.mkv` publish;
+    // the wire half is gone with the Plex transcoder, so a remux recovery cannot be built. Fail
+    // with the held route untouched — on the only remaining backend this is exactly what the old
+    // call resolved to, since `prepare_original_remux` found no Plex client for its slot.
+    let _ = audio;
+    None
 }
 
 /// Whether the server will serve an Original's raw Part to this playback right now.
@@ -3979,45 +3595,17 @@ pub(crate) fn drop_original_recovery(ps: &PlaybackSession) {
     }
 }
 
-fn retire_replaced_encoder(ps: &PlaybackSession, encoder: String) {
-    if encoder.is_empty() || !ps.auto_fixture_base.is_empty() {
-        return;
-    }
-    let Some(client) = cur_client(ps) else { return };
-    let worker = encoder.clone();
-    if crate::task::spawn_small_keeping("abr-original-stop", move || {
-        let ok = client.transcode_stop(&worker);
-        crate::player::log(&format!(
-            "abr: retired superseded encoder after Original handoff ok={}",
-            ok as i32
-        ));
-    })
-    .is_none()
-    {
-        let _ = client.transcode_stop(&encoder);
-    }
+fn retire_replaced_encoder(_ps: &PlaybackSession, _encoder: String) {
+    // The stop this used to background was the Plex `/stop`, gone with the transcoder. The
+    // Jellyfin backend reaps its own quiet encoders, and a fixture never has one running.
 }
 
 /// The raw Part already exact-reuses `encoder`'s Streaming Resource. Stop only the physical HLS
 /// producer; keeping the resource alive is what lets the current body and every later seek remain
 /// admitted. [`scrobble_stop`] still owns the id in `ACTIVE_ENCODER` and closes it at teardown.
-fn retire_hls_encoder_keep_source(ps: &PlaybackSession, encoder: String) {
-    if encoder.is_empty() || !ps.auto_fixture_base.is_empty() {
-        return;
-    }
-    let Some(client) = cur_client(ps) else { return };
-    let worker = encoder.clone();
-    if crate::task::spawn_small_keeping("abr-original-physical-stop", move || {
-        let ok = client.transcode_stop_physical(&worker);
-        crate::player::log(&format!(
-            "abr: stopped HLS encoder while retaining Original resource ok={}",
-            ok as i32
-        ));
-    })
-    .is_none()
-    {
-        let _ = client.transcode_stop_physical(&encoder);
-    }
+fn retire_hls_encoder_keep_source(_ps: &PlaybackSession, _encoder: String) {
+    // The physical-only stop went with the Plex transcoder; without the wire there is no
+    // encoder identity this side could retire.
 }
 /// true while this playback is a server transcode (a live transcode session exists). Cheap
 /// in-place check — the pump polls it every tick, so no String clone here.
@@ -4108,25 +3696,10 @@ fn cur_client(ps: &PlaybackSession) -> Option<&'static crate::plex::Client> {
 pub(crate) fn cur_audio_sid(ps: &PlaybackSession) -> i64 {
     ps.cur_audio.as_ref().map_or(0, |a| a.sid)
 }
-/// The currently-playing item's Part id. Written once per item by `build_stream` from its own
-/// `part` argument. In-playback callers (audio switch, subtitle toggle, retranscode) want this;
-/// `build_stream` must pass its freshly-derived local instead, since this is not yet updated
-/// for the item being started.
-fn cur_part_id(ps: &PlaybackSession) -> i64 {
-    ps.cur_part_id
-}
 /// The stable app-owned playback generation (and the first encoder's PMS session id).
 pub(crate) fn sess(ps: &PlaybackSession) -> String {
     ps.sess.clone()
 }
-pub(crate) fn pq_id(ps: &PlaybackSession) -> String {
-    ps.pq_id.clone()
-}
-pub(crate) fn pq_item_id(ps: &PlaybackSession) -> String {
-    ps.pq_item_id.clone()
-}
-/// The streamed item's Media video/audio codec, so the player picks the H265 Load payload for a
-/// native HEVC direct-play and the matching audio codec.
 pub(crate) fn stream_vcodec(ps: &PlaybackSession) -> String {
     ps.stream_vcodec.clone()
 }
@@ -4352,7 +3925,6 @@ pub(crate) fn cur_enhancement_label(ps: &PlaybackSession) -> Option<&'static str
     match ps.cur_enhancement {
         EnhancementOutcome::Off => None,
         EnhancementOutcome::Applied => Some("applied"),
-        EnhancementOutcome::Unverified => Some("unverified"),
         EnhancementOutcome::Refused => Some("refused"),
     }
 }
@@ -4399,18 +3971,13 @@ pub(crate) fn ctxline_cptr(ps: &PlaybackSession) -> *const c_char {
     ps.ctxline.as_ptr()
 }
 struct ScrobbleWork {
-    client: Option<&'static crate::plex::Client>,
-    /// The Jellyfin client when the playback came from the Jellyfin backend — captured at the
-    /// same spawn site and under the same "current is the origin" caveat as `client` (a jellyfin
+    /// The Jellyfin client when the playback came from the Jellyfin backend — the only backend
+    /// there is. Captured at the spawn site under the "current is the origin" caveat (a jellyfin
     /// install has exactly one server, so cur IS the origin for the life of this flavor).
     jf_client: Option<&'static crate::jellyfin::JfClient>,
     final_report: Option<(String, i64, i64)>,
     report_th: Option<std::thread::JoinHandle<()>>,
     session: String,
-    play_queue_id: String,
-    play_queue_item_id: String,
-    audio_stream_id: i64,
-    subtitle_stream_id: i64,
     transcode_session: String,
     timeline_stop: Option<TimelineStopCompletion>,
 }
@@ -4425,40 +3992,26 @@ impl ScrobbleWork {
             crate::task::join("timeline", t);
         }
         if let Some((rk, t_ms, d_ms)) = self.final_report.take() {
-            let ok = {
-                let _effect = TIMELINE_EFFECT.lock().unwrap_or_else(|e| e.into_inner());
-                // The final `stopped` report, on whichever backend the playback came from.
-                // `session` is already tsession-when-set (the capture in `scrobble_stop`), which
-                // on the Jellyfin side is the PlaySessionId rule `jellyfin::profile` states.
-                if let Some(jc) = self.jf_client {
-                    let ok = jc.session_stopped(&rk, t_ms, &self.session);
-                    crate::log(&format!(
-                        "timeline stopped t={}s/{}s ok={}",
-                        t_ms / 1000,
-                        d_ms / 1000,
-                        ok as i32,
-                    ));
-                    return;
-                }
-                self.client.is_some_and(|c| {
-                    c.timeline(&crate::plex::TimelineReport {
-                        rating_key: &rk,
-                        state: crate::playback::TimelineState::Stopped,
-                        time_ms: t_ms,
-                        duration_ms: d_ms,
-                        session: &self.session,
-                        play_queue_id: &self.play_queue_id,
-                        play_queue_item_id: &self.play_queue_item_id,
-                        audio_stream_id: self.audio_stream_id,
-                        subtitle_stream_id: self.subtitle_stream_id,
-                    })
-                })
-            };
+            let _effect = TIMELINE_EFFECT.lock().unwrap_or_else(|e| e.into_inner());
+            // The final `stopped` report. `session` is already tsession-when-set (the capture in
+            // `scrobble_stop`), which on the Jellyfin side is the PlaySessionId rule
+            // `jellyfin::profile` states. The Plex arm of this report went with the Plex
+            // transcoder; without a Jellyfin client (host fixtures) there is no wire, and the
+            // honest line is the ok=0 it used to resolve to.
+            if let Some(jc) = self.jf_client {
+                let ok = jc.session_stopped(&rk, t_ms, &self.session);
+                crate::log(&format!(
+                    "timeline stopped t={}s/{}s ok={}",
+                    t_ms / 1000,
+                    d_ms / 1000,
+                    ok as i32,
+                ));
+                return;
+            }
             crate::log(&format!(
-                "timeline stopped t={}s/{}s ok={}",
+                "timeline stopped t={}s/{}s ok=0",
                 t_ms / 1000,
                 d_ms / 1000,
-                ok as i32,
             ));
         }
         // This is the semantic publication boundary: old reporter joined, then old stopped was
@@ -4471,16 +4024,9 @@ impl ScrobbleWork {
             // The server-side encoder kill, on whichever backend holds the session. Jellyfin's
             // is a best-effort DELETE (the server reaps a quiet HLS encoder on its own); Plex's
             // is the transcode-session stop.
-            let ok = if let Some(jc) = self.jf_client {
-                jc.stop_active_encodings(&self.transcode_session)
-            } else {
-                self.client
-                    .is_some_and(|c| c.transcode_stop(&self.transcode_session))
-            };
-            #[cfg(any())]
             let ok = self
-                .client
-                .is_some_and(|c| c.transcode_stop(&self.transcode_session));
+                .jf_client
+                .is_some_and(|jc| jc.stop_active_encodings(&self.transcode_session));
             crate::log(&format!("transcode stopped ok={}", ok as i32));
         }
     }
@@ -4507,8 +4053,7 @@ pub(crate) fn scrobble_stop(
     if preview_request(ps) {
         return;
     }
-    let (logical_session, pq, pqi) = (sess(ps), pq_id(ps), pq_item_id(ps));
-    let (aud, sub) = (cur_audio_sid(ps), cur_sub_sid(ps)); // the selection this playback reported under
+    let logical_session = sess(ps);
     let tsession = take_active_encoder();
     let session = if tsession.is_empty() {
         logical_session
@@ -4526,12 +4071,9 @@ pub(crate) fn scrobble_stop(
     if final_report.is_none() && tsession.is_empty() && report_th.is_none() {
         return; // nothing to post and nobody to wait for
     }
-    // The server this playback came FROM, not whichever one is current — the resume point and the
-    // transcode session both live there, and by the time a stop runs the user may well have walked
-    // back to a different source's Home.
-    let client = cur_client(ps);
-    // The Jellyfin backend's client lives outside the Plex registry, so `cur_client` above can
-    // never resolve it; capture it under the same origin rule (one server per jellyfin install).
+    // The server this playback came FROM — the resume point and the transcode session both
+    // live there, and by the time a stop runs the user may well have walked back to a different
+    // source's Home. One backend: the Jellyfin client lives outside the (Plex) registry.
     let jf_client = if cur_sid(ps) == crate::jellyfin::SERVER_ID {
         crate::jellyfin::client()
     } else {
@@ -4544,15 +4086,10 @@ pub(crate) fn scrobble_stop(
     let timeline_stop =
         (final_report.is_some() || report_th.is_some()).then(|| TIMELINE_STOP_FENCE.announce());
     let work = std::sync::Arc::new(std::sync::Mutex::new(Some(ScrobbleWork {
-        client,
         jf_client,
         final_report,
         report_th,
         session,
-        play_queue_id: pq,
-        play_queue_item_id: pqi,
-        audio_stream_id: aud,
-        subtitle_stream_id: sub,
         transcode_session: tsession,
         timeline_stop,
     })));
@@ -4902,7 +4439,7 @@ use crate::cbuf::set as set_c; // shared fixed-C-buffer write (the session's HUD
 /// The playback-quality ladder: **Auto, Original, and a few fixed rungs**, and every rung is a ROUTING POLICY
 /// before it is a parameter.
 ///
-/// # Why this is not a bitrate field on [`crate::plex::TranscodeSpec`]
+/// # Why this is not a bitrate field on [`crate::playback::EncodeContract`]
 ///
 /// That is the shape this began as, and it does nothing for the one file it exists for.
 /// [`build_stream`] picks direct play → remux → re-encode BEFORE any spec is built, and only the
@@ -4910,8 +4447,8 @@ use crate::cbuf::set as set_c; // shared fixed-C-buffer write (the session's HUD
 /// bytes with no encoder anywhere to read a cap, and a remux copies the codecs and deliberately
 /// sends no cap at all (a cap is exactly what would force the re-encode it exists to avoid). So a
 /// 30 Mbit/s source on a 4 Mbit/s link — the case the whole feature is about — direct-plays
-/// straight past a number set on the spec, and the user who picked "4 Mbps" sees no change
-/// whatsoever. `plex::params`' own doc argued this out for a LINK ceiling long before there was a
+/// straight past a number set on the contract, and the user who picked "4 Mbps" sees no change
+/// whatsoever. The relay-policy doc argued this out for a LINK ceiling long before there was a
 /// user-chosen one, and the argument transfers unchanged.
 ///
 /// So a rung is spent the way [`crate::plex::link_policy`] spends the relay tier: **deny the two
@@ -5503,24 +5040,6 @@ fn apply_quality_choice(ps: &mut PlaybackSession, q: Quality) {
 /// in-playback callers pass [`cur_sid`]. A `Part.id` is server-local, so a PUT sent to the wrong
 /// one either 404s or, worse, re-selects streams on a stranger's part that happens to share the
 /// number.
-pub(super) fn put_selection(sid: ServerId, part: i64, aud: i64, sub: i64) {
-    if part <= 0 {
-        return;
-    }
-    let c = match crate::registry::client_for(sid) {
-        Some(c) => c,
-        None => return,
-    };
-    let st = c.select_streams(&crate::plex::StreamSelection {
-        part_id: part,
-        audio_stream_id: aud,
-        subtitle_stream_id: sub,
-    });
-    crate::player::log(&format!(
-        "select streams: part={part} audio={aud} sub={sub} -> HTTP {st}"
-    ));
-}
-
 /// The queued next episode. Main-thread only, and — like `metadata::playing()` (via
 /// `MetadataView`, which hands out a `&'a` borrow of the owner's state) — it hands out a
 /// reference the Up Next control reads across a frame, so `apply_plan` (main thread) staying its
@@ -5652,35 +5171,8 @@ static PLAY_SLOT: Mutex<Option<PlayLanding>> = Mutex::new(None);
 /// later Play can therefore never donate an old movie's position to the next landing.
 static PLAY_RESUME: Mutex<Option<(u32, i64)>> = Mutex::new(None);
 
-fn retire_plan_resources(resources: AbandonedPlanResources) {
-    let Some(client) = crate::registry::client_for(resources.sid) else {
-        return;
-    };
-    let worker_ids = resources.identities.clone();
-    if !crate::task::spawn_small("resolve-abandoned-stop", move || {
-        for identity in worker_ids {
-            let _ = client.transcode_stop(&identity);
-        }
-    }) {
-        // Thread creation failure is rarer than cancellation and must not turn into a permanent
-        // server allocation. The normal path above keeps this network work off the main thread.
-        for identity in resources.identities {
-            let _ = client.transcode_stop(&identity);
-        }
-    }
-}
-
 /// Retire every exact PMS identity created by a resolve that will never be installed.
 ///
-/// A cold Remote probe can admit a Streaming Resource under `Plan::sess` before the plan owns an
-/// engine, and a transcode plan additionally owns `Plan::tsession`. Generation cancellation only
-/// decides whether the UI may install the value; it does not make either server object disappear.
-fn retire_abandoned_plan(plan: Plan) {
-    if let Some(resources) = abandoned_plan_resources(&plan) {
-        retire_plan_resources(resources);
-    }
-}
-
 /// True while a resolve is in flight — the HUD renders `PlaybackState::Resolving` from this.
 pub(crate) fn play_pending() -> bool {
     PLAY_BUSY.load(Ordering::SeqCst)
@@ -5908,23 +5400,18 @@ fn request_play_inner(
             plan,
             rk,
         };
-        let abandoned = {
+        {
+            // The mailbox dance keeps the slot MONOTONE: a newer resolve replaces an older
+            // unconsumed landing, supersession before publication installs nothing, and an even
+            // newer unconsumed landing already owns the slot. The dropped plan's server objects
+            // were the abandoned-stop worker's business; that stop was the Plex `/stop`, gone
+            // with the wire layer (a quiet Jellyfin encoder is reaped by the server).
             let mut slot = PLAY_SLOT.lock().unwrap_or_else(|e| e.into_inner());
-            if gen != PLAY_GEN.load(Ordering::SeqCst) {
-                // Cancellation/supersession happened before publication. There may be no player
-                // screen left to pump this landing later, so the worker owns its cleanup now.
-                Some(landing.plan)
-            } else if slot.as_ref().map(|old| old.gen < gen).unwrap_or(true) {
-                // MONOTONE: a newer resolve replaces an older unconsumed landing, and takes over
-                // the mailbox only after taking responsibility for that plan's server objects.
-                slot.replace(landing).map(|old| old.plan)
-            } else {
-                // An even newer unconsumed landing already owns the slot.
-                Some(landing.plan)
+            if gen == PLAY_GEN.load(Ordering::SeqCst)
+                && slot.as_ref().map(|old| old.gen < gen).unwrap_or(true)
+            {
+                slot.replace(landing);
             }
-        };
-        if let Some(plan) = abandoned {
-            retire_abandoned_plan(plan);
         }
     });
     if !spawned {
@@ -6118,7 +5605,9 @@ pub(crate) fn request_play_up_next(ps: &mut PlaybackSession, meta: &mut crate::s
 pub(crate) fn cancel_play(ps: &mut PlaybackSession) {
     PLAY_GEN.fetch_add(1, Ordering::SeqCst);
     PLAY_BUSY.store(false, Ordering::SeqCst);
-    let abandoned = PLAY_SLOT.lock().unwrap_or_else(|e| e.into_inner()).take();
+    // Take the landing so a late plan can never land past this cancel; its plan needed no
+    // retirement (see the resolve worker's mailbox comment above).
+    PLAY_SLOT.lock().unwrap_or_else(|e| e.into_inner()).take();
     *PLAY_RESUME.lock().unwrap_or_else(|e| e.into_inner()) = None;
     // …and the refusal, because this is the statement that the withdrawn RESOLVE is over. Do not
     // clear the playback trace here: background suspend calls this to prevent a late plan landing,
@@ -6126,9 +5615,6 @@ pub(crate) fn cancel_play(ps: &mut PlaybackSession) {
     // attempt and clears it.
     clear_play_verdict(ps);
     cancel_playback_request(ps, has_url(ps));
-    if let Some(landing) = abandoned {
-        retire_abandoned_plan(landing.plan);
-    }
 }
 
 /// MAIN THREAD, once a frame. Returns the generation-owned resume point when a playable fresh plan
@@ -6150,8 +5636,7 @@ pub(crate) fn pump_play(ps: &mut PlaybackSession, meta: &mut crate::stores::meta
         if resume.as_ref().is_some_and(|(owner, _)| *owner == gen) {
             *resume = None;
         }
-        retire_abandoned_plan(plan);
-        return None; // superseded while in flight
+return None; // superseded while in flight
     }
     if contract_revision != desired_contract_revision() {
         PLAY_BUSY.store(false, Ordering::SeqCst);
@@ -6161,7 +5646,6 @@ pub(crate) fn pump_play(ps: &mut PlaybackSession, meta: &mut crate::stores::meta
         };
         let request = ps.request.clone();
         let retry = current_retry_context(ps, resume_ns);
-        retire_abandoned_plan(plan);
         if let Some(request) = request {
             crate::player::log(
                 "playback resolve: desired contract changed in flight; discarding and resolving the latest contract",
@@ -6177,15 +5661,11 @@ pub(crate) fn pump_play(ps: &mut PlaybackSession, meta: &mut crate::stores::meta
     // A refusing `/decision` is a real landing (its verdict must still be installed for the error
     // read-out), but it has no Engine and therefore no ACTIVE_ENCODER/scrobble owner. The cold
     // source probe or the decision itself may already have registered the logical resource.
-    let refused_resources = (!ok).then(|| abandoned_plan_resources(&plan)).flatten();
     let resume_ns = {
         let mut resume = PLAY_RESUME.lock().unwrap_or_else(|e| e.into_inner());
         take_resume_for(&mut resume, gen)
     };
     let _start = apply_plan(ps, meta, plan, &rk);
-    if let Some(resources) = refused_resources {
-        retire_plan_resources(resources);
-    }
     // Warm the next episode's still NOW rather than at first draw. The URL has been known since
     // this plan resolved — tens of minutes before the credits — and the fetch is async, so touching
     // it here costs nothing and spares the control a skeleton for one image-transcode round trip at
@@ -6317,12 +5797,9 @@ fn apply_plan(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::Meta
             // and any later transcode of this item all agree with what the renderer is told below
             cur_sub_sid: plan.sub_sid,
             cur_sub_pref_lang: plan.sub_pref_lang,
-            cur_part_id: plan.part_id,
             sess: plan.sess,
             machine_id,
             machine_sid,
-            pq_id: plan.pq_id,
-            pq_item_id: plan.pq_item_id,
             src_vcodec,
             src_acodec,
             stream_vcodec,
@@ -6385,140 +5862,6 @@ fn apply_plan(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::Meta
     // the rule instead.
     crate::ui::idle::invalidate();
     start
-}
-
-/// What [`prepare_original_remux`] published (`None` from it = the recovery failed and the held
-/// route is untouched).
-enum OriginalRemux {
-    /// The remux replacement's encoder session, registered and published, with the
-    /// [`EnhancementOutcome`] it was graded and already written to `ps.cur_enhancement` — the
-    /// caller does not need to (and must not) grade it again.
-    Prepared(String, EnhancementOutcome),
-    /// The server would not apply the enhancement and the candidate direct-plays: nothing was
-    /// published, and the plain Original is the direct play the caller now installs as `Refused`.
-    RefusedToDirect,
-}
-
-/// Register and publish a codec-preserving Original remux without retiring `expected_hls`.
-/// `PendingOriginal` owns the two-session commit/rollback after this returns. `audio` is the
-/// recovery's own [`recovery_flavour`] (issue #266): `NONE` for the plain remux, else the params
-/// the enhanced Original carries. `known_refused` is set by the caller when this exact playback
-/// already had an enhancement refused earlier in the same recovery attempt (the direct-play retry
-/// that reaches here with `audio` forced to `NONE`) — the plain remux this call now prepares
-/// carries no params of its own to refuse, but it exists only because the server would not honour
-/// the ask, so it must still grade `Refused` rather than `Off`.
-fn prepare_original_remux(
-    ps: &mut PlaybackSession,
-    candidate: &AutoOriginalCandidate,
-    expected: &WorkerTicket,
-    offset_secs: i64,
-    watched: bool,
-    audio: crate::playback::AudioEnhancements,
-    known_refused: bool,
-) -> Option<OriginalRemux> {
-    let c = cur_client(ps)?;
-    let rk = cur_rk(ps);
-    let expected_hls = expected.encoder();
-    if rk.is_empty() || expected_hls.is_empty() {
-        return None;
-    }
-    // The replacement must have its own exact physical/resource identity. Reusing `sess()` can
-    // equal the initial HLS encoder and would mutate the very rollback this handoff promises to
-    // retain; a fresh child also makes a failed remux safe to stop without touching HLS.
-    let logical_session = sess(ps);
-    let namespace = if logical_session.is_empty() {
-        expected_hls
-    } else {
-        logical_session.as_str()
-    };
-    let replacement = next_encoder_session(namespace);
-    let subtitle = cur_sub_sid(ps);
-    let candidate_audio_sid = candidate.audio.as_ref().map_or(0, |a| a.sid);
-    put_selection(cur_sid(ps), cur_part_id(ps), candidate_audio_sid, subtitle);
-    let spec_for = |audio| {
-        transcode_spec(
-            &rk,
-            &replacement,
-            &replacement,
-            crate::playback::TranscodeOffset::from_seconds(offset_secs.max(0)),
-            candidate_audio_sid,
-            subtitle,
-            enhanced_remux_contract(audio),
-        )
-    };
-    let mut audio = audio;
-    let mut spec = spec_for(audio);
-    let mut decision = c.transcode_decision(&spec);
-    let mut enhancement_refused = false;
-    // A refused or ignored enhancement must not strand the recovery: the candidate's plain
-    // Original is still the route this recovery exists to reach. Fall back once, exactly as the
-    // resolve and the remote preflight do, and record `Refused` so no reconcile asks this server
-    // again this playback. Nothing enhanced was fetched, so re-deciding on the same replacement
-    // session replaces its registration; a direct candidate needs no remux at all.
-    if enhancement_fallback(decision.as_ref(), audio) == Fallback::Retry {
-        note_enhancement_refused(" in Original recovery; fell back", audio);
-        if candidate.direct {
-            let _ = c.transcode_stop(&replacement);
-            return Some(OriginalRemux::RefusedToDirect);
-        }
-        enhancement_refused = true;
-        audio = crate::playback::AudioEnhancements::NONE;
-        spec = spec_for(audio);
-        decision = c.transcode_decision(&spec);
-    }
-    if let Some(reason) = decision.as_ref().and_then(refusal) {
-        crate::player::log(&format!(
-            "abr: Original remux decision refused{}",
-            if reason.is_empty() {
-                ""
-            } else {
-                ": server supplied a reason"
-            },
-        ));
-        let _ = c.transcode_stop(&replacement);
-        return None;
-    }
-    let output_codecs = decision.as_ref().and_then(decision_codecs).unwrap_or_else(|| {
-        (
-            candidate.vcodec.clone(),
-            if audio.any() {
-                // I4: an enhanced remux re-encodes the audio; the profile's first target is what
-                // arrives, and the source codec here would be silent audio.
-                "ac3".to_owned()
-            } else {
-                // Server-default candidate: the file's own default codec, as the direct-play twin.
-                candidate.audio.as_ref().map_or_else(|| ps.src_acodec.clone(), |a| a.codec.clone())
-            },
-        )
-    });
-    let enhancement = if enhancement_refused || known_refused {
-        EnhancementOutcome::Refused
-    } else {
-        classify_outcome(decision.as_ref(), candidate.audio.as_ref(), audio)
-    };
-    let url = c.transcode_start_url(&spec).to_url();
-    if replace_active_encoder_for(expected, &replacement).is_none() {
-        let _ = c.transcode_stop(&replacement);
-        return None;
-    }
-    { let s = &mut *ps; {
-        s.url = url;
-        s.tsession = replacement.clone();
-        s.cur_contract = enhanced_remux_contract(audio);
-        s.cur_enhancement = enhancement;
-        s.cur_auto_original_watched = watched;
-        s.cur_audio = candidate.audio.clone();
-        s.stream_vcodec = output_codecs.0.clone();
-        s.stream_acodec = output_codecs.1.clone();
-        s.stream_fps = 0.0;
-        clear_output_dv(s);
-        s.stream_immersive = false;
-    } };
-    crate::player::log(&format!(
-        "decision output: v={} a={}",
-        output_codecs.0, output_codecs.1
-    ));
-    Some(OriginalRemux::Prepared(replacement, enhancement))
 }
 
 /// Re-transcode the current item (the session's `cur_rk`) at `offset_secs`, carrying the CURRENT
@@ -6641,171 +5984,6 @@ fn jellyfin_retranscode_as(
     Some(url)
 }
 
-fn retranscode_as(
-    ps: &mut PlaybackSession,
-    expected: &WorkerTicket,
-    offset_secs: i64,
-    contract: crate::playback::EncodeContract,
-) -> Option<String> {
-
-    if forced_direct_play(ps) { return None; }
-    let c = cur_client(ps)?;
-    let rk = cur_rk(ps);
-    if rk.is_empty() || !is_worker_ticket_current(expected) {
-        return None;
-    }
-    // Snapshot the desired contract, but publish none of it before PMS has answered and the full
-    // worker/action ticket still owns the route. This prevents a failed `/decision` from making
-    // diagnostics claim the requested 22 Mbps while the old 1.1 Mbps encoder still serves bytes.
-    let crate::playback::EncodeContract {
-        remux,
-        delivery,
-        ceiling,
-        audio,
-        ..
-    } = contract;
-    let audio_sid = cur_audio_sid(ps);
-    let subtitle_sid = cur_sub_sid(ps);
-    let (fallback_vcodec, fallback_acodec) = if remux {
-        (
-            ps.src_vcodec.clone(),
-            if audio.any() {
-                // I4: the enhanced audio is re-encoded to the profile's first target; the source
-                // codec here would describe bytes that never arrive (silent audio).
-                "ac3".to_owned()
-            } else {
-                // A plain remux copies the carried track; server default falls back to the file's.
-                ps.cur_audio
-                    .as_ref()
-                    .filter(|a| !a.codec.is_empty())
-                    .map_or_else(|| ps.src_acodec.clone(), |a| a.codec.clone())
-            },
-        )
-    } else if matches!(delivery, crate::playback::TranscodeDelivery::FixedHls { .. }) {
-        ("h264".to_owned(), "aac".to_owned())
-    } else {
-        (
-            crate::devcaps::caps().encode_vcodec().to_owned(),
-            "ac3".to_owned(),
-        )
-    };
-    put_selection(cur_sid(ps), cur_part_id(ps), audio_sid, subtitle_sid); // drives encode + burn
-    let logical = sess(ps);
-    let namespace = if logical.is_empty() {
-        format!("butaca-{rk}")
-    } else {
-        logical
-    };
-    let qsess = next_encoder_session(&namespace);
-    let sp = transcode_spec(
-        &rk,
-        &qsess,
-        &qsess,
-        crate::playback::TranscodeOffset::from_seconds(offset_secs.max(0)),
-        audio_sid,
-        subtitle_sid,
-        contract,
-    );
-    let Some(decision) = c.transcode_decision(&sp) else {
-        let _ = c.transcode_stop(&qsess);
-        return None;
-    };
-    // A live toggle the server refuses (or silently ignores — audio `copy` despite the params)
-    // is a rejected action: the current stream is retained and the menu shows what plays.
-    if enhancement_fallback(Some(&decision), audio) == Fallback::Retry {
-        note_enhancement_refused("; current stream retained", audio);
-        let _ = c.transcode_stop(&qsess);
-        return None;
-    }
-    if let Some(reason) = refusal(&decision) {
-        crate::player::log(&format!(
-            "retranscode decision refused{}",
-            if reason.is_empty() {
-                ""
-            } else {
-                ": server supplied a reason"
-            },
-        ));
-        let _ = c.transcode_stop(&qsess);
-        return None;
-    }
-    let output_codecs = decision_codecs(&decision).unwrap_or((fallback_vcodec, fallback_acodec));
-    let url = c.transcode_start_url(&sp).to_url();
-    let replacement_installed = match (delivery, ceiling.and_then(crate::abr::Rung::from_ceiling)) {
-        (crate::playback::TranscodeDelivery::FixedHls { .. }, Some(rung)) => {
-            replace_active_hls_for(expected, &qsess, &url, rung, None).is_some()
-        }
-        _ => replace_active_encoder_for(expected, &qsess).is_some(),
-    };
-    if !replacement_installed {
-        // A concurrent ABR commit or teardown won while the decision request was in flight. Do not
-        // reload onto a session which no longer belongs to this playback generation.
-        let _ = c.transcode_stop(&qsess);
-        return None;
-    }
-    let expected_encoder = expected.encoder().to_owned();
-    let enhancement = classify_outcome(Some(&decision), ps.cur_audio.as_ref(), audio);
-    { let s = &mut *ps; {
-        s.cur_contract = contract;
-        s.cur_enhancement = enhancement;
-        s.tsession = qsess.clone();
-        s.url = url.clone();
-        s.stream_vcodec = output_codecs.0.clone();
-        s.stream_acodec = output_codecs.1.clone();
-        s.stream_fps = 0.0;
-        clear_output_dv(s);
-        s.stream_immersive = false;
-    } };
-    crate::player::log(&format!(
-        "decision output: v={} a={}",
-        output_codecs.0, output_codecs.1,
-    ));
-    // A harness-readable statement of what actually took effect, distinct from the ask: only
-    // `Applied` means the server demonstrably ran the params (`EnhancementOutcome`'s own doc), so
-    // an on-device case grading a live toggle has one line to key on instead of inferring the
-    // outcome from the codec/URL lines above.
-    if matches!(enhancement, EnhancementOutcome::Applied) {
-        crate::player::log(&format!(
-            "enhancement: applied boost={} loudness={}",
-            i32::from(audio.boost_dialog),
-            i32::from(audio.normalize_loudness),
-        ));
-    }
-    if !expected_encoder.is_empty() && expected_encoder != qsess {
-        let old = expected_encoder;
-        let worker_old = old.clone();
-        if crate::task::spawn_small_keeping("retranscode-stop", move || {
-            let _ = c.transcode_stop(&worker_old);
-        })
-        .is_none()
-        {
-            let _ = c.transcode_stop(&old);
-        }
-    }
-    // NEVER log the URL. `transcode_start_url` ends in `X-Plex-Token=…`, and this line is reached
-    // by an ordinary audio-track switch — so the app's own support channel ("send us
-    // /tmp/butaca-events.log") was asking users to paste a live PMS credential into a public
-    // issue thread. The rk, the track ids and the offset are the whole diagnostic value here; the
-    // URL added nothing that is not derivable from them.
-    crate::player::log(&format!(
-        "retranscode rk={rk} audio={} sub={} offset={offset_secs} -> transcode start",
-        audio_sid, subtitle_sid
-    ));
-    Some(url)
-}
-
-// ---- issue #266: the live audio-enhancement state machine ------------------------------------
-//
-// The enhancement decorates the Original route: turning it on makes a Direct/Remux playback an
-// enhanced remux, turning it off (or losing the offer — a subtitle, a track the server cannot
-// analyse) returns it to the frozen `AutoOriginalCandidate`. Every mid-play change funnels through
-// ONE reconcile which only ever queues `UserRouteIntent::Retranscode`; the claim then asks
-// `enhancement_step` what "Retranscode" means NOW. Deciding at claim rather than at the click is
-// what lets several quick picks and toggles coalesce into the route their final state describes,
-// with the merge table left exactly as it was.
-
-/// The family of the route playing NOW (see [`RouteFamily`]). Mid-play code and the menu pass
-/// this; the resolve and recovery pass the family of the route they are building instead.
 pub(super) fn live_family(ps: &PlaybackSession) -> RouteFamily {
     if !is_transcoding(ps) {
         RouteFamily::Direct
@@ -7075,9 +6253,10 @@ pub(crate) fn execute_retranscode_claim(
             RecoveryCause::EnhancementReleased,
         )
         .map(ClaimTail::Original),
-        ClaimPrimary::Remux(contract) => {
-            retranscode_as(ps, expected, offset_secs, contract).map(|_| ClaimTail::Retranscode)
-        }
+        // The enhanced remux was a Plex `/decision` re-registration; the wire is gone, so this
+        // primary can no longer be honoured. Unreachable on the remaining backend: the offer is
+        // gated on the server's subscription state, which the Jellyfin slot never reports as Yes.
+        ClaimPrimary::Remux(_) => None,
         ClaimPrimary::Legacy => run_legacy(ps, expected, offset_secs),
         ClaimPrimary::Retranscode => {
             retranscode_for(ps, expected, offset_secs).map(|_| ClaimTail::Retranscode)
@@ -7201,9 +6380,6 @@ pub(crate) struct EnhTestFixture {
     pub(crate) subtitle_shown: bool,
     /// This playback's server already refused or ignored the params once.
     pub(crate) refused: bool,
-    /// The server never answered (an unreachable decision — `classify_outcome`'s `Unverified`).
-    /// Takes precedence over `applied.any()` alone, but `refused` wins if both are set.
-    pub(crate) unverified: bool,
     /// The contract's own `audio` — what the live route has actually applied.
     pub(crate) applied: crate::playback::AudioEnhancements,
     /// Force `displayed_audio_enhancements`'s in-flight branch (a user edit queued, not yet
@@ -7222,7 +6398,6 @@ impl Default for EnhTestFixture {
             carried_capable: Some(true),
             subtitle_shown: false,
             refused: false,
-            unverified: false,
             applied: crate::playback::AudioEnhancements::NONE,
             in_flight: false,
         }
@@ -7239,8 +6414,6 @@ pub(crate) fn enhancement_test_session(route: EnhTestFixture) -> (PlaybackSessio
     ps.cur_sub_sid = if route.subtitle_shown { 999 } else { 0 };
     ps.cur_enhancement = if route.refused {
         EnhancementOutcome::Refused
-    } else if route.unverified {
-        EnhancementOutcome::Unverified
     } else if route.applied.any() {
         EnhancementOutcome::Applied
     } else {
@@ -7347,14 +6520,6 @@ pub(crate) fn commit_audio_selection(ps: &mut PlaybackSession, audio: CarriedAud
     let native = family == RouteFamily::Direct && direct_plays;
     let (ordinal, codec) = (audio.ordinal, audio.codec.clone());
     { let s = &mut *ps; s.cur_audio = Some(audio) };
-    if native {
-        // record the pick: the timeline then reports the stream that actually plays, and a
-        // later transcode event (subtitle burn refresh / transcode seek) keeps this track.
-        // persist the USER's pick server-side (official-client behavior): /status/sessions'
-        // selected-stream display keys on the part selection, not the timeline report. Only
-        // user picks persist — the start-of-play auto-pick (eng preference) reports only.
-        put_selection(cur_sid(ps), cur_part_id(ps), cur_audio_sid(ps), cur_sub_sid(ps));
-    }
     // The new track may change what the enhancement offer says (capability, candidate). If the
     // route must change for that, the reconcile's Retranscode REPLACES this pick's own reload and
     // is marked as owing it, so a refused enhancement still switches the track.
@@ -7443,9 +6608,6 @@ pub(crate) fn commit_subtitle_selection(
         // part of the applied stream contract. Publish projection + reporter tracks as one reducer
         // event so a later rejected action cannot restore the pre-subtitle snapshot.
         commit_in_place_route_projection(ps, false);
-        // persist the pick server-side (and subs Off PUTs subtitleStreamID=0, clearing a
-        // stale server-side selection that would otherwise burn on the next transcode)
-        put_selection(cur_sid(ps), cur_part_id(ps), cur_audio_sid(ps), cur_sub_sid(ps));
     }
     // A subtitle turns the enhancement's offer off (I6) and Off may turn it back on. On direct
     // play a subtitle never reloads, so there is no pick of its own to displace.
@@ -7469,11 +6631,6 @@ pub(crate) fn begin_timeline_reporting(ps: &PlaybackSession) -> Option<TimelineL
     let projection = TimelineProjection {
         sid: cur_sid(ps),
         rating_key: cur_rk(ps),
-        logical_session: sess(ps),
-        play_queue_id: pq_id(ps),
-        play_queue_item_id: pq_item_id(ps),
-        audio_stream_id: cur_audio_sid(ps),
-        subtitle_stream_id: cur_sub_sid(ps),
     };
     if projection.rating_key.is_empty() || !projection.sid.is_set() {
         return None;
@@ -7490,12 +6647,7 @@ pub(crate) fn begin_timeline_reporting(ps: &PlaybackSession) -> Option<TimelineL
 /// Linearize one worker sample against route replacement and engine teardown. No network work is
 /// done while the mutex is held. `None` permanently invalidates this reporter after its Engine is
 /// retired; transient Applying/Resolving phases skip a hybrid report without borrowing Session.
-fn timeline_snapshot(
-    lease: &TimelineLease,
-    state: crate::playback::TimelineState,
-    time_ms: i64,
-    duration_ms: i64,
-) -> Option<TimelineSnapshot> {
+fn timeline_snapshot(lease: &TimelineLease) -> Option<()> {
     let control = PLAYER_CONTROL.lock().unwrap_or_else(|e| e.into_inner());
     if control.engine_epoch != lease.engine_epoch {
         return None;
@@ -7506,24 +6658,7 @@ fn timeline_snapshot(
     ) {
         return None;
     }
-    let projection = control.timeline.as_ref()?;
-    let session = if control.active.id.is_empty() {
-        projection.logical_session.clone()
-    } else {
-        control.active.id.clone()
-    };
-    Some(TimelineSnapshot {
-        sid: projection.sid,
-        rating_key: projection.rating_key.clone(),
-        state,
-        time_ms,
-        duration_ms,
-        session,
-        play_queue_id: projection.play_queue_id.clone(),
-        play_queue_item_id: projection.play_queue_item_id.clone(),
-        audio_stream_id: projection.audio_stream_id,
-        subtitle_stream_id: projection.subtitle_stream_id,
-    })
+    control.timeline.as_ref().map(|_| ())
 }
 
 /// POST one periodic timeline update for an exact [`TimelineLease`]. After waiting for the stop
@@ -7531,48 +6666,17 @@ fn timeline_snapshot(
 /// server, item, PlayQueue and selected tracks together from [`PlayerControl`]; a stale Engine lease
 /// sends nothing. Final `Stopped` is emitted separately by [`ScrobbleWork`] from its owned teardown
 /// snapshot.
-pub(crate) fn report_timeline(
-    lease: &TimelineLease,
-    state: crate::playback::TimelineState,
-    t_ms: i64,
-    d_ms: i64,
-) -> bool {
+pub(crate) fn report_timeline(lease: &TimelineLease) -> bool {
     // This lease belongs to a replacement Engine only after every stop synchronously announced
     // before its publication has joined the old reporter and attempted old `stopped`. Old leases
     // captured an earlier generation and never wait on the stop worker which is joining them.
     TIMELINE_STOP_FENCE.wait(lease.required_stop);
     let _effect = TIMELINE_EFFECT.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(report) = timeline_snapshot(lease, state, t_ms, d_ms) else {
-        return false;
-    };
-    let c = match crate::registry::client_for(report.sid) {
-        Some(c) => c,
-        None => return true,
-    };
-    let ok = c.timeline(&crate::plex::TimelineReport {
-        rating_key: &report.rating_key,
-        state: report.state,
-        time_ms: report.time_ms,
-        duration_ms: report.duration_ms,
-        session: &report.session,
-        play_queue_id: &report.play_queue_id,
-        play_queue_item_id: &report.play_queue_item_id,
-        audio_stream_id: report.audio_stream_id,
-        subtitle_stream_id: report.subtitle_stream_id,
-    });
-    // FAILURES ONLY. The reporter thread logs `timeline <state> t=…s/…s` for every tick whichever
-    // way the POST went (`player::threads`), so a report the server never took looks exactly like
-    // one it did — for the whole length of a film, ten seconds at a time. The success half is
-    // already on that line and this runs at 0.1 Hz, so only the silence needs a line of its own.
-    if !ok {
-        crate::log(&format!(
-            "timeline post failed rk={} state={} t={}s",
-            report.rating_key,
-            report.state.as_str(),
-            report.time_ms / 1000,
-        ));
-    }
-    true
+    // The wire arm went with the Plex transcoder: this POST was the Plex `/:/timeline`, and
+    // the Jellyfin backend reports progress through its own session machinery. What stays is
+    // the gate (a stale Engine's reporter must stay silent across a teardown) and the fence/
+    // effect serialization around it.
+    timeline_snapshot(lease).is_some()
 }
 
 // ---------------------------------------------------------------------------------------

@@ -1470,59 +1470,6 @@ fn original_recovery_waits_for_the_hls_ceiling_not_a_timer() {
     );
 }
 
-/// A PMS request ceiling is not the delivered rendition.  The remote server can map every larger
-/// request to the same smaller encode; those completed candidates are then structurally rejected
-/// because they improve neither raster nor declared bandwidth.  Requiring the rejected actuator
-/// to become `current` makes Original recovery unreachable even though HLS has no experiment left
-/// and the direct-file request is a different, uncapped service path.
-#[test]
-fn an_exhausted_hls_frontier_allows_the_source_probe_below_the_top_rung() {
-    let mut controller = Controller::starting_at(Rung::P720, None, hd_catalog());
-    let observation = sample(20_000, 200, 20_000);
-
-    // Exercise and structurally rule out every larger HLS actuator without ever committing one.
-    // This is the controller state from the device trace: 20 Mbps was requested, PMS returned the
-    // same ~1.1 Mbps picture, and the strict quality gate correctly kept the current stream.
-    loop {
-        match controller.observe_next(observation) {
-            Decision::Prime(proposal) => {
-                assert_eq!(proposal.direction, Direction::Up);
-                assert!(controller.reject(
-                    proposal,
-                    RejectCause::Structural,
-                    controller.clock_ms(),
-                ));
-            }
-            Decision::Stay => break,
-        }
-    }
-    assert_eq!(controller.current(), Rung::P720);
-    assert_eq!(
-        controller.last_reason(),
-        Some(DecisionReason::Hls(HlsReason::RejectBackoff)),
-        "the fixture must end with every higher HLS experiment classified",
-    );
-
-    let current = controller.catalog().candidate(controller.current());
-    let hls = CapacityEstimate::from_prior(current.expected_wire_kbps);
-    assert!(
-        recovery(28_000)
-            .probe_due(
-                current,
-                controller.hls_frontier_exhausted(),
-                &idle_server(),
-                observation,
-                controller.prime_runway_ms(),
-                controller.buffer(),
-                &hls,
-                HOUR_MS,
-                controller.clock_ms(),
-            )
-            .is_ok(),
-        "a rejected request must not have to become current before direct Original can be measured",
-    );
-}
-
 /// A response that completed at exactly the requested HLS rate is a lower bound on service, never
 /// proof that no unused service exists.  It therefore cannot veto the source experiment.
 #[test]
