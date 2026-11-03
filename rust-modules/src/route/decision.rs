@@ -649,6 +649,7 @@ impl RecoveryCause {
     /// only add up to its own budget (`PART_ADMISSION_BUDGET`) of UI/feed block for a question
     /// already answered. `ManualOriginal` and `EnhancementReleased` fire from something the viewer
     /// just did, with no prior sample of this Part, so they still need to ask.
+    #[allow(dead_code)] // frozen until the wire layer goes
     fn needs_part_admission(self) -> bool {
         match self {
             RecoveryCause::Automatic => false,
@@ -2101,15 +2102,6 @@ fn observe_active_hls(
     }
 }
 
-#[cfg(test)]
-fn active_encoder() -> String {
-    PLAYER_CONTROL
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .active
-        .id
-        .clone()
-}
 
 // Dev-only: used only by the `#[cfg(feature = "devtriggers")]` tests in this module's `tests`
 // submodule below (see the comment on the first one).
@@ -2213,6 +2205,7 @@ pub(crate) struct PrimedHls {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum OriginalProbeResult {
+    #[allow(dead_code)] // frozen until the wire layer goes
     Measured(crate::curlio::ThroughputSample),
     /// The request reached no usable body. The client-side HLS route remained selected; PMS-side
     /// cursor continuity is not inferred. The outcome is telemetry, not a zero-capacity sample.
@@ -2221,6 +2214,7 @@ pub(crate) enum OriginalProbeResult {
     },
     /// The active route changed while the finite GET was in flight. Its bytes belong to an old
     /// resource epoch and cannot update the new worker's source evidence.
+    #[allow(dead_code)] // frozen until the wire layer goes
     Stale,
 }
 
@@ -2229,9 +2223,13 @@ pub(crate) enum OriginalProbeResult {
 /// connection into the same `Original check failed` sentence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum OriginalProbeFailure {
+    #[allow(dead_code)] // frozen until the wire layer goes
     HttpStatus(i32),
+    #[allow(dead_code)] // frozen until the wire layer goes
     Deadline,
+    #[allow(dead_code)] // frozen until the wire layer goes
     Transport,
+    #[allow(dead_code)] // frozen until the wire layer goes
     NoBody,
     Other,
 }
@@ -2305,14 +2303,6 @@ impl HlsAbrControl {
     /// from the same media boundary instead of asking that cursor for one more segment.
     // Dev-only: used only by the `#[cfg(feature = "devtriggers")]` tests in this module's `tests`
     // submodule below (see the comment on the first one).
-    #[cfg(all(test, feature = "devtriggers"))]
-    pub(crate) fn probe_original_while_hls(
-        &self,
-        expected: &WorkerTicket,
-        plan: crate::abr::SourceProbePlan,
-    ) -> OriginalProbeResult {
-        self.probe_original_while_hls_cancellable(expected, plan, || false)
-    }
 
     pub(crate) fn probe_original_while_hls_cancellable<F>(
         &self,
@@ -2323,57 +2313,10 @@ impl HlsAbrControl {
     where
         F: FnOnce() -> bool,
     {
-        use crate::curlio::{OpenErr, ThroughputFailure as Failure};
-        if !is_worker_ticket_current(expected) {
-            return OriginalProbeResult::Stale;
-        }
-        let url = if self.fixture_base.is_empty() {
-            let Some(client) = crate::registry::client_for(self.sid) else {
-                return OriginalProbeResult::Failed {
-                    failure: OriginalProbeFailure::Other,
-                };
-            };
-            client
-                .direct_play_url(&self.original_probe_part, expected.encoder())
-                .to_url()
-        } else {
-            self.original_probe_part.clone()
-        };
-                let sample = crate::curlio::sample_active_throughput_result(
-            &url,
-            plan.target_bytes,
-            std::time::Duration::from_millis(plan.budget_ms),
-            std::time::Duration::from_millis(plan.budget_ms),
-            cancelled,
-        );
-        if !is_worker_ticket_current(expected) {
-                        return OriginalProbeResult::Stale;
-        }
-        match sample {
-            Ok(sample) => {
-                                OriginalProbeResult::Measured(sample)
-            }
-            Err(failure) => {
-                let detail = match &failure {
-                    Failure::Open(OpenErr::Status(status)) => {
-                        OriginalProbeFailure::HttpStatus(*status)
-                    }
-                    Failure::Open(OpenErr::Deadline) | Failure::BodyDeadline => {
-                        OriginalProbeFailure::Deadline
-                    }
-                    Failure::Open(OpenErr::Transport(_) | OpenErr::Multi(_))
-                    | Failure::BodyRead { .. } => OriginalProbeFailure::Transport,
-                    Failure::NoBody { .. } => OriginalProbeFailure::NoBody,
-                    _ => OriginalProbeFailure::Other,
-                };
-                                crate::player::log(&format!(
-                    "abr: Original source request produced no capacity sample failure={failure:?}"
-                ));
-                OriginalProbeResult::Failed {
-                    failure: detail,
-                }
-            }
-        }
+        // The ABR original probe was a Plex capability: it measured the original file through
+        // the Plex client. Jellyfin playback stays on HLS, so the probe never measures.
+        let _ = (expected, plan, cancelled);
+        OriginalProbeResult::Failed { failure: OriginalProbeFailure::Other }
     }
 
     pub(crate) fn original_source_kbps(&self) -> u32 {
@@ -3095,13 +3038,16 @@ pub(crate) fn recover_auto_to_original_for(
 pub(super) enum PartAdmission {
     Admitted,
     /// Why not, for the log: the HTTP status, or the transport failure that stood for one.
+    #[allow(dead_code)] // frozen until the wire layer goes
     Refused(String),
 }
 
 /// Bytes the admission reads before it lets go: enough to prove a body arrives, nothing more.
+    #[allow(dead_code)] // frozen until the wire layer goes
 const PART_ADMISSION_BYTES: usize = 16 * 1024;
 /// Header and body budget, each. The claim this answers runs on the pump's main-thread PMS half
 /// beside a `/decision` call, so it is bounded well under the API timeout that call carries.
+    #[allow(dead_code)] // frozen until the wire layer goes
 const PART_ADMISSION_BUDGET: std::time::Duration = std::time::Duration::from_millis(1500);
 
 /// **Ask the server for the Original's Part on the exact identity the trial would open it on,
@@ -3135,37 +3081,9 @@ fn admit_original_part(
     expected: &WorkerTicket,
     cause: RecoveryCause,
 ) -> PartAdmission {
-    if !cause.needs_part_admission() || !candidate.probe_part.starts_with('/') {
-        return PartAdmission::Admitted;
-    }
-    let Some(client) = cur_client(ps) else {
-        return PartAdmission::Refused("no client for this server".into());
-    };
-    let url = client
-        .direct_play_url(&candidate.probe_part, expected.encoder())
-        .to_url();
-    use crate::curlio::{OpenErr, ThroughputFailure};
-    match crate::curlio::sample_throughput_result(
-        &url,
-        PART_ADMISSION_BYTES,
-        PART_ADMISSION_BUDGET,
-        PART_ADMISSION_BUDGET,
-    ) {
-        // Only the server's own answer refuses: a status it will not stream, or headers with no
-        // body behind them.
-        Err(ThroughputFailure::Open(OpenErr::Status(status))) => {
-            PartAdmission::Refused(format!("HTTP {status}"))
-        }
-        Err(failure @ ThroughputFailure::NoBody { .. }) => {
-            PartAdmission::Refused(format!("{failure:?}"))
-        }
-        // A body, a transport failure mid-read (`BodyRead`: the server answered with a status and
-        // then the connection died before delivering it), or no answer inside the budget (a slow
-        // server, no bounded client on this build): nothing here is the server's OWN refusal, so
-        // the trial's own open — with its rollback — stays the judge, exactly as before this
-        // admission existed.
-        Ok(_) | Err(_) => PartAdmission::Admitted,
-    }
+    // Jellyfin playback never needs a part admission probe: the HLS resource is the route.
+    let _ = (ps, candidate, expected, cause);
+    PartAdmission::Admitted
 }
 
 /// [`admit_or_plain_remux`]'s answer: either the Part is admitted and the caller's own plan
@@ -3216,14 +3134,7 @@ fn recover_original_direct(
     // The probe and the actual Part body must name the same exact Streaming Resource. A URL
     // left on the logical playback id can token-alias this HLS resource today, then fail a
     // later seek after cleanup because the alias choice is not durable.
-    let source_url = if candidate.probe_part.starts_with('/') {
-        let client = cur_client(ps)?;
-        client
-            .direct_play_url(&candidate.probe_part, expected_encoder)
-            .to_url()
-    } else {
-        candidate.url.clone()
-    };
+    let source_url = candidate.url.clone();
     // Keep the exact id as a source-resource owner, but remove its HLS route projection. On
     // decoded frames confirmation stops only the physical encoder; final teardown takes this
     // id and performs the full resource close.
@@ -3687,6 +3598,7 @@ pub(crate) fn cur_sid(ps: &PlaybackSession) -> ServerId {
 /// plan that never resolved). The main-thread twin of `client_for(env.sid)` on the resolve worker
 /// — every in-playback PMS call in this file goes through one of the two, and none through
 /// `client_opt()`, which answers with whatever server is CURRENT rather than the one playing.
+    #[allow(dead_code)] // frozen until the wire layer goes
 fn cur_client(ps: &PlaybackSession) -> Option<&'static crate::plex::Client> {
     crate::registry::client_for(cur_sid(ps))
 }

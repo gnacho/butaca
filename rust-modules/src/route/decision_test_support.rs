@@ -106,20 +106,6 @@ pub(super) fn unregistered_sid() -> ServerId {
     id
 }
 
-/// A `206 Partial Content` answer covering `[0, n)` of a `2n`-byte resource, body filled with
-/// `0x55` — the fixed "prove a Range GET works" shape every probe/admission fixture in this file
-/// used before this helper existed.
-pub(super) fn write_partial(socket: &mut std::net::TcpStream, n: usize) {
-    use std::io::Write;
-    write!(
-        socket,
-        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-{}/{}\r\nContent-Length: {n}\r\nConnection: close\r\n\r\n",
-        n.saturating_sub(1),
-        n.saturating_mul(2),
-    )
-    .expect("partial headers");
-    socket.write_all(&vec![0x55; n]).expect("partial body");
-}
 
 pub(super) fn fourk_item_with_subs(
     sid: ServerId,

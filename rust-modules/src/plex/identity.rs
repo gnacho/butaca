@@ -66,6 +66,7 @@ pub(crate) const PLATFORM: &str = "webOS";
 /// this replaces — the exact claim every release so far has made — rather than inventing an
 /// empty-string case no server has ever been shown. Safe by boot order: `webos::probe()` is the
 /// first call in `plex_run`, before SDL exists, so no PMS request can precede the read.
+    #[allow(dead_code)] // frozen until the wire layer goes
 pub(crate) fn platform_version() -> &'static str {
     let r = &crate::webos::info().release;
     if r.is_empty() {
@@ -83,6 +84,7 @@ pub(crate) fn language() -> Option<&'static str> {
 /// Device CLASS — what kind of thing this is. Generic on purpose: this app runs on any rooted
 /// webOS 4.x panel, not on the model it was developed against.
 pub(crate) const DEVICE: &str = "LG webOS TV";
+    #[allow(dead_code)] // frozen until the wire layer goes
 pub(crate) const MODEL: &str = "LG webOS TV";
 
 /// Who MADE the hardware. Canon-only since the plex.tv account surface went away: the
@@ -100,6 +102,7 @@ pub(crate) const VENDOR: &str = "LG";
 /// the account grows two entries spelled identically, and revoking "the one on the TV" is a
 /// coin flip. The shipped app's name is unchanged, which matters because it is already in every
 /// existing user's device list — a rename there would read as a new, unknown device.
+    #[allow(dead_code)] // frozen until the wire layer goes
 pub(crate) fn device_name() -> &'static str {
     static NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     NAME.get_or_init(|| match crate::paths::flavour() {
@@ -109,6 +112,7 @@ pub(crate) fn device_name() -> &'static str {
 }
 
 /// What this client offers the network. It plays; it is not a controller and not a server.
+    #[allow(dead_code)] // frozen until the wire layer goes
 pub(crate) const PROVIDES: &str = "player";
 
 /// The HTTP `User-Agent` for the libcurl transport (plex.tv + discover.provider.plex.tv).

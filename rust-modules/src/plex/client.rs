@@ -99,6 +99,7 @@ pub struct Client {
     //
     // What "fixed" was actually protecting is stability ACROSS RUNS, and the persisted UUID gives
     // that too, per install rather than per binary.
+    #[allow(dead_code)] // frozen until the wire layer goes
     pub(super) client_id: String, // X-Plex-Client-Identifier — stable device id (NEVER per-item)
     pub(super) product: String,   // "Butaca"
     pub(super) version: String,   // "0.1.0"
@@ -298,6 +299,7 @@ impl Client {
     ///
     /// `X-Plex-Language` is broader than this PLAYBACK-only query identity: [`pms_headers`]
     /// adds the resolved UI language to every PMS operation.
+    #[allow(dead_code)] // frozen until the wire layer goes
     pub(super) fn playback_identity(&self, q: QueryBuilder) -> QueryBuilder {
         q.str("X-Plex-Client-Identifier", &self.client_id)
             .str("X-Plex-Product", &self.product)
@@ -611,6 +613,7 @@ impl StreamUrl {
     /// plaintext origin, and correct for the two shapes that spelling could not express: an https
     /// origin, and a v6 literal (which must be BRACKETED in a URL and BARE at the resolver — see
     /// [`Origin`]).
+    #[allow(dead_code)] // frozen until the wire layer goes
     pub fn to_url(&self) -> String {
         format!("{}{}", self.origin.base(), self.path)
     }
