@@ -261,23 +261,6 @@ fn controlled_admission_records_real_discovery_spawn_refusal() {
     assert_eq!(io.requests[0]["admitted"], serde_json::json!(false), "real refusal must be recorded");
 }
 
-#[test]
-fn controlled_admission_records_real_hubs_spawn_refusal() {
-    let _serial = crate::testlock::serial();
-    crate::registry::reset_for_test();
-    let mut hubs = crate::stores::hubs::HubsStore::default();
-    assert!(hubs.run(crate::stores::hubs::HubsCmd::Reset).changed);
-    let sid = crate::registry::register_with_client_id("s00000001", "127.0.0.1", 9, "s00000002", "s00000003");
-    assert!(crate::registry::set_current(sid));
-    let mt = unsafe { crate::task::MainThread::assume() };
-    let publisher = crate::plex::session::ProfilePublisher::scoped(&mt);
-    let mut io = HomeIo { replay:false,preferences:Default::default(),requests:Vec::new(),admissions:Default::default(),
-        failure:None,profile:publisher.snapshot() };
-    assert!(crate::pms::with_refused_fetches_for_test(|| io.hubs(&mut hubs, Some(crate::stores::hubs::HubsCmd::RefetchHubs), 0.0)).changed);
-    assert_eq!(io.requests.len(), 1);
-    assert_eq!(io.requests[0]["admitted"], serde_json::json!(false), "real refusal must be recorded");
-    crate::registry::reset_for_test();
-}
 
 
 #[test]

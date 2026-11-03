@@ -242,6 +242,7 @@ fn profile_extra(delivery: TranscodeDelivery) -> String {
     profile_for_delivery(crate::devcaps::caps(), delivery)
 }
 
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 fn forced_direct_profile() -> String {
     format!("add-direct-play-profile(type=videoProfile&container=mkv,mp4&videoCodec=h264,hevc&audioCodec={DP_AUDIO_CODECS}&subtitleCodec={DP_SUBTITLE_CODECS})")
 }
@@ -385,6 +386,7 @@ impl Client {
     /// 1.43.4 HTTP 400s `hasMDE`+`directPlay` when the part already has a selected subtitle
     /// (`invalid subtitle setting 'auto'`). That `None` fail-closes Original into remux and a
     /// PUT `subtitleStreamID=0`, which clears the selection. `burn` would force a transcode.
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub fn mde_decision(
         &self,
         rating_key: &str,

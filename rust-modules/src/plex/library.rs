@@ -11,6 +11,7 @@ fn sidecar_key_allowed(key: &str) -> bool {
         && ext.len() <= 10 && ext.bytes().all(|b| b.is_ascii_alphanumeric())
 }
 
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 impl Client {
     /// GET /library/all?guid=… — **does THIS server hold this film, and under which key?**
     ///
@@ -55,6 +56,7 @@ impl Client {
     /// ready-made `fastKey` listing URL) and the `firstCharacter` per-letter index.
     /// → `.directory[]`.
     /// `metadata_type` scopes genre values and letter counts to the same flat listing as
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub fn show_language_prefs(&self, show_rk: &str) -> Option<crate::media::ShowLangPrefs> {
         if show_rk.is_empty() || !show_rk.bytes().all(|b| b.is_ascii_digit()) {
             return None; // a key is server data: only ever a plain ratingKey

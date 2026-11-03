@@ -424,6 +424,7 @@ impl Machine {
 
 /// Direct-play only. A transcode, remux, or adaptive decision is a refusal, which is how a relay
 /// link (policy denies direct play) is refused without a second check.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(crate) fn accepts_direct_play(direct_play: bool, part_nonempty: bool, adaptive: bool) -> bool {
     direct_play && part_nonempty && !adaptive
 }

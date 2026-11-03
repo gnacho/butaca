@@ -784,6 +784,7 @@ struct SourceBuild {
 /// otherwise stamp these rows with the other machine's id — the one thing every `(sid, rk)`
 /// comparison downstream then trusts). A `&'static Client` also pins the exact address this fetch
 /// was aimed at even if the registry re-points that slot mid-request.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 fn fetch_source(c: &crate::plex::Client, sid: ServerId) -> Option<SourceBuild> {
     let mc = c.home_hubs(HUB_FETCH_COUNT)?;
     // The Continue Watching shelf comes from the DEDICATED hub (see `project`). Its failure fails
@@ -875,6 +876,7 @@ fn fetch_source_jellyfin(c: &'static crate::jellyfin::JfClient, sid: ServerId) -
 /// Project one source's `/hubs` + `/hubs/continueWatching` responses into its [`SourceBuild`].
 /// Pure — no statics, no I/O, no knowledge of any other source; `sid` is the server the two
 /// containers came from, stamped onto every row it builds.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 fn project(
     mc: &crate::media::MediaContainer,
     cw: &crate::media::MediaContainer,
@@ -1204,7 +1206,6 @@ impl Src {
             client: LandingClient { instance, resource }, token_gen,
         };
         self.client = match resource {
-            HubClientRef::Plex(c) => Some(c),
             HubClientRef::Jellyfin(_) => None,
         };
         self.token_gen = request.token_gen;
@@ -1263,7 +1264,6 @@ fn refresh_src_lifecycle(s: &mut Src) -> bool {
 /// re-point, exactly as the Plex arm documents below.
 #[derive(Clone, Copy)]
 enum HubClientRef {
-    Plex(&'static crate::plex::Client),
     /// The Jellyfin flavor has ONE source — the server the boot flow authenticated against —
     /// and no Plex registry slot behind it, so no instance/token generation to fingerprint.
     Jellyfin(&'static crate::jellyfin::JfClient),
@@ -1362,6 +1362,7 @@ fn hub_state(state: &PmsState) -> HubState {
 /// with no sources at all on the frame it boots.
 ///
 /// Pure, so the bootstrap rule is graded rather than observed on a television.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 fn feeds_home(sid: ServerId, pinned: &[ServerId], known: &[ServerId]) -> bool {
     // **A server whose libraries we have not enumerated yet is UNDECIDED, not unpinned.**
     //
@@ -1453,6 +1454,7 @@ fn item_pinned(pins: &[(ServerId, i64, bool)], m: &PmsMovie) -> bool {
 
 /// The two server sets [`feeds_home`] takes, folded out of the retained directory's favourite
 /// table in one pass: `(pinned, known)`. Separated so `feeds_home` stays pure and host-gradeable.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 fn home_server_sets(pins: &[(ServerId, i64, bool)]) -> (Vec<ServerId>, Vec<ServerId>) {
     let (mut pinned, mut known) = (Vec::new(), Vec::new());
     for &(sid, _, is_pinned) in pins {
@@ -1475,31 +1477,13 @@ fn home_server_sets(pins: &[(ServerId, i64, bool)]) -> (Vec<ServerId>, Vec<Serve
 /// `butaca-servers` dev trigger) handed us a token for it — and [`feeds_home`] is what narrows
 /// the grant to a pin. The handle comes from the same place (`ServerFacts`), so nothing here has an
 /// opinion about who a server belongs to that the Sources list does not share.
-fn roster_with_scope(scope: &BrowseScope) -> Vec<(ServerId, String)> {
-    // The Jellyfin flavor has ONE source — the server the boot flow authenticated against —
-    // with no plex.tv registry to enumerate and no share handle to display. It is listed the
-    // moment the client exists; before that, the Plex enumeration below answers empty anyway.
+fn roster_with_scope(_scope: &BrowseScope) -> Vec<(ServerId, String)> {
+    // Jellyfin is the only backend: one source, the server the boot flow authenticated against.
+    // Listed the moment the client exists; before that the roster is empty.
     if crate::jellyfin::client().is_some() {
         return vec![(crate::jellyfin::SERVER_ID, String::new())];
     }
-    let (pinned, known) = home_server_sets(&scope.pins);
-    let mut own: Vec<(ServerId, String)> = Vec::new();
-    let mut shared: Vec<(ServerId, String)> = Vec::new();
-    for sid in crate::registry::ids() {
-        if crate::registry::client_for(sid).is_none() || !feeds_home(sid, &pinned, &known) {
-            continue;
-        }
-        let handle = crate::registry::facts(sid)
-            .map(|f| f.handle.clone())
-            .unwrap_or_default();
-        if handle.is_empty() {
-            own.push((sid, handle));
-        } else {
-            shared.push((sid, handle));
-        }
-    }
-    own.append(&mut shared);
-    own
+    Vec::new()
 }
 
 /// A cheap fingerprint of what [`roster`] would return, so [`sync_roster`] can skip the rebuild on
@@ -1710,36 +1694,26 @@ fn kick_with(gen: u32, adapter: &PmsAdapter, s: &mut Src, launch: impl FnOnce(Hu
     // The guard is load-bearing, not redundant: the jellyfin slot is 0, which test fixtures also
     // hand to `register_for_test` Plex clients — an absent jellyfin client must fall THROUGH to
     // the Plex registry, not shadow it.
-    if s.sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
-        let c = crate::jellyfin::client().expect("guarded above");
-        let Some(request) = s.begin_request(HubClientRef::Jellyfin(c), 0, 0, gen,
-            || adapter.next_request.fetch_add(1, Ordering::Relaxed)) else { return };
-        let sid = request.sid;
-        let spawned = launch(request);
-        if !spawned {
-            s.fetching = false;
-            landed_fail(s);
-            return;
-        }
-        crate::log(&format!("hubs: source {} fetching (off-thread, jellyfin)", sid.raw()));
+    // Jellyfin is the only backend: the spawn site captures its client from the process slot
+    // (the main thread reads the `&'static` here and the worker holds it, never a lookup).
+    if s.sid != crate::jellyfin::SERVER_ID {
+        landed_fail(s);
         return;
     }
-    let Some(c) = crate::registry::client_for(s.sid) else {
+    let Some(c) = crate::jellyfin::client() else {
         landed_fail(s);
         return;
     };
-    let Some(request) = s.begin_request(HubClientRef::Plex(c), c.instance_gen(), c.token_gen(), gen,
+    let Some(request) = s.begin_request(HubClientRef::Jellyfin(c), 0, 0, gen,
         || adapter.next_request.fetch_add(1, Ordering::Relaxed)) else { return };
     let sid = request.sid;
     let spawned = launch(request);
     if !spawned {
-        // nothing will ever fill the mailbox (the thread limit refused us), so release the latch
-        // here and back off — `pump` will try again on the ladder.
         s.fetching = false;
         landed_fail(s);
-    } else {
-        crate::log(&format!("hubs: source {} fetching (off-thread)", sid.raw()));
+        return;
     }
+    crate::log(&format!("hubs: source {} fetching (off-thread, jellyfin)", sid.raw()));
 }
 
 /// The live worker adapter. Replay must replace this operation, not skip `begin_request` and
@@ -1750,10 +1724,8 @@ pub(crate) fn spawn_fetch(adapter: &Arc<PmsAdapter>, request: HubRequest) -> boo
     let worker_adapter = Arc::clone(adapter);
     crate::task::spawn_small("hubs", move || {
         let (resource, sid) = (request.client.resource, request.sid);
-        let build = catch_unwind(move || match resource {
-            HubClientRef::Plex(client) => fetch_source(client, sid),
-            HubClientRef::Jellyfin(client) => fetch_source_jellyfin(client, sid),
-        }).ok().flatten();
+        let HubClientRef::Jellyfin(client) = resource;
+        let build = catch_unwind(move || fetch_source_jellyfin(client, sid)).ok().flatten();
         // Outside the panic guard: every admitted worker answers, including a panicking fetch.
         worker_adapter.results.lock().unwrap_or_else(|e| e.into_inner()).push(request.complete(build));
     })
@@ -1764,6 +1736,7 @@ thread_local! {
     static REFUSE_FETCH_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 /// Replace only the OS spawn boundary on this test thread, including nested callers in stores.
 #[cfg(test)]
 pub(crate) fn with_refused_fetches_for_test<R>(f: impl FnOnce() -> R) -> R {
@@ -1809,6 +1782,7 @@ pub(crate) fn take_landings(adapter: &PmsAdapter) -> Vec<Landing> {
 /// adapter observe or substitute arrivals without a second state-application path. This is NOT an
 /// offline replay mode: retry scheduling and worker spawning remain live.
 #[cfg(test)]
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 fn pump_with_landings(state: &mut PmsState, adapter: &Arc<PmsAdapter>, dt: f32,
     take: impl FnOnce() -> Vec<Landing>) {
     step_landings(state, adapter, Some(dt), take)
@@ -1816,6 +1790,7 @@ fn pump_with_landings(state: &mut PmsState, adapter: &Arc<PmsAdapter>, dt: f32,
 
 /// Test-only compatibility tick for fixtures without a retained directory.
 #[cfg(test)]
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(crate) fn tick(state: &mut PmsState, adapter: &Arc<PmsAdapter>, dt: f32) {
     // Same test-only catalog guard as `request_refetch_hubs` — the catalog is `PmsState`, a
     // field of the per-`Bridge` `HubsStore`, not a crate-global; see `lib.rs::testlock` and D5.
@@ -1842,6 +1817,7 @@ pub(crate) fn tick_with_directory(
 /// An addressed arrival may update the catalog behind another page, but must not advance retry
 /// timers or start a new hubs fetch there. The visible Home alone owes the store's tick.
 #[cfg(test)]
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 fn apply_landing(state: &mut PmsState, adapter: &Arc<PmsAdapter>, landing: &Landing) {
     #[cfg(test)]
     crate::testlock::assert_held("the pms hub catalog (apply_landing)");
@@ -1850,6 +1826,7 @@ fn apply_landing(state: &mut PmsState, adapter: &Arc<PmsAdapter>, landing: &Land
 
 /// Test-only compatibility landing for fixtures without a retained directory.
 #[cfg(test)]
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(crate) fn land(state: &mut PmsState, adapter: &Arc<PmsAdapter>, landing: &Landing) -> crate::stores::StoreOutcome {
     let before = state.catalog_gen;
     apply_landing(state, adapter, landing);
@@ -1972,12 +1949,14 @@ fn controlled_work_with_scope(state: &mut PmsState, adapter: &Arc<PmsAdapter>, c
 }
 
 #[cfg(test)]
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 fn step_landings(state: &mut PmsState, adapter: &Arc<PmsAdapter>, dt: Option<f32>, take: impl FnOnce() -> Vec<Landing>) {
     let mut launch = |r| spawn_fetch(adapter, r);
     step_landings_with(state, adapter, dt, take, &mut launch)
 }
 
 #[cfg(test)]
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 fn step_landings_with(state: &mut PmsState, adapter: &Arc<PmsAdapter>, dt: Option<f32>, take: impl FnOnce() -> Vec<Landing>,
     launch: &mut dyn FnMut(HubRequest) -> bool) {
     step_landings_with_scope(state, adapter, dt, take, &BrowseScope::standalone(), launch)
@@ -2000,8 +1979,6 @@ fn step_landings_with_scope(state: &mut PmsState, adapter: &PmsAdapter, dt: Opti
             continue; // its source left the roster while it was out
         };
         let lifecycle_matches = l.client.is_none_or(|client| match client.resource {
-            HubClientRef::Plex(resource) => crate::registry::client_for(l.sid)
-                .is_some_and(|now| std::ptr::eq(now, resource) && now.token_gen() == l.token_gen),
             // The Jellyfin client is a single leaked-static: it is the same resource for the
             // whole install, and its retirement (uninstall) removes the source from the roster
             // wholesale, so a pointer check against the current slot is the whole lifecycle.
@@ -2299,10 +2276,6 @@ mod test_support;
 mod catalog_commit_tests;
 
 #[cfg(test)]
-#[path = "pms_fetch_retry_tests.rs"]
-mod fetch_retry_tests;
-
-#[cfg(test)]
 #[path = "pms_local_edit_tests.rs"]
 mod local_edit_tests;
 
@@ -2313,10 +2286,6 @@ mod hero_pool_tests;
 #[cfg(test)]
 #[path = "pms_jellyfin_fetch_tests.rs"]
 mod jellyfin_fetch_tests;
-
-#[cfg(test)]
-#[path = "pms_multi_source_merge_tests.rs"]
-mod multi_source_merge_tests;
 
 /// The library's tile abstraction (restructure spec §10) over a catalog row: the one place a
 /// `PmsMovie` becomes a `Tile`, so a widget that draws a tile asks the trait and never this type.

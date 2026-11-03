@@ -3,6 +3,7 @@ use super::*;
 /// How the media reaches this television, as PMS classifies it. Not a preference — a different
 /// amount of prior knowledge, which is why bootstrap branches on it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(crate) enum LinkKind {
     Local,
     Remote,
@@ -12,6 +13,7 @@ pub(crate) enum LinkKind {
 /// Why bootstrap chose what it chose. Printed verbatim into the event log: the startup decision is
 /// the one nobody can re-run, so it has to explain itself the first time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(crate) enum BootstrapReason {
     /// A verified LAN carrying a file the device can play. No probe: a measurement to prove that a
     /// local network can carry local media would only cost the viewer a second of black screen.
@@ -35,6 +37,7 @@ pub(crate) enum BootstrapReason {
 
 /// The startup state, plus what to hand the steady-state controller.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(crate) struct BootstrapDecision {
     pub(crate) original: bool,
     /// The starting rung when `original` is false. Chosen from the same catalog steady-state
@@ -53,6 +56,7 @@ pub(crate) struct BootstrapDecision {
 /// history, no buffer, no production evidence, and a strict latency budget on acquiring any. So it
 /// branches on how much is knowable for free, and its worst case is "start conservative HLS and
 /// let the real controller recover", never "hold the screen black until the link is proven".
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(crate) fn bootstrap(
     link: LinkKind,
     original_feasible: bool,
@@ -151,6 +155,7 @@ pub(crate) fn hls_reentry_rung(
 /// Pick the highest rendition whose declared demand does not exceed the service the completed
 /// probe actually achieved.  Startup reserve is handled as media time by the player; multiplying
 /// the rate by an unrelated fraction would be a second, dimensionally hidden reserve.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(crate) fn startup_rung(
     measured_kbps: u32,
     catalog: &HlsActuatorCatalog,

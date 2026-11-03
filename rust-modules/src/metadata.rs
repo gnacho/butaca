@@ -287,6 +287,7 @@ enum CrewRole {
     DirectorWriter,
 }
 impl CrewRole {
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     fn key(self) -> &'static str {
         match self {
             Self::Director => "Director",
@@ -555,6 +556,7 @@ impl Dovi {
         )
     }
 
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub(crate) fn decision_now(&self, video_is_hevc: bool) -> DvDecision {
         let capability = crate::webos::caps::capability();
         DvDecision {
@@ -1217,6 +1219,7 @@ impl RatingArt {
     /// An unknown provider — or a Rotten Tomatoes string with no state we recognise, which leaves
     /// tomato-vs-popcorn genuinely undetermined — yields `None`: a score whose artwork cannot be
     /// attributed is not badged at all, rather than badged with a guess.
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub(crate) fn from_image(image: &str) -> Option<RatingArt> {
         let (provider, rest) = image.split_once("://")?;
         // "image.rating.ripe" → "ripe"; a stateless "image.rating" → "rating", which matches no arm.
@@ -1305,6 +1308,7 @@ pub(crate) struct Rating {
 ///
 /// Rows whose artwork cannot be attributed are dropped, as are non-positive scores: PMS omits a
 /// score it does not have, and `de_f64` defaults that to 0.0, so "0.0" means absent, not zero.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 fn convert_ratings(it: &crate::media::Metadata) -> Vec<Rating> {
     let mut out: Vec<Rating> = if !it.ratings.is_empty() {
         it.ratings
@@ -1890,114 +1894,25 @@ fn dev_source() -> Option<&'static str> {
 }
 
 fn fetch_detail(sid: crate::registry::ServerId, rk: &str) -> Option<(Detail, String)> {
-    // Jellyfin arm: the same Detail from the other backend's full fetch (item + NextUp +
-    // seasons + hero episode's streams). The extra key has no counterpart there: trailer
-    // identity comes from the DTO itself, so the slot is empty.
-    // The installed-client guard is load-bearing: slot 0 is also a valid Plex slot in this build.
-    if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
-        let c = crate::jellyfin::client().expect("guarded above");
-        let d = crate::jellyfin::detail::fetch_full(c, sid, rk)?;
-        return Some((d, String::new()));
+    // Jellyfin is the only backend: the store's own full fetch (item + NextUp + seasons + the
+    // hero episode's streams). The extra key has no counterpart there: trailer identity comes
+    // from the DTO itself, so the slot is empty.
+    if sid != crate::jellyfin::SERVER_ID {
+        return None;
     }
-    let it = crate::registry::client_for(sid)?.metadata(rk)?;
-    let media0 = it.primary_media();
-    // one read, both fields (see `Detail::blur`)
-    let blur = it.ultra_blur_colors.and_then(|u| u.corners());
-    let mut d = Detail {
-        sid,
-        rk: rk.to_string(),
-        // the portable identity — what "Also available" resolves across the other sources
-        guid: it.guid.clone(),
-        is_show: it.kind == "show",
-        kind: it.kind.clone(),
-        show_title: it.grandparent_title.clone(),
-        show_rk: it.grandparent_rating_key.clone(),
-        season: it.parent_index,
-        index: it.index,
-        title: it.title.clone(),
-        year: it.year,
-        rating: it.content_rating.clone(),
-        summary: it.summary.clone(),
-        tagline: it.tagline.clone(),
-        aired: it.originally_available_at.clone(),
-        dur_ms: it.duration,
-        resume_ms: it.view_offset,
-        is_favorite: false,
-        watched: if it.kind == "show" || it.kind == "season" {
-            it.leaf_count > 0 && it.viewed_leaf_count >= it.leaf_count
-        } else {
-            it.view_count > 0
-        },
-        // empty for a show (no Media on the show container)
-        part: it.first_part().map(|p| p.key.clone()).unwrap_or_default(),
-        vcodec: media0.map(|m| m.video_codec.clone()).unwrap_or_default(),
-        acodec: media0.map(|m| m.audio_codec.clone()).unwrap_or_default(),
-        video_fps: 0.0, // set from the video Stream by parse_streams below
-        // likewise set by parse_streams (one assignment point), which for a SHOW runs a second
-        // time over its first episode — the show container carries no Media of its own
-        video_resolution: String::new(),
-        width: 0,
-        height: 0,
-        bitrate: 0,
-        // …as are the five below, which `parse_streams` fills from that same primary version — so
-        // a show's borrowed technicals and its FILE column can never describe two different files.
-        container: String::new(),
-        file: String::new(),
-        size: 0,
-        aspect_ratio: 0.0,
-        video: None,
-        hdr: false,
-        dovi: Dovi::default(),
-        art: it.art.clone(),
-        thumb: it.thumb.clone(),
-        blur: blur.unwrap_or_default(),
-        has_blur: blur.is_some(),
-        genres: it.genre.iter().map(|t| t.tag.clone()).collect(),
-        countries: it.country.iter().map(|t| t.tag.clone()).collect(),
-        cast: it
-            .role
-            .iter()
-            .map(|r| Cast {
-                tag: r.tag.clone(),
-                role: r.role.clone(),
-                thumb: r.thumb.clone(),
-                id: r.id,
-                tag_key: r.tag_key.clone(),
-            })
-            .collect(),
-        // deduped like the shelf below it: a repeated Director[] row would otherwise read
-        // "Directed by Jane Doe, Jane Doe"
-        directors: dedup_tags(&it.director),
-        crew: crew_credits(&it),
-        audio: Vec::new(),
-        subs: Vec::new(),
-        seasons: Vec::new(),
-        episodes: Vec::new(),
-        on_deck: it
-            .on_deck
-            .as_ref()
-            .and_then(|h| h.metadata.as_deref())
-            .map(convert_episode),
-        cur_season: 0,
-        related: Vec::new(),
-        chapters: convert_chapters(&it.chapter),
-        markers: convert_markers(&it.marker),
-        ratings: convert_ratings(&it),
-        extras: Vec::new(),
-        trailer_rk: String::new(),
-    };
-    // audio/subtitle streams (movies carry Media/Part/Stream; a show does not — its
-    // episodes do, so load_detail backfills a show's streams from its first episode).
-    parse_streams(&it, &mut d);
-    Some((d, it.primary_extra_key.clone()))
+    let c = crate::jellyfin::client()?;
+    let d = crate::jellyfin::detail::fetch_full(c, sid, rk)?;
+    Some((d, String::new()))
 }
 
 /// The crew jobs we surface, in the order they appear on the shelf. PMS names the job by the
 /// ARRAY the person arrived in (`Director[]`/`Writer[]`) — the rows themselves carry no job
 /// attribute, and (verified live) no `role` either, so this is where the sub-caption comes from.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 const CREW_JOBS: [CrewRole; 2] = [CrewRole::Director, CrewRole::Writer];
 
 /// The named tags of one crew array, in server order, without the blanks or the repeats.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 fn dedup_tags(tags: &[crate::media::Tag]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for t in tags.iter().filter(|t| !t.tag.is_empty()) {
@@ -2016,6 +1931,7 @@ fn dedup_tags(tags: &[crate::media::Tag]) -> Vec<String> {
 /// merge) the job is already there and is not repeated — "Director, Director" is nobody's credit.
 /// Nameless rows are dropped: a tile with no name and (often) no headshot is a blank circle the
 /// focus can still land on.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 fn crew_credits(it: &crate::media::Metadata) -> Vec<Cast> {
     let mut out: Vec<Cast> = Vec::new();
     for (role, list) in CREW_JOBS.iter().zip([&it.director, &it.writer]) {
@@ -2783,35 +2699,15 @@ fn fetch_seasons(sid: crate::registry::ServerId, rk: &str) -> Vec<Season> {
     // The store's own season list, beside fetch_full's: the same data through the same client —
     // without this arm the tab strip read "0 seasons" off the empty Plex registry and the show
     // rendered season 1 with no way to reach the rest (TV-reported).
-    if sid == crate::jellyfin::SERVER_ID {
-        return crate::jellyfin::client()
-            .map(|c| c.seasons(rk)
-                .map(|r| r.items.iter().map(crate::jellyfin::detail::season_from_dto).collect())
-                .unwrap_or_default())
-            .unwrap_or_default();
+    // Jellyfin is the only backend: the store's own season list, beside fetch_full's.
+    if sid != crate::jellyfin::SERVER_ID {
+        return Vec::new();
     }
-    let mc = match crate::registry::client_for(sid).and_then(|c| c.children(rk)) {
-        Some(m) => m,
-        None => {
-            // The empty Vec is the deliberate degrade (see `fetch_episodes`'s note), but by the
-            // time `fetch_full` prints `seasons=` the refusal and a show that genuinely has no
-            // seasons are the same zero — so the refusal has to say so HERE, or the log records a
-            // failed GET as a fact about the library.
-            crate::log(&format!("detail: rk={rk} — no season list (server unresolved, or it refused); the seasons= below is that, not a count"));
-            return Vec::new();
-        }
-    };
-    mc.metadata
-        .iter()
-        .filter(|x| x.kind == "season")
-        .map(|x| Season {
-            rk: x.rating_key.clone(),
-            index: x.index,
-            title: x.title.clone(),
-            leaf_count: x.leaf_count,
-            viewed_leaf_count: x.viewed_leaf_count,
-        })
-        .collect()
+    crate::jellyfin::client()
+        .map(|c| c.seasons(rk)
+            .map(|r| r.items.iter().map(crate::jellyfin::detail::season_from_dto).collect())
+            .unwrap_or_default())
+        .unwrap_or_default()
 }
 
 /// A season's episode list, or **None when the `/children` GET failed**. The failure has to stay
@@ -2827,20 +2723,19 @@ fn fetch_episodes(sid: crate::registry::ServerId, series_rk: &str, season_rk: &s
     // Jellyfin addresses a season's episodes by BOTH ids (`/Shows/{series}/Episodes?SeasonId=`),
     // where Plex's `/children` needs the season key alone — that asymmetry is the whole reason
     // this signature carries `series_rk`. Every caller has it in hand (the loaded show's rk).
-    if sid == crate::jellyfin::SERVER_ID {
-        return crate::jellyfin::client()
-            .and_then(|c| crate::jellyfin::detail::fetch_episodes(c, series_rk, season_rk));
+    // Jellyfin is the only backend, and it addresses a season's episodes by BOTH ids.
+    if sid != crate::jellyfin::SERVER_ID {
+        return None;
     }
-    #[cfg(any())]
-    let _ = series_rk;
-    let mc = crate::registry::client_for(sid)?.children(season_rk)?;
-    Some(mc.metadata.iter().map(convert_episode).collect())
+    crate::jellyfin::client()
+        .and_then(|c| crate::jellyfin::detail::fetch_episodes(c, series_rk, season_rk))
 }
 
 /// One `/children` row → an [`Episode`]. Split out of [`fetch_episodes`] so the wire → model
 /// mapping is host-testable without a PMS — the watched flag in particular is DERIVED, and a
 /// derivation nothing can exercise is how `viewCount` came to be parsed at
 /// `plex/models.rs` and then dropped on the floor here for the whole life of the episode row.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 fn convert_episode(x: &crate::media::Metadata) -> Episode {
     let media0 = x.media.first();
     Episode {
@@ -3315,15 +3210,13 @@ fn request_detail(adapter: &std::sync::Arc<MetadataAdapter>, sid: crate::registr
         // source's single client is instance 0 (it has no registry slot behind it), and every
         // other source carries its Plex registry instance as before. `null` would record a
         // resource the replay validator can never match.
-        let client = if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+        // The recorded client identity: Jellyfin's single client is instance 0; any other
+        // source has no registry slot behind it any more, which the recorder spells null.
+        let client = if sid == crate::jellyfin::SERVER_ID {
             serde_json::json!(0)
         } else {
-            crate::registry::client_for(sid).map(|c| serde_json::json!(c.instance_gen()))
-                .unwrap_or(serde_json::Value::Null)
+            serde_json::Value::Null
         };
-        #[cfg(any())]
-        let client = crate::registry::client_for(sid).map(|c| serde_json::json!(c.instance_gen()))
-            .unwrap_or(serde_json::Value::Null);
         crate::app::bootstrap::stores::admit(serde_json::json!({"store":"metadata",
             "sid":sid.raw(),"rk":rk,"gen":gen,
             "client":client}), || {

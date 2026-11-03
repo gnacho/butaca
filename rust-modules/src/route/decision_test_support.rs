@@ -8,6 +8,7 @@ use super::*;
 // Dev-only: used only by the `#[cfg(feature = "devtriggers")]` tests in this module (see the
 // comment on the first one).
 #[cfg(feature = "devtriggers")]
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn p8() -> crate::metadata::Dovi {
     crate::metadata::Dovi {
         present: true,
@@ -122,20 +123,26 @@ pub(super) fn unregistered_sid() -> ServerId {
     id
 }
 
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) const MDE_DIRECTPLAY: &[u8] =
     br#"{"MediaContainer":{"Metadata":[{"Media":[{"Part":[{"decision":"directplay"}]}]}]}}"#;
 
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) const MDE_TRANSCODE: &[u8] =
     br#"{"MediaContainer":{"Metadata":[{"Media":[{"Part":[{"decision":"transcode"}]}]}]}}"#;
 
 /// Part.decision=transcode, video copied, audio transcoded — the measured TrueHD-only shape.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) const MDE_TRANSCODE_COPY: &[u8] = br#"{"MediaContainer":{"Metadata":[{"Media":[{"Part":[{"decision":"transcode","Stream":[{"streamType":1,"decision":"copy"},{"streamType":2,"decision":"transcode"}]}]}]}]}}"#;
 
 /// Part.decision=transcode AND the video lane itself is transcode (bit depth, …).
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) const MDE_TRANSCODE_VIDEO: &[u8] = br#"{"MediaContainer":{"Metadata":[{"Media":[{"Part":[{"decision":"transcode","Stream":[{"streamType":1,"decision":"transcode"}]}]}]}]}}"#;
 
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) const EMPTY_MC: &[u8] = br#"{"MediaContainer":{}}"#;
 
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn drain_http(socket: &mut std::net::TcpStream) -> String {
     use std::io::{BufRead, BufReader, Read};
     let mut reader = BufReader::new(socket.try_clone().expect("clone"));
@@ -160,6 +167,7 @@ pub(super) fn drain_http(socket: &mut std::net::TcpStream) -> String {
 }
 
 /// Exact `key=value` on a request-line query, so `subtitleStreamID=0` cannot match `88001`.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn query_param<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     let query = line.split_once('?')?.1;
     let query = query.split_whitespace().next().unwrap_or(query);
@@ -169,6 +177,7 @@ pub(super) fn query_param<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     })
 }
 
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn write_json(socket: &mut std::net::TcpStream, body: &[u8]) {
     use std::io::Write;
     write!(
@@ -182,6 +191,7 @@ pub(super) fn write_json(socket: &mut std::net::TcpStream, body: &[u8]) {
 
 /// A bodyless status line, `Content-Length: 0`, `Connection: close` — the shape every synthetic
 /// server in this file used for a plain refusal/ack before this helper existed.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn write_status(socket: &mut std::net::TcpStream, code: u16) {
     use std::io::Write;
     let reason = match code {
@@ -213,6 +223,7 @@ pub(super) fn write_partial(socket: &mut std::net::TcpStream, n: usize) {
 }
 
 /// Loopback PMS that answers PlayQueue / PUT / `/decision` long enough for `build_stream`.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn plan_pms(
     n: usize,
     mde_body: &'static [u8],
@@ -227,6 +238,7 @@ pub(super) fn plan_pms(
 /// Same as [`plan_pms`], plus a bounded `start.mkv` body so Remote Auto can probe a remux.
 /// A Part GET is 503 — that is PMS 1.43 after a transcode MDE, and the test grades that we
 /// never ask.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn plan_pms_with_start_mkv(
     n: usize,
     mde_body: &'static [u8],
@@ -239,6 +251,7 @@ pub(super) fn plan_pms_with_start_mkv(
     plan_pms_inner(n, mde_body, Some(start_bytes))
 }
 
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn plan_pms_inner(
     n: usize,
     mde_body: &'static [u8],
@@ -304,6 +317,7 @@ pub(super) fn plan_pms_inner(
 }
 
 /// Selection is PMS state, not a promise made by a GET's query parameters.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn selection_probe_pms(
     refuse: bool,
     burn: i64,
@@ -360,6 +374,7 @@ pub(super) fn selection_probe_pms(
     (port, done, handle)
 }
 
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn fourk_item(
     sid: ServerId,
     audio: Vec<crate::metadata::Stream>,
@@ -390,6 +405,7 @@ pub(super) fn fourk_item_with_subs(
     }
 }
 
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn eac3_track() -> crate::metadata::Stream {
     crate::metadata::Stream {
         id: 36014,
@@ -404,6 +420,7 @@ pub(super) fn eac3_track() -> crate::metadata::Stream {
     }
 }
 
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn selected_sub(id: i64, codec: &str) -> crate::metadata::Stream {
     crate::metadata::Stream {
         id,
@@ -421,6 +438,7 @@ pub(super) fn selected_sub(id: i64, codec: &str) -> crate::metadata::Stream {
 /// when the horizon started requiring an observed drain, and it should have — the reserve was
 /// growing, so nothing was starving. This is the honest replacement.
 /// The raster every pre-2026-08-28 `auto_network` case had hardcoded into the function.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) const HD: (u16, u16) = (1_920, 1_080);
 
 /// A one-shot loopback PMS: accepts ONE connection, hands its request line back down the
@@ -471,6 +489,7 @@ pub(super) fn ordered_stub_pms(
 /// `normalizeLoudness=1` (issue #266). Shapes are the measured ones (`/tmp/plx266` M1/M2): an
 /// honoured ask is a Part transcode with the video copied and the audio re-encoded.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) enum EnhMode {
     /// Audio `transcode`, declared as this output codec.
     Honor(&'static str),
@@ -486,6 +505,7 @@ pub(super) enum EnhMode {
 /// per [`EnhMode`] when it carries a param and a plain remux (video+audio copy) when it does not,
 /// and every media GET (Part or `start.mkv`) serves `media_bytes` so a Remote probe can complete.
 /// Runs until the returned sender fires; the join handle yields every request line.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn enhancement_pms(
     mde: &'static [u8],
     mode: EnhMode,
@@ -496,6 +516,7 @@ pub(super) fn enhancement_pms(
 
 /// How [`enhancement_pms_parts`] answers a raw `/library/parts/` GET.
 #[derive(Clone, Copy)]
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) enum PartAnswer {
     /// The same bytes `start.mkv` gets.
     Serve,
@@ -510,6 +531,7 @@ pub(super) enum PartAnswer {
 }
 
 /// [`enhancement_pms`] with the raw Part's answer chosen separately from `start.mkv`'s.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn enhancement_pms_parts(
     mde: &'static [u8],
     mode: EnhMode,

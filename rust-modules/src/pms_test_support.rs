@@ -27,6 +27,7 @@ impl Default for Owner {
 /// frame. Production splits it (the adapter drains with [`take_landings`] and applies through
 /// `apply_landing`; the store's [`tick`] only counts down), so it survives here as the one
 /// driver these landing/back-off contracts are phrased in.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn pump(state: &mut PmsState, adapter: &Arc<PmsAdapter>, dt: f32) {
     let a = Arc::clone(adapter);
     let _outcome = pump_with_landings(state, adapter, dt, move || take_landings(&a));
@@ -55,12 +56,14 @@ pub(super) fn hero_pool_source(state: &PmsState, i: usize) -> &str {
 }
 
 /// title of hub `i` (e.g. "Continue Watching")
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn hub_title(state: &PmsState, i: usize) -> &str {
     hubs(state).get(i).map(|h| h.title.as_str()).unwrap_or("")
 }
 
 /// Handle of the server hub `i` came from ("friend"), or **empty** for the signed-in user's
 /// own server — see [`HubRow::source`].
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn hub_source(state: &PmsState, i: usize) -> &str {
     hubs(state).get(i).map(|h| h.source.as_str()).unwrap_or("")
 }
@@ -68,6 +71,7 @@ pub(super) fn hub_source(state: &PmsState, i: usize) -> &str {
 /// whether hub `i` is the merged Continue Watching shelf (its tiles play directly on OK, so
 /// the home grid stamps the play-hint badge on them). Matched on the locale-independent
 /// hubIdentifier, through the one identity function the publication itself uses.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn hub_is_continue(state: &PmsState, i: usize) -> bool {
     hubs(state)
         .get(i)
@@ -100,6 +104,7 @@ pub(super) fn seed(state: &mut PmsState, srcs: Vec<Src>) {
 
 /// A landing from the worker this source has out right now (current generation and seq) — what
 /// a real fetch would post. `None` is a failure.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn land(state: &PmsState, adapter: &PmsAdapter, slot: u16, build: Option<SourceBuild>) {
     let s = sid(slot);
     let seq = state.srcs.iter().find(|x| x.sid == s).map(|x| x.seq).unwrap_or(0);
