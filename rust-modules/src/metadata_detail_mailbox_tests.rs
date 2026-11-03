@@ -499,7 +499,6 @@ fn a_panicking_detail_fetch_acknowledges_and_settles_its_request() {
 
 /// The controlled mailbox world boots the synthetic Jellyfin home; refused without the feature.
 #[test]
-#[cfg(feature = "jellyfin")]
 fn controlled_cancelled_detail_ack_is_recorded_and_recovers_capacity() {
     let _serial = crate::testlock::serial();
     let mut value = serde_json::to_value(

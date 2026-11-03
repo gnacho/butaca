@@ -63,13 +63,12 @@ pub(crate) fn encode(result: &Result) -> serde_json::Value {
 }
 
 pub(crate) fn decode(value: serde_json::Value) -> std::result::Result<Result, &'static str> {
-    #[cfg(not(feature = "jellyfin"))]
+    #[cfg(any())]
     {
         // No roster exists without the Jellyfin world, so no discovery wire can be decoded.
         let _ = value;
         return Err("unsupported discovery result");
     }
-    #[cfg(feature = "jellyfin")]
     {
     let wire: Wire = serde_json::from_value(value).map_err(|_| "invalid discovery result")?;
     if wire.kind != "discovery" || wire.version != 1 { return Err("unsupported discovery result"); }

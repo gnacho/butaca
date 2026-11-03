@@ -118,7 +118,6 @@ lab-diagnostics = []
 # jellyfin.json, the home-fetch arm in `pms`, the poster arms — each a `#[cfg]` beside the
 # Plex path it parallels, so an ordinary build is byte-for-byte unaffected. `make JELLYFIN=1 …`
 # builds it; the fork ships it as the flavor it installs.
-jellyfin = []
 hostsim = []
 
 # Warnings are ERRORS, for this crate, in every cargo invocation — build, check, test, clippy, the

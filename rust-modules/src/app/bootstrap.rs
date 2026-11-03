@@ -262,7 +262,7 @@ impl Initial {
         // construct it.
         let content_detail_ok = match &s.authority {
             BootstrapAuthority::DevJf { origin, token, user_id, user_name } => {
-                if !cfg!(feature = "jellyfin") { return Err("unsupported replay bootstrap authority"); }
+                if !true { return Err("unsupported replay bootstrap authority"); }
                 // captured() carries the Account authority, so the reconstruction re-imposes
                 // the DevJf authority it names; everything AROUND it must still round-trip
                 // byte for byte.

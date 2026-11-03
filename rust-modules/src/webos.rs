@@ -781,7 +781,6 @@ pub(crate) mod ls2 {
         /// message, this one leaves it attached, which is what a service's `{"subscribe":true}`
         /// method needs to deliver more than its first reply. The Jellyfin flavour's lifecycle
         /// subscriber is its one caller, so the Plex build does not carry the declaration at all.
-        #[cfg(feature = "jellyfin")]
         fn LSCall(
             handle: *mut c_void,
             uri: *const c_char,
@@ -818,7 +817,6 @@ pub(crate) mod ls2 {
     /// cannot keep the borrow it was handed (this is why [`Registration::call`] writes into a slot
     /// instead of returning a `&str`). `pub(super)` because the lifecycle subscriber is the one
     /// caller that wants the copy rather than a slot of its own.
-    #[cfg(feature = "jellyfin")]
     pub(super) fn payload_of(message: *mut c_void) -> String {
         if message.is_null() {
             return String::new();
@@ -902,7 +900,6 @@ pub(crate) mod ls2 {
     /// <name>` (measured 2026-10-18), and the caller resolution falls back to the sender service
     /// name, which matches the running app by app id anyway. The role file appinstalld writes for
     /// the app allows exactly this name.
-    #[cfg(feature = "jellyfin")]
     pub(crate) fn register_as_app_service() -> Result<Registration, RegisterFail> {
         let app_id = app_id_cstring()?;
         register_with(Some(&app_id))
@@ -1080,7 +1077,6 @@ pub(crate) mod ls2 {
         /// context, which is why this returns as soon as the bus accepted the call. An `Err` is a
         /// call that never got as far as being sent, never "the service said no" - a refusal comes
         /// back as a message, exactly as it does for [`Self::call`].
-        #[cfg(feature = "jellyfin")]
         pub(crate) fn subscribe(
             &self,
             uri: &str,
@@ -1125,7 +1121,6 @@ pub(crate) mod ls2 {
         /// registration it borrows is never dropped and never unregistered: this is a
         /// process-lifetime channel, and a bus client that unregisters mid-session would stop
         /// receiving the events it exists for.
-        #[cfg(feature = "jellyfin")]
         pub(crate) fn pump_forever(&self) -> ! {
             let _block = crate::task::assert_may_block(
                 const { &crate::task::BlockingLabel::new("SAM lifecycle subscription") },
@@ -1306,7 +1301,6 @@ pub(crate) mod ls2 {
 /// the one with a deep link for the event to carry. The Plex flavour has no launch-param deep link
 /// at boot either (`app::boot::deeplink_item_id`), so a subscription there would receive events
 /// nothing could act on.
-#[cfg(feature = "jellyfin")]
 pub(crate) mod lifecycle {
     use std::sync::Mutex;
 

@@ -518,14 +518,13 @@ pub(crate) enum BootTo {
 /// and keeps unit tests honest about the shape. Malformed JSON, a missing key and a non-string
 /// value all answer None: a launcher that cannot read our log must never get a crash for its
 /// typo.
-#[cfg(feature = "jellyfin")]
 pub(crate) fn deeplink_item_id(params: &str) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(params).ok()?;
     let as_id = |v: &serde_json::Value| v.get("jellyfinItemId").and_then(|x| x.as_str()).map(str::to_owned);
     as_id(&value).or_else(|| value.get("parameters").and_then(as_id))
 }
 
-#[cfg(all(test, feature = "jellyfin"))]
+#[cfg(test)]
 mod deeplink_tests {
     use super::deeplink_item_id;
 
@@ -664,7 +663,6 @@ pub(crate) unsafe fn construct(
     // owns the channel, so the claim goes here with a bounded wait for its outcome; on any failure
     // SDL proceeds exactly as before, which is the pre-fix behaviour. Jellyfin flavour only: it is
     // the one with a launch-param deep link for the event to carry.
-    #[cfg(feature = "jellyfin")]
     crate::webos::lifecycle::start();
     // DEAD END, measured 2026-07-31 — do not re-try this. The obvious answer to "a parked TV
     // should blank itself" is to stop inhibiting the platform screensaver here (and re-allow it
@@ -911,13 +909,12 @@ pub(crate) unsafe fn construct(
     // it unprobed (`JfClient::synthetic`), so recording and replay construct the exact world the
     // typed Initial names — no config file, no network round-trip, no /tmp trigger. `None`
     // without the feature: that build cannot construct the world at all.
-    #[cfg(feature = "jellyfin")]
     let jf_world = initial.as_ref().and_then(|initial| match &initial.session.authority {
         crate::auth::owner::BootstrapAuthority::DevJf { origin, token, user_id, user_name } =>
             Some((origin.clone(), token.clone(), user_id.clone(), user_name.clone())),
         _ => None,
     });
-    #[cfg(not(feature = "jellyfin"))]
+    #[cfg(any())]
     let jf_world: Option<(String, String, String, String)> = None;
     // Lifted beside `jf_world` for the same reason: the closure borrows,
     // and `initial` itself moves into the `App`.
@@ -1297,13 +1294,12 @@ pub(crate) unsafe fn construct(
     // strand BACK. Dropping the id in those cases is the issue's "fall back to Home, no error
     // loop" contract. Parsed here (not in the frame arm) so malformed params cost one
     // serde_json call at boot, never a per-frame one.
-    #[cfg(feature = "jellyfin")]
     let deeplink_rk = if matches!(route, AppArg::Home) {
         launch_params.as_deref().and_then(deeplink_item_id)
     } else {
         None
     };
-    #[cfg(not(feature = "jellyfin"))]
+    #[cfg(any())]
     let deeplink_rk: Option<String> = {
         // Plex builds never deep-link; acknowledging the param keeps the signature honest
         // without a second signature behind cfg.

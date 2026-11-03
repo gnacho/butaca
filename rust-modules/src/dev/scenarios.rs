@@ -998,7 +998,6 @@ fn itemmenu_arm(app: &mut App, fr: &mut Frame) {
 /// cut, never the retired blocking load) and the same single forward entry
 /// (`bridge::open_detail`), so a second way in cannot drift from the first. `source` names the way
 /// in on the log line, which is the only thing that differs between the two.
-#[cfg(feature = "jellyfin")]
 fn open_deeplink_item(app: &mut App, rk: &str, source: &str) {
     let sid = crate::jellyfin::SERVER_ID;
     app.bridge.metadata_mut().run(crate::stores::metadata::MetadataCmd::RequestDetail { sid, rk: rk.to_string() });
@@ -1011,7 +1010,6 @@ fn open_deeplink_item(app: &mut App, rk: &str, source: &str) {
 /// cut, never the retired blocking load), same 500 ms boot delay, but its trigger is the app
 /// field `App.deeplink_rk`, which `boot::construct` seeded only when the gate reached Home — so
 /// no route check is needed here. `take()` makes the arm one-shot even if Home is slow to mount.
-#[cfg(feature = "jellyfin")]
 fn deeplink_arm(app: &mut App, fr: &mut Frame) -> bool {
     if fr.now.wrapping_sub(app.t0) <= 500 { return true; }
     let Some(rk) = app.deeplink_rk.take() else { return true };
@@ -1028,7 +1026,6 @@ fn deeplink_arm(app: &mut App, fr: &mut Frame) -> bool {
 /// No boot delay and no route check: the app is already up and the person is looking at it, so the
 /// event is served on the frame it is noticed. `take()` is what makes two tiles clicked inside one
 /// frame resolve to the last one rather than to a page each (the slot's own last-wins rule).
-#[cfg(feature = "jellyfin")]
 fn relaunch_arm(app: &mut App, fr: &mut Frame) -> bool {
     // This arm's clock is the bus, not the frame: the frame's own timing governs nothing here.
     let _ = fr;
@@ -1040,7 +1037,7 @@ fn relaunch_arm(app: &mut App, fr: &mut Frame) -> bool {
 
 /// Plex builds: `App.deeplink_rk` is always None (the parser is jellyfin-only), so the arm is a
 /// no-op — but it stays in `each_frame` so the call site is not feature-gated soup.
-#[cfg(not(feature = "jellyfin"))]
+#[cfg(any())]
 fn deeplink_arm(app: &mut App, fr: &mut Frame) -> bool {
     // Consume the (always-None) field so it is "read" on this flavor too, and keep the
     // one-shot contract identical to the jellyfin arm.
@@ -1050,7 +1047,7 @@ fn deeplink_arm(app: &mut App, fr: &mut Frame) -> bool {
 
 /// Plex builds hold no lifecycle queue at all (`webos::lifecycle` is the jellyfin flavour's), so
 /// this arm is a no-op that keeps the call site identical to the one above it.
-#[cfg(not(feature = "jellyfin"))]
+#[cfg(any())]
 fn relaunch_arm(_app: &mut App, _fr: &mut Frame) -> bool {
     true
 }

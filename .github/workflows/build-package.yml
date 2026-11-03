@@ -141,9 +141,6 @@ jobs:
         env:
           WEBOS_SDK: ${{ steps.ndk.outputs.sdk-dir }}
           RUST_NIGHTLY: ${{ vars.RUST_NIGHTLY || 'nightly-2026-07-02' }}
-          # This fork ships the Jellyfin flavor: every CI build compiles the jellyfin feature in,
-          # the same recipe the butaca 0.6.x CI used. A build without it boots as a Plex-only app.
-          JELLYFIN: "1"
           # Drops the `devtools` cargo feature — no on-screen counter in a public build.
           RELEASE: "1"
           # WHICH INSTALL. `FLAVOR ?= debug` in the Makefile — deliberately, so a developer's
@@ -336,7 +333,6 @@ jobs:
           WEBOS_SDK: ${{ steps.ndk.outputs.sdk-dir }}
           FLAVOR: ${{ inputs.flavor }}
           RELEASE: "1"
-          JELLYFIN: "1"
         run: |
           set -euo pipefail
           private_values="$RUNNER_TEMP/gpl-private-values.json"

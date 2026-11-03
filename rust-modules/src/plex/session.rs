@@ -322,7 +322,7 @@ impl TempSession {
     }
 
     /// Resource tests assert the actual read/write/clear candidate list before touching it.
-    #[cfg(all(test, feature = "jellyfin"))]
+    #[cfg(test)]
     pub(crate) fn assert_only_target(&self) {
         crate::testlock::assert_held("Session scratch resource target");
         assert_eq!(auth_paths(), vec![self.path()]);
@@ -4602,7 +4602,6 @@ impl Session {
         // The Jellyfin flavor: this app only reaches Home WITH a signed-in Jellyfin client, and
         // no Plex session ever exists to name it. The account facts come from the installed
         // client itself, so a signed-in user sees their name, never "Sign in".
-        #[cfg(feature = "jellyfin")]
         if let Some(client) = crate::jellyfin::client() {
             if let Some(name) = client.user_name() {
                 return Account { signed_in: true, name: Some(name) };

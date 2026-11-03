@@ -1507,7 +1507,6 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
         // credit row already named (`fetch_profile_jf`), and plex.tv's global filmography has no
         // counterpart on this backend at all — the filmography the route draws there is the
         // per-source shelves below, so the F_CREDITS mailbox asks for nothing.
-        #[cfg(feature = "jellyfin")]
         if p.sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
             if i == F_CREDITS {
                 return;
@@ -1543,7 +1542,6 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
     // backend) and is spelled out anyway so a future caller of the fx space cannot turn that
     // silence into a spawn loop. The filmography landing carries an EMPTY match index: that
     // table joins plex.tv guids, and a Jellyfin item has none.
-    #[cfg(feature = "jellyfin")]
     if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
         if kind == K_RESOLVE {
             return;
@@ -1667,7 +1665,6 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
 /// for exactly the mid-fetch-rename reason its comment records, and an empty `thumb` here is
 /// what leaves that untouched. Jellyfin has no departments and no birthplace on the record;
 /// both stay empty, which the header draws as absent rather than as a blank line.
-#[cfg(feature = "jellyfin")]
 fn jf_profile_from(it: &crate::jellyfin::BaseItemDto) -> types::PersonProfile {
     let date = |v: &Option<String>| {
         v.as_deref()
@@ -1691,7 +1688,6 @@ fn jf_profile_from(it: &crate::jellyfin::BaseItemDto) -> types::PersonProfile {
 /// total kept beside them (a prolific actor has more credits than tiles, and the heading counts
 /// facts, not what fitted), and the roles vector pre-sized parallel with empty strings — the
 /// credit names land through their own fetch, never this one.
-#[cfg(feature = "jellyfin")]
 fn jf_shelf(
     items: &[crate::jellyfin::BaseItemDto],
     total: i64,
@@ -1713,7 +1709,6 @@ fn jf_shelf(
 /// the landing is addressed to one shelf list, exactly the contract `RolesLanding`'s `keys`
 /// exists to enforce. A credit with no `Role` string (crew, or a sparse record) answers `""`,
 /// which `apply` already reads as "name no part".
-#[cfg(feature = "jellyfin")]
 fn jf_roles(
     items: &[crate::jellyfin::BaseItemDto],
     person_id: &str,
@@ -1736,14 +1731,12 @@ fn jf_roles(
 
 /// WORKER THREAD: the Jellyfin biography. The detail fetch answers the person's own record; the
 /// mapping is the whole job.
-#[cfg(feature = "jellyfin")]
 fn fetch_profile_jf(person_id: &str) -> Option<types::PersonProfile> {
     crate::jellyfin::client()?.item_detail(person_id).map(|it| jf_profile_from(&it))
 }
 
 /// WORKER THREAD: the Jellyfin filmography, both shelves. One page per kind keeps each shelf's
 /// REAL total a fact about its own answer rather than a split of a shared count.
-#[cfg(feature = "jellyfin")]
 fn person_media_jf(sid: ServerId, person_id: &str) -> Option<MediaLanding> {
     let c = crate::jellyfin::client()?;
     let movies = c.person_items(person_id, "Movie", "")?;
@@ -1769,7 +1762,6 @@ fn person_media_jf(sid: ServerId, person_id: &str) -> Option<MediaLanding> {
 }
 
 /// WORKER THREAD: the Jellyfin credit rows, off one filmography page that asks for `People`.
-#[cfg(feature = "jellyfin")]
 fn person_roles_jf(person_id: &str, keys: &[String]) -> Option<RolesLanding> {
     let c = crate::jellyfin::client()?;
     let res = c.person_items(person_id, "Movie,Series", "People")?;
@@ -2220,7 +2212,6 @@ mod tests {
 
     /// The controlled person world boots the synthetic Jellyfin home; refused without the feature.
     #[test]
-    #[cfg(feature = "jellyfin")]
     fn controlled_person_ignores_ambient_session_recovery() {
         let _g = crate::testlock::serial();
         struct ResetTape;

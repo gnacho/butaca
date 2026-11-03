@@ -329,14 +329,14 @@ impl BrowseStore {
 
     /// Seed one synthetic source row so a discovery pick exists without a roster behind it.
     #[cfg(test)]
-    #[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
+    
     pub(crate) fn seed_source_for_test(&mut self, sid: crate::registry::ServerId) {
         crate::browse::seed_source_for_owner_test(&mut self.state, sid);
     }
 
     #[cfg(test)]
     #[cfg(test)]
-    #[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
+    
     fn source_list_gen_for_test(&self) -> u32 {
         self.state.source_list_gen()
     }
@@ -515,7 +515,6 @@ mod contract_tests {
 
     /// Same flavor bound as `controlled_discovery_apply_bumps_exactly_once`.
     #[test]
-    #[cfg(feature = "jellyfin")]
     fn an_owned_discovery_landing_is_consumed_once_and_noticed_once() {
         let _guard = crate::testlock::serial();
         let session = crate::plex::session::TempSession::new("browse-preowner");
@@ -539,7 +538,6 @@ mod contract_tests {
     /// The launch lane is the Jellyfin world's (the pick requires its installed client); the
     /// recorded fixtures grade this contract end to end.
     #[test]
-    #[cfg(feature = "jellyfin")]
     fn controlled_discovery_apply_bumps_exactly_once() {
         let _guard = crate::testlock::serial();
         crate::registry::reset_for_test();
@@ -590,7 +588,6 @@ mod contract_tests {
 
     /// Same flavor bound as `controlled_discovery_apply_bumps_exactly_once`.
     #[test]
-    #[cfg(feature = "jellyfin")]
     fn direct_controlled_discovery_mutates_only_the_addressed_owner() {
         let _guard = crate::testlock::serial();
         // The flavor's launch lane is the installed client: the discovery pick only fires for

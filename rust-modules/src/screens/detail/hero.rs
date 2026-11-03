@@ -909,7 +909,6 @@ mod tests {
     /// The heart's verb follows the FAVORITE flag, never `name_show` (the wiring bug of the
     /// first cut: the label answered "Marcar como favorito" on an item the server already held
     /// favorited, because the flag it read was the show-naming one).
-    #[cfg(feature = "jellyfin")]
     #[test]
     fn the_hearts_verb_follows_the_favorite_flag() {
         assert_eq!(disc_verb(HeroCtl::Favorite, false, false), Some((3, favorite_label())));

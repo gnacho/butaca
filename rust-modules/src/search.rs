@@ -455,7 +455,6 @@ fn slots() -> Vec<usize> {
     // here so the fan-out asks it like any other source. The guard is the load-bearing half:
     // slot 0 is also a valid PLEX slot (every test fixture), so without an installed jellyfin
     // client this must not double-list it.
-    #[cfg(feature = "jellyfin")]
     if crate::jellyfin::client().is_some() && !out.contains(&(crate::jellyfin::SERVER_ID.raw() as usize))
     {
         out.push(crate::jellyfin::SERVER_ID.raw() as usize);
@@ -1154,13 +1153,12 @@ fn maybe_spawn(state: &mut SearchState, adapter: &Arc<SearchAdapter>, i: usize) 
             // The Jellyfin backend answers one flat item page plus a people lookup; the shelfing
             // lives in `jellyfin::search` and the mailbox shape is unchanged. Account-wide scope:
             // no ParentId, the whole library.
-            #[cfg(feature = "jellyfin")]
             if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
                 return crate::jellyfin::search::search(crate::jellyfin::client()?, &q, LIMIT);
             }
             // No other source can answer: an uninstalled backend leaves the slot silent, and a
             // test that wants an answer injects one through the mailbox directly.
-            #[cfg(not(feature = "jellyfin"))]
+            #[cfg(any())]
             let _ = (&sid, &q);
             None
         })

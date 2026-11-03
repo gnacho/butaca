@@ -92,7 +92,6 @@ fn a_prepared_request_keeps_its_original_context_without_running_an_adapter() {
     assert_eq!((result.gen, result.seq, result.sid, result.token_gen), (generation, 23, sid, token_gen));
     let resource = match result.client.unwrap().resource {
         crate::pms::HubClientRef::Plex(resource) => resource,
-        #[cfg(feature = "jellyfin")]
         crate::pms::HubClientRef::Jellyfin(_) => unreachable!("a Plex request carries a Plex client"),
     };
     assert!(std::ptr::eq(resource, client));

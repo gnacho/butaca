@@ -1,6 +1,5 @@
 // The attachment race stages the synthetic Jellyfin world (`initial_for` boots
 // `Initial::synthetic_home`), so the whole module is flavor-gated.
-#![cfg(feature = "jellyfin")]
 use super::*;
 use crate::app::{boot, recorder::Recplay};
 use crate::plex::session::{self, Session};

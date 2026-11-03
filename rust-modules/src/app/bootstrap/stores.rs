@@ -275,7 +275,7 @@ pub(crate) fn reset_for_test() {
 
 // The person tape only fills in the synthetic Jellyfin world: without the feature
 // `Initial::synthetic_home` cannot boot it, so both tests are flavor-gated.
-#[cfg(all(test, feature = "jellyfin"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

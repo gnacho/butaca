@@ -210,7 +210,7 @@ impl SessionAdapter {
             publisher: crate::plex::session::ProfilePublisher::new(_mt),
         })
     }
-    #[cfg(all(test, feature = "jellyfin"))]
+    #[cfg(test)]
     pub(crate) fn live_recording_resources_for_test(mt: &crate::task::MainThread, root: std::path::PathBuf) -> Self {
         assert!(root.is_absolute() && root.is_dir());
         let mut adapter = Self::live_resources_for_test(mt);
@@ -299,7 +299,7 @@ impl SessionAdapter {
         self.commit_with_disk(permit, &completed.plan, Some(completed.disk))
     }
 
-    #[cfg(all(test, feature = "jellyfin"))]
+    #[cfg(test)]
     pub(crate) fn persistence_pending(&self) -> bool { !self.commits.is_empty() || !self.erasures.is_empty() }
 
     pub(crate) fn commit(&mut self, permit: CommitPermit<'_>, plan: &CommitPlan) -> CommitReply {
@@ -442,7 +442,6 @@ impl SessionAdapter {
             // config file goes (the next boot asks again), the installed client is retired (the
             // stores fail closed at once), and the form's flow resets. One site covers both
             // sign-out and delete-all-local-data: every account teardown funnels through here.
-            #[cfg(feature = "jellyfin")]
             {
                 crate::jellyfin::boot::erase_config();
                 crate::jellyfin::uninstall();

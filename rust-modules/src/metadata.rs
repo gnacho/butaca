@@ -1640,7 +1640,6 @@ pub(crate) fn install_for_test(state: &mut MetadataState, d: Option<Detail>) {
 /// The landed refresh is the truth and silently corrects any of this; see [`crate::viewstate`].
 /// The heart toggle's optimistic half: only the loaded item's flag — the heart is not drawn on
 /// cards, so there is no shelf fan-out to walk.
-#[cfg(feature = "jellyfin")]
 fn set_favorite_local(state: &mut MetadataState, sid: crate::registry::ServerId, rk: &str, on: bool) -> bool {
     let Some(d) = state.current.as_mut() else {
         return false;
@@ -1895,7 +1894,6 @@ fn fetch_detail(sid: crate::registry::ServerId, rk: &str) -> Option<(Detail, Str
     // seasons + hero episode's streams). The extra key has no counterpart there: trailer
     // identity comes from the DTO itself, so the slot is empty.
     // The installed-client guard is load-bearing: slot 0 is also a valid Plex slot in this build.
-    #[cfg(feature = "jellyfin")]
     if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
         let c = crate::jellyfin::client().expect("guarded above");
         let d = crate::jellyfin::detail::fetch_full(c, sid, rk)?;
@@ -2268,7 +2266,6 @@ pub(crate) struct PlayingItem {
     /// key carries no extension to read (a Jellyfin MediaSource id is a GUID). Empty means "not
     /// said", and the gate then falls back to the part key's extension, which is the same fact
     /// on Plex.
-    #[cfg_attr(not(feature = "jellyfin"), allow(dead_code))] // the Plex gate reads the part key
 
     pub(crate) container: String,
     /// The played leaf's Dolby Vision layering — the direct-play gate's other refusal, beside the
@@ -2361,7 +2358,6 @@ pub(crate) fn fetch_playing_item(sid: crate::registry::ServerId, rk: &str) -> Op
     // Jellyfin arm — same store, the other server (`jellyfin::detail::playing_item` builds the
     // same PlayingItem off /Items + /MediaSegments). The installed-client guard is every
     // jellyfin arm's guard: slot 0 is also a valid Plex slot in this build.
-    #[cfg(feature = "jellyfin")]
     if sid == crate::jellyfin::SERVER_ID {
         if let Some(c) = crate::jellyfin::client() {
             return crate::jellyfin::detail::playing_item(c, sid, rk);
@@ -2787,7 +2783,6 @@ fn fetch_seasons(sid: crate::registry::ServerId, rk: &str) -> Vec<Season> {
     // The store's own season list, beside fetch_full's: the same data through the same client —
     // without this arm the tab strip read "0 seasons" off the empty Plex registry and the show
     // rendered season 1 with no way to reach the rest (TV-reported).
-    #[cfg(feature = "jellyfin")]
     if sid == crate::jellyfin::SERVER_ID {
         return crate::jellyfin::client()
             .map(|c| c.seasons(rk)
@@ -2832,12 +2827,11 @@ fn fetch_episodes(sid: crate::registry::ServerId, series_rk: &str, season_rk: &s
     // Jellyfin addresses a season's episodes by BOTH ids (`/Shows/{series}/Episodes?SeasonId=`),
     // where Plex's `/children` needs the season key alone — that asymmetry is the whole reason
     // this signature carries `series_rk`. Every caller has it in hand (the loaded show's rk).
-    #[cfg(feature = "jellyfin")]
     if sid == crate::jellyfin::SERVER_ID {
         return crate::jellyfin::client()
             .and_then(|c| crate::jellyfin::detail::fetch_episodes(c, series_rk, season_rk));
     }
-    #[cfg(not(feature = "jellyfin"))]
+    #[cfg(any())]
     let _ = series_rk;
     let mc = crate::registry::client_for(sid)?.children(season_rk)?;
     Some(mc.metadata.iter().map(convert_episode).collect())
@@ -3321,14 +3315,13 @@ fn request_detail(adapter: &std::sync::Arc<MetadataAdapter>, sid: crate::registr
         // source's single client is instance 0 (it has no registry slot behind it), and every
         // other source carries its Plex registry instance as before. `null` would record a
         // resource the replay validator can never match.
-        #[cfg(feature = "jellyfin")]
         let client = if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
             serde_json::json!(0)
         } else {
             crate::registry::client_for(sid).map(|c| serde_json::json!(c.instance_gen()))
                 .unwrap_or(serde_json::Value::Null)
         };
-        #[cfg(not(feature = "jellyfin"))]
+        #[cfg(any())]
         let client = crate::registry::client_for(sid).map(|c| serde_json::json!(c.instance_gen()))
             .unwrap_or(serde_json::Value::Null);
         crate::app::bootstrap::stores::admit(serde_json::json!({"store":"metadata",
@@ -3403,7 +3396,6 @@ pub(crate) fn run(state: &mut MetadataState, adapter: &std::sync::Arc<MetadataAd
             true
         }
         MetadataCmd::SetWatchedLocal { sid, rk, on } => set_watched_local(state, sid, &rk, on),
-        #[cfg(feature = "jellyfin")]
         MetadataCmd::SetFavoriteLocal { sid, rk, on } => set_favorite_local(state, sid, &rk, on),
         MetadataCmd::InstallPlaying(p) => {
             install_playing(state, p);
