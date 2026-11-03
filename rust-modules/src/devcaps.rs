@@ -24,9 +24,9 @@
 //!   `"HEVC"` (4096x2176@60) — same decoder, two rows, different numbers. Rows naming the same
 //!   codec are merged by MIN on every axis we consume, because over-claiming is the exact
 //!   failure mode this module exists to end.
-//! * **It cannot express bit depth.** No row carries one, so the profile's `bitDepth=10` claim
-//!   stays the constant it always was (see `plex/transcoder.rs::profile_for`) — the table can
-//!   neither confirm nor deny it.
+//! * **It cannot express bit depth.** No row carries one, so the transcode profile's
+//!   `bitDepth=10` claim stayed the constant it always was while the profile lived (the table can
+//!   neither confirm nor deny it; the demuxer's HDR10 path still relies on the same in-band claim).
 //!
 //! Parsed with serde_json (already a dependency of the plex layer) rather than `webos.rs`'s
 //! hand scanner: this file is nested arrays of objects, not a flat string map. Any parse
@@ -42,6 +42,19 @@
 use std::sync::OnceLock;
 
 const CAPS_TABLE: &str = "/etc/umediaserver/device_codec_capability_config.json";
+
+/// The AUDIO codec set the buffer-feed PIPELINE decodes. This is the software half of a
+/// two-sided test — what our demuxer/payload path can feed, before asking whether this
+/// particular SoC can decode it. The live set is [`Caps::audio`] (this list ∩ the device's own
+/// codec table), and the ONE-definition rule lives here with it: normal routing uses
+/// [`is_dp_audio_track`] for membership and channel bounds, shared with the device profile.
+pub const DP_AUDIO_CODECS: &str = "aac,ac3,eac3,dts";
+
+/// Codec and channel check for an actual selected track. Codec-only membership is insufficient
+/// on devices whose DTS decoder stops at 5.1 or whose AAC decoder stops at stereo.
+pub fn is_dp_audio_track(codec: &str, channels: i64) -> bool {
+    caps().audio_supports(codec, channels)
+}
 
 /// The decode-capability snapshot the playback stack derives from. `OnceLock` for the same
 /// reason as `webos::Info`: written exactly once, at boot, then read on every play decision.
@@ -76,10 +89,10 @@ pub(crate) struct Caps {
     /// whatever the panel decodes (route.rs's decode gate explains why), but a support log that
     /// names a codec the panel decodes and the app still transcodes answers its own question.
     pub vp9: bool,
-    /// The direct-playable AUDIO subset: `plex::DP_AUDIO_CODECS` (what the pipeline decodes)
+    /// The direct-playable AUDIO subset: [`DP_AUDIO_CODECS`] (what the pipeline decodes)
     /// intersected with the table's audio rows, in `DP_AUDIO_CODECS`'s own URL form/order.
-    /// Normal routing reads this and the channel ceilings through `plex::is_dp_audio_track`,
-    /// as does its PMS profile. Forced mode uses the software feed set independently.
+    /// Normal routing reads this and the channel ceilings through [`is_dp_audio_track`],
+    /// as does its profile. Forced mode uses the software feed set independently.
     pub audio: String,
     /// Nonzero, per-codec channel ceilings from the device table, duplicate rows MIN-merged.
     /// Missing legacy limits remain unknown; DTS is admitted only with a measured limit.
@@ -88,7 +101,7 @@ pub(crate) struct Caps {
 
 impl Caps {
     /// The 49SM9000PLA values — the only set ever measured before this module. Byte-for-byte,
-    /// these reproduce the profile the app has always sent (the transcoder test pins that), so
+    /// these reproduce the capability set every routing decision has always assumed, so
     /// an unreadable table changes nothing for any device that was working yesterday.
     pub(crate) fn assumed() -> Caps {
         Caps {
@@ -118,22 +131,6 @@ impl Caps {
         }
     }
 
-    /// The transcode-target chain's HEAD — the codec the profile asks PMS to ENCODE when a
-    /// source must re-encode: `hevc` where the SoC decodes it (keeps 4K + HDR10 through a
-    /// transcode), else `h264`. ONE definition on purpose: route.rs's /decision-unreachable
-    /// Load-payload guess and retranscode's codec record must name the codec the profile
-    /// actually asked the server to produce, and as three hand-copied `if caps().hevc`
-    /// expressions they could drift — a Load payload naming a codec the profile never requested
-    /// is exactly the payload/output mismatch of docs/plex-pass-audit.md row 1 (issue #22).
-    /// `transcoder.rs::profile_for` builds the target list's head from this, and its test pins
-    /// the agreement.
-    pub(crate) fn encode_vcodec(&self) -> &'static str {
-        if self.hevc {
-            "hevc"
-        } else {
-            "h264"
-        }
-    }
 }
 
 static CAPS: OnceLock<Caps> = OnceLock::new();
@@ -274,7 +271,7 @@ fn parse(s: &str) -> Option<Caps> {
         }
     }
     let table_audio: Vec<String> = t.audio_codecs.iter().map(|r| canon(&r.name)).collect();
-    let audio: Vec<&str> = crate::plex::DP_AUDIO_CODECS
+    let audio: Vec<&str> = DP_AUDIO_CODECS
         .split(',')
         .filter(|c| table_audio.iter().any(|t| t == c))
         .filter(|c| *c != "dts" || audio_channels.contains_key("dts"))

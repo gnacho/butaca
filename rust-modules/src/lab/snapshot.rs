@@ -88,7 +88,7 @@ pub(crate) struct Caps {
     pub hevc_max_w: u32,
     pub hevc_max_h: u32,
     pub vp9: bool,
-    /// the direct-playable audio subset, in `plex::DP_AUDIO_CODECS`'s comma form
+    /// the direct-playable audio subset, in `devcaps::DP_AUDIO_CODECS`'s comma form
     pub audio: String,
 }
 

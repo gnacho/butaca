@@ -19,7 +19,7 @@ pub(super) fn allowed(
     link: Option<crate::plex::probe::Location>,
     q: Quality,
     src: (i64, i64, i64),
-) -> crate::plex::LinkPolicy {
+) -> crate::playback::LinkPolicy {
     let auto_original = q == Quality::Auto && link == Some(crate::plex::probe::Location::Local);
     flavors_allowed(
         crate::plex::link_policy(link),

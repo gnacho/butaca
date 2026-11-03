@@ -1138,6 +1138,35 @@ pub(crate) fn http_open(
     ))
 }
 
+/// [`http_open`] with the whole-chain connect and stalled-I/O ceiling selected by the caller.
+/// Candidate discovery is the one caller that knows whether a connection is local or remote; the
+/// ordinary request path keeps [`CONNECT_TIMEOUT_MS`] and never infers a tier from an address.
+pub(crate) fn http_open_probe(
+    hs: *mut HttpStream,
+    host: *const c_char,
+    port: c_int,
+    path: *const c_char,
+    extra: *const c_char,
+    method: &str,
+    timeout_ms: c_int,
+) -> c_int {
+    legacy_open_result(http_open_with_timeouts(
+        hs,
+        host,
+        port,
+        path,
+        extra,
+        method,
+        timeout_ms,
+        timeout_ms,
+        timeout_ms,
+        None,
+        false,
+        &mut NoCheckpoint,
+        &[],
+    ))
+}
+
 /// [`http_open`] plus a request body written after the head - the shape Jellyfin's JSON control
 /// POSTs need (`http::request_post_json` is the one caller, and it adds the matching
 /// `Content-Length` itself). Every other entry point passes an empty slice and keeps the exact
@@ -1168,35 +1197,6 @@ pub(crate) fn http_open_body(
     ))
 }
 
-/// [`http_open`] with the whole-chain connect and stalled-I/O ceiling selected by the caller.
-/// Candidate discovery is the one caller that knows whether a connection is local or remote; the
-/// ordinary request path keeps [`CONNECT_TIMEOUT_MS`] and never infers a tier from an address.
-pub(crate) fn http_open_probe(
-    hs: *mut HttpStream,
-    host: *const c_char,
-    port: c_int,
-    path: *const c_char,
-    extra: *const c_char,
-    method: &str,
-    timeout_ms: c_int,
-) -> c_int {
-    legacy_open_result(http_open_with_timeouts(
-        hs,
-        host,
-        port,
-        path,
-        extra,
-        method,
-        timeout_ms,
-        timeout_ms,
-        timeout_ms,
-        None,
-        false,
-        &mut NoCheckpoint,
-        &[],
-    ))
-}
-
 /// Open a candidate media request inside one absolute setup snapshot. Unlike
 /// [`http_open_probe`], this bound applies to the whole connect/send/header chain and is removed
 /// after successful headers; body reads receive their own current projection from the caller.
@@ -1206,33 +1206,6 @@ pub(crate) fn http_open_probe(
 ///
 /// `checkpoint` is consulted before and during every blocking connect/send/header wait (not DNS,
 /// which is a synchronous `getaddrinfo`); [`HttpOpenError::Stopped`] is its answer, never a redial.
-pub(crate) fn http_open_until_result(
-    hs: *mut HttpStream,
-    host: *const c_char,
-    port: c_int,
-    path: *const c_char,
-    extra: *const c_char,
-    method: &str,
-    deadline: Instant,
-    checkpoint: &mut dyn Checkpoint,
-) -> Result<(), HttpOpenError> {
-    http_open_with_timeouts(
-        hs,
-        host,
-        port,
-        path,
-        extra,
-        method,
-        CONNECT_TIMEOUT_MS,
-        MEDIA_RECV_TIMEOUT_MS,
-        MEDIA_SEND_TIMEOUT_MS,
-        Some(deadline),
-        true,
-        checkpoint,
-        &[],
-    )
-}
-
 fn legacy_open_result(result: Result<(), HttpOpenError>) -> c_int {
     if result.is_ok() {
         0
@@ -2292,14 +2265,6 @@ pub(crate) mod redirect;
 mod test_support;
 
 #[cfg(test)]
-#[path = "stream_deadline_connect_tests.rs"]
-mod deadline_connect_tests;
-
-#[cfg(test)]
-#[path = "stream_header_body_tests.rs"]
-mod header_body_tests;
-
-#[cfg(test)]
 #[path = "stream_ipv6_resolution_tests.rs"]
 mod ipv6_resolution_tests;
 
@@ -2310,7 +2275,3 @@ mod keepalive_reuse_tests;
 #[cfg(test)]
 #[path = "stream_chunked_drain_tests.rs"]
 mod chunked_drain_tests;
-
-#[cfg(test)]
-#[path = "stream_checkpoint_tests.rs"]
-mod checkpoint_tests;

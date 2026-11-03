@@ -1,15 +1,43 @@
 //! Backend-neutral playback vocabulary: the encode-shape contract and its parts, the quality
-//! ceiling, the timeline state, and the retained play-queue row — concepts every backend speaks
-//! and that `route/` (both halves), the ABR ladder, the Jellyfin device profile, the player and
-//! the UI consume. Nothing here should force a caller to name a Plex path for a noun it uses
-//! without Plex in sight.
+//! ceiling, the timeline state, the link policy, and the retained play-queue row — concepts
+//! every backend speaks and that `route/` (both halves), the ABR ladder, the Jellyfin device
+//! profile, the player and the UI consume. Nothing here should force a caller to name a Plex
+//! path for a noun it uses without Plex in sight.
 //!
 //! Extracted verbatim from `plex/params.rs` and `plex/timeline.rs` (the campaign's
 //! vocabulary-move pattern: `origin`, `librecord`, `grant`, `collection`, `person/types`,
-//! `registry`). This module holds NOUNS, not protocol: the Plex wire types that wrap them
-//! (`TranscodeSpec`, `StreamSelection`, `TimelineReport`) stayed in `plex/params.rs`, and the
-//! queue row's PRODUCER (`QueueRow::of`, consuming a Plex `models::Metadata` tree) stayed in
-//! `plex/timeline.rs`.
+//! `registry`). This module holds NOUNS, not protocol: the Plex wire types that wrapped them
+//! (`TranscodeSpec`, `StreamSelection`, `TimelineReport`) died with the Plex wire layer, and
+//! the queue row's PRODUCER (`QueueRow::of`) went with the PlayQueue itself.
+
+/// What the connection tier a server is reached over lets a playback plan ask for. Both fields
+/// are true on every tier but a capped relay link — the tier reasoning lives with the wire that
+/// has such tiers (`plex::link_policy`); this type is the neutral half every backend's decision
+/// vocabulary composes.
+///
+/// `quality_policy` returns one, `direct_play_policy` filters one, `flavors_allowed` ANDs two —
+/// none of which needs to know the link came from a Plex probe.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LinkPolicy {
+    /// May the client stream the source file itself? False forces the transcode branch.
+    pub direct_play: bool,
+    /// May that transcode be a container-only REMUX — codecs copied, no cap? False forces the
+    /// RE-ENCODE flavor, the only one whose query carries a bound the server can come in under.
+    pub remux: bool,
+}
+
+impl LinkPolicy {
+    /// Everything allowed: every tier but a capped relay, and every link nothing has told us
+    /// about.
+    ///
+    /// **Unknown must be permissive, and that is a decision rather than a default.** Reading an
+    /// undescribed link as "assume capped" would downgrade every direct play on earth to a
+    /// server-side encode, to prevent a stall on a connection this codebase has never once made.
+    pub const UNRESTRICTED: LinkPolicy = LinkPolicy {
+        direct_play: true,
+        remux: true,
+    };
+}
 
 /// The wire/container contract for one universal-transcoder session.
 ///
@@ -25,38 +53,6 @@ pub enum TranscodeDelivery {
     ProgressiveMkv,
     /// A fixed rendition delivered as a complete HLS VOD playlist of MPEG-TS segments.
     FixedHls { seconds_per_segment: u8 },
-}
-
-/// Exact content boundary for a universal-transcoder start.
-///
-/// PMS declares this query parameter as a number of seconds, not an integer. Keeping the value in
-/// microseconds matches the six-decimal `EXTINF`/`EXT-X-START` contract and prevents an adaptive
-/// encoder handoff at 2.002 s from being rounded back into the segment which already played.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum TranscodeOffset {
-    Fresh,
-    AtMicros(i64),
-}
-
-impl TranscodeOffset {
-    pub fn from_seconds(seconds: i64) -> Self {
-        if seconds < 0 {
-            Self::Fresh
-        } else {
-            Self::AtMicros(seconds.saturating_mul(1_000_000))
-        }
-    }
-
-    pub fn from_micros(micros: i64) -> Self {
-        Self::AtMicros(micros.max(0))
-    }
-
-    pub(crate) fn wire_seconds(self) -> Option<String> {
-        let Self::AtMicros(micros) = self else {
-            return None;
-        };
-        Some(format!("{}.{:06}", micros / 1_000_000, micros % 1_000_000))
-    }
 }
 
 /// Plex Pass's per-track transcoder DSP (issue #266): dialog boost and loudness normalization.
@@ -96,8 +92,8 @@ impl AudioEnhancements {
 
 /// The single value that describes the SHAPE of one universal-transcoder encode: flavor, delivery,
 /// the re-encode/no-copy switch, a user ceiling, and — issue #266 — which Plex Pass audio DSP the
-/// carried track gets. These five used to be four independent fields on
-/// [`crate::plex::TranscodeSpec`]; folding them into one value is what keeps "enhancement"
+/// carried track gets. These five used to be four independent fields on the Plex wire request;
+/// folding them into one value is what keeps "enhancement"
 /// honestly scoped to a remux: the audio params only ever mean anything alongside `remux == true`
 /// (M1 — MDE and a re-encode both ignore or mishandle them), so a caller that builds a contract
 /// states the whole shape in one place instead of four call sites that could each be edited
@@ -178,20 +174,6 @@ pub struct Ceiling {
 }
 
 impl Ceiling {
-    /// What the re-encode branch asked for before user ceilings existed: the panel's own native 4K
-    /// at a rate high enough to be no bound in practice. This is the `None`/Original substitute;
-    /// Auto always supplies an explicit bootstrap or controller rung.
-    pub const NATIVE_4K: Ceiling = Ceiling {
-        max_kbps: 60000,
-        max_w: 3840,
-        max_h: 2160,
-    };
-
-    /// `videoResolution`'s value for this bound.
-    pub fn resolution(&self) -> String {
-        format!("{}x{}", self.max_w, self.max_h)
-    }
-
     /// Does a source measured at `kbps` and `w`x`h` come in under this bound?
     ///
     /// **An unmeasured source does NOT** — `0` is "the server did not say", and it fails CLOSED
@@ -211,7 +193,6 @@ impl Ceiling {
 pub enum TimelineState {
     Playing,
     Paused,
-    Stopped,
 }
 
 impl TimelineState {
@@ -219,7 +200,6 @@ impl TimelineState {
         match self {
             TimelineState::Playing => "playing",
             TimelineState::Paused => "paused",
-            TimelineState::Stopped => "stopped",
         }
     }
 }

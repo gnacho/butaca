@@ -1,12 +1,11 @@
 //! Resolve/seek/route state-machine tests: worker fencing, teardown, encoder cleanup,
 //! source probe/preflight and remux-preview detection.
 
-use super::*;
-#[allow(unused_imports)]
-use super::test_support::*;
 use super::test_support::apply_plan;
 #[allow(unused_imports)]
-
+use super::test_support::*;
+use super::*;
+#[allow(unused_imports)]
 #[test]
 #[cfg(feature = "devtriggers")]
 fn a_user_contract_requested_during_resolve_survives_the_landing() {
@@ -59,10 +58,13 @@ fn cancelling_resolve_restores_failed_even_when_its_projection_has_a_url() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     reset_session(&mut ps);
-    { let s = &mut ps; {
-        s.url = "https://example.invalid/failed-candidate.mkv".into();
-        s.cur_audio = Some(CarriedAudio::named(17, -1));
-    } };
+    {
+        let s = &mut ps;
+        {
+            s.url = "https://example.invalid/failed-candidate.mkv".into();
+            s.cur_audio = Some(CarriedAudio::named(17, -1));
+        }
+    };
     let failed_projection = route_projection(&ps);
     {
         let mut control = PLAYER_CONTROL.lock().unwrap_or_else(|e| e.into_inner());
@@ -71,10 +73,13 @@ fn cancelling_resolve_restores_failed_even_when_its_projection_has_a_url() {
     }
 
     begin_playback_request();
-    { let s = &mut ps; {
-        s.url = "https://example.invalid/incoming.mkv".into();
-        s.cur_audio = None;
-    } };
+    {
+        let s = &mut ps;
+        {
+            s.url = "https://example.invalid/incoming.mkv".into();
+            s.cur_audio = None;
+        }
+    };
     cancel_playback_request(&mut ps, true);
 
     let control = PLAYER_CONTROL.lock().unwrap_or_else(|e| e.into_inner());
@@ -117,10 +122,22 @@ fn a_new_load_attempt_supersedes_the_old_observer_and_rejects_its_late_results()
     );
     assert_eq!(route_start_status(second), RouteStartStatus::Pending);
 
-    assert!(!settle_route_start(&mut ps, first, RouteStartResult::Started));
-    assert!(!settle_route_start(&mut ps, first, RouteStartResult::StartFailed));
+    assert!(!settle_route_start(
+        &mut ps,
+        first,
+        RouteStartResult::Started
+    ));
+    assert!(!settle_route_start(
+        &mut ps,
+        first,
+        RouteStartResult::StartFailed
+    ));
     assert_eq!(route_start_status(second), RouteStartStatus::Pending);
-    assert!(settle_route_start(&mut ps, second, RouteStartResult::Started));
+    assert!(settle_route_start(
+        &mut ps,
+        second,
+        RouteStartResult::Started
+    ));
     assert_eq!(route_start_status(second), RouteStartStatus::Started);
     assert_eq!(
         PLAYER_CONTROL
@@ -138,14 +155,17 @@ fn backgrounding_an_unproven_original_rearms_frame_proof_on_a_new_load() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     reset_session(&mut ps);
-    { let s = &mut ps; {
-        s.url = "http://fixture.invalid/hls/master.m3u8".into();
-        s.tsession = "foreground-held-hls".into();
-        s.cur_contract.delivery = crate::playback::TranscodeDelivery::FixedHls {
-            seconds_per_segment: 2,
-        };
-        s.cur_contract.ceiling = Some(crate::abr::Rung::P480.ceiling());
-    } };
+    {
+        let s = &mut ps;
+        {
+            s.url = "http://fixture.invalid/hls/master.m3u8".into();
+            s.tsession = "foreground-held-hls".into();
+            s.cur_contract.delivery = crate::playback::TranscodeDelivery::FixedHls {
+                seconds_per_segment: 2,
+            };
+            s.cur_contract.ceiling = Some(crate::abr::Rung::P480.ceiling());
+        }
+    };
     install_active_hls(
         "foreground-held-hls",
         "http://fixture.invalid/hls/master.m3u8",
@@ -153,12 +173,15 @@ fn backgrounding_an_unproven_original_rearms_frame_proof_on_a_new_load() {
     );
     reset_player_control_for_test(&ps);
     let pending = snapshot_route(&ps, "foreground-held-hls".into(), 44);
-    { let s = &mut ps; {
-        s.url = "https://example.invalid/source.mkv".into();
-        s.tsession.clear();
-        s.cur_contract.delivery = crate::playback::TranscodeDelivery::ProgressiveMkv;
-        s.cur_contract.ceiling = None;
-    } };
+    {
+        let s = &mut ps;
+        {
+            s.url = "https://example.invalid/source.mkv".into();
+            s.tsession.clear();
+            s.cur_contract.delivery = crate::playback::TranscodeDelivery::ProgressiveMkv;
+            s.cur_contract.ceiling = None;
+        }
+    };
     set_pending_original(&ps, pending, true);
 
     let first = settle_pending_native_start(&mut ps, RouteStartResult::Started);
@@ -177,8 +200,16 @@ fn backgrounding_an_unproven_original_rearms_frame_proof_on_a_new_load() {
         route_start_status(first),
         RouteStartStatus::Superseded(second),
     );
-    assert!(!settle_route_start(&mut ps, first, RouteStartResult::Started));
-    assert!(settle_route_start(&mut ps, second, RouteStartResult::Started));
+    assert!(!settle_route_start(
+        &mut ps,
+        first,
+        RouteStartResult::Started
+    ));
+    assert!(settle_route_start(
+        &mut ps,
+        second,
+        RouteStartResult::Started
+    ));
     assert!(matches!(
         PLAYER_CONTROL
             .lock()
@@ -208,7 +239,11 @@ fn resolve_cannot_hide_a_live_start_transaction() {
     assert!(!begin_playback_request());
     assert_eq!(desired_contract_revision(), before_revision);
     assert_eq!(route_start_status(attempt), RouteStartStatus::Pending);
-    assert!(settle_route_start(&mut ps, attempt, RouteStartResult::Started));
+    assert!(settle_route_start(
+        &mut ps,
+        attempt,
+        RouteStartResult::Started
+    ));
     assert_eq!(route_start_status(attempt), RouteStartStatus::Started);
 
     reset_player_control_for_test(&ps);
@@ -220,14 +255,17 @@ fn accepted_original_load_stays_in_trial_until_a_frame_or_rollback() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     reset_session(&mut ps);
-    { let s = &mut ps; {
-        s.url = "http://fixture.invalid/hls/master.m3u8".into();
-        s.tsession = "held-hls".into();
-        s.cur_contract.delivery = crate::playback::TranscodeDelivery::FixedHls {
-            seconds_per_segment: 2,
-        };
-        s.cur_contract.ceiling = Some(crate::abr::Rung::P480.ceiling());
-    } };
+    {
+        let s = &mut ps;
+        {
+            s.url = "http://fixture.invalid/hls/master.m3u8".into();
+            s.tsession = "held-hls".into();
+            s.cur_contract.delivery = crate::playback::TranscodeDelivery::FixedHls {
+                seconds_per_segment: 2,
+            };
+            s.cur_contract.ceiling = Some(crate::abr::Rung::P480.ceiling());
+        }
+    };
     install_active_hls(
         "held-hls",
         "http://fixture.invalid/hls/master.m3u8",
@@ -235,12 +273,15 @@ fn accepted_original_load_stays_in_trial_until_a_frame_or_rollback() {
     );
     reset_player_control_for_test(&ps);
     let pending = snapshot_route(&ps, "held-hls".into(), 31);
-    { let s = &mut ps; {
-        s.url = "https://example.invalid/source.mkv".into();
-        s.tsession.clear();
-        s.cur_contract.delivery = crate::playback::TranscodeDelivery::ProgressiveMkv;
-        s.cur_contract.ceiling = None;
-    } };
+    {
+        let s = &mut ps;
+        {
+            s.url = "https://example.invalid/source.mkv".into();
+            s.tsession.clear();
+            s.cur_contract.delivery = crate::playback::TranscodeDelivery::ProgressiveMkv;
+            s.cur_contract.ceiling = None;
+        }
+    };
     set_pending_original(&ps, pending, true);
 
     let attempt = settle_pending_native_start(&mut ps, RouteStartResult::Started);
@@ -295,7 +336,10 @@ fn automatic_publication_is_busy_for_the_whole_staged_user_edit() {
 fn a_failed_resolve_spawn_preserves_the_old_playable_route() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
-    { let s = &mut ps; s.url = "https://example.invalid/still-playing.mkv".into() };
+    {
+        let s = &mut ps;
+        s.url = "https://example.invalid/still-playing.mkv".into()
+    };
     begin_playback_request();
     request_user_route_intent(&ps, UserRouteIntent::AdaptiveReload);
 
@@ -353,8 +397,8 @@ fn quality_changed_during_resolve_cannot_land_the_old_contract() {
             url: "https://example.invalid/old-contract.mkv".into(),
             contract: crate::playback::EncodeContract {
                 delivery: crate::playback::TranscodeDelivery::FixedHls {
-                seconds_per_segment: 2,
-            },
+                    seconds_per_segment: 2,
+                },
                 ceiling: Some(crate::abr::Rung::P480.ceiling()),
                 ..Default::default()
             },
@@ -365,7 +409,13 @@ fn quality_changed_during_resolve_cannot_land_the_old_contract() {
 
     // This is the reducer half of a quality edit after ResolveEnv was snapshotted.
     begin_user_contract_boundary();
-    assert_eq!(pump_play(&mut ps, &mut crate::stores::metadata::MetadataStore::default()), None);
+    assert_eq!(
+        pump_play(
+            &mut ps,
+            &mut crate::stores::metadata::MetadataStore::default()
+        ),
+        None
+    );
     assert!(
         url(&ps).is_empty(),
         "the stale plan must never become the applied URL"
@@ -427,8 +477,7 @@ fn a_seek_retargets_an_accepted_handoff_instead_of_erasing_its_only_producer() {
     );
 
     note_user_seek_intent(90_000_000_000);
-    let action =
-        claim_route_action().expect("the accepted handoff still owns the stopped worker");
+    let action = claim_route_action().expect("the accepted handoff still owns the stopped worker");
     assert_eq!(action.ticket, worker_ticket());
     assert!(matches!(
         action.intent,
@@ -529,8 +578,7 @@ fn rejected_user_action_preserves_old_applied_auto_handoff_without_rebinding_it_
         Quality::Auto,
         "PMS refusal changed the policy which owns the unchanged physical stream",
     );
-    let automatic =
-        claim_route_action().expect("the stopped Auto producer retained its handoff");
+    let automatic = claim_route_action().expect("the stopped Auto producer retained its handoff");
     assert_eq!(
         automatic.ticket, applied,
         "old Auto evidence was rebound to a desired contract it never observed",
@@ -561,42 +609,48 @@ fn rejected_route_effect_restores_the_whole_applied_projection() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     let previous = route_projection(&ps);
-    { let s = &mut ps; {
-        s.url = "http://fixture.invalid/applied-480.m3u8".into();
-        s.tsession = "applied-480".into();
-        s.cur_contract.remux = false;
-        s.cur_contract.delivery = crate::playback::TranscodeDelivery::FixedHls {
-            seconds_per_segment: 2,
-        };
-        s.cur_contract.no_video_copy = true;
-        s.cur_contract.ceiling = Some(crate::abr::Rung::P480.ceiling());
-        s.cur_auto_original_watched = false;
-        s.cur_audio = Some(CarriedAudio::named(17, -1));
-        s.cur_sub_sid = 23;
-        s.stream_vcodec = "h264".into();
-        s.stream_acodec = "aac".into();
-        s.stream_fps = 0.0;
-        s.stream_dovi = crate::metadata::Dovi::NONE;
-        s.stream_immersive = false;
-    } };
+    {
+        let s = &mut ps;
+        {
+            s.url = "http://fixture.invalid/applied-480.m3u8".into();
+            s.tsession = "applied-480".into();
+            s.cur_contract.remux = false;
+            s.cur_contract.delivery = crate::playback::TranscodeDelivery::FixedHls {
+                seconds_per_segment: 2,
+            };
+            s.cur_contract.no_video_copy = true;
+            s.cur_contract.ceiling = Some(crate::abr::Rung::P480.ceiling());
+            s.cur_auto_original_watched = false;
+            s.cur_audio = Some(CarriedAudio::named(17, -1));
+            s.cur_sub_sid = 23;
+            s.stream_vcodec = "h264".into();
+            s.stream_acodec = "aac".into();
+            s.stream_fps = 0.0;
+            s.stream_dovi = crate::metadata::Dovi::NONE;
+            s.stream_immersive = false;
+        }
+    };
     restore_quality(Quality::Auto);
     reset_player_control_for_test(&ps);
 
     begin_user_quality_boundary(Quality::P1080High);
-    { let s = &mut ps; {
-        s.url = "http://fixture.invalid/not-yet-applied-4k.m3u8".into();
-        s.tsession = "not-yet-applied-4k".into();
-        s.cur_contract.delivery = crate::playback::TranscodeDelivery::ProgressiveMkv;
-        s.cur_contract.no_video_copy = false;
-        s.cur_contract.ceiling = Some(crate::abr::Rung::Uhd.ceiling());
-        s.cur_auto_original_watched = true;
-        s.cur_audio = Some(CarriedAudio::named(99, -1));
-        s.cur_sub_sid = 101;
-        s.stream_vcodec = "hevc".into();
-        s.stream_acodec = "eac3".into();
-        s.stream_fps = 23.976;
-        s.stream_immersive = true;
-    } };
+    {
+        let s = &mut ps;
+        {
+            s.url = "http://fixture.invalid/not-yet-applied-4k.m3u8".into();
+            s.tsession = "not-yet-applied-4k".into();
+            s.cur_contract.delivery = crate::playback::TranscodeDelivery::ProgressiveMkv;
+            s.cur_contract.no_video_copy = false;
+            s.cur_contract.ceiling = Some(crate::abr::Rung::Uhd.ceiling());
+            s.cur_auto_original_watched = true;
+            s.cur_audio = Some(CarriedAudio::named(99, -1));
+            s.cur_sub_sid = 101;
+            s.stream_vcodec = "hevc".into();
+            s.stream_acodec = "eac3".into();
+            s.stream_fps = 23.976;
+            s.stream_immersive = true;
+        }
+    };
     request_user_route_intent(&ps, UserRouteIntent::Retranscode);
     let action = claim_route_action().expect("staged user route");
     finish_route_action(&mut ps, &action, RouteApplyResult::Rejected);
@@ -610,7 +664,10 @@ fn rejected_route_effect_restores_the_whole_applied_projection() {
             seconds_per_segment: 2,
         },
     );
-    assert_eq!(restored.contract.ceiling, Some(crate::abr::Rung::P480.ceiling()));
+    assert_eq!(
+        restored.contract.ceiling,
+        Some(crate::abr::Rung::P480.ceiling())
+    );
     assert_eq!(restored.audio.as_ref().map_or(0, |a| a.sid), 17);
     assert_eq!(restored.subtitle_sid, 23);
     assert_eq!(restored.stream_vcodec, "h264");
@@ -630,18 +687,21 @@ fn hls_commit_during_a_staged_user_contract_merges_only_physical_fields() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     let previous = route_projection(&ps);
-    { let s = &mut ps; {
-        s.url = "http://fixture.invalid/old-480.m3u8".into();
-        s.tsession = "old-480".into();
-        s.cur_contract.delivery = crate::playback::TranscodeDelivery::FixedHls {
-            seconds_per_segment: 2,
-        };
-        s.cur_contract.ceiling = Some(crate::abr::Rung::P480.ceiling());
-        s.cur_audio = Some(CarriedAudio::named(17, -1));
-        s.cur_sub_sid = 23;
-        s.stream_vcodec = "h264".into();
-        s.stream_acodec = "aac".into();
-    } };
+    {
+        let s = &mut ps;
+        {
+            s.url = "http://fixture.invalid/old-480.m3u8".into();
+            s.tsession = "old-480".into();
+            s.cur_contract.delivery = crate::playback::TranscodeDelivery::FixedHls {
+                seconds_per_segment: 2,
+            };
+            s.cur_contract.ceiling = Some(crate::abr::Rung::P480.ceiling());
+            s.cur_audio = Some(CarriedAudio::named(17, -1));
+            s.cur_sub_sid = 23;
+            s.stream_vcodec = "h264".into();
+            s.stream_acodec = "aac".into();
+        }
+    };
     restore_quality(Quality::Auto);
     install_active_hls(
         "old-480",
@@ -652,7 +712,10 @@ fn hls_commit_during_a_staged_user_contract_merges_only_physical_fields() {
     let worker = worker_ticket();
 
     begin_user_contract_boundary();
-    { let s = &mut ps; s.cur_audio = Some(CarriedAudio::named(99, -1)) };
+    {
+        let s = &mut ps;
+        s.cur_audio = Some(CarriedAudio::named(99, -1))
+    };
     request_user_route_intent(&ps, UserRouteIntent::Retranscode);
     assert!(replace_active_hls_for(
         &worker,
@@ -669,9 +732,13 @@ fn hls_commit_during_a_staged_user_contract_merges_only_physical_fields() {
     let restored = route_projection(&ps);
     assert_eq!(restored.url, "http://fixture.invalid/new-720.m3u8");
     assert_eq!(restored.tsession, "new-720");
-    assert_eq!(restored.contract.ceiling, Some(crate::abr::Rung::P720.ceiling()));
     assert_eq!(
-        restored.audio.as_ref().map_or(0, |a| a.sid), 17,
+        restored.contract.ceiling,
+        Some(crate::abr::Rung::P720.ceiling())
+    );
+    assert_eq!(
+        restored.audio.as_ref().map_or(0, |a| a.sid),
+        17,
         "unaccepted track leaked into applied route"
     );
     assert_eq!(restored.subtitle_sid, 23);
@@ -720,15 +787,16 @@ fn pinning_the_live_auto_hls_rung_fences_its_worker_before_projection_changes() 
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     restore_quality(Quality::Auto);
-    apply_plan(&mut ps, 
+    apply_plan(
+        &mut ps,
         Plan {
             url: "http://fixture.invalid/4000/master.m3u8".into(),
             sess: "logical-auto".into(),
             tsession: "encoder-auto-720".into(),
             contract: crate::playback::EncodeContract {
                 delivery: crate::playback::TranscodeDelivery::FixedHls {
-                seconds_per_segment: 2,
-            },
+                    seconds_per_segment: 2,
+                },
                 ceiling: Some(crate::abr::Rung::P720.ceiling()),
                 ..Default::default()
             },
@@ -783,14 +851,15 @@ fn reselecting_the_exact_quality_does_not_fence_the_current_worker() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     restore_quality(Quality::Auto);
-    apply_plan(&mut ps, 
+    apply_plan(
+        &mut ps,
         Plan {
             url: "http://fixture.invalid/4000/master.m3u8".into(),
             tsession: "encoder-auto-720".into(),
             contract: crate::playback::EncodeContract {
                 delivery: crate::playback::TranscodeDelivery::FixedHls {
-                seconds_per_segment: 2,
-            },
+                    seconds_per_segment: 2,
+                },
                 ceiling: Some(crate::abr::Rung::P720.ceiling()),
                 ..Default::default()
             },
@@ -836,14 +905,15 @@ fn subtitle_off_keeps_a_pending_original_recovery() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     restore_quality(Quality::Original);
-    apply_plan(&mut ps, 
+    apply_plan(
+        &mut ps,
         Plan {
             url: "http://fixture.invalid/4000/master.m3u8".into(),
             tsession: "encoder-subtitle-off".into(),
             contract: crate::playback::EncodeContract {
                 delivery: crate::playback::TranscodeDelivery::FixedHls {
-                seconds_per_segment: 2,
-            },
+                    seconds_per_segment: 2,
+                },
                 ceiling: Some(crate::abr::Rung::P720.ceiling()),
                 ..Default::default()
             },
@@ -853,14 +923,16 @@ fn subtitle_off_keeps_a_pending_original_recovery() {
         },
         "rk-subtitle-off",
     );
-    request_user_route_intent(&ps, UserRouteIntent::RecoverOriginal(RecoveryCause::ManualOriginal));
+    request_user_route_intent(
+        &ps,
+        UserRouteIntent::RecoverOriginal(RecoveryCause::ManualOriginal),
+    );
 
     commit_subtitle_selection(&mut ps, -1, 0, false);
 
     assert_eq!(cur_sub_sid(&ps), 0);
     assert_eq!(
-        ps
-            .auto_original
+        ps.auto_original
             .as_ref()
             .and_then(|candidate| candidate.subtitle_ordinal),
         None,
@@ -869,7 +941,9 @@ fn subtitle_off_keeps_a_pending_original_recovery() {
     let action = claim_route_action().expect("Original recovery remains the owned action");
     assert_eq!(
         action.intent,
-        RouteIntent::User(UserRouteIntent::RecoverOriginal(RecoveryCause::ManualOriginal)),
+        RouteIntent::User(UserRouteIntent::RecoverOriginal(
+            RecoveryCause::ManualOriginal
+        )),
     );
     finish_route_action(&mut ps, &action, RouteApplyResult::Prepared);
 
@@ -883,7 +957,8 @@ fn a_direct_subtitle_change_keeps_the_original_watchdog_ticket_current() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     restore_quality(Quality::Auto);
-    apply_plan(&mut ps, 
+    apply_plan(
+        &mut ps,
         Plan {
             url: "https://example.invalid/source.mkv".into(),
             contract: crate::playback::EncodeContract {
@@ -921,14 +996,15 @@ fn subtitle_on_invalidates_a_pending_original_recovery() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     restore_quality(Quality::Original);
-    apply_plan(&mut ps, 
+    apply_plan(
+        &mut ps,
         Plan {
             url: "http://fixture.invalid/4000/master.m3u8".into(),
             tsession: "encoder-subtitle-on".into(),
             contract: crate::playback::EncodeContract {
                 delivery: crate::playback::TranscodeDelivery::FixedHls {
-                seconds_per_segment: 2,
-            },
+                    seconds_per_segment: 2,
+                },
                 ceiling: Some(crate::abr::Rung::P720.ceiling()),
                 ..Default::default()
             },
@@ -937,7 +1013,10 @@ fn subtitle_on_invalidates_a_pending_original_recovery() {
         },
         "rk-subtitle-on",
     );
-    request_user_route_intent(&ps, UserRouteIntent::RecoverOriginal(RecoveryCause::ManualOriginal));
+    request_user_route_intent(
+        &ps,
+        UserRouteIntent::RecoverOriginal(RecoveryCause::ManualOriginal),
+    );
 
     commit_subtitle_selection(&mut ps, 2, 88, true);
 
@@ -960,14 +1039,15 @@ fn audio_change_invalidates_a_pending_original_recovery() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     restore_quality(Quality::Original);
-    apply_plan(&mut ps, 
+    apply_plan(
+        &mut ps,
         Plan {
             url: "http://fixture.invalid/4000/master.m3u8".into(),
             tsession: "encoder-audio-change".into(),
             contract: crate::playback::EncodeContract {
                 delivery: crate::playback::TranscodeDelivery::FixedHls {
-                seconds_per_segment: 2,
-            },
+                    seconds_per_segment: 2,
+                },
                 ceiling: Some(crate::abr::Rung::P720.ceiling()),
                 ..Default::default()
             },
@@ -976,9 +1056,22 @@ fn audio_change_invalidates_a_pending_original_recovery() {
         },
         "rk-audio-change",
     );
-    request_user_route_intent(&ps, UserRouteIntent::RecoverOriginal(RecoveryCause::ManualOriginal));
+    request_user_route_intent(
+        &ps,
+        UserRouteIntent::RecoverOriginal(RecoveryCause::ManualOriginal),
+    );
 
-    commit_audio_selection(&mut ps, CarriedAudio { sid: 99, ordinal: 1, codec: "aac".into(), channels: 2, can_normalize_loudness: false, immersive: false });
+    commit_audio_selection(
+        &mut ps,
+        CarriedAudio {
+            sid: 99,
+            ordinal: 1,
+            codec: "aac".into(),
+            channels: 2,
+            can_normalize_loudness: false,
+            immersive: false,
+        },
+    );
 
     assert!(ps.auto_original.is_none());
     let action = claim_route_action().expect("the new audio track needs HLS retranscode");
@@ -1081,15 +1174,18 @@ fn a_completed_teardown_releases_the_fence_it_raised() {
         pending_route_start().is_none(),
         "a completed stop owns no transaction of its own",
     );
-    let start =
-        begin_route_start().expect("a completed stop must grant the next start an owner");
+    let start = begin_route_start().expect("a completed stop must grant the next start an owner");
     assert!(
         prepare_route_start(start),
         "the replay owns the transaction it was granted",
     );
     let attempt = claim_route_start_attempt(start)
         .expect("a granted transaction mints one physical Load attempt");
-    assert!(settle_route_start(&mut ps, attempt, RouteStartResult::Started));
+    assert!(settle_route_start(
+        &mut ps,
+        attempt,
+        RouteStartResult::Started
+    ));
     assert_eq!(
         PLAYER_CONTROL
             .lock()
@@ -1210,151 +1306,6 @@ fn source_recovery_publication_is_atomic_with_route_ownership() {
 
 /// A semantic route change can keep the same PMS resource id: direct Original deliberately
 /// retains the HLS Streaming Resource while dropping its HLS projection. Comparing only the
-/// id therefore admits an outgoing HLS worker after ownership has changed (same-id ABA).
-#[test]
-#[cfg(feature = "devtriggers")]
-fn a_same_id_route_change_invalidates_the_outgoing_worker() {
-    let mut ps = crate::route::PlaybackSession::IDLE;
-    let _g = fresh_registry(&mut ps);
-    let owner = "same-resource-owner";
-    install_active_hls(
-        owner,
-        "http://fixture.invalid/live.m3u8",
-        crate::abr::Rung::P480,
-    );
-    let outgoing_owner = active_route_lease();
-
-    assert!(
-        replace_active_encoder(owner, owner),
-        "direct Original keeps the exact PMS resource id",
-    );
-    assert_eq!(
-        with_active_route(&outgoing_owner, || ()),
-        Err(ActiveEncoderRefusal::RouteMoved),
-        "the old worker lease must not survive a same-id semantic route change",
-    );
-    install_active_encoder("");
-}
-
-#[test]
-fn a_resume_intent_belongs_to_exactly_one_resolve_generation() {
-    let mut pending = Some((41, 3_600_000_000_000));
-    assert_eq!(take_resume_for(&mut pending, 40), 0);
-    assert_eq!(pending, Some((41, 3_600_000_000_000)));
-    assert_eq!(take_resume_for(&mut pending, 41), 3_600_000_000_000);
-    assert_eq!(pending, None);
-}
-
-#[test]
-#[cfg(feature = "devtriggers")]
-fn abandoned_resolves_retire_the_streaming_resources_they_created() {
-    let mut ps = crate::route::PlaybackSession::IDLE;
-    use std::io::{BufRead, BufReader, Write};
-
-    let _g = fresh_registry(&mut ps);
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind cleanup server");
-    listener.set_nonblocking(true).unwrap();
-    let port = listener.local_addr().unwrap().port() as i32;
-    let (tx, rx) = std::sync::mpsc::channel();
-    let server = std::thread::spawn(move || {
-        // A FAILURE BOUND, NOT A RUNTIME: the loop returns the moment the request arrives,
-        // so a passing run never spends this. One second was not one — under a loaded
-        // 1900-test parallel run the client had not been scheduled yet, the loop gave up, and
-        // the count assertion below failed with an empty vec. Observed twice in ordinary runs
-        // on 2026-09-02, never when the module ran alone.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-        let mut requests = Vec::new();
-        while std::time::Instant::now() < deadline && requests.len() < 2 {
-            match crate::testnet::accept(&listener) {
-                Ok((mut socket, _)) => {
-                    let mut request = String::new();
-                    let mut reader = BufReader::new(socket.try_clone().expect("clone socket"));
-                    reader
-                        .read_line(&mut request)
-                        .expect("read cleanup request");
-                    socket
-                        .write_all(
-                            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                        )
-                        .expect("cleanup response");
-                    requests.push(request);
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(std::time::Duration::from_millis(5));
-                }
-                Err(error) => panic!("accept cleanup request: {error}"),
-            }
-        }
-        tx.send(requests).unwrap();
-    });
-    let sid = crate::registry::register_with_client_id(
-        "stale-resolve",
-        "127.0.0.1",
-        port,
-        "token",
-        "stale-resolve-client",
-    );
-
-    PLAY_GEN.store(2, Ordering::SeqCst);
-    *PLAY_SLOT.lock().unwrap_or_else(|e| e.into_inner()) = Some(PlayLanding {
-        gen: 1,
-        contract_revision: desired_contract_revision(),
-        plan: Plan {
-            sid,
-            sess: "abandoned-logical-resource".into(),
-            url: "https://example.invalid/source.mkv".into(),
-            ..Default::default()
-        },
-        rk: "abandoned-rk".into(),
-    });
-
-    assert_eq!(
-        pump_play(&mut ps, &mut crate::stores::metadata::MetadataStore::default()),
-        None,
-        "the superseded plan may not be installed"
-    );
-
-    PLAY_GEN.store(3, Ordering::SeqCst);
-    *PLAY_SLOT.lock().unwrap_or_else(|e| e.into_inner()) = Some(PlayLanding {
-        gen: 3,
-        contract_revision: desired_contract_revision(),
-        plan: Plan {
-            sid,
-            sess: "refused-logical-resource".into(),
-            verdict: Some(PlayVerdict::Server("server refused this route".into())),
-            ..Default::default()
-        },
-        rk: "refused-rk".into(),
-    });
-    assert_eq!(pump_play(&mut ps, &mut crate::stores::metadata::MetadataStore::default()), None, "a refusal has no playable URL");
-    assert!(
-        play_refused(&ps),
-        "its server verdict still reaches the error read-out"
-    );
-
-    let requests = rx.recv().expect("cleanup observations");
-    server.join().unwrap();
-    assert_eq!(
-        requests.len(),
-        2,
-        "both ownerless resources need an exact close: {requests:?}"
-    );
-    for session in ["abandoned-logical-resource", "refused-logical-resource"] {
-        let request = requests
-            .iter()
-            .find(|request| request.contains(&format!("session={session}")))
-            .unwrap_or_else(|| panic!("missing cleanup for {session}: {requests:?}"));
-        assert!(
-            request.contains("/video/:/transcode/universal/stop?"),
-            "{request}"
-        );
-        assert!(request.contains("closeResourceSession=1"), "{request}");
-    }
-
-    crate::registry::reset_for_test();
-    reset_session(&mut ps);
-}
-
 /// **The visible-switch stamp is THIS FRAME'S TICK** (spec §4.1), and the tick has exactly one
 /// writer.
 ///
@@ -1407,7 +1358,7 @@ fn a_retry_keeps_the_subtitle_offset_a_new_item_does_not() {
     crate::player::reset_subtitle();
     crate::player::set_subtitle_offset(2_000);
     let retry = RetryContext {
-            direct_play_mode: DirectPlayMode::Auto,
+        direct_play_mode: DirectPlayMode::Auto,
         resume_ns: 0,
         audio_sid: 17,
         sub_sid: 23,
@@ -1421,16 +1372,27 @@ fn a_retry_keeps_the_subtitle_offset_a_new_item_does_not() {
         "a retry of the same item must keep the offset tuned against its subtitle",
     );
     reset_track_selection(None);
-    assert_eq!(crate::player::subtitle_offset_ms(), 0, "a new item starts at 0");
+    assert_eq!(
+        crate::player::subtitle_offset_ms(),
+        0,
+        "a new item starts at 0"
+    );
 
     // A sidecar's advance survives the reset (which deselects the sidecar) and is held to the
     // range of whatever the landing re-selected: kept for the sidecar, dropped for anything else.
-    let advanced = RetryContext { sub_offset_ms: -2_000, ..retry };
+    let advanced = RetryContext {
+        sub_offset_ms: -2_000,
+        ..retry
+    };
     reset_track_selection(Some(advanced));
     assert_eq!(crate::player::subtitle_offset_ms(), -2_000);
     crate::player::sidecar::select_without_fetch_for_test(23);
     crate::player::reclamp_subtitle_offset();
-    assert_eq!(crate::player::subtitle_offset_ms(), -2_000, "the sidecar landed again");
+    assert_eq!(
+        crate::player::subtitle_offset_ms(),
+        -2_000,
+        "the sidecar landed again"
+    );
     reset_track_selection(Some(advanced));
     crate::player::reclamp_subtitle_offset();
     assert_eq!(
@@ -1457,12 +1419,15 @@ fn a_refused_retry_keeps_its_position_and_full_request_for_the_next_quality() {
         ctx: "S01 E02".into(),
         preview: false,
     };
-    { let s = &mut ps; {
-        s.request = Some(request.clone());
-        s.requested_resume_ns = 3_600_000_000_000;
-        s.cur_audio = Some(CarriedAudio::named(17, -1));
-        s.cur_sub_sid = 23;
-    } };
+    {
+        let s = &mut ps;
+        {
+            s.request = Some(request.clone());
+            s.requested_resume_ns = 3_600_000_000_000;
+            s.cur_audio = Some(CarriedAudio::named(17, -1));
+            s.cur_sub_sid = 23;
+        }
+    };
 
     assert_eq!(
         current_retry_context(&ps, 3_600_000_000_000),
@@ -1477,7 +1442,8 @@ fn a_refused_retry_keeps_its_position_and_full_request_for_the_next_quality() {
         "a rescue must not silently restore the server-default tracks",
     );
 
-    apply_plan(&mut ps, 
+    apply_plan(
+        &mut ps,
         Plan {
             verdict: Some(PlayVerdict::Server("temporary refusal".into())),
             ..Default::default()
@@ -1503,94 +1469,6 @@ fn a_refused_retry_keeps_its_position_and_full_request_for_the_next_quality() {
 // the expression `build_stream` itself evaluates — not a re-derivation of it. `build_stream`
 // is unreachable from the host (it needs a `Client` and a PMS), and the composition is the
 // half that can silently go wrong, so it is the half that is factored out and pinned.
-
-
-/// A stop acknowledgement is not a release event. The ledger must coalesce concurrent
-/// checks, retain present/unknown sessions, retry a stop only when it was not accepted, and
-/// release one server independently only after physical absence and exact logical close.
-#[test]
-fn encoder_cleanup_ledger_releases_only_on_exact_absence() {
-    let sid_a = ServerId::from_raw(1);
-    let sid_b = ServerId::from_raw(2);
-    let mut ledger = EncoderCleanupLedger::default();
-
-    assert!(ledger.remember(sid_a, "candidate-a"));
-    assert!(
-        !ledger.remember(sid_a, "candidate-a"),
-        "one physical key, one cleanup owner"
-    );
-    assert!(!ledger.is_clear(sid_a));
-    assert!(
-        ledger.is_clear(sid_b),
-        "another PMS has independent resource accounting"
-    );
-
-    let first = ledger.take_unchecked(sid_a);
-    assert_eq!(first.len(), 1);
-    assert!(
-        first[0].stop_needed,
-        "the first worker must issue the one requested stop"
-    );
-    assert!(
-        ledger.take_unchecked(sid_a).is_empty(),
-        "an in-flight ping is single-owner"
-    );
-    ledger.finish(
-        first.into_iter().next().unwrap(),
-        Some(true),
-        Some(true),
-        None,
-    );
-
-    let ping = ledger.take_unchecked(sid_a);
-    assert_eq!(ping.len(), 1);
-    assert!(
-        !ping[0].stop_needed,
-        "accepted stop is polled with ping, not re-enqueued"
-    );
-    ledger.finish(ping.into_iter().next().unwrap(), None, None, None);
-    assert!(
-        !ledger.is_clear(sid_a),
-        "transport uncertainty is not absence"
-    );
-
-    let absent = ledger.take_unchecked(sid_a);
-    ledger.finish(absent.into_iter().next().unwrap(), Some(false), None, None);
-    assert!(
-        !ledger.is_clear(sid_a),
-        "404 ping cannot prove that the separately-owned Streaming Resource was released",
-    );
-
-    let close = ledger.take_unchecked(sid_a);
-    assert_eq!(close.len(), 1);
-    assert!(
-        close[0].physical_absent,
-        "a known-absent encoder must not be pinged again"
-    );
-    assert!(
-        !close[0].stop_needed,
-        "a known-absent encoder must not be stopped again"
-    );
-    ledger.finish(
-        close.into_iter().next().unwrap(),
-        Some(false),
-        None,
-        Some(true),
-    );
-    assert!(
-        ledger.is_clear(sid_a),
-        "only the logical close completes exact cleanup"
-    );
-
-    assert!(ledger.remember(sid_a, "candidate-retry"));
-    let failed_stop = ledger.take_unchecked(sid_a).into_iter().next().unwrap();
-    ledger.finish(failed_stop, Some(true), Some(false), None);
-    let retry = ledger.take_unchecked(sid_a).into_iter().next().unwrap();
-    assert!(
-        retry.stop_needed,
-        "an unaccepted stop must be retried from later media evidence"
-    );
-}
 
 /// The live Mandalorian regression, reproduced at the PMS resource boundary.  A raw Part GET
 /// first exact-looks up the supplied Streaming Resource and only enters AdHoc MDE when that
@@ -1654,11 +1532,7 @@ fn source_probe_reuses_live_hls_resource_instead_of_entering_adhoc_mde() {
     let active_route = worker_ticket();
     let control = HlsAbrControl {
         sid,
-        rating_key: "1".into(),
         logical_session: "probe-logical".into(),
-        audio_stream_id: 0,
-        subtitle_stream_id: 0,
-        seconds_per_segment: 2,
         initial_rung: rung,
         initial_observed: None,
         fixture_base: String::new(),
@@ -1754,11 +1628,7 @@ fn a_rejected_original_probe_keeps_hls_and_produces_no_capacity_observation() {
     let active_route = worker_ticket();
     let control = HlsAbrControl {
         sid,
-        rating_key: "1".into(),
         logical_session: "probe-bodyless-logical".into(),
-        audio_stream_id: 0,
-        subtitle_stream_id: 0,
-        seconds_per_segment: 2,
         initial_rung: rung,
         initial_observed: None,
         fixture_base: String::new(),
@@ -1843,11 +1713,7 @@ fn a_source_sample_from_a_superseded_hls_resource_is_discarded() {
     let active_route = worker_ticket();
     let control = HlsAbrControl {
         sid,
-        rating_key: "1".into(),
         logical_session: "probe-logical".into(),
-        audio_stream_id: 0,
-        subtitle_stream_id: 0,
-        seconds_per_segment: 2,
         initial_rung: crate::abr::Rung::P480,
         initial_observed: None,
         fixture_base: String::new(),
@@ -1877,18 +1743,10 @@ fn a_source_sample_from_a_superseded_hls_resource_is_discarded() {
 
 // ---- the two reads that FEED the ceiling: which detail describes the leaf, and at what rate
 
-
-
 // ---- pick_dp_audio: the direct-play audio selection ladder ------------------------------
 // Never host-testable before: it read `metadata::playing()`'s `&'static` store. Making it
 // take the tracks explicitly (step 6 of docs/async-model-decision.md) turned the ladder into
 // a pure function, and these pin the order the comments claim.
-
-
-
-
-
-
 
 // ---- rung 1: the selection the SERVER already holds --------------------------------------
 // `Stream.selected` is the part's current pick — what `put_selection` writes and what a pick
@@ -1897,31 +1755,11 @@ fn a_source_sample_from_a_superseded_hls_resource_is_discarded() {
 // The shapes below are the ones the live server actually serves (probed per-identity while
 // this landed), which is where the two gates on the rung come from.
 
-
-
-
-
 // ---- pick_dp_subtitle: the read-back half of put_selection -------------------------------
-
-
-
-
-
 
 // ---- video_direct_plays: the local codec + resolution + Dolby Vision direct-play gate ----
 
-
-
-
-
-
-
 // ---- video_direct_plays: the local codec + resolution direct-play gate -------------------
-
-
-
-
-
 
 /// The preview's THIRD answer, which is the one the UI hangs a Plex Pass claim on.
 ///
@@ -2015,7 +1853,10 @@ fn on_deck_hevc_p5_preview_uses_the_selected_episodes_codec() {
         }),
         ..Default::default()
     };
-    assert!(show.vcodec.is_empty(), "a show deliberately has no file codec");
+    assert!(
+        show.vcodec.is_empty(),
+        "a show deliberately has no file codec"
+    );
     assert_eq!(
         playback_preview_with_capability_for_test(
             &show,
@@ -2041,16 +1882,34 @@ fn restored_sidecar_is_part_of_the_route_contract() {
     let sid = ServerId::from_raw(0);
     let mut meta = crate::stores::metadata::MetadataStore::default();
     let playing = Some(fourk_item_with_subs(
-        sid, vec![], vec![crate::metadata::Stream {
-            id: 77, external: true, selected: true, codec: "srt".into(),
-            key: "/library/streams/77".into(), ..Default::default()
+        sid,
+        vec![],
+        vec![crate::metadata::Stream {
+            id: 77,
+            external: true,
+            selected: true,
+            codec: "srt".into(),
+            key: "/library/streams/77".into(),
+            ..Default::default()
         }],
     ));
-    let start = super::apply_plan(&mut ps, &mut meta, Plan {
-        sid, playing, url: "http://fixture.invalid/movie.mkv".into(), ..Default::default()
-    }, "rk-4k");
+    let start = super::apply_plan(
+        &mut ps,
+        &mut meta,
+        Plan {
+            sid,
+            playing,
+            url: "http://fixture.invalid/movie.mkv".into(),
+            ..Default::default()
+        },
+        "rk-4k",
+    );
     settle_plan_start_in_unit_test(&mut ps, start);
-    assert_eq!(cur_sub_sid(&ps), 77, "timeline and later audio/quality transcodes must retain the restored sidecar");
+    assert_eq!(
+        cur_sub_sid(&ps),
+        77,
+        "timeline and later audio/quality transcodes must retain the restored sidecar"
+    );
     crate::player::sidecar::reset();
 }
 #[test]
@@ -2059,14 +1918,15 @@ fn sidecar_on_invalidates_a_pending_original_recovery() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
     restore_quality(Quality::Original);
-    apply_plan(&mut ps,
+    apply_plan(
+        &mut ps,
         Plan {
             url: "http://fixture.invalid/4000/master.m3u8".into(),
             tsession: "encoder-subtitle-on".into(),
             contract: crate::playback::EncodeContract {
                 delivery: crate::playback::TranscodeDelivery::FixedHls {
-                seconds_per_segment: 2,
-            },
+                    seconds_per_segment: 2,
+                },
                 ceiling: Some(crate::abr::Rung::P720.ceiling()),
                 ..Default::default()
             },
@@ -2075,7 +1935,10 @@ fn sidecar_on_invalidates_a_pending_original_recovery() {
         },
         "rk-subtitle-on",
     );
-    request_user_route_intent(&ps, UserRouteIntent::RecoverOriginal(RecoveryCause::ManualOriginal));
+    request_user_route_intent(
+        &ps,
+        UserRouteIntent::RecoverOriginal(RecoveryCause::ManualOriginal),
+    );
 
     commit_subtitle_selection(&mut ps, -1, 88, true);
 
@@ -2100,7 +1963,8 @@ fn sidecar_on_invalidates_a_pending_original_recovery() {
 fn picking_a_different_subtitle_track_resets_the_offset_and_re_picking_it_keeps_it() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
-    apply_plan(&mut ps,
+    apply_plan(
+        &mut ps,
         Plan {
             url: "https://example.invalid/source.mkv".into(),
             contract: crate::playback::EncodeContract {
@@ -2117,14 +1981,26 @@ fn picking_a_different_subtitle_track_resets_the_offset_and_re_picking_it_keeps_
     crate::player::set_subtitle_offset(1_500);
 
     commit_subtitle_selection(&mut ps, 2, 88, true);
-    assert_eq!(crate::player::subtitle_offset_ms(), 1_500, "the same track keeps its offset");
+    assert_eq!(
+        crate::player::subtitle_offset_ms(),
+        1_500,
+        "the same track keeps its offset"
+    );
 
     commit_subtitle_selection(&mut ps, 3, 89, true);
-    assert_eq!(crate::player::subtitle_offset_ms(), 0, "another track starts at zero");
+    assert_eq!(
+        crate::player::subtitle_offset_ms(),
+        0,
+        "another track starts at zero"
+    );
 
     crate::player::set_subtitle_offset(700);
     commit_subtitle_selection(&mut ps, -1, 0, false);
-    assert_eq!(crate::player::subtitle_offset_ms(), 0, "Off drops the offset too");
+    assert_eq!(
+        crate::player::subtitle_offset_ms(),
+        0,
+        "Off drops the offset too"
+    );
 
     reset_session(&mut ps);
     reset_player_control_for_test(&ps);
@@ -2140,13 +2016,25 @@ fn picking_a_different_subtitle_track_resets_the_offset_and_re_picking_it_keeps_
 fn retry_after_start_failure_suppresses_enhancement() {
     let mut ps = crate::route::PlaybackSession::IDLE;
     let _g = fresh_registry(&mut ps);
-    let enh = crate::playback::AudioEnhancements { boost_dialog: true, normalize_loudness: true };
+    let enh = crate::playback::AudioEnhancements {
+        boost_dialog: true,
+        normalize_loudness: true,
+    };
     crate::player::restore_audio_enhancements(enh);
     let sid = unregistered_sid();
     let fresh_env = |ps: &PlaybackSession| {
-        ResolveEnv::snapshot(ps, crate::stores::metadata::MetadataStore::default().view(), sid, "rk-r")
+        ResolveEnv::snapshot(
+            ps,
+            crate::stores::metadata::MetadataStore::default().view(),
+            sid,
+            "rk-r",
+        )
     };
-    assert_eq!(fresh_env(&ps).audio_enhancements, enh, "the snapshot carries the preference");
+    assert_eq!(
+        fresh_env(&ps).audio_enhancements,
+        enh,
+        "the snapshot carries the preference"
+    );
 
     // The failed route was enhanced.
     ps.cur_contract.audio = enh;
@@ -2154,7 +2042,10 @@ fn retry_after_start_failure_suppresses_enhancement() {
     assert!(rescue.suppress_enhancement);
     let mut env = fresh_env(&ps);
     apply_retry_enhancement(&mut env, rescue);
-    assert_eq!(env.audio_enhancements, crate::playback::AudioEnhancements::NONE);
+    assert_eq!(
+        env.audio_enhancements,
+        crate::playback::AudioEnhancements::NONE
+    );
 
     // The contract-change re-resolve of the same playback does not suppress.
     let inflight = current_retry_context(&ps, 5_000);
@@ -2169,8 +2060,15 @@ fn retry_after_start_failure_suppresses_enhancement() {
     assert!(!plain.suppress_enhancement);
     let mut env = fresh_env(&ps);
     apply_retry_enhancement(&mut env, plain);
-    assert_eq!(env.audio_enhancements, enh, "the viewer's preference is never rewritten");
-    assert_eq!(crate::player::audio_enhancements(), enh, "suppression is per-resolve, not persisted");
+    assert_eq!(
+        env.audio_enhancements, enh,
+        "the viewer's preference is never rewritten"
+    );
+    assert_eq!(
+        crate::player::audio_enhancements(),
+        enh,
+        "suppression is per-resolve, not persisted"
+    );
 
     crate::player::restore_audio_enhancements(crate::playback::AudioEnhancements::NONE);
 }

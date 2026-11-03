@@ -7003,35 +7003,12 @@ fn hls_demux(
                     tx.finish("aborted");
                     return Err(HlsExit::Aborted);
                 }
-                // **The cause is the SERVER's answer, not a guess at this call site.** `prime`
-                // has four exits and only one — a PMS refusal of this rung's ceiling — says
-                // anything about the candidate. Reading a bare failure as `Candidate` charged the
-                // other three a full `E_tx` refill debt (up to ~4x `E_tx` of blocked climbing) for
-                // an encoder that moved underneath, a missing client or an unresolved
-                // control-plane result. None is ordinal evidence about the requested rung.
+                // **The refusal is never ordinal evidence about the requested rung.** The Plex
+                // `/decision` exits that carried rung information (`Rung`, `Deadline`, `Control`)
+                // went with the wire layer; the one refusal left says the session moved or the
+                // server client is gone, which is Circumstance for the frontier, not a verdict
+                // on the candidate.
                 let (cause, why) = match refusal {
-                    crate::route::PrimeRefusal::Rung => {
-                        (crate::abr::RejectCause::Structural, "prime_refused")
-                    }
-                    crate::route::PrimeRefusal::Deadline
-                        if !exploration_timeout_is_final(
-                            &mut exploration_reserve,
-                            prime_deadline,
-                        ) =>
-                    {
-                        // A decision request is not safe to replay blindly: PMS may have
-                        // registered it before the old snapshot fired. `prime` has already
-                        // queued exact cleanup, so retire this attempt without teaching the
-                        // frontier that the rung exhausted a reserve the playhead did not
-                        // spend. Resume can propose it again from fresh completed evidence.
-                        (crate::abr::RejectCause::Circumstance, "control_clock_moved")
-                    }
-                    crate::route::PrimeRefusal::Deadline => {
-                        (crate::abr::RejectCause::Censored, "control_deadline")
-                    }
-                    crate::route::PrimeRefusal::Control => {
-                        (crate::abr::RejectCause::Circumstance, "control_unresolved")
-                    }
                     crate::route::PrimeRefusal::Session => {
                         (crate::abr::RejectCause::Circumstance, "prime_session_moved")
                     }

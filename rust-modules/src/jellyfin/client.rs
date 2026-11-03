@@ -1238,7 +1238,6 @@ pub(crate) fn build_letters(total: i64, counts: Vec<(String, i64)>) -> Vec<(Stri
 fn method_name(m: http::Method) -> &'static str {
     match m {
         http::Method::Get => "GET",
-        http::Method::Put => "PUT",
         http::Method::Post => "POST",
         http::Method::Delete => "DELETE",
     }

@@ -1957,14 +1957,6 @@ mod tests {
             assert!(route_line(&ps, &d).contains("enh=refused"));
         }
 
-        {
-            let ps = EnhTestSession::new(EnhTestFixture {
-                applied: asked,
-                unverified: true,
-                ..Default::default()
-            });
-            assert!(route_line(&ps, &d).contains("enh=unverified"));
-        }
     }
     use crate::ui::consts::{SCR_H, SCR_W};
 

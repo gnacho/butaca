@@ -1,8 +1,8 @@
 //! Library operations (impl Client): the guid lookup and item metadata reads that still have
-//! live callers, plus the two part-level playback ops (stream selection, direct-play target).
+//! live callers, plus the part-level direct-play target. (The part's stream-selection PUT went
+//! with the Plex transcoder slice: its one caller, route's `put_selection`, is gone.)
 use super::client::{Client, QueryBuilder, StreamUrl};
 use crate::media::{MediaContainer, Metadata};
-use super::params::StreamSelection;
 
 fn sidecar_key_allowed(key: &str) -> bool {
     let Some(tail) = key.strip_prefix("/library/streams/") else { return false; };
@@ -90,19 +90,6 @@ impl Client {
         paths.push(format!("{key}{sep}encoding=utf-8"));
         paths.push(key.to_string());
         paths.iter().find_map(|path| self.get_sidecar_bytes(path).filter(|b| !b.is_empty()))
-    }
-
-    /// PUT /library/parts/{id} — select the part's audio/subtitle streams SERVER-side (the
-    /// transcoder encodes the SELECTED audio and burns the SELECTED subtitle; a query-param
-    /// on the stream URL does NOT change them, only this PUT does). `subtitleStreamID` is
-    /// always sent — 0 keeps subs OFF (suppresses a default-selected burn); `audioStreamID`
-    /// only when the user switched. Returns the HTTP status (route logs it).
-    pub fn select_streams(&self, sel: &StreamSelection) -> i32 {
-        let q = QueryBuilder::new(format!("/library/parts/{}", sel.part_id))
-            .int("allParts", 1)
-            .int("subtitleStreamID", sel.subtitle_stream_id)
-            .opt_int("audioStreamID", sel.audio_stream_id);
-        self.put(&q.build())
     }
 
     /// The direct-play stream target: the raw part `key` GET, carrying the per-playback

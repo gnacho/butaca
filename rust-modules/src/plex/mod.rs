@@ -12,7 +12,6 @@
 
 mod client;
 pub(crate) mod identity; // ONE X-Plex-* identity for both transports (plex.tv headers + PMS query)
-mod params;
 // WHICH servers exist and which one is current. The SERVER REGISTRY itself now lives in
 // `crate::registry` (backend-neutral: `ServerId`, `ServerFacts` and the per-slot state machine are
 // shared vocabulary — the Jellyfin backend names its one server in the same slot model), and the
@@ -25,8 +24,9 @@ use crate::registry as servers;
 mod library;
 /// Whole-file text subtitles are bounded before transport allocation and parsing.
 pub(crate) const SIDECAR_MAX_BYTES: usize = 4 * 1024 * 1024;
-mod timeline;
-mod transcoder;
+// The relay link policy (`link_policy`): pure policy over `probe::Location`. The transcoder
+// request builders it used to govern went with the Plex wire layer.
+mod link;
 
 // The server's self-description (version + Plex Pass tristate), refreshed by `install` on every
 // session path. pub(crate) because it is a DIAGNOSTICS surface with readers outside this layer
@@ -94,7 +94,6 @@ pub(crate) mod pins;
 
 // The re-exports are the public surface the call sites import.
 pub(crate) use client::ArtFetch;
-pub(crate) use client::JsonDeadlineOutcome;
 // The one link/IP ⇄ u8 encode/decode pair — shared by `Client`'s own atomics and the removed
 // report trace's packed attempt snapshot; with nothing left to read them, the re-export goes.
 pub use client::{Client, IpVersion, StreamUrl};
@@ -118,20 +117,18 @@ pub(crate) use servers::ConnectionFacts;
 // and `reset_servers_for_test` is what keeps the table a per-test fixture instead of a growing
 // process-global holding clients whose loopback ports closed when their test returned. Both must be
 // called under `crate::testlock::serial`.
-// The i64 wire-fold helper is shared, not plex-private: the person screen's DTO vocabulary
-// (crate::person, where the old discover.rs types now live) deserializes its optional i64s
-// through it.
-pub use params::*;
+// The typed request params (`TranscodeSpec`, `StreamSelection`, `TimelineReport`) and the
+// universal-transcoder ops died with the Plex wire layer; the backend-neutral nouns they
+// carried had already moved to `crate::playback` (#189). The i64 wire-fold helper the params
+// doc mentioned is `crate::plex::i64_fold`'s sibling and stays with its own users.
 // The registry's test-fixture surface (`register_with_client_id`, `reset_for_test`,
 // `write_held_for_test`, `register_pinned_with_client_id*`) and the registration entry points
 // (`register_origin`, `register_captured_origin_with_connection`) moved to `crate::registry`
 // with the registry itself — callers import them there.
-// The projected play-queue row and the rest of the encode/timeline vocabulary moved to
-// `crate::playback`; route/, `plex/session.rs` and `jellyfin/profile.rs` name it there now.
-// DP_AUDIO_CODECS rides along for `devcaps`, which intersects it with the device's own codec
-// table — normal routing and its profile read the same codec and channel limits.
-// `is_dp_subtitle` is the subtitle twin: the profile's `subtitleCodec=` list and route's MDE
-// `subtitleStreamID` gate, so a selected PGS cannot be advertised in one and omitted from the other.
-// `is_dp_audio_track` checks normal codec/channel eligibility, while `link_policy` constrains
-// the connection. Forced mode retains software feed limits and uses a separate PMS profile.
-pub use transcoder::{DP_AUDIO_CODECS, LinkPolicy, is_dp_audio_track, is_dp_subtitle, link_policy};
+// `link_policy` is the one symbol the wire layer left behind that outside callers still name:
+// the detail page's playback preview grades the live link tier through it, and the routing
+// tests grade it beside `route::quality_policy`. `LinkPolicy` itself moved to
+// `crate::playback`; `DP_AUDIO_CODECS`/`is_dp_audio_track` moved to `crate::devcaps` (their
+// implementation home), and the subtitle list went local to `route/plan.rs` with its render
+// consumer.
+pub use link::link_policy;

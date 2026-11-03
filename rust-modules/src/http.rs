@@ -69,13 +69,10 @@
 //! error whenever a 2xx will not parse, over either transport.
 use crate::origin::{CredentialPolicy, Origin, Scheme, ResolvePin};
 
-/// The verb. Three, because three is what the Plex control plane uses: reads, the body-less
-/// `PUT /library/parts/{id}` that selects a track server-side, and the POSTs whose params ride the
-/// query string (`/:/timeline`, `/playQueues`).
+/// The verb. Reads, and the POSTs/DELETEs whose parameters ride the query string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Method {
     Get,
-    Put,
     Post,
     /// Jellyfin's view-state writes (`DELETE .../PlayedItems/{id}`) and its transcode kill
     /// (`DELETE /Videos/ActiveEncodings`) — bodyless like a GET, parameters in the query string.
@@ -87,7 +84,6 @@ impl Method {
     fn as_str(self) -> &'static str {
         match self {
             Method::Get => "GET",
-            Method::Put => "PUT",
             Method::Post => "POST",
             Method::Delete => "DELETE",
         }
@@ -111,7 +107,6 @@ pub(crate) struct Reply {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum RequestOutcome {
     Response(Reply),
-    Deadline,
     /// Nothing answered. Carries libcurl's [`crate::net::RequestFailure`] when the TLS transport
     /// ran and produced one; `None` from the plaintext transport and from a request refused
     /// before any transport ran.
@@ -122,7 +117,7 @@ impl RequestOutcome {
     fn response(self) -> Option<Reply> {
         match self {
             Self::Response(reply) => Some(reply),
-            Self::Deadline | Self::Transport(_) => None,
+            Self::Transport(_) => None,
         }
     }
 }
@@ -156,24 +151,6 @@ enum BodyPolicy {
     Api,
     Bulk { max: usize },
     Probe { max: usize, timeout_s: i32 },
-    Deadline { at: std::time::Instant },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DeadlineOwner {
-    Caller,
-    Liveness,
-}
-
-fn effective_deadline(
-    caller: std::time::Instant,
-    liveness: std::time::Instant,
-) -> (std::time::Instant, DeadlineOwner) {
-    if caller <= liveness {
-        (caller, DeadlineOwner::Caller)
-    } else {
-        (liveness, DeadlineOwner::Liveness)
-    }
 }
 
 /// **The one entry point.** One request to `origin` for `path`, over whichever transport that
@@ -243,31 +220,6 @@ pub(crate) fn request_bulk(
     .response()
 }
 
-/// A small control-plane request inside an already-running transaction reserve. Plaintext composes
-/// the caller's absolute projection with a rolling inactivity deadline; complete headers and body
-/// bytes renew only that liveness clock. TLS instead composes the remaining reserve with the
-/// ordinary 25-second whole-request API cap, which progress does not renew. Neither transport can
-/// renew the caller's reserve. The typed result distinguishes an issued HTTP/transport result from
-/// the absolute timer which actually fired.
-pub(crate) fn request_until_outcome(
-    origin: &Origin,
-    path: &str,
-    method: Method,
-    headers: &[&str],
-    deadline: std::time::Instant,
-    pin: Option<&ResolvePin>,
-) -> RequestOutcome {
-    request_with(
-        origin,
-        path,
-        method,
-        headers,
-        BodyPolicy::Deadline { at: deadline },
-        pin,
-        &[],
-    )
-}
-
 /// A bounded discovery probe. The caller chooses 5 s for a local candidate and 10 s for a remote
 /// or relay candidate; this façade carries that policy into either transport without either arm
 /// trying to infer locality from an address.
@@ -307,9 +259,6 @@ pub(crate) fn request_probe(
     ) {
         RequestOutcome::Response(reply) => Ok(reply),
         RequestOutcome::Transport(failure) => Err(failure),
-        // A probe carries no caller deadline (`BodyPolicy::Probe`), so this is unreachable; it is
-        // a failure without evidence rather than a panic if that ever changes.
-        RequestOutcome::Deadline => Err(None),
     }
 }
 
@@ -517,12 +466,6 @@ fn plaintext(
     let extra_ptr = extra_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
 
     let mut hs = crate::stream::http_stream_boxed();
-    let mut deadline_liveness = matches!(body_policy, BodyPolicy::Deadline { .. }).then(|| {
-        std::time::Instant::now()
-            .checked_add(crate::stream::media_stall_budget())
-            .unwrap_or_else(std::time::Instant::now)
-    });
-    let mut response_status = None;
     let opened = match body_policy {
         BodyPolicy::Probe { timeout_s, .. } => crate::stream::http_open_probe(
             &mut *hs,
@@ -533,47 +476,8 @@ fn plaintext(
             method.as_str(),
             timeout_s.saturating_mul(1000),
         ),
-        BodyPolicy::Deadline { at } => {
-            if std::time::Instant::now() >= at {
-                return RequestOutcome::Deadline;
-            }
-            let (effective, owner) = deadline_liveness
-                .map_or((at, DeadlineOwner::Caller), |liveness| {
-                    effective_deadline(at, liveness)
-                });
-            match crate::stream::http_open_until_result(
-                &mut *hs,
-                host_c.as_ptr(),
-                origin.port(),
-                path_c.as_ptr(),
-                extra_ptr,
-                method.as_str(),
-                effective,
-                &mut crate::checkpoint::NoCheckpoint,
-            ) {
-                Ok(()) => 0,
-                Err(crate::stream::HttpOpenError::Status(status)) => {
-                    response_status = Some(status);
-                    -1
-                }
-                Err(crate::stream::HttpOpenError::Deadline) => {
-                    return match owner {
-                        DeadlineOwner::Caller => RequestOutcome::Deadline,
-                        DeadlineOwner::Liveness => RequestOutcome::Transport(None),
-                    };
-                }
-                // `Stopped` cannot occur: this request has no checkpoint.
-                Err(
-                    crate::stream::HttpOpenError::Aborted
-                    | crate::stream::HttpOpenError::Stopped
-                    | crate::stream::HttpOpenError::Transport,
-                ) => {
-                    return RequestOutcome::Transport(None);
-                }
-            }
-        }
         // The JSON-body entry point is the one caller that brings bytes of its own, and it runs
-        // the ordinary API policy only — there is no body-bearing probe or deadline variant, and
+        // the ordinary API policy only — there is no body-bearing probe variant, and
         // `request_post_json`'s doc says why none is needed. An empty slice keeps `http_open`'s
         // byte-for-byte head and behaviour.
         _ if !req_body.is_empty() => crate::stream::http_open_body(
@@ -594,20 +498,10 @@ fn plaintext(
             method.as_str(),
         ),
     };
-    if opened == 0 && matches!(body_policy, BodyPolicy::Deadline { .. }) {
-        // A complete response head is transport progress. Preserve the caller's reserve instant,
-        // but begin a fresh ordinary inactivity epoch for the body just as the HLS path and
-        // SO_RCVTIMEO do; connect/header latency cannot silently consume the body's watchdog.
-        deadline_liveness = Some(
-            std::time::Instant::now()
-                .checked_add(crate::stream::media_stall_budget())
-                .unwrap_or_else(std::time::Instant::now),
-        );
-    }
     // Read the status BEFORE anything else: a non-2xx open has already closed the socket, and the
     // code survives on the struct (`http_open` says so where it closes). That is the whole reason
     // this arm is a composition rather than a wrapper call.
-    let status = response_status.unwrap_or_else(|| crate::stream::hs_status(&*hs));
+    let status = crate::stream::hs_status(&*hs);
     let mut body = Vec::new();
     // The two non-positive returns are split rather than folded into one `n <= 0`: -1 is a recv
     // ERROR and 0 a clean end, and `note_short_body` needs them apart to say which ended the
@@ -615,7 +509,6 @@ fn plaintext(
     // handed back exactly as it is, and only the event log gains a fact.
     let mut recv_err = false;
     let mut overflowed = false;
-    let mut deadline_failure = None;
     if opened == 0 {
         let mut chunk = vec![0u8; 65536];
         loop {
@@ -626,48 +519,17 @@ fn plaintext(
                 BodyPolicy::Probe { max, .. } | BodyPolicy::Bulk { max } => {
                     max.saturating_sub(body.len())
                 }
-                BodyPolicy::Api | BodyPolicy::Deadline { .. } => chunk.len(),
+                BodyPolicy::Api => chunk.len(),
             };
             let want = match body_policy {
                 BodyPolicy::Probe { .. } | BodyPolicy::Bulk { .. } => {
                     chunk.len().min(room.saturating_add(1))
                 }
-                BodyPolicy::Api | BodyPolicy::Deadline { .. } => chunk.len(),
+                BodyPolicy::Api => chunk.len(),
             };
-            let (n, read_deadline_owner) = match body_policy {
-                BodyPolicy::Deadline { at } => {
-                    let (effective, owner) = deadline_liveness
-                        .map_or((at, DeadlineOwner::Caller), |liveness| {
-                            effective_deadline(at, liveness)
-                        });
-                    (
-                        crate::stream::http_read_until(
-                            &mut *hs,
-                            chunk.as_mut_ptr(),
-                            want as i32,
-                            Some(effective),
-                            &mut crate::checkpoint::NoCheckpoint,
-                        ),
-                        Some(owner),
-                    )
-                }
-                _ => (
-                    crate::stream::http_read(&mut *hs, chunk.as_mut_ptr(), want as i32),
-                    None,
-                ),
-            };
+            let n = crate::stream::http_read(&mut *hs, chunk.as_mut_ptr(), want as i32);
             if n < 0 {
                 recv_err = true;
-                if matches!(body_policy, BodyPolicy::Deadline { .. }) {
-                    deadline_failure = Some(if n == crate::stream::HTTP_READ_DEADLINE {
-                        match read_deadline_owner.unwrap_or(DeadlineOwner::Caller) {
-                            DeadlineOwner::Caller => RequestOutcome::Deadline,
-                            DeadlineOwner::Liveness => RequestOutcome::Transport(None),
-                        }
-                    } else {
-                        RequestOutcome::Transport(None)
-                    });
-                }
                 break;
             }
             if n == 0 {
@@ -680,32 +542,14 @@ fn plaintext(
                 break;
             }
             body.extend_from_slice(&chunk[..n as usize]);
-            if matches!(body_policy, BodyPolicy::Deadline { .. }) {
-                deadline_liveness = Some(
-                    std::time::Instant::now()
-                        .checked_add(crate::stream::media_stall_budget())
-                        .unwrap_or_else(std::time::Instant::now),
-                );
-            }
         }
         if !overflowed {
             crate::stream::note_short_body(method.as_str(), path, &hs, recv_err);
         }
     }
-    let content_length = crate::stream::hs_content_length(&*hs);
     crate::stream::http_close(&mut *hs);
-    if let Some(failure) = deadline_failure {
-        return failure;
-    }
     if overflowed {
         crate::log("http: response exceeded body limit");
-        return RequestOutcome::Transport(None);
-    }
-    if matches!(body_policy, BodyPolicy::Deadline { .. })
-        && opened == 0
-        && content_length >= 0
-        && (body.len() as i64) < content_length
-    {
         return RequestOutcome::Transport(None);
     }
     // A status of 0 is not something a server sent — it is what `http_open`'s parser leaves when
@@ -753,45 +597,9 @@ fn tls(
     // their params in the query string — while GET and the body-less PUT carry none. `net` turns
     // the second shape into `CURLOPT_CUSTOMREQUEST`.
     let body: Option<&[u8]> = matches!(method, Method::Post).then_some(&[][..]);
-    let (timeouts, max_body, caller_owns_timeout) = match body_policy {
-        BodyPolicy::Api => (crate::net::API, None, false),
-        BodyPolicy::Bulk { max } => (crate::net::BULK, Some(max), false),
-        BodyPolicy::Deadline { at } => {
-            let now = std::time::Instant::now();
-            if now >= at {
-                return RequestOutcome::Deadline;
-            }
-            let remaining = at.saturating_duration_since(now);
-            let reserve_us = remaining.as_micros();
-            let reserve_ms = ((reserve_us.saturating_add(999) / 1_000)
-                .max(1)
-                .min(std::os::raw::c_long::MAX as u128))
-                as std::os::raw::c_long;
-            let api_ms = crate::net::API
-                .total_s
-                .saturating_mul(1_000)
-                .max(crate::net::API.total_ms)
-                .max(1);
-            let effective_ms = reserve_ms.min(api_ms);
-            // Curl reports both connect and total expiry as code 28. The caller owns that code only
-            // when its reserve is no later than BOTH ordinary ceilings; otherwise the issued fact
-            // is ambiguous and must remain Transport rather than being relabelled from the clock.
-            let ordinary_connect_ms = crate::net::API.connect_s.saturating_mul(1_000).max(1);
-            let caller_owns_timeout = reserve_ms <= api_ms && reserve_ms <= ordinary_connect_ms;
-            (
-                crate::net::Timeouts {
-                    connect_s: crate::net::API
-                        .connect_s
-                        .min((effective_ms.saturating_add(999) / 1_000).max(1)),
-                    total_s: 0,
-                    total_ms: effective_ms,
-                    low_speed_bps: 0,
-                    low_speed_s: 0,
-                },
-                None,
-                caller_owns_timeout,
-            )
-        }
+    let (timeouts, max_body) = match body_policy {
+        BodyPolicy::Api => (crate::net::API, None),
+        BodyPolicy::Bulk { max } => (crate::net::BULK, Some(max)),
         BodyPolicy::Probe { max, timeout_s } => (
             crate::net::Timeouts {
                 connect_s: timeout_s as _,
@@ -801,7 +609,6 @@ fn tls(
                 low_speed_s: 0,
             },
             Some(max),
-            false,
         ),
     };
     // PMS redirects are responses, never instructions: the path already carries a token. Keeping
@@ -820,9 +627,6 @@ fn tls(
             status: r.status as i32,
             body: r.body,
         }),
-        Err(failure) if failure.cause == crate::net::RequestError::TimedOut && caller_owns_timeout => {
-            RequestOutcome::Deadline
-        }
         Err(failure) => RequestOutcome::Transport(Some(failure)),
     }
 }
@@ -830,17 +634,6 @@ fn tls(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn cross(deadline: std::time::Instant) {
-        let left = deadline.saturating_duration_since(std::time::Instant::now());
-        if !left.is_zero() {
-            std::thread::sleep(left + std::time::Duration::from_millis(10));
-        }
-        assert!(
-            std::time::Instant::now() >= deadline,
-            "the fixture did not cross its deadline"
-        );
-    }
 
     /// The dispatch is on the SCHEME and on nothing else — not on whether the host looks numeric,
     /// not on the port, not on what the caller thinks it is doing. Asserted through the arms'
@@ -964,13 +757,12 @@ mod tests {
         assert!(request(&https, "/identity", Method::Get, &[ACCEPT_JSON], None).is_none());
     }
 
-    /// The verb tokens are what goes on the request line, and `plex::client::put` and the
-    /// `/:/timeline` POST both depend on the exact string. Pinned rather than left to a `Debug`
-    /// derive, which would spell them `Get`/`Put`/`Post`.
+    /// The verb tokens are what goes on the request line, and the query-param POSTs depend on the
+    /// exact string. Pinned rather than left to a `Debug` derive, which would spell them
+    /// `Get`/`Post`.
     #[test]
     fn each_method_names_itself_the_way_http_spells_it() {
         assert_eq!(Method::Get.as_str(), "GET");
-        assert_eq!(Method::Put.as_str(), "PUT");
         assert_eq!(Method::Post.as_str(), "POST");
     }
 
@@ -1143,85 +935,4 @@ mod tests {
         server.join().expect("server");
     }
 
-    #[test]
-    fn a_completed_500_cannot_become_a_deadline_after_the_caller_crosses_the_boundary() {
-        use std::io::{Read, Write};
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let port = listener.local_addr().unwrap().port();
-        let server = std::thread::spawn(move || {
-            let (mut socket, _) = listener.accept().expect("accept");
-            let mut request = [0u8; 2048];
-            let _ = socket.read(&mut request).expect("request");
-            socket
-                .write_all(
-                    b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 4\r\nConnection: close\r\n\r\nnope",
-                )
-                .expect("response");
-        });
-        let origin = Origin::http("127.0.0.1", port as i32);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
-
-        let outcome = request_until_outcome(&origin, "/decision", Method::Get, &[], deadline, None);
-        server.join().unwrap();
-        cross(deadline);
-
-        assert!(matches!(
-            outcome,
-            RequestOutcome::Response(Reply { status: 500, ref body }) if body.is_empty()
-        ));
-    }
-
-    #[test]
-    fn a_transport_reset_cannot_become_a_deadline_after_the_caller_crosses_the_boundary() {
-        use std::io::Read;
-        use std::os::fd::AsRawFd;
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let port = listener.local_addr().unwrap().port();
-        let server = std::thread::spawn(move || {
-            let (mut socket, _) = listener.accept().expect("accept");
-            let mut request = [0u8; 2048];
-            let _ = socket.read(&mut request).expect("request");
-            let reset = libc::linger {
-                l_onoff: 1,
-                l_linger: 0,
-            };
-            let rc = unsafe {
-                libc::setsockopt(
-                    socket.as_raw_fd(),
-                    libc::SOL_SOCKET,
-                    libc::SO_LINGER,
-                    &reset as *const _ as *const std::ffi::c_void,
-                    std::mem::size_of::<libc::linger>() as libc::socklen_t,
-                )
-            };
-            assert_eq!(rc, 0, "arm reset-on-close");
-        });
-        let origin = Origin::http("127.0.0.1", port as i32);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
-
-        let outcome = request_until_outcome(&origin, "/decision", Method::Get, &[], deadline, None);
-        server.join().unwrap();
-        cross(deadline);
-
-        assert!(matches!(outcome, RequestOutcome::Transport(_)));
-    }
-
-    #[test]
-    fn only_the_timer_that_stops_the_request_is_a_deadline() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let port = listener.local_addr().unwrap().port();
-        let (release_tx, release_rx) = std::sync::mpsc::channel();
-        let server = std::thread::spawn(move || {
-            let (_silent_peer, _) = listener.accept().expect("accept");
-            let _ = release_rx.recv();
-        });
-        let origin = Origin::http("127.0.0.1", port as i32);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(80);
-
-        let outcome = request_until_outcome(&origin, "/decision", Method::Get, &[], deadline, None);
-        let _ = release_tx.send(());
-        server.join().unwrap();
-
-        assert!(matches!(outcome, RequestOutcome::Deadline));
-    }
 }

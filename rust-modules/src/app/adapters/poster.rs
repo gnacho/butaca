@@ -536,24 +536,9 @@ fn built_key(srv: ServerId, path: &str, w: c_int, h: c_int, png: bool) -> Option
         }
         return Some(s);
     }
-    let c = crate::registry::client_for(srv)?;
-    let s = memo.get_or_build(srv.raw(), path, w, h, png, c.token_gen(), || {
-        transcode_request(c, path, w, h, png)
-    });
-    if s.len() > KEY_MAX {
-        warn_key_refused(s.len());
-        return None;
-    }
-    Some(s)
-}
-
-/// The transcoder request for `path` drawn in a `w`×`h` logical box — the one builder behind
-/// every store key, so equal keys name equal bytes on disk.
-/// Supersampled simulator renders (`surface::render_scale`, 1 on a television) ask the server
-/// for the pixels they will draw; the logical box stays the caller's.
-fn transcode_request(c: &crate::plex::Client, path: &str, w: c_int, h: c_int, png: bool) -> String {
-    let n = crate::surface::render_scale() as i64;
-    c.image_transcode_path(path, w as i64 * n, h as i64 * n, png)
+    // The Plex arm (`registry::client_for` + the `/photo/:/transcode` path builder) went with the
+    // Plex wire layer: the Jellyfin slot is the only server this adapter can ever be handed.
+    None
 }
 
 /// A refused key logs ONCE per process, with both ceilings and the length that missed them.
@@ -1642,43 +1627,31 @@ mod tests {
         assert!(!decode_admitted(&slots, DECODE_BACKLOG_MAX));
     }
 
-    /// A synthetic headshot URL of the SHAPE the server really returns for a `/hubs/search`
-    /// `actor` row: absolute, on Plex's metadata CDN, with a 32-hex digest. A made-up digest
-    /// rather than a captured one, so nothing here is a record of who is in anyone's library —
-    /// the LENGTH is what the encoding and the [`KEY_MAX`] headroom are graded on, and it matches.
-    const HEADSHOT: &str =
-        "https://metadata-static.plex.tv/a/people/0123456789abcdef0123456789abcdef.jpg";
-    /// The same, encoded — every `:` and `/` gone, which is the whole reason the PMS photo
-    /// transcoder can be handed a third-party URL as a query VALUE.
-    const HEADSHOT_ENC: &str =
-        "https%3A%2F%2Fmetadata-static.plex.tv%2Fa%2Fpeople%2F0123456789abcdef0123456789abcdef.jpg";
-
-    /// A registry holding exactly one server, emptied again on the way out. The reset on DROP is
-    /// the load-bearing half: an owned `BrowseStore::pump` adopts every registered slot as a source
-    /// and spawns a discovery worker for it, so a server left behind here would have another module's tests
-    /// dialling a dead loopback port on a background thread.
     struct Fresh(#[allow(dead_code)] crate::testlock::Serial);
     impl Drop for Fresh {
         fn drop(&mut self) {
             crate::registry::reset_for_test();
+            crate::jellyfin::uninstall();
             reset_key_memo();
         }
     }
-    /// `register_for_test`, not the public `register`: the latter resolves the device id through
-    /// `session::load`, which mints and PERSISTS a uuid on a host that has no session file.
+    /// The store serves the Jellyfin backend's own image path now; the Plex transcode-key
+    /// builder these fixtures used to grade is gone with the wire layer. `install` (not the boot
+    /// flow) so no session file is touched, and `uninstall` on the way out so the next test
+    /// starts fail-closed.
     fn one_server() -> (Fresh, ServerId, &'static str) {
         let g = crate::testlock::serial();
         crate::registry::reset_for_test();
         reset_key_memo();
         let tok = "tok-poster-test";
-        let sid = crate::registry::register_with_client_id(
-            "poster-test",
-            "127.0.0.1",
-            32400,
-            tok,
-            "cid-poster-test",
-        );
-        (Fresh(g), sid, tok)
+        crate::jellyfin::install(crate::jellyfin::JfClient::synthetic(
+            crate::origin::Origin::http("127.0.0.1", 8096),
+            "poster-test-device".into(),
+            tok.to_string(),
+            "user-poster-test".into(),
+            "Poster Test".into(),
+        ));
+        (Fresh(g), crate::jellyfin::SERVER_ID, tok)
     }
 
     /// Build a key through the real [`built_key`] — the same call `lookup` makes for a draw —
@@ -1687,96 +1660,13 @@ mod tests {
         built_key(srv, src, w, h, png != 0).unwrap_or("").to_owned()
     }
 
-    /// **Search's `Directory[]` half, and the reason this file needed no second image route.** An
-    /// `actor` result's `thumb` is an absolute `https://metadata-static.plex.tv/…` URL on a host
-    /// `stream.rs` can never reach — it has neither DNS nor TLS. It does not need to: the URL goes
-    /// in as the `url=` VALUE, percent-encoded whole, and the request still goes to our own PMS,
-    /// which fetches it over TLS on our behalf. Verified live against PMS 1.43.3 (2026-08-14):
-    /// `200 image/jpeg`, exactly the requested 300×300.
-    ///
-    /// The assertions that matter are that nothing survives raw — a bare `://` or `?` in a query
-    /// value would end the `url` parameter early and hand the server a truncated address — and
-    /// that the token still lands at the end, on the outer request rather than inside `url=`.
-    #[test]
-    fn an_absolute_headshot_is_percent_encoded_into_the_url_parameter() {
-        let (_g, sid, tok) = one_server();
-        let k = key_for(sid, HEADSHOT, 300, 300, 0);
-
-        assert!(
-            k.starts_with("/photo/:/transcode?width=300&height=300&minSize=1&url="),
-            "wrong request shape: {k}"
-        );
-        assert!(
-            k.contains(&format!("url={HEADSHOT_ENC}&")),
-            "the absolute URL is not encoded whole: {k}"
-        );
-        assert!(
-            !k.contains("://"),
-            "a raw scheme separator would truncate the url parameter: {k}"
-        );
-        assert!(
-            k.ends_with(&format!("&X-Plex-Token={tok}")),
-            "the token belongs to the OUTER request: {k}"
-        );
-
-        // The headroom the doc quotes, pinned. A headshot key is the longest shape the store holds
-        // today; if a future one crosses KEY_MAX it is refused rather than truncated (below), so
-        // this failing means artwork silently became skeletons, not that anything corrupted.
-        assert!(
-            k.len() <= KEY_MAX,
-            "a headshot key must fit a slot: {} bytes",
-            k.len()
-        );
-    }
-
-    /// The other half of "keep the existing path untouched": a PMS-relative key is encoded by the
-    /// same rule and comes out the same shape it always did. Both kinds reach the transcoder
-    /// through one code path, and this is what says so.
-    #[test]
-    fn a_relative_thumb_still_takes_the_old_path() {
-        let (_g, sid, _) = one_server();
-        let k = key_for(sid, "/library/metadata/42/thumb/1778526065", 250, 375, 0);
-        assert!(
-            k.starts_with("/photo/:/transcode?width=250&height=375&minSize=1&url="),
-            "wrong request shape: {k}"
-        );
-        assert!(
-            k.contains("url=%2Flibrary%2Fmetadata%2F42%2Fthumb%2F1778526065&"),
-            "relative key mis-encoded: {k}"
-        );
-
-        // png=1 is the clearLogo flavour — the one thing that changes the shape — and it must not
-        // have moved either.
-        let logo = key_for(
-            sid,
-            "/library/metadata/42/clearLogo",
-            LOGO_REQ_W,
-            LOGO_REQ_H,
-            1,
-        );
-        assert!(
-            logo.contains("&format=png&"),
-            "the transparent flavour lost its format: {logo}"
-        );
-    }
-
-    /// **A tag-shaped `/hubs/search` `collection` row (a request without `includeCollections=1`)
-    /// carries no `thumb` at all** (verified live — no
-    /// `ratingKey` either; only `key` and a tag `id`), so an empty source stops being a rarity and
-    /// becomes a whole shelf of them. It must produce NO request: `…&url=&X-Plex-Token=…` is a
-    /// `404 text/html` from this server (measured), and every one of them would burn a slot as
-    /// `P_FAILED` until the LRU walked back to it.
-    ///
-    /// The empty key is the store's existing "nothing to fetch" convention — the same answer an
+    /// **A tag-shaped `/hubs/search` `collection` row carries no `thumb` at all**, so an empty
+    /// source stops being a rarity and becomes a whole shelf of them. It must produce NO request:
+    /// the empty key is the store's existing "nothing to fetch" convention — the same answer an
     /// unregistered server gets — so the tile draws its skeleton face and no prefetch budget is
-    /// spent on it.
-    ///
-    /// It asserts only the BUILDER, and that limit is the host boundary rather than an oversight:
-    /// calling `poster_get_wh`/`poster_warm` here — even on the empty key they return early for —
-    /// makes `lookup` reachable from the test binary, and through it `gfx::delete_tex`. The link
-    /// then fails with `Undefined symbols … _glDeleteTextures`, because `-dead_strip` was the only
-    /// reason this suite got away without a GL context at all. Their empty-key early exits are
-    /// asserted in prose at their definitions instead.
+    /// spent on it. (The draw/warm entry points' own early exits are asserted in prose at their
+    /// definitions: calling them here makes `lookup` reachable from the test binary and links
+    /// `gfx::delete_tex`, which needs a GL context no host test has.)
     #[test]
     fn an_empty_thumb_yields_no_request_at_all() {
         let (_g, sid, _) = one_server();
@@ -1784,52 +1674,6 @@ mod tests {
             key_for(sid, "", 300, 300, 0),
             "",
             "an empty source must not become a request"
-        );
-    }
-
-    /// The cliff absolute URLs brought within sight, and the reason [`poster_key`] gates on
-    /// [`KEY_MAX`] instead of trusting the caller's 352-byte buffer.
-    ///
-    /// `set_key` truncates into [`PT_KEYLEN`]. A truncated key never equals the probe that built
-    /// it, so the slot can never be found again: every frame misses, claims a fresh slot and
-    /// evicts a real poster — the whole store thrashing over one tile, which is far worse than the
-    /// tile simply not loading. The sizes are DERIVED from a probe build rather than written down,
-    /// so this keeps grading the real boundary if the request shape ever changes.
-    #[test]
-    fn a_path_too_long_for_a_slot_is_refused_rather_than_truncated() {
-        let (_g, sid, _) = one_server();
-        // Everything around the source, measured: build with a one-character source and subtract
-        // it. The filler is alphanumeric, so it passes through `enc` one byte per byte.
-        let overhead = key_for(sid, "x", 300, 300, 0).len() - 1;
-
-        let exact = key_for(sid, &"a".repeat(KEY_MAX - overhead), 300, 300, 0);
-        assert_eq!(
-            exact.len(),
-            KEY_MAX,
-            "the fixture must land exactly on the boundary"
-        );
-        let mut s = Pslot::ZERO;
-        set_key(&mut s, &exact);
-        assert_eq!(
-            key_bytes(&s),
-            exact.as_bytes(),
-            "a key the gate accepts must survive a slot intact"
-        );
-
-        let over = key_for(sid, &"a".repeat(KEY_MAX - overhead + 1), 300, 300, 0);
-        assert_eq!(
-            over, "",
-            "one byte past what a slot holds must be refused, not handed out"
-        );
-
-        // …because this is what handing it out would have meant. Not a claim about `set_key`, a
-        // claim about `lookup`: the probe it compares against is the FULL string.
-        let would_be = "b".repeat(KEY_MAX + 1);
-        set_key(&mut s, &would_be);
-        assert_ne!(
-            key_bytes(&s),
-            would_be.as_bytes(),
-            "a truncated slot can never match its own probe"
         );
     }
 
@@ -1844,7 +1688,7 @@ mod tests {
     fn only_a_key_that_survives_a_slot_is_fetchable() {
         assert!(!is_fetchable(""), "an empty key names no request");
         assert!(
-            is_fetchable("/photo/:/transcode?url=x"),
+            is_fetchable("/library/metadata/42/thumb?tag=x"),
             "an ordinary key is fetchable"
         );
         assert!(
@@ -1867,33 +1711,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_repoint_with_the_same_url_and_token_retires_the_old_request_generation() {
-        let (_fresh, sid, tok) = one_server();
-        crate::ui::card_motion::begin_frame(crate::app::clock::now());
-        let path = key_for(sid, "/library/metadata/42/thumb", 2, 2, 0);
-        let old_generation = crate::registry::client_for(sid).unwrap().token_gen();
-        {
-            let mut g = store();
-            g.slots = [Pslot::ZERO; PT_CAP];
-            g.frame = 1;
-            let slot = &mut g.slots[0];
-            slot.srv = sid;
-            slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = old_generation;
-            set_key(slot, &path);
-            slot.state = P_EVICTED;
-        }
-        let repointed = crate::registry::register_with_client_id("poster-test", "127.0.0.2", 32400, tok, "cid-poster-test");
-        assert_eq!(repointed, sid);
-        let current_generation = crate::registry::client_for(sid).unwrap().token_gen();
-        assert_ne!(current_generation, old_generation);
-        assert_eq!(lookup(sid, &path, Touch::Draw).1, Warm::Claimed);
-        assert!(store().slots.iter().any(|s| s.state == P_WANT
-            && s.srv == sid && s.token_gen == current_generation));
-        store().slots = [Pslot::ZERO; PT_CAP];
-    }
-
     /// A rejected decode used to leave the source in READY while the cache remembered the key as
     /// failed. No later probe could re-arm either half, so the tile drew its skeleton forever.
     #[test]
@@ -1908,7 +1725,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
+            slot.token_gen = 0; // the Jellyfin client has no token rotation
             set_key(slot, &path);
             slot.state = P_DECODED;
             slot.px = 0;
@@ -1963,7 +1780,7 @@ mod tests {
             slot.state = P_READY;
             slot.srv = srv;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::registry::client_for(srv).unwrap().token_gen();
+            slot.token_gen = 0; // the Jellyfin client has no token rotation
             set_key(slot, &path);
         }
 
@@ -2100,7 +1917,7 @@ mod tests {
             let mut g = store();
             g.slots = [Pslot::ZERO; PT_CAP];
             g.quit = false;
-            let gen = crate::registry::client_for(srv).unwrap().token_gen();
+            let gen = 0_u32; // the Jellyfin client has no token rotation
             let cache_gen = crate::imgcache::generation();
             for (i, path) in [&path0, &path1].into_iter().enumerate() {
                 let slot = &mut g.slots[i];
@@ -2244,7 +2061,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
+            slot.token_gen = 0; // the Jellyfin client has no token rotation
             set_key(slot, &path);
             slot.state = P_RETRY;
             slot.retry_at = Some(crate::app::clock::now().wrapping_add(30_000));
@@ -2285,7 +2102,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
+            slot.token_gen = 0; // the Jellyfin client has no token rotation
             set_key(slot, &path);
             slot.state = P_EVICTED;
             // No eviction history, so the cooldown gate would admit this re-arm. That isolates
@@ -2329,7 +2146,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
+            slot.token_gen = 0; // the Jellyfin client has no token rotation
             set_key(slot, &path);
             slot.state = P_RETRY;
             slot.attempts = 1;
@@ -2379,7 +2196,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
+            slot.token_gen = 0; // the Jellyfin client has no token rotation
             set_key(slot, &path);
             slot.state = P_READY;
         }
@@ -2427,7 +2244,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
+            slot.token_gen = 0; // the Jellyfin client has no token rotation
             set_key(slot, &path);
             slot.state = P_READY;
         }
@@ -2517,7 +2334,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
+            slot.token_gen = 0; // the Jellyfin client has no token rotation
             set_key(slot, &path);
             slot.state = P_EVICTED;
         }
@@ -2568,7 +2385,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
+            slot.token_gen = 0; // the Jellyfin client has no token rotation
             set_key(slot, &path);
             slot.state = P_EVICTED;
             slot.evict_attempts = 1;
@@ -2610,7 +2427,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
+            slot.token_gen = 0; // the Jellyfin client has no token rotation
             set_key(slot, &path);
             slot.state = P_EVICTED;
             slot.evict_attempts = 1;
@@ -2660,7 +2477,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
+            slot.token_gen = 0; // the Jellyfin client has no token rotation
             set_key(slot, &path);
             slot.state = P_READY;
         }
@@ -2730,7 +2547,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
+            slot.token_gen = 0; // the Jellyfin client has no token rotation
             set_key(slot, &path);
             slot.state = P_READY;
             slot.evicted_at = Some(0);
@@ -2874,7 +2691,7 @@ mod tests {
             let slot = &mut g.slots[0];
             slot.srv = sid;
             slot.cache_gen = crate::imgcache::generation();
-            slot.token_gen = crate::registry::client_for(sid).unwrap().token_gen();
+            slot.token_gen = 0; // the Jellyfin client has no token rotation
             set_key(slot, &path);
             slot.state = P_READY;
         }

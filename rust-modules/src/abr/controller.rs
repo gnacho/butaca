@@ -185,10 +185,6 @@ pub(crate) enum RejectCause {
     /// that is new physical evidence about end-to-end service, not time or reserve pretending the
     /// old observation changed.
     CompletedUnsustainable,
-    /// A typed fact about this exact actuator that more reserve cannot change for this controller
-    /// scope, such as PMS refusing this ceiling. It remains excluded until a new controller is
-    /// built for a new route/session.
-    Structural,
     /// A fresh session returned no Pareto quality gain over the response already playing. This is
     /// not a structural or ordinal fact about the requested actuator: PMS answered with a
     /// different, demand-capped response. The completed transaction gives an exact common budget
@@ -1563,7 +1559,6 @@ impl Controller {
                 RejectCause::Censored
                     | RejectCause::Candidate
                     | RejectCause::CompletedUnsustainable
-                    | RejectCause::Structural
                     | RejectCause::ResponseUnchanged
             ) {
                 let floor = self.recovery_floor();
@@ -1608,9 +1603,6 @@ impl Controller {
                         .unwrap_or(0)
                         .max(self.delivery.fast_kbps),
                 );
-            }
-            RejectCause::Structural => {
-                self.failures[proposal.rung.index()].structural = true;
             }
             RejectCause::StructuralAtOrBelow => {
                 for rung in LADDER.iter().copied().filter(|rung| *rung <= proposal.rung) {

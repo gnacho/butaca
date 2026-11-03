@@ -16,12 +16,12 @@ fn original_is_unchanged_and_auto_original_is_an_explicit_measured_state() {
     for src in [UHD_REMUX, HD_BIG, HD_SMALL, UNMEASURED] {
         assert_eq!(
             quality_policy(Quality::Original, false, src.0, src.1, src.2),
-            crate::plex::LinkPolicy::UNRESTRICTED,
+            crate::playback::LinkPolicy::UNRESTRICTED,
             "Original must restrict nothing, and {src:?} is not an exception"
         );
         assert_eq!(
             quality_policy(Quality::Auto, false, src.0, src.1, src.2),
-            crate::plex::LinkPolicy {
+            crate::playback::LinkPolicy {
                 direct_play: false,
                 remux: false
             },
@@ -29,7 +29,7 @@ fn original_is_unchanged_and_auto_original_is_an_explicit_measured_state() {
         );
         assert_eq!(
             quality_policy(Quality::Auto, true, src.0, src.1, src.2),
-            crate::plex::LinkPolicy::UNRESTRICTED,
+            crate::playback::LinkPolicy::UNRESTRICTED,
             "Auto's proven Original state must not start an encoder"
         );
         // …and composed, on every link tier, Original is exactly what the link alone said.
@@ -137,7 +137,7 @@ fn a_source_over_the_ceiling_is_refused_the_remux_as_well() {
     );
     assert_eq!(
         p,
-        crate::plex::LinkPolicy {
+        crate::playback::LinkPolicy {
             direct_play: false,
             remux: false
         }
@@ -160,7 +160,7 @@ fn a_relay_link_and_a_user_ceiling_compose_to_the_stricter_of_the_two() {
             // relay denies both, and NOTHING a user can pick gives either back
             assert_eq!(
                 allowed(Some(crate::plex::probe::Location::Relay), q, src),
-                crate::plex::LinkPolicy {
+                crate::playback::LinkPolicy {
                     direct_play: false,
                     remux: false
                 },
