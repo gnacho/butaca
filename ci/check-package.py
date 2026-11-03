@@ -1039,8 +1039,8 @@ else:
 # has to check an unsigned download. `ci/check-elf.sh` only ever scanned `pkg/butaca`, so
 # nothing looked at the libraries beside it.
 #
-# The pattern is ANCHORED on a non-path character so ordinary URL fragments do not trip it: the
-# app talks to plex.tv's `/api/v2/home/users`, which is not a build path.
+# The pattern is ANCHORED on a non-path character so ordinary URL fragments do not trip it: a
+# server URL ending in `/home/users` is not a build path.
 # A build-machine path anywhere in the payload.
 #
 # Two calibration bugs are baked into the shape below, both found by running this against a release
@@ -1050,8 +1050,8 @@ else:
 #     written for. FFmpeg records its whole configure invocation as ONE string, so the unavoidable
 #     `--cross-prefix=/…/webos-ndk/…` sits beside the offending `--prefix=/…/plex-native-poc/…`
 #     and one allowed token vouches for the other. v0.2.1's libraries pass that test.
-#   * tokenising to fix it, without keeping the leading boundary, makes plex.tv's own
-#     `/api/v2/home/users` read as `/home/users` and fails every build.
+#   * tokenising to fix it, without keeping the leading boundary, makes an absolute URL ending
+#     in `/home/users` read as a bare `/home/users` and fails every build.
 #
 # So: extract each path WITH its boundary character, drop the boundary, and allow per PATH.
 HOSTPATH = re.compile(rb"(?:^|[^A-Za-z0-9/_.-])(/(?:Users|home)/[A-Za-z0-9_./+-]+)")
