@@ -61,13 +61,16 @@ impl ShowLangPrefs {
 #[derive(Deserialize, Default)]
 pub struct Metadata {
     #[serde(rename = "ratingKey", default, deserialize_with = "de_route_key")]
+    #[allow(dead_code)] // frozen until the wire layer goes
     pub rating_key: String,
     /// The LIBRARY this row lives in, on the server that answered ("Movies", "Film Club"). Sent on
     /// a cross-library query such as `/library/all?guid=…`, which is the one place the app asks a
     /// server something without already knowing which of its libraries will answer.
     #[serde(rename = "librarySectionTitle", default, deserialize_with = "de_str")]
+    #[allow(dead_code)] // frozen until the wire layer goes
     pub library_section_title: String,
     #[serde(default, deserialize_with = "de_i64")]
+    #[allow(dead_code)] // frozen until the wire layer goes
     pub duration: i64, // ms
     #[serde(rename = "grandparentRatingKey", default, deserialize_with = "de_route_key")]
     pub grandparent_rating_key: String, // episode → its show
@@ -118,6 +121,7 @@ pub struct Media {
     /// PMS's coarse resolution class, always a STRING even when it looks numeric — verified live:
     /// `"4k"`, `"1080"`, `"720"`, `"576"`, `"sd"`. The version-picker key per docs/pms-api.md §4.
     #[serde(rename = "videoResolution", default, deserialize_with = "de_str")]
+    #[allow(dead_code)] // frozen until the wire layer goes
     pub video_resolution: String,
     #[serde(rename = "Part", default)]
     pub part: Vec<MediaPart>,

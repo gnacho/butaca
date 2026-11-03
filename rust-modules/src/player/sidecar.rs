@@ -109,9 +109,8 @@ fn state() -> std::sync::MutexGuard<'static, State> {
 /// Select the sidecar `stream_id`, fetching `key` from `server` unless that file is already
 /// loaded. MAIN THREAD.
 pub(crate) fn select(server: crate::registry::ServerId, stream_id: i64, key: String, codec: String) {
-    select_with_fetch(server, stream_id, key, codec, |server, key, codec| {
-        crate::registry::client_for(server).and_then(|c| c.sidecar_subtitle(key, codec))
-    });
+    // Sidecars came from a Plex server; a Jellyfin stream carries its subtitles in-band.
+    select_with_fetch(server, stream_id, key, codec, |_, _, _| None);
 }
 
 fn select_with_fetch(
