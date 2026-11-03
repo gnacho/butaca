@@ -26,8 +26,8 @@ bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; FAIL=$((FAIL+1)); }
 note() { printf '  \033[33mnote\033[0m  %s\n' "$1"; NOTE=$((NOTE+1)); }
 head_() { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
 
-# A build-machine path in a shipped file. Anchored on a non-path character so ordinary URLs do not
-# trip it — the app talks to plex.tv's /api/v2/home/users, which is not a build path.
+# A build-machine path in a shipped file. Anchored on a non-path character so ordinary URLs do
+# not trip it: a server URL ending in /home/users is not a build path.
 HOSTPATH='(^|[^A-Za-z0-9/_.-])/(Users|home)/[a-z]'
 # The NDK's own location is unavoidable: --cross-prefix must be absolute (the wrapper gcc dies when
 # invoked through PATH), so it rides in FFmpeg's recorded configure string. It is identical on every
@@ -41,8 +41,8 @@ ALLOWED='webos-ndk|/home/runner/'
 # check existed to prevent, caught only by testing it against a release known to be dirty.
 #
 # The match KEEPS its leading boundary character and strips it afterwards, because dropping the
-# anchor to tokenise reintroduces the opposite error: plex.tv's own `/api/v2/home/users` looks like
-# `/home/users` once you extract without context. Both failure modes were observed; this shape is
+# anchor to tokenise reintroduces the opposite error: an absolute URL ending in `/home/users`
+# looks like a bare `/home/users` once you extract without context. Both failure modes were observed; this shape is
 # the one that gets both right.
 scan_paths() { # $1 = file
   local hits
