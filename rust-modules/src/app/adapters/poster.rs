@@ -1396,61 +1396,6 @@ struct Loaded<T> {
     transient: bool,
 }
 
-/// The shared disk-first/fetch path for one built request. A disk hit that does not decode is
-/// removed and falls through to the network; only a fetched response that DECODES is written to
-/// disk, so a bad answer never replaces a good image.
-#[allow(dead_code)] // frozen until the art cache goes
-fn load_art<T>(
-    client: &crate::plex::Client,
-    srv: ServerId,
-    key_s: &str,
-    cache_gen: u64,
-    mut decode: impl FnMut(&[u8]) -> Option<T>,
-) -> Loaded<T> {
-    let mut out = Loaded { art: None, stale: None, transient: false };
-    let disk = if crate::dev::scenarios::imagecache_bypass_armed() {
-        None
-    } else {
-        crate::imgcache::classify(&disk_namespace(client), key_s)
-    };
-    if let Some(k) = &disk {
-        if let Some(cached) = crate::imgcache::read_at(cache_gen, k) {
-            match decode(&cached.bytes) {
-                Some(art) => {
-                    out.art = Some(art);
-                    if cached.stale {
-                        out.stale = Some(k.clone());
-                    }
-                    return out;
-                }
-                None => crate::imgcache::remove_at(cache_gen, k),
-            }
-        }
-    }
-    if cache_gen != crate::imgcache::generation() {
-        return out;
-    }
-    FETCHES.fetch_add(1, Ordering::Relaxed);
-    match client.fetch_built_outcome(key_s) {
-        crate::plex::ArtFetch::Bytes(b) if !b.is_empty() => {
-            out.art = decode(&b);
-            if out.art.is_some() {
-                if let Some(k) = &disk {
-                    crate::imgcache::write_at(cache_gen, k, &b);
-                }
-            }
-        }
-        crate::plex::ArtFetch::Bytes(_) => {
-            out.transient = true;
-            warn_fetch_failed(srv, ArtFail::Empty);
-        }
-        outcome => {
-            out.transient = is_transient(&outcome);
-            warn_fetch_failed(srv, ArtFail::NoResponse);
-        }
-    }
-    out
-}
 
 /// BACKGROUND worker: claim a request, read disk or fetch and decode off-lock, publish pixels.
 /// RAM/GPU residency stays bounded independently of the number of persistent images.
