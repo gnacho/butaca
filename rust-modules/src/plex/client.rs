@@ -702,6 +702,7 @@ impl Client {
     }
 
     /// POST → parse the `{ "MediaContainer": … }` envelope — /playQueues (the returned ids).
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub(super) fn post_json(&self, path_no_token: &str) -> Option<MediaContainer> {
         let body = self.body_2xx(path_no_token, Method::Post, &[ACCEPT_JSON])?;
         serde_json::from_slice::<Envelope>(&body)

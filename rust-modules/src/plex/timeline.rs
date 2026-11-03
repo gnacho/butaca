@@ -39,6 +39,7 @@ impl Client {
     }
 
     /// GET /identity → the server's stable machineIdentifier (None on failure/empty).
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub fn machine_identity(&self) -> Option<String> {
         let mid = self.get_json("/identity")?.machine_identifier;
         if mid.is_empty() {
@@ -92,6 +93,7 @@ impl Client {
 impl QueueRow {
     /// Consume a queue `Metadata` row into its lean projection. BY VALUE: the strings are moved,
     /// not cloned, and the rest of the row's tree is dropped as this returns.
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     fn of(m: crate::media::Metadata, sid: super::ServerId) -> QueueRow {
         // `Media[0]` / `Media[0].Part[0]`, the same pick `Metadata::first_part` makes — by value,
         // so the other versions and their Stream lists die here.
@@ -134,6 +136,7 @@ impl QueueRow {
 /// twice, and matching on the rating key would then pick the wrong row. The rating key is only the
 /// fallback for a server that omitted the per-row id — for a queue built FROM this item the two
 /// agree, and losing the row entirely is the worse failure.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub fn queue_index_of(
     items: &[QueueRow],
     item_id: i64,
@@ -153,6 +156,7 @@ pub fn queue_index_of(
 /// The queue row that follows the selected one — None at the end of the queue, and None when the
 /// selection matches no row at all (handing back `items[1]` there would start something the user
 /// was never watching).
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 fn next_after<'a>(
     items: &'a [QueueRow],
     selected_item_id: i64,
@@ -394,6 +398,7 @@ mod tests {
 /// What a POST /playQueues gives the app: the two ids the `/:/timeline` report carries, plus the
 /// queue's own view of what comes next. Kept as a struct rather than a tuple because `next` made
 /// the third and fourth members meaningless positionally.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub struct PlayQueueResult {
     pub id: i64,
     pub selected_item_id: i64,
@@ -414,6 +419,7 @@ pub struct PlayQueueResult {
 impl PlayQueueResult {
     /// The WHOLE response→result mapping, kept out of `create_play_queue` so the host tests grade
     /// the code that ships instead of a copy of it (only the request build is left up there).
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     fn of(
         mc: crate::media::MediaContainer,
         sid: super::ServerId,

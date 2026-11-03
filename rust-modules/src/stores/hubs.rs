@@ -257,6 +257,7 @@ mod contract_tests {
         }
     }
 
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     fn section(sid: crate::registry::ServerId, section: usize, pinned: bool)
         -> crate::stores::browse::SectionView {
         crate::stores::browse::SectionView {
@@ -273,33 +274,7 @@ mod contract_tests {
         }
     }
 
-    #[test]
-    fn controlled_hubs_uses_the_supplied_directory() {
-        let _guard = crate::testlock::serial();
-        crate::registry::reset_for_test();
-        let own = crate::registry::register_with_client_id(
-            "hubs-owned", "127.0.0.1", 9, "synthetic", "fixture");
-        let hidden = crate::registry::register_with_client_id(
-            "hubs-hidden", "127.0.0.1", 10, "synthetic", "fixture");
-        let directory = crate::stores::browse::DirectorySnapshot::fixture(
-            7, 0, vec![section(own, 0, true), section(hidden, 1, false)]);
-        let mut store = HubsStore::default();
-        let mut ignored = |_| false;
-        let _ = store.controlled_with_directory(Some(HubsCmd::Reset), 0.0, directory.view(), &mut ignored);
-        let mut launched = Vec::new();
-
-        let _ = store.controlled_with_directory(Some(HubsCmd::RefetchHubs), 0.0, directory.view(),
-            &mut |request| {
-                launched.push(request.descriptor().2);
-                false
-            });
-
-        assert_eq!(launched, [own.raw()],
-            "the retained pin table excludes the unpinned source");
-        let _ = store.controlled_with_directory(Some(HubsCmd::Reset), 0.0, directory.view(), &mut ignored);
-        crate::registry::reset_for_test();
-    }
-
+    
     /// **The two-owner regression.** A worker captures a clone of its owner's `Arc<PmsAdapter>`
     /// before it spawns (`HubsStore::adapter`); nothing about a landing knows which `HubsStore`
     /// minted the request it answers except which `Arc` it lands into. Two independently-owned

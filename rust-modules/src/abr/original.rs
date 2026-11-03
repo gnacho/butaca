@@ -90,6 +90,7 @@ pub(crate) fn original_open_fallback_rung(
 /// test: the prefix contributes media at least as quickly as playback removes it.  A finite prefix
 /// is still only evidence about that prefix, so everything after admission remains an observed
 /// trial under [`OriginalModeController`]; no invented multiplier turns it into a capacity claim.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(crate) fn original_sustainable(
     source_kbps: u32,
     measured_kbps: u32,

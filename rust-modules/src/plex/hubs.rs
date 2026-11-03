@@ -23,6 +23,7 @@ impl Client {
     /// [`continue_watching`] fetches properly (see its doc for why the dedicated endpoint is the
     /// only honest one), so we parse and discard them today; and with several sources on Home the
     /// waste is per source per fetch, not once.
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub fn home_hubs(&self, count: i64) -> Option<MediaContainer> {
         self.get_json(
             &QueryBuilder::new("/hubs")

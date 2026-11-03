@@ -1429,6 +1429,7 @@ pub(crate) fn cancel_adaptive_reload() {
 /// Whether a route change has scheduled an encoder rebuild. Test-visible so route policy can be
 /// graded independently of the pump's frame timing.
 #[cfg(test)]
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(crate) fn pending_transcode_refresh() -> bool {
     crate::route::pending_user_route_intent(crate::route::UserRouteIntent::Retranscode)
 }
@@ -1437,6 +1438,7 @@ pub(crate) fn pending_transcode_refresh() -> bool {
 // build's `CredentialPolicy::HttpsOnly` refuses those tests' plaintext loopback PMS fixtures; see
 // the comment on that module's first gated test).
 #[cfg(all(test, feature = "devtriggers"))]
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(crate) fn pending_adaptive_reload() -> bool {
     crate::route::pending_user_route_intent(crate::route::UserRouteIntent::AdaptiveReload)
 }

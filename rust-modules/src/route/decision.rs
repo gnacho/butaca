@@ -2800,6 +2800,7 @@ impl HlsAbrControl {
     /// Route-only compatibility door used by focused route tests. Production uses
     /// [`Self::commit_transition`] so controller, route and worker-local ownership cannot split.
     #[cfg(test)]
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub(crate) fn commit(
         &self,
         expected: &WorkerTicket,
@@ -3166,6 +3167,7 @@ pub(crate) fn arm_auto_fixture(
 // Dev-only: used only by the `#[cfg(feature = "devtriggers")]` tests in this module's `tests`
 // submodule below (see the comment on the first one).
 #[cfg(all(test, feature = "devtriggers"))]
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(crate) fn fallback_auto_to_hls(ps: &mut PlaybackSession, measured_kbps: u32, offset_secs: i64) -> Option<String> {
     let expected = worker_ticket();
     fallback_auto_to_hls_for(ps, &expected, measured_kbps, offset_secs)
@@ -4227,6 +4229,7 @@ pub(crate) fn set_stream_acodec(ps: &mut PlaybackSession, codec: &str) {
 /// Record the streamed item's video+audio codec pair in one write (the Load-payload source of
 /// truth) for route-policy tests that install a synthetic live HLS response.
 #[cfg(test)]
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(crate) fn set_stream_codecs(ps: &mut PlaybackSession, vc: &str, ac: &str) {
     { let s = &mut *ps; {
         s.stream_vcodec = vc.to_owned();
@@ -4407,6 +4410,7 @@ pub(crate) fn cur_enhancement_label(ps: &PlaybackSession) -> Option<&'static str
 }
 /// Did this playback forbid the server a video stream COPY? Read by the seek and audio-switch
 /// rebuilds so the constraint survives them — see [`PlaybackSession::cur_contract`].
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 fn is_no_video_copy(ps: &PlaybackSession) -> bool {
     ps.cur_contract.no_video_copy
 }
@@ -4837,103 +4841,10 @@ pub(crate) fn transcode_seek(ps: &mut PlaybackSession, offset_secs: i64) -> Opti
     // ACTIVE_ENCODER exactly as on the Plex arm.
     // The guard is load-bearing: the jellyfin slot is 0, which host fixtures also hand to
     // `register_for_test` Plex clients — an absent jellyfin client must fall THROUGH.
-    if cur_sid(ps) == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
-        return jellyfin_transcode_seek(ps, offset_secs, &rk);
-    }
-    let c = cur_client(ps)?;
-    // A plain seek/foreground resume has no claimed RouteAction, but it still replaces the PMS
-    // route and native Engine. Reserve the same start transaction before exposing any candidate
-    // fields; an action already in Applying owns its own later Prepared edge and returns None here.
-    let route_start = begin_route_start();
-    let reject_preparation = || {
-        if let Some(ticket) = route_start {
-            let _ = reject_route_start_preparation(ticket);
-        }
-    };
-    let live_hls = sync_active_hls_to_session(ps);
-    let expected = live_hls
-        .as_ref()
-        .map(|(ticket, _)| ticket.clone())
-        .unwrap_or_else(worker_ticket);
-    let previous = expected.encoder().to_owned();
-    if previous.is_empty() {
-        reject_preparation();
+    if cur_sid(ps) != crate::jellyfin::SERVER_ID || crate::jellyfin::client().is_none() {
         return None;
     }
-    let logical_session = sess(ps);
-    let namespace = if logical_session.is_empty() {
-        previous.as_str()
-    } else {
-        logical_session.as_str()
-    };
-    let replacement = next_encoder_session(namespace);
-    let sp = transcode_spec(
-        &rk,
-        &replacement,
-        &replacement,
-        crate::playback::TranscodeOffset::from_seconds(offset_secs.max(0)),
-        cur_audio_sid(ps),
-        cur_sub_sid(ps),
-        ps.cur_contract,
-    );
-    let Some(decision) = c.transcode_decision(&sp) else {
-        // A lost response may still have registered the key. The old route remains published;
-        // clean up only the uncommitted replacement.
-        let _ = c.transcode_stop(&replacement);
-        reject_preparation();
-        return None;
-    };
-    if refusal(&decision).is_some() {
-        let _ = c.transcode_stop(&replacement);
-        reject_preparation();
-        return None;
-    }
-    let url = c.transcode_start_url(&sp).to_url();
-    let replacement_published = if let Some((_, hls)) = live_hls.as_ref() {
-        // This is a NEW PMS response. Carrying the old decoded raster would turn the previous
-        // session's observation into a claim about bytes nobody has opened yet; the new demux
-        // publishes its own master declaration and decoded raster after the reload.
-        replace_active_hls_for(&expected, &replacement, &url, hls.rung, None).is_some()
-    } else {
-        replace_active_encoder_for(&expected, &replacement).is_some()
-    };
-    if !replacement_published {
-        let _ = c.transcode_stop(&replacement);
-        reject_preparation();
-        return None;
-    }
-    { let s = &mut *ps; {
-        s.tsession = replacement.clone();
-        s.url = url.clone();
-        if let Some((_, hls)) = live_hls.as_ref() {
-            s.cur_contract.ceiling = Some(hls.rung.ceiling());
-        }
-    } };
-    publish_applied_route_projection(ps);
-    if let Some(ticket) = route_start {
-        if !prepare_route_start(ticket) {
-            crate::player::log("seek: prepared PMS route lost its start transaction");
-            return None;
-        }
-    }
-
-    // The route now names the replacement; the caller will tear down the old demux immediately
-    // and reopen this URL. Retire the old exact PMS key off the main thread, just like an ABR
-    // commit, so a slow `/stop` cannot freeze the seek UI.
-    let old = previous.clone();
-    if crate::task::spawn_small_keeping("seek-stop", move || {
-        let ok = c.transcode_stop(&old);
-        crate::player::log(&format!("seek: retired previous encoder ok={}", ok as i32));
-    })
-    .is_none()
-    {
-        let ok = c.transcode_stop(&previous);
-        crate::player::log(&format!(
-            "seek: synchronously retired previous encoder ok={}",
-            ok as i32
-        ));
-    }
-    Some(url)
+    jellyfin_transcode_seek(ps, offset_secs, &rk)
 }
 
 /// The Jellyfin arm of [`transcode_seek`]: a PlaybackInfo naming the offset re-cuts the HLS
@@ -5646,6 +5557,7 @@ fn apply_quality_choice(ps: &mut PlaybackSession, q: Quality) {
 ///
 /// `None` means there is nothing to reason from (no source bitrate, or the transfer never
 /// returned), which is deliberately distinct from a completed slow probe.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn measure_remote_original(url: &str, source_kbps: i64) -> Option<crate::abr::CapacityObservation> {
     let Some(plan) = remote_probe_plan(source_kbps) else {
         crate::player::log(
@@ -5698,6 +5610,7 @@ pub(super) fn measure_remote_original(url: &str, source_kbps: i64) -> Option<cra
 /// probe re-asks once with `NONE` on the same session — replacing the enhanced registration
 /// before any enhanced `start.mkv` is fetched — samples that plain remux, and reports
 /// [`RemuxProbe::enhancement_refused`] so the play is built without the params and records it.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn measure_remote_remux(
     client: &crate::plex::Client,
     rk: &str,
@@ -5751,6 +5664,7 @@ pub(super) fn measure_remote_remux(
 /// What [`measure_remote_remux`] learned: the capacity sample (`None` = no usable sample, fall to
 /// HLS), and whether the server refused or ignored the enhancement it was asked for — in which case
 /// the sample is of the PLAIN remux and the play must be built without the params.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) struct RemuxProbe {
     pub(super) sample: Option<crate::abr::CapacityObservation>,
     pub(super) enhancement_refused: bool,
@@ -5759,6 +5673,7 @@ pub(super) struct RemuxProbe {
 /// MDE handshake result. `None` from [`server_decision`] means the body was missing or unusable:
 /// the caller must not Original, but remux is still allowed. `Part.decision=transcode` is a
 /// container change, not a video-copy veto — see [`crate::media::MediaPart::video_forbids_copy`].
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) struct MdeVerdict {
     pub(super) original: bool,
     pub(super) video_forbids_copy: bool,
@@ -5771,6 +5686,7 @@ pub(super) struct MdeVerdict {
 ///
 /// Takes the `Client` rather than looking one up: this runs on the resolve worker, and `rk` is only
 /// an item on the server the caller resolved from this playback's captured `ServerId`.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn server_decision(
     c: &crate::plex::Client,
     rk: &str,
@@ -5789,6 +5705,7 @@ pub(super) fn server_decision(
     mde_verdict(&mc)
 }
 
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 fn mde_verdict(mc: &crate::media::MediaContainer) -> Option<MdeVerdict> {
     if refusal(mc).is_some() { return None; }
     // Part.decision is the Original-vs-not verdict (Media/container carry none). Video copy
@@ -5835,6 +5752,7 @@ fn mde_verdict(mc: &crate::media::MediaContainer) -> Option<MdeVerdict> {
     })
 }
 
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn forced_server_decision(
     c: &crate::plex::Client, rk: &str, session: &str, audio: i64, sub: i64,
 ) -> Option<MdeVerdict> {
@@ -5874,6 +5792,7 @@ pub(super) fn put_selection(sid: ServerId, part: i64, aud: i64, sub: i64) {
 /// What the queue told us, as owned data for `apply_plan` to install. `machine_id` is `""` when
 /// the cached one is still good.
 #[derive(Default)]
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) struct QueueInfo {
     pub(super) machine_id: String,
     pub(super) id: String,
@@ -5923,6 +5842,7 @@ pub(crate) fn with_queue<R>(ps: &PlaybackSession, f: impl FnOnce(&[crate::playba
 ///      for the session's own server rung 1 is empty and this is what saves a round trip.
 ///   3. `GET /identity`, whose answer travels back in `QueueInfo::machine_id` for `apply_plan` to
 ///      cache against this server.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub(super) fn resolve_playqueue(
     c: &crate::plex::Client,
     rk: &str,
@@ -7007,20 +6927,10 @@ pub(crate) fn retranscode_for(ps: &mut PlaybackSession, expected: &WorkerTicket,
     // `jellyfin_transcode_seek` uses for a seek. The Plex machinery below resolves its client
     // from a registry the Jellyfin slot is not in, so without this arm an audio switch to a
     // non-direct-playable track is silently rejected on this backend.
-    if cur_sid(ps) == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
-        return jellyfin_retranscode_as(ps, expected, offset_secs);
+    if cur_sid(ps) != crate::jellyfin::SERVER_ID || crate::jellyfin::client().is_none() {
+        return None;
     }
-    if matches!(
-        cur_delivery(ps),
-        crate::playback::TranscodeDelivery::FixedHls { .. }
-    ) {
-        let live = sync_active_hls_to_session(ps);
-        if live.as_ref().is_some_and(|(ticket, _)| ticket != expected) {
-            return None;
-        }
-    }
-    let contract = retranscode_contract(ps);
-    retranscode_as(ps, expected, offset_secs, contract)
+    jellyfin_retranscode_as(ps, expected, offset_secs)
 }
 
 /// The contract a plain rebuild of the current route asks for: today's delivery, ceiling and
@@ -7032,6 +6942,7 @@ pub(crate) fn retranscode_for(ps: &mut PlaybackSession, expected: &WorkerTicket,
 /// (another capable track the candidate can carry) makes [`enhancement_step`] `NotInvolved`
 /// because the params already match, and its legacy reload lands here; rebuilding that as a
 /// re-encode would silently drop the enhancement the viewer still has switched on.
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 fn retranscode_contract(ps: &PlaybackSession) -> crate::playback::EncodeContract {
     // A ceiling means a fixed rung was picked, and an enhanced remux is uncapped by definition:
     // keeping it would erase the cap the picker shows (I5).
@@ -8097,29 +8008,10 @@ pub(crate) mod test_support;
 mod resolve_route_tests;
 
 #[cfg(test)]
-#[path = "decision_plan_tests.rs"]
-mod plan_tests;
-
-#[cfg(test)]
-#[path = "decision_quality_recovery_tests.rs"]
-mod quality_recovery_tests;
-
-#[cfg(test)]
 #[path = "decision_timeline_tests.rs"]
 mod timeline_tests;
-
-#[cfg(test)]
-#[path = "decision_direct_play_mode_tests.rs"]
-mod direct_play_mode_tests;
 
 #[cfg(test)]
 #[path = "carried_audio_tests.rs"]
 mod carried_audio_tests;
 
-#[cfg(test)]
-#[path = "plan_audio_enhancement_tests.rs"]
-mod plan_audio_enhancement_tests;
-
-#[cfg(test)]
-#[path = "decision_audio_enhancement_tests.rs"]
-mod audio_enhancement_tests;

@@ -241,6 +241,7 @@ pub struct QueueRow {
     /// `playQueueItemID` — identity WITHIN the queue. A ratingKey can repeat in a queue (the same
     /// item queued twice), a playQueueItemID cannot, so every lookup keys off this. 0 = a server
     /// that omitted the field.
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub item_id: i64,
     /// The server that ISSUED this queue, and so the server `rk` is a key on. A PlayQueue is
     /// per-server by construction (it is created with a `server://{machineIdentifier}/…` uri), so

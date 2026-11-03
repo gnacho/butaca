@@ -18,6 +18,7 @@ pub struct MediaContainer {
     /// The item's own SETTINGS, on `/library/metadata/{id}/tree` (`the upstream Plex API reference`'s
     /// `show` example): `episodeSort`, `audioLanguage`, `subtitleLanguage`, … — see [`Setting`].
     #[serde(rename = "Setting", default)]
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub setting: Vec<Setting>,
     #[serde(rename = "Metadata", default)]
     pub metadata: Vec<Metadata>,
@@ -64,6 +65,7 @@ pub struct MediaContainer {
         default,
         deserialize_with = "de_opt_i64"
     )]
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub transcode_decision_code: Option<i64>,
     /// …and the two HUMAN sentences PMS pairs with those codes — "Cannot convert this item.
     /// Implementation for video encoder 'vp9' not found." / "Neither direct play nor conversion is
@@ -93,6 +95,7 @@ pub struct MediaContainer {
 }
 
 #[derive(Deserialize, Default)]
+#[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
 pub struct Hub {
     #[serde(rename = "type", default)]
     pub kind: String,
@@ -106,6 +109,7 @@ pub struct Hub {
     /// could plausibly spell differently, the key is the route it must answer at. Nothing follows
     /// it yet — the items on that route arrive embedded (`docs/pms-api.md` §3a).
     #[serde(default)]
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub key: String,
     #[serde(default)]
     pub title: String,
@@ -142,6 +146,7 @@ pub struct Hub {
 
 impl Hub {
     /// Every item the hub's listing holds: `totalSize`, else `size`, never negative.
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub fn total(&self) -> usize {
         self.total_size.max(self.size).max(0) as usize
     }
@@ -152,6 +157,7 @@ impl Hub {
 #[derive(Deserialize, Default, Clone, Debug)]
 pub struct Setting {
     #[serde(default, deserialize_with = "de_str")]
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub id: String,
     #[serde(default, deserialize_with = "de_str")]
     pub value: String,
@@ -177,6 +183,7 @@ impl Default for ShowLangPrefs {
 impl ShowLangPrefs {
     /// Read the three settings out of a `Setting[]`, or None when it carries none of them (so the
     /// caller can ask the other endpoint).
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub fn from_settings(settings: &[Setting]) -> Option<ShowLangPrefs> {
         let get = |id: &str| settings.iter().find(|s| s.id == id).map(|s| s.value.trim());
         let (a, s, m) = (get("audioLanguage"), get("subtitleLanguage"), get("subtitleMode"));
@@ -197,6 +204,7 @@ impl ShowLangPrefs {
 #[derive(Deserialize, Default)]
 pub struct Preferences {
     #[serde(rename = "Setting", default)]
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub setting: Vec<Setting>,
 }
 
@@ -205,6 +213,7 @@ pub struct Preferences {
 pub struct Metadata {
     /// Only on a read that asked `includePreferences=1` — see [`Preferences`].
     #[serde(rename = "Preferences", default)]
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub preferences: Preferences,
     #[serde(rename = "type", default)]
     pub kind: String, // movie|show|season|episode|clip
@@ -224,6 +233,7 @@ pub struct Metadata {
     /// Path of the item's primary extra (`/library/metadata/{rk}`). Present on movie/show
     /// metadata even without `includeExtras=1`.
     #[serde(rename = "primaryExtraKey", default)]
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub primary_extra_key: String,
     /// **The only PORTABLE identity Plex issues** — `plex://movie/6856…291d`, the metadata
     /// provider's id, identical on every server that ever matched this film. Everything else
@@ -259,6 +269,7 @@ pub struct Metadata {
     #[serde(default)]
     pub summary: String,
     #[serde(default)]
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub tagline: String,
     #[serde(rename = "originallyAvailableAt", default)]
     pub originally_available_at: String,
@@ -267,6 +278,7 @@ pub struct Metadata {
     #[serde(rename = "viewOffset", default, deserialize_with = "de_i64")]
     pub view_offset: i64, // ms; resume point
     #[serde(rename = "lastViewedAt", default, deserialize_with = "de_i64")]
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub last_viewed_at: i64, // unix secs; drives Continue Watching recency sort
     /// Collection rows use this as their tag id (distinct from `ratingKey`).
     #[serde(default, deserialize_with = "de_i64")]
@@ -298,8 +310,10 @@ pub struct Metadata {
     #[serde(rename = "Media", default)]
     pub media: Vec<Media>,
     #[serde(rename = "Genre", default)]
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub genre: Vec<Tag>,
     #[serde(rename = "Country", default)]
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub country: Vec<Tag>,
     #[serde(rename = "Director", default)]
     pub director: Vec<Tag>,
@@ -331,6 +345,7 @@ pub struct Metadata {
     /// time, so anything it worked out itself would change with the selected season tab — which is
     /// exactly the bug this field exists to fix.
     #[serde(rename = "OnDeck", default)]
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub on_deck: Option<OnDeckHub>,
     #[serde(rename = "Rating", default)]
     pub ratings: Vec<Rating>,
@@ -409,6 +424,7 @@ pub struct MediaPart {
     /// /decision only: the MDE verdict for this part — "directplay" | "transcode" | "copy"
     /// (Media/container carry no decision; the part is the authoritative one).
     #[serde(default)]
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub decision: String,
     /// The part's absolute path ON THE SERVER's filesystem — the header line of the
     /// Track-information panel. **Not a URL and not reachable from here**: it is the server
@@ -435,6 +451,7 @@ impl MediaPart {
     /// `Stream.decision`; this reader is for `/decision` bodies. `Part.decision=transcode` is a
     /// container change: TrueHD-only and Profile 5 are `Part=transcode` with video `copy`
     /// (`docs/pms-api.md`).
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub fn video_forbids_copy(&self) -> bool {
         self.stream
             .iter()
@@ -608,6 +625,7 @@ pub struct Tag {
     #[serde(default, deserialize_with = "de_str")]
     pub role: String, // Role[] only (character name)
     #[serde(default, deserialize_with = "de_str")]
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub thumb: String, // headshot — on the crew arrays (Director[]/Writer[]) as well as Role[]
     /// The tag's numeric library id — the `personId` of `/library/people/{id}[/media]`, and the
     /// value behind `?actor=<id>` on a section listing. 0 = absent.
@@ -682,6 +700,7 @@ pub struct Marker {
 #[derive(Deserialize, Default)]
 pub struct Rating {
     #[serde(default)]
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub image: String,
     #[serde(default, deserialize_with = "de_f64")]
     pub value: f64,
@@ -742,6 +761,7 @@ impl From<String> for HexColor {
 #[derive(Deserialize, Default)]
 pub struct OnDeckHub {
     #[serde(rename = "Metadata", default, deserialize_with = "de_on_deck")]
+    #[allow(dead_code)] // frozen until PR3 removes the Plex wire layer
     pub metadata: Option<Box<Metadata>>,
 }
 
