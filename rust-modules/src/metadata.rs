@@ -3170,39 +3170,9 @@ fn resolve_alt_sources(
     others: &[crate::registry::ServerId],
     guid: &str,
 ) -> Vec<AltCopy> {
-    let mut out = Vec::new();
-    for &id in others {
-        let Some(c) = crate::registry::client_for(id) else {
-            continue;
-        };
-        // `None` here is "did not answer" and `Some(empty)` is "does not have it" — both contribute
-        // no row, but only the second is a fact about the library. They are not collapsed at the
-        // client (see `find_by_guid`) so a later revision can say "not reachable" in the panel.
-        let Some(mc) = c.find_by_guid(guid) else {
-            continue;
-        };
-        let handle = crate::registry::facts(id)
-            .map(|f| f.handle.clone())
-            .unwrap_or_default();
-        for m in mc.metadata.iter() {
-            let media0 = m.media.first();
-            out.push(AltCopy {
-                sid: id,
-                library: m.library_section_title.clone(),
-                // `None` is the ABSENCE of an owner, which is what the row spells "This account";
-                // an empty handle must not become `Some("")`.
-                owner: (!handle.is_empty()).then(|| handle.clone()),
-                rk: m.rating_key.clone(),
-                dur_ms: m.duration,
-                res: media0
-                    .map(|x| x.video_resolution.clone())
-                    .unwrap_or_default(),
-                width: media0.map(|x| x.width).unwrap_or_default(),
-                height: media0.map(|x| x.height).unwrap_or_default(),
-            });
-        }
-    }
-    out
+    // Jellyfin is the only backend: there is no second source to look the same title up in.
+    let _ = (others, guid);
+    Vec::new()
 }
 
 /// MAIN THREAD, once a frame. Runs the store's whole per-frame half — the two registry epochs, the

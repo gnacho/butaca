@@ -39,6 +39,7 @@ impl Client {
     /// without another round trip — and a guid whose kind we do not recognise sends no `type` at
     /// all rather than guessing 1, because a wrong type answers `size 0` and would read as "that
     /// server does not have it".
+    #[allow(dead_code)] // frozen until the wire layer goes
     pub fn find_by_guid(&self, guid: &str) -> Option<MediaContainer> {
         if guid.is_empty() {
             return None;
@@ -78,6 +79,7 @@ impl Client {
     /// path. Conversion is the server's and has been seen refusing a FORMAT before (`.vtt` → 501):
     /// without `format` PMS re-encodes only, and the bare key is the file as it lies on disk.
     /// `player::sidecar` retains styled scripts and parses plain captions from the response.
+    #[allow(dead_code)] // frozen until the wire layer goes
     pub fn sidecar_subtitle(&self, key: &str, codec: &str) -> Option<Vec<u8>> {
         if !sidecar_key_allowed(key) {
             return None; // a key is server data: only ever the path this method is for
