@@ -367,15 +367,6 @@ impl OpenReservation {
         Some(OpenReservation { abort: Some(abort) })
     }
 
-    /// A short independent transfer which must not replace the demuxer's teardown target. Auto's
-    /// remote-original preflight can run while the outgoing player still owns [`ACTIVE`]; putting
-    /// this handle there would make teardown wake the probe instead of the movie.
-    #[allow(dead_code)] // frozen until the wire layer goes
-    fn private() -> Option<OpenReservation> {
-        Some(OpenReservation {
-            abort: Some(Abort::new()?),
-        })
-    }
 
     fn into_abort(mut self) -> Arc<Abort> {
         self.abort.take().expect("a reservation is consumed once")
@@ -664,29 +655,6 @@ impl CurlSource {
         )
     }
 
-    /// Open the finite prefix used by an Original throughput experiment. Unlike an ordinary
-    /// offset-zero media open this sends `Range: bytes=0-(len-1)`, so completing the sample also
-    /// completes the HTTP response instead of abandoning the rest of a multi-gigabyte file.
-    #[allow(dead_code)] // frozen until the wire layer goes
-    fn open_bounded_with_reservation_until(
-        url: &str,
-        len: usize,
-        reservation: OpenReservation,
-        deadline: Option<std::time::Instant>,
-    ) -> Result<Box<CurlSource>, OpenErr> {
-        let end = i64::try_from(len)
-            .ok()
-            .and_then(|n| n.checked_sub(1))
-            .ok_or(OpenErr::Local)?;
-        Self::open_with_reservation_range_until(
-            url,
-            0,
-            Some(end),
-            reservation,
-            deadline,
-            &mut NoCheckpoint,
-        )
-    }
 
     fn open_with_reservation_range_until(
         url: &str,
@@ -1460,18 +1428,6 @@ pub(crate) struct ThroughputSample {
     pub(crate) target_reached: bool,
 }
 
-/// Why a bounded source measurement did not produce even one body byte.  Keeping the setup
-/// failure typed is what lets Auto distinguish a PMS refusal from a zero-rate link: an HTTP 500,
-/// 503 or 509 is a statement about this request, not a throughput observation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    #[allow(dead_code)] // frozen until the wire layer goes
-pub(crate) enum ThroughputFailure {
-    Open(OpenErr),
-    BodyDeadline,
-    BodyRead { status: c_int },
-    NoBody { status: c_int },
-}
-
 impl ThroughputSample {
     pub(crate) fn kbps(self) -> u64 {
         let us = self.elapsed.as_micros().max(1);
@@ -1479,123 +1435,9 @@ impl ThroughputSample {
     }
 }
 
-/// Read at most `target_bytes` from a URL inside two separately bounded serial phases, without
-/// taking over the live demuxer's abort registry.
-///
-/// `setup_budget` bounds DNS/TLS/response headers. `body_budget` starts only after those headers
-/// exist and is the interval reported in [`ThroughputSample::elapsed`]. Sharing one absolute
-/// deadline between them confounds a one-off reload cost with ongoing body service: a fast body
-/// can be truncated merely because setup spent the first part of its measurement window. The
-/// caller funds both phases; this function reports only the body observation. Dropping the source
-/// stops the request as soon as the sample is complete, so the remainder of the movie is never
-/// downloaded here.
-/// Bounded source measurement used by the ABR control path. Its typed failure keeps a server
-/// refusal visible instead of collapsing it into an absent/zero capacity sample. The lower curl
-/// boundary enforces the same credential-transport policy as the live demuxer.
-    #[allow(dead_code)] // frozen until the wire layer goes
-pub(crate) fn sample_throughput_result(
-    url: &str,
-    target_bytes: usize,
-    setup_budget: std::time::Duration,
-    body_budget: std::time::Duration,
-) -> Result<ThroughputSample, ThroughputFailure> {
-    let setup_deadline = sample_setup_deadline(target_bytes, setup_budget, body_budget)?;
-    let reservation = OpenReservation::private().ok_or(ThroughputFailure::Open(OpenErr::Local))?;
-    sample_throughput_with_reservation(url, target_bytes, setup_deadline, body_budget, reservation)
-}
 
-/// The same finite measurement while it is the demux worker's current blocking operation.
-///
-/// Publish the probe in teardown's registry *before* checking the AU-lane cancellation supplied
-/// by the caller.  Those two operations close the lost-wake race exactly as a normal media open
-/// does: teardown either signals this reservation, or it aborted the queue first and
-/// `cancelled()` refuses to start the request.  Cold preflight deliberately uses
-/// [`sample_throughput_result`] instead because an outgoing player may still own the registry.
-    #[allow(dead_code)] // frozen until the wire layer goes
-pub(crate) fn sample_active_throughput_result<F>(
-    url: &str,
-    target_bytes: usize,
-    setup_budget: std::time::Duration,
-    body_budget: std::time::Duration,
-    cancelled: F,
-) -> Result<ThroughputSample, ThroughputFailure>
-where
-    F: FnOnce() -> bool,
-{
-    let setup_deadline = sample_setup_deadline(target_bytes, setup_budget, body_budget)?;
-    let reservation = OpenReservation::publish().ok_or(ThroughputFailure::Open(OpenErr::Local))?;
-    if cancelled() {
-        return Err(ThroughputFailure::Open(OpenErr::Aborted));
-    }
-    sample_throughput_with_reservation(url, target_bytes, setup_deadline, body_budget, reservation)
-}
 
-    #[allow(dead_code)] // frozen until the wire layer goes
-fn sample_setup_deadline(
-    target_bytes: usize,
-    setup_budget: std::time::Duration,
-    body_budget: std::time::Duration,
-) -> Result<std::time::Instant, ThroughputFailure> {
-    if target_bytes == 0 || setup_budget.is_zero() || body_budget.is_zero() || !available() {
-        return Err(ThroughputFailure::Open(OpenErr::Unavailable));
-    }
-    std::time::Instant::now()
-        .checked_add(setup_budget)
-        .ok_or(ThroughputFailure::Open(OpenErr::Local))
-}
 
-    #[allow(dead_code)] // frozen until the wire layer goes
-fn sample_throughput_with_reservation(
-    url: &str,
-    target_bytes: usize,
-    setup_deadline: std::time::Instant,
-    body_budget: std::time::Duration,
-    reservation: OpenReservation,
-) -> Result<ThroughputSample, ThroughputFailure> {
-    let mut src = CurlSource::open_bounded_with_reservation_until(
-        url,
-        target_bytes,
-        reservation,
-        Some(setup_deadline),
-    )
-    .map_err(ThroughputFailure::Open)?;
-    // `start_range_until` disarms its setup-only total timeout after validating the headers.
-    // `read_until` supplies the independently bounded body deadline from this point on.
-    let started = std::time::Instant::now();
-    let body_deadline = started
-        .checked_add(body_budget)
-        .ok_or(ThroughputFailure::Open(OpenErr::Local))?;
-    let mut bytes = 0usize;
-    let mut last_read = 0;
-    let mut chunk = [0u8; 64 * 1024];
-    while bytes < target_bytes {
-        let want = chunk.len().min(target_bytes - bytes);
-        let n = src.read_until(&mut chunk[..want], Some(body_deadline), &mut NoCheckpoint);
-        last_read = n;
-        if n <= 0 {
-            break;
-        }
-        bytes = bytes.saturating_add(n as usize);
-    }
-    if bytes == 0 {
-        return Err(if std::time::Instant::now() >= body_deadline {
-            ThroughputFailure::BodyDeadline
-        } else if last_read < 0 {
-            ThroughputFailure::BodyRead {
-                status: src.status(),
-            }
-        } else {
-            ThroughputFailure::NoBody {
-                status: src.status(),
-            }
-        });
-    }
-    Ok(ThroughputSample {
-        bytes: bytes as u64,
-        elapsed: started.elapsed(),
-        target_reached: bytes >= target_bytes,
-    })
-}
 
 fn media_url_allowed(url: &str) -> bool {
     let (origin, path) = crate::origin::split(url);
@@ -2407,92 +2249,6 @@ mod tests {
                 src.size(),
                 BODY.len() as i64,
                 "Content-Range's total must not shrink to the tail length"
-            );
-        });
-    }
-
-    /// A connection handshake is a one-off reload cost; the body interval is the evidence about
-    /// whether ongoing Original can replenish media. Sharing one deadline between them truncated
-    /// the device probe after 625 ms of body at 35 Mbit/s merely because setup had spent the first
-    /// ~375 ms, then called a 25 Mbit/s source inconclusive although manual Original played. The
-    /// request itself must also name a finite byte range: reading a prefix from an unbounded 200
-    /// and dropping the handle leaves PMS serving the rest of an 18 GB file into a broken pipe.
-    #[test]
-    fn source_probe_gives_setup_and_body_their_own_bounded_windows() {
-        let Some(_gate) = curl_gate() else { return };
-        with_server(RangeMode::DelayedSample, |port, _, _| {
-            let sample = sample_throughput_result(
-                &format!("http://127.0.0.1:{port}/f.mkv"),
-                BODY.len(),
-                std::time::Duration::from_millis(500),
-                std::time::Duration::from_millis(500),
-            )
-            .expect("both individually bounded phases should complete");
-            assert!(sample.target_reached);
-            assert_eq!(sample.bytes, BODY.len() as u64);
-        });
-    }
-
-    /// Runtime Original sampling runs synchronously on the demux worker.  If it used the cold
-    /// preflight's private reservation, engine teardown would abort the queues and then wait for
-    /// this stalled request's entire setup/body budget before the worker could join.  The active
-    /// variant must instead be the exact request reached by teardown's one wake signal.
-    #[test]
-    fn teardown_aborts_a_runtime_source_probe_without_waiting_out_its_budget() {
-        let Some(_gate) = curl_gate() else { return };
-        // The server never answers, so the probe is parked in its setup wait and only teardown's
-        // wake can end it. `Stall` sent headers at once: a 200 to the probe's Range, which the
-        // probe itself refuses as `RangeIgnored` — ending the sample (and retiring its handle)
-        // before teardown ran whenever this thread was late, which a loaded suite made it.
-        with_server(RangeMode::WithholdFrom(1), |port, _, _| {
-            let url = format!("http://127.0.0.1:{port}/f.mkv");
-            let started = std::time::Instant::now();
-            std::thread::scope(|scope| {
-                let worker = scope.spawn(|| {
-                    sample_active_throughput_result(
-                        &url,
-                        BODY.len(),
-                        std::time::Duration::from_secs(5),
-                        std::time::Duration::from_secs(5),
-                        || false,
-                    )
-                });
-                // A FAILURE BOUND, NOT A RUNTIME: the loop returns the moment the worker publishes,
-                // so a passing run never spends this. One second was not one — with an ARM
-                // cross-build loading the machine beside a full `make check`, the worker had not
-                // been scheduled inside it and this read as a teardown regression (2026-09-02);
-                // alone, the same test publishes in ~10 ms. Same shape as route.rs's stop-probe.
-                let published_by = std::time::Instant::now() + std::time::Duration::from_secs(20);
-                while lock_active().is_none() {
-                    assert!(
-                        std::time::Instant::now() < published_by,
-                        "runtime probe never published teardown's wake target"
-                    );
-                    std::thread::yield_now();
-                }
-                // Teardown lands whenever the main thread next runs, not the instant the probe
-                // publishes. A loaded suite deschedules this thread right here; the delay makes
-                // that the case every run, so the probe is already on the wire when it is woken.
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                abort_active();
-                let result = worker.join().expect("probe worker");
-                assert!(
-                    matches!(
-                        result,
-                        Err(ThroughputFailure::Open(OpenErr::Aborted))
-                            | Err(ThroughputFailure::BodyRead { .. })
-                    ),
-                    "teardown must end the sample as an abort, got {result:?}"
-                );
-            });
-            assert!(
-                started.elapsed() < std::time::Duration::from_secs(2),
-                "teardown waited out the runtime probe budget: {:?}",
-                started.elapsed()
-            );
-            assert!(
-                lock_active().is_none(),
-                "the aborted probe must retire its reservation"
             );
         });
     }
