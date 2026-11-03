@@ -90,10 +90,10 @@ impl TestBrowse {
 
 
     pub(super) fn first_run_asks(&self) -> bool {
-        let session = crate::plex::session::peek();
-        crate::plex::pins::asks(
+        let session = crate::server::session::peek();
+        crate::server::pins::asks(
             self.state.sources.len(),
-            session.pins_for(&crate::plex::session::current_profile_key()),
+            session.pins_for(&crate::server::session::current_profile_key()),
         )
     }
 }
@@ -172,15 +172,15 @@ pub(super) fn a_source(name: &str, handle: &str, reachable: bool) -> BrowseSourc
 }
 // ---- the Home selection: defaults, persistence, and one answer per PROFILE ------------------
 //
-// The RULES are `plex::pins` and are graded there, pure. What is graded here is the plumbing
+// The RULES are `server::pins` and are graded there, pure. What is graded here is the plumbing
 // around them, which is where the failures actually live: does an answer reach the disk, does
 // it come back, and does it come back to the person who gave it.
 
 /// The session-isolation guard, under the name this module's tests have always called it.
-/// It is `plex::session::TempSession` now — one guard rather than the three near-identical
+/// It is `server::session::TempSession` now — one guard rather than the three near-identical
 /// copies that had grown here, in `ui::onboard` and in `auth`; the local alias is kept only so
 /// the dozens of call sites below still read as pinning THIS module's per-profile answer.
-pub(super) use crate::plex::session::TempSession as TempPins;
+pub(super) use crate::server::session::TempSession as TempPins;
 
 /// **The household's own server as a MANAGED or Guest profile sees it** — the shape
 /// [`a_source`] cannot express, because it derives the verdict from the handle.

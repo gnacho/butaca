@@ -13,7 +13,7 @@ pub(super) fn execute(command: PreferenceCmd) {
         }
         PreferenceCmd::Language { language, reply } => {
             let _ = crate::storage_worker::submit_retained(move || {
-                let _ = reply.send(crate::plex::session::set_language(language));
+                let _ = reply.send(crate::server::session::set_language(language));
                 crate::ui::idle::invalidate();
             });
         }

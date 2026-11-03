@@ -200,7 +200,7 @@ mod route_key_allowlist_tests {
 /// Canon-only wire shapes since the plex.tv account surface was removed: the session-protocol
 /// observation digest is frozen (SessionInit::write layout), so the recorded observation
 /// vocabulary and the `/api/v2/resources` rows it named survive here with no producer. The
-/// lenient adapters are `plex::models`' — the shapes must keep tolerating exactly what the
+/// lenient adapters are `server::models`' — the shapes must keep tolerating exactly what the
 /// account API used to send, because old recordings are replayed against this code.
 #[derive(serde::Deserialize, Default)]
 pub(crate) struct Resource {

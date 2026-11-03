@@ -61,10 +61,10 @@ pub(crate) enum AppFx {
 }
 
 pub(crate) enum PreferenceCmd {
-    Quality { quality: crate::plex::session::PlaybackQuality, reply: std::sync::mpsc::Sender<bool> },
-    DirectPlay { mode: crate::plex::session::DirectPlayMode, reply: std::sync::mpsc::Sender<bool> },
+    Quality { quality: crate::server::session::PlaybackQuality, reply: std::sync::mpsc::Sender<bool> },
+    DirectPlay { mode: crate::server::session::DirectPlayMode, reply: std::sync::mpsc::Sender<bool> },
     LipSync { offset_ms: i64, reply: std::sync::mpsc::Sender<bool> },
-    UpNext { policy: crate::plex::session::UpNextPolicy, reply: std::sync::mpsc::Sender<bool> },
+    UpNext { policy: crate::server::session::UpNextPolicy, reply: std::sync::mpsc::Sender<bool> },
     UpNextWindow { seconds: i64, reply: std::sync::mpsc::Sender<bool> },
     Language { language: crate::i18n::Preference, reply: std::sync::mpsc::Sender<bool> },
 }
@@ -82,7 +82,7 @@ pub(crate) enum PreferenceCmd {
 /// were still deciding by the time the route that carried them was deleted:
 ///
 /// * `sid` — WHICH SERVER the action's ratingKey is about, captured when the menu was presented.
-///   Resolving it against `plex::current_server()` at the press is the reported bug itself: on a
+///   Resolving it against `server::current_server()` at the press is the reported bug itself: on a
 ///   Continue Watching shelf merged across servers, Play from Start on a friend's episode found
 ///   OUR row with the same key and played a different film under the friend's title.
 /// * `item` — the catalog ROW the menu was opened on, for the one action a key cannot perform.

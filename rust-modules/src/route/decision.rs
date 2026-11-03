@@ -4364,7 +4364,7 @@ use crate::cbuf::set as set_c; // shared fixed-C-buffer write (the session's HUD
 /// whatsoever. The relay-policy doc argued this out for a LINK ceiling long before there was a
 /// user-chosen one, and the argument transfers unchanged.
 ///
-/// So a rung is spent the way [`crate::plex::link_policy`] spends the relay tier: **deny the two
+/// So a rung is spent the way [`crate::server::link_policy`] spends the relay tier: **deny the two
 /// flavors that ship the file at its own rate, leaving the one flavor whose whole point is that
 /// the server picks the rate** ([`quality_policy`]). Only then does the rung's number reach the
 /// wire, as [`crate::playback::Ceiling`] on the re-encode query.
@@ -4483,9 +4483,9 @@ pub(crate) fn restore_direct_play_mode(mode: DirectPlayMode) {
 
 /// Blocking persistence seam; Settings dispatches it on the storage worker.
 pub(crate) fn set_direct_play_mode(mode: DirectPlayMode) -> bool {
-    let saved = crate::plex::session::update_with_outcome(|s| Some(s.with_direct_play_mode(mode)))
+    let saved = crate::server::session::update_with_outcome(|s| Some(s.with_direct_play_mode(mode)))
         .is_some_and(|write| matches!(write.classify(),
-            crate::plex::session::async_persistence::CompletionOutcome::Durable(_)));
+            crate::server::session::async_persistence::CompletionOutcome::Durable(_)));
     if saved { restore_direct_play_mode(mode); crate::ui::idle::invalidate(); }
     saved
 }
@@ -4528,9 +4528,9 @@ pub(crate) fn restore_lip_sync_offset_ms(offset_ms: i64) {
 /// [`set_direct_play_mode`].
 pub(crate) fn set_lip_sync_offset_ms(offset_ms: i64) -> bool {
     let offset_ms = clamp_lip_sync_offset_ms(offset_ms);
-    let saved = crate::plex::session::update_with_outcome(|s| Some(s.with_lip_sync_offset_ms(offset_ms)))
+    let saved = crate::server::session::update_with_outcome(|s| Some(s.with_lip_sync_offset_ms(offset_ms)))
         .is_some_and(|write| matches!(write.classify(),
-            crate::plex::session::async_persistence::CompletionOutcome::Durable(_)));
+            crate::server::session::async_persistence::CompletionOutcome::Durable(_)));
     if saved { restore_lip_sync_offset_ms(offset_ms); crate::ui::idle::invalidate(); }
     saved
 }
@@ -4542,25 +4542,25 @@ static UP_NEXT_POLICY: AtomicU8 = AtomicU8::new(0);
 
 /// Seconds before the end at which the Up Next card appears where the server marks no credits.
 static UP_NEXT_WINDOW_S: AtomicI64 =
-    AtomicI64::new(crate::plex::session::UP_NEXT_WINDOW_DEFAULT_S);
+    AtomicI64::new(crate::server::session::UP_NEXT_WINDOW_DEFAULT_S);
 
-pub(crate) fn up_next_policy() -> crate::plex::session::UpNextPolicy {
+pub(crate) fn up_next_policy() -> crate::server::session::UpNextPolicy {
     match UP_NEXT_POLICY.load(Ordering::Relaxed) {
-        1 => crate::plex::session::UpNextPolicy::Ask,
-        2 => crate::plex::session::UpNextPolicy::Off,
-        _ => crate::plex::session::UpNextPolicy::Auto,
+        1 => crate::server::session::UpNextPolicy::Ask,
+        2 => crate::server::session::UpNextPolicy::Off,
+        _ => crate::server::session::UpNextPolicy::Auto,
     }
 }
 
 /// Whether the countdown may arm: `Ask` leaves the card up and waits, `Off` never shows it.
 pub(crate) fn up_next_auto_advances() -> bool {
-    matches!(up_next_policy(), crate::plex::session::UpNextPolicy::Auto)
+    matches!(up_next_policy(), crate::server::session::UpNextPolicy::Auto)
 }
 
 /// Whether the card is offered at all. Reads the policy once so the draw, the hit map and the
 /// countdown cannot disagree within a frame.
 pub(crate) fn up_next_offered() -> bool {
-    !matches!(up_next_policy(), crate::plex::session::UpNextPolicy::Off)
+    !matches!(up_next_policy(), crate::server::session::UpNextPolicy::Off)
 }
 
 pub(crate) fn up_next_window_s() -> i64 {
@@ -4574,8 +4574,8 @@ pub(crate) fn up_next_window_ms() -> i64 {
 
 pub(crate) fn up_next_window_range_s() -> (i64, i64) {
     (
-        crate::plex::session::UP_NEXT_WINDOW_MIN_S,
-        crate::plex::session::UP_NEXT_WINDOW_MAX_S,
+        crate::server::session::UP_NEXT_WINDOW_MIN_S,
+        crate::server::session::UP_NEXT_WINDOW_MAX_S,
     )
 }
 
@@ -4586,21 +4586,21 @@ pub(crate) fn clamp_up_next_window_s(seconds: i64) -> i64 {
 
 /// Restore the persisted preference without writing it back, exactly as
 /// [`restore_lip_sync_offset_ms`].
-pub(crate) fn restore_up_next_policy(policy: crate::plex::session::UpNextPolicy) {
+pub(crate) fn restore_up_next_policy(policy: crate::server::session::UpNextPolicy) {
     #[cfg(test)]
     crate::testlock::assert_held("the up-next policy (restore_up_next_policy)");
     UP_NEXT_POLICY.store(match policy {
-        crate::plex::session::UpNextPolicy::Auto => 0,
-        crate::plex::session::UpNextPolicy::Ask => 1,
-        crate::plex::session::UpNextPolicy::Off => 2,
+        crate::server::session::UpNextPolicy::Auto => 0,
+        crate::server::session::UpNextPolicy::Ask => 1,
+        crate::server::session::UpNextPolicy::Off => 2,
     }, Ordering::Relaxed);
 }
 
 /// Blocking persistence seam; Settings dispatches it on the storage worker.
-pub(crate) fn set_up_next_policy(policy: crate::plex::session::UpNextPolicy) -> bool {
-    let saved = crate::plex::session::update_with_outcome(|s| Some(s.with_up_next_policy(policy)))
+pub(crate) fn set_up_next_policy(policy: crate::server::session::UpNextPolicy) -> bool {
+    let saved = crate::server::session::update_with_outcome(|s| Some(s.with_up_next_policy(policy)))
         .is_some_and(|write| matches!(write.classify(),
-            crate::plex::session::async_persistence::CompletionOutcome::Durable(_)));
+            crate::server::session::async_persistence::CompletionOutcome::Durable(_)));
     if saved { restore_up_next_policy(policy); }
     saved
 }
@@ -4616,9 +4616,9 @@ pub(crate) fn restore_up_next_window_s(seconds: i64) {
 /// Blocking persistence seam; Settings dispatches it on the storage worker.
 pub(crate) fn set_up_next_window_s(seconds: i64) -> bool {
     let seconds = clamp_up_next_window_s(seconds);
-    let saved = crate::plex::session::update_with_outcome(|s| Some(s.with_up_next_window_s(seconds)))
+    let saved = crate::server::session::update_with_outcome(|s| Some(s.with_up_next_window_s(seconds)))
         .is_some_and(|write| matches!(write.classify(),
-            crate::plex::session::async_persistence::CompletionOutcome::Durable(_)));
+            crate::server::session::async_persistence::CompletionOutcome::Durable(_)));
     if saved { restore_up_next_window_s(seconds); }
     saved
 }
@@ -4626,14 +4626,14 @@ pub(crate) fn set_up_next_window_s(seconds: i64) -> bool {
 /// **What each series was last watched with**, held as the process copy the resolve worker reads.
 ///
 /// A `Mutex<Vec<_>>` rather than a session read for the reason every preference here has a process
-/// copy: the plan runs off the main thread, and `plex::session::peek` would put the session file's
+/// copy: the plan runs off the main thread, and `server::session::peek` would put the session file's
 /// I/O in its path. Restored once at boot beside the other preferences, and written by
 /// [`remember_series_tracks`], which persists first and publishes only on a durable write.
-static SERIES_TRACKS: Mutex<Vec<crate::plex::session::SeriesTracks>> = Mutex::new(Vec::new());
+static SERIES_TRACKS: Mutex<Vec<crate::server::session::SeriesTracks>> = Mutex::new(Vec::new());
 
 /// What one series was last watched with. Cloned out so the plan never holds the lock while it
 /// weighs streams.
-pub(crate) fn series_tracks(series: &str) -> Option<crate::plex::session::SeriesTracks> {
+pub(crate) fn series_tracks(series: &str) -> Option<crate::server::session::SeriesTracks> {
     if series.is_empty() {
         return None;
     }
@@ -4643,7 +4643,7 @@ pub(crate) fn series_tracks(series: &str) -> Option<crate::plex::session::Series
 
 /// Restore the persisted table without writing it back, exactly as
 /// [`restore_up_next_policy`].
-pub(crate) fn restore_series_tracks(entries: &[crate::plex::session::SeriesTracks]) {
+pub(crate) fn restore_series_tracks(entries: &[crate::server::session::SeriesTracks]) {
     #[cfg(test)]
     crate::testlock::assert_held("the series track table (restore_series_tracks)");
     let mut table = SERIES_TRACKS.lock().unwrap_or_else(|e| e.into_inner());
@@ -4654,31 +4654,31 @@ pub(crate) fn restore_series_tracks(entries: &[crate::plex::session::SeriesTrack
 /// Record one series' pick. Blocking persistence seam, called from the track menu's commit and
 /// never from the draw path; the process copy follows the durable write, so a failed save leaves
 /// the running table describing what is on disk.
-pub(crate) fn remember_series_tracks(entry: crate::plex::session::SeriesTracks) -> bool {
+pub(crate) fn remember_series_tracks(entry: crate::server::session::SeriesTracks) -> bool {
     #[cfg(test)]
     crate::testlock::assert_held("the series track table (remember_series_tracks)");
     if entry.series.is_empty() {
         return false;
     }
-    let saved = crate::plex::session::update_with_outcome(|s| Some(s.with_series_tracks(entry.clone())))
+    let saved = crate::server::session::update_with_outcome(|s| Some(s.with_series_tracks(entry.clone())))
         .is_some_and(|write| matches!(write.classify(),
-            crate::plex::session::async_persistence::CompletionOutcome::Durable(_)));
+            crate::server::session::async_persistence::CompletionOutcome::Durable(_)));
     if !saved {
         return false;
     }
     let mut table = SERIES_TRACKS.lock().unwrap_or_else(|e| e.into_inner());
     table.retain(|t| t.series != entry.series);
     table.push(entry);
-    let excess = table.len().saturating_sub(crate::plex::session::SeriesTracks::CAP);
+    let excess = table.len().saturating_sub(crate::server::session::SeriesTracks::CAP);
     table.drain(..excess);
     true
 }
 
 pub(crate) fn set_default_quality(q: Quality) -> bool {
     let q = supported_quality(q);
-    let saved = crate::plex::session::update_with_outcome(|s| Some(s.with_playback_quality(q)))
+    let saved = crate::server::session::update_with_outcome(|s| Some(s.with_playback_quality(q)))
         .is_some_and(|write| matches!(write.classify(),
-            crate::plex::session::async_persistence::CompletionOutcome::Durable(_)));
+            crate::server::session::async_persistence::CompletionOutcome::Durable(_)));
     if saved { restore_quality(q); crate::ui::idle::invalidate(); }
     saved
 }
@@ -4712,7 +4712,7 @@ pub(crate) fn restore_quality(q: Quality) {
     // `QUALITY` is a process global `quality()` reads without taking any lock, so a test that
     // writes it without `testlock::serial()` lands the write mid some OTHER test's read —
     // `on_deck_hevc_p5_preview_uses_the_selected_episodes_codec` flaked exactly this way. Same
-    // guard as the plex server registry (`plex::servers::register_with_client_id`).
+    // guard as the plex server registry (`server::servers::register_with_client_id`).
     #[cfg(test)]
     crate::testlock::assert_held("the playback quality ceiling (restore_quality)");
     QUALITY.store(supported_quality(q).index(), Ordering::Relaxed);
@@ -4747,7 +4747,7 @@ fn persist_quality_choice(q: Quality) -> Quality {
     QUALITY.store(q.index(), Ordering::Relaxed);
     // A session write is a read-modify-write under the session lock: changing this preference
     // must not overwrite a roster refresh, a profile switch, or another profile's recents.
-    let _ = crate::plex::session::queue_update(move |s| {
+    let _ = crate::server::session::queue_update(move |s| {
         if s.playback_quality == Some(q) {
             None
         } else {
@@ -4859,8 +4859,8 @@ fn apply_quality_choice(ps: &mut PlaybackSession, q: Quality) {
     let original_feasible = ps.auto_original.is_some();
     let auto_original = q == Quality::Auto
         && original_feasible
-        && (location == Some(crate::plex::probe::Location::Local)
-            || (location == Some(crate::plex::probe::Location::Remote)
+        && (location == Some(crate::server::probe::Location::Local)
+            || (location == Some(crate::server::probe::Location::Remote)
                 && (!is_transcoding(ps) || is_remux(ps))));
     let adaptive = auto_uses_hls(q, auto_original);
     let delivery = if adaptive {
@@ -5051,7 +5051,7 @@ fn playback_preview_with_capability(
     // not a fictitious failed bandwidth result. Remote Auto is measured at Play. Relay remains a
     // conversion because its independent link policy refuses both original-rate flavors.
     let policy = direct_play_policy(mode, flavors_allowed(
-        crate::plex::link_policy(location),
+        crate::server::link_policy(location),
         quality_policy(quality(), true, d.bitrate, d.width, d.height),
     ));
     Some(match p {
@@ -5136,7 +5136,7 @@ pub(crate) fn arm_play_resume(ps: &mut PlaybackSession, resume_ns: i64) -> bool 
 
 /// The server an item on a browsing surface came from. MAIN THREAD.
 ///
-/// Today every surface is drawn from the CURRENT server, so this is `plex::current_server()` — and
+/// Today every surface is drawn from the CURRENT server, so this is `server::current_server()` — and
 /// reading it HERE, on the main thread, at the instant the user pressed Play, is the entire point:
 /// from this line on the id travels by value and nothing downstream re-resolves it. When the stored
 /// rows carry their own server (the shared-server data-model step), each call site passes `m.sid` /
@@ -5920,7 +5920,7 @@ pub(super) fn live_family(ps: &PlaybackSession) -> RouteFamily {
 /// DV facts.
 pub(super) fn facts(ps: &PlaybackSession) -> EnhancementFacts<'_> {
     EnhancementFacts {
-        pass: crate::plex::serverinfo::subscription_of(cur_sid(ps)),
+        pass: crate::server::serverinfo::subscription_of(cur_sid(ps)),
         base: ps.auto_original.as_ref(),
         carried: ps.cur_audio.as_ref(),
         subtitle_shown: ps.cur_sub_sid != 0,
@@ -6280,7 +6280,7 @@ pub(crate) fn menu_enhancements(ps: &PlaybackSession) -> Option<crate::playback:
 /// `crate::registry::reset_for_test()` when done. Caller holds `crate::testlock::serial()`.
 #[cfg(test)]
 pub(crate) struct EnhTestFixture {
-    pub(crate) pass: crate::plex::serverinfo::Subscription,
+    pub(crate) pass: crate::server::serverinfo::Subscription,
     /// `None` = still direct-playing (Direct family). `Some(true)` = a progressive-MKV remux
     /// (Remux family — a plain Original remux, or an already-applied enhancement). `Some(false)`
     /// = any other transcode shape (Other family — HLS, a fixed rung, a relay: I5 excludes all of
@@ -6310,7 +6310,7 @@ pub(crate) struct EnhTestFixture {
 impl Default for EnhTestFixture {
     fn default() -> Self {
         Self {
-            pass: crate::plex::serverinfo::Subscription::Yes,
+            pass: crate::server::serverinfo::Subscription::Yes,
             remux: Some(true),
             base_present: true,
             dv_declared: false,
@@ -6326,7 +6326,7 @@ impl Default for EnhTestFixture {
 #[cfg(test)]
 pub(crate) fn enhancement_test_session(route: EnhTestFixture) -> (PlaybackSession, ServerId) {
     let sid = crate::registry::ServerId::from_raw(0);
-    crate::plex::serverinfo::store_for_test(sid, route.pass, "1.43.4");
+    crate::server::serverinfo::store_for_test(sid, route.pass, "1.43.4");
 
     let mut ps = PlaybackSession::IDLE;
     ps.cur_sid = sid;

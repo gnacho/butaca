@@ -35,8 +35,8 @@
 //! grant. With a friend's shared server merged into one Home, "the current server" is the wrong
 //! host for half the tiles on screen — so a [`ServerId`] rides every call, sits in the slot as
 //! the other half of its identity, and is what the worker dials. Nothing in this file reads
-//! `plex::client()`; a caller that genuinely means "the server I am browsing" says so by passing
-//! `plex::current_server()`, at the call site, where it is visible.
+//! `server::client()`; a caller that genuinely means "the server I am browsing" says so by passing
+//! `server::current_server()`, at the call site, where it is visible.
 //!
 //! The server is a FIELD on the slot, not a prefix on the key, deliberately: keys already run
 //! ~140 bytes (an ordinary relative thumb) to ~177 (an absolute headshot — see [`built_key`])
@@ -471,7 +471,7 @@ impl KeyMemo {
 }
 static mut KEY_MEMO: Option<KeyMemo> = None;
 
-/// The memo is a SECOND crate global, and it outlives `plex::reset_servers_for_test`. Entries are
+/// The memo is a SECOND crate global, and it outlives `server::reset_servers_for_test`. Entries are
 /// keyed `(slot, w, h, png)` and every test re-registers at slot 0, so without this a test is
 /// served the previous test's path for the same request box. That the key tests pass at all rests
 /// on `Client::new` drawing a process-unique `token_gen` from a monotone sequence — true today,
@@ -689,7 +689,7 @@ fn residency_last_emitted_for_test() -> (u64, u64) {
 /// through [`log_residency`] is deterministically unthrottled regardless of what an earlier test
 /// (serialized the same way, through [`crate::testlock::serial`]) wrote a moment before. Leaves
 /// the process-wide totals alone — those are graded by delta, exactly as [`reset_key_memo`]
-/// leaves `plex::reset_servers_for_test` to the registry it resets.
+/// leaves `server::reset_servers_for_test` to the registry it resets.
 #[cfg(test)]
 fn reset_residency_log_for_test() {
     let mut st = RESIDENCY_LOG.lock().unwrap_or_else(|e| e.into_inner());
@@ -1258,7 +1258,7 @@ pub(crate) fn prepare(
 /// the network or the token, and a 2xx with nothing in it is an answer that arrived and was empty.
 #[derive(Clone, Copy)]
 enum ArtFail {
-    /// `plex::client_for` answered `None` — the slot names a server the registry does not resolve
+    /// `server::client_for` answered `None` — the slot names a server the registry does not resolve
     /// (never registered, or below the floor a sign-out raised). No request was made.
     NoServer,
     /// The request produced no usable response, and this layer cannot take that apart any further:
@@ -1450,7 +1450,7 @@ fn poster_worker() {
 
 /// Spawn the poster workers. No config is threaded in: each request carries its own server
 /// (the slot's [`Pslot::srv`]), and the address behind it comes from the registry
-/// (`crate::plex::install` or a `register` must have run before a fetch can resolve).
+/// (`crate::server::install` or a `register` must have run before a fetch can resolve).
 pub(crate) fn init() {
     tex::install(&SOURCE);
     {

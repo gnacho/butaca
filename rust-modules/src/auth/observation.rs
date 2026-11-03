@@ -95,7 +95,7 @@ fn write_identity(w: &mut crate::ui::machine::Canon, identity: &SessionIdentity)
 #[cfg(test)]
 mod identity_canon_tests {
     use super::*;
-    use crate::plex::session::{Session, UserRef};
+    use crate::server::session::{Session, UserRef};
 
     #[test]
     fn observation_identity_canon_is_three_fields_without_legacy_authority_tag() {
@@ -359,7 +359,7 @@ mod insecure_only_outcome_tests {
         use crate::ui::machine::Canon;
         let probe = |address: Option<&str>| SettledProbe {
             machine_id: "m".into(), outcome: Outcome::InsecureOnly,
-            tier: Some(crate::plex::probe::Location::Local), address: address.map(str::to_owned),
+            tier: Some(crate::server::probe::Location::Local), address: address.map(str::to_owned),
         };
         let bytes = |address: Option<&str>| {
             let mut w = Canon::new();

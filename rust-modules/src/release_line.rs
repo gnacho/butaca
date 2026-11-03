@@ -15,7 +15,7 @@
 // it is only legal at the very start of a file or block. A regular comment compiles fine in
 // both places this file is read from.
 //
-// `crate::plex::identity`'s `version_is_the_package_or_the_next_minor_dev` test exercises the
+// `crate::server::identity`'s `version_is_the_package_or_the_next_minor_dev` test exercises the
 // end-to-end behavior (the emitted `BUTACA_VERSION` itself); this module is the unit-level half.
 
 /// Parse a `RELEASE_LINE` file's content (`"X.Y"`, with or without a trailing newline) into its

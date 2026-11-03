@@ -212,7 +212,7 @@ fn chain(host: AppArg, episode: bool, accept_request: bool, accept_start: bool) 
 #[test]
 fn card_menu_activation_returns_to_all_hosts_through_production_launch() {
     let _serial = crate::testlock::serial();
-    let _session = crate::plex::session::TempSession::new("menu-card-return");
+    let _session = crate::server::session::TempSession::new("menu-card-return");
     crate::registry::reset_for_test();
     // Non-Home first: Home alone can hide a missing origin.
     for host in [
@@ -229,7 +229,7 @@ fn card_menu_activation_returns_to_all_hosts_through_production_launch() {
 #[test]
 fn filmstrip_menu_activation_returns_to_detail_through_production_launch() {
     let _serial = crate::testlock::serial();
-    let _session = crate::plex::session::TempSession::new("menu-filmstrip-return");
+    let _session = crate::server::session::TempSession::new("menu-filmstrip-return");
     crate::registry::reset_for_test();
     chain(detail(), true, true, true);
 }
@@ -237,7 +237,7 @@ fn filmstrip_menu_activation_returns_to_detail_through_production_launch() {
 #[test]
 fn refused_menu_resources_leave_the_retained_host_and_do_not_repeat_work() {
     let _serial = crate::testlock::serial();
-    let _session = crate::plex::session::TempSession::new("menu-refused-return");
+    let _session = crate::server::session::TempSession::new("menu-refused-return");
     crate::registry::reset_for_test();
     for episode in [false, true] {
         chain(detail(), episode, false, true);

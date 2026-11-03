@@ -146,7 +146,7 @@ pub(crate) struct CarriedAudio {
     pub(crate) codec: String,
     pub(crate) channels: i64,
     /// PMS 1.43.4+ Plex Pass: can the server honor `boostDialog`/`normalizeLoudness` for this
-    /// track (issue #266; wire field is `plex::Stream::can_normalize_loudness`).
+    /// track (issue #266; wire field is `server::Stream::can_normalize_loudness`).
     pub(crate) can_normalize_loudness: bool,
     /// Dolby Atmos (`metadata::Stream::has_atmos`) — the Load payload's `contents.immersive`.
     pub(crate) immersive: bool,
@@ -265,7 +265,7 @@ pub(crate) enum PrimeRefusal {
 }
 
 
-pub(crate) use crate::plex::session::{PlaybackQuality as Quality, DirectPlayMode};
+pub(crate) use crate::server::session::{PlaybackQuality as Quality, DirectPlayMode};
 
 
 pub(crate) const QUALITY_LADDER: [Quality; 7] = [
@@ -307,7 +307,7 @@ pub(super) fn supported_quality(q: Quality) -> Quality {
 
 
 /// **What the user's chosen ceiling allows a plan to ask for** — the same two flags
-/// [`crate::plex::link_policy`] returns, deliberately, so [`build_stream`] can compose the two by
+/// [`crate::server::link_policy`] returns, deliberately, so [`build_stream`] can compose the two by
 /// AND and the stricter always wins. A relay link cannot be loosened by picking a high rung, and a
 /// low rung is not rescued by a fast link.
 ///
@@ -399,7 +399,7 @@ pub(super) enum RouteFamily {
 #[derive(Clone, Copy)]
 pub(super) struct EnhancementFacts<'a> {
     /// The server's Plex Pass state (`serverinfo::subscription_of`), captured at the request.
-    pub(super) pass: crate::plex::serverinfo::Subscription,
+    pub(super) pass: crate::server::serverinfo::Subscription,
     /// The frozen non-enhanced Original route. `None` = Original was never feasible here (forced
     /// direct play, a fixed rung, relay, a non-Original MDE…), which is I5's whole exclusion list.
     pub(super) base: Option<&'a AutoOriginalCandidate>,
@@ -427,7 +427,7 @@ pub(super) struct EnhancementFacts<'a> {
 ///   progressive MKV — PMS answers "unavailable", or re-encodes the video to burn it.
 /// - **Not already refused** by this playback's server, and **Direct or Remux only (I5)**.
 pub(super) fn enhancements_offered(f: &EnhancementFacts, target: RouteFamily) -> bool {
-    use crate::plex::serverinfo::Subscription;
+    use crate::server::serverinfo::Subscription;
     f.pass == Subscription::Yes
         && f.base.is_some_and(|b| {
             b.dv_decision.presentation.declared().is_none() && !b.dovi.base_layer_unusable()
@@ -510,7 +510,7 @@ pub(super) fn new_sess(rk: &str) -> String {
 /// everything [`request_play`] needs to start it, so playing it costs no PMS round trip either.
 ///
 /// It comes free with the `continuous=1` PlayQueue every playback already creates (see
-/// [`crate::plex::Client::create_play_queue`]); nothing here asks the server "what's next".
+/// [`crate::server::Client::create_play_queue`]); nothing here asks the server "what's next".
 #[derive(Clone, Default)]
 pub(crate) struct UpNext {
     pub(crate) rk: String,
@@ -569,7 +569,7 @@ fn jellyfin_up_next(c: &crate::jellyfin::JfClient, series_id: &str) -> Option<Up
 /// non-atomic i64s, which on armv7 is a tearable two-word load.
 ///
 /// The `sid` is the same idea one step further out: it is not a static the worker could read, it is
-/// a *function call* — `plex::client_opt()` — which is worse, because `Send` cannot see a function
+/// a *function call* — `server::client_opt()` — which is worse, because `Send` cannot see a function
 /// call and a worker that resolves its own server therefore compiles clean and passes every test.
 /// It is captured here, at the request, and every PMS call the worker makes is `client_for(sid)`.
 #[derive(Clone, Default)]
@@ -800,7 +800,7 @@ pub(crate) struct Plan {
 /// on the main thread. Write-purity alone is not enough: `apply_plan` reassigns the `machine_id`
 /// and `sess` Strings, so a still-running superseded worker reading them is a use-after-free.
 ///
-/// **And it must not ask which server is current.** `plex::client_opt()` / `plex::current_server()`
+/// **And it must not ask which server is current.** `server::client_opt()` / `server::current_server()`
 /// are not statics, they are calls, so nothing in the type system stops a worker making one — but
 /// the answer is "whatever the user is looking at NOW", which for an item from a shared source is
 /// the wrong authority for every id in this function. The server arrives in `env.sid` and the only
@@ -964,7 +964,7 @@ pub(super) fn pick_dp_audio_pref(
 /// direct-play, or remembering it would quietly force a transcode nobody asked for.
 fn remembered_audio(
     tracks: &[crate::metadata::Stream],
-    memory: &crate::plex::session::SeriesTracks,
+    memory: &crate::server::session::SeriesTracks,
 ) -> Option<(i32, String, i64)> {
     let hit = tracks
         .iter()
@@ -980,7 +980,7 @@ fn remembered_audio(
 /// cannot name is not a subtitle worth turning on.
 fn remembered_subtitle(
     subs: &[crate::metadata::Stream],
-    memory: &crate::plex::session::SeriesTracks,
+    memory: &crate::server::session::SeriesTracks,
 ) -> Option<(i64, i32)> {
     let hit = subs
         .iter()
@@ -1051,7 +1051,7 @@ fn pick_dp_audio_eligible(
 
 
 /// Subtitle codecs the client Original-renders (`ff.rs` / the track menu) and a selected track
-/// may therefore be advertised with. This was `plex::is_dp_subtitle` (the `subtitleCodec=` list
+/// may therefore be advertised with. This was `server::is_dp_subtitle` (the `subtitleCodec=` list
 /// on the direct-play profile and the gate on MDE's `subtitleStreamID`); the profile and the MDE
 /// gate went with the Plex wire layer, but the RENDER half of the list is still what decides
 /// whether an embedded pick can be drawn instead of triggering a burn. Spellings are the FFmpeg/

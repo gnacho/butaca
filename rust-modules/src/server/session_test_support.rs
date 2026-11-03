@@ -1,4 +1,4 @@
-//! Shared fixtures and helpers for the `plex::session` test modules split out below.
+//! Shared fixtures and helpers for the `server::session` test modules split out below.
 
 use super::*;
 

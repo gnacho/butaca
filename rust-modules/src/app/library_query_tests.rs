@@ -16,7 +16,7 @@ fn leaving_after_query_commit_before_arrival_cannot_restore_the_old_query_bookma
         }
     }
     let _cleanup = Cleanup;
-    let session = crate::plex::session::TempSession::new("library-query-leave");
+    let session = crate::server::session::TempSession::new("library-query-leave");
     session.watching("u-library-query-leave");
     crate::registry::reset_for_test();
     // The flavor's world: one server, the installed client. A seeded source naming any other
@@ -127,7 +127,7 @@ fn a_filter_menu_resets_its_covered_library_grid_memory_without_taking_menu_focu
         }
     }
     let _cleanup = Cleanup;
-    let session = crate::plex::session::TempSession::new("library-covered-query-reset");
+    let session = crate::server::session::TempSession::new("library-covered-query-reset");
     session.watching("u-library-covered-query-reset");
     crate::registry::reset_for_test();
     // The flavor's world: one server, the installed client. A seeded source naming any other

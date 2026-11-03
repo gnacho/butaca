@@ -117,8 +117,8 @@ impl Screen<InnerHost> for DrawProbe {
 /// and no dialable server, i.e. deterministically SIGNED OUT, which is the state the row
 /// comments here already assume. The caller must hold `testlock::serial()` for its whole body
 /// (the redirected path is a crate global); every test below takes it first.
-pub(super) fn scratch_session(tag: &str) -> crate::plex::session::TempSession {
-    crate::plex::session::TempSession::new(tag)
+pub(super) fn scratch_session(tag: &str) -> crate::server::session::TempSession {
+    crate::server::session::TempSession::new(tag)
 }
 
 /// Run the push spring to rest on 16 ms frames — bounded, so a spring that never settles

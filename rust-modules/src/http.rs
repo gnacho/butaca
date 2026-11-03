@@ -19,7 +19,7 @@
 //! that is the whole of why a reviewer with no Plex Media Server on their LAN dead-ends: an account
 //! signed in from anywhere else reaches its servers over `https://<something>.plex.direct` — a name
 //! carrying a certificate, and cleartext to the address behind it fails validation by design
-//! (`plex::origin`).
+//! (`server::origin`).
 //!
 //! So the dispatch is on [`Origin::scheme`] and nowhere else. An [`Origin`] is parsed from a URL
 //! and never rebuilt from an address, so by the time a request reaches here the question "which
@@ -32,7 +32,7 @@
 //! `stream.rs` used to offer three one-shot wrappers — `http_get`, `http_put`, `http_post` — and
 //! each folded away half the answer: the first two returned `Option<Vec<u8>>`, collapsing every
 //! non-2xx into the same `None` a refused connection produces, and the third returned the status
-//! with the body dropped. That collapse is precisely the bug [`crate::plex::probe::Outcome`] exists
+//! with the body dropped. That collapse is precisely the bug [`crate::server::probe::Outcome`] exists
 //! to prevent: a final `401` after the parallel direct and relay candidates settle is a TOKEN or
 //! access-policy problem, while a refusal is a REACHABILITY problem, and reporting the first as
 //! the second sends a user to look at their friend's router. `auth::get_identity` had already had
@@ -40,7 +40,7 @@
 //! open/read/close to keep the two apart; it calls this instead now, and gets the same answer over
 //! either transport. The three wrappers had no other callers and went with the change.
 //!
-//! Callers that genuinely want the fold still write it — `plex::client`'s read choke points check
+//! Callers that genuinely want the fold still write it — `server::client`'s read choke points check
 //! [`Reply::ok`] — but they write it, rather than inheriting it from a transport.
 //!
 //! ## Two asymmetries worth knowing before you read a failure
@@ -65,7 +65,7 @@
 //! before its `Content-Length` (`note_short_body` — the difference between "the JSON would not
 //! parse" and "the server never answered"), and the plaintext arm below calls it; the TLS arm
 //! cannot, because libcurl owns that framing and `net.rs` sees only the assembled body. The gap is
-//! narrower than it looks: `plex::client::get_json` logs the status, the byte count and serde's own
+//! narrower than it looks: `server::client::get_json` logs the status, the byte count and serde's own
 //! error whenever a 2xx will not parse, over either transport.
 use crate::origin::{CredentialPolicy, Origin, Scheme, ResolvePin};
 
@@ -140,7 +140,7 @@ pub(crate) const ACCEPT_JSON: &str = "Accept: application/json";
 /// origin's scheme names.
 ///
 /// `path` is everything after the authority — it must already carry its query string and, for the
-/// PMS, its `X-Plex-Token` (appended by `plex::client::with_token`, the one token choke point).
+/// PMS, its `X-Plex-Token` (appended by `server::client::with_token`, the one token choke point).
 /// `headers` are full `"Name: value"` lines **without** CRLF; this function adds the framing each
 /// transport wants, which is the one place the two disagree about the shape of a header.
 ///

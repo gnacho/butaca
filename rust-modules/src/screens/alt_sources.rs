@@ -338,7 +338,7 @@ impl AltSourcesScreen {
     /// The rows the store would produce right now, marked against **the server the open PAGE
     /// belongs to** and the item it is showing.
     ///
-    /// The page's server, not `plex::current_server()`. Those were the same thing only while
+    /// The page's server, not `server::current_server()`. Those were the same thing only while
     /// browsing a shared library also re-pointed `current`; once that stopped, opening a borrowed
     /// film left `current` on our own server, no copy matched the pair, and the panel drew **no
     /// tick at all** — owner-reported. The tick answers "which of these am I looking at", and only

@@ -41,7 +41,7 @@ fn back_dismisses_the_filter_menu_before_the_floor_without_cancelling_its_query(
         }
     }
     let _cleanup = Cleanup;
-    let session = crate::plex::session::TempSession::new("library-back-before-floor");
+    let session = crate::server::session::TempSession::new("library-back-before-floor");
     session.watching("u-library-back-before-floor");
     crate::registry::reset_for_test();
     // The flavor's world: one server, the installed client. A seeded source naming any other

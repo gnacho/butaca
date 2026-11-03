@@ -21,7 +21,7 @@
 //!
 //! The CHOSEN sort of a library's own listing is remembered across restarts, per profile, by
 //! (machine id, section key) and by the sort's KEY, never its menu position
-//! (`plex::session::Session::library_sorts`, issue #278). The PMS page worker that re-asked the
+//! (`server::session::Session::library_sorts`, issue #278). The PMS page worker that re-asked the
 //! first page in a remembered order is gone with the PMS arm; the recording side
 //! ([`BrowseState::note_sort_choice`]) stays, because the persisted session shapes are shared.
 //!
@@ -67,7 +67,7 @@ const SRC_RETRY_CD: u32 = 600; // ~10 s at 60 fps
 ///
 /// A bool could say "answered" or "did not", and the Sources list said exactly those two things.
 /// It could not say the three things a user needs told apart, and which the prober already
-/// distinguishes ([`crate::plex::probe::Outcome`]): nobody has dialled yet, the server answered but
+/// distinguishes ([`crate::server::probe::Outcome`]): nobody has dialled yet, the server answered but
 /// refused our token, and the server did not answer at all. Those want different words and, for the
 /// middle one, a different remedy — a 401 is a sharing-grant problem that re-fetching
 /// `/api/v2/resources` fixes, and telling the user their friend's server is unreachable sends them
@@ -95,15 +95,15 @@ pub(crate) enum SourceState {
 pub(crate) struct BrowseSource {
     /// The source's fixed slot; for the one roster entry it is [`crate::jellyfin::SERVER_ID`].
     pub(crate) sid: ServerId,
-    /// The server's `machineIdentifier` key for Home-selection persistence (`plex::pins`).
-    /// `""` — Jellyfin's ServerId is not wired into `plex::pins`, so its Home selection lives
+    /// The server's `machineIdentifier` key for Home-selection persistence (`server::pins`).
+    /// `""` — Jellyfin's ServerId is not wired into `server::pins`, so its Home selection lives
     /// for the run only.
     pub(crate) machine_id: String,
     /// **Is this OUR HOUSEHOLD'S server?** The login IS the grant on the one roster source, so
     /// this is `true` by construction.
     ///
     /// **Who reads it**: the first-run/Settings pin default (`BrowseState::lib_refs` →
-    /// `plex::pins`) and the tab destination's tiebreak ([`BrowseState::section_of_kind`]).
+    /// `server::pins`) and the tab destination's tiebreak ([`BrowseState::section_of_kind`]).
     pub(crate) household: bool,
     /// The MACHINE name ("nas-home") — the Sources list's group header, and the only place in the
     /// app a machine is named. Arrives with discovery, off `/System/Info/Public`; `""` until it
@@ -121,7 +121,7 @@ pub(crate) struct BrowseSource {
     /// Which tier of connection actually won — local, remote, or Plex's relay tunnel. The Sources
     /// list only renders it beside [`SourceState::Reachable`], so an offline source retains the
     /// route metadata needed for retry/playback policy without claiming that route works now.
-    pub(crate) tier: Option<crate::plex::probe::Location>,
+    pub(crate) tier: Option<crate::server::probe::Location>,
     /// its `/library/sections` has landed — sections are appended exactly once per source
     sections_done: bool,
     /// its per-library item counts have landed (the row sub-line's "185 films")
@@ -187,7 +187,7 @@ pub(crate) struct BrowseSection {
     /// favourite-library hits first.
     ///
     /// Your HOUSEHOLD's libraries start favourite and a friend's start favourite only where the
-    /// household has no library of that type ([`crate::plex::pins::default_on`]); the last
+    /// household has no library of that type ([`crate::server::pins::default_on`]); the last
     /// favourite cannot be turned off, or the app has nothing. The household and not the account
     /// — see [`BrowseSource::household`] and [`BrowseState::lib_refs`] for why plex.tv's raw
     /// `owned` cannot answer this for a Plex Home managed profile.
@@ -549,11 +549,11 @@ pub(crate) struct BrowseState {
     tab_shape: u32,
     retry_cd: u32,
     remembered: Vec<(SecKind, String, i64)>,
-    /// This profile's remembered library sorts ([`crate::plex::session::Session::library_sorts`]),
+    /// This profile's remembered library sorts ([`crate::server::session::Session::library_sorts`]),
     /// loaded beside [`remembered`](Self::remembered) and cleared with it on a reset, so a
     /// profile switch can never open one person's library in another's order.
-    sort_memory: crate::plex::session::LibrarySorts,
-    recorded: Option<crate::plex::session::HomePins>,
+    sort_memory: crate::server::session::LibrarySorts,
+    recorded: Option<crate::server::session::HomePins>,
     pending_pins: Option<(String, std::sync::Arc<std::sync::Mutex<PinWrite>>)>,
 }
 
@@ -641,14 +641,14 @@ impl Default for BrowseState {
             sort_memory: Default::default(),
             recorded: None,
             pending_pins: None,
-            session_generation: crate::plex::session::visible_generation(),
+            session_generation: crate::server::session::visible_generation(),
         }
     }
 }
 
 impl BrowseState {
     pub(crate) fn discovery_needs_pump(&self, adapter: &BrowseAdapter) -> bool {
-        if self.session_generation != crate::plex::session::visible_generation() { return true; }
+        if self.session_generation != crate::server::session::visible_generation() { return true; }
         if adapter.src_result.lock().unwrap_or_else(|e| e.into_inner()).is_some() {
             return true;
         }
@@ -920,9 +920,9 @@ impl BrowseState {
         if !machine.is_empty() {
             self.remembered.push((kind, machine.clone(), key));
         }
-        let user = crate::plex::session::current_profile_key();
+        let user = crate::server::session::current_profile_key();
         let wire = kind.wire();
-        crate::plex::session::queue_update(move |current| {
+        crate::server::session::queue_update(move |current| {
             let mut next = current.clone();
             let slot = match next
                 .last_library
@@ -931,7 +931,7 @@ impl BrowseState {
             {
                 Some(library) => library,
                 None => {
-                    next.last_library.push(crate::plex::session::LastLibrary {
+                    next.last_library.push(crate::server::session::LastLibrary {
                         user: user.clone(),
                         libs: Vec::new(),
                         extensions: Default::default(),
@@ -968,8 +968,8 @@ impl BrowseState {
         self.sort_memory.set(&machine, key, wanted(&choice));
         // Deduplicated against the STORED record, under the worker's read — never against
         // `sort_memory`, which a pin reconcile may have just reloaded from an older snapshot.
-        let user = crate::plex::session::current_profile_key();
-        crate::plex::session::queue_update(move |current| {
+        let user = crate::server::session::current_profile_key();
+        crate::server::session::queue_update(move |current| {
             if current.sorts_for(&user).and_then(|sorts| sorts.get(&machine, key))
                 == wanted(&choice) {
                 return None;
@@ -1356,7 +1356,7 @@ impl BrowseState {
             SecFetch::Loading
         }
     }
-    fn load_remembered(&mut self, session: &crate::plex::session::Session, user: &str) {
+    fn load_remembered(&mut self, session: &crate::server::session::Session, user: &str) {
         self.remembered = session.last_library.iter().find(|library| library.user == user)
             .map(|library| library.libs.iter().filter_map(|target| {
                 SecKind::from_wire(&target.kind)
@@ -1366,14 +1366,14 @@ impl BrowseState {
     }
     /// The pin rules' view of the section table.
     ///
-    /// **Both bits are the HOUSEHOLD's, not this account's.** `plex::pins` is a pure leaf that
+    /// **Both bits are the HOUSEHOLD's, not this account's.** `server::pins` is a pure leaf that
     /// takes bools, so the whole of `is_household` — the grant, plex.tv's `home` flag and the Plex
     /// Home roster — is resolved on this side and handed down already decided
     /// ([`BrowseSource::household`]). Reading `owned` here is what gave a managed profile's own
     /// family server a stranger's defaults: plex.tv answers such a profile `owned:false` on it,
     /// and `owns_type` then found nothing of the household's either, so EVERY library defaulted On
     /// — a genuine friend's share included.
-    fn lib_refs(&self) -> Vec<crate::plex::pins::LibRef<'_>> {
+    fn lib_refs(&self) -> Vec<crate::server::pins::LibRef<'_>> {
         let household_type = |kind: SecKind| self.sections.iter().any(|section| {
             section.kind == kind
                 && self.sources.get(section.src).map(|source| source.household).unwrap_or(true)
@@ -1381,7 +1381,7 @@ impl BrowseState {
         self.sections.iter().map(|section| {
             let (machine_id, household) = self.sources.get(section.src)
                 .map(|source| (source.machine_id.as_str(), source.household)).unwrap_or(("", true));
-            crate::plex::pins::LibRef {
+            crate::server::pins::LibRef {
                 machine_id, key: section.key, household,
                 household_type: household_type(section.kind),
             }
@@ -1400,19 +1400,19 @@ impl BrowseState {
     }
     /// A directory refresh must not replace the pending (or failed) local choice with the
     /// older persisted snapshot. Successful receipts recapture the cache after the worker fill.
-    fn pin_record_for(&mut self, session: &crate::plex::session::Session, user: &str)
-        -> Option<crate::plex::session::HomePins> {
+    fn pin_record_for(&mut self, session: &crate::server::session::Session, user: &str)
+        -> Option<crate::server::session::HomePins> {
         if let Some((pending_user, write)) = &self.pending_pins {
             if pending_user == user && !write.lock().unwrap_or_else(|e| e.into_inner()).saved() {
                 return self.recorded.clone();
             }
             self.pending_pins = None;
-            return crate::plex::session::peek().pins_for(user).cloned();
+            return crate::server::session::peek().pins_for(user).cloned();
         }
         session.pins_for(user).cloned()
     }
 
-    fn resolve_pins_from(&mut self, session: &crate::plex::session::Session, user: &str) -> bool {
+    fn resolve_pins_from(&mut self, session: &crate::server::session::Session, user: &str) -> bool {
         self.load_remembered(session, user);
         let record = self.pin_record_for(session, user);
         self.resolve_pins_with(record)
@@ -1420,10 +1420,10 @@ impl BrowseState {
     /// Re-derive every row from `record` and the never-empty floor, and report whether the table
     /// actually MOVED — `pins::resolve` is a whole-table function (its own doc says why the floor
     /// cannot be decided per row), so this is the only shape a re-resolve comes in.
-    fn resolve_pins_with(&mut self, record: Option<crate::plex::session::HomePins>) -> bool {
+    fn resolve_pins_with(&mut self, record: Option<crate::server::session::HomePins>) -> bool {
         let want = {
             let libraries = self.lib_refs();
-            crate::plex::pins::resolve(&libraries, record.as_ref())
+            crate::server::pins::resolve(&libraries, record.as_ref())
         };
         self.recorded = record;
         let mut moved = false;
@@ -1448,7 +1448,7 @@ impl BrowseState {
     /// keeping a version of the answer. A row that moves without `bump_sections_gen` +
     /// `ui::idle::invalidate` is a table nothing republishes, which is a pill strip and a set of
     /// shelves still drawing the previous resolve.
-    fn reconcile_pins(&mut self, record: Option<crate::plex::session::HomePins>) -> bool {
+    fn reconcile_pins(&mut self, record: Option<crate::server::session::HomePins>) -> bool {
         let moved = self.resolve_pins_with(record);
         if moved {
             self.bump_sections_gen();
@@ -1459,7 +1459,7 @@ impl BrowseState {
     /// [`reconcile_pins`](Self::reconcile_pins) against the record a session holds.
     fn reconcile_pins_from(
         &mut self,
-        session: &crate::plex::session::Session,
+        session: &crate::server::session::Session,
         user: &str,
     ) -> bool {
         self.load_remembered(session, user);
@@ -1467,12 +1467,12 @@ impl BrowseState {
         self.reconcile_pins(record)
     }
     fn resolve_pins(&mut self) {
-        let session = crate::plex::session::peek();
-        let user = crate::plex::session::current_profile_key();
+        let session = crate::server::session::peek();
+        let user = crate::server::session::current_profile_key();
         self.resolve_pins_from(&session, &user);
     }
     fn append_sections_with(&mut self, source: usize, list: Vec<(i64, String, SecKind)>,
-        preferences: Option<&crate::plex::session::Session>) {
+        preferences: Option<&crate::server::session::Session>) {
         let fresh: Vec<_> = list.into_iter().filter(|(key, _, _)| {
             !self.sections.iter().any(|section| section.src == source && section.key == *key)
         }).collect();
@@ -1496,34 +1496,34 @@ impl BrowseState {
     /// Write this profile's answer down. `touched` is indexed like the section table and marks
     /// the rows the VIEWER answered — as the editor reported them, never as a comparison against
     /// the live pins; everything else keeps whatever it had already answered and is otherwise
-    /// left unrecorded, to go on re-deriving (`plex::pins::answers`).
+    /// left unrecorded, to go on re-deriving (`server::pins::answers`).
     ///
     /// The returned record is the local pending selection. The worker recomputes the merge
     /// against the current authority under IO, so unrelated edits made while it was queued
     /// survive. A missing session or a refused queue returns `None`; the visible selection
     /// still stands for this run, without claiming it was saved.
     fn record_pins(&mut self, asked: bool, touched: &[bool])
-        -> Option<crate::plex::session::HomePins> {
+        -> Option<crate::server::session::HomePins> {
         let libraries = self.lib_refs();
         let on: Vec<bool> = self.sections.iter().map(|section| section.pinned).collect();
-        let user = crate::plex::session::current_profile_key();
-        let snapshot = crate::plex::session::peek();
+        let user = crate::server::session::current_profile_key();
+        let snapshot = crate::server::session::peek();
         if snapshot.client_id.is_empty() { return None; }
         let previous = self.recorded.as_ref().or_else(|| snapshot.pins_for(&user));
-        let answers = crate::plex::pins::answers(&libraries, &on, touched, previous);
-        let fresh = crate::plex::pins::record(&user, asked, &libraries, &answers);
-        let record = crate::plex::pins::carry_forward(fresh, previous, &libraries);
+        let answers = crate::server::pins::answers(&libraries, &on, touched, previous);
+        let fresh = crate::server::pins::record(&user, asked, &libraries, &answers);
+        let record = crate::server::pins::carry_forward(fresh, previous, &libraries);
         let owned: Vec<_> = libraries.iter().map(|lib|
             (lib.machine_id.to_owned(), lib.key, lib.household, lib.household_type)).collect();
         let touched = touched.to_vec();
         let pending_user = user.clone();
-        let ticket = crate::plex::session::queue_update_ticket(move |session| {
+        let ticket = crate::server::session::queue_update_ticket(move |session| {
             let libraries: Vec<_> = owned.iter().map(|(machine_id, key, household, household_type)|
-                crate::plex::pins::LibRef { machine_id, key: *key, household: *household, household_type: *household_type }).collect();
+                crate::server::pins::LibRef { machine_id, key: *key, household: *household, household_type: *household_type }).collect();
             let previous = session.pins_for(&user);
-            let answers = crate::plex::pins::answers(&libraries, &on, &touched, previous);
-            let fresh = crate::plex::pins::record(&user, asked, &libraries, &answers);
-            let merged = crate::plex::pins::carry_forward(fresh, previous, &libraries);
+            let answers = crate::server::pins::answers(&libraries, &on, &touched, previous);
+            let fresh = crate::server::pins::record(&user, asked, &libraries, &answers);
+            let merged = crate::server::pins::carry_forward(fresh, previous, &libraries);
             let mut next = session.clone();
             next.set_pins_for(&user, merged);
             Some(next)
@@ -1534,7 +1534,7 @@ impl BrowseState {
     }
     /// The editor's one commit: apply the rows it ANSWERED, and record exactly those.
     ///
-    /// Recording the rest would freeze defaults nobody chose; `plex::pins::answers` has the
+    /// Recording the rest would freeze defaults nobody chose; `server::pins::answers` has the
     /// argument.
     ///
     /// **The provenance arrives with the command; it is not reconstructed here.** This used to
@@ -1606,7 +1606,7 @@ impl BrowseState {
         epoch: u32,
         source_index: usize,
         landing: SrcLanding,
-        preferences: Option<&crate::plex::session::Session>,
+        preferences: Option<&crate::server::session::Session>,
         adapter: &BrowseAdapter,
     ) -> crate::stores::StoreOutcome {
         crate::ui::idle::invalidate();
@@ -1744,7 +1744,7 @@ impl BrowseState {
         self.reset_with(|| adapter.clear());
     }
     pub(crate) fn sync_roster_owned(&mut self) -> RosterSync {
-        let generation = crate::plex::session::visible_generation();
+        let generation = crate::server::session::visible_generation();
         let session_changed = self.session_generation != generation;
         self.session_generation = generation;
         // The Plex share roster that used to drive this sync went with the Plex discovery arm
@@ -1770,7 +1770,7 @@ impl BrowseState {
         let known = self.sources.len();
         // The Jellyfin source: one server, adopted once, owned by definition (the login IS the
         // grant — there is no plex.tv to describe it). `machine_id` stays empty because
-        // Jellyfin's ServerId is not wired into `plex::pins`, so its Home selection lives for
+        // Jellyfin's ServerId is not wired into `server::pins`, so its Home selection lives for
         // the run only; `name` arrives with discovery, off `/System/Info/Public`. Lifecycle
         // fields are zero: there is no registry lifecycle to read them from. `household` is
         // `true` by the same "the login is the grant" reasoning.
@@ -1808,9 +1808,9 @@ impl BrowseState {
             // without a cache of its own. It bumps only when a row actually MOVED — a
             // reclassification that moves none publishes nothing new to the section table, and
             // the source facts it did move have their own generation.
-            if crate::plex::session::peek_settled().is_some() {
-                self.reconcile_pins_from(&crate::plex::session::peek(),
-                    &crate::plex::session::current_profile_key());
+            if crate::server::session::peek_settled().is_some() {
+                self.reconcile_pins_from(&crate::server::session::peek(),
+                    &crate::server::session::current_profile_key());
             }
             changed = true;
         }
@@ -2346,7 +2346,7 @@ impl SecKind {
 /// What it costs is stated rather than hidden: Home's catalog belongs to the server it was fetched
 /// from, so it is dropped and re-armed (`pms::reset` — `pms::pump` refetches on the next frames,
 /// asynchronously, so nothing blocks), and the person page's shelves with it. The poster memo needs
-/// no help: it compares a token generation, and two servers never share one (`plex::servers`).
+/// no help: it compares a token generation, and two servers never share one (`server::servers`).
 fn activate_source_of(_i: usize) {
     // **Browsing a friend's library does NOT re-point the app.** This used to `set_current` to that
     // section's server and then wipe Home's catalog, the person store and the PlayQueue identity —
@@ -2407,7 +2407,7 @@ pub(crate) const TAB_KINDS: [SecKind; 3] = [SecKind::Movie, SecKind::Show, SecKi
 // an authorization boundary, and removing results would turn "I don't browse this often" into
 // "this does not exist".
 //
-// The rules are `plex::pins` — pure, host-graded, and deliberately holding no store. This half is
+// The rules are `server::pins` — pure, host-graded, and deliberately holding no store. This half is
 // the plumbing: project the section table into what those rules take, apply what they answer, and
 // persist an answer against the profile that gave it.
 //
@@ -2455,7 +2455,7 @@ pub(crate) struct SrcGroup {
     pub(crate) state: SourceState,
     /// Which tier won — local, remote or relay. The Sources list is the surface that should say it:
     /// "relay" explains a 2 Mbit/s ceiling that otherwise reads as a broken server.
-    pub(crate) tier: Option<crate::plex::probe::Location>,
+    pub(crate) tier: Option<crate::server::probe::Location>,
 }
 
 impl SrcGroup {
@@ -2804,7 +2804,7 @@ pub(crate) fn land_pin_for_owner_test(state: &mut BrowseState, pinned: bool) {
 #[cfg(test)]
 pub(crate) fn seed_two_source_table_for_owner_test(state: &mut BrowseState) {
     crate::testlock::assert_held("an owned browse section table (seed_two_source_table_for_test)");
-    crate::plex::session::forget_pins_for_test(&crate::plex::session::current_profile_key());
+    crate::server::session::forget_pins_for_test(&crate::server::session::current_profile_key());
     state.reset_with(|| {});
     state.sources = vec![
         test_support::a_source("mac-mini", "", true),

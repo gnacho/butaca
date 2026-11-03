@@ -5,7 +5,7 @@
 //! # Where this lives, and why it is not a screen (restructure phase 10)
 //!
 //! It was `ui/stats.rs` and nine `static mut`s. It is `app/` because of what it is WRITTEN FROM —
-//! `player::Diag`, `route`, `plex::identity`, `webos`, `devcaps`, `surface`: application facts, not
+//! `player::Diag`, `route`, `server::identity`, `webos`, `devcaps`, `surface`: application facts, not
 //! a design-system vocabulary — and its state is now one `App` field, [`Diagnostics`]. `ui/` keeps
 //! what it always drew with (`widgets::FieldList` is still the list primitive).
 //!
@@ -85,7 +85,7 @@
 //! structural rather than a matter of care:
 //!
 //! * **No field is ever a URL or a path.** The PMS token rides in the query string of every
-//!   playback and image URL, appended at one choke point in `plex::client`, so a URL-shaped field
+//!   playback and image URL, appended at one choke point in `server::client`, so a URL-shaped field
 //!   is a guaranteed credential leak rather than a possible one. Anything URL-derived is decomposed
 //!   into non-secret parts (mode, endpoint KIND, throughput) before it can reach a draw call.
 //! * **No credential, at any length.** Tokens are omitted, never masked: a PMS token is short,
@@ -461,7 +461,7 @@ fn header(ps: &crate::route::PlaybackSession, d: &crate::player::Diag, now: u32)
     };
     let (_, _, vw, vh) = crate::surface::viewport();
     [
-        // via `plex::identity`, not a literal + `env!`: that module exists precisely so the
+        // via `server::identity`, not a literal + `env!`: that module exists precisely so the
         // product name and version cannot disagree between surfaces, and this one is photographed.
         // The firmware CODENAME is dropped — it identifies the release no better than the release
         // number does, and this line has to fit beside it.
@@ -474,8 +474,8 @@ fn header(ps: &crate::route::PlaybackSession, d: &crate::player::Diag, now: u32)
             crate::webos::caps::capability().compact_display(),
             &vh.to_string(),
             &os,
-            crate::plex::identity::PRODUCT,
-            crate::plex::identity::VERSION,
+            crate::server::identity::PRODUCT,
+            crate::server::identity::VERSION,
             &vw.to_string(),
         ),
         playback_line(ps, d, now),
@@ -617,7 +617,7 @@ fn device_rows() -> Vec<Field> {
     // meaning yet: it answers "did the server ever reply", which IS the failure when nothing plays.
     v.push(Field::new(
         crate::i18n::msg::browse_diagnostics_field_server(),
-        server_line(&crate::plex::serverinfo::version()),
+        server_line(&crate::server::serverinfo::version()),
     ));
     v
 }

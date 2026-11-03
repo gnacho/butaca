@@ -145,7 +145,7 @@ pub const TEXT_SEPARATOR: [f32; 4] = with_a(TEXT_TERTIARY, 0.45);
 pub const INK_DISABLED: [f32; 4] = with_a(WHITE, 0.22);
 
 /// **The inks a client-rendered subtitle may be drawn in**, lightest first — one per rung of
-/// `plex::session::SubtitleTone::LADDER`, indexed by `SubtitleTone::index` (a host test pins the
+/// `server::session::SubtitleTone::LADDER`, indexed by `SubtitleTone::index` (a host test pins the
 /// two lengths together). The caption is media chrome over the video plane rather than app text,
 /// which is why it is `WHITE` and not [`TEXT_PRIMARY`] at the top; the greys under it exist
 /// because an HDR picture maps graphics white far brighter than an SDR one does, and the only

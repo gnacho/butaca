@@ -153,8 +153,8 @@ pub(crate) fn episode_ordinal(season: i64, index: i64) -> String {
 /// The source attribution — `"Shared by friend"` — or `None` when there is nobody to credit.
 ///
 /// **This is the WORDS and not the RULE.** `handle` arrives already decided:
-/// `plex::servers::owner_credit` is the one place that says whether a server is credited to
-/// anybody, `plex::ServerFacts::handle` is where its answer rests, and every caller here reads
+/// `server::servers::owner_credit` is the one place that says whether a server is credited to
+/// anybody, `server::ServerFacts::handle` is where its answer rests, and every caller here reads
 /// that field. So an empty handle does not mean "an owned server" — it means *our own server, or
 /// the household's server whichever Plex Home profile is watching, or a share plex.tv has not
 /// named* — and this function must never grow a second opinion about which of those it is. The

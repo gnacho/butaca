@@ -15,7 +15,7 @@ fn keyboard_rail_ok_down_up_returns_without_arming_or_requesting_a_card() {
         }
     }
     let _cleanup = Cleanup;
-    let session = crate::plex::session::TempSession::new("library-rail-key-return");
+    let session = crate::server::session::TempSession::new("library-rail-key-return");
     session.watching("u-library-rail-key-return");
     crate::registry::reset_for_test();
     let sid = crate::registry::ServerId::from_raw(0);
@@ -191,7 +191,7 @@ fn library_sweep_visits_the_whole_document_and_reverses_at_its_ends() {
         }
     }
     let _cleanup = Cleanup;
-    let session = crate::plex::session::TempSession::new("library-diagnostic-sweep");
+    let session = crate::server::session::TempSession::new("library-diagnostic-sweep");
     session.watching("u-library-diagnostic-sweep");
     crate::registry::reset_for_test();
     // The flavor's world: one server, the installed client. A seeded source naming any other

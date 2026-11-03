@@ -178,10 +178,10 @@ fn hit(screen: &SearchScreen, fixture: &Fixture, elems: &[u32], x: f32, y: f32) 
 /// A profile that has remembered `terms`. The write comes BEFORE the switch deliberately: the
 /// recents store caches per profile GENERATION, so a file write behind an already-seated profile
 /// is not read until something moves that generation.
-fn watching(session: &crate::plex::session::TempSession, who: &str, terms: &[&str]) {
+fn watching(session: &crate::server::session::TempSession, who: &str, terms: &[&str]) {
     let terms: Vec<String> = terms.iter().map(|t| (*t).to_owned()).collect();
     let who_owned = who.to_owned();
-    crate::plex::session::update(|s| {
+    crate::server::session::update(|s| {
         let mut next = s.clone();
         next.set_recents_for(&who_owned, terms.clone());
         Some(next)
@@ -189,8 +189,8 @@ fn watching(session: &crate::plex::session::TempSession, who: &str, terms: &[&st
     session.watching(who);
 }
 
-fn remembering(tag: &str, terms: &[&str]) -> crate::plex::session::TempSession {
-    let session = crate::plex::session::TempSession::new(tag);
+fn remembering(tag: &str, terms: &[&str]) -> crate::server::session::TempSession {
+    let session = crate::server::session::TempSession::new(tag);
     watching(&session, tag, terms);
     session
 }
@@ -204,7 +204,7 @@ fn remembering(tag: &str, terms: &[&str]) -> crate::plex::session::TempSession {
 #[test]
 fn down_from_the_field_reaches_only_a_region_that_is_drawn() {
     let _serial = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("owned-search-handoff");
+    let session = crate::server::session::TempSession::new("owned-search-handoff");
 
     // (1) no query, no terms: nothing is under the field at all.
     watching(&session, "owned-search-handoff-fresh", &[]);

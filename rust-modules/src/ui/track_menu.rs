@@ -32,7 +32,7 @@ use crate::metadata;
 use crate::metadata::sub_layout::{self, RowBadge, SubHeader, SubRow, SubSection, SubTrack};
 pub(crate) use crate::metadata::sub_layout::RowTarget;
 use crate::metadata::track_label;
-use crate::plex::session::SubtitleTone;
+use crate::server::session::SubtitleTone;
 use crate::ui::consts::SCR_H;
 use crate::ui::frame::Budget;
 use crate::ui::geom::IndexElem;
@@ -1616,7 +1616,7 @@ mod enhancement_menu_tests {
     fn enh_rows_absent_no_pass() {
         let _g = crate::testlock::serial();
         let (menu, ps) =
-            audio_tab(EnhTestFixture { pass: crate::plex::serverinfo::Subscription::No, ..Default::default() });
+            audio_tab(EnhTestFixture { pass: crate::server::serverinfo::Subscription::No, ..Default::default() });
         assert_eq!(menu.enhance_shown, None);
         assert_eq!(menu.table.sections.len(), 1, "track list only — no second section at all");
         teardown(&ps);
@@ -1626,7 +1626,7 @@ mod enhancement_menu_tests {
     fn enh_rows_absent_unknown_subscription() {
         let _g = crate::testlock::serial();
         let (menu, ps) = audio_tab(EnhTestFixture {
-            pass: crate::plex::serverinfo::Subscription::Unknown,
+            pass: crate::server::serverinfo::Subscription::Unknown,
             ..Default::default()
         });
         assert_eq!(menu.enhance_shown, None);
@@ -1757,7 +1757,7 @@ mod enhancement_menu_tests {
     fn row_for_audio_target_none_without_enhancement_rows() {
         let _g = crate::testlock::serial();
         let (menu, ps) =
-            audio_tab(EnhTestFixture { pass: crate::plex::serverinfo::Subscription::No, ..Default::default() });
+            audio_tab(EnhTestFixture { pass: crate::server::serverinfo::Subscription::No, ..Default::default() });
         assert_eq!(menu.row_for_audio_target("boost"), None);
         assert_eq!(menu.row_for_audio_target("loudness"), None);
         teardown(&ps);

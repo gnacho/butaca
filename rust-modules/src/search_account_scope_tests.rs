@@ -17,7 +17,7 @@ use super::test_support::*;
 fn a_favourite_edit_supersedes_a_resident_query_and_re_arms_it() {
     let _g = fresh();
     let mut owner = Owner::default();
-    let _t = crate::plex::session::TempSession::new("search-favgen");
+    let _t = crate::server::session::TempSession::new("search-favgen");
     _t.watching("u-search-favgen");
     register(&mut owner, 1);
     let stores = crate::stores::Stores::default();
@@ -65,7 +65,7 @@ fn a_favourite_edit_supersedes_a_resident_query_and_re_arms_it() {
 fn a_favourite_edit_with_no_query_resident_only_refreshes_the_snapshot() {
     let _g = fresh();
     let mut owner = Owner::default();
-    let _t = crate::plex::session::TempSession::new("search-favgen-idle");
+    let _t = crate::server::session::TempSession::new("search-favgen-idle");
     _t.watching("u-search-favgen-idle");
     register(&mut owner, 1);
     let stores = crate::stores::Stores::default();

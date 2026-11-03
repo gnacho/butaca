@@ -419,7 +419,7 @@ pub(crate) fn session_candidates() -> Vec<PathBuf> {
     // the Plex Home roster — sharing it means a sign-out in the developer build signs you out of
     // the build you watch with, a profile switch in one decides who the other resumes as, and two
     // processes race a file whose `save()` is best-effort. The two installs are genuinely two
-    // devices; `plex::identity::device_name` is what keeps them distinguishable in the account's
+    // devices; `server::identity::device_name` is what keeps them distinguishable in the account's
     // authorized-device list once they are.
     let id = app_id();
     v.extend([

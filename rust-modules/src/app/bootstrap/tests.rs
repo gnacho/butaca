@@ -223,7 +223,7 @@ fn controlled_hubs_commands_preserve_normal_store_notice_bookkeeping() {
     let _serial = crate::testlock::serial();
     crate::registry::reset_for_test();
     let mt = unsafe { crate::task::MainThread::assume() };
-    let publisher = crate::plex::session::ProfilePublisher::scoped(&mt);
+    let publisher = crate::server::session::ProfilePublisher::scoped(&mt);
     let mut io = HomeIo { replay:true,preferences:Default::default(),requests:Vec::new(),admissions:Default::default(),
         failure:None,profile:publisher.snapshot() };
     let mut hubs = crate::stores::hubs::HubsStore::default();
@@ -250,7 +250,7 @@ fn controlled_admission_records_real_discovery_spawn_refusal() {
     crate::jellyfin::install(crate::jellyfin::JfClient::new(
         crate::origin::Origin::http("127.0.0.1", 1), "dev-1".into()));
     let mt = unsafe { crate::task::MainThread::assume() };
-    let publisher = crate::plex::session::ProfilePublisher::scoped(&mt);
+    let publisher = crate::server::session::ProfilePublisher::scoped(&mt);
     let mut io = HomeIo { replay:false,preferences:Default::default(),requests:Vec::new(),admissions:Default::default(),
         failure:None,profile:publisher.snapshot() };
     let stores = crate::stores::Stores::default();
@@ -267,7 +267,7 @@ fn controlled_admission_records_real_discovery_spawn_refusal() {
 fn admission_replay_requires_full_request_identity_and_boolean_outcome() {
     let _serial = crate::testlock::serial();
     let mt = unsafe { crate::task::MainThread::assume() };
-    let publisher = crate::plex::session::ProfilePublisher::scoped(&mt);
+    let publisher = crate::server::session::ProfilePublisher::scoped(&mt);
     let request = serde_json::json!({"kind":"hubs","epoch":u32::MAX,"req":u32::MAX,
         "sid":0,"client":u32::MAX,"token_gen":u32::MAX});
     let mut recorded = request.clone(); recorded["admitted"] = serde_json::json!(false);

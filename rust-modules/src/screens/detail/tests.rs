@@ -1368,8 +1368,8 @@ fn preview_tick_does_not_read_the_session_file_every_frame() {
 
     // A readable session, so `preview::enabled()`'s `peek()` call has real Ready bytes behind it,
     // rather than the trivially-cheap Missing/default path.
-    let _session = crate::plex::session::TempSession::new("detail-preview-fps");
-    crate::plex::session::save(&crate::plex::session::Session {
+    let _session = crate::server::session::TempSession::new("detail-preview-fps");
+    crate::server::session::save(&crate::server::session::Session {
         client_id: "cid-detail-preview-fps".into(),
         trailer_autoplay: true,
         ..Default::default()
@@ -1384,13 +1384,13 @@ fn preview_tick_does_not_read_the_session_file_every_frame() {
     );
     let hero_focus = Some(Located::Hero(hero::HeroCtl::Play));
 
-    crate::plex::session::reset_reads_for_test();
+    crate::server::session::reset_reads_for_test();
     let mut now = 0u32;
     for _ in 0..30 {
         now += 16;
         screen.preview_tick::<TestHost>(now, 0.016, hero_focus, &mut sink, test_store().view());
     }
-    let reads = crate::plex::session::reads_for_test();
+    let reads = crate::server::session::reads_for_test();
     assert_eq!(
         reads, 0,
         "preview_tick must not re-read the session file every frame -- {reads} session reads over \
@@ -1903,7 +1903,7 @@ fn back_falls_through_to_navigation_when_no_background_preview_is_up() {
 
 /// `preview_completed_naturally` is the pure core of §8.2's play-once suppression, extracted
 /// specifically so it is testable without driving the live, process-wide `player::preview`
-/// singleton (which needs `plex::session::peek()` file I/O to even start a Load — exactly the
+/// singleton (which needs `server::session::peek()` file I/O to even start a Load — exactly the
 /// fragility the original plan's §5 rejected a live-Machine integration test over). This table
 /// pins the outside-voice-found ordering bug: the check must fire when full-trailer mode was
 /// active (`promoted=true`) even though `hero_active` is irrelevant there, AND when the viewer is

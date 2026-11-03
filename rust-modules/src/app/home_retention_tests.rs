@@ -312,7 +312,7 @@ fn library_detail_return_restores_engine_card_and_viewport_after_stack_eviction(
         fn drop(&mut self) { crate::registry::reset_for_test(); }
     }
     let _cleanup = RegistryCleanup;
-    let session = crate::plex::session::TempSession::new("owned-library-return");
+    let session = crate::server::session::TempSession::new("owned-library-return");
     session.watching("u-owned-library-return");
     for evict in [false, true] {
         crate::registry::reset_for_test();
@@ -641,7 +641,7 @@ fn controlled_discovery_recaptures_the_directory_in_its_delivery_turn() {
     rig.stores.browse.borrow_mut().queue_discovery_for_test(sid, true);
     let result = rig.stores.browse.borrow_mut().take_discovery().unwrap();
     let mt = unsafe { crate::task::MainThread::assume() };
-    let publisher = crate::plex::session::ProfilePublisher::scoped(&mt);
+    let publisher = crate::server::session::ProfilePublisher::scoped(&mt);
     rig.home_io = Some(crate::app::bootstrap::HomeIo {
         replay: false,
         preferences: Default::default(),

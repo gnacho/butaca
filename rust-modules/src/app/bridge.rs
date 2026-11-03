@@ -82,7 +82,7 @@ fn refresh_chrome(
     chrome: &mut super::chrome::ChromeSnapshot,
     measure: &dyn Measure,
     directory: crate::stores::browse::DirectoryView<'_>,
-    captured: Option<(&crate::plex::session::CurrentProfile, &crate::plex::session::Session)>,
+    captured: Option<(&crate::server::session::CurrentProfile, &crate::server::session::Session)>,
 ) {
     match captured {
         Some(captured) => chrome.refresh_with_profile(measure, directory, Some(captured)),
@@ -363,7 +363,7 @@ impl Bridge {
     pub(crate) fn for_test(now_us: fn() -> u64) -> Self {
         static FIXTURE: crate::ui::fixture::FixtureMeasure = crate::ui::fixture::FixtureMeasure;
         Self::with_measure(&FIXTURE, now_us,
-            crate::auth::SessionInit::captured(crate::plex::session::Session::default()),
+            crate::auth::SessionInit::captured(crate::server::session::Session::default()),
             super::adapters::session::SessionAdapter::fixture())
     }
 
@@ -405,7 +405,7 @@ impl Bridge {
         init: crate::auth::SessionInit, session_adapter: super::adapters::session::SessionAdapter,
         reads: StorePublications, stores: crate::stores::Stores) -> Self {
         Self {
-            session_cache_generation: crate::plex::session::visible_generation(),
+            session_cache_generation: crate::server::session::visible_generation(),
             home_io: None,
             initial_subhash: 0,
             session: crate::auth::SessionMachine::from_init(init),
@@ -445,7 +445,7 @@ impl Bridge {
 
     /// Observe storage landings on the frame thread, alongside store/adapter publications.
     pub(crate) fn land_session_cache(&mut self) {
-        let generation = crate::plex::session::visible_generation();
+        let generation = crate::server::session::visible_generation();
         if self.session_cache_generation != generation {
             self.session_cache_generation = generation;
             crate::ui::idle::invalidate();
@@ -3048,7 +3048,7 @@ mod preference_effect_tests {
     fn controlled_preferences_are_rejected_before_capture_or_persistence() {
         let _serial = crate::testlock::serial();
         let mt = unsafe { crate::task::MainThread::assume() };
-        let temp = crate::plex::session::TempSession::new("controlled-preference-effects");
+        let temp = crate::server::session::TempSession::new("controlled-preference-effects");
         let before = std::fs::read(temp.path()).unwrap();
         let quality = crate::route::quality();
         let mode = crate::route::direct_play_mode();

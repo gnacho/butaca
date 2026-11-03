@@ -1,8 +1,8 @@
 //! The SERVER REGISTRY — the backend-neutral slot vocabulary every store keys on.
 //!
-//! This was the table of leaked `plex::Client`s behind `client_for`/`client()`/`register`. The
+//! This was the table of leaked `server::Client`s behind `client_for`/`client()`/`register`. The
 //! dispatch collapse (#202) removed every path that could publish a Plex client, so the table
-//! over `plex::Client` was unreachable code, and this slice (#166) retired it together with the
+//! over `server::Client` was unreachable code, and this slice (#166) retired it together with the
 //! wire layer it existed to index (`plex/client.rs` and siblings). What survives is the
 //! vocabulary the app still shares across backends:
 //!
@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use crate::origin::{Origin, ResolvePin};
 use std::sync::Mutex;
 
-/// The registration-time connection facts went with the wire layer (`plex::Client` carried the
+/// The registration-time connection facts went with the wire layer (`server::Client` carried the
 /// tier/IP atomics they fed). The name survives only because `session.rs`'s frame-boundary test
 /// still spells a full registration call; the future `session.rs` transition slice retires both.
 #[cfg(test)]
@@ -39,7 +39,7 @@ pub(crate) struct ConnectionFacts;
 /// Slot ceiling. A Plex account's server list is a handful (own + shared); this is the number
 /// that decides which slot ids can ever exist.
 ///
-/// `pub` because [`crate::plex::serverinfo`] holds one entry PER SERVER in a flat array indexed
+/// `pub` because [`crate::server::serverinfo`] holds one entry PER SERVER in a flat array indexed
 /// by [`ServerId::raw`], and a second, independent ceiling there is a silent out-of-bounds
 /// waiting to happen: this is the number that decides which ids can ever exist. `crate::person`
 /// keys its per-source mailboxes the same way and is OUTSIDE this module tree, which is what
@@ -190,7 +190,7 @@ pub fn ids() -> impl Iterator<Item = ServerId> {
 }
 
 /// The active slot whose machine id is `machine_id`, if any. Machine ids lived on the retired
-/// `plex::Client`s, so this answers `None` for every input; the signature stays for the one
+/// `server::Client`s, so this answers `None` for every input; the signature stays for the one
 /// caller (the plaintext alert's subject resolution) until the plaintext slice retires it.
 pub(crate) fn id_of_machine(_machine_id: &str) -> Option<ServerId> {
     None
@@ -240,7 +240,7 @@ pub(crate) fn revoke_all() {
 /// Register (or update) a server, returning its stable id.
 ///
 /// **RETIRED SHAPE.** The registration world this entry point drove — slot lookup, re-point,
-/// credential admission, the leaked `plex::Client` — went with the wire layer (#166): no product
+/// credential admission, the leaked `server::Client` — went with the wire layer (#166): no product
 /// path can publish a Plex client since the dispatch collapse (#202), and the only remaining
 /// caller is `session.rs`'s frame-boundary test, which grades that a registration call inside a
 /// frame resolves the session identity through the NON-BLOCKING cache and never touches a file.
@@ -254,7 +254,7 @@ pub(crate) fn register_origin(
     _pin: Option<&ResolvePin>,
     _connection: ConnectionFacts,
 ) -> ServerId {
-    let _identity = crate::plex::session::peek().client_id.clone();
+    let _identity = crate::server::session::peek().client_id.clone();
     ServerId::UNSET
 }
 

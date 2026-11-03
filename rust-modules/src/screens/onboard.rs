@@ -200,7 +200,7 @@ impl OnboardScreen {
     ///
     /// It is [`touched`](Self::touched) — the sections a press moved — carrying each one's
     /// CURRENT draft value. Everything else is a value nobody chose and must stay unrecorded, to
-    /// go on re-deriving from its default (`plex::pins::answers`).
+    /// go on re-deriving from its default (`server::pins::answers`).
     ///
     /// **This is the half a store cannot reconstruct.** Browse used to infer the same thing by
     /// comparing the whole visible draft against the live pins — which reads a row the viewer
@@ -794,11 +794,11 @@ mod tests {
     /// This screen's session guard. Browse state belongs to each test's [`BrowseFixture`] and
     /// therefore needs no process-global teardown.
     struct TempSession {
-        _inner: crate::plex::session::TempSession,
+        _inner: crate::server::session::TempSession,
     }
     impl TempSession {
         fn new(tag: &str) -> TempSession {
-            let inner = crate::plex::session::TempSession::new(tag);
+            let inner = crate::server::session::TempSession::new(tag);
             inner.watching("u-test");
             TempSession { _inner: inner }
         }
@@ -1041,8 +1041,8 @@ mod tests {
             "…but the LIVE pin has not moved: nothing is written until commit"
         );
         assert!(
-            crate::plex::session::peek()
-                .pins_for(&crate::plex::session::current_profile_key())
+            crate::server::session::peek()
+                .pins_for(&crate::server::session::current_profile_key())
                 .is_none(),
             "…and nothing has been recorded either — BACK has nothing to undo"
         );
@@ -1074,8 +1074,8 @@ mod tests {
              once the queued command is actually drained, not this screen's"
         );
         assert!(
-            crate::plex::session::peek()
-                .pins_for(&crate::plex::session::current_profile_key())
+            crate::server::session::peek()
+                .pins_for(&crate::server::session::current_profile_key())
                 .is_none(),
             "…nor has anything been recorded — recording is also a consequence of the command \
              actually running"
@@ -1312,8 +1312,8 @@ mod tests {
             .any(|st| matches!(st.fx, Fx::App(AppFx::Loop(LoopReq::OnboardBack)))));
         assert!(browse.pinned(0), "first-run BACK left the live pin exactly as it was");
         assert!(
-            crate::plex::session::peek()
-                .pins_for(&crate::plex::session::current_profile_key())
+            crate::server::session::peek()
+                .pins_for(&crate::server::session::current_profile_key())
                 .is_none(),
             "…and recorded nothing"
         );
@@ -1326,8 +1326,8 @@ mod tests {
         assert!(effs.is_empty(), "…and this screen asks for nothing on the way out");
         assert!(browse.pinned(0), "Settings-mode BACK left the live pin exactly as it was");
         assert!(
-            crate::plex::session::peek()
-                .pins_for(&crate::plex::session::current_profile_key())
+            crate::server::session::peek()
+                .pins_for(&crate::server::session::current_profile_key())
                 .is_none(),
             "…and recorded nothing — there was nothing to restore"
         );
@@ -1348,7 +1348,7 @@ mod tests {
         // already holds a pin record for the empty profile key, so the assertion read `Some`
         // before this test had done anything at all and failed on the maintainer's Mac while
         // saying "must record nothing". Every other test in this module that names `pins_for`
-        // takes one of these; this one was written without it. `plex::session::TempSession`'s own
+        // takes one of these; this one was written without it. `server::session::TempSession`'s own
         // doc is the full account of why the guard exists.
         let _t = TempSession::new("armed-verb");
         let mut browse = BrowseFixture::new();
@@ -1379,8 +1379,8 @@ mod tests {
             "the deferred commit must refuse rather than answer the first-run question"
         );
         assert!(
-            crate::plex::session::peek()
-                .pins_for(&crate::plex::session::current_profile_key())
+            crate::server::session::peek()
+                .pins_for(&crate::server::session::current_profile_key())
                 .is_none(),
             "…and must record nothing — nothing here is an answer the user gave"
         );
@@ -1559,8 +1559,8 @@ mod tests {
             "BACK navigates without recording an empty answer"
         );
         assert!(
-            crate::plex::session::peek()
-                .pins_for(&crate::plex::session::current_profile_key())
+            crate::server::session::peek()
+                .pins_for(&crate::server::session::current_profile_key())
                 .is_none(),
             "…and BACK recorded nothing"
         );
@@ -1631,8 +1631,8 @@ mod tests {
              restore the pre-toggle baseline (true)"
         );
         assert!(
-            crate::plex::session::peek()
-                .pins_for(&crate::plex::session::current_profile_key())
+            crate::server::session::peek()
+                .pins_for(&crate::server::session::current_profile_key())
                 .is_none(),
             "…and must record nothing — nothing here is an answer the user gave"
         );

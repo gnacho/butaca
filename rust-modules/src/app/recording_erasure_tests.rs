@@ -3,7 +3,7 @@
 // module is flavor-gated.
 use super::*;
 use crate::app::{bootstrap, recorder, run};
-use crate::plex::session::{self, Session};
+use crate::server::session::{self, Session};
 
 #[test]
 fn owned_recording_files_are_erased_after_quiescence_and_leftovers_are_acked() {

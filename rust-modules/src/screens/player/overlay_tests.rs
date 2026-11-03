@@ -417,7 +417,7 @@ fn resolve_menupick_row_parses_a_number_or_an_audio_tab_name() {
 #[test]
 fn a_color_press_commits_without_dismissing_the_tracks_panel() {
     let _g = crate::testlock::serial(); // the panel seeds its tone from the player's global
-    crate::player::restore_subtitle_tone(crate::plex::session::SubtitleTone::White);
+    crate::player::restore_subtitle_tone(crate::server::session::SubtitleTone::White);
     let ps = crate::route::PlaybackSession::IDLE;
     let meta = crate::stores::metadata::MetadataStore::default();
     let mut page = PlayerOverlayScreen::new(&ps, meta.view(), ENTRY, OverlayKind::Tracks { tab: 1 });
@@ -429,7 +429,7 @@ fn a_color_press_commits_without_dismissing_the_tracks_panel() {
     assert!(reqs.iter().any(|r| matches!(
         r,
         PlayerReq::CommitTrack(crate::ui::track_menu::TrackCommit::SubtitleTone(
-            crate::plex::session::SubtitleTone::Silver
+            crate::server::session::SubtitleTone::Silver
         ))
     )));
     assert!(reqs.iter().any(|r| matches!(r, PlayerReq::ExtendHud(_))));

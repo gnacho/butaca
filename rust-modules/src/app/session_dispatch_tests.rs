@@ -8,7 +8,7 @@ use super::test_support::*;
 #[test]
 fn browse_tab_generation_is_owned_and_chrome_never_replays_a_stale_shape() {
     let _guard = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("bridge-browse-tabs");
+    let session = crate::server::session::TempSession::new("bridge-browse-tabs");
     session.watching("u-bridge-browse-tabs");
     crate::registry::reset_for_test();
     let own = crate::registry::ServerId::from_raw(0);

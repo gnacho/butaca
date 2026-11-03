@@ -35,13 +35,13 @@ fn original_is_unchanged_and_auto_original_is_an_explicit_measured_state() {
         // …and composed, on every link tier, Original is exactly what the link alone said.
         for link in [
             None,
-            Some(crate::plex::probe::Location::Local),
-            Some(crate::plex::probe::Location::Remote),
-            Some(crate::plex::probe::Location::Relay),
+            Some(crate::server::probe::Location::Local),
+            Some(crate::server::probe::Location::Remote),
+            Some(crate::server::probe::Location::Relay),
         ] {
             assert_eq!(
                 allowed(link, Quality::Original, src),
-                crate::plex::link_policy(link),
+                crate::server::link_policy(link),
                 "Original changed the answer for link {link:?} on {src:?}"
             );
         }
@@ -159,7 +159,7 @@ fn a_relay_link_and_a_user_ceiling_compose_to_the_stricter_of_the_two() {
         for src in [UHD_REMUX, HD_BIG, HD_SMALL, UNMEASURED] {
             // relay denies both, and NOTHING a user can pick gives either back
             assert_eq!(
-                allowed(Some(crate::plex::probe::Location::Relay), q, src),
+                allowed(Some(crate::server::probe::Location::Relay), q, src),
                 crate::playback::LinkPolicy {
                     direct_play: false,
                     remux: false
@@ -169,11 +169,11 @@ fn a_relay_link_and_a_user_ceiling_compose_to_the_stricter_of_the_two() {
             // and on an unrestricted link the answer is the user's policy, unchanged
             for link in [
                 None,
-                Some(crate::plex::probe::Location::Local),
-                Some(crate::plex::probe::Location::Remote),
+                Some(crate::server::probe::Location::Local),
+                Some(crate::server::probe::Location::Remote),
             ] {
                 let auto_original =
-                    q == Quality::Auto && link == Some(crate::plex::probe::Location::Local);
+                    q == Quality::Auto && link == Some(crate::server::probe::Location::Local);
                 assert_eq!(
                     allowed(link, q, src),
                     quality_policy(q, auto_original, src.0, src.1, src.2),

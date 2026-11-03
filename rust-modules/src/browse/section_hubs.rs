@@ -74,7 +74,7 @@ pub(crate) struct Shelf {
     pub(crate) id: String,
     /// The hub's provider listing `key`, verbatim.
     pub(crate) key: String,
-    /// Every item the hub's listing holds (`plex::Hub::total`), which `items` caps. 0 when the
+    /// Every item the hub's listing holds (`server::Hub::total`), which `items` caps. 0 when the
     /// server named no total.
     pub(crate) total: usize,
     pub(crate) title: String,
@@ -610,7 +610,7 @@ mod tests {
         first
             .remembered
             .push((super::super::SecKind::Movie, "machine-a".into(), 7));
-        first.recorded = Some(crate::plex::session::HomePins {
+        first.recorded = Some(crate::server::session::HomePins {
             user: "profile-a".into(),
             asked: true,
             on: Vec::new(),
@@ -1078,7 +1078,7 @@ mod tests {
     #[test]
     fn removing_from_the_deck_reaches_the_staged_set_as_well() {
         let _g = crate::testlock::serial();
-        let _t = crate::plex::session::TempSession::new("deckstage");
+        let _t = crate::server::session::TempSession::new("deckstage");
         _t.watching("u-deckstage");
         let mut state = super::super::BrowseState::default();
         super::super::seed_two_source_table_for_owner_test(&mut state);

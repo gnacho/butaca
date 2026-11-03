@@ -1422,7 +1422,7 @@ pub(crate) enum PlaintextChoice {
     /// Never asked — the only value an absent or unreadable entry can mean.
     #[default]
     Undecided,
-    /// Connect is allowed while the server is eligible (`plex::probe::PlaintextEligibility`).
+    /// Connect is allowed while the server is eligible (`server::probe::PlaintextEligibility`).
     Allowed,
     /// *Not now* on the question.
     Declined,
@@ -1935,7 +1935,7 @@ impl Session {
     ///
     /// The PORT is part of "we have a server", and this is the only gate in front of it: every
     /// resume path (`app.rs`'s boot gate, `auth::cancel`) reads `server.port as i32` straight into
-    /// `plex::install` on the strength of this answer. A port outside `1..=65535` wraps in that
+    /// `server::install` on the strength of this answer. A port outside `1..=65535` wraps in that
     /// cast into a plausible one, so it is refused here — the app lands on sign-in, which is the
     /// honest report for a session it cannot dial, rather than talking to a port nobody named. It
     /// also covers `port` simply being ABSENT from an older file (`#[serde(default)]` = 0), which
@@ -2681,7 +2681,7 @@ mod cache_timing_tests {
         let _serial = crate::testlock::serial();
         let _session = test_support::TempSession::new("register-frame-no-load");
         let _frame = crate::task::FrameScope::enter();
-        crate::registry::register_origin("frame-client", &crate::plex::Origin::http("127.0.0.1", 32400),
+        crate::registry::register_origin("frame-client", &crate::server::Origin::http("127.0.0.1", 32400),
             "", None, crate::registry::ConnectionFacts::default());
     }
 

@@ -106,18 +106,18 @@ fn the_shared_fixture_resolves_the_defaults_over_a_recorded_answer() {
     let _g = crate::testlock::serial();
     let t = TempPins::new("fixture-owns-its-pins");
     t.watching("u-fixture-owns-its-pins");
-    let user = crate::plex::session::current_profile_key();
-    let lib = |machine: &str, key| crate::plex::session::PinnedLib {
+    let user = crate::server::session::current_profile_key();
+    let lib = |machine: &str, key| crate::server::session::PinnedLib {
         machine_id: machine.into(),
         key,
         extensions: Default::default(),
     };
     assert!(
-        crate::plex::session::update(|s| {
+        crate::server::session::update(|s| {
             let mut next = s.clone();
             next.set_pins_for(
                 &user,
-                crate::plex::session::HomePins {
+                crate::server::session::HomePins {
                     user: user.clone(),
                     asked: true,
                     on: vec![lib("mac-mini", 2)],
@@ -144,7 +144,7 @@ fn the_shared_fixture_resolves_the_defaults_over_a_recorded_answer() {
         "…and they are the OWNERSHIP defaults: yours On, a friend's Off"
     );
     assert!(
-        crate::plex::session::peek().pins_for(&user).is_none(),
+        crate::server::session::peek().pins_for(&user).is_none(),
         "the record was forgotten rather than worked around, so a later resolve agrees"
     );
 }
@@ -171,8 +171,8 @@ fn apply_pins_writes_the_whole_batch_in_one_record() {
         "every edit in the batch landed"
     );
 
-    let sess = crate::plex::session::peek();
-    let rec = sess.pins_for(&crate::plex::session::current_profile_key());
+    let sess = crate::server::session::peek();
+    let rec = sess.pins_for(&crate::server::session::current_profile_key());
     assert!(
         rec.is_some_and(|r| r.asked),
         "one commit is still a recorded answer"
@@ -208,9 +208,9 @@ fn an_answer_the_live_pin_already_agrees_with_is_recorded_anyway() {
     browse.state.apply_pins(&[(2, false)]);
     crate::storage_worker::drain_for_test();
 
-    let user = crate::plex::session::current_profile_key();
+    let user = crate::server::session::current_profile_key();
     assert_eq!(
-        crate::plex::session::peek().pins_for(&user).and_then(|r| r.answer("nas-home", 1)),
+        crate::server::session::peek().pins_for(&user).and_then(|r| r.answer("nas-home", 1)),
         Some(false),
         "the answer was written down rather than mistaken for the default it agreed with"
     );
@@ -242,18 +242,18 @@ fn a_commit_leaves_the_table_showing_what_it_saved() {
     let _g = crate::testlock::serial();
     let t = TempPins::new("commit-reconcile");
     t.watching("u-owner");
-    let user = crate::plex::session::current_profile_key();
-    let lib = |machine: &str, key| crate::plex::session::PinnedLib {
+    let user = crate::server::session::current_profile_key();
+    let lib = |machine: &str, key| crate::server::session::PinnedLib {
         machine_id: machine.into(),
         key,
         extensions: Default::default(),
     };
     assert!(
-        crate::plex::session::update(|s| {
+        crate::server::session::update(|s| {
             let mut next = s.clone();
             next.set_pins_for(
                 &user,
-                crate::plex::session::HomePins {
+                crate::server::session::HomePins {
                     user: user.clone(),
                     asked: true,
                     on: vec![lib("laptop", 1)],
@@ -285,7 +285,7 @@ fn a_commit_leaves_the_table_showing_what_it_saved() {
     browse.state.apply_pins(&[(1, true)]);
     crate::storage_worker::drain_for_test();
 
-    let saved = crate::plex::session::peek();
+    let saved = crate::server::session::peek();
     let recorded = saved.pins_for(&user).and_then(|r| r.answer("mac-mini", 1));
     assert_eq!(
         (browse.pinned(0), recorded),
@@ -332,7 +332,7 @@ fn a_commit_the_session_refuses_leaves_the_answer_on_screen() {
         br#"{"format":"butaca-secure-session","version":99,"sealed":{}}"#,
     )
     .expect("the locked fixture");
-    crate::plex::session::invalidate_for_test();
+    crate::server::session::invalidate_for_test();
 
     // One of them switched off, and Done pressed.
     browse.state.apply_pins(&[(1, false)]);
@@ -345,8 +345,8 @@ fn a_commit_the_session_refuses_leaves_the_answer_on_screen() {
          record it was replacing, which restores exactly what the viewer just changed"
     );
     assert!(
-        crate::plex::session::peek()
-            .pins_for(&crate::plex::session::current_profile_key())
+        crate::server::session::peek()
+            .pins_for(&crate::server::session::current_profile_key())
             .is_none(),
         "…and nothing was recorded — the answer is this RUN's, and the record is untouched"
     );
@@ -390,7 +390,7 @@ fn a_recorded_answer_reaches_home_before_that_servers_sections_do() {
     seed_two_servers(&mut browse);
     // The friend's library, turned on and then off again — an ANSWER about it rather than the
     // default it happens to agree with. Only a row somebody moved is written down now
-    // (`plex::pins::answers`), so a fixture that wants a record has to make the decision.
+    // (`server::pins::answers`), so a fixture that wants a record has to make the decision.
     assert!(browse.state.toggle_pin(2) && browse.state.toggle_pin(2));
     crate::storage_worker::drain_for_test();
     assert!(!browse.pinned(2), "back where it started, but now on the record");
@@ -1202,11 +1202,11 @@ fn the_movies_tab_prefers_the_households_library_over_a_friends() {
 
     // …and a REMEMBERED choice still wins outright: the tiebreak is only ever consulted when the
     // profile has not already said. Nothing about the household may second-guess that.
-    crate::plex::session::update(|session| {
+    crate::server::session::update(|session| {
         let mut next = session.clone();
-        let user = crate::plex::session::current_profile_key();
+        let user = crate::server::session::current_profile_key();
         next.last_library.retain(|l| l.user != user);
-        let mut libs = crate::plex::session::LastLibrary { user, ..Default::default() };
+        let mut libs = crate::server::session::LastLibrary { user, ..Default::default() };
         libs.libs.push(crate::librecord::TypedLib {
             kind: SecKind::Movie.wire().to_string(),
             machine_id: "nas-home".into(),

@@ -10,8 +10,8 @@
 //! Stored Home, picker and explicit developer bootstrap use the same owner, with distinct typed
 //! authority. Network/PIN derivation remain worker operations; offline policy is retained below.
 use self::observation::Resource;
-use crate::plex::probe::{self, Outcome, PlaintextEligibility};
-use crate::plex::session::{PlaintextChoice, SourceRef};
+use crate::server::probe::{self, Outcome, PlaintextEligibility};
+use crate::server::session::{PlaintextChoice, SourceRef};
 use crate::origin::Origin;
 use crate::registry::ServerId;
 
@@ -95,7 +95,7 @@ pub struct UserTile {
     /// This member's plex.tv account id. Nothing on screen reads it — it rides through so that
     /// [`session::Session::household_ids`] is filled on the one path that writes the persisted
     /// roster, which is what lets the "Shared by …" rule tell the household's own server from a
-    /// friend's share (`plex::servers::owner_credit`).
+    /// friend's share (`server::servers::owner_credit`).
     pub id: i64,
     pub title: String,
     pub thumb: String,
@@ -118,7 +118,7 @@ pub(crate) struct SessionIdentity {
 
 impl SessionIdentity {
     #[cfg(test)]
-    pub(crate) fn of(s: &crate::plex::session::Session) -> Self {
+    pub(crate) fn of(s: &crate::server::session::Session) -> Self {
         Self {
             client_id: s.client_id.clone(),
             account_token: s.account_token.clone(),

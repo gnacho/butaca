@@ -358,7 +358,7 @@ fn down_from_a_missing_final_row_column_clamps_to_the_last_item() {
 #[test]
 fn rail_eligibility_and_last_producer_hold_over_a_long_shelf() {
     let _guard = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("library-rail-layer");
+    let session = crate::server::session::TempSession::new("library-rail-layer");
     session.watching("u-library-rail-layer");
     let mut fixture = Fixture::shelves(&["movie.inprogress.1", "movie.recentlyadded.1"], 12);
     let view = fixture.listing.view();
@@ -902,7 +902,7 @@ fn direction(page: &mut LibraryScreen, engine: &mut FocusEngine<u32>, fixture: &
 #[test]
 fn shelf_horizontal_viewport_and_engine_item_survive_body_eviction() {
     let _guard = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("library-shelf-return");
+    let session = crate::server::session::TempSession::new("library-shelf-return");
     session.watching("u-library-shelf-return");
     let fixture = Fixture::shelves(&["movie.inprogress.1"], 12);
     let mut page = fixture.screen();
@@ -926,7 +926,7 @@ fn shelf_horizontal_viewport_and_engine_item_survive_body_eviction() {
 #[test]
 fn shelf_return_follows_the_film_then_its_last_published_slot() {
     let _guard = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("library-shelf-removal");
+    let session = crate::server::session::TempSession::new("library-shelf-removal");
     session.watching("u-library-shelf-removal");
     for evict in [false, true] {
         for remove_focused in [false, true] {
@@ -1123,7 +1123,7 @@ fn favorite_library_row_uses_shared_strip_geometry_and_incoming_type() {
 #[test]
 fn rapid_shelf_moves_use_settled_geometry_and_walk_each_document_row() {
     let _guard = crate::testlock::serial();
-    let session = crate::plex::session::TempSession::new("library-shelf-geometry");
+    let session = crate::server::session::TempSession::new("library-shelf-geometry");
     session.watching("u-library-shelf-geometry");
     let fixture = Fixture::shelves(&["s0", "s1", "s2"], 12);
     let listing_id = fixture.listing.view().id().unwrap();

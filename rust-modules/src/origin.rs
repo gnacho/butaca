@@ -15,8 +15,8 @@
 //! `(host, port)` still could not say is the SCHEME, which is this type's reason for existing.
 //!
 //! It is not a complete description of the servers plex.tv actually advertises, and the gap is not
-//! cosmetic. [`crate::plex::probe`] builds ranked candidates from an account's `/api/v2/resources`, and
-//! the one field that says where a candidate really is is [`Candidate::url`](crate::plex::probe::Candidate::url)
+//! cosmetic. [`crate::server::probe`] builds ranked candidates from an account's `/api/v2/resources`, and
+//! the one field that says where a candidate really is is [`Candidate::url`](crate::server::probe::Candidate::url)
 //! — **not** `Candidate::address`. plex.tv advertises the `plex.direct` HOSTNAME in `uri` while
 //! `address` stays the dotted quad hiding behind it, and `probe`'s own doc says outright that
 //! "https to the bare IP fails validation by design": the certificate is issued for
@@ -25,7 +25,7 @@
 //! like it speaks TLS and cannot: it is exactly the bug this type is here to make unwriteable.
 //!
 //! **So an `Origin` is PARSED from a URL, never assembled from an address.** [`Origin::parse`] is
-//! the front door, [`crate::plex::probe::Candidate::origin`] is the one that matters, and
+//! the front door, [`crate::server::probe::Candidate::origin`] is the one that matters, and
 //! [`Origin::http`] is the deliberately-named plaintext constructor — every remaining caller of
 //! *that* is a place that still assumes cleartext, and `Origin::http(` is the grep that finds them.
 //!
@@ -54,10 +54,10 @@
 //!   than inventing a meaning for it.
 #![allow(dead_code)]
 
-/// Which transport an origin names. Lives here rather than in [`crate::plex::probe`] because it is a
+/// Which transport an origin names. Lives here rather than in [`crate::server::probe`] because it is a
 /// property of an ORIGIN; probe merely *ranks* it, and re-exports this type for that.
 ///
-/// **Ordered best-first, and the derived `Ord` IS that preference** — [`crate::plex::probe::candidates`]
+/// **Ordered best-first, and the derived `Ord` IS that preference** — [`crate::server::probe::candidates`]
 /// sorts on it directly.
 ///
 /// **The two declarations were the other way round until the TLS control plane landed**, and this
@@ -409,9 +409,9 @@ impl StreamUrl {
 /// The HOST of a URL, **bare** — a borrowed view for a caller that only wants to look at the host
 /// and has no use for an owned [`Origin`].
 ///
-/// Its one caller is [`crate::plex::probe`]'s ranking, which asks whether a candidate's host is a numeric
+/// Its one caller is [`crate::server::probe`]'s ranking, which asks whether a candidate's host is a numeric
 /// literal or a name that needs resolving — and it must ask that of the URL's host and **not** of
-/// [`Candidate::address`](crate::plex::probe::Candidate::address), which is the dotted quad hiding behind
+/// [`Candidate::address`](crate::server::probe::Candidate::address), which is the dotted quad hiding behind
 /// a `plex.direct` NAME. This lives here so that there is exactly one reading of a URL in the
 /// codebase; probe used to carry a second copy of it.
 pub fn url_host(url: &str) -> &str {
@@ -497,7 +497,7 @@ impl<'a> Parts<'a> {
 /// and that name resolves only through Plex's public wildcard zone. Discovery ranks TLS first and
 /// persists the winner, so a LAN server is normally stored under that name — and on a LAN whose
 /// uplink is down it can no longer be found, although it is one hop away. The plaintext twin
-/// [`crate::plex::probe::candidates`] synthesizes for exactly this case cannot carry a token in a store
+/// [`crate::server::probe::candidates`] synthesizes for exactly this case cannot carry a token in a store
 /// build (`crate::http::credential_transport_allowed`), so the only offline route is the TLS name
 /// with its address supplied locally. That is this type.
 ///
@@ -604,7 +604,7 @@ impl ResolvePin {
 /// `192-168-0-10.<label>.plex.direct` → `192.168.0.10`; eight dash-joined hex groups → the v6
 /// address. Only the FIRST label is read; the hash label and the zone are checked for shape, not
 /// meaning. This is the reverse of a mapping plex.tv performs and is used as a cross-check against
-/// an address it advertised — never to build a hostname ([`crate::plex::probe`]'s rule stands).
+/// an address it advertised — never to build a hostname ([`crate::server::probe`]'s rule stands).
 pub fn plex_direct_literal(host: &str) -> Option<std::net::IpAddr> {
     let host = unbracket(host);
     let rest = host.strip_suffix(".plex.direct")?;

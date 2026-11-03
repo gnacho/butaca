@@ -155,7 +155,7 @@ fn an_address_literal_resolves_without_a_resolver() {
 /// IPv6 end to end, which is checklist #43 CASE2: a listener on `::1`, an AF_INET6 socket
 /// opened because the RESOLVER said so, a 200 read back, and — the half a connect alone cannot
 /// show — a bracketed `Host:` on the wire. Both spellings of the host reach the same server,
-/// since `plex::probe::host_of` hands back the bracketed one.
+/// since `server::probe::host_of` hands back the bracketed one.
 #[test]
 fn a_v6_literal_connects_and_sends_a_bracketed_host_header() {
     let Some(listener) = v6_loopback_or_skip("the IPv6 end-to-end open") else {

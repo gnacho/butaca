@@ -165,7 +165,7 @@ impl HttpStream {
 /// The part of a request path that may be written to the event log: everything before the query.
 ///
 /// Paths reaching this module routinely carry the PMS token in their query string —
-/// `plex::client::with_token` is the data layer's one token choke point and appends
+/// `server::client::with_token` is the data layer's one token choke point and appends
 /// `X-Plex-Token=…` to what it is given, and the poster store's paths arrive with one already in
 /// them (`Client::fetch_built`, where the built path *is* the LRU key, so the key and the request
 /// have to be the same bytes). The event log is this app's support channel: a user is asked to paste
@@ -189,7 +189,7 @@ fn log_endpoint(path: &str) -> &str {
 /// [`http_read`] reports a clean end as 0 and a recv ERROR as -1 (a mid-body `SO_RCVTIMEO` firing,
 /// a reset), and the one-shot wrappers below hand back `Some(body)` for both — deliberately, since
 /// changing that would move every caller's behaviour. What the caller sees instead is a body short
-/// by however much never arrived: for `plex::client::get_json` that is a `serde_json` parse
+/// by however much never arrived: for `server::client::get_json` that is a `serde_json` parse
 /// failure `.ok()`-folded to `None`, which is the same value a server that never answered
 /// produces. This line is the difference between those two.
 ///
@@ -235,7 +235,7 @@ fn short_body_line(
 /// `pub(crate)` because the one-shot wrappers that used to call it are gone. They folded away half
 /// of every answer — `http_get`/`http_post` dropped the status, `http_put` dropped the body — and
 /// the control plane needs both (a `401` is a token problem and a refusal is a reachability one;
-/// `plex::probe::Outcome` exists to keep those apart). Their replacement composes this module's
+/// `server::probe::Outcome` exists to keep those apart). Their replacement composes this module's
 /// primitives directly: [`crate::http`]'s plaintext arm, which is now this function's only caller
 /// and the reason it did not go with them. The three fields it reads are private, so the notice
 /// could not have been reproduced from outside.
@@ -717,7 +717,7 @@ fn header_is_chunked(hdr: &[u8]) -> bool {
 /// **One number, and it is deliberately NOT derived from the address.** RFC1918 is not "local" in
 /// Plex's sense — a NAT'd server reached over a VPN is private and far, and a `plex.direct` name
 /// resolves to a LAN address — so an address cannot tell you which connection tier you are on.
-/// Choosing a probe ORDER, and how much patience each tier is worth, is `plex::probe`'s policy;
+/// Choosing a probe ORDER, and how much patience each tier is worth, is `server::probe`'s policy;
 /// this layer owes exactly one honest ceiling on how long the main loop can be held.
 ///
 /// **It is the budget for the whole chain, not per address**, so the worst-case freeze is this
@@ -891,7 +891,7 @@ impl Drop for AddrList {
 /// The bytes to hand `getaddrinfo` as its node: a v6 literal WITHOUT its brackets.
 ///
 /// The brackets belong to the URI authority grammar (RFC 3986 §3.2.2) — which is where they are
-/// needed, in the `Host:` header and in a URL, and why `plex::probe::host_of` hands one back
+/// needed, in the `Host:` header and in a URL, and why `server::probe::host_of` hands one back
 /// bracketed. The resolver takes an ADDRESS, not an authority: `getaddrinfo("[::1]", …)` is
 /// EAI_NONAME. Stripping here rather than asking every caller to remember means a bracketed host
 /// cannot silently become "that server does not resolve", which is a failure nothing in the log
@@ -1278,7 +1278,7 @@ fn http_open_with_timeouts(
             None => {
                 // The host is on the line because "which name failed to resolve" is the only
                 // question this failure raises, and it is not a secret the way a query string is
-                // (`log_endpoint`) — `player::engine` and `plex::servers` already log `host=…:port`.
+                // (`log_endpoint`) — `player::engine` and `server::servers` already log `host=…:port`.
                 crate::log(&format!(
                     "stream: {method} {} DNS FAILED host={host_s}",
                     log_endpoint(&path_s)
@@ -2196,7 +2196,7 @@ pub(crate) fn http_shutdown(hs: *mut HttpStream) {
 // They were the Plex control plane's transport, and each folded away half of the answer:
 // `http_get`/`http_post` returned `Option<Vec<u8>>`, collapsing every non-2xx into the same `None`
 // a refused connection produces, and `http_put` returned the status with the body dropped. That
-// collapse is precisely what `plex::probe::Outcome` exists to prevent — a final `401` after the
+// collapse is precisely what `server::probe::Outcome` exists to prevent — a final `401` after the
 // direct/relay candidates settle is a TOKEN or access-policy problem, while a refusal is a
 // REACHABILITY one, and reporting the first as the second sends a user to their friend's router.
 // `auth::get_identity` had already had to hand-roll its own open/read/close for that reason.

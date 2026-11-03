@@ -28,7 +28,7 @@ fn a_compact_library_menu_holds_a_frozen_host_and_gives_it_back_on_dismissal() {
         }
     }
     let _cleanup = Cleanup;
-    let session = crate::plex::session::TempSession::new("library-host-freeze");
+    let session = crate::server::session::TempSession::new("library-host-freeze");
     session.watching("u-library-host-freeze");
     crate::registry::reset_for_test();
     let sid = crate::registry::ServerId::from_raw(0);
@@ -122,7 +122,7 @@ fn a_host_page_spring_under_an_open_panel_is_host_motion() {
         }
     }
     let _cleanup = Cleanup;
-    let session = crate::plex::session::TempSession::new("library-host-motion");
+    let session = crate::server::session::TempSession::new("library-host-motion");
     session.watching("u-library-host-motion");
     crate::registry::reset_for_test();
     let sid = crate::registry::ServerId::from_raw(1);

@@ -107,7 +107,7 @@ pub(crate) mod adapters;
 pub(crate) mod boot;
 pub(crate) mod bootstrap;
 /// **"Stats for nerds"** — the diagnostics read-out (phase 10, was `ui/stats.rs`). Here rather
-/// than in `ui/` because it is written from `player::Diag`, `route`, `plex::identity`, `webos`
+/// than in `ui/` because it is written from `player::Diag`, `route`, `server::identity`, `webos`
 /// and `devcaps` — application facts — and because its state is now an `App` field.
 pub(crate) mod diagnostics;
 pub(crate) mod words;
@@ -362,7 +362,7 @@ impl App {
     /// Controlled construction receives decoded/captured inputs before bootstrap effects.
     pub(crate) unsafe fn from_init(initial: bootstrap::Initial, mode: bootstrap::Preflight,
         pms_host: *const c_char, pms_port: c_int, mt: crate::task::MainThread,
-        deferred: Option<crate::plex::session::DeferredLoad>,
+        deferred: Option<crate::server::session::DeferredLoad>,
         launch_params: Option<String>) -> Result<Self, c_int> {
         boot::construct(pms_host, pms_port, mt, mode, Some(initial), deferred, launch_params)
     }

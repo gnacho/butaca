@@ -9,7 +9,7 @@
 //! because that is what the certificate is issued for — so the whole PMS control plane comes
 //! through here too whenever the origin is TLS. `crate::http` is the door that decides which of
 //! the two transports a request takes; this module is only ever the https half of it. Direct
-//! callers are `plex::account` and auth's public headerless QR-image fetch. It goes through
+//! callers are `server::account` and auth's public headerless QR-image fetch. It goes through
 //! [`post_ca`]: CA-verified,
 //! unpinned, bounded sink. **This list has stood here while becoming untrue before**, which is why
 //! it is worth checking rather than trusting; that is twice.
@@ -110,7 +110,7 @@ const PUBLIC_MAX_REDIRECTS: c_long = 5;
 /// change what curl sends or expects, it only overrides the verb written on the request line. That
 /// is exactly what a body-less `PUT` needs: `CURLOPT_UPLOAD` would make curl wait to read a body
 /// it is never given, while this sends a plain GET-shaped request that says `PUT` — the same bytes
-/// `crate::http`'s plaintext arm puts on the wire for `plex::Client::put`.
+/// `crate::http`'s plaintext arm puts on the wire for `server::Client::put`.
 ///
 /// It is an option ID, **not a new symbol**: `curl_easy_setopt` is already bound, so nothing about
 /// the `dynlib!` table (and therefore nothing about which firmwares this binary starts on) moves
@@ -535,7 +535,7 @@ pub(crate) struct RequestFailure {
 
 /// What a closed account-shaped request observed when it produced nothing usable: `Ok(status)`
 /// for a complete response that was refused or would not decode, `Err` for `net`'s own failure.
-/// Closed evidence only. Formerly `plex::account`'s evidence type; its remaining readers are
+/// Closed evidence only. Formerly `server::account`'s evidence type; its remaining readers are
 /// this module's transport-evidence tests.
 #[cfg_attr(not(test), expect(dead_code))]
 pub type CallEvidence = Result<u16, RequestFailure>;
@@ -547,7 +547,7 @@ pub fn refuses_identity(status: u16) -> bool {
     matches!(status, 401 | 403)
 }
 
-/// Shared capped geometric delay. Neutral retry-ladder helper (formerly `plex::account`'s);
+/// Shared capped geometric delay. Neutral retry-ladder helper (formerly `server::account`'s);
 /// `pms.rs`'s hub-retry backoff is its one live consumer.
 pub(crate) fn backoff(misses: u32, base: Duration, ceiling: Duration) -> Duration {
     let factor = 1u32.checked_shl(misses.min(30)).unwrap_or(u32::MAX);
@@ -669,7 +669,7 @@ fn allowed_redirect_protocols(url: &[u8]) -> c_long {
 /// Returns `None` on a transport error (offline, TLS failure, timeout) — callers treat that as
 /// "not reachable". A request that COMPLETED comes back as `Some`, whatever status it carries, so
 /// a `401` is a value here and never a `None`: that distinction is the whole of
-/// `plex::probe::Outcome`, and folding it is what sends a user to look at a router for a token
+/// `server::probe::Outcome`, and folding it is what sends a user to look at a router for a token
 /// problem.
 ///
 /// **The easy handle is per call, deliberately.** It is initialised and cleaned up here, so there
@@ -709,7 +709,7 @@ pub(crate) fn request_result(
 }
 
 /// [`request_result`] keeping the whole [`RequestFailure`] — the `CURLcode` a discovery probe's
-/// evidence names (`plex::probe::RouteOutcome`). The same one entry every such request passes.
+/// evidence names (`server::probe::RouteOutcome`). The same one entry every such request passes.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn request_result_evidence(
     url: &str,
@@ -875,7 +875,7 @@ fn request_tls_evidence(
         return Err(RequestError::Transport.into());
     }
     let ua =
-        CString::new(crate::plex::identity::user_agent()).map_err(|_| RequestError::Transport)?;
+        CString::new(crate::server::identity::user_agent()).map_err(|_| RequestError::Transport)?;
     let tls_c = match tls {
         Tls::Ca => TlsCfg::Ca,
         Tls::CaBundle(p) => TlsCfg::CaBundle(CString::new(p).map_err(|_| RequestError::Transport)?),

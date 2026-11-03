@@ -12,7 +12,7 @@
 
 use std::borrow::Cow;
 
-use crate::plex::session::Account;
+use crate::server::session::Account;
 use crate::screens::registry::{AppFx, AppLike, LoopReq};
 use crate::ui::frame::Budget;
 use crate::ui::machine::{

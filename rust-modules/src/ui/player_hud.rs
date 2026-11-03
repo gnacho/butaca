@@ -125,7 +125,7 @@ pub(crate) fn subtitle_ink() -> [f32; 4] {
     subtitle_ink_for(crate::player::subtitle_tone())
 }
 
-fn subtitle_ink_for(tone: crate::plex::session::SubtitleTone) -> [f32; 4] {
+fn subtitle_ink_for(tone: crate::server::session::SubtitleTone) -> [f32; 4] {
     theme::SUBTITLE_INKS
         .get(tone.index() as usize)
         .copied()
@@ -1464,7 +1464,7 @@ pub(crate) fn draw_playbar(p: Painter, bar: Playbar, measure: &dyn crate::ui::ma
     };
     // Trickplay thumbnail (issue #65) - the preview still that would sit ABOVE the playhead while
     // scrubbing, fed from the scrub fraction `frac`. NOT drawn here: the data layer exists
-    // (Jellyfin `jellyfin::client::trickplay_info`, Plex `plex::bif::parse_bif_index`), but drawing
+    // (Jellyfin `jellyfin::client::trickplay_info`, Plex `server::bif::parse_bif_index`), but drawing
     // it needs (1) an async fetch + decode of the one frame - `/Videos/{id}/Trickplay/{width}/
     // {index}.jpg` for Jellyfin, `/library/parts/{id}/indexes/sd/{offsetMs}` for Plex - that must
     // not block this draw thread, and (2) a cached texture just above `(hx, sy)` shown only while
@@ -2044,7 +2044,7 @@ mod tests {
     /// never coverage (the outline depends on it) and never hue (it tints image subtitles).
     #[test]
     fn the_subtitle_tones_are_a_strictly_darkening_opaque_grey_ladder_from_white() {
-        use crate::plex::session::SubtitleTone;
+        use crate::server::session::SubtitleTone;
         assert_eq!(theme::SUBTITLE_INKS.len(), SubtitleTone::LADDER.len());
         assert_eq!(subtitle_ink_for(SubtitleTone::White), [1.0, 1.0, 1.0, 1.0]);
         let mut prev = f32::MAX;
