@@ -827,7 +827,7 @@ pub(crate) struct ResolveEnv {
 /// Direct Play for it. Two answers to one question, which is the mismatch that preview exists to
 /// prevent.
 ///
-/// The show's technical fields ARE the on-deck episode's: `metadata::fetch_item_streams` backfills
+/// The show's technical fields ARE the on-deck episode's: the backend's own detail fetch backfills
 /// them from exactly the leaf `playback_preview` answers for. An episode reached some OTHER way (a
 /// season list, Up Next) still measures 0 and still fails closed — honest, and the residue that
 /// `PlayingItem` carrying its own bitrate would close (`ResolveEnv::src_kbps`).

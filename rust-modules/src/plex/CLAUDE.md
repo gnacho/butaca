@@ -17,8 +17,10 @@ otherwise.
 - `transcoder.rs`: `LinkPolicy`, the direct-play predicates (`is_dp_audio_track`, `is_dp_subtitle`,
   the codec lists) and the transcode/relay URL construction.
 - `timeline.rs`: timeline reporting, machine identity and the play-queue payloads.
-- `hubs.rs` / `library.rs`: the hub fetches and the section listings (children, related, extras) that
-  the Home catalog and the detail pipeline still ask for.
+- `library.rs`: the reads that still have live callers — the guid lookup (the alt-sources panel),
+  item metadata (the playing-tracks store), the sidecar subtitle download, and the two part-level
+  playback ops (stream selection, direct-play target). The hub fetches and the section listings
+  (children, related, extras, the batched metadata read) went with the Plex read layer (issue #166).
 - `identity.rs`: the client identity strings, including `VERSION` and the `X-Plex-*` headers the
   diagnostics panel reports.
 - `serverinfo.rs`: the Server row of the diagnostics panel and `subscription_of` (the Plex Pass

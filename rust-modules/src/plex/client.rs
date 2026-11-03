@@ -976,7 +976,7 @@ mod tests {
     /// selected UI language on every PMS operation, whatever it is** — this is the half of the
     /// question this repo can answer without a live server. Hub `title` strings arrive already
     /// localized IN the `/hubs`/`/hubs/promoted` response body (`docs/pms-api.md` §"Verified hub
-    /// list", `plex::hubs`, `Hub::title` in `models.rs`); the app has no hub-title catalog and
+    /// list", `Hub::title` in `models.rs`); the app has no hub-title catalog and
     /// performs no client-side translation or substitution on it (`screens/home/mod.rs`'s
     /// `LinkedHeading::heading(hub.title, ..)` at the render site). So a mix of Belarusian and
     /// Russian/English hub titles on one Home screen is PMS's own answer to the `X-Plex-Language:

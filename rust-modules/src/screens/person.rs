@@ -2600,20 +2600,22 @@ mod tests {
         store.run(PersonCmd::Close);
     }
 
-    fn pending_share_return(
+    /// The return-hydration fixture, single-source: the saved card is the ORIGIN's own, and the
+    /// page is reopened WITHOUT its landing, so the card sits in the one resolving interval that
+    /// still exists (the origin's own media fetch). The old share-source variant of this fixture
+    /// retired with the Plex read layer: a non-origin source is born settled and never enters
+    /// this interval at all.
+    fn pending_return(
         measure: &FixtureMeasure,
     ) -> (
         crate::stores::person::PersonStore,
         PersonScreen,
         crate::ui::machine::FocusKey<u32>,
         ServerId,
-        ServerId,
     ) {
         crate::registry::reset_for_test();
         let origin =
             crate::registry::register_with_client_id("person-pending-origin", "127.0.0.1", 1, "a", "cid");
-        let share =
-            crate::registry::register_with_client_id("person-pending-share", "127.0.0.1", 2, "b", "cid");
         let mut store = crate::stores::person::PersonStore::default();
         store.run(PersonCmd::Open { sid: origin, key: "161".into(),
             guid: "5d77682aeb5d26001f1de4b0".into(), name: "Idina Menzel".into(),
@@ -2626,7 +2628,7 @@ mod tests {
             "Idina Menzel".to_string(),
             String::new(),
         );
-        store.install_source_for_test(share, vec![item_on(share, "wanted")], Vec::new());
+        store.install_source_for_test(origin, vec![item_on(origin, "wanted")], Vec::new());
         original.sync_card_keys(&cx(measure, store.view()));
         let old_focus = focus_of(&original, &store, 0, 0);
         let PageMemory::Person(memory) =
@@ -2667,36 +2669,30 @@ mod tests {
         store.run(PersonCmd::Open { sid: origin, key: "161".into(),
             guid: "5d77682aeb5d26001f1de4b0".into(), name: "Idina Menzel".into(),
             thumb: String::new() });
-        store.install_source_for_test(
-            origin,
-            vec![item_on(origin, "available")],
-            Vec::new(),
-        );
-        Machine::<PersonHost>::step(
-            &mut returned,
-            &ScreenEvent::StoreChanged(crate::stores::StoreId::Person.ord(), 1),
-            &cx_at(measure, store.view(), old_focus),
-            &mut fx,
-        );
-        assert!(returned.return_pending);
-        assert_eq!(
-            Focusable::<PersonHost>::reconcile(&returned, old_focus, &cx_at(measure, store.view(), old_focus)),
-            old_focus
-        );
-        (store, returned, old_focus, origin, share)
+        (store, returned, old_focus, origin)
     }
 
     #[test]
     fn a_direction_abandons_an_unavailable_return_card_and_allows_fallback() {
         let _serial = crate::testlock::serial();
         let measure = FixtureMeasure;
-        let (mut store, mut returned, old_focus, _origin, _share) = pending_share_return(&measure);
+        let (mut store, mut returned, old_focus, origin) = pending_return(&measure);
         let mut present = crate::ui::present::Present::new();
         let mut out = Vec::new();
         let mut fx = Effects::new(
             &mut out,
             crate::ui::machine::MachineId::Instance(crate::ui::machine::InstanceId(0)),
             &mut present,
+        );
+        Machine::<PersonHost>::step(
+            &mut returned,
+            &ScreenEvent::StoreChanged(crate::stores::StoreId::Person.ord(), 1),
+            &cx_at(&measure, store.view(), old_focus),
+            &mut fx,
+        );
+        assert!(
+            returned.return_pending,
+            "the origin's own unlanded fetch is the interval that holds the return card"
         );
         let right = ScreenEvent::Input(InputEvent {
             at: Tick::default(),
@@ -2720,47 +2716,18 @@ mod tests {
             "the engine still owns directional movement"
         );
         assert!(!returned.return_pending);
+        store.install_source_for_test(origin, vec![item_on(origin, "available")], Vec::new());
+        Machine::<PersonHost>::step(
+            &mut returned,
+            &ScreenEvent::StoreChanged(crate::stores::StoreId::Person.ord(), 2),
+            &cx_at(&measure, store.view(), old_focus),
+            &mut fx,
+        );
         assert_eq!(
             Focusable::<PersonHost>::reconcile(&returned, old_focus, &cx_at(&measure, store.view(), old_focus)),
             focus_of(&returned, &store, 0, 0),
-            "the same frame's dispatcher reconcile can seat the available card"
+            "once the fetch lands, the dispatcher's reconcile seats the available card"
         );
-        store.run(PersonCmd::Close);
-        crate::registry::reset_for_test();
-    }
-
-    #[test]
-    fn a_click_abandons_an_unavailable_return_card() {
-        let _serial = crate::testlock::serial();
-        let measure = FixtureMeasure;
-        let (mut store, mut returned, old_focus, _origin, _share) = pending_share_return(&measure);
-        let available = focus_of(&returned, &store, 0, 0);
-        let mut present = crate::ui::present::Present::new();
-        let mut out = Vec::new();
-        let mut fx = Effects::new(
-            &mut out,
-            crate::ui::machine::MachineId::Instance(crate::ui::machine::InstanceId(0)),
-            &mut present,
-        );
-        let click = ScreenEvent::Input(InputEvent {
-            at: Tick::default(),
-            source: crate::ui::machine::Source::Replay,
-            kind: InputKind::Click {
-                x: 0.0,
-                y: 0.0,
-                hit: Some(available.elem),
-            },
-        });
-        assert_eq!(
-            Machine::<PersonHost>::step(
-                &mut returned,
-                &click,
-                &cx_at(&measure, store.view(), old_focus),
-                &mut fx,
-            ),
-            Handled::No
-        );
-        assert!(!returned.return_pending);
         store.run(PersonCmd::Close);
         crate::registry::reset_for_test();
     }
@@ -2769,8 +2736,8 @@ mod tests {
     fn a_successful_empty_source_answer_releases_the_return_card_to_fallback() {
         let _serial = crate::testlock::serial();
         let measure = FixtureMeasure;
-        let (mut store, mut returned, old_focus, _origin, share) = pending_share_return(&measure);
-        store.install_source_for_test(share, Vec::new(), Vec::new());
+        let (mut store, mut returned, old_focus, origin) = pending_return(&measure);
+        store.install_source_for_test(origin, Vec::new(), Vec::new());
         let mut present = crate::ui::present::Present::new();
         let mut out = Vec::new();
         let mut fx = Effects::new(
@@ -2780,17 +2747,13 @@ mod tests {
         );
         Machine::<PersonHost>::step(
             &mut returned,
-            &ScreenEvent::StoreChanged(crate::stores::StoreId::Person.ord(), 2),
+            &ScreenEvent::StoreChanged(crate::stores::StoreId::Person.ord(), 1),
             &cx_at(&measure, store.view(), old_focus),
             &mut fx,
         );
         assert!(
             !returned.return_pending,
             "a successful empty media answer is terminal for this saved source"
-        );
-        assert_eq!(
-            Focusable::<PersonHost>::reconcile(&returned, old_focus, &cx_at(&measure, store.view(), old_focus)),
-            focus_of(&returned, &store, 0, 0)
         );
         store.run(PersonCmd::Close);
         crate::registry::reset_for_test();
@@ -2807,8 +2770,6 @@ mod tests {
         crate::registry::reset_for_test();
         let origin =
             crate::registry::register_with_client_id("person-return-origin", "127.0.0.1", 1, "a", "cid");
-        let share =
-            crate::registry::register_with_client_id("person-return-share", "127.0.0.1", 2, "b", "cid");
         let mut store = crate::stores::person::PersonStore::default();
         store.run(PersonCmd::Open { sid: origin, key: "161".into(),
             guid: "5d77682aeb5d26001f1de4b0".into(), name: "Idina Menzel".into(),
@@ -2822,8 +2783,8 @@ mod tests {
             String::new(),
         );
         store.install_source_for_test(
-            share,
-            vec![item_on(share, "m0"), item_on(share, "m1")],
+            origin,
+            vec![item_on(origin, "m0"), item_on(origin, "m1")],
             Vec::new(),
         );
         first.sync_card_keys(&cx(&FixtureMeasure, store.view()));
@@ -2902,33 +2863,12 @@ mod tests {
 
         store.install_source_for_test(
             origin,
-            vec![item_on(origin, "other-source-card")],
+            vec![item_on(origin, "m1"), item_on(origin, "m0")],
             Vec::new(),
         );
         Machine::<PersonHost>::step(
             &mut first,
             &ScreenEvent::StoreChanged(crate::stores::StoreId::Person.ord(), 2),
-            &cx_at(&measure, store.view(), old_focus),
-            &mut fx,
-        );
-        assert!(
-            first.person(&cx(&FixtureMeasure, store.view())).unwrap().landed,
-            "another source has enough content to settle the page-level spinner"
-        );
-        assert_eq!(
-            Focusable::<PersonHost>::reconcile(&first, old_focus, &cx_at(&measure, store.view(), old_focus)),
-            old_focus,
-            "page-level landed must not settle the saved card's still-resolving source"
-        );
-
-        store.install_source_for_test(
-            share,
-            vec![item_on(share, "m1"), item_on(share, "m0")],
-            Vec::new(),
-        );
-        Machine::<PersonHost>::step(
-            &mut first,
-            &ScreenEvent::StoreChanged(crate::stores::StoreId::Person.ord(), 3),
             &cx_at(&measure, store.view(), old_focus),
             &mut fx,
         );
@@ -2949,7 +2889,6 @@ mod tests {
         store.run(PersonCmd::Close);
         crate::registry::reset_for_test();
     }
-
     /// The same delayed interval exists after the dispatcher's body cap evicts the Person screen:
     /// PageMemory restores the interner before `Enter(Restored)`, while the new body has already
     /// opened an empty A store. The saved engine key must remain intact until A's shelves arrive.

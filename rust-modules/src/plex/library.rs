@@ -1,5 +1,5 @@
-//! Library operations (impl Client): sections, section queries, metadata, children,
-//! related, plus the two part-level playback ops (stream selection, direct-play target).
+//! Library operations (impl Client): the guid lookup and item metadata reads that still have
+//! live callers, plus the two part-level playback ops (stream selection, direct-play target).
 use super::client::{Client, QueryBuilder, StreamUrl};
 use crate::media::{MediaContainer, Metadata};
 use super::params::StreamSelection;
@@ -70,59 +70,6 @@ impl Client {
         self.get_json(&path)?.metadata.into_iter().next()
     }
 
-    /// GET /library/metadata/{rating_key}/extras → clip rows (`subtype` trailer / behindTheScenes / …).
-    /// Same playable `Media`/`Part` as `?includeExtras=1` nested under the parent (docs/pms-api.md §4).
-    /// A refused GET is `None`; an empty list is `Some` with `metadata` empty.
-    pub fn extras(&self, rating_key: &str) -> Option<MediaContainer> {
-        self.get_json(&format!("/library/metadata/{rating_key}/extras"))
-    }
-
-    /// GET /library/metadata/{csv} — the FULL records of MANY items in ONE request. The answer
-    /// carries one `.metadata[]` row per key, in request order; the CSV is joined HERE, because
-    /// assembling path syntax is this layer's job (`plex/CLAUDE.md`: every PMS query is built here).
-    ///
-    /// **This is the only way to get what a LISTING response strips.** Verified live 2026-07-30
-    /// against PMS 1.43.3 while building the person page's role captions:
-    /// `/library/people/{id}/media` does return a `Role[]` on every row, but each entry carries
-    /// **nothing except `tag`** — no `id`, and no `role` (the character name). `?includeRole=1`
-    /// changes nothing. The full item carries both, so one batched read of the shelf's keys is the
-    /// cheap way to caption a whole filmography.
-    ///
-    /// The response is **trimmed to the tag arrays**, which is the whole point of batching it: nobody
-    /// wants 48 items' `Media`/`Genre`/`Director`/summary just to read a credit. Measured on four
-    /// movies, the untrimmed response is **32.8 KB** against 12.9 KB trimmed. The trim is a property
-    /// of this operation, not of the caller, so it lives here rather than as query fragments a store
-    /// module passes in. (The server silently KEEPS `Image`, `UltraBlurColors` and `Field` whatever
-    /// you ask, so they are not listed — naming them would just read as if they went.)
-    ///
-    /// Absent from `the upstream Plex API reference`, which documents only the single-key form.
-    pub fn metadata_many(&self, rating_keys: &[&str]) -> Option<MediaContainer> {
-        const EXCLUDE_ELEMENTS: &str =
-            "Media,Genre,Country,Collection,Director,Writer,Producer,Similar,Chapter,Marker,Guid,Rating,Review,Extras";
-        let path = QueryBuilder::new(format!("/library/metadata/{}", rating_keys.join(",")))
-            .str("excludeElements", EXCLUDE_ELEMENTS)
-            .str("excludeFields", "summary,tagline")
-            .build();
-        self.get_json(&path)
-    }
-
-
-    /// GET /library/metadata/{rating_key}/related → `.hub[]`.
-    pub fn related(&self, rating_key: &str) -> Option<MediaContainer> {
-        self.get_json(&format!("/library/metadata/{rating_key}/related"))
-    }
-
-    /// GET /library/people/{person_id}/media → `.metadata[]` — every item this person appears
-    /// in, **across every library section in one request** (docs/pms-api.md §2c). `person_id` is
-    /// either the numeric [`Tag::id`](super::Tag::id) or the [`Tag::tag_key`](super::Tag::tag_key)
-    /// guid; both were verified live against the same record on 2026-07-29.
-    ///
-    /// **Group the rows by each row's own `type`, never by the container's `viewGroup`** — that
-    /// field is unreliable here: it read `"movie"` on a response whose only row was a `show`
-    /// (verified on person 6059, 5 movies + 1 show). See `crate::person::split_by_type`.
-    pub fn person_media(&self, person_id: &str) -> Option<MediaContainer> {
-        self.get_json(&format!("/library/people/{person_id}/media"))
-    }
 
     /// Fetch a SIDECAR subtitle (`Stream.key`, i.e. `/library/streams/{id}`) for the client
     /// renderer. The endpoint takes `encoding` and `format` (the upstream Plex API reference). ASS/SSA

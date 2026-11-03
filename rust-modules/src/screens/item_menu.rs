@@ -256,7 +256,7 @@ fn build_with(
     // The row set comes from the shared `widgets::row_watch_state`, over the catalog row this menu
     // captured when it was presented — so it is exact for a leaf (`viewCount`/`viewOffset` off the
     // same container the shelf was built from) AND for a container, whose three states are already
-    // on the row as the `unwatched`/`watched` PAIR (`pms::parse_item`: a show is "neither" exactly
+    // on the row as the `unwatched`/`watched` PAIR (a show is "neither" exactly
     // while some of its leaves are viewed and some are not).
     let mut sec = state_rows(
         sec,
@@ -771,8 +771,8 @@ impl LogicalState for ItemMenuScreen {
 mod tests {
     use super::*;
 
-    /// A catalog row of `kind` in a given watch state, with the flags a real `pms::parse_item`
-    /// would set — which is the part that matters here, since the menu's row set is derived from
+    /// A catalog row of `kind` in a given watch state, with the flags a real catalog row carries —
+    /// which is the part that matters here, since the menu's row set is derived from
     /// `unwatched`/`watched`/`resume_ms` together rather than from one of them.
     ///
     /// A LEAF in the middle is `viewCount == 0` with a live `viewOffset`; a CONTAINER in the middle
@@ -1093,43 +1093,36 @@ mod tests {
         );
     }
 
-    /// **A RELATED tile gets the same three-state row set as every other card**, built from a row
-    /// that came off the wire rather than from this module's hand-made fixture.
-    ///
-    /// The Related shelf was the last card surface with no context menu, excluded on the stated
-    /// grounds that its tiles carried no `(ratingKey, watched)` pair — true of the old struct, never
-    /// of the response. So this half runs `/related`'s real JSON through the same `pms::parse_item`
-    /// the shelf now uses, into `build`, and out as labels, rather than through this module's
-    /// hand-made [`item`] fixture: the fixture sets the three flags directly, so it can only prove
-    /// that `build` reads them, never that the WIRE fills them in.
-    ///
-    /// It is deliberately only that half. The other coupling — that `fetch_related` still hands the
-    /// shelf a fully parsed row instead of going back to copying three fields — cannot be seen from
-    /// here, because this test calls `parse_item` itself. That one is
-    /// `metadata::tests::related_rows_carry_the_watch_state_the_wire_already_had`; the two are a
-    /// pair and neither is sufficient alone.
+    /// **A catalog tile gets the same three-state row set**, per the state the row arrives in —
+    /// the same flags the backend's row conversion fills (`convert::movie_from_dto` carries
+    /// `watched`/`unwatched`/`resume_ms` straight off the item's own counters). The fixture sets
+    /// the flags DIRECTLY on purpose: what is under test here is `build`'s verb choice per state,
+    /// not the wire→row mapping (whose Plex half retired with `/related`; the Jellyfin conversion
+    /// has its own module tests).
     #[test]
     fn a_related_tile_off_the_wire_gets_the_row_set_its_state_earns() {
-        let row = |json: &str| {
-            let body = format!(r#"{{"MediaContainer":{{"Hub":[{{"Metadata":[{json}]}}]}}}}"#);
-            let mc = serde_json::from_str::<crate::media::Envelope>(&body)
-                .expect("parses")
-                .media_container;
-            crate::pms::parse_item(&mc.hub[0].metadata[0], crate::registry::ServerId::UNSET)
+        let row = |kind: i32, rk: &str, resume_ms: i64, watched: bool, unwatched: bool| {
+            crate::pms::PmsMovie {
+                sid: crate::registry::ServerId::UNSET,
+                rk: rk.into(),
+                kind,
+                dur_ns: 7_020_000_000_000,
+                resume_ms,
+                watched,
+                unwatched,
+                ..Default::default()
+            }
         };
-        let set = |json: &str| labels(&build(&row(json), false).0);
+        let set = |r: crate::pms::PmsMovie| labels(&build(&r, false).0);
 
         // a MOVIE, in each of the three states — one navigation row, then the state group
-        let movie = |extra: &str| {
-            format!(r#"{{"ratingKey":"11","type":"movie","duration":"7020000"{extra}}}"#)
-        };
         assert_eq!(
-            set(&movie("")),
+            set(row(0, "11", 0, false, true)),
             ["Go to Movie", "—", "Mark as Watched", "Play from Start"],
             "never started: only the way forward"
         );
         assert_eq!(
-            set(&movie(r#","viewOffset":"3510000""#)),
+            set(row(0, "11", 3_510_000, false, true)),
             [
                 "Go to Movie",
                 "—",
@@ -1140,32 +1133,30 @@ mod tests {
             "part-watched: both ends are reachable and both are true"
         );
         assert_eq!(
-            set(&movie(r#","viewCount":2"#)),
+            set(row(0, "11", 0, true, false)),
             ["Go to Movie", "—", "Mark as Unwatched", "Play from Start"],
             "finished: only the way back"
         );
 
         // a SHOW — a container, so no Play from Start, and its middle state is the leaf-count one
-        let show =
-            |extra: &str| format!(r#"{{"ratingKey":"14","type":"show","leafCount":10{extra}}}"#);
         assert_eq!(
-            set(&show("")),
+            set(row(1, "14", 0, false, true)),
             ["Go to Show", "—", "Mark as Watched"],
             "no leaf viewed"
         );
         assert_eq!(
-            set(&show(r#","viewedLeafCount":3"#)),
+            set(row(1, "14", 0, false, false)),
             ["Go to Show", "—", "Mark as Watched", "Mark as Unwatched"],
             "3 of 10: neither watched nor unwatched, so BOTH verbs — the case `viewCount > 0` misses"
         );
         assert_eq!(
-            set(&show(r#","viewedLeafCount":10"#)),
+            set(row(1, "14", 0, true, false)),
             ["Go to Show", "—", "Mark as Unwatched"],
             "all 10"
         );
 
         // and no Related row offers the deck action: that shelf is not the Continue Watching deck
-        let (sec, acts) = build(&row(&movie("")), false);
+        let (sec, acts) = build(&row(0, "11", 0, false, true), false);
         assert!(!labels(&sec).iter().any(|l| l == "Remove from Deck"));
         assert_eq!(acts.len(), sec.rows.len(), "{ACTS_PARALLEL}");
     }

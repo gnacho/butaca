@@ -108,7 +108,8 @@ fn a_container_mid_run_is_in_the_middle_for_a_menu_though_it_wears_no_mark() {
 }
 
 /// The two ENDS are the same answer from both resolvers, on containers as much as leaves.
-/// A container's `watched` is the strict `viewedLeafCount >= leafCount` (`pms::parse_item`), so
+/// A container's `watched` is the strict `viewedLeafCount >= leafCount` (the row conversion's own
+/// comparison), so
 /// a finished show is genuinely finished and its menu offers only the way back — which is what
 /// the shelf menu got wrong before, offering "Mark as Watched" on a show already done.
 #[test]

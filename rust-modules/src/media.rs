@@ -17,8 +17,6 @@ pub struct Envelope {
 pub struct MediaContainer {
     #[serde(rename = "Metadata", default)]
     pub metadata: Vec<Metadata>,
-    #[serde(rename = "Hub", default)]
-    pub hub: Vec<Hub>,
     /// Position of the selected item within the WHOLE queue (not within the returned window).
     /// /transcode/universal/decision verdict codes — Option (not defaulted 0) so the route
     /// log distinguishes "absent" from a real code, matching the old find_num scan.
@@ -58,42 +56,6 @@ pub struct MediaContainer {
     pub version: String,
 }
 
-#[derive(Deserialize, Default)]
-pub struct Hub {
-    #[serde(rename = "type", default)]
-    pub kind: String,
-    #[serde(rename = "hubIdentifier", default)]
-    pub hub_identifier: String, // e.g. home.continue, home.ondeck — stable, locale-independent
-    #[serde(default)]
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub title: String,
-    #[serde(rename = "Metadata", default)]
-    pub metadata: Vec<Metadata>,
-    /// **A hub's items do not all arrive as `Metadata`**, and a search screen that assumes they do
-    /// renders two of its five shelves as nothing at all, silently. Measured against this
-    /// household's PMS 1.43.3 over six queries on 2026-08-14:
-    ///
-    /// | payload | hubs |
-    /// |---|---|
-    /// | `Metadata[]` | `movie`, `show`, `episode`, `album`, `artist`, `track` |
-    /// | **`Directory[]`** | **`actor`, `director`, `collection`** |
-    ///
-    /// So Cast & Crew *and* Collections both come through here — Collections only when the request
-    /// omits `includeCollections=1`, which moves them to full `Metadata[]` collection rows and which
-    /// `Client::search` always sends. `the upstream API reference`'s own worked
-    /// example for `/hubs/search` disagrees — it puts shows under `Directory` — which is why this
-    /// was probed live rather than modelled from the spec, and why the split is written down here
-    /// instead of being rediscovered the next time a hub looks empty.
-    #[serde(rename = "Directory", default)]
-    pub directory: Vec<Tag>,
-    /// How many items the hub holds. A search response carries EVERY hub type the server knows
-    /// about — 17 of them on this set — most with `size: 0`, so this is the field that says which
-    /// ones are worth drawing.
-    #[serde(default, deserialize_with = "de_i64")]
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub size: i64,
-}
-
 
 
 /// A SHOW's language settings — its Advanced dialog in Plex Web. `None` / `-1` mean "Account
@@ -120,91 +82,19 @@ impl ShowLangPrefs {
 /// The movie/show/season/episode item. Missing fields default (Plex omits optionals).
 #[derive(Deserialize, Default)]
 pub struct Metadata {
-    #[serde(rename = "type", default)]
-    pub kind: String, // movie|show|season|episode|clip
     #[serde(rename = "ratingKey", default, deserialize_with = "de_route_key")]
     pub rating_key: String,
-    /// `/library/metadata/{rk}` for a leaf, `/library/metadata/{rk}/children` for a show/season.
-    /// Extras matching also reads this against `primaryExtraKey` (docs/pms-api.md §4 extras).
-    #[serde(default, deserialize_with = "de_route_key")]
-    pub key: String,
-    /// Clip extras only: `trailer` / `behindTheScenes` / `sceneOrSample` / …
-    #[serde(default)]
-    pub subtype: String,
-    /// Clip extras only. `1` is a trailer; `5` behind-the-scenes; `6` scene-or-sample
-    /// (verified live 2026-09-12). Lenient: PMS string-encodes numerics on some endpoints.
-    #[serde(rename = "extraType", default, deserialize_with = "de_i64")]
-    pub extra_type: i64,
-    /// **The only PORTABLE identity Plex issues** — `plex://movie/6856…291d`, the metadata
-    /// provider's id, identical on every server that ever matched this film. Everything else
-    /// item-shaped (`ratingKey`, `librarySectionID`, `Part.key`, `Stream.id`) is a server-local
-    /// integer dense from 1.
-    ///
-    /// Measured across this household's two servers 2026-08-14: one film is `ratingKey` **2029**
-    /// on ours and **5274** on the share, and their copy is titled in another language entirely —
-    /// so matching copies by key offers a different film and matching by title misses this one.
-    /// Plex's own client matches these two, which is the behaviour "Also available" reproduces.
-    #[serde(default, deserialize_with = "de_str")]
-    pub guid: String,
-    #[serde(default)]
-    pub title: String,
     /// The LIBRARY this row lives in, on the server that answered ("Movies", "Film Club"). Sent on
     /// a cross-library query such as `/library/all?guid=…`, which is the one place the app asks a
     /// server something without already knowing which of its libraries will answer.
     #[serde(rename = "librarySectionTitle", default, deserialize_with = "de_str")]
     pub library_section_title: String,
-    /// Which LIBRARY on that server this row belongs to — the pin's grain.
-    ///
-    /// Present on every `/hubs` and `/hubs/continueWatching` row (verified live), which is what
-    /// lets Home honour a per-library pin without a per-library fetch: the whole-server hub request
-    /// answers with rows from every library, and this is the only field that says which. 0 = the
-    /// server did not send one, and an item with no library cannot be gated out — see
-    /// `pms::feeds_home_item`.
-    #[serde(rename = "librarySectionID", default, deserialize_with = "de_i64")]
-    pub library_section_id: i64,
-    #[serde(default, deserialize_with = "de_i64")]
-    pub year: i64,
-    #[serde(rename = "contentRating", default)]
-    pub content_rating: String,
-    #[serde(default)]
-    pub summary: String,
-    #[serde(rename = "originallyAvailableAt", default)]
-    pub originally_available_at: String,
     #[serde(default, deserialize_with = "de_i64")]
     pub duration: i64, // ms
-    #[serde(rename = "viewOffset", default, deserialize_with = "de_i64")]
-    pub view_offset: i64, // ms; resume point
-    /// Collection rows use this as their tag id (distinct from `ratingKey`).
-    #[serde(default, deserialize_with = "de_i64")]
-    pub index: i64, // season/episode number
-    #[serde(rename = "childCount", default, deserialize_with = "de_i64")]
-    pub child_count: i64,
-    #[serde(rename = "parentIndex", default, deserialize_with = "de_i64")]
-    pub parent_index: i64,
-    #[serde(rename = "parentRatingKey", default, deserialize_with = "de_route_key")]
-    pub parent_rating_key: String, // season → its show
-    #[serde(rename = "parentTitle", default)]
-    pub parent_title: String, // season → show title; episode → season title
     #[serde(rename = "grandparentRatingKey", default, deserialize_with = "de_route_key")]
     pub grandparent_rating_key: String, // episode → its show
-    #[serde(rename = "grandparentTitle", default)]
-    pub grandparent_title: String, // episode → show title
-    #[serde(rename = "leafCount", default, deserialize_with = "de_i64")]
-    pub leaf_count: i64,
-    #[serde(rename = "viewedLeafCount", default, deserialize_with = "de_i64")]
-    pub viewed_leaf_count: i64, // shows/seasons: episodes watched (watched = viewed >= leaf)
-    #[serde(rename = "viewCount", default, deserialize_with = "de_i64")]
-    pub view_count: i64, // present only once watched ≥1× (absent = unwatched)
-    #[serde(default)]
-    pub thumb: String,
-    #[serde(default)]
-    pub art: String,
-    #[serde(rename = "grandparentThumb", default)]
-    pub grandparent_thumb: String,
     #[serde(rename = "Media", default)]
     pub media: Vec<Media>,
-    #[serde(rename = "Role", default)]
-    pub role: Vec<Tag>,
     #[serde(rename = "Chapter", default)]
     pub chapter: Vec<Chapter>,
     #[serde(rename = "Marker", default)]
@@ -236,10 +126,6 @@ impl Metadata {
 
 #[derive(Deserialize, Default)]
 pub struct Media {
-    #[serde(rename = "videoCodec", default)]
-    pub video_codec: String,
-    #[serde(rename = "audioCodec", default)]
-    pub audio_codec: String,
     /// Whole-stream bitrate in **kbps** (PMS's unit) — the source rung of the video-quality ladder
     /// ("26.1 Mbps 4K (Original)") and the input to any bandwidth cap.
     #[serde(default, deserialize_with = "de_i64")]
@@ -255,38 +141,12 @@ pub struct Media {
     /// `"4k"`, `"1080"`, `"720"`, `"576"`, `"sd"`. The version-picker key per docs/pms-api.md §4.
     #[serde(rename = "videoResolution", default, deserialize_with = "de_str")]
     pub video_resolution: String,
-    /// The container this version is muxed in — `"mp4"`, `"mkv"`, …. PMS sends it on the Media
-    /// *and* on the Part; they agree on every item swept on the dev server, and the part's is the
-    /// authoritative one for a multi-part version, so [`MediaPart::container`] is what the
-    /// Track-information panel prefers and this is its fallback.
-    #[serde(default)]
-    pub container: String,
-    /// Display aspect ratio as a NUMBER — `2.35` on the Dolby Vision title probed live 2026-08-21.
-    /// Lenient because PMS string-encodes numerics on some endpoints. Descriptive only.
-    #[serde(rename = "aspectRatio", default, deserialize_with = "de_f64")]
-    pub aspect_ratio: f64,
     #[serde(rename = "Part", default)]
     pub part: Vec<MediaPart>,
 }
 
 #[derive(Deserialize, Default)]
 pub struct MediaPart {
-    #[serde(default, deserialize_with = "de_route_key")]
-    pub key: String, // /library/parts/{id}/{changestamp}/file.mkv
-    /// The part's absolute path ON THE SERVER's filesystem — the header line of the
-    /// Track-information panel. **Not a URL and not reachable from here**: it is the server
-    /// operator's own path (`/Volumes/DAS/Movies/…`, probed live), shown because "which file is
-    /// this" is the question the panel exists to answer. It is also the one field on this struct
-    /// that can carry non-ASCII, so anything that elides it must do so by CHARACTER.
-    #[serde(default)]
-    pub file: String,
-    /// The part's size in BYTES (not kB) — `34659545780` on the DV title probed live. Lenient:
-    /// PMS string-encodes this one on several endpoints.
-    #[serde(default, deserialize_with = "de_i64")]
-    pub size: i64,
-    /// The container this part is muxed in — see [`Media::container`], which is the fallback.
-    #[serde(default)]
-    pub container: String,
     #[serde(rename = "Stream", default)]
     pub stream: Vec<Stream>,
 }
@@ -330,14 +190,8 @@ pub struct Stream {
     // so a non-numeric frameRate never fails the whole detail parse — matches the old jfloat.
     #[serde(rename = "frameRate", default, deserialize_with = "de_f64")]
     pub frame_rate: f64,
-    /// Video stream only: the transfer characteristic — `smpte2084` (HDR10/PQ) or
-    /// `arib-std-b67` (HLG) mark an HDR source (probed live on the dev PMS 2026-08-11:
-    /// the HDR10 items send `colorTrc=smpte2084`). Drives the detail facts row's
-    /// HDR-without-tone-mapping warning; absent (SDR or old server) is just "".
-    #[serde(rename = "colorTrc", default)]
-    pub color_trc: String,
-    /// Video stream only: Dolby Vision present — HDR whatever `colorTrc` says. Lenient because
-    /// PMS sends bools as `true` and as `"1"` depending on the endpoint.
+    /// Video stream only: Dolby Vision present — HDR whatever the transfer characteristic says.
+    /// Lenient because PMS sends bools as `true` and as `"1"` depending on the endpoint.
     #[serde(rename = "DOVIPresent", default, deserialize_with = "de_i64")]
     pub dovi_present: i64,
     // ---- Dolby Vision, beyond "present". These three decide whether the file's BASE LAYER is a
@@ -437,49 +291,6 @@ pub struct Stream {
     /// the failure mode I2/I5 exist to prevent.
     #[serde(rename = "canNormalizeLoudness", default, deserialize_with = "de_bool")]
     pub can_normalize_loudness: bool,
-}
-
-/// A tag row — `Genre[]`, `Country[]`, `Role[]`, `Director[]`, `Writer[]`. The three PEOPLE
-/// arrays carry six attributes, with the consumed fields modelled here; verified live 2026-07-29:
-/// `{"id":161,"filter":"actor=161","tag":"Idina Menzel","tagKey":"5d77682a…","count":3,
-///   "role":"Elsa (voice)","thumb":"https://metadata-static.plex.tv/…jpg"}`.
-/// [`id`](Tag::id)/[`tag_key`](Tag::tag_key) are what make the person page reachable — either is
-/// the `personId` of `/library/people/{personId}[/media]` (docs/pms-api.md §2c).
-///
-/// **Every string here is [`de_str`], and that is not tidiness.** A strict `String` meeting a JSON
-/// `null` does not lose one field: serde fails the whole `MediaContainer`, so one null in one
-/// `Directory[]` row of one hub blanks the entire search — which reads as the transport having
-/// failed while the server is answering perfectly. The plain `#[serde(default)]` these carried
-/// fills an ABSENT field and does nothing at all for one that is present and null (`de_vec`'s doc
-/// states the same trap one container up), and a share is exactly the machine whose PMS version,
-/// scanner and agents are not ours.
-#[derive(Deserialize, Default)]
-pub struct Tag {
-    #[serde(default, deserialize_with = "de_str")]
-    pub tag: String,
-    #[serde(default, deserialize_with = "de_str")]
-    pub role: String, // Role[] only (character name)
-    /// The tag's numeric library id — the `personId` of `/library/people/{id}[/media]`, and the
-    /// value behind `?actor=<id>` on a section listing. 0 = absent.
-    #[serde(default, deserialize_with = "de_i64")]
-    pub id: i64,
-    /// Plex's global person guid (`"5d77682aeb5d26001f1de4b0"`) — stable across servers, and the
-    /// alternate `personId` (both forms verified live against the same record).
-    #[serde(rename = "tagKey", default, deserialize_with = "de_route_key")]
-    pub tag_key: String,
-}
-
-impl Tag {
-    /// Is this tag the person addressed by `id` (a local `personId`) or `guid` (a `tagKey`)?
-    ///
-    /// **Both, because the two id spaces are not interchangeable and a caller rarely has only one.**
-    /// A credit row may carry no numeric [`Tag::id`], in which case whatever addressed the person is
-    /// their `tagKey` — so an id-only comparison silently never matches (a 24-char hex guid never
-    /// equals a decimal id string). `id == 0` means "the server sent none" and must never match a
-    /// caller's literal `"0"`; an empty `guid` must never match a tag whose `tagKey` is also empty.
-    pub fn is_person(&self, id: &str, guid: &str) -> bool {
-        (self.id != 0 && self.id.to_string() == id) || (!guid.is_empty() && self.tag_key == guid)
-    }
 }
 
 /// Plex `Chapter[]` on a leaf item (movies/episodes with chapter data). Sibling of `Media[]`,
@@ -796,311 +607,6 @@ mod tests {
         let json = br#"{"MediaContainer":{"Metadata":[{"ratingKey":"9","type":"show","title":"A Show"}]}}"#;
         let env: Envelope = serde_json::from_slice(json).expect("parse");
         assert!(env.media_container.metadata[0].primary_media().is_none());
-    }
-
-    // ---- /hubs/search ----
-    //
-    // A captured live response, trimmed to the fields under test and otherwise VERBATIM: field
-    // names, nesting, ordering and every value's JSON encoding are the server's, taken from
-    // `GET /hubs/search?query=wallace&limit=8` against this household's PMS 1.43.3 on 2026-08-14.
-    // The only edits are dropping unread fields and cutting the two longest hubs to two rows each
-    // (their `size` was corrected to match) — the whole 40 KB body is the same shape repeated.
-    //
-    // It is INLINE rather than an `include_str!`'d `.json` because there is no fixture-file
-    // precedent under `rust-modules/` (every DTO test in this module inlines its body), and
-    // because a whole capture would put one household's library — titles, people, section names —
-    // into a PUBLIC repo for no test value. Trimming is what makes it publishable, and once it is
-    // trimmed it is small enough to read in place, where the assertions can point at it.
-    const SEARCH_WALLACE: &[u8] = br#"{"MediaContainer":{"size":17,"Hub":[
-  {"type":"show","hubIdentifier":"show","title":"Shows","size":1,"more":false,"style":"shelf","Metadata":[
-    {"ratingKey":"1975","type":"show","title":"Wallace & Gromit's Cracking Contraptions","year":2002,"librarySectionID":2,"score":"0.73084","guid":"plex://show/5d9c08804eefaa001f5df5fc"}
-  ]},
-  {"type":"movie","hubIdentifier":"movie","title":"Movies","size":2,"more":false,"style":"shelf","Metadata":[
-    {"ratingKey":"1973","type":"movie","title":"Wallace & Gromit: The Wrong Trousers","year":1993,"librarySectionID":1,"score":"0.73092","guid":"plex://movie/5d7768264de0ee001fcc87e4"},
-    {"ratingKey":"1971","type":"movie","title":"Wallace & Gromit: A Close Shave","year":1995,"librarySectionID":1,"score":"0.73092","guid":"plex://movie/5d776827a091de001f2e62cb"}
-  ]},
-  {"type":"collection","hubIdentifier":"collection","title":"Collections","size":1,"more":false,"style":"shelf","Directory":[
-    {"key":"/library/sections/1/all?collection=6068","librarySectionID":1,"librarySectionTitle":"Movies","reason":"section","reasonTitle":"Movies","score":"0.52000","type":"tag","id":6068,"filter":"collection=6068","tag":"Wallace & Gromit Collection","tagType":2,"count":6,"guid":"collection://10c9bd0a-40ce-400c-bf57-dfd4009bb216"}
-  ]},
-  {"type":"actor","hubIdentifier":"actor","title":"Actors","size":3,"more":false,"style":"shelf","Directory":[
-    {"key":"/library/sections/1/all?actor=921","librarySectionID":1,"librarySectionTitle":"Movies","reason":"section","reasonTitle":"Movies","score":"0.52000","type":"tag","id":921,"filter":"actor=921","tag":"Wallace Shawn","tagType":6,"tagKey":"5d776827151a60001f24ab18","thumb":"https://metadata-static.plex.tv/a/people/a8285fd57cda1effc4119eb9d63aec8f.jpg","count":5},
-    {"key":"/library/sections/2/all?actor=921","librarySectionID":2,"librarySectionTitle":"TV Shows","reason":"section","reasonTitle":"TV Shows","score":"0.52000","type":"tag","id":921,"filter":"actor=921","tag":"Wallace Shawn","tagType":6,"tagKey":"5d776827151a60001f24ab18","thumb":"https://metadata-static.plex.tv/a/people/a8285fd57cda1effc4119eb9d63aec8f.jpg","count":3},
-    {"key":"/library/sections/2/all?actor=1378","librarySectionID":2,"librarySectionTitle":"TV Shows","reason":"section","reasonTitle":"TV Shows","score":"0.32000","type":"tag","id":1378,"filter":"actor=1378","tag":"Dee Wallace","tagType":6,"tagKey":"5d776827eb5d26001f1dd893","thumb":"https://metadata-static.plex.tv/f/people/fb7113ed77c8a6ed4a992547c9faf12b.jpg","count":1}
-  ]},
-  {"type":"artist","hubIdentifier":"artist","title":"Artists","size":0,"more":false,"style":"shelf"},
-  {"type":"album","hubIdentifier":"album","title":"Albums","size":0,"more":false,"style":"shelf"},
-  {"type":"photoalbum","hubIdentifier":"photoalbum","title":"Photo Albums","size":0,"more":false,"style":"shelf"},
-  {"type":"autotag","hubIdentifier":"autotag","title":"Automatic Tags","size":0,"more":false,"style":"shelf"},
-  {"type":"photo","hubIdentifier":"photo","title":"Photos","size":0,"more":false,"style":"shelf"},
-  {"type":"tag","hubIdentifier":"tag","title":"Tags","size":0,"more":false,"style":"shelf"},
-  {"type":"track","hubIdentifier":"track","title":"Tracks","size":0,"more":false,"style":"shelf"},
-  {"type":"director","hubIdentifier":"director","title":"Directors","size":0,"more":false,"style":"shelf"},
-  {"type":"genre","hubIdentifier":"genre","title":"Genres","size":0,"more":false,"style":"shelf"},
-  {"type":"episode","hubIdentifier":"episode","title":"Episodes","size":2,"more":false,"style":"shelf","Metadata":[
-    {"ratingKey":"1990","type":"episode","title":"Shopper 13","year":2002,"librarySectionID":2,"score":"0.31085","guid":"plex://episode/5fbd929d55d986002d63c021"},
-    {"ratingKey":"1988","type":"episode","title":"The Autochef","year":2002,"librarySectionID":2,"score":"0.31075","guid":"plex://episode/5fbd929a55d986002d63bffb"}
-  ]},
-  {"type":"playlist","hubIdentifier":"playlist","title":"Playlists","size":0,"more":false,"style":"shelf"},
-  {"type":"shared","hubIdentifier":"shared","title":"Shared","size":0,"more":false,"style":"shelf"},
-  {"type":"place","hubIdentifier":"place","title":"Places","size":0,"more":false,"style":"shelf"}
-]}}"#;
-
-    fn search_hub<'a>(mc: &'a super::MediaContainer, kind: &str) -> &'a super::Hub {
-        mc.hub
-            .iter()
-            .find(|h| h.kind == kind)
-            .unwrap_or_else(|| panic!("no {kind} hub"))
-    }
-
-    /// **The one fact the whole search screen rests on: a hub's items arrive in TWO different
-    /// containers, and which one depends on the hub's type.**
-    ///
-    /// `movie`/`show`/`episode` come as `Metadata[]`; `actor`/`director`/`collection` come as
-    /// `Directory[]`. `the upstream Plex API reference`'s own worked example for this endpoint disagrees —
-    /// it files shows under `Directory` — so the split was probed live rather than modelled from
-    /// the spec, and this is the test that keeps the live answer.
-    ///
-    /// The failure it guards is silent and total, not partial: nothing errors, no field is
-    /// missing, `Hub.size` still says 3 — the Cast & Crew and Collections shelves simply draw
-    /// zero cards, because the reader looked in `.metadata` and the rows were in `.directory`.
-    /// **Two** of the five design shelves, gone, with a green parse (three hub types, but
-    /// `search::Kind::hubs` folds `actor` + `director` into one Cast & Crew shelf).
-    #[test]
-    fn a_search_response_delivers_its_items_in_two_different_containers() {
-        let mc = serde_json::from_slice::<Envelope>(SEARCH_WALLACE)
-            .expect("lenient parse")
-            .media_container;
-        assert_eq!(
-            mc.hub.len(),
-            17,
-            "every hub type the server knows, populated or not"
-        );
-
-        for kind in ["movie", "show", "episode"] {
-            let h = search_hub(&mc, kind);
-            assert!(!h.metadata.is_empty(), "{kind} rows are Metadata[]");
-            assert!(h.directory.is_empty(), "{kind} sends no Directory[]");
-            // `size` round-trips the wire number. It is NOT evidence about what the server counts:
-            // two of these hubs were trimmed here and their `size` edited to match (see above), so
-            // the wire fact — `size` is the count RETURNED, capped by `limit` — is `docs/pms-api.md`
-            // §3b's, measured by varying `limit`, not something this body could show.
-            assert_eq!(h.size, h.metadata.len() as i64);
-        }
-        // `director` belongs in this list and cannot be tested from THIS capture: "wallace" matched
-        // no directors, so its hub is one of the twelve that came back `size: 0`. The hub type is
-        // in the split table on the strength of the `sta` query, which does populate it.
-        for kind in ["actor", "collection"] {
-            let h = search_hub(&mc, kind);
-            assert!(
-                !h.directory.is_empty(),
-                "{kind} rows are Directory[] — the whole point"
-            );
-            assert!(
-                h.metadata.is_empty(),
-                "…and a reader that only looks HERE draws nothing"
-            );
-            assert_eq!(h.size, h.directory.len() as i64);
-        }
-
-        // the payload is keyed off the hub, and `hubIdentifier` is the stable, locale-independent
-        // name to key off (`title` is "Actors" today and localised tomorrow) — search::Kind::hubs
-        assert_eq!(search_hub(&mc, "actor").hub_identifier, "actor");
-        assert_eq!(search_hub(&mc, "actor").title, "Actors");
-    }
-
-    /// The `Directory[]` row is a [`super::Tag`] — the SAME record the detail page's cast row is
-    /// built from — and every field the app reads off one must survive the round trip.
-    ///
-    /// A person carries `tagKey` (the portable guid that `discover.provider.plex.tv` answers to)
-    /// and an ABSOLUTE `metadata-static.plex.tv` `thumb`; a collection instead carries a
-    /// server-local tag `id`, but no `ratingKey` or artwork.
-    #[test]
-    fn person_and_collection_hits_keep_their_distinct_portable_identities() {
-        let mc = serde_json::from_slice::<Envelope>(SEARCH_WALLACE)
-            .expect("lenient parse")
-            .media_container;
-
-        let p = &search_hub(&mc, "actor").directory[0];
-        assert_eq!(p.tag, "Wallace Shawn");
-        assert_eq!(p.tag_key, "5d776827151a60001f24ab18");
-        assert_eq!(p.id, 921);
-        // …and it is the same record `is_person` matches, by either id space
-        assert!(p.is_person("921", ""));
-        assert!(p.is_person("", "5d776827151a60001f24ab18"));
-
-        let c = &search_hub(&mc, "collection").directory[0];
-        assert_eq!(c.tag, "Wallace & Gromit Collection");
-        assert_eq!(c.id, 6068);
-        assert_eq!(c.tag_key, "", "a collection guid is not a person tagKey");
-        // `is_person` consumes person identity only; collection resolution uses id and key.
-        assert!(c.is_person("6068", ""), "the server-local id still matches");
-        assert!(
-            !c.is_person("", "5d776827151a60001f24ab18"),
-            "a person's tagKey cannot match a collection guid"
-        );
-
-        // …and a row the server sent no id for must not match a caller's literal "0" — the guard
-        // in `is_person` that the collection above cannot exercise, because it HAS an id
-        assert!(
-            !super::Tag::default().is_person("0", ""),
-            "id 0 means absent, not id zero"
-        );
-        assert!(
-            !super::Tag::default().is_person("", ""),
-            "nor does an empty guid match an empty one"
-        );
-    }
-
-    /// **The same person arrives ONCE PER LIBRARY SECTION**, as separate rows with the same `id`
-    /// and the same `tagKey`. Wallace Shawn is here twice — section 1 with `count: 5`, section 2
-    /// with `count: 3` — because the hub is a union of per-section tag listings, which is also
-    /// what `reason: "section"` is saying.
-    ///
-    /// Left alone that draws him twice in Cast & Crew. Neither is visible from a single row,
-    /// which is why the shape is pinned here rather than left for the shelf to discover: the
-    /// rows are one person under the same identity, and the merge dedupes on `tagKey`/`id`.
-    #[test]
-    fn one_person_arrives_once_per_library_section_with_a_per_section_count() {
-        let mc = serde_json::from_slice::<Envelope>(SEARCH_WALLACE)
-            .expect("lenient parse")
-            .media_container;
-        let rows = &search_hub(&mc, "actor").directory;
-
-        let shawn: Vec<_> = rows.iter().filter(|t| t.tag == "Wallace Shawn").collect();
-        assert_eq!(
-            shawn.len(),
-            2,
-            "one row per section, not one row per person"
-        );
-        assert_eq!(
-            shawn[0].id, shawn[1].id,
-            "the same person: same server-local id"
-        );
-        assert_eq!(
-            shawn[0].tag_key, shawn[1].tag_key,
-            "…and the same portable guid"
-        );
-    }
-
-    /// Every number in a search hub, string-encoded — the encoding PMS is free to switch to per
-    /// endpoint and has already switched on `size`, `streamType` and the decision codes. A strict
-    /// field meeting one does not lose a count: it fails the WHOLE `MediaContainer`, so the search
-    /// screen goes blank and stays blank while the server keeps answering correctly.
-    ///
-    /// `score` is the live proof that this endpoint really does it — it arrives as `"0.52000"`,
-    /// a float in a string, on every row of every hub. It is deliberately not modelled (shelf
-    /// order is fixed, so nothing ranks on it), and the body below keeps it to pin the other half:
-    /// an unmodelled field must be IGNORED, never a parse failure.
-    #[test]
-    fn every_number_in_a_search_hub_survives_string_encoding() {
-        let json = br#"{"MediaContainer":{"size":"2","Hub":[
-          {"type":"actor","hubIdentifier":"actor","title":"Actors","size":"1","more":"1","Directory":[
-            {"tag":"Wallace Shawn","id":"921","count":"5","librarySectionID":"1","score":"0.52000",
-             "tagKey":"5d776827151a60001f24ab18","key":"/library/sections/1/all?actor=921"}]},
-          {"type":"movie","hubIdentifier":"movie","title":"Movies","size":"1","Metadata":[
-            {"ratingKey":"1973","type":"movie","title":"The Wrong Trousers","year":"1993",
-             "librarySectionID":"1","score":"0.73092"}]}
-        ]}}"#;
-        let mc = serde_json::from_slice::<Envelope>(json)
-            .expect("lenient parse")
-            .media_container;
-        let p = &search_hub(&mc, "actor").directory[0];
-        assert_eq!(p.id, 921);
-        assert_eq!(search_hub(&mc, "actor").size, 1);
-
-        let m = &search_hub(&mc, "movie").metadata[0];
-        assert_eq!((m.year, m.library_section_id), (1993, 1));
-        assert_eq!(m.rating_key, "1973");
-    }
-
-    /// **A JSON `null` in any string of a `Directory[]` row must cost that FIELD, never the
-    /// container.** `#[serde(default)]` fills an absent field and does nothing for one that is
-    /// present and null, so a strict `String` meeting one fails the whole `MediaContainer` — and
-    /// the search screen then draws the transport-failure read-out while the server is answering
-    /// correctly, over a hub it would have shown perfectly with the field empty.
-    ///
-    /// Reachable in exactly the place it is hardest to reproduce: a friend's server runs its own
-    /// PMS version, scanner and agents, so which of these it sends as `null` is not ours to
-    /// predict. Every string on the record is graded, one null per field in one body — the parse
-    /// has to survive all of them at once, since a container fails on the FIRST one it meets.
-    #[test]
-    fn a_null_string_anywhere_in_a_search_hub_costs_that_field_and_not_the_container() {
-        let json = br#"{"MediaContainer":{"size":1,"Hub":[
-          {"type":"actor","hubIdentifier":"actor","title":"Actors","size":2,"Directory":[
-            {"tag":null,"role":null,"thumb":null,"tagKey":null,"filter":null,"key":null,
-             "reason":null,"reasonTitle":null,"id":921,"count":5},
-            {"tag":"Wallace Shawn","tagKey":"5d776827151a60001f24ab18","id":921,"count":5,
-             "key":"/library/sections/1/all?actor=921","reason":"section","reasonTitle":"Movies"}
-          ]}]}}"#;
-        let mc = serde_json::from_slice::<Envelope>(json)
-            .expect("a null is a field, not a failure")
-            .media_container;
-        let rows = &search_hub(&mc, "actor").directory;
-        assert_eq!(
-            rows.len(),
-            2,
-            "the row with the nulls survives, and so does the one beside it"
-        );
-
-        let n = &rows[0];
-        for (name, got) in [
-            ("tag", &n.tag),
-            ("role", &n.role),
-            ("tagKey", &n.tag_key),
-        ] {
-            assert_eq!(
-                got, "",
-                "{name} came back as something other than the empty string"
-            );
-        }
-        // the numbers beside them are untouched — this is a per-field leniency, not a dropped row
-        assert_eq!(n.id, 921);
-        // …and the intact row is exactly what it would have been on its own
-        assert_eq!(rows[1].tag, "Wallace Shawn");
-
-        // The same leniency the other way: a stringly-typed number is a string, not a failure.
-        let json = br#"{"MediaContainer":{"Hub":[
-          {"type":"collection","hubIdentifier":"collection","title":"Collections","size":1,"Directory":[
-            {"tag":1998,"key":"/library/sections/3/all?collection=7","reasonTitle":2024,"id":7}]}]}}"#;
-        let mc = serde_json::from_slice::<Envelope>(json)
-            .expect("lenient parse")
-            .media_container;
-        let c = &search_hub(&mc, "collection").directory[0];
-        assert_eq!(c.tag, "1998");
-    }
-
-    /// A one-character query is a **200 with every hub empty** — not an error, and not an absent
-    /// `Hub[]`: all seventeen hubs arrive carrying `size: 0` and no items array at all. (Measured:
-    /// `a` returns this; `to` returns seven populated hubs. It is why `search::MIN_QUERY` is 2.)
-    /// Three hubs stand in for the seventeen below; the shape is per-hub, so the count adds nothing.
-    ///
-    /// So "the server answered with nothing" and "the request failed" are different states that
-    /// the store must not conflate, and the DTO's job is to make the first one arrive intact:
-    /// both item vectors empty, no panic, and the hubs still countable.
-    #[test]
-    fn a_query_the_server_matched_nothing_for_is_an_answer_not_a_failure() {
-        let json = br#"{"MediaContainer":{"size":3,"Hub":[
-          {"type":"movie","hubIdentifier":"movie","title":"Movies","size":0,"more":false,"style":"shelf"},
-          {"type":"actor","hubIdentifier":"actor","title":"Actors","size":0,"more":false,"style":"shelf"},
-          {"type":"collection","hubIdentifier":"collection","title":"Collections","size":0,"more":false,"style":"shelf"}
-        ]}}"#;
-        let mc = serde_json::from_slice::<Envelope>(json).expect("parse");
-        let mc = mc.media_container;
-        assert_eq!(
-            mc.hub.len(),
-            3,
-            "the hubs are there — it is the ITEMS that are absent"
-        );
-        for h in &mc.hub {
-            assert_eq!(h.size, 0);
-            assert!(h.metadata.is_empty() && h.directory.is_empty());
-        }
-
-        // and a container with no `Hub` key at all is still a container, not a parse failure
-        let mc = serde_json::from_slice::<Envelope>(br#"{"MediaContainer":{"size":0}}"#)
-            .expect("parse")
-            .media_container;
-        assert!(mc.hub.is_empty());
     }
 
     /// `canNormalizeLoudness` (issue #266) arrives as a real bool, as the string PMS also uses for

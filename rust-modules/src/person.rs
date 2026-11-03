@@ -6,43 +6,31 @@
 //! `PersonState` and rotated `Arc<PersonAdapter>` belong to each production Bridge; screens borrow
 //! a `PersonView` through their frame `Cx`, so neither reads nor workers select process state.
 //!
-//! ## A filmography is a fact about a PERSON, not about a server
+//! ## One backend answers; the other slots contribute nothing
 //!
-//! **Every registered server is asked, and the shelves are the merge.** This page used to fetch
-//! from exactly one — the machine whose credit row opened it — and present the result as the
-//! person's filmography. With a share registered that is a lie in both directions: a person opened
-//! from your own library hid everything of theirs on a friend's server, and (once a search screen
-//! can surface the same actor from a borrowed source) *which server you happened to arrive
-//! through* decided what their page showed. It is the same page either way now.
-//!
-//! **The join key is the `tagKey`, and only the `tagKey`** ([`resolve_local`]). [`Person::guid`] is
-//! plex.tv's global person id; the numeric `personId` in [`Person::key`] is server-local exactly
-//! like a `ratingKey` (docs/shared-servers.md §1) and addresses a *different person* on the next
-//! machine. So every server but the origin costs one extra round trip — a `/hubs/search` for the
-//! name, whose `actor` hub is joined back on the guid — before its filmography can be asked for at
-//! all.
+//! This page used to ask every registered server — the machine whose credit row opened it first,
+//! then a `/hubs/search` resolve plus a `/library/people/{id}/media` sweep on each Plex share,
+//! merged into one filmography. The Plex read layer is gone (issue #166): the ONLY fetch that
+//! remains is the origin's, on the Jellyfin backend. Every other registry slot is born settled
+//! ([`sources`]) and contributes nothing — an empty shelf from a slot this build cannot ask is an
+//! answer, not a fetch to retry forever.
 //!
 //! ## The fetches, and their index space
 //!
-//! Three requests **per source**, plus TWO that are not per-source at all:
+//! Three requests **per source**, plus TWO that are not per-source at all — in practice only the
+//! origin's three ever fire:
 //!
-//! * **[`K_RESOLVE`]** — `GET /hubs/search?query=<name>` on that server, joined on the `tagKey` to
-//!   its own local `personId`. Skipped entirely for the ORIGIN server, which handed us that id in
-//!   the credit row. A server that has never heard of them answers here, and that is an ANSWER: it
-//!   contributes nothing, fails nobody, and shows no error.
-//! * **[`K_MEDIA`]** — the shelves: `GET /library/people/{personId}/media` returns everything the
-//!   person appears in across EVERY library section at once, no per-section `?actor=<id>` sweep.
-//!   The rows are split into the Movies / Shows shelves by **each row's own `type`**; the
-//!   container's `viewGroup` is a trap (it read `"movie"` on a response whose only row was a
-//!   `show`). Each row is stamped with the source's `ServerId`, which is what makes a card open on
-//!   the machine it came from.
-//! * **[`K_ROLES`]** — the character names, one batched `GET /library/metadata/{that source's shelf
-//!   keys}` ([`crate::plex::Client::metadata_many`]). It exists because the shelf listing does NOT
-//!   carry them: its rows have a `Role[]` whose entries hold only `tag`. It is the ONE fetch here
-//!   that DEPENDS on another — it can only be addressed once that source's shelves have landed, and
-//!   [`address`] expresses that by keying it on that source's shelf keys, which are empty until
-//!   then. Per source, because a `ratingKey` csv means nothing on another machine, and filtered on
-//!   the SOURCE's own local id, not the origin's.
+//! * **[`K_MEDIA`]** — the shelves: the backend's person-items read returns everything the person
+//!   appears in as movies and series. Each row is stamped with the source's `ServerId`, which is
+//!   what makes a card open on the machine it came from. A source that cannot be asked (`local`
+//!   empty) never spawns this.
+//! * **[`K_ROLES`]** — the character names, off the credit rows the shelf listing already carries.
+//!   It is the ONE fetch here that DEPENDS on another — it can only be addressed once that
+//!   source's shelves have landed, and [`address`] expresses that by keying it on that source's
+//!   shelf keys, which are empty until then.
+//! * **[`K_RESOLVE`]** — RETIRED with the Plex read layer. The slot kind survives in the index
+//!   space ([`fx`]/[`un_fx`]) but no worker is ever spawned for it: the origin's `personId` rides
+//!   in on the credit row, and no other source is ever asked.
 //! * **[`F_PROFILE`]** — the biography, from plex.tv: `GET
 //!   discover.provider.plex.tv/library/people/{tagKey}` over the TLS+DNS `net.rs` path (the
 //!   wire facts are the field docs on the DTO vocabulary (`person::types`) below). **Deliberately still
@@ -69,15 +57,13 @@
 //! *finished* at portrait + name — never as a row of fields that failed to load. Nothing in the
 //! header is a placeholder; each line is drawn only when it has content.
 //!
-//! **The three id spaces are not interchangeable.** [`Person::key`] is the ORIGIN server's local
+//! **The id spaces are not interchangeable.** [`Person::key`] is the ORIGIN server's local
 //! `personId` (the numeric `Tag::id`, or its `tagKey` when that server omitted the number) and
-//! addresses `/media` **on `Person::sid` only**; [`Src::local`] is the same thing for every other
-//! source, resolved rather than given; [`Person::guid`] is the `tagKey` and is the ONLY thing
-//! plex.tv answers to — the numeric id 404s there (`"Invalid value provided for metadataId!"`).
-//! Keep all three; do not collapse them.
+//! addresses `/media` **on `Person::sid` only**; every other source carries NO id at all —
+//! there is no resolve left to obtain one ([`sources`]); [`Person::guid`] is the portable guid.
+//! Keep them apart; do not collapse them.
 use crate::registry::ServerId;
-use crate::media::Tag;
-use crate::pms::{parse_item, PmsMovie};
+use crate::pms::PmsMovie;
 use std::panic::catch_unwind;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -98,12 +84,6 @@ const SHELF_MAX: usize = crate::ui::card_row::MAX_ROW_ITEMS;
 /// jobbing actor (Peter Sallis has five). The wire order is most-credits-first, so the first three
 /// ARE the ones worth naming.
 const MAX_ROLES: usize = 3;
-
-/// Items asked of each hub in the cross-server resolve. `/hubs/search`'s `limit` is per-hub and
-/// defaults to **3** (`the upstream Plex API reference`), which is too few to rely on: a search for a
-/// surname returns every actor who shares it, and the one we are joining on has to be among them.
-/// It is not a display list — nothing is drawn from this response but one id.
-const RESOLVE_LIMIT: i64 = 12;
 
 /// One shelf of a person's page. The three fields move together and must never be updated apart:
 /// the captions describe THESE items by index, and the total is the number to print rather than
@@ -143,8 +123,10 @@ struct Src {
     /// has no record of them, which is why the media fetch is gated on `resolved` as well: `None`
     /// before the resolve answers means "not known yet", and the two must not be confused.
     local: Option<String>,
-    /// the resolve has ANSWERED — found or not. The ORIGIN starts `true` (the credit row handed us
-    /// its id) and so does a source that cannot be asked at all (see [`sources`]).
+    /// the resolve has ANSWERED — found or not. Every source now starts `true`: the resolve was
+    /// the Plex read layer's `/hubs/search` round trip, and with that layer gone there is nothing
+    /// left to ask. The origin carries its `personId` from the credit row; every other slot
+    /// contributes nothing and is settled at birth (see [`sources`]).
     resolved: bool,
     /// this source's own contribution, before the merge
     shelves: [Shelf; NSHELF],
@@ -183,11 +165,11 @@ impl Src {
 
     /// Did this source actually put a tile on the page?
     ///
-    /// **Not the same question as `landed`,** and the difference is a visible flash. A `/media`
-    /// response can succeed and still yield nothing: [`split_by_type`] keeps only `movie` and `show`
-    /// rows, so a person credited on this server in episodes alone lands *successfully* with two
-    /// empty shelves. Reading that as "the page has something to show" draws the empty read-out over
-    /// a share that is still resolving, and its films then pop in on top of the words.
+    /// **Not the same question as `landed`,** and the difference is a visible flash. A media
+    /// response can succeed and still yield nothing: the shelf split keeps only the rows the page
+    /// has shelves for, so a person credited on this server in episodes alone lands *successfully*
+    /// with two empty shelves. Reading that as "the page has something to show" draws the empty
+    /// read-out over a share that is still resolving, and its films then pop in on top of the words.
     fn has_content(&self) -> bool {
         self.shelves.iter().any(|sh| !sh.items.is_empty())
     }
@@ -210,9 +192,8 @@ pub(crate) struct Person {
     /// number) — addresses `/library/people/{key}/media` on [`Person::sid`] and nowhere else
     pub(crate) key: String,
     /// the `tagKey` guid — plex.tv's global person id. The ONLY thing
-    /// `discover.provider.plex.tv` answers to (module docs), and the ONLY key two SERVERS can
-    /// agree on, which is what makes [`resolve_local`] possible. Empty when the credit row carried
-    /// none, which costs both the biography and every cross-server join.
+    /// `discover.provider.plex.tv` answers to (module docs). Empty when the credit row carried
+    /// none, which costs the biography.
     pub(crate) guid: String,
     pub(crate) name: String,
     pub(crate) thumb: String,
@@ -448,13 +429,10 @@ const RETRY_FRAMES: u32 = 120;
 /// retried. It has to stay distinguishable from a successful answer that happens to be empty —
 /// installing empty shelves on a failure is the "one wifi hiccup blanked a populated grid" bug
 /// `browse.rs` carries its `total < 0` sentinel for; the profile has the same trap in a subtler
-/// form (plex.tv answers 200 with an empty container for a person it has never heard of, which is
-/// an ANSWER); and the resolve has it in the sharpest form of all, since "this server has no record
-/// of them" is the NORMAL answer from a share and must never read as a fault.
+/// form (a backend answering 200 with an empty record for a person it has never heard of is an
+/// ANSWER).
 #[derive(serde::Serialize, serde::Deserialize)]
 enum Landing {
-    /// One source's own `personId`. `Some("")` = answered, and this server has never heard of them.
-    Resolve(Option<String>),
     Media(Option<MediaLanding>),
     Profile(Option<types::PersonProfile>),
     /// The whole filmography, ungrouped and unsorted — the display model is derived on the main
@@ -506,7 +484,6 @@ pub(crate) fn validate_record(slot: u32, value: &serde_json::Value) -> Result<()
         F_PROFILE => matches!(mail.what, Landing::Profile(_)),
         F_CREDITS => matches!(mail.what, Landing::Credits(_)),
         i => match un_fx(i).map(|(_, kind)| kind) {
-            Some(K_RESOLVE) => matches!(mail.what, Landing::Resolve(_)),
             Some(K_MEDIA) => matches!(mail.what, Landing::Media(_)),
             Some(K_ROLES) => matches!(mail.what, Landing::Roles(_)),
             _ => false,
@@ -645,7 +622,7 @@ impl PersonState {
 ///
 /// Read on open and whenever the registry generation moves. The roster is tiny; rebuilding only at
 /// that explicit boundary prevents an open page retaining a revoked share or missing a new one.
-fn sources(origin: ServerId, key: &str, name: &str) -> Vec<Src> {
+fn sources(origin: ServerId, key: &str) -> Vec<Src> {
     let mut out: Vec<Src> = Vec::new();
     for sid in crate::registry::ids().chain(std::iter::once(origin)) {
         if fx(sid, K_RESOLVE).is_none() || out.iter().any(|s| s.sid == sid) {
@@ -657,10 +634,11 @@ fn sources(origin: ServerId, key: &str, name: &str) -> Vec<Src> {
             // The origin needs no resolve: the credit row handed us its own `personId`, which is
             // both the round trip saved and the only id we could ever be sure of.
             local: is_origin.then(|| key.to_string()).filter(|k| !k.is_empty()),
-            // …and a source we cannot even ASK is settled at birth. The cross-server resolve is a
-            // NAME query, so a credit row that carried no name can never be joined on another
-            // machine; contributing nothing is an answer, not a fetch to retry forever.
-            resolved: is_origin || name.is_empty(),
+            // Every source starts RESOLVED: the cross-server resolve was a `/hubs/search` query
+            // through the Plex read layer, which no longer exists. A slot other than the origin
+            // cannot be asked for anything, so contributing nothing is its answer, not a fetch to
+            // retry forever (`settled` reads `resolved && local.is_none()`).
+            resolved: true,
             shelves: Default::default(),
             matches: Vec::new(),
             landed: false,
@@ -670,78 +648,12 @@ fn sources(origin: ServerId, key: &str, name: &str) -> Vec<Src> {
     out
 }
 
-/// This server's OWN `personId` for the person `(name, guid)`, read out of its `/hubs/search`
-/// answer. `None` means it has never heard of them — an ANSWER, not a failure.
-///
-/// **The guid is the join, and [`Tag::is_person`] is the comparison** — the same one the credit
-/// rows already use, not a second one written here. A `tagKey` is plex.tv's global person id and
-/// therefore the one key two machines can agree on; the numeric `personId` beside it is dense from
-/// 1 on every server and names a different person on each.
-///
-/// The name is a FALLBACK, and only where there is no guid to join on: either the entry carries no
-/// `tagKey`, or we were opened without one. **Nothing looser, and never against a guid we can see
-/// and disagree with** — a search for "John Williams" returns both of them, and a name match there
-/// would put the other man's films on this page. Showing fewer films is the lesser failure and it
-/// is the one this rule picks.
-///
-/// Both of `search::Kind::Person`'s hubs are scanned, so a page opened from a DIRECTOR credit
-/// resolves too — **and they are scanned in ITS order, `actor` before `director`, not in the order
-/// the server sent them.** On PMS an actor tag and a director tag for one person are different rows
-/// with different `id`s and the SAME `tagKey` (see [`Tag::filter`], which carries the role `id`
-/// alone does not), and `search.rs` records that `/hubs/search` reorders its hubs per query. Filter
-/// `mc.hub` and an actor-director whose `director` hub happened to come back first resolves to the
-/// directing tag — after which `/library/people/{id}/media` returns only what they directed, and
-/// every acting credit that server holds is silently gone. So the candidate list is built by walking
-/// `want`, and the server's order decides nothing.
-///
-/// Hubs are matched on either `hubIdentifier` or `type` because `/hubs/search` sends the same token
-/// in both (`the upstream Plex API reference`'s own example), and `Hub::directory` is keyed by that word.
-pub(crate) fn resolve_local(
-    mc: &crate::media::MediaContainer,
-    name: &str,
-    guid: &str,
-) -> Option<String> {
-    let mut people: Vec<&Tag> = Vec::new();
-    for h in crate::search::Kind::Person.hubs() {
-        for hub in mc
-            .hub
-            .iter()
-            .filter(|x| x.hub_identifier == *h || x.kind == *h)
-        {
-            people.extend(hub.directory.iter());
-        }
-    }
-    // the guid join first, across EVERY person hub — a `director`-hub guid match still beats a
-    // name match in `actor`, because a guid is proof and a name is a guess
-    people
-        .iter()
-        .copied()
-        .find(|t| t.is_person("", guid))
-        .or_else(|| {
-            people.iter().copied().find(|t| {
-                !name.is_empty() && t.tag == name && (t.tag_key.is_empty() || guid.is_empty())
-            })
-        })
-        .map(local_id)
-        .filter(|id| !id.is_empty())
-}
-
-/// The `personId` a tag row addresses on ITS OWN server: the numeric id, or the `tagKey` when the
-/// server sent no number — the same rule [`Person::key`] documents for the origin.
-fn local_id(t: &Tag) -> String {
-    if t.id != 0 {
-        t.id.to_string()
-    } else {
-        t.tag_key.clone()
-    }
-}
-
 /// Merge every source's shelves into the pair the screen draws. PURE — no statics, no I/O — which
 /// is what makes the order, the budget and the parallel captions gradeable on the host.
 ///
-/// Sources are taken in [`sources`] order and each keeps its own rows: [`split_by_type`] stamped
-/// every `PmsMovie` with the `ServerId` it came from, so a card opens on the right machine however
-/// far down the merged shelf it lands (`ui::person`'s activation reads `mm.sid`, and `Art::Poster`
+/// Sources are taken in [`sources`] order and each keeps its own rows: every row a source landed
+/// was stamped with that source's `ServerId`, so a card opens on the right machine however far
+/// down the merged shelf it lands (`ui::person`'s activation reads `mm.sid`, and `Art::Poster`
 /// resolves the artwork on that server too).
 ///
 /// The per-shelf budget is divided by [`crate::pms::allot`] rather than spent first-come, for the
@@ -754,6 +666,8 @@ fn local_id(t: &Tag) -> String {
 /// `PmsMovie` does not carry — and a title+year join would merge two different films *and* miss the
 /// case docs/shared-servers.md measured on this very pair of servers, where the share's copy is
 /// titled in another language. A visible duplicate is honest; a wrong merge hides a film.
+/// (With the Plex read layer gone only the origin lands rows today, but the merge stays the one
+/// place that shapes what the screen draws.)
 fn merge_shelves(srcs: &[Src]) -> [Shelf; NSHELF] {
     let mut out: [Shelf; NSHELF] = Default::default();
     for (kind, sh_out) in out.iter_mut().enumerate() {
@@ -860,7 +774,7 @@ fn open(
         }
     }
     state.supersede(adapter);
-    let srcs = sources(sid, key, name);
+    let srcs = sources(sid, key);
     state.current = Some(Person {
         sid,
         key: key.to_string(),
@@ -1232,8 +1146,8 @@ fn seed_dev_credits(state: &mut PersonState) -> bool {
 /// profile facts survive; server-derived shelves and every old worker/mailbox do not.
 fn sync_roster(state: &mut PersonState, adapter: &PersonAdapter) -> bool {
     let gen = crate::registry::roster_gen();
-    let Some((old, sid, key, name)) =
-        state.current().map(|p| (p.roster_gen, p.sid, p.key.clone(), p.name.clone()))
+    let Some((old, sid, key)) =
+        state.current().map(|p| (p.roster_gen, p.sid, p.key.clone()))
     else {
         return false;
     };
@@ -1241,7 +1155,7 @@ fn sync_roster(state: &mut PersonState, adapter: &PersonAdapter) -> bool {
         return false;
     }
     state.supersede(adapter);
-    let srcs = sources(sid, &key, &name);
+    let srcs = sources(sid, &key);
     let Some(p) = state.current.as_mut() else {
         return false;
     };
@@ -1269,10 +1183,9 @@ fn apply_landing(state: &mut PersonState, i: usize, what: Landing) -> bool {
     };
     match what {
         // FAILED: leave the store exactly as it was and back off before retrying. One arm for all
-        // four fetch kinds, because the countdown is per MAILBOX — a dead share backs off its own
-        // three and nothing else's.
-        Landing::Resolve(None)
-        | Landing::Media(None)
+        // the fetch kinds, because the countdown is per MAILBOX — a dead source backs off its own
+        // two and nothing else's.
+        Landing::Media(None)
         | Landing::Profile(None)
         | Landing::Credits(None)
         | Landing::Roles(None) => {
@@ -1303,32 +1216,6 @@ fn apply_landing(state: &mut PersonState, i: usize, what: Landing) -> bool {
                 !p.died.is_empty(),
                 p.bio.len()
             ));
-            true
-        }
-        Landing::Resolve(Some(id)) => {
-            let Some((sid, si)) = src_of(p, i) else {
-                return false;
-            };
-            {
-                let s = &mut p.srcs[si];
-                s.local = (!id.is_empty()).then(|| id.clone());
-                s.resolved = true;
-            }
-            // The SLOT, never the handle or the address: a plex.tv username is the friend's, and
-            // the event log is what users send us.
-            crate::log(&format!(
-                "person: source {} resolve '{}' -> {}",
-                sid.raw(),
-                p.name,
-                if id.is_empty() {
-                    "no record here".to_string()
-                } else {
-                    format!("id={id}")
-                }
-            ));
-            // …and "no record here" can be the last answer the page was waiting on, so the fold
-            // has to run even though no shelf moved.
-            resettle(p);
             true
         }
         Landing::Media(Some(MediaLanding { shelves, matches })) => {
@@ -1477,8 +1364,9 @@ fn address(i: usize, p: &Person) -> Option<Vec<String>> {
     let (sid, kind) = un_fx(i)?;
     let s = p.srcs.iter().find(|s| s.sid == sid)?;
     match kind {
-        // the cross-server join: a NAME query, whose answer `resolve_local` joins back on the guid
-        K_RESOLVE if !s.resolved => Some(vec![p.name.clone()]),
+        // K_RESOLVE never asks: its worker went with the Plex read layer. The origin's `personId`
+        // rode in on the credit row and every other source is born settled (`sources`).
+        K_RESOLVE => None,
         K_MEDIA if s.resolved && !s.landed => s.local.clone().map(|id| vec![id]),
         K_ROLES if s.landed && !s.roled => {
             let keys = s.shelf_keys();
@@ -1559,7 +1447,7 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
             "local":local,"client":0,"sid":sid.raw()}), move || {
             let worker_adapter = Arc::clone(adapter);
             crate::task::spawn_small("person", move || {
-                // same contract as the Plex arms: a panicking worker lands as a FAILURE, never as an
+                // same contract as every worker here: a panicking fetch lands as a FAILURE, never as an
                 // empty filmography or silently-missing credit names
                 let what = match kind {
                     K_MEDIA => Landing::Media(
@@ -1577,85 +1465,17 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
         }
         return;
     }
-    // CAPTURE AT THE SPAWN SITE — `pms::kick` states the rule and this store now needs it for the
-    // same reason. The worker is handed THIS server's own `&'static Client`, never `client()`: a
-    // slot re-pointed mid-request cannot redirect a fetch already out (`plex::servers` leaks each
-    // client precisely so the reference stays live), and a worker that asked which server is
-    // current would answer for whichever machine the user has since walked onto.
-    let Some(c) = crate::registry::client_for(sid) else {
-        // a source whose slot holds no client has nothing to contribute right now — back off rather
-        // than re-asking every frame; `pump` retries by itself
-        state.retry_cd[i] = RETRY_FRAMES;
-        return;
-    };
-    // …and the SOURCE's own local id, for the roles worker's credit filter. The origin's `key` is
-    // meaningless on any other machine, so filtering with it blanked every borrowed caption while
-    // still paying for the batch.
-    let local = p
-        .srcs
-        .iter()
-        .find(|s| s.sid == sid)
-        .and_then(|s| s.local.clone())
-        .unwrap_or_default();
-    adapter.fetch[i].claim();
-    let worker_adapter = Arc::clone(adapter);
-    let spawned = crate::app::bootstrap::stores::admit(serde_json::json!({
-        "store":"person","slot":i,"gen":generation,"arg":arg,"guid":guid,
-        "local":local,"client":c.instance_gen(),"sid":sid.raw()}), || crate::task::spawn_small("person", move || {
-        // the mailbox is filled OUTSIDE the guard so a panicking fetch still lands — as a FAILURE
-        // (None), not as an empty filmography / a source silently written off / no captions
-        let what = match kind {
-            K_RESOLVE => Landing::Resolve(
-                catch_unwind(|| {
-                    // sectionId 0 = every section. `opt_int` omits a zero, and scoping would be
-                    // wrong anyway: this asks a server we have never addressed before whether it
-                    // knows this person AT ALL, so it must see the whole library.
-                    let mc = c.search(&arg[0], RESOLVE_LIMIT, 0)?;
-                    // `""` is the ANSWER "no record of them here" — see `Landing::Resolve`
-                    Some(resolve_local(&mc, &arg[0], &guid).unwrap_or_default())
-                })
-                .unwrap_or(None),
-            ),
-            K_MEDIA => Landing::Media(
-                catch_unwind(|| {
-                    let mc = c.person_media(&arg[0])?;
-                    Some(MediaLanding {
-                        shelves: split_by_type(&mc, sid),
-                        matches: guid_index(&mc),
-                    })
-                })
-                .unwrap_or(None),
-            ),
-            K_ROLES => Landing::Roles(
-                catch_unwind(|| {
-                    let keys: Vec<&str> = arg.iter().map(String::as_str).collect();
-                    let mc = c.metadata_many(&keys)?;
-                    let pairs = roles_from(&mc, &local, &guid);
-                    Some(RolesLanding {
-                        keys: arg.clone(),
-                        pairs,
-                    })
-                })
-                .unwrap_or(None),
-            ),
-            _ => return, // `un_fx` only ever yields 0..NKIND
-        };
-        worker_adapter.land(i, generation, what);
-    }));
-    if !spawned {
-        // nothing will ever fill the mailbox, and the claim is cleared only by a take — release it
-        // here or this source never fetches again. `maybe_spawn` runs every frame, so this retries
-        // by itself.
-        adapter.fetch[i].release();
+    // A non-Jellyfin slot has no fetch left: the Plex read layer (`/hubs/search` resolve,
+    // `/library/people/{id}/media`, the batched metadata read) is gone with issue #166. Such a
+    // source was born settled (`sources`) and its mailbox simply never fires.
     }
-}
 
 // ---- the Jellyfin backend's answers -----------------------------------------------------------
 //
-// There is no plex.tv on that side and no per-server join either: the person IS an item id the
-// credit row already carried, so the whole arm is three direct reads (profile item, filmography
-// page per shelf kind, credit rows inline on the filmography) mapped into the same landings the
-// Plex workers post. The pure halves are split out (`jf_profile_from`, `jf_shelf`, `jf_roles`)
+// There is no per-server join on this backend: the person IS an item id the credit row already
+// carried, so the whole arm is three direct reads (profile item, filmography page per shelf kind,
+// credit rows inline on the filmography) mapped into the same landings the store applies. The
+// pure halves are split out (`jf_profile_from`, `jf_shelf`, `jf_roles`)
 // because they are the parts worth grading: the date trim, the cap-vs-total split and the
 // credit-row match are each exactly the kind of off-by-one a worker test would never catch once
 // the real server answers.
@@ -1784,68 +1604,6 @@ fn person_roles_jf(person_id: &str, keys: &[String]) -> Option<RolesLanding> {
 /// appears in `Director[]`, not `Role[]`) are simply absent from the result rather than carried as
 /// empty pairs, and `apply` reads a missing key as `""`. Naming their department instead would need
 /// the crew arrays this batch excludes, for a line the mockup does not ask for.
-pub(crate) fn roles_from(
-    mc: &crate::media::MediaContainer,
-    id: &str,
-    guid: &str,
-) -> Vec<(String, String)> {
-    mc.metadata
-        .iter()
-        .filter_map(|it| {
-            let r = it.role.iter().find(|r| r.is_person(id, guid))?;
-            (!r.role.is_empty()).then(|| (it.rating_key.clone(), r.role.clone()))
-        })
-        .collect()
-}
-
-/// Split a `/library/people/{id}/media` container into the Movies and Shows shelves **by each
-/// row's own `type`**, counting the REAL totals past the [`SHELF_MAX`] tile cap.
-///
-/// The container's `viewGroup` cannot be used for this and is the whole reason this function is
-/// named and tested: verified live 2026-07-29, person 6059's response carries `viewGroup:"movie"`
-/// over five movies AND one show. Anything that is neither a `movie` nor a `show` is dropped —
-/// the page has exactly two shelves and they are labelled, so silently filing an episode under
-/// "Shows" would put a landscape still in a portrait poster slot.
-///
-/// `sid` is the server the response came from, stamped onto every row — the fact that survives
-/// [`merge_shelves`] and lets a card three sources deep open on the right machine.
-pub(crate) fn split_by_type(mc: &crate::media::MediaContainer, sid: ServerId) -> [Shelf; NSHELF] {
-    let mut out: [Shelf; NSHELF] = Default::default();
-    for it in &mc.metadata {
-        let sh = match it.kind.as_str() {
-            "movie" => &mut out[0],
-            "show" => &mut out[1],
-            _ => continue,
-        };
-        sh.total += 1;
-        if sh.items.len() < SHELF_MAX {
-            sh.items.push(parse_item(it, sid));
-        }
-    }
-    out
-}
-
-/// **The availability index of one `/media` response** — `(guid, ratingKey)` for every `movie` /
-/// `show` row it carried, UNCAPPED.
-///
-/// Separate from [`split_by_type`] and not derived from its output, which is the whole point: that
-/// function caps at [`SHELF_MAX`] because a `CardRow` owns a fixed number of springs, and the
-/// Filmography route's question — "does anybody hold this credit" — has nothing to do with how many
-/// posters fit on a strip. Rows the shelves dropped are exactly the ones a prolific actor's list is
-/// made of.
-///
-/// A row with no `guid` contributes nothing: the join key is the metadata provider's global id, and
-/// a server old enough to send none simply cannot be joined. That is an ABSENCE of evidence — the
-/// route draws such a credit at full strength with no annotation — never a claim that nobody has it.
-pub(crate) fn guid_index(mc: &crate::media::MediaContainer) -> Vec<(String, String)> {
-    mc.metadata
-        .iter()
-        .filter(|it| matches!(it.kind.as_str(), "movie" | "show"))
-        .filter(|it| !it.guid.is_empty() && !it.rating_key.is_empty())
-        .map(|it| (it.guid.clone(), it.rating_key.clone()))
-        .collect()
-}
-
 // ---- the filmography, as the route draws it ----------------------------------------------------
 
 /// **A department with fewer credits than this does not earn a tab.** `other` is already one of the
@@ -1987,7 +1745,7 @@ pub(crate) fn filmography_total(p: &Person) -> usize {
 ///
 /// The FIRST match wins, and registry order is what makes that deterministic: with a film on two
 /// servers the route names the one nearer the front of the roster, which is the same machine every
-/// other surface in the app would open it on. An empty guid never matches (see [`guid_index`]).
+/// other surface in the app would open it on. An empty guid never matches.
 /// **The last path segment of a Plex guid — the catalog ID, which is the ONLY form both sides of
 /// the join agree on.** PMS states an item's identity as `plex://movie/5d7768295af944001f1f7477`;
 /// the Discover credits endpoint states the SAME identity as a bare `ratingKey` of
@@ -2167,7 +1925,6 @@ pub(crate) struct OwnershipFixture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::media::{Hub, MediaContainer, Metadata};
 
     /// Slot 0 — the server every single-source test opens on. A real slot, so its mailboxes exist,
     /// but nothing is registered at it: `maybe_spawn` therefore refuses to dial (`client_for` is
@@ -2205,7 +1962,6 @@ mod tests {
         }
         fn pump(&mut self) -> bool { self.state.pump(&self.adapter) }
         fn sync_roster(&mut self) -> bool { sync_roster(&mut self.state, &self.adapter) }
-        fn loading(&self) -> bool { self.state.view().loading() }
         fn hold_off(&mut self) { self.state.retry_cd = [RETRY_FRAMES; NFETCH]; }
         fn supersede(&mut self) { self.state.supersede(&self.adapter); }
     }
@@ -2338,15 +2094,6 @@ mod tests {
         }))
     }
 
-    fn row(kind: &str, rk: &str, title: &str) -> Metadata {
-        Metadata {
-            kind: kind.to_string(),
-            rating_key: rk.to_string(),
-            title: title.to_string(),
-            ..Default::default()
-        }
-    }
-
     /// A movie row on a named server — the pair that has to survive the merge.
     fn movie_on(sid: ServerId, rk: &str) -> PmsMovie {
         PmsMovie {
@@ -2373,27 +2120,6 @@ mod tests {
             roles,
         };
         s
-    }
-
-    /// A `/hubs/search` answer carrying one `actor` hub of `Directory[]` rows.
-    fn search_answer(hub_kind: &str, tags: Vec<Tag>) -> MediaContainer {
-        let mut mc = MediaContainer::default();
-        mc.hub = vec![Hub {
-            kind: hub_kind.to_string(),
-            hub_identifier: hub_kind.to_string(),
-            directory: tags,
-            ..Default::default()
-        }];
-        mc
-    }
-
-    fn person_tag(name: &str, id: i64, guid: &str) -> Tag {
-        Tag {
-            tag: name.into(),
-            id,
-            tag_key: guid.into(),
-            ..Default::default()
-        }
     }
 
     #[test]
@@ -2423,187 +2149,6 @@ mod tests {
             "a source absent from the current roster cannot restore a card"
         );
         owner.reset();
-    }
-
-    /// The shelves are filled from each ROW's `type`, never from the container's `viewGroup` —
-    /// verified live against person 6059, whose response is `viewGroup:"movie"` over five movies
-    /// and one show. Reading the container would have filed that show under Movies.
-    #[test]
-    fn media_rows_are_shelved_by_their_own_type_not_the_containers_view_group() {
-        let mut mc = MediaContainer::default();
-        mc.metadata = vec![
-            row("movie", "1", "A Movie"),
-            row("show", "1975", "A Show"),
-            row("movie", "2", "Another Movie"),
-        ];
-        let s = split_by_type(&mc, S0);
-        assert_eq!(
-            s[0].items.iter().map(|m| m.rk.as_str()).collect::<Vec<_>>(),
-            ["1", "2"]
-        );
-        assert_eq!(
-            s[1].items.iter().map(|m| m.rk.as_str()).collect::<Vec<_>>(),
-            ["1975"]
-        );
-        assert_eq!((s[0].total, s[1].total), (2, 1));
-        assert!(
-            s[0].items.iter().all(|m| m.sid == S0),
-            "every row wears the server it came from"
-        );
-    }
-
-    /// Neither shelf may exceed a `CardRow`'s spring count: past it `scale(i)` clamps to the last
-    /// cell, so an over-cap tile would wear its neighbour's pop and never animate its own.
-    /// Unknown types (season/episode/clip) are dropped rather than filed under a wrong label.
-    #[test]
-    fn shelves_are_capped_at_the_card_rows_spring_count_and_drop_unknown_types() {
-        let mut mc = MediaContainer::default();
-        for i in 0..(SHELF_MAX + 5) {
-            mc.metadata.push(row("movie", &i.to_string(), "m"));
-        }
-        mc.metadata.push(row("episode", "e1", "an episode"));
-        mc.metadata.push(row("season", "s1", "a season"));
-        let s = split_by_type(&mc, S0);
-        assert_eq!(s[0].items.len(), SHELF_MAX);
-        assert_eq!(
-            s[0].total,
-            SHELF_MAX + 5,
-            "the count is the RESPONSE's total, not the tile cap"
-        );
-        assert!(
-            s[1].items.is_empty(),
-            "an episode/season is not a Show shelf tile"
-        );
-    }
-
-    // ---- the cross-server join --------------------------------------------------------------
-
-    /// **The rule the whole unit turns on.** A second server's `personId` is a different number for
-    /// the same person, so the only thing the two machines can be joined on is the `tagKey` — and
-    /// the id read back is the OTHER server's, never ours.
-    ///
-    /// The namesake in the answer is the case that makes this more than bookkeeping: two actors
-    /// share the name, the guid tells them apart, and a join that reached for the name would open
-    /// the wrong man's filmography.
-    #[test]
-    fn a_second_servers_person_id_is_resolved_by_tag_key_not_by_name_or_number() {
-        let mc = search_answer(
-            "actor",
-            vec![
-                person_tag("John Williams", 4102, "5d776b1e880197001ec93f4a"), // the namesake
-                person_tag("John Williams", 918, "5d77683d880197001ec9053c"),  // ours, elsewhere
-            ],
-        );
-        // ours is `161` on the origin and `918` here — the number that comes back is THIS server's
-        assert_eq!(
-            resolve_local(&mc, "John Williams", "5d77683d880197001ec9053c"),
-            Some("918".to_string())
-        );
-        // and the namesake resolves to their own id, never to ours
-        assert_eq!(
-            resolve_local(&mc, "John Williams", "5d776b1e880197001ec93f4a"),
-            Some("4102".to_string())
-        );
-        // a person this server has never heard of is an ANSWER of None, not a match on the name
-        assert_eq!(
-            resolve_local(&mc, "John Williams", "0000000000000000000000ff"),
-            None
-        );
-        // …and so is an answer with no person hub at all
-        assert_eq!(
-            resolve_local(
-                &search_answer("movie", Vec::new()),
-                "John Williams",
-                "5d77683d880197001ec9053c"
-            ),
-            None
-        );
-    }
-
-    /// The name fallback exists only where there is **no guid to join on** — an entry the server
-    /// sent no `tagKey` for, or a page opened without one. It must never fire against a guid we can
-    /// see and disagree with: that is the namesake case above, and a page of the wrong person's
-    /// films is worse than a page with fewer.
-    #[test]
-    fn the_name_fallback_is_exact_and_only_where_no_tag_key_can_decide() {
-        // the server named no guid for its entry: the exact name is the only join there is
-        let no_key = search_answer("actor", vec![person_tag("Idina Menzel", 77, "")]);
-        assert_eq!(
-            resolve_local(&no_key, "Idina Menzel", "5d77682a"),
-            Some("77".to_string())
-        );
-        // …and it is EXACT: nothing looser may reach another person's filmography
-        assert_eq!(resolve_local(&no_key, "Idina Menze", "5d77682a"), None);
-        assert_eq!(resolve_local(&no_key, "idina menzel", "5d77682a"), None);
-        assert_eq!(
-            resolve_local(&no_key, "", "5d77682a"),
-            None,
-            "an empty name matches nothing"
-        );
-
-        // the entry DOES carry a guid, and it is not ours — the name must not override it
-        let other = search_answer("actor", vec![person_tag("Idina Menzel", 88, "5d776999")]);
-        assert_eq!(resolve_local(&other, "Idina Menzel", "5d77682a"), None);
-        // …but with no guid on OUR side there is nothing to disagree with, so the name joins
-        assert_eq!(
-            resolve_local(&other, "Idina Menzel", ""),
-            Some("88".to_string())
-        );
-
-        // an entry with neither number nor tagKey addresses nothing and must not resolve to ""
-        let empty = search_answer("actor", vec![person_tag("Idina Menzel", 0, "")]);
-        assert_eq!(resolve_local(&empty, "Idina Menzel", ""), None);
-        // a server that sent no number falls back to the tagKey, exactly as `Person::key` does
-        let key_only = search_answer("actor", vec![person_tag("Idina Menzel", 0, "5d77682a")]);
-        assert_eq!(
-            resolve_local(&key_only, "Idina Menzel", "5d77682a"),
-            Some("5d77682a".to_string())
-        );
-
-        // a DIRECTOR credit resolves too — both of `search::Kind::Person`'s hubs are scanned, so a
-        // page opened from a crew row is not silently unresolvable on every other server
-        let crew = search_answer("director", vec![person_tag("Nick Park", 459, "5d776826")]);
-        assert_eq!(
-            resolve_local(&crew, "Nick Park", "5d776826"),
-            Some("459".to_string())
-        );
-    }
-
-    /// An actor-director carries TWO tag rows on one server — same `tagKey`, different `id`, one per
-    /// department — and `/hubs/search` reorders its hubs per query (`search.rs`'s own measurement).
-    /// So the scan order has to be OURS, `actor` first, not the server's: take the director row and
-    /// `/library/people/{id}/media` answers with only what they directed, silently dropping every
-    /// acting credit that server holds.
-    #[test]
-    fn an_actor_director_keeps_their_acting_id_whatever_order_the_server_sent_its_hubs() {
-        let guid = "5d77682b7a53e9001e73f2d1";
-        let mut mc = MediaContainer::default();
-        // the server put its DIRECTOR hub first, which it is free to do
-        mc.hub = vec![
-            Hub {
-                kind: "director".into(),
-                hub_identifier: "director".into(),
-                directory: vec![person_tag("Clint Eastwood", 2201, guid)],
-                ..Default::default()
-            },
-            Hub {
-                kind: "actor".into(),
-                hub_identifier: "actor".into(),
-                directory: vec![person_tag("Clint Eastwood", 1104, guid)],
-                ..Default::default()
-            },
-        ];
-        assert_eq!(
-            resolve_local(&mc, "Clint Eastwood", guid),
-            Some("1104".to_string()),
-            "the acting id must win — the server's hub order decides nothing"
-        );
-        // …and with no actor row at all, the director one is still better than nothing
-        mc.hub.truncate(1);
-        assert_eq!(
-            resolve_local(&mc, "Clint Eastwood", guid),
-            Some("2201".to_string())
-        );
     }
 
     // ---- the merge ---------------------------------------------------------------------------
@@ -2930,58 +2475,6 @@ mod tests {
         owner.close();
     }
 
-    /// `roles_from` keeps exactly THIS person's credit per row — matched by the tag's numeric id
-    /// OR its `tagKey` guid, because the local id is the guid whenever the credit row carried no
-    /// number, and an id-only match then blanked every caption while still paying for the batch. A
-    /// row where the person is crew only (no `Role[]` entry of theirs) yields `""`, never a
-    /// neighbour's character.
-    #[test]
-    fn roles_from_matches_by_id_or_tag_key_and_leaves_crew_rows_blank() {
-        let tag = |name: &str, role: &str, id: i64, guid: &str| Tag {
-            tag: name.into(),
-            role: role.into(),
-            id,
-            tag_key: guid.into(),
-            ..Default::default()
-        };
-        let mut mc = MediaContainer::default();
-        let mut with_cast = row("movie", "1971", "A Close Shave");
-        with_cast.role = vec![
-            tag(
-                "Peter Sallis",
-                "Wallace (voice)",
-                6059,
-                "5d7768268718ba001e311be6",
-            ),
-            tag(
-                "Anne Reid",
-                "Wendolene (voice)",
-                7001,
-                "5d776828a091de001f2e63e6",
-            ),
-        ];
-        let mut crew_only = row("movie", "2005", "The Curse of the Were-Rabbit");
-        crew_only.role = vec![tag("Helena Bonham Carter", "Lady Tottington", 7002, "")];
-        mc.metadata = vec![with_cast, crew_only];
-
-        // ONLY the row this person has a part in — the crew-only row is absent rather than carried as
-        // an empty pair, and `apply` reads a missing key as "" anyway
-        let want = vec![("1971".to_string(), "Wallace (voice)".to_string())];
-        assert_eq!(roles_from(&mc, "6059", "5d7768268718ba001e311be6"), want);
-        // a person OPENED BY GUID (no numeric id on the credit row) must match through the tagKey —
-        // this is the case an id-only match silently reduced to a wasted fetch and blank captions
-        assert_eq!(
-            roles_from(&mc, "5d7768268718ba001e311be6", "5d7768268718ba001e311be6"),
-            want
-        );
-        // ANOTHER SERVER's local id for the same person is a different number, and the guid is what
-        // carries the caption across — the reason the worker is handed `Src::local`, not the origin's
-        assert_eq!(roles_from(&mc, "918", "5d7768268718ba001e311be6"), want);
-        // an id of 0 means "the server sent none" — it must never match a page opened for key "0",
-        // and an EMPTY guid must never match a tag whose tagKey is also empty
-        assert!(roles_from(&mc, "0", "").is_empty());
-    }
-
     /// A roles landing captions the shelves BY KEY (order-independent), and the NEXT media landing
     /// clears both vectors with the shelves they described — a caption must never outlive the list
     /// it was addressed to, and the cleared `roled` is what re-asks for the new one.
@@ -3057,246 +2550,6 @@ mod tests {
         assert!(
             address(fr, owner.current().unwrap()).is_some(),
             "the reset is what re-asks for the new list's captions"
-        );
-        owner.close();
-    }
-
-    // ---- multi-source --------------------------------------------------------------------------
-
-    /// Empty the registry around a test that needs real slots in it, and hand it back empty — the
-    /// discipline `plex::servers`' own tests document: a client left registered at a port that
-    /// closed is one another module's pump will dial on a background thread.
-    struct FreshRegistry(#[allow(dead_code)] crate::testlock::Serial);
-    impl Drop for FreshRegistry {
-        fn drop(&mut self) {
-            crate::registry::reset_for_test();
-        }
-    }
-    fn fresh_registry() -> FreshRegistry {
-        let g = crate::testlock::serial();
-        crate::registry::reset_for_test();
-        FreshRegistry(g)
-    }
-
-    /// **The bug, in one test.** The page is opened from ONE server's credit row and must ask every
-    /// registered one: the origin with the id it was handed, each share through a resolve first.
-    #[test]
-    fn every_registered_server_is_a_source_and_only_the_origin_skips_the_resolve() {
-        let mut owner = Owner::default();
-        let _g = fresh_registry();
-        // `register_for_test`, not the public `register`: the latter resolves the device id through
-        // `session::load`, which mints and PERSISTS a uuid on a host that has no session file.
-        let own =
-            crate::registry::register_with_client_id("mach-own", "10.0.0.1", 32400, "tok", "cid-person-test");
-        let friend = crate::registry::register_with_client_id(
-            "mach-friend",
-            "10.0.0.2",
-            32400,
-            "tok",
-            "cid-person-test",
-        );
-
-        owner.open(friend, "77", "5d77682a", "Idina Menzel", ""); // arrived through the SHARE
-        let p = owner.current().unwrap();
-        assert_eq!(
-            p.srcs.len(),
-            2,
-            "both servers are sources however we arrived"
-        );
-
-        // the ORIGIN was handed its id and asks for the filmography straight away…
-        assert!(
-            address(at(friend, K_RESOLVE), p).is_none(),
-            "the origin must not re-resolve what it gave us"
-        );
-        assert_eq!(
-            address(at(friend, K_MEDIA), p),
-            Some(vec!["77".to_string()])
-        );
-        // …while the other server must find its OWN id first, and cannot ask for media until it has
-        assert_eq!(
-            address(at(own, K_RESOLVE), p),
-            Some(vec!["Idina Menzel".to_string()])
-        );
-        assert!(
-            address(at(own, K_MEDIA), p).is_none(),
-            "a filmography cannot be asked for by a foreign id"
-        );
-
-        // the resolve lands: now, and only now, is that server's own filmography addressable
-        let gen = owner.gen();
-        owner.land(
-            at(own, K_RESOLVE),
-            gen,
-            Landing::Resolve(Some("918".to_string())),
-        );
-        owner.hold_off();
-        assert!(owner.pump());
-        assert_eq!(
-            address(at(own, K_MEDIA), owner.current().unwrap()),
-            Some(vec!["918".to_string()])
-        );
-        owner.close();
-    }
-
-    /// A server that has never heard of them contributes nothing — **and that is an answer.** It
-    /// must not fail the other source, must not blank it, must arm no backoff, and must never ask
-    /// that server for a filmography it has no id for. The other half is the timing: its instant
-    /// "no" must not settle the page into "nothing in your libraries" while the server that DOES
-    /// have them is still fetching.
-    #[test]
-    fn a_source_that_has_never_heard_of_them_contributes_nothing_without_failing_the_others() {
-        let mut owner = Owner::default();
-        let _g = fresh_registry();
-        let own =
-            crate::registry::register_with_client_id("mach-own", "10.0.0.1", 32400, "tok", "cid-person-test");
-        let friend = crate::registry::register_with_client_id(
-            "mach-friend",
-            "10.0.0.2",
-            32400,
-            "tok",
-            "cid-person-test",
-        );
-        owner.open(own, "161", "5d77682a", "Idina Menzel", "");
-        let gen = owner.gen();
-
-        // the share answers first, with nothing
-        owner.land(
-            at(friend, K_RESOLVE),
-            gen,
-            Landing::Resolve(Some(String::new())),
-        );
-        owner.hold_off();
-        owner.pump();
-        assert!(
-            !owner.current().unwrap().landed,
-            "an empty answer must not settle a page still fetching"
-        );
-        assert_eq!(
-            owner.state.retry_cd[at(friend, K_RESOLVE)],
-            RETRY_FRAMES - 1,
-            "an ANSWER is not a failure"
-        );
-        assert!(
-            address(at(friend, K_MEDIA), owner.current().unwrap()).is_none(),
-            "a server with no record of them must not be asked for their filmography"
-        );
-
-        // …and the server that does have them fills the page by itself
-        owner.land(
-            at(own, K_MEDIA),
-            gen,
-            media(vec![movie_on(own, "1971")], Vec::new()),
-        );
-        owner.hold_off();
-        assert!(owner.pump());
-        let p = owner.current().unwrap();
-        assert_eq!(p.shelf(0).len(), 1);
-        assert_eq!(
-            p.shelf(0)[0].sid,
-            own,
-            "the row still names the machine it came from"
-        );
-        assert!(
-            p.landed,
-            "one source answering is enough to stop the spinner"
-        );
-        owner.close();
-    }
-
-    /// The other direction of the same fold: when NO source has anything, the page may only say so
-    /// once every one of them has answered. A share that answers instantly must not draw "nothing
-    /// in your libraries" over the fetch still out on the other server.
-    #[test]
-    fn the_page_says_nothing_only_once_every_source_has_answered() {
-        let mut owner = Owner::default();
-        let _g = fresh_registry();
-        let own =
-            crate::registry::register_with_client_id("mach-own", "10.0.0.1", 32400, "tok", "cid-person-test");
-        let friend = crate::registry::register_with_client_id(
-            "mach-friend",
-            "10.0.0.2",
-            32400,
-            "tok",
-            "cid-person-test",
-        );
-        owner.open(own, "161", "5d77682a", "Idina Menzel", "");
-        let gen = owner.gen();
-        assert!(
-            owner.loading(),
-            "a page that has asked nobody anything yet is loading"
-        );
-
-        owner.land(
-            at(friend, K_RESOLVE),
-            gen,
-            Landing::Resolve(Some(String::new())),
-        );
-        owner.hold_off();
-        owner.pump();
-        assert!(owner.loading(), "one source's 'no' is not the page's answer");
-
-        // the origin answers with an empty (but successful) filmography — now the page HAS an answer
-        owner.land(at(own, K_MEDIA), gen, media(Vec::new(), Vec::new()));
-        owner.hold_off();
-        owner.pump();
-        assert!(
-            !owner.loading(),
-            "every source has answered — the page is finished, not still loading"
-        );
-        assert!(owner.current().unwrap().shelf(0).is_empty());
-        owner.close();
-    }
-
-    /// The same flash from the other side. A `/media` response can SUCCEED and still put no tile on
-    /// the page — `split_by_type` keeps only `movie` and `show` rows, so a person credited here in
-    /// episodes alone lands exactly like that. Read as "we have something to show", it draws the
-    /// empty read-out over a share still resolving, whose films then pop in on top of the words.
-    #[test]
-    fn a_successful_but_empty_filmography_is_not_something_to_show() {
-        let mut owner = Owner::default();
-        let _g = fresh_registry();
-        let own =
-            crate::registry::register_with_client_id("mach-own", "10.0.0.1", 32400, "tok", "cid-person-test");
-        let friend = crate::registry::register_with_client_id(
-            "mach-friend",
-            "10.0.0.2",
-            32400,
-            "tok",
-            "cid-person-test",
-        );
-        owner.open(own, "161", "5d77682a", "Idina Menzel", "");
-        let gen = owner.gen();
-
-        // the origin succeeds with nothing shelvable while the share has not answered at all
-        owner.land(at(own, K_MEDIA), gen, media(Vec::new(), Vec::new()));
-        owner.hold_off();
-        owner.pump();
-        assert!(
-            owner.loading(),
-            "a successful EMPTY answer is not content — the share is still out"
-        );
-
-        // …and the share then fills the page
-        owner.land(
-            at(friend, K_RESOLVE),
-            gen,
-            Landing::Resolve(Some("918".to_string())),
-        );
-        owner.hold_off();
-        owner.pump();
-        owner.land(
-            at(friend, K_MEDIA),
-            gen,
-            media(vec![movie_on(friend, "5274")], Vec::new()),
-        );
-        owner.hold_off();
-        assert!(owner.pump());
-        assert!(!owner.loading());
-        assert_eq!(
-            owner.current().unwrap().shelf(0).len(),
-            1,
-            "the borrowed film is the whole page"
         );
         owner.close();
     }
