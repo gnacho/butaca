@@ -89,7 +89,7 @@ tv-lock-require:
 # runtime files; `nightly` (`com.butaca.nightly`) is a third install beside both — same
 # per-flavour shape (own tile, own sign-in, own runtime root) but ALWAYS a RELEASE=1 build (see
 # `release-guard` below), with its own bumped package version and a dated reported version
-# (`rust-modules/build.rs::emit_version`'s `PLX_CHANNEL=nightly` arm). webOS keys everything — the
+# (`rust-modules/build.rs::emit_version`'s `BUTACA_CHANNEL=nightly` arm). webOS keys everything — the
 # install directory, SAM's launch/closeByAppId, the LS2 role file — on that id, so distinct ids are
 # distinct apps that cannot touch each other.
 #
@@ -268,10 +268,10 @@ CFLAGS_REMAP = -fdebug-prefix-map=$(HOME)=/build -fdebug-prefix-map=$(WEBOS_SDK)
                -fdebug-prefix-map=$(CURDIR)=/butaca
 
 ifeq ($(DEBUG),1)
-# -DPLX_DEBUG lets the C shim keep core dumps enabled for a post-mortem (src/crashtrace.c's
+# -DBUTACA_DEBUG lets the C shim keep core dumps enabled for a post-mortem (src/crashtrace.c's
 # setrlimit(RLIMIT_CORE, 0) — a shipping build must not write 200 MB into the TV's app
 # partition). This is the only thing DEBUG=1 changes about behaviour rather than debuginfo.
-CFLAGS      += -g $(CFLAGS_REMAP) -DPLX_DEBUG
+CFLAGS      += -g $(CFLAGS_REMAP) -DBUTACA_DEBUG
 RUST_DEBUGINFO = -C debuginfo=2
 endif
 
@@ -351,7 +351,7 @@ LIBS_REAL = -lSDL2 -lSDL2_ttf -lGLESv2 -lluna-service2 -lglib-2.0 \
 #   rust-modules/src/dynlib.rs, and the video-plane comment at the top of src/starfish.c.
 #
 #   FFmpeg is not a version question at all any more: we SHIP our own, pinned (the bundled-FFmpeg
-#   section below builds libav*-plx.so.63/63/61 and stages them into pkg/). It is unlinked because
+#   section below builds libav*-butaca.so.63/63/61 and stages them into pkg/). It is unlinked because
 #   those files land BESIDE the binary, which is on no library search path, and they carry no rpath
 #   — so a DT_NEEDED entry would be resolved at exec() against the system path, where it either
 #   finds nothing (dead before main) or finds the TELEVISION's copy, which is the wrong one:
@@ -417,8 +417,8 @@ LIBS_REAL = -lSDL2 -lSDL2_ttf -lGLESv2 -lluna-service2 -lglib-2.0 \
 # (`export VAR ?= v` on one line is silently a no-op under GNU make 3.81 — measured
 # here, `$(origin CARGO_INCREMENTAL)` came back `undefined` — so the assignment and the export are
 # two statements.)
-PLX_LINKED_WORKTREE := $(shell test -f .git && echo yes)
-ifeq ($(PLX_LINKED_WORKTREE),yes)
+BUTACA_LINKED_WORKTREE := $(shell test -f .git && echo yes)
+ifeq ($(BUTACA_LINKED_WORKTREE),yes)
 CARGO_INCREMENTAL ?= 0
 export CARGO_INCREMENTAL
 endif
@@ -446,7 +446,7 @@ RUST_TDIR      = target$(if $(RELEASE),-release,)$(if $(LAB),-lab,)$(if $(SYMBOL
 # It is deliberately NOT in $(RUST_CFG), and `override` is what makes that safe. RELEASE is
 # already in the stamp and gives each configuration its own --target-dir, so a flip through the
 # supported door rebuilds a DIFFERENT .a and cargo re-runs the script for it. What the stamp could
-# not have caught is somebody decoupling this from RELEASE by hand — `make PLX_RELEASE=1 deploy`
+# not have caught is somebody decoupling this from RELEASE by hand — `make BUTACA_RELEASE=1 deploy`
 # (a command-line variable outranks an ordinary assignment) or `make -e` with it exported — which
 # would write a binary reporting 0.6.0 into the DEV target dir, leave RUST_CFG unmoved, and let
 # every later plain `make` link that stale library without a word. `override` makes the value a
@@ -462,21 +462,21 @@ RUST_TDIR      = target$(if $(RELEASE),-release,)$(if $(LAB),-lab,)$(if $(SYMBOL
 # no-op is `override export VAR := value` — override AND export STACKED on one line — which sets
 # the value for make's own expansions but never reaches a child process's environment. That is
 # exactly what happened here: `RELEASE=1` correctly drove `RUST_FEATFLAGS`, so the cargo
-# invocation used the right feature set, while the linked binary's `PLX_VERSION` still read
-# `0.7.0-dev` with no error from anything, because PLX_RELEASE never left make. `override` has to
-# stay on the assignment, not the export, or a command-line `PLX_RELEASE=1` could outrank this
+# invocation used the right feature set, while the linked binary's `BUTACA_VERSION` still read
+# `0.7.0-dev` with no error from anything, because BUTACA_RELEASE never left make. `override` has to
+# stay on the assignment, not the export, or a command-line `BUTACA_RELEASE=1` could outrank this
 # derivation again.
-override PLX_RELEASE := $(if $(RELEASE),1,)
-export PLX_RELEASE
-# `PLX_CHANNEL=nightly` selects `build.rs::emit_version`'s nightly arm — a dated pre-release
+override BUTACA_RELEASE := $(if $(RELEASE),1,)
+export BUTACA_RELEASE
+# `BUTACA_CHANNEL=nightly` selects `build.rs::emit_version`'s nightly arm — a dated pre-release
 # string (`X.Y.Z-nightly-YYYYMMDD`) instead of the plain `-dev` suffix every other non-release
 # build reports. Derived from FLAVOR by the same `override … := $(if …)` / unconditional `export`
-# shape as PLX_RELEASE immediately above, for the same reason: a stray command-line
-# `PLX_CHANNEL=nightly FLAVOR=debug` must not reach cargo, and exporting empty-for-everything-but-
+# shape as BUTACA_RELEASE immediately above, for the same reason: a stray command-line
+# `BUTACA_CHANNEL=nightly FLAVOR=debug` must not reach cargo, and exporting empty-for-everything-but-
 # nightly is the SAME "set but empty is not the special case" idiom `build.rs` already reads
-# PLX_RELEASE with, rather than a second one.
-override PLX_CHANNEL := $(if $(filter nightly,$(FLAVOR)),nightly,)
-export PLX_CHANNEL
+# BUTACA_RELEASE with, rather than a second one.
+override BUTACA_CHANNEL := $(if $(filter nightly,$(FLAVOR)),nightly,)
+export BUTACA_CHANNEL
 # The date a nightly build reports, `YYYYMMDD`. Only meaningful for FLAVOR=nightly, and exported
 # ONLY then — exporting it unconditionally would make cargo's `rerun-if-env-changed` force a
 # rebuild every single day (the value changes daily) even for a plain `make check` on stable or
@@ -484,8 +484,8 @@ export PLX_CHANNEL
 # already-set environment variable — CI's coming nightly caller supplies the date it actually cut;
 # a bare local `make FLAVOR=nightly RELEASE=1 ipk` gets today's UTC date for free.
 ifeq ($(FLAVOR),nightly)
-PLX_NIGHTLY_DATE ?= $(shell date -u +%Y%m%d)
-export PLX_NIGHTLY_DATE
+BUTACA_NIGHTLY_DATE ?= $(shell date -u +%Y%m%d)
+export BUTACA_NIGHTLY_DATE
 endif
 # ...and the LINK needs its own witness, because pkg/butaca is a path BOTH configurations
 # write. Per-dir targets keep cargo honest, but after a RELEASE=1 build the dev .a is older
@@ -496,7 +496,7 @@ RUST_STAMP     = pkg/.build-config
 # The bundled FFmpeg is configured differently by RELEASE=1 too (no swscale, no mpeg1/mpegts), so
 # it belongs in the SAME stamp. It was missed at first, and the failure was exactly the one this
 # mechanism exists to prevent, one layer down: `ci/build-ffmpeg.sh` is reached through a single
-# header sentinel, so make never re-ran it once the header existed, its own .plx-flags guard was
+# header sentinel, so make never re-ran it once the header existed, its own .butaca-flags guard was
 # unreachable, and `make RELEASE=1` shipped the libraries built for a DEV configuration — while
 # the comment two blocks below claimed otherwise. Building release-first then dev is worse: the
 # swscale staging rule globs a prefix that has none and the build dies.
@@ -507,17 +507,17 @@ RUST_STAMP     = pkg/.build-config
 # `make RELEASE=1 ipk` followed by `make RELEASE=1 SYMBOLS=1 symbols` silently relinks a different
 # binary and hands you a `.debug` that will never match anything a user's television reports — the
 # same shape as `make RELEASE=1 && make deploy`, which is the trap this whole mechanism exists for.
-# `+nightly:<date>` carries PLX_NIGHTLY_DATE into the stamp itself, the same reason SYMBOLS and
+# `+nightly:<date>` carries BUTACA_NIGHTLY_DATE into the stamp itself, the same reason SYMBOLS and
 # RELEASE already are: a nightly binary's REPORTED version is dated by
-# this value (`build.rs`'s PLX_CHANNEL=nightly arm), so `ci/check-package.py` needs the exact date a
+# this value (`build.rs`'s BUTACA_CHANNEL=nightly arm), so `ci/check-package.py` needs the exact date a
 # packaged binary was built with to grade it — and the ONLY other place that date exists is this
 # environment variable, gone the moment the shell that ran `make` exits. Embedding the real value
 # (not just "nightly: yes/no") is also what makes a DATE CHANGE relink: two nightly builds cut on
 # the same tracked version a day apart must not silently share pkg/butaca just because nothing
 # else about the configuration moved. `$(filter nightly,$(FLAVOR))` guards it exactly the way
-# PLX_CHANNEL and PLX_NIGHTLY_DATE above are themselves guarded, so a non-nightly stamp is
+# BUTACA_CHANNEL and BUTACA_NIGHTLY_DATE above are themselves guarded, so a non-nightly stamp is
 # byte-for-byte what it always was.
-RUST_CFG       = features:$(RUST_FEATFLAGS)$(if $(SYMBOLS),+symbols,)$(if $(filter nightly,$(FLAVOR)),+nightly:$(PLX_NIGHTLY_DATE),)
+RUST_CFG       = features:$(RUST_FEATFLAGS)$(if $(SYMBOLS),+symbols,)$(if $(filter nightly,$(FLAVOR)),+nightly:$(BUTACA_NIGHTLY_DATE),)
 # Handled by $(shell) during PARSING, and by DELETING the output rather than by timestamps.
 # Both choices are load-bearing, and both were arrived at by measuring the failures:
 #   * A rule cannot do it. GNU make 3.81 decides whether a target is up to date
@@ -554,7 +554,7 @@ PURE_QUERY := $(if $(MAKECMDGOALS),$(if $(filter-out $(SIDE_EFFECT_FREE),$(MAKEC
 ifneq ($(PURE_QUERY),yes)
 ifneq ($(RUST_CFG),$(shell cat $(RUST_STAMP) 2>/dev/null))
   $(shell mkdir -p pkg && printf '%s' '$(RUST_CFG)' > $(RUST_STAMP) && rm -f pkg/butaca pkg/butaca-storage \
-          vendor/ffmpeg-prefix/include/libavformat/avformat.h pkg/lib*-plx.so.* pkg/.ffabi-ok)
+          vendor/ffmpeg-prefix/include/libavformat/avformat.h pkg/lib*-butaca.so.* pkg/.ffabi-ok)
 endif
 endif
 
@@ -623,13 +623,13 @@ src/%.o: src/%.c $(wildcard src/*.h) Makefile $(CONFIG_LOCAL_STAMP)
 FFMPEG_PREFIX = vendor/ffmpeg-prefix
 FFMPEG_INC    = $(FFMPEG_PREFIX)/include
 # Staged into pkg/ under their SONAMEs, which is the name ff.rs dlopens by absolute path.
-FFMPEG_SONAMES = libavutil-plx.so.61 libavcodec-plx.so.63 libavformat-plx.so.63 \
-                 $(if $(RELEASE),,libswscale-plx.so.10)
+FFMPEG_SONAMES = libavutil-butaca.so.61 libavcodec-butaca.so.63 libavformat-butaca.so.63 \
+                 $(if $(RELEASE),,libswscale-butaca.so.10)
 FFMPEG_STAGED = $(addprefix pkg/,$(FFMPEG_SONAMES))
 
-# One pinned ASS renderer and font stack on every firmware. Only the plx_ass_* facade
+# One pinned ASS renderer and font stack on every firmware. Only the butaca_ass_* facade
 # is exported; FreeType/FriBidi/HarfBuzz are static and cannot bind to firmware copies.
-LIBASS_STAGED = pkg/libass-plx.so.0
+LIBASS_STAGED = pkg/libass-butaca.so.0
 LIBASS_INPUTS = ci/build-libass.sh ci/build-libass.py ci/libass-dependencies.json \
                 ci/arm-cc.py ci/check-link-evidence.py ci/stage-link-evidence.py \
                 src/ass.c src/ass_composite.h include/ass.h
@@ -644,7 +644,7 @@ libass: $(LIBASS_STAGED)
 $(FFMPEG_INC)/libavformat/avformat.h: ci/build-ffmpeg.sh ci/arm-cc.py ci/check-link-evidence.py ci/stage-link-evidence.py
 	RELEASE=$(RELEASE) ./ci/build-ffmpeg.sh
 
-# The real files carry a full version (libavutil-plx.so.58.29.100); ship them under the SONAME.
+# The real files carry a full version (libavutil-butaca.so.58.29.100); ship them under the SONAME.
 $(FFMPEG_STAGED): pkg/%: $(FFMPEG_INC)/libavformat/avformat.h
 	@mkdir -p pkg
 	cp -L $(FFMPEG_PREFIX)/lib/$* $@
@@ -901,11 +901,11 @@ deploy: pkg/butaca pkg/butaca-storage $(FFMPEG_STAGED) $(APPINFO) release-guard 
 	$(SSH) 'chmod 755 $(SERVICEDIR)/butaca-storage.new && mv $(SERVICEDIR)/butaca-storage.new $(SERVICEDIR)/butaca-storage'
 	# ...then retire any FFmpeg from a PREVIOUS version. `scp` only adds, so bumping the bundled
 	# release left the old majors sitting in the app directory forever — observed on the dev TV,
-	# which was carrying libavcodec-plx.so.60 and .so.58 from an earlier experiment alongside the
+	# which was carrying libavcodec-butaca.so.60 and .so.58 from an earlier experiment alongside the
 	# live .63/.61. Harmless (ff.rs opens by exact name) but it accumulates, and it ships nothing:
 	# the .ipk only ever contains the current set. Removal comes AFTER the copy so there is never
 	# a moment with no FFmpeg on the device.
-	$(SSH) 'cd $(APPDIR) && for f in libav*-plx.so.* libswscale-plx.so.*; do case " $(FFMPEG_SONAMES) " in *" $$f "*) ;; *) rm -f "$$f";; esac; done'
+	$(SSH) 'cd $(APPDIR) && for f in libav*-butaca.so.* libswscale-butaca.so.*; do case " $(FFMPEG_SONAMES) " in *" $$f "*) ;; *) rm -f "$$f";; esac; done'
 
 	$(SCP) pkg/butaca root@$(TV):$(APPDIR)/butaca.new
 	@# The lab session file, under LAB=1 only. Shipped by deploy as well as by the .ipk so the
@@ -1052,7 +1052,7 @@ test: deploy run
 # where a lone run is ~10 min. Queuing through `tools/check-lock.py`'s machine-wide
 # flock (`~/.cache/butaca/check.lock` by default, shared by every worktree) is
 # strictly faster for everyone: the kernel releases the lock the moment a holder dies,
-# so there is nothing to clean up by hand. `PLX_CHECK_LOCK=off` bypasses it. See
+# so there is nothing to clean up by hand. `BUTACA_CHECK_LOCK=off` bypasses it. See
 # `check-unlocked` below for the actual suite; CI runs `make check` uncontended, so the
 # wrapper acquires immediately there.
 check:
@@ -1083,9 +1083,9 @@ check:
 # Built into the shell's temp dir rather than the tree: it is a host binary in a repository whose
 # every other artifact is ARM, and one that landed in `src/` or `pkg/` would be a genuinely
 # confusing thing to find. `$(TMPDIR)` may be unset, hence the fallback.
-CRASHFMT_TEST_BIN := $(or $(TMPDIR),/tmp/)plx-crashfmt-test
-CRASHTRACE_TEST_BIN := $(or $(TMPDIR),/tmp/)plx-crashtrace-test
-PRIVATE_LOG_TEST_BIN := $(or $(TMPDIR),/tmp/)plx-private-log-test
+CRASHFMT_TEST_BIN := $(or $(TMPDIR),/tmp/)butaca-crashfmt-test
+CRASHTRACE_TEST_BIN := $(or $(TMPDIR),/tmp/)butaca-crashtrace-test
+PRIVATE_LOG_TEST_BIN := $(or $(TMPDIR),/tmp/)butaca-private-log-test
 
 # Catalog completeness is checked by the Rust build; this checks UI text entry points too.
 .PHONY: check-localization
@@ -1252,7 +1252,7 @@ check-unlocked: lint check-localization
 	python3 ci/test_restore_runtime.py
 	python3 ci/test-compat.py
 	@# The `check` lock wrapper's own suite: two invocations serialize, a SIGKILLed holder
-	@# unblocks the waiter promptly, --timeout exits 75, and PLX_CHECK_LOCK=off really
+	@# unblocks the waiter promptly, --timeout exits 75, and BUTACA_CHECK_LOCK=off really
 	@# bypasses it. Runs against a throwaway lock path — never the real
 	@# ~/.cache/butaca/check.lock — so it cannot contend with the `check` that is
 	@# running it.
@@ -1520,8 +1520,8 @@ SIM_LINUX_TDIR_ENV = $(SIM_TDIR)
 export SIM_LINUX_TDIR_ENV
 
 # The Linux simulator links a host build of the same pinned ASS renderer and font stack the
-# television ships (`libass-plx-host.so.0`), staged beside the binary like the ARM one.
-LIBASS_HOST_NAME = libass-plx-host.so.0
+# television ships (`libass-butaca-host.so.0`), staged beside the binary like the ARM one.
+LIBASS_HOST_NAME = libass-butaca-host.so.0
 LIBASS_HOST_STAGED = pkg/$(LIBASS_HOST_NAME)
 
 $(LIBASS_HOST_STAGED): $(LIBASS_INPUTS)
@@ -1538,7 +1538,7 @@ check-ass: $(LIBASS_HOST_STAGED)
 
 # The host half of the same pinned FFmpeg, built by the same script with the cross block skipped.
 # It stages into its OWN directory: the host libraries carry the basenames the shipped ARM ones do,
-# and `pkg/lib*-plx.so.*` is the glob that puts the device libraries in an `.ipk`.
+# and `pkg/lib*-butaca.so.*` is the glob that puts the device libraries in an `.ipk`.
 FFMPEG_HOST_PREFIX = vendor/ffmpeg-prefix-host
 FFMPEG_HOST_INC    = $(FFMPEG_HOST_PREFIX)/include
 FFMPEG_HOST_STAGED = pkg/host-ffmpeg/.staged

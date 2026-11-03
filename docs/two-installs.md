@@ -2,7 +2,7 @@
 
 **This document predates the nightly flavour.** A third flavour, `FLAVOR=nightly`
 (`com.butaca.nightly`, port 8912), has since landed, and nightly is the one flavour that
-feeds a codegen input — `PLX_CHANNEL` / `PLX_NIGHTLY_DATE` into `build.rs`'s reported version. See
+feeds a codegen input — `BUTACA_CHANNEL` / `BUTACA_NIGHTLY_DATE` into `build.rs`'s reported version. See
 `docs/agent-reference.md` for the current account; the body below still only describes stable and
 debug.
 

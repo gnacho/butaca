@@ -55,7 +55,7 @@ tools/tv-session.sh down [--flavor <f>]     # hand the TV back
 state, not an app state (see the owner's panel rule below). `sound off`/`on` calls
 `com.webos.service.audio/setMuted` and reads `getVolume` back to confirm rather than trusting the
 call's own result; `sound status` only reads `getVolume`. This is the sanctioned way to mute the
-set — no lane needs the raw luna-send/`PLX_TV_LOCK_BYPASS` route for it. Neither `screen` nor
+set — no lane needs the raw luna-send/`BUTACA_TV_LOCK_BYPASS` route for it. Neither `screen` nor
 `sound` is restored automatically by `down`; a lane that muted or blanked the panel for its own
 reasons is the one that knows when to undo it.
 

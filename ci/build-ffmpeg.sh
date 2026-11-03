@@ -26,7 +26,7 @@
 # §6(a)'s relinkable-object obligation for no benefit. The source tarball this builds from is
 # published beside each release; see THIRD-PARTY-NOTICES.md.
 #
-# BUILD SUFFIX. The libraries are named libavformat-plx.so.60 and so on. webOS 11.2.0 ships
+# BUILD SUFFIX. The libraries are named libavformat-butaca.so.60 and so on. webOS 11.2.0 ships
 # FFmpeg 6 too, so without the suffix our file names and SONAMEs would collide with the
 # television's own — and "which libavformat did we actually get" is precisely the question that
 # cannot be answered remotely. With it, the answer is structural.
@@ -50,12 +50,12 @@
 #
 # **One script, and specifically ONE COMPONENT LIST.** Everything below `set --` is shared: same
 # version, same demuxers, parsers, bitstream filters and decoders, same `--disable-network` with
-# `file` as the only protocol, same `-plx` suffix, same LGPL flags. A second script would drift,
+# `file` as the only protocol, same `-butaca` suffix, same LGPL flags. A second script would drift,
 # and the drift would be invisible — the host would demux something the television cannot, or
 # stop demuxing something it can, and the simulator would be answering about a different FFmpeg
 # while looking identical. The cross block is the only difference, and it is three lines.
 #
-# The output is `vendor/ffmpeg-prefix-host` and, on this platform, `libavformat-plx.so.63` with the
+# The output is `vendor/ffmpeg-prefix-host` and, on this platform, `libavformat-butaca.so.63` with the
 # SAME basename the shipped ARM library has. `ci/stage-host-ffmpeg.sh` therefore stages the host
 # copies into `pkg/host-ffmpeg/` and never into `pkg/`, which is what `FFMPEG_STAGED` fills for a
 # television and what `APP_FILES` puts in an `.ipk`.
@@ -82,7 +82,7 @@ HOST=${HOST:-}
 # and every new lane paid the two-minute compile again to produce bytes that already existed
 # eleven times over.
 #
-# So it lives under $PLX_BUILD_CACHE (default ~/.cache/butaca), machine-wide, KEYED BY THE
+# So it lives under $BUTACA_BUILD_CACHE (default ~/.cache/butaca), machine-wide, KEYED BY THE
 # CONFIGURE FLAGS. The key is the half that makes sharing safe, and it is precisely what the
 # manual `ln -s` workaround in fleet-plan could not express: RELEASE=1 drops swscale and the
 # mpeg1/mpegts pair, so a dev lane and a release lane MUST NOT share one build tree. Different
@@ -90,7 +90,7 @@ HOST=${HOST:-}
 # one configuration the other's libraries. The cross and host builds key apart for the same
 # reason, as do two different NDKs.
 #
-# Set PLX_BUILD_CACHE= (empty) to keep the build tree in the checkout as it was; CI does not need
+# Set BUTACA_BUILD_CACHE= (empty) to keep the build tree in the checkout as it was; CI does not need
 # to, because a runner is ephemeral and caches the prefix rather than the objects.
 #
 # The TARBALL is deliberately NOT in the cache. It is the LGPL corresponding source that
@@ -103,13 +103,13 @@ else
   PREFIX="$ROOT/vendor/ffmpeg-prefix"
 fi
 TARDIR="$ROOT/vendor/ffmpeg-build"
-# `--prefix` is the LITERAL /plx, not $PREFIX, and the install is redirected with DESTDIR below.
+# `--prefix` is the LITERAL /butaca, not $PREFIX, and the install is redirected with DESTDIR below.
 #
 # WHY: FFmpeg records its entire configure INVOCATION inside libavutil (`avutil_configuration()`),
 # so every absolute path on that command line ends up in the shipped `.so`. A real `--prefix` put
 # the maintainer's working directory in all three libraries, and with it the `.ipk` sha — which
 # silently made "builds are reproducible" false in the v0.2.0 and v0.2.1 release notes, on the one
-# number a user has to check an unsigned download. `/plx` is a stand-in that exists nowhere.
+# number a user has to check an unsigned download. `/butaca` is a stand-in that exists nowhere.
 #
 # It does NOT make a local build reproducible, and nothing here can: `--cross-prefix` must be
 # absolute (see below — the NDK gcc is a wrapper that dies when invoked through PATH), so the
@@ -135,7 +135,7 @@ fi
 # leaves the previous major's libraries sitting beside the new ones — and since the Makefile stages
 # by SONAME glob, the package would quietly ship whichever the shell listed first. Found the hard
 # way going 6.1 -> 8.1: the prefix held libavformat 60 AND 62.
-STAMP="$PREFIX/.plx-version"
+STAMP="$PREFIX/.butaca-version"
 if [ ! -f "$STAMP" ] || [ "$(cat "$STAMP")" != "$VERSION" ]; then
   rm -rf "$PREFIX"
   mkdir -p "$PREFIX"
@@ -175,14 +175,14 @@ fi
 # to 11.2.0, zlib 1.2.7 to 1.3.1) and on the desktop host.
 if [ -n "$HOST" ]; then
   # No --arch/--cpu/--target-os: configure detects this machine, which is the point.
-  set -- --prefix=/plx
+  set -- --prefix=/butaca
 else
-  set -- --prefix=/plx \
-    --enable-cross-compile --cross-prefix="$CROSS" --host-cc=cc --cc=./plx-arm-cc.py \
+  set -- --prefix=/butaca \
+    --enable-cross-compile --cross-prefix="$CROSS" --host-cc=cc --cc=./butaca-arm-cc.py \
     --arch=arm --cpu=cortex-a9 --target-os=linux --sysroot="$SYSROOT"
 fi
 set -- "$@" \
-  --build-suffix=-plx \
+  --build-suffix=-butaca \
   --enable-shared --disable-static --enable-pic \
   --extra-cflags='-Dstatic_assert=_Static_assert' \
   --disable-programs --disable-doc --disable-avdevice --disable-avfilter \
@@ -210,9 +210,9 @@ fi
 # end up on the configure line, and the flag list itself — which is what keeps a RELEASE tree and
 # a dev tree apart.
 if [ -n "$HOST" ]; then ARCHTAG=host; else ARCHTAG=arm; fi
-CACHE_ROOT=${PLX_BUILD_CACHE-$HOME/.cache/butaca}
+CACHE_ROOT=${BUTACA_BUILD_CACHE-$HOME/.cache/butaca}
 # ABSOLUTE, because this script `cd`s into $SRC before it uses $WORK again. A relative root such
-# as `PLX_BUILD_CACHE=.plx-cache` would leave $WORK relative too, and after the `cd` every later
+# as `BUTACA_BUILD_CACHE=.butaca-cache` would leave $WORK relative too, and after the `cd` every later
 # reference — the configure/build/install logs, $WORK/destdir — would resolve UNDER THE FFMPEG
 # SOURCE TREE instead, where the first redirection fails and takes the build with it.
 if [ -n "$CACHE_ROOT" ]; then
@@ -253,7 +253,7 @@ if [ -n "$CACHE_ROOT" ]; then
   # two would disagree about what the shipped libraries are, which is the one claim the LGPL
   # position rests on.
   # INHERITED BUILD VARIABLES ARE INPUTS TOO. FFmpeg's configure honours CFLAGS, CPPFLAGS and
-  # LDFLAGS from the environment, and neither the flag list above nor `.plx-flags` records them —
+  # LDFLAGS from the environment, and neither the flag list above nor `.butaca-flags` records them —
   # so the first checkout to build with something in CFLAGS would bake it into objects that every
   # later, clean checkout then reuses. One shell's codegen or SDK override, silently inherited by
   # every lane on the machine, in libraries that ship. They are in the key, which means such a
@@ -433,12 +433,12 @@ fi
 cd "$SRC"
 if [ -z "$HOST" ]; then
   # Relative configure spelling avoids embedding the checkout path in avutil_configuration.
-  cp "$ROOT/ci/arm-cc.py" ./plx-arm-cc.py
+  cp "$ROOT/ci/arm-cc.py" ./butaca-arm-cc.py
   cp "$ROOT/ci/check-link-evidence.py" ./check-link-evidence.py
 fi
 # Reconfigure only when the flags change; FFmpeg's configure is slow and this script is a
 # prerequisite of every build.
-FLAGS_FILE="$SRC/.plx-flags"
+FLAGS_FILE="$SRC/.butaca-flags"
 NEW_FLAGS=$*
 if [ ! -f "$FLAGS_FILE" ] || [ "$(cat "$FLAGS_FILE")" != "$NEW_FLAGS" ]; then
   echo "ffmpeg: configuring ($VERSION, $([ "${RELEASE:-}" = 1 ] && echo release || echo dev))"
@@ -450,14 +450,14 @@ fi
 echo "ffmpeg: building"
 make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" > "$WORK/build.log" 2>&1 || {
   echo "ffmpeg: BUILD FAILED — $WORK/build.log" >&2; tail -20 "$WORK/build.log" >&2; exit 1; }
-# DESTDIR redirects the /plx prefix onto the real tree: the libraries believe they were
-# configured for /plx (so they record no build path) and land in $PREFIX regardless.
+# DESTDIR redirects the /butaca prefix onto the real tree: the libraries believe they were
+# configured for /butaca (so they record no build path) and land in $PREFIX regardless.
 make install DESTDIR="$WORK/destdir" > "$WORK/install.log" 2>&1
 mkdir -p "$PREFIX"
-cp -R "$WORK/destdir/plx/." "$PREFIX/"
+cp -R "$WORK/destdir/butaca/." "$PREFIX/"
 # Strip each real ELF, then prove the exact strip transformation against its link receipt.
 if [ -z "$HOST" ]; then
-  for elf in "$SRC"/libavutil/libavutil-plx.so.* "$SRC"/libavcodec/libavcodec-plx.so.* "$SRC"/libavformat/libavformat-plx.so.* "$SRC"/libswscale/libswscale-plx.so.*; do
+  for elf in "$SRC"/libavutil/libavutil-butaca.so.* "$SRC"/libavcodec/libavcodec-butaca.so.* "$SRC"/libavformat/libavformat-butaca.so.* "$SRC"/libswscale/libswscale-butaca.so.*; do
     case "$elf" in *.link.*) continue ;; esac
     [ -f "$elf" ] && [ ! -L "$elf" ] || continue
     target="$PREFIX/lib/$(basename "$elf")"
@@ -482,7 +482,7 @@ echo "ffmpeg: installed to $PREFIX"
 # installed. Make then fails the target on a COLD tree while a second run succeeds, because by then
 # the header exists and the recipe never re-runs. That reads as a flake and is not one; CI builds
 # clean, so it fails there every time.
-for f in "$PREFIX"/lib/lib*-plx.so.* "$PREFIX"/lib/lib*-plx.*.dylib; do
+for f in "$PREFIX"/lib/lib*-butaca.so.* "$PREFIX"/lib/lib*-butaca.*.dylib; do
   case "$f" in *.link.*) continue ;; esac
   if [ -f "$f" ] && [ ! -L "$f" ]; then
     printf '  %-28s %6s KB\n' "$(basename "$f")" "$(( $(wc -c < "$f") / 1024 ))"

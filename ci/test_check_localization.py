@@ -120,8 +120,8 @@ class InventoryTests(unittest.TestCase):
 
     def test_another_modules_prose_constant_is_followed(self):
         consts = checker.prose_consts('''pub(crate) const REFUSED: &str = "Switching profiles isn't available";
-            pub(crate) const KEY: &str = "plx:context/trailer"; const N: usize = 3;''')
-        self.assertEqual(consts, {'REFUSED': "Switching profiles isn't available", 'KEY': 'plx:context/trailer'})
+            pub(crate) const KEY: &str = "butaca:context/trailer"; const N: usize = 3;''')
+        self.assertEqual(consts, {'REFUSED': "Switching profiles isn't available", 'KEY': 'butaca:context/trailer'})
         source = '''fn step(&mut self) { self.state.error = owner::REFUSED.into(); log(owner::KEY); }'''
         self.assertEqual({f.text for f in checker.scan(source, None, consts)}, {"Switching profiles isn't available"})
 

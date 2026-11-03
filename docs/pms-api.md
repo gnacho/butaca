@@ -937,7 +937,7 @@ user-selected fixed rungs remain on the progressive direct-play/start.mkv paths 
 Two universal-transcoder query params, each `1` or absent (never `0` — omit to mean off). PMS
 accepts them on the transcode leg only; `Stream.canNormalizeLoudness` (bool, lenient-decoded like
 every other PMS bool) says per-track whether the server has the loudness analysis the DSP needs.
-Every session opened for these measurements was stopped afterward; see `/tmp/plx266/measurements.md`
+Every session opened for these measurements was stopped afterward; see `/tmp/butaca266/measurements.md`
 for the raw captures behind this table.
 
 | # | Request | Result |

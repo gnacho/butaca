@@ -1000,7 +1000,7 @@ mod delete_all_tests {
 
     impl Tv {
         fn new(tag: &str) -> Self {
-            let root = std::env::temp_dir().join(format!(".plx-delete-{tag}-{}", std::process::id()));
+            let root = std::env::temp_dir().join(format!(".butaca-delete-{tag}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&root);
             std::fs::create_dir_all(root.join("persistent")).unwrap();
             std::fs::create_dir_all(root.join("runtime")).unwrap();
@@ -1066,7 +1066,7 @@ mod delete_all_tests {
         }
         let _restore = Restore;
         let root = std::env::temp_dir().join(format!(
-            ".plx-delete-runtime-logs-{}",
+            ".butaca-delete-runtime-logs-{}",
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&root);

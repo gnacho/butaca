@@ -34,7 +34,7 @@ they no longer do, because the TV's version moves with the firmware (libavformat
 
 | Shipped file | Upstream | Licence |
 |---|---|---|
-| `libavutil-plx.so.61`, `libavcodec-plx.so.63`, `libavformat-plx.so.63` | FFmpeg **9.0**, unmodified | LGPL-2.1-or-later |
+| `libavutil-butaca.so.61`, `libavcodec-butaca.so.63`, `libavformat-butaca.so.63` | FFmpeg **9.0**, unmodified | LGPL-2.1-or-later |
 
 **These libraries are covered by the GNU Lesser General Public License, version 2.1 or later.** A
 complete copy of that licence is supplied with this package at `licenses/LGPL-2.1.txt`.
@@ -56,7 +56,7 @@ section 3), which the Matroska demuxer needs to inflate compressed subtitle trac
 **You may modify and replace them.** They are ordinary shared libraries, loaded at run time by
 `dlopen` from the application's own directory; no FFmpeg code is linked into the `butaca`
 executable. Build your own from the source above and put it in the app directory under the same
-file name, and Butaca will load yours instead, with no change to the application. The `-plx`
+file name, and Butaca will load yours instead, with no change to the application. The `-butaca`
 suffix in the file names exists so these cannot be confused with — or accidentally replace — the
 television's own FFmpeg; it denotes nothing about their content, which is stock upstream.
 
@@ -67,8 +67,8 @@ built from a different release will be declined rather than misread.
 
 ### 1.2 Native ASS rendering — redistributed inside this package
 
-`libass-plx.so.0` contains the Butaca facade and this pinned, statically linked stack.
-The Linux simulator uses the same sources in `libass-plx-host.so.0`.
+`libass-butaca.so.0` contains the Butaca facade and this pinned, statically linked stack.
+The Linux simulator uses the same sources in `libass-butaca-host.so.0`.
 
 | Component | Version | Licence |
 |---|---|---|
@@ -94,7 +94,7 @@ dependencies. FreeType's optional external compression/image libraries are disab
 HarfBuzz uses FreeType and its built-in Unicode data, without ICU or platform shapers.
 
 You may modify and rebuild the complete library, including FriBidi, using the
-matching source release, then replace `libass-plx.so.0` in the app directory. The
+matching source release, then replace `libass-butaca.so.0` in the app directory. The
 application loads that file by absolute path and checks the Butaca facade ABI.
 This distribution supplies source for the entire combined library, including the
 GPL-3.0-or-later facade, so recipients can rebuild and relink it. No library in this

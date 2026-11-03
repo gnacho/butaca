@@ -125,7 +125,7 @@ assert set(ABR_FIXTURE) == set(ABR_RUNGS.split("|")) == set(ABR_RASTER), (
 
 class FixtureHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "plxfixtures/1.0"
+    server_version = "butacafixtures/1.0"
     # The default logs to stderr with a timestamp; ours go through the server's sink so a harness
     # run can attribute every open and every seek to a case.
     def log_message(self, fmt, *args):  # noqa: A003  (BaseHTTPRequestHandler's name)

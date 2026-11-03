@@ -51,7 +51,7 @@ the pinned Sentry Native cross-build), and `sshpass` (Homebrew, for deploy/run).
   FPS. See the `ui-sim` skill.
 - `make` — build `pkg/butaca` (the ARM binary), and, first, the FFmpeg it ships
   (`ci/build-ffmpeg.sh`; ~2 minutes on the first checkout to want that configuration, **3 seconds
-  in every checkout after** — the source and object tree is machine-wide under `$PLX_BUILD_CACHE`,
+  in every checkout after** — the source and object tree is machine-wide under `$BUTACA_BUILD_CACHE`,
   default `~/.cache/butaca`, keyed by the configure flags so a dev tree and a RELEASE tree
   cannot be confused for one another; only the 3.8 MB prefix is per-checkout) plus the
   checksum-pinned Sentry Native
@@ -98,7 +98,7 @@ the pinned Sentry Native cross-build), and `sshpass` (Homebrew, for deploy/run).
   serializes every `make check` across every worktree on the machine, because concurrent cold
   builds (~1 GB RSS each) thrash far worse than queuing (measured 2026-09-28: a lone run ~10 min,
   seven concurrent ones stretched one run to 60 min). A second caller waits and gets the holder's
-  pid/worktree/start time printed every 60 s rather than silently sharing the CPU/RAM; `PLX_CHECK_LOCK=off`
+  pid/worktree/start time printed every 60 s rather than silently sharing the CPU/RAM; `BUTACA_CHECK_LOCK=off`
   bypasses the lock, and `--timeout` (passed to the wrapper directly, not through `make`) exits 75
   instead of waiting forever. It runs `cargo test --lib`
   **twice: once on the default feature set and once with `--features hostsim`**, which is not a
@@ -204,10 +204,10 @@ the pinned Sentry Native cross-build), and `sshpass` (Homebrew, for deploy/run).
   **FLAVOR is NOT a codegen input for stable/debug**, which is what makes flipping between them
   cheap: the app reads its id from the INSTALL DIRECTORY at runtime (`paths::app_id`, via
   `/proc/self/exe`), so no rebuild, no second `--target-dir`, no FFmpeg rebuild, one
-  `pkg/butaca`. **Nightly is the one exception**: the Makefile derives `PLX_CHANNEL=nightly` from
+  `pkg/butaca`. **Nightly is the one exception**: the Makefile derives `BUTACA_CHANNEL=nightly` from
   `FLAVOR=nightly` and exports it (empty for the other two), and `rust-modules/build.rs` reads it to
-  decide what `PLX_VERSION` the binary reports — a REAL codegen input, so switching to or from
-  `FLAVOR=nightly` does trigger cargo's `rerun-if-env-changed` and relinks. `PLX_NIGHTLY_DATE`
+  decide what `BUTACA_VERSION` the binary reports — a REAL codegen input, so switching to or from
+  `FLAVOR=nightly` does trigger cargo's `rerun-if-env-changed` and relinks. `BUTACA_NIGHTLY_DATE`
   (`YYYYMMDD`, defaulted to today's UTC date by the Makefile) rides the same mechanism and is what
   turns the reported version into `X.Y.Z-nightly-YYYYMMDD` rather than plain `X.Y.Z-dev`; a nightly
   package's OWN `appinfo.json`/control `version` also moves ahead to that same next `X.Y.Z` (see
@@ -226,8 +226,8 @@ the pinned Sentry Native cross-build), and `sshpass` (Homebrew, for deploy/run).
   stamps the feature name into a recording) and `devtriggers` (the whole `/tmp` surface, the remote
   FIFO and the capture listener — see `rust-modules/src/dev.rs`),
   plus `threadcheck` (the main-thread violation checker). **It also decides WHICH VERSION
-  THE BINARY SAYS IT IS**: the Makefile exports `PLX_RELEASE`, and `rust-modules/build.rs` publishes
-  `PLX_VERSION` as the `Cargo.toml` version exactly for a release build and as the **next MINOR plus
+  THE BINARY SAYS IT IS**: the Makefile exports `BUTACA_RELEASE`, and `rust-modules/build.rs` publishes
+  `BUTACA_VERSION` as the `Cargo.toml` version exactly for a release build and as the **next MINOR plus
   `-dev`** for every other one — `0.6.0` published, `0.7.0-dev` in the tree. The minor rather than the
   patch because development is TRUNK-BASED here: features land on main, so the next release cut from
   it is a minor (or a major, which no build script can predict); a patch is cut from an existing
@@ -339,8 +339,8 @@ kills the process at `exec()` — before `main`, before the event log exists. So
 its own and PINS it.** This doc used to file FFmpeg beside curl and ACB as "SONAME moves,
 55→57→58→59→60", which is the wrong mental model to carry into any FFmpeg change today.
 `ci/build-ffmpeg.sh` cross-compiles FFmpeg **9.0** with the NDK — shared, LGPL-clean (no
-`--enable-gpl`), under a `-plx` build suffix: `libavutil-plx.so.61`, `libavcodec-plx.so.63`,
-`libavformat-plx.so.63`, plus `libswscale-plx.so.10` in dev builds only. `make deploy`/`make ipk`
+`--enable-gpl`), under a `-butaca` build suffix: `libavutil-butaca.so.61`, `libavcodec-butaca.so.63`,
+`libavformat-butaca.so.63`, plus `libswscale-butaca.so.10` in dev builds only. `make deploy`/`make ipk`
 ship those `.so` files **beside the binary**, and `ff.rs::load_libraries` opens them by **absolute
 path out of `paths::app_dir()`**, in dependency order under `RTLD_GLOBAL` (they carry no rpath —
 FFmpeg's configure evals its flags and `$ORIGIN` does not survive), after which `boot()` refuses to
@@ -1071,7 +1071,7 @@ behaviour; real GL copies, glyphs and presentation still need a device capture w
 > real regression by looking at them.
 >
 > **Since 2026-08-22 there IS a lock, and it is enforced.** `tools/tv-lock.sh` holds a lease in a
-> directory ON THE TELEVISION (`/tmp/plx-tv.lock`, so it spans worktrees and machines, and outside
+> directory ON THE TELEVISION (`/tmp/butaca-tv.lock`, so it spans worktrees and machines, and outside
 > the `butaca-*` prefix so it neither trips `dev::any_trigger_present` nor gets swept by a
 > teardown). **The `tv-lock` skill is the workflow** — acquiring and queueing, the two things the
 > lock CANNOT see (a human watching television, and a job started from a checkout without these
@@ -1098,10 +1098,10 @@ behaviour; real GL copies, glyphs and presentation still need a device capture w
 > television exclusively" is *not* a mutex — each is true when written and false the moment the
 > second one starts, which is the 2026-08-21 collision that was caught by luck rather than by
 > anything failing loudly. **A subagent proves which lane it is by prefixing
-> `PLX_TV_LOCK_LANE=<its worktree path>` on every device command it runs**, not by exporting the
+> `BUTACA_TV_LOCK_LANE=<its worktree path>` on every device command it runs**, not by exporting the
 > variable once — the harness reports the SESSION's own checkout as that command's `cwd`
 > regardless of which worktree the agent is actually in, so `tools/tv-lock.sh` (which already
-> reads `PLX_TV_LOCK_LANE`) and the `PreToolUse` guard's `lane_from_command()` (which resolves the
+> reads `BUTACA_TV_LOCK_LANE`) and the `PreToolUse` guard's `lane_from_command()` (which resolves the
 > prefix, then the hook's own environment, then `cwd`, in that order) have to agree on the same
 > per-command spelling for several subagents to multiplex the one set through the lock, one
 > `tools/tv-lock.sh with --ttl N --wait S -- <one test>` lease per test run.
@@ -1263,7 +1263,7 @@ in its banner; the command is `tools/tv-session.sh screen off` (a PANEL state, n
 the app keeps running and playback keeps decoding). The sound half is now the same shape of
 command: `tools/tv-session.sh sound off|on|status` calls `com.webos.service.audio/setMuted` and
 reads `getVolume` back to confirm — this is the sanctioned path, so no lane needs
-`PLX_TV_LOCK_BYPASS` to mute the television. The two luna calls were exercised by hand on the set
+`BUTACA_TV_LOCK_BYPASS` to mute the television. The two luna calls were exercised by hand on the set
 (2026-09-19); the subcommand wrapping them is host-tested only and still owes a first device run.
 The **`tv-session` skill** is
 the bring-up/observe/drive loop; **`profile-tv`** handles a live but slow or stuck process and the
@@ -1815,7 +1815,7 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
 - **The binary carries no credential that grants access to anything of YOURS** — no compiled PMS
   token, no demo URL, and never the Sentry auth token, which can read and delete the project and
   lives only as a GitHub secret. A RELEASE build does carry two **write-only ingest credentials**
-  (`PLX_SENTRY_DSN`, `PLX_POSTHOG_KEY`, compiled in via `option_env!`): they permit sending to a
+  (`BUTACA_SENTRY_DSN`, `BUTACA_POSTHOG_KEY`, compiled in via `option_env!`): they permit sending to a
   project and reading nothing from it, `strings` finds them, `ci/gen-release-audit.py` prints them
   into the audit on purpose, and `release.yml` REFUSES to publish without them. The distinction is
   the point, and this line read "NO credentials" flatly — which stops a reader before they reach

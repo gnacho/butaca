@@ -339,7 +339,7 @@ pub struct AVSubtitleRect {
 crate::dynlib! {
     avformat: [
         // The ELF the app ships.
-        "libavformat-plx.so.63",
+        "libavformat-butaca.so.63",
     ] {
     // Declared beside libavformat's other entry points because that is the library that DEFINES
     // it. Under `#[link]` the final link resolved every name against every library at once and
@@ -392,7 +392,7 @@ crate::dynlib! {
 crate::dynlib! {
     avcodec: [
         // The ELF the app ships.
-        "libavcodec-plx.so.63",
+        "libavcodec-butaca.so.63",
     ] {
     fn avcodec_version() -> c_uint;
     fn av_packet_alloc() -> *mut AVPacket;
@@ -434,7 +434,7 @@ crate::dynlib! {
     // the whole avutil table reports Incomplete on every device.
     avutil: [
         // The ELF the app ships.
-        "libavutil-plx.so.61",
+        "libavutil-butaca.so.61",
     ] {
     fn avutil_version() -> c_uint;
     fn av_malloc(size: usize) -> *mut c_void;
@@ -459,7 +459,7 @@ crate::dynlib! {
 crate::dynlib! {
     swscale: [
         // The ELF the app ships.
-        "libswscale-plx.so.10",
+        "libswscale-butaca.so.10",
     ] {
     fn sws_getContext(
         src_w: c_int, src_h: c_int, src_fmt: c_int,
@@ -1522,7 +1522,7 @@ pub(crate) fn boot() {
         // the n3.3 offset on a modern AVStream lands hundreds of bytes past the struct and
         // dereferences whatever it finds, on a device with no debugger.
         // The version we BUILT against, not a version we hope to find. These libraries ship
-        // inside the package under a -plx SONAME, so a mismatch means the deployed payload is
+        // inside the package under a -butaca SONAME, so a mismatch means the deployed payload is
         // stale or someone put a different file there — not a firmware difference.
         let bad = (fmt >> 16, cod >> 16, utl >> 16) != (63, 63, 61);
         ABI_OK.store(!bad, Ordering::Relaxed);
@@ -1530,7 +1530,7 @@ pub(crate) fn boot() {
             crate::log(
                 "ff: BUNDLED FFmpeg is not the one this build expects (want avformat 63 / \
                  avcodec 63 / avutil 61) — the app directory holds a stale or foreign \
-                 libav*-plx; refusing to demux",
+                 libav*-butaca; refusing to demux",
             );
         }
     }

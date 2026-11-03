@@ -3,7 +3,7 @@ name = "butaca-modules"
 # THE version, in three places that ci/check-package.py keeps in step: here, pkg/appinfo.json
 # (which the ipk derives its filename and control entry from), and the X-Plex-Version this client
 # reports to both Plex services via src/plex/identity.rs. What the app reports is DERIVED from this
-# rather than equal to it: build.rs publishes `PLX_VERSION`, which is this number exactly for a
+# rather than equal to it: build.rs publishes `BUTACA_VERSION`, which is this number exactly for a
 # RELEASE build and the next minor plus `-dev` for every other build, so a working tree does not
 # report itself as the last published release.
 version = "0.7.0"

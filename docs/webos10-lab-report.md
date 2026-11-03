@@ -134,10 +134,10 @@ teardown, and every one of sixteen Loads got a distinct id.
 ### 2.3 The bundled FFmpeg, on a firmware whose own FFmpeg we have no table for
 
 ```
-ff: bound avutil -> libavutil-plx.so.61
-ff: bound avcodec -> libavcodec-plx.so.63
-ff: bound avformat -> libavformat-plx.so.63
-ff: bound swscale -> libswscale-plx.so.10
+ff: bound avutil -> libavutil-butaca.so.61
+ff: bound avcodec -> libavcodec-butaca.so.63
+ff: bound avformat -> libavformat-butaca.so.63
+ff: bound swscale -> libswscale-butaca.so.10
 ff: avformat=63.1.100 avcodec=63.1.100 avutil=61.1.100
 ```
 
@@ -147,7 +147,7 @@ The binary loads there, and `ff::boot` refuses to demux because there is no tabl
 gone; the app opened its own libraries out of its own app directory, by absolute path, and got the
 exact 63/63/61 triple `boot()` demands.
 
-The `-plx` build suffix is doing real work here and the log is where you can see it: the names in
+The `-butaca` build suffix is doing real work here and the log is where you can see it: the names in
 those four lines cannot resolve to the television's copies whatever version they are. **What the
 records do not say is what the set's own FFmpeg is** — the app never opens it, and the nearest
 firmware inventory we hold (10.2.0) says avformat 59, i.e. FFmpeg 5.x, not 6. Nothing in this

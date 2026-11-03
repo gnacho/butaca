@@ -1,4 +1,4 @@
-/* Compiled INTO libass-plx, never linked into the app. The implementation reads
+/* Compiled INTO libass-butaca, never linked into the app. The implementation reads
  * ASS_Image/ASS_Track through the exact pinned libass headers used to build it. */
 #include "../include/ass.h"
 #include "ass_composite.h"
@@ -22,13 +22,13 @@ struct ImageKey {
     int x, y, width, height, stride;
 };
 
-struct PlxAss {
+struct ButacaAss {
     ASS_Library *library;
     ASS_Renderer *renderer;
     ASS_Track *track;
     uint8_t *rgba;
     size_t bytes, font_bytes;
-    PlxAssBitmap regions[PLX_ASS_MAX_REGIONS];
+    ButacaAssBitmap regions[BUTACA_ASS_MAX_REGIONS];
     struct ImageKey *images;
     size_t image_capacity, image_count, region_count;
     int cache_valid;
@@ -45,9 +45,9 @@ static void quiet_message(int level, const char *format, va_list args, void *dat
     (void)level; (void)format; (void)args; (void)data;
 }
 
-unsigned plx_ass_abi_version(void) { return 2; }
+unsigned butaca_ass_abi_version(void) { return 2; }
 
-void plx_ass_destroy(PlxAss *ctx)
+void butaca_ass_destroy(ButacaAss *ctx)
 {
     if (!ctx) return;
     if (ctx->track) ass_free_track(ctx->track);
@@ -59,10 +59,10 @@ void plx_ass_destroy(PlxAss *ctx)
     free(ctx);
 }
 
-PlxAss *plx_ass_create(const char *default_font)
+ButacaAss *butaca_ass_create(const char *default_font)
 {
     if (!default_font || !*default_font) return NULL;
-    PlxAss *ctx = calloc(1, sizeof(*ctx));
+    ButacaAss *ctx = calloc(1, sizeof(*ctx));
     if (!ctx) return NULL;
     for (unsigned a = 1; a < 256; ++a) ctx->reciprocal[a] = 65536u / a;
     ctx->default_font = strdup(default_font);
@@ -77,11 +77,11 @@ PlxAss *plx_ass_create(const char *default_font)
     ctx->first = 1;
     return ctx;
 failed:
-    plx_ass_destroy(ctx);
+    butaca_ass_destroy(ctx);
     return NULL;
 }
 
-int plx_ass_add_font(PlxAss *ctx, const char *name, const uint8_t *data, size_t len)
+int butaca_ass_add_font(ButacaAss *ctx, const char *name, const uint8_t *data, size_t len)
 {
     if (!ctx || ctx->track || !name || !*name || !data || !len ||
         len > MAX_FONT_BYTES || ctx->font_bytes > MAX_FONT_BYTES - len)
@@ -91,7 +91,7 @@ int plx_ass_add_font(PlxAss *ctx, const char *name, const uint8_t *data, size_t 
     return 0;
 }
 
-int plx_ass_load(PlxAss *ctx, const uint8_t *data, size_t len, int script)
+int butaca_ass_load(ButacaAss *ctx, const uint8_t *data, size_t len, int script)
 {
     if (!ctx || ctx->track || !data || !len || len > MAX_SCRIPT_BYTES) return -1;
     if (script) {
@@ -113,7 +113,7 @@ int plx_ass_load(PlxAss *ctx, const uint8_t *data, size_t len, int script)
     return 0;
 }
 
-int plx_ass_chunk(PlxAss *ctx, const uint8_t *data, size_t len,
+int butaca_ass_chunk(ButacaAss *ctx, const uint8_t *data, size_t len,
                   int64_t start_ms, int64_t duration_ms)
 {
     if (!ctx || !ctx->track || !data || !len || len > MAX_EVENT_BYTES ||
@@ -124,12 +124,12 @@ int plx_ass_chunk(PlxAss *ctx, const uint8_t *data, size_t len,
     return 0;
 }
 
-void plx_ass_prune_before(PlxAss *ctx, int64_t deadline_ms)
+void butaca_ass_prune_before(ButacaAss *ctx, int64_t deadline_ms)
 {
     if (ctx && ctx->track) ass_prune_events(ctx->track, deadline_ms);
 }
 
-void plx_ass_flush_events(PlxAss *ctx)
+void butaca_ass_flush_events(ButacaAss *ctx)
 {
     if (ctx && ctx->track) ass_flush_events(ctx->track);
 }
@@ -178,7 +178,7 @@ static void add_bounds(struct Bounds *regions, size_t *count, struct Bounds box)
         }
     }
     /* An unusually fragmented script stays bounded without dropping any image. */
-    if (*count == PLX_ASS_MAX_REGIONS) {
+    if (*count == BUTACA_ASS_MAX_REGIONS) {
         for (size_t i = 0; i < *count; ++i) box = unite(box, regions[i]);
         *count = 0;
     }
@@ -198,7 +198,7 @@ static int same_image(struct ImageKey a, struct ImageKey b)
  * consecutive snapshots. Store addresses only; never dereference an old one.
  * Unlike libass's whole-frame changed flag, these keys identify static regions
  * while another sign moves, changes colour, or advances its karaoke coverage. */
-static int retained_regions(PlxAss *ctx, ASS_Image *images, int width, int height,
+static int retained_regions(ButacaAss *ctx, ASS_Image *images, int width, int height,
                             const struct Bounds *bounds, size_t count,
                             size_t image_count, int reusable, int *retained)
 {
@@ -245,10 +245,10 @@ static int retained_regions(PlxAss *ctx, ASS_Image *images, int width, int heigh
 /* Keep one bounded arena. Regions retain their order on the reuse path, so
  * moving left in ascending order and then right in descending order cannot
  * overwrite another retained source. Clear changed regions only after moving. */
-static void place_regions(PlxAss *ctx, const struct Bounds *bounds, size_t count,
+static void place_regions(ButacaAss *ctx, const struct Bounds *bounds, size_t count,
                            const int *retained)
 {
-    size_t old_offset[PLX_ASS_MAX_REGIONS], next_offset[PLX_ASS_MAX_REGIONS];
+    size_t old_offset[BUTACA_ASS_MAX_REGIONS], next_offset[BUTACA_ASS_MAX_REGIONS];
     size_t old = 0, next = 0;
     for (size_t i = 0; i < count; ++i) {
         old_offset[i] = old;
@@ -264,8 +264,8 @@ static void place_regions(PlxAss *ctx, const struct Bounds *bounds, size_t count
             memmove(ctx->rgba + next_offset[i], ctx->rgba + old_offset[i], ctx->regions[i].bytes);
     for (size_t i = 0; i < count; ++i) {
         struct Bounds b = bounds[i];
-        PlxAssBitmap *bitmap = &ctx->regions[i];
-        *bitmap = (PlxAssBitmap){
+        ButacaAssBitmap *bitmap = &ctx->regions[i];
+        *bitmap = (ButacaAssBitmap){
             .x = b.left, .y = b.top, .width = b.right - b.left, .height = b.bottom - b.top,
             .bytes = (size_t)(b.right - b.left) * (b.bottom - b.top) * 4,
             .rgba = ctx->rgba + next_offset[i]
@@ -275,9 +275,9 @@ static void place_regions(PlxAss *ctx, const struct Bounds *bounds, size_t count
     ctx->region_count = count;
 }
 
-int plx_ass_render(PlxAss *ctx, int64_t now_ms, int width, int height,
+int butaca_ass_render(ButacaAss *ctx, int64_t now_ms, int width, int height,
                    int storage_width, int storage_height,
-                   PlxAssFrame *frame)
+                   ButacaAssFrame *frame)
 {
     if (!ctx || !ctx->track || !frame || width <= 0 || height <= 0 ||
         width > 4096 || height > 2160 || (size_t)width * height > MAX_PIXELS ||
@@ -306,7 +306,7 @@ int plx_ass_render(PlxAss *ctx, int64_t now_ms, int width, int height,
         return 0;
     }
     ctx->first = 0;
-    struct Bounds bounds[PLX_ASS_MAX_REGIONS];
+    struct Bounds bounds[BUTACA_ASS_MAX_REGIONS];
     size_t region_count = 0;
     int image_count = 0;
     for (ASS_Image *p = images; p; p = p->next) {
@@ -327,7 +327,7 @@ int plx_ass_render(PlxAss *ctx, int64_t now_ms, int width, int height,
         ctx->cache_valid = 1;
         return 1;
     }
-    int retained[PLX_ASS_MAX_REGIONS];
+    int retained[BUTACA_ASS_MAX_REGIONS];
     if (retained_regions(ctx, images, width, height, bounds, region_count,
                          (size_t)image_count, reusable, retained) < 0) return -1;
     size_t bytes = 0;
@@ -355,7 +355,7 @@ int plx_ass_render(PlxAss *ctx, int64_t now_ms, int width, int height,
         if (region == SIZE_MAX || retained[region]) continue;
         int l, t, r, b;
         if (clipped_bounds(p, width, height, &l, &t, &r, &b) <= 0) continue;
-        PlxAssBitmap *bitmap = &ctx->regions[region];
+        ButacaAssBitmap *bitmap = &ctx->regions[region];
         uint32_t color = (p->color >> 24) | ((p->color >> 8) & 0xff00u) |
                          ((p->color << 8) & 0xff0000u) | 0xff000000u;
         unsigned opacity = 255 - (p->color & 255);
@@ -379,7 +379,7 @@ int plx_ass_render(PlxAss *ctx, int64_t now_ms, int width, int height,
     }
     for (size_t region = 0; region < region_count; ++region) {
         if (retained[region]) continue;
-        PlxAssBitmap *bitmap = &ctx->regions[region];
+        ButacaAssBitmap *bitmap = &ctx->regions[region];
         uint8_t *rgba = (uint8_t *)bitmap->rgba;
         for (size_t i = 0; i < bitmap->bytes; i += 4) {
             unsigned a = rgba[i + 3];

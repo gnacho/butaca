@@ -154,7 +154,7 @@ fn legacy_account_key(account_token: &str) -> String {
     if account_token.is_empty() {
         return String::new();
     }
-    let mut input = b"plx-consent:".to_vec();
+    let mut input = b"butaca-consent:".to_vec();
     input.extend_from_slice(account_token.as_bytes());
     crate::sha256::sha256(&input)[..8].iter().map(|b| format!("{b:02x}")).collect()
 }

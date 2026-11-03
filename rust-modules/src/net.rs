@@ -1915,7 +1915,7 @@ mod tls_mode_tests {
     /// the change in behaviour is a test diff rather than a discovery.
     #[test]
     fn a_missing_bundle_falls_back_to_the_device_trust_store() {
-        let dir = std::env::temp_dir().join("plx-net-ca-absent");
+        let dir = std::env::temp_dir().join("butaca-net-ca-absent");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("temp dir");
         assert_eq!(shipped_ca_bundle(&dir), None);
@@ -1927,7 +1927,7 @@ mod tls_mode_tests {
     /// the one `app_dir()` resolves at runtime.
     #[test]
     fn a_shipped_bundle_is_selected_by_absolute_path() {
-        let dir = std::env::temp_dir().join("plx-net-ca-present");
+        let dir = std::env::temp_dir().join("butaca-net-ca-present");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("temp dir");
         std::fs::write(dir.join("roots.pem"), b"-----BEGIN CERTIFICATE-----\n").expect("write");
@@ -1945,7 +1945,7 @@ mod tls_mode_tests {
     /// the store that would have worked.
     #[test]
     fn a_directory_named_like_the_bundle_is_not_one() {
-        let dir = std::env::temp_dir().join("plx-net-ca-dir");
+        let dir = std::env::temp_dir().join("butaca-net-ca-dir");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("roots.pem")).expect("temp dirs");
         assert_eq!(shipped_ca_bundle(&dir), None);

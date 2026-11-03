@@ -14,7 +14,7 @@ name: build + verify
 # .ipk plus its sidecar evidence files, uploaded as one artifact.
 #
 # A third caller, `nightly.yml` (a scheduled build from `main`), now uses this too — `flavor:
-# nightly` with the `nightly-date` input, passed through as `PLX_NIGHTLY_DATE`, so the FLAVOR/
+# nightly` with the `nightly-date` input, passed through as `BUTACA_NIGHTLY_DATE`, so the FLAVOR/
 # version machinery this job already exercised for stable and debug covers nightly the same way.
 # The boolean inputs below (`homebrew-manifest`, `source-asset`, `caches`, `fwcompat`) are what let
 # three callers each select the right subset without a third copy of this job.
@@ -33,9 +33,9 @@ on:
       nightly-date:
         description: >
           UTC date (YYYYMMDD) a nightly build reports in its version string
-          (`X.Y.Z-nightly-<date>`), passed through as PLX_NIGHTLY_DATE. Ignored by stable/debug,
+          (`X.Y.Z-nightly-<date>`), passed through as BUTACA_NIGHTLY_DATE. Ignored by stable/debug,
           which never read it. A nightly caller must supply a real date: `rust-modules/build.rs`
-          fails the build on `PLX_CHANNEL=nightly` with no date or a malformed one, by design —
+          fails the build on `BUTACA_CHANNEL=nightly` with no date or a malformed one, by design —
           only a bare local `make FLAVOR=nightly RELEASE=1 ipk`, with the variable truly absent
           from the shell rather than set empty here, gets the Makefile's own today's-date default.
         type: string
@@ -154,7 +154,7 @@ jobs:
           FLAVOR: ${{ inputs.flavor }}
           # Only meaningful for `flavor: nightly` — `build.rs` never reads it for stable/debug.
           # See the `nightly-date` input's own comment for what an empty value here means.
-          PLX_NIGHTLY_DATE: ${{ inputs.nightly-date }}
+          BUTACA_NIGHTLY_DATE: ${{ inputs.nightly-date }}
           # DWARF, so the release can be symbolicated later. It must be set on EVERY invocation in
           # this step and it must be the SAME invocation that cuts the .ipk: a debuginfo build and a
           # plain one produce DIFFERENT BUILD IDs from identical sources (measured — see the
@@ -264,7 +264,7 @@ jobs:
           matrix=$(mktemp)
           {
             echo 'Bundled libraries (tools/fwcompat.py --shipped pkg):'
-            for lib in pkg/lib*-plx.so.*; do
+            for lib in pkg/lib*-butaca.so.*; do
               case "$lib" in *.link.*) continue ;; esac   # the link-evidence sidecars
               ./tools/fwcompat.py --db /usr/share/webosbrew/compat-checker/data --min-release 4.4.2 --shipped pkg "$lib"
             done

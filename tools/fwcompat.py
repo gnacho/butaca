@@ -23,7 +23,7 @@ plane. Do not read a green matrix as "it works on webOS 5"; read it as "it start
 USAGE
     tools/fwcompat.py                          # grade pkg/butaca against every release
     tools/fwcompat.py --release 5.3.1          # one release, with the full missing list
-    tools/fwcompat.py --shipped pkg pkg/libavformat-plx.so.63   # a bundled library, siblings shipped
+    tools/fwcompat.py --shipped pkg pkg/libavformat-butaca.so.63   # a bundled library, siblings shipped
     tools/fwcompat.py --lib libSDL2-2.0.so.0 --grep webOS      # what does that library export?
     tools/fwcompat.py --inventory libAcbAPI libavformat        # which releases carry these?
 
@@ -227,8 +227,8 @@ def defined_symbols(lib):
 def split_shipped(needed, shipped_dir):
     """(DT_NEEDED the firmware must provide, symbols the package's own libraries export).
 
-    The bundled FFmpeg libraries need each other (`libavformat-plx` -> `libavcodec-plx`,
-    `libavutil-plx`), and no firmware carries those names, so grading one of them bare reports every
+    The bundled FFmpeg libraries need each other (`libavformat-butaca` -> `libavcodec-butaca`,
+    `libavutil-butaca`), and no firmware carries those names, so grading one of them bare reports every
     firmware as FAIL and says nothing. With `--shipped DIR`, a DT_NEEDED name that is a file in DIR
     is the package's own and is taken off the firmware's list, and what that file exports counts as
     resolved; everything else still has to come from the television. Each shipped library is graded
@@ -236,7 +236,7 @@ def split_shipped(needed, shipped_dir):
 
     DIR is trusted to be the payload: a name is "shipped" because a file of that name sits there,
     not because the .ipk carries it. CI's `pkg/` is exactly the staged payload; a local `pkg/` with
-    leftovers from another build (a debug `libswscale-plx` beside a RELEASE=1 build) would credit a
+    leftovers from another build (a debug `libswscale-butaca` beside a RELEASE=1 build) would credit a
     library the package does not ship.
     """
     if not shipped_dir:

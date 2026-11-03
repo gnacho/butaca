@@ -52,7 +52,7 @@ import serve_fixtures  # noqa: E402
 import focusfp_check  # noqa: E402
 
 _FIXTURE_GEN_SPEC = importlib.util.spec_from_file_location(
-    "plx_make_fixtures", os.path.join(TESTS_DIR, "fixtures", "make_fixtures.py"))
+    "butaca_make_fixtures", os.path.join(TESTS_DIR, "fixtures", "make_fixtures.py"))
 fixturegen = importlib.util.module_from_spec(_FIXTURE_GEN_SPEC)
 _FIXTURE_GEN_SPEC.loader.exec_module(fixturegen)
 

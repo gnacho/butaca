@@ -12,7 +12,7 @@ CASES = ('valid short eintr empty partial unterminated open-error read-error '
 
 def main():
     parser = argparse.ArgumentParser(__doc__)
-    parser.add_argument('--output', type=Path, default=Path('/tmp/plx-compat-tests'))
+    parser.add_argument('--output', type=Path, default=Path('/tmp/butaca-compat-tests'))
     args = parser.parse_args()
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -77,7 +77,7 @@ def main():
     print('PASS: return, errno, and partial-read negative controls rejected')
     if platform.system() == 'Linux':
         binary = out / 'auxv-native'
-        run([cc, *flags, '-D_GNU_SOURCE', '-DPLX_AUXV_HOST_TEST',
+        run([cc, *flags, '-D_GNU_SOURCE', '-DBUTACA_AUXV_HOST_TEST',
              ROOT / 'src/compat/getauxval.c', ROOT / 'ci/test-compat-native.c', '-o', binary])
         run([binary])
         print('PASS: same-process native Linux comparison')

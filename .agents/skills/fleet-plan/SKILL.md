@@ -58,9 +58,9 @@ rather than by anything failing loudly. `tools/tv-lock.sh` came out of a second 
 lock schedules; it does not plan.** Two lanes that both want the set still run in series, and that
 queue is invisible in the plan you wrote.
 
-- **A LANE IS A CHECKOUT** — `tools/tv-lock.sh:62`, `LANE="${PLX_TV_LOCK_LANE:-$REPO}"`. What that
+- **A LANE IS A CHECKOUT** — `tools/tv-lock.sh:62`, `LANE="${BUTACA_TV_LOCK_LANE:-$REPO}"`. What that
   means for planning: **a second worktree on the same Mac is a second lane**, however the prompt
-  describes it. Do not set `PLX_TV_LOCK_LANE` to make two worktrees share one lease — that is
+  describes it. Do not set `BUTACA_TV_LOCK_LANE` to make two worktrees share one lease — that is
   spelling "we are one lane" at the mechanism whose entire job is to disagree.
 - **`FLAVOR` does not buy you a second lane.** Two installs live on one set, but
   `docs/two-installs.md` §3.2: *"One hardware video plane and one decoder… Two installs cannot play
@@ -166,7 +166,7 @@ code beside it. A lane without one costs a few gigabytes.
 What keeps that in check:
 
 - **`make disk`** (`tools/build-gc.sh`) reports every checkout's derived trees, the external lane
-  trees under `$PLX_FLEET_DIR`, and the free space, in one table; `tools/build-gc.sh
+  trees under `$BUTACA_FLEET_DIR`, and the free space, in one table; `tools/build-gc.sh
   --orphans | --incremental | --lanes | --worktrees | --all` reclaims. Nothing it deletes is
   anything but `make` output or a lane worktree already fully on `main`. Run it when a lane starts
   failing for space, before launching a fleet, and `--worktrees` followed by `--orphans` after
@@ -184,7 +184,7 @@ What keeps that in check:
   else and the main checkout keeps its cache. `CARGO_INCREMENTAL=1` in the environment still
   overrides both — the right call only for a lane genuinely doing long iterative work.
 - **The FFmpeg build tree is machine-wide and keyed by its configure flags**, under
-  `$PLX_BUILD_CACHE` (default `~/.cache/butaca`); see the vendor bullet below.
+  `$BUTACA_BUILD_CACHE` (default `~/.cache/butaca`); see the vendor bullet below.
 
 **The rule: workers run `make check` and nothing that cross-compiles. ONE integrator does the
 cross-build, once, at the end.** Because `make check` now serializes machine-wide, several lanes
@@ -201,8 +201,8 @@ all build it and `make check` cannot.
 Keep each lane's build trees **outside** the worktree:
 
 ```sh
-export CARGO_TARGET_DIR=$HOME/plx-fleet/<lane>/target       # governs `make check` — it passes no --target-dir
-export SIM_TDIR=$HOME/plx-fleet/<lane>/target-sim           # `make sim` DOES pass --target-dir, which wins
+export CARGO_TARGET_DIR=$HOME/butaca-fleet/<lane>/target       # governs `make check` — it passes no --target-dir
+export SIM_TDIR=$HOME/butaca-fleet/<lane>/target-sim           # `make sim` DOES pass --target-dir, which wins
 ```
 
 Give each lane its **own** path: one shared dir makes concurrent cargo runs block on the target
@@ -212,7 +212,7 @@ lock and re-fingerprint each other's sources.
 **`git worktree remove` stays meaningful.**
 
 **And moving them is how they become permanent, which is the failure this advice caused.** A tree
-under `$HOME/plx-fleet/<lane>` outlives its worktree by construction: remove the lane and the
+under `$HOME/butaca-fleet/<lane>` outlives its worktree by construction: remove the lane and the
 gigabytes stay, owned by nobody, named for a branch that no longer exists, and invisible to a `du`
 at the repo root. So: **`tools/build-gc.sh --orphans` after every fleet**, which deletes exactly the
 external trees whose worktree is gone and touches no live lane. `make disk` lists them with an
@@ -257,7 +257,7 @@ cp "$MAIN/tests/manifest.local.json" "$WT/tests/"        # only for ./tests/run.
   (280 MB, plus the builder's MAC addresses and home path in FFmpeg's configure logs) into a branch
   bound for a public repository**. The `.gitignore` entry that now catches it says so. **You no
   longer need to do anything at all**: since 2026-09-03 `ci/build-ffmpeg.sh` puts the 122 MB source
-  and object tree in a machine-wide cache under `$PLX_BUILD_CACHE` (default `~/.cache/butaca`),
+  and object tree in a machine-wide cache under `$BUTACA_BUILD_CACHE` (default `~/.cache/butaca`),
   keyed by the configure flags, so a lane that cross-builds compiles nothing and copies out a
   3.8 MB prefix. Measured the day it landed: a cold worktree's `make pkg/.ffabi-ok` went from
   ~2 minutes and 122 MB to **3 seconds and 3.8 MB**.
@@ -287,7 +287,7 @@ cannot be reached once they are running — a hazard you meant to mention is a h
    the simulator — the `ui-sim` skill — with your own root: `BUTACA_RUNTIME_DIR=/tmp/sim-<lane>`.
 3. DISK. `make check` ONLY. Never bare `make`, `make all`, `make deploy`, `make ipk` — each
    cross-builds FFmpeg into this worktree (a built lane here measures 1.2–4.8 GB). First:
-   `export CARGO_TARGET_DIR=$HOME/plx-fleet/<lane>/target SIM_TDIR=$HOME/plx-fleet/<lane>/target-sim`
+   `export CARGO_TARGET_DIR=$HOME/butaca-fleet/<lane>/target SIM_TDIR=$HOME/butaca-fleet/<lane>/target-sim`
 4. NEVER `git stash` — the stack is SHARED across worktrees and another lane's pop takes your work.
    Use `git add -A && git commit -m wip`. If you already stashed, pin it and drop it:
    `git update-ref refs/rescue/<lane> "$(git rev-parse stash@{0})" && git stash drop`

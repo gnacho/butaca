@@ -8,7 +8,7 @@
 # advances — drives the transport with the remote FIFO and writes one shot per panel. The same
 # script run against two commits produces two comparable sets.
 #
-#   CLIP=/tmp/plxfix/clip.mp4 tests/player_shots.sh /tmp/shots-mine
+#   CLIP=/tmp/butacafix/clip.mp4 tests/player_shots.sh /tmp/shots-mine
 #
 # The clip is any h264/aac mp4; generate one with
 #   ffmpeg -f lavfi -i testsrc=size=1920x1080:rate=24:duration=120 \
@@ -23,7 +23,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SIM_BIN="${SIM_BIN:-$ROOT/rust-modules/target-sim/debug/butaca-sim}"
 OUT="${1:-/tmp/butaca-player-shots}"
-CLIP="${CLIP:-/tmp/plxfix/clip.mp4}"
+CLIP="${CLIP:-/tmp/butacafix/clip.mp4}"
 MEDIA_PORT="${MEDIA_PORT:-8021}"
 PMS_PORT="${PMS_PORT:-32497}"
 STEP="${STEP:-0.9}"

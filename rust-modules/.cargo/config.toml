@@ -10,10 +10,10 @@
 # `RUST_TDIR` for an ordinary developer build is `target` — cargo's own default — so a hand-typed
 # cross build with a DIFFERENT ENVIRONMENT still writes the archive `make` links, and make will not
 # re-run cargo if that archive is newer than its prerequisites. Everything the environment decides
-# rides on this, and since 2026-09-02 that includes `PLX_RELEASE`, i.e. the version the binary
+# rides on this, and since 2026-09-02 that includes `BUTACA_RELEASE`, i.e. the version the binary
 # REPORTS:
 #
-#     cd rust-modules && PLX_RELEASE=1 cargo +nightly build --release --target arm-…-gnueabi
+#     cd rust-modules && BUTACA_RELEASE=1 cargo +nightly build --release --target arm-…-gnueabi
 #     make deploy        # links that archive: a dev-featured binary claiming the released version
 #
 # Nothing detects it in the ordinary loop — `ci/check-package.py` would, but only at package time.

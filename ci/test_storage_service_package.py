@@ -71,7 +71,7 @@ class StorageServicePackage(unittest.TestCase):
                          "--", "--exact"],
                         env={**os.environ, "CARGO_INCREMENTAL": "0",
                              "PATH": str(Path.home() / ".cargo" / "bin") + os.pathsep + os.environ.get("PATH", ""),
-                             "PLX_TEST_PACKAGED_HELPERS": "\n".join(helpers)},
+                             "BUTACA_TEST_PACKAGED_HELPERS": "\n".join(helpers)},
                         capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     self.assertIn("test result: ok. 1 passed;", result.stdout)

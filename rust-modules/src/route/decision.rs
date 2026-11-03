@@ -341,7 +341,7 @@ pub(crate) struct PlaybackSession {
 /// What the server actually did with a requested Plex Pass audio enhancement (issue #266) — as
 /// opposed to `EncodeContract::audio`, which is what was ASKED for. Distinguishing "on and
 /// working" from "the server ignored it" matters because PMS 1.43.4 does both: measurement M2
-/// (`/tmp/plx266/measurements.md`) found an AC3 2.0 source where the params changed the decision
+/// (`/tmp/butaca266/measurements.md`) found an AC3 2.0 source where the params changed the decision
 /// (a real DSP transcode) beside an AAC 5.1 source where the audio was transcoded to AC3 either
 /// way, params or not — so "the decision shows a transcode" alone cannot tell the two apart.
 ///

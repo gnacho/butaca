@@ -54,10 +54,10 @@ static int fake_close(int fd)
     if (close_error) { errno = close_error; return -1; }
     return 0;
 }
-#define PLX_AUXV_HOST_TEST
-#define PLX_AUXV_OPEN fake_open
-#define PLX_AUXV_READ fake_read
-#define PLX_AUXV_CLOSE fake_close
+#define BUTACA_AUXV_HOST_TEST
+#define BUTACA_AUXV_OPEN fake_open
+#define BUTACA_AUXV_READ fake_read
+#define BUTACA_AUXV_CLOSE fake_close
 #ifndef AUX_SOURCE
 #define AUX_SOURCE "../src/compat/getauxval.c"
 #endif
@@ -65,7 +65,7 @@ static int fake_close(int fd)
 static void expect(unsigned long key, unsigned long value, int expected_errno)
 {
     errno = EDOM;
-    assert(plx_getauxval(key) == value);
+    assert(butaca_getauxval(key) == value);
     assert(errno == expected_errno);
 }
 static void *concurrent(void *unused)

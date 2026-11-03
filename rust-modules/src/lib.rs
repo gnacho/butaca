@@ -5,8 +5,8 @@
 //!
 //! butaca-modules — the Rust app core, built as a staticlib and linked into the C
 //! boot shim. The crate's C surface is tiny: C calls `plex_run` (app.rs), writes the fallback
-//! image marker through `plx_crash_write_image_marker`, re-enters the native-crash spool through
-//! `plx_sentry_spool_external`, and forwards the two Starfish callbacks (`sf_on_event`/
+//! image marker through `butaca_crash_write_image_marker`, re-enters the native-crash spool through
+//! `butaca_sentry_spool_external`, and forwards the two Starfish callbacks (`sf_on_event`/
 //! `acb_on_event`, player/mod.rs). Everything else is Rust-internal (the per-module `repr(C)`
 //! shapes are migration legacy, not ABI).
 mod abr; // client-managed fixed-session HLS controller: estimate, propose, prime, then commit
@@ -484,7 +484,7 @@ mod private_log_tests {
     #[test]
     fn a_symlink_cannot_redirect_the_rust_log_sink() {
         let _g = crate::testlock::serial();
-        let dir = std::env::temp_dir().join(format!("plx-rust-log-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("butaca-rust-log-{}", std::process::id()));
         let _ = std::fs::create_dir(&dir);
         let victim = dir.join("victim");
         let sink = dir.join("sink");

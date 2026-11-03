@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <sys/resource.h>
 
-void plx_sentry_window_breadcrumb(const char *, int, int, int, int, int, int);
+void butaca_sentry_window_breadcrumb(const char *, int, int, int, int, int, int);
 
 int main(int argc, char **argv)
 {
@@ -33,12 +33,12 @@ int main(int argc, char **argv)
         return 3;
     }
     for (int i = 0; i < 20; i++) {
-        plx_sentry_window_breadcrumb("will_background", 1, -1, -1, -1, -1, -1);
-        plx_sentry_window_breadcrumb("did_background", 0, -1, -1, -1, -1, -1);
+        butaca_sentry_window_breadcrumb("will_background", 1, -1, -1, -1, -1, -1);
+        butaca_sentry_window_breadcrumb("did_background", 0, -1, -1, -1, -1, -1);
     }
-    plx_sentry_window_breadcrumb("did_foreground", 0, -1, -1, -1, -1, -1);
-    plx_sentry_window_breadcrumb("wm_ready", -1, 2, 0, 5, 1, 1);
-    plx_sentry_window_breadcrumb("first_frame", 1, -1, -1, -1, -1, -1);
+    butaca_sentry_window_breadcrumb("did_foreground", 0, -1, -1, -1, -1, -1);
+    butaca_sentry_window_breadcrumb("wm_ready", -1, 2, 0, 5, 1, 1);
+    butaca_sentry_window_breadcrumb("first_frame", 1, -1, -1, -1, -1, -1);
     fputs("DELIBERATE SIGSEGV: offline window breadcrumb probe\n", stderr);
     fflush(stderr);
     raise(SIGSEGV);

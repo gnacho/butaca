@@ -148,7 +148,7 @@ CASES = [
     # The same letter, the other meaning: `-f` is a string field on gh and a boolean on `git add`
     # whose NEXT word is the path. A flat text-flag set gets one of these two wrong.
     (ALLOW, 'gh workflow run release.yml -f version=0.3.0'),
-    (ALLOW, 'PLX_PUBLISH_BYPASS=1 gh pr create --body "%s"' % FAKE_TV),   # the documented hatch
+    (ALLOW, 'BUTACA_PUBLISH_BYPASS=1 gh pr create --body "%s"' % FAKE_TV),   # the documented hatch
 ]
 
 # --- heredocs: the inversion against tv-lock-guard.py -----------------------------------------

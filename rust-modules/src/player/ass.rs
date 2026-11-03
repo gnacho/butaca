@@ -500,7 +500,7 @@ impl Engine {
                     let Content::Embedded { events, .. } = &request.source.content else {
                         unreachable!()
                     };
-                    unsafe { plx_ass_prune_before(native.0, prune_deadline(events)) };
+                    unsafe { butaca_ass_prune_before(native.0, prune_deadline(events)) };
                     native.append(&request.source, from)
                 } else if self
                     .source
@@ -511,7 +511,7 @@ impl Engine {
                     // An out-of-order or size-capped window may not be expressible
                     // as expiry + append. Reset events only, retaining parsed fonts.
                     let native = self.native.as_mut().unwrap();
-                    unsafe { plx_ass_flush_events(native.0) };
+                    unsafe { butaca_ass_flush_events(native.0) };
                     native.append(&request.source, 0)
                 } else {
                     self.native = None;
@@ -610,16 +610,16 @@ pub(crate) struct NativeFrame {
 }
 
 crate::dynlib! {
-    native_ass: ["libass-plx-host.so.0", "libass-plx.so.0"] {
-        fn plx_ass_abi_version() -> u32;
-        fn plx_ass_create(default_font: *const c_char) -> *mut c_void;
-        fn plx_ass_destroy(ctx: *mut c_void);
-        fn plx_ass_add_font(ctx: *mut c_void, name: *const c_char, data: *const u8, len: usize) -> i32;
-        fn plx_ass_load(ctx: *mut c_void, data: *const u8, len: usize, script: i32) -> i32;
-        fn plx_ass_chunk(ctx: *mut c_void, data: *const u8, len: usize, start_ms: i64, duration_ms: i64) -> i32;
-        fn plx_ass_prune_before(ctx: *mut c_void, deadline_ms: i64);
-        fn plx_ass_flush_events(ctx: *mut c_void);
-        fn plx_ass_render(ctx: *mut c_void, now_ms: i64, width: i32, height: i32, storage_width: i32, storage_height: i32, frame: *mut NativeFrame) -> i32;
+    native_ass: ["libass-butaca-host.so.0", "libass-butaca.so.0"] {
+        fn butaca_ass_abi_version() -> u32;
+        fn butaca_ass_create(default_font: *const c_char) -> *mut c_void;
+        fn butaca_ass_destroy(ctx: *mut c_void);
+        fn butaca_ass_add_font(ctx: *mut c_void, name: *const c_char, data: *const u8, len: usize) -> i32;
+        fn butaca_ass_load(ctx: *mut c_void, data: *const u8, len: usize, script: i32) -> i32;
+        fn butaca_ass_chunk(ctx: *mut c_void, data: *const u8, len: usize, start_ms: i64, duration_ms: i64) -> i32;
+        fn butaca_ass_prune_before(ctx: *mut c_void, deadline_ms: i64);
+        fn butaca_ass_flush_events(ctx: *mut c_void);
+        fn butaca_ass_render(ctx: *mut c_void, now_ms: i64, width: i32, height: i32, storage_width: i32, storage_height: i32, frame: *mut NativeFrame) -> i32;
     }
 }
 
@@ -640,7 +640,7 @@ fn asset_dir() -> &'static std::path::Path {
 
 impl Drop for Native {
     fn drop(&mut self) {
-        unsafe { plx_ass_destroy(self.0) };
+        unsafe { butaca_ass_destroy(self.0) };
     }
 }
 
@@ -648,7 +648,7 @@ impl Native {
     fn open(source: &Source) -> Result<Self, Fault> {
         static LOADED: OnceLock<bool> = OnceLock::new();
         let loaded = *LOADED.get_or_init(|| {
-            native_ass::load(Some(asset_dir())).ok() && unsafe { plx_ass_abi_version() } == 2
+            native_ass::load(Some(asset_dir())).ok() && unsafe { butaca_ass_abi_version() } == 2
         });
         if !loaded {
             return Err(Fault::Unavailable);
@@ -656,7 +656,7 @@ impl Native {
         let fallback = asset_dir().join("appfont-cjk.ttf");
         let fallback = CString::new(fallback.to_string_lossy().as_bytes())
             .map_err(|_| Fault::FontsUnavailable)?;
-        let ptr = unsafe { plx_ass_create(fallback.as_ptr()) };
+        let ptr = unsafe { butaca_ass_create(fallback.as_ptr()) };
         if ptr.is_null() {
             return Err(Fault::InitFailed);
         }
@@ -677,7 +677,7 @@ impl Native {
             Content::Embedded { header, .. } => (header.as_ref(), 0),
             Content::Script { bytes, .. } => (bytes.as_ref(), 1),
         };
-        if unsafe { plx_ass_load(native.0, data.as_ptr(), data.len(), script) } < 0 {
+        if unsafe { butaca_ass_load(native.0, data.as_ptr(), data.len(), script) } < 0 {
             return Err(Fault::Unreadable);
         }
         native.append(source, 0)?;
@@ -686,7 +686,7 @@ impl Native {
 
     fn font(&mut self, name: &str, bytes: &[u8]) -> Result<(), Fault> {
         let name = CString::new(name).map_err(|_| Fault::FontName)?;
-        if unsafe { plx_ass_add_font(self.0, name.as_ptr(), bytes.as_ptr(), bytes.len()) } < 0 {
+        if unsafe { butaca_ass_add_font(self.0, name.as_ptr(), bytes.as_ptr(), bytes.len()) } < 0 {
             return Err(Fault::TrackFonts);
         }
         Ok(())
@@ -696,7 +696,7 @@ impl Native {
         if let Content::Embedded { events, .. } = &source.content {
             for event in &events[from..] {
                 if unsafe {
-                    plx_ass_chunk(
+                    butaca_ass_chunk(
                         self.0,
                         event.payload.as_ptr(),
                         event.payload.len(),
@@ -715,7 +715,7 @@ impl Native {
     fn render(&mut self, key: Key, previous: &[Rect]) -> Result<Option<Vec<Rect>>, Fault> {
         let mut frame = NativeFrame::default();
         let result = unsafe {
-            plx_ass_render(
+            butaca_ass_render(
                 self.0,
                 key.now_ms,
                 key.width,
