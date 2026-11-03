@@ -374,6 +374,7 @@ fn park_retry(s: &mut Pslot) {
 /// transient. Other completed HTTP answers are final: retrying a redirect we deliberately do not
 /// follow, an unsupported method/media type, or a missing item can never change this request.
 /// Bytes that arrived but did not decode are the decoder's verdict and final too.
+#[allow(dead_code)] // frozen until the art cache goes
 fn is_transient(outcome: &crate::plex::ArtFetch) -> bool {
     match outcome {
         crate::plex::ArtFetch::Bytes(_) => false,
@@ -1365,6 +1366,7 @@ fn fetch_image(client: &crate::plex::Client, path: &str) -> Option<Vec<u8>> {
 
 /// Use the persistent PMS identity, never its registration-order slot. An origin is the
 /// conservative fallback for injected/older sessions that have not learned a machine id yet.
+#[allow(dead_code)] // frozen until the art cache goes
 fn disk_namespace(client: &crate::plex::Client) -> String {
     if client.machine_id().is_empty() {
         format!("origin:{}", client.origin().base())
@@ -1387,6 +1389,7 @@ pub(crate) fn log_cache_stats() {
 
 /// What [`load_art`] produced: the decoded art (if any), the disk key to refresh when the hit
 /// was stale, and whether a failure is one that can change.
+#[allow(dead_code)] // frozen until the art cache goes
 struct Loaded<T> {
     art: Option<T>,
     stale: Option<crate::imgcache::DiskKey>,
@@ -1396,6 +1399,7 @@ struct Loaded<T> {
 /// The shared disk-first/fetch path for one built request. A disk hit that does not decode is
 /// removed and falls through to the network; only a fetched response that DECODES is written to
 /// disk, so a bad answer never replaces a good image.
+#[allow(dead_code)] // frozen until the art cache goes
 fn load_art<T>(
     client: &crate::plex::Client,
     srv: ServerId,
@@ -1471,7 +1475,7 @@ fn poster_worker() {
         let mut h = 0;
         let mut px: *mut std::os::raw::c_uchar = std::ptr::null_mut();
 
-        let mut stale = None;
+        let stale = None;
         let mut transient = false;
         // The Jellyfin slot fetches through ITS client: the key was built by `image_path` and is
         // already a complete token-bearing path, which is what `get_bytes` dials as-is. The
@@ -1501,19 +1505,6 @@ fn poster_worker() {
                     warn_fetch_failed(srv, ArtFail::NoServer);
                 }
             }
-        } else if let Some(client) = crate::registry::client_for(srv)
-            .filter(|c| cache_gen == crate::imgcache::generation() && c.token_gen() == token_gen)
-        {
-            let loaded = load_art(client, srv, &key_s, cache_gen, |b| {
-                let (mut dw, mut dh) = (0, 0);
-                let p = img::img_decode_rgba(b.as_ptr(), b.len() as c_int, &mut dw, &mut dh);
-                (!p.is_null()).then_some((p, dw, dh))
-            });
-            if let Some((p, dw, dh)) = loaded.art {
-                (px, w, h) = (p, dw, dh);
-            }
-            stale = loaded.stale.map(|k| (client, k));
-            transient = loaded.transient;
         } else {
             transient = cache_gen == crate::imgcache::generation();
             warn_fetch_failed(srv, ArtFail::NoServer);

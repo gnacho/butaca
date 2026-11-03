@@ -16,7 +16,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+#[allow(dead_code)] // frozen until the art cache goes
 pub(crate) const REFRESH_AFTER: Duration = Duration::from_secs(24 * 3600);
+#[allow(dead_code)] // frozen until the art cache goes
 const TOUCH_AFTER: Duration = Duration::from_secs(3600);
 const MAX_FILE: usize = 4 * 1024 * 1024;
 const MAX_BYTES: u64 = 128 * 1024 * 1024;
@@ -30,6 +32,7 @@ pub(crate) struct DiskKey {
     legacy: Option<String>,
 }
 
+#[allow(dead_code)] // frozen until the art cache goes
 pub(crate) struct CachedImage {
     pub bytes: Vec<u8>,
     pub stale: bool,
@@ -47,6 +50,7 @@ pub(crate) struct Snapshot {
 
 /// Every transcode option participates, except the outer authentication token. Namespace is
 /// the stable Plex machine identifier (or server origin when discovery has no identifier).
+#[allow(dead_code)] // frozen until the art cache goes
 pub(crate) fn classify(server_namespace: &str, built_key: &str) -> Option<DiskKey> {
     let (path, query) = built_key.split_once('?')?;
     if path != "/photo/:/transcode" || server_namespace.is_empty() {
@@ -121,6 +125,7 @@ pub(crate) fn classify(server_namespace: &str, built_key: &str) -> Option<DiskKe
     })
 }
 
+#[allow(dead_code)] // frozen until the art cache goes
 fn hex_digest(bytes: &[u8]) -> String {
     crate::sha256::sha256(bytes)
         .iter()
@@ -128,6 +133,7 @@ fn hex_digest(bytes: &[u8]) -> String {
         .collect()
 }
 
+#[allow(dead_code)] // frozen until the art cache goes
 fn is_avatar(source: &str) -> bool {
     let Some(rest) = source
         .strip_prefix("https://plex.tv/")
@@ -139,6 +145,7 @@ fn is_avatar(source: &str) -> bool {
     matches!((parts.next(), parts.next(), parts.next()), (Some("users"), Some(id), Some("avatar")) if !id.is_empty())
 }
 
+#[allow(dead_code)] // frozen until the art cache goes
 fn without_avatar_stamp(source: &str) -> String {
     let Some((path, query)) = source.split_once('?') else {
         return source.into();
@@ -155,6 +162,7 @@ fn without_avatar_stamp(source: &str) -> String {
 }
 
 /// RFC3986 decoding: literal `+` is not a form-encoded space.
+#[allow(dead_code)] // frozen until the art cache goes
 fn percent_decode(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
@@ -185,6 +193,7 @@ struct Limits {
 struct Entry {
     size: u64,
     order: u64,
+    #[allow(dead_code)] // frozen until the art cache goes
     touched: SystemTime,
 }
 
@@ -288,6 +297,7 @@ impl Cache {
         ));
     }
 
+    #[allow(dead_code)] // frozen until the art cache goes
     fn read_at(&self, generation: u64, key: &DiskKey) -> Option<CachedImage> {
         let mut index = self.index.lock().unwrap_or_else(|e| e.into_inner());
         if self.generation.load(Ordering::Acquire) != generation {
@@ -509,6 +519,7 @@ impl Index {
         }
     }
 
+    #[allow(dead_code)] // frozen until the art cache goes
     fn touch(&mut self, name: &str, now: SystemTime) {
         let Some(entry) = self.entries.get_mut(name) else {
             return;
@@ -532,6 +543,7 @@ impl Index {
     }
 }
 
+#[allow(dead_code)] // frozen until the art cache goes
 fn read_file(path: &Path, legacy: bool) -> Option<(Vec<u8>, u64)> {
     let max = MAX_FILE + if legacy { 0 } else { HEADER_LEN };
     let meta = fs::symlink_metadata(path).ok()?;
@@ -563,6 +575,7 @@ fn read_file(path: &Path, legacy: bool) -> Option<(Vec<u8>, u64)> {
     Some((bytes, fetched))
 }
 
+#[allow(dead_code)] // frozen until the art cache goes
 fn stale(fetched: u64, now: SystemTime) -> bool {
     let now = unix_seconds(now);
     fetched > now || now - fetched >= REFRESH_AFTER.as_secs()
@@ -612,12 +625,14 @@ fn cache() -> &'static Cache {
 pub(crate) fn generation() -> u64 {
     cache().generation.load(Ordering::Acquire)
 }
+#[allow(dead_code)] // frozen until the art cache goes
 pub(crate) fn read_at(generation: u64, key: &DiskKey) -> Option<CachedImage> {
     cache().read_at(generation, key)
 }
 pub(crate) fn write_at(generation: u64, key: &DiskKey, bytes: &[u8]) -> bool {
     cache().write_at(generation, key, bytes)
 }
+#[allow(dead_code)] // frozen until the art cache goes
 pub(crate) fn remove_at(generation: u64, key: &DiskKey) {
     cache().remove_at(generation, key);
 }
