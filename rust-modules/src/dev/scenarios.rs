@@ -183,6 +183,7 @@ pub(crate) fn login_forced() -> bool {
 crate::dev::latched_flag! { pub(crate) fn imagecache_stats_armed = "imagecache-stats"; }
 crate::dev::latched_flag! {
     /// RAM-only control leg for cache performance comparisons; absent in shipping builds.
+    #[allow(dead_code)] // frozen until the art cache goes
     pub(crate) fn imagecache_bypass_armed = "imagecache-bypass";
 }
 
