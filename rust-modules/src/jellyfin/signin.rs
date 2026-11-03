@@ -112,8 +112,10 @@ pub(crate) fn start(url_raw: &str, user: &str, password: &str) -> Result<(), Fai
     };
     // The identity header is a credential shape even before it carries a token (client.rs says
     // so at the call site), so this is the exact check the POST would face — asked up front so
-    // the form can say WHY instead of reporting a refusal as "unreachable".
-    if !crate::http::credential_transport_allowed(
+    // the form can say WHY instead of reporting a refusal as "unreachable". It is the SIGN-IN gate,
+    // not the per-request one: this POST installs the client the anchoring rule then measures
+    // every other request against (`http::credential_transport_allowed_at_signin`).
+    if !crate::http::credential_transport_allowed_at_signin(
         &origin,
         "/Users/AuthenticateByName",
         &["Authorization: MediaBrowser …"],
@@ -231,37 +233,46 @@ mod tests {
         assert_eq!(phase(), Phase::Editing);
     }
 
+    /// The regression #204: on a clean install there is no client to anchor the plaintext
+    /// relaxation to, and the sign-in POST is what installs one. Graded on the SHIPPED policy
+    /// (`HttpsOnly`), not this dev-featured build's: the gate the form asks is the sign-in one.
     #[test]
     fn plaintext_credentials_off_the_lan_are_refused_before_the_wire() {
         let _guard = crate::testlock::serial();
-        crate::jellyfin::install(JfClient::new(
-            crate::origin::Origin::http("192.168.1.20", 8096),
-            "dev-test".into(),
-        ));
-        // The SHIPPED rule is graded here, not this (dev-featured) build's: `devtriggers` relaxes
-        // the gate for lab work, so the test asks the policy directly with the relaxation off —
-        // exactly what a release .ipk ships.
+        crate::jellyfin::uninstall();
+        let store = crate::origin::CredentialPolicy::HttpsOnly;
+        let path = "/Users/AuthenticateByName";
+        let headers = ["Authorization: MediaBrowser …"];
         let origin = crate::origin::Origin::parse("http://203.0.113.10:8096").unwrap();
         assert!(
-            !crate::http::credential_transport_allowed_by_policy(
-                &origin,
-                "/Users/AuthenticateByName",
-                &["Authorization: MediaBrowser …"],
-                crate::origin::CredentialPolicy::HttpsOnly,
+            !crate::http::credential_transport_allowed_at_signin_by_policy(
+                &origin, path, &headers, store
             ),
             "a public address over http must not carry the password"
         );
-        let lan = crate::origin::Origin::parse("http://192.168.1.20:8096").unwrap();
+        let lan = crate::origin::Origin::parse("http://10.9.9.7:8096").unwrap();
         assert!(
-            crate::http::credential_transport_allowed_by_policy(
-                &lan,
-                "/Users/AuthenticateByName",
-                &["Authorization: MediaBrowser …"],
-                crate::origin::CredentialPolicy::HttpsOnly,
+            crate::http::credential_transport_allowed_at_signin_by_policy(
+                &lan, path, &headers, store
             ),
-            "…while the LAN literal the PoC targets stays allowed"
+            "…while the LAN literal a home server lives on is exactly what sign-in must reach"
         );
-        crate::jellyfin::uninstall();
+        assert!(
+            !crate::http::credential_transport_allowed_by_policy(
+                &lan,
+                "/Users/me/Items?api_key=t",
+                &[],
+                store,
+            ),
+            "…and nothing else may follow it there until the sign-in installs the anchor"
+        );
+        let named = crate::origin::Origin::parse("http://jellyfin.local:8096").unwrap();
+        assert!(
+            !crate::http::credential_transport_allowed_at_signin_by_policy(
+                &named, path, &headers, store
+            ),
+            "a hostname is never the carve-out"
+        );
     }
 
     #[test]
