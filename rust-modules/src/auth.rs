@@ -208,43 +208,18 @@ pub(crate) enum ServerRosterOutcome {
     },
 }
 
-/// Canon-only (no producer): the observation vocabulary is frozen.
+/// Canon-only (no producer): the observation vocabulary is frozen. The endpoint progress carried
+/// the registry's `ClientLifecycle`; that vocabulary went with the wire layer (#166) and the
+/// struct with it — the frozen canon digest never named it field-by-field, only through the
+/// owner's logical `ServerLifecycle` (sid + instance_gen + token_gen), which survives.
 #[allow(dead_code)]
 pub(crate) struct EndpointProgress {
     epoch: u64,
     expected: SessionIdentity,
     id: ServerId,
     machine_id: String,
-    lifecycle: Option<ClientLifecycle>,
     fresh: Option<SourceRef>,
     probe: Option<SettledProbe>,
-}
-
-/// The exact registry incarnation an endpoint request was issued through. `ServerId` and
-/// `machine_id` survive a re-point and a profile retoken, so neither can prove that a late route
-/// result still belongs to the client/token that launched it.
-#[derive(Clone, Copy)]
-/// Canon-only (no producer): Pending.lifecycle stays part of the frozen owner canon.
-#[allow(dead_code)]
-pub(crate) struct ClientLifecycle {
-    client: &'static crate::plex::Client,
-    token_gen: u32,
-}
-
-#[allow(dead_code)]
-impl ClientLifecycle {
-    pub(crate) fn machine_id(self) -> &'static str { self.client.machine_id() }
-
-    pub(crate) fn capture(client: &'static crate::plex::Client) -> Self {
-        Self { client, token_gen: client.token_gen() }
-    }
-    pub(crate) fn logical(self, sid: u16) -> owner::ServerLifecycle {
-        owner::ServerLifecycle { sid, instance_gen: self.client.instance_gen(), token_gen: self.token_gen }
-    }
-    pub(crate) fn is_current(self, expected: owner::ServerLifecycle) -> bool {
-        self.logical(expected.sid) == expected && crate::registry::commit_if_current(
-            ServerId::from_raw(expected.sid), self.client, self.token_gen, || ()).is_some()
-    }
 }
 
 pub(crate) enum ReadoutSurface {
@@ -324,16 +299,4 @@ pub(crate) struct SettledProbe {
     #[serde(default)]
     address: Option<String>,
 }
-/// The grant evidence a persisted [`SourceRef`] carries, for the registry describers.
-#[cfg(test)]
-fn grant_of(source: &SourceRef) -> crate::registry::GrantEvidence {
-    crate::registry::GrantEvidence {
-        owned: source.owned,
-        home: source.home,
-        owner_id: source.owner_id,
-    }
-}
-#[cfg(test)]
-#[path = "auth_registry_tests.rs"]
-mod registry_tests;
 

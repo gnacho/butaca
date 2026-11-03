@@ -310,7 +310,7 @@ mod activate_card_tests {
         }
         let _cleanup = Cleanup(&mut bridge as *mut _);
         crate::registry::reset_for_test();
-        let sid = crate::registry::register_with_client_id("press-frame", "127.0.0.1", 1, "t", "c-press-frame");
+        let sid = crate::registry::ServerId::from_raw(0);
         let mm = crate::pms::PmsMovie { sid, rk: "show-1".into(), kind: 1, ..Default::default() };
 
         unsafe {

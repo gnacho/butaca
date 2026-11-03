@@ -420,8 +420,9 @@ pub(crate) fn adopt_legacy_consent(session: &Session) -> bool {
     })
 }
 
-/// Keep only the grants `keep` accepts; when any went, re-grade the registry so no published
-/// client keeps a token its origin may no longer carry. Returns whether any went.
+/// Keep only the grants `keep` accepts. Returns whether any went. (The registry re-grade that
+/// used to follow went with the client slots: no published client exists to strip a token from,
+/// #166.)
 fn retain(keep: impl Fn(&PlaintextGrant) -> bool) -> bool {
     let mut grants = GRANTS.lock().unwrap_or_else(|e| e.into_inner());
     let before = grants.len();
@@ -430,7 +431,6 @@ fn retain(keep: impl Fn(&PlaintextGrant) -> bool) -> bool {
     COUNT.store(grants.len(), Ordering::Release);
     drop(grants);
     if removed {
-        crate::registry::regrade_credentials();
         moved();
     }
     removed

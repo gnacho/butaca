@@ -2615,7 +2615,7 @@ mod tests {
     ) {
         crate::registry::reset_for_test();
         let origin =
-            crate::registry::register_with_client_id("person-pending-origin", "127.0.0.1", 1, "a", "cid");
+            crate::registry::ServerId::from_raw(0);
         let mut store = crate::stores::person::PersonStore::default();
         store.run(PersonCmd::Open { sid: origin, key: "161".into(),
             guid: "5d77682aeb5d26001f1de4b0".into(), name: "Idina Menzel".into(),
@@ -2769,7 +2769,7 @@ mod tests {
         let _serial = crate::testlock::serial();
         crate::registry::reset_for_test();
         let origin =
-            crate::registry::register_with_client_id("person-return-origin", "127.0.0.1", 1, "a", "cid");
+            crate::registry::ServerId::from_raw(1);
         let mut store = crate::stores::person::PersonStore::default();
         store.run(PersonCmd::Open { sid: origin, key: "161".into(),
             guid: "5d77682aeb5d26001f1de4b0".into(), name: "Idina Menzel".into(),
@@ -2896,7 +2896,7 @@ mod tests {
     fn cold_remount_holds_the_memory_interner_key_until_reordered_shelves_land() {
         let _serial = crate::testlock::serial();
         crate::registry::reset_for_test();
-        let sid = crate::registry::register_with_client_id("person-cold-return", "127.0.0.1", 1, "a", "cid");
+        let sid = crate::registry::ServerId::from_raw(2);
         let mut store = crate::stores::person::PersonStore::default();
         store.run(PersonCmd::Open { sid, key: "161".into(),
             guid: "5d77682aeb5d26001f1de4b0".into(), name: "Idina Menzel".into(),

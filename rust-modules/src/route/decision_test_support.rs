@@ -95,13 +95,14 @@ pub(super) fn fresh_registry(ps: &mut PlaybackSession) -> crate::testlock::Seria
     g
 }
 
-/// A `ServerId` naming a slot nothing is registered in — so `client_for` answers `None` and
-/// `build_stream` takes its no-client exit without opening a socket.
+/// A `ServerId` naming a slot nothing can ever be registered in — `build_stream` takes its
+/// no-client exit without opening a socket. The registry's client half is retired (#166), so
+/// every non-Jellyfin slot is permanently empty; the assertion below pins that.
 pub(super) fn unregistered_sid() -> ServerId {
     let id = ServerId::from_raw((crate::registry::MAX_SERVERS - 1) as u16);
     assert!(
-        crate::registry::client_for(id).is_none(),
-        "the test needs an EMPTY slot"
+        id != crate::jellyfin::SERVER_ID,
+        "the test needs a slot the live backend does not own"
     );
     id
 }

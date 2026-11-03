@@ -943,9 +943,6 @@ struct Src {
     /// The registry slot every fetch for this source is issued through — and the id stamped onto
     /// every row it parses.
     sid: ServerId,
-    /// Registry lifecycle currently represented by this slot. A slot id survives repoint, so the
-    /// pointer and credential generation are part of the source identity too.
-    client: Option<&'static crate::plex::Client>,
     token_gen: u32,
     /// **The CREDIT** for this source — `plex::servers::owner_credit`'s answer, stamped onto every
     /// shelf and hero row this source contributes. `"friend"` for a borrowed server; **empty when
@@ -991,9 +988,6 @@ impl Src {
             gen: generation, seq: mint(), sid: self.sid,
             client: LandingClient { instance, resource }, token_gen,
         };
-        self.client = match resource {
-            HubClientRef::Jellyfin(_) => None,
-        };
         self.token_gen = request.token_gen;
         self.fetching = true;
         self.state = HubState::Loading;
@@ -1003,11 +997,11 @@ impl Src {
     }
 
     fn new(sid: ServerId, handle: String) -> Src {
-        let client = crate::registry::client_for(sid);
         Src {
             sid,
-            client,
-            token_gen: client.map_or(0, |c| c.token_gen()),
+            // The single-source app's only source is the Jellyfin server, whose client has no
+            // token rotation: the generation is the constant the landing wire carries (0).
+            token_gen: 0,
             handle,
             state: HubState::Loading,
             fetching: false,
@@ -1017,27 +1011,6 @@ impl Src {
             last: None,
         }
     }
-}
-
-fn refresh_src_lifecycle(s: &mut Src) -> bool {
-    let client = crate::registry::client_for(s.sid);
-    let token_gen = client.map_or(0, |c| c.token_gen());
-    let same = match (s.client, client) {
-        (Some(a), Some(b)) => std::ptr::eq(a, b) && s.token_gen == token_gen,
-        (None, None) => true,
-        _ => false,
-    };
-    if same {
-        return false;
-    }
-    s.client = client;
-    s.token_gen = token_gen;
-    s.fetching = false;
-    s.state = HubState::Loading;
-    s.retry_s = 0.0;
-    s.retry_n = 0;
-    s.seq = s.seq.wrapping_add(1);
-    true
 }
 
 // The source table and the roster fingerprint (SRCS/SEEN/SEEN_FACTS) live as `PmsState` fields
@@ -1318,9 +1291,6 @@ fn sync_roster_with_scope(state: &mut PmsState, scope: &BrowseScope) {
                 let mut keep = srcs.remove(i);
                 restamped |= keep.handle != handle && keep.last.is_some();
                 keep.handle = handle;
-                // Preserve the last good shelves while the replacement lifecycle fetches, but
-                // release and supersede the old single-flight so it cannot wedge this slot.
-                refresh_src_lifecycle(&mut keep);
                 out.push(keep);
             }
             None => out.push(Src::new(sid, handle)),
@@ -1810,9 +1780,8 @@ pub(crate) fn seed_two_library_home_for_test(
 #[cfg(test)]
 fn seed_with_scope_for_test(state: &mut PmsState, adapter: &Arc<PmsAdapter>, sid: ServerId, items: usize, hub_state: HubState, scope: &BrowseScope) {
     reset_with_scope(state, adapter, scope);
-    let handle = crate::registry::facts(sid)
-        .map(|facts| facts.handle.clone())
-        .unwrap_or_default();
+    // The roster credit went with the describers (#166): a fixture source carries no handle.
+    let handle = String::new();
     let mut s = Src::new(sid, handle);
     s.state = hub_state;
     if items > 0 {

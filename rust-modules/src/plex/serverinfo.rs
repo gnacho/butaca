@@ -24,16 +24,15 @@
 //! `_of(id)` for a caller that knows which server it is talking about, and the bare form for one
 //! that means "the current server" (which is what every reader meant when there was only one).
 //!
-//! One fetch per registration: `servers::register` calls [`refresh`] for the server it just
-//! registered — own or shared — so no caller has to remember to. The fetch is `GET /` on that
-//! PMS — probed live against PMS 1.43.3 (2026-08-10): the root `MediaContainer` carries
-//! `"myPlexSubscription": true|false` and `"version": "1.43.3.10861-…"`. Both ride the ordinary
-//! typed client (`get_json`, JSON Accept + the `with_token` choke point), so nothing new touches
-//! the transport and no token can appear here or in the log line.
+//! One fetch per registration: `servers::register` used to call [`refresh`] for the server it
+//! just registered — own or shared. The registration world and its fetch went with the wire
+//! layer (#166), so nothing populates the per-slot answers any more and every read answers the
+//! boot state (`Unknown` / build string unknown). The read surface stays exactly as it was:
+//! per-slot, keyed by [`ServerId::raw`], and the test seam (`store_for_test`) still seeds it for
+//! the suites grading its readers.
 
-use super::client::Client;
 use super::servers::{ServerId, MAX_SERVERS};
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering::Relaxed};
+use std::sync::atomic::{AtomicU8, Ordering::Relaxed};
 use std::sync::Mutex;
 
 /// Does the server's owner hold a Plex Pass? A TRISTATE, not a bool with a default: `Unknown`
@@ -58,7 +57,9 @@ impl Subscription {
     }
     /// The wire field → the tristate. `None` is a server that never said (the field predates
     /// nothing we can date, so absence is only ever "unknown", never "free"); the lenient adapter
-    /// has already folded `true`/`"1"`/`1` to nonzero and `false`/`"0"` to 0.
+    /// has already folded `true`/`"1"`/`1` to nonzero and `false`/`"0"` to 0. The wire read that
+    /// fed it went with the fetch (#166); the mapping stays for the module suite.
+    #[cfg(test)]
     fn from_wire(v: Option<i64>) -> Self {
         match v {
             None => Self::Unknown,
@@ -76,11 +77,6 @@ static SUBSCRIPTION: [AtomicU8; MAX_SERVERS] = [const { AtomicU8::new(0) }; MAX_
 /// sample step and written once per registration — never in a per-frame path, and never held
 /// across a round trip (the fetch happens first, the store second).
 static VERSION: Mutex<[String; MAX_SERVERS]> = Mutex::new([const { String::new() }; MAX_SERVERS]);
-/// Single-flight, PER SERVER: boot registers a server and a profile pick re-registers it moments
-/// later; two live workers would answer the same question twice and double the log line. Per
-/// server rather than global because two servers' fetches are different questions — a shared
-/// server registered while our own is mid-fetch must not be silently skipped.
-static INFLIGHT: [AtomicBool; MAX_SERVERS] = [const { AtomicBool::new(false) }; MAX_SERVERS];
 
 /// The array index for a server, `None` for [`ServerId::UNSET`] and for any id the registry
 /// cannot have issued. The registry's own ceiling is the bound (see [`MAX_SERVERS`]), so this
@@ -93,11 +89,9 @@ fn slot(id: ServerId) -> Option<usize> {
 
 /// [`subscription`] for a NAMED server — what a caller uses once it knows which server the item,
 /// the failed playback or the panel row belongs to. `Unknown` for a server that has not answered
-/// yet, and for an id that names nothing.
+/// yet, and for an id that names nothing. Nothing populates the slots any more (the registration
+/// fetch went with the wire layer, #166), so this answers the boot state: `Unknown`.
 pub(crate) fn subscription_of(id: ServerId) -> Subscription {
-    if super::client_for(id).is_none() {
-        return Subscription::Unknown;
-    }
     slot(id)
         .map(|i| Subscription::from_u8(SUBSCRIPTION[i].load(Relaxed)))
         .unwrap_or(Subscription::Unknown)
@@ -105,9 +99,6 @@ pub(crate) fn subscription_of(id: ServerId) -> Subscription {
 
 /// [`version`] for a NAMED server; "" while unknown.
 pub(crate) fn version_of(id: ServerId) -> String {
-    if super::client_for(id).is_none() {
-        return String::new();
-    }
     let Some(i) = slot(id) else {
         return String::new();
     };
@@ -119,91 +110,12 @@ pub(crate) fn version_of(id: ServerId) -> String {
 /// (the stats panel holds each sample for 500 ms), they don't call it per frame. A caller that
 /// knows which server it means wants [`version_of`], for [`subscription`]'s reason.
 pub(crate) fn version() -> String {
-    version_of(super::current_server())
+    version_of(super::servers::current())
 }
 
-/// Fetch `GET /` for ONE server on a worker and store what it says. Called by
-/// `servers::register`, i.e. once per registration (own server or shared); fire-and-forget, and a
-/// refused spawn (`task::spawn_small`'s EAGAIN case) only costs the refresh — the tristate
-/// honestly stays `Unknown`.
-///
-/// **The client is resolved HERE, at the spawn site, and moved in.** The worker never asks the
-/// registry anything: `client()` inside it would mean "whichever server is current when the
-/// thread happens to run", which with two servers is how server A's build string ends up filed
-/// under server B. The `&'static Client` is sound to hold across the spawn because registry
-/// clients are leaked (see `servers.rs`) — a re-point mid-fetch costs one round trip to where
-/// that server used to be, never a dangling reference.
-pub(super) fn refresh(id: ServerId) {
-    let Some(i) = slot(id) else { return };
-    let Some(c) = super::client_for(id) else {
-        return;
-    }; // nothing registered there to ask
-    if INFLIGHT[i].swap(true, Relaxed) {
-        return; // a fetch for THIS server is already in flight; it answers for this one too
-    }
-    let spawned = crate::task::spawn_small("serverinfo", move || {
-        fetch_once(id, c);
-        INFLIGHT[i].store(false, Relaxed);
-    });
-    if !spawned {
-        INFLIGHT[i].store(false, Relaxed);
-    }
-}
-
-/// One round trip, one log line, for the server whose client was captured at the spawn site.
-///
-/// On failure that server's stored state is KEPT, not wiped. The old justification for keeping it
-/// ("host/port fix at the first install") died with the singleton; the surviving one is per-slot
-/// and stronger: a registry slot is one SERVER for the life of the process — `register` matches
-/// on `machineIdentifier`, and a slot whose address moves is the same machine at a new address —
-/// so a stale answer still describes the server it is filed under, while wiping would let one
-/// wifi hiccup blank a fact we already knew.
-fn fetch_once(id: ServerId, c: &Client) {
-    let Some(i) = slot(id) else { return };
-    let Some(mc) = c.server_root() else {
-        crate::log(&format!(
-            "pms: server {i} info unavailable (GET / failed) — subscription stays unknown"
-        ));
-        return;
-    };
-    let mut sub = Subscription::from_wire(mc.my_plex_subscription);
-    // dev: /tmp/butaca-nopass — pretend the server answered "no Plex Pass". The dev server
-    // has one, so the stats Server row is otherwise stuck on "has a Pass" on the only TV we
-    // own. It applies to EVERY server, deliberately: it is a "what does a free server look
-    // like" switch, not a per-server override. Checked here, once per fetch, rather than in
-    // `subscription()` — that accessor is on per-frame paths and `dev::flag` is a filesystem
-    // stat. (The old Pass-conditional UX the trigger used to reach — the detail facts row's
-    // warning and the failure read-out's capsule — went with #166.)
-    if crate::dev::flag("nopass") {
-        #[cfg(feature = "devtriggers")]
-        crate::log("pms: /tmp/butaca-nopass — reporting subscription as No");
-        sub = Subscription::No;
-    }
-    store(id, sub, &mc.version);
-    // The version + subscription bit identify a RELEASE, not a household — safe to log, and safe
-    // for the stats panel to photograph. The SLOT number names which server said it, because the
-    // `machineIdentifier` that really identifies one is a permanent household fingerprint
-    // (`servers::register` keeps it out of the log for the same reason), and the address is the
-    // owner's. The token never appears: the URL is built and consumed inside `get_json`.
-    crate::log(&format!(
-        "pms: server {i} version={} plexPass={}",
-        if mc.version.is_empty() {
-            "unknown"
-        } else {
-            &mc.version
-        },
-        match sub {
-            Subscription::Yes => "true",
-            Subscription::No => "false",
-            Subscription::Unknown => "unknown",
-        }
-    ));
-}
-
-/// Publish one server's answer into its slot. Split from [`fetch_once`] so the SCOPING is
-/// host-testable without a socket: above this line is a round trip, below it is per-slot state,
-/// and the property that matters — one server's answer never reaching another's reader — lives
-/// entirely below.
+/// Publish one server's answer into its slot. Split from the retired fetch so the SCOPING is
+/// host-testable without a socket: below this line is per-slot state, and the property that
+/// matters — one server's answer never reaching another's reader — lives entirely there.
 ///
 /// **This is an async LANDING, so it owes the present gate a poke.** It runs on a worker, seconds
 /// after boot or after a share is registered, and it changes what a SETTLED screen says: the stats
@@ -214,6 +126,7 @@ fn fetch_once(id: ServerId, c: &Client) {
 /// landing that repaints must add a call there*). Unconditional rather than change-guarded: a
 /// re-registration that stores the same answer costs one frame, and a guard here would be a second
 /// place that has to agree with what the readers draw.
+#[cfg(test)]
 fn store(id: ServerId, sub: Subscription, version: &str) {
     let Some(i) = slot(id) else { return };
     SUBSCRIPTION[i].store(sub as u8, Relaxed);
@@ -236,19 +149,9 @@ pub(crate) fn store_for_test(id: ServerId, sub: Subscription, version: &str) {
     store(id, sub, version);
 }
 
-impl Client {
-    /// `GET /` — the server root: its self-description envelope (version, capabilities, and the
-    /// owner's `myPlexSubscription`). The two fields consumed live on the shared `MediaContainer`
-    /// (see `models.rs`) so the ordinary envelope parse serves this too.
-    fn server_root(&self) -> Option<crate::media::MediaContainer> {
-        self.get_json("/")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::media::Envelope;
 
     /// The tristate mapping is the module's contract: absence is UNKNOWN (an old server that
     /// never says must not read as free), zero is a real "no", anything else a real "yes" — and
@@ -265,76 +168,20 @@ mod tests {
         assert_eq!(Subscription::from_u8(7), Subscription::Unknown);
     }
 
-    /// The plex/CLAUDE.md lenient-number rule, applied to the root envelope: PMS sends
-    /// `myPlexSubscription` as a JSON bool on 1.43 and is free to string-encode it elsewhere, and
-    /// a strict field would fail the WHOLE root parse — reading as "server info unavailable" on
-    /// exactly the endpoint issue #22 needs. All three shapes must land, and absence must stay
-    /// `None` (→ Unknown), not default to a confident 0 (→ "no Plex Pass").
-    #[test]
-    fn the_root_envelope_survives_every_encoding_of_the_subscription_flag() {
-        let as_bool = br#"{"MediaContainer":{"size":30,"version":"1.43.3.10861-cd85035e7",
-            "myPlexSubscription":true}}"#;
-        let e: Envelope = serde_json::from_slice(as_bool).expect("bool form");
-        assert_eq!(e.media_container.version, "1.43.3.10861-cd85035e7");
-        assert_eq!(
-            Subscription::from_wire(e.media_container.my_plex_subscription),
-            Subscription::Yes
-        );
-
-        let as_string =
-            br#"{"MediaContainer":{"myPlexSubscription":"1","version":"1.42.0.9999-abc"}}"#;
-        let e: Envelope = serde_json::from_slice(as_string).expect("string form");
-        assert_eq!(
-            Subscription::from_wire(e.media_container.my_plex_subscription),
-            Subscription::Yes
-        );
-
-        let as_false =
-            br#"{"MediaContainer":{"myPlexSubscription":false,"version":"1.43.3.10861-x"}}"#;
-        let e: Envelope = serde_json::from_slice(as_false).expect("false form");
-        assert_eq!(
-            Subscription::from_wire(e.media_container.my_plex_subscription),
-            Subscription::No
-        );
-
-        let absent = br#"{"MediaContainer":{"size":30,"version":"0.9.9"}}"#;
-        let e: Envelope = serde_json::from_slice(absent).expect("absent form");
-        assert_eq!(
-            Subscription::from_wire(e.media_container.my_plex_subscription),
-            Subscription::Unknown
-        );
-    }
 
     /// **The reason this module stopped being one global.** A Plex Pass claim is about ONE
-    /// server's owner: with our own server and a friend's share both registered, an answer filed
-    /// under A must be invisible to a reader asking about B, and the bare accessors must follow
-    /// `current` rather than the last fetch that happened to land.
+    /// server's owner: with our own server and a friend's share both filed, an answer stored
+    /// under A must be invisible to a reader asking about B.
     ///
-    /// Registry state is a crate global, so this holds `testlock::serial()` (the registry's own
-    /// tests do too) and it registers through the client-id seam — the plain `register` fetches
-    /// server info, which on the host would mean a worker thread dialling a fictional address.
-    ///
-    /// The guard empties the registry on the way OUT as well as in — `servers`' own `Fresh`
-    /// discipline. This test used to reset only on entry, and the two servers it left behind read
-    /// as a live two-server roster to any later test that derives one: `pms::sync_roster` kept a
-    /// seeded source table alive on exactly that, and which test inherited the leak depended on
-    /// parallel completion order — the worst shape a flake can take.
+    /// The slot arrays are crate globals, so this holds `testlock::serial()` and seeds through
+    /// the private [`store`] — no fetch has produced a real answer since the wire layer went
+    /// (#166), which is exactly why the test seeds both slots by hand before asserting the
+    /// isolation.
     #[test]
     fn one_servers_plex_pass_is_never_read_as_the_others() {
-        use super::super::servers;
-        struct Fresh(#[allow(dead_code)] crate::testlock::Serial);
-        impl Drop for Fresh {
-            fn drop(&mut self) {
-                servers::reset_for_test();
-            }
-        }
-        let _g = Fresh(crate::testlock::serial());
-        servers::reset_for_test();
-        let reg =
-            |m: &str, host: &str| servers::register_with_client_id(m, host, 32400, "tok", "cid");
-        let (a, b) = (reg("mach-A", "10.0.0.1"), reg("mach-B", "10.0.0.2"));
-        // the slot arrays outlive `reset_for_test` (they are keyed on the slot, not the client),
-        // so start from the boot state explicitly rather than from what an earlier test left
+        let (a, b) = (ServerId::from_raw(0), ServerId::from_raw(1));
+        // the slot arrays are keyed on the SLOT and never reset by anything else, so start from
+        // the boot state explicitly rather than from what an earlier test left
         store(a, Subscription::Unknown, "");
         store(b, Subscription::Unknown, "");
 
@@ -356,12 +203,9 @@ mod tests {
         );
         assert_eq!(version_of(a), "1.43.3.10861-cd85035e7");
 
-        // the bare accessors mean "the current server", which is what every reader that has not
-        // yet learned which server it is describing gets
-        assert!(servers::set_current(a));
-        assert_eq!(version(), "1.43.3.10861-cd85035e7");
-        assert!(servers::set_current(b));
-        assert_eq!(version(), "1.32.0.6918-free");
+        // the bare accessor means "the current server", and the current server is UNSET on every
+        // boot of the single-source app: the row it answers with is the empty one, never a slot's
+        assert_eq!(version(), "");
 
         // an id that names no server is "nothing known" — never slot 0's answer, never a panic,
         // and a write through one must not reach the array at all

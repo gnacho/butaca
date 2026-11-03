@@ -101,7 +101,10 @@ pub(super) struct DirectoryPolicyCleanup;
 impl Drop for DirectoryPolicyCleanup {
     fn drop(&mut self) {
         // Search and Hubs are now owned per-Bridge (`rig`, dropped with the test's own stack
-        // frame), so there is no process-wide store state left for this cleanup to reset.
+        // frame), so there is no process-wide store state left for this cleanup to reset. The
+        // synthetic Jellyfin client these suites install for the view-state guard comes down
+        // with them, or the next test inherits a signed-in backend.
+        crate::jellyfin::uninstall();
         crate::registry::reset_for_test();
     }
 }

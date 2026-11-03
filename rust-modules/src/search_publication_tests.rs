@@ -72,42 +72,32 @@ fn an_empty_answer_waits_for_the_stragglers_but_a_populated_one_does_not() {
     assert_eq!(state_from(&[empty(), failed()], true), State::Ready);
 }
 
-/// A dead source arms its OWN backoff and contributes nothing; the source beside it still
-/// answers, and the screen reads `Ready` rather than failed. The other half of "release the
-/// claim on the take": a failure must not latch the source either.
+/// A dead source arms its OWN backoff and contributes nothing, and the screen reads `Failed`
+/// when that source is the only one. The other half of "release the claim on the take": a
+/// failure must not latch the source either. (The "the others still answer" half of this test
+/// graded the multi-source fan-out, which went with the registry — #166.)
 #[test]
-fn a_failed_source_backs_off_alone_and_the_others_still_answer() {
+fn a_failed_source_backs_off_and_the_single_source_screen_reads_failed() {
     let _g = fresh();
     let mut owner = Owner::default();
-    register(&mut owner, 2);
+    register(&mut owner, 1);
     owner.set_query("wallace");
     let gen = owner.state.gen;
 
     owner.adapter.fetch[0].claim();
-    owner.adapter.fetch[1].claim();
-    owner.land(
-        0,
-        gen,
-        Some(answered(0, vec![media("A Close Shave")]).items),
-    );
-    owner.land(1, gen, None); // the friend's server is off
+    owner.land(0, gen, None); // the one source is off
     hold_off(&mut owner);
     assert!(owner.pump(0.0));
 
+    assert_eq!(owner.state.state(), State::Failed, "no answer exists to wait beside");
+    assert_eq!(owner.state.src[0].status, Status::Failed);
     assert_eq!(
-        titles(&owner.state.shelves()[0]),
-        ["A Close Shave"],
-        "a dead source must not blank a live one"
-    );
-    assert_eq!(owner.state.state(), State::Ready, "one answer is enough");
-    assert_eq!(owner.state.src[1].status, Status::Failed);
-    assert_eq!(
-        owner.state.src[1].retry_cd,
+        owner.state.src[0].retry_cd,
         RETRY_FRAMES,
         "the failed source backs off before retrying"
     );
-    assert!(!owner.adapter.fetch[0].busy()
-        && !owner.adapter.fetch[1].busy());
+    assert!(!owner.adapter.fetch[0].busy());
+    crate::jellyfin::uninstall();
     crate::registry::reset_for_test();
 }
 

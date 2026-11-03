@@ -1243,7 +1243,7 @@ fn start_bufferfeed_inner(
     let source;
 
     if stream {
-        let su = crate::plex::StreamUrl::parse(&url); // the typed layer's URL splitter
+        let su = crate::origin::StreamUrl::parse(&url); // the typed layer's URL splitter
                                                       // **The whole ORIGIN goes down, not a `(host, port)` pair, because the SCHEME chooses the
                                                       // transport**: `ff::demux` reads http through `crate::stream`'s cleartext socket and https
                                                       // through `crate::curlio`. This used to REFUSE an https origin outright — cleartext to a

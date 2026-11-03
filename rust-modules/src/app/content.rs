@@ -750,8 +750,8 @@ mod search_action_tests {
     fn owned_search_targets_validate_retained_identity_and_use_retained_labels() {
         let _serial = crate::testlock::serial();
         crate::registry::reset_for_test();
-        let a = crate::registry::register_with_client_id("action-a", "127.0.0.1", 1, "synthetic", "fixture");
-        let b = crate::registry::register_with_client_id("action-b", "127.0.0.1", 2, "synthetic", "fixture");
+        let a = crate::registry::ServerId::from_raw(0);
+        let b = crate::registry::ServerId::from_raw(1);
         let media = Item::Media(crate::pms::PmsMovie { sid: a, rk: "same".into(), ..Default::default() });
         assert!(matches!(search_target(&media, &SearchReq::Detail { sid: a, rk: "same".into() }),
             Some(AppArg::Content(ContentArg::Detail { sid, rk })) if sid == a && rk == "same"));

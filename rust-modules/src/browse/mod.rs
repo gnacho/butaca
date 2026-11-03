@@ -2838,9 +2838,6 @@ pub(crate) fn seed_registered_table_for_owner_test(
     for (index, sid) in sids.into_iter().enumerate() {
         let source = state.source_mut(index).unwrap();
         source.sid = sid;
-        if let Some(client) = crate::registry::client_for(sid) {
-            source.machine_id = client.machine_id().to_owned();
-        }
     }
     for section in &mut state.states {
         section.letters_done = true;

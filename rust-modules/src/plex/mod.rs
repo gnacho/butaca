@@ -10,20 +10,20 @@
 //! decision/start/stop/selection, PlayQueue/identity, and the player's `/:/timeline`) use this
 //! typed client (history: `docs/plex-api-migration.md`).
 
-mod client;
 pub(crate) mod identity; // ONE X-Plex-* identity for both transports (plex.tv headers + PMS query)
+
 // WHICH servers exist and which one is current. The SERVER REGISTRY itself now lives in
 // `crate::registry` (backend-neutral: `ServerId`, `ServerFacts` and the per-slot state machine are
-// shared vocabulary — the Jellyfin backend names its one server in the same slot model), and the
-// private alias below keeps the in-layer `super::servers::…` spellings resolving unchanged.
-// `client()`/`client_opt()` still mean "the current server"; `client.rs` is just the type.
+// shared vocabulary), and the private alias below keeps the in-layer `super::servers::…`
+// spellings resolving unchanged. The registry's client slots went with the wire layer (#166);
+// what remains there is the neutral slot vocabulary.
 use crate::registry as servers;
 
-// Op files below only add `impl Client { … }` blocks (Rust allows multiple impls of one
-// type across a crate) — declared here so those methods compile onto `Client`.
-mod library;
-/// Whole-file text subtitles are bounded before transport allocation and parsing.
+// Whole-file text subtitles are bounded before transport allocation and parsing. The typed
+// client that enforced it went with the wire layer; the bound survives because
+// `player::sidecar` grades the same ceiling.
 pub(crate) const SIDECAR_MAX_BYTES: usize = 4 * 1024 * 1024;
+
 // The relay link policy (`link_policy`): pure policy over `probe::Location`. The transcoder
 // request builders it used to govern went with the Plex wire layer.
 mod link;
@@ -57,78 +57,28 @@ pub(crate) mod probe;
 // (Unused since the server registry moved to crate::registry — its `super::grant` calls went
 // with it — so the alias is gone.)
 
-// The ONE door the out-of-layer registry (crate::registry) has back into this layer's private
-// surface: minting a slot `Client` (its constructor and the resolve-pin builder are `pub(super)`
-// on purpose) and triggering the self-description refresh. Pure forwarding, same calls in the
-// same order as the in-layer spellings — no behavior of its own.
-pub(crate) mod registry_seam {
-    use super::{Client, ServerId};
-    use crate::origin::{Origin, ResolvePin};
-
-    pub(crate) fn new_client(
-        id: ServerId,
-        machine_id: &str,
-        origin: Origin,
-        token: &str,
-        client_id: &str,
-        pin: Option<ResolvePin>,
-    ) -> Client {
-        Client::new(id, machine_id, origin, token, client_id).with_resolve_pin(pin)
-    }
-
-    pub(crate) fn refresh_serverinfo(id: ServerId) {
-        super::serverinfo::refresh(id);
-    }
-
-    /// Test-only read of the slot client's token (`with_token` is `pub(super)` by design).
-    #[cfg(test)]
-    pub(crate) fn client_token_for_test(c: &Client) -> String {
-        c.with_token("/x").rsplit('=').next().unwrap_or_default().to_owned()
-    }
-}
+// The ONE door the out-of-layer registry (crate::registry) had back into this layer's private
+// surface — minting a slot `Client` and triggering the self-description refresh — went with the
+// wire layer (#166): the registry no longer holds clients, so there is nothing to forward.
 
 // Which libraries feed Home, PER PROFILE. Pure policy over the section table and one profile's
 // persisted answer — no store, no screen — so the household default, the recorded answer and the
 // never-empty floor are graded on the host rather than observed on a television.
 pub(crate) mod pins;
 
-// The re-exports are the public surface the call sites import.
-pub(crate) use client::ArtFetch;
-// The one link/IP ⇄ u8 encode/decode pair — shared by `Client`'s own atomics and the removed
-// report trace's packed attempt snapshot; with nothing left to read them, the re-export goes.
-pub use client::{Client, IpVersion, StreamUrl};
-// WHERE a server is, as one value. `Origin` is what `register_origin` takes and what a
-// `Client` carries; `Scheme` is re-exported beside it because `dev::DevServer` deserializes one
-// straight out of the `butaca-servers` trigger.
-#[allow(unused_imports)]
-pub(crate) use crate::origin::{plex_direct_literal, url_host, CredentialPolicy, Origin, ResolvePin, Scheme};
-// The registry surface THIS LAYER still names through `super::…` / `crate::plex::…` — the
-// crate-wide surface lives in `crate::registry` since the move out of plex/ (`super::servers::…`
-// spellings resolve through the alias above).
-#[allow(unused_imports)]
-pub use servers::{
-    client_for, current as current_server, count as server_count, same_item, ServerId,
-};
-#[allow(unused_imports)]
-pub(crate) use servers::ConnectionFacts;
-// The registry as a TEST FIXTURE, for suites outside this module (`route.rs` grades which server a
-// `/:/timeline` POST reaches). `register_for_test` skips the `session::load` the public `register`
-// does — that call mints and PERSISTS a device uuid, which a host test has no business writing —
-// and `reset_servers_for_test` is what keeps the table a per-test fixture instead of a growing
-// process-global holding clients whose loopback ports closed when their test returned. Both must be
-// called under `crate::testlock::serial`.
-// The typed request params (`TranscodeSpec`, `StreamSelection`, `TimelineReport`) and the
-// universal-transcoder ops died with the Plex wire layer; the backend-neutral nouns they
-// carried had already moved to `crate::playback` (#189). The i64 wire-fold helper the params
-// doc mentioned is `crate::plex::i64_fold`'s sibling and stays with its own users.
-// The registry's test-fixture surface (`register_with_client_id`, `reset_for_test`,
-// `write_held_for_test`, `register_pinned_with_client_id*`) and the registration entry points
-// (`register_origin`, `register_captured_origin_with_connection`) moved to `crate::registry`
-// with the registry itself — callers import them there.
-// `link_policy` is the one symbol the wire layer left behind that outside callers still name:
-// the detail page's playback preview grades the live link tier through it, and the routing
-// tests grade it beside `route::quality_policy`. `LinkPolicy` itself moved to
+// The registry surface THIS LAYER still names through `super::…` / `crate::plex::…`. The typed
+// client and its vocabulary (`Client`, `IpVersion`, `ArtFetch`, the registration seams) went
+// with the wire layer (#166); `StreamUrl` moved to `crate::origin`, whose splitter the media
+// plane already read. `link_policy` is the one symbol the wire layer left behind that outside
+// callers still name: the detail page's playback preview grades the live link tier through it,
+// and the routing tests grade it beside `route::quality_policy`. `LinkPolicy` itself lives in
 // `crate::playback`; `DP_AUDIO_CODECS`/`is_dp_audio_track` moved to `crate::devcaps` (their
 // implementation home), and the subtitle list went local to `route/plan.rs` with its render
 // consumer.
+// WHERE a server is, as one value. `Origin` keeps its `crate::plex::` spelling for the one
+// session.rs test that spells a registration call (test-only now); the crate-wide surface lives
+// in `crate::origin` (`crate::registry as servers` above is the alias the in-layer spellings
+// resolve through).
+#[cfg(test)]
+pub(crate) use crate::origin::Origin;
 pub use link::link_policy;

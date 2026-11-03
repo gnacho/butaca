@@ -1,103 +1,43 @@
-//! The SERVER REGISTRY — every PMS this session knows about, which one is CURRENT, and the
-//! `&'static Client` handed to ~30 call sites outside this module.
+//! The SERVER REGISTRY — the backend-neutral slot vocabulary every store keys on.
 //!
-//! This replaces `client.rs`'s `static PLEX: OnceLock<Client>`: one server per process, forever,
-//! whose second `install` could only swap a token because its address was frozen by the first.
-//! That single fact is what made browsing a SECOND (shared) server impossible — not the UI, not
-//! the ops. So the singleton becomes a table, and `client()` becomes "the current entry of it"
-//! with its signature untouched, which is why nothing outside `plex/` changed in the commit that
-//! introduced this file.
+//! This was the table of leaked `plex::Client`s behind `client_for`/`client()`/`register`. The
+//! dispatch collapse (#202) removed every path that could publish a Plex client, so the table
+//! over `plex::Client` was unreachable code, and this slice (#166) retired it together with the
+//! wire layer it existed to index (`plex/client.rs` and siblings). What survives is the
+//! vocabulary the app still shares across backends:
 //!
-//! **Keyed by `machineIdentifier`.** The server's own permanent id is the only identity that
-//! survives it changing address (LAN ↔ remote, DHCP, a relay), so the table keys on it and an
-//! address is just where that key currently answers. [`install`] doesn't know the id — its callers
-//! (`app.rs`, `auth.rs`) have only a stored session origin — so it registers with an EMPTY id and
-//! matches on the origin; a later [`register_origin`] that does know the id adopts that slot
-//! instead of adding a second one for the same server.
+//! * [`ServerId`] — the stable per-process slot handle that sits in UI state, routes and queued
+//!   jobs. The Jellyfin backend names its one server `crate::jellyfin::SERVER_ID` (raw slot 0);
+//!   every Plex slot is permanently empty.
+//! * [`same_item`] — THE item-identity rule every server-scoped key comparison goes through.
+//! * [`current`]/[`ids`] — the reads, honest over an always-empty Plex roster:
+//!   `current()` answers [`ServerId::UNSET`], `ids()` yields nothing.
+//! * the generation counters ([`roster_gen`]/[`facts_gen`]) and the client-generation sequence
+//!   ([`capture_generation_seed`]) the persisted bootstrap vocabulary carries.
+//! * [`revoke_all`] — sign-out retires whatever state there is (always the empty roster today)
+//!   and stays the one funnel every account teardown goes through.
+//! * [`register_origin`] — the retired registration's shape, kept only so `session.rs`'s
+//!   frame-boundary test keeps its subject until that slice lands.
 //!
-//! **An address here is an [`Origin`], not a `(host, port)` pair** — scheme included, and parsed
-//! from the URL plex.tv advertised rather than rebuilt from the address behind it (`origin.rs` has
-//! the reasoning; the one-line version is that a `plex.direct` certificate is issued for the NAME).
-//! [`register`] and [`register_with_client_id`] keep the pair-shaped spelling for callers that
-//! genuinely hold nothing else, and say `Origin::http` out loud when they do.
-//!
-//! ## Why an atomic pointer table and not an `RwLock<Vec<Arc<Client>>>`
-//!
-//! `client()` is a HOT path: `app::adapters::poster::built_key` calls it three times per key, for every
-//! visible art tile, every frame (~25–40 tiles × 60 fps). An `RwLock` there buys nothing and
-//! costs an atomic RMW pair per call plus a fairness stall whenever a login writes; an `Arc`
-//! clone would be a refcount bump per call on top of changing every call site's type. So a read
-//! is: one acquire load of `CURRENT`, one acquire load of a slot pointer, deref. No lock, no
-//! refcount, no allocation. Writers (login, profile switch, adding a server) serialize on
-//! `WRITE`, which no reader ever touches.
-//!
-//! **Each slot's `Client` is LEAKED, deliberately.** It is what makes `&'static Client` sound
-//! without an `Arc`: the reference handed out at frame N must stay valid even if a re-point
-//! lands at frame N+1 while a worker thread is mid-request with it. Re-pointing publishes a
-//! NEW leaked `Client` and stores its pointer over the old one, so the worst case for a caller
-//! holding the previous reference is one request to the address that server used to be at —
-//! never a use-after-free. The leak is bounded by [`MAX_SERVERS`] pointers' worth of small
-//! structs for the life of the process (a household has a handful of servers, and registration
-//! happens on login / profile switch / server switch, never per frame), so "bounded and never
-//! freed" is cheaper than the refcount it replaces.
-//!
-//! ## Signing out: slots are REVOKED, never freed and never reused
-//!
-//! Because nothing is freed, a sign-out cannot remove a server from the table — and until
-//! [`revoke_all`] existed nothing tried, so the account that signed out stayed in the table with
-//! its live per-server tokens and the next account browsed, searched and built Home from BOTH.
-//! [`revoke_all`] raises a [`FLOOR`]: every slot below it is dead — invisible to [`ids`], resolved
-//! to `None` by [`client_for`], and blanked to an empty token so a `&'static Client` grabbed before
-//! the sign-out cannot dial with the old one either.
-//!
-//! **A revoked slot number is never handed out again**, not even to the same `machineIdentifier`.
-//! [`ServerId`]'s whole contract is that it names one server for the life of the process — it sits
-//! in UI state, in routes, in queued jobs — and every per-server store in the app (`search`'s
-//! mailboxes, `serverinfo`, `person`'s per-source records) is a flat array indexed by
-//! [`ServerId::raw`]. Reusing a number would file the previous account's results under the new
-//! account's server, which is the very leak this exists to close. The cost is that sign-out /
-//! sign-in cycles consume slots: past [`MAX_SERVERS`] registration is refused and says so in the
-//! log, which for a table of 16 and a household of one or two servers is a great many sign-outs
-//! inside one process.
+//! **Keyed by slot number.** A slot number names one server for the life of the process; the
+//! per-server stores (`search`'s mailboxes, `serverinfo`, `person`'s per-source records) are flat
+//! arrays indexed by [`ServerId::raw`]. The reserved [`ServerId::UNSET`] is the pre-registration
+//! state and never resolves to anything.
 
-use crate::origin::{CredentialPolicy, Origin, ResolvePin};
-use crate::plex::Client;
-use crate::plex::IpVersion;
-use crate::plex::probe::{Location, Outcome};
-use std::sync::atomic::{AtomicPtr, AtomicU32, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+#[cfg(test)]
+use crate::origin::{Origin, ResolvePin};
 use std::sync::Mutex;
 
-/// #95 step 8 / A1: connection facts to apply to a `Client` AT REGISTRATION, atomically with
-/// whichever [`register_lazy`] branch the write lands in — never as a separate post-hoc
-/// `Client::set_connection`/`set_link` call a caller can forget, and never something a re-point
-/// (a fresh `Client`) can lose between the write and the caller's next line.
-///
-/// **`None` in either field means LEAVE UNCHANGED, never "set unknown".** A same-origin retoken
-/// (`register_lazy`'s in-place branch) must not blank a tier or IP a previous activation already
-/// proved just because this particular caller doesn't know it — `abr::bootstrap` (`probe.rs:187-
-/// 189`) reads the tier on every resolve, and a naive unconditional `LINK_UNKNOWN` write here
-/// would regress it on every plain retoken. A re-point starts the fresh `Client` at
-/// `LINK_UNKNOWN`/`IP_UNKNOWN` regardless (`Client::new`), so `None` there is simply "still
-/// unknown" — the same value it would have been with no `Connection` at all.
-///
-/// Not the recorded-observation `Connection` (the frozen canon shape `Connection.uri`/`.address`
-/// this module's own doc talks about) — deliberately a different, narrower type so the registry
-/// write never has to reach into that wire struct.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct ConnectionFacts {
-    pub tier: Option<Location>,
-    pub ip: Option<IpVersion>,
-}
-
+/// The registration-time connection facts went with the wire layer (`plex::Client` carried the
+/// tier/IP atomics they fed). The name survives only because `session.rs`'s frame-boundary test
+/// still spells a full registration call; the future `session.rs` transition slice retires both.
 #[cfg(test)]
-impl ConnectionFacts {
-    pub(crate) fn new(tier: Option<Location>, ip: Option<IpVersion>) -> Self {
-        Self { tier, ip }
-    }
-}
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct ConnectionFacts;
 
-/// Slot ceiling. A Plex account's server list is a handful (own + shared); past this, a
-/// registration is refused and logged rather than growing a table the hot path indexes.
+/// Slot ceiling. A Plex account's server list is a handful (own + shared); this is the number
+/// that decides which slot ids can ever exist.
 ///
 /// `pub` because [`crate::plex::serverinfo`] holds one entry PER SERVER in a flat array indexed
 /// by [`ServerId::raw`], and a second, independent ceiling there is a silent out-of-bounds
@@ -113,8 +53,9 @@ pub const MAX_SERVERS: usize = 16;
 pub struct ServerId(u16);
 
 impl ServerId {
-    /// The reserved "no server" value — what [`current`] reads before the first install, and
-    /// what a `Client` built outside the registry (tests) carries. Never resolves to a client.
+    /// The reserved "no server" value — what [`current`] answers on every boot of the
+    /// single-source app, and what a host test builds by literal when it needs an id no store can
+    /// resolve. Never resolves to a client.
     pub const UNSET: ServerId = ServerId(u16::MAX);
 
     pub fn is_set(self) -> bool {
@@ -128,10 +69,6 @@ impl ServerId {
     /// that grade the identity rules build one without a registry, a socket or the serial lock.
     pub const fn from_raw(v: u16) -> ServerId {
         ServerId(v)
-    }
-    /// Slot index, `None` for UNSET — the one place the reserved value is turned away.
-    fn index(self) -> Option<usize> {
-        self.is_set().then_some(self.0 as usize)
     }
 }
 
@@ -164,402 +101,86 @@ pub fn same_item(a: (ServerId, &str), b: (ServerId, &str)) -> bool {
     a.0 == b.0 && a.1 == b.1
 }
 
-/// What the ROSTER says ABOUT a registered server, as opposed to the address a request dials:
-/// whose it is and what it is called. Set by whoever ingested the roster (plex.tv
-/// `/api/v2/resources`, the `butaca-servers` dev trigger, or a server naming itself through
-/// `Client::friendly_name`), read by the Sources list.
-///
-/// Deliberately NOT fields on `Client`: a `Client` is re-pointed whenever the address moves, and
-/// a re-point must not forget whose server it is. Published by the same leak-and-store the client
-/// slots use, so [`facts`] hands out `&'static` on exactly the same terms as [`client_for`].
-pub struct ServerFacts {
-    /// The MACHINE name — "nas-home". "People in content, machines in settings": this is drawn
-    /// only where the grant itself is the subject, i.e. the Sources list's group headers.
-    pub name: String,
-    /// **The CREDIT** — the person to name, or empty when there is nobody to name. It is
-    /// [`owner_credit`]'s answer and never a raw `sourceTitle`; read that function's doc before
-    /// changing anything that writes this field.
-    ///
-    /// Empty is the ABSENCE of an owner rather than an anonymous one: every surface that annotates
-    /// a source draws nothing at all for it, no separator and no empty run. Empty for our own
-    /// server, for the household's server whichever Plex Home profile is watching, and for a share
-    /// plex.tv has not named.
-    pub handle: String,
-    /// This ACCOUNT owns the server (`account::Resource.owned`) — plex.tv's own flag, carried
-    /// through unedited. Not derivable from an empty handle in either direction: a share whose
-    /// `sourceTitle` plex.tv did not send is still a share, and a Plex Home managed user does not
-    /// "own" the household server they watch every day.
-    ///
-    /// **Frozen evidence (#166 unpinning)**: the one reader of the three grant-evidence fields
-    /// (the browse roster's household grading) went with the Plex arm, and auth still publishes
-    /// them whole. Kept as the registry's canonical durable reduction, exactly as written.
-    #[cfg_attr(not(test), expect(dead_code))]
-    pub owned: bool,
-    /// plex.tv's `home` on the resource, carried through unedited — see [`Grant::home`]. Frozen
-    /// evidence; see [`ServerFacts::owned`].
-    #[cfg_attr(not(test), expect(dead_code))]
-    pub home: bool,
-    /// plex.tv's `ownerId` — the account that owns the server, `0` on our own and `0` when
-    /// plex.tv sent none. Frozen evidence; see [`ServerFacts::owned`].
-    #[cfg_attr(not(test), expect(dead_code))]
-    pub owner_id: i64,
-}
-
-/// **The grant evidence a describer publishes**, as opposed to the CREDIT it publishes beside it.
-///
-/// [`Grant`] is the borrowed wire row, alive only as long as the `/api/v2/resources` response it
-/// points into; this is its durable, owned reduction — the three fields [`is_household`] reads,
-/// with the handle deliberately left out because a describer's handle is already a *credit*
-/// ([`owner_credit`]'s answer) and not the raw `sourceTitle` the rule takes.
-///
-/// It exists so the registry cannot publish a partial grant. `describe` used to take `owned: bool`
-/// alone, and everything downstream that asked "is this our household's server?" had nothing else
-/// to reason with — so a Plex Home managed profile's own household server read as a stranger's on
-/// every surface but the credit. Carrying all three together, in one value, is what makes that
-/// unforgettable at a call site rather than a field somebody remembers to set.
-#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-pub struct GrantEvidence {
-    /// plex.tv's `owned` — see [`ServerFacts::owned`].
-    pub owned: bool,
-    /// plex.tv's `home` — see [`Grant::home`].
-    pub home: bool,
-    /// plex.tv's `ownerId` — see [`Grant::owner_id`].
-    pub owner_id: i64,
-}
-
-impl GrantEvidence {
-    /// What this carried evidence says as a [`Grant`], for [`is_household`]. `source_title` is
-    /// empty because the rule does not read it — [`owner_credit`] does, and a credit has already
-    /// been decided by the time evidence is carried. The production grader (the browse roster's
-    /// household verdict) went with the Plex arm (#166); tests still grade through it.
-    #[cfg_attr(not(test), expect(dead_code))]
-    pub fn grant(&self) -> Grant<'static> {
-        Grant { owned: self.owned, home: self.home, owner_id: self.owner_id, source_title: "" }
-    }
-
-    /// Our own server: owned, with nobody else's id on it.
-    #[cfg(test)]
-    pub fn ours() -> Self {
-        Self { owned: true, ..Self::default() }
-    }
-
-    /// A grant this account does not own and about which plex.tv volunteered no household
-    /// evidence — the shape a legacy record deserializes to, and what a test means by "a share".
-    #[cfg(test)]
-    pub fn outside() -> Self {
-        Self::default()
-    }
-
-    /// **The household's own server as a member who does not own it sees it** — a Plex Home
-    /// managed or Guest profile looking at the family machine. `owned:false`, because plex.tv says
-    /// so; `home:true`, because the grant reaches this account through its own Plex Home; and
-    /// `owner_id` the admin's, which is the signal [`is_household`] actually decides on.
-    ///
-    /// Pass `0` for a caller with no roster to name one from. `home` then carries the case alone —
-    /// which is [`is_household`]'s un-enumerable-roster arm, not a weaker version of the same
-    /// answer; read that function's doc before relying on it.
-    ///
-    /// It exists because [`GrantEvidence::outside`] is a CLAIM, and writing it where a household
-    /// server was meant made an assertion pass for the wrong reason: before this type, `false`
-    /// only meant "not owned", which is true of the household's server too, so the two cases were
-    /// spelled identically and a fixture could not say which it meant.
-    #[cfg(test)]
-    pub fn household(owner_id: i64) -> Self {
-        Self { owned: false, home: true, owner_id }
-    }
-}
-/// One `/api/v2/resources` row reduced to **whose server it is** — the four fields the credit rule
-/// reads, and nothing else. `account::Resource::grant` is the one place a wire row becomes one of
-/// these; everything downstream (`auth`'s three ingest sites, this module's tests) takes the
-/// reduced form so the rule cannot quietly grow a fifth input at one call site only.
-#[derive(Clone, Copy, Default)]
-pub struct Grant<'a> {
-    /// plex.tv's `owned`: this ACCOUNT owns the server. `false` for a friend's share **and** for
-    /// the household's own server seen through a Plex Home managed profile — which is the whole
-    /// reason this is not the rule by itself.
-    pub owned: bool,
-    /// plex.tv's `home` on the resource: the grant reaches us through our own Plex Home.
-    pub home: bool,
-    /// plex.tv's `ownerId`: the account id of whoever owns the server, `0` on our own.
-    pub owner_id: i64,
-    /// plex.tv's `sourceTitle`: the owner's handle, empty when plex.tv did not name them.
-    #[cfg_attr(not(test), expect(dead_code))]
-    pub source_title: &'a str,
-}
-
-/// **Is this grant OUR HOUSEHOLD'S?** — our own server, or one that reaches us through the Plex
-/// Home this session belongs to.
-///
-/// `household` is the plex.tv account ids of the Home's members — the `/api/v2/home/users`
-/// ROSTER and nothing else: the admin, every managed user, and
-/// every ordinary account that has joined the Home. **Two signals, and they are not equals: the
-/// second only speaks when the first cannot.**
-///
-/// * **`ownerId` against the household ids** decides it whenever the house can be enumerated, and
-///   it is the MEASURED signal. `/api/v2/home/users` returns each member's plex.tv `id`, and the
-///   admin row's `id` is byte-identical to `/api/v2/user`'s `id` (measured 2026-09-03 on the dev
-///   account) — so `Resource::ownerId` and `HomeUser::id` are one id space and the comparison
-///   means what it reads as. `0` is "plex.tv sent no owner" and must never match a household id,
-///   hence the guard.
-/// * **`home`** is Plex's own flag for the same question and is **community-tier at best**:
-///   python-plexapi documents it as *"home (bool): Unknown"*. One reading of it IS refuted here —
-///   this account is a Plex Home ADMIN (`homeSize` 3) and BOTH of its grants, the owned server and
-///   a friend's share, come back `home:false`, so it is not "the owner has a Plex Home" — but the
-///   reading we want, "this grant is a Home grant", has never been observed TRUE by anybody here.
-///
-/// **So `home` is consulted only for a session that cannot enumerate its own house** — `household`
-/// empty, which the `/api/v2/home/users` roster read is built so as to mean exactly that and nothing
-/// else: a roster from a file written before `HomeUserRef::id` existed, or a sign-in whose
-/// `/api/v2/home/users` has not landed yet. An undocumented flag must not be able to take a credit
-/// away from a friend's share on the strength of a name — that is the ONE way this rule can regress
-/// a case that works today — and gating it on the measured signal being unavailable means the worst
-/// it can do is withhold a credit for as long as the roster is un-enumerable, which is until the
-/// next `/api/v2/home/users`.
-///
-/// The gate is what makes that list's contents load-bearing rather than a convenience, and the
-/// trap is not hypothetical: while the watching profile's own id was in there, an upgraded managed
-/// session (every roster id still `0`, a `user.id` written by an old `/switch`) came back
-/// NON-empty, which silenced `home` with an id that could never match anybody's `ownerId`.
-pub fn is_household(g: Grant<'_>, household: &[i64]) -> bool {
-    g.owned
-        || (household.is_empty() && g.home)
-        || (g.owner_id != 0 && household.contains(&g.owner_id))
-}
-
-/// **THE "Shared by …" RULE, and the only one.** Whom a server is credited to, `""` for nobody.
-///
-/// > A server is credited to a person when, and only when, plex.tv says it belongs to somebody
-/// > **outside this household** and names them.
-///
-/// So the credit is `sourceTitle` exactly when the grant is not [`is_household`]'s and the handle
-/// is non-empty, and `""` in all four other cases:
-///
-/// | the server | plex.tv says | drawn |
-/// |---|---|---|
-/// | our own | `owned:true`, `sourceTitle:null` | nothing |
-/// | the household's, seen by a Plex Home managed profile | `owned:false`, the admin in `sourceTitle`, `ownerId` = the admin's | nothing |
-/// | a friend's share | `owned:false`, their handle, their `ownerId` | `Shared by <handle>` |
-/// | a share plex.tv did not name | `owned:false`, `sourceTitle` absent/empty | nothing |
-///
-/// **Absence is the safe direction and the rule is written to fall that way**, which is the whole
-/// reason it exists: the bug it closes is the app telling the person watching that their own
-/// household's library was *"Shared by"* the account holder — an annotation that is not merely
-/// noise but a false statement about who owns what, drawn on the hero, the detail page's facts
-/// row, the Library read-out, the search results and the "Also available" rows at once. A credit
-/// that is late (an unnamed share, a household we cannot yet enumerate) costs one quiet line of
-/// attribution; a credit that is wrong costs the user's trust in every other line beside it.
-///
-/// **A NOTE ON WHAT IS INSIDE THE HOUSEHOLD.** A second server owned by another member of the same
-/// Plex Home is *not* credited either, and that is a decision rather than a side effect: a Plex
-/// Home is one household sharing one subscription, "Shared by" means somebody outside it lent you
-/// their library, and one rule that says "inside the house, nobody is a guest" is worth more than
-/// a second rule for a case nobody here can measure. Change it here, not per screen.
-///
-/// Every "Shared by …" in the app is [`crate::ui::fmt::shared_by`] applied to
-/// [`ServerFacts::handle`], and this is the only function that decides what goes into that field —
-/// see `docs/shared-servers.md` §13.
-#[cfg_attr(not(test), expect(dead_code))]
-pub fn owner_credit<'a>(g: Grant<'a>, household: &[i64]) -> &'a str {
-    if is_household(g, household) {
-        ""
-    } else {
-        g.source_title
-    }
-}
-
-/// The table. A null slot is unpopulated; a non-null one is a leaked `Client` that is never
-/// freed (see the module doc), which is what makes the `unsafe` deref in [`client_for`] sound.
-static SLOTS: [AtomicPtr<Client>; MAX_SERVERS] =
-    [const { AtomicPtr::new(std::ptr::null_mut()) }; MAX_SERVERS];
-/// [`ServerFacts`] per slot, published and leaked exactly as `SLOTS` is. A null slot is a server
-/// nobody has described yet — which is the honest state on a boot that never reached plex.tv.
-static FACTS: [AtomicPtr<ServerFacts>; MAX_SERVERS] =
-    [const { AtomicPtr::new(std::ptr::null_mut()) }; MAX_SERVERS];
-/// The last aggregate identity-probe result for each live server. Zero means this origin has not
-/// been probed in the current identity/address lifecycle. Unlike [`FACTS`], this is replaced rather
-/// than merged: a fresh successful probe is current evidence, as is a later timeout or 401.
-static PROBES: [AtomicU8; MAX_SERVERS] = [const { AtomicU8::new(PROBE_UNKNOWN) }; MAX_SERVERS];
-/// Slots populated so far — the high-water mark, MONOTONE for the life of the process. A revoked
-/// slot keeps its number (see the module doc), so this is not the number of servers: that is the
-/// population count of [`ACTIVE`].
+/// Slots populated so far — the high-water mark, MONOTONE for the life of the process. Nothing
+/// raises it any more (the registration world is retired), so the roster it bounds is empty; the
+/// static stays because [`revoke_all`] and the test reset still speak the same state machine.
 static COUNT: AtomicUsize = AtomicUsize::new(0);
-/// Which slots in the current account window are granted to the active profile. A profile switch
-/// can remove one share without retiring every slot number above it; inactive clients stay leaked
-/// but resolve to nothing, and their token is blanked before this bit is cleared.
+/// Which slots in the current account window are granted to the active profile. Always zero
+/// today; see [`COUNT`].
 static ACTIVE: AtomicU32 = AtomicU32::new(0);
-/// Which active roster slots may carry their credential under the policy that admitted their
-/// current origin. An ineligible stored origin remains ACTIVE as recovery metadata (so Sources
-/// and the endpoint rediscovery loop retain it), but never becomes CURRENT and its `Client`
-/// carries an empty token. A later eligible re-point flips this bit in the same registry write.
-static CREDENTIAL_ELIGIBLE: AtomicU32 = AtomicU32::new(0);
-/// The subset of [`CREDENTIAL_ELIGIBLE`] whose eligibility rests on a plaintext grant
-/// (`crate::grant`) rather than the policy alone — the slots [`regrade_credentials`] re-asks when
-/// a grant ends. Written with the eligibility bit, in the same registry write.
-static ON_GRANT: AtomicU32 = AtomicU32::new(0);
-/// Monotone epoch of the active roster's identity. It moves when a slot appears/disappears or is
-/// re-pointed, even when the active COUNT stays the same, so cached fan-out stores can distinguish
-/// `{0,1}` from `{0,2}` and can discard work aimed at a superseded origin.
-///
-/// **A re-DESCRIBE is deliberately not one of those**, and the distinction is load-bearing: this
-/// counter is what several stores read as "the set of servers I am working against has changed, so
-/// discard what is in flight". Restating a fact about a server already in the table is a different
-/// event, it invalidates nothing that was asked of that server, and it has its own counter one
-/// definition down.
+/// Monotone epoch of the active roster's identity. It moved when a slot appeared/disappeared or
+/// was re-pointed; nothing moves it today, but cached fan-out stores (`search`, `person`,
+/// `metadata`'s projections, `pms`'s source table) still read it as "the server set has not
+/// changed", and [`revoke_all`] still bumps it so a sign-out visibly retires whatever a cache
+/// projected.
 static ROSTER_GEN: AtomicU32 = AtomicU32::new(1);
-/// Monotone epoch of the published [`ServerFacts`] — it moves on every [`describe_locked`], and on
-/// nothing else. The counter beside it answers "which servers am I working against"; this one
-/// answers "what do I say ABOUT them", and a store that conflated the two paid for it in both
-/// directions.
-///
-/// **It exists because a cached projection cannot otherwise see a fact being restated.**
-/// `pms::roster_key` — the fingerprint Home's whole source-table rebuild is skipped on — was
-/// `(ROSTER_GEN, sections_gen)`, so a corrected "Shared by …" credit was invisible to Home; and
-/// registration bumps `ROSTER_GEN` BEFORE the describe that follows it, so even widening that
-/// counter left a gap in which a rebuild could cache the old credit under the new key and never
-/// revisit. A separate epoch closes both without telling `search`, `person` and `metadata`'s
-/// cross-source resolve — which read `ROSTER_GEN` to discard work aimed at a server set that has
-/// since changed — that their in-flight requests are stale when they are not.
+/// Monotone epoch of the published roster facts — it moved on every description commit, and on
+/// nothing else. Nothing commits descriptions today, so this stays at 1; the caches that key on
+/// it (`pms`'s facts fingerprint, `metadata`'s owner re-stamp) keep reading it unchanged.
 static FACTS_GEN: AtomicU32 = AtomicU32::new(1);
-/// The first slot that still belongs to the signed-in account. Raised to [`COUNT`] by
-/// [`revoke_all`]; everything below it is a credential of an account that has left.
-///
-/// A sign-out raises this past the whole account window. Profile visibility is separate in
-/// [`ACTIVE`], because a managed user may be granted only a subset of the owner's servers.
+/// The first slot that still belongs to the signed-in account. Raised by [`revoke_all`];
+/// everything below it is a credential of an account that has left.
 static FLOOR: AtomicUsize = AtomicUsize::new(0);
-/// The current/primary server as a raw `ServerId` — what `client()` answers with.
+/// The current/primary server as a raw `ServerId` — what `current()` answers with. The
+/// registration world that wrote it is retired, so this rests at [`ServerId::UNSET`]; it is
+/// reset by [`revoke_all`] and the test reset like every other piece of roster state.
 static CURRENT: AtomicU32 = AtomicU32::new(ServerId::UNSET.0 as u32);
-/// Writers only (register / re-point / reset). Readers never take it — that is the whole point.
+/// Writers only (sign-out / reset). Readers never take it — that is the whole point.
 static WRITE: Mutex<()> = Mutex::new(());
 
-const PROBE_UNKNOWN: u8 = 0;
+/// The source of every client generation value, process-wide. Only the UNIQUENESS matters — it is
+/// never compared for order. The clients that consumed it are retired (#166); the sequence
+/// survives because the persisted bootstrap vocabulary (`Initial.primary_client`) captures and
+/// restores it, and the two vocabularies (a captured seed >= 1, the dev Jellyfin world's 0) must
+/// never collide.
+static GEN_SEQ: AtomicU32 = AtomicU32::new(1);
 
-fn probe_code(outcome: Outcome) -> u8 {
-    match outcome {
-        Outcome::Reachable => 1,
-        Outcome::Unauthorized => 2,
-        Outcome::WrongServer => 3,
-        Outcome::Unreachable => 4,
-        Outcome::InsecureOnly => 5,
-    }
+/// Called only before constructing controlled resources in an empty registry. Read the sequence
+/// the retired clients issued generations from, so a replay can restore it byte-identically.
+pub(crate) fn capture_generation_seed() -> u32 {
+    GEN_SEQ.load(Ordering::Relaxed)
 }
 
-#[cfg_attr(not(test), expect(dead_code))]
-fn probe_of_code(code: u8) -> Option<Outcome> {
-    match code {
-        1 => Some(Outcome::Reachable),
-        2 => Some(Outcome::Unauthorized),
-        3 => Some(Outcome::WrongServer),
-        4 => Some(Outcome::Unreachable),
-        5 => Some(Outcome::InsecureOnly),
-        _ => None,
+/// Restore a captured generation seed. Refuses `0`: that is the dev world's "no client ever
+/// minted" marker, and storing it would let a later minted generation collide with the value a
+/// captured vocabulary means.
+pub(crate) fn restore_generation_seed(seed: u32) -> Result<(), &'static str> {
+    if seed == 0 {
+        return Err("invalid client initialization boundary");
     }
+    GEN_SEQ.store(seed, Ordering::Relaxed);
+    Ok(())
 }
 
-// ---- reads: the hot path ----
+// ---- reads ----
 
-/// The `Client` for one slot, `None` for [`ServerId::UNSET`], an unpopulated slot, or one
-/// [`revoke_all`] has retired.
+/// Which server `client()` used to answer with. [`ServerId::UNSET`] on every boot of the
+/// single-source app: the installation path that wrote this retired with the Plex wire layer, so
+/// the current-server slot is permanently unnamed. Callers that need the LIVE backend name
+/// `crate::jellyfin::SERVER_ID` directly.
 ///
-/// The revoked case is the reason this is the ONE door: ~30 call sites resolve a stored `ServerId`
-/// through it, they all already handle `None` (that is the contract for an unpopulated slot), and
-/// answering `None` here is what stops every one of them dialling the previous account's server
-/// with the previous account's token. `Relaxed` on the floor: it is a lone `usize` publishing
-/// nothing, and a reader that raced a sign-out by a microsecond would have read the old value a
-/// microsecond earlier anyway.
-pub fn client_for(id: ServerId) -> Option<&'static Client> {
-    let i = id.index()?;
-    if i < FLOOR.load(Ordering::Relaxed) || ACTIVE.load(Ordering::Acquire) & (1u32 << i) == 0 {
-        return None;
-    }
-    let p = SLOTS.get(i)?.load(Ordering::Acquire);
-    // SAFETY: a slot holds either null or a pointer from `Box::into_raw` that is NEVER freed
-    // (see the module doc on the deliberate leak), published with a Release store paired to this
-    // Acquire load. So a non-null read is always a fully-initialised, permanently-live `Client`.
-    (!p.is_null()).then(|| unsafe { &*p })
-}
-
-/// Which server `client()` answers with. `UNSET` before the first install.
-///
-/// **`Acquire`, and the pair with [`set_current`]'s `Release` is load-bearing on the TV.** The
-/// invariant every reader depends on is *"if you can see this id, the slot it names is published"*
-/// — `client_opt` reads this and then the slot, and `client()` PANICS on a null one. Relaxed on
-/// both sides states no such ordering: ARMv7 is weakly ordered, so a poster worker calling
-/// `client()` per art tile per frame could observe an id stored by the auth worker's `install`
-/// before that thread's slot-pointer store landed, and take the panic. x86 would never show it,
-/// which is exactly why it is spelled out here rather than left to a host test to catch.
+/// **`Acquire`** for the store side that no longer exists is still the right order here: the
+/// read is on poster/resolution worker paths, and the relaxation of one atomic buys nothing.
 pub fn current() -> ServerId {
     ServerId(CURRENT.load(Ordering::Acquire) as u16)
-}
-
-/// Point `client()` at another registered server. `false` (and no change) for an id that names
-/// no client or only recovery metadata whose origin cannot carry a credential in this build —
-/// retargeting to either would make the hot-path `client()` answer unusable connection state.
-#[cfg(test)]
-pub fn set_current(id: ServerId) -> bool {
-    // `CURRENT` is a crate global; a test that flips it outside `crate::testlock::serial()` lands
-    // in the middle of some other module's test — see `lib.rs::testlock`.
-    #[cfg(test)]
-    crate::testlock::assert_held("the plex server registry (set_current)");
-    let ok = id.index().is_some_and(|i| {
-        client_for(id).is_some() && CREDENTIAL_ELIGIBLE.load(Ordering::Acquire) & (1u32 << i) != 0
-    });
-    if ok {
-        // Release, pairing with `current()`'s Acquire: publishes the slot store that
-        // `client_for` above just proved visible TO US, so it is visible to every later reader.
-        CURRENT.store(id.0 as u32, Ordering::Release);
-    }
-    ok
-}
-
-/// The CURRENT server's `Client`. Panics unless at least one credential-eligible server has been
-/// installed and selected; recovery-only origins deliberately do not satisfy that precondition.
-/// The panic message is retained for compatibility with the singleton this replaced.
-#[cfg(test)]
-pub fn client() -> &'static Client {
-    client_opt().expect("plex::install not called")
-}
-
-/// Non-panicking accessor for paths that can legitimately run before login (playback teardown,
-/// the /tmp/butaca-url + sample demo boots) — the old `route::CFG == None` guard semantics.
-pub fn client_opt() -> Option<&'static Client> {
-    client_for(current())
-}
-
-/// How many servers are registered **and still ours** — a sign-out takes the whole table down to
-/// zero (see [`revoke_all`]).
-///
-/// Not a slot bound: slot numbers are permanent and profile visibility can be sparse. The caller
-/// that wants slot NUMBERS wants [`ids`]; reading this as `0..count()` can hit an inactive share or
-/// miss a live slot above it.
-pub fn count() -> usize {
-    ACTIVE.load(Ordering::Acquire).count_ones() as usize
 }
 
 pub fn roster_gen() -> u32 {
     ROSTER_GEN.load(Ordering::Acquire)
 }
 
-/// The [`FACTS_GEN`] epoch — read it beside [`roster_gen`] when a cache projects an AUTHORITATIVE
+/// The facts epoch — read it beside [`roster_gen`] when a cache projects an AUTHORITATIVE
 /// description (the "Shared by …" credit, and the machine name as a describer stated it) and not
-/// merely which servers are in the table.
-///
-/// **Not every published field moves it**, and the exception is deliberate: the per-request
-/// name-merging commit (the browse Plex arm's, #166) could refresh a machine NAME — the server
-/// naming itself — without bumping this. A cache that needs to follow that has
-/// the facts POINTER to key on; making a per-request commit move a counter that
-/// `pms::sync_roster` rebuilds Home's whole source table on would be a poor trade for a field Home
-/// does not draw.
+/// merely which servers are in the table. Constant at 1 today; see the static's doc.
 pub fn facts_gen() -> u32 {
     FACTS_GEN.load(Ordering::Acquire)
 }
 
-/// Every LIVE slot, in registration order — **the granted roster**, since a server is only
-/// registered once the account was granted it, and only while that account is signed in.
-/// Registration order matters to the one caller (`browse`'s section table appends in it, and the
-/// session server registers first), so this is an ordered walk and not a set.
-///
-/// The walk starts at [`FLOOR`], not at 0: a sign-out retires the slots below it without
-/// renumbering anything registered after (the module doc says why numbers are never reused).
+/// Every LIVE slot, in registration order — **the granted roster**. With registration retired
+/// (#166) the roster is always empty; the walk keeps its exact shape (floor-bounded, active-bit
+/// filtered, ordered) because `browse`'s discovery wire, `search`'s fan-out, `person`'s sources
+/// and `metadata`'s alt panel all read it and must keep reading "no Plex sources" rather than a
+/// guessed slot.
 pub fn ids() -> impl Iterator<Item = ServerId> {
     let hi = COUNT.load(Ordering::Acquire);
     let active = ACTIVE.load(Ordering::Acquire);
@@ -568,684 +189,88 @@ pub fn ids() -> impl Iterator<Item = ServerId> {
         .map(|i| ServerId(i as u16))
 }
 
-/// The active slot `machine_id` is registered in, if any.
-pub(crate) fn id_of_machine(machine_id: &str) -> Option<ServerId> {
-    if machine_id.is_empty() {
-        return None;
-    }
-    ids().find(|&id| client_for(id).is_some_and(|c| c.machine_id() == machine_id))
+/// The active slot whose machine id is `machine_id`, if any. Machine ids lived on the retired
+/// `plex::Client`s, so this answers `None` for every input; the signature stays for the one
+/// caller (the plaintext alert's subject resolution) until the plaintext slice retires it.
+pub(crate) fn id_of_machine(_machine_id: &str) -> Option<ServerId> {
+    None
 }
 
-/// What the roster says about one server, `None` until something has described it — and `None`
-/// again once [`revoke_all`] has retired it, on the same floor [`client_for`] applies. The pair has
-/// to answer alike or a stale `ServerId` held past a sign-out would still put the previous account's
-/// machine name and the person who shared it on screen, off a slot nothing can dial.
-pub fn facts(id: ServerId) -> Option<&'static ServerFacts> {
-    let i = id.index()?;
-    client_for(id)?;
-    let p = FACTS.get(i)?.load(Ordering::Acquire);
-    // SAFETY: identical to `client_for`'s — a slot holds null or a `Box::into_raw` pointer that is
-    // never freed, published Release and read Acquire.
-    (!p.is_null()).then(|| unsafe { &*p })
-}
+// ---- writes ----
 
-/// The last aggregate probe result for this live server, or `None` when nobody has probed its
-/// current identity/address lifecycle. Candidate-level wrong-machine answers are normally folded
-/// into [`Outcome::Unreachable`] by the coordinator; the full enum is encoded so this boundary
-/// remains total if another prober publishes its raw answer in the future. The one production
-/// reader (the browse roster's reachability grading) went with the Plex arm (#166); the auth
-/// install paths' InsecureOnly publication is still graded through it in tests.
-#[cfg_attr(not(test), expect(dead_code))]
-pub fn probe_result(id: ServerId) -> Option<Outcome> {
-    let i = id.index()?;
-    client_for(id)?;
-    probe_of_code(PROBES.get(i)?.load(Ordering::Acquire))
-}
-
-/// Publish what the completed server race proved. The winning tier is the neighbouring
-/// [`Client::link`](crate::registry::client::Client::link) fact and is written by the same auth coordinator.
-/// A no-op for an inactive/unknown slot, so a late auth worker cannot resurrect a revoked source.
-#[cfg_attr(not(test), expect(dead_code))]
-pub fn publish_probe_result(id: ServerId, outcome: Outcome) {
-    let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(i) = id.index().filter(|_| client_for(id).is_some()) else {
-        return;
-    };
-    PROBES[i].store(probe_code(outcome), Ordering::Release);
-    // The Sources list follows this atomic from `browse::sync_roster`; wake an idle frame so the
-    // new word/tier is visible immediately rather than at the two-second keepalive.
-    crate::ui::idle::invalidate();
-}
-
-/// Commit lifecycle-bound data that does not itself prove reachability (menu directories, for
-/// example). Validation and callback share [`WRITE`] for the same reason the deleted
-/// reachability commit did (the browse Plex arm's, #166): registration/revocation cannot move
-/// the client between this validation and the caller's commit. The callback must not re-enter
-/// this registry.
-pub fn commit_if_current<R>(
-    id: ServerId,
-    expected: &'static Client,
-    token_gen: u32,
-    commit: impl FnOnce() -> R,
-) -> Option<R> {
-    let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
-    current_lifecycle_index(id, expected, token_gen)?;
-    Some(commit())
-}
-
-/// Resolve one exact lifecycle. Caller holds [`WRITE`], so pointer and generation cannot move
-/// between this check and its critical-section commit.
-fn current_lifecycle_index(
-    id: ServerId,
-    expected: &'static Client,
-    token_gen: u32,
-) -> Option<usize> {
-    let i = id.index()?;
-    let current = client_for(id)?;
-    (std::ptr::eq(current, expected) && current.token_gen() == token_gen).then_some(i)
-}
-
-/// Record what the roster says about a server.
+/// **Sign-out.** Retire every registered server: `current()` answers with nothing again, [`ids`]
+/// walks nothing, and the roster epochs move so every cache that projected the roster rebuilds
+/// empty.
 ///
-/// **`handle` is AUTHORITATIVE and `name` is MERGED, and the asymmetry is the whole point.**
+/// The token-blanking half the old table performed died with the clients — a `&'static Client`
+/// can no longer exist to hold a credential — but the funnel stays: every account teardown
+/// (`app::adapters::session`'s `begin_erase`) passes through here, and the state machine it
+/// resets is the one the whole app reads.
 ///
-/// `handle` is a CREDIT, already decided by [`owner_credit`] at whichever ingest produced it —
-/// never a raw `sourceTitle` — and an empty one is a positive answer, *there is nobody to credit*,
-/// not "I learned nothing". So it REPLACES: passing `""` takes a previously published credit off
-/// the server. It has to. Every caller here holds a roster row that has just been graded by the
-/// rule, and the case that matters is precisely the one where the old answer was wrong — a session
-/// file written by a build that stored the raw `sourceTitle`, replayed at boot from the persisted
-/// roster, or a share whose `sourceTitle` plex.tv has stopped sending. Merging the
-/// credit made `refreshed_sources`' correction unobservable: it persisted the empty credit
-/// faithfully and the registry kept the stale name for the life of the process.
-///
-/// `name` still merges, because a machine NAME genuinely arrives from two describers in either
-/// order and empty there really does mean "I did not learn one". A server naming itself over
-/// `GET /` used to reach the table through the browse arm's reachability commit (which merged the
-/// name and carried the existing handle and ownership under the same lock, #166); [`describe_name`]
-/// is the same idea for a caller that has only a name and no request to publish alongside it.
-///
-/// This also enforces the half of the rule it can always see for itself, `owned ⇒ nobody is
-/// credited`, so no describer — the `butaca-servers` dev trigger, a future one — can put a
-/// person's name on a server this account owns. The other half needs the household, which only the
-/// ingest holds.
-///
-/// A no-op for an id that names no client: describing a slot nothing dials would leave a row in
-/// the Sources list that cannot be browsed.
-/// `grant` is the EVIDENCE ([`GrantEvidence`]), authoritative like the credit and for the same
-/// reason: every caller here holds a roster row plex.tv has just answered with, and the case that
-/// matters is the one where the stored answer was wrong.
-#[cfg(test)]
-pub fn describe(id: ServerId, name: &str, handle: &str, grant: GrantEvidence) {
-    let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
-    describe_locked(id, name, Some(handle), grant);
-}
-
-/// The body of [`describe`] and [`describe_name`], with the caller holding [`WRITE`].
-///
-/// `credit` says which of the two contracts this describer is under: `Some` is an ANSWER about who
-/// is credited (empty included — that is *nobody*), `None` is "I know nothing about the grant, keep
-/// what is there". Spelling the difference in the type rather than in an empty string is what stops
-/// the two collapsing back together, which is how the raw `sourceTitle` outlived its own correction.
-///
-/// The read-modify-write is inside the critical section for the ordinary reason: [`describe_name`]
-/// reads `facts` and writes back a value derived from it, and an authoritative describe landing
-/// between the two would be overwritten by the stale credit it had just replaced.
-#[cfg(test)]
-fn describe_locked(id: ServerId, name: &str, credit: Option<&str>, grant: GrantEvidence) {
-    let Some(i) = id.index().filter(|_| client_for(id).is_some()) else {
-        return;
-    };
-    let old = facts(id);
-    let merged = ServerFacts {
-        name: pick(name, old.map(|f| f.name.as_str())),
-        handle: match (grant.owned, credit) {
-            (true, _) => String::new(),
-            (false, Some(c)) => c.to_owned(),
-            (false, None) => old.map(|f| f.handle.clone()).unwrap_or_default(),
-        },
-        // The grant has no "unknown" spelling, so the newest answer wins whole — but a describer
-        // that only learned a name passes back the evidence it read, which is what makes that a
-        // no-op rather than a lie. All three move together: `home` and `owner_id` are the same
-        // answer about the same grant that `owned` is, and a half-updated trio would let a stale
-        // `ownerId` outlive the `owned` that was corrected beside it.
-        owned: grant.owned,
-        home: grant.home,
-        owner_id: grant.owner_id,
-    };
-    FACTS[i].store(Box::into_raw(Box::new(merged)), Ordering::Release);
-    // The PUBLISHED FACTS moved, which every cached projection of them has to be able to notice —
-    // see [`FACTS_GEN`], and note the ordering hazard it closes.
-    FACTS_GEN.fetch_add(1, Ordering::AcqRel);
-    // A server learning its own name CHANGES PIXELS — the Search screen's scope line and the
-    // Library's Source chip both read it — and it lands asynchronously, well after the first frame.
-    // `ui::idle` gates the whole present on detected motion and cannot see a `static` being
-    // written, so without this the new name sat invisible until the 2 s keepalive or the next
-    // keypress: a screen showing "your server and your server" for two seconds after it knew better.
-    crate::ui::idle::invalidate();
-}
-
-/// Record a server's MACHINE NAME and nothing else — for a describer that learned it from the
-/// server itself (`GET /` → `friendlyName`) and knows nothing whatever about the grant.
-///
-/// **It has no production caller today** and is kept because it is the correct shape for that
-/// describer to reappear in: the live one, the server naming itself over `GET /`, merged its
-/// name through the browse arm's reachability commit (the same lock, the same reasons), which
-/// went with the Plex arm (#166).
-///
-/// It exists because [`describe`]'s `owned` has no "unknown" spelling, so a name-only describer has
-/// to pass SOMETHING — and its call site of the day computed it as `handle.is_empty()`, which is
-/// precisely the derivation [`ServerFacts::owned`] documents as wrong: a share whose `sourceTitle`
-/// plex.tv did not send has no handle and is still a share. So every such share flipped to "ours"
-/// the moment its friendly name arrived — un-attributing it on the detail page and the shelf
-/// headings, and pinning its libraries to Home by the ownership default. Carrying the stored flag
-/// through is the only honest answer, and doing it HERE rather than asking each call site to read
-/// [`facts`] back is what makes it unforgettable.
-///
-/// A slot nothing has described yet reads as ours, which is not a guess: the only registration that
-/// does not describe is [`install`], the SESSION path, whose server is the account's own.
-///
-/// The CREDIT is preserved for the same reason and by the same means as `owned` — `credit: None`,
-/// the "I know nothing about the grant" arm of [`describe_locked`]. A name-only describer that
-/// passed `""` would un-attribute a friend's share the moment its friendly name arrived: the exact
-/// shape of the `owned` bug this function was written to close, one field over.
-#[cfg(test)]
-pub fn describe_name(id: ServerId, name: &str) {
-    let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
-    let grant = facts(id)
-        .map(|f| GrantEvidence { owned: f.owned, home: f.home, owner_id: f.owner_id })
-        .unwrap_or_else(GrantEvidence::ours);
-    describe_locked(id, name, None, grant);
-}
-
-/// `new` when it says something, else whatever was already known.
-#[cfg(test)]
-fn pick(new: &str, old: Option<&str>) -> String {
-    if new.is_empty() {
-        old.unwrap_or_default().to_owned()
-    } else {
-        new.to_owned()
-    }
-}
-
-// ---- writes: registration ----
-
-/// Is this slot the same SERVER as the one being registered?
-///
-/// Machine ids decide it whenever both sides have one — that is the identity that survives the
-/// address moving. Otherwise the address is all there is: for the legacy `install` (no id at
-/// all), and for a `register` that has learned an id for a slot registered without one, which is
-/// the ADOPT case rather than a second slot for one server.
-fn same_server(c: &Client, machine_id: &str, origin: &Origin) -> bool {
-    if !machine_id.is_empty() && !c.machine_id().is_empty() {
-        return c.machine_id() == machine_id;
-    }
-    c.origin() == origin
-}
-
-/// Publish a client into a slot. Takes the leak (see the module doc); the Release store pairs
-/// with [`client_for`]'s Acquire load.
-fn publish(id: ServerId, c: Client) {
-    let p = Box::into_raw(Box::new(c));
-    SLOTS[id.0 as usize].store(p, Ordering::Release);
-}
-
-/// Read a populated slot without applying profile visibility. Writers use this only while holding
-/// [`WRITE`] so a profile-switch re-registration can find and reactivate the same machine id after
-/// its old token was blanked. Slots below [`FLOOR`] are never searched: those belong to an account
-/// that signed out and must never be adopted by the next one.
-fn populated(id: ServerId) -> Option<&'static Client> {
-    let i = id.index()?;
-    let p = SLOTS.get(i)?.load(Ordering::Acquire);
-    (!p.is_null()).then(|| unsafe { &*p })
-}
-
-/// Record whether `id`'s credential rests on a plaintext grant — see [`ON_GRANT`].
-fn mark_on_grant(id: ServerId, on_grant: bool) {
-    let Some(i) = id.index() else { return };
-    let bit = 1u32 << i;
-    if on_grant {
-        ON_GRANT.fetch_or(bit, Ordering::Release);
-    } else {
-        ON_GRANT.fetch_and(!bit, Ordering::Release);
-    }
-}
-
-/// Publish one populated slot into the active profile's roster. Pointer/token writes happen first;
-/// the Release bit is what makes them reachable through [`client_for`].
-fn activate(id: ServerId, credential_eligible: bool) {
-    let Some(i) = id.index() else { return };
-    let bit = 1u32 << i;
-    if credential_eligible {
-        CREDENTIAL_ELIGIBLE.fetch_or(bit, Ordering::Release);
-    } else {
-        CREDENTIAL_ELIGIBLE.fetch_and(!bit, Ordering::Release);
-    }
-    if ACTIVE.fetch_or(bit, Ordering::Release) & bit == 0 {
-        ROSTER_GEN.fetch_add(1, Ordering::AcqRel);
-    }
-    if credential_eligible && !current().is_set() {
-        CURRENT.store(id.0 as u32, Ordering::Release);
-    } else if !credential_eligible && current() == id {
-        let usable = ACTIVE.load(Ordering::Acquire) & CREDENTIAL_ELIGIBLE.load(Ordering::Acquire);
-        let next = if usable == 0 {
-            ServerId::UNSET
-        } else {
-            ServerId(usable.trailing_zeros() as u16)
-        };
-        CURRENT.store(next.0 as u32, Ordering::Release);
-    }
-}
-
-/// Register (or update) a server, returning its stable id — or [`ServerId::UNSET`] when the table
-/// is full and there was nowhere to put it.
-///
-/// * an existing slot for the same server keeps its slot: the token is swapped IN PLACE, so
-///   every `&'static Client` already handed out sees the new token — that is what the Plex Home
-///   profile-switch path relies on;
-/// * unless the address moved (or the slot's machine id was empty and is now known), in which
-///   case the slot is RE-POINTED: a fresh `Client` is published over the old pointer;
-/// * a server not in the table is appended.
-///
-/// **The full-table answer is a SENTINEL, and it used to be `current()`** — which reads as a
-/// successful registration and is a lie about a completely different machine. The caller's very
-/// next line is a `describe_server`, so a roster ingest that overflowed renamed the user's OWN
-/// server to the share it could not fit and captioned it "Shared by <friend>"; `pms::sync_roster`
-/// had to grow a de-duplication guard for the same return value. `ServerId::UNSET` resolves to
-/// nothing everywhere by construction — [`describe`], [`set_current`] and [`client_for`] all turn
-/// it away — so every caller degrades correctly without a full-table branch of its own.
-///
-/// Does NOT steal `current` from an established server — only the first credential-eligible
-/// registration sets it (otherwise there is nothing usable for `client()` to answer with). Use
-/// [`set_current`] to switch, or [`install`], which is the session path and retargets whenever
-/// the supplied origin is credential-eligible.
-#[cfg_attr(test, allow(dead_code))]
-pub fn register(machine_id: &str, host: &str, port: i32, token: &str) -> ServerId {
-    register_origin(machine_id, &Origin::http(host, port), token, None, ConnectionFacts::default())
-}
-
-/// [`register`], given the server's whole [`Origin`] instead of a plaintext address.
-///
-/// **This is the real one.** The `(host, port)` spelling above cannot say `https`, and an origin
-/// is not something that can be rebuilt from an address afterwards: plex.tv advertises a server's
-/// TLS origin as the `plex.direct` HOSTNAME while its `address` stays the dotted quad behind it,
-/// and the certificate is issued for the name. So an origin has to be carried from where it was
-/// parsed ([`crate::plex::probe::Candidate::origin`]) all the way to here, and the pair-shaped entry
-/// points are kept only for callers that genuinely have nothing but an address.
-///
-/// `pin` is the origin's [`ResolvePin`] when the caller holds the address plex.tv advertised
-/// beside it (`ResolvePin::for_origin`), `None` otherwise. The registry records it on the
-/// published `Client` for the control plane and in `crate::net::resolve` for the media plane;
-/// that table is append-only, so a pin is never retracted — see its doc for why that is sound.
-/// Carries connection facts (#95 step 8) to apply to the published `Client` AT registration, in
-/// the same write that creates or re-points its slot — never as a separate post-hoc call a caller
-/// can forget or that a re-point can race. `connection`'s doc explains why `None` means "leave
-/// unchanged" rather than "unknown"; a caller that genuinely knows nothing about the connection
-/// passes `ConnectionFacts::default()` explicitly (that is [`register`]'s whole body).
-pub(crate) fn register_origin(
-    machine_id: &str,
-    origin: &Origin,
-    token: &str,
-    pin: Option<&ResolvePin>,
-    connection: ConnectionFacts,
-) -> ServerId {
-    let policy = CredentialPolicy::build();
-    // Boot/credential completion has already supplied the install identity. Registration also
-    // runs inside frames, so a new or re-pointed slot may only consult the cached snapshot.
-    let id = register_lazy(machine_id, origin, token, pin, connection, policy, &|| {
-        crate::plex::session::peek().client_id.clone()
-    });
-    // Both this cached-identity path and the captured-identity path refresh the server's
-    // self-description. The worker is single-flighted per server; registration never waits.
-    if crate::grant::allowed_for(policy, machine_id, origin) {
-        crate::plex::registry_seam::refresh_serverinfo(id);
-    }
-    id
-}
-
-/// [`register`] with the device id supplied — the seam that keeps the session file **and the
-/// network** out of the registry proper, and out of the tests.
-///
-/// `pub(crate)` rather than `pub(super)` because tests OUTSIDE `plex/` need it too (`route.rs`
-/// grades which server a `/:/timeline` POST reaches, which takes two registered clients).
-///
-/// **Two reasons a host test must come through here, and the second one cost a red CI run.**
-///
-/// 1. The public [`register`] resolves the device id through `session::peek`; a cache miss can
-///    queue a storage refresh. Pure registry tests supply the id instead.
-/// 2. [`register`] also fires [`serverinfo::refresh`](crate::plex::serverinfo::refresh), which spawns a
-///    worker that really opens a socket. Tests of the registry must not acquire that unrelated
-///    network side effect or depend on worker scheduling. (`stream::http_stream_boxed` now zeros
-///    its 64 KiB buffer directly on the heap; this seam remains necessary for isolation.)
-///
-/// So: **no test in this crate may call [`register`] or [`register_origin`]**. The two seams here
-/// are the whole test surface, and neither loads a session nor spawns anything.
-#[cfg(test)]
-pub(crate) fn register_with_client_id(
-    machine_id: &str,
-    host: &str,
-    port: i32,
-    token: &str,
-    client_id: &str,
-) -> ServerId {
-    // Same crate-global registry guard as `register_lazy` (which this reaches through
-    // `register_pinned_with_client_id`) — named directly here too, since this is the entry point
-    // D5 names and `register_lazy`'s own assertion is one call away rather than at this frame.
-    #[cfg(test)]
-    crate::testlock::assert_held("the plex server registry (register_with_client_id)");
-    register_pinned_with_client_id(machine_id, &Origin::http(host, port), token, None, client_id,
-        ConnectionFacts::default())
-}
-
-/// [`register_with_client_id`], given the whole [`Origin`] and, optionally, a resolve pin — the
-/// seam for a test that is about the SCHEME (which the `(host, port)` form cannot express) or the
-/// PIN, and for grading [`ConnectionFacts`]'s "leave unchanged on retoken" / "sets both on
-/// re-point" semantics (#95 step 8). Same contract as every `_with_client_id` seam: no session
-/// file, no worker — a caller that genuinely knows nothing about the connection passes
-/// `ConnectionFacts::default()` explicitly. Its product callers were the DevPms installs, gone
-/// with that world (#166); the roster install rides `register_observed_origin`.
-#[cfg(test)]
-pub(crate) fn register_pinned_with_client_id(
-    machine_id: &str,
-    origin: &Origin,
-    token: &str,
-    pin: Option<&ResolvePin>,
-    client_id: &str,
-    connection: ConnectionFacts,
-) -> ServerId {
-    register_lazy(
-        machine_id,
-        origin,
-        token,
-        pin,
-        connection,
-        CredentialPolicy::build(),
-        &|| client_id.to_owned(),
-    )
-}
-
-#[cfg(test)]
-pub(crate) fn register_pinned_with_client_id_and_policy(
-    machine_id: &str,
-    origin: &Origin,
-    token: &str,
-    pin: Option<&ResolvePin>,
-    client_id: &str,
-    connection: ConnectionFacts,
-    policy: CredentialPolicy,
-) -> ServerId {
-    register_lazy(machine_id, origin, token, pin, connection, policy, &|| client_id.to_owned())
-}
-
-fn register_lazy(
-    machine_id: &str,
-    origin: &Origin,
-    token: &str,
-    pin: Option<&ResolvePin>,
-    connection: ConnectionFacts,
-    policy: CredentialPolicy,
-    client_id: &dyn Fn() -> String,
-) -> ServerId {
-    // The registry's SLOTS/COUNT/ACTIVE/CURRENT tables are crate globals — a test reaching this
-    // through `register_with_client_id`/`register_pinned_with_client_id` without
-    // `crate::testlock::serial()` writes them outside the lock, exactly what `lib.rs::testlock`
-    // exists to catch.
-    #[cfg(test)]
-    crate::testlock::assert_held("the plex server registry (register)");
-    let client_id = client_id();
-    // A transient/revoked session has no install identity. Never publish a malformed client.
-    if client_id.is_empty() { return ServerId::UNSET; }
-    // Recorded BEFORE the client is published, so no request made through the new pointer can
-    // reach `curlio` ahead of the table entry it will look for. Once per (host, port); the
-    // log line below names the pin only when it is new, so a token-only re-registration of the
-    // same server (every profile switch) stays byte-identical to what it always logged.
-    let pinned = pin.is_some_and(crate::net::resolve::add);
-    // The NOTE names the family and nothing else. The pin's host is a dashed LAN address and its
-    // `addr` is that address again: `crate::log`'s scrubber rewrites a bare address but has no
-    // rule for a `192-168-0-10.<hash>.plex.direct` label, so printing either would put the
-    // household's LAN layout into the file users paste into issues.
-    let pin_note = match pin {
-        Some(p) if pinned => format!(" (pinned: {} name resolved locally)", p.family()),
-        _ => String::new(),
-    };
-    let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
-    let n = COUNT.load(Ordering::Acquire);
-    let floor = FLOOR.load(Ordering::Acquire).min(n);
-    // Search every populated slot in THIS account's window, including one deactivated by a profile
-    // switch. Reusing that machine's stable id is how repeated profile changes avoid consuming the
-    // 16-slot table; a sign-out raises FLOOR, so a previous account's slot is never considered.
-    let found = (floor..n)
-        .map(|i| ServerId(i as u16))
-        .find(|&id| populated(id).is_some_and(|c| same_server(c, machine_id, origin)));
-    // THE authority (`crate::grant`): TLS, a developer build, or a live consented grant for this
-    // SERVER at this exact plaintext origin — the machine this registration is for (a legacy
-    // id-less call adopting a slot is that slot's machine; with none known, no grant applies).
-    // Asked under the write lock, so a revocation that lands after this line re-grades the slot
-    // it publishes (`regrade_credentials`), never misses it.
-    let grant_machine = match found.and_then(populated) {
-        Some(c) if machine_id.is_empty() => c.machine_id(),
-        _ => machine_id,
-    };
-    let credential_eligible = crate::grant::allowed_for(policy, grant_machine, origin);
-    let on_grant = crate::grant::rests_on_grant(policy, grant_machine, origin);
-    let admitted_token = if credential_eligible { token } else { "" };
-
-    if let Some(id) = found {
-        let c = populated(id).expect("the matched slot is populated");
-        let bit = 1u32 << id.index().expect("a populated slot has an index");
-        let was_eligible = CREDENTIAL_ELIGIBLE.load(Ordering::Acquire) & bit != 0;
-        // Keep an id we already know: a legacy address-keyed call must not blank it.
-        let mid = if machine_id.is_empty() {
-            c.machine_id()
-        } else {
-            machine_id
-        };
-        // A pin ARRIVING on a slot that had none is a re-publication condition too: the pin lives
-        // on the `Client` (immutable there by design), so a same-origin registration that only
-        // swapped the token would leave the control plane resolving through DNS while the media
-        // table already knew the answer. A pin never goes away (same origin ⇒ same pin), so this
-        // is a one-way upgrade and cannot churn.
-        let pin_arrived = pin.is_some() && c.resolve_pin() != pin;
-        if c.origin() != origin || c.machine_id() != mid || pin_arrived {
-            // Re-point. The old `Client` stays alive and merely stale for anyone mid-request
-            // with it; the fresh one also gets a fresh token generation, so token-baked caches
-            // flush without a special case.
-            //
-            // `log_form`: the bare authority for a plaintext origin, so this line stays
-            // byte-identical to the `{host}:{port}` it has always been and an archived log is
-            // still comparable with a current one — and the whole URL the moment the scheme is
-            // worth saying, which is the only way a headless run armed with `{"scheme":"https"}`
-            // can be told from an http one at all. See `Origin::log_form`.
-            crate::log(&format!(
-                "plex: server slot {} re-pointed to {}{pin_note}",
-                id.0,
-                origin.log_form()
-            ));
-            // The pointer is leaked, so a worker may retain it forever. Defang that old reference
-            // before publishing the replacement; later sign-out/profile revocation can only walk
-            // the current pointer stored in this slot and cannot discover superseded clients.
-            c.set_token("");
-            // The old origin's answer says nothing about the replacement. The activation that
-            // proved this address writes its result after `register_origin` returns.
-            PROBES[id.0 as usize].store(PROBE_UNKNOWN, Ordering::Release);
-            publish(
-                id,
-                crate::plex::registry_seam::new_client(
-                    id, mid, origin.clone(), admitted_token, &client_id, pin.cloned(),
-                ),
-            );
-            ROSTER_GEN.fetch_add(1, Ordering::AcqRel);
-        } else {
-            c.set_token(admitted_token); // every reference already handed out follows along
-            // The slot set did not change, but its lifecycle did. Catalog source tables key their
-            // reconciliation on this generation so they can release an old single-flight and
-            // re-arm with the new per-profile credential even on a same-origin retoken.
-            ROSTER_GEN.fetch_add(1, Ordering::AcqRel);
-        }
-        // Applied AFTER either branch, against the slot's now-current `Client` — a re-point
-        // publishes a fresh pointer, so re-fetching here (rather than reusing `c`) is what makes
-        // this the client a re-pointed reader actually gets. `None` fields leave whatever that
-        // client already has (fresh: still unknown; in-place: whatever a prior activation set) —
-        // see `ConnectionFacts`'s doc (#95 step 8 / A1).
-        if let Some(fresh) = populated(id) {
-            fresh.apply_connection(connection);
-        }
-        activate(id, credential_eligible);
-        mark_on_grant(id, on_grant);
-        if credential_eligible {
-            if !was_eligible {
-                PROBES[id.0 as usize].store(PROBE_UNKNOWN, Ordering::Release);
-            }
-        } else {
-            PROBES[id.0 as usize].store(probe_code(Outcome::InsecureOnly), Ordering::Release);
-        }
-        return id;
-    }
-
-    if n >= MAX_SERVERS {
-        // The sentinel, not `current()` — see this function's doc for what the old answer did to
-        // the caller's `describe_server` one line later.
-        crate::log("plex: server registry full — this server was NOT registered");
-        return ServerId::UNSET;
-    }
-    let id = ServerId(n as u16);
-    PROBES[n].store(PROBE_UNKNOWN, Ordering::Release);
-    publish(
-        id,
-        crate::plex::registry_seam::new_client(
-            id, machine_id, origin.clone(), admitted_token, &client_id, pin.cloned(),
-        ),
-    );
-    COUNT.store(n + 1, Ordering::Release); // after the pointer: a visible count implies a live slot
-    if let Some(fresh) = populated(id) {
-        fresh.apply_connection(connection);
-    }
-    activate(id, credential_eligible);
-    mark_on_grant(id, on_grant);
-    if !credential_eligible {
-        PROBES[n].store(probe_code(Outcome::InsecureOnly), Ordering::Release);
-    }
-    // Address only — the machineIdentifier is a permanent household fingerprint (see `app::diagnostics`)
-    // and the event log is what users send us. `log_form` rather than `base`, for the reason the
-    // re-point line above gives.
-    crate::log(&format!(
-        "plex: server slot {} registered at {}{pin_note}",
-        id.0,
-        origin.log_form()
-    ));
-    id
-}
-
-/// **Sign-out.** Retire every registered server: `client()` answers with nothing again, [`ids`]
-/// walks nothing, and each slot's token is blanked in place.
-///
-/// The blanking is the half that is easy to leave out and the half that matters most. Raising the
-/// floor stops anything RESOLVING a `ServerId` — but ~30 call sites take a `&'static Client` and
-/// hold it across a spawn (that is the whole reason the clients are leaked), so a worker already
-/// out when the user signed out still has a reference with a live per-(user, server) token on it.
-/// [`Client::set_token`] is in-place and every reference already handed out follows along, so after
-/// this the worst that reference can do is send a tokenless request and get a 401.
-///
-/// It does NOT free anything and does not lower [`COUNT`] — see the module doc on why a slot number
-/// is never handed out twice.
+/// It does NOT free anything and does not lower [`COUNT`] — slot numbers are never handed out
+/// twice, which is what keeps a stale [`ServerId`] filed under the account that left from
+/// silently naming the next account's server.
 pub(crate) fn revoke_all() {
-    // Same crate-global registry `register_lazy`/`set_current` guard — see `lib.rs::testlock`.
+    // Same crate-global registry guard the registration paths held — see `lib.rs::testlock`.
     #[cfg(test)]
     crate::testlock::assert_held("the plex server registry (revoke_all)");
-    // Every plaintext grant dies with the identity that consented. First, and outside WRITE: its
-    // re-grade takes the same lock.
+    // Every plaintext grant dies with the identity that consented.
     crate::grant::identity_changed();
     let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
     let n = COUNT.load(Ordering::Acquire);
     let floor = FLOOR.load(Ordering::Acquire);
-    for id in ids() {
-        if let Some(c) = client_for(id) {
-            c.set_token("");
-        }
-        if let Some(i) = id.index() {
-            PROBES[i].store(PROBE_UNKNOWN, Ordering::Release);
-        }
-    }
     // CURRENT first: for the instant between these two stores a reader must never see an id whose
-    // slot the floor has already killed, which is the one state `client()`'s `expect` would take.
+    // slot the floor has already killed.
     CURRENT.store(ServerId::UNSET.0 as u32, Ordering::Release);
     ACTIVE.store(0, Ordering::Release);
-    CREDENTIAL_ELIGIBLE.store(0, Ordering::Release);
-    ON_GRANT.store(0, Ordering::Release);
     FLOOR.store(n, Ordering::Release);
     ROSTER_GEN.fetch_add(1, Ordering::AcqRel);
     if n > floor {
         crate::log(&format!(
-            "plex: {} server(s) revoked — signed out",
+            "plex: {} server(s) revoked - signed out",
             n - floor
         ));
     }
     // The Sources list, the Search scope line and every shelf heading are drawn from this table,
     // and `ui::idle` gates the whole present on detected motion — it cannot see a `static` being
-    // written. Same reason `describe` invalidates.
+    // written.
     crate::ui::idle::invalidate();
 }
 
-/// **Re-ask the grant table for every client a grant was carrying** ([`ON_GRANT`]), after a plaintext grant was
-/// revoked or died (`crate::grant`'s revocation paths). A client whose origin may no longer carry
-/// a credential has its token blanked IN PLACE — every `&'static Client` already handed out
-/// follows along, so a worker mid-request can at worst send a tokenless request — and is marked
-/// ineligible and [`Outcome::InsecureOnly`], exactly what [`register_lazy`] records for a stored
-/// origin it cannot credential. `current` moves off it when another usable slot exists.
+/// Register (or update) a server, returning its stable id.
 ///
-/// Discovery is what re-grants: a later eligible, consented verdict mints a fresh grant and the
-/// ordinary registration re-tokens the slot.
-pub(crate) fn regrade_credentials() {
-    let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
-    let mut regraded = 0usize;
-    for id in ids() {
-        let Some(c) = client_for(id) else { continue };
-        let Some(i) = id.index() else { continue };
-        let bit = 1u32 << i;
-        if ON_GRANT.load(Ordering::Acquire) & bit == 0
-            || crate::grant::granted_now(c.machine_id(), c.origin())
-        {
-            continue;
-        }
-        c.set_token("");
-        activate(id, false);
-        mark_on_grant(id, false);
-        PROBES[i].store(probe_code(Outcome::InsecureOnly), Ordering::Release);
-        ROSTER_GEN.fetch_add(1, Ordering::AcqRel);
-        regraded += 1;
-    }
-    if regraded > 0 {
-        crate::log(&format!(
-            "plex: {regraded} server(s) lost their plaintext credential — the grant ended"
-        ));
-        crate::ui::idle::invalidate();
-    }
+/// **RETIRED SHAPE.** The registration world this entry point drove — slot lookup, re-point,
+/// credential admission, the leaked `plex::Client` — went with the wire layer (#166): no product
+/// path can publish a Plex client since the dispatch collapse (#202), and the only remaining
+/// caller is `session.rs`'s frame-boundary test, which grades that a registration call inside a
+/// frame resolves the session identity through the NON-BLOCKING cache and never touches a file.
+/// That boundary contract is what this shell keeps alive; the `session.rs` transition slice
+/// retires it together with that suite. Always [`ServerId::UNSET`]: there is no slot to compute.
+#[cfg(test)]
+pub(crate) fn register_origin(
+    _machine_id: &str,
+    _origin: &Origin,
+    _token: &str,
+    _pin: Option<&ResolvePin>,
+    _connection: ConnectionFacts,
+) -> ServerId {
+    let _identity = crate::plex::session::peek().client_id.clone();
+    ServerId::UNSET
 }
 
-/// Empty the table so each test starts from "nothing installed". Leaks whatever was registered
-/// (that is the ordinary lifecycle here, not a test-only wart) and must be called under
+/// Empty the table so each test starts from "nothing installed". Must be called under
 /// [`crate::testlock::serial`] — the registry is a crate global.
 ///
-/// `pub(crate)` for the same reason as [`register_with_client_id`]: a test outside `plex/` that
-/// registers a server owes the rest of the suite an empty table on the way out, or the next test
-/// to ask `client_opt()` gets `Some(a client whose port closed when that test returned)`.
+/// The neutral reset the whole suite still uses: roster state (`COUNT`/`ACTIVE`/`FLOOR`/
+/// `CURRENT`) and both epochs go back to their boot values. The client
+/// generation sequence is deliberately NOT reset — the seeds a test restores are process-global
+/// vocabulary, and `restore_generation_seed` refuses `0` for the same reason.
 #[cfg(test)]
 pub(crate) fn reset_for_test() {
     crate::testlock::assert_held("the plex server registry (reset)");
     let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
-    for s in SLOTS.iter() {
-        s.store(std::ptr::null_mut(), Ordering::Release);
-    }
-    for f in FACTS.iter() {
-        f.store(std::ptr::null_mut(), Ordering::Release);
-    }
-    for p in PROBES.iter() {
-        p.store(PROBE_UNKNOWN, Ordering::Release);
-    }
     COUNT.store(0, Ordering::Release);
     ACTIVE.store(0, Ordering::Release);
-    CREDENTIAL_ELIGIBLE.store(0, Ordering::Release);
-    ON_GRANT.store(0, Ordering::Release);
     ROSTER_GEN.store(1, Ordering::Release);
     FACTS_GEN.store(1, Ordering::Release);
     // The floor goes back with the count, or every test after one that signed out would register
@@ -1257,401 +282,6 @@ pub(crate) fn reset_for_test() {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Every test here mutates the ONE registry, so they hold the crate-wide serialization lock
-    /// (`lib.rs`'s `testlock`) rather than a module-local one: `client()` is reachable from other
-    /// modules' tests too.
-    ///
-    /// It empties the registry on the way OUT as well as on the way in, and that half is
-    /// load-bearing rather than tidy: an owned `BrowseStore::pump` adopts every registered slot as
-    /// a source and then spawns a discovery worker for it, so servers left behind here would have another
-    /// module's tests dialling `10.0.0.1` on a background thread. The reset happens while the lock
-    /// is still held (a struct's own `Drop` runs before its fields').
-    struct Fresh(#[allow(dead_code)] crate::testlock::Serial);
-    impl Drop for Fresh {
-        fn drop(&mut self) {
-            reset_for_test();
-        }
-    }
-    fn fresh() -> Fresh {
-        let g = crate::testlock::serial();
-        reset_for_test();
-        Fresh(g)
-    }
-
-    /// The token as the wire would carry it — `with_token` is the only reader of the field, and it
-    /// is `pub(super)` inside the Plex layer, so the test reads it through the registry seam.
-    fn token_of(c: &Client) -> String {
-        crate::plex::registry_seam::client_token_for_test(c)
-    }
-
-    fn reg(machine_id: &str, host: &str, token: &str) -> ServerId {
-        register_with_client_id(machine_id, host, 32400, token, "test-client-id")
-    }
-
-    #[test]
-    fn registration_refuses_an_empty_client_identifier() {
-        let _g = fresh();
-        assert_eq!(register_with_client_id("synthetic-machine", "127.0.0.1", 9,
-            "synthetic-token", ""), ServerId::UNSET);
-        assert!(client_opt().is_none());
-    }
-
-    /// **The offline fix's registry half.** A pinned registration publishes the pin on the
-    /// `Client` (the control plane reads it there) AND records it in `net::resolve` (the media
-    /// plane looks it up by host); a re-point to a new origin APPENDS a second entry and leaves the
-    /// first in place, because a worker mid-stream may still hold the old client and its URL; and
-    /// a token-only re-registration of the same server records nothing new.
-    #[test]
-    fn installing_a_pinned_origin_appends_to_the_resolve_table_and_a_repoint_appends_not_replaces() {
-        let _g = fresh();
-        crate::net::resolve::clear();
-        let ip = |s: &str| s.parse::<std::net::IpAddr>().unwrap();
-        let o1 = Origin::parse("https://192-168-0-10.h4sh.plex.direct:32400").unwrap();
-        let p1 = ResolvePin::for_origin(&o1, "192.168.0.10").expect("a valid pin");
-        let id = register_pinned_with_client_id("m1", &o1, "tok", Some(&p1), "cid", ConnectionFacts::default());
-        assert!(id.is_set());
-        assert_eq!(client_for(id).unwrap().resolve_pin(), Some(&p1), "the client carries it");
-        assert_eq!(
-            crate::net::resolve::lookup("192-168-0-10.h4sh.plex.direct", 32400).map(|p| p.addr()),
-            Some(ip("192.168.0.10")),
-            "the media plane can find it by host and port"
-        );
-        // a profile switch: same server, new token, no new entry
-        let again = register_pinned_with_client_id("m1", &o1, "tok2", Some(&p1), "cid", ConnectionFacts::default());
-        assert_eq!(again, id);
-        assert_eq!(client_for(id).unwrap().resolve_pin(), Some(&p1));
-        // DHCP moved the server and discovery re-pointed the slot: the old entry survives
-        let o2 = Origin::parse("https://192-168-0-20.h4sh.plex.direct:32400").unwrap();
-        let p2 = ResolvePin::for_origin(&o2, "192.168.0.20").unwrap();
-        let moved = register_pinned_with_client_id("m1", &o2, "tok2", Some(&p2), "cid", ConnectionFacts::default());
-        assert_eq!(moved, id, "re-pointed in place");
-        assert_eq!(client_for(id).unwrap().resolve_pin(), Some(&p2));
-        assert_eq!(
-            crate::net::resolve::lookup("192-168-0-10.h4sh.plex.direct", 32400).map(|p| p.addr()),
-            Some(ip("192.168.0.10")),
-            "append-only: the route an old worker captured still resolves"
-        );
-        assert_eq!(
-            crate::net::resolve::lookup("192-168-0-20.h4sh.plex.direct", 32400).map(|p| p.addr()),
-            Some(ip("192.168.0.20"))
-        );
-        // an unpinned registration carries nothing and records nothing
-        let plain = Origin::http("10.0.0.7", 32400);
-        let pid = register_pinned_with_client_id("m2", &plain, "t", None, "cid", ConnectionFacts::default());
-        assert_eq!(client_for(pid).unwrap().resolve_pin(), None);
-        assert_eq!(crate::net::resolve::lookup("10.0.0.7", 32400), None);
-        crate::net::resolve::clear();
-    }
-
-    /// A pin that arrives on an ALREADY registered origin (a legacy session file re-saved with its
-    /// address, a roster refresh learning it) must reach the control plane: the same origin is
-    /// re-published with the pin rather than only re-tokened, and the slot stays the same.
-    #[test]
-    fn a_pin_arriving_on_a_registered_origin_republishes_the_same_slot() {
-        let _g = fresh();
-        crate::net::resolve::clear();
-        let o = Origin::parse("https://192-168-0-10.h4sh.plex.direct:32400").unwrap();
-        let id = register_pinned_with_client_id("m1", &o, "tok", None, "cid", ConnectionFacts::default());
-        assert_eq!(client_for(id).unwrap().resolve_pin(), None);
-        let p = ResolvePin::for_origin(&o, "192.168.0.10").unwrap();
-        let again = register_pinned_with_client_id("m1", &o, "tok", Some(&p), "cid", ConnectionFacts::default());
-        assert_eq!(again, id, "same slot");
-        assert_eq!(client_for(id).unwrap().resolve_pin(), Some(&p), "…now pinned");
-        assert_eq!(count(), 1);
-        crate::net::resolve::clear();
-    }
-
-    /// #95 step 8 / A1: `ConnectionFacts::default()` (both fields `None`) on a same-origin
-    /// retoken — `register_lazy`'s IN-PLACE branch — must LEAVE the prior tier/IP exactly as they
-    /// were, never blank them. A naive unconditional write here would regress `abr::bootstrap`
-    /// (`probe.rs:187-189`), which reads the tier on every resolve.
-    #[test]
-    fn a_same_origin_retoken_with_default_connection_preserves_the_prior_tier_and_ip() {
-        let _g = fresh();
-        let o = Origin::http("10.0.0.5", 32400);
-        let connection = ConnectionFacts::new(Some(Location::Local), Some(IpVersion::V4));
-        let id = register_pinned_with_client_id("m1", &o, "tok", None, "cid",
-            connection);
-        let c = client_for(id).unwrap();
-        assert_eq!(c.link(), Some(Location::Local));
-        assert_eq!(c.ip_version(), Some(IpVersion::V4));
-        // Same origin, same machine id: `register_lazy` takes the in-place branch. A plain
-        // retoken (e.g. a profile switch swapping only the token) knows nothing new about the
-        // connection, so it passes `ConnectionFacts::default()`.
-        let again = register_pinned_with_client_id("m1", &o, "tok2", None, "cid",
-            ConnectionFacts::default());
-        assert_eq!(again, id, "same slot — in place, not a re-point");
-        let c = client_for(id).unwrap();
-        assert_eq!(c.link(), Some(Location::Local), "tier survives an unrelated retoken");
-        assert_eq!(c.ip_version(), Some(IpVersion::V4), "ip survives an unrelated retoken");
-    }
-
-    /// #95 step 8: a re-point (a DIFFERENT origin — a fresh `Client`, published at `LINK_UNKNOWN`/
-    /// `IP_UNKNOWN` by `Client::new`) that carries `Some` connection facts must have BOTH applied
-    /// to the new slot in the same write, not left at their fresh-client defaults.
-    #[test]
-    fn a_repoint_with_some_connection_sets_both_tier_and_ip_on_the_fresh_client() {
-        let _g = fresh();
-        let o1 = Origin::http("10.0.0.5", 32400);
-        let id = register_pinned_with_client_id("m1", &o1, "tok", None, "cid",
-            ConnectionFacts::new(Some(Location::Relay), Some(IpVersion::V4)));
-        assert_eq!(client_for(id).unwrap().link(), Some(Location::Relay));
-        // DHCP moved the server: a different origin for the same machine id re-points the slot.
-        let o2 = Origin::http("10.0.0.9", 32400);
-        let connection = ConnectionFacts::new(Some(Location::Local), Some(IpVersion::V6));
-        let moved = register_pinned_with_client_id("m1", &o2, "tok", None, "cid",
-            connection);
-        assert_eq!(moved, id, "re-pointed in place (same slot id)");
-        let c = client_for(id).unwrap();
-        assert_eq!(c.link(), Some(Location::Local), "the NEW tier, not the old one");
-        assert_eq!(c.ip_version(), Some(IpVersion::V6), "the NEW ip, not the old one");
-    }
-
-    /// The boot gate registers the stored roster (with machine ids) and then installs the
-    /// primary by ORIGIN alone (`install` has no id): that must land in the roster's slot, not a
-    /// second one. Written because a device log read as two slots at one origin (it was the
-    /// friend's share pinned to its own LAN label), and the coalescing rule deserved a pin.
-    #[test]
-    fn installing_the_primary_after_the_roster_reuses_its_slot() {
-        let _g = fresh();
-        let o = Origin::parse("https://192-168-0-10.h4sh.plex.direct:32400").unwrap();
-        let p = ResolvePin::for_origin(&o, "192.168.0.10").unwrap();
-        let roster = register_pinned_with_client_id("m1", &o, "tok", Some(&p), "cid", ConnectionFacts::default());
-        let primary = register_pinned_with_client_id("", &o, "tok", Some(&p), "cid", ConnectionFacts::default());
-        assert_eq!(primary, roster);
-        assert_eq!(count(), 1);
-        crate::net::resolve::clear();
-    }
-
-    /// The table's basic contract: a registration round trips through its id, the reserved UNSET
-    /// value resolves to nothing (rather than slot 0, which is the bug a sentinel of 0 would
-    /// have), and an id that names an empty slot is `None`, not a wild pointer.
-    #[test]
-    fn a_registered_server_round_trips_and_an_unset_id_resolves_to_nothing() {
-        let _g = fresh();
-        assert!(client_opt().is_none(), "nothing installed yet");
-        assert!(!current().is_set());
-        assert!(
-            client_for(ServerId::UNSET).is_none(),
-            "the reserved value must never resolve"
-        );
-
-        let id = reg("mach-A", "10.0.0.1", "tok-a");
-        let c = client_for(id).expect("round trip");
-        assert_eq!(
-            (c.host(), c.port(), c.machine_id()),
-            ("10.0.0.1", 32400, "mach-A")
-        );
-        assert_eq!(c.id(), id, "the client knows its own slot");
-        assert_eq!(count(), 1);
-        // the first registration becomes current, so `client()` works exactly as after the first
-        // `install` did under the singleton
-        assert!(std::ptr::eq(client(), c));
-        assert!(
-            client_for(ServerId::from_raw(7)).is_none(),
-            "an unpopulated slot"
-        );
-    }
-
-    /// The profile-switch path: same server, new per-user token. It must land IN PLACE — same
-    /// slot, same pointer — because ~30 call sites hold a `&'static Client` from before the
-    /// switch and must see the new token without re-fetching anything.
-    #[test]
-    fn re_registering_the_same_server_swaps_the_token_in_place() {
-        let _g = fresh();
-        let id = reg("mach-A", "10.0.0.1", "tok-a");
-        let before: *const Client = client_for(id).unwrap();
-        let roster_before = roster_gen();
-
-        let again = reg("mach-A", "10.0.0.1", "tok-b");
-        assert_eq!(again, id, "same server, same slot");
-        assert_eq!(count(), 1, "no slot appended");
-        let c = client_for(id).unwrap();
-        assert!(
-            std::ptr::eq(c, before),
-            "the client was updated, not replaced"
-        );
-        assert_eq!(token_of(c), "tok-b");
-        assert_ne!(
-            roster_gen(),
-            roster_before,
-            "catalog source tables must observe the new credential lifecycle"
-        );
-
-        // and the legacy address-keyed form (`install`, which knows no machine id) matches the
-        // same slot on host+port alone
-        let by_addr = reg("", "10.0.0.1", "tok-c");
-        assert_eq!(by_addr, id);
-        assert_eq!(count(), 1);
-        assert_eq!(token_of(client_for(id).unwrap()), "tok-c");
-        assert_eq!(
-            client_for(id).unwrap().machine_id(),
-            "mach-A",
-            "a call with no id must not blank one"
-        );
-    }
-
-    /// **A scheme change is an ADDRESS change**, so it re-points the slot exactly as a new host or
-    /// port does — a fresh `Client`, a fresh token generation, the tier reset to unknown.
-    ///
-    /// It cannot be observed any other way: `same_server` matches on the machine id whenever both
-    /// sides have one, so the origin comparison only ever decides whether to RE-POINT. Get that
-    /// comparison wrong — compare `host`/`port` and forget the scheme, which is exactly what the
-    /// pair-shaped code did because it could not spell one — and the day a server moves to https
-    /// the registry keeps a plaintext client for it, in place, with nothing in the log.
-    ///
-    /// Driven through [`register_pinned_with_client_id`], NOT the public [`register_origin`] — see
-    /// that seam's doc. This test was written against the public one and turned CI red on Linux
-    /// with a stack overflow in an unnamed thread, because `register_origin` spawns a real
-    /// `serverinfo` worker that opens a real socket on a 256 KiB stack.
-    #[test]
-    fn moving_a_server_to_https_re_points_its_slot() {
-        let _g = fresh();
-        let reg_at = |o: &Origin, tok: &str| {
-            register_pinned_with_client_id("mach-A", o, tok, None, "test-client-id", ConnectionFacts::default())
-        };
-        let plain = Origin::http("10.0.0.1", 32400);
-        let id = reg_at(&plain, "tok-a");
-        let before: *const Client = client_for(id).unwrap();
-        let gen_before = client_for(id).unwrap().token_gen();
-        client_for(id)
-            .unwrap()
-            .set_link(crate::plex::probe::Location::Local);
-
-        let tls = Origin::parse("https://10-0-0-1.hash.plex.direct:32400").expect("an origin");
-        assert_eq!(reg_at(&tls, "tok-a"), id, "same machine, same slot");
-        assert_eq!(count(), 1, "a scheme change is not a second server");
-
-        let c = client_for(id).unwrap();
-        assert!(
-            !std::ptr::eq(c, before),
-            "the slot was RE-POINTED, not updated in place"
-        );
-        assert_eq!(c.origin(), &tls);
-        assert_eq!(
-            c.host(),
-            "10-0-0-1.hash.plex.direct",
-            "the name a certificate is issued for"
-        );
-        assert_ne!(
-            c.token_gen(),
-            gen_before,
-            "a fresh client means token-baked caches flush"
-        );
-        assert_eq!(
-            c.link(),
-            None,
-            "a new address is not evidence about the old tier"
-        );
-
-        // and re-registering the SAME origin lands in place again, as any unchanged address does
-        let same: *const Client = c;
-        assert_eq!(reg_at(&tls, "tok-b"), id);
-        assert!(
-            std::ptr::eq(client_for(id).unwrap(), same),
-            "unchanged origin, unchanged pointer"
-        );
-    }
-
-    /// Probe state belongs to the registry slot, beside the address and tier it describes. It is
-    /// unknown before the first race, follows later aggregate answers including 401, and is reset
-    /// when a new origin replaces the old one because the old answer is no evidence about it.
-    #[test]
-    fn aggregate_probe_results_follow_a_slot_and_reset_on_repoint() {
-        let _g = fresh();
-        let id = reg("mach-A", "10.0.0.1", "tok-a");
-        assert_eq!(probe_result(id), None);
-
-        publish_probe_result(id, Outcome::Reachable);
-        assert_eq!(probe_result(id), Some(Outcome::Reachable));
-        publish_probe_result(id, Outcome::Unauthorized);
-        assert_eq!(probe_result(id), Some(Outcome::Unauthorized));
-
-        assert_eq!(reg("mach-A", "10.0.0.9", "tok-a"), id);
-        assert_eq!(
-            probe_result(id),
-            None,
-            "a replacement origin has not been probed yet"
-        );
-        publish_probe_result(id, Outcome::Unreachable);
-        assert_eq!(probe_result(id), Some(Outcome::Unreachable));
-    }
-
-    /// Issue #95 plan §6: `InsecureOnly` round-trips through the same `probe_code`/`probe_of_code`
-    /// table every other [`Outcome`] does — verified end to end via [`publish_probe_result`] and
-    /// [`probe_result`] rather than by re-deriving the private code number here.
-    #[test]
-    fn insecure_only_probe_result_round_trips_through_the_slot() {
-        let _g = fresh();
-        let id = reg("mach-insecure", "10.0.0.1", "tok-a");
-        publish_probe_result(id, Outcome::InsecureOnly);
-        assert_eq!(probe_result(id), Some(Outcome::InsecureOnly));
-    }
-
-    /// A generic request's failure cannot disprove a more specific identity-probe verdict — true
-    /// A different server is a NEW slot, never a silent retarget of the old one — the singleton's
-    /// defining limitation. `current` stays where it was until something moves it, and both
-    /// clients remain individually reachable by id.
-    #[test]
-    fn a_different_server_appends_a_slot_and_current_moves_only_when_told() {
-        let _g = fresh();
-        let a = reg("mach-A", "10.0.0.1", "tok-a");
-        let b = reg("mach-B", "10.0.0.2", "tok-b");
-        assert_ne!(a, b);
-        assert_eq!(count(), 2, "appended, not retargeted");
-        assert_eq!(
-            client_for(a).unwrap().host(),
-            "10.0.0.1",
-            "server A kept its address"
-        );
-        assert!(
-            std::ptr::eq(client(), client_for(a).unwrap()),
-            "current stayed on A"
-        );
-
-        assert!(set_current(b));
-        assert!(std::ptr::eq(client(), client_for(b).unwrap()));
-        assert_eq!(client().machine_id(), "mach-B");
-        assert!(
-            client_for(a).is_some(),
-            "A is still registered and reachable by id"
-        );
-
-        assert!(
-            !set_current(ServerId::from_raw(9)),
-            "an unknown id is refused"
-        );
-        assert!(
-            std::ptr::eq(client(), client_for(b).unwrap()),
-            "…and changes nothing"
-        );
-
-        // the legacy address-keyed path, on an address nobody is registered at, also appends
-        let c = reg("", "10.0.0.3", "tok-c");
-        assert_eq!(count(), 3);
-        assert_eq!(client_for(c).unwrap().host(), "10.0.0.3");
-    }
-
-    /// Token generations are PER SERVER (they used to be one process-global counter). A profile
-    /// switch on A must flush A's token-baked caches and leave B's alone — and the two servers'
-    /// generations must differ, so a cache that only asks "did this number move" also flushes
-    /// when `client()` starts answering with the other server.
-    #[test]
-    fn a_token_swap_moves_only_that_servers_generation() {
-        let _g = fresh();
-        let a = reg("mach-A", "10.0.0.1", "tok-a");
-        let b = reg("mach-B", "10.0.0.2", "tok-b");
-        let (ga, gb) = (
-            client_for(a).unwrap().token_gen(),
-            client_for(b).unwrap().token_gen(),
-        );
-        assert_ne!(ga, gb, "two servers never share a generation");
-
-        reg("mach-A", "10.0.0.1", "tok-a2");
-        assert_ne!(client_for(a).unwrap().token_gen(), ga, "A's token changed");
-        assert_eq!(client_for(b).unwrap().token_gen(), gb, "B's did not");
-    }
 
     /// The identity rule the whole app's stored rows compare on. The case it exists for is the
     /// FIRST assertion: the share's ratingKeys are dense from 1 exactly like ours, so a bare key
@@ -1680,473 +310,32 @@ mod tests {
         assert!(!same_item((a, "1"), (ServerId::UNSET, "1")));
     }
 
-    /// The roster half: [`ids`] walks every registered slot in registration order (that IS the
-    /// granted roster), and [`describe`] merges the machine NAME rather than replacing it — the two
-    /// describers of a name (plex.tv's roster, and the server naming itself, which used to arrive
-    /// through the browse arm's reachability commit, #166) land in either order without either
-    /// blanking the other.
-    ///
-    /// The CREDIT is the field that does not merge, and
-    /// [`an_authoritative_describe_can_take_a_credit_away_again`] is where that is graded: every
-    /// caller of [`describe`] holds a roster row the rule has just answered about, and an empty
-    /// answer is *nobody*. The describer that knows only a name is [`describe_name`], which carries
-    /// the credit through rather than spelling an absence it cannot vouch for.
+    /// The retired registry's whole contract, pinned in one place: every read answers the empty
+    /// roster honestly, sign-out on an empty roster moves the epochs and nothing else, and the
+    /// generation seed boundary refuses the dev world's zero.
     #[test]
-    fn the_roster_walks_in_registration_order_and_describing_it_never_blanks_a_known_field() {
-        let _g = fresh();
-        let a = reg("mach-A", "10.0.0.1", "tok-a");
-        let b = reg("mach-B", "10.0.0.2", "tok-b");
-        assert_eq!(
-            ids().collect::<Vec<_>>(),
-            vec![a, b],
-            "registration order, the session server first"
-        );
-        assert!(
-            facts(a).is_none(),
-            "nothing has described it yet — not an empty-named server"
-        );
-
-        // plex.tv first (owner known, no machine name in this path), then the server itself
-        describe(b, "", "friend", GrantEvidence::outside());
-        describe_name(b, "nas-home");
-        let f = facts(b).expect("described");
-        assert_eq!(
-            (f.name.as_str(), f.handle.as_str(), f.owned),
-            ("nas-home", "friend", false)
-        );
-
-        // and the other order, on the other slot
-        describe(a, "mac-mini", "", GrantEvidence::ours());
-        describe_name(a, "");
-        let f = facts(a).expect("described");
-        assert_eq!(
-            (f.name.as_str(), f.handle.as_str(), f.owned),
-            ("mac-mini", "", true)
-        );
-
-        // a slot nothing dials is never described — a Sources row you cannot browse
-        describe(ServerId::from_raw(9), "ghost", "nobody", GrantEvidence::outside());
-        assert!(facts(ServerId::from_raw(9)).is_none());
-        assert!(
-            facts(ServerId::UNSET).is_none(),
-            "the reserved value must never resolve"
-        );
-    }
-
-    /// A slot registered by address only (what `install` can do) is ADOPTED once the machine id
-    /// is learned: re-pointed in place of a second slot for one server. The old reference stays
-    /// valid — merely stale — which is the whole reason the clients are leaked.
-    #[test]
-    fn learning_the_machine_id_adopts_the_address_only_slot() {
-        let _g = fresh();
-        let id = reg("", "10.0.0.1", "tok-a");
-        let stale: &'static Client = client_for(id).unwrap();
-        assert_eq!(stale.machine_id(), "");
-
-        let same = reg("mach-A", "10.0.0.1", "tok-a");
-        assert_eq!(same, id, "adopted, not appended");
-        assert_eq!(count(), 1);
-        assert_eq!(client_for(id).unwrap().machine_id(), "mach-A");
-        assert_eq!(
-            stale.host(),
-            "10.0.0.1",
-            "the replaced client is still readable, not freed"
-        );
-        assert_eq!(
-            token_of(stale),
-            "",
-            "a superseded leaked client cannot retain a credential"
-        );
-
-        // and once known, the id is what identifies it — the same server at a new address
-        // re-points that slot rather than appending
-        let adopted: &'static Client = client_for(id).unwrap();
-        let moved = reg("mach-A", "10.0.0.9", "tok-a");
-        assert_eq!(moved, id);
-        assert_eq!(count(), 1);
-        assert_eq!(client_for(id).unwrap().host(), "10.0.0.9");
-        assert_eq!(
-            token_of(adopted),
-            "",
-            "every re-point defangs the pointer it supersedes"
-        );
-    }
-
-    /// **Signing out takes the servers with it.** Nothing here can be freed, so the leak that
-    /// mattered was not memory: the account that left stayed in the table with its live
-    /// per-(user, server) tokens, and every roster walk in the app (`pms::roster`,
-    /// `browse::sync_roster`, `search`'s fan-out, the Sources list) is one of the two accessors
-    /// asserted here.
-    #[test]
-    fn signing_out_retires_every_slot_and_defangs_the_references_already_handed_out() {
-        let _g = fresh();
-        let a = reg("mach-A", "10.0.0.1", "tok-a");
-        let b = reg("mach-B", "10.0.0.2", "tok-b");
-        describe(b, "nas-home", "friend", GrantEvidence::outside());
-        // the reference a worker took before the sign-out, which nothing can take back
-        let inflight: &'static Client = client_for(b).unwrap();
-        assert_eq!(token_of(inflight), "tok-b");
+    fn the_retired_registry_answers_an_empty_roster() {
+        let _g = crate::testlock::serial();
+        reset_for_test();
+        assert!(!current().is_set(), "nothing is current on a fresh registry");
+        assert_eq!(ids().collect::<Vec<_>>(), Vec::new(), "the roster walk yields nothing");
+        assert_eq!(id_of_machine("mach-A"), None, "no client carries a machine id any more");
+        assert!(roster_gen() >= 1 && facts_gen() >= 1, "the epochs start at 1");
 
         revoke_all();
+        assert!(!current().is_set(), "sign-out on an empty roster changes no current server");
+        assert_eq!(ids().collect::<Vec<_>>(), Vec::new());
+        assert!(roster_gen() > 1, "the roster epoch still moves on a sign-out");
 
-        assert_eq!(count(), 0, "no server is registered any more");
+        let seed = capture_generation_seed();
+        assert!(seed >= 1, "the generation sequence starts at 1, never 0");
         assert_eq!(
-            ids().collect::<Vec<_>>(),
-            Vec::new(),
-            "and the roster walk yields nothing"
+            restore_generation_seed(0).unwrap_err(),
+            "invalid client initialization boundary",
+            "the dev world's zero marker must never be stored"
         );
-        assert!(
-            client_for(a).is_none() && client_for(b).is_none(),
-            "a stored ServerId resolves to nothing"
-        );
-        assert!(
-            client_opt().is_none() && !current().is_set(),
-            "and `client()` has nothing to answer with"
-        );
-        // the description goes with the client: a stale id must not still name the friend who
-        // shared it, off a slot nothing can dial
-        assert!(
-            facts(b).is_none(),
-            "a slot that cannot be dialled is not described either"
-        );
-        // the in-flight reference is still READABLE — it was never freed, which is the whole
-        // reason these are leaked — but it can no longer dial as anybody
-        assert_eq!(inflight.host(), "10.0.0.2");
-        assert_eq!(
-            token_of(inflight),
-            "",
-            "a worker mid-request must not carry the old credential"
-        );
-    }
-
-    /// The account that signs in next gets FRESH slot numbers, even for a machine the previous
-    /// account was also granted. `ServerId` names one server for the life of the process — it sits
-    /// in UI state, in routes, in queued jobs, and every per-server store in the app is a flat
-    /// array indexed by one — so re-adopting a revoked slot would file the new account's results
-    /// under the old account's rows.
-    #[test]
-    fn a_revoked_slot_is_never_resurrected_even_for_the_same_machine() {
-        let _g = fresh();
-        let before = reg("mach-A", "10.0.0.1", "tok-old");
-        revoke_all();
-
-        let after = reg("mach-A", "10.0.0.1", "tok-new");
-        assert_ne!(after, before, "the same machine, a new account, a new slot");
-        assert_eq!(count(), 1, "…and exactly one server is registered");
-        assert_eq!(
-            ids().collect::<Vec<_>>(),
-            vec![after],
-            "the walk starts above the floor"
-        );
-        assert_eq!(token_of(client_for(after).unwrap()), "tok-new");
-        assert!(
-            client_for(before).is_none(),
-            "the retired slot stays retired"
-        );
-        // the first registration after a sign-out becomes current, exactly as it does at boot
-        assert!(std::ptr::eq(client(), client_for(after).unwrap()));
-
-        // and a description of the retired slot is still refused — it dials nothing
-        describe(before, "ghost", "nobody", GrantEvidence::outside());
-        assert!(facts(before).is_none());
-    }
-
-    /// **A full table answers with a SENTINEL, not with `current()`.** The caller's next line is a
-    /// `describe_server`, so the old answer renamed the user's OWN server to whichever share had
-    /// nowhere to go and captioned it "Shared by <friend>" — the roster install did exactly
-    /// this pair, and `pms::sync_roster` had to grow a de-duplication guard for the same value.
-    #[test]
-    fn a_registration_that_does_not_fit_is_refused_rather_than_aliased_onto_the_current_server() {
-        let _g = fresh();
-        let ours = reg("mach-ours", "10.0.0.1", "tok-ours");
-        describe(ours, "Mac mini", "", GrantEvidence::ours());
-        for i in 1..MAX_SERVERS {
-            reg(&format!("mach-{i}"), &format!("10.0.1.{i}"), "tok");
-        }
-        assert_eq!(count(), MAX_SERVERS);
-
-        let refused = reg("mach-overflow", "10.0.9.9", "tok-overflow");
-        assert_eq!(
-            refused,
-            ServerId::UNSET,
-            "there was nowhere to put it, and that is what it says"
-        );
-        assert_eq!(count(), MAX_SERVERS, "nothing was appended");
-
-        // the call site's very next line, verbatim — and it must land on nobody
-        describe(refused, "nas-home", "friend", GrantEvidence::outside());
-        let f = facts(ours).expect("our own server is still described");
-        assert_eq!(
-            (f.name.as_str(), f.handle.as_str(), f.owned),
-            ("Mac mini", "", true),
-            "ours was not renamed"
-        );
-        assert!(
-            !set_current(refused),
-            "and it cannot become the current server either"
-        );
-        assert!(std::ptr::eq(client(), client_for(ours).unwrap()));
-    }
-
-    /// [`describe_name`] is for the describer that learned a machine name off the server itself and
-    /// knows nothing about the grant. `owned` has no "unknown" in [`describe`], so that caller had
-    /// to pass something and computed it as `handle.is_empty()` — which is the derivation
-    /// [`ServerFacts::owned`] documents as wrong, and flipped every handle-less share to "ours" the
-    /// moment its friendly name arrived.
-    #[test]
-    fn naming_a_server_carries_its_ownership_through_untouched() {
-        let _g = fresh();
-        let a = reg("mach-A", "10.0.0.1", "tok-a");
-        let b = reg("mach-B", "10.0.0.2", "tok-b");
-        // the case the bug was invisible in: a share plex.tv sent no `sourceTitle` for, so there is
-        // no handle to derive anything from — and it is a share all the same
-        describe(a, "", "", GrantEvidence::outside());
-        describe(b, "", "friend", GrantEvidence::outside());
-
-        describe_name(a, "nas-home");
-        describe_name(b, "nas-loft");
-
-        assert_eq!(
-            facts(a).map(|f| (f.name.as_str(), f.owned)),
-            Some(("nas-home", false)),
-            "a handle-less SHARE"
-        );
-        assert_eq!(
-            facts(b).map(|f| (f.name.as_str(), f.handle.as_str(), f.owned)),
-            Some(("nas-loft", "friend", false))
-        );
-
-        // a slot nothing has described is one `install` put there, i.e. the account's own server
-        let c = reg("mach-C", "10.0.0.3", "tok-c");
-        describe_name(c, "Mac mini");
-        assert_eq!(
-            facts(c).map(|f| (f.name.as_str(), f.owned)),
-            Some(("Mac mini", true))
-        );
-    }
-
-    /// **[`owner_credit`]'s whole table**, one case per row of the doc — the rule this module owns
-    /// and the six screens read through [`ServerFacts::handle`].
-    ///
-    /// The field values are the live 2026-09-03 `/api/v2/resources` shapes with stand-in
-    /// identities: an owned server sends `sourceTitle`/`ownerId` as explicit nulls (`""`/`0` after
-    /// `Resource::grant`), a share sends the owner's handle and their plex.tv account id, and
-    /// `ownerId` shares an id space with `/api/v2/home/users[].id`.
-    #[test]
-    fn a_credit_names_a_person_outside_the_household_and_nobody_else() {
-        const ADMIN: i64 = 111_111;
-        const MANAGED: i64 = 222_222;
-        const FRIEND: i64 = 987_654;
-        let house = [ADMIN, MANAGED];
-
-        // ours — plex.tv names no owner at all, and `owned` says so on its own
-        let own = Grant {
-            owned: true,
-            ..Grant::default()
-        };
-        assert_eq!(owner_credit(own, &house), "");
-
-        // THE REPORTED BUG. Seen through a Plex Home managed profile, the household's own server
-        // is not "owned" and DOES carry a handle — the admin's. Both of plex.tv's household
-        // signals are asserted independently, because each has to carry the case on its own: the
-        // id comparison is the measured one, `home` is the one that still works on a roster whose
-        // `HomeUserRef::id`s a previous build never wrote.
-        let household_server = Grant {
-            owned: false,
-            home: true,
-            owner_id: ADMIN,
-            source_title: "admin",
-        };
-        assert_eq!(owner_credit(household_server, &house), "");
-        assert_eq!(
-            owner_credit(
-                Grant {
-                    home: false,
-                    ..household_server
-                },
-                &house
-            ),
-            "",
-            "the ownerId is enough on its own"
-        );
-        assert_eq!(
-            owner_credit(
-                Grant {
-                    owner_id: 0,
-                    ..household_server
-                },
-                &[]
-            ),
-            "",
-            "and `home` carries it for a session that cannot enumerate its own house"
-        );
-        // …but ONLY then. `home` is undocumented ("Unknown", python-plexapi) and must never be
-        // able to take a credit away from a friend's share on the strength of its name, so the
-        // measured signal silences it the moment the house can answer for itself.
-        assert_eq!(
-            owner_credit(
-                Grant {
-                    owned: false,
-                    home: true,
-                    owner_id: FRIEND,
-                    source_title: "friend",
-                },
-                &house
-            ),
-            "friend",
-            "an enumerable household outranks `home`"
-        );
-
-        // a friend: outside the house, named, and still credited — the case a rule that
-        // over-suppresses would break, which is the only way this change can regress anything
-        let share = Grant {
-            owned: false,
-            home: false,
-            owner_id: FRIEND,
-            source_title: "friend",
-        };
-        assert_eq!(owner_credit(share, &house), "friend");
-        assert_eq!(
-            owner_credit(share, &[]),
-            "friend",
-            "an un-enumerable household does not silence a share"
-        );
-
-        // a share plex.tv has not named yet: no credit rather than an anonymous one
-        assert_eq!(
-            owner_credit(
-                Grant {
-                    source_title: "",
-                    ..share
-                },
-                &house
-            ),
-            ""
-        );
-
-        // `0` is "no id" on BOTH sides and the two zeroes must never meet: a roster entry written
-        // before `HomeUserRef::id` existed carries one, and so does our own server's `ownerId`.
-        assert_eq!(
-            owner_credit(
-                Grant {
-                    owner_id: 0,
-                    ..share
-                },
-                &[0, ADMIN]
-            ),
-            "friend"
-        );
-    }
-
-    /// [`describe`] enforces the half of the rule it can see for itself, so that no describer can
-    /// put a person's name on a server this account owns — not a roster entry read off disk that a
-    /// previous build wrote the raw `sourceTitle` into, and not the `butaca-servers` dev
-    /// trigger. The other half needs the household, which only the ingest holds.
-    ///
-    /// The clear has to beat the MERGE, which is the subtle part: `describe` keeps a known field
-    /// when the new one is empty, so "there is nobody to credit" cannot be spelled as an empty
-    /// handle — it would read as "I learned nothing" and keep the wrong name.
-    #[test]
-    fn describing_a_server_we_own_takes_any_credit_off_it() {
-        let _g = fresh();
-        let a = reg("mach-A", "10.0.0.1", "tok-a");
-
-        // what a build without the rule persisted, replayed from the session at boot
-        describe(a, "Mac mini", "admin", GrantEvidence::outside());
-        assert_eq!(facts(a).map(|f| f.handle.as_str()), Some("admin"));
-
-        describe(a, "Mac mini", "", GrantEvidence::ours());
-        assert_eq!(
-            facts(a).map(|f| (f.handle.as_str(), f.owned)),
-            Some(("", true)),
-            "owned means nobody is credited, and it outranks the keep-what-you-knew merge"
-        );
-
-        // and it is not a blanket ban on the merge: the machine NAME still merges, because that
-        // one really does arrive from two describers in either order
-        let b = reg("mach-B", "10.0.0.2", "tok-b");
-        describe(b, "nas-home", "friend", GrantEvidence::outside());
-        describe(b, "", "friend", GrantEvidence::outside());
-        assert_eq!(
-            facts(b).map(|f| (f.name.as_str(), f.handle.as_str())),
-            Some(("nas-home", "friend"))
-        );
-    }
-
-    /// **A name-only describer may not un-household a server**, for the same reason it may not
-    /// un-attribute one: a server naming itself over `GET /` learned a machine name and nothing
-    /// whatever about whose grant this is.
-    ///
-    /// The `owned` bug this guards against is a shipped one (see [`describe_name`]); `home` and
-    /// `owner_id` are the same fact about the same grant, and dropping them would turn a managed
-    /// profile's own household server into an outsider's the moment its friendly name landed.
-    #[test]
-    fn a_name_only_describer_carries_the_grant_evidence_through() {
-        let _g = fresh();
-        let a = reg("mach-A", "10.0.0.1", "tok-a");
-
-        // a managed profile's view of its own household server: owned by nobody it knows of
-        describe(a, "Mac mini", "", GrantEvidence { owned: false, home: true, owner_id: 111_111 });
-        describe_name(a, "nas-loft");
-
-        assert_eq!(
-            facts(a).map(|f| (f.name.as_str(), f.owned, f.home, f.owner_id)),
-            Some(("nas-loft", false, true, 111_111)),
-            "the name is the only thing that describer knew"
-        );
-
-        // the authoritative describer still REPLACES all three, whichever way they move
-        describe(a, "nas-loft", "friend", GrantEvidence { owned: false, home: false, owner_id: 987_654 });
-        assert_eq!(
-            facts(a).map(|f| (f.home, f.owner_id)),
-            Some((false, 987_654)),
-            "a re-grade is not a merge: stale evidence must not outlive the `owned` beside it"
-        );
-    }
-
-    /// **An authoritative describe TAKES A CREDIT OFF a server we do not own** — the half that
-    /// makes the fix observable at all, and the half a merge cannot express.
-    ///
-    /// This is the reported bug's own recovery path. A session file written before the rule
-    /// existed holds the account holder's raw handle against the household's server;
-    /// `auth::refreshed_sources` re-grades it to no-credit and persists that, and the roster
-    /// install republished the roster as `describe(id, name, "", owned=false)` —
-    /// which is exactly `owned:false` with an empty credit. While the credit merged, that call
-    /// was a no-op and the wrong name outlived every correction for the life of the process.
-    ///
-    /// `describe_name` is the case that has to keep NOT clearing, and it does so by carrying the
-    /// credit rather than by the merge: a server naming itself over `GET /` knows nothing about
-    /// the grant and may not un-attribute a share.
-    #[test]
-    fn an_authoritative_describe_can_take_a_credit_away_again() {
-        let _g = fresh();
-        let a = reg("mach-A", "10.0.0.1", "tok-a");
-
-        // the stale publication: an older build's persisted `sourceTitle`, replayed at boot
-        describe(a, "Mac mini", "admin", GrantEvidence::outside());
-        assert_eq!(facts(a).map(|f| f.handle.as_str()), Some("admin"));
-
-        // the corrected roster's very next boot — same call shape, empty credit
-        describe(a, "Mac mini", "", GrantEvidence::outside());
-        assert_eq!(
-            facts(a).map(|f| (f.handle.as_str(), f.owned)),
-            Some(("", false)),
-            "an empty credit is `nobody`, not `I learned nothing`"
-        );
-
-        // a share whose handle plex.tv stops sending loses the credit by the same route
-        let b = reg("mach-B", "10.0.0.2", "tok-b");
-        describe(b, "nas-home", "friend", GrantEvidence::outside());
-        describe(b, "nas-home", "", GrantEvidence::outside());
-        assert_eq!(facts(b).map(|f| f.handle.as_str()), Some(""));
-
-        // …while the describer that knows only a NAME still cannot un-attribute anybody
-        let c = reg("mach-C", "10.0.0.3", "tok-c");
-        describe(c, "", "friend", GrantEvidence::outside());
-        describe_name(c, "nas-loft");
-        assert_eq!(
-            facts(c).map(|f| (f.name.as_str(), f.handle.as_str(), f.owned)),
-            Some(("nas-loft", "friend", false))
-        );
+        restore_generation_seed(seed + 7).expect("a nonzero seed restores");
+        assert_eq!(capture_generation_seed(), seed + 7);
+        reset_for_test();
     }
 }

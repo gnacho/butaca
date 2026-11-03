@@ -897,7 +897,7 @@ mod tests {
         let _t = TempSession::new("endpoint-onboard");
         crate::registry::reset_for_test();
         let mut browse = BrowseFixture::new();
-        let sid = crate::registry::register_with_client_id("endpoint-onboard", "127.0.0.1", 9, "synthetic", "cid");
+        let sid = crate::registry::ServerId::from_raw(0);
         let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
         browse.stores.browse.borrow_mut().queue_discovery_for_test(sid, false);

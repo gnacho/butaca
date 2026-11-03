@@ -54,8 +54,6 @@ pub(crate) fn display_name() -> &'static str {
 /// drift apart.
 pub(crate) const VERSION: &str = env!("BUTACA_VERSION");
 
-pub(crate) const PLATFORM: &str = "webOS";
-
 /// The OS version — the REAL one, read off the set at boot ([`crate::webos`]), because the app
 /// runs on webOS 4 through 11 now and a literal is wrong on every set but one. This was
 /// `const … = "4.5"` while the app was packaged `>=4.0, <5.0`; the webosbrew reviewer flagged it
@@ -74,11 +72,6 @@ pub(crate) fn platform_version() -> &'static str {
     } else {
         r
     }
-}
-
-/// The resolved UI language for this launch, also requested from Plex metadata endpoints.
-pub(crate) fn language() -> Option<&'static str> {
-    Some(crate::i18n::current().language().tag())
 }
 
 /// Device CLASS — what kind of thing this is. Generic on purpose: this app runs on any rooted

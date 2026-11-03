@@ -18,10 +18,9 @@ fn library_strip_profile_navigation_and_armed_pill_use_the_actual_engine_identit
     let session = crate::plex::session::TempSession::new("library-strip-navigation");
     session.watching("u-library-strip-navigation");
     crate::registry::reset_for_test();
-    let own = crate::registry::register_with_client_id("strip-own", "127.0.0.1", 9, "synthetic", "fixture");
+    let own = crate::registry::ServerId::from_raw(0);
     let shared =
-        crate::registry::register_with_client_id("strip-shared", "127.0.0.1", 10, "synthetic", "fixture");
-    crate::registry::set_current(own);
+        crate::registry::ServerId::from_raw(1);
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     rig.stores.browse.borrow_mut().seed_registered_table_for_test([own, shared]);

@@ -2040,14 +2040,16 @@ mod tests {
     }
 
     #[test]
-    fn an_open_person_rebuilds_exact_sources_when_the_profile_roster_changes() {
+    fn an_open_page_sources_exactly_the_origin_on_the_single_source_roster() {
         let mut owner = Owner::default();
         let _g = crate::testlock::serial();
         crate::registry::reset_for_test();
         owner.reset();
-        let a = crate::registry::register_with_client_id("person-a", "127.0.0.1", 1, "a", "cid");
-        let b = crate::registry::register_with_client_id("person-b", "127.0.0.1", 2, "b", "cid");
+        let a = crate::registry::ServerId::from_raw(0);
         owner.open(a, "7", "plex://person/7", "Actor", "");
+        // The roster the page used to append went with the registry (#166): the only source is
+        // the ORIGIN itself, force-included because the page must answer for the credit row that
+        // opened it. `sync_roster` can never report a change: nothing moves the roster epoch.
         assert_eq!(
             owner.current()
                 .unwrap()
@@ -2055,26 +2057,9 @@ mod tests {
                 .iter()
                 .map(|s| s.sid)
                 .collect::<Vec<_>>(),
-            [a, b]
+            [a]
         );
-
-        let old_gen = owner.gen();
-        owner.land(
-            fx(b, K_MEDIA).unwrap(),
-            old_gen,
-            media(vec![movie_on(b, "4")], Vec::new()),
-        );
-        let c = crate::registry::register_with_client_id("person-c", "127.0.0.1", 3, "c", "cid");
-        assert!(owner.sync_roster());
-        assert_eq!(
-            owner.current()
-                .unwrap()
-                .srcs
-                .iter()
-                .map(|s| s.sid)
-                .collect::<Vec<_>>(),
-            [a, b, c]
-        );
+        assert!(!owner.sync_roster());
 
         owner.reset();
         crate::registry::reset_for_test();

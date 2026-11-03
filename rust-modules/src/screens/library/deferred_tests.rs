@@ -45,15 +45,8 @@ impl Fixture {
         let session = crate::plex::session::TempSession::new("library-deferred-ports");
         session.watching("u-library-deferred-ports");
         crate::registry::reset_for_test();
-        let own =
-            crate::registry::register_with_client_id("deferred-own", "127.0.0.1", 9, "synthetic", "fixture");
-        let shared = crate::registry::register_with_client_id(
-            "deferred-shared",
-            "127.0.0.1",
-            10,
-            "synthetic",
-            "fixture",
-        );
+        let own = crate::registry::ServerId::from_raw(0);
+        let shared = crate::registry::ServerId::from_raw(1);
         let mut fixture = Self {
             stores: crate::stores::Stores::default(),
             listing: crate::stores::browse::ListingSnapshot::empty_for_test(),

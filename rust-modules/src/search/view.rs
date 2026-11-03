@@ -188,7 +188,16 @@ mod tests {
         let _registry = RegistryReset;
         crate::registry::reset_for_test();
         let (mut fx, old) = publish_fixture();
-        let sid = crate::registry::register_with_client_id("search-view", "127.0.0.1", 9, "synthetic", "fixture");
+        // The rebuild keeps only LIVE sources' answers, and the single live source is the
+        // Jellyfin slot while its client is installed (#166's single-source fan-out).
+        crate::jellyfin::install(crate::jellyfin::JfClient::synthetic(
+            crate::origin::Origin::http("127.0.0.1", 8096),
+            "search-view-test-device".into(),
+            "tok".to_string(),
+            "user-search-view-test".into(),
+            "Search View Test".into(),
+        ));
+        let sid = crate::jellyfin::SERVER_ID;
         let mut answer = [const { Vec::new() }; super::super::NKIND];
         answer[0].push(Item::Media(crate::pms::PmsMovie {
             sid, rk: "new-answer".into(), title: "Replacement result".into(), ..Default::default()
@@ -201,5 +210,6 @@ mod tests {
         assert_eq!(next.view().shelves()[0].items[0].sid(), sid);
         assert!(Arc::ptr_eq(old.query.as_ref().unwrap(), next.query.as_ref().unwrap()));
         assert!(!Arc::ptr_eq(old.shelves.as_ref().unwrap(), next.shelves.as_ref().unwrap()));
+        crate::jellyfin::uninstall();
     }
 }

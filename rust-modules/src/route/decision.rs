@@ -2393,7 +2393,12 @@ impl HlsAbrControl {
         observed: (crate::abr::ObservedHlsVariant, u32),
         transition: impl FnOnce() -> Option<T>,
     ) -> Result<(T, WorkerTicket), HlsCommitRefusal> {
-        if self.fixture_base.is_empty() && crate::registry::client_for(self.sid).is_none() {
+        // The session guard's registry half (`client_for(self.sid).is_none()`) went with the
+        // client slots (#166). The live backend's truth takes its place: the commit may only fly
+        // when the playing item's slot IS the Jellyfin server and its client is still signed in.
+        let live_backend =
+            self.sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some();
+        if self.fixture_base.is_empty() && !live_backend {
             return Err(HlsCommitRefusal::Session);
         }
         replace_active_hls_with(
@@ -3594,14 +3599,10 @@ pub(crate) fn cur_rk(ps: &PlaybackSession) -> String {
 pub(crate) fn cur_sid(ps: &PlaybackSession) -> ServerId {
     ps.cur_sid
 }
-/// The `Client` for the currently-playing item's server, `None` before the first play (or after a
-/// plan that never resolved). The main-thread twin of `client_for(env.sid)` on the resolve worker
-/// — every in-playback PMS call in this file goes through one of the two, and none through
-/// `client_opt()`, which answers with whatever server is CURRENT rather than the one playing.
-    #[allow(dead_code)] // frozen until the wire layer goes
-fn cur_client(ps: &PlaybackSession) -> Option<&'static crate::plex::Client> {
-    crate::registry::client_for(cur_sid(ps))
-}
+/// The `Client` for the currently-playing item's server — went with the wire layer (#166): no
+/// Plex client exists to resolve, and the Jellyfin arm hands its own client by value. The
+/// resolve worker receives everything it needs at spawn; nothing in-playback resolves a client
+/// by sid any more.
 /// Projection: the wire id of the carried audio track, `0` for "server default / none" — the
 /// pre-#266 shape of this accessor, kept so every existing caller that only ever wanted the id
 /// keeps compiling against `cur_audio` unchanged.
@@ -4841,7 +4842,10 @@ fn apply_quality_choice(ps: &mut PlaybackSession, q: Quality) {
         crate::player::request_adaptive_reload(ps);
         return;
     }
-    let location = crate::registry::client_for(cur_sid(ps)).and_then(|client| client.link());
+    // The link tier was the Plex slot's connection fact (`client_for(sid).link()`); that world
+    // is retired (#166), so nothing can prove a tier any more and the policy reads `None` —
+    // "nobody has said", which leaves every flavor free (`link_policy`'s table).
+    let location = None;
     // A direct Remote already on screen is itself stronger evidence than a second prefix fetch:
     // selecting Auto must not start an encoder under a movie which is currently arriving as
     // Original. A fresh Remote play is measured in `build_stream`; an existing transcode has no
@@ -5039,7 +5043,10 @@ fn playback_preview_with_capability(
     // promise "Direct Play" for a source the rung is about to send to an encoder, which is the
     // exact mismatch this preview's doc says it exists to avoid. `d.bitrate`/`width`/`height` are
     // `Media[0]`'s, i.e. the same numbers `ResolveEnv` hands the resolve.
-    let location = crate::registry::client_for(d.sid).and_then(|client| client.link());
+    // The link tier was the Plex slot's connection fact (`client_for(d.sid).link()`); that world
+    // is retired (#166), so nothing can prove a tier any more and the policy reads `None` —
+    // "nobody has said", which leaves every flavor free (`link_policy`'s table).
+    let location = None;
     // A detail page has not downloaded the file yet, so it reports what can preserve the source,
     // not a fictitious failed bandwidth result. Remote Auto is measured at Play. Relay remains a
     // conversion because its independent link policy refuses both original-rate flavors.
@@ -6318,7 +6325,7 @@ impl Default for EnhTestFixture {
 
 #[cfg(test)]
 pub(crate) fn enhancement_test_session(route: EnhTestFixture) -> (PlaybackSession, ServerId) {
-    let sid = crate::registry::register_with_client_id("enh-menu-test", "127.0.0.1", 1, "token", "enh-menu-client");
+    let sid = crate::registry::ServerId::from_raw(0);
     crate::plex::serverinfo::store_for_test(sid, route.pass, "1.43.4");
 
     let mut ps = PlaybackSession::IDLE;

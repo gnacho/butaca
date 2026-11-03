@@ -316,9 +316,8 @@ fn library_detail_return_restores_engine_card_and_viewport_after_stack_eviction(
     session.watching("u-owned-library-return");
     for evict in [false, true] {
         crate::registry::reset_for_test();
-        let sid = crate::registry::register_with_client_id("library-return-own", "127.0.0.1", 9, "synthetic", "fixture");
-        let shared = crate::registry::register_with_client_id("library-return-shared", "127.0.0.1", 10, "synthetic", "fixture");
-        crate::registry::set_current(sid);
+        let sid = crate::registry::ServerId::from_raw(0);
+        let shared = crate::registry::ServerId::from_raw(1);
         let mut d = Dispatcher::<AppHost>::new();
         let mut rig = Bridge::for_test(|| 0);
         rig.stores.browse.borrow_mut().seed_registered_table_for_test([sid, shared]);
@@ -638,8 +637,7 @@ fn controlled_discovery_recaptures_the_directory_in_its_delivery_turn() {
     let _guard = crate::testlock::serial();
     crate::registry::reset_for_test();
     let mut rig = Bridge::for_test(|| 0);
-    let sid = crate::registry::register_with_client_id(
-        "same-turn-discovery", "127.0.0.1", 9, "synthetic", "fixture");
+    let sid = crate::registry::ServerId::from_raw(2);
     rig.stores.browse.borrow_mut().queue_discovery_for_test(sid, true);
     let result = rig.stores.browse.borrow_mut().take_discovery().unwrap();
     let mt = unsafe { crate::task::MainThread::assume() };
