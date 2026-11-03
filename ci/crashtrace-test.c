@@ -79,7 +79,7 @@ static int crash_child(const char *path, int sig, enum how how) {
         int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0600);
         /* BOTH sinks, deliberately the same file: the tracer writes each line to both, so one file
          * receiving the record twice also proves neither descriptor is being dropped. */
-        plx_crash_install(fd, fd);
+        butaca_crash_install(fd, fd);
         if (how == FAULT) {
             /* A real null dereference. `volatile` so no compiler decides this is undefined and
              * therefore deletable — which they do, and then the test would prove nothing. */
@@ -119,7 +119,7 @@ static int count(const char *hay, const char *needle) {
 
 static void one_case(const char *name, int sig, const char *signame, enum how how) {
     char path[256];
-    snprintf(path, sizeof path, "/tmp/plx-crashtrace-test-%d-%d.log", (int)getpid(), sig);
+    snprintf(path, sizeof path, "/tmp/butaca-crashtrace-test-%d-%d.log", (int)getpid(), sig);
     unlink(path);
 
     int status = crash_child(path, sig, how);
@@ -164,7 +164,7 @@ static void one_case(const char *name, int sig, const char *signame, enum how ho
 
     /* The `at:`/`bin:` lines need TWO things, and the second one was missing from this condition
      * until 2026-09-02: `/proc/self/maps`, which a desktop host does not have, AND a fault context the
-     * handler can actually read. `plx_crash` reads `pc`/`lr` only under `__arm__` — off the target
+     * handler can actually read. `butaca_crash` reads `pc`/`lr` only under `__arm__` — off the target
      * it deliberately records `pc=0x0 lr=0x0` rather than pretending to have measured them — so a
      * maps scan for address zero matches no mapping and emits neither line, by design.
      *
@@ -204,8 +204,8 @@ static void one_case(const char *name, int sig, const char *signame, enum how ho
 static const char *scan(const char *content, unsigned long pc, unsigned long lr) {
     static char out[64 * 1024];
     char maps[256], sink[256];
-    snprintf(maps, sizeof maps, "/tmp/plx-crashtrace-maps-%d", (int)getpid());
-    snprintf(sink, sizeof sink, "/tmp/plx-crashtrace-sink-%d", (int)getpid());
+    snprintf(maps, sizeof maps, "/tmp/butaca-crashtrace-maps-%d", (int)getpid());
+    snprintf(sink, sizeof sink, "/tmp/butaca-crashtrace-sink-%d", (int)getpid());
 
     int mf = open(maps, O_WRONLY | O_CREAT | O_TRUNC, 0600);
     (void)!write(mf, content, strlen(content));
@@ -214,8 +214,8 @@ static const char *scan(const char *content, unsigned long pc, unsigned long lr)
     int sf = open(sink, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0600);
     /* One sink, not two: the duplicate-write property is already asserted by the crash cases, and
      * counting occurrences here would double every number for no extra evidence. */
-    plx_crash_install(sf, -1);
-    plx_crash_scan_maps_file(maps, pc, lr);
+    butaca_crash_install(sf, -1);
+    butaca_crash_scan_maps_file(maps, pc, lr);
     close(sf);
 
     size_t len = 0;
@@ -313,10 +313,10 @@ static void maps_cases(void) {
     /* An absent file is not a crash inside the crash handler. */
     {
         char sink[256];
-        snprintf(sink, sizeof sink, "/tmp/plx-crashtrace-sink-none-%d", (int)getpid());
+        snprintf(sink, sizeof sink, "/tmp/butaca-crashtrace-sink-none-%d", (int)getpid());
         int sf = open(sink, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0600);
-        plx_crash_install(sf, -1);
-        plx_crash_scan_maps_file("/nonexistent/maps", 0x20000, 0);
+        butaca_crash_install(sf, -1);
+        butaca_crash_scan_maps_file("/nonexistent/maps", 0x20000, 0);
         close(sf);
         size_t len = 0;
         slurp(sink, &len);

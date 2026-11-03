@@ -76,7 +76,7 @@ pub(crate) use glsl;
 /// tile arrived with (bisected 2026-09-04; `docs/backdrop-blur-profiling.md`). The test
 /// `every_dithered_program_carries_the_one_shared_dither_and_no_hash_of_its_own` pins both lists.
 /// [`glsl_dithered`]'s twin: the SAME fragment source behind `shaders/dither_stub.glsl`, whose
-/// `plx_dither` is the identity — so one file links as two programs, and the plain one (the hero
+/// `butaca_dither` is the identity — so one file links as two programs, and the plain one (the hero
 /// scrim's, `draw_grad4`) has no
 /// uniform, no sampler and no fetch. See [`ambient_program`] for why OFF is a program, not a zero.
 macro_rules! glsl_undithered {
@@ -101,7 +101,7 @@ macro_rules! glsl_dithered {
     };
 }
 
-/// The VERTEX half of a [`glsl_dithered`] program: the same vertex source with `PLX_DITHER_NC`
+/// The VERTEX half of a [`glsl_dithered`] program: the same vertex source with `BUTACA_DITHER_NC`
 /// defined, which makes it emit `v_dither_nc` — the noise tile's coordinate, target px /
 /// [`NOISE_DIM`] — so `shaders/dither.glsl` fetches straight from a varying and does no arithmetic
 /// on `gl_FragCoord` (its cost rule 4, measured 2026-09-19). Every `glsl_dithered!` fragment source
@@ -112,7 +112,7 @@ macro_rules! glsl_vs_dithered {
         // SAFETY: as `glsl!` — GLSL sources contain no interior NUL.
         unsafe {
             ::std::ffi::CStr::from_bytes_with_nul_unchecked(
-                concat!("#define PLX_DITHER_NC\n", include_str!($file), "\0").as_bytes(),
+                concat!("#define BUTACA_DITHER_NC\n", include_str!($file), "\0").as_bytes(),
             )
         }
     };
@@ -128,14 +128,14 @@ const VS_IMG: &CStr = glsl!("shaders/vs_img.vert");
 /// The wash's vertex shader: the dithered twin, and the only one carrying the INK RAMP
 /// ([`draw_ambient_inked`]) — the plain twin behind `draw_grad4` has real corner alpha and no ramp.
 const VS_AMBIENT_DITHERED: &CStr =
-    glsl!("shaders/vs_ambient.vert", "#define PLX_DITHER_NC\n#define PLX_WASH_INK\n");
+    glsl!("shaders/vs_ambient.vert", "#define BUTACA_DITHER_NC\n#define BUTACA_WASH_INK\n");
 const VS_IMG_DITHERED: &CStr = glsl_vs_dithered!("shaders/vs_img.vert");
 const VS_SRC_DITHERED: &CStr = glsl_vs_dithered!("shaders/vs_src.vert");
 const FS_IMG: &CStr = glsl!("shaders/fs_img.frag");
 const FS_FIELD: &CStr = glsl_dithered!("shaders/fs_field.frag");
 const FS_FIELD_PANEL: &CStr = glsl_dithered!("shaders/fs_field_panel.frag");
-const VS_STILL: &CStr = glsl!("shaders/vs_img.vert", "#define PLX_STILL_GROUND\n");
-const FS_STILL: &CStr = glsl!("shaders/fs_img.frag", "#define PLX_STILL_GROUND\n");
+const VS_STILL: &CStr = glsl!("shaders/vs_img.vert", "#define BUTACA_STILL_GROUND\n");
+const FS_STILL: &CStr = glsl!("shaders/fs_img.frag", "#define BUTACA_STILL_GROUND\n");
 /// The FOCUSED-tile specialization: the lit-glass edge + risen shadow, in their own program rather
 /// than a branch every plain IPROG draw (resting cards, glyphs, blur reductions, `field_kick`,
 /// `FrameCache`) pays for. A TV A/B measured real backpressure from the bigger program running on
@@ -144,8 +144,8 @@ const FS_STILL: &CStr = glsl!("shaders/fs_img.frag", "#define PLX_STILL_GROUND\n
 /// regardless of `u_focus.x`. [`draw_tex_impl`] only ever reaches for this when a draw is actually
 /// focused or risen (`focus > 0.0 || dy > 0.0` — at most one card on screen), falling back to
 /// [`IPROG`] with the plain look if it fails to link, same as [`STILL_IMAGE`]'s own fallback.
-const VS_FOCUS: &CStr = glsl!("shaders/vs_img.vert", "#define PLX_FOCUS\n");
-const FS_FOCUS: &CStr = glsl!("shaders/fs_img.frag", "#define PLX_FOCUS\n");
+const VS_FOCUS: &CStr = glsl!("shaders/vs_img.vert", "#define BUTACA_FOCUS\n");
+const FS_FOCUS: &CStr = glsl!("shaders/fs_img.frag", "#define BUTACA_FOCUS\n");
 const FS_HERO: &CStr = glsl!("shaders/fs_hero.frag");
 /// The wash with its photograph dissolved into it (`draw_art_wash`): dithered, because the wash it
 /// carries always dithers, over `vs_ambient.vert`'s field mesh so its colour is the wash's own
@@ -153,7 +153,7 @@ const FS_HERO: &CStr = glsl!("shaders/fs_hero.frag");
 const FS_ART_WASH: &CStr = glsl_dithered!("shaders/fs_art_wash.frag");
 const VS_ART_WASH: &CStr = glsl!(
     "shaders/vs_ambient.vert",
-    "#define PLX_DITHER_NC\n#define PLX_WASH_INK\n#define PLX_ART_WASH\n"
+    "#define BUTACA_DITHER_NC\n#define BUTACA_WASH_INK\n#define BUTACA_ART_WASH\n"
 );
 const FS_BLUR: &CStr = glsl!("shaders/fs_blur.frag");
 const FS_GLASS: &CStr = glsl_dithered!("shaders/fs_glass.frag");
@@ -561,7 +561,7 @@ const NOISE_DIM: usize = 256;
 /// triangular over ±1 LSB, which is the sum of two independent ±½ LSB uniforms. Formed in the
 /// shader that is a second channel plus an add on a full-screen quad, and `fs_ambient.frag`'s
 /// header prices what one extra arithmetic word costs on this part. Summing the two hashes into the
-/// STORED byte instead leaves the fragment expression byte-for-byte unchanged — `plx_noise() *
+/// STORED byte instead leaves the fragment expression byte-for-byte unchanged — `butaca_noise() *
 /// u_dither` in `shaders/dither.glsl` — and moves the entire difference into the amplitude every
 /// caller passes, [`DITHER_LSB`] (2/255), through `dither_for_field` or
 /// [`draw_ambient`] directly. Same one fetch, same one multiply, 2M times a frame.
@@ -747,7 +747,7 @@ fn glsl_preamble(ty: c_uint) -> &'static CStr {
     if ty == GL_VERTEX_SHADER {
         c"#version 410 core\n#define attribute in\n#define varying out\n#define texture2D texture\n#line 1\n"
     } else {
-        c"#version 410 core\n#define varying in\n#define texture2D texture\nout vec4 plx_frag;\n#define gl_FragColor plx_frag\n#line 1\n"
+        c"#version 410 core\n#define varying in\n#define texture2D texture\nout vec4 butaca_frag;\n#define gl_FragColor butaca_frag\n#line 1\n"
     }
 }
 
@@ -1036,7 +1036,7 @@ pub(crate) fn init_gl() {
         // The underlay field. `vs_src.vert` because a field is drawn 1:1 over its rect, so the
         // unit quad IS the texture coordinate and there is nothing for a `u_uvrect` to express.
         // DITHERED: `fs_field.frag` is built with `glsl_dithered!`, so its paired vertex source
-        // must be the `PLX_DITHER_NC` variant that supplies `v_dither_nc` (cost rule 4).
+        // must be the `BUTACA_DITHER_NC` variant that supplies `v_dither_nc` (cost rule 4).
         UPROG = link_program(VS_SRC_DITHERED.as_ptr(), FS_FIELD.as_ptr()).unwrap_or_else(|| {
             log("field prog link failed — an underlay field draws nothing");
             0
@@ -1052,7 +1052,7 @@ pub(crate) fn init_gl() {
 
         // The same field as a popover's material — `draw_field_panel`. DITHERED, same contract as
         // `UPROG` above: `fs_field_panel.frag` is built with `glsl_dithered!`, so it must link
-        // against the `PLX_DITHER_NC` vertex variant.
+        // against the `BUTACA_DITHER_NC` vertex variant.
         PPROG = link_program(VS_SRC_DITHERED.as_ptr(), FS_FIELD_PANEL.as_ptr()).unwrap_or_else(|| {
             log("field-panel prog link failed — popover panels fall back to the flat sheet");
             0
@@ -2784,7 +2784,7 @@ pub(crate) fn draw_tex_carded_still(
     band: f32, scrim: [f32; 4], f: f32, dy: f32,
 ) -> bool {
     let image = unsafe { STILL_IMAGE };
-    // `STILL_IMAGE` (`VS_STILL`/`FS_STILL`) never carries `PLX_FOCUS` — only `PLX_STILL_GROUND` —
+    // `STILL_IMAGE` (`VS_STILL`/`FS_STILL`) never carries `BUTACA_FOCUS` — only `BUTACA_STILL_GROUND` —
     // so it has no lit-glass/risen-shadow code at all, on purpose: a THIRD program crossing focus
     // with still-fusion was rejected in favour of two passes for the (at most one) card that is
     // both. `f > 0.0` therefore returns false here so the caller keeps its ordinary card path
@@ -6540,7 +6540,7 @@ mod tests {
                 "{name} must hand the tile coordinate at 1/NOISE_DIM ({NOISE_DIM}) of the target px"
             );
             assert!(
-                code.contains("#define PLX_DITHER_NC"),
+                code.contains("#define BUTACA_DITHER_NC"),
                 "{name}: the dithered twin defines it"
             );
         }
@@ -6550,7 +6550,7 @@ mod tests {
             ("vs_src.vert", VS_SRC),
         ] {
             assert!(
-                !shader_code(vs).contains("#define PLX_DITHER_NC"),
+                !shader_code(vs).contains("#define BUTACA_DITHER_NC"),
                 "{name}: the plain vertex shader (every image program, the undithered twin) \
                  carries no noise varying"
             );
@@ -6569,7 +6569,7 @@ mod tests {
                 "{name} must be built with glsl_dithered! (the prelude is missing)"
             );
             assert!(
-                code.contains("plx_dither"),
+                code.contains("butaca_dither"),
                 "{name} carries the prelude but never applies it — a program that pays for the \
                  uniforms and bands anyway"
             );
@@ -6608,10 +6608,10 @@ mod tests {
     #[test]
     fn the_art_wash_is_the_wash_program_with_the_art_between_it_and_the_ink() {
         let wash = shader_code(VS_AMBIENT_DITHERED);
-        assert!(wash.contains("#define PLX_WASH_INK") && !wash.contains("#define PLX_ART_WASH"));
-        assert!(!shader_code(VS_AMBIENT).contains("#define PLX_WASH_INK"), "plain twin: no ramp");
+        assert!(wash.contains("#define BUTACA_WASH_INK") && !wash.contains("#define BUTACA_ART_WASH"));
+        assert!(!shader_code(VS_AMBIENT).contains("#define BUTACA_WASH_INK"), "plain twin: no ramp");
         let vs = shader_code(VS_ART_WASH);
-        for d in ["#define PLX_DITHER_NC", "#define PLX_WASH_INK", "#define PLX_ART_WASH"] {
+        for d in ["#define BUTACA_DITHER_NC", "#define BUTACA_WASH_INK", "#define BUTACA_ART_WASH"] {
             assert!(vs.contains(d), "VS_ART_WASH must define {d}");
         }
         let fs = shader_code(FS_ART_WASH);
@@ -6797,7 +6797,7 @@ mod tests {
             CARD_GLOW_TOP_A, CARD_GLOW_TOP_PX,
         };
         // `shader_code` returns the raw, un-preprocessed file text (it strips comment-only lines,
-        // nothing else), so the text inside a `#ifdef PLX_FOCUS` block is present whichever of
+        // nothing else), so the text inside a `#ifdef BUTACA_FOCUS` block is present whichever of
         // `FS_IMG`/`FS_FOCUS` (same file, different prepended `#define`) is read here — reading the
         // `FS_FOCUS`/`VS_FOCUS` constants just documents which program actually compiles this code.
         // `an_unfocused_program_carries_none_of_the_focus_code` below is the test that checks what
@@ -6905,8 +6905,8 @@ mod tests {
     /// The whole reason [`FOCUS_IMAGE`] exists: a resting card, a glyph, a blur reduction, a
     /// `field_kick`, a `FrameCache` quad — every draw through the PLAIN program — must compile and
     /// run EXACTLY what main shipped before the lit-glass/risen-shadow feature, with no trace of
-    /// `u_focus`/`v_gloss` left in by a stray `#ifdef PLX_FOCUS` that didn't close where intended.
-    /// Preprocessing with `PLX_FOCUS` absent (mirroring what the GL driver does for `FS_IMG`/
+    /// `u_focus`/`v_gloss` left in by a stray `#ifdef BUTACA_FOCUS` that didn't close where intended.
+    /// Preprocessing with `BUTACA_FOCUS` absent (mirroring what the GL driver does for `FS_IMG`/
     /// `VS_IMG`, `FS_STILL`/`VS_STILL`) and grepping the result is what actually answers that,
     /// unlike a raw-text search against `shader_code`.
     #[test]
@@ -6914,17 +6914,17 @@ mod tests {
         let fs = preprocess(FS_IMG.to_str().unwrap(), &[]);
         let vs = preprocess(VS_IMG.to_str().unwrap(), &[]);
         for hay in [&fs, &vs] {
-            for needle in ["u_focus", "v_gloss", "PLX_FOCUS"] {
+            for needle in ["u_focus", "v_gloss", "BUTACA_FOCUS"] {
                 assert!(!hay.contains(needle), "plain program must not reference `{needle}`:\n{hay}");
             }
         }
-        // Also true with PLX_STILL_GROUND defined alongside (FS_STILL/VS_STILL) — the two macros
+        // Also true with BUTACA_STILL_GROUND defined alongside (FS_STILL/VS_STILL) — the two macros
         // are independent, and the still specialization has no focus code of its own either
         // (`draw_tex_carded_still` refuses `f > 0.0` rather than ever reaching for it).
-        let fs_still = preprocess(FS_IMG.to_str().unwrap(), &["PLX_STILL_GROUND"]);
-        let vs_still = preprocess(VS_IMG.to_str().unwrap(), &["PLX_STILL_GROUND"]);
+        let fs_still = preprocess(FS_IMG.to_str().unwrap(), &["BUTACA_STILL_GROUND"]);
+        let vs_still = preprocess(VS_IMG.to_str().unwrap(), &["BUTACA_STILL_GROUND"]);
         for hay in [&fs_still, &vs_still] {
-            for needle in ["u_focus", "v_gloss", "PLX_FOCUS"] {
+            for needle in ["u_focus", "v_gloss", "BUTACA_FOCUS"] {
                 assert!(!hay.contains(needle), "still program must not reference `{needle}`:\n{hay}");
             }
         }

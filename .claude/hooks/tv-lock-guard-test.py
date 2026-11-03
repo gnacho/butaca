@@ -79,7 +79,7 @@ CASES = [
     (ALLOW, 'git commit -m "make deploy now takes the TV lock; tests/run.py releases it"'),
     (ALLOW, 'grep -rn "ssh root@" docs/'),
     (ALLOW, "ssh someserver.example.com uptime"),
-    (ALLOW, "PLX_TV_LOCK_BYPASS=1 ssh root@1.2.3.4 uptime"),          # the documented hatch
+    (ALLOW, "BUTACA_TV_LOCK_BYPASS=1 ssh root@1.2.3.4 uptime"),          # the documented hatch
     # "sound" alone, off the tv-session.sh command word, must not trip the classifier -- it keys
     # on the SUBCOMMAND of tv-session.sh specifically, not on the word appearing anywhere on the
     # line (prose, a commit message, an unrelated script).
@@ -114,7 +114,7 @@ CASES += [
 
 
 def blocked(cmd):
-    if "PLX_TV_LOCK_BYPASS=1" in cmd:
+    if "BUTACA_TV_LOCK_BYPASS=1" in cmd:
         return False
     return any(guard.classify(seg) for seg in guard.segments(guard.strip_heredocs(cmd)))
 
@@ -122,7 +122,7 @@ def blocked(cmd):
 # --- lane identity: the hook and tools/tv-lock.sh must agree on ONE lane -------------------------
 #
 # A subagent's own worktree is not `payload["cwd"]` (the harness always reports the SESSION
-# checkout there), so it names its lane by prefixing `PLX_TV_LOCK_LANE=<its worktree>` on the
+# checkout there), so it names its lane by prefixing `BUTACA_TV_LOCK_LANE=<its worktree>` on the
 # command itself. These cases run the SAME decision `main()` makes — classify, then resolve a
 # lane with `lane_from_command()`, then check `lease_for()` — against a throwaway mirror directory,
 # never the real `~/.butaca/tv-lock` a live `tools/tv-lock.sh` writes to.
@@ -151,7 +151,7 @@ def blocked_full(cmd, cwd, env=None, live_lanes=()):
     """The hook's whole decision — classify, resolve the lane, check for a mirror lease — the way
     `main()` does it, against a disposable STATE_DIR rather than the real mirror.
     """
-    if "PLX_TV_LOCK_BYPASS=1" in cmd:
+    if "BUTACA_TV_LOCK_BYPASS=1" in cmd:
         return False
     if not any(guard.classify(seg) for seg in guard.segments(guard.strip_heredocs(cmd))):
         return False
@@ -175,40 +175,40 @@ LANE_CASES = [
     # A prefixed lane whose own mirror lease is live is allowed, even though the reported cwd is
     # the session checkout (never lane-a) and holds nothing itself.
     (False,
-     f"PLX_TV_LOCK_LANE={LANE_A} make deploy",
+     f"BUTACA_TV_LOCK_LANE={LANE_A} make deploy",
      SESSION_CWD, {}, (LANE_A,)),
     # The identical command naming a DIFFERENT lane, which holds no lease, is blocked — the prefix
     # is honoured, not the cwd, and not lane-a's lease either.
     (True,
-     f"PLX_TV_LOCK_LANE={LANE_B} make deploy",
+     f"BUTACA_TV_LOCK_LANE={LANE_B} make deploy",
      SESSION_CWD, {}, (LANE_A,)),
     # A prefixed lane must not be satisfied by a lease belonging to the CWD's own lane: cwd is
     # lane-a (which has a live lease), but the command explicitly names lane-b (which has none).
     (True,
-     f"PLX_TV_LOCK_LANE={LANE_B} make deploy",
+     f"BUTACA_TV_LOCK_LANE={LANE_B} make deploy",
      LANE_A, {}, (LANE_A,)),
-    # A `# PLX_TV_LOCK_LANE=` inside a COMMENT does not count as the prefix: the would-be lane
+    # A `# BUTACA_TV_LOCK_LANE=` inside a COMMENT does not count as the prefix: the would-be lane
     # (lane-a) holds the only live lease, but cwd resolves to lane-b, which holds none — so this
     # must still block. If the comment were mistakenly read as the prefix, it would wrongly allow.
     (True,
-     f"# PLX_TV_LOCK_LANE={LANE_A}\nmake deploy",
+     f"# BUTACA_TV_LOCK_LANE={LANE_A}\nmake deploy",
      LANE_B, {}, (LANE_A,)),
     # The same escape, but as a heredoc BODY rather than a comment — also must not count.
     (True,
-     f"cat > note.txt <<'EOF'\nPLX_TV_LOCK_LANE={LANE_A}\nEOF\nmake deploy",
+     f"cat > note.txt <<'EOF'\nBUTACA_TV_LOCK_LANE={LANE_A}\nEOF\nmake deploy",
      LANE_B, {}, (LANE_A,)),
-    # `env PLX_TV_LOCK_LANE=<path>` spelling is honoured the same as a bare assignment.
+    # `env BUTACA_TV_LOCK_LANE=<path>` spelling is honoured the same as a bare assignment.
     (False,
-     f"env PLX_TV_LOCK_LANE={LANE_A} make deploy",
+     f"env BUTACA_TV_LOCK_LANE={LANE_A} make deploy",
      SESSION_CWD, {}, (LANE_A,)),
     # A leading `cd <dir> &&` before the assignment is still a prefix.
     (False,
-     f"cd /repo/worktrees/lane-a && PLX_TV_LOCK_LANE={LANE_A} make deploy",
+     f"cd /repo/worktrees/lane-a && BUTACA_TV_LOCK_LANE={LANE_A} make deploy",
      SESSION_CWD, {}, (LANE_A,)),
     # No prefix at all: falls back to the hook's own environment variable.
     (False,
      "make deploy",
-     SESSION_CWD, {"PLX_TV_LOCK_LANE": LANE_A}, (LANE_A,)),
+     SESSION_CWD, {"BUTACA_TV_LOCK_LANE": LANE_A}, (LANE_A,)),
     # No prefix, no env var: falls back to cwd, exactly as before this change.
     (False,
      "make deploy",

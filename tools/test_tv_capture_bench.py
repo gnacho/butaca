@@ -124,7 +124,7 @@ static int sleep_until_ns(uint64_t n) { (void)n; return 0; }
 class BenchmarkExit(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.tmp = tempfile.TemporaryDirectory(prefix="plx-capture-test-")
+        cls.tmp = tempfile.TemporaryDirectory(prefix="butaca-capture-test-")
         cls.addClassCleanup(cls.tmp.cleanup)
         src = SOURCE.read_text()
         types = src[src.index("enum {"):src.index("static void on_signal")]

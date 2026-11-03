@@ -238,7 +238,7 @@ pub(crate) fn body(
         reason: reason.to_string(),
         sent_at_ms: now,
         app: App {
-            version: env!("PLX_VERSION"),
+            version: env!("BUTACA_VERSION"),
             id: crate::paths::app_id(),
             flavour: crate::paths::flavour().unwrap_or("stable"),
             features: features(),
@@ -370,7 +370,7 @@ mod tests {
         assert_eq!(env["dropped"], 7);
         assert_eq!(env["records"], 2);
         assert_eq!(env["route"], "player");
-        assert_eq!(env["app"]["version"], env!("PLX_VERSION"));
+        assert_eq!(env["app"]["version"], env!("BUTACA_VERSION"));
         // the never-started session reads honestly rather than as a healthy one
         assert_eq!(env["player"]["vp_mode"], "NONE — no video path");
         assert_eq!(env["player"]["feed_state"], "— nothing fed yet");

@@ -100,7 +100,7 @@ pkg/.flavor/
 # are ignored.
 #
 # Nobody should be making that symlink any more — `ci/build-ffmpeg.sh` keeps the 122 MB object
-# tree in a machine-wide, flag-keyed cache (`$PLX_BUILD_CACHE`, default `~/.cache/butaca`), so
+# tree in a machine-wide, flag-keyed cache (`$BUTACA_BUILD_CACHE`, default `~/.cache/butaca`), so
 # a fresh worktree gets its own real prefix in about three seconds. The slashless form stays: it
 # costs nothing, and it is the pattern that was actually load-bearing when somebody did.
 # `vendor/ffmpeg-build` still holds one thing after that change — the pinned upstream TARBALL,
@@ -128,8 +128,8 @@ vendor/vendor/
 # ...and the copies staged into pkg/ for the package. Equally derived: pkg/butaca depends on
 # them, so a fresh clone rebuilds FFmpeg either way, and tracking them costs 2.1 MB per version
 # bump forever in a repo whose reproducibility rests on the pinned tarball.
-pkg/lib*-plx.so.*
-pkg/libass-plx-host.so.0*
+pkg/lib*-butaca.so.*
+pkg/libass-butaca-host.so.0*
 # The host half of the same FFmpeg, staged for the host tests only. It carries the SAME basenames
 # as the shipped ARM libraries, so it lives in its own directory and never in `pkg/` itself.
 pkg/host-ffmpeg/

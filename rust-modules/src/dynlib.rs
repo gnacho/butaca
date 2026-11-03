@@ -92,7 +92,7 @@ impl Handle {
     /// on no library search path, so a bare SONAME would either fail or — worse, on webOS 11,
     /// which ships FFmpeg 6 itself — silently open the television's copy instead of ours. An
     /// absolute path makes "which library did we get" structural rather than a matter of search
-    /// order. (The `-plx` build suffix is the second half of that guarantee.)
+    /// order. (The `-butaca` build suffix is the second half of that guarantee.)
     /// `dir` is a `Path`, not a `&str`, because the caller's app directory comes from
     /// `paths::app_dir()` and a `.to_str()` on the way in has a `None` branch — one that would
     /// silently turn "our bundled FFmpeg" into "whatever the loader finds".

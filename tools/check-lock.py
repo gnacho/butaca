@@ -11,9 +11,9 @@ stale lock to clean up by hand (unlike a mkdir/pidfile scheme).
 Usage:
     check-lock.py [--lock PATH] [--timeout SECONDS] -- CMD...
 
-The lock file defaults to `${PLX_CHECK_LOCK:-~/.cache/butaca/check.lock}`, which is
+The lock file defaults to `${BUTACA_CHECK_LOCK:-~/.cache/butaca/check.lock}`, which is
 deliberately OUTSIDE any git worktree so every checkout on the machine contends for the
-same file. Set `PLX_CHECK_LOCK=off` to bypass locking entirely (escape hatch for a
+same file. Set `BUTACA_CHECK_LOCK=off` to bypass locking entirely (escape hatch for a
 machine known to be otherwise idle, or for debugging the wrapper itself).
 
 While waiting, the current holder's identity (pid, worktree, start time) is printed
@@ -44,7 +44,7 @@ EX_TEMPFAIL = 75
 
 
 def default_lock_path():
-    override = os.environ.get("PLX_CHECK_LOCK")
+    override = os.environ.get("BUTACA_CHECK_LOCK")
     if override:
         return override
     return DEFAULT_LOCK
@@ -177,7 +177,7 @@ def run_locked(cmd):
 
 def main(argv):
     lock_path, timeout, cmd = parse_args(argv)
-    if os.environ.get("PLX_CHECK_LOCK") == "off":
+    if os.environ.get("BUTACA_CHECK_LOCK") == "off":
         return run_locked(cmd)
     fd = acquire(lock_path, timeout)
     try:

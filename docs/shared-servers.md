@@ -433,7 +433,7 @@ re-read cannot recover.
   `stream.rs` read as less capable than it is, and sent work to `net.rs`/curl that the raw socket
   could already do.
 - Root `CLAUDE.md` and `player/CLAUDE.md` described `ff.rs` as "the TV's own libavformat", dlopen'd
-  by SONAME candidate list. FFmpeg is **bundled and pinned** (majors 63/63/61, `-plx` suffix, opened
+  by SONAME candidate list. FFmpeg is **bundled and pinned** (majors 63/63/61, `-butaca` suffix, opened
   by absolute path out of `paths::app_dir()`). **Fixed in both** — and on 2026-08-13 also in the
   **Makefile itself**, whose `LIBS_REAL` comment still filed FFmpeg beside curl and ACB as "SONAME
   moves, 55→57→58→59→60", a hundred lines above the rules that build and stage the pinned copy. That

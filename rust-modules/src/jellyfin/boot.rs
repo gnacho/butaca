@@ -401,7 +401,7 @@ fn mint_device_id() -> String {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        return format!("plx-jf-{n:x}");
+        return format!("butaca-jf-{n:x}");
     }
     b.iter().map(|x| format!("{x:02x}")).collect()
 }

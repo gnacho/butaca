@@ -534,7 +534,7 @@ fn scrub_authority(s: &str) -> String {
 /// address, and none of those go through a URL. Rather than teach every such call site its own
 /// redaction, this is keyed the same way [`scrub_params`] is keyed on its credential parameters —
 /// the literal `host=` is the signal, not a guess at what a hostname looks like, so it cannot
-/// mistake a soname (`libavformat-plx.so.63`), a version (`1.43.4.10903`) or a GL extension name
+/// mistake a soname (`libavformat-butaca.so.63`), a version (`1.43.4.10903`) or a GL extension name
 /// for one, the way a generic "any dotted token" scan would.
 ///
 /// **One value is deliberately spared: a `0x…` hex dump.** `dev.rs`'s softfloat probe reuses this

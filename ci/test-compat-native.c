@@ -5,7 +5,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <sys/auxv.h>
-unsigned long plx_getauxval(unsigned long);
+unsigned long butaca_getauxval(unsigned long);
 int main(void)
 {
     /* HWCAP is intentionally excluded: libc may normalize raw capabilities. */
@@ -15,7 +15,7 @@ int main(void)
         unsigned long native = getauxval(keys[i]);
         int native_error = errno;
         errno = 0;
-        assert(plx_getauxval(keys[i]) == native);
+        assert(butaca_getauxval(keys[i]) == native);
         assert(errno == native_error);
     }
     return 0;

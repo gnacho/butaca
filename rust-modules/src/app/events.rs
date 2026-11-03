@@ -107,7 +107,7 @@ pub(crate) fn decode_key(ev: &[u8]) -> (u32, u32, u32) {
 /// Defined unconditionally, like both halves of [`decode_key`]: the arm that uses it is behind
 /// `cfg!` rather than `#[cfg]`, precisely so the configuration nobody is currently building cannot
 /// rot.
-pub(crate) const SYNTH_WINDOW: u32 = 0x504c_584b; // "PLXK"
+pub(crate) const SYNTH_WINDOW: u32 = 0x504c_584b; // "BTCA"
 
 /// The Magic Remote button a desktop keyboard stands in for, or 0.
 ///

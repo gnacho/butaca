@@ -2,22 +2,22 @@
 # Stage the HOST FFmpeg beside the app assets so the host tests can bind it.
 #
 # WHY A SEPARATE DIRECTORY, and not `pkg/` itself. The host build has the SAME basenames as the
-# shipped libraries (`libavformat-plx.so.63`), because both come from one configure line with one
-# component list and only the machine differs. `pkg/lib*-plx.so.*` is exactly what `FFMPEG_STAGED`
+# shipped libraries (`libavformat-butaca.so.63`), because both come from one configure line with one
+# component list and only the machine differs. `pkg/lib*-butaca.so.*` is exactly what `FFMPEG_STAGED`
 # stages for a television and what `APP_FILES` puts in an `.ipk`, so a host copy dropped there
 # would be a 64-bit library in a package for a 32-bit device, and nothing in the build would
 # complain: the glob that ships them does not read ELF headers. A subdirectory is never in
 # `APP_FILES`, so the two builds cannot be confused by name or by glob.
 #
 # WHY NO NAME REWRITING. On this platform each library carries a plain SONAME and the app opens
-# the three in dependency order with RTLD_GLOBAL, so a reference to `libavutil-plx.so.61` resolves
+# the three in dependency order with RTLD_GLOBAL, so a reference to `libavutil-butaca.so.61` resolves
 # against the object already opened by name. The macOS stage script had to rewrite install names
 # because dyld resolves by install name instead; that script retired with the platform.
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PREFIX="$ROOT/vendor/ffmpeg-prefix-host"
 OUT="$ROOT/pkg/host-ffmpeg"
-LIBS='libavutil-plx libavcodec-plx libavformat-plx libswscale-plx'
+LIBS='libavutil-butaca libavcodec-butaca libavformat-butaca libswscale-butaca'
 
 mkdir -p "$OUT"
 for name in $LIBS; do

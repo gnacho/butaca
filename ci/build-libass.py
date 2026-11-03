@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the private ASS facade with a pinned, statically contained font stack.
 
-Only plx_ass_* leaves the resulting shared library. No firmware FreeType, FriBidi,
+Only butaca_ass_* leaves the resulting shared library. No firmware FreeType, FriBidi,
 HarfBuzz, libass, or platform font provider can affect its ABI or rendering.
 The same source pins and configuration build both the ARM library and host one.
 """
@@ -102,7 +102,7 @@ def verify_library(path, readelf):
     unexpected = set(needed) - allowed
     if unexpected:
         raise ValueError('unexpected runtime dependencies: ' + ', '.join(sorted(unexpected)))
-    if not names or any(not name.startswith('plx_ass_') for name in names):
+    if not names or any(not name.startswith('butaca_ass_') for name in names):
         raise ValueError('font stack leaked a symbol outside the private ASS facade')
     print('libass: dependency/export isolation PASS', flush=True)
 
@@ -231,14 +231,14 @@ def build_locked(host, target, prefix, work, sources):
         stamp.write_text(key)
     # The facade changes more often than the upstream stack; relinking it does not
     # require a clean FreeType/HarfBuzz rebuild.
-    name = 'libass-plx-host.so.0' if host else 'libass-plx.so.0'
+    name = 'libass-butaca-host.so.0' if host else 'libass-butaca.so.0'
     output = prefix / 'lib' / name
     objects = [prefix / 'lib' / n for n in static_names]
     wrapper_flags = [f for f in flags if f != '-fvisibility=hidden']
     command = [cc, *wrapper_flags, '-I' + str(ROOT / 'include'), '-I' + str(prefix / 'include'),
                str(ROOT / 'src/ass.c'), *map(str, objects), '-lm']
     exports = work / 'exports.map'
-    exports.write_text('{ global: plx_ass_*; local: *; };\n')
+    exports.write_text('{ global: butaca_ass_*; local: *; };\n')
     command += ['-shared', '-Wl,-soname,' + name, '-Wl,--no-undefined',
                 '-Wl,--exclude-libs,ALL', '-Wl,--version-script=' + str(exports)]
     run([*command, '-o', output], env=env)

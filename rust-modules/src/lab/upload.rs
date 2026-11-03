@@ -134,8 +134,8 @@ fn send(url: &str, secret: &str, session: &str, pin: &str, seq: u32, doc: String
     };
     let headers = vec![
         format!("Authorization: Bearer {secret}"),
-        format!("X-Plx-Session: {session}"),
-        format!("X-Plx-Seq: {seq}"),
+        format!("X-Butaca-Session: {session}"),
+        format!("X-Butaca-Seq: {seq}"),
         "Content-Type: application/x-ndjson".to_string(),
         format!("Content-Encoding: {encoding}"),
         // curl would otherwise add `Expect: 100-continue` for a body over 1 KB and wait a second

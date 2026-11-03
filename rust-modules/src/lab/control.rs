@@ -123,7 +123,7 @@ pub(crate) fn start() {
 fn run(url: String, secret: String, session: String, pin: String) {
     let headers = vec![
         format!("Authorization: Bearer {secret}"),
-        format!("X-Plx-Session: {session}"),
+        format!("X-Butaca-Session: {session}"),
         "Content-Type: application/json".to_string(),
         "Expect:".to_string(),
     ];

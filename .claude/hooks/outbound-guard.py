@@ -176,7 +176,7 @@ driving the real binary against a throwaway root of fake secrets and grepping it
 which is the only way to check this and is now a step in the test. `redact()` is the fix; the
 heredoc body and any `--body-file` contents were never echoed and still are not.
 
-THE ESCAPE HATCH is a prefix on the command itself — `PLX_PUBLISH_BYPASS=1 gh pr create …`. It is
+THE ESCAPE HATCH is a prefix on the command itself — `BUTACA_PUBLISH_BYPASS=1 gh pr create …`. It is
 for a human publishing something the scanner mis-read (a doc that must quote a real-looking address
 is the realistic case). An agent reaching for it is deciding, on the maintainer's behalf and
 usually on a third party's behalf, to publish an address that cannot be un-published. Use a
@@ -192,7 +192,7 @@ import re
 import subprocess
 import sys
 
-BYPASS = re.compile(r"\bPLX_PUBLISH_BYPASS=1\b")
+BYPASS = re.compile(r"\bBUTACA_PUBLISH_BYPASS=1\b")
 
 # The gitignored files that hold private values. All eight are named in `.gitignore`, and seven of
 # them carry their own reason in its comments — `src/config.local.h` and `local.env` under "local

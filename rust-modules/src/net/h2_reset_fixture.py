@@ -32,7 +32,7 @@ def receive(sock, size):
 def main():
     status = int(sys.argv[1])
     assert status in (401, 403, 404, 410)
-    with tempfile.TemporaryDirectory(prefix="plx-h2-reset-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="butaca-h2-reset-") as tmp:
         cert = os.path.join(tmp, "cert.pem")
         key = os.path.join(tmp, "key.pem")
         config = os.path.join(tmp, "openssl.cnf")

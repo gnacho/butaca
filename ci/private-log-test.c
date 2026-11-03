@@ -1,5 +1,5 @@
 /* Host regression test for the boot shim's fixed-name log sinks. */
-#define main plx_boot_main
+#define main butaca_boot_main
 #include "../src/main.c"
 #undef main
 
@@ -7,10 +7,10 @@
 #include <limits.h>
 
 int plex_run(const char *host, int port, const char *launch_params) { (void)host; (void)port; (void)launch_params; return 0; }
-int plx_sentry_spool_external(const char *path) { (void)path; return 0; }
-void plx_crash_write_image_marker(int fd) { (void)fd; }
-void plx_crash_install(int event_fd, int crash_fd) { (void)event_fd; (void)crash_fd; }
-int plx_runtime_path(const char *name, char *out, size_t cap) {
+int butaca_sentry_spool_external(const char *path) { (void)path; return 0; }
+void butaca_crash_write_image_marker(int fd) { (void)fd; }
+void butaca_crash_install(int event_fd, int crash_fd) { (void)event_fd; (void)crash_fd; }
+int butaca_runtime_path(const char *name, char *out, size_t cap) {
     return snprintf(out, cap, "/tmp/%s", name) > 0;
 }
 
@@ -24,7 +24,7 @@ static void expect(int yes, const char *what) {
 }
 
 int main(void) {
-    char dir[] = "/tmp/plx-private-log-test.XXXXXX";
+    char dir[] = "/tmp/butaca-private-log-test.XXXXXX";
     expect(mkdtemp(dir) != NULL, "scratch directory");
     char victim[PATH_MAX], sink[PATH_MAX];
     snprintf(victim, sizeof victim, "%s/victim", dir);

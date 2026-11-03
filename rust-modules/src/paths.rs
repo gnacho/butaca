@@ -42,7 +42,7 @@ use std::sync::OnceLock;
 /// `main.c` used to name all three by ABSOLUTE LITERAL, and this constant was the whole guarantee
 /// on its own. It cannot be, now that the root varies per install ([`app_id`]): a second literal
 /// in C would be a second definition of a value that moves. So `main.c` calls
-/// [`plx_runtime_path`] instead — one resolver, asked from both languages — and this constant
+/// [`butaca_runtime_path`] instead — one resolver, asked from both languages — and this constant
 /// keeps the other half of the promise, that the resolver's answer cannot be steered from outside
 /// on a television.
 ///
@@ -185,7 +185,7 @@ pub(crate) fn in_app_dir(name: &str) -> PathBuf {
 /// own files; that is [`app_dir`].
 ///
 /// On the television `src/main.c` opens those same logs before any Rust runs, through
-/// [`plx_runtime_path`] — the same resolver, so the two languages cannot disagree — and
+/// [`butaca_runtime_path`] — the same resolver, so the two languages cannot disagree — and
 /// [`ENV_STEERABLE`] guarantees that answer is not steerable from outside.
 ///
 /// `/tmp` on the television for the app users install, always; `/tmp/<app id>` for a developer
@@ -321,7 +321,7 @@ fn resolve_runtime_dir(env: Option<std::ffi::OsString>, app_id: &str) -> PathBuf
 /// `name` must be a valid NUL-terminated C string; `out` must point to at least `cap` writable
 /// bytes. The result is NUL-terminated whenever this returns 1.
 #[no_mangle]
-pub unsafe extern "C" fn plx_runtime_path(
+pub unsafe extern "C" fn butaca_runtime_path(
     name: *const std::os::raw::c_char,
     out: *mut std::os::raw::c_char,
     cap: usize,
@@ -748,7 +748,7 @@ mod tests {
     }
 
     /// A television build must not be relocatable by the environment at all — `src/main.c` opens
-    /// the logs through [`super::plx_runtime_path`], i.e. through this very function, so an
+    /// the logs through [`super::butaca_runtime_path`], i.e. through this very function, so an
     /// environment that could move one half would move only that half's later reads. Compile-time
     /// half of the [`super::ENV_STEERABLE`] guarantee.
     #[test]

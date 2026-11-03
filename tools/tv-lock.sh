@@ -45,21 +45,21 @@ set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-REMOTE_LOCK="${PLX_TV_LOCK_PATH:-/tmp/plx-tv.lock}"
-STATE_DIR="${PLX_TV_LOCK_STATE:-$HOME/.butaca/tv-lock}"
+REMOTE_LOCK="${BUTACA_TV_LOCK_PATH:-/tmp/butaca-tv.lock}"
+STATE_DIR="${BUTACA_TV_LOCK_STATE:-$HOME/.butaca/tv-lock}"
 
 # Lease lengths, in minutes. An EXPLICIT acquire is a session and gets the long one; the implicit
 # lease `require` takes when nobody holds the set is short on purpose, because nothing will ever
 # come back to release it — it exists so a lone `make deploy` still cannot collide, not so a
 # forgotten one can hold the television for an hour.
-TTL_MIN="${PLX_TV_LOCK_TTL:-45}"
+TTL_MIN="${BUTACA_TV_LOCK_TTL:-45}"
 AUTO_TTL_MIN=10
 
 # ---------------------------------------------------------------- identity ---
 # The LANE, not the process: a lease belongs to a checkout (this worktree), so every Bash call,
 # every `make`, every nested tool in that lane inherits it, and a second worktree on the same Mac
 # is a different lane — which is precisely the fleet case that collides today.
-LANE="${PLX_TV_LOCK_LANE:-$REPO}"
+LANE="${BUTACA_TV_LOCK_LANE:-$REPO}"
 lane_slug() {
   local h; h=$(printf '%s' "$LANE" | shasum 2>/dev/null | cut -c1-12)
   [ -n "$h" ] || h=$(printf '%s' "$LANE" | cksum | tr -d ' ' | cut -c1-12)
@@ -138,7 +138,7 @@ why=$(sane "${WHY:-}")
 pid=$$"
 
   local script
-  script="$(cat <<PLX_HDR
+  script="$(cat <<BUTACA_HDR
 set -u
 L='$REMOTE_LOCK'
 O="\$L/owner"
@@ -146,16 +146,16 @@ NOW=$(now)
 TOK='$TOKEN'
 MODE='$mode'
 FORCE='$force'
-OWNER=\$(cat <<'PLX_OWNER'
+OWNER=\$(cat <<'BUTACA_OWNER'
 $owner
-PLX_OWNER
+BUTACA_OWNER
 )
-PLX_HDR
+BUTACA_HDR
 )"
   script="$script
 $REMOTE_BODY"
 
-  if [ -n "${PLX_TV_LOCK_LOCAL:-}" ]; then printf '%s\n' "$script" | sh
+  if [ -n "${BUTACA_TV_LOCK_LOCAL:-}" ]; then printf '%s\n' "$script" | sh
   else printf '%s\n' "$script" | ssh_tv 'sh -s'; fi
 }
 
@@ -269,7 +269,7 @@ lease_load() {
   FILE_TOKEN="$TOKEN"
   # An inherited token beats the file: inside `with`, or inside anything it spawned, the lease is
   # the parent's and may not have been written for this lane at all.
-  [ -n "${PLX_TV_LOCK_TOKEN:-}" ] && TOKEN="$PLX_TV_LOCK_TOKEN"
+  [ -n "${BUTACA_TV_LOCK_TOKEN:-}" ] && TOKEN="$BUTACA_TV_LOCK_TOKEN"
   [ -n "$TOKEN" ]
 }
 new_token() {
@@ -483,8 +483,8 @@ cmd_break() {
 # command still cannot collide with a fleet job, without anybody having typed anything.
 cmd_require() {
   parse_opts "$@"
-  if [ "${PLX_TV_LOCK_BYPASS:-0}" = 1 ]; then
-    warn "PLX_TV_LOCK_BYPASS=1 — TV lock NOT checked (you are on your own for collisions)"; exit 0
+  if [ "${BUTACA_TV_LOCK_BYPASS:-0}" = 1 ]; then
+    warn "BUTACA_TV_LOCK_BYPASS=1 — TV lock NOT checked (you are on your own for collisions)"; exit 0
   fi
   [ -n "$HOST" ] || exit 0            # no TV configured: the caller will fail on its own terms
 
@@ -554,7 +554,7 @@ cmd_with() {
   # Inheriting rather than nesting. A `with` inside a lane that ALREADY holds the set must not
   # release it on the way out — the outer session would silently lose the television mid-task.
   local inherited=0
-  if [ "${PLX_TV_LOCK_INHERITED:-0}" = 1 ]; then inherited=1
+  if [ "${BUTACA_TV_LOCK_INHERITED:-0}" = 1 ]; then inherited=1
   elif lease_load; then
     RESP="$(remote_op status 0 0)"; parse_resp
     [ "$(fld token "$OWNER_BLK")" = "$TOKEN" ] && inherited=1
@@ -574,7 +574,7 @@ cmd_with() {
   fi
   trap 'rc=$?; [ '"$renewer"' -gt 0 ] && kill '"$renewer"' 2>/dev/null; [ '"$inherited"' = 0 ] && "$0" release >/dev/null; exit $rc' EXIT INT TERM HUP
 
-  PLX_TV_LOCK_TOKEN="$TOKEN" PLX_TV_LOCK_INHERITED=1 "$@"
+  BUTACA_TV_LOCK_TOKEN="$TOKEN" BUTACA_TV_LOCK_INHERITED=1 "$@"
 }
 
 cmd_selftest() {
@@ -583,8 +583,8 @@ cmd_selftest() {
   # the decisions: who wins a contended acquire, that a live lease is not stealable, that an
   # expired one is, that release is owner-scoped, that re-acquiring is a renew.
   local d; d="$(mktemp -d)"; trap "rm -rf '$d'" EXIT
-  export PLX_TV_LOCK_LOCAL="$d"
-  REMOTE_LOCK="$d/plx-tv.lock"
+  export BUTACA_TV_LOCK_LOCAL="$d"
+  REMOTE_LOCK="$d/butaca-tv.lock"
   local fails=0
   t() {  # t <name> <expected act> ; RESP already set
     parse_resp

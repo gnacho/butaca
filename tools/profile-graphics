@@ -51,7 +51,7 @@ def ssh(tv: str, command: str, *, check: bool = True) -> subprocess.CompletedPro
 
 
 def lock_reexec(argv: list[str]) -> None:
-    if os.environ.get("PLX_TV_LOCK_INHERITED") == "1":
+    if os.environ.get("BUTACA_TV_LOCK_INHERITED") == "1":
         return
     os.execv(str(LOCK), [str(LOCK), "with", "--why", "passive graphics observation", "--",
                              sys.executable, str(Path(__file__).resolve()), *argv])

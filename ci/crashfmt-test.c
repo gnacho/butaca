@@ -13,7 +13,7 @@
  * wrong function rather than failing. Its twin is recorded in that script, on the app id, because
  * `com.butaca` is a PREFIX of `com.butaca.debug`.
  *
- * **Written by watching it fail.** `plx_names_our_binary` was reverted to the bare substring test
+ * **Written by watching it fail.** `butaca_names_our_binary` was reverted to the bare substring test
  * before this file was trusted, and exactly one assertion below went red — `butaca-sim`. That
  * result is itself the finding: it disproved the justification `src/main.c` had carried since the
  * tracer was written (that a substring test would also match `libturbojpeg.so.0` beside the
@@ -48,25 +48,25 @@ static void eq_int(const char *what, long got, long want) {
     failures++;
 }
 
-/* Format one value through the real `plx_s_hex` and return it as a C string. */
+/* Format one value through the real `butaca_s_hex` and return it as a C string. */
 static const char *hex(unsigned long v) {
     static char out[64];
-    struct plx_sbuf b = { out, 0, sizeof out - 1 };
-    plx_s_hex(&b, v);
+    struct butaca_sbuf b = { out, 0, sizeof out - 1 };
+    butaca_s_hex(&b, v);
     out[b.n] = 0;
     return out;
 }
 
 static const char *dec(unsigned long v) {
     static char out[64];
-    struct plx_sbuf b = { out, 0, sizeof out - 1 };
-    plx_s_dec(&b, v);
+    struct butaca_sbuf b = { out, 0, sizeof out - 1 };
+    butaca_s_dec(&b, v);
     out[b.n] = 0;
     return out;
 }
 
 static int kind(const char *line, unsigned long pc, unsigned long lr) {
-    return plx_map_line_kind(line, strlen(line), pc, lr);
+    return butaca_map_line_kind(line, strlen(line), pc, lr);
 }
 
 int main(void) {
@@ -87,7 +87,7 @@ int main(void) {
      * substring. The leading newline separates one crash from the last in the append-only log. */
     {
         char out[256];
-        size_t n = plx_fmt_signal(out, sizeof out - 1, 11, "SIGSEGV", 0, 0xb6f2a1c4UL, 0xb6f2a0e8UL);
+        size_t n = butaca_fmt_signal(out, sizeof out - 1, 11, "SIGSEGV", 0, 0xb6f2a1c4UL, 0xb6f2a0e8UL);
         out[n] = 0;
         eq_str("signal line",
                out,
@@ -99,7 +99,7 @@ int main(void) {
     {
         char out[32];
         memset(out, '#', sizeof out);
-        size_t n = plx_fmt_signal(out, 16, 11, "SIGSEGV", 0, 0xb6f2a1c4UL, 0xb6f2a0e8UL);
+        size_t n = butaca_fmt_signal(out, 16, 11, "SIGSEGV", 0, 0xb6f2a1c4UL, 0xb6f2a0e8UL);
         eq_int("truncated length", (long)n, 16);
         eq_int("nothing written past cap", out[16], '#');
     }
@@ -122,8 +122,8 @@ int main(void) {
     static const char LGLIB[] =
         "b5000000-b5240000 r-xp 00000000 b3:02 999 /usr/lib/libplayerAPIs.so\n";
 
-    eq_int("our binary, containing the pc", kind(BIN, 0x00020000UL, 0), PLX_MAP_AT | PLX_MAP_BIN);
-    eq_int("our binary, not containing it", kind(BIN, 0xb5100000UL, 0), PLX_MAP_BIN);
+    eq_int("our binary, containing the pc", kind(BIN, 0x00020000UL, 0), BUTACA_MAP_AT | BUTACA_MAP_BIN);
+    eq_int("our binary, not containing it", kind(BIN, 0xb5100000UL, 0), BUTACA_MAP_BIN);
     eq_int("a library beside the binary is NOT the binary", kind(JPEG, 0x00020000UL, 0), 0);
     /* THE case the separator actually buys, and the only assertion that went red when the token
      * test was reverted to a substring one. `butaca-sim` is the host simulator and
@@ -133,8 +133,8 @@ int main(void) {
     eq_int("butaca.new is a different name",
            kind("00010000-00020000 r-xp 0 0:0 1 /media/developer/apps/usr/palm/applications/"
                 "com.butaca/butaca.new\n", 0, 0), 0);
-    eq_int("a library beside it, containing the pc", kind(JPEG, 0xb6a10000UL, 0), PLX_MAP_AT);
-    eq_int("a TV library containing the pc", kind(LGLIB, 0xb5100000UL, 0), PLX_MAP_AT);
+    eq_int("a library beside it, containing the pc", kind(JPEG, 0xb6a10000UL, 0), BUTACA_MAP_AT);
+    eq_int("a TV library containing the pc", kind(LGLIB, 0xb5100000UL, 0), BUTACA_MAP_AT);
 
     /* The `(deleted)` form, and the other half of what the separator buys. `make deploy` writes
      * `butaca.new` and renames it over the running binary (the ETXTBSY dance), so the kernel
@@ -144,7 +144,7 @@ int main(void) {
     static const char DELETED[] =
         "00010000-0097f000 r-xp 00000000 b3:35 12345 "
         "/media/developer/apps/usr/palm/applications/com.butaca/butaca (deleted)\n";
-    eq_int("the (deleted) form is still our binary", kind(DELETED, 0, 0), PLX_MAP_BIN);
+    eq_int("the (deleted) form is still our binary", kind(DELETED, 0, 0), BUTACA_MAP_BIN);
 
     /* And the flavoured install, whose directory name has `.debug` after the token — the prefix
      * trap from the other side. Still our binary: both installs' executables are named
@@ -153,15 +153,15 @@ int main(void) {
     static const char DEBUG_BIN[] =
         "00010000-0097f000 r-xp 00000000 b3:35 12347 "
         "/media/developer/apps/usr/palm/applications/com.butaca.debug/butaca\n";
-    eq_int("the debug install's binary is also a bin: line", kind(DEBUG_BIN, 0, 0), PLX_MAP_BIN);
+    eq_int("the debug install's binary is also a bin: line", kind(DEBUG_BIN, 0, 0), BUTACA_MAP_BIN);
 
     /* The LR is checked as well as the PC: on a jump through a bad function pointer the PC is
      * garbage and the link register is the only thing naming a real module. */
-    eq_int("matched by the lr alone", kind(LGLIB, 0xffffffffUL, 0xb5100000UL), PLX_MAP_AT);
+    eq_int("matched by the lr alone", kind(LGLIB, 0xffffffffUL, 0xb5100000UL), BUTACA_MAP_AT);
 
     /* Half-open, at both ends. `hi` is the first address NOT in the mapping; a closed test would
      * attribute a fault to the library below the one that owns it. */
-    eq_int("lo is inside", kind(LGLIB, 0xb5000000UL, 0), PLX_MAP_AT);
+    eq_int("lo is inside", kind(LGLIB, 0xb5000000UL, 0), BUTACA_MAP_AT);
     eq_int("hi is outside", kind(LGLIB, 0xb5240000UL, 0), 0);
 
     /* A line with no range says nothing — rather than parsing to a zero-length range at zero that

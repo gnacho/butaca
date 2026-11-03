@@ -8,7 +8,7 @@ index 93293ce8..60599d79 100644
  }
 +
 +#[cfg(test)]
-+mod plx_fixture_gen {
++mod butaca_fixture_gen {
 +    const ERR_ID: &str = "0123456789abcdef0123456789abcdef";
 +    const SESSION: &str = r#"{"client_id":"synthetic-client-id","account_token":"synthetic-account-token",
 +        "server":{"name":"Server A","machine_id":"aaaa1111","address":"192.0.2.10","port":32400,"token":"synthetic-server-token"},
@@ -23,7 +23,7 @@ index 93293ce8..60599d79 100644
 +
 +    #[test]
 +    fn emit() {
-+        let Ok(out) = std::env::var("PLX_FIXTURE_OUT") else { return };
++        let Ok(out) = std::env::var("BUTACA_FIXTURE_OUT") else { return };
 +        let out = std::path::PathBuf::from(out);
 +        let _g = crate::testlock::serial();
 +        for (name, errors) in [("v0.6.0-errors-yes.consent.json", true), ("v0.6.0-no.consent.json", false)] {
@@ -54,10 +54,10 @@ index 136e975e..2ee53526 100644
  }
 +
 +#[cfg(test)]
-+mod plx_fixture_gen {
++mod butaca_fixture_gen {
 +    #[test]
 +    fn emit() {
-+        let Ok(out) = std::env::var("PLX_FIXTURE_OUT") else { return };
++        let Ok(out) = std::env::var("BUTACA_FIXTURE_OUT") else { return };
 +        let out = std::path::PathBuf::from(out);
 +        let _g = crate::testlock::serial();
 +        // A 0.6.0 errors-yes file upgraded in place by 0.6.5, which then declines the extension.
@@ -109,7 +109,7 @@ index 4b58cea6..1282bdc7 100644
 +pub(crate) mod keymanager;
 +
 +#[cfg(test)]
-+mod plx_fixture_gen {
++mod butaca_fixture_gen {
 +    use super::state::{self, CanonicalState, Expected, Generation};
 +    use super::wire::{self, *};
 +    use serde_json::Value;
@@ -143,7 +143,7 @@ index 4b58cea6..1282bdc7 100644
 +                    self.puts += 1;
 +                    next["_rev"] = serde_json::json!(self.puts);
 +                    self.record = Some(next);
-+                    Ok(serde_json::json!({"returnValue":true,"results":[{"id":"plxstate.stable","rev":self.puts}]}))
++                    Ok(serde_json::json!({"returnValue":true,"results":[{"id":"btcstate.stable","rev":self.puts}]}))
 +                }
 +                other => panic!("unexpected rpc {other}"),
 +            }
@@ -181,7 +181,7 @@ index 4b58cea6..1282bdc7 100644
 +
 +    #[test]
 +    fn emit() {
-+        let Ok(out) = std::env::var("PLX_FIXTURE_OUT") else { return };
++        let Ok(out) = std::env::var("BUTACA_FIXTURE_OUT") else { return };
 +        let out = std::path::PathBuf::from(out);
 +        let mut backend = crate::storage::backend::Backend::new(Db8::default(), state::Flavor::Stable, "com.butaca.storage".into());
 +        let session: crate::plex::session::Session =
@@ -228,10 +228,10 @@ index 18d60948..f6abf7ab 100644
  }
 +
 +#[cfg(test)]
-+mod plx_fixture_gen {
++mod butaca_fixture_gen {
 +    #[test]
 +    fn emit() {
-+        let Ok(out) = std::env::var("PLX_FIXTURE_OUT") else { return };
++        let Ok(out) = std::env::var("BUTACA_FIXTURE_OUT") else { return };
 +        let out = std::path::PathBuf::from(out);
 +        let _g = crate::testlock::serial();
 +        let dir = out.join("v0.6.6-upgraded");

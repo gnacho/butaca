@@ -82,7 +82,7 @@
 #
 # THIS IS THE SANCTIONED PATH for muting the television. Before it existed, the only ways to
 # silence a run were the physical remote or a raw `luna-send` reached through
-# `PLX_TV_LOCK_BYPASS=1` around the lock guard — neither belongs in an automated lane, and the
+# `BUTACA_TV_LOCK_BYPASS=1` around the lock guard — neither belongs in an automated lane, and the
 # bypass in particular is meant for a human who knows the set is theirs, not for routine muting. No
 # lane needs it for this: `tv-session.sh sound off` is the tool.
 #
@@ -1241,8 +1241,8 @@ cmd_sound() {
 # real router does with its uplink down (that is usually silence), and the jail's resolver view
 # is the app's business — read `net: curl rc=6` / `nowan` lines in the app's OWN log, never this
 # script's status, to say what the app saw.
-WAN_MARK=/tmp/plx-wan-off
-WAN_RESTORE=/tmp/plx-wan-restore.sh
+WAN_MARK=/tmp/butaca-wan-off
+WAN_RESTORE=/tmp/butaca-wan-restore.sh
 cmd_wan() {
   local want="${1:-}" ttl="${2:-900}"
   case "$want" in off|on|status) ;; *) echo "usage: tv-session.sh wan off [TTL_SECONDS]|on|status" >&2; exit 2 ;; esac
@@ -1255,32 +1255,32 @@ cmd_wan() {
       tv "cat > $WAN_RESTORE" <<'RESTORE'
 #!/bin/sh
 # written by tools/tv-session.sh wan off — puts the television's uplink back
-while iptables -D OUTPUT -j PLXWAN 2>/dev/null; do :; done
-iptables -F PLXWAN 2>/dev/null; iptables -X PLXWAN 2>/dev/null
+while iptables -D OUTPUT -j BUTACAWAN 2>/dev/null; do :; done
+iptables -F BUTACAWAN 2>/dev/null; iptables -X BUTACAWAN 2>/dev/null
 while ip -6 route del unreachable 2000::/3 2>/dev/null; do :; done
-[ -f /tmp/plx-wan-off.wd ] && kill "$(cat /tmp/plx-wan-off.wd)" 2>/dev/null
-rm -f /tmp/plx-wan-off /tmp/plx-wan-off.wd
+[ -f /tmp/butaca-wan-off.wd ] && kill "$(cat /tmp/butaca-wan-off.wd)" 2>/dev/null
+rm -f /tmp/butaca-wan-off /tmp/butaca-wan-off.wd
 RESTORE
       if ! tv "sh -s $ttl" <<'CUT'
 set -e
 ttl="$1"
-sh /tmp/plx-wan-restore.sh >/dev/null 2>&1 || true   # idempotent: start from a clean chain
+sh /tmp/butaca-wan-restore.sh >/dev/null 2>&1 || true   # idempotent: start from a clean chain
 lan4=$(ip -4 route show dev eth0 scope link | awk '/\// {print $1; exit}')
-iptables -N PLXWAN
-iptables -A PLXWAN -p udp --dport 53 -j REJECT
-iptables -A PLXWAN -p tcp --dport 53 -j REJECT
-iptables -A PLXWAN -d 127.0.0.0/8 -j ACCEPT
-[ -n "$lan4" ] && iptables -A PLXWAN -d "$lan4" -j ACCEPT
-iptables -A PLXWAN -d 224.0.0.0/4 -j ACCEPT
-iptables -A PLXWAN -j REJECT --reject-with icmp-net-unreachable
+iptables -N BUTACAWAN
+iptables -A BUTACAWAN -p udp --dport 53 -j REJECT
+iptables -A BUTACAWAN -p tcp --dport 53 -j REJECT
+iptables -A BUTACAWAN -d 127.0.0.0/8 -j ACCEPT
+[ -n "$lan4" ] && iptables -A BUTACAWAN -d "$lan4" -j ACCEPT
+iptables -A BUTACAWAN -d 224.0.0.0/4 -j ACCEPT
+iptables -A BUTACAWAN -j REJECT --reject-with icmp-net-unreachable
 # The watchdog BEFORE the hook: if anything after this line fails, the set still comes back.
-date +%s > /tmp/plx-wan-off
-nohup sh -c "sleep $ttl; sh /tmp/plx-wan-restore.sh" >/dev/null 2>&1 &
-echo $! > /tmp/plx-wan-off.wd
-iptables -I OUTPUT -j PLXWAN
+date +%s > /tmp/butaca-wan-off
+nohup sh -c "sleep $ttl; sh /tmp/butaca-wan-restore.sh" >/dev/null 2>&1 &
+echo $! > /tmp/butaca-wan-off.wd
+iptables -I OUTPUT -j BUTACAWAN
 ip -6 route add unreachable 2000::/3
 # …and prove it took, from the set's own tables, or fail this command.
-[ "$(iptables -S OUTPUT | grep -c PLXWAN)" = 1 ] || { echo "v4 chain not hooked" >&2; exit 3; }
+[ "$(iptables -S OUTPUT | grep -c BUTACAWAN)" = 1 ] || { echo "v4 chain not hooked" >&2; exit 3; }
 ip -6 route show | grep -q '^unreachable 2000::/3' || { echo "v6 route not added" >&2; exit 3; }
 echo "lan4=$lan4 ttl=$ttl"
 CUT
@@ -1293,13 +1293,13 @@ CUT
       cmd_wan status
       ;;
     on)
-      tv "[ -f $WAN_RESTORE ] && sh $WAN_RESTORE; while iptables -D OUTPUT -j PLXWAN 2>/dev/null; do :; done; iptables -F PLXWAN 2>/dev/null; iptables -X PLXWAN 2>/dev/null; while ip -6 route del unreachable 2000::/3 2>/dev/null; do :; done; rm -f $WAN_MARK $WAN_MARK.wd; true"
+      tv "[ -f $WAN_RESTORE ] && sh $WAN_RESTORE; while iptables -D OUTPUT -j BUTACAWAN 2>/dev/null; do :; done; iptables -F BUTACAWAN 2>/dev/null; iptables -X BUTACAWAN 2>/dev/null; while ip -6 route del unreachable 2000::/3 2>/dev/null; do :; done; rm -f $WAN_MARK $WAN_MARK.wd; true"
       ok "WAN restored"
       cmd_wan status
       ;;
     status)
       local chain since pms
-      chain=$(tvq "iptables -S OUTPUT 2>/dev/null | grep -c PLXWAN; ip -6 route show 2>/dev/null | grep -c '^unreachable 2000::/3'" | tr '\n' '/')
+      chain=$(tvq "iptables -S OUTPUT 2>/dev/null | grep -c BUTACAWAN; ip -6 route show 2>/dev/null | grep -c '^unreachable 2000::/3'" | tr '\n' '/')
       since=$(tvq "cat $WAN_MARK 2>/dev/null")
       if [ -n "$since" ]; then
         info "WAN: CUT since epoch $since (v4 chain / v6 unreachable route armed: ${chain%/}); watchdog pid $(tvq "cat $WAN_MARK.wd 2>/dev/null")"

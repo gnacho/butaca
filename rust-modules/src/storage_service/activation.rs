@@ -124,7 +124,7 @@ mod tests {
     use std::os::unix::fs::{symlink, PermissionsExt};
 
     fn root(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("plx-activation-{name}-{}", std::process::id()))
+        std::env::temp_dir().join(format!("butaca-activation-{name}-{}", std::process::id()))
     }
 
     #[test]

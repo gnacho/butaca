@@ -88,7 +88,7 @@
       // rather than left blank or half-animated.
       document.documentElement.classList.add("reveal", "fx");
       setTimeout(function () {
-        if (!window.plxReveal) document.documentElement.classList.remove("reveal", "fx");
+        if (!window.butacaReveal) document.documentElement.classList.remove("reveal", "fx");
       }, 2500);
 
       // Will this browser start a muted inline video without a tap? iOS in Low Power Mode, or a
@@ -98,7 +98,7 @@
       // Only a refusal counts; a browser that cannot say (no play() promise, no H.264, no answer
       // in time) is treated as one that plays. The probe is one black 16x16 H.264 frame (ffmpeg,
       // libx264 baseline, SEI and edit list stripped), 776 bytes.
-      window.plxAutoplay = new Promise(function (resolve) {
+      window.butacaAutoplay = new Promise(function (resolve) {
         var settled = false;
         var answer = function (plays) {
           if (settled) return;

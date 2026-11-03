@@ -859,7 +859,7 @@ impl Recplay {
         let mut header = Header::new(state_fp(), initial);
         header.init_data = serde_json::to_value(initial).map_err(|_| "cannot encode initial state")?;
         header.clock_start_ms = initial.clock_start;
-        header.build = env!("PLX_VERSION").into();
+        header.build = env!("BUTACA_VERSION").into();
         header.features = features();
         header.triggers = initial.triggers.clone();
         let w = Writer::open(sink, &header, 0).map_err(|_| "cannot open recording")?;

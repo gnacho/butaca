@@ -43,7 +43,7 @@ int main(void) {
 }
 '''
 
-with tempfile.TemporaryDirectory(prefix="plx-ass-composite-") as directory:
+with tempfile.TemporaryDirectory(prefix="butaca-ass-composite-") as directory:
     source = Path(directory) / "test.c"
     binary = Path(directory) / "test"
     source.write_text(SOURCE)

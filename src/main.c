@@ -22,16 +22,16 @@ FILE *elogf = NULL;   /* shared event/diagnostic log (extern in app.h); used by 
                        * crash handler here and by the starfish.c seam. Opened "w" each
                        * launch, so it is TRUNCATED on relaunch — do not rely on it to
                        * survive a crash+relaunch (that is what the crash log and `crash_fd` are for). */
-/* The crash log has no `FILE *` any more, only a raw descriptor handed to `plx_crash_install`: its
+/* The crash log has no `FILE *` any more, only a raw descriptor handed to `butaca_crash_install`: its
  * ONLY writer is the signal handler, and stdio is not usable there. See `src/crashtrace.c`. */
 
 extern int plex_run(const char *pms_host, int pms_port, const char *launch_params);  /* Rust app core (no creds — session or /tmp/butaca-token; argv[1] launch-params JSON or NULL) */
-extern void plx_crash_write_image_marker(int fd); /* identify this binary in the append-only log (crashtrace.c) */
+extern void butaca_crash_write_image_marker(int fd); /* identify this binary in the append-only log (crashtrace.c) */
 
 /* Where this INSTALL's runtime files live — `/tmp/butaca-events.log` for the app users get,
  * `/tmp/com.butaca.debug/butaca-events.log` for a developer build installed beside it.
  *
- * The answer comes from Rust (`plx_runtime_path`, rust-modules/src/paths.rs) rather than from a
+ * The answer comes from Rust (`butaca_runtime_path`, rust-modules/src/paths.rs) rather than from a
  * literal here, and that is the whole point: this file opens three logs before a single line of
  * Rust runs, and `crate::log` and the panic hook then append to two of them. Two definitions of
  * "where" — one in C, one in Rust — is the split-brain paths.rs documents at length: main.c would
@@ -45,14 +45,14 @@ extern void plx_crash_write_image_marker(int fd); /* identify this binary in the
  *
  * Two static buffers are alternated per call. No current call site holds two results at once, so
  * this is cheap insurance for a future one rather than a live hazard. */
-extern int plx_runtime_path(const char *name, char *out, size_t cap);
+extern int butaca_runtime_path(const char *name, char *out, size_t cap);
 
 static const char *runtime_path(const char *name) {
     static char buf[2][256];
     static int slot = 0;
     char *b = buf[slot];
     slot ^= 1;
-    if (plx_runtime_path(name, b, sizeof buf[0])) return b;
+    if (butaca_runtime_path(name, b, sizeof buf[0])) return b;
     snprintf(b, sizeof buf[0], "/tmp/%s", name);
     return b;
 }
@@ -125,7 +125,7 @@ int main(int argc, char **argv) {
     int crash_fd = open_fd_0600(runtime_path("butaca-crash.log"), O_APPEND); /* append: keep prior crashes across relaunches */
     /* Written while allocation and ELF parsing are safe. The signal path then needs only numbers,
      * while the next launch can still pair a record with THIS executable after a deploy. */
-    plx_crash_write_image_marker(crash_fd);
+    butaca_crash_write_image_marker(crash_fd);
     /* stderr is redirected from the SAME verified descriptor. Re-opening by path with `freopen`
      * would reintroduce the symlink race that `open_fd_0600` just closed. */
     int stderr_fd = open_fd_0600(runtime_path("butaca-stderr.log"), O_TRUNC | O_APPEND);
@@ -134,7 +134,7 @@ int main(int argc, char **argv) {
             fcntl(STDERR_FILENO, F_SETFD, FD_CLOEXEC);
         if (stderr_fd != STDERR_FILENO) close(stderr_fd);
     }
-    plx_crash_install(event_fd, crash_fd);
+    butaca_crash_install(event_fd, crash_fd);
     /* request BACK key delivery from the webOS access policy (before SDL init) */
     setenv("SDL_WEBOS_ACCESS_POLICY_KEYS_BACK", "true", 1);
     /* webOS hands a native app its launch params as a JSON string in argv[1]

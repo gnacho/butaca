@@ -501,7 +501,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._refuse(401, "unauthorised")
         # The secret is sufficient cryptographic authentication; the short id separately makes a
         # stale package failure diagnosable instead of accepting it into the wrong named session.
-        got_session = self.headers.get("X-Plx-Session", "")
+        got_session = self.headers.get("X-Butaca-Session", "")
         if not hmac.compare_digest(got_session, self.server.session):
             return self._refuse(409, "stale session")
 
@@ -829,7 +829,7 @@ def _local_control(st: dict, path: str, payload: dict, timeout: float = 5.0):
     body = json.dumps(payload, separators=(",", ":")).encode()
     headers = {
         "Authorization": "Bearer " + st["secret"],
-        "X-Plx-Session": st["session"],
+        "X-Butaca-Session": st["session"],
         "Content-Type": "application/json",
         "Content-Length": str(len(body)),
     }
@@ -1105,7 +1105,7 @@ def selftest(_args) -> int:
         gz = gzip.compress(doc)
         good = {"Authorization": "Bearer " + secret, "Content-Type": "application/x-ndjson",
                 "Content-Encoding": "gzip", "Content-Length": str(len(gz)),
-                "X-Plx-Session": "selftest"}
+                "X-Butaca-Session": "selftest"}
 
         st, body = post(gz, good)
         check("a valid gzip upload is accepted", st == 200 and json.loads(body)["ok"], str(st))
@@ -1121,7 +1121,7 @@ def selftest(_args) -> int:
         check("an oversized declared body is refused", st == 413, str(st))
 
         st, _ = post(b"", {"Authorization": "Bearer " + secret, "Content-Length": "0",
-                           "X-Plx-Session": "selftest"})
+                           "X-Butaca-Session": "selftest"})
         check("an empty body is refused", st == 413, str(st))
 
         st, _ = post(gz, good, path="/anything-else")
@@ -1138,7 +1138,7 @@ def selftest(_args) -> int:
         check("only the accepted uploads were stored", len(_uploads()) == 2, str(len(_uploads())))
 
         control_headers = {"Authorization": "Bearer " + secret,
-                           "X-Plx-Session": "selftest", "Content-Type": "application/json"}
+                           "X-Butaca-Session": "selftest", "Content-Type": "application/json"}
 
         def control(payload: dict, path: str):
             raw = json.dumps(payload).encode()
@@ -1189,7 +1189,7 @@ def selftest(_args) -> int:
         st, _ = control({"tokens": ["shell:rm"], "wait_ms": 0}, "/v1/control/enqueue")
         check("tokens outside the app-input grammar are refused", st == 400, str(st))
 
-        stale = dict(control_headers, **{"X-Plx-Session": "old"})
+        stale = dict(control_headers, **{"X-Butaca-Session": "old"})
         raw = b"{}"
         st, _ = post(raw, dict(stale, **{"Content-Length": str(len(raw))}),
                      path="/v1/control/poll")

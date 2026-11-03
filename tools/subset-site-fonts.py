@@ -48,7 +48,7 @@ except ImportError:
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # (weight, source TTF, output WOFF2 basename) — the two faces @font-face in site/styles.css
-# declares for the "PlxAppFont" family.
+# declares for the "ButacaAppFont" family.
 FACES = [
     (400, REPO_ROOT / "pkg" / "appfont.ttf", "appfont.woff2"),
     (700, REPO_ROOT / "pkg" / "appfont-bold.ttf", "appfont-bold.woff2"),
@@ -253,7 +253,7 @@ def do_check(site_dir: Path, fonts_dir: Path, extra: set[int]) -> int:
     text = collect_site_text(site_dir)
     missing = missing_codepoints(text, covered or set())
     if missing:
-        print("PlxAppFont is missing glyphs the staged site actually renders:", file=sys.stderr)
+        print("ButacaAppFont is missing glyphs the staged site actually renders:", file=sys.stderr)
         for cp in missing:
             name = unicodedata.name(chr(cp), "<unnamed>")
             print(f"  U+{cp:04X} {chr(cp)!r} ({name})", file=sys.stderr)
@@ -263,7 +263,7 @@ def do_check(site_dir: Path, fonts_dir: Path, extra: set[int]) -> int:
             file=sys.stderr,
         )
         return 1
-    print(f"PlxAppFont covers every character in {site_dir} (checked {len(text):,} characters).")
+    print(f"ButacaAppFont covers every character in {site_dir} (checked {len(text):,} characters).")
     return 0
 
 
@@ -281,7 +281,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "subset":
-        print("Subsetting PlxAppFont for the site:")
+        print("Subsetting ButacaAppFont for the site:")
         return do_subset(args.out_dir, EXTRA_CODEPOINTS)
     if args.command == "check":
         fonts_dir = args.fonts_dir or (args.site_dir / "fonts")

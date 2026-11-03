@@ -136,37 +136,37 @@ foreach ($directoryOverride in @(
 $repoWindows = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $repoLinux = ConvertTo-WslPath $repoWindows
 $commonEnvironment = @{
-    PLX_REPO = $repoLinux
-    PLX_PMS = $PmsHost
-    PLX_PORT = $(if ($PSBoundParameters.ContainsKey("PmsPort")) {
+    BUTACA_REPO = $repoLinux
+    BUTACA_PMS = $PmsHost
+    BUTACA_PORT = $(if ($PSBoundParameters.ContainsKey("PmsPort")) {
         $PmsPort.ToString([System.Globalization.CultureInfo]::InvariantCulture)
     } else { "" })
-    PLX_RUNTIME = $RuntimeDir
-    PLX_TARGET = $TargetDir
-    PLX_ASSETS = $AssetDir
-    PLX_STAGE_TOKEN = $(if ($StageToken) { "1" } else { "" })
+    BUTACA_RUNTIME = $RuntimeDir
+    BUTACA_TARGET = $TargetDir
+    BUTACA_ASSETS = $AssetDir
+    BUTACA_STAGE_TOKEN = $(if ($StageToken) { "1" } else { "" })
 }
 
 $prepare = @'
 set -euo pipefail
 . "$HOME/.cargo/env"
-repo="$PLX_REPO"
-runtime="${PLX_RUNTIME:-$HOME/.local/state/butaca-sim}"
-target="${PLX_TARGET:-$HOME/.cache/butaca-sim/target}"
-assets="${PLX_ASSETS:-$HOME/.local/share/butaca-sim/assets}"
+repo="$BUTACA_REPO"
+runtime="${BUTACA_RUNTIME:-$HOME/.local/state/butaca-sim}"
+target="${BUTACA_TARGET:-$HOME/.cache/butaca-sim/target}"
+assets="${BUTACA_ASSETS:-$HOME/.local/share/butaca-sim/assets}"
 mkdir -p "$runtime" "$target" "$assets"
 # All launch paths use the same build-and-stage operation. The ASS library is
 # produced by make, and the process loads it from BUTACA_APP_DIR, not pkg/.
 build_simulator() {
     cd "$repo"
     make sim-wsl SIM_TDIR="$target"
-    for file in appfont.ttf appfont-bold.ttf appfont-cjk.ttf OFL.txt libass-plx-host.so.0; do
+    for file in appfont.ttf appfont-bold.ttf appfont-cjk.ttf OFL.txt libass-butaca-host.so.0; do
         staged="$assets/$file.$$.new"
         install -m 0644 "$repo/pkg/$file" "$staged"
         mv -f "$staged" "$assets/$file"
     done
 }
-if [ "${PLX_STAGE_TOKEN:-}" = 1 ]; then
+if [ "${BUTACA_STAGE_TOKEN:-}" = 1 ]; then
     token=""
     if [ -f "$repo/src/config.local.h" ]; then
         token=$(sed -n 's/^#define[[:space:]]*PMS_TOKEN[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/src/config.local.h" | head -n 1 || true)
@@ -181,11 +181,11 @@ if [ "${PLX_STAGE_TOKEN:-}" = 1 ]; then
 elif [ -s "$runtime/butaca-token" ]; then
     echo "Using the token already staged in the simulator runtime directory."
 fi
-pms="${PLX_PMS:-}"
+pms="${BUTACA_PMS:-}"
 if [ -z "$pms" ] && [ -f "$repo/src/config.local.h" ]; then
     pms=$(sed -n 's/^#define[[:space:]]*PMS_HOST[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/src/config.local.h" | head -n 1 || true)
 fi
-port="${PLX_PORT:-}"
+port="${BUTACA_PORT:-}"
 if [ -z "$port" ] && [ -f "$repo/src/config.local.h" ]; then
     port=$(sed -n 's/^#define[[:space:]]*PMS_PORT[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$repo/src/config.local.h" | head -n 1 || true)
 fi
@@ -198,8 +198,8 @@ export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-x11}"
 
 $instanceLocks = @'
 set -euo pipefail
-runtime="${PLX_RUNTIME:-$HOME/.local/state/butaca-sim}"
-target="${PLX_TARGET:-$HOME/.cache/butaca-sim/target}"
+runtime="${BUTACA_RUNTIME:-$HOME/.local/state/butaca-sim}"
+target="${BUTACA_TARGET:-$HOME/.cache/butaca-sim/target}"
 mkdir -p "$runtime" "$target"
 exec 9>"$runtime/butaca-sim.lock"
 if ! flock -n 9; then
@@ -258,10 +258,10 @@ exec "$target/release/butaca-sim" "$pms" "$port"
             $Output = Join-Path (Get-Location) "butaca-shot.png"
         }
         $outputAbsolute = Get-AbsoluteWindowsPath $Output
-        $commonEnvironment.PLX_OUTPUT = ConvertTo-WslPath $outputAbsolute
+        $commonEnvironment.BUTACA_OUTPUT = ConvertTo-WslPath $outputAbsolute
         Invoke-WslShell -Environment $commonEnvironment -Script ($instanceLocks + "`n" + $prepare + "`n" + @'
 build_simulator
-mkdir -p "$(dirname "$PLX_OUTPUT")"
+mkdir -p "$(dirname "$BUTACA_OUTPUT")"
 base="$runtime/windows-shot.png"
 captured="$runtime/windows-shot-1.png"
 rm -f "$base" "$captured"
@@ -304,8 +304,8 @@ kill "$pid" 2>/dev/null || true
 wait "$pid" 2>/dev/null || true
 rm -f "$runtime/butaca-sim.pid"
 trap - EXIT
-mv "$captured" "$PLX_OUTPUT"
-echo "Wrote $PLX_OUTPUT"
+mv "$captured" "$BUTACA_OUTPUT"
+echo "Wrote $BUTACA_OUTPUT"
 '@)
         Write-Host "Screenshot: $outputAbsolute"
     }
@@ -318,11 +318,11 @@ echo "Wrote $PLX_OUTPUT"
                 throw "Unsupported simulator token '$token'."
             }
         }
-        $commonEnvironment.PLX_TOKENS = $InputTokens -join " "
+        $commonEnvironment.BUTACA_TOKENS = $InputTokens -join " "
         Invoke-WslShell -Environment $commonEnvironment -Script @'
 set -euo pipefail
-runtime="${PLX_RUNTIME:-$HOME/.local/state/butaca-sim}"
-target="${PLX_TARGET:-$HOME/.cache/butaca-sim/target}"
+runtime="${BUTACA_RUNTIME:-$HOME/.local/state/butaca-sim}"
+target="${BUTACA_TARGET:-$HOME/.cache/butaca-sim/target}"
 fifo="$runtime/butaca-remote"
 pid=$(cat "$runtime/butaca-sim.pid" 2>/dev/null || true)
 actual=$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)
@@ -332,7 +332,7 @@ if [ ! -p "$fifo" ] || [ -z "$pid" ] || [ "$actual" != "$expected" ]; then
     exit 1
 fi
 exec 3<>"$fifo"
-for token in $PLX_TOKENS; do
+for token in $BUTACA_TOKENS; do
     printf '%s ' "$token" >&3
 done
 exec 3>&-

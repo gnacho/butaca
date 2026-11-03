@@ -74,7 +74,7 @@ the desktop simulator are valuable, but they cannot prove every device behavior.
   worktree): a second invocation waits and prints the holder's pid/worktree/start time every 60 s
   rather than compiling alongside it, because concurrent cold builds thrash one Mac far worse than
   queuing (measured 2026-09-28: a lone run ~10 min, seven at once made one take 60 min).
-  `PLX_CHECK_LOCK=off` bypasses the lock. Never launch it in the foreground with a short tool
+  `BUTACA_CHECK_LOCK=off` bypasses the lock. Never launch it in the foreground with a short tool
   timeout — a queued run can wait a long time before it even starts building.
 - `make` performs the ARM cross-build. Do not assume a host-only green result proves the target
   still builds.
@@ -84,7 +84,7 @@ the desktop simulator are valuable, but they cannot prove every device behavior.
   `CARGO_INCREMENTAL=0` prefix on this and on every other direct `cargo` call: they bypass `make`,
   so the Makefile's linked-worktree setting cannot reach them, and a one-shot gate has no use for
   a multi-gigabyte incremental cache. `tools/build-gc.sh` also installs
-  `.claude/worktrees/.cargo/config.toml` (`plx-build-gc-policy`) with `incremental = false`,
+  `.claude/worktrees/.cargo/config.toml` (`butaca-build-gc-policy`) with `incremental = false`,
   `[profile.dev] debug = "line-tables-only"` and `debug = false` for third-party packages as a
   backstop; the env var outranks that file and states the intent where a reader can see it.
 - **`make disk` before and after a fleet.** Build trees are per-checkout; the cargo
@@ -92,7 +92,7 @@ the desktop simulator are valuable, but they cannot prove every device behavior.
   `tools/build-gc.sh --incremental|--lanes|--stale|--all` deletes only rebuildable output. After tearing
   a fleet down, run `--worktrees` (removes finished lanes — clean, unlocked, already on `main` —
   which `git branch --merged` cannot see once they are squash-merged) and then `--orphans` (lane
-  target dirs live outside the repo under `$PLX_FLEET_DIR` and outlive their worktree).
+  target dirs live outside the repo under `$BUTACA_FLEET_DIR` and outlive their worktree).
   `docs/agent-reference.md` keeps the measurements behind this. None of this has to be run by
   hand any more: `tools/build-gc.sh --auto` stages the same reclaim on its own, gated by free
   space and (for `--lanes`) an idle guard, from a `SessionEnd` hook or a cron entry. `make disk`

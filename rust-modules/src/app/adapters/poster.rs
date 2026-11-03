@@ -1123,7 +1123,7 @@ fn idle_of(slots: &[Pslot; PT_CAP]) -> bool {
 /// The next queued slot a worker claims. Kept pure so queue ordering is host-testable.
 fn next_wanted(slots: &[Pslot; PT_CAP]) -> Option<usize> {
     #[cfg(test)]
-    if std::env::var_os("PLX_TEST_FIFO_POSTER_QUEUE").is_some() {
+    if std::env::var_os("BUTACA_TEST_FIFO_POSTER_QUEUE").is_some() {
         return (0..PT_CAP).find(|&i| slots[i].state == P_WANT);
     }
     (0..PT_CAP)
