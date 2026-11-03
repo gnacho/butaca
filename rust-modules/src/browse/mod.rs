@@ -45,7 +45,6 @@
 //! second call.
 use crate::registry::ServerId;
 use crate::pms::PmsMovie;
-#[cfg(feature = "jellyfin")]
 use std::panic::catch_unwind;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -59,7 +58,7 @@ const PAGE: usize = 60;
 /// unreachable SHARE is a state the Sources list states in words and nobody is waiting on. Each
 /// attempt can also park a worker in `connect(2)` for its full timeout, so a short backoff would
 /// keep one thread permanently occupied for a server that is simply switched off.
-#[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
+
 const SRC_RETRY_CD: u32 = 600; // ~10 s at 60 fps
 
 // ---- the granted roster: the SOURCE dimension of the table ----------------------------------
@@ -87,7 +86,6 @@ pub(crate) enum SourceState {
     /// Answered, and it was the machine we asked for.
     Reachable,
     /// Did not answer: refused, timed out, or unresolvable.
-    #[cfg_attr(all(not(test), not(feature = "jellyfin")), expect(dead_code))]
     Unreachable,
 }
 
@@ -222,7 +220,6 @@ impl LibraryType {
         // The Jellyfin flavor wires BoxSets as the Collections type for MOVIE sections only: the
         // server keeps box sets under a movies view, and a TV library has no collections concept
         // to list (issue #59). Seasons/Episodes work on both kinds as before.
-        #[cfg(feature = "jellyfin")]
         if crate::jellyfin::client().is_some() {
             return match kind {
                 SecKind::Movie | SecKind::Video => &[Self::Primary, Self::Collections],
@@ -385,7 +382,6 @@ struct SecState {
     letters_done: bool,
     /// The filter combination the landed `letters` describe — Jellyfin only (issue #37); Plex
     /// never sets this. `kick_letters` refetches whenever the current state disagrees.
-    #[cfg(feature = "jellyfin")]
     letters_filter: Option<crate::browse::LettersFilter>,
     /// **The library's OWN shelves** — `Library Recommended`, as its server's owner arranged it.
     /// A field here rather than a store of its own because this struct is already the per-section
@@ -425,7 +421,6 @@ impl SecItems {
     }
     /// Size to the listing: pages are kept where they still fit, dropped past the new end.
     /// Only the Jellyfin page landing calls these; dead (and expected) without the feature.
-    #[cfg_attr(all(not(feature = "jellyfin"), not(test)), expect(dead_code))]
     fn resize(&mut self, total: usize) {
         if total == self.len {
             return;
@@ -450,7 +445,6 @@ impl SecItems {
     }
     /// Place `m` at `i`; a page is allocated on its first item. Out of range is ignored (the
     /// listing shrank under a fetch, which the next page reconciles).
-    #[cfg_attr(all(not(feature = "jellyfin"), not(test)), expect(dead_code))]
     fn set(&mut self, i: usize, m: PmsMovie) {
         if i >= self.len {
             return;
@@ -525,7 +519,6 @@ impl Default for SecState {
             genres_done: false,
             letters: Arc::default(),
             letters_done: false,
-        #[cfg(feature = "jellyfin")]
         letters_filter: None,
             hubs: Default::default(),
             fetch: SecFetch::Loading,
@@ -665,7 +658,6 @@ impl BrowseState {
         // sign-in — is never adopted, and the empty table above reads "nothing to do" forever.
         // The reverse edge (client gone, source still present) needs no arm: the length diff
         // below already opens the gate, and the sync retires the source.
-        #[cfg(feature = "jellyfin")]
         if crate::jellyfin::client().is_some()
             && !self.sources.iter().any(|s| s.sid == crate::jellyfin::SERVER_ID) {
             return true;
@@ -713,7 +705,6 @@ impl BrowseState {
     fn states_mut(&mut self) -> &mut Vec<SecState> {
         &mut self.states
     }
-    #[cfg_attr(all(not(test), not(feature = "jellyfin")), expect(dead_code))]
     fn source_mut(&mut self, i: usize) -> Option<&mut BrowseSource> {
         self.sources.get_mut(i)
     }
@@ -749,7 +740,6 @@ impl BrowseState {
         self.sections_gen = self.sections_gen.wrapping_add(1);
         self.refresh_tab_shape();
     }
-    #[cfg_attr(all(not(test), not(feature = "jellyfin")), expect(dead_code))]
     fn bump_source_facts_gen(&mut self) {
         self.src_facts_gen = self.src_facts_gen.wrapping_add(1);
     }
@@ -842,7 +832,6 @@ impl BrowseState {
             return true;
         }
         state.unwatched = on;
-        #[cfg(feature = "jellyfin")]
         if state.sorts.iter().any(|s| s.key == "SortName") {
             // Issue #37: the landed letters describe the OLD filter combination.
             state.letters_done = false;
@@ -881,7 +870,6 @@ impl BrowseState {
         state.genre = index
             .and_then(|i| state.genres.get(i).cloned())
             .map(Arc::new);
-        #[cfg(feature = "jellyfin")]
         if state.sorts.iter().any(|s| s.key == "SortName") {
             // Issue #37: the landed letters describe the OLD filter combination.
             state.letters_done = false;
@@ -1025,7 +1013,6 @@ impl BrowseState {
     /// The current section's source is the Jellyfin server AND its client is installed. The
     /// installed-client guard is load-bearing on every arm that keys on the slot alone: slot 0
     /// is also a valid Plex slot in this build (every host fixture).
-    #[cfg(feature = "jellyfin")]
     fn cur_is_jellyfin(&self) -> bool {
         self.section_sid(self.cur()) == Some(crate::jellyfin::SERVER_ID)
             && crate::jellyfin::client().is_some()
@@ -1034,7 +1021,6 @@ impl BrowseState {
     /// The section-directory fetch: same single-flight, epoch and mailbox discipline,
     /// but the list arrives ALREADY projected (`jellyfin::browse` owns the mapping) and the
     /// landing carries the process-lifetime client instead of a registry slot.
-    #[cfg(feature = "jellyfin")]
     fn jf_kick_directory<T: Send + 'static>(
         &self,
         adapter: &Arc<BrowseAdapter>,
@@ -1082,14 +1068,13 @@ impl BrowseState {
             .unwrap_or(true);
         // The Jellyfin lane asks its own client for the same directory and lands it through
         // the same mailbox.
-        #[cfg(feature = "jellyfin")]
         if self.cur_is_jellyfin() {
             self.jf_kick_directory(adapter, done, |a| &a.genre_fetching, |a| &a.genre_result, None,
                 |jc, key, _kind| crate::jellyfin::browse::fetch_genres(jc, key).unwrap_or_default());
             return;
         }
         // The Plex section-directory lane went with the PMS browse arm (#166 pass 3).
-        #[cfg(not(feature = "jellyfin"))]
+        #[cfg(any())]
         let _ = (done, adapter);
     }
     fn kick_letters(&self, adapter: &Arc<BrowseAdapter>) {
@@ -1102,7 +1087,6 @@ impl BrowseState {
         // probes carry the ACTIVE filter (issue #37) — IsPlayed and GenreIds ride NameStartsWith
         // — so `done` is only true when the landed table describes the current filter state;
         // changing unwatched/genre makes the next frame kick a fresh combination.
-        #[cfg(feature = "jellyfin")]
         if self.cur_is_jellyfin() {
             let state = self.cur_state();
             let library_type = state.map(|state| state.library_type).unwrap_or_default();
@@ -1123,7 +1107,7 @@ impl BrowseState {
             return;
         }
         // The Plex firstCharacter lane went with the PMS browse arm (#166 pass 3).
-        #[cfg(not(feature = "jellyfin"))]
+        #[cfg(any())]
         let _ = (done, adapter);
     }
     pub(crate) fn addressed_with_adapter(
@@ -1335,9 +1319,8 @@ impl BrowseState {
         let title_asc = match state.sorts.get(state.sort_idx) {
             // Jellyfin's fixed sort vocabulary names the title token "SortName" (see the view's
             // rail_available); the two tokens never appear on the other backend.
-            #[cfg(feature = "jellyfin")]
             Some(sort) => (sort.key == "titleSort" || sort.key == "SortName") && !state.sort_desc,
-            #[cfg(not(feature = "jellyfin"))]
+            #[cfg(any())]
             Some(sort) => sort.key == "titleSort" && !state.sort_desc,
             None => true,
         };
@@ -1345,10 +1328,9 @@ impl BrowseState {
         // so the rail may stay for unwatched-only and per-genre listings. The backend test is
         // the fixed sort vocabulary ("SortName" never appears on Plex). Plex's counts are
         // query-independent and would index the wrong rows, so its lane keeps the gate.
-        #[cfg(feature = "jellyfin")]
         let filter_ok = state.sorts.iter().any(|s| s.key == "SortName")
             || (!state.unwatched && state.genre.is_none());
-        #[cfg(not(feature = "jellyfin"))]
+        #[cfg(any())]
         let filter_ok = !state.unwatched && state.genre.is_none();
         title_asc && filter_ok && state.letters.len() > 1
     }
@@ -1430,7 +1412,6 @@ impl BrowseState {
         session.pins_for(user).cloned()
     }
 
-    #[cfg_attr(all(not(test), not(feature = "jellyfin")), expect(dead_code))]
     fn resolve_pins_from(&mut self, session: &crate::plex::session::Session, user: &str) -> bool {
         self.load_remembered(session, user);
         let record = self.pin_record_for(session, user);
@@ -1485,13 +1466,11 @@ impl BrowseState {
         let record = self.pin_record_for(session, user);
         self.reconcile_pins(record)
     }
-    #[cfg_attr(all(not(test), not(feature = "jellyfin")), expect(dead_code))]
     fn resolve_pins(&mut self) {
         let session = crate::plex::session::peek();
         let user = crate::plex::session::current_profile_key();
         self.resolve_pins_from(&session, &user);
     }
-    #[cfg_attr(all(not(test), not(feature = "jellyfin")), expect(dead_code))]
     fn append_sections_with(&mut self, source: usize, list: Vec<(i64, String, SecKind)>,
         preferences: Option<&crate::plex::session::Session>) {
         let fresh: Vec<_> = list.into_iter().filter(|(key, _, _)| {
@@ -1635,13 +1614,12 @@ impl BrowseState {
             return Default::default();
         }
         adapter.src_fetching.store(false, Ordering::SeqCst);
-        #[cfg(not(feature = "jellyfin"))]
+        #[cfg(any())]
         {
             // No roster exists without the Jellyfin world, so nothing can land here.
             let _ = (source_index, landing, preferences);
             return Default::default();
         }
-        #[cfg(feature = "jellyfin")]
         {
             // The Jellyfin client is a process-lifetime install with no registry reachability
             // to merge into: the landing applies straight to its source slot, the same shape
@@ -1775,9 +1753,8 @@ impl BrowseState {
         // else this loop used to reconcile (registry lifecycles, probe states, ServerFacts,
         // household verdicts) belonged to the share rows and is gone with them.
         // Without that world there is no install to sign out of, so nothing ever retires.
-        #[cfg(not(feature = "jellyfin"))]
+        #[cfg(any())]
         let retire_adapter = false;
-        #[cfg(feature = "jellyfin")]
         let retire_adapter = self.sources.iter().any(|source| {
             // The Jellyfin source is not in any fetched roster — it is live for exactly as long
             // as its client is installed; sign-out retires it through this arm.
@@ -1797,7 +1774,6 @@ impl BrowseState {
         // the run only; `name` arrives with discovery, off `/System/Info/Public`. Lifecycle
         // fields are zero: there is no registry lifecycle to read them from. `household` is
         // `true` by the same "the login is the grant" reasoning.
-        #[cfg(feature = "jellyfin")]
         if crate::jellyfin::client().is_some()
             && !self.sources.iter().any(|s| s.sid == crate::jellyfin::SERVER_ID)
         {
@@ -1906,7 +1882,6 @@ impl BrowseState {
         if adapter.src_fetching.load(Ordering::SeqCst) {
             return;
         }
-        #[cfg(feature = "jellyfin")]
         {
             // The roster has exactly one source — the Jellyfin install — so this pick is the
             // whole story; a build without that world has no sources and never launches
@@ -1962,10 +1937,10 @@ impl BrowseState {
                 }
             }
         }
-        #[cfg(not(feature = "jellyfin"))]
+        #[cfg(any())]
         let _ = launch;
     }
-    #[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
+    
     fn discovery_spawn_refused_owned(&mut self, adapter: &BrowseAdapter, source: usize) {
         adapter.src_fetching.store(false, Ordering::SeqCst);
         if let Some(source) = self.source_mut(source) {
@@ -2003,7 +1978,6 @@ impl BrowseState {
         // The Jellyfin landing applies straight to its section state — a process-lifetime
         // install has no registry lifecycle to validate against. The Plex arm went with the PMS
         // browse arm (#166 pass 3); without the feature there is no lane that can land here.
-        #[cfg(feature = "jellyfin")]
         {
             let DirectoryResult { epoch: _, sec, client, library_type, letters_filter, list } = result;
             if matches!(client, DiscClient::Jellyfin(_)) {
@@ -2022,7 +1996,7 @@ impl BrowseState {
             }
             false
         }
-        #[cfg(not(feature = "jellyfin"))]
+        #[cfg(any())]
         {
             let _ = (result, apply);
             false
@@ -2042,7 +2016,6 @@ impl BrowseState {
         // load-bearing: the jellyfin slot is 0, which test fixtures also hand to
         // `register_for_test` Plex clients — an absent jellyfin client must fall THROUGH (into
         // nothing: the PMS page worker went with the PMS browse arm, #166 pass 3).
-        #[cfg(feature = "jellyfin")]
         {
             let Some(state) = self.states.get(current) else { return };
             let Some(section) = self.sections.get(current) else { return };
@@ -2094,7 +2067,7 @@ impl BrowseState {
                 adapter.fetching.store(false, Ordering::SeqCst);
             }
         }
-        #[cfg(not(feature = "jellyfin"))]
+        #[cfg(any())]
         let _ = adapter;
     }
     pub(crate) fn controlled_discover_owned(
@@ -2141,11 +2114,10 @@ impl BrowseState {
                 // filter change can tell stale from fresh. Plex lands here with `None` and its
                 // query-independent counts, which replace identically.
                 state.letters = Arc::new(list);
-                #[cfg(feature = "jellyfin")]
                 {
                     state.letters_filter = filter;
                 }
-                #[cfg(not(feature = "jellyfin"))]
+                #[cfg(any())]
                 let _ = filter;
             });
         // The page landing is the Jellyfin lane's alone now (the PMS page worker went with the
@@ -2154,7 +2126,6 @@ impl BrowseState {
         // is this backend's includeMeta — it lands with the first page. A page fetch is also
         // EVIDENCE ABOUT THE SERVER: with one source it is the only reachability evidence after
         // discovery at all.
-        #[cfg(feature = "jellyfin")]
         if let Some(result) = crate::stores::take_landing(gate, crate::stores::StoreId::Browse, || {
             adapter.page_result.lock().unwrap_or_else(|e| e.into_inner()).take()
         }) {
@@ -2236,7 +2207,7 @@ impl BrowseState {
 
 /// Dead without the feature: no lane fills the page mailbox, but the Jellyfin build's
 /// landing shape is this struct, so it is frozen rather than made `#[cfg]`.
-#[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
+
 struct PageResult {
     gen: u32,
     sec: usize,
@@ -2249,18 +2220,17 @@ struct PageResult {
 // menu-data landings carry the table EPOCH so a landing spawned before a [`reset`] (profile
 // switch) can never populate the NEW user's state at the same index. Dead without the feature
 // (no lane lands a directory), frozen for the same reason as [`PageResult`].
-#[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
+
 struct DirectoryResult<T> {
     epoch: u32,
     sec: usize,
     /// The builder's client arm; the landing's validator matches on it. Only the Jellyfin arm
     /// builds one since the Plex fetch went (#166).
-    #[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
+    
     client: DiscClient,
     library_type: LibraryType,
     /// Letters flights only (issue #37): the filter combination the probe ran under, stamped on
     /// the landing so the store can tell a stale table from a fresh one.
-    #[cfg(feature = "jellyfin")]
     letters_filter: Option<crate::browse::LettersFilter>,
     list: Vec<T>,
 }
@@ -2283,11 +2253,10 @@ struct SrcLanding {
 enum SrcWhat {
     /// `GET /library/sections`. `None` is the FAILURE sentinel — the source is marked unreachable
     /// and whatever sections it had already contributed are left exactly where they are.
-    #[cfg_attr(all(not(test), not(feature = "jellyfin")), expect(dead_code))]
     Sections(Option<Vec<(i64, String, SecKind)>>),
     /// The unfiltered item count per library, **by section KEY** rather than by index: the table
     /// may have grown between the spawn and the landing, and a key is stable inside one source.
-    #[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
+    
     Counts(Vec<(i64, i64)>),
 }
 
@@ -2543,20 +2512,18 @@ fn count_line(count: i64, kind: SecKind) -> String {
 /// went with the Plex discovery arm, #166).
 #[derive(Clone, Copy)]
 enum DiscClient {
-    #[cfg(feature = "jellyfin")]
     Jellyfin(&'static crate::jellyfin::JfClient),
 }
 
 enum SrcJob {
     /// its section list
-    #[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
+    
     Sections,
     /// the unfiltered item count of each of its libraries, by section key
-    #[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
+    
     Counts(Vec<i64>),
     /// The Jellyfin count probe: each library's key WITH its kind, which that backend's
     /// include_types vocabulary needs (the Plex probe filters by section key alone).
-    #[cfg(feature = "jellyfin")]
     JfCounts(Vec<(i64, SecKind)>),
 }
 
@@ -2564,12 +2531,12 @@ pub(crate) struct DiscoveryRequest {
     epoch: u32,
     si: usize,
     /// The one roster arm's client; the request can only be built when that world is installed.
-    #[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
+    
     client: DiscClient,
     token_gen: u32,
     job: SrcJob,
     want_name: bool,
-    #[cfg_attr(not(feature = "jellyfin"), expect(dead_code))]
+    
     adapter: Arc<BrowseAdapter>,
 }
 
@@ -2586,14 +2553,12 @@ impl DiscoveryRequest {
             "counts": match &self.job {
                 SrcJob::Sections => Vec::new(),
                 SrcJob::Counts(keys) => keys.clone(),
-                #[cfg(feature = "jellyfin")]
                 SrcJob::JfCounts(keys) => keys.iter().map(|(k, _)| *k).collect(),
             },
         })
     }
 }
 
-#[cfg(feature = "jellyfin")]
 pub(crate) fn execute_discovery(request: DiscoveryRequest) -> bool {
     let DiscoveryRequest {
         epoch,
@@ -2646,13 +2611,12 @@ pub(crate) fn execute_discovery(request: DiscoveryRequest) -> bool {
     })
 }
 
-#[cfg(not(feature = "jellyfin"))]
+#[cfg(any())]
 pub(crate) fn execute_discovery(_request: DiscoveryRequest) -> bool {
     // No roster exists without the Jellyfin world, so nothing can build a request to launch.
     false
 }
 
-#[cfg(feature = "jellyfin")]
 fn spawn_discovery(job: impl FnOnce() + Send + 'static) -> bool {
     #[cfg(test)]
     if REFUSE_DISCOVERY_FOR_TEST.with(|flag| flag.get()) {
@@ -2661,7 +2625,7 @@ fn spawn_discovery(job: impl FnOnce() + Send + 'static) -> bool {
     crate::task::spawn_small("sources", job)
 }
 
-#[cfg(all(test, feature = "jellyfin"))]
+#[cfg(test)]
 thread_local! {
     static REFUSE_DISCOVERY_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
@@ -2986,6 +2950,6 @@ mod localized_type_tests {
         }
     }
 }
-#[cfg(all(test, feature = "jellyfin"))]
+#[cfg(test)]
 #[path = "browse_roster_jellyfin_tests.rs"]
 mod roster_jellyfin_tests;

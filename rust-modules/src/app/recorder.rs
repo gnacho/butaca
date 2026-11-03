@@ -1243,12 +1243,6 @@ pub(crate) fn features() -> Vec<String> {
     if cfg!(feature = "hostsim") {
         v.push("hostsim".into());
     }
-    // The backend flavor, stamped next to the rest: a recording names the world it was taken
-    // against, so a Plex artifact can never be loaded by the Jellyfin replay build or vice
-    // versa — the first half of the #166 flip's refusal story (the census names the other).
-    if cfg!(feature = "jellyfin") {
-        v.push("jellyfin".into());
-    }
     if cfg!(feature = "lab-diagnostics") {
         v.push("lab-diagnostics".into());
     }
@@ -1351,7 +1345,6 @@ mod tests {
     /// The recorder's controlled worlds boot the synthetic Jellyfin home, whose authority
     /// `Initial::validate` refuses without the feature; the family is flavor-gated.
     #[test]
-    #[cfg(feature = "jellyfin")]
     fn two_bridge_recorders_own_their_landing_lifecycle() {
         let _serial = crate::testlock::serial();
         crate::ui::landgate::disarm();
@@ -1403,7 +1396,6 @@ mod tests {
         eprintln!("product wire fingerprint: {old:#018x} -> {:#018x}",state_fp());
     }
 
-    #[cfg(feature = "jellyfin")]
     fn replay_for_test(rec:Recording, mode:ReplayMode) -> Recplay {
         Recplay::Replaying(Replay { resolution:ResolutionReplay {mode,..Default::default()}, rec,
             at:0,graded:0,diverged:0,present_diffs:0,result_diffs:0,land_diffs:0,result_at:0,
@@ -1412,7 +1404,6 @@ mod tests {
 
     /// Jellyfin world gate: the synthetic recording world cannot boot without the feature.
     #[test]
-    #[cfg(feature = "jellyfin")]
     fn controlled_replay_retains_capture_readiness_when_the_gpu_finishes_earlier() {
         use crate::ui::dispatch::Tap;
         let _serial = crate::testlock::serial();
@@ -1457,7 +1448,6 @@ mod tests {
 
     /// Jellyfin world gate: the synthetic recording world cannot boot without the feature.
     #[test]
-    #[cfg(feature = "jellyfin")]
     fn capture_readiness_must_be_consumed_exactly_once() {
         let _serial = crate::testlock::serial();
         let initial = super::super::bootstrap::Initial::synthetic_home(1, 32517, None).unwrap();
@@ -1478,7 +1468,6 @@ mod tests {
 
     /// Jellyfin world gate: the synthetic recording world cannot boot without the feature.
     #[test]
-    #[cfg(feature = "jellyfin")]
     fn controlled_recording_accepts_the_tvs_startup_foreground_pair() {
         let initial = super::super::bootstrap::Initial::synthetic_home(1, 32517, None).unwrap();
         let mut header = Header::new(state_fp(), &initial);
@@ -1528,7 +1517,6 @@ mod tests {
 
     /// Jellyfin world gate: the synthetic recording world cannot boot without the feature.
     #[test]
-    #[cfg(feature = "jellyfin")]
     fn product_none_focus_and_missing_extra_truth_never_false_same() {
         use crate::ui::dispatch::Tap;
         // end_frame consumes the process-wide landing diffs even in this geometry-only case.
@@ -1602,11 +1590,9 @@ mod tests {
         fn result(&mut self,f:u64,a:&crate::ui::machine::Addr,m:&crate::screens::registry::AppMsg){crate::ui::dispatch::Tap::<Product>::result(self.rec,f,a,m);}
     }
 
-    #[cfg(feature = "jellyfin")]
     fn product_settings_run(rec:&mut Recplay, changed_focus:bool, changed_hit:bool) -> Vec<u64> {
         product_settings_run_with_queries(rec,changed_focus,changed_hit,&mut Vec::new())
     }
-    #[cfg(feature = "jellyfin")]
     fn product_settings_run_with_queries(rec:&mut Recplay, changed_focus:bool, changed_hit:bool,
         queries:&mut Vec<crate::ui::rec::MetricKey>) -> Vec<u64> {
         use crate::ui::{dispatch::Dispatcher,machine::{Tick,Key,InputKind}};
@@ -1662,7 +1648,6 @@ mod tests {
         hashes
     }
 
-    #[cfg(feature = "jellyfin")]
     fn product_settings_recording() -> (Recording,Vec<u64>) {
         let initial=super::super::bootstrap::Initial::synthetic_home(1,32517,Some("root".into())).unwrap();
         let sink=crate::ui::rec::MemSink::default();
@@ -1676,14 +1661,12 @@ mod tests {
         (recording,expected)
     }
 
-    #[cfg(feature = "jellyfin")]
     fn copy_recording(rec:&Recording) -> Recording {
         Recording {header:rec.header.clone(),frames:rec.frames.clone(),metrics:rec.metrics.clone(),stopped_at:rec.stopped_at}
     }
 
     /// Jellyfin world gate: the synthetic recording world cannot boot without the feature.
     #[test]
-    #[cfg(feature = "jellyfin")]
     fn product_replay_uses_captured_metrics_and_missing_queries_refuse_same() {
         let _serial=crate::testlock::serial();
         let (recording,expected)=product_settings_recording();
@@ -1706,7 +1689,6 @@ mod tests {
 
     /// Jellyfin world gate: the synthetic recording world cannot boot without the feature.
     #[test]
-    #[cfg(feature = "jellyfin")]
     fn product_record_and_resolve_query_order_is_identical() {
         let _serial=crate::testlock::serial();
         let initial=super::super::bootstrap::Initial::synthetic_home(1,32517,Some("root".into())).unwrap();
@@ -1728,7 +1710,6 @@ mod tests {
 
     /// Jellyfin world gate: the synthetic recording world cannot boot without the feature.
     #[test]
-    #[cfg(feature = "jellyfin")]
     fn product_controlled_bridge_replay_is_font_free_and_fails_before_attachment() {
         use crate::ui::dispatch::Rig;
         let _serial=crate::testlock::serial();
@@ -1753,7 +1734,6 @@ mod tests {
 
     /// Jellyfin world gate: the synthetic recording world cannot boot without the feature.
     #[test]
-    #[cfg(feature = "jellyfin")]
     fn product_recorded_continuations_preserve_cross_group_memory_without_avalanche() {
         use crate::ui::{dispatch::Dispatcher,machine::{Tick,Key}};
         use super::super::bridge;
@@ -1816,7 +1796,6 @@ mod tests {
 
     /// Jellyfin world gate: the synthetic recording world cannot boot without the feature.
     #[test]
-    #[cfg(feature = "jellyfin")]
     fn product_targets_and_resolve_grade_pointwise_and_continue_before_effects() {
         let _serial=crate::testlock::serial();
         let (recording,expected)=product_settings_recording();
@@ -1843,7 +1822,6 @@ mod tests {
 
     /// Jellyfin world gate: the synthetic recording world cannot boot without the feature.
     #[test]
-    #[cfg(feature = "jellyfin")]
     fn product_resolution_tape_rejects_missing_extra_order_and_impossible_targets() {
         let _serial=crate::testlock::serial();
         let (recording,_)=product_settings_recording();
@@ -1893,7 +1871,6 @@ mod tests {
 
     /// Jellyfin world gate: the synthetic recording world cannot boot without the feature.
     #[test]
-    #[cfg(feature = "jellyfin")]
     fn product_recording_observes_post_drain_focus_including_none() {
         use crate::ui::dispatch::Tap;
         let _serial = crate::testlock::serial();
@@ -1919,7 +1896,6 @@ mod tests {
 
     /// Jellyfin world gate: the synthetic recording world cannot boot without the feature.
     #[test]
-    #[cfg(feature = "jellyfin")]
     fn confirmed_erasure_retires_buffered_writer_before_owner_drain() {
         let _serial = crate::testlock::serial();
         let initial = super::super::bootstrap::Initial::synthetic_home(17,32517,None).unwrap();
@@ -1943,7 +1919,6 @@ mod tests {
 
     /// Jellyfin world gate: the synthetic recording world cannot boot without the feature.
     #[test]
-    #[cfg(feature = "jellyfin")]
     fn final_storage_flush_failure_reaches_application_exit() {
         struct Disk(bool);
         impl std::io::Write for Disk {
@@ -2009,7 +1984,6 @@ mod tests {
 
     /// Jellyfin world gate: the synthetic recording world cannot boot without the feature.
     #[test]
-    #[cfg(feature = "jellyfin")]
     fn direct_and_owned_inputs_share_one_ordered_replay_ledger() {
         use crate::ui::dispatch::Tap;
         let _serial = crate::testlock::serial();
@@ -2037,7 +2011,6 @@ mod tests {
     #[cfg(feature = "devtriggers")]
     /// Jellyfin world gate: the synthetic recording world cannot boot without the feature.
     #[test]
-    #[cfg(feature = "jellyfin")]
     fn controlled_recordings_accept_only_canonical_direct_token_envelopes() {
         let initial = super::super::bootstrap::Initial::synthetic_home(1, 32517, None).unwrap();
         let mut header = Header::new(state_fp(), &initial);

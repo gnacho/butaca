@@ -41,7 +41,6 @@
 //! completions even within one adapter. There is no process-global ViewState transport or state.
 
 use crate::registry::ServerId;
-#[cfg(feature = "jellyfin")]
 use std::panic::catch_unwind;
 use std::sync::{Arc, Mutex};
 
@@ -56,7 +55,6 @@ pub(crate) enum Write {
     /// resume-point merge, `clear_resume`).
     RemoveFromDeck,
     /// Jellyfin's heart: `POST/DELETE /Users/{uid}/FavoriteItems/{id}`.
-    #[cfg(feature = "jellyfin")]
     Favorite(bool),
 }
 
@@ -71,7 +69,6 @@ impl Write {
             Write::RemoveFromDeck => 1,
             // A heart toggle is its own decision about the item: a later favorite supersedes an
             // earlier one, and it must not be swallowed by a watched toggle that followed it.
-            #[cfg(feature = "jellyfin")]
             Write::Favorite(_) => 2,
         }
     }
@@ -79,7 +76,6 @@ impl Write {
     /// The Jellyfin flavor's `perform`: the same queue, the backend's client. Played-state
     /// and favorite writes ride `PlayedItems`/`FavoriteItems`; the deck removal is the documented
     /// resume-point merge (`clear_resume`).
-    #[cfg(feature = "jellyfin")]
     fn perform_jellyfin(self, c: &crate::jellyfin::JfClient, rk: &str) -> bool {
         match self {
             Write::Watched => c.mark_played(rk),
@@ -91,7 +87,6 @@ impl Write {
 
     fn name(self) -> &'static str {
         match self {
-            #[cfg(feature = "jellyfin")]
             Write::Favorite(on) => if on { "favorite" } else { "unfavorite" },
             Write::Watched => "watched",
             Write::Unwatched => "unwatched",
@@ -161,7 +156,6 @@ impl Default for ViewStateState {
 /// ~2 s at 60 fps — the same wait `search.rs` gives a refused spawn. Without it, a process at the
 /// thread ceiling would re-attempt (and log a refusal) every single frame. Only the jellyfin
 /// transport arms a refusal, so the constant is read only behind that feature.
-#[cfg_attr(not(feature = "jellyfin"), allow(dead_code))]
 const RETRY_FRAMES: u32 = 120;
 
 impl ViewStateState {
@@ -205,9 +199,8 @@ impl ViewStateState {
     // Jellyfin client is signed in. The `client_for` half keeps the registry fixture path honest
     // in host tests and drops any sid that names no live backend — a view-state write is exactly
     // the operation to skip and log rather than guess a destination for.
-    #[cfg(feature = "jellyfin")]
     let jellyfin = sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some();
-    #[cfg(not(feature = "jellyfin"))]
+    #[cfg(any())]
     let jellyfin = false;
     if crate::registry::client_for(sid).is_none() && !jellyfin {
         crate::log(&format!(
@@ -308,7 +301,6 @@ fn edit_local_with_owners(
         }
         // The one edit that can be stated with certainty: the server hides the item from the deck
         // and keeps everything else about it (`plex::Client::remove_from_continue_watching`).
-        #[cfg(feature = "jellyfin")]
         Write::Favorite(on) => {
             // The heart is only drawn on the detail page: the loaded item's flag. The show-level
             // roll-up the watched pair performs is NOT wanted here — a heart has no children.
@@ -357,7 +349,6 @@ impl ViewStateState {
 /// Start the next queued write if nothing is out. MAIN THREAD.
 /// The backend client only exists behind the `jellyfin` feature; without it every queued write
 /// drains through the DROPPED arm below and the adapter has nothing to feed.
-#[cfg_attr(not(feature = "jellyfin"), allow(unused_variables))]
     fn kick(&mut self, adapter: &Arc<ViewStateAdapter>) {
         if self.sent.is_some() || self.retry_cd > 0 {
             return;
@@ -368,9 +359,7 @@ impl ViewStateState {
         // stopped holding a client is a write with nowhere to go: dropping it silently would be the
         // one PMS write with no line at all, which is what the request-time check above exists to
         // prevent, so it says so here too.
-        #[cfg(feature = "jellyfin")]
         let jellyfin = req.sid == crate::jellyfin::SERVER_ID;
-        #[cfg(feature = "jellyfin")]
         if jellyfin {
             let Some(c) = crate::jellyfin::client() else {
                 crate::log(&format!(

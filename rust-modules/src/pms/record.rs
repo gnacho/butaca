@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{Landing, SourceBuild};
-#[cfg(feature = "jellyfin")]
 use super::LandingClient;
 
 pub(crate) const SHAPE: &str = "HubsResultV1{gen:u32,seq:u32,sid:u16,client:Option<u32>,token_gen:u32,build:Option<{cw:[{last_viewed_at:i64,m:PmsMovie}],shelves:[{title:str,hub_id:str,key:str,items:[PmsMovie],total:u64}]}>};PmsMovie{sid:u16,sec:i64,title:str,year:i32,rating:str,dur_ns:i64,part:str,thumb:str,still:str,art:str,summary:str,rk:str,vcodec:str,acodec:str,blur:[[f32bits;3];4],has_blur:bool,kind:i32,resume_ms:i64,show_rk:str,season_index:i32,show_title:str,ep_index:i32,unwatched:bool,watched:bool,aired:str,child_count:i64}";
@@ -58,7 +57,6 @@ pub(crate) fn decode(value: Value) -> Result<Landing, &'static str> {
     // The Jellyfin flavor's own result vocabulary: instance 0, no token rotation, the one
     // installed client. Any payload naming a client through a recorded-id mapping is refused:
     // that vocabulary was the Plex arm's, and no Plex mapping exists to consult anymore.
-    #[cfg(feature = "jellyfin")]
     let resolved = if p.client == Some(0) && p.token_gen == 0
         && p.sid.raw() == crate::jellyfin::SERVER_ID.raw()
         && crate::jellyfin::client().is_some()
@@ -68,7 +66,7 @@ pub(crate) fn decode(value: Value) -> Result<Landing, &'static str> {
     } else {
         None
     };
-    #[cfg(not(feature = "jellyfin"))]
+    #[cfg(any())]
     let resolved = None;
     if resolved.is_none() && p.client.is_some() {
         return Err("unresolved hubs client");

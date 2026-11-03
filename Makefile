@@ -423,8 +423,8 @@ CARGO_INCREMENTAL ?= 0
 export CARGO_INCREMENTAL
 endif
 
-RUST_FEATFLAGS = $(if $(RELEASE),--no-default-features,)$(if $(LAB), --features lab-diagnostics,)$(if $(JELLYFIN), --features jellyfin,)
-RUST_TDIR      = target$(if $(RELEASE),-release,)$(if $(LAB),-lab,)$(if $(JELLYFIN),-jellyfin,)$(if $(SYMBOLS),-sym,)
+RUST_FEATFLAGS = $(if $(RELEASE),--no-default-features,)$(if $(LAB), --features lab-diagnostics,)
+RUST_TDIR      = target$(if $(RELEASE),-release,)$(if $(LAB),-lab,)$(if $(SYMBOLS),-sym,)
 # OVERRIDING RUST_FEATFLAGS BY HAND? PASS RUST_TDIR TOO. This dir is keyed on RELEASE, not on the
 # flag set, so `make RUST_FEATFLAGS=...` alone lands in the SAME target/ as an ordinary build:
 # cargo's staticlib looks up to date, the stamp below deletes pkg/butaca, and make relinks the
@@ -1124,7 +1124,7 @@ check-unlocked: lint check-localization
 	@# this costs a few seconds warm rather than a rebuild.
 	@set -e; d=$$(mktemp -d /tmp/butaca-check.XXXXXX); trap 'rm -rf "'"$$d"'"' EXIT; \
 	cd rust-modules && PATH="$$HOME/.cargo/bin:$$PATH" BUTACA_RUNTIME_DIR="$$d" \
-	  cargo +$(RUST_NIGHTLY) test --lib --features hostsim,jellyfin
+	  cargo +$(RUST_NIGHTLY) test --lib --features hostsim
 	@# ...and the THIRD feature set, `lab-diagnostics`, TYPE-CHECKED. It is not in the default set
 	@# at all (that is what makes it unshippable by forgetting a flag), so nothing above compiles a
 	@# line of `lab/` or of `ui/lab_toast.rs` — and until 2026-09-10 nothing anywhere did: not this
@@ -1620,7 +1620,7 @@ screenshots: screenshots-sim demo-library
 # Jellyfin controlled world for the anchors recorded against it.
 sim-linux: $(LIBASS_HOST_STAGED)
 	cargo build --release --manifest-path rust-modules/Cargo.toml --target-dir "$$SIM_LINUX_TDIR_ENV" \
-	  --features hostsim,jellyfin --bin butaca-sim
+	  --features hostsim --bin butaca-sim
 
 # Compatibility spelling used by the Windows launcher and existing documentation.
 sim-wsl: sim-linux

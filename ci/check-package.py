@@ -72,7 +72,7 @@ def build_configuration(stamp: str) -> "str | None":
 # how a diagnostics surface ends up certified as a release. Adding a feature that really ships
 # means adding it here, and that is the point: the day a release carries something new, this line
 # is where someone has to say so out loud.
-SHIPPED_FEATURES = frozenset({"jellyfin"})
+SHIPPED_FEATURES = frozenset()
 
 
 def classify_flags(flags: str) -> "str | None":
@@ -322,15 +322,6 @@ def _selftest() -> int:
         "features:+symbols+tel:98c4b7d37a4c": "dev",
         # the nightly cut: RELEASE=1 (so --no-default-features), SYMBOLS=1, and the dated field
         "features:--no-default-features+symbols+nightly:20260919+tel:98c4b7d37a4c": "release",
-        # what CI actually writes: `RUST_FEATFLAGS` appends the Jellyfin backend to every build,
-        # so the flags are a list of words rather than either of the two literals above
-        "features:--no-default-features --features jellyfin+symbols+tel:98c4b7d37a4c": "release",
-        "features:--no-default-features --features jellyfin+symbols+nightly:20261029"
-        "+tel:98c4b7d37a4c": "release",                                          # the nightly cut
-        "features:--no-default-features --features jellyfin+tel:98c4b7d37a4c": "release",
-        "features: --features jellyfin+tel:98c4b7d37a4c": "dev",                # JELLYFIN=1, no RELEASE
-        "features:--no-default-features --features jellyfin --features jellyfin+tel:98c4b7d37a4c":
-            "release",
         # older stamps, from before the telemetry and symbols fields existed
         "features:": "dev",
         "features:--no-default-features": "release",
@@ -338,10 +329,8 @@ def _selftest() -> int:
         "features: --features lab-diagnostics+tel:abc123def456": None,          # LAB=1
         "features:--no-default-features --features lab-diagnostics+tel:abc123def456": None,
         "features:--no-default-features --features devtriggers+tel:abc123def456": None,  # shots
-        "features:--no-default-features --features jellyfin --features lab-diagnostics"
-        "+tel:abc123def456": None,                                              # JELLYFIN=1 LAB=1
         "features:--features": None,                                            # a flag with no word
-        "features:--no-default-features jellyfin+tel:abc123def456": None,        # not the grammar
+        "features:--no-default-features symbols+tel:abc123def456": None,        # not the grammar
         # nothing to read
         "": None,
         "garbage": None,

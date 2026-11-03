@@ -1,7 +1,6 @@
 //! Real Session/Bridge erasure ACK and private files; unrelated host sweeps are substituted.
 // The erasure contract is staged on the synthetic Jellyfin Session world, so the whole
 // module is flavor-gated.
-#![cfg(feature = "jellyfin")]
 use super::*;
 use crate::app::{bootstrap, recorder, run};
 use crate::plex::session::{self, Session};

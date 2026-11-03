@@ -4457,7 +4457,6 @@ struct ScrobbleWork {
     /// The Jellyfin client when the playback came from the Jellyfin backend — captured at the
     /// same spawn site and under the same "current is the origin" caveat as `client` (a jellyfin
     /// install has exactly one server, so cur IS the origin for the life of this flavor).
-    #[cfg(feature = "jellyfin")]
     jf_client: Option<&'static crate::jellyfin::JfClient>,
     final_report: Option<(String, i64, i64)>,
     report_th: Option<std::thread::JoinHandle<()>>,
@@ -4485,7 +4484,6 @@ impl ScrobbleWork {
                 // The final `stopped` report, on whichever backend the playback came from.
                 // `session` is already tsession-when-set (the capture in `scrobble_stop`), which
                 // on the Jellyfin side is the PlaySessionId rule `jellyfin::profile` states.
-                #[cfg(feature = "jellyfin")]
                 if let Some(jc) = self.jf_client {
                     let ok = jc.session_stopped(&rk, t_ms, &self.session);
                     crate::log(&format!(
@@ -4527,14 +4525,13 @@ impl ScrobbleWork {
             // The server-side encoder kill, on whichever backend holds the session. Jellyfin's
             // is a best-effort DELETE (the server reaps a quiet HLS encoder on its own); Plex's
             // is the transcode-session stop.
-            #[cfg(feature = "jellyfin")]
             let ok = if let Some(jc) = self.jf_client {
                 jc.stop_active_encodings(&self.transcode_session)
             } else {
                 self.client
                     .is_some_and(|c| c.transcode_stop(&self.transcode_session))
             };
-            #[cfg(not(feature = "jellyfin"))]
+            #[cfg(any())]
             let ok = self
                 .client
                 .is_some_and(|c| c.transcode_stop(&self.transcode_session));
@@ -4589,7 +4586,6 @@ pub(crate) fn scrobble_stop(
     let client = cur_client(ps);
     // The Jellyfin backend's client lives outside the Plex registry, so `cur_client` above can
     // never resolve it; capture it under the same origin rule (one server per jellyfin install).
-    #[cfg(feature = "jellyfin")]
     let jf_client = if cur_sid(ps) == crate::jellyfin::SERVER_ID {
         crate::jellyfin::client()
     } else {
@@ -4603,7 +4599,6 @@ pub(crate) fn scrobble_stop(
         (final_report.is_some() || report_th.is_some()).then(|| TIMELINE_STOP_FENCE.announce());
     let work = std::sync::Arc::new(std::sync::Mutex::new(Some(ScrobbleWork {
         client,
-        #[cfg(feature = "jellyfin")]
         jf_client,
         final_report,
         report_th,
@@ -4842,7 +4837,6 @@ pub(crate) fn transcode_seek(ps: &mut PlaybackSession, offset_secs: i64) -> Opti
     // ACTIVE_ENCODER exactly as on the Plex arm.
     // The guard is load-bearing: the jellyfin slot is 0, which host fixtures also hand to
     // `register_for_test` Plex clients — an absent jellyfin client must fall THROUGH.
-    #[cfg(feature = "jellyfin")]
     if cur_sid(ps) == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
         return jellyfin_transcode_seek(ps, offset_secs, &rk);
     }
@@ -4945,7 +4939,6 @@ pub(crate) fn transcode_seek(ps: &mut PlaybackSession, offset_secs: i64) -> Opti
 /// The Jellyfin arm of [`transcode_seek`]: a PlaybackInfo naming the offset re-cuts the HLS
 /// transcode, and the new `TranscodingUrl` becomes the route. The old server-side session is
 /// retired off the main thread — best-effort, as Jellyfin reaps a quiet encoder on its own.
-#[cfg(feature = "jellyfin")]
 fn jellyfin_transcode_seek(
     ps: &mut PlaybackSession,
     offset_secs: i64,
@@ -5337,7 +5330,6 @@ static SERIES_TRACKS: Mutex<Vec<crate::plex::session::SeriesTracks>> = Mutex::ne
 
 /// What one series was last watched with. Cloned out so the plan never holds the lock while it
 /// weighs streams.
-#[cfg_attr(not(feature = "jellyfin"), allow(dead_code))] // only the Jellyfin plan reads it
 pub(crate) fn series_tracks(series: &str) -> Option<crate::plex::session::SeriesTracks> {
     if series.is_empty() {
         return None;
@@ -7015,7 +7007,6 @@ pub(crate) fn retranscode_for(ps: &mut PlaybackSession, expected: &WorkerTicket,
     // `jellyfin_transcode_seek` uses for a seek. The Plex machinery below resolves its client
     // from a registry the Jellyfin slot is not in, so without this arm an audio switch to a
     // non-direct-playable track is silently rejected on this backend.
-    #[cfg(feature = "jellyfin")]
     if cur_sid(ps) == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
         return jellyfin_retranscode_as(ps, expected, offset_secs);
     }
@@ -7066,7 +7057,6 @@ fn retranscode_contract(ps: &PlaybackSession) -> crate::playback::EncodeContract
 /// Rebuild the current item under `contract` (issue #266: the whole encode shape, enhancement
 /// included). Publishes `cur_contract` and `cur_enhancement` only after PMS accepted it — the
 /// applied enhancement is never written at the selection (I9).
-#[cfg(feature = "jellyfin")]
 fn jellyfin_retranscode_as(
     ps: &mut PlaybackSession,
     expected: &WorkerTicket,

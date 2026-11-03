@@ -524,7 +524,6 @@ fn built_key(srv: ServerId, path: &str, w: c_int, h: c_int, png: bool) -> Option
     // The arm engages only when a Jellyfin client is INSTALLED, not on the slot number alone:
     // slot 0 is also what a host test's `register_for_test` hands out, and without the guard the
     // flavor's own test suite would route a Plex fixture through this arm.
-    #[cfg(feature = "jellyfin")]
     if srv == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
         let c = crate::jellyfin::client()?;
         let s = memo.get_or_build(srv.raw(), path, w, h, png, 0, || {
@@ -744,13 +743,12 @@ fn logo_key(srv: ServerId, rk: &str) -> Option<&'static str> {
     // Plex names the clearLogo under `/library/metadata/{rk}` with the `clearLogo` transcode
     // verb; Jellyfin keeps the same picture as the item's own `Logo` image type. Getting this
     // wrong is silent — the fetch just 404s and the hero falls back to title text.
-    #[cfg(feature = "jellyfin")]
     let src_path = if srv == crate::jellyfin::SERVER_ID {
         format!("/Items/{rk}/Images/Logo")
     } else {
         format!("/library/metadata/{rk}/clearLogo")
     };
-    #[cfg(not(feature = "jellyfin"))]
+    #[cfg(any())]
     let src_path = format!("/library/metadata/{rk}/clearLogo");
     built_key(srv, &src_path, LOGO_REQ_W, LOGO_REQ_H, true)
 }
@@ -1495,9 +1493,8 @@ fn poster_worker() {
         // installed-client guard is `built_key`'s: slot 0 alone must not pick this arm (a host
         // test's Plex fixture registers there too). No disk arm on this backend: the cache
         // namespace is a Plex-registry concept and 0.6.x fetched direct.
-        #[cfg(feature = "jellyfin")]
         let jellyfin_slot = srv == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some();
-        #[cfg(not(feature = "jellyfin"))]
+        #[cfg(any())]
         let jellyfin_slot = false;
         if jellyfin_slot {
             match crate::jellyfin::client() {

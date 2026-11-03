@@ -799,7 +799,6 @@ fn fetch_source(c: &crate::plex::Client, sid: ServerId) -> Option<SourceBuild> {
 /// it. What Home is built from is Jellyfin's own vocabulary rather than `/hubs`: Continue
 /// Watching is `/Items/Resume` (the deck, server-sorted by last-played) and each
 /// movies/tvshows view contributes one Recently Added shelf from `/Items/Latest`.
-#[cfg(feature = "jellyfin")]
 fn fetch_source_jellyfin(c: &'static crate::jellyfin::JfClient, sid: ServerId) -> Option<SourceBuild> {
     // A row earns its card the same way the Plex projection's `keep` decides it: a title to
     // name it and a poster to draw. Jellyfin ids are GUIDs, so the catalog pin (`sec`) has no
@@ -1206,7 +1205,6 @@ impl Src {
         };
         self.client = match resource {
             HubClientRef::Plex(c) => Some(c),
-            #[cfg(feature = "jellyfin")]
             HubClientRef::Jellyfin(_) => None,
         };
         self.token_gen = request.token_gen;
@@ -1268,7 +1266,6 @@ enum HubClientRef {
     Plex(&'static crate::plex::Client),
     /// The Jellyfin flavor has ONE source — the server the boot flow authenticated against —
     /// and no Plex registry slot behind it, so no instance/token generation to fingerprint.
-    #[cfg(feature = "jellyfin")]
     Jellyfin(&'static crate::jellyfin::JfClient),
 }
 
@@ -1482,7 +1479,6 @@ fn roster_with_scope(scope: &BrowseScope) -> Vec<(ServerId, String)> {
     // The Jellyfin flavor has ONE source — the server the boot flow authenticated against —
     // with no plex.tv registry to enumerate and no share handle to display. It is listed the
     // moment the client exists; before that, the Plex enumeration below answers empty anyway.
-    #[cfg(feature = "jellyfin")]
     if crate::jellyfin::client().is_some() {
         return vec![(crate::jellyfin::SERVER_ID, String::new())];
     }
@@ -1523,7 +1519,6 @@ fn roster_key() -> u64 {
 fn roster_key_with_scope(scope: &BrowseScope) -> u64 {
     // The Jellyfin client's install is an event no plex-registry generation can see, so under
     // the flavor it IS the high bit: boot order (sync first, install second) must still rebuild.
-    #[cfg(feature = "jellyfin")]
     if crate::jellyfin::client().is_some() {
         return u64::MAX;
     }
@@ -1715,7 +1710,6 @@ fn kick_with(gen: u32, adapter: &PmsAdapter, s: &mut Src, launch: impl FnOnce(Hu
     // The guard is load-bearing, not redundant: the jellyfin slot is 0, which test fixtures also
     // hand to `register_for_test` Plex clients — an absent jellyfin client must fall THROUGH to
     // the Plex registry, not shadow it.
-    #[cfg(feature = "jellyfin")]
     if s.sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
         let c = crate::jellyfin::client().expect("guarded above");
         let Some(request) = s.begin_request(HubClientRef::Jellyfin(c), 0, 0, gen,
@@ -1758,7 +1752,6 @@ pub(crate) fn spawn_fetch(adapter: &Arc<PmsAdapter>, request: HubRequest) -> boo
         let (resource, sid) = (request.client.resource, request.sid);
         let build = catch_unwind(move || match resource {
             HubClientRef::Plex(client) => fetch_source(client, sid),
-            #[cfg(feature = "jellyfin")]
             HubClientRef::Jellyfin(client) => fetch_source_jellyfin(client, sid),
         }).ok().flatten();
         // Outside the panic guard: every admitted worker answers, including a panicking fetch.
@@ -2012,7 +2005,6 @@ fn step_landings_with_scope(state: &mut PmsState, adapter: &PmsAdapter, dt: Opti
             // The Jellyfin client is a single leaked-static: it is the same resource for the
             // whole install, and its retirement (uninstall) removes the source from the roster
             // wholesale, so a pointer check against the current slot is the whole lifecycle.
-            #[cfg(feature = "jellyfin")]
             HubClientRef::Jellyfin(resource) => crate::jellyfin::client()
                 .is_some_and(|now| std::ptr::eq(now, resource)),
         });
@@ -2318,7 +2310,7 @@ mod local_edit_tests;
 #[path = "pms_hero_pool_tests.rs"]
 mod hero_pool_tests;
 
-#[cfg(all(test, feature = "jellyfin"))]
+#[cfg(test)]
 #[path = "pms_jellyfin_fetch_tests.rs"]
 mod jellyfin_fetch_tests;
 

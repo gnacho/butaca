@@ -38,7 +38,7 @@ pub(crate) const PRODUCT: &str = "Butaca";
 /// The display name this build shows servers (`Client="..."` and the dashboard's session list):
 /// the fork's own build says Butaca there (issue #35), the Plex backend keeps the product name.
 pub(crate) fn display_name() -> &'static str {
-    if cfg!(feature = "jellyfin") { "Butaca" } else { PRODUCT }
+    "Butaca"
 }
 
 /// The app version, derived from `Cargo.toml` rather than written as a literal — `pkg/appinfo.json`

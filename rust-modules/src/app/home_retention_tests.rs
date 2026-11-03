@@ -608,7 +608,6 @@ fn store_work_is_addressed_and_idle_polling_does_not_invent_a_change() {
 /// The launch lane is the Jellyfin world's (the pick requires its installed client); the
 /// recorded fixtures grade this contract end to end.
 #[test]
-#[cfg(feature = "jellyfin")]
 fn onboard_frame_lands_owned_discovery_before_capturing_its_directory() {
     let _guard = crate::testlock::serial();
     crate::registry::reset_for_test();
@@ -635,7 +634,6 @@ fn onboard_frame_lands_owned_discovery_before_capturing_its_directory() {
 
 /// Same flavor bound as `onboard_frame_lands_owned_discovery_before_capturing_its_directory`.
 #[test]
-#[cfg(feature = "jellyfin")]
 fn controlled_discovery_recaptures_the_directory_in_its_delivery_turn() {
     let _guard = crate::testlock::serial();
     crate::registry::reset_for_test();

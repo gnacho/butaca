@@ -8,8 +8,7 @@
  "features": [
   "devtools",
   "devtriggers",
-  "hostsim",
-  "jellyfin"
+  "hostsim"
  ],
  "init": {
   "data": {

@@ -2,7 +2,6 @@
 //! episode of every started series — leads the shelves, ahead of the per-view Recently Added
 //! rows, and a failed NextUp must not take the source down with it.
 
-#![cfg(all(test, feature = "jellyfin"))]
 
 use super::*;
 

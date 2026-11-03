@@ -839,7 +839,6 @@ pub(super) fn up_next_of(r: &crate::playback::QueueRow) -> Option<UpNext> {
 /// the episode the server says follows the one now playing, in the same shape the Plex lane
 /// gets free from its `continuous=1` PlayQueue. Episodes only, the same rule as
 /// [`up_next_of`]: "up next" is a show idea.
-#[cfg(feature = "jellyfin")]
 fn up_next_from_dto(it: &crate::jellyfin::BaseItemDto) -> Option<UpNext> {
     let m = crate::jellyfin::movie_from_dto(it, crate::jellyfin::SERVER_ID, 0)?;
     if m.kind != 3 {
@@ -864,7 +863,6 @@ fn up_next_from_dto(it: &crate::jellyfin::BaseItemDto) -> Option<UpNext> {
 /// Ask the server for the show's next episode and project it. An empty NextUp (a show never
 /// started or fully watched) is `None` exactly like a transport failure: both honestly read as
 /// "no up next".
-#[cfg(feature = "jellyfin")]
 fn jellyfin_up_next(c: &crate::jellyfin::JfClient, series_id: &str) -> Option<UpNext> {
     c.next_up(series_id)?.items.first().and_then(up_next_from_dto)
 }
@@ -1162,7 +1160,6 @@ pub(super) fn build_stream(rk: &str, part: &str, vcodec: &str, acodec: &str, env
     // GUID MediaSource instead of a numeric Part id. Same Plan shape out, so everything from
     // apply_plan down cannot tell the two apart. The installed-client guard is every jellyfin
     // arm's guard: the slot number alone is also a valid Plex slot in host fixtures.
-    #[cfg(feature = "jellyfin")]
     if env.sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
         return build_stream_jellyfin(rk, part, vcodec, acodec, env);
     }
@@ -2092,7 +2089,6 @@ pub(super) fn pick_dp_audio_pref(
 /// The language tag outranks the index because stream ids belong to the FILE: a remux or the next
 /// season renumbers them, and only the tag survives that. The remembered track still has to
 /// direct-play, or remembering it would quietly force a transcode nobody asked for.
-#[cfg_attr(not(feature = "jellyfin"), allow(dead_code))] // only the Jellyfin plan calls it
 fn remembered_audio(
     tracks: &[crate::metadata::Stream],
     memory: &crate::plex::session::SeriesTracks,
@@ -2109,7 +2105,6 @@ fn remembered_audio(
 /// The subtitle track a series was last watched with. The same tag-then-index rule as
 /// [`remembered_audio`], and the same usability rule as [`pick_dp_subtitle`]: an id the menu
 /// cannot name is not a subtitle worth turning on.
-#[cfg_attr(not(feature = "jellyfin"), allow(dead_code))] // only the Jellyfin plan calls it
 fn remembered_subtitle(
     subs: &[crate::metadata::Stream],
     memory: &crate::plex::session::SeriesTracks,
@@ -2487,7 +2482,6 @@ pub(crate) fn playback_preview_of(
 /// anything else asks the server's transcoder with this set's pinned profile (H264/AAC in
 /// MPEG-TS HLS), and the PlaybackInfo answer carries the transcode URL, the kill handle and
 /// the progress quote.
-#[cfg(feature = "jellyfin")]
 fn build_stream_jellyfin(
     rk: &str,
     part: &str,
@@ -2703,7 +2697,6 @@ pub(super) fn part_is_streamable(part_key: &str) -> bool {
 /// path extension to read — the DTO's container word IS the same fact (`part_is_streamable`
 /// stays the fallback for a row that named no container, which is also its Plex role when a
 /// part key is all we hold).
-#[cfg(feature = "jellyfin")]
 pub(super) fn streamable_container(container: &str, part_key: &str) -> bool {
     if !container.is_empty() {
         return matches!(container, "mkv" | "mp4" | "m4v");

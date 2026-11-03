@@ -3383,9 +3383,8 @@ impl DetailScreen {
         // handling stays correct even though the disc itself is never shown.)
         // The heart rides only where the backend HAS favorites: the Jellyfin flavor reads the
         // loaded item's flag; the Plex build never draws the control.
-        #[cfg(feature = "jellyfin")]
         let favorite = self.detail(meta).map(|d| d.is_favorite);
-        #[cfg(not(feature = "jellyfin"))]
+        #[cfg(any())]
         let favorite = None;
         hero::HeroSet {
             restart,
@@ -3562,7 +3561,6 @@ impl DetailScreen {
                 }
             }
             hero::HeroCtl::Favorite => {
-                #[cfg(feature = "jellyfin")]
                 if let Some(d) = self.detail(meta) {
                     let on = !d.is_favorite;
                     fx.push(Fx::App(AppFx::Store(

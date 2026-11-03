@@ -2,7 +2,6 @@
 //! `GET /Shows/NextUp` answer into the `UpNext` shape the HUD control and the auto-advance
 //! countdown already read.
 
-#![cfg(feature = "jellyfin")]
 
 use super::*;
 

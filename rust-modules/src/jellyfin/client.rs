@@ -1282,9 +1282,8 @@ mod tests {
         assert!(auth.starts_with("POST /Users/AuthenticateByName HTTP/1.1"));
         assert!(auth.to_ascii_lowercase().contains("content-type: application/json"));
         // The dashboard names the fork: Client is the display name, "Butaca" on this build.
-        #[cfg(feature = "jellyfin")]
         assert!(auth.contains("Authorization: MediaBrowser Client=\"Butaca\""));
-        #[cfg(not(feature = "jellyfin"))]
+        #[cfg(any())]
         assert!(auth.contains("Authorization: MediaBrowser Client=\"Butaca\""));
         // Key order in the body is serde_json's (alphabetical without preserve_order) — assert
         // the two fields, not one literal, so the test does not hinge on serializer internals.
