@@ -235,7 +235,7 @@ impl Initial {
         let initial = Self { version: 1,
             session: crate::auth::SessionInit::captured(saved),
             clock_start: 0, entropy: Entropy::Captured(entropy),
-            primary_client: crate::plex::Client::capture_generation_seed(),
+            primary_client: crate::registry::capture_generation_seed(),
             automated: crate::dev::any_trigger_present(),
             settings: crate::dev::scenarios::settings_boot_value(),
             content: None,

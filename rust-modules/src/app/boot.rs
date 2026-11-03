@@ -500,7 +500,9 @@ pub(crate) fn direct_trigger_server() -> Result<crate::registry::ServerId, Strin
     resolve_direct_server(
         crate::dev::server_slot(),
         crate::registry::current(),
-        |sid| crate::registry::client_for(sid).is_some(),
+        // The only live server: the Jellyfin slot, while its client is signed in. The registry
+        // half this closure used (`client_for(sid).is_some()`) went with the client slots (#166).
+        |sid| sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some(),
     )
 }
 
@@ -652,7 +654,7 @@ pub(crate) unsafe fn construct(
     if let Some(initial) = &initial {
         super::bootstrap::stores::init(initial, preflight.replay());
         initial.home.restore(&mt).map_err(|_| 1)?;
-        crate::plex::Client::restore_generation_seed(initial.primary_client).map_err(|_| 1)?;
+        crate::registry::restore_generation_seed(initial.primary_client).map_err(|_| 1)?;
     }
     SDL_SetMainReady();
     // SAM's lifecycle claim (`webos::lifecycle`) MUST run before SDL initialises. Measured on the

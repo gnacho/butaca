@@ -818,19 +818,13 @@ fn fps_milli_str(fps_milli: i64) -> String {
 
 fn connection_line(ps: &crate::route::PlaybackSession) -> String {
     let sid = crate::route::cur_sid(ps);
-    let Some(client) = crate::registry::client_for(sid) else {
-        return crate::i18n::msg::browse_diagnostics_standalone().to_string();
-    };
-    let tier = match client.link() {
-        Some(crate::plex::probe::Location::Local) => "LAN",
-        Some(crate::plex::probe::Location::Remote) => crate::i18n::msg::browse_diagnostics_remote(),
-        Some(crate::plex::probe::Location::Relay) => crate::i18n::msg::browse_diagnostics_relay(),
-        None => crate::i18n::msg::browse_diagnostics_unknown_link(),
-    };
-    format!(
-        "{tier} · PMS {}",
-        server_line(&crate::plex::serverinfo::version_of(sid))
-    )
+    // The Plex client lookup that used to name a tier and a PMS build went with the wire layer
+    // (#166). The one live backend names itself; its server has no tier and its build string is
+    // not fetched, so the row says which kind of server the byte came from and nothing more.
+    if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
+        return "Jellyfin".to_string();
+    }
+    crate::i18n::msg::browse_diagnostics_standalone().to_string()
 }
 
 fn route_line(ps: &crate::route::PlaybackSession, d: &crate::player::Diag) -> String {

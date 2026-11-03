@@ -638,7 +638,9 @@ pub const API: Timeouts = Timeouts {
 /// The deadlines for a PMS body whose size is content-dependent (library JSON, artwork, sidecar
 /// subtitles). A connect normally costs at most 8 s and fewer than one byte per second for 30 s
 /// ends a stalled transfer, but a healthy transfer has no wall-clock guillotine:
-/// `CURLOPT_TIMEOUT=0` is libcurl's documented disabled value.
+/// `CURLOPT_TIMEOUT=0` is libcurl's documented disabled value. The bulk transport that read
+/// under it went with the Plex wire layer (#166); the net suite still pins the numbers.
+#[cfg(test)]
 pub const BULK: Timeouts = Timeouts {
     connect_s: 8,
     total_s: 0,
@@ -1342,20 +1344,6 @@ pub(crate) mod resolve {
 
     static PINS: Mutex<Vec<ResolvePin>> = Mutex::new(Vec::new());
 
-    /// Record a pin. `true` when it was new, `false` when the same host and port were already
-    /// pinned (to the same address, by construction).
-    pub(crate) fn add(pin: &ResolvePin) -> bool {
-        let mut pins = PINS.lock().unwrap_or_else(|e| e.into_inner());
-        if pins
-            .iter()
-            .any(|p| p.host() == pin.host() && p.port() == pin.port())
-        {
-            return false;
-        }
-        pins.push(pin.clone());
-        true
-    }
-
     /// The pin for `host:port`, if this process has recorded one.
     pub(crate) fn lookup(host: &str, port: i32) -> Option<ResolvePin> {
         PINS.lock()
@@ -1398,12 +1386,6 @@ pub(crate) mod resolve {
         }
         crate::log(&format!("net: resolve pin refused (rc={rc}); request cancelled"));
         Err(())
-    }
-
-    /// Tests share one process-global table; this empties it between them.
-    #[cfg(test)]
-    pub(crate) fn clear() {
-        PINS.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 }
 

@@ -42,7 +42,6 @@
 //! ~140 bytes (an ordinary relative thumb) to ~177 (an absolute headshot — see [`built_key`])
 //! into a fixed [`PT_KEYLEN`]-byte array (see [`Pslot::key`]), and a `u16` compare is also the
 //! cheaper half of the per-frame identity scan, so it goes first.
-mod refresh;
 
 use crate::img;
 use crate::registry::ServerId;
@@ -367,20 +366,6 @@ fn park_retry(s: &mut Pslot) {
     s.retry_wake_sent = false;
     s.state = P_RETRY;
     crate::ui::idle::invalidate();
-}
-
-/// Does a failed fetch's outcome deserve another try? Transport failure and the statuses whose
-/// conditions can clear (401/403 after a re-point or token refresh, 408, 429 and 5xx) are
-/// transient. Other completed HTTP answers are final: retrying a redirect we deliberately do not
-/// follow, an unsupported method/media type, or a missing item can never change this request.
-/// Bytes that arrived but did not decode are the decoder's verdict and final too.
-#[allow(dead_code)] // frozen until the art cache goes
-fn is_transient(outcome: &crate::plex::ArtFetch) -> bool {
-    match outcome {
-        crate::plex::ArtFetch::Bytes(_) => false,
-        crate::plex::ArtFetch::Status(s) => matches!(s, 401 | 403 | 408 | 429 | 500..=599),
-        crate::plex::ArtFetch::NoResponse => true,
-    }
 }
 
 /// Does this slot hold the art `srv` was asked for under `key`?
@@ -828,7 +813,10 @@ fn lookup(srv: ServerId, key_s: &str, touch: Touch) -> (Hit, Warm) {
     let decline = touch == Touch::Draw && crate::ui::card_motion::declines_request();
     let mut g = store();
     let cache_gen = crate::imgcache::generation();
-    let token_gen = crate::registry::client_for(srv).map_or(0, |c| c.token_gen());
+    // The token generation was the Plex slot's token-baked cache key; that world is retired
+    // (#166), and the one live source — the Jellyfin server — has no token rotation, so the
+    // generation is the constant the landing wire carries (0).
+    let token_gen = 0;
     // hit?
     for i in 0..PT_CAP {
         if g.slots[i].cache_gen == cache_gen && g.slots[i].token_gen == token_gen && slot_matches(&g.slots[i], srv, key_s.as_bytes()) {
@@ -1359,22 +1347,6 @@ fn warn_fetch_failed(srv: ServerId, cause: ArtFail) {
 /// Cumulative network attempts, including stale refreshes. No URL or credential is logged.
 static FETCHES: AtomicU64 = AtomicU64::new(0);
 
-fn fetch_image(client: &crate::plex::Client, path: &str) -> Option<Vec<u8>> {
-    FETCHES.fetch_add(1, Ordering::Relaxed);
-    client.fetch_built(path)
-}
-
-/// Use the persistent PMS identity, never its registration-order slot. An origin is the
-/// conservative fallback for injected/older sessions that have not learned a machine id yet.
-#[allow(dead_code)] // frozen until the art cache goes
-fn disk_namespace(client: &crate::plex::Client) -> String {
-    if client.machine_id().is_empty() {
-        format!("origin:{}", client.origin().base())
-    } else {
-        format!("machine:{}", client.machine_id())
-    }
-}
-
 /// Diagnostic snapshot only: reading counters must never initialize or scan the disk cache
 /// on the frame thread. The two demand workers are the only callers that open it.
 pub(crate) fn log_cache_stats() {
@@ -1401,7 +1373,7 @@ struct Loaded<T> {
 /// RAM/GPU residency stays bounded independently of the number of persistent images.
 fn poster_worker() {
     loop {
-        let (idx, key_s, srv, gen, cache_gen, token_gen) = {
+        let (idx, key_s, srv, gen, cache_gen, _token_gen) = {
             let mut g = store();
             let idx = loop {
                 if g.quit { return; }
@@ -1420,7 +1392,6 @@ fn poster_worker() {
         let mut h = 0;
         let mut px: *mut std::os::raw::c_uchar = std::ptr::null_mut();
 
-        let stale = None;
         let mut transient = false;
         // The Jellyfin slot fetches through ITS client: the key was built by `image_path` and is
         // already a complete token-bearing path, which is what `get_bytes` dials as-is. The
@@ -1474,11 +1445,6 @@ fn poster_worker() {
             } else { false }
         };
         if !accepted && !px.is_null() { img::img_free(px); }
-        if accepted {
-            if let Some((client, key)) = stale {
-                refresh::enqueue(client, key_s, key, cache_gen, token_gen);
-            }
-        }
     }
 }
 
@@ -1499,7 +1465,6 @@ pub(crate) fn init() {
         .filter_map(|_| crate::task::spawn("poster", poster_worker))
         .collect();
     store().workers = handles;
-    refresh::init();
 }
 
 pub(crate) fn shutdown() {
@@ -1508,7 +1473,6 @@ pub(crate) fn shutdown() {
         g.quit = true;
     }
     CV.notify_all();
-    refresh::shutdown();
     let handles = std::mem::take(&mut store().workers);
     for h in handles {
         // these park in `stream::http_get`, whose socket nothing outside the call can reach —
@@ -2727,24 +2691,6 @@ mod tests {
         // …and so is a parked RETRY: a tile that scrolled away must not hold its slot
         failed[8].state = P_RETRY;
         assert_eq!(victim(&failed, 7), Some(8));
-    }
-
-    /// **A transient failure is parked, not burnt** (#107): the boot's plaintext window, a refused
-    /// connect or a 5xx used to mark a poster `P_FAILED`, and `lookup` then answered "no art"
-    /// for that key for as long as the slot lived — so a cover that missed once stayed a skeleton
-    /// for the session while the debug build (which allows plaintext tokens) showed it. Only a
-    /// status that will not change is final.
-    #[test]
-    fn only_a_final_status_is_final() {
-        use crate::plex::ArtFetch;
-        for s in [301, 400, 404, 405, 410, 414, 415, 422] {
-            assert!(!is_transient(&ArtFetch::Status(s)), "{s} will not change");
-        }
-        for s in [401, 403, 408, 429, 500, 502, 503, 504] {
-            assert!(is_transient(&ArtFetch::Status(s)), "{s} can change");
-        }
-        assert!(is_transient(&ArtFetch::NoResponse), "no response is the boot window's shape");
-        assert!(!is_transient(&ArtFetch::Bytes(vec![1])), "bytes are the decoder's to judge");
     }
 
     /// The wait doubles from one second and caps at thirty: quick enough that the plaintext

@@ -6,12 +6,25 @@ use super::*;
 use super::test_support::*;
 use super::test_support::{directory_policy_fixture, DirectoryPolicyCleanup};
 
+/// The view-state write guard admits only the Jellyfin slot with a signed-in client
+/// (`viewstate.rs`'s single-source rule), so the suites below install the synthetic backend and
+/// address `SERVER_ID`; [`DirectoryPolicyCleanup`]'s Drop takes it down again.
+fn install_backend_for_viewstate() -> crate::registry::ServerId {
+    crate::jellyfin::install(crate::jellyfin::JfClient::synthetic(
+        crate::origin::Origin::http("127.0.0.1", 8096),
+        "viewstate-test-device".into(),
+        "tok".to_string(),
+        "user-viewstate-test".into(),
+        "Viewstate Test".into(),
+    ));
+    crate::jellyfin::SERVER_ID
+}
+
 #[test]
 fn viewstate_optimistic_home_edit_keeps_the_frame_directory_policy() {
     let _guard = crate::testlock::serial();
     crate::registry::reset_for_test();
-    let sid = crate::registry::register_with_client_id(
-        "bridge-viewstate-directory", "127.0.0.1", 9, "synthetic", "fixture");
+    let sid = install_backend_for_viewstate();
     let _cleanup = DirectoryPolicyCleanup;
     let mut rig = Bridge::for_test(|| 0);
     rig.directory = directory_policy_fixture(sid, sid);
@@ -243,8 +256,7 @@ fn profile_activation_clears_the_same_bridge_person_before_a_new_mount() {
 fn viewstate_optimistic_edit_mutates_only_its_bridge_person_store() {
     let _guard = crate::testlock::serial();
     crate::registry::reset_for_test();
-    let sid = crate::registry::register_with_client_id(
-        "bridge-person-viewstate", "127.0.0.1", 9, "synthetic", "fixture");
+    let sid = install_backend_for_viewstate();
     let mut first = Bridge::for_test(|| 0);
     let mut second = Bridge::for_test(|| 0);
     for bridge in [&mut first, &mut second] {
@@ -316,8 +328,7 @@ fn detail_watch_activation_dispatches_the_addressed_store_effect_in_the_press_fr
 
     let _guard = crate::testlock::serial();
     crate::registry::reset_for_test();
-    let sid = crate::registry::register_with_client_id(
-        "bridge-detail-viewstate", "127.0.0.1", 9, "synthetic", "fixture");
+    let sid = install_backend_for_viewstate();
     let _cleanup = DirectoryPolicyCleanup;
     let route = AppArg::Content(ContentArg::Detail { sid, rk: "movie".into() });
     let mut dispatcher = Dispatcher::<AppHost>::new();
@@ -361,10 +372,8 @@ fn detail_watch_activation_dispatches_the_addressed_store_effect_in_the_press_fr
 fn search_capture_and_pump_keep_the_frame_directory_policy() {
     let _guard = crate::testlock::serial();
     crate::registry::reset_for_test();
-    let own = crate::registry::register_with_client_id(
-        "bridge-search-own", "127.0.0.1", 9, "synthetic", "fixture");
-    let hidden = crate::registry::register_with_client_id(
-        "bridge-search-hidden", "127.0.0.1", 10, "synthetic", "fixture");
+    let own = install_backend_for_viewstate();
+    let hidden = crate::registry::ServerId::from_raw(1);
     let _cleanup = DirectoryPolicyCleanup;
     let mut rig = Bridge::for_test(|| 0);
     rig.search_run(crate::stores::search::SearchCmd::Reset);
@@ -409,8 +418,7 @@ fn search_capture_and_pump_keep_the_frame_directory_policy() {
 fn separate_bridges_do_not_share_any_search_owner_state_or_notice() {
     let _guard = crate::testlock::serial();
     crate::registry::reset_for_test();
-    let server = crate::registry::register_with_client_id(
-        "bridge-search-landing", "127.0.0.1", 11, "synthetic", "landing");
+    let server = install_backend_for_viewstate();
     let _cleanup = DirectoryPolicyCleanup;
     let mut first = Bridge::for_test(|| 0);
     let mut second = Bridge::for_test(|| 0);
@@ -478,8 +486,7 @@ fn separate_bridges_do_not_share_any_search_owner_state_or_notice() {
 fn search_reset_rotates_the_adapter_and_fences_a_late_old_worker() {
     let _guard = crate::testlock::serial();
     crate::registry::reset_for_test();
-    let server = crate::registry::register_with_client_id(
-        "bridge-search-late-worker", "127.0.0.1", 12, "synthetic", "late-worker");
+    let server = crate::registry::ServerId::from_raw(0);
     let _cleanup = DirectoryPolicyCleanup;
     let mut bridge = Bridge::for_test(|| 0);
     let old_adapter = bridge.stores.search.adapter_for_test();
@@ -522,8 +529,7 @@ fn search_reset_rotates_the_adapter_and_fences_a_late_old_worker() {
 fn metadata_reset_rotates_the_adapter_and_fences_a_late_old_worker() {
     let _guard = crate::testlock::serial();
     crate::registry::reset_for_test();
-    let sid = crate::registry::register_with_client_id(
-        "bridge-metadata-late-worker", "127.0.0.1", 15, "synthetic", "late-worker");
+    let sid = crate::registry::ServerId::from_raw(1);
     let _cleanup = DirectoryPolicyCleanup;
     let mut bridge = Bridge::for_test(|| 0);
 

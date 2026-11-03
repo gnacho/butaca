@@ -7038,7 +7038,7 @@ fn hls_demux(
             crate::player::log("abr: candidate spent its exploration reserve in the control plane");
             continue;
         }
-        let candidate_url = crate::plex::StreamUrl::parse(&primed.url);
+        let candidate_url = crate::origin::StreamUrl::parse(&primed.url);
         if candidate_url.origin != *origin {
             control.abandon(&primed.encoder_session);
             reject_hls_abr_after_transaction(

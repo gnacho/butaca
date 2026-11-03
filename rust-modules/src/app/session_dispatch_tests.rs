@@ -11,10 +11,8 @@ fn browse_tab_generation_is_owned_and_chrome_never_replays_a_stale_shape() {
     let session = crate::plex::session::TempSession::new("bridge-browse-tabs");
     session.watching("u-bridge-browse-tabs");
     crate::registry::reset_for_test();
-    let own = crate::registry::register_with_client_id(
-        "bridge-tabs-own", "127.0.0.1", 9, "synthetic", "fixture");
-    let shared = crate::registry::register_with_client_id(
-        "bridge-tabs-shared", "127.0.0.1", 10, "synthetic", "fixture");
+    let own = crate::registry::ServerId::from_raw(0);
+    let shared = crate::registry::ServerId::from_raw(1);
     let mut rig = Bridge::for_test(|| 0);
     rig.stores.browse.borrow_mut().seed_registered_table_for_test([own, shared]);
     let mut pages = Dispatcher::<AppHost>::new();

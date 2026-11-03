@@ -1570,32 +1570,12 @@ mod tests {
         );
     }
 
-    /// `DOVIVersion` arrives as the STRING "1.0" and is stored decomposed so `Dovi` can stay
-    /// `Copy` (it is read on a per-frame draw path). The round trip has to be exact, and an
-    /// unparseable value has to land as "the server said nothing" rather than as a panic or a 0.0.
+    /// `Dovi`'s version is stored DECOMPOSED so the struct can stay `Copy` (it is read on a
+    /// per-frame draw path). The wire-side string parser went with the Plex stream parse (#166);
+    /// what the draw path reads — `version_str`'s caption and the unsaid absence — stays graded.
     #[test]
-    fn the_dolby_vision_version_round_trips_through_its_decomposition() {
+    fn the_dolby_vision_version_caption_is_the_decomposed_pair() {
         use metadata::Dovi;
-        assert_eq!(Dovi::parse_version("1.0"), (1, 0));
-        assert_eq!(Dovi::parse_version("2.1"), (2, 1));
-        assert_eq!(
-            Dovi::parse_version("1.0.0"),
-            (1, 0),
-            "a three-part version keeps two"
-        );
-        assert_eq!(
-            Dovi::parse_version("2"),
-            (2, 0),
-            "a bare major is major-only"
-        );
-        assert_eq!(Dovi::parse_version(" 1.0 "), (1, 0));
-        for junk in ["", "  ", "abc", "1.x", "-1.0", "1.-2"] {
-            assert_eq!(
-                Dovi::parse_version(junk),
-                (0, 0),
-                "{junk:?} must read as unsaid"
-            );
-        }
         let dv = Dovi {
             version: (1, 0),
             ..Dovi::NONE

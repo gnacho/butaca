@@ -1081,8 +1081,8 @@ fn hero_action_row_hit_matches_the_drawn_controls_at_every_set_size() {
     let _guard = crate::testlock::serial();
     use crate::ui::hit::{HitMap, PointerKind};
     crate::registry::reset_for_test();
-    let sid = crate::registry::register_with_client_id("hero-hit-own", "127.0.0.1", 1, "t", "c1");
-    let other = crate::registry::register_with_client_id("hero-hit-other", "127.0.0.1", 2, "t", "c2");
+    let sid = crate::registry::ServerId::from_raw(0);
+    let other = crate::registry::ServerId::from_raw(1);
     let measure = crate::ui::fixture::FixtureMeasure;
     let context = cx(&measure, None);
     let mut sizes = std::collections::BTreeSet::new();
@@ -2019,7 +2019,7 @@ fn leaving_the_page_resets_play_once_state_alongside_the_existing_preview_fields
 fn a_watch_disc_press_emits_an_addressed_viewstate_effect_without_global_apply() {
     let _guard = crate::testlock::serial();
     crate::registry::reset_for_test();
-    let sid = crate::registry::register_with_client_id("detail-watch", "127.0.0.1", 1, "t", "c");
+    let sid = crate::registry::ServerId::from_raw(2);
     crate::metadata::set_current_for_test(test_store().state_mut(), Some(Detail {
         sid,
         rk: "movie".into(),

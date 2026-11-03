@@ -18,10 +18,9 @@ fn keyboard_rail_ok_down_up_returns_without_arming_or_requesting_a_card() {
     let session = crate::plex::session::TempSession::new("library-rail-key-return");
     session.watching("u-library-rail-key-return");
     crate::registry::reset_for_test();
-    let sid = crate::registry::register_with_client_id("rail-own", "127.0.0.1", 9, "synthetic", "fixture");
+    let sid = crate::registry::ServerId::from_raw(0);
     let shared =
-        crate::registry::register_with_client_id("rail-shared", "127.0.0.1", 10, "synthetic", "fixture");
-    crate::registry::set_current(sid);
+        crate::registry::ServerId::from_raw(1);
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
     rig.stores.browse.borrow_mut().seed_registered_table_for_test([sid, shared]);

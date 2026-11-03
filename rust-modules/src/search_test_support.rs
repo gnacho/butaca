@@ -93,6 +93,10 @@ impl Drop for Fresh {
 pub(super) fn fresh() -> Fresh {
     let g = crate::testlock::serial();
     crate::registry::reset_for_test();
+    // The fan-out's one live source is installed per-test by [`register`]; start every test
+    // from no backend at all, so a helper-installed client cannot leak into a test that means
+    // to grade the empty roster.
+    crate::jellyfin::uninstall();
     Fresh(g)
 }
 
@@ -106,24 +110,25 @@ pub(super) fn hold_off(owner: &mut Owner) {
     owner.state.armed = false;
 }
 
-/// A registered loopback slot. The port is never dialled — `hold_off` parks every spawn — so
-/// this exists only to give [`slots`] a roster to fan out over. `register_for_test`, not the
-/// public `register`: the latter mints and PERSISTS a device uuid.
+/// The live fan-out's one source. The multi-slot roster this used to seed went with the registry
+/// (#166): `slots()` is the empty Plex roster plus the Jellyfin slot while its client is
+/// installed, so the helper installs the synthetic client — the port is never dialled, `hold_off`
+/// parks every spawn — and the count is accepted for signature stability and ignored.
 pub(super) fn register(owner: &mut Owner, n: usize) {
-    for i in 0..n {
-        crate::registry::register_with_client_id(
-            &format!("search-test-{i}"),
-            "127.0.0.1",
-            1,
-            "tok",
-            "cid-search-test",
-        );
-    }
+    let _ = n;
+    crate::jellyfin::uninstall();
+    crate::jellyfin::install(crate::jellyfin::JfClient::synthetic(
+        crate::origin::Origin::http("127.0.0.1", 8096),
+        "search-test-device".into(),
+        "tok".to_string(),
+        "user-search-test".into(),
+        "Search Test".into(),
+    ));
     // Test setup finishes before any seeded mailbox/status. Production learns this boundary
     // from its first pump; fixtures that inject a landing directly must mark the just-built
     // roster as already observed so that first pump grades the landing rather than setup.
     owner.state.visible = crate::registry::roster_gen();
-    assert_eq!(nsrc(), n);
+    assert_eq!(nsrc(), 1, "the single-source fan-out is exactly one live slot");
 }
 
 pub(super) fn media(rk: &str) -> Item {

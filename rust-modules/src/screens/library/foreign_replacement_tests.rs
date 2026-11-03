@@ -161,9 +161,9 @@ fn foreign_table_replacement_during_grid_query_mounts_incoming_engine_focus_and_
     }
     let _cleanup = Cleanup;
     crate::registry::reset_for_test();
-    let own = crate::registry::register_with_client_id("foreign-own", "127.0.0.1", 9, "synthetic", "fixture");
+    let own = crate::registry::ServerId::from_raw(0);
     let shared =
-        crate::registry::register_with_client_id("foreign-shared", "127.0.0.1", 10, "synthetic", "fixture");
+        crate::registry::ServerId::from_raw(1);
     for incoming_index in [0, 2] {
         let stores = crate::stores::Stores::default();
         let outgoing = Publication::replace(&stores, [own, shared], 0);

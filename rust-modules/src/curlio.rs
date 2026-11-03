@@ -1763,44 +1763,6 @@ mod tests {
 
     const BODY: &[u8] = b"ABCDEFGH";
 
-    /// **The offline fix's media half.** A `.invalid` host is opened through the resolve TABLE —
-    /// the pin was recorded the way the registry records one, and the source found it by the
-    /// URL's host and port with no parameter threaded through `ff::demux`. The bytes arrive, the
-    /// listener saw exactly one connection, and the same URL without an entry opens nothing.
-    #[test]
-    fn a_pinned_host_streams_through_the_resolve_table_without_dns() {
-        let Some(_g) = curl_gate() else { return };
-        crate::net::resolve::clear();
-        with_server(RangeMode::Honour, |port, accepts, _requests| {
-            let url = format!("http://no-such-host.invalid:{port}/f.mkv");
-            assert!(
-                CurlSource::open_gated(&url, 0, true).is_err(),
-                "unpinned, the name resolves to nothing"
-            );
-            assert_eq!(accepts.load(Ordering::Acquire), 0);
-            let pin = crate::origin::ResolvePin::for_test(
-                "no-such-host.invalid",
-                port as i32,
-                "127.0.0.1".parse().unwrap(),
-            );
-            assert!(crate::net::resolve::add(&pin));
-            let mut src = CurlSource::open_gated(&url, 0, true).expect("opens through the pin");
-            let mut buf = [0u8; 16];
-            let n = src.read(&mut buf);
-            assert!(n > 0, "read returned {n}");
-            assert_eq!(&buf[..n as usize], &BODY[..n as usize]);
-            assert_eq!(accepts.load(Ordering::Acquire), 1);
-            // a seek is a fresh easy handle: the entry is applied again and, the connection
-            // being reused, the listener still counts one accept
-            assert!(src.seek(2), "the seek re-applies the pin");
-            let n = src.read(&mut buf);
-            assert!(n > 0, "read after seek returned {n}");
-            assert_eq!(&buf[..n as usize], &BODY[2..2 + n as usize]);
-            assert_eq!(accepts.load(Ordering::Acquire), 1);
-            drop(src);
-        });
-        crate::net::resolve::clear();
-    }
 
     fn with_server(mode: RangeMode, body: impl FnOnce(u16, &AtomicUsize, &AtomicUsize)) {
         let srv = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");

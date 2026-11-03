@@ -349,6 +349,11 @@ impl Cache {
         })
     }
 
+    /// The disk-cache write path. No production caller remains (the one writer was the Plex
+    /// art-refresh queue, retired with the wire layer, #166; the Jellyfin arm fetches without a
+    /// disk namespace), so the write semantics stay graded by this module's own suite and the
+    /// path waits frozen for a backend that wants the disk cache back.
+    #[cfg_attr(not(test), expect(dead_code))] // frozen until the art cache goes
     fn write_at(&self, generation: u64, key: &DiskKey, bytes: &[u8]) -> bool {
         let mut index = self.index.lock().unwrap_or_else(|e| e.into_inner());
         if self.generation.load(Ordering::Acquire) != generation {
@@ -628,9 +633,6 @@ pub(crate) fn generation() -> u64 {
 #[allow(dead_code)] // frozen until the art cache goes
 pub(crate) fn read_at(generation: u64, key: &DiskKey) -> Option<CachedImage> {
     cache().read_at(generation, key)
-}
-pub(crate) fn write_at(generation: u64, key: &DiskKey, bytes: &[u8]) -> bool {
-    cache().write_at(generation, key, bytes)
 }
 #[allow(dead_code)] // frozen until the art cache goes
 pub(crate) fn remove_at(generation: u64, key: &DiskKey) {

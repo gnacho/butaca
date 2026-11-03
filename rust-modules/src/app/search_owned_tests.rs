@@ -593,8 +593,8 @@ fn owned_search_result_keys_are_server_scoped_and_survive_same_query_reordering(
         Some(next)
     });
     crate::registry::reset_for_test();
-    let a = crate::registry::register_with_client_id("search-a", "127.0.0.1", 1, "a", "search");
-    let b = crate::registry::register_with_client_id("search-b", "127.0.0.1", 2, "b", "search");
+    let a = crate::registry::ServerId::from_raw(0);
+    let b = crate::registry::ServerId::from_raw(1);
     let item = |sid| crate::search::Item::Media(crate::pms::PmsMovie {
         sid, rk: "same-local-key".into(), title: "Synthetic movie".into(), ..Default::default()
     });

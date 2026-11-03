@@ -344,6 +344,68 @@ pub fn split(url: &str) -> (Origin, &str) {
     )
 }
 
+// ---- StreamUrl — the streaming return type ----
+
+/// A built playback target for the raw demux/cue sockets. NOT a fetched response — the player
+/// passes its origin and path straight to `crate::stream::http_open`. Range headers for seeks
+/// are added by the player as `http_open`'s `extra`, never here. `path` includes the `?query`.
+///
+/// Originally the typed Plex layer's return type; it moved here with the wire layer's retirement
+/// because its one surviving reader is the media plane itself, which splits ANY stored playback
+/// URL — a Jellyfin transcode target included — back into origin + path (`player::engine`, `ff.rs`).
+pub struct StreamUrl {
+    /// Where the bytes come from ([`Origin`]) — copied from whichever client built the URL, so a
+    /// stream target can never disagree with the control plane about which scheme, host and port
+    /// it means.
+    pub origin: Origin,
+    pub path: String,
+}
+
+impl StreamUrl {
+    /// The full `{scheme}://{authority}{path}` form — what a caller STORES as the playback URL
+    /// (the engine later splits it back with [`StreamUrl::parse`]).
+    ///
+    /// Byte-identical to the `format!("http://{host}:{port}{path}")` spelling for a plaintext
+    /// origin, and correct for the two shapes that spelling could not express: an https origin,
+    /// and a v6 literal (which must be BRACKETED in a URL and BARE at the resolver — see
+    /// [`Origin`]).
+    #[allow(dead_code)] // the stored-URL spelling; the engine only reads today
+    pub fn to_url(&self) -> String {
+        format!("{}{}", self.origin.base(), self.path)
+    }
+
+    /// Parse an EXTERNAL full URL (the `/tmp/butaca-url` override) back into parts —
+    /// replaces `player::engine::parse_stream_url`.
+    ///
+    /// **Total**, because its caller has no failure path: a garbage override has to come back as
+    /// *something* to fail on at `http_open`. That is why it goes through [`split`] rather than
+    /// [`Origin::parse`] — the defaults are the ones this function has always had (no scheme means
+    /// `http`, no port means 32400), and an undialable port becomes the default instead of wrapping
+    /// into one nobody wrote down.
+    pub fn parse(url: &str) -> StreamUrl {
+        let (origin, path) = split(url);
+        StreamUrl {
+            origin,
+            path: if path.is_empty() {
+                "/".into()
+            } else {
+                path.into()
+            },
+        }
+    }
+
+    /// The host to DIAL — bare, never bracketed. `crate::stream` takes this; a URL takes
+    /// [`StreamUrl::to_url`].
+    #[cfg(test)]
+    pub fn host(&self) -> &str {
+        self.origin.host()
+    }
+    #[cfg(test)]
+    pub fn port(&self) -> i32 {
+        self.origin.port()
+    }
+}
+
 /// The HOST of a URL, **bare** — a borrowed view for a caller that only wants to look at the host
 /// and has no use for an owned [`Origin`].
 ///
@@ -916,6 +978,72 @@ mod tests {
         // the abbreviated v6 spelling this repo's fixtures guessed is NOT what plex.tv sends
         let abbrev = Origin::parse("https://2001-db8--1.h4sh.plex.direct:32400").unwrap();
         assert_eq!(ResolvePin::for_origin(&abbrev, "2001:db8::1"), None);
+    }
+
+    /// `StreamUrl`'s two halves answer two different questions: [`StreamUrl::to_url`] is what a
+    /// caller STORES (a URL string) and [`StreamUrl::host`] is what `crate::stream` DIALS. The
+    /// engine really does round-trip the stored string through [`StreamUrl::parse`], so that trip
+    /// is graded rather than assumed — and the `to_url` bytes are pinned, because a change there
+    /// is a change to every playback URL in the app.
+    #[test]
+    fn a_stream_url_round_trips_through_the_string_route_stores() {
+        let su = StreamUrl {
+            origin: Origin::http("10.0.0.1", 32400),
+            path: "/library/parts/9?X-Plex-Token=t".into(),
+        };
+        assert_eq!(
+            su.to_url(),
+            "http://10.0.0.1:32400/library/parts/9?X-Plex-Token=t"
+        );
+
+        let back = StreamUrl::parse(&su.to_url());
+        assert_eq!((back.host(), back.port()), ("10.0.0.1", 32400));
+        assert_eq!(back.path, su.path);
+        assert_eq!(back.to_url(), su.to_url());
+    }
+
+    /// The two shapes `StreamUrl` could not previously express. Nothing calls it with either yet —
+    /// they are here so the transport lane inherits a splitter that is already right, and so the
+    /// v6 case cannot regress to the old reading, which took `[` as the entire host.
+    #[test]
+    fn a_stream_url_understands_https_and_a_bracketed_v6_literal() {
+        let s = StreamUrl::parse("https://nas.hash.plex.direct:32400/video/x?a=1");
+        assert!(s.origin.is_tls());
+        assert_eq!(
+            (s.host(), s.port(), s.path.as_str()),
+            ("nas.hash.plex.direct", 32400, "/video/x?a=1")
+        );
+        assert_eq!(s.to_url(), "https://nas.hash.plex.direct:32400/video/x?a=1");
+
+        let v6 = StreamUrl::parse("http://[2001:db8::1]:32400/p");
+        assert_eq!(
+            v6.host(),
+            "2001:db8::1",
+            "the resolver never sees the brackets"
+        );
+        assert_eq!(
+            v6.to_url(),
+            "http://[2001:db8::1]:32400/p",
+            "…and the URL always carries them"
+        );
+    }
+
+    /// The defaults `player::engine::parse_stream_url` had and this inherited: no scheme means
+    /// http, no port means 32400, and no path at all means `/` — a bare host is a request for the
+    /// server's root, not for the empty string. The `/tmp/butaca-url` override is written by
+    /// hand, so all three are reachable.
+    #[test]
+    fn a_stream_url_keeps_the_defaults_the_override_trigger_relies_on() {
+        let bare = StreamUrl::parse("192.0.2.10");
+        assert_eq!(
+            (bare.host(), bare.port(), bare.path.as_str()),
+            ("192.0.2.10", 32400, "/")
+        );
+        assert_eq!(StreamUrl::parse("192.0.2.10/x").port(), 32400);
+        assert_eq!(
+            StreamUrl::parse("http://192.0.2.10:8020/f.mkv").port(),
+            8020
+        );
     }
 
     #[test]

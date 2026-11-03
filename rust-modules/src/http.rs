@@ -136,23 +136,6 @@ impl Reply {
 /// failing (`plex/CLAUDE.md`), so this constant is shared rather than spelled per call site.
 pub(crate) const ACCEPT_JSON: &str = "Accept: application/json";
 
-/// The response-body ceiling for a BULK/JSON read (library catalogs, hubs, search). A healthy PMS
-/// answer can be large, but a hostile one must not inflate an unbounded allocation past the
-/// process's 160 MB telemetry budget (issue #131).
-pub(crate) const BULK_JSON_MAX_BYTES: usize = 64 * 1024 * 1024;
-
-/// The response-body ceiling for artwork/images fetched through the BULK path. The poster store
-/// re-caps committed files at imgcache's 4 MiB AFTER download; this bounds the in-flight read
-/// itself, which is the allocation a hostile server could otherwise inflate without limit.
-pub(crate) const BULK_ART_MAX_BYTES: usize = 8 * 1024 * 1024;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BodyPolicy {
-    Api,
-    Bulk { max: usize },
-    Probe { max: usize, timeout_s: i32 },
-}
-
 /// **The one entry point.** One request to `origin` for `path`, over whichever transport that
 /// origin's scheme names.
 ///
@@ -170,7 +153,7 @@ pub(crate) fn request(
     headers: &[&str],
     pin: Option<&ResolvePin>,
 ) -> Option<Reply> {
-    request_with(origin, path, method, headers, BodyPolicy::Api, pin, &[]).response()
+    request_with(origin, path, method, headers, pin, &[]).response()
 }
 
 /// A JSON-body POST: the one shape Jellyfin's control plane needs that Plex's never did
@@ -192,74 +175,7 @@ pub(crate) fn request_post_json(
     all.extend_from_slice(headers);
     all.push(&ct);
     all.push(&cl);
-    request_with(origin, path, Method::Post, &all, BodyPolicy::Api, None, body).response()
-}
-
-/// A PMS request whose response size is content-dependent. Only the TLS arm differs from
-/// [`request`]: it keeps the connect timeout and disables the 25 s whole-transfer deadline.
-/// `max_body` is the response-body ceiling on BOTH arms: the caller names the budget that fits
-/// what it asked for ([`BULK_JSON_MAX_BYTES`] for JSON, [`BULK_ART_MAX_BYTES`] for artwork), and
-/// a body past it fails the read closed rather than truncating.
-pub(crate) fn request_bulk(
-    origin: &Origin,
-    path: &str,
-    method: Method,
-    headers: &[&str],
-    max_body: usize,
-    pin: Option<&ResolvePin>,
-) -> Option<Reply> {
-    request_with(
-        origin,
-        path,
-        method,
-        headers,
-        BodyPolicy::Bulk { max: max_body },
-        pin,
-        &[],
-    )
-    .response()
-}
-
-/// A bounded discovery probe. The caller chooses 5 s for a local candidate and 10 s for a remote
-/// or relay candidate; this façade carries that policy into either transport without either arm
-/// trying to infer locality from an address.
-///
-/// **Pinned.** `auth::race_batch` builds a [`ResolvePin`] for each `https://…plex.direct`
-/// candidate from the address plex.tv advertised beside it (`ResolvePin::for_origin`) and hands it
-/// down here — exactly the mechanism data calls already use (the `tls` arm below), now run at the
-/// DIAL that decides a winner rather than only after one is already decided. The plaintext arm
-/// ignores it: a pin belongs to a TLS name, never to a literal. A candidate whose dashed label does
-/// not encode the address it was persisted with gets no pin, and resolves through DNS exactly as
-/// before.
-///
-/// `Err` is a transport failure, carrying libcurl's [`crate::net::RequestFailure`] when the TLS
-/// arm produced one — the evidence a discovery verdict names per route
-/// (`plex::probe::RouteOutcome::of_failure`). `None` from the plaintext arm, which has no code.
-pub(crate) fn request_probe(
-    origin: &Origin,
-    path: &str,
-    method: Method,
-    headers: &[&str],
-    max_body: usize,
-    timeout_s: i32,
-    pin: Option<&ResolvePin>,
-) -> Result<Reply, Option<crate::net::RequestFailure>> {
-    match request_with(
-        origin,
-        path,
-        method,
-        headers,
-        BodyPolicy::Probe {
-            max: max_body,
-            timeout_s,
-        },
-        pin,
-   
-        &[],
-    ) {
-        RequestOutcome::Response(reply) => Ok(reply),
-        RequestOutcome::Transport(failure) => Err(failure),
-    }
+    request_with(origin, path, Method::Post, &all, None, body).response()
 }
 
 fn request_with(
@@ -267,7 +183,6 @@ fn request_with(
     path: &str,
     method: Method,
     headers: &[&str],
-    body_policy: BodyPolicy,
     pin: Option<&ResolvePin>,
     req_body: &[u8],
 ) -> RequestOutcome {
@@ -276,8 +191,8 @@ fn request_with(
     }
     match origin.scheme() {
         // The plaintext arm dials the literal it is given; a pin belongs to a TLS NAME only.
-        Scheme::Http => plaintext(origin, path, method, headers, body_policy, req_body),
-        Scheme::Https => tls(origin, path, method, headers, body_policy, pin, req_body),
+        Scheme::Http => plaintext(origin, path, method, headers, req_body),
+        Scheme::Https => tls(origin, path, method, headers, pin, req_body),
     }
 }
 
@@ -433,7 +348,6 @@ fn plaintext(
     path: &str,
     method: Method,
     headers: &[&str],
-    body_policy: BodyPolicy,
     req_body: &[u8],
 ) -> RequestOutcome {
     // The raw socket takes ONE `extra` blob, CRLF-terminated per line and CRLF-terminated at the
@@ -466,21 +380,12 @@ fn plaintext(
     let extra_ptr = extra_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
 
     let mut hs = crate::stream::http_stream_boxed();
-    let opened = match body_policy {
-        BodyPolicy::Probe { timeout_s, .. } => crate::stream::http_open_probe(
-            &mut *hs,
-            host_c.as_ptr(),
-            origin.port(),
-            path_c.as_ptr(),
-            extra_ptr,
-            method.as_str(),
-            timeout_s.saturating_mul(1000),
-        ),
+    let opened = if !req_body.is_empty() {
         // The JSON-body entry point is the one caller that brings bytes of its own, and it runs
         // the ordinary API policy only — there is no body-bearing probe variant, and
         // `request_post_json`'s doc says why none is needed. An empty slice keeps `http_open`'s
         // byte-for-byte head and behaviour.
-        _ if !req_body.is_empty() => crate::stream::http_open_body(
+        crate::stream::http_open_body(
             &mut *hs,
             host_c.as_ptr(),
             origin.port(),
@@ -488,15 +393,16 @@ fn plaintext(
             extra_ptr,
             method.as_str(),
             req_body,
-        ),
-        _ => crate::stream::http_open(
+        )
+    } else {
+        crate::stream::http_open(
             &mut *hs,
             host_c.as_ptr(),
             origin.port(),
             path_c.as_ptr(),
             extra_ptr,
             method.as_str(),
-        ),
+        )
     };
     // Read the status BEFORE anything else: a non-2xx open has already closed the socket, and the
     // code survives on the struct (`http_open` says so where it closes). That is the whole reason
@@ -508,26 +414,10 @@ fn plaintext(
     // transfer. Both still break, so what this function returns is unchanged — a short body is
     // handed back exactly as it is, and only the event log gains a fact.
     let mut recv_err = false;
-    let mut overflowed = false;
     if opened == 0 {
         let mut chunk = vec![0u8; 65536];
         loop {
-            // Read at most one byte past a ceiling. That one-byte lookahead distinguishes an
-            // exactly-full body followed by EOF from a body that is actually too large, without
-            // ever extending `body` past the cap.
-            let room = match body_policy {
-                BodyPolicy::Probe { max, .. } | BodyPolicy::Bulk { max } => {
-                    max.saturating_sub(body.len())
-                }
-                BodyPolicy::Api => chunk.len(),
-            };
-            let want = match body_policy {
-                BodyPolicy::Probe { .. } | BodyPolicy::Bulk { .. } => {
-                    chunk.len().min(room.saturating_add(1))
-                }
-                BodyPolicy::Api => chunk.len(),
-            };
-            let n = crate::stream::http_read(&mut *hs, chunk.as_mut_ptr(), want as i32);
+            let n = crate::stream::http_read(&mut *hs, chunk.as_mut_ptr(), chunk.len() as i32);
             if n < 0 {
                 recv_err = true;
                 break;
@@ -535,23 +425,11 @@ fn plaintext(
             if n == 0 {
                 break;
             }
-            if matches!(body_policy, BodyPolicy::Probe { .. } | BodyPolicy::Bulk { .. })
-                && n as usize > room
-            {
-                overflowed = true;
-                break;
-            }
             body.extend_from_slice(&chunk[..n as usize]);
         }
-        if !overflowed {
-            crate::stream::note_short_body(method.as_str(), path, &hs, recv_err);
-        }
+        crate::stream::note_short_body(method.as_str(), path, &hs, recv_err);
     }
     crate::stream::http_close(&mut *hs);
-    if overflowed {
-        crate::log("http: response exceeded body limit");
-        return RequestOutcome::Transport(None);
-    }
     // A status of 0 is not something a server sent — it is what `http_open`'s parser leaves when
     // the connection never produced an `HTTP/1.x NNN` line at all, i.e. a transport failure. It
     // must not reach a caller as a "response", because `classify` would read it as `Unreachable`
@@ -583,7 +461,6 @@ fn tls(
     path: &str,
     method: Method,
     headers: &[&str],
-    body_policy: BodyPolicy,
     pin: Option<&ResolvePin>,
     req_body: &[u8],
 ) -> RequestOutcome {
@@ -597,20 +474,7 @@ fn tls(
     // their params in the query string — while GET and the body-less PUT carry none. `net` turns
     // the second shape into `CURLOPT_CUSTOMREQUEST`.
     let body: Option<&[u8]> = matches!(method, Method::Post).then_some(&[][..]);
-    let (timeouts, max_body) = match body_policy {
-        BodyPolicy::Api => (crate::net::API, None),
-        BodyPolicy::Bulk { max } => (crate::net::BULK, Some(max)),
-        BodyPolicy::Probe { max, timeout_s } => (
-            crate::net::Timeouts {
-                connect_s: timeout_s as _,
-                total_s: timeout_s as _,
-                total_ms: 0,
-                low_speed_bps: 0,
-                low_speed_s: 0,
-            },
-            Some(max),
-        ),
-    };
+    let (timeouts, max_body) = (crate::net::API, None);
     // PMS redirects are responses, never instructions: the path already carries a token. Keeping
     // `FOLLOWLOCATION` off also makes the TLS arm's 3xx semantics match the plaintext arm.
     match crate::net::request_result_evidence(
@@ -683,67 +547,6 @@ mod tests {
         });
     }
 
-    /// **`request_probe` — the discovery race's entry point — carries a pin the same way
-    /// [`request`] does over TLS, and structurally cannot over plaintext.** `auth::race_batch`
-    /// builds a [`ResolvePin`] only for a TLS origin (`ResolvePin::for_origin` refuses anything
-    /// else outright), and `request_with`'s `Scheme::Http` arm calls `plaintext(...)`, which has no
-    /// `pin` parameter at all — there is no plumbing left for a foreign value to travel through even
-    /// if one were built. Proved the same way as the test above, at this entry point instead of
-    /// `request`'s: the TLS probe reaches the pinned loopback socket with no resolver involved, and a
-    /// plaintext probe against a guaranteed-unrouted TEST-NET-1 (RFC 5737) address, given the SAME
-    /// pin pointed at that socket, never reaches it.
-    #[test]
-    fn request_probe_hands_the_pin_to_the_tls_path_only() {
-        let _g = crate::testlock::serial();
-        if !crate::net::global_init() {
-            return;
-        }
-        let Ok(srv) = std::net::TcpListener::bind("127.0.0.1:0") else { return };
-        let port = srv.local_addr().unwrap().port();
-        srv.set_nonblocking(true).unwrap();
-        let accepts = std::sync::atomic::AtomicUsize::new(0);
-        let stop = std::sync::atomic::AtomicBool::new(false);
-        std::thread::scope(|sc| {
-            sc.spawn(|| {
-                while !stop.load(std::sync::atomic::Ordering::Acquire) {
-                    match srv.accept() {
-                        Ok(_) => {
-                            accepts.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-                        }
-                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                            std::thread::sleep(std::time::Duration::from_millis(1))
-                        }
-                        Err(_) => break,
-                    }
-                }
-            });
-            let tls_origin = Origin::parse(&format!("https://no-such-host.invalid:{port}")).unwrap();
-            let pin = ResolvePin::for_test("no-such-host.invalid", port as i32, "127.0.0.1".parse().unwrap());
-            assert!(
-                request_probe(&tls_origin, "/identity", Method::Get, &[], 4096, 1, Some(&pin)).is_err(),
-                "TLS against a plaintext listener fails, as it must"
-            );
-            assert_eq!(
-                accepts.load(std::sync::atomic::Ordering::Acquire),
-                1,
-                "the TLS probe reached the pinned socket with no resolver"
-            );
-
-            let http_origin = Origin::parse("http://192.0.2.1:32400").unwrap();
-            let same_pin = ResolvePin::for_test("192.0.2.1", 32400, "127.0.0.1".parse().unwrap());
-            assert!(
-                request_probe(&http_origin, "/identity", Method::Get, &[], 4096, 1, Some(&same_pin))
-                    .is_err(),
-                "the unrouted literal never answers, pin or no pin"
-            );
-            assert_eq!(
-                accepts.load(std::sync::atomic::Ordering::Acquire),
-                1,
-                "a plaintext probe must never be redirected to the pinned socket"
-            );
-            stop.store(true, std::sync::atomic::Ordering::Release);
-        });
-    }
 
     #[test]
     fn a_request_is_routed_by_the_origins_scheme() {
@@ -854,85 +657,7 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn an_identity_ceiling_is_enforced_while_the_socket_is_read() {
-        use std::io::{Read, Write};
 
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let port = listener.local_addr().expect("address").port();
-        let server = std::thread::spawn(move || {
-            let (mut socket, _) = listener.accept().expect("accept");
-            let mut request = [0u8; 1024];
-            let n = socket.read(&mut request).expect("request");
-            assert!(
-                request[..n]
-                    .windows(b"Connection: close".len())
-                    .any(|w| w.eq_ignore_ascii_case(b"connection: close")),
-                "control-plane plaintext still sends Connection: close"
-            );
-            socket
-                .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nabcde",
-                )
-                .expect("response");
-        });
 
-        let origin = Origin::http("127.0.0.1", port as i32);
-        assert!(request_probe(&origin, "/identity", Method::Get, &[ACCEPT_JSON], 4, 1, None).is_err());
-        server.join().expect("server");
-    }
-
-    /// The BULK ceiling is the same FAIL-CLOSED read the probe ceiling is: a body past it aborts
-    /// the transfer (no truncation, no panic), so a hostile PMS answering a catalog read with an
-    /// unbounded body cannot drive the process past its memory budget.
-    #[test]
-    fn a_bulk_body_past_the_ceiling_is_refused_on_plaintext() {
-        use std::io::{Read, Write};
-
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let port = listener.local_addr().expect("address").port();
-        let server = std::thread::spawn(move || {
-            let (mut socket, _) = listener.accept().expect("accept");
-            let mut request = [0u8; 1024];
-            let _ = socket.read(&mut request).expect("request");
-            // Five body bytes against a four-byte ceiling: the read must stop and fail, not buffer.
-            socket
-                .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nabcde",
-                )
-                .expect("response");
-        });
-
-        let origin = Origin::http("127.0.0.1", port as i32);
-        assert!(request_bulk(&origin, "/identity", Method::Get, &[ACCEPT_JSON], 4, None).is_none());
-        server.join().expect("server");
-    }
-
-    /// A BULK body that fits under the ceiling completes: the ceiling is a refusal point, not a
-    /// clamp that would silently drop bytes from a healthy response.
-    #[test]
-    fn a_bulk_body_within_the_ceiling_completes_on_plaintext() {
-        use std::io::{Read, Write};
-
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let port = listener.local_addr().expect("address").port();
-        let server = std::thread::spawn(move || {
-            let (mut socket, _) = listener.accept().expect("accept");
-            let mut request = [0u8; 1024];
-            let _ = socket.read(&mut request).expect("request");
-            socket
-                .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nabcd",
-                )
-                .expect("response");
-        });
-
-        let origin = Origin::http("127.0.0.1", port as i32);
-        let reply = request_bulk(&origin, "/identity", Method::Get, &[ACCEPT_JSON], 4, None)
-            .expect("a within-ceiling body completes");
-        assert_eq!(reply.status, 200);
-        assert_eq!(reply.body, b"abcd");
-        server.join().expect("server");
-    }
 
 }

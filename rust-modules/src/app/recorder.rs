@@ -2189,11 +2189,8 @@ mod tests {
             }
         }
         crate::registry::reset_for_test();
-        let own = crate::registry::register_with_client_id(
-            "recorder-owned", "127.0.0.1", 9, "synthetic", "fixture");
-        let shared = crate::registry::register_with_client_id(
-            "recorder-shared", "127.0.0.1", 10, "synthetic", "fixture");
-        crate::registry::set_current(own);
+        let own = crate::registry::ServerId::from_raw(0);
+        let shared = crate::registry::ServerId::from_raw(1);
         let _cleanup = Cleanup;
         let mut rig = super::super::bridge::Bridge::for_test(|| 0);
         rig.seed_registered_browse_for_test([own, shared]);

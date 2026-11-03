@@ -196,13 +196,13 @@ impl ViewStateState {
     metadata: &mut dyn FnMut(crate::stores::metadata::MetadataCmd) -> bool,
 ) -> bool {
     // One backend, one guard: a write flies only when the sid names the Jellyfin slot AND the
-    // Jellyfin client is signed in. The `client_for` half keeps the registry fixture path honest
-    // in host tests and drops any sid that names no live backend — a view-state write is exactly
-    // the operation to skip and log rather than guess a destination for.
+    // Jellyfin client is signed in. Any other sid names a retired Plex slot that no client can
+    // ever fill (#166) — a view-state write is exactly the operation to skip and log rather than
+    // guess a destination for.
     let jellyfin = sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some();
     #[cfg(any())]
     let jellyfin = false;
-    if crate::registry::client_for(sid).is_none() && !jellyfin {
+    if !jellyfin {
         crate::log(&format!(
             "viewstate: rk={rk} {} DROPPED — server {} is not registered",
             w.name(),
@@ -602,12 +602,24 @@ pub(crate) fn run(
 // ---------------------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
+    /// The optimistic write flies only for the Jellyfin slot with a signed-in client
+    /// (`request`'s single-source guard), so these tests install the synthetic backend.
+    fn install_backend_for_viewstate() -> crate::registry::ServerId {
+        crate::jellyfin::install(crate::jellyfin::JfClient::synthetic(
+            crate::origin::Origin::http("127.0.0.1", 8096),
+            "viewstate-test-device".into(),
+            "tok".to_string(),
+            "user-viewstate-test".into(),
+            "Viewstate Test".into(),
+        ));
+        crate::jellyfin::SERVER_ID
+    }
+
     #[test]
     fn owner_callback_receives_the_optimistic_browse_edit_before_run_returns() {
         let _g = crate::testlock::serial();
         crate::registry::reset_for_test();
-        let sid = crate::registry::register_with_client_id(
-            "viewstate-owner", "127.0.0.1", 9, "synthetic", "fixture");
+        let sid = install_backend_for_viewstate();
         let mut store = crate::stores::viewstate::ViewStateStore::default();
         store.hold_inflight_for_test(sid, "held");
         let mut browse = Vec::new();
@@ -653,6 +665,7 @@ mod tests {
         assert!(metadata_store.take_notice().is_some(),
             "the optimistic edit reaches {} before run returns", crate::stores::StoreId::Metadata.name());
         assert!(store.take_notice().is_some(), "the owning ViewState store notices its command");
+        crate::jellyfin::uninstall();
         crate::registry::reset_for_test();
     }
 
@@ -660,8 +673,7 @@ mod tests {
     fn stores_route_the_optimistic_edit_to_the_addressed_browse_owner() {
         let _g = crate::testlock::serial();
         crate::registry::reset_for_test();
-        let sid = crate::registry::register_with_client_id(
-            "viewstate-stores-owner", "127.0.0.1", 9, "synthetic", "fixture");
+        let sid = install_backend_for_viewstate();
         let mut selected = crate::stores::Stores::default();
         selected.browse.borrow_mut().seed_registered_table_for_test([sid, sid]);
         selected.browse.borrow_mut().seed_items_for_test(1);
@@ -681,6 +693,7 @@ mod tests {
         assert!(decoy.browse.borrow_mut().listing_snapshot().view().item(0).is_none(),
             "the unaddressed decoy is not used by the owner-aware callback");
         drop((selected, decoy));
+        crate::jellyfin::uninstall();
         crate::registry::reset_for_test();
     }
 

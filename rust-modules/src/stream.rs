@@ -1138,35 +1138,6 @@ pub(crate) fn http_open(
     ))
 }
 
-/// [`http_open`] with the whole-chain connect and stalled-I/O ceiling selected by the caller.
-/// Candidate discovery is the one caller that knows whether a connection is local or remote; the
-/// ordinary request path keeps [`CONNECT_TIMEOUT_MS`] and never infers a tier from an address.
-pub(crate) fn http_open_probe(
-    hs: *mut HttpStream,
-    host: *const c_char,
-    port: c_int,
-    path: *const c_char,
-    extra: *const c_char,
-    method: &str,
-    timeout_ms: c_int,
-) -> c_int {
-    legacy_open_result(http_open_with_timeouts(
-        hs,
-        host,
-        port,
-        path,
-        extra,
-        method,
-        timeout_ms,
-        timeout_ms,
-        timeout_ms,
-        None,
-        false,
-        &mut NoCheckpoint,
-        &[],
-    ))
-}
-
 /// [`http_open`] plus a request body written after the head - the shape Jellyfin's JSON control
 /// POSTs need (`http::request_post_json` is the one caller, and it adds the matching
 /// `Content-Length` itself). Every other entry point passes an empty slice and keeps the exact

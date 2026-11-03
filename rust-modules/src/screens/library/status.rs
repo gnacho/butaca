@@ -35,12 +35,12 @@ impl LibraryScreen {
 
     /// Follow the offer for the failed source's server (`grant::offers`), and take the
     /// question down once the read-out it was asked from no longer asks about that server.
-    pub(super) fn watch_plaintext<H: LibraryLike>(&mut self, cx: &Cx<'_, H>) {
+    pub(super) fn watch_plaintext<H: LibraryLike>(&mut self, _cx: &Cx<'_, H>) {
         use super::super::plaintext_question::{asks, Near};
-        let machine = (self.readout == Readout::Failed)
-            .then(|| H::directory(cx).source().and_then(|(sid, _)| crate::registry::client_for(*sid)))
-            .flatten()
-            .map(|client| client.machine_id());
+        // The registry half (`client_for(sid)` → the slot's machine id) went with the client
+        // slots (#166): no Plex slot carries a machine any more, so the question's machine
+        // subject is always absent and the refresh below only ever withdraws.
+        let machine = None;
         self.plaintext.refresh(machine, Near::Only);
         if self.plaintext_alert.is_open()
             && !(self.readout == Readout::Failed

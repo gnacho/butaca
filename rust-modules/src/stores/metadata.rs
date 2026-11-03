@@ -188,11 +188,6 @@ pub(crate) enum MetadataCmd {
         rk: String,
         copies: Vec<crate::metadata::AltCopy>,
     },
-    /// Re-read every retained copy's credit from the registry — `metadata::alt_restamp_owners`,
-    /// test-only for the same reason as `AltInstall`: production reaches it from
-    /// `pump_alt_sources` directly (a facts-epoch move), never as a user command.
-    #[cfg(test)]
-    AltRestampOwners,
 }
 
 /// One Metadata owner: logical state, the worker adapter every current fetch captures, and

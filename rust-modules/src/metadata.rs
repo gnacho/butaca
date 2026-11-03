@@ -393,26 +393,6 @@ impl Dovi {
         (self.version != (0, 0)).then(|| format!("{}.{}", self.version.0, self.version.1))
     }
 
-    /// Parse `DOVIVersion`'s dotted string into [`Self::version`]'s pair. PURE, and deliberately
-    /// forgiving: a value this does not understand is `(0, 0)` — i.e. "the server said nothing" —
-    /// because a version string is a caption and must never be a parse failure that costs the
-    /// whole item.
-    pub(crate) fn parse_version(s: &str) -> (i64, i64) {
-        let s = s.trim();
-        if s.is_empty() {
-            return (0, 0);
-        }
-        let (a, b) = match s.split_once('.') {
-            // a trailing ".0.0" (a three-part version) keeps its first two components
-            Some((a, rest)) => (a, rest.split('.').next().unwrap_or("0")),
-            None => (s, "0"),
-        };
-        match (a.trim().parse::<i64>(), b.trim().parse::<i64>()) {
-            (Ok(a), Ok(b)) if a >= 0 && b >= 0 => (a, b),
-            _ => (0, 0),
-        }
-    }
-
     /// PURE: **true when the base layer on its own is not a picture we can put on the panel
     /// correctly** — i.e. when this bitstream, decoded as ordinary HEVC by a pipeline that was
     /// never TOLD it is Dolby Vision, shows the user wrong colours (or nothing).
@@ -1027,21 +1007,6 @@ pub(crate) struct Chapter {
     pub(crate) thumb: String, // server image path → resolve_tex_wh_on (empty if no chapter thumbs)
 }
 
-/// Parse an item's `Chapter[]` into the app's model — the ONE `plex::Chapter` → [`Chapter`] mapping,
-/// shared by the detail parse and the playing-item store (which must agree: the Chapters strip seeks
-/// with these offsets, so two mappings is two chances to disagree about which item they describe).
-fn convert_chapters(chapters: &[crate::media::Chapter]) -> Vec<Chapter> {
-    chapters
-        .iter()
-        .map(|c| Chapter {
-            index: c.index,
-            start_ms: c.start_time_offset,
-            title: c.tag.clone(),
-            thumb: c.thumb.clone(),
-        })
-        .collect()
-}
-
 /// Which timeline segment a [`Marker`] describes. Only the two the player acts on are modelled —
 /// PMS also emits `commercial` on recorded content, which [`convert_markers`] drops, so an
 /// unhandled kind can never be mistaken for one of these.
@@ -1063,30 +1028,6 @@ pub(crate) struct Marker {
     pub(crate) end_ms: i64,
     /// this credits segment runs to the end of the item (PMS `final: true`)
     pub(crate) final_seg: bool,
-}
-
-/// Parse a leaf's `Marker[]` into the app's model, dropping kinds the player has no behaviour for
-/// and any segment whose offsets are not a forward range (a zero-length or inverted marker would
-/// otherwise produce a prompt that can never be satisfied by seeking to its end).
-fn convert_markers(markers: &[crate::media::Marker]) -> Vec<Marker> {
-    markers
-        .iter()
-        .filter_map(|m| {
-            let kind = match m.kind.as_str() {
-                "intro" => MarkerKind::Intro,
-                "credits" => MarkerKind::Credits,
-                _ => return None,
-            };
-            (m.end_time_offset > m.start_time_offset && m.start_time_offset >= 0).then_some(
-                Marker {
-                    kind,
-                    start_ms: m.start_time_offset,
-                    end_ms: m.end_time_offset,
-                    final_seg: m.is_final != 0,
-                },
-            )
-        })
-        .collect()
 }
 
 /// Record that `m` has been skipped, so it is never offered again for this item.
@@ -1436,11 +1377,10 @@ impl Detail {
     /// session loads, which is what a fully-borrowed library looks like. Read ONCE (see
     /// [`dev_source`]) — the trigger surface is boot state, and this is reached from a draw.
     pub(crate) fn source(&self) -> String {
-        dev_source().map(str::to_owned).unwrap_or_else(|| {
-            crate::registry::facts(self.sid)
-                .map(|f| f.handle.clone())
-                .unwrap_or_default()
-        })
+        // The roster credit (`facts(sid)`'s handle) went with the describers (#166): a
+        // single-source library is this account's own, so the answer is the dev stand-in or
+        // nothing.
+        dev_source().map(str::to_owned).unwrap_or_default()
     }
 
     /// How many tiles the Cast & Crew shelf holds: every actor, then every crew credit.
@@ -1782,126 +1722,6 @@ fn fetch_detail(sid: crate::registry::ServerId, rk: &str) -> Option<Detail> {
 /// the item would transcode on a server that cannot tone-map. [`Dovi`] is the finer-grained
 /// companion to that flag and answers a different question — not "is this HDR" but "can we show
 /// the base layer at all" (`route::video_direct_plays` gates direct play on it).
-/// What one part's `Stream[]` reduces to — the return of [`convert_streams`].
-///
-/// A named struct rather than the 5-tuple it was, because the Track-information panel needed the
-/// VIDEO track itself and a sixth positional element is where a tuple stops being readable at the
-/// call site. Every field keeps the meaning it had.
-#[derive(Default)]
-pub(crate) struct Streams {
-    pub(crate) audio: Vec<Stream>,
-    pub(crate) subs: Vec<Stream>,
-    /// the video track's `frameRate` (0 = unknown) — feeds the Load esInfo
-    pub(crate) fps: f64,
-    pub(crate) dovi: Dovi,
-}
-
-fn convert_streams(streams: &[crate::media::Stream]) -> Streams {
-    let (mut audio, mut subs, mut fps) = (Vec::new(), Vec::new(), 0.0);
-    let mut dovi = Dovi::default();
-    for s in streams {
-        let st = Stream {
-            id: s.id,
-            index: s.index,
-            lang: s.language.clone(),
-            lang_code: s.language_code.to_lowercase(),
-            language_tag: s.language_tag.clone(),
-            codec: s.codec.clone(),
-            channels: s.channels,
-            layout: s.audio_channel_layout.clone(),
-            bitrate: s.bitrate,
-            profile: s.profile.clone(),
-            bit_depth: s.bit_depth,
-            chroma: s.chroma_subsampling.clone(),
-            sdh: s.hearing_impaired != 0,
-            ad: s.audio_description != 0 || s.title.to_lowercase().contains("descri"),
-            forced: s.forced != 0,
-            default: s.is_default != 0,
-            title: s.title.clone(),
-            // embedded container streams carry no delivery key; sidecars do
-            external: s.stream_type == 3 && !s.key.is_empty(),
-            key: s.key.clone(),
-            // the server's current pick for this part (a track chosen on another client)
-            selected: s.selected != 0,
-            can_normalize_loudness: s.can_normalize_loudness,
-        };
-        match s.stream_type {
-            1 => {
-                fps = s.frame_rate; // e.g. 23.976 — for the Load esInfo
-                // NB a Profile 5 file sends NO colorTrc at all (verified live 2026-08-21: the
-                // dev server's one P5 item omits the field), so `dovi_present` is the only
-                // thing that makes it read as HDR — and the layering fields below are the only
-                // thing that makes it read as unplayable.
-                //
-                // Guarded on `dovi_present`, unlike the `fps` assignment above it, and the
-                // difference is deliberate. `fps` takes the LAST video stream in the
-                // part; a Dolby Vision record must instead SURVIVE one, because the direct-play
-                // gate reads it and losing it fails the wrong way — a second `streamType: 1`
-                // stream carrying no DOVI fields (embedded cover art is the shape to expect)
-                // would blank a Profile 5 record back to `Dovi::default()`, which refuses
-                // nothing, and the file would direct-play in the wrong colours again. No part on
-                // the dev server has two video streams today (all 540 leaves swept 2026-08-21),
-                // so this costs nothing and is not a change to any measured behaviour — it is the
-                // one assignment here whose failure is silent and wrong rather than silent and
-                // cosmetic.
-                if s.dovi_present != 0 {
-                    dovi = Dovi {
-                        present: true,
-                        profile: s.dovi_profile,
-                        bl_compat: s.dovi_bl_compat_id,
-                        el_present: s.dovi_el_present != 0,
-                        level: s.dovi_level,
-                        version: Dovi::parse_version(&s.dovi_version),
-                        bl_present: s.dovi_bl_present != 0,
-                        rpu_present: s.dovi_rpu_present != 0,
-                    };
-                }
-            }
-            2 => audio.push(st),
-            3 => subs.push(st),
-            _ => {}
-        }
-    }
-    Streams {
-        audio,
-        subs,
-        fps,
-        dovi,
-    }
-}
-
-#[cfg(test)]
-mod convert_streams_tests {
-    use super::*;
-
-    /// `canNormalizeLoudness` (issue #266) must survive the wire-DTO → app-model copy, both ways:
-    /// a capable audio track stays capable, and an incapable one (or the video track, which never
-    /// carries the flag) stays false rather than inheriting some other stream's value.
-    #[test]
-    fn convert_streams_carries_loudness_capability() {
-        let wire = [
-            crate::media::Stream {
-                stream_type: 2,
-                can_normalize_loudness: true,
-                ..Default::default()
-            },
-            crate::media::Stream {
-                stream_type: 2,
-                can_normalize_loudness: false,
-                ..Default::default()
-            },
-            crate::media::Stream {
-                stream_type: 1,
-                can_normalize_loudness: false,
-                ..Default::default()
-            },
-        ];
-        let s = convert_streams(&wire);
-        assert_eq!(s.audio.len(), 2);
-        assert!(s.audio[0].can_normalize_loudness);
-        assert!(!s.audio[1].can_normalize_loudness);
-    }
-}
 
 // ---- the PLAYING-item store — the in-player source of truth ---------------------------------
 // Unlike `current()` (the detail page's item — it stays on the SHOW during an episode play, and
@@ -2042,55 +1862,10 @@ pub(crate) fn fetch_playing_item(sid: crate::registry::ServerId, rk: &str) -> Op
             return crate::jellyfin::detail::playing_item(c, sid, rk);
         }
     }
-    let it = crate::registry::client_for(sid).and_then(|c| c.metadata(rk));
-    // Markers and chapters hang off the ITEM, streams off its first Part — so a part-less response
-    // still yields both of those instead of discarding all three. `Client::metadata` already sends
-    // `includeChapters=1` (plex/library.rs), so the Chapter[] is on the wire either way: taking it
-    // here costs no request, and dropping it is what hid the Chapters tab on the episode path.
-    let markers = it
-        .as_ref()
-        .map(|it| convert_markers(&it.marker))
-        .unwrap_or_default();
-    let chapters = it
-        .as_ref()
-        .map(|it| convert_chapters(&it.chapter))
-        .unwrap_or_default();
-    let st = it
-        .as_ref()
-        .and_then(|it| it.first_part().map(|p| convert_streams(&p.stream)))
-        .unwrap_or_default();
-    let (audio, subs, video_fps, dovi) = (st.audio, st.subs, st.fps, st.dovi);
-    let show_rk = it
-        .as_ref()
-        .map(|it| it.grandparent_rating_key.clone())
-        .unwrap_or_default();
-    // the frame size rides the same PRIMARY version the streams come from (route.rs's
-    // direct-play gate tests it against the device bound — see the field doc)
-    let (width, height, bitrate) = it
-        .as_ref()
-        .and_then(|it| it.primary_media().map(|m| (m.width, m.height, m.bitrate)))
-        .unwrap_or((0, 0, 0));
-    let blur = it
-        .as_ref()
-        .and_then(|it| it.ultra_blur_colors)
-        .and_then(|u| u.corners());
-    Some(PlayingItem {
-        container: String::new(),
-        sid,
-        rk: rk.to_string(),
-        show_rk,
-        audio,
-        subs,
-        video_fps,
-        width,
-        height,
-        bitrate,
-        // the Plex lane reads the same fact off the part key's extension when this is empty
-                dovi,
-        markers,
-        chapters,
-        blur,
-    })
+    // The Plex arm (`client_for(sid)` + `Client::metadata`) went with the wire layer (#166): no
+    // slot other than the Jellyfin one can hold a playing item, and the Jellyfin slot is fully
+    // answered above. A miss here is the honest None the store treats as "no item".
+    None
 }
 
 /// Retire BOTH descriptions of the item that was playing, together.
@@ -2728,7 +2503,7 @@ fn finish_detail_fetch(
 /// `stores::metadata`'s one door onto every [`MetadataCmd`](crate::stores::metadata::MetadataCmd)
 /// variant (D3): the match used to live in `stores/metadata.rs::run`, calling `pub(crate)`
 /// mutators across the module boundary. Relocating it here is what lets those go private. The
-/// `#[cfg(test)]` arms (`AltInstall`, `AltRestampOwners`) exist only so tests can seed the
+/// `#[cfg(test)]` arm (`AltInstall`) exists only so tests can seed the
 /// alt-sources store the way a landed resolve or a facts-epoch move would — production reaches
 /// both through `pump_alt_sources`, a same-file call, never as a dispatched `Cmd`.
 pub(crate) fn run(state: &mut MetadataState, adapter: &std::sync::Arc<MetadataAdapter>, cmd: crate::stores::metadata::MetadataCmd) -> bool {
@@ -2778,8 +2553,6 @@ pub(crate) fn run(state: &mut MetadataState, adapter: &std::sync::Arc<MetadataAd
         }
         #[cfg(test)]
         MetadataCmd::AltInstall { sid, rk, copies } => alt_install(state, sid, &rk, copies),
-        #[cfg(test)]
-        MetadataCmd::AltRestampOwners => alt_restamp_owners(state),
     }
 }
 
@@ -3064,19 +2837,10 @@ fn alt_regrade(list: &mut [AltCopy], stand_in_owns: bool) -> bool {
     if stand_in_owns {
         return false;
     }
-    let mut moved = false;
-    for c in list.iter_mut() {
-        let credit = crate::registry::facts(c.sid)
-            .map(|f| f.handle.clone())
-            .unwrap_or_default();
-        // `None` is the absence of an owner and must not become `Some("")` — the same guard
-        // `resolve_alt_sources` applies when it stamps this field in the first place.
-        let next = (!credit.is_empty()).then_some(credit);
-        if c.owner != next {
-            c.owner = next;
-            moved = true;
-        }
-    }
+    // The roster credit (`facts(sid)`'s handle) went with the describers (#166): there is no
+    // "Shared by" answer to re-grade, so the re-stamp can never move a row.
+    let moved = false;
+    let _ = list;
     moved
 }
 
@@ -3086,7 +2850,7 @@ fn alt_prune_inactive(state: &mut MetadataState) -> bool {
     let held = &mut state.alt;
     let before = held.copies.len();
     held.copies
-        .retain(|c| crate::registry::client_for(c.sid).is_some());
+        .retain(|c| c.sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some());
     held.copies.len() != before
 }
 
@@ -3187,11 +2951,6 @@ fn resolve_alt_sources(
 pub(crate) fn pump_alt_sources_with_gate(state: &mut MetadataState, adapter: &MetadataAdapter,
     gate: &crate::ui::landgate::Gate) -> bool {
     pump_alt_sources_with_library(state, adapter, None, gate)
-}
-
-#[cfg(test)]
-pub(crate) fn pump_alt_sources(state: &mut MetadataState, adapter: &MetadataAdapter) -> bool {
-    pump_alt_sources_with_gate(state, adapter, crate::ui::landgate::fixture_gate())
 }
 
 pub(crate) fn pump_alt_sources_with_directory_and_gate(
@@ -3311,116 +3070,12 @@ fn alt_pump_stand_in(state: &mut MetadataState, library: Option<&str>) -> bool {
 /// real answer here to outrank: an unarmed trigger means no panel content at all, and an
 /// armed-but-EMPTY file means the same, because a copy list has to be attributed to somebody.
 #[cfg(not(test))]
-fn alt_dev_stand_in(d: &Detail, library: Option<&str>) -> Option<Vec<AltCopy>> {
-    let handle = crate::dev::read("shared").filter(|h| !h.is_empty())?;
-    // The application supplies the retained owner publication on every production pump. A
-    // compatibility caller with no directory cannot honestly name the library, so it cannot arm
-    // this visual stand-in.
-    let library = library?;
-    let here = crate::registry::current();
-    let theirs = alt_stand_in_slot()?;
-    let v = alt_stand_in(
-        &handle,
-        library,
-        &d.rk,
-        &d.video_resolution,
-        d.dur_ms,
-        here,
-        theirs,
-    );
-    crate::log(&format!(
-        "altsources: stand-in for rk={} on slot {} (dev)",
-        d.rk,
-        theirs.raw()
-    ));
-    Some(v)
+fn alt_dev_stand_in(_d: &Detail, _library: Option<&str>) -> Option<Vec<AltCopy>> {
+    None
 }
 #[cfg(test)]
 fn alt_dev_stand_in(_d: &Detail, _library: Option<&str>) -> Option<Vec<AltCopy>> {
     None // the host suite must not depend on what this dev Mac happens to have under /tmp
-}
-
-/// The registry slot the stand-in's borrowed copy lives on — a REAL one, because the point of the
-/// stand-in is to exercise the switch.
-///
-/// A genuinely different server if one is registered. Otherwise the current server registered a
-/// SECOND time under a synthetic machine id: from everything this feature does — counting sources,
-/// resolving a client, switching, refetching — that is a second source, and because it is the same
-/// machine the ratingKey it carries is honestly the same film. What it cannot stand in for is a
-/// server going offline, or a library and a resolution that differ for real.
-///
-/// The token comes from the harness's own `/tmp/butaca-token`, which is the only place a session
-/// token is available to a dev path; with no token there is nothing to build a working client from,
-/// so there is no stand-in at all rather than one that 401s.
-#[cfg(not(test))]
-fn alt_stand_in_slot() -> Option<crate::registry::ServerId> {
-    let here = crate::registry::current();
-    // `server_ids`, never `0..server_count()`: slot numbers are permanent and a sign-out retires
-    // the ones below the registry's floor, so the live roster is a window and not a prefix.
-    let other =
-        crate::registry::ids().find(|&id| id != here && crate::registry::client_for(id).is_some());
-    if let Some(id) = other {
-        return Some(id); // a real second server is already registered — use it
-    }
-    let c = crate::registry::client_opt()?;
-    let token = crate::dev::read("token").filter(|t| !t.is_empty())?;
-    // …and a registry with no room left answers `UNSET`, which is no stand-in at all rather than
-    // one that resolves to whatever happens to be current.
-    Some(crate::registry::register(
-        &format!("standin-{}", c.machine_id()),
-        c.host(),
-        c.port(),
-        &token,
-    ))
-    .filter(|id| id.is_set())
-}
-
-/// [`alt_dev_stand_in`]'s pure half — the two copies it describes, so the shape of what a device
-/// capture is looking at is itself host-graded.
-///
-/// **D3 note**: the census flagged this as "MUTATOR-adjacent" by name alone; it is not — it
-/// touches no crate-global state at all, just builds and returns a `Vec<AltCopy>` from its
-/// arguments. `screens/alt_sources_tests.rs` calls it directly to grade that shape, which is
-/// exactly what the doc above says it exists for; kept `pub(crate)` rather than routed through a
-/// `Cmd`, since it is a pure reader/builder, not a mutator the gate has any reason to restrict.
-pub(crate) fn alt_stand_in(
-    handle: &str,
-    library: &str,
-    rk: &str,
-    res: &str,
-    dur_ms: i64,
-    here: crate::registry::ServerId,
-    theirs: crate::registry::ServerId,
-) -> Vec<AltCopy> {
-    let mine = AltCopy {
-        sid: here,
-        library: library.to_string(),
-        owner: None,
-        rk: rk.to_string(),
-        dur_ms,
-        res: res.to_string(),
-        width: 0,
-        height: 0,
-    };
-    let borrowed = AltCopy {
-        sid: theirs,
-        owner: Some(handle.to_string()),
-        res: alt_one_class_better(res),
-        ..mine.clone()
-    };
-    vec![mine, borrowed]
-}
-
-/// The resolution class one rung above `res`, in `screens::alt_sources`' `scan_lines` vocabulary —
-/// the stand-in's single invention (see [`alt_dev_stand_in`]). Anything already at the top, or
-/// unrecognised, is returned unchanged rather than promoted into a class that does not exist.
-fn alt_one_class_better(res: &str) -> String {
-    match res.trim().to_ascii_lowercase().as_str() {
-        "sd" | "480" | "576" => "720".into(),
-        "720" => "1080".into(),
-        "1080" | "1440" => "4k".into(),
-        other => other.to_string(),
-    }
 }
 
 /// True while a detail fetch is in flight — drives the detail page's loading spinner.
@@ -3621,45 +3276,16 @@ pub(crate) fn pump_season(state: &mut MetadataState, adapter: &MetadataAdapter) 
 mod marker_tests {
     use super::*;
 
-    fn wire(kind: &str, start: i64, end: i64, is_final: bool) -> crate::media::Marker {
-        crate::media::Marker {
-            kind: kind.to_string(),
-            start_time_offset: start,
-            end_time_offset: end,
-            is_final: is_final as i64,
-        }
-    }
-    /// An episode's markers as the live server actually returns them (2026-07-29): an intro and a
+    /// An episode's markers as the live server actually returned them (2026-07-29): an intro and a
     /// `final` credits marker, in that wire order — credits FIRST, which is why nothing here may
-    /// assume the array is sorted by time.
+    /// assume the array is sorted by time. The wire→model conversion went with the Plex parse
+    /// (#166); these fixtures are the MODEL shapes the store holds, which is what the live
+    /// playhead logic below reads.
     fn episode_markers() -> Vec<Marker> {
-        convert_markers(&[
-            wire("credits", 3_065_648, 3_130_720, true),
-            wire("intro", 990, 99_625, false),
-        ])
-    }
-
-    #[test]
-    fn only_the_kinds_the_player_acts_on_survive_parsing() {
-        let m = episode_markers();
-        assert_eq!(m.len(), 2);
-        assert_eq!(m[0].kind, MarkerKind::Credits);
-        assert!(m[0].final_seg);
-        assert_eq!(m[1].kind, MarkerKind::Intro);
-        assert!(!m[1].final_seg);
-        // `commercial` (PMS emits it on recorded content) has no behaviour — it must be DROPPED,
-        // not defaulted into one of the two, or the pill would offer to skip an ad break as an intro.
-        assert!(convert_markers(&[wire("commercial", 10, 20, false)]).is_empty());
-        assert!(convert_markers(&[wire("", 10, 20, false)]).is_empty());
-    }
-
-    #[test]
-    fn a_degenerate_range_is_dropped_rather_than_offered() {
-        // A zero-length or inverted marker would produce a prompt that seeking to `end_ms` can
-        // never satisfy — the pill would sit there and the press would do nothing.
-        assert!(convert_markers(&[wire("intro", 500, 500, false)]).is_empty());
-        assert!(convert_markers(&[wire("intro", 900, 100, false)]).is_empty());
-        assert!(convert_markers(&[wire("credits", -5, 100, true)]).is_empty());
+        vec![
+            Marker { kind: MarkerKind::Credits, start_ms: 3_065_648, end_ms: 3_130_720, final_seg: true },
+            Marker { kind: MarkerKind::Intro, start_ms: 990, end_ms: 99_625, final_seg: false },
+        ]
     }
 
     #[test]
@@ -3730,7 +3356,7 @@ mod marker_tests {
 
         // A NON-final credits marker (credits before a post-credits scene) must still end, or
         // playback past it would keep offering a skip for a segment already behind the playhead.
-        let mid = convert_markers(&[wire("credits", 1000, 2000, false)]);
+        let mid = vec![Marker { kind: MarkerKind::Credits, start_ms: 1000, end_ms: 2000, final_seg: false }];
         assert!(marker_at(&mid, 1500).is_some());
         assert!(
             marker_at(&mid, 2000).is_none(),
@@ -3822,18 +3448,6 @@ mod trailer_tests {
 mod test_support;
 
 #[cfg(test)]
-#[path = "metadata_dolby_vision_tests.rs"]
-mod dolby_vision_tests;
-
-#[cfg(test)]
-#[path = "metadata_detail_mailbox_tests.rs"]
-mod detail_mailbox_tests;
-
-#[cfg(test)]
 #[path = "metadata_season_mailbox_tests.rs"]
 mod season_mailbox_tests;
-
-#[cfg(test)]
-#[path = "metadata_watch_state_tests.rs"]
-mod watch_state_tests;
 

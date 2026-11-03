@@ -28,43 +28,6 @@ pub(super) fn test_adapter() -> &'static std::sync::Arc<MetadataAdapter> {
     TEST_ADAPTER.with(|cell| unsafe { &*cell.get() })
 }
 
-// ---- convert_streams: the Dolby Vision record's survival ------------------------------
-
-pub(super) fn video_stream(dovi: Option<(i64, i64, i64)>) -> crate::media::Stream {
-    let (present, profile, compat, el) = match dovi {
-        Some((profile, compat, el)) => (1, profile, compat, el),
-        None => (0, 0, 0, 0),
-    };
-    crate::media::Stream {
-        stream_type: 1,
-        codec: "hevc".into(),
-        dovi_present: present,
-        dovi_profile: profile,
-        dovi_bl_compat_id: compat,
-        dovi_el_present: el,
-        ..Default::default()
-    }
-}
-
-/// post through the REAL mailbox write, so the monotone guard is under test rather than
-/// bypassed (an unconditional store here would make the "older lands late" case vacuous)
-pub(super) fn landing(gen: u32, rk: &str) {
-    land_detail(
-        test_adapter(),
-        crate::registry::ServerId::UNSET,
-        rk,
-        gen,
-        Some(Detail {
-            rk: rk.to_string(),
-            ..Default::default()
-        }),
-    );
-}
-
-pub(super) fn cur_rk() -> Option<String> {
-    current(test_state()).map(|d| d.rk.clone())
-}
-
 // ---- the season mailbox -----------------------------------------------------------------
 
 /// A two-season show with a populated episode row, as a landed detail fetch leaves it. Written

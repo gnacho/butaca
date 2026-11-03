@@ -32,8 +32,8 @@ fn a_detail_panel_parks_across_a_push_and_returns_with_the_same_instance() {
     }
     let _cleanup = Cleanup;
     crate::registry::reset_for_test();
-    let here = crate::registry::register_with_client_id("park-here", "127.0.0.1", 1, "t", "c1");
-    let other = crate::registry::register_with_client_id("park-other", "127.0.0.2", 2, "t", "c2");
+    let here = crate::registry::ServerId::from_raw(0);
+    let other = crate::registry::ServerId::from_raw(1);
 
     // Naming the page IS naming the item since the fold: the argument carries the identity, so
     // a frame on `detail_arg("m1")` mounts that detail page and a frame on `person_arg("p1")`

@@ -520,8 +520,7 @@ mod contract_tests {
         let session = crate::plex::session::TempSession::new("browse-preowner");
         session.watching("u-browse-preowner");
         crate::registry::reset_for_test();
-        let sid = crate::registry::register_with_client_id(
-            "browse-preowner", "127.0.0.1", 9, "synthetic", "fixture");
+        let sid = crate::registry::ServerId::from_raw(0);
         let stores = crate::stores::Stores::default();
         stores.browse.borrow_mut().queue_discovery_for_test(sid, false);
         let before_landing = stores.browse.borrow().gen();
@@ -541,8 +540,7 @@ mod contract_tests {
     fn controlled_discovery_apply_bumps_exactly_once() {
         let _guard = crate::testlock::serial();
         crate::registry::reset_for_test();
-        let sid = crate::registry::register_with_client_id(
-            "browse-owned-landings", "127.0.0.1", 9, "synthetic", "fixture");
+        let sid = crate::registry::ServerId::from_raw(1);
         let stores = crate::stores::Stores::default();
         stores.browse.borrow_mut().seed_registered_table_for_test([sid, sid]);
         let _ = stores.take_notices();
@@ -563,8 +561,7 @@ mod contract_tests {
     fn extracted_discovery_result_cannot_clear_the_post_reset_source_flight() {
         let _guard = crate::testlock::serial();
         crate::registry::reset_for_test();
-        let sid = crate::registry::register_with_client_id(
-            "browse-result-retire", "127.0.0.1", 9, "synthetic", "fixture");
+        let sid = crate::registry::ServerId::from_raw(2);
         let stores = crate::stores::Stores::default();
         stores.browse.borrow_mut().seed_registered_table_for_test([sid, sid]);
         stores.browse.borrow_mut().queue_discovery_for_test(sid, true);

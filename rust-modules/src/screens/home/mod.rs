@@ -727,7 +727,10 @@ impl HomeScreen {
             self.snap_target = 0.0;
             self.snap.jump(0.0);
         }
-        let current = crate::registry::client_for(crate::registry::current()).map(|c| c.machine_id());
+        // The registry half (`client_for(current())` → the current slot's machine id) went with
+        // the client slots (#166): no Plex slot carries a machine any more, so the question's
+        // machine subject is always absent and the refresh below only ever withdraws.
+        let current = None;
         if self.plaintext.refresh(current, Near::First) {
             fx.invalidate(Provenance::Landing(fx.from()));
         }

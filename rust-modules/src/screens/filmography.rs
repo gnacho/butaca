@@ -517,13 +517,7 @@ impl FilmographyScreen {
             self.rows()
                 .iter()
                 .map(|c| {
-                    let sub = match c.local.as_ref().and_then(|(sid, _)| {
-                        crate::registry::facts(*sid).map(|f| f.name.clone())
-                    }) {
-                        Some(name) if c.role.is_empty() => name,
-                        Some(name) => format!("{} · {}", c.role, name),
-                        None => c.role.clone(),
-                    };
+                    let sub = c.role.clone();
                     TRow::new(c.title.clone())
                         .detail(sub)
                         .value(match c.year {

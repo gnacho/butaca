@@ -4,50 +4,6 @@ use super::*;
 #[allow(unused_imports)]
 use super::test_support::*;
 
-/// **The fan-out is the exact live-id set, not a prefix of the mailboxes.** Slot numbers are
-/// permanent and a sign-out retires the departing account's without renumbering what registers
-/// after them, so the `0..server_count()` this used to walk would have asked two slots that
-/// resolve to no client at all and never asked the server the user had just signed in to: a
-/// Search screen that could only ever report failure, for every account after the first.
-#[test]
-fn signing_into_a_second_account_searches_its_slots_and_not_the_retired_ones() {
-    let _g = fresh();
-    let mut owner = Owner::default();
-    register(&mut owner, 2);
-    assert_eq!(slots(), vec![0, 1]);
-
-    crate::registry::revoke_all();
-    assert!(
-        slots().is_empty(),
-        "there is nothing to ask while signed out"
-    );
-    assert_eq!(nsrc(), 0);
-    assert!(
-        live_sources(&owner.state, &slots()).is_empty(),
-        "and the retired records reach neither the merge nor the verdict"
-    );
-
-    let sid = crate::registry::register_with_client_id(
-        "search-test-next",
-        "127.0.0.1",
-        1,
-        "tok",
-        "cid-search-test",
-    );
-    assert_eq!(
-        sid.raw(),
-        2,
-        "the next account gets a fresh slot, above the retired ones"
-    );
-    assert_eq!(
-        slots(),
-        vec![2],
-        "and the live id follows it rather than starting at 0"
-    );
-    assert_eq!(nsrc(), 1);
-    assert_eq!(live_sources(&owner.state, &slots()).len(), 1);
-}
-
 /// **A favourite edit under a resident query supersedes it and re-arms the fetch.** Search
 /// watched the ROSTER generation alone and the favourite answer moves without it — discovery
 /// appending a library, and `apply_pins` recording an edit, both bump `SECTIONS_GEN`, and this
