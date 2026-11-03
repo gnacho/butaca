@@ -210,7 +210,7 @@ that command), even though `--list` returns long before `acquire_tv_lock` is rea
 right trade — a guard that parsed argv for intent would be a hole the first time a listing flag
 grew a side effect — but it means the free move is not free from inside an agent session. Take a
 short lease for it (`tools/tv-lock.sh with --why 'coverage listing' -- ./tests/run.py --list
---server`) or read `tests/manifest.json`. Not `PLX_TV_LOCK_BYPASS=1`: that hatch is for a human who
+--server`) or read `tests/manifest.json`. Not `BUTACA_TV_LOCK_BYPASS=1`: that hatch is for a human who
 knows the set is theirs.
 
 ## The router — keyed on WHAT CHANGED

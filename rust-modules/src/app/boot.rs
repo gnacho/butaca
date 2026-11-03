@@ -644,9 +644,9 @@ pub(crate) unsafe fn construct(
     // of this line is a contract, not decoration: keep the prefix and the version adjacent.
     log(concat!(
         "boot: butaca@",
-        env!("PLX_VERSION"),
+        env!("BUTACA_VERSION"),
         " sha=",
-        env!("PLX_BUILD_SHA")
+        env!("BUTACA_BUILD_SHA")
     ));
     let controlled = preflight.controlled();
     if let Some(initial) = &initial {

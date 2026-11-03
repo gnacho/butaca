@@ -7,16 +7,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fmt;
 
-pub(crate) const FORMAT: &str = "butaca-state";
+pub(crate) const FORMAT: &str = "btcstate";
 pub(crate) const SCHEMA: u32 = 1;
 pub(crate) const MAX_LOGICAL_BYTES: usize = 256 * 1024;
 pub(crate) const MAX_ENCODED_BYTES: usize = 512 * 1024;
 pub(crate) const LEDGER_CAPACITY: usize = 16;
 
 // Install identities come from the packaging manifest via build.rs, shared by both binaries.
-// Compatibility: plxstate.stable/debug are live DB8 keys and must never change. The allowlist
+// Compatibility: btcstate.stable/debug are live DB8 keys and must never change. The allowlist
 // landed in 6f78842e (2026-09-17), before nightly in 1c96bb7e (2026-09-19). Nightly now uses
-// plxstate.night (14 bytes): on webOS 4.10.2, the earlier 16-byte ID failed get with -995
+// btcstate.night (14 bytes): on webOS 4.10.2, the earlier 16-byte ID failed get with -995
 // (generated base64 ID), and the 18-byte ID failed put with -3968 ("Invalid _id length").
 // Neither ID ever stored anything, so there is nothing to migrate.
 // Flavor is serialized as snake_case. An old binary rejects the unknown "nightly" variant
@@ -1006,9 +1006,9 @@ mod tests {
 
     #[test]
     fn exact_ids_and_key_names() {
-        assert_eq!(Flavor::Stable.object_id().as_bytes(), b"plxstate.stable");
-        assert_eq!(Flavor::Debug.object_id().as_bytes(), b"plxstate.debug");
-        assert_eq!(Flavor::Nightly.object_id().as_bytes(), b"plxstate.night");
+        assert_eq!(Flavor::Stable.object_id().as_bytes(), b"btcstate.stable");
+        assert_eq!(Flavor::Debug.object_id().as_bytes(), b"btcstate.debug");
+        assert_eq!(Flavor::Nightly.object_id().as_bytes(), b"btcstate.night");
         assert_eq!(Flavor::Stable.object_id().len(), 15);
         assert_eq!(Flavor::Debug.object_id().len(), 14);
         assert_eq!(Flavor::Nightly.object_id().len(), 14);

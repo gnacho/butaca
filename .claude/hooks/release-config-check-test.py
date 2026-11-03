@@ -22,11 +22,11 @@ fixed in `run_check`, because its message carried an em-dash.
 
 The interesting cases are the NEGATIVES. A missed edit costs one unchecked release configuration
 and the next edit re-runs it; a false fire costs 0.55 s on every `.rs` write in the session and
-teaches the reader to reach for `PLX_RELEASE_CHECK_SKIP`. The three that are easy to get wrong are
+teaches the reader to reach for `BUTACA_RELEASE_CHECK_SKIP`. The three that are easy to get wrong are
 `src/bin/sim.rs` (a real Rust file under the tree, which `--lib` does not compile and the release
 set could not build anyway — `required-features = ["hostsim"]`), `build.rs` (cargo compiles the script in
 EVERY configuration, so a break in it is already covered by `make check` — true even though it now
-emits `PLX_VERSION` for every build rather than early-returning outside `hostsim`), and a file in a sibling `.claude/worktrees/`
+emits `BUTACA_VERSION` for every build rather than early-returning outside `hostsim`), and a file in a sibling `.claude/worktrees/`
 checkout (another lane's crate, another lane's target dir).
 
 `/repo` below is a fabricated root: `rust_src_target` is pure path arithmetic, so nothing needs to

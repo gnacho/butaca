@@ -10,7 +10,7 @@
  * — a compile-time constant recovered without a target, an emulator, or a device.
  *
  *   arm-webos-linux-gnueabi-gcc -I<headers> -c ci/ffabi-dump.c -o /tmp/d.o
- *   arm-webos-linux-gnueabi-nm -S --defined-only /tmp/d.o | sed -n 's/.* \([0-9a-f]*\) [Bb] plx_/\1 /p'
+ *   arm-webos-linux-gnueabi-nm -S --defined-only /tmp/d.o | sed -n 's/.* \([0-9a-f]*\) [Bb] butaca_/\1 /p'
  *
  * (`tools/ffabi-dump.sh` runs exactly that and prints a table.) An offset of 0 would produce a
  * zero-size array, which some toolchains drop entirely — so every value is stored PLUS ONE, and
@@ -28,19 +28,19 @@
  * CROSS (default): each value becomes the SIZE of a zero-initialised array, read back with
  * `nm -S`. Nothing executes, which is the only option for an ARM object on this desk.
  *
- * `-DPLX_FFABI_MAIN` (the HOST table, for the simulator): the same list becomes a printed table,
+ * `-DBUTACA_FFABI_MAIN` (the HOST table, for the simulator): the same list becomes a printed table,
  * because a host object CAN be run and because a desktop `nm` reports every Mach-O size as zero — the
  * array trick is not merely unnecessary there, it silently yields nothing.
  *
  * **One list, two readers.** A second file would drift, and a drifted ABI table does not fail: it
  * succeeds with garbage, which is the whole reason this apparatus exists.
  */
-#ifdef PLX_FFABI_MAIN
+#ifdef BUTACA_FFABI_MAIN
 #include <stdio.h>
-static const struct { const char *name; long value; } plx_table[] = {
+static const struct { const char *name; long value; } butaca_table[] = {
 #define DUMP(name, expr) { #name, (long)(expr) },
 #else
-#define DUMP(name, expr) char plx_##name[(expr) + 1];
+#define DUMP(name, expr) char butaca_##name[(expr) + 1];
 #endif
 
 DUMP(version_avformat, LIBAVFORMAT_VERSION_MAJOR)
@@ -144,12 +144,12 @@ DUMP(mt_video,  AVMEDIA_TYPE_VIDEO)
 DUMP(mt_audio,  AVMEDIA_TYPE_AUDIO)
 DUMP(mt_sub,    AVMEDIA_TYPE_SUBTITLE)
 
-#ifdef PLX_FFABI_MAIN
+#ifdef BUTACA_FFABI_MAIN
 };
 int main(void) {
-    for (unsigned i = 0; i < sizeof plx_table / sizeof plx_table[0]; i++)
-        printf("%-24s %8ld   0x%lx\n", plx_table[i].name, plx_table[i].value,
-               plx_table[i].value);
+    for (unsigned i = 0; i < sizeof butaca_table / sizeof butaca_table[0]; i++)
+        printf("%-24s %8ld   0x%lx\n", butaca_table[i].name, butaca_table[i].value,
+               butaca_table[i].value);
     return 0;
 }
 #endif

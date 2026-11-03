@@ -77,17 +77,17 @@ crossing 5→4 at exactly the same release.
 
 **3 — FFmpeg: the app BUNDLES its own and PINS it.** This one is *not* a version question, and
 treating it as one ("FFmpeg SONAMEs drift, 55→57→58→59→60") is the stale mental model. `make`
-cross-compiles FFmpeg 9.0 under a `-plx` build suffix (`ci/build-ffmpeg.sh`, `--build-suffix=-plx`),
+cross-compiles FFmpeg 9.0 under a `-butaca` build suffix (`ci/build-ffmpeg.sh`, `--build-suffix=-butaca`),
 ships the `.so` files beside the binary, and `ff.rs::load_libraries` opens them by **absolute path
 out of `paths::app_dir()`** — because they sit on no library search path, and because webOS 11.2.0
 ships an FFmpeg 6 of its own that a bare SONAME could open instead. Both halves of that guarantee
-are load-bearing; `tools/fwcompat.py --inventory libavformat-plx` returns `-` on all 14 releases,
+are load-bearing; `tools/fwcompat.py --inventory libavformat-butaca` returns `-` on all 14 releases,
 which is the point.
 
 Consequences to check in any FFmpeg-touching diff:
 
-* the candidate lists are `libavformat-plx.so.63`, `libavcodec-plx.so.63`, `libavutil-plx.so.61`,
-  `libswscale-plx.so.10`, and `ff::boot()` refuses to demux unless the majors are exactly
+* the candidate lists are `libavformat-butaca.so.63`, `libavcodec-butaca.so.63`, `libavutil-butaca.so.61`,
+  `libswscale-butaca.so.10`, and `ff::boot()` refuses to demux unless the majors are exactly
   **`(63, 63, 61)`**. A diff that changes the FFmpeg build must change both, together.
 * **load order is `avutil` → `avcodec` → `avformat`, under `RTLD_GLOBAL`, and it is load-bearing**
   — these libraries carry no rpath, so a dependency loaded first is what the next one finds

@@ -279,7 +279,7 @@ mod tests {
 
     #[test]
     fn packaged_app_identity() {
-        let Ok(paths) = std::env::var("PLX_TEST_PACKAGED_HELPERS") else {
+        let Ok(paths) = std::env::var("BUTACA_TEST_PACKAGED_HELPERS") else {
             return;
         };
         for path in paths.lines() {

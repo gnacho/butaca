@@ -110,7 +110,7 @@ static void s_write(int fd, const char *p, size_t n) {
 
 /* Both sinks get every line, so the two logs tell the same story: the event log is where the rest
  * of the session is, and the crash log is the half that survives the relaunch. */
-static void emit(const struct plx_sbuf *b) {
+static void emit(const struct butaca_sbuf *b) {
     s_write((int)event_fd, b->p, b->n);
     s_write((int)crash_fd, b->p, b->n);
 }
@@ -124,17 +124,17 @@ static char rec_buf[1024];
 /* One /proc/self/maps line: emit it as `at:` when it contains the PC or the LR, and as `bin:`
  * when it is our own executable's mapping (which is what gives triage the load base). */
 static void emit_map_line(const char *line, size_t n, unsigned long pc, unsigned long lr) {
-    int kind = plx_map_line_kind(line, n, pc, lr);
-    struct plx_sbuf b = { rec_buf, 0, sizeof rec_buf };
-    if (kind & PLX_MAP_AT) {
-        plx_s_str(&b, "at: ");
-        for (size_t i = 0; i < n; i++) plx_s_ch(&b, line[i]);
+    int kind = butaca_map_line_kind(line, n, pc, lr);
+    struct butaca_sbuf b = { rec_buf, 0, sizeof rec_buf };
+    if (kind & BUTACA_MAP_AT) {
+        butaca_s_str(&b, "at: ");
+        for (size_t i = 0; i < n; i++) butaca_s_ch(&b, line[i]);
         emit(&b);
         b.n = 0;
     }
-    if (kind & PLX_MAP_BIN) {
-        plx_s_str(&b, "bin: ");
-        for (size_t i = 0; i < n; i++) plx_s_ch(&b, line[i]);
+    if (kind & BUTACA_MAP_BIN) {
+        butaca_s_str(&b, "bin: ");
+        for (size_t i = 0; i < n; i++) butaca_s_ch(&b, line[i]);
         emit(&b);
     }
 }
@@ -152,7 +152,7 @@ static void emit_map_line(const char *line, size_t n, unsigned long pc, unsigned
  * (the app peaks at 31 threads, each with a stack mapping), it has no size to `stat`, and a static
  * buffer big enough for the worst case is memory this process holds for its whole life to use once
  * at death. A 4 KiB window with a carried partial line costs the same syscalls and is bounded. */
-void plx_crash_scan_maps_file(const char *path, unsigned long pc, unsigned long lr) {
+void butaca_crash_scan_maps_file(const char *path, unsigned long pc, unsigned long lr) {
     int m = open(path, O_RDONLY);
     if (m < 0) return;
     size_t held = 0;
@@ -192,18 +192,18 @@ static void emit_regs(const struct sigcontext *c) {
     const unsigned long regs[] = { c->arm_r0, c->arm_r1, c->arm_r2, c->arm_r3,
                                    c->arm_r4, c->arm_r5, c->arm_r6, c->arm_r7,
                                    c->arm_r8, c->arm_r9, c->arm_r10 };
-    struct plx_sbuf b = { rec_buf, 0, sizeof rec_buf };
-    plx_s_str(&b, "reg: sp=");  plx_s_hex(&b, c->arm_sp);
-    plx_s_str(&b, " fp=");      plx_s_hex(&b, c->arm_fp);
-    plx_s_str(&b, " ip=");      plx_s_hex(&b, c->arm_ip);
-    plx_s_str(&b, " cpsr=");    plx_s_hex(&b, c->arm_cpsr);
+    struct butaca_sbuf b = { rec_buf, 0, sizeof rec_buf };
+    butaca_s_str(&b, "reg: sp=");  butaca_s_hex(&b, c->arm_sp);
+    butaca_s_str(&b, " fp=");      butaca_s_hex(&b, c->arm_fp);
+    butaca_s_str(&b, " ip=");      butaca_s_hex(&b, c->arm_ip);
+    butaca_s_str(&b, " cpsr=");    butaca_s_hex(&b, c->arm_cpsr);
     for (unsigned i = 0; i < sizeof regs / sizeof *regs; i++) {
-        plx_s_ch(&b, ' ');
-        plx_s_str(&b, NAMES[i]);
-        plx_s_ch(&b, '=');
-        plx_s_hex(&b, regs[i]);
+        butaca_s_ch(&b, ' ');
+        butaca_s_str(&b, NAMES[i]);
+        butaca_s_ch(&b, '=');
+        butaca_s_hex(&b, regs[i]);
     }
-    plx_s_ch(&b, '\n');
+    butaca_s_ch(&b, '\n');
     emit(&b);
 }
 #endif
@@ -226,13 +226,13 @@ static void crash_handler(int sig, siginfo_t *si, void *uc) {
 #endif
     unsigned long addr = si ? (unsigned long)si->si_addr : 0;
 
-    struct plx_sbuf b = { rec_buf, 0, sizeof rec_buf };
-    b.n = plx_fmt_signal(rec_buf, sizeof rec_buf, sig, signame(sig), addr, pc, lr);
+    struct butaca_sbuf b = { rec_buf, 0, sizeof rec_buf };
+    b.n = butaca_fmt_signal(rec_buf, sizeof rec_buf, sig, signame(sig), addr, pc, lr);
     emit(&b);
 #if defined(__arm__)
     emit_regs(&c->uc_mcontext);
 #endif
-    plx_crash_scan_maps_file("/proc/self/maps", pc, lr);
+    butaca_crash_scan_maps_file("/proc/self/maps", pc, lr);
 
     /* Re-raise with the DEFAULT disposition so the signal actually kills us, and the parent (SAM)
      * sees a real signal crash — `exit_status: 11` for a SIGSEGV, device-verified 2026-08-29 —
@@ -292,7 +292,7 @@ static void crash_handler(int sig, siginfo_t *si, void *uc) {
  * local crash log keeps the contract with the one fact it actually needs. Called before the
  * handler is armed, so plain syscalls are fine here.
  */
-void plx_crash_write_image_marker(int fd) {
+void butaca_crash_write_image_marker(int fd) {
     if (fd < 0) return;
     char path[256];
     ssize_t n = readlink("/proc/self/exe", path, sizeof(path) - 1);
@@ -306,7 +306,7 @@ void plx_crash_write_image_marker(int fd) {
     (void)ignored;
 }
 
-void plx_crash_install(int ev_fd, int cr_fd) {
+void butaca_crash_install(int ev_fd, int cr_fd) {
     struct sigaction sa;
     /* The sinks first, THEN `sigaction`. Ordering, not style: after the last line of this function
      * a signal can arrive at any instant, and the handler must find descriptors it can write to
@@ -334,7 +334,7 @@ void plx_crash_install(int ev_fd, int cr_fd) {
        ("SIGPIPE would kill the app", capture.rs); this covers every other socket in one line. */
     signal(SIGPIPE, SIG_IGN);
 
-#ifndef PLX_DEBUG
+#ifndef BUTACA_DEBUG
     /* No core dumps in a shipping build — this is the other half of the re-raise above, and
        without it that design is actively hostile to the user's TV. The jail sets RLIMIT_CORE
        to INFINITY and /proc/sys/kernel/core_pattern is the bare string "core", i.e. relative

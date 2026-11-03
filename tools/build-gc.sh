@@ -12,7 +12,7 @@
 #    2.6 GB ⤷ vendor/ffmpeg-build — twelve byte-identical copies of one 122 MB object tree
 #
 # ...and then a further **36 GB that none of those numbers could see**, because `fleet-plan` tells
-# workers to point `CARGO_TARGET_DIR` at `$HOME/plx-fleet/<lane>` — OUTSIDE the repository, so
+# workers to point `CARGO_TARGET_DIR` at `$HOME/butaca-fleet/<lane>` — OUTSIDE the repository, so
 # outside every `du` anyone had run. Ten lanes' worth, every one of them an ORPHAN whose worktree
 # had long since been removed. That is what `--orphans` is for, and it is the mode to reach for
 # first: nothing on the machine will ever refer to those trees again.
@@ -29,14 +29,14 @@
 # iterates in; a lane's is cut for one task).
 set -eu
 
-# BEFORE THE `cd`, because `ci/build-ffmpeg.sh` resolves a relative PLX_BUILD_CACHE against the
+# BEFORE THE `cd`, because `ci/build-ffmpeg.sh` resolves a relative BUTACA_BUILD_CACHE against the
 # CALLER's directory and this script is about to change to the repository root. Left alone, the two
-# would resolve `PLX_BUILD_CACHE=.plx-cache` to different places: the report would describe a cache
+# would resolve `BUTACA_BUILD_CACHE=.butaca-cache` to different places: the report would describe a cache
 # that does not exist, the prune would target the wrong tree, and — worst of the three — the busy
 # guard would look for active locks in a directory no build is using and cheerfully find none.
-if [ -n "${PLX_BUILD_CACHE-}" ] && [ -d "${PLX_BUILD_CACHE-}" ]; then
-  PLX_BUILD_CACHE=$(cd "$PLX_BUILD_CACHE" && pwd)
-  export PLX_BUILD_CACHE
+if [ -n "${BUTACA_BUILD_CACHE-}" ] && [ -d "${BUTACA_BUILD_CACHE-}" ]; then
+  BUTACA_BUILD_CACHE=$(cd "$BUTACA_BUILD_CACHE" && pwd)
+  export BUTACA_BUILD_CACHE
 fi
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
@@ -77,8 +77,8 @@ install_worktree_cargo_policy() {
     # REPLACED below rather than left — the whole reason it is a marker and not just "file
     # exists" is so this script can tell its own output from a human's. A file with no marker at
     # all is somebody else's and is never touched, on this run or any later one.
-    if grep -q 'plx-build-gc-policy v2' "$cfg" 2>/dev/null; then return 0; fi
-    if ! grep -q 'plx-build-gc-policy' "$cfg" 2>/dev/null; then return 0; fi
+    if grep -q 'butaca-build-gc-policy v2' "$cfg" 2>/dev/null; then return 0; fi
+    if ! grep -q 'butaca-build-gc-policy' "$cfg" 2>/dev/null; then return 0; fi
   fi
   # `-n` writes nothing, including this. A dry run that creates or rewrites a file is not a dry run.
   if [ -n "$DRY" ]; then
@@ -88,7 +88,7 @@ install_worktree_cargo_policy() {
   fi
   mkdir -p "$wt_root/.cargo" || return 0
   cat > "$cfg" <<'POLICY'
-# plx-build-gc-policy v2 — installed by tools/build-gc.sh, not tracked by git.
+# butaca-build-gc-policy v2 — installed by tools/build-gc.sh, not tracked by git.
 #
 # Cargo merges config upward from the working directory, so this file applies to every linked
 # worktree under `.claude/worktrees/` and to NOTHING else: the main checkout lives above this
@@ -167,8 +167,8 @@ usage: tools/build-gc.sh [MODE] [-n]
                   of them had accumulated past it by 2026-09-17, which is why this script now
                   installs the same rule as a `.cargo/config.toml` any cargo can see.
   --lanes         delete every derived tree in the LINKED WORKTREES — cargo target dirs and the
-                  vendor build trees — plus the EXTERNAL lane target dirs under $PLX_FLEET_DIR
-                  (default ~/plx-fleet), which is where fleet-plan tells workers to point
+                  vendor build trees — plus the EXTERNAL lane target dirs under $BUTACA_FLEET_DIR
+                  (default ~/butaca-fleet), which is where fleet-plan tells workers to point
                   CARGO_TARGET_DIR and which outlive their worktree. The main checkout is left
                   alone. Costs each lane one rebuild when it next runs; costs no source,
                   committed or not.
@@ -183,12 +183,12 @@ usage: tools/build-gc.sh [MODE] [-n]
                   lands as, per AGENTS.md's squash-only trunk rule). Removal is a plain
                   `git worktree remove` (no --force, so it refuses rather than eating anything
                   the clean-tree check missed) followed by that lane's external target dir under
-                  $PLX_FLEET_DIR if one exists. Branches are never deleted; a removed worktree
+                  $BUTACA_FLEET_DIR if one exists. Branches are never deleted; a removed worktree
                   whose branch still exists is reported as "branch left" so the owner decides.
                   Every worktree NOT removed is reported with one reason: dirty | locked |
                   unmerged | building | current | main.
   --stale         delete SUPERSEDED per-hash cargo artifacts from every `deps/` directory this
-                  script can find — inside the lanes, inside the external $PLX_FLEET_DIR lane
+                  script can find — inside the lanes, inside the external $BUTACA_FLEET_DIR lane
                   target dirs, AND inside the MAIN checkout's own `rust-modules/target*` (the one
                   tree every other destructive mode leaves alone). Cargo keys each build by a
                   metadata hash that folds in the exact feature/flag/profile combination (lib
@@ -199,7 +199,7 @@ usage: tools/build-gc.sh [MODE] [-n]
                   asks for this anymore" and never sweeps it. In a lane or an external fleet
                   target dir: keeps the newest hash per (crate name, artifact kind — test binary
                   vs rlib vs other) plus any hash whose newest file is younger than
-                  $PLX_GC_STALE_HOURS hours (default 24); deletes every other hash's files
+                  $BUTACA_GC_STALE_HOURS hours (default 24); deletes every other hash's files
                   outright. In the MAIN checkout: a separate, more conservative rule — a hash is
                   only ever deleted for being OLDER than the threshold, and the newest hash per
                   crate (regardless of kind) is never touched, because that tree is the one a
@@ -209,8 +209,8 @@ usage: tools/build-gc.sh [MODE] [-n]
                   needs the binary; the objects exist solely for a debugger attached to it.
                   Respects the same in-use guard as every other mode: a `deps/` dir a live build
                   is writing into is skipped, never swept.
-  --cache         delete shared FFmpeg build trees under $PLX_BUILD_CACHE untouched for
-                  $PLX_CACHE_MAX_DAYS days (default 30). They are keyed by configure flags AND
+  --cache         delete shared FFmpeg build trees under $BUTACA_BUILD_CACHE untouched for
+                  $BUTACA_CACHE_MAX_DAYS days (default 30). They are keyed by configure flags AND
                   toolchain, so a version bump or an NDK upgrade strands the old entry silently —
                   a cache nothing prunes is the same unbounded growth this script exists for.
                   The tarball is kept; it is 11 MB and every checkout copies from it.
@@ -219,9 +219,9 @@ usage: tools/build-gc.sh [MODE] [-n]
                   themselves in place — `--stale` only removes the superseded hashes inside them.
   --auto          staged reclaim, driven by free space on this volume, and the mode a hook or a
                   cron entry runs unattended. Always runs
-                  --orphans first (cheap, safe, unconditional). Below $PLX_GC_MIN_FREE_GIB GiB
+                  --orphans first (cheap, safe, unconditional). Below $BUTACA_GC_MIN_FREE_GIB GiB
                   free (default 20): --incremental, then --worktrees, then --lanes restricted to
-                  lanes idle for at least $PLX_GC_IDLE_MIN minutes (default 60, judged by the
+                  lanes idle for at least $BUTACA_GC_IDLE_MIN minutes (default 60, judged by the
                   newest mtime anywhere under the worktree, target dirs included) — a lane an
                   agent might resume in the next few minutes is not the same as one nobody is
                   touching, and a needless rebuild costs real money — then --stale last, which is
@@ -229,15 +229,15 @@ usage: tools/build-gc.sh [MODE] [-n]
                   --stale's own conservative rule; never the newest hash per crate). Never
                   --cache, never a tracked file, never any main-checkout file --stale itself
                   would not also remove standalone. Single-instance: a mkdir lock
-                  (stale-safe, $PLX_GC_LOCK_DIR) means a second --auto exits 0 quietly rather than
-                  racing the first. Logs one line per stage to $PLX_GC_LOG (default
+                  (stale-safe, $BUTACA_GC_LOCK_DIR) means a second --auto exits 0 quietly rather than
+                  racing the first. Logs one line per stage to $BUTACA_GC_LOG (default
                   ~/Library/Logs/butaca-build-gc.log on a launchd host,
                   ${XDG_STATE_HOME:-~/.cache}/butaca/build-gc.log elsewhere), truncated to its
                   last ~200 lines past ~1 MB. `--auto -n` previews every stage the current free
                   space would trigger, deletes nothing, and still takes the lock.
   -n, --dry-run   print what would go, delete nothing.
 
-Nothing here touches a tracked file, the shared FFmpeg cache under $PLX_BUILD_CACHE, or the
+Nothing here touches a tracked file, the shared FFmpeg cache under $BUTACA_BUILD_CACHE, or the
 television. Everything it removes is rebuilt by `make`.
 USAGE
       exit 0 ;;
@@ -266,18 +266,18 @@ SELF="$ROOT/tools/build-gc.sh"
 
 # Free space on the volume holding the repo, in KiB. `df -Pk` (POSIX output) rather than plain
 # `df -k`: a long device name wraps GNU df's default format onto two lines, which would put the
-# free-space column on a line `awk 'NR==2'` never sees. `PLX_GC_TEST_FREE_KIB` is a TEST-ONLY
+# free-space column on a line `awk 'NR==2'` never sees. `BUTACA_GC_TEST_FREE_KIB` is a TEST-ONLY
 # override — ci/test_build_gc.py stubs pressure without needing to fill a real disk.
 free_kib() {
-  if [ -n "${PLX_GC_TEST_FREE_KIB-}" ]; then printf '%s' "$PLX_GC_TEST_FREE_KIB"; return 0; fi
+  if [ -n "${BUTACA_GC_TEST_FREE_KIB-}" ]; then printf '%s' "$BUTACA_GC_TEST_FREE_KIB"; return 0; fi
   df -Pk "$ROOT" 2>/dev/null | awk 'NR==2{print $4}'
 }
 
 # Where the auto log lives: the XDG state dir, falling back to ~/.cache like every other
-# dotfile-averse tool here. `PLX_GC_LOG` overrides it, for a caller (or a test) that wants a known
+# dotfile-averse tool here. `BUTACA_GC_LOG` overrides it, for a caller (or a test) that wants a known
 # path.
 gc_log_path() {
-  if [ -n "${PLX_GC_LOG-}" ]; then printf '%s' "$PLX_GC_LOG"; return 0; fi
+  if [ -n "${BUTACA_GC_LOG-}" ]; then printf '%s' "$BUTACA_GC_LOG"; return 0; fi
   if [ -n "${XDG_STATE_HOME-}" ]; then printf '%s' "$XDG_STATE_HOME/butaca/build-gc.log"
   else printf '%s' "$HOME/.cache/butaca/build-gc.log"; fi
 }
@@ -316,12 +316,12 @@ gc_log() {
 # (`ci/test_build_gc.py` measured this failing roughly every other run of its own idle-guard test,
 # every failure showing `find` matching every file in the tree it should have matched none of) the
 # exact zero boundary is not reliable across the (`stat`, `find`'s own clock read, filesystem mtime
-# resolution) chain this walks. `$PLX_GC_IDLE_MIN=0` has an honest meaning anyway — "no idle guard,
+# resolution) chain this walks. `$BUTACA_GC_IDLE_MIN=0` has an honest meaning anyway — "no idle guard,
 # a lane is always eligible" — so answering it without `find` at all removes the flaky boundary
 # case instead of trying to make it trustworthy. Non-numeric input is treated the same way: a
 # caller-supplied guard this function cannot parse is not a reason to spare or to reclaim by
 # accident, and "always eligible" is the same answer `run_auto_mode`'s own `case` gives a garbage
-# `$PLX_GC_IDLE_MIN` before it ever reaches here.
+# `$BUTACA_GC_IDLE_MIN` before it ever reaches here.
 idle_lane() {
   _w=$1 _mins=$2
   case "$_mins" in ''|*[!0-9]*) _mins=0 ;; esac
@@ -336,10 +336,10 @@ idle_lane() {
 # The single-instance lock. mkdir is atomic even over NFS, which is the whole reason it is the
 # mutex primitive everywhere else in this script (`prune_lock`, below). Stale-lock safe by the
 # same protocol `prune_lock` uses for the FFmpeg cache: an unowned lock directory older than
-# $PLX_GC_LOCK_STALE_MIN (default 120) is reclaimed rather than trusted forever, because the
+# $BUTACA_GC_LOCK_STALE_MIN (default 120) is reclaimed rather than trusted forever, because the
 # process most likely to leave a lock behind — one killed mid `--worktrees` `du` sweep, or a
 # laptop that slept through it — is exactly the one that can never release it itself.
-AUTO_LOCK_DIR=${PLX_GC_LOCK_DIR:-${TMPDIR:-/tmp}/plx-build-gc-auto.lock}
+AUTO_LOCK_DIR=${BUTACA_GC_LOCK_DIR:-${TMPDIR:-/tmp}/butaca-build-gc-auto.lock}
 acquire_auto_lock() {
   if mkdir "$AUTO_LOCK_DIR" 2>/dev/null; then
     echo $$ >"$AUTO_LOCK_DIR/pid" 2>/dev/null || true
@@ -347,7 +347,7 @@ acquire_auto_lock() {
     return 0
   fi
   if ! owner_is_alive "$AUTO_LOCK_DIR" \
-     && [ -n "$(find "$AUTO_LOCK_DIR" -maxdepth 0 -mmin +"${PLX_GC_LOCK_STALE_MIN:-120}" 2>/dev/null)" ]; then
+     && [ -n "$(find "$AUTO_LOCK_DIR" -maxdepth 0 -mmin +"${BUTACA_GC_LOCK_STALE_MIN:-120}" 2>/dev/null)" ]; then
     if mv "$AUTO_LOCK_DIR" "$AUTO_LOCK_DIR.stale.$$" 2>/dev/null; then rm -rf "$AUTO_LOCK_DIR.stale.$$"; fi
     if mkdir "$AUTO_LOCK_DIR" 2>/dev/null; then
       echo $$ >"$AUTO_LOCK_DIR/pid" 2>/dev/null || true
@@ -383,7 +383,7 @@ run_auto_stage() {
 # first and unconditionally: it is the cheapest, safest mode this script has, reclaiming trees
 # that literally nothing on the machine can refer to again, so there is no reason to gate it on
 # pressure at all. Everything past it is gated, and `--lanes` additionally passes
-# `PLX_GC_AUTO_IDLE_MIN` so that mode's own dispatch (below) spares any lane touched inside the
+# `BUTACA_GC_AUTO_IDLE_MIN` so that mode's own dispatch (below) spares any lane touched inside the
 # idle window — see `idle_lane`. Manual `--lanes` never sets that variable and is unaffected.
 run_auto_mode() {
   if [ -z "$DRY" ]; then
@@ -394,8 +394,8 @@ run_auto_mode() {
     trap release_auto_lock EXIT
   fi
 
-  _min_gib=${PLX_GC_MIN_FREE_GIB:-20}
-  _idle_min=${PLX_GC_IDLE_MIN:-60}
+  _min_gib=${BUTACA_GC_MIN_FREE_GIB:-20}
+  _idle_min=${BUTACA_GC_IDLE_MIN:-60}
   case "$_min_gib" in ''|*[!0-9]*) _min_gib=20 ;; esac
   case "$_idle_min" in ''|*[!0-9]*) _idle_min=60 ;; esac
   _min_kib=$((_min_gib * 1048576))
@@ -418,7 +418,7 @@ run_auto_mode() {
     [ -n "$DRY" ] || { _cur=$(free_kib); _cur=${_cur:-0}; }
   fi
   if [ "$_cur" -lt "$_min_kib" ] 2>/dev/null; then
-    PLX_GC_AUTO_IDLE_MIN=$_idle_min run_auto_stage "lanes (idle >= ${_idle_min}m)" --lanes
+    BUTACA_GC_AUTO_IDLE_MIN=$_idle_min run_auto_stage "lanes (idle >= ${_idle_min}m)" --lanes
     [ -n "$DRY" ] || { _cur=$(free_kib); _cur=${_cur:-0}; }
   fi
   if [ "$_cur" -lt "$_min_kib" ] 2>/dev/null; then
@@ -523,13 +523,13 @@ incremental_trees() {
 }
 
 # LANE BUILD TREES THAT ARE NOT IN A LANE. `fleet-plan` tells every worker to export
-# `CARGO_TARGET_DIR=$HOME/plx-fleet/<lane>/target` and `SIM_TDIR=.../target-sim`, precisely so that
+# `CARGO_TARGET_DIR=$HOME/butaca-fleet/<lane>/target` and `SIM_TDIR=.../target-sim`, precisely so that
 # `git worktree remove` stays meaningful — which means the documented default puts the biggest
 # thing this script exists to find OUTSIDE every path it was walking. Worse, those trees outlive
 # the worktree by construction: remove the lane and its gigabytes stay, owned by nobody and named
 # after a branch that no longer exists. Scanning only `target*` under each lane directory keeps
 # this to cargo output; nothing else in there is touched.
-FLEET_DIR=${PLX_FLEET_DIR-$HOME/plx-fleet}
+FLEET_DIR=${BUTACA_FLEET_DIR-$HOME/butaca-fleet}
 external_trees() {
   [ -n "$FLEET_DIR" ] && [ -d "$FLEET_DIR" ] || return 0
   for d in "$FLEET_DIR"/*/target*; do
@@ -568,9 +568,9 @@ external_incremental_trees() {
 # which is where nearly all the bulk lives (250-2300 files per hash, measured). Keeping or
 # deleting anything less than the whole hash-group at once produces a `.d` file with no binary or
 # an `.rlib` with half its objects gone — not smaller, just broken.
-PLX_GC_STALE_HOURS_DEFAULT=24
-STALE_HOURS=${PLX_GC_STALE_HOURS:-$PLX_GC_STALE_HOURS_DEFAULT}
-case "$STALE_HOURS" in ''|*[!0-9]*) STALE_HOURS=$PLX_GC_STALE_HOURS_DEFAULT ;; esac
+BUTACA_GC_STALE_HOURS_DEFAULT=24
+STALE_HOURS=${BUTACA_GC_STALE_HOURS:-$BUTACA_GC_STALE_HOURS_DEFAULT}
+case "$STALE_HOURS" in ''|*[!0-9]*) STALE_HOURS=$BUTACA_GC_STALE_HOURS_DEFAULT ;; esac
 STALE_SECS=$((STALE_HOURS * 3600))
 # A 16-hex-digit run, spelled out one class per position rather than `{16}`: `/bin/sh` here
 # resolves to whatever ships as `awk`, and this script already assumes the BSD toolchain
@@ -607,7 +607,7 @@ external_target_roots() {
 # (the main checkout only) keeps the newest hash per crate name ALONE, never mind kind, which is
 # the more conservative floor: a human iterates in this tree and a second live hash there — a
 # `--no-default-features` check run beside the ordinary one — is often deliberate. Both scopes
-# additionally keep any hash whose newest file is younger than $PLX_GC_STALE_HOURS hours, and both
+# additionally keep any hash whose newest file is younger than $BUTACA_GC_STALE_HOURS hours, and both
 # still decline a KEPT test-binary hash's individual `*.rcgu.o` objects once those age past the
 # threshold: only a line-table backtrace needs the binary; the objects exist solely for a debugger
 # attached to it, and nothing here attaches one to a superseded-in-spirit-but-still-newest binary.
@@ -782,7 +782,7 @@ owner_is_alive() {   # $1 = lock directory
 # FFmpeg lock is about the SHARED cache, which belongs to no checkout at all — there is no finer
 # answer to give, so this half stays all-or-nothing exactly as it was.
 ffmpeg_lock_held() {
-  c=${PLX_BUILD_CACHE-$HOME/.cache/butaca}
+  c=${BUTACA_BUILD_CACHE-$HOME/.cache/butaca}
   if [ -n "$c" ]; then
     for l in "$c"/ffmpeg/*.lock; do
       case "$l" in *'*'*) continue ;; esac
@@ -903,10 +903,10 @@ live_checkouts() {
       _pids="$_pids $q"
     done
   done
-  LIVE_LIST="${TMPDIR:-/tmp}/plx-build-gc-live.$$"
+  LIVE_LIST="${TMPDIR:-/tmp}/butaca-build-gc-live.$$"
   : > "$LIVE_LIST"
   [ -n "$_pids" ] || return 0          # nothing building: an empty protected set is the truth
-  LIVE_CWDS="${TMPDIR:-/tmp}/plx-build-gc-cwd.$$"
+  LIVE_CWDS="${TMPDIR:-/tmp}/butaca-build-gc-cwd.$$"
   _cwds=$LIVE_CWDS
   : > "$_cwds"
   # Per pid, and the distinction matters: a builder that EXITED between the `pgrep` above and the
@@ -921,7 +921,7 @@ live_checkouts() {
       rm -f "$_cwds"; LIVE_CWDS=; LIVE_LIST=; return 1
     fi
   done
-  WT_LIST="${TMPDIR:-/tmp}/plx-build-gc-wt.$$"
+  WT_LIST="${TMPDIR:-/tmp}/butaca-build-gc-wt.$$"
   worktrees > "$WT_LIST"
   while IFS= read -r c; do
     [ -n "$c" ] || continue
@@ -1117,7 +1117,7 @@ report)
     done
   fi
 
-  cache=${PLX_BUILD_CACHE-$HOME/.cache/butaca}
+  cache=${BUTACA_BUILD_CACHE-$HOME/.cache/butaca}
   echo
   if [ -n "$cache" ] && [ -d "$cache" ]; then
     printf 'shared build cache  %8s  %s (one copy per configuration, for every checkout)\n' \
@@ -1174,7 +1174,7 @@ stale|all)
   ;;
 esac
 
-CACHE_MAX_DAYS=${PLX_CACHE_MAX_DAYS-30}
+CACHE_MAX_DAYS=${BUTACA_CACHE_MAX_DAYS-30}
 # Take a cache entry's lock the same way `ci/build-ffmpeg.sh` does, INCLUDING its reclaim rule —
 # otherwise the one thing guaranteed to leave a dead lock behind (a build that was killed) is also
 # the thing that makes its tree permanently unprunable, so the entries most worth collecting are
@@ -1190,7 +1190,7 @@ prune_lock() {
   return 1
 }
 stale_cache_trees() {
-  c=${PLX_BUILD_CACHE-$HOME/.cache/butaca}
+  c=${BUTACA_BUILD_CACHE-$HOME/.cache/butaca}
   [ -n "$c" ] && [ -d "$c/ffmpeg" ] || return 0
   for d in "$c"/ffmpeg/*; do
     case "$d" in
@@ -1292,7 +1292,7 @@ worktrees)
     if git worktree remove "$w" 2>&1; then
       printf '  removed       %s  (%s)\n' "$w" "$branch"
       # Same staleness risk as above for the external tree, plus `$FLEET_DIR` itself: `${VAR-def}`
-      # only substitutes when VAR is UNSET, so `PLX_FLEET_DIR=""` in the environment leaves
+      # only substitutes when VAR is UNSET, so `BUTACA_FLEET_DIR=""` in the environment leaves
       # `FLEET_DIR` empty rather than defaulted, and `"$FLEET_DIR/$(basename "$w")"` would then be
       # a ROOT-level path like `/agent-abc`. Guard exactly like `external_trees()` does — non-empty
       # AND an existing directory — before ever building that path.
@@ -1340,19 +1340,19 @@ esac
 case "$MODE" in
 lanes|all)
   echo "== derived trees in linked worktrees (the main checkout is left alone) =="
-  # PLX_GC_AUTO_IDLE_MIN is set ONLY by `run_auto_mode`'s recursive call into this mode, never by
+  # BUTACA_GC_AUTO_IDLE_MIN is set ONLY by `run_auto_mode`'s recursive call into this mode, never by
   # a human typing `--lanes` — a manual reclaim is an explicit ask and idleness is not this mode's
   # business; the idle guard belongs to the pressure-driven caller, not to the mode itself.
   worktrees | while IFS= read -r w; do
     [ "$w" = "$MAIN" ] && continue
-    if [ -n "${PLX_GC_AUTO_IDLE_MIN-}" ] && ! idle_lane "$w" "$PLX_GC_AUTO_IDLE_MIN"; then
+    if [ -n "${BUTACA_GC_AUTO_IDLE_MIN-}" ] && ! idle_lane "$w" "$BUTACA_GC_AUTO_IDLE_MIN"; then
       printf '  recently active, skipped  %s\n' "$w" >&2
       continue
     fi
     lane_trees "$w"
   done | skip_live | drop
   echo "== external lane build trees =="
-  if [ -n "${PLX_GC_AUTO_IDLE_MIN-}" ]; then
+  if [ -n "${BUTACA_GC_AUTO_IDLE_MIN-}" ]; then
     external_trees | sort -u | while IFS= read -r d; do
       _lane=$(basename "$(dirname "$d")")
       _w=$(worktrees | while IFS= read -r ww; do
@@ -1361,9 +1361,9 @@ lanes|all)
       # Check BOTH: the worktree source tree (edits, checkouts) AND the external tree itself
       # (`$d`) — a lane's own `cargo build` writes into `$d`, not into the worktree, so a worktree
       # that has sat untouched for the idle window can still be mid-build if the target dir under
-      # `$PLX_FLEET_DIR` is fresh. Either one being recently active is enough to spare the lane.
-      if { [ -n "$_w" ] && ! idle_lane "$_w" "$PLX_GC_AUTO_IDLE_MIN"; } \
-         || ! idle_lane "$d" "$PLX_GC_AUTO_IDLE_MIN"; then
+      # `$BUTACA_FLEET_DIR` is fresh. Either one being recently active is enough to spare the lane.
+      if { [ -n "$_w" ] && ! idle_lane "$_w" "$BUTACA_GC_AUTO_IDLE_MIN"; } \
+         || ! idle_lane "$d" "$BUTACA_GC_AUTO_IDLE_MIN"; then
         printf '  recently active, skipped  %s\n' "$d" >&2
         continue
       fi

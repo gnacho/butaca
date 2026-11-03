@@ -335,7 +335,7 @@ impl Snapshot {
             seq: 0,
             app_id: Identifier::new(crate::paths::app_id()),
             flavour: Identifier::new(crate::paths::flavour().unwrap_or("stable")),
-            version: Identifier::new(env!("PLX_VERSION")),
+            version: Identifier::new(env!("BUTACA_VERSION")),
             uid: unsafe { libc::getuid() },
             euid: unsafe { libc::geteuid() },
             gid: unsafe { libc::getgid() },
@@ -642,7 +642,7 @@ fn directory(path: &Path) -> io::Result<File> {
 fn unique() -> CString {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     CString::new(format!(
-        ".plxdiag-{}-{}-{}",
+        ".butacadiag-{}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

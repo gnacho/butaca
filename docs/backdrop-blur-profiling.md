@@ -934,7 +934,7 @@ is `butaca-drawmask=<class>`.
 
 1. *The tile coordinate was a highp multiply per fragment* (`gl_FragCoord.xy * (1.0/256.0)`), on
    every fragment of every dithered surface. It is linear in screen position, so the paired vertex
-   shader now computes it (`glsl_vs_dithered!`, `#define PLX_DITHER_NC`, varying `v_dither_nc`)
+   shader now computes it (`glsl_vs_dithered!`, `#define BUTACA_DITHER_NC`, varying `v_dither_nc`)
    and the fetch reads the varying directly — `dither.glsl` cost rule 4. With it: library 45 → 50,
    search loop 45 → 50, grid 51 → 54, detail 50 → 56 (the last also carries the Detail TextView's
    wrap now going through the global `wrap_memo` — `Measure::live_font`, the one CPU term the
@@ -1015,7 +1015,7 @@ scrim are one pass, and opaque card interiors that let the tiler skip the wash b
 
 **2026-09-28, the first lever, taken in part.** The wash, the photograph dissolving over it and the
 atmospheric ramp now draw as ONE opaque pass (`AmbientWash::draw_ground`, `fs_art_wash.frag`,
-`vs_ambient.vert`'s `PLX_WASH_INK`), on Home's fold and Detail's still-over-ground; the corner wedge
+`vs_ambient.vert`'s `BUTACA_WASH_INK`), on Home's fold and Detail's still-over-ground; the corner wedge
 stays its own layer. `poster-hero-grid-dive` went from 56.3 mean moving fps (seven runs, 54.9–57.1,
 one below its 55 floor) to 58.6–60.7 (five runs). The whole-screen version — `fs_hero` extended
 with the wash, the wedge and an inside test on every pixel — measured **49.1**: it moved ALU onto

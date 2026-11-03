@@ -47,7 +47,7 @@ non-`.rs` path is rejected on the extension before even the `git rev-parse`, and
 this crate's `src/` is rejected on pure path arithmetic after it. Cargo is never started for
 either. A second run of the DEFAULT set happens only when the release set already failed — see the message below, which needs to know
 whether the break is release-specific or shared, and cannot know from one run. Both runs share ONE
-budget (`PLX_RELEASE_CHECK_TIMEOUT`, default 90 s) rather than one each, because a cap that can be
+budget (`BUTACA_RELEASE_CHECK_TIMEOUT`, default 90 s) rather than one each, because a cap that can be
 doubled is not a cap. The harness applies its OWN per-hook timeout on top and the smaller of the
 two wins, so wire this in `.claude/settings.json` with a `timeout` at least as large as the cap
 (`"timeout": 120` beside the default 90) or the 90 is decorative. Being killed that way is benign —
@@ -98,8 +98,8 @@ WHAT IT DELIBERATELY DOES NOT CHECK.
     Firing there would spend the 0.55 s and grade nothing.
   * **`rust-modules/build.rs`.** Cargo compiles the script in every configuration, so a break in
     it is a break `make check` already sees. Note what that does and does not cover now: since it
-    started publishing `PLX_VERSION` it no longer emits nothing outside `hostsim` — `emit_version`
-    runs first, in every configuration, and BRANCHES on `PLX_RELEASE`. Both arms compile whatever
+    started publishing `BUTACA_VERSION` it no longer emits nothing outside `hostsim` — `emit_version`
+    runs first, in every configuration, and BRANCHES on `BUTACA_RELEASE`. Both arms compile whatever
     is being checked (it is a runtime branch in a host binary, not a `cfg`), which is why this
     still skips; what nothing here executes is the release arm's VALUE, and nothing should try to
     — `ci/check-package.py` grades the version the packaged bytes actually carry, at package time,
@@ -139,11 +139,11 @@ because nobody would sit through it. A `RUSTFLAGS` already in the environment is
 than cleared, so `Cargo.toml`'s documented `RUSTFLAGS="--cap-lints=warn"` mid-edit escape keeps
 working through this hook too.
 
-THE ESCAPE HATCH is `PLX_RELEASE_CHECK_SKIP=1` in the environment (and
-`PLX_RELEASE_CHECK_TIMEOUT=<seconds>` to move the cap, default 90). Unlike the TV lock's bypass it
+THE ESCAPE HATCH is `BUTACA_RELEASE_CHECK_SKIP=1` in the environment (and
+`BUTACA_RELEASE_CHECK_TIMEOUT=<seconds>` to move the cap, default 90). Unlike the TV lock's bypass it
 is NOT a command prefix, and that asymmetry is deliberate: this hook fires on Edit/Write, which
 carry no command line for an agent to decorate, so the hatch is reachable only by the human who
-started the session — `export PLX_RELEASE_CHECK_SKIP=1`, or an `env` entry in
+started the session — `export BUTACA_RELEASE_CHECK_SKIP=1`, or an `env` entry in
 `.claude/settings.json`. It is for a human deliberately holding the release arm broken across a
 long refactor. There is no reason for it during a release cut; that is when the check is the point.
 
@@ -186,8 +186,8 @@ for _stream in (sys.stdout, sys.stderr):
     except Exception:       # pre-3.7, or a stream that is not a TextIOWrapper — not worth failing
         pass
 
-SKIP_ENV = "PLX_RELEASE_CHECK_SKIP"
-TIMEOUT_ENV = "PLX_RELEASE_CHECK_TIMEOUT"
+SKIP_ENV = "BUTACA_RELEASE_CHECK_SKIP"
+TIMEOUT_ENV = "BUTACA_RELEASE_CHECK_TIMEOUT"
 DEFAULT_TIMEOUT = 90            # warm 0.55s, cold-into-an-empty-dir 13.0s — which is now what the
                                 # first edit after a reboot costs, since $TMPDIR does not survive
                                 # one. The rest is lock headroom, and it is the budget for BOTH

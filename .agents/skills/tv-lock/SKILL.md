@@ -147,23 +147,23 @@ plan the work so only one lane needs the device.
 A lane is a **checkout**: the lease belongs to the worktree, so every Bash call, `make` and nested
 tool inside it inherits the same lease, and a second worktree on the same Mac is a different lane.
 
-**A subagent takes its OWN lane by prefixing `PLX_TV_LOCK_LANE=<its worktree path>` on every
+**A subagent takes its OWN lane by prefixing `BUTACA_TV_LOCK_LANE=<its worktree path>` on every
 device command**, not by exporting it once for the session. The harness reports the SESSION's own
 checkout as the Bash `cwd` for every subagent's call, whatever worktree that agent is actually
 running in — so the `PreToolUse` hook cannot tell one subagent's lease from another's by reading
-`cwd`, and exporting `PLX_TV_LOCK_LANE` into the shared session environment instead collapses
+`cwd`, and exporting `BUTACA_TV_LOCK_LANE` into the shared session environment instead collapses
 every agent onto one lane, which is the exact failure this exists to prevent (the 2026-09-03
 collision: one lane's `make deploy` ran inside another's lease). A per-command prefix is the one
-spelling that can vary call to call: `PLX_TV_LOCK_LANE=$(pwd) tools/tv-lock.sh with --ttl 30
+spelling that can vary call to call: `BUTACA_TV_LOCK_LANE=$(pwd) tools/tv-lock.sh with --ttl 30
 --wait 300 -- ./tests/run.py --filter seek`, repeated per test run, one lease per run rather than
 one for the whole fleet. `tools/tv-lock.sh` already reads the same variable
-(`LANE="${PLX_TV_LOCK_LANE:-$REPO}"`); the hook's `lane_from_command()` resolves it the same way —
+(`LANE="${BUTACA_TV_LOCK_LANE:-$REPO}"`); the hook's `lane_from_command()` resolves it the same way —
 the prefix, else the hook's own environment, else `cwd` — so the two agree on which lane a command
 belongs to.
 
 ## Under the hood (enough to debug it)
 
-- The lock is a **directory on the television**, `/tmp/plx-tv.lock`, holding one `owner` file.
+- The lock is a **directory on the television**, `/tmp/butaca-tv.lock`, holding one `owner` file.
   `mkdir` is the atomic create-if-absent primitive that works on the set's busybox userland; the
   whole decision is taken on the TV in one round trip, never as a read here and a write back.
 - It lives on the **device** because the device is the resource — a host-side file cannot see the
@@ -188,8 +188,8 @@ belongs to.
   before widening what the guard matches. It also grades `lane_from_command()` — the prefix, the
   hook's own environment, and the `cwd` fallback, each against a disposable mirror directory
   rather than the real `~/.butaca/tv-lock` — including that a comment or a heredoc BODY
-  mentioning `PLX_TV_LOCK_LANE=` must never be read as the prefix.
+  mentioning `BUTACA_TV_LOCK_LANE=` must never be read as the prefix.
 
-The escape hatch is `PLX_TV_LOCK_BYPASS=1 <command>`, which both the tools and the hook honour. It
+The escape hatch is `BUTACA_TV_LOCK_BYPASS=1 <command>`, which both the tools and the hook honour. It
 is for a human who knows the set is theirs. Reaching for it because a lock said no is the one move
 this whole mechanism exists to prevent.

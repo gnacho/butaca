@@ -6,7 +6,7 @@ selected subtitle on the server. The simple caption size/wrapping rules apply to
 ASS/SSA retains its authored layout. The viewer's existing tone and timing controls still apply.
 
 `ci/build-libass.py` builds a pinned libass with private FreeType, FriBidi and HarfBuzz. The
-application loads its own `libass-plx` by absolute path. Only the versioned `plx_ass_*` facade is
+application loads its own `libass-butaca` by absolute path. Only the versioned `butaca_ass_*` facade is
 exported; dependency symbols cannot collide with the firmware's font stack. `src/ass.c` reads
 libass structures through the same headers used to compile that library. No firmware libass or
 new Starfish API is required. Pins, checksums, license notices and corresponding source archives

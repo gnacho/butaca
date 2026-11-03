@@ -221,7 +221,7 @@ Unlike the Plex flavour described below, the server address **is** typed on the 
 
 ## The bundled FFmpeg
 
-The package contains three FFmpeg shared libraries, `libavformat-plx.so.63`, `libavcodec-plx.so.63` and `libavutil-plx.so.61`, built from **FFmpeg 9.0**, unmodified, and licensed **LGPL-2.1-or-later**.
+The package contains three FFmpeg shared libraries, `libavformat-butaca.so.63`, `libavcodec-butaca.so.63` and `libavutil-butaca.so.61`, built from **FFmpeg 9.0**, unmodified, and licensed **LGPL-2.1-or-later**.
 
 They contain demuxers, parsers, bitstream filters, and subtitle decoders only: video and audio are decoded by the television's own hardware.
 

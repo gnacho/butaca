@@ -363,7 +363,7 @@ class Session:
 
 
 def lock_reexec(argv: list[str]) -> None:
-    if os.environ.get("PLX_TV_LOCK_INHERITED") == "1":
+    if os.environ.get("BUTACA_TV_LOCK_INHERITED") == "1":
         return
     os.execv(
         str(LOCK),

@@ -67,10 +67,10 @@ static ASS_Image *ass_render_frame(ASS_Renderer *r, ASS_Track *t, long long ms, 
     *changed = 2; /* Another region can change while this one stays identical. */
     return input;
 }
-static PlxAss *context(void) {
+static ButacaAss *context(void) {
     static ASS_Track track = {1, 1, 1};
     static ASS_Renderer renderer;
-    PlxAss *ctx = calloc(1, sizeof(*ctx));
+    ButacaAss *ctx = calloc(1, sizeof(*ctx));
     assert(ctx);
     ctx->track = &track;
     ctx->renderer = &renderer;
@@ -79,28 +79,28 @@ static PlxAss *context(void) {
     return ctx;
 }
 enum { WIDTH = 96, HEIGHT = 48, CANVAS = WIDTH * HEIGHT * 4 };
-static void render(PlxAss *ctx, int width, uint8_t *canvas) {
-    PlxAssFrame f;
-    int result = plx_ass_render(ctx, 0, width, HEIGHT, width, HEIGHT, &f);
+static void render(ButacaAss *ctx, int width, uint8_t *canvas) {
+    ButacaAssFrame f;
+    int result = butaca_ass_render(ctx, 0, width, HEIGHT, width, HEIGHT, &f);
     assert(result == 1);
     memset(canvas, 0, CANVAS);
     for (size_t i = 0; i < f.count; ++i) {
-        const PlxAssBitmap *b = &f.regions[i];
+        const ButacaAssBitmap *b = &f.regions[i];
         for (int y = 0; y < b->height; ++y)
             memcpy(canvas + ((b->y + y) * WIDTH + b->x) * 4,
                    b->rgba + y * b->width * 4, b->width * 4);
     }
 }
-static unsigned check(PlxAss *ctx, int width) {
+static unsigned check(ButacaAss *ctx, int width) {
     uint8_t actual[CANVAS], expected[CANVAS];
     blends = 0;
     render(ctx, width, actual);
     unsigned cached = blends;
-    PlxAss *fresh = context();
+    ButacaAss *fresh = context();
     blends = 0;
     render(fresh, width, expected);
     assert(memcmp(actual, expected, CANVAS) == 0);
-    plx_ass_destroy(fresh);
+    butaca_ass_destroy(fresh);
     return cached;
 }
 int main(void) {
@@ -114,7 +114,7 @@ int main(void) {
     ASS_Image outline = {4, 3, 16, masks[1], 0x00ff0040, 7, 8, &motion};
     ASS_Image sign = {12, 8, 16, masks[0], 0xff000020, 5, 6, &outline};
     input = &sign;
-    PlxAss *ctx = context();
+    ButacaAss *ctx = context();
     unsigned all = check(ctx, WIDTH);
     motion.dst_x += 2;
     motion.color ^= 0x10000000;
@@ -145,17 +145,17 @@ int main(void) {
     /* An intervening failed frame retires the pointer-identity cache. The next
      * libass call may reuse an address whose old image is no longer retained. */
     sign.bitmap = NULL;
-    PlxAssFrame failed;
-    assert(plx_ass_render(ctx, 0, WIDTH, HEIGHT, WIDTH, HEIGHT, &failed) == -1);
+    ButacaAssFrame failed;
+    assert(butaca_ass_render(ctx, 0, WIDTH, HEIGHT, WIDTH, HEIGHT, &failed) == -1);
     sign.bitmap = masks[0]; masks[0][0] ^= 15;
     check(ctx, WIDTH);
-    plx_ass_destroy(ctx);
+    butaca_ass_destroy(ctx);
     puts("PASS: unchanged regions skip blending; 253 frames match fresh composition");
     return 0;
 }
 '''
 
-with tempfile.TemporaryDirectory(prefix='plx-ass-regions-') as directory:
+with tempfile.TemporaryDirectory(prefix='butaca-ass-regions-') as directory:
     folder = Path(directory)
     (folder / 'ass').mkdir()
     (folder / 'ass' / 'ass.h').write_text(HEADER)

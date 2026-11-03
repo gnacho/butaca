@@ -78,7 +78,7 @@ fn main() {
     compile_svg();
 }
 
-/// Publish `PLX_VERSION` — the version this build REPORTS, which is not always the version it was
+/// Publish `BUTACA_VERSION` — the version this build REPORTS, which is not always the version it was
 /// cut from.
 ///
 /// `Cargo.toml`, `pkg/appinfo.json` and `ipkroot/ctl/control` all carry the same three integers,
@@ -120,28 +120,28 @@ fn main() {
 /// `ci/bump-version.py` refuses to write anything but three integers. `ci/check-package.py`
 /// gates the other direction — a package built for the stable id may not carry a `-dev` binary.
 ///
-/// **`PLX_CHANNEL=nightly` adds a third arm**, on top of `PLX_RELEASE`: a nightly build is always
+/// **`BUTACA_CHANNEL=nightly` adds a third arm**, on top of `BUTACA_RELEASE`: a nightly build is always
 /// a `RELEASE=1` build (no dev triggers ever ship under that id — see the Makefile's
 /// `release-guard`), but it must not claim to BE the release its own `Cargo.toml` names, the same
 /// reason a plain dev build cannot. So it reports the same "next minor, or next patch on a
 /// maintenance line" number the `-dev` suffix would, dated instead of merely suffixed:
-/// `0.7.0-nightly-20260919` rather than `0.7.0-dev`. The date comes from `PLX_NIGHTLY_DATE`
+/// `0.7.0-nightly-20260919` rather than `0.7.0-dev`. The date comes from `BUTACA_NIGHTLY_DATE`
 /// (`YYYYMMDD`, validated by [`is_nightly_date`]) because a bare channel name cannot tell two
 /// nightly cuts of the same commit-less trunk apart — X-Plex-Version, the Sentry release and the
 /// diagnostics panel all need that to distinguish "today's nightly" from "yesterday's" the way
-/// `PLX_BUILD_SHA` cannot (trunk moves several times a day; the reported version is what a bug
+/// `BUTACA_BUILD_SHA` cannot (trunk moves several times a day; the reported version is what a bug
 /// report actually names).
 ///
-/// The input is `PLX_RELEASE` and (new) `PLX_CHANNEL`/`PLX_NIGHTLY_DATE`, exported by the Makefile
+/// The input is `BUTACA_RELEASE` and (new) `BUTACA_CHANNEL`/`BUTACA_NIGHTLY_DATE`, exported by the Makefile
 /// for `RELEASE=1` and `FLAVOR=nightly` respectively and by nothing else, so the developer answer
 /// is what an ordinary `make`, `make check`, `make sim` or a bare `cargo build` produces —
-/// `PLX_CHANNEL` unset (or empty) leaves every existing build byte-for-byte as it always reported.
+/// `BUTACA_CHANNEL` unset (or empty) leaves every existing build byte-for-byte as it always reported.
 /// `rerun-if-env-changed` makes cargo re-run this when any of the three flips; the emitted value is
 /// itself tracked, so the crate rebuilds with it.
 fn emit_version() {
-    println!("cargo:rerun-if-env-changed=PLX_RELEASE");
-    println!("cargo:rerun-if-env-changed=PLX_CHANNEL");
-    println!("cargo:rerun-if-env-changed=PLX_NIGHTLY_DATE");
+    println!("cargo:rerun-if-env-changed=BUTACA_RELEASE");
+    println!("cargo:rerun-if-env-changed=BUTACA_CHANNEL");
+    println!("cargo:rerun-if-env-changed=BUTACA_NIGHTLY_DATE");
     let pkg = std::env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION");
     // PARSED BEFORE THE BRANCH, deliberately. Validating only inside the developer arm would make
     // the shape rule conditional on the build that is least likely to be looked at: cargo accepts
@@ -152,25 +152,25 @@ fn emit_version() {
     let (major, minor, patch) = triplet(&pkg);
     // Set-but-empty is not "release": the Makefile exports the variable unconditionally and
     // leaves it blank for a dev build, the same shape `telemetry::sender` reads its credentials
-    // with. `PLX_CHANNEL` follows the identical convention (see the Makefile's `override … :=
-    // $(if …)` beside `PLX_RELEASE`), so "nightly" is checked the same way rather than a second one.
-    let release = std::env::var("PLX_RELEASE").is_ok_and(|v| !v.is_empty());
-    let channel = std::env::var("PLX_CHANNEL").unwrap_or_default();
+    // with. `BUTACA_CHANNEL` follows the identical convention (see the Makefile's `override … :=
+    // $(if …)` beside `BUTACA_RELEASE`), so "nightly" is checked the same way rather than a second one.
+    let release = std::env::var("BUTACA_RELEASE").is_ok_and(|v| !v.is_empty());
+    let channel = std::env::var("BUTACA_CHANNEL").unwrap_or_default();
     if !channel.is_empty() && channel != "nightly" {
-        panic!("PLX_CHANNEL={channel:?} is not a recognized channel — only \"nightly\" (or unset/empty) is");
+        panic!("BUTACA_CHANNEL={channel:?} is not a recognized channel — only \"nightly\" (or unset/empty) is");
     }
     let nightly = channel == "nightly";
     if nightly && !release {
         panic!(
-            "PLX_CHANNEL=nightly requires PLX_RELEASE=1 — nightly never ships a dev build (see \
+            "BUTACA_CHANNEL=nightly requires BUTACA_RELEASE=1 — nightly never ships a dev build (see \
              the Makefile's release-guard)"
         );
     }
     let version = if nightly {
-        let date = std::env::var("PLX_NIGHTLY_DATE").unwrap_or_default();
+        let date = std::env::var("BUTACA_NIGHTLY_DATE").unwrap_or_default();
         if !is_nightly_date(&date) {
             panic!(
-                "PLX_CHANNEL=nightly requires PLX_NIGHTLY_DATE as exactly 8 digits (YYYYMMDD); \
+                "BUTACA_CHANNEL=nightly requires BUTACA_NIGHTLY_DATE as exactly 8 digits (YYYYMMDD); \
                  got {date:?}"
             );
         }
@@ -182,7 +182,7 @@ fn emit_version() {
         let (next_major, next_minor, next_patch) = next_triplet(major, minor, patch, pkg.as_str());
         format!("{next_major}.{next_minor}.{next_patch}-dev")
     };
-    println!("cargo:rustc-env=PLX_VERSION={version}");
+    println!("cargo:rustc-env=BUTACA_VERSION={version}");
 }
 
 /// The `(major, minor, patch)` this checkout's tree is heading TOWARDS — trunk's next minor with
@@ -318,8 +318,8 @@ fn compile_svg() {
     println!("cargo:rustc-link-arg={}", out.display());
 }
 
-/// Publish `PLX_BUILD_SHA` — the short commit this binary was built from, so the About screen can
-/// name the exact source a bug report came from. `PLX_VERSION` alone cannot: every commit on trunk
+/// Publish `BUTACA_BUILD_SHA` — the short commit this binary was built from, so the About screen can
+/// name the exact source a bug report came from. `BUTACA_VERSION` alone cannot: every commit on trunk
 /// between two releases reports the identical `X.Y.0-dev`.
 ///
 /// Best-effort and NOT [`emit_version`]'s contract: a release source package (`docs/distribution.md`
@@ -331,7 +331,7 @@ fn compile_svg() {
 /// silently miss every commit made from here.
 fn emit_build_sha() {
     let sha = git_short_sha().unwrap_or_else(|| "unknown".into());
-    println!("cargo:rustc-env=PLX_BUILD_SHA={sha}");
+    println!("cargo:rustc-env=BUTACA_BUILD_SHA={sha}");
     for rel in ["logs/HEAD", "HEAD"] {
         if let Some(path) = git_path(rel) {
             println!("cargo:rerun-if-changed={}", path.display());

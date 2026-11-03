@@ -127,7 +127,7 @@ jobs:
           python3 ci/nightly.py latest-json --repo "${{ github.repository }}" > _site/nightly/latest.json
           cat _site/nightly/latest.json
 
-      - name: Check PlxAppFont subset covers the staged site
+      - name: Check ButacaAppFont subset covers the staged site
         # _site/nightly/latest.json is JSON data, not rendered text (site.js pulls only ASCII
         # version/date fields from it today), so it is deliberately outside this check's scan.
         run: python3 tools/subset-site-fonts.py check --site-dir _site

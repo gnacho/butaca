@@ -913,8 +913,8 @@ impl ExtraContext {
     /// The comparison key. Deliberately not a word, so no display text can be mistaken for it.
     pub(crate) const fn key(self) -> &'static str {
         match self {
-            Self::Trailer => "plx:context/trailer",
-            Self::Extra => "plx:context/extra",
+            Self::Trailer => "butaca:context/trailer",
+            Self::Extra => "butaca:context/extra",
         }
     }
 

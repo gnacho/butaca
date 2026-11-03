@@ -21,7 +21,7 @@ const TOUCH_AFTER: Duration = Duration::from_secs(3600);
 const MAX_FILE: usize = 4 * 1024 * 1024;
 const MAX_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_ENTRIES: usize = 8192;
-const MAGIC: &[u8; 8] = b"PLXIMG02";
+const MAGIC: &[u8; 8] = b"BTCIMG02";
 const HEADER_LEN: usize = 24;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -108,7 +108,7 @@ pub(crate) fn classify(server_namespace: &str, built_key: &str) -> Option<DiskKe
     };
     params.sort();
     let mut identity = Vec::new();
-    for field in std::iter::once("plx-image-v2")
+    for field in std::iter::once("butaca-image-v2")
         .chain(std::iter::once(server_namespace))
         .chain(params.iter().flat_map(|(k, v)| [k.as_str(), v.as_str()]))
     {

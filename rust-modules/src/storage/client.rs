@@ -673,7 +673,7 @@ mod tests {
             wire::write_frame(&mut bytes, &response).unwrap();
             failure::remember(Stage::HelloRejected, None);
             failure::update(|f| f.activation = Some(failure::Detail::new(Stage::ActivationCall, Some(-13))));
-            let root = std::env::temp_dir().join(format!("plx-no-helper-detail-{}", std::process::id()));
+            let root = std::env::temp_dir().join(format!("butaca-no-helper-detail-{}", std::process::id()));
             assert!(read_response(&mut bytes.as_slice(), &root, &"01".repeat(16)).is_ok());
             let diagnostic = failure::last().unwrap();
             assert_eq!(diagnostic.helper, None);
@@ -770,7 +770,7 @@ mod tests {
     #[test]
     fn helper_failure_descriptor_validation_and_last_error_are_bounded() {
         use std::os::unix::fs::PermissionsExt;
-        let root = std::env::temp_dir().join(format!("plx-helper-diag-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("butaca-helper-diag-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
         let path = root.join("rendezvous.json");
@@ -799,7 +799,7 @@ mod tests {
 
     fn start_failure_fixture(name: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
-        let root = std::env::temp_dir().join(format!("plx-start-{name}-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("butaca-start-{name}-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
         root
@@ -855,7 +855,7 @@ mod tests {
     #[test]
     fn previous_helper_failure_cannot_override_current_connect_failure() {
         use std::os::unix::fs::PermissionsExt;
-        let root = std::env::temp_dir().join(format!("plx-helper-stale-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("butaca-helper-stale-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700)).unwrap();
         let last = root.join("last-error");
@@ -889,7 +889,7 @@ mod tests {
     fn helper_failure_descriptor_open_keeps_errno() {
         use super::wire::failure::{self, Stage};
         failure::clear();
-        let missing = std::env::temp_dir().join(format!("plx-helper-missing-{}", std::process::id()));
+        let missing = std::env::temp_dir().join(format!("butaca-helper-missing-{}", std::process::id()));
         assert!(read_descriptor(&missing).is_err());
         assert_eq!(failure::last().map(|f| f.observed),
             Some(failure::Detail::new(Stage::DescriptorInvalid, Some(libc::ENOENT))));

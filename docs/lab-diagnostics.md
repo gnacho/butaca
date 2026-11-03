@@ -40,7 +40,7 @@ Five pieces of this feature already exist, and the design is mostly wiring them 
   public issue threads. A snapshot built from `Diag` is redacted by construction.
 * **Device identity.** `webos::info()` (release, codename, api, name, from `/var/run/nyx/os_info.json`),
   `devcaps::caps()` (the SoC's own codec table), `paths::app_id()`/`flavour()`,
-  `env!("PLX_VERSION")` (the reported app version — `X.Y.Z` for a release build, and the next
+  `env!("BUTACA_VERSION")` (the reported app version — `X.Y.Z` for a release build, and the next
   MINOR with the patch reset for every other one, `X.(Y+1).0-dev`; see `rust-modules/build.rs`).
 * **A TLS client with runtime-bound libcurl.** `net::request` — verification on, `NOSIGNAL`, curl
   bound by SONAME candidate list so it works from webOS 4.4 to 11.2. Adding one pinning option is a
@@ -82,7 +82,7 @@ lab build.
 
 ## 3. Wire protocol — two public TV routes, both outbound POSTs
 
-The bearer secret and `X-Plx-Session` id authenticate both routes. The per-session SPKI pin
+The bearer secret and `X-Butaca-Session` id authenticate both routes. The per-session SPKI pin
 authenticates the receiver to the television. Redirects are disabled.
 
 ### Diagnostic upload
@@ -91,7 +91,7 @@ authenticates the receiver to the television. Redirects are disabled.
 POST /v1/diag HTTP/1.1
 Host: lab.example.invalid:39443
 Authorization: Bearer <session secret, 32 random bytes, base64url>
-X-Plx-Session: <session id, 8 hex>
+X-Butaca-Session: <session id, 8 hex>
 Content-Type: application/x-ndjson
 Content-Encoding: gzip | identity
 Content-Length: <= 4 MiB, enforced both ends
@@ -131,7 +131,7 @@ one number that tells the agent the window was too small.
 ```
 POST /v1/control/poll HTTP/1.1
 Authorization: Bearer <same session secret>
-X-Plx-Session: <session id>
+X-Butaca-Session: <session id>
 Content-Type: application/json
 
 {"ack":{"id":41,"ok":true,"detail":"dispatched"}}

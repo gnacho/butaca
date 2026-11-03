@@ -172,7 +172,7 @@ def nightly_stamp_date(stamp: str) -> "str | None":
     So this stops guessing where the date ends from the bytes alone, and reads it instead from the
     one place the build ACTUALLY recorded it under its own control: the Makefile's own stamp,
     where `+` is a delimiter WE chose and control, not a byte sequence the linker assembled.
-    Read `PLX_NIGHTLY_DATE` there, then grade the binary the same way `stable` is graded — an exact
+    Read `BUTACA_NIGHTLY_DATE` there, then grade the binary the same way `stable` is graded — an exact
     substring, no boundary assumed either side, because the substring itself is now precise.
     """
     m = re.search(r"\+nightly:([0-9]{8})(?=\+|$)", stamp.strip())
@@ -502,7 +502,7 @@ const DIAG: [&str; 6] = [
     # This fixture is that literal adjacency, using a small legitimate-name set independent of the
     # real allowlist so the case pins the ALGORITHM rather than today's contents of `dev.rs`.
     boundary_blob = b"...jsonlbutaca-hwcnt.jsonlloginonboardli..." \
-                    b"...r.logbutaca-anim.logbutaca-gst.logplx..." \
+                    b"...r.logbutaca-anim.logbutaca-gst.log..." \
                     b"...standalonebutaca-hwcnt!bare-occurrence-with-no-extension..."
     boundary_legit = {"butaca-hwcnt.jsonl", "butaca-anim.log", "butaca-gst.log"}
     boundary_cases = {
@@ -1131,11 +1131,11 @@ BUILD = build_configuration(STAMP_TEXT)
 # configurations, with no build-flag sniffing: a new library still has to be documented, and a
 # documented one that stopped shipping still fails. Whether a RELEASE build really dropped them is
 # the separate, narrower check below.
-DEV_ONLY_SONAMES = {"libswscale-plx.so.10"}   # the dev capture stream's scaler; RELEASE=1 drops it
+DEV_ONLY_SONAMES = {"libswscale-butaca.so.10"}   # the dev capture stream's scaler; RELEASE=1 drops it
 shipped = {p.name for p in (ROOT / "pkg").glob("*.so.*")
            if p.is_file() and p.read_bytes()[:4] == b"\x7fELF"}
 if shipped:
-    named = set(re.findall(r"`(lib[a-z]+-plx\.so\.\d+)`", (ROOT / "THIRD-PARTY-NOTICES.md").read_text()))
+    named = set(re.findall(r"`(lib[a-z]+-butaca\.so\.\d+)`", (ROOT / "THIRD-PARTY-NOTICES.md").read_text()))
     distributed = shipped - DEV_ONLY_SONAMES
     check(distributed == named,
           "THIRD-PARTY-NOTICES names exactly the distributed libraries"
@@ -1256,10 +1256,10 @@ if binary.exists():
     # applies to this checkout.
     #
     # MATCHED WITH THE `butaca@` PREFIX, not as a bare number, and that is the difference
-    # between grading `PLX_VERSION` and grading whatever digits happen to be in .rodata: the About
+    # between grading `BUTACA_VERSION` and grading whatever digits happen to be in .rodata: the About
     # page and any release note text carry the version too, so a bare-number search was satisfiable
     # by a page the version mechanism never touched. `app::boot::construct` opens every session log
-    # with `concat!("boot: butaca@", env!("PLX_VERSION"), " sha=", env!("PLX_BUILD_SHA"))`, one
+    # with `concat!("boot: butaca@", env!("BUTACA_VERSION"), " sha=", env!("BUTACA_BUILD_SHA"))`, one
     # line, ungated, before any store is opened, so this witnesses the emitted value itself. (The
     # string used to be composed by the telemetry modules, deleted with the reporting subsystem in
     # #22, which is why the gate briefly had no witness to find.)
@@ -1268,7 +1268,7 @@ if binary.exists():
     # against Cargo.toml above) IS the next-minor-or-patch number — recomputing "next" a second
     # time from it would double-bump and grade against a version nobody built. Its REPORTED
     # version instead adds `build.rs`'s `-nightly-<date>` suffix on top of that SAME number, dated
-    # by whatever `PLX_NIGHTLY_DATE` the build actually ran with.
+    # by whatever `BUTACA_NIGHTLY_DATE` the build actually ran with.
     #
     # THE DATE IS GRADED BY VALUE, READ FROM THE STAMP — not guessed from the binary's own bytes by
     # shape. Two earlier versions of this gate tried exactly that: first a trailing `\b`, then
@@ -1292,7 +1292,7 @@ if binary.exists():
             nightly_expect = f"butaca@{appinfo['version']}-nightly-{nightly_date}".encode()
             nightly_found = nightly_expect in blob
             nightly_msg = (f"the {PACKAGED_ID} binary reports {nightly_expect.decode()} "
-                            "(build.rs's PLX_CHANNEL=nightly arm, dated by the pkg/.build-config "
+                            "(build.rs's BUTACA_CHANNEL=nightly arm, dated by the pkg/.build-config "
                             "+nightly: stamp)")
             if not nightly_found:
                 # Self-explaining on failure: list what the binary DOES carry after `butaca@`,
@@ -1325,7 +1325,7 @@ if binary.exists():
         if IS_STABLE:
             check(not says_dev,
                   f"the {PACKAGED_ID} binary reports a released version, not {DEV_VERSION.decode()}"
-                  " (build.rs adds the suffix unless PLX_RELEASE is set — RELEASE=1 exports it)")
+                  " (build.rs adds the suffix unless BUTACA_RELEASE is set — RELEASE=1 exports it)")
             check(f'butaca@{appinfo["version"]}'.encode() in blob,
                   f'the {PACKAGED_ID} binary reports the packaged version ({appinfo["version"]})')
         # ...and the configuration is the other half. A `RELEASE=1` build of ANY flavour reports
@@ -1367,7 +1367,7 @@ check(appinfo["type"] == "native", 'appinfo type == "native"')
 check(not appinfo["id"].startswith(("com.palm", "com.webos", "com.lge", "com.palmdts")),
       "app id avoids LG's reserved prefixes")
 # The crate version is a THIRD copy of the same number: plex/identity.rs sends it to both Plex
-# services as X-Plex-Version (through `PLX_VERSION`, which `build.rs` derives from it), so a build
+# services as X-Plex-Version (through `BUTACA_VERSION`, which `build.rs` derives from it), so a build
 # whose Cargo.toml disagreed with appinfo.json would report a version no release ever had.
 # Nightly again the exception, and graded the same way as the first Cargo.toml witness above.
 cargo_ver = re.search(r'^version\s*=\s*"([^"]+)"', (ROOT / "rust-modules/Cargo.toml").read_text(), re.M)
@@ -1529,7 +1529,7 @@ for loc in staged_locales:
 print("== ipk payload ==")
 expected = {
     # No sentry-crash: this fork ships no crash daemon (the Makefile is sentry-free).
-    "butaca", "libass-plx.so.0", "appinfo.json", "icon.png", "largeIcon.png", "splash.png",
+    "butaca", "libass-butaca.so.0", "appinfo.json", "icon.png", "largeIcon.png", "splash.png",
     # appfont-cjk.ttf is the fallback face. Its absence is not a cosmetic loss: every Korean,
     # Japanese and Chinese title in the library becomes tofu, which is LG checklist #6 and #48.
     "appfont.ttf", "appfont-bold.ttf", "appfont-cjk.ttf", "OFL.txt",

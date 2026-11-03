@@ -96,11 +96,11 @@ static PRIVACY: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| [
 ].join("\n\n"));
 static OPEN_SOURCE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| format!("{}\n\n{}", crate::i18n::msg::settings_legal_opensource_body(), include_str!("../../../LICENSE")));
 static FFMPEG: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(crate::i18n::msg::settings_legal_ffmpeg_body);
-static SOURCE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| crate::i18n::msg::settings_legal_source_body(env!("PLX_BUILD_SHA")));
+static SOURCE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| crate::i18n::msg::settings_legal_source_body(env!("BUTACA_BUILD_SHA")));
 static TRADEMARKS: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(crate::i18n::msg::settings_legal_trademarks_body);
 static CONTACT: std::sync::LazyLock<&'static str> = std::sync::LazyLock::new(crate::i18n::msg::settings_legal_contact_body);
 #[cfg(test)]
-static ABOUT: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| crate::i18n::msg::settings_about_body(env!("PLX_BUILD_SHA"), env!("PLX_VERSION")));
+static ABOUT: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| crate::i18n::msg::settings_about_body(env!("BUTACA_BUILD_SHA"), env!("BUTACA_VERSION")));
 
 // ---------------------------------------------------------------------------------------------
 // the index
@@ -575,7 +575,7 @@ mod tests {
         );
     }
 
-    /// The About page also names the exact COMMIT — `PLX_VERSION` alone cannot distinguish two
+    /// The About page also names the exact COMMIT — `BUTACA_VERSION` alone cannot distinguish two
     /// trunk builds cut minutes apart, since both report the same `X.Y.0-dev`.
     #[test]
     fn about_names_a_build_sha() {
@@ -584,8 +584,8 @@ mod tests {
             "About should carry a Build line, says: {ABOUT:?}"
         );
         assert!(
-            !env!("PLX_BUILD_SHA").is_empty(),
-            "PLX_BUILD_SHA must never be the empty string (build.rs falls back to \"unknown\")"
+            !env!("BUTACA_BUILD_SHA").is_empty(),
+            "BUTACA_BUILD_SHA must never be the empty string (build.rs falls back to \"unknown\")"
         );
     }
 

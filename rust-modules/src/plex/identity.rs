@@ -50,9 +50,9 @@ pub(crate) fn display_name() -> &'static str {
 /// `-dev` suffix** — `0.5.0` published, `0.6.0-dev` in the tree, because trunk is where features
 /// land and a patch is cut from an existing minor's own line. `rust-modules/build.rs` is where
 /// that rule is written and why. Every other surface that reports a version — the telemetry
-/// release, the lab snapshot, the usage context — reads the same `PLX_VERSION`, so they cannot
+/// release, the lab snapshot, the usage context — reads the same `BUTACA_VERSION`, so they cannot
 /// drift apart.
-pub(crate) const VERSION: &str = env!("PLX_VERSION");
+pub(crate) const VERSION: &str = env!("BUTACA_VERSION");
 
 pub(crate) const PLATFORM: &str = "webOS";
 
@@ -182,7 +182,7 @@ mod tests {
         assert!(super::user_agent().contains(v));
         // The same input `build.rs` decides on: set by the Makefile for `RELEASE=1` and by
         // nothing else, so an ordinary `make check` compiles the developer answer.
-        let release = matches!(option_env!("PLX_RELEASE"), Some(s) if !s.is_empty());
+        let release = matches!(option_env!("BUTACA_RELEASE"), Some(s) if !s.is_empty());
         match v.strip_suffix("-dev") {
             None => {
                 assert!(release, "a non-release build reports the published version {v:?}");

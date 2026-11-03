@@ -2,16 +2,16 @@
   {
     "name": "stable",
     "app_id": "com.butaca",
-    "object_id": "plxstate.stable"
+    "object_id": "btcstate.stable"
   },
   {
     "name": "debug",
     "app_id": "com.butaca.debug",
-    "object_id": "plxstate.debug"
+    "object_id": "btcstate.debug"
   },
   {
     "name": "nightly",
     "app_id": "com.butaca.nightly",
-    "object_id": "plxstate.night"
+    "object_id": "btcstate.night"
   }
 ]

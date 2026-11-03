@@ -978,7 +978,7 @@ mod tests {
     #[test]
     fn storage_diagnostics_is_never_an_armed_trigger() {
         let _serial = crate::testlock::serial();
-        let root = std::env::temp_dir().join(format!(".plx-diag-trigger-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!(".butaca-diag-trigger-{}", std::process::id()));
         std::fs::create_dir(&root).unwrap();
         struct Cleanup(std::path::PathBuf);
         impl Drop for Cleanup {
