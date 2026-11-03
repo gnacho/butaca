@@ -14,7 +14,7 @@ how a green run means nothing.
 
 | | **synthetic** — the DEFAULT | **server** (`--server`) |
 |---|---|---|
-| what it proves | **transport and decode**: raw-socket GET → `ff.rs` demux over the custom AVIO → the two-lane AU queues → the Starfish `Feed()` pump → the ACB bind, and the Load payload's codec/Dolby **declaration** | **selection**: plex.tv auth, `/decision`, direct-play vs transcode, the PlayQueue, track menus from PMS metadata, markers, resume, the `/:/timeline` reporter |
+| what it proves | **transport and decode**: raw-socket GET → `ff.rs` demux over the custom AVIO → the two-lane AU queues → the Starfish `Feed()` pump → the ACB bind, and the Load payload's codec/Dolby **declaration** | **selection**: `/decision`, direct-play vs transcode, the PlayQueue, track menus from PMS metadata, markers, resume, the `/:/timeline` reporter |
 | what it needs | a TV address and `make fixtures-pipeline` | a Plex server, a token, a `manifest.local.json`, and a library holding the shapes the matrix names |
 | media | generated clips, served off your Mac | real items on your PMS |
 | who can run it | **anyone** | whoever owns that library |
@@ -206,6 +206,8 @@ are written to a `butaca-*` file in the TV's runtime root and cleared by the sam
 before every case, and again by `teardown()` on *every* exit path, including Ctrl-C and a crash.
 
 ## Test identity — runs as a managed user (no watch-history pollution)
+
+> **Legacy note.** The binary no longer reads the `butaca-token` file: the dev-token arm went with the Plex account flow (#190). `tests/run.py` and the on-device tooling still write it for archived scenarios.
 
 By default the harness plays **as the Plex Home managed user in `manifest.local.json` →
 `test_user`**, so test playback + timeline scrobbles land on *that* user's history and your real
