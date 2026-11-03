@@ -1415,13 +1415,6 @@
     },
     "description": "Diagnostics panel: open http failed"
   },
-  "browse.diagnostics.no_plex_pass": {
-    "value": "{version} · no Plex Pass",
-    "args": {
-      "version": "str"
-    },
-    "description": "Diagnostics panel: no plex pass"
-  },
   "browse.crew.director": {
     "value": "Director",
     "description": "App-owned crew job caption; preserve stable metadata role keys."
@@ -1839,13 +1832,6 @@
       "percent": "str"
     },
     "description": "Diagnostics suffix: the measurement's uncertainty as a percentage. es and be put a no-break space before the percent sign."
-  },
-  "browse.diagnostics.plex_pass": {
-    "value": "{version} · Plex Pass",
-    "args": {
-      "version": "str"
-    },
-    "description": "Diagnostics: the server version, and that its owner has Plex Pass (a product name; keep it untranslated)."
   },
   "browse.library.no_collections": {
     "value": "No collections in {library}",

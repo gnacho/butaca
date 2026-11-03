@@ -452,7 +452,7 @@
     "description": "Settings, account, onboarding or privacy UI: settings.legal.ffmpeg.body"
   },
   "settings.legal.trademarks.body": {
-    "value": "Plex, the Plex logo and Plex Media Server are trademarks of Plex, Inc.\n\nLG and webOS are trademarks of LG Electronics Inc.\n\nButaca is an independent, unofficial application. It is not produced by, endorsed by, or affiliated with Plex, Inc. or LG Electronics Inc.",
+    "value": "LG and webOS are trademarks of LG Electronics Inc.\n\nButaca is an independent, unofficial application. It is not produced by, endorsed by, or affiliated with Jellyfin or LG Electronics Inc.",
     "description": "Settings, account, onboarding or privacy UI: settings.legal.trademarks.body"
   },
   "settings.legal.contact.body": {
@@ -471,7 +471,7 @@
     }
   },
   "settings.about.body": {
-    "value": "Version {version}\nBuild {build}\n\nOpen source under GPL-3.0-or-later\n\nButaca is an independent, unofficial application. It is not produced by, endorsed by, or affiliated with Plex, Inc. or LG Electronics Inc.",
+    "value": "Version {version}\nBuild {build}\n\nOpen source under GPL-3.0-or-later\n\nButaca is an independent, unofficial application. It is not produced by, endorsed by, or affiliated with Jellyfin or LG Electronics Inc.",
     "description": "About page body: version, build, licence, and the unofficial-app notice. Authorship and the source link live in Legal, not here.",
     "args": {
       "build": "str",

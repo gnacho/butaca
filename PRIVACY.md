@@ -1,11 +1,10 @@
 # Butaca Privacy Policy
 
 Applies to Butaca 0.7.0, the Jellyfin build published from this repository. Last updated
-30 October 2026.
+3 November 2026.
 
 This page describes the package you install: a client for a Jellyfin server on a rooted LG webOS
-television. The same source also builds the earlier Plex client, which is not what is published
-here, and [the last section](#if-you-build-the-plex-flavour) covers how that one differs.
+television. It is the only build this repository produces.
 
 ## Who is responsible
 
@@ -68,31 +67,13 @@ in `/tmp`, which the television clears when it restarts.
 ## What is never collected
 
 No crash reports, no analytics, no usage counters, no identifiers of any kind, and no access to what
-you watch beyond the server the app points at. The reporting subsystem the earlier Plex client
-carried was removed from this tree, so there is no code here that could send such a thing anywhere.
+you watch beyond the server the app points at. The reporting subsystem was removed from this tree,
+not disabled, so there is no code here that could send such a thing anywhere.
 
 There is no switch to turn this off, because there is no reporting code left to switch off: the
 subsystem is not in the tree, not merely disabled. If this page and the app ever disagree about what
 leaves the television, this page is the one that counts, and the disagreement is a bug worth
 reporting.
-
-## If you build the Plex flavour
-
-The Plex client is still in the tree and builds when the `jellyfin` feature is off. It is not the
-package published here, and it differs in what it reaches and keeps:
-
-- It signs in through **plex.tv**, which handles your Plex account and tells the app which servers
-  that account can see. Plex processes what its own services receive under
-  [Plex's privacy policy](https://www.plex.tv/about/privacy-legal/).
-- It stores your Plex account token, a token for each server you use, and, for every profile you
-  have switched to on this television, that profile's own server token and a one-way check computed
-  from its PIN rather than the PIN itself, so that a switch still works with no internet.
-- It also stores, for a server you were asked about, whether you allowed an unencrypted connection
-  on your home network. Only the answer is kept, and it ends at sign-in or sign-out, at a profile
-  switch unless the new profile reaches that server at the same address, or when the app returns
-  from the background.
-- It keeps the same local logs and the same artwork cache, scrubbed and bounded the same way, and it
-  no longer carries crash or analytics reporting either.
 
 ## Contact and non-affiliation
 
@@ -100,4 +81,4 @@ Privacy questions: `hnacho@proton.me`. Security vulnerabilities may be reported 
 GitHub Security Advisories for this repository.
 
 Butaca is an independent, unofficial application. It is not produced by, endorsed by, or affiliated
-with Plex, Inc., Jellyfin, or LG Electronics Inc.
+with Jellyfin or LG Electronics Inc.

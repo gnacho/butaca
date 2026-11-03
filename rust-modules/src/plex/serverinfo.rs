@@ -114,32 +114,6 @@ pub(crate) fn version_of(id: ServerId) -> String {
     VERSION.lock().map(|g| g[i].clone()).unwrap_or_default()
 }
 
-/// The CURRENT server owner's Plex Pass state, for DIAGNOSTICS — the stats panel and the playback
-/// error wording.
-///
-/// "Current" is a real choice, not a default: a reader that knows WHICH server it is describing
-/// must call [`subscription_of`] instead, or with two servers registered it will happily attribute
-/// one server's subscription to the other's item.
-///
-/// **Never a routing/profile input.** If you are about to gate a transcode target, a codec
-/// profile, or a direct-play decision on this: don't, for two reasons that do not expire.
-/// The transcode target is already a fallback CHAIN (`transcoder.rs`: `hevc,h264` /
-/// `ac3,eac3,aac`), so the server picks what it can actually encode — degradation is handled
-/// where the capability lives, server-side. And this value is fetched asynchronously and can be
-/// stale or `Unknown` at decision time (boot races, a fetch that failed, an old PMS that never
-/// says), so a decision built on it would be issue #22's bug again with the polarity flipped:
-/// a dev-environment claim — this time "we know the subscription" — asserted as universal.
-///
-/// **What it MAY decide is whether a Plex Pass feature is offered** (issue #266's I8): the audio
-/// enhancement (`route::enhancements_offered`) is shown, and asked for, only on a server known to
-/// answer `Yes`. That is visibility, not routing — `Unknown` and `No` both hide it, so a stale or
-/// missing answer degrades to exactly the app without the feature, never to a different flavour,
-/// and once the viewer has opted in the request still goes through the ordinary flavour machinery
-/// (`route::flavors_allowed`) and falls back if the server refuses. It never picks the flavour or
-/// the profile for anything that is not that opt-in.
-pub(crate) fn subscription() -> Subscription {
-    subscription_of(super::current_server())
-}
 
 /// The CURRENT server's build string, "" while unknown. Clones under the lock — callers sample it
 /// (the stats panel holds each sample for 500 ms), they don't call it per frame. A caller that
@@ -385,14 +359,8 @@ mod tests {
         // the bare accessors mean "the current server", which is what every reader that has not
         // yet learned which server it is describing gets
         assert!(servers::set_current(a));
-        assert_eq!(subscription(), Subscription::Yes);
         assert_eq!(version(), "1.43.3.10861-cd85035e7");
         assert!(servers::set_current(b));
-        assert_eq!(
-            subscription(),
-            Subscription::No,
-            "switching servers switches the claim"
-        );
         assert_eq!(version(), "1.32.0.6918-free");
 
         // an id that names no server is "nothing known" — never slot 0's answer, never a panic,
