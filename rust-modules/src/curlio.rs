@@ -370,6 +370,7 @@ impl OpenReservation {
     /// A short independent transfer which must not replace the demuxer's teardown target. Auto's
     /// remote-original preflight can run while the outgoing player still owns [`ACTIVE`]; putting
     /// this handle there would make teardown wake the probe instead of the movie.
+    #[allow(dead_code)] // frozen until the wire layer goes
     fn private() -> Option<OpenReservation> {
         Some(OpenReservation {
             abort: Some(Abort::new()?),
@@ -666,6 +667,7 @@ impl CurlSource {
     /// Open the finite prefix used by an Original throughput experiment. Unlike an ordinary
     /// offset-zero media open this sends `Range: bytes=0-(len-1)`, so completing the sample also
     /// completes the HTTP response instead of abandoning the rest of a multi-gigabyte file.
+    #[allow(dead_code)] // frozen until the wire layer goes
     fn open_bounded_with_reservation_until(
         url: &str,
         len: usize,
@@ -1462,6 +1464,7 @@ pub(crate) struct ThroughputSample {
 /// failure typed is what lets Auto distinguish a PMS refusal from a zero-rate link: an HTTP 500,
 /// 503 or 509 is a statement about this request, not a throughput observation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[allow(dead_code)] // frozen until the wire layer goes
 pub(crate) enum ThroughputFailure {
     Open(OpenErr),
     BodyDeadline,
@@ -1489,6 +1492,7 @@ impl ThroughputSample {
 /// Bounded source measurement used by the ABR control path. Its typed failure keeps a server
 /// refusal visible instead of collapsing it into an absent/zero capacity sample. The lower curl
 /// boundary enforces the same credential-transport policy as the live demuxer.
+    #[allow(dead_code)] // frozen until the wire layer goes
 pub(crate) fn sample_throughput_result(
     url: &str,
     target_bytes: usize,
@@ -1507,6 +1511,7 @@ pub(crate) fn sample_throughput_result(
 /// does: teardown either signals this reservation, or it aborted the queue first and
 /// `cancelled()` refuses to start the request.  Cold preflight deliberately uses
 /// [`sample_throughput_result`] instead because an outgoing player may still own the registry.
+    #[allow(dead_code)] // frozen until the wire layer goes
 pub(crate) fn sample_active_throughput_result<F>(
     url: &str,
     target_bytes: usize,
@@ -1525,6 +1530,7 @@ where
     sample_throughput_with_reservation(url, target_bytes, setup_deadline, body_budget, reservation)
 }
 
+    #[allow(dead_code)] // frozen until the wire layer goes
 fn sample_setup_deadline(
     target_bytes: usize,
     setup_budget: std::time::Duration,
@@ -1538,6 +1544,7 @@ fn sample_setup_deadline(
         .ok_or(ThroughputFailure::Open(OpenErr::Local))
 }
 
+    #[allow(dead_code)] // frozen until the wire layer goes
 fn sample_throughput_with_reservation(
     url: &str,
     target_bytes: usize,

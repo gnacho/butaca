@@ -101,6 +101,7 @@ impl Client {
     /// `part_key` may already contain a query. Library parts do not; IVA extras do
     /// (`/services/iva/assets?…`). [`QueryBuilder`] joins onto that query instead of
     /// writing a second `?`.
+    #[allow(dead_code)] // frozen until the wire layer goes
     pub fn direct_play_url(&self, part_key: &str, session: &str) -> StreamUrl {
         let q = QueryBuilder::new(part_key).str("X-Plex-Session-Identifier", session);
         let path = self.playback_identity(q).build();
