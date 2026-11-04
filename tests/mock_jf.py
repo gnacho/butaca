@@ -153,29 +153,22 @@ def demo_cache_dir():
     return pathlib.Path(env) if env else pathlib.Path.home() / ".cache" / "butaca-demo"
 
 
-_STREAM_BYTES = None
+def fallback_stream():
+    """The clip an item with no film of its own still gets.
 
-
-def stream_bytes():
-    """The bytes `/Videos/{id}/stream` serves, read once.
-
-    The demo cache ships a short stand-in clip for the capture scenes; a machine that has not
-    run `tools/demo_library.py derive` falls back to the source film. Returns b"" when neither
+    The demo cache ships a short stand-in for the capture scenes; a machine that has not run
+    `tools/demo_library.py derive` falls back to the source film. Returns None when neither
     exists, so the handler can answer 404 the way a server without the file would.
+
+    A PATH, never the bytes: the source film is 282 MB, and reading it once per server was
+    already more than the routes need.
     """
-    global _STREAM_BYTES
-    if _STREAM_BYTES is None:
-        cache = demo_cache_dir()
-        for candidate in (cache / "derived" / "caminandes_1_2" / "stand-in.mp4",
-                          cache / "src" / "sintel-film.mp4"):
-            try:
-                _STREAM_BYTES = candidate.read_bytes()
-                break
-            except OSError:
-                continue
-        else:
-            _STREAM_BYTES = b""
-    return _STREAM_BYTES
+    cache = demo_cache_dir()
+    for candidate in (cache / "derived" / "caminandes_1_2" / "stand-in.mp4",
+                      cache / "src" / "sintel-film.mp4"):
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def date_at(rng, start_year, span_years):
@@ -580,6 +573,7 @@ class CatalogLibrary(Library):
         self.people_by_index = []
         self.items = {}
         self.images = {}
+        self.streams = {}
         self._image_cache = {}
         self.by_slug = {}
         self.sections = [dict(s, Id=sid(self.seed, "view", s["type"])) for s in cat["sections"]]
@@ -660,6 +654,23 @@ class CatalogLibrary(Library):
             self.genres[gid] = {"Id": gid, "Name": name, "Type": "Genre"}
         return names
 
+    def _stream_for(self, rec, slug):
+        """The clip this record actually contains, when the cache carries one.
+
+        `stand_in` records are the ones `tools/demo_library.py derive` renders a short clip for.
+        A record with `media` plays the source asset it names: the catalog film is 14:48 and a
+        scene that pauses at 7:26 needs those minutes to exist. Everything else has no film of
+        its own and keeps the shared fallback, which is what the other scenes were written on.
+        """
+        if rec.get("stand_in"):
+            path = self.derived / slug.replace("/", "_") / "stand-in.mp4"
+            return path if path.is_file() else None
+        asset = rec.get("media")
+        if not asset:
+            return None
+        found = sorted((self.cache / "src").glob("%s.*" % asset))
+        return found[0] if found else None
+
     # ---- the item builders -------------------------------------------------------------
 
     @staticmethod
@@ -673,6 +684,9 @@ class CatalogLibrary(Library):
         self.images[item_id] = art
         self.by_slug[rec["id"]] = item_id
         minutes = rec["minutes"]
+        stream = self._stream_for(rec, rec["id"])
+        if stream:
+            self.streams[item_id] = stream
         item = {
             "Id": item_id,
             "Name": rec["title"],
@@ -758,6 +772,9 @@ class CatalogLibrary(Library):
         self.images[item_id] = images
         self.by_slug[slug] = item_id
         minutes = entry["minutes"]
+        stream = self._stream_for(entry, slug)
+        if stream:
+            self.streams[item_id] = stream
         return {
             "Id": item_id,
             "Name": entry["title"],
@@ -1215,7 +1232,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(204, None)
 
         if len(segs) == 3 and segs[0] == "Videos" and segs[2] in ("stream", "stream.mp4"):
-            return self.video_stream()
+            return self.video_stream(lib, segs[1])
 
         with self.server.lock:
             self.server.unknown.append("%s %s" % (method, path))
@@ -1309,14 +1326,19 @@ class Handler(BaseHTTPRequestHandler):
                 "ThumbnailCount": 100, "Interval": 10000, "Bandwidth": 123456}}}
         return self._send_json(200, row)
 
-    def video_stream(self):
+    def video_stream(self, lib, item_id):
         """The static file the client plays (`?static=true`). Range is honoured because the
         player seeks: a server that ignored the header answers the whole file and the player
-        looks like it stalled."""
-        data = stream_bytes()
-        if not data:
+        looks like it stalled.
+
+        The path comes from the ITEM: handing every item the same clip made a scene that
+        pauses at 7:26 of a 14:48 film reach the end of a three-minute stand-in instead.
+        """
+        # The synthetic world carries no clips of its own; only the demo catalog does.
+        path = getattr(lib, "streams", {}).get(item_id) or fallback_stream()
+        if path is None:
             return self._send_json(404, {})
-        total = len(data)
+        total = path.stat().st_size
         start, end = 0, total - 1
         status = 200
         match = re.match(r"bytes=(\d*)-(\d*)$", (self.headers.get("Range") or "").strip())
@@ -1334,15 +1356,23 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return 416
             status = 206
-        chunk = data[start:end + 1]
+        length = end - start + 1
         self.send_response(status)
         self.send_header("Content-Type", "video/mp4")
         self.send_header("Accept-Ranges", "bytes")
-        self.send_header("Content-Length", str(len(chunk)))
+        self.send_header("Content-Length", str(length))
         if status == 206:
             self.send_header("Content-Range", "bytes %d-%d/%d" % (start, end, total))
         self.end_headers()
-        self.wfile.write(chunk)
+        remaining = length
+        with path.open("rb") as fh:
+            fh.seek(start)
+            while remaining > 0:
+                block = fh.read(min(64 * 1024, remaining))
+                if not block:
+                    break
+                self.wfile.write(block)
+                remaining -= len(block)
         return status
 
     def item_image(self, lib, item_id, kind_path, query):
@@ -1599,11 +1629,13 @@ def selftest(catalog=None):
     # The static stream the player opens: the whole body, then one Range slice. Skipped by
     # name on a machine that has not run the demo library, which is the same machine that has
     # no clip to serve.
-    if stream_bytes():
+    clip = fallback_stream()
+    if clip:
         stream_path = "/Videos/%s/stream?static=true&api_key=%s" % (movie["Id"], token)
         with urllib.request.urlopen(base + stream_path, timeout=10) as reply:
             assert reply.status == 200 and reply.headers["Accept-Ranges"] == "bytes"
             whole = reply.read()
+        assert len(whole) == clip.stat().st_size, (len(whole), clip.stat().st_size)
         assert whole[:4] == b"\x00\x00\x00\x20" or whole[4:8] == b"ftyp", whole[:8]
         ranged = urllib.request.Request(base + stream_path, headers={"Range": "bytes=0-99"})
         with urllib.request.urlopen(ranged, timeout=10) as reply:
@@ -1695,6 +1727,20 @@ def _selftest_catalog(catalog_path):
     ctype, data = get("/Items/%s/Images/Backdrop/0?api_key=%s" % (art_id, token), raw=True)
     assert ctype == "image/jpeg" and data[:2] == b"\xff\xd8", (ctype, data[:4])
     assert len(data) > 10_000, "a real backdrop, not the placeholder"
+
+    # An item that carries its own film must serve THAT film. The scenes share one stand-in, so
+    # serving it to every item made the player scene reach the end of a three-minute clip before
+    # the instant it pauses at (7:26 of the catalog movie).
+    film_id = lib.by_slug["sintel"]
+    film = lib.streams.get(film_id)
+    assert film is not None, "the catalog film is cached but no stream was registered for it"
+    request = urllib.request.Request(
+        base + "/Videos/%s/stream?static=true&api_key=%s" % (film_id, token),
+        headers={"Range": "bytes=0-99"})
+    with urllib.request.urlopen(request, timeout=10) as reply:
+        assert reply.status == 206 and len(reply.read()) == 100, reply.status
+        assert reply.headers["Content-Range"] == "bytes 0-99/%d" % film.stat().st_size
+    assert film.stat().st_size > 60 * 1024 * 1024, "the film itself, not a derived stand-in"
 
     srv.shutdown()
 
