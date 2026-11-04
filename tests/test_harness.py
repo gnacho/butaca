@@ -5001,13 +5001,15 @@ class DepGates(unittest.TestCase):
     SCRATCH_DIR_PREFIX = "_check_deps_cfg_"
 
     @classmethod
-    def _sweep_abandoned_self_tests(cls):
+    def _sweep_abandoned_self_tests(cls, root=None):
         """Undo what a killed run left behind, before this run touches the tree.
 
         Returns `[(path, action)]`, empty when the tree is clean. Walks only `rust-modules/src`,
-        which is where all three writers work."""
+        which is where all three writers work. `root` defaults to this checkout and is pointed at
+        the mirror by the self-tests that prove the sweep itself."""
+        root = root or cls.ROOT
         fixed = []
-        src = os.path.join(cls.ROOT, "rust-modules", "src")
+        src = os.path.join(root, "rust-modules", "src")
         for dirpath, dirnames, filenames in os.walk(src):
             for name in list(dirnames):
                 if name.startswith(cls.SCRATCH_DIR_PREFIX):
@@ -5056,18 +5058,76 @@ class DepGates(unittest.TestCase):
             for path, action in fixed:
                 print(f"  {action}: {os.path.relpath(path, cls.ROOT)}", file=sys.stderr)
 
+    # The self-tests below PROVE a gate by breaking a source file. They used to break the real
+    # one, so a killed run left the checkout dirty, and not even a `finally` survives a SIGKILL.
+    # The mirror is a throwaway root (#129): `ci/` is a symlink to this checkout (the script and
+    # its allowlists are read, never written) and `rust-modules/src` is a real copy the tests may
+    # mutate freely. `PLX_CHECK_ROOT` points `ci/check-deps.sh` at it, so a scan sees the copy and
+    # the repository is never a candidate for a write.
+    MIRROR = None
+
+    @classmethod
+    def _mirror(cls):
+        """The throwaway root, built once per class. 16 MB of sources, copied once, not per test."""
+        if cls.MIRROR is None:
+            root = tempfile.mkdtemp(prefix="butaca-deps-mirror-")
+            os.symlink(os.path.join(cls.ROOT, "ci"), os.path.join(root, "ci"))
+            shutil.copytree(
+                os.path.join(cls.ROOT, "rust-modules", "src"),
+                os.path.join(root, "rust-modules", "src"),
+            )
+            cls.MIRROR = root
+        return cls.MIRROR
+
+    @classmethod
+    def _mirror_src(cls):
+        return os.path.join(cls._mirror(), "rust-modules", "src")
+
+    def _check_deps(self):
+        """Run the gate against the mirror, never against this checkout."""
+        root = self._mirror()
+        env = dict(os.environ, PLX_CHECK_ROOT=root)
+        return subprocess.run([os.path.join(root, "ci", "check-deps.sh")],
+                              capture_output=True, text=True, env=env)
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls.MIRROR is not None:
+            shutil.rmtree(cls.MIRROR, ignore_errors=True)
+            cls.MIRROR = None
+
     def test_check_deps_is_green(self):
-        r = subprocess.run([os.path.join(self.ROOT, "ci", "check-deps.sh")], capture_output=True, text=True)
+        r = self._check_deps()
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
+    def test_the_tracked_tree_is_never_a_candidate_for_a_write(self):
+        """The mirror exists for one reason: a self-test that plants, rewrites or renames a source
+        file must do it where the checkout is not. Prove it by planting a shape a gate catches,
+        watching that gate fire, and walking away with the tracked tree untouched."""
+        name = "_check_deps_selftest_write_probe.rs"
+        tracked = os.path.join(self.ROOT, "rust-modules", "src", name)
+        self.assertFalse(os.path.exists(tracked), f"stale self-test artifact at {tracked} — remove it by hand")
+        r = self._plant(
+            name,
+            "use std::thread;\n\npub fn spawn_worker() {\n    thread::spawn(|| {});\n}\n",
+        )
+        out = r.stdout + r.stderr
+        self.assertNotEqual(r.returncode, 0, f"the mirror copy must be what the gate scans\n{out}")
+        self.assertIn(name, out)
+        self.assertFalse(os.path.exists(tracked), "the probe landed in the checkout, not the mirror")
+        status = subprocess.run(
+            ["git", "-C", self.ROOT, "status", "--porcelain", "--", "rust-modules/src"],
+            capture_output=True, text=True)
+        self.assertEqual(status.stdout, "", "the tracked tree is not a candidate for a self-test write")
+
     def _plant(self, name, content):
-        """Write `content` to a temp file under rust-modules/src that no ci/allow/*.txt names,
-        run ci/check-deps.sh against the real tree with it present, and guarantee removal even if
-        the assertion that follows fails. An orphan .rs file with no `mod` statement pointing at
-        it is invisible to cargo (nothing declares it part of the crate) but not to `find … -name
-        '*.rs'`, which is all these gates scan with — so this is the cheapest way to prove a gate
-        catches a shape without touching a real, permanent source file."""
-        target = os.path.join(self.ROOT, "rust-modules", "src", name)
+        """Write `content` to a temp file under the mirror's rust-modules/src that no
+        ci/allow/*.txt names, run ci/check-deps.sh against the mirror with it present, and
+        guarantee removal even if the assertion that follows fails. An orphan .rs file with no
+        `mod` statement pointing at it is invisible to cargo (nothing declares it part of the
+        crate) but not to `find … -name '*.rs'`, which is all these gates scan with — so this is
+        the cheapest way to prove a gate catches a shape without touching a real source file."""
+        target = os.path.join(self._mirror_src(), name)
         self.assertFalse(os.path.exists(target), f"stale self-test artifact at {target} — remove it by hand")
         planted = target + self.PLANTED_SUFFIX
         with open(planted, "w", encoding="utf-8"):
@@ -5075,8 +5135,7 @@ class DepGates(unittest.TestCase):
         try:
             with open(target, "w", encoding="utf-8") as f:
                 f.write(content)
-            return subprocess.run([os.path.join(self.ROOT, "ci", "check-deps.sh")],
-                                   capture_output=True, text=True)
+            return self._check_deps()
         finally:
             if os.path.exists(target):
                 os.remove(target)
@@ -5084,14 +5143,15 @@ class DepGates(unittest.TestCase):
                 os.remove(planted)
 
     def _mutate(self, relpath, needle, replacement):
-        """Temporarily replace ONE occurrence of `needle` with `replacement` in a REAL tracked
-        file, run ci/check-deps.sh, then unconditionally restore the original bytes — even if the
-        assertion that follows fails. Unlike `_plant`'s orphan-file trick, `mutators-visibility`
-        greps a DECLARATION LINE inside one of the seven specific legacy-store files by path, not
-        a `find … -name '*.rs'` sweep, so an orphan file elsewhere in the tree is invisible to it
-        by design; a scratch mutation of the real file's own content is what "plants a
-        pub(crate) fn set_cur in a temp copy" (the D3 brief's own words) has to mean here."""
-        target = os.path.join(self.ROOT, "rust-modules", "src", relpath)
+        """Temporarily replace ONE occurrence of `needle` with `replacement` in the MIRROR's copy
+        of a tracked file, run ci/check-deps.sh, then unconditionally restore the original bytes —
+        even if the assertion that follows fails. Unlike `_plant`'s orphan-file trick,
+        `mutators-visibility` greps a DECLARATION LINE inside one of the seven specific
+        legacy-store files by path, not a `find … -name '*.rs'` sweep, so an orphan file elsewhere
+        in the tree is invisible to it by design; a scratch mutation of the file's own content is
+        what "plants a pub(crate) fn set_cur in a temp copy" (the D3 brief's own words) has to mean
+        here. The copy is the mirror, so the checkout keeps its bytes whatever happens."""
+        target = os.path.join(self._mirror_src(), relpath)
         with open(target, encoding="utf-8") as f:
             original = f.read()
         self.assertEqual(original.count(needle), 1, f"{needle!r} not found exactly once in {relpath}")
@@ -5101,8 +5161,7 @@ class DepGates(unittest.TestCase):
         try:
             with open(target, "w", encoding="utf-8") as f:
                 f.write(original.replace(needle, replacement, 1))
-            return subprocess.run([os.path.join(self.ROOT, "ci", "check-deps.sh")],
-                                   capture_output=True, text=True)
+            return self._check_deps()
         finally:
             with open(target, "w", encoding="utf-8") as f:
                 f.write(original)
@@ -5110,8 +5169,8 @@ class DepGates(unittest.TestCase):
                 os.remove(backup)
 
     def _prepend(self, relpath, content):
-        """Temporarily prepend a valid module-level fixture to a scanned Rust file."""
-        target = os.path.join(self.ROOT, "rust-modules", "src", relpath)
+        """Temporarily prepend a valid module-level fixture to a scanned Rust file in the mirror."""
+        target = os.path.join(self._mirror_src(), relpath)
         with open(target, encoding="utf-8") as f:
             original = f.read()
         backup = target + self.BACKUP_SUFFIX
@@ -5120,8 +5179,7 @@ class DepGates(unittest.TestCase):
         try:
             with open(target, "w", encoding="utf-8") as f:
                 f.write(content + original)
-            return subprocess.run([os.path.join(self.ROOT, "ci", "check-deps.sh")],
-                                  capture_output=True, text=True)
+            return self._check_deps()
         finally:
             with open(target, "w", encoding="utf-8") as f:
                 f.write(original)
@@ -5131,7 +5189,7 @@ class DepGates(unittest.TestCase):
     def test_a_killed_plant_is_removed_by_the_next_run(self):
         """A killed run skips `finally`, so the marker is the only record of what to undo. The
         sweep has to delete the file it created and the marker with it."""
-        target = os.path.join(self.ROOT, "rust-modules", "src", "selftest_kill_probe.rs")
+        target = os.path.join(self._mirror_src(), "selftest_kill_probe.rs")
         planted = target + self.PLANTED_SUFFIX
         self.assertFalse(os.path.exists(target), f"stale probe at {target}")
         try:
@@ -5139,7 +5197,7 @@ class DepGates(unittest.TestCase):
                 f.write("pub(crate) fn leftover() {}\n")
             with open(planted, "w", encoding="utf-8"):
                 pass
-            fixed = self._sweep_abandoned_self_tests()
+            fixed = self._sweep_abandoned_self_tests(self._mirror())
             self.assertIn((target, "removed"), fixed)
             self.assertFalse(os.path.exists(target), "the sweep must delete the planted file")
             self.assertFalse(os.path.exists(planted), "and the marker that pointed at it")
@@ -5151,7 +5209,7 @@ class DepGates(unittest.TestCase):
     def test_a_killed_mutation_is_put_back_from_its_marker(self):
         """The same for a scratch edit of a real file: the marker carries the bytes to restore, so
         the next run repairs the file instead of leaving the mutation for a reviewer to find."""
-        target = os.path.join(self.ROOT, "rust-modules", "src", "selftest_restore_probe.rs")
+        target = os.path.join(self._mirror_src(), "selftest_restore_probe.rs")
         backup = target + self.BACKUP_SUFFIX
         self.assertFalse(os.path.exists(target), f"stale probe at {target}")
         try:
@@ -5159,7 +5217,7 @@ class DepGates(unittest.TestCase):
                 f.write("pub(crate) fn mutated() {}\n")
             with open(backup, "w", encoding="utf-8") as f:
                 f.write("pub(crate) fn original() {}\n")
-            fixed = self._sweep_abandoned_self_tests()
+            fixed = self._sweep_abandoned_self_tests(self._mirror())
             self.assertIn((target, "restored"), fixed)
             with open(target, encoding="utf-8") as f:
                 self.assertEqual(f.read(), "pub(crate) fn original() {}\n")
@@ -5172,14 +5230,14 @@ class DepGates(unittest.TestCase):
     def test_a_killed_rename_is_put_back_by_the_next_run(self):
         """The set-aside shape: the marker the test used as a scratch name is the whole record, so
         a file that never came back is restored by moving it home again."""
-        target = os.path.join(self.ROOT, "rust-modules", "src", "selftest_rename_probe.rs")
+        target = os.path.join(self._mirror_src(), "selftest_rename_probe.rs")
         aside = target + self.SET_ASIDE_SUFFIX
         self.assertFalse(os.path.exists(target), f"stale probe at {target}")
         try:
             with open(target, "w", encoding="utf-8") as f:
                 f.write("pub(crate) fn scanned() {}\n")
             os.replace(target, aside)
-            fixed = self._sweep_abandoned_self_tests()
+            fixed = self._sweep_abandoned_self_tests(self._mirror())
             self.assertIn((target, "put back"), fixed)
             self.assertTrue(os.path.exists(target), "the scanned file has to be back in place")
             self.assertFalse(os.path.exists(aside), "and the scratch name gone")
@@ -5191,13 +5249,13 @@ class DepGates(unittest.TestCase):
     def test_a_killed_run_leaves_a_scratch_module_tree_that_is_removed(self):
         """`_module_path_fixture` builds its tree inside `rust-modules/src` so the gate sees it.
         TemporaryDirectory deletes it on the way out, which a kill never reaches."""
-        scratch = os.path.join(self.ROOT, "rust-modules", "src", self.SCRATCH_DIR_PREFIX + "probe")
+        scratch = os.path.join(self._mirror_src(), self.SCRATCH_DIR_PREFIX + "probe")
         self.assertFalse(os.path.exists(scratch), f"stale scratch tree at {scratch}")
         try:
             os.makedirs(scratch)
             with open(os.path.join(scratch, "entry.rs"), "w", encoding="utf-8") as f:
                 f.write("mod checks;\n")
-            fixed = self._sweep_abandoned_self_tests()
+            fixed = self._sweep_abandoned_self_tests(self._mirror())
             self.assertIn((scratch, "removed scratch tree"), fixed)
             self.assertFalse(os.path.exists(scratch), "the scratch tree must be gone")
         finally:
@@ -5405,7 +5463,7 @@ impl ViewStateOwnerGateFixture {
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def _module_path_fixture(self, production_reference):
-        source = os.path.join(self.ROOT, "rust-modules", "src")
+        source = self._mirror_src()
         with tempfile.TemporaryDirectory(prefix="_check_deps_cfg_", dir=source) as directory:
             declaration = '#[cfg(test)]\n#[allow(dead_code)]\n#[path = "support.rs"]\npub(crate) mod checks;\n'
             if production_reference:
@@ -5415,9 +5473,8 @@ impl ViewStateOwnerGateFixture {
             target = os.path.join(directory, "support.rs")
             with open(target, "w", encoding="utf-8") as output:
                 output.write('pub fn helper() { std::thread::spawn(|| {}); let _ = 0.5f32.powf(2.4); }\n')
-            result = subprocess.run([os.path.join(self.ROOT, "ci", "check-deps.sh")],
-                                    capture_output=True, text=True)
-            return result, os.path.relpath(target, self.ROOT)
+            result = self._check_deps()
+            return result, os.path.relpath(target, self._mirror())
 
     def test_cfg_test_path_modules_are_excluded_from_production_gates(self):
         result, target = self._module_path_fixture(False)

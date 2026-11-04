@@ -89,7 +89,10 @@
 #              Nothing failed: both doors return a `Session` and the difference is invisible at the
 #              call site, which is exactly what a grep gate is for. Count is zero.
 set -uo pipefail
-cd "$(dirname "$0")/.."
+# `tests/test_harness.py` runs this script once per self-test, and its self-tests edit source
+# files. Pointing PLX_CHECK_ROOT at a throwaway mirror lets them prove a gate without ever
+# writing in the tracked tree (#129). Unset, the root is the checkout wherever this file lives.
+cd "${PLX_CHECK_ROOT:-$(dirname "$0")/..}"
 SRC=rust-modules/src
 fails=0
 fail() { echo "::error::check-deps: $*"; fails=$((fails+1)); }
