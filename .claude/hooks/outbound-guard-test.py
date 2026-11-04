@@ -6,7 +6,7 @@ guard reads its values out of the gitignored files at run time, so the seam it w
 is `load_secrets(root)`: the test builds a throwaway directory holding a FAKE `.tv-host`,
 `.tv-mac`, `src/config.local.h` and `tests/manifest.local.json`, loads those, and drives
 `verdict(..., secrets=…, published=…)` against them. A tracked test file that contained the real
-Plex token in order to prove the token is caught would be the leak it is testing for.
+access token in order to prove the token is caught would be the leak it is testing for.
 
 Half the cases below are FALSE POSITIVES, for the same reason `tv-lock-guard-test.py` says: the
 failure that gets a guard switched off is not the missed leak, it is refusing
@@ -34,17 +34,18 @@ spec.loader.exec_module(guard)
 FAKE_TV = "192.168.44.7"
 FAKE_PMS = "192.168.44.3"
 FAKE_MAC = "de:ad:be:ef:00:11"
-FAKE_TOKEN = "Kx7fQ2mZ9pLr4TvB1sNd"          # 20 alnum, mixed — a Plex token's shape
+FAKE_TOKEN = "Kx7fQ2mZ9pLr4TvB1sNd"          # 20 alnum, mixed — an access token's shape
 FAKE_USERID = "987654321"
 FAKE_MACHINE = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"   # 40 hex
 OTHER_TOKEN = "Ab3xY9zQ1mNp7Rt5Vw2K"         # token-shaped, in NO file — tests the shape rule
 OTHER_MACHINE = "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432"
 GIT_SHA = "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"        # also 40 hex, and NOT a leak
 
-# What `git grep -F` would find in a tracked file. Two real ones, both counted 2026-08-23:
-# docs/shared-servers.md nominates 10.9.9.7 as the LAN-address stand-in ("RFC1918, as the real one
-# is") and it is now in five tracked files, and docs/plex-openapi.json carries upstream Plex's
-# 10.0.0.42 example EIGHT times. This comment said fifteen; nothing in the tree says fifteen.
+# What `git grep -F` would find in a tracked file. 10.9.9.7 is the LAN-address stand-in that
+# docs/agent-reference.md nominates ("RFC1918, as the real one is"), and it appears in three
+# tracked files. 10.0.0.42 was upstream's example address inside the vendored API document, which
+# has been deleted, so only this hook pair carries it now. It stays in the set because it was
+# published before. This comment said fifteen; nothing in the tree says fifteen.
 PUBLISHED = {"10.9.9.7", "10.0.0.42"}
 
 
@@ -122,8 +123,8 @@ CASES = [
     (ALLOW, 'git commit -m "sshpass -p alpine is webosbrew\'s published password"'),
     (ALLOW, 'git commit -m "rk=4 is shared by five cases, rk=1804 by three"'),   # under the floor
     (ALLOW, 'git commit -m "revert %s"' % GIT_SHA),                       # 40 hex, no id context
-    (ALLOW, 'git commit -m "plex-openapi: the 10.0.0.42 example"'),       # tracked → not a leak
-    (ALLOW, 'gh pr create --body "the stand-in LAN address is 10.9.9.7"'),  # docs/shared-servers.md
+    (ALLOW, 'git commit -m "openapi: the 10.0.0.42 example"'),            # tracked → not a leak
+    (ALLOW, 'gh pr create --body "the stand-in LAN address is 10.9.9.7"'),  # docs/agent-reference.md
     (ALLOW, 'gh pr create --body "the guard covers 172.16.0.0/12"'),      # CIDR names a range
     # THE debugging command of this repo: the real PMS address and the real token, sent to the
     # machine that issued them. Blocking it would be the guard's worst false positive.

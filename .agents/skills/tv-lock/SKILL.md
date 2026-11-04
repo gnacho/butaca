@@ -119,7 +119,7 @@ Four layers, so there is no "I forgot" path:
      behind it too, on top of any TV wait — a fleet with several lanes waiting on the TV should not
      assume their `make check`s all progress in parallel;
    - **`make sim`** — the real app core on the desktop against the real PMS, screenshotting itself, and
-     **N instances run at once**. Layout, focus, navigation, every screen and the whole Plex data
+     **N instances run at once**. Layout, focus, navigation, every screen and the whole server data
      layer are answerable there. See the **`ui-sim`** skill. It cannot answer frame rate, text
      rasterization, or anything about video — those, and only those, need the set.
 4. **Break it only when it is a corpse**: `tools/tv-lock.sh break` refuses a live lease and tells

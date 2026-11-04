@@ -38,7 +38,7 @@ minutes of television for a pipeline the change cannot reach.)
 
 **2. Reading a bare `./tests/run.py` as the suite it used to be.** The default **inverted on
 2026-08-22**. A bare run is now the **synthetic tier** — generated clips served off your
-Mac through `/tmp/butaca-playurl`, **no Plex anywhere**. Ask `./tests/run.py --list` for the
+Mac through `/tmp/butaca-playurl`, **no server anywhere**. Ask `./tests/run.py --list` for the
 count — a number written down here has now rotted twice, the second time inside the branch that
 was correcting the first. The 21 library-backed cases are
 `./tests/run.py --server`; `--fps` and `--fps-player` imply `--server` (their scenes navigate a
@@ -46,7 +46,7 @@ real signed-in Home and would otherwise grade a QR screen). `--pipeline` still p
 the default — and pairing it with `--server`/`--fps` is refused rather than silently resolved.
 
 The inversion is right: the obvious command now runs for everybody, needs no credentials and
-touches nobody's watch history. But **the synthetic tier cannot see the Plex half at all**, and it
+touches nobody's watch history. But **the synthetic tier cannot see the server half at all**, and it
 is not a subset failure, it is a whole bypassed layer:
 
 - it writes its five `route` fields **itself**, so `metadata → plan → apply_plan` is never entered
@@ -144,7 +144,7 @@ ships, because `-Z build-std` is what ships.
 
 The same app core on desktop SDL2 + desktop GL, drawing the real interface against your real PMS.
 It answers **layout, spacing, focus, navigation, route transitions, every screen, and the whole
-Plex data layer**. Several run at once (`BUTACA_RUNTIME_DIR` instance roots), which is why it — not the
+server data layer**. Several run at once (`BUTACA_RUNTIME_DIR` instance roots), which is why it — not the
 television — is where parallel UI work belongs. The `ui-sim` skill is the loop.
 
 It provably cannot answer:
@@ -180,8 +180,8 @@ fails as "no line found", which reads exactly like a total regression. There is 
 OS-level mutex, and two jobs on it produce plausible WRONG data rather than a clean failure.
 
 ```sh
-./tests/run.py                 # the synthetic tier — the player pipeline, no Plex, no credentials
-./tests/run.py --server        # the 21 library-backed cases — selection, the whole Plex chain
+./tests/run.py                 # the synthetic tier — the player pipeline, no server, no credentials
+./tests/run.py --server        # the 21 library-backed cases — selection, the whole server chain
 ./tests/run.py --fps           # the UI fps scenes (implies --server; resolves the test identity)
 ./tests/run.py --fps-player    # + the player-overlay scenes (manifest `tier: "player"`; `--list --server` names them)
 ./tests/run.py --list          # OFFLINE: the synthetic cases, each declaration and raster, and
@@ -197,7 +197,7 @@ teardown — so wrapping it in `tools/tv-lock.sh with` is belt and braces, usefu
 is one step of a longer device session you do not want to lose the set between.
 
 **`--list` is the cheap move nobody makes**, and three things about it are not obvious. It contacts
-nothing — no television, no PMS, no plex.tv — but it **lists the tier you did not ask for**: a bare
+nothing — no television, no PMS, no account service — but it **lists the tier you did not ask for**: a bare
 `--list` prints the synthetic matrix, and the library cases with their SKIP reasons appear only
 under `--list --server`. `run.py` prints two different tables on purpose, because the two matrices
 share no key (a `fixture` and a `declare` on one side, an `item`/`rk` on the other). It also still
@@ -217,7 +217,7 @@ knows the set is theirs.
 
 | what you changed | run, in order | what those tiers CANNOT see |
 |---|---|---|
-| **pure logic** — `route/plan.rs`, `plex/`, `metadata.rs`, `browse.rs`, `aq.rs`, `stream.rs` parsing, `ff.rs` helpers | `make check` (+ a new test) → `make sim-shot` if a screen reads it | the native libraries; Linux syscall semantics; whether the value reaches a pixel |
+| **pure logic** — `route/plan.rs`, `pms/`, `metadata.rs`, `browse.rs`, `aq.rs`, `stream.rs` parsing, `ff.rs` helpers | `make check` (+ a new test) → `make sim-shot` if a screen reads it | the native libraries; Linux syscall semantics; whether the value reaches a pixel |
 | **UI layout / spacing / colour / a new screen** (`ui/`) | `make check` → a `BUTACA_WIN=1920x1080` simulator shot (`ui-sim`) → **one device capture, looked at** | the fps tier is blind to pixels (the 2026-08-13 watched-mark bug); a FITTED sim shot is 960x540 on a 1x display, layout evidence only — which is what `BUTACA_WIN` exists for |
 | **text rasterization, fonts, the `theme::size` ladder** | `tools/font-hint-audit.py` → device capture | **the simulator is disqualified** — different FreeType; `make check` never rasterizes anything |
 | **anything ANIMATED, or repainting from a CLOCK** | two host tests (runs / rests) → `--fps` with a real `fps_floor`, plus an `fps_ceiling` if the screen settles | `loop_floor` cannot see a stopped animation at all; the simulator cannot see rate |
@@ -270,7 +270,7 @@ catch an FFI bug class the device cannot.** `dynlib!` bound the variadic `curl_e
 non-variadic wrapper, which is right about the types and wrong about the convention — one ABI
 passes variadic arguments on the stack while named ones go in registers. ARM32 and x86-64 pass
 both ways identically, so it compiled, passed `make check`, ran on the television, and SIGSEGV'd
-inside libcurl's `strlen` on the desktop at the first plex.tv call (found 2026-08-16).
+inside libcurl's `strlen` on the desktop at the first account-service call (found 2026-08-16).
 No amount of device testing could have found it.
 
 **The release configuration.** `make check` builds default features; `RELEASE=1` drops both

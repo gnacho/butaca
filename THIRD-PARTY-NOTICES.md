@@ -1,7 +1,7 @@
 # Third-party notices
 
 This file accompanies the **Butaca** application package (`com.butaca`), an unofficial
-native Plex client for LG webOS 4.x televisions. Butaca itself is Copyright (c) 2026 Gleb
+native Jellyfin client for LG webOS 4.x televisions. Butaca itself is Copyright (c) 2026 Gleb
 Linnik and is distributed under GPL-3.0-or-later (see `LICENSE`; the brand reservation and the
 non-affiliation statements are in `TRADEMARKS.md`, alongside it in both the repository and this
 package).
@@ -202,8 +202,8 @@ rename and the family name "Noto Sans CJK KR" is retained. The font also carries
 trademark statement "Source is a trademark of Adobe in the United States and/or other countries."
 
 *Why it ships:* it is the second link of the application's font fallback chain. Inter covers no
-Hangul, Kana or Han, so without this face every Korean, Japanese and Chinese title in a Plex
-library renders as empty boxes. See `rust-modules/src/text.rs` for the chain and
+Hangul, Kana or Han, so without this face every Korean, Japanese and Chinese title in the library
+renders as empty boxes. See `rust-modules/src/text.rs` for the chain and
 `rust-modules/src/fontcov.rs` for the coverage each face is required to have.
 
 ### 2.4 Rust code statically linked into `butaca`
@@ -427,7 +427,7 @@ other trademarks are the property of their respective owners. Where those names 
 application, they identify whose review score is being shown and nothing more.
 
 **Third-party brands in the interface (not a licence matter).** Review scores fetched from the
-user's own Plex Media Server are labelled with the name of the service that published them, set
+user's own media server are labelled with the name of the service that published them, set
 as ordinary text. No third-party logo, wordmark or brand colour is reproduced: the only glyphs
 beside a score are two original drawings — a tomato and a group of people — that indicate the
 verdict, not the vendor. Nothing here is owed under any licence in this file.

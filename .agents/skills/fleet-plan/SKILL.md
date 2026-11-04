@@ -66,7 +66,7 @@ queue is invisible in the plan you wrote.
   `docs/two-installs.md` §3.2: *"One hardware video plane and one decoder… Two installs cannot play
   at once."* The lease is one directory on the television, with no flavour in it — deliberately.
 - **Everyone else goes to the simulator** — the **`ui-sim`** skill. N instances run at once, and it
-  answers layout, focus, navigation, every screen and the whole Plex data layer. Give each lane
+  answers layout, focus, navigation, every screen and the whole server data layer. Give each lane
   **its own instance root** (`BUTACA_RUNTIME_DIR`), which defaults to `/tmp/butaca-sim` and is
   passed straight through, so two lanes on the default share one token
   file, one remote FIFO and one event log.

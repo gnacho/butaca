@@ -1579,7 +1579,7 @@ check-replay: sim-linux
 # scene in `tests/screenshots/scenes.json` against the mock server's DEMO LIBRARY (openly licensed
 # films, `tests/demo_library/`), waits for each scene's settled frame, and writes the JPEGs, and
 # the CREDITS.md that goes with them, into `docs/screenshots/` (or `SHOT_OUT=dir`), then the website's
-# `site/credits.html` from the same manifests. No Plex account, no
+# `site/credits.html` from the same manifests. No account, no
 # television, no gitignored file.
 #   make screenshots                         # every scene
 #   make screenshots SHOT_SCENES=home,ux-detail            # some
@@ -1636,7 +1636,7 @@ sim-wsl: sim-linux
 # entire barrier to entry — the shapes include a TrueHD default with an AC-3 sibling, a Dolby
 # Vision 8.1 base layer, a PGS bitmap subtitle track and an eight-track audio file with English DTS
 # at ordinal 6, and two of those have no freely-licensed example anywhere. This builds all of them
-# from nothing, lays them out in two Plex-scannable trees, and writes a fixtures.json saying what
+# from nothing, lays them out in two server-scannable trees, and writes a fixtures.json saying what
 # it PROVED about each file. tests/fixtures/README.md is the walkthrough, including the shapes it
 # cannot solve (the three marker_* cases) and why.
 #
@@ -1655,12 +1655,12 @@ fixtures-quick:
 	python3 tests/fixtures/make_fixtures.py --quick --out "$(FIXTURES_OUT)" $(FIXTURES_ARGS)
 
 # ...and the PIPELINE tier's pack, which is a different thing for a different suite. `fixtures`
-# above builds media for the INTEGRATION suite: full-length, laid out in two Plex-scannable trees,
-# because those cases go through a PMS and every duration in them is a Plex constant (the ~90%
+# above builds media for the INTEGRATION suite: full-length, laid out in two server-scannable trees,
+# because those cases go through a PMS and every duration in them is a server constant (the ~90%
 # watched threshold that drops a seeded resume point, the marker windows, the Up Next tail).
 # `./tests/run.py` (the DEFAULT tier since 2026-08-22) needs none of that — it serves these files
 # off this machine over HTTP
-# and plays them through butaca-playurl with no Plex anywhere — so the pack is short clips in a
+# and plays them through butaca-playurl with no server anywhere — so the pack is short clips in a
 # FLAT directory, ~0.7 GB and a few minutes instead of ~3 GB and twenty. Same root, its own
 # subdirectory, which is also where the harness looks by default.
 #
