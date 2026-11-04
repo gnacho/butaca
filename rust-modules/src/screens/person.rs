@@ -2049,7 +2049,7 @@ mod tests {
     fn a_fresh_mount_holds_the_entry_group_pending_credits() {
         assert!(
             entry_reachable_of(false, false, false),
-            "no credits answer yet, but a guid to ask plex.tv with — the hold must not release early"
+            "no credits answer yet, but a guid to ask the account service with — the hold must not release early"
         );
     }
 

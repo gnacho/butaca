@@ -202,7 +202,7 @@ pub(crate) fn id_of_machine(_machine_id: &str) -> Option<ServerId> {
 pub(crate) fn revoke_all() {
     // Same crate-global registry guard the registration paths held — see `lib.rs::testlock`.
     #[cfg(test)]
-    crate::testlock::assert_held("the plex server registry (revoke_all)");
+    crate::testlock::assert_held("the server registry (revoke_all)");
     // Every plaintext grant dies with the identity that consented.
     crate::grant::identity_changed();
     let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
@@ -216,7 +216,7 @@ pub(crate) fn revoke_all() {
     ROSTER_GEN.fetch_add(1, Ordering::AcqRel);
     if n > floor {
         crate::log(&format!(
-            "plex: {} server(s) revoked - signed out",
+            "server: {} server(s) revoked - signed out",
             n - floor
         ));
     }
@@ -235,7 +235,7 @@ pub(crate) fn revoke_all() {
 /// vocabulary, and `restore_generation_seed` refuses `0` for the same reason.
 #[cfg(test)]
 pub(crate) fn reset_for_test() {
-    crate::testlock::assert_held("the plex server registry (reset)");
+    crate::testlock::assert_held("the server registry (reset)");
     let _w = WRITE.lock().unwrap_or_else(|e| e.into_inner());
     COUNT.store(0, Ordering::Release);
     ACTIVE.store(0, Ordering::Release);

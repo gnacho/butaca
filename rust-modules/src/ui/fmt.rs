@@ -230,7 +230,7 @@ mod tests {
     /// that look like integers ("1080"), which is the case that must come out as "1080p" and not
     /// as a number or an empty badge.
     #[test]
-    fn resolution_labels_pms_string_encoded_classes() {
+    fn resolution_labels_server_string_encoded_classes() {
         // verified live on the dev server: every videoResolution is a JSON string
         assert_eq!(resolution("4k", 3840, 2160).as_deref(), Some("4K"));
         assert_eq!(resolution("1080", 1920, 1080).as_deref(), Some("1080p"));

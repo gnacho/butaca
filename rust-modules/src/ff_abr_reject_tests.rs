@@ -14,7 +14,7 @@ fn an_expired_candidate_is_a_common_censored_budget_not_an_ordinal_rung_failure(
     assert_eq!(
         abr_reject_for_hls_exit(HlsExit::NotReady),
         crate::abr::RejectCause::Circumstance,
-        "an ordinary PMS not-ready reply has no exhausted deadline and says nothing about a rung",
+        "an ordinary server not-ready reply has no exhausted deadline and says nothing about a rung",
     );
 }
 
@@ -23,7 +23,7 @@ fn a_completed_underfilled_response_is_common_evidence_not_a_structural_rung_fai
     assert_eq!(
         abr_reject_for_candidate_result(true, false, crate::abr::CandidateVerdict::Ready,),
         crate::abr::RejectCause::ResponseUnchanged,
-        "PMS response geometry, not the different requested actuator, determines the evidence",
+        "server response geometry, not the different requested actuator, determines the evidence",
     );
 }
 

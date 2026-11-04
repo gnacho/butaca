@@ -13,15 +13,15 @@ use super::test_support::*;
 fn a_stored_origin_beats_the_address_pair_beside_it() {
     let json = r#"{"client_id":"c","account_token":"a",
         "server":{"machine_id":"aaaa1111","address":"203.0.113.9","port":31234,"token":"t",
-                  "origin":"https://203-0-113-9.hash.plex.direct:31234"},
+                  "origin":"https://203-0-113-9.h4sh.example.com:31234"},
         "sources":[{"machine_id":"aaaa1111","owned":true,"address":"203.0.113.9","port":31234,
-                    "token":"t","origin":"https://203-0-113-9.hash.plex.direct:31234"}]}"#;
+                    "token":"t","origin":"https://203-0-113-9.h4sh.example.com:31234"}]}"#;
     let s: Session = serde_json::from_str(json).expect("parses");
 
     let o = s.server.origin();
     assert_eq!(
         o.host(),
-        "203-0-113-9.hash.plex.direct",
+        "203-0-113-9.h4sh.example.com",
         "the name TLS validates against"
     );
     assert!(o.is_tls());

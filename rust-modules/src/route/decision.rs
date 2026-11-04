@@ -5422,7 +5422,7 @@ pub(crate) fn retry_current_play(
     direct_play: Option<DirectPlayMode>,
 ) -> bool {
     let Some(request) = ps.request.clone() else {
-        crate::player::log("playback retry: no Plex request descriptor");
+        crate::player::log("playback retry: no reusable request descriptor");
         return false;
     };
     crate::player::log(&format!(

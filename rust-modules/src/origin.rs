@@ -589,24 +589,24 @@ mod tests {
     #[test]
     fn parse_connection_takes_the_advertised_port_only_when_the_uri_omits_one() {
         // portless custom URL → the advertised 443, not the 32400 server default
-        let o = Origin::parse_connection("https://plex.example.com", 443).unwrap();
+        let o = Origin::parse_connection("https://media.example.com", 443).unwrap();
         assert_eq!(
             (o.scheme(), o.host(), o.port()),
-            (Scheme::Https, "plex.example.com", 443)
+            (Scheme::Https, "media.example.com", 443)
         );
-        assert_eq!(o.base(), "https://plex.example.com:443");
+        assert_eq!(o.base(), "https://media.example.com:443");
 
         // a URL that spells its port keeps it, ignoring the advertised fallback
-        let o = Origin::parse_connection("https://1-2-3-4.hash.plex.direct:32400", 443).unwrap();
+        let o = Origin::parse_connection("https://1-2-3-4.h4sh.example.com:32400", 443).unwrap();
         assert_eq!(o.port(), 32400);
 
         // an empty advertised port is not a port, fall through to the default rather than 0
-        let o = Origin::parse_connection("https://plex.example.com", 0).unwrap();
+        let o = Origin::parse_connection("https://media.example.com", 0).unwrap();
         assert_eq!(o.port(), DEFAULT_PORT);
 
         // a written-but-garbage port is still refused (the `port_bad` guard `parse` also honours)
-        assert!(Origin::parse_connection("https://plex.example.com:", 443).is_none());
-        assert!(Origin::parse_connection("ftp://plex.example.com", 443).is_none());
+        assert!(Origin::parse_connection("https://media.example.com:", 443).is_none());
+        assert!(Origin::parse_connection("ftp://media.example.com", 443).is_none());
     }
 
     /// **The bracket invariant, as a round trip.** `host()` is the resolver's node and is bare;
@@ -664,16 +664,16 @@ mod tests {
     /// quad behind that name gives a URL that connects and fails validation.
     #[test]
     fn an_https_origin_keeps_the_name_tls_validates_against() {
-        let o = Origin::parse("https://203-0-113-9.hash.plex.direct:31234").expect("parses");
+        let o = Origin::parse("https://203-0-113-9.h4sh.example.com:31234").expect("parses");
         assert_eq!(o.scheme(), Scheme::Https);
         assert!(o.is_tls());
-        assert_eq!(o.host(), "203-0-113-9.hash.plex.direct");
-        assert_eq!(o.base(), "https://203-0-113-9.hash.plex.direct:31234");
+        assert_eq!(o.host(), "203-0-113-9.h4sh.example.com");
+        assert_eq!(o.base(), "https://203-0-113-9.h4sh.example.com:31234");
     }
 
     /// The defaults, each one a behaviour `StreamUrl::parse` has always had and must keep.
     #[test]
-    fn a_missing_scheme_is_http_and_a_missing_port_is_the_pms_default() {
+    fn a_missing_scheme_is_http_and_a_missing_port_is_the_server_default() {
         let o = Origin::parse("192.0.2.10").expect("a bare host is an origin");
         assert_eq!(
             (o.scheme(), o.host(), o.port()),
@@ -771,10 +771,10 @@ mod tests {
             "byte-identical to the old line"
         );
         assert_eq!(
-            Origin::parse("https://nas.hash.plex.direct:32400")
+            Origin::parse("https://nas.h4sh.example.com:32400")
                 .unwrap()
                 .log_form(),
-            "https://nas.hash.plex.direct:32400"
+            "https://nas.h4sh.example.com:32400"
         );
         // a v6 literal is bracketed either way — it is a URL authority, not a resolver node
         assert_eq!(
@@ -798,8 +798,8 @@ mod tests {
             "the port is not a v6 group"
         );
         assert_eq!(
-            url_host("https://203-0-113-9.hash2.plex.direct:31234"),
-            "203-0-113-9.hash2.plex.direct"
+            url_host("https://203-0-113-9.h4sh2.example.com:31234"),
+            "203-0-113-9.h4sh2.example.com"
         );
     }
 
@@ -837,11 +837,11 @@ mod tests {
     fn a_stream_url_round_trips_through_the_string_route_stores() {
         let su = StreamUrl {
             origin: Origin::http("10.0.0.1", 32400),
-            path: "/library/parts/9?X-Plex-Token=t".into(),
+            path: "/library/parts/9?api_key=t".into(),
         };
         assert_eq!(
             su.to_url(),
-            "http://10.0.0.1:32400/library/parts/9?X-Plex-Token=t"
+            "http://10.0.0.1:32400/library/parts/9?api_key=t"
         );
 
         let back = StreamUrl::parse(&su.to_url());
@@ -855,13 +855,13 @@ mod tests {
     /// v6 case cannot regress to the old reading, which took `[` as the entire host.
     #[test]
     fn a_stream_url_understands_https_and_a_bracketed_v6_literal() {
-        let s = StreamUrl::parse("https://nas.hash.plex.direct:32400/video/x?a=1");
+        let s = StreamUrl::parse("https://nas.h4sh.example.com:32400/video/x?a=1");
         assert!(s.origin.is_tls());
         assert_eq!(
             (s.host(), s.port(), s.path.as_str()),
-            ("nas.hash.plex.direct", 32400, "/video/x?a=1")
+            ("nas.h4sh.example.com", 32400, "/video/x?a=1")
         );
-        assert_eq!(s.to_url(), "https://nas.hash.plex.direct:32400/video/x?a=1");
+        assert_eq!(s.to_url(), "https://nas.h4sh.example.com:32400/video/x?a=1");
 
         let v6 = StreamUrl::parse("http://[2001:db8::1]:32400/p");
         assert_eq!(

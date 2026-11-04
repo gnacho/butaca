@@ -17,7 +17,7 @@ mod auth; // account sign-in/boot flow controller (PIN/QR → discovery → who'
 mod browse; // Library browse: per-section paged catalog (sparse store + off-thread page fetches)
 mod capture; // dev live UI capture stream: own-GLES-frame grab → MPEG1/TS or JPEG → TCP (UI plane only)
 mod checkpoint; // the transport-neutral "may I keep waiting?" seam every blocking media wait consults
-mod cbuf; // fixed NUL-terminated C-string buffer read/write (shared by pms/route/posters)
+mod cbuf; // fixed NUL-terminated C-string buffer read/write (shared by catalog/route/posters)
 mod coldstart; // retires old last-page bookmarks; authenticated cold boots now stay on Home
 mod curlio; // the HTTPS media plane: a remote file pulled by byte range over libcurl-multi (stream.rs is the plaintext-socket twin)
 mod dev; // the /tmp/butaca-* trigger surface, behind one `devtriggers` feature — read it before adding a trigger
@@ -132,7 +132,7 @@ pub(crate) mod testlock {
     //! That DoD criterion scopes a bare `static mut` OUT of `screens`/`ui` engine code — it asks
     //! "does a SCREEN still own process-wide state a second instance would corrupt", and an
     //! allowlisted exception there is a debt with a name and a phase number. A store's data module
-    //! (`pms`, `metadata`, `search`) is a different question entirely: those remaining
+    //! (`catalog`, `metadata`, `search`) is a different question entirely: those remaining
     //! compatibility stores keep process-wide statics **by design** — `docs/stores-as-machines.md`
     //! §1 is explicit about that temporary shape. Browse, Person and ViewState have since moved to
     //! per-`Bridge` physical owners, and their owner gates reject a restored process global. For
@@ -155,7 +155,7 @@ pub(crate) mod testlock {
     //! installers include `metadata.rs`
     //! (`install_for_test`, `set_current_for_test`, `begin_detail_for_test`,
     //! `land_detail_for_test`), `search.rs` (`publish_shelves_for_test`,
-    //! `debounce_elapsed_for_test`) and `pms.rs`'s own eleven sites — and so does every entry point of
+    //! `debounce_elapsed_for_test`) and `catalog.rs`'s own eleven sites — and so does every entry point of
     //! the server registry a test can reach: `registry::register_with_client_id` (and the
     //! `register_lazy` seam it and its sibling test constructors share), `revoke_all`,
     //! `set_current` and `reset_for_test`. A three-run `make check` plus a ten-run

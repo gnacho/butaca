@@ -18,7 +18,7 @@
 //!   the frame of the press however far away the server is. The refresh that follows the write is
 //!   the reconcile: it is the server's own answer, and it silently corrects an optimistic edit that
 //!   turned out to be wrong. A server that never answers leaves the edit standing — the same "a
-//!   failure never blanks a populated Home" rule `pms.rs` keeps for a fetch, applied to a write.
+//!   failure never blanks a populated Home" rule `catalog.rs` keeps for a fetch, applied to a write.
 //! * **One write at a time, in order.** These are not idempotent reads: a watched/unwatched pair
 //!   landing out of order leaves the server saying the opposite of what the user last asked for. So
 //!   the queue is drained strictly one worker at a time, and a second press on the SAME item
@@ -432,7 +432,7 @@ pub(crate) fn pump_with_gate(
             // The refresh is owed whether or not the server took it: on success it is the reconcile,
             // and on failure it is what puts the optimistic edit back to whatever the server really
             // says. A server that can answer neither question leaves the shelves exactly as they
-            // are — `pms.rs`'s per-source rule, unchanged.
+            // are — `catalog.rs`'s per-source rule, unchanged.
             self.want_hubs = true;
             if let Some(detail) = r.detail {
                 self.want_detail = Some(detail);

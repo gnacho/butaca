@@ -1686,15 +1686,15 @@ mod tests {
     #[test]
     fn lower_media_layer_refuses_plaintext_credentials_in_store_policy() {
         assert!(!media_url_allowed_by_policy(
-            "http://192.0.2.1:32400/video.mkv?X-Plex-Token=secret",
+            "http://192.0.2.1:32400/video.mkv?api_key=secret",
             crate::origin::CredentialPolicy::HttpsOnly,
         ));
         assert!(media_url_allowed_by_policy(
-            "https://example.invalid/video.mkv?X-Plex-Token=secret",
+            "https://example.invalid/video.mkv?api_key=secret",
             crate::origin::CredentialPolicy::HttpsOnly,
         ));
         assert!(media_url_allowed_by_policy(
-            "http://192.0.2.1:32400/video.mkv?X-Plex-Token=secret",
+            "http://192.0.2.1:32400/video.mkv?api_key=secret",
             crate::origin::CredentialPolicy::AllowPlaintext,
         ));
     }

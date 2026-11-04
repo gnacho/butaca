@@ -408,7 +408,7 @@ fn un_fx(i: usize) -> Option<(ServerId, usize)> {
 
 /// Frames left before fetch `i` may spawn again after a FAILED attempt (main-thread; [`PersonState::pump`]
 /// decrements). Stops a fast-failing network from spawning a worker every frame. PER FETCH AND PER
-/// SOURCE on purpose, which is the third of `pms.rs`'s three multi-source lessons: a biography
+/// SOURCE on purpose, which is the third of `catalog.rs`'s three multi-source lessons: a biography
 /// biography that cannot be reached (the TV is on a LAN with no internet — the case this app is
 /// built to keep working) must not hold the shelves off for two seconds a go, and a share that
 /// takes eight seconds to time out must not put the server that IS answering on its ladder.
@@ -895,7 +895,7 @@ fn close(state: &mut PersonState, adapter: &PersonAdapter) {
     state.current = None;
 }
 
-/// Wipe the store on a profile/account switch — the browse/pms twin of `install_server`'s reset. A
+/// Wipe the store on a profile/account switch — the browse/catalog twin of `install_server`'s reset. A
 /// new user must never inherit the previous one's page, and the flags must move with the mailbox.
 /// It is also what makes [`sources`]' read-once safe: the roster only changes on the paths that
 /// call this.
@@ -2046,7 +2046,7 @@ mod tests {
         crate::registry::reset_for_test();
         owner.reset();
         let a = crate::registry::ServerId::from_raw(0);
-        owner.open(a, "7", "plex://person/7", "Actor", "");
+        owner.open(a, "7", "catalog://person/7", "Actor", "");
         // The roster the page used to append went with the registry (#166): the only source is
         // the ORIGIN itself, force-included because the page must answer for the credit row that
         // opened it. `sync_roster` can never report a change: nothing moves the roster epoch.

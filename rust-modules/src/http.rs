@@ -201,14 +201,14 @@ fn request_with(
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Credential {
     None,
-    Plex,
+    Legacy,
     Jellyfin,
 }
 
 fn credential_carried(path: &str, headers: &[&str]) -> Credential {
     let lower = path.to_ascii_lowercase();
     if lower.contains("x-plex-token=") {
-        return Credential::Plex;
+        return Credential::Legacy;
     }
     // Jellyfin accepts the access token either as the `api_key` query parameter (its SDKs' habit,
     // and what our image/stream URLs use) or inside the `Authorization` header under its own
@@ -235,7 +235,7 @@ fn credential_carried(path: &str, headers: &[&str]) -> Credential {
             {
                 return Credential::Jellyfin;
             }
-            return Credential::Plex;
+            return Credential::Legacy;
         }
         if name.eq_ignore_ascii_case("x-emby-token")
             || name.eq_ignore_ascii_case("x-emby-authorization")
@@ -279,7 +279,7 @@ pub(crate) fn credential_transport_allowed_by_policy(
 ) -> bool {
     match credential_carried(path, headers) {
         Credential::None => true,
-        Credential::Plex => crate::grant::allowed_under(policy, origin),
+        Credential::Legacy => crate::grant::allowed_under(policy, origin),
         // Jellyfin has no public wildcard name equivalent: a home server is plain HTTP on a LAN
         // address in the overwhelming majority of installs, so its credential shapes may cross
         // plaintext ONLY to the address the credential was issued for — the installed client's
@@ -322,11 +322,11 @@ fn plaintext_credential_report(
     allowed: bool,
 ) -> Option<&'static str> {
     let (bit, line) = if policy == CredentialPolicy::AllowPlaintext {
-        (1, "security: developer build allows plaintext PMS credentials")
+        (1, "security: developer build allows plaintext server credentials")
     } else if allowed {
-        (2, "security: plaintext PMS credentials sent under a consented grant")
+        (2, "security: plaintext server credentials sent under a consented grant")
     } else {
-        (4, "security: refused plaintext PMS credentials; HTTPS required")
+        (4, "security: refused plaintext server credentials; HTTPS required")
     };
     (seen.fetch_or(bit, std::sync::atomic::Ordering::Relaxed) & bit == 0).then_some(line)
 }
@@ -552,7 +552,7 @@ mod tests {
     fn a_request_is_routed_by_the_origins_scheme() {
         // TEST-NET-1 (RFC 5737): guaranteed unrouted, so nothing can answer either of these.
         let http = Origin::parse("http://192.0.2.1:32400").expect("parses");
-        let https = Origin::parse("https://192-0-2-1.hash.plex.direct:32400").expect("parses");
+        let https = Origin::parse("https://192-0-2-1.h4sh.example.com:32400").expect("parses");
         assert_eq!(http.scheme(), Scheme::Http);
         assert_eq!(https.scheme(), Scheme::Https);
 
@@ -585,7 +585,7 @@ mod tests {
         );
         assert!(
             !r(301).ok(),
-            "a redirect is a response, not a successful PMS operation"
+            "a redirect is a response, not a successful server operation"
         );
         assert!(!r(500).ok());
     }
@@ -608,12 +608,12 @@ mod tests {
         let store = CredentialPolicy::HttpsOnly;
         assert_eq!(
             plaintext_credential_report(&seen, store, false),
-            Some("security: refused plaintext PMS credentials; HTTPS required")
+            Some("security: refused plaintext server credentials; HTTPS required")
         );
         assert_eq!(plaintext_credential_report(&seen, store, false), None, "once per outcome");
         assert_eq!(
             plaintext_credential_report(&seen, store, true),
-            Some("security: plaintext PMS credentials sent under a consented grant"),
+            Some("security: plaintext server credentials sent under a consented grant"),
             "a consented send after a refusal is a different outcome"
         );
         assert_eq!(plaintext_credential_report(&seen, store, true), None);

@@ -1,8 +1,8 @@
 [package]
 name = "butaca-modules"
 # THE version, in three places that ci/check-package.py keeps in step: here, pkg/appinfo.json
-# (which the ipk derives its filename and control entry from), and the `X-Plex-Version` this client
-# reports to the server and to the account service via src/server/identity.rs. What the app reports
+# (which the ipk derives its filename and control entry from), and the version this client reports
+# through src/server/identity.rs. What the app reports
 # is DERIVED from this rather than equal to it: build.rs publishes `BUTACA_VERSION`, which is this
 # number exactly for a RELEASE build and the next minor plus `-dev` for every other build, so a
 # working tree does not report itself as the last published release.
@@ -115,7 +115,7 @@ lab-diagnostics = []
 # orchestration — is compiled identically for both.
 # Jellyfin backend. The `jellyfin/` module is what talks to the server, and no cargo feature stands
 # in front of it any more: the wiring that used to sit behind one - the boot-gate arm that reads
-# jellyfin.json, the home-fetch arm in `pms`, the poster arms, each a `#[cfg]` beside the path it
+# jellyfin.json, the home-fetch arm in `catalog`, the poster arms, each a `#[cfg]` beside the path it
 # paralleled - is unconditional now, so an ordinary build has no toggle left to forget, and
 # `make JELLYFIN=1` went with the feature.
 hostsim = []
@@ -159,7 +159,7 @@ warnings = "deny"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 # raw socket/libc FFI for the stream module (correct constants + struct layouts)
 libc = "0.2"
-# JSON parsing for the pms module (replaces the C's hand-rolled string scrape)
+# JSON parsing for the catalog module (replaces the C's hand-rolled string scrape)
 # std exposes the writer API used to bound manifest encoding before any filesystem write.
 serde_json = { version = "1", default-features = false, features = ["alloc", "std"] }
 # derive(Deserialize) for the typed API response models (src/jellyfin/dto.rs)

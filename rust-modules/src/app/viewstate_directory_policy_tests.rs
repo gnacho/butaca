@@ -102,7 +102,7 @@ fn person_open(sid: crate::registry::ServerId, name: &str) -> crate::stores::per
     crate::stores::person::PersonCmd::Open {
         sid,
         key: "person-key".into(),
-        guid: "plex://person/person-guid".into(),
+        guid: "catalog://person/person-guid".into(),
         name: name.into(),
         thumb: String::new(),
     }
@@ -341,7 +341,7 @@ fn detail_watch_activation_dispatches_the_addressed_store_effect_in_the_press_fr
         rk: "movie".into(),
         kind: "movie".into(),
         watched: false,
-        guid: "plex://movie".into(),
+        guid: "catalog://movie".into(),
         ..Default::default()
     }));
     dispatcher.frame_with(&mut rig, tick(1), Vec::new(), Vec::new(), &mut NoTap, false);
@@ -536,7 +536,7 @@ fn metadata_reset_rotates_the_adapter_and_fences_a_late_old_worker() {
     // Seed the pre-reset profile's full owned state.
     crate::metadata::set_current_for_test(bridge.stores.metadata.state_mut(), Some(crate::metadata::Detail {
         sid, rk: "old-rk".into(), kind: "movie".into(), title: "Old Title".into(),
-        guid: "plex://movie/old".into(), ..Default::default()
+        guid: "catalog://movie/old".into(), ..Default::default()
     }));
     assert!(bridge.metadata_run(crate::stores::metadata::MetadataCmd::SetNowPlaying(Some(crate::metadata::NowPlaying {
         is_episode: false, is_real_episode: false, title: "Old Playing".into(), ep_title: String::new(),

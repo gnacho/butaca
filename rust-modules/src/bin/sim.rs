@@ -72,14 +72,14 @@ fn main() {
 
     // No host is not an error — it is what a person who was SENT this app has. The boot host is
     // only ever consulted by the two paths that already hold credentials (the stored session and
-    // the harness's injected token). With neither, `butaca_run` goes to QR sign-in and the account
-    // service supplies the server address, exactly as on a television out of the box.
+    // the harness's injected token). With neither, `butaca_run` opens the sign-in screen, which
+    // asks for the server address, exactly as on a television out of the box.
     //
     // A bare boot with no host still fails loudly here rather than silently booting a sign-in
     // screen at somebody expecting Home.
     if host.is_empty() {
         eprintln!(
-            "butaca-sim: no PMS host given — starting the plex.tv sign-in flow.\n\
+            "butaca-sim: no server host given - opening the sign-in screen.\n\
              (pass one as `butaca-sim <numeric-ip> [port]`, or set BUTACA_SERVER_HOST, to boot\n\
              straight at a known server. It must be a NUMERIC IP: stream.rs speaks HTTP/1.1 over a\n\
              raw socket with no DNS resolver, on the desktop exactly as on the television.)"
@@ -109,7 +109,7 @@ fn main() {
     }
 
     eprintln!(
-        "butaca-sim: pms={host}:{port} runtime={} log={}",
+        "butaca-sim: server={host}:{port} runtime={} log={}",
         root.display(),
         events.display()
     );

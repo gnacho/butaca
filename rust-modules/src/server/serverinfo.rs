@@ -178,7 +178,7 @@ mod tests {
     /// (#166), which is exactly why the test seeds both slots by hand before asserting the
     /// isolation.
     #[test]
-    fn one_servers_plex_pass_is_never_read_as_the_others() {
+    fn one_servers_paid_tier_is_never_read_as_the_others() {
         let (a, b) = (ServerId::from_raw(0), ServerId::from_raw(1));
         // the slot arrays are keyed on the SLOT and never reset by anything else, so start from
         // the boot state explicitly rather than from what an earlier test left

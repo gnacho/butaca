@@ -133,7 +133,7 @@ mod tests {
     /// The point of the module: an unofficial client must not present as a first-party one.
     /// The vendor's documented naming pattern for its OWN apps is what this test refuses.
     #[test]
-    fn identity_never_claims_to_be_plex() {
+    fn identity_never_claims_a_first_party_name() {
         for s in [
             super::PRODUCT,
             super::DEVICE,
@@ -144,11 +144,11 @@ mod tests {
             let low = s.to_ascii_lowercase();
             assert!(
                 !low.starts_with("plex for"),
-                "{s:?} uses Plex's own first-party naming pattern"
+                "{s:?} copies the retired vendor's first-party naming pattern"
             );
             assert!(
                 !low.starts_with("plexfor"),
-                "{s:?} uses Plex's own first-party naming pattern"
+                "{s:?} copies the retired vendor's first-party naming pattern"
             );
         }
     }
@@ -235,8 +235,7 @@ mod tests {
     #[test]
     fn the_vendor_names_the_hardware_this_binary_runs_on() {
         assert_eq!(super::VENDOR, "LG");
-        assert!(!super::VENDOR.to_ascii_lowercase().starts_with("plex"));
-    }
+            }
 
     /// The shipped app's device name must not move — it is already in every existing user's
     /// authorized-device list, and a rename there reads as a new, unknown device. A flavoured
@@ -262,7 +261,7 @@ mod tests {
     }
 
     #[test]
-    fn a_process_locale_becomes_a_safe_plex_language_tag() {
+    fn a_process_locale_becomes_a_safe_language_tag() {
         assert_eq!(
             crate::i18n::normalize("en_US.UTF-8"),
             Some("en-US".into())
@@ -275,7 +274,7 @@ mod tests {
         assert_eq!(crate::i18n::normalize("C.UTF-8"), None);
         assert_eq!(crate::i18n::normalize("POSIX"), None);
         assert_eq!(
-            crate::i18n::normalize("en_US\r\nX-Plex-Token: stolen"),
+            crate::i18n::normalize("en_US\r\nX-Injected: stolen"),
             None
         );
     }

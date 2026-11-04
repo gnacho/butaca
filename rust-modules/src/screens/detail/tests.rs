@@ -922,7 +922,7 @@ fn restart_drops_the_resume_both_play_paths_bake_in() {
         assert_eq!(
             play_resume_ns(false, resume_ms, duration_ms),
             expected,
-            "ordinary Play keeps the resume produced by the Plex rule"
+            "ordinary Play keeps the resume produced by the stored-progress rule"
         );
         assert_eq!(
             play_resume_ns(true, resume_ms, duration_ms),

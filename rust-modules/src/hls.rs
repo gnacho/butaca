@@ -454,9 +454,9 @@ impl fmt::Display for Error {
                 write!(f, "segment {sequence} appeared after ENDLIST")
             }
             Self::StaleEndList => f.write_str("ENDLIST came from a playlist older than the cursor"),
-            Self::MissingCredential => f.write_str("HLS master URL has no Plex credential"),
+            Self::MissingCredential => f.write_str("HLS master URL has no access credential"),
             Self::MultipleCredentials => {
-                f.write_str("HLS master URL has multiple Plex credentials")
+                f.write_str("HLS master URL has multiple access credentials")
             }
             Self::CredentialChanged => f.write_str("playlist URI replaces the route credential"),
             Self::DurationOverflow => f.write_str("HLS timeline duration overflows"),
@@ -1343,7 +1343,7 @@ mod tests {
     }
 
     #[test]
-    fn observed_sanitized_plex_corpus_accepts_legacy_allow_cache() {
+    fn observed_sanitized_corpus_accepts_legacy_allow_cache() {
         let master = source("/video/:/transcode/universal/start.m3u8?X-Plex-Token=secret");
         let master = parse_master(
             &master,

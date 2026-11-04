@@ -2007,7 +2007,7 @@ mod enhancement_menu_tests {
     /// ordinary audio settings; the gate that hid them from everyone else is never named in
     /// prose the viewer who HAS them ever reads.
     #[test]
-    fn enh_locale_values_never_mention_plex_pass() {
+    fn enh_locale_values_never_name_the_paid_tier() {
         use crate::i18n::{language_on_this_thread_for_test, Preference};
         for language in [Preference::En, Preference::Es, Preference::Be] {
             let _guard = language_on_this_thread_for_test(language);
@@ -2016,7 +2016,7 @@ mod enhancement_menu_tests {
                 crate::i18n::msg::widgets_tracks_normalize_loudness(),
             ] {
                 let lower = value.to_lowercase();
-                assert!(!lower.contains("plex pass"), "{language:?}: {value:?} names the gate");
+                assert!(!lower.contains("paid tier"), "{language:?}: {value:?} names the gate");
             }
         }
     }

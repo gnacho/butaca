@@ -1,4 +1,4 @@
-//! Jellyfin library fetch/parse into the private catalog (was src/pms.c), read by the UI
+//! Jellyfin library fetch/parse into the private catalog (was the file that carried the old name), read by the UI
 //! via the retained publication (`hubs_snapshot()` → `HubsView`) and movie()/hub_item(), plus
 //! urlenc_str (shared by posters/route).
 //! The fetch + JSON parse go through the typed `crate::jellyfin` client (serde DTOs), with no
@@ -10,7 +10,7 @@
 //! `edit_item` here against its own `CatalogState`/`Arc<CatalogAdapter>`, the same relationship the owned
 //! `BrowseStore::run` has to Browse commands against its explicit state. **Those forwarding targets
 //! cannot be scoped narrower than `pub(crate)`, and that is a fact about Rust module topology,
-//! not an oversight**: `pms` and `stores` are both top-level children of the crate root, so
+//! not an oversight**: `catalog` and `stores` are both top-level children of the crate root, so
 //! neither is an ancestor of the other, and `pub(in path)` requires `path` to name an ancestor of
 //! the ITEM's own module. There is no visibility keyword that means "visible to `stores::hubs`
 //! and nobody else" for an item defined here. What IS enforceable, and is: (1) anything with no
@@ -21,7 +21,7 @@
 //! state those seeds still share (see `lib.rs::testlock` and D5), which is the runtime half of
 //! the same contract a compile-time visibility keyword cannot express across two sibling
 //! modules. `ci/allow/mutators.txt`'s `# count: 0` already
-//! proves no PRODUCTION line outside `pms`/`stores::hubs` spells the old direct-call form; this
+//! proves no PRODUCTION line outside `catalog`/`stores::hubs` spells the old direct-call form; this
 //! is the part that keyword-level `pub(super)` genuinely cannot add on top of that count.
 use crate::registry::ServerId;
 use std::os::raw::c_int;
@@ -485,7 +485,7 @@ fn request_refetch_hubs_with_scope(state: &mut CatalogState, adapter: &Arc<Catal
     // A test reaching this outside `crate::testlock::serial()` races some other module's test — see
     // `lib.rs::testlock`.
     #[cfg(test)]
-    crate::testlock::assert_held("the pms hub catalog (request_refetch_hubs)");
+    crate::testlock::assert_held("the hub catalog (request_refetch_hubs)");
     state.hub_gen = state.hub_gen.wrapping_add(1); // supersede every retry already in flight
     sync_roster_with_scope(state, scope);
     let gen = state.hub_gen;
@@ -541,7 +541,7 @@ fn edit_item_with_scope(
     // Same test-only catalog guard as `request_refetch_hubs` — the catalog is `CatalogState`, a
     // field of the per-`Bridge` `HubsStore`, not a crate-global; see `lib.rs::testlock` and D5.
     #[cfg(test)]
-    crate::testlock::assert_held("the pms hub catalog (edit_item)");
+    crate::testlock::assert_held("the hub catalog (edit_item)");
     let mut hit = false;
     for s in state.srcs.iter_mut() {
         if let Some(b) = s.last.as_mut() {
@@ -1092,7 +1092,7 @@ pub(crate) fn backoff_secs(fails: u32) -> f32 {
 /// case where every one of them failed. The whole point of the fold: "Can't reach your Jellyfin
 /// server", drawn because a friend's machine is asleep, is a lie about the library that works.
 /// No source at all (before the first install) is Loading — nothing to show is not an answer.
-// Only `hubs_snapshot` and this module's own tests read the fold; nothing outside `pms.rs` names
+// Only `hubs_snapshot` and this module's own tests read the fold; nothing outside `catalog.rs` names
 // it, so it stays module-private — the D3 hardening this file's other mutators cannot get (a
 // sibling of `stores`, not a child of it, so `pub(crate)` is the tightest visibility Rust allows
 // them; see the doc above `edit_item`/`reset`/`tick` et al.).
@@ -1450,7 +1450,7 @@ fn request_retry(state: &mut CatalogState, adapter: &Arc<CatalogAdapter>) {
     // Same test-only catalog guard as `request_refetch_hubs` — the catalog is `CatalogState`, a
     // field of the per-`Bridge` `HubsStore`, not a crate-global; see `lib.rs::testlock` and D5.
     #[cfg(test)]
-    crate::testlock::assert_held("the pms hub catalog (request_retry)");
+    crate::testlock::assert_held("the hub catalog (request_retry)");
     let gen = state.hub_gen;
     let mut srcs = std::mem::take(&mut state.srcs);
     let mut launch = |r| spawn_fetch(adapter, r);
@@ -1474,7 +1474,7 @@ pub(crate) fn tick_with_directory(
     directory: crate::stores::browse::DirectoryView<'_>,
 ) {
     #[cfg(test)]
-    crate::testlock::assert_held("the pms hub catalog (owned tick)");
+    crate::testlock::assert_held("the hub catalog (owned tick)");
     let mut launch = |r| spawn_fetch(adapter, r);
     step_landings_with_scope(state, adapter, Some(dt), Vec::new, &BrowseScope::retained(directory),
         &mut launch)
@@ -1710,7 +1710,7 @@ fn build_test(n: usize) -> SourceBuild {
 /// cannot reach for real (a live server answering, or refusing) are exactly the ones worth pinning.
 #[cfg(test)]
 pub(crate) fn seed_for_test(state: &mut CatalogState, adapter: &Arc<CatalogAdapter>, items: usize, hub_state: HubState) {
-    crate::testlock::assert_held("the pms hub catalog (seed_for_test)");
+    crate::testlock::assert_held("the hub catalog (seed_for_test)");
     seed_with_scope_for_test(state, adapter, ServerId::UNSET, items, hub_state, &BrowseScope::standalone());
 }
 
@@ -1725,7 +1725,7 @@ pub(crate) fn seed_for_directory_test(
     hub_state: HubState,
     directory: crate::stores::browse::DirectoryView<'_>,
 ) {
-    crate::testlock::assert_held("the pms hub catalog (seed_for_directory_test)");
+    crate::testlock::assert_held("the hub catalog (seed_for_directory_test)");
     assert!(directory.sections().iter().any(|section| section.sid == Some(sid)),
         "a directory-scoped Hubs fixture requires its server in the retained Browse directory");
     seed_with_scope_for_test(state, adapter, sid, items, hub_state, &BrowseScope::retained(directory));
@@ -1739,7 +1739,7 @@ pub(crate) fn seed_two_library_home_for_test(
     sid: ServerId,
     directory: crate::stores::browse::DirectoryView<'_>,
 ) {
-    crate::testlock::assert_held("the two-library pms home fixture");
+    crate::testlock::assert_held("the two-library home fixture");
     let sections = directory.sections();
     assert!(
         sections.len() >= 2 && sections[..2].iter().all(|section| section.sid == Some(sid)),
@@ -1823,7 +1823,7 @@ fn reset_with_scope(state: &mut CatalogState, adapter: &Arc<CatalogAdapter>, sco
     // Same test-only catalog guard as `request_refetch_hubs` — the catalog is `CatalogState`, a
     // field of the per-`Bridge` `HubsStore`, not a crate-global; see `lib.rs::testlock` and D5.
     #[cfg(test)]
-    crate::testlock::assert_held("the pms hub catalog (reset)");
+    crate::testlock::assert_held("the hub catalog (reset)");
     let _ = adapter; // every HubsStore command path rotates before applying `HubsCmd::Reset`
     state.hub_gen = state.hub_gen.wrapping_add(1); // a worker still running belongs to the old identity
     state.srcs = Vec::new();
@@ -1840,7 +1840,7 @@ fn reset_with_scope(state: &mut CatalogState, adapter: &Arc<CatalogAdapter>, sco
 // ---------------------------------------------------------------------------------------
 #[cfg(test)]
 pub(crate) fn queue_test_landing(state: &CatalogState, adapter: &CatalogAdapter, items: Option<usize>) -> u32 {
-    crate::testlock::assert_held("the pms hub catalog (queue_test_landing)");
+    crate::testlock::assert_held("the hub catalog (queue_test_landing)");
     let source = &state.srcs[0];
     let seq = source.seq;
     let landing = Landing {
@@ -1853,7 +1853,7 @@ pub(crate) fn queue_test_landing(state: &CatalogState, adapter: &CatalogAdapter,
 
 #[cfg(test)]
 pub(crate) fn reverse_test_shelves(state: &mut CatalogState) {
-    crate::testlock::assert_held("the pms hub catalog (reverse_test_shelves)");
+    crate::testlock::assert_held("the hub catalog (reverse_test_shelves)");
     for source in state.srcs.iter_mut() {
         if let Some(build) = source.last.as_mut() {
             for shelf in &mut build.shelves { shelf.items.reverse(); }
@@ -1865,7 +1865,7 @@ pub(crate) fn reverse_test_shelves(state: &mut CatalogState) {
 
 #[cfg(test)]
 pub(crate) fn seed_grid_for_test(state: &mut CatalogState, adapter: &Arc<CatalogAdapter>, rows: usize, items: usize) {
-    crate::testlock::assert_held("the pms hub catalog (seed_grid_for_test)");
+    crate::testlock::assert_held("the hub catalog (seed_grid_for_test)");
     seed_for_test(state, adapter, items, HubState::Ready);
     let source = state.srcs[0].last.as_mut().unwrap();
     source.shelves = (0..rows).map(|row| {
@@ -1879,7 +1879,7 @@ pub(crate) fn seed_grid_for_test(state: &mut CatalogState, adapter: &Arc<Catalog
 
 #[cfg(test)]
 pub(crate) fn reverse_test_hubs(state: &mut CatalogState) {
-    crate::testlock::assert_held("the pms hub catalog (reverse_test_hubs)");
+    crate::testlock::assert_held("the hub catalog (reverse_test_hubs)");
     for source in state.srcs.iter_mut() {
         if let Some(build) = source.last.as_mut() { build.shelves.reverse(); }
     }
@@ -1889,7 +1889,7 @@ pub(crate) fn reverse_test_hubs(state: &mut CatalogState) {
 
 #[cfg(test)]
 pub(crate) fn remove_test_item(state: &mut CatalogState, rk: &str) {
-    crate::testlock::assert_held("the pms hub catalog (remove_test_item)");
+    crate::testlock::assert_held("the hub catalog (remove_test_item)");
     for source in state.srcs.iter_mut() {
         if let Some(build) = source.last.as_mut() {
             for shelf in &mut build.shelves { shelf.items.retain(|item| item.rk != rk); }

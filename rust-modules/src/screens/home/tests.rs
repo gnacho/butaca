@@ -1160,7 +1160,7 @@ fn the_hero_source_run_keeps_the_lines_rung_and_takes_one_step_of_ink() {
 
 #[test]
 fn an_over_long_handle_truncates_rather_than_wrapping() {
-    let ridiculous = "a-very-long-plex-account-handle-that-nobody-would-ever-choose";
+    let ridiculous = "a-very-long-account-handle-that-nobody-would-ever-choose";
     for base in [0.0f32, 420.0, HERO_COL_W] {
         let (w, runs) = meta_flow(base, ridiculous);
         assert_eq!(
