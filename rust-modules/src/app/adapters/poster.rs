@@ -508,8 +508,8 @@ fn built_key(srv: ServerId, path: &str, w: c_int, h: c_int, png: bool) -> Option
     // (server, path, size) alone, which is exactly when the bytes could change.
     //
     // The arm engages only when a Jellyfin client is INSTALLED, not on the slot number alone:
-    // slot 0 is also what a host test's `register_for_test` hands out, and without the guard the
-    // flavor's own test suite would route a Plex fixture through this arm.
+    // slot 0 is also what a host test's `register_for_test` hands out, and without the guard a
+    // fixture registered at slot 0 would take this arm.
     if srv == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
         let c = crate::jellyfin::client()?;
         let s = memo.get_or_build(srv.raw(), path, w, h, png, 0, || {
@@ -522,8 +522,8 @@ fn built_key(srv: ServerId, path: &str, w: c_int, h: c_int, png: bool) -> Option
         }
         return Some(s);
     }
-    // The Plex arm (`registry::client_for` + the `/photo/:/transcode` path builder) went with the
-    // Plex wire layer: the Jellyfin slot is the only server this adapter can ever be handed.
+    // The retired arm (`registry::client_for` + the `/photo/:/transcode` path builder) went with
+    // the wire layer: the Jellyfin slot is the only server this adapter can ever be handed.
     None
 }
 
@@ -711,9 +711,10 @@ fn logo_key(srv: ServerId, rk: &str) -> Option<&'static str> {
     if rk.is_empty() {
         return None;
     }
-    // Plex names the clearLogo under `/library/metadata/{rk}` with the `clearLogo` transcode
-    // verb; Jellyfin keeps the same picture as the item's own `Logo` image type. Getting this
-    // wrong is silent — the fetch just 404s and the hero falls back to title text.
+    // The fallback arm names the clearLogo under `/library/metadata/{rk}` with the `clearLogo`
+    // transcode verb, a path only the retired flavor ever read. Jellyfin keeps the same picture as
+    // the item's own `Logo` image type. Getting this wrong is silent: the fetch just 404s and the
+    // hero falls back to title text.
     let src_path = if srv == crate::jellyfin::SERVER_ID {
         format!("/Items/{rk}/Images/Logo")
     } else {
@@ -813,7 +814,7 @@ fn lookup(srv: ServerId, key_s: &str, touch: Touch) -> (Hit, Warm) {
     let decline = touch == Touch::Draw && crate::ui::card_motion::declines_request();
     let mut g = store();
     let cache_gen = crate::imgcache::generation();
-    // The token generation was the Plex slot's token-baked cache key; that world is retired
+    // The token generation was the retired slot's token-baked cache key. That world is retired
     // (#166), and the one live source — the Jellyfin server — has no token rotation, so the
     // generation is the constant the landing wire carries (0).
     let token_gen = 0;
@@ -1315,13 +1316,13 @@ impl ArtFail {
 /// whichever failed first and hide the other for the rest of the process. [`crate::registry::MAX_SERVERS`]
 /// is 16, so the extra dimension is one `u32` of bits per slot.
 ///
-/// **What is deliberately NOT in the line: the key.** It is a `/photo/:/transcode?…` path ending in
-/// `&X-Plex-Token=…` (see [`poster_key`], and the test that pins the token to the end of it), and
-/// `crate::redact_tokens`' own doc states the policy that backstop exists to make redundant — no
-/// call site formats a URL into a log line in the first place. The server is named by its registry
-/// SLOT NUMBER, the handle `plex: server slot N registered at …` already prints, and by nothing
-/// else: not the address, not the machine identifier, not the friendly name (which defaults to the
-/// owner's hostname). `app/diagnostics.rs`'s module doc argues the whole rule for the on-screen read-out.
+/// **What is deliberately NOT in the line: the key.** It is a server image path ending in an
+/// `api_key` query that carries the access token (see [`poster_key`]), and `crate::redact_tokens`'
+/// own doc states the policy that backstop exists to make redundant. No call site formats a URL
+/// into a log line in the first place. The server is named by its registry SLOT NUMBER, and by
+/// nothing else: not the address, not the machine identifier, not the friendly name (which
+/// defaults to the owner's hostname). `app/diagnostics.rs`'s module doc argues the whole rule for
+/// the on-screen read-out.
 fn warn_fetch_failed(srv: ServerId, cause: ArtFail) {
     // One word per server slot, one BIT per cause. Indexing by the SERVER (clamped) is what keeps
     // the index in range by construction rather than by assumption: `ServerId::UNSET` is
@@ -1396,8 +1397,8 @@ fn poster_worker() {
         // The Jellyfin slot fetches through ITS client: the key was built by `image_path` and is
         // already a complete token-bearing path, which is what `get_bytes` dials as-is. The
         // installed-client guard is `built_key`'s: slot 0 alone must not pick this arm (a host
-        // test's Plex fixture registers there too). No disk arm on this backend: the cache
-        // namespace is a Plex-registry concept and 0.6.x fetched direct.
+        // test's fixture registers there too). No disk arm on this backend: the cache
+        // namespace is a registry concept and 0.6.x fetched direct.
         let jellyfin_slot = srv == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some();
         #[cfg(any())]
         let jellyfin_slot = false;
@@ -1535,7 +1536,7 @@ mod tests {
             reset_key_memo();
         }
     }
-    /// The store serves the Jellyfin backend's own image path now; the Plex transcode-key
+    /// The store serves the Jellyfin backend's own image path now. The retired transcode-key
     /// builder these fixtures used to grade is gone with the wire layer. `install` (not the boot
     /// flow) so no session file is touched, and `uninstall` on the way out so the next test
     /// starts fail-closed.
