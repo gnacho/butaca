@@ -4,12 +4,11 @@
 Every figure is a named target STATE in `tests/screenshots/scenes.json`. For each scene this
 driver:
 
-  1. starts `tests/mock_server.py` in catalog mode (the demo library, `tests/demo_library/`) on a
+  1. starts `tests/mock_jf.py` in catalog mode (the demo library, `tests/demo_library/`) on a
      free loopback port, in this process;
-  2. makes a fresh instance root and arms the scene's triggers in it, plus three the driver owns:
-     `token` (a placeholder the mock accepts), `account` (the account service replaced by
-     the mock, so nothing
-     leaves the machine) and `stillclock` (free-running animation held still);
+  2. makes a fresh instance root and points the app at that server — a `butaca-jellyfin` file
+     naming it, as the boot gate (`jellyfin/boot.rs`) reads — plus one trigger the driver owns,
+     `stillclock` (free-running animation held still);
   3. runs the simulator with `BUTACA_SHOT_SETTLE`: the app itself writes one PNG once its
      screen has been at rest for the scene's settle time, and exits. The driver waits on that
      process — an artifact, never a sleep — under a ceiling timeout;
@@ -18,6 +17,11 @@ driver:
      answer;
   5. crops, scales and encodes each output with ffmpeg (Lanczos, `-bitexact`, one thread) into a
      staging directory.
+
+A scene names a film, not an id: any `@<slug>` in a trigger value or an `expect` line is replaced
+with that catalog item's Jellyfin id (`mock_jf.CatalogLibrary.by_slug`) for the run. The id is
+derived from the slug, so it is the same in every run and on every machine, and reordering the
+catalog moves none of them.
 
 A scene may render SUPERSAMPLED: `render_scale` (1..4, default 1) sets `BUTACA_RENDER_SCALE`,
 so the simulator draws the 1920x1080 canvas at that multiple (glyphs, icons and artwork rasterised
@@ -45,14 +49,14 @@ which must carry a `tolerance_reason`.
 `hero_alternatives` as `home-hero-<film>.jpg`, for choosing the hero; `--hero` swaps the film the
 home scenes pin for this run. Both write to the output directory like every other image.
 
-Nothing here reads a gitignored file, and nothing touches an account on the account service
-or a television.
+Nothing here reads a gitignored file, and nothing touches an account on a server or a television.
 """
 import argparse
 import importlib.util
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -61,7 +65,7 @@ import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tests"))
-import mock_server  # noqa: E402
+import mock_jf  # noqa: E402
 
 # tools/demo_library.py shares its name with the tests/demo_library package, so it is loaded by
 # path under another name rather than through sys.path.
@@ -71,8 +75,11 @@ _spec.loader.exec_module(demo_library)
 
 SCENES = ROOT / "tests" / "screenshots" / "scenes.json"
 CATALOG = ROOT / "tests" / "demo_library" / "catalog.json"
-# What the `token` trigger holds. The mock accepts any token; this one only has to be non-empty.
-PLACEHOLDER_TOKEN = "demo-library-token"
+# What the app boots against: the mock accepts any user and password (its module doc says why).
+SERVER_USER = "demo"
+SERVER_PASSWORD = "x"
+# `@<slug>` in a trigger value or an expect line, resolved to that catalog item's Jellyfin id.
+ITEM_REF = re.compile(r"@([a-z0-9][a-z0-9-]*(?:/[0-9]+/[0-9]+)?)")
 # Where an output's `dest` puts it when there is no --out.
 DESTS = {"docs": ROOT / "docs" / "screenshots", "site": ROOT / "site" / "media"}
 # What composes a `card` output (the site's link-preview card) around a staged figure.
@@ -173,18 +180,32 @@ def clean_env(rt, shot, scene, defaults):
     return env
 
 
-def capture(binary, scene, defaults, hero, keep):
+def resolve_refs(text, by_slug):
+    """`@<slug>` → that catalog item's Jellyfin id, so a scene names a film and the driver writes
+    the id it has today. Anything else is returned unchanged: a trigger value is free text."""
+    def sub(match):
+        slug = match.group(1)
+        if slug not in by_slug:
+            raise ValueError(f"@{slug} is not a catalog item")
+        return by_slug[slug]
+    return ITEM_REF.sub(sub, text)
+
+
+def capture(binary, scene, defaults, hero, keep, by_slug):
     """Boot one scene and return (png bytes, log text). Raises RuntimeError on any failure."""
-    httpd, srv = mock_server.serve(0, catalog=CATALOG, hero=hero)
-    port = httpd.server_address[1]
+    srv, lib = mock_jf.serve(0, catalog=CATALOG, hero=hero)
+    mock_jf.run(srv)
+    port = srv.server_address[1]
     rt = pathlib.Path(tempfile.mkdtemp(prefix=f"butaca-shot-{scene['name']}-"))
     try:
-        triggers = {"account": f"http://127.0.0.1:{port}", "stillclock": str(defaults["stillclock_ms"])}
-        if not scene.get("no_token"):
-            triggers["token"] = PLACEHOLDER_TOKEN
+        triggers = {"stillclock": str(defaults["stillclock_ms"])}
         triggers.update(scene.get("triggers", {}))
         for name, value in triggers.items():
-            (rt / f"butaca-{name}").write_text(value)
+            (rt / f"butaca-{name}").write_text(resolve_refs(str(value), by_slug))
+        if not scene.get("no_token"):
+            (rt / "butaca-jellyfin").write_text(json.dumps({
+                "url": f"http://127.0.0.1:{port}", "user": SERVER_USER,
+                "password": SERVER_PASSWORD}))
         shot = rt / "shot.png"
         out = open(rt / "sim.out", "w")
         timeout = scene.get("timeout_s", defaults["timeout_s"])
@@ -207,8 +228,8 @@ def capture(binary, scene, defaults, hero, keep):
         if not shot.exists():
             problems.append("no capture written")
         for line in scene.get("expect", []):
-            if line not in log:
-                problems.append(f"expected log line missing: {line!r}")
+            if resolve_refs(line, by_slug) not in log:
+                problems.append(f"expected log line missing: {resolve_refs(line, by_slug)!r}")
         for bad in REFUSALS:
             hits = [l for l in log.splitlines() if bad in l]
             if hits:
@@ -335,7 +356,7 @@ def main():
     defaults = dict(manifest["defaults"], canvas=manifest["canvas"])
     catalog = json.loads(CATALOG.read_text())
     try:
-        mock_server.CatalogLibrary(CATALOG)
+        by_slug = mock_jf.CatalogLibrary(CATALOG).by_slug
     except ValueError as e:
         die(f"{e} — run `make demo-library`")
     canvas = size_of(manifest["canvas"])
@@ -343,6 +364,10 @@ def main():
         for s in manifest["scenes"]:
             for o in s["outputs"]:
                 resolve_output(s, o, canvas)
+            for value in s.get("triggers", {}).values():
+                resolve_refs(str(value), by_slug)
+            for line in s.get("expect", []):
+                resolve_refs(line, by_slug)
     except ValueError as e:
         die(str(e))
     dests = {d: a.out for d in DESTS} if a.out else dict(DESTS)
@@ -365,9 +390,9 @@ def main():
     report = []
 
     def render(scene, hero, outputs, stage):
-        png, _ = capture(a.bin, scene, defaults, hero, a.keep)
+        png, _ = capture(a.bin, scene, defaults, hero, a.keep, by_slug)
         if a.check_determinism:
-            again, _ = capture(a.bin, scene, defaults, hero, a.keep)
+            again, _ = capture(a.bin, scene, defaults, hero, a.keep, by_slug)
             bound = scene.get("max_delta", defaults["max_delta"])
             free = scene.get("free_regions", [])
             if again == png:
