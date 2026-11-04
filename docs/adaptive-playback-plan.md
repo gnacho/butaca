@@ -646,7 +646,7 @@ low-capacity sample.
 
 **The previous §10's premise "HLS rung switches are invisible to the viewer" is void as stated.**
 The device evidence establishes *acceptance*, not invisibility:
-`docs/hls-protocol-probe.md:154-155` records that a 720p→1080p→720p fixture proved the pipeline
+The probe runs behind this plan recorded that a 720p→1080p→720p fixture proved the pipeline
 **accepts** in-band raster changes on one Load. The repo's own manifest says the opposite in product
 language — `tests/manifest.json:1591`: "five to ten visible quality changes to the person watching".
 
@@ -705,7 +705,7 @@ infeasible. That case grades the sample counters and nothing else, which matters
 **only** device coverage the counters have.
 
 Where the repository already holds a measurement that contradicts the catalog, say so rather than
-silently keeping the request: `docs/hls-protocol-probe.md:18-19` records 720 → ~425 kbps and
+silently keeping the request: The same runs record 720 → ~425 kbps and
 12 000 → ~11.356 Mbps.
 
 ### N18 — remaining-playback scale: §16's clamp already exists (no-op); the scale then had to
@@ -937,7 +937,7 @@ including the ones that cannot be identified.
 | `dv_bonus` | Dolby Vision preserved by Original | utility pts | split from 25 | product ordering (DV is first) | mode choice on a DV item vs. a plain one | ordering yes, magnitude no | I7b's leg |
 | `generation_loss_bonus` | no re-encode | utility pts | split from 25 | product ordering (second) | as above | ordering yes, magnitude no | I7b's leg |
 | `atmos_bonus` | Atmos/lossless audio preserved | utility pts | split from 25 | product ordering (last — inaudible on TV speakers) | mode choice on an Atmos-only item | ordering yes, magnitude no | I7b's leg |
-| `planning_wire_kbps` (13 entries) | conservative planning ceiling | kbps | request for 11 of 13; measured for `P1080High` (20 011) and `Uhd` (20 895) | **mixed, and now labelled as such** | advertised vs. requested rate | partly — the repo already contradicts two rows (`docs/hls-protocol-probe.md:18-19`) | **M3** |
+| `planning_wire_kbps` (13 entries) | conservative planning ceiling | kbps | request for 11 of 13; measured for `P1080High` (20 011) and `Uhd` (20 895) | **mixed, and now labelled as such** | advertised vs. requested rate | partly — the repo already contradicts two rows (the probe runs behind this plan) | **M3** |
 | `production_load_pm` (13 entries) | relative server work per rung | pm | 90 … 2 100 | **empirical for 2, "an ordering assumption" for 11** (`abr.rs:1074-1082`) | residual ρ per rung, normalised (M3) | **NO** | **M3** — this is what blocks §7.A |
 
 ### 6.2b Kept, unidentified — no measurement exists and none is planned

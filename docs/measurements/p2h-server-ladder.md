@@ -285,7 +285,7 @@ movie and 425 on the other two items — a 29% spread. Rung 22000 declares 20 89
 20 379. A per-item quantity stored as a per-server constant will be wrong for most items.
 
 **(b) The `P1080High` entry was measured under a request the app never makes.** Its 20 011 comes
-from `docs/hls-protocol-probe.md`'s ceiling table, taken with a **3840x2160** ceiling.
+from the probe's ceiling table, taken with a **3840x2160** ceiling.
 `Rung::P1080High::raster()` is `(1920, 1080)`, so the app sends a 1080p ceiling and gets 16 150.
 I first hypothesised that the ceiling box itself unlocks the higher rate, and **tested it: it does
 not.** 20 000 kbps returns 16 150 with either box. The step boundary from the old doc does
