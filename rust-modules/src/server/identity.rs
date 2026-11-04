@@ -1,26 +1,24 @@
-//! Who this client says it is — ONE set of constants for both Plex services.
+//! Who this client says it is - ONE set of constants for every transport that names it.
 //!
-//! There are two independent transports here and they used to each hardcode their own identity:
-//! [`account`](super::account) talks to plex.tv over libcurl and sends `X-Plex-*` as HEADERS, while
-//! [`client`](super::client) talks to the PMS and sends them as QUERY PARAMETERS. Nothing kept the
-//! two in step, and they had drifted on every field that mattered:
+//! The two transports that report an identity used to each hardcode their own, and nothing kept
+//! them in step: the account calls sent it as request HEADERS, the server calls sent it as QUERY
+//! PARAMETERS, and they had drifted on every field that mattered:
 //!
-//! | field       | plex.tv said        | the PMS said     |
+//! | field       | the account said    | the server said  |
 //! |-------------|---------------------|------------------|
-//! | Product     | `Plex for webOS`    | `Butaca`      |
+//! | Product     | the vendor's app    | `Butaca`         |
 //! | Version     | `1.0`               | `0.1.0`          |
 //! | Device      | `LG TV`             | `webOS`          |
-//! | Device-Name | `Plex (LG webOS)`   | `Living Room TV` |
+//! | Device-Name | the vendor's app    | `Living Room TV` |
 //! | Model       | `LG webOS TV`       | `49SM9000PLA`    |
 //!
 //! Two of those were release blockers rather than untidiness.
 //!
-//! **`Plex for webOS` is impersonation.** `Plex for <platform>` is Plex's own documented
-//! first-party naming pattern (their sample value is `Plex for Roku`), and it appeared verbatim in
-//! the authorized-devices list of the account this app signs into — on a platform where an official
-//! Plex app exists. A server owner had no way to tell an unofficial client from Plex's own. This is
-//! an unofficial client and must say so; that is also what makes the referential use of the Plex
-//! name elsewhere defensible.
+//! **The old product string was impersonation.** The vendor documents a first-party naming
+//! pattern for its OWN apps, and the value this client sent appeared verbatim in the
+//! authorized-devices list of the account it signed into, on a platform where the official app
+//! exists. A server owner had no way to tell an unofficial client from the vendor's own. This is
+//! an unofficial client and must say so.
 //!
 //! **`49SM9000PLA` is the author's television.** It was accurate for exactly one device on earth
 //! and reported as fact by every install.
@@ -32,11 +30,11 @@
 //! The client IDENTIFIER is deliberately not here — it is per-install, not per-build. It is minted
 //! once from `/dev/urandom` and persisted by [`session`](super::session).
 
-/// The product name. Unique, and not `Plex …` anything.
+/// The product name. Unique, and no name the vendor's own app answers to.
 pub(crate) const PRODUCT: &str = "Butaca";
 
 /// The display name this build shows servers (`Client="..."` and the dashboard's session list):
-/// the fork's own build says Butaca there (issue #35), the Plex backend keeps the product name.
+/// the fork's own build says Butaca there (issue #35), the identity keeps the product name.
 pub(crate) fn display_name() -> &'static str {
     "Butaca"
 }
@@ -57,13 +55,13 @@ pub(crate) const VERSION: &str = env!("BUTACA_VERSION");
 /// The OS version — the REAL one, read off the set at boot ([`crate::webos`]), because the app
 /// runs on webOS 4 through 11 now and a literal is wrong on every set but one. This was
 /// `const … = "4.5"` while the app was packaged `>=4.0, <5.0`; the webosbrew reviewer flagged it
-/// reporting 4.5 from a 6.5.2 television (issue #22). PMS augments our named Generic profile
-/// from the X-Plex-Client-Profile-Extra we send, so the version is informational today — but it
+/// reporting 4.5 from a 6.5.2 television (issue #22). The old server augmented our named Generic
+/// profile from a client-profile field we sent, so the version was informational there - but it
 /// is also how a server-side profile could ever distinguish firmware generations, and a false
 /// one poisons that forever. The fallback when `os_info.json` is unreadable keeps the literal
 /// this replaces — the exact claim every release so far has made — rather than inventing an
 /// empty-string case no server has ever been shown. Safe by boot order: `webos::probe()` is the
-/// first call in `butaca_run`, before SDL exists, so no PMS request can precede the read.
+/// first call in `butaca_run`, before SDL exists, so no server request can precede the read.
     #[allow(dead_code)] // frozen until the wire layer goes
 pub(crate) fn platform_version() -> &'static str {
     let r = &crate::webos::info().release;
@@ -80,18 +78,18 @@ pub(crate) const DEVICE: &str = "LG webOS TV";
     #[allow(dead_code)] // frozen until the wire layer goes
 pub(crate) const MODEL: &str = "LG webOS TV";
 
-/// Who MADE the hardware. Canon-only since the plex.tv account surface went away: the
+/// Who MADE the hardware. Canon-only since the account surface went away: the
 /// authorized-device header that named the vendor is gone, and the identity tests pin the value.
 #[cfg_attr(not(test), expect(dead_code))]
 pub(crate) const VENDOR: &str = "LG";
 
-/// The FRIENDLY name, which is what a user actually reads in plex.tv's device list and in the
-/// server's Now Playing. Names the app rather than a room, so it is true on every install and
-/// distinguishable from an official client sharing the same TV.
+/// The FRIENDLY name, which is what a user actually reads in the account service's device list
+/// and in the server's Now Playing. Names the app rather than a room, so it is true on every
+/// install and distinguishable from an official client sharing the same TV.
 ///
 /// **A flavoured install says so.** Two builds can sit on one television now
 /// ([`crate::paths::app_id`]) and they hold separate session files, so each mints its own
-/// `X-Plex-Client-Identifier` and each appears as its own authorized device. Without the suffix
+/// client identifier and each appears as its own authorized device. Without the suffix
 /// the account grows two entries spelled identically, and revoking "the one on the TV" is a
 /// coin flip. The shipped app's name is unchanged, which matters because it is already in every
 /// existing user's device list — a rename there would read as a new, unknown device.
@@ -108,11 +106,12 @@ pub(crate) fn device_name() -> &'static str {
     #[allow(dead_code)] // frozen until the wire layer goes
 pub(crate) const PROVIDES: &str = "player";
 
-/// The HTTP `User-Agent` for the libcurl transport (plex.tv + discover.provider.plex.tv).
+/// The HTTP `User-Agent` for the libcurl transports (the account service and the server's own
+/// discovery endpoint).
 ///
-/// This was `PlexForWebOS/1.0 (LG webOS)` — the same impersonation as the product string and
-/// arguably the worse one, since it is what lands in Plex's own server logs, and it named no
-/// version that has ever existed.
+/// This was the vendor's own app name and version - the same impersonation as the product string
+/// and arguably the worse one, since it is what lands in the vendor's own server logs, and it
+/// named no version that has ever existed.
 pub(crate) fn user_agent() -> String {
     format!("{PRODUCT}/{VERSION} ({DEVICE})")
 }
@@ -132,7 +131,7 @@ mod tests {
     }
 
     /// The point of the module: an unofficial client must not present as a first-party one.
-    /// `Plex for <platform>` is Plex's documented pattern for its OWN apps.
+    /// The vendor's documented naming pattern for its OWN apps is what this test refuses.
     #[test]
     fn identity_never_claims_to_be_plex() {
         for s in [
@@ -158,7 +157,7 @@ mod tests {
     /// and a build that is NOT a release must not report the published version.
     ///
     /// A release commit leaves every tracked file at the version it just published, so every
-    /// developer build after it reported that exact number: to `X-Plex-Version` on the account's
+    /// developer build after it reported that exact number: to the version field on the account's
     /// authorized-devices list and on the diagnostics panel that is designed to be photographed
     /// into a bug report. Nothing downstream could tell the shipped
     /// binary from a working tree. So a non-release build names the version it is working TOWARDS,

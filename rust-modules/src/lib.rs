@@ -1,7 +1,8 @@
-//! Butaca — an unofficial native Plex client for LG webOS.
+//! Butaca - an unofficial native Jellyfin client for LG webOS.
 //! Copyright © 2026 Gleb Linnik. Licensed under GPL-3.0-or-later; see LICENSE at the repository
 //! root, and THIRD-PARTY-NOTICES.md for the components this links or redistributes.
-//! Not affiliated with, endorsed by, or sponsored by Plex GmbH or LG Electronics.
+//! Not affiliated with, endorsed by, or sponsored by the vendor it interoperates with, nor by
+//! LG Electronics.
 //!
 //! butaca-modules — the Rust app core, built as a staticlib and linked into the C
 //! boot shim. The crate's C surface is tiny: C calls `butaca_run` (app.rs), writes the fallback
@@ -12,7 +13,7 @@
 mod abr; // client-managed fixed-session HLS controller: estimate, propose, prime, then commit
 mod app; // butaca_run — the Rust app core / event loop (the entry inverted from main.c)
 mod aq;
-mod auth; // plex.tv login/boot flow controller (PIN/QR → discovery → who's-watching → install)
+mod auth; // account sign-in/boot flow controller (PIN/QR → discovery → who's-watching → install)
 mod browse; // Library browse: per-section paged catalog (sparse store + off-thread page fetches)
 mod capture; // dev live UI capture stream: own-GLES-frame grab → MPEG1/TS or JPEG → TCP (UI plane only)
 mod checkpoint; // the transport-neutral "may I keep waiting?" seam every blocking media wait consults
@@ -33,7 +34,7 @@ mod grant; // credential transport authority and consented plaintext grants
 #[cfg(feature = "devtriggers")]
 mod gpu_timer; // async EXT_disjoint_timer_query timing; no glFinish on the timing path
 mod hls; // strict parser/auth/timeline for the measured one-variant PMS HLS shape
-mod http; // the ONE door out of the control plane: dispatch a Plex REST request on its origin's scheme (stream.rs for http, net.rs/libcurl for https)
+mod http; // the ONE door out of the control plane: dispatch a REST request on its origin's scheme (stream.rs for http, net.rs/libcurl for https)
 #[cfg(feature = "devtriggers")]
 mod hwcnt; // direct userspace Mali r12p0 vinstr reader for the phase profiler
 mod img;
@@ -42,13 +43,13 @@ mod jellyfin;
 mod imgcache; // bounded persistent artwork cache shared by every image source
 mod keymanager; // public LS2 key stores: keymanager3, legacy Palm service, or unavailable
 mod lab; // Cloud Lab bridge: pinned diagnostic uploads + optional outbound command long-poll
-mod librecord; // backend-neutral remembered-library records shared outside Plex session storage
+mod librecord; // backend-neutral remembered-library records shared outside the session storage
 mod metadata; // item detail data layer (detail page): full metadata + seasons/episodes + cast + related
-mod net; // HTTPS client over the TV's libcurl (plex.tv account/login calls — stream.rs can't do TLS/DNS)
+mod net; // HTTPS client over the TV's libcurl (account and sign-in calls - stream.rs can't do TLS/DNS)
 mod origin;
 mod paths; // where the app's own files live — /proc/self/exe, not a hardcoded install prefix
-mod media; // PMS wire vocabulary (metadata/media container/stream and friends) moved out of plex/
-mod playback; // backend-neutral playback vocabulary: encode contract, delivery/offset, audio DSP flags, quality ceiling, timeline state, queue rows (moved out of plex/)
+mod media; // media vocabulary (metadata/media container/stream and friends) shared by the data layer
+mod playback; // backend-neutral playback vocabulary: encode contract, delivery/offset, audio DSP flags, quality ceiling, timeline state, queue rows
 mod person; // person/actor page data layer: the header handed in by the cast row + /library/people/{id}/media
 mod collection; // collection page model: tag resolution, header metadata and paged members
 mod player; // buffer-feed video engine (was playback.c) — step 5
@@ -280,7 +281,7 @@ mod textinput; // the TV's own on-screen keyboard, via plain SDL_StartTextInput 
 mod ui;
 mod webos; // which webOS this set is — nyx's os_info.json, read once at boot (release + codename)
 
-/// Strip any PMS/plex.tv token from a line bound for the event log.
+/// Strip any server or account-service token from a line bound for the event log.
 ///
 /// **This is a backstop, not the policy.** The policy is that no call site formats a URL into a log
 /// line at all — but that policy was violated for months by one `-> {url}` in `route::retranscode`,
@@ -290,8 +291,8 @@ mod webos; // which webOS this set is — nyx's os_info.json, read once at boot 
 ///
 /// Matches the parameter name rather than the value: the token is a short unstructured alphanumeric
 /// with no distinguishing shape, so it cannot be recognised on its own — but it only ever reaches a
-/// string as `X-Plex-Token=…`, appended by the single choke point in `server::client`. The value runs
-/// to the next `&` or whitespace, i.e. the end of that query parameter.
+/// string as a query parameter whose name ends in `token`, appended by one of the client's own URL
+/// builders. The value runs to the next `&` or whitespace, i.e. the end of that query parameter.
 ///
 /// Cheap by construction: the `find` is a no-op scan for the overwhelming majority of lines, and
 /// the log is written a few times a second at most, never per frame.

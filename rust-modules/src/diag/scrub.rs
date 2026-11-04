@@ -41,7 +41,7 @@ const CREDENTIAL_HEADERS: [&str; 5] = [
     "proxy-authorization:",
 ];
 
-/// Query parameters whose value is a secret. `X-Plex-Token` is here too even though
+/// Query parameters whose value is a secret. The access-token parameter is here too even though
 /// [`crate::redact_tokens`] already caught it on the way in — this pass must be correct on its own,
 /// because it is also what protects a record written by a future call site that bypasses the log.
 const CREDENTIAL_PARAMS: [&str; 6] = [
@@ -56,7 +56,7 @@ const CREDENTIAL_PARAMS: [&str; 6] = [
 /// One record, made safe.
 ///
 /// Four rewrites, in order, each narrower than dropping the line: header values, query-parameter
-/// values, `plex.direct` hostnames (which ENCODE a household's LAN address in their leftmost
+/// values, public wildcard hostnames (which ENCODE a household's LAN address in their leftmost
 /// label), and any remaining `scheme://host` authority. A record that still contains a credential
 /// header name after rewriting is refused outright rather than shipped — that can only happen if
 /// the rewrite failed to find the value it was sure was there.
@@ -117,7 +117,7 @@ pub(crate) fn scrub_with(line: &str, ids: &[String]) -> Scrubbed {
 /// the probe diagnostics.
 ///
 /// [`scrub_authority`] only sees an address that follows `://`, and the device test found the gap
-/// immediately: `plex: server slot 0 re-pointed to 203.0.113.7:32400` is not a URL, and it puts a
+/// immediately: `server: slot 0 re-pointed to 203.0.113.7:32400` is not a URL, and it puts a
 /// household's LAN topology in an upload that crosses the public internet. The port goes with the
 /// address, because a port is only diagnostic in company with the address it is on.
 ///
@@ -329,9 +329,9 @@ fn scrub_identities(s: &str, ids: &[String]) -> String {
 /// What is left here is the generic shape a future call site can still leak through, which is
 /// worth catching centrally because it is cheap and mechanical:
 ///
-/// * **`plex://…` GUIDs** — a Plex GUID names the WORK, globally and stably. It is the single
-///   most identifying token that can appear in this log, and it arrives from the server rather
-///   than being typed at a call site, so a new site can pick one up without meaning to.
+/// * **catalog GUIDs**: a metadata GUID names the WORK, globally and stably. It is the
+///   single most identifying token that can appear in this log, and it arrives from the server
+///   rather than being typed at a call site, so a new site can pick one up without meaning to.
 /// * **`q='…'`** — the search-field convention. Kept as a shape rather than trusting `search.rs`
 ///   to stay disciplined forever.
 ///
@@ -345,8 +345,8 @@ fn scrub_viewing(s: &str) -> String {
     replace_quoted_value(&s, "q='", '\'', "<query>")
 }
 
-/// `plex://episode/5d9c…` → `plex://<guid>`. The scheme survives because "we were resolving a
-/// guid here" is the diagnostic; the identifier does not.
+/// A catalog GUID is replaced by a placeholder: the scheme survives because "we were resolving a
+/// guid here" is the diagnostic, the identifier does not.
 fn replace_guids(s: &str) -> String {
     const KEY: &str = "plex://";
     if !s.contains(KEY) {
@@ -501,10 +501,10 @@ fn scrub_params(s: &str) -> String {
 
 /// Any `scheme://authority` becomes `scheme://<host>`, keeping the path.
 ///
-/// This is the clause that covers what no parameter list can: a PMS address, a `plex.direct` name
-/// (whose leftmost label is a hex-encoded LAN address, i.e. a household fingerprint), a friend's
-/// shared server, a port that identifies a deployment. The PATH is what makes a line diagnostic —
-/// `/video/:/transcode/universal/start.mkv` — and it stays.
+/// This is the clause that covers what no parameter list can: a server address, a public wildcard
+/// name (whose leftmost label is a hex-encoded LAN address, i.e. a household fingerprint), a
+/// friend's shared server, a port that identifies a deployment. The PATH is what makes a line
+/// diagnostic - `/video/:/transcode/universal/start.mkv` - and it stays.
 fn scrub_authority(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
@@ -655,8 +655,8 @@ mod tests {
         );
     }
 
-    /// The address clause: a `plex.direct` name encodes a LAN address in its leftmost label, and a
-    /// PMS host is a household's location. The path is the diagnostic half and stays.
+    /// The address clause: a public wildcard name encodes a LAN address in its leftmost label, and
+    /// a server host is a household's location. The path is the diagnostic half and stays.
     #[test]
     fn a_host_is_replaced_and_the_path_is_kept() {
         let out = kept("open https://10-0-0-2.abc123.plex.direct:32400/library/sections?x=1");
@@ -866,14 +866,15 @@ mod tests {
 
     /// **The generic shapes the backstop owns**, quoted from the call sites that produce them:
     ///
-    /// * `viewstate.rs:524` / `metadata.rs:2102` — a Plex GUID names the WORK, globally and stably
+    /// * `viewstate.rs:524` / `metadata.rs:2102`: a metadata GUID names the WORK, globally and
+    ///   stably
     /// * `search.rs` — the `q='…'` convention
     ///
     /// This is LG's "Content Viewing Information" category, which the app's Data Safety
     /// declaration has to be able to answer **Not collected** to. None of the other four passes
     /// touches it: they hunt credentials, hosts, bare addresses and names taken from the SESSION,
-    /// and a Plex GUID is none of those. Every case passes an EMPTY identity list, the state the
-    /// app is in for the whole of boot.
+    /// and a metadata GUID is none of those. Every case passes an EMPTY identity list, the state
+    /// the app is in for the whole of boot.
     ///
     /// **`rk=` is deliberately not banned.** A ratingKey is server-local, this file is 0600, and it
     /// is the primary handle for triaging a playback bug — `distribution.md`'s own remediation for
