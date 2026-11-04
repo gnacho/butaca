@@ -488,11 +488,11 @@ which the linking section explains is load-bearing rather than tidy.
   `player/` (buffer-feed engine + worker threads — **`rust-modules/src/player/CLAUDE.md` is the
   playback deep-dive; read it before touching playback**), `ff.rs` (THE demuxer — the **bundled,
   pinned** libavformat shipped beside the binary, *not* the TV's), `stream.rs`/`aq.rs` (HTTP socket
-  → AU pipeline), `net.rs` (libcurl/TLS), and the Plex data layer (`plex/` — **its own
-  `rust-modules/src/plex/CLAUDE.md`**, which the rest of this file never pointed at: read it before
-  adding a PMS query, and before assuming there is one server. There is a REGISTRY behind
-  `client()` now — the app can hold a friend's shared server beside your own, each with its own
-  token, `ratingKey` space and watch state. `docs/shared-servers.md` is the design note).
+  → AU pipeline), `net.rs` (libcurl/TLS), and `server/` (the server-side vocabulary the app still
+  uses — **its own `rust-modules/src/server/CLAUDE.md`**: the persisted account and preference
+  store, the identity strings the diagnostics report, the pinned libraries the browse table reads,
+  and the share-link vocabulary. The wire client is gone: `crate::jellyfin` carries every request,
+  and `crate::registry` only names servers).
 - `rust-modules/src/ui/` — **the UI, as a shared design system**: `theme.rs` tokens, the retui core
   (`mod.rs` `Painter`/`View`), reusable components (`widgets.rs`/`table.rs`/`label.rs`/`icons.rs`),
   and, since phase 9 (Player was the last), no legacy screens at all — every route mounts an owned
@@ -785,13 +785,11 @@ which the linking section explains is load-bearing rather than tidy.
 - `docs/two-installs.md` — **why two builds live on one television and what they do and do not
   share**: the `FLAVOR` axis and its seven query targets, the identity model (the app id is the
   install DIRECTORY's name, read from `/proc/self/exe`, so nothing about it reaches codegen), the
-  shared-resource inventory (separate: runtime root and everything in it, session file, plex.tv
+  shared-resource inventory (separate: runtime root and everything in it, session file, the
   device name, launcher tile, the Load payload's `option.appId` and the ACB id — still shared: the
   jail template, the ONE video plane, `/media/developer`, `splash.png`, the `requiredMemory`
   budget), the two name traps, and the ordered list of what only a television can settle. Read it
   before adding anything per-install, and before assuming a log came from the install you meant.
-- `docs/pms-api.md` — **verified** PMS REST reference (sections, hubs, metadata, image transcode,
-  direct-play URLs, timeline). The authoritative spec for the data layer.
 - `docs/buffer-feed-plan.md` — historical design note for the buffer-feed pivot (partly outdated).
 
 ## Non-obvious conventions & gotchas (all verified in code)
@@ -801,8 +799,8 @@ which the linking section explains is load-bearing rather than tidy.
   `src/config.local.h` (a live Plex token), `tests/manifest.local.json` and `pkg/auth.json` among
   them; the LIST is `PRIVATE_FILES` in `.claude/hooks/outbound-guard.py`, not this sentence, which
   is why no count is given here. The rule for anything leaving the machine is **placeholders,
-  always** — a PR body, an issue comment, a release note, a commit message — and
-  `docs/shared-servers.md` carries the stand-in table this repo actually uses. **It has already
+  always** — a PR body, an issue comment, a release note, a commit message — and the table at the
+  end of this bullet is the set of stand-ins this repo uses. **It has already
   failed once as a convention, in these words.** A batch of subagents told to write device
   recipes "executable without me" each did the obviously helpful thing and pasted a friend's real
   server address, port, `machineIdentifier` and handle into **four PR bodies (#28-31) on
@@ -813,6 +811,24 @@ which the linking section explains is load-bearing rather than tidy.
   PR body of any length is actually passed. It never prints the value it matched, since that is
   the same leak by a shorter route. The escape hatch is a prefix on the command, and an agent
   reaching for it is doing the thing the hook exists to prevent.
+
+  Addresses, ports, tokens, machine identifiers, the owner's username and their library names are
+  deliberately **not** recorded in any fixture, doc comment, commit message or PR body. The
+  stand-ins, and the only ones to use in new work:
+
+  | real thing | stand-in |
+  |---|---|
+  | owner's handle | `friend` |
+  | server / machine name | `nas-home` |
+  | their library name | `Film Club` |
+  | their port | `31234` |
+  | their LAN address | `10.9.9.7` (RFC1918, as the real one is) |
+  | any public address | `203.0.113.9` / `198.51.100.7` (TEST-NET-3 / TEST-NET-2) |
+  | a machine identifier | `aaaabbbb…` runs, never a real 40-hex id |
+
+  Several are deliberately the **same character length** as what they replaced, because the owned
+  Home's tests (`screens/home/tests.rs`) assert text widths against them. The live values live only
+  in the gitignored `tests/manifest.local.json` and `src/config.local.h`.
 - **LG's SDL fork has a shifted `SDL_KeyboardEvent`.** `e.key.keysym` is unreliable; the handler
   (`app.rs`, via `rd_u32`) reads raw bytes off the event: `+16` = state (u32), `+20` = webOS keycode
   (u32), `+24` = sym (u32). State low byte = pressed(1)/released(0); bit `0x100` = auto-repeat.
