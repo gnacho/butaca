@@ -56,7 +56,7 @@
 //! Arming is at boot only (`Writer::open` refuses any other frame). The directory is the runtime
 //! root's `butaca-recordings/latest` (not `butaca-rec/`, which is the trigger FILE's own
 //! name) — private, gitignored, refused by the outbound guard; a
-//! committed fixture uses the full synthetic initializer and `tests/mock_server.py`, then passes
+//! committed fixture uses the full synthetic initializer and `tests/mock_jf.py`, then passes
 //! `tools/butaca-rec`'s closed alphabet and the actual replay gate. This is not all-domain or
 //! cross-target AppInit acceptance.
 #![allow(clippy::too_many_arguments)]
