@@ -1412,7 +1412,20 @@ fn load_libraries() -> bool {
     // The bundled FFmpeg lives beside the binary, which is on no library search path — so it is
     // opened by ABSOLUTE PATH. That is not a convenience: webOS 11.2.0 ships FFmpeg 6 itself, and
     // a bare SONAME there could open the television's copy instead of ours.
-    let dir = Some(crate::paths::app_dir());
+    let app = crate::paths::app_dir();
+    // A desktop capture run has no packaged FFmpeg beside its binary. `make ffmpeg-host` stages the
+    // same basenames under `host-ffmpeg/`, a directory the package never carries precisely because
+    // they would collide (see .gitignore). Look there too on the host simulator, so the video
+    // scenes decode instead of refusing to play.
+    #[cfg(feature = "hostsim")]
+    let owned = if app.join("host-ffmpeg").join("libavutil-butaca.so.61").exists() {
+        app.join("host-ffmpeg")
+    } else {
+        app.to_path_buf()
+    };
+    #[cfg(not(feature = "hostsim"))]
+    let owned = app.to_path_buf();
+    let dir = Some(owned.as_path());
 
     // DEPENDENCY ORDER, and it is load-bearing. libavformat NEEDs libavcodec NEEDs libavutil by
     // SONAME, and these libraries carry no rpath (FFmpeg's configure evals its flags, so

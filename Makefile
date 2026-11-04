@@ -1591,7 +1591,7 @@ SHOT_OUT    ?=
 SHOT_CHECK  ?=
 SHOT_HERO   ?=
 SHOT_HERO_VARIANTS ?=
-screenshots-sim: $(LIBASS_HOST_STAGED)
+screenshots-sim: $(LIBASS_HOST_STAGED) $(FFMPEG_HOST_STAGED)
 	CARGO_INCREMENTAL=0 cargo build --manifest-path rust-modules/Cargo.toml --target-dir $(SHOT_TDIR) \
 	  --no-default-features --features hostsim,devtriggers --bin butaca-sim
 
@@ -1605,8 +1605,9 @@ screenshots: screenshots-sim demo-library
 	python3 tools/demo_library.py site-credits
 
 # Optimized Linux UI simulator with no host FFmpeg prerequisite. It runs natively on Linux;
-# Windows/WSLg uses the same binary through `tools/sim.ps1`. Play intentionally reaches the host
-# seam's existing "no video path" result.
+# Windows/WSLg uses the same binary through `tools/sim.ps1`. Play reaches the host seam's existing
+# "no video path" result unless a host FFmpeg was staged with `make ffmpeg-host`: the capture target
+# stages one, because the video scenes decode through it.
 # The build carries the `jellyfin` flavor: the replay gate's world IS a Jellyfin one (#166 flip),
 # so the recorder stamps the flavor into every fixture header and `synthetic_home` constructs the
 # Jellyfin controlled world for the anchors recorded against it.

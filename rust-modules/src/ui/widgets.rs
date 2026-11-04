@@ -274,8 +274,15 @@ impl Art<'_> {
         let (owner, sid, key, kind) = match self {
             Self::Poster(Some(m)) => (*m as *const CatalogMovie as usize, m.sid, m.thumb.as_str(), 0u8),
             Self::Still(Some(m)) => (*m as *const CatalogMovie as usize, m.sid, still_key(m), 1),
-            Self::Thumb { sid, key, .. } => (key.as_ptr() as usize, *sid, *key, 2),
-            Self::Person { sid, key, .. } => (key.as_ptr() as usize, *sid, *key, 3),
+            // A path's ADDRESS is not an identity. The player republishes its whole session every
+            // frame (`Bridge::publish_playback`), so the `String` behind this `&str` is a fresh
+            // allocation each time and an address-keyed identity never matches twice: the placement
+            // stays `Unknown`, every miss is declined, and the decline's own "present the next
+            // sample" request repaints the page forever at the loop rate. Two placements of one art
+            // are told apart by `History::observe`'s occurrence counter instead, which is exactly
+            // what two draws of the same object in one frame are.
+            Self::Thumb { sid, key, .. } => (0, *sid, *key, 2),
+            Self::Person { sid, key, .. } => (0, *sid, *key, 3),
             Self::Poster(None) | Self::Still(None) => return None,
         };
         let mut hash = std::collections::hash_map::DefaultHasher::new();
