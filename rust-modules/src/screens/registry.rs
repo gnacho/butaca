@@ -205,6 +205,7 @@ pub(crate) enum HomeTab {
     Home,
     Movies,
     Shows,
+    Favorites,
     Videos,
     Search,
 }

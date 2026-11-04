@@ -25,10 +25,26 @@ pub(crate) struct CollectionRef {
     pub(crate) name: String,
 }
 
+/// The reserved item id of the favourites page. It names no server item: the page it opens asks
+/// the account's own favourite listing instead of a box set's children, which is why it carries a
+/// header that never lands and a job of its own.
+pub(crate) const FAVORITES_RK: &str = "@favorites";
+
 impl CollectionRef {
     /// A link that knows the collection's item id (a library tile, a box set card).
     pub(crate) fn by_rk(sid: ServerId, rk: &str, sec: i64, name: &str) -> Self {
         Self { sid, rk: rk.to_owned(), sec, tag: 0, name: name.to_owned() }
+    }
+
+    /// The strip's Favorites destination: the same paged grid as a collection, over the account's
+    /// favourite items rather than one box set's members.
+    pub(crate) fn favorites(sid: ServerId, name: &str) -> Self {
+        Self { sid, rk: FAVORITES_RK.to_owned(), sec: 0, tag: 0, name: name.to_owned() }
+    }
+
+    /// Whether this link is the favourites page, which has no item to fetch a header for.
+    pub(crate) fn is_favorites(&self) -> bool {
+        self.rk == FAVORITES_RK
     }
 
     /// THE collection identity rule. Two item ids compare when both sides carry one; otherwise
@@ -103,9 +119,12 @@ impl Collection {
     /// A collection opened (or reopened) with nothing landed yet: its title is the link's name
     /// until the header replaces it.
     fn loading(id: CollectionRef, want: usize) -> Self {
+        // The favourites page has no server item to read a header from: its title is the one the
+        // strip pill carries, and it is ready the moment it opens.
+        let header_ready = id.is_favorites();
         Self { title: id.name.clone(), id, summary: String::new(), thumb: String::new(),
             child_count: 0, order: None, items: Vec::new(), total: 0, status: CollectionStatus::Loading,
-            more: true, offset: 0, want, header_ready: false }
+            more: true, offset: 0, want, header_ready }
     }
 
     /// Whether the header (title, art, summary) has landed — before it, an empty `thumb` is not
@@ -193,6 +212,14 @@ impl CollectionState {
     fn job(&self) -> Option<Job> {
         let c = self.current.as_ref()?;
         if c.status == CollectionStatus::Unavailable || c.status == CollectionStatus::Empty { return None; }
+        if c.id.is_favorites() {
+            // No header to read: the favourites listing IS the first page of the grid.
+            return if c.more && c.items.len() < c.want {
+                Some(Job::Favorites { start: c.offset })
+            } else {
+                None
+            };
+        }
         if !c.header_ready { return Some(Job::Header { rk: c.id.rk.clone() }); }
         if c.more && c.items.len() < c.want {
             return Some(Job::Children { rk: c.id.rk.clone(), start: c.offset });
@@ -298,6 +325,8 @@ impl CollectionState {
 enum Job {
     Header { rk: String },
     Children { rk: String, start: usize },
+    /// One page of the account's favourite items — the strip's Favorites grid.
+    Favorites { start: usize },
 }
 
 /// A collection row's header fields, as the metadata read returns them.
@@ -339,6 +368,19 @@ fn run_job_jellyfin(
             Job::Children { rk, start } => {
                 let page = jc
                     .collection_children(&rk, start as i64, PAGE_SIZE as i64)
+                    .ok_or(Landing::Transport)?;
+                let total = page.total.max(0) as usize;
+                let got = page.items.len();
+                let items = page
+                    .items
+                    .iter()
+                    .filter_map(|it| crate::jellyfin::movie_from_dto(it, sid, 0))
+                    .collect();
+                Landing::Page { start, got, items, total }
+            }
+            Job::Favorites { start } => {
+                let page = jc
+                    .favorites_page(start as i64, PAGE_SIZE as i64)
                     .ok_or(Landing::Transport)?;
                 let total = page.total.max(0) as usize;
                 let got = page.items.len();

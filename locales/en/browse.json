@@ -31,6 +31,10 @@
     "value": "TV Shows",
     "description": "browse kind tv_shows"
   },
+  "browse.kind.favorites": {
+    "value": "Favorites",
+    "description": "browse kind favorites, the strip destination that lists the items the viewer hearted"
+  },
   "browse.kind.other_videos": {
     "value": "Other Videos",
     "description": "Other Videos library type, used by the type pill and library listing"
