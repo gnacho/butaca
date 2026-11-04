@@ -707,6 +707,11 @@ impl Bridge {
         }
         let before = (self.hubs.view().generation, self.hubs.view().state);
         self.hubs = self.stores.hubs.snapshot();
+        // Test bridges seed `section_hubs` directly; an empty catalog must not overwrite it.
+        let hubs = self.hubs.view();
+        if hubs.hub_count() > 0 {
+            self.section_hubs = crate::browse::section_hubs::HubsSnapshot::projected(hubs);
+        }
         let after = (self.hubs.view().generation, self.hubs.view().state);
         let hubs_changed = before != after;
         (browse_changed, hubs_changed, search_changed)

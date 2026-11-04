@@ -135,7 +135,7 @@ impl LibraryScreen {
         self.draw_library_controls(f);
         crate::ui::profile::phase("lb.shelves", || {
             for (index, row) in self.shelves.iter().enumerate() {
-                let Some(shelf) = H::section_hubs(f.cx).shelves().get(index) else { continue };
+                let Some(shelf) = H::section_hubs(f.cx).shelves().iter().find(|s| s.id == row.id) else { continue };
                 let origin = self.layout.shelf_y(index, self.scroll.pos);
                 if !shelf_on_screen(origin, self.layout.shelf_pitch(index)) { continue; }
                 let heading_y = origin - crate::ui::consts::TITLE_DY - row.motion.lift();
@@ -232,7 +232,7 @@ impl LibraryScreen {
     }
 
     fn draw_shelf_tile<H: LibraryLike>(&self, row: usize, col: usize, focused: bool, f: &DrawFrame<'_, '_, H>) {
-        let Some(shelf) = H::section_hubs(f.cx).shelves().get(row) else { return };
+        let Some(shelf) = H::section_hubs(f.cx).shelves().iter().find(|s| s.id == self.shelves[row].id) else { return };
         let Some(item) = shelf.items.get(col) else { return };
         let model = &self.shelves[row];
         let style = row_style(model);
