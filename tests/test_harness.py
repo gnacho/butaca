@@ -866,62 +866,17 @@ class TeardownProcessTable(unittest.TestCase):
         fake.assert_called_once_with(["ps", "-Ao", "pid,command"], capture_output=True)
 
 
-class StoredSessionGate(unittest.TestCase):
-    """A `session: stored` case with no stored sign-in on the install used to call
-    `require_stored_session()` -> `sys.exit()` from inside `run_case`, and `SystemExit` is not an
-    `Exception` — the per-case `except Exception` in main()'s run loop let it straight through and
-    killed the whole batch at the first such case. The fix moves the check in front of the loop
-    (`stored_session_reason` + `partition_stored_sessions`) so an unmet precondition SKIPS just
-    those cases instead."""
-
-    def test_stored_session_reason_is_none_when_a_session_file_is_present(self):
-        with mock.patch.object(run, "ssh") as ssh:
-            ssh.return_value = subprocess.CompletedProcess([], 0)
-            self.assertIsNone(run.stored_session_reason("192.0.2.5"))
-
-    def test_stored_session_reason_names_how_to_fix_it_when_absent(self):
-        with mock.patch.object(run, "ssh") as ssh:
-            ssh.return_value = subprocess.CompletedProcess([], 1)
-            reason = run.stored_session_reason("192.0.2.5")
-        self.assertIn("signed-in session", reason)
-        self.assertIn("sign in on that install once", reason)
-
-    def test_a_stored_case_is_skipped_not_dropped_as_a_systemexit(self):
-        """This is the regression itself: before the fix, the only way main() learned a stored
-        session was missing was `require_stored_session()` raising `SystemExit` from inside the
-        per-case try/except — which does not catch it. `partition_stored_sessions` must instead
-        move the case out of `cases` and into the skip list, raising nothing."""
-        cases = [{"name": "offline_play", "session": "stored"},
-                 {"name": "normal_case"}]
-        remaining, skipped = run.partition_stored_sessions(
-            cases, "needs a signed-in session on com.butaca")
-        self.assertEqual([c["name"] for c in remaining], ["normal_case"])
-        self.assertEqual([c["name"] for c in skipped], ["offline_play"])
-
-    def test_a_present_session_leaves_every_case_untouched(self):
-        cases = [{"name": "offline_play", "session": "stored"}, {"name": "normal_case"}]
-        remaining, skipped = run.partition_stored_sessions(cases, None)
-        self.assertEqual(remaining, cases)
-        self.assertEqual(skipped, [])
-
-    def test_no_stored_case_in_the_batch_is_untouched_even_with_a_reason(self):
-        cases = [{"name": "normal_case"}]
-        remaining, skipped = run.partition_stored_sessions(cases, "some reason")
-        self.assertEqual(remaining, cases)
-        self.assertEqual(skipped, [])
-
-
 class ItemResolution(unittest.TestCase):
     def test_placeholder_reads_as_absent(self):
         """The stranger's dominant path is `cp` the example, which ships every key bracketed.
         If only the ABSENT branch skipped, that path would still die — one guard further down."""
-        items = {"present": 1234, "blank": "<ratingKey>"}
+        items = {"present": 1234, "blank": "<item id>"}
         self.assertEqual(run._item_rk(items, "present"), "1234")   # ints are stringified
         self.assertIsNone(run._item_rk(items, "blank"))
         self.assertIsNone(run._item_rk(items, "absent"))
 
     def test_reason_distinguishes_the_two(self):
-        items = {"blank": "<ratingKey>"}
+        items = {"blank": "<item id>"}
         self.assertIn("template placeholder", run._item_missing_reason(items, "blank"))
         self.assertIn("no `items` entry", run._item_missing_reason(items, "absent"))
 
@@ -949,8 +904,6 @@ class FpsIdentity(unittest.TestCase):
             scene = {"route": route, "tier": "player" if route == "player" else "ui"}
             self.assertTrue(run.fps_scene_needs_token(scene), route)
         self.assertFalse(run.fps_scene_needs_token({"route": "login", "tier": "ui"}))
-        self.assertTrue(run.fps_scene_needs_token({"route": "login", "tier": "ui"}, True),
-                        "a shared-server scene still needs its primary credential")
 
     def test_settings_overlay_samples_do_not_alias_plain_home(self):
         """Settings is a modal over Home, but each workload needs its own heartbeat identity."""
@@ -1497,7 +1450,7 @@ class LoadManifest(unittest.TestCase):
 
     def test_collection_scenes_resolve_through_the_overlay(self):
         """manifest.json is installation-independent, so the collection scenes may not carry a
-        mock_server ratingKey: on a real server `butaca-collection=50001` opens a collection that
+        mock server item id: on a real server `butaca-collection=50001` opens a collection that
         does not exist and the page's fps_ceiling passes vacuously on its failure read-out."""
         tracked = {s["name"]: s for s in _manifest()["fps_scenes"]}
         for name in ("collection-page", "library-collections"):
@@ -1513,16 +1466,16 @@ class LoadManifest(unittest.TestCase):
         # library-collections declares the key as a requirement only: nothing reads its `$rk`.
         self.assertNotIn("424242", [v for _, v in run.fps_trigger_files(scenes["library-collections"])])
 
-        items["collection"] = "<ratingKey: a movie COLLECTION, not a movie>"
+        items["collection"] = "<item id: a movie COLLECTION, not a movie>"
         scenes = {s["name"]: s for s in self._load(_overlay(items))["fps_scenes"]}
         for name in ("collection-page", "library-collections"):
             with self.subTest(scene=name):
                 self.assertIn("template placeholder", scenes[name]["skip"])
                 self.assertNotIn("rk", scenes[name])
 
-    def test_no_fps_trigger_holds_a_literal_ratingkey(self):
+    def test_no_fps_trigger_holds_a_literal_item_id(self):
         """A scene that opens one item names it by `item` + `$rk`, never by a number that is true
-        on one server only. These are the triggers whose value carries a ratingKey."""
+        on one server only. These are the triggers whose value carries an item id."""
         takes_rk = ("butaca-detail", "butaca-collection", "butaca-play", "butaca-navosc",
                     "butaca-pushbench", "butaca-modalbench", "butaca-deepbench")
         for scene in _manifest()["fps_scenes"]:
@@ -1548,7 +1501,7 @@ class LoadManifest(unittest.TestCase):
     def test_bracketed_items_are_no_longer_fatal(self):
         """The exact shape of an untouched `cp` of the example."""
         keys = self._all_keys()
-        self._load(_overlay({k: "<ratingKey>" for k in keys}))  # must not raise
+        self._load(_overlay({k: "<item id>" for k in keys}))  # must not raise
 
     @staticmethod
     def _all_keys():
@@ -1729,7 +1682,7 @@ class PipelineTier(unittest.TestCase):
 
     def test_pos_climb_has_no_timeline_fallback(self):
         """`a_timeline_climb` falls back to the 10 s /:/timeline series. That reporter is never
-        spawned here (no ratingKey), so accepting its absence would make a broken assertion read as
+        spawned here (no item id), so accepting its absence would make a broken assertion read as
         a pass. Pin that the pipeline one refuses a log carrying only timeline lines."""
         timeline_only = ["timeline playing t=10s/60s", "timeline playing t=20s/60s"]
         self.assertTrue(run.a_timeline_climb(timeline_only, 8)[0], "the server one still folds back")
@@ -4951,18 +4904,15 @@ class FpsRunToken(unittest.TestCase):
     the plain `./tests/run.py --fps` used to skip it and boot every route scene to QR sign-in."""
 
     def test_a_route_scene_alone_needs_the_token(self):
-        self.assertTrue(run.fps_run_needs_token([{"route": "home"}], False))
+        self.assertTrue(run.fps_run_needs_token([{"route": "home"}]))
 
     def test_the_login_spinner_alone_does_not(self):
         # ... whichever tier flag selected it: `--fps-player --filter login-spinner` must not
         # demand a config.local.h for a scene that boots to QR sign-in on purpose
-        self.assertFalse(run.fps_run_needs_token([{"route": "login"}], False))
+        self.assertFalse(run.fps_run_needs_token([{"route": "login"}]))
 
     def test_a_player_scene_answers_through_its_route(self):
-        self.assertTrue(run.fps_run_needs_token([{"route": "login"}, {"route": "player"}], False))
-
-    def test_a_shared_server_still_forces_it(self):
-        self.assertTrue(run.fps_run_needs_token([{"route": "login"}], True))
+        self.assertTrue(run.fps_run_needs_token([{"route": "login"}, {"route": "player"}]))
 
 
 
