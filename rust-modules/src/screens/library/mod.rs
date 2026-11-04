@@ -35,7 +35,7 @@ use crate::screens::registry::{
     LibraryReq, LibrarySectionIdentity, LibraryViewport, PageMemory,
 };
 use crate::stores::{StoreCmd, StoreId, StoreWork};
-use crate::stores::browse::{BrowseCmd, LibraryWork, SectionAddress};
+use crate::stores::browse::{BrowseCmd, HubsId, LibraryWork, SectionAddress};
 use crate::ui::card_row::{CardRow, RowStyle};
 use crate::ui::consts::{MARGIN_X, SCR_W, SCR_H, K_SCROLL, CARD_DY};
 use crate::ui::frame::Budget;
@@ -156,7 +156,7 @@ pub(crate) struct LibraryScreen {
     epoch: Option<u32>,
     query: Option<u32>,
     grid_reset_pending: bool,
-    shelf_publication: Option<(crate::browse::section_hubs::HubsId, u64)>,
+    shelf_publication: Option<(HubsId, u64)>,
     layout: Layout,
     target_layout: Layout,
     scroll: Spring,
@@ -381,7 +381,14 @@ impl LibraryScreen {
         if self.shelf_publication != publication {
             let mut old = std::mem::take(&mut self.shelves);
             if let Some(section) = &identity {
-                for (index, shelf) in hubs.shelves().iter().take(MAX_SHELVES).enumerate() {
+                // `section.key` is the synthetic view key, the hub id carries the Jellyfin GUID.
+                let wanted = crate::jellyfin::browse::view_for_key(section.key)
+                    .map(|guid| format!("jf.latest.{guid}"));
+                for (index, shelf) in hubs.shelves().iter().enumerate() {
+                    // Catalog shelves carry a `jf.latest.<view id>` id: keep only this section's.
+                    // Continue Watching has no view, and test seeds use free-form ids.
+                    if shelf.id.starts_with("jf.latest.") && Some(shelf.id.as_str()) != wanted.as_deref() { continue; }
+                    if self.shelves.len() >= MAX_SHELVES { break; }
                     let group = GroupId(self.keys.register(
                         LibraryIdentity::Control { section: section.clone(), kind: "shelf-group".into(), key: shelf.id.clone() },
                         GroupId(0), index));
@@ -535,7 +542,7 @@ impl LibraryScreen {
         if let Some(index) = self.pair.detail.index_of(key.elem) { return H::listing(cx).item(index); }
         let (row, col) = self.shelves.iter().enumerate().find_map(|(row, shelf)|
             shelf.elems.iter().position(|elem| *elem == key.elem).map(|col| (row, col)))?;
-        H::section_hubs(cx).shelves().get(row)?.items.get(col)
+        H::section_hubs(cx).shelves().iter().find(|s| s.id == self.shelves[row].id)?.items.get(col)
     }
 
     pub(crate) fn grid_position(&self, focus: Option<FocusKey<u32>>) -> Option<(usize, usize)> {
@@ -576,7 +583,9 @@ impl LibraryScreen {
 
     fn from_deck<H: LibraryLike>(&self, elem: u32, cx: &Cx<'_, H>) -> bool {
         self.shelves.iter().position(|row| row.elems.contains(&elem))
-            .and_then(|row| H::section_hubs(cx).shelves().get(row)).is_some_and(|row| row.is_continue)
+            .and_then(|row| self.shelves.get(row))
+            .and_then(|row| H::section_hubs(cx).shelves().iter().find(|s| s.id == row.id))
+            .is_some_and(|shelf| shelf.is_continue)
     }
 
     fn activate<H: LibraryLike>(&mut self, elem: u32, held: bool, cx: &Cx<'_, H>, fx: &mut Effects<'_, H>) -> Handled {

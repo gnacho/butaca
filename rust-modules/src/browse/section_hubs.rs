@@ -138,6 +138,42 @@ impl HubsSnapshot {
             revision: self.revision,
         }
     }
+
+    /// The Library's shelves, read off the Home catalog. Since the server browse arm went (#166)
+    /// the catalog is the only owner of hub data left, so the publication this screen renders is a
+    /// projection of it rather than a second fetch. Items are cloned once per catalog generation,
+    /// never per frame: the caller stores the result and compares revisions.
+    ///
+    /// The projection publishes whatever the catalog holds right now, including nothing. The
+    /// catalog carries its own load state, and a screen that waited on its own first-paint window
+    /// here would hold itself at black for shelves nobody asked for.
+    pub(crate) fn projected(hubs: crate::catalog::HubsView<'_>) -> Self {
+        let mut shelves = Vec::with_capacity(hubs.hub_count());
+        for index in 0..hubs.hub_count() {
+            let Some(hub) = hubs.hub(index) else { continue };
+            let (id, key, is_continue) = match hub.identity {
+                Some(crate::catalog::HubIdentity::ContinueWatching) =>
+                    ("home.continue".to_string(), String::new(), true),
+                Some(crate::catalog::HubIdentity::Identifier { id, key, .. }) =>
+                    (id.to_string(), key.to_string(), false),
+                Some(crate::catalog::HubIdentity::Key { key, .. }) =>
+                    (key.to_string(), key.to_string(), false),
+                None => (format!("hub-{index}"), String::new(), false),
+            };
+            shelves.push(Shelf {
+                id, key, total: hub.items.len(), title: hub.title.to_string(),
+                is_continue, landscape: false, items: hub.items.to_vec(),
+            });
+        }
+        Self {
+            data: Some(Arc::new(shelves)),
+            // The catalog owns no section id. The projection carries a stand-in section so the
+            // publication keeps a stable identity and `sync` can tell one generation from the next.
+            id: Some(HubsId { epoch: hubs.generation, sid: ServerId::from_raw(0), section: 0 }),
+            publication: Publication::Committed,
+            revision: Some(u64::from(hubs.generation)),
+        }
+    }
 }
 
 /// A frame-borrowed read of one retained publication. Absence is explicit in [`HubsView::id`];
