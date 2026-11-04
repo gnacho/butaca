@@ -3149,8 +3149,7 @@ mod tests {
         // (`request_seek` arms it; only a pump pass or a `reset_session` clears it), and the
         // route's refusal flags, and the hostsim engine tests drive the real pump — which stores
         // `Error` on a refused Load/Play — without restoring it. Establish the state this test
-        // asserts about, and hand back whatever was there
-        // (see `[[test-suite-global-pollution]]`).
+        // asserts about, and hand back whatever was there.
         let prev = crate::player::swap_state_for_test(crate::player::PlaybackState::Idle);
         let prev_seeking = crate::player::swap_seeking_for_test(false);
         crate::route::clear_play_verdict_for_test(&mut ps);
