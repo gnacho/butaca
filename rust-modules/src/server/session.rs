@@ -1,7 +1,7 @@
 //! Persisted login session — what makes the client **offline-first**. After the one-time online
 //! login (account token → server discovery → profile switch), the chosen server's verified
 //! [`Origin`] and the profile's token are written here. A stable build can therefore resume a
-//! stored HTTPS origin without plex.tv when it remains reachable; an explicit developer-trigger
+//! stored HTTPS origin without the account service when it remains reachable. An explicit
 //! build may also resume a plaintext HTTP origin for lab use. Lives in the writable app dir (device-only; never in the
 //! repo). The token fields are secrets — this file's contents are never logged.
 //!
@@ -96,7 +96,7 @@ impl ProfilePublisher {
         }
     }
     pub(crate) fn publish(&mut self, user: Option<UserRef>, generation: u32) {
-        // The plex.tv audio-preference warm hook went with the account surface; publication is
+        // The account-service audio-preference warm hook went with that surface. Publication is
         // the plain profile swap now.
         self.publish_with(user, generation, |_, _| {});
     }
@@ -127,7 +127,7 @@ pub(crate) fn publish_profile_for_test(user: Option<UserRef>, generation: u32) {
     let mt = unsafe { crate::task::MainThread::assume() };
     ProfilePublisher::new(&mt).publish(user, generation);
 }
-/// The active profile (name + avatar), if any. Empty title = the owner with no Plex Home selection.
+/// The active profile (name + avatar), if any. Empty title = the owner with no profile selected.
 pub fn current() -> Option<UserRef> {
     current_snapshot().user.clone()
 }
@@ -141,7 +141,7 @@ pub fn current_gen() -> u32 {
 /// of two jail profiles by install prefix, and they disagree about which directories are writable,
 /// so the one hardcoded path was correct under Developer Mode and did not exist under a Homebrew
 /// Channel install — where `save()` then dropped the error and the user re-did the QR sign-in on
-/// every boot, with a fresh `X-Plex-Client-Identifier` each time.
+/// every boot, with a fresh client identifier each time.
 ///
 /// The first entry is still deliberately OUTSIDE the app install dir: appinstalld replaces
 /// `applications/com.butaca/` wholesale on every ipk (re)install, which silently signed the
@@ -357,19 +357,20 @@ pub struct Session {
     /// did before localization — committed replay initials and the owner digest included.
     #[serde(default, skip_serializing_if = "crate::i18n::Preference::is_system")]
     pub(crate) language: crate::i18n::Preference,
-    /// Stable `X-Plex-Client-Identifier` — generated once, reused forever (plex.tv binds the pin
-    /// and the authorized-device entry to it).
+    /// Stable client identifier - generated once, reused forever. The retired account service
+    /// bound the pin and the authorized-device entry to it.
     #[serde(default)]
     pub client_id: String,
-    /// plex.tv account token (for online: re-discovery, home-users, switch). Not used for PMS.
+    /// Account-service credential (re-discovery, profile roster, switch). Not used for the
+    /// server, which takes the per-profile token.
     #[serde(default)]
     pub account_token: String,
     #[serde(default)]
     pub server: ServerRef,
     #[serde(default)]
     pub user: UserRef,
-    /// The Plex Home roster as of the last successful fetch — lets the who's-watching picker
-    /// render instantly on every boot (and offline) instead of waiting on a plex.tv round-trip.
+    /// The profile roster as of the last successful fetch - lets the who's-watching picker
+    /// render instantly on every boot (and offline) instead of waiting on the account service.
     ///
     /// Soft-parsed for the same reason [`Session::sources`] is: one managed user whose stored
     /// `thumb` came back as a JSON `null` would otherwise fail the whole `Session` and sign the
@@ -410,7 +411,7 @@ pub struct Session {
     ///
     /// **Keyed by PROFILE, and that is the whole point of the shape.** They lived here as a bare
     /// `Vec<String>` for one commit, which made them the account's rather than the person's — so
-    /// after a Plex Home switch the next person's empty search screen offered back what the
+    /// after a profile switch the next person's empty search screen offered back what the
     /// previous one had looked for. A search history is about as personal as watch state, which
     /// this product already scopes per user, and a shared television is exactly where that
     /// matters.
@@ -472,9 +473,9 @@ pub struct Session {
     #[serde(default, deserialize_with = "de_soft_vec", skip_serializing_if = "Vec::is_empty")]
     pub series_tracks: Vec<SeriesTracks>,
     /// **Every profile this television has switched to, with the credentials that switch
-    /// resolved** — so the who's-watching picker can seat a household member with plex.tv
-    /// unreachable. Written by the profile switch on every ONLINE success (replace-by-uuid), read
-    /// by [`crate::auth`]'s offline fallback, and gone with the file on sign-out.
+    /// resolved** - so the who's-watching picker can seat a household member with the account
+    /// service unreachable. Written on every ONLINE switch success (replace-by-uuid), read by
+    /// [`crate::auth`]'s offline fallback, and gone with the file on sign-out.
     ///
     /// It exists because the offline design's first cut let only the already-active, PIN-free
     /// profile through without a network, and the first real outage (2026-09-06) showed what that
@@ -573,7 +574,7 @@ pub struct Session {
     /// entry — and an entry that cannot be read is "never asked", the closed direction.
     #[serde(default, deserialize_with = "de_soft_vec")]
     pub(crate) plaintext_consent: Vec<PlaintextConsent>,
-    /// Plex Pass per-track transcoder DSP preference (issue #266): dialog boost / loudness
+    /// Per-track transcoder DSP preference (issue #266): dialog boost / loudness
     /// normalization. `NONE` by default and skipped on write while `NONE`, so every session
     /// persisted before the field existed — and every viewer who never opted in — round-trips
     /// byte-identical to what it wrote before. Restored into `player::audio_enhancements` at boot
@@ -919,7 +920,7 @@ pub(crate) fn set_subtitle_tone(tone: SubtitleTone) -> bool {
     })
 }
 
-/// Persist the Plex Pass audio-DSP preference (issue #266) through [`update`], merging with the
+/// Persist the audio-DSP preference (issue #266) through [`update`], merging with the
 /// current disk record — the same door as [`set_subtitle_tone`].
 pub(crate) fn set_audio_enhancements(enhancements: crate::playback::AudioEnhancements) -> bool {
     update(|cur| {
@@ -1061,7 +1062,7 @@ impl SubtitleTone {
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 #[serde(default)]
 pub struct RecentSearches {
-    /// The Plex Home user's `uuid`, or **empty for the account owner** with no Home selection.
+    /// The roster profile's `uuid`, or **empty for the account owner** with no profile selected.
     /// `uuid` and not `id`, because it is the identity that survives a roster refetch.
     ///
     /// This used to cite [`SourceRef`]'s handle as the same "empty means the owner" convention. It
@@ -1084,8 +1085,9 @@ pub struct RecentSearches {
 #[derive(Serialize, Deserialize, Default, Clone)]
 #[serde(default)]
 pub struct HomeUserRef {
-    /// This member's plex.tv **account id** (`/api/v2/home/users[].id`) — the identity the
-    /// "Shared by …" rule used to grade against, and the reason it is here at all.
+    /// This member's **account id** (`/api/v2/home/users[].id` where the account service used to
+    /// report it) - the identity the "Shared by …" rule used to grade against, and the reason it
+    /// is here at all.
     /// It is the SAME id space as `account::Resource::owner_id`: the admin's row carries the id
     /// `/api/v2/user` reports for the account itself (measured 2026-09-03 on the dev account), so
     /// "does this server's owner live in this house" is an integer comparison rather than a
@@ -1113,17 +1115,17 @@ pub struct ProfileCreds {
     pub server: ServerRef,
     #[serde(deserialize_with = "de_soft_vec")]
     pub sources: Vec<SourceRef>,
-    /// Present for a protected profile: the PIN plex.tv accepted at the last online switch, as a
-    /// verifier. Absent for an unprotected profile - and absent for a protected one whose last
-    /// switch predates this field, which the loader treats as "cannot verify",
-    /// never as "no PIN".
+    /// Present for a protected profile: the PIN the account service accepted at the last online
+    /// switch, as a verifier. Absent for an unprotected profile, and for a protected one whose
+    /// last switch predates this field, which the loader treats as "cannot verify", never as
+    /// "no PIN".
     pub pin: Option<PinVerifier>,
     #[serde(flatten, default, skip_serializing_if = "OpaqueExtensions::is_empty")]
     pub(crate) extensions: OpaqueExtensions,
 
 }
 
-/// A Plex Home PIN as something a PIN can be checked against, never the PIN: PBKDF2-HMAC-SHA-256
+/// A profile PIN as something a PIN can be checked against, never the PIN: PBKDF2-HMAC-SHA-256
 /// over a random 16-byte salt ([`crate::sha256`]).
 ///
 /// **What it does and does not protect.** A four-digit PIN has ten thousand values, so nothing
@@ -1228,7 +1230,7 @@ pub struct ServerRef {
     pub machine_id: String,
     /// The dotted quad (or v6 literal, or hostname) discovery recorded. The LEGACY fallback for a
     /// file with no `origin` — see [`ServerRef::origin`] — and, since 2026-09-05, **the DNS
-    /// answer for a `plex.direct` origin**: [`ServerRef::resolve_pin`] dials the name at this
+    /// answer for a public wildcard name**: [`ServerRef::resolve_pin`] dials the name at this
     /// address when the name encodes it, which is what lets a stored session reach the household's
     /// own server with the internet down.
     pub address: String,
@@ -1244,7 +1246,7 @@ pub struct ServerRef {
     /// [`ServerRef::origin`] has a fallback rather than an `Option`.
     ///
     /// It is a serialized [`Origin`] and not a `scheme` beside `address` because the two are not
-    /// interchangeable: the host a TLS certificate is issued for is the `plex.direct` NAME, which
+    /// interchangeable: the host a TLS certificate is issued for is the public wildcard NAME, which
     /// `address` never holds (`origin.rs`). Storing the URL keeps the file legible to a human
     /// editing it on the television, which the struct-shaped alternative does not.
     ///
@@ -1293,29 +1295,30 @@ pub struct SourceRef {
     pub name: String,
     /// **The CREDIT** — whom to name, empty when there is nobody to name. It is
     /// [`super::servers::owner_credit`]'s answer, decided once at ingest (`auth::credit_of`), and
-    /// deliberately NOT the raw `sourceTitle` it used to be: plex.tv puts the Plex Home ADMIN's
-    /// handle here for a managed profile's own household server, so the raw field named the person
-    /// watching. Empty therefore covers three cases and the UI treats them alike — our own server,
-    /// the household's, and a share plex.tv did not name.
+    /// deliberately NOT the raw `sourceTitle` it used to be: the account service put the household
+    /// ADMIN's handle here for a managed profile's own household server, so the raw field named the
+    /// person watching. Empty therefore covers three cases and the UI treats them alike - our own
+    /// server, the household's, and a share the account service did not name.
     ///
     /// The one string the browsing UI ever says about a source: "Shared by friend".
     pub shared_by: String,
     /// False ⇒ shared with us. A preference (ours sorts first, ours is `current`), never a wall.
     ///
-    /// **It is plex.tv's wire flag, not "is this our household's server"** — those are different
-    /// questions and `false` answers both of them for a Plex Home managed profile's own household
+    /// **It is the account service's wire flag, not "is this our household's server"** - those are
+    /// different questions, and `false` answers both of them for a managed profile's own household
     /// server. [`home`](Self::home) and [`owner_id`](Self::owner_id) are carried beside it so the
-    /// second question can be asked; see [`super::servers::is_household`].
+    /// second question can be asked. See [`super::servers::is_household`].
     pub owned: bool,
-    /// plex.tv's `home` on the grant, carried verbatim — see [`super::account::Resource::home`].
+    /// The account service's `home` on the grant, carried verbatim - see
+    /// [`super::account::Resource::home`].
     ///
     /// **Absent from every file written before this field existed, and `false` is what those
     /// files mean.** Read the note on [`owner_id`](Self::owner_id) for why that default is safe:
     /// the two fields are one decision.
     #[serde(default)]
     pub home: bool,
-    /// plex.tv's `ownerId` on the grant, carried verbatim: the account that owns the server, `0`
-    /// on our own and `0` when plex.tv named nobody.
+    /// The account service's `ownerId` on the grant, carried verbatim: the account that owns the
+    /// server, `0` on our own and `0` when the account service named nobody.
     ///
     /// **The legacy default is the whole reason this doc sentence exists.** A `SourceRef`
     /// deserialized from a file written before these two fields came back `home:false,
@@ -1334,7 +1337,7 @@ pub struct SourceRef {
     ///
     /// **What [`SourceRef::describe`] prints, the LEGACY fallback, and the resolve pin's address.**
     /// A connection is built from [`SourceRef::origin`], and for an https server the two genuinely
-    /// differ (`origin.rs`) — but when the origin's `plex.direct` name encodes this very address,
+    /// differ (`origin.rs`) - but when the origin's public wildcard name encodes this very address,
     /// [`SourceRef::resolve_pin`] hands it to the transport as the name's resolution, so the
     /// origin is dialled with no resolver at all (the offline case).
     pub address: String,
@@ -1363,10 +1366,11 @@ impl SourceRef {
     /// the file we ask users to send us.
     #[cfg_attr(not(test), expect(dead_code))]
     pub fn describe(&self) -> String {
-        // Three states, not two: `owned` is plex.tv's flag about this ACCOUNT, and a source that is
-        // not ours may still credit nobody — the household's own server seen by a managed profile,
-        // or a share plex.tv never named. That case used to print the dangling `shared by ` with
-        // the name missing, which reads as a bug in the logger rather than as the fact it is.
+        // Three states, not two: `owned` is the account service's flag about this ACCOUNT, and a
+        // source that is not ours may still credit nobody - the household's own server seen by a
+        // managed profile, or a share the account service never named. That case used to print the
+        // dangling `shared by ` with the name missing, which reads as a bug in the logger rather
+        // than as the fact it is.
         let who = if self.owned {
             "ours".to_string()
         } else if self.shared_by.is_empty() {
@@ -1434,9 +1438,9 @@ pub(crate) enum PlaintextChoice {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PlaintextConsent {
     pub machine_id: String,
-    /// The account that answered - `grant::account_key`, the roster admin's stable plex.tv
-    /// id, or the legacy token fingerprint when that id is unavailable. An entry is honoured only
-    /// while that account is signed in; one with no account (or another's) reads as never asked.
+    /// The account that answered - `grant::account_key`, the roster admin's stable account id,
+    /// or the legacy token fingerprint when that id is unavailable. An entry is honoured only
+    /// while that account is signed in. One with no account (or another's) reads as never asked.
     #[serde(default)]
     pub account: String,
     pub choice: PlaintextChoice,
@@ -1448,7 +1452,7 @@ pub(crate) struct PlaintextConsent {
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 #[serde(default)]
 pub struct LastLibrary {
-    /// The Plex Home user's `uuid`, or **empty for the account owner** with no Home selection —
+    /// The roster profile's `uuid`, or **empty for the account owner** with no profile selected -
     /// the same convention [`HomePins`] and [`RecentSearches`] use, and for the same reason.
     pub user: String,
     pub libs: Vec<TypedLib>,
@@ -1528,7 +1532,7 @@ impl Session {
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 #[serde(default)]
 pub struct LibrarySorts {
-    /// The Plex Home user's `uuid`, or **empty for the account owner** — [`LastLibrary`]'s
+    /// The roster profile's `uuid`, or **empty for the account owner** - [`LastLibrary`]'s
     /// convention, and for the same reason.
     pub user: String,
     /// Oldest first: [`LibrarySorts::set`] moves a re-sorted library to the end, and the cap
@@ -1619,7 +1623,7 @@ impl LibrarySorts {
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq)]
 #[serde(default)]
 pub struct HomePins {
-    /// The Plex Home user's `uuid`, or **empty for the account owner** with no Home selection —
+    /// The roster profile's `uuid`, or **empty for the account owner** with no profile selected -
     /// the same convention [`RecentSearches`] uses, and for the same reason: `uuid` and not `id`,
     /// because it is the identity that survives a roster refetch. A profile is keyed by something
     /// durable, never by its position in the roster, which reshuffles.
@@ -1963,7 +1967,7 @@ impl Session {
         }
         !self.server.address.is_empty() && super::probe::dial_port(self.server.port).is_some()
     }
-    /// The token PMS calls use: the switched managed-user token if we have one, else the server
+    /// The token server requests use: the switched profile token if we have one, else the server
     /// access token (owner).
     ///
     /// **This is the PRIMARY server's token and no other's.** A share is a separate authority and
@@ -1979,22 +1983,23 @@ impl Session {
     #[cfg_attr(not(test), expect(dead_code))]
     /// **Is the profile currently watching the one [`Session::account_token`] belongs to?**
     ///
-    /// That token is the account OWNER's (the Plex Home admin's). It is written once, by the QR
-    /// sign-in, and a profile switch never replaces it. The switched user's plex.tv credential is
-    /// retained separately on [`UserRef::account_token`]. Anything asked of the account service with the
-    /// session account token is answered ABOUT THE OWNER: every `accessToken` that comes back is the owner's
-    /// per-(user, server) grant, and a restricted profile's answer would have been a shorter list.
+    /// That token is the account OWNER's (the roster admin's). It is written once, by the QR
+    /// sign-in, and a profile switch never replaces it. The switched user's account credential
+    /// is retained separately on [`UserRef::account_token`]. Anything asked of the account
+    /// service with the session account token is answered ABOUT THE OWNER: every `accessToken`
+    /// that comes back is the owner's per-(user, server) grant, and a restricted profile's answer
+    /// would have been a shorter list.
     /// A caller that installs those tokens while somebody else is watching has swapped identities
     /// under them, which is why this exists as a gate rather than as a display fact.
     ///
-    /// `true` for the owner with or without Plex Home; `false` for a managed profile — **and false
-    /// when the roster cannot say.** "We cannot prove this is the owner" and "this is the owner"
-    /// must not be one value on a question whose wrong answer is another identity's credentials:
-    /// `home_users` is empty for "never fetched" as well as for "no Plex Home"
+    /// `true` for the owner with or without a profile roster, `false` for a managed profile - **and
+    /// false when the roster cannot say.** "We cannot prove this is the owner" and "this is the
+    /// owner" must not be one value on a question whose wrong answer is another identity's
+    /// credentials: `home_users` is empty for "never fetched" as well as for "no profile roster"
     /// (see [`Session::account`]), so the two are only told apart by a uuid actually being set.
     pub fn active_profile_is_admin(&self) -> bool {
         if self.user.uuid.is_empty() {
-            // No Plex Home selection was ever made, so there is no managed profile to be: auth's
+            // No roster profile was ever selected, so there is no managed profile to be: auth's
             // single-user path enters Home on the owner's own server token without writing one.
             return true;
         }
@@ -2005,21 +2010,21 @@ impl Session {
             .unwrap_or(false)
     }
 
-    /// The plex.tv account id of the owner, from the roster's admin row. Unlike [`UserRef::id`],
+    /// The account id of the owner, from the roster's admin row. Unlike [`UserRef::id`],
     /// this does not change when a managed profile is selected. Zero means an old session did not
     /// persist the id, so callers keep their token-based fallback.
     pub(crate) fn owner_identity(&self) -> Option<i64> {
         self.home_users.iter().find(|u| u.admin && u.id != 0).map(|u| u.id)
     }
 
-    /// **Everyone in this house, as plex.tv account ids** — the input to
+    /// **Everyone in this house, as account ids** - the input to
     /// [`super::servers::is_household`] and so to the one "Shared by …" rule: a server whose
     /// `ownerId` is in here belongs to the household and credits nobody.
     ///
-    /// **The Plex Home ROSTER and nothing else, so that an empty answer means exactly one thing:
-    /// the roster could not answer.** The rule leans on that — it falls back to plex.tv's
-    /// undocumented `home` flag precisely when this list is empty — so anything else in here would
-    /// be an id that silences the fallback without being able to replace it.
+    /// **The profile ROSTER and nothing else, so that an empty answer means exactly one thing:
+    /// the roster could not answer.** The rule leans on that - it falls back to the account
+    /// service's undocumented `home` flag precisely when this list is empty - so anything else
+    /// in here would be an id that silences the fallback without being able to replace it.
     ///
     /// [`UserRef::id`], the WATCHING profile's own id, is therefore deliberately NOT included, and
     /// it took a review to see why it must not be. It looks free (a server owned by the person
@@ -2032,8 +2037,9 @@ impl Session {
     ///
     /// **An empty answer means "we cannot enumerate the house", never "the house is empty"** —
     /// exactly the trap [`Session::active_profile_is_admin`] documents one function up, and it
-    /// falls the same way: an id we do not hold matches nothing, so the rule degrades to plex.tv's
-    /// own `owned`/`home` flags rather than to a confident wrong answer about somebody's server.
+    /// falls the same way: an id we do not hold matches nothing, so the rule degrades to the
+    /// account service's `owned`/`home` flags rather than to a confident wrong answer about
+    /// somebody's server.
     /// `0` is filtered because it is the "no id" value on both sides of the comparison — an entry
     /// from a file written before [`HomeUserRef::id`] existed, and `Resource::ownerId` on our own
     /// server — and letting those two zeroes meet would credit-suppress by accident.
@@ -2049,9 +2055,10 @@ impl Session {
     ///
     /// The other flag on the same roster row as [`Session::active_profile_is_admin`], read for the
     /// one question the boot who's-watching picker has to answer: may BACK out of it silently
-    /// reinstate what is on disk? A PIN-protected profile is one plex.tv validates a code for on
-    /// every switch (`auth::submit_pin` → `AccountClient::switch_user`), so resuming it without
-    /// one hands out precisely the session the PIN exists to gate — see [`crate::auth::cancel`].
+    /// reinstate what is on disk? A PIN-protected profile is one whose code the retired online
+    /// switch validated (`auth::submit_pin` → `AccountClient::switch_user`), so resuming it
+    /// without one hands out precisely the session the PIN exists to gate - see
+    /// [`crate::auth::cancel`].
     ///
     /// It answers the OPPOSITE way to `active_profile_is_admin` when the roster cannot say, and
     /// for the same reason: on each question, "we cannot prove it" must land on the side whose
@@ -2125,8 +2132,8 @@ impl Session {
     }
 }
 
-/// Which profile's history is in play: the active Plex Home user's `uuid`, or `""` for the owner
-/// with no Home selection. One accessor, so the reader and the writer cannot key on different
+/// Which profile's history is in play: the active roster profile's `uuid`, or `""` for the owner
+/// with no profile selected. One accessor, so the reader and the writer cannot key on different
 /// things — which would look exactly like the leak this scoping exists to prevent.
 pub fn current_profile_key() -> String {
     current().map(|u| u.uuid).unwrap_or_default()
@@ -3194,7 +3201,7 @@ fn publish_identities(s: &Session) {
         v.push(src.machine_id.clone());
         v.push(src.shared_by.clone());
         // The origin's HOST too: a share reached through a custom access URL carries the friend's
-        // own domain, which is neither a `plex.direct` label nor a bare address — the two shapes
+        // own domain, which is neither a public wildcard label nor a bare address - the two shapes
         // the scrubber recognises on its own — and it surfaced verbatim in a `stream: … DNS
         // FAILED host=…` line on 2026-09-06.
         if let Some(o) = src.origin() {
@@ -4523,8 +4530,8 @@ fn retire_session_candidate(path: &std::path::Path) -> bool {
     }
 }
 
-/// A v4-ish UUID from `/dev/urandom` (no `uuid` crate). Only uniqueness/stability matter — plex.tv
-/// just needs a value it can key the device on.
+/// A v4-ish UUID from `/dev/urandom` (no `uuid` crate). Only uniqueness/stability matter - the
+/// account service just needed a value it could key the device on.
 pub(crate) fn new_client_id() -> String {
     client_id_from_entropy(random_bytes())
 }
@@ -4542,16 +4549,16 @@ pub(crate) fn client_id_from_entropy(mut b: [u8; 16]) -> String {
 
 /// The account facts the UI may state — see [`Session::account`]. An account surface must word
 /// itself from THIS, never from [`current`] alone: that profile is a bare `UserRef::default()` —
-/// empty title, empty thumb — for every account **without Plex Home**, because auth's single-user
-/// path enters Home without ever writing one. Reading that emptiness as "signed out" is how a
-/// signed-in owner ends up being offered "Sign in".
+/// empty title, empty thumb - for every account **without a profile roster**, because auth's
+/// single-user path enters Home without ever writing one. Reading that emptiness as "signed out"
+/// is how a signed-in owner ends up being offered "Sign in".
 ///
 /// Converted: `screens/account_menu.rs`, and — since 2026-08-23 — the shared top bar's profile chip
 /// (`ui/widgets.rs` `profile_chip`), which was the remaining half of the bug. Both now word
 /// themselves through ONE resolver, `screens::account_menu::chip_label`, so the chip and the menu it
 /// opens cannot disagree about the same account again.
 pub struct Account {
-    /// **This device** holds a session: a plex.tv account token, or at least a server + PMS token
+    /// **This device** holds a session: an account token, or at least a server + server token
     /// it can stream on. The opposite of "offer them Sign in". Note it describes the session ON
     /// DISK, not the identity currently in use: an automated boot on `/tmp/butaca-token` streams
     /// on an injected token yet still reports the stored account here — deliberately, because the
@@ -4566,7 +4573,7 @@ pub struct Account {
 impl Session {
     /// The account facts for the UI, from the persisted session plus the in-memory active profile
     /// (`active`, i.e. [`current`]). The profile is the better name once a managed user has been
-    /// picked; the persisted roster's `admin` entry is what names an owner who has no Plex Home
+    /// picked, the persisted roster's `admin` entry is what names an owner who has no profiles
     /// and therefore never got a profile written at all.
     ///
     /// **`home_users` being empty means "unknown", not "none".** It is only ever filled by a
@@ -4591,7 +4598,7 @@ impl Session {
             .or_else(|| named(&self.user.title))
             .or_else(roster);
         // The Jellyfin flavor: this app only reaches Home WITH a signed-in Jellyfin client, and
-        // no Plex session ever exists to name it. The account facts come from the installed
+        // no account session exists to name it. The account facts come from the installed
         // client itself, so a signed-in user sees their name, never "Sign in".
         if let Some(client) = crate::jellyfin::client() {
             if let Some(name) = client.user_name() {
@@ -4850,7 +4857,7 @@ mod series_tracks_tests {
     }
 }
 
-/// Issue #266 (PR1): `Session::audio_enhancements` — the persisted Plex Pass DSP preference.
+/// Issue #266 (PR1): `Session::audio_enhancements` - the persisted DSP preference.
 /// This PR never sets a toggle on from any production code path; these tests establish the
 /// field's own contract in isolation (soft-parse, omit-when-NONE, round-trip) so a later PR's
 /// offering policy has a settled place to write into.
