@@ -81,14 +81,13 @@
 //! synchronous resolver libcurl cannot honour a timeout during name resolution, and pre-resolving
 //! would have sidestepped that. Nothing measured that as needed, and it still has not been.
 //!
-//! What DID need it is offline play. plex.tv advertises the household's own server as an
-//! `https://…plex.direct` name that only public DNS resolves, so a LAN with its uplink down could
-//! not reach a server one hop away. `CurlSource::open*` now asks `net::resolve` for a pin by the
-//! URL's host and port — recorded by the registry from the address plex.tv advertised beside the
-//! name, validated in `server::origin::ResolvePin` — and applies it as ONE `CURLOPT_RESOLVE` entry
-//! on every easy handle it attaches. The hostname stays in the URL, so SNI and certificate
-//! identity are untouched; libcurl simply never resolves it. There is no `getaddrinfo` here: the
-//! address comes from plex.tv, never from a resolver of ours, so the second-resolution-path
+//! What DID need it is offline play. A server named through a public wildcard zone could not be
+//! reached on a LAN whose uplink was down, although it was one hop away, so `CurlSource::open*`
+//! asks `net::resolve` for a pin by the URL's host and port and applies it as ONE
+//! `CURLOPT_RESOLVE` entry on every easy handle it attaches. The hostname stays in the URL, so SNI
+//! and certificate identity are untouched; libcurl simply never resolves it. There is no
+//! `getaddrinfo` here: the address comes from the caller's own record, never from a resolver of
+//! ours, so the second-resolution-path
 //! objection above does not arise. The list is owned by the easy handle it was set on (see
 //! `stop`), and a libcurl that answers `CURLE_UNKNOWN_OPTION` keeps resolving names itself.
 //!
@@ -865,9 +864,9 @@ impl CurlSource {
                     return Err(OpenErr::Local);
                 }
             }
-            // TLS verification ON, both halves — the certificate is issued for the `plex.direct`
-            // NAME, which is the entire reason an Origin is parsed from a URL and never rebuilt
-            // from an address (`plex/origin.rs`). Turning either of these off would make an
+            // TLS verification ON, both halves — the certificate is issued for the NAME, which is
+            // the entire reason an Origin is parsed from a URL and never rebuilt from an address
+            // (`crate::origin`). Turning either of these off would make an
             // https URL "work" against the wrong server.
             require_setopt!(
                 crate::net::curl_easy_setopt_long(easy, CURLOPT_SSL_VERIFYPEER, 1),

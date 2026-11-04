@@ -452,10 +452,10 @@ fn plaintext(
 /// sequential connect setting (subject to the synchronous-resolver caveat in the module doc).
 ///
 /// `pin`, when the origin has one, is handed to `net` as a ready `CURLOPT_RESOLVE` entry, so the
-/// `plex.direct` name is dialled at the address plex.tv advertised beside it and no resolver is
-/// consulted — the whole of offline mode, from this layer's point of view. A pin for a DIFFERENT
-/// host than this origin's is ignored: the entry is keyed on the URL's own host, and curl would
-/// simply never match it, but refusing to send it keeps the log honest.
+/// named host is dialled at the address recorded beside it and no resolver is consulted. A pin for
+/// a DIFFERENT host than this origin's is ignored: the entry is keyed on the URL's own host, and
+/// curl would simply never match it, but refusing to send it keeps the log honest. No product
+/// caller passes one since the pinned-name path went with the wire layer (#166).
 fn tls(
     origin: &Origin,
     path: &str,

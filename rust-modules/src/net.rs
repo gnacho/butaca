@@ -1325,12 +1325,14 @@ pub(crate) fn refuse_name(host: &str, connect_s: c_long) -> bool {
 
 /// **Resolve pins — the DNS answers this process already knows.**
 ///
-/// A [`ResolvePin`] says "this `plex.direct` name IS this address", validated by
-/// [`ResolvePin::for_origin`] so that it is a pure function of the hostname (its doc has the
-/// rule). The control plane carries the pin on each `Client` and passes it into
-/// [`request_result`] explicitly. The media plane cannot: `ff::demux` receives a URL string and
-/// `curlio::CurlSource` builds a fresh easy handle on every open and seek, so it asks THIS table
-/// by the URL's host and port instead.
+/// A [`ResolvePin`] says "this name IS this address". The control plane used to carry the pin on
+/// each `Client` and pass it into [`request_result`] explicitly. The media plane cannot: `ff::demux`
+/// receives a URL string and `curlio::CurlSource` builds a fresh easy handle on every open and
+/// seek, so it asks THIS table by the URL's host and port instead.
+///
+/// **Nothing fills the table any more.** Writing it died with the wire layer (#166), so `lookup`
+/// answers `None` and every name falls through to DNS. What keeps the module alive is the
+/// transport tests, which drive the entry path with [`ResolvePin::for_test`].
 ///
 /// **Append-only, process-lifetime, never replaced.** A registry slot is re-pointed by publishing
 /// a new `Client` over a leaked old one, and a worker mid-stream keeps the old reference — so a
