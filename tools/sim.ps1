@@ -7,7 +7,7 @@ param(
     [string]$Distro = "Ubuntu-22.04",
     [string]$ServerHost = "",
     [ValidateRange(1, 65535)]
-    [int]$ServerPort = 32400,
+    [int]$ServerPort = 8096,
     [string]$RuntimeDir = "",
     [string]$TargetDir = "",
     [string]$AssetDir = "",
@@ -189,7 +189,7 @@ port="${BUTACA_PORT:-}"
 if [ -z "$port" ] && [ -f "$repo/src/config.local.h" ]; then
     port=$(sed -n 's/^#define[[:space:]]*SERVER_PORT[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$repo/src/config.local.h" | head -n 1 || true)
 fi
-port="${port:-32400}"
+port="${port:-8096}"
 export BUTACA_RUNTIME_DIR="$runtime"
 export BUTACA_APP_DIR="$assets"
 export BUTACA_WIN=1920x1080

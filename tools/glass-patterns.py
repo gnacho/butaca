@@ -129,7 +129,7 @@ def main():
         raise SystemExit("no simulator — run `make sim` first")
     srv, port = cfg("SERVER_HOST"), None
     m = re.search(r"^#define\s+SERVER_PORT\s+(\d+)", (REPO / "src/config.local.h").read_text(), re.M)
-    port = m.group(1) if m else "32400"
+    port = m.group(1) if m else "8096"
     if not srv:
         raise SystemExit("no SERVER_HOST in src/config.local.h")
 

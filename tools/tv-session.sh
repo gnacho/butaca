@@ -575,7 +575,11 @@ configure_direct_screen() {
   direct_kind="${screen%%=*}"
   direct_rk="${screen#*=}"
   case "$direct_rk" in
-    ''|*[!0-9]*) bad "a server-qualified ratingKey must be numeric, got: $direct_rk"; return 2 ;;
+    ''|*[!0-9a-f]*) bad "a server-qualified item id must be numeric or 32 hex digits, got: $direct_rk"; return 2 ;;
+  esac
+  case "$direct_rk" in
+    *[!0-9]*)
+      [ "${#direct_rk}" = 32 ] || { bad "a hex item id must be 32 digits, got: $direct_rk"; return 2; } ;;
   esac
 
   # A singular dev token installs only the compiled primary server. The signed-in session, on the
@@ -928,9 +932,9 @@ cmd_selftest() {
   if configure_direct_screen >/dev/null 2>&1; then
     bad "--server incorrectly accepted a non-item screen"; return 1
   fi
-  screen=player=not-a-rating-key
+  screen=player=not-an-item-id
   if configure_direct_screen >/dev/null 2>&1; then
-    bad "--server incorrectly accepted a nonnumeric ratingKey"; return 1
+    bad "--server incorrectly accepted a non-item id"; return 1
   fi
   screen=player=42; server_slot=01
   if configure_direct_screen >/dev/null 2>&1; then
@@ -1293,8 +1297,8 @@ CUT
       # over the LAN, and a public name through the router's resolver. The server host comes from
       # the gitignored config, when this checkout has one; a lane without it skips that line.
       srv=${SERVER_HOST:-$(sed -n 's/.*SERVER_HOST *"\([^"]*\)".*/\1/p' "$REPO/src/config.local.h" 2>/dev/null)}
-      [ -n "$srv" ] && info "from the TV: LAN server /identity -> $(tvq "wget -q -T 5 -O - http://$srv:32400/identity >/dev/null 2>&1 && echo ok || echo FAIL")"
-      info "from the TV: resolve plex.tv -> $(tvq "nslookup plex.tv >/dev/null 2>&1 && echo ok || echo FAIL")"
+      [ -n "$srv" ] && info "from the TV: LAN server /System/Info/Public -> $(tvq "wget -q -T 5 -O - http://$srv:8096/System/Info/Public >/dev/null 2>&1 && echo ok || echo FAIL")"
+      info "from the TV: resolve jellyfin.org -> $(tvq "nslookup jellyfin.org >/dev/null 2>&1 && echo ok || echo FAIL")"
       ;;
   esac
 }
