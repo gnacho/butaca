@@ -134,9 +134,9 @@ echo "== build-host identity =="
 # Those are TWO independent properties and this section used to conflate them, which is how the
 # one that gates everything went unverified for so long:
 #
-#   the LAN address comes from src/config.local.h, which is present on a dev machine BY DESIGN
-#   (src/app.h's __has_include falls back to YOUR_SERVER_HOST only in a clean checkout) — so those
-#   assertions genuinely can only hold in CI;
+#   the LAN address used to be compiled in from src/config.local.h through src/app.h. The binary
+#   no longer carries any server address (the app reads it from the Jellyfin config at runtime),
+#   so this gate now fails if a private IP or the old YOUR_SERVER_HOST placeholder shows up again;
 #
 #   the HOME DIRECTORY has nothing to do with config.local.h. It arrives through `-Z build-std`
 #   compiling std and every dependency from absolute paths under $RUSTUP_HOME/$CARGO_HOME, and
@@ -155,12 +155,6 @@ fi
 # every build.
 ok "no build-host paths"
 
-if [ -f src/config.local.h ] && [ "${CI:-}" != "true" ]; then
-  echo "  SKIP (private-IP + placeholder) — src/config.local.h present: a dev build, not a release."
-  echo "         (CI builds from a clean checkout, where these gate.)"
-  echo "all ELF assertions passed (config-dependent assertions skipped)"
-  exit 0
-fi
 # All alternatives include the first TWO octets. A bare `10` alternative would match
 # three-component locale/version data such as `10.11.12`, not an IPv4 address.
 # Dots also belong to the token: do not extract four components out of a longer
@@ -168,10 +162,11 @@ fi
 PRIVATE_IPV4_RE='(^|[^[:alnum:]_.])(10\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])|192\.168)\.[0-9]{1,3}\.[0-9]{1,3}($|[^[:alnum:]_.])'
 if grep -qE "$PRIVATE_IPV4_RE" "$AUDIT_TMP/strings"; then
   grep -oE "$PRIVATE_IPV4_RE" "$AUDIT_TMP/strings" | sort -u | sed -n '1,10p'
-  fail "private IP address baked into the binary — was this built with src/config.local.h present?"
+  fail "private IP address baked into the binary — the app must read its server from the Jellyfin config"
 fi
-grep -q YOUR_SERVER_HOST "$AUDIT_TMP/strings" \
-  || fail "YOUR_SERVER_HOST placeholder absent — a real SERVER_HOST was compiled in"
-ok "no private IPs, placeholder present"
+if grep -q YOUR_SERVER_HOST "$AUDIT_TMP/strings"; then
+  fail "YOUR_SERVER_HOST baked into the binary — the app must read its server from the Jellyfin config"
+fi
+ok "no private IPs, no baked server host"
 
 echo "all ELF assertions passed"

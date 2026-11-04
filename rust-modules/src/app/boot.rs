@@ -601,8 +601,6 @@ pub(super) fn activate_server_owned(
 /// `&MainThread` (which is `!Send`, so `task::spawn` rejects any closure that captured one), and
 /// the native session slot takes the adapter itself. See `task::MainThread` and `player::adapter`.
 pub(crate) unsafe fn boot(
-    server_host: *const c_char,
-    server_port: c_int,
     mt: crate::task::MainThread,
     preflight: super::bootstrap::Preflight,
     launch_params: Option<String>,
@@ -610,8 +608,7 @@ pub(crate) unsafe fn boot(
     let initial = match &preflight {
         super::bootstrap::Preflight::Live => None,
         super::bootstrap::Preflight::Record => {
-            let host = std::ffi::CStr::from_ptr(server_host).to_string_lossy();
-            match super::bootstrap::Initial::capture_home(&host, server_port) {
+            match super::bootstrap::Initial::capture_home() {
                 Ok(initial) => Some(initial),
                 Err(reason) => { log(&format!("rec: REFUSED — {reason}")); return Err(1); }
             }
@@ -619,8 +616,8 @@ pub(crate) unsafe fn boot(
         super::bootstrap::Preflight::Replay { initial, .. } => Some((initial.clone(), None)),
     };
     match initial {
-        Some((initial, deferred)) => App::from_init(initial, preflight, server_host, server_port, mt, deferred, launch_params),
-        None => construct(server_host, server_port, mt, preflight, None, None, launch_params),
+        Some((initial, deferred)) => App::from_init(initial, preflight, mt, deferred, launch_params),
+        None => construct(mt, preflight, None, None, launch_params),
     }
 }
 
@@ -635,7 +632,7 @@ pub(super) fn apply_deferred_capture(rec: &mut super::recorder::Recplay,
 }
 
 pub(crate) unsafe fn construct(
-    _server_host: *const c_char, _server_port: c_int, mt: crate::task::MainThread,
+    mt: crate::task::MainThread,
     preflight: super::bootstrap::Preflight, initial: Option<super::bootstrap::Initial>,
     deferred: Option<crate::server::session::DeferredLoad>,
     launch_params: Option<String>,

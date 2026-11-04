@@ -116,7 +116,7 @@ def main():
         print(f"  segment_profile={case['segment_profile']}")
     env = dict(os.environ, BUTACA_RUNTIME_DIR=root,
                BUTACA_APP_DIR=os.path.join(REPO, "pkg"), BUTACA_WIN="640x360")
-    proc = subprocess.Popen([SIM_BIN, "127.0.0.1", "32400"], env=env,
+    proc = subprocess.Popen([SIM_BIN], env=env,
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         proc.wait(timeout=secs)

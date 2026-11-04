@@ -1482,29 +1482,13 @@ def _parsed(pattern, fields, lines, numeric=True):
 # shared token bucket, live-switchable under an open transfer — and this is its lifecycle.
 #
 # **The binary decides whether any of this is reachable, and the harness can only read that.**
-# The app's primary server is `butaca_run(SERVER_HOST, SERVER_PORT)` (`src/main.c`). So the
-# link is conditioned only if the DEPLOYED BINARY was built with `SERVER_PORT` pointing at the proxy
-# rather than at the server. When it was not, a case that declares `link_profile` SKIPS with that
-# reason spelled out — it must never run unconditioned and report a pass, because "Auto held a
-# rung it could afford" and "Auto was never squeezed" produce the same green.
+# The app reads its server from the Jellyfin config (`/tmp/butaca-jellyfin`, then the install's
+# `-jellyfin.json`), so pointing it at a proxy means writing that file, not rebuilding with a
+# different server port. The harness does not write it yet: every case that declares
+# `link_profile` therefore SKIPS with that reason spelled out. It must never run unconditioned and
+# report a pass, because "Auto held a rung it could afford" and "Auto was never squeezed" produce
+# the same green.
 # ---------------------------------------------------------------------------
-CONFIG_LOCAL_H = os.path.join(REPO_ROOT, "src", "config.local.h")
-
-
-def compiled_server_endpoint():
-    """`(host, port)` the deployed binary talks to, or `(None, None)`.
-
-    Read from the gitignored `src/config.local.h`, which is the ONLY statement of it — `app.h`
-    includes that file when present and falls back to a placeholder host on port 32400.
-    """
-    try:
-        with open(CONFIG_LOCAL_H, encoding="utf-8") as fh:
-            text = fh.read()
-    except OSError:
-        return None, None
-    host = re.search(r'#define\s+SERVER_HOST\s+"([^"]*)"', text)
-    port = re.search(r"#define\s+SERVER_PORT\s+(\d+)", text)
-    return (host.group(1) if host else None, int(port.group(1)) if port else None)
 
 
 class LinkConditioner:
@@ -1534,17 +1518,14 @@ class LinkConditioner:
 
     def start(self):
         if self.listen is None:
-            self.why = ("the deployed binary names no server port - src/config.local.h is missing "
-                        "or has no SERVER_PORT")
+            self.why = ("the harness does not point the app at a proxy yet: the app reads its "
+                        "server from the Jellyfin config, and this run writes no such file")
             return
-        # netcond binds 0.0.0.0, so "direct" is decided by the PORT alone: the compiled host IS
-        # the server host by construction (`self.target[0]` is where both come from). The second
-        # conjunct used to be `self.target[0] == self.host_of_listen()`, and `host_of_listen`
-        # returned `self.target[0]` — `x == x`, a named method and a clause that read as a real
-        # guard and expressed nothing.
+        # netcond binds 0.0.0.0, so "direct" is decided by the PORT alone: the Jellyfin config
+        # names the target host, so the port is the only half worth comparing.
         if self.listen == self.target[1]:
-            self.why = (f"the binary talks to the server DIRECTLY on :{self.listen}; rebuild with "
-                        f"SERVER_PORT set to a proxy port to condition the link")
+            self.why = (f"the app talks to the server DIRECTLY on :{self.listen}; point its "
+                        f"Jellyfin config at the proxy port to condition the link")
             return
         with open(self.control, "w") as fh:
             fh.write("pass")
@@ -5798,17 +5779,16 @@ def main():
     if args.build:
         do_build(cfg["tv"])
 
-    # The link conditioner, started ONCE for the tier — the binary points at its port for every
-    # case, conditioned or not, so it cannot be a per-case resource. `usable` decides whether a
-    # case that names a `link_profile` runs or skips; nothing else changes.
-    _host, listen = compiled_server_endpoint()
-    cond = LinkConditioner(listen, (cfg["server"]["host"], cfg["server"]["port"]), cfg["tv"])
+    # The link conditioner, started ONCE for the tier. It stays unavailable until the harness
+    # writes the Jellyfin config that points the app at a proxy; `usable` decides whether a case
+    # that names a `link_profile` runs or skips. Nothing else changes.
+    cond = LinkConditioner(None, (cfg["server"]["host"], cfg["server"]["port"]), cfg["tv"])
     cond.start()
     atexit.register(cond.close)
     shaped, link_skipped = [c for c in cases if c.get("link_profile")], []
     if shaped:
         if cond.usable:
-            print(f"link conditioner: :{listen} -> server, {len(shaped)} shaped case(s)")
+            print(f"link conditioner: :{cond.listen} -> server, {len(shaped)} shaped case(s)")
         else:
             print(f"link conditioner UNAVAILABLE — {cond.why}")
             for c in shaped:

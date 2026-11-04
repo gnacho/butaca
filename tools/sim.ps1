@@ -249,7 +249,7 @@ echo "Built $target/release/butaca-sim"
         Invoke-WslShell -Environment $commonEnvironment -Script ($instanceLocks + "`n" + $prepare + "`n" + @'
 build_simulator
 printf '%s\n' "$$" > "$runtime/butaca-sim.pid"
-exec "$target/release/butaca-sim" "$srv" "$port"
+exec "$target/release/butaca-sim"
 '@)
     }
     "shot" {
@@ -265,7 +265,7 @@ mkdir -p "$(dirname "$BUTACA_OUTPUT")"
 base="$runtime/windows-shot.png"
 captured="$runtime/windows-shot-1.png"
 rm -f "$base" "$captured"
-BUTACA_SHOT="$base" "$target/release/butaca-sim" "$srv" "$port" &
+BUTACA_SHOT="$base" "$target/release/butaca-sim" &
 pid=$!
 printf '%s\n' "$pid" > "$runtime/butaca-sim.pid"
 cleanup() {
