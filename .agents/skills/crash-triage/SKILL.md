@@ -19,23 +19,15 @@ description: >
 > log`) — but the moment you RE-RUN to reproduce, take the television's lock first:
 > `tools/tv-lock.sh acquire --why "reproduce <crash>"`. See the **`tv-lock`** skill.
 
-There are now two evidence paths. When crash-report consent and a compiled endpoint are both
-present, the patched Sentry Native ARM32 handler wakes the shipped `sentry-crash` process. That
-process reads the stopped target, walks the crashing thread's frame chain from a copy of its
-stack, and unwinds every other Linux LWP remotely through libunwind's ptrace accessors (DWARF,
-with function names), attaching and detaching per thread. It records up to 128 frames for the
-crashing thread plus up to 32 for each other thread, registers, modules, Linux/webOS versions and
-build ids. Its transport is disabled; the next
-healthy Butaca launch sanitises the envelope and sends it from the ordinary telemetry spool.
-That Sentry event **is a
-backtrace** when it contains multiple frames.
-
-The local, always-available fallback is the C tracer (`src/crashtrace.c`). It catches the fatal
-signals, writes what it knows, then **re-raises to `SIG_DFL`** so SAM sees a real `WIFSIGNALED`
-death — and **not** so a crash daemon
-produces a backtrace, which on this firmware it never does (see §"do not go looking for a crashd
-backtrace" above; `core_pattern` is the bare string `core` and `RLIMIT_CORE` is 0, so no core is
-written and the report chain never starts). Per crash it emits:
+There is one evidence path now: the repository's own tracer (`src/crashtrace.c` with
+`src/crashfmt.h`). It catches the fatal signals, writes the fault event quoted below to
+`butaca-crash.log` in the install's runtime root, and re-raises to `SIG_DFL` so SAM sees a real
+`WIFSIGNALED` death — and **not** so a crash daemon produces a backtrace, which on this firmware it
+never does (see §"do not go looking for a crashd backtrace" above; `core_pattern` is the bare
+string `core` and `RLIMIT_CORE` is 0, so no core is written and the report chain never starts).
+`tools/butaca-stackwalk` reads those records on the host: it subtracts the load bases the event
+carries and symbolizes the program counter against `pkg/butaca`, giving a function name always and
+file:line when the build was made with `DEBUG=1`. Per crash it emits:
 
 ```
 *** SIGNAL 11 (SIGSEGV) addr=0x6bcf pc=0xf5a4dd08 lr=0x0
@@ -44,8 +36,8 @@ at:  <the /proc/self/maps line containing pc or lr>    -- which library faulted
 bin: <the maps line for our own executable>            -- our load base, for addr2line
 ```
 
-Turning `pc` into a source location needs `pc - load_base` fed to `addr2line`. Nothing in
-the repo did that arithmetic until `tools/crash-report.sh`.
+Turning `pc` into a source location needs `pc - load_base` fed to `addr2line`. `tools/butaca-stackwalk`
+does that arithmetic from the fault event itself, which is why it is the tool named above.
 
 **Call the local C record a FAULT EVENT, not a backtrace, when you write it up.** Two frames and the
 registers are what an async-signal-safe handler can honestly produce: `backtrace()` is not on the safe list, ARM
@@ -177,7 +169,7 @@ and it is worse than none, for the reason in the gotchas below.
 - **SIGABRT / SIGTRAP (6 / 5)** — usually a **Rust panic** crossing the FFI boundary. The
   PC is inside `abort()` and is worthless; the evidence is `<rundir>/butaca-stderr.log`.
 - **SIGFPE / SIGSYS (8 / 31)** — arithmetic trap or a rejected system call. They are uncommon,
-  but both Sentry and the local tracer cover them so an internal daemon write failure still leaves
+  but the local tracer covers them so an internal daemon write failure still leaves
   a bounded record.
 - **No signal at all, app just gone** — not a caught crash. Check the SAM exit status, an
   OOM/memchute kill, or a deliberate close.
@@ -251,10 +243,8 @@ ssh root@"$(make -s print-tv)" "rm -f $RUN/butaca-crashtest"
 - **`lr=0x0` is normal** for a signal delivered asynchronously; only `pc` is meaningful then.
 - **There are no system crashd reports to pull.** `/var/log/reports/librdx/` is empty by
   construction and this bullet used to say the opposite — that the re-raise produces real
-  backtraces there. Do not confuse LG's absent `crashd` output with the app's shipped
-  `sentry-crash` daemon: the latter hands its envelope to the telemetry queue and normally leaves
-  no report file behind after a healthy restart. For consent-off/unconfigured builds, use
-  `pkg/butaca.debug` and `addr2line` on the local fault event.
+  backtraces there. The app writes its own fault event instead: read it with
+  `tools/butaca-stackwalk`.
 - **Older notes say `/tmp/poc-*`.** The app was renamed; the names are all `butaca-*` now,
   and they sit in the install's runtime root rather than always in `/tmp`.
 - **`com.butaca` is a PREFIX of `com.butaca.debug`.** Anything that picks a crash
