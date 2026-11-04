@@ -29,7 +29,8 @@ fn home_command(command: &crate::screens::registry::HomeCmd) -> Value {
         HomeCmd::Hero => json!("hero"),
         HomeCmd::FocusStrip(tab) => json!({"focus_strip":match tab {
             HomeTab::Home => "home", HomeTab::Movies => "movies", HomeTab::Shows => "shows",
-            HomeTab::Videos => "videos", HomeTab::Search => "search" }}),
+            HomeTab::Videos => "videos", HomeTab::Favorites => "favorites",
+            HomeTab::Search => "search" }}),
         HomeCmd::Flip(delta) => json!({"flip":delta}),
         HomeCmd::SelectHero(index) => json!({"select_hero":index}),
         HomeCmd::PinHero(index) => json!({"pin_hero":index}),
@@ -226,6 +227,7 @@ fn home_request(req: &crate::screens::registry::HomeReq) -> Value {
                 HomeTab::Movies => "movies",
                 HomeTab::Shows => "shows",
                 HomeTab::Videos => "videos",
+                HomeTab::Favorites => "favorites",
                 HomeTab::Search => "search",
             }
         ]),

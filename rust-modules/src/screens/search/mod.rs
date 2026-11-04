@@ -235,6 +235,7 @@ impl SearchScreen {
                 0 => SearchReq::Tab(HomeTab::Home), 1 => SearchReq::Tab(HomeTab::Movies),
                 2 => SearchReq::Tab(HomeTab::Shows), 3 => return Handled::Yes,
                 4 => SearchReq::Account, 5 => SearchReq::Tab(HomeTab::Videos),
+                6 => SearchReq::Tab(HomeTab::Favorites),
                 _ => return Handled::No,
             };
             self.keyboard(false, true, fx);

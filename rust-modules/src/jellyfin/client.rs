@@ -608,6 +608,20 @@ impl JfClient {
     /// `convert::movie_from_dto` every listing uses. No `IncludeItemTypes` is sent: the box set's
     /// own children ARE its members, and an unexpected kind is still dropped by the converter
     /// rather than misfilled.
+    /// One page of the account's favourite items — the strip's Favorites grid. No `ParentId`: the
+    /// destination spans every library the viewer can see, and `Filters=IsFavorite` is the
+    /// server's own filter, so the page is the same shape a library listing has without being
+    /// scoped to one section.
+    pub(crate) fn favorites_page(&self, start: i64, limit: i64) -> Option<ItemsResult> {
+        let user_id = self.user_id()?;
+        self.get_json(&format!(
+            "/Users/{user_id}/Items?Recursive=true&IncludeItemTypes=Movie,Series&Filters=IsFavorite\
+             &SortBy=SortName&SortOrder=Ascending&StartIndex={start}&Limit={limit}\
+             &Fields={}&EnableImageTypes=Primary,Backdrop",
+            Self::LISTING_FIELDS
+        ))
+    }
+
     pub(crate) fn collection_children(
         &self,
         boxset_id: &str,

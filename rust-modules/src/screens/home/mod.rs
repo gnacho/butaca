@@ -67,6 +67,7 @@ pub(crate) const STRIP_HOME_ELEM: u32 = crate::ui::dispatch::STRIP_BASE;
 pub(crate) const STRIP_MOVIES_ELEM: u32 = crate::ui::dispatch::STRIP_BASE + 1;
 pub(crate) const STRIP_SHOWS_ELEM: u32 = crate::ui::dispatch::STRIP_BASE + 2;
 pub(crate) const STRIP_VIDEOS_ELEM: u32 = crate::ui::dispatch::STRIP_BASE + 5;
+pub(crate) const STRIP_FAVORITES_ELEM: u32 = crate::ui::dispatch::STRIP_BASE + 6;
 pub(crate) const STRIP_SEARCH_ELEM: u32 = crate::ui::dispatch::STRIP_BASE + 3;
 pub(crate) const STRIP_ACCOUNT_ELEM: u32 = crate::ui::dispatch::STRIP_BASE + 4;
 
@@ -877,6 +878,7 @@ impl HomeScreen {
             STRIP_HOME_ELEM => HomeReq::Tab(HomeTab::Home),
             STRIP_MOVIES_ELEM => HomeReq::Tab(HomeTab::Movies),
             STRIP_SHOWS_ELEM => HomeReq::Tab(HomeTab::Shows),
+            STRIP_FAVORITES_ELEM => HomeReq::Tab(HomeTab::Favorites),
             STRIP_VIDEOS_ELEM => HomeReq::Tab(HomeTab::Videos),
             STRIP_SEARCH_ELEM => HomeReq::Tab(HomeTab::Search),
             STRIP_ACCOUNT_ELEM => HomeReq::Account,
@@ -938,6 +940,7 @@ impl HomeScreen {
                     HomeTab::Home => STRIP_HOME_ELEM,
                     HomeTab::Movies => STRIP_MOVIES_ELEM,
                     HomeTab::Shows => STRIP_SHOWS_ELEM,
+                    HomeTab::Favorites => STRIP_FAVORITES_ELEM,
                     HomeTab::Videos => STRIP_VIDEOS_ELEM,
                     HomeTab::Search => STRIP_SEARCH_ELEM,
                 };

@@ -650,6 +650,7 @@ impl LibraryScreen {
             Some(3) => Some(LibraryReq::Tab(HomeTab::Search)),
             Some(4) => Some(LibraryReq::Account),
             Some(5) => Some(LibraryReq::Tab(HomeTab::Videos)),
+            Some(6) => Some(LibraryReq::Tab(HomeTab::Favorites)),
             _ => None,
         };
         if let Some(req) = req { fx.push(Fx::App(AppFx::Library(req))); return Handled::Yes; }

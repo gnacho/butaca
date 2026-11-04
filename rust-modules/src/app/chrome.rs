@@ -11,11 +11,14 @@ use crate::stores::browse::{DirectoryView, SecKind};
 pub(crate) enum Pill {
     Home,
     Section(SecKind),
+    /// The favourites listing: not a library section, so it has no `SecKind` of its own, but it
+    /// is drawn in the same strip and must keep a stable index while sections come and go.
+    Favorites,
     Search,
 }
 
 pub(crate) fn tab_count(directory: DirectoryView<'_>) -> usize {
-    1 + directory.tab_count() + 1
+    1 + directory.tab_count() + 2
 }
 
 pub(crate) fn pill_at(directory: DirectoryView<'_>, i: usize) -> Pill {
@@ -29,6 +32,8 @@ fn pill_in(
 ) -> Pill {
     if i == search {
         Pill::Search
+    } else if i + 1 == search {
+        Pill::Favorites
     } else if let Some(section) = i.checked_sub(1) {
         kind_at(section).map(Pill::Section).unwrap_or(Pill::Home)
     } else {
@@ -49,6 +54,7 @@ fn pill_index(
     match pill {
         Pill::Home => Some(0),
         Pill::Section(kind) => tab_of(kind).map(|i| i + 1),
+        Pill::Favorites => Some(search - 1),
         Pill::Search => Some(search),
     }
 }
@@ -93,6 +99,8 @@ impl ChromeSnapshot {
                     SecKind::Video => 5,
                 });
             }
+            self.labels.push(crate::i18n::msg::browse_kind_favorites().into());
+            self.keys.push(STRIP_BASE + 6);
             self.labels.push(String::new());
             self.keys.push(STRIP_BASE + 3);
             self.widths = widgets::tab_widths(&self.labels, measure);
@@ -222,12 +230,12 @@ mod tests {
             profile_generation: Some(crate::server::session::current_gen()), ..Default::default()
         };
         snapshot.refresh(&crate::ui::fixture::FixtureMeasure, directory.view());
-        assert_eq!(snapshot.keys, vec![STRIP_BASE, STRIP_BASE + 1, STRIP_BASE + 2, STRIP_BASE + 3]);
+        assert_eq!(snapshot.keys, vec![STRIP_BASE, STRIP_BASE + 1, STRIP_BASE + 2, STRIP_BASE + 6, STRIP_BASE + 3]);
         assert_eq!(&snapshot.labels[..3], &["Home", "Movies", "TV Shows"]);
         let mut members = Vec::new();
         snapshot.members(0, None, 0.0, &mut members);
         assert_eq!(members.iter().map(|member| member.elem).collect::<Vec<_>>(),
-            vec![STRIP_BASE + 4, STRIP_BASE, STRIP_BASE + 1, STRIP_BASE + 2, STRIP_BASE + 3]);
+            vec![STRIP_BASE + 4, STRIP_BASE, STRIP_BASE + 1, STRIP_BASE + 2, STRIP_BASE + 6, STRIP_BASE + 3]);
     }
 
     #[test]
@@ -237,8 +245,8 @@ mod tests {
             profile_generation: Some(crate::server::session::current_gen()), ..Default::default()
         };
         snapshot.refresh(&crate::ui::fixture::FixtureMeasure, directory.view());
-        assert_eq!(snapshot.keys, vec![STRIP_BASE, STRIP_BASE + 1, STRIP_BASE + 2, STRIP_BASE + 5, STRIP_BASE + 3]);
-        assert_eq!(snapshot.labels, ["Home", "Movies", "TV Shows", "Other Videos", ""]);
+        assert_eq!(snapshot.keys, vec![STRIP_BASE, STRIP_BASE + 1, STRIP_BASE + 2, STRIP_BASE + 5, STRIP_BASE + 6, STRIP_BASE + 3]);
+        assert_eq!(snapshot.labels, ["Home", "Movies", "TV Shows", "Other Videos", "Favorites", ""]);
         assert_eq!(pill_at(directory.view(), 3), Pill::Section(SecKind::Video));
         assert_eq!(pill_of(directory.view(), Pill::Section(SecKind::Video)), Some(3));
         assert_eq!(snapshot.library_selection(SecKind::Video), 3);
@@ -249,10 +257,11 @@ mod tests {
         use crate::stores::browse::SecKind::{Movie, Show};
         let kinds = [Movie, Show];
         let at = |i| kinds.get(i).copied();
-        let search = kinds.len() + 1;
+        let search = kinds.len() + 2;
         assert_eq!(pill_in(0, search, at), Pill::Home);
         assert_eq!(pill_in(1, search, at), Pill::Section(Movie));
         assert_eq!(pill_in(2, search, at), Pill::Section(Show));
+        assert_eq!(pill_in(search - 1, search, at), Pill::Favorites);
         assert_eq!(pill_in(search, search, at), Pill::Search);
         assert_eq!(pill_in(search + 1, search, at), Pill::Home);
         let pos = |kind| kinds.iter().position(|&candidate| candidate == kind);

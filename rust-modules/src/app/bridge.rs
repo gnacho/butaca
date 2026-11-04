@@ -2430,6 +2430,7 @@ pub(crate) fn nav_tab(
             if let Some(pill) = focus_pill.filter(|pill| crate::app::chrome::pill_of(rig.directory.view(), *pill).is_some()) {
                 let want = match pill {
                     Pill::Home => HomeTab::Home,
+                    Pill::Favorites => HomeTab::Favorites,
                     Pill::Search => HomeTab::Search,
                     Pill::Section(crate::browse::SecKind::Movie) => HomeTab::Movies,
                     Pill::Section(crate::browse::SecKind::Show) => HomeTab::Shows,
@@ -2442,6 +2443,12 @@ pub(crate) fn nav_tab(
         HomeTab::Movies => { rig.enter_library(crate::browse::SecKind::Movie); AppArg::Library }
         HomeTab::Shows => { rig.enter_library(crate::browse::SecKind::Show); AppArg::Library }
         HomeTab::Videos => { rig.enter_library(crate::browse::SecKind::Video); AppArg::Library }
+        HomeTab::Favorites => AppArg::Content(ContentArg::Collection(
+            crate::collection::CollectionRef::favorites(
+                crate::jellyfin::SERVER_ID,
+                &crate::i18n::msg::browse_kind_favorites(),
+            ),
+        )),
         HomeTab::Search => AppArg::Search,
     };
     nav_peer(d, arg, ret);
