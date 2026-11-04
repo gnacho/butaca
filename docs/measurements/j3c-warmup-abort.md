@@ -1,15 +1,15 @@
 # J3c — a downshift warm-up that cannot land, and the ~30 s of judder after it
 
-**Device, `pipe_abr_down_outrun`, 2026-08-28.** Synthetic fixture tier: no PMS, no library, no
+**Device, `pipe_abr_down_outrun`, 2026-08-28.** Synthetic fixture tier: no server, no library, no
 account. Every number below is off the app's own event log.
 
-## Correction — the prefix projection was superseded after a real-PMS run
+## Correction — the prefix projection was superseded after a real-server run
 
 The trace below remains a valid measurement of the synthetic fixture and of the cost of spending
-the whole candidate deadline. Its proposed early-abort rule is not valid for a real PMS and is no
-longer shipped. A remote-PMS run on 2026-08-30 showed a sustainable 4K response repeatedly being
-abandoned after a slow opening prefix. The supplied PMS SessionReports contain `segmentWait`
-pauses, and a Ghidra audit of PMS 1.43.4 proved the stronger fact: the server can snapshot
+the whole candidate deadline. Its proposed early-abort rule is not valid for a real server and is no
+longer shipped. A remote-server run on 2026-08-30 showed a sustainable 4K response repeatedly being
+abandoned after a slow opening prefix. The supplied server SessionReports contain `segmentWait`
+pauses, and a Ghidra audit of the server at 1.43.4 proved the stronger fact: the server can snapshot
 `Content-Length` while the current segment file is still growing, return would-block in the middle
 of that body, then resume it on an encoder notification. A prefix is therefore a right-censored
 end-to-end production/delivery sample, not a forecast of its unseen remainder.
@@ -119,5 +119,5 @@ budget to learn the rung was unaffordable, the other proved it early and handed 
 - The 8 s stall at pos=121 precedes all three transactions and is not addressed here.
 - One fixture, one link profile, one collapse shape. `down_outrun` is built so the link outruns the
   controller; whether the same sequence occurs on a gentler collapse is untested.
-- Nothing here has been measured against a real PMS, only the synthetic fixture server. The
+- Nothing here has been measured against a real server, only the synthetic fixture server. The
   capacity numbers are a shaped loopback link, not a household's internet.

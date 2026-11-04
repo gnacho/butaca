@@ -18,7 +18,7 @@ use std::ffi::CString;
 
 use crate::person::{Person, NSHELF};
 use crate::registry::ServerId;
-use crate::pms::PmsMovie;
+use crate::catalog::CatalogMovie;
 use crate::stores::person::PersonCmd;
 use crate::ui::card_row::{self, CardRow, RowStyle};
 use crate::ui::consts::*;
@@ -699,7 +699,7 @@ impl PersonScreen {
         CardPageMemory { cards: self.cards.clone(), header_marked: self.header_marked }
     }
 
-    fn elem_for(&self, item: &PmsMovie) -> Option<u32> {
+    fn elem_for(&self, item: &CatalogMovie) -> Option<u32> {
         self.cards.elem_for(item.sid, &item.rk)
     }
 
@@ -828,7 +828,7 @@ impl PersonScreen {
         }
     }
 
-    fn focused_movie_in<'a>(&self, p: &'a Person, elem: Option<u32>) -> Option<&'a PmsMovie> {
+    fn focused_movie_in<'a>(&self, p: &'a Person, elem: Option<u32>) -> Option<&'a CatalogMovie> {
         match elem.and_then(|e| self.locate(p, e))? {
             Located::Shelf(kind, col) => p.shelf(kind).get(col),
             _ => None,
@@ -839,7 +839,7 @@ impl PersonScreen {
         &self,
         focus: Option<crate::ui::machine::FocusKey<u32>>,
         cx: &Cx<'a, H>,
-    ) -> Option<&'a PmsMovie> {
+    ) -> Option<&'a CatalogMovie> {
         let p = self.person(cx)?;
         self.focused_movie_in(p, focus.filter(|k| k.entry == self.entry).map(|k| k.elem))
     }
@@ -1793,12 +1793,12 @@ mod tests {
         fn person<'a>(cx: &Cx<'a, Self>) -> crate::person::PersonView<'a> { cx.views }
     }
 
-    fn item(rk: &str) -> PmsMovie {
+    fn item(rk: &str) -> CatalogMovie {
         item_on(ServerId::UNSET, rk)
     }
 
-    fn item_on(sid: ServerId, rk: &str) -> PmsMovie {
-        PmsMovie {
+    fn item_on(sid: ServerId, rk: &str) -> CatalogMovie {
+        CatalogMovie {
             sid,
             rk: rk.to_string(),
             ..Default::default()
@@ -2122,7 +2122,7 @@ mod tests {
         let (mut store, mut s) = seed(4, 0);
         let want = focus_of(&s, &store, 0, 2);
         // the row is rebuilt with two items inserted ahead — "m2" is now at index 4
-        let rebuilt: Vec<PmsMovie> = ["x0", "x1", "m0", "m1", "m2", "m3"]
+        let rebuilt: Vec<CatalogMovie> = ["x0", "x1", "m0", "m1", "m2", "m3"]
             .iter()
             .map(|rk| item(rk))
             .collect();

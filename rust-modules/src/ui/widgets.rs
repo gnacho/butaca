@@ -3,7 +3,7 @@
 //! core (`card`/`draw_card`) and the poster-resolve helper. (Multi-line text wrapping
 //! now lives in the `TextView` primitive in `text_view.rs`.)
 use crate::registry::ServerId;
-use crate::pms::PmsMovie;
+use crate::catalog::CatalogMovie;
 use crate::ui::label::{HAlign, Label, VAlign};
 use crate::ui::text_view::TextView;
 use crate::ui::theme;
@@ -238,7 +238,7 @@ pub(crate) fn warm_tex_on(
 /// keyed thumbnail at an explicit resolution (flat placeholder skeleton), or a person's headshot
 /// (the same thumbnail, but its EMPTY case draws a person glyph rather than a blank tile).
 pub(crate) enum Art<'a> {
-    Poster(Option<&'a PmsMovie>),
+    Poster(Option<&'a CatalogMovie>),
     /// **A landscape tile of a real catalog row** — an episode's own still, with the watched disc
     /// and (through `card_row::resume_bar`) the resume bar a poster wears.
     ///
@@ -248,7 +248,7 @@ pub(crate) enum Art<'a> {
     /// A shelf of recently released episodes is exactly where "then the show poster" must be the
     /// LAST resort — several episodes of one show all substituting the same poster is the picture
     /// this variant exists to stop drawing.
-    Still(Option<&'a PmsMovie>),
+    Still(Option<&'a CatalogMovie>),
     /// `sid` is the server `key` is a path on — an image-transcode path embeds a server-local
     /// ratingKey, so a still or a poster fetched from another machine is a 404 or, worse, a
     /// different item's picture. Every variant here carries one for that reason.
@@ -272,8 +272,8 @@ impl Art<'_> {
     fn motion_identity(&self) -> Option<crate::ui::card_motion::Identity> {
         use std::hash::{Hash, Hasher};
         let (owner, sid, key, kind) = match self {
-            Self::Poster(Some(m)) => (*m as *const PmsMovie as usize, m.sid, m.thumb.as_str(), 0u8),
-            Self::Still(Some(m)) => (*m as *const PmsMovie as usize, m.sid, still_key(m), 1),
+            Self::Poster(Some(m)) => (*m as *const CatalogMovie as usize, m.sid, m.thumb.as_str(), 0u8),
+            Self::Still(Some(m)) => (*m as *const CatalogMovie as usize, m.sid, still_key(m), 1),
             Self::Thumb { sid, key, .. } => (key.as_ptr() as usize, *sid, *key, 2),
             Self::Person { sid, key, .. } => (key.as_ptr() as usize, *sid, *key, 3),
             Self::Poster(None) | Self::Still(None) => return None,
@@ -300,13 +300,13 @@ pub(crate) const POSTER_RES: (c_int, c_int) = (250, 375);
 /// **Which artwork a landscape tile draws, in order of preference.** The episode's own still, the
 /// show's backdrop, then the show's poster.
 ///
-/// `PmsMovie::still` is empty on anything that is not an episode and on an episode whose server
+/// `CatalogMovie::still` is empty on anything that is not an episode and on an episode whose server
 /// sent no thumb of its own, and BOTH of those must fall through to something 16:9-ish before they
 /// reach `thumb` — which for an episode is the SHOW POSTER, i.e. the identical-tiles picture this
 /// whole tile exists to replace. Falling back to it at all is still right for the last resort: a
 /// poster, cover-cropped to the tile ([`art_uv`]), answers "which show" even when it cannot answer
 /// "which episode".
-pub(crate) fn still_key(m: &PmsMovie) -> &str {
+pub(crate) fn still_key(m: &CatalogMovie) -> &str {
     if !m.still.is_empty() {
         &m.still
     } else if !m.thumb.is_empty() {
@@ -481,7 +481,7 @@ pub(crate) fn still_line(
 /// see [`still_line`] for why a shelf surface names the show rather than the episode.
 pub(crate) fn still_overlay(
     p: Painter,
-    m: &crate::pms::PmsMovie,
+    m: &crate::catalog::CatalogMovie,
     card: Rect,
     rad: f32,
     press_plays: bool,
@@ -606,8 +606,8 @@ pub(crate) fn resolve_card_art(p: Painter, rect: Rect, art: &Art<'_>) -> (u32, f
 
 /// The name a poster card draws on the neutral collection tile, when it draws one: a collection
 /// row whose server sent no `thumb`. A composite or custom thumb is artwork and draws as a poster.
-fn neutral_collection_name(m: Option<&crate::pms::PmsMovie>) -> Option<&str> {
-    m.filter(|m| m.kind == crate::pms::KIND_COLLECTION && m.thumb.is_empty()).map(|m| m.title.as_str())
+fn neutral_collection_name(m: Option<&crate::catalog::CatalogMovie>) -> Option<&str> {
+    m.filter(|m| m.kind == crate::catalog::KIND_COLLECTION && m.thumb.is_empty()).map(|m| m.title.as_str())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -650,7 +650,7 @@ pub(crate) fn card(p: Painter, frame: Rect, art: Art, rad: f32, focused: bool, s
             // **Inheriting it is a property of the ART VARIANT, not of the shelf**, and this line
             // claimed Related had it for months while Related passed `Art::Thumb` and so wore no
             // mark at all. A `Thumb` is a path and a size; only `Poster` carries the row the mark is
-            // derived from, so a shelf that wants the state language must hand over a `PmsMovie` —
+            // derived from, so a shelf that wants the state language must hand over a `CatalogMovie` —
             // which is what putting a real catalog row behind Related's tiles bought (2026-08-21,
             // `metadata::Related`).
             //
@@ -750,7 +750,7 @@ pub(crate) fn card(p: Painter, frame: Rect, art: Art, rad: f32, focused: bool, s
 /// | in progress | the full-bleed resume BAR | the CALLER (`card_row::draw_tile`/`draw_focused`) |
 /// | watched | the amber corner DISC | [`card`] |
 ///
-/// [`PosterMark::InProgress`] is *defined* as "[`PmsMovie::resume_frac`] has a value" — precisely
+/// [`PosterMark::InProgress`] is *defined* as "[`CatalogMovie::resume_frac`] has a value" — precisely
 /// when the caller draws the bar — so the two halves cannot disagree and put two marks on one tile.
 /// That is also the precedence: a re-watch in flight outranks the watched flag, because the
 /// server reports both on a finished-then-restarted item and being part-way through the re-watch
@@ -778,7 +778,7 @@ pub(crate) enum PosterMark {
 
 /// Resolve [`PosterMark`] from a catalog row. Total and mutually exclusive by construction.
 ///
-/// Keyed on `PmsMovie::watched` — **not** on `!unwatched`, which is a weaker claim for a container:
+/// Keyed on `CatalogMovie::watched` — **not** on `!unwatched`, which is a weaker claim for a container:
 /// a SHOW with one episode played is `!unwatched` but nowhere near done, and marking it watched is a
 /// statement the viewer can see is false. Partly-watched shows therefore land on [`PosterMark::None`]
 /// beside never-started ones; the true statement about a series mid-run is where its next episode
@@ -3105,7 +3105,7 @@ impl AmbientWash {
     }
 
     /// [`target`](Self::target) for corners taken from an item's `UltraBlurColors` envelope
-    /// (`PmsMovie::blur` / `metadata::Detail::blur`), each held under [`GROUND_LUMA`] first. Every
+    /// (`CatalogMovie::blur` / `metadata::Detail::blur`), each held under [`GROUND_LUMA`] first. Every
     /// artwork-keyed wash goes through here; a palette token (the resting warm tint) does not need
     /// it, because we chose that value.
     pub(crate) fn keyed(blur: [[f32; 3]; 4], w: [f32; 4]) -> [[f32; 4]; 4] {
@@ -3413,7 +3413,7 @@ impl PageGround {
     /// A header-and-cards page's ground target: `focused`'s `UltraBlurColors` along
     /// [`CARD_W`](Self::CARD_W) when it carries any, else the warm [`HEADER_W`](Self::HEADER_W)
     /// tint. The Person and Collection pages share it.
-    pub(crate) fn page_target(focused: Option<&crate::pms::PmsMovie>) -> [[f32; 4]; 4] {
+    pub(crate) fn page_target(focused: Option<&crate::catalog::CatalogMovie>) -> [[f32; 4]; 4] {
         match focused.filter(|m| m.has_blur) {
             Some(m) => AmbientWash::keyed(m.blur, Self::CARD_W),
             None => AmbientWash::target([theme::WASH_WARM; 4], Self::HEADER_W),
@@ -3430,7 +3430,7 @@ impl PageGround {
     }
 
     /// Dissolve toward the focused item's colours. `src` is that item's `UltraBlurColors` corners
-    /// (`PmsMovie::blur`) or `None` when nothing focused carries any — **which holds the ground
+    /// (`CatalogMovie::blur`) or `None` when nothing focused carries any — **which holds the ground
     /// rather than clearing it**, per the type's doc.
     ///
     /// Called once per frame from a screen's update, before anything reads the ground.

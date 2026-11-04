@@ -276,8 +276,8 @@ fn a_trailer_play_judges_the_extra_file_not_the_parent_or_zero() {
 /// **The ceiling is spent as `maxVideoBitrate`, so it must be judged against the VIDEO rate.**
 /// `Detail::bitrate` is the whole-file figure — video plus every audio track — and comparing
 /// that against a video-only cap makes each rung bite about one AC-3 track early. The video
-/// stream's own number is preferred where PMS sent one; the whole-file figure is the fallback,
-/// which is the conservative direction and so the right one.
+/// stream's own number is preferred where the server sent one; the whole-file figure is
+/// the fallback, which is the conservative direction and so the right one.
 #[test]
 fn the_source_rate_is_the_video_streams_own_where_the_server_gave_one() {
     let with_video = crate::metadata::Detail {
@@ -304,7 +304,7 @@ fn the_source_rate_is_the_video_streams_own_where_the_server_gave_one() {
         ..Default::default()
     };
     assert_eq!(source_kbps(&bare), 8540);
-    // a video record PMS gave no bitrate for is not a measurement of 0 — fall back
+    // a video record the server gave no bitrate for is not a measurement of 0 — fall back
     let unmeasured_stream = crate::metadata::Detail {
         bitrate: 8540,
         video: Some(crate::metadata::Stream::default()),

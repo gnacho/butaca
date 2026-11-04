@@ -11,13 +11,13 @@
 //! exploration E  =  (B-max(R_s,D_next))+
 //! ```
 //!
-//! An upshift is the missing excitation. PMS uses fixed-rendition sessions, so the candidate is
-//! primed as a separate encoder under the absolute `E` deadline and commits only from its own
+//! An upshift is the missing excitation. The server uses fixed-rendition sessions, so the candidate
+//! is primed as a separate encoder under the absolute `E` deadline and commits only from its own
 //! completed `A <= D && B_post >= A` evidence. `R_o` diagnoses the observed current-point queue;
 //! `R_s` remains a retrospective stress diagnostic and conservative experiment-funding runway, not
-//! a predictive downshift trigger. There is no dwell, rate headroom, fixed buffer threshold, passive
-//! capacity ceiling or probability claim in that decision. Abandoned prefixes are censored and
-//! never become capacity samples.
+//! a predictive downshift trigger. There is no dwell, rate headroom, fixed buffer threshold,
+//! passive capacity ceiling or probability claim in that decision. Abandoned prefixes are censored
+//! and never become capacity samples.
 //!
 //! **One term in the upshift is NOT physics and is marked as such**
 //! (`Controller::upshift_earns_its_visible_switch`). Every committed rung change is a picture the
@@ -30,7 +30,7 @@
 //!
 //! Original versus HLS is a product utility decision, not a network theorem. Original creates a
 //! new stream and visibly reloads the pipeline, but preserves direct-play/remux quality, DV/Atmos
-//! and removes recurring PMS video-encode work. Those recurring effects scale with remaining
+//! and removes recurring server video-encode work. Those recurring effects scale with remaining
 //! playback; the one-time visible transition cost does not. The weights are explicit product
 //! choices and must never be described as inferred probabilities.
 //!
@@ -99,7 +99,7 @@ pub(crate) struct AbrPolicy {
     pub(crate) admission: AdmissionPolicy,
     /// **The part of segment acquisition that is not production** — connection, request, time to
     /// first byte, playlist latency — as a per-mille of content duration. 250 is half a second of a
-    /// two-second segment, which is an ordinary round trip to a remote PMS. It exists so
+    /// two-second segment, which is an ordinary round trip to a remote server. It exists so
     /// [`ProductionEstimate::predicted_ratio_pm`] scales only the work, and never reads a LAN's
     /// round trips as a struggling encoder.
     pub(crate) production_floor_pm: u32,
@@ -210,7 +210,7 @@ pub(crate) struct AbrPolicy {
     pub(crate) benefit_horizon_ms: i64,
     /// Weight on [`CandidateRisk::score`] in the utility sum.
     pub(crate) risk_weight: i64,
-    /// Weight on ongoing PMS transcoding work. Small, because a watchable picture beats a tidy
+    /// Weight on ongoing server transcoding work. Small, because a watchable picture beats a tidy
     /// server — but not zero, because 2.1x the work for 4% more bits is a real trade.
     pub(crate) server_cost_weight: i64,
     /// **How long an unsafe deficit must hold before Original is abandoned on JUDGEMENT** — the

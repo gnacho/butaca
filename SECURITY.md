@@ -32,7 +32,7 @@ looking at:
   access token, a `plex.direct` hostname, a household name or anything about what is being
   watched is a valid report — see [PRIVACY.md](PRIVACY.md) for the contract that is meant to hold.
 - **TLS.** Certificate verification is on for every HTTPS request (`net.rs`). Stable builds refuse
-  any PMS control or media URL that would carry an access token over plaintext HTTP, with one
+  any server control or media URL that would carry an access token over plaintext HTTP, with one
   consented exception: a server that answers only unencrypted at a numeric private address on the
   television's own network, where the person answered "Connect without encryption?" for that
   server (`grant.rs`). The grant names that server and that exact origin, is never persisted,

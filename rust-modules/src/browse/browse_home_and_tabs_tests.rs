@@ -378,7 +378,7 @@ fn a_selection_survives_the_table_being_rebuilt() {
 ///
 /// Every catalog screen drives discovery, but the share's Home hubs may land before its section
 /// worker. In that interval the share is in the roster with no row in the section table — and
-/// `pms::feeds_home`'s "a library nobody has discovered is undecided, not unpinned" rule then
+/// `catalog::feeds_home`'s "a library nobody has discovered is undecided, not unpinned" rule then
 /// put a friend's shelves back on the front door of somebody who had turned them off the night
 /// before. `library_pins` is the join, and the recorded answer is the other half of it.
 #[test]
@@ -1013,7 +1013,7 @@ fn a_profile_switch_re_measures_the_strip_instead_of_keeping_the_last_accounts_p
     assert_eq!(browse.tab_count(), 2);
     let before = browse.state.tabs_gen();
 
-    browse.reset(); // install_pms: a different account signs in
+    browse.reset(); // install_server: a different account signs in
     assert_eq!(
         browse.tab_count(),
         0,

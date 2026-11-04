@@ -194,7 +194,7 @@ impl<H: Host> Tap<H> for NoTap {}
 /// named twice. Results are delivered by `(completion_frame, rank, arrival_index)`.
 pub const ADAPTER_RANKS: [&str; 11] = [
     "auth",
-    "pms",
+    "catalog",
     "browse",
     "search",
     "metadata/season",

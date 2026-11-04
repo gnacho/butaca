@@ -78,7 +78,7 @@ impl Mounter<InnerHost> for SurfaceMounter {
         match arg {
             SettingsPage::About => mount_page(entry, SettingsPage::About, cx, fx),
             other => Box::new(RouteSurface::new(entry, id, Family::Settings, *other,
-                crate::pms::HubsSnapshot::empty_for_test().view())),
+                crate::catalog::HubsSnapshot::empty_for_test().view())),
         }
     }
 }

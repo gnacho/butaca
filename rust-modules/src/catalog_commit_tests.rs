@@ -84,7 +84,7 @@ fn a_catalog_row_is_found_by_its_server_and_key_never_by_the_key_alone() {
     let mut o = Owner::default();
     reset(&mut o.state, &o.adapter);
     let (a, b) = (sid(0), sid(1));
-    let mk = |s: ServerId, rk: &str, title: &str| PmsMovie {
+    let mk = |s: ServerId, rk: &str, title: &str| CatalogMovie {
         sid: s,
         rk: rk.to_string(),
         title: title.to_string(),

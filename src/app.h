@@ -3,7 +3,7 @@
 #include <stdio.h>                 /* FILE */
 
 /* (1) config.local.h (gitignored, dev-only) overrides the host placeholder. NO token macro:
- *     the binary carries no credentials — PMS access comes from the signed-in session, or from
+ *     the binary carries no credentials — server access comes from the signed-in session, or from
  *     the /tmp/butaca-token dev trigger for automated runs (the token in config.local.h is read by
  *     tests/run.py on the HOST, never compiled in). */
 #if defined(__has_include)
@@ -11,11 +11,21 @@
 #    include "config.local.h"
 #  endif
 #endif
-#ifndef PMS_HOST
-#  define PMS_HOST  "YOUR_PMS_HOST"
+/* A config.local.h written before the rename still defines the old macros. Honour them, so an
+ * existing checkout keeps building without editing a gitignored file. */
+#ifndef SERVER_HOST
+#  ifdef PMS_HOST
+#    define SERVER_HOST PMS_HOST
+#  else
+#    define SERVER_HOST "YOUR_SERVER_HOST"
+#  endif
 #endif
-#ifndef PMS_PORT
-#  define PMS_PORT  32400
+#ifndef SERVER_PORT
+#  ifdef PMS_PORT
+#    define SERVER_PORT PMS_PORT
+#  else
+#    define SERVER_PORT 32400
+#  endif
 #endif
 
 /* (2) the one process-wide global: the event/diagnostic log, DEFINED once as

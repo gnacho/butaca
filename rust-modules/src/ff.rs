@@ -606,7 +606,7 @@ unsafe fn stream_name(s: *mut AVStream) -> String {
 ///
 /// File order is the join, and it is the mapping this file already relies on twice
 /// (`nth_audio_stream`, and the subtitle enumeration that feeds `desired_sub_idx`). It is worth
-/// stating why that is sound rather than convenient: PMS lists a part's streams in container order
+/// stating why that is sound rather than convenient: the server lists a part's streams in container order
 /// too, and both ordinal helpers skip the SIDECAR streams that exist only on the server — which is
 /// exactly the set that is not in this file. So position N here and position N there name one
 /// track, and a file with no tags simply yields empty strings in the right slots.
@@ -1677,12 +1677,12 @@ struct HlsNet {
     curl: Option<Box<crate::curlio::CurlSource>>,
 }
 
-/// **The live-transfer terminal rule.** A partial response is right-censored evidence.  PMS may
+/// **The live-transfer terminal rule.** A partial response is right-censored evidence.  The server may
 /// open a sized HLS response, deliver a prefix, wait for its JIT encoder (`segmentWait` in the
 /// server's own SessionReport), then burst the remainder.  Consequently neither
 /// `prefix_bytes / prefix_time` nor `Content-Length - prefix_bytes` identifies the unseen
 /// acquisition time.  The former attained-rate projection falsely abandoned sustainable 4K
-/// responses on the remote PMS.
+/// responses on the remote server.
 ///
 /// There is one coefficient-free fact available before completion: the playable reserve has
 /// actually reached zero.  The main thread observes that physical boundary and holds Starfish's
@@ -2146,7 +2146,7 @@ fn classify_hls_deadline(wake: BlockingWake) -> Option<HlsExit> {
 }
 
 /// Preserve the one exploration clock across its media leg. An upshift starts its playhead clock
-/// before PMS registration and the playlist requests; replacing it here with their last wall
+/// before server registration and the playlist requests; replacing it here with their last wall
 /// snapshot made a user Pause expire unspent playable reserve. A downshift's formula is known only
 /// after its actual candidate EXTINF and fresh reserve are known, so its media-only clock starts at
 /// this boundary and spends unpaused elapsed time: internal starvation is recovery cost, accepted
@@ -2220,13 +2220,13 @@ struct AvioState {
     /// length it announced. Bounded: a body that truncates over and over is a broken origin and
     /// has to reach the player as an error rather than spin here.
     short_body_retries: u8,
-    /// Time spent inside successful body reads only. Request setup, PMS JIT production, TTFB and
+    /// Time spent inside successful body reads only. Request setup, server JIT production, TTFB and
     /// demux/probe work intentionally stay out of this network-rate clock and remain in the
     /// enclosing segment's total acquisition clock.
     body_active_us: u64,
     body_bytes: u64,
     /// When the FIRST body byte reached the demuxer. Together with the open above it this splits
-    /// acquisition into connect / server-think / transfer, which is the only way to see PMS
+    /// acquisition into connect / server-think / transfer, which is the only way to see server
     /// just-in-time production as its own term: for a JIT encoder the wait before the first byte
     /// IS the production cost, and it is otherwise indistinguishable from a slow link.
     first_byte_at: Option<std::time::Instant>,
@@ -2242,7 +2242,7 @@ struct AvioState {
     /// already held. Its action distinguishes an abort above the ladder floor from a clock-only
     /// hold at the terminal actuator. Candidate transactions use `reserve_deadline` instead: an
     /// ordinary candidate owns a playhead-funded clock projected onto each blocking wait, while a
-    /// terminal-floor recovery may omit that reserve clock. A partial PMS response remains
+    /// terminal-floor recovery may omit that reserve clock. A partial server response remains
     /// right-censored and cannot prove an earlier completion time from its prefix rate.
     ///
     /// This is the SAME runtime the segment's open and `NotReady` wait consulted, moved here
@@ -2337,7 +2337,7 @@ impl AvioState {
 
     /// **Credit the acquisition with every body byte already RECEIVED**, not merely read: what
     /// FFmpeg consumed (`off`), plus the park drain's bounce, plus what the transport holds ahead
-    /// (`Src::body_receipt`). PMS pauses a sized response and then bursts the remainder; once
+    /// (`Src::body_receipt`). The server pauses a sized response and then bursts the remainder; once
     /// that burst is in hand, a hold must not abandon it. An unsized body completes only on the
     /// transport's proven end. Called before every guard decision `read_cb` makes.
     ///
@@ -3472,7 +3472,7 @@ enum HlsExit {
     /// It carries the transfer for diagnostics and censored-event accounting — before any body
     /// byte, zero bytes and zero body time over the request's elapsed time (see
     /// `AcquisitionRuntime::stopped_exit`). Its prefix is not a capacity or acquisition
-    /// observation: PMS production, response pacing and network service are not identifiable
+    /// observation: server production, response pacing and network service are not identifiable
     /// separately before the response completes.
     StallAbort(SegmentTransfer),
     Failed(&'static str),
@@ -3628,7 +3628,7 @@ fn hls_open_curl(
 }
 
 /// The plaintext half of [`hls_open_source`], redirects followed (`stream::redirect`) while they
-/// stay on the PMS origin. Also returns the resource the open landed on: a playlist's children
+/// stay on the server origin. Also returns the resource the open landed on: a playlist's children
 /// resolve against it, not against the path that was requested.
 fn hls_open_plain(
     origin: &crate::origin::Origin,
@@ -3650,7 +3650,7 @@ fn hls_open_plain(
         credentials: None,
         range_from: None,
         deadline,
-        // The HLS contract (`crate::hls`): every request stays on the PMS origin.
+        // The HLS contract (`crate::hls`): every request stays on the server origin.
         same_origin_only: true,
     };
     let opened = crate::stream::redirect::open_following(hs, &req, &mut *checkpoint);
@@ -3719,7 +3719,7 @@ fn open_curl_hop(
     crate::curlio::CurlSource::open_reserved(url, at, reservation)
 }
 
-/// The progressive (direct-play) open of a PLAINTEXT part URL, redirects followed. A PMS-hosted
+/// The progressive (direct-play) open of a PLAINTEXT part URL, redirects followed. A server-hosted
 /// trailer answers its Part URL with a `302` to a presigned CDN URL — usually https, which lands
 /// on the curl source. Publishes the same two diagnostics the TLS arm of `demux` does.
 fn open_plain_progressive(
@@ -3984,7 +3984,7 @@ fn hls_wait(
     }
 }
 
-/// One MPEG-TS segment's entirely private FFmpeg state. PMS HLS segments are independent decode
+/// One MPEG-TS segment's entirely private FFmpeg state. Server HLS segments are independent decode
 /// units; retaining an AVFormatContext across them teaches libavformat a byte stream that does not
 /// exist and makes timestamp resets/container EOF ambiguous. The custom AVIO remains transport-
 /// owned exactly as in the progressive path, but every field here is retired at the segment
@@ -4701,7 +4701,7 @@ struct HlsCursor {
     /// Whether this cursor's media playlist is the one describing WHAT IS PLAYING.
     ///
     /// A candidate cursor opened during a quality transaction reads a freshly created encoder
-    /// session, whose playlist lists only the segments PMS has produced so far — so its
+    /// session, whose playlist lists only the segments the server has produced so far — so its
     /// `total_duration()` is a fraction of the film's. Publishing that clobbers
     /// `SHARED.duration_ns`, and on a reject nothing ever restores it: the remaining-playback
     /// estimate, the HUD's total and the scrobble all inherit the truncated number for the rest
@@ -4713,11 +4713,11 @@ struct HlsCursor {
     /// only per-rung rate this app can obtain that is not the catalog's `expected_wire_kbps`, whose
     /// error is +5.2% to +31.6%, item-dependent and non-injective (rungs 18000 and 20000 both
     /// declare 16 150). Live candidate acceptance uses measured `(A,D,B_post)`, not this declaration;
-    /// keeping it attached to the cursor makes the transaction trace describe the actual PMS
+    /// keeping it attached to the cursor makes the transaction trace describe the actual server
     /// variant and preserves the historical corpus comparator.
     ///
     /// Available at VALIDATION and nowhere else: a rung's `BANDWIDTH` cannot be read without first
-    /// creating a PMS encoder session for it, so selection over the ladder still has no per-rung
+    /// creating a server encoder session for it, so selection over the ladder still has no per-rung
     /// rate. That asymmetry is the specification's, not this field's.
     declared_bps: u64,
     auth: crate::hls::InheritedAuth,
@@ -5001,7 +5001,7 @@ fn hls_round_sample(
 
 fn hls_abr_rate_readout(sample: crate::abr::SegmentSample) -> (i64, i64, i64) {
     // The compact panel has no `complete=` column. Publishing an abandoned prefix here would
-    // present its mixed PMS-production/network rate as a normal sample even though the controller
+    // present its mixed server-production/network rate as a normal sample even though the controller
     // correctly discarded it. Keep the forensic prefix on the `abr: sample ... complete=0` log
     // line and make the unqualified panel values explicitly unknown.
     if sample.completed() {
@@ -5332,7 +5332,7 @@ fn publish_hls_abr_action(
 /// property of where the samples are taken, not evidence that the cost is small.
 struct TxTrace {
     started: std::time::Instant,
-    /// The control plane is THREE requests, not one near-zero-byte transfer: PMS session
+    /// The control plane is THREE requests, not one near-zero-byte transfer: server session
     /// creation, the master playlist and the media playlist. Logged separately because they
     /// scale with different things — `prime` is server work and is anti-correlated with link
     /// speed, while the two playlist fetches are round trips. A single `control=` total cannot
@@ -5418,7 +5418,7 @@ impl Drop for HlsTrialReserve {
     }
 }
 
-/// Exclusive ownership of one automatic actuator while its blocking PMS/native work runs outside
+/// Exclusive ownership of one automatic actuator while its blocking server/native work runs outside
 /// the playback-clock mutex.  Acquisition and commit authorization are synchronized state-machine
 /// transitions; dropping the lease is the single rollback/finish edge on every return path.
 struct HlsAutomaticLease {
@@ -5548,7 +5548,7 @@ fn latched_original_recovery(
 ) -> LatchedOriginalRecovery {
     // A fresh successful source observation is already sitting on a completed/fed HLS boundary.
     // It must be eligible on THIS call, not copied into a local latch which can only be consumed
-    // after another HLS GET.  PMS may rebind the shared Streaming Resource to the raw Part as a
+    // after another HLS GET.  The server may rebind the shared Streaming Resource to the raw Part as a
     // side effect of that probe; requiring one more old-session segment then makes the transition
     // depend on a resource the probe itself may have invalidated.
     let recover_kbps = fresh_probe_kbps.unwrap_or(recover_kbps);
@@ -5568,7 +5568,7 @@ fn latched_original_recovery(
 }
 
 /// Publish the worker -> main-thread source handoff only while this worker still owns both the AU
-/// queue and the active PMS route.  This is the source-mode twin of [`publish_hls_candidate`]:
+/// queue and the active server route.  This is the source-mode twin of [`publish_hls_candidate`]:
 /// teardown and publication linearize on AQ, then route identity is checked under ACTIVE.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum OriginalRecoveryPublication {
@@ -5785,7 +5785,7 @@ impl Drop for TxTrace {
 /// **`cause` is a judgement each call site makes about its own failure, and it is load-bearing.**
 ///
 /// N11's backoff refuses to re-prime a rung that just failed. That is right when the failure was
-/// ABOUT the rung — a completed-but-unfunded response, PMS refusing this rung's ceiling
+/// ABOUT the rung — a completed-but-unfunded response, server refusing this rung's ceiling
 /// (`route::PrimeRefusal::Rung`), an acceptance test the candidate did not pass — and wrong when it
 /// was about the session: `reserve_unreadable` is the audio lane falling silent at a seek,
 /// `origin_changed` is the route moving underneath, and `prime_session_moved` is either of those
@@ -5899,9 +5899,9 @@ fn abr_reject_for_hls_exit(exit: HlsExit) -> crate::abr::RejectCause {
 }
 
 /// Classify a completed candidate from what its RESPONSE proved, never from the request label.
-/// A no-gain response is PMS underfill: even when the request actuator differs, its smaller output
+/// A no-gain response is server underfill: even when the request actuator differs, its smaller output
 /// does not order that actuator against lower request ceilings. Treating it as structural walked
-/// the whole ladder and allocated one physical encoder per rung on the remote PMS.
+/// the whole ladder and allocated one physical encoder per rung on the remote server.
 fn abr_reject_for_candidate_result(
     raster_ready: bool,
     quality_improves: bool,
@@ -6280,11 +6280,11 @@ fn hls_demux(
     // Lives here rather than on `OriginalRecovery` because it is a property of the LOG, not of the
     // gate — and the gate is rebuilt on a seek while this loop is not.
     let mut last_probe_block: Option<crate::abr::ProbeBlock> = None;
-    // PMS acknowledges a transcode stop before its worker finishes either half of the lifecycle.
+    // Server acknowledges a transcode stop before its worker finishes either half of the lifecycle.
     // The route ledger drives physical ping then exact logical-resource close; this latch keeps a
     // potentially long server cleanup to one waiting line and one release line.
     let mut cleanup_wait_logged = false;
-    // Exactly one completed object in a fresh cursor carries PMS encoder/session startup. It is
+    // Exactly one completed object in a fresh cursor carries server encoder/session startup. It is
     // buffered and measured, but the repeatable acquisition window begins with the next object;
     // see `Controller::observe_session_boundary`.
     let mut session_boundary_pending = adaptive.is_some();
@@ -6328,7 +6328,7 @@ fn hls_demux(
             //
             // **What it must NOT do is enter the capacity estimate as a completed transfer.** The
             // response is incomplete by construction, so its bytes may be a receive-buffer burst or
-            // a PMS JIT production interval rather than path service — device-measured
+            // a server JIT production interval rather than path service — device-measured
             // `bytes=1448 ... at 42277kbps` while the shaper held the link at 500 kbps. Entered as
             // complete it kept `conservative_kbps` near 16 Mbit/s, so every correct downshift picked a
             // target 30x too dear. See `SegmentSample::abandoned`.
@@ -6870,7 +6870,7 @@ fn hls_demux(
         }
         // A recovery downshift may legitimately span an internally-held rebuffer clock, so it
         // does not use the upward trial-reserve certificate below. It still owns the same single
-        // automatic-actuator slot for the whole PMS/candidate transaction: source recovery and a
+        // automatic-actuator slot for the whole server/candidate transaction: source recovery and a
         // second rung transaction cannot both pass an earlier snapshot and publish independently.
         let _automatic_lease = if proposal.direction == crate::abr::Direction::Down {
             let Some(lease) = HlsAutomaticLease::begin(automatic_kind, expected_user_sequence)
@@ -6898,7 +6898,7 @@ fn hls_demux(
         // itself. A setup-bearing object and its optional ordinary observation share this same
         // clock while both remain staged. A user Pause therefore moves an already-issued snapshot
         // instead of consuming playable reserve. Publish the retained balance BEFORE the control
-        // plane: PMS session creation and playlist requests consume it while the native clock
+        // plane: server session creation and playlist requests consume it while the native clock
         // advances, even though they move no media bytes.
         let mut _trial_reserve = None;
         let mut exploration_reserve = None;
@@ -7167,7 +7167,7 @@ fn hls_demux(
             continue;
         }
         // The remaining candidate media budget is whatever is left of the same end-to-end
-        // exploration surplus after session creation and both playlists. A remote PMS may spend a
+        // exploration surplus after session creation and both playlists. A remote the server may spend a
         // material fraction of it registering the encoder; that time consumes the viewer's
         // reserve even though it transfers no media, so excluding it would over-grant the trial.
         //
@@ -7276,7 +7276,7 @@ fn hls_demux(
                 aq,
                 &mut net,
                 acodec,
-                // `SegmentAcquisition::Candidate` never carries a prefix `StallGuard`. PMS may
+                // `SegmentAcquisition::Candidate` never carries a prefix `StallGuard`. The server may
                 // pause a sized response while its JIT encoder catches up, so a prefix-rate
                 // extrapolation is not proof that the unseen remainder will miss
                 // `candidate_deadline` below. When that reserve clock exists, each `read_until`
@@ -7333,7 +7333,7 @@ fn hls_demux(
         let mut candidate_transition: Option<HlsCandidateTransition> = None;
 
         // The boundary object is still direct evidence whenever it satisfies `A<=D && B_post>=A`:
-        // commit it immediately. An `A>D` boundary contains one-time PMS/session/JIT setup and may
+        // commit it immediately. An `A>D` boundary contains one-time server/session/JIT setup and may
         // need one ordinary object to identify repeatable cadence. Both objects remain STAGED:
         // the original exploration clock must fund the whole observation without media credit.
         // Publishing the setup object first and later rejecting the candidate mixed two encoder
@@ -7680,7 +7680,7 @@ fn hls_demux(
         drop(_trial_reserve.take());
         control.retire(previous);
         // **`out=` is what was DECODED; the pair before it is the rung's bounding box.** They are
-        // routinely different and the difference is the point: M3 (2026-08-28) measured PMS
+        // routinely different and the difference is the point: M3 (2026-08-28) measured server
         // producing 1280x720 for BOTH `P720` and `P1080M6` against a 4K source, and 1918x802 for
         // every rung from `P1080M6` up against a 1080p one. So a commit that crosses a catalog
         // raster band is frequently invisible to a viewer, and `run.py`'s `raster_changes` — the
@@ -8127,7 +8127,7 @@ pub(crate) fn demux(
                 // The container's own track names, published before anything else can fail: the track
                 // menu is the only reader and it wants them whether or not this part turns out to have
                 // a video stream. See `stream_name` for why they are read at all — for an MP4 they are
-                // the ONLY place a track's identity exists, PMS having dropped it.
+                // the ONLY place a track's identity exists, server having dropped it.
                 {
                     let (audio, subs) = track_names(fmt);
                     let named = audio
@@ -8247,7 +8247,7 @@ pub(crate) fn demux(
                 // one of those six numbers checked against the vendored `libavutil/pixfmt.h`, not
                 // recalled). A Profile 5 file is expected to read 2/2/2, since IPT-PQ signals no
                 // ordinary transfer at all — inferred rather than seen from here, but from the same
-                // probe: PMS reports NO `colorTrc`, `colorSpace` or `colorPrimaries` at all on the dev
+                // probe: the server reports NO `colorTrc`, `colorSpace` or `colorPrimaries` at all on the dev
                 // server's P5 item while sending all three on every P8 (swept 2026-08-21). This line
                 // is where a television settles it.
                 // All three were declared in the offsets table above and read NOWHERE until now.

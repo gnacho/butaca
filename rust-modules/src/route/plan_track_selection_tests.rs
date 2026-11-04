@@ -36,13 +36,13 @@ fn the_files_default_track_wins_without_a_language_preference() {
 
 
 
-/// PMS account auto-picks and manual picks are indistinguishable, so both outrank the show.
+/// Server account auto-picks and manual picks are indistinguishable, so both outrank the show.
 
 
 
 
 
-/// A PMS selection the pipeline cannot decode (French DTS) is answered by a
+/// A server selection the pipeline cannot decode (French DTS) is answered by a
 /// direct-playable track in THAT language, not by the file's default in another one.
 #[test]
 fn a_non_playable_pick_is_answered_by_a_sibling_in_its_language() {
@@ -95,7 +95,7 @@ fn the_servers_selected_track_outranks_the_files_default() {
 
 #[test]
 fn a_selected_track_that_cannot_direct_play_falls_through_to_the_ladder() {
-    // A live shape off the server: it holds the English DTS track (a PMS selection — it is
+    // A live shape off the server: it holds the English DTS track (a server selection — it is
     // not the file default), which this pipeline cannot decode. Honouring it would force a
     // whole-video transcode for one audio track, so the ladder runs on instead.
     let tracks = [
@@ -210,7 +210,7 @@ fn the_audio_ladder_walks_its_rungs_in_order() {
 #[test]
 fn the_selected_subtitle_resolves_to_the_renderers_embedded_ordinal() {
     // Document order is NOT container order and a sidecar sits in the middle of the list:
-    // the renderer counts only embedded streams, sorted on PMS `Stream.index` — the same
+    // the renderer counts only embedded streams, sorted on the server `Stream.index` — the same
     // identifier space the track menu commits (metadata::sub_render_ordinal).
     let subs = [
         sub(10, 7, "fra", true),  // sidecar — not in the container, not counted
@@ -257,7 +257,7 @@ fn a_selection_with_no_stream_id_is_left_off_rather_than_half_applied() {
 
 
 
-/// **One precedence for every path.** A PMS selection the pipeline cannot decode (English DTS)
+/// **One precedence for every path.** A server selection the pipeline cannot decode (English DTS)
 /// still outranks the show's language: direct play carries it as the English AC3
 /// sibling, a re-encode names the DTS itself. The direct-play pick used to hand this case to the
 /// show's Hungarian while the re-encode named the DTS — two answers to one question.

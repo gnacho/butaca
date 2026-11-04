@@ -198,7 +198,7 @@ hubs: landed — 54 items, 6 shelves
 ```
 
 The registry of `rust-modules/src/server/CLAUDE.md` held two servers with separate tokens — the
-owner's (PMS 1.43.3) and a shared one (PMS 1.43.4) — and the who's-watching picker, the managed
+owner's (server 1.43.3) and a shared one (server 1.43.4) — and the who's-watching picker, the managed
 profile switch and the per-user server token all worked. A managed profile's PIN keypad was
 exercised twice (§4.2 is about what that put in the log).
 
@@ -371,7 +371,7 @@ because nothing in a symbol inventory can express "how does this firmware interp
 value". `tools/fwcompat.py` grades whether the binary starts; this is a payload semantics change,
 invisible to it by construction.
 
-The blast radius is total on this firmware and zero on the dev set: **every** PMS transcode target
+The blast radius is total on this firmware and zero on the dev set: **every** server transcode target
 that is not HEVC is H.264, so on webOS 10.3.1 the app direct-plays whatever it can and shows a
 black screen for everything else — which is most libraries, most of the time.
 
@@ -415,7 +415,7 @@ almost certainly the frame rate, and `devcaps.rs` ignores it *by design*:
 
 So the real fix is a per-codec `(maxWidth, maxHeight, maxFrameRate)` triple read out of
 `/etc/umediaserver/device_codec_capability_config.json` and declared per Load — which also closes
-the gap CLAUDE.md already names, that the profile sent to PMS bounds no frame rate at all. That is
+the gap CLAUDE.md already names, that the profile sent to server bounds no frame rate at all. That is
 bench work with the pipeline test tier behind it (`pipe_h264_*` covers all four rasters SD→UHD, and
 `pipe_h264_1080p5994` is the one fixture that exercises a non-integer rate), not something to land
 off a lab session.
@@ -450,7 +450,7 @@ ceiling fix turns out to be, `type=18` needs to become a *verdict*.
 
 ### 4.1 Remote cold start burns 13–21 s probing LAN addresses that cannot work
 
-This is precisely the reviewer-with-no-PMS-on-their-LAN scenario `curlio.rs` was written for, and
+This is precisely the reviewer-with-no-server-on-their-LAN scenario `curlio.rs` was written for, and
 the *transport* half is solved while the *discovery* half is not. Every server is probed at its
 LAN candidates first, serially, at roughly 4.5–5 s per candidate, before falling back to the
 public `https://<host>` URI that works:
@@ -487,7 +487,7 @@ what a redactor missed is the same leak by a shorter route, which is why
 
 **(a) A bare hostname, three times.** `rust-modules/src/stream.rs:673` logs a resolver failure as
 `stream: GET /identity DNS FAILED host=<the hostname verbatim>`. It appeared once per run — three
-of the ten uploads carry a household's PMS hostname in the clear. The scrubber cannot see it:
+of the ten uploads carry a household's server hostname in the clear. The scrubber cannot see it:
 `scrub_authority` only rewrites what follows `://`, `scrub_addresses` only matches numeric
 addresses, and the hostname is a custom domain rather than a pinned-name origin, so the one
 hostname special-case does not apply either. **Strictly, §6 does not promise to catch this** — its

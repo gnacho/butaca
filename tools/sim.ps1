@@ -5,9 +5,9 @@ param(
     [string]$Action = "run",
 
     [string]$Distro = "Ubuntu-22.04",
-    [string]$PmsHost = "",
+    [string]$ServerHost = "",
     [ValidateRange(1, 65535)]
-    [int]$PmsPort = 32400,
+    [int]$ServerPort = 32400,
     [string]$RuntimeDir = "",
     [string]$TargetDir = "",
     [string]$AssetDir = "",
@@ -137,9 +137,9 @@ $repoWindows = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $repoLinux = ConvertTo-WslPath $repoWindows
 $commonEnvironment = @{
     BUTACA_REPO = $repoLinux
-    BUTACA_PMS = $PmsHost
-    BUTACA_PORT = $(if ($PSBoundParameters.ContainsKey("PmsPort")) {
-        $PmsPort.ToString([System.Globalization.CultureInfo]::InvariantCulture)
+    BUTACA_SERVER_HOST = $ServerHost
+    BUTACA_PORT = $(if ($PSBoundParameters.ContainsKey("ServerPort")) {
+        $ServerPort.ToString([System.Globalization.CultureInfo]::InvariantCulture)
     } else { "" })
     BUTACA_RUNTIME = $RuntimeDir
     BUTACA_TARGET = $TargetDir
@@ -169,10 +169,10 @@ build_simulator() {
 if [ "${BUTACA_STAGE_TOKEN:-}" = 1 ]; then
     token=""
     if [ -f "$repo/src/config.local.h" ]; then
-        token=$(sed -n 's/^#define[[:space:]]*PMS_TOKEN[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/src/config.local.h" | head -n 1 || true)
+        token=$(sed -n 's/^#define[[:space:]]*SERVER_TOKEN[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/src/config.local.h" | head -n 1 || true)
     fi
     if [ -z "$token" ]; then
-        echo "No PMS_TOKEN was found in src/config.local.h." >&2
+        echo "No SERVER_TOKEN was found in src/config.local.h." >&2
         exit 1
     fi
     umask 077
@@ -181,13 +181,13 @@ if [ "${BUTACA_STAGE_TOKEN:-}" = 1 ]; then
 elif [ -s "$runtime/butaca-token" ]; then
     echo "Using the token already staged in the simulator runtime directory."
 fi
-pms="${BUTACA_PMS:-}"
+pms="${BUTACA_SERVER_HOST:-}"
 if [ -z "$pms" ] && [ -f "$repo/src/config.local.h" ]; then
-    pms=$(sed -n 's/^#define[[:space:]]*PMS_HOST[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/src/config.local.h" | head -n 1 || true)
+    pms=$(sed -n 's/^#define[[:space:]]*SERVER_HOST[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/src/config.local.h" | head -n 1 || true)
 fi
 port="${BUTACA_PORT:-}"
 if [ -z "$port" ] && [ -f "$repo/src/config.local.h" ]; then
-    port=$(sed -n 's/^#define[[:space:]]*PMS_PORT[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$repo/src/config.local.h" | head -n 1 || true)
+    port=$(sed -n 's/^#define[[:space:]]*SERVER_PORT[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$repo/src/config.local.h" | head -n 1 || true)
 fi
 port="${port:-32400}"
 export BUTACA_RUNTIME_DIR="$runtime"

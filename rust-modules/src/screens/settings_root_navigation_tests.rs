@@ -17,7 +17,7 @@ fn mounting_the_surface_names_its_root_page() {
         InstanceId(0),
         Family::Settings,
         SettingsPage::Root,
-        crate::pms::HubsSnapshot::empty_for_test().view(),
+        crate::catalog::HubsSnapshot::empty_for_test().view(),
     );
     step(&mut s, ScreenEvent::Mount, None);
     assert_eq!(name(&s), word::SETTINGS);
@@ -44,7 +44,7 @@ fn back_at_the_surface_s_own_root_is_not_handled() {
         InstanceId(0),
         Family::Settings,
         SettingsPage::Root,
-        crate::pms::HubsSnapshot::empty_for_test().view(),
+        crate::catalog::HubsSnapshot::empty_for_test().view(),
     );
     step(&mut s, ScreenEvent::Mount, None);
     let back: ScreenEvent<InnerHost> = ScreenEvent::Input(InputEvent {
@@ -75,7 +75,7 @@ fn a_pop_from_servers_restores_focus_to_the_row_that_opened_it() {
         InstanceId(0),
         Family::Settings,
         SettingsPage::Root,
-        crate::pms::HubsSnapshot::empty_for_test().view(),
+        crate::catalog::HubsSnapshot::empty_for_test().view(),
     );
     step(&mut s, ScreenEvent::Mount, None);
 
@@ -145,7 +145,7 @@ fn the_logical_state_follows_the_inner_stack() {
         InstanceId(0),
         Family::Settings,
         SettingsPage::Root,
-        crate::pms::HubsSnapshot::empty_for_test().view(),
+        crate::catalog::HubsSnapshot::empty_for_test().view(),
     );
     step(&mut s, ScreenEvent::Mount, None);
     let at_root = <RouteSurface as Screen<InnerHost>>::state(&s).hash();

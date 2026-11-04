@@ -220,7 +220,7 @@ impl Origin {
     /// The **plaintext** constructor, named so that it is greppable.
     ///
     /// Every call is a place that still assumes cleartext — the legacy `(host, port)` registry
-    /// entry points, the compiled-in PMS host, a session file with no stored origin. Each of those
+    /// entry points, the compiled-in server host, a session file with no stored origin. Each of those
     /// really does mean plaintext (they have only an address to go on, and an address cannot carry
     /// the name a certificate is issued for), which is why they are spelled `Origin::http(` rather
     /// than `Origin::new(Scheme::Http, …)`: the grep is what finds them the day one of them learns
@@ -433,7 +433,7 @@ struct Parts<'a> {
     /// **An EMPTY port counts.** `http://192.0.2.10:` is a truncated write or a half-finished hand
     /// edit, not a request for the default, and reading it as one is exactly the "dial a port
     /// nobody wrote down" outcome [`dial_port`] exists to prevent. RFC 3986 would let an empty port
-    /// mean the default; this is a PMS origin parser reading a file that can be corrupt, and the
+    /// mean the default; this is a server origin parser reading a file that can be corrupt, and the
     /// two want opposite answers.
     port_bad: bool,
     path: &'a str,
@@ -588,7 +588,7 @@ mod tests {
     /// contract that stops a custom `https://host` (served on 443) from being dialled on 32400.
     #[test]
     fn parse_connection_takes_the_advertised_port_only_when_the_uri_omits_one() {
-        // portless custom URL → the advertised 443, not the 32400 PMS default
+        // portless custom URL → the advertised 443, not the 32400 server default
         let o = Origin::parse_connection("https://plex.example.com", 443).unwrap();
         assert_eq!(
             (o.scheme(), o.host(), o.port()),

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve a synthetic guest for tests/mock_pms.py without using an account token."""
+"""Resolve a synthetic guest for tests/mock_server.py without using an account token."""
 import argparse
 import json
 from pathlib import Path
@@ -17,10 +17,10 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def configured_origin(config):
     text = Path(config).read_text()
-    host = re.search(r'^\s*#define\s+PMS_HOST\s+"([^"]+)"\s*$', text, re.M)
-    port = re.search(r'^\s*#define\s+PMS_PORT\s+(\d+)\s*$', text, re.M)
+    host = re.search(r'^\s*#define\s+SERVER_HOST\s+"([^"]+)"\s*$', text, re.M)
+    port = re.search(r'^\s*#define\s+SERVER_PORT\s+(\d+)\s*$', text, re.M)
     if not host or not port or not re.fullmatch(r"[A-Za-z0-9.-]+", host[1]):
-        raise ValueError("mock guest requires explicit PMS_HOST and PMS_PORT in config.local.h")
+        raise ValueError("mock guest requires explicit SERVER_HOST and SERVER_PORT in config.local.h")
     if not 1 <= int(port[1]) <= 65535:
         raise ValueError("invalid mock PMS port")
     return f"http://{host[1]}:{int(port[1])}"
@@ -44,7 +44,7 @@ def resolve(config):
             or user.get("uuid") != "demo-user" or user.get("username") != "demo"):
         raise ValueError("configured server is not the synthetic mock PMS")
     # This value is fabricated, never an account or per-server access token. The mock accepts
-    # arbitrary nonempty tokens; a real PMS cannot authenticate it even if misconfigured later.
+    # arbitrary nonempty tokens; a real server cannot authenticate it even if misconfigured later.
     return MOCK_TOKEN
 
 
@@ -85,9 +85,9 @@ def selftest():
             try:
                 with tempfile.TemporaryDirectory() as tmp:
                     config = Path(tmp) / "config.local.h"
-                    config.write_text('#define PMS_HOST "127.0.0.1"\n'
-                                      f'#define PMS_PORT {server.server_port}\n'
-                                      '#define PMS_TOKEN "MUST-NOT-BE-READ-OR-SENT"\n')
+                    config.write_text('#define SERVER_HOST "127.0.0.1"\n'
+                                      f'#define SERVER_PORT {server.server_port}\n'
+                                      '#define SERVER_TOKEN "MUST-NOT-BE-READ-OR-SENT"\n')
                     self.assertEqual(resolve(config), MOCK_TOKEN)
                     self.assertEqual([p for p, _ in seen], ["/identity", "/api/v2/user"])
                     self.assertTrue(all("X-Plex-Token" not in h for _, h in seen))
@@ -99,8 +99,8 @@ def selftest():
                     with self.assertRaisesRegex(ValueError, "redirected"):
                         resolve(config)
                     self.assertEqual(len(seen), count + 1)
-                    config.write_text('#define PMS_HOST "example.invalid/escape"\n#define PMS_PORT 80\n')
-                    with self.assertRaisesRegex(ValueError, "explicit PMS_HOST"):
+                    config.write_text('#define SERVER_HOST "example.invalid/escape"\n#define SERVER_PORT 80\n')
+                    with self.assertRaisesRegex(ValueError, "explicit SERVER_HOST"):
                         resolve(config)
             finally:
                 server.shutdown()
@@ -123,7 +123,7 @@ def main():
     try:
         token = resolve(args.config)
     except (OSError, ValueError, KeyError, TypeError, AttributeError, urllib.error.URLError):
-        parser.exit(1, "mock guest refused: configured PMS must answer as tests/mock_pms.py\n")
+        parser.exit(1, "mock guest refused: configured the server must answer as tests/mock_server.py\n")
     print(token)
     return 0
 

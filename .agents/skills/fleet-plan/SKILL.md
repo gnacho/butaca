@@ -231,14 +231,14 @@ reaches back to the main checkout:
 
 ```sh
 WT=$MAIN/.claude/worktrees/<lane>
-cp "$MAIN/src/config.local.h"        "$WT/src/"          # PMS host + token
+cp "$MAIN/src/config.local.h"        "$WT/src/"          # server host + token
 cp "$MAIN/tests/manifest.local.json" "$WT/tests/"        # only for ./tests/run.py --server
 ```
 
 - **`src/config.local.h`** is the one a host-only lane still needs. `make sim-run` and
-  `make sim-shot` read `PMS_HOST` out of it (`Makefile:843`) and die `no PMS host` without it —
+  `make sim-shot` read `SERVER_HOST` out of it (`Makefile:843`) and die `no server host` without it —
   `make sim` alone only builds, so the failure arrives one command later than you expect;
-  `make sim-token`, `tools/tv-session.sh` and `tests/run.py` read `PMS_TOKEN` from it. **So every
+  `make sim-token`, `tools/tv-session.sh` and `tests/run.py` read `SERVER_TOKEN` from it. **So every
   lane carries its own copy of a real X-Plex-Token**, which is exactly why `.gitignore` names it in
   the *tracked* file — read the comment there: it used to be held out by `.git/info/exclude`, which
   is local-only and *"does not apply in a fresh worktree"*, i.e. one `git add -A` from a live

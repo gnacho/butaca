@@ -135,7 +135,7 @@ echo "== build-host identity =="
 # one that gates everything went unverified for so long:
 #
 #   the LAN address comes from src/config.local.h, which is present on a dev machine BY DESIGN
-#   (src/app.h's __has_include falls back to YOUR_PMS_HOST only in a clean checkout) — so those
+#   (src/app.h's __has_include falls back to YOUR_SERVER_HOST only in a clean checkout) — so those
 #   assertions genuinely can only hold in CI;
 #
 #   the HOME DIRECTORY has nothing to do with config.local.h. It arrives through `-Z build-std`
@@ -170,8 +170,8 @@ if grep -qE "$PRIVATE_IPV4_RE" "$AUDIT_TMP/strings"; then
   grep -oE "$PRIVATE_IPV4_RE" "$AUDIT_TMP/strings" | sort -u | sed -n '1,10p'
   fail "private IP address baked into the binary — was this built with src/config.local.h present?"
 fi
-grep -q YOUR_PMS_HOST "$AUDIT_TMP/strings" \
-  || fail "YOUR_PMS_HOST placeholder absent — a real PMS_HOST was compiled in"
+grep -q YOUR_SERVER_HOST "$AUDIT_TMP/strings" \
+  || fail "YOUR_SERVER_HOST placeholder absent — a real SERVER_HOST was compiled in"
 ok "no private IPs, placeholder present"
 
 echo "all ELF assertions passed"

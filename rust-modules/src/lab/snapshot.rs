@@ -13,9 +13,10 @@
 //! behind each clause; it applies here unchanged and for a stronger reason, since an upload
 //! crosses the public internet rather than a room:
 //!
-//! * **no URL and no path** — the PMS token rides in the query string of every playback and image
+//! * **no URL and no path** — the server token rides in the query string of every playback and
+//! image
 //!   URL, so a URL-shaped field is a guaranteed credential leak rather than a possible one;
-//! * **no credential at any length** — omitted, never masked, because a PMS token is short and
+//! * **no credential at any length** — omitted, never masked, because a server token is short and
 //!   shape-indistinguishable from an ordinary opaque id;
 //! * **no stable identity** — not the server's friendly name (commonly the owner's first name),
 //!   not its `machineIdentifier` (a permanent household fingerprint), not its address;

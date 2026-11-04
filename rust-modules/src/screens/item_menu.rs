@@ -42,7 +42,7 @@
 use std::borrow::Cow;
 use std::os::raw::c_int;
 
-use crate::pms::PmsMovie;
+use crate::catalog::CatalogMovie;
 use crate::screens::registry::{RepeatGate, PANEL_REPEAT_MS};
 use crate::screens::registry::{AppFx, AppLike, ItemMenuArg, ItemMenuKind, ItemMenuReq};
 use crate::ui::consts::*;
@@ -173,8 +173,8 @@ pub(crate) const SHAPE: &str =
 
 /// Is `m` an item the menu has anything to offer? A leaf or a show/season — i.e. everything the
 /// home shelves carry. Kept as a predicate so the caller can decline to present an empty panel.
-pub(crate) fn has_actions(m: &PmsMovie) -> bool {
-    m.kind != crate::pms::KIND_COLLECTION && !m.rk.is_empty()
+pub(crate) fn has_actions(m: &CatalogMovie) -> bool {
+    m.kind != crate::catalog::KIND_COLLECTION && !m.rk.is_empty()
 }
 
 /// Why [`build`], [`build_episode`] and [`build_season`] all end in a length assertion.
@@ -189,17 +189,17 @@ const ACTS_PARALLEL: &str = "acts must stay one-to-one with the rows: a row with
 
 /// The rows, and the action each one commits. Order is the pinned design's:
 /// navigation (`Go to Episode` · `Go to Show`) — separator — state (the watch row or ROWS ·
-/// `Play from Start`), adapted per item kind (`PmsMovie::kind`: 0 movie / 1 show / 2 season /
+/// `Play from Start`), adapted per item kind (`CatalogMovie::kind`: 0 movie / 1 show / 2 season /
 /// 3 episode; 4 collection is refused by [`has_actions`], which every caller asks first). The
 /// state group is one row or two off [`state_rows`], so this list has no fixed length and every
 /// index into it is resolved through `acts` — see [`ACTS_PARALLEL`].
 #[cfg(test)]
-fn build(m: &PmsMovie, from_deck: bool) -> (Section, Vec<Option<Action>>) {
+fn build(m: &CatalogMovie, from_deck: bool) -> (Section, Vec<Option<Action>>) {
     build_with(m, from_deck, None)
 }
 
 fn build_with(
-    m: &PmsMovie,
+    m: &CatalogMovie,
     from_deck: bool,
     trailer: Option<&crate::metadata::Extra>,
 ) -> (Section, Vec<Option<Action>>) {
@@ -271,7 +271,7 @@ fn build_with(
     // ---- and, only on a Continue Watching card, the row that takes it off the deck ----
     // Gated on the SHELF, not on the item: the action is meaningless anywhere else (nothing to
     // remove it from), and offering it on a Recently Added card would be a row that silently did
-    // nothing. `pms::hub_is_continue` is what the caller passes in.
+    // nothing. `catalog::hub_is_continue` is what the caller passes in.
     //
     // Last, after the watched toggle, because it is the only row here that removes something from
     // view — the destructive-ish end of the group, where a mis-hit is least likely.
@@ -437,7 +437,7 @@ pub(crate) struct ItemMenuScreen {
 /// The menu never talks to the server.
 fn cached_trailer(
     sid: crate::registry::ServerId,
-    m: &PmsMovie,
+    m: &CatalogMovie,
     meta: crate::metadata::MetadataView<'_>,
 ) -> Option<crate::metadata::Extra> {
     if m.kind != 0 && m.kind != 1 {
@@ -778,9 +778,9 @@ mod tests {
     /// A LEAF in the middle is `viewCount == 0` with a live `viewOffset`; a CONTAINER in the middle
     /// is "some leaves viewed, not all", i.e. NEITHER flag — the state a bool could not hold and the
     /// reason this fixture takes a [`PosterMark`].
-    fn item(kind: c_int, mark: PosterMark) -> PmsMovie {
+    fn item(kind: c_int, mark: PosterMark) -> CatalogMovie {
         let leaf = kind == 0 || kind == 3;
-        let mut m = PmsMovie::default();
+        let mut m = CatalogMovie::default();
         m.rk = "42".to_string();
         m.kind = kind;
         m.show_rk = "7".to_string();
@@ -873,7 +873,7 @@ mod tests {
 
     #[test]
     fn a_collection_has_no_item_menu_actions() {
-        let collection = PmsMovie { rk: "42".into(), kind: crate::pms::KIND_COLLECTION,
+        let collection = CatalogMovie { rk: "42".into(), kind: crate::catalog::KIND_COLLECTION,
             ..Default::default() };
         assert!(!has_actions(&collection), "a collection menu must not be openable before its page exists");
     }
@@ -1102,7 +1102,7 @@ mod tests {
     #[test]
     fn a_related_tile_off_the_wire_gets_the_row_set_its_state_earns() {
         let row = |kind: i32, rk: &str, resume_ms: i64, watched: bool, unwatched: bool| {
-            crate::pms::PmsMovie {
+            crate::catalog::CatalogMovie {
                 sid: crate::registry::ServerId::UNSET,
                 rk: rk.into(),
                 kind,
@@ -1113,7 +1113,7 @@ mod tests {
                 ..Default::default()
             }
         };
-        let set = |r: crate::pms::PmsMovie| labels(&build(&r, false).0);
+        let set = |r: crate::catalog::CatalogMovie| labels(&build(&r, false).0);
 
         // a MOVIE, in each of the three states — one navigation row, then the state group
         assert_eq!(
@@ -1272,7 +1272,7 @@ mod tests {
 
     /// **The menu carries the row it was opened on**, and it is the ENTRY's argument now rather
     /// than a `static mut ITEM`. That capture is the fix for a Play-from-Start that resolved its
-    /// target through the HOME hub catalog (`pms::index_of_rk`) and so silently did nothing on
+    /// target through the HOME hub catalog (`catalog::index_of_rk`) and so silently did nothing on
     /// every other card surface — and it is a stronger claim as an argument than as a global: the
     /// row cannot be re-pointed by a hub refetch rebuilding the catalog under an open panel, and
     /// the episode / season entry points carry NONE rather than the last card's.
@@ -1533,7 +1533,7 @@ mod tests {
         })
     }
 
-    fn card_arg(m: &PmsMovie, from_deck: bool) -> ItemMenuArg {
+    fn card_arg(m: &CatalogMovie, from_deck: bool) -> ItemMenuArg {
         ItemMenuArg {
             sid: m.sid,
             rk: m.rk.clone(),

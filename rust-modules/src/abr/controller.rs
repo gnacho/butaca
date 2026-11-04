@@ -65,9 +65,9 @@ pub(crate) enum HlsReason {
     /// Stay that names the VIEWER as the binding constraint rather than the link, which is why it
     /// is not folded into `RejectBackoff` — nothing about the network refused anything here.
     SwitchCost,
-    /// The current actuator is already the largest request, but PMS returned a response whose
-    /// decoded geometry is provably below that request/source.  It remains refreshable as the
-    /// same actuator after strictly stronger completed-service evidence; the request ceiling is
+    /// The current actuator is already the largest request, but the server returned a response
+    /// whose decoded geometry is provably below that request/source.  It remains refreshable as
+    /// the same actuator after strictly stronger completed-service evidence; the request ceiling is
     /// not promoted into a claim about delivered quality.
     ResponseLimited,
 }
@@ -141,7 +141,7 @@ pub(crate) struct GateCounters {
     pub(crate) dwell_ms: u64,
     /// The rung the reject/backoff guard is currently refusing, in kbps (N11). `0` is nothing.
     pub(crate) blocked_kbps: u32,
-    /// Samples taken since the current rung was committed. The first is a PMS cold start, which
+    /// Samples taken since the current rung was committed. The first is a server cold start, which
     /// is the ONE sample count that survives anywhere in HLS policy — it feeds the production
     /// estimator's 1-vs-3 weight, and it is I3's cold-start predicate. It is not an adaptation
     /// gate any more (N9).
@@ -186,11 +186,11 @@ pub(crate) enum RejectCause {
     /// old observation changed.
     CompletedUnsustainable,
     /// A fresh session returned no Pareto quality gain over the response already playing. This is
-    /// not a structural or ordinal fact about the requested actuator: PMS answered with a
+    /// not a structural or ordinal fact about the requested actuator: the server answered with a
     /// different, demand-capped response. The completed transaction gives an exact common budget
     /// endpoint, so no quality request runs again until disposable reserve is strictly larger.
     /// Requiring the small response to prove a higher hidden service rate would make a demand-
-    /// capped PMS response absorbing; trying lower request ceilings would merely churn encoders
+    /// capped server response absorbing; trying lower request ceilings would merely churn encoders
     /// without any response-size evidence that orders those requests.
     ResponseUnchanged,
     /// The decoded raster exceeded this actuator's bounding box. Every smaller box is at least as
@@ -207,8 +207,8 @@ pub(crate) enum RejectCause {
 /// Monotone failure memory for one actuator. Completed candidate evidence is ordered by response
 /// size: a later, cheaper failure must not erase the larger budget already spent on a higher rung.
 /// Transactions with no ordinal response endpoint have an additional common frontier on
-/// [`Controller`]: either no response completed, or PMS completed a no-gain object unrelated to
-/// the requested ceiling. The array is indexed by [`Rung::index`].
+/// [`Controller`]: either no response completed, or the server completed a no-gain object unrelated
+/// to the requested ceiling. The array is indexed by [`Rung::index`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct FailureCertificate {
     /// Largest end-to-end exploration budget under which this rung failed or completed unfunded.
@@ -217,9 +217,10 @@ struct FailureCertificate {
     deadline_budget_ms: Option<i64>,
     /// This actuator supplied an upper scheduling endpoint even after a larger reserve releases
     /// its hard budget block.  A completed candidate does so directly; a deadline-censored
-    /// candidate does so operationally because repeating that same largest transaction on every
-    /// epsilon of refill is the observed livelock.  `ResponseUnchanged` deliberately does not:
-    /// PMS returned an unrelated demand-capped response which cannot order request actuators.
+    /// candidate does so operationally because repeating that same largest transaction on
+    /// every epsilon of refill is the observed livelock.  `ResponseUnchanged` deliberately does
+    /// not: the server returned an unrelated demand-capped response which cannot order request
+    /// actuators.
     service_endpoint: bool,
     /// Recent current-rung delivery estimate when a completed `A > D` observation was made. The
     /// certificate blocks until the live distribution's conservative bound is strictly above
@@ -340,14 +341,14 @@ pub(crate) struct Controller {
     failures: [FailureCertificate; LADDER.len()],
     /// Largest common refill frontier established by a quality transaction which did not produce
     /// an ordinal response endpoint: `E_f`, the exact disposable budget armed for the attempt.
-    /// The transaction was either right-censored before
-    /// complete media or PMS completed a demand-capped response with no Pareto gain. Until the
-    /// live operating point exposes a strictly larger budget, *no other upshift actuator* is
-    /// eligible; changing the requested rung is not new evidence in either case.
+    /// The transaction was either right-censored before complete media or the server completed
+    /// a demand-capped response with no Pareto gain. Until the live operating point exposes
+    /// a strictly larger budget, *no other upshift actuator* is eligible; changing the requested
+    /// rung is not new evidence in either case.
     ///
     /// This is separate from [`Self::failures`]. That array retains actuator-specific evidence
     /// for search once a larger common budget exists; this frontier prevents untouched rungs from
-    /// laundering the same exhausted reserve into immediate PMS encoder churn.
+    /// laundering the same exhausted reserve into immediate server encoder churn.
     common_budget_frontier_ms: Option<i64>,
     /// Spendable reserve attached to the in-flight upshift. At rejection it becomes `E_f` in the
     /// common refill frontier; the worker replaces the proposal-time value with the exact budget
@@ -567,7 +568,7 @@ impl Controller {
     /// budget available now.
     ///
     /// This is deliberately about the controller's measured failure frontier, not about whether
-    /// `current` happens to equal the catalog's largest request. PMS is free to map a larger
+    /// `current` happens to equal the catalog's largest request. The server is free to map a larger
     /// request to the same (or a worse) rendition. Such a completed transaction is correctly
     /// rejected and can therefore never become `current`; requiring it to do so turns a valid
     /// structural refusal into a permanent lock that also suppresses the independent direct-file
@@ -1116,9 +1117,9 @@ impl Controller {
             .exploration_budget_ms(buffered)
             .expect("the surplus gate above admitted exploration");
         // The common frontier covers the two results which cannot order untouched REQUEST
-        // actuators: a deadline-censored transaction with no complete media, and a completed PMS
+        // actuators: a deadline-censored transaction with no complete media, and a completed server
         // underfill with no Pareto gain over the live response. Starting another encoder merely
-        // by changing the request ceiling repeats the same failed experiment and, on a real PMS,
+        // by changing the request ceiling repeats the same failed experiment and, on a real server,
         // leaves enough overlapping resource state to make later decisions under-grant. Only a
         // physically observed surplus beyond the failed start budget releases quality
         // exploration. Its drawdown already reduced the live surplus and is replaced on the way
@@ -1138,9 +1139,10 @@ impl Controller {
                     && !self.failures[self.current.index()]
                         .blocks(Some(exploration_budget), &self.delivery)
                 {
-                    // A fresh encoder at the SAME request is the missing excitation. Mapping the
-                    // response back to a guessed lower rung would invent an inverse PMS does not
-                    // have; treating `current == target` as terminal repeats the original bug.
+                    // A fresh encoder at the SAME request is the missing excitation. Mapping
+                    // the response back to a guessed lower rung would invent an inverse the server
+                    // does not have; treating `current == target` as terminal repeats the original
+                    // bug.
                     let proposal = Proposal {
                         rung: self.current,
                         direction: Direction::Up,
@@ -1389,11 +1391,11 @@ impl Controller {
     /// Grade the structurally unique first object of a newly-created candidate encoder.
     ///
     /// A boundary object which already satisfies the ordinary conservation rule is immediately
-    /// `Ready`.  If `A>D`, it cannot identify repeatable production because `A` contains the
-    /// one-time PMS decision/session/JIT setup.  It may fund one observation from the now-running
-    /// encoder only when the post-object reserve covers that exact measured `A`; otherwise the
-    /// experiment is simply unfunded.  No count, dwell, tolerance or catalog-rate estimate enters
-    /// this distinction.
+    /// `Ready`.  If `A>D`, it cannot identify repeatable production because `A` contains
+    /// the one-time server decision/session/JIT setup.  It may fund one observation from
+    /// the now-running encoder only when the post-object reserve covers that exact measured `A`;
+    /// otherwise the experiment is simply unfunded.  No count, dwell, tolerance or catalog-rate
+    /// estimate enters this distinction.
     pub(crate) fn candidate_boundary_verdict(
         &self,
         proposal: Proposal,

@@ -278,7 +278,7 @@ fn owned_search_wheel_scrolls_without_moving_focus_and_dpad_reveals_again() {
     rig.search_run(crate::stores::search::SearchCmd::SetQuery("wheel".into()));
     rig.stores.search.publish_shelves_for_test([crate::search::Kind::Movie, crate::search::Kind::Show,
         crate::search::Kind::Episode].into_iter().map(|kind| crate::search::Shelf { kind,
-            items: vec![crate::search::Item::Media(crate::pms::PmsMovie {
+            items: vec![crate::search::Item::Media(crate::catalog::CatalogMovie {
                 rk: format!("synthetic-{kind:?}"), title: "Synthetic wheel result".into(), ..Default::default()
             })] }).collect());
     frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
@@ -399,7 +399,7 @@ fn owned_search_adopts_panel_text_without_restarting_or_losing_the_commit() {
     let mut rig = Bridge::for_test(|| 0);
     rig.search_run(crate::stores::search::SearchCmd::SetQuery("ab".into()));
     rig.stores.search.publish_shelves_for_test(vec![crate::search::Shelf { kind: crate::search::Kind::Movie,
-        items: vec![crate::search::Item::Media(crate::pms::PmsMovie {
+        items: vec![crate::search::Item::Media(crate::catalog::CatalogMovie {
             rk: "adopt-result".into(), title: "Synthetic result".into(), ..Default::default()
         })] }]);
     frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);
@@ -595,7 +595,7 @@ fn owned_search_result_keys_are_server_scoped_and_survive_same_query_reordering(
     crate::registry::reset_for_test();
     let a = crate::registry::ServerId::from_raw(0);
     let b = crate::registry::ServerId::from_raw(1);
-    let item = |sid| crate::search::Item::Media(crate::pms::PmsMovie {
+    let item = |sid| crate::search::Item::Media(crate::catalog::CatalogMovie {
         sid, rk: "same-local-key".into(), title: "Synthetic movie".into(), ..Default::default()
     });
     let mut d = Dispatcher::<AppHost>::new();
@@ -670,7 +670,7 @@ fn owned_search_return_memory_reconstructs_positions_with_a_query_guard() {
     session.watching("synthetic-return-profile");
     crate::registry::reset_for_test();
     let catalog = || vec![crate::search::Shelf { kind: crate::search::Kind::Movie,
-        items: (0..8).map(|i| crate::search::Item::Media(crate::pms::PmsMovie {
+        items: (0..8).map(|i| crate::search::Item::Media(crate::catalog::CatalogMovie {
             rk: format!("item-{i}"), title: format!("Synthetic {i}"), ..Default::default()
         })).collect() }];
     let mut d = Dispatcher::<AppHost>::new();
@@ -782,7 +782,7 @@ fn a_seeded_boot_query_survives_the_freshly_mounted_screens_first_sync() {
     crate::dev::scenarios::apply_search_boot_trigger("dune", &mut d, &mut rig);
     rig.stores.search.publish_shelves_for_test([crate::search::Kind::Movie].into_iter()
         .map(|kind| crate::search::Shelf { kind, items: vec![crate::search::Item::Media(
-            crate::pms::PmsMovie { rk: "synthetic-boot-seed".into(), title: "Dune".into(), ..Default::default() })] })
+            crate::catalog::CatalogMovie { rk: "synthetic-boot-seed".into(), title: "Dune".into(), ..Default::default() })] })
         .collect());
     // Mirror the loop's own next step: the first frame mounts the page the trigger just rooted the
     // container on.
@@ -1011,7 +1011,7 @@ fn owned_search_content_probe_reports_zone_row_col_pill_and_card_as_focus_moves(
     let mut rig = Bridge::for_test(|| 0);
     rig.search_run(crate::stores::search::SearchCmd::SetQuery("fingerprint".into()));
     rig.stores.search.publish_shelves_for_test(vec![crate::search::Shelf { kind: crate::search::Kind::Movie,
-        items: vec![crate::search::Item::Media(crate::pms::PmsMovie {
+        items: vec![crate::search::Item::Media(crate::catalog::CatalogMovie {
             rk: "fp-result".into(), title: "Fingerprint result".into(), ..Default::default()
         })] }]);
     frame(&mut d, &mut rig, AppArg::Search, tick(0), vec![]);

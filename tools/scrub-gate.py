@@ -47,7 +47,7 @@ def load_guard(root):
 SHAPE_RULE_FIXTURES = frozenset({
     ".claude/hooks/outbound-guard.py",
     ".claude/hooks/outbound-guard-test.py",
-    "tools/test_pms_hls_probe.py",
+    "tools/test_hls_probe.py",
 })
 
 

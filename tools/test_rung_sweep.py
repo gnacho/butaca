@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline tests for pms-rung-sweep.py. No PMS, no network, no device.
+"""Offline tests for rung-sweep.py. No server, no network, no device.
 
 Everything here is about ONE failure mode: a table that looks right and is not. The sweep's
 output is a byte RATIO between two rungs, and every way that ratio can silently stop meaning
@@ -13,8 +13,8 @@ import unittest
 from pathlib import Path
 
 
-TOOL = Path(__file__).with_name("pms-rung-sweep.py")
-SPEC = importlib.util.spec_from_file_location("pms_rung_sweep", TOOL)
+TOOL = Path(__file__).with_name("rung-sweep.py")
+SPEC = importlib.util.spec_from_file_location("rung_sweep", TOOL)
 sweep = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = sweep
 SPEC.loader.exec_module(sweep)

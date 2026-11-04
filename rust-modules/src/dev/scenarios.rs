@@ -833,7 +833,7 @@ fn autoplay_arm(app: &mut App, fr: &mut Frame) {
                         // player's Info card has a descriptor, and the landing's own
                         // `install_landed_detail` calls the same `sync_now_playing` the blocking
                         // load did. So there is nothing to wait for, and no reason to spend two
-                        // PMS round trips of the SDL thread on the frame that starts a playback.
+                        // server round trips of the SDL thread on the frame that starts a playback.
                         app.bridge.metadata_mut().run(crate::stores::metadata::MetadataCmd::RequestDetail { sid: pmm.sid, rk: pmm.rk.to_string() });
                     }
                     requested
@@ -1057,7 +1057,7 @@ fn relaunch_arm(_app: &mut App, _fr: &mut Frame) -> bool {
 ///
 /// **The request is the ASYNC one, and that is the whole scene.** This arm ran
 /// `MetadataCmd::LoadDetailNow` until phase 11 — the deliberately BLOCKING load, two sequential
-/// PMS round trips plus the `Detail` build, on the SDL thread, from inside `each_frame`, i.e.
+/// server round trips plus the `Detail` build, on the SDL thread, from inside `each_frame`, i.e.
 /// inside the frame's `results` phase. `fps:cold-open` was therefore measuring a synchronous
 /// double GET that the PRODUCT does not perform: an OK on a card raises
 /// `MetadataCmd::RequestDetail` and mounts the page empty (`metadata::request_detail`,
@@ -1124,7 +1124,7 @@ fn collection_arm(app: &mut App, fr: &mut Frame) -> bool {
 ///
 /// It used to be one frame, on `MetadataCmd::LoadDetailNow` — the deliberately BLOCKING load —
 /// because the very next statement reads `metadata::current()` to derive the leaf's part and
-/// codecs. Two sequential PMS round trips on the SDL thread, inside the frame's `results` phase.
+/// codecs. Two sequential server round trips on the SDL thread, inside the frame's `results` phase.
 /// The wait is the same wait with the loop still running: `pump_detail` installs the landing
 /// route-unconditionally, and this arm re-checks each frame that the item now published IS the
 /// one it asked for — by SERVER and key, since two servers in one household both number from 1.
@@ -2053,7 +2053,7 @@ fn modal_bench_open(app: &mut App, target: bench::ModalTarget) {
                 sid,
                 rk: rk.clone(),
                 kind: ItemMenuKind::Card {
-                    row: Box::new(crate::pms::PmsMovie { sid, rk, ..Default::default() }),
+                    row: Box::new(crate::catalog::CatalogMovie { sid, rk, ..Default::default() }),
                     from_deck: false,
                 },
                 host,

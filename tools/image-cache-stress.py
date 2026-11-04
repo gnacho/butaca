@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synthetic PMS and evidence grader for the real Library image-cache stress run.
+"""Synthetic media server and evidence grader for the real Library image-cache stress run.
 
 This tool never connects to or drives a TV. The device-owning lane uses tv-session
 under the repository TV lock to boot the app against this server, with `library`,
@@ -770,7 +770,7 @@ def grade_baseline(access, baseline, minimum=1001, seconds=90):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
-    serve = sub.add_parser("serve", help="serve a synthetic PMS; does not drive the TV")
+    serve = sub.add_parser("serve", help="serve a synthetic media server; does not drive the TV")
     serve.add_argument("--bind", default="0.0.0.0")
     serve.add_argument("--port", type=int, default=8027)
     serve.add_argument("--count", type=int, default=1200)

@@ -113,7 +113,7 @@ def sid(seed, *parts):
 
 
 def sname(rng):
-    """One name from the closed alphabet: `s` + 8 lowercase hex digits (mock_pms' rule)."""
+    """One name from the closed alphabet: `s` + 8 lowercase hex digits (mock_server' rule)."""
     return "s%08x" % rng.getrandbits(32)
 
 
@@ -628,7 +628,7 @@ class Handler(BaseHTTPRequestHandler):
             })
 
         # ---- token-required routes ------------------------------------------------------
-        # Accepted, never checked — mock_pms's own rule for the synthetic world's credentials
+        # Accepted, never checked — mock_server's own rule for the synthetic world's credentials
         # (its `butaca-token` line): the carrier SHAPE is what the client's correctness lives on,
         # and the 401 below is the absence answer. The controlled replay world's fixture client
         # (#166 flip) carries a token the mock cannot have minted, and a recording must reach the

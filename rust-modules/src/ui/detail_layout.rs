@@ -169,9 +169,9 @@ mod tests {
     }
 
     /// The crew credit takes no vertical space: the action row hangs off the facts line's own
-    /// measured height by a flat [`theme::space::MD`], whether or not PMS sent a Director[] credit
-    /// (the credit is drawn as one more `Bit` inside the same `CAPTION`-sized facts row, so it
-    /// never changes that row's height).
+    /// measured height by a flat [`theme::space::MD`], whether or not the server sent a Director[]
+    /// credit (the credit is drawn as one more `Bit` inside the same `CAPTION`-sized facts row, so
+    /// it never changes that row's height).
     #[test]
     fn the_crew_credit_costs_the_chain_no_vertical_space() {
         let m = crate::ui::fixture::FixtureMeasure;

@@ -351,7 +351,7 @@ fn plaintext(
 ) -> RequestOutcome {
     // The raw socket takes ONE `extra` blob, CRLF-terminated per line and CRLF-terminated at the
     // end — it is spliced straight into the request head. Control-plane is one-shot: send
-    // `Connection: close` so PMS does not wait for a second request on an fd we are about to
+    // `Connection: close` so the server does not wait for a second request on an fd we are about to
     // `http_close`. Media sequential GETs call `stream::http_open` directly and omit the header
     // so the demux socket can reuse. A caller that already named Connection keeps their spelling.
     let extra = {
@@ -475,7 +475,7 @@ fn tls(
     // the second shape into `CURLOPT_CUSTOMREQUEST`.
     let body: Option<&[u8]> = matches!(method, Method::Post).then_some(&[][..]);
     let (timeouts, max_body) = (crate::net::API, None);
-    // PMS redirects are responses, never instructions: the path already carries a token. Keeping
+    // Server redirects are responses, never instructions: the path already carries a token. Keeping
     // `FOLLOWLOCATION` off also makes the TLS arm's 3xx semantics match the plaintext arm.
     match crate::net::request_result_evidence(
         &url,
@@ -505,7 +505,7 @@ mod tests {
     /// arm returns `None` without touching a socket, and the plaintext arm reaches
     /// `stream::http_open` and fails to connect. Both are `None`, so what this really pins is that
     /// neither one PANICS and neither one dials the other's target — the useful half on a machine
-    /// that has no PMS.
+    /// that has no server.
     /// **The control plane end to end.** An https origin whose name no resolver answers for is
     /// dialled at the pinned address: the loopback listener ACCEPTS a connection (the TLS
     /// handshake against a plaintext listener then fails, which is fine — reaching the socket is

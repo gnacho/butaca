@@ -116,13 +116,13 @@ fn bare(sid: ServerId, rk: &str) -> DetailScreen {
         about_rows: about::Rows::new(),
         ground: AmbientWash::flat(theme::SURFACE_APP),
         selected: {
-            // No production `HubsStore`/`PmsState` is ever seeded in this file (fixtures come from
+            // No production `HubsStore`/`CatalogState` is ever seeded in this file (fixtures come from
             // `crate::metadata::set_current_for_test`, not the hub catalog), so an empty owned
             // state stands in — `index_of_rk` finds nothing in it, exactly as the deleted
-            // process-wide catalog found nothing here before Hubs ownership moved onto `PmsState`.
-            let pms_state = crate::pms::PmsState::default();
-            crate::pms::movie(&pms_state, crate::pms::index_of_rk(&pms_state, sid, rk).max(0) as usize)
-                .filter(|_| crate::pms::index_of_rk(&pms_state, sid, rk) >= 0)
+            // process-wide catalog found nothing here before Hubs ownership moved onto `CatalogState`.
+            let catalog_state = crate::catalog::CatalogState::default();
+            crate::catalog::movie(&catalog_state, crate::catalog::index_of_rk(&catalog_state, sid, rk).max(0) as usize)
+                .filter(|_| crate::catalog::index_of_rk(&catalog_state, sid, rk) >= 0)
                 .cloned()
         },
         spin_ms: 0.0,
@@ -144,7 +144,7 @@ fn fixture(sid: ServerId) -> Detail {
         dur_ms: 60_000,
         ..Default::default()
     }).collect();
-    let related = (0..12).map(|i| crate::pms::PmsMovie {
+    let related = (0..12).map(|i| crate::catalog::CatalogMovie {
         sid,
         rk: format!("r{i}"),
         title: format!("Related {i}"),

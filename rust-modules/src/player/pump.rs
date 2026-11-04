@@ -86,7 +86,7 @@ fn set_state(s: super::shared::PlaybackState) {
 /// The count is what makes coalescing observable. `seek_to_ns` only ever holds the newest target,
 /// so a burst of six taps and a single tap leave identical state behind; and the burst is applied
 /// by whichever of two paths wins a race with the stuck-watchdog, which log different lines.
-/// Counting either line therefore measures PMS latency, not merging — `coalesced=` measures
+/// Counting either line therefore measures server latency, not merging — `coalesced=` measures
 /// merging directly, and both paths report it.
 fn take_coalesced() -> u32 {
     TX.seek_reqs.swap(0, Relaxed).saturating_sub(1)
@@ -453,7 +453,7 @@ fn recover_from_failed_original(ps: &mut crate::route::PlaybackSession) -> Optio
 pub(crate) enum ForegroundOriginalRecovery {
     NotOriginal,
     Tracking(crate::route::RouteStartAttempt),
-    /// PMS preparation succeeded and the HLS candidate remains retryable, but native Engine
+    /// The server preparation succeeded and the HLS candidate remains retryable, but native Engine
     /// construction failed before an asynchronous Load could be observed.
     RetryPrepared,
     /// Rollback consumed the Original snapshot but could not rebuild/rebase a truthful HLS route.
@@ -619,7 +619,7 @@ fn reacquire_engine(pa: &mut super::adapter::PlayerAdapter) -> (&mut Engine, &Ma
     )
 }
 
-/// Physical half of a claimed user action whose PMS half `route` already ran (`ClaimTail`).
+/// Physical half of a claimed user action whose server half `route` already ran (`ClaimTail`).
 /// Returns whether it replaced the Engine: every arm but `Rejected` does, and the caller must
 /// return immediately in that case (`eng` dangles); `Rejected` restores the previous projection
 /// and lets the pump keep using the live Engine, so callers read
@@ -860,7 +860,7 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
             match action.intent.clone() {
                 crate::route::RouteIntent::User(intent) => match intent {
                     crate::route::UserRouteIntent::Retranscode => {
-                        // "Retranscode" means "reconcile at claim" (issue #266): the route PMS
+                        // "Retranscode" means "reconcile at claim" (issue #266): the route server
                         // half decides between the enhancement and today's rebuild.
                         let secs = user_target / 1_000_000_000;
                         let tail = crate::route::execute_retranscode_claim(ps, &action, secs);
@@ -1040,11 +1040,11 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
     // then eat everything → stuck. Hold the latest requested target (it stays in TX.seek_to_ns) and
     // process it once this seek anchors. If it hasn't anchored within SEEK_STUCK_MS the reopen was
     // lost — first RETRY the reopen cheaply (re-interrupt the demuxer + re-arm), and only fall back
-    // to a full (slow) reload if the retries also fail.
-    // SEEK_STUCK_MS must comfortably exceed a real reopen+av_seek+first-keyframe on 4K HEVC over
-    // PMS (~700ms): the retry closes the demux socket, so a premature watchdog KILLS an open that
-    // was about to succeed and restarts it — at 500ms a rapid tap-burst self-DoS'd into the
-    // reload fallback every time (caught by the seek_rapid harness cases).
+    // to a full (slow) reload if the retries also fail. SEEK_STUCK_MS must comfortably exceed
+    // a real reopen+av_seek+first-keyframe on 4K HEVC over the server (~700ms): the retry closes
+    // the demux socket, so a premature watchdog KILLS an open that was about to succeed and
+    // restarts it — at 500ms a rapid tap-burst self-DoS'd into the reload fallback every time
+    // (caught by the seek_rapid harness cases).
     const SEEK_STUCK_MS: u32 = 1200;
     if eng.flushed && eng.rebase_pending && now.wrapping_sub(eng.seek_armed_at) > SEEK_STUCK_MS {
         // Adopt the NEWEST coalesced target if later taps landed while this seek was resolving
@@ -1188,8 +1188,8 @@ pub(crate) fn pump(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapt
             return;
         }
         // This is the applied media boundary: everything after it belongs to the new playhead.
-        // Advancing earlier would strand the live worker when PMS/native refused; advancing later
-        // would let pre-seek ABR evidence publish while queues are already being reset.
+        // Advancing earlier would strand the live worker when server/native refused; advancing
+        // later would let pre-seek ABR evidence publish while queues are already being reset.
         crate::route::commit_user_seek();
         unsafe {
             ffi::sf_flush(mt); // drop decoded/queued frames only after the clock is really held

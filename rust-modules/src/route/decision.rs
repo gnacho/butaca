@@ -1,5 +1,5 @@
 //! The IMPURE half of the route split (spec §9, §15.2): session state, the synchronized
-//! [`PlayerControl`], PMS/native I/O, and the encoder/scrobble/timeline machinery — everything
+//! [`PlayerControl`], server/native I/O, and the encoder/scrobble/timeline machinery — everything
 //! [`super::plan`] is not. `PlaybackSession` is the main-thread projection used to build URLs/payloads;
 //! [`PLAYER_CONTROL`] is the synchronized authority for route ownership and route-changing
 //! intents. The player engine reads the URL/session through the accessors here; ui::player_hud
@@ -9,7 +9,7 @@
 //! (`PlaybackSession::auto_last_switch`) is now a frame-tick millisecond stamp, not an `Instant`.
 
 use crate::registry::ServerId;
-use crate::pms::PmsMovie;
+use crate::catalog::CatalogMovie;
 use std::os::raw::c_char;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU8, Ordering};
 use std::sync::Mutex;
@@ -23,7 +23,7 @@ use super::plan::*;
 /// terminal, so neither can be recovered by poking the live route.  The user-facing quality
 /// picker starts a NEW resolve instead.  Keep the original request here, before the worker runs:
 /// even a plan that returns no URL must remain retryable, and a numeric Part id alone cannot
-/// reconstruct the source key PMS expects.
+/// reconstruct the source key server expects.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct PlaybackRequest {
     sid: ServerId,
@@ -111,7 +111,7 @@ pub(crate) struct PlaybackSession {
     /// the player is showing.
     play_verdict: Option<PlayVerdict>,
     /// The resolve itself could not produce a plan (no client, worker panic, or worker spawn
-    /// refusal).  Unlike `play_verdict`, this is OUR failure rather than a PMS sentence; it makes
+    /// refusal).  Unlike `play_verdict`, this is OUR failure rather than a server sentence; it makes
     /// an empty plan terminal and retryable instead of falling back to an idle black frame.
     resolve_failed: bool,
     /// This playback's encode shape — flavor, delivery, the no-copy switch, the fixed quality
@@ -145,7 +145,7 @@ pub(crate) struct PlaybackSession {
     cur_src: (i64, i64, i64),
     /// Whole Part transport bitrate, including audio. Auto's progressive watchdog compares the
     /// live socket against this rather than `cur_src.0` (video only), because the wire has to carry
-    /// both lanes. `0` means PMS did not provide one and disables the watchdog fail-safely.
+    /// both lanes. `0` means the server did not provide one and disables the watchdog fail-safely.
     cur_transport_kbps: i64,
     /// **Can this television decode the SOURCE video stream as it stands** — `video_direct_plays`
     /// evaluated by [`build_stream`], carried rather than re-derived.
@@ -178,7 +178,7 @@ pub(crate) struct PlaybackSession {
     /// stream in the house all produce a LAN that cannot carry a 10 Mbps source.
     ///
     /// Measured 2026-08-27 (`docs/measurements/local-original-blind.md`): a 10 634 kbps
-    /// direct-play source on the local PMS with the link held at 2 500 kbps ran at **8–25 % of
+    /// direct-play source on the local server with the link held at 2 500 kbps ran at **8–25 % of
     /// real time for the rest of the playback**, with ZERO `abr:` lines in the whole log. The two
     /// `recover_auto_to_original` writers never carried the conjunct, so an Original REACHED from
     /// HLS was supervised on any link while the same state chosen at play time on a LAN was not —
@@ -188,7 +188,7 @@ pub(crate) struct PlaybackSession {
     /// HLS is active: the HLS worker owns only measurements, while the main thread owns the
     /// codec/session transition back to this exact source declaration.
     auto_original: Option<AutoOriginalCandidate>,
-    /// Debug pipeline-tier substitute for PMS's fixed-rendition endpoints. Empty in every
+    /// Debug pipeline-tier substitute for server's fixed-rendition endpoints. Empty in every
     /// production plan; see [`arm_auto_fixture`].
     auto_fixture_base: String,
     /// **Visible mode switches this playback has already shown the viewer**, and when the last one
@@ -218,7 +218,7 @@ pub(crate) struct PlaybackSession {
     ///
     /// A ratingKey names an item only within one server: `1` is a real item on our own server and a
     /// different real item on a friend's share, and the same goes for `Part.id`, `Stream.id`,
-    /// `playQueueID` and the resume point. Every PMS call in this file used to resolve its server
+    /// `playQueueID` and the resume point. Every server call in this file used to resolve its server
     /// implicitly, at the instant of the call, through `client_opt()` — i.e. whichever server
     /// happened to be CURRENT right then. Merged Home shelves make "the item is from B while
     /// current is A" ordinary, and every one of those calls would then land on A: the PlayQueue,
@@ -249,8 +249,8 @@ pub(crate) struct PlaybackSession {
     /// the playing item's Part id (from the part key), so an audio switch can PUT the
     /// server-side stream selection — the transcoder encodes the part's SELECTED audio.
     /// Opaque internal playback generation, regenerated on each play_movie/play_episode. It is
-    /// also the first encoder's PMS session id. Adaptive replacements keep this app generation
-    /// stable but use their own coupled PMS wire id; the active encoder mutex supplies timeline,
+    /// also the first encoder's server session id. Adaptive replacements keep this app generation
+    /// stable but use their own coupled server wire id; the active encoder mutex supplies timeline,
     /// seek and teardown with the currently published wire identity.
     sess: String,
     /// GET /identity machineIdentifier, cached — needed for the PlayQueue uri.
@@ -353,7 +353,7 @@ pub(super) enum EnhancementOutcome {
     /// copy list — the params demonstrably did something.
     Applied,
     /// The server refused the params outright, or silently ignored them (audio came back `copy`
-    /// despite the ask) — an old or non-conforming PMS.
+    /// despite the ask) — an old or non-conforming server.
     Refused,
 }
 
@@ -587,7 +587,7 @@ pub(crate) fn transcode_session(ps: &PlaybackSession) -> String {
     ps.tsession.clone()
 }
 
-/// Thread-safe active PMS resource identity. While transcoding it names the coupled physical
+/// Thread-safe active server resource identity. While transcoding it names the coupled physical
 /// encoder/Streaming Resource; while direct-playing it names the logical Streaming Resource only.
 /// `PlaybackSession::tsession` remains the main-thread playback classification bit, so owning a direct
 /// resource does not relabel it as a transcode. Adaptive HLS can replace the server identity from
@@ -602,7 +602,7 @@ struct ActiveHlsRoute {
 }
 
 pub(super) struct ActiveEncoderState {
-    /// Monotone semantic route generation. The PMS id may deliberately stay unchanged while the
+    /// Monotone semantic route generation. The server id may deliberately stay unchanged while the
     /// route changes from HLS to direct Original, so the id alone is not an ownership token.
     pub(super) epoch: u64,
     pub(super) id: String,
@@ -702,7 +702,7 @@ pub(crate) struct ClaimedRouteAction {
 
 /// Identity of one prepared route transaction.
 ///
-/// PMS/Session preparation and native construction are two different external effects. A
+/// Server/Session preparation and native construction are two different external effects. A
 /// transaction may mint multiple never-reused [`RouteStartAttempt`]s; the attempt, not this
 /// transaction, prevents a late `Load` result from settling a retry.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -731,7 +731,7 @@ enum OriginalTrialPhase {
 /// The only three ways an external route effect may return to the synchronized owner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RouteApplyResult {
-    /// PMS accepted and installed the candidate projection. Native `Load` is still outstanding;
+    /// Server accepted and installed the candidate projection. Native `Load` is still outstanding;
     /// this moves `Applying -> Prepared`. [`claim_route_start_attempt`] later moves it to
     /// `Starting`, and it never moves directly to `Stable`.
     Prepared,
@@ -743,7 +743,7 @@ pub(crate) enum RouteApplyResult {
 
 /// The part of [`Session`] which describes bytes already accepted as the live route.
 ///
-/// User controls are allowed to stage a different projection in `Session` while their PMS/native
+/// User controls are allowed to stage a different projection in `Session` while their server/native
 /// effect is being built, because `Session` is main-thread-confined.  They are not allowed to make
 /// that proposal look applied after the effect is refused.  `PlayerControl` therefore retains this
 /// complete value at every commit and restores it on `Rejected`/`Cancelled`; no individual setter
@@ -816,7 +816,7 @@ fn publish_applied_route_projection(ps: &PlaybackSession) {
         .applied_projection = Some(projection);
 }
 
-/// Commit a contract change which requires no PMS/native route replacement.  This is still a
+/// Commit a contract change which requires no server/native route replacement.  This is still a
 /// reducer event: otherwise a later rejected action restores the older snapshot and silently
 /// undoes the already-visible quality/subtitle choice.
 fn commit_in_place_route_projection(ps: &PlaybackSession, quality_contract: bool) {
@@ -892,7 +892,7 @@ enum ResolveFallback {
 
 /// The synchronized authority for route ownership and route-changing intents. `Session` remains
 /// the main-thread projection used to build URLs/payloads; workers are never allowed to infer
-/// ownership from it. PMS/native I/O is deliberately performed after an action is claimed and
+/// ownership from it. Server/native I/O is deliberately performed after an action is claimed and
 /// this mutex is released, then completed through a typed transition below.
 pub(super) struct PlayerControl {
     pub(super) active: ActiveEncoderState,
@@ -902,7 +902,7 @@ pub(super) struct PlayerControl {
     /// but is not a worker credential.
     desired_revision: u64,
     /// Quality preference represented by `desired_revision`. The process-wide picker is only the
-    /// durable user preference; it cannot also describe bytes PMS has not accepted yet.
+    /// durable user preference; it cannot also describe bytes the server has not accepted yet.
     desired_quality: Quality,
     /// Revision represented by the physical route and therefore carried by WorkerTicket.
     pub(super) applied_revision: u64,
@@ -1023,7 +1023,7 @@ fn retarget_automatic_intent(
 /// Cross one explicit desired-contract boundary while holding [`PLAYER_CONTROL`]. An automatic
 /// handoff which was already accepted remains labelled with the *applied* ticket that produced it:
 /// its producer may have stopped after publication, and relabelling that evidence as the new
-/// desire is precisely the PMS-refusal race this split exists to prevent. Seek is different: it
+/// desire is precisely the server-refusal race this split exists to prevent. Seek is different: it
 /// changes the target carried by that same accepted handoff and is handled explicitly below.
 fn advance_user_contract_locked(control: &mut PlayerControl) {
     control.desired_revision = next_generation(control.desired_revision);
@@ -1066,7 +1066,7 @@ fn begin_user_contract_boundary() -> UserEditGuard {
 }
 
 /// Publish a quality preference into the desired half of the route reducer before any Session
-/// projection changes. The applied half moves only when PMS/native commits the matching action.
+/// projection changes. The applied half moves only when server/native commits the matching action.
 fn begin_user_quality_boundary(quality: Quality) -> UserEditGuard {
     let guard = begin_user_contract_boundary();
     PLAYER_CONTROL
@@ -1097,7 +1097,7 @@ fn merge_user_route_intent(
     }
 }
 
-/// Begin a new explicit playback request. The outgoing Engine may keep rendering while the PMS
+/// Begin a new explicit playback request. The outgoing Engine may keep rendering while the server
 /// resolve runs, but none of its asynchronous ABR evidence may mutate the route after this point.
 /// A matching landing is the successful exit from `Resolving`; cancellation or spawn failure
 /// restores the captured Idle/Stable/Failed fallback.
@@ -1113,7 +1113,7 @@ fn begin_playback_request() -> bool {
         // [`finish_engine_teardown`] publishes `Idle` the moment that teardown returns. Either
         // way there is no live Engine left to preserve, which is why they share one fallback.
         ControlPhase::Idle | ControlPhase::Stopping => Some(ResolveFallback::Idle),
-        // Do not hide a native/PMS transaction under Resolving. Its matching completion would
+        // Do not hide a native/server transaction under Resolving. Its matching completion would
         // otherwise have nowhere truthful to land, and cancelling the resolve would fabricate an
         // Idle route around a live Engine.
         ControlPhase::Preparing(_)
@@ -1137,7 +1137,7 @@ fn begin_playback_request() -> bool {
     true
 }
 
-/// Publish the PMS half of a resolve. A refused plan has no Engine and therefore lands in `Idle`;
+/// Publish the server half of a resolve. A refused plan has no Engine and therefore lands in `Idle`;
 /// a playable plan lands in `Prepared`. Claiming a physical `Load` moves it to `Starting`, and only
 /// settling that exact attempt through [`settle_route_start`] may publish `Stable`. In particular,
 /// installing a URL is not evidence that the television accepted it.
@@ -1319,7 +1319,7 @@ pub(crate) fn note_user_seek_intent(position_ns: i64) {
 }
 
 /// Commit the exact point at which queues/route cross to the requested timeline. Calling this
-/// before a real flush/reload revokes every pre-seek observation; calling it after a PMS refusal
+/// before a real flush/reload revokes every pre-seek observation; calling it after a server refusal
 /// would be a lie, so refusal uses [`reject_user_seek`] instead.
 pub(crate) fn commit_user_seek() -> bool {
     let mut control = PLAYER_CONTROL.lock().unwrap_or_else(|e| e.into_inner());
@@ -1348,7 +1348,7 @@ pub(crate) fn cancel_user_route_intent(intent: UserRouteIntent) {
     }
 }
 
-/// Reserve one main-thread action. The mutex is released before PMS or native I/O; `serial`
+/// Reserve one main-thread action. The mutex is released before server or native I/O; `serial`
 /// prevents a completion from settling any later action by mistake.
 pub(crate) fn claim_route_action() -> Option<ClaimedRouteAction> {
     let mut control = PLAYER_CONTROL.lock().unwrap_or_else(|e| e.into_inner());
@@ -1378,7 +1378,7 @@ pub(crate) fn claim_route_action() -> Option<ClaimedRouteAction> {
     })
 }
 
-/// Settle the PMS/projection half of a claimed action which did not enter the explicit Original
+/// Settle the server/projection half of a claimed action which did not enter the explicit Original
 /// trial phase. A prepared candidate advances the applied contract but remains non-publishable in
 /// `Prepared`; claiming a physical `Load` moves it to `Starting`, and only [`settle_route_start`]
 /// may expose it as `Stable`. Refusal/cancellation restores the previous complete projection while
@@ -1436,7 +1436,7 @@ pub(crate) fn pending_route_start() -> Option<RouteStartTransaction> {
 /// Return or reserve the semantic transaction for an Engine replacement which does not already
 /// belong to a prepared plan/action. [`claim_route_start_attempt`] mints the exact physical attempt.
 /// A failed-candidate retry gets a new transaction while retaining its already-prepared URL, so no
-/// PMS decision is repeated merely because native construction failed synchronously.
+/// Server decision is repeated merely because native construction failed synchronously.
 pub(crate) fn begin_route_start() -> Option<RouteStartTransaction> {
     let mut control = PLAYER_CONTROL.lock().unwrap_or_else(|e| e.into_inner());
     match control.phase {
@@ -1526,7 +1526,7 @@ pub(crate) fn claim_route_start_attempt(
     })
 }
 
-/// PMS/resume preparation failed before teardown. Only ordinary `Preparing` has a proven live
+/// Server/resume preparation failed before teardown. Only ordinary `Preparing` has a proven live
 /// fallback; an ordinary rejection after `Prepared` is terminal. An Original rejection remains
 /// `OriginalTrialPhase::Failed` and recoverable through [`rollback_original_recovery`].
 pub(crate) fn reject_route_start_preparation(ticket: RouteStartTransaction) -> bool {
@@ -1585,7 +1585,7 @@ pub(crate) fn abort_route_start(ticket: RouteStartTransaction, result: RouteStar
 
 /// Publish the native half of one prepared route. An ordinary failed candidate deliberately
 /// remains the applied projection in `Failed`: teardown may already have destroyed the old Engine
-/// and PMS may already have retired its encoder, so restoring the old *description* would fabricate
+/// and the server may already have retired its encoder, so restoring the old *description* would fabricate
 /// a live route. An Original failure remains `OriginalTrialPhase::Failed` with the retained HLS
 /// rollback projection until the explicit rollback edge.
 pub(crate) fn settle_route_start(ps: &mut PlaybackSession, ticket: RouteStartAttempt, result: RouteStartResult) -> bool {
@@ -1977,7 +1977,7 @@ fn replace_active_encoder(expected: &str, replacement: &str) -> bool {
 
 /// Publish a main-thread route replacement only while the complete action/worker generation is
 /// still current. Unlike the legacy string helper this rejects same-id ABA, a direct seek epoch,
-/// a new Engine and a user contract which superseded an in-flight PMS request.
+/// a new Engine and a user contract which superseded an in-flight server request.
 fn replace_active_encoder_for(expected: &WorkerTicket, replacement: &str) -> Option<WorkerTicket> {
     let mut control = PLAYER_CONTROL.lock().unwrap_or_else(|e| e.into_inner());
     if !ticket_is_current(&control, expected) {
@@ -2174,14 +2174,14 @@ pub(crate) struct HlsAbrControl {
     /// worker's response state but never alter the request actuator above.
     pub(crate) initial_observed: Option<(crate::abr::ObservedHlsVariant, u32)>,
     fixture_base: String,
-    /// Raw Part key in production; a complete URL only for the no-PMS fixture.  Runtime source
+    /// Raw Part key in production; a complete URL only for the no-server fixture.  Runtime source
     /// measurements bind this Part to the exact active HLS resource instead of minting an AdHoc
-    /// identity: PMS's token fallback makes a supposedly separate identity non-owning anyway.
+    /// identity: server's token fallback makes a supposedly separate identity non-owning anyway.
     original_probe_part: String,
     original_source_kbps: u32,
     /// This playback's actuator set, with the device's decode bound and the source raster already
     /// applied — so the worker cannot propose a rendition that could never decode or that would
-    /// only make PMS upscale.
+    /// only make server upscale.
     pub(crate) catalog: crate::abr::HlsActuatorCatalog,
     /// The startup probe as a weak prior for the live estimator, when there was one.
     pub(crate) prior: Option<crate::abr::CapacityEstimate>,
@@ -2207,7 +2207,7 @@ pub(crate) struct PrimedHls {
 pub(crate) enum OriginalProbeResult {
     #[allow(dead_code)] // frozen until the wire layer goes
     Measured(crate::curlio::ThroughputSample),
-    /// The request reached no usable body. The client-side HLS route remained selected; PMS-side
+    /// The request reached no usable body. The client-side HLS route remained selected; server-side
     /// cursor continuity is not inferred. The outcome is telemetry, not a zero-capacity sample.
     Failed {
         failure: OriginalProbeFailure,
@@ -2219,7 +2219,7 @@ pub(crate) enum OriginalProbeResult {
 }
 
 /// Photograph-safe detail for an Original source probe failure. The report trace keeps a broad
-/// outcome class, but the on-screen panel must not collapse a PMS 503, a deadline and a broken
+/// outcome class, but the on-screen panel must not collapse a server 503, a deadline and a broken
 /// connection into the same `Original check failed` sentence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum OriginalProbeFailure {
@@ -2293,12 +2293,12 @@ impl HlsAbrControl {
 
     /// Measure the raw Part with the exact identity of the current HLS Streaming Resource.
     ///
-    /// PMS resolves a Part request by exact identity, then by token alias, and creates an AdHoc
+    /// Server resolves a Part request by exact identity, then by token alias, and creates an AdHoc
     /// resource only after both miss.  Destroying HLS first therefore turns a harmless bounded
     /// read into a fresh server-admission decision; on the incident server that decision is
-    /// `99_341 > 92_000` kbps and PMS 1.43.4 turns the refusal into HTTP 500.  Reusing the active
+    /// `99_341 > 92_000` kbps and server 1.43.4 turns the refusal into HTTP 500.  Reusing the active
     /// encoder id makes ownership deterministic and needs no client-side stop, close or
-    /// replacement decision. It does not prove that PMS preserves the old HLS cursor: observed PMS
+    /// replacement decision. It does not prove that server preserves the old HLS cursor: observed server
     /// can rebind the shared resource during the raw Part read, so a successful recovery must leave
     /// from the same media boundary instead of asking that cursor for one more segment.
     // Dev-only: used only by the `#[cfg(feature = "devtriggers")]` tests in this module's `tests`
@@ -2332,7 +2332,7 @@ impl HlsAbrControl {
     /// `None` as `Candidate` for all four. Three of the four say nothing about the rung at all:
     /// the active encoder moved underneath (the same event as `origin_changed`, already
     /// `Circumstance`), the server's client is gone, or the control-plane result was unusable.
-    /// Only a PMS `refusal` is about the rung, and it is the only one that should arm N11's
+    /// Only a server `refusal` is about the rung, and it is the only one that should arm N11's
     /// backoff — which charges a full `E_tx` refill debt, up to ~4x `E_tx` of blocked climbing,
     /// against exits that spent one round trip or none at all.
     pub(crate) fn prime(
@@ -2540,8 +2540,8 @@ pub(crate) fn hls_abr_control(ps: &PlaybackSession) -> Option<(HlsAbrControl, Wo
             initial_observed: live.as_ref().and_then(|(_, hls)| hls.observed),
             fixture_base: ps.auto_fixture_base.clone(),
             original_probe_part: original.map(|c| c.probe_part.clone()).unwrap_or_default(),
-            // **Whole-file rate if PMS gave one, else the video rate — but NEVER zero while a
-            // candidate exists.** `cur_transport_kbps`'s zero means "PMS did not say", and
+            // **Whole-file rate if server gave one, else the video rate — but NEVER zero while a
+            // candidate exists.** `cur_transport_kbps`'s zero means "the server did not say", and
             // `can_recover_original` reads this as "there is no way back", which silently deletes
             // the entire recovery feature — `ff.rs` then never constructs `OriginalRecovery`, and
             // `probe_due` is the only thing that logs a reason, so the deletion is invisible.
@@ -2965,7 +2965,7 @@ pub(crate) fn recover_auto_to_original_for(
     let automatic = cause == RecoveryCause::Automatic;
     if forced_direct_play(ps) { return None; }
     // One handoff owns both the unproven replacement and the retained client-side HLS route until
-    // decoded frames commit it or an open failure restores that route snapshot. PMS-side HLS
+    // decoded frames commit it or an open failure restores that route snapshot. Server-side HLS
     // cursor continuity is proved only by an actual later HLS response. Re-entering here would
     // replace that PendingOriginal, retire its only retained HLS identity, and leave the first
     // replacement ownerless while neither open had yet proved a frame.
@@ -3050,14 +3050,14 @@ pub(super) enum PartAdmission {
 /// Bytes the admission reads before it lets go: enough to prove a body arrives, nothing more.
     #[allow(dead_code)] // frozen until the wire layer goes
 const PART_ADMISSION_BYTES: usize = 16 * 1024;
-/// Header and body budget, each. The claim this answers runs on the pump's main-thread PMS half
+/// Header and body budget, each. The claim this answers runs on the pump's main-thread server half
 /// beside a `/decision` call, so it is bounded well under the API timeout that call carries.
     #[allow(dead_code)] // frozen until the wire layer goes
 const PART_ADMISSION_BUDGET: std::time::Duration = std::time::Duration::from_millis(1500);
 
 /// **Ask the server for the Original's Part on the exact identity the trial would open it on,
 /// before the trial is started.** A recovery used to publish the raw Part as an unproven trial
-/// and let the demuxer find out: PR 4's device run (PMS 1.43.4, issue #266) released an enhanced
+/// and let the demuxer find out: PR 4's device run (server 1.43.4, issue #266) released an enhanced
 /// remux to its direct play, the Part came back **503**, and the rollback restored the enhanced
 /// route — the only route `PendingOriginal` holds — under a preference, a menu and a log line that
 /// all said the enhancement was off. A manual Original and an enhancement release did not ask at
@@ -3067,7 +3067,7 @@ const PART_ADMISSION_BUDGET: std::time::Duration = std::time::Duration::from_mil
 /// own budget as UI/feed block for a cause that already has its answer (`RecoveryCause::
 /// needs_part_admission`).
 ///
-/// What PMS keys that 503 on did not reproduce from a host against the same server with the
+/// What server keys that 503 on did not reproduce from a host against the same server with the
 /// same identity (every Part GET after an enhanced remux decision, with the encoder held,
 /// stopped physically, stopped with `closeResourceSession=1`, or abandoned, answered 200/206), so
 /// this reads the answer rather than predicting it. **It does not re-register an MDE first:**
@@ -3203,7 +3203,7 @@ fn recover_original_direct(
 /// So the two irreversible client steps are DEFERRED behind this: the explicit server-side stop,
 /// and retiring the route snapshot. [`confirm_original_recovery`] performs them once the new source
 /// has actually delivered frames; [`rollback_original_recovery`] restores that snapshot if it
-/// never does. Restoration makes no claim about PMS's cursor until a new HLS response arrives.
+/// never does. Restoration makes no claim about server's cursor until a new HLS response arrives.
 struct PendingOriginal {
     /// Applied reducer state to restore if the unproven native Load never produces a frame.
     previous_applied_revision: u64,
@@ -3213,7 +3213,7 @@ struct PendingOriginal {
     /// stage fields in Session while native frames are pending; first-frame commit must not bless
     /// those still-unapplied edits along with the candidate.
     candidate_projection: AppliedRouteProjection,
-    /// The HLS encoder the recovery replaced. The client has not explicitly stopped it; PMS-side
+    /// The HLS encoder the recovery replaced. The client has not explicitly stopped it; server-side
     /// cursor continuity is deliberately not inferred from that fact.
     encoder: String,
     /// The new server encoder to retire if this handoff never produces a decoded frame. Empty for
@@ -3421,7 +3421,7 @@ pub(crate) fn confirm_original_recovery(ps: &mut PlaybackSession) {
 /// **The new source never delivered.** Restore the HLS projection as a `Prepared` candidate and
 /// return its offset. The caller must rebase it through `transcode_seek`, claim a fresh exact Load
 /// attempt and settle that attempt before `Stable`; this bookkeeping operation alone says nothing
-/// about PMS cursor continuity. Returns `None` when there is nothing pending, in which case every
+/// about server cursor continuity. Returns `None` when there is nothing pending, in which case every
 /// failure in the pump still means exactly what it always did.
 pub(crate) fn rollback_original_recovery(ps: &mut PlaybackSession) -> Option<OriginalRollback> {
     let (mut pending, trial_serial) = {
@@ -3533,7 +3533,7 @@ pub(crate) fn is_transcoding(ps: &PlaybackSession) -> bool {
 pub(crate) fn play_refused(ps: &PlaybackSession) -> bool {
     ps.play_verdict.is_some()
 }
-/// The app/worker failed to produce a playable plan, as distinct from a PMS `/decision` refusal.
+/// The app/worker failed to produce a playable plan, as distinct from a server `/decision` refusal.
 /// There is no Engine whose pump could publish Error, so `player::state()` derives it beside the
 /// refusal case.
 pub(crate) fn play_resolution_failed(ps: &PlaybackSession) -> bool {
@@ -3609,7 +3609,7 @@ pub(crate) fn cur_sid(ps: &PlaybackSession) -> ServerId {
 pub(crate) fn cur_audio_sid(ps: &PlaybackSession) -> i64 {
     ps.cur_audio.as_ref().map_or(0, |a| a.sid)
 }
-/// The stable app-owned playback generation (and the first encoder's PMS session id).
+/// The stable app-owned playback generation (and the first encoder's server session id).
 pub(crate) fn sess(ps: &PlaybackSession) -> String {
     ps.sess.clone()
 }
@@ -3676,7 +3676,7 @@ pub(crate) fn set_stream_acodec(ps: &mut PlaybackSession, codec: &str) {
 ///
 /// * direct play / remux (`ProgressiveMkv`): the SOURCE's own coded size (`cur_src`), since the
 ///   file's elementary stream is what gets fed;
-/// * a fixed quality's HLS: the source capped by that quality's [`crate::playback::Ceiling`] — PMS
+/// * a fixed quality's HLS: the source capped by that quality's [`crate::playback::Ceiling`] — server
 ///   never upscales, so the smaller of the two is the largest picture it can send;
 /// * Auto: the bounding box of every FEASIBLE actuator (`HlsActuatorCatalog::widest_feasible_raster`),
 ///   because a rung commit never re-issues `Load` and the controller may climb to the 4K point
@@ -3714,7 +3714,7 @@ pub(crate) fn sink_max_raster(ps: &PlaybackSession) -> (u16, u16) {
 /// The SOURCE raster for a stream the app did not select — the pipeline tier's
 /// `butaca-playurl` carries it as `source_raster`, the same field its Auto fixtures already
 /// used to size the actuator catalog. One fact, one field: [`sink_max_raster`] reads it from the
-/// same place a PMS-chosen item's dimensions land, so the synthetic tier declares exactly what the
+/// same place a server-chosen item's dimensions land, so the synthetic tier declares exactly what the
 /// production route would for a file of that size.
 pub(crate) fn set_stream_source_raster(ps: &mut PlaybackSession, w: u16, h: u16) {
     { let s = &mut *ps; {
@@ -3724,7 +3724,7 @@ pub(crate) fn set_stream_source_raster(ps: &mut PlaybackSession, w: u16, h: u16)
 }
 
 /// The whole Load-payload DECLARATION for a stream the app did not SELECT — the pipeline test
-/// tier's `/tmp/butaca-playurl` ([`crate::dev::PlayUrl`]), whose entire point is that no PMS
+/// tier's `/tmp/butaca-playurl` ([`crate::dev::PlayUrl`]), whose entire point is that no server
 /// chose anything and so `apply_plan` never runs.
 ///
 /// ONE write for the same reason [`set_server_output_declaration`] is one write and [`apply_plan`]
@@ -3945,12 +3945,12 @@ impl ScrobbleWork {
     }
 }
 
-/// The end-of-playback PMS work, moved OFF the main thread: the `state=stopped` timeline report
+/// The end-of-playback server work, moved OFF the main thread: the `state=stopped` timeline report
 /// (which commits the server-side resume point and watched state) and the server-side transcode
 /// stop. Replaces the inline `report_timeline` + `stop_transcode` pair in `engine::teardown`.
 ///
 /// Both ran inline on the SDL
-/// thread — two blocking PMS round trips, each bounded by `CONNECT_TIMEOUT_MS` + `SO_RCVTIMEO`
+/// thread — two blocking server round trips, each bounded by `CONNECT_TIMEOUT_MS` + `SO_RCVTIMEO`
 /// (~17 s), on **100% of real stops**. That was the largest guaranteed main-loop park left in the
 /// engine, and strictly bigger than the rare in-flight-POST window at the joins above it.
 ///
@@ -4216,7 +4216,7 @@ pub(crate) fn drain_scrobble() {
 /// so a byte-Range seek can't work. Registers a fresh physical encoder, swaps
 /// the route to its delivery-matched start endpoint with `offset={secs}`, then retires the old
 /// exact key. Returns the new URL (the demux re-opens it from byte 0), or `None` if this playback
-/// is not a transcode or PMS refuses the replacement. The old stream stays live until the new
+/// is not a transcode or the server refuses the replacement. The old stream stays live until the new
 /// decision has succeeded and the route publication wins, so a failed seek cannot cut playback.
 pub(crate) fn transcode_seek(ps: &mut PlaybackSession, offset_secs: i64) -> Option<String> {
     if forced_direct_play(ps) { return None; }
@@ -4904,7 +4904,7 @@ fn apply_quality_choice(ps: &mut PlaybackSession, q: Quality) {
     // The bytes, URL and decoder declaration may be identical while the worker contract is not.
     // `engine::start_bufferfeed` captures `auto_original_watch()` BY VALUE at spawn, so toggling
     // Manual Original <-> Auto Original underneath the existing thread can never start/stop the
-    // controller. Replace only that worker/pipeline at the same movie position; this is not a PMS
+    // controller. Replace only that worker/pipeline at the same movie position; this is not a server
     // rendition change and must not go through the transcode-refresh path.
     if route_unchanged && watched_before != auto_original {
         crate::player::log(&format!(
@@ -4980,7 +4980,7 @@ impl ResolveEnv {
 
     /// MAIN THREAD ONLY.
     /// `sid` arrives BY VALUE from the caller, which is the whole point: the item being played
-    /// carries the server it came from (`PmsMovie`/`UpNext`/`Detail` all hold one now), so a play
+    /// carries the server it came from (`CatalogMovie`/`UpNext`/`Detail` all hold one now), so a play
     /// raised off a merged shelf resolves against the server that shelf's row belongs to rather
     /// than whichever server happens to be current when the worker gets around to asking.
     fn snapshot(ps: &PlaybackSession, meta: crate::metadata::MetadataView<'_>, sid: ServerId, rk: &str) -> ResolveEnv {
@@ -5090,7 +5090,7 @@ static PLAY_SLOT: Mutex<Option<PlayLanding>> = Mutex::new(None);
 /// later Play can therefore never donate an old movie's position to the next landing.
 static PLAY_RESUME: Mutex<Option<(u32, i64)>> = Mutex::new(None);
 
-/// Retire every exact PMS identity created by a resolve that will never be installed.
+/// Retire every exact server identity created by a resolve that will never be installed.
 ///
 /// True while a resolve is in flight — the HUD renders `PlaybackState::Resolving` from this.
 pub(crate) fn play_pending() -> bool {
@@ -5147,7 +5147,7 @@ pub(crate) fn surface_sid() -> ServerId {
 
 /// MAIN THREAD, NON-BLOCKING. On acceptance, publishes the HUD strings immediately, supersedes an
 /// in-flight resolve and spawns a worker; the caller flips the route this same frame. While a
-/// PMS/native route transition owns the reducer, returns `false` without mutating request/session
+/// Server/native route transition owns the reducer, returns `false` without mutating request/session
 /// state, and the caller must leave the current route alone.
 ///
 /// `sid` is the server the ITEM came from, which the caller knows and this function must not guess:
@@ -5213,7 +5213,7 @@ pub(crate) fn request_preview(
     )
 }
 
-/// Common async request transaction. A retry waits for the real stop's PMS work on THIS worker
+/// Common async request transaction. A retry waits for the real stop's server work on THIS worker
 /// before asking the server to start another encoder. Ordinary requests do not synchronously drain;
 /// a replacement timeline lease still waits for any stop announced before its publication.
 fn request_play_inner(
@@ -5447,7 +5447,7 @@ fn retry_context_with(ps: &PlaybackSession, resume_ns: i64, direct_play: Option<
 /// network work runs on a worker and the caller flips the route THIS frame; an empty or Busy request
 /// returns `false` and leaves the current route alone. `app.rs` drains `pump_play` once a frame and
 /// starts the engine when the plan lands.
-pub(crate) fn request_play_movie(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::MetadataStore, m: &PmsMovie) -> bool {
+pub(crate) fn request_play_movie(ps: &mut PlaybackSession, meta: &mut crate::stores::metadata::MetadataStore, m: &CatalogMovie) -> bool {
     if m.part.is_empty() {
         return false;
     }
@@ -5805,7 +5805,7 @@ pub(crate) fn retranscode_for(ps: &mut PlaybackSession, expected: &WorkerTicket,
 }
 
 /// Rebuild the current item under `contract` (issue #266: the whole encode shape, enhancement
-/// included). Publishes `cur_contract` and `cur_enhancement` only after PMS accepted it — the
+/// included). Publishes `cur_contract` and `cur_enhancement` only after server accepted it — the
 /// applied enhancement is never written at the selection (I9).
 fn jellyfin_retranscode_as(
     ps: &mut PlaybackSession,
@@ -6083,7 +6083,7 @@ pub(crate) struct Dispatch {
 }
 
 /// **Pure: the claim-time dispatch table** for a `Retranscode` (plan §6.1). Kept separate from the
-/// effects so every cell is unit-testable without PMS or an Engine.
+/// effects so every cell is unit-testable without server or an Engine.
 pub(crate) fn claim_dispatch(step: EnhancementStep, displaced_pick: bool) -> Dispatch {
     let owed = ClaimFallback::owed(displaced_pick);
     match step {
@@ -6106,7 +6106,7 @@ pub(crate) fn claim_dispatch(step: EnhancementStep, displaced_pick: bool) -> Dis
     }
 }
 
-/// The physical half the pump performs after a claim's PMS half has run. The PMS half (this
+/// The physical half the pump performs after a claim's server half has run. The server half (this
 /// module) never calls `finish_route_action` for a tail that reloads; the pump's tail does, once,
 /// with the reload it is about to start.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -6156,7 +6156,7 @@ fn claim_fallback(
     }
 }
 
-/// PMS half of a claimed user `Retranscode` ("reconcile at claim").
+/// Server half of a claimed user `Retranscode` ("reconcile at claim").
 pub(crate) fn execute_retranscode_claim(
     ps: &mut PlaybackSession,
     action: &ClaimedRouteAction,
@@ -6191,7 +6191,7 @@ pub(crate) fn execute_retranscode_claim(
     })
 }
 
-/// PMS half of a claimed user `RecoverOriginal`. A displaced pick merged under it (the merge table
+/// Server half of a claimed user `RecoverOriginal`. A displaced pick merged under it (the merge table
 /// lets RecoverOriginal absorb a queued Retranscode) is still owed its reload if Original fails.
 pub(crate) fn execute_recover_original_claim(
     ps: &mut PlaybackSession,

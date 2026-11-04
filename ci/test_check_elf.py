@@ -48,7 +48,7 @@ def defaults():
         "readelf:-n": "Build ID: " + "a" * 40 + "\n",
         "readelf:-d": "Shared library: [libalpha.so]\nShared library: [libbeta.so]\n",
         "objdump": "  00: dmb ish\n" * 101,
-        "strings": "YOUR_PMS_HOST\n",
+        "strings": "YOUR_SERVER_HOST\n",
     }.items()}
 
 
@@ -96,7 +96,7 @@ class ElfGateTests(unittest.TestCase):
 
     def test_early_required_placeholder_with_large_tail(self):
         spec = defaults()
-        spec["strings"]["output"] = "YOUR_PMS_HOST\n" + FILLER
+        spec["strings"]["output"] = "YOUR_SERVER_HOST\n" + FILLER
         self.assert_pass(spec)
 
     def test_early_forbidden_strings_with_placeholder_at_eof(self):
@@ -105,7 +105,7 @@ class ElfGateTests(unittest.TestCase):
                                       ("10.23.45.67", "private IP address")]:
             with self.subTest(forbidden=forbidden):
                 spec = defaults()
-                spec["strings"]["output"] = forbidden + "\n" + FILLER + "YOUR_PMS_HOST\n"
+                spec["strings"]["output"] = forbidden + "\n" + FILLER + "YOUR_SERVER_HOST\n"
                 result = self.run_gate(spec)
                 self.assertNotEqual(result.returncode, 0, "forbidden value was allowed: " + result.stdout)
                 self.assertIn(diagnostic, result.stdout)

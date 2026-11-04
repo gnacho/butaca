@@ -26,7 +26,7 @@ hand-written copies of a case drifting apart.
   device-only. `docs/webos10-resource-allocation.md` is what that blindness costs.
 * **No number here is a device measurement.** Every heartbeat carries `sim=1` precisely so a
   pasted log cannot be mistaken for one, and this Mac's link to loopback is not a television's
-  link to a PMS.
+  link to a server.
 * **It does not grade.** It runs the case and prints where the log is; `tests/run.py` owns the
   assertions. Grading here would be a second copy of `a_abr_shape` free to disagree with the first.
 

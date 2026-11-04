@@ -326,7 +326,7 @@ fn push_player(ps: &crate::route::PlaybackSession, s: &mut String, overlay: &str
 ///
 /// A rating key is a server-local integer dense from 1, so it names an item only together with the
 /// server — and the slot number is a registry index (0, 1, …), not anything about the machine.
-pub(crate) fn push_item(s: &mut String, m: Option<&crate::pms::PmsMovie>) {
+pub(crate) fn push_item(s: &mut String, m: Option<&crate::catalog::CatalogMovie>) {
     match m {
         Some(m) => {
             s.push_str(" sid=");
@@ -354,10 +354,10 @@ fn push_sid(s: &mut String, sid: crate::registry::ServerId) {
 /// Append a rating key, keeping ASCII alphanumerics and dropping everything else.
 ///
 /// The filter is the redaction rule made structural rather than assumed. A catalog row's `rk` is
-/// filled from the wire's `ratingKey`, which PMS sends as a bare number — but this line goes to a log
-/// that gets pasted into public issues, and a field that simply trusted the server's string would
-/// be one upstream change away from carrying a path or a title into it. Bounded too, for the same
-/// reason: a key is a handful of digits, so anything longer is not a key.
+/// filled from the wire's `ratingKey`, which server sends as a bare number — but this line goes to
+/// a log that gets pasted into public issues, and a field that simply trusted the server's string
+/// would be one upstream change away from carrying a path or a title into it. Bounded too, for
+/// the same reason: a key is a handful of digits, so anything longer is not a key.
 pub(crate) fn push_rk(s: &mut String, rk: &str) {
     let mut n = 0;
     for c in rk.chars() {

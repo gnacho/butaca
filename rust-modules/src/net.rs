@@ -1171,7 +1171,7 @@ pub(crate) fn tls_verify_why(rc: c_int, verify: Option<c_long>, year: Option<i64
 
 /// [`tls_verify_why`] for a handle whose transfer just failed with `rc`: reads the verify result
 /// only for the two codes that can carry one, so every other failure costs no extra call.
-/// Shared by both TLS clients to the PMS — this module's control plane and `curlio`'s media
+/// Shared by both TLS clients to the server — this module's control plane and `curlio`'s media
 /// plane — because both ride the same firmware OpenSSL and the same wrong clock.
 pub(crate) fn tls_failure_reason(easy: *mut CURL, rc: c_int) -> Option<String> {
     if !matches!(rc, 51 | 60) {
@@ -1295,7 +1295,7 @@ const TELEMETRY_MAX_REPLY: usize = 4096;
 
 /// Redirect-following HTTPS GET for a PUBLIC, credential-free resource. The QR image fetch is the
 /// only caller: at most five HTTP(S)-only redirects are followed, and an HTTPS request may never
-/// downgrade. Account/PMS requests keep redirects off because replayed headers/URLs carry tokens.
+/// downgrade. Account/server requests keep redirects off because replayed headers/URLs carry tokens.
 /// The `nowan` gate shared by the three resolver doors ([`request_tls_result`],
 /// [`crate::curlio`] and [`crate::stream`]): `true` when `/tmp/butaca-nowan` is armed and
 /// `host` is a NAME rather than a literal, i.e. when a dead resolver would have refused it. The

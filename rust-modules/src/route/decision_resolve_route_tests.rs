@@ -1304,7 +1304,7 @@ fn source_recovery_publication_is_atomic_with_route_ownership() {
     install_active_encoder("");
 }
 
-/// A semantic route change can keep the same PMS resource id: direct Original deliberately
+/// A semantic route change can keep the same server resource id: direct Original deliberately
 /// retains the HLS Streaming Resource while dropping its HLS projection. Comparing only the
 /// **The visible-switch stamp is THIS FRAME'S TICK** (spec §4.1), and the tick has exactly one
 /// writer.
@@ -1467,7 +1467,7 @@ fn a_refused_retry_keeps_its_position_and_full_request_for_the_next_quality() {
 //
 // These grade `flavors_allowed(link_policy(link), quality_policy(q, auto_original, …))`, which is
 // the expression `build_stream` itself evaluates — not a re-derivation of it. `build_stream`
-// is unreachable from the host (it needs a `Client` and a PMS), and the composition is the
+// is unreachable from the host (it needs a `Client` and a server), and the composition is the
 // half that can silently go wrong, so it is the half that is factored out and pinned.
 
 

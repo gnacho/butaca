@@ -5,12 +5,12 @@
 > identical to every other row clamped to the source raster, while delivering a HIGHER rate
 > (7618 vs 5153 kbps) — and the stray 58 landed on `P1080M10`'s back-to-back leg this time while
 > its own paced leg read 111. It is a sporadic artifact that moves between rungs, not a property
-> of any rung, and the "PMS stopped re-encoding at an unbinding ceiling" hypothesis it motivated is
+> of any rung, and the "the server stopped re-encoding at an unbinding ceiling" hypothesis it motivated is
 > **refuted**: every rung's output is `h264` at the source raster. §"The re-run" at the bottom has
 > the full tables and the decision that came out of them.
 
-**Measured 2026-08-28 on the dev Mac against the configured PMS.** No television, no lock.
-Tool: `tools/abr-production-census.py`, which drives `tools/pms-hls-probe.py` once per request
+**Measured 2026-08-28 on the dev Mac against the configured server.** No television, no lock.
+Tool: `tools/abr-production-census.py`, which drives `tools/hls-probe.py` once per request
 ceiling and reads only its already-redacted `report.json`. Twelve consecutive segments per rung,
 one short-lived transcode session each, run twice: back-to-back, and paced at one request per two
 seconds of media (what a player actually does).
@@ -27,7 +27,7 @@ mean different things by it.
 `HlsActuatorCatalog::measured()` carries a `production_load_pm` per rung, and `ladder.rs` says
 plainly that two of the thirteen are empirical and the other eleven are "an ordering assumption".
 That table is one half of the two-constraint admission rule — the half that refuses 4K on a fast
-link in front of a loaded PMS — so eleven unmeasured numbers decide a real behaviour.
+link in front of a loaded server — so eleven unmeasured numbers decide a real behaviour.
 `docs/adaptive-playback-plan.md` blocks I9 on this and states the falsification rule in advance:
 residuals within 15% uphold the "inert argmax" finding, and any mid-ladder load off by more than
 25% means the deferred argmax is a re-parameterisation on fresh numbers.
@@ -62,7 +62,7 @@ interpolation between them, and the interpolation holds.
 **`P1080M6` does not.** The table says 900; it measures 353, off by 60.8% and consistently so in
 both pacing legs. The 6000 kbps rung is charged roughly two and a half times the server work it
 costs, which biases the admission rule against exactly the rung a mid-speed link should be
-settling on in front of a loaded PMS. `P720Low` and `P720` sit either side of the 25% line
+settling on in front of a loaded server. `P720Low` and `P720` sit either side of the 25% line
 (23.6% / 26.0%) and are charged about a third too much on the same reading.
 
 Per M3's stated rule this is **REFUTED at the mid-ladder**: the deferred argmax cannot be adopted
@@ -85,7 +85,7 @@ what the table orders them. Warm rho, paced:
 The low rungs are the *expensive* ones. That is not noise and it is not a server anomaly — it is
 what a transcoder does: **against a source at raster R, a target below R must be downscaled, while
 a target at R is a near-copy.** Requesting 240p from a 1080p master is real scaling work;
-requesting 1080p is close to a remux. The `Uhd` row is the same effect at the other end — PMS
+requesting 1080p is close to a remux. The `Uhd` row is the same effect at the other end — the server
 never upscales, so a 4K request against a 1080p source produces 1080p, and it is the cheapest
 column in the table.
 
@@ -102,10 +102,10 @@ explanation fits the same numbers and nothing recorded here can separate them**,
 said before anyone re-parameterises a table on it.
 
 The `Uhd` row is what raises it. Against a 1080p source, a 4K request produced **58 pm** where
-`P1080High` produced **105** — the same output raster (PMS never upscales), the same source, half
+`P1080High` produced **105** — the same output raster (the server never upscales), the same source, half
 the work, from two requests that differ only in a bitrate ceiling that binds in neither case. Two
 unbinding ceilings should not differ by 2x. The obvious reason they might is that **at a ceiling
-above what the source needs, PMS stops re-encoding and copies the video** — in which case the
+above what the source needs, the server stops re-encoding and copies the video** — in which case the
 cheapest column is not a cheap transcode at all but a REMUX, and a remux does not belong on a curve
 of encoder cost. If that is what happened, part of the "inversion" is two different operations
 plotted on one axis rather than a mis-indexed table.
@@ -131,7 +131,7 @@ class" should not be made on the cause being assumed.
   whether the missing term is the source raster or the transcode/remux distinction is open. Any re-parameterisation has to
   decide whether to index by (source, target) or to accept being right for one source class.
 - **Does NOT settle:** anything about a *loaded* server. Every reading here is against an idle
-  PMS, where warm rho tops out at 432 pm against a `production_max_pm` of 1100 — a factor of 2.5
+  server, where warm rho tops out at 432 pm against a `production_max_pm` of 1100 — a factor of 2.5
   of headroom, so the production gate never approaches firing. The table's job is to rank rungs
   when the server is behind, and this census cannot create that condition. Stated rather than
   inferred past.
@@ -148,10 +148,10 @@ tools/abr-production-census.py --item movie_hevc_4k_high_bitrate --segments 12 -
 
 Both write a `census.json` carrying every per-segment rho. The overlay keys are shape names, not
 identifiers on anybody's server; no address, token, session, rating key or title reaches any
-artifact, which `pms-hls-probe.py` enforces rather than merely intending.
+artifact, which `hls-probe.py` enforces rather than merely intending.
 
 
-## The re-run (2026-08-28), with what PMS actually produced
+## The re-run (2026-08-28), with what the server actually produced
 
 `tools/abr-production-census.py` now records the OUTPUT per rung — codec, raster and delivered rate
 — which is the column that separates a mis-indexed table from a mixture of two different
@@ -169,10 +169,10 @@ operations. Both source classes, paced and back-to-back.
 | Uhd | 2100 | 106 | 1918x802 | 7618 |
 
 **Table spread 23.3x. Measured spread 1.53x.** Every rung from `P1080M6` up produces the same
-picture, because PMS never upscales and the source is 1918x802 — so eight rungs of the ladder are
+picture, because the server never upscales and the source is 1918x802 — so eight rungs of the ladder are
 one output and one cost. "Inverted" was the right sign and the wrong magnitude.
 
-### Against a 4K source, cost tracks the raster PMS ACTUALLY PRODUCED
+### Against a 4K source, cost tracks the raster the server ACTUALLY PRODUCED
 
 | rung | table | warm | output raster | resid | dev |
 |---|---|---|---|---|---|
@@ -188,7 +188,7 @@ one output and one cost. "Inverted" was the right sign and the wrong magnitude.
 **The two empirical anchors hold.** `Uhd = 2100` measures 2340–2416 and the 1080p block is within
 8.2%, reproducing the first census.
 
-**`P1080M6` is the indexing defect in a single row.** Against a 4K source PMS produces **1280x720**
+**`P1080M6` is the indexing defect in a single row.** Against a 4K source the server produces **1280x720**
 for it — the same raster it produces for `P720` — at the same measured 112 pm, while the table
 asserts 900 against `P720`'s 450. Two rungs, identical output, identical cost, a 2x ratio between
 them. That is a bounding box being read as a target, which `Rung::raster`'s own doc already warns
@@ -222,4 +222,4 @@ better than the rung — is named at the field, with the note that nothing measu
 - **"`Uhd` … 58 pm … half the work"** — **withdrawn.** It does not reproduce and the stray value
   moves between rungs; the remux hypothesis built on it is refuted by the output column.
 - **"does NOT settle: anything about a LOADED server"** — unchanged and still true. Every reading
-  here is against an idle PMS.
+  here is against an idle server.

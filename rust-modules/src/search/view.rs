@@ -98,7 +98,7 @@ mod tests {
         fx.set_query("wallace");
         fx.state.publish_shelves_for_test(vec![Shelf {
             kind: Kind::Movie,
-            items: vec![Item::Media(crate::pms::PmsMovie {
+            items: vec![Item::Media(crate::catalog::CatalogMovie {
                 sid: crate::registry::ServerId::UNSET, rk: "retained-search".into(),
                 title: "Synthetic result".into(), unwatched: true, ..Default::default()
             })],
@@ -199,7 +199,7 @@ mod tests {
         ));
         let sid = crate::jellyfin::SERVER_ID;
         let mut answer = [const { Vec::new() }; super::super::NKIND];
-        answer[0].push(Item::Media(crate::pms::PmsMovie {
+        answer[0].push(Item::Media(crate::catalog::CatalogMovie {
             sid, rk: "new-answer".into(), title: "Replacement result".into(), ..Default::default()
         }));
         crate::search::record_for_test(&mut fx.state, sid.raw() as usize, Some(answer));

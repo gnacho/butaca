@@ -106,7 +106,7 @@ impl Fixture {
             sid,
             (0..items)
                 .map(|i| {
-                    Some(crate::pms::PmsMovie {
+                    Some(crate::catalog::CatalogMovie {
                         sid,
                         kind,
                         rk: format!("{}", i + 1),

@@ -83,7 +83,7 @@ WHAT IT MATCHES. Two halves, and they fail in opposite directions on purpose.
 
 (a) LITERAL VALUES, read at the moment the hook runs out of the gitignored files that hold them —
     `.tv-host` (the dev television's address), `.tv-mac` (its Wake-on-LAN MAC), `src/config.local.h`
-    (`PMS_HOST`/`PMS_TOKEN`, the real owner token), `tests/manifest.local.json` (server host, the
+    (`SERVER_HOST`/`SERVER_TOKEN`, the real owner token), `tests/manifest.local.json` (server host, the
     test user's account id, this library's ratingKeys, and the shared_server block when there is
     one), `pkg/auth.json` (the persisted session: `account_token` and each source's per-server
     token), plus three more that `.gitignore` names and its comments explain — `local.env` ("real

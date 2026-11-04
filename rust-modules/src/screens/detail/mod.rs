@@ -210,7 +210,7 @@ pub(crate) struct DetailScreen {
     /// fallback used only before/if `metadata::current()` has a `Detail` for this item (see
     /// [`selected`](Self::selected)'s callers); it is never re-read from the catalog afterward, so
     /// a hub republish while this page is open does not change what it reports.
-    selected: Option<crate::pms::PmsMovie>,
+    selected: Option<crate::catalog::CatalogMovie>,
     /// Skeleton spinner clock, in ms — cached each tick from [`spin_phase`](Self::spin_phase)'s
     /// `advance`. Render-only, never hashed.
     spin_ms: f32,
@@ -360,7 +360,7 @@ impl Drop for LayoutPin<'_> {
 }
 
 impl DetailScreen {
-    pub(crate) fn new(entry: EntryId, sid: ServerId, rk: String, hubs: crate::pms::HubsView<'_>) -> Self {
+    pub(crate) fn new(entry: EntryId, sid: ServerId, rk: String, hubs: crate::catalog::HubsView<'_>) -> Self {
         let selected = hubs.find(sid, &rk).cloned();
         let mut ground = AmbientWash::flat(theme::SURFACE_APP);
         if let Some(m) = selected.as_ref().filter(|m| m.has_blur) {
@@ -591,7 +591,7 @@ impl DetailScreen {
         &self,
         focus: Option<FocusKey<u32>>,
         meta: crate::metadata::MetadataView<'a>,
-    ) -> Option<&'a crate::pms::PmsMovie> {
+    ) -> Option<&'a crate::catalog::CatalogMovie> {
         let key = focus.filter(|k| k.entry == self.entry)?.elem;
         let d = self.detail(meta)?;
         match self.locate(key, meta)? {
@@ -669,7 +669,7 @@ impl DetailScreen {
         })
     }
 
-    fn selected(&self) -> Option<&crate::pms::PmsMovie> {
+    fn selected(&self) -> Option<&crate::catalog::CatalogMovie> {
         self.selected.as_ref()
     }
 
@@ -2660,7 +2660,7 @@ mod may_sample_control_ground_tests {
 
 fn hero_blurb<'a>(
     d: Option<&'a Detail>,
-    row: Option<&'a crate::pms::PmsMovie>,
+    row: Option<&'a crate::catalog::CatalogMovie>,
 ) -> (String, String) {
     if let Some(d) = d {
         if d.is_show {

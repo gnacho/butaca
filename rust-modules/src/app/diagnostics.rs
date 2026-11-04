@@ -84,11 +84,11 @@
 //! **strict subset** of what the event log records, with tighter rules, and the rules are
 //! structural rather than a matter of care:
 //!
-//! * **No field is ever a URL or a path.** The PMS token rides in the query string of every
+//! * **No field is ever a URL or a path.** The server token rides in the query string of every
 //!   playback and image URL, appended at one choke point in `server::client`, so a URL-shaped field
 //!   is a guaranteed credential leak rather than a possible one. Anything URL-derived is decomposed
 //!   into non-secret parts (mode, endpoint KIND, throughput) before it can reach a draw call.
-//! * **No credential, at any length.** Tokens are omitted, never masked: a PMS token is short,
+//! * **No credential, at any length.** Tokens are omitted, never masked: a server token is short,
 //!   unstructured and shape-indistinguishable from an ordinary opaque id, so no reader will spot
 //!   one and no prefix of it is safe to show.
 //! * **No stable identity.** The server's friendly name defaults to the owner's hostname (commonly
@@ -103,7 +103,7 @@
 //!
 //! The enforcement is structural: every row is built by [`pipeline_rows`]/[`model_rows`] from one
 //! [`crate::player::Diag`] snapshot and a small set of route facts. The compositor's opaque window
-//! id is reduced to `window ready`/`NO WINDOW`; the only server-derived text is the PMS release and
+//! id is reduced to `window ready`/`NO WINDOW`; the only server-derived text is the server release and
 //! Pass state, never its name or address. There is no generic "push a string to diagnostics" path,
 //! so adding a field is a deliberate edit to the file that carries these rules.
 use crate::ui::label::Label;
@@ -623,7 +623,7 @@ fn device_rows() -> Vec<Field> {
 }
 
 /// One fixed instrument, split by responsibility rather than by mode.  The left column follows a
-/// byte from the chosen PMS connection to the television plane.  The right column is the adaptive
+/// byte from the chosen server connection to the television plane.  The right column is the adaptive
 /// model.  Fixed playback keeps every right-hand row and says `inactive`; that stability is what
 /// makes a LAN/Original photograph directly comparable with a remote/HLS one.
 fn columns(ps: &crate::route::PlaybackSession, d: &crate::player::Diag, prev: (i64, i64, u32), now: u32) -> [Vec<Field>; 2] {
@@ -1073,7 +1073,7 @@ fn abr_risk(d: &crate::player::Diag, selected: crate::route::Quality) -> String 
     s
 }
 
-/// End-to-end acquisition wall time per media duration. It spans request open, PMS wait, pacing
+/// End-to-end acquisition wall time per media duration. It spans request open, server wait, pacing
 /// and path transfer, so it is useful cadence telemetry but cannot identify an independent
 /// encoder or server-load constraint. Above 1.0x means this operating point loses reserve over
 /// that complete service episode; it does not say which component caused the loss.
@@ -1129,7 +1129,7 @@ fn abr_rate(kbps: i64) -> String {
     }
 }
 
-/// Demand is what the current delivery has to carry, not the request ceiling when PMS emitted a
+/// Demand is what the current delivery has to carry, not the request ceiling when server emitted a
 /// smaller VBR stream. Manual fixed HLS has no segment estimator, so its explicit ceiling is the
 /// honest planning demand; Original uses the whole-file transport rate captured by the resolve.
 fn chart_demand_kbps(d: &crate::player::Diag, selected: crate::route::Quality) -> i64 {
@@ -1248,7 +1248,7 @@ fn decoded_raster(d: &crate::player::Diag) -> String {
 }
 
 /// Keep the three different meanings that used to be collapsed into "HLS 22 Mbps / 4K" on one
-/// line: what the client requested as a ceiling, what PMS says it produced, and what the decoder
+/// line: what the client requested as a ceiling, what the server says it produced, and what the decoder
 /// actually opened.  The controller's next choice belongs in Action; repeating it here made the
 /// widest real row wrap and therefore made every row below it move between photographs.
 fn abr_quality(d: &crate::player::Diag, selected: crate::route::Quality) -> String {
@@ -1491,7 +1491,7 @@ fn server_line(version: &str) -> String {
     short_version(version).to_string()
 }
 
-/// The PMS release triplet ("1.43.3.10861-cd85035e7" → "1.43.3"). The build/hash carry no support
+/// The server release triplet ("1.43.3.10861-cd85035e7" → "1.43.3"). The build/hash carry no support
 /// signal the release does not, while the shorter stable form keeps the Connection row directly
 /// comparable and leaves its Pass verdict visible. The event log retains the full string.
 fn short_version(version: &str) -> &str {
@@ -2629,7 +2629,7 @@ mod tests {
         assert_eq!(val(&v, "Action"), "changed up to 4.0 Mbps");
         assert_eq!(val(&v, "Reason"), "link has room");
 
-        // Device trace, 2026-08-30: the request/controller said 22 Mbps / 4K while PMS declared
+        // Device trace, 2026-08-30: the request/controller said 22 Mbps / 4K while server declared
         // 896 kbps and every decoded segment was 720x404. The panel must expose all three facts
         // rather than promote a ceiling into a statement about the picture.
         let mismatched = build(&crate::player::Diag {

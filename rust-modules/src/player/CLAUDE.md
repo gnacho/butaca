@@ -12,7 +12,7 @@ one-paragraph playback summary.
 In-process is the point: ACB can only bind an app-owned sink, which the earlier URI/out-of-process
 path (`com.webos.media/load`, `start_playback()`) could not provide — that path is kept only as
 dead-ish reference, and `docs/buffer-feed-plan.md` records the pivot (treat it as history, not
-spec). The stream side: `PMS HTTP GET` → demux → per-lane access-unit
+spec). The stream side: `server HTTP GET` → demux → per-lane access-unit
 queues with byte-cap backpressure (`aq.rs`) → the pump `Feed()`s each AU to the Starfish pipeline.
 The demuxer is **`ff.rs` — the libavformat the app BUNDLES (not the TV's), over a custom AVIO on
 one of TWO transports** (design record: `docs/ffmpeg-demuxer-plan.md`; the hand-rolled `mkv.rs`
@@ -165,7 +165,7 @@ something.
   is in its doc comment) and `player_hud::sub_screen_rect` scales the whole display set into the
   video rect. Assuming 1080p unconditionally is what made VobSub render as a corner postage stamp.
   **An EXTERNAL text subtitle (the `.srt` beside the film) is a third producer, `sidecar.rs`:** the
-  demuxer never sees it, so it is fetched whole from PMS, parsed, and looked up by time from its OWN
+  demuxer never sees it, so it is fetched whole from the server, parsed, and looked up by time from its OWN
   store — not `SHARED.sub_cues`, which is a window the demuxer refills and a backward seek would
   empty. It is silent while transcoding (the server burns the selection instead).
 - **A seek NEVER interrupts the demuxer.** The pump publishes the target in `seek_to_ns` and the

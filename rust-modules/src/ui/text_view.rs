@@ -449,8 +449,8 @@ impl<'a> TextView<'a> {
             }
             widths.push(measured);
         }
-        // NUL-terminate once, here — every later frame draws these by pointer (interior NULs
-        // can't occur in PMS strings; degrade to an empty line rather than panic if one does)
+        // NUL-terminate once, here — every later frame draws these by pointer (interior NULs can't
+        // occur in the server strings; degrade to an empty line rather than panic if one does)
         let lines = lines
             .into_iter()
             .map(|s| CString::new(s).unwrap_or_default())

@@ -13,10 +13,10 @@ import unittest
 import urllib.parse
 import urllib.request
 
-from mock_pms import (
+from mock_server import (
     ENHANCEMENT_AAC_51_RK, ENHANCEMENT_AC3_2CH_RK, ENHANCEMENT_DEFAULT_SRT_RK,
     ENHANCEMENT_DV_P8_RK, ENHANCEMENT_EXTERNAL_SRT_RK, EXTRA_MEDIA_RK_BASE, PLEX_DIRECT_HASH,
-    Library, MockPms, plaintext_only_lan_resources, serve,
+    Library, MockServer, plaintext_only_lan_resources, serve,
 )
 
 
@@ -31,7 +31,7 @@ def get(pms, path):
 
 class LibraryRail(unittest.TestCase):
     def test_collection_ids_and_collection_routes_match_pms(self):
-        pms = MockPms(Library())
+        pms = MockServer(Library())
         collections = get(pms, "/library/sections/1/collections")["Metadata"]
         self.assertTrue(collections)
         row = collections[0]
@@ -57,7 +57,7 @@ class LibraryRail(unittest.TestCase):
     def test_collection_listing_matches_the_library_type_menu_contract(self):
         """The Library's Collections type: `all?type=18&includeMeta=1` declares only titleSort,
         `firstCharacter?type=18` counts collections, and only a collection with members has art."""
-        pms = MockPms(Library())
+        pms = MockServer(Library())
         first = get(pms, "/library/sections/1/all?type=18&includeMeta=1"
                          "&X-Plex-Container-Start=0&X-Plex-Container-Size=60")
         kinds = first["Meta"]["Type"]
@@ -73,7 +73,7 @@ class LibraryRail(unittest.TestCase):
             self.assertEqual("thumb" in row, row["childCount"] > 0, row["title"])
 
     def test_search_with_include_collections_answers_full_collection_rows(self):
-        pms = MockPms(Library())
+        pms = MockServer(Library())
         listed = get(pms, "/library/sections/1/collections")["Metadata"]
         name = listed[0]["title"]
         query = urllib.parse.quote(name.split()[0])
@@ -103,7 +103,7 @@ class LibraryRail(unittest.TestCase):
 
     def test_a_member_movies_related_carries_its_whole_collection(self):
         lib = Library()
-        pms = MockPms(lib)
+        pms = MockServer(lib)
         member = next(it for it in lib.items.values()
                       if it["type"] == "movie" and it.get("Collection"))
         tag = member["Collection"][0]
@@ -135,18 +135,18 @@ class LibraryRail(unittest.TestCase):
             self.assertEqual(hashlib.sha256(payload).hexdigest(), expected)
 
     def test_default_letter_counts_match_the_actual_section(self):
-        pms = MockPms(Library())
+        pms = MockServer(Library())
         for section, count in ((1, 48), (2, 6)):
             with self.subTest(section=section):
                 letters = get(pms, f"/library/sections/{section}/firstCharacter")["Directory"]
                 self.assertEqual(letters, [{"key": "s", "title": "S", "size": count}])
 
     def test_empty_section_has_no_letter_stops(self):
-        pms = MockPms(Library(movies=0))
+        pms = MockServer(Library(movies=0))
         self.assertEqual(get(pms, "/library/sections/1/firstCharacter")["Directory"], [])
 
     def test_rail_buckets_cover_real_page_boundaries_and_only_their_section(self):
-        pms = MockPms(Library(movies=321, rail_fixture=True))
+        pms = MockServer(Library(movies=321, rail_fixture=True))
         rows = []
         for start in range(0, 321, 60):
             page = get(pms, f"/library/sections/1/all?X-Plex-Container-Start={start}&X-Plex-Container-Size=60")
@@ -278,7 +278,7 @@ class DoviAndExtraMedia(unittest.TestCase):
                     self.assertTrue(part["key"].endswith(f"/file.{want_container}"), part["key"])
                     self.assertEqual(lib.media_content_type[part["id"]], want_ct)
                     # the actual byte-serving path (Handler._media), not the synthetic-item
-                    # fallback in MockPms.handle — this is the header the app's part probe sees.
+                    # fallback in MockServer.handle — this is the header the app's part probe sees.
                     with urllib.request.urlopen(base + part["key"], timeout=5) as response:
                         self.assertEqual(response.headers["Content-Type"], want_ct)
             finally:
@@ -307,7 +307,7 @@ class DoviAndExtraMedia(unittest.TestCase):
 
 class PlaintextOnlyLan(unittest.TestCase):
     """BUTACA-10: `--plaintext-only-lan`'s wire shape and the fail-mode/advertise-ip
-    plumbing, kept separate from the (also-passing) live-socket assertions in mock_pms.py's own
+    plumbing, kept separate from the (also-passing) live-socket assertions in mock_server.py's own
     `--selftest`, which additionally proves the https route really fails a TLS handshake."""
 
     def test_resources_shape_has_no_relay_and_the_two_documented_connections(self):
@@ -334,7 +334,7 @@ class PlaintextOnlyLan(unittest.TestCase):
                                  "IPv6": False})
 
     def test_resource_discovery_advertises_only_the_bound_mock(self):
-        pms = MockPms(Library(seed=7))
+        pms = MockServer(Library(seed=7))
         status, ctype, body = pms.handle("GET", "/api/v2/resources")
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body), [], "an unbound fixture advertises no listener")
@@ -408,7 +408,7 @@ class Enhancement266(unittest.TestCase):
         return next(s for s in item["Media"][0]["Part"][0]["Stream"] if s["streamType"] == 2)
 
     def test_no_paid_tier_flag(self):
-        pms = MockPms(Library())
+        pms = MockServer(Library())
         self.assertIs(get(pms, "/identity")["myPlexSubscription"], True)
         self.assertEqual(get(pms, "/identity")["version"], "1.41.0.0000-synthetic")
 
@@ -460,10 +460,10 @@ class Enhancement266(unittest.TestCase):
         self.assertEqual(ext_sub["codec"], "srt")
         self.assertTrue(ext_sub["key"])
         # invisible to the ordinary section listings/rails/counts
-        self.assertEqual(get(MockPms(lib), "/library/sections/1/all")["totalSize"], 48)
+        self.assertEqual(get(MockServer(lib), "/library/sections/1/all")["totalSize"], 48)
 
     def test_decision_enhancement_shapes(self):
-        pms = MockPms(Library())
+        pms = MockServer(Library())
         rk = ENHANCEMENT_AC3_2CH_RK
         base_q = f"path=%2Flibrary%2Fmetadata%2F{rk}&directPlay=0&directStream=1"
         path = f"/video/:/transcode/universal/decision?{base_q}"
@@ -514,7 +514,7 @@ class Enhancement266(unittest.TestCase):
         return json.loads(body)
 
     def test_mock_config_runtime_toggle(self):
-        pms = MockPms(Library())
+        pms = MockServer(Library())
         status, _, body = pms.handle(
             "POST", "/_mock/config", json.dumps({"refuse_enhancements": True}).encode())
         self.assertEqual(status, 200)
@@ -527,7 +527,7 @@ class Enhancement266(unittest.TestCase):
         self.assertEqual(status, 400)
 
         # a case can resolve once, then refuse only from the next decision on
-        pms2 = MockPms(Library())
+        pms2 = MockServer(Library())
         rk = ENHANCEMENT_AC3_2CH_RK
         path = (f"/video/:/transcode/universal/decision?path=%2Flibrary%2Fmetadata%2F{rk}"
                 "&directPlay=0&directStream=1&normalizeLoudness=1")
@@ -536,7 +536,7 @@ class Enhancement266(unittest.TestCase):
         self.assertEqual(get(pms2, path)["generalDecisionCode"], 2000)
 
     def test_request_log(self):
-        pms = MockPms(Library())
+        pms = MockServer(Library())
         pms.handle("GET", "/identity?X-Plex-Token=SECRET&foo=bar",
                   headers={"X-Plex-Session-Identifier": "sess-1"})
         log = self._requests(pms)

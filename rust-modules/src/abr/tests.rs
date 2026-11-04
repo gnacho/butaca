@@ -38,7 +38,7 @@ fn sample_bytes_with_total(
     .unwrap()
 }
 
-/// A rendition that declares exactly what its rung asked for. Real PMS does not — the catalog's
+/// A rendition that declares exactly what its rung asked for. Real server does not — the catalog's
 /// error is +5.2% to +31.6% — but a test that wants to exercise the ADMISSION arithmetic should not
 /// also be modelling that gap, and every test here that needs a different one passes it directly.
 fn declared_bps(rung: Rung) -> u64 {
@@ -131,7 +131,7 @@ fn bootstrap_controller() -> Controller {
     controller_at(Rung::P480)
 }
 
-/// A fresh encoder's first object contains the one-time PMS/session startup.  The device trace
+/// A fresh encoder's first object contains the one-time server/session startup.  The device trace
 /// took 3.013 s to obtain 2 s of 4K media while its body transferred at 35 Mbit/s; deciding on that
 /// boundary object alone sent 22 Mbps straight to 320 kbps after every seek.  The next object is
 /// the first repeatable operating-point observation, while the boundary bytes still seed delivery,
@@ -1394,9 +1394,9 @@ fn top_candidate() -> HlsCandidate {
     hd_catalog().candidate(Rung::P1080High)
 }
 
-/// The server the recovery fixtures compare against. Its own default — an idle PMS — which is what
-/// these tests meant all along; the difference is that the gate now has to be TOLD, so a fixture
-/// that wants a loaded server can say so.
+/// The server the recovery fixtures compare against. Its own default — an idle server — which is
+/// what these tests meant all along; the difference is that the gate now has to be TOLD, so
+/// a fixture that wants a loaded server can say so.
 fn idle_server() -> ProductionEstimate {
     ProductionEstimate::default()
 }
@@ -2041,13 +2041,13 @@ fn a_failed_candidate_reopens_exploration_only_with_strictly_more_budget() {
 
 /// A deadline-censored transaction has not produced a candidate media quantum, so it cannot be
 /// an ordinal response-size endpoint. The only fact it established is common to every quality
-/// excitation: the serial PMS decision/start/playlist/body path did not finish in the disposable
+/// excitation: the serial server decision/start/playlist/body path did not finish in the disposable
 /// reserve it was given.
 ///
-/// Remote-PMS reproduction (2026-08-31): after a 22 Mbps candidate spent its deadline, the
-/// old per-rung frontier immediately tried 12, 6 and 22 Mbps candidates on smaller common
-/// budgets. Those overlapping encoder resources made PMS map later 22 Mbps requests to 720p and
-/// then 404p. A different actuator is not new evidence and must not bypass the censored budget.
+/// Remote server reproduction (2026-08-31): after a 22 Mbps candidate spent its deadline, the old
+/// per-rung frontier immediately tried 12, 6 and 22 Mbps candidates on smaller common budgets.
+/// Those overlapping encoder resources made the server map later 22 Mbps requests to 720p and then
+/// 404p. A different actuator is not new evidence and must not bypass the censored budget.
 #[test]
 fn a_censored_candidate_blocks_all_quality_exploration_until_the_common_budget_grows() {
     let mut controller = Controller::starting_at(Rung::P720Low, None, hd_catalog());
@@ -3464,8 +3464,9 @@ fn the_network_risk_term_is_continuous_between_the_two_horizons_that_already_exi
     assert_eq!(risk_score(Some(0), true, &policy), RISK_SCORE_MAX);
 }
 
-/// PMS gives only a whole-file average, not a peak envelope.  Inventing a multiplier does not turn
-/// it into one; VBR pressure becomes evidence only when the playable reserve actually drains.
+/// The server gives only a whole-file average, not a peak envelope.  Inventing a multiplier does
+/// not turn it into one; VBR pressure becomes evidence only when the playable reserve actually
+/// drains.
 #[test]
 fn source_average_is_the_consumption_rate_and_vbr_is_observed_in_the_buffer() {
     let policy = AbrPolicy::measured();
@@ -3582,13 +3583,14 @@ fn originals_quality_is_scored_from_the_source_and_not_from_a_fabricated_rung() 
         "an unmeasured raster must not be read as a forbidden zero-pixel picture",
     );
 
-    // **A rung's raster is a BOUNDING BOX, and every SCOPE film is the case that proves it.** PMS
-    // fits the source inside the box and never upscales, so 1920x800 is reproduced exactly by the
-    // 1920x1080 rungs and must score as 1080p does. The cap was first written as its own per-axis
-    // filter in the inverted direction (`rung_w <= source_w`), which admitted no 1080p rung for a
-    // 2.40:1 master and capped it at 4000 kbps — 40 against this 76, on the argmax that decides
-    // whether Auto recovers Original at all. `ladder::admits`' doc records the same defect measured
-    // on the television from the ladder's side; this asserts it from the mode comparison's.
+    // **A rung's raster is a BOUNDING BOX, and every SCOPE film is the case that proves it.**
+    // The server fits the source inside the box and never upscales, so 1920x800 is reproduced
+    // exactly by the 1920x1080 rungs and must score as 1080p does. The cap was first written as
+    // its own per-axis filter in the inverted direction (`rung_w <= source_w`), which admitted
+    // no 1080p rung for a 2.40:1 master and capped it at 4000 kbps — 40 against this 76, on
+    // the argmax that decides whether Auto recovers Original at all. `ladder::admits`' doc records
+    // the same defect measured on the television from the ladder's side; this asserts it from
+    // the mode comparison's.
     for scope in [(1_920u16, 800u16), (1_920, 816), (1_920, 1_040)] {
         assert_eq!(
             quality_of(28_000, scope),
@@ -5311,7 +5313,8 @@ fn an_abandoned_prefix_cannot_restart_the_estimate_upward() {
 }
 
 /// A slow prefix is censored too.  Its deadline failure is actionable, but its byte/time ratio does
-/// not identify whether path capacity, PMS production, pacing, or startup withheld the remainder.
+/// not identify whether path capacity, server production, pacing, or startup withheld
+/// the remainder.
 #[test]
 fn a_slow_abandoned_prefix_also_leaves_capacity_unchanged() {
     let mut c = CapacityEstimate::default();
@@ -5883,7 +5886,7 @@ fn a_post_seek_modest_drain_is_confirmed_before_original_is_abandoned() {
 /// four times the size and the body quadruples; the open and the probe do not move at all. The
 /// rule multiplied all 582.
 ///
-/// **An earlier version of this test blamed PMS JIT production, and `not_ready=0` refutes it.**
+/// **An earlier version of this test blamed server JIT production, and `not_ready=0` refutes it.**
 /// The apparent corroboration was circular: `prod=` is an EWMA of `total_fetch_us / duration`, the
 /// same quantity the window's demand is built from, so of course they agreed. Kept as a note
 /// because the arithmetic below is unchanged by the correction and the wrong cause would have led
@@ -6130,12 +6133,12 @@ fn a_realtime_demand_capped_response_still_excites_an_unknown_higher_tier() {
     );
 }
 
-/// A request ceiling and the response PMS actually attached to it are two different state
+/// A request ceiling and the response the server actually attached to it are two different state
 /// variables.  Device trace, 2026-08-31: the top `22 Mbps / 4K` actuator returned a
 /// `979 kbps / 720x404` master, so recording the actuator as `current` made the ladder terminal
 /// even after later segment service proved a stronger regime.  The only honest next experiment
 /// is a fresh encoder at the SAME actuator; mapping 979 kbps back to a guessed lower rung would
-/// invent a non-existent inverse for PMS's item-dependent request mapping.
+/// invent a non-existent inverse for the server's item-dependent request mapping.
 #[test]
 fn an_underfilled_top_actuator_refreshes_after_stronger_service_evidence() {
     let mut controller = Controller::starting_at(Rung::Uhd, None, uhd_catalog());
@@ -6209,12 +6212,12 @@ fn an_underfilled_top_actuator_refreshes_after_stronger_service_evidence() {
 }
 
 /// A completed same-request refresh can itself be demand-capped. Its transfer rate then measures
-/// only the small response PMS chose, not the dormant capacity behind that response, so requiring
-/// the live low rendition to confidence-separate above its own fast estimate is an absorbing
-/// state. The completed transaction did establish its exact cost, however: a strictly larger
-/// disposable reserve can fund one more physical attempt without inventing link capacity.
+/// only the small response the server chose, not the dormant capacity behind that response, so
+/// requiring the live low rendition to confidence-separate above its own fast estimate is
+/// an absorbing state. The completed transaction did establish its exact cost, however: a strictly
+/// larger disposable reserve can fund one more physical attempt without inventing link capacity.
 ///
-/// Remote-PMS reproduction (2026-08-31): after the link reopened, an underfilled 22 Mbps
+/// Remote server reproduction (2026-08-31): after the link reopened, an underfilled 22 Mbps
 /// refresh completed as 1.61 Mbps / 720x404 with E about 14.5 s. The current response then filled
 /// the real device queues to about 42 s while reporting 10--16 Mbps body service, but no refresh
 /// ever ran because a demand-capped response could not prove a larger hidden service rate.
@@ -6268,14 +6271,14 @@ fn an_unchanged_underfilled_response_retries_on_a_strictly_larger_disposable_res
     );
 }
 
-/// A higher request whose completed PMS response does not improve on the live response is not an
+/// A higher request whose completed server response does not improve on the live response is not an
 /// ordinal failure of that requested rung. The server answered with a different, demand-capped
 /// object, so immediately trying every lower request only allocates a train of physical encoders
 /// against the same resource governor. The exact transaction did measure one common disposable-
 /// reserve endpoint: hold every quality experiment at that E, then retry the most informative top
 /// request once a strictly larger reserve exists.
 ///
-/// Remote-PMS regression (2026-08-31): a 22 Mbps request returned 433 kbps / 720x404 against
+/// Remote server regression (2026-08-31): a 22 Mbps request returned 433 kbps / 720x404 against
 /// a live 1.459 Mbps / 720x404 response. Treating that as `Structural` walked 20, 18, 16, 14, 12,
 /// 10, 8, 6 and 4 Mbps in one pass; the accumulated encoder churn eventually revoked the live
 /// session. Nothing in those response bytes ordered the requested actuators.
@@ -6471,7 +6474,7 @@ fn an_exact_current_point_deficit_requests_a_lower_actuator() {
     ));
 }
 
-/// Device regression (remote PMS, 2026-08-31): Auto correctly left Original for an 8 Mbps HLS
+/// Device regression (remote server, 2026-08-31): Auto correctly left Original for an 8 Mbps HLS
 /// actuator after the link was shaped to 10 Mbps. The fresh-session object was treated as setup,
 /// then the first repeatable object supplied 2.000 s of media in 2.039 s. Its exact finite bag was
 /// survivable from the 4 s reserve but not self-replenishing by 39 ms. The controller ignored its
@@ -6951,12 +6954,12 @@ fn a_completed_unsustainable_candidate_rearms_after_stronger_link_evidence() {
     );
 }
 
-/// A fresh PMS encoder's first object is a setup-bearing transaction leg, not yet the
-/// repeatable segment service of the rendition it starts. A remote PMS reproduced the distinction
-/// on device (2026-08-31): after the shaped link was released, the 22 Mbps request returned real
-/// 3840x2160 media, but its first 2 s object took 2464 ms because it included encoder/session
-/// startup.  The very next live 12 Mbps object took 1022 ms on the same path.  Classifying the
-/// first object as a steady `A>D` result blocked the proved 4K response behind `RejectBackoff`.
+/// A fresh server encoder's first object is a setup-bearing transaction leg, not yet the repeatable
+/// segment service of the rendition it starts. A remote server reproduced the distinction on device
+/// (2026-08-31): after the shaped link was released, the 22 Mbps request returned real 3840x2160
+/// media, but its first 2 s object took 2464 ms because it included encoder/session startup. 
+/// The very next live 12 Mbps object took 1022 ms on the same path.  Classifying the first object
+/// as a steady `A>D` result blocked the proved 4K response behind `RejectBackoff`.
 ///
 /// There is no sample-count heuristic here.  Exactly one object has the structural session-boundary
 /// bit.  If that complete object leaves enough reserve to fund its exact acquisition, it buys one
@@ -7154,10 +7157,10 @@ fn reachable_reserve_ms(rung: Rung, catalog: HlsActuatorCatalog) -> i64 {
 ///
 /// A transaction is charged the same way the device pays for one: the candidate's own acquisition
 /// drains the reserve and advances the clock before its verdict is taken, and only a commit credits
-/// its media. What it deliberately does NOT model is the control plane, PMS session setup and the
-/// warm-up object — all three make a transaction more expensive, so every one of them is omitted in
-/// the direction that makes flapping CHEAPER than it really is. A commit count graded here is
-/// therefore a lower bound on the device's.
+/// its media. What it deliberately does NOT model is the control plane, server session setup and
+/// the warm-up object — all three make a transaction more expensive, so every one of them is
+/// omitted in the direction that makes flapping CHEAPER than it really is. A commit count graded
+/// here is therefore a lower bound on the device's.
 fn commit_trail(catalog: HlsActuatorCatalog, legs: &[(i64, u32)]) -> Vec<(u64, Direction, u32)> {
     const SEGMENT_MS: i64 = 2_000;
     // The device seeds every one of these cases at 480p/720 kbps (`abr: seed rung=720kbps`).

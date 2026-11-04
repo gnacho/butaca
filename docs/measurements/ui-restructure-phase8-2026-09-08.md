@@ -49,9 +49,9 @@ see the integration entry immediately below for the re-measured, whole-tree zero
 
 **What remains owed (as of this per-package checkpoint).** No TV run happened anywhere in this
 task, by design — no `ssh`, `make deploy/run/test`, or `tools/tv-*` was invoked by any package.
-Neither `tests/focusfp.sh --only 4` (the live-sim-plus-mock-PMS mode) nor its committed-fixture
+Neither `tests/focusfp.sh --only 4` (the live-sim-plus-mock-server mode) nor its committed-fixture
 replay alternative was run by this doc-only package, which does not drive a simulator or a mock
-PMS; whether an earlier or later package in this run exercised either mode is that package's own
+server; whether an earlier or later package in this run exercised either mode is that package's own
 report, not restated here as a claim of this section. Device/simulator pixel-level and
 text-rasterization verification of the owned Search screen is a separate obligation this cutover
 does not retire, per this repo's own tier rules (`docs/agent-reference.md`'s Testing/verification
@@ -67,8 +67,8 @@ merged tree (`ci/allow/statics-migration.txt` reads 18 entries, no `ui/search/*`
 passed) both green, `make lint` clean, `CARGO_INCREMENTAL=0 cargo +nightly check
 --manifest-path rust-modules/Cargo.toml --lib --no-default-features` clean. `grep -rn
 'ui::search' rust-modules/src | wc -l` is **0** whole-repo, superseding the per-package caveat
-above. `tests/focusfp.sh --only 4` (the live-sim-plus-mock-PMS mode, not the committed-fixture
-replay — the script's own mock PMS started and answered) **passed**: `[PASS] 4
+above. `tests/focusfp.sh --only 4` (the live-sim-plus-mock-server mode, not the committed-fixture
+replay — the script's own mock server started and answered) **passed**: `[PASS] 4
 search-shelf-detail-back: 8 fingerprint lines -> /tmp/butaca-focusfp/4-search-shelf-detail-back.fp`.
 No TV-touching command (`ssh`, `make deploy/run/test`, `tools/tv-*`) was invoked during this
 re-check. Device/simulator pixel-level and text-rasterization verification of the owned Search
@@ -109,7 +109,7 @@ net new host test), `--features hostsim` 2749 passed (was 2748), both 0 failed, 
 --no-default-features` clean; `bash ci/check-deps.sh` and `bash ci/check-statics.sh` both exit 0
 (`ci/allow/statics-migration.txt` unchanged at 18 entries, no `ui/search/*` line); `grep -rn
 'ui::search' rust-modules/src | wc -l` is **0** whole-repo; `tests/focusfp.sh --only 4` (live-sim
-against the script's own mock PMS, not fixture replay) **passed**: `[PASS] 4
+against the script's own mock server, not fixture replay) **passed**: `[PASS] 4
 search-shelf-detail-back: 7 fingerprint lines`. The fingerprint line count (7, vs. 8 in the
 pre-fix-wave re-check above) reflects the chip/strip now painting and animating rather than a
 regression — this run's own `.fp` file is the artifact, not re-diffed against a committed fixture
@@ -421,7 +421,7 @@ Host regressions exercise the actual bridge result tap, exactly-once ingest, wro
 failure retention, mailbox isolation from ticks, and request uniqueness across sources/retries/
 profile resets. This is NOT yet recorder payload encoding: `Recplay::result` still has its default
 no-op, and replay still needs the codec, injection, adapter suppression and full initialization.
-The request sequence and source table still live in the legacy PMS backing state; their move into
+The request sequence and source table still live in the legacy server backing state; their move into
 an owned, canonically encoded store remains required. No existing anchor was replaced.
 
 Full `make check` passes (default 2604 / hostsim 2625 passed, 3 ignored each, plus lint and CI).
@@ -430,7 +430,7 @@ Shipping-feature and ARM cross-build checks pass. Gate logs are
 
 ## Previous checkpoint: Home mailbox capture separated from application
 
-`pms::pump` now delegates to a single batch-application path with a supplier invoked after roster
+`catalog::pump` now delegates to a single batch-application path with a supplier invoked after roster
 reconciliation. `take_landings` only transfers the worker mailbox; it does not mutate the catalog
 and releases its lock before application. Existing generation, sequence, client and token checks,
 retry scheduling, merge ordering and failure-only repaint behavior remain on the common path.
@@ -480,7 +480,7 @@ Built the current simulator and recorded flow 1 into a fresh synthetic runtime a
 and the recording passes the synthetic-alphabet check. It contains 581 frames, 10 input records,
 5 state records and 581 presentation records, but ZERO effects, results or lifecycle records.
 
-Same-build replay with the seed-1 mock PMS running at the original endpoint reports
+Same-build replay with the seed-1 mock server running at the original endpoint reports
 `graded=5 diverged=0 present_diffs=0 verdict=SAME`. Replaying the same artifact with no server
 listening reports `graded=5 diverged=5 present_diffs=0 verdict=DIVERGED`. Neither replay reported
 an initial-probe or trigger mismatch; this is not proof that full store initialization was equal,
@@ -491,7 +491,7 @@ Both simulator processes exited and the mock server was stopped. No TV access oc
 
 Concrete missing wiring: `ui::rec::Writer` exposes `effect` and `result`, but the application
 `Recplay` only records ticks/inputs/presentation/event-frame state; `bridge::frame` runs with
-`NoTap`. `stores::hubs::pump` still invokes the live PMS pump, whose worker mailbox supplies data
+`NoTap`. `stores::hubs::pump` still invokes the live server pump, whose worker mailbox supplies data
 outside this recording. The online SAME result is therefore live-assisted evidence, not the
 closed adapter replay/adoption proof required by the plan. Do not import it as an accepted
 anchor or retire legacy Home on its strength. No existing fixture was changed.
@@ -775,7 +775,7 @@ The failure is `app::recorder::tests::the_init_probe_is_synthetic_and_the_shape_
 (actual 11018145524105529622, previous pin 10012012826793680199). The gate stopped there;
 later hostsim/CI stages were not run. Do not claim full check green or update the pin before
 the canonical-state review. Log: `/tmp/plx-phase8-home-review-check.log`.
-The local simulator and mock PMS sessions were stopped, and the completed worker was closed.
+The local simulator and mock server sessions were stopped, and the completed worker was closed.
 
 ## Historical checkpoint: Home integration in progress
 
@@ -785,7 +785,7 @@ The newer work below supersedes the prerequisite-only status of the earlier sect
   `HubsSnapshot` survives commits/reset; `HubsView` borrows it. `Bridge::split` refreshes the
   snapshot, including status, without cloning movies or strings per frame. A RED/GREEN regression
   fixed generation advancement on optimistic and roster commits (previously only some callers
-  bumped it). PMS's provider listing key is preserved as a tagged, server-scoped identity fallback.
+  bumped it). The server's provider listing key is preserved as a tagged, server-scoped identity fallback.
 - `StoreWork::{Hubs,BrowseDiscovery}` is addressed through the same dispatcher drain as commands,
   without inventing a generation change on idle polls. Astra found no introduced correctness or
   lifetime issue in this commit. Existing caveat: failure-only hub landings do not raise a store
@@ -843,7 +843,7 @@ verification remain pending; this branch retains their integrated code as its de
   page/chrome alpha, pending tab selection, and blur amount. Surfaces still use their own appear
   alpha. A failing propagation test was observed, then passed after wiring; it also checks that
   drawing does not mutate logical state.
-- Home hub identities are exposed by the PMS view as provider identifier plus server namespace.
+- Home hub identities are exposed by the server view as provider identifier plus server namespace.
   The merged Continue Watching group is source-independent. Titles, owner labels and row positions
   do not define identity. Tests cover source collisions, renaming/reordering, and merged-deck order.
   A missing provider identity is explicitly absent, not a supposedly stable positional key.

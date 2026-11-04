@@ -8,7 +8,7 @@ table in §1, §8.3, §8.4, the goal's bullet 4 and the third decision bullet):
 - Full-trailer mode does NOT leave "only the Play/Resume pill" on screen. It takes the WHOLE page
   off — the action row with it — and draws a trailer transport in its place: the `Trailer` kicker
   over a title (`trailer::transport_title` — the FILM/SHOW title by default, so a trailer whose own
-  PMS title is the boilerplate "Trailer" doesn't repeat the kicker word right under it; the extra's
+  The server title is the boilerplate "Trailer" doesn't repeat the kicker word right under it; the extra's
   own title only when it says something the kicker doesn't), the playbar with elapsed/remaining,
   and the play/pause state read-out, built from `ui::player_hud`'s own
   `draw_scrim`/`draw_title`/`draw_playbar`. There is still no quality, subtitle, audio or Info
@@ -404,7 +404,7 @@ synopsis_view.draw(synopsis_alpha, …);   // was `prose`
 ```
 
 **This is a legibility regression risk, and `DESIGN.md` already names the exact reason to take it
-seriously**: "Still artwork has a knowable worst case, which is what the PMS `blur` hash is for.
+seriously**: "Still artwork has a knowable worst case, which is what the server `blur` hash is for.
 Video does not." (`DESIGN.md:84-85`). Today, no prose is ever drawn over a *playing* trailer — only
 the title survives, and titles get the full clearLogo/fallback+shadow treatment plus the boosted
 `PREVIEW_FIELD` wedge. A 3-line `LABEL` (26px) synopsis block is materially harder to keep legible
@@ -492,7 +492,7 @@ product cost, traded deliberately for full-trailer mode reading as an actual imm
 view rather than a video playing behind a still-cluttered action row. This was an explicit choice
 made in the design review (not a default this plan invented), and it stands as scoped; a resume
 point itself is never at risk of being lost or altered by entering/leaving full-trailer mode — it
-lives on the server/PMS side, unaffected by which hero controls are drawn.
+lives on the server side, unaffected by which hero controls are drawn.
 
 **(c) The scrim over the video eases down.** New screen-local scalar `preview_field: f32`
 (alongside `preview_art`/`preview_prose`/`preview_synopsis`/`preview_chrome`), targeting

@@ -32,7 +32,7 @@ focus route=detail sec=5 col=0 eptext=0 season=- saved=0,0,0,0,0,0 card=0 alt=0 
 hb route=detail
 ```
 
-All data above came from `tests/mock_pms.py`, seed 1. No ItemMenu opened: `detailsec=3` is three
+All data above came from `tests/mock_server.py`, seed 1. No ItemMenu opened: `detailsec=3` is three
 DOWN presses, not section ID 3. The synthetic movie's order is Hero → Cast → Related → About.
 The old success condition only required an alive process and at least two fingerprints.
 
@@ -45,7 +45,7 @@ identity. Flows 2 and 5 now also require their actual navigation/return sequence
 ## Visual comparison baseline
 
 Four 1920×1080 screenshots were captured and inspected from the starting simulator, using the
-synthetic PMS and its flat-color artwork: movie hero, show's episode strip, Person, Filmography.
+synthetic server and its flat-color artwork: movie hero, show's episode strip, Person, Filmography.
 The movie retains its artwork/logo, metadata badges, rating, synopsis, playback facts, action row
 and right-side people column. The show preserves separate still and text rows; Filmography uses
 the existing two-column route layout, department strip and credit table.
@@ -153,7 +153,7 @@ is accepted; this is a reachability/permission issue, not a requirement to light
 The pending state above is superseded: the set was reachable this session, and the four screens
 were captured (plus one follow-up, below) under the `tv-lock` skill's protocol — one lease per
 capture group, deployed dev build, TV audio muted for the session, panel/backlight state left
-untouched. Real household library items stood in for the simulator's synthetic PMS content;
+untouched. Real household library items stood in for the simulator's synthetic server content;
 no ratingKey, server address or other identifying value is recorded here, and no image was
 committed — all five PNGs were inspected locally and left under `/tmp`.
 

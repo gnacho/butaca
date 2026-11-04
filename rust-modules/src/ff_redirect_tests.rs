@@ -2,10 +2,10 @@
 //!
 //! Field report (debug build of a788b27a): a remote trailer's Part URL answered
 //! `302`, the socket open reported `ff: http_open FAILED status=302`, and the demuxer saw no
-//! access units. PMS redirects those parts to a presigned CDN URL on ANOTHER origin, usually
+//! access units. The server redirects those parts to a presigned CDN URL on ANOTHER origin, usually
 //! https, sometimes via a relative `Location`. These grade every plaintext media open the demux
 //! thread makes — the progressive first open, the AVIO seek reopen, and the HLS source open —
-//! against loopback servers that answer the way PMS did.
+//! against loopback servers that answer the way the server did.
 
 use super::*;
 
@@ -166,7 +166,7 @@ fn progressive_open(port: u16, path: &str) -> Result<(String, i64), String> {
 #[test]
 fn an_hls_open_follows_an_absolute_same_origin_302_and_keeps_the_token() {
     let _serial = crate::testlock::serial();
-    let pms = Scripted::start(|head, port| {
+    let catalog = Scripted::start(|head, port| {
         if request_line(head).starts_with("GET /start") {
             redirect(302, &format!("http://127.0.0.1:{port}/final/seg.ts"))
         } else if request_line(head).starts_with("GET /final/seg.ts") {
@@ -175,13 +175,13 @@ fn an_hls_open_follows_an_absolute_same_origin_302_and_keeps_the_token() {
             not_found()
         }
     });
-    let (outcome, _hs) = hls_open_plain(pms.port, "/start?X-Plex-Token=tok");
+    let (outcome, _hs) = hls_open_plain(catalog.port, "/start?X-Plex-Token=tok");
     assert_eq!(
         outcome,
         Ok(("/final/seg.ts?X-Plex-Token=tok".to_string(), 4)),
         "the open must land on the Location, and a later reopen must use it"
     );
-    let heads = pms.heads();
+    let heads = catalog.heads();
     assert_eq!(heads.len(), 2, "one redirect, one final GET: {heads:?}");
     assert!(
         request_line(&heads[1]).starts_with("GET /final/seg.ts?X-Plex-Token=tok "),
@@ -193,7 +193,7 @@ fn an_hls_open_follows_an_absolute_same_origin_302_and_keeps_the_token() {
 #[test]
 fn a_seek_reopen_follows_a_relative_302_and_keeps_its_range() {
     let _serial = crate::testlock::serial();
-    let pms = Scripted::start(|head, _port| {
+    let catalog = Scripted::start(|head, _port| {
         let line = request_line(head);
         if line.starts_with("GET /dir/a.mp4 ") {
             redirect(307, "b.mp4")
@@ -209,7 +209,7 @@ fn a_seek_reopen_follows_a_relative_302_and_keeps_its_range() {
         src: Src::Socket {
             hs: &mut *hs,
             host: CString::new("127.0.0.1").unwrap(),
-            port: pms.port as c_int,
+            port: catalog.port as c_int,
             path: CString::new("/dir/a.mp4").unwrap(),
         },
         aq: &mut *aq,
@@ -237,7 +237,7 @@ fn a_seek_reopen_follows_a_relative_302_and_keeps_its_range() {
         at, 2,
         "the seek must follow the 307 and land at the requested byte"
     );
-    let heads = pms.heads();
+    let heads = catalog.heads();
     assert_eq!(heads.len(), 2, "{heads:?}");
     assert!(
         heads[1].contains("Range: bytes=2-"),
@@ -255,13 +255,13 @@ fn a_cross_origin_hop_does_not_forward_the_token() {
     let _serial = crate::testlock::serial();
     let cdn = Scripted::start(|_head, _port| ok_body("ABCD"));
     let cdn_port = cdn.port;
-    let pms = Scripted::start(move |_head, _port| {
+    let catalog = Scripted::start(move |_head, _port| {
         redirect(
             302,
             &format!("http://127.0.0.1:{cdn_port}/cdn/v.ts?sig=abc"),
         )
     });
-    let outcome = progressive_open(pms.port, "/start?X-Plex-Token=tok");
+    let outcome = progressive_open(catalog.port, "/start?X-Plex-Token=tok");
     assert_eq!(outcome, Ok(("/cdn/v.ts?sig=abc".to_string(), 4)));
     let heads = cdn.heads();
     assert_eq!(heads.len(), 1, "{heads:?}");
@@ -280,11 +280,11 @@ fn a_cross_origin_hop_does_not_forward_the_token() {
 #[test]
 fn a_redirect_loop_is_bounded_and_fails() {
     let _serial = crate::testlock::serial();
-    let pms = Scripted::start(|_head, _port| redirect(302, "/loop"));
-    let (outcome, _hs) = hls_open_plain(pms.port, "/start");
+    let catalog = Scripted::start(|_head, _port| redirect(302, "/loop"));
+    let (outcome, _hs) = hls_open_plain(catalog.port, "/start");
     assert!(outcome.is_err(), "a loop must fail: {outcome:?}");
     assert_eq!(
-        pms.requests().len(),
+        catalog.requests().len(),
         1 + crate::stream::redirect::MAX_HOPS as usize,
         "the first request plus exactly MAX_HOPS followed hops"
     );
@@ -293,7 +293,7 @@ fn a_redirect_loop_is_bounded_and_fails() {
 #[test]
 fn a_progressive_open_follows_a_302() {
     let _serial = crate::testlock::serial();
-    let pms = Scripted::start(|head, _port| {
+    let catalog = Scripted::start(|head, _port| {
         if request_line(head).starts_with("GET /library/parts/1/file.mp4") {
             redirect(302, "/services/iva/assets/1/video.mp4")
         } else {
@@ -302,7 +302,7 @@ fn a_progressive_open_follows_a_302() {
     });
     let mut hs = crate::stream::http_stream_boxed();
     let mut aq = crate::aq::aq_new(1 << 20);
-    let origin = crate::origin::Origin::http("127.0.0.1", pms.port as i32);
+    let origin = crate::origin::Origin::http("127.0.0.1", catalog.port as i32);
     let opened = open_plain_progressive(
         &mut *hs,
         &origin,
@@ -334,13 +334,13 @@ fn an_https_hop_from_the_socket_path_is_routed_to_curl() {
     };
     let cdn = Scripted::start(|_head, _port| Vec::new());
     let cdn_port = cdn.port;
-    let pms = Scripted::start(move |_head, _port| {
+    let catalog = Scripted::start(move |_head, _port| {
         redirect(
             302,
             &format!("https://127.0.0.1:{cdn_port}/cdn/seg.ts?sig=abc"),
         )
     });
-    let outcome = progressive_open(pms.port, "/start?X-Plex-Token=tok");
+    let outcome = progressive_open(catalog.port, "/start?X-Plex-Token=tok");
     assert!(
         outcome.is_err(),
         "a plaintext server cannot finish TLS: {outcome:?}"
@@ -361,7 +361,7 @@ fn an_https_hop_from_the_socket_path_is_routed_to_curl() {
 #[test]
 fn a_redirected_master_playlist_resolves_its_children_against_the_redirect_target() {
     let _serial = crate::testlock::serial();
-    let pms = Scripted::start(|head, _port| {
+    let catalog = Scripted::start(|head, _port| {
         if request_line(head).starts_with("GET /old/master.m3u8") {
             redirect(302, "/new/master.m3u8")
         } else if request_line(head).starts_with("GET /new/master.m3u8") {
@@ -376,7 +376,7 @@ fn a_redirected_master_playlist_resolves_its_children_against_the_redirect_targe
         hs: &mut *hs,
         curl: None,
     };
-    let origin = crate::origin::Origin::http("127.0.0.1", pms.port as i32);
+    let origin = crate::origin::Origin::http("127.0.0.1", catalog.port as i32);
     let cursor = hls_cursor_open(
         &origin,
         "/old/master.m3u8?X-Plex-Token=tok",
@@ -394,18 +394,18 @@ fn a_redirected_master_playlist_resolves_its_children_against_the_redirect_targe
     assert_eq!(media, Ok("/new/variant.m3u8".to_string()));
 }
 
-/// The HLS contract (`hls.rs`): every request stays on the PMS origin, so the media worker can
+/// The HLS contract (`hls.rs`): every request stays on the server origin, so the media worker can
 /// never be steered into fetching from elsewhere. A redirect off that origin is refused before
 /// anything is dialled there.
 #[test]
-fn an_hls_redirect_off_the_pms_origin_is_refused_before_it_is_dialled() {
+fn an_hls_redirect_off_the_server_origin_is_refused_before_it_is_dialled() {
     let _serial = crate::testlock::serial();
     let cdn = Scripted::start(|_head, _port| ok_body("ABCD"));
     let cdn_port = cdn.port;
-    let pms = Scripted::start(move |_head, _port| {
+    let catalog = Scripted::start(move |_head, _port| {
         redirect(302, &format!("http://127.0.0.1:{cdn_port}/cdn/v.ts?sig=abc"))
     });
-    let (outcome, _hs) = hls_open_plain(pms.port, "/start?X-Plex-Token=tok");
+    let (outcome, _hs) = hls_open_plain(catalog.port, "/start?X-Plex-Token=tok");
     assert!(outcome.is_err(), "{outcome:?}");
     assert!(cdn.requests().is_empty(), "nothing may reach another origin");
 }

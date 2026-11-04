@@ -26,15 +26,15 @@ use std::ffi::CString;
 use crate::ui::player_hud::{LINGER_MS, PLAY_MARK_MS};
 
 /// Which title the transport shows under the `Trailer` kicker: the FILM/SHOW title by default, so
-/// a trailer whose own PMS-scanned title is the boilerplate "Trailer" does not repeat the kicker
+/// a trailer whose own server-scanned title is the boilerplate "Trailer" does not repeat the kicker
 /// word right underneath it — the case docs/trailer-ux-plan.md calls out as true "on most
 /// servers". The extra's own title wins only when it says something the kicker doesn't already,
 /// compared trimmed and case-insensitively so "trailer"/"Trailer "/"TRAILER" all count as the same
 /// non-information while "Official Trailer" or "Teaser 2" do not.
 pub(super) fn transport_title<'a>(film_title: &'a str, extra_title: &'a str) -> &'a str {
     let trimmed = extra_title.trim();
-    // PMS scans the boilerplate title in English whatever the UI language, so both the kicker's
-    // own word and the server's "Trailer" count as saying nothing new.
+    // The server scans the boilerplate title in English whatever the UI language, so both
+    // the kicker's own word and the server's "Trailer" count as saying nothing new.
     if trimmed.is_empty()
         || trimmed.eq_ignore_ascii_case("trailer")
         || trimmed.to_lowercase() == crate::metadata::ExtraContext::Trailer.label().to_lowercase()
@@ -431,7 +431,7 @@ impl Transport {
     }
 
     /// Draw the trailer transport. `film_title` is the ITEM's own (the trailer extra's parent);
-    /// `extra_title` is the trailer extra's own PMS title. [`transport_title`] picks which one
+    /// `extra_title` is the trailer extra's own server title. [`transport_title`] picks which one
     /// actually goes under the `Trailer` kicker — the same pairing the player HUD gives a trailer
     /// played as a feature. Nothing is drawn once it has faded out.
     ///
@@ -519,7 +519,7 @@ mod tests {
     use super::*;
     use crate::ui::machine::Key as MKey;
 
-    /// **The "Trailer / Trailer" duplicate case.** When the extra's own PMS title is the
+    /// **The "Trailer / Trailer" duplicate case.** When the extra's own server title is the
     /// boilerplate "Trailer" (however it's cased/spaced — most servers scan trailers this way),
     /// the transport must show the FILM/SHOW title instead, so it doesn't repeat the kicker word
     /// right under it. An empty extra title (no extra resolved yet) falls back the same way.

@@ -2,7 +2,7 @@
 //! tiers an address (local, remote, relay) and [`Outcome`] grades one identity-probe answer.
 //! Pure policy, no I/O. The candidate ranking engine itself (`Candidate`, `candidates`, `plan`)
 //! went out with the account service surface, and `configured_tier`, the boot-time address-shape
-//! tier guess, went out with the DevPms boot world (#166). [`PlaintextEligibility`]
+//! tier guess, went out with the DevServer boot world (#166). [`PlaintextEligibility`]
 //! stays as `grant`'s closed reason vocabulary.
 pub use crate::origin::dial_port;
 use serde::{Deserialize, Serialize};

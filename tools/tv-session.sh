@@ -39,7 +39,7 @@
 #   --owner           boot as the household account (the config.local.h owner token). This is
 #                     also what a bare `up` does with neither flag — spelling it out is for a
 #                     script that wants the choice to be visible in its own command line.
-#   --mock            with --guest, use only tests/mock_pms.py at the configured PMS endpoint.
+#   --mock            with --guest, use only tests/mock_server.py at the configured server endpoint.
 #                     Verifies its synthetic identity; never uses an account token or contacts
 #                     the account service.
 #   --dry-run         resolve and print the identity `up` would use (including a real --guest
@@ -110,7 +110,7 @@
 #
 # Config: TV host from $TV, else the Makefile's TV default. The app id, the install directory
 # and the runtime root are ASKED FOR (`make -s print-…`), never restated here — see the block
-# under REPO for why a literal copy of them is a bug waiting to happen. The PMS token is read
+# under REPO for why a literal copy of them is a bug waiting to happen. The server token is read
 # from the gitignored src/config.local.h at runtime, written straight to the TV in its own ssh
 # round-trip, and never printed. Nothing about the network or any credential lives here.
 set -uo pipefail
@@ -390,8 +390,8 @@ clear_triggers() {
 # token: read host-side, pushed in its own round-trip, never echoed
 push_token() {
   local tok
-  tok=$(sed -n 's/.*PMS_TOKEN *"\([^"]*\)".*/\1/p' "$REPO/src/config.local.h" 2>/dev/null | head -1)
-  [ -n "$tok" ] || { bad "no PMS_TOKEN in src/config.local.h (gitignored) — boot will hit QR sign-in"; return 1; }
+  tok=$(sed -n 's/.*SERVER_TOKEN *"\([^"]*\)".*/\1/p' "$REPO/src/config.local.h" 2>/dev/null | head -1)
+  [ -n "$tok" ] || { bad "no SERVER_TOKEN in src/config.local.h (gitignored) — boot will hit QR sign-in"; return 1; }
   printf '%s' "$tok" | tv "cat > $RUNDIR/butaca-token" || return 1
   ok "token injected (value not printed)"
 }
@@ -584,7 +584,7 @@ configure_direct_screen() {
     ''|*[!0-9]*) bad "a server-qualified ratingKey must be numeric, got: $direct_rk"; return 2 ;;
   esac
 
-  # A singular dev token installs only the compiled primary PMS. The signed-in session, on the
+  # A singular dev token installs only the compiled primary server. The signed-in session, on the
   # other hand, restores its persisted multi-server roster before the direct trigger fires. Make
   # that the supported path automatically; requiring an undocumented `--no-token` was exactly the
   # reason `--server 1` could otherwise select a slot the same command had just erased.
@@ -609,8 +609,8 @@ direct_poll_state() {
 }
 
 # Direct item triggers deliberately perform a synchronous metadata fetch before they route: two
-# PMS API calls for a movie and up to five for a show. Each API call has the documented 25-second
-# total deadline, so an 8-second launch snapshot cannot distinguish a slow healthy remote PMS from
+# server API calls for a movie and up to five for a show. Each API call has the documented 25-second
+# total deadline, so an 8-second launch snapshot cannot distinguish a slow healthy remote server from
 # a rejected trigger. Poll through the structural 5*25-second upper bound plus launch slack, while
 # still returning immediately on an explicit refusal or process death. This is tooling patience,
 # not a playback/ABR heuristic.
@@ -1311,10 +1311,10 @@ CUT
       else
         info "WAN: open (v4 chain / v6 unreachable route armed: ${chain%/})"
       fi
-      # Measured from the SET, which is the only place the answer is about: the PMS on the Mac
-      # over the LAN, and a public name through the router's resolver. The PMS host comes from
+      # Measured from the SET, which is the only place the answer is about: the server on the Mac
+      # over the LAN, and a public name through the router's resolver. The server host comes from
       # the gitignored config, when this checkout has one; a lane without it skips that line.
-      pms=${PMS_HOST:-$(sed -n 's/.*PMS_HOST *"\([^"]*\)".*/\1/p' "$REPO/src/config.local.h" 2>/dev/null)}
+      pms=${SERVER_HOST:-$(sed -n 's/.*SERVER_HOST *"\([^"]*\)".*/\1/p' "$REPO/src/config.local.h" 2>/dev/null)}
       [ -n "$pms" ] && info "from the TV: LAN PMS /identity -> $(tvq "wget -q -T 5 -O - http://$pms:32400/identity >/dev/null 2>&1 && echo ok || echo FAIL")"
       info "from the TV: resolve plex.tv -> $(tvq "nslookup plex.tv >/dev/null 2>&1 && echo ok || echo FAIL")"
       ;;

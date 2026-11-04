@@ -2,7 +2,7 @@
 //!
 //! Everything here is the Jellyfin half of a `browse.rs` idiom, shaped so the store side stays
 //! backend-blind: sections arrive as the same `(key, title, SecKind)` rows `project_sections`
-//! builds off a server, a page lands as the same `(Vec<PmsMovie>, total)` shape the store already
+//! builds off a server, a page lands as the same `(Vec<CatalogMovie>, total)` shape the store already
 //! takes, and the sort menu is a `Vec<SortEntry>` like any other. What could not be shared is
 //! the CLIENT (the retired client's lifecycle validation read registry state a Jellyfin client
 //! has no counterpart of), so `browse.rs` carries a narrow jellyfin lane beside each mailbox, the
@@ -22,7 +22,7 @@
 use super::client::{BrowseQuery, JfClient};
 use super::SERVER_ID;
 use crate::browse::{GenreEntry, LibraryType, SecKind, SortEntry};
-use crate::pms::PmsMovie;
+use crate::catalog::CatalogMovie;
 use std::sync::Mutex;
 
 /// The synthetic section keys handed out so far, 1-based: `VIEW_KEYS[i]` is the GUID of the view
@@ -160,7 +160,7 @@ pub(crate) fn fetch_page(
     sort_desc: bool,
     unwatched: bool,
     genre_ids: &str,
-) -> Option<(Vec<PmsMovie>, i64)> {
+) -> Option<(Vec<CatalogMovie>, i64)> {
     let view = view_for_key(key)?;
     if library_type == LibraryType::Collections {
         return fetch_collections(c, &view, start, limit);
@@ -180,7 +180,7 @@ pub(crate) fn fetch_page(
         unwatched,
         genre_ids,
     })?;
-    let items: Vec<PmsMovie> = res
+    let items: Vec<CatalogMovie> = res
         .items
         .iter()
         .filter_map(|it| super::convert::movie_from_dto(it, SERVER_ID, 0))
@@ -194,9 +194,9 @@ pub(crate) fn fetch_page(
 /// box set has no release date or rating of its own to sort by). Rows convert through
 /// [`super::convert::boxset_from_dto`] into `kind == collection` cards the browse grid already
 /// knows how to open.
-fn fetch_collections(c: &JfClient, view: &str, start: i64, limit: i64) -> Option<(Vec<PmsMovie>, i64)> {
+fn fetch_collections(c: &JfClient, view: &str, start: i64, limit: i64) -> Option<(Vec<CatalogMovie>, i64)> {
     let res = c.boxsets(view, start, limit)?;
-    let items: Vec<PmsMovie> = res
+    let items: Vec<CatalogMovie> = res
         .items
         .iter()
         .filter_map(|it| super::convert::boxset_from_dto(it, SERVER_ID))

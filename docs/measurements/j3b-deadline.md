@@ -1,7 +1,7 @@
 # J3b — bounding a candidate transfer by the reserve it spends
 
 *Device capture: `docs/measurements/j3b-logs/`. Binary: dev features, `FLAVOR=debug`, on the
-LG 49SM9000PLA (webOS 4.5). Synthetic pipeline tier — no PMS, no token, no library.*
+LG 49SM9000PLA (webOS 4.5). Synthetic pipeline tier — no server, no token, no library.*
 
 **What this measures.** Whether the deadline that landed in J3b changes anything, and what it
 costs. It is deliberately *not* a re-derivation of `H_ref`: that needs the deadline to be in the
@@ -203,8 +203,8 @@ collapsing link the dominant cost is not the transaction — it is the app's ref
 segment it has already started, on a rung the link can no longer carry.
 
 The historical proposed remedy was the plan's R16 prefix-rate abort rule, and this was the first
-measurement that priced it: rung 320 was 1.6 s away. Later real-PMS evidence invalidated the last
-sentence's premise. PMS can snapshot `Content-Length` for a still-growing segment and wait for its
+measurement that priced it: rung 320 was 1.6 s away. Later real-server evidence invalidated the last
+sentence's premise. The server can snapshot `Content-Length` for a still-growing segment and wait for its
 encoder inside that body, so the delivered prefix rate does not identify the unseen remainder even
 when both values appear known. Current code turns only observed `B = 0` into a decision point.
 
@@ -226,7 +226,7 @@ something else entirely, which is the part worth keeping.*
 `pipe_abr_seek_flat` was added to close the one gap §7 named: R11's `None` branch is host-proven
 and device-**unobserved**, because no case seeks during Auto. It cannot close it on this tier, and
 the reason is structural rather than incidental. A transcode seek restarts the encode at a new
-`&offset`; `route::transcode_seek` builds that from a PMS ratingKey and client; a
+`&offset`; `route::transcode_seek` builds that from a server ratingKey and client; a
 `butaca-playurl` playback has neither. So the seek is refused before a single segment is
 fetched, and the reserve the seek would have disturbed is never touched.
 

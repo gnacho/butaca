@@ -695,8 +695,8 @@ fn header_is_chunked(hdr: &[u8]) -> bool {
 /// How long the handshake phase of ONE open may take, across EVERY address the host resolved to.
 ///
 /// Without a bound at all the app inherits the kernel's SYN-retry budget (~2 min on Linux), during
-/// which the 60fps SDL loop is fully blocked — an unreachable PMS (box rebooting, TV on a different
-/// VLAN, DHCP re-lease) froze the whole UI rather than failing, and every PMS request in a chain
+/// which the 60fps SDL loop is fully blocked — an unreachable server (box rebooting, TV on a different
+/// VLAN, DHCP re-lease) froze the whole UI rather than failing, and every server request in a chain
 /// paid it again.
 ///
 /// **2000 ms was a LAN number**, and it was the right one while the only dialable host was a
@@ -709,7 +709,7 @@ fn header_is_chunked(hdr: &[u8]) -> bool {
 /// **Be clear about who pays for that today, because it is not who it is chosen for.** No caller
 /// hands this module a public-internet name yet: `auth::dial_target` still admits only an IPv4
 /// literal over plain HTTP, so every host that reaches here is a dotted quad on the LAN. What the
-/// raise actually buys *today* is a 4× longer main-loop freeze when the LAN server is down — a PMS
+/// raise actually buys *today* is a 4× longer main-loop freeze when the LAN server is down — a server
 /// rebooting, the set moved to another VLAN — and what it buys is paid back the day a name is
 /// dialled. It is a forward-looking number, on purpose and by instruction, and it is the one line
 /// here to re-examine if that day gets further away rather than closer.
@@ -1566,7 +1566,7 @@ unsafe fn perform_http_request(
     if header_is_chunked(hdr) {
         hs.chunked = 1;
     }
-    // HTTP/1.0 `Connection: keep-alive` is unused. PMS is 1.1; offering 1.0 reuse would add a
+    // HTTP/1.0 `Connection: keep-alive` is unused. The server is 1.1; offering 1.0 reuse would add a
     // handshake only if we ever saw that framing, which we have not.
     hs.keep_alive = i32::from(hdr.starts_with(b"HTTP/1.1") && !header_has_connection_close(hdr));
     remember_peer(hs, host_s, port);
@@ -1850,7 +1850,7 @@ pub(crate) fn http_body_done(hs: *const HttpStream) -> bool {
 
 /// **What a transport holds of the current response body beyond what its reader has taken** —
 /// the one question `ff.rs`'s acquisition asks both transports before it may abandon a fetch.
-/// A body is complete when it is RECEIVED, not when FFmpeg has read it: PMS bursts a paused
+/// A body is complete when it is RECEIVED, not when FFmpeg has read it: server bursts a paused
 /// remainder, and a burst sitting in a buffer is already paid for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct BodyReceipt {

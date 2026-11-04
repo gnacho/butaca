@@ -1,16 +1,17 @@
 use super::*;
 
-/// What one second of this source consumes on average.  PMS does not expose a peak envelope, so
-/// inflating the average by a fixed multiplier would be an unmeasured heuristic, not a bound.
+/// What one second of this source consumes on average.  The server does not expose a peak envelope,
+/// so inflating the average by a fixed multiplier would be an unmeasured heuristic, not a bound.
 /// Short-term VBR demand is instead visible where it matters: in the playable-buffer derivative.
 pub(crate) fn source_requirement_kbps(source_kbps: u32, _policy: &AbrPolicy) -> u32 {
     source_kbps
 }
 
 /// **The single number every measurement reaches the decision through.** Delivery variance, VBR
-/// headroom and buffer level/slope end here, per candidate, so the utility comparison below has one
-/// risk term instead of one term per telemetry field. PMS cadence is published separately because
-/// the available observation is total acquisition, not an independent encoder clock.
+/// headroom and buffer level/slope end here, per candidate, so the utility comparison below has
+/// one risk term instead of one term per telemetry field. The server cadence is published
+/// separately because the available observation is total acquisition, not an independent encoder
+/// clock.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct CandidateRisk {
     pub(crate) starvation_seconds: Option<u32>,
@@ -199,7 +200,7 @@ pub(crate) fn hls_safe_budget(capacity: &CapacityEstimate) -> u32 {
 ///   acquisition window would supply, and exactly what it cannot supply here: a delivery collapse
 ///   resets the window, and a collapse is the event that produced the downshift.
 ///
-/// An in-response prefix-rate projection is not an available alternative: a growing PMS HLS body
+/// An in-response prefix-rate projection is not an available alternative: a growing server HLS body
 /// right-censors server production together with network service. Absent an arrival-reserve bound,
 /// the alternative to the physical bound is a fraction of it — which would be the
 /// unexplained multiplier the design rule forbids, doing the work of a model nobody has written.
@@ -270,7 +271,7 @@ pub(crate) fn candidate_warmup_budget(
     predicted_transfer: std::time::Duration,
     fixed_overhead: std::time::Duration,
 ) -> std::time::Duration {
-    // A NEW PMS encoder's first segment carries decoder and encoder cold start and is not the
+    // A NEW server encoder's first segment carries decoder and encoder cold start and is not the
     // cadence the replacement will sustain. An upshift therefore spends exactly the exploration
     // reserve its caller proved disposable above the current runway; imposing `3/2·D` here was an
     // unrelated timer that could both waste a deep reserve and reject a safely funded cold start.

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# tests/focusfp.sh — the FOCUS FINGERPRINT flows, on the simulator, against the synthetic PMS.
+# tests/focusfp.sh — the FOCUS FINGERPRINT flows, on the simulator, against the synthetic server.
 #
 # Each flow boots `butaca-sim` into an instance root with `butaca-focus` armed, drives it
 # through the remote FIFO with the same tokens a television session uses, and keeps every
 # `focus …` fingerprint line (`crate::focusprobe`, logged only on CHANGE) plus every `route=`
 # heartbeat transition the run produced. The result is one `.fp` file per flow under $OUT: the
 # (screen x key) characterisation of the app's focus behaviour, taken against data that is pinned
-# (`tests/mock_pms.py --seed`) and free of household bytes, so it can be diffed across commits and
+# (`tests/mock_server.py --seed`) and free of household bytes, so it can be diffed across commits and
 # committed as a fixture.
 #
 # Phase 0 of the UI restructure runs this as a LIVE-SIM SMOKE: a flow passes when the app stayed
@@ -17,7 +17,7 @@
 # Flow 10 (root BACK at Home / picker / QR) is a television flow — on the simulator a root BACK is
 # a log line and nothing else — and is listed here as SKIP so the numbering matches the spec.
 #
-#   tests/focusfp.sh                    # all flows, own mock PMS on 127.0.0.1:32498
+#   tests/focusfp.sh                    # all flows, own mock server on 127.0.0.1:32498
 #   tests/focusfp.sh --only 2,8         # a subset
 #   tests/focusfp.sh --rec --only 1     # RECORD each flow (butaca-rec): the recording lands in
 #                                       #   $OUT/root-<n>/butaca-recordings/latest, ready for
@@ -25,7 +25,7 @@
 #   tests/focusfp.sh --replay --only 1  # REPLAY tests/fixtures/replay/<n>-<name> instead of
 #                                       #   sending tokens; a flow passes when the app's own
 #                                       #   `replay: done … verdict=SAME` line is produced
-#   tests/focusfp.sh --pms 10.0.0.5:32400   # against a real server (fingerprints then carry
+#   tests/focusfp.sh --server 10.0.0.5:32400   # against a real server (fingerprints then carry
 #                                            #   real ratingKeys: NOT committable)
 #
 # Needs `make sim` (the binary) and nothing else. Every flow gets a fresh instance root.
@@ -36,7 +36,7 @@ SIM_BIN="${SIM_BIN:-$ROOT/rust-modules/target-sim/debug/butaca-sim}"
 OUT="${OUT:-/tmp/butaca-focusfp}"
 PORT="${MOCK_PORT:-32498}"
 SEED="${MOCK_SEED:-1}"
-PMS=""
+SERVER=""
 ONLY=""
 REC=""
 REPLAY=""
@@ -48,7 +48,7 @@ SETTLE=3         # seconds after the last token before the run is read
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --pms) PMS="$2"; shift 2 ;;
+    --server) SERVER="$2"; shift 2 ;;
     --only) ONLY="$2"; shift 2 ;;
     --out) OUT="$2"; shift 2 ;;
     --seed) SEED="$2"; shift 2 ;;
@@ -67,19 +67,19 @@ mkdir -p "$OUT"
 
 MOCK_PID=""
 if [ -n "$REPLAY" ]; then
-  PMS="127.0.0.1:$PORT"
-elif [ -z "$PMS" ]; then
-  python3 "$ROOT/tests/mock_pms.py" --port "$PORT" --seed "$SEED" > "$OUT/mock_pms.log" 2>&1 &
+  SERVER="127.0.0.1:$PORT"
+elif [ -z "$SERVER" ]; then
+  python3 "$ROOT/tests/mock_server.py" --port "$PORT" --seed "$SEED" > "$OUT/mock_server.log" 2>&1 &
   MOCK_PID=$!
   for _ in $(seq 1 30); do
-    grep -q 'serving' "$OUT/mock_pms.log" 2>/dev/null && break
+    grep -q 'serving' "$OUT/mock_server.log" 2>/dev/null && break
     sleep 0.2
   done
-  grep -q 'serving' "$OUT/mock_pms.log" || { echo "focusfp: mock PMS did not start (see $OUT/mock_pms.log)" >&2; exit 2; }
-  PMS="127.0.0.1:$PORT"
+  grep -q 'serving' "$OUT/mock_server.log" || { echo "focusfp: mock server did not start (see $OUT/mock_server.log)" >&2; exit 2; }
+  SERVER="127.0.0.1:$PORT"
 fi
-PMS_HOST="${PMS%%:*}"
-PMS_PORT="${PMS##*:}"
+SERVER_HOST="${SERVER%%:*}"
+SERVER_PORT="${SERVER##*:}"
 
 SIM_PID=""
 cleanup() {
@@ -88,7 +88,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# The synthetic library's ratingKeys are dense and seeded (tests/mock_pms.py): the first movie is
+# The synthetic library's ratingKeys are dense and seeded (tests/mock_server.py): the first movie is
 # 1001 and the first show is 2001 — under any seed. A real server needs `--rk`; not offered yet.
 RK_MOVIE=1001
 RK_SHOW=2001
@@ -103,11 +103,11 @@ run_flow() {
     # Complete typed initial inputs, before boot. Never seed/copy an auth file or rewrite an ID
     # in a completed recording. These are the supported synthetic bootstrap domains.
     if [ "$n" = 12 ]; then
-      "$SIM_BIN" --write-synthetic-initial "$d/butaca-app-init" "$SEED" "$PMS_PORT" flow12
+      "$SIM_BIN" --write-synthetic-initial "$d/butaca-app-init" "$SEED" "$SERVER_PORT" flow12
     elif [ "$n" = 6 ]; then
-      "$SIM_BIN" --write-synthetic-initial "$d/butaca-app-init" "$SEED" "$PMS_PORT" settings=root
+      "$SIM_BIN" --write-synthetic-initial "$d/butaca-app-init" "$SEED" "$SERVER_PORT" settings=root
     else
-      "$SIM_BIN" --write-synthetic-initial "$d/butaca-app-init" "$SEED" "$PMS_PORT"
+      "$SIM_BIN" --write-synthetic-initial "$d/butaca-app-init" "$SEED" "$SERVER_PORT"
     fi
   else
     printf 'synthetic-token' > "$d/butaca-token"
@@ -128,7 +128,7 @@ run_flow() {
     esac
   done
   BUTACA_RUNTIME_DIR="$d" BUTACA_APP_DIR="$ROOT/pkg" BUTACA_WIN=1920x1080 \
-    "$SIM_BIN" "$PMS_HOST" "$PMS_PORT" > "$d/sim.out" 2>&1 &
+    "$SIM_BIN" "$SERVER_HOST" "$SERVER_PORT" > "$d/sim.out" 2>&1 &
   SIM_PID=$!
   local log="$d/butaca-events.log"
   local ok_boot=0
@@ -198,7 +198,7 @@ PY
   kill -0 "$SIM_PID" 2>/dev/null || alive=0
   kill "$SIM_PID" 2>/dev/null || true; wait "$SIM_PID" 2>/dev/null || true; SIM_PID=""
   {
-    echo "# focusfp flow $n $name — pms=$PMS_HOST:$PMS_PORT seed=$SEED triggers=[$triggers] tokens=[$tokens]"
+    echo "# focusfp flow $n $name — pms=$SERVER_HOST:$SERVER_PORT seed=$SEED triggers=[$triggers] tokens=[$tokens]"
     # fingerprints, and every heartbeat whose route word CHANGED — the two lines the harness reads
     awk '/^focus / {print; next}
          match($0, /route=[a-z]+( overlay=[a-z-]+)?/) { r=substr($0, RSTART, RLENGTH); if (r != last) { print "hb " r; last=r } }' "$log"
@@ -245,7 +245,7 @@ record_flow() {
     fi
   fi
 }
-echo "=== focusfp: $PMS (seed $SEED), out=$OUT ==="
+echo "=== focusfp: $SERVER (seed $SEED), out=$OUT ==="
 # 1 boot -> Home -> chip -> grid   (the picker is suppressed by the injected token; a TV flow)
 record_flow 1 boot-home-chip-grid "" "up left down down down" 'hubs: landed'
 # 2 grid -> Detail -> BACK

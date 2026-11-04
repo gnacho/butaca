@@ -351,7 +351,7 @@ refinements the table understated:
   `glViewport(0,0,1920,1080)`, the scissor math, `u_screen` and `acb_start(0,0,1920,1080)` all assume
   the surface *is* 1080p. Whether webOS normalises a native app's graphics plane to 1080p on a 4K
   panel is **assumed, not verified** — and the severity of this finding hangs entirely on that.
-- **Codec capability is asserted, never probed.** `profile_extra()` tells PMS "HEVC + 4K + 10-bit"
+- **Codec capability is asserted, never probed.** `profile_extra()` tells the server "HEVC + 4K + 10-bit"
   unconditionally, and the transcode *fallback* target is also HEVC — so a lower-end panel has no
   working path at all.
 - `sys_grab_wayland` hardcodes SDL version bytes 2/0/4 and never checks `subsystem`; a newer SDL
@@ -508,7 +508,7 @@ line, real fonts rendering, and the session file rewritten `0600` under the app'
 
 **Git history is clean.** All 2,694 unique blobs across 36 local + 25 remote refs were swept
 (`git cat-file` sweep + byte-exact needle search for the real values currently in the gitignored
-`src/config.local.h`, + an entropy sweep). The real `PMS_TOKEN` and `DEMO_STREAM_URL` have **never**
+`src/config.local.h`, + an entropy sweep). The real `SERVER_TOKEN` and `DEMO_STREAM_URL` have **never**
 been committed; `src/config.local.h`, `local.env` and any `auth.json` have **never** been tracked.
 The only historical binaries are the two icons and one short-lived `pkg/threadprobe`. The
 `accessToken: transient-…` and `10.0.0.x` strings in the upstream published spec that used to be
@@ -523,7 +523,7 @@ world-readable `/tmp` on the TV across many runs.
 - `sshpass -p alpine` (`Makefile:24-25`) — **not a secret.** `alpine` is the published webosbrew
   dev-mode root password; the repo's own skill says so. Publishable. It does teach an insecure
   default and will authenticate against *any* rooted webOS TV a contributor points `TV=` at.
-- `TV_HOST` / `PMS_HOST` — RFC1918, low risk, but they are the maintainer's home topology,
+- `TV_HOST` / `SERVER_HOST` — RFC1918, low risk, but they are the maintainer's home topology,
   they are the defaults every contributor inherits, **and one of them gets baked into the binary**.
   **FIXED 2026-08-02.** `git ls-files | xargs grep '192\.168\.0\.'` is now empty outside this
   section, which keeps its citations on purpose. The TV's address moved to the gitignored
@@ -531,7 +531,7 @@ world-readable `/tmp` on the TV across many runs.
   is unchanged for anyone who has one, and a target that needs a TV without one fails saying so
   rather than dialling `root@`. Documentation and fixtures use RFC 5737 TEST-NET (`192.0.2.x`).
   `alpine` deliberately stayed (see above): it identifies nobody, and removing it protects nothing.
-  The PMS address is the one that still reaches a *binary*, and only one built on this machine —
+  The server address is the one that still reaches a *binary*, and only one built on this machine —
   see the leak list below.
 - `glinnik21@gmail.com` (`ipkroot/ctl/control:7` — this said `:6`) — deliberate maintainer contact,
   but a personal Gmail shipping inside every distributed `.ipk`. **FIXED 2026-08-02:** replaced with
@@ -540,13 +540,13 @@ world-readable `/tmp` on the TV across many runs.
 
 **What a public build would leak (verified by `strings` on `pkg/butaca` and inside the ipk):**
 
-1. `PMS_HOST` — `PMS_HOST` from `config.local.h` is compiled in. *(Only used on the
+1. `SERVER_HOST` — `SERVER_HOST` from `config.local.h` is compiled in. *(Only used on the
    `/tmp/butaca-token` automation branch — `app.rs:436-438` — so a public build with no
-   `config.local.h` compiles the `"YOUR_PMS_HOST"` placeholder and never uses it. Still, don't ship a
+   `config.local.h` compiles the `"YOUR_SERVER_HOST"` placeholder and never uses it. Still, don't ship a
    binary built on this machine.)*
    **Measured 2026-08-02, and better than this list implied: the TOKEN never reaches the binary.**
-   `PMS_TOKEN` is referenced nowhere outside `config.local.h` itself — `main.c` passes only
-   `PMS_HOST`/`PMS_PORT` to `butaca_run` — and `strings` finds zero occurrences of the real value.
+   `SERVER_TOKEN` is referenced nowhere outside `config.local.h` itself — `main.c` passes only
+   `SERVER_HOST`/`SERVER_PORT` to `butaca_run` — and `strings` finds zero occurrences of the real value.
    The leak here is one RFC1918 address, not a credential. Note also that the local guard is
    self-disabling: `ci/check-elf.sh` skips its config-dependent assertions when `config.local.h`
    is present, so `make ipk` on this machine still produces a fully valid, correctly-hashed
@@ -742,7 +742,7 @@ Why Inter, and why `opsz` 18:
   or shaping), 35 C1 control codes, and archaic Church-Slavonic/Coptic. Every character in
   `tests/manifest.json` renders.
 * **Size:** 668 KB the pair, down from Arial's 1488 KB. Subsetting was measured (−83 KB) and
-  rejected — not worth the `.notdef` risk on arbitrary PMS metadata for 2% of the package.
+  rejected — not worth the `.notdef` risk on arbitrary server metadata for 2% of the package.
 * **Reflow risk, measured:** Inter runs **+4.7% wider** than Arial on representative UI strings
   (+7.6% on `TV-MA`, −0.8% on `S2, E2`). Verified on device across detail / library: wrap points,
   ellipsis truncation, pill and button widths all unchanged, because the layout is content-sized
@@ -872,7 +872,7 @@ plus this notice placed prominently: *"This [application] uses TMDB and the TMDB
 endorsed, certified, or otherwise approved by TMDB."* (Note this current wording differs from the
 older short form that circulates.) Our `tmdb.svg` is a redraw — violating the no-modification rule —
 and there is no attribution anywhere. Nuance: we don't call the TMDB API (we take
-`themoviedb://image.rating` hints from PMS, `metadata.rs:322`), so we're likely not a licensee at all
+`themoviedb://image.rating` hints from the server, `metadata.rs:322`), so we're likely not a licensee at all
 and have no licence to the logo. Ship the official unmodified logo **with** the notice, or drop it.
 
 Two more, minor: `assets/icons/user.svg` is character-for-character Google Material Icons `person`
@@ -1089,7 +1089,7 @@ between here and a release, and none of them is code:
   were all caught by him reading the output, not by the agents producing it.
 
   Two other checkboxes on the same template: tested on a real webOS TV (yes — `tests/run.py` is
-  21 cases against a live PMS on the device), and complies with the repository rules (§1.5).
+  21 cases against a live server on the device), and complies with the repository rules (§1.5).
 
 ---
 
@@ -1245,7 +1245,7 @@ not a prerequisite of `all`, so a red clippy can't mask a broken ARM link:
 | `webosbrew-ipk-verify --fw-releases '>=4.0, <5.0'` | The gate webosbrew's own PR CI runs. Resolves `DT_NEEDED` + symbols against 14 firmware databases — the exact error class the stub-`.so` trick makes invisible at link time. Fully offline. **Never been run on the real binary.** |
 | `ci/expected-dt-needed.txt` diff | Dependency drift. Calling into any library that happens to be in the NDK sysroot silently adds a `DT_NEEDED` entry and the link still succeeds. |
 | CP15 barrier scan | The SIGILL regression. `.cargo/config.toml` names the exact scenario — "a future CI" setting `RUSTFLAGS`, which *replaces* the config list and drops `target-cpu=cortex-a9`. Carries a positive control (`dmb` count > 100) so a zero can't pass vacuously. |
-| build-host identity | The dev's LAN IP and `/Users/…` paths. A clean checkout has no `config.local.h`, so `app.h`'s `__has_include` falls back to `YOUR_PMS_HOST` — the CI artifact is leak-free *by construction*. Skipped on a dev machine, where `config.local.h` exists by design. |
+| build-host identity | The dev's LAN IP and `/Users/…` paths. A clean checkout has no `config.local.h`, so `app.h`'s `__has_include` falls back to `YOUR_SERVER_HOST` — the CI artifact is leak-free *by construction*. Skipped on a dev machine, where `config.local.h` exists by design. |
 | `legal-gate` | Refuses to publish without `LICENSE` + `THIRD-PARTY-NOTICES.md`, and **hard-fails if `pkg/appfont*.ttf` is still Arial**. (`check-package.py` treats Arial as an XFAIL so the gate could land before the swap; the release job does not.) |
 | manifest sha256 vs artifact | The hash is enforced **on the device** at install and by nothing in CI. A mismatch is invisible until it breaks every user's install. |
 
@@ -1312,7 +1312,7 @@ compares versions by **plain string equality** — its `versionHigher()` helper 
 **Not built: on-device CI.** It is the only real gate, but `tests/run.py` has **no mutual-exclusion
 lock** (no `flock`, no pidfile), and there is one television — a scheduled run overlapping with the
 developer at their desk produces failures that look like player regressions and are not. It would
-also need a live PMS token as a repo secret, and it mutates shared state (real watch history, real
+also need a live server token as a repo secret, and it mutates shared state (real watch history, real
 `/:/unscrobble` calls). If added: `schedule` + `workflow_dispatch` only, never `pull_request`, with
 a device-side `flock` and a Wake-on-LAN probe that reports "TV asleep" distinctly from a test
 failure.
@@ -1578,7 +1578,7 @@ VERDICT: our own tomato — red ripe, gold for the rarer Certified bar, hollow w
 two-figure crowd for the audience score, green or drained. Four assets instead of eleven.
 
 The design brief is `Details Screen.dc.html` in the owner's Claude Design project. Verified on
-device against the live PMS: `rk=1` (ripe + upright, all four providers) and `rk=2020` (**rotten** +
+device against the live server: `rk=1` (ripe + upright, all four providers) and `rk=2020` (**rotten** +
 upright). Rendered ink matches the design's geometry within ~1.5 px.
 
 **Two states could not be verified on device**: `certified` and `spilled` appear on no item in this

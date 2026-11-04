@@ -33,7 +33,7 @@ mod gfx;
 mod grant; // credential transport authority and consented plaintext grants
 #[cfg(feature = "devtriggers")]
 mod gpu_timer; // async EXT_disjoint_timer_query timing; no glFinish on the timing path
-mod hls; // strict parser/auth/timeline for the measured one-variant PMS HLS shape
+mod hls; // strict parser/auth/timeline for the measured one-variant server HLS shape
 mod http; // the ONE door out of the control plane: dispatch a REST request on its origin's scheme (stream.rs for http, net.rs/libcurl for https)
 #[cfg(feature = "devtriggers")]
 mod hwcnt; // direct userspace Mali r12p0 vinstr reader for the phase profiler
@@ -54,7 +54,7 @@ mod person; // person/actor page data layer: the header handed in by the cast ro
 mod collection; // collection page model: tag resolution, header metadata and paged members
 mod player; // buffer-feed video engine (was playback.c) — step 5
 mod server; // typed server API layer (rust-modules/src/server/): one method per server operation (the live READ layer; playback ops still in route.rs)
-mod pms;
+mod catalog;
 mod registry; // the SERVER REGISTRY: which servers exist, which is current, and the per-slot facts, the sid vocabulary shared by every backend
 // Pure RELEASE_LINE-parsing helpers, `include!`d verbatim by build.rs so `cargo test --lib`
 // actually runs their unit tests (see the module for why). Nothing in the app itself calls
@@ -77,7 +77,7 @@ mod surface; // what we are actually drawing into — drawable vs the 1920x1080 
 mod svg; // runtime SVG rasterizer FFI (src/svg.c / nanosvg) — vector icon assets
 mod system;
 mod task; // the one spawn: a refused thread is a return value, not a panic that kills the app
-mod viewstate; // watched / unwatched / remove-from-deck: the PMS view-state WRITES, off the SDL thread
+mod viewstate; // watched / unwatched / remove-from-deck: the server view-state WRITES, off the SDL thread
 
 #[cfg(test)]
 pub(crate) mod testnet {

@@ -974,7 +974,7 @@ impl<H: ContentLike + PersonLike> Machine<H> for FilmographyScreen {
                 self.activate_focus(cx.focus.current, fx);
                 Handled::Yes
             }
-            // Credits never fabricate a `PmsMovie`, including locally joined ones. The rows are
+            // Credits never fabricate a `CatalogMovie`, including locally joined ones. The rows are
             // Cards retain the ordinary hold gesture, but decline its action; a held row must
             // neither fabricate a catalog item/menu nor activate when its key is released.
             ScreenEvent::PressHold(_) => Handled::No,

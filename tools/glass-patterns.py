@@ -23,7 +23,7 @@ Sheets land in the output directory (default a scratch dir it prints), plus a ta
 actually DREW at each rung — the plate's measured colour and the idle label's contrast over it —
 because "does it look right" and "does it hold 3:1" are different questions and this answers both.
 
-Requires a built simulator (`make sim`) and a PMS host in src/config.local.h, same as `make sim-run`.
+Requires a built simulator (`make sim`) and a server host in src/config.local.h, same as `make sim-run`.
 """
 import argparse, os, re, shutil, signal, subprocess, sys, time
 from pathlib import Path
@@ -66,7 +66,7 @@ def launch(root: Path, pkg: str, pms: str, port: str, lens: str = "", lift: str 
     # …and how much of the rim shows the page unblurred
     if sharp:
         (root / "butaca-tracksharp").write_text(sharp)
-    tok = re.search(r'^#define\s+PMS_TOKEN\s+"([^"]*)"', (REPO / "src/config.local.h").read_text(), re.M)
+    tok = re.search(r'^#define\s+SERVER_TOKEN\s+"([^"]*)"', (REPO / "src/config.local.h").read_text(), re.M)
     if tok:
         (root / "butaca-token").write_text(tok.group(1))
     # `noidle` because a settled screen stops presenting and `shot` would then wait for a frame that
@@ -127,11 +127,11 @@ def main():
 
     if not SIM.exists():
         raise SystemExit("no simulator — run `make sim` first")
-    pms, port = cfg("PMS_HOST"), None
-    m = re.search(r"^#define\s+PMS_PORT\s+(\d+)", (REPO / "src/config.local.h").read_text(), re.M)
+    pms, port = cfg("SERVER_HOST"), None
+    m = re.search(r"^#define\s+SERVER_PORT\s+(\d+)", (REPO / "src/config.local.h").read_text(), re.M)
     port = m.group(1) if m else "32400"
     if not pms:
-        raise SystemExit("no PMS_HOST in src/config.local.h")
+        raise SystemExit("no SERVER_HOST in src/config.local.h")
 
     out = Path(a.out) if a.out else Path("/tmp/glass-patterns")
     if out.exists():

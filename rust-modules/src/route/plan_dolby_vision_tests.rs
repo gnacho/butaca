@@ -467,7 +467,7 @@ fn base_layer_usability_by_profile() {
 /// answer, since a real re-encode is exactly what the server has to do to make it displayable.
 ///
 /// It is a client-side PREDICTION and stops there: `Preview` has no "this server cannot do it"
-/// state, and on the dev PMS a Profile 5 conversion is exactly what comes back refused. The
+/// state, and on the dev server a Profile 5 conversion is exactly what comes back refused. The
 /// page says what the route will ASK for; whether the server can answer is the read-out's
 /// question, not this one's.
 #[test]
@@ -528,11 +528,11 @@ fn the_preview_calls_a_profile_5_item_a_conversion() {
     );
 }
 
-/// The RESOLUTION half of the gate (issue #22's over-claim class): when `/decision` is
-/// unreachable the fallback never asks PMS, so the profile's `*`-scoped width/height limitation
-/// cannot save a 4K source from direct-playing onto a 1080p-bounded decoder — the client must
-/// refuse it locally. Invisible on the dev TV (bound 4096x2176); this drives the gate with the
-/// reviewer-class caps.
+/// The RESOLUTION half of the gate (issue #22's over-claim class): when `/decision` is unreachable
+/// the fallback never asks the server, so the profile's `*`-scoped width/height limitation cannot
+/// save a 4K source from direct-playing onto a 1080p-bounded decoder — the client must refuse it
+/// locally. Invisible on the dev TV (bound 4096x2176); this drives the gate with the reviewer-class
+/// caps.
 #[test]
 fn a_source_beyond_the_device_bound_does_not_direct_play() {
     let caps = crate::devcaps::Caps {
@@ -577,7 +577,7 @@ fn a_source_beyond_the_device_bound_does_not_direct_play() {
     ));
 }
 
-/// Unknown dimensions fail OPEN (0 = PMS never measured the file — not evidence of 4K, and
+/// Unknown dimensions fail OPEN (0 = the server never measured the file — not evidence of 4K, and
 /// yesterday's behavior for it), while the codec half keeps gating regardless.
 #[test]
 fn unknown_dimensions_fail_open_and_the_codec_half_still_gates() {

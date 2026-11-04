@@ -87,7 +87,7 @@ pub(crate) enum PreferenceCmd {
 ///   OUR row with the same key and played a different film under the friend's title.
 /// * `item` — the catalog ROW the menu was opened on, for the one action a key cannot perform.
 ///   `route::request_play_movie` needs the part id, duration, resume offset and media flags, and
-///   the only way back from a bare key used to be `pms::index_of_rk`, which walks the HOME hub
+///   the only way back from a bare key used to be `catalog::index_of_rk`, which walks the HOME hub
 ///   catalog alone — so on a Library, Search or person tile the press silently did nothing.
 ///   `None` for the detail page's filmstrip and season menus, which play through the loaded season.
 /// * `loaded_episode` — `MenuHost::is_loaded_episode`, the one bit that changed what an action
@@ -101,7 +101,7 @@ pub(crate) enum PreferenceCmd {
 pub(crate) struct ItemMenuReq {
     pub(crate) act: crate::screens::item_menu::Action,
     pub(crate) sid: crate::registry::ServerId,
-    pub(crate) item: Option<crate::pms::PmsMovie>,
+    pub(crate) item: Option<crate::catalog::CatalogMovie>,
     pub(crate) loaded_episode: bool,
     pub(crate) from_home: bool,
 }
@@ -296,7 +296,7 @@ pub(crate) struct ItemMenuArg {
 
 /// Which of the three menus this is, and the data its row set is built from.
 ///
-/// No `Debug`, deliberately: `PmsMovie` is a wire DTO with none, and deriving one for it would put
+/// No `Debug`, deliberately: `CatalogMovie` is a wire DTO with none, and deriving one for it would put
 /// a household's viewing on the far end of any `{:?}` — which `diag::scrub` cannot make safe,
 /// because nothing distinguishes a title from an ordinary log word (`diag/scrub.rs`'s own rule, and
 /// the tree-wide grep that enforces it).
@@ -308,7 +308,7 @@ pub(crate) enum ItemMenuKind {
     Card {
         /// Boxed because it is by far the largest thing an `AppArg` can carry, and every other
         /// variant of that enum would pay for it inline.
-        row: Box<crate::pms::PmsMovie>,
+        row: Box<crate::catalog::CatalogMovie>,
         from_deck: bool,
     },
     /// The detail page's episode filmstrip. `mark` is resolved by the page through the same
@@ -319,7 +319,7 @@ pub(crate) enum ItemMenuKind {
     Season { mark: crate::ui::widgets::PosterMark },
 }
 
-/// **Identity, not contents.** `PmsMovie` is a wire DTO with no `PartialEq` of its own, and one
+/// **Identity, not contents.** `CatalogMovie` is a wire DTO with no `PartialEq` of its own, and one
 /// derived over its forty-odd fields would be the wrong question anyway: two menus are the same
 /// menu when they are about the same item on the same server in the same role, and a refreshed
 /// copy of that row with a new `viewOffset` is still that menu. The container asks this through
@@ -384,7 +384,7 @@ pub(crate) enum LibraryCmd {
     ItemMenu,
 }
 
-/// Stable section identity. PMS section keys are server-local, never globally unique.
+/// Stable section identity. Server section keys are server-local, never globally unique.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct LibrarySectionIdentity {
     pub(crate) sid: crate::registry::ServerId,
@@ -957,7 +957,7 @@ impl ContentPanel {
 /// `route::request_play` takes the playback session's `&mut`, and an owned screen is only ever
 /// shown the frame's publication (`AppViews::session`) — so Detail names the item and the loop
 /// performs the request, exactly as Home's [`HomeReq::Play`] already did. The loop also owns what
-/// happens when the request is REFUSED (a PMS/native route transition still owns the reducer):
+/// happens when the request is REFUSED (a server/native route transition still owns the reducer):
 /// the page's navigation is skipped, which is what the page's own discarded `started` bool used
 /// to decide.
 pub(crate) enum PlayIntent {
@@ -975,7 +975,7 @@ pub(crate) enum PlayIntent {
     /// than a `&'static` catalog borrow: it is held inside `PageAction`/`AppFx` across a frame
     /// boundary, and once Detail's `selected` becomes an owned per-page snapshot (rather than a
     /// process-wide catalog read) there is no `'static` row left to borrow.
-    Movie(crate::pms::PmsMovie),
+    Movie(crate::catalog::CatalogMovie),
 }
 
 pub(crate) trait ContentLike: AppLike<Memory = PageMemory> {}
@@ -1000,7 +1000,7 @@ pub(crate) trait MetadataLike: AppLike + Sized {
 /// A host that publishes Home's retained catalog view. The view is borrowed from the rig-owned
 /// snapshot and is therefore valid for the complete step/draw query without per-frame cloning.
 pub(crate) trait HomeLike: AppLike<Memory = PageMemory> + Sized {
-    fn hubs<'a>(cx: &Cx<'a, Self>) -> crate::pms::HubsView<'a>;
+    fn hubs<'a>(cx: &Cx<'a, Self>) -> crate::catalog::HubsView<'a>;
 }
 
 /// A host that publishes this frame's playback session (spec §2.3). The player's owned screens
@@ -1865,7 +1865,7 @@ pub(crate) fn every_surface_arg() -> Vec<AppArg> {
         AppArg::ItemMenu(ItemMenuArg {
             sid: crate::registry::ServerId::UNSET,
             rk: "1".into(),
-            kind: ItemMenuKind::Card { row: Box::new(crate::pms::PmsMovie::default()), from_deck: false },
+            kind: ItemMenuKind::Card { row: Box::new(crate::catalog::CatalogMovie::default()), from_deck: false },
             host: EntryId(0),
             focus: None,
             anchor: [0; 4],
@@ -1932,7 +1932,7 @@ pub(crate) fn every_surface_arg() -> Vec<AppArg> {
 /// conversion touches its own `screens/<name>.rs`, this module, `dev/scenarios.rs` and
 /// `tests/manifest.json` and nothing else. The recorder still owns the shapes that are the LOOP's
 /// (the press machine, the input state, the frame line, the container tree, the return state, the
-/// PMS fixtures, the app's own init) and folds them in FRONT of these; what belongs to a screen is
+/// Server fixtures, the app's own init) and folds them in FRONT of these; what belongs to a screen is
 /// declared here, beside the argument that mounts it.
 ///
 /// **Order is part of the hash** (`ui::rec::state_fp` writes the sequence), so an entry is
@@ -2018,7 +2018,7 @@ pub(crate) const SCREEN_SHAPES: &[&str] = &[
 ///
 /// **Trailer PlayQueue / item menu** (0x3c0b_74a7_7a48_169c → 0xeb69_f6bf_105f_697f): `screens::item_menu::SHAPE`
 /// grows `Action` with `part`/`vcodec`/`acodec`/`title` so Play Trailer can carry the extra's
-/// play fields without a second PMS GET.
+/// play fields without a second server GET.
 ///
 /// **Extras shelf** (0xeb69_f6bf_105f_697f → 0xb462_145d_9477_05de): detail `Spot.saved_col` grows a seventh
 /// identity-keyed slot for the extras section, and `DetailIdentity` grows `Extra`. The shape

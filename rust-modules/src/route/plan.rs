@@ -3,7 +3,7 @@
 //! `SESSION`/`PLAYER_CONTROL`/`PLAY_SLOT`/`ENCODER_CLEANUP`/`SCROBBLE_JOIN`/`TIMELINE_STOP_FENCE`/
 //! `QUALITY`, or calls `task::spawn*` — that is what makes [`build_stream`] safe to run on the
 //! resolve worker. Everything else in the former `route.rs` (session state, the synchronized
-//! `PlayerControl`, PMS/native I/O, the encoder/scrobble/timeline machinery) lives in
+//! `PlayerControl`, server/native I/O, the encoder/scrobble/timeline machinery) lives in
 //! [`super::decision`]. `ci/check-deps.sh`'s `wall` gate holds this file to zero
 //! `Instant::now`/`SystemTime::now`/`.elapsed()`; a function that needs wall time is not pure and
 //! belongs in `decision.rs`.
@@ -17,7 +17,7 @@ use super::decision::{
 };
 
 /// One worker's right to observe or replace the active route. Both fields are required: `encoder`
-/// addresses PMS, while `epoch` distinguishes semantic routes which intentionally reuse that
+/// addresses server, while `epoch` distinguishes semantic routes which intentionally reuse that
 /// exact Streaming Resource.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RouteLease {
@@ -37,7 +37,7 @@ impl RouteLease {
 /// `route` rejects same-id ABA, `engine_epoch` rejects a worker from an earlier Load,
 /// `media_epoch` rejects evidence collected before an applied seek, and `applied_revision`
 /// names the physical route contract this worker actually serves. Desired user edits deliberately
-/// do not change this ticket until their PMS/native effect commits: a refusal must leave the
+/// do not change this ticket until their server/native effect commits: a refusal must leave the
 /// unchanged worker authorized.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WorkerTicket {
@@ -137,7 +137,7 @@ pub(super) fn next_encoder_generation() -> u64 {
 /// loudness-capable or immersive just because nobody has said otherwise.
 #[derive(Clone, PartialEq, Debug)]
 pub(crate) struct CarriedAudio {
-    /// PMS `Stream.id` — the id this track is selected/burned by (`audioStreamID`,
+    /// Server `Stream.id` — the id this track is selected/burned by (`audioStreamID`,
     /// `PUT /library/parts`).
     pub(crate) sid: i64,
     /// The demuxer-facing ordinal (`metadata::Stream.index` order) — what `set_audio_track` feeds
@@ -161,7 +161,7 @@ impl CarriedAudio {
             sid: s.id,
             ordinal,
             // Lowercased like every other codec this module compares (`audio_sel`, the payload):
-            // PMS ids are lowercase already, and a stray capital must not make a recovery's Load
+            // Server ids are lowercase already, and a stray capital must not make a recovery's Load
             // payload disagree with the direct play it restores.
             codec: s.codec.to_lowercase(),
             channels: s.channels,
@@ -190,7 +190,7 @@ impl CarriedAudio {
 /// Everything needed to restore Auto's zero-video-encode state after HLS. `url` is the cold-start
 /// playback target; `probe_part` is the raw Part key used to bind runtime measurement and direct
 /// playback to the exact live HLS Streaming Resource. `direct` says whether the Part itself is
-/// playable or whether PMS must container-remux it while copying the video.
+/// playable or whether the server must container-remux it while copying the video.
 #[derive(Clone)]
 pub(super) struct AutoOriginalCandidate {
     pub(super) url: String,
@@ -454,7 +454,7 @@ pub(super) fn desired_audio(
 
 /// **Why a plan leaves without a URL on purpose**, as a typed verdict rather than a sentence.
 ///
-/// The server's own refusal is quoted verbatim ([`PlayVerdict::Server`]: PMS wrote it, in the
+/// The server's own refusal is quoted verbatim ([`PlayVerdict::Server`]: server wrote it, in the
 /// server's language, and it may be empty). Every other arm is the APP's policy decision, so it is
 /// stored as a variant and worded only where it is read ([`PlayVerdict::text`]) — a stored sentence
 /// would freeze one language into playback state that tests, logs and replays also read.
@@ -507,7 +507,7 @@ pub(super) fn new_sess(rk: &str) -> String {
 
 
 /// The episode queued after the one now playing — everything the Up Next control draws AND
-/// everything [`request_play`] needs to start it, so playing it costs no PMS round trip either.
+/// everything [`request_play`] needs to start it, so playing it costs no server round trip either.
 ///
 /// It comes free with the `continuous=1` PlayQueue every playback already creates (see
 /// [`crate::server::Client::create_play_queue`]); nothing here asks the server "what's next".
@@ -571,7 +571,7 @@ fn jellyfin_up_next(c: &crate::jellyfin::JfClient, series_id: &str) -> Option<Up
 /// The `sid` is the same idea one step further out: it is not a static the worker could read, it is
 /// a *function call* — `server::client_opt()` — which is worse, because `Send` cannot see a function
 /// call and a worker that resolves its own server therefore compiles clean and passes every test.
-/// It is captured here, at the request, and every PMS call the worker makes is `client_for(sid)`.
+/// It is captured here, at the request, and every server call the worker makes is `client_for(sid)`.
 #[derive(Clone, Default)]
 pub(crate) struct ResolveEnv {
     /// WHICH SERVER this playback's item lives on — the scope for every server-local key the
@@ -653,7 +653,7 @@ pub(super) fn detail_describes(d: &crate::metadata::Detail, sid: ServerId, rk: &
 /// be capped at a rate its video already met.
 ///
 /// `Detail::video` is the stream's own record and carries its own bitrate; it is `None` for a show
-/// that never got an episode backfill and for an audio-only part, and PMS omits the field often
+/// that never got an episode backfill and for an audio-only part, and server omits the field often
 /// enough that the whole-file fallback has to stay. Falling back is the conservative direction,
 /// which is the right one here — see [`crate::playback::Ceiling::admits`].
 pub(super) fn source_kbps(d: &crate::metadata::Detail) -> i64 {
@@ -872,8 +872,8 @@ impl<'a> AudioLangPrefs<'a> {
 /// differently.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AudioIntent<'a> {
-    /// PMS's selection (`Stream.selected` on a stream that is NOT the file's `default`). It may be
-    /// a manual pick OR PMS's automatic account-language pick; the wire cannot distinguish them.
+    /// Server's selection (`Stream.selected` on a stream that is NOT the file's `default`). It may be
+    /// a manual pick OR server's automatic account-language pick; the wire cannot distinguish them.
     Selection(usize),
     /// A language preference the item has a track in.
     Language(&'a str),
@@ -1036,7 +1036,7 @@ fn pick_dp_audio_eligible(
         return Some(pick(i));
     }
     if !tracks.iter().any(|s| s.default) {
-        // Once PMS supplied tracks, their concrete channel count outranks the codec-only
+        // Once server supplied tracks, their concrete channel count outranks the codec-only
         // Media default. Never erase a known 8-channel refusal by rechecking it as unknown/0.
         if let Some(i) = tracks.iter().position(|s| s.codec.eq_ignore_ascii_case(default_acodec) && dp_at(s)) {
             return Some(pick(i));
@@ -1174,8 +1174,8 @@ pub(super) fn direct_play_policy(mode: DirectPlayMode, policy: crate::playback::
 /// The codec half: h264 unconditionally (every webOS SoC decodes it), hevc only when the table
 /// lists the decoder — anything else the pipeline cannot feed at all. The resolution half is the
 /// local agreement with the profile's `*`-scoped `video.width`/`video.height` limitation: the
-/// profile makes PMS transcode a 4K source down for a 1080p-bounded SoC, but when `/decision` is
-/// unreachable the fallback never asks PMS, so without this test a 4K file with one
+/// profile makes server transcode a 4K source down for a 1080p-bounded SoC, but when `/decision` is
+/// unreachable the fallback never asks server, so without this test a 4K file with one
 /// direct-playable audio track was fed verbatim to a decoder whose table says 1920x1088 — the
 /// wrong-side failure devcaps' own doc names (issue #22's over-claim class), invisible on the
 /// dev TV, whose bound is 4096x2176.
@@ -1198,7 +1198,7 @@ pub(super) fn direct_play_policy(mode: DirectPlayMode, policy: crate::playback::
 /// [`Dovi::presentation`] — instead of being a coincidence between two functions.
 ///
 /// **Refusing here is only half the work, and the other half is not in this function.** A refusal
-/// sends the item down the transcode branch — but that branch's query grants PMS `directStream=1`,
+/// sends the item down the transcode branch — but that branch's query grants server `directStream=1`,
 /// permission to COPY the video rather than encode it, and the server takes it whenever the source
 /// fits the caps: resolution, bitrate, and the profile's own limitation axes. None of those can say
 /// "Dolby Vision", so a refused Profile 5 came back `Part.decision=transcode` with the video's own
@@ -1208,11 +1208,11 @@ pub(super) fn direct_play_policy(mode: DirectPlayMode, policy: crate::playback::
 /// happy to direct-play. That was measured against a real server rather than read from a spec: it
 /// answered with a copy decision and the bitstream unchanged. A server that cannot encode the
 /// result is then allowed to say so —
-/// this PMS answers general code 2000, *"File is unplayable. DoVi (Profile 5) color space is not
+/// this the server answers general code 2000, *"File is unplayable. DoVi (Profile 5) color space is not
 /// supported."*, which [`DvPresentation::Refuse`] turns into the player's read-out. A read-out that
 /// names the reason is the honest end of that road; a picture in the wrong colours is not.
 ///
-/// Unknown dimensions (0) PASS: PMS omitting a Media attribute is not evidence of 4K, and
+/// Unknown dimensions (0) PASS: server omitting a Media attribute is not evidence of 4K, and
 /// failing open is yesterday's behavior for every file the server never measured — the same
 /// misread-degrades-to-assumed rule `devcaps::parse` applies, and `Dovi` applies it too.
 pub(super) fn video_direct_plays(

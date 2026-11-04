@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Host unit tests for the harness itself (`tests/run.py`) and for `tools/netcond.py` — stdlib
-`unittest`, no TV, no PMS, no OUTBOUND network. Run by `make check` beside the Rust suite and
+`unittest`, no TV, no server, no OUTBOUND network. Run by `make check` beside the Rust suite and
 `ci/flavor.py --selftest`.
 
 ("no network" needs one qualification since the netcond tests landed: they bind and drive real
@@ -298,7 +298,7 @@ class FocusFpAccounting(unittest.TestCase):
             env = os.environ.copy()
             env.update({"SIM_BIN": sim, "OUT": os.path.join(tmp, "out")})
             return subprocess.run(
-                [focusfp, "--pms", "127.0.0.1:9", mode, *args],
+                [focusfp, "--server", "127.0.0.1:9", mode, *args],
                 cwd=repo,
                 env=env,
                 capture_output=True,
@@ -1497,7 +1497,7 @@ class LoadManifest(unittest.TestCase):
 
     def test_collection_scenes_resolve_through_the_overlay(self):
         """manifest.json is installation-independent, so the collection scenes may not carry a
-        mock_pms ratingKey: on a real server `butaca-collection=50001` opens a collection that
+        mock_server ratingKey: on a real server `butaca-collection=50001` opens a collection that
         does not exist and the page's fps_ceiling passes vacuously on its failure read-out."""
         tracked = {s["name"]: s for s in _manifest()["fps_scenes"]}
         for name in ("collection-page", "library-collections"):
@@ -1654,7 +1654,7 @@ class PipelineTier(unittest.TestCase):
                 self.assertEqual(spec[k], v)
 
     def test_the_integration_tier_pins_original_quality(self):
-        """The PMS matrix must not inherit an Auto preference from an earlier TV run."""
+        """The server matrix must not inherit an Auto preference from an earlier TV run."""
         files = run.triggers_for_case({"rk": "1234", "operations": [{"op": "play"}]})
         self.assertEqual(files, [
             ("butaca-play", "1234"),
@@ -2219,7 +2219,7 @@ class AutoNetworkProfile(unittest.TestCase):
         ok, why = run.a_auto_network_recovery([down, up, request, committed], 5000, 20000)
         self.assertTrue(ok, why)
         self.assertIn("ImminentStarvation", why, "the reason code is the field worth reporting")
-        # The rung the ladder happens to be on when the probe fires is NOT graded any more: PMS
+        # The rung the ladder happens to be on when the probe fires is NOT graded any more: server
         # producing 20 Mbit/s of H.264 says the server can encode, not that the link can carry the
         # remux. The probe gate and the upshift dwell are both WALL clock now (6 s and ~5.2 s) and
         # race too closely to order, where they used to be three segments against five. What must
@@ -2328,7 +2328,7 @@ class AutoNetworkProfile(unittest.TestCase):
     def test_a_requested_rung_cannot_substitute_for_the_picture_pms_returned(self):
         """The reported regression is request=22 Mbps/4K but decoded=720p.
 
-        A rung floor alone calls that run recovered because it reads the actuator sent to PMS.
+        A rung floor alone calls that run recovered because it reads the actuator sent to the server.
         The recovery case needs a separate bound on ``out=`` from the completed candidate, which
         is the picture the decoder actually received.  Catalog geometry must not satisfy it.
         """
@@ -2838,7 +2838,7 @@ class NetcondRate(unittest.TestCase):
                              f"(floor {self.FLOOR_S:.3f}s, took {slow_s:.3f}s)")
 
     def test_a_non_loopback_listener_requires_a_client_allowlist(self):
-        """PMS URLs carry credentials; a LAN-wide forwarding proxy may not be open by default."""
+        """server URLs carry credentials; a LAN-wide forwarding proxy may not be open by default."""
         with self.assertRaisesRegex(ValueError, "requires at least one allowed client"):
             netcond.start_proxy(0, ("127.0.0.1", 1), self.mode)
 
@@ -3075,7 +3075,7 @@ class AbrTraceMetrics(unittest.TestCase):
 
     def test_pipeline_evaluation_cannot_drop_the_pause_resume_operation(self):
         """The synthetic device tier has its own evaluator, so adding an operation only to the
-        PMS evaluator produces a green TV run which never graded the operation it executed.
+        server evaluator produces a green TV run which never graded the operation it executed.
         Exercise the dispatcher itself, not merely `op_pause_resume` in isolation.
         """
         lines = [
@@ -3202,7 +3202,7 @@ class AbrTraceMetrics(unittest.TestCase):
     def test_audio_enhancement_op_grades_applied_remux_and_ac3(self):
         """A live Normalize Loudness pick that took effect: the server ran the DSP params
         (`enhancement: applied ..`, printed only for `EnhancementOutcome::Applied`), the Load
-        declares the audio the decision NEGOTIATED (never a literal: PMS answers an AAC source's
+        declares the audio the decision NEGOTIATED (never a literal: server answers an AAC source's
         DSP ask with a=aac, an AC-3 source's with ac3), the video codec is unchanged across the
         switch (a copy, i.e. a remux and not a full re-encode), the resulting stream is
         `start.mkv` (ProgressiveMkv), and no source failed to open after the toggle."""
@@ -4201,7 +4201,7 @@ class AbrSegmentVariation(unittest.TestCase):
 
 
 class AbrResponseProfile(unittest.TestCase):
-    """One request actuator may produce different completed renditions in fresh PMS sessions."""
+    """One request actuator may produce different completed renditions in fresh server sessions."""
 
     def _server(self):
         srv = serve_fixtures.FixtureServer.__new__(serve_fixtures.FixtureServer)
@@ -4212,7 +4212,7 @@ class AbrResponseProfile(unittest.TestCase):
         return srv
 
     def test_fresh_sessions_walk_the_declared_responses_then_hold_the_last(self):
-        """Reproduce PMS answering 22 Mbps/4K with 720p, then 4K after link recovery."""
+        """Reproduce server answering 22 Mbps/4K with 720p, then 4K after link recovery."""
         srv = self._server()
         srv.set_abr_response_profile({"22000": ["2000", "22000"]})
 
@@ -4587,7 +4587,7 @@ class TheAbrCommitLineMatchesTheHarnessRegex(unittest.TestCase):
 
         Values chosen so every field is distinguishable from every other: a direction, a rate, a
         bounding box and a DIFFERENT decoded raster — which is the case the whole change exists
-        for (M3 measured PMS producing 1280x720 against a 1920x1080 box).
+        for (M3 measured server producing 1280x720 against a 1920x1080 box).
         """
         fmt = self.commit_format()
         values = ["Up", "6000", "1920", "1080", "1280", "720"]
@@ -4616,7 +4616,7 @@ class TheAbrCommitLineMatchesTheHarnessRegex(unittest.TestCase):
     def test_raster_changes_prefers_the_decoded_raster(self):
         """MATHEMATICAL INVARIANT: two commits that decoded alike are not a raster change.
 
-        Measured (`docs/measurements/m3-production-census.md`): against a 4K source PMS produces
+        Measured (`docs/measurements/m3-production-census.md`): against a 4K source server produces
         1280x720 for both `P720` and `P1080M6`, whose catalog boxes differ. Counting boxes scores
         a change a viewer cannot see.
         """

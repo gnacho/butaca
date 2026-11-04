@@ -1000,7 +1000,7 @@ mod tests {
     /// **Finding 1, phase 11 review (2026-09-10).** Red before the fix: the exception used to be a
     /// bare substring strip (`call.replace("tile.title", "")`) applied regardless of which file the
     /// call came from, so a `tile.title()` receiver OUTSIDE `auth.rs` — exactly what
-    /// `ui::tile::Tile::title` (implemented for `pms::PmsMovie`, the library's own content item)
+    /// `ui::tile::Tile::title` (implemented for `catalog::CatalogMovie`, the library's own content item)
     /// would spell at a call site — was silently exempted too. Scoping the exception to `auth.rs`
     /// closes that: this call, attributed to an unrelated screen module, must still be caught.
     #[test]
@@ -1060,7 +1060,7 @@ mod tests {
     /// **The exception is scoped by FILE, not by receiver name alone** (fixed 2026-09-10, phase 11
     /// review, finding 1). It used to be a bare substring strip applied to every call in the tree —
     /// but `ui/tile.rs` defines `pub trait Tile { fn title(&self) -> &str; … }`, the library's own
-    /// CONTENT item (implemented for `pms::PmsMovie`), whose idiomatic receiver name is also
+    /// CONTENT item (implemented for `catalog::CatalogMovie`), whose idiomatic receiver name is also
     /// `tile`. A future `log(&format!("… {} …", tile.title()))` over a content tile would spell the
     /// exact exempted substring and this gate would stay silent on a real title leak. So [`BANNED`]
     /// pairs each exception with the file it is legitimate in — today that is `auth.rs` alone, the

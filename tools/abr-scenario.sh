@@ -58,14 +58,14 @@ SIM_BIN="$(make -s print-simbin 2>/dev/null)"
 # public and `outbound-guard.py` exists because that convention has already failed once.
 RK="$(python3 -c "import json;print(json.load(open('tests/manifest.local.json'))['items']['$ITEM'])" 2>/dev/null)"
 [ -n "$RK" ] || { echo "item '$ITEM' not in tests/manifest.local.json"; exit 1; }
-TOKEN="$(sed -n 's/.*PMS_TOKEN *"\([^"]*\)".*/\1/p' src/config.local.h | head -1)"
-[ -n "$TOKEN" ] || { echo "no PMS_TOKEN in src/config.local.h"; exit 1; }
-PMS_HOST="$(sed -n 's/.*PMS_HOST *"\([^"]*\)".*/\1/p' src/config.local.h | head -1)"
-PMS_PORT="$(sed -n 's/^#define[ 	]*PMS_PORT[ 	]*\([0-9]*\).*/\1/p' src/config.local.h | head -1)"
+TOKEN="$(sed -n 's/.*SERVER_TOKEN *"\([^"]*\)".*/\1/p' src/config.local.h | head -1)"
+[ -n "$TOKEN" ] || { echo "no SERVER_TOKEN in src/config.local.h"; exit 1; }
+SERVER_HOST="$(sed -n 's/.*SERVER_HOST *"\([^"]*\)".*/\1/p' src/config.local.h | head -1)"
+SERVER_PORT="$(sed -n 's/^#define[ 	]*SERVER_PORT[ 	]*\([0-9]*\).*/\1/p' src/config.local.h | head -1)"
 
 # ---- the source bitrate, so a leg can be written as a multiple of it ----------
 SRC_KBPS="$(curl -s -m 10 -H 'Accept: application/json' \
-    "http://$PMS_HOST:$PMS_PORT/library/metadata/$RK?X-Plex-Token=$TOKEN" \
+    "http://$SERVER_HOST:$SERVER_PORT/library/metadata/$RK?X-Plex-Token=$TOKEN" \
   | python3 -c "
 import json,sys
 d=json.load(sys.stdin)['MediaContainer']['Metadata'][0]['Media'][0]
@@ -90,7 +90,7 @@ done
 # ---- netcond, on loopback -----------------------------------------------------
 rm -f "$MODEFILE"; echo pass > "$MODEFILE"
 python3 -u tools/netcond.py --bind 127.0.0.1 --listen "$PROXY_PORT" \
-    --target "127.0.0.1:$PMS_PORT" --control "$MODEFILE" \
+    --target "127.0.0.1:$SERVER_PORT" --control "$MODEFILE" \
     > "/tmp/netcond-$NAME.log" 2>&1 &
 NETCOND_PID=$!
 sleep 1

@@ -78,7 +78,7 @@ fn retained_pages_copy_only_changed_page_and_keep_sparse_holes() {
     let other = super::ServerId::from_raw(1);
     items.set(
         0,
-        super::PmsMovie {
+        super::CatalogMovie {
             sid,
             rk: "7".into(),
             ..Default::default()
@@ -86,7 +86,7 @@ fn retained_pages_copy_only_changed_page_and_keep_sparse_holes() {
     );
     items.set(
         super::PAGE,
-        super::PmsMovie {
+        super::CatalogMovie {
             sid: other,
             rk: "7".into(),
             ..Default::default()
@@ -110,7 +110,7 @@ fn retained_pages_copy_only_changed_page_and_keep_sparse_holes() {
     assert!(!old.get(0).unwrap().unwatched);
     assert!(items.get(0).unwrap().unwatched);
     assert!(!items.get(super::PAGE).unwrap().unwatched);
-    items.set(super::PAGE * 2, super::PmsMovie::default());
+    items.set(super::PAGE * 2, super::CatalogMovie::default());
     assert!(old.get(super::PAGE * 2).is_none());
     assert!(old.page_missing(2));
     items.clear();
@@ -137,7 +137,7 @@ fn sparse_page_resize_matches_flat_storage_across_boundaries() {
                 let rk = format!("{size}-{i}");
                 items.set(
                     i,
-                    super::PmsMovie {
+                    super::CatalogMovie {
                         rk: rk.clone(),
                         ..Default::default()
                     },
@@ -158,12 +158,12 @@ fn sparse_page_resize_matches_flat_storage_across_boundaries() {
 fn sparse_page_growth_accepts_new_items() {
     let mut items = super::SecItems::default();
     items.resize(1);
-    items.set(0, super::PmsMovie::default());
+    items.set(0, super::CatalogMovie::default());
     items.resize(2);
     assert!(items.page_missing(0));
     items.set(
         1,
-        super::PmsMovie {
+        super::CatalogMovie {
             rk: "2".into(),
             ..Default::default()
         },
@@ -174,8 +174,8 @@ fn sparse_page_growth_accepts_new_items() {
 #[test]
 fn sparse_page_shrink_does_not_resurrect_removed_items() {
     let mut items = super::SecItems::from_vec(vec![
-        Some(super::PmsMovie::default()),
-        Some(super::PmsMovie::default()),
+        Some(super::CatalogMovie::default()),
+        Some(super::CatalogMovie::default()),
     ]);
     items.resize(1);
     items.resize(2);

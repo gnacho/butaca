@@ -12,7 +12,7 @@ fn pending_home_grid_focus_wins_when_the_first_catalog_arrives() {
     for on_strip in [false, true] {
         let mut d = Dispatcher::<AppHost>::new();
         let mut rig = Bridge::for_test(|| 0);
-        rig.stores.hubs.seed_for_test(0, crate::pms::HubState::Loading);
+        rig.stores.hubs.seed_for_test(0, crate::catalog::HubState::Loading);
         frame(&mut d, &mut rig, AppArg::Home, tick(0), vec![]);
         let entry = d.nav.top_page().unwrap().id;
         d.set_focus_in(
@@ -21,7 +21,7 @@ fn pending_home_grid_focus_wins_when_the_first_catalog_arrives() {
         );
         assert!(rig.home_command(HomeCmd::FocusGrid { row: 0, col: 2 }));
         frame(&mut d, &mut rig, AppArg::Home, tick(1), vec![]);
-        assert_eq!(rig.with_home(&d, |_, cx, _| cx.views.hubs.state), Some(crate::pms::HubState::Loading));
+        assert_eq!(rig.with_home(&d, |_, cx, _| cx.views.hubs.state), Some(crate::catalog::HubState::Loading));
         assert_eq!(rig.with_home(&d, |home, cx, _| home.hero_item::<AppHost>(cx).is_none()), Some(true));
 
         // The real bridge releases the retained command before this frame's Tick. Its nested
@@ -53,9 +53,9 @@ fn first_home_catalog_preserves_default_and_explicit_hero_seating() {
     ] {
         let mut d = Dispatcher::<AppHost>::new();
         let mut rig = Bridge::for_test(|| 0);
-        rig.stores.hubs.seed_for_test(0, crate::pms::HubState::Loading);
+        rig.stores.hubs.seed_for_test(0, crate::catalog::HubState::Loading);
         frame(&mut d, &mut rig, AppArg::Home, tick(0), vec![]);
-        assert_eq!(rig.with_home(&d, |_, cx, _| cx.views.hubs.state), Some(crate::pms::HubState::Loading));
+        assert_eq!(rig.with_home(&d, |_, cx, _| cx.views.hubs.state), Some(crate::catalog::HubState::Loading));
         let entry = d.nav.top_page().unwrap().id;
         d.set_focus_in(None, None);
         for command in &commands { assert!(rig.home_command(*command)); }
@@ -159,14 +159,14 @@ fn removed_home_items_recover_near_their_old_slot_after_live_or_evicted_return()
 #[test]
 fn mounted_home_navigation_stays_inside_a_full_or_oversized_catalog() {
     let _guard = crate::testlock::serial();
-    for offered in [crate::pms::MAX_SHELVES, crate::pms::MAX_SHELVES + 5] {
+    for offered in [crate::catalog::MAX_SHELVES, crate::catalog::MAX_SHELVES + 5] {
         let mut d = Dispatcher::<AppHost>::new();
         let mut rig = Bridge::for_test(|| 0);
         rig.stores.hubs.seed_grid_for_test(offered, 3);
         frame(&mut d, &mut rig, AppArg::Home, tick(0), vec![]);
         frame(&mut d, &mut rig, AppArg::Home, tick(1), vec![]);
         let mut i = 2;
-        for row in 0..crate::pms::MAX_SHELVES {
+        for row in 0..crate::catalog::MAX_SHELVES {
             frame(&mut d, &mut rig, AppArg::Home, tick(i), script_key(Key::Down, tick(i)));
             i += 1;
             assert_eq!(rig.with_home(&d, |home, cx, focus| home.grid_position::<AppHost>(focus, cx)),
@@ -194,7 +194,7 @@ fn hero_edge_keys_page_without_seating_a_pager_or_leaving_the_control() {
     let _guard = crate::testlock::serial();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
-    rig.stores.hubs.seed_for_test(3, crate::pms::HubState::Ready);
+    rig.stores.hubs.seed_for_test(3, crate::catalog::HubState::Ready);
     frame(&mut d, &mut rig, AppArg::Home, tick(0), vec![]);
     frame(&mut d, &mut rig, AppArg::Home, tick(1), vec![]);
     let selected = |rig: &Bridge, d: &Dispatcher<AppHost>| rig.with_home(d,
@@ -229,7 +229,7 @@ fn a_removed_home_type_tab_recovers_to_home_not_the_profile_chip() {
     let _guard = crate::testlock::serial();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
-    rig.stores.hubs.seed_for_test(3, crate::pms::HubState::Ready);
+    rig.stores.hubs.seed_for_test(3, crate::catalog::HubState::Ready);
     frame(&mut d, &mut rig, AppArg::Home, tick(0), vec![]);
     frame(&mut d, &mut rig, AppArg::Home, tick(1), vec![]);
     let entry = d.nav.top_page().unwrap().id;
@@ -414,7 +414,7 @@ fn all_splits_in_one_frame_keep_the_same_home_publication() {
     let _guard = crate::testlock::serial();
     let mut rig = super::Bridge::for_test(|| 0);
     let mut dispatcher = Dispatcher::<AppHost>::new();
-    rig.stores.hubs.seed_for_test(3, crate::pms::HubState::Ready);
+    rig.stores.hubs.seed_for_test(3, crate::catalog::HubState::Ready);
     rig.capture_views(&mut dispatcher);
     assert_eq!(rig.split().views.hubs.hub(0).unwrap().items.len(), 3);
     // `split()` reads `rig.hubs`, the last-captured publication — resetting the live store
@@ -432,7 +432,7 @@ fn removing_the_pressed_home_item_cancels_instead_of_activating_its_replacement(
     let _guard = crate::testlock::serial();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
-    rig.stores.hubs.seed_for_test(3, crate::pms::HubState::Ready);
+    rig.stores.hubs.seed_for_test(3, crate::catalog::HubState::Ready);
     frame(&mut d, &mut rig, AppArg::Home, tick(0), vec![]);
     frame(&mut d, &mut rig, AppArg::Home, tick(1), script_key(Key::Down, tick(1)));
     for i in 2..40 { frame(&mut d, &mut rig, AppArg::Home, tick(i), vec![]); }
@@ -454,7 +454,7 @@ fn a_midframe_reorder_keeps_painted_keys_matched_and_a_click_activates_the_seen_
     let _guard = crate::testlock::serial();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
-    rig.stores.hubs.seed_for_test(3, crate::pms::HubState::Ready);
+    rig.stores.hubs.seed_for_test(3, crate::catalog::HubState::Ready);
     frame(&mut d, &mut rig, AppArg::Home, tick(0), vec![]);
     frame(&mut d, &mut rig, AppArg::Home, tick(1), script_key(Key::Down, tick(1)));
     for i in 2..40 { frame(&mut d, &mut rig, AppArg::Home, tick(i), vec![]); }
@@ -498,7 +498,7 @@ fn home_worker_results_cross_the_addressed_dispatcher_ingest_once() {
     let _guard = crate::testlock::serial();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
-    rig.stores.hubs.seed_for_test(2, crate::pms::HubState::Ready);
+    rig.stores.hubs.seed_for_test(2, crate::catalog::HubState::Ready);
     let mut tap = Results::default();
     let req = rig.stores.hubs.queue_test_landing(Some(5));
     frame_with_tap(&mut d, &mut rig, AppArg::Home, tick(0), vec![], &mut tap);
@@ -545,7 +545,7 @@ fn one_home_landing_notifies_the_home_screen_once() {
     let _guard = crate::testlock::serial();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
-    rig.stores.hubs.seed_for_test(2, crate::pms::HubState::Ready);
+    rig.stores.hubs.seed_for_test(2, crate::catalog::HubState::Ready);
     let mut tap = HubsNotices::default();
     frame_with_tap(&mut d, &mut rig, AppArg::Home, tick(0), vec![], &mut tap);
     let baseline = tap.0;
@@ -562,12 +562,12 @@ fn supplied_home_results_use_the_dispatcher_without_consuming_live_arrivals() {
     let _guard = crate::testlock::serial();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
-    rig.stores.hubs.seed_for_test(2, crate::pms::HubState::Ready);
+    rig.stores.hubs.seed_for_test(2, crate::catalog::HubState::Ready);
     rig.stores.hubs.queue_test_landing(Some(5));
     let captured = rig.take_hubs_results().pop().unwrap();
     let AppMsg::HubsResult(result) = captured.1 else { unreachable!() };
-    let payload = crate::pms::record::encode(&result);
-    let decoded = crate::pms::record::decode(payload).unwrap();
+    let payload = crate::catalog::record::encode(&result);
+    let decoded = crate::catalog::record::decode(payload).unwrap();
     rig.stores.hubs.queue_test_landing(Some(9));
 
     frame_with_results(&mut d, &mut rig, AppArg::Home, tick(0), vec![],
@@ -586,7 +586,7 @@ fn store_work_is_addressed_and_idle_polling_does_not_invent_a_change() {
     let _guard = crate::testlock::serial();
     let mut d = Dispatcher::<AppHost>::new();
     let mut rig = Bridge::for_test(|| 0);
-    rig.stores.hubs.seed_for_test(0, crate::pms::HubState::Ready);
+    rig.stores.hubs.seed_for_test(0, crate::catalog::HubState::Ready);
     frame(&mut d, &mut rig, AppArg::Home, tick(0), vec![]);
     let before = rig.stores.gen(StoreId::Hubs);
     d.emit(MachineId::Nav, Fx::App(AppFx::StoreWork(StoreWork::Hubs)));

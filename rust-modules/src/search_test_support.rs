@@ -132,7 +132,7 @@ pub(super) fn register(owner: &mut Owner, n: usize) {
 }
 
 pub(super) fn media(rk: &str) -> Item {
-    Item::Media(PmsMovie {
+    Item::Media(CatalogMovie {
         rk: rk.to_string(),
         title: rk.to_string(),
         ..Default::default()

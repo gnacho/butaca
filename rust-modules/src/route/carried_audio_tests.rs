@@ -11,9 +11,10 @@ use super::*;
 use super::test_support::*;
 use super::test_support::apply_plan;
 
-/// `has_atmos` (and therefore `CarriedAudio::immersive`) reads `Stream.profile` alone — Dolby's
-/// own spec says the channel layout cannot tell Atmos apart from plain surround, and PMS composes
-/// `"dolby digital plus + dolby atmos"` for a JOC track regardless of its ordinary 5.1 layout.
+/// `has_atmos` (and therefore `CarriedAudio::immersive`) reads `Stream.profile` alone — Dolby's own
+/// spec says the channel layout cannot tell Atmos apart from plain surround, and the server
+/// composes `"dolby digital plus + dolby atmos"` for a JOC track regardless of its ordinary 5.1
+/// layout.
 #[test]
 fn from_stream_eac3_joc_is_immersive() {
     let s = crate::metadata::Stream {

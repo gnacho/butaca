@@ -883,7 +883,7 @@ pub(crate) fn strip<'a>(
 /// A grid poster card's label, for every kind but the episode each grid words its own way: a
 /// season names its show, and anything else is its title over its [`focused_caption`]. The
 /// Library grid and the Collection page share it, so one item reads the same on both.
-pub(crate) fn poster_label(item: &crate::pms::PmsMovie) -> TileLabel {
+pub(crate) fn poster_label(item: &crate::catalog::CatalogMovie) -> TileLabel {
     if item.kind == 2 && !item.show_title.is_empty() {
         return TileLabel::titled(&item.title, &item.show_title);
     }
@@ -892,12 +892,13 @@ pub(crate) fn poster_label(item: &crate::pms::PmsMovie) -> TileLabel {
     label
 }
 
-pub(crate) fn focused_caption(m: &crate::pms::PmsMovie, is_continue: bool) -> Option<std::ffi::CString> {
+pub(crate) fn focused_caption(m: &crate::catalog::CatalogMovie, is_continue: bool) -> Option<std::ffi::CString> {
     if is_continue {
         return cw_caption(m);
     }
-    let s = if m.kind == crate::pms::KIND_COLLECTION {
-        // A collection is its size, never a year: the members span several, and PMS sends none.
+    let s = if m.kind == crate::catalog::KIND_COLLECTION {
+        // A collection is its size, never a year: the members span several, and the server sends
+        // none.
         crate::ui::fmt::item_count(m.child_count)
     } else if m.kind == 3 && m.ep_index > 0 {
         if m.season_index > 0 {
@@ -917,15 +918,15 @@ pub(crate) fn focused_caption(m: &crate::pms::PmsMovie, is_continue: bool) -> Op
 /// "<show> · 8 min left" (episodes) or just the time-remaining (a resumed movie); a next-up episode
 /// (no resume point yet) reads "<show> · New episode". `title` above it carries the episode name.
 ///
-/// "In progress" is [`PmsMovie::resume_frac`] — THE resume rule, and the same call `Grid::draw`
+/// "In progress" is [`CatalogMovie::resume_frac`] — THE resume rule, and the same call `Grid::draw`
 /// makes for the BAR in the pass that asks for this caption. A hand-written
 /// `resume_ms > 0 && dur_ns > 0` here dropped that rule's end-guard, so a finished item whose
 /// server never cleared `viewOffset` drew NO bar (`resume_frac`'s answer) under a caption still
 /// promising "1 min left" — `fmt::time_left` floors at a minute, so it could not even read zero.
 /// One item, described two ways in one draw. Whether that tile also wore the watched TICK is a
-/// separate question with a separate answer: `widgets::poster_mark` reads `PmsMovie::watched`, so
+/// separate question with a separate answer: `widgets::poster_mark` reads `CatalogMovie::watched`, so
 /// a stale past-end `viewOffset` on an item the server has not marked watched drew no mark at all.
-fn cw_caption(m: &crate::pms::PmsMovie) -> Option<std::ffi::CString> {
+fn cw_caption(m: &crate::catalog::CatalogMovie) -> Option<std::ffi::CString> {
     let show = m.show_title.as_str();
     let s = if m.resume_frac().is_some() {
         let left = crate::ui::fmt::time_left(m.dur_ns / 1_000_000 - m.resume_ms);
@@ -1425,13 +1426,13 @@ mod tests {
     /// A collection's caption is its size — "1 item", "3 items" — never a year it does not have.
     #[test]
     fn a_collection_caption_counts_its_items() {
-        let caption = |child_count, year| super::focused_caption(&crate::pms::PmsMovie {
-            kind: crate::pms::KIND_COLLECTION, child_count, year, ..Default::default()
+        let caption = |child_count, year| super::focused_caption(&crate::catalog::CatalogMovie {
+            kind: crate::catalog::KIND_COLLECTION, child_count, year, ..Default::default()
         }, false).map(|c| c.into_string().unwrap());
         assert_eq!(caption(3, 0).as_deref(), Some("3 items"));
         assert_eq!(caption(1, 1999).as_deref(), Some("1 item"));
         assert_eq!(caption(0, 0).as_deref(), Some("0 items"));
-        let film = crate::pms::PmsMovie { year: 1999, child_count: 3, ..Default::default() };
+        let film = crate::catalog::CatalogMovie { year: 1999, child_count: 3, ..Default::default() };
         assert_eq!(super::focused_caption(&film, false).unwrap().to_str().unwrap(), "1999");
     }
 

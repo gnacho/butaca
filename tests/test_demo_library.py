@@ -24,7 +24,7 @@ import zlib
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tests"))
 
-import mock_pms  # noqa: E402
+import mock_server  # noqa: E402
 from demo_library import qr  # noqa: E402  (tests/demo_library/qr.py)
 
 # tools/demo_library.py shares its name with the tests/demo_library package, so it is loaded by
@@ -42,7 +42,7 @@ RUST = ROOT / "rust-modules" / "src"
 # Armed by tools/screenshots.py on every scene, not by the manifest.
 DRIVER_TRIGGERS = {"token", "plextv", "stillclock"}
 
-HAVE_CACHE = (mock_pms.demo_cache_dir() / "derived").is_dir() and shutil.which("ffmpeg") and shutil.which("ffprobe")
+HAVE_CACHE = (mock_server.demo_cache_dir() / "derived").is_dir() and shutil.which("ffmpeg") and shutil.which("ffprobe")
 
 
 def decode_png(data):
@@ -291,7 +291,7 @@ class Fetch(unittest.TestCase):
 
 
 class Chapters(unittest.TestCase):
-    chapters = staticmethod(mock_pms.CatalogLibrary._chapters)
+    chapters = staticmethod(mock_server.CatalogLibrary._chapters)
 
     def test_chapters_tile_the_film(self):
         rows = self.chapters([{"start": "0:00", "title": "A"}, {"start": "1:41", "title": "B"}], 300_000, "x")
@@ -315,7 +315,7 @@ class Chapters(unittest.TestCase):
 
 class Qr(unittest.TestCase):
     def setUp(self):
-        self.m = qr.encode(mock_pms.DEMO_QR_TEXT, "M")
+        self.m = qr.encode(mock_server.DEMO_QR_TEXT, "M")
 
     def test_the_symbol_has_the_right_version_and_finder_patterns(self):
         # 20 bytes in byte mode at ECC M needs version 2: 25x25 modules.
@@ -362,14 +362,14 @@ class AccountServiceStandIn(unittest.TestCase):
     """`butaca-plextv` points the sign-in at the mock: the pin never links."""
 
     def setUp(self):
-        self.pms = mock_pms.MockPms(mock_pms.Library())
+        self.pms = mock_server.MockServer(mock_server.Library())
 
     def test_a_pin_is_minted_with_the_demo_code_and_stays_pending(self):
         status, _, body = self.pms.handle("POST", "/api/v2/pins?strong=false")
         self.assertEqual(status, 201)
         pin = json.loads(body)
-        self.assertEqual((pin["id"], pin["code"], pin["authToken"]), (mock_pms.DEMO_PIN_ID, "DEMO", None))
-        status, _, body = self.pms.handle("GET", f"/api/v2/pins/{mock_pms.DEMO_PIN_ID}")
+        self.assertEqual((pin["id"], pin["code"], pin["authToken"]), (mock_server.DEMO_PIN_ID, "DEMO", None))
+        status, _, body = self.pms.handle("GET", f"/api/v2/pins/{mock_server.DEMO_PIN_ID}")
         self.assertEqual((status, json.loads(body)["authToken"]), (200, None))
 
     def test_the_qr_is_a_styled_png(self):
@@ -446,8 +446,8 @@ class SceneManifest(unittest.TestCase):
 class Catalog(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.lib = mock_pms.CatalogLibrary(CATALOG)
-        cls.pms = mock_pms.MockPms(cls.lib)
+        cls.lib = mock_server.CatalogLibrary(CATALOG)
+        cls.pms = mock_server.MockServer(cls.lib)
         cls.catalog = json.loads(CATALOG.read_text())
 
     def get(self, path, pms=None):
@@ -472,7 +472,7 @@ class Catalog(unittest.TestCase):
     def test_hero_swaps_the_head_and_keeps_the_rest_in_order(self):
         for film in self.catalog["hero_alternatives"]:
             with self.subTest(hero=film):
-                lib = mock_pms.CatalogLibrary(CATALOG, hero=film)
+                lib = mock_server.CatalogLibrary(CATALOG, hero=film)
                 rows = lib.continue_watching()
                 self.assertEqual(rows[0]["ratingKey"], str(lib.by_slug[film]))
                 others = [r["ratingKey"] for r in rows[1:]]
@@ -510,7 +510,7 @@ class Catalog(unittest.TestCase):
 
     def test_an_unknown_hero_is_refused(self):
         with self.assertRaises(ValueError):
-            mock_pms.CatalogLibrary(CATALOG, hero="no-such-film")
+            mock_server.CatalogLibrary(CATALOG, hero="no-such-film")
 
     def test_home_hubs_are_titled_like_a_real_server(self):
         hubs = self.get("/hubs?count=12")["Hub"]
@@ -588,7 +588,7 @@ class Catalog(unittest.TestCase):
         hubs = self.get("/hubs/search?query=an&limit=2")["Hub"]
         movie = next(h for h in hubs if h["type"] == "movie")
         self.assertEqual((movie["size"], len(movie["Metadata"])), (2, 2))
-        # No limit: PMS's own default of three rows per hub.
+        # No limit: server's own default of three rows per hub.
         hubs = self.get("/hubs/search?query=an")["Hub"]
         self.assertEqual(next(h for h in hubs if h["type"] == "movie")["size"], 3)
 
@@ -614,7 +614,7 @@ class Catalog(unittest.TestCase):
         self.assertNotIn("Metropolis", self.search("fritz")["movie"])
 
     def test_search_matches_the_start_of_a_word_not_the_middle(self):
-        # Word-prefix, as the mock assumes PMS does: "sp" begins Spring, Sprite and Space;
+        # Word-prefix, as the mock assumes server does: "sp" begins Spring, Sprite and Space;
         # "in" sits inside Spring and Sintel and begins no word, so it finds no film.
         hits = self.search("sp")
         self.assertEqual(hits["movie"], ["Spring", "Sprite Fright", "Plan 9 from Outer Space"])
@@ -627,11 +627,11 @@ class Catalog(unittest.TestCase):
         self.assertEqual(self.search("si")["collection"], ["Silent Classics"])
 
     def test_a_one_character_search_finds_nothing(self):
-        # PMS answers a one-character query with every hub empty (docs: tests/manifest.json).
+        # server answers a one-character query with every hub empty (docs: tests/manifest.json).
         self.assertTrue(all(not rows for rows in self.search("s").values()))
 
     def test_two_libraries_serve_the_same_bytes(self):
-        other = mock_pms.MockPms(mock_pms.CatalogLibrary(CATALOG))
+        other = mock_server.MockServer(mock_server.CatalogLibrary(CATALOG))
         for path in ("/hubs?count=12", "/library/sections/1/all?sort=titleSort:asc", "/hubs/search?query=the",
                      f"/library/metadata/{self.lib.by_slug[self.catalog['hero']]}"):
             with self.subTest(path=path):
@@ -647,5 +647,5 @@ class Catalog(unittest.TestCase):
 if __name__ == "__main__":
     if not HAVE_CACHE:
         print("test_demo_library: the Catalog cases are SKIPPED — no derived demo cache "
-              f"({mock_pms.demo_cache_dir()}); `make demo-library` builds it", file=sys.stderr)
+              f"({mock_server.demo_cache_dir()}); `make demo-library` builds it", file=sys.stderr)
     unittest.main(verbosity=1)

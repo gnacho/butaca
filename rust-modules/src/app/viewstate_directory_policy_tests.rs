@@ -108,8 +108,8 @@ fn person_open(sid: crate::registry::ServerId, name: &str) -> crate::stores::per
     }
 }
 
-fn person_item(sid: crate::registry::ServerId, rk: &str, watched: bool) -> crate::pms::PmsMovie {
-    crate::pms::PmsMovie {
+fn person_item(sid: crate::registry::ServerId, rk: &str, watched: bool) -> crate::catalog::CatalogMovie {
+    crate::catalog::CatalogMovie {
         sid,
         rk: rk.into(),
         watched,
@@ -443,7 +443,7 @@ fn separate_bridges_do_not_share_any_search_owner_state_or_notice() {
     first.search_run(crate::stores::search::SearchCmd::SetQuery("landed-owner".into()));
     let gen = first.stores.search.query_gen();
     let idx = server.raw() as usize;
-    let item = crate::search::Item::Media(crate::pms::PmsMovie {
+    let item = crate::search::Item::Media(crate::catalog::CatalogMovie {
         sid: server, rk: "landed-row".into(), title: "Landed row".into(), ..Default::default()
     });
     crate::search::land_for_test(&first.stores.search.adapter_for_test(), idx, gen, item);
@@ -502,7 +502,7 @@ fn search_reset_rotates_the_adapter_and_fences_a_late_old_worker() {
     // would still match, if it could reach the current adapter at all).
     let gen = bridge.stores.search.query_gen();
     let idx = server.raw() as usize;
-    let item = crate::search::Item::Media(crate::pms::PmsMovie {
+    let item = crate::search::Item::Media(crate::catalog::CatalogMovie {
         sid: server, rk: "late-row".into(), title: "Late row".into(), ..Default::default()
     });
     crate::search::land_for_test(&old_adapter, idx, gen, item);

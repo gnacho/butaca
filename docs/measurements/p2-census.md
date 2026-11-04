@@ -37,7 +37,7 @@ points") confirmed from a direction the review board did not look at.
 Fixed by splitting the constant in two and deriving the downward figure from what a downshift
 actually costs: one segment for the warm-up fetch, bounded by the acquisition-transfer bound at a
 current-rung segment since the candidate's byte count is lower by definition, plus one segment for
-the three control-plane requests (~100 ms median, 1 306 ms max on a real PMS). Two segments —
+the three control-plane requests (~100 ms median, 1 306 ms max on a real server). Two segments —
 4 000 ms — fits inside `B_max` at every rung including the top.
 
 **Before and after, same binary except that constant:**

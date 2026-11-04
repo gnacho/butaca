@@ -349,7 +349,7 @@ its ground participate in backdrop discovery, including texture changes and UV c
 Until 2026-09-05 `want_play` was `from_deck || kind == 3` on both Home and the Library, so an
 episode played immediately from ANY shelf and every landscape tile drew the triangle whatever its
 press did. Behaviour and mark now read the same flag (`Shelf::is_continue` /
-`pms::hub_is_continue`), so they cannot disagree. A poster wears nothing at all when it has never
+`catalog::hub_is_continue`), so they cannot disagree. A poster wears nothing at all when it has never
 been started — most of a server is unstarted, so a clean shelf is the common case and a mark is
 information.
 

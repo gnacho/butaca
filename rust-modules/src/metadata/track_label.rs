@@ -3,7 +3,7 @@
 //! mock's `parseTrackName` (`player.html:430-460`), which the design record settles as the
 //! reference for the language-grouped Subtitles panel (`docs/../subtitle-menu-capsule` plan §1).
 //!
-//! A track's title from PMS mixes two different questions run together: what KIND of track it
+//! A track's title from server mixes two different questions run together: what KIND of track it
 //! is (a fixed, small vocabulary — FORCED, SDH, "full", a commentary track) and WHOSE it is (free
 //! text: "iTunes", "DVD R5", "Е. Воронин"). The kind becomes a badge, or nothing at all when it
 //! only restates that every unmarked track already is ("full"/"Полные"); what is left is the
@@ -314,11 +314,11 @@ pub(crate) fn flags(label: &SubLabel, forced: bool, sdh: bool) -> (bool, bool) {
 /// `pms` is `Stream.title` — what the server parsed out of the container — and `container` is what
 /// OUR demuxer read out of the same file (`player::TrackNames`, published by `ff.rs`). They are the
 /// same tag seen twice, so they do not disagree in practice; the order matters for a different
-/// reason. PMS's copy exists **before playback starts** and survives a transcode, while the
+/// reason. Server's copy exists **before playback starts** and survives a transcode, while the
 /// demuxer's only exists on direct play and only once the file is open — so the server's answer is
 /// preferred when it has one, and the file's is what fills the hole when it does not.
 ///
-/// That hole is the whole point: **for an MP4 part PMS sends no `title` at all.** Matroska spells
+/// That hole is the whole point: **for an MP4 part the server sends no `title` at all.** Matroska spells
 /// the tag `title` and MP4 spells it `name`, and the server's parser maps only the first (verified
 /// live against one server holding both). So the six Russian tracks of a nine-track MP4 arrive with
 /// nothing to tell them apart, while the file itself says `Форс. iTunes`, `Полные Jaskier`,
@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     fn an_mp4s_container_names_tell_apart_the_tracks_pms_reports_identically() {
-        let pms_title = "";
+        let server_title = "";
         let lang = "Русский";
         let container = [
             "Форс. iTunes",
@@ -409,7 +409,7 @@ mod tests {
             "Полные Jaskier",
             "Полные stirloo",
         ];
-        let rows: Vec<String> = container.iter().map(|c| track_name(pms_title, c, lang)).collect();
+        let rows: Vec<String> = container.iter().map(|c| track_name(server_title, c, lang)).collect();
         assert_eq!(rows, container, "each row shows its own track's name");
         let distinct: std::collections::HashSet<&String> = rows.iter().collect();
         assert_eq!(distinct.len(), rows.len(), "no two rows of one language may read the same");
@@ -542,7 +542,7 @@ mod tests {
             ("full / по дубляжу", false, false, "по дубляжу", Kind::Full),
             ("full / Е. Воронин", false, false, "Е. Воронин", Kind::Full),
             ("full", false, false, "", Kind::Full),
-            // this one's PMS `forced`/`sdh` flags are 0 in every case above but flags=2 (SDH) on
+            // this one's server `forced`/`sdh` flags are 0 in every case above but flags=2 (SDH) on
             // the real fixture's last English track (`SUB_SETS.hobbit`'s `[…, 2, "SDH", …]`)
             ("SDH", false, true, "", Kind::Sdh),
         ];

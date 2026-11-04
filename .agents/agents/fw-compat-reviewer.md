@@ -264,7 +264,7 @@ Reading the output:
   positive control, so a broken disassembly cannot pass vacuously), the `DT_NEEDED` diff, and the
   build-host path scan. On a dev machine it prints
   `SKIP (private-IP + placeholder) — src/config.local.h present` and exits 0 — and that skip is
-  **only** the private-IP and `YOUR_PMS_HOST` assertions, which genuinely can only hold in a clean
+  **only** the private-IP and `YOUR_SERVER_HOST` assertions, which genuinely can only hold in a clean
   CI checkout. The build-host path scan above it still runs, and it is the one that makes the
   ipk's byte-for-byte reproducibility claim true; the script's own comment records that skipping
   the WHOLE section is how that gate had never once executed against a real build. Quote the skip

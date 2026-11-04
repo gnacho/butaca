@@ -132,7 +132,7 @@ impl RouteSurface {
         id: InstanceId,
         kind: Family,
         root: SettingsPage,
-        _hubs: crate::pms::HubsView<'_>,
+        _hubs: crate::catalog::HubsView<'_>,
     ) -> Self {
         let mut s = Self {
             entry,

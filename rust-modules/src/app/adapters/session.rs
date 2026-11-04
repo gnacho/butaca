@@ -311,7 +311,7 @@ impl SessionAdapter {
 
         use crate::auth::owner::CommitAdmission;
         if self.controlled_home {
-            // The controlled world's only resource operation was the DevPms DevInstall, and the
+            // The controlled world's only resource operation was the DevServer DevInstall, and the
             // dev activation that issued it is gone with that world (#166): the owner never
             // leaves Idle here, so any commit that still arrives is stale authority.
             return permit.reply(CommitAdmission::StaleAuthority);

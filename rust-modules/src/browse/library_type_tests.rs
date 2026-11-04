@@ -63,7 +63,7 @@ mod tests {
     }
 
     /// **Design A: a movie library lists its collections from the TYPE menu.** The listing asks
-    /// for `type=18` on the PMS wire, which also scoped its letters), sends neither
+    /// for `type=18` on the server wire, which also scoped its letters), sends neither
     /// filter — a collection has no watch state or genre — and shows neither as applied. Unwatched
     /// is the section's own switch and comes back with its films; a genre belongs to one metadata
     /// type's menu, so a type change drops it, as it always has between TV types.

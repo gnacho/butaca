@@ -47,7 +47,7 @@ impl std::ops::DerefMut for SessionGround {
 }
 
 /// Prefer the already-published Home hero; otherwise observe the persisted seed as it lands.
-pub(crate) fn pre_home_ground(hubs: crate::pms::HubsView<'_>) -> SessionGround {
+pub(crate) fn pre_home_ground(hubs: crate::catalog::HubsView<'_>) -> SessionGround {
     let live = hubs.hero(0).filter(|hero| hero.item.has_blur).map(|hero| hero.item.blur);
     if let Some(blur) = live {
         let _ = crate::storage_worker::submit_retained(move || crate::server::session::record_last_hero(blur));
@@ -339,7 +339,7 @@ mod session_tests {
         let mut saved = (*crate::server::session::peek()).clone();
         saved.last_hero_blur = Some([[0.2, 0.3, 0.4]; 4]);
         crate::server::session::install_transient_for_test(true);
-        let mut ground = super::pre_home_ground(crate::pms::HubsSnapshot::empty_for_test().view());
+        let mut ground = super::pre_home_ground(crate::catalog::HubsSnapshot::empty_for_test().view());
         assert!(ground.seed.is_none());
         crate::server::session::save(&saved);
         assert!(ground.refresh());

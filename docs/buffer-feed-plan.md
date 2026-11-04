@@ -33,7 +33,7 @@ Codec info comes from the server's `/library/metadata` Media/Part/Stream fields.
 pointer is in-process. Check reply for `"Ok"` / `"BufferFull"` (backpressure → retry).
 
 ### 4. Demuxer — needs raw ES (no container-ingest transport; only BUFFERSTREAM/dual_stream)
-Plan: have PMS **remux to MPEG-TS** (H264+AC3 direct-stream copy, cheap), then a minimal
+Plan: have the server **remux to MPEG-TS** (H264+AC3 direct-stream copy, cheap), then a minimal
 in-app TS demuxer (188-byte packets → PID filter → PES → ES + PTS). ~300–500 lines C.
 Server endpoint: `/video/:/transcode/universal/start.m3u8?protocol=hls...` (HLS, TS segments)
 — exact params still TBD (400s so far, and it needs the full client-header set + session).
@@ -47,7 +47,7 @@ on videoInfo: setMediaVideoData (should now succeed — in-process pipeline). se
 1. Shim + Load(BUFFERSTREAM) + ACB + feed a small pre-made ES sample → does video show?
    (de-risks the whole architecture before HTTP/demux). Need an H264+AC3 ES sample source.
 2. Add TS demux, feed from a local .ts file.
-3. Add HTTP fetch from PMS, full pipeline.
+3. Add HTTP fetch from the server, full pipeline.
 
 ## Open questions
 - Exact server params for a plain MPEG-TS/HLS stream (current requests 400).

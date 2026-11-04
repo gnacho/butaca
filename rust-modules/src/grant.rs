@@ -75,7 +75,7 @@
 //! consults. The consent lifecycle below runs entirely on the live backend's pieces:
 //! discovery evidence comes from `crate::server::probe`, consent persistence uses
 //! `crate::server::session`, and registry invalidation goes through
-//! `crate::registry::regrade_credentials`. [`UpgradeRetry`] also shares `crate::pms`'s backoff.
+//! `crate::registry::regrade_credentials`. [`UpgradeRetry`] also shares `crate::catalog`'s backoff.
 //! `Session::owner_identity` lives in session storage.
 #![allow(dead_code)]
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};

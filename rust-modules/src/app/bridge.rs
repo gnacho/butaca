@@ -92,7 +92,7 @@ fn refresh_chrome(
 
 #[derive(Clone, Copy)]
 pub(crate) struct AppViews<'a> {
-    pub(crate) hubs: crate::pms::HubsView<'a>,
+    pub(crate) hubs: crate::catalog::HubsView<'a>,
     pub(crate) listing: crate::stores::browse::ListingView<'a>,
     pub(crate) directory: crate::stores::browse::DirectoryView<'a>,
     pub(crate) section_hubs: crate::stores::browse::HubsView<'a>,
@@ -133,7 +133,7 @@ pub(crate) struct BridgeInit;
 
 /// Retained read inputs captured before construction. This is not a store decision owner.
 struct StorePublications {
-    hubs: crate::pms::HubsSnapshot,
+    hubs: crate::catalog::HubsSnapshot,
     listing: crate::stores::browse::ListingSnapshot,
     directory: crate::stores::browse::DirectorySnapshot,
     section_hubs: crate::stores::browse::HubsSnapshot,
@@ -166,7 +166,7 @@ impl Host for AppHost {
 }
 
 impl HomeLike for AppHost {
-    fn hubs<'a>(cx: &Cx<'a, Self>) -> crate::pms::HubsView<'a> { cx.views.hubs }
+    fn hubs<'a>(cx: &Cx<'a, Self>) -> crate::catalog::HubsView<'a> { cx.views.hubs }
 }
 
 impl crate::screens::registry::CollectionLike for AppHost {
@@ -244,7 +244,7 @@ pub(crate) struct Bridge {
     /// on its own assertion. `Split::measure` is `&dyn Measure` already, so erasing it here costs
     /// the app nothing and buys [`Bridge::for_test`].
     measure: crate::ui::rec::Measurements,
-    hubs: crate::pms::HubsSnapshot,
+    hubs: crate::catalog::HubsSnapshot,
     listing: crate::stores::browse::ListingSnapshot,
     directory: crate::stores::browse::DirectorySnapshot,
     section_hubs: crate::stores::browse::HubsSnapshot,
@@ -300,7 +300,7 @@ impl Bridge {
         self.session_adapter.recording_retired_for_erasure(failed);
     }
     pub(crate) fn controlled_failure(&self) -> Option<&'static str> {
-        // The recorded-clients denial half went with the DevPms controlled install (#166): the
+        // The recorded-clients denial half went with the DevServer controlled install (#166): the
         // jellyfin world has no registry instances to police, and the replay denial contract that
         // the deleted fixture library used to keep went with it.
         self.home_io.as_ref().and_then(|io| io.failure)
@@ -386,7 +386,7 @@ impl Bridge {
         static FIXTURE: crate::ui::fixture::FixtureMeasure = crate::ui::fixture::FixtureMeasure;
         let adapter = super::adapters::session::SessionAdapter::fixture_with(init.persisted.clone());
         Self::with_publications(&FIXTURE, || 0, init, adapter, StorePublications {
-            hubs: crate::pms::HubsSnapshot::empty_for_test(),
+            hubs: crate::catalog::HubsSnapshot::empty_for_test(),
             listing: crate::stores::browse::ListingSnapshot::empty_for_test(),
             directory: Default::default(), section_hubs: crate::stores::browse::HubsSnapshot::empty_for_test(),
             search: Default::default(),
@@ -508,7 +508,7 @@ impl Bridge {
     }
 
     pub(crate) fn library_selection(&self, d: &Dispatcher<AppHost>, entry: EntryId, focus: Option<FocusKey<u32>>)
-        -> Option<(crate::pms::PmsMovie, crate::ui::popover::Opener)> {
+        -> Option<(crate::catalog::CatalogMovie, crate::ui::popover::Opener)> {
         let page = d.nav.entry(entry)?.inst.as_ref()?.screen.as_any()?.downcast_ref::<crate::screens::library::LibraryScreen>()?;
         let parts = CxParts { tick: Tick::default(), press: Default::default(),
             focus: crate::ui::machine::FocusRead { current: focus , ..Default::default() }, owner: InputOwner::Entry(entry) };
@@ -984,7 +984,7 @@ impl Bridge {
 
     /// A fresh Hubs publication captured from this owner's store, for a caller that must not read
     /// the frame's retained `self.hubs` publication (e.g. a same-turn action after a command).
-    pub(crate) fn hubs_snapshot(&self) -> crate::pms::HubsSnapshot {
+    pub(crate) fn hubs_snapshot(&self) -> crate::catalog::HubsSnapshot {
         self.stores.hubs.snapshot()
     }
 
@@ -1041,7 +1041,7 @@ impl Bridge {
     /// `mod tests`) reaches its owned `(state, adapter)` pair through here rather than the deleted
     /// process-wide catalog.
     #[cfg(test)]
-    pub(crate) fn seed_hubs_for_test(&mut self, items: usize, hub_state: crate::pms::HubState) {
+    pub(crate) fn seed_hubs_for_test(&mut self, items: usize, hub_state: crate::catalog::HubState) {
         self.stores.hubs.seed_for_test(items, hub_state);
     }
 
@@ -1050,7 +1050,7 @@ impl Bridge {
         &mut self,
         sid: crate::registry::ServerId,
         items: usize,
-        hub_state: crate::pms::HubState,
+        hub_state: crate::catalog::HubState,
     ) {
         let directory = self.directory.view();
         self.stores.hubs.seed_for_directory_test(sid, items, hub_state, directory);
@@ -1417,7 +1417,7 @@ impl Bridge {
             }
             // The credentials handoff (`SessionFx::Ready`) has no consumer anymore: both of
             // `take_session_ready`'s readers, the boot gate's dev-token arm and the sign-in
-            // arm of `follow_auth_landing`, went with the DevPms world (#166). The owner-side
+            // arm of `follow_auth_landing`, went with the DevServer world (#166). The owner-side
             // Ready machinery stays until the account sign-in world itself is cut. Its
             // emissions land here and are dropped.
             SessionFx::Ready { .. } => {}
@@ -1651,7 +1651,7 @@ fn frame_ingest(
         // The dispatcher's gate wants a frame: the loop's gate presents it. While a surface is up
         // this bump is the PANEL's — `take_page_damage` subtracts the panel's claims BY COUNT, and
         // a page's own landings reach `ui::idle` from the pumps outside this frame (the poster
-        // adapter, `pms::commit`), where nothing claims them.
+        // adapter, `catalog::commit`), where nothing claims them.
         let _own = surface.then(crate::ui::idle::OwnScope::open);
         crate::ui::idle::invalidate();
     }
@@ -2091,7 +2091,7 @@ fn anchor_bits(rect: Option<crate::ui::Rect>) -> [u32; 4] {
 /// all five are the same arm: the row rides in the argument instead of being looked up in the hub
 /// catalog, which only Home's cards are ever in.
 pub(crate) fn card_menu_arg(
-    item: &crate::pms::PmsMovie,
+    item: &crate::catalog::CatalogMovie,
     from_deck: bool,
     from_home: bool,
     host: EntryId,

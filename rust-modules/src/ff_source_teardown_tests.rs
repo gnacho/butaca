@@ -75,7 +75,7 @@ fn a_seek_after_teardown_fails_instead_of_opening_a_second_connection() {
 /// `read_cb` returns AVERROR_EOF unconditionally once the lane is aborted, and libavformat's
 /// recovery for a failed read on a seekable AVIO is to seek and read again — so if `seek_cb`
 /// succeeds, every hop of that loop is a full `http_open` (connect + request + header read)
-/// against a PMS the main thread is already waiting on. Measured on the unguarded code: nine
+/// against a server the main thread is already waiting on. Measured on the unguarded code: nine
 /// accepts for eight hops, i.e. one whole reopen per hop, not the single wasted open the
 /// static reading of this suggested.
 #[test]

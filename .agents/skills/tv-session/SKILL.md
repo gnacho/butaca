@@ -22,7 +22,7 @@ description: >
 > again for the next run; other lanes are waiting on the same set.
 
 > **Before booking the TV: can the simulator answer this?** `make sim` runs the same app core on
-> the desktop — real UI, real PMS data, boot triggers, the same FIFO tokens, self-screenshotting, and
+> the desktop — real UI, real server data, boot triggers, the same FIFO tokens, self-screenshotting, and
 > several instances at once. Layout, focus, navigation and the whole data layer are answerable
 > there without touching the television, which is a single shared resource. See the **`ui-sim`**
 > skill. Come back here for frame rates, text rasterization, video, the video plane, or a final
@@ -33,7 +33,7 @@ the television and observe. That ritual has a lot of steps and each fails in its
 silent way, so it lives in one asserting driver.
 
 All paths are relative to the repo root. The TV address comes from the `Makefile`
-(override with `TV=…`); no addresses or credentials live in this skill. The PMS token is
+(override with `TV=…`); no addresses or credentials live in this skill. The server token is
 read from the gitignored `src/config.local.h` at runtime and never printed.
 
 ## The driver
@@ -98,7 +98,7 @@ For a multi-server boot, `--server <slot>` supplies the server half of a `detail
 item identity. Use it instead of navigating through Search/Sources with key presses: for example,
 `--screen player=5469 --server 1` arms `butaca-play` and `butaca-server` together. The app
 refuses an invalid or unregistered explicit slot rather than falling back to the current server,
-because the same numeric rating key normally names a different item on each PMS. The option also
+because the same numeric rating key normally names a different item on each server. The option also
 selects the signed-in stored-session boot automatically: that is the credential source which
 restores the persisted multi-server roster. After launch the command requires both the requested
 route and the exact `ratingKey + server slot` success marker; a missing slot exits nonzero instead

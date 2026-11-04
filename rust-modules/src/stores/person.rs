@@ -87,8 +87,8 @@ impl PersonStore {
     #[cfg(test)]
     pub(crate) fn install_for_test(
         &mut self,
-        movies: Vec<crate::pms::PmsMovie>,
-        shows: Vec<crate::pms::PmsMovie>,
+        movies: Vec<crate::catalog::CatalogMovie>,
+        shows: Vec<crate::catalog::CatalogMovie>,
     ) {
         self.state.install_for_test(movies, shows);
         self.bump();
@@ -98,8 +98,8 @@ impl PersonStore {
     pub(crate) fn install_source_for_test(
         &mut self,
         sid: ServerId,
-        movies: Vec<crate::pms::PmsMovie>,
-        shows: Vec<crate::pms::PmsMovie>,
+        movies: Vec<crate::catalog::CatalogMovie>,
+        shows: Vec<crate::catalog::CatalogMovie>,
     ) {
         self.state.install_source_for_test(sid, movies, shows);
         self.bump();

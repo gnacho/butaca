@@ -45,12 +45,12 @@ impl HomeIo {
     pub fn hubs(&mut self, hubs: &mut crate::stores::hubs::HubsStore,
         cmd: Option<crate::stores::hubs::HubsCmd>, dt: f32) -> crate::stores::StoreOutcome {
         let adapter = hubs.adapter();
-        self.hubs_with(hubs, cmd, dt, &mut |request| crate::pms::spawn_fetch(&adapter, request))
+        self.hubs_with(hubs, cmd, dt, &mut |request| crate::catalog::spawn_fetch(&adapter, request))
     }
     #[cfg(test)]
     fn hubs_with(&mut self, hubs: &mut crate::stores::hubs::HubsStore,
         cmd: Option<crate::stores::hubs::HubsCmd>, dt: f32,
-        launch: &mut dyn FnMut(crate::pms::HubRequest) -> bool) -> crate::stores::StoreOutcome {
+        launch: &mut dyn FnMut(crate::catalog::HubRequest) -> bool) -> crate::stores::StoreOutcome {
         hubs.controlled(cmd, dt, &mut |request| {
             let (epoch, req, sid, client, token_gen) = request.descriptor();
             self.admit(serde_json::json!({"kind":"hubs", "epoch":epoch,
@@ -62,12 +62,12 @@ impl HomeIo {
         directory: crate::stores::browse::DirectoryView<'_>) -> crate::stores::StoreOutcome {
         let adapter = hubs.adapter();
         self.hubs_with_directory_and_launch(hubs, cmd, dt, directory,
-            &mut |request| crate::pms::spawn_fetch(&adapter, request))
+            &mut |request| crate::catalog::spawn_fetch(&adapter, request))
     }
     fn hubs_with_directory_and_launch(&mut self, hubs: &mut crate::stores::hubs::HubsStore,
         cmd: Option<crate::stores::hubs::HubsCmd>, dt: f32,
         directory: crate::stores::browse::DirectoryView<'_>,
-        launch: &mut dyn FnMut(crate::pms::HubRequest) -> bool) -> crate::stores::StoreOutcome {
+        launch: &mut dyn FnMut(crate::catalog::HubRequest) -> bool) -> crate::stores::StoreOutcome {
         hubs.controlled_with_directory(cmd, dt, directory, &mut |request| {
             let (epoch, req, sid, client, token_gen) = request.descriptor();
             self.admit(serde_json::json!({"kind":"hubs", "epoch":epoch,
@@ -144,7 +144,7 @@ pub(crate) fn validate_admission(value: &serde_json::Value, client: u32) -> Resu
 /// (#166) records against — written as tag `u8(2)` in `SessionInit`'s own census. The term
 /// moves for the V3/V4 reason: `session` is spelled here as a NAME, so a variant space that
 /// grew inside it is invisible unless the name moves too, hence `SessionInitV6` and the
-/// `ControlledHomeInitV7` that carries it. The DevPms/Account tags and their bytes are
+/// `ControlledHomeInitV7` that carries it. The DevServer/Account tags and their bytes are
 /// untouched, but a recording must now name a census that knows the world it booted; fixtures
 /// recorded before this census are refused at the shape boundary and re-recorded (all three
 /// anchors moved to the Jellyfin flavor in the same change).
@@ -162,7 +162,7 @@ pub(crate) enum Entropy {
 pub(crate) struct Initial {
     pub version: u32,
     pub session: crate::auth::SessionInit,
-    pub home: crate::pms::initial::Initial,
+    pub home: crate::catalog::initial::Initial,
     pub clock_start: u32,
     pub entropy: Entropy,
     pub primary_client: u32,
@@ -208,7 +208,7 @@ impl Initial {
             session
         };
         let initial = Self { version:1, session,
-            home:crate::pms::initial::Initial::fresh(),clock_start:0,
+            home:crate::catalog::initial::Initial::fresh(),clock_start:0,
             entropy:Entropy::Seeded(seed),primary_client:1,automated:true,settings:settings.clone(),
             content:None, triggers:vec!["butaca-app-init".into(),"butaca-rec".into(),
                 "butaca-focus".into(),"butaca-noidle".into()] };
@@ -239,7 +239,7 @@ impl Initial {
             automated: crate::dev::any_trigger_present(),
             settings: crate::dev::scenarios::settings_boot_value(),
             content: None,
-            home: crate::pms::initial::Initial::fresh(),
+            home: crate::catalog::initial::Initial::fresh(),
             triggers: crate::dev::armed_triggers(),
         };
         initial.validate()?;

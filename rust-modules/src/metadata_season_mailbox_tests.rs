@@ -10,7 +10,7 @@ use super::test_support::*;
 ///
 /// The FIRST block is the audit finding: `fetch_episodes` returned an empty Vec for BOTH "this
 /// season has no episodes" and "the `/children` GET failed", and `pump_season` installed it
-/// either way — so one transient PMS failure blanked a populated episode row, with no spinner
+/// either way — so one transient server failure blanked a populated episode row, with no spinner
 /// and no error, onto a tab that could then never be asked again. The blocks after it cover the
 /// supersede / monotone / wrong-item guards this change rewrites; on their own they would pass
 /// before and after, which is why they live inside the failing test rather than beside it.

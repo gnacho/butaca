@@ -453,7 +453,7 @@ threading model, the Starfish/ACB ABI + bind-order gotchas, seek/PTS rebase. Rea
 touching playback):** LG's in-process **StarfishMediaAPIs** (`libplayerAPIs.so`) in
 `BUFFERSTREAM` **buffer-feed** mode, the decoded sink bound to the hardware video plane via
 **`libAcbAPI` (ACB)** — in-process is what lets ACB bind the app-owned sink. The media pipeline
-is all Rust: `PMS HTTP GET` → demux (**`ff.rs`, over a custom AVIO on the
+is all Rust: `server HTTP GET` → demux (**`ff.rs`, over a custom AVIO on the
 FFmpeg the app BUNDLES** — not the television's; see the linking section, and note ours is built
 `--disable-network`, so the AVIO is the *only* way bytes reach it) → AU queues with backpressure
 (`aq.rs`) → the pump `Feed()`s the Starfish
@@ -557,7 +557,7 @@ which the linking section explains is load-bearing rather than tidy.
   phase 4, 2026-09-07; `docs/stores-as-machines.md`): `StoreCmd` is the complete set of mutations
   of `browse`/`pms`/`metadata`/`search`/`person`/`viewstate`. Browse, Hubs, Metadata, Person,
   Search and ViewState are physically owned per `Bridge` by `Stores`: `BrowseStore` owns its
-  state/adapter/notice, `HubsStore` owns its `PmsState`/`Arc<PmsAdapter>`/notice,
+  state/adapter/notice, `HubsStore` owns its `CatalogState`/`Arc<CatalogAdapter>`/notice,
   `MetadataStore` owns its state/`Arc<MetadataAdapter>`/notice,
   `PersonStore` owns its model/generation/retry state plus a rotated indexed fetch adapter,
   `SearchStore` owns its state/adapter/notice with a rotated adapter, and `ViewStateStore`
@@ -626,10 +626,10 @@ which the linking section explains is load-bearing rather than tidy.
   selftest` proves upload, ordered redelivery/ack and refusal paths on loopback with no television,
   and runs inside `make check`.
 - `tools/netcond.py` — **network-conditioning TCP proxy** (host-side), for the failures a healthy LAN
-  cannot produce. Sits between the TV and the PMS (`--listen 32499 --target 127.0.0.1:32400
-  --allow-client <TV_IP>`; the PMS runs on the dev Mac) and makes the server misbehave on demand
+  cannot produce. Sits between the TV and the server (`--listen 32499 --target 127.0.0.1:32400
+  --allow-client <TV_IP>`; the server runs on the dev Mac) and makes the server misbehave on demand
   via `/tmp/netcond.mode`. A non-loopback listener refuses to start without an allowlisted client:
-  PMS request URLs carry credentials, so a LAN-wide forwarding proxy may never be open by default.
+  server request URLs carry credentials, so a LAN-wide forwarding proxy may never be open by default.
   Modes:
   `pass` / `stall` (accept, hold open, answer nothing — the case that turns a join into a parked
   frame loop) / `blackhole` / `reject` / `delay:<ms>` / **`rate:<kbps>`**. Any mode scopes to
@@ -645,7 +645,7 @@ which the linking section explains is load-bearing rather than tidy.
   open transfer, so the four legs of LG checklist item #43 CASE1 — 512 Kbps → 1 Mbps → 7 Mbps →
   17.5 Mbps — are one scripted run instead of four launches, and #14's degrading link is
   measurable rather than anecdotal. `tools/netcond.py --selftest`
-  proves the shaper against a loopback transfer with no television in the room. Point the app at it by editing `PMS_PORT` in the gitignored `src/config.local.h` and
+  proves the shaper against a loopback transfer with no television in the room. Point the app at it by editing `SERVER_PORT` in the gitignored `src/config.local.h` and
   `make deploy` (host/port are compiled into `main.c`). **Pick a port the media server is not already
   on**: a server binds a loopback port of its own (the retired vendor's took `127.0.0.1:32401`), and
   the more specific bind wins, so the proxy is silently bypassed.
@@ -657,9 +657,9 @@ which the linking section explains is load-bearing rather than tidy.
   **`tests/run.py` owns one for the whole SERVER tier** since 2026-08-27, so a case can declare a
   `link_profile` — legs of `{"at_s": …, "mode": …}` anchored at the app's first log line — and be
   graded over a link the harness controls rather than over whatever the LAN was doing. It is
-  fail-closed and has to be: the app's primary server is `butaca_run(PMS_HOST, PMS_PORT)` plus the
+  fail-closed and has to be: the app's primary server is `butaca_run(SERVER_HOST, SERVER_PORT)` plus the
   injected `butaca-token` (`butaca-servers` is strictly ADDITIVE and cannot move the
-  primary), so the link is conditioned only if the DEPLOYED BINARY was built with `PMS_PORT`
+  primary), so the link is conditioned only if the DEPLOYED BINARY was built with `SERVER_PORT`
   pointing at the proxy — which the harness can read out of `src/config.local.h` but never
   arrange. When it cannot bind, or when the binary talks to the server directly, every case
   naming a `link_profile` SKIPS with that reason in the summary, because a shaped assertion on an
@@ -1230,7 +1230,7 @@ on the host.** This tier
 did not exist before 2026-08-14, and the line below used to read "there is no host *runtime*" flatly
 — that is now wrong for the UI half and right for everything else. `butaca-sim` is the same app
 core built with `--features hostsim` and linked against desktop SDL2 + desktop GL 4.1 core: it
-renders the real interface against a real PMS, boots to a screen with the same `butaca-*`
+renders the real interface against a real server, boots to a screen with the same `butaca-*`
 triggers, is driven by the same remote-FIFO tokens, and screenshots itself. **The
 `ui-sim` skill is the loop.** It exists because the TV is a mutex — one set, one app instance, two
 harness jobs kill each other — while N simulators run side by side, each pointed at its own
@@ -1290,7 +1290,7 @@ three-layer graphics profile; **`crash-triage`** handles a death; **`bind-tv-lib
 FFI into the TV's own libraries. **`./tests/run.py` needs a gitignored `tests/manifest.local.json`**
 — `manifest.json` holds only the installation-INDEPENDENT case definitions, and each case names the
 SHAPE of item it needs (`item: "movie_h264_ac3_1080p"`); the overlay maps that to a ratingKey on
-this server and supplies the PMS host, TV address and test user. Copy
+this server and supplies the server host, TV address and test user. Copy
 `tests/manifest.local.json.example` and fill it in; the runner refuses to start without the FILE, and
 without `pms.host` / `tv` / `test_user.id`. **An `item` key it cannot resolve is a SKIP, not a
 death** (since 2026-08-22) — absent or left as the example's `<ratingKey>`, it skips the cases and
@@ -1342,7 +1342,7 @@ raster alone, each grading `expect.video_size` EXACTLY out of the `ff:` line rat
 floor — which is what stopped the item being answerable only as "pieces are covered", and which
 closed the `4k-h264` library gap on this tier (`8-bit-hevc` was already closed by
 `pipe_hevc_aac_mp4` and the gap list had not caught up; a generated clip closes neither gap's real
-half, which is a PMS DECISION on such an item). The same day added the one clip in
+half, which is a server DECISION on such an item). The same day added the one clip in
 either pack that is MEANT to run out (`pipe_finish_eos` and `pipe_replay_after_eos`, 20 s), which
 is #46 END TO END — the second of those restarts the finished stream through
 `/tmp/butaca-replay[=N]`, a bounded counter re-arming `app.rs`'s one-shot autoplay latch, and
@@ -1353,7 +1353,7 @@ uncovered: HLG, HDR10+, DV P5/P7, Atmos, the
 server-tier by construction), and the transcode INPUT space
 (three server cases on one AV1 item stand in for 17 codecs). One of those is an app gap, not a test
 gap — `devcaps` reads the table's `maxFrameRate` only into the per-codec rows the Starfish Load
-envelope clamps against (since 2026-09-03), so the profile sent to PMS still bounds no frame rate
+envelope clamps against (since 2026-09-03), so the profile sent to server still bounds no frame rate
 at all. Three things about it
 are worth knowing before reading a result. **(1)** The declaration is the interesting half and the
 main false-PASS risk: `engine`'s `_ =>` arm maps an unrecognised audio codec to `"AC3"` and a
@@ -1401,7 +1401,7 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   every assertion reads as a total regression). `make run` keeps the old sleep-then-`cat` shape
   because the FPS scenes need a fixed sampling window; both share `BOOT_SH`.
 - **A case's start position is server state, so the harness resets it every time.** The resume
-  point (`viewOffset`) lives on the PMS, outlives the run, and the app's timeline reporter posts
+  point (`viewOffset`) lives on the server, outlives the run, and the app's timeline reporter posts
   progress every 10s while playing — so before this was fixed, a case inherited wherever the
   previous case *or the previous run* stopped (`rk=4` is shared by five cases, `rk=1804` by three),
   and `resume_ns` resumes anything past 10s. "Play from the start" was silently a resume test. Now
@@ -1513,7 +1513,7 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   saved logs it fails the 60-declared run at a median of 14 and passes the 24-declared one.
 - **`tests/run.py` always cleans the TV on exit** — pass, fail, Ctrl-C, `kill`, or crash: it closes
   the app, clears every `butaca-*` trigger in that install's runtime root **including the
-  injected PMS token**, and reaps stray ssh clients. Runtime `*.log` files
+  injected server token**, and reaps stray ssh clients. Runtime `*.log` files
   survive, including the storage diagnostics snapshot. Nothing did this before
   2026-07-28 except the normal path, so an interrupted run left the app playing (scrobbling a
   resume point the next run then inherited) and a live per-server token in world-readable `/tmp`.
@@ -1632,7 +1632,7 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   `devtriggers` build otherwise lets a token ride plaintext, so the BUTACA-10 "Connect without
   encryption?" flow — reachable only when plaintext needs a consented grant — cannot be reached in
   the sim or on the TV without it. It only tightens, and a store build has no trigger to read. The
-  end-to-end reproduction against `tests/mock_pms.py --plaintext-only-lan` is in the mock's
+  end-to-end reproduction against `tests/mock_server.py --plaintext-only-lan` is in the mock's
   `--help`. **Controlled-bootstrap update:** `butaca-rec` and
   `butaca-recplay` support Home, Settings, and typed Flow 12 content with typed pre-effect
   initialization, explicit recorded Client bindings, recorded Home/Browse and Detail/Person
@@ -1656,7 +1656,7 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   runtime root — a DIFFERENT name from the trigger file, which is why the directory is not
   `butaca-rec/` — private, gitignored and refused by the outbound guard; `tests/focusfp.sh
   --rec` records a flow and `tools/butaca-rec import` turns a recording taken against
-  `tests/mock_pms.py` into a committed fixture), **`/tmp/butaca-recplay=<dir>`** (REPLAY that
+  `tests/mock_server.py` into a committed fixture), **`/tmp/butaca-recplay=<dir>`** (REPLAY that
   recording: the loop runs on the recorded ticks through `app::clock`, re-injects each frame's
   inputs through the remote FIFO's own synthesis, grades the state hash frame by frame — every
   mismatch is its own `replay: diverge` line and the run continues — and ends with one `replay:
@@ -1832,7 +1832,7 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   the one screen in the app that cannot be reached headlessly at all: arming anything to reach it
   is what hides it. It forces the question regardless of a stored decision, so it is also how the
   screen is re-examined after answering once.
-- **The binary carries no credential that grants access to anything of YOURS** — no compiled PMS
+- **The binary carries no credential that grants access to anything of YOURS** — no compiled server
   token, no demo URL, and never the Sentry auth token, which can read and delete the project and
   lives only as a GitHub secret. A RELEASE build does carry two **write-only ingest credentials**
   (`BUTACA_SENTRY_DSN`, `BUTACA_POSTHOG_KEY`, compiled in via `option_env!`): they permit sending to a
@@ -1840,7 +1840,7 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   into the audit on purpose, and `release.yml` REFUSES to publish without them. The distinction is
   the point, and this line read "NO credentials" flatly — which stops a reader before they reach
   it. A build with no credential compiled in cannot report at all, which is the guarantee that
-  replaced the cargo feature that used to claim it. PMS access comes
+  replaced the cargo feature that used to claim it. Server access comes
   from the signed-in session (QR login) or, for automated runs only, `/tmp/butaca-token` — which
   `tests/run.py` always injects (it reads the owner token from the gitignored
   `src/config.local.h` on the HOST; that macro is never compiled in). An interactive boot with

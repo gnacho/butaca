@@ -97,11 +97,11 @@ pub(crate) enum RecoveryVerdict {
     /// The evidence does not clear the requirement yet. More probes may; that is the point of
     /// keeping the estimate rather than a success counter.
     Insufficient,
-    /// The source experiment never produced a body. A PMS 5xx, DNS/connect failure or local
+    /// The source experiment never produced a body. A server 5xx, DNS/connect failure or local
     /// transport refusal makes this attempt inconclusive; it does NOT prove that the same Part is
     /// unavailable to a later real playback open. The client keeps HLS selected without
     /// contaminating the source-capacity estimate with a fabricated zero-rate sample; continuity
-    /// of PMS's cursor is established only by the next actual HLS response.
+    /// of the server's cursor is established only by the next actual HLS response.
     ProbeFailed,
 }
 
@@ -120,14 +120,15 @@ pub(crate) struct RetainedProbeDecision {
 /// **Explicit HLS→Original gate, on evidence about the SOURCE.**
 ///
 /// HLS traffic can only establish a lower bound on service while its request is finite.  Recovery
-/// therefore lets useful HLS traffic exercise the full feasible ladder, then performs the one
-/// missing experiment: a bounded request for actual source bytes. PMS cannot account that raw Part
-/// as a fresh AdHoc resource without re-running server admission, so the request exact-reuses the
-/// live HLS identity while the media worker is between HLS acquisitions. Because PMS may rebind
-/// that shared resource, a successful result leaves on the same media boundary. An insufficient
-/// result is repeated only after HLS establishes a strictly stronger confidence-separated link
-/// bound, so it neither competes with playback traffic nor loops on an arbitrary spacing counter.
-/// **Which of `probe_due`'s conditions said no.** Not a policy input — a name for the log.
+/// therefore lets useful HLS traffic exercise the full feasible ladder, then performs the
+/// one missing experiment: a bounded request for actual source bytes. The server cannot account
+/// that raw Part as a fresh AdHoc resource without re-running server admission, so the request
+/// exact-reuses the live HLS identity while the media worker is between HLS acquisitions. Because
+/// the server may rebind that shared resource, a successful result leaves on the same media
+/// boundary. An insufficient result is repeated only after HLS establishes a strictly stronger
+/// confidence-separated link bound, so it neither competes with playback traffic nor loops on
+/// an arbitrary spacing counter. **Which of `probe_due`'s conditions said no.** Not a policy input
+/// — a name for the log.
 ///
 /// It is that function's ERROR TYPE rather than a field it publishes, and the difference is not
 /// cosmetic. It was both at once: `probe_due` returned `bool` AND wrote the reason to a
@@ -437,8 +438,8 @@ impl OriginalRecovery {
             source_delivery,
             hls_delivery,
             // Preserve the real end-to-end acquisition telemetry rather than fabricating an idle
-            // default. The ratio spans PMS wait, pacing and path transfer; mode utility does not
-            // treat it as an independent server-load or feasibility gate.
+            // default. The ratio spans the server wait, pacing and path transfer; mode utility does
+            // not treat it as an independent server-load or feasibility gate.
             production,
             buffer,
             remaining_ms,
@@ -452,12 +453,12 @@ impl OriginalRecovery {
         }
     }
 
-    /// Is this the moment to spend a source experiment?  It needs a reserve deep enough to
-    /// outlast its own deadline, a reserve that is not draining, and the HLS experiment frontier
-    /// exhausted. The latter is supplied by [`Controller`], which owns the per-actuator failure
-    /// certificates. It is not equivalent to playing the largest requested rung: PMS may answer a
-    /// larger request with the same smaller encode, making that rung structurally uncommittable
-    /// while also leaving no useful HLS request to try.
+    /// Is this the moment to spend a source experiment?  It needs a reserve deep enough to outlast
+    /// its own deadline, a reserve that is not draining, and the HLS experiment frontier exhausted.
+    /// The latter is supplied by [`Controller`], which owns the per-actuator failure certificates.
+    /// It is not equivalent to playing the largest requested rung: the server may answer a larger
+    /// request with the same smaller encode, making that rung structurally uncommittable while also
+    /// leaving no useful HLS request to try.
     #[cfg(test)]
     pub(crate) fn probe_due(
         &mut self,
@@ -506,14 +507,15 @@ impl OriginalRecovery {
         //   source setup + source body + max(current stress boundary R_s,
         //                                    exact next HLS horizon D_next).
         //
-        // The source request exact-reuses the live HLS Streaming Resource, so the client issues no
-        // HLS stop/close/restart transaction. That does not prove PMS preserves the prior HLS
-        // cursor: a successful Recover is therefore published on this same completed media
-        // boundary and performs no later HLS GET. For any result which retains HLS, `D_next` funds the
-        // next response if PMS continues the resource. The two `P`s are not a safety multiplier:
-        // setup and body have two separately enforced deadlines from one [`SourceProbePlan`]. Once
-        // that response completes, `D_next-A >= 0`, so the same balance restores `R_s`. Adding
-        // `R_s` and `D_next` would charge opposite sides of one media credit twice.
+        // The source request exact-reuses the live HLS Streaming Resource, so the client issues
+        // no HLS stop/close/restart transaction. That does not prove the server preserves the prior
+        // HLS cursor: a successful Recover is therefore published on this same completed media
+        // boundary and performs no later HLS GET. For any result which retains HLS, `D_next` funds
+        // the next response if the server continues the resource. The two `P`s are not a safety
+        // multiplier: setup and body have two separately enforced deadlines from
+        // one [`SourceProbePlan`]. Once that response completes, `D_next-A >= 0`, so the same
+        // balance restores `R_s`. Adding `R_s` and `D_next` would charge opposite sides of
+        // one media credit twice.
         let funding = source_probe_plan(self.source_kbps, self.policy.probe_budget_ms)
             .zip(current_runway_ms)
             .zip(rollback_media_ms)

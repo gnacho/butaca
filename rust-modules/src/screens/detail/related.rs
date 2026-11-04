@@ -1,7 +1,7 @@
 //! Related-shelf geometry and actions for [`super::DetailScreen`].
 
 use crate::metadata::Detail;
-use crate::pms::PmsMovie;
+use crate::catalog::CatalogMovie;
 use crate::ui::card_row::{self, CardRow, RowStyle};
 use crate::ui::machine::GroupId;
 use crate::ui::widgets::Art;
@@ -42,7 +42,7 @@ pub(crate) fn action(d: &Detail, key: u32) -> Action {
     Action::OpenDetail(m.sid, m.rk.clone())
 }
 
-pub(crate) fn item<'a>(d: &'a Detail, key: u32) -> Option<&'a PmsMovie> {
+pub(crate) fn item<'a>(d: &'a Detail, key: u32) -> Option<&'a CatalogMovie> {
     d.related.get(locate(key)?)
 }
 
@@ -95,7 +95,7 @@ pub(crate) fn draw(
 /// (`super::collection`), which is the same strip under a linked heading.
 pub(crate) fn draw_strip(
     p: Painter,
-    items: &[PmsMovie],
+    items: &[CatalogMovie],
     row: &CardRow,
     top: f32,
     focused: Option<usize>,
@@ -134,7 +134,7 @@ pub(crate) fn draw_focused(
 /// The focused card of a strip drawn by [`draw_strip`], last so its glow sits over its neighbours.
 pub(crate) fn draw_focused_in(
     p: Painter,
-    items: &[PmsMovie],
+    items: &[CatalogMovie],
     row: &CardRow,
     index: usize,
     top: f32,

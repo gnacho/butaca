@@ -4,14 +4,14 @@ use super::*;
 #[allow(unused_imports)]
 use super::test_support::*;
 
-/// A completed PMS HLS object is not necessarily delivered at a stationary rate.  The server
+/// A completed server HLS object is not necessarily delivered at a stationary rate.  The server
 /// reports `segmentWait` inside downloads while its JIT encoder catches up, then sends the
 /// already-sized remainder as a burst.  On the television the first 214 440-byte prefix of a
 /// roughly 6 MB 4K object took about 258 ms, while the adjacent complete objects landed in
 /// 1.2--1.4 s.  Extrapolating that prefix over the unseen remainder predicts more than the
 /// available 6.4 s reserve and aborts a stream whose complete acquisitions are sustainable.
 ///
-/// The prefix is right-censored evidence: without a model of PMS's future production it can
+/// The prefix is right-censored evidence: without a model of the server's future production it can
 /// prove only what has already been spent, not how long unseen bytes will take.  Keeping the
 /// playhead fixed makes this differential: the broken attained-rate forecast fires; the
 /// physical reserve has spent nothing and therefore cannot.
@@ -449,14 +449,14 @@ fn a_terminal_hold_aborts_only_an_incomplete_response() {
 // The tests above drive the guard where it was first evaluated: the top of an AVIO `read_cb`.
 // These drive the legs that used to precede or outlast that evaluation — the HTTP open waiting
 // for headers, the `NotReady` retry wait, and a body read already blocked when the boundary
-// arrives — through the real `hls_demux_segment`/`read_cb` against a scripted loopback PMS.
+// arrives — through the real `hls_demux_segment`/`read_cb` against a scripted loopback server.
 // Synchronisation is causal: the server reports each request it has read, and the acquisition
 // runtime reports (via `acquisition::observe`) every answer it gives, with its phase — so a hold
 // is published strictly AFTER a chosen `Continue`, and only a LATER check can have seen it.
 // A test that the fix does not rescue is bounded by a teardown (AU abort + socket shutdown,
 // exactly what `engine::teardown` does), so a red run fails with a message, never a hang.
 
-/// What the scripted PMS does with request number `n` (0-based, across connections).
+/// What the scripted server does with request number `n` (0-based, across connections).
 #[derive(Clone, Copy)]
 enum Reply {
     /// Read the request, send nothing, hold the connection open until the test ends.
@@ -465,13 +465,13 @@ enum Reply {
     Send(&'static [u8]),
     /// Answer with a prefix, then hold the connection open until the test ends.
     SendThenWithhold(&'static [u8]),
-    /// Hold the headers until [`ScriptedPms::release`], then answer.
+    /// Hold the headers until [`ScriptedServer::release`], then answer.
     AfterRelease(&'static [u8]),
     /// Answer with a prefix, hold the rest until released, then send it.
     PrefixThenRelease(&'static [u8], &'static [u8]),
 }
 
-struct ScriptedPms {
+struct ScriptedServer {
     port: u16,
     accepts: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     requests: std::sync::Arc<std::sync::atomic::AtomicUsize>,
@@ -482,8 +482,8 @@ struct ScriptedPms {
     acceptor: Option<std::thread::JoinHandle<()>>,
 }
 
-impl ScriptedPms {
-    fn start(script: fn(usize) -> Reply) -> ScriptedPms {
+impl ScriptedServer {
+    fn start(script: fn(usize) -> Reply) -> ScriptedServer {
         use std::io::{Read, Write};
         use std::sync::atomic::AtomicUsize;
         use std::sync::Arc;
@@ -589,7 +589,7 @@ impl ScriptedPms {
                 let _ = handler.join();
             }
         });
-        ScriptedPms {
+        ScriptedServer {
             port,
             accepts,
             requests,
@@ -613,7 +613,7 @@ impl ScriptedPms {
     }
 }
 
-impl Drop for ScriptedPms {
+impl Drop for ScriptedServer {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
         if let Some(acceptor) = self.acceptor.take() {
@@ -712,14 +712,14 @@ enum Fire {
     AfterContinue(Phase, usize),
 }
 
-/// Run the REAL `hls_demux_segment` against `pms`, firing `trigger` per `fire`. A fetch still
+/// Run the REAL `hls_demux_segment` against `catalog`, firing `trigger` per `fire`. A fetch still
 /// running [`TEARDOWN_AFTER`] later is torn down.
 fn demux_against(
-    pms: &mut ScriptedPms,
+    catalog: &mut ScriptedServer,
     acquisition: SegmentAcquisition,
     trigger: impl FnOnce() + Send + 'static,
 ) -> DemuxRun {
-    demux_against_when(pms, acquisition, Fire::OnGet, trigger)
+    demux_against_when(catalog, acquisition, Fire::OnGet, trigger)
 }
 
 /// Wait on the runtime's answers for the `n`th `Continue` in `phase`.
@@ -741,21 +741,21 @@ fn await_continue(
 }
 
 fn demux_against_when(
-    pms: &mut ScriptedPms,
+    catalog: &mut ScriptedServer,
     acquisition: SegmentAcquisition,
     fire: Fire,
     trigger: impl FnOnce() + Send + 'static,
 ) -> DemuxRun {
     let (answers_tx, answers) = std::sync::mpsc::sync_channel(256);
     acquisition::observe::watch_this_thread(answers_tx);
-    let (segment, auth) = segment_on(pms.port);
+    let (segment, auth) = segment_on(catalog.port);
     let mut hs = crate::stream::http_stream_boxed();
     let mut aq = crate::aq::aq_new(1 << 20);
     let (hs_addr, aq_addr) = (
         &mut *hs as *mut HttpStream as usize,
         &mut *aq as *mut AuQueue as usize,
     );
-    let seen = pms.seen.take().expect("one run per server");
+    let seen = catalog.seen.take().expect("one run per server");
     let (done_tx, done_rx) = std::sync::mpsc::sync_channel::<()>(1);
     let publisher = std::thread::spawn(move || {
         let saw_get = match fire {
@@ -795,7 +795,7 @@ fn demux_against_when(
     let _ = done_tx.send(());
     let (fired_at, torn_down, seen) = publisher.join().expect("publisher");
     acquisition::observe::unwatch();
-    pms.seen = Some(seen);
+    catalog.seen = Some(seen);
     crate::stream::http_close(&mut *hs);
     crate::aq::aq_destroy(&mut *aq);
     DemuxRun {
@@ -842,9 +842,9 @@ fn assert_prompt_zero_byte_stall_abort(run: &DemuxRun, leg: &str) {
 fn a_hold_accepted_while_the_open_waits_for_headers_abandons_the_fetch() {
     let _serial = crate::testlock::serial();
     let _reset = SharedHoldReset::at(PLAYHEAD_NS);
-    let mut pms = ScriptedPms::start(|_| Reply::Withhold);
+    let mut catalog = ScriptedServer::start(|_| Reply::Withhold);
     let acquisition = SegmentAcquisition::for_test(Some(6_000), false, false);
-    let run = demux_against(&mut pms, acquisition, publish_accepted_hold);
+    let run = demux_against(&mut catalog, acquisition, publish_accepted_hold);
     assert_prompt_zero_byte_stall_abort(&run, "open, accepted hold");
 }
 
@@ -854,14 +854,14 @@ fn a_hold_accepted_while_the_open_waits_for_headers_abandons_the_fetch() {
 fn a_playhead_that_spends_the_reserve_during_the_open_abandons_the_fetch() {
     let _serial = crate::testlock::serial();
     let _reset = SharedHoldReset::at(PLAYHEAD_NS);
-    let mut pms = ScriptedPms::start(|_| Reply::Withhold);
+    let mut catalog = ScriptedServer::start(|_| Reply::Withhold);
     let acquisition = SegmentAcquisition::for_test(Some(2_000), false, false);
     fn spend_the_reserve() {
         crate::player::SHARED
             .playpos_ns
             .store(PLAYHEAD_NS + 2_000_000_000, Ordering::Relaxed);
     }
-    let run = demux_against(&mut pms, acquisition, spend_the_reserve);
+    let run = demux_against(&mut catalog, acquisition, spend_the_reserve);
     assert_prompt_zero_byte_stall_abort(&run, "open, playhead spend");
     assert!(
         SHARED.hls_rebuffer_requested.load(Ordering::Acquire),
@@ -869,20 +869,20 @@ fn a_playhead_that_spends_the_reserve_during_the_open_abandons_the_fetch() {
     );
 }
 
-/// (c) The `NotReady` retry wait: PMS answers 404 (segment not produced yet), the main thread
-/// accepts its hold while the fetch waits to retry. The fetch must end promptly and must not go
-/// back to the server for the object it has just abandoned.
+/// (c) The `NotReady` retry wait: the server answers 404 (segment not produced yet), the main
+/// thread accepts its hold while the fetch waits to retry. The fetch must end promptly and must not
+/// go back to the server for the object it has just abandoned.
 #[test]
 fn a_hold_accepted_during_the_not_ready_wait_abandons_the_fetch_without_another_get() {
     let _serial = crate::testlock::serial();
     let _reset = SharedHoldReset::at(PLAYHEAD_NS);
-    let mut pms =
-        ScriptedPms::start(|_| Reply::Send(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n"));
+    let mut catalog =
+        ScriptedServer::start(|_| Reply::Send(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n"));
     let acquisition = SegmentAcquisition::for_test(Some(6_000), false, false);
     // Strictly inside the wait: after the runtime entered it AND answered its first Continue.
     let fire = Fire::AfterContinue(Phase::RetryWaiting, 1);
-    let run = demux_against_when(&mut pms, acquisition, fire, publish_accepted_hold);
-    let requests = pms.requests();
+    let run = demux_against_when(&mut catalog, acquisition, fire, publish_accepted_hold);
+    let requests = catalog.requests();
     assert_prompt_zero_byte_stall_abort(&run, "NotReady wait");
     assert_eq!(requests, 1, "no GET may follow the hold");
 }
@@ -910,7 +910,7 @@ fn blocked_body_read(
 ) -> BlockedRead {
     static REPLY: std::sync::Mutex<Option<Reply>> = std::sync::Mutex::new(None);
     *REPLY.lock().unwrap() = Some(reply);
-    let pms = ScriptedPms::start(|_| REPLY.lock().unwrap().expect("scripted reply"));
+    let catalog = ScriptedServer::start(|_| REPLY.lock().unwrap().expect("scripted reply"));
     let host = CString::new("127.0.0.1").unwrap();
     let path = CString::new("/segment.ts").unwrap();
     let mut hs = crate::stream::http_stream_boxed();
@@ -918,7 +918,7 @@ fn blocked_body_read(
         crate::stream::http_open(
             &mut *hs,
             host.as_ptr(),
-            pms.port as c_int,
+            catalog.port as c_int,
             path.as_ptr(),
             std::ptr::null(),
             "GET"
@@ -933,7 +933,7 @@ fn blocked_body_read(
     let src = Src::Socket {
         hs: &mut *hs,
         host,
-        port: pms.port as c_int,
+        port: catalog.port as c_int,
         path,
     };
     let mut state = avio_state_for(src, &mut *aq, 8, acquisition);
@@ -948,7 +948,7 @@ fn blocked_body_read(
 
     let (answers_tx, answers) = std::sync::mpsc::sync_channel(256);
     acquisition::observe::watch_this_thread(answers_tx);
-    let released = pms.released.clone();
+    let released = catalog.released.clone();
     let (done_tx, done_rx) = std::sync::mpsc::sync_channel::<()>(1);
     let publisher = std::thread::spawn(move || {
         let continued = await_continue(&answers, Phase::Body, 2);
@@ -976,8 +976,8 @@ fn blocked_body_read(
     drop(state);
     crate::stream::http_close(&mut *hs);
     crate::aq::aq_destroy(&mut *aq);
-    let accepts = pms.accepts();
-    drop(pms);
+    let accepts = catalog.accepts();
+    drop(catalog);
     BlockedRead {
         second,
         latched,
@@ -1068,7 +1068,7 @@ fn at_the_floor_a_body_reads_short_deadline_keeps_its_transport_classification()
 }
 
 /// Floor continuation for a blocked body read: the hold is requested once, the SAME read keeps
-/// waiting on the same connection, and returns the rest when PMS sends it.
+/// waiting on the same connection, and returns the rest when the server sends it.
 #[test]
 fn at_the_floor_a_blocked_body_read_asks_once_and_keeps_reading() {
     let _serial = crate::testlock::serial();
@@ -1109,14 +1109,14 @@ fn at_the_floor_a_blocked_body_read_asks_once_and_keeps_reading() {
 }
 
 /// Floor continuation for the `NotReady` wait: asks once, and the wait carries on into its retry
-/// (here PMS then refuses it, which ends the test with an ordinary failure). The retry dials
+/// (here the server then refuses it, which ends the test with an ordinary failure). The retry dials
 /// afresh — the plaintext transport does not keep a non-2xx response's socket — so the
 /// observable is the second GET, not the connection count.
 #[test]
 fn at_the_floor_the_not_ready_wait_asks_once_and_retries() {
     let _serial = crate::testlock::serial();
     let _reset = SharedHoldReset::at(PLAYHEAD_NS);
-    let mut pms = ScriptedPms::start(|n| {
+    let mut catalog = ScriptedServer::start(|n| {
         Reply::Send(if n == 0 {
             b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n"
         } else {
@@ -1125,7 +1125,7 @@ fn at_the_floor_the_not_ready_wait_asks_once_and_retries() {
     });
     let acquisition = SegmentAcquisition::for_test(Some(6_000), true, false);
     let fire = Fire::AfterContinue(Phase::RetryWaiting, 1);
-    let run = demux_against_when(&mut pms, acquisition, fire, publish_accepted_hold);
+    let run = demux_against_when(&mut catalog, acquisition, fire, publish_accepted_hold);
     assert!(!run.torn_down, "{}", describe(&run.result));
     assert!(
         matches!(run.result, Err(HlsExit::Failed("HTTP request failed"))),
@@ -1136,7 +1136,7 @@ fn at_the_floor_the_not_ready_wait_asks_once_and_retries() {
         SHARED.hls_rebuffer_requested.load(Ordering::Acquire),
         "the hold was requested"
     );
-    assert_eq!(pms.requests(), 2, "the wait carried on into its retry");
+    assert_eq!(catalog.requests(), 2, "the wait carried on into its retry");
 }
 
 /// MUST-FIX regression (i): the open's own deadline is SHORTER than the checkpoint slice, so the
@@ -1147,7 +1147,7 @@ fn at_the_floor_the_not_ready_wait_asks_once_and_retries() {
 fn a_hold_before_an_opens_short_deadline_settles_as_a_stall_abort() {
     let _serial = crate::testlock::serial();
     let _reset = SharedHoldReset::at(PLAYHEAD_NS);
-    let mut pms = ScriptedPms::start(|_| Reply::Withhold);
+    let mut catalog = ScriptedServer::start(|_| Reply::Withhold);
     let acquisition = SegmentAcquisition::for_test_with_deadline(
         Some(6_000),
         false,
@@ -1155,7 +1155,7 @@ fn a_hold_before_an_opens_short_deadline_settles_as_a_stall_abort() {
         ReserveDeadlineState::new(Some(std::time::Instant::now() + SHORT_DEADLINE), false),
     );
     let fire = Fire::AfterContinue(Phase::Opening, 1);
-    let run = demux_against_when(&mut pms, acquisition, fire, publish_accepted_hold);
+    let run = demux_against_when(&mut catalog, acquisition, fire, publish_accepted_hold);
     assert_prompt_zero_byte_stall_abort(&run, "open, deadline shorter than a slice");
 }
 
@@ -1165,7 +1165,7 @@ fn a_hold_before_an_opens_short_deadline_settles_as_a_stall_abort() {
 fn at_the_floor_an_opens_short_deadline_keeps_its_classification() {
     let _serial = crate::testlock::serial();
     let _reset = SharedHoldReset::at(PLAYHEAD_NS);
-    let mut pms = ScriptedPms::start(|_| Reply::Withhold);
+    let mut catalog = ScriptedServer::start(|_| Reply::Withhold);
     let acquisition = SegmentAcquisition::for_test_with_deadline(
         Some(6_000),
         true,
@@ -1173,7 +1173,7 @@ fn at_the_floor_an_opens_short_deadline_keeps_its_classification() {
         ReserveDeadlineState::new(Some(std::time::Instant::now() + SHORT_DEADLINE), false),
     );
     let fire = Fire::AfterContinue(Phase::Opening, 1);
-    let run = demux_against_when(&mut pms, acquisition, fire, publish_accepted_hold);
+    let run = demux_against_when(&mut catalog, acquisition, fire, publish_accepted_hold);
     assert!(!run.torn_down, "{}", describe(&run.result));
     assert!(
         matches!(run.result, Err(HlsExit::PrimeExpired)),
@@ -1184,7 +1184,7 @@ fn at_the_floor_an_opens_short_deadline_keeps_its_classification() {
         SHARED.hls_rebuffer_requested.load(Ordering::Acquire),
         "the hold was requested"
     );
-    assert_eq!(pms.requests(), 1);
+    assert_eq!(catalog.requests(), 1);
 }
 
 /// (e) A zero-byte pre-body abort through the shared reducer, from both active-cursor callers:
@@ -1280,17 +1280,17 @@ fn stops(runtime: &mut AcquisitionRuntime) -> bool {
 }
 
 /// At the ladder floor the boundary asks for the hold exactly once and the SAME open carries on:
-/// one connection, one GET, and the open completes when PMS finally sends its headers. Drives
-/// `hls_open_source` with the runtime directly — past the open, `hls_input` needs FFmpeg, which
-/// the host does not bind.
+/// one connection, one GET, and the open completes when the server finally sends its headers.
+/// Drives `hls_open_source` with the runtime directly — past the open, `hls_input` needs FFmpeg,
+/// which the host does not bind.
 #[test]
 fn at_the_floor_the_open_asks_for_the_hold_once_and_keeps_its_connection() {
     let _serial = crate::testlock::serial();
     let _reset = SharedHoldReset::at(PLAYHEAD_NS);
-    let mut pms = ScriptedPms::start(|_| {
+    let mut catalog = ScriptedServer::start(|_| {
         Reply::AfterRelease(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nABCD")
     });
-    let (segment, auth) = segment_on(pms.port);
+    let (segment, auth) = segment_on(catalog.port);
     let path = auth.request_path(&segment.resource).expect("fixture path");
     let mut hs = crate::stream::http_stream_boxed();
     let mut aq = crate::aq::aq_new(1 << 20);
@@ -1298,8 +1298,8 @@ fn at_the_floor_the_open_asks_for_the_hold_once_and_keeps_its_connection() {
         &mut *hs as *mut HttpStream as usize,
         &mut *aq as *mut AuQueue as usize,
     );
-    let seen = pms.seen.take().expect("one run per server");
-    let released = pms.released.clone();
+    let seen = catalog.seen.take().expect("one run per server");
+    let released = catalog.released.clone();
     let (done_tx, done_rx) = std::sync::mpsc::sync_channel::<()>(1);
     let publisher = std::thread::spawn(move || {
         if seen.recv_timeout(std::time::Duration::from_secs(5)).is_ok() {
@@ -1357,8 +1357,8 @@ fn at_the_floor_the_open_asks_for_the_hold_once_and_keeps_its_connection() {
         "the hold was requested"
     );
     assert!(!runtime.armed(), "asked once, then disarmed");
-    assert_eq!(pms.accepts(), 1, "the same connection carried on");
-    assert_eq!(pms.requests(), 1, "no second GET");
+    assert_eq!(catalog.accepts(), 1, "the same connection carried on");
+    assert_eq!(catalog.requests(), 1, "no second GET");
 }
 
 #[test]
@@ -1532,8 +1532,8 @@ fn the_retry_wait_keeps_its_end_across_rechecks_and_ends_on_a_stop() {
 
 // -- a body the transport already HOLDS is complete, whatever FFmpeg has read ----------------
 //
-// PMS pauses a sized response for its JIT encoder and then bursts the remainder. The burst can
-// land entirely in the transport — the socket's header buffer or kernel queue, curl's transfer
+// The server pauses a sized response for its JIT encoder and then bursts the remainder. The burst
+// can land entirely in the transport — the socket's header buffer or kernel queue, curl's transfer
 // buffer — while FFmpeg has consumed only a prefix through AVIO. A hold accepted then must not
 // abandon an object that is already fully downloaded: that is a needless downshift and a longer
 // rebuffer, paid for bytes that were already here.
@@ -1909,8 +1909,8 @@ fn a_failed_read_credits_nothing_and_its_settlement_receipt_is_credited_once() {
     static REPLY: std::sync::Mutex<Option<Reply>> = std::sync::Mutex::new(None);
     *REPLY.lock().unwrap() =
         Some(Reply::SendThenWithhold(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\nABCD"));
-    let pms = ScriptedPms::start(|_| REPLY.lock().unwrap().expect("scripted reply"));
-    let cs = crate::curlio::CurlSource::open(&format!("http://127.0.0.1:{}/segment.ts", pms.port), 0)
+    let catalog = ScriptedServer::start(|_| REPLY.lock().unwrap().expect("scripted reply"));
+    let cs = crate::curlio::CurlSource::open(&format!("http://127.0.0.1:{}/segment.ts", catalog.port), 0)
         .expect("fixture: the open must succeed");
     let mut aq = crate::aq::aq_new(1 << 20);
     let mut state = avio_state_for(
@@ -1950,7 +1950,7 @@ fn a_failed_read_credits_nothing_and_its_settlement_receipt_is_credited_once() {
     );
     drop(state);
     crate::aq::aq_destroy(&mut *aq);
-    drop(pms);
+    drop(catalog);
 }
 
 // -- seams onto production state, so each scenario above reads the same before and after --------

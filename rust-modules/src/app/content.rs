@@ -537,7 +537,7 @@ pub(crate) fn content_requests(app: &mut App, fr: &Frame) {
                 }
                 // The PAGE decided which item; the LOOP performs the request, because
                 // `route::request_play` takes the playback session's `&mut` and a screen is only
-                // ever shown the frame's publication (§2.2). A refusal (a PMS/native route
+                // ever shown the frame's publication (§2.2). A refusal (a server/native route
                 // transition still owns the reducer) leaves the page exactly where it was, which
                 // is what the page's own discarded `started` bool used to decide.
                 // Held-feature drain uses this same helper: a trailer Play pressed while a
@@ -682,7 +682,7 @@ fn home_requests(app: &mut App, now: u32) {
     }
 }
 
-fn home_item<'a>(view: crate::pms::HubsView<'a>, sid: crate::registry::ServerId, rk: &str) -> Option<&'a crate::pms::PmsMovie> {
+fn home_item<'a>(view: crate::catalog::HubsView<'a>, sid: crate::registry::ServerId, rk: &str) -> Option<&'a crate::catalog::CatalogMovie> {
     (0..view.hub_count()).find_map(|i| view.hub(i)?.items.iter()
         .find(|item| crate::registry::same_item((item.sid, &item.rk), (sid, rk))))
 }
@@ -752,7 +752,7 @@ mod search_action_tests {
         crate::registry::reset_for_test();
         let a = crate::registry::ServerId::from_raw(0);
         let b = crate::registry::ServerId::from_raw(1);
-        let media = Item::Media(crate::pms::PmsMovie { sid: a, rk: "same".into(), ..Default::default() });
+        let media = Item::Media(crate::catalog::CatalogMovie { sid: a, rk: "same".into(), ..Default::default() });
         assert!(matches!(search_target(&media, &SearchReq::Detail { sid: a, rk: "same".into() }),
             Some(AppArg::Content(ContentArg::Detail { sid, rk })) if sid == a && rk == "same"));
         assert!(search_target(&media, &SearchReq::Detail { sid: b, rk: "same".into() }).is_none());
@@ -1427,10 +1427,10 @@ mod library_publication_tests {
         drain_detail_workers(&mut rig);
         rig.metadata_mut().run(crate::stores::metadata::MetadataCmd::Clear);
         let mut detail = detail_with_episode(sid, "detail-a", "Old A", true);
-        detail.related.push(crate::pms::PmsMovie {
+        detail.related.push(crate::catalog::CatalogMovie {
             sid, rk: "detail-b".into(), title: "Related B".into(), ..Default::default()
         });
-        detail.related.push(crate::pms::PmsMovie {
+        detail.related.push(crate::catalog::CatalogMovie {
             sid, rk: "detail-c".into(), title: "Related C".into(), ..Default::default()
         });
         crate::metadata::set_current_for_test(rig.metadata_mut().state_mut(), Some(detail));
@@ -1455,10 +1455,10 @@ mod library_publication_tests {
         let pre_refresh = crate::metadata::begin_detail_for_test(rig.metadata_mut().adapter_ref(), sid, "detail-a");
         if settled_before_refresh {
             let mut settled = detail_with_episode(sid, "detail-a", "Old A", true);
-            settled.related.push(crate::pms::PmsMovie {
+            settled.related.push(crate::catalog::CatalogMovie {
                 sid, rk: "detail-b".into(), title: "Related B".into(), ..Default::default()
             });
-            settled.related.push(crate::pms::PmsMovie {
+            settled.related.push(crate::catalog::CatalogMovie {
                 sid, rk: "detail-c".into(), title: "Related C".into(), ..Default::default()
             });
             assert!(land_detail_for_test(&mut rig, 

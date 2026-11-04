@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Measure what each ABR rung actually DELIVERS, from a real PMS, with no television.
+"""Measure what each ABR rung actually DELIVERS, from a real server, with no television.
 
-This drives `pms-hls-probe.py` once per rung and pairs the resulting segment byte lists BY
+This drives `hls-probe.py` once per rung and pairs the resulting segment byte lists BY
 MEDIA INDEX, which is the whole point: the same scene, encoded at two rungs, is the only
 comparison in which a byte ratio is the actuator's effect rather than the content's.
 
@@ -9,7 +9,7 @@ comparison in which a byte ratio is the actuator's effect rather than the conten
 
 The adaptive-playback plan ranks an "adjacent-pair byte census" among the cases needing a
 45-minute television lease, because the byte sizes were assumed observable only as the app
-fetched them. They are not. PMS hands the same bytes to any HTTP client, so the SIZE half of
+fetched them. They are not. The server hands the same bytes to any HTTP client, so the SIZE half of
 the census needs no device at all -- only the TIMING half (transaction cost, queue behaviour,
 the feed) does. Running it here costs minutes instead of a lease on a contended set.
 
@@ -40,7 +40,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PROBE = ROOT / "tools" / "pms-hls-probe.py"
+PROBE = ROOT / "tools" / "hls-probe.py"
 
 # The shipped actuator ladder, read as (request kbps, raster) pairs. Kept beside the Rust rather
 # than derived from it because this tool must be able to sweep a rung the ladder does NOT have --
@@ -424,7 +424,7 @@ def load_sweep(directory: Path):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Sweep the ABR ladder against a real PMS and pair the byte lists by index."
+        description="Sweep the ABR ladder against a real server and pair the byte lists by index."
     )
     parser.add_argument("--item", default="movie_h264_ac3_1080p", help="overlay item key")
     parser.add_argument("--owner", action="store_true", help="use the owner token")
@@ -476,9 +476,9 @@ def main():
     if args.segments <= 0:
         parser.error("--segments must be positive")
 
-    out = Path(args.out) if args.out else Path(tempfile.mkdtemp(prefix="pms-rung-sweep."))
+    out = Path(args.out) if args.out else Path(tempfile.mkdtemp(prefix="rung-sweep."))
     out.mkdir(parents=True, exist_ok=True)
-    print(f"PMS rung sweep: {len(rungs)} rungs x {len(offsets)} offsets; artifacts={out}")
+    print(f"media server rung sweep: {len(rungs)} rungs x {len(offsets)} offsets; artifacts={out}")
 
     for offset in offsets:
         reports = {}

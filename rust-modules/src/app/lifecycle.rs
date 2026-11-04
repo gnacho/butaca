@@ -609,7 +609,7 @@ pub(crate) fn drive_foreground<A: ForegroundActuator>(
 
 /// Poll the exact native Load attempt after `player::pump` has drained its media-thread result.
 /// Only a confirmed `Started` result may advance the viewer clock; failure retains the already
-/// prepared route so a Play retry never repeats PMS preparation or `resume_at`.
+/// prepared route so a Play retry never repeats the server preparation or `resume_at`.
 pub(crate) fn poll_foreground_load<A: ForegroundActuator>(
     lifecycle: &mut ForegroundLifecycle<A::Attempt>,
     ps: &mut crate::route::PlaybackSession,

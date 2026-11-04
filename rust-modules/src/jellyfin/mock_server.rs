@@ -1,7 +1,7 @@
 //! A one-response-per-connection HTTP mock for the Jellyfin tests. Shared by the client
-//! suite and the pms fetch projection tests. It drains the whole request — head AND the
+//! suite and the catalog fetch projection tests. It drains the whole request — head AND the
 //! Content-Length'd body — before responding: a body left unread RSTs the socket under the
-//! client's response read on some kernels, which is the flake class the pms fetch tests hit
+//! client's response read on some kernels, which is the flake class the catalog fetch tests hit
 //! with a headers-only mock.
 
 #![cfg(test)]

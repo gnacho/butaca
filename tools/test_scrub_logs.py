@@ -16,7 +16,7 @@ a commit whose message was "scrub third-party and device identifiers from the ca
 `tools/scrub-gate.py` -- written in response to that very incident -- inherits `load_secrets` and
 cannot catch it either.
 
-The version-string case below is not padding. PMS reports `version=1.43.3.10896-cb3ebc72d`, whose
+The version-string case below is not padding. The server reports `version=1.43.3.10896-cb3ebc72d`, whose
 leading run is four dot-separated numbers, and a public-address regex written without a trailing
 guard turns every server version in every log into `<peer-ip-1>`.
 """

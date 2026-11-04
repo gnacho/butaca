@@ -102,7 +102,7 @@ pub(crate) struct ModeInputs {
     pub(crate) remaining_ms: i64,
     pub(crate) history: TransitionHistory,
     /// Feasibility, decided elsewhere and passed in as a fact: codec support, subtitle burn-in,
-    /// relay, and whether PMS offered a playable source URL at all.
+    /// relay, and whether the server offered a playable source URL at all.
     pub(crate) original_feasible: bool,
     /// The source carries Dolby Vision — a visible panel-mode change a transcode destroys.
     /// **Split from one `original_features` boolean** (N16), which was
@@ -300,7 +300,7 @@ pub(crate) fn hls_utility(
     // capacity test that empties the starvation band, and `inputs` hardcodes `unsafe_deficit_ms:
     // 0`), so near the end of a film the comparison reduces to `-transition` against
     // `-(risk + server)` with one side scaled to almost nothing and the other not. Worked at 8 s
-    // remaining (`scale` = 66 pm) with a loaded PMS holding the best rung at P480: Original
+    // remaining (`scale` = 66 pm) with a loaded server holding the best rung at P480: Original
     // totalled -9 and HLS -60, i.e. tear the encoder down and reload the pipeline with eight
     // seconds of film left. Scaled consistently the same state gives HLS -3 and the reload does
     // not happen. `benefit_scale_pm` exists to make exactly that decision.
@@ -419,7 +419,8 @@ pub(crate) fn original_utility(inputs: &ModeInputs, policy: &AbrPolicy) -> Optio
 ///   **Asking the catalog is not tidiness — restating the rule got it backwards, in the exact
 ///   shape `admits` already records as device-measured.** This function first wrote the cap as its
 ///   own per-axis filter, `rung_w <= source_w && rung_h <= source_h`. That is the inverted
-///   containment test: a rung's raster is a BOUNDING BOX that PMS fits the source inside, so the
+/// containment test: a rung's raster is a BOUNDING BOX that the server fits the source inside, so
+/// the
 ///   question is whether the box COVERS the source, not whether it fits within it. Under the
 ///   inverted form a 1920x800 scope master — which is to say most films — admitted no 1080p rung
 ///   at all and capped at 4000 kbps, scoring 40 where a 16:9 master of the same bitrate scored 76.

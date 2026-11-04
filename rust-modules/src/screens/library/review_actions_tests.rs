@@ -69,7 +69,7 @@ impl Fixture {
             sid,
             (0..36)
                 .map(|i| {
-                    Some(crate::pms::PmsMovie {
+                    Some(crate::catalog::CatalogMovie {
                         sid,
                         rk: format!("{}", i + 1),
                         title: format!("s{i:04x}"),

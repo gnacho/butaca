@@ -61,7 +61,7 @@ impl Fixture {
         let sid = crate::registry::ServerId::from_raw(0);
         let listing = crate::stores::browse::ListingSnapshot::fixture(
             sid,
-            (0..36).map(|i| Some(crate::pms::PmsMovie {
+            (0..36).map(|i| Some(crate::catalog::CatalogMovie {
                 sid,
                 rk: format!("status-{i}"),
                 title: format!("Status {i}"),
@@ -89,7 +89,7 @@ impl Fixture {
         let sid = crate::registry::ServerId::from_raw(0);
         crate::stores::browse::ListingSnapshot::fixture(
             sid,
-            (0..total.max(0) as usize).map(|i| Some(crate::pms::PmsMovie {
+            (0..total.max(0) as usize).map(|i| Some(crate::catalog::CatalogMovie {
                 sid,
                 rk: format!("status-{i}"),
                 title: format!("Status {i}"),

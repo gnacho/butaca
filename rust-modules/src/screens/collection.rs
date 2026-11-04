@@ -6,7 +6,7 @@ use std::ffi::CString;
 
 use crate::collection::{Collection, CollectionOrder, CollectionStatus, CollectionTarget, PAGE_SIZE};
 use crate::collection::CollectionRef;
-use crate::pms::PmsMovie;
+use crate::catalog::CatalogMovie;
 use crate::stores::collection::CollectionCmd;
 use crate::ui::card_row::{self, TileLabel};
 use crate::ui::consts::*;
@@ -112,7 +112,7 @@ fn meta_line(collection: &Collection) -> CString {
     }
 }
 
-pub(crate) fn member_label(item: &PmsMovie) -> String {
+pub(crate) fn member_label(item: &CatalogMovie) -> String {
     match item.kind {
         2 if item.season_index > 0 => crate::i18n::msg::browse_collection_season_mark(item.season_index as i64),
         3 => crate::ui::fmt::episode_address(item.season_index as i64, item.ep_index as i64).to_string(),
@@ -120,7 +120,7 @@ pub(crate) fn member_label(item: &PmsMovie) -> String {
     }
 }
 
-pub(crate) fn member_caption(item: &PmsMovie) -> TileLabel {
+pub(crate) fn member_caption(item: &CatalogMovie) -> TileLabel {
     if item.kind == 3 {
         let address = crate::ui::fmt::episode_address(item.season_index as i64, item.ep_index as i64);
         let caption = match (item.show_title.is_empty(), address.is_empty()) {
@@ -395,7 +395,7 @@ impl CollectionScreen {
     }
 
     pub(crate) fn focused_item<'a, H: CollectionLike>(&self,
-        focus: Option<crate::ui::machine::FocusKey<u32>>, cx: &Cx<'a, H>) -> Option<&'a PmsMovie> {
+        focus: Option<crate::ui::machine::FocusKey<u32>>, cx: &Cx<'a, H>) -> Option<&'a CatalogMovie> {
         let collection = self.collection(cx)?;
         let index = focus.filter(|key| key.entry == self.entry)
             .and_then(|key| self.item_index(collection, key.elem))?;
@@ -475,7 +475,7 @@ impl CollectionScreen {
 
     /// Card `index`'s persistent label: the one [`Self::sync`] built, or — for a landing the page
     /// has not synced yet — formatted now.
-    fn label_at<'a>(&'a self, collection: &Collection, index: usize, item: &PmsMovie) -> std::borrow::Cow<'a, str> {
+    fn label_at<'a>(&'a self, collection: &Collection, index: usize, item: &CatalogMovie) -> std::borrow::Cow<'a, str> {
         match self.labels.get(index).filter(|_| self.indexed(collection)) {
             Some(label) => std::borrow::Cow::Borrowed(label),
             None => std::borrow::Cow::Owned(member_label(item)),
@@ -483,7 +483,7 @@ impl CollectionScreen {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn draw_card(&self, p: Painter, item: &PmsMovie, persistent: &str, index: usize, focused: bool,
+    fn draw_card(&self, p: Painter, item: &CatalogMovie, persistent: &str, index: usize, focused: bool,
         press: f32, measure: &dyn crate::ui::machine::Measure) {
         let rect = self.card_rect(index, focused, press);
         let scale = rect.w / CARD_W;
@@ -764,7 +764,7 @@ mod tests {
         fn collection<'a>(cx: &Cx<'a, Self>) -> crate::collection::CollectionView<'a> { cx.views }
     }
 
-    fn item(rk: &str) -> PmsMovie { PmsMovie { rk: rk.into(), title: rk.into(), ..Default::default() } }
+    fn item(rk: &str) -> CatalogMovie { CatalogMovie { rk: rk.into(), title: rk.into(), ..Default::default() } }
     fn set() -> CollectionRef {
         CollectionRef { sid: crate::registry::ServerId::UNSET, rk: "50001".into(), sec: 1, tag: 7, name: "Set".into() }
     }
@@ -784,9 +784,9 @@ mod tests {
 
     #[test]
     fn season_and_episode_projection_uses_persistent_labels_and_show_address_caption() {
-        let season = PmsMovie { kind: 2, season_index: 3, title: "Season 3".into(), ..Default::default() };
+        let season = CatalogMovie { kind: 2, season_index: 3, title: "Season 3".into(), ..Default::default() };
         assert_eq!(member_label(&season), "SEASON 3");
-        let episode = PmsMovie { kind: 3, season_index: 3, ep_index: 4, title: "The Answer".into(),
+        let episode = CatalogMovie { kind: 3, season_index: 3, ep_index: 4, title: "The Answer".into(),
             show_title: "Example Show".into(), ..Default::default() };
         assert_eq!(member_label(&episode), "S3 · E4");
         let caption = member_caption(&episode);
@@ -968,7 +968,7 @@ mod tests {
     #[test]
     fn a_restore_past_the_first_page_waits_for_its_member() {
         let (mut store, original) = seeded();
-        let many: Vec<PmsMovie> = (0..PAGE_SIZE + 10).map(|i| item(&format!("m{i}"))).collect();
+        let many: Vec<CatalogMovie> = (0..PAGE_SIZE + 10).map(|i| item(&format!("m{i}"))).collect();
         store.edit_for_test(|c| c.items = many.clone());
         let mut original = original;
         original.sync(store.view().current().unwrap(), &FixtureMeasure);
@@ -1023,7 +1023,7 @@ mod tests {
         let mut out = Vec::new();
         for language in [Preference::En, Preference::Es, Preference::Be] {
             let _guard = language_on_this_thread_for_test(language);
-            let season = PmsMovie { kind: 2, season_index: 99, ..Default::default() };
+            let season = CatalogMovie { kind: 2, season_index: 99, ..Default::default() };
             let mark = member_label(&season);
             let w = m.width_str(&mark, theme::size::LABEL, true);
             if w > mark_budget { out.push(format!("{}: {mark:?} is {w:.0}px in {mark_budget:.0}px", language.tag())); }
@@ -1057,7 +1057,7 @@ mod tests {
         let _serial = crate::testlock::serial();
         let _pseudo = crate::i18n::pseudo_on_this_thread_for_test();
         let server = ["Set", "Qwerty", "Zzyzx", "Vlox"];
-        let season = PmsMovie { rk: "s".into(), kind: 2, season_index: 3, title: "Zzyzx".into(),
+        let season = CatalogMovie { rk: "s".into(), kind: 2, season_index: 3, title: "Zzyzx".into(),
             show_title: "Vlox".into(), ..Default::default() };
         let mut stray = Vec::new();
         for status in [CollectionStatus::Ready, CollectionStatus::Loading, CollectionStatus::Empty,

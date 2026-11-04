@@ -63,7 +63,7 @@
 //! there is no resolve left to obtain one ([`sources`]); [`Person::guid`] is the portable guid.
 //! Keep them apart; do not collapse them.
 use crate::registry::ServerId;
-use crate::pms::PmsMovie;
+use crate::catalog::CatalogMovie;
 use std::panic::catch_unwind;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -92,7 +92,7 @@ const MAX_ROLES: usize = 3;
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) struct Shelf {
     /// the tiles, capped at [`SHELF_MAX`]
-    pub(crate) items: Vec<PmsMovie>,
+    pub(crate) items: Vec<CatalogMovie>,
     /// How many items of this kind the `/media` response REALLY held. Distinct from `items.len()`,
     /// which is capped at [`SHELF_MAX`] (a `CardRow` spring-array limit): a prolific actor has 60
     /// movies in the library, and a heading that read "24" would be the cap masquerading as a fact
@@ -101,7 +101,7 @@ pub(crate) struct Shelf {
     pub(crate) total: usize,
     /// The character each tile is this person's credit for (`"Wallace (voice)"`), PARALLEL to
     /// `items` — index `i` captions tile `i`, `""` where the server named no part. A parallel vector
-    /// rather than a field on `PmsMovie`, because a character name is a fact about a *person's
+    /// rather than a field on `CatalogMovie`, because a character name is a fact about a *person's
     /// credit in* an item, not about the item: the same movie on a home shelf has no role.
     pub(crate) roles: Vec<String>,
 }
@@ -252,13 +252,13 @@ pub(crate) struct Person {
     /// drawn on: an entry naming no count is an entry that cannot promise a list.
     pub(crate) credited: bool,
     /// Exact registry identity this source vector was built from. Background roster refresh can
-    /// add/remove/re-point while a page remains open, without going through `install_pms::reset`.
+    /// add/remove/re-point while a page remains open, without going through `install_server::reset`.
     roster_gen: u32,
 }
 
 impl Person {
     /// The tiles of shelf `kind`.
-    pub(crate) fn shelf(&self, kind: usize) -> &[PmsMovie] {
+    pub(crate) fn shelf(&self, kind: usize) -> &[CatalogMovie] {
         &self.shelves[kind].items
     }
     /// The character tile `i` of shelf `kind` credits this person as — `""` until the batched read
@@ -657,14 +657,14 @@ fn sources(origin: ServerId, key: &str) -> Vec<Src> {
 /// down the merged shelf it lands (`ui::person`'s activation reads `mm.sid`, and `Art::Poster`
 /// resolves the artwork on that server too).
 ///
-/// The per-shelf budget is divided by [`crate::pms::allot`] rather than spent first-come, for the
+/// The per-shelf budget is divided by [`crate::catalog::allot`] rather than spent first-come, for the
 /// reason that function documents: a prolific actor's 24 films on the first source would otherwise
 /// fill the row and leave every share behind it nothing — which is this unit's own bug, re-created
 /// one level down. The heading's count is the sum of the REAL totals, not of what fitted.
 ///
 /// **Nothing is deduplicated, deliberately.** Two servers that both hold a film contribute two
 /// cards. The only identity that could join them is the portable `Metadata::guid`, which a
-/// `PmsMovie` does not carry — and a title+year join would merge two different films *and* miss the
+/// `CatalogMovie` does not carry — and a title+year join would merge two different films *and* miss the
 /// case measured on this very pair of servers, where the share's copy is
 /// titled in another language. A visible duplicate is honest; a wrong merge hides a film.
 /// (With that read layer gone only the origin lands rows today, but the merge stays the one
@@ -673,7 +673,7 @@ fn merge_shelves(srcs: &[Src]) -> [Shelf; NSHELF] {
     let mut out: [Shelf; NSHELF] = Default::default();
     for (kind, sh_out) in out.iter_mut().enumerate() {
         let want: Vec<usize> = srcs.iter().map(|s| s.shelves[kind].items.len()).collect();
-        let take = crate::pms::allot(SHELF_MAX, &want);
+        let take = crate::catalog::allot(SHELF_MAX, &want);
         for (i, s) in srcs.iter().enumerate() {
             let sh = &s.shelves[kind];
             sh_out.total += sh.total;
@@ -700,7 +700,7 @@ fn resettle(p: &mut Person) {
 }
 
 /// Flip `(sid, rk)`'s watched state on this person's shelves — the optimistic half of a view-state
-/// write. `pms::edit_item`'s twin, for `browse::set_watched_local`'s reason: that one reaches the
+/// write. `catalog::edit_item`'s twin, for `browse::set_watched_local`'s reason: that one reaches the
 /// HOME hubs alone, so a film marked watched from a filmography tile's context menu kept its old
 /// mark until a refetch.
 ///
@@ -721,7 +721,7 @@ fn set_watched_local(state: &mut PersonState, sid: ServerId, rk: &str, on: bool)
         .flat_map(|sh| sh.items.iter_mut())
     {
         if crate::registry::same_item((m.sid, &m.rk), (sid, rk)) {
-            crate::pms::set_watched(m, on);
+            crate::catalog::set_watched(m, on);
             hit = true;
         }
     }
@@ -895,7 +895,7 @@ fn close(state: &mut PersonState, adapter: &PersonAdapter) {
     state.current = None;
 }
 
-/// Wipe the store on a profile/account switch — the browse/pms twin of `install_pms`'s reset. A
+/// Wipe the store on a profile/account switch — the browse/pms twin of `install_server`'s reset. A
 /// new user must never inherit the previous one's page, and the flags must move with the mailbox.
 /// It is also what makes [`sources`]' read-once safe: the roster only changes on the paths that
 /// call this.
@@ -1831,7 +1831,7 @@ pub(crate) fn install_credits_for_test(&mut self, groups: &[(&str, usize)]) {
 /// page's default focus on the entry row exactly until `credited` says so — a caller that wants a
 /// PENDING person (focus still parked, nothing walkable yet) should not call this at all rather
 /// than call it and expect `credited` to stay false.
-pub(crate) fn install_for_test(&mut self, movies: Vec<PmsMovie>, shows: Vec<PmsMovie>) {
+pub(crate) fn install_for_test(&mut self, movies: Vec<CatalogMovie>, shows: Vec<CatalogMovie>) {
     let Some(p) = self.current.as_mut() else {
         return;
     };
@@ -1860,7 +1860,7 @@ pub(crate) fn install_for_test(&mut self, movies: Vec<PmsMovie>, shows: Vec<PmsM
 /// TEST ONLY: land one named source's shelves through the same per-source ownership and merge
 /// projection as [`apply_landing`]'s successful media arm. Unlike [`PersonState::install_for_test`], this does not
 /// settle unrelated credits state and therefore supports multi-source pending-return tests.
-pub(crate) fn install_source_for_test(&mut self, sid: ServerId, movies: Vec<PmsMovie>, shows: Vec<PmsMovie>) {
+pub(crate) fn install_source_for_test(&mut self, sid: ServerId, movies: Vec<CatalogMovie>, shows: Vec<CatalogMovie>) {
     let Some(p) = self.current.as_mut() else {
         return;
     };
@@ -2034,7 +2034,7 @@ mod tests {
         assert_eq!(rows.iter().map(|r| r.catalog_id.as_str()).collect::<Vec<_>>(),
             ["s00000003", "s00000002", "s00000001", "s00000000"]);
         assert!(rows.iter().all(|r| r.local.is_none()),
-            "provider identity survives even when no PMS can supply a local ratingKey");
+            "provider identity survives even when no the server can supply a local ratingKey");
         owner.reset();
         crate::registry::reset_for_test();
     }
@@ -2068,7 +2068,7 @@ mod tests {
     /// A [`Landing::Media`] payload the way a worker builds one — totals = lens, i.e. an uncapped
     /// response, and no guid index (these rows are minted, not parsed, so they carry no guids to
     /// join on).
-    fn media(movies: Vec<PmsMovie>, shows: Vec<PmsMovie>) -> Landing {
+    fn media(movies: Vec<CatalogMovie>, shows: Vec<CatalogMovie>) -> Landing {
         Landing::Media(Some(MediaLanding {
             shelves: [movies, shows].map(|items| Shelf {
                 total: items.len(),
@@ -2080,8 +2080,8 @@ mod tests {
     }
 
     /// A movie row on a named server — the pair that has to survive the merge.
-    fn movie_on(sid: ServerId, rk: &str) -> PmsMovie {
-        PmsMovie {
+    fn movie_on(sid: ServerId, rk: &str) -> CatalogMovie {
+        CatalogMovie {
             sid,
             rk: rk.to_string(),
             ..Default::default()
@@ -2089,7 +2089,7 @@ mod tests {
     }
 
     /// One source, already landed with these shelves — the input [`merge_shelves`] takes.
-    fn src_with(sid: ServerId, movies: Vec<PmsMovie>, total: usize, roles: Vec<String>) -> Src {
+    fn src_with(sid: ServerId, movies: Vec<CatalogMovie>, total: usize, roles: Vec<String>) -> Src {
         let mut s = Src {
             sid,
             local: Some("1".into()),
@@ -2292,7 +2292,7 @@ mod tests {
         owner.land(
             at(S0, K_MEDIA),
             stale,
-            media(vec![PmsMovie::default()], Vec::new()),
+            media(vec![CatalogMovie::default()], Vec::new()),
         );
         assert!(!owner.pump(), "a superseded landing must not publish");
 
@@ -2322,7 +2322,7 @@ mod tests {
         owner.land(
             at(S0, K_MEDIA),
             gen,
-            media(vec![PmsMovie::default()], Vec::new()),
+            media(vec![CatalogMovie::default()], Vec::new()),
         );
         owner.hold_off();
         assert!(owner.pump());
@@ -2382,7 +2382,7 @@ mod tests {
         owner.land(
             at(S0, K_MEDIA),
             gen,
-            media(vec![PmsMovie::default()], Vec::new()),
+            media(vec![CatalogMovie::default()], Vec::new()),
         );
         owner.hold_off();
         assert!(owner.pump());

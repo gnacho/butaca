@@ -570,12 +570,12 @@ mod tests {
         };
         let got = open_following(&mut *hs, &req, &mut crate::checkpoint::NoCheckpoint);
         super::super::http_close(&mut *hs);
-        let (pms_head, cdn_head) = (pms_h.join().unwrap(), cdn_h.join().unwrap());
+        let (server_head, cdn_head) = (pms_h.join().unwrap(), cdn_h.join().unwrap());
         match got {
             Ok(Opened::Socket(t)) => assert_eq!(t.origin.port(), cdn as i32),
             other => panic!("{other:?}"),
         }
-        assert!(pms_head.contains("X-Plex-Token: secret"), "{pms_head}");
+        assert!(server_head.contains("X-Plex-Token: secret"), "{server_head}");
         assert!(!cdn_head.contains("secret"), "{cdn_head}");
         assert!(cdn_head.contains("Range: bytes=7-"), "{cdn_head}");
     }

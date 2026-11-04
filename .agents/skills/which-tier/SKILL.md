@@ -142,7 +142,7 @@ ships, because `-Z build-std` is what ships.
 
 ### Tier 1.5 — the simulator
 
-The same app core on desktop SDL2 + desktop GL, drawing the real interface against your real PMS.
+The same app core on desktop SDL2 + desktop GL, drawing the real interface against your real server.
 It answers **layout, spacing, focus, navigation, route transitions, every screen, and the whole
 server data layer**. Several run at once (`BUTACA_RUNTIME_DIR` instance roots), which is why it — not the
 television — is where parallel UI work belongs. The `ui-sim` skill is the loop.
@@ -197,7 +197,7 @@ teardown — so wrapping it in `tools/tv-lock.sh with` is belt and braces, usefu
 is one step of a longer device session you do not want to lose the set between.
 
 **`--list` is the cheap move nobody makes**, and three things about it are not obvious. It contacts
-nothing — no television, no PMS, no account service — but it **lists the tier you did not ask for**: a bare
+nothing — no television, no server, no account service — but it **lists the tier you did not ask for**: a bare
 `--list` prints the synthetic matrix, and the library cases with their SKIP reasons appear only
 under `--list --server`. `run.py` prints two different tables on purpose, because the two matrices
 share no key (a `fixture` and a `declare` on one side, an `item`/`rk` on the other). It also still

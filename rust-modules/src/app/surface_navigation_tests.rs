@@ -450,7 +450,7 @@ fn the_card_menu_is_a_surface_over_the_page_the_hold_happened_on() {
         frame(&mut d, &mut rig, route.clone(), tick(0), vec![]);
         let host = d.nav.top_page().expect("a host page").id;
         let host_owner = d.nav.input_owner();
-        let mut row = crate::pms::PmsMovie::default();
+        let mut row = crate::catalog::CatalogMovie::default();
         row.rk = "42".into();
         row.kind = 3;
         row.show_rk = "7".into();
@@ -510,7 +510,7 @@ fn a_card_menus_commit_reports_one_request_carrying_the_row_it_captured() {
     let mut rig = Bridge::for_test(|| 0);
     frame(&mut d, &mut rig, AppArg::Home, tick(0), vec![]);
     let host = d.nav.top_page().unwrap().id;
-    let mut row = crate::pms::PmsMovie::default();
+    let mut row = crate::catalog::CatalogMovie::default();
     row.rk = "42".into();
     row.kind = 0; // a movie: [Go to Movie, —, Mark as Watched, Play from Start]
     row.unwatched = true;

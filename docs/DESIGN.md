@@ -86,7 +86,7 @@ Both halves scale by the screen's own hero fade, so the field leaves with the he
 lingering over the shelves.
 
 **Anything that changes what sits behind hero text must re-grade the anchor table.** Still artwork
-has a knowable worst case, which is what the PMS `blur` hash is for. Video does not.
+has a knowable worst case, which is what the server `blur` hash is for. Video does not.
 
 For text sitting directly on a piece of artwork, the answer is `art_scrim`: `STILL_SCRIM_H` 112 px
 (or `STILL_SCRIM_H_1` 88 for one line) of near-black at `STILL_SCRIM_A` 0.78, fading upward and

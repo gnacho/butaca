@@ -455,7 +455,7 @@ pub struct Session {
     /// Keyed like [`Session::last_library`] and for its reasons: by profile, because a sort is a
     /// person's habit rather than the television's, and by (machine id, section key), never a
     /// section INDEX. The sort is recorded by its KEY, never by its menu position: the menu is
-    /// the server's (`Meta.Type[].Sort`) and a PMS update may reorder it. `browse` applies a
+    /// the server's (`Meta.Type[].Sort`) and a server update may reorder it. `browse` applies a
     /// recorded key only once the section's own menu has offered it again, so a key a server
     /// stopped advertising falls silently back to the default rather than being sent blind.
     ///
@@ -1282,7 +1282,7 @@ impl ServerRef {
 /// the identity to key it on, the address that actually **answered**, and the credential that
 /// server accepts.
 ///
-/// Deliberately NOT `Debug`: `token` is a live per-(user, server) PMS access token, and a derived
+/// Deliberately NOT `Debug`: `token` is a live per-(user, server) server access token, and a derived
 /// `Debug` is exactly how a secret reaches a log by accident (`dev::DevServer` says the same).
 /// [`SourceRef::describe`] is the only formatter, and it prints everything but the token.
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -1563,7 +1563,7 @@ impl LibrarySorts {
     /// list is ~2 KiB per profile.
     pub const CAP: usize = 24;
     /// Longest sort key recorded. Real keys are a few words (`show.titleSort,episode.index` is
-    /// the longest PMS advertises); anything longer is not a key worth carrying across restarts.
+    /// the longest the server advertises); anything longer is not a key worth carrying across restarts.
     const MAX_SORT: usize = 96;
 
     /// This profile's remembered sort for one library, as `(sort key, descending)`.
@@ -1935,7 +1935,7 @@ impl Session {
         next
     }
 
-    /// True once we have a LAN server + a usable PMS token — i.e. we can run offline.
+    /// True once we have a LAN server + a usable server token — i.e. we can run offline.
     ///
     /// The PORT is part of "we have a server", and this is the only gate in front of it: every
     /// resume path (`app.rs`'s boot gate, `auth::cancel`) reads `server.port as i32` straight into
@@ -1945,7 +1945,7 @@ impl Session {
     /// also covers `port` simply being ABSENT from an older file (`#[serde(default)]` = 0), which
     /// could never have connected either.
     pub fn can_go_local(&self) -> bool {
-        self.server_dialable() && !self.pms_token().is_empty()
+        self.server_dialable() && !self.server_token().is_empty()
     }
 
     /// Is the primary's address one this app could actually open a socket to?
@@ -1972,7 +1972,7 @@ impl Session {
     ///
     /// **This is the PRIMARY server's token and no other's.** A share is a separate authority and
     /// answers 401 to it; its own credential is [`SourceRef::token`], keyed by machine id.
-    pub fn pms_token(&self) -> &str {
+    pub fn server_token(&self) -> &str {
         if !self.user.token.is_empty() {
             &self.user.token
         } else {

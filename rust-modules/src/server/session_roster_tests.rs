@@ -232,7 +232,7 @@ fn a_port_no_socket_could_take_is_refused_rather_than_wrapped() {
 }
 
 /// One server must behave exactly as it did before the roster existed: the primary
-/// `server`/`user` pair is what `can_go_local` and `pms_token` read, and the roster is a
+/// `server`/`user` pair is what `can_go_local` and `server_token` read, and the roster is a
 /// record beside it, never a second source of truth that could disagree.
 #[test]
 fn a_single_server_session_behaves_as_it_always_has() {
@@ -246,13 +246,13 @@ fn a_single_server_session_behaves_as_it_always_has() {
     .unwrap();
     assert!(s.can_go_local());
     assert_eq!(
-        s.pms_token(),
+        s.server_token(),
         "tok-own",
         "no managed user picked yet → the server token"
     );
     s.user.token = "tok-user".into();
     assert_eq!(
-        s.pms_token(),
+        s.server_token(),
         "tok-user",
         "a switched profile's token wins, as before"
     );

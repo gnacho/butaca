@@ -27,7 +27,7 @@
 //!   standby the old socket is a half-open zombie that would otherwise lock the real
 //!   client out). The listener only `shutdown()`s the displaced fd — capenc is the
 //!   SOLE closer of client fds, so a send in flight can never race a close and write
-//!   into a recycled fd (a live PMS socket!). An mpeg client forces the 960x540 chain.
+//!   into a recycled fd (a live server socket!). An mpeg client forces the 960x540 chain.
 //! - `capenc`: waits on the mailbox, encodes JPEG q70 for the jpeg slot, sends one
 //!   `PXFR` frame; MPEG1-encodes + TS-muxes the same frame for the mpeg slot.
 //!   Encode is the NDK's NEON libjpeg-turbo (`libturbojpeg.so.0`, deployed next to

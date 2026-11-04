@@ -5,13 +5,13 @@ with NOT ONE household byte anywhere in it.
 
 Why it exists (restructure spec §5.6): every committed replay fixture and every focus-fingerprint
 flow is recorded against THIS server, on the simulator, so the recording can be committed to a
-public repository without a scrub pass that cannot recognise a title. Every string a real PMS
+public repository without a scrub pass that cannot recognise a title. Every string a real server
 would fill with a title, a name, a summary or a tag is drawn here from one CLOSED ALPHABET —
 `s` + eight lowercase hex digits (`s3fa90c12`) — plus the protocol's own constants (`movie`,
 `h264`, `home.continue`, …). `tests/test_harness.py` verifies committed fixtures against exactly
 that alphabet, which is decidable; "does this look like a title" is not.
 
-What it is NOT: a PMS emulator. It answers the endpoints the app's data layer requests
+What it is NOT: a server emulator. It answers the endpoints the app's data layer requests
 (`library`, `hubs`, `transcoder`, `timeline`) with the FIELDS its own model types
 deserialise, and nothing else. An unknown path gets an empty container and a line on stderr
 naming it, so extending it is one function. Numbers go on the wire as numbers, the models
@@ -32,10 +32,10 @@ from ffprobe exactly like `--media`, at a fixed ratingKey block (990001+) that c
 the generated library or the `--media` verification ids. The ratingKey-to-file mapping is printed
 at startup.
 
-    python3 tests/mock_pms.py --port 32499              # serve until Ctrl-C
-    python3 tests/mock_pms.py --port 32499 --selftest   # prove the shapes without an app
-    python3 tests/mock_pms.py --port 32499 --movies 321 --rail-fixture  # multi-page A–Z rail
-    python3 tests/mock_pms.py --host 0.0.0.0 --media /path/to/mockverify  # account-free TV set
+    python3 tests/mock_server.py --port 32499              # serve until Ctrl-C
+    python3 tests/mock_server.py --port 32499 --selftest   # prove the shapes without an app
+    python3 tests/mock_server.py --port 32499 --movies 321 --rail-fixture  # multi-page A–Z rail
+    python3 tests/mock_server.py --host 0.0.0.0 --media /path/to/mockverify  # account-free TV set
 
 `--catalog tests/demo_library/catalog.json` is the one exception to the closed alphabet, and a
 deliberate one: the DEMO LIBRARY behind the documentation screenshots (`make screenshots`). It
@@ -46,7 +46,7 @@ deterministic as a seeded library; `--hero SLUG` moves one film to the front of 
 which is the home hero's first slot. An episode marked `stand_in` plays: its media is a black,
 silent file of the episode's catalog length that `derive` made (never the work itself), which is
 enough for the simulator's clock sink to run the player over it. And a `continuous=1` PlayQueue
-of an episode carries the rest of its show after it, as PMS's does, so Up Next has a successor.
+of an episode carries the rest of its show after it, as server's does, so Up Next has a successor.
 Nothing recorded against it may be committed as a fixture — the harness's alphabet check would
 refuse it, correctly.
 
@@ -86,7 +86,7 @@ The full reproduction needs a developer build to take the STORE credential polic
 `devtriggers` build otherwise lets a token ride plaintext and never needs the consent — and a QR
 sign-in against this mock (it authorizes the code by itself, on the 2nd poll):
 
-    1. python3 tests/mock_pms.py --host 0.0.0.0 --plaintext-only-lan --advertise-ip <HOST-LAN-IP>
+    1. python3 tests/mock_server.py --host 0.0.0.0 --plaintext-only-lan --advertise-ip <HOST-LAN-IP>
        (the LAN plaintext leg the app connects to directly).
     2. The account sign-in accepts only a `127.0.0.1`/`localhost` trigger — the trigger
        carries the account token, and that restriction is deliberate and must stay. So make
@@ -104,7 +104,7 @@ sign-in against this mock (it authorizes the code by itself, on the 2nd poll):
          - *Connect* opens "Connect without encryption?" seated on *Not now*; its *Connect* logs
            `plaintext: user allowed an unencrypted connection on this network` and retries
          - the retry mints the grant (`security: consented plaintext credentials for one server at …`),
-           then `security: plaintext PMS credentials sent under a consented grant` — the token
+           then `security: plaintext server credentials sent under a consented grant` — the token
            rides http://<HOST-LAN-IP>:32499 under it — Home loads from this mock
          - Settings → Unencrypted connections shows the server ON; turning it off logs
            `settings: unencrypted connections turned off for one server` and withdraws the grant
@@ -114,7 +114,7 @@ read-out; the consent flow itself needs the TV and a real LAN address.
 
     # TV (replace 192.168.0.10 with the host's actual LAN IPv4; never a real private address from
     # a gitignored file — hold the TV lock for the device commands below):
-    python3 tests/mock_pms.py --host 0.0.0.0 --plaintext-only-lan --advertise-ip 192.168.0.10
+    python3 tests/mock_server.py --host 0.0.0.0 --plaintext-only-lan --advertise-ip 192.168.0.10
     # `butaca-plextv` only ever accepts a loopback address (see step 2 above), so make
     # the account service
     # loopback ON THE DEVICE with a reverse tunnel from the host, then arm the loopback trigger:
@@ -124,7 +124,7 @@ read-out; the consent flow itself needs the TV and a real LAN address.
     # Simulator (loopback is both the account service and the LAN address it advertises;
     # still exercises
     # HTTPS-fails / plaintext-answers shape, just not the loopback-ineligibility warning):
-    python3 tests/mock_pms.py --plaintext-only-lan --advertise-ip 127.0.0.1
+    python3 tests/mock_server.py --plaintext-only-lan --advertise-ip 127.0.0.1
     # butaca-plextv=http://127.0.0.1:32499
 
 Issue #266 (Boost Dialog / Normalize Loudness) fixtures and flags, every one default-off except
@@ -137,7 +137,7 @@ otherwise carries `canNormalizeLoudness="1"` (PMS string-encodes booleans on the
 analysis on the source.
 
 `/video/:/transcode/universal/decision` answers a live `boostDialog=1` or `normalizeLoudness=1`
-like measured PMS 1.43.4 with the paid tier (M1/M2 in the design plan): the Part's decision becomes
+like measured server 1.43.4 with the paid tier (M1/M2 in the design plan): the Part's decision becomes
 "transcode", the video stream stays "copy", and the audio stream becomes "transcode" with
 `codec=ac3` at the SAME channel count as the source — whether the request shape was a remux
 (`directPlay=0&directStream=1`) or an MDE probe (`directPlay=1&directStreamAudio=1`); a param of
@@ -232,8 +232,8 @@ def swords(rng, n):
     return " ".join(sname(rng) for _ in range(n))
 
 
-# The shortest query PMS answers: a one-character query came back with every hub empty (measured
-# against PMS 1.43.3; the app's `search::MIN_QUERY` never sends one).
+# The shortest query the server answers: a one-character query came back with every hub empty (measured
+# against server 1.43.3; the app's `search::MIN_QUERY` never sends one).
 SEARCH_MIN_QUERY = 2
 
 
@@ -361,7 +361,7 @@ class Library:
             detail = getattr(e, "output", b"").decode("utf-8", "replace").strip()
             raise ValueError(f"ffprobe failed for {path}: {detail or e}") from e
 
-    # The container a real PMS would name, and the wire Content-Type for it. Only the two
+    # The container a real the server would name, and the wire Content-Type for it. Only the two
     # containers this fixture set ever deals in — extend here, never with a per-caller default.
     _CONTAINER_CONTENT_TYPE = {"mkv": "video/x-matroska", "mp4": "video/mp4"}
 
@@ -805,7 +805,7 @@ class Library:
 
     def first_characters(self, key, q=None):
         """Counts in the unfiltered ascending titleSort order, exactly the rail's query —
-        of the section's collections for `type=18`, as PMS answers `firstCharacter?type=18`."""
+        of the section's collections for `type=18`, as the server answers `firstCharacter?type=18`."""
         counts = {}
         rows = (sorted(self.collection_metadata(key), key=lambda c: c["titleSort"].lower())
                 if (q or {}).get("type") == "18" else self.section_items(key, {}))
@@ -1154,7 +1154,7 @@ class CatalogLibrary(Library):
 
     def continuous_queue(self, it):
         """The rows of a `continuous=1` PlayQueue started on `it`: an episode and every episode of
-        its show after it, in (season, episode) order, as PMS answers; anything else, itself."""
+        its show after it, in (season, episode) order, as the server answers; anything else, itself."""
         if it["type"] != "episode":
             return [it]
         show = [x for x in self.items.values()
@@ -1207,7 +1207,7 @@ class CatalogLibrary(Library):
 
     @staticmethod
     def _blur_of(path):
-        """The four UltraBlur corner colours PMS would compute, taken from the backdrop itself: a
+        """The four UltraBlur corner colours the server would compute, taken from the backdrop itself: a
         2×2 area-average of the image, darkened the way PMS's own colours are."""
         raw = subprocess.check_output(["ffmpeg", "-v", "error", "-i", str(path), "-vf",
                                        "scale=2:2:flags=area", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
@@ -1223,7 +1223,7 @@ class CatalogLibrary(Library):
 
     def image(self, url, width, height):
         """`(content type, bytes)` for an artwork URL (`/library/metadata/<rk>/<thumb|art|clearLogo>
-        [/<n>]`), scaled like PMS's photo transcoder with minSize=1 (cover the box, keep the aspect)
+        [/<n>]`), scaled like server's photo transcoder with minSize=1 (cover the box, keep the aspect)
         — a clearLogo as a transparent PNG, the rest as JPEG; None when the item has no such image
         — a 404, as for a real item without art."""
         segs = [s for s in urllib.parse.urlsplit(url).path.split("/") if s]
@@ -1433,7 +1433,7 @@ def plaintext_only_lan_resources(lib, ip, http_port, fail_port, access_token):
 
 # ---------------------------------------------------------------- the server ----------------
 
-class MockPms:
+class MockServer:
     def __init__(self, lib):
         self.lib = lib
         self.lock = threading.Lock()
@@ -1478,7 +1478,7 @@ class MockPms:
         safe = self.safe_path(path)
         with self.lock:
             self.writes.append((method, safe, body))
-        print(f"mock_pms: WRITE {method} {safe}", file=sys.stderr, flush=True)
+        print(f"mock_server: WRITE {method} {safe}", file=sys.stderr, flush=True)
 
     # --- containers ------------------------------------------------------------------------
 
@@ -1493,7 +1493,7 @@ class MockPms:
 
     def sort_meta(self, kind=None):
         if kind == "18":
-            # PMS's collection listing declares ONE sort (probed on 1.43): titleSort.
+            # server's collection listing declares ONE sort (probed on 1.43): titleSort.
             return {"Type": [{"key": "/library/sections/1/all?type=18", "type": "collection",
                               "title": "Collections", "active": True,
                               "Sort": [{"key": "titleSort", "defaultDirection": "asc",
@@ -1853,9 +1853,9 @@ class MockPms:
                 return (200, "application/x-subrip", sidecar.read_bytes())
         if p.startswith("/video/:/transcode/universal/start"):
             # an HLS/transcode START: this server encodes nothing, so the honest answer is the one
-            # a PMS gives for a session it cannot serve — the app's route planner then lands on
+            # a server gives for a session it cannot serve — the app's route planner then lands on
             # its failure read-out, which is the player screen a simulator can reach
-            return (404, "text/plain", b"mock_pms: no transcoder")
+            return (404, "text/plain", b"mock_server: no transcoder")
         if p == "/video/:/transcode/universal/decision":
             wanted = q.get("path", "").rsplit("/", 1)[-1]
             rk = int(wanted) if wanted.isdigit() else -1
@@ -1863,7 +1863,7 @@ class MockPms:
             part_id = (item.get("Media", [{}])[0].get("Part", [{}])[0].get("id")
                        if item else None)
             # #266: a LIVE boostDialog=1 or normalizeLoudness=1 — a `0` or absent param is
-            # byte-identical to the branches below, untouched. Measured against PMS 1.43.4 with
+            # byte-identical to the branches below, untouched. Measured against server 1.43.4 with
             # paid tier (design plan M1/M2): whether the request shape was the remux one
             # (directPlay=0&directStream=1) or the MDE probe (directPlay=1&directStreamAudio=1),
             # the Part becomes a transcode — video stays "copy", audio becomes "transcode" at
@@ -1897,7 +1897,7 @@ class MockPms:
                                         mdeDecisionCode=1000, transcodeDecisionCode=1000,
                                         Metadata=[row]))
             # Any item backed by a REAL probed file (--media or --extra-media) answers direct
-            # play, the same way a PMS does for a file its own caps accept — not just the two
+            # play, the same way a server does for a file its own caps accept — not just the two
             # fixed verification ids. `media_files` is the one place that distinguishes "this rk
             # has real bytes behind it" from a purely synthetic generated item.
             if part_id is not None and part_id in getattr(lib, "media_files", {}):
@@ -1912,7 +1912,7 @@ class MockPms:
             return j(self.container(generalDecisionCode=1000, generalDecisionText="Direct play OK",
                                     mdeDecisionCode=1000, Metadata=[]))
         self.unknown.append(p)
-        print(f"mock_pms: UNKNOWN {method} {path}", file=sys.stderr, flush=True)
+        print(f"mock_server: UNKNOWN {method} {path}", file=sys.stderr, flush=True)
         return j(self.container())
 
 
@@ -2005,7 +2005,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _do(self, method):
         if self.server.verbose:
-            print(f"mock_pms: REQUEST {method} {self.server.pms.safe_path(self.path)}",
+            print(f"mock_server: REQUEST {method} {self.server.pms.safe_path(self.path)}",
                   file=sys.stderr, flush=True)
         if method in ("GET", "HEAD") and (self._media(method) or self._transcode_fixture(method)):
             return
@@ -2084,7 +2084,7 @@ def serve(port, seed=1, host="127.0.0.1", verbose=False, movies=48, rail_fixture
     else:
         lib = Library(seed=seed, movies=movies, rail_fixture=rail_fixture, media=media,
                       extra_media=extra_media, loudness_analysis=loudness_analysis)
-    pms = MockPms(lib)
+    pms = MockServer(lib)
     pms.plex_pass = plex_pass
     pms.refuse_enhancements = refuse_enhancements
     pms.ignore_enhancements = ignore_enhancements
@@ -2113,7 +2113,7 @@ def serve(port, seed=1, host="127.0.0.1", verbose=False, movies=48, rail_fixture
             ip = detect_lan_ip()
             if ip is None:
                 ip = "127.0.0.1"
-                print("mock_pms: WARNING --plaintext-only-lan found no routable LAN IPv4 to "
+                print("mock_server: WARNING --plaintext-only-lan found no routable LAN IPv4 to "
                       "advertise; falling back to 127.0.0.1, which the app classifies as "
                       "loopback, NOT LAN-eligible — BUTACA-10's consent path will never "
                       "trigger against this fallback. Pass --advertise-ip with a real LAN "
@@ -2291,7 +2291,7 @@ def selftest():
     tmp.cleanup()
 
     _selftest_plaintext_only_lan()
-    print("mock_pms selftest: ok")
+    print("mock_server selftest: ok")
 
 
 def _teardown(srv):
@@ -2407,10 +2407,10 @@ def main():
                          "relay, whose only HTTPS route (a dashed-address connection) fails before "
                          "the app's own logic runs, and whose plaintext http://<advertise-ip>:"
                          "<port> connection is this same server, answering /identity tokenless. "
-                         "TV: `python3 tests/mock_pms.py --host 0.0.0.0 --plaintext-only-lan "
+                         "TV: `python3 tests/mock_server.py --host 0.0.0.0 --plaintext-only-lan "
                          "--advertise-ip 192.168.0.10`, then point the device's account "
                          "service trigger "
-                         "at http://192.168.0.10:<port>. Simulator: `python3 tests/mock_pms.py "
+                         "at http://192.168.0.10:<port>. Simulator: `python3 tests/mock_server.py "
                          "--plaintext-only-lan --advertise-ip 127.0.0.1`. Expect the app to offer "
                          "\"Connect without encryption?\", never a dead end. The full reproduction "
                          "(store policy trigger, QR sign-in, expected log lines) follows below.")
@@ -2473,7 +2473,7 @@ def main():
     except ValueError as e:
         ap.error(str(e))
     what = f"catalog={a.catalog}" if a.catalog else f"seed={a.seed}"
-    print(f"mock_pms: serving {what} on http://{a.host}:{srv.server_address[1]}", flush=True)
+    print(f"mock_server: serving {what} on http://{a.host}:{srv.server_address[1]}", flush=True)
     if a.media is not None:
         trigger = {"name": pms.lib.friendly, "machine_id": pms.lib.machine,
                    "host": "<TV-REACHABLE-HOST>", "port": srv.server_address[1],
@@ -2482,12 +2482,12 @@ def main():
         print(json.dumps(trigger, separators=(",", ":")), flush=True)
     if a.plaintext_only_lan:
         cfg = pms.plaintext_only_lan
-        print(f"mock_pms: plaintext-only-lan resources: machine={pms.lib.machine} "
+        print(f"mock_server: plaintext-only-lan resources: machine={pms.lib.machine} "
               f"https(fails, {cfg['fail_mode']})=https://<dashed-ip>.{PLEX_DIRECT_HASH}"
               f".plex.direct:{cfg['fail_port']} http(answers)=http://{cfg['ip']}:{cfg['http_port']}",
               flush=True)
     for rk, path in sorted(getattr(pms.lib, "extra_media_files", {}).items()):
-        print(f"mock_pms: extra-media rk={rk} file={path}", flush=True)
+        print(f"mock_server: extra-media rk={rk} file={path}", flush=True)
     try:
         while True:
             time.sleep(3600)
@@ -2498,7 +2498,7 @@ def main():
         if srv.insecure_fail_listener is not None:
             srv.insecure_fail_listener.close()
         if pms.unknown:
-            print("mock_pms: unknown paths seen: " + ", ".join(sorted(set(pms.unknown))), file=sys.stderr)
+            print("mock_server: unknown paths seen: " + ", ".join(sorted(set(pms.unknown))), file=sys.stderr)
 
 
 if __name__ == "__main__":

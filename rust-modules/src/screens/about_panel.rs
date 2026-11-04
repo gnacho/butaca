@@ -52,11 +52,12 @@
 //!
 //! # Two things about it that are decisions rather than defaults
 //!
-//! **The height is CONTENT-DRIVEN.** The mock hints 1120×360; that is a canvas placeholder and the
-//! content div under it carries no height at all. A real PMS synopsis runs well past three lines,
-//! and the whole reason this panel exists is that the card CUT one — so a panel that cut it again
-//! at a different width would be pointless. The panel grows, and [`syn_lines`] is the last resort:
-//! it spends whatever is left inside the screen's glass keep-out and never less than one line.
+//! **The height is CONTENT-DRIVEN.** The mock hints 1120×360; that is a canvas placeholder and
+//! the content div under it carries no height at all. A real server synopsis runs well past three
+//! lines, and the whole reason this panel exists is that the card CUT one — so a panel that cut it
+//! again at a different width would be pointless. The panel grows, and [`syn_lines`] is the last
+//! resort: it spends whatever is left inside the screen's glass keep-out and never less than
+//! one line.
 //!
 //! **Its ground is the latched underlay field, not glass** (`widgets::panel_ground`): the page
 //! under it sampled once into the 15×8 field the modal dim already latched, windowed to the

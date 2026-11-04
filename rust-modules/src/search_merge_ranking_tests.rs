@@ -57,7 +57,7 @@ fn one_person_on_two_servers_is_one_row_after_the_merge() {
 fn a_non_favourite_library_is_ranked_later_and_never_removed() {
     let sid = ServerId::from_raw(0);
     let mk = |title: &str, sec: i64| {
-        Item::Media(PmsMovie {
+        Item::Media(CatalogMovie {
             sid,
             sec,
             title: title.into(),
@@ -91,7 +91,7 @@ fn a_non_favourite_library_is_ranked_later_and_never_removed() {
 #[test]
 fn ranking_is_stable_so_each_servers_own_order_survives_the_pass() {
     let mk = |sid: u16, title: &str, sec: i64| {
-        Item::Media(PmsMovie {
+        Item::Media(CatalogMovie {
             sid: ServerId::from_raw(sid),
             sec,
             title: title.into(),
@@ -223,7 +223,7 @@ fn a_duplicate_past_the_shelf_cap_still_augments_a_displayed_tags_count() {
 /// An unclassified row ranks as a FAVOURITE, in both directions — the server said nothing
 /// about its library, or the section table has not enumerated it yet. Demoting what cannot be
 /// classified would push a user's own results down the shelf on the frame the app boots, which
-/// is the same trap `pms::item_pinned` documents at the same join.
+/// is the same trap `catalog::item_pinned` documents at the same join.
 #[test]
 fn an_unclassified_row_ranks_as_a_favourite_rather_than_being_demoted() {
     let sid = ServerId::from_raw(0);

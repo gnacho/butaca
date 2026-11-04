@@ -13,7 +13,7 @@
 //! pair the press carried. What remains is the discipline the queue existed for:
 //!
 //! * **The press is optimistic.** [`request`] flips what the shelves and the loaded detail item say
-//!   about the item BEFORE anything leaves the machine ([`crate::pms::edit_item`],
+//!   about the item BEFORE anything leaves the machine ([`crate::catalog::edit_item`],
 //!   [`crate::metadata::set_watched_local`]), so the tick, the veil and the resume bar all change on
 //!   the frame of the press however far away the server is. The refresh that follows the write is
 //!   the reconcile: it is the server's own answer, and it silently corrects an optimistic edit that
@@ -96,7 +96,7 @@ impl Write {
 }
 
 /// One queued write. Identity only — the backend's client is resolved in [`kick`], on the main
-/// thread, at the moment the worker is spawned. `pms::kick`'s rule ("capture at the spawn site")
+/// thread, at the moment the worker is spawned. `catalog::kick`'s rule ("capture at the spawn site")
 /// says the worker must never ask which server is current; resolving the client there is that
 /// rule applied to the one live backend.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -271,7 +271,7 @@ fn edit_local_with_owners(
             hubs(crate::stores::hubs::HubsCmd::EditItem {
                 sid,
                 rk: rk.to_string(),
-                edit: crate::pms::LocalEdit::Watched(on),
+                edit: crate::catalog::LocalEdit::Watched(on),
             }).changed;
             metadata(crate::stores::metadata::MetadataCmd::SetWatchedLocal {
                 sid,
@@ -312,7 +312,7 @@ fn edit_local_with_owners(
             hubs(crate::stores::hubs::HubsCmd::EditItem {
                 sid,
                 rk: rk.to_string(),
-                edit: crate::pms::LocalEdit::LeftTheDeck,
+                edit: crate::catalog::LocalEdit::LeftTheDeck,
             }).changed;
             // …and the LIBRARY's own deck, which is a different shelf on a different screen and is
             // where this row is now reachable from at all (the Library's section Continue Watching
@@ -337,7 +337,7 @@ impl ViewStateState {
     }
 
 /// Spend one frame of the refused-spawn ladder; true when the next attempt is due. Split out so the
-/// ladder is gradeable without a registry or a socket — `pms::retry_due`'s twin.
+/// ladder is gradeable without a registry or a socket — `catalog::retry_due`'s twin.
     fn retry_tick(&mut self) -> bool {
         let cd = self.retry_cd;
         if cd > 0 {
@@ -564,7 +564,7 @@ impl ViewStateState {
 }
 
 impl ViewStateState {
-/// Drop everything — the identity-change twin of `pms::reset`/`browse::reset`, called from the same
+/// Drop everything — the identity-change twin of `catalog::reset`/`browse::reset`, called from the same
 /// place. The request counter deliberately survives: identities remain monotone across reset, while
 /// the owning store rotates the adapter so an old worker has no route into the replacement owner.
 fn reset(&mut self) {
@@ -648,7 +648,7 @@ mod tests {
         ));
 
         assert!(matches!(hubs.as_slice(), [crate::stores::hubs::HubsCmd::EditItem {
-            sid: seen, rk, edit: crate::pms::LocalEdit::Watched(true)
+            sid: seen, rk, edit: crate::catalog::LocalEdit::Watched(true)
         }] if *seen == sid && rk == "7"));
         assert!(matches!(browse.as_slice(), [crate::stores::browse::BrowseCmd::SetWatchedLocal {
             sid: seen, rk, on: true

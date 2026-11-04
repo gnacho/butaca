@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Probe the configured PMS's real HLS universal-transcoder contract.
+"""Probe the configured server's real HLS universal-transcoder contract.
 
 This is intentionally a developer tool, not part of playback.  It reads the same
 gitignored overlay/token as tests/run.py, registers one short-lived transcode session,
@@ -43,7 +43,7 @@ SESSION_RE = re.compile(r"^[A-Za-z0-9._-]{1,160}$")
 
 @dataclass(frozen=True)
 class SessionPlan:
-    """The independently observable PMS session-id wires for one probe leg.
+    """The independently observable server session-id wires for one probe leg.
 
     `query_x` preserves the legacy baseline this probe first measured: both
     `session` and `X-Plex-Session-Identifier` travelled as query parameters.
@@ -164,9 +164,9 @@ def _session_plan(mode: str, legacy=None, canonical=None, header=None, factory=_
 
 
 def _token() -> str:
-    match = re.search(r'#define\s+PMS_TOKEN\s+"([^"]+)"', CONFIG.read_text())
+    match = re.search(r'#define\s+SERVER_TOKEN\s+"([^"]+)"', CONFIG.read_text())
     if not match:
-        raise SystemExit(f"no PMS_TOKEN in {CONFIG}")
+        raise SystemExit(f"no SERVER_TOKEN in {CONFIG}")
     return match.group(1)
 
 
@@ -190,7 +190,7 @@ def _managed_token(owner_token: str, host: str, port: int, user_id, client_id: s
     try:
         machine_id = json.loads(body)["MediaContainer"]["machineIdentifier"]
     except (KeyError, TypeError, json.JSONDecodeError):
-        raise SystemExit("configured PMS root did not expose a machineIdentifier") from None
+        raise SystemExit("configured server root did not expose a machineIdentifier") from None
     request = urllib.request.Request(
         f"https://plex.tv/api/servers/{machine_id}/shared_servers",
         headers={"X-Plex-Token": owner_token, "X-Plex-Client-Identifier": client_id},
@@ -269,7 +269,7 @@ def _redact(
         for spelling in _secret_spellings(media_path):
             text = text.replace(spelling, "/library/metadata/<item>")
         text = re.sub(rf"(?i)(ratingKey(?:=|%3D)){re.escape(item)}(?=\b|&)", r"\1<item>", text)
-    # Fail closed even when a future PMS puts a token into a URI which did not
+    # Fail closed even when a future server puts a token into a URI which did not
     # originate in this process (and therefore is not one of `tokens`).
     text = re.sub(
         r"(?i)(X-Plex-Token)(?:=|%3D|:\s*)[^&\s\"'<>]+",
@@ -288,7 +288,7 @@ def _redact(
         text,
     )
     # Artifacts never need an authority. Removing every absolute HTTP(S)
-    # authority also covers harmless PMS spelling differences (host case,
+    # authority also covers harmless server spelling differences (host case,
     # explicit default port) which exact replacement cannot anticipate.
     text = re.sub(r"(?i)https?://[^/\s?#]+", "<origin>", text)
     return text
@@ -359,7 +359,7 @@ class _SameOriginRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         target = urllib.parse.urljoin(req.full_url, newurl)
         if not _same_origin(self.origin, target):
-            raise RuntimeError("PMS redirected the probe across origins")
+            raise RuntimeError("the server redirected the probe across origins")
         return super().redirect_request(req, fp, code, msg, headers, target)
 
 
@@ -398,7 +398,7 @@ def _request(
         headers=_request_headers(token, accept, session_header, client_id),
     )
     started = time.monotonic()
-    # The configured PMS is often cleartext on a LAN. Never allow ambient
+    # The configured server is often cleartext on a LAN. Never allow ambient
     # HTTP_PROXY settings to receive its credential-bearing request.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _SameOriginRedirect(url))
     with opener.open(req, timeout=30) as response:
@@ -409,7 +409,7 @@ def _request(
             raise RuntimeError(f"response exceeded the {limit}-byte probe bound")
         final_url = response.geturl()
         if not _same_origin(url, final_url):
-            raise RuntimeError("PMS redirected the probe across origins")
+            raise RuntimeError("the server redirected the probe across origins")
         return response.status, body, {
             "ttfb_ms": round((first - started) * 1000, 1),
             "body_ms": round((finished - first) * 1000, 1),
@@ -545,7 +545,7 @@ def _bandwidth_changes(body: bytes):
     try:
         mc = json.loads(body).get("MediaContainer", {})
         raw = mc.get("Bandwidths") or []
-        # PMS currently emits this as a bare JSON list while the published schema models an
+        # server currently emits this as a bare JSON list while the published schema models an
         # XML-shaped {Bandwidth: [...]} wrapper. Accept both; the report normalizes them below.
         changes = raw.get("Bandwidth", []) if isinstance(raw, dict) else raw
     except (AttributeError, UnicodeDecodeError, json.JSONDecodeError):
@@ -584,7 +584,7 @@ def _timeline(origin: str, token: str, rk: str, sessions: SessionPlan, time_ms: 
         "time": str(time_ms),
         "duration": str(duration_ms),
         "bandwidth": str(bandwidth),
-        # The published prose says seconds, but official-client logs and PMS's own timeline
+        # The published prose says seconds, but official-client logs and server's own timeline
         # examples carry milliseconds (e.g. 2589 for ~2.6 s). Ten here would report a 10 ms
         # starvation and correctly prevent every upshift, so send ten seconds in wire units.
         "bufferedTime": "10000",
@@ -610,7 +610,7 @@ def _sample_indices(child_count: int, explicit, limit: int, offset_seconds: int,
 
     Two things here are load-bearing rather than convenient.
 
-    **The default origin is the OFFSET, not zero.** A PMS HLS session starts producing at
+    **The default origin is the OFFSET, not zero.** A server HLS session starts producing at
     `offset`, but the media playlist it hands back is the whole film indexed from time zero.
     Sampling from index 0 after a non-zero offset therefore asks the encoder to seek BACKWARDS
     on its first request, which measures a seek rather than the steady production this probe is
@@ -804,7 +804,7 @@ def _cleanup_sessions(
             attempt.update({"status": status, "timing": timing})
             settled = 200 <= status < 300
         except urllib.error.HTTPError as error:
-            # A mismatch leg deliberately arms IDs which PMS may not adopt. 404
+            # A mismatch leg deliberately arms IDs which server may not adopt. 404
             # proves that candidate is absent and is therefore a settled cleanup.
             attempt["status"] = error.code
             settled = error.code == 404
@@ -836,7 +836,7 @@ def probe(args):
     aliases = {session: f"sid-{index + 1}" for index, session in enumerate(sessions.candidates())}
     ledger = CleanupLedger()
     # Arm every possible owner before the decision which may create one. The
-    # mismatch experiment cannot know in advance which wire PMS will adopt.
+    # mismatch experiment cannot know in advance which wire server will adopt.
     for session in sessions.candidates():
         ledger.arm(session)
     out = _prepare_output(args.out)
@@ -1001,7 +1001,7 @@ def probe(args):
             client_id,
         )
 
-    print(f"PMS HLS probe: {'auto' if args.auto else 'fixed'}; artifacts={out}")
+    print(f"media server HLS probe: {'auto' if args.auto else 'fixed'}; artifacts={out}")
     print(
         "  decision={} playlist={} variants={} segment={} class={} cleanup={}".format(
             report.get("decision", {}).get("status", "-"),
@@ -1128,9 +1128,9 @@ def main():
     try:
         probe(args)
     except urllib.error.HTTPError as error:
-        raise SystemExit(f"PMS HLS probe failed with HTTP {error.code}") from None
+        raise SystemExit(f"server HLS probe failed with HTTP {error.code}") from None
     except urllib.error.URLError as error:
-        raise SystemExit(f"PMS HLS probe could not reach the configured server ({error.reason})") from None
+        raise SystemExit(f"media server HLS probe could not reach the configured server ({error.reason})") from None
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ use super::*;
 /// link instead of rounding it down to the next power of two — a 17.5 Mbit/s link that had to
 /// choose between 8 and 20 Mbps spent 12 Mbit/s of it on nothing.
 ///
-/// `Uhd` is the one entry whose REQUEST is not its output. See [`HlsActuatorCatalog`]: PMS holds
+/// `Uhd` is the one entry whose REQUEST is not its output. See [`HlsActuatorCatalog`]: the server holds
 /// 1920x1080 up to a 21,750 kbps ask and switches to 3840x2160 at 22,000, so the request is the
 /// actuator and the raster is the measured consequence. It is also the one rung
 /// [`HlsActuatorCatalog::feasible`] can remove: no device decodes every raster.
@@ -211,9 +211,9 @@ impl Rung {
     }
 }
 
-/// What PMS actually attached to one fixed-HLS request.  This is deliberately not a [`Rung`]:
+/// What server actually attached to one fixed-HLS request.  This is deliberately not a [`Rung`]:
 /// the rung is the actuator sent on the decision request, while the master declaration and the
-/// decoded raster are the server's response.  PMS's mapping is item- and session-dependent and
+/// decoded raster are the server's response.  Server's mapping is item- and session-dependent and
 /// therefore has no honest inverse back to the request ladder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ObservedHlsVariant {
@@ -265,7 +265,7 @@ impl ObservedHlsVariant {
     }
 }
 
-/// One PMS operating point. `request_kbps` is what goes on the wire as the ceiling; the other two
+/// One server operating point. `request_kbps` is what goes on the wire as the ceiling; the other two
 /// are what the server was measured to DO with it, and they are separate fields precisely because
 /// the request is not a promise in either direction. Read `expected_wire_kbps` with the
 /// correction on [`HlsActuatorCatalog`] beside it: for 11 of 13 rungs it simply repeats
@@ -275,7 +275,7 @@ pub(crate) struct HlsCandidate {
     pub(crate) rung: Rung,
     pub(crate) request_kbps: u32,
     pub(crate) expected_wire_kbps: u32,
-    /// Relative PMS transcoding work, per mille of the 1080p/20 Mbps point. **Two values are
+    /// Relative server transcoding work, per mille of the 1080p/20 Mbps point. **Two values are
     /// measured and the rest are an ordering assumption**, which matters when reading a refusal:
     /// the 1080p high point produced segments at a 0.21 production ratio and the 4K point at 0.44,
     /// i.e. **the wire cost rose 4% while the server's work roughly doubled** — so 1000 and 2100
@@ -292,7 +292,7 @@ pub(crate) struct HlsCandidate {
     /// source: the same rung costs 2.8x-4x differently depending on what it is transcoding FROM.
     /// `Uhd` measures 429 pm against a 4K source and 106 against a 1918x802 one; `P240` measures
     /// 57 against the 4K source and 161 against the smaller one — in the opposite direction. The
-    /// reason is structural: PMS never upscales, so the raster it actually produces is
+    /// reason is structural: server never upscales, so the raster it actually produces is
     /// `min(rung box, source)`, and against a small source the top eight rungs all clamp to the
     /// same output and cost the same. Measured spread on that source is **1.53x** against the
     /// 23.3x this table asserts.
@@ -315,7 +315,7 @@ pub(crate) struct HlsCandidate {
     /// observes the candidate's end-to-end acquisition, so an inaccurate class cannot commit an
     /// encoder that produces slower than real time.
     ///
-    /// **The alternative, if this ever needs to be exact:** index by the raster PMS actually
+    /// **The alternative, if this ever needs to be exact:** index by the raster server actually
     /// produces, `min(rung box, source)`, which the census shows the cost tracks far better than
     /// the rung does. It needs a per-source measurement this project can take (the census does it
     /// in one command) and a `source_raster` already threaded into the catalog by `limited_to`.
@@ -323,7 +323,7 @@ pub(crate) struct HlsCandidate {
     pub(crate) production_load_pm: u32,
 }
 
-/// The compact actuator catalog: the fixed request values, and beside each one what this PMS was
+/// The compact actuator catalog: the fixed request values, and beside each one what this the server was
 /// measured to produce for it.
 ///
 /// **The 4K entry is the reason this type exists rather than a bare `Rung::kbps()` call.** Measured
@@ -335,14 +335,14 @@ pub(crate) struct HlsCandidate {
 /// a budget it does not have on a raster it did not ask for.
 ///
 /// None of it is a claim about media servers in general - it is this server, this profile, this
-/// media shape, taken by `tools/pms-hls-probe.py` (see `docs/pms-hls-protocol-probe.md`). Another
-/// PMS may hold a different boundary, which is survivable exactly because the transaction in
+/// media shape, taken by `tools/hls-probe.py` (see `docs/hls-protocol-probe.md`). Another
+/// The server may hold a different boundary, which is survivable exactly because the transaction in
 /// [`Controller::candidate_ready`] grades the actual segment rather than trusting this table.
 ///
 /// **`expected_wire_kbps` is WRONG for 12 of these 13 entries, and the reason is that it is a
 /// PER-ITEM quantity stored as a per-server constant.** Swept across the whole ladder on three
-/// library items (`docs/measurements/p2h-pms-ladder.md`, `tools/pms-rung-sweep.py`), the rate
-/// PMS actually declares runs 5.2%–31.6% BELOW the request on every rung but the 4K one, and it
+/// library items (`docs/measurements/p2h-pms-ladder.md`, `tools/rung-sweep.py`), the rate
+/// Server actually declares runs 5.2%–31.6% BELOW the request on every rung but the 4K one, and it
 /// moves with the item: rung 720 declares 547 kbps on one film and 425 on two other titles.
 /// Two entries are worse than merely stale. **The 20,011 above was taken with a 3840x2160
 /// ceiling, and `Rung::P1080High::raster()` is (1920, 1080)** — under the request the app really
@@ -391,7 +391,7 @@ impl HlsActuatorCatalog {
                 // `docs/measurements/m3-production-census.md`.
                 //
                 // `P1080M6` is the entry worth understanding rather than just correcting, because
-                // it is the whole indexing defect in one row: against a 4K source PMS produces
+                // it is the whole indexing defect in one row: against a 4K source the server produces
                 // **1280x720** for it — the same raster it produces for `P720` — at the same
                 // measured 112 pm, while this table asserted 900 against `P720`'s 450. Two rungs,
                 // identical output, identical cost, a 2x ratio between them. That is the bounding
@@ -428,11 +428,11 @@ impl HlsActuatorCatalog {
 
     /// Restrict the catalog to rasters this playback can actually use. Both bounds matter and they
     /// are different questions: `device` is what the SoC decodes (`devcaps`, the television's own
-    /// table), and `source` is the picture that exists — asking PMS to UPSCALE a 1080p master to
+    /// table), and `source` is the picture that exists — asking server to UPSCALE a 1080p master to
     /// 4K buys nothing and costs the measured 2.1x of server work, so a candidate wider than the
     /// source is infeasible rather than merely unattractive.
     /// **A zero on either axis means NOBODY SAID, and is treated as unbounded** — not as a
-    /// forbidden zero-pixel picture. PMS omits source dimensions often enough that the other
+    /// forbidden zero-pixel picture. Server omits source dimensions often enough that the other
     /// reading would empty the catalog and park Auto on whatever the floor happens to be, which is
     /// the opposite of what a missing field justifies. (This is the mirror image of
     /// `crate::playback::Ceiling::admits`, where an unmeasured source fails CLOSED — deliberately: there, `0`
@@ -457,14 +457,14 @@ impl HlsActuatorCatalog {
         width <= self.raster_limit.0 && height <= self.raster_limit.1
     }
 
-    /// Is this box big enough that PMS would not scale the source down at all?
+    /// Is this box big enough that the server would not scale the source down at all?
     fn covers_source(&self, candidate: HlsCandidate) -> bool {
         let (width, height) = candidate.rung.raster();
         self.source.0 > 0 && self.source.1 > 0 && width >= self.source.0 && height >= self.source.1
     }
 
     /// **A rung's raster is a BOUNDING BOX, not a target**, and reading it as a target is a bug
-    /// this shipped for one afternoon: PMS fits the source inside the box and never upscales, so
+    /// this shipped for one afternoon: server fits the source inside the box and never upscales, so
     /// the per-axis test that seemed obvious — box must not exceed the source on either axis —
     /// threw away every 1080p rung for a 1918x802 scope film, which is to say for most films.
     /// Measured on the television against a real library item: Auto capped at 4 Mbps / 720p on a
@@ -561,7 +561,7 @@ impl HlsActuatorCatalog {
             // candidate that would leave the buffer short of its own target has to leave room to
             // close that shortfall inside `H`, so the rate it may claim shrinks in proportion.
             //
-            // The rates handed to it are PLANNING rates. `expected_wire_kbps` is calibrated PMS
+            // The rates handed to it are PLANNING rates. `expected_wire_kbps` is calibrated server
             // output, while the audio lane is still an assumption because no per-lane ES
             // measurement exists for an actuator that has not run.
             && {

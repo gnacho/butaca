@@ -694,14 +694,14 @@ impl JfClient {
     /// `BoxSet` (a collection opens a listing, not a detail page, so it rides the media page and
     /// the shelfing — `jellyfin::search` — projects it to a tag hit). The terms are
     /// percent-encoded HERE, at the wire boundary: they are user-typed text, and the one encoder
-    /// the crate has (`pms::urlenc_str`, `QueryBuilder`'s choke point) is what encodes them.
+    /// the crate has (`catalog::urlenc_str`, `QueryBuilder`'s choke point) is what encodes them.
     pub(crate) fn search_media(&self, terms: &str, limit: i64) -> Option<ItemsResult> {
         let user_id = self.user_id()?;
         self.get_json(&format!(
             "/Users/{user_id}/Items?searchTerm={}&Recursive=true\
              &IncludeItemTypes=Movie,Series,Episode,BoxSet\
              &Fields={}&Limit={limit}&EnableImageTypes=Primary,Backdrop",
-            crate::pms::urlenc_str(terms),
+            crate::catalog::urlenc_str(terms),
             Self::LISTING_FIELDS
         ))
     }
@@ -713,7 +713,7 @@ impl JfClient {
         let user_id = self.user_id()?;
         self.get_json(&format!(
             "/Persons?searchTerm={}&UserId={user_id}&Limit={limit}&EnableImageTypes=Primary",
-            crate::pms::urlenc_str(terms)
+            crate::catalog::urlenc_str(terms)
         ))
     }
 
