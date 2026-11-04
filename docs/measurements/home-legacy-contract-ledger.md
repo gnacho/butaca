@@ -68,18 +68,18 @@ already defined by its proper owner, and the legacy copy was the duplicate:
 | `Backdrop`, `HERO_WASH_W`, `HERO_CTRL_D`, `HERO_PREFETCH`, `prefetch_order`, `meta_source_flow` | `screens/home/mod.rs` (its own definitions, since phase 8) |
 | `HERO_BASE_SCRIM_Y0`, `HERO_CTRL_GAP` (`CTRL_GAP`), `redraw_profile_chip` | `ui/widgets.rs` |
 | `base_scrim_a` and the hero scrim curve | `ui/landing_hero.rs` |
-| `MAX_HUBS` / `MAX_ITEMS` | `pms::MAX_SHELVES` / `pms::MAX_SHELF_ITEMS`; `screens/home` reads them from there, as `ui/home.rs` did |
+| `MAX_HUBS` / `MAX_ITEMS` | `catalog::MAX_SHELVES` / `catalog::MAX_SHELF_ITEMS`; `screens/home` reads them from there, as `ui/home.rs` did |
 | the heading flow (`flow`) | `ui/card_row.rs::heading_flow` |
 
 ## The API the deletion orphaned
 
-`ui/home.rs` was the last production caller of `pms`'s static-catalog read API. Production reads the
-retained publication (`pms::hubs_snapshot()` → `HubsView`) and nothing else now, so these were
-removed with it: `pms::{pool, hero_pool_len, hero_pool_item, hero_pool_source, hub_title,
-hub_source, hub_len, hub_identity, hub_identity_in, hub_is_continue, pump}`,
+`ui/home.rs` was the last production caller of `catalog`'s static-catalog read API. Production
+reads the retained publication (`catalog::hubs_snapshot()` → `HubsView`) and nothing else now,
+so these were removed with it: `catalog::{pool, hero_pool_len, hero_pool_item, hero_pool_source,
+hub_title, hub_source, hub_len, hub_identity, hub_identity_in, hub_is_continue, pump}`,
 `stores::hubs::pump` and `ui::widgets::is_search_pill`.
 
-Nothing they asserted was lost. The readers survive verbatim as helpers inside `pms`'s own test
+Nothing they asserted was lost. The readers survive verbatim as helpers inside `catalog`'s own test
 module, so every landing, back-off, merge and attribution contract in that file is unchanged;
 `hub_len` stays at module scope behind `#[cfg(test)]` because `app/bridge.rs`'s and
 `app/recorder.rs`'s tests assert a landing with it; and `hub_identity_in`'s two identity contracts
@@ -94,7 +94,7 @@ server-independent by design; gating the `home.continue` arm on `start == 0` is 
 one (`Identifier { sid: ServerId(1) }` where `ContinueWatching` is owed). A simulated red, not a
 historical one — the defect never shipped. `stores::hubs::pump` was documented as the "legacy callers' combined
 pass"; the live path is the adapter's `take_results`/`land` plus the store's own `tick`, and
-`pms`'s tests keep the combined pass as a local driver. `is_search_pill` had no caller left and its
+`catalog`'s tests keep the combined pass as a local driver. `is_search_pill` had no caller left and its
 doc named the legacy top-band walk test as its only reason to exist.
 
 ## Gate deltas

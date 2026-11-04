@@ -94,7 +94,7 @@ can follow.
 | layer | may name |
 |---|---|
 | `ui/` — the LIBRARY | `crate::{gfx,text,paths,task,i18n}` — **never an application type** |
-| `screens/` - the screens | `ui/`, `stores/`, `pms/` types, `player/` - never a sibling screen |
+| `screens/` - the screens | `ui/`, `stores/`, `catalog/` types, `player/` - never a sibling screen |
 | `stores/` | data crates and `ui::machine` only — never `screens/` |
 | `app/` | everything |
 

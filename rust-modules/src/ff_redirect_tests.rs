@@ -272,7 +272,7 @@ fn a_cross_origin_hop_does_not_forward_the_token() {
     );
     assert!(
         !heads[0].contains("tok"),
-        "the PMS token must not reach another origin: {}",
+        "the server token must not reach another origin: {}",
         heads[0]
     );
 }

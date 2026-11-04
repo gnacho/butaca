@@ -2268,7 +2268,7 @@ mod tests {
         assert!(!forced.caption.to_str().unwrap().contains("convert"));
         assert!(forced.panel.contains("automatic fallback is disabled"));
         let server = with_forced_playback_context(
-            error_shape(false, true, Some("PMS cannot convert this item"), RuntimeFailure::Unknown), false);
+            error_shape(false, true, Some("The server cannot convert this item"), RuntimeFailure::Unknown), false);
         assert_eq!(server.kind, FailureKind::DecisionRefused);
         assert!(server.readout.contains("server"));
     }
@@ -2807,12 +2807,12 @@ mod tests {
             e.panel
         );
         assert!(
-            !e.panel.contains("Plex Pass"),
+            !e.panel.contains("paid tier"),
             "no subscription story survives in the panel: {}",
             e.panel
         );
         assert!(
-            !e.readout.contains("Plex Pass"),
+            !e.readout.contains("paid tier"),
             "no subscription story survives in the read-out: {}",
             e.readout
         );
@@ -2988,7 +2988,7 @@ mod tests {
             "the server's sentence is reproduced unedited"
         );
         assert!(
-            !e.readout.contains("Plex Pass") && !e.panel.contains("Plex Pass"),
+            !e.readout.contains("paid tier") && !e.panel.contains("paid tier"),
             "no subscription story on this arm, ever — the server named the cause",
         );
         assert!(
@@ -3003,7 +3003,7 @@ mod tests {
             Some("Implementation for video encoder 'hevc' not found."),
             RuntimeFailure::PlaybackInterrupted,
         );
-        assert!(!e.readout.contains("Plex Pass") && !e.panel.contains("Plex Pass"));
+        assert!(!e.readout.contains("paid tier") && !e.panel.contains("paid tier"));
         // a server that refused without saying why: the reason still lands, the quote line does not
         let e = error_shape(
             false,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline tests for hls-probe.py. No server, plex.tv, or device I/O."""
+"""Offline tests for hls-probe.py. No server, account service, or device I/O."""
 
 import importlib.util
 import json
@@ -120,37 +120,37 @@ class Redaction(unittest.TestCase):
     def test_fail_closed_scan_rejects_unknown_token_field(self):
         with self.assertRaises(RuntimeError):
             probe._assert_artifact_safe(
-                "child.ts?X-Plex-Token=surprise", "http://pms:32400", (), ("known",)
+                "child.ts?X-Plex-Token=surprise", "http://media:32400", (), ("known",)
             )
         with self.assertRaises(RuntimeError):
             probe._assert_artifact_safe(
-                "child.ts?transcodeSessionId=surprise", "http://pms:32400", (), ("known",)
+                "child.ts?transcodeSessionId=surprise", "http://media:32400", (), ("known",)
             )
 
 
 class UriSafety(unittest.TestCase):
     def test_same_origin_normalizes_default_ports(self):
-        self.assertTrue(probe._same_origin("http://pms/a", "http://PMS:80/b"))
-        self.assertTrue(probe._same_origin("https://pms/a", "https://pms:443/b"))
-        self.assertFalse(probe._same_origin("http://pms/a", "https://pms/a"))
+        self.assertTrue(probe._same_origin("http://media/a", "http://MEDIA:80/b"))
+        self.assertTrue(probe._same_origin("https://media/a", "https://media:443/b"))
+        self.assertFalse(probe._same_origin("http://media/a", "https://media/a"))
         self.assertEqual(probe._origin("2001:db8::1", 32400), "http://[2001:db8::1]:32400")
 
     def test_child_rejects_cross_origin_credentials_and_control_chars(self):
-        base = "http://pms:32400/video/start.m3u8"
-        self.assertEqual(probe._safe_child(base, "segment/0.ts"), "http://pms:32400/video/segment/0.ts")
-        for uri in ("//other:32400/x", "http://user@pms:32400/x", "segment.ts\nX:bad"):
+        base = "http://media:32400/video/start.m3u8"
+        self.assertEqual(probe._safe_child(base, "segment/0.ts"), "http://media:32400/video/segment/0.ts")
+        for uri in ("//other:32400/x", "http://user@media:32400/x", "segment.ts\nX:bad"):
             with self.subTest(uri=uri), self.assertRaises(RuntimeError):
                 probe._safe_child(base, uri)
 
     def test_redirect_is_rejected_before_headers_can_cross_origin(self):
         request = urllib.request.Request(
-            "http://pms:32400/start", headers={"X-Plex-Token": "secret"}
+            "http://media:32400/start", headers={"X-Plex-Token": "secret"}
         )
-        handler = probe._SameOriginRedirect("http://pms:32400/start")
+        handler = probe._SameOriginRedirect("http://media:32400/start")
         with self.assertRaises(RuntimeError):
             handler.redirect_request(request, None, 302, "Found", {}, "https://elsewhere/start")
         redirected = handler.redirect_request(request, None, 302, "Found", {}, "/same-origin")
-        self.assertEqual(redirected.full_url, "http://pms:32400/same-origin")
+        self.assertEqual(redirected.full_url, "http://media:32400/same-origin")
         self.assertEqual(redirected.get_header("X-plex-token"), "secret")
 
 
@@ -269,7 +269,7 @@ class Cleanup(unittest.TestCase):
             return 200, b"", {"bytes": 0}
 
         aliases = {"left": "sid-1", "centre": "sid-2", "right": "sid-3"}
-        result = probe._cleanup_sessions("http://pms:32400", "token", ledger, aliases, fake_request)
+        result = probe._cleanup_sessions("http://media:32400", "token", ledger, aliases, fake_request)
         self.assertEqual(seen, ["left", "centre", "right"])
         self.assertTrue(result["complete"])
         self.assertEqual(ledger.pending(), ())
@@ -283,7 +283,7 @@ class Cleanup(unittest.TestCase):
             raise OSError("private detail must not enter the report")
 
         result = probe._cleanup_sessions(
-            "http://pms:32400", "token", ledger, {"still-live": "sid-1"}, refused
+            "http://media:32400", "token", ledger, {"still-live": "sid-1"}, refused
         )
         self.assertFalse(result["complete"])
         self.assertEqual(ledger.pending(), ("still-live",))
@@ -323,7 +323,7 @@ class Cleanup(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             args.out = Path(directory) / "artifacts"
             with mock.patch.object(
-                probe, "_overlay", return_value=("pms.invalid", 32400, "item-private", None)
+                probe, "_overlay", return_value=("media.invalid", 32400, "item-private", None)
             ):
                 with mock.patch.object(probe, "_token", return_value="token-private"):
                     with mock.patch.object(probe, "_request", side_effect=fake_request):

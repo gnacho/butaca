@@ -85,10 +85,8 @@ fn main() {
 /// and `ci/check-package.py` fails the build if they ever disagree: LG accepts nothing else in a
 /// package, so the published number has to stay exactly `X.Y.Z`. But a release commit leaves the
 /// tree AT the version it just published, so every developer build after it reported that number
-/// as its own — to `X-Plex-Version` (the header keeps that name on the wire, and this client still
-/// sends it) on the account's authorized-devices list, to Sentry as the release `butaca@X.Y.Z`,
-/// to PostHog as `app_version`, and on the diagnostics panel that is meant to be photographed
-/// into a bug report. A crash from somebody's working tree landed on the
+/// as its own — to Sentry as the release `butaca@X.Y.Z`, to PostHog as `app_version`, and on the
+/// diagnostics panel that is meant to be photographed into a bug report. A crash from somebody's working tree landed on the
 /// shipped release's tally and nothing downstream could separate the two.
 ///
 /// So a build that is not a release names the version it is working TOWARDS and says what it is:
@@ -128,8 +126,8 @@ fn main() {
 /// maintenance line" number the `-dev` suffix would, dated instead of merely suffixed:
 /// `0.7.0-nightly-20260919` rather than `0.7.0-dev`. The date comes from `BUTACA_NIGHTLY_DATE`
 /// (`YYYYMMDD`, validated by [`is_nightly_date`]) because a bare channel name cannot tell two
-/// nightly cuts of the same commit-less trunk apart — X-Plex-Version, the Sentry release and the
-/// diagnostics panel all need that to distinguish "today's nightly" from "yesterday's" the way
+/// nightly cuts of the same commit-less trunk apart — the Sentry release and the diagnostics panel
+/// both need that to distinguish "today's nightly" from "yesterday's" the way
 /// `BUTACA_BUILD_SHA` cannot (trunk moves several times a day; the reported version is what a bug
 /// report actually names).
 ///

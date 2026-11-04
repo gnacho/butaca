@@ -4,8 +4,8 @@
 //! module supplies the core state transitions and immutable publication types; every stateful
 //! operation requires an explicit `BrowseState` or `BrowseStore` receiver.
 //!
-//! Sibling of `pms.rs`'s hub catalog, which stays hub-only (256-cap, rebuilt wholesale by
-//! `pms`'s worker-driven hub catalog); this store pages arbitrarily large sections without blocking the
+//! Sibling of `catalog.rs`'s hub catalog, which stays hub-only (256-cap, rebuilt wholesale by
+//! `catalog`'s worker-driven hub catalog); this store pages arbitrarily large sections without blocking the
 //! main loop. Data model: one [`SecItems`] per section — a PAGE-CHUNKED table sized to the
 //! listing's `totalSize`, a page (`PAGE` items) allocated only when it lands (restructure phase
 //! 4's O(result) rule) — filled page-by-page by ONE background fetch at a
@@ -310,7 +310,7 @@ pub(crate) struct GenreEntry {
 /// What the last page fetch for a section produced — Loading / Ready / **Failed**, per SECTION
 /// because that is the grain this store's state already has.
 ///
-/// The irony is worth recording once: `pms.rs`'s hub fetch runs this same three-state machine and
+/// The irony is worth recording once: `catalog.rs`'s hub fetch runs this same three-state machine and
 /// its own doc says it was "Modelled on `browse.rs`'s page store, deliberately, because it already
 /// learned both lessons this needed" — the copy took the two lessons (a failed fetch must never
 /// overwrite a populated store; a fast-failing network is held off by a countdown) and then added

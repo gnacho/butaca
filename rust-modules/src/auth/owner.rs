@@ -1327,9 +1327,9 @@ mod tests {
         let mut second = first.clone();
         second.persisted.user.account_token = Some("synthetic-account-token-b".into());
 
-        assert_ne!(none.hash(), first.hash(), "None and Some plex.tv credentials are distinct canonical state");
-        assert_ne!(first.hash(), second.hash(), "users differing only by plex.tv credential are distinct canonical state");
+        assert_ne!(none.hash(), first.hash(), "None and Some account-service credentials are distinct canonical state");
+        assert_ne!(first.hash(), second.hash(), "users differing only by an account-service credential are distinct canonical state");
         assert_ne!(SessionMachine::from_init(none).subhash(), SessionMachine::from_init(first).subhash(),
-            "cached owner hash must include the optional plex.tv credential");
+            "cached owner hash must include the optional account-service credential");
     }
 }

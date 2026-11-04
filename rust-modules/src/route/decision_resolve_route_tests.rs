@@ -576,7 +576,7 @@ fn rejected_user_action_preserves_old_applied_auto_handoff_without_rebinding_it_
     assert_eq!(
         applied_quality(),
         Quality::Auto,
-        "PMS refusal changed the policy which owns the unchanged physical stream",
+        "the server refusal changed the policy which owns the unchanged physical stream",
     );
     let automatic = claim_route_action().expect("the stopped Auto producer retained its handoff");
     assert_eq!(

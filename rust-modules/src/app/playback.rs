@@ -148,7 +148,7 @@ pub(crate) fn retry_failed_playback(
     // Error Engine and only then discovering it cannot be rebuilt would replace an actionable
     // read-out with an idle black frame.
     if !crate::route::can_retry_current_play(ps) {
-        log("playback retry: current source has no reusable Plex request");
+        log("playback retry: current source has no reusable request descriptor");
         return false;
     }
     // A terminal error can race a seek whose requested target has not landed.  Resume what the
@@ -1607,7 +1607,7 @@ mod player_return_tests {
         let _session = crate::server::session::TempSession::new("player-return-guid-only");
         let mut p = Pages::new();
         let arg = AppArg::Content(ContentArg::Person { sid: A, key: String::new(),
-            guid: "plex://person/synthetic-person".into(), name: String::new(), thumb: String::new() });
+            guid: "catalog://person/synthetic-person".into(), name: String::new(), thumb: String::new() });
         p.stand_on(AppArg::Home).stand_on(arg.clone());
         let before = p.top_entry();
         p.play(Origin::Here);

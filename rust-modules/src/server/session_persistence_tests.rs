@@ -1079,7 +1079,7 @@ fn a_reader_outside_the_lock_never_sees_half_a_session() {
                     next.home_users.push(HomeUserRef {
                         uuid: format!("uuid-{i}"),
                         title: format!("A profile with a long enough name to be worth {i} bytes"),
-                        thumb: format!("https://plex.direct/photo/:/transcode?url=library%2Fmetadata%2F{i}"),
+                        thumb: format!("https://example.com/photo/:/transcode?url=library%2Fmetadata%2F{i}"),
                         ..Default::default()
                     });
                     Some(next)

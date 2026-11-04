@@ -341,7 +341,7 @@ pub(crate) struct HlsCandidate {
 ///
 /// **`expected_wire_kbps` is WRONG for 12 of these 13 entries, and the reason is that it is a
 /// PER-ITEM quantity stored as a per-server constant.** Swept across the whole ladder on three
-/// library items (`docs/measurements/p2h-pms-ladder.md`, `tools/rung-sweep.py`), the rate
+/// library items (`docs/measurements/p2h-server-ladder.md`, `tools/rung-sweep.py`), the rate
 /// Server actually declares runs 5.2%–31.6% BELOW the request on every rung but the 4K one, and it
 /// moves with the item: rung 720 declares 547 kbps on one film and 425 on two other titles.
 /// Two entries are worse than merely stale. **The 20,011 above was taken with a 3840x2160

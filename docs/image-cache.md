@@ -76,8 +76,10 @@ must be installed for a subsequent close-first `make FLAVOR=debug run` launch un
 1. Build and deploy the current debug binary. Confirm its deployed hash, then close the app. Set
    aside its image-cache directory for a cold run, preserving any pre-existing cache to restore
    afterwards. Do not touch the stable installation or sign out to clear the cache.
-2. In the debug runtime root, arm `butaca-pms-origin` with `http://<HOST_LAN_IP>:8027`,
-   `butaca-token` with a synthetic value such as `image-cache-fixture`, and empty
+2. In the debug runtime root, point the app at the fixture server at
+   `http://<HOST_LAN_IP>:8027` (the origin-override trigger that used to do this went with the old
+   server harness, #190), arm `butaca-token` with a synthetic value such as `image-cache-fixture`,
+   and empty
    `butaca-library`, `butaca-libosc`, `butaca-framedrop` and `butaca-imagecache-stats`
    files. Remove the GPU/CPU profiler and recorder triggers for quotable frame rates.
 3. Launch the app and verify the `route=library` heartbeat and 1,200-item grid. The existing

@@ -145,7 +145,7 @@ def say(msg):
 
 
 def _redact(s: str) -> str:
-    """A PMS request line carries the access token in the query string. Never print it."""
+    """A server request line carries the access token in the query string. Never print it."""
     return re.sub(r"([?&](?:X-Plex-Token|token)=)[^&\s]*", r"\1<redacted>", s)
 
 
@@ -461,7 +461,7 @@ def start_proxy(listen, target, mode, bind="0.0.0.0", allow_clients=None):
 
 
 def start_origin(nbytes, bind="127.0.0.1"):
-    """A stand-in PMS: answers every connection with `nbytes` of body, then closes. (listener, port)
+    """A stand-in server: answers every connection with `nbytes` of body, then closes. (listener, port)
 
     Deliberately not HTTP. Nothing in this proxy parses a response — it forwards bytes — so the
     only property a shaping test needs from the far end is "produces data as fast as it is asked

@@ -1,5 +1,5 @@
 //! Blocking HTTP/1.1 over a raw TCP socket (was src/stream.c). Callers
-//! (posters/pms/player) allocate an `HttpStream` and pass `&hs`; this operates on it
+//! (posters/catalog/player) allocate an `HttpStream` and pass `&hs`; this operates on it
 //! in place. Header/chunk parsing is bounds-checked (no OOB).
 //!
 //! The host is a **name or an address literal of either family**, resolved through `getaddrinfo`

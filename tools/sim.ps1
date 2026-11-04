@@ -181,9 +181,9 @@ if [ "${BUTACA_STAGE_TOKEN:-}" = 1 ]; then
 elif [ -s "$runtime/butaca-token" ]; then
     echo "Using the token already staged in the simulator runtime directory."
 fi
-pms="${BUTACA_SERVER_HOST:-}"
-if [ -z "$pms" ] && [ -f "$repo/src/config.local.h" ]; then
-    pms=$(sed -n 's/^#define[[:space:]]*SERVER_HOST[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/src/config.local.h" | head -n 1 || true)
+srv="${BUTACA_SERVER_HOST:-}"
+if [ -z "$srv" ] && [ -f "$repo/src/config.local.h" ]; then
+    srv=$(sed -n 's/^#define[[:space:]]*SERVER_HOST[[:space:]]*"\([^"]*\)".*/\1/p' "$repo/src/config.local.h" | head -n 1 || true)
 fi
 port="${BUTACA_PORT:-}"
 if [ -z "$port" ] && [ -f "$repo/src/config.local.h" ]; then
@@ -249,7 +249,7 @@ echo "Built $target/release/butaca-sim"
         Invoke-WslShell -Environment $commonEnvironment -Script ($instanceLocks + "`n" + $prepare + "`n" + @'
 build_simulator
 printf '%s\n' "$$" > "$runtime/butaca-sim.pid"
-exec "$target/release/butaca-sim" "$pms" "$port"
+exec "$target/release/butaca-sim" "$srv" "$port"
 '@)
     }
     "shot" {
@@ -265,7 +265,7 @@ mkdir -p "$(dirname "$BUTACA_OUTPUT")"
 base="$runtime/windows-shot.png"
 captured="$runtime/windows-shot-1.png"
 rm -f "$base" "$captured"
-BUTACA_SHOT="$base" "$target/release/butaca-sim" "$pms" "$port" &
+BUTACA_SHOT="$base" "$target/release/butaca-sim" "$srv" "$port" &
 pid=$!
 printf '%s\n' "$pid" > "$runtime/butaca-sim.pid"
 cleanup() {

@@ -259,7 +259,7 @@ access. Before-wave disk measurement reported 15 GiB free; external per-lane tar
 and disabled incremental compilation bound build growth. Full integration gates and one Astra
 review follow the completed wave, not every small edit.
 
-Parent work adds owned `pms::initial::Initial`: source states/contributions, immutable client ids,
+Parent work adds owned `catalog::initial::Initial`: source states/contributions, immutable client ids,
 token generations, in-flight tags, retry bits/history, allocator/roster/section/publication
 counters, and the published catalog/hub ranges/hero slots. Capture leaves the worker mailbox
 untouched. The application adapts a data-layer scalar visitor to `Canon`, with exhaustive field
@@ -372,7 +372,7 @@ checks of the grader and binding correction, not a new simulator or device repla
 ## Previous checkpoint: complete Home result payloads are recorded
 
 `Recplay::result` now encodes the addressed Home result at the recorder's own frame origin.
-`pms/record.rs` preserves the whole source projection, including Continue Watching sort keys,
+`catalog/record.rs` preserves the whole source projection, including Continue Watching sort keys,
 provider hub keys, all movie/episode fields, failure versus empty success, and the request's
 generation/sequence/server/token-generation tags. Blur colours encode IEEE bits so JSON cannot
 erase negative zero, NaN payloads or infinities. The payload version is explicit and strict;
@@ -931,7 +931,7 @@ the status Retry command. Keep `HubsCmd::Retry`; route ticking through store-wor
 existing pumps, without artificially bumping generation every frame. Boot/refetch and optimistic
 view-state edits retain their existing authority. Freeze this effect contract before migration.
 
-For identities, preserve the provider `Hub.key` currently discarded by `pms::Shelf`. Use distinct
+For identities, preserve the provider `Hub.key` currently discarded by `catalog::Shelf`. Use distinct
 merged-Continue-Watching, server/identifier and server/key variants. Neither localized title nor
 row position is a stable fallback; both provider fields absent is an explicit unresolved case.
 

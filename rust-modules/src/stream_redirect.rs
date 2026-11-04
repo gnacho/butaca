@@ -394,7 +394,7 @@ mod tests {
         }
     }
 
-    fn pms() -> Target {
+    fn server() -> Target {
         base(
             Scheme::Http,
             "192.168.1.10",
@@ -415,29 +415,29 @@ mod tests {
 
     #[test]
     fn an_absolute_https_location_is_a_tls_target_on_443() {
-        let t = resolve_location(&pms(), "https://cdn.example.com/v/1.mp4?sig=a&e=2").unwrap();
+        let t = resolve_location(&server(), "https://cdn.example.com/v/1.mp4?sig=a&e=2").unwrap();
         assert!(t.origin.is_tls());
         assert_eq!(t.origin.host(), "cdn.example.com");
         assert_eq!(t.origin.port(), 443);
         assert_eq!(t.path, "/v/1.mp4?sig=a&e=2");
         assert_eq!(t.url(), "https://cdn.example.com:443/v/1.mp4?sig=a&e=2");
-        assert!(!same_origin(&t.origin, &pms().origin));
+        assert!(!same_origin(&t.origin, &server().origin));
     }
 
     #[test]
     fn an_absolute_http_location_defaults_to_80_and_keeps_explicit_ports() {
-        let t = resolve_location(&pms(), "HTTP://cdn.example.com?x=1").unwrap();
+        let t = resolve_location(&server(), "HTTP://cdn.example.com?x=1").unwrap();
         assert_eq!((t.origin.port(), t.path.as_str()), (80, "/?x=1"));
-        let t = resolve_location(&pms(), "http://[::1]:8080/a#frag").unwrap();
+        let t = resolve_location(&server(), "http://[::1]:8080/a#frag").unwrap();
         assert_eq!((t.origin.host(), t.origin.port()), ("::1", 8080));
         assert_eq!(t.path, "/a");
-        let same = resolve_location(&pms(), "http://192.168.1.10:32400/x").unwrap();
-        assert!(same_origin(&same.origin, &pms().origin));
+        let same = resolve_location(&server(), "http://192.168.1.10:32400/x").unwrap();
+        assert!(same_origin(&same.origin, &server().origin));
     }
 
     #[test]
     fn relative_locations_resolve_against_the_answering_target() {
-        let b = pms();
+        let b = server();
         assert_eq!(resolve_location(&b, "/a/b?c=1").unwrap().path, "/a/b?c=1");
         assert_eq!(
             resolve_location(&b, "other.mp4").unwrap().path,
@@ -465,7 +465,7 @@ mod tests {
 
     #[test]
     fn unusable_locations_are_refused() {
-        let b = pms();
+        let b = server();
         for bad in [
             "",
             "   ",
@@ -552,13 +552,13 @@ mod tests {
             b"HTTP/1.1 206 Partial Content\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
                 .to_vec(),
         );
-        let (pms, pms_h) = serve(
+        let (srv, srv_h) = serve(
             format!(
                 "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{cdn}/v\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
             )
             .into_bytes(),
         );
-        let origin = Origin::http("127.0.0.1", pms as i32);
+        let origin = Origin::http("127.0.0.1", srv as i32);
         let mut hs = super::super::http_stream_boxed();
         let req = Request {
             origin: &origin,
@@ -570,7 +570,7 @@ mod tests {
         };
         let got = open_following(&mut *hs, &req, &mut crate::checkpoint::NoCheckpoint);
         super::super::http_close(&mut *hs);
-        let (server_head, cdn_head) = (pms_h.join().unwrap(), cdn_h.join().unwrap());
+        let (server_head, cdn_head) = (srv_h.join().unwrap(), cdn_h.join().unwrap());
         match got {
             Ok(Opened::Socket(t)) => assert_eq!(t.origin.port(), cdn as i32),
             other => panic!("{other:?}"),

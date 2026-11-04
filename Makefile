@@ -435,7 +435,7 @@ RUST_TDIR      = target$(if $(RELEASE),-release,)$(if $(LAB),-lab,)$(if $(SYMBOL
 
 # WHICH VERSION THE BINARY REPORTS, which is not always the version it was cut from. A release
 # commit leaves the whole tree at the version it just published, so every developer build after it
-# reported that exact number as its own — in X-Plex-Version, in the Sentry release, on the
+# reported that exact number as its own — in the version it reports, in the Sentry release, on the
 # diagnostics panel — and nothing downstream could tell a working tree from the shipped artifact.
 # `rust-modules/build.rs` reads this ONE variable: set, the binary says `0.6.0`; unset or empty, it
 # says `0.7.0-dev`, the next MINOR — trunk is where features land, so that is what is cut from it

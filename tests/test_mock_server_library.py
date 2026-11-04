@@ -23,29 +23,29 @@ from mock_server import (
 HAS_FFMPEG_AND_FFPROBE = shutil.which("ffmpeg") and shutil.which("ffprobe")
 
 
-def get(pms, path):
-    status, content_type, data = pms.handle("GET", path)
+def get(srv, path):
+    status, content_type, data = srv.handle("GET", path)
     assert status == 200 and content_type == "application/json"
     return json.loads(data)["MediaContainer"]
 
 
 class LibraryRail(unittest.TestCase):
-    def test_collection_ids_and_collection_routes_match_pms(self):
-        pms = MockServer(Library())
-        collections = get(pms, "/library/sections/1/collections")["Metadata"]
+    def test_collection_ids_and_collection_routes_match_server(self):
+        srv = MockServer(Library())
+        collections = get(srv, "/library/sections/1/collections")["Metadata"]
         self.assertTrue(collections)
         row = collections[0]
         self.assertNotEqual(row["index"], int(row["ratingKey"]))
-        own = get(pms, f"/library/metadata/{row['ratingKey']}")["Metadata"]
+        own = get(srv, f"/library/metadata/{row['ratingKey']}")["Metadata"]
         self.assertEqual(own, [row])
-        children = get(pms, f"/library/collections/{row['ratingKey']}/children"
+        children = get(srv, f"/library/collections/{row['ratingKey']}/children"
                             "?X-Plex-Container-Start=0&X-Plex-Container-Size=2")
         self.assertLessEqual(len(children["Metadata"]), 2)
         self.assertEqual(children["offset"], 0)
-        via_all = get(pms, "/library/sections/1/all?type=18&sort=titleSort:asc"
+        via_all = get(srv, "/library/sections/1/all?type=18&sort=titleSort:asc"
                            "&X-Plex-Container-Start=0&X-Plex-Container-Size=2")
         self.assertEqual(via_all["Metadata"], sorted(collections, key=lambda c: c["titleSort"])[:2])
-        status, ctype, body = pms.handle(
+        status, ctype, body = srv.handle(
             "GET", f"/library/collections/{row['ratingKey']}/children", headers={
                 "X-Plex-Container-Start": "0", "X-Plex-Container-Size": "1",
             })
@@ -57,14 +57,14 @@ class LibraryRail(unittest.TestCase):
     def test_collection_listing_matches_the_library_type_menu_contract(self):
         """The Library's Collections type: `all?type=18&includeMeta=1` declares only titleSort,
         `firstCharacter?type=18` counts collections, and only a collection with members has art."""
-        pms = MockServer(Library())
-        first = get(pms, "/library/sections/1/all?type=18&includeMeta=1"
+        srv = MockServer(Library())
+        first = get(srv, "/library/sections/1/all?type=18&includeMeta=1"
                          "&X-Plex-Container-Start=0&X-Plex-Container-Size=60")
         kinds = first["Meta"]["Type"]
         self.assertEqual([k["type"] for k in kinds], ["collection"])
         self.assertEqual([s["key"] for s in kinds[0]["Sort"]], ["titleSort"])
         self.assertEqual(first["totalSize"], len(first["Metadata"]))
-        letters = get(pms, "/library/sections/1/firstCharacter?type=18")["Directory"]
+        letters = get(srv, "/library/sections/1/firstCharacter?type=18")["Directory"]
         self.assertEqual(sum(d["size"] for d in letters), first["totalSize"])
         self.assertEqual([d["title"] for d in letters],
                          sorted({row["titleSort"][0].upper() for row in first["Metadata"]}),
@@ -73,13 +73,13 @@ class LibraryRail(unittest.TestCase):
             self.assertEqual("thumb" in row, row["childCount"] > 0, row["title"])
 
     def test_search_with_include_collections_answers_full_collection_rows(self):
-        pms = MockServer(Library())
-        listed = get(pms, "/library/sections/1/collections")["Metadata"]
+        srv = MockServer(Library())
+        listed = get(srv, "/library/sections/1/collections")["Metadata"]
         name = listed[0]["title"]
         query = urllib.parse.quote(name.split()[0])
 
         def hub(path):
-            return next(h for h in get(pms, path)["Hub"] if h["hubIdentifier"] == "collection")
+            return next(h for h in get(srv, path)["Hub"] if h["hubIdentifier"] == "collection")
 
         # without the flag: tag rows under Directory — no ratingKey, no thumb
         tags = hub(f"/hubs/search?query={query}&limit=12")
@@ -95,19 +95,19 @@ class LibraryRail(unittest.TestCase):
         self.assertNotEqual(row["index"], int(row["ratingKey"]))
         self.assertTrue(row["thumb"])
         # every other hub is unchanged by the flag
-        plain = [h for h in get(pms, f"/hubs/search?query={query}&limit=12")["Hub"]
+        plain = [h for h in get(srv, f"/hubs/search?query={query}&limit=12")["Hub"]
                  if h["hubIdentifier"] != "collection"]
-        flagged = [h for h in get(pms, f"/hubs/search?query={query}&limit=12&includeCollections=1")["Hub"]
+        flagged = [h for h in get(srv, f"/hubs/search?query={query}&limit=12&includeCollections=1")["Hub"]
                    if h["hubIdentifier"] != "collection"]
         self.assertEqual(plain, flagged)
 
     def test_a_member_movies_related_carries_its_whole_collection(self):
         lib = Library()
-        pms = MockServer(lib)
+        srv = MockServer(lib)
         member = next(it for it in lib.items.values()
                       if it["type"] == "movie" and it.get("Collection"))
         tag = member["Collection"][0]
-        hubs = get(pms, f"/library/metadata/{member['ratingKey']}/related")["Hub"]
+        hubs = get(srv, f"/library/metadata/{member['ratingKey']}/related")["Hub"]
         own = [h for h in hubs if h["hubIdentifier"].startswith("collection.related.")]
         self.assertEqual(len(own), len(member["Collection"]))
         hub = own[0]
@@ -119,7 +119,7 @@ class LibraryRail(unittest.TestCase):
         self.assertEqual(keys, [m["ratingKey"] for m in lib.collection_rows(tag["id"])])
         loner = next(it for it in lib.items.values()
                      if it["type"] == "movie" and not it.get("Collection"))
-        hubs = get(pms, f"/library/metadata/{loner['ratingKey']}/related")["Hub"]
+        hubs = get(srv, f"/library/metadata/{loner['ratingKey']}/related")["Hub"]
         self.assertFalse(any(h["hubIdentifier"].startswith("collection.related") for h in hubs))
 
     def test_default_generated_data_is_stable(self):
@@ -135,21 +135,21 @@ class LibraryRail(unittest.TestCase):
             self.assertEqual(hashlib.sha256(payload).hexdigest(), expected)
 
     def test_default_letter_counts_match_the_actual_section(self):
-        pms = MockServer(Library())
+        srv = MockServer(Library())
         for section, count in ((1, 48), (2, 6)):
             with self.subTest(section=section):
-                letters = get(pms, f"/library/sections/{section}/firstCharacter")["Directory"]
+                letters = get(srv, f"/library/sections/{section}/firstCharacter")["Directory"]
                 self.assertEqual(letters, [{"key": "s", "title": "S", "size": count}])
 
     def test_empty_section_has_no_letter_stops(self):
-        pms = MockServer(Library(movies=0))
-        self.assertEqual(get(pms, "/library/sections/1/firstCharacter")["Directory"], [])
+        srv = MockServer(Library(movies=0))
+        self.assertEqual(get(srv, "/library/sections/1/firstCharacter")["Directory"], [])
 
     def test_rail_buckets_cover_real_page_boundaries_and_only_their_section(self):
-        pms = MockServer(Library(movies=321, rail_fixture=True))
+        srv = MockServer(Library(movies=321, rail_fixture=True))
         rows = []
         for start in range(0, 321, 60):
-            page = get(pms, f"/library/sections/1/all?X-Plex-Container-Start={start}&X-Plex-Container-Size=60")
+            page = get(srv, f"/library/sections/1/all?X-Plex-Container-Start={start}&X-Plex-Container-Size=60")
             self.assertEqual(page["totalSize"], 321)
             self.assertEqual(page["offset"], start)
             self.assertEqual(page["size"], min(60, 321 - start))
@@ -157,7 +157,7 @@ class LibraryRail(unittest.TestCase):
         self.assertEqual(len({row["ratingKey"] for row in rows}), 321)
         self.assertEqual([r["titleSort"] for r in rows], sorted(r["titleSort"] for r in rows))
         self.assertTrue(all(re.fullmatch(r"s[0-9a-f]{8}", r["title"]) for r in rows))
-        letters = get(pms, "/library/sections/1/firstCharacter")["Directory"]
+        letters = get(srv, "/library/sections/1/firstCharacter")["Directory"]
         self.assertEqual([r["title"] for r in letters], list("ACFMZ"))
         self.assertEqual(sum(r["size"] for r in letters), 321)
         offset = 0
@@ -166,10 +166,10 @@ class LibraryRail(unittest.TestCase):
             size = letter["size"]
             self.assertGreater(size, 60)
             self.assertTrue(all(r["titleSort"].startswith(prefix) for r in rows[offset:offset + size]))
-            first = get(pms, f"/library/sections/1/all?X-Plex-Container-Start={offset}&X-Plex-Container-Size=1")["Metadata"][0]
+            first = get(srv, f"/library/sections/1/all?X-Plex-Container-Start={offset}&X-Plex-Container-Size=1")["Metadata"][0]
             self.assertEqual(first["ratingKey"], rows[offset]["ratingKey"])
             offset += size
-        self.assertEqual(sum(r["size"] for r in get(pms, "/library/sections/2/firstCharacter")["Directory"]), 6)
+        self.assertEqual(sum(r["size"] for r in get(srv, "/library/sections/2/firstCharacter")["Directory"]), 6)
 
     def test_count_cannot_overlap_the_show_key_namespace(self):
         for count in (-1, 1001):
@@ -194,9 +194,9 @@ class LibraryRail(unittest.TestCase):
             self.assertFalse(allowed(rejected), rejected)
 
     def test_serve_exposes_opt_in_rail_data_over_the_real_http_handler(self):
-        server, _ = serve(0, movies=121, rail_fixture=True)
+        httpd, _ = serve(0, movies=121, rail_fixture=True)
         try:
-            base = f"http://127.0.0.1:{server.server_address[1]}"
+            base = f"http://127.0.0.1:{httpd.server_address[1]}"
             with urllib.request.urlopen(base + "/library/sections/1/firstCharacter", timeout=5) as response:
                 rows = json.load(response)["MediaContainer"]["Directory"]
             self.assertEqual([r["title"] for r in rows], list("ACFMZ"))
@@ -205,16 +205,16 @@ class LibraryRail(unittest.TestCase):
                 page = json.load(response)["MediaContainer"]
             self.assertEqual((page["offset"], page["size"], page["totalSize"]), (120, 1, 121))
         finally:
-            server.shutdown()
-            server.server_close()
+            httpd.shutdown()
+            httpd.server_close()
 
 
 class DoviAndExtraMedia(unittest.TestCase):
-    """The DOVI*/container derivation `--extra-media` relies on — the field NAMES a real PMS
-    sends (docs/pms-api.md, verified live 2026-08-21), mapped from ffprobe's own "DOVI
+    """The DOVI*/container derivation `--extra-media` relies on - the field NAMES a real server
+    sends (verified live 2026-08-21), mapped from ffprobe's own "DOVI
     configuration record" side-data shape rather than probed against a real DV file here."""
 
-    def test_dovi_wire_maps_the_real_pms_field_names(self):
+    def test_dovi_wire_maps_the_real_server_field_names(self):
         stream = {
             "side_data_list": [{
                 "side_data_type": "DOVI configuration record",
@@ -264,12 +264,12 @@ class DoviAndExtraMedia(unittest.TestCase):
                     "color=size=64x64:rate=24:duration=1", "-f", "lavfi", "-i",
                     "sine=frequency=330:duration=1", "-c:v", "libx264", "-c:a", "aac", "-t", "1",
                     str(out)])
-            server, pms = serve(0, movies=0, extra_media=[mp4, mkv])
+            httpd, srv = serve(0, movies=0, extra_media=[mp4, mkv])
             try:
-                lib = pms.lib
+                lib = srv.lib
                 rks = sorted(lib.extra_media_files)
                 self.assertEqual(rks, [EXTRA_MEDIA_RK_BASE, EXTRA_MEDIA_RK_BASE + 1])
-                base = f"http://127.0.0.1:{server.server_address[1]}"
+                base = f"http://127.0.0.1:{httpd.server_address[1]}"
                 for rk, want_container, want_ct in (
                         (rks[0], "mp4", "video/mp4"), (rks[1], "mkv", "video/x-matroska")):
                     media = lib.items[rk]["Media"][0]
@@ -282,8 +282,8 @@ class DoviAndExtraMedia(unittest.TestCase):
                     with urllib.request.urlopen(base + part["key"], timeout=5) as response:
                         self.assertEqual(response.headers["Content-Type"], want_ct)
             finally:
-                server.shutdown()
-                server.server_close()
+                httpd.shutdown()
+                httpd.server_close()
 
     @unittest.skipUnless(
         HAS_FFMPEG_AND_FFPROBE,
@@ -297,12 +297,12 @@ class DoviAndExtraMedia(unittest.TestCase):
                 "color=size=64x64:rate=24:duration=1", "-f", "lavfi", "-i",
                 "sine=frequency=330:duration=1", "-c:v", "libx264", "-c:a", "aac", "-t", "1",
                 str(clip)])
-            server, pms = serve(0, movies=0, extra_media=[clip])
+            httpd, srv = serve(0, movies=0, extra_media=[clip])
             try:
-                self.assertEqual(pms.lib.extra_media_files, {EXTRA_MEDIA_RK_BASE: clip})
+                self.assertEqual(srv.lib.extra_media_files, {EXTRA_MEDIA_RK_BASE: clip})
             finally:
-                server.shutdown()
-                server.server_close()
+                httpd.shutdown()
+                httpd.server_close()
 
 
 class PlaintextOnlyLan(unittest.TestCase):
@@ -334,69 +334,69 @@ class PlaintextOnlyLan(unittest.TestCase):
                                  "IPv6": False})
 
     def test_resource_discovery_advertises_only_the_bound_mock(self):
-        pms = MockServer(Library(seed=7))
-        status, ctype, body = pms.handle("GET", "/api/v2/resources")
+        srv = MockServer(Library(seed=7))
+        status, ctype, body = srv.handle("GET", "/api/v2/resources")
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body), [], "an unbound fixture advertises no listener")
-        self.assertEqual(pms.unknown, [])
-        server, pms = serve(0, seed=7)
+        self.assertEqual(srv.unknown, [])
+        httpd, srv = serve(0, seed=7)
         try:
-            status, _, body = pms.handle("GET", "/api/v2/resources")
+            status, _, body = srv.handle("GET", "/api/v2/resources")
             self.assertEqual(status, 200)
             resources = json.loads(body)
             self.assertEqual(len(resources), 1)
-            self.assertEqual(resources[0]["clientIdentifier"], pms.lib.machine)
+            self.assertEqual(resources[0]["clientIdentifier"], srv.lib.machine)
             self.assertEqual(resources[0]["connections"], [{
-                "protocol": "http", "address": "127.0.0.1", "port": server.server_address[1],
-                "uri": f"http://127.0.0.1:{server.server_address[1]}", "local": True,
+                "protocol": "http", "address": "127.0.0.1", "port": httpd.server_address[1],
+                "uri": f"http://127.0.0.1:{httpd.server_address[1]}", "local": True,
                 "relay": False, "IPv6": False,
             }])
         finally:
-            server.shutdown()
-            server.server_close()
+            httpd.shutdown()
+            httpd.server_close()
 
     def test_advertise_ip_none_falls_back_to_loopback_with_a_warning_when_undetectable(self):
         import ipaddress
-        server, pms = serve(0, seed=7, plaintext_only_lan=True, advertise_ip=None)
+        httpd, srv = serve(0, seed=7, plaintext_only_lan=True, advertise_ip=None)
         try:
-            ipaddress.IPv4Address(pms.plaintext_only_lan["ip"])  # a real, parseable IPv4
+            ipaddress.IPv4Address(srv.plaintext_only_lan["ip"])  # a real, parseable IPv4
             # a real LAN IPv4 needs no warning; the loopback fallback always gets one.
-            if pms.plaintext_only_lan["ip"] == "127.0.0.1":
+            if srv.plaintext_only_lan["ip"] == "127.0.0.1":
                 buf = io.StringIO()
                 with contextlib.redirect_stderr(buf):
-                    server2, pms2 = serve(0, seed=7, plaintext_only_lan=True, advertise_ip=None)
+                    httpd2, srv2 = serve(0, seed=7, plaintext_only_lan=True, advertise_ip=None)
                 try:
-                    self.assertEqual(pms2.plaintext_only_lan["ip"], "127.0.0.1")
+                    self.assertEqual(srv2.plaintext_only_lan["ip"], "127.0.0.1")
                     self.assertIn("NOT LAN-eligible", buf.getvalue())
                 finally:
-                    server2.shutdown()
-                    server2.server_close()
+                    httpd2.shutdown()
+                    httpd2.server_close()
         finally:
-            server.shutdown()
-            server.server_close()
+            httpd.shutdown()
+            httpd.server_close()
 
     def test_unreachable_fail_mode_opens_no_listener_and_refuses(self):
-        server, pms = serve(0, seed=7, plaintext_only_lan=True, advertise_ip="127.0.0.1",
+        httpd, srv = serve(0, seed=7, plaintext_only_lan=True, advertise_ip="127.0.0.1",
                             insecure_fail_mode="unreachable")
         try:
-            self.assertIsNone(server.insecure_fail_listener)
+            self.assertIsNone(httpd.insecure_fail_listener)
             with self.assertRaises(OSError):
                 socket.create_connection(
-                    ("127.0.0.1", pms.plaintext_only_lan["fail_port"]), timeout=5).close()
+                    ("127.0.0.1", srv.plaintext_only_lan["fail_port"]), timeout=5).close()
         finally:
-            server.shutdown()
-            server.server_close()
+            httpd.shutdown()
+            httpd.server_close()
 
     def test_identity_over_the_plaintext_connection_is_tokenless_and_matches_the_resource(self):
-        server, pms = serve(0, seed=7, plaintext_only_lan=True, advertise_ip="127.0.0.1")
+        httpd, srv = serve(0, seed=7, plaintext_only_lan=True, advertise_ip="127.0.0.1")
         try:
-            base = f"http://127.0.0.1:{server.server_address[1]}"
+            base = f"http://127.0.0.1:{httpd.server_address[1]}"
             with urllib.request.urlopen(base + "/identity", timeout=5) as response:
                 identity = json.load(response)["MediaContainer"]
-            self.assertEqual(identity["machineIdentifier"], pms.lib.machine)
+            self.assertEqual(identity["machineIdentifier"], srv.lib.machine)
         finally:
-            server.shutdown()
-            server.server_close()
+            httpd.shutdown()
+            httpd.server_close()
 
 
 class Enhancement266(unittest.TestCase):
@@ -408,23 +408,23 @@ class Enhancement266(unittest.TestCase):
         return next(s for s in item["Media"][0]["Part"][0]["Stream"] if s["streamType"] == 2)
 
     def test_no_paid_tier_flag(self):
-        pms = MockServer(Library())
-        self.assertIs(get(pms, "/identity")["myPlexSubscription"], True)
-        self.assertEqual(get(pms, "/identity")["version"], "1.41.0.0000-synthetic")
+        srv = MockServer(Library())
+        self.assertIs(get(srv, "/identity")["myPlexSubscription"], True)
+        self.assertEqual(get(srv, "/identity")["version"], "1.41.0.0000-synthetic")
 
-        server, pms2 = serve(0, seed=1, plex_pass=False)
+        httpd, srv2 = serve(0, seed=1, paid_tier=False)
         try:
-            identity = json.loads(pms2.handle("GET", "/identity")[2])["MediaContainer"]
+            identity = json.loads(srv2.handle("GET", "/identity")[2])["MediaContainer"]
             self.assertIs(identity["myPlexSubscription"], False)
             # tools/mock-guest.py keys off this exact version string — untouched by the flag.
             self.assertEqual(identity["version"], "1.41.0.0000-synthetic")
         finally:
-            server.shutdown()
-            server.server_close()
+            httpd.shutdown()
+            httpd.server_close()
 
         # also flippable live
-        pms.handle("POST", "/_mock/config", json.dumps({"plex_pass": False}).encode())
-        self.assertIs(get(pms, "/identity")["myPlexSubscription"], False)
+        srv.handle("POST", "/_mock/config", json.dumps({"paid_tier": False}).encode())
+        self.assertIs(get(srv, "/identity")["myPlexSubscription"], False)
 
     def test_loudness_attr_default_and_flag(self):
         lib_on = Library(movies=1)
@@ -463,19 +463,19 @@ class Enhancement266(unittest.TestCase):
         self.assertEqual(get(MockServer(lib), "/library/sections/1/all")["totalSize"], 48)
 
     def test_decision_enhancement_shapes(self):
-        pms = MockServer(Library())
+        srv = MockServer(Library())
         rk = ENHANCEMENT_AC3_2CH_RK
         base_q = f"path=%2Flibrary%2Fmetadata%2F{rk}&directPlay=0&directStream=1"
         path = f"/video/:/transcode/universal/decision?{base_q}"
 
-        baseline = get(pms, path)
+        baseline = get(srv, path)
         self.assertEqual(baseline["generalDecisionCode"], 1000)
         self.assertEqual(baseline["Metadata"], [])
         # a param of 0 is byte-identical to no param at all
-        self.assertEqual(get(pms, path + "&normalizeLoudness=0"), baseline)
-        self.assertEqual(get(pms, path + "&boostDialog=0&normalizeLoudness=0"), baseline)
+        self.assertEqual(get(srv, path + "&normalizeLoudness=0"), baseline)
+        self.assertEqual(get(srv, path + "&boostDialog=0&normalizeLoudness=0"), baseline)
 
-        on = get(pms, path + "&normalizeLoudness=1")
+        on = get(srv, path + "&normalizeLoudness=1")
         part = on["Metadata"][0]["Media"][0]["Part"][0]
         self.assertEqual(part["decision"], "transcode")
         video = next(s for s in part["Stream"] if s["streamType"] == 1)
@@ -487,68 +487,68 @@ class Enhancement266(unittest.TestCase):
 
         # the MDE shape with a live param mimics the same M1 outcome
         mde_q = f"path=%2Flibrary%2Fmetadata%2F{rk}&directPlay=1&directStreamAudio=1&boostDialog=1"
-        mde = get(pms, f"/video/:/transcode/universal/decision?{mde_q}")
+        mde = get(srv, f"/video/:/transcode/universal/decision?{mde_q}")
         mde_part = mde["Metadata"][0]["Media"][0]["Part"][0]
         self.assertEqual(mde_part["decision"], "transcode")
         mde_audio = next(s for s in mde_part["Stream"] if s["streamType"] == 2)
         self.assertEqual((mde_audio["decision"], mde_audio["codec"]), ("transcode", "ac3"))
 
-        pms.refuse_enhancements = True
-        refused = get(pms, path + "&normalizeLoudness=1")
+        srv.refuse_enhancements = True
+        refused = get(srv, path + "&normalizeLoudness=1")
         self.assertEqual(refused["generalDecisionCode"], 2000)
         self.assertEqual(refused["Metadata"], [])
         self.assertTrue(refused["transcodeDecisionText"])
-        pms.refuse_enhancements = False
+        srv.refuse_enhancements = False
 
-        pms.ignore_enhancements = True
-        ignored = get(pms, path + "&normalizeLoudness=1")
+        srv.ignore_enhancements = True
+        ignored = get(srv, path + "&normalizeLoudness=1")
         ig_part = ignored["Metadata"][0]["Media"][0]["Part"][0]
         self.assertEqual(ig_part["decision"], "transcode")
         ig_audio = next(s for s in ig_part["Stream"] if s["streamType"] == 2)
         self.assertEqual(ig_audio["decision"], "copy")
 
     @staticmethod
-    def _requests(pms):
-        status, ctype, body = pms.handle("GET", "/_mock/requests")
+    def _requests(srv):
+        status, ctype, body = srv.handle("GET", "/_mock/requests")
         assert status == 200 and ctype == "application/json", (status, ctype)
         return json.loads(body)
 
     def test_mock_config_runtime_toggle(self):
-        pms = MockServer(Library())
-        status, _, body = pms.handle(
+        srv = MockServer(Library())
+        status, _, body = srv.handle(
             "POST", "/_mock/config", json.dumps({"refuse_enhancements": True}).encode())
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body), {
-            "refuse_enhancements": True, "ignore_enhancements": False, "plex_pass": True})
-        self.assertIs(pms.refuse_enhancements, True)
-        self.assertIs(pms.ignore_enhancements, False)
+            "refuse_enhancements": True, "ignore_enhancements": False, "paid_tier": True})
+        self.assertIs(srv.refuse_enhancements, True)
+        self.assertIs(srv.ignore_enhancements, False)
 
-        status, _, body = pms.handle("POST", "/_mock/config", json.dumps({"bogus": True}).encode())
+        status, _, body = srv.handle("POST", "/_mock/config", json.dumps({"bogus": True}).encode())
         self.assertEqual(status, 400)
 
         # a case can resolve once, then refuse only from the next decision on
-        pms2 = MockServer(Library())
+        srv2 = MockServer(Library())
         rk = ENHANCEMENT_AC3_2CH_RK
         path = (f"/video/:/transcode/universal/decision?path=%2Flibrary%2Fmetadata%2F{rk}"
                 "&directPlay=0&directStream=1&normalizeLoudness=1")
-        self.assertEqual(get(pms2, path)["generalDecisionCode"], 1000)
-        pms2.handle("POST", "/_mock/config", json.dumps({"refuse_enhancements": True}).encode())
-        self.assertEqual(get(pms2, path)["generalDecisionCode"], 2000)
+        self.assertEqual(get(srv2, path)["generalDecisionCode"], 1000)
+        srv2.handle("POST", "/_mock/config", json.dumps({"refuse_enhancements": True}).encode())
+        self.assertEqual(get(srv2, path)["generalDecisionCode"], 2000)
 
     def test_request_log(self):
-        pms = MockServer(Library())
-        pms.handle("GET", "/identity?X-Plex-Token=SECRET&foo=bar",
+        srv = MockServer(Library())
+        srv.handle("GET", "/identity?X-Plex-Token=SECRET&foo=bar",
                   headers={"X-Plex-Session-Identifier": "sess-1"})
-        log = self._requests(pms)
+        log = self._requests(srv)
         entry = next(e for e in log if e["path"] == "/identity")
         self.assertEqual(entry["method"], "GET")
         self.assertEqual(entry["query"], {"foo": "bar"})
         self.assertNotIn("X-Plex-Token", entry["query"])
         self.assertEqual(entry["session"], "sess-1")
 
-        status, _, _ = pms.handle("DELETE", "/_mock/requests")
+        status, _, _ = srv.handle("DELETE", "/_mock/requests")
         self.assertEqual(status, 200)
-        after = self._requests(pms)
+        after = self._requests(srv)
         self.assertEqual(len(after), 1)
         self.assertEqual((after[0]["method"], after[0]["path"]), ("GET", "/_mock/requests"))
 
@@ -564,9 +564,9 @@ class Enhancement266(unittest.TestCase):
                 "color=size=64x64:rate=24:duration=1", "-f", "lavfi", "-i",
                 "sine=frequency=330:duration=1", "-c:v", "libx264", "-c:a", "aac", "-t", "1",
                 str(clip)])
-            server, pms = serve(0, movies=0, transcode_fixture=clip)
+            httpd, srv = serve(0, movies=0, transcode_fixture=clip)
             try:
-                base = f"http://127.0.0.1:{server.server_address[1]}"
+                base = f"http://127.0.0.1:{httpd.server_address[1]}"
                 url = base + "/video/:/transcode/universal/start.mkv?path=x"
                 with urllib.request.urlopen(url, timeout=5) as response:
                     self.assertEqual(response.status, 200)
@@ -578,8 +578,8 @@ class Enhancement266(unittest.TestCase):
                     self.assertEqual(response.read(), clip.read_bytes()[1:4])
                     self.assertTrue(response.headers["Content-Range"].startswith("bytes 1-3/"))
             finally:
-                server.shutdown()
-                server.server_close()
+                httpd.shutdown()
+                httpd.server_close()
 
     def test_missing_transcode_fixture_file_is_rejected(self):
         with self.assertRaises(ValueError):

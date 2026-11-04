@@ -1,9 +1,9 @@
-/* Butaca — an unofficial native Plex client for LG webOS.
+/* Butaca, an unofficial native Jellyfin client for LG webOS.
  * Copyright © 2026 Gleb Linnik. Licensed under GPL-3.0-or-later; see LICENSE at the repository
  * root, and THIRD-PARTY-NOTICES.md for the components this links or redistributes.
  * Not affiliated with, endorsed by, or sponsored by Plex GmbH or LG Electronics.
  *
- * butaca — native webOS Plex client. BOOT SHIM only: the app core is Rust
+ * butaca, a native webOS Jellyfin client. BOOT SHIM only: the app core is Rust
  * butaca_run() (rust-modules). This file stays C for the genuinely low-level
  * bootstrap that must run before any Rust executes — the async-signal-safe crash
  * tracer, the event-log handle, stderr capture, and process bring-up. Everything
@@ -70,8 +70,8 @@ static int open_fd_0600(const char *path, int flags);
  * corruption that makes a log untrustworthy at the moment you most need it — and it silently ate
  * whole lines whenever the C side wrote more than Rust had.
  *
- * Mode 0600 because this file records the server name, the LAN address, Plex Home profile names
- * and episode titles, and /tmp is world-readable. */
+ * Mode 0600 because this file records the server name, the LAN address, user names and episode
+ * titles, and /tmp is world-readable. */
 static FILE *open_event_log(void) {
     int fd = open_fd_0600(runtime_path("butaca-events.log"), O_TRUNC | O_APPEND);
     return fd >= 0 ? fdopen(fd, "a") : NULL;

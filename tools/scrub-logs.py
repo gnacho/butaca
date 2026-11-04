@@ -82,7 +82,7 @@ def load_guard(root):
 
 
 def slug(label):
-    """`SERVER_HOST (src/config.local.h)` -> `pms-host`; `.tv-host` -> `tv-host`."""
+    """`SERVER_HOST (src/config.local.h)` -> `server-host`; `.tv-host` -> `tv-host`."""
     base = label.split("(")[0].strip().lstrip(".")
     return re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-") or "private"
 

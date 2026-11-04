@@ -24,7 +24,7 @@ category: multimedia
 pool: main
 
 # Max 80 characters (schema-enforced).
-shortDescription: A native, Apple-TV-style Plex client for LG webOS TVs — no browser
+shortDescription: A native, Apple-TV-style Jellyfin client for LG webOS TVs, no browser
 
 requirements:
   # Passed VERBATIM to `webosbrew-ipk-verify --fw-releases`, the same tool and flag the release CI
@@ -63,63 +63,62 @@ requirements:
   webosRelease: '>=4.0'
 
 description: |
-  An unofficial, native Plex client for LG webOS televisions.
+  An unofficial, native Jellyfin client for LG webOS televisions.
 
-  The official Plex app on these sets runs in Chromium, and on older hardware it shows: shelves
+  The built-in apps on these sets run in Chromium, and on older hardware it shows: shelves
   stutter, posters open a beat late. Butaca draws its interface directly on the GPU and hands
-  video to the TV's own hardware decoder — the same silicon the built-in apps use — so the picture
+  video to the TV's own hardware decoder, the same silicon the built-in apps use, so the picture
   sits on the video plane with the interface composited over it.
 
   **What it does**
 
-  * Sign in on the TV with an on-screen QR code, pick a Plex Home profile, browse and play
-  * Every server your account can reach, at once — your own and any a friend has shared with you,
-    merged on the home screen and side by side in the library list
-  * Search across all of them from one field, typed with the television's own keyboard
+  * Sign in on the TV with the account you already have on your server: address, user name and
+    password, typed with the television's own keyboard, or a Quick Connect code
+  * Sign in to more than one server and switch between them in Settings, each with its own token
+  * Search from one field, typed with the television's own keyboard
   * Direct play wherever the TV can decode it, including HEVC, 4K and 10-bit; the server is asked
     to transcode only when it genuinely cannot
-  * Resume, seek and scrub, chapters, audio and subtitle track switching (including image
-    subtitles), Skip Intro / Skip Credits, Up Next with auto-advance, and progress reported back
-    to your server
+  * Resume, seek and scrub, chapters from the server, audio and subtitle track switching
+    (including image subtitles), Skip Intro and Skip Credits where the server carries the markers,
+    Up Next with auto-advance, and progress reported back to your server
+  * Subtitles drawn by the set rather than burned in: ASS and SSA render natively during direct
+    play, with their styles, positioning and embedded fonts. Only transcoded playback falls back
+    to the server's burn-in
   * Dolby Vision and Dolby Atmos are declared to the television rather than sent down unlabelled,
-    so a Dolby Vision file is no longer played as if it were ordinary HDR, and the panel is
-    confirmed to switch into its Dolby Vision mode on one television — see the scope note below
+    so a Dolby Vision file is not played as if it were ordinary HDR, and the panel is confirmed
+    to switch into its Dolby Vision mode on one television, see the scope note below
 
-  **Scope — please read before installing**
+  **Scope, please read before installing**
 
   * **Movies and TV shows only.** No music, photos, live TV or DVR.
-  * **Unencrypted connections to your server, including over the internet.** The app speaks plain
-    HTTP to a numeric address, with your access token in the URL — it has no TLS and no name
-    resolver. Your own server on your own LAN is reached there, as before; a library a friend has
-    shared is normally reached at a public address, and that traffic crosses the internet in clear
-    text. Servers behind Plex Relay, servers that require secure connections, and servers reachable
-    only by hostname or IPv6 cannot be dialled at all, and there is nowhere to enter an address.
+  * **TLS is on, and your token does not go out in the clear.** Certificate verification is on for
+    every HTTPS request. A stable build refuses any server address that would carry your access
+    token over plaintext HTTP, with one exception you have to answer for explicitly: a server that
+    answers only unencrypted at a numeric private address on the television's own network, after
+    you choose to connect without encryption for that server. That grant names that server and
+    that origin, is never persisted, and is revoked at sign-in, at sign-out and on return to the
+    foreground.
   * **Video plays on sets from 2018 through webOS 11.** The author verifies it on a 2019 LG
-    (platform release 4.10.2) before every release, and opt-in usage reports show playback, direct
-    and transcoded, on Developer Mode installs of every firmware line from 4.4.2 to 11.2.0. Known
+    (platform release 4.10.2) before every release, and playback, direct and transcoded, has been
+    seen on Developer Mode installs of every firmware line from 4.4.2 to 11.2.0. Known
     exceptions: some 2019 sets on LG's k5lp or k3lp chip, whose Developer Mode sandbox withholds a
     device the video path needs; 2018 sets on platform release 3.9.3, where video has never been
     seen to start (issue #249); and a crash on k6hp sets (issue #174).
   * **Dolby Vision is confirmed on ONE television.** On the 2019 set this is developed against, a
     Profile 5 or Profile 8 film moves the panel into its Dolby Vision picture mode, and a Profile 7
-    film — the dual-layer kind this app cannot feed — is refused and lands on HDR10, which is what
+    film, the dual-layer kind this app cannot feed, is refused and lands on HDR10, which is what
     refusing it should produce. That is one set. If yours is a different year or a different panel,
     that is still the report worth sending.
   * **Seeking on webOS 5 and newer takes a slower route.** It reloads the stream rather than
     moving within it. It works; it has not been watched on hardware.
   * **Bit depth is asserted, not probed.** The app reads the codec table your television publishes
-    and reports the codecs and resolutions it actually lists — but that table has no column for
+    and reports the codecs and resolutions it actually lists, but that table has no column for
     bit depth, so 10-bit is still claimed without asking.
 
-  The app talks to the Plex Media Servers your account can reach, to plex.tv to sign in, and to
-  discover.provider.plex.tv for cast biographies. Error reports and usage are two separate
-  switches. The first question presents both selected, but that is only an inert draft: nothing is
-  collected or sent until you explicitly save reporting settings, BACK cancels, and Continue
-  without reporting records both as off. The choices remain reversible under Account → Reporting
-  settings, the question shows the exact messages before anything can be enabled, and no title,
-  search term, server name or address can appear in one. Sign-in to your Plex account is
-  encrypted; traffic to a media server is not (above).
+  The app talks to the server you configured and to nothing else: no account with the author, no
+  telemetry, no crash reporting, no analytics. PRIVACY.md in the repository carries the contract
+  in full.
 
-  Not affiliated with, endorsed by, or sponsored by Plex GmbH or LG Electronics.
+  Not affiliated with, endorsed by, or sponsored by Jellyfin, Plex GmbH or LG Electronics.
 
   Source, screenshots and issues: the upstream project page

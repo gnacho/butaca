@@ -402,13 +402,13 @@ pub fn global_init() -> bool {
         crate::dynlib::Loaded::NoLibrary => {
             crate::log(
                 "net: no libcurl on this device (tried .so.4 and .so.5) — \
-                 account calls and HTTPS PMS control unavailable",
+                 account calls and HTTPS server control unavailable",
             );
             false
         }
         crate::dynlib::Loaded::Incomplete(soname, n) => {
             crate::log(&format!(
-                "net: {soname} is missing {n} symbol(s) — account calls and HTTPS PMS control unavailable"
+                "net: {soname} is missing {n} symbol(s) — account calls and HTTPS server control unavailable"
             ));
             false
         }
@@ -547,7 +547,7 @@ pub fn refuses_identity(status: u16) -> bool {
 }
 
 /// Shared capped geometric delay. Neutral retry-ladder helper (formerly `server::account`'s);
-/// `pms.rs`'s hub-retry backoff is its one live consumer.
+/// `catalog.rs`'s hub-retry backoff is its one live consumer.
 pub(crate) fn backoff(misses: u32, base: Duration, ceiling: Duration) -> Duration {
     let factor = 1u32.checked_shl(misses.min(30)).unwrap_or(u32::MAX);
     base.checked_mul(factor).unwrap_or(ceiling).min(ceiling)

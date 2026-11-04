@@ -87,7 +87,7 @@ WHAT IT MATCHES. Two halves, and they fail in opposite directions on purpose.
     test user's account id, this library's ratingKeys, and the shared_server block when there is
     one), `pkg/auth.json` (the persisted session: `account_token` and each source's per-server
     token), plus three more that `.gitignore` names and its comments explain — `local.env` ("real
-    PMS host + access token"), `.tv-dpad-pass` (a generated password; "NEVER commit a password")
+    server host + access token"), `.tv-dpad-pass` (a generated password; "NEVER commit a password")
     and `.tv-remote-url` ("never commit a URL that is live while it is live"). Missing files are
     skipped, so a checkout with none of them simply has less to match. An exact substring hit on a
     real secret is never a false positive, which makes this the precise half.
@@ -129,10 +129,10 @@ WHAT IT MATCHES. Two halves, and they fail in opposite directions on purpose.
       applied to those two shape rules and NOT to the literal half or the token rules: a real
       credential sitting in a tracked file is an incident to clean up, never a licence to republish.
 
-    THE DESTINATION GATE ON curl/wget IS LOAD-BEARING. `curl "http://<pms>:32400/library/sections?
-    X-Plex-Token=<real token>"` is the single most common debugging command in this repo, and it
-    contains two real secrets by necessity — but it sends them to the machine they belong to. So a
-    curl or wget whose URLs are all loopback, RFC1918, a dotless host, one under `.local`/`.lan`/
+    THE DESTINATION GATE ON curl/wget IS LOAD-BEARING. A debug request aimed straight at the
+    server's own API carries an access token in its query string, and it contains a real secret by
+    necessity. It sends that secret to the machine it belongs to, though. So a curl or wget whose
+    URLs are all loopback, RFC1918, a dotless host, one under `.local`/`.lan`/
     `.home`/`.internal`, or one under `plex.tv` (where an account token legitimately goes, which is
     how `tests/run.py` resolves the test user's per-server token) is not outbound at all.
     Anything aimed off the LAN is.
@@ -196,9 +196,9 @@ BYPASS = re.compile(r"\bBUTACA_PUBLISH_BYPASS=1\b")
 
 # The gitignored files that hold private values. All eight are named in `.gitignore`, and seven of
 # them carry their own reason in its comments - `src/config.local.h` and `local.env` under "local
-# dev overrides (real PMS host + access token)", `.tv-host` as "the maintainer's home network, not
+# dev overrides (real server host + access token)", `.tv-host` as "the maintainer's home network, not
 # a project fact", `tests/manifest.local.json` as "the private library inventory", `pkg/auth.json`
-# as holding "account-service and PMS tokens, and this repository is public", and `.tv-dpad-pass` /
+# as holding "account-service and server tokens, and this repository is public", and `.tv-dpad-pass` /
 # `.tv-remote-url` under "NEVER commit a password, and never commit a URL that is live while it is
 # live". `.tv-mac` is the one bare line. (An earlier draft of this comment split the list five/three
 # by whether a reason was attached; checked against the file, that split does not exist.)
@@ -1133,7 +1133,7 @@ def main():
         "  handle `friend` · machine `nas-home` · library `Film Club` · port `31234`\n"
         "  LAN address `10.9.9.7` · public address `203.0.113.9` (RFC 5737 TEST-NET-3)\n"
         "  a machine id: `aaaabbbb…` runs, never a real 40-hex one\n"
-        "and tests/manifest.local.json.example uses `<pms-host>`, `<tv-host>`, `<ratingKey>`.\n"
+        "and tests/manifest.local.json.example brackets every private value (`<placeholder>`).\n"
         "\n"
         "If the reader genuinely needs the real value, name the gitignored FILE it comes from\n"
         "(.tv-host, src/config.local.h, tests/manifest.local.json) and let them read their own copy.\n"))

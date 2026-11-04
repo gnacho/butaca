@@ -142,7 +142,7 @@ fn the_audio_ladder_walks_its_rungs_in_order() {
         Option<(i32, String, i64)>,
     ); 7] = [
         (
-            "rung 1: a PMS selection wins even against English",
+            "rung 1: a server selection wins even against English",
             vec![
                 trk(1, "eac3", "rus", true),
                 server_selected(trk(2, "eac3", "deu", false)),
@@ -152,7 +152,7 @@ fn the_audio_ladder_walks_its_rungs_in_order() {
             Some((1, "eac3".into(), 2)),
         ),
         (
-            "rung 1 needs a non-default PMS selection: the default echo is not one",
+            "rung 1 needs a non-default server selection: the default echo is not one",
             vec![
                 server_selected(trk(1, "eac3", "rus", true)),
                 trk(2, "eac3", "eng", false),

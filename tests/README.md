@@ -28,7 +28,7 @@ how a green run means nothing.
 **The synthetic tier is the default**, and that inversion (2026-08-22) is about what a bare
 `./tests/run.py` should mean. The default has to be the thing that runs for everybody, needs no
 credentials, touches nobody's watch history, and answers *"is the player broken"* — which is asked
-far more often than *"is my library's metadata right"*. Charging a PMS, a token and a filled-in
+far more often than *"is my library's metadata right"*. Charging a real server, a token and a filled-in
 overlay for the obvious command meant most people could not type it at all. `--server` is the
 explicit opt-in; `--fps` / `--fps-player` imply it, because those scenes navigate a real signed-in
 Home and would otherwise grade a QR screen. `--pipeline` still parses — it names the default — but
@@ -102,7 +102,7 @@ since 2026-09-03) — the profile sent to server still carries no frame-rate lim
   needs, the expected log signals, and the *shape* of the item it needs (`item`, a symbolic key
   like `movie_h264_ac3_1080p`) rather than any ratingKey.
 - `manifest.local.json` — **gitignored, one per installation**, and required. Maps each `item`
-  key to a ratingKey on *your* server, and carries your `pms` host, `tv` address, `test_user`,
+  key to a ratingKey on *your* server, and carries your `server` host, `tv` address, `test_user`,
   which `flavour` to drive, and (optionally) the `shared_server` a two-source case needs.
   Copy it from `manifest.local.json.example` and fill it in; `run.py` merges it over the manifest
   at load and refuses to run without it. An `item` key it cannot resolve is **not** fatal — see
@@ -354,7 +354,7 @@ library you care about — which is what `test_user` is for.
   directory SAM already knows about; a flavour is registered once with
   `make FLAVOR=<f> install`, which builds its .ipk, installs it and then deploys into it.
 - The TV powered on and reachable (`root@<tv>`, the overlay's `tv`).
-- The server reachable at `http://<pms-host>:32400` (the overlay's `pms` block).
+- The server reachable at `http://<server-host>:32400` (the overlay's `server` block).
 - `src/config.local.h` present with `SERVER_TOKEN`.
 
 ## Running

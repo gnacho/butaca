@@ -1483,7 +1483,7 @@ pub(crate) enum AppArg {
     /// Account sign-in (QR), shown when there is no usable session.
     Login,
     /// The "who's watching" profile picker.
-    #[cfg_attr(not(test), expect(dead_code, reason = "ARG_SHAPE is frozen and the picker route         died with the plex.tv account flow; the variant stays for the recorded-shape census only"))]
+    #[cfg_attr(not(test), expect(dead_code, reason = "ARG_SHAPE is frozen and the picker route         died with the retired account flow; the variant stays for the recorded-shape census only"))]
     Profiles,
     /// **"Which libraries do you want?"** — the *Favorite libraries* screen, the third and last
     /// onboarding page and the only one that is not about credentials: which of the granted
@@ -1788,7 +1788,7 @@ where
             // The who's-watching picker died with the account flow (Jellyfin-only pivot,
             // #166): nothing constructs this route any more, and `ARG_SHAPE` keeps the variant
             // because the recorded-shape census is frozen. A mount here is a routing bug.
-            AppArg::Profiles => unreachable!("the profiles route has no mount without the plex.tv account flow"),
+            AppArg::Profiles => unreachable!("the profiles route has no mount without the retired account flow"),
             AppArg::Home => {
                 let mut page = crate::screens::home::HomeScreen::new(entry, id);
                 if let PageMemory::Home(memory) = &ret.memory { page.restore(memory); }

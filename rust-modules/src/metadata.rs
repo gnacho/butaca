@@ -1,6 +1,6 @@
 //! Item detail data layer for the detail page: full metadata (genres, cast, crew,
 //! audio/subtitle streams), and the TV season/episode hierarchy — fetched on demand into a single
-//! CURRENT item. Idiomatic Rust (String/Vec), like the browse catalog (pms.rs) — the fixed C
+//! CURRENT item. Idiomatic Rust (String/Vec), like the browse catalog (catalog.rs) — the fixed C
 //! buffers from the C port are gone.
 use std::os::raw::c_int;
 pub(crate) mod record;

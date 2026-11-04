@@ -420,7 +420,7 @@ mod tests {
     }
 
     #[test]
-    fn the_jellyfin_client_builds_the_menu_without_a_plex_session() {
+    fn the_jellyfin_client_builds_the_menu_without_a_session() {
         let _guard = crate::testlock::serial();
         let server = crate::jellyfin::MockServer::start(vec![
             (200, r#"{"User":{"Id":"u-1","Name":"demo"},"AccessToken":"tok-1","ServerId":"srv-1","SessionInfo":null}"#.to_string()),

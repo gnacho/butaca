@@ -63,7 +63,7 @@ supported. These three overrides are absolute Linux paths inside WSL, keeping Ca
 files off the Windows-mounted checkout. `-StageToken` copies the token from gitignored
 `src/config.local.h` without printing it.
 The staged token persists in that runtime directory, so use a fresh `-RuntimeDir` for QR sign-in
-after staging one. `-PmsHost` overrides the header's server host.
+after staging one. `-ServerHost` overrides the server host the simulator points at.
 
 This path deliberately calls `make sim-wsl`, the Windows-facing compatibility alias for the native
 Linux `make sim-linux` target. Both skip bundled host FFmpeg. UI, sign-in, server browsing,
@@ -142,7 +142,7 @@ point of the simulator is that it needs neither.
 
 ### What a second machine needs
 
-On Windows, run `tools/sim.ps1 setup`; use `-PmsHost` for an explicit server and `-StageToken`
+On Windows, run `tools/sim.ps1 setup`; use `-ServerHost` for an explicit server and `-StageToken`
 when credentials should be copied from `src/config.local.h`.
 
 Three things on Linux, and notably no webOS NDK and no nightly for the simulator:
@@ -241,7 +241,7 @@ make screenshots SHOT_HERO_VARIANTS=1 # also home-hero-<film>.jpg for each hero 
 
 - **Scenes are target STATES, reached by triggers.** `tests/screenshots/scenes.json` names each
   state, the triggers that reach it, the event-log lines that prove it was reached (`expect`)
-  and the files it becomes. No key is sent. `tools/screenshots.py` arms `token`, `plextv` (the
+  and the files it becomes. No key is sent. `tools/screenshots.py` arms `token`, `account` (the
   account service replaced by the mock) and `stillclock` itself on every scene, and refuses a run
   whose log shows a `BADTRIGGER`, a trigger that gave up, or a request the mock could not answer.
 - **An output is a file, a crop and a size.** An output's `dest` is `docs` (default,

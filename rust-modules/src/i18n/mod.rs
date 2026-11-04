@@ -301,7 +301,7 @@ pub(crate) fn current() -> &'static LocaleContext {
     {
         CURRENT
             .get()
-            .expect("locale initialized before any screen or Plex request")
+            .expect("locale initialized before any screen or server request")
     }
 }
 #[cfg(not(test))]

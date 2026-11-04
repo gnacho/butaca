@@ -6,7 +6,7 @@
 //! takes, and the sort menu is a `Vec<SortEntry>` like any other. What could not be shared is
 //! the CLIENT (the retired client's lifecycle validation read registry state a Jellyfin client
 //! has no counterpart of), so `browse.rs` carries a narrow jellyfin lane beside each mailbox, the
-//! same split `posters.rs` and `pms.rs` already made.
+//! same split `posters.rs` and `catalog.rs` already made.
 //!
 //! ## The key side-table
 //!

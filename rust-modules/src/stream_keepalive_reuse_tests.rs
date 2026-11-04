@@ -485,7 +485,7 @@ fn http_1_0_keep_alive_does_not_reuse_the_fd() {
             assert_eq!(
                 accepts.load(std::sync::atomic::Ordering::Acquire),
                 2,
-                "HTTP/1.0 Connection: keep-alive is unused; PMS is 1.1"
+                "HTTP/1.0 Connection: keep-alive is unused; the server is 1.1"
             );
             http_close(&mut *hs);
         },

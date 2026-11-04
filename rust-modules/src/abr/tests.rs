@@ -2285,7 +2285,7 @@ fn an_infeasible_raster_is_removed_before_any_scoring() {
     assert_eq!(
         hd_catalog().best_for_budget(huge_budget).map(|c| c.rung),
         Some(Rung::P1080High),
-        "a 1080p source must not make PMS upscale — 2.1x the server work for no picture",
+        "a 1080p source must not make the server upscale — 2.1x the server work for no picture",
     );
     let hd_only_device = HlsActuatorCatalog::measured().limited_to((1920, 1088), (3840, 2160));
     assert_eq!(
@@ -2315,7 +2315,7 @@ fn a_scope_source_keeps_every_rung_that_would_not_scale_it() {
     let rungs: Vec<Rung> = scope.feasible().map(|c| c.rung).collect();
     assert!(
         rungs.contains(&Rung::P1080High) && rungs.contains(&Rung::P1080M12),
-        "PMS fits 1918x802 inside a 1920x1080 box and never upscales: {rungs:?}",
+        "The server fits 1918x802 inside a 1920x1080 box and never upscales: {rungs:?}",
     );
     assert!(
         !rungs.contains(&Rung::Uhd),
@@ -6148,7 +6148,7 @@ fn an_underfilled_top_actuator_refreshes_after_stronger_service_evidence() {
     assert_eq!(
         controller.current(),
         Rung::Uhd,
-        "the actuator remains the request PMS received"
+        "the actuator remains the request the server received"
     );
     assert_eq!(
         controller.observe_next(sample(5_000, 400, 40_000)),

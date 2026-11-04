@@ -98,7 +98,7 @@ fn an_address_literal_is_told_apart_from_a_name() {
     }
     for n in [
         "nas.local",
-        "plex.example.org",
+        "media.example.org",
         "localhost",
         "999.1.2.3",
         "1.2.3",

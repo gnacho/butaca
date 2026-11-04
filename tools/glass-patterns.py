@@ -55,7 +55,7 @@ def cfg(name):
     return m.group(1) if m else None
 
 
-def launch(root: Path, pkg: str, pms: str, port: str, lens: str = "", lift: str = "", sharp: str = ""):
+def launch(root: Path, pkg: str, srv: str, port: str, lens: str = "", lift: str = "", sharp: str = ""):
     root.mkdir(parents=True, exist_ok=True)
     # the container's lens geometry, one rung per instance — `gfx::standing_sweep` reads it once
     if lens:
@@ -77,7 +77,7 @@ def launch(root: Path, pkg: str, pms: str, port: str, lens: str = "", lift: str 
     env = dict(os.environ, BUTACA_RUNTIME_DIR=str(root), BUTACA_APP_DIR=str(REPO / "pkg"),
                BUTACA_WIN="1920x1080")
     log = open(root / "stdout.log", "w")
-    return subprocess.Popen([str(SIM), pms, port], env=env, stdout=log, stderr=log)
+    return subprocess.Popen([str(SIM), srv, port], env=env, stdout=log, stderr=log)
 
 
 def drive(root: Path, pats, settle):
@@ -127,10 +127,10 @@ def main():
 
     if not SIM.exists():
         raise SystemExit("no simulator — run `make sim` first")
-    pms, port = cfg("SERVER_HOST"), None
+    srv, port = cfg("SERVER_HOST"), None
     m = re.search(r"^#define\s+SERVER_PORT\s+(\d+)", (REPO / "src/config.local.h").read_text(), re.M)
     port = m.group(1) if m else "32400"
-    if not pms:
+    if not srv:
         raise SystemExit("no SERVER_HOST in src/config.local.h")
 
     out = Path(a.out) if a.out else Path("/tmp/glass-patterns")
@@ -146,7 +146,7 @@ def main():
     procs, roots = {}, {}
     for pkg in pkgs:
         roots[pkg] = out / pkg
-        procs[pkg] = launch(roots[pkg], pkg, pms, port, lens.get(pkg, ""), lift.get(pkg, ""), sharp.get(pkg, ""))
+        procs[pkg] = launch(roots[pkg], pkg, srv, port, lens.get(pkg, ""), lift.get(pkg, ""), sharp.get(pkg, ""))
     print(f"launched {len(pkgs)} simulators; ladder of {len(pats)} grounds, {a.settle}s each "
           f"(~{len(pats) * (a.settle + 0.6) + 8:.0f}s)")
     time.sleep(8)

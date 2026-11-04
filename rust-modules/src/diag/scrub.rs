@@ -586,7 +586,7 @@ mod tests {
 
     /// The exact shape the log's own backstop was written for still cannot survive this one.
     #[test]
-    fn a_plex_token_never_survives_either_pass() {
+    fn an_access_token_never_survives_either_pass() {
         let out = kept("retranscode rk=42 -> http://10.0.0.2:32400/video/:/transcode/universal/start.mkv?protocol=http&X-Plex-Token=aBcD1234xyzQ");
         assert!(!out.contains("aBcD1234xyzQ"));
         assert!(out.contains("start.mkv"), "the diagnostic half survives");
@@ -817,7 +817,7 @@ mod tests {
     #[test]
     fn version_like_numbers_are_not_addresses() {
         for line in [
-            "pms: server 0 version=1.41.0.8992",
+            "server: server 0 version=1.41.0.8992",
             "load: v=H265 fps=23.976",
             "surface: window=1920x1080 scale=0.500",
             "feed v#12 reply=Ok",

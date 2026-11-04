@@ -64,7 +64,7 @@ CASES = [
     (FIRE, "Write", edit("/repo/rust-modules/src/dev.rs", tool="Write"), ROOT),
     (FIRE, "MultiEdit", edit("/repo/rust-modules/src/gfx.rs", tool="MultiEdit"), ROOT),
     (FIRE, "relative to root", edit("rust-modules/src/route.rs"), ROOT),
-    (FIRE, "relative to a subdir", edit("src/pms/client.rs"), "/repo/rust-modules"),
+    (FIRE, "relative to a subdir", edit("src/catalog.rs"), "/repo/rust-modules"),
     (FIRE, "relative climbing out", edit("../rust-modules/src/net.rs"), "/repo/tools"),
     (FIRE, "un-normalised absolute", edit("/repo/rust-modules/src/ui/../ff.rs"), ROOT),
     # A worktree IS its own lane: same file, but `git rev-parse` from its own cwd returns ITS root.

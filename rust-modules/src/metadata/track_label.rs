@@ -311,7 +311,7 @@ pub(crate) fn flags(label: &SubLabel, forced: bool, sdh: bool) -> (bool, bool) {
 
 /// **The one name a track row shows, from the two places a name can come from.**
 ///
-/// `pms` is `Stream.title` — what the server parsed out of the container — and `container` is what
+/// `title` is `Stream.title` — what the server parsed out of the container — and `container` is what
 /// OUR demuxer read out of the same file (`player::TrackNames`, published by `ff.rs`). They are the
 /// same tag seen twice, so they do not disagree in practice; the order matters for a different
 /// reason. Server's copy exists **before playback starts** and survives a transcode, while the
@@ -329,8 +329,8 @@ pub(crate) fn flags(label: &SubLabel, forced: bool, sdh: bool) -> (bool, bool) {
 /// second line to repeat it. `eq_ignore_ascii_case` is deliberately ASCII-only and stays that way —
 /// it is a cheap guard against `English`/`english`, not a Unicode fold, and the case it must not
 /// get wrong is the one where the two differ.
-pub(crate) fn track_name(pms: &str, container: &str, lang: &str) -> String {
-    for cand in [pms.trim(), container.trim()] {
+pub(crate) fn track_name(title: &str, container: &str, lang: &str) -> String {
+    for cand in [title.trim(), container.trim()] {
         if !cand.is_empty() && !cand.eq_ignore_ascii_case(lang) {
             return cand.to_string();
         }
@@ -398,7 +398,7 @@ mod tests {
     // ---- the moved `track_name` cases (were `ui::track_menu::tests`) ------------------------
 
     #[test]
-    fn an_mp4s_container_names_tell_apart_the_tracks_pms_reports_identically() {
+    fn an_mp4s_container_names_tell_apart_the_tracks_the_server_reports_identically() {
         let server_title = "";
         let lang = "Русский";
         let container = [
@@ -429,7 +429,7 @@ mod tests {
         assert_eq!(
             track_name("English", "Full SDH", "English"),
             "Full SDH",
-            "a useless PMS title falls through to the container's"
+            "a useless server title falls through to the container's"
         );
         assert_eq!(track_name("  ", " Full ", "English"), "Full", "both sides are trimmed");
     }

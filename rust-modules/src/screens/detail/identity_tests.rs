@@ -128,7 +128,7 @@ fn item(rk: &str, reverse: bool) -> Detail {
             season: 1, title: format!("Episode {i}"), ..Default::default() });
         d.related.push(crate::catalog::CatalogMovie { sid: ServerId::UNSET, rk: format!("r{i}"), ..Default::default() });
         d.cast.push(crate::metadata::Cast { id: i, tag: format!("Person {i}"),
-            role: "Actor".into(), tag_key: format!("plex://person/{i}"), thumb: String::new() });
+            role: "Actor".into(), tag_key: format!("catalog://person/{i}"), thumb: String::new() });
     }
     if reverse {
         d.seasons.reverse(); d.cur_season = 1;
@@ -296,7 +296,7 @@ fn reordered_detail_keys_activate_the_same_related_cast_and_episode_text_targets
     for (located, expected) in [
         (Located::Related(0), ContentArg::Detail { sid: ServerId::UNSET, rk: "r1".into() }),
         (Located::Cast(0), ContentArg::Person { sid: ServerId::UNSET, key: "1".into(),
-            guid: "plex://person/1".into(), name: "Person 1".into(), thumb: String::new() }),
+            guid: "catalog://person/1".into(), name: "Person 1".into(), thumb: String::new() }),
         (Located::Episode(0, episodes::Row::Text), ContentArg::Detail { sid: ServerId::UNSET, rk: "e1".into() }),
     ] {
         let (mut d, mut rig) = boot();

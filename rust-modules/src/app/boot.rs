@@ -588,7 +588,7 @@ pub(super) fn activate_server_owned(
     bridge.metadata_run(crate::stores::metadata::MetadataCmd::Reset);
     let _ = bridge.hubs_run(crate::stores::hubs::HubsCmd::RefetchHubs);
     let _ = bridge.browse_discover_pump();
-    log("pms: catalog activation queued");
+    log("server: catalog activation queued");
 }
 /// Everything before the loop: SDL and the window, GL, text, the poster workers, the boot gate
 /// (login / token / session / picker), every dev trigger read once, and the `App` literal —
