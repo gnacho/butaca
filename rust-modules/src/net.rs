@@ -2,17 +2,16 @@
 //! at runtime by the candidate list below (nothing is linked, and `stub/` — which this line named
 //! for months after it was deleted — is gone). The plain-HTTP socket in [`crate::stream`] can
 //! resolve names now, but it still cannot do TLS; this fills that gap. Every call is
-//! **blocking**, so callers must run it off the SDL main loop (the account and the server workers).
+//! **blocking**, so callers must run it off the SDL main loop (the control-plane workers).
 //!
-//! **It is no longer the plex.tv transport alone**, and that line stood here while it was becoming
-//! untrue. A server reached over the public internet is an `https://…plex.direct` origin — a NAME,
-//! because that is what the certificate is issued for — so the whole server control plane comes
-//! through here too whenever the origin is TLS. `crate::http` is the door that decides which of
-//! the two transports a request takes; this module is only ever the https half of it. Direct
-//! callers are `server::account` and auth's public headerless QR-image fetch. It goes through
-//! [`post_ca`]: CA-verified,
-//! unpinned, bounded sink. **This list has stood here while becoming untrue before**, which is why
-//! it is worth checking rather than trusting; that is twice.
+//! **It is no longer one service's transport alone**, and this line stood here while it was
+//! becoming untrue. A server reached over the public internet is an origin keyed to a NAME,
+//! because that is what the certificate is issued for, so the whole control plane comes through
+//! here too whenever the origin is TLS. `crate::http` is the door that decides which of the two
+//! transports a request takes, and this module is only ever the https half of it. The live caller
+//! is `crate::http`, and the lab control plane calls [`post_pinned`] directly. It goes through
+//! [`post_ca`]: CA-verified, unpinned, bounded sink. **This list has stood here while becoming
+//! untrue before**, which is why it is worth checking rather than trusting. That is twice.
 //!
 //! Only the curl *easy* API is used here; [`crate::curlio`] binds the multi API separately for the
 //! media plane. This module owns their shared process init, including the mutex callbacks required
@@ -132,8 +131,8 @@ const CURLOPT_PINNEDPUBLICKEY: c_int = 10230;
 /// **It is not pinning and must not be read as pinning**, which is the confusion
 /// [`CURLOPT_PINNEDPUBLICKEY`]'s own doc exists to prevent from the other side: this selects which
 /// roots are trusted, and any certificate chaining to one of them still validates. What it buys is
-/// independence from a store nobody can update on a television, on a path whose far end is not a
-/// Plex service and whose CA may rotate.
+/// independence from a store nobody can update on a television, on a path whose far end is a
+/// server whose CA may rotate.
 const CURLOPT_CAINFO: c_int = 10065;
 /// `CURLOPTTYPE_SLISTPOINT + 203`: a `curl_slist` of `host:port:address` entries that pre-populate
 /// the DNS cache, so the named host is never resolved. Present since 7.21.3; the entry syntax the
@@ -155,7 +154,7 @@ const CURLVERSION_FIRST: c_int = 0;
 const CURL_VERSION_ASYNCHDNS: c_int = 1 << 7;
 
 /// Is libcurl resolved? False on a device with no libcurl this app can bind, which means no
-/// plex.tv account calls or HTTPS server control — but a running app, and a log line saying why.
+/// account calls and no HTTPS control - but a running app, and a log line saying why.
 static CURL_OK: AtomicBool = AtomicBool::new(false);
 
 /// Whether two threads may enter distinct curl handles concurrently. The media multi transport
@@ -403,13 +402,13 @@ pub fn global_init() -> bool {
         crate::dynlib::Loaded::NoLibrary => {
             crate::log(
                 "net: no libcurl on this device (tried .so.4 and .so.5) — \
-                 account calls and HTTPS PMS control unavailable",
+                 account calls and HTTPS server control unavailable",
             );
             false
         }
         crate::dynlib::Loaded::Incomplete(soname, n) => {
             crate::log(&format!(
-                "net: {soname} is missing {n} symbol(s) — account calls and HTTPS PMS control unavailable"
+                "net: {soname} is missing {n} symbol(s) — account calls and HTTPS server control unavailable"
             ));
             false
         }
@@ -548,7 +547,7 @@ pub fn refuses_identity(status: u16) -> bool {
 }
 
 /// Shared capped geometric delay. Neutral retry-ladder helper (formerly `server::account`'s);
-/// `catalog.rs`'s hub-retry backoff is its one live consumer.
+/// `pms.rs`'s hub-retry backoff is its one live consumer.
 pub(crate) fn backoff(misses: u32, base: Duration, ceiling: Duration) -> Duration {
     let factor = 1u32.checked_shl(misses.min(30)).unwrap_or(u32::MAX);
     base.checked_mul(factor).unwrap_or(ceiling).min(ceiling)
@@ -626,7 +625,7 @@ pub struct Timeouts {
 
 /// The deadlines for an **API call** — a request whose answer is small and whose caller is a user
 /// waiting behind a spinner. The values every call in this app used before they were a parameter,
-/// unchanged, so nothing about plex.tv sign-in moves.
+/// unchanged, so nothing about sign-in moves.
 pub const API: Timeouts = Timeouts {
     connect_s: 8,
     total_s: 25,
@@ -635,11 +634,11 @@ pub const API: Timeouts = Timeouts {
     low_speed_s: 0,
 };
 
-/// The deadlines for a server body whose size is content-dependent (library JSON, artwork, sidecar
+/// The deadlines for a bulk body whose size is content-dependent (library JSON, artwork, sidecar
 /// subtitles). A connect normally costs at most 8 s and fewer than one byte per second for 30 s
 /// ends a stalled transfer, but a healthy transfer has no wall-clock guillotine:
 /// `CURLOPT_TIMEOUT=0` is libcurl's documented disabled value. The bulk transport that read
-/// under it went with the Plex wire layer (#166); the net suite still pins the numbers.
+/// under it went with the wire layer (#166), and the net suite still pins the numbers.
 #[cfg(test)]
 pub const BULK: Timeouts = Timeouts {
     connect_s: 8,
@@ -782,7 +781,7 @@ pub(crate) mod test_ca_bundle {
 /// Making them variants means the compiler enforces what a comment used to ask for.
 pub(crate) enum Tls<'a> {
     /// CA-verified against **the television's own trust store**. The default, and what every
-    /// plex.tv and server calls have always used — `request` is exactly this.
+    /// server call has always used - `request` is exactly this.
     Ca,
     /// CA-verified against **a PEM bundle we ship**, by absolute path. Same verification, different
     /// roots: it exists so a third-party endpoint's CA rotation is not at the mercy of a store
@@ -826,8 +825,8 @@ pub(crate) fn request_tls(
 
 /// `resolve` is a ready-made `CURLOPT_RESOLVE` entry (`host:port:address`, see
 /// [`crate::origin::ResolvePin::entry`]) for the URL's own host, or `None` to let the resolver
-/// answer. Every request whose origin carries a [`crate::origin::ResolvePin`] passes one; plex.tv
-/// calls pass `None`, and that is the difference the `nowan` trigger grades (see [`refuse_name`]).
+/// answer. A request that has a pin passes one, and every other call passes `None`, which is the
+/// difference the `nowan` trigger grades (see [`refuse_name`]).
 #[allow(clippy::too_many_arguments)]
 fn request_tls_result(
     url: &str,
@@ -1201,7 +1200,7 @@ pub fn https_post(url: &str, headers: &[String], body: &[u8]) -> Option<Resp> {
 /// Their receiver is a self-signed certificate on a developer's Mac. Redirects are OFF (a pinned
 /// endpoint that redirects is not the endpoint) and the response body is capped: the receiver
 /// answers one small JSON object, and this is the one transport in the app whose far end is not a
-/// Plex service.
+/// media server.
 #[cfg(feature = "lab-diagnostics")]
 pub(crate) fn post_pinned(
     url: &str,
@@ -1235,9 +1234,9 @@ pub(crate) fn post_pinned(
 ///
 /// What a telemetry sender genuinely needs beyond [`https_post`] is three other things:
 ///
-/// * **a bounded response sink.** `https_post` passes `max_body: None`. plex.tv is a service this
-///   app is built around; a telemetry endpoint is not, and an unbounded sink on a 1.68 GB
-///   television is a memory risk for a reply we only read a status code from;
+/// * **a bounded response sink.** `https_post` passes `max_body: None`. The media server is a
+///   service this app is built around. A telemetry endpoint is not, and an unbounded sink on a
+///   1.68 GB television is a memory risk for a reply we only read a status code from.
 /// * **its own deadlines.** [`API`] is tuned for a call a person is waiting on. A background flush
 ///   holding a worker for 25 s to report a crash that already happened has the priority backwards;
 /// * **our own roots, when we ship them.** The device's trust store was frozen in 2019 and cannot
@@ -1294,14 +1293,14 @@ fn shipped_ca_bundle(dir: &std::path::Path) -> Option<String> {
 /// debugging a 400 and guessing at one.
 const TELEMETRY_MAX_REPLY: usize = 4096;
 
-/// Redirect-following HTTPS GET for a PUBLIC, credential-free resource. The QR image fetch is
-/// the only caller: at most five HTTP(S)-only redirects are followed, and an HTTPS request may
-/// never downgrade. Account/server requests keep redirects off because replayed headers/URLs
-/// carry tokens. The `nowan` gate shared by the three resolver doors ([`request_tls_result`],
-/// [`crate::curlio`] and [`crate::stream`]): `true` when `/tmp/butaca-nowan` is armed and `host` is
-/// a NAME rather than a literal, i.e. when a dead resolver would have refused it. The `slow`
-/// variant first spends `connect_s`, the budget a worker would have lost waiting on that resolver.
-/// `false` without the trigger, and at compile time without `devtriggers`.
+/// Redirect-following HTTPS GET for a PUBLIC, credential-free resource. The QR image fetch is the
+/// only caller: at most five HTTP(S)-only redirects are followed, and an HTTPS request may never
+/// downgrade. Account/server requests keep redirects off because replayed headers/URLs carry tokens.
+/// The `nowan` gate shared by the three resolver doors ([`request_tls_result`],
+/// [`crate::curlio`] and [`crate::stream`]): `true` when `/tmp/butaca-nowan` is armed and
+/// `host` is a NAME rather than a literal, i.e. when a dead resolver would have refused it. The
+/// `slow` variant first spends `connect_s`, the budget a worker would have lost waiting on that
+/// resolver. `false` without the trigger, and at compile time without `devtriggers`.
 pub(crate) fn refuse_name(host: &str, connect_s: c_long) -> bool {
     let Some(nw) = crate::dev::no_wan() else {
         return false;

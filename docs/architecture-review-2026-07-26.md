@@ -706,7 +706,7 @@ Recorded so the next reviewer does not re-derive them. Read with §5.
 - **`hero_button_at`'s sentinel namespace is a four-way architecture defect.** Both consumers guard
   `b >= 0` and `set_hero_focus` clamps, so nothing misroutes; `hero_pill_index` already centralises
   the packing by design (`125a828`). Residual: return `Option<usize>` from `home.rs:211`, ~6 lines.
-- **`library::enter` silently no-ops on zero sections.** Unreachable: `install_pms` runs
+- **`library::enter` silently no-ops on zero sections.** Unreachable: `install_server` runs
   `ensure_sections()` before Home is interactive (`app.rs:323`), and with zero sections
   `set_hero_focus`'s clamp and the `i > 0` pointer guard both close the entry.
 - **Eight non-exhaustive route chains need a `Screen` trait.** Already refuted in §5 on different
@@ -838,12 +838,12 @@ which files exist there is **unverified** (not checked on-device for this review
 the rasterization contract: `tools/font-hint-audit.py`'s guarantee about the `theme::size` ladder
 holds only for the scripts the bundled face covers. **medium** → **Wave 3**
 
-**C11 — boot presents no frame at all until two blocking server GETs.** `install_pms`
-(`app.rs:316-325`) runs `pms::pms_fetch_hubs()` (`:321`) and `browse::ensure_sections()` (`:323`)
+**C11 — boot presents no frame at all until two blocking server GETs return.** `install_server`
+(`app.rs:316-325`) runs `catalog::pms_fetch_hubs()` (`:321`) and `browse::ensure_sections()` (`:323`)
 synchronously, and is called at `app.rs:373` (dev token) and `:386` (stored session) — both
 *before* the event loop; the first `SDL_GL_SwapWindow` is at `app.rs:1993`/`:2030`, inside it.
 Combined with the confirmed absence of a connect deadline (§2.4, `stream.rs:122-126`), the boot
-case against an unreachable server is not "a frozen UI" — it is a window that has never had content,
+case against an unreachable the server is not "a frozen UI" — it is a window that has never had content,
 for the kernel's full SYN-retry budget, on the exact path SAM watches to decide the launch
 succeeded. *Fix:* swap one frame before any socket is opened, and put the boot catalog fetch behind
 the `Load<T>` state item 7 already introduces. **medium** → **Wave 1**, with item 9

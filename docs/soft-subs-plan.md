@@ -31,7 +31,7 @@ The body is a WebVTT document, **streamed progressively in sync with the active 
 transcode session** (bytes flow only while the video transcode is being consumed). Because it
 carries the *same* `session=butaca-{rk}` id and the *same* `offset=` as the concurrent
 `start.mkv`, its cue timeline is identical to the fed video timeline (§4). `subtitles=auto`
-(not `burn`) tells the server to emit sidecar text, not to bake pixels.
+(not `burn`) tells server to emit sidecar text, not to bake pixels.
 
 ---
 
@@ -42,7 +42,7 @@ Two subtitle mechanisms exist today (see `route.rs` header comment and `track_me
 | Mechanism | Selected by | Produced by | Rendered by |
 |---|---|---|---|
 | **Soft, client-rendered** (direct-play only) | `desired_sub_idx` (index, `-1`=off) via `player::request_subtitle` | MKV demuxer `active_sub_track` → `push_subtitle_cue` → `SHARED.sub_cues` | `player_hud::draw_subtitles` ← `active_subtitle(playpos_ns())` |
-| **Burn, server-side** (transcode) | `route::CUR_SUB_SID` via `route::set_subtitle` | the server bakes it into the H264 plane (`&subtitles=burn`) | (already pixels) |
+| **Burn, server-side** (transcode) | `route::CUR_SUB_SID` via `route::set_subtitle` | server bakes it into the H264 plane (`&subtitles=burn`) | (already pixels) |
 
 This plan adds a **third producer for the *same* soft render sink**: a WebVTT stream thread
 that fills `SHARED.sub_cues` during a transcode. The render side (`active_subtitle` +
@@ -399,7 +399,7 @@ demux_pts + disp_base`, and the transcode is requested 0-based at content `T` so
 `engine.rs:388-396`, `route.rs:130-133`.)
 
 The WebVTT sidecar is fetched with the **same** `session=` and **same** `offset=T` as the
-concurrent `start.mkv`, so the server rebases its cue times to **0 at T** exactly like the fed video
+concurrent `start.mkv`, so server rebases its cue times to **0 at T** exactly like the fed video
 PTS. Therefore a parsed cue time `vtt_ns` relates to content time as `vtt_ns = content − T`,
 identical to `demux_pts`. To land on the store's expected clock (content-time ns, the clock
 `active_subtitle(playpos_ns())` compares against), add the same `disp_base` the video uses:
@@ -423,7 +423,7 @@ Covered cases:
 | **Retranscode / audio-switch @ T** | T | T·1e9 | content−T | content | ✓ aligned |
 | Direct-play (demuxer path, unchanged) | — | 0 | content | content | ✓ aligned |
 
-**Why sync survives keyframe snap.** `offset` is quantized to whole seconds and the server's
+**Why sync survives keyframe snap.** `offset` is quantized to whole seconds and server's
 `fastSeek` may snap the transcode 0-point to a nearby keyframe, so `playpos` can drift from
 *true* content time by up to a GOP after a transcode seek. But the subtitle stream is the
 **same session**, snapped to the **same** 0-point, so its cues drift *identically* — subtitle-
@@ -497,7 +497,7 @@ transcode so the video plane is never baked (subtitles ride the sidecar instead)
 ```
 
 **(c) `route.rs::put_selection` (`route.rs:186-198`)** — keep forcing the server-side selection
-to *no burned sub* (`subtitleStreamID=0`), so the server never default-selects+burns one. The chosen
+to *no burned sub* (`subtitleStreamID=0`), so server never default-selects+burns one. The chosen
 sub id goes only to `transcode_subtitles_url`, not the PUT:
 
 ```diff
@@ -518,7 +518,7 @@ re-transcodes video, and §2.4 re-opens the subs stream on the new offset.
 
 **Why the server would now emit soft, not burn.** The advertised client profile
 (the client-profile header, `route.rs:156-158`) declares only a video transcode target and
-no soft-sub capability, so the server defaults an *attached-to-the-video* subtitle to burn. With (b)+(c)
+no soft-sub capability, so server defaults an *attached-to-the-video* subtitle to burn. With (b)+(c)
 the video request carries no subtitle at all, and the explicit `/subtitles?…&subtitles=auto`
 call asks specifically for the sidecar text stream — the endpoint that returns `text/vtt`.
 

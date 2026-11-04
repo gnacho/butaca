@@ -1,5 +1,5 @@
 //! **The one door out of the control plane** — the single place that decides which transport a
-//! Plex REST request takes, and the only place that knows there is more than one.
+//! control-plane REST request takes, and the only place that knows there is more than one.
 //!
 //! ## Why this file exists
 //!
@@ -7,19 +7,18 @@
 //!
 //! * [`crate::stream`] is a raw TCP socket. It resolves through `getaddrinfo` and dials either
 //!   address family, it is fast, and it speaks **cleartext only**.
-//! * [`crate::net`] is libcurl. It also validates certificates, and it is what plex.tv has always
-//!   been reached through.
+//! * [`crate::net`] is libcurl. It also validates certificates, and it is what the account
+//!   service has always been reached through.
 //!
 //! Media makes its own scheme decision under `ff.rs`: the same `stream.rs` socket for plaintext,
 //! or [`crate::curlio`]'s interruptible libcurl-multi pull source for HTTPS. That is deliberately
 //! outside this REST request façade.
 //!
 //! **TLS is now the only thing that separates them**, which `stream.rs`'s own module doc says in
-//! those words. Until this file, the server control plane was hard-wired to the first of the two,
-//! and that is the whole of why a reviewer with no Plex Media Server on their LAN dead-ends:
-//! an account signed in from anywhere else reaches its servers over
-//! `https://<something>.plex.direct` — a name carrying a certificate, and cleartext to the address
-//! behind it fails validation by design (`server::origin`).
+//! those words. Until this file, the control plane was hard-wired to the first of the two, and
+//! that is the whole of why a reviewer with no server on their LAN dead-ends: an account signed in
+//! from anywhere else reaches its servers over HTTPS on a public name that carries a certificate,
+//! and cleartext to the address behind it fails validation by design (`server::origin`).
 //!
 //! So the dispatch is on [`Origin::scheme`] and nowhere else. An [`Origin`] is parsed from a URL
 //! and never rebuilt from an address, so by the time a request reaches here the question "which
@@ -46,20 +45,20 @@
 //! ## Two asymmetries worth knowing before you read a failure
 //!
 //! **Deadlines.** Small API calls take [`net::API`] (8 s connect, 25 s total). Content-dependent
-//! the server reads take [`net::BULK`] instead: the same connect setting, a 1-byte/s-for-30-s
-//! low-speed guard, and no whole-transfer timeout, so a healthy large library/art/subtitle response
-//! is not cut off at 25 s while a stalled body is still bounded. The connect value is not a promise
-//! over a synchronous resolver when `NOSIGNAL` is set; `net::global_init` logs the runtime's
-//! `AsynchDNS` feature bit. The plaintext arm cannot select either policy: `stream.rs` compiles in
-//! its own 2 s connect and 15 s `SO_RCVTIMEO`.
+//! library reads take [`net::BULK`] instead: the same connect setting, a 1-byte/s low-speed
+//! guard held for 30 s, and no whole-transfer timeout, so a healthy large library/art/subtitle
+//! response is not cut off at 25 s while a stalled body is still bounded. The connect value is not
+//! a promise over a synchronous resolver when `NOSIGNAL` is set; `net::global_init` logs the
+//! runtime's `AsynchDNS` feature bit. The plaintext arm cannot select either policy: `stream.rs`
+//! compiles in its own 2 s connect and 15 s `SO_RCVTIMEO`.
 //!
-//! **Redirects.** The plaintext transport returns a 3xx response and never follows it. The TLS arm
-//! does the same for the server requests. This is a correctness rule and a credential boundary:
-//! every server path carries `X-Plex-Token` in its query string, so an automatic cross-origin
-//! follow would give libcurl permission to replay a token-bearing URL outside the origin we
-//! selected and verified. The plex.tv account wrappers also keep redirects off because their custom
-//! headers carry a token. Only the public, headerless QR-image fetch may follow one: at most five
-//! hops, HTTP(S) only, and never from HTTPS down to HTTP.
+//! **Redirects.** The plaintext transport returns a 3xx response and never follows it. The TLS
+//! arm does the same for control-plane requests. This is a correctness rule and a credential
+//! boundary: the routes that take a credential carry it in the query string, so an automatic
+//! cross-origin follow would give libcurl permission to replay a token-bearing URL outside the
+//! origin we selected and verified. The account wrappers also keep redirects off because their
+//! custom headers carry a token. Only the public, headerless QR-image fetch may follow one: at
+//! most five hops, HTTP(S) only, and never from HTTPS down to HTTP.
 //!
 //! **A short body is reported on one arm only.** `stream.rs` logs a line when a response ends
 //! before its `Content-Length` (`note_short_body` — the difference between "the JSON would not
@@ -130,21 +129,19 @@ impl Reply {
     }
 }
 
-/// `Accept: application/json` as one header line, without the CRLF — see [`request`] for
-/// the framing rule. The server answers **XML** for `Accept: */*` or no Accept and only JSON for
-/// an explicit `application/json`, and a request that forgets it silently parses to zero items
-/// rather than failing (`plex/CLAUDE.md`), so this constant is shared rather than spelled per call
-/// site.
+/// `Accept: application/json` as one header line, without the CRLF — see [`request`] for the
+/// framing rule. The old backend answered **XML** for `Accept: */*` or no Accept and only JSON for
+/// an explicit `application/json`, and a request that forgot it silently parsed to zero items
+/// rather than failing, so this constant is shared rather than spelled per call site.
 pub(crate) const ACCEPT_JSON: &str = "Accept: application/json";
 
 /// **The one entry point.** One request to `origin` for `path`, over whichever transport that
 /// origin's scheme names.
 ///
-/// `path` is everything after the authority — it must already carry its query string and, for
-/// the server, its `X-Plex-Token` (appended by `server::client::with_token`, the one token
-/// choke point). `headers` are full `"Name: value"` lines **without** CRLF; this function adds
-/// the framing each transport wants, which is the one place the two disagree about the shape of
-/// a header.
+/// `path` is everything after the authority: it must already carry its query string and, on the
+/// routes that take one, its token (the client's own URL builders append it).
+/// `headers` are full `"Name: value"` lines **without** CRLF; this function adds the framing each
+/// transport wants, which is the one place the two disagree about the shape of a header.
 ///
 /// `None` is a transport failure. Anything the server actually answered — including a `401` and a
 /// `500` — comes back as `Some`.
@@ -158,7 +155,7 @@ pub(crate) fn request(
     request_with(origin, path, method, headers, pin, &[]).response()
 }
 
-/// A JSON-body POST: the one shape Jellyfin's control plane needs that Plex's never did
+/// A JSON-body POST: the one shape Jellyfin's control plane needs that the old wire never had
 /// (`AuthenticateByName`, `Sessions/Playing`, the view-state writes). The caller's `headers`
 /// ride alongside the two this function adds (`Accept`, `Content-Type`, `Content-Length` — the
 /// body is sized here, so the head and the bytes on the wire cannot disagree). The ordinary API
@@ -198,7 +195,7 @@ fn request_with(
     }
 }
 
-/// Which credential shape a request carries — the Plex arm's rule and the Jellyfin flavor's
+/// Which credential shape a request carries: the legacy arm's rule and the Jellyfin flavor's
 /// relaxation answer DIFFERENT questions, so the classifier names the shape before any policy
 /// runs. `None` is "no credential", and every policy admits it.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -217,7 +214,7 @@ fn credential_carried(path: &str, headers: &[&str]) -> Credential {
     // and what our image/stream URLs use) or inside the `Authorization` header under its own
     // `MediaBrowser` scheme — since Jellyfin 12 the ONLY accepted spelling: the legacy
     // `X-Emby-Token` / `X-Emby-Authorization` headers were removed server-side. The name check
-    // for everything else is deliberately EXACT: a bare `Authorization` belongs to the Plex
+    // for everything else is deliberately EXACT: a bare `Authorization` belongs to the legacy
     // arm's rule (and to every bearer scheme), and substring-matching it onto Jellyfin's old
     // identity header would route Jellyfin's credentials through a policy written for another
     // service.
@@ -232,7 +229,7 @@ fn credential_carried(path: &str, headers: &[&str]) -> Credential {
         let name = name.trim();
         if name.eq_ignore_ascii_case("x-plex-token") || name.eq_ignore_ascii_case("authorization") {
             // `Authorization: MediaBrowser ...` is Jellyfin's own scheme; it answers to the
-            // Jellyfin plaintext policy, not to the Plex arm a generic Authorization obeys.
+            // Jellyfin plaintext policy, not to the legacy arm a generic Authorization obeys.
             if name.eq_ignore_ascii_case("authorization")
                 && value.trim_start().starts_with("MediaBrowser")
             {
@@ -283,11 +280,11 @@ pub(crate) fn credential_transport_allowed_by_policy(
     match credential_carried(path, headers) {
         Credential::None => true,
         Credential::Plex => crate::grant::allowed_under(policy, origin),
-        // Jellyfin has no *.plex.direct equivalent: a home server is plain HTTP on a LAN
+        // Jellyfin has no public wildcard name equivalent: a home server is plain HTTP on a LAN
         // address in the overwhelming majority of installs, so its credential shapes may cross
         // plaintext ONLY to the address the credential was issued for — the installed client's
         // origin, the one signed in against (`jellyfin::plaintext_host_allowed`). TLS, a
-        // developer build and a live consented grant admit everything the Plex arm admits.
+        // developer build and a live consented grant admit everything the legacy arm admits.
         Credential::Jellyfin => {
             crate::grant::allowed_under(policy, origin)
                 || crate::jellyfin::plaintext_host_allowed(origin)
@@ -325,11 +322,11 @@ fn plaintext_credential_report(
     allowed: bool,
 ) -> Option<&'static str> {
     let (bit, line) = if policy == CredentialPolicy::AllowPlaintext {
-        (1, "security: developer build allows plaintext PMS credentials")
+        (1, "security: developer build allows plaintext server credentials")
     } else if allowed {
-        (2, "security: plaintext PMS credentials sent under a consented grant")
+        (2, "security: plaintext server credentials sent under a consented grant")
     } else {
-        (4, "security: refused plaintext PMS credentials; HTTPS required")
+        (4, "security: refused plaintext server credentials; HTTPS required")
     };
     (seen.fetch_or(bit, std::sync::atomic::Ordering::Relaxed) & bit == 0).then_some(line)
 }
@@ -445,13 +442,14 @@ fn plaintext(
 
 /// The TLS arm: [`crate::net`]'s libcurl.
 ///
-/// The URL is `origin.base()` + `path`, so the authority is the one the origin PARSED — the
-/// `plex.direct` name a certificate is issued for, bracketed if it is a v6 literal — and never a
+/// The URL is `origin.base()` + `path`, so the authority is the one the origin PARSED (the
+/// public name a certificate is issued for, bracketed if it is a v6 literal) and never a
 /// pair reassembled from an address. `net` verifies peer and host (`SSL_VERIFYPEER` +
 /// `SSL_VERIFYHOST=2`), so a retained public or matched-LAN candidate must authenticate the name
-/// plex.tv advertised. Unmatched private-LAN connections on a share are removed earlier by
-/// `probe::candidates`; validation could reject a stranger there, but could not refund its 8 s
-/// sequential connect setting (subject to the synchronous-resolver caveat in the module doc).
+/// the account service advertised. Unmatched private-LAN connections on a share are removed
+/// earlier by `probe::candidates`. Validation could reject a stranger there, but it could not
+/// refund its 8 s sequential connect setting (subject to the synchronous-resolver caveat in the
+/// module doc).
 ///
 /// `pin`, when the origin has one, is handed to `net` as a ready `CURLOPT_RESOLVE` entry, so the
 /// named host is dialled at the address recorded beside it and no resolver is consulted. A pin for
@@ -472,13 +470,13 @@ fn tls(
         .filter(|p| p.host() == origin.host() && p.port() == origin.port())
         .map(crate::net::resolve::entry_of);
     let owned: Vec<String> = headers.iter().map(|h| (*h).to_string()).collect();
-    // A POST carries a body even when that body is empty — the Plex control plane's POSTs put
+    // A POST carries a body even when that body is empty: the legacy control plane's POSTs put
     // their params in the query string — while GET and the body-less PUT carry none. `net` turns
     // the second shape into `CURLOPT_CUSTOMREQUEST`.
     let body: Option<&[u8]> = matches!(method, Method::Post).then_some(&[][..]);
     let (timeouts, max_body) = (crate::net::API, None);
-    // The server redirects are responses, never instructions: the path already carries a token.
-    // Keeping `FOLLOWLOCATION` off also makes the TLS arm's 3xx semantics match the plaintext arm.
+    // Server redirects are responses, never instructions: the path already carries a token. Keeping
+    // `FOLLOWLOCATION` off also makes the TLS arm's 3xx semantics match the plaintext arm.
     match crate::net::request_result_evidence(
         &url,
         &owned,
@@ -587,7 +585,7 @@ mod tests {
         );
         assert!(
             !r(301).ok(),
-            "a redirect is a response, not a successful PMS operation"
+            "a redirect is a response, not a successful server operation"
         );
         assert!(!r(500).ok());
     }
@@ -610,12 +608,12 @@ mod tests {
         let store = CredentialPolicy::HttpsOnly;
         assert_eq!(
             plaintext_credential_report(&seen, store, false),
-            Some("security: refused plaintext PMS credentials; HTTPS required")
+            Some("security: refused plaintext server credentials; HTTPS required")
         );
         assert_eq!(plaintext_credential_report(&seen, store, false), None, "once per outcome");
         assert_eq!(
             plaintext_credential_report(&seen, store, true),
-            Some("security: plaintext PMS credentials sent under a consented grant"),
+            Some("security: plaintext server credentials sent under a consented grant"),
             "a consented send after a refusal is a different outcome"
         );
         assert_eq!(plaintext_credential_report(&seen, store, true), None);

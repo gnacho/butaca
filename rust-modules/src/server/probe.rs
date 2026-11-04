@@ -1,14 +1,14 @@
-//! Address and probe vocabulary that outlived the plex.tv discovery engine: [`Location`]
+//! Address and probe vocabulary that outlived the account discovery engine: [`Location`]
 //! tiers an address (local, remote, relay) and [`Outcome`] grades one identity-probe answer.
 //! Pure policy, no I/O. The candidate ranking engine itself (`Candidate`, `candidates`, `plan`)
-//! went out with the plex.tv account surface, and `configured_tier` — the boot-time address-shape
-//! tier guess — went out with the DevServer boot world (#166); [`PlaintextEligibility`]
+//! went out with the account service surface, and `configured_tier`, the boot-time address-shape
+//! tier guess, went out with the DevServer boot world (#166). [`PlaintextEligibility`]
 //! stays as `grant`'s closed reason vocabulary.
 pub use crate::origin::dial_port;
 use serde::{Deserialize, Serialize};
 
-/// Where an address sits relative to us. The ranking axis every Plex client agrees on, ordered
-/// best-first by declaration so the derived `Ord` *is* the preference.
+/// Where an address sits relative to us. The ranking axis every client of the old account service
+/// agreed on, ordered best-first by declaration so the derived `Ord` *is* the preference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Location {
@@ -16,7 +16,7 @@ pub enum Location {
     Local,
     /// Reached over the internet, directly to the owner's address.
     Remote,
-    /// Plex's relay tunnel: ~2 Mbit/s, server-side transcode to fit. Last resort.
+    /// The relay tunnel: ~2 Mbit/s, server-side transcode to fit. Last resort.
     Relay,
 }
 
@@ -61,10 +61,10 @@ pub(crate) enum PlaintextEligibility {
     /// The server requires secure connections (`httpsRequired`). Its owner's decision; never
     /// overridden.
     HttpsRequired,
-    /// The plaintext connection is not one plex.tv marked `local` — remote or relay. Never offered:
-    /// that is the owner's credential crossing the internet unencrypted.
+    /// The plaintext connection is not one the account service marked `local`, so it is remote or
+    /// relay. Never offered: the owner's credential would cross the internet unencrypted.
     NotLocal,
-    /// plex.tv did not see this television behind the server's own public address
+    /// The account service did not see this television behind the server's own public address
     /// (`publicAddressMatches == false`), so "the same network" is unproven.
     NotSameNetwork,
     /// The host the credential would travel to is not a numeric private literal (RFC 1918,

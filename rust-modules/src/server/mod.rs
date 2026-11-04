@@ -1,16 +1,12 @@
-//! Typed Plex API layer — one method per server operation the app uses.
+//! The server layer's remaining surfaces: the client's identity, which advertised addresses are
+//! worth dialling, the link policy, the persisted session record, the server's self-description
+//! and the per-profile library pins.
 //!
-//! Replaces every hand-built Plex path/query string in the app with a typed `Client`
-//! method. Percent-encoding
-//! (`crate::catalog::urlenc_str`), the `X-Plex-Token` injection, and the origin-aware HTTP(S)
-//! transport (`crate::http`) are centralised in `client.rs`, so no op file can bypass them.
-//! Response bodies deserialize into `serde` DTOs (`crate::media`).
-//!
-//! The read layer (`catalog`/`metadata`/`posters`/`detail`) and the playback layer (`route.rs`
-//! decision/start/stop/selection, PlayQueue/identity, and the player's `/:/timeline`) use this
-//! typed client.
+//! The typed client this module used to head (`Client`, one method per operation, with
+//! percent-encoding and credential injection in `client.rs`) went with the wire layer (#166).
+//! The read layer asks `crate::jellyfin` instead, and playback keeps its own route code.
 
-pub(crate) mod identity; // ONE X-Plex-* identity for both transports (plex.tv headers + PMS query)
+pub(crate) mod identity; // ONE credential identity for both transports (account + server query)
 
 // WHICH servers exist and which one is current. The SERVER REGISTRY itself now lives in
 // `crate::registry` (backend-neutral: `ServerId`, `ServerFacts` and the per-slot state machine are
@@ -25,10 +21,10 @@ use crate::registry as servers;
 pub(crate) const SIDECAR_MAX_BYTES: usize = 4 * 1024 * 1024;
 
 // The relay link policy (`link_policy`): pure policy over `probe::Location`. The transcoder
-// request builders it used to govern went with the Plex wire layer.
+// request builders it used to govern went with the retired wire layer.
 mod link;
 
-// The server's self-description (version + Plex Pass tristate), refreshed by `install` on every
+// The server's self-description (version + paid-tier tristate), refreshed by `install` on every
 // session path. pub(crate) because it is a DIAGNOSTICS surface with readers outside this layer
 // (`app::diagnostics`, `player::error_shape`) — and deliberately nothing else: see its module doc for
 // why subscription state must never become a routing input.
@@ -52,10 +48,9 @@ pub(crate) use crate::origin;
 // 8-second timeout and a probe that answers as the wrong machine.
 pub(crate) mod probe;
 
-// Compatibility alias for Plex internals. The credential authority and plaintext consent
-// lifecycle live in crate::grant so shared HTTP transport code need not import through Plex.
-// (Unused since the server registry moved to crate::registry — its `super::grant` calls went
-// with it — so the alias is gone.)
+// The credential authority and plaintext consent lifecycle live in `crate::grant`, so shared
+// HTTP transport code need not import through this layer. The compatibility alias that used to
+// re-export it went with the server registry's move to `crate::registry`.
 
 // The ONE door the out-of-layer registry (crate::registry) had back into this layer's private
 // surface — minting a slot `Client` and triggering the self-description refresh — went with the

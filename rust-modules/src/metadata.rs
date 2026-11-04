@@ -1,6 +1,6 @@
 //! Item detail data layer for the detail page: full metadata (genres, cast, crew,
 //! audio/subtitle streams), and the TV season/episode hierarchy — fetched on demand into a single
-//! CURRENT item. Idiomatic Rust (String/Vec), like the browse catalog (catalog.rs) — the fixed C
+//! CURRENT item. Idiomatic Rust (String/Vec), like the browse catalog (pms.rs) — the fixed C
 //! buffers from the C port are gone.
 use std::os::raw::c_int;
 pub(crate) mod record;
@@ -233,7 +233,7 @@ pub(crate) struct Spot {
     pub(crate) season: Option<i64>,
 }
 
-/// Plex's resume rule, in ONE place (home Continue-Watching, the detail Play button, and the
+/// The resume rule, in ONE place (home Continue-Watching, the detail Play button, and the
 /// butaca-play harness all apply it): resume only past 10s and before 95% watched, else start
 /// from the beginning. Both args are MILLISECONDS; the returned position is NANOSECONDS
 /// (what `player::resume_at` takes).
@@ -263,22 +263,22 @@ pub(crate) fn friendly_codec(codec: &str) -> String {
     }
 }
 
-/// One credit on the Cast & Crew shelf. The server ships crew (`Director[]`/`Writer[]`) in the SAME
-/// shape as the actors (`Role[]`) minus the `role` attribute, so a crew credit is this same struct
-/// with its JOB in `role` — see [`crew_credits`].
+/// One credit on the Cast & Crew shelf. Server ships crew (`Director[]`/`Writer[]`) in the SAME shape
+/// as the actors (`Role[]`) minus the `role` attribute, so a crew credit is this same struct with
+/// its JOB in `role` — see [`crew_credits`].
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Cast {
     pub(crate) tag: String,   // person's name
     pub(crate) role: String,  // character (an actor) — or the job, "Director"/"Writer" (crew)
-    pub(crate) thumb: String, // headshot (often an external metadata-static.plex.tv URL)
+    pub(crate) thumb: String, // headshot (often an external metadata CDN URL)
     /// The person's numeric library id (`Role[].id`), 0 when absent.
     pub(crate) id: i64,
-    /// The person's global Plex guid (`Role[].tagKey`) — the id's stand-in when the server
+    /// The person's global metadata guid (`Role[].tagKey`), the id's stand-in when the server
     /// omits the numeric one.
     pub(crate) tag_key: String,
 }
 
-/// Stable identities for the app-owned jobs derived from the server crew arrays. The keys stay in
+/// Stable identities for the app-owned jobs derived from server crew arrays. The keys stay in
 /// recorded metadata and semantic comparisons; only a display accessor translates them.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CrewRole {
@@ -320,8 +320,8 @@ impl Cast {
     }
 }
 
-/// What the server says about a video stream's **Dolby Vision** layering — read together, because
-/// the only question worth asking of them is a joint one: **is the base layer, alone, a correct
+/// What the server says about a video stream's **Dolby Vision** layering — read together, because the
+/// only question worth asking of them is a joint one: **is the base layer, alone, a correct
 /// picture?**
 ///
 /// It has to be a joint question because the buffer-feed pipeline has no other option. We feed one
@@ -679,16 +679,16 @@ pub(crate) fn prewarm_dv_latches() {
     let _ = dv_node_suppressed();
 }
 
-// `Default` is for TESTS: every field is a zero/empty that means "the server did not say", so
-// a fixture can name the two or three fields its case is about instead of the fifteen it is not.
+// `Default` is for TESTS: every field is a zero/empty that means "the server did not say", so a fixture
+// can name the two or three fields its case is about instead of the fifteen it is not.
 #[derive(Clone, Default)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) struct Stream {
-    pub(crate) id: i64,      // Plex stream id (for &audioStreamID / &subtitleStreamID)
-    pub(crate) index: i64,   // PMS stream index (container order) — the ordinal mapping sorts by it
+    pub(crate) id: i64,      // media stream id (for &audioStreamID / &subtitleStreamID)
+    pub(crate) index: i64,   // server stream index (container order) — the ordinal mapping sorts by it
     pub(crate) lang: String, // display name ("English")
     pub(crate) lang_code: String, // ISO code ("eng") — the route's language preference matches this
-    /// The server `Stream.languageTag` — the BCP-47 tag ("es-419", "en-GB"), region and all, where
+    /// Server `Stream.languageTag` — the BCP-47 tag ("es-419", "en-GB"), region and all, where
     /// `lang_code` is only the ISO-639 primary subtag. `metadata::track_label`'s region fallback
     /// is the one reader (a nameless track with a regional tag names the region instead of
     /// nothing). This struct is a recorded wire value: controlled replay carries whole `Detail`s
@@ -705,13 +705,13 @@ pub(crate) struct Stream {
     /// seven same-language AC3 tracks apart in `screens::tracks_panel`, where language and codec alone
     /// cannot.
     pub(crate) bitrate: i64,
-    /// The codec profile, lower-case as the server sends it. **On an audio track this is where
-    /// Atmos is** — `"dolby digital plus + dolby atmos"` (probed live 2026-08-21); on the video
-    /// track it is `"main 10"`. See [`Stream::has_atmos`].
+    /// The codec profile, lower-case as the server sends it. **On an audio track this is where Atmos
+    /// is** — `"dolby digital plus + dolby atmos"` (probed live 2026-08-21); on the video track it
+    /// is `"main 10"`. See [`Stream::has_atmos`].
     pub(crate) profile: String,
     /// Video track only: bits per component (10 for Main 10); 0 = not said.
     pub(crate) bit_depth: i64,
-    /// Video track only: chroma subsampling as the server spells it, e.g. `"4:2:0"`.
+    /// Video track only: chroma subsampling as server spells it, e.g. `"4:2:0"`.
     pub(crate) chroma: String,
     pub(crate) title: String,
     pub(crate) sdh: bool,
@@ -722,24 +722,24 @@ pub(crate) struct Stream {
     /// cannot reach it; on direct play a TEXT sidecar is fetched and drawn by `player::sidecar`
     /// instead ([`Stream::sidecar_renderable`]), and a transcode burns it.
     pub(crate) external: bool,
-    /// The server `Stream.key` — the sidecar's delivery path (`/library/streams/{id}`). Empty for
-    /// every embedded stream, which is exactly how `external` is derived.
+    /// Server `Stream.key` — the sidecar's delivery path (`/library/streams/{id}`). Empty for every
+    /// embedded stream, which is exactly how `external` is derived.
     pub(crate) key: String,
-    /// The server `Stream.selected` — the server's CURRENT pick for this part, i.e. the track
-    /// a user chose on ANY Plex client (phone, web, another TV) and the one `select_streams`
-    /// writes. `route`'s selection ladder prefers it over its own defaults, which is what makes
-    /// a pick made elsewhere survive here instead of being silently overwritten. NB for AUDIO
-    /// the server marks a selected stream on essentially every part — for an untouched one that is
-    /// just the container `default` echoed back — so `route::pick_dp_audio` only treats it as
-    /// a choice when it names a DIFFERENT stream, and never as a reason to transcode. Read its doc
-    /// before using this flag anywhere else.
+    /// Server `Stream.selected` — the server's CURRENT pick for this part, i.e. the track a user
+    /// chose on ANY client (phone, web, another TV) and the one `select_streams` writes.
+    /// `route`'s selection ladder prefers it over its own defaults, which is what makes a pick
+    /// made elsewhere survive here instead of being silently overwritten. NB for AUDIO the server
+    /// marks a selected stream on essentially every part — for an untouched one that is just the
+    /// container `default` echoed back — so `route::pick_dp_audio` only treats it as a choice when
+    /// it names a DIFFERENT stream, and never as a reason to transcode. Read its doc before using
+    /// this flag anywhere else.
     pub(crate) selected: bool,
-    /// Audio track only: a 1.43.4+ server with Plex Pass can honor
-    /// `boostDialog=1`/`normalizeLoudness=1` for this track on the transcoder (issue #266). Same
-    /// round-trip concern as `language_tag`: a `Detail` recorded before this field existed carries
-    /// no key for it, so `skip_serializing_if` keeps a false value off the wire and `default`
-    /// reads the recording back as false — never a confident "capable" for a fixture that never
-    /// said so.
+    /// Audio track only: the server reported the capability on 1.43.4+ behind its paid tier, so
+    /// this records whether it can honor `boostDialog=1`/`normalizeLoudness=1` for this track on
+    /// the transcoder (issue #266). Same round-trip concern as `language_tag`: a `Detail` recorded
+    /// before this field existed carries no key for it, so `skip_serializing_if` keeps a false
+    /// value off the wire and `default` reads the recording back as false, never a confident
+    /// "capable" for a fixture that never said so.
     #[serde(default, skip_serializing_if = "is_false")]
     pub(crate) can_normalize_loudness: bool,
 }
@@ -750,7 +750,7 @@ fn is_false(b: &bool) -> bool {
 
 impl Stream {
     /// Can the CLIENT draw this sidecar on direct play? Only a TEXT format: `player::sidecar`
-    /// preserves ASS/SSA scripts for native styled rendering and asks the server for other formats
+    /// preserves ASS/SSA scripts for native styled rendering and asks server for other formats
     /// as UTF-8 SubRip (with SubRip/WebVTT parsing fallbacks). An image sidecar
     /// (`.idx`/`.sub` VobSub, `.sup` PGS) has no such path — only a server burn can show it, so
     /// it stays a transcode-only row. An allow-list rather than "not an image codec", so a
@@ -767,14 +767,14 @@ impl Stream {
     /// Does this audio track carry **Dolby Atmos**?
     ///
     /// **The answer is in `profile`, and only there** — probed live against the dev server
-    /// 2026-08-21. The Atmos track on the P5 test item sends `profile: "dolby digital plus + dolby
-    /// atmos"` while its `audioChannelLayout` is the ordinary `"5.1(side)"` and its `title` is
-    /// `null`. A client that looked at the layout, the title or the channel count would badge
-    /// nothing, forever and silently. (the server *also* composes it into `displayTitle`, but
-    /// that is a pre-formatted user string in the server's own words; the profile is the structured
-    /// field.) Dolby's own AC-4 spec §3.1.1.1 says the same thing from the other end — *"It is not
-    /// possible to derive whether content is branded as Dolby Atmos by inspecting the channel
-    /// configuration."*
+    /// 2026-08-21. The Atmos track on the P5 test item sends
+    /// `profile: "dolby digital plus + dolby atmos"` while its `audioChannelLayout` is the
+    /// ordinary `"5.1(side)"` and its `title` is `null`. A client that looked at the layout, the
+    /// title or the channel count would badge nothing, forever and silently. (server *also* composes
+    /// it into `displayTitle`, but that is a pre-formatted user string in the server's own words;
+    /// the profile is the structured field.) Dolby's own AC-4 spec §3.1.1.1 says the same thing
+    /// from the other end — *"It is not possible to derive whether content is branded as Dolby
+    /// Atmos by inspecting the channel configuration."*
     ///
     /// Two consumers, and they are why this lives here rather than in the panel that first needed
     /// it: the track menu's `EAC3 5.1 + Atmos` detail line, and the Load payload's
@@ -802,10 +802,10 @@ pub(crate) struct Episode {
     pub(crate) dur_ms: i64,
     pub(crate) thumb: String,
     pub(crate) resume_ms: i64, // viewOffset (0 = not started)
-    /// `viewCount ≥ 1` — played through at least once. Deliberately INDEPENDENT of `resume_ms` on
-    /// the wire: the server keeps both on an episode that was finished and then started again, so
-    /// which of the two a tile shows is a presentation rule at the draw site (see `ui/detail.rs`'s
-    /// filmstrip), not a mutual exclusion the data layer can assume.
+    /// `viewCount ≥ 1` — played through at least once. Deliberately INDEPENDENT of `resume_ms`
+    /// on the wire: the server keeps both on an episode that was finished and then started again, so
+    /// which of the two a tile shows is a presentation rule at the draw site (see
+    /// `ui/detail.rs`'s filmstrip), not a mutual exclusion the data layer can assume.
     pub(crate) watched: bool,
     pub(crate) part: String, // Media[0].Part[0].key (to play)
     pub(crate) rating: String,
@@ -848,7 +848,7 @@ impl Extra {
     }
 
     /// Human subtype for the extras shelf caption, in the UI language. Unknown subtypes read as
-    /// the generic extra. The match is on the server's own subtype names, which are never drawn.
+    /// the generic extra. The match is on server's own subtype names, which are never drawn.
     pub(crate) fn caption(&self) -> &'static str {
         use crate::i18n::msg;
         match self.subtype.as_str() {
@@ -1008,7 +1008,7 @@ pub(crate) struct Chapter {
 }
 
 /// Which timeline segment a [`Marker`] describes. Only the two the player acts on are modelled —
-/// the server also emits `commercial` on recorded content, which [`convert_markers`] drops, so an
+/// Server also emits `commercial` on recorded content, which [`convert_markers`] drops, so an
 /// unhandled kind can never be mistaken for one of these.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -1026,7 +1026,7 @@ pub(crate) struct Marker {
     pub(crate) kind: MarkerKind,
     pub(crate) start_ms: i64,
     pub(crate) end_ms: i64,
-    /// this credits segment runs to the end of the item (the server `final: true`)
+    /// this credits segment runs to the end of the item (server `final: true`)
     pub(crate) final_seg: bool,
 }
 
@@ -1047,12 +1047,12 @@ fn mark_skipped(state: &mut MetadataState, m: Marker) {
 }
 
 /// The last stretch of an episode counts as its credits when the server never said where the
-/// credits are. Credits DETECTION is a Plex Pass feature: on a server without one, no item ever
-/// carries a credits marker, so the Up Next tile — armed exclusively off that marker — could
-/// never appear, and binge-watching ended every episode by dropping the user back to the detail
-/// page (found by the Plex Pass dependency audit after issue #22). Synthesizing the segment
-/// reuses the entire existing chain — tile, countdown, cancel latch, HUD hold — instead of
-/// growing a parallel EOS path.
+/// credits are. Credits DETECTION is a server feature behind the old server's paid tier: on a
+/// server without it, no item ever carries a credits marker, so the Up Next tile - armed
+/// exclusively off that marker - could never appear, and binge-watching ended every episode by
+/// dropping the user back to the detail page (found by the paid-tier dependency audit after
+/// issue #22). The synthesized segment reuses the whole existing chain (tile, countdown, cancel
+/// latch, HUD hold) rather than growing a parallel EOS path.
 ///
 /// Deliberately narrow: only when a successor EXISTS (a movie's tail must not grow a Skip
 /// Credits pill pointing nowhere), only when the item carries no credits marker AT ALL (a server
@@ -1084,9 +1084,8 @@ pub(crate) fn tail_marker_with(pos_ms: i64, dur_ms: i64, window_ms: i64) -> Opti
 /// skip lands on `end_ms` rather than re-offering the segment it just left.
 ///
 /// A `final` credits marker is treated as running to `i64::MAX` rather than its stated `end_ms`:
-/// the server sets that end to the container duration, but our playhead is the DECODER's,
-/// which routinely stops a few hundred ms short of it — so the prompt would blink out over the last
-/// frames.
+/// Server sets that end to the container duration, but our playhead is the DECODER's, which routinely
+/// stops a few hundred ms short of it — so the prompt would blink out over the last frames.
 pub(crate) fn marker_at(markers: &[Marker], pos_ms: i64) -> Option<Marker> {
     markers
         .iter()
@@ -1150,9 +1149,9 @@ impl RatingArt {
     }
 }
 
-/// One review score to badge on the detail hero: the artwork the server named, the score as
-/// the server normalises it (0–10 for every provider — a 91% tomato arrives as 9.1), and whether
-/// the server filed it as a critic or an audience score.
+/// One review score to badge on the detail hero: the artwork the server named, the score as server
+/// normalises it (0–10 for every provider — a 91% tomato arrives as 9.1), and whether server filed it
+/// as a critic or an audience score.
 #[derive(Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) struct Rating {
@@ -1176,7 +1175,7 @@ pub(crate) struct Detail {
     /// Which SERVER this item was fetched from, as the OWNER'S HANDLE ("friend") — empty whenever
     /// it came from the signed-in user's own server, which is every item today.
     ///
-    /// The item's PORTABLE identity (`plex://movie/…`) — the same string on every server that
+    /// The item's PORTABLE identity (a catalog id): the same string on every server that
     /// matched this film, and the only one that is. It is what "Also available" asks the other
     /// sources about, because their copy has a different `rk` and may even have a different title:
     /// measured across this household's two servers, one film is `2029` here and `5274` there,
@@ -1201,8 +1200,7 @@ pub(crate) struct Detail {
     /// read the whole record. Empty for most items and for every episode — absence is the ordinary
     /// case, and the panel drops the line AND its gap rather than reserving a hole.
     ///
-    /// It arrives on the SINGLE-key `/library/metadata/{rk}` fetch, which asks for no field
-    /// exclusions. Both of the other reads in `plex/library.rs` pass
+    /// It arrives on the store's full item fetch. Both of the other reads of the old wire passed
     /// `excludeFields=summary,tagline` — the batched `metadata_many` and the section listing — so
     /// anything derived from THOSE has never seen it and never will.
     pub(crate) tagline: String,
@@ -1210,10 +1208,10 @@ pub(crate) struct Detail {
     pub(crate) dur_ms: i64,
     pub(crate) resume_ms: i64, // viewOffset (0 = not partially watched) — the resume position
     pub(crate) watched: bool,  // movie: viewCount ≥ 1; show: viewedLeafCount ≥ leafCount
-    /// The heart's state (Jellyfin's `UserData.IsFavorite`; always false on Plex — the backend
-    /// has no such flag, and the heart is only drawn on the flavor that does). False stays OFF
-    /// the wire: an unfavorited item's record is byte-identical to one that predates the field
-    /// (the committed fixtures' canonical gate prices exactly that).
+    /// The heart's state (Jellyfin's `UserData.IsFavorite` - the old backend had no such flag,
+    /// and the heart is only drawn on the flavor that does). False stays OFF the wire: an
+    /// unfavorited item's record is byte-identical to one that predates the field (the committed
+    /// fixtures' canonical gate prices exactly that).
     #[serde(default, skip_serializing_if = "is_false")]
     pub(crate) is_favorite: bool,
     pub(crate) part: String,   // Media[0].Part[0].key for a leaf (movie/episode); empty for a show
@@ -1418,8 +1416,8 @@ fn current(state: &MetadataState) -> Option<&Detail> {
     state.current.as_ref()
 }
 /// TEST-ONLY installer for the loaded item. The UI's layout tests need a `Detail` on screen with
-/// no server behind them; every other writer of `CURRENT` goes through the landing mailbox,
-/// which is exactly the invariant those tests must not have to fake. Crate-global, so callers hold
+/// no server behind them; every other writer of `CURRENT` goes through the landing mailbox, which is
+/// exactly the invariant those tests must not have to fake. Crate-global, so callers hold
 /// [`crate::testlock::serial`].
 #[cfg(test)]
 pub(crate) fn install_for_test(state: &mut MetadataState, d: Option<Detail>) {
@@ -1677,7 +1675,7 @@ pub(crate) fn trailer_now_playing(
     })
 }
 
-// ---- fetches (all via the typed crate::plex client; serde DTOs, no Value scraping) ----
+// ---- fetches (all via the typed backend client, serde DTOs, no Value scraping) ----
 //
 // Every one of them takes the `ServerId` rather than reaching for `server::client()`: they run on the
 // detail/season workers, and the house rule is that a worker reads no statics. It is also what
@@ -1708,7 +1706,7 @@ fn dev_source() -> Option<&'static str> {
 fn fetch_detail(sid: crate::registry::ServerId, rk: &str) -> Option<Detail> {
     // Jellyfin is the only backend: the store's own full fetch (item + NextUp + seasons + the
     // hero episode's streams). Trailer identity comes from the DTO itself; the old
-    // `primaryExtraKey` side-channel went with the Plex extras machinery.
+    // `primaryExtraKey` side-channel went with the old extras machinery.
     if sid != crate::jellyfin::SERVER_ID {
         return None;
     }
@@ -1761,17 +1759,16 @@ pub(crate) struct PlayingItem {
     /// stream's rate—when deciding whether a remote connection has enough headroom to carry the
     /// original file, because the transport also has to carry audio and container overhead.
     pub(crate) bitrate: i64,
-    /// The source's container word (`Part[0].container`, `Media[0].container` on Plex; the
-    /// MediaSource's own name on Jellyfin) — the direct-play gate's demuxer test where the part
-    /// key carries no extension to read (a Jellyfin MediaSource id is a GUID). Empty means "not
-    /// said", and the gate then falls back to the part key's extension, which is the same fact
-    /// on Plex.
+    /// The source's container word (the MediaSource's own name on Jellyfin), the direct-play
+    /// gate's demuxer test where the part key carries no extension to read (a Jellyfin MediaSource
+    /// id is a GUID). Empty means "not said", and the gate then falls back to the part key's
+    /// extension.
 
     pub(crate) container: String,
-    /// The played leaf's Dolby Vision layering — the direct-play gate's other refusal, beside
-    /// the frame size above and for the same reason: the local fallback never asks the server, so
-    /// a file whose base layer we cannot display correctly (Profile 5, or a dual-layer Profile 7)
-    /// would otherwise be fed to the decoder verbatim and shown in the wrong colours. See [`Dovi`].
+    /// The played leaf's Dolby Vision layering — the direct-play gate's other refusal, beside the
+    /// frame size above and for the same reason: the local fallback never asks server, so a file
+    /// whose base layer we cannot display correctly (Profile 5, or a dual-layer Profile 7) would
+    /// otherwise be fed to the decoder verbatim and shown in the wrong colours. See [`Dovi`].
     pub(crate) dovi: Dovi,
     pub(crate) markers: Vec<Marker>, // intro / credits segments — the in-player Skip prompt
     pub(crate) chapters: Vec<Chapter>, // chapter boundaries — the in-player Chapters tab/strip
@@ -1816,13 +1813,13 @@ impl PlayingItem {
 /// MAIN THREAD: the cache-hit half of the old `load_playing` — reuse the loaded detail's streams
 /// when it IS this item, so playing from a detail page costs no extra GET. Snapshotted into
 /// `ResolveEnv` and handed to the worker; splitting the fetch out lost this and quietly added a
-/// server round trip to every play from a detail page.
+/// Server round trip to every play from a detail page.
 ///
 /// The hit test is the PAIR `(sid, rk)`, and this is the site where a bare key is most dangerous:
-/// it SKIPS the server fetch, so a collision here silently substitutes the loaded page's item for
-/// the one about to play — its audio/subtitle `Stream.id`s (then PUT to the other server),
-/// its frame size (so the direct-play gate reasons about the wrong resolution), its fps, chapters
-/// and markers. A miss costs one round trip; a false hit costs the whole playback.
+/// it SKIPS the server fetch, so a collision here silently substitutes the loaded page's item for the
+/// one about to play — its audio/subtitle `Stream.id`s (then PUT to the other server), its frame
+/// size (so the direct-play gate reasons about the wrong resolution), its fps, chapters and
+/// markers. A miss costs one round trip; a false hit costs the whole playback.
 ///
 /// This closed a TODO that stood here through the foundation commits: `Detail` had no server, so
 /// the filter was the rk alone and the parameter was deliberately unused. `Detail.sid` is what
@@ -1857,13 +1854,13 @@ pub(crate) fn fetch_playing_item(sid: crate::registry::ServerId, rk: &str) -> Op
     }
     // Jellyfin arm — same store, the other server (`jellyfin::detail::playing_item` builds the
     // same PlayingItem off /Items + /MediaSegments). The installed-client guard is every
-    // jellyfin arm's guard: slot 0 is also a valid Plex slot in this build.
+    // jellyfin arm's guard: slot 0 is also a valid slot id for the other backend in this build.
     if sid == crate::jellyfin::SERVER_ID {
         if let Some(c) = crate::jellyfin::client() {
             return crate::jellyfin::detail::playing_item(c, sid, rk);
         }
     }
-    // The Plex arm (`client_for(sid)` + `Client::metadata`) went with the wire layer (#166): no
+    // The old arm (`client_for(sid)` + `Client::metadata`) went with the wire layer (#166): no
     // slot other than the Jellyfin one can hold a playing item, and the Jellyfin slot is fully
     // answered above. A miss here is the honest None the store treats as "no item".
     None
@@ -1914,10 +1911,10 @@ fn install_playing(state: &mut MetadataState, pt: Option<PlayingItem>) {
 }
 
 // ---- list-position → demuxer-ordinal conversion --------------------------------------------
-// The demuxer selects "the Nth stream of its type" in CONTAINER order; the menu/metadata lists are
-// in the server document order. These convert a list position to that container ordinal by sorting
-// on the server `Stream.index` (stable tie-break on list position, so an index-less response
-// degrades to document order — the previous behavior).
+// The demuxer selects "the Nth stream of its type" in CONTAINER order; the menu/metadata lists
+// are in server document order. These convert a list position to that container ordinal by sorting
+// on server `Stream.index` (stable tie-break on list position, so an index-less response degrades
+// to document order — the previous behavior).
 
 /// Container-audio ordinal of `audio[i]` — what `player::set_audio_track`/`request_audio_track`
 /// (→ ff's nth_audio_stream) consume.
@@ -1936,7 +1933,7 @@ pub(crate) fn audio_ordinal(audio: &[Stream], i: usize) -> i32 {
 /// The external subtitle the SERVER already has selected for this part and that this client can
 /// draw itself — the one `player::sidecar::restore_server_selection` switches on at a direct-play
 /// landing. ONE definition, because two readers must agree on it: the restore that turns it on,
-/// and `route::renders_subtitle`, which withholds the Plex Pass audio enhancement (issue #266 I6)
+/// and `route::renders_subtitle`, which withholds the server-side audio enhancement (issue #266 I6)
 /// whenever a subtitle will be on screen. A route that offered the enhancement for a part whose
 /// sidecar the restore then showed would pair a remux (no client-drawn sidecar on a transcode)
 /// with a subtitle the viewer was promised.
@@ -1966,7 +1963,7 @@ pub(crate) fn sub_render_ordinal(subs: &[Stream], i: usize) -> i32 {
 
 /// ISO 639-1 / 639-2 bibliographic and terminology spellings from Debian iso-codes:
 /// https://salsa.debian.org/iso-codes-team/iso-codes/-/raw/main/data/iso_639-2.json
-/// (retrieved 2026-09-27). Plex preferences use 639-1; the server commonly uses either 639-2 form.
+/// (retrieved 2026-09-27). Client preferences use 639-1, the server either 639-2 spelling.
 const LANG_SPELLINGS: &[&[&str]] = &[
     &["aa", "aar"],
     &["ab", "abk"],
@@ -2177,7 +2174,7 @@ pub(crate) fn lang_key(tag: &str) -> Option<std::borrow::Cow<'static, str>> {
     })
 }
 
-/// Do two language tags name the same language? Either side may be a Plex preference
+/// Do two language tags name the same language? Either side may be a client preference
 /// (`"hu-HU"`, `"pt-BR"`) or a stream's ISO-639-2 `languageCode` (`"hun"`, `"ger"`/`"deu"`), so the
 /// same test serves a preference against a stream AND a picked stream against its siblings (a
 /// `fre` pick and a `fra` sibling are one language). Only the primary subtag counts — a stream
@@ -2228,8 +2225,8 @@ mod lang_matches_tests {
 
 fn fetch_seasons(sid: crate::registry::ServerId, rk: &str) -> Vec<Season> {
     // The store's own season list, beside fetch_full's: the same data through the same client —
-    // without this arm the tab strip read "0 seasons" off the empty Plex registry and the show
-    // rendered season 1 with no way to reach the rest (TV-reported).
+    // without this arm the tab strip read "0 seasons" off the empty registry of the retired
+    // backend and the show rendered season 1 with no way to reach the rest (TV-reported).
     // Jellyfin is the only backend: the store's own season list, beside fetch_full's.
     if sid != crate::jellyfin::SERVER_ID {
         return Vec::new();
@@ -2252,8 +2249,8 @@ fn fetch_seasons(sid: crate::registry::ServerId, rk: &str) -> Vec<Season> {
 /// to protect, and neither is worth failing the whole page over.
 fn fetch_episodes(sid: crate::registry::ServerId, series_rk: &str, season_rk: &str) -> Option<Vec<Episode>> {
     // Jellyfin addresses a season's episodes by BOTH ids (`/Shows/{series}/Episodes?SeasonId=`),
-    // where Plex's `/children` needs the season key alone — that asymmetry is the whole reason
-    // this signature carries `series_rk`. Every caller has it in hand (the loaded show's rk).
+    // where the old backend's `/children` needed the season key alone. That asymmetry is the
+    // reason this signature carries `series_rk`. Every caller has it in hand (the loaded show).
     // Jellyfin is the only backend, and it addresses a season's episodes by BOTH ids.
     if sid != crate::jellyfin::SERVER_ID {
         return None;
@@ -2454,7 +2451,7 @@ fn request_detail(adapter: &std::sync::Arc<MetadataAdapter>, sid: crate::registr
         let adapter = std::sync::Arc::clone(adapter);
         // The recorded client identity mirrors the discovery/hubs vocabulary: the Jellyfin
         // source's single client is instance 0 (it has no registry slot behind it), and every
-        // other source carries its Plex registry instance as before. `null` would record a
+        // other source carries its registry instance as before. `null` would record a
         // resource the replay validator can never match.
         // The recorded client identity: Jellyfin's single client is instance 0; any other
         // source has no registry slot behind it any more, which the recorder spells null.
@@ -2680,8 +2677,8 @@ pub(crate) struct AltCopy {
     /// **The CREDIT for that server** — `server::servers::owner_credit`'s answer, the same one the
     /// shelf headings and the Sources list draw, and NOT the raw `sourceTitle` it used to be.
     /// `Some(handle)` for a person outside this household; `None` when there is nobody to credit,
-    /// which is our own server, the household's own server whichever Plex Home profile is watching,
-    /// and a share plex.tv never named.
+    /// which is our own server, the household's own server whichever profile is watching,
+    /// and a share the account service never named.
     ///
     /// `None` is the ABSENCE of an owner, not an empty one: it is what the row spells
     /// "This account", and it is the ordering's own-before-a-friend's tiebreak. That read-out is
@@ -2909,11 +2906,11 @@ fn request_alt_sources(
         let list = catch_unwind(|| resolve_alt_sources(&others, &guid)).unwrap_or_default();
         // The one line that makes this chain debuggable from a device log. A guid is a public
         // metadata id — not an address, a token or a machine. It was filed as "safe to log" on
-        // exactly that reasoning, and the reasoning is incomplete: a Plex GUID names the WORK,
+        // exactly that reasoning, and the reasoning is incomplete: a metadata GUID names the WORK,
         // globally and stably, which is LG's "Content Viewing Information" and the one category
         // this app's Data Safety declaration answers "Not collected" to. It stays here because it
         // is the only string that says WHICH lookup this was, and `diag::scrub::scrub_viewing`
-        // rewrites it to `plex://<guid>` before the line reaches the disk.
+        // rewrites the identifier out of it before the line reaches the disk.
         crate::log(&format!(
             "altsrc: asked {n} source(s) for {guid} -> {} copy(ies)",
             list.len()
@@ -3278,7 +3275,7 @@ mod marker_tests {
 
     /// An episode's markers as the live server actually returned them (2026-07-29): an intro and a
     /// `final` credits marker, in that wire order — credits FIRST, which is why nothing here may
-    /// assume the array is sorted by time. The wire→model conversion went with the Plex parse
+    /// assume the array is sorted by time. The wire→model conversion went with the old parse
     /// (#166); these fixtures are the MODEL shapes the store holds, which is what the live
     /// playhead logic below reads.
     fn episode_markers() -> Vec<Marker> {
@@ -3313,7 +3310,7 @@ mod marker_tests {
         assert!(marker_at(&[], 1234).is_none());
     }
 
-    /// The Plex-Pass-free tail: a server without credits detection ships no markers, so the last
+    /// The no-detection tail: a server without credits detection ships no markers, so the last
     /// window of an episode (30s by default) stands in as the credits segment (final, ending at
     /// the duration) — the geometry Up Next arms from. Short items never grow one: a 60s clip
     /// offering "next" for half its runtime is worse than no offer. The window is the user's, so
@@ -3347,7 +3344,7 @@ mod marker_tests {
 
     #[test]
     fn a_final_credits_marker_holds_past_its_stated_end() {
-        // The server sets a `final` marker's end to the CONTAINER duration, but our playhead is the
+        // Server sets a `final` marker's end to the CONTAINER duration, but our playhead is the
         // decoder's and routinely stops short of it — an exclusive end there made the pill blink
         // out over the last frames, exactly when it is being reached for.
         let m = episode_markers();

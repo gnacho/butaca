@@ -588,7 +588,7 @@ pub(super) fn activate_server_owned(
     bridge.metadata_run(crate::stores::metadata::MetadataCmd::Reset);
     let _ = bridge.hubs_run(crate::stores::hubs::HubsCmd::RefetchHubs);
     let _ = bridge.browse_discover_pump();
-    log("catalog: catalog activation queued");
+    log("pms: catalog activation queued");
 }
 /// Everything before the loop: SDL and the window, GL, text, the poster workers, the boot gate
 /// (login / token / session / picker), every dev trigger read once, and the `App` literal —
@@ -823,9 +823,9 @@ pub(crate) unsafe fn construct(
 
     // NO token is compiled into this binary. Controlled recordings inject their own fixture
     // identity. Live onboarding reads only the Jellyfin configuration. The Jellyfin controlled
-    // world carries NO Plex dev token: its boot arm installs the client from the Initial's own
-    // identity. The C shim's host/port pair names nothing this function reads anymore — the
-    // Plex dev world that configured an address from it is gone (#166).
+    // world carries NO vendor dev token: its boot arm installs the client from the Initial's own
+    // identity. The C shim's host/port pair names nothing this function reads anymore, and the
+    // dev world that configured an address from it is gone (#166).
 
     // UI infra + poster workers always come up — the owned login/profiles screens use them too.
     //
@@ -861,8 +861,8 @@ pub(crate) unsafe fn construct(
     //  1. /tmp/butaca-login forces the Jellyfin sign-in screen on demand.
     //  2. Controlled recordings activate their injected fixture identity.
     //  3. A stored Jellyfin configuration authenticates and goes Home.
-    //  4. Nothing else goes to Jellyfin sign-in. Live boot never loads a Plex session, and the
-    //     Plex dev-token world (ActivateDevBootstrap) is gone with the DevServer authority.
+    //  4. Nothing else goes to Jellyfin sign-in. Live boot never loads a legacy session, and the
+    //     dev-token world (ActivateDevBootstrap) is gone with the DevServer authority.
     // The destination itself is [`BootTo`], at module scope with the rest of the vocabulary.
     //
     let session = match &initial {
@@ -930,7 +930,7 @@ pub(crate) unsafe fn construct(
         BootTo::Login
     } else if let Some((origin, token, user_id, user_name)) = &jf_world {
         // The controlled Jellyfin world: install the fixture client and fill Home through the
-        // SAME store commands the Plex controlled arm issues (the recorded admissions and
+        // SAME store commands every controlled arm issues (the recorded admissions and
         // results are what replay answers them with). No session-owner activation runs —
         // `activate_dev` refuses this authority, there is no registry primary to bind, and the
         // recorded-result decoders bind this flavor's clients through the install itself.
@@ -1248,7 +1248,7 @@ pub(crate) unsafe fn construct(
     //
     // …and Home is intercepted by the first-run question when this profile has never been
     // asked it and the roster holds more than one source (`screens::onboard`). It belongs HERE as
-    // well as on the login path, because a single-Plex-Home-user account never meets the
+    // well as on the login path, because an account with a single source never meets the
     // picker at all: the two paths into Home are the picker's `take_ready` and this gate, and
     // a question asked on only one of them is a question half the accounts never see.
     // `install_server` above has already registered the stored roster, so "more than one source"
@@ -1303,8 +1303,8 @@ pub(crate) unsafe fn construct(
     };
     #[cfg(any())]
     let deeplink_rk: Option<String> = {
-        // Plex builds never deep-link; acknowledging the param keeps the signature honest
-        // without a second signature behind cfg.
+        // A build without deep links still accepts the param: acknowledging it keeps the signature
+        // honest without a second signature behind cfg.
         let _ = &launch_params;
         None
     };
@@ -1325,7 +1325,7 @@ pub(crate) unsafe fn construct(
     // absent file is 0, which leaves every existing boot byte-identical, and every pipeline
     // case but the one that asks for a replay is untouched.
     //
-    // Why the app needs this at all: the synthetic tier boots with NO Plex session, so after a
+    // Why the app needs this at all: the synthetic tier boots with NO stored session, so after a
     // stream ends there is no detail page, no Play control and no key path back into the
     // player. Everything else was already in place — `teardown` clears the URL and `ended` on a
     // real stop, and `engine::start_bufferfeed` re-reads `dev::playurl()` whenever

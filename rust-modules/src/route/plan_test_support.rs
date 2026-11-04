@@ -11,7 +11,7 @@ pub(super) const HD_BIG: (i64, i64, i64) = (30000, 1920, 1080); // the case the 
 
 pub(super) const HD_SMALL: (i64, i64, i64) = (3000, 1280, 720); // a 3 Mbit/s 720p episode
 
-pub(super) const UNMEASURED: (i64, i64, i64) = (0, 0, 0); // PMS said nothing (a play straight off a shelf)
+pub(super) const UNMEASURED: (i64, i64, i64) = (0, 0, 0); // server said nothing (a play straight off a shelf)
 
 
 /// What `build_stream` computes, spelled once.
@@ -45,8 +45,8 @@ pub(super) fn trk(id: i64, codec: &str, lang: &str, default: bool) -> crate::met
 }
 
 
-/// Mark a track as the server's CURRENT pick (the server `Stream.selected`) — the flag a pick made
-/// on a phone / Plex Web / another TV arrives on.
+/// Mark a track as the server's CURRENT pick (server `Stream.selected`) — the flag a pick made
+/// on a phone / another client / another TV arrives on.
 pub(super) fn server_selected(mut s: crate::metadata::Stream) -> crate::metadata::Stream {
     s.selected = true;
     s

@@ -415,7 +415,7 @@ almost certainly the frame rate, and `devcaps.rs` ignores it *by design*:
 
 So the real fix is a per-codec `(maxWidth, maxHeight, maxFrameRate)` triple read out of
 `/etc/umediaserver/device_codec_capability_config.json` and declared per Load — which also closes
-the gap CLAUDE.md already names, that the profile sent to the server bounds no frame rate at all. That is
+the gap CLAUDE.md already names, that the profile sent to server bounds no frame rate at all. That is
 bench work with the pipeline test tier behind it (`pipe_h264_*` covers all four rasters SD→UHD, and
 `pipe_h264_1080p5994` is the one fixture that exercises a non-integer rate), not something to land
 off a lab session.

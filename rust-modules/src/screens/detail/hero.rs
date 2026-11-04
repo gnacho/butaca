@@ -151,7 +151,7 @@ pub(crate) struct HeroSet {
     pub(crate) alt: bool,
     pub(crate) mark: PosterMark,
     /// The heart: `Some(favorited)` on a backend that has favorites, `None` where the control
-    /// must not exist at all (Plex has no such flag).
+    /// must not exist at all (a backend with no such flag).
     pub(crate) favorite: Option<bool>,
 }
 
@@ -251,7 +251,7 @@ pub(crate) fn watch_index(set: HeroSet) -> Option<usize> {
     v[..n].iter().position(|&c| c.is_watch())
 }
 
-/// Has this show been started AT ALL? The server puts `S1E1 off=0` on deck for a show nobody has
+/// Has this show been started AT ALL? The server puts `S1E1 off=0` on deck for a show nobody
 /// touched, so "there is something on deck" is not the same question as "this show is underway" —
 /// ported verbatim from `ui/detail.rs::show_started`.
 pub(crate) fn show_started(d: &Detail) -> bool {
@@ -328,7 +328,7 @@ pub(crate) fn disc_verb(ctl: HeroCtl, name_show: bool, favorited: bool) -> Optio
     }
 }
 
-/// The heart's two verbs. The Jellyfin flavor's own labels; dead weight on a Plex build.
+/// The heart's two verbs, in the Jellyfin flavor's own labels.
 fn favorite_label() -> &'static CStr { crate::i18n::msg::browse_detail_favorite_c() }
 fn unfavorite_label() -> &'static CStr { crate::i18n::msg::browse_detail_unfavorite_c() }
 
@@ -601,9 +601,9 @@ fn play_mode_bits(d: &Detail, after: bool) -> ([Bit; FACTS_BITS], usize) {
     if after {
         push(Bit::Sep(theme::space::MD));
     }
-    // The facts row names only HOW the item will play. The old Plex Pass annotation chain
-    // (the "no Pass" soft/warn notes and their capsule) rode a `serverinfo` fact no Jellyfin
-    // server can answer, so on this codebase's only live flavor it never drew; the capsule
+    // The facts row names only HOW the item will play. The old annotation chain for a missing
+    // paid feature (the soft/warn notes and their capsule) rode a `serverinfo` fact no Jellyfin
+    // server can answer, so it never drew on this codebase's only live flavor. The capsule
     // vocabulary went with it (see `ui::widgets` history).
     push(Bit::Word(
         match preview {

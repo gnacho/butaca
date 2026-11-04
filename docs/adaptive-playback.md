@@ -15,7 +15,7 @@ values Dolby Vision.
 
 ## 1. Why the displayed download rate is not link capacity
 
-An HLS rendition asks the server for a finite amount of data. If the current rendition needs about
+An HLS rendition asks server for a finite amount of data. If the current rendition needs about
 4 Mbit/s, a healthy 25 Mbit/s path can still appear as 4–6 Mbit/s: the request did not offer enough
 work to saturate the path. Therefore
 
@@ -160,7 +160,7 @@ over a finite ordered set, not a conversion of the current rung's download rate 
 hidden link capacity.
 
 A deadline-censored transaction produced no complete candidate media quantum. A completed response
-with no Pareto gain produced media, but the server answered with a different demand-capped object; its
+with no Pareto gain produced media, but server answered with a different demand-capped object; its
 bytes do not say that a lower request ceiling would fare better. In the former case the serial server
 decision/start/playlist/body path did not finish inside `E`; in the latter the no-gain response
 completed for that exact cost. Let `E_f` be the disposable reserve armed at its start. Changing the
@@ -184,7 +184,7 @@ requires that candidate's own completed `A <= D` and `B_post >= A` observation. 
 poll interval, bitrate margin or probe-
 count constant.
 
-The server encoder lifecycle is an independent physical condition. A successful universal-transcoder
+Server encoder lifecycle is an independent physical condition. A successful universal-transcoder
 `/stop` only queues cleanup, and the server owns the physical `session=` encoder separately from the
 logical session-identifier Streaming Resource charged by the bandwidth governor. Before
 another upward HLS or Original experiment, the client checks the stopped physical key with the
@@ -198,7 +198,7 @@ cleanup is pending.
 For the initial phase of an upward experiment, one playhead-funded reserve clock, bounded by `E`,
 covers:
 
-- the server transcode decision and session creation;
+- server transcode decision and session creation;
 - master playlist;
 - media-playlist refresh and its wait;
 - the first complete candidate segment: open, headers, any production wait, probe and body.
@@ -246,7 +246,7 @@ A <= D  and  B_post >= A
 A downshift is a recovery transaction: it must leave one complete decodable segment funded
 (`B_post >= D`), and an unsustainable intermediate response (`A > D`) is rejected so descent can
 continue. The terminal floor is the derived no-rollback exception. No cheaper actuator exists
-there, so any complete demuxable floor response commits even when `A > D`, `B_post < D`, or the server
+there, so any complete demuxable floor response commits even when `A > D`, `B_post < D`, or server
 exceeds the requested rung box; otherwise the only possible result is retrying the same floor
 while retaining a known-losing higher route. That verdict means “best available”, not “stable”. A
 successful commit atomically changes the actuator and seeds a fresh
@@ -310,7 +310,7 @@ instead records the exact common refill frontier `E_f` defined above. Quality
 exploration may run again only after disposable reserve grows strictly past that frontier, and then
 retries the most informative highest request instead of walking every lower tier. Thus a filling
 real buffer can safely buy one later retry only after replacing the media the previous transaction
-spent; an unchanged reserve cannot poll the server and a full reserve eventually makes the frontier
+spent; an unchanged reserve cannot poll server and a full reserve eventually makes the frontier
 terminal. There is no timer, bitrate margin or inferred capacity in either release. A seek/reload
 carries the requested/observed pair together, so rebuilding the worker cannot promote the request
 back into a delivered-quality claim.
@@ -380,7 +380,7 @@ The retained facts are different:
   buffer growth does not release it. The certificate also retains the live HLS distribution's
   recent estimate at failure; a later live distribution whose conservative bound is strictly
   above that old-regime estimate authorizes one new excitation;
-- the server refusal: structurally excludes that exact actuator for this controller;
+- server refusal: structurally excludes that exact actuator for this controller;
 - raster larger than a rung's bounding box: excludes that rung and smaller boxes, while a larger
   box remains eligible;
 - origin/session/transport/parse failure: says nothing about the rung and creates no certificate.
@@ -520,7 +520,7 @@ the model to resume on media that did not exist.
 An HLS rung swap can continue on the same normalized media timeline and is intended to be invisible.
 Moving between HLS and Original is different:
 
-- the server creates or tears down a different stream;
+- server creates or tears down a different stream;
 - the native pipeline is re-Loaded;
 - the video plane may be black while it rebinds;
 - codec and HDR declarations may change;
@@ -615,7 +615,7 @@ first stopped/closed HLS and used a fresh `source-N` id; that forced AdHoc admis
 The current experiment instead names the exact active HLS encoder and issues no client-side stop,
 close or replacement before the read. It runs between ordinary HLS acquisitions, and its result is
 discarded if the active identity changes while the request is in flight. That ordering keeps the
-client route explicit, but it is not evidence that the server preserves the old HLS cursor: the server may rebind
+client route explicit, but it is not evidence that server preserves the old HLS cursor: the server may rebind
 the shared Streaming Resource while serving the raw Part. A successful `Recover` therefore starts
 an Original trial on that same completed media boundary and never waits for one more HLS segment.
 HLS remains the rollback owner until the exact Load succeeds and a decoded frame confirms the
@@ -630,7 +630,7 @@ with `PendingOriginal` and is committed by the first decoded frame. A failed Loa
 route and that unspent charge back, because the viewer never saw the proposed mode.
 
 The experiment becomes informative when no higher HLS actuator remains unclassified at the current
-exploration budget. That does not require the live actuator to equal the largest request: if the server
+exploration budget. That does not require the live actuator to equal the largest request: if server
 maps larger requests to the same or a worse encode, their structural rejections exhaust the HLS
 frontier without ever becoming current.
 
@@ -658,12 +658,12 @@ physical HLS encoder (`closeResourceSession=0`); its Streaming Resource remains 
 owner so later Range/seek opens remain valid. Final playback teardown performs the full resource
 close. A remux recovery instead registers a distinct replacement encoder; decoded frames close the
 held old HLS resource, while a failed remux open restores the client-side HLS route and closes only
-the unproven remux. The first actual HLS response after that restoration decides whether the server kept
+the unproven remux. The first actual HLS response after that restoration decides whether server kept
 or can resume its cursor.
 If a cold resolve is cancelled, superseded or refused before it owns an Engine, there is no winning
 route to reuse its logical resource; that abandonment path therefore performs the exact full close.
 
-A source request which fails before any body arrives (for example a server `5xx`, DNS or connect
+A source request which fails before any body arrives (for example server `5xx`, DNS or connect
 failure) is an inconclusive request failure, not a zero-rate link sample and not proof that the
 Part is unavailable to a later playback open. It does not enter the source capacity estimate and
 HLS retains its best observed/requested route.

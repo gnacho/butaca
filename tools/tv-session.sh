@@ -453,7 +453,7 @@ resolve_identity() {
     if resolve_guest_token; then
       push_guest=1
       if [ "${mock:-0}" = 1 ]; then
-        identity_desc="guest — synthetic mock PMS (no account or account token)"
+        identity_desc="guest — synthetic mock server (no account or account token)"
       else
       identity_desc="guest — the manifest's managed test user (token via tests/run.py, value not printed)"
       fi
@@ -1035,7 +1035,7 @@ cmd_selftest() {
     local mock_dry
     mock_dry=$(cmd_up --guest --mock --dry-run 2>&1) || _identity_rc=1
     case "$mock_dry" in
-      *"identity: guest — synthetic mock PMS"*) ;;
+      *"identity: guest — synthetic mock server"*) ;;
       *) bad "mock guest dry run did not select a synthetic identity"; _identity_rc=1 ;;
     esac
     if (cmd_up --mock --dry-run) >/dev/null 2>&1; then

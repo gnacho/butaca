@@ -453,7 +453,7 @@ threading model, the Starfish/ACB ABI + bind-order gotchas, seek/PTS rebase. Rea
 touching playback):** LG's in-process **StarfishMediaAPIs** (`libplayerAPIs.so`) in
 `BUFFERSTREAM` **buffer-feed** mode, the decoded sink bound to the hardware video plane via
 **`libAcbAPI` (ACB)** — in-process is what lets ACB bind the app-owned sink. The media pipeline
-is all Rust: an HTTP GET to the server → demux (**`ff.rs`, over a custom AVIO on the
+is all Rust: `server HTTP GET` → demux (**`ff.rs`, over a custom AVIO on the
 FFmpeg the app BUNDLES** — not the television's; see the linking section, and note ours is built
 `--disable-network`, so the AVIO is the *only* way bytes reach it) → AU queues with backpressure
 (`aq.rs`) → the pump `Feed()`s the Starfish
@@ -555,9 +555,9 @@ which the linking section explains is load-bearing rather than tidy.
   both fatal paths to logs plus warnings. Release builds contain none of these new dev paths.
 - `rust-modules/src/stores/` — **the data stores behind ONE vocabulary and ONE step** (restructure
   phase 4, 2026-09-07; `docs/stores-as-machines.md`): `StoreCmd` is the complete set of mutations
-  of `browse`/`catalog`/`metadata`/`search`/`person`/`viewstate`. Browse, Hubs, Metadata, Person,
+  of `browse`/`pms`/`metadata`/`search`/`person`/`viewstate`. Browse, Hubs, Metadata, Person,
   Search and ViewState are physically owned per `Bridge` by `Stores`: `BrowseStore` owns its
-  state/adapter/notice, `HubsStore` owns its `PmsState`/`Arc<PmsAdapter>`/notice,
+  state/adapter/notice, `HubsStore` owns its `CatalogState`/`Arc<CatalogAdapter>`/notice,
   `MetadataStore` owns its state/`Arc<MetadataAdapter>`/notice,
   `PersonStore` owns its model/generation/retry state plus a rotated indexed fetch adapter,
   `SearchStore` owns its state/adapter/notice with a rotated adapter, and `ViewStateStore`
@@ -1290,7 +1290,7 @@ three-layer graphics profile; **`crash-triage`** handles a death; **`bind-tv-lib
 FFI into the TV's own libraries. **`./tests/run.py` needs a gitignored `tests/manifest.local.json`**
 — `manifest.json` holds only the installation-INDEPENDENT case definitions, and each case names the
 SHAPE of item it needs (`item: "movie_h264_ac3_1080p"`); the overlay maps that to a ratingKey on
-this server and supplies the media server's host, TV address and test user. Copy
+this server and supplies the server host, TV address and test user. Copy
 `tests/manifest.local.json.example` and fill it in; the runner refuses to start without the FILE, and
 without `pms.host` / `tv` / `test_user.id`. **An `item` key it cannot resolve is a SKIP, not a
 death** (since 2026-08-22) — absent or left as the example's `<ratingKey>`, it skips the cases and
@@ -1353,7 +1353,7 @@ uncovered: HLG, HDR10+, DV P5/P7, Atmos, the
 server-tier by construction), and the transcode INPUT space
 (three server cases on one AV1 item stand in for 17 codecs). One of those is an app gap, not a test
 gap — `devcaps` reads the table's `maxFrameRate` only into the per-codec rows the Starfish Load
-envelope clamps against (since 2026-09-03), so the profile sent to the server still bounds no frame rate
+envelope clamps against (since 2026-09-03), so the profile sent to server still bounds no frame rate
 at all. Three things about it
 are worth knowing before reading a result. **(1)** The declaration is the interesting half and the
 main false-PASS risk: `engine`'s `_ =>` arm maps an unrecognised audio codec to `"AC3"` and a

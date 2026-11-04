@@ -1,7 +1,7 @@
 //! The `/tmp` developer-trigger surface, behind one door.
 //!
 //! This app is driven headlessly by ~44 files under `/tmp/butaca-*`: which screen to boot to,
-//! which item to play, which URL to stream, whether to auto-press OK, which server token to use.
+//! which item to play, which URL to stream, whether to auto-press OK, which access token to use.
 //! That is how `tests/run.py` and every capture scene work, and it is not going away.
 //!
 //! It must not exist in a public build. `/tmp` is the SHARED system `/tmp` in the production jail
@@ -277,8 +277,8 @@ pub(crate) fn guard_log_only() -> bool {
 /// **`/tmp/butaca-nowan` — refuse every name lookup, as a dead resolver would.**
 ///
 /// The offline-mode reproduction. A household whose internet is down but whose LAN is up resolves
-/// no public name at all: `plex.tv`, `discover.provider.plex.tv` and — the one that matters — the
-/// `plex.direct` hostname the app persisted for its OWN server on the LAN. Nothing on a desk can
+/// no public name at all: the account service, its discovery host and, the one that matters, the
+/// wildcard hostname the app persisted for its OWN server on the LAN. Nothing on a desk can
 /// take the router's uplink away deterministically, so this trigger does it inside the app: while
 /// armed, [`crate::net`], [`crate::curlio`] and [`crate::stream`] refuse any host that is not a
 /// numeric literal, at the point where they would otherwise hand it to a resolver, and return the
@@ -331,7 +331,7 @@ pub(crate) fn holdload_delay_ms() -> Option<u64> {
 
 /// Parse `/tmp/butaca-server=<slot>`, the optional server half of a direct-screen trigger.
 ///
-/// A Plex `ratingKey` is only unique together with its server.  The original `butaca-play`
+/// A `ratingKey` is only unique together with its server.  The original `butaca-play`
 /// trigger predated the multi-server registry and therefore meant "that key on the current
 /// server".  Keeping the slot in a separate trigger preserves that wire format for the regression
 /// harness while allowing `tv-session --server N` to name the other half explicitly.
@@ -659,8 +659,8 @@ pub(crate) fn pause_script() -> Option<PauseScript> {
 /// has no mid-1080p points, while the ladder this pins has eight of them.
 ///
 /// The value is the actuator's REQUEST rate (`Rung::kbps`) — 320, 720, 2000, 4000, 6000, 8000,
-/// 10000, 12000, 14000, 16000, 18000, 20000, 22000 — because that is the number the server is given
-/// and the one identity in the catalog that does not move when somebody re-measures the server.
+/// 10000, 12000, 14000, 16000, 18000, 20000, 22000, as that is the number the server is given and
+/// the one identity in the catalog that does not move when somebody re-measures the server.
 /// An unrecognised or empty value pins nothing, deliberately: a typo must leave Auto alone rather
 /// than silently park playback on the bottom rung for a whole measurement session.
 ///
@@ -693,12 +693,12 @@ pub(crate) fn read_sample(_name: &str) -> Option<Vec<u8>> {
 /// A stream to play and **the Load payload declaration to play it with**, with no library item
 /// behind it — `/tmp/butaca-playurl`, the player-PIPELINE test tier's one entry point.
 ///
-/// This is the trigger that makes the pipeline testable without Plex. `butaca-url` already
+/// This is the trigger that makes the pipeline testable without a server. `butaca-url` already
 /// hands the engine a URL, and everything downstream of it — `stream.rs`, `ff.rs`, `aq.rs`, the
 /// pump's `Feed()`, the ACB bind — is byte-identical to a real playback. What it CANNOT do is say
 /// what the stream *is*: the Starfish `Load` payload takes its codecs from `route::stream_vcodec`
 /// / `stream_acodec`, and its Dolby nodes from `stream_dovi` / `stream_immersive`, all five of
-/// which are normally installed together by `route::apply_plan` from a server decision and replaced
+/// which are normally installed together by `route::apply_plan` from a route decision and replaced
 /// together by later route transitions. So a URL-fed 4K HEVC file was declared to the television
 /// as whatever the route happened to hold — in a fresh boot, the empty string, which falls through
 /// [`crate::player::engine`]'s `_ =>` arm to `"AC3"` and an H264 payload. The declaration is
@@ -719,7 +719,7 @@ pub(crate) fn read_sample(_name: &str) -> Option<Vec<u8>> {
 ///
 /// Deliberately **not** `Debug`, for [`DevServer`]'s reason one step removed: `url` is a free
 /// string, and while the pipeline tier's own URLs carry no credentials, the field is the same
-/// shape as `route::url()` — which for a real playback carries `X-Plex-Token` in its query. A
+/// shape as `route::url()`, which for a real playback carries an access token in its query. A
 /// derived `Debug` is how that reaches a log the day someone points this trigger at a server part.
 #[derive(serde::Deserialize, Clone)]
 pub(crate) struct PlayUrl {
@@ -744,7 +744,7 @@ pub(crate) struct PlayUrl {
     #[serde(default)]
     pub(crate) atmos: bool,
     /// Pipeline-tier Auto watchdog seam: whole Original wire bitrate. Zero leaves the ordinary
-    /// Plex-free one-shot playback unchanged.
+    /// Library-free one-shot playback unchanged.
     #[serde(default)]
     pub(crate) auto_source_kbps: u32,
     /// Same-origin fixture HLS root used after the synthetic Original becomes unsustainable.

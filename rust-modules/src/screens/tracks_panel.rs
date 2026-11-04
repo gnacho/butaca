@@ -194,8 +194,8 @@ pub(crate) struct TrackRow {
 }
 
 /// A byte count as the design writes it — `"32.28 GB"`. **GiB, two decimals**: 34659545780 bytes
-/// reads as 32.28 GB in the mock, which is `/1024³` and not `/1000³` (that would be 34.66). Plex's
-/// own clients use the binary units here.
+/// reads as 32.28 GB in the mock, which is `/1024³` and not `/1000³` (that would be 34.66). The
+/// clients this app replaces used the binary units here.
 pub(crate) fn fmt_size(bytes: i64) -> Option<String> {
     if bytes <= 0 {
         return None;
@@ -280,7 +280,7 @@ pub(crate) fn fmt_fps(fps: f64) -> Option<String> {
     Some(crate::i18n::msg::widgets_tracks_fps(&rate))
 }
 
-/// `"2.35"` — the display aspect as the server sends it, trailing zeros trimmed.
+/// `"2.35"`, the display aspect as the server sends it, trailing zeros trimmed.
 pub(crate) fn fmt_aspect(ar: f64) -> Option<String> {
     if !(ar > 0.0) {
         return None;
@@ -791,7 +791,7 @@ impl Flow<'_> {
 ///
 /// **The design sets `--track-caps` tracking on this head and we do not draw it — and the reason
 /// recorded here was that the renderer HAS no letter-spacing, which is no longer true.**
-/// `widgets::tracked_run` is a shared component (the PLEX PASS capsule's per-character technique,
+/// `widgets::tracked_run` is a shared component (the retired capsule's per-character technique,
 /// promoted), and the person bio's own eyebrow spends it. So the three panels' kickers do not
 /// match each other: §1C is tracked, §1A and this one are not. Left as it is deliberately rather
 /// than guessed at — the spec copy in this tree carries no `ds/` token files, so `--track-caps`'s
@@ -1571,8 +1571,8 @@ mod tests {
     }
 
     /// `Dovi`'s version is stored DECOMPOSED so the struct can stay `Copy` (it is read on a
-    /// per-frame draw path). The wire-side string parser went with the Plex stream parse (#166);
-    /// what the draw path reads — `version_str`'s caption and the unsaid absence — stays graded.
+    /// per-frame draw path). The wire-side string parser went with the old stream parse (#166),
+    /// and what the draw path reads (`version_str`'s caption and the unsaid absence) stays graded.
     #[test]
     fn the_dolby_vision_version_caption_is_the_decomposed_pair() {
         use metadata::Dovi;

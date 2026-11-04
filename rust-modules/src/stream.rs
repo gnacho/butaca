@@ -1,5 +1,5 @@
 //! Blocking HTTP/1.1 over a raw TCP socket (was src/stream.c). Callers
-//! (posters/catalog/player) allocate an `HttpStream` and pass `&hs`; this operates on it
+//! (posters/pms/player) allocate an `HttpStream` and pass `&hs`; this operates on it
 //! in place. Header/chunk parsing is bounds-checked (no OOB).
 //!
 //! The host is a **name or an address literal of either family**, resolved through `getaddrinfo`
@@ -164,15 +164,15 @@ impl HttpStream {
 
 /// The part of a request path that may be written to the event log: everything before the query.
 ///
-/// Paths reaching this module routinely carry the server token in their query string —
+/// Paths reaching this module routinely carry the access token in their query string:
 /// `server::client::with_token` is the data layer's one token choke point and appends
-/// `X-Plex-Token=…` to what it is given, and the poster store's paths arrive with one already in
+/// the credential to what it is given, and the poster store's paths arrive with one already in
 /// them (`Client::fetch_built`, where the built path *is* the LRU key, so the key and the request
-/// have to be the same bytes). The event log is this app's support channel: a user is asked to
-/// paste `/tmp/butaca-events.log` into a public issue thread, so a line carrying a query string is
-/// a credential leak rather than a possible one — the same rule, for the same reason,
-/// that `app::diagnostics` applies to the diagnostics panel. The endpoint on its own is what makes
-/// a line diagnosable ("which request failed") and it carries no secret.
+/// have to be the same bytes). The event log is this app's support channel: a user is asked to paste
+/// `/tmp/butaca-events.log` into a public issue thread, so a line carrying a query string is a
+/// credential leak rather than a possible one — the same rule, for the same reason, that
+/// `app::diagnostics` applies to the diagnostics panel. The endpoint on its own is what makes a line
+/// diagnosable ("which request failed") and it carries no secret.
 ///
 /// `crate::redact_tokens` catches a line that gets this wrong on the way out; the policy is that
 /// nothing built here needs it.
@@ -695,9 +695,9 @@ fn header_is_chunked(hdr: &[u8]) -> bool {
 /// How long the handshake phase of ONE open may take, across EVERY address the host resolved to.
 ///
 /// Without a bound at all the app inherits the kernel's SYN-retry budget (~2 min on Linux), during
-/// which the 60fps SDL loop is fully blocked — an unreachable the server (box rebooting, TV on
-/// a different VLAN, DHCP re-lease) froze the whole UI rather than failing, and every server
-/// request in a chain paid it again.
+/// which the 60fps SDL loop is fully blocked — an unreachable server (box rebooting, TV on a different
+/// VLAN, DHCP re-lease) froze the whole UI rather than failing, and every server request in a chain
+/// paid it again.
 ///
 /// **2000 ms was a LAN number**, and it was the right one while the only dialable host was a
 /// dotted quad on the same subnet. It is the wrong one now the host can be a name on the public
@@ -708,15 +708,15 @@ fn header_is_chunked(hdr: &[u8]) -> bool {
 ///
 /// **Be clear about who pays for that today, because it is not who it is chosen for.** No caller
 /// hands this module a public-internet name yet: `auth::dial_target` still admits only an IPv4
-/// literal over plain HTTP, so every host that reaches here is a dotted quad on the LAN. What
-/// the raise actually buys *today* is a 4× longer main-loop freeze when the LAN server is down —
-/// a server rebooting, the set moved to another VLAN — and what it buys is paid back the day a name
-/// is dialled. It is a forward-looking number, on purpose and by instruction, and it is the
-/// one line here to re-examine if that day gets further away rather than closer.
+/// literal over plain HTTP, so every host that reaches here is a dotted quad on the LAN. What the
+/// raise actually buys *today* is a 4× longer main-loop freeze when the LAN server is down — a server
+/// rebooting, the set moved to another VLAN — and what it buys is paid back the day a name is
+/// dialled. It is a forward-looking number, on purpose and by instruction, and it is the one line
+/// here to re-examine if that day gets further away rather than closer.
 ///
 /// **One number, and it is deliberately NOT derived from the address.** RFC1918 is not "local" in
-/// Plex's sense — a NAT'd server reached over a VPN is private and far, and a `plex.direct` name
-/// resolves to a LAN address — so an address cannot tell you which connection tier you are on.
+/// the account service's sense: a NAT'd server reached over a VPN is private and far, and a public
+/// wildcard name resolves to a LAN address, so an address cannot tell you which tier you are on.
 /// Choosing a probe ORDER, and how much patience each tier is worth, is `server::probe`'s policy;
 /// this layer owes exactly one honest ceiling on how long the main loop can be held.
 ///
@@ -920,8 +920,8 @@ fn is_numeric_host(host: &str) -> bool {
 ///
 /// Emitting the address is what the code did before there was any resolution, when the two could
 /// not differ. They differ now, and a numeric `Host:` breaks name-based virtual hosting outright:
-/// a reverse proxy in front of a server routes on this header, and a server that answers
-/// `plex.example.org` has no vhost named `203.0.113.9`. It is also the value a TLS SNI would have
+/// a reverse proxy in front of a media server routes on this header, and a server that answers
+/// `example.org` has no vhost named `203.0.113.9`. It is also the value a TLS SNI would have
 /// to agree with if https ever lands here.
 ///
 /// A v6 literal is BRACKETED (RFC 9110 §7.2's `Host` → RFC 3986 §3.2.2's `IP-literal`), which is
@@ -1527,7 +1527,7 @@ unsafe fn perform_http_request(
     // §5.5: field values are octets, and a recipient must not reject the message for them).
     // This used to run on `from_utf8(...).unwrap_or("")`, which meant ONE stray byte anywhere
     // in the block — a Latin-1 character in a filename echoed back in a header, a mojibake
-    // title in an `X-Plex-*` round-trip — collapsed the WHOLE header block to "", left
+    // title in a header round-trip, collapsed the WHOLE header block to "", left
     // `status` at 0, and made the `status < 200` check below close a perfectly good 200 and
     // report it as a transport failure. The bytes we actually care about are all ASCII, so
     // reading them as bytes costs nothing and cannot be poisoned from a distance.
@@ -1566,8 +1566,8 @@ unsafe fn perform_http_request(
     if header_is_chunked(hdr) {
         hs.chunked = 1;
     }
-    // HTTP/1.0 `Connection: keep-alive` is unused. The server is 1.1; offering 1.0 reuse would add
-    // a handshake only if we ever saw that framing, which we have not.
+    // HTTP/1.0 `Connection: keep-alive` is unused. The server is 1.1; offering 1.0 reuse would add a
+    // handshake only if we ever saw that framing, which we have not.
     hs.keep_alive = i32::from(hdr.starts_with(b"HTTP/1.1") && !header_has_connection_close(hdr));
     remember_peer(hs, host_s, port);
 
@@ -1850,7 +1850,7 @@ pub(crate) fn http_body_done(hs: *const HttpStream) -> bool {
 
 /// **What a transport holds of the current response body beyond what its reader has taken** —
 /// the one question `ff.rs`'s acquisition asks both transports before it may abandon a fetch.
-/// A body is complete when it is RECEIVED, not when FFmpeg has read it: the server bursts a paused
+/// A body is complete when it is RECEIVED, not when FFmpeg has read it: server bursts a paused
 /// remainder, and a burst sitting in a buffer is already paid for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct BodyReceipt {
@@ -2193,7 +2193,7 @@ pub(crate) fn http_shutdown(hs: *mut HttpStream) {
 
 // The three one-shot wrappers that lived here — `http_get`, `http_put`, `http_post` — are GONE.
 //
-// They were the Plex control plane's transport, and each folded away half of the answer:
+// They were the old control plane's transport, and each folded away half of the answer:
 // `http_get`/`http_post` returned `Option<Vec<u8>>`, collapsing every non-2xx into the same `None`
 // a refused connection produces, and `http_put` returned the status with the body dropped. That
 // collapse is precisely what `server::probe::Outcome` exists to prevent — a final `401` after the

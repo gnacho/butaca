@@ -1,14 +1,14 @@
 //! Backend-neutral playback vocabulary: the encode-shape contract and its parts, the quality
 //! ceiling, the timeline state, the link policy, and the retained play-queue row — concepts
 //! every backend speaks and that `route/` (both halves), the ABR ladder, the Jellyfin device
-//! profile, the player and the UI consume. Nothing here should force a caller to name a Plex
-//! path for a noun it uses without Plex in sight.
+//! profile, the player and the UI consume. Nothing here should force a caller to name a wire
+//! path for a noun it uses without the wire in sight.
 //!
-//! Extracted verbatim from `plex/params.rs` and `plex/timeline.rs` (the campaign's
-//! vocabulary-move pattern: `origin`, `librecord`, `grant`, `collection`, `person/types`,
-//! `registry`). This module holds NOUNS, not protocol: the Plex wire types that wrapped them
-//! (`TranscodeSpec`, `StreamSelection`, `TimelineReport`) died with the Plex wire layer, and
-//! the queue row's PRODUCER (`QueueRow::of`) went with the PlayQueue itself.
+//! Extracted verbatim from the retired wire module's `params.rs` and `timeline.rs` (the
+//! campaign's vocabulary-move pattern: `origin`, `librecord`, `grant`, `collection`,
+//! `person/types`, `registry`). This module holds NOUNS, not protocol: the wire types that
+//! wrapped them (`TranscodeSpec`, `StreamSelection`, `TimelineReport`) died with the wire
+//! layer, and the queue row's PRODUCER (`QueueRow::of`) went with the PlayQueue itself.
 
 /// What the connection tier a server is reached over lets a playback plan ask for. Both fields
 /// are true on every tier but a capped relay link — the tier reasoning lives with the wire that
@@ -16,7 +16,7 @@
 /// vocabulary composes.
 ///
 /// `quality_policy` returns one, `direct_play_policy` filters one, `flavors_allowed` ANDs two —
-/// none of which needs to know the link came from a Plex probe.
+/// none of which needs to know that a probe produced the link.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LinkPolicy {
     /// May the client stream the source file itself? False forces the transcode branch.
@@ -43,7 +43,7 @@ impl LinkPolicy {
 ///
 /// This is carried beside the request instead of inferred from its eventual URL: the capability
 /// profile, decision query, start endpoint and demux strategy are one choice and must never drift
-/// independently. Fixed HLS is deliberately a single-rendition session on the measured server; an
+/// independently. Fixed HLS is deliberately a single-rendition session on the measured server. An
 /// adaptive quality change primes a replacement encoder session rather than pretending that the
 /// one-entry master playlist is client-selectable ABR.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -55,11 +55,11 @@ pub enum TranscodeDelivery {
     FixedHls { seconds_per_segment: u8 },
 }
 
-/// Plex Pass's per-track transcoder DSP (issue #266): dialog boost and loudness normalization.
-/// The server accepts the two independently (`boostDialog=1`, `normalizeLoudness=1` on
-/// the transcode query — never on MDE, per M1), so they are two flags rather than one; this client
-/// always offers them together with the same gate (`route::plan::desired_audio`), but the wire and
-/// the type stay as honest about the server's contract as the server itself is.
+/// The server's per-track transcoder DSP (issue #266): dialog boost and loudness normalization.
+/// The server accepts the two independently (`boostDialog=1`, `normalizeLoudness=1` on the
+/// transcode query, never on MDE, per M1), so they are two flags rather than one. This client
+/// always offers them together with the same gate (`route::plan::desired_audio`), but the wire
+/// and the type stay as honest about the server's contract as the server itself is.
 ///
 /// `Copy`, `Default` (= [`NONE`](Self::NONE)), `Serialize`/`Deserialize` — it rides every
 /// [`EncodeContract`] built on the resolve worker and is persisted as the user's preference
@@ -91,8 +91,8 @@ impl AudioEnhancements {
 }
 
 /// The single value that describes the SHAPE of one universal-transcoder encode: flavor, delivery,
-/// the re-encode/no-copy switch, a user ceiling, and — issue #266 — which Plex Pass audio DSP the
-/// carried track gets. These five used to be four independent fields on the Plex wire request;
+/// the re-encode/no-copy switch, a user ceiling, and, per issue #266, which server-side audio DSP
+/// the carried track gets. These five used to be four independent fields on the wire request, and
 /// folding them into one value is what keeps "enhancement"
 /// honestly scoped to a remux: the audio params only ever mean anything alongside `remux == true`
 /// (M1 — MDE and a re-encode both ignore or mishandle them), so a caller that builds a contract
@@ -113,12 +113,13 @@ pub struct EncodeContract {
     ///
     /// It exists because "we refused direct play" and "the server will re-encode" are NOT the same
     /// statement, and the gap between them shipped a fix that fixed nothing. `directStream=1`
-    /// permits a stream copy, and the server takes it whenever the source fits the caps the query
-    /// carries — resolution, bitrate, and the profile's own limitation axes
-    /// (width/height/bitDepth). **None of those axes can express Dolby Vision**, so a Profile 5
-    /// file refused by `route::video_direct_plays` came back `Part.decision=transcode` with
-    /// the VIDEO stream's own decision `copy`: the identical IPT-PQ bitstream, one container down,
-    /// the identical wrong colours (measured against a real server on 2026-08-21).
+    /// permits a stream copy, and the server takes it whenever the source fits the caps the
+    /// query carries: resolution, bitrate, and the profile's own limitation axes
+    /// (width/height/bitDepth).
+    /// **None of those axes can express Dolby Vision**, so a Profile 5 file refused by
+    /// `route::video_direct_plays` came back `Part.decision=transcode` with the VIDEO stream's own
+    /// decision `copy`: the identical IPT-PQ bitstream, one container down, the identical wrong
+    /// colours (measured against a real server on 2026-08-21).
     ///
     /// Setting it makes the ask honest, and the answer honest with it: a server that CAN convert
     /// the file does, and a server that cannot says so (this server answers
@@ -135,9 +136,10 @@ pub struct EncodeContract {
     /// above. By the time a `Some` reaches here, `route::quality_policy` has already refused the
     /// two flavors no number can bind.
     pub ceiling: Option<Ceiling>,
-    /// Plex Pass DSP for the carried audio track (issue #266). Set only by `build_stream`, from
-    /// `route::desired_audio` — `NONE` unless the enhancement is offered (Plex Pass, a capable
-    /// carried track, the Original route, no subtitle, no Dolby Vision) and the viewer opted in.
+    /// The server's DSP for the carried audio track (issue #266). Set only by `build_stream`, from
+    /// `route::desired_audio`. It stays `NONE` unless the enhancement is offered (a server that
+    /// offers it, a capable carried track, the Original route, no subtitle, no Dolby Vision) and
+    /// the viewer opted in.
     pub audio: AudioEnhancements,
 }
 
@@ -156,16 +158,16 @@ impl EncodeContract {
     }
 }
 
-/// A bound a playback must come in under, in the units the server's own params use:
-/// `maxVideoBitrate` is **kbps**, `videoResolution` is a `WxH` pair. One value rather than two
-/// scattered ints, because the two axes have to move together — a rung that halves the rate and
-/// keeps 4K asks the server for something it cannot make look like anything.
+/// A bound a playback must come in under, in the server's own param units: `maxVideoBitrate` is
+/// **kbps**, `videoResolution` is a `WxH` pair. One value rather than two scattered ints, because
+/// the two axes have to move together — a rung that halves the rate and keeps 4K asks the server
+/// for something it cannot make look like anything.
 ///
 /// Lives here rather than in `route` so the ladder's rungs and the query that spends them are one
 /// type: `route::Quality::ceiling` is the only constructor of a non-default one.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Ceiling {
-    /// `maxVideoBitrate`, in **kbps** (the server's unit — not bits, not bytes).
+    /// `maxVideoBitrate`, in **kbps** (the server's unit, not bits, not bytes).
     pub max_kbps: i64,
     /// `videoResolution`, as the frame the encode may not exceed.
     pub max_w: i64,

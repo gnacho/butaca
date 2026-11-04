@@ -8,8 +8,8 @@
 //! ## Why this module exists
 //!
 //! With the Jellyfin-only conversion there is one backend and one server, so a write is exactly
-//! one request: the fan-out that used to repeat a watched claim across every Plex share that held
-//! the title is gone with the server protocol, and the item's identity is simply the `(sid, rk)`
+//! one request: the fan-out that used to repeat a watched claim across every share that held
+//! the title is gone with the old wire protocol, and the item's identity is simply the `(sid, rk)`
 //! pair the press carried. What remains is the discipline the queue existed for:
 //!
 //! * **The press is optimistic.** [`request`] flips what the shelves and the loaded detail item say
@@ -18,7 +18,7 @@
 //!   the frame of the press however far away the server is. The refresh that follows the write is
 //!   the reconcile: it is the server's own answer, and it silently corrects an optimistic edit that
 //!   turned out to be wrong. A server that never answers leaves the edit standing — the same "a
-//!   failure never blanks a populated Home" rule `catalog.rs` keeps for a fetch, applied to a write.
+//!   failure never blanks a populated Home" rule `pms.rs` keeps for a fetch, applied to a write.
 //! * **One write at a time, in order.** These are not idempotent reads: a watched/unwatched pair
 //!   landing out of order leaves the server saying the opposite of what the user last asked for. So
 //!   the queue is drained strictly one worker at a time, and a second press on the SAME item
@@ -172,10 +172,10 @@ impl ViewStateState {
         !self.queue.is_empty() || self.sent.is_some()
     }
 
-/// Ask the item's server to change `(sid, rk)`'s view state, and update every surface
-/// that describes it AT ONCE. **MAIN THREAD, NON-BLOCKING.** Returns false when the write never
-/// left — the one case being a server slot that holds no client, which is a dropped server write
-/// and says so in the log rather than being the one that goes unrecorded.
+/// Ask the item's server to change `(sid, rk)`'s view state, and update every surface that describes
+/// it AT ONCE. **MAIN THREAD, NON-BLOCKING.** Returns false when the write never left — the one case
+/// being a server slot that holds no client, which is a dropped write and says so in the log
+/// rather than being the one that goes unrecorded.
 ///
 /// `detail` says exactly what to re-read when the write lands: `None` for a press outside Detail,
 /// an addressed page plus kept episode for its filmstrip, and the addressed page with no episode
@@ -196,7 +196,7 @@ impl ViewStateState {
     metadata: &mut dyn FnMut(crate::stores::metadata::MetadataCmd) -> bool,
 ) -> bool {
     // One backend, one guard: a write flies only when the sid names the Jellyfin slot AND the
-    // Jellyfin client is signed in. Any other sid names a retired Plex slot that no client can
+    // Jellyfin client is signed in. Any other sid names a retired slot that no client can
     // ever fill (#166) — a view-state write is exactly the operation to skip and log rather than
     // guess a destination for.
     let jellyfin = sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some();
@@ -356,9 +356,9 @@ impl ViewStateState {
     while !self.queue.is_empty() {
         let req = self.queue.remove(0);
         // Resolved HERE, at the spawn site, and never inside the worker. A slot that has since
-        // stopped holding a client is a write with nowhere to go: dropping it silently would be
-        // the one server write with no line at all, which is what the request-time check above
-        // exists to prevent, so it says so here too.
+        // stopped holding a client is a write with nowhere to go: dropping it silently would be the
+        // one write with no line at all, which is what the request-time check above exists to
+        // prevent, so it says so here too.
         let jellyfin = req.sid == crate::jellyfin::SERVER_ID;
         if jellyfin {
             let Some(c) = crate::jellyfin::client() else {
@@ -378,7 +378,7 @@ impl ViewStateState {
             });
             if !spawned {
                 // Nothing will ever fill the mailbox. Put the write back at the HEAD, exactly as
-                // the Plex arm below does, and wait out the ladder before trying again.
+                // the retired arm did, and wait out the ladder before trying again.
                 self.queue.insert(0, req);
                 self.retry_cd = RETRY_FRAMES;
                 crate::log("viewstate: jellyfin write refused at spawn");
@@ -432,7 +432,7 @@ pub(crate) fn pump_with_gate(
             // The refresh is owed whether or not the server took it: on success it is the reconcile,
             // and on failure it is what puts the optimistic edit back to whatever the server really
             // says. A server that can answer neither question leaves the shelves exactly as they
-            // are — `catalog.rs`'s per-source rule, unchanged.
+            // are — `pms.rs`'s per-source rule, unchanged.
             self.want_hubs = true;
             if let Some(detail) = r.detail {
                 self.want_detail = Some(detail);

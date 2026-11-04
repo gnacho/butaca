@@ -9,8 +9,8 @@
 //! ## One backend answers; the other slots contribute nothing
 //!
 //! This page used to ask every registered server — the machine whose credit row opened it first,
-//! then a `/hubs/search` resolve plus a `/library/people/{id}/media` sweep on each Plex share,
-//! merged into one filmography. The Plex read layer is gone (issue #166): the ONLY fetch that
+//! then a `/hubs/search` resolve plus a `/library/people/{id}/media` sweep on every share,
+//! merged into one filmography. That read layer is gone (issue #166): the ONLY fetch that
 //! remains is the origin's, on the Jellyfin backend. Every other registry slot is born settled
 //! ([`sources`]) and contributes nothing — an empty shelf from a slot this build cannot ask is an
 //! answer, not a fetch to retry forever.
@@ -28,21 +28,21 @@
 //!   It is the ONE fetch here that DEPENDS on another — it can only be addressed once that
 //!   source's shelves have landed, and [`address`] expresses that by keying it on that source's
 //!   shelf keys, which are empty until then.
-//! * **[`K_RESOLVE`]** — RETIRED with the Plex read layer. The slot kind survives in the index
+//! * **[`K_RESOLVE`]** - RETIRED with that read layer. The slot kind survives in the index
 //!   space ([`fx`]/[`un_fx`]) but no worker is ever spawned for it: the origin's `personId` rides
 //!   in on the credit row, and no other source is ever asked.
-//! * **[`F_PROFILE`]** — the biography, from plex.tv: `GET
-//!   discover.provider.plex.tv/library/people/{tagKey}` over the TLS+DNS `net.rs` path (the
-//!   wire facts are the field docs on the DTO vocabulary (`person::types`) below). **Deliberately still
-//!   single.** It is already GLOBAL —
-//!   plex.tv answers about the person, not about anybody's library — so fanning it out would be the
-//!   same request N times for one answer.
-//! * **[`F_CREDITS`]** — the filmography, from the same host: `GET
-//!   …/library/people/{tagKey}/credits` → `types::CreditGroup[]`. Global for exactly [`F_PROFILE`]'s
-//!   reason and then some, since a person's CAREER is not a fact any server has an opinion about.
-//!   What the servers contribute to it is the availability JOIN, and that rides on the [`K_MEDIA`]
-//!   answers this page already makes — so it adds one request per person, not one per source. The
-//!   screen is [`crate::ui::filmography`]; the display model it draws is [`filmography`].
+//! * **[`F_PROFILE`]** - the biography. It was a global read from the metadata provider
+//!   (`GET <provider>/library/people/{tagKey}`, the wire facts are the field docs on the DTO
+//!   vocabulary (`person::types`) below). Today the Jellyfin arm answers it from the person ITEM
+//!   the credit row already named (`fetch_profile_jf`), and every other slot answers nothing.
+//!   **Deliberately still single.** It is about the person, not about anybody's library, so
+//!   fanning it out would be the same request N times for one answer.
+//! * **[`F_CREDITS`]** - the filmography. It was the global credits read on that same host
+//!   (`…/library/people/{tagKey}/credits` → `types::CreditGroup[]`), and its availability JOIN
+//!   rode on the [`K_MEDIA`] answers this page already makes. There is no counterpart on the
+//!   Jellyfin backend: the filmography IS the per-source shelves, so this mailbox asks for
+//!   nothing there. The screen is [`crate::ui::filmography`] and the display model it draws is
+//!   [`filmography`].
 //!
 //! Every fetch's plumbing is indexed by ONE flat key ([`fx`]/[`un_fx`]): its mailbox and its
 //! single-flight claim as one [`Fetch`] ([`FETCH`]), its retry countdown beside them ([`RETRY_CD`],
@@ -51,9 +51,9 @@
 //! can never be applied to a different server because the source list moved under it.
 //!
 //! **The header still MOUNTS on what it was handed.** `Role[]` already carries the name and the
-//! headshot (`server::Tag`), so the page draws instantly and the plex.tv fields fade in under the
+//! headshot (`server::Tag`), so the page draws instantly and the biography fields fade in under the
 //! name when they land. That ordering is the whole degrade strategy: the biography request can
-//! fail, or the person can be one plex.tv has never heard of, and the page must then read as
+//! fail, or the person can be one the server has never heard of, and the page must then read as
 //! *finished* at portrait + name — never as a row of fields that failed to load. Nothing in the
 //! header is a placeholder; each line is drawn only when it has content.
 //!
@@ -79,10 +79,10 @@ pub(crate) mod types;
 /// It is also the perf ceiling the A53 budget wants: a shelf is a horizontal strip, not a grid.
 const SHELF_MAX: usize = crate::ui::card_row::MAX_ROW_ITEMS;
 
-/// How many departments the roles line names before it stops. Plex prints every one; on a couch
-/// that turns a one-line kicker into "Actor, Writer, Producer, Composer, Costume Makeup" for a
-/// jobbing actor (Peter Sallis has five). The wire order is most-credits-first, so the first three
-/// ARE the ones worth naming.
+/// How many departments the roles line names before it stops. The wire names every one, and on
+/// a couch that turns a one-line kicker into "Actor, Writer, Producer, Composer, Costume Makeup"
+/// for a jobbing actor (Peter Sallis has five). The wire order is most-credits-first, so the first
+/// three ARE the ones worth naming.
 const MAX_ROLES: usize = 3;
 
 /// One shelf of a person's page. The three fields move together and must never be updated apart:
@@ -124,8 +124,8 @@ struct Src {
     /// before the resolve answers means "not known yet", and the two must not be confused.
     local: Option<String>,
     /// the resolve has ANSWERED — found or not. Every source now starts `true`: the resolve was
-    /// the Plex read layer's `/hubs/search` round trip, and with that layer gone there is nothing
-    /// left to ask. The origin carries its `personId` from the credit row; every other slot
+    /// the retired read layer's `/hubs/search` round trip, and with that layer gone there is
+    /// nothing left to ask. The origin carries its `personId` from the credit row, and every other
     /// contributes nothing and is settled at birth (see [`sources`]).
     resolved: bool,
     /// this source's own contribution, before the merge
@@ -175,14 +175,14 @@ impl Src {
     }
 }
 
-/// One person's page: the header handed in by the cast row, the plex.tv biography fields, and the
+/// One person's page: the header handed in by the cast row, the biography fields, and the
 /// MERGED Movies / Shows shelves every source contributed to.
 pub(crate) struct Person {
     /// The ORIGIN server — the one whose credit row opened this page, and the only one
     /// [`Person::key`] means anything on. A personId is server-local exactly like a ratingKey,
     /// so `key` alone names a person on no machine in particular once
     /// a share is registered; the pair is the identity, compared through
-    /// [`crate::registry::same_item`]. `guid` needs no such scoping: it is plex.tv's, and global.
+    /// [`crate::registry::same_item`]. `guid` needs no such scoping: it is portable, and global.
     ///
     /// It is NOT "the server this page reads" any more — that is every entry of [`Person::srcs`].
     /// What it still decides is the header (`Art::Person` fetches the headshot from it) and the
@@ -191,23 +191,24 @@ pub(crate) struct Person {
     /// the ORIGIN server's local `personId` (numeric tag id, or the guid when that server sent no
     /// number) — addresses `/library/people/{key}/media` on [`Person::sid`] and nowhere else
     pub(crate) key: String,
-    /// the `tagKey` guid — plex.tv's global person id. The ONLY thing
-    /// `discover.provider.plex.tv` answers to (module docs). Empty when the credit row carried
-    /// none, which costs the biography.
+    /// the `tagKey` guid - the global person id carried over from the inherited metadata. It is
+    /// the id the profile fetch is addressed with (module docs). Empty when the credit row carried
+    /// none, and then there is nothing to ask with, which costs the biography.
     pub(crate) guid: String,
     pub(crate) name: String,
     pub(crate) thumb: String,
-    /// Biography, from plex.tv. Empty until the profile fetch lands — and STAYS empty for a person
-    /// plex.tv has no record of. Drawn only when non-empty.
+    /// Biography, from the profile fetch. Empty until that fetch lands - and STAYS empty for a
+    /// person the server has no record of. Drawn only when non-empty.
     pub(crate) bio: String,
     /// The departments, already shortened + prettified for display, in flow order and capped at
     /// [`MAX_ROLES`] — `["Actor", "Producer"]`, one entry per department. See [`roles_line`]; a
     /// caller joins them with whatever separator its own line uses (the header's dotted run, the
     /// bio panel's `", "`).
     pub(crate) roles: Vec<String>,
-    /// ISO `YYYY-MM-DD` birth / death dates and the birthplace, verbatim from plex.tv — the SCREEN
-    /// formats them (`ui::fmt::pretty_date`), because how a date reads is a display decision.
-    /// `died` is empty for someone living, which is why the page tests "non-empty", never "unknown".
+    /// ISO `YYYY-MM-DD` birth / death dates and the birthplace, verbatim from the profile record -
+    /// the SCREEN formats them (`ui::fmt::pretty_date`), because how a date reads is a display
+    /// decision. `died` is empty for someone living, which is why the page tests "non-empty", never
+    /// "unknown".
     pub(crate) born: String,
     pub(crate) died: String,
     pub(crate) birthplace: String,
@@ -233,18 +234,18 @@ pub(crate) struct Person {
     /// has_content`] — an episodes-only credit lands exactly like that), must neither of them draw
     /// "nothing in your libraries" over a fetch still out on the server that does have them.
     pub(crate) landed: bool,
-    /// the plex.tv profile fetch has ANSWERED at least once — including the answer "no such
+    /// the profile fetch has ANSWERED at least once - including the answer "no such
     /// person", which arrives as an all-empty profile. Its only job is to stop the retry; the page
     /// never renders a "loading" state for the header, because a header that is complete without a
     /// biography must not flicker a spinner into a space it will never fill.
     pub(crate) profiled: bool,
-    /// Whether the plex.tv profile fetch has COME BACK at all, success or failure — the bound on
+    /// Whether the profile fetch has COME BACK at all, success or failure - the bound on
     /// [`facts_pending`]'s wait. Distinct from `profiled`, which says the answer had content:
     /// "still waiting" and "asked, and got nothing" look identical to a placeholder and must not.
     pub(crate) profile_tried: bool,
-    /// The filmography as plex.tv sent it — every department, in the provider's own order, with
-    /// nothing folded, sorted or joined. The DISPLAY model is [`filmography`], derived on demand,
-    /// because its availability column is a function of the sources and changes under it.
+    /// The filmography the retired global read delivered - every department, in the provider's own
+    /// order, with nothing folded, sorted or joined. The DISPLAY model is [`filmography`], derived
+    /// on demand, because its availability column is a function of the sources and moves under it.
     credits: Vec<types::CreditGroup>,
     /// the credits fetch has ANSWERED at least once — including the answer "no credits", which is
     /// an empty vector. [`Person::profiled`]'s twin, and the gate the Filmography entry row is
@@ -332,7 +333,7 @@ impl PersonState {
 
 /// The open person publication is borrowed from its owner. Main-thread only; the reference is
 /// valid for the frame context that lent it.
-/// **The plex.tv profile has not answered yet** — the canvas's phase 0, and what the portrait, the
+/// **The profile has not answered yet** - the canvas's phase 0, and what the portrait, the
 /// identity pair and the bio draw a placeholder for.
 ///
 /// It is PENDING, not ABSENT: a profile that answered with no biography is `profiled` with an empty
@@ -342,9 +343,9 @@ impl PersonState {
 /// the wait.
 pub(crate) fn facts_pending(p: &Person) -> bool {
     // **Bounded by a real ATTEMPT, not only by success.** `!p.profiled` alone is unbounded whenever
-    // plex.tv cannot be reached — an offline or LAN-only television, a provider outage, or any
-    // headless boot, where the injected `/tmp/butaca-token` is a SERVER token that
-    // `discover.provider.plex.tv` answers 401. The profile mailbox then re-arms its back-off
+    // the profile cannot be fetched - an offline or LAN-only television, a provider outage, or any
+    // headless boot, where the injected `/tmp/butaca-token` was a SERVER token the metadata
+    // provider answered 401 to. The profile mailbox then re-arms its back-off
     // forever, `profiled` never turns true, and `draw_header` paints five `skeleton_bar`s a frame,
     // each of which calls `idle::invalidate()` — so the whole-frame present gate never closes and
     // the page repaints at 60fps for as long as it is open, for a sweep over content that is never
@@ -371,15 +372,15 @@ const K_MEDIA: usize = 1;
 const K_ROLES: usize = 2;
 const NKIND: usize = 3;
 
-/// The two fetches that are not per-server: plex.tv's biography and plex.tv's filmography, both of
+/// The two fetches that are not per-server: the biography and the filmography, both of which were
 /// which are already global (module doc). They sit past every per-source mailbox, which is what
 /// keeps [`un_fx`] total.
 const F_PROFILE: usize = crate::registry::MAX_SERVERS * NKIND;
-/// The FILMOGRAPHY — `{DISCOVER}/library/people/{tagKey}/credits`. Global for [`F_PROFILE`]'s
-/// reason and then some: it is a fact about the person's CAREER, which no server has an opinion
-/// about at all. What the servers contribute is the AVAILABILITY join, and that rides on the
-/// `/media` answers ([`K_MEDIA`]) the page already makes — so this adds one request per person, not
-/// one per source.
+/// The FILMOGRAPHY - the retired global credits read, `{DISCOVER}/library/people/{tagKey}/credits`.
+/// Global for [`F_PROFILE`]'s reason and then some: it is a fact about the person's CAREER, which
+/// no server has an opinion about at all. What the servers contribute is the AVAILABILITY join,
+/// and that rides on the `/media` answers ([`K_MEDIA`]) the page already makes. On the Jellyfin
+/// backend the filmography IS the per-source shelves, so this mailbox asks for nothing there.
 const F_CREDITS: usize = F_PROFILE + 1;
 /// Mailboxes, single-flight claims and retry countdowns, all over this one index space.
 const NFETCH: usize = F_CREDITS + 1;
@@ -407,7 +408,7 @@ fn un_fx(i: usize) -> Option<(ServerId, usize)> {
 
 /// Frames left before fetch `i` may spawn again after a FAILED attempt (main-thread; [`PersonState::pump`]
 /// decrements). Stops a fast-failing network from spawning a worker every frame. PER FETCH AND PER
-/// SOURCE on purpose, which is the third of `catalog.rs`'s three multi-source lessons: a plex.tv
+/// SOURCE on purpose, which is the third of `pms.rs`'s three multi-source lessons: a biography
 /// biography that cannot be reached (the TV is on a LAN with no internet — the case this app is
 /// built to keep working) must not hold the shelves off for two seconds a go, and a share that
 /// takes eight seconds to time out must not put the server that IS answering on its ladder.
@@ -616,8 +617,8 @@ impl PersonState {
 ///
 /// Registry order, not "the one you arrived through first", is the point of the whole unit — the
 /// page has to be the same page whichever credit row opened it. The ORIGIN is force-included when
-/// the registry has never heard of it, which covers a host test and a boot that never reached
-/// plex.tv; a `ServerId` that names no slot ([`ServerId::UNSET`]) is not a source at all, since
+/// the registry has never heard of it, which covers a host test and a boot that never signed in.
+/// A `ServerId` that names no slot ([`ServerId::UNSET`]) is not a source at all, since
 /// there is nothing to dial and no mailbox to land in.
 ///
 /// Read on open and whenever the registry generation moves. The roster is tiny; rebuilding only at
@@ -635,7 +636,7 @@ fn sources(origin: ServerId, key: &str) -> Vec<Src> {
             // both the round trip saved and the only id we could ever be sure of.
             local: is_origin.then(|| key.to_string()).filter(|k| !k.is_empty()),
             // Every source starts RESOLVED: the cross-server resolve was a `/hubs/search` query
-            // through the Plex read layer, which no longer exists. A slot other than the origin
+            // through the retired read layer, which no longer exists. A slot other than the origin
             // cannot be asked for anything, so contributing nothing is its answer, not a fetch to
             // retry forever (`settled` reads `resolved && local.is_none()`).
             resolved: true,
@@ -666,7 +667,7 @@ fn sources(origin: ServerId, key: &str) -> Vec<Src> {
 /// `CatalogMovie` does not carry — and a title+year join would merge two different films *and* miss the
 /// case measured on this very pair of servers, where the share's copy is
 /// titled in another language. A visible duplicate is honest; a wrong merge hides a film.
-/// (With the Plex read layer gone only the origin lands rows today, but the merge stays the one
+/// (With that read layer gone only the origin lands rows today, but the merge stays the one
 /// place that shapes what the screen draws.)
 fn merge_shelves(srcs: &[Src]) -> [Shelf; NSHELF] {
     let mut out: [Shelf; NSHELF] = Default::default();
@@ -805,18 +806,18 @@ fn open(
     }
 }
 
-/// `/tmp/butaca-personbio[=<text>]` — **stand in for the plex.tv biography record**, so the
+/// `/tmp/butaca-personbio[=<text>]` - **stand in for the biography record**, so the
 /// person page's header bio and the bio alert panel behind it can be reached headlessly.
 ///
-/// **Why this trigger has to exist.** Everything below the name on this page — roles, dates,
-/// birthplace and the biography itself — comes from `discover.provider.plex.tv`, which is a
-/// different identity from the server. An automated boot signs in with `/tmp/butaca-token`, a
-/// *server* token, and the provider answers that `401`; a real interactive session gets a real
-/// biography and an automated one never does. So neither `tests/run.py` nor `make sim-shot` can
-/// reach a person page with any prose on it at all, and the panel this seeds is by construction
-/// only reachable when there is MORE prose than the header shows. That is the same argument
+/// **Why this trigger has to exist.** Everything below the name on this page - roles, dates,
+/// birthplace and the biography itself - used to come from the metadata provider, which was a
+/// different identity from the server's own. An automated boot signed in with `/tmp/butaca-token`,
+/// a *server* token, and the provider answered that `401`, while a real interactive session got a
+/// biography and an automated one never did. That path is retired, and no capture can depend on
+/// what a server happens to hold: the panel this seeds is by construction only reachable when
+/// there is MORE prose than the header shows. That is the same argument
 /// `/tmp/butaca-search`'s query seed makes (no harness can type) and `/tmp/butaca-failtest`'s
-/// (no server will refuse on cue) — the screen is real, the route to it is not automatable.
+/// (no server will refuse on cue) - the screen is real, the route to it is not automatable.
 ///
 /// Empty file = a long built-in sample with paragraph breaks in it, which is the shape that
 /// exercises the panel (a one-paragraph blob would never show [`PARA_GAP`], and a short one would
@@ -894,7 +895,7 @@ fn close(state: &mut PersonState, adapter: &PersonAdapter) {
     state.current = None;
 }
 
-/// Wipe the store on a profile/account switch — the browse/catalog twin of `install_server`'s reset. A
+/// Wipe the store on a profile/account switch — the browse/pms twin of `install_server`'s reset. A
 /// new user must never inherit the previous one's page, and the flags must move with the mailbox.
 /// It is also what makes [`sources`]' read-once safe: the roster only changes on the paths that
 /// call this.
@@ -1024,12 +1025,12 @@ impl PersonState {
     }
 }
 
-/// `/tmp/butaca-personcredits[=<rows>]` — **stand in for the plex.tv FILMOGRAPHY record**, so
+/// `/tmp/butaca-personcredits[=<rows>]` - **stand in for the FILMOGRAPHY record**, so
 /// [`crate::ui::filmography`] can be reached headlessly.
 ///
 /// It exists for exactly [`seed_dev_profile`]'s reason and the argument is not repeated here: the
-/// credits come from `discover.provider.plex.tv`, an automated boot signs in with a *server* token,
-/// and the provider answers that `401`. So no harness and no `make sim-shot` can reach this screen
+/// credits came from the metadata provider, an automated boot signed in with a *server* token, and
+/// the provider answered that `401`. So no harness and no `make sim-shot` could reach this screen
 /// with a single row on it.
 ///
 /// **It seeds the JOIN as well as the rows**, which the biography's twin has no equivalent of and
@@ -1199,7 +1200,7 @@ fn apply_landing(state: &mut PersonState, i: usize, what: Landing) -> bool {
         }
         Landing::Profile(Some(prof)) => {
             // The name is NOT overwritten from here: the local `Role[]` tag is what the credits
-            // shelf showed a moment ago, and swapping it for plex.tv's spelling mid-fetch would
+            // shelf showed a moment ago, and swapping it for the profile's spelling mid-fetch would
             // rename the person under the user's eyes. Same for the headshot.
             p.roles = roles_line(&prof);
             p.bio = prof.summary;
@@ -1346,7 +1347,7 @@ pub(crate) fn pretty_department(raw: &str) -> String {
 /// keyed off another.
 ///
 /// `None` covers both "already answered" and **"not actionable"**, and the second is now the common
-/// case rather than the exception: a person with no `tagKey` never asks plex.tv anything, a source
+/// case rather than the exception: a person with no `tagKey` never asks for a biography, a source
 /// whose resolve came back empty never asks for a filmography, and neither is a failure or may spin
 /// a worker every frame. The two per-source dependencies are expressed as keys rather than as
 /// ordering machinery — `K_MEDIA` keys on the source's resolved id, `K_ROLES` on its shelf list,
@@ -1364,8 +1365,8 @@ fn address(i: usize, p: &Person) -> Option<Vec<String>> {
     let (sid, kind) = un_fx(i)?;
     let s = p.srcs.iter().find(|s| s.sid == sid)?;
     match kind {
-        // K_RESOLVE never asks: its worker went with the Plex read layer. The origin's `personId`
-        // rode in on the credit row and every other source is born settled (`sources`).
+        // K_RESOLVE never asks: its worker went with the retired read layer. The origin's
+        // `personId` rode in on the credit row and every other source is born settled (`sources`).
         K_RESOLVE => None,
         K_MEDIA if s.resolved && !s.landed => s.local.clone().map(|id| vec![id]),
         K_ROLES if s.landed && !s.roled => {
@@ -1392,7 +1393,7 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
     let guid = p.guid.clone();
     if i == F_PROFILE || i == F_CREDITS {
         // The Jellyfin flavor's page is its own provider: the biography is the person ITEM the
-        // credit row already named (`fetch_profile_jf`), and plex.tv's global filmography has no
+        // credit row already named (`fetch_profile_jf`), and the global filmography read has no
         // counterpart on this backend at all — the filmography the route draws there is the
         // per-source shelves below, so the F_CREDITS mailbox asks for nothing.
         if p.sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
@@ -1400,7 +1401,7 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
                 return;
             }
             adapter.fetch[i].claim();
-            // Same controlled-resource rule the Plex local arms below live under: a controlled
+            // Same controlled-resource rule every other arm below lives under: a controlled
             // boot records (or replays) the spawn answer, and the landing's admission evidence
             // is what its recorded terminal is fenced by. Global slot: no client/sid/local in
             // the request — the same shape `validate_admission` spells for global person rows.
@@ -1422,19 +1423,19 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
         return;
     }
     let Some((sid, kind)) = un_fx(i) else { return };
-    // The Jellyfin slot's own answers. That backend's client lives outside the Plex registry
+    // The Jellyfin slot's own answers. That backend's client lives outside the registry
     // `client_for` reads, so without this arm the fetch backs off forever and the page never
     // fills — the "opening a cast member does nothing" of issue #8 was exactly that silence, plus
-    // a plex.tv biography a signed-out session could never fetch. K_RESOLVE is unreachable here
+    // a provider biography a signed-out session could never fetch. K_RESOLVE is unreachable here
     // by construction (the origin src is born resolved and no other source exists on this
     // backend) and is spelled out anyway so a future caller of the fx space cannot turn that
     // silence into a spawn loop. The filmography landing carries an EMPTY match index: that
-    // table joins plex.tv guids, and a Jellyfin item has none.
+    // table joins catalog guids, and a Jellyfin item has none.
     if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
         if kind == K_RESOLVE {
             return;
         }
-        // The source's own local id rides the recorded request exactly as the Plex arm's does
+        // The source's own local id rides the recorded request exactly as the retired arm did
         // (this backend's roles worker matches credit rows by key, so the value is carried, not
         // consumed) — and the controlled admission's client identity is the Jellyfin world's 0,
         // mirroring discovery/hubs/metadata.
@@ -1465,7 +1466,7 @@ fn maybe_spawn(state: &mut PersonState, adapter: &Arc<PersonAdapter>, i: usize) 
         }
         return;
     }
-    // A non-Jellyfin slot has no fetch left: the Plex read layer (`/hubs/search` resolve,
+    // A non-Jellyfin slot has no fetch left: that read layer (`/hubs/search` resolve,
     // `/library/people/{id}/media`, the batched metadata read) is gone with issue #166. Such a
     // source was born settled (`sources`) and its mailbox simply never fires.
     }
@@ -1567,7 +1568,7 @@ fn person_media_jf(sid: ServerId, person_id: &str) -> Option<MediaLanding> {
             jf_shelf(&shows.items, shows.total, sid),
         ],
         // The cross-source availability join reads a (guid, ratingKey) index. That vocabulary
-        // has no plex.tv guid behind it on this backend — but the filmography query here IS a
+        // has no catalog guid behind it on this backend - but the filmography query here IS a
         // library query, so every row it returns is an item this server holds, and the honest
         // index joins each id to ITSELF: `match_local` and `seed_dev_credits` read the same
         // shape, a Jellyfin id is its own guid for that purpose, and a filmography row carries
@@ -1651,7 +1652,7 @@ pub(crate) struct Department {
 ///
 /// Pure over the open person, and derived on demand rather than stored, because two of its three
 /// steps depend on data that keeps moving: the availability join is a function of the sources, and
-/// a share that lands five seconds in must turn "no server behind this" into "Dad's Plex" without
+/// a share that lands five seconds in must turn "no server behind this" into "Dad's server" without
 /// anybody remembering to invalidate a cache. The screen rebuilds it on the frames
 /// [`PersonState::pump`] reports a change, which is the same discipline the Person screen's header flow uses.
 ///
@@ -1744,19 +1745,18 @@ pub(crate) fn filmography_total(p: &Person) -> usize {
 /// source's [`Src::matches`] index in registry order.
 ///
 /// The FIRST match wins, and registry order is what makes that deterministic: with a film on two
-/// servers the route names the one nearer the front of the roster, which is the same machine
-/// every other surface in the app would open it on. An empty guid never matches. **The last path
-/// segment of a Plex guid — the catalog ID, which is the ONLY form both sides of the join agree
-/// on.** The server states an item's identity as `plex://movie/5d7768295af944001f1f7477`;
-/// the Discover credits endpoint states the SAME identity as a bare `ratingKey` of
-/// `5d7768295af944001f1f7477`, and carries no `guid` field at all (measured 2026-09-06 against
-/// a real response). Comparing the two whole strings therefore never matches, which is exactly
-/// the bug this exists to end: the page reported `joinable=5`, drew 544 credit rows, and marked
-/// none of them.
+/// servers the route names the one nearer the front of the roster, which is the same machine every
+/// other surface in the app would open it on. An empty guid never matches.
+/// **The last path segment of a guid - the catalog ID, which is the ONLY form both sides of the
+/// join agree on.** A local row states an item's identity as a full guid, `<prefix>/movie/<id>`.
+/// The credits answer states the SAME identity as a bare `ratingKey` of `<id>`, and carries no
+/// `guid` field at all (measured 2026-09-06 against a real response). Comparing the two whole
+/// strings therefore never matches, which is exactly the bug this exists to end: the page
+/// reported `joinable=5`, drew 544 credit rows, and marked none of them.
 ///
-/// Taking the TAIL rather than stripping a `plex://<type>/` prefix is deliberate — the type
-/// segment differs between the two sides for the same title (a show credit is `plex://show/…`
-/// while the local row may be the movie), and an ID is the same ID whichever side named it.
+/// Taking the TAIL rather than stripping a `<prefix>/<type>/` prefix is deliberate - the type
+/// segment differs between the two sides for the same title (a show credit and the local movie
+/// row are two types), and an ID is the same ID whichever side named it.
 fn guid_tail(s: &str) -> &str {
     match s.rfind('/') {
         Some(i) => &s[i + 1..],
@@ -2034,7 +2034,7 @@ mod tests {
         assert_eq!(rows.iter().map(|r| r.catalog_id.as_str()).collect::<Vec<_>>(),
             ["s00000003", "s00000002", "s00000001", "s00000000"]);
         assert!(rows.iter().all(|r| r.local.is_none()),
-            "provider identity survives even when no PMS can supply a local ratingKey");
+            "provider identity survives even when no the server can supply a local ratingKey");
         owner.reset();
         crate::registry::reset_for_test();
     }
@@ -2226,9 +2226,9 @@ mod tests {
 
     /// Park EVERY fetch, so a take's RELEASE of a single-flight flag is observable rather than
     /// immediately masked by the next fetch claiming it — and, more importantly, so the host suite
-    /// spawns NO worker: one would reach for a server client that isn't installed and for a plex.tv
-    /// these tests must never touch, and a stray background thread also perturbs the process-wide
-    /// fd count `stream.rs`'s tests assert on. Call it before every `owner.pump()`.
+    /// spawns NO worker: one would reach for a server client that isn't installed and for a
+    /// provider these tests must never touch, and a stray background thread also perturbs the
+    /// process-wide fd count `stream.rs`'s tests assert on. Call it before every `owner.pump()`.
     fn profile(bio: &str, born: &str, died: &str) -> types::PersonProfile {
         types::PersonProfile {
             summary: bio.to_string(),
@@ -2370,9 +2370,9 @@ mod tests {
         assert!(owner.current().is_none());
     }
 
-    /// The plex.tv profile lands into the HEADER fields and settles the fetch — and it must not
-    /// disturb the shelves, which come from a different service on a different mailbox. It stays a
-    /// SINGLE fetch on purpose: plex.tv answers about the person, not about anybody's library.
+    /// The profile lands into the HEADER fields and settles the fetch - and it must not disturb
+    /// the shelves, which come from a different mailbox. It stays a SINGLE fetch on purpose: it is
+    /// about the person, not about anybody's library.
     #[test]
     fn a_profile_landing_fills_the_header_without_touching_the_shelves() {
         let mut owner = Owner::default();
@@ -2417,9 +2417,9 @@ mod tests {
         owner.close();
     }
 
-    /// plex.tv answers **200 with an empty container** for a person it has never heard of, which
-    /// `person_profile` turns into a DEFAULT profile. That is an answer, not a failure: it must
-    /// settle `profiled` (so the page stops asking) and arm NO backoff — while a real failure does
+    /// The backend answers **200 with an empty record** for a person it has never heard of, which
+    /// the profile mapping turns into a DEFAULT profile. That is an answer, not a failure: it must
+    /// settle `profiled` (so the page stops asking) and arm NO backoff - while a real failure does
     /// the opposite. Getting this backwards is a page that re-requests a biography forever.
     #[test]
     fn an_unknown_person_settles_the_profile_while_a_failure_backs_off() {
@@ -2539,9 +2539,9 @@ mod tests {
         owner.close();
     }
 
-    /// The roles line is Plex's "Actor, Producer" kicker: display titles, most-credited first,
-    /// capped — and the provider's own un-named departments (`title == the raw slug`, live on Peter
-    /// Sallis's `costume-makeup`) are un-slugged rather than printed as typed.
+    /// The roles line is the header's "Actor, Producer" kicker: display titles, most-credited
+    /// first, capped - and the profile's own un-named departments (`title == the raw slug`, live on
+    /// Peter Sallis's `costume-makeup`) are un-slugged rather than printed as typed.
     #[test]
     fn the_roles_line_prettifies_slugs_and_caps_the_list() {
         let ct = |kind: &str, title: &str| types::CreditType {
@@ -2575,9 +2575,9 @@ mod tests {
     /// **A wait nothing can end is not a wait.** `facts_pending` drives the header's placeholder
     /// sweep, and every one of those bars calls `idle::invalidate()` — so a pending state that can
     /// never resolve defeats the whole-frame present gate and repaints the page at 60fps forever.
-    /// That is the ordinary case whenever plex.tv is unreachable: an offline or LAN-only set, a
-    /// provider outage, or any headless boot, where the injected token is a SERVER token the
-    /// discover provider answers 401.
+    /// That is the ordinary case whenever the profile cannot be fetched: an offline or LAN-only
+    /// set, a provider outage, or any headless boot, where the injected token was a SERVER token
+    /// the metadata provider answered 401 to.
     #[test]
     fn the_header_stops_sweeping_once_the_profile_has_actually_been_asked() {
         let mut owner = Owner::default();

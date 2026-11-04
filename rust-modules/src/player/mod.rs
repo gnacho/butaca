@@ -48,9 +48,9 @@ use shared::{
 /// It exists for the same reason `/tmp/butaca-personbio` does, and the shape of the problem is
 /// identical: the data comes from a source no automated or host run can reach, so without a seed
 /// every headless look at the screen shows the degenerate state. Here the source is the DEMUXER —
-/// `ff::track_names` publishes these when it opens a part — and the desktop simulator has
-/// no demuxer at all (the bundled FFmpeg is ARM, and `player::ffi`'s host arm has no video path),
-/// so the picker there can only ever draw what the server sent. Which, for the MP4 this exists to
+/// `ff::track_names` publishes these when it opens a part — and the desktop simulator has no
+/// demuxer at all (the bundled FFmpeg is ARM, and `player::ffi`'s host arm has no video path), so
+/// the picker there can only ever draw what the server sent. Which, for the MP4 this exists to
 /// fix, is a column of identical language names.
 ///
 /// Pipe-separated within a list, `;` between the two lists, audio first:
@@ -69,7 +69,7 @@ pub(crate) fn seed_dev_track_names() {
     let Some(spec) = crate::dev::read("tracknames") else {
         return;
     };
-    // The real subtitle names of a nine-track MP4 whose server record carries none — the file this
+    // The real subtitle names of a nine-track MP4 whose metadata carries none, the file this
     // whole path was written against. Audio is left empty on purpose: one list is enough to
     // demonstrate, and seeding audio too would hide the `audio_descriptor` fallback the real menu
     // still uses for a track the container does not name.
@@ -179,7 +179,7 @@ pub(crate) const ABR_WHY_RESERVE_UNKNOWN: u8 = 11;
 /// A fetch hit its runway deadline and the controller rolled back without treating its censored
 /// prefix as a capacity measurement.
 pub(crate) const ABR_WHY_DEADLINE_ROLLBACK: u8 = 12;
-/// The largest request is active but its observed server master/raster is smaller than the request
+/// The largest request is active but its observed master/raster is smaller than the request
 /// can produce. It is a response state, not `AtBestRung`: a fresh session at the same actuator
 /// remains eligible after stronger completed-service evidence.
 pub(crate) const ABR_WHY_RESPONSE_LIMITED: u8 = 13;
@@ -587,8 +587,8 @@ fn support_line_of(i: &crate::webos::Info, hw: &crate::webos::Hardware, kind: Fa
 /// names an h264/hevc video track, so reaching it means the file disagrees with its own
 /// metadata. One error, three surfaces — the HUD caption, the diagnostics panel's verdict line,
 /// and the full-screen read-out (`Player Screen.dc.html`) — shaped in ONE place so they can
-/// never disagree about what happened. (The old Plex Pass annotation chain — the Pass-conditional
-/// wording, the subscription parameter and the read-out's PLEX PASS capsule — rode a
+/// never disagree about what happened. (The retired paid-tier annotation chain, meaning the
+/// conditional wording, the subscription parameter and the read-out's capsule, rode a
 /// `serverinfo` fact no Jellyfin server can answer, so it never drew on this codebase's only
 /// live flavor and went with #166.)
 /// **Why a playback failed, as a closed set.** Drives the wording below AND the telemetry code, so
@@ -609,8 +609,8 @@ pub(crate) enum FailureKind {
     PlaybackPolicy,
     /// Transcoding, and the server produced no video stream — it found no usable video target.
     NoVideoTranscodeTarget,
-    /// Direct playing, and the stream carries no video track, so the file disagrees with the server
-    /// metadata that made us choose direct play.
+    /// Direct playing, and the stream carries no video track, so the file disagrees with the
+    /// server metadata that made us choose direct play.
     NoVideoTrack,
     /// The producer never opened a usable media stream or produced a video access unit.
     MediaSource,
@@ -680,7 +680,7 @@ pub(crate) struct FailureContext {
     /// Force Direct Play was in effect for the failed attempt. It overrides every quality rung
     /// (Force always requests the original), so no rung can change the outcome.
     pub forced: bool,
-    /// The failed attempt has a Plex request that can be resolved again. A URL/dev-trigger
+    /// The failed attempt has a server request that can be resolved again. A URL/dev-trigger
     /// playback has none, so nothing that retries can do anything.
     pub can_retry: bool,
     /// The sandbox repair can still be started (nothing is running or finished).
@@ -933,9 +933,9 @@ fn error_shape(
 }
 
 /// Keep the runtime diagnosis while making the active override and its recovery path visible.
-/// A failed strict-original request is a policy failure, not evidence that the server cannot
-/// convert the file: conversion was never allowed. The mode snapshot supplies that distinction;
-/// no user-facing sentence or firmware error string is parsed to decide it.
+/// A failed strict-original request is a policy failure, not evidence the server cannot convert
+/// the file: conversion was never allowed. The mode snapshot supplies that distinction; no
+/// user-facing sentence or firmware error string is parsed to decide it.
 fn with_forced_playback_context(mut shape: ErrorShape, forced: bool) -> ErrorShape {
     if !forced { return shape; }
     if shape.kind == FailureKind::DecisionRefused {
@@ -983,9 +983,9 @@ pub(crate) fn error_now(ps: &crate::route::PlaybackSession) -> ErrorShape {
     ), crate::route::forced_direct_play(ps))
 }
 
-/// A sample server refusal, for the `verdict` variant of the dev trigger below. Real wording:
-/// this is the sentence a server emits when the only encoder our profile asked for is one it does
-/// not have, which is issue #22's failure with the pre-#22 single-entry target chain.
+/// A sample server refusal, for the `verdict` variant of the dev trigger below. Real wording is
+/// the sentence a server emits when the only encoder our profile asked for is one it does not have,
+/// which is issue #22's failure with the pre-#22 single-entry target chain.
 const FAILTEST_VERDICT: &str =
     "Cannot convert this item. Implementation for video encoder 'hevc' not found.";
 
@@ -1364,7 +1364,7 @@ pub(crate) fn intended_pos_ns(ps: &crate::route::PlaybackSession) -> i64 {
         playpos_ns()
     }
 }
-/// request an audio-track switch (Plex audioStreamID); the pump forces a fresh
+/// request an audio-track switch (audioStreamID): the pump forces a fresh
 /// transcode with that source audio at the current position next tick.
 pub(crate) fn request_audio_switch(ps: &crate::route::PlaybackSession, _sid: i64) {
     crate::route::request_user_route_intent(ps, crate::route::UserRouteIntent::Retranscode);
@@ -1415,9 +1415,9 @@ pub(crate) fn request_transcode_refresh(ps: &crate::route::PlaybackSession) {
     SHARED.sub_cues.lock().unwrap().clear(); // burned/absent in the fresh transcode
 }
 
-/// Restart the current stream at the current movie position so a fresh demux worker captures
-/// a newly-enabled adaptive controller. This mailbox does not itself mutate the route or ask
-/// the server for another encode; the main-thread pump owns the eventual same-position restart.
+/// Restart the current stream at the current movie position so a fresh demux worker captures a
+/// newly-enabled adaptive controller. This mailbox does not itself mutate the route or ask the
+/// server for another encode. The main-thread pump owns the eventual same-position restart.
 pub(crate) fn request_adaptive_reload(ps: &crate::route::PlaybackSession) {
     crate::route::request_user_route_intent(ps, crate::route::UserRouteIntent::AdaptiveReload);
 }
@@ -1592,10 +1592,10 @@ fn clamp_subtitle_offset_ms(offset_ms: i64) -> i32 {
     offset_ms.clamp(earliest, latest) as i32
 }
 
-/// The viewer's Plex Pass audio-DSP preference (issue #266: dialog boost, loudness normalization),
+/// The viewer's audio-DSP preference (issue #266: dialog boost, loudness normalization),
 /// as two bits — a PREFERENCE, like [`SUBTITLE_TONE`], so it outlives a playback. Only the
 /// resolve's `ResolveEnv::snapshot` reads it, on the main thread, and it reaches the wire only
-/// through `route::desired_audio`: with no Plex Pass (or an unknown one) nothing reads it at all.
+/// through `route::desired_audio`: with no paid tier (or an unknown one) nothing reads it at all.
 static AUDIO_ENHANCEMENTS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
 const ENH_BOOST_DIALOG: u8 = 1;
@@ -2268,7 +2268,7 @@ mod tests {
         assert!(!forced.caption.to_str().unwrap().contains("convert"));
         assert!(forced.panel.contains("automatic fallback is disabled"));
         let server = with_forced_playback_context(
-            error_shape(false, true, Some("PMS cannot convert this item"), RuntimeFailure::Unknown), false);
+            error_shape(false, true, Some("server cannot convert this item"), RuntimeFailure::Unknown), false);
         assert_eq!(server.kind, FailureKind::DecisionRefused);
         assert!(server.readout.contains("server"));
     }

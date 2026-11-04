@@ -143,7 +143,7 @@ fn initial_header(app: &AppInit, state: &crate::catalog::CatalogState, adapter: 
 /// screen is added to (§0 criterion 5: a conversion touches `screens/<name>.rs`, the registry,
 /// `dev/scenarios.rs` and `tests/manifest.json` and nothing else, and this file used to be a
 /// fifth). These are what is left: the press machine, the input state, the frame line, the
-/// container tree, the cached Session digest, the return state, the recorded server fixtures and
+/// container tree, the cached Session digest, the return state, the recorded fixtures and
 /// the app's own still-coarse init.
 ///
 /// Pinned by `the_app_shape_census_is_pinned` below, which does NOT move when a screen lands —
@@ -202,12 +202,12 @@ const RESOLUTION_SHAPE: &str = "ProductResolutionV1{fo:Option<(entry:u32,elem:u3
 ///
 /// **The household-evidence bump** is `super::bootstrap::SHAPE`'s, `ControlledHomeInitV2` →
 /// `ControlledHomeInitV3` with `session:SessionInit` → `session:SessionInitV2`. `SourceRef` now
-/// carries plex.tv's `home` and `ownerId` beside raw `owned`, and `owner::write_sources` folds
-/// both into the session digest — so a session that has learned whose household a server belongs
-/// to is no longer byte-identical to one that has not. The term for `SessionInit` had to move as
-/// well as the term around it: the init shape names that type rather than spelling its fields, so
-/// a census that only said `ControlledHomeInitV3` would be claiming the change was in the
-/// envelope when it is in the session.
+/// carries the account service's `home` and `ownerId` beside raw `owned`, and
+/// `owner::write_sources` folds both into the session digest. A session that has learned whose
+/// household a server belongs to is no longer byte-identical to one that has not. The term for
+/// `SessionInit` had to move as well as the term around it: the init shape names that type rather
+/// than spelling its fields, so a census that only said `ControlledHomeInitV3` would be claiming
+/// the change was in the envelope when it is in the session.
 pub(crate) fn state_fp() -> u64 {
     let mut shapes: Vec<&str> = APP_SHAPES.to_vec();
     shapes.push(super::bootstrap::CONTENT_SHAPE);
@@ -2341,7 +2341,7 @@ mod tests {
         //
         // **Household evidence moves it to 0x6c07_e505_2de6_63b8.** `ControlledHomeInitV2{…
         // session:SessionInit …}` became `ControlledHomeInitV3{… session:SessionInitV2 …}`:
-        // `SourceRef` now carries plex.tv's `home`/`ownerId` beside raw `owned` and
+        // `SourceRef` now carries the account service's `home`/`ownerId` beside raw `owned` and
         // `owner::write_sources` folds them into the session digest, so a session that knows whose
         // household a server belongs to is no longer byte-identical to one that does not. The
         // predecessor 0x7609_c82f_0914_2f33 is kept in this comment for the same reason every

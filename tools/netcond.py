@@ -11,7 +11,7 @@ is exactly the habit that has been wrong three times on this target already.
 This sits between the TV and the server and makes the server misbehave on demand.
 
     ┌────────┐        ┌──────────────┐        ┌─────────┐
-    │  TV    │──────▶ │ netcond.py   │──────▶ │ server  │
+    │  TV    │──────▶ │ netcond.py   │──────▶ │  server    │
     │  app   │  :32401│ (this Mac)   │  :32400│         │
     └────────┘        └──────────────┘        └─────────┘
 
@@ -426,7 +426,7 @@ def start_proxy(listen, target, mode, bind="0.0.0.0", allow_clients=None):
     `serve_conn`/`relay` the television goes through — a test against a private mini-proxy would
     grade a function nothing in the field calls.
 
-    A listener reachable beyond loopback MUST name the clients allowed to use it. The server's requests
+    A listener reachable beyond loopback MUST name the clients allowed to use it. Server requests
     carry an authentication token in the URL, so an open forwarding proxy on the LAN is not a
     harmless test fixture: another client could ask it for private server responses. The check is
     made before the request line is read and before an upstream connection is opened.

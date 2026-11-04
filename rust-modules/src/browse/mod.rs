@@ -4,8 +4,8 @@
 //! module supplies the core state transitions and immutable publication types; every stateful
 //! operation requires an explicit `BrowseState` or `BrowseStore` receiver.
 //!
-//! Sibling of `catalog.rs`'s hub catalog, which stays hub-only (256-cap, rebuilt wholesale by
-//! `catalog`'s worker-driven hub catalog); this store pages arbitrarily large sections without blocking the
+//! Sibling of `pms.rs`'s hub catalog, which stays hub-only (256-cap, rebuilt wholesale by
+//! `pms`'s worker-driven hub catalog); this store pages arbitrarily large sections without blocking the
 //! main loop. Data model: one [`SecItems`] per section — a PAGE-CHUNKED table sized to the
 //! listing's `totalSize`, a page (`PAGE` items) allocated only when it lands (restructure phase
 //! 4's O(result) rule) — filled page-by-page by ONE background fetch at a
@@ -13,16 +13,16 @@
 //! `Mutex` mailbox + generation atomics (a re-query supersedes in-flight landings), applied
 //! on the main thread by [`pump`] once a frame while the Library screen is up.
 //!
-//! The sort/filter MENUS are server-shaped but arrive with the section's data: Jellyfin's `SortBy`
-//! vocabulary is fixed (`jellyfin::browse::sorts`, landed with the first page) and the genre value
-//! list is fetched lazily (`kick_genres`) when the filter menu first opens. The server-side menu
-//! discovery (`includeMeta=1`), its client-side Plays entry and the remembered-sort page re-ask
-//! went with the server browse arm (#166 pass 3).
+//! The sort/filter MENUS are server-shaped but arrive with the section's data: Jellyfin's
+//! `SortBy` vocabulary is fixed (`jellyfin::browse::sorts`, landed with the first page) and the
+//! genre value list is fetched lazily (`kick_genres`) when the filter menu first opens. The
+//! Server-side menu discovery (`includeMeta=1`), its client-side Plays entry and the remembered-sort
+//! page re-ask went with the server browse arm (#166 pass 3).
 //!
 //! The CHOSEN sort of a library's own listing is remembered across restarts, per profile, by
 //! (machine id, section key) and by the sort's KEY, never its menu position
-//! (`server::session::Session::library_sorts`, issue #278). The server page worker that re-asked
-//! the first page in a remembered order is gone with the server arm; the recording side
+//! (`server::session::Session::library_sorts`, issue #278). The server page worker that re-asked the
+//! first page in a remembered order is gone with the server arm; the recording side
 //! ([`BrowseState::note_sort_choice`]) stays, because the persisted session shapes are shared.
 //!
 //! [`BrowseState`] is main-thread-only; worker threads touch only their owning store adapter's
@@ -109,7 +109,7 @@ pub(crate) struct BrowseSource {
     /// app a machine is named. Arrives with discovery, off `/System/Info/Public`; `""` until it
     /// lands.
     pub(crate) name: String,
-    /// The owner's plex.tv handle ("friend"); **empty on your own server**, where the absence of an
+    /// The owner's account handle ("friend"), **empty on your own server**, where the absence of an
     /// owner is drawn as the absence of a run rather than as an empty one.
     pub(crate) handle: String,
     /// How its last dial ended. One of the design's three orthogonal states — *granted* (the
@@ -118,7 +118,7 @@ pub(crate) struct BrowseSource {
     /// dims whole and still reads `On`, because nothing was unpinned. Hiding it would read as a
     /// revoked share.
     pub(crate) state: SourceState,
-    /// Which tier of connection actually won — local, remote, or Plex's relay tunnel. The Sources
+    /// Which tier of connection actually won: local, remote, or a relay tunnel. The Sources
     /// list only renders it beside [`SourceState::Reachable`], so an offline source retains the
     /// route metadata needed for retry/playback policy without claiming that route works now.
     pub(crate) tier: Option<crate::server::probe::Location>,
@@ -142,8 +142,8 @@ impl BrowseSource {
     pub(crate) fn reachable(&self) -> bool {
         !matches!(self.state, SourceState::Unreachable)
     }
-    /// Record a generic server request that answered or did not. A failed request cannot
-    /// distinguish HTTP status from transport/parse failure.
+    /// Record a generic server request that answered or did not. A failed request cannot distinguish
+    /// HTTP status from transport/parse failure.
     #[cfg(test)]
     pub(crate) fn set_reachable(&mut self, ok: bool) {
         if ok {
@@ -188,9 +188,9 @@ pub(crate) struct BrowseSection {
     ///
     /// Your HOUSEHOLD's libraries start favourite and a friend's start favourite only where the
     /// household has no library of that type ([`crate::server::pins::default_on`]); the last
-    /// favourite cannot be turned off, or the app has nothing. The household and not the account
-    /// — see [`BrowseSource::household`] and [`BrowseState::lib_refs`] for why plex.tv's raw
-    /// `owned` cannot answer this for a Plex Home managed profile.
+    /// favourite cannot be turned off, or the app has nothing. The household and not the account.
+    /// See [`BrowseSource::household`] and [`BrowseState::lib_refs`] for why the account
+    /// service's raw `owned` could not answer this for a managed profile.
     pub(crate) pinned: bool,
 }
 
@@ -209,8 +209,8 @@ pub(crate) enum LibraryType {
     Primary,
     Seasons,
     Episodes,
-    /// The section's collections — `all?type=18`, measured on the server to page with `totalSize`,
-    /// to answer `firstCharacter?type=18` and to declare `titleSort` as its only sort.
+    /// The section's collections — `all?type=18`, measured on server to page with `totalSize`, to
+    /// answer `firstCharacter?type=18` and to declare `titleSort` as its only sort.
     Collections,
 }
 
@@ -280,10 +280,9 @@ impl LibraryType {
     }
 }
 
-/// One sort-menu entry. The menu itself is the backend's: Jellyfin's `SortBy` vocabulary is fixed
-/// (`jellyfin::browse::sorts`) and lands with the first page; the server-driven menu
-/// (`Meta.Type[].Sort`) and its query-token machinery went with the server browse arm (#166 pass
-/// 3).
+/// One sort-menu entry. The menu itself is the backend's: Jellyfin's `SortBy` vocabulary is
+/// fixed (`jellyfin::browse::sorts`) and lands with the first page; the server-driven menu
+/// (`Meta.Type[].Sort`) and its query-token machinery went with the server browse arm (#166 pass 3).
 #[derive(Clone)]
 pub(crate) struct SortEntry {
     pub(crate) key: String,   // "SortName"
@@ -293,8 +292,8 @@ pub(crate) struct SortEntry {
 
 /// The filter combination a letters probe describes (issue #37): Jellyfin's per-letter counts
 /// are computed WITH the active filter, so a landed table is only valid for the unwatched/genre
-/// state it was kicked under. Plex's `firstCharacter` counts are query-independent and never
-/// carry one of these.
+/// state it was kicked under. The old backend's `firstCharacter` counts were query-independent and
+/// never carried one of these.
 #[derive(Clone, Default, PartialEq, Eq, Debug)]
 pub(crate) struct LettersFilter {
     pub(crate) unwatched: bool,
@@ -311,7 +310,7 @@ pub(crate) struct GenreEntry {
 /// What the last page fetch for a section produced — Loading / Ready / **Failed**, per SECTION
 /// because that is the grain this store's state already has.
 ///
-/// The irony is worth recording once: `catalog.rs`'s hub fetch runs this same three-state machine and
+/// The irony is worth recording once: `pms.rs`'s hub fetch runs this same three-state machine and
 /// its own doc says it was "Modelled on `browse.rs`'s page store, deliberately, because it already
 /// learned both lessons this needed" — the copy took the two lessons (a failed fetch must never
 /// overwrite a populated store; a fast-failing network is held off by a countdown) and then added
@@ -381,8 +380,8 @@ struct SecState {
     /// Counts describe the UNFILTERED title listing, so the rail only shows in that state.
     letters: Arc<Vec<(String, i64)>>,
     letters_done: bool,
-    /// The filter combination the landed `letters` describe — Jellyfin only (issue #37); Plex
-    /// never sets this. `kick_letters` refetches whenever the current state disagrees.
+    /// The filter combination the landed `letters` describe: Jellyfin only (issue #37), the old
+    /// backend never set this. `kick_letters` refetches whenever the current state disagrees.
     letters_filter: Option<crate::browse::LettersFilter>,
     /// **The library's OWN shelves** — `Library Recommended`, as its server's owner arranged it.
     /// A field here rather than a store of its own because this struct is already the per-section
@@ -654,7 +653,7 @@ impl BrowseState {
             return true;
         }
         // An installed-but-unadopted Jellyfin client IS discovery work, and only this gate can
-        // say so: the roster diff below reads the PLEX registry (empty in this flavour), so
+        // say so: the roster diff below reads the server registry (empty in this flavour), so
         // without the arm a client installed after the first sync — boot order, or a mid-session
         // sign-in — is never adopted, and the empty table above reads "nothing to do" forever.
         // The reverse edge (client gone, source still present) needs no arm: the length diff
@@ -663,8 +662,8 @@ impl BrowseState {
             && !self.sources.iter().any(|s| s.sid == crate::jellyfin::SERVER_ID) {
             return true;
         }
-        // The Plex registry diff that used to open this gate for share arrivals went with the
-        // Plex roster (#166): the roster has exactly one source, the Jellyfin install, and both
+        // The registry diff that used to open this gate for share arrivals went with the old
+        // roster (#166): the roster has exactly one source, the Jellyfin install, and both
         // of its edges (installed-but-unadopted above, gone-but-listed via the length diff) are
         // covered by the checks that remain.
         !adapter.src_fetching.load(Ordering::SeqCst)
@@ -1013,7 +1012,7 @@ impl BrowseState {
     }
     /// The current section's source is the Jellyfin server AND its client is installed. The
     /// installed-client guard is load-bearing on every arm that keys on the slot alone: slot 0
-    /// is also a valid Plex slot in this build (every host fixture).
+    /// is also a valid server slot in this build (every host fixture).
     fn cur_is_jellyfin(&self) -> bool {
         self.section_sid(self.cur()) == Some(crate::jellyfin::SERVER_ID)
             && crate::jellyfin::client().is_some()
@@ -1045,7 +1044,7 @@ impl BrowseState {
         let epoch = self.table_epoch();
         let worker_adapter = Arc::clone(&adapter);
         let spawned = crate::task::spawn_small("directory", move || {
-            // a panicking fetch lands as EMPTY, the same refusal the Plex arm posts
+            // a panicking fetch lands as EMPTY, the same refusal the retired arm posted
             let list = catch_unwind(std::panic::AssertUnwindSafe(|| fetch(jc, key, kind)))
                 .unwrap_or_default();
             *mail(&worker_adapter).lock().unwrap_or_else(|e| e.into_inner()) = Some(DirectoryResult {
@@ -1074,7 +1073,7 @@ impl BrowseState {
                 |jc, key, _kind| crate::jellyfin::browse::fetch_genres(jc, key).unwrap_or_default());
             return;
         }
-        // The Plex section-directory lane went with the server browse arm (#166 pass 3).
+        // The old section-directory lane went with the retired browse arm (#166 pass 3).
         #[cfg(any())]
         let _ = (done, adapter);
     }
@@ -1107,7 +1106,7 @@ impl BrowseState {
                 });
             return;
         }
-        // The Plex firstCharacter lane went with the server browse arm (#166 pass 3).
+        // The old firstCharacter lane went with the retired browse arm (#166 pass 3).
         #[cfg(any())]
         let _ = (done, adapter);
     }
@@ -1255,8 +1254,8 @@ impl BrowseState {
     /// raw `!owned` with no `pinned` filter at all, so two equally-graded libraries tied and the
     /// section table's arrival order decided permanently — *"I have two TV Shows libraries … only
     /// my Animes are being displayed"*. 0.7's `pinned` filter and the remembered choice closed that
-    /// for an owner. They did not close it for a Plex Home managed profile, because plex.tv grades
-    /// that profile's own family server `owned:false` exactly like a friend's share: NOTHING was
+    /// for an owner. They did not close it for a managed profile, because the account service
+    /// graded that profile's own family server `owned:false` exactly like a friend's share: NOTHING
     /// owned, so everything tied again and the tab could land on a stranger's shelf. Grading on
     /// the household is what makes the tiebreak able to separate them.
     fn section_of_kind(&self, kind: SecKind) -> Option<usize> {
@@ -1327,8 +1326,8 @@ impl BrowseState {
         };
         // Issue #37: on Jellyfin the per-letter counts are recomputed WITH the active filter,
         // so the rail may stay for unwatched-only and per-genre listings. The backend test is
-        // the fixed sort vocabulary ("SortName" never appears on Plex). Plex's counts are
-        // query-independent and would index the wrong rows, so its lane keeps the gate.
+        // the fixed sort vocabulary ("SortName" never appears on the old backend). Its counts were
+        // query-independent and would index the wrong rows, which is why its lane kept the gate.
         let filter_ok = state.sorts.iter().any(|s| s.key == "SortName")
             || (!state.unwatched && state.genre.is_none());
         #[cfg(any())]
@@ -1368,12 +1367,12 @@ impl BrowseState {
     /// The pin rules' view of the section table.
     ///
     /// **Both bits are the HOUSEHOLD's, not this account's.** `server::pins` is a pure leaf that
-    /// takes bools, so the whole of `is_household` — the grant, plex.tv's `home` flag and the Plex
-    /// Home roster — is resolved on this side and handed down already decided
+    /// takes bools, so the whole of `is_household` (the grant, the account service's `home` flag
+    /// and the profile roster) is resolved on this side and handed down already decided
     /// ([`BrowseSource::household`]). Reading `owned` here is what gave a managed profile's own
-    /// family server a stranger's defaults: plex.tv answers such a profile `owned:false` on it,
-    /// and `owns_type` then found nothing of the household's either, so EVERY library defaulted On
-    /// — a genuine friend's share included.
+    /// family server a stranger's defaults: the account service answered `owned:false` on such
+    /// a profile, and `owns_type` then found nothing of the household's either, so EVERY library
+    /// defaulted On, a genuine friend's share included.
     fn lib_refs(&self) -> Vec<crate::server::pins::LibRef<'_>> {
         let household_type = |kind: SecKind| self.sections.iter().any(|section| {
             section.kind == kind
@@ -1442,7 +1441,7 @@ impl BrowseState {
     /// **The whole-table reconcile, plus the publication a moved row owes** — the one path for
     /// "something happened that can invalidate an already-resolved table".
     ///
-    /// Two callers reach it, and they are the two ways that can happen: a Plex Home roster landing
+    /// Two callers reach it, and they are the two ways that can happen: a profile roster landing
     /// or session-cache recovery refreshes a SOURCE/record (`sync_roster_owned`), and the Home editor's commit replaces this
     /// profile's RECORD (`apply_pins`). Both end in the same question — what does
     /// `pins::resolve` say about every row now — so they ask it the same way rather than each
@@ -1625,8 +1624,8 @@ impl BrowseState {
             // The Jellyfin client is a process-lifetime install with no registry reachability
             // to merge into: the landing applies straight to its source slot, the same shape
             // 0.6.x's separate mailbox committed, and its retirement is the roster rebuild that
-            // removes the source wholesale. It is also the only roster there is: the Plex share
-            // rows and their registry commit went with the Plex arm (#166).
+            // removes the source wholesale. It is also the only roster there is: the old share
+            // rows and their registry commit went with the retired arm (#166).
             let SrcLanding { name, what, .. } = landing;
             let ok = match &what {
                 SrcWhat::Sections(list) => list.is_some(),
@@ -1748,7 +1747,7 @@ impl BrowseState {
         let generation = crate::server::session::visible_generation();
         let session_changed = self.session_generation != generation;
         self.session_generation = generation;
-        // The Plex share roster that used to drive this sync went with the Plex discovery arm
+        // The share roster that used to drive this sync went with the retired discovery arm
         // (#166): the roster is now exactly one source, the Jellyfin install, so the whole
         // ingest reduces to its two edges — retire on sign-out, adopt on install. Everything
         // else this loop used to reconcile (registry lifecycles, probe states, ServerFacts,
@@ -1770,7 +1769,7 @@ impl BrowseState {
         }
         let known = self.sources.len();
         // The Jellyfin source: one server, adopted once, owned by definition (the login IS the
-        // grant — there is no plex.tv to describe it). `machine_id` stays empty because
+        // grant, and there is no account service to describe it). `machine_id` stays empty because
         // Jellyfin's ServerId is not wired into `server::pins`, so its Home selection lives for
         // the run only; `name` arrives with discovery, off `/System/Info/Public`. Lifecycle
         // fields are zero: there is no registry lifecycle to read them from. `household` is
@@ -1976,9 +1975,9 @@ impl BrowseState {
         if result.epoch != self.table_epoch() {
             return false;
         }
-        // The Jellyfin landing applies straight to its section state — a process-lifetime
-        // install has no registry lifecycle to validate against. The Plex arm went with the server
-        // browse arm (#166 pass 3); without the feature there is no lane that can land here.
+        // The Jellyfin landing applies straight to its section state, a process-lifetime
+        // install has no registry lifecycle to validate against. The old arm went with the
+        // retired browse path (#166 pass 3), so without the feature no lane can land here.
         {
             let DirectoryResult { epoch: _, sec, client, library_type, letters_filter, list } = result;
             if matches!(client, DiscClient::Jellyfin(_)) {
@@ -2014,9 +2013,9 @@ impl BrowseState {
         // The Jellyfin lane reads through its own client and menu vocabulary: the sort menu is
         // this backend's fixed list (`jellyfin::browse::sorts`), landed with the first page, so
         // the query takes the RAW sort key and the descending flag separately. The guard is
-        // load-bearing: the jellyfin slot is 0, which test fixtures also hand to
-        // `register_for_test` Plex clients — an absent jellyfin client must fall THROUGH (into
-        // nothing: the server page worker went with the server browse arm, #166 pass 3).
+        // load-bearing: the jellyfin slot is 0, which test fixtures also use, so an absent
+        // jellyfin client must fall THROUGH (into nothing: the server page worker went with the
+        // retired browse arm, #166 pass 3).
         {
             let Some(state) = self.states.get(current) else { return };
             let Some(section) = self.sections.get(current) else { return };
@@ -2112,8 +2111,8 @@ impl BrowseState {
                 state.letters_done = true;
                 // Jellyfin's counts describe one filter combination (issue #37): the new table
                 // REPLACES the old, and the combination it ran under is stamped so a later
-                // filter change can tell stale from fresh. Plex lands here with `None` and its
-                // query-independent counts, which replace identically.
+                // filter change can tell stale from fresh. The old backend landed here with `None`
+                // because its query-independent counts replaced identically.
                 state.letters = Arc::new(list);
                 {
                     state.letters_filter = filter;
@@ -2122,7 +2121,7 @@ impl BrowseState {
                 let _ = filter;
             });
         // The page landing is the Jellyfin lane's alone now (the server page worker went with the
-        // server browse arm, #166 pass 3): the same store splice, minus the registry-lifecycle
+        // Server browse arm, #166 pass 3): the same store splice, minus the registry-lifecycle
         // validation (a process-lifetime install has none) and plus the static sort menu, which
         // is this backend's includeMeta — it lands with the first page. A page fetch is also
         // EVIDENCE ABOUT THE SERVER: with one source it is the only reachability evidence after
@@ -2226,7 +2225,7 @@ struct DirectoryResult<T> {
     epoch: u32,
     sec: usize,
     /// The builder's client arm; the landing's validator matches on it. Only the Jellyfin arm
-    /// builds one since the Plex fetch went (#166).
+    /// builds one since the old fetch went (#166).
     
     client: DiscClient,
     library_type: LibraryType,
@@ -2282,13 +2281,13 @@ enum SrcWhat {
 pub(crate) enum SecKind {
     Movie,
     Show,
-    /// Plex's Other Videos library: a movie-typed section filed without a metadata agent.
+    /// Other Videos: a movie-typed section filed without a metadata agent.
     Video,
 }
 
 impl SecKind {
-    /// The app's own persisted code for a kind, not the Plex `Directory.type`. Other Videos is
-    /// classified by [`of_section`](Self::of_section) because its Plex type is `movie` too.
+    /// The app's own persisted code for a kind, not the wire `Directory.type`. Other Videos is
+    /// classified by [`of_section`](Self::of_section) because its wire type is `movie` too.
     pub(crate) fn from_wire(s: &str) -> Option<SecKind> {
         match s {
             "movie" => Some(SecKind::Movie),
@@ -2499,18 +2498,18 @@ fn count_line(count: i64, kind: SecKind) -> String {
 /// Re-check the roster: adopt anything newly registered, and re-arm discovery for every source
 /// that failed. The Sources list's last row.
 ///
-/// It cannot ask plex.tv for shares the app was never granted — that fetch belongs to whoever
-/// owns the roster ingest, and this is where it hooks in. What it does today is the half that is
-/// ours: a friend who has switched their server back on stops being unreachable on the next pump
-/// instead of after the ten-second backoff.
+/// It cannot ask the account service for shares the app was never granted: that fetch belongs to
+/// whoever owns the roster ingest, and this is where it hooks in. What it does today is the half
+/// that is ours: a friend who has switched their server back on stops being unreachable on the
+/// next pump instead of after the ten-second backoff.
 // ---- source discovery, off the main thread ---------------------------------------------------
 
 /// What a discovery worker is being asked for. Two phases per source, one worker at a time within
 /// the owning BrowseStore: the roster is a handful of servers and none of it is on a user's
 /// critical path.
-/// Which backend a discovery request dials. The Jellyfin client lives outside the Plex
-/// registry, so its slot is captured here at the spawn site (the Plex arm's `&'static Client`
-/// went with the Plex discovery arm, #166).
+/// Which backend a discovery request dials. The Jellyfin client lives outside the server
+/// registry, so its slot is captured here at the spawn site (the route that handed a `&'static
+/// Client` per slot went with the retired discovery arm, #166).
 #[derive(Clone, Copy)]
 enum DiscClient {
     Jellyfin(&'static crate::jellyfin::JfClient),
@@ -2524,7 +2523,7 @@ enum SrcJob {
     
     Counts(Vec<i64>),
     /// The Jellyfin count probe: each library's key WITH its kind, which that backend's
-    /// include_types vocabulary needs (the Plex probe filters by section key alone).
+    /// include_types vocabulary needs (the old probe filtered by section key alone).
     JfCounts(Vec<(i64, SecKind)>),
 }
 
@@ -2633,7 +2632,7 @@ thread_local! {
 
 /// Supply a discovery observation. The roster only ever carries the Jellyfin install now, so a
 /// test that names a synthetic slot seeds the row itself instead of asking a registry to adopt
-/// it (the registry-ingest fixture went with the Plex arm, #166).
+/// it (the registry-ingest fixture went with the retired arm, #166).
 #[cfg(test)]
 pub(crate) fn queue_discovery_for_owner_test(
     state: &mut BrowseState,

@@ -1,7 +1,8 @@
-//! Butaca — an unofficial native Plex client for LG webOS.
+//! Butaca - an unofficial native Jellyfin client for LG webOS.
 //! Copyright © 2026 Gleb Linnik. Licensed under GPL-3.0-or-later; see LICENSE at the repository
 //! root, and THIRD-PARTY-NOTICES.md for the components this links or redistributes.
-//! Not affiliated with, endorsed by, or sponsored by Plex GmbH or LG Electronics.
+//! Not affiliated with, endorsed by, or sponsored by the vendor it interoperates with, nor by
+//! LG Electronics.
 //!
 //! butaca-modules — the Rust app core, built as a staticlib and linked into the C
 //! boot shim. The crate's C surface is tiny: C calls `butaca_run` (app.rs), writes the fallback
@@ -12,11 +13,11 @@
 mod abr; // client-managed fixed-session HLS controller: estimate, propose, prime, then commit
 mod app; // butaca_run — the Rust app core / event loop (the entry inverted from main.c)
 mod aq;
-mod auth; // plex.tv login/boot flow controller (PIN/QR → discovery → who's-watching → install)
+mod auth; // account sign-in/boot flow controller (PIN/QR → discovery → who's-watching → install)
 mod browse; // Library browse: per-section paged catalog (sparse store + off-thread page fetches)
 mod capture; // dev live UI capture stream: own-GLES-frame grab → MPEG1/TS or JPEG → TCP (UI plane only)
 mod checkpoint; // the transport-neutral "may I keep waiting?" seam every blocking media wait consults
-mod cbuf; // fixed NUL-terminated C-string buffer read/write (shared by catalog/route/posters)
+mod cbuf; // fixed NUL-terminated C-string buffer read/write (shared by pms/route/posters)
 mod coldstart; // retires old last-page bookmarks; authenticated cold boots now stay on Home
 mod curlio; // the HTTPS media plane: a remote file pulled by byte range over libcurl-multi (stream.rs is the plaintext-socket twin)
 mod dev; // the /tmp/butaca-* trigger surface, behind one `devtriggers` feature — read it before adding a trigger
@@ -32,8 +33,8 @@ mod gfx;
 mod grant; // credential transport authority and consented plaintext grants
 #[cfg(feature = "devtriggers")]
 mod gpu_timer; // async EXT_disjoint_timer_query timing; no glFinish on the timing path
-mod hls; // strict parser/auth/timeline for the measured one-variant PMS HLS shape
-mod http; // the ONE door out of the control plane: dispatch a Plex REST request on its origin's scheme (stream.rs for http, net.rs/libcurl for https)
+mod hls; // strict parser/auth/timeline for the measured one-variant server HLS shape
+mod http; // the ONE door out of the control plane: dispatch a REST request on its origin's scheme (stream.rs for http, net.rs/libcurl for https)
 #[cfg(feature = "devtriggers")]
 mod hwcnt; // direct userspace Mali r12p0 vinstr reader for the phase profiler
 mod img;
@@ -42,13 +43,13 @@ mod jellyfin;
 mod imgcache; // bounded persistent artwork cache shared by every image source
 mod keymanager; // public LS2 key stores: keymanager3, legacy Palm service, or unavailable
 mod lab; // Cloud Lab bridge: pinned diagnostic uploads + optional outbound command long-poll
-mod librecord; // backend-neutral remembered-library records shared outside Plex session storage
+mod librecord; // backend-neutral remembered-library records shared outside the session storage
 mod metadata; // item detail data layer (detail page): full metadata + seasons/episodes + cast + related
-mod net; // HTTPS client over the TV's libcurl (plex.tv account/login calls — stream.rs can't do TLS/DNS)
+mod net; // HTTPS client over the TV's libcurl (account and sign-in calls - stream.rs can't do TLS/DNS)
 mod origin;
 mod paths; // where the app's own files live — /proc/self/exe, not a hardcoded install prefix
-mod media; // PMS wire vocabulary (metadata/media container/stream and friends) moved out of plex/
-mod playback; // backend-neutral playback vocabulary: encode contract, delivery/offset, audio DSP flags, quality ceiling, timeline state, queue rows (moved out of plex/)
+mod media; // media vocabulary (metadata/media container/stream and friends) shared by the data layer
+mod playback; // backend-neutral playback vocabulary: encode contract, delivery/offset, audio DSP flags, quality ceiling, timeline state, queue rows
 mod person; // person/actor page data layer: the header handed in by the cast row + /library/people/{id}/media
 mod collection; // collection page model: tag resolution, header metadata and paged members
 mod player; // buffer-feed video engine (was playback.c) — step 5
@@ -76,7 +77,7 @@ mod surface; // what we are actually drawing into — drawable vs the 1920x1080 
 mod svg; // runtime SVG rasterizer FFI (src/svg.c / nanosvg) — vector icon assets
 mod system;
 mod task; // the one spawn: a refused thread is a return value, not a panic that kills the app
-mod viewstate; // watched / unwatched / remove-from-deck: the PMS view-state WRITES, off the SDL thread
+mod viewstate; // watched / unwatched / remove-from-deck: the server view-state WRITES, off the SDL thread
 
 #[cfg(test)]
 pub(crate) mod testnet {
@@ -131,7 +132,7 @@ pub(crate) mod testlock {
     //! That DoD criterion scopes a bare `static mut` OUT of `screens`/`ui` engine code — it asks
     //! "does a SCREEN still own process-wide state a second instance would corrupt", and an
     //! allowlisted exception there is a debt with a name and a phase number. A store's data module
-    //! (`catalog`, `metadata`, `search`) is a different question entirely: those remaining
+    //! (`pms`, `metadata`, `search`) is a different question entirely: those remaining
     //! compatibility stores keep process-wide statics **by design** — `docs/stores-as-machines.md`
     //! §1 is explicit about that temporary shape. Browse, Person and ViewState have since moved to
     //! per-`Bridge` physical owners, and their owner gates reject a restored process global. For
@@ -154,7 +155,7 @@ pub(crate) mod testlock {
     //! installers include `metadata.rs`
     //! (`install_for_test`, `set_current_for_test`, `begin_detail_for_test`,
     //! `land_detail_for_test`), `search.rs` (`publish_shelves_for_test`,
-    //! `debounce_elapsed_for_test`) and `catalog.rs`'s own eleven sites — and so does every entry point of
+    //! `debounce_elapsed_for_test`) and `pms.rs`'s own eleven sites — and so does every entry point of
     //! the server registry a test can reach: `registry::register_with_client_id` (and the
     //! `register_lazy` seam it and its sibling test constructors share), `revoke_all`,
     //! `set_current` and `reset_for_test`. A three-run `make check` plus a ten-run
@@ -280,7 +281,7 @@ mod textinput; // the TV's own on-screen keyboard, via plain SDL_StartTextInput 
 mod ui;
 mod webos; // which webOS this set is — nyx's os_info.json, read once at boot (release + codename)
 
-/// Strip any server/plex.tv token from a line bound for the event log.
+/// Strip any server or account-service token from a line bound for the event log.
 ///
 /// **This is a backstop, not the policy.** The policy is that no call site formats a URL into a log
 /// line at all — but that policy was violated for months by one `-> {url}` in `route::retranscode`,
@@ -290,8 +291,8 @@ mod webos; // which webOS this set is — nyx's os_info.json, read once at boot 
 ///
 /// Matches the parameter name rather than the value: the token is a short unstructured alphanumeric
 /// with no distinguishing shape, so it cannot be recognised on its own — but it only ever reaches a
-/// string as `X-Plex-Token=…`, appended by the single choke point in `server::client`. The value runs
-/// to the next `&` or whitespace, i.e. the end of that query parameter.
+/// string as a query parameter whose name ends in `token`, appended by one of the client's own URL
+/// builders. The value runs to the next `&` or whitespace, i.e. the end of that query parameter.
 ///
 /// Cheap by construction: the `find` is a no-op scan for the overwhelming majority of lines, and
 /// the log is written a few times a second at most, never per frame.

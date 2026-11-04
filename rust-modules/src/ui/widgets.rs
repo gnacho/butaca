@@ -663,11 +663,11 @@ pub(crate) fn card(p: Painter, frame: Rect, art: Art, rad: f32, focused: bool, s
             // only clean tile on the shelf; it also made the poster disagree with the episode
             // still beside it, whose `✓` has always meant watched.
             //
-            // Never both marks. **In progress WINS over watched**, because the server keeps
-            // a resume point on a finished-then-restarted item, so the wire says both — and being
+            // Never both marks. **In progress WINS over watched**, because the server keeps a
+            // resume point on a finished-then-restarted item, so the wire says both. Being
             // part-way through a re-watch is what the viewer is actually doing (`detail::ep_state`
-            // resolves the same three states for a still, and its table is the authority for all of
-            // them).
+            // resolves the same three states for a still, and its table is the authority for all
+            // of them).
             if let Some(m) = m {
                 if poster_mark(m) == PosterMark::Watched {
                     watched_mark(p, r, rad);
@@ -750,11 +750,11 @@ pub(crate) fn card(p: Painter, frame: Rect, art: Art, rad: f32, focused: bool, s
 /// | in progress | the full-bleed resume BAR | the CALLER (`card_row::draw_tile`/`draw_focused`) |
 /// | watched | the amber corner DISC | [`card`] |
 ///
-/// [`PosterMark::InProgress`] is *defined* as "[`CatalogMovie::resume_frac`] has a value" —
-/// precisely when the caller draws the bar — so the two halves cannot disagree and put two marks on
-/// one tile. That is also the precedence: a re-watch in flight outranks the watched flag, because
-/// the server reports both on a finished-then-restarted item and being part-way through
-/// the re-watch is what the viewer is doing. Same answer as the still's resolver, on the same item.
+/// [`PosterMark::InProgress`] is *defined* as "[`CatalogMovie::resume_frac`] has a value" — precisely
+/// when the caller draws the bar — so the two halves cannot disagree and put two marks on one tile.
+/// That is also the precedence: a re-watch in flight outranks the watched flag, because the
+/// server reports both on a finished-then-restarted item and being part-way through the re-watch
+/// is what the viewer is doing. Same answer as the still's resolver, on the same item.
 ///
 /// The three states are the app's ONE watch-state vocabulary, not the poster's alone: the detail
 /// hero's watch controls ([`crate::ui::detail`]'s `hero_watch_state`) and the tile context menu's
@@ -3013,10 +3013,9 @@ impl View for Spinner {
 
 // ---- AmbientWash: the full-screen four-corner colour wash keyed to an item's artwork. ----
 
-/// The **ambient wash** — a page-wide bilinear gradient taken from an item's the server
-/// `UltraBlurColors` corners, which is how home's backdrop, detail's below-hero ground and
-/// the person page all say "this screen is about *this* artwork" without paying for a full-bleed
-/// image.
+/// The **ambient wash**: a page-wide bilinear gradient taken from an item's `UltraBlurColors`
+/// corners, which is how home's backdrop, detail's below-hero ground and the person page all say
+/// "this screen is about *this* artwork" without paying for a full-bleed image.
 ///
 /// It exists as a component because the non-obvious part is not the gradient, it is the FADE.
 /// [`Painter::ambient`](crate::ui::Painter::ambient) writes opaque pixels (its `dim` scales the
@@ -5282,7 +5281,7 @@ impl TabStrip {
 /// The global destinations: **Home, then a pill per type that HAS a favourite library, then
 /// Search** — two to four of them.
 ///
-/// Movies and TV Shows are still TYPE pills rather than discovered Plex sections, so discovery,
+/// Movies and TV Shows are still TYPE pills rather than server-discovered sections, so discovery,
 /// failure and roster changes never REORDER navigation and a friend's tenth film library never adds
 /// a stop. **What changed on 2026-09-05 is that they can be REMOVED**: the Favorite libraries
 /// switch governs the strip, so a type left with no favourite draws no pill at all
@@ -6108,7 +6107,7 @@ latched_flag!(
 static mut TAB_CACHE: Option<(u32, Vec<std::ffi::CString>, Vec<f32>)> = None;
 
 /// The shared strip's captured labels, including Home first and an empty Search icon label last.
-/// Supplied by the application; no Browse/Plex type is part of the renderer's vocabulary.
+/// Supplied by the application. No Browse type is part of the renderer's vocabulary.
 #[derive(Clone, Copy)]
 pub(crate) struct TabLabels<'a> {
     pub(crate) generation: u32,
@@ -6407,7 +6406,8 @@ impl StripRender {
         };
         // `/tmp/butaca-groundlog` — the density is now a FUNCTION of something invisible, so the
         // instrument that says what it read and what it chose is not optional. It is how the first
-        // version of this was caught reading Plex's `UltraBlurColors`, which gave (0.30,0.23,0.18)
+        // version of this was caught reading an item's `UltraBlurColors`, which gave
+        // (0.30,0.23,0.18)
         // for a hero whose top edge is (0.00,0.68,0.91) and left the bar at its floor.
         if groundlog {
             // A safe atomic rather than `static mut`: a plain sample counter, same shape as
@@ -6679,11 +6679,11 @@ pub enum ControlGround {
 /// The colours a keyed control derives from its page's local ground sample.
 ///
 /// Home and Detail read the pixels they already rendered under the row — artwork AFTER its scrims,
-/// not the server artwork envelope. The sample's LIGHTNESS never reaches the control: it
+/// not the server's artwork envelope. The sample's LIGHTNESS never reaches the control: it
 /// contributes only OKLCH hue and a fraction of chroma. That is the difference between a white
-/// object catching the scene's light and a white chip averaged toward a dark photograph (which
-/// turns muddy). A screen computes this once for its control row and copies it into every face;
-/// the player may receive one accidentally, but [`ControlGround::Unkeyed`] ignores it by
+/// object catching the scene's light and a white chip averaged toward a dark photograph, which
+/// turns muddy. A screen computes this once for its control row and copies it into every face.
+/// The player may receive one accidentally, but [`ControlGround::Unkeyed`] ignores it by
 /// construction.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ControlPalette {

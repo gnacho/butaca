@@ -46,7 +46,7 @@ deterministic as a seeded library; `--hero SLUG` moves one film to the front of 
 which is the home hero's first slot. An episode marked `stand_in` plays: its media is a black,
 silent file of the episode's catalog length that `derive` made (never the work itself), which is
 enough for the simulator's clock sink to run the player over it. And a `continuous=1` PlayQueue
-of an episode carries the rest of its show after it, as the server's does, so Up Next has a successor.
+of an episode carries the rest of its show after it, as server's does, so Up Next has a successor.
 Nothing recorded against it may be committed as a fixture — the harness's alphabet check would
 refuse it, correctly.
 
@@ -232,7 +232,7 @@ def swords(rng, n):
     return " ".join(sname(rng) for _ in range(n))
 
 
-# The shortest query server answers: a one-character query came back with every hub empty (measured
+# The shortest query the server answers: a one-character query came back with every hub empty (measured
 # against server 1.43.3; the app's `search::MIN_QUERY` never sends one).
 SEARCH_MIN_QUERY = 2
 
@@ -361,7 +361,7 @@ class Library:
             detail = getattr(e, "output", b"").decode("utf-8", "replace").strip()
             raise ValueError(f"ffprobe failed for {path}: {detail or e}") from e
 
-    # The container a real server would name, and the wire Content-Type for it. Only the two
+    # The container a real the server would name, and the wire Content-Type for it. Only the two
     # containers this fixture set ever deals in — extend here, never with a per-caller default.
     _CONTAINER_CONTENT_TYPE = {"mkv": "video/x-matroska", "mp4": "video/mp4"}
 
@@ -369,7 +369,7 @@ class Library:
     def _resolution_label(width, height):
         """The (videoResolution, displayTitle-prefix) pair server derives from the DECODED frame
         size — e.g. `("4k", "4K")` — never a hardcoded 1080p regardless of the source file.
-        Thresholds follow the server's own videoResolution buckets (sd/720/1080/4k)."""
+        Thresholds follow server's own videoResolution buckets (sd/720/1080/4k)."""
         if width >= 3800 or height >= 2000:
             return "4k", "4K"
         if height >= 1000:
@@ -576,7 +576,7 @@ class Library:
         return out
 
     def _maybe_loudness(self, audio):
-        """The server string-encodes this boolean on the wire (#266)."""
+        """server string-encodes this boolean on the wire (#266)."""
         if self.loudness_analysis:
             audio["canNormalizeLoudness"] = "1"
         return audio
@@ -805,7 +805,7 @@ class Library:
 
     def first_characters(self, key, q=None):
         """Counts in the unfiltered ascending titleSort order, exactly the rail's query —
-        of the section's collections for `type=18`, as server answers `firstCharacter?type=18`."""
+        of the section's collections for `type=18`, as the server answers `firstCharacter?type=18`."""
         counts = {}
         rows = (sorted(self.collection_metadata(key), key=lambda c: c["titleSort"].lower())
                 if (q or {}).get("type") == "18" else self.section_items(key, {}))
@@ -1154,7 +1154,7 @@ class CatalogLibrary(Library):
 
     def continuous_queue(self, it):
         """The rows of a `continuous=1` PlayQueue started on `it`: an episode and every episode of
-        its show after it, in (season, episode) order, as server answers; anything else, itself."""
+        its show after it, in (season, episode) order, as the server answers; anything else, itself."""
         if it["type"] != "episode":
             return [it]
         show = [x for x in self.items.values()
@@ -1207,8 +1207,8 @@ class CatalogLibrary(Library):
 
     @staticmethod
     def _blur_of(path):
-        """The four UltraBlur corner colours server would compute, taken from the backdrop itself: a
-        2×2 area-average of the image, darkened the way the server's own colours are."""
+        """The four UltraBlur corner colours the server would compute, taken from the backdrop itself: a
+        2×2 area-average of the image, darkened the way server's own colours are."""
         raw = subprocess.check_output(["ffmpeg", "-v", "error", "-i", str(path), "-vf",
                                        "scale=2:2:flags=area", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
         px = [tuple(int(c * 0.55) for c in raw[i:i + 3]) for i in range(0, 12, 3)]
@@ -1223,7 +1223,7 @@ class CatalogLibrary(Library):
 
     def image(self, url, width, height):
         """`(content type, bytes)` for an artwork URL (`/library/metadata/<rk>/<thumb|art|clearLogo>
-        [/<n>]`), scaled like the server's photo transcoder with minSize=1 (cover the box, keep the aspect)
+        [/<n>]`), scaled like server's photo transcoder with minSize=1 (cover the box, keep the aspect)
         — a clearLogo as a transparent PNG, the rest as JPEG; None when the item has no such image
         — a 404, as for a real item without art."""
         segs = [s for s in urllib.parse.urlsplit(url).path.split("/") if s]

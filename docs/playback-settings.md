@@ -97,4 +97,4 @@ this change does not advertise all DTS-HD streams as directly playable.
 
 The television remained muted with its panel off. These results do not claim audible output
 verification, and no real account language preferences were written. The throwaway-account
-The server propagation measurement is still outstanding.
+Server propagation measurement is still outstanding.

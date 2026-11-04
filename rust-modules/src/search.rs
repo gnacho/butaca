@@ -10,7 +10,7 @@
 //!
 //! The Jellyfin backend answers the settled query with one flat `/Items?searchTerm=` page plus a
 //! people lookup, and `jellyfin::search` shelves it into this store's mailbox shape. Two of the
-//! constants here were measured against the server endpoint this store was originally built for
+//! constants here were measured against the endpoint this store was originally built for
 //! rather than taken from a spec, and both still decide something:
 //!
 //! - **A one-character query was answered with every hub empty**, so [`MIN_QUERY`] is 2 and the
@@ -53,8 +53,8 @@
 //! The reason is that a favourite is a browsing preference, not an authorization boundary. Removing
 //! a non-favourite library's hits turns "I don't browse this often" into "this does not exist": a
 //! user searching by name for a film they own and can play gets nothing, with no explanation on
-//! screen and no control anywhere that obviously undoes it. Plex's own Favorite Libraries feature
-//! makes the same split.
+//! screen and no control anywhere that obviously undoes it. A favourite-libraries feature in
+//! another client makes the same split.
 //!
 //! **Counts stay grant-wide**, and that is a second decision rather than a consequence: "12 films"
 //! must keep meaning every film the user can play, or the count becomes a quieter version of the
@@ -170,7 +170,7 @@ impl Kind {
 pub(crate) struct TagHit {
     pub(crate) sid: ServerId,
     pub(crate) name: String,
-    /// Empty on this backend — the portable person guid was the plex.tv wire's concept. A row is
+    /// Empty on this backend: the portable person guid was the account wire's concept. A row is
     /// identified by [`TagHit::id`] instead.
     pub(crate) tag_key: String,
     /// The server-local tag id as a string: the Jellyfin GUID for a person or BoxSet, stable on
@@ -451,9 +451,9 @@ fn slots() -> Vec<usize> {
     let mut out: Vec<usize> = crate::registry::ids()
         .filter_map(|id| ((id.raw() as usize) < NSRC).then_some(id.raw() as usize))
         .collect();
-    // The Jellyfin backend's one server lives outside the Plex registry; its slot is appended
+    // The Jellyfin backend's one server lives outside the registry. Its slot is appended
     // here so the fan-out asks it like any other source. The guard is the load-bearing half:
-    // slot 0 is also a valid PLEX slot (every test fixture), so without an installed jellyfin
+    // slot 0 is also a valid registry slot (every test fixture), so without an installed jellyfin
     // client this must not double-list it.
     if crate::jellyfin::client().is_some() && !out.contains(&(crate::jellyfin::SERVER_ID.raw() as usize))
     {
@@ -490,7 +490,7 @@ pub(crate) struct SearchState {
     visible: u32,
 
     /// **The favourite table this result set was projected under**, taken once per query at the
-    /// spawn site (`plex/CLAUDE.md` rule 5) and read by [`rebuild`]'s merge. It ranks; it never
+    /// spawn site and read by [`rebuild`]'s merge. It ranks, it never
     /// filters.
     favs: Vec<(ServerId, i64, bool)>,
 
@@ -1173,7 +1173,7 @@ fn maybe_spawn(state: &mut SearchState, adapter: &Arc<SearchAdapter>, i: usize) 
     }
 }
 
-/// Are these two rows the same tag? `tagKey` was plex.tv's and global; `id` is server-local, so it
+/// Are these two rows the same tag? `tagKey` was global, `id` is server-local, so it
 /// may only be compared **within one server** — two servers' id 921 are two different people, and
 /// folding on it across sources would merge strangers.
 fn same_tag(a: &TagHit, b: &TagHit) -> bool {

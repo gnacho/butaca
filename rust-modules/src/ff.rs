@@ -91,16 +91,16 @@ const OFF_STREAM_CODECPAR: usize = 16;
 const OFF_STREAM_TIME_BASE: usize = 32;
 /// `AVStream.metadata` — the container's own per-track tags, which is where a track's NAME lives.
 ///
-/// It is read for one reason and it is a data reason, not a rendering one: **the server does not
-/// send the per-track title for an MP4.** Verified live 2026-08-22 against one server holding
-/// both — for a Matroska part the server sends `Stream.title` (`"HDRezka Studio"`, `"Forced"`,
-/// `"SDH"`) and the track menu has always drawn it; for an MP4 part it sends no `title` key at all,
-/// though the file carries a `name` tag on every track (`"Полные Jaskier"`, `"Форс. iTunes"`,
-/// `"Full SDH"`). Matroska spells the tag `title` and MP4 spells it `name`, and Plex's parser maps
-/// only the first. So a nine-track MP4 arrives as six rows reading `Русский` and nothing else —
-/// the user cannot tell a forced signs track from a full translation, and no amount of care in
-/// the UI can invent the difference. `/library/streams/{id}` is 501 and `checkFiles=1` adds
-/// nothing; the file is the only source, and we are already holding it open.
+/// It is read for one reason and it is a data reason, not a rendering one: **the server sends no
+/// per-track title for an MP4.** Verified live 2026-08-22 against one server holding both — for a
+/// Matroska part it sends `Stream.title` (`"HDRezka Studio"`, `"Forced"`, `"SDH"`) and the track
+/// menu has always drawn it; for an MP4 part it sends no `title` key at all, though the file
+/// carries a `name` tag on every track (`"Полные Jaskier"`, `"Форс. iTunes"`, `"Full SDH"`).
+/// Matroska spells the tag `title` and MP4 spells it `name`, and only the first is parsed.
+/// So a nine-track MP4 arrives as six rows reading `Русский` and nothing else — the user cannot
+/// tell a forced signs track from a full translation, and no amount of care in the UI can invent
+/// the difference. `/library/streams/{id}` is 501 and `checkFiles=1` adds nothing; the file is the
+/// only source, and we are already holding it open.
 #[cfg(target_pointer_width = "32")]
 const OFF_STREAM_METADATA: usize = 72;
 #[cfg(target_pointer_width = "64")]
@@ -606,10 +606,10 @@ unsafe fn stream_name(s: *mut AVStream) -> String {
 ///
 /// File order is the join, and it is the mapping this file already relies on twice
 /// (`nth_audio_stream`, and the subtitle enumeration that feeds `desired_sub_idx`). It is worth
-/// stating why that is sound rather than convenient: the server lists a part's streams in container
-/// order too, and both ordinal helpers skip the SIDECAR streams that exist only on the server —
-/// which is exactly the set that is not in this file. So position N here and position N there name
-/// one track, and a file with no tags simply yields empty strings in the right slots.
+/// stating why that is sound rather than convenient: the server lists a part's streams in container order
+/// too, and both ordinal helpers skip the SIDECAR streams that exist only on the server — which is
+/// exactly the set that is not in this file. So position N here and position N there name one
+/// track, and a file with no tags simply yields empty strings in the right slots.
 unsafe fn track_names(fmt: *mut AVFormatContext) -> (Vec<String>, Vec<String>) {
     let (mut audio, mut subs) = (Vec::new(), Vec::new());
     let streams = (*fmt).streams;
@@ -1677,12 +1677,12 @@ struct HlsNet {
     curl: Option<Box<crate::curlio::CurlSource>>,
 }
 
-/// **The live-transfer terminal rule.** A partial response is right-censored evidence.  The server
-/// may open a sized HLS response, deliver a prefix, wait for its JIT encoder (`segmentWait` in
-/// the server's own SessionReport), then burst the remainder.  Consequently neither `prefix_bytes /
-/// prefix_time` nor `Content-Length - prefix_bytes` identifies the unseen acquisition time. 
-/// The former attained-rate projection falsely abandoned sustainable 4K responses on the remote
-/// server.
+/// **The live-transfer terminal rule.** A partial response is right-censored evidence.  The server may
+/// open a sized HLS response, deliver a prefix, wait for its JIT encoder (`segmentWait` in the
+/// server's own SessionReport), then burst the remainder.  Consequently neither
+/// `prefix_bytes / prefix_time` nor `Content-Length - prefix_bytes` identifies the unseen
+/// acquisition time.  The former attained-rate projection falsely abandoned sustainable 4K
+/// responses on the remote server.
 ///
 /// There is one coefficient-free fact available before completion: the playable reserve has
 /// actually reached zero.  The main thread observes that physical boundary and holds Starfish's
@@ -2146,7 +2146,7 @@ fn classify_hls_deadline(wake: BlockingWake) -> Option<HlsExit> {
 }
 
 /// Preserve the one exploration clock across its media leg. An upshift starts its playhead clock
-/// before the server registration and the playlist requests; replacing it here with their last wall
+/// before server registration and the playlist requests; replacing it here with their last wall
 /// snapshot made a user Pause expire unspent playable reserve. A downshift's formula is known only
 /// after its actual candidate EXTINF and fresh reserve are known, so its media-only clock starts at
 /// this boundary and spends unpaused elapsed time: internal starvation is recovery cost, accepted
@@ -2226,7 +2226,7 @@ struct AvioState {
     body_active_us: u64,
     body_bytes: u64,
     /// When the FIRST body byte reached the demuxer. Together with the open above it this splits
-    /// acquisition into connect / server-think / transfer, which is the only way to see the server
+    /// acquisition into connect / server-think / transfer, which is the only way to see server
     /// just-in-time production as its own term: for a JIT encoder the wait before the first byte
     /// IS the production cost, and it is otherwise indistinguishable from a slow link.
     first_byte_at: Option<std::time::Instant>,
@@ -2337,9 +2337,9 @@ impl AvioState {
 
     /// **Credit the acquisition with every body byte already RECEIVED**, not merely read: what
     /// FFmpeg consumed (`off`), plus the park drain's bounce, plus what the transport holds ahead
-    /// (`Src::body_receipt`). The server pauses a sized response and then bursts the remainder;
-    /// once that burst is in hand, a hold must not abandon it. An unsized body completes only on
-    /// the transport's proven end. Called before every guard decision `read_cb` makes.
+    /// (`Src::body_receipt`). The server pauses a sized response and then bursts the remainder; once
+    /// that burst is in hand, a hold must not abandon it. An unsized body completes only on the
+    /// transport's proven end. Called before every guard decision `read_cb` makes.
     ///
     /// A receipt that took a transfer step received body bytes the later read only copies out, so
     /// the step's time is counted here, once, as body time — the same accounting those bytes
@@ -3677,7 +3677,7 @@ fn hls_open_plain(
     let landed = crate::hls::Resource::from_request_path(target.origin.clone(), &target.path)
         .map_err(|_| HlsExit::Failed("HTTP redirect refused"))?;
     let host =
-        CString::new(target.origin.host()).map_err(|_| HlsExit::Failed("invalid PMS host"))?;
+        CString::new(target.origin.host()).map_err(|_| HlsExit::Failed("invalid server host"))?;
     let port = target.origin.port() as c_int;
     let path =
         CString::new(target.path).map_err(|_| HlsExit::Failed("invalid HLS request path"))?;
@@ -4709,12 +4709,12 @@ struct HlsCursor {
     publishes_duration: bool,
     /// **The rate this rendition's master playlist DECLARED**, bit/s, `#EXT-X-STREAM-INF:BANDWIDTH`.
     ///
-    /// Retained rather than logged and dropped, which is what happened to it until now. It is
-    /// the only per-rung rate this app can obtain that is not the catalog's `expected_wire_kbps`,
-    /// whose error is +5.2% to +31.6%, item-dependent and non-injective (rungs 18000 and 20000
-    /// both declare 16 150). Live candidate acceptance uses measured `(A,D,B_post)`, not
-    /// this declaration; keeping it attached to the cursor makes the transaction trace describe
-    /// the actual server variant and preserves the historical corpus comparator.
+    /// Retained rather than logged and dropped, which is what happened to it until now. It is the
+    /// only per-rung rate this app can obtain that is not the catalog's `expected_wire_kbps`, whose
+    /// error is +5.2% to +31.6%, item-dependent and non-injective (rungs 18000 and 20000 both
+    /// declare 16 150). Live candidate acceptance uses measured `(A,D,B_post)`, not this declaration;
+    /// keeping it attached to the cursor makes the transaction trace describe the actual server
+    /// variant and preserves the historical corpus comparator.
     ///
     /// Available at VALIDATION and nowhere else: a rung's `BANDWIDTH` cannot be read without first
     /// creating a server encoder session for it, so selection over the ladder still has no per-rung
@@ -5001,9 +5001,9 @@ fn hls_round_sample(
 
 fn hls_abr_rate_readout(sample: crate::abr::SegmentSample) -> (i64, i64, i64) {
     // The compact panel has no `complete=` column. Publishing an abandoned prefix here would
-    // present its mixed server production/network rate as a normal sample even though
-    // the controller correctly discarded it. Keep the forensic prefix on the `abr: sample ...
-    // complete=0` log line and make the unqualified panel values explicitly unknown.
+    // present its mixed server-production/network rate as a normal sample even though the controller
+    // correctly discarded it. Keep the forensic prefix on the `abr: sample ... complete=0` log
+    // line and make the unqualified panel values explicitly unknown.
     if sample.completed() {
         (
             i64::from(sample.network_kbps()),
@@ -5546,10 +5546,10 @@ fn latched_original_recovery(
     buffered_ms: Option<i64>,
     media_duration_ms: u32,
 ) -> LatchedOriginalRecovery {
-    // A fresh successful source observation is already sitting on a completed/fed HLS boundary. It
-    // must be eligible on THIS call, not copied into a local latch which can only be consumed after
-    // another HLS GET.  The server may rebind the shared Streaming Resource to the raw Part as
-    // a side effect of that probe; requiring one more old-session segment then makes the transition
+    // A fresh successful source observation is already sitting on a completed/fed HLS boundary.
+    // It must be eligible on THIS call, not copied into a local latch which can only be consumed
+    // after another HLS GET.  The server may rebind the shared Streaming Resource to the raw Part as a
+    // side effect of that probe; requiring one more old-session segment then makes the transition
     // depend on a resource the probe itself may have invalidated.
     let recover_kbps = fresh_probe_kbps.unwrap_or(recover_kbps);
     if recover_kbps == 0
@@ -5785,7 +5785,7 @@ impl Drop for TxTrace {
 /// **`cause` is a judgement each call site makes about its own failure, and it is load-bearing.**
 ///
 /// N11's backoff refuses to re-prime a rung that just failed. That is right when the failure was
-/// ABOUT the rung — a completed-but-unfunded response, the server refusing this rung's ceiling
+/// ABOUT the rung — a completed-but-unfunded response, server refusing this rung's ceiling
 /// (`route::PrimeRefusal::Rung`), an acceptance test the candidate did not pass — and wrong when it
 /// was about the session: `reserve_unreadable` is the audio lane falling silent at a seek,
 /// `origin_changed` is the route moving underneath, and `prime_session_moved` is either of those
@@ -5899,9 +5899,9 @@ fn abr_reject_for_hls_exit(exit: HlsExit) -> crate::abr::RejectCause {
 }
 
 /// Classify a completed candidate from what its RESPONSE proved, never from the request label.
-/// A no-gain response is the server underfill: even when the request actuator differs, its smaller
-/// output does not order that actuator against lower request ceilings. Treating it as structural
-/// walked the whole ladder and allocated one physical encoder per rung on the remote server.
+/// A no-gain response is server underfill: even when the request actuator differs, its smaller output
+/// does not order that actuator against lower request ceilings. Treating it as structural walked
+/// the whole ladder and allocated one physical encoder per rung on the remote server.
 fn abr_reject_for_candidate_result(
     raster_ready: bool,
     quality_improves: bool,
@@ -6280,9 +6280,9 @@ fn hls_demux(
     // Lives here rather than on `OriginalRecovery` because it is a property of the LOG, not of the
     // gate — and the gate is rebuilt on a seek while this loop is not.
     let mut last_probe_block: Option<crate::abr::ProbeBlock> = None;
-    // The server acknowledges a transcode stop before its worker finishes either half of
-    // the lifecycle. The route ledger drives physical ping then exact logical-resource close;
-    // this latch keeps a potentially long server cleanup to one waiting line and one release line.
+    // Server acknowledges a transcode stop before its worker finishes either half of the lifecycle.
+    // The route ledger drives physical ping then exact logical-resource close; this latch keeps a
+    // potentially long server cleanup to one waiting line and one release line.
     let mut cleanup_wait_logged = false;
     // Exactly one completed object in a fresh cursor carries server encoder/session startup. It is
     // buffered and measured, but the repeatable acquisition window begins with the next object;
@@ -6326,12 +6326,12 @@ fn hls_demux(
             // ever decides between segments, so the fetch that already exhausted the picture's
             // reserve is converted into the one thing it was withholding: a recovery decision.
             //
-            // **What it must NOT do is enter the capacity estimate as a completed transfer.**
-            // The response is incomplete by construction, so its bytes may be a receive-buffer
-            // burst or a server JIT production interval rather than path service — device-measured
+            // **What it must NOT do is enter the capacity estimate as a completed transfer.** The
+            // response is incomplete by construction, so its bytes may be a receive-buffer burst or
+            // a server JIT production interval rather than path service — device-measured
             // `bytes=1448 ... at 42277kbps` while the shaper held the link at 500 kbps. Entered as
-            // complete it kept `conservative_kbps` near 16 Mbit/s, so every correct downshift
-            // picked a target 30x too dear. See `SegmentSample::abandoned`.
+            // complete it kept `conservative_kbps` near 16 Mbit/s, so every correct downshift picked a
+            // target 30x too dear. See `SegmentSample::abandoned`.
             match unsafe {
                 hls_demux_segment(
                     &segment,
@@ -6411,11 +6411,11 @@ fn hls_demux(
         if !encoder_cleanup_ready && !cleanup_wait_logged {
             cleanup_wait_logged = true;
             crate::player::log(
-                "abr: waiting for PMS to release the stopped encoder before another experiment",
+                "abr: waiting for server to release the stopped encoder before another experiment",
             );
         } else if encoder_cleanup_ready && cleanup_wait_logged {
             cleanup_wait_logged = false;
-            crate::player::log("abr: PMS encoder release observed; exploration may resume");
+            crate::player::log("abr: server encoder release observed; exploration may resume");
         }
         // A pause between two segments really is unmeasured wall-clock time. Age the estimate by
         // it rather than letting a rate measured before the interruption decide what happens after.
@@ -6835,7 +6835,7 @@ fn hls_demux(
                 now_ms(),
             );
             crate::player::log(
-                "abr: quality exploration deferred until PMS confirms prior encoder cleanup",
+                "abr: quality exploration deferred until server confirms prior encoder cleanup",
             );
             continue;
         }
@@ -7003,7 +7003,7 @@ fn hls_demux(
                     tx.finish("aborted");
                     return Err(HlsExit::Aborted);
                 }
-                // **The refusal is never ordinal evidence about the requested rung.** The Plex
+                // **The refusal is never ordinal evidence about the requested rung.** The
                 // `/decision` exits that carried rung information (`Rung`, `Deadline`, `Control`)
                 // went with the wire layer; the one refusal left says the session moved or the
                 // server client is gone, which is Circumstance for the frontier, not a verdict
@@ -7167,8 +7167,8 @@ fn hls_demux(
             continue;
         }
         // The remaining candidate media budget is whatever is left of the same end-to-end
-        // exploration surplus after session creation and both playlists. A remote server may spend
-        // a material fraction of it registering the encoder; that time consumes the viewer's
+        // exploration surplus after session creation and both playlists. A remote the server may spend a
+        // material fraction of it registering the encoder; that time consumes the viewer's
         // reserve even though it transfers no media, so excluding it would over-grant the trial.
         //
         // **The buffer is read HERE for recovery.** Upward exploration instead carries the same
@@ -7276,8 +7276,8 @@ fn hls_demux(
                 aq,
                 &mut net,
                 acodec,
-                // `SegmentAcquisition::Candidate` never carries a prefix `StallGuard`. The server
-                // may pause a sized response while its JIT encoder catches up, so a prefix-rate
+                // `SegmentAcquisition::Candidate` never carries a prefix `StallGuard`. The server may
+                // pause a sized response while its JIT encoder catches up, so a prefix-rate
                 // extrapolation is not proof that the unseen remainder will miss
                 // `candidate_deadline` below. When that reserve clock exists, each `read_until`
                 // gets its current wall projection and the callback classifies the wake against
@@ -7333,13 +7333,13 @@ fn hls_demux(
         let mut candidate_transition: Option<HlsCandidateTransition> = None;
 
         // The boundary object is still direct evidence whenever it satisfies `A<=D && B_post>=A`:
-        // commit it immediately. An `A>D` boundary contains one-time server/session/JIT setup and
-        // may need one ordinary object to identify repeatable cadence. Both objects remain STAGED:
+        // commit it immediately. An `A>D` boundary contains one-time server/session/JIT setup and may
+        // need one ordinary object to identify repeatable cadence. Both objects remain STAGED:
         // the original exploration clock must fund the whole observation without media credit.
         // Publishing the setup object first and later rejecting the candidate mixed two encoder
         // owners on one decoder timeline, forced cursor-by-count repair, and produced the observed
-        // raster/A-V excursion. A candidate now has exactly two outcomes: commit then feed
-        // every staged object, or discard all of them while the old cursor remains untouched.
+        // raster/A-V excursion. A candidate now has exactly two outcomes: commit then feed every
+        // staged object, or discard all of them while the old cursor remains untouched.
         let first_raster_ready = hls_raster_within(
             candidate_outputs[0].0.video_width,
             candidate_outputs[0].0.video_height,
@@ -7843,8 +7843,8 @@ mod audio_ahead_tests {
 /// Takes an [`Origin`](crate::origin::Origin) rather than a `(host, port)` pair because **the scheme
 /// decides the transport**: `http` reads through the Engine's `stream.rs` socket, `https` through
 /// [`crate::curlio`]. An origin is parsed from a URL and never rebuilt from an address, which is
-/// what keeps the `plex.direct` hostname TLS validates against intact all the way down here
-/// (`plex/origin.rs`). `hs` is still passed on both paths — it is the Engine's, and it stays
+/// what keeps the public wildcard name TLS validates against intact all the way down here
+/// (`crate::origin`). `hs` is still passed on both paths: it is the Engine's, and it stays
 /// unused (fd = -1, published as `SHARED.hs_ptr`) when the origin turns out to be https.
 pub(crate) fn demux(
     origin: crate::origin::Origin,
@@ -8124,11 +8124,10 @@ pub(crate) fn demux(
                     free_avio(avio);
                     break;
                 }
-                // The container's own track names, published before anything else can fail:
-                // the track menu is the only reader and it wants them whether or not this part
-                // turns out to have a video stream. See `stream_name` for why they are read at all
-                // — for an MP4 they are the ONLY place a track's identity exists, the server having
-                // dropped it.
+                // The container's own track names, published before anything else can fail: the track
+                // menu is the only reader and it wants them whether or not this part turns out to have
+                // a video stream. See `stream_name` for why they are read at all — for an MP4 they are
+                // the ONLY place a track's identity exists, server having dropped it.
                 {
                     let (audio, subs) = track_names(fmt);
                     let named = audio
@@ -8180,7 +8179,7 @@ pub(crate) fn demux(
                     // "No video stream" alone reads as a demuxer fault. When audio IS present the
                     // demuxer worked fine — the stream itself arrived without video, which on a
                     // transcode URL means the server dropped the track (no usable video target —
-                    // issue #22: an HEVC-only target on a server without Plex Pass). Record which
+                    // issue #22: an HEVC-only target on a server with no paid tier). Record which
                     // shape this is so the error the user sees can say so; the main thread words it.
                     if ai >= 0 {
                         SHARED.demux_no_video.store(true, Ordering::Release);
@@ -8238,21 +8237,20 @@ pub(crate) fn demux(
                 let cname =
                     std::ffi::CStr::from_ptr(avcodec_get_name((*vcp).codec_id)).to_string_lossy();
                 // WHAT THE STREAM ACTUALLY IS, not just what it is called. `codec=hevc` is the same
-                // four letters for an SDR file, an HDR10 file, a Dolby Vision Profile 8.1 file
-                // whose base layer is that same HDR10, and a Profile 5 file that will display in
-                // visibly wrong colours — `avcodec_get_name` cannot tell them apart and neither
-                // could this log line or any assertion built on it. These fields can.
-                // `trc`/`pri`/`spc` are the raw AVCOL_* enum values, logged as NUMBERS because
-                // naming them would mean binding three more FFmpeg symbols for a diagnostic: trc 16
-                // = smpte2084 (PQ/HDR10), 18 = arib-std-b67 (HLG), spc 9 = bt2020nc, pri 9 =
-                // bt2020, and **2 = UNSPECIFIED on all three** (every one of those six numbers
-                // checked against the vendored `libavutil/pixfmt.h`, not recalled). A Profile 5
-                // file is expected to read 2/2/2, since IPT-PQ signals no ordinary transfer at all
-                // — inferred rather than seen from here, but from the same probe: the server
-                // reports NO `colorTrc`, `colorSpace` or `colorPrimaries` at all on the dev
-                // server's P5 item while sending all three on every P8 (swept 2026-08-21).
-                // This line is where a television settles it. All three were declared in
-                // the offsets table above and read NOWHERE until now.
+                // four letters for an SDR file, an HDR10 file, a Dolby Vision Profile 8.1 file whose
+                // base layer is that same HDR10, and a Profile 5 file that will display in visibly
+                // wrong colours — `avcodec_get_name` cannot tell them apart and neither could this log
+                // line or any assertion built on it. These fields can. `trc`/`pri`/`spc` are the raw
+                // AVCOL_* enum values, logged as NUMBERS because naming them would mean binding three
+                // more FFmpeg symbols for a diagnostic: trc 16 = smpte2084 (PQ/HDR10), 18 = arib-std-b67
+                // (HLG), spc 9 = bt2020nc, pri 9 = bt2020, and **2 = UNSPECIFIED on all three** (every
+                // one of those six numbers checked against the vendored `libavutil/pixfmt.h`, not
+                // recalled). A Profile 5 file is expected to read 2/2/2, since IPT-PQ signals no
+                // ordinary transfer at all — inferred rather than seen from here, but from the same
+                // probe: the server reports NO `colorTrc`, `colorSpace` or `colorPrimaries` at all on the dev
+                // server's P5 item while sending all three on every P8 (swept 2026-08-21). This line
+                // is where a television settles it.
+                // All three were declared in the offsets table above and read NOWHERE until now.
                 let dv = match dovi_conf(vcp) {
                     // `bl_compat` is the field that decides whether the base layer means anything on
                     // its own, so it is logged beside the profile rather than left to be inferred

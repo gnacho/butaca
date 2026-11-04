@@ -1528,8 +1528,8 @@ def a_timeline_post(lines):
     """
     ts = timeline_secs(lines)
     if not ts:
-        return False, "no `timeline playing t=` line — progress never reported to the server"
-    return True, f"{len(ts)} timeline report(s) to the server, last t={ts[-1][0]}s"
+        return False, "no `timeline playing t=` line — progress never reported to server"
+    return True, f"{len(ts)} timeline report(s) to server, last t={ts[-1][0]}s"
 
 
 # ---- pipeline-tier assertions ----
@@ -2397,7 +2397,7 @@ def abr_raster_changes(lines):
 
     **Counts the DECODED raster when the log carries one** (`out=`, appended 2026-08-28), and the
     catalog raster otherwise. That is not a formatting preference — the two disagree, measured:
-    against a 4K source server produces 1280x720 for BOTH `P720` and `P1080M6`, and against a 1080p
+    against a 4K source the server produces 1280x720 for BOTH `P720` and `P1080M6`, and against a 1080p
     source it produces 1918x802 for every rung from `P1080M6` up
     (`docs/measurements/m3-production-census.md`). So on the catalog reading a `P720 -> P1080M6`
     commit is a raster change and a viewer sees nothing, while `P1080High -> Uhd` on a 1080p item
@@ -2744,7 +2744,7 @@ def a_abr_shape(lines, spec, dip_windows=()):
       oscillation, because each one is a visible quality change to the person watching.
     * ``decoded_width_floor`` -- some completed candidate actually decoded at least this wide.
       This is deliberately separate from ``floor_kbps``: the latter is the request actuator, and
-      server may answer a 22 Mbps / 4K request with a 720p rendition.
+      the server may answer a 22 Mbps / 4K request with a 720p rendition.
     * ``settle_min_kbps`` / ``settle_max_kbps`` -- where it ENDED. Bounds rather than a value,
       because the ladder has 13 points and a link between two of them may legitimately settle on
       either; a profile that wants an exact rung sets both to it.
@@ -3644,7 +3644,7 @@ def op_audio_enhancement(lines):
        post-toggle `load: v=`) equals the codec before it (the last `ff: v=`/`load: v=` before the
        applied line — a direct-play start may be torn down before it ever logged `ff: v=`).
     4. The post-toggle stream is `start.mkv` (`TranscodeDelivery::ProgressiveMkv`), the one
-       delivery server answers a DSP param with; an HLS re-encode under a fixed rung would be
+       delivery the server answers a DSP param with; an HLS re-encode under a fixed rung would be
        `start.m3u8`, a different, non-enhanced contract by design.
     5. No `ff: open_input failed` after the applied line. The demuxer the reload tears down logs
        `ff: aborted during open_input` instead (`ff::open_input_failure_note`), so this line is

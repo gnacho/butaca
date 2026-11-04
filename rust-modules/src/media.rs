@@ -1,5 +1,5 @@
 //! serde response DTOs — only the fields the app consumes. The wire shapes below are gated
-//! `#[cfg(test)]`: every production constructor went with the Plex wire layer (#166), and what
+//! `#[cfg(test)]`: every production constructor went with the retired wire layer (#166), and what
 //! remains is the test vocabulary that parses recorded shapes plus the canon-only `Resource` /
 //! `Connection` rows and the lenient adapters they share with the live code.
 use serde::Deserialize;
@@ -7,8 +7,8 @@ use serde::Deserialize;
 
 
 
-/// A SHOW's language settings — its Advanced dialog in Plex Web. `None` / `-1` mean "Account
-/// default", inherited from the active Plex profile when its preferences are available.
+/// A SHOW's language settings, the ones its Advanced dialog edits. `None` / `-1` mean "Account
+/// default", inherited from the active profile when its preferences are available.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShowLangPrefs {
     /// `audioLanguage`, e.g. `"hu-HU"`
@@ -69,15 +69,16 @@ where
     Ok(Option::<Vec<T>>::deserialize(d)?.unwrap_or_default())
 }
 
-/// Lenient bool: a JSON bool, the `1`/`0` (or `"1"`/`"0"`) forms Plex also uses, or null → false.
+/// Lenient bool: a JSON bool, the `1`/`0` (or `"1"`/`"0"`) forms the account surface also uses,
+/// or null → false.
 ///
-/// The server DTOs above keep their 0/1 flags as `i64` and test `!= 0`, because those fields are
-/// read once, near the wire. This adapter exists for the plex.tv **connection-policy** flags
-/// (`account.rs`'s `httpsRequired`/`publicAddressMatches`/`local`/`relay`/`IPv6`), which are read
-/// in boolean position by `probe.rs` on every candidate: folding the encodings here once beats
+/// The DTOs above keep their 0/1 flags as `i64` and test `!= 0`, because those fields are read
+/// once, near the wire. This adapter exists for the account service's **connection-policy** flags
+/// (`account.rs`'s `httpsRequired`/`publicAddressMatches`/`local`/`relay`/`IPv6`), which are read in
+/// boolean position by `probe.rs` on every candidate: folding the encodings here once beats
 /// spelling `!= 0` at every branch of a policy that has to stay readable to be trusted. Leniency
-/// itself is not optional — plex.tv sends these as real JSON bools today, and a strict `bool`
-/// that meets a `"1"` fails the WHOLE resources parse, which is a silent sign-in failure.
+/// itself is not optional: they arrive as real JSON bools today, and a strict `bool` that
+/// meets a `"1"` fails the WHOLE resources parse, which is a silent sign-in failure.
 pub(super) fn de_bool<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
@@ -100,8 +101,8 @@ pub(super) fn de_bool<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D:
 /// `String` that meets one is a WHOLE-`MediaContainer` parse failure — the same blast radius
 /// `de_i64` exists to avoid, just pointing the other way. Use it for any stringly-typed number.
 ///
-/// `pub(super)` because `account.rs` needs the null half of it: plex.tv sends an explicit `null` for
-/// an absent string, and there a whole-container failure is the account's whole server list.
+/// `pub(super)` because `account.rs` needs the null half of it: recorded rows send an explicit
+/// `null` for an absent string, where a container failure costs the account's whole server list.
 pub(super) fn de_str<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]
@@ -197,7 +198,7 @@ mod route_key_allowlist_tests {
     }
 }
 
-/// Canon-only wire shapes since the plex.tv account surface was removed: the session-protocol
+/// Canon-only wire shapes since the account surface was removed: the session-protocol
 /// observation digest is frozen (SessionInit::write layout), so the recorded observation
 /// vocabulary and the `/api/v2/resources` rows it named survive here with no producer. The
 /// lenient adapters are `server::models`' — the shapes must keep tolerating exactly what the

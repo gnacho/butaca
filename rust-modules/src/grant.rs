@@ -1,6 +1,6 @@
 //! **May a credential go to this origin — the ONE answer, and the plaintext grants behind it.**
 //!
-//! Every layer that puts a Plex token on a request asks [`credential_allowed`] (or, in a pure
+//! Every layer that puts a credential on a request asks [`credential_allowed`] (or, in a pure
 //! function that receives the build's policy as a parameter, [`allowed_under`]): the registry
 //! when it admits an origin, endpoint admission, the control-plane transport (`crate::http`), the
 //! media plane (`crate::curlio`, `crate::stream_redirect`'s plaintext hops, the player's stream
@@ -17,12 +17,12 @@
 //!
 //! ## What a grant is bound to
 //!
-//! A grant is minted only by discovery ([`mint`]), from a FRESH verdict — plex.tv's resources and
-//! a tokenless `/identity` answer — that [`InsecureEvidence::plaintext_eligibility`] calls
-//! eligible, and only when the person's recorded consent for that (account, server) allows it.
-//! Consent is the ACCOUNT's ([`account_key`]): an answer is honoured only while the plex.tv
-//! account that gave it is the one signed in, so a different account signing in on the same
-//! television is asked again.
+//! A grant is minted only by discovery ([`mint`]), from a FRESH verdict: a tokenless `/identity`
+//! answer that [`InsecureEvidence::plaintext_eligibility`] calls eligible, and only when the
+//! person's recorded consent for that (account, server) allows it.
+//! Consent is the ACCOUNT's ([`account_key`]): an answer is honoured only while the account that
+//! gave it is the one signed in, so a different account signing in on the same television is
+//! asked again.
 //! It names:
 //!
 //! * the server's `machineIdentifier` — a grant admits THAT server's credential ([`allowed_for`]),
@@ -71,12 +71,12 @@
 //!
 //! ## Backend boundary
 //!
-//! [`credential_allowed`] and [`allowed_under`] are the backend-neutral transport authority used
-//! by both Plex and Jellyfin. The consent lifecycle below is still Plex-specific: discovery
-//! evidence comes from `crate::server::probe`, consent persistence uses `crate::server::session`, and
-//! registry invalidation goes through `crate::plex`. [`UpgradeRetry`] also shares `crate::catalog`'s
-//! backoff. Those dependencies remain unchanged until B2 rewires the Plex lifecycle.
-//! `Session::owner_identity` stays in Plex session storage.
+//! [`credential_allowed`] and [`allowed_under`] are the transport authority every request path
+//! consults. The consent lifecycle below runs entirely on the live backend's pieces:
+//! discovery evidence comes from `crate::server::probe`, consent persistence uses
+//! `crate::server::session`, and registry invalidation goes through
+//! `crate::registry::regrade_credentials`. [`UpgradeRetry`] also shares `crate::catalog`'s backoff.
+//! `Session::owner_identity` lives in session storage.
 #![allow(dead_code)]
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -134,7 +134,7 @@ pub(crate) fn revision() -> u64 {
     REVISION.load(Ordering::Acquire)
 }
 
-/// **The account half of a consent's key** - the roster admin's stable plex.tv account id, so a
+/// **The account half of a consent's key** - the roster admin's stable account id, so a
 /// fresh token for the same owner keeps every profile's answer. Sessions written before that id
 /// was persisted fall back to the legacy token fingerprint. An empty key matches nothing.
 pub(crate) fn account_key(session: &Session) -> String {
@@ -181,7 +181,7 @@ impl PlaintextVerdict {
 
     /// Of two insecure-only servers, the one the read-out should speak about: the first that can
     /// be offered, else the first at all. A household's own non-eligible server does not hide a
-    /// share the person could connect to, and the order stays plex.tv's (ours first).
+    /// share the person could connect to, and the order stays discovery's (ours first).
     pub(crate) fn prefer<E>(held: Option<(E, PlaintextVerdict)>, next: (E, PlaintextVerdict))
         -> Option<(E, PlaintextVerdict)> {
         match held {
@@ -213,9 +213,8 @@ pub(crate) fn allowed_under(policy: CredentialPolicy, origin: &Origin) -> bool {
     policy.may_carry_credential(origin) || (!origin.is_tls() && granted(None, origin))
 }
 
-/// **May `machine_id`'s credential go to `origin`** — the question for whoever is about to put a
-/// server's own token on an origin: registry admission (`crate::plex`), endpoint admission
-/// (`crate::server::admit_source_until`). A grant admits only the server it was minted for, so another
+/// **May `machine_id`'s credential go to `origin`**: the question for whoever is about to put a
+/// server's own token on an origin. A grant admits only the server it was minted for, so another
 /// machine whose address collides with a granted origin (a DHCP reshuffle, a share advertising
 /// the same private address) never gets its token sent there. An empty `machine_id` names no
 /// server, and no grant admits it.

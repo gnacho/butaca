@@ -42,7 +42,7 @@ def resolve(config):
     user = get("/api/v2/user")
     if (identity.get("version") != "1.41.0.0000-synthetic"
             or user.get("uuid") != "demo-user" or user.get("username") != "demo"):
-        raise ValueError("configured server is not the synthetic mock PMS")
+        raise ValueError("configured server is not the synthetic mock server")
     # This value is fabricated, never an account or per-server access token. The mock accepts
     # arbitrary nonempty tokens; a real server cannot authenticate it even if misconfigured later.
     return MOCK_TOKEN
@@ -123,7 +123,7 @@ def main():
     try:
         token = resolve(args.config)
     except (OSError, ValueError, KeyError, TypeError, AttributeError, urllib.error.URLError):
-        parser.exit(1, "mock guest refused: configured server must answer as tests/mock_server.py\n")
+        parser.exit(1, "mock guest refused: configured the server must answer as tests/mock_server.py\n")
     print(token)
     return 0
 

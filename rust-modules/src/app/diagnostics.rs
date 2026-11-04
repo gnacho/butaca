@@ -101,11 +101,11 @@
 //!   are omitted: no playback bug depends on them, and they are what turns an anonymous technical
 //!   photograph into an attributable one.
 //!
-//! The enforcement is structural: every row is built by [`pipeline_rows`]/[`model_rows`] from
-//! one [`crate::player::Diag`] snapshot and a small set of route facts. The compositor's opaque
-//! window id is reduced to `window ready`/`NO WINDOW`; the only server-derived text is the server
-//! release and Pass state, never its name or address. There is no generic "push a string to
-//! diagnostics" path, so adding a field is a deliberate edit to the file that carries these rules.
+//! The enforcement is structural: every row is built by [`pipeline_rows`]/[`model_rows`] from one
+//! [`crate::player::Diag`] snapshot and a small set of route facts. The compositor's opaque window
+//! id is reduced to `window ready`/`NO WINDOW`; the only server-derived text is the server release and
+//! Pass state, never its name or address. There is no generic "push a string to diagnostics" path,
+//! so adding a field is a deliberate edit to the file that carries these rules.
 use crate::ui::label::Label;
 use crate::ui::machine::Measure;
 use crate::ui::widgets::{Field, FieldList, FIELD_COL_W};
@@ -622,11 +622,10 @@ fn device_rows() -> Vec<Field> {
     v
 }
 
-/// One fixed instrument, split by responsibility rather than by mode.  The left column follows
-/// a byte from the chosen server connection to the television plane.  The right column is
-/// the adaptive model.  Fixed playback keeps every right-hand row and says `inactive`;
-/// that stability is what makes a LAN/Original photograph directly comparable with a remote/HLS
-/// one.
+/// One fixed instrument, split by responsibility rather than by mode.  The left column follows a
+/// byte from the chosen server connection to the television plane.  The right column is the adaptive
+/// model.  Fixed playback keeps every right-hand row and says `inactive`; that stability is what
+/// makes a LAN/Original photograph directly comparable with a remote/HLS one.
 fn columns(ps: &crate::route::PlaybackSession, d: &crate::player::Diag, prev: (i64, i64, u32), now: u32) -> [Vec<Field>; 2] {
     [pipeline_rows(ps, d, prev, now), model_rows(ps, d)]
 }
@@ -819,7 +818,7 @@ fn fps_milli_str(fps_milli: i64) -> String {
 
 fn connection_line(ps: &crate::route::PlaybackSession) -> String {
     let sid = crate::route::cur_sid(ps);
-    // The Plex client lookup that used to name a tier and a server build went with the wire layer
+    // The old client lookup that used to name a tier and a server build went with the wire layer
     // (#166). The one live backend names itself; its server has no tier and its build string is
     // not fetched, so the row says which kind of server the byte came from and nothing more.
     if sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some() {
@@ -840,7 +839,7 @@ fn route_line(ps: &crate::route::PlaybackSession, d: &crate::player::Diag) -> St
         (true, true) => crate::i18n::msg::browse_diagnostics_remux(),
         (true, false) => crate::i18n::msg::browse_diagnostics_transcode(),
     };
-    // Issue #266: the server's own verdict on the Plex Pass DSP ask, distinct from `transform`
+    // Issue #266: the server's own verdict on the paid tier's DSP ask, distinct from `transform`
     // (which only says remux vs re-encode) — absent entirely while the enhancement is Off, so an
     // ordinary playback's route line is unchanged.
     match crate::route::cur_enhancement_label(ps) {
@@ -1074,8 +1073,8 @@ fn abr_risk(d: &crate::player::Diag, selected: crate::route::Quality) -> String 
     s
 }
 
-/// End-to-end acquisition wall time per media duration. It spans request open, the server wait,
-/// pacing and path transfer, so it is useful cadence telemetry but cannot identify an independent
+/// End-to-end acquisition wall time per media duration. It spans request open, server wait, pacing
+/// and path transfer, so it is useful cadence telemetry but cannot identify an independent
 /// encoder or server-load constraint. Above 1.0x means this operating point loses reserve over
 /// that complete service episode; it does not say which component caused the loss.
 ///
@@ -1130,10 +1129,9 @@ fn abr_rate(kbps: i64) -> String {
     }
 }
 
-/// Demand is what the current delivery has to carry, not the request ceiling when the server
-/// emitted a smaller VBR stream. Manual fixed HLS has no segment estimator, so its explicit ceiling
-/// is the honest planning demand; Original uses the whole-file transport rate captured by
-/// the resolve.
+/// Demand is what the current delivery has to carry, not the request ceiling when server emitted a
+/// smaller VBR stream. Manual fixed HLS has no segment estimator, so its explicit ceiling is the
+/// honest planning demand; Original uses the whole-file transport rate captured by the resolve.
 fn chart_demand_kbps(d: &crate::player::Diag, selected: crate::route::Quality) -> i64 {
     match d.abr_mode {
         crate::player::ABR_MODE_HLS => [d.abr_media_kbps, d.abr_declared_kbps, d.abr_kbps]
@@ -1249,17 +1247,17 @@ fn decoded_raster(d: &crate::player::Diag) -> String {
     }
 }
 
-/// Keep the three different meanings that used to be collapsed into "HLS 22 Mbps / 4K" on one line:
-/// what the client requested as a ceiling, what the server says it produced, and what the decoder
-/// actually opened.  The controller's next choice belongs in Action; repeating it here made
-/// the widest real row wrap and therefore made every row below it move between photographs.
+/// Keep the three different meanings that used to be collapsed into "HLS 22 Mbps / 4K" on one
+/// line: what the client requested as a ceiling, what the server says it produced, and what the decoder
+/// actually opened.  The controller's next choice belongs in Action; repeating it here made the
+/// widest real row wrap and therefore made every row below it move between photographs.
 fn abr_quality(d: &crate::player::Diag, selected: crate::route::Quality) -> String {
     match d.abr_mode {
         crate::player::ABR_MODE_ORIGINAL => crate::i18n::msg::browse_diagnostics_quality_original(&decoded_raster(d), &abr_rate(d.abr_kbps)),
         crate::player::ABR_MODE_HLS => {
             let mut now = crate::i18n::msg::browse_diagnostics_quality_request(abr_raster(d.abr_kbps), &abr_rate(d.abr_kbps));
             if d.abr_declared_kbps > 0 {
-                now.push_str(&format!(" · PMS {}", abr_rate(d.abr_declared_kbps)));
+                now.push_str(&format!(" · server {}", abr_rate(d.abr_declared_kbps)));
             }
             now.push_str(&crate::i18n::msg::browse_diagnostics_decoded(&decoded_raster(d)));
             now
@@ -1480,9 +1478,9 @@ fn chain(src: String, sent: String, payload: &str) -> String {
     }
 }
 
-/// The Server row's value: "<release> · Plex Pass" / "<release> · no Plex Pass", or
-/// "not yet queried" while the `GET /` worker has not landed (an empty version IS that state —
-/// `serverinfo` stores the two fields together).
+/// The Server row's value: the release alone, or "not yet queried" while the `GET /` worker
+/// has not landed (an empty version IS that state, as `serverinfo` stores both fields in one
+/// record).
 ///
 /// A Jellyfin server has no subscription to report, so the row is the release alone. Pure so every
 /// arm is host-testable without touching the process-global store.
@@ -1493,9 +1491,9 @@ fn server_line(version: &str) -> String {
     short_version(version).to_string()
 }
 
-/// The server release triplet ("1.43.3.10861-cd85035e7" → "1.43.3"). The build/hash carry
-/// no support signal the release does not, while the shorter stable form keeps the Connection row
-/// directly comparable and leaves its Pass verdict visible. The event log retains the full string.
+/// The server release triplet ("1.43.3.10861-cd85035e7" → "1.43.3"). The build/hash carry no support
+/// signal the release does not, while the shorter stable form keeps the Connection row directly
+/// comparable and leaves its Pass verdict visible. The event log retains the full string.
 fn short_version(version: &str) -> &str {
     let numeric = version.split('-').next().unwrap_or(version);
     match numeric.match_indices('.').nth(2) {
@@ -2116,7 +2114,7 @@ mod tests {
         assert_eq!(
             chart_demand_kbps(&hls, crate::route::Quality::Auto),
             17_900,
-            "actual measured HLS demand outranks both PMS declaration and request ceiling",
+            "actual measured HLS demand outranks both server declaration and request ceiling",
         );
     }
 
@@ -2618,7 +2616,7 @@ mod tests {
         let v = build(&hls);
         assert_eq!(
             val(&v, "Quality"),
-            "request ≤4.0 Mbps / ≤720p · PMS 3.5 Mbps · decoded 1280×720",
+            "request ≤4.0 Mbps / ≤720p · server 3.5 Mbps · decoded 1280×720",
         );
         assert_eq!(val(&v, "Sample"), "12.4 Mbps · stream-limited · ±20% · n=7");
         assert_eq!(
@@ -2631,9 +2629,9 @@ mod tests {
         assert_eq!(val(&v, "Action"), "changed up to 4.0 Mbps");
         assert_eq!(val(&v, "Reason"), "link has room");
 
-        // Device trace, 2026-08-30: the request/controller said 22 Mbps / 4K while the server
-        // declared 896 kbps and every decoded segment was 720x404. The panel must expose all three
-        // facts rather than promote a ceiling into a statement about the picture.
+        // Device trace, 2026-08-30: the request/controller said 22 Mbps / 4K while server declared
+        // 896 kbps and every decoded segment was 720x404. The panel must expose all three facts
+        // rather than promote a ceiling into a statement about the picture.
         let mismatched = build(&crate::player::Diag {
             abr_mode: crate::player::ABR_MODE_HLS,
             abr_kbps: 22_000,
@@ -2646,7 +2644,7 @@ mod tests {
         });
         assert_eq!(
             val(&mismatched, "Quality"),
-            "request ≤22.0 Mbps / ≤4K · PMS 896 kbps · decoded 720×404",
+            "request ≤22.0 Mbps / ≤4K · server 896 kbps · decoded 720×404",
         );
 
         // Every actuator on the ladder names its raster, including the ones added after this panel
@@ -2695,7 +2693,7 @@ mod tests {
         );
         assert_eq!(
             val(&build(&unavailable), "Reason"),
-            "PMS refused Original source · HTTP 503",
+            "server refused Original source · HTTP 503",
         );
 
         let refreshing = crate::player::Diag {
@@ -2711,7 +2709,7 @@ mod tests {
         );
         assert_eq!(
             val(&build(&refreshing), "Reason"),
-            "PMS output below request"
+            "server output below request"
         );
 
         // A fixed rung keeps the schema. Model-only rows state that they are inactive, while the
@@ -2757,7 +2755,7 @@ mod tests {
         );
         assert_eq!(
             val(&idle_after_original_failure, "Reason"),
-            "PMS failed Original source · HTTP 500",
+            "server failed Original source · HTTP 500",
             "a controller restart must not hide the typed source failure behind a generic idle state",
         );
 
@@ -3067,7 +3065,7 @@ mod tests {
     }
 
     /// A free server reads as a fact, never a fault: the danger tint is reserved for rows that say
-    /// "something broke", and `no Plex Pass` is the server working exactly as sold. (The value
+    /// "something broke", and a server without the paid tier is working exactly as sold. (The value
     /// itself depends on the process-global store this test deliberately does not touch — the
     /// tone is a property of the ROW, fixed at build time, so it is assertable regardless.)
     #[test]

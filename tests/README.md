@@ -14,7 +14,7 @@ how a green run means nothing.
 
 | | **synthetic** — the DEFAULT | **server** (`--server`) |
 |---|---|---|
-| what it proves | **transport and decode**: raw-socket GET → `ff.rs` demux over the custom AVIO → the two-lane AU queues → the Starfish `Feed()` pump → the ACB bind, and the Load payload's codec/Dolby **declaration** | **selection**: `/decision`, direct-play vs transcode, the PlayQueue, track menus from the server's metadata, markers, resume, the `/:/timeline` reporter |
+| what it proves | **transport and decode**: raw-socket GET → `ff.rs` demux over the custom AVIO → the two-lane AU queues → the Starfish `Feed()` pump → the ACB bind, and the Load payload's codec/Dolby **declaration** | **selection**: `/decision`, direct-play vs transcode, the PlayQueue, track menus from server metadata, markers, resume, the `/:/timeline` reporter |
 | what it needs | a TV address and `make fixtures-pipeline` | a media server, a token, a `manifest.local.json`, and a library holding the shapes the matrix names |
 | media | generated clips, served off your Mac | real items on your server |
 | who can run it | **anyone** | whoever owns that library |
@@ -96,7 +96,7 @@ one below — a Play control on a detail page is server-tier by construction), a
 **transcode input space** — three server cases on one AV1 item stand in for 17 video codecs. One of
 those is an app gap rather than a test gap: `devcaps` now reads `maxFrameRate` into per-codec rows,
 but only the Starfish Load's `adaptiveStreaming` ceiling clamps against it (`engine::sink_envelope`,
-since 2026-09-03) — the profile sent to the server still carries no frame-rate limitation at all.
+since 2026-09-03) — the profile sent to server still carries no frame-rate limitation at all.
 
 - `manifest.json` — the test matrix, and **installation-independent**: the triggers each case
   needs, the expected log signals, and the *shape* of the item it needs (`item`, a symbolic key
@@ -949,7 +949,7 @@ secondary to the real item shapes, and still to be labelled synthetic:
   `Part.decision=transcode` while the VIDEO stream's own decision was **`copy`** — the identical
   IPT-PQ bitstream one container down, with `DOVIProfile: 5` still on it. A case asserting
   `decision: transcode` would have passed over a completely unfixed bug. The route now also
-  withdraws the copy permission (`TranscodeSpec::no_video_copy`), and this server answers **general
+  withdraws the copy permission (`TranscodeSpec::no_video_copy`), and this the server answers **general
   code 2000 — "File is unplayable. DoVi (Profile 5) color space is not supported."** — so the P5
   item's honest on-device expectation is the **failure read-out quoting that sentence**, not a
   playing stream. The P7 does transcode for real (an enhancement layer is not copyable), which is

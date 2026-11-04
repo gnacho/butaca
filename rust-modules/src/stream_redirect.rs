@@ -1,19 +1,19 @@
 //! **HTTP redirects on the plaintext MEDIA path** — the one place a `3xx` answer to a media
 //! open is turned into the next request.
 //!
-//! The server answers some Part URLs (Plex-hosted trailers: `/services/iva/assets/…`) with a `302`
-//! to a presigned CDN URL on another origin — typically https, sometimes a relative `Location`.
-//! The socket client in [`super`] is one request per open and cannot speak TLS, so following is
-//! a loop ABOVE it: [`open_following`] re-opens the same [`HttpStream`] for each plaintext hop and
-//! stops at the first https hop, handing that target back for the caller to open through `curlio`
-//! (which follows any further hops itself, under its own `CURLOPT_MAXREDIRS` and no-downgrade
-//! `CURLOPT_REDIR_PROTOCOLS`).
+//! The server answers some Part URLs (trailers it hosts: `/services/iva/assets/…`) with a `302`
+//! to a presigned CDN URL on another origin, typically https, and the `Location` is sometimes
+//! relative. The socket client in [`super`] is one request per open and cannot speak TLS, so
+//! following is a loop ABOVE it: [`open_following`] re-opens the same [`HttpStream`] for each
+//! plaintext hop and stops at the first https hop, handing that target back for the caller to open
+//! through `curlio` (which follows any further hops itself, under its own `CURLOPT_MAXREDIRS` and
+//! no-downgrade `CURLOPT_REDIR_PROTOCOLS`).
 //!
-//! Credentials: the ORIGINAL request's credential header block and its `X-Plex-Token` query pair
-//! ride a hop only when the hop's scheme+host+port equal the ORIGINAL origin's. A cross-origin hop
-//! is requested exactly as its `Location` spells it — a presigned URL carries its own authority,
-//! and the server token must never reach a third party. A `Range` is not a credential and rides
-//! every hop. Log lines carry an origin and a query-less path, never a query.
+//! Credentials: the ORIGINAL request's credential header block and its access-token query pair
+//! ride a hop only when the hop's scheme+host+port equal the ORIGINAL origin's. A cross-origin
+//! hop is requested exactly as its `Location` spells it — a presigned URL carries its own
+//! authority, and the access token must never reach a third party. A `Range` is not a credential
+//! and rides every hop. Log lines carry an origin and a query-less path, never a query.
 //!
 //! **Every plaintext hop that would carry a credential asks the credential authority first**
 //! (`crate::http::credential_transport_allowed`, i.e. `grant`) — the first request, every
@@ -21,9 +21,9 @@
 //! grant therefore stops at its next request once that grant is revoked: [`FollowError::Refused`],
 //! with nothing dialled.
 //!
-//! A caller whose contract confines it to one origin — HLS, whose playlists may only name
-//! children on the server origin (`crate::hls`) — sets [`Request::same_origin_only`], and a hop
-//! elsewhere (a scheme change included) is refused before anything is dialled there.
+//! A caller whose contract confines it to one origin (HLS, whose playlists may only name children
+//! on the server origin, `crate::hls`) sets [`Request::same_origin_only`], and a hop elsewhere, a
+//! scheme change included, is refused before anything is dialled there.
 //!
 //! The control plane (`crate::http`) does not come through here; its redirect policy is the
 //! per-request `follow_redirects` option in `crate::net`, off by default.
@@ -94,7 +94,7 @@ pub(crate) enum FollowError {
 /// One media GET to be opened with redirects followed.
 pub(crate) struct Request<'a> {
     pub(crate) origin: &'a Origin,
-    /// Absolute path plus optional query. May carry `X-Plex-Token`.
+    /// Absolute path plus optional query. May carry the access token as a query pair.
     pub(crate) path: &'a str,
     /// A credential header block (`Name: value\r\n`…), sent to the original origin only.
     pub(crate) credentials: Option<&'a str>,
@@ -224,7 +224,7 @@ pub(crate) fn same_origin(a: &Origin, b: &Origin) -> bool {
     a.scheme() == b.scheme() && a.port() == b.port() && a.host().eq_ignore_ascii_case(b.host())
 }
 
-/// The `X-Plex-Token=…` pair of a path's query, if it has one.
+/// The access-token pair of a path's query, if it has one.
 fn token_pair(path: &str) -> Option<&str> {
     let (_, query) = path.split_once('?')?;
     query
@@ -394,7 +394,7 @@ mod tests {
         }
     }
 
-    fn catalog() -> Target {
+    fn pms() -> Target {
         base(
             Scheme::Http,
             "192.168.1.10",
@@ -415,29 +415,29 @@ mod tests {
 
     #[test]
     fn an_absolute_https_location_is_a_tls_target_on_443() {
-        let t = resolve_location(&catalog(), "https://cdn.example.com/v/1.mp4?sig=a&e=2").unwrap();
+        let t = resolve_location(&pms(), "https://cdn.example.com/v/1.mp4?sig=a&e=2").unwrap();
         assert!(t.origin.is_tls());
         assert_eq!(t.origin.host(), "cdn.example.com");
         assert_eq!(t.origin.port(), 443);
         assert_eq!(t.path, "/v/1.mp4?sig=a&e=2");
         assert_eq!(t.url(), "https://cdn.example.com:443/v/1.mp4?sig=a&e=2");
-        assert!(!same_origin(&t.origin, &catalog().origin));
+        assert!(!same_origin(&t.origin, &pms().origin));
     }
 
     #[test]
     fn an_absolute_http_location_defaults_to_80_and_keeps_explicit_ports() {
-        let t = resolve_location(&catalog(), "HTTP://cdn.example.com?x=1").unwrap();
+        let t = resolve_location(&pms(), "HTTP://cdn.example.com?x=1").unwrap();
         assert_eq!((t.origin.port(), t.path.as_str()), (80, "/?x=1"));
-        let t = resolve_location(&catalog(), "http://[::1]:8080/a#frag").unwrap();
+        let t = resolve_location(&pms(), "http://[::1]:8080/a#frag").unwrap();
         assert_eq!((t.origin.host(), t.origin.port()), ("::1", 8080));
         assert_eq!(t.path, "/a");
-        let same = resolve_location(&catalog(), "http://192.168.1.10:32400/x").unwrap();
-        assert!(same_origin(&same.origin, &catalog().origin));
+        let same = resolve_location(&pms(), "http://192.168.1.10:32400/x").unwrap();
+        assert!(same_origin(&same.origin, &pms().origin));
     }
 
     #[test]
     fn relative_locations_resolve_against_the_answering_target() {
-        let b = catalog();
+        let b = pms();
         assert_eq!(resolve_location(&b, "/a/b?c=1").unwrap().path, "/a/b?c=1");
         assert_eq!(
             resolve_location(&b, "other.mp4").unwrap().path,
@@ -465,7 +465,7 @@ mod tests {
 
     #[test]
     fn unusable_locations_are_refused() {
-        let b = catalog();
+        let b = pms();
         for bad in [
             "",
             "   ",
@@ -552,13 +552,13 @@ mod tests {
             b"HTTP/1.1 206 Partial Content\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
                 .to_vec(),
         );
-        let (catalog, server_h) = serve(
+        let (pms, pms_h) = serve(
             format!(
                 "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{cdn}/v\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
             )
             .into_bytes(),
         );
-        let origin = Origin::http("127.0.0.1", catalog as i32);
+        let origin = Origin::http("127.0.0.1", pms as i32);
         let mut hs = super::super::http_stream_boxed();
         let req = Request {
             origin: &origin,
@@ -570,7 +570,7 @@ mod tests {
         };
         let got = open_following(&mut *hs, &req, &mut crate::checkpoint::NoCheckpoint);
         super::super::http_close(&mut *hs);
-        let (server_head, cdn_head) = (server_h.join().unwrap(), cdn_h.join().unwrap());
+        let (server_head, cdn_head) = (pms_h.join().unwrap(), cdn_h.join().unwrap());
         match got {
             Ok(Opened::Socket(t)) => assert_eq!(t.origin.port(), cdn as i32),
             other => panic!("{other:?}"),

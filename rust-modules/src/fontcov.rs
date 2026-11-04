@@ -8,7 +8,7 @@
 //! ## Why the gate exists
 //!
 //! `pkg/appfont.ttf` covers 2853 codepoints — Latin, Cyrillic, Greek — and **zero** Hangul, Kana
-//! or Han. A Plex library with Korean, Japanese or Chinese titles rendered 100 % tofu, and every
+//! or Han. A library with Korean, Japanese or Chinese titles rendered 100 % tofu, and every
 //! test tier this project has was structurally blind to it: the host suite draws nothing, the
 //! simulator renders through a different rasterizer, and the device FPS scenes grade `loop=`.
 //! Coverage is not a rendering question at all — it is a property of a file on disk — so it
@@ -49,7 +49,7 @@ use std::path::Path;
 ///
 /// The BMP half is the hot one — `text.rs` asks per character on every cache-missing string — and
 /// 8 KB of bitset makes that a shift and a mask instead of a binary search. Astral codepoints
-/// (emoji, CJK ext-B) are rare enough in a Plex library to be worth a `partition_point`.
+/// (emoji, CJK ext-B) are rare enough in a library to be worth a `partition_point`.
 pub(crate) struct Coverage {
     bmp: Box<[u64; 1024]>,
     sup: Vec<(u32, u32)>,
@@ -562,7 +562,7 @@ mod tests {
     // --- the declared set ------------------------------------------------------------------------
     //
     // LINK 1 — `appfont.ttf` / `appfont-bold.ttf` (Inter, cut by tools/cut-inter.py). Every
-    // codepoint the product chrome itself can emit, plus the scripts the Plex libraries this
+    // codepoint the product chrome itself can emit, plus the scripts the libraries this
     // client is built for actually contain. Whole blocks, not samples: a partial block is how
     // "Cyrillic works" and "Ё is a box" coexist.
     const LINK1_BLOCKS: &[(&str, u32, u32)] = &[
@@ -585,8 +585,8 @@ mod tests {
     ];
 
     /// Individual codepoints link 1 must carry: the typographic punctuation the UI composes by
-    /// hand (`elide` appends U+2026; headings join with U+00B7; server metadata is full of curly
-    /// quotes and en/em dashes) and the marks drawn beside ratings.
+    /// hand (`elide` appends U+2026, headings join with U+00B7, and the server's metadata is full
+    /// of curly quotes and en/em dashes) and the marks drawn beside ratings.
     const LINK1_CHARS: &[(&str, char)] = &[
         ("ellipsis (elide appends it)", '\u{2026}'),
         ("middle dot (heading separator)", '\u{00B7}'),

@@ -1,4 +1,4 @@
-# HLS protocol probe against the server
+# server HLS protocol probe
 
 Measured 2026-08-24 with the host-only `tools/hls-probe.py`. This report deliberately omits
 the server address and identity, account identifiers, token, library item identifier, raw session
@@ -21,8 +21,8 @@ decrease.
 
 The corrected Auto leg fetched one initial segment, then 30 consecutive two-second segments while
 reporting 20,000 kbps, followed by 30 while reporting 512 kbps. Timeline reports used
-`bufferedTime=10000` in the server's observed millisecond wire units. The master continued to contain one
-variant; the actual video stream stayed 480x200 throughout; and the server's returned bandwidth record
+`bufferedTime=10000` in server's observed millisecond wire units. The master continued to contain one
+variant; the actual video stream stayed 480x200 throughout; and server's returned bandwidth record
 stayed at its initial 575 kbps / SD entry.
 
 This distinguishes the three protocol shapes as follows:
@@ -85,7 +85,7 @@ failures remain visibly pending.
 
 ## Production implementation and device result
 
-The measured `FixedSession` result determines the production architecture. Auto does not ask the server
+The measured `FixedSession` result determines the production architecture. Auto does not ask server
 to mutate one encoder and does not select among variants. It keeps one internal playback
 generation, but gives each physical encoder the same fresh value on the legacy `session=` and
 the session-identifier wires. A move is proposed from the current segment measurements, a new
@@ -134,7 +134,7 @@ On the target LG television, the four shaped links settled as follows (six-rung 
 
 ## The bitrate ceiling is an actuator, not a promise
 
-A follow-up leg measured what this server does with the top of the range, and both halves matter to a
+A follow-up leg measured what this the server does with the top of the range, and both halves matter to a
 client that has to spend a budget:
 
 | request | resolution ceiling | decision / actual |
@@ -155,7 +155,7 @@ claim about a universal server maximum, and the client's transaction grades the 
 than trusting the table.
 
 > **Corrected 2026-08-27 — the table above is ITEM-specific, and it was read as server-specific.**
-> A full-ladder sweep on three items (`docs/measurements/p2h-server-ladder.md`) reproduces the
+> A full-ladder sweep on three items (`docs/measurements/p2h-pms-ladder.md`) reproduces the
 > *boundary* exactly — 21,750 kbps still returns the lower operating point and 21,999 the higher —
 > but **not the value below it**: on a 1080p 2.39:1 film the lower point declares **16,150 kbps**,
 > not the "about 20,011" recorded here. The 20,011 was that probe's item. The boundary generalises;
@@ -165,13 +165,13 @@ than trusting the table.
 > ceiling is not what unlocks the higher rate** — 20,000 kbps returns 16,150 with a 3840x2160
 > ceiling and with a 1920x1080 one alike, so "asking for 20,895 gets 1080p" is about the requested
 > BITRATE, not the box. And **"22,000 flips the output to 3840x2160" holds only when the SOURCE is
-> 4K**: on a 1080p master, 22,000 with a 4K ceiling still returns 1918x802, because the server never
+> 4K**: on a 1080p master, 22,000 with a 4K ceiling still returns 1918x802, because server never
 > upscales. The 4K item in the sweep does return 3840x2160 there, which is what makes the original
 > sentence true of its own measurement and false as a general rule.
 
 All resolution changes stayed inside one Starfish Load. A 720p→1080p→720p fixture independently
 proved that the LG pipeline accepts in-band H.264 parameter-set/raster changes on one Load. The live
-server run retained the full 1:40:03 playlist duration instead of exposing only the downloaded tail; a
+Server run retained the full 1:40:03 playlist duration instead of exposing only the downloaded tail; a
 mid-movie seek selected the correct playlist segment and continued on a freshly normalized A/V
 timeline; and a live high-to-512 Kbps collapse returned directly to 320 Kbps without walking or
 blocking on oversized intermediate encoders.
