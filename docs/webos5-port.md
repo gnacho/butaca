@@ -323,7 +323,7 @@ that matters when judging how much a webOS 4 assumption is worth elsewhere.
 - **The exported window has a SUBTITLE type** (value 1) that webOS 4's ACB had no equivalent for.
   Whether it opens a route to the TV's hardware subtitle engine in buffer-feed mode — currently
   documented here as URI-mode only — is unexplored.
-- **Codec capability is still asserted, not probed.** `profile_extra()` tells PMS "HEVC + 4K +
+- **Codec capability is still asserted, not probed.** `profile_extra()` tells the server "HEVC + 4K +
   10-bit" unconditionally because that is what the author's panel does. On a lower-end webOS 5 set
   that is wrong, and so is the transcode fallback, which also targets HEVC.
 - **Resolution: do NOT use `SDL_webOSGetPanelResolution`.** It exists on both eras, which makes it

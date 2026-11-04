@@ -93,7 +93,7 @@ Why: The C side references only `butaca_run` + the two starfish callbacks (grep 
 - `server/library.rs` `section_items_paged/metadata_many/all_leaves` "no kept rationale" — **false**: the retired API migration plan (:445-447) names all three as intentional kept capacity.
 - `account.rs` `Resource::local_connection` "reimplemented inline at two sites" — **false**: only one site does connection selection, and its logic *differs* (refuses remote); the proposed reuse would change behavior.
 - `chapters_panel` "re-implements episode picker; back with CardRow" — **false**: episodes use `TextView` not `text::elide`, label every card (CardRow labels only the focused tile), and already share the real leaf (`draw_card`).
-- `route.rs` "identity three divergent values the server sees" — **false**: the PMS data transport emits *no* identity headers; the `client.rs` fields are never transmitted.
+- `route.rs` "identity three divergent values the server sees" — **false**: the server data transport emits *no* identity headers; the `client.rs` fields are never transmitted.
 - `app.rs` "D-pad-mode idiom duplicated verbatim 3×" — **false**: exact block appears 2×; the third and the two cursor-hide sites are different idioms.
 - `app.rs` "`g_`-prefixed forwarders, 4+14 cluster" — **false**: only `g_fr`/`g_snap` carry the stale prefix; the rest are clean Rust names.
 - `tests/README.md` "install zig does nothing" — **false**: `run.py:533` still *needs* zig for `--build` (the README is accurate; the bug is in `run.py`, → S1).

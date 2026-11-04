@@ -572,7 +572,7 @@ needed it:
    `AppArg::Content`. `ARG_SHAPE` gained the seven words and `SCREEN_SHAPES_PIN` moved with it.
 2. **`state_fp`'s shape inventory SPLIT** (same commit). Every screen's `SHAPE` is
    `registry::SCREEN_SHAPES`, pinned in that module; `app/recorder.rs` keeps `APP_SHAPES` — the
-   press machine, the input state, the frame line, the container tree, the PMS fixtures — pinned
+   press machine, the input state, the frame line, the container tree, the server fixtures — pinned
    separately and unmoved by any screen. Without this, every conversion edited `app/recorder.rs`
    twice: once for the entry and once for the pin.
 3. **The panel→surface map moved to the registry** (`39d51ae8`, `ContentPanel::surface`), and the

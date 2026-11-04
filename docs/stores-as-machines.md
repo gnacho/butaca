@@ -82,7 +82,7 @@ only cross-layer reads; the old free `crate::browse` publication and mutator fun
 
 Phase 7 (2026-09-08) mounted Detail and Person from `screens/` and retired their old `ui/` files;
 the table now names the live callers. Phase 8 (2026-09-09) did the same to Home and took two of the
-table's cells with it: `ui/home.rs` is deleted, so it is no caller of anything, and `pms::pump` —
+table's cells with it: `ui/home.rs` is deleted, so it is no caller of anything, and `catalog::pump` —
 the "legacy callers' combined pass" it was the last caller of — is deleted with it, along with
 `stores::hubs::pump`. The pms row is `request_refetch_hubs`, `request_retry`, `reset` (private,
 the last one `#[cfg(test)]`-only), reached only through `HubsCmd::{RefetchHubs,Retry,Reset}` via
@@ -200,7 +200,7 @@ an ownership slice.
   (`app/run.rs`'s per-frame `metadata_pump_detail`/`metadata_pump_season` calls, the same idiom as
   the rest).
 - **The pumps stay where they are.** A route-gated pump moved to the machine's `Tick` would fetch
-  behind the player, which `pms::pump`'s doc forbids for a reason. Browse's owned full and
+  behind the player, which `catalog::pump`'s doc forbids for a reason. Browse's owned full and
   roster-only work events are both delivered by `app/bridge.rs`; the gate moves with the explicit
   owner that drives the work.
 - **Store state is not in the recorder's hash — still true after 5b's new anchor.** The phase-2
@@ -208,7 +208,7 @@ an ownership slice.
   (spec §5.5). 5b DID re-pin `state_fp` and record a new anchor (`app/recorder.rs`'s `tree:u64`
   term folding in `Dispatcher::state_hash`), but that term is the CONTAINER TREE's own
   `LogicalState` — the Settings family's live instances, its surface phases, the engine's focus
-  and the queue depth — not the seven PMS-derived stores. `browse`/`pms`/`metadata`/`search`/
+  and the queue depth — not the seven server-derived stores. `browse`/`catalog`/`metadata`/`search`/
   `person`/`collection`/`viewstate`'s generations stay out of `recorder::state_hash`; physical ownership does
   not by itself make store state part of the recorder hash, and that stays true now that all seven
   have completed their ownership slices.

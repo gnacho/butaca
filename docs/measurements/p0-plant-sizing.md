@@ -150,14 +150,14 @@ distinct commit lines** — `Up to 2000kbps 1280x720 out=1280x720`, and so on fo
 `abr_raster_changes` reads 15 on both the catalog and the decoded series. That is not evidence the
 two agree in general; it is a property of the FIXTURE PACK. `serve_fixtures.py`'s `ABR_RASTER` maps
 every rung to exactly its catalog box, because the renditions are pre-encoded static files rather
-than a transcoder's output. There is no PMS here choosing a raster, so there is nothing for the box
+than a transcoder's output. There is no server here choosing a raster, so there is nothing for the box
 to disagree with.
 
 **The synthetic tier is therefore structurally blind to the box-vs-decoded divergence**, and the
-divergence is real: M3 measured a live PMS producing 1280x720 for BOTH `P720` and `P1080M6` against
+divergence is real: M3 measured a live server producing 1280x720 for BOTH `P720` and `P1080M6` against
 a 4K source, and 1918x802 for every rung from `P1080M6` up against a 1080p one. Confirming that
 `out=` changes what `raster_changes` counts needs the SERVER tier (`./tests/run.py --server`)
-against a real PMS. Until then the change is correct-by-construction and unexercised, which is a
+against a real server. Until then the change is correct-by-construction and unexercised, which is a
 different and weaker claim than "verified".
 
 **What the simulator can and cannot say about the feed.** `make sim` + `butaca-clocksink` now
@@ -172,9 +172,9 @@ before anyone went looking.
 
 ## What this does not settle
 
-- `cold_start_ms = 250` is **unmeasured off-fixture**; on a remote TLS PMS it carries a handshake.
+- `cold_start_ms = 250` is **unmeasured off-fixture**; on a remote TLS server it carries a handshake.
 - `E_tx_down` medians come from 17 committed down-legs on a static file server: no JIT, control
-  plane 6 ms. Both are optimistic against a real PMS.
+  plane 6 ms. Both are optimistic against a real server.
 - The `/1.04` TS-to-ES divisor is an assumption (`sim.rs:246-250`), not a measurement, and the
   per-lane ES byte counters that replace it are Phase 1 work.
 - ~~The audio lane has never bound in 366 samples, so its term in `B_max` is pure arithmetic.~~

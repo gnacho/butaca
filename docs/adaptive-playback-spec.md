@@ -53,7 +53,7 @@ upshift transaction starts. A downshift is still permitted while held because it
 edge; an upshift is reconsidered from the next completed live observation after resume.
 
 Original/HLS selection is outside this network result. It explicitly prices a visible full reload,
-remaining playback, source quality/DV/Atmos/generation preservation, recurring PMS encode work and
+remaining playback, source quality/DV/Atmos/generation preservation, recurring server encode work and
 recent visible switches. Those utility weights are product choices, never inferred probabilities.
 
 ---
@@ -84,9 +84,9 @@ cooldowns, utility weights or rung-walking rules. §7 applies that test to all e
 tunables, one at a time, and it is the part of this document most likely to be wrong.
 
 **What is derivable today and what is not.** The SIZE half of the admission problem is settled
-host-side (`docs/measurements/p2h-pms-ladder.md`) — with the two limits §3 now carries. The TIME
+host-side (`docs/measurements/p2h-server-ladder.md`) — with the two limits §3 now carries. The TIME
 half — the per-segment intercept and the per-byte transport cost on a real link — is not, because
-the measurement apparatus has the PMS on the same machine and no link at all.
+the measurement apparatus has the server on the same machine and no link at all.
 
 **[R-blocked]** An earlier draft of this paragraph said §4's two parameters were written as
 "named parameters whose *estimation* is specified". **That was false and is withdrawn.** No
@@ -149,8 +149,8 @@ A = O₀ + bytes · τ
 across a 15× link range. The coefficients did not, and this is the sharpest correction the
 measurements make to the plan:
 
-**`O₀` is not one number.** Measured against a real PMS over 1 426 fetches
-(`docs/measurements/p2h-pms-ladder.md` §5), the server's contribution to `O₀` is **quantized**:
+**`O₀` is not one number.** Measured against a real server over 1 426 fetches
+(`docs/measurements/p2h-server-ladder.md` §5), the server's contribution to `O₀` is **quantized**:
 best-fit quantum **108.13 ms**, median residual 3.47 ms against ~27 ms if the grid were unrelated.
 It takes three regimes:
 
@@ -166,7 +166,7 @@ deployment". **Both halves were wrong and the pairing that produced them was the
 fit on a corpus the repo's own measurement doc says is not comparable. The repository's actual
 joint fit, post-fixture-rebuild, is **`τ` = 21.40 ns/byte with `O₀` = 687.95 ms**
 (`docs/measurements/p1-transaction-anatomy.md:203`) — so the fixture tier's intercept is **larger**
-than the real PMS's ~214 ms, not 12× smaller. The draft had taken `τ` from that joint fit and
+than the real server's ~214 ms, not 12× smaller. The draft had taken `τ` from that joint fit and
 `O₀` from a different one, which is not a combination either fit supports: in `A = O₀ + bytes·τ`
 the two are estimated together and only travel together.
 
@@ -177,7 +177,7 @@ value:**
 |---|---:|---:|---|
 | planning file | 17.76 ms | 58.51 ns/byte | pre-rebuild fixture corpus, 10 effective points |
 | `p1-transaction-anatomy.md:203` | 687.95 ms | 21.40 ns/byte | post-rebuild fixture corpus |
-| `p2h-pms-ladder.md` §5 | k · 108 ms, k ∈ {1,2,3} | not measurable | real PMS, no link |
+| `p2h-server-ladder.md` §5 | k · 108 ms, k ∈ {1,2,3} | not measurable | real server, no link |
 
 `p1` says outright that its own `τ` is unsettled — 33.30 on the first five logs against 21.40 on
 eleven, a 1.56× swing, with a cluster-robust SE of 15.29 that puts it ~1.4σ from zero.
@@ -523,7 +523,7 @@ the two halves of admission:
 | decision | where | is `W_j` available? |
 |---|---|---|
 | **validate** — commit this primed candidate, or reject it | `Controller::candidate_ready`, after `ff.rs`'s `hls_cursor_open(candidate_url, …)` | **yes.** The candidate's master playlist has been fetched and its `BANDWIDTH` parsed and logged. |
-| **select** — which rung to prime at all | `Controller::observe`, at the `Proposal { rung: target }` sites | **no.** A rung's `BANDWIDTH` cannot be read without first creating a PMS encoder session for it. |
+| **select** — which rung to prime at all | `Controller::observe`, at the `Proposal { rung: target }` sites | **no.** A rung's `BANDWIDTH` cannot be read without first creating a server encoder session for it. |
 
 So §4's rule **can** be evaluated at the validation point and **cannot** be evaluated over the
 ladder at selection time. Worse, the number is not even *retained* for the rung that does have
@@ -760,7 +760,7 @@ whose own graded segment is at or slower than real time is refused outright, at
 window's; this is the disqualifier. Two independent constraints, not two stacked margins.
 
 **Selection and admission must evaluate the same rule or the controller livelocks.** Proposing what
-validation will refuse costs a real PMS encoder session and ~3 s of unrefilled playback, and
+validation will refuse costs a real server encoder session and ~3 s of unrefilled playback, and
 `reject` sets a one-sample cooldown — so the loop repeats. Selection therefore walks DOWN from the
 budget's choice to the highest rung the window supports, using the catalog rate, which is the only
 per-rung rate it can see (§3); validation re-runs the same rule on the declared rate and decides.
@@ -1135,7 +1135,7 @@ still be doing the thing it exists to do, so it is an upper bound on any correct
 firing there is the weakest enforceable rule. A tighter one needs a bound on the reserve the new
 rung needs on arrival, `A_j` — which the acquisition window would supply and cannot supply here,
 because a delivery collapse resets the window and a collapse is the event that produced the
-downshift. The former R16 prefix-rate projection is not such a bound: a growing PMS HLS response
+downshift. The former R16 prefix-rate projection is not such a bound: a growing server HLS response
 right-censors encoder production together with network service. The alternative to the physical
 bound is therefore a fraction of it, which is the unexplained multiplier the design rule forbids.
 
@@ -1470,10 +1470,10 @@ rather than deleted, because what each BECAME is the useful part:**
   Rung 2000 puts 9 of 40 segments above `0.85·W` (max 0.9175), so §3's claim now reads **rungs
   ≥ 4000**. Five item-windows also make the cross-item margin *derivable*: at rungs ≥ 4000 an
   unseen item moves max `σ` by at most 5.6%, giving `σ = 0.90` with a reason rather than 0.85 with
-  0.5% of rounding slack. `docs/measurements/p2h-pms-ladder.md` §2/§2a. The original wording,
+  0.5% of rounding slack. `docs/measurements/p2h-server-ladder.md` §2/§2a. The original wording,
   which the earlier draft got wrong by asking only for a second *server*, was: Eight of the eleven rungs ≥ 2000 rest on one film, including
   rung **2000**, the boundary of the rule, and the item that breaks the bound one rung below it
-  (the episode, 1.155 at 720) is absent from rung 2000 entirely. `tools/pms-rung-sweep.py`
+  (the episode, 1.155 at 720) is absent from rung 2000 entirely. `tools/rung-sweep.py`
   defaults to the full 13-rung ladder, so this needs no `--rungs` and no second server: it is one
   host-only command per additional item. **Do this first — it is cheaper than the second server
   and it closes the hole that a second-server run would faithfully reproduce.**

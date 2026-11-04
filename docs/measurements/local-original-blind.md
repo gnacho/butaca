@@ -8,7 +8,7 @@ tuning failure, and **every assertion this harness had passed while it happened.
 ## 1. The observation
 
 `auto_original_squeeze`: `movie_h264_ac3_1080p` (source measured at **10 634 kbps**, 1918x802,
-h264/ac3 mkv — direct-playable), quality **Auto**, on the **local** PMS. The link runs unshaped for
+h264/ac3 mkv — direct-playable), quality **Auto**, on the **local** server. The link runs unshaped for
 30 s and is then held at **2 500 kbps** and never released: a fourfold deficit against the source.
 
 ```

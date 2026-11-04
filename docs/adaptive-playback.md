@@ -15,7 +15,7 @@ values Dolby Vision.
 
 ## 1. Why the displayed download rate is not link capacity
 
-An HLS rendition asks PMS for a finite amount of data. If the current rendition needs about
+An HLS rendition asks the server for a finite amount of data. If the current rendition needs about
 4 Mbit/s, a healthy 25 Mbit/s path can still appear as 4–6 Mbit/s: the request did not offer enough
 work to saturate the path. Therefore
 
@@ -29,7 +29,7 @@ request or identify the best untried rendition.
 
 No continuously parallel speed-test stream is used. It would consume the same path as playback and
 change the quantity it tries to measure. The de-obfuscated official Chromium/webOS client confirms
-there is no special PMS speed-test endpoint behind its “Checking connection speed” notice: before
+there is no special server speed-test endpoint behind its “Checking connection speed” notice: before
 `player.open()` it performs an ordinary raw Part GET and measures source bytes. Butaca uses the
 same physically uncapped object, but bounds it to one finite Range response. At cold start that
 request runs before playback; at runtime it is serialized between HLS acquisitions, never beside
@@ -147,7 +147,7 @@ impossible until the path or server recovers.
 ### Exploring upward
 
 If `E > 0` and there is no failed response-size endpoint at that budget, the controller may excite
-the highest feasible unclassified rung. The candidate is a separate PMS fixed-rendition encoder
+the highest feasible unclassified rung. The candidate is a separate server fixed-rendition encoder
 session. The old session remains the rollback actuator.
 
 After a high excitation establishes a scheduling endpoint, adjacent descent is the worst possible
@@ -160,11 +160,11 @@ over a finite ordered set, not a conversion of the current rung's download rate 
 hidden link capacity.
 
 A deadline-censored transaction produced no complete candidate media quantum. A completed response
-with no Pareto gain produced media, but PMS answered with a different demand-capped object; its
-bytes do not say that a lower request ceiling would fare better. In the former case the serial PMS
+with no Pareto gain produced media, but the server answered with a different demand-capped object; its
+bytes do not say that a lower request ceiling would fare better. In the former case the serial server
 decision/start/playlist/body path did not finish inside `E`; in the latter the no-gain response
 completed for that exact cost. Let `E_f` be the disposable reserve armed at its start. Changing the
-requested rung is not new budget evidence in either case and may leave several physical PMS
+requested rung is not new budget evidence in either case and may leave several physical server
 encoders overlapping. The next quality excitation therefore requires
 
 ```text
@@ -184,8 +184,8 @@ requires that candidate's own completed `A <= D` and `B_post >= A` observation. 
 poll interval, bitrate margin or probe-
 count constant.
 
-PMS encoder lifecycle is an independent physical condition. A successful universal-transcoder
-`/stop` only queues cleanup, and PMS owns the physical `session=` encoder separately from the
+The server encoder lifecycle is an independent physical condition. A successful universal-transcoder
+`/stop` only queues cleanup, and the server owns the physical `session=` encoder separately from the
 logical session-identifier Streaming Resource charged by the bandwidth governor. Before
 another upward HLS or Original experiment, the client checks the stopped physical key with the
 matching `/ping`; `200` proves it remains and `404` proves only that physical entry is gone. It
@@ -198,7 +198,7 @@ cleanup is pending.
 For the initial phase of an upward experiment, one playhead-funded reserve clock, bounded by `E`,
 covers:
 
-- PMS transcode decision and session creation;
+- the server transcode decision and session creation;
 - master playlist;
 - media-playlist refresh and its wait;
 - the first complete candidate segment: open, headers, any production wait, probe and body.
@@ -214,7 +214,7 @@ Before each blocking control or playlist leg, its remaining `E - Δplayhead` is 
 absolute transport deadline; the media AVIO retains the clock itself and refreshes that projection
 on every open, wait and read. If Pause or a naturally stopped native clock moves an issued
 projection, idempotent GET legs retry with the unchanged reserve. A timed-out transcode decision is
-not replayed blindly because PMS may have registered it; exact cleanup is queued. If its projection
+not replayed blindly because the server may have registered it; exact cleanup is queued. If its projection
 moved while the playhead reserve remained unspent, the outcome is a circumstance rather than a
 censored-rung observation; `Δplayhead >= E` remains censored reserve. Synchronous firmware DNS may
 still exceed the projection on builds without an interruptible resolver; the main-thread reserve
@@ -229,9 +229,9 @@ subtracts every native-accepted user Pause interval, including a complete Pause�
 inside one blocked read. A terminal-floor recovery remains unarmed because abandoning the only
 remaining actuator cannot restore a stronger rollback guarantee.
 
-The HLS GET legs also retain an independent wall-clock transport-inactivity deadline. Plaintext PMS
+The HLS GET legs also retain an independent wall-clock transport-inactivity deadline. Plaintext server
 control has the same rolling inactivity shape: complete headers and actual body bytes begin a fresh
-epoch. HTTPS PMS control instead retains its existing 25-second whole-request API cap, intersected
+epoch. HTTPS server control instead retains its existing 25-second whole-request API cap, intersected
 with the current reserve projection; progress does not renew that total cap. In every case an
 obsolete reserve wake renews neither form of transport liveness. Classification reads the owning
 clocks: spent reserve is censored evidence, expired transport liveness is a circumstance, and
@@ -246,7 +246,7 @@ A <= D  and  B_post >= A
 A downshift is a recovery transaction: it must leave one complete decodable segment funded
 (`B_post >= D`), and an unsustainable intermediate response (`A > D`) is rejected so descent can
 continue. The terminal floor is the derived no-rollback exception. No cheaper actuator exists
-there, so any complete demuxable floor response commits even when `A > D`, `B_post < D`, or PMS
+there, so any complete demuxable floor response commits even when `A > D`, `B_post < D`, or the server
 exceeds the requested rung box; otherwise the only possible result is retrying the same floor
 while retaining a known-losing higher route. That verdict means “best available”, not “stable”. A
 successful commit atomically changes the actuator and seeds a fresh
@@ -310,7 +310,7 @@ instead records the exact common refill frontier `E_f` defined above. Quality
 exploration may run again only after disposable reserve grows strictly past that frontier, and then
 retries the most informative highest request instead of walking every lower tier. Thus a filling
 real buffer can safely buy one later retry only after replacing the media the previous transaction
-spent; an unchanged reserve cannot poll PMS and a full reserve eventually makes the frontier
+spent; an unchanged reserve cannot poll the server and a full reserve eventually makes the frontier
 terminal. There is no timer, bitrate margin or inferred capacity in either release. A seek/reload
 carries the requested/observed pair together, so rebuilding the worker cannot promote the request
 back into a delivered-quality claim.
@@ -374,13 +374,13 @@ The retained facts are different:
 - completed but unfunded: store the largest actually executed `E` for that actuator; its completed
   response size keeps lower ordinal experiments meaningful;
 - completed response with no quality gain: store the same common refill frontier; disposable
-  reserve strictly beyond it may buy another fresh PMS session at the highest informative request,
+  reserve strictly beyond it may buy another fresh server session at the highest informative request,
   while the demand-capped response rate is never promoted into an ordinal or capacity bound;
 - completed unsustainable (`A > D`): more reserve cannot make the operating point sustainable, so
   buffer growth does not release it. The certificate also retains the live HLS distribution's
   recent estimate at failure; a later live distribution whose conservative bound is strictly
   above that old-regime estimate authorizes one new excitation;
-- PMS refusal: structurally excludes that exact actuator for this controller;
+- the server refusal: structurally excludes that exact actuator for this controller;
 - raster larger than a rung's bounding box: excludes that rung and smaller boxes, while a larger
   box remains eligible;
 - origin/session/transport/parse failure: says nothing about the rung and creates no certificate.
@@ -421,7 +421,7 @@ stop a running clock.
 The native clock, durable user hold, recovery epoch and automatic actuator owner are one
 mutex-protected authority. They are orthogonal fields rather than independently polled atomics: at
 most one of `QualityUp(token)`, `QualityDown(token)` or `Original(token)` owns an automatic
-boundary. Blocking PMS, HTTP and native work necessarily runs outside that mutex, but carries its
+boundary. Blocking server, HTTP and native work necessarily runs outside that mutex, but carries its
 monotone lease token and the accepted user-clock sequence through the result. Completion may only
 take the explicit commit edge if both still own the compatible boundary; a complete
 Pause→Resume is therefore not mistaken for the earlier identical-looking `Running` state.
@@ -456,7 +456,7 @@ controller's typed `ReservePolicy::TerminalFloor`, because waiting for the later
 was the measured abort/retry loop at a positive 84 ms remnant.
 
 An incomplete ordinary response is right-censored and has no prefix-rate projection. This is not
-just a conservative interpretation: PMS 1.43.4 can publish `Content-Length` from the current file
+just a conservative interpretation: server 1.43.4 can publish `Content-Length` from the current file
 size while the requested HLS segment is still growing, return would-block at the apparent body EOF,
 and resume the same HTTP response when the encoder produces more bytes. Prefix time therefore
 mixes server production, pacing and network service; neither it nor the advertised remainder
@@ -520,12 +520,12 @@ the model to resume on media that did not exist.
 An HLS rung swap can continue on the same normalized media timeline and is intended to be invisible.
 Moving between HLS and Original is different:
 
-- PMS creates or tears down a different stream;
+- the server creates or tears down a different stream;
 - the native pipeline is re-Loaded;
 - the video plane may be black while it rebinds;
 - codec and HDR declarations may change;
 - Original can restore Dolby Vision, Atmos/lossless audio and avoid generation loss;
-- Original has zero recurring PMS video-encode work; every HLS rendition has some.
+- Original has zero recurring server video-encode work; every HLS rendition has some.
 
 The mode comparison therefore scores the real Original candidate against the best currently
 supportable HLS alternative, not against a fabricated “top rung.”
@@ -572,14 +572,14 @@ Measured/structural inputs include:
 - current end-to-end HLS acquisition cadence;
 - current reserve and remaining playback;
 - whether Original is technically feasible;
-- the HLS candidate's calibrated PMS-work class.
+- the HLS candidate's calibrated server-work class.
 
 Explicit product choices include:
 
 - the subjective cost of a visible reload/black frame;
 - the relative value ordering of DV, no generation loss and Atmos;
 - the time horizon over which recurring benefits fully repay a reload;
-- the relative price assigned to ongoing PMS encode work.
+- the relative price assigned to ongoing server encode work.
 
 Those values cannot be derived from network probability and are intentionally named as policy.
 
@@ -587,9 +587,9 @@ DV and Atmos/lossless audio are the source feature flags currently scored explic
 HDR declaration change is part of the reload/feasibility boundary, but it has no separate utility
 bonus today.
 
-The measured HLS acquisition ratio spans open, PMS wait, pacing and path transfer. It remains useful
+The measured HLS acquisition ratio spans open, server wait, pacing and path transfer. It remains useful
 telemetry, but those components are not separately identifiable and the ratio is not charged as a
-second feasibility or mode gate. The rendition's calibrated PMS-work class prices recurring server
+second feasibility or mode gate. The rendition's calibrated server-work class prices recurring server
 work in the Original/HLS utility comparison. That class is a product calibration, not a live
 reading of the server's current load; the implementation must not describe either quantity as one.
 
@@ -608,14 +608,14 @@ There are three exits:
 If the remaining film is already buffered, no exit is possible.
 
 Returning from HLS requires an actual bounded source request. HLS traffic cannot prove source
-capacity because its request sizes are capped. PMS 1.43.4 resolves a raw Part by exact Streaming
+capacity because its request sizes are capped. Server 1.43.4 resolves a raw Part by exact Streaming
 Resource identity, then token alias, and only then enters AdHoc admission. The old implementation
 first stopped/closed HLS and used a fresh `source-N` id; that forced AdHoc admission, whose
-`99 341 > 92 000` bandwidth refusal fell through a PMS lexical-cast bug and surfaced as HTTP 500.
+`99 341 > 92 000` bandwidth refusal fell through a server lexical-cast bug and surfaced as HTTP 500.
 The current experiment instead names the exact active HLS encoder and issues no client-side stop,
 close or replacement before the read. It runs between ordinary HLS acquisitions, and its result is
 discarded if the active identity changes while the request is in flight. That ordering keeps the
-client route explicit, but it is not evidence that PMS preserves the old HLS cursor: PMS may rebind
+client route explicit, but it is not evidence that the server preserves the old HLS cursor: the server may rebind
 the shared Streaming Resource while serving the raw Part. A successful `Recover` therefore starts
 an Original trial on that same completed media boundary and never waits for one more HLS segment.
 HLS remains the rollback owner until the exact Load succeeds and a decoded frame confirms the
@@ -630,7 +630,7 @@ with `PendingOriginal` and is committed by the first decoded frame. A failed Loa
 route and that unspent charge back, because the viewer never saw the proposed mode.
 
 The experiment becomes informative when no higher HLS actuator remains unclassified at the current
-exploration budget. That does not require the live actuator to equal the largest request: if PMS
+exploration budget. That does not require the live actuator to equal the largest request: if the server
 maps larger requests to the same or a worse encode, their structural rejections exhaust the HLS
 frontier without ever becoming current.
 
@@ -658,12 +658,12 @@ physical HLS encoder (`closeResourceSession=0`); its Streaming Resource remains 
 owner so later Range/seek opens remain valid. Final playback teardown performs the full resource
 close. A remux recovery instead registers a distinct replacement encoder; decoded frames close the
 held old HLS resource, while a failed remux open restores the client-side HLS route and closes only
-the unproven remux. The first actual HLS response after that restoration decides whether PMS kept
+the unproven remux. The first actual HLS response after that restoration decides whether the server kept
 or can resume its cursor.
 If a cold resolve is cancelled, superseded or refused before it owns an Engine, there is no winning
 route to reuse its logical resource; that abandonment path therefore performs the exact full close.
 
-A source request which fails before any body arrives (for example PMS `5xx`, DNS or connect
+A source request which fails before any body arrives (for example a server `5xx`, DNS or connect
 failure) is an inconclusive request failure, not a zero-rate link sample and not proof that the
 Part is unavailable to a later playback open. It does not enter the source capacity estimate and
 HLS retains its best observed/requested route.
@@ -711,7 +711,7 @@ threshold-straddling `sus`/`sur` checks are reported as ambiguous coverage rathe
 counted as proof.
 
 The on-screen diagnostics likewise keep request and output separate: `Quality` shows the requested
-ceiling, PMS master declaration and decoded raster; the measured media rate is the HLS demand used
+ceiling, server master declaration and decoded raster; the measured media rate is the HLS demand used
 in the conservative-budget row. A requested `22 Mbps / 4K` box can therefore never masquerade as
 a decoded `720×404` picture.
 

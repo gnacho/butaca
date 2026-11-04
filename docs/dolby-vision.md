@@ -299,7 +299,7 @@ That is why absent or unknown platform support rejects Profile 5 here. P5 has no
 displayable base-layer outcome; without an affirmative capability result the client requests a
 video re-encode and also forbids a remux/video copy of the same unusable bitstream. This is
 fail-closed and not cost-free: a server unable to perform the conversion may fail playback, and a
-successful PMS encode is not by itself proof that the returned colours are correct.
+successful server encode is not by itself proof that the returned colours are correct.
 
 ### 6b. "The RPU is HEVC NAL type 62" is our measurement, not a Dolby fact
 
@@ -448,7 +448,7 @@ human at the panel, check whether the platform already publishes it.
   the LUT ring's size. Our path is case 1, so it does not bite us.
 
 Operational risks which remain: a transient boot failure disables DV until restart by design;
-`Supported` identifies an SKU capability, not every profile, level or malformed stream; PMS P5
+`Supported` identifies an SKU capability, not every profile, level or malformed stream; the server P5
 re-encoding still needs picture validation; recovery/synthetic/codec seams are guarded by frozen
 decision regressions but remain high-value bypass points; and a stale forced-support trigger can
 reproduce the original corruption, which is why its `forced` provenance is visible in diagnostics.

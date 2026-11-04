@@ -182,7 +182,7 @@ that defect at `abr.rs:1531-1534` (milliseconds subtracted from kilobits per sec
 | `H` | buffer refill horizon | ms |
 | `E_tx` | expected cost of an **upshift** transaction, in unrefilled playback | ms |
 | `E_tx_down` | the same for a **downshift** — a different number (N4) | ms |
-| `ρ` | PMS acquisition time ÷ media duration; `ρ > 1` means the server is falling behind | per-mille |
+| `ρ` | server acquisition time ÷ media duration; `ρ > 1` means the server is falling behind | per-mille |
 | `T` | starvation horizon | s |
 
 `C_safe = C_hat · (1 − u)` with `u = uncertainty_pm/1000` clamped at 500 pm
@@ -307,7 +307,7 @@ contradiction.
 
 Two limitations to state in the code rather than fix by mixing dimensions:
 
-- `C` is measured over `active_fetch_us` (`abr.rs:1265`, `:1292-1295`), which **excludes PMS
+- `C` is measured over `active_fetch_us` (`abr.rs:1265`, `:1292-1295`), which **excludes the server
   production time**, while "recover `D` within `H`" is a wall-clock promise. The refill guarantee
   therefore over-promises by exactly the factor N6 forbids folding in. Document it.
 - The production discount currently folded into the same function (`abr.rs:1525-1530`) is removed
@@ -508,7 +508,7 @@ exactly 5 segments between successive upshifts (2 cooldown + 3 stable) and 10 af
 
 Delete the gate at `abr.rs:2171`. **Keep the field**: `abr.rs:2107` uses it as the production
 estimator's cold-start flag (`let cold_start = self.samples_on_rung == 0;`), feeding a 1-vs-3
-sample weight at `abr.rs:926` for a measured PMS reason. This is the "retain whatever sample count
+sample weight at `abr.rs:926` for a measured server reason. This is the "retain whatever sample count
 the production estimator genuinely needs" requirement, and it is the only sample count that
 survives anywhere in HLS policy. It is also the predicate I3 uses.
 
@@ -646,7 +646,7 @@ low-capacity sample.
 
 **The previous §10's premise "HLS rung switches are invisible to the viewer" is void as stated.**
 The device evidence establishes *acceptance*, not invisibility:
-`docs/pms-hls-protocol-probe.md:154-155` records that a 720p→1080p→720p fixture proved the pipeline
+`docs/hls-protocol-probe.md:154-155` records that a 720p→1080p→720p fixture proved the pipeline
 **accepts** in-band raster changes on one Load. The repo's own manifest says the opposite in product
 language — `tests/manifest.json:1591`: "five to ten visible quality changes to the person watching".
 
@@ -705,7 +705,7 @@ infeasible. That case grades the sample counters and nothing else, which matters
 **only** device coverage the counters have.
 
 Where the repository already holds a measurement that contradicts the catalog, say so rather than
-silently keeping the request: `docs/pms-hls-protocol-probe.md:18-19` records 720 → ~425 kbps and
+silently keeping the request: `docs/hls-protocol-probe.md:18-19` records 720 → ~425 kbps and
 12 000 → ~11.356 Mbps.
 
 ### N18 — remaining-playback scale: §16's clamp already exists (no-op); the scale then had to
@@ -815,8 +815,8 @@ with it.
 | **M1** | **Freeze the baseline.** Record `5a8ef2ef` and the `+I0+I1` SHA in `tests/README.md` as the adaptive-playback baseline pair, with the exact build configuration used for M2. | desk | everything |
 | **M2** | **Record baseline device behaviour.** Run the four `pipe_abr_*` cases on the baseline pair with the new assertions armed (`min_buf_ms`, `dip_max_kbps`, `max_stall_s`, `raster_changes_max`) and write the results into `tests/README.md`. **There is no recorded device result for any of these cases anywhere in the repository today**, and every increment that lands first makes the "before" unrecoverable. Also record the observed ratio of active-read time to wall clock, which N13's conversion needs. Take M4 and M-D6 in the same lease. | television, 1 lease | I3 onward |
 | **M-D6** | **The 17.5 Mbit/s leg.** A new flat shaped case at 17 500 kbps (`tools/netcond.py --rate`) with settle bounds, run against the M2 baseline binary. *Falsifies:* settling on P1080M10 confirms `upshift_admission_headroom_pm = 800` costs a rung at 57 % utilisation; settling on P1080M14 says it does not. Closes `docs/lg-self-checklist.md:87`, which records the leg as never re-measured after `5a8ef2ef`. | television, same lease as M2 | N7's retention of the margin |
-| **M3** | **Extend `tools/pms-hls-probe.py` to measure production cost per actuator.** For each of the thirteen request ceilings, against one 4K and one 1080p source, fetch ≥10 consecutive segments and record `total_fetch_us / media_duration_ms` (ρ), cold and warm. **Runs on the dev Mac. No television, no lock, no `make`.** Compare on the **residual**, as `predicted_ratio_pm` does (`abr.rs:977-983`): compute `load_j ∝ (ρ_j − ρ_floor)` normalised so the P1080High point reads 1000, with `ρ_floor` from the lowest rung's measured ρ. Run **both** a back-to-back leg and a `--pace 2.0` leg (`tools/pms-hls-probe.py:1013`) and state which the catalog is meant to match; the paced one is what the app experiences. *Falsifies:* residual loads within ±15 % of `abr.rs:1126-1138` uphold the "inert argmax" finding and keep §7.A closed; any mid-ladder load off by >25 % means the deferred argmax is a re-parameterisation on fresh numbers and must be argued on those. **Record the raw ρ per rung as well**, because `abr.rs:1074-1083`'s own anchor (0.21 at P1080High) sits *below* `production_floor_pm = 250`, which makes `predicted_ratio_pm` from the top rung return the measured ratio unchanged for every candidate — a property M3 should confirm or refute rather than inherit. | host | §7.A, N19, N6's extrapolation |
-| **M4** | **Measure the settled `buf=` at high rungs and at more than one segment duration.** *Prerequisites:* I0's `abr: sample` line (media kbps + buf, on every segment) **and** I0's rung-pin trigger. Unshaped LAN ≥25 Mbit/s so the AQ cap is the only limiter; one ≥40-minute 1080p item forcing a video transcode. Arm `/tmp/butaca-abrrung=<kbps>` for each of 720, 4 000, 10 000, 16 000, 20 000 in turn for ≥3 minutes, discarding the first 30 s. **The playback-quality selector CANNOT be used for this**: `route::hls_abr_control()` returns `None` for any non-Auto quality (`route.rs:581`), and the quality ladder has no mid-1080p rungs (`server/session.rs:190-212`). Record the audio ES rate beside the video one. *Falsifiers, split by which lane binds:* a **video-bound leg** (10 000 and above) must track `1 600 + 67 108 864/R_video` within ±20 %; an **audio-bound leg** (720) must track `3 600 + 8 388 608/R_audio`. **The single most valuable byte: is the settled `buf=` at 20 000 above or below 6 000 ms?** The 4 s `EXT-X-TARGETDURATION` leg needs **new 4 s fixture clips** in `make fixtures-pipeline` and a `#EXTINF:4.0` playlist — `tests/serve_fixtures.py:141-146` hard-codes 2 s — and the pipeline tier cannot substitute for the PMS legs at all, because `serve_fixtures.py:71-78` serves the same `pipe_abr_1080p.ts` for every rung from 6 000 to 20 000. | television, same lease as M2 | N3's `buffer_target_ms` and α, N4's guards, §0.3(2) |
+| **M3** | **Extend `tools/hls-probe.py` to measure production cost per actuator.** For each of the thirteen request ceilings, against one 4K and one 1080p source, fetch ≥10 consecutive segments and record `total_fetch_us / media_duration_ms` (ρ), cold and warm. **Runs on the dev Mac. No television, no lock, no `make`.** Compare on the **residual**, as `predicted_ratio_pm` does (`abr.rs:977-983`): compute `load_j ∝ (ρ_j − ρ_floor)` normalised so the P1080High point reads 1000, with `ρ_floor` from the lowest rung's measured ρ. Run **both** a back-to-back leg and a `--pace 2.0` leg (`tools/hls-probe.py:1013`) and state which the catalog is meant to match; the paced one is what the app experiences. *Falsifies:* residual loads within ±15 % of `abr.rs:1126-1138` uphold the "inert argmax" finding and keep §7.A closed; any mid-ladder load off by >25 % means the deferred argmax is a re-parameterisation on fresh numbers and must be argued on those. **Record the raw ρ per rung as well**, because `abr.rs:1074-1083`'s own anchor (0.21 at P1080High) sits *below* `production_floor_pm = 250`, which makes `predicted_ratio_pm` from the top rung return the measured ratio unchanged for every candidate — a property M3 should confirm or refute rather than inherit. | host | §7.A, N19, N6's extrapolation |
+| **M4** | **Measure the settled `buf=` at high rungs and at more than one segment duration.** *Prerequisites:* I0's `abr: sample` line (media kbps + buf, on every segment) **and** I0's rung-pin trigger. Unshaped LAN ≥25 Mbit/s so the AQ cap is the only limiter; one ≥40-minute 1080p item forcing a video transcode. Arm `/tmp/butaca-abrrung=<kbps>` for each of 720, 4 000, 10 000, 16 000, 20 000 in turn for ≥3 minutes, discarding the first 30 s. **The playback-quality selector CANNOT be used for this**: `route::hls_abr_control()` returns `None` for any non-Auto quality (`route.rs:581`), and the quality ladder has no mid-1080p rungs (`server/session.rs:190-212`). Record the audio ES rate beside the video one. *Falsifiers, split by which lane binds:* a **video-bound leg** (10 000 and above) must track `1 600 + 67 108 864/R_video` within ±20 %; an **audio-bound leg** (720) must track `3 600 + 8 388 608/R_audio`. **The single most valuable byte: is the settled `buf=` at 20 000 above or below 6 000 ms?** The 4 s `EXT-X-TARGETDURATION` leg needs **new 4 s fixture clips** in `make fixtures-pipeline` and a `#EXTINF:4.0` playlist — `tests/serve_fixtures.py:141-146` hard-codes 2 s — and the pipeline tier cannot substitute for the server legs at all, because `serve_fixtures.py:71-78` serves the same `pipe_abr_1080p.ts` for every rung from 6 000 to 20 000. | television, same lease as M2 | N3's `buffer_target_ms` and α, N4's guards, §0.3(2) |
 | **M5** | **Instrumentation and the closed-loop host simulator.** See I0. No policy change. | host | I3 onward |
 | **M6** | **Land the zero-risk correctness fixes.** See I1. | host | — |
 | **M7** | **Fix the confirmed control-law defects, without the deferred argmax.** I3–I7b. | host + device | — |
@@ -844,11 +844,11 @@ commit, and a single ★ increment may contain only one policy surface.**
 | **I7a ★** | **N14** (one surface: the mode comparison) | The three fabrication sites together (`observe_probe`, `worth_probing`, `original_utility`'s baseline) + `ModeInputs::source_raster` plumbing and its construction sites + `abr.rs:1741`'s scaled risk term (N18) + log the `ModeUtility` decomposition on the `abr: mode` line (§7.H). | host + a device leg on **Original recovery** | I5, I6, I7b |
 | **I7b ★** | **N16 + N13** (one surface: when Original is abandoned, and what it is worth) | The DV/Atmos split; `sustained_unsafe_deficit_ms` and `probe_spacing_ms` in elapsed wall time. | host + a device leg on the **Original→HLS fallback** — the `pipe_abr_*` cases cannot reach it; name the case that can, or state the leg is a hand-driven `netcond` session | I7a; then M8 |
 | **I8 ★** | **Seek estimate preservation** (§7.G) | A `CapacityEstimate` snapshot (`slow_kbps`, `fast_kbps`, `uncertainty_pm`, `samples`) stored in session state at teardown and consumed by the new `Controller` as its seed, replacing `auto_prior_kbps` on the seek path. `route.rs:700` keeps writing `auto_prior_kbps` as the **Original-fallback-only** seed and is not otherwise read on the seek path. Reset positional buffer and risk history; reset any pending transaction that no longer describes the seeked position. | host + a device leg: seek twice on a healthy link and assert the rung does not re-ramp | — |
-| **I9** | **BLOCKED — and M3 is now DONE, which narrows rather than lifts it** | §7.A's argmax and §7.B's quality scoring. M3 ran 2026-08-28 (`docs/measurements/m3-production-census.md`): `Uhd = 2100` measures 2404 and the whole 1080p block lands within 10.3%, so the two empirical points and the interpolation between them are **upheld**; `P1080M6 = 900` measures 353, off by **60.8%** in both pacing legs, which is past the 25% rule and REFUTES the mid-ladder. The larger finding is that the table is indexed by the wrong VARIABLE: against a 1080p source the ordering INVERTS (58 of 75 rung pairs), because a target below the source raster is downscaling work while a target at it is a near-copy — so no thirteen numbers keyed to the target alone can be right for both a 4K and a 1080p item. **Half of that is now UNBLOCKED (2026-08-28).** The 4K `auto_network` case exists: `serve_fixtures.py` answers rung 22000 with a real 3840x2160 clip, `route::arm_auto_fixture` takes the source raster instead of hardcoding 1080p, and `pipe_abr_uhd_source_admits_4k` declares it. The two were circular — the literal was there because the rung 404'd — so a fixture gap had been standing in for a policy, and the two entries the table calls empirical were the two nothing could reach. What remains is the decision on whether `production_load_pm` becomes a function of (source, target) or is declared correct for one source class only. That decision is a product call and is not made here — **and it should not be made on Result 2's stated cause**, which the census has since narrowed: the ordering is measured, but the same numbers also fit "PMS stopped re-encoding at an unbinding ceiling", and the output column that separates the two was not recorded the first time. It is recorded now, **and the re-run is DONE (2026-08-28)** — `m3-production-census.md` carries
+| **I9** | **BLOCKED — and M3 is now DONE, which narrows rather than lifts it** | §7.A's argmax and §7.B's quality scoring. M3 ran 2026-08-28 (`docs/measurements/m3-production-census.md`): `Uhd = 2100` measures 2404 and the whole 1080p block lands within 10.3%, so the two empirical points and the interpolation between them are **upheld**; `P1080M6 = 900` measures 353, off by **60.8%** in both pacing legs, which is past the 25% rule and REFUTES the mid-ladder. The larger finding is that the table is indexed by the wrong VARIABLE: against a 1080p source the ordering INVERTS (58 of 75 rung pairs), because a target below the source raster is downscaling work while a target at it is a near-copy — so no thirteen numbers keyed to the target alone can be right for both a 4K and a 1080p item. **Half of that is now UNBLOCKED (2026-08-28).** The 4K `auto_network` case exists: `serve_fixtures.py` answers rung 22000 with a real 3840x2160 clip, `route::arm_auto_fixture` takes the source raster instead of hardcoding 1080p, and `pipe_abr_uhd_source_admits_4k` declares it. The two were circular — the literal was there because the rung 404'd — so a fixture gap had been standing in for a policy, and the two entries the table calls empirical were the two nothing could reach. What remains is the decision on whether `production_load_pm` becomes a function of (source, target) or is declared correct for one source class only. That decision is a product call and is not made here — **and it should not be made on Result 2's stated cause**, which the census has since narrowed: the ordering is measured, but the same numbers also fit "the server stopped re-encoding at an unbinding ceiling", and the output column that separates the two was not recorded the first time. It is recorded now, **and the re-run is DONE (2026-08-28)** — `m3-production-census.md` carries
 the output-raster column and the corrected table (`P720Low` 420 -> 300, `P1080M6` 900 -> 350, the
 two entries the census refuted at the falsification rule this table was published with; tier6 ran
 19/19 afterwards, so no device behaviour moved). The re-run also settled Result 2's competing
-cause: cost tracks the raster PMS ACTUALLY PRODUCED, and the product call was made and recorded
+cause: cost tracks the raster the server ACTUALLY PRODUCED, and the product call was made and recorded
 there — the index stays keyed to the target rung, with the field's doc now saying what that
 describes. **§7.B's two inputs both landed the same day** (see §7.B), so what remains of I9 is
 building §7.B and then §7.A on top of it, and validating both — not measuring anything further. | — | — |
@@ -856,7 +856,7 @@ building §7.B and then §7.A on top of it, and validating both — not measurin
 ### Historical 2026-08-28 abort rule and the chain behind it (partly superseded)
 
 The device failures and censored-sample fixes below remain evidence. The prefix-rate actuator does
-not. A 2026-08-30 remote-PMS run and subsequent Ghidra audit proved that PMS may advertise the
+not. A 2026-08-30 remote-server run and subsequent Ghidra audit proved that the server may advertise the
 current size of a still-growing HLS segment and asynchronously wait for the encoder within the
 same response body. The active cursor therefore now aborts only at observed `B = 0`; candidate
 warm-up uses only its absolute transaction deadline while reserve remains. After observed `B = 0`,
@@ -907,8 +907,8 @@ including the ones that cannot be identified.
 | `visible_switch_decay_ms` | **half-life** of that pressure | ms, wall | 120 000 | empirical | interval between visible switches | no — the decay has never run (N12) | yes, after I4 |
 | `starvation_fallback_secs` | emergency horizon | s | 20 | product | must be ≥ `E_tx_down` | partly | **M4** (yields `E_tx`/`E_tx_down`) |
 | `starvation_safe_secs` | comfortable horizon | s | 60 | product | is it reachable at all at the top rungs? | partly | **M4** |
-| `production_safe_pm` | server real-time margin, comfortable | pm | 750 | measured PMS cadence | ρ per rung | **yes** | **M3** |
-| `production_max_pm` | server real-time margin, unacceptable | pm | 1 100 | measured PMS cadence | ρ per rung | **yes** | **M3** |
+| `production_safe_pm` | server real-time margin, comfortable | pm | 750 | measured server cadence | ρ per rung | **yes** | **M3** |
+| `production_max_pm` | server real-time margin, unacceptable | pm | 1 100 | measured server cadence | ρ per rung | **yes** | **M3** |
 | `production_floor_pm` | fixed per-segment overhead | pm | 250 | measured | ρ at the lowest rung | **yes** | **M3** — note `abr.rs:1074-1083`'s anchor ρ = 0.21 sits *below* it |
 | `emergency_buffer_ms` | fail-safe floor | ms | 2 000 | hard guard | relative to `E_tx_down` | yes | **M4** |
 | `stale_half_life_ms` | ageing of an unmeasured gap | ms, wall | 30 000 | empirical | estimate error after a pause | partly | I8's pause leg |
@@ -937,8 +937,8 @@ including the ones that cannot be identified.
 | `dv_bonus` | Dolby Vision preserved by Original | utility pts | split from 25 | product ordering (DV is first) | mode choice on a DV item vs. a plain one | ordering yes, magnitude no | I7b's leg |
 | `generation_loss_bonus` | no re-encode | utility pts | split from 25 | product ordering (second) | as above | ordering yes, magnitude no | I7b's leg |
 | `atmos_bonus` | Atmos/lossless audio preserved | utility pts | split from 25 | product ordering (last — inaudible on TV speakers) | mode choice on an Atmos-only item | ordering yes, magnitude no | I7b's leg |
-| `planning_wire_kbps` (13 entries) | conservative planning ceiling | kbps | request for 11 of 13; measured for `P1080High` (20 011) and `Uhd` (20 895) | **mixed, and now labelled as such** | advertised vs. requested rate | partly — the repo already contradicts two rows (`docs/pms-hls-protocol-probe.md:18-19`) | **M3** |
-| `production_load_pm` (13 entries) | relative PMS work per rung | pm | 90 … 2 100 | **empirical for 2, "an ordering assumption" for 11** (`abr.rs:1074-1082`) | residual ρ per rung, normalised (M3) | **NO** | **M3** — this is what blocks §7.A |
+| `planning_wire_kbps` (13 entries) | conservative planning ceiling | kbps | request for 11 of 13; measured for `P1080High` (20 011) and `Uhd` (20 895) | **mixed, and now labelled as such** | advertised vs. requested rate | partly — the repo already contradicts two rows (`docs/hls-protocol-probe.md:18-19`) | **M3** |
+| `production_load_pm` (13 entries) | relative server work per rung | pm | 90 … 2 100 | **empirical for 2, "an ordering assumption" for 11** (`abr.rs:1074-1082`) | residual ρ per rung, normalised (M3) | **NO** | **M3** — this is what blocks §7.A |
 
 ### 6.2b Kept, unidentified — no measurement exists and none is planned
 
@@ -996,7 +996,7 @@ paragraph used to describe the blocker as permanent scenery: `tests/serve_fixtur
 circular. The server answers 22 000 with a real 3840x2160 clip, the raster is declared per case, and
 `pipe_abr_uhd_source_admits_4k` separately grades the requested actuator with
 `floor_kbps: 22000` and the completed picture with `decoded_width_floor: 3800`. The separation
-matters because PMS may answer a 22 Mbps / 4K request with a smaller rendition. The previous
+matters because the server may answer a 22 Mbps / 4K request with a smaller rendition. The previous
 §21's tests E and F are
 reachable on the pipeline tier now; what still blocks I9 is M3's indexing decision alone. **Do not build it without B**: in
 the shipped integer scale the argmax at every budget above 20 Mbps is P1080M18, not P1080High
@@ -1027,7 +1027,7 @@ mistake by hand, this time on the side where an over-stated value is anti-conser
    `proposal.rung.raster()`, the **catalog** raster, which is why `tests/run.py:1227` currently
    asserts the catalog against itself" — true when written, fixed since: the line appends
    ` out=WxH` from `HlsSegmentOutput::video_{width,height}`, and `abr_raster_changes` prefers it.
-   M3's re-run is what made this urgent rather than tidy — PMS produces 1280x720 for both `P720`
+   M3's re-run is what made this urgent rather than tidy — the server produces 1280x720 for both `P720`
    and `P1080M6` against a 4K source, so the co-grader was counting band crossings a viewer cannot
    see. `TheAbrCommitLineMatchesTheHarnessRegex` pins the wire form by source extraction.
 
@@ -1059,7 +1059,7 @@ constrains, on a cost table that measurement has partly refuted, to move a selec
 does not move. That is precisely the "inert today, arbitrary tomorrow, with no measurement in
 between" this section was written to prevent. **The unblock is real; the motivation is still
 absent.** What would create one: a deployment where two rungs are genuinely close on quality and
-far apart on server cost, measured — which is M3 against a loaded PMS, and every ABR measurement in
+far apart on server cost, measured — which is M3 against a loaded server, and every ABR measurement in
 this repository so far has been against an idle one.
 
 **C. `g(remaining)·Q` on rung selection (previous §10).** *Void.* See N18.
@@ -1121,7 +1121,7 @@ deliberate endpoint changes N5 names (a comfortable horizon scores 0 where the l
 
 ### 8.2 Device-finding regression tests
 
-Encode something a television or a real PMS taught this project. **Their expected values may never
+Encode something a television or a real server taught this project. **Their expected values may never
 be re-fitted to a rewritten controller.** When the surrounding model changes, the assertion is
 *re-expressed* with its provenance restated in the doc comment, and the new expectation is derived
 from the recorded measurement — not from running the new code and copying the output.

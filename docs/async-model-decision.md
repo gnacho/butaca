@@ -96,7 +96,7 @@ in `task.rs`, and it is the part the user sees this week.
 **Why not A, despite the best fit score (9/9/9 on C7).** A's own arithmetic refuted it: A set its
 threshold at ~8 call sites, recounted the real number as fourteen, and honoured its own
 disqualifier. Its two flagship cheap wins also fail on inspection — deleting `let _ =
-c.transcode_decision(&sp)` (`route.rs:184`) is a **PMS protocol change** (`transcoder.rs:8`: the
+c.transcode_decision(&sp)` (`route.rs:184`) is a **server protocol change** (`transcoder.rs:8`: the
 decision "registers a transcode/remux session before `start.mkv` will stream"), and `resolve` is
 not a mechanical hoist because `metadata::load_playing` writes `static mut PLAYING` that
 `pick_dp_audio` reads back one line later (`route.rs:377` → `:463`).
@@ -393,7 +393,7 @@ argues it should be done. It argues only that "not done" and "deliberately decli
 states, and this one is the first.
 
 **The two arms, as they stand on HEAD.** Both live in `player/pump.rs`, which runs on the main
-thread every frame, and both make blocking PMS round trips before handing off to
+thread every frame, and both make blocking server round trips before handing off to
 `engine::reload_transcode`:
 
   - **`pump.rs:75` — the audio-switch / subtitle-burn-refresh arm.** A pending `pending_audio_sid`

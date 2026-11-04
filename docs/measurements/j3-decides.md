@@ -38,7 +38,7 @@ Three of those are the increment's whole point.
   a correction to 14000.
 
 **The emergency-floor limitation is real but did not bind on this pipeline.** §4 records that the
-bound licenses a climb off rung 320 only while production is faster than `ratio_pm ≈ 313`; PMS's
+bound licenses a climb off rung 320 only while production is faster than `ratio_pm ≈ 313`; the server's
 production for these fixtures is well inside that, so `slow_start_then_fast` escapes the floor
 normally. The host test pins both sides of the boundary so a change that moves it fails loudly.
 

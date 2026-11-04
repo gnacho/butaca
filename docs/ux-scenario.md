@@ -782,7 +782,7 @@ The needed captures are all reachable on the bench with the boot triggers docume
 - Key dispatch: `rust-modules/src/ui/consts.rs::classify` and `rust-modules/src/app.rs`'s ladder.
 - Screen map: the `Route` enum in `rust-modules/src/app.rs` and `ui::trail`.
 - Audio: `Makefile` `LIBS_REAL`, and `SDL_Init(SDL_INIT_VIDEO)` in `rust-modules/src/app.rs`.
-- Figures: `make screenshots` (the simulator against `tests/mock_pms.py`'s demo library), at
+- Figures: `make screenshots` (the simulator against `tests/mock_server.py`'s demo library), at
   1920×1080, dev counter compiled out; the scene manifest is `tests/screenshots/scenes.json`.
 
 **No figure is edited.** Each is the app's own capture of a settled screen, scaled and encoded by

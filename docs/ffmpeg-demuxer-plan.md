@@ -604,7 +604,7 @@ Use a known **HEVC 3840×1920** title and a known **H264+AC3** title.
    Fallback: hand-roll length→Annex-B + param-set prepend from `codecpar->extradata` (reuse the
    `mkv_parse_avcc`/`mkv_parse_hvcc` logic) — byte-identical to the old path, no BSF dependency.
 4. **HTTP via AVIO vs the raw socket.** `seek_cb` reopens the TCP connection with a `Range:` header
-   on every seek (and possibly a few times during `find_stream_info` probing) — each is a fresh PMS
+   on every seek (and possibly a few times during `find_stream_info` probing) — each is a fresh server
    request. Acceptable (seeks are user-initiated, infrequent), but note the reconnect cost.
    `find_stream_info` may read more of the stream than `mkv_run` did (larger startup latency);
    bound it with `probesize`/`analyzeduration` demuxer options via `av_dict_set` if startup is slow.

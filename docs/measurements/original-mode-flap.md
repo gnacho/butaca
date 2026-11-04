@@ -141,7 +141,7 @@ causal story is not, and the table in §4 is the measurement that was missing.
 * `starving()`'s `6_000` arm, plan increment I3b(a), never done: it is degenerate at the top two
   rungs, where `B_max <= 6 000` makes every reachable reserve satisfy the level test, collapsing the
   arm to `draining_samples >= 2` alone.
-* Separating network acquisition from PMS production in the acquisition window: `acquisition_us` is
+* Separating network acquisition from server production in the acquisition window: `acquisition_us` is
   end to end, and on a healthy LAN more than half of it is not link transfer.
 * A device leg for the eviction-basis change. Rows 1-3 above are simulator runs; the shipped
   behaviour was verified on the television only through the 25-case server tier and the four Auto

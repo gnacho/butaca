@@ -62,7 +62,7 @@ a link it had already measured.
 ## What this still does not establish
 
 * **It is not a device measurement.** Every heartbeat carries `sim=1`, nothing decodes, and this
-  Mac's loopback is not a television's link to a PMS. The device A/B on `pipe_abr_oscillating_link`
+  Mac's loopback is not a television's link to a server. The device A/B on `pipe_abr_oscillating_link`
   that I6's row asks for is still owed — but it is now owed as *confirmation*, against a host
   result that already exists, rather than as the only evidence.
 * **Three cases, one link profile each.** The disturbance matrix in `abr/sim.rs` is broader and

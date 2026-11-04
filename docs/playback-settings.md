@@ -34,11 +34,11 @@ or an obsolete preference revision cannot replace newer settings.
 
 Audio **Original** clears the preferred language while enabling automatic selection. Subtitle
 mode offers manual selection, foreign audio, and always; **No preference** clears only the
-subtitle language. Existing PMS item selections take precedence, followed by explicit show
+subtitle language. Existing server item selections take precedence, followed by explicit show
 preferences and then account defaults. Foreign-audio mode compares with the selected audio.
 Account defaults do not introduce subtitle burning when playback starts as a transcode.
 
-PMS can keep using an earlier account preference until its own copy updates. The UI explains
+The server can keep using an earlier account preference until its own copy updates. The UI explains
 this delay, and the resolver does not guess that an old-language selection was automatic.
 
 ### Language catalog provenance
@@ -61,7 +61,7 @@ visible and are preserved. Regional codes are not rewritten on save.
 ## Verification boundary
 
 Mock profile writes cover development and UI verification. Real account preferences must not be
-changed as part of these tests. Issue #223's live PMS preference-propagation measurement requires
+changed as part of these tests. Issue #223's live server preference-propagation measurement requires
 a throwaway account shared to the dev server and remains a separate completion gate.
 
 Host tests cannot establish DTS sound, synchronization, resource allocation or DTS-HD core
@@ -97,4 +97,4 @@ this change does not advertise all DTS-HD streams as directly playable.
 
 The television remained muted with its panel off. These results do not claim audible output
 verification, and no real account language preferences were written. The throwaway-account
-PMS propagation measurement is still outstanding.
+The server propagation measurement is still outstanding.

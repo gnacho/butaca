@@ -28,7 +28,7 @@ Both exits then kill the playback:
 | rollback | `abandon(candidate)` | `transcode_stop` on the **live** encoder |
 | commit | `replace_active_encoder(expected, candidate)` then `retire(previous)` | the compare succeeds trivially, `previous == candidate`, so `retire` stops the session the commit just **switched to** |
 
-The demuxer then polls a stopped session. **404 is `NotReady` by design** — PMS answers it for a
+The demuxer then polls a stopped session. **404 is `NotReady` by design** — the server answers it for a
 segment it has not produced yet — so the retry loop waits out its whole budget
 (`clamp(3*duration + 2s, 3..15s)`) and reports "not produced in time". The client cannot tell a
 stopped session from a slow one, which is why the failure reads as the server's.
@@ -86,12 +86,12 @@ would also work, but it would leave the namespace able to express the bug.
 formats the name, and fails as `sess-42-abr-1` against `sess-42-abr-1` when the counter is made to
 restart.
 
-**Lifecycle follow-up, 2026-08-31.** The maintainer's PMS archive showed the same physical
+**Lifecycle follow-up, 2026-08-31.** The maintainer's server archive showed the same physical
 `abr-N` registered twice, about two minutes apart, with stale Streaming Resource state surviving
 between starts. Ghidra confirmed that the exact opaque `session` is the encoder-map key; a seek is
 not an operation on that encoder, it is another Universal Transcoder decision/start. The seek path
 now allocates a fresh process-global name too, publishes it only after the replacement decision is
-accepted, and retires the previous exact key after publication. A loopback PMS regression grades
+accepted, and retires the previous exact key after publication. A loopback server regression grades
 all three wire/state facts: fresh decision id, new active id, and `/stop` on the old id.
 
 ## 4b. On the television
@@ -175,7 +175,7 @@ own by-hand scenario — full link, drop, hold, release to full — with a budge
   before and passes now". The before half is a deliberate omission — reproducing it needs a
   knowingly broken binary deployed to a set someone watches.
 * **`transcode_seek` vs `retranscode_as` in the original incident.** The original excerpt could
-  not distinguish them. The later PMS archive and binary audit close the lifecycle ambiguity for
+  not distinguish them. The later server archive and binary audit close the lifecycle ambiguity for
   seeks in general (a repeated exact key is unsafe), but cannot retroactively prove which UI action
   produced that first excerpt.
 * **The seek re-seed**, which is a different defect in the same sequence: `cur_ceiling` is frozen at

@@ -123,7 +123,7 @@ Right shape, wrong content. Amended list:
 - The **control-plane leg** timed separately — `control.prime`, master playlist, both `hls_cursor_next` calls. It is the leg no deadline covers and the one that decides whether §5 is enforceable at all.
 - **`T_down`**, split by leg and by rung distance, on the downshift path. This is the single number that decides §3, and nothing else can.
 - `not_ready` retry consumption attributed to the transaction (already logged at `ff.rs:2545`, not attributed).
-- **`ttfb_us`** on `SegmentTransfer` — one timestamp at the first successful body read — so `A − active` splits into client demux versus PMS JIT. Without it §6's three-way logging split is not computable.
+- **`ttfb_us`** on `SegmentTransfer` — one timestamp at the first successful body read — so `A − active` splits into client demux versus server JIT. Without it §6's three-way logging split is not computable.
 - **Both** buffer values at acceptance: the honest `hls_buffer_snapshot(None)` and the folded value the test consumed. After the §3.4 fix, the first device run is otherwise uninterpretable against the I1 baseline.
 - Per-lane demuxed ES bytes, for `B_max_est`.
 - `achievable_eps_pm = 1000/(k+1)` logged beside `prod=` (see §6.4).
@@ -134,7 +134,7 @@ Right shape, wrong content. Amended list:
 - No sample is emitted between proposal and commit — the prime arm runs inline inside the one-sample-per-iteration loop (`ff.rs:3065`, `3207`), so **the transaction drawdown is structurally invisible**. `min_buf_ms = 2000` in the M2 results is not evidence of no drawdown.
 - The census traces are pin-masked; grading any decision needs an **unpinned** shaped leg.
 - ~~`A` at every rung above ~11 Mbit/s of media is unmeasured, because `PIN_MIN_RESERVE_SEGMENTS = 6` cannot be satisfied there.~~ **Both clauses closed 2026-08-27.** The constant no longer gates a downshift, and `A` is measured at seven rungs across an 18x range including 16000 (n = 54) and 20000 (n = 39). The code change this bullet says the claim does not mention is the directional split of that constant — `docs/measurements/p2-census.md`.
-- The ABR fixtures are a static file server, so **every A in the corpus has zero PMS JIT production**. At the top rung the slack `B − A_i − 4600` is 95 ms; 95 ms of JIT inverts §5's own worked example.
+- The ABR fixtures are a static file server, so **every A in the corpus has zero server JIT production**. At the top rung the slack `B − A_i − 4600` is 95 ms; 95 ms of JIT inverts §5's own worked example.
 
 **Free win to take first:** `abr: sample` already carries `prod=` on every current-stream segment (`ff.rs:3115`). Replaying the event logs of the four shaped M2 profiles answers "how many of the 7/6/7/3 commits would rule 1 have suppressed" with **no code change and no television**.
 
@@ -151,7 +151,7 @@ Right shape, wrong content. Amended list:
 | 6.5 | Real transaction wall cost `E_tx` including the control plane | I2, same run as 6.3 | **yes** |
 | 6.6 | `B_max_est` plumbed into `abr.rs` (`MAX_FEED_AHEAD_NS` / `AUDIO_SLACK_NS` are private, `engine.rs:1051-1052`) and the reachability invariant landed: no gate may require a reserve `B_max_est` cannot supply | host test | no |
 | 6.7 | Host corpus re-parameterised — `settle_link`/`prime_up` hand the controller 10-12 s reserves at 20 Mbps where the device measures 5335 max. Under §5, B *generates* the budget, so those tests would confirm a 2× over-grant | `make check`; derive `buffered_ms` from `b_max_ms` so an unreachable reserve is inexpressible | no |
-| 6.8 | A at rungs above ~11 Mbit/s, and against a real PMS rather than the fixture server | pin at the route's starting ceiling (I0 follow-up) + `tools/pms-hls-probe.py` | **yes** for the first |
+| 6.8 | A at rungs above ~11 Mbit/s, and against a real server rather than the fixture one | pin at the route's starting ceiling (I0 follow-up) + `tools/hls-probe.py` | **yes** for the first |
 
 **Landing order I will defend:** (1) 6.2 + 6.1 + 6.7, host only; (2) rule 1 alone, as a *suppressor* of the three down triggers at `abr.rs:2238-2240` — never the pseudocode's literal `if sustainable { Stay }`, which sits ahead of the upshift arm and would freeze the ladder on its starting rung — with a retained guard at the **stall boundary** (`buffered_ms < A_i`) rather than at one segment; (3) I2 instrumentation; (4) §5, only with §7's certificate, a segment-count cap, and the `− D` term.
 

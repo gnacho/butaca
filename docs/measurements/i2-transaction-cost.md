@@ -51,8 +51,8 @@ increment must bracket each; a 25.9 s leg on a 90 s case cannot stay unattribute
 Note this **refutes the board's hypothesis about which leg is uncovered**: it predicted the control
 plane (`control.prime` + master + media playlist) would dominate because no deadline covers it.
 Measured, that leg is **5-6 ms**. Something after it and outside both media legs takes the
-majority. Caveat: the fixture server is static, so there is no PMS transcode decision and no JIT
-production in these numbers — against a real PMS the control plane will not be 6 ms.
+majority. Caveat: the fixture server is static, so there is no server transcode decision and no JIT
+production in these numbers — against a real server the control plane will not be 6 ms.
 
 ## The claimed admission rule, against measurement
 
@@ -75,4 +75,4 @@ experiment cost.
 ## Status
 
 Measurement only. No threshold proposed, no policy changed. The four transaction legs now have
-measured values for the fixture tier; against a real PMS they are unmeasured.
+measured values for the fixture tier; against a real server they are unmeasured.

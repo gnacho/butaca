@@ -59,7 +59,7 @@ exit through the same door as a finished movie**: `http_open` failure (`ff.rs:12
 (`:1290`), `avio_alloc_context` (`:1303`), `avformat_alloc_context` (`:1309`), `open_input`
 (`:1316`), `find_stream_info` (`:1321`), no video stream (`:1339`), `packet_alloc` (`:1429`) — all
 `break` to `aq_set_eof(); aq_set_eof(); log("ff: demux ended")` at `ff.rs:1597`. A 404 on the part
-URL, a token revoked between `/decision` and the GET, or a PMS restart therefore leaves the app on
+URL, a token revoked between `/decision` and the GET, or a server restart therefore leaves the app on
 a black Player screen forever, with the video plane bound and nothing decoded, recoverable only by
 BACK.
 
@@ -133,8 +133,8 @@ Four confirmed defects in `stream.rs`, all on the path every screen depends on:
 
 | | Site | Problem |
 |---|---|---|
-| No connect timeout | `stream.rs:122-126` | `connect()` is blocking with no deadline; the only timeout, `SO_RCVTIMEO`, is set at `:131` — *after* `connect` returns, so it cannot bound it. An unreachable PMS freezes the SDL main loop for the kernel's SYN-retry budget (~2 min), multiplied by every request in the chain. |
-| Status discarded | `stream.rs:208-212` | The status is parsed at `:193` then thrown away; `http_get` returns `None`. 401, 404, 500, 3xx and "cable unplugged" are one value. There is no re-auth path anywhere (`grep -i 401 rust-modules/src` → nothing in the PMS layer). |
+| No connect timeout | `stream.rs:122-126` | `connect()` is blocking with no deadline; the only timeout, `SO_RCVTIMEO`, is set at `:131` — *after* `connect` returns, so it cannot bound it. An unreachable server freezes the SDL main loop for the kernel's SYN-retry budget (~2 min), multiplied by every request in the chain. |
+| Status discarded | `stream.rs:208-212` | The status is parsed at `:193` then thrown away; `http_get` returns `None`. 401, 404, 500, 3xx and "cable unplugged" are one value. There is no re-auth path anywhere (`grep -i 401 rust-modules/src` → nothing in the server layer). |
 | `close()` as interrupt | `stream.rs:290-300` | `pump.rs:75`, `pump.rs:146` and `engine.rs:482` close the socket to wake a demux thread blocked in `recv`. On Linux `close(2)` does not wake a blocked reader — `shutdown(2)` does. So BACK during a stall blocks the main loop on `join()` for up to the 15 s `SO_RCVTIMEO`. `fd` is a bare `c_int` (`stream.rs:10`) mutated from two threads, so the freed number can also be recycled by a poster worker. |
 | No completeness check | `stream.rs:316-324` | The struct tracks `content_length` and `consumed` faithfully, then the one-shot wrappers ignore both and return `Some(body)` unconditionally. A body truncated by a reset is a "successful" response. |
 
@@ -218,7 +218,7 @@ Severities reflect the adversarial panel's corrections, not the original auditor
 | high | `ui/home.rs:445`, `:577` | `Grid` holds `shelves: [CardRow; MAX_HUBS]` (16, `home.rs:412`) but `draw` iterates `0..hub_count()` and `hit_at` iterates `0..hub_count()`, both indexing `self.shelves[r]`. `hub_count()` is `hubs().len()` (`pms.rs:188`) with **no cap** — `home_hubs(12)` caps items *per hub*, not hub count. 17+ non-empty hubs (ordinary with 3-4 libraries) → index-out-of-bounds panic every frame. `layout` (`:437`) and `env` (`:638`) clamp correctly, so the cap exists in two of four places. |
 | high | `browse.rs:171` | `reset()` drops all three result mailboxes but never clears `FETCHING`/`GENRE_FETCHING`/`LETTERS_FETCHING` (`:125-127`), which are cleared *only* inside a successful mailbox take (`:466`, `land_directory`). Deterministic wedge: scroll Library → BACK to Home (pump stops) → worker lands → switch profile → `app.rs:320 browse::reset()` nulls the mailbox → the flag is now permanently true. Library is a spinner forever, with no log line (`browse.rs` emits none). |
 | high | `route.rs:376` | The direct-play gate is defensive about video (`:364-368`, explicitly) but credulous about audio: when `pick_dp_audio` returns `None` — meaning *no* track is direct-playable — it still defers to `server_decision`, then `route.rs:383` falls back to `acodec` and publishes it. `engine.rs`'s `_ => "AC3"` fallback then mislabels it. A TrueHD-only item the server calls `directplay` gets an AC3 Load payload against a TrueHD lane: audio ES never configures, playback wedges at BufferFull. Make the audio gate symmetric with the video gate. |
-| high | `server/client.rs:146` | `install` is a `OnceLock`, so host/port freeze for the process life and the `Some(c) => c.set_token(token)` branch silently discards a new address. `sign_out` (`auth.rs:227-232`) clears everything *except* the client. When the PMS box takes a new DHCP lease, re-login installs the new token against the old IP with no recovery short of a kill. |
+| high | `server/client.rs:146` | `install` is a `OnceLock`, so host/port freeze for the process life and the `Some(c) => c.set_token(token)` branch silently discards a new address. `sign_out` (`auth.rs:227-232`) clears everything *except* the client. When the server box takes a new DHCP lease, re-login installs the new token against the old IP with no recovery short of a kill. |
 | medium | `ff.rs:1149`, `:1176` | `while i + nls <= size { … nl = …; if nl == 0 \|\| i + nl > size { break } }` — `usize` is **32-bit** here and `[profile.release]` sets no `overflow-checks`, so `i + nl` wraps and defeats the only bounds guard, panicking the demux thread before it can `aq_set_eof` → permanent hang, not a clean stop. `nls == 4` is the value `parse_extradata` *defaults to* on any parse failure (`ff.rs:1014/1021/1055`). Use `checked_add`, and wrap `ff::demux` in `catch_unwind` with the EOFs on the unwind path (the crate already does this at `mod.rs:281`, `browse.rs:354`, `metadata.rs:552`). |
 | medium | `ff.rs:944` | `read_cb` maps *both* `http_read` return codes to `AVERROR_EOF`, discarding the distinction `stream.rs:281` vs `:283` carefully preserves. `seek_cb` never verifies the Range reopen returned `206` — a Range-ignoring proxy yields total demux corruption with libavformat parsing from byte 0 while believing it is at `target`. |
 | high | `src/starfish.c:74` | `static int g_smp_ready` publishes a 64 KB in-place-constructed C++ object across threads with no `_Atomic`, no barrier, not even `volatile`. Written on the load thread (`:87`, right after `SMP_ctor`), read on the main thread every frame (`pump.rs:16`). `sf_feed` (`:148`) has **no guard at all** and relies entirely on the caller. Two lines: `_Atomic int` + release/acquire. |
@@ -299,7 +299,7 @@ Do this first: every later wave's on-device verification is worthless until the 
 8. Clear the three single-flight flags in `browse::reset()` — or better, fold flag+mailbox into a
    `SingleFlight<T>` so the fourth mailbox someone adds is correct by construction.
 9. Nonblocking `connect` + `poll(POLLOUT)` with a ~2 s budget, plus `SO_SNDTIMEO`.
-   *Verify:* `make run` with the PMS host firewalled; the UI must stay responsive.
+   *Verify:* `make run` with the server host firewalled; the UI must stay responsive.
 
 ### Wave 2 — the races and the sharp edges (2-3 days)
 
@@ -619,7 +619,7 @@ from both sites. (Lenses split medium/low.) → **Wave 2**
 `key_s.as_bytes()` built into a `[0u8; 352]` (`posters.rs:142`, `ui/widgets.rs:19`) — and
 `ui/widgets.rs:17` stages the *source* path through a second `[0u8; 256]` first. Three capacities
 that must agree, spelled three ways. Latent, not live: both lenses measured real keys against the
-live PMS at 132-162 bytes, ~93 bytes of headroom. *Fix:* one `POSTER_KEY_CAP` const owning all four
+live server at 132-162 bytes, ~93 bytes of headroom. *Fix:* one `POSTER_KEY_CAP` const owning all four
 sites, and make `cbuf` truncation loud. The same class applies to `route.rs:502-503`
 (`TITLE` 128 / `CTXLINE` 96, byte-wise, no char-boundary check). → **Wave 2**
 
@@ -630,7 +630,7 @@ sites, and make `cbuf` truncation loud. The same class applies to `route.rs:502-
 The existing `catch_unwind` (`img.rs:21`) catches decoder *panics* but not an allocation failure,
 which aborts — so the module's own "never crashes the app" promise (`img.rs:2-3`) has a hole.
 Unreachable from the legitimate path (every fetch is a `/photo/:/transcode` with explicit
-width/height, largest 1920x1080), so this is hardening against a hostile or broken PMS. *Fix:*
+width/height, largest 1920x1080), so this is hardening against a hostile or broken server. *Fix:*
 build the reader explicitly and set `max_image_width/height = Some(4096)`,
 `max_alloc = Some(16 << 20)` on a mutated `Limits::default()` (the struct is `#[non_exhaustive]`,
 so a struct literal will not compile). Drop the finding's `stream::http_get` `max_bytes` and
@@ -662,7 +662,7 @@ Recorded so the next reviewer does not re-derive them. Read with §5.
   components; `hit_row` has exactly one implementation (`table.rs:117`) with four call sites, and
   the `MENU_BUILT` guard is library-only because only library's rows come from background threads.
 - **`route.rs:177`'s discarded `/decision` breaks the session contract.** A verifier probed the
-  live PMS: a seek on an already-registered session returns 200 + valid Matroska without a second
+  live server: a seek on an already-registered session returns 200 + valid Matroska without a second
   decision (4/4). Residual, low: `route.rs:426` and `:572` swallow a `None` with no log line while
   `ff.rs:1272` logs only the consequence.
 - **`[profile.release]` LTO cuts 3.5 MB of *resident* image.** Measured and real as an *on-disk*
@@ -676,7 +676,7 @@ Recorded so the next reviewer does not re-derive them. Read with §5.
 - **`make clean` must also wipe `rust-modules/target`.** 3.5 GB and `-Z build-std` means the next
   build recompiles std; `cargo clean` already exists and is what the in-repo setup skill prescribes.
   Residual: add `stub/*.so` to `clean`. (`rm -f src/*.d` is dead — no depfiles are generated.)
-- **`PMS_HOST` compiled into the binary is an exposure.** `pkg/butaca` and `pkg/*.ipk` are
+- **`SERVER_HOST` compiled into the binary is an exposure.** `pkg/butaca` and `pkg/*.ipk` are
   gitignored and never distributed, and the tracked `Makefile:23-25` already commits the TV's LAN
   IP and root password as a documented choice.
 - **`pms.rs:284`'s unlabelled `break` silently drops shelves.** Mechanism real (the inner `break`
@@ -734,7 +734,7 @@ Recorded so the next reviewer does not re-derive them. Read with §5.
 Only critic-raised gaps I re-verified myself by reading code. Speculative items dropped.
 
 **C1 — `stream.rs` sends without `MSG_NOSIGNAL` and the process has no `SIGPIPE` disposition.**
-`stream.rs:151` is `libc::send(fd, …, 0)` — the only place the app writes a PMS request. A
+`stream.rs:151` is `libc::send(fd, …, 0)` — the only place the app writes a server request. A
 tree-wide grep for `SIGPIPE`/`SIG_IGN`/`MSG_NOSIGNAL` returns the sibling that got it right
 (`capture.rs:396`, whose doc at `:390` says outright "SIGPIPE would kill the app") and nothing else.
 The usual net does not exist: `main` is C (`src/main.c:92`) calling `butaca_run` as a plain
@@ -838,12 +838,12 @@ which files exist there is **unverified** (not checked on-device for this review
 the rasterization contract: `tools/font-hint-audit.py`'s guarantee about the `theme::size` ladder
 holds only for the scripts the bundled face covers. **medium** → **Wave 3**
 
-**C11 — boot presents no frame at all until two blocking PMS GETs return.** `install_pms`
+**C11 — boot presents no frame at all until two blocking server GETs.** `install_pms`
 (`app.rs:316-325`) runs `pms::pms_fetch_hubs()` (`:321`) and `browse::ensure_sections()` (`:323`)
 synchronously, and is called at `app.rs:373` (dev token) and `:386` (stored session) — both
 *before* the event loop; the first `SDL_GL_SwapWindow` is at `app.rs:1993`/`:2030`, inside it.
 Combined with the confirmed absence of a connect deadline (§2.4, `stream.rs:122-126`), the boot
-case against an unreachable PMS is not "a frozen UI" — it is a window that has never had content,
+case against an unreachable server is not "a frozen UI" — it is a window that has never had content,
 for the kernel's full SYN-retry budget, on the exact path SAM watches to decide the launch
 succeeded. *Fix:* swap one frame before any socket is opened, and put the boot catalog fetch behind
 the `Load<T>` state item 7 already introduces. **medium** → **Wave 1**, with item 9
@@ -860,7 +860,7 @@ than the queue therefore freezes the picture with no indicator and nothing in th
 empty while `!paused && !eof`) driving the existing spinner plus one log line. **medium** →
 **Wave 1**, item 5
 
-**C13 — backgrounding mid-transcode orphans the PMS encoder, even on a clean exit.**
+**C13 — backgrounding mid-transcode orphans the server encoder, even on a clean exit.**
 `suspend_bufferfeed` → `teardown(true)` (`engine.rs:445-447`) deliberately skips the `stopped`
 scrobble and `route::stop_transcode()` (`engine.rs:519-525`) so the foreground reload is clean.
 But `teardown` also calls `TX.reset()` (`engine.rs:522` → `shared.rs:200`), which clears `started`

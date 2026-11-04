@@ -95,14 +95,14 @@ mechanism attached and a measured magnitude — up to **1.78x** the modelled cei
 Read this as a property of the FIXTURE SERVER, not of deployment. A static file server registers
 no encoder session, so `prime = 0` on all 25 is the ABSENCE of just-in-time production rather than
 evidence it is cheap. R8's structural point — that `control` is three requests with different
-drivers — is confirmed; its magnitude against a real PMS is unmeasured, and is what
-`tools/pms-hls-probe.py` is for.
+drivers — is confirmed; its magnitude against a real server is unmeasured, and is what
+`tools/hls-probe.py` is for.
 
 ## 5. `ttfb_ms` works and reads ~0, which is the correct answer here
 
 `open_ms` 1-10 ms, `ttfb_ms` 0-7 ms, the `-1` sentinel never observed. On a static server there is
 no server think-time between the request and the first body byte, so a near-zero TTFB is the
-instrument working rather than stuck. **The field's purpose — isolating PMS just-in-time
+instrument working rather than stuck. **The field's purpose — isolating server just-in-time
 production as its own term — cannot be exercised on this tier at all.**
 
 ## 6. Every segment at a rung is the same file, so nothing here can identify a size model
@@ -174,7 +174,7 @@ Two further properties, both known and both reproduced independently here:
 
 * Whether §3's mixed-byte explanation is right. It needs queue-composition logging.
 * Anything about JIT, the production fold, or a real control plane (§4, §5). **Settled
-  host-side since, against the real PMS: `docs/measurements/p2h-pms-ladder.md`.** The
+  host-side since, against the real server: `docs/measurements/p2h-server-ladder.md`.** The
   control plane is 118 ms rather than this tier's ~6, time to first byte is quantized on a
   108 ms grid, and production only becomes the constraint on a hard source.
 * Anything about VBR, or any size model (§6). The tier has 10 distinct segment sizes
@@ -241,7 +241,7 @@ steps outside +/-10%.**
 
 The four bad steps were exactly the four quality-targeted rungs. So a large part of the 2.4x
 nominal/delivered spread that refuted the admission rule (board finding R1) was **an artefact of
-this fixture pack rather than a fact about PMS**, and R1's conclusion — measured sizes, never
+this fixture pack rather than a fact about the server**, and R1's conclusion — measured sizes, never
 catalog rates — survives on its own merits rather than on that number.
 
 ## What the re-rating did to the CONTROLLER

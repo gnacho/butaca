@@ -33,7 +33,7 @@ Two independent causes stack.
 ### 2a. The play ritual runs inside the SDL key handler
 
 `route::play_movie` / `play_episode` → `build_stream` (`route.rs:335-444`) performs serial,
-blocking PMS round trips *inside the event handler*, then `metadata::load_detail`
+blocking the server round trips *inside the event handler*, then `metadata::load_detail`
 (`app.rs:651`) adds more. Neither yields a frame.
 
 Per keypress, in order:
@@ -58,7 +58,7 @@ allocates a fresh `HttpStream` and `http_close`s it). Media sequential GETs reus
 socket; that keep-alive is not this main-thread freeze.
 
 **Measured bounds from the code's own constants:** typical direct-play MKV is ~4 serial round
-trips (**≈300 ms–2 s**); the transcode path ~6; the Home→show→season arm ~9-11. When PMS is
+trips (**≈300 ms–2 s**); the transcode path ~6; the Home→show→season arm ~9-11. When the server is
 degraded the ceiling is `CONNECT_TIMEOUT_MS = 2000` (`stream.rs:119`) plus a 15 s `SO_RCVTIMEO`
 (`stream.rs:212`) **per request** — a 12 s to 150 s hard freeze.
 
@@ -111,12 +111,12 @@ So the HUD freezes *while it is on screen*, mid-interaction. Note `transcode_see
 > **Carry this forward:** the timeline reporter's uncancellable window is now the ~10-50 ms it is
 > genuinely inside a POST, not ~99.9% of teardowns. Any rationale that still cites "every teardown
 > pays" is arguing from the pre-fix tree. The exposure that remains is real but rare — and is
-> strictly smaller than the *unconditional* pair of blocking PMS round trips six lines further
+> strictly smaller than the *unconditional* pair of blocking server round trips six lines further
 > down the same function (`report_timeline(Stopped)` + `stop_transcode`), which run on 100% of
 > real stops and are tracked separately.
 
 `engine::teardown` (`engine.rs:480-510`) joins the demux, load and timeline threads with no
-timeout, then does **two more blocking PMS calls** (`report_timeline` + `stop_transcode`,
+timeout, then does **two more blocking server calls** (`report_timeline` + `stop_transcode`,
 `engine.rs:508`). This runs on BACK, Stop, EOS, app-switch, and every reload (transcode seek,
 audio switch). Three verified stalls:
 

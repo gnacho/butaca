@@ -52,7 +52,7 @@ the transport HUD appears.
 The device fixture generator requires FFmpeg/ffprobe and MKVToolNix (`mkvmerge`). It verifies
 subtitle packet counts, timestamps and mux interleaving before publishing a video.
 
-Verification commands (set `MOCK_PMS_PORT` to an unused local port and configure the developer
+Verification commands (set `MOCK_SERVER_PORT` to an unused local port and configure the developer
 build to reach that mock server):
 
 ```sh
@@ -62,7 +62,7 @@ CARGO_INCREMENTAL=0 cargo +nightly check --manifest-path rust-modules/Cargo.toml
   --lib --no-default-features
 make
 python3 tests/fixtures/make_ass_fixture.py /tmp/ass-render-test
-python3 tests/mock_pms.py --host 0.0.0.0 --port "$MOCK_PMS_PORT" \
+python3 tests/mock_server.py --host 0.0.0.0 --port "$MOCK_SERVER_PORT" \
   --extra-media /tmp/ass-render-test/styled-ass.mkv
 ```
 
