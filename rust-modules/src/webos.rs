@@ -676,7 +676,7 @@ extern "C" {
 }
 
 /// Hand this module the SDL window, once, at boot — `textinput::bind`'s shape and for its reason:
-/// the window is created deep inside `plex_run` and the platform call needs it a long way from
+/// the window is created deep inside `butaca_run` and the platform call needs it a long way from
 /// there.
 #[cfg(all(not(feature = "hostsim"), not(test)))]
 pub(crate) fn bind_window(win: *mut std::os::raw::c_void) {

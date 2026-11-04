@@ -1868,7 +1868,7 @@ def _parsed(pattern, fields, lines, numeric=True):
 # shared token bucket, live-switchable under an open transfer — and this is its lifecycle.
 #
 # **The binary decides whether any of this is reachable, and the harness can only read that.**
-# The app's primary server is `plex_run(PMS_HOST, PMS_PORT)` (`src/main.c`) plus the injected
+# The app's primary server is `butaca_run(PMS_HOST, PMS_PORT)` (`src/main.c`) plus the injected
 # `butaca-token`; `butaca-servers` is strictly ADDITIVE and cannot move the primary. So the
 # link is conditioned only if the DEPLOYED BINARY was built with `PMS_PORT` pointing at the proxy
 # rather than at the server. When it was not, a case that declares `link_profile` SKIPS with that
@@ -4092,7 +4092,7 @@ def arm_teardown(tv):
     atexit.register(lambda: teardown(_TEARDOWN_TV) if _TEARDOWN_TV else None)
 
 
-# The app's first log line, written before anything can fail (app.rs's plex_run): which install
+# The app's first log line, written before anything can fail (app.rs's butaca_run): which install
 # produced this log, and whether it was built with the dev triggers at all.
 RE_INSTALL = re.compile(r"install: id=(\S+) flavour=\S+ .*\bfeatures=(\S+)")
 
@@ -4150,7 +4150,7 @@ def require_install(lines, cfg):
         return  # an empty log is graded by the assertions themselves ("no line found")
     raise SystemExit(
         f"no `install:` boot line in {EVENTLOG}. The deployed binary predates it (app.rs's "
-        f"plex_run writes it first, before anything can fail), so nothing in this log says which "
+        f"butaca_run writes it first, before anything can fail), so nothing in this log says which "
         f"of the two installs produced it — and an unattributable log is exactly what this check "
         f"exists to refuse. `make FLAVOR={FLAVOUR} deploy` ships one that carries it.")
 

@@ -459,7 +459,7 @@ about a specific contract, NOT about "it's only a throwaway" — that is never t
    rest of the backlog is closed.** `route`/`fnlen`/`testmod` were the three gates left red, all
    three for one reason — `enum Route` still existed — and D1 deleted it along with `app/nav.rs`
    and `ui/trail.rs`. `check-deps.sh` is green across every gate: no `Route::` in `app/`, no
-   `enum Route` in the tree, `app/run.rs::run` at 104 lines against a 200 budget, `plex_run` at 10,
+   `enum Route` in the tree, `app/run.rs::run` at 104 lines against a 200 budget, `butaca_run` at 10,
    and 0 `#[cfg(test)] mod` blocks in `app/mod.rs`. `draw_clock` and subtitles are still bespoke
    and not `Label`-expressible, and remain immediate-mode by the same original reasoning.
 

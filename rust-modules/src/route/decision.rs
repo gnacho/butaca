@@ -4205,7 +4205,7 @@ impl Drop for TimelineStopCompletion {
 /// Wait for pending [`scrobble_stop`] work to finish its ordered timeline/transcode attempts.
 ///
 /// Production uses this before another stop, before Retry starts a replacement encoder, and at
-/// `plex_run` exit. The exit wait matters because the process is about to die and a detached worker
+/// `butaca_run` exit. The exit wait matters because the process is about to die and a detached worker
 /// dies with it; the other waits preserve ordering without putting routine BACK teardown on the
 /// SDL thread.
 pub(crate) fn drain_scrobble() {

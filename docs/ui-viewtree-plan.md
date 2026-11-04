@@ -87,7 +87,7 @@ enum Route   { Home, Detail, Player { overlay: Overlay } }
 Replaces the five entangled `let mut` stack locals `playing/detail_open/menu_open/info_open/
 chapters_open` (app.rs:329-333). The semantics are **not** flat: `detail_open` is only meaningful
 while `!playing`; the three menu/info/chapters overlays are only meaningful while `playing` — hence
-`Player{overlay}` rather than four peer variants. `plex_run` stays immediate-mode: it is the loop
+`Player{overlay}` rather than four peer variants. `butaca_run` stays immediate-mode: it is the loop
 that ticks/draws the View tree, never itself a View.
 
 **Suspend/restore is NOT encoded in Route.** Background (0x103/0x104) snapshots intended position
@@ -109,7 +109,7 @@ app.rs-shared focus state or the fragile snap edge-trigger. It is the correct th
 
 ## (B) Frozen C-ABI / call-site signatures (MUST NOT CHANGE)
 
-These are `pub(crate)` Rust (not `extern "C"`, except `plex_run`), but their **names/arities/return
+These are `pub(crate)` Rust (not `extern "C"`, except `butaca_run`), but their **names/arities/return
 types are frozen** — app.rs, route.rs, and the `butaca-*` dev-triggers call them verbatim. Any struct
 migration must keep them as thin wrappers.
 
@@ -128,7 +128,7 @@ migration must keep them as thin wrappers.
   (internal-only today, but `pub(crate)` — keep as forwarding wrappers, signatures frozen)
 
 **app.rs**:
-- `#[no_mangle] pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int, pms_token: *const c_char, demo_url: *const c_char) -> c_int` — the C boot shim (main.c:97). Any Route/focus refactor stays **inside** its body.
+- `#[no_mangle] pub extern "C" fn butaca_run(pms_host: *const c_char, pms_port: c_int, pms_token: *const c_char, demo_url: *const c_char) -> c_int` — the C boot shim (main.c:97). Any Route/focus refactor stays **inside** its body.
 
 ---
 
@@ -332,7 +332,7 @@ the main-loop poll settles the exact attempt as `Started`. Exact `Failed` return
 ownership to `Idle`. Keep this reducer SEPARATE from Route. `home_update(dt)` STAYS unconditional
 (#6). Migrate ALL
 ~12 `butaca-*` set-sites in lockstep (#17). Preserve the snap edge-trigger (#8), LG key decode (#2),
-`plex_run` C-ABI. Keep `g_fr/g_fc/g_snap/set_fr/set_snap` + home `fr/fc` + detail `section/col` as
+`butaca_run` C-ABI. Keep `g_fr/g_fc/g_snap/set_fr/set_snap` + home `fr/fc` + detail `section/col` as
 SEPARATE focus owners (no unification yet).
 - **Files:** rust-modules/src/app.rs
 - **Checkpoint:** `make` green; on-TV capture through the full route graph home→detail→play→

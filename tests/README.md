@@ -219,7 +219,7 @@ account stays clean. It works without storing any new secret:
   shared with it.
 - That token is used for the `/:/progress` resume seed **and** written to `butaca-token` in the
   TV's runtime root. The binary carries **no** token, so this file is the only way an automated run
-  gets PMS access at all (see `plex_run`); the **app itself** then plays and scrobbles as the
+  gets PMS access at all (see `butaca_run`); the **app itself** then plays and scrobbles as the
   managed user, not just the seed. The token value is never printed (redacted to
   `<…, redacted>`), and `butaca-token` is cleared between cases like every other trigger.
 - Pass **`--owner`** to run as the `config.local.h` owner token instead (history *will* be

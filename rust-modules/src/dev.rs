@@ -224,7 +224,7 @@ pub(crate) use latched_flag;
 ///
 /// **Timing is the whole reason this is here and not later.** Neither `libpf` nor `libplayerAPIs`
 /// imports `gst_init`; they use LG's lazy `gst_cool_init_check`, which does not run until a player
-/// is created. `plex_run` is therefore comfortably early — but anything that arms this AFTER the
+/// is created. `butaca_run` is therefore comfortably early — but anything that arms this AFTER the
 /// first `Load` would be setting variables nobody reads again.
 ///
 /// An empty trigger takes the five Dolby categories at level 6; content overrides the whole
@@ -242,7 +242,7 @@ pub(crate) fn arm_gst_logging() {
         spec
     };
     let log = crate::paths::in_runtime_dir(crate::paths::runtime_file::GST);
-    // SAFETY: single-threaded here by construction — `plex_run` has not yet minted a worker, and
+    // SAFETY: single-threaded here by construction — `butaca_run` has not yet minted a worker, and
     // this runs before SDL init. `set_var` is only unsound against a concurrent reader.
     std::env::set_var("GST_DEBUG", &spec);
     std::env::set_var("GST_DEBUG_FILE", &log);
@@ -385,11 +385,11 @@ pub(crate) fn server_slot() -> Option<Result<u16, String>> {
 ///
 /// `panic` is a Rust panic inside an `extern "C"` CALLBACK — the shape of `ff::read_cb` under
 /// libav: the hook writes its `*** RUST PANIC` line, the unwind stops at the callback's own
-/// boundary, and the process aborts with `plex_run`'s frame intact. That leaves BOTH a panic
+/// boundary, and the process aborts with `butaca_run`'s frame intact. That leaves BOTH a panic
 /// record and a native SIGABRT envelope, the pair `telemetry::crashreport` must send as the one
 /// panic.
 ///
-/// `unwind` panics straight in here instead, so the unwind crosses `plex_run`'s own frame before
+/// `unwind` panics straight in here instead, so the unwind crosses `butaca_run`'s own frame before
 /// aborting at its `extern "C"` boundary. That used to drop the telemetry `Guard` on the way past
 /// and stop the native backend before the abort landed (dev set, 2026-09-19), so no envelope was
 /// written. `Drop for Guard` (`telemetry::native`) now checks `std::thread::panicking()` and
@@ -416,7 +416,7 @@ pub(crate) fn crash_on_purpose() {
     }
     if kind == "unwind" {
         crate::log(
-            "crashtest: DELIBERATE crash, kind=unwind (unwinds plex_run to its extern \"C\" boundary)",
+            "crashtest: DELIBERATE crash, kind=unwind (unwinds butaca_run to its extern \"C\" boundary)",
         );
         panic!("crashtest: deliberate unwinding panic");
     }

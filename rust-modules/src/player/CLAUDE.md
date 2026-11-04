@@ -46,7 +46,7 @@ and seeks by time via `av_seek_frame` (libavformat's own Cues index).
   it belongs to; never smuggle it through a raw static.
 
 **The main-thread rule is compiler-enforced.** `ffi.rs`'s `extern "C"` declarations are private to
-that module, and every wrapper but one takes a `task::MainThread` — a `!Send` ZST `plex_run` mints
+that module, and every wrapper but one takes a `task::MainThread` — a `!Send` ZST `butaca_run` mints
 once. Since phase 9 it mints exactly one and `boot` MOVES it into `player::adapter::PlayerAdapter`
 (`App.adapters.player`), which also owns the native session that was the `static mut ENGINE`: the
 seam is reached as `pa.mt()`, the session as `pa.engine()` / `pa.split()`, and a function that

@@ -158,7 +158,7 @@ pub(crate) enum Screen {
 
 /// The player HUD's focus cursor, plus whether the transport is on screen at all.
 ///
-/// A copy of the `HudNav` cursor `plex_run` holds as a local. The type is a non-`pub` item of
+/// A copy of the `HudNav` cursor `butaca_run` holds as a local. The type is a non-`pub` item of
 /// `app`, which `lib.rs` declares as a private `mod`, so it cannot be named from here — the same
 /// boundary `Route` sits behind. `visible` is `app.rs`'s `hud_visible(…)` — the same
 /// value its own OK and LEFT/RIGHT arms branch on — because the HUD's visibility decides whether a

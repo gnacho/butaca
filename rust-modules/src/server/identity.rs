@@ -63,7 +63,7 @@ pub(crate) const VERSION: &str = env!("BUTACA_VERSION");
 /// one poisons that forever. The fallback when `os_info.json` is unreadable keeps the literal
 /// this replaces — the exact claim every release so far has made — rather than inventing an
 /// empty-string case no server has ever been shown. Safe by boot order: `webos::probe()` is the
-/// first call in `plex_run`, before SDL exists, so no PMS request can precede the read.
+/// first call in `butaca_run`, before SDL exists, so no PMS request can precede the read.
     #[allow(dead_code)] // frozen until the wire layer goes
 pub(crate) fn platform_version() -> &'static str {
     let r = &crate::webos::info().release;
