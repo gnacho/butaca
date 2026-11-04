@@ -360,7 +360,7 @@ fn commit_text(fields: &mut [String; 3], editing: Option<usize>, text: &str) -> 
     true
 }
 
-/// Apply the two deletion commands whether they arrive as raw desktop keys or typed-edit events.
+/// Apply the two deletion commands the key arm synthesizes from raw desktop keys.
 fn delete_text(field: &mut String, edit: &crate::ui::machine::TextEdit) -> bool {
     use crate::ui::machine::TextEdit;
     match edit {
@@ -514,9 +514,9 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
                         return Handled::Yes;
                     }
                     if let Some(f) = self.editing {
-                        // Backspace/Clear may be delivered as ordinary keys (the system keyboard's
-                        // protocol) or as typed-edit events (the desktop editing path). Repeats
-                        // matter for a held delete key, while printable text still arrives as an
+                        // Backspace/Clear arrive as ordinary keys (the on-screen keyboard's
+                        // protocol). No producer emits them as typed-edit events. Repeats matter
+                        // for a held delete key, while printable text still arrives as an
                         // SDL_TEXTINPUT commit drained on Tick.
                         let edit = match sym {
                             crate::ui::consts::SDLK_BACKSPACE => {
@@ -574,14 +574,10 @@ impl<H: AppLike> Machine<H> for JfLoginScreen {
                         Handled::No
                     }
                 }
-                crate::ui::machine::InputKind::Text(ref edit) if self.editing.is_some() => {
-                    let field = self.editing.expect("guarded editing field");
-                    if delete_text(&mut self.fields[field], &edit) {
-                        self.dirty = true;
-                        fx.invalidate(crate::ui::present::Provenance::Input);
-                    }
-                    Handled::Yes
-                }
+                // The only producer of a text edit is `SDL_TEXTINPUT` (`app/events.rs`), and it
+                // emits `TextEdit::Commit` alone. The typed text is applied by `textinput::drain`
+                // on Tick. Consuming the event keeps that commit from reaching the screen below.
+                crate::ui::machine::InputKind::Text(_) if self.editing.is_some() => Handled::Yes,
                 _ => Handled::No,
             },
             _ => Handled::No,
