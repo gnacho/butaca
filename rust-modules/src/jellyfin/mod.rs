@@ -114,11 +114,21 @@ struct RetireOnThreadExit;
 impl Drop for RetireOnThreadExit {
     fn drop(&mut self) {
         let _ = INSTALLED_HERE.try_with(|mine| {
-            let Some(mine) = mine.get() else { return };
-            if client().is_some_and(|current| std::ptr::eq(current, mine)) {
-                uninstall();
+            if let Some(mine) = mine.get() {
+                retire_if_current(mine);
             }
         });
+    }
+}
+
+/// Clear the installed client only if it is still `mine`, comparing and clearing under one write
+/// lock: a check followed by a separate [`uninstall`] would let a concurrent install slip in
+/// between and be retired by a thread that never installed it.
+#[cfg(test)]
+fn retire_if_current(mine: *const JfClient) {
+    let mut slot = CLIENT.write().unwrap_or_else(|e| e.into_inner());
+    if slot.is_some_and(|current| std::ptr::eq(current, mine)) {
+        *slot = None;
     }
 }
 
