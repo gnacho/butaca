@@ -46,8 +46,9 @@ COVERED (route — used by):
   GET   /Shows/NextUp                             — Home's Next Up shelf and the detail OnDeck
   GET   /Items/{id}/Similar                       — the Related shelf
   GET   /MediaSegments/{id}                       — intro/credits; answers EMPTY (no markers)
-  GET   /Items/{id}/Images/Primary|Backdrop/0     — poster/art bytes (api_key required), one
-                                                    embedded 1x1 JPEG for every image
+  GET   /Items/{id}/Images/Primary|Backdrop/0|Logo — poster/art/logo bytes (api_key required): the
+                                                    real derived artwork in --catalog mode, one
+                                                    embedded 1x1 JPEG for the generated world
   POST  /Items/{id}/PlaybackInfo                  — the Media Decision Engine; always DIRECT play
   POST  /Sessions/Playing[/Progress|/Stopped]     — playback reporting; Stopped COMMITS the
                                                     resume point into UserData (visible in Resume)
@@ -68,15 +69,26 @@ the Rust unit suite); Quick Connect authorizes itself on the 2nd poll.
 Usage:
 
     python3 tests/mock_jf.py --port 8920              # serve until Ctrl-C
+    python3 tests/mock_jf.py --port 8920 --catalog    # serve the demo library instead
     python3 tests/mock_jf.py --port 8920 --selftest   # prove the shapes without an app
 
 The app reaches it through the dev trigger (see `jellyfin/boot.rs`):
-`/tmp/butaca-jellyfin` containing `{"url":"http://127.0.0.1:8920","user":"demo","password":"x"}`.
+`$BUTACA_RUNTIME_DIR/butaca-jellyfin` containing
+`{"url":"http://127.0.0.1:8920","user":"demo","password":"x"}` (`/tmp` on the television).
+
+**The demo library (`--catalog`, [`CatalogLibrary`]).** The same wire and the same queries, built
+from `tests/demo_library/catalog.json` and the artwork `tools/demo_library.py derive` renders into
+`~/.cache/butaca-demo/derived/` (`$BUTACA_DEMO_CACHE` moves the cache). This is the world
+`tools/screenshots.py` records against: real films, real posters and backdrops served as the bytes
+on disk, and every id derived from the catalog's own slug, so a scene manifest can name a film
+once and get one id in every run.
 """
 import argparse
 import base64
 import hashlib
 import json
+import os
+import pathlib
 import random
 import re
 import sys
@@ -85,6 +97,9 @@ import time
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# Where `tools/demo_library.py` keeps its manifests and its derived artwork cache.
+DEMO_CATALOG = pathlib.Path(__file__).resolve().parent / "demo_library" / "catalog.json"
 
 # One valid 1x1 JPEG — every image route serves these bytes. The poster store only scales and
 # paints; a real server's pixels are content, and content is the closed alphabet's job to avoid.
@@ -113,7 +128,7 @@ def sid(seed, *parts):
 
 
 def sname(rng):
-    """One name from the closed alphabet: `s` + 8 lowercase hex digits (mock_server' rule)."""
+    """One name from the closed alphabet: `s` + 8 lowercase hex digits (the generated world's)."""
     return "s%08x" % rng.getrandbits(32)
 
 
@@ -124,6 +139,17 @@ def swords(rng, n):
 def iso(dt):
     """The ISO-8601 shape Jellyfin puts on the wire (`1976-11-12T00:00:00.0000000Z`)."""
     return dt.strftime("%Y-%m-%dT%H:%M:%S.0000000Z")
+
+
+def iso_date(text):
+    """A `YYYY-MM-DD` catalog date as the same wire timestamp (midnight UTC)."""
+    return "%sT00:00:00.0000000Z" % text
+
+
+def demo_cache_dir():
+    """The derived-artwork cache `tools/demo_library.py` writes (`$BUTACA_DEMO_CACHE` overrides)."""
+    env = os.environ.get("BUTACA_DEMO_CACHE")
+    return pathlib.Path(env) if env else pathlib.Path.home() / ".cache" / "butaca-demo"
 
 
 def date_at(rng, start_year, span_years):
@@ -171,6 +197,8 @@ class Library:
             self.genres[gid] = {"Id": gid, "Name": "g%04x" % rng.getrandbits(16), "Type": "Genre"}
 
         self.items = {}  # id -> the wire dict (mutable: watch state lives here)
+        self.images = {}  # id -> {"Primary"|"Backdrop"|"Logo": path}: real artwork, catalog mode only
+        self._image_cache = {}  # path -> (content type, bytes)
         self.movies = []
         for i in range(1, movies + 1):
             item = self._movie(rng, i)
@@ -449,6 +477,411 @@ class Library:
             out += [self.items[i] for i in self.boxsets]
         return out
 
+    def collection_children(self, boxset_id):
+        """The members of one box set, in the server's own order for it — or `None` when the id is
+        not a box set. A real server states a collection's order (custom where the owner pinned
+        one) and `Items?ParentId=<boxset>` answers in it, so the pinned order survives the
+        listing's `SortBy=SortName` rather than being re-sorted away."""
+        box = self.items.get(boxset_id)
+        if not box or box["Type"] != "BoxSet":
+            return None
+        return [self.items[i] for i in box["_members"]]
+
+    def pinned_rank(self, boxset_id):
+        """`{id: position}` when the library pins a custom order for that box set, else `None`."""
+        return None
+
+    def similar_for(self, item, limit):
+        """The Related shelf's rows: the same kind, name-ordered — the generated world has no
+        genre table worth ranking on, and a real server's own ranking is not reproduced here."""
+        pool = [self.items[i] for i in self.movies + self.series
+                if i != item["Id"] and self.items[i]["Type"] == item["Type"]]
+        pool.sort(key=lambda it: it["Name"].lower())
+        return pool[:limit]
+
+    def image_bytes(self, item_id, kind):
+        """`(content type, bytes)` of one image, or `None` when this item has no such image (the
+        handler then answers its placeholder JPEG, which is what the generated world has for
+        everything)."""
+        path = self.images.get(item_id, {}).get(kind)
+        if path is None:
+            return None
+        if path not in self._image_cache:
+            ctype = "image/png" if path.suffix == ".png" else "image/jpeg"
+            self._image_cache[path] = (ctype, path.read_bytes())
+        return self._image_cache[path]
+
+
+# ---------------------------------------------------------------- the demo catalog ----------
+
+class CatalogLibrary(Library):
+    """The demo library: the generated world's wire and queries, built from
+    `tests/demo_library/catalog.json` and the artwork `tools/demo_library.py derive` renders
+    instead of from a seed. This is the world `tools/screenshots.py` records against.
+
+    Every id is derived from the catalog's own slug (`sid`, seed 0) — a movie, a show, a season,
+    an episode and a box set each get one id that never moves, whatever the order of the catalog
+    or the machine it runs on, so a scene manifest names a film (`@tears-of-steel`) once and the
+    driver resolves the id it has today. `by_slug` is that map, in both directions of use:
+    `"caminandes"` and `"caminandes/1/2"` are keys, their Jellyfin GUIDs the values.
+
+    What the catalog states and the wire needs is lifted here: `sections` → the views,
+    `collections` → box sets (with `collection_order` as a real server's custom order), shows →
+    series/season/episode, `continue_watching`/`watched` → UserData, `added_order` → DateCreated
+    and the derived artwork → the bytes `/Items/{id}/Images/…` answers. Nothing reads the clock:
+    every date is the catalog's pinned `now`, so two runs answer byte-identically.
+    """
+
+    def __init__(self, catalog_path=DEMO_CATALOG, cache=None, hero=None):
+        catalog_path = pathlib.Path(catalog_path)
+        cat = json.loads(catalog_path.read_text())
+        self.catalog = cat
+        self.cache = pathlib.Path(cache) if cache else demo_cache_dir()
+        self.derived = self.cache / "derived"
+        if not self.derived.is_dir():
+            raise ValueError("no derived demo artwork in %s: run `python3 tools/demo_library.py "
+                             "derive` first" % self.derived)
+        self.seed = 0
+        self.now = int(cat["now"])
+        self.server_id = cat["server"]["machineIdentifier"]
+        self.server_name = cat["server"]["friendlyName"]
+        self.version = "10.11.11"
+        self.user_id = sid(self.seed, "user")
+        self.user_name = "demo"
+        self.token = "jf" + hashlib.md5(b"jf:tok:0").hexdigest()[:10]
+        self.genres = {}
+        self.people = {}
+        self.people_by_index = []
+        self.items = {}
+        self.images = {}
+        self._image_cache = {}
+        self.by_slug = {}
+        self.sections = [dict(s, Id=sid(self.seed, "view", s["type"])) for s in cat["sections"]]
+        self.views = [{"Id": s["Id"], "Name": s["title"],
+                       "CollectionType": "movies" if s["type"] == "movie" else "tvshows"}
+                      for s in self.sections]
+        self.movies_view = self.views[0]["Id"]
+        self.tv_view = self.views[1]["Id"] if len(self.views) > 1 else self.views[0]["Id"]
+        self.movies, self.series, self.boxsets = [], [], []
+
+        for rec in cat["movies"]:
+            item = self._movie_item(rec)
+            self.items[item["Id"]] = item
+            self.movies.append(item["Id"])
+        for rec in cat["shows"]:
+            show = self._show_item(rec)
+            self.items[show["Id"]] = show
+            self.series.append(show["Id"])
+            for season in show["_seasons"]:
+                self.items[season["Id"]] = season
+                for episode in season["_episodes"]:
+                    self.items[episode["Id"]] = episode
+        for name in cat["collections"]:
+            box = self._boxset_item(name)
+            self.items[box["Id"]] = box
+            self.boxsets.append(box["Id"])
+
+        self._pin_clock(hero or cat["hero"])
+        self._roll_up()
+
+    # ---- artwork -----------------------------------------------------------------------
+
+    def _art(self, rec, slug):
+        """The record's own derived artwork: `{"Primary"|"Backdrop"|"Logo": path}`. An entry the
+        catalog names must have its bytes — a missing one is a cache that was never derived, which
+        is worth failing on rather than serving a placeholder that hides it."""
+        folder = self.derived / slug.replace("/", "_")
+        out = {}
+        for name, kind in (("poster", "Primary"), ("art", "Backdrop"), ("logo", "Logo")):
+            path = folder / ("logo.png" if name == "logo" else "%s.jpg" % name)
+            if name not in rec:
+                continue
+            if not path.is_file():
+                raise ValueError("%s: derived %s is missing (%s); rerun "
+                                 "`python3 tools/demo_library.py derive`" % (slug, name, path))
+            out[kind] = path
+        return out
+
+    def _tag(self, *parts):
+        return sid(self.seed, "imtag", *parts)
+
+    # ---- the registries the queries filter on ------------------------------------------
+
+    def _person(self, name):
+        pid = sid(self.seed, "person", name)
+        if pid not in self.people:
+            self.people[pid] = {"Id": pid, "Name": name, "Type": "Person",
+                                "PrimaryImageTag": None}
+            self.people_by_index.append(pid)
+        return self.people[pid]
+
+    def _credit_rows(self, rec):
+        """`People[]` in Jellyfin's own vocabulary: actors with their role, then the crew."""
+        rows = []
+        for entry in rec.get("cast", []):
+            rows.append({"Name": entry["name"], "Id": self._person(entry["name"])["Id"],
+                         "Type": "Actor", "Role": entry.get("role", "")})
+        for name in rec.get("directors", []):
+            rows.append({"Name": name, "Id": self._person(name)["Id"], "Type": "Director"})
+        for name in rec.get("writers", []):
+            rows.append({"Name": name, "Id": self._person(name)["Id"], "Type": "Writer"})
+        return rows
+
+    def _genre_names(self, rec):
+        names = list(rec.get("genres", []))
+        for name in names:
+            gid = sid(self.seed, "genre", name)
+            self.genres[gid] = {"Id": gid, "Name": name, "Type": "Genre"}
+        return names
+
+    # ---- the item builders -------------------------------------------------------------
+
+    @staticmethod
+    def _user_data():
+        return {"Played": False, "PlayCount": 0, "PlaybackPositionTicks": 0,
+                "IsFavorite": False, "LastPlayedDate": None}
+
+    def _movie_item(self, rec):
+        item_id = sid(self.seed, "movie", rec["id"])
+        art = self._art(rec, rec["id"])
+        self.images[item_id] = art
+        self.by_slug[rec["id"]] = item_id
+        minutes = rec["minutes"]
+        item = {
+            "Id": item_id,
+            "Name": rec["title"],
+            "Type": "Movie",
+            "ProductionYear": rec["year"],
+            "Overview": rec.get("summary", ""),
+            "RunTimeTicks": minutes * TICKS_PER_MINUTE,
+            "DateCreated": self._pinned(3),
+            "Genres": self._genre_names(rec),
+            "People": self._credit_rows(rec),
+            "ImageTags": {"Primary": self._tag("movie", rec["id"])},
+            "BackdropImageTags": [self._tag("moviebd", rec["id"])] if "Backdrop" in art else [],
+            "MediaSources": [self._media_source(random.Random(item_id), item_id, minutes)],
+            "MediaType": "Video",
+            "IsFolder": False,
+            "UserData": self._user_data(),
+        }
+        if "originallyAvailableAt" in rec:
+            item["PremiereDate"] = iso_date(rec["originallyAvailableAt"])
+        if rec.get("chapters"):
+            item["Chapters"] = self.chapters(rec["chapters"], minutes * 60_000, rec["id"])
+        return item
+
+    def _show_item(self, rec):
+        show_id = sid(self.seed, "series", rec["id"])
+        art = self._art(rec, rec["id"])
+        self.images[show_id] = art
+        self.by_slug[rec["id"]] = show_id
+        genres = self._genre_names(rec)
+        show = {
+            "Id": show_id,
+            "Name": rec["title"],
+            "Type": "Series",
+            "ProductionYear": rec["year"],
+            "Overview": rec.get("summary", ""),
+            "PremiereDate": iso_date("%04d-01-01" % rec["year"]),
+            "DateCreated": iso_date("%04d-01-01" % rec["year"]),
+            "Genres": genres,
+            "People": self._credit_rows(rec),
+            "ChildCount": len(rec["seasons"]),
+            "ImageTags": {"Primary": self._tag("series", rec["id"])},
+            "BackdropImageTags": [self._tag("seriesbd", rec["id"])] if "Backdrop" in art else [],
+            "UserData": self._user_data(),
+            "_seasons": [],
+        }
+        for season in rec["seasons"]:
+            index = season["index"]
+            season_id = sid(self.seed, "season", rec["id"], index)
+            self.images[season_id] = dict(art)
+            self.by_slug["%s/%d" % (rec["id"], index)] = season_id
+            episodes = []
+            for entry in season["episodes"]:
+                episode = self._episode_item(rec, season, entry, show_id, art)
+                self.items[episode["Id"]] = episode
+                episodes.append(episode)
+            season_item = {
+                "Id": season_id,
+                "Name": "Season %d" % index,
+                "Type": "Season",
+                "SeriesId": show_id,
+                "SeriesName": rec["title"],
+                "IndexNumber": index,
+                "ChildCount": len(episodes),
+                "ImageTags": {"Primary": self._tag("season", rec["id"], index)},
+                "UserData": dict(self._user_data(), UnplayedItemCount=len(episodes)),
+                "_episodes": episodes,
+            }
+            if episodes and "PremiereDate" in episodes[0]:
+                season_item["PremiereDate"] = episodes[0]["PremiereDate"]
+            show["_seasons"].append(season_item)
+        return show
+
+    def _episode_item(self, show, season, entry, show_id, art):
+        slug = "%s/%d/%d" % (show["id"], season["index"], entry["index"])
+        item_id = sid(self.seed, "episode", show["id"], season["index"], entry["index"])
+        still = self.derived / slug.replace("/", "_") / "thumb.jpg"
+        if not still.is_file():
+            raise ValueError("%s: derived thumb is missing (%s); rerun "
+                             "`python3 tools/demo_library.py derive`" % (slug, still))
+        images = {"Primary": still}
+        if "Backdrop" in art:
+            images["Backdrop"] = art["Backdrop"]
+        self.images[item_id] = images
+        self.by_slug[slug] = item_id
+        minutes = entry["minutes"]
+        return {
+            "Id": item_id,
+            "Name": entry["title"],
+            "Type": "Episode",
+            "SeriesId": show_id,
+            "SeriesName": show["title"],
+            "ParentIndexNumber": season["index"],
+            "IndexNumber": entry["index"],
+            "RunTimeTicks": minutes * TICKS_PER_MINUTE,
+            "Overview": entry.get("summary", ""),
+            "PremiereDate": iso_date(entry["date"]),
+            "DateCreated": iso_date(entry["date"]),
+            "Genres": list(show.get("genres", [])),
+            "People": [],
+            "ImageTags": {"Primary": self._tag("episode", show["id"], season["index"],
+                                               entry["index"])},
+            "BackdropImageTags": ([self._tag("seriesbd", show["id"])] if "Backdrop" in art
+                                  else []),
+            "MediaSources": [self._media_source(random.Random(item_id), item_id, minutes)],
+            "MediaType": "Video",
+            "IsFolder": False,
+            "UserData": self._user_data(),
+        }
+
+    def _boxset_item(self, name):
+        members = [m for m in self.catalog["movies"] if name in m.get("collections", [])]
+        order = self.catalog.get("collection_order", {}).get(name)
+        if order:
+            rank = {slug: n for n, slug in enumerate(order)}
+            members.sort(key=lambda m: rank.get(m["id"], len(rank)))
+        else:
+            members.sort(key=lambda m: self._added_index(m["id"]))
+        box_id = sid(self.seed, "boxset", name)
+        return {
+            "Id": box_id,
+            "Name": name,
+            "Type": "BoxSet",
+            "ChildCount": len(members),
+            "DateCreated": self._pinned(4),
+            "ImageTags": {},
+            "BackdropImageTags": [],
+            "UserData": self._user_data(),
+            "_members": [self.by_slug[m["id"]] for m in members],
+            "_pin": order,
+        }
+
+    # ---- the clock, the deck and the watch state --------------------------------------
+
+    def _pinned(self, days):
+        """One wire timestamp `days` before the catalog's pinned `now` — never the clock."""
+        return iso(datetime.fromtimestamp(self.now - 86_400 * days, timezone.utc))
+
+    def _added_index(self, slug):
+        """Where the catalog's `added_order` puts one item (higher index = added EARLIER)."""
+        order = self.catalog.get("added_order", [])
+        return order.index(slug) if slug in order else len(order)
+
+    def _pin_clock(self, hero):
+        """DateCreated, the resume points and the watched flags from the catalog and its pinned
+        `now`, never the wall clock. `hero` heads Continue Watching: the home hero pool opens with
+        the deck, so that is its first slot (and `--hero` swaps one film for another without
+        disturbing the rest of the order)."""
+        if hero not in self.by_slug:
+            raise ValueError("hero %r is not in the catalog" % hero)
+        self.hero = hero
+        for slug in self.catalog.get("added_order", []):
+            item_id = self.by_slug.get(slug)
+            if item_id is None:
+                continue
+            added = self.now - 86_400 * (2 + 3 * self._added_index(slug))
+            item = self.items[item_id]
+            item["DateCreated"] = self._pinned(2 + 3 * self._added_index(slug))
+            # A show's own seasons and episodes sort under it, in their broadcast order, so the
+            # library's Recently Added never interleaves one show's episodes into another's.
+            for season in item.get("_seasons", []):
+                for child in [season, *season["_episodes"]]:
+                    step = (season.get("IndexNumber", 0) * 100
+                            + child.get("IndexNumber", 0)) * 60
+                    child["DateCreated"] = iso(
+                        datetime.fromtimestamp(added + step, timezone.utc))
+        deck = [dict(c) for c in self.catalog.get("continue_watching", [])]
+        if all(c["item"] != hero for c in deck):
+            deck.insert(0, {"item": hero, "progress": 0.42})
+        deck.sort(key=lambda c: c["item"] != hero)  # stable: the hero first, the rest in order
+        for n, entry in enumerate(deck):
+            item = self.items[self.by_slug[entry["item"]]]
+            item["UserData"]["PlaybackPositionTicks"] = \
+                int(item["RunTimeTicks"] * entry["progress"])
+            item["UserData"]["LastPlayedDate"] = iso(
+                datetime.fromtimestamp(self.now - 600 - 3_600 * n, timezone.utc))
+        for n, slug in enumerate(self.catalog.get("watched", [])):
+            item = self.items[self.by_slug[slug]]
+            item["UserData"]["Played"] = True
+            item["UserData"]["PlayCount"] = 1
+            item["UserData"]["PlaybackPositionTicks"] = 0
+            item["UserData"]["LastPlayedDate"] = iso(
+                datetime.fromtimestamp(self.now - 86_400 * (10 + n), timezone.utc))
+
+    def _roll_up(self):
+        """The containers' `UnplayedItemCount` and `ChildCount` from the leaves under them, as the
+        real server aggregates them — the series row's watched state and the detail page's
+        "N episodes left" both read this and nothing else."""
+        for series_id in self.series:
+            show = self.items[series_id]
+            episodes = self.series_episodes(show)
+            left = sum(1 for e in episodes if not e["UserData"]["Played"])
+            show["ChildCount"] = len(show["_seasons"])
+            show["UserData"]["UnplayedItemCount"] = left
+            show["UserData"]["Played"] = bool(episodes) and left == 0
+            show["UserData"]["PlayCount"] = int(show["UserData"]["Played"])
+            for season in show["_seasons"]:
+                left = sum(1 for e in season["_episodes"] if not e["UserData"]["Played"])
+                season["UserData"]["UnplayedItemCount"] = left
+                season["UserData"]["Played"] = left == 0
+
+    # ---- what the catalog states about order and relatedness --------------------------
+
+    def pinned_rank(self, boxset_id):
+        box = self.items.get(boxset_id)
+        order = (box or {}).get("_pin") or None
+        if not order:
+            return None
+        return {self.by_slug[slug]: n for n, slug in enumerate(order)}
+
+    def similar_for(self, item, limit):
+        """Related rows by shared genre, then name — what a real server's similar list is
+        approximately about, and enough for the shelf to be worth looking at."""
+        mine = set(item.get("Genres", []))
+        pool = [self.items[i] for i in self.movies + self.series
+                if i != item["Id"] and self.items[i]["Type"] == item["Type"]]
+        pool.sort(key=lambda it: (-len(mine.intersection(it.get("Genres", []))),
+                                 it["Name"].lower()))
+        return pool[:limit]
+
+    @staticmethod
+    def chapters(marks, duration, slug):
+        """`[{"start": "m:ss", "title": …}, …]` from the catalog → the server's `Chapters[]`, as
+        the tick offsets the detail page's strip reads. The first must start at 0:00 and the
+        starts must rise inside the film, as they do on a real file."""
+        def ms(stamp):
+            minutes, seconds = stamp.split(":")
+            return (int(minutes) * 60 + int(seconds)) * 1000
+
+        starts = [ms(c["start"]) for c in marks]
+        if marks and (starts[0] != 0 or starts != sorted(set(starts)) or starts[-1] >= duration):
+            raise ValueError("%s: chapter starts must begin at 0:00, rise, and end inside the "
+                             "film" % slug)
+        return [{"Name": c["title"], "StartPositionTicks": start * 10_000}
+                for c, start in zip(marks, starts)]
+
 
 # ------------------------------------------------------------------ the server ----------------
 
@@ -504,7 +937,8 @@ class Handler(BaseHTTPRequestHandler):
     def _send_json(self, status, payload):
         """One JSON answer. Returns the status so handle() can report it to the request log.
         A body left unread RSTs the socket under the client's response read on some kernels
-        (the flake class the Rust mock_server.rs doc describes) — `_do` drains every body."""
+        (the flake class `rust-modules/src/jellyfin/mock_server.rs` describes) — `_do` drains
+        every body."""
         data = b"" if payload is None else \
             json.dumps(payload, separators=(",", ":")).encode()
         self.send_response(status)
@@ -628,7 +1062,7 @@ class Handler(BaseHTTPRequestHandler):
             })
 
         # ---- token-required routes ------------------------------------------------------
-        # Accepted, never checked — mock_server's own rule for the synthetic world's credentials
+        # Accepted, never checked — the generated world's own rule for its credentials
         # (its `butaca-token` line): the carrier SHAPE is what the client's correctness lives on,
         # and the 401 below is the absence answer. The controlled replay world's fixture client
         # (#166 flip) carries a token the mock cannot have minted, and a recording must reach the
@@ -727,10 +1161,7 @@ class Handler(BaseHTTPRequestHandler):
             if not item:
                 return self._send_json(404, {})
             limit = int((query.get("Limit") or ["12"])[0] or 12)
-            pool = [lib.items[i] for i in lib.movies + lib.series if i != item["Id"]
-                    and lib.items[i]["Type"] == item["Type"]]
-            pool.sort(key=lambda it: it["Name"].lower())
-            rows = [wire_row(it) for it in pool[:limit]]
+            rows = [wire_row(it) for it in lib.similar_for(item, limit)]
             return self._send_json(200, {"Items": rows, "TotalRecordCount": len(rows)})
         if len(segs) == 3 and segs[0] == "Items" and segs[2] == "PlaybackInfo" \
                 and method == "POST":
@@ -810,6 +1241,10 @@ class Handler(BaseHTTPRequestHandler):
 
         pool = [lib.items[i] for i in lib.boxsets] if kinds == ["BoxSet"] \
             else lib.view_items(parent, kinds)
+        children = lib.collection_children(parent) if parent else None
+        if children is not None:
+            # `Items?ParentId=<boxset>` — the collection screen's own member listing.
+            pool = children
 
         if person_ids:
             pool = [it for it in pool
@@ -825,7 +1260,13 @@ class Handler(BaseHTTPRequestHandler):
             pool = [it for it in pool if it["Name"].lower().startswith(starts.lower())]
 
         key = SORT_KEYS.get(sort_by, SORT_KEYS["SortName"])
-        pool = sorted(pool, key=lambda it: (key(it), it["Name"].lower()), reverse=descending)
+        pinned = lib.pinned_rank(parent) if parent else None
+        if pinned:
+            # A pinned collection order IS the server's order for that listing; the client still
+            # sends SortBy=SortName and still gets the collection as the owner arranged it.
+            pool = sorted(pool, key=lambda it: pinned.get(it["Id"], len(pinned)))
+        else:
+            pool = sorted(pool, key=lambda it: (key(it), it["Name"].lower()), reverse=descending)
 
         total = len(pool)
         window = pool[start:start + limit] if limit > 0 else []
@@ -853,7 +1294,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(404, {})
         if item_id not in lib.items and item_id not in lib.people:
             return self._send_json(404, {})
-        return self._send_bytes(200, JPEG_1X1, "image/jpeg")
+        kind = kind_path.split("/")[0]
+        found = lib.image_bytes(item_id, kind)
+        if found is None:
+            return self._send_bytes(200, JPEG_1X1, "image/jpeg")
+        return self._send_bytes(200, found[1], found[0])
 
     def next_up(self, lib, query):
         limit = int((query.get("Limit") or ["1"])[0] or 1)
@@ -881,20 +1326,36 @@ class Handler(BaseHTTPRequestHandler):
 
 # ------------------------------------------------------------------ entry point ---------------
 
-def serve(port, seed=1, host="127.0.0.1", movies=48, shows=6):
-    lib = Library(seed=seed, movies=movies, shows=shows)
-    srv = Server((host, port), lib)
-    return srv, lib
+def serve(port, seed=1, host="127.0.0.1", movies=48, shows=6, catalog=None,
+          catalog_cache=None, hero=None):
+    """Start the mock and return `(srv, lib)`; the caller runs `srv.serve_forever()` (a thread in
+    the tools and the tests, the foreground in `main`). `catalog` serves the demo library
+    (`tests/demo_library/catalog.json` by default) instead of a generated seed."""
+    if catalog is not None:
+        lib = CatalogLibrary(DEMO_CATALOG if catalog is True else catalog,
+                             cache=catalog_cache, hero=hero)
+    else:
+        lib = Library(seed=seed, movies=movies, shows=shows)
+    return Server((host, port), lib), lib
 
 
-def selftest():
+def run(srv):
+    """Serve `srv` on a daemon thread — the one line a tool or a test needs to make it answer."""
+    thread = threading.Thread(target=srv.serve_forever, args=(0.2,), daemon=True)
+    thread.start()
+    return thread
+
+
+def selftest(catalog=None):
     """Prove the shapes without an app: every covered route answers, and the fields the Rust
-    DTOs deserialise are present with the right JSON types — the contract mock_jf exists for."""
+    DTOs deserialise are present with the right JSON types — the contract mock_jf exists for.
+    With the derived artwork cache present it proves the demo catalog's world too (the one
+    `tools/screenshots.py` records against); without it, that half is skipped by name."""
     import urllib.error
     import urllib.request
 
     srv, lib = serve(0, seed=7)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    run(srv)
     port = srv.server_address[1]
     base = "http://127.0.0.1:%d" % port
     failures = []
@@ -1093,12 +1554,82 @@ def selftest():
         json.dumps(lib.items[lib.movies[0]], sort_keys=True)
 
     srv.shutdown()
+
+    # The demo catalog's world (`tools/screenshots.py` records against it): the same routes, real
+    # films, real artwork. Skipped by name where the derived cache is absent, so a fresh clone's
+    # selftest stays offline.
+    if catalog is not None or (demo_cache_dir() / "derived").is_dir():
+        _selftest_catalog(DEMO_CATALOG if catalog is None else catalog)
+
     if failures:
         print("mock_jf: selftest FAILED:", file=sys.stderr)
         for failure in failures:
             print("  " + failure, file=sys.stderr)
         sys.exit(1)
     print("mock_jf: selftest OK (%d requests exercised)" % len(srv.requests))
+
+
+def _selftest_catalog(catalog_path):
+    """The catalog world through the same HTTP surface: ids derived from slugs, the deck in the
+    catalog's order with the hero at its head, real artwork bytes, a box set's own order, and two
+    constructions that agree — the determinism a capture grades."""
+    import urllib.error
+    import urllib.request
+
+    srv, lib = serve(0, catalog=catalog_path)
+    run(srv)
+    base = "http://127.0.0.1:%d" % srv.server_address[1]
+    token = lib.token
+    auth = 'MediaBrowser Token="%s", Client="T", Device="D", DeviceId="dev", Version="1"' % token
+
+    def get(path, raw=False):
+        request = urllib.request.Request(base + path)
+        request.add_header("Authorization", auth)
+        with urllib.request.urlopen(request, timeout=10) as reply:
+            data = reply.read()
+            return (reply.headers.get("Content-Type"), data) if raw else json.loads(data)
+
+    uid = lib.user_id
+    cat = lib.catalog
+    assert len(lib.movies) == len(cat["movies"]) and len(lib.series) == len(cat["shows"])
+    for slug in (cat["hero"], "caminandes/1/2"):
+        assert slug in lib.by_slug, slug
+        assert len(lib.by_slug[slug]) == 32, "a Jellyfin GUID is 32 hex characters"
+
+    resume = get("/Users/%s/Items/Resume?Limit=20" % uid)["Items"]
+    assert resume and resume[0]["Id"] == lib.by_slug[cat["hero"]], "the hero heads the deck"
+    assert all(0 < it["UserData"]["PlaybackPositionTicks"] < it["RunTimeTicks"] for it in resume)
+
+    page = get("/Users/%s/Items?ParentId=%s&Recursive=true&IncludeItemTypes=Movie&Limit=0"
+               % (uid, lib.movies_view))
+    assert page["TotalRecordCount"] == len(cat["movies"])
+
+    box = lib.items[lib.boxsets[0]]
+    kids = get("/Users/%s/Items?ParentId=%s&SortBy=SortName&SortOrder=Ascending"
+               % (uid, box["Id"]))["Items"]
+    pinned = lib.pinned_rank(box["Id"])
+    if pinned:
+        assert [k["Id"] for k in kids] == [k for k, _ in
+                                           sorted(pinned.items(), key=lambda kv: kv[1])]
+
+    still = lib.by_slug["caminandes/1/2"]
+    ctype, data = get("/Items/%s/Images/Primary?api_key=%s" % (still, token), raw=True)
+    assert ctype == "image/jpeg" and data[:2] == b"\xff\xd8", (ctype, data[:4])
+    art_id = lib.by_slug[cat["hero"]]
+    ctype, data = get("/Items/%s/Images/Backdrop/0?api_key=%s" % (art_id, token), raw=True)
+    assert ctype == "image/jpeg" and data[:2] == b"\xff\xd8", (ctype, data[:4])
+    assert len(data) > 10_000, "a real backdrop, not the placeholder"
+
+    srv.shutdown()
+
+    srv2, lib2 = serve(0, catalog=catalog_path)
+    assert lib2.user_id == lib.user_id and lib2.movies_view == lib.movies_view
+    assert json.dumps(sorted(lib2.by_slug.items())) == json.dumps(sorted(lib.by_slug.items()))
+    assert json.dumps(lib2.items[lib2.by_slug[cat["hero"]]], sort_keys=True) == \
+        json.dumps(lib.items[lib.by_slug[cat["hero"]]], sort_keys=True)
+    srv2.server_close()
+    print("mock_jf: catalog selftest OK (%d movies, %d shows, %d box sets)"
+          % (len(lib.movies), len(lib.series), len(lib.boxsets)))
 
 
 def main():
@@ -1111,15 +1642,27 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--movies", type=int, default=48)
     ap.add_argument("--shows", type=int, default=6)
+    ap.add_argument("--catalog", nargs="?", const=True, default=None, metavar="PATH",
+                    help="serve the demo library (tests/demo_library/catalog.json, or PATH)")
+    ap.add_argument("--catalog-cache", metavar="DIR",
+                    help="the demo artwork cache (default: ~/.cache/butaca-demo)")
+    ap.add_argument("--hero", help="the film the home deck pins (default: the catalog's `hero`)")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
-        selftest()
+        selftest(a.catalog)
         return
-    srv, lib = serve(a.port, seed=a.seed, host=a.host, movies=a.movies, shows=a.shows)
-    print("mock_jf: serving seed=%d on http://%s:%d (user id %s, %d movies, %d series)"
-          % (a.seed, a.host, srv.server_address[1], lib.user_id, len(lib.movies), len(lib.series)),
-          flush=True)
+    srv, lib = serve(a.port, seed=a.seed, host=a.host, movies=a.movies, shows=a.shows,
+                     catalog=a.catalog, catalog_cache=a.catalog_cache, hero=a.hero)
+    if a.catalog is not None:
+        print("mock_jf: serving the demo library on http://%s:%d (user id %s, %d movies, "
+              "%d series, %d box sets)"
+              % (a.host, srv.server_address[1], lib.user_id, len(lib.movies), len(lib.series),
+                 len(lib.boxsets)), flush=True)
+    else:
+        print("mock_jf: serving seed=%d on http://%s:%d (user id %s, %d movies, %d series)"
+              % (a.seed, a.host, srv.server_address[1], lib.user_id, len(lib.movies),
+                 len(lib.series)), flush=True)
     try:
         srv.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:
