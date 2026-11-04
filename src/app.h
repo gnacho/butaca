@@ -11,21 +11,12 @@
 #    include "config.local.h"
 #  endif
 #endif
-/* A config.local.h written before the rename still defines the old macros. Honour them, so an
- * existing checkout keeps building without editing a gitignored file. */
+/* A config.local.h overrides the host placeholder. */
 #ifndef SERVER_HOST
-#  ifdef PMS_HOST
-#    define SERVER_HOST PMS_HOST
-#  else
-#    define SERVER_HOST "YOUR_SERVER_HOST"
-#  endif
+#  define SERVER_HOST "YOUR_SERVER_HOST"
 #endif
 #ifndef SERVER_PORT
-#  ifdef PMS_PORT
-#    define SERVER_PORT PMS_PORT
-#  else
-#    define SERVER_PORT 32400
-#  endif
+#  define SERVER_PORT 32400
 #endif
 
 /* (2) the one process-wide global: the event/diagnostic log, DEFINED once as

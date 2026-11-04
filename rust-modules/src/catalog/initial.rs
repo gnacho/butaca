@@ -6,7 +6,7 @@
 use super::*;
 use serde::{Deserialize, Serialize};
 
-pub(crate) const SHAPE: &str = "HubsInitialV1{version:u32,generation:u32,next_request:u32,seen:u64,seen_facts:u32,sections_generation:u32,catalog_generation:u32,sources:[{sid:u16,client:Option<u32>,token_gen:u32,handle:str,state:u32,fetching:bool,seq:u32,retry_bits:u32,retry_n:u32,last:Option<SourceBuild>}],catalog:{items:[PmsMovie],hubs:[{title:str,hub_id:str,key:str,source:str,total:u64,start:u64,len:u64}],heroes:[{idx:u64,source:str}]}}";
+pub(crate) const SHAPE: &str = "HubsInitialV1{version:u32,generation:u32,next_request:u32,seen:u64,seen_facts:u32,sections_generation:u32,catalog_generation:u32,sources:[{sid:u16,client:Option<u32>,token_gen:u32,handle:str,state:u32,fetching:bool,seq:u32,retry_bits:u32,retry_n:u32,last:Option<SourceBuild>}],catalog:{items:[CatalogMovie],hubs:[{title:str,hub_id:str,key:str,source:str,total:u64,start:u64,len:u64}],heroes:[{idx:u64,source:str}]}}";
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
