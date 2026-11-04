@@ -417,7 +417,7 @@ fn release_native_object(mt: &MainThread, epoch: u32) {
 
 /// Bind the decoded video sink to the display plane, whichever way this television does it.
 ///
-/// **Boot-scoped.** Called once, from `plex_run`, and never again — which is why the webOS 5
+/// **Boot-scoped.** Called once, from `butaca_run`, and never again — which is why the webOS 5
 /// exported window is NOT created here: that one is created per session in [`start_bufferfeed`],
 /// beside the payload it has to be spliced into, and destroyed by the matching `teardown`.
 ///
@@ -1778,7 +1778,7 @@ fn teardown(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::Pla
     // server-side transcode stop, both dispatched to a worker. They used to run inline HERE and
     // twelve lines below — two blocking PMS round trips on the SDL thread, ~17 s each worst case,
     // on 100% of real stops. `scrobble_stop` reads and clears route's session statics on THIS
-    // thread and hands the worker owned copies; `plex_run` drains it at exit so the report still
+    // thread and hands the worker owned copies; `butaca_run` drains it at exit so the report still
     // lands. Skipped for a reload, which is not a stop.
     // The reporter is NOT joined here. Its handle rides out with the scrobble worker, which
     // joins it before posting `stopped` — so the last `playing` report still lands first, but the

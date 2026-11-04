@@ -14,7 +14,7 @@ raised, 84 confirmed, 13 refuted.** Every claim below is cited to `file:line`.
 
 There is no async model. There is a **strictly serial single-threaded frame loop** in which any
 operation that needs the network is performed inline, and the frame simply does not present until
-it returns. `plex_run` has exactly one `SDL_GL_SwapWindow` (`app.rs:2075`); everything from the
+it returns. `butaca_run` has exactly one `SDL_GL_SwapWindow` (`app.rs:2075`); everything from the
 poll loop (`app.rs:799`) onward runs before it. So a blocking call anywhere in event handling, the
 per-frame pump, or draw is a **directly visible freeze**.
 

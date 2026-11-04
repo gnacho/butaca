@@ -24,7 +24,7 @@
 //!   BUTACA_RUNTIME_DIR                     this instance's trigger/FIFO/log root
 //!   BUTACA_APP_DIR                         where appfont*.ttf and the icons live (repo `pkg/`)
 
-use butaca_modules::plex_run;
+use butaca_modules::butaca_run;
 use std::ffi::CString;
 use std::os::raw::c_int;
 
@@ -72,7 +72,7 @@ fn main() {
 
     // No host is not an error — it is what a person who was SENT this app has. The boot host is
     // only ever consulted by the two paths that already hold credentials (the stored session and
-    // the harness's injected token); with neither, `plex_run` goes to QR sign-in and plex.tv's
+    // the harness's injected token); with neither, `butaca_run` goes to QR sign-in and plex.tv's
     // `/api/v2/resources` supplies the address, exactly as on a television out of the box.
     //
     // A bare boot with no host still fails loudly here rather than silently booting a sign-in
@@ -120,13 +120,13 @@ fn main() {
     });
 
     // `as c_int` directly — an intermediate i16 would wrap every port above 32767.
-    let rc = plex_run(c_host.as_ptr(), port as c_int, std::ptr::null());
+    let rc = butaca_run(c_host.as_ptr(), port as c_int, std::ptr::null());
     exit_without_atexit_teardown(rc)
 }
 
 /// Leave the process WITHOUT running libc's `atexit` handlers or shared-library destructors.
 ///
-/// `plex_run` returns with detached workers still alive — the sign-in PIN request, the poster
+/// `butaca_run` returns with detached workers still alive — the sign-in PIN request, the poster
 /// fetchers, anything else parked in libcurl — because nothing in the app joins them, and on the
 /// television nothing has to. `std::process::exit` would call libc `exit`, whose handlers include
 /// OpenSSL 3's `OPENSSL_cleanup`: it frees libcrypto's global tables underneath a worker that is
@@ -135,7 +135,7 @@ fn main() {
 /// `OPENSSL_cleanup` from `exit`, worker in `X509_STORE_load_file_ex` under `auth::mint_pin`).
 ///
 /// Nothing that must survive the process lives in those handlers: the event log is appended
-/// unbuffered, the app's own shutdown (telemetry flush included) already ran inside `plex_run`,
+/// unbuffered, the app's own shutdown (telemetry flush included) already ran inside `butaca_run`,
 /// and the two std streams are flushed here by hand.
 fn exit_without_atexit_teardown(rc: c_int) -> ! {
     use std::io::Write;

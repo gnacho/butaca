@@ -1,8 +1,8 @@
-//! plex_run — the Rust app core (was the body of src/main.c). Owns SDL init, the
+//! butaca_run — the Rust app core (was the body of src/main.c). Owns SDL init, the
 //! event loop, input decode, the per-frame tick, draw orchestration, app lifecycle,
 //! the buffer-feed pump orchestration, and the dev triggers. The C boot shim
 //! (main.c) sets up the log and fallback crash tracer, calls the Rust image-marker and native-spool
-//! entries when required, then calls `plex_run`. The only application subsystem left in C is the
+//! entries when required, then calls `butaca_run`. The only application subsystem left in C is the
 //! starfish.c C++/ACB seam (the engine itself is Rust: crate::player).
 #![allow(non_upper_case_globals)]
 use std::os::raw::{c_char, c_int, c_uint, c_void};
@@ -100,9 +100,9 @@ extern "C" {
     fn SDL_GetDisplayUsableBounds(display: c_int, rect: *mut c_int) -> c_int;
 }
 
-// Phase 1a of the UI restructure split this file: everything above `plex_run` moved into the
+// Phase 1a of the UI restructure split this file: everything above `butaca_run` moved into the
 // submodules below as a PURE move (`pub(crate)` widening only), glob-imported here so the
-// loop body reads exactly as before. `plex_run` itself is phase 1b.
+// loop body reads exactly as before. `butaca_run` itself is phase 1b.
 pub(crate) mod adapters;
 pub(crate) mod boot;
 pub(crate) mod bootstrap;
@@ -206,8 +206,8 @@ pub(crate) struct Adapters {
     pub(crate) player: crate::player::adapter::PlayerAdapter,
 }
 
-/// The app core's state, gathered from `plex_run`'s loop-locals (UI restructure spec v4 §13,
-/// phase 1b-i: FIELDS ONLY — `plex_run` keeps its shape and reads `app.<field>` where it read a
+/// The app core's state, gathered from `butaca_run`'s loop-locals (UI restructure spec v4 §13,
+/// phase 1b-i: FIELDS ONLY — `butaca_run` keeps its shape and reads `app.<field>` where it read a
 /// local). Phase 1b-ii extracts the coordinator's functions over `&mut App`; the machines of §2.2
 /// replace these fields one phase at a time. Every field was a `let mut` before the `while
 /// running` loop; the immutable boot-time values (dev flags, closures, the window) stay locals.
@@ -361,10 +361,10 @@ impl App {
     }
     /// Controlled construction receives decoded/captured inputs before bootstrap effects.
     pub(crate) unsafe fn from_init(initial: bootstrap::Initial, mode: bootstrap::Preflight,
-        pms_host: *const c_char, pms_port: c_int, mt: crate::task::MainThread,
+        server_host: *const c_char, server_port: c_int, mt: crate::task::MainThread,
         deferred: Option<crate::server::session::DeferredLoad>,
         launch_params: Option<String>) -> Result<Self, c_int> {
-        boot::construct(pms_host, pms_port, mt, mode, Some(initial), deferred, launch_params)
+        boot::construct(server_host, server_port, mt, mode, Some(initial), deferred, launch_params)
     }
     /// **Which page is on top** (spec §15.2) — the container's answer, and since D1 the ONLY one.
     ///
@@ -379,9 +379,9 @@ impl App {
     }
 }
 
-/// Everything `plex_run` does before minting the main-thread token — every probe, gate and
+/// Everything `butaca_run` does before minting the main-thread token — every probe, gate and
 /// dev-trigger arm that has to run BEFORE `boot()`, in the order this doc explains one by one.
-/// Extracted so `plex_run` itself stays a ten-line skeleton (D4): this is not a phase-function
+/// Extracted so `butaca_run` itself stays a ten-line skeleton (D4): this is not a phase-function
 /// split of ONGOING per-frame work like `app/run.rs`'s, but the one-shot bring-up sequence, and
 /// splitting it out changes nothing about when any of it runs.
 fn pre_boot_diagnostics() {
@@ -467,8 +467,8 @@ fn pre_boot_diagnostics() {
     crate::webos::caps::start_probe();
 }
 
-/// The run+teardown sequence `plex_run` hands the mounted `App` to, split out for the same reason
-/// as [`pre_boot_diagnostics`] (D4): `plex_run` stays a ten-line skeleton naming only the THREE
+/// The run+teardown sequence `butaca_run` hands the mounted `App` to, split out for the same reason
+/// as [`pre_boot_diagnostics`] (D4): `butaca_run` stays a ten-line skeleton naming only the THREE
 /// real phases (pre-boot diagnostics, `boot`, this), never the steps inside any one of them.
 unsafe fn run_and_shutdown(app: &mut App) -> c_int {
     run::run(app);
@@ -510,7 +510,7 @@ pub fn synthetic_home_initial(seed: u32, port: u16, settings: Option<String>)
     serde_json::to_string_pretty(&initial).map_err(|_| "cannot encode synthetic initial inputs")
 }
 
-fn enter_application(pms_host: *const c_char, pms_port: c_int, launch_params: *const c_char) -> Result<App,c_int> {
+fn enter_application(server_host: *const c_char, server_port: c_int, launch_params: *const c_char) -> Result<App,c_int> {
     // The webOS launch-params JSON (argv[1] in the C shim; NULL on a plain launch, which is what
     // SAM does). Read once, up front, while the pointer is known good; the deep-link key is picked
     // out of it in `boot::construct`. Logged raw so a misbehaving launcher is diagnosable from our
@@ -539,7 +539,7 @@ fn enter_application(pms_host: *const c_char, pms_port: c_int, launch_params: *c
     // Diagnostics probes `app_dir()` on its worker, so starting it earlier races that preamble.
     crate::storage::diagnostics::start();
     let main_thread = unsafe { crate::task::MainThread::assume() };
-    let app = unsafe { boot(pms_host,pms_port,main_thread,preflight,launch_params) }?;
+    let app = unsafe { boot(server_host,server_port,main_thread,preflight,launch_params) }?;
     Ok(app)
 }
 
@@ -547,14 +547,14 @@ fn enter_application(pms_host: *const c_char, pms_port: c_int, launch_params: *c
 /// `launch_params` is the raw argv[1] pointer; it is read inside `enter_application` so this
 /// function keeps its line budget (check-deps `fnlen`).
 #[no_mangle]
-pub extern "C" fn plex_run(pms_host: *const c_char, pms_port: c_int, launch_params: *const c_char) -> c_int {
-    let mut app = match enter_application(pms_host,pms_port,launch_params) { Ok(app) => app, Err(code) => return code };
+pub extern "C" fn butaca_run(server_host: *const c_char, server_port: c_int, launch_params: *const c_char) -> c_int {
+    let mut app = match enter_application(server_host,server_port,launch_params) { Ok(app) => app, Err(code) => return code };
     unsafe { run_and_shutdown(&mut app) }
 }
 
 
 // **Four `#[cfg(test)] mod` blocks stood here** and D8 gives each one the home of the thing it
-// grades, so that `plex_run`'s module reads as the entry point it is (`ci/check-deps.sh`'s
+// grades, so that `butaca_run`'s module reads as the entry point it is (`ci/check-deps.sh`'s
 // `testmod` gate is zero here now):
 //
 // * `player_return_tests` — "where playback returns to", over an `Origin::From(Node)` and a

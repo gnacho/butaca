@@ -543,7 +543,7 @@ world-readable `/tmp` on the TV across many runs.
    binary built on this machine.)*
    **Measured 2026-08-02, and better than this list implied: the TOKEN never reaches the binary.**
    `PMS_TOKEN` is referenced nowhere outside `config.local.h` itself — `main.c` passes only
-   `PMS_HOST`/`PMS_PORT` to `plex_run` — and `strings` finds zero occurrences of the real value.
+   `PMS_HOST`/`PMS_PORT` to `butaca_run` — and `strings` finds zero occurrences of the real value.
    The leak here is one RFC1918 address, not a credential. Note also that the local guard is
    self-disabling: `ci/check-elf.sh` skips its config-dependent assertions when `config.local.h`
    is present, so `make ipk` on this machine still produces a fully valid, correctly-hashed

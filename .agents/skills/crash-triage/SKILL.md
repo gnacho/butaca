@@ -185,7 +185,7 @@ and it is worse than none, for the reason in the gotchas below.
 ## Symbolization: what you get
 
 The release build has **no DWARF**, so `addr2line` resolves the **function name** only
-(`plex_run at ??:?`). That is usually enough to route.
+(`butaca_run at ??:?`). That is usually enough to route.
 
 For **file:line**, rebuild with debug info:
 
@@ -196,7 +196,7 @@ make FLAVOR=<f> deploy             # the SAME flavour you are triaging, then rep
 ```
 
 `make` does not track `RUSTFLAGS` changes, so the Rust staticlib will not rebuild on its
-own — hence the `touch`. Verified output after that: `plex_run at rust-modules/src/app/mod.rs:<line>` (it read `app.rs:248` before phase 1a moved the file),
+own — hence the `touch`. Verified output after that: `butaca_run at rust-modules/src/app/mod.rs:<line>` (it read `app.rs:248` before phase 1a moved the file),
 `main at src/main.c:92`. Same codegen, larger binary; deploy it only while chasing a crash.
 
 ## Prove the tracer works before reading its silence

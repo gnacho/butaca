@@ -1213,7 +1213,7 @@ mod tests {
         let diagnostics = body
             .find("crate::storage::diagnostics::start()")
             .expect("diagnostics start");
-        let boot = body.find("boot(pms_host").expect("application boot");
+        let boot = body.find("boot(server_host").expect("application boot");
         assert!(identity < diagnostics && diagnostics < boot);
     }
 

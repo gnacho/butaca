@@ -484,7 +484,7 @@ onto `Overlay` — any non-`None` overlay dismisses via the existing `close_play
 → **Wave 2**
 
 **A5 — the player HUD's focus survives across playback sessions.** `hud_focus`/`hud_btn`/`hud_tab`
-are `plex_run` locals (`app.rs:482-484`) with no owning module. `start_playback`
+are `butaca_run` locals (`app.rs:482-484`) with no owning module. `start_playback`
 (`app.rs:579-596`) resets none of them, and the only general reset (`app.rs:1829-1833`) is gated on
 `route == Player && !hud_shown(…)` — false for the whole `HUD_LINGER_MS` window that
 `start_playback`'s own `set_hud` opens. `app.rs:1727` zeroes `hud_focus` on the EOS path only, so
@@ -577,7 +577,7 @@ key sticks on release). → **Wave 3**, item 20
 **A11 — `remote.rs:66` panics on a multi-byte whitespace character.** `self.buf.rfind(char::is_whitespace)`
 returns the *start* byte of the match, so `buf[..=i]` / `buf[i+1..]` (`:68-69`) slice inside any
 non-ASCII whitespace. The FIFO is drained every frame on every boot (`app.rs:755-771`), the panic
-crosses the `extern "C"` `plex_run` boundary and aborts. Exposure is dev-only: `tools/stream-screen.py`
+crosses the `extern "C"` `butaca_run` boundary and aborts. Exposure is dev-only: `tools/stream-screen.py`
 allowlists every token and both shipped writers use `printf '%s\n'`, and the trailing newline makes
 the last whitespace ASCII — so only a hand-typed `printf 'ok\xc2\xa0'` with no newline trips it.
 *Fix:* `rfind(|c: char| c.is_ascii_whitespace())`. Every token is ASCII, so nothing is lost.
@@ -684,7 +684,7 @@ Recorded so the next reviewer does not re-derive them. Read with §5.
 - **Injecting a measurer into `elide_compute`/`wrap_uncached` unlocks host tests.** It does not:
   `wrap_uncached` calls the memoised global `text::elide`, which drags TTF+GL back in. The
   historical defects in that code were performance, invisible to a stub measurer.
-- **`plex_run`'s 1,830-line `unsafe` block makes input untestable.** Per-screen input rules are
+- **`butaca_run`'s 1,830-line `unsafe` block makes input untestable.** Per-screen input rules are
   already named `pub(crate)` functions outside it, and neither cited regression originated there
   (`211b834` was a device-latency threshold in `pump.rs:60`; `125a828` was `ui/home.rs:194`).
 - **The 172 `static mut` gate testability.** They do not; the crate's host-buildability and its FFI
@@ -728,7 +728,7 @@ Only critic-raised gaps I re-verified myself by reading code. Speculative items 
 `stream.rs:151` is `libc::send(fd, …, 0)` — the only place the app writes a PMS request. A
 tree-wide grep for `SIGPIPE`/`SIG_IGN`/`MSG_NOSIGNAL` returns the sibling that got it right
 (`capture.rs:396`, whose doc at `:390` says outright "SIGPIPE would kill the app") and nothing else.
-The usual net does not exist: `main` is C (`src/main.c:92`) calling `plex_run` as a plain
+The usual net does not exist: `main` is C (`src/main.c:92`) calling `butaca_run` as a plain
 `extern "C"` (`app.rs:248`), so Rust's `std::rt::init` — which installs `SIG_IGN` for SIGPIPE —
 never runs, and `install_crash_tracer` (`src/main.c:80-90`) registers SEGV/ABRT/BUS/ILL/TRAP only.
 A peer that closes between `connect` and the request write therefore terminates the process with

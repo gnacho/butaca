@@ -828,7 +828,7 @@ else
   fail "route: enum Route re-declared — the page alphabet is \`AppArg\` (D1)"
 fi
 
-# fnlen: app/run.rs::run <= 200 lines, plex_run (app/mod.rs) <= 10 lines (D4) — counted by brace
+# fnlen: app/run.rs::run <= 200 lines, butaca_run (app/mod.rs) <= 10 lines (D4) — counted by brace
 # depth from the `fn` line to its matching close, not by grep pattern.
 fn_body_lines() {
   # fn_body_lines <file> <fn-name-pattern> — prints the line count of the first matching fn's body
@@ -844,9 +844,9 @@ fn_body_lines() {
 run_len=$(fn_body_lines "$SRC/app/run.rs" 'run')
 if [ -n "$run_len" ] && [ "$run_len" -le 200 ]; then ok "fnlen: app/run.rs::run ($run_len lines)"
 else fail "fnlen: app/run.rs::run is ${run_len:-unknown} lines, budget 200 — a phase of the frame belongs in its own function (see run.rs's own doc)"; fi
-plexrun_len=$(fn_body_lines "$SRC/app/mod.rs" 'plex_run')
-if [ -n "$plexrun_len" ] && [ "$plexrun_len" -le 10 ]; then ok "fnlen: plex_run ($plexrun_len lines)"
-else fail "fnlen: plex_run is ${plexrun_len:-unknown} lines, budget 10"; fi
+plexrun_len=$(fn_body_lines "$SRC/app/mod.rs" 'butaca_run')
+if [ -n "$plexrun_len" ] && [ "$plexrun_len" -le 10 ]; then ok "fnlen: butaca_run ($plexrun_len lines)"
+else fail "fnlen: butaca_run is ${plexrun_len:-unknown} lines, budget 10"; fi
 
 # testmod: `#[cfg(test)] mod` count in app/mod.rs = 0 (D4/D8) — every test module named in D8's
 # table is meant to have moved to its subject's own file by the time this gate is added.

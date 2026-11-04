@@ -4,13 +4,13 @@
 //! Not affiliated with, endorsed by, or sponsored by Plex GmbH or LG Electronics.
 //!
 //! butaca-modules — the Rust app core, built as a staticlib and linked into the C
-//! boot shim. The crate's C surface is tiny: C calls `plex_run` (app.rs), writes the fallback
+//! boot shim. The crate's C surface is tiny: C calls `butaca_run` (app.rs), writes the fallback
 //! image marker through `butaca_crash_write_image_marker`, re-enters the native-crash spool through
 //! `butaca_sentry_spool_external`, and forwards the two Starfish callbacks (`sf_on_event`/
 //! `acb_on_event`, player/mod.rs). Everything else is Rust-internal (the per-module `repr(C)`
 //! shapes are migration legacy, not ABI).
 mod abr; // client-managed fixed-session HLS controller: estimate, propose, prime, then commit
-mod app; // plex_run — the Rust app core / event loop (the entry inverted from main.c)
+mod app; // butaca_run — the Rust app core / event loop (the entry inverted from main.c)
 mod aq;
 mod auth; // plex.tv login/boot flow controller (PIN/QR → discovery → who's-watching → install)
 mod browse; // Library browse: per-section paged catalog (sparse store + off-thread page fetches)
@@ -406,12 +406,12 @@ pub fn sim_events_log() -> std::path::PathBuf {
 }
 
 /// Re-exported so the simulator binary calls the SAME entry the C shim calls, by name, with the
-/// compiler checking the signature. It previously re-declared `plex_run` in its own `extern "C"`
+/// compiler checking the signature. It previously re-declared `butaca_run` in its own `extern "C"`
 /// block, which meant the one binary whose whole premise is "cannot drift from the shipped boot
 /// path" was the one place a signature change would become a silent ABI mismatch instead of a
 /// compile error.
 #[cfg(feature = "hostsim")]
-pub use app::plex_run;
+pub use app::butaca_run;
 #[cfg(feature = "hostsim")]
 pub use app::synthetic_home_initial;
 

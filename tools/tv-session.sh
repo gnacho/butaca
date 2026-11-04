@@ -503,7 +503,7 @@ assert_install() {
   line=$(tvq "grep '^install: id=' $EVENTLOG 2>/dev/null | head -1")
   if [ -z "$line" ]; then
     bad "no install: line in $EVENTLOG — that is the FIRST thing the app writes"
-    info "so this log is another install's leftover, or the app died before plex_run:"
+    info "so this log is another install's leftover, or the app died before butaca_run:"
     info "    tools/crash-report.sh --flavor $FLAVOR"
     return 1
   fi
