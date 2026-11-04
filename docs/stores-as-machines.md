@@ -34,11 +34,11 @@ read/mutation facade and storage selector with no allowlist.
 ## 1. What a store is, today
 
 Seven data modules own the application's server-derived state: `browse` (the Library table and its
-per-section paged listing), `pms` (Home's hub catalog, behind the `stores::hubs` machine),
+per-section paged listing), `catalog` (Home's hub catalog, behind the `stores::hubs` machine),
 `metadata` (the detail page's item, seasons and episodes, the playing item), `search`, `person`,
 `collection`, and `viewstate` (the view-state WRITE queue). All seven now own their state per `Bridge` (Metadata
 was the last to complete its port): each `Bridge` owns one of each store. `BrowseStore`'s
-state/adapter/notice, `HubsStore`'s `PmsState`/`Arc<PmsAdapter>`/notice, `SearchStore`'s
+state/adapter/notice, `HubsStore`'s `CatalogState`/`Arc<CatalogAdapter>`/notice, `SearchStore`'s
 state/adapter/notice, `MetadataStore`'s state/`Arc<MetadataAdapter>`/notice and `ViewStateStore`'s
 queue, flight, retry and refresh state, worker adapter and notice are per-instance. The Browse
 adapter holds Browse's page, genre, letter, source-discovery and section-hub mailboxes and
@@ -54,7 +54,7 @@ beside a rotated `Arc<CollectionAdapter>` mailbox, and `AppViews` lends `Collect
 the mounted Collection screen.
 
 The census that sized this phase (2026-09-07): browse exports 87 `pub(crate) fn`, metadata 51,
-pms 24, person 21, search 17, viewstate 4. Of those, the MUTATORS a screen calls directly are
+catalog 24, person 21, search 17, viewstate 4. Of those, the MUTATORS a screen calls directly are
 exactly these (file: callers):
 
 | store | mutator | callers outside the store |
@@ -68,7 +68,7 @@ exactly these (file: callers):
 | metadata | `MetadataCmd::{RequestDetail,Clear,Reset,LoadSeason,LoadSeasonNow,SetNowPlaying,SetWatchedLocal,InstallPlaying,MarkSkipped}` — the private `request_detail`/`clear`/`load_season`/`set_now_playing`/`set_watched_local`/`install_playing`/`mark_skipped` functions behind them are not reachable directly | Detail emits `AppFx::Store` (the mount-time `RequestDetail` `screens/registry.rs` used to queue for a fresh Detail page raced `DetailScreen`'s own `Enter(Fresh)` decision and issued it twice; `registry.rs` no longer queues one, so `Enter` is the one owner of "does this page need a fetch"); `app/bridge.rs` delivers to that Bridge's `MetadataStore`; `app/boot.rs` and `app/content.rs` call `Bridge::metadata_run` directly (`load_detail_now` is deleted, D7) |
 | metadata | `pump_detail`, `pump_season`, `pump_alt_sources` | PUMP doors, `pub(crate)` by design — stepped by the store's own `run`/pump path, not called by a screen |
 | search | `set_query`, `reset`, `pump` | none direct — reached only through `StoreCmd::Search` from the owned `screens/search/mod.rs` (`ui/search/mod.rs` and `ui/search/recents.rs` are both deleted) |
-| pms | `request_refetch_hubs`, `request_retry`, `reset` (`#[cfg(test)]`-only since D3's follow-up) | none direct — reached only through `HubsCmd::{RefetchHubs,Retry,Reset}` via `Bridge::hubs_run`, called from `app/{boot,run}.rs` (`ui/home.rs` is deleted; the owned Home emits `StoreCmd::Hubs(..)` and never a mutator — see the Phase 8 note below) |
+| catalog | `request_refetch_hubs`, `request_retry`, `reset` (`#[cfg(test)]`-only since D3's follow-up) | none direct — reached only through `HubsCmd::{RefetchHubs,Retry,Reset}` via `Bridge::hubs_run`, called from `app/{boot,run}.rs` (`ui/home.rs` is deleted; the owned Home emits `StoreCmd::Hubs(..)` and never a mutator — see the Phase 8 note below) |
 
 The phase-4 CENSUS is historical: the 87/51/24/21/17/4 `pub(crate) fn` counts above are a
 2026-09-07 snapshot, never re-run. The table's CALLER column is not — it is the part kept current
@@ -84,7 +84,7 @@ Phase 7 (2026-09-08) mounted Detail and Person from `screens/` and retired their
 the table now names the live callers. Phase 8 (2026-09-09) did the same to Home and took two of the
 table's cells with it: `ui/home.rs` is deleted, so it is no caller of anything, and `catalog::pump` —
 the "legacy callers' combined pass" it was the last caller of — is deleted with it, along with
-`stores::hubs::pump`. The pms row is `request_refetch_hubs`, `request_retry`, `reset` (private,
+`stores::hubs::pump`. The catalog row is `request_refetch_hubs`, `request_retry`, `reset` (private,
 the last one `#[cfg(test)]`-only), reached only through `HubsCmd::{RefetchHubs,Retry,Reset}` via
 `Bridge::hubs_run`, called from `app/{boot,run}.rs`; the owned Home emits `StoreCmd::Hubs(..)` and
 never a mutator, and the store's own `tick` is what a frame drives now. Person, Filmography and
@@ -189,8 +189,8 @@ an ownership slice.
   page, genre, letter, source-discovery and section-hub mailboxes are now fields of its
   per-`BrowseStore` `BrowseAdapter`, not process-wide `PAGE_RESULT`/`GENRE_RESULT`/
   `LETTER_RESULT`/`SRC_RESULT`/`HUB_FETCHING` state. Hubs' fetch results and request counter are
-  now fields of its per-`HubsStore` `Arc<PmsAdapter>`, not a process-wide `RESULTS`, and `pms`'s
-  source table and roster fingerprint live as `PmsState` fields, not statics. ViewState's `MAIL`
+  now fields of its per-`HubsStore` `Arc<CatalogAdapter>`, not a process-wide `RESULTS`, and `catalog`'s
+  source table and roster fingerprint live as `CatalogState` fields, not statics. ViewState's `MAIL`
   moved into its per-owner rotated adapter. Collection's generation-stamped single fetch mailbox
   likewise lives in its per-owner rotated adapter. Metadata is single-flight by construction
   (`FETCHING`/`IN_FLIGHT` bounds the worker count), so the backpressure `Landing` adds is a no-op

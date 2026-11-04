@@ -14,5 +14,5 @@
 # a different, already-permanent exception (see check-deps.sh's own comment on the mutators-
 # visibility gate) and does not belong on this list. This file exists for the day a future
 # store's worker closure DOES call a pub fn directly instead of a private in-file helper. Not the
-# place for any other kind of pub(crate) exception — see check-deps.sh's comment on `pms::reset`
+# place for any other kind of pub(crate) exception — see check-deps.sh's comment on `catalog::reset`
 # for why that one is tracked as an open item instead of waived here.

@@ -310,7 +310,7 @@
   "errors": [],
   "flavor": "debug",
   "passed": true,
-  "real_plex_restart": {
+  "real_server_restart": {
     "bytes": 2676817,
     "entries": 45,
     "evictions": 0,

@@ -64,7 +64,7 @@ def build_root():
     with open(os.path.join(root, "tests/manifest.local.json"), "w") as f:
         json.dump({
             "_comment": "prose that is verbatim public in the .example, and must not be matched",
-            "pms": {"host": FAKE_SERVER, "port": 32400},
+            "server": {"host": FAKE_SERVER, "port": 32400},
             "tv": FAKE_TV,
             "test_user": {"id": FAKE_USERID, "title": "Zed"},
             "shared_server": {"machine_id": FAKE_MACHINE, "name": "nas-fake", "port": 31234},
@@ -184,7 +184,7 @@ Verified against %s over twelve seeks."''' % FAKE_SERVER
 # repository root as well, where `published` is a live `git grep` rather than the set above.
 HEREDOC_SELF = """gh pr create --title "hooks: an outbound guard" --body-file - <<'EOF'
 It matches the literal values in `.tv-host`, `src/config.local.h` and `tests/manifest.local.json`,
-plus shapes: `X-Plex-Token=<value>`, a 40-hex machineIdentifier, a private-range IPv4.
+plus shapes: a token key/value pair, a 40-hex machineIdentifier, a private-range IPv4.
 
 It does NOT match `192.0.2.10`, `203.0.113.9`, `1.2.3.4`, `127.0.0.1`, `192.168.x`,
 `172.16.0.0/12`, the stand-in `10.9.9.7`, upstream's `10.0.0.42`, or `alpine`.
@@ -403,7 +403,7 @@ def variable_reference_case():
         os.path.abspath(__file__)), "outbound-guard.py"))
     g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)
 
-    REAL = "sK3xY9zQ2mNpL7vR1tB4"          # 20 chars, exactly a Plex token's shape
+    REAL = "sK3xY9zQ2mNpL7vR1tB4"          # 20 chars, exactly the shape of an access token
     cases = [
         # (should_flag, text, why)
         (False, 'auth_token = fetch()\nheaders = {"X-Plex-Token": auth_token}',
@@ -412,7 +412,7 @@ def variable_reference_case():
          "same, through concatenation"),
         (True, 'headers = {"X-Plex-Token": "%s"}' % REAL,
          "a QUOTED literal is a leak however it is spelled"),
-        (True, "curl 'https://pms/library?X-Plex-Token=%s'" % REAL,
+        (True, "curl 'https://media.example/library?X-Plex-Token=%s'" % REAL,
          "an unquoted literal nothing assigns is a leak"),
         (True, 'auth_token = fetch()\nheaders = {"X-Plex-Token": "%s"}' % REAL,
          "a quoted literal beside an unrelated assignment is still a leak"),

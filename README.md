@@ -1,6 +1,6 @@
 # Butaca
 
-A Jellyfin client that runs natively on LG webOS televisions. Not a web page: the interface is
+An unofficial Jellyfin client that runs natively on LG webOS televisions. Not a web page: the interface is
 drawn straight on the GPU and video goes to the television's own decoder. No Chromium, no
 JavaScript, no web view.
 
@@ -172,4 +172,4 @@ build of FFmpeg, and those notices travel inside the `.ipk` rather than only wit
 
 This is an unofficial client, not affiliated with, endorsed by or sponsored by Jellyfin, Plex GmbH
 or LG Electronics. "Jellyfin", "Plex", "LG" and "webOS" are trademarks of their respective owners,
-and where they appear in the app they identify whose service is being shown.
+and where they appear they identify whose service is being shown.

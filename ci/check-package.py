@@ -1037,7 +1037,7 @@ else:
 #
 #   * matching per-BLOB and allowing anything containing "webos-ndk" passes the very file it was
 #     written for. FFmpeg records its whole configure invocation as ONE string, so the unavoidable
-#     `--cross-prefix=/…/webos-ndk/…` sits beside the offending `--prefix=/…/plex-native-poc/…`
+#     `--cross-prefix=/…/webos-ndk/…` sits beside the offending `--prefix=/…/butaca-native-poc/…`
 #     and one allowed token vouches for the other. v0.2.1's libraries pass that test.
 #   * tokenising to fix it, without keeping the leading boundary, makes an absolute URL ending
 #     in `/home/users` read as a bare `/home/users` and fails every build.
@@ -1242,8 +1242,8 @@ if binary.exists():
     # on trunk (`0.5.0` published, `0.6.0-dev` in the tree) — or, on a MAINTENANCE LINE (a tracked
     # `RELEASE_LINE` marker at the repo root, see `expected_dev_version`'s doc and
     # `rust-modules/src/release_line.rs`), the next PATCH instead (`0.6.1` published, `0.6.2-dev`
-    # in the tree). That exists so a developer build stops impersonating the last release in
-    # X-Plex-Version, in the Sentry release and on the diagnostics panel — and it means a version
+    # in the tree). That exists so a developer build stops impersonating the last release in the
+    # version it reports, in the Sentry release and on the diagnostics panel. It means a version
     # string now has a way to be wrong that no file comparison can see: a package for the stable id
     # whose binary reports a version no release will ever carry, or, once this rule exists, a
     # developer build that silently stopped saying so.
@@ -1366,9 +1366,10 @@ check(re.fullmatch(r"\d+\.\d+\.\d+", appinfo["version"]) is not None,
 check(appinfo["type"] == "native", 'appinfo type == "native"')
 check(not appinfo["id"].startswith(("com.palm", "com.webos", "com.lge", "com.palmdts")),
       "app id avoids LG's reserved prefixes")
-# The crate version is a THIRD copy of the same number: server/identity.rs reports it to the account
-# service as X-Plex-Version (through `BUTACA_VERSION`, which `build.rs` derives from it), so a build
-# whose Cargo.toml disagreed with appinfo.json would report a version no release ever had.
+# The crate version is a THIRD copy of the same number: the binary reports it (through
+# `BUTACA_VERSION`, which `build.rs` derives from it) on the diagnostics panel, on the About page
+# and in the session log, so a build whose Cargo.toml disagreed with appinfo.json would report a
+# version no release ever had.
 # Nightly again the exception, and graded the same way as the first Cargo.toml witness above.
 cargo_ver = re.search(r'^version\s*=\s*"([^"]+)"', (ROOT / "rust-modules/Cargo.toml").read_text(), re.M)
 if IS_NIGHTLY:

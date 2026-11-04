@@ -131,7 +131,7 @@ Recorded **2026-08-21**: a lane was branched from an unrelated `backdrop-blur` c
 integration branch, so the symbol its task depended on did not exist.
 
 ```sh
-MAIN=/Users/gleblinnik/Developer/plex/plex-native-poc
+MAIN=<path-to-main-checkout>                             # the long-lived clone, not a lane
 git -C "$MAIN" fetch origin                              # `git log --all` reads only refs you HOLD
 BASE=$(git -C "$MAIN" rev-parse origin/main)             # or the integration branch
 git -C "$MAIN" worktree add -b fleet/<lane> "$MAIN/.claude/worktrees/<lane>" "$BASE"
@@ -239,7 +239,7 @@ cp "$MAIN/tests/manifest.local.json" "$WT/tests/"        # only for ./tests/run.
   `make sim-shot` read `SERVER_HOST` out of it (`Makefile:843`) and die `no server host` without it —
   `make sim` alone only builds, so the failure arrives one command later than you expect;
   `make sim-token`, `tools/tv-session.sh` and `tests/run.py` read `SERVER_TOKEN` from it. **So every
-  lane carries its own copy of a real X-Plex-Token**, which is exactly why `.gitignore` names it in
+  lane carries its own copy of a real access token**, which is exactly why `.gitignore` names it in
   the *tracked* file — read the comment there: it used to be held out by `.git/info/exclude`, which
   is local-only and *"does not apply in a fresh worktree"*, i.e. one `git add -A` from a live
   credential in a public repo's history. `git worktree remove` the lanes when the fleet is done and

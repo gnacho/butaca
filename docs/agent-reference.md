@@ -555,7 +555,7 @@ which the linking section explains is load-bearing rather than tidy.
   both fatal paths to logs plus warnings. Release builds contain none of these new dev paths.
 - `rust-modules/src/stores/` — **the data stores behind ONE vocabulary and ONE step** (restructure
   phase 4, 2026-09-07; `docs/stores-as-machines.md`): `StoreCmd` is the complete set of mutations
-  of `browse`/`pms`/`metadata`/`search`/`person`/`viewstate`. Browse, Hubs, Metadata, Person,
+  of `browse`/`hubs`/`metadata`/`search`/`person`/`viewstate`. Browse, Hubs, Metadata, Person,
   Search and ViewState are physically owned per `Bridge` by `Stores`: `BrowseStore` owns its
   state/adapter/notice, `HubsStore` owns its `CatalogState`/`Arc<CatalogAdapter>`/notice,
   `MetadataStore` owns its state/`Arc<MetadataAdapter>`/notice,
@@ -1292,10 +1292,10 @@ FFI into the TV's own libraries. **`./tests/run.py` needs a gitignored `tests/ma
 SHAPE of item it needs (`item: "movie_h264_ac3_1080p"`); the overlay maps that to a ratingKey on
 this server and supplies the server host, TV address and test user. Copy
 `tests/manifest.local.json.example` and fill it in; the runner refuses to start without the FILE, and
-without `pms.host` / `tv` / `test_user.id`. **An `item` key it cannot resolve is a SKIP, not a
-death** (since 2026-08-22) — absent or left as the example's `<ratingKey>`, it skips the cases and
-fps scenes naming it, prints the reason in the summary and in `--list`, and runs the rest. The
-matrix is a SUPERSET of what any one library holds (it names 4K DoVi P8, TrueHD, PGS, AV1-with-no-
+without the server block, the TV address or `test_user.id`. **An `item` key it cannot resolve is a
+SKIP, not a death** (since 2026-08-22) — absent or left as the example's `<ratingKey>`, it skips
+the cases and fps scenes naming it, prints the reason in the summary and in `--list`, and runs the
+rest. The matrix is a SUPERSET of what any one library holds (it names 4K DoVi P8, TrueHD, PGS, AV1-with-no-
 DP-audio), so before that change the suite ran for exactly one library in the world; one ordinary
 h264/ac3 movie now gets a stranger every playback case and fps scene naming that shape or no item
 at all — count it with `./tests/run.py --list`, never from here. Consequence when
@@ -1316,7 +1316,7 @@ library-backed cases everything above describes are **`./tests/run.py --server`*
 still parses (it names the default); pairing it with `--server`/`--fps` is refused rather than
 silently resolved. The inversion is about what the obvious command should mean: the default has to
 be the thing that runs for everybody, needs no credentials, touches nobody's watch history, and
-answers "is the PLAYER broken" — charging a PMS, a token and a filled-in overlay for typing
+answers "is the PLAYER broken" — charging a server, a token and a filled-in overlay for typing
 `./tests/run.py` meant most people could not type it at all. **Never ship on the default alone**
 (what it cannot see is three paragraphs down). The server tier is still the right shape for what it
 grades — SELECTION: `/decision`, direct-play vs transcode, track menus from server metadata, markers,
@@ -1681,7 +1681,7 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   it; `make softfloat-probe` fetches it), `/tmp/butaca-url` (override the streamed part
   URL) and **`/tmp/butaca-playurl`** (the same, plus the LOAD DECLARATION — one JSON object,
   `{"url":…,"vcodec":…,"acodec":…,"fps":…,"dovi":{…},"atmos":…}`, which is what the pipeline test
-  tier drives and the only way to declare HEVC / `"AC3 PLUS"` / Dolby for a stream no PMS chose;
+  tier drives and the only way to declare HEVC / `"AC3 PLUS"` / Dolby for a stream no server chose;
   it also ENTERS the player on its own from a boot with no session, since there is no home grid to
   press OK on), **`/tmp/butaca-replay[=N]`** (once a `playurl` stream reaches EOS,
   start it AGAIN, N times — LG checklist #46's replay half; a COUNTER rather than a lifted latch

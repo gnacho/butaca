@@ -155,7 +155,7 @@ claim about a universal server maximum, and the client's transaction grades the 
 than trusting the table.
 
 > **Corrected 2026-08-27 — the table above is ITEM-specific, and it was read as server-specific.**
-> A full-ladder sweep on three items (`docs/measurements/p2h-pms-ladder.md`) reproduces the
+> A full-ladder sweep on three items (`docs/measurements/p2h-server-ladder.md`) reproduces the
 > *boundary* exactly — 21,750 kbps still returns the lower operating point and 21,999 the higher —
 > but **not the value below it**: on a 1080p 2.39:1 film the lower point declares **16,150 kbps**,
 > not the "about 20,011" recorded here. The 20,011 was that probe's item. The boundary generalises;

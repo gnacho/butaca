@@ -126,7 +126,7 @@ ships, because `-Z build-std` is what ships.
    connected. A socket assertion passing here is evidence about the host, not the TV.
 3. **Some tests are serialized on crate globals**, not parallel. `metadata.rs`'s take `lib.rs`'s
    crate-wide `testlock::serial()`, and so does every owned-screen test that seeds a store —
-   an owned screen keeps no focus of its own (the `FocusEngine` does), but `pms`'s catalog statics
+   an owned screen keeps no focus of its own (the `FocusEngine` does), but `catalog`'s statics
    are shared across modules. `ui/xfade.rs` is the cautionary case, and its own module doc says why:
    pure value semantics **with one exception that costs them their parallelism** — `tick` reports
    to `ui::idle`'s process-global dirty flag, which `ui::idle`'s own "a settled screen does not
@@ -217,7 +217,7 @@ knows the set is theirs.
 
 | what you changed | run, in order | what those tiers CANNOT see |
 |---|---|---|
-| **pure logic** — `route/plan.rs`, `pms/`, `metadata.rs`, `browse.rs`, `aq.rs`, `stream.rs` parsing, `ff.rs` helpers | `make check` (+ a new test) → `make sim-shot` if a screen reads it | the native libraries; Linux syscall semantics; whether the value reaches a pixel |
+| **pure logic** — `route/plan.rs`, `catalog/`, `metadata.rs`, `browse.rs`, `aq.rs`, `stream.rs` parsing, `ff.rs` helpers | `make check` (+ a new test) → `make sim-shot` if a screen reads it | the native libraries; Linux syscall semantics; whether the value reaches a pixel |
 | **UI layout / spacing / colour / a new screen** (`ui/`) | `make check` → a `BUTACA_WIN=1920x1080` simulator shot (`ui-sim`) → **one device capture, looked at** | the fps tier is blind to pixels (the 2026-08-13 watched-mark bug); a FITTED sim shot is 960x540 on a 1x display, layout evidence only — which is what `BUTACA_WIN` exists for |
 | **text rasterization, fonts, the `theme::size` ladder** | `tools/font-hint-audit.py` → device capture | **the simulator is disqualified** — different FreeType; `make check` never rasterizes anything |
 | **anything ANIMATED, or repainting from a CLOCK** | two host tests (runs / rests) → `--fps` with a real `fps_floor`, plus an `fps_ceiling` if the screen settles | `loop_floor` cannot see a stopped animation at all; the simulator cannot see rate |
