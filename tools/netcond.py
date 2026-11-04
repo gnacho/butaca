@@ -12,12 +12,12 @@ This sits between the TV and the server and makes the server misbehave on demand
 
     ┌────────┐        ┌──────────────┐        ┌─────────┐
     │  TV    │──────▶ │ netcond.py   │──────▶ │  server    │
-    │  app   │  :32401│ (this Mac)   │  :32400│         │
+    │  app   │  :32401│ (this Mac)   │  :8096 │         │
     └────────┘        └──────────────┘        └─────────┘
 
-The server runs on this same Mac, so the proxy only needs a second port; point the app at it by
-editing `SERVER_PORT` in the gitignored `src/config.local.h`, then `make deploy` (the host/port are
-compiled into `main.c`'s `butaca_run` call — there is no runtime override).
+The server runs on this same Mac, so the proxy only needs a second port. The app learns the
+server URL from its Jellyfin config (`/media/developer/<app id>-jellyfin.json`, or the
+`/tmp/butaca-jellyfin` development trigger), so point its `url` at the proxy.
 
 ## Modes
 
@@ -37,7 +37,7 @@ bug is a POST that was in flight when the server went quiet.
 
 Any mode may be scoped to matching requests only:
 
-    stall@/:/timeline   stall ONLY connections whose first bytes contain "/:/timeline";
+    stall@/Sessions/Playing   stall ONLY connections whose first bytes contain "/Sessions/Playing";
                         everything else passes normally.
 
 That scoping is what makes a clean experiment possible: freeze the progress reporter while the
@@ -46,7 +46,7 @@ reporter's POST and not a starved demuxer.
 
 **Scoping was broken until 2026-08-23 and only the ACCEPT half worked.** `serve_conn` consulted
 `applies()` (scope-aware) to decide reject/blackhole and to log, and then handed `relay` a bare
-`Mode.split`, which throws the scope away — so `stall@/:/timeline` really stalled the relay of
+`Mode.split`, which throws the scope away — so `stall@/Sessions/Playing` really stalled the relay of
 every open connection, media stream included, and the experiment the scope exists to make clean
 was not clean. `relay` now takes the connection's own first bytes and asks `applies()` per chunk,
 which is what this docstring has claimed all along.
@@ -69,9 +69,9 @@ Four properties, each deliberate:
   * **kbps is KILOBITS, decimal** — 1 kbps = 1000 bits/s — because that is the unit the checklist
     item states its legs in. `rate:512` is 64,000 bytes/s, not 65,536.
   * **One bucket for the whole proxy, not one per connection.** `rate:` names a LINK, and a link
-    is shared: the media GET and a `/:/timeline` POST racing each other is exactly the contention
+    is shared: the media GET and a `/Sessions/Playing` POST racing each other is exactly the contention
     a real slow network produces, and per-connection buckets would hand each of them the full
-    rate. Scope it (`rate:512@/library/parts`) when you want only the media stream throttled and
+    rate. Scope it (`rate:512@/Videos/`) when you want only the media stream throttled and
     the control calls left at full speed.
   * **It applies to connections ALREADY OPEN**, like every other mode here — the bucket's rate is
     re-read per chunk — so a transfer can be throttled, released and re-throttled MID-FLIGHT
@@ -83,9 +83,9 @@ Four properties, each deliberate:
 
 ## Use
 
-    tools/netcond.py --listen 32401 --target 127.0.0.1:32400 \
+    tools/netcond.py --listen 32401 --target 127.0.0.1:8096 \
         --allow-client <TV_IP>                                     # starts in `pass`
-    echo 'stall@/:/timeline' > /tmp/netcond.mode                    # freeze the reporter
+    echo 'stall@/Sessions/Playing' > /tmp/netcond.mode                    # freeze the reporter
     echo 'rate:512'          > /tmp/netcond.mode                    # throttle the link
     echo pass                > /tmp/netcond.mode                    # let it go again
 
@@ -173,7 +173,7 @@ class Mode:
 
     @staticmethod
     def split(raw):
-        """'stall@/:/timeline' -> ('stall', '/:/timeline'); 'delay:250' -> ('delay:250', None)"""
+        """'stall@/Sessions/Playing' -> ('stall', '/Sessions/Playing'); 'delay:250' -> ('delay:250', None)"""
         act, _, scope = raw.partition("@")
         return act.strip(), (scope.strip() or None)
 
@@ -507,7 +507,7 @@ def pull(port, nbytes, host="127.0.0.1", timeout=60):
     c = socket.create_connection((host, port), timeout=timeout)
     try:
         c.settimeout(timeout)
-        c.sendall(b"GET /library/parts/1/file.mkv HTTP/1.1\r\nHost: netcond\r\n\r\n")
+        c.sendall(b"GET /Videos/1/stream HTTP/1.1\r\nHost: netcond\r\n\r\n")
         t0 = time.monotonic()
         got = 0
         while got < nbytes:
@@ -604,7 +604,7 @@ def main():
     ap.add_argument("--bind", default="0.0.0.0",
                     help="listener address (default 0.0.0.0; use 127.0.0.1 for a simulator run, "
                          "which then needs no --allow-client)")
-    ap.add_argument("--target", default="127.0.0.1:32400")
+    ap.add_argument("--target", default="127.0.0.1:8096")
     ap.add_argument("--mode", default="pass")
     ap.add_argument("--control", default="/tmp/netcond.mode")
     ap.add_argument(
