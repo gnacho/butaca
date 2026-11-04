@@ -1135,6 +1135,9 @@ fn update_refuses_a_file_that_holds_no_session() {
 /// whose stored `thumb` is a `null` costs that user, not the session.
 #[test]
 fn a_malformed_home_user_costs_that_tile_and_not_the_session() {
+    // `account` prefers an installed client's user name over this session's roster, so the
+    // assertion below is only about the roster while no other test has one installed.
+    let _g = crate::testlock::serial();
     let s: Session = serde_json::from_str(
         r#"{"client_id":"c","home_users":[{"uuid":"a","title":"A","thumb":null},
                                           {"uuid":"b","title":"B","thumb":"","admin":true}]}"#,
