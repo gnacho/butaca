@@ -58,7 +58,7 @@ printf '{"url":"http://127.0.0.1:%s/%s","vcodec":"h264","acodec":"aac","fps":24.
   "$MEDIA_PORT" "$(basename "$CLIP")" > "$D/butaca-playurl"
 
 BUTACA_RUNTIME_DIR="$D" BUTACA_APP_DIR="$ROOT/pkg" BUTACA_WIN=1920x1080 \
-  "$SIM_BIN" 127.0.0.1 "$SERVER_PORT" > "$D/sim.out" 2>&1 &
+  "$SIM_BIN" > "$D/sim.out" 2>&1 &
 SIM_PID=$!
 
 LOG="$D/butaca-events.log"

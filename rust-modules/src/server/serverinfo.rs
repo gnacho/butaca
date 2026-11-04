@@ -179,6 +179,7 @@ mod tests {
     /// isolation.
     #[test]
     fn one_servers_paid_tier_is_never_read_as_the_others() {
+        let _g = crate::testlock::serial();
         let (a, b) = (ServerId::from_raw(0), ServerId::from_raw(1));
         // the slot arrays are keyed on the SLOT and never reset by anything else, so start from
         // the boot state explicitly rather than from what an earlier test left
@@ -239,9 +240,13 @@ mod tests {
     #[test]
     fn a_landed_server_fact_asks_the_frame_gate_to_repaint() {
         let _g = crate::testlock::serial();
+        // `reset_for_test` drains leftover gate state from other modules' tests, including the
+        // video-plane term `should_present` reads and this test does not own: a bound plane makes
+        // every frame present, so a stale `true` from another test failed the quiet assertion.
         // `frame_begin` forgets last frame's motion, `note_present` retires the 2 s keepalive, and
         // `should_present` TAKES-AND-CLEARS — so each call answers for exactly the frames since the
         // previous one, and nothing but the store below can be what answered.
+        crate::ui::idle::reset_for_test();
         let asked = || {
             crate::ui::idle::set_enabled(true); // a test that disabled the gate leaves it off
             crate::ui::idle::frame_begin(1.0 / 60.0);

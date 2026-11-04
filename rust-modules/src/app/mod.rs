@@ -361,10 +361,10 @@ impl App {
     }
     /// Controlled construction receives decoded/captured inputs before bootstrap effects.
     pub(crate) unsafe fn from_init(initial: bootstrap::Initial, mode: bootstrap::Preflight,
-        server_host: *const c_char, server_port: c_int, mt: crate::task::MainThread,
+        mt: crate::task::MainThread,
         deferred: Option<crate::server::session::DeferredLoad>,
         launch_params: Option<String>) -> Result<Self, c_int> {
-        boot::construct(server_host, server_port, mt, mode, Some(initial), deferred, launch_params)
+        boot::construct(mt, mode, Some(initial), deferred, launch_params)
     }
     /// **Which page is on top** (spec §15.2) — the container's answer, and since D1 the ONLY one.
     ///
@@ -510,7 +510,7 @@ pub fn synthetic_home_initial(seed: u32, port: u16, settings: Option<String>)
     serde_json::to_string_pretty(&initial).map_err(|_| "cannot encode synthetic initial inputs")
 }
 
-fn enter_application(server_host: *const c_char, server_port: c_int, launch_params: *const c_char) -> Result<App,c_int> {
+fn enter_application(launch_params: *const c_char) -> Result<App,c_int> {
     // The webOS launch-params JSON (argv[1] in the C shim; NULL on a plain launch, which is what
     // SAM does). Read once, up front, while the pointer is known good; the deep-link key is picked
     // out of it in `boot::construct`. Logged raw so a misbehaving launcher is diagnosable from our
@@ -539,7 +539,7 @@ fn enter_application(server_host: *const c_char, server_port: c_int, launch_para
     // Diagnostics probes `app_dir()` on its worker, so starting it earlier races that preamble.
     crate::storage::diagnostics::start();
     let main_thread = unsafe { crate::task::MainThread::assume() };
-    let app = unsafe { boot(server_host,server_port,main_thread,preflight,launch_params) }?;
+    let app = unsafe { boot(main_thread,preflight,launch_params) }?;
     Ok(app)
 }
 
@@ -547,8 +547,8 @@ fn enter_application(server_host: *const c_char, server_port: c_int, launch_para
 /// `launch_params` is the raw argv[1] pointer; it is read inside `enter_application` so this
 /// function keeps its line budget (check-deps `fnlen`).
 #[no_mangle]
-pub extern "C" fn butaca_run(server_host: *const c_char, server_port: c_int, launch_params: *const c_char) -> c_int {
-    let mut app = match enter_application(server_host,server_port,launch_params) { Ok(app) => app, Err(code) => return code };
+pub extern "C" fn butaca_run(launch_params: *const c_char) -> c_int {
+    let mut app = match enter_application(launch_params) { Ok(app) => app, Err(code) => return code };
     unsafe { run_and_shutdown(&mut app) }
 }
 

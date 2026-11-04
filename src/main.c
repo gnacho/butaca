@@ -25,7 +25,7 @@ FILE *elogf = NULL;   /* shared event/diagnostic log (extern in app.h); used by 
 /* The crash log has no `FILE *` any more, only a raw descriptor handed to `butaca_crash_install`: its
  * ONLY writer is the signal handler, and stdio is not usable there. See `src/crashtrace.c`. */
 
-extern int butaca_run(const char *server_host, int server_port, const char *launch_params);  /* Rust app core (no creds — session or /tmp/butaca-token; argv[1] launch-params JSON or NULL) */
+extern int butaca_run(const char *launch_params);  /* Rust app core (no creds and no server: session, config file or /tmp/butaca-token; argv[1] launch-params JSON or NULL) */
 extern void butaca_crash_write_image_marker(int fd); /* identify this binary in the append-only log (crashtrace.c) */
 
 /* Where this INSTALL's runtime files live — `/tmp/butaca-events.log` for the app users get,
@@ -139,5 +139,5 @@ int main(int argc, char **argv) {
     setenv("SDL_WEBOS_ACCESS_POLICY_KEYS_BACK", "true", 1);
     /* webOS hands a native app its launch params as a JSON string in argv[1]
      * (SAM "params" object; absent on a plain launch). Forwarded, not parsed here. */
-    return butaca_run(SERVER_HOST, SERVER_PORT, argc > 1 ? argv[1] : NULL);
+    return butaca_run(argc > 1 ? argv[1] : NULL);
 }

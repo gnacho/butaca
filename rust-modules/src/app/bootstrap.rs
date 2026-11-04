@@ -225,7 +225,7 @@ impl Initial {
         if matches!(&self.session.authority, crate::auth::owner::BootstrapAuthority::DevJf { .. }) { 0 }
         else { self.primary_client }
     }
-    pub(crate) fn capture_home(_host: &str, _port: i32) -> Result<(Self, Option<crate::server::session::DeferredLoad>), &'static str> {
+    pub(crate) fn capture_home() -> Result<(Self, Option<crate::server::session::DeferredLoad>), &'static str> {
         if let Some(value) = crate::dev::scenarios::app_init_value() {
             return Self::from_value(value?).map(|initial| (initial, None));
         }

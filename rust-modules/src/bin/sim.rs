@@ -18,18 +18,16 @@
 //! the parts that do transfer — and they are most of the UI work.
 //!
 //! Usage:
-//!   butaca-sim [server-host] [server-port]
+//!   butaca-sim [--write-synthetic-initial <path> <seed> <port> [flow12|settings=…]]
 //! Environment:
-//!   BUTACA_SERVER_HOST / BUTACA_SERVER_PORT   server to talk to (argv wins)
+//!   BUTACA_SERVER_HOST / BUTACA_SERVER_PORT   accepted and ignored: older scripts still pass
+//!                                             them, but the app reads its server from the
+//!                                             Jellyfin config, never from here
 //!   BUTACA_RUNTIME_DIR                     this instance's trigger/FIFO/log root
 //!   BUTACA_APP_DIR                         where appfont*.ttf and the icons live (repo `pkg/`)
 
 use butaca_modules::butaca_run;
-use std::ffi::CString;
 use std::os::raw::c_int;
-
-/// Defaults chosen to fail loudly rather than silently talk to the wrong thing.
-const DEFAULT_PORT: u16 = 32400;
 
 fn main() {
     // SIGPIPE needs no handling here, unlike `src/main.c:105`: that file installs `SIG_IGN` by hand
@@ -37,11 +35,11 @@ fn main() {
     // already done it, and the first server socket closed mid-write cannot kill the process.
 
     let mut args = std::env::args().skip(1);
-    let host = args
+    let first = args
         .next()
         .or_else(|| std::env::var("BUTACA_SERVER_HOST").ok())
         .unwrap_or_default();
-    if host == "--write-synthetic-initial" {
+    if first == "--write-synthetic-initial" {
         use std::io::Write;
         use std::os::unix::fs::OpenOptionsExt;
         let result = (|| -> Result<(), &'static str> {
@@ -64,27 +62,9 @@ fn main() {
         if let Err(reason) = result { eprintln!("synthetic initial input: {reason}"); std::process::exit(2); }
         return;
     }
-    let port: u16 = args
-        .next()
-        .or_else(|| std::env::var("BUTACA_SERVER_PORT").ok())
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(DEFAULT_PORT);
-
-    // No host is not an error — it is what a person who was SENT this app has. The boot host is
-    // only ever consulted by the two paths that already hold credentials (the stored session and
-    // the harness's injected token). With neither, `butaca_run` opens the sign-in screen, which
-    // asks for the server address, exactly as on a television out of the box.
-    //
-    // A bare boot with no host still fails loudly here rather than silently booting a sign-in
-    // screen at somebody expecting Home.
-    if host.is_empty() {
-        eprintln!(
-            "butaca-sim: no server host given - opening the sign-in screen.\n\
-             (pass one as `butaca-sim <numeric-ip> [port]`, or set BUTACA_SERVER_HOST, to boot\n\
-             straight at a known server. It must be a NUMERIC IP: stream.rs speaks HTTP/1.1 over a\n\
-             raw socket with no DNS resolver, on the desktop exactly as on the television.)"
-        );
-    }
+    // Older scripts still pass `[host] [port]`. The app takes neither: it reads its server from
+    // the Jellyfin config, so the pair is consumed and ignored rather than rejected.
+    let _ = args.next().or_else(|| std::env::var("BUTACA_SERVER_PORT").ok());
 
     // The instance root must exist before anything writes into it, and the event log is truncated
     // per launch — `src/main.c` does the same on the television, and `tests/run.py` relies on the
@@ -109,18 +89,12 @@ fn main() {
     }
 
     eprintln!(
-        "butaca-sim: server={host}:{port} runtime={} log={}",
+        "butaca-sim: server from the Jellyfin config runtime={} log={}",
         root.display(),
         events.display()
     );
 
-    let c_host = CString::new(host).unwrap_or_else(|_| {
-        eprintln!("butaca-sim: host contains a NUL byte");
-        std::process::exit(2)
-    });
-
-    // `as c_int` directly — an intermediate i16 would wrap every port above 32767.
-    let rc = butaca_run(c_host.as_ptr(), port as c_int, std::ptr::null());
+    let rc = butaca_run(std::ptr::null());
     exit_without_atexit_teardown(rc)
 }
 

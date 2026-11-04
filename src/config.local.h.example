@@ -1,7 +1,8 @@
 /* Copy this file to config.local.h and fill in your Jellyfin server host.
- * config.local.h is gitignored. Only SERVER_HOST/SERVER_PORT are compiled into the app —
- * the binary carries NO credentials: server access comes from the in-app sign-in,
- * or from the /tmp/butaca-token dev trigger for automated runs.
+ * config.local.h is gitignored. SERVER_HOST/SERVER_PORT are read by HOST-side scripts
+ * (tests/run.py, tools/) and are NOT compiled into the app: the binary carries no server
+ * address and NO credentials. Server access comes from the in-app sign-in, or from the
+ * /tmp/butaca-token dev trigger for automated runs.
  *
  * SERVER_TOKEN is read by tests/run.py on the BUILD HOST only (it injects the token
  * onto the TV at test time via /tmp/butaca-token); it is never compiled into the app.

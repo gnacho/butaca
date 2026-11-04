@@ -134,8 +134,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# The simulator reads its server from the Jellyfin config in BUTACA_RUNTIME_DIR, not from argv.
+# This script does not write one yet, so the proxy below only matters once a config points at it.
 BUTACA_RUNTIME_DIR="$DIR" BUTACA_APP_DIR="$REPO/pkg" BUTACA_WIN=640x360 \
-  "$SIM_BIN" 127.0.0.1 "$PROXY_PORT" > "$DIR/sim.stdout" 2>&1 &
+  "$SIM_BIN" > "$DIR/sim.stdout" 2>&1 &
 SIM_PID=$!
 
 # ---- drive the profile --------------------------------------------------------
