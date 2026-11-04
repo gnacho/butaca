@@ -111,7 +111,7 @@ FOCUS_RE = re.compile(r"^focus .*$", re.M)
 def server_from_config():
     """Host and port out of the gitignored src/config.local.h, the same source `make sim` reads."""
     p = os.path.join(REPO, "src", "config.local.h")
-    host, port = None, "32400"
+    host, port = None, "8096"
     if os.path.exists(p):
         for line in open(p):
             m = re.match(r'\s*#define\s+SERVER_HOST\s+"([^"]+)"', line)

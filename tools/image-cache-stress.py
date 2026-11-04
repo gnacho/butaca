@@ -30,7 +30,7 @@ import urllib.request
 
 
 MACHINE_ID = "butaca-image-cache-stress-v1"
-THUMB = re.compile(r"^/library/metadata/([1-9][0-9]*)/thumb/1$")
+THUMB = re.compile(r"^/Items/([0-9a-f]{32})/Images/Primary$")
 CACHE = re.compile(r"\bimgcache: ((?:[a-z_]+=[0-9]+ ?)+)")
 FPS = re.compile(r"\bloop=(\d+) route=library\b.*?\bfps=(\d+)")
 WORST = re.compile(r"\bworstframe=([0-9.]+)ms\b")
@@ -530,37 +530,37 @@ class Fixture:
             self.phase, self.images = phase, enabled
 
     def item(self, number):
-        return dict(ratingKey=str(number), key=f"/library/metadata/{number}", type="movie",
-                    title=f"Tile {number:04d}", titleSort=f"Tile {number:04d}", year=2026,
-                    thumb=f"/library/metadata/{number}/thumb/1", librarySectionID=1,
-                    librarySectionTitle="Image cache stress", duration=6000000,
-                    addedAt=1700000000 + number, updatedAt=1700000000)
+        item_id = f"{number:032x}"
+        tag = f"tag{number:05d}"
+        return dict(Id=item_id, Name=f"Tile {number:04d}", SortName=f"Tile {number:04d}",
+                    Type="Movie", ProductionYear=2026, RunTimeTicks=6000000 * 10000,
+                    ParentId="1", ImageTags={"Primary": tag}, PrimaryImageTag=tag)
 
     def metadata(self, path, query):
-        if path in ("/", "/identity"):
-            return dict(machineIdentifier=MACHINE_ID, friendlyName="Image cache stress",
-                        version="1.43.3.0", myPlexSubscription=False)
-        if path in ("/library/sections", "/library/sections/all"):
-            return dict(size=1, Directory=[dict(key="1", type="movie", title="Image cache stress")])
-        if path == "/library/sections/1/all":
-            start = int(query.get("X-Plex-Container-Start", ["0"])[0])
-            size = int(query.get("X-Plex-Container-Size", ["60"])[0])
+        if path in ("/System/Info/Public", "/System/Info"):
+            return dict(Id=MACHINE_ID, ServerName="Image cache stress",
+                        Version="10.10.0", ProductName="Jellyfin Server")
+        if path == "/Users/Me":
+            return dict(Id="1", Name="image-cache-stress", ServerId=MACHINE_ID)
+        if re.fullmatch(r"/Users/[^/]+/Views", path):
+            return dict(Items=[dict(Id="1", Name="Image cache stress", CollectionType="movies")],
+                        TotalRecordCount=1)
+        if re.fullmatch(r"/Users/[^/]+/Items", path):
+            try:
+                start = int(query.get("StartIndex", ["0"])[0])
+                size = int(query.get("Limit", ["60"])[0])
+            except ValueError:
+                raise ValueError("invalid page range")
             if start < 0 or not 0 <= size <= 10000:
                 raise ValueError("invalid page range")
             end = min(start + size, self.count)
             items = [self.item(i + 1) for i in range(start, end)]
-            return dict(size=len(items), totalSize=self.count, offset=start, Metadata=items,
-                        Meta={"Type": [{"active": True, "Sort": [
-                            {"key": "titleSort", "title": "Title", "defaultDirection": "asc"}]}]})
-        if path == "/library/sections/1/firstCharacter":
-            return dict(size=1, Directory=[dict(key="T", title="T", size=self.count)])
-        if path == "/library/sections/1/genre":
-            return dict(size=0, Directory=[])
-        if path in ("/hubs", "/hubs/sections/1", "/hubs/continueWatching"):
-            return dict(size=0, Hub=[], Metadata=[])
-        match = re.fullmatch(r"/library/metadata/([1-9][0-9]*)", path)
-        if match and 1 <= int(match[1]) <= self.count:
-            return dict(size=1, Metadata=[self.item(int(match[1]))])
+            return dict(Items=items, TotalRecordCount=self.count, StartIndex=start)
+        if re.fullmatch(r"/Users/[^/]+/Items/(Resume|Latest)", path):
+            return dict(Items=[], TotalRecordCount=0)
+        match = re.fullmatch(r"/Items/([0-9a-f]{32})", path)
+        if match and 1 <= int(match[1], 16) <= self.count:
+            return self.item(int(match[1], 16))
         return None
 
 
@@ -608,13 +608,16 @@ def handler(fixture):
             if path == "/__stress/stats":
                 self.send_json(200, fixture.snapshot())
                 return
-            if path == "/photo/:/transcode":
-                source = query.get("url", [""])[0]
-                match = THUMB.fullmatch(source)
+            if THUMB.fullmatch(path):
+                if not query.get("api_key"):
+                    self.send_json(401, {"error": "api_key required"})
+                    fixture.record("image", path, 401, 0)
+                    return
+                number = int(THUMB.fullmatch(path)[1], 16)
                 try:
-                    width = int(query.get("width", ["250"])[0])
-                    height = int(query.get("height", ["375"])[0])
-                    if not (match and int(match[1]) <= fixture.count and
+                    width = int(query.get("fillWidth", ["250"])[0])
+                    height = int(query.get("fillHeight", ["375"])[0])
+                    if not (1 <= number <= fixture.count and
                             1 <= width <= 1920 and 1 <= height <= 1080):
                         raise ValueError("invalid fixture image")
                 except ValueError:
@@ -624,20 +627,21 @@ def handler(fixture):
                 with fixture.lock:
                     enabled = fixture.images
                 status = 200 if enabled else 503
-                data = image_jpeg(int(match[1])) if enabled else b"images disabled"
+                data = image_jpeg(number) if enabled else b"images disabled"
                 self.send_body(status, "image/jpeg" if enabled else "text/plain", data)
                 # The canonical key excludes auth and includes every transform the app uses.
-                key = f"{source}|{width}x{height}|{query.get('format', ['jpeg'])[0]}|minSize={query.get('minSize', [''])[0]}"
-                fixture.record("image", source, status, len(data), image_id=int(match[1]), key=key)
+                key = f"{path}|{width}x{height}|quality={query.get('quality', ['90'])[0]}"
+                fixture.record("image", path, status, len(data), image_id=number, key=key)
                 return
             try:
                 response = fixture.metadata(path, query)
             except ValueError:
                 response = None
             status = 200 if response is not None else 404
-            size = self.send_json(status, {"MediaContainer": response} if response is not None
+            size = self.send_json(status, response if response is not None
                                   else {"error": "unknown fixture endpoint"})
-            fields = {"start": response["offset"], "count": response["size"]} if response and "offset" in response else {}
+            fields = {"start": response["StartIndex"], "count": len(response["Items"])} \
+                if response and "StartIndex" in response else {}
             fixture.record("metadata", path, status, size, **fields)
     return Handler
 

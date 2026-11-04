@@ -43,7 +43,7 @@ reusable artwork. Filesystem deletion failures remain best effort, like the exis
 ## Reproducible television stress test
 
 `tools/image-cache-stress.py` serves a synthetic library with 1,200 movies. Each has its own
-rating key, thumbnail path and image-cache key. The approximately 33 KB JPEG fixture shares its
+item id, primary image tag and image-cache key. The approximately 33 KB JPEG fixture shares its
 raster artwork between tiles; an ordinal JPEG comment also makes each response's bytes distinct.
 This tests 1,200 independent cached objects, rather than drawing one cached poster 1,200 times.
 The fixture needs only Python's standard library and contains no credentials or private media.

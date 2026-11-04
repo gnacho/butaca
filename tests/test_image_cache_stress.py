@@ -36,21 +36,21 @@ class FixtureTest(unittest.TestCase):
             return response.read()
 
     def image_path(self, number):
-        return "/photo/:/transcode?" + urllib.parse.urlencode(dict(
-            url=f"/library/metadata/{number}/thumb/1", width=250, height=375,
-            minSize=1, **{"X-Plex-Token": "YOUR_IMAGE_TOKEN"}))
+        return f"/Items/{number:032x}/Images/Primary?" + urllib.parse.urlencode(dict(
+            fillWidth=250, fillHeight=375, quality=90, api_key="YOUR_IMAGE_TOKEN"))
 
     def test_real_pagination_has_1200_distinct_posters_and_stable_identity(self):
         items = []
         for start in range(0, 1200, 60):
             page = json.loads(self.get(
-                f"/library/sections/1/all?X-Plex-Container-Start={start}&X-Plex-Container-Size=60"))["MediaContainer"]
-            self.assertEqual(page["offset"], start)
-            self.assertEqual(page["totalSize"], 1200)
-            items.extend(page["Metadata"])
-        self.assertEqual(len({item["thumb"] for item in items}), 1200)
-        self.assertEqual(len({item["ratingKey"] for item in items}), 1200)
-        self.assertEqual(json.loads(self.get("/identity"))["MediaContainer"]["machineIdentifier"], stress.MACHINE_ID)
+                f"/Users/1/Items?ParentId=1&Recursive=true&IncludeItemTypes=Movie"
+                f"&StartIndex={start}&Limit=60"))
+            self.assertEqual(page["StartIndex"], start)
+            self.assertEqual(page["TotalRecordCount"], 1200)
+            items.extend(page["Items"])
+        self.assertEqual(len({item["ImageTags"]["Primary"] for item in items}), 1200)
+        self.assertEqual(len({item["Id"] for item in items}), 1200)
+        self.assertEqual(json.loads(self.get("/System/Info/Public"))["Id"], stress.MACHINE_ID)
         self.assertEqual(self.fixture.snapshot()["phases"]["cold"]["unique_listing_items"], 1200)
 
     def test_control_refuses_images_but_keeps_metadata_and_never_logs_tokens(self):
@@ -65,7 +65,7 @@ class FixtureTest(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as refused:
             self.get(self.image_path(1))
         self.assertEqual(refused.exception.code, 503)
-        self.get("/library/sections/1/all?X-Plex-Token=YOUR_META_TOKEN")
+        self.get("/Users/1/Items?ParentId=1&api_key=YOUR_META_TOKEN")
         self.assertNotIn("YOUR_IMAGE_TOKEN", json.dumps(self.fixture.records))
         self.assertNotIn("YOUR_META_TOKEN", json.dumps(self.fixture.records))
         self.assertEqual(self.fixture.snapshot()["phases"]["cold"]["unique_image_keys"], 2)

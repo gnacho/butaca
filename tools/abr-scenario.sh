@@ -54,22 +54,31 @@ SIM_BIN="$(make -s print-simbin 2>/dev/null)"
 [ -n "$SIM_BIN" ] && [ -x "$SIM_BIN" ] || SIM_BIN="rust-modules/target-sim/debug/butaca-sim"
 [ -x "$SIM_BIN" ] || { echo "no simulator binary — run \`make sim\`"; exit 1; }
 
-# The rating key and the token are read from gitignored files and NEVER echoed. This repo is
+# The item id and the token are read from gitignored files and NEVER echoed. This repo is
 # public and `outbound-guard.py` exists because that convention has already failed once.
-RK="$(python3 -c "import json;print(json.load(open('tests/manifest.local.json'))['items']['$ITEM'])" 2>/dev/null)"
-[ -n "$RK" ] || { echo "item '$ITEM' not in tests/manifest.local.json"; exit 1; }
+# A key present in tests/manifest.local.json wins, so existing scenario notebooks keep working;
+# anything else is taken as the Jellyfin item id verbatim.
+RK="$(python3 -c "
+import json,sys
+try: print(json.load(open('tests/manifest.local.json'))['items']['$ITEM'])
+except Exception: pass
+" 2>/dev/null)"
+[ -n "$RK" ] || RK="$ITEM"
 TOKEN="$(sed -n 's/.*SERVER_TOKEN *"\([^"]*\)".*/\1/p' src/config.local.h | head -1)"
 [ -n "$TOKEN" ] || { echo "no SERVER_TOKEN in src/config.local.h"; exit 1; }
 SERVER_HOST="$(sed -n 's/.*SERVER_HOST *"\([^"]*\)".*/\1/p' src/config.local.h | head -1)"
 SERVER_PORT="$(sed -n 's/^#define[ 	]*SERVER_PORT[ 	]*\([0-9]*\).*/\1/p' src/config.local.h | head -1)"
+SERVER_PORT="${SERVER_PORT:-8096}"
 
 # ---- the source bitrate, so a leg can be written as a multiple of it ----------
-SRC_KBPS="$(curl -s -m 10 -H 'Accept: application/json' \
-    "http://$SERVER_HOST:$SERVER_PORT/library/metadata/$RK?X-Plex-Token=$TOKEN" \
+# Jellyfin answers the bare BaseItemDto for a single item and reports `MediaSources[].Bitrate`
+# in bits per second. The token rides the header the way the app sends it.
+SRC_KBPS="$(curl -s -m 10 -H "Authorization: MediaBrowser Token=\"$TOKEN\"" \
+    "http://$SERVER_HOST:$SERVER_PORT/Items/$RK?Fields=MediaSources" \
   | python3 -c "
 import json,sys
-d=json.load(sys.stdin)['MediaContainer']['Metadata'][0]['Media'][0]
-print(int(d.get('bitrate') or 0))
+d=json.load(sys.stdin)['MediaSources'][0]
+print(int((d.get('Bitrate') or 0) / 1000))
 " 2>/dev/null)"
 [ "${SRC_KBPS:-0}" -gt 0 ] || { echo "could not read the source bitrate for '$ITEM'"; exit 1; }
 
