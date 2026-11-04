@@ -29,6 +29,24 @@ pub(super) fn execute(command: PreferenceCmd) {
                 crate::ui::idle::invalidate();
             });
         }
+        PreferenceCmd::SubtitleScale { step, reply } => {
+            let _ = crate::storage_worker::submit_retained(move || {
+                let _ = reply.send(crate::route::set_subtitle_scale_step(step));
+                crate::ui::idle::invalidate();
+            });
+        }
+        PreferenceCmd::SubtitlePosition { step, reply } => {
+            let _ = crate::storage_worker::submit_retained(move || {
+                let _ = reply.send(crate::route::set_subtitle_position_step(step));
+                crate::ui::idle::invalidate();
+            });
+        }
+        PreferenceCmd::SubtitleBackground { step, reply } => {
+            let _ = crate::storage_worker::submit_retained(move || {
+                let _ = reply.send(crate::route::set_subtitle_background_step(step));
+                crate::ui::idle::invalidate();
+            });
+        }
         PreferenceCmd::UpNext { policy, reply } => {
             let _ = crate::storage_worker::submit_retained(move || {
                 let _ = reply.send(crate::route::set_up_next_policy(policy));

@@ -4535,6 +4535,113 @@ pub(crate) fn set_lip_sync_offset_ms(offset_ms: i64) -> bool {
     saved
 }
 
+/// Subtitle appearance, in steps, for the text tracks this app converts to ASS (SRT/VTT). An
+/// ASS/SSA track carries its author's style and never reads these: the player only asks for the
+/// override list when the track is one the app composed itself.
+static SUBTITLE_SCALE_STEP: AtomicU8 = AtomicU8::new(0);
+static SUBTITLE_POSITION_STEP: AtomicU8 = AtomicU8::new(0);
+static SUBTITLE_BACKGROUND_STEP: AtomicU8 = AtomicU8::new(0);
+
+/// What each picker offers, as the count of steps. Step 0 is the factory appearance, so an absent
+/// preference and an explicit factory pick draw the same thing.
+pub(crate) const SUBTITLE_SCALE_STEPS: u8 = 5;
+pub(crate) const SUBTITLE_POSITION_STEPS: u8 = 5;
+pub(crate) const SUBTITLE_BACKGROUND_STEPS: u8 = 3;
+
+pub(crate) fn subtitle_scale_step() -> u8 {
+    SUBTITLE_SCALE_STEP.load(Ordering::Relaxed)
+}
+
+pub(crate) fn subtitle_position_step() -> u8 {
+    SUBTITLE_POSITION_STEP.load(Ordering::Relaxed)
+}
+
+pub(crate) fn subtitle_background_step() -> u8 {
+    SUBTITLE_BACKGROUND_STEP.load(Ordering::Relaxed)
+}
+
+pub(crate) fn clamp_subtitle_scale_step(step: u8) -> u8 {
+    step.min(SUBTITLE_SCALE_STEPS - 1)
+}
+
+pub(crate) fn clamp_subtitle_position_step(step: u8) -> u8 {
+    step.min(SUBTITLE_POSITION_STEPS - 1)
+}
+
+pub(crate) fn clamp_subtitle_background_step(step: u8) -> u8 {
+    step.min(SUBTITLE_BACKGROUND_STEPS - 1)
+}
+
+/// Restore a persisted step without writing it back, with the same `#[cfg(test)]` guard as
+/// [`restore_lip_sync_offset_ms`]: these are process globals read without a lock.
+pub(crate) fn restore_subtitle_scale_step(step: u8) {
+    #[cfg(test)]
+    crate::testlock::assert_held("the subtitle scale (restore_subtitle_scale_step)");
+    SUBTITLE_SCALE_STEP.store(clamp_subtitle_scale_step(step), Ordering::Relaxed);
+}
+
+pub(crate) fn restore_subtitle_position_step(step: u8) {
+    #[cfg(test)]
+    crate::testlock::assert_held("the subtitle position (restore_subtitle_position_step)");
+    SUBTITLE_POSITION_STEP.store(clamp_subtitle_position_step(step), Ordering::Relaxed);
+}
+
+pub(crate) fn restore_subtitle_background_step(step: u8) {
+    #[cfg(test)]
+    crate::testlock::assert_held("the subtitle background (restore_subtitle_background_step)");
+    SUBTITLE_BACKGROUND_STEP.store(clamp_subtitle_background_step(step), Ordering::Relaxed);
+}
+
+/// Blocking persistence seams; Settings dispatches them on the storage worker, exactly as
+/// [`set_lip_sync_offset_ms`].
+pub(crate) fn set_subtitle_scale_step(step: u8) -> bool {
+    let step = clamp_subtitle_scale_step(step);
+    let saved = crate::server::session::update_with_outcome(|s| Some(s.with_subtitle_scale(step)))
+        .is_some_and(|write| matches!(write.classify(),
+            crate::server::session::async_persistence::CompletionOutcome::Durable(_)));
+    if saved { restore_subtitle_scale_step(step); crate::ui::idle::invalidate(); }
+    saved
+}
+
+pub(crate) fn set_subtitle_position_step(step: u8) -> bool {
+    let step = clamp_subtitle_position_step(step);
+    let saved = crate::server::session::update_with_outcome(|s| Some(s.with_subtitle_position(step)))
+        .is_some_and(|write| matches!(write.classify(),
+            crate::server::session::async_persistence::CompletionOutcome::Durable(_)));
+    if saved { restore_subtitle_position_step(step); crate::ui::idle::invalidate(); }
+    saved
+}
+
+pub(crate) fn set_subtitle_background_step(step: u8) -> bool {
+    let step = clamp_subtitle_background_step(step);
+    let saved = crate::server::session::update_with_outcome(|s| Some(s.with_subtitle_background(step)))
+        .is_some_and(|write| matches!(write.classify(),
+            crate::server::session::async_persistence::CompletionOutcome::Durable(_)));
+    if saved { restore_subtitle_background_step(step); crate::ui::idle::invalidate(); }
+    saved
+}
+
+/// The `ass_set_style_overrides` list the player hands libass for a text track it composed, as
+/// `Key=Value` lines. EMPTY when every step sits at its factory value: an untouched preference
+/// must draw exactly what shipped, and an empty list is how libass is told there is nothing to
+/// override. Sizes are in the composed header's script units (PlayResY 180), which is why the
+/// vertical steps walk up to half the height rather than to pixels.
+pub(crate) fn subtitle_style_overrides() -> String {
+    let (scale, position, background) =
+        (subtitle_scale_step(), subtitle_position_step(), subtitle_background_step());
+    if scale == 0 && position == 0 && background == 0 {
+        return String::new();
+    }
+    let font_size = [24u32, 18, 21, 30, 38][usize::from(scale)];
+    let margin_v = [0u32, 20, 45, 70, 90][usize::from(position)];
+    let (border_style, back_colour) = match background {
+        1 => (3, "&H80000000"),
+        2 => (3, "&HC0000000"),
+        _ => (1, "&H00000000"),
+    };
+    format!("FontSize={font_size}\nMarginV={margin_v}\nBorderStyle={border_style}\nBackColour={back_colour}")
+}
+
 /// What an episode ending does. A process-wide atomic beside [`LIP_SYNC_OFFSET_MS`] for the same
 /// reason: the player reads it while drawing the control row, and a lock there would be a lock in
 /// the draw path.
@@ -6611,4 +6718,8 @@ mod resolve_route_tests;
 #[cfg(test)]
 #[path = "carried_audio_tests.rs"]
 mod carried_audio_tests;
+
+#[cfg(test)]
+#[path = "subtitle_style_tests.rs"]
+mod subtitle_style_tests;
 

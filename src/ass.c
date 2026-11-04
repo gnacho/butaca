@@ -14,6 +14,10 @@
 #define MAX_EVENTS 20000
 #define MAX_PIXELS (3840u * 2160u)
 #define MAX_IMAGES 16384
+/* A generated style override list is a handful of `Key=Value` lines. The cap is
+ * generous enough for every key libass documents and small enough to reject a
+ * caller that hands over script text by mistake. */
+#define MAX_STYLE_BYTES 4096u
 
 struct ImageKey {
     uintptr_t bitmap;
@@ -45,7 +49,7 @@ static void quiet_message(int level, const char *format, va_list args, void *dat
     (void)level; (void)format; (void)args; (void)data;
 }
 
-unsigned butaca_ass_abi_version(void) { return 2; }
+unsigned butaca_ass_abi_version(void) { return 3; }
 
 void butaca_ass_destroy(ButacaAss *ctx)
 {
@@ -88,6 +92,47 @@ int butaca_ass_add_font(ButacaAss *ctx, const char *name, const uint8_t *data, s
         return -1;
     ass_add_font(ctx->library, name, (char *)data, (int)len);
     ctx->font_bytes += len;
+    return 0;
+}
+
+/* Style overrides for a track the app GENERATED from a plain-text subtitle (SRT,
+ * VTT). libass applies overrides while a track is loaded, so they are pushed here,
+ * before butaca_ass_load, and an authored ASS/SSA track never reaches this call:
+ * its own styles are the whole point of the format.
+ *
+ * `overrides` is `Key=Value` lines separated by '\n' (libass's own list syntax).
+ * libass copies the strings it keeps, so both the buffer and the pointer table are
+ * this function's to free. */
+int butaca_ass_set_style(ButacaAss *ctx, const char *overrides, size_t len)
+{
+    if (!ctx || ctx->track || len > MAX_STYLE_BYTES) return -1;
+    if (!overrides || !len) {
+        ass_set_style_overrides(ctx->library, NULL);
+        return 0;
+    }
+    char *buf = malloc(len + 1);
+    /* Worst case is one pointer per byte (every line a single character). */
+    char **lines = malloc((len + 1) * sizeof(char *));
+    if (!buf || !lines) {
+        free(buf);
+        free(lines);
+        return -1;
+    }
+    memcpy(buf, overrides, len);
+    buf[len] = '\0';
+    size_t count = 0;
+    char *line = buf;
+    while (line && *line) {
+        char *end = strchr(line, '\n');
+        if (end) *end = '\0';
+        if (*line) lines[count++] = line;
+        line = end ? end + 1 : NULL;
+    }
+    lines[count] = NULL;
+    if (count) ass_set_style_overrides(ctx->library, lines);
+    else ass_set_style_overrides(ctx->library, NULL);
+    free(lines);
+    free(buf);
     return 0;
 }
 

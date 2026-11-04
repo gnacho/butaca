@@ -614,6 +614,7 @@ crate::dynlib! {
         fn butaca_ass_abi_version() -> u32;
         fn butaca_ass_create(default_font: *const c_char) -> *mut c_void;
         fn butaca_ass_destroy(ctx: *mut c_void);
+        fn butaca_ass_set_style(ctx: *mut c_void, overrides: *const c_char, len: usize) -> i32;
         fn butaca_ass_add_font(ctx: *mut c_void, name: *const c_char, data: *const u8, len: usize) -> i32;
         fn butaca_ass_load(ctx: *mut c_void, data: *const u8, len: usize, script: i32) -> i32;
         fn butaca_ass_chunk(ctx: *mut c_void, data: *const u8, len: usize, start_ms: i64, duration_ms: i64) -> i32;
@@ -648,7 +649,7 @@ impl Native {
     fn open(source: &Source) -> Result<Self, Fault> {
         static LOADED: OnceLock<bool> = OnceLock::new();
         let loaded = *LOADED.get_or_init(|| {
-            native_ass::load(Some(asset_dir())).ok() && unsafe { butaca_ass_abi_version() } == 2
+            native_ass::load(Some(asset_dir())).ok() && unsafe { butaca_ass_abi_version() } == 3
         });
         if !loaded {
             return Err(Fault::Unavailable);
@@ -674,7 +675,17 @@ impl Native {
             native.font(&font.name, &font.data)?;
         }
         let (data, script) = match &source.content {
-            Content::Embedded { header, .. } => (header.as_ref(), 0),
+            Content::Embedded { header, .. } => {
+                // A text track carries the header this app composed, so the viewer's appearance
+                // preference applies: libass reads overrides while loading, which is why this runs
+                // before `load` and why an already-loaded track refuses the call. An ASS/SSA track
+                // keeps its author's style and never gets here.
+                let overrides = crate::route::subtitle_style_overrides();
+                if unsafe { butaca_ass_set_style(native.0, overrides.as_ptr().cast(), overrides.len()) } < 0 {
+                    return Err(Fault::Unreadable);
+                }
+                (header.as_ref(), 0)
+            }
             Content::Script { bytes, .. } => (bytes.as_ref(), 1),
         };
         if unsafe { butaca_ass_load(native.0, data.as_ptr(), data.len(), script) } < 0 {
