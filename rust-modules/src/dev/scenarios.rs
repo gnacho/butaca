@@ -544,9 +544,9 @@ pub(crate) fn advance_content_boot(app: &mut App, fr: &Frame) {
                 // needs `credited`/`landed` because it is a list of them; the biography needs the
                 // person's own facts, which the header already has. Requiring the credits here
                 // would be requiring something a headless boot cannot have: they come from
-                // plex.tv, which answers an injected server token 401 (`account: … HTTP 401` in
-                // the event log), so the wait would never end and the trigger would present
-                // nothing at all — measured on the simulator, 2026-09-10.
+                // the account service, which answers an injected server token 401 (`account: …
+                // HTTP 401` in the event log), so the wait would never end and the trigger would
+                // present nothing at all, measured on the simulator, 2026-09-10.
                 && (boot.bio || (p.credited && p.landed)))
         })
     } else {
@@ -566,8 +566,8 @@ pub(crate) fn advance_content_boot(app: &mut App, fr: &Frame) {
         // door OK on the header uses (`ContentPanel::Bio`) and gated on the same predicate, so the
         // trigger cannot open a sheet an interactive press would have refused. It exists because
         // this sheet has no other headless route: OK on the header only opens it when the prose is
-        // TRUNCATED, and the bio comes from plex.tv, which answers an injected server token 401 —
-        // so pair it with `/tmp/butaca-personbio=<text>` for a boot that has any prose at all.
+        // TRUNCATED, and the bio comes from the account service, which answers an injected server
+        // token 401, so pair it with `/tmp/butaca-personbio=<text>` for a boot with any prose.
         let available = app
             .pages
             .nav
@@ -1036,7 +1036,7 @@ fn relaunch_arm(app: &mut App, fr: &mut Frame) -> bool {
     true
 }
 
-/// Plex builds: `App.deeplink_rk` is always None (the parser is jellyfin-only), so the arm is a
+/// Retired builds: `App.deeplink_rk` is always None (the parser is jellyfin-only), so the arm is a
 /// no-op — but it stays in `each_frame` so the call site is not feature-gated soup.
 #[cfg(any())]
 fn deeplink_arm(app: &mut App, fr: &mut Frame) -> bool {
@@ -1046,7 +1046,7 @@ fn deeplink_arm(app: &mut App, fr: &mut Frame) -> bool {
     true
 }
 
-/// Plex builds hold no lifecycle queue at all (`webos::lifecycle` is the jellyfin flavour's), so
+/// Retired builds hold no lifecycle queue at all (`webos::lifecycle` is the jellyfin flavour's), so
 /// this arm is a no-op that keeps the call site identical to the one above it.
 #[cfg(any())]
 fn relaunch_arm(_app: &mut App, _fr: &mut Frame) -> bool {

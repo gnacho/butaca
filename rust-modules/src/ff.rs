@@ -91,12 +91,12 @@ const OFF_STREAM_CODECPAR: usize = 16;
 const OFF_STREAM_TIME_BASE: usize = 32;
 /// `AVStream.metadata` — the container's own per-track tags, which is where a track's NAME lives.
 ///
-/// It is read for one reason and it is a data reason, not a rendering one: **PMS does not send the
+/// It is read for one reason and it is a data reason, not a rendering one: **the server sends no
 /// per-track title for an MP4.** Verified live 2026-08-22 against one server holding both — for a
-/// Matroska part PMS sends `Stream.title` (`"HDRezka Studio"`, `"Forced"`, `"SDH"`) and the track
+/// Matroska part it sends `Stream.title` (`"HDRezka Studio"`, `"Forced"`, `"SDH"`) and the track
 /// menu has always drawn it; for an MP4 part it sends no `title` key at all, though the file
 /// carries a `name` tag on every track (`"Полные Jaskier"`, `"Форс. iTunes"`, `"Full SDH"`).
-/// Matroska spells the tag `title` and MP4 spells it `name`, and Plex's parser maps only the first.
+/// Matroska spells the tag `title` and MP4 spells it `name`, and only the first is parsed.
 /// So a nine-track MP4 arrives as six rows reading `Русский` and nothing else — the user cannot
 /// tell a forced signs track from a full translation, and no amount of care in the UI can invent
 /// the difference. `/library/streams/{id}` is 501 and `checkFiles=1` adds nothing; the file is the
@@ -7003,7 +7003,7 @@ fn hls_demux(
                     tx.finish("aborted");
                     return Err(HlsExit::Aborted);
                 }
-                // **The refusal is never ordinal evidence about the requested rung.** The Plex
+                // **The refusal is never ordinal evidence about the requested rung.** The
                 // `/decision` exits that carried rung information (`Rung`, `Deadline`, `Control`)
                 // went with the wire layer; the one refusal left says the session moved or the
                 // server client is gone, which is Circumstance for the frontier, not a verdict
@@ -7843,8 +7843,8 @@ mod audio_ahead_tests {
 /// Takes an [`Origin`](crate::origin::Origin) rather than a `(host, port)` pair because **the scheme
 /// decides the transport**: `http` reads through the Engine's `stream.rs` socket, `https` through
 /// [`crate::curlio`]. An origin is parsed from a URL and never rebuilt from an address, which is
-/// what keeps the `plex.direct` hostname TLS validates against intact all the way down here
-/// (`plex/origin.rs`). `hs` is still passed on both paths — it is the Engine's, and it stays
+/// what keeps the public wildcard name TLS validates against intact all the way down here
+/// (`crate::origin`). `hs` is still passed on both paths: it is the Engine's, and it stays
 /// unused (fd = -1, published as `SHARED.hs_ptr`) when the origin turns out to be https.
 pub(crate) fn demux(
     origin: crate::origin::Origin,
@@ -8179,7 +8179,7 @@ pub(crate) fn demux(
                     // "No video stream" alone reads as a demuxer fault. When audio IS present the
                     // demuxer worked fine — the stream itself arrived without video, which on a
                     // transcode URL means the server dropped the track (no usable video target —
-                    // issue #22: an HEVC-only target on a server without Plex Pass). Record which
+                    // issue #22: an HEVC-only target on a server with no paid tier). Record which
                     // shape this is so the error the user sees can say so; the main thread words it.
                     if ai >= 0 {
                         SHARED.demux_no_video.store(true, Ordering::Release);

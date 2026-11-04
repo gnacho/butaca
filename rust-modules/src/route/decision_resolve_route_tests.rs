@@ -1482,7 +1482,7 @@ fn a_refused_retry_keeps_its_position_and_full_request_for_the_next_quality() {
 
 // ---- rung 1: the selection the SERVER already holds --------------------------------------
 // `Stream.selected` is the part's current pick — what `put_selection` writes and what a pick
-// made on a phone / Plex Web / another TV shows up as. We wrote it for a long time and never
+// made on a phone / web app / another TV shows up as. We wrote it for a long time and never
 // read it, so our own ladder silently overwrote every cross-client choice on the next play.
 // The shapes below are the ones the live server actually serves (probed per-identity while
 // this landed), which is where the two gates on the rung come from.
@@ -1493,14 +1493,14 @@ fn a_refused_retry_keeps_its_position_and_full_request_for_the_next_quality() {
 
 // ---- video_direct_plays: the local codec + resolution direct-play gate -------------------
 
-/// The preview's THIRD answer, which is the one the UI hangs a Plex Pass claim on.
+/// The preview's THIRD answer, which is the one the UI hangs the paid-tier claim on.
 ///
 /// While `Preview` had two values, everything that was not a direct play collapsed into
 /// `Converts` — and `detail::play_note` read that as "the server re-encodes the picture", which
 /// is false for the two cases below: `build_stream` answers both of them with
-/// `plan.remux = video_dp`, i.e. ask Plex to copy the codecs into MKV. So a 4K HDR HEVC file in
-/// a `.mov`, and any mkv whose only fault is an audio track that must be converted, drew
-/// "HDR → SDR · tone-mapping needs \[PLEX PASS\]" on a proven-Pass-less server while the picture
+/// `plan.remux = video_dp`, i.e. ask the server to copy the codecs into MKV. So a 4K HDR HEVC
+/// file in a `.mov`, and any mkv whose only fault is an audio track that must be converted, drew
+/// "HDR → SDR · tone-mapping needs the paid tier" on a server without it while the picture
 /// arrived HDR10 intact. This grades the SPLIT; the truth table it feeds is `detail.rs`'s.
 ///
 /// The device table is `Caps::assumed` here (nothing in the host suite calls `devcaps::probe`),

@@ -1,10 +1,10 @@
 //! **The HTTPS media plane: a byte range of a remote file, pulled on demand.**
 //!
 //! [`crate::stream`] is a raw TCP socket that speaks cleartext to a host name or address of either
-//! family. It is the right transport for a plaintext PMS, but it cannot carry an HTTPS origin.
-//! LG's QA reviewers will not have a Plex Media Server on their LAN — they sign in with an account
-//! we supply and stream from a server on the public internet, over https, at a `plex.direct`
-//! hostname whose certificate is issued for that NAME. So the media plane needs a second
+//! family. It is the right transport for a plaintext media server, but it cannot carry an HTTPS
+//! origin. LG's QA reviewers will not have a Jellyfin server on their LAN. They sign in with an
+//! account we supply and stream from a server on the public internet, over https, at a public
+//! wildcard name whose certificate is issued for that NAME. So the media plane needs a second
 //! transport, and this is it.
 //!
 //! # What this module IS
@@ -25,7 +25,7 @@
 //! This module's [`dynlib!`] table is a SECOND table, separate from `net.rs`'s, and that is the
 //! whole point: [`crate::dynlib::load_into`] is **all-or-nothing**, so one missing symbol empties
 //! the table it is in. If the multi symbols shared net's table, a television without them would
-//! lose **plex.tv sign-in** — the app would not merely fail to play, it would fail to log in. Two
+//! lose **account sign-in**: the app would not merely fail to play, it would fail to log in. Two
 //! tables means a set that cannot stream over https can still sign in and browse.
 //!
 //! The table contains exactly seven names. `curl_multi_wait` has existed since curl 7.28.0.
@@ -2582,8 +2582,8 @@ mod tests {
     /// **The entire reason this module has its own `dynlib!` table.**
     ///
     /// `dynlib::load_into` is all-or-nothing, so a television missing one `curl_multi_*` symbol
-    /// empties whichever table holds it. If that were net.rs's table, the set would lose plex.tv
-    /// SIGN-IN — not just streaming. Two halves are graded here: an unavailable multi table
+    /// empties whichever table holds it. If that were net.rs's table, the set would lose account
+    /// SIGN-IN, not just streaming. Two halves are graded here: an unavailable multi table
     /// refuses cleanly (no `dynlib::missing_symbol` panic), and a failed load of it leaves net's
     /// easy table — the one sign-in runs on — untouched.
     #[test]
@@ -2881,7 +2881,7 @@ mod tests {
     ///
     /// If this fails, the tests above did not run. It is not a bug in them: this host cannot
     /// `dlopen` any of `net.rs`'s three candidates, which also means the app on it cannot sign in
-    /// to plex.tv at all. Install libcurl rather than deleting this.
+    /// to its account service at all. Install libcurl rather than deleting this.
     #[test]
     fn libcurl_binds_on_this_host_so_the_tests_above_are_not_vacuous() {
         let _g = crate::testlock::serial();

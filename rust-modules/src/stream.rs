@@ -164,9 +164,9 @@ impl HttpStream {
 
 /// The part of a request path that may be written to the event log: everything before the query.
 ///
-/// Paths reaching this module routinely carry the PMS token in their query string —
+/// Paths reaching this module routinely carry the access token in their query string:
 /// `server::client::with_token` is the data layer's one token choke point and appends
-/// `X-Plex-Token=…` to what it is given, and the poster store's paths arrive with one already in
+/// the credential to what it is given, and the poster store's paths arrive with one already in
 /// them (`Client::fetch_built`, where the built path *is* the LRU key, so the key and the request
 /// have to be the same bytes). The event log is this app's support channel: a user is asked to paste
 /// `/tmp/butaca-events.log` into a public issue thread, so a line carrying a query string is a
@@ -715,8 +715,8 @@ fn header_is_chunked(hdr: &[u8]) -> bool {
 /// here to re-examine if that day gets further away rather than closer.
 ///
 /// **One number, and it is deliberately NOT derived from the address.** RFC1918 is not "local" in
-/// Plex's sense — a NAT'd server reached over a VPN is private and far, and a `plex.direct` name
-/// resolves to a LAN address — so an address cannot tell you which connection tier you are on.
+/// the account service's sense: a NAT'd server reached over a VPN is private and far, and a public
+/// wildcard name resolves to a LAN address, so an address cannot tell you which tier you are on.
 /// Choosing a probe ORDER, and how much patience each tier is worth, is `server::probe`'s policy;
 /// this layer owes exactly one honest ceiling on how long the main loop can be held.
 ///
@@ -920,8 +920,8 @@ fn is_numeric_host(host: &str) -> bool {
 ///
 /// Emitting the address is what the code did before there was any resolution, when the two could
 /// not differ. They differ now, and a numeric `Host:` breaks name-based virtual hosting outright:
-/// a reverse proxy in front of a PMS routes on this header, and a server that answers
-/// `plex.example.org` has no vhost named `203.0.113.9`. It is also the value a TLS SNI would have
+/// a reverse proxy in front of a media server routes on this header, and a server that answers
+/// `example.org` has no vhost named `203.0.113.9`. It is also the value a TLS SNI would have
 /// to agree with if https ever lands here.
 ///
 /// A v6 literal is BRACKETED (RFC 9110 §7.2's `Host` → RFC 3986 §3.2.2's `IP-literal`), which is
@@ -1527,7 +1527,7 @@ unsafe fn perform_http_request(
     // §5.5: field values are octets, and a recipient must not reject the message for them).
     // This used to run on `from_utf8(...).unwrap_or("")`, which meant ONE stray byte anywhere
     // in the block — a Latin-1 character in a filename echoed back in a header, a mojibake
-    // title in an `X-Plex-*` round-trip — collapsed the WHOLE header block to "", left
+    // title in a header round-trip, collapsed the WHOLE header block to "", left
     // `status` at 0, and made the `status < 200` check below close a perfectly good 200 and
     // report it as a transport failure. The bytes we actually care about are all ASCII, so
     // reading them as bytes costs nothing and cannot be poisoned from a distance.
@@ -2193,7 +2193,7 @@ pub(crate) fn http_shutdown(hs: *mut HttpStream) {
 
 // The three one-shot wrappers that lived here — `http_get`, `http_put`, `http_post` — are GONE.
 //
-// They were the Plex control plane's transport, and each folded away half of the answer:
+// They were the old control plane's transport, and each folded away half of the answer:
 // `http_get`/`http_post` returned `Option<Vec<u8>>`, collapsing every non-2xx into the same `None`
 // a refused connection produces, and `http_put` returned the status with the body dropped. That
 // collapse is precisely what `server::probe::Outcome` exists to prevent — a final `401` after the

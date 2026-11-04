@@ -301,8 +301,8 @@ impl Bridge {
     }
     pub(crate) fn controlled_failure(&self) -> Option<&'static str> {
         // The recorded-clients denial half went with the DevPms controlled install (#166): the
-        // jellyfin world has no registry instances to police, and the replay denial contract
-        // rides the fixture client's own counters (`plex/library.rs`).
+        // jellyfin world has no registry instances to police, and the replay denial contract that
+        // the deleted fixture library used to keep went with it.
         self.home_io.as_ref().and_then(|io| io.failure)
     }
     pub(crate) fn take_resource_requests(&mut self) -> Vec<serde_json::Value> {
@@ -1416,9 +1416,9 @@ impl Bridge {
                 }
             }
             // The credentials handoff (`SessionFx::Ready`) has no consumer anymore: both of
-            // `take_session_ready`'s readers — the boot gate's dev-token arm and the Plex arm
-            // of `follow_auth_landing` — went with the DevPms world (#166). The owner-side
-            // Ready machinery stays until the plex.tv sign-in world itself is cut; its
+            // `take_session_ready`'s readers, the boot gate's dev-token arm and the sign-in
+            // arm of `follow_auth_landing`, went with the DevPms world (#166). The owner-side
+            // Ready machinery stays until the account sign-in world itself is cut. Its
             // emissions land here and are dropped.
             SessionFx::Ready { .. } => {}
             // Erase is ordered work, not a stale asynchronous completion: a subsequent login
@@ -2287,9 +2287,9 @@ pub(crate) fn nav_root_if_unsettled(d: &mut Dispatcher<AppHost>, arg: AppArg) {
 pub(crate) fn follow_auth_landing(pages: &mut Dispatcher<AppHost>, bridge: &mut Bridge) {
     // The Jellyfin flavor's sign-in landing: a successful form attempt (first boot OR the Settings
     // "quick connect" add) has installed the client and persisted the config. Reset the stores the
-    // previous server filled and land on Home — the same reset the boot gate runs. On a Plex build
-    // this arm is compiled out and `take_ready` is a jellyfin-only fn, so the chain below is
-    // unchanged there.
+    // previous server filled and land on Home, the same reset the boot gate runs. With no Jellyfin
+    // client in the build this arm is compiled out and `take_ready` is a jellyfin-only fn, so the
+    // chain below is unchanged there.
     if crate::jellyfin::signin::take_ready() {
         crate::jellyfin::signin::set_add_mode(false);
         super::boot::activate_server_owned(bridge);
@@ -2304,7 +2304,7 @@ pub(crate) fn follow_auth_landing(pages: &mut Dispatcher<AppHost>, bridge: &mut 
         nav_root_if_unsettled(pages, AppArg::Home);
         return;
     }
-    // The Plex phase machine below does not apply to a signed-in Jellyfin session: left to run,
+    // The sign-in phase machine below does not apply to a signed-in Jellyfin session: left to run,
     // its `_ => nav_root_if_unsettled(Login)` tail re-roots the sign-in form right on top of the
     // add-server PUSH, wiping the stack that BACK pops back to Settings - the second half of the
     // #56 trap. The flavor drives its own sign-in navigation: the boot gate roots the form when

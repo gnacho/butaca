@@ -31,7 +31,7 @@
 //! forward than a menu does.
 //!
 //! **2. Paragraphs are separate views, because `TextView` cannot hold them.** `TextView::wrap`
-//! splits on `char::is_whitespace` and reflows the lot, so a `\n\n` in a plex.tv biography is
+//! splits on `char::is_whitespace` and reflows the lot, so a `\n\n` in a fetched biography is
 //! destroyed — every paragraph break in the source becomes a single space. The block is therefore
 //! [`paragraphs`] + one memoised `TextView` each, stacked on [`PARA_GAP`]. That also buys the
 //! per-paragraph cull for free.
@@ -371,7 +371,7 @@ impl<H: crate::screens::registry::AppLike + crate::screens::registry::PersonLike
 
 /// The biography split into paragraphs.
 ///
-/// Blank-line delimited, which is what plex.tv's `summary` uses, and every run trimmed. Empty runs
+/// Blank-line delimited, which is what `summary` uses, and every run trimmed. Empty runs
 /// are dropped rather than kept as zero-height rows, so a summary that ends in three newlines does
 /// not leave a page of air under the last line.
 ///
@@ -523,7 +523,7 @@ fn scroll_for_page(person: &Person, page: usize) -> f32 {
 /// absent fact absent rather than blank.
 ///
 /// Pure, and the shape is the point: it builds a LIST for [`widgets::dotted_run`] rather than
-/// filling one template with holes, so a person plex.tv knows nothing about produces an empty line
+/// filling one template with holes, so a person nothing is known about produces an empty line
 /// the flow simply does not draw, and someone with a death date but no birth date reads
 /// "Died 2 June 2017" with no leading separator. That is `person::refresh_runs`' rule for the
 /// header's life line, applied to a line that also carries the roles.
@@ -776,7 +776,7 @@ mod tests {
             meta_runs("", "8 January 1987", "", "London"),
             vec!["Born 8 January 1987", "London"]
         );
-        // no dates at all (plex.tv knows the person but not when) — roles and place still read
+        // no dates at all (the person is known, the dates are not): roles and place still read
         assert_eq!(
             meta_runs("Director", "", "", "Leeds"),
             vec!["Director", "Leeds"]
