@@ -2676,15 +2676,6 @@ mod cache_timing_tests {
     }
 
     #[test]
-    fn registering_a_new_server_inside_a_frame_never_loads_storage() {
-        let _serial = crate::testlock::serial();
-        let _session = test_support::TempSession::new("register-frame-no-load");
-        let _frame = crate::task::FrameScope::enter();
-        crate::registry::register_origin("frame-client", &crate::server::Origin::http("127.0.0.1", 32400),
-            "", None, crate::registry::ConnectionFacts::default());
-    }
-
-    #[test]
     fn reads_and_preference_updates_cannot_resurrect_a_revoked_session() {
         let _serial = crate::testlock::serial();
         let _session = test_support::TempSession::new("revoked-read");

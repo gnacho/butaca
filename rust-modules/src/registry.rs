@@ -16,8 +16,6 @@
 //!   ([`capture_generation_seed`]) the persisted bootstrap vocabulary carries.
 //! * [`revoke_all`] — sign-out retires whatever state there is (always the empty roster today)
 //!   and stays the one funnel every account teardown goes through.
-//! * [`register_origin`] — the retired registration's shape, kept only so `session.rs`'s
-//!   frame-boundary test keeps its subject until that slice lands.
 //!
 //! **Keyed by slot number.** A slot number names one server for the life of the process; the
 //! per-server stores (`search`'s mailboxes, `serverinfo`, `person`'s per-source records) are flat
@@ -25,16 +23,7 @@
 //! state and never resolves to anything.
 
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-#[cfg(test)]
-use crate::origin::{Origin, ResolvePin};
 use std::sync::Mutex;
-
-/// The registration-time connection facts went with the wire layer (`server::Client` carried the
-/// tier/IP atomics they fed). The name survives only because `session.rs`'s frame-boundary test
-/// still spells a full registration call; the future `session.rs` transition slice retires both.
-#[cfg(test)]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct ConnectionFacts;
 
 /// Slot ceiling. A Plex account's server list is a handful (own + shared); this is the number
 /// that decides which slot ids can ever exist.
@@ -235,27 +224,6 @@ pub(crate) fn revoke_all() {
     // and `ui::idle` gates the whole present on detected motion — it cannot see a `static` being
     // written.
     crate::ui::idle::invalidate();
-}
-
-/// Register (or update) a server, returning its stable id.
-///
-/// **RETIRED SHAPE.** The registration world this entry point drove — slot lookup, re-point,
-/// credential admission, the leaked `server::Client` — went with the wire layer (#166): no product
-/// path can publish a Plex client since the dispatch collapse (#202), and the only remaining
-/// caller is `session.rs`'s frame-boundary test, which grades that a registration call inside a
-/// frame resolves the session identity through the NON-BLOCKING cache and never touches a file.
-/// That boundary contract is what this shell keeps alive; the `session.rs` transition slice
-/// retires it together with that suite. Always [`ServerId::UNSET`]: there is no slot to compute.
-#[cfg(test)]
-pub(crate) fn register_origin(
-    _machine_id: &str,
-    _origin: &Origin,
-    _token: &str,
-    _pin: Option<&ResolvePin>,
-    _connection: ConnectionFacts,
-) -> ServerId {
-    let _identity = crate::server::session::peek().client_id.clone();
-    ServerId::UNSET
 }
 
 /// Empty the table so each test starts from "nothing installed". Must be called under
