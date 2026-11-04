@@ -39,10 +39,13 @@
 //! URLs still carry) may cross plaintext ONLY to the address the credential was issued for: the
 //! origin of the installed client, the one signed in against (and itself a literal that cannot
 //! route off the LAN, `crate::http::is_lan_host`). Another LAN address is refused like anywhere
-//! else, no installed client means no relaxation at all, and a server that moves comes back
-//! through sign-in, which re-anchors the address. That is a considered weakening of the
-//! transport floor for this backend alone, and it is why the onboarding asks for an IP literal
-//! rather than a hostname.
+//! else, no installed client means no relaxation at all outside the two sign-in attempts, and a
+//! server that moves comes back through sign-in, which re-anchors the address. Those two attempts
+//! are the one exception, and they have to be: they are what INSTALLS the anchor the rule measures
+//! against, so `crate::http::credential_transport_allowed_at_signin` dials the private literal on
+//! the form rather than refusing the request that would have created the anchor. That is a
+//! considered weakening of the transport floor for this backend alone, and it is why the
+//! onboarding asks for an IP literal rather than a hostname.
 //!
 //! ## Units, spelled out once
 //!
@@ -159,7 +162,10 @@ pub(crate) fn uninstall() {
 /// ONLY to the address the credential was issued for, the origin of the installed client (the
 /// one signed in against, the address the persisted config carries). Another LAN address is
 /// denied even a hop away on the same subnet; with no client installed the answer is no (fail
-/// closed); and the address itself must still be a literal that cannot route off the LAN.
+/// closed), and the sign-in attempt that would create that anchor does not ask this function at
+/// all — it asks [`crate::http::credential_transport_allowed_at_signin`], the one crossing this
+/// rule cannot grade without a deadlock; and the address itself must still be a literal that
+/// cannot route off the LAN.
 pub(crate) fn plaintext_host_allowed(origin: &crate::origin::Origin) -> bool {
     client().is_some_and(|installed| {
         origin.host() == installed.origin().host()

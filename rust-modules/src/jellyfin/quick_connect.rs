@@ -101,8 +101,9 @@ pub(crate) fn start(url_raw: &str) -> Result<(), Fail> {
         return Err(Fail::Parse);
     };
     // The identity header is a credential shape even before it carries a token, so this is the
-    // exact check the POST would face, asked up front so the form can say WHY.
-    if !crate::http::credential_transport_allowed(
+    // exact check the POST would face, asked up front so the form can say WHY. The SIGN-IN gate:
+    // this attempt is what installs the client the anchoring rule measures requests against.
+    if !crate::http::credential_transport_allowed_at_signin(
         &origin,
         "/QuickConnect/Initiate",
         &["Authorization: MediaBrowser …"],
@@ -225,36 +226,38 @@ mod tests {
         assert_eq!(phase(), Phase::Editing);
     }
 
+    /// Quick Connect signs in through the same door, so it meets the same clean-install state:
+    /// the LAN literal on the form is admitted, a public address is not.
     #[test]
     fn plaintext_credentials_off_the_lan_are_refused_before_the_wire() {
         let _guard = crate::testlock::serial();
-        crate::jellyfin::install(JfClient::new(
-            crate::origin::Origin::http("192.168.1.20", 8096),
-            "dev-test".into(),
-        ));
-        // The SHIPPED rule is graded here, not this (dev-featured) build's: `devtriggers` relaxes
-        // the gate for lab work, so the test asks the policy directly with the relaxation off.
+        crate::jellyfin::uninstall();
+        let store = crate::origin::CredentialPolicy::HttpsOnly;
+        let path = "/QuickConnect/Initiate";
+        let headers = ["Authorization: MediaBrowser …"];
         let origin = crate::origin::Origin::parse("http://203.0.113.10:8096").unwrap();
         assert!(
-            !crate::http::credential_transport_allowed_by_policy(
-                &origin,
-                "/QuickConnect/Initiate",
-                &["Authorization: MediaBrowser …"],
-                crate::origin::CredentialPolicy::HttpsOnly,
+            !crate::http::credential_transport_allowed_at_signin_by_policy(
+                &origin, path, &headers, store
             ),
             "a public address over http must not carry the identity"
         );
-        let lan = crate::origin::Origin::parse("http://192.168.1.20:8096").unwrap();
+        let lan = crate::origin::Origin::parse("http://10.9.9.8:8096").unwrap();
         assert!(
-            crate::http::credential_transport_allowed_by_policy(
-                &lan,
-                "/QuickConnect/Initiate",
-                &["Authorization: MediaBrowser …"],
-                crate::origin::CredentialPolicy::HttpsOnly,
+            crate::http::credential_transport_allowed_at_signin_by_policy(
+                &lan, path, &headers, store
             ),
-            "…while the LAN literal stays allowed"
+            "…while the LAN literal stays reachable to the sign-in that creates the anchor"
         );
-        crate::jellyfin::uninstall();
+        assert!(
+            !crate::http::credential_transport_allowed_by_policy(
+                &lan,
+                "/QuickConnect/Connect?api_key=t",
+                &[],
+                store,
+            ),
+            "…and nothing else may follow it there until the sign-in installs the anchor"
+        );
     }
 
     #[test]
