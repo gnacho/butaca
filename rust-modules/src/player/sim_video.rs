@@ -43,7 +43,7 @@ const H: usize = 1080;
 const FRAME_BYTES: usize = W * H * 4;
 
 /// Is the picture armed? Read once (a trigger is a boot-time fact).
-fn armed() -> bool {
+pub(crate) fn armed() -> bool {
     static ONCE: OnceLock<bool> = OnceLock::new();
     *ONCE.get_or_init(|| {
         let on = crate::dev::flag("simvideo");

@@ -13,6 +13,23 @@ fn headshot(key: &str) -> Art<'_> {
     Art::Person { sid: ServerId::UNSET, key, res: (300, 300) }
 }
 
+/// A borrowed path's ADDRESS is not a placement identity. The player republishes its whole session
+/// on every frame (`Bridge::publish_playback`), so the `String` behind an `Art::Thumb` key is a new
+/// allocation each time. Keyed by that address the identity never matched twice: the placement read
+/// `Unknown` forever, every card miss was declined, and the decline's own request for the next
+/// sample repainted the page at the loop rate, so `site-up-next` never came to rest.
+#[test]
+fn thumb_identity_is_the_art_not_the_address_of_its_path() {
+    let path = "/Items/838d5ae9/Images/Primary?tag=1&maxWidth=480&maxHeight=270";
+    let (first, second) = (String::from(path), String::from(path));
+    assert_ne!(first.as_ptr(), second.as_ptr(), "the fixture must actually reallocate");
+    let a = Art::Thumb { sid: ServerId::UNSET, key: &first, res: (480, 270) };
+    let b = Art::Thumb { sid: ServerId::UNSET, key: &second, res: (480, 270) };
+    assert_eq!(a.motion_identity(), b.motion_identity());
+    let elsewhere = Art::Thumb { sid: ServerId::UNSET, key: "/Items/other/Images/Primary", res: (480, 270) };
+    assert_ne!(a.motion_identity(), elsewhere.motion_identity(), "different art stays different");
+}
+
 /// Texels per drawn pixel on each axis — equal ⇔ an even scale, i.e. no distortion.
 fn texel_scale(uv: [f32; 4], tw: f32, th: f32, r: Rect) -> (f32, f32) {
     (uv[2] * tw / r.w, uv[3] * th / r.h)

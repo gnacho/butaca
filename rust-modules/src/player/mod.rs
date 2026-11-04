@@ -412,11 +412,18 @@ fn acb_playstate_ready(stage: shared::Stage) -> bool {
 ///
 /// This is an OBSERVATION of the adapter, not a second owner: it hands the answer to
 /// [`machine::Player::set_video_plane_bound`], which is the only writer and the only publisher.
+/// The video plane's EDGE, from `Player::set_video_plane_bound` and from nowhere else —
+/// except the host simulator, which decodes no picture of its own. There, without
+/// `butaca-simvideo` armed there is nothing under the UI to keep presenting for, and a bound
+/// plane would hold the capture gate open forever: the screen would never come to rest. The
+/// television is untouched.
 pub(crate) fn observe_video_plane(
     pl: &mut machine::Player,
     pa: &mut adapter::PlayerAdapter,
 ) -> Option<bool> {
     let bound = pa.engine().is_some_and(|e| acb_playstate_ready(e.stage));
+    #[cfg(feature = "hostsim")]
+    let bound = bound && crate::player::sim_video::armed();
     pl.set_video_plane_bound(bound)
 }
 

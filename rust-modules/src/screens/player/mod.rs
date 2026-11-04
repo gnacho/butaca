@@ -555,7 +555,15 @@ impl<H: PlayerLike + crate::screens::registry::MetadataLike> Machine<H> for Play
                 // …and the Up Next countdown, which arms on APPEARANCE and is dropped with the
                 // segment. Stepped for the whole route, not per-overlay: the countdown must keep
                 // running whichever panel is up (`up_next::tick`).
+                let was_armed = self.up_next.armed();
                 self.up_next.tick(self.slot, tick.ms, crate::route::up_next_auto_advances());
+                if !was_armed && self.up_next.armed() {
+                    if let Some(next) = crate::route::up_next(H::session(cx)) {
+                        // The tile went up: the only moment the app commits to an auto-advance.
+                        // The screenshot scenes assert on this instead of guessing from pixels.
+                        crate::log(&format!("next=S{}E{} {}", next.season, next.index, next.rk));
+                    }
+                }
                 // The scrub gesture's whole per-frame half — `app/run.rs`'s old
                 // per-loop-iteration block, now on this screen's own Tick: the continuous
                 // accelerating advance with its lost-keyup safety commit, then the tap debounce.
