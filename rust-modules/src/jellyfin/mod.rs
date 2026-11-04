@@ -92,14 +92,49 @@ pub(crate) const SERVER_ID: ServerId = ServerId::from_raw(0);
 /// lands. The lock is the only write path; `client()` is a read.
 static CLIENT: std::sync::RwLock<Option<&'static JfClient>> = std::sync::RwLock::new(None);
 
+#[cfg(test)]
+thread_local! {
+    /// Retires the client when the installing test's thread ends. Every test runs on its own
+    /// thread, so this covers both the ordinary end and a panic: a test that installs a synthetic
+    /// client and never reaches its teardown cannot leave that client grading the next test's
+    /// `Session::account`, which reads this global and prefers the signed-in name over the
+    /// session's own roster.
+    static RETIRE_ON_THREAD_EXIT: RetireOnThreadExit = const { RetireOnThreadExit };
+    /// The client THIS thread installed last. The teardown retires only when the installed client
+    /// is still that one: a test thread that ends while a later test has already installed its own
+    /// must not uninstall somebody else's client.
+    static INSTALLED_HERE: std::cell::Cell<Option<*const JfClient>> =
+        const { std::cell::Cell::new(None) };
+}
+
+#[cfg(test)]
+struct RetireOnThreadExit;
+
+#[cfg(test)]
+impl Drop for RetireOnThreadExit {
+    fn drop(&mut self) {
+        let _ = INSTALLED_HERE.try_with(|mine| {
+            let Some(mine) = mine.get() else { return };
+            if client().is_some_and(|current| std::ptr::eq(current, mine)) {
+                uninstall();
+            }
+        });
+    }
+}
+
 /// Install the authenticated client. Called by the boot flow and by the sign-in form's worker,
 /// after [`JfClient::authenticate_by_name`] has succeeded. A SECOND install (sign out → a
 /// different server) replaces the first — the leaked predecessor stays alive for any worker
 /// still holding it and is simply never handed out again.
 pub(crate) fn install(client: JfClient) {
     #[cfg(test)]
-    crate::testlock::assert_held("the installed Jellyfin client");
+    {
+        crate::testlock::assert_held("the installed Jellyfin client");
+        RETIRE_ON_THREAD_EXIT.with(|_| {});
+    }
     let leaked: &'static JfClient = Box::leak(Box::new(client));
+    #[cfg(test)]
+    INSTALLED_HERE.with(|mine| mine.set(Some(leaked as *const JfClient)));
     *CLIENT.write().unwrap_or_else(|e| e.into_inner()) = Some(leaked);
 }
 
