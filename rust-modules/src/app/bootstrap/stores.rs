@@ -284,7 +284,7 @@ mod tests {
         let _guard = crate::testlock::serial();
         let last_local = (crate::registry::MAX_SERVERS * 3) as u32;
         for slot in 0..last_local + 2 {
-            // The K_RESOLVE slots accept NOTHING: their fetch went with the Plex read layer, and
+            // The K_RESOLVE slots accept NOTHING: their fetch went with the retired read layer, and
             // the `Resolve` mail kind no longer deserializes at all.
             let expected = if slot == last_local { "Profile" }
                 else if slot == last_local + 1 { "Credits" }

@@ -105,8 +105,8 @@ impl Initial {
     #[cfg(test)]
     pub(crate) fn capture(state: &PmsState, adapter: &PmsAdapter) -> Self {
         let sources = state.srcs.iter().map(|s| {
-            // The recorded `client` field is the retired Plex client's instance generation; no
-            // client can exist any more (#166), so the capture writes the None half of the
+            // The recorded `client` field is the retired client's instance generation. No client
+            // can be installed any more (#166), so the capture writes the None half of the
             // frozen shape. (A boot-time capture has no sources at all — `restore` refuses
             // them — so this arm only ever serves a fixture.)
             let Src { sid, token_gen, handle, state, fetching, seq, retry_s, retry_n, last } = s;

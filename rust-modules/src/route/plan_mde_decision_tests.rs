@@ -1,5 +1,5 @@
 //! Streamability tests (the survivors of the MDE-decision suite: the part-id parser and the
-//! `/decision` refusal grader went with the Plex wire layer).
+//! `/decision` refusal grader went with the retired wire layer).
 
 use super::*;
 #[allow(unused_imports)]

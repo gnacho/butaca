@@ -11,7 +11,7 @@
 //! # The fallback chain, and why the unit of work is a RUN
 //!
 //! Inter carries 2853 codepoints — Latin, Cyrillic, Greek — and no Hangul, Kana or Han at all, so
-//! a Korean, Japanese or Chinese Plex library used to render as tofu end to end. SDL2_ttf 2.0.x
+//! a Korean, Japanese or Chinese catalog used to render as tofu end to end. SDL2_ttf 2.0.x
 //! has **no fallback-font API**: one `TTF_Font` is one face, and `TTF_RenderUTF8_Blended` draws
 //! whatever that one face has, box glyphs included. So the chain has to be built here, and
 //! building it means changing the unit of work from a *string* to a **run**:

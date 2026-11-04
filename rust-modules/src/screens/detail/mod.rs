@@ -3382,7 +3382,7 @@ impl DetailScreen {
         // `!hero_set().trailer` and then drive `ELEM_TRAILER` directly to prove `activate_hero`'s
         // handling stays correct even though the disc itself is never shown.)
         // The heart rides only where the backend HAS favorites: the Jellyfin flavor reads the
-        // loaded item's flag; the Plex build never draws the control.
+        // loaded item's flag, and the retired build never drew the control.
         let favorite = self.detail(meta).map(|d| d.is_favorite);
         #[cfg(any())]
         let favorite = None;

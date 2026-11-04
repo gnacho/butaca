@@ -240,7 +240,7 @@ pub(crate) struct PlayerOverlayScreen {
 /// (`metadata::sub_layout::sub_sections`, plan `subtitle-menu-capsule` §2-3): the subtitle-language
 /// preference this play resolved under (the show's own, else the account's —
 /// `route::cur_sub_pref_lang`), then the playing audio's language, then the current subtitle's
-/// own — each only if it names one. `ui/` never sees a Plex account type, only these codes.
+/// own, each only if it names one. `ui/` never sees a backend account type, only these codes.
 fn subtitle_yours_langs(ps: &crate::route::PlaybackSession, meta: crate::metadata::MetadataView<'_>) -> Vec<String> {
     let mut yours = Vec::new();
     if let Some(pref) = crate::route::cur_sub_pref_lang(ps) {

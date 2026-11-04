@@ -1,6 +1,6 @@
 //! A linked shelf heading: one measured run and focus contract with two presentations. `Entry`
 //! preserves the filled 60px Filmography control; `Heading` is a bare card-row heading at rest
-//! and becomes that same control face on focus. The component owns no application or Plex type.
+//! and becomes that same control face on focus. The component owns no application or backend type.
 
 use super::card_row;
 use super::icons::{self, Icon};

@@ -6374,7 +6374,7 @@ fn response_underfill_is_geometry_not_a_bitrate_tolerance() {
     assert!(short.definitively_underfills(Rung::P1080High, (3_840, 2_160)));
 
     // The declared rate is intentionally absent from the predicate: a ceiling is not a target,
-    // and no coefficient-free rule can call two equal rasters at different content complexity
+    // and no coefficient-free rule can call two equal rasters at different compression levels
     // underfilled merely because one compressed smaller.
     let compact = ObservedHlsVariant::new(400_000, 1_918, 802).unwrap();
     assert!(!compact.definitively_underfills(Rung::P1080High, (1_918, 802)));

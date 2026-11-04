@@ -46,7 +46,7 @@ pub(super) fn trk(id: i64, codec: &str, lang: &str, default: bool) -> crate::met
 
 
 /// Mark a track as the server's CURRENT pick (PMS `Stream.selected`) — the flag a pick made
-/// on a phone / Plex Web / another TV arrives on.
+/// on a phone / another client / another TV arrives on.
 pub(super) fn server_selected(mut s: crate::metadata::Stream) -> crate::metadata::Stream {
     s.selected = true;
     s

@@ -63,8 +63,8 @@
 //!
 //! # Where the copies come from
 //!
-//! **The identity is the `guid` (`plex://movie/…`), never the `ratingKey`.** Every item-shaped
-//! integer in Plex is server-local and starts at 1, so both servers in this household have a
+//! **The identity is the `guid` (the catalog id), never the `ratingKey`.** Every item-shaped
+//! integer is server-local and starts at 1, so both servers in this household have a
 //! `ratingKey` 4 and a section 1. Matching on one would confidently
 //! offer a different film — which is why the STORE is ADDRESSED on the `(server, ratingKey)` PAIR:
 //! a resolve outliving the page that asked for it is the normal case, not the exotic one. The

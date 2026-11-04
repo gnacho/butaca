@@ -1,4 +1,4 @@
-//! The Jellyfin source's place in the roster sync: it is not in the Plex `live` list (that
+//! The Jellyfin source's place in the roster sync: it is not in the roster's `live` list (that
 //! list is EMPTY in this flavour), so the retire predicate must keep it for exactly as long
 //! as its client is installed. A bare `!live.contains(sid)` test retires it on the sync right
 //! after adoption, resetting the table it had just joined — the TV symptom was no Movies/Shows

@@ -1,4 +1,4 @@
-//! Device-backed protection for the persisted Plex session.
+//! Device-backed protection for the persisted account session.
 //!
 //! TV 24+ documents the public `com.webos.service.keymanager3` service. The version number alone
 //! is not a capability test, so we probe the running firmware and its LS2 policy. Older firmware's

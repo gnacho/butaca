@@ -63,7 +63,7 @@ pub(crate) const CYCLE_BUDGET: u32 = 14;
 /// false-starts against `CYCLE_BUDGET` or merely spends the same 14 cycles faster on browsed-past
 /// items (the cost the plan's own review flagged and did not resolve on paper). A single dwell
 /// timer is the safe, already-understood mechanism; if the investigation above is carried out and
-/// finds the two-timer approach worth the complexity, it replaces this constant rather than adding
+/// finds the two timers worth the extra moving part, it replaces this constant rather than adding
 /// a parallel path — nothing else in the trailer UI depends on which mechanism sets `view.picture`.
 pub(crate) const DWELL_S: f32 = 2.0;
 

@@ -2342,7 +2342,7 @@ mod scrub_ownership_tests {
             .pb_state
             .store(crate::player::PlaybackState::Error as u8, Relaxed);
 
-        // With no Plex request behind it nothing can be retried, so the row is only the way out
+        // With no request behind it nothing can be retried, so the row is only the way out
         // (`player::failure_actions`; the support facts are the footer, never a control); OK
         // performs the FOCUSED control — the first, Back.
         let mut page = page_on_the_bar();

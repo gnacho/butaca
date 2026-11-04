@@ -319,8 +319,8 @@ pub(crate) fn flags(label: &SubLabel, forced: bool, sdh: bool) -> (bool, bool) {
 /// preferred when it has one, and the file's is what fills the hole when it does not.
 ///
 /// That hole is the whole point: **for an MP4 part PMS sends no `title` at all.** Matroska spells
-/// the tag `title` and MP4 spells it `name`, and Plex's parser maps only the first (verified live
-/// against one server holding both). So the six Russian tracks of a nine-track MP4 arrive with
+/// the tag `title` and MP4 spells it `name`, and the server's parser maps only the first (verified
+/// live against one server holding both). So the six Russian tracks of a nine-track MP4 arrive with
 /// nothing to tell them apart, while the file itself says `Форс. iTunes`, `Полные Jaskier`,
 /// `Полные stirloo`.
 ///

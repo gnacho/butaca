@@ -4247,10 +4247,10 @@ pub(crate) fn blur_source_pass() -> bool {
 ///
 /// Five small boxes along the rect's centre line, at most every [`GROUND_SAMPLE_EVERY`] calls,
 /// through the asynchronous [`GroundProbe`]. It exists because a material whose density follows its ground needs to know
-/// the ground, and every cheaper source is the wrong colour: Plex's `UltraBlurColors` are a derived
-/// muted palette for an ambient wash — measured against the Luca hero, they give (0.30, 0.23, 0.18)
-/// where the top of the panel is actually (0.00, 0.68, 0.91) — and the wash's own corners lean only
-/// 26% toward the art. The pixels are the only honest answer.
+/// the ground, and every cheaper source is the wrong colour: the retired server's `UltraBlurColors`
+/// were a derived muted palette for an ambient wash - measured against the Luca hero, they gave
+/// (0.30, 0.23, 0.18) where the top of the panel is actually (0.00, 0.68, 0.91) - and the wash's
+/// own corners lean only 26% toward the art. The pixels are the only honest answer.
 ///
 /// A hero holds for 8 seconds and a scrim density has no business changing faster than the picture
 /// does, so twice a second is the rate. Each reading is a GPU-side copy queued on one call and read
