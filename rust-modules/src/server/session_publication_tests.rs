@@ -39,7 +39,7 @@ fn live_profile_publication_triggers_the_account_audio_warm_hook() {
     let mut publisher = super::ProfilePublisher::new(&mt);
     let observed = std::cell::RefCell::new(None);
     publisher.publish_with_warmer_for_test(Some(super::UserRef {
-        id: 7, uuid: "guest".into(), plex_tv_token: Some("credential".into()),
+        id: 7, uuid: "guest".into(), account_token: Some("credential".into()),
         ..Default::default()
     }), 23, |user, generation| {
         let user = user.expect("a live signed-in publication");

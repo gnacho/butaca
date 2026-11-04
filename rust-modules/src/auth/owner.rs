@@ -615,7 +615,7 @@ pub(super) fn write_plaintext_verdict(w: &mut Canon, v: &super::PlaintextVerdict
 
 pub(super) fn write_user(w: &mut Canon, user: &UserRef) {
     w.u64(user.id as u64).str(&user.uuid).str(&user.title).str(&user.thumb).str(&user.token);
-    w.option(user.plex_tv_token.as_ref(), |w, t| { w.str(t); });
+    w.option(user.account_token.as_ref(), |w, t| { w.str(t); });
 }
 
 pub(super) fn write_profile(w: &mut Canon, profile: &crate::server::session::ProfileCreds) {
@@ -1319,12 +1319,12 @@ mod tests {
 
 
     #[test]
-    fn plex_tv_token_changes_user_and_cached_owner_hashes() {
+    fn account_token_changes_user_and_cached_owner_hashes() {
         let none = captured_session();
         let mut first = none.clone();
-        first.persisted.user.plex_tv_token = Some("synthetic-plex-tv-token-a".into());
+        first.persisted.user.account_token = Some("synthetic-account-token-a".into());
         let mut second = first.clone();
-        second.persisted.user.plex_tv_token = Some("synthetic-plex-tv-token-b".into());
+        second.persisted.user.account_token = Some("synthetic-account-token-b".into());
 
         assert_ne!(none.hash(), first.hash(), "None and Some plex.tv credentials are distinct canonical state");
         assert_ne!(first.hash(), second.hash(), "users differing only by plex.tv credential are distinct canonical state");
