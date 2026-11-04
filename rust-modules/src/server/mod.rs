@@ -75,10 +75,4 @@ pub(crate) mod pins;
 // `crate::playback`; `DP_AUDIO_CODECS`/`is_dp_audio_track` moved to `crate::devcaps` (their
 // implementation home), and the subtitle list went local to `route/plan.rs` with its render
 // consumer.
-// WHERE a server is, as one value. `Origin` keeps its `crate::server::` spelling for the one
-// session.rs test that spells a registration call (test-only now); the crate-wide surface lives
-// in `crate::origin` (`crate::registry as servers` above is the alias the in-layer spellings
-// resolve through).
-#[cfg(test)]
-pub(crate) use crate::origin::Origin;
 pub use link::link_policy;

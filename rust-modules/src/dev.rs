@@ -282,9 +282,10 @@ pub(crate) fn guard_log_only() -> bool {
 /// take the router's uplink away deterministically, so this trigger does it inside the app: while
 /// armed, [`crate::net`], [`crate::curlio`] and [`crate::stream`] refuse any host that is not a
 /// numeric literal, at the point where they would otherwise hand it to a resolver, and return the
-/// same error a failed resolution returns. A name reaches the wire only when the request carries a
-/// resolve pin ([`crate::origin::ResolvePin`]) — which is exactly what the fix provides, so the same
-/// trigger shows the defect red and the fix green with no network condition arranged anywhere.
+/// same error a failed resolution returns. A name reached the wire only when the request carried a
+/// resolve pin ([`crate::origin::ResolvePin`]), and the fix that pinned one is what the trigger was
+/// built to grade. No product path builds a pin since the wire layer went (#166), so on this tree
+/// the trigger refuses every name.
 ///
 /// Content `slow` first sleeps the connect budget an API call would have spent waiting on a dead
 /// resolver ([`crate::net::API`]'s `connect_s`), so a worker that would have stalled stalls here
