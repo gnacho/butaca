@@ -1,11 +1,11 @@
 //! The **item context menu** — a registered `Style::Compact` surface on the shared `ModalStack`,
 //! opened by a press-and-hold on a card (or on the detail page's episode still / season tab).
 //!
-//! The reference is **Apple TV's card menu, not Plex's**: a panel anchored BESIDE the focused card
+//! The reference is **Apple TV's card menu**: a panel anchored BESIDE the focused card
 //! (the card and the rest of the shelf stay where they are, visible behind it), rows of
 //! `[leading icon] [label]`, the focused row a filled light pill spanning the panel, and a hairline
-//! separator between the navigation actions and the state actions. Plex's own version is a
-//! full-screen sheet; that is deliberately not what this is.
+//! separator between the navigation actions and the state actions. The obvious alternative, a
+//! full-screen sheet, is deliberately not what this is.
 //!
 //! It exists because OK on a Continue Watching tile **resumes immediately, by design** — the amber
 //! play badge on the card is the affordance that says so. The hold is the *other* half of that
@@ -37,7 +37,7 @@
 //!
 //! It still only **reports** the chosen [`Action`]: `AppFx::ItemMenu` carries it to
 //! `app::input::apply_item_action`, which does the routing, the server call and the hub refresh.
-//! It never mutates playback or PMS state itself.
+//! It never mutates playback or server state itself.
 
 use std::borrow::Cow;
 use std::os::raw::c_int;
@@ -434,7 +434,7 @@ pub(crate) struct ItemMenuScreen {
 }
 
 /// Play Trailer only when the already-loaded Detail is this movie/show and already has a trailer.
-/// The menu never talks to PMS.
+/// The menu never talks to the server.
 fn cached_trailer(
     sid: crate::registry::ServerId,
     m: &PmsMovie,
@@ -1097,8 +1097,8 @@ mod tests {
     /// the same flags the backend's row conversion fills (`convert::movie_from_dto` carries
     /// `watched`/`unwatched`/`resume_ms` straight off the item's own counters). The fixture sets
     /// the flags DIRECTLY on purpose: what is under test here is `build`'s verb choice per state,
-    /// not the wire→row mapping (whose Plex half retired with `/related`; the Jellyfin conversion
-    /// has its own module tests).
+    /// not the wire→row mapping (the old conversion retired with `/related`, and the Jellyfin
+    /// mapping has its own module tests).
     #[test]
     fn a_related_tile_off_the_wire_gets_the_row_set_its_state_earns() {
         let row = |kind: i32, rk: &str, resume_ms: i64, watched: bool, unwatched: bool| {

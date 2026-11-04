@@ -8,8 +8,8 @@
 //! ## Why this module exists
 //!
 //! With the Jellyfin-only conversion there is one backend and one server, so a write is exactly
-//! one request: the fan-out that used to repeat a watched claim across every Plex share that held
-//! the title is gone with the PMS protocol, and the item's identity is simply the `(sid, rk)`
+//! one request: the fan-out that used to repeat a watched claim across every share that held
+//! the title is gone with the old wire protocol, and the item's identity is simply the `(sid, rk)`
 //! pair the press carried. What remains is the discipline the queue existed for:
 //!
 //! * **The press is optimistic.** [`request`] flips what the shelves and the loaded detail item say
@@ -174,7 +174,7 @@ impl ViewStateState {
 
 /// Ask the item's server to change `(sid, rk)`'s view state, and update every surface that describes
 /// it AT ONCE. **MAIN THREAD, NON-BLOCKING.** Returns false when the write never left — the one case
-/// being a server slot that holds no client, which is a dropped PMS write and says so in the log
+/// being a server slot that holds no client, which is a dropped write and says so in the log
 /// rather than being the one that goes unrecorded.
 ///
 /// `detail` says exactly what to re-read when the write lands: `None` for a press outside Detail,
@@ -196,7 +196,7 @@ impl ViewStateState {
     metadata: &mut dyn FnMut(crate::stores::metadata::MetadataCmd) -> bool,
 ) -> bool {
     // One backend, one guard: a write flies only when the sid names the Jellyfin slot AND the
-    // Jellyfin client is signed in. Any other sid names a retired Plex slot that no client can
+    // Jellyfin client is signed in. Any other sid names a retired slot that no client can
     // ever fill (#166) — a view-state write is exactly the operation to skip and log rather than
     // guess a destination for.
     let jellyfin = sid == crate::jellyfin::SERVER_ID && crate::jellyfin::client().is_some();
@@ -357,7 +357,7 @@ impl ViewStateState {
         let req = self.queue.remove(0);
         // Resolved HERE, at the spawn site, and never inside the worker. A slot that has since
         // stopped holding a client is a write with nowhere to go: dropping it silently would be the
-        // one PMS write with no line at all, which is what the request-time check above exists to
+        // one write with no line at all, which is what the request-time check above exists to
         // prevent, so it says so here too.
         let jellyfin = req.sid == crate::jellyfin::SERVER_ID;
         if jellyfin {
@@ -378,7 +378,7 @@ impl ViewStateState {
             });
             if !spawned {
                 // Nothing will ever fill the mailbox. Put the write back at the HEAD, exactly as
-                // the Plex arm below does, and wait out the ladder before trying again.
+                // the retired arm did, and wait out the ladder before trying again.
                 self.queue.insert(0, req);
                 self.retry_cd = RETRY_FRAMES;
                 crate::log("viewstate: jellyfin write refused at spawn");

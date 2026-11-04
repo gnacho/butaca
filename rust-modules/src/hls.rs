@@ -1,10 +1,10 @@
-//! Strict parser and refresh state for the fixed PMS HLS shape.
+//! Strict parser and refresh state for the server's fixed HLS shape.
 //!
 //! This deliberately is not a general HLS implementation. It accepts one master variant and
 //! growing MPEG-TS media playlists, and rejects every feature that would change how bytes must be
 //! assembled before they reach the demuxer (encryption, byte ranges, fMP4 maps and
 //! discontinuities). URI resolution is also part of the parser: every child stays on the source
-//! PMS origin, so a playlist cannot turn the media worker into an arbitrary URL fetcher.
+//! server origin, so a playlist cannot turn the media worker into an arbitrary URL fetcher.
 use crate::abr::MediaTimeMs;
 use crate::origin::{self, Origin};
 use std::collections::BTreeMap;
@@ -19,9 +19,9 @@ pub(crate) struct Resource {
 }
 
 /// Authentication captured from the route-owned master URL and applied only at the transport
-/// boundary. HLS URI resolution does not inherit a query, but PMS requires the Plex token on the
-/// master, child manifest and every segment request. Keeping it out of [`Resource`] means parsed
-/// playlist values and their `Debug` output can never become a credential store.
+/// boundary. HLS URI resolution does not inherit a query, but the server requires the access
+/// token on the master, child manifest and every segment request. Keeping it out of [`Resource`]
+/// means parsed playlist values and their `Debug` output can never become a credential store.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct InheritedAuth {
     token_pair: String,
@@ -156,7 +156,7 @@ impl SegmentClock {
 
 impl fmt::Debug for Resource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // The initial master URL normally carries X-Plex-Token in its query. Parsed values are
+        // The initial master URL normally carries the access token in its query. Parsed values are
         // useful in assertions and diagnostics, but Debug must not become a second credential
         // logging surface.
         let path = match self.path.split_once('?') {
@@ -260,9 +260,9 @@ pub(crate) struct MediaPlaylist {
     pub(crate) source: Resource,
     pub(crate) version: Option<u32>,
     pub(crate) target_duration_secs: u64,
-    /// PMS repeats the requested content offset in EXT-X-START. This is validated and retained
-    /// as playlist metadata, but it is not added to the demux clock: the route's display base
-    /// already places segment-local timestamps on the content timeline.
+    /// The server repeats the requested content offset in EXT-X-START. This is validated and
+    /// retained as playlist metadata, but it is not added to the demux clock: the route's display
+    /// base already places segment-local timestamps on the content timeline.
     pub(crate) start_offset_micros: Option<i64>,
     pub(crate) media_sequence: u64,
     pub(crate) playlist_type: Option<PlaylistType>,
@@ -281,10 +281,10 @@ impl MediaPlaylist {
             })
     }
 
-    /// Segment containing EXT-X-START's preferred content time. PMS emits the whole VOD list but
-    /// produces only the suffix at/after this point for an offset encoder; requesting segment zero
-    /// from such a session returns 404 forever. Positive offsets count from the head, negative
-    /// offsets from the tail, per the HLS tag's wire semantics.
+    /// Segment containing EXT-X-START's preferred content time. The server emits the whole VOD
+    /// list but produces only the suffix at/after this point for an offset encoder. Requesting
+    /// segment zero from such a session returns 404 forever. Positive offsets count from the
+    /// head, negative offsets from the tail, per the HLS tag's wire semantics.
     pub(crate) fn preferred_start_index(&self) -> Result<usize, Error> {
         let Some(offset_micros) = self.start_offset_micros else {
             return Ok(0);

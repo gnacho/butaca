@@ -28,7 +28,7 @@
 //!   `bitDepth=10` claim stayed the constant it always was while the profile lived (the table can
 //!   neither confirm nor deny it; the demuxer's HDR10 path still relies on the same in-band claim).
 //!
-//! Parsed with serde_json (already a dependency of the plex layer) rather than `webos.rs`'s
+//! Parsed with serde_json (already a dependency of the server layer) rather than `webos.rs`'s
 //! hand scanner: this file is nested arrays of objects, not a flat string map. Any parse
 //! failure — or a shape we misread — lands on [`Caps::assumed`], never on a refused boot.
 //!
@@ -65,14 +65,14 @@ pub(crate) struct Caps {
     pub hevc: bool,
     /// The video width/height upper bound — the per-axis MIN across the merged H.264 and HEVC
     /// rows, because both consumers apply one bound to EVERY codec at once: the profile's
-    /// `*`-scoped limitation (a 1080p-only SoC must tell PMS 1920x1088 so 4K sources transcode
-    /// down) and route.rs's local direct-play resolution gate. Taking the HEVC row alone
+    /// `*`-scoped limitation (a 1080p-only SoC must tell the server 1920x1088 so 4K sources
+    /// transcode down) and route.rs's local direct-play resolution gate. Taking the HEVC row alone
     /// whenever one existed — as this first shipped — assumed the dev set's shape ("HEVC is the
     /// tighter of the two decoders") as if it were universal: on a SoC with a 4K HEVC decoder
-    /// beside 1080p-limited AVC (a real SoC shape) it advertised a 4K bound for h264, and PMS
-    /// would direct-play 4K H.264 onto a decoder that cannot handle it — issue #22's over-claim
-    /// class, reintroduced by the module built to end it. The dev set's bound is unchanged:
-    /// min((4096,2304), (4096,2176)) = (4096,2176).
+    /// beside 1080p-limited AVC (a real SoC shape) it advertised a 4K bound for h264, and the
+    /// server would direct-play 4K H.264 onto a decoder that cannot handle it. That is issue #22's
+    /// over-claim class, reintroduced by the module built to end it. The dev set's bound is
+    /// unchanged: min((4096,2304), (4096,2176)) = (4096,2176).
     pub hevc_max: (u32, u32),
     /// **Per-codec `(maxWidth, maxHeight, maxFrameRate)` as the table states them**, H.264 and HEVC
     /// respectively, duplicate rows MIN-merged per axis, `0` on any axis the table did not say.
@@ -82,7 +82,7 @@ pub(crate) struct Caps {
     /// frame rate is the axis `docs/webos10-resource-allocation.md` names as the likely
     /// discriminator on webOS 10 (the raster was not: that set's own table claims 4096x2176 for
     /// H.264 too); this module used to drop it by design, and `hevc_max` above still folds both
-    /// codecs into one raster bound for the PMS profile and the direct-play gate, unchanged.
+    /// codecs into one raster bound for the server profile and the direct-play gate, unchanged.
     pub h264_row: (u32, u32, u32),
     pub hevc_row: (u32, u32, u32),
     /// Diagnostic ONLY — nothing derives from it. The buffer-feed pipeline cannot feed VP9
@@ -115,7 +115,7 @@ impl Caps {
         }
     }
 
-    /// Membership test on [`Caps::audio`] — `codec` already lowercase (PMS codec ids are).
+    /// Membership test on [`Caps::audio`] - `codec` already lowercase (server codec ids are).
     pub(crate) fn audio_has(&self, codec: &str) -> bool {
         self.audio.split(',').any(|c| c == codec)
     }
@@ -498,7 +498,7 @@ mod tests {
 
     /// The issue-#22 shape the first cut of this module REINTRODUCED: a 4K HEVC decoder beside
     /// 1080p-limited AVC. Bounding at the HEVC rows alone ("HEVC is the tighter decoder" — a
-    /// dev-set fact asserted as universal) advertised a `*`-scoped 3840x2160, and PMS would
+    /// dev-set fact asserted as universal) advertised a `*`-scoped 3840x2160, and the server would
     /// direct-play 4K H.264 onto the 1080p decoder. The bound is the min across BOTH.
     #[test]
     fn the_bound_is_the_min_across_both_decoders_not_the_hevc_rows_alone() {
@@ -528,8 +528,8 @@ mod tests {
     }
 
     /// The issue-#22 case this module exists for: a SoC whose table has no HEVC row. The width/
-    /// height bound must then come from the H.264 row — telling PMS 3840 wide on a 1080p-only
-    /// decoder would direct-play 4K H.264 onto hardware that cannot play it.
+    /// height bound must then come from the H.264 row - telling the server 3840 wide on a
+    /// 1080p-only decoder would direct-play 4K H.264 onto hardware that cannot play it.
     #[test]
     fn a_soc_without_hevc_bounds_at_its_h264_row() {
         let c = parse(
@@ -593,7 +593,7 @@ mod tests {
     }
 
     /// The fallback IS yesterday's constants — the values the app asserted for every device
-    /// before this module existed (the profile-string pin in plex/transcoder.rs is the other
+    /// before this module existed (the profile-string pin of the retired transcoder is the other
     /// half of this contract).
     #[test]
     fn the_assumed_profile_is_todays_constants() {

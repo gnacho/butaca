@@ -2,7 +2,7 @@
 //!
 //! The demuxer only ever sees the streams INSIDE the container it opened, so a sidecar was
 //! unreachable on direct play and the track menu hid it. This is the missing
-//! producer: fetch the whole file from PMS once. Plain captions answer [`active`]; ASS/SSA
+//! producer: fetch the whole file from the server once. Plain captions answer [`active`], ASS/SSA
 //! keeps its complete script for [`ass_source`] and the native styled renderer. Styles,
 //! overlapping events, drawings and embedded fonts must never pass through plain-text parsing.
 //!
@@ -108,7 +108,7 @@ fn state() -> std::sync::MutexGuard<'static, State> {
 /// Select the sidecar `stream_id`, fetching `key` from `server` unless that file is already
 /// loaded. MAIN THREAD.
 pub(crate) fn select(server: crate::registry::ServerId, stream_id: i64, key: String, codec: String) {
-    // Sidecars came from a Plex server; a Jellyfin stream carries its subtitles in-band.
+    // Sidecars came from the old server. A Jellyfin stream carries its subtitles in-band.
     select_with_fetch(server, stream_id, key, codec, |_, _, _| None);
 }
 
@@ -219,8 +219,9 @@ pub(crate) fn reset() {
 }
 
 /// **Honour a sidecar the SERVER already has selected for this part** — picked here in an earlier
-/// session, or on another Plex client. The embedded twin is `route::pick_dp_subtitle`, which
-/// leaves an external selection off because nothing could render it; now something can.
+/// session, or on another client of the same server. The embedded twin is
+/// `route::pick_dp_subtitle`, which leaves an external selection off because nothing could render
+/// it. Now something can.
 /// Direct play only (the caller's gate): a transcode start keeps subtitles off, as before.
 pub(crate) fn restore_server_selection(server: crate::registry::ServerId, meta: crate::metadata::MetadataView<'_>) -> Option<i64> {
     let item = meta.playing()?;
@@ -589,8 +590,8 @@ mod tests {
         );
     }
 
-    /// PMS is asked for SubRip but may answer in whatever it has. WebVTT differs in three ways
-    /// that matter — a header, `.` before the milliseconds with the hours optional, and cue
+    /// The server is asked for SubRip but may answer in whatever it has. WebVTT differs in three
+    /// ways that matter: a header, `.` before the milliseconds with the hours optional, and cue
     /// settings after the end time — and none of them may cost a cue or reach the text.
     #[test]
     fn a_webvtt_file_parses_through_the_same_reader() {

@@ -71,9 +71,9 @@ fn every_connection_tier_and_source_state_draws_the_same_selector() {
 /// Regression guard for issue #100/#165: the 0.6.x server picker's singleton exception ("a
 /// borrowed library is still ambiguous") was carried into the restructure by `3c2de7ad` and kept a
 /// legacy `Library · <name> ⌄` chip up for any Guest/managed profile, whose own household server
-/// always arrives `owned:false` (`plex/account.rs`). `SectionView` carries no ownership bit at
-/// all any more — the only trace of "whose server" that reaches this layer is the handle
-/// `owner_credit` attaches (`servers.rs:247-290`: empty for your own/household server, the
+/// always arrives `owned:false` from the retired account module. `SectionView` carries no
+/// ownership bit at all any more. The only trace of "whose server" that reaches this layer is the
+/// handle `owner_credit` attaches (`servers.rs:247-290`: empty for your own/household server, the
 /// sharer's name otherwise) — so this table drives every shape ownership can take, at F=1 and
 /// F=2, and asserts the pill COUNT tracks F alone.
 #[test]
@@ -85,7 +85,7 @@ fn ownership_does_not_change_how_many_pills_are_drawn() {
         ("one borrowed source", &[("Friend's cinema", "friend")]),
         ("two owned sources", &[("Cinema server", ""), ("Home cinema", "")]),
         ("own + borrowed", &[("Cinema server", ""), ("Friend's cinema", "friend")]),
-        // A managed/Guest profile's own household server: plex.tv says `owned:false`, but the
+        // A managed/Guest profile's own household server: the account service says `owned:false`,
         // household handle is still empty (`is_household`, servers.rs:247-250), so the shape at
         // this layer is indistinguishable from "two owned sources" above — which is the point.
         ("all-owned:false managed/Guest roster", &[("Family room", ""), ("Kids room", "")]),
@@ -122,7 +122,7 @@ fn ownership_does_not_change_how_many_pills_are_drawn() {
 
 /// The owner's handle branch in `library_label` (toolbar.rs:27-37): a nonempty `SrcGroup.handle`
 /// suffixes the pill, an empty one leaves the title bare. A managed/Guest profile's own household
-/// library arrives `owned:false` from plex.tv but still gets an EMPTY handle
+/// library arrives `owned:false` from the account service but still gets an EMPTY handle
 /// (`owner_credit`/`is_household`, servers.rs:247-290) — so that case must render exactly like an
 /// ordinary owned library, never like a share.
 #[test]

@@ -187,7 +187,7 @@ pub(super) use crate::server::session::TempSession as TempPins;
 ///
 /// `household:true` beside no credit, because a household server is credited to nobody
 /// (`owner_credit`): what the pins rules read is the verdict alone now that the grant evidence
-/// the roster used to carry went with the Plex arm (#166).
+/// the roster used to carry went with the retired arm (#166).
 pub(super) fn a_household_source(name: &str) -> BrowseSource {
     BrowseSource {
         household: true,
@@ -205,7 +205,7 @@ pub(super) fn seed_two_servers(browse: &mut TestBrowse) {
     seed_pair(browse, a_source("mac-mini", "", true));
 }
 
-/// The same two servers, granted to a Plex Home MANAGED profile: the family server arrives
+/// The same two servers, granted to a MANAGED profile of the household roster: the family server
 /// `owned:false` with the admin's id on it, exactly as a friend's share does, and only the
 /// household verdict tells them apart.
 pub(super) fn seed_two_servers_managed(browse: &mut TestBrowse) {

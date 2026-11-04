@@ -74,8 +74,8 @@ pub(crate) fn decode(value: serde_json::Value) -> std::result::Result<Result, &'
     if wire.kind != "discovery" || wire.version != 1 { return Err("unsupported discovery result"); }
     // The Jellyfin flavor's own result vocabulary: SERVER_ID (raw 0) with client 0 and token_gen
     // 0, resolved against the one installed client. The replay gate has run THIS arm since the
-    // #166 flip; the Plex arm that resolved a recorded instance id through an explicit mapping
-    // went with the Plex discovery arm, so any other wire is refused, never guessed.
+    // #166 flip. The arm that resolved a recorded instance id through an explicit mapping went
+    // with the retired discovery arm, so any other wire is refused, never guessed.
     if wire.sid != crate::jellyfin::SERVER_ID.raw()
         || wire.client != 0 || wire.token_gen != 0
         || crate::registry::ids().next().is_some()

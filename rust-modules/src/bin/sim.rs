@@ -1,7 +1,7 @@
 //! `butaca-sim` — the desktop UI simulator.
 //!
 //! The same application core the television runs, linked against a desktop SDL2 and desktop GL
-//! instead of LG's. It draws the real interface, against a real Plex Media Server, on a laptop.
+//! instead of LG's. It draws the real interface, against a real Jellyfin server, on a laptop.
 //!
 //! **What it is for.** The television serializes the entire dev loop: one set, one app instance,
 //! and two `tests/run.py` jobs kill each other's app. That makes every UI change a queue. Several
@@ -14,11 +14,11 @@
 //! ACB binding reports, so Play lands on the app's real failure read-out. Nor is it a substitute
 //! for the device on anything the GPU decides: the `--fps` gates are calibrated to the SM9000's
 //! Mali, and text rasterization here goes through a different FreeType. A green run on this binary
-//! is evidence about a Mac. Layout, focus, navigation, and every byte of the Plex data layer are
+//! is evidence about a Mac. Layout, focus, navigation, and every byte of the data layer are
 //! the parts that do transfer — and they are most of the UI work.
 //!
 //! Usage:
-//!   butaca-sim [pms-host] [pms-port]
+//!   butaca-sim [server-host] [server-port]
 //! Environment:
 //!   BUTACA_PMS_HOST / BUTACA_PMS_PORT   server to talk to (argv wins)
 //!   BUTACA_RUNTIME_DIR                     this instance's trigger/FIFO/log root
@@ -34,7 +34,7 @@ const DEFAULT_PORT: u16 = 32400;
 fn main() {
     // SIGPIPE needs no handling here, unlike `src/main.c:105`: that file installs `SIG_IGN` by hand
     // precisely because a C `main` skips Rust's `std::rt::init`. This IS a Rust main, so std has
-    // already done it, and the first PMS socket closed mid-write cannot kill the process.
+    // already done it, and the first server socket closed mid-write cannot kill the process.
 
     let mut args = std::env::args().skip(1);
     let host = args
@@ -72,8 +72,8 @@ fn main() {
 
     // No host is not an error — it is what a person who was SENT this app has. The boot host is
     // only ever consulted by the two paths that already hold credentials (the stored session and
-    // the harness's injected token); with neither, `butaca_run` goes to QR sign-in and plex.tv's
-    // `/api/v2/resources` supplies the address, exactly as on a television out of the box.
+    // the harness's injected token). With neither, `butaca_run` goes to QR sign-in and the account
+    // service supplies the server address, exactly as on a television out of the box.
     //
     // A bare boot with no host still fails loudly here rather than silently booting a sign-in
     // screen at somebody expecting Home.
