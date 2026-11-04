@@ -192,7 +192,7 @@ fn chapters_from_dto(chs: &[super::dto::ChapterDto]) -> Vec<Chapter> {
 
 /// Jellyfin kind → the Plex spelling the UI reads. `None` (a kind the app has no page for) is
 /// filtered by the caller; [`detail_from_dto`] is only ever asked with a playable kind.
-fn plex_kind(kind: &str) -> Option<&'static str> {
+fn item_kind(kind: &str) -> Option<&'static str> {
     match kind {
         "Movie" => Some("movie"),
         "Series" => Some("show"),
@@ -211,7 +211,7 @@ fn date_part(iso: &str) -> String {
 /// mapping; where Jellyfin simply does not have the datum the field gets its honest zero and a
 /// comment says so.
 fn detail_from_dto(it: &BaseItemDto, sid: ServerId) -> Detail {
-    let kind = plex_kind(&it.kind).unwrap_or("movie");
+    let kind = item_kind(&it.kind).unwrap_or("movie");
     let is_show = kind == "show";
     let (resume_ms, watched) = match &it.user_data {
         Some(ud) => {

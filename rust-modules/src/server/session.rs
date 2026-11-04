@@ -1657,9 +1657,9 @@ impl HomePins {
     }
 }
 
-/// The last-selected Plex Home user. `token` is strictly the per-user PMS token that scopes
-/// server access and watch state; `plex_tv_token` is the distinct credential returned by the
-/// profile switch for account-service calls. Both keep their authority when cached offline.
+/// The last-selected home user. `token` is strictly the per-user token that scopes server access
+/// and watch state; `account_token` is the distinct credential returned by the profile switch for
+/// account-service calls. Both keep their authority when cached offline.
 #[derive(Serialize, Deserialize, Default, Clone)]
 #[serde(default)] // a missing field costs that field, never the session — see [`HomeUserRef`]
 pub struct UserRef {
@@ -1667,12 +1667,13 @@ pub struct UserRef {
     pub uuid: String,
     pub title: String,
     pub thumb: String,
-    /// Per-(profile, server) PMS credential. Never send this to plex.tv.
+    /// Per-(profile, server) credential. Never send this to the account service.
     pub token: String,
-    /// The switched profile's plex.tv credential. Old, damaged, or empty values simply disable
-    /// optional account-service reads until the next successful online switch.
+    /// The switched profile's account-service credential. Old, damaged, or empty values simply
+    /// disable optional account-service reads until the next successful online switch.
     #[serde(default, deserialize_with = "de_soft_nonempty_string", skip_serializing_if = "Option::is_none")]
-    pub plex_tv_token: Option<String>,
+    #[serde(alias = "plex_tv_token")]
+    pub account_token: Option<String>,
     #[serde(flatten, default, skip_serializing_if = "OpaqueExtensions::is_empty")]
     pub(crate) extensions: OpaqueExtensions,
 
@@ -1980,7 +1981,7 @@ impl Session {
     ///
     /// That token is the account OWNER's (the Plex Home admin's). It is written once, by the QR
     /// sign-in, and a profile switch never replaces it. The switched user's plex.tv credential is
-    /// retained separately on [`UserRef::plex_tv_token`]. Anything asked of plex.tv with the
+    /// retained separately on [`UserRef::account_token`]. Anything asked of the account service with the
     /// session account token is answered ABOUT THE OWNER: every `accessToken` that comes back is the owner's
     /// per-(user, server) grant, and a restricted profile's answer would have been a shorter list.
     /// A caller that installs those tokens while somebody else is watching has swapped identities
