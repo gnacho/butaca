@@ -891,6 +891,21 @@ fn grid_library_search_heroidx_arm(app: &mut App, _fr: &mut Frame) {
             }
         }
     }
+    // The Search pill opens the screen with the on-screen keyboard up by contract (0.6.x), and its
+    // caret blinks every `BLINK_MS`, which keeps `at_rest` false for as long as the capture waits.
+    // One Back closes the panel and does not leave Search: the gesture a viewer makes to look at
+    // the results. Fired once, after the mount had time to open the panel.
+    static SEARCH_BACK_SENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if app.scenarios.grid_tried
+        && matches!(app.route(), AppArg::Search)
+        && !SEARCH_BACK_SENT.load(std::sync::atomic::Ordering::Relaxed)
+        && script_step_due(_fr.now, app.t0, 1600)
+    {
+        SEARCH_BACK_SENT.store(true, std::sync::atomic::Ordering::Relaxed);
+        for ev in crate::app::bridge::script_key(Key::Back, Tick { ms: _fr.now, dt_us: 0 }) {
+            app.inputs.push(ev);
+        }
+    }
 }
 
 fn settings_boot_arm(app: &mut App, fr: &mut Frame) {
