@@ -58,7 +58,7 @@ impl CollectionStore {
     #[cfg(test)]
     pub(crate) fn adapter_for_test(&self) -> Arc<CollectionAdapter> { Arc::clone(&self.adapter) }
     #[cfg(test)]
-    pub(crate) fn install_for_test(&mut self, items: Vec<crate::pms::PmsMovie>, status: crate::collection::CollectionStatus) {
+    pub(crate) fn install_for_test(&mut self, items: Vec<crate::catalog::CatalogMovie>, status: crate::collection::CollectionStatus) {
         self.state.install_for_test(items, status);
         self.bump();
     }

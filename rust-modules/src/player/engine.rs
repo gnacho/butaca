@@ -532,7 +532,8 @@ const ENVELOPE_FHD60: SinkEnvelope = SinkEnvelope {
 ///   measured (a 1080p source's transcode), and stays 4K60 otherwise — a real 4K H.264 file, or an
 ///   Auto session whose catalog can reach the 4K actuator, keeps today's behaviour and today's
 ///   known refusal on 10.3.1. "Fits FHD" is width ≤ 1920 and height ≤ 1088: a 1080p H.264 stream's
-///   CODED height is 1088 (16-aligned), and PMS reports coded sizes, so 1088 has to read as 1080
+/// CODED height is 1088 (16-aligned), and the server reports coded sizes, so 1088 has to read as
+/// 1080
 ///   or every 1080p file would be promoted to the 4K declaration it was meant to escape.
 /// * **Unknown raster (0 on an axis) means 4K60**, today's value: "nobody said" must not
 ///   under-declare a file that might be 4K.
@@ -1244,14 +1245,24 @@ fn start_bufferfeed_inner(
 
     if stream {
         let su = crate::origin::StreamUrl::parse(&url); // the typed layer's URL splitter
-                                                      // **The whole ORIGIN goes down, not a `(host, port)` pair, because the SCHEME chooses the
-                                                      // transport**: `ff::demux` reads http through `crate::stream`'s cleartext socket and https
-                                                      // through `crate::curlio`. This used to REFUSE an https origin outright — cleartext to a
-                                                      // TLS port is a hang or a garbage response with nothing in the log — and that refusal is
-                                                      // what a remote QA reviewer, with no PMS on their LAN, would have hit on every Play.
-                                                      // Rebuilding the origin from an address would put the refusal back in a subtler form: the
-                                                      // certificate is issued for the `plex.direct` NAME, so a TLS connection to the dotted quad
-                                                      // behind it fails validation however well the packets flow (`plex/origin.rs`).
+                                                      // **The whole ORIGIN goes down, not a `(host,
+                                                      // port)` pair, because the SCHEME chooses
+                                                      // the transport**: `ff::demux` reads http
+                                                      // through `crate::stream`'s cleartext socket
+                                                      // and https through `crate::curlio`.
+                                                      // This used to REFUSE an https origin
+                                                      // outright — cleartext to a TLS port is
+                                                      // a hang or a garbage response with nothing
+                                                      // in the log — and that refusal is what
+                                                      // a remote QA reviewer, with no server on
+                                                      // their LAN, would have hit on every Play.
+                                                      // Rebuilding the origin from an address would
+                                                      // put the refusal back in a subtler form:
+                                                      // the certificate is issued for
+                                                      // the `plex.direct` NAME, so a TLS connection
+                                                      // to the dotted quad behind it fails
+                                                      // validation however well the packets flow
+                                                      // (`plex/origin.rs`).
         if !crate::http::credential_transport_allowed(&su.origin, &su.path, &[]) {
             crate::log("stream: refused insecure credential transport");
             return Err(crate::route::RouteStartResult::StartFailed);
@@ -1656,7 +1667,7 @@ pub(crate) fn suspend_bufferfeed_if_attempt(
 /// stop: preserve the playback session so start_bufferfeed can restart the SAME item — skip
 /// the "stopped" timeline scrobble, the server transcode stop, and the URL clear.
 fn teardown(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::PlayerAdapter, for_reload: bool) {
-    // A prepared route whose native start failed has no Engine but still owns its exact PMS
+    // A prepared route whose native start failed has no Engine but still owns its exact server
     // resource and Session projection. A real stop must retire that ownership exactly once;
     // returning here used to leak the candidate forever while the reducer remained Failed.
     if !pa.is_live() {
@@ -1774,22 +1785,22 @@ fn teardown(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::Pla
             crate::stream::http_close(p);
         }
     }
-    // Final position report (state=stopped, so the server commits the resume point) + the
-    // server-side transcode stop, both dispatched to a worker. They used to run inline HERE and
-    // twelve lines below — two blocking PMS round trips on the SDL thread, ~17 s each worst case,
-    // on 100% of real stops. `scrobble_stop` reads and clears route's session statics on THIS
-    // thread and hands the worker owned copies; `butaca_run` drains it at exit so the report still
-    // lands. Skipped for a reload, which is not a stop.
-    // The reporter is NOT joined here. Its handle rides out with the scrobble worker, which
-    // joins it before posting `stopped` — so the last `playing` report still lands first, but the
-    // MAIN thread stops paying for it. It parked the frame loop for the remainder of SO_RCVTIMEO
-    // whenever that POST had stalled (measured: `THREADJOIN timeline 6974ms`, tools/netcond.py in
-    // `stall@/:/timeline` — whose scope was broken until 2026-08-23, so that run stalled EVERY
-    // connection. The named `THREADJOIN` line is what keeps the attribution good, and step 1 above
-    // is why: demux and the AU lanes are woken before they are joined, so `timeline` was the only
-    // one that could park). Safe to outlive the Engine: the reporter owns `ReportStop` and a
-    // `TimelineLease`, samples only SHARED clock state, and the route reducer revalidates the lease
-    // before each network effect.
+    // Final position report (state=stopped, so the server commits the resume point) +
+    // the server-side transcode stop, both dispatched to a worker. They used to run inline HERE and
+    // twelve lines below — two blocking server round trips on the SDL thread, ~17 s each worst
+    // case, on 100% of real stops. `scrobble_stop` reads and clears route's session statics on
+    // THIS thread and hands the worker owned copies; `butaca_run` drains it at exit so the report
+    // still lands. Skipped for a reload, which is not a stop. The reporter is NOT joined here.
+    // Its handle rides out with the scrobble worker, which joins it before posting `stopped` — so
+    // the last `playing` report still lands first, but the MAIN thread stops paying for it. It
+    // parked the frame loop for the remainder of SO_RCVTIMEO whenever that POST had stalled
+    // (measured: `THREADJOIN timeline 6974ms`, tools/netcond.py in `stall@/:/timeline` — whose
+    // scope was broken until 2026-08-23, so that run stalled EVERY connection. The named
+    // `THREADJOIN` line is what keeps the attribution good, and step 1 above is why: demux and
+    // the AU lanes are woken before they are joined, so `timeline` was the only one that could
+    // park). Safe to outlive the Engine: the reporter owns `ReportStop` and a `TimelineLease`,
+    // samples only SHARED clock state, and the route reducer revalidates the lease before
+    // each network effect.
     if !for_reload {
         crate::route::scrobble_stop(ps, final_report, eng.report_th.take());
     }
@@ -1850,7 +1861,7 @@ fn teardown(ps: &mut crate::route::PlaybackSession, pa: &mut super::adapter::Pla
         // skip re-ramp the ladder for ten to twenty seconds.
         SHARED.clear_abr_seed();
         // The failure is retained across the rollback reload only; a new playback must not carry
-        // another item's PMS response into its diagnostics.
+        // another item's server response into its diagnostics.
         SHARED.clear_abr_failure();
         // A deferred Original recovery outlives nothing: the playback it belonged to is over, so
         // there is no frame left that could confirm it and no route left to roll back to. The

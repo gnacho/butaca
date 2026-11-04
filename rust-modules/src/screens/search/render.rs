@@ -894,13 +894,13 @@ mod tests {
 
     #[test]
     fn a_caption_identifies_the_result() {
-        let film = Item::Media(crate::pms::PmsMovie {
+        let film = Item::Media(crate::catalog::CatalogMovie {
             title: "Wallace & Gromit".into(),
             year: 2005,
             ..Default::default()
         });
         assert_eq!(subtitle(Kind::Movie, &film), "2005");
-        let ep = Item::Media(crate::pms::PmsMovie {
+        let ep = Item::Media(crate::catalog::CatalogMovie {
             kind: 3,
             title: "A Grand Day Out".into(),
             show_title: "Wallace & Gromit".into(),
@@ -910,7 +910,7 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(subtitle(Kind::Episode, &ep), "11/4/1989");
-        let undated = Item::Media(crate::pms::PmsMovie {
+        let undated = Item::Media(crate::catalog::CatalogMovie {
             kind: 3,
             title: "A Grand Day Out".into(),
             season_index: 1,
@@ -918,7 +918,7 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(subtitle(Kind::Episode, &undated), "");
-        let bare = Item::Media(crate::pms::PmsMovie {
+        let bare = Item::Media(crate::catalog::CatalogMovie {
             title: "Untitled".into(),
             ..Default::default()
         });

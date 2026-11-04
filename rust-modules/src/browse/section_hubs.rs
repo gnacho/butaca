@@ -5,7 +5,7 @@
 //!
 //! ## Why this is a FIELD on `SecState` and not a store of its own
 //!
-//! The obvious shape was a sibling of [`crate::pms`] keyed by `(ServerId, section_key)` with its
+//! The obvious shape was a sibling of [`crate::catalog`] keyed by `(ServerId, section_key)` with its
 //! own LRU. [`super::SecState`] is *already* the per-library-section aggregate — it owns that
 //! section's query, verdict, items, focus and scroll — so a second store meant a second section
 //! identity, a second generation gate, a second mailbox and a second retry policy for one library,
@@ -17,7 +17,7 @@
 //!
 //! The grid and the hubs land independently, and **the shelf count sets the grid's absolute
 //! offset** — a late 12-shelf landing would move a focused grid row by 6,588px. "Commit when the
-//! fetch is terminal" does not work, because [`crate::pms::backoff_secs`] is an INFINITE ladder
+//! fetch is terminal" does not work, because [`crate::catalog::backoff_secs`] is an INFINITE ladder
 //! (2/4/8/16/30s and then 30s forever): terminal never arrives on a dead server, and an ordinary
 //! fail-then-succeed would still shift the grid under a reader.
 //!
@@ -47,16 +47,16 @@
 //!
 //! The owned Library emits `PublishShelves`; the application combines its visibility flags with
 //! live press state and delivers addressed `LibraryWork::Hubs` to `stores::browse`, which calls
-//! [`BrowseState::hubs_kick`] and gates staged publication. The PMS fetch itself
-//! (`GET /hubs/sections/{id}`) is gone with the PMS browse arm (#166 pass 3): Jellyfin has no
+//! [`BrowseState::hubs_kick`] and gates staged publication. The server fetch itself
+//! (`GET /hubs/sections/{id}`) is gone with the server browse arm (#166 pass 3): Jellyfin has no
 //! per-library shelves feed, so `kick` arms the window and the first-paint expiry commits ZERO
-//! shelves — the same end state a dead PMS section reached, and the same screen contract. The
+//! shelves — the same end state a dead server section reached, and the same screen contract. The
 //! publication machine stays because it is what the Library screen renders and what a future
 //! shelves feed would seat its landings beside.
 #![allow(dead_code)] // the accessors are Landing 3's; see the Dormant note above
 
 use crate::registry::ServerId;
-use crate::pms::PmsMovie;
+use crate::catalog::CatalogMovie;
 use std::sync::Arc;
 
 /// Frames the page waits for the FIRST answer before committing zero shelves and becoming usable
@@ -79,12 +79,12 @@ pub(crate) struct Shelf {
     pub(crate) total: usize,
     pub(crate) title: String,
     /// A Continue Watching row scoped to this section. **Not `home.continue`**, which is
-    /// `pms`'s whole-server id and does not appear here — see [`shelf_is_continue`].
+    /// `catalog`'s whole-server id and does not appear here — see [`shelf_is_continue`].
     pub(crate) is_continue: bool,
     /// **This row is EPISODES, so it is drawn as landscape stills** rather than portrait posters —
     /// see [`is_episode_shelf`] for why that is decided from the items and not from the hub.
     pub(crate) landscape: bool,
-    pub(crate) items: Vec<PmsMovie>,
+    pub(crate) items: Vec<CatalogMovie>,
 }
 
 /// Where a section's shelves are in the publication axis. The fetch axis is separate and runs
@@ -260,7 +260,7 @@ impl SecHubs {
     /// almost always is — `BrowseStore::pump` lands and the screen commits in the SAME frame, so
     /// nothing waits.
     ///
-    /// Production has no landing left to call this (no PMS fetch), so it survives as the test
+    /// Production has no landing left to call this (no server fetch), so it survives as the test
     /// seeders' way to place a set exactly where a worker would have.
     #[cfg(test)]
     fn land_ok(&mut self, shelves: Vec<Shelf>) {
@@ -404,7 +404,7 @@ fn edit_watched(shelves: &mut Arc<Vec<Shelf>>, sid: ServerId, rk: &str, on: bool
         .flat_map(|shelf| shelf.items.iter_mut())
     {
         if crate::registry::same_item((item.sid, &item.rk), (sid, rk)) {
-            crate::pms::set_watched(item, on);
+            crate::catalog::set_watched(item, on);
         }
     }
     true
@@ -474,7 +474,7 @@ pub(crate) fn seed_named_shelves_for_owner_test(
                 is_continue: shelf_is_continue(id, key),
                 landscape: false,
                 items: (0..per_row)
-                    .map(|index| PmsMovie {
+                    .map(|index| CatalogMovie {
                         rk: format!("{id}-{index}"),
                         title: format!("{title} {index}"),
                         ..Default::default()
@@ -519,7 +519,7 @@ pub(crate) fn seed_landscape_for_owner_test(
 }
 
 /// **Every published shelf is a store that can be DRAWING the item** — so it takes the same
-/// optimistic edit `pms`, `metadata`, `browse`, `search` and `person` already take, and for the same
+/// optimistic edit `catalog`, `metadata`, `browse`, `search` and `person` already take, and for the same
 /// reason: the press writes correctly to the server and changes nothing on the screen the user is
 /// looking at until a refetch, which reads as the row having done nothing.
 ///
@@ -530,17 +530,17 @@ pub(crate) fn seed_landscape_for_owner_test(
 /// One response into published shelves. **Pure**, so every rule below is host-graded against the
 /// fixture in this module's tests rather than inferred from a screenshot.
 ///
-/// The filter is [`crate::pms`]'s: allow only the types this product can list, require a title
+/// The filter is [`crate::catalog`]'s: allow only the types this product can list, require a title
 /// and a thumb, and read the ITEM's own `type` rather than the hub's — which can be `mixed`. An
 /// EMPTY hub is dropped entirely, which §3a measured as the common case (one movie section
 /// answered with 6 hubs of which 5 were empty), so this is required rather than tidy: a client
 /// that draws what it is given draws five headings over nothing.
 ///
-/// RETIRED with the PMS fetch (#166 pass 3): its rules and the measured fixture that graded them
+/// RETIRED with the server fetch (#166 pass 3): its rules and the measured fixture that graded them
 /// went with it. `shelf_is_continue` below stays — it is the identifier vocabulary a future
 /// shelves feed must speak, and the test seeders key on it.
 
-/// Prints the shelf's identity and how many items it holds — `PmsMovie` has no `Debug` and a
+/// Prints the shelf's identity and how many items it holds — `CatalogMovie` has no `Debug` and a
 /// derived one would dump a whole shelf of DTOs into a failing assertion, which is noise rather
 /// than evidence. The count is what a layout question is ever about.
 impl std::fmt::Debug for Shelf {
@@ -559,7 +559,7 @@ impl std::fmt::Debug for Shelf {
 /// Is this the section's own Continue Watching row?
 ///
 /// **It is not `home.continue`**, and that is the whole reason this function exists rather than a
-/// call to `pms::hub_is_continue`: that id is the WHOLE-SERVER hub's and does not appear on this
+/// call to `catalog::hub_is_continue`: that id is the WHOLE-SERVER hub's and does not appear on this
 /// route at all. A per-section deck is `movie.inprogress.N` / `tv.inprogress.N`, or its
 /// `key=/hubs/sections/N/continueWatching/items` (§3a). Both are matched, because the id is the
 /// part a server could plausibly spell differently and the key is the route it must answer at.
@@ -570,7 +570,7 @@ impl std::fmt::Debug for Shelf {
 /// the loose form was harmless and would have stayed harmless right up until somebody reached for
 /// this function from the `/hubs` side.
 ///
-/// Its only caller was `parse_hubs`, retired with the PMS fetch; the test seeders keep speaking
+/// Its only caller was `parse_hubs`, retired with the server fetch; the test seeders keep speaking
 /// the same identifier vocabulary a future shelves feed must.
 #[cfg_attr(not(test), expect(dead_code))]
 pub(crate) fn shelf_is_continue(id: &str, key: &str) -> bool {
@@ -800,7 +800,7 @@ mod tests {
         assert!(!before.view().shelves()[0].items[0].watched);
         assert!(edited.view().shelves()[0].items[0].watched);
         let staged = Shelf {
-            items: vec![PmsMovie {
+            items: vec![CatalogMovie {
                 sid,
                 rk: "staged-only".into(),
                 ..Default::default()

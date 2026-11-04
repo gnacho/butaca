@@ -184,11 +184,11 @@ pub(crate) fn episode_kicker(season: i64, index: i64, title: &str) -> String {
 /// The media badge for a video version — `"4K"` / `"1080p"` / `"SD"`, or None when the item has no
 /// video (a show container, a music item, an unparsed response).
 ///
-/// `res` is PMS's `Media.videoResolution` and is PREFERRED over the frame size, because the frame
-/// size is the STORED one: a 2.35:1 1080p film is 1918x802 on the dev server, and a height rule
-/// would badge it 720p. Verified values are `"4k"`, `"1080"`, `"720"`, `"576"`, `"sd"` — and PMS
-/// sends every one of them as a numeric-looking STRING, which is exactly the shape this maps.
-/// `width`/`height` are only the fallback for a version that omits the class.
+/// `res` is the server's `Media.videoResolution` and is PREFERRED over the frame size, because
+/// the frame size is the STORED one: a 2.35:1 1080p film is 1918x802 on the dev server, and
+/// a height rule would badge it 720p. Verified values are `"4k"`, `"1080"`, `"720"`, `"576"`,
+/// `"sd"` — and the server sends every one of them as a numeric-looking STRING, which is exactly
+/// the shape this maps. `width`/`height` are only the fallback for a version that omits the class.
 pub(crate) fn resolution(res: &str, width: i64, height: i64) -> Option<String> {
     let r = res.trim().to_ascii_lowercase();
     if !r.is_empty() {
@@ -225,11 +225,11 @@ pub(crate) fn resolution(res: &str, width: i64, height: i64) -> Option<String> {
 mod tests {
     use super::{episode_address, resolution};
 
-    /// The mapping is fed PMS's own values, and PMS string-encodes them — including the ones that
-    /// look like integers ("1080"), which is the case that must come out as "1080p" and not as a
-    /// number or an empty badge.
+    /// The mapping is fed the server's own values, and the server string-encodes them — including
+    /// the ones that look like integers ("1080"), which is the case that must come out as "1080p"
+    /// and not as a number or an empty badge.
     #[test]
-    fn resolution_labels_pms_string_encoded_classes() {
+    fn resolution_labels_server_string_encoded_classes() {
         // verified live on the dev server: every videoResolution is a JSON string
         assert_eq!(resolution("4k", 3840, 2160).as_deref(), Some("4K"));
         assert_eq!(resolution("1080", 1920, 1080).as_deref(), Some("1080p"));
@@ -307,10 +307,11 @@ pub(crate) fn pretty_date(iso: &str, year: i64) -> String {
     }
 }
 
-/// A review score, in the shape its own provider publishes it. PMS normalises every provider onto
-/// one 0–10 scale, which is not how any of them are quoted: Rotten Tomatoes and TMDB are
+/// A review score, in the shape its own provider publishes it. The server normalises every provider
+/// onto one 0–10 scale, which is not how any of them are quoted: Rotten Tomatoes and TMDB are
 /// PERCENTAGES (9.1 → "91%") and IMDb is out of ten ("7.4"). Printing the raw 9.1 beside a tomato
-/// would read as a 9.1% score, so the badge's number is put back into the provider's own units here.
+/// would read as a 9.1% score, so the badge's number is put back into the provider's own units
+/// here.
 pub(crate) fn rating_score(art: crate::metadata::RatingArt, value: f64) -> String {
     match art {
         crate::metadata::RatingArt::Imdb => crate::i18n::current().decimal((value * 10.0).round() as i64, 1),

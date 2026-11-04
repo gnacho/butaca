@@ -1,7 +1,7 @@
 //! A library's sort survives a restart (GitHub #278): *"sort order should persist between
 //! restarts. I have to change it from the default (title) every time I fire it up."*
 //!
-//! Graded end to end against a loopback PMS: the choice goes through the Library's own commit
+//! Graded end to end against a loopback server: the choice goes through the Library's own commit
 //! (`QueryEdit::Sort`), reaches the session file, and a FRESH store — a cold session cache read
 //! back from disk, a new `BrowseState`, a section whose menu nobody has seen yet this run — must
 //! open that library in the remembered order.
@@ -41,7 +41,7 @@ fn a_remembered_sort_belongs_to_the_profile_that_chose_it() {
 
 /// Choosing the default order back FORGETS the entry rather than recording it, and a non-primary
 /// view (Collections of a movie library) is never remembered. The menu is seeded directly — the
-/// landing that used to deliver it was the PMS page worker, retired with the PMS browse arm
+/// landing that used to deliver it was the server page worker, retired with the server browse arm
 /// (#166 pass 3); what this grades is the recording rule, which is backend-blind.
 #[test]
 fn choosing_the_default_order_forgets_the_entry() {

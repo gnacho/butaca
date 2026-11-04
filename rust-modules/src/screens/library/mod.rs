@@ -530,7 +530,7 @@ impl LibraryScreen {
         fx.invalidate(Provenance::Input);
     }
 
-    pub(crate) fn focused_item<'a, H: LibraryLike>(&self, focus: Option<FocusKey<u32>>, cx: &Cx<'a, H>) -> Option<&'a crate::pms::PmsMovie> {
+    pub(crate) fn focused_item<'a, H: LibraryLike>(&self, focus: Option<FocusKey<u32>>, cx: &Cx<'a, H>) -> Option<&'a crate::catalog::CatalogMovie> {
         let key = focus.filter(|key| key.entry == self.entry)?;
         if let Some(index) = self.pair.detail.index_of(key.elem) { return H::listing(cx).item(index); }
         let (row, col) = self.shelves.iter().enumerate().find_map(|(row, shelf)|

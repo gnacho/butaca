@@ -1,6 +1,6 @@
 //! **Stores as machines** (restructure spec §2.1/§2.2, phase 4; `docs/stores-as-machines.md`).
 //!
-//! Seven data modules provide the application's server-derived state — `browse`, `pms` (the Home
+//! Seven data modules provide the application's server-derived state — `browse`, `catalog` (the Home
 //! hubs), `metadata`, `search`, `person`, `collection`, `viewstate`. All seven are physically owned by one
 //! [`Stores`] aggregate per `crate::app::bridge::Bridge`, each with its own per-instance state,
 //! adapter and notice (Browse/Person/ViewState landed first; Search, Hubs and Metadata completed

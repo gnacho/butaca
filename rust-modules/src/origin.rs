@@ -44,12 +44,12 @@
 //! `base() == "http://[::1]:32400"` is pinned by a test, because the failure mode without it is
 //! silent: URL construction keeps looking right while name resolution quietly stops working.
 //!
-//! ## This is a PMS origin parser, not a general URL parser
+//! ## This is a server origin parser, not a general URL parser
 //!
 //! Two deliberate narrowings, both because every origin in this app is a Plex server's:
 //!
 //! * **The default port is 32400**, not 80/443. It is what `StreamUrl::parse` has always defaulted
-//!   to, and a PMS with no port in its URL is a PMS on the default port.
+//!   to, and a server with no port in its URL is a server on the default port.
 //! * **Only `http` and `https` are recognised.** [`Origin::parse`] refuses anything else rather
 //!   than inventing a meaning for it.
 #![allow(dead_code)]
@@ -97,19 +97,19 @@ impl Scheme {
     }
 }
 
-/// The port a PMS origin means when its URL names none. See the module doc: 32400, not 80/443.
+/// The port a server origin means when its URL names none. See the module doc: 32400, not 80/443.
 pub const DEFAULT_PORT: i32 = 32400;
 
 /// A port this client could actually dial, narrowed to the `i32` the transport takes — `None` for
 /// anything outside `1..=65535`.
 ///
 /// **The narrowing is the point.** `port` arrives from plex.tv (and from the session file, and from
-/// the `butaca-servers` trigger) as an `i64`, because PMS and plex.tv both string-encode numbers
-/// and every numeric field here goes through the lenient `de_i64` — so what lands in a `Candidate`
-/// is whatever the JSON said, not whatever a port can be. `port as i32` on that WRAPS: an answer of
-/// `4_294_999_696` becomes `32400` and the app dials a port nobody advertised, quietly and with a
-/// plausible-looking result. Every site that turns an advertised port into a connection goes
-/// through here.
+/// the `butaca-servers` trigger) as an `i64`, because the server and plex.tv both string-encode
+/// numbers and every numeric field here goes through the lenient `de_i64` — so what lands in
+/// a `Candidate` is whatever the JSON said, not whatever a port can be. `port as i32` on
+/// that WRAPS: an answer of `4_294_999_696` becomes `32400` and the app dials a port nobody
+/// advertised, quietly and with a plausible-looking result. Every site that turns an advertised
+/// port into a connection goes through here.
 ///
 /// Out of range drops the CANDIDATE, never the server: another of its addresses may still be
 /// dialable, and the same rule already applies to an address this transport cannot speak to.
@@ -222,12 +222,12 @@ impl Origin {
     /// The **plaintext** constructor, named so that it is greppable.
     ///
     /// Every call is a place that still assumes cleartext — the legacy `(host, port)` registry
-    /// entry points, the compiled-in PMS host, a session file with no stored origin. Each of those
-    /// really does mean plaintext (they have only an address to go on, and an address cannot carry
-    /// the name a certificate is issued for), which is why they are spelled `Origin::http(` rather
-    /// than `Origin::new(Scheme::Http, …)`: the grep is what finds them the day one of them learns
-    /// a URL. A caller that already has a URL must parse it instead; rebuilding that URL through
-    /// this constructor silently downgrades both its control requests and its media stream.
+    /// entry points, the compiled-in server host, a session file with no stored origin. Each of
+    /// those really does mean plaintext (they have only an address to go on, and an address cannot
+    /// carry the name a certificate is issued for), which is why they are spelled `Origin::http(`
+    /// rather than `Origin::new(Scheme::Http, …)`: the grep is what finds them the day one of them
+    /// learns a URL. A caller that already has a URL must parse it instead; rebuilding that URL
+    /// through this constructor silently downgrades both its control requests and its media stream.
     pub fn http(host: &str, port: i32) -> Origin {
         Origin::new(Scheme::Http, host, port)
     }
@@ -255,11 +255,11 @@ impl Origin {
     /// plex.tv's `plex.direct` URIs always spell their port (`…plex.direct:32400`). A **custom
     /// server-access URL** does not: `https://plex.example.com` carries no port, and its owner is
     /// serving it on 443 (a reverse proxy), which is exactly what the connection's `port` field
-    /// reports. Parsing such a URI through [`parse`] would apply the 32400 PMS default and dial a
-    /// closed port — the whole server then reads as unreachable, with no relay to fall back on
+    /// reports. Parsing such a URI through [`parse`] would apply the 32400 server default and dial
+    /// a closed port — the whole server then reads as unreachable, with no relay to fall back on
     /// (observed live: a share whose only remote was `https://<custom>` at `port:443`, timing out
-    /// at every probe deadline while the official client reached it fine). A URI that DID write a
-    /// port keeps it; `advertised` is the fallback, and only a `port_bad` URI (a written-but-
+    /// at every probe deadline while the official client reached it fine). A URI that DID write
+    /// a port keeps it; `advertised` is the fallback, and only a `port_bad` URI (a written-but-
     /// garbage port) is still refused.
     pub fn parse_connection(uri: &str, advertised: i64) -> Option<Origin> {
         let p = Parts::of(uri);
@@ -435,7 +435,7 @@ struct Parts<'a> {
     /// **An EMPTY port counts.** `http://192.0.2.10:` is a truncated write or a half-finished hand
     /// edit, not a request for the default, and reading it as one is exactly the "dial a port
     /// nobody wrote down" outcome [`dial_port`] exists to prevent. RFC 3986 would let an empty port
-    /// mean the default; this is a PMS origin parser reading a file that can be corrupt, and the
+    /// mean the default; this is a server origin parser reading a file that can be corrupt, and the
     /// two want opposite answers.
     port_bad: bool,
     path: &'a str,
@@ -590,7 +590,7 @@ mod tests {
     /// contract that stops a custom `https://host` (served on 443) from being dialled on 32400.
     #[test]
     fn parse_connection_takes_the_advertised_port_only_when_the_uri_omits_one() {
-        // portless custom URL → the advertised 443, not the 32400 PMS default
+        // portless custom URL → the advertised 443, not the 32400 server default
         let o = Origin::parse_connection("https://plex.example.com", 443).unwrap();
         assert_eq!(
             (o.scheme(), o.host(), o.port()),
@@ -602,7 +602,7 @@ mod tests {
         let o = Origin::parse_connection("https://1-2-3-4.hash.plex.direct:32400", 443).unwrap();
         assert_eq!(o.port(), 32400);
 
-        // an empty advertised port is not a port — fall through to the PMS default rather than 0
+        // an empty advertised port is not a port — fall through to the server default rather than 0
         let o = Origin::parse_connection("https://plex.example.com", 0).unwrap();
         assert_eq!(o.port(), DEFAULT_PORT);
 
@@ -675,7 +675,7 @@ mod tests {
 
     /// The defaults, each one a behaviour `StreamUrl::parse` has always had and must keep.
     #[test]
-    fn a_missing_scheme_is_http_and_a_missing_port_is_the_pms_default() {
+    fn a_missing_scheme_is_http_and_a_missing_port_is_the_server_default() {
         let o = Origin::parse("192.0.2.10").expect("a bare host is an origin");
         assert_eq!(
             (o.scheme(), o.host(), o.port()),

@@ -1,12 +1,12 @@
-//! Typed Plex API layer — one method per PMS operation the app uses.
+//! Typed Plex API layer — one method per server operation the app uses.
 //!
 //! Replaces every hand-built Plex path/query string in the app with a typed `Client`
 //! method. Percent-encoding
-//! (`crate::pms::urlenc_str`), the `X-Plex-Token` injection, and the origin-aware HTTP(S)
+//! (`crate::catalog::urlenc_str`), the `X-Plex-Token` injection, and the origin-aware HTTP(S)
 //! transport (`crate::http`) are centralised in `client.rs`, so no op file can bypass them.
 //! Response bodies deserialize into `serde` DTOs (`crate::media`).
 //!
-//! The read layer (`pms`/`metadata`/`posters`/`detail`) and the playback layer (`route.rs`
+//! The read layer (`catalog`/`metadata`/`posters`/`detail`) and the playback layer (`route.rs`
 //! decision/start/stop/selection, PlayQueue/identity, and the player's `/:/timeline`) use this
 //! typed client.
 

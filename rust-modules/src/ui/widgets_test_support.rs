@@ -32,15 +32,15 @@ pub(super) fn band_region(w: f32) -> f32 {
 
 // ── The poster's state mark: one vocabulary, one mark at a time ───────────────────────────
 //
-// `card` needs a GL context, so the CHOICE is what a host test can reach — and the choice is
-// where this has been wrong before: the mark used to say "unwatched" in amber, which is the
-// opposite claim, and the bar/disc precedence is only observable on an item PMS reports as both.
+// `card` needs a GL context, so the CHOICE is what a host test can reach — and the choice is where
+// this has been wrong before: the mark used to say "unwatched" in amber, which is the opposite
+// claim, and the bar/disc precedence is only observable on an item the server reports as both.
 
 /// A MOVIE row at a given watched state. `dur_ns` is 100 min, so `resume_ms` reads as a
 /// percentage of the way in. For a LEAF the two flags really are each other's negation — which
 /// is exactly what stops being true for a container, hence the show cases below.
-pub(super) fn row(watched: bool, resume_ms: i64) -> PmsMovie {
-    let mut m = PmsMovie::default();
+pub(super) fn row(watched: bool, resume_ms: i64) -> CatalogMovie {
+    let mut m = CatalogMovie::default();
     m.dur_ns = 100 * 60 * 1000 * 1_000_000;
     m.watched = watched;
     m.unwatched = !watched;

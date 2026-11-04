@@ -82,11 +82,11 @@ impl Initial {
 
     /// Restore the validated pre-work inputs into a fresh owner, never a mid-flight checkpoint or
     /// live mailbox. Runs before any `Bridge`/`Stores` exists (`app/boot.rs::construct()`), so it
-    /// produces the `(PmsState, PmsAdapter)` pair rather than mutating anything global.
+    /// produces the `(CatalogState, CatalogAdapter)` pair rather than mutating anything global.
     pub(crate) fn restore(&self, _mt: &crate::task::MainThread)
-        -> Result<(super::PmsState, super::PmsAdapter), &'static str> {
+        -> Result<(super::CatalogState, super::CatalogAdapter), &'static str> {
         if !self.validate_boot() { return Err("Home initial state contains work or content"); }
-        let state = super::PmsState {
+        let state = super::CatalogState {
             published: Some(Arc::new(self.catalog.clone())),
             srcs: Vec::new(),
             seen: self.seen,
@@ -95,7 +95,7 @@ impl Initial {
             last_sections_gen: self.sections_generation,
             catalog_gen: self.catalog_generation,
         };
-        let adapter = super::PmsAdapter {
+        let adapter = super::CatalogAdapter {
             results: Mutex::new(Vec::new()),
             next_request: AtomicU32::new(self.next_request),
         };
@@ -103,7 +103,7 @@ impl Initial {
     }
 
     #[cfg(test)]
-    pub(crate) fn capture(state: &PmsState, adapter: &PmsAdapter) -> Self {
+    pub(crate) fn capture(state: &CatalogState, adapter: &CatalogAdapter) -> Self {
         let sources = state.srcs.iter().map(|s| {
             // The recorded `client` field is the retired Plex client's instance generation; no
             // client can exist any more (#166), so the capture writes the None half of the
@@ -164,13 +164,13 @@ fn source_build(b: &SourceBuild, w: &mut impl Sink) {
     }
 }
 
-fn movies(items: &[PmsMovie], w: &mut impl Sink) {
+fn movies(items: &[CatalogMovie], w: &mut impl Sink) {
     w.u64(items.len() as u64);
     for m in items { movie(m, w); }
 }
 
-fn movie(m: &PmsMovie, w: &mut impl Sink) {
-    let PmsMovie { sid, sec, title, year, rating, dur_ns, part, thumb, still, art, summary, rk,
+fn movie(m: &CatalogMovie, w: &mut impl Sink) {
+    let CatalogMovie { sid, sec, title, year, rating, dur_ns, part, thumb, still, art, summary, rk,
         vcodec, acodec, blur, has_blur, kind, resume_ms, show_rk, season_index, show_title,
         ep_index, unwatched, watched, aired, child_count } = m;
     w.u32(sid.raw().into()); w.u64(*sec as u64); w.text(title); w.u32(*year as u32);
@@ -198,7 +198,7 @@ mod tests {
     #[test]
     fn initial_contents_are_owned_round_trip_and_do_not_consume_arrivals() {
         let _guard = crate::testlock::serial();
-        let mut o = crate::pms::test_support::Owner::default();
+        let mut o = crate::catalog::test_support::Owner::default();
         seed_for_test(&mut o.state, &o.adapter, 3, HubState::Ready);
         { o.state.srcs[0].fetching = true; o.state.srcs[0].seq = 19; o.state.srcs[0].retry_s = -0.0; o.state.srcs[0].retry_n = 4; }
         queue_test_landing(&o.state, &o.adapter, Some(5));
@@ -218,7 +218,7 @@ mod tests {
     #[test]
     fn canonical_initial_state_includes_hidden_retry_and_request_fields() {
         let _guard = crate::testlock::serial();
-        let mut o = crate::pms::test_support::Owner::default();
+        let mut o = crate::catalog::test_support::Owner::default();
         seed_for_test(&mut o.state, &o.adapter, 2, HubState::Ready);
         let initial = Initial::capture(&o.state, &o.adapter);
         let value = serde_json::to_value(&initial).unwrap();

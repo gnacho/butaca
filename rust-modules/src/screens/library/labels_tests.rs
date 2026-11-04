@@ -1,5 +1,5 @@
 //! Meaningful legacy caption and landscape assertions, on the owned production helpers.
-use crate::pms::PmsMovie;
+use crate::catalog::CatalogMovie;
 use crate::ui::card_row::{self, RowStyle};
 use crate::ui::consts::{self, CARD_H, CARD_W, MARGIN_X};
 use crate::ui::fixture::FixtureMeasure;
@@ -13,11 +13,11 @@ use super::layout::{self, Layout, shelf_pitch, COLS, CONTENT_TOP, GRID_RIGHT, MA
 
 #[test]
 fn grid_labels_identify_episodes_and_seasons() {
-    let episode = PmsMovie { kind: 3, title: "The Bear".into(), show_title: "The Bear".into(),
+    let episode = CatalogMovie { kind: 3, title: "The Bear".into(), show_title: "The Bear".into(),
         season_index: 3, ep_index: 4, ..Default::default() };
     assert_eq!(super::parts::grid_label(&episode).title.unwrap().to_str().unwrap(), "S3 · E4",
         "an episode without its own title must identify the episode, not repeat the show");
-    let season = PmsMovie { kind: 2, title: "Season 3".into(), show_title: "The Bear".into(),
+    let season = CatalogMovie { kind: 2, title: "Season 3".into(), show_title: "The Bear".into(),
         season_index: 3, year: 2024, ..Default::default() };
     let label = super::parts::grid_label(&season);
     assert_eq!(label.title.unwrap().to_str().unwrap(), "Season 3");
@@ -28,7 +28,7 @@ fn grid_labels_identify_episodes_and_seasons() {
 #[test]
 fn focused_grid_labels_keep_the_shared_trailing_fact_including_under_a_menu() {
     for (kind, year) in [(0, 1994), (1, 2022)] {
-        let item = PmsMovie { kind, year, title: "Synthetic title".into(),
+        let item = CatalogMovie { kind, year, title: "Synthetic title".into(),
             dur_ns: 60 * 60 * 1_000_000_000, resume_ms: 35 * 60 * 1000,
             ..Default::default() };
         let label = super::parts::grid_label(&item);
@@ -36,9 +36,9 @@ fn focused_grid_labels_keep_the_shared_trailing_fact_including_under_a_menu() {
         assert_eq!(label.caption.unwrap().to_str().unwrap(), year.to_string(),
             "grid cards use the shared non-deck caption, not remaining playback time");
     }
-    let item = PmsMovie { title: "Undated".into(), ..Default::default() };
+    let item = CatalogMovie { title: "Undated".into(), ..Default::default() };
     assert!(super::parts::grid_label(&item).caption.is_none());
-    let episode = PmsMovie { kind: 3, year: 2020, season_index: 2, ep_index: 7,
+    let episode = CatalogMovie { kind: 3, year: 2020, season_index: 2, ep_index: 7,
         ..Default::default() };
     assert_eq!(super::parts::grid_label(&episode).caption.unwrap().to_str().unwrap(), "2020",
         "the still overlay carries the episode address; the focus caption adds its release date");
@@ -75,7 +75,7 @@ fn a_focused_grid_caption_stays_inside_the_rail_reserved_band() {
 
 #[test]
 fn episode_grid_art_and_focus_labels_use_the_landscape_card_contract() {
-    let item = PmsMovie { kind: 3, still: "/episode/still".into(),
+    let item = CatalogMovie { kind: 3, still: "/episode/still".into(),
         thumb: "/show/poster".into(), ..Default::default() };
     let crate::ui::widgets::Art::Still(Some(art)) = super::parts::grid_art(&item) else {
         panic!("episodes must use their own still, not the show poster");
@@ -86,7 +86,7 @@ fn episode_grid_art_and_focus_labels_use_the_landscape_card_contract() {
         layout.card_w(), layout.card_h());
     let (x, width) = card_row::label_band(Painter::root(), rect, &layout.style());
     assert!(x + width <= GRID_RIGHT + 0.01, "episode focus label must keep the rail clear");
-    let season = PmsMovie { kind: 2, ..item };
+    let season = CatalogMovie { kind: 2, ..item };
     assert!(matches!(super::parts::grid_art(&season), crate::ui::widgets::Art::Poster(Some(_))));
 }
 
@@ -202,21 +202,21 @@ fn owned_library_overscan_probe_covers_every_legacy_edge() {
 #[test]
 fn a_focused_poster_tile_always_fills_the_caption_rung_it_reserves() {
     // Port the original Library assertion against the owned screen's production helper.
-    let caption = |item: PmsMovie, is_continue| {
+    let caption = |item: CatalogMovie, is_continue| {
         let shelf = crate::browse::section_hubs::Shelf {
             id: "x".into(), key: String::new(), total: 0, title: "Recently Added".into(), is_continue,
             landscape: false, items: vec![item],
         };
         shelf_label(&shelf, 0).caption.map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
     };
-    assert_eq!(caption(PmsMovie { kind: 1, title: "The Bear".into(), year: 2022,
+    assert_eq!(caption(CatalogMovie { kind: 1, title: "The Bear".into(), year: 2022,
         ..Default::default() }, false), "2022", "shows reserve the same caption rung as films");
-    assert_eq!(caption(PmsMovie { kind: 0, title: "Stardust".into(), year: 2007,
+    assert_eq!(caption(CatalogMovie { kind: 0, title: "Stardust".into(), year: 2007,
         ..Default::default() }, false), "2007");
-    assert_eq!(caption(PmsMovie { kind: 0, title: "Stardust".into(), year: 2007,
+    assert_eq!(caption(CatalogMovie { kind: 0, title: "Stardust".into(), year: 2007,
         dur_ns: 60 * 60 * 1_000_000_000, resume_ms: 35 * 60 * 1000,
         ..Default::default() }, true), "25 min left", "a Continue Watching tile reports time left");
-    assert_eq!(caption(PmsMovie { kind: 1, title: "Untitled".into(),
+    assert_eq!(caption(CatalogMovie { kind: 1, title: "Untitled".into(),
         ..Default::default() }, false), "", "missing source data does not invent a caption");
 }
 
@@ -237,7 +237,7 @@ fn a_focused_poster_tile_always_fills_the_caption_rung_it_reserves() {
 
     #[test]
     fn a_focused_episode_tile_reveals_the_episode_and_not_the_show() {
-        let ep = |s: c_int, e: c_int, title: &str, show: &str| PmsMovie {
+        let ep = |s: c_int, e: c_int, title: &str, show: &str| CatalogMovie {
             kind: 3,
             season_index: s,
             ep_index: e,
@@ -245,7 +245,7 @@ fn a_focused_poster_tile_always_fills_the_caption_rung_it_reserves() {
             show_title: show.into(),
             ..Default::default()
         };
-        let shelf = |items: Vec<PmsMovie>| crate::browse::section_hubs::Shelf {
+        let shelf = |items: Vec<CatalogMovie>| crate::browse::section_hubs::Shelf {
             id: "tv.recentlyreleased".into(),
             key: String::new(),
             total: 0,
@@ -269,7 +269,7 @@ fn a_focused_poster_tile_always_fills_the_caption_rung_it_reserves() {
                 .unwrap_or_default()
         };
 
-        let dated = |m: PmsMovie| PmsMovie {
+        let dated = |m: CatalogMovie| CatalogMovie {
             aired: "2026-09-11".into(),
             ..m
         };
@@ -294,7 +294,7 @@ fn a_focused_poster_tile_always_fills_the_caption_rung_it_reserves() {
 
         // **Continue Watching trails time left instead**, because for a part-watched episode that
         // is the fact you came for. The shelf decides and not the item.
-        let mut deck = shelf(vec![PmsMovie {
+        let mut deck = shelf(vec![CatalogMovie {
             dur_ns: 30 * 60 * 1_000_000_000,
             resume_ms: 6 * 60 * 1000,
             ..dated(ep(3, 4, "Violet", "The Bear"))

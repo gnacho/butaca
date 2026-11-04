@@ -1,6 +1,6 @@
 //! Item detail data layer for the detail page: full metadata (genres, cast, crew,
 //! audio/subtitle streams), and the TV season/episode hierarchy — fetched on demand into a single
-//! CURRENT item. Idiomatic Rust (String/Vec), like the browse catalog (pms.rs) — the fixed C
+//! CURRENT item. Idiomatic Rust (String/Vec), like the browse catalog (catalog.rs) — the fixed C
 //! buffers from the C port are gone.
 use std::os::raw::c_int;
 pub(crate) mod record;
@@ -263,9 +263,9 @@ pub(crate) fn friendly_codec(codec: &str) -> String {
     }
 }
 
-/// One credit on the Cast & Crew shelf. PMS ships crew (`Director[]`/`Writer[]`) in the SAME shape
-/// as the actors (`Role[]`) minus the `role` attribute, so a crew credit is this same struct with
-/// its JOB in `role` — see [`crew_credits`].
+/// One credit on the Cast & Crew shelf. The server ships crew (`Director[]`/`Writer[]`) in the SAME
+/// shape as the actors (`Role[]`) minus the `role` attribute, so a crew credit is this same struct
+/// with its JOB in `role` — see [`crew_credits`].
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Cast {
     pub(crate) tag: String,   // person's name
@@ -278,7 +278,7 @@ pub(crate) struct Cast {
     pub(crate) tag_key: String,
 }
 
-/// Stable identities for the app-owned jobs derived from PMS crew arrays. The keys stay in
+/// Stable identities for the app-owned jobs derived from the server crew arrays. The keys stay in
 /// recorded metadata and semantic comparisons; only a display accessor translates them.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CrewRole {
@@ -308,7 +308,7 @@ impl CrewRole {
 
 impl Cast {
     /// The `personId` for `/library/people/{personId}/media` — the numeric id when the server
-    /// sent one, else the global guid (PMS accepts EITHER; both verified live 2026-07-29).
+    /// sent one, else the global guid (the server accepts EITHER; both verified live 2026-07-29).
     /// Empty when the row carries neither, which is the "this headshot opens nothing" case the
     /// cast row's OK arm gates on.
     pub(crate) fn person_key(&self) -> String {
@@ -320,8 +320,8 @@ impl Cast {
     }
 }
 
-/// What PMS says about a video stream's **Dolby Vision** layering — read together, because the
-/// only question worth asking of them is a joint one: **is the base layer, alone, a correct
+/// What the server says about a video stream's **Dolby Vision** layering — read together, because
+/// the only question worth asking of them is a joint one: **is the base layer, alone, a correct
 /// picture?**
 ///
 /// It has to be a joint question because the buffer-feed pipeline has no other option. We feed one
@@ -679,8 +679,8 @@ pub(crate) fn prewarm_dv_latches() {
     let _ = dv_node_suppressed();
 }
 
-// `Default` is for TESTS: every field is a zero/empty that means "PMS did not say", so a fixture
-// can name the two or three fields its case is about instead of the fifteen it is not.
+// `Default` is for TESTS: every field is a zero/empty that means "the server did not say", so
+// a fixture can name the two or three fields its case is about instead of the fifteen it is not.
 #[derive(Clone, Default)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) struct Stream {
@@ -688,7 +688,7 @@ pub(crate) struct Stream {
     pub(crate) index: i64,   // PMS stream index (container order) — the ordinal mapping sorts by it
     pub(crate) lang: String, // display name ("English")
     pub(crate) lang_code: String, // ISO code ("eng") — the route's language preference matches this
-    /// PMS `Stream.languageTag` — the BCP-47 tag ("es-419", "en-GB"), region and all, where
+    /// The server `Stream.languageTag` — the BCP-47 tag ("es-419", "en-GB"), region and all, where
     /// `lang_code` is only the ISO-639 primary subtag. `metadata::track_label`'s region fallback
     /// is the one reader (a nameless track with a regional tag names the region instead of
     /// nothing). This struct is a recorded wire value: controlled replay carries whole `Detail`s
@@ -705,13 +705,13 @@ pub(crate) struct Stream {
     /// seven same-language AC3 tracks apart in `screens::tracks_panel`, where language and codec alone
     /// cannot.
     pub(crate) bitrate: i64,
-    /// The codec profile, lower-case as PMS sends it. **On an audio track this is where Atmos
-    /// is** — `"dolby digital plus + dolby atmos"` (probed live 2026-08-21); on the video track it
-    /// is `"main 10"`. See [`Stream::has_atmos`].
+    /// The codec profile, lower-case as the server sends it. **On an audio track this is where
+    /// Atmos is** — `"dolby digital plus + dolby atmos"` (probed live 2026-08-21); on the video
+    /// track it is `"main 10"`. See [`Stream::has_atmos`].
     pub(crate) profile: String,
     /// Video track only: bits per component (10 for Main 10); 0 = not said.
     pub(crate) bit_depth: i64,
-    /// Video track only: chroma subsampling as PMS spells it, e.g. `"4:2:0"`.
+    /// Video track only: chroma subsampling as the server spells it, e.g. `"4:2:0"`.
     pub(crate) chroma: String,
     pub(crate) title: String,
     pub(crate) sdh: bool,
@@ -722,19 +722,19 @@ pub(crate) struct Stream {
     /// cannot reach it; on direct play a TEXT sidecar is fetched and drawn by `player::sidecar`
     /// instead ([`Stream::sidecar_renderable`]), and a transcode burns it.
     pub(crate) external: bool,
-    /// PMS `Stream.key` — the sidecar's delivery path (`/library/streams/{id}`). Empty for every
-    /// embedded stream, which is exactly how `external` is derived.
+    /// The server `Stream.key` — the sidecar's delivery path (`/library/streams/{id}`). Empty for
+    /// every embedded stream, which is exactly how `external` is derived.
     pub(crate) key: String,
-    /// PMS `Stream.selected` — the server's CURRENT pick for this part, i.e. the track a user
-    /// chose on ANY Plex client (phone, web, another TV) and the one `select_streams` writes.
-    /// `route`'s selection ladder prefers it over its own defaults, which is what makes a pick
-    /// made elsewhere survive here instead of being silently overwritten. NB for AUDIO the server
-    /// marks a selected stream on essentially every part — for an untouched one that is just the
-    /// container `default` echoed back — so `route::pick_dp_audio` only treats it as a choice when
-    /// it names a DIFFERENT stream, and never as a reason to transcode. Read its doc before using
-    /// this flag anywhere else.
+    /// The server `Stream.selected` — the server's CURRENT pick for this part, i.e. the track
+    /// a user chose on ANY Plex client (phone, web, another TV) and the one `select_streams`
+    /// writes. `route`'s selection ladder prefers it over its own defaults, which is what makes
+    /// a pick made elsewhere survive here instead of being silently overwritten. NB for AUDIO
+    /// the server marks a selected stream on essentially every part — for an untouched one that is
+    /// just the container `default` echoed back — so `route::pick_dp_audio` only treats it as
+    /// a choice when it names a DIFFERENT stream, and never as a reason to transcode. Read its doc
+    /// before using this flag anywhere else.
     pub(crate) selected: bool,
-    /// Audio track only: PMS 1.43.4+ with Plex Pass says the server can honor
+    /// Audio track only: a 1.43.4+ server with Plex Pass can honor
     /// `boostDialog=1`/`normalizeLoudness=1` for this track on the transcoder (issue #266). Same
     /// round-trip concern as `language_tag`: a `Detail` recorded before this field existed carries
     /// no key for it, so `skip_serializing_if` keeps a false value off the wire and `default`
@@ -750,7 +750,7 @@ fn is_false(b: &bool) -> bool {
 
 impl Stream {
     /// Can the CLIENT draw this sidecar on direct play? Only a TEXT format: `player::sidecar`
-    /// preserves ASS/SSA scripts for native styled rendering and asks PMS for other formats
+    /// preserves ASS/SSA scripts for native styled rendering and asks the server for other formats
     /// as UTF-8 SubRip (with SubRip/WebVTT parsing fallbacks). An image sidecar
     /// (`.idx`/`.sub` VobSub, `.sup` PGS) has no such path — only a server burn can show it, so
     /// it stays a transcode-only row. An allow-list rather than "not an image codec", so a
@@ -767,14 +767,14 @@ impl Stream {
     /// Does this audio track carry **Dolby Atmos**?
     ///
     /// **The answer is in `profile`, and only there** — probed live against the dev server
-    /// 2026-08-21. The Atmos track on the P5 test item sends
-    /// `profile: "dolby digital plus + dolby atmos"` while its `audioChannelLayout` is the
-    /// ordinary `"5.1(side)"` and its `title` is `null`. A client that looked at the layout, the
-    /// title or the channel count would badge nothing, forever and silently. (PMS *also* composes
-    /// it into `displayTitle`, but that is a pre-formatted user string in the server's own words;
-    /// the profile is the structured field.) Dolby's own AC-4 spec §3.1.1.1 says the same thing
-    /// from the other end — *"It is not possible to derive whether content is branded as Dolby
-    /// Atmos by inspecting the channel configuration."*
+    /// 2026-08-21. The Atmos track on the P5 test item sends `profile: "dolby digital plus + dolby
+    /// atmos"` while its `audioChannelLayout` is the ordinary `"5.1(side)"` and its `title` is
+    /// `null`. A client that looked at the layout, the title or the channel count would badge
+    /// nothing, forever and silently. (the server *also* composes it into `displayTitle`, but
+    /// that is a pre-formatted user string in the server's own words; the profile is the structured
+    /// field.) Dolby's own AC-4 spec §3.1.1.1 says the same thing from the other end — *"It is not
+    /// possible to derive whether content is branded as Dolby Atmos by inspecting the channel
+    /// configuration."*
     ///
     /// Two consumers, and they are why this lives here rather than in the panel that first needed
     /// it: the track menu's `EAC3 5.1 + Atmos` detail line, and the Load payload's
@@ -802,10 +802,10 @@ pub(crate) struct Episode {
     pub(crate) dur_ms: i64,
     pub(crate) thumb: String,
     pub(crate) resume_ms: i64, // viewOffset (0 = not started)
-    /// `viewCount ≥ 1` — played through at least once. Deliberately INDEPENDENT of `resume_ms`
-    /// on the wire: PMS keeps both on an episode that was finished and then started again, so
-    /// which of the two a tile shows is a presentation rule at the draw site (see
-    /// `ui/detail.rs`'s filmstrip), not a mutual exclusion the data layer can assume.
+    /// `viewCount ≥ 1` — played through at least once. Deliberately INDEPENDENT of `resume_ms` on
+    /// the wire: the server keeps both on an episode that was finished and then started again, so
+    /// which of the two a tile shows is a presentation rule at the draw site (see `ui/detail.rs`'s
+    /// filmstrip), not a mutual exclusion the data layer can assume.
     pub(crate) watched: bool,
     pub(crate) part: String, // Media[0].Part[0].key (to play)
     pub(crate) rating: String,
@@ -848,7 +848,7 @@ impl Extra {
     }
 
     /// Human subtype for the extras shelf caption, in the UI language. Unknown subtypes read as
-    /// the generic extra. The match is on PMS's own subtype names, which are never drawn.
+    /// the generic extra. The match is on the server's own subtype names, which are never drawn.
     pub(crate) fn caption(&self) -> &'static str {
         use crate::i18n::msg;
         match self.subtype.as_str() {
@@ -867,7 +867,7 @@ impl Extra {
         }
     }
 
-    /// HUD / PlayIntent title: the extra's own name, or the parent item's if PMS sent none.
+    /// HUD / PlayIntent title: the extra's own name, or the parent item's if the server sent none.
     pub(crate) fn hud_title<'a>(&'a self, parent: &'a str) -> &'a str {
         if self.title.is_empty() {
             parent
@@ -960,7 +960,7 @@ impl Season {
     ///
     /// **No caller outside its own tests.** This doc used to claim the season tab's tick read it —
     /// that tick does not exist, and the two sites that DO spell the rule out (`fetch_detail`'s
-    /// container test below, `pms::unwatched`) hold a `PmsMovie`, not a `Season`, so neither can
+    /// container test below, `catalog::unwatched`) hold a `CatalogMovie`, not a `Season`, so neither can
     /// call it. Kept for the "Mark Season Watched" row, and because the tests below are where the
     /// `leaf_count > 0` guard is actually written down.
     #[allow(dead_code)]
@@ -981,7 +981,7 @@ impl Season {
 /// **The data was never missing.** `/related`'s rows are the SAME wire DTO every other listing
 /// parses, carrying `viewCount`, `viewOffset`, `duration`, `type` and `Media[0].Part[0]`;
 /// `fetch_related` simply copied three fields out and dropped the rest. So the fix is not to widen
-/// this struct field by field but to stop having one: `crate::pms::parse_item` WAS the ONE
+/// this struct field by field but to stop having one: `crate::catalog::parse_item` WAS the ONE
 /// `server::Metadata` → row mapping that the hub catalog, the Library grid and the person page
 /// shared, and it owned rules a re-derivation gets wrong. The sharpest is that a related
 /// **SHOW** is watched on `viewedLeafCount >= leafCount` and never on `viewCount > 0`, so a series
@@ -994,7 +994,7 @@ impl Season {
 /// stamps each row with the sid it fetched from, so every downstream use — the art request, the
 /// context menu's `SID`, the scrobble — addresses the right machine BY CONSTRUCTION rather than by
 /// a comment asking the next caller to remember `server::current_server()` is the wrong answer here.
-pub(crate) type Related = crate::pms::PmsMovie;
+pub(crate) type Related = crate::catalog::CatalogMovie;
 
 /// Clone because the playing-item store keeps the played leaf's OWN chapters (see [`PlayingItem`]) —
 /// on the detail-page play path they are cloned from the already-loaded `Detail` rather than refetched.
@@ -1008,7 +1008,7 @@ pub(crate) struct Chapter {
 }
 
 /// Which timeline segment a [`Marker`] describes. Only the two the player acts on are modelled —
-/// PMS also emits `commercial` on recorded content, which [`convert_markers`] drops, so an
+/// the server also emits `commercial` on recorded content, which [`convert_markers`] drops, so an
 /// unhandled kind can never be mistaken for one of these.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -1026,7 +1026,7 @@ pub(crate) struct Marker {
     pub(crate) kind: MarkerKind,
     pub(crate) start_ms: i64,
     pub(crate) end_ms: i64,
-    /// this credits segment runs to the end of the item (PMS `final: true`)
+    /// this credits segment runs to the end of the item (the server `final: true`)
     pub(crate) final_seg: bool,
 }
 
@@ -1084,8 +1084,9 @@ pub(crate) fn tail_marker_with(pos_ms: i64, dur_ms: i64, window_ms: i64) -> Opti
 /// skip lands on `end_ms` rather than re-offering the segment it just left.
 ///
 /// A `final` credits marker is treated as running to `i64::MAX` rather than its stated `end_ms`:
-/// PMS sets that end to the container duration, but our playhead is the DECODER's, which routinely
-/// stops a few hundred ms short of it — so the prompt would blink out over the last frames.
+/// the server sets that end to the container duration, but our playhead is the DECODER's,
+/// which routinely stops a few hundred ms short of it — so the prompt would blink out over the last
+/// frames.
 pub(crate) fn marker_at(markers: &[Marker], pos_ms: i64) -> Option<Marker> {
     markers
         .iter()
@@ -1149,9 +1150,9 @@ impl RatingArt {
     }
 }
 
-/// One review score to badge on the detail hero: the artwork the server named, the score as PMS
-/// normalises it (0–10 for every provider — a 91% tomato arrives as 9.1), and whether PMS filed it
-/// as a critic or an audience score.
+/// One review score to badge on the detail hero: the artwork the server named, the score as
+/// the server normalises it (0–10 for every provider — a 91% tomato arrives as 9.1), and whether
+/// the server filed it as a critic or an audience score.
 #[derive(Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) struct Rating {
@@ -1271,7 +1272,7 @@ pub(crate) struct Detail {
     /// [`server::UltraBlurColors::corners`](crate::media::UltraBlurColors::corners) owns) and whether
     /// the server sent a usable envelope — what keys the detail page's ambient GROUND. It lives on
     /// the LOADED item and not only on the catalog row because a page opened from the Library grid,
-    /// a Related tile or the person page is never in the home catalog (`pms::index_of_rk` searches
+    /// a Related tile or the person page is never in the home catalog (`catalog::index_of_rk` searches
     /// the hubs only), and those were exactly the pages sitting on flat grey with no wash at all.
     #[serde(with = "record::blur_bits")]
     pub(crate) blur: [[f32; 3]; 4],
@@ -1300,7 +1301,7 @@ pub(crate) struct Detail {
     pub(crate) chapters: Vec<Chapter>,
     pub(crate) markers: Vec<Marker>, // intro / credits segments (leaf items only)
     pub(crate) ratings: Vec<Rating>, // review scores, critic-first (see convert_ratings)
-    /// Every extras row, server order. Empty when PMS sent none, the GET was refused and no
+    /// Every extras row, server order. Empty when the server sent none, the GET was refused and no
     /// primary trailer could be filled, or this item is an episode/season (those never request
     /// extras). The Trailer control reads [`Self::trailer`], not this vec's first element.
     #[serde(default)]
@@ -1417,8 +1418,8 @@ fn current(state: &MetadataState) -> Option<&Detail> {
     state.current.as_ref()
 }
 /// TEST-ONLY installer for the loaded item. The UI's layout tests need a `Detail` on screen with
-/// no PMS behind them; every other writer of `CURRENT` goes through the landing mailbox, which is
-/// exactly the invariant those tests must not have to fake. Crate-global, so callers hold
+/// no server behind them; every other writer of `CURRENT` goes through the landing mailbox,
+/// which is exactly the invariant those tests must not have to fake. Crate-global, so callers hold
 /// [`crate::testlock::serial`].
 #[cfg(test)]
 pub(crate) fn install_for_test(state: &mut MetadataState, d: Option<Detail>) {
@@ -1429,7 +1430,7 @@ pub(crate) fn install_for_test(state: &mut MetadataState, d: Option<Detail>) {
 /// **OPTIMISTIC**, MAIN THREAD: flip what the LOADED item says about `(sid, rk)`'s watch state,
 /// before the server has been told. Returns whether anything on this page was about that item.
 ///
-/// The detail page's twin of [`crate::pms::edit_item`], and it exists for the same reason: the write
+/// The detail page's twin of [`crate::catalog::edit_item`], and it exists for the same reason: the write
 /// that justifies it now happens on a worker (`crate::viewstate`), so without this the hero's toggle
 /// and the filmstrip's checks would sit unchanged for as long as the item's server takes to answer —
 /// which on a share is seconds, and reads as the press having missed.
@@ -1448,7 +1449,7 @@ pub(crate) fn install_for_test(state: &mut MetadataState, d: Option<Detail>) {
 ///   item watched — and without this pass the tile it was pressed on kept its old tick and resume
 ///   bar until a refetch, which reads as the row having done nothing.
 ///
-/// `resume_ms` is cleared with the flag for the same reason `pms::set_watched` clears it: the
+/// `resume_ms` is cleared with the flag for the same reason `catalog::set_watched` clears it: the
 /// still's own resolver (`ui::detail::ep_state`) reads progress ahead of the watched mark, so an
 /// episode keeping its old `viewOffset` would still draw its resume bar and no check.
 ///
@@ -1486,7 +1487,7 @@ fn set_watched_local(state: &mut MetadataState, sid: crate::registry::ServerId, 
             if crate::registry::same_item((m.sid, &m.rk), (sid, rk)) {
                 // the shared three-field flip (`watched`/`unwatched`/`resume_ms` move together, or
                 // the tile wears the progress bar it had before and shows no tick at all)
-                crate::pms::set_watched(m, on);
+                crate::catalog::set_watched(m, on);
                 hit = true;
             }
         }
@@ -1553,7 +1554,7 @@ fn reset(state: &mut MetadataState, adapter: &MetadataAdapter) {
 }
 
 /// TEST ONLY — install `d` as the loaded item, bypassing the fetch and its mailbox. The screens'
-/// pure focus/label math reads `current()`, and the only real way to populate it is a PMS round
+/// pure focus/label math reads `current()`, and the only real way to populate it is a server round
 /// trip, which the host suite has no server for. Compiled out of the shipped binary. `state` is
 /// the owner's own `MetadataState`, not a global — the detail and season mailboxes are per-owner
 /// fields too, like the other five stores — but `assert_held` below enforces the same crate-wide
@@ -1767,10 +1768,10 @@ pub(crate) struct PlayingItem {
     /// on Plex.
 
     pub(crate) container: String,
-    /// The played leaf's Dolby Vision layering — the direct-play gate's other refusal, beside the
-    /// frame size above and for the same reason: the local fallback never asks PMS, so a file
-    /// whose base layer we cannot display correctly (Profile 5, or a dual-layer Profile 7) would
-    /// otherwise be fed to the decoder verbatim and shown in the wrong colours. See [`Dovi`].
+    /// The played leaf's Dolby Vision layering — the direct-play gate's other refusal, beside
+    /// the frame size above and for the same reason: the local fallback never asks the server, so
+    /// a file whose base layer we cannot display correctly (Profile 5, or a dual-layer Profile 7)
+    /// would otherwise be fed to the decoder verbatim and shown in the wrong colours. See [`Dovi`].
     pub(crate) dovi: Dovi,
     pub(crate) markers: Vec<Marker>, // intro / credits segments — the in-player Skip prompt
     pub(crate) chapters: Vec<Chapter>, // chapter boundaries — the in-player Chapters tab/strip
@@ -1815,13 +1816,13 @@ impl PlayingItem {
 /// MAIN THREAD: the cache-hit half of the old `load_playing` — reuse the loaded detail's streams
 /// when it IS this item, so playing from a detail page costs no extra GET. Snapshotted into
 /// `ResolveEnv` and handed to the worker; splitting the fetch out lost this and quietly added a
-/// PMS round trip to every play from a detail page.
+/// server round trip to every play from a detail page.
 ///
 /// The hit test is the PAIR `(sid, rk)`, and this is the site where a bare key is most dangerous:
-/// it SKIPS the PMS fetch, so a collision here silently substitutes the loaded page's item for the
-/// one about to play — its audio/subtitle `Stream.id`s (then PUT to the other server), its frame
-/// size (so the direct-play gate reasons about the wrong resolution), its fps, chapters and
-/// markers. A miss costs one round trip; a false hit costs the whole playback.
+/// it SKIPS the server fetch, so a collision here silently substitutes the loaded page's item for
+/// the one about to play — its audio/subtitle `Stream.id`s (then PUT to the other server),
+/// its frame size (so the direct-play gate reasons about the wrong resolution), its fps, chapters
+/// and markers. A miss costs one round trip; a false hit costs the whole playback.
 ///
 /// This closed a TODO that stood here through the foundation commits: `Detail` had no server, so
 /// the filter was the rk alone and the parameter was deliberately unused. `Detail.sid` is what
@@ -1913,10 +1914,10 @@ fn install_playing(state: &mut MetadataState, pt: Option<PlayingItem>) {
 }
 
 // ---- list-position → demuxer-ordinal conversion --------------------------------------------
-// The demuxer selects "the Nth stream of its type" in CONTAINER order; the menu/metadata lists
-// are in PMS document order. These convert a list position to that container ordinal by sorting
-// on PMS `Stream.index` (stable tie-break on list position, so an index-less response degrades
-// to document order — the previous behavior).
+// The demuxer selects "the Nth stream of its type" in CONTAINER order; the menu/metadata lists are
+// in the server document order. These convert a list position to that container ordinal by sorting
+// on the server `Stream.index` (stable tie-break on list position, so an index-less response
+// degrades to document order — the previous behavior).
 
 /// Container-audio ordinal of `audio[i]` — what `player::set_audio_track`/`request_audio_track`
 /// (→ ff's nth_audio_stream) consume.
@@ -1965,7 +1966,7 @@ pub(crate) fn sub_render_ordinal(subs: &[Stream], i: usize) -> i32 {
 
 /// ISO 639-1 / 639-2 bibliographic and terminology spellings from Debian iso-codes:
 /// https://salsa.debian.org/iso-codes-team/iso-codes/-/raw/main/data/iso_639-2.json
-/// (retrieved 2026-09-27). Plex preferences use 639-1; PMS commonly uses either 639-2 form.
+/// (retrieved 2026-09-27). Plex preferences use 639-1; the server commonly uses either 639-2 form.
 const LANG_SPELLINGS: &[&[&str]] = &[
     &["aa", "aar"],
     &["ab", "abk"],
@@ -2336,7 +2337,7 @@ fn fetch_full(sid: crate::registry::ServerId, rk: &str) -> Option<Detail> {
 // variant that wrapped it — are gone rather than left as unreachable dead code.
 
 // ---- async detail load ---------------------------------------------------------------------
-// Opening a detail page used to block the SDL loop on 2 (movie) to 5 (show) sequential PMS
+// Opening a detail page used to block the SDL loop on 2 (movie) to 5 (show) sequential server
 // round-trips, straight off the key handler. `request_detail` spawns the fetch and `pump_detail`
 // installs the result — the page mounts THIS frame on the catalog row's art/title/summary and
 // fills in a beat later. Same shape as the season mailbox below and route.rs's play resolve.
@@ -3346,7 +3347,7 @@ mod marker_tests {
 
     #[test]
     fn a_final_credits_marker_holds_past_its_stated_end() {
-        // PMS sets a `final` marker's end to the CONTAINER duration, but our playhead is the
+        // The server sets a `final` marker's end to the CONTAINER duration, but our playhead is the
         // decoder's and routinely stops short of it — an exclusive end there made the pill blink
         // out over the last frames, exactly when it is being reached for.
         let m = episode_markers();

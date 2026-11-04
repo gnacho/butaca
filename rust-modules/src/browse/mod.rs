@@ -4,8 +4,8 @@
 //! module supplies the core state transitions and immutable publication types; every stateful
 //! operation requires an explicit `BrowseState` or `BrowseStore` receiver.
 //!
-//! Sibling of `pms.rs`'s hub catalog, which stays hub-only (256-cap, rebuilt wholesale by
-//! `pms`'s worker-driven hub catalog); this store pages arbitrarily large sections without blocking the
+//! Sibling of `catalog.rs`'s hub catalog, which stays hub-only (256-cap, rebuilt wholesale by
+//! `catalog`'s worker-driven hub catalog); this store pages arbitrarily large sections without blocking the
 //! main loop. Data model: one [`SecItems`] per section — a PAGE-CHUNKED table sized to the
 //! listing's `totalSize`, a page (`PAGE` items) allocated only when it lands (restructure phase
 //! 4's O(result) rule) — filled page-by-page by ONE background fetch at a
@@ -13,16 +13,16 @@
 //! `Mutex` mailbox + generation atomics (a re-query supersedes in-flight landings), applied
 //! on the main thread by [`pump`] once a frame while the Library screen is up.
 //!
-//! The sort/filter MENUS are server-shaped but arrive with the section's data: Jellyfin's
-//! `SortBy` vocabulary is fixed (`jellyfin::browse::sorts`, landed with the first page) and the
-//! genre value list is fetched lazily (`kick_genres`) when the filter menu first opens. The
-//! PMS-side menu discovery (`includeMeta=1`), its client-side Plays entry and the remembered-sort
-//! page re-ask went with the PMS browse arm (#166 pass 3).
+//! The sort/filter MENUS are server-shaped but arrive with the section's data: Jellyfin's `SortBy`
+//! vocabulary is fixed (`jellyfin::browse::sorts`, landed with the first page) and the genre value
+//! list is fetched lazily (`kick_genres`) when the filter menu first opens. The server-side menu
+//! discovery (`includeMeta=1`), its client-side Plays entry and the remembered-sort page re-ask
+//! went with the server browse arm (#166 pass 3).
 //!
 //! The CHOSEN sort of a library's own listing is remembered across restarts, per profile, by
 //! (machine id, section key) and by the sort's KEY, never its menu position
-//! (`server::session::Session::library_sorts`, issue #278). The PMS page worker that re-asked the
-//! first page in a remembered order is gone with the PMS arm; the recording side
+//! (`server::session::Session::library_sorts`, issue #278). The server page worker that re-asked
+//! the first page in a remembered order is gone with the server arm; the recording side
 //! ([`BrowseState::note_sort_choice`]) stays, because the persisted session shapes are shared.
 //!
 //! [`BrowseState`] is main-thread-only; worker threads touch only their owning store adapter's
@@ -44,7 +44,7 @@
 //! that replaces it, and it holds for every source that lands later rather than only for the
 //! second call.
 use crate::registry::ServerId;
-use crate::pms::PmsMovie;
+use crate::catalog::CatalogMovie;
 use std::panic::catch_unwind;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -142,8 +142,8 @@ impl BrowseSource {
     pub(crate) fn reachable(&self) -> bool {
         !matches!(self.state, SourceState::Unreachable)
     }
-    /// Record a generic PMS request that answered or did not. A failed request cannot distinguish
-    /// HTTP status from transport/parse failure.
+    /// Record a generic server request that answered or did not. A failed request cannot
+    /// distinguish HTTP status from transport/parse failure.
     #[cfg(test)]
     pub(crate) fn set_reachable(&mut self, ok: bool) {
         if ok {
@@ -209,8 +209,8 @@ pub(crate) enum LibraryType {
     Primary,
     Seasons,
     Episodes,
-    /// The section's collections — `all?type=18`, measured on PMS to page with `totalSize`, to
-    /// answer `firstCharacter?type=18` and to declare `titleSort` as its only sort.
+    /// The section's collections — `all?type=18`, measured on the server to page with `totalSize`,
+    /// to answer `firstCharacter?type=18` and to declare `titleSort` as its only sort.
     Collections,
 }
 
@@ -280,9 +280,10 @@ impl LibraryType {
     }
 }
 
-/// One sort-menu entry. The menu itself is the backend's: Jellyfin's `SortBy` vocabulary is
-/// fixed (`jellyfin::browse::sorts`) and lands with the first page; the PMS server-driven menu
-/// (`Meta.Type[].Sort`) and its query-token machinery went with the PMS browse arm (#166 pass 3).
+/// One sort-menu entry. The menu itself is the backend's: Jellyfin's `SortBy` vocabulary is fixed
+/// (`jellyfin::browse::sorts`) and lands with the first page; the server-driven menu
+/// (`Meta.Type[].Sort`) and its query-token machinery went with the server browse arm (#166 pass
+/// 3).
 #[derive(Clone)]
 pub(crate) struct SortEntry {
     pub(crate) key: String,   // "SortName"
@@ -310,7 +311,7 @@ pub(crate) struct GenreEntry {
 /// What the last page fetch for a section produced — Loading / Ready / **Failed**, per SECTION
 /// because that is the grain this store's state already has.
 ///
-/// The irony is worth recording once: `pms.rs`'s hub fetch runs this same three-state machine and
+/// The irony is worth recording once: `catalog.rs`'s hub fetch runs this same three-state machine and
 /// its own doc says it was "Modelled on `browse.rs`'s page store, deliberately, because it already
 /// learned both lessons this needed" — the copy took the two lessons (a failed fetch must never
 /// overwrite a populated store; a fast-failing network is held off by a countdown) and then added
@@ -321,7 +322,7 @@ pub(crate) struct GenreEntry {
 /// `Failed` describes the last FETCH, not the store: a mid-scroll page failure on a populated
 /// section is Failed with items still on screen, which is why the screen's read-out projects this
 /// state and the store TOGETHER (`screens::library`'s `readout`, where that whole decision lives as
-/// one pure function) rather than reading the state alone — the same rule `pms::HubState` and
+/// one pure function) rather than reading the state alone — the same rule `catalog::HubState` and
 /// `StatusKind::Empty` state, that an empty answer is an answer and only a fault is a fault.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum SecFetch {
@@ -398,7 +399,7 @@ struct SecState {
 /// A section's items, CHUNKED BY PAGE (restructure phase 4, the O(result) rule of spec §5.2 —
 /// `docs/stores-as-machines.md` §2.6). The outer vector holds one slot per page of `PAGE`
 /// items and a page is allocated only when its items land, so sizing the store to a listing's
-/// `totalSize` on the main thread costs `total / PAGE` words rather than an `Option<PmsMovie>`
+/// `totalSize` on the main thread costs `total / PAGE` words rather than an `Option<CatalogMovie>`
 /// per item in the library — the previous shape allocated every slot of a 20 000-title section
 /// in the drain, on the first page's landing. `get`/`set` index by absolute item index exactly
 /// as the flat vector did; `page_missing` is the fetch scan, over pages.
@@ -406,7 +407,7 @@ struct SecState {
 /// changed pages, never the whole loaded catalog. This is the Library read-view backing.
 #[derive(Clone, Default)]
 struct SecItems {
-    pages: Arc<Vec<Option<Arc<Vec<Option<PmsMovie>>>>>>,
+    pages: Arc<Vec<Option<Arc<Vec<Option<CatalogMovie>>>>>>,
     len: usize,
 }
 
@@ -437,7 +438,7 @@ impl SecItems {
             }
         }
     }
-    fn get(&self, i: usize) -> Option<&PmsMovie> {
+    fn get(&self, i: usize) -> Option<&CatalogMovie> {
         if i >= self.len {
             return None;
         }
@@ -445,7 +446,7 @@ impl SecItems {
     }
     /// Place `m` at `i`; a page is allocated on its first item. Out of range is ignored (the
     /// listing shrank under a fetch, which the next page reconciles).
-    fn set(&mut self, i: usize, m: PmsMovie) {
+    fn set(&mut self, i: usize, m: CatalogMovie) {
         if i >= self.len {
             return;
         }
@@ -472,7 +473,7 @@ impl SecItems {
     }
     /// A read scan first: an optimistic edit must not clone unrelated retained pages.
     fn set_watched(&mut self, sid: ServerId, rk: &str, on: bool) -> bool {
-        let matches = |m: &PmsMovie| crate::registry::same_item((m.sid, &m.rk), (sid, rk));
+        let matches = |m: &CatalogMovie| crate::registry::same_item((m.sid, &m.rk), (sid, rk));
         let mut hit = false;
         for p in 0..self.pages.len() {
             if !self.pages[p]
@@ -487,14 +488,14 @@ impl SecItems {
                 .flatten()
                 .filter(|m| matches(m))
             {
-                crate::pms::set_watched(m, on);
+                crate::catalog::set_watched(m, on);
                 hit = true;
             }
         }
         hit
     }
     #[cfg(test)]
-    fn from_vec(v: Vec<Option<PmsMovie>>) -> Self {
+    fn from_vec(v: Vec<Option<CatalogMovie>>) -> Self {
         let mut s = SecItems::default();
         s.resize(v.len());
         for (i, m) in v.into_iter().enumerate() {
@@ -1073,7 +1074,7 @@ impl BrowseState {
                 |jc, key, _kind| crate::jellyfin::browse::fetch_genres(jc, key).unwrap_or_default());
             return;
         }
-        // The Plex section-directory lane went with the PMS browse arm (#166 pass 3).
+        // The Plex section-directory lane went with the server browse arm (#166 pass 3).
         #[cfg(any())]
         let _ = (done, adapter);
     }
@@ -1106,7 +1107,7 @@ impl BrowseState {
                 });
             return;
         }
-        // The Plex firstCharacter lane went with the PMS browse arm (#166 pass 3).
+        // The Plex firstCharacter lane went with the server browse arm (#166 pass 3).
         #[cfg(any())]
         let _ = (done, adapter);
     }
@@ -1976,7 +1977,7 @@ impl BrowseState {
             return false;
         }
         // The Jellyfin landing applies straight to its section state — a process-lifetime
-        // install has no registry lifecycle to validate against. The Plex arm went with the PMS
+        // install has no registry lifecycle to validate against. The Plex arm went with the server
         // browse arm (#166 pass 3); without the feature there is no lane that can land here.
         {
             let DirectoryResult { epoch: _, sec, client, library_type, letters_filter, list } = result;
@@ -2015,7 +2016,7 @@ impl BrowseState {
         // the query takes the RAW sort key and the descending flag separately. The guard is
         // load-bearing: the jellyfin slot is 0, which test fixtures also hand to
         // `register_for_test` Plex clients — an absent jellyfin client must fall THROUGH (into
-        // nothing: the PMS page worker went with the PMS browse arm, #166 pass 3).
+        // nothing: the server page worker went with the server browse arm, #166 pass 3).
         {
             let Some(state) = self.states.get(current) else { return };
             let Some(section) = self.sections.get(current) else { return };
@@ -2120,8 +2121,8 @@ impl BrowseState {
                 #[cfg(any())]
                 let _ = filter;
             });
-        // The page landing is the Jellyfin lane's alone now (the PMS page worker went with the
-        // PMS browse arm, #166 pass 3): the same store splice, minus the registry-lifecycle
+        // The page landing is the Jellyfin lane's alone now (the server page worker went with the
+        // server browse arm, #166 pass 3): the same store splice, minus the registry-lifecycle
         // validation (a process-lifetime install has none) and plus the static sort menu, which
         // is this backend's includeMeta — it lands with the first page. A page fetch is also
         // EVIDENCE ABOUT THE SERVER: with one source it is the only reachability evidence after
@@ -2212,7 +2213,7 @@ struct PageResult {
     gen: u32,
     sec: usize,
     start: usize,
-    items: Vec<PmsMovie>,
+    items: Vec<CatalogMovie>,
     /// totalSize of the listing; **negative = the fetch FAILED** — pump must not touch the
     /// store (a transient network error once wiped a whole populated section to "empty").
     total: i64,
@@ -2337,14 +2338,14 @@ impl SecKind {
 ///
 /// **This is the seam that per-item `ServerId` retires**,
 /// and it is here because without it the Sources list is a trap rather than a feature. The grid
-/// itself is fetched through `client_for(sid)`, but a `PmsMovie` carries no server: `posters` fetch
+/// itself is fetched through `client_for(sid)`, but a `CatalogMovie` carries no server: `posters` fetch
 /// from `client()`, and OK on a card resolves its ratingKey through `client()` too — and ratingKeys
 /// are server-local, so a friend's card would quietly open, and play, a DIFFERENT title of yours
 /// with the same number. Moving `current` with the browsed library makes every one of those agree
 /// again, which is the named "cheap variant": one active server at a time.
 ///
 /// What it costs is stated rather than hidden: Home's catalog belongs to the server it was fetched
-/// from, so it is dropped and re-armed (`pms::reset` — `pms::pump` refetches on the next frames,
+/// from, so it is dropped and re-armed (`catalog::reset` — `catalog::pump` refetches on the next frames,
 /// asynchronously, so nothing blocks), and the person page's shelves with it. The poster memo needs
 /// no help: it compares a token generation, and two servers never share one (`server::servers`).
 fn activate_source_of(_i: usize) {
@@ -2355,7 +2356,7 @@ fn activate_source_of(_i: usize) {
     // only their library, because `ensure_sections` discovers the CURRENT server and the strip had
     // just been re-pointed at theirs.
     //
-    // It was a deliberate stopgap and it said so: `PmsMovie` carried no `ServerId`, so OK on a
+    // It was a deliberate stopgap and it said so: `CatalogMovie` carried no `ServerId`, so OK on a
     // borrowed card would have opened one of OUR films with the same ratingKey, and re-pointing was
     // the cheap way to make the ids line up. Threading `ServerId` through the stored rows retired
     // it — the promise its own comment made. Every consumer now addresses the server by DATA:
@@ -2400,7 +2401,7 @@ pub(crate) const TAB_KINDS: [SecKind; 3] = [SecKind::Movie, SecKind::Show, SecKi
 //
 // **It governed Home ALONE until 2026-09-05 and this header said so.** Owner's direction: the
 // setting affects the whole app. Three browsing surfaces read it now — Home's shelves
-// (`pms::item_pinned`), the top tab STRIP (`tab_has_favorite`: a type with no favourite draws no
+// (`catalog::item_pinned`), the top tab STRIP (`tab_has_favorite`: a type with no favourite draws no
 // pill at all) and the Library's own Sources picker (`source_rows`). `all_source_rows` stays
 // unscoped and is the Favorite libraries editor's list, which is the one way a non-favourite comes
 // back. Search deliberately stays GRANT-scoped and only RANKS by this: a browsing preference is not
@@ -2414,7 +2415,7 @@ pub(crate) const TAB_KINDS: [SecKind; 3] = [SecKind::Movie, SecKind::Show, SecKi
 // **Per profile is the whole shape.** The persisted selection used to hang off the `Session`,
 // which is one per INSTALL, so a household could hold exactly one opinion about a friend's films.
 // Owner's ruling, 2026-08-21: "it is separate for each profile." A switch needs no code of its own
-// to honour it — `install_pms` calls [`reset`], discovery re-runs, and [`resolve_pins`] reads the
+// to honour it — `install_server` calls [`reset`], discovery re-runs, and [`resolve_pins`] reads the
 // NEW profile's record — which is exactly why the resolve is a whole-table function rather than a
 // per-row default applied once at append.
 
@@ -2423,7 +2424,7 @@ pub(crate) const TAB_KINDS: [SecKind; 3] = [SecKind::Movie, SecKind::Show, SecKi
 ///
 /// The table only ever holds sources that have answered, while Home/Library/Search/Onboard
 /// enumerate the granted roster asynchronously. During that window a share can have no row here;
-/// `pms::feeds_home` must still recover its recorded answer by machine identity.
+/// `catalog::feeds_home` must still recover its recorded answer by machine identity.
 /// Their answer is on disk keyed by machine, which is exactly the join that settles it.
 ///
 /// `None` means "nothing has been read yet", never "nothing was recorded" — the same distinction
@@ -2690,7 +2691,7 @@ pub(crate) fn seed_items_for_owner_test(state: &mut BrowseState, n: usize) {
         st.items = SecItems::from_vec(
             (0..n)
                 .map(|i| {
-                    Some(crate::pms::PmsMovie {
+                    Some(crate::catalog::CatalogMovie {
                         sid,
                         rk: format!("{}", i + 1),
                         title: format!("Item {i}"),

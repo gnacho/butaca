@@ -1,7 +1,7 @@
 //! The `/tmp` developer-trigger surface, behind one door.
 //!
 //! This app is driven headlessly by ~44 files under `/tmp/butaca-*`: which screen to boot to,
-//! which item to play, which URL to stream, whether to auto-press OK, which PMS token to use.
+//! which item to play, which URL to stream, whether to auto-press OK, which server token to use.
 //! That is how `tests/run.py` and every capture scene work, and it is not going away.
 //!
 //! It must not exist in a public build. `/tmp` is the SHARED system `/tmp` in the production jail
@@ -659,8 +659,8 @@ pub(crate) fn pause_script() -> Option<PauseScript> {
 /// has no mid-1080p points, while the ladder this pins has eight of them.
 ///
 /// The value is the actuator's REQUEST rate (`Rung::kbps`) — 320, 720, 2000, 4000, 6000, 8000,
-/// 10000, 12000, 14000, 16000, 18000, 20000, 22000 — because that is the number PMS is given and
-/// the one identity in the catalog that does not move when somebody re-measures the server.
+/// 10000, 12000, 14000, 16000, 18000, 20000, 22000 — because that is the number the server is given
+/// and the one identity in the catalog that does not move when somebody re-measures the server.
 /// An unrecognised or empty value pins nothing, deliberately: a typo must leave Auto alone rather
 /// than silently park playback on the bottom rung for a whole measurement session.
 ///
@@ -698,7 +698,7 @@ pub(crate) fn read_sample(_name: &str) -> Option<Vec<u8>> {
 /// pump's `Feed()`, the ACB bind — is byte-identical to a real playback. What it CANNOT do is say
 /// what the stream *is*: the Starfish `Load` payload takes its codecs from `route::stream_vcodec`
 /// / `stream_acodec`, and its Dolby nodes from `stream_dovi` / `stream_immersive`, all five of
-/// which are normally installed together by `route::apply_plan` from a PMS decision and replaced
+/// which are normally installed together by `route::apply_plan` from a server decision and replaced
 /// together by later route transitions. So a URL-fed 4K HEVC file was declared to the television
 /// as whatever the route happened to hold — in a fresh boot, the empty string, which falls through
 /// [`crate::player::engine`]'s `_ =>` arm to `"AC3"` and an H264 payload. The declaration is
@@ -720,7 +720,7 @@ pub(crate) fn read_sample(_name: &str) -> Option<Vec<u8>> {
 /// Deliberately **not** `Debug`, for [`DevServer`]'s reason one step removed: `url` is a free
 /// string, and while the pipeline tier's own URLs carry no credentials, the field is the same
 /// shape as `route::url()` — which for a real playback carries `X-Plex-Token` in its query. A
-/// derived `Debug` is how that reaches a log the day someone points this trigger at a PMS part.
+/// derived `Debug` is how that reaches a log the day someone points this trigger at a server part.
 #[derive(serde::Deserialize, Clone)]
 pub(crate) struct PlayUrl {
     /// `http://<dotted-quad>:<port>/<path>`. **A dotted quad, not a hostname** — `stream.rs` does
@@ -749,7 +749,7 @@ pub(crate) struct PlayUrl {
     pub(crate) auto_source_kbps: u32,
     /// Same-origin fixture HLS root used after the synthetic Original becomes unsustainable.
     /// Present only in debug/test artifacts; production playback obtains replacement URLs from
-    /// PMS through `HlsAbrControl`.
+    /// the server through `HlsAbrControl`.
     #[serde(default)]
     pub(crate) auto_hls_base: String,
     /// **Start in HLS instead of arriving there through a starvation.** The pipeline tier's ABR

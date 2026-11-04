@@ -30,10 +30,10 @@ enum Policy {
     /// that reads ahead of it. Both are the same kind of request against the same rung and must
     /// arm the identical [`StallGuard`]. Only [`SegmentAcquisition::for_cursor`] can build one.
     Active(ActiveAcquisition),
-    /// An ABR exploration fetch (a candidate's warm-up or its repeatable follow-up), racing its
-    /// own [`ReserveDeadlineState`]. Never carries a `StallGuard`: PMS may pause a sized response
-    /// while its JIT encoder catches up, and a candidate's prefix rate is not proof that its
-    /// remainder will miss that deadline — only the deadline itself decides.
+    /// An ABR exploration fetch (a candidate's warm-up or its repeatable follow-up), racing its own
+    /// [`ReserveDeadlineState`]. Never carries a `StallGuard`: the server may pause a sized
+    /// response while its JIT encoder catches up, and a candidate's prefix rate is not proof
+    /// that its remainder will miss that deadline — only the deadline itself decides.
     Candidate(ReserveDeadlineState),
     /// Non-adaptive playback: there is no ladder to abandon a rung on, so there is no reserve
     /// deadline and no stall guard to arm.

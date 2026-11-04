@@ -208,7 +208,7 @@ pub(crate) fn fmt_size(bytes: i64) -> Option<String> {
     })
 }
 
-/// A PMS bitrate (which is in **kbps**) as `"28.9 Mbps"`, or `"640 kbps"` below a megabit. The
+/// A server bitrate (which is in **kbps**) as `"28.9 Mbps"`, or `"640 kbps"` below a megabit. The
 /// split is what keeps an audio track's 448 from reading as `0.4 Mbps`.
 pub(crate) fn fmt_bitrate(kbps: i64) -> Option<String> {
     match kbps {
@@ -280,7 +280,7 @@ pub(crate) fn fmt_fps(fps: f64) -> Option<String> {
     Some(crate::i18n::msg::widgets_tracks_fps(&rate))
 }
 
-/// `"2.35"` — the display aspect as PMS sends it, trailing zeros trimmed.
+/// `"2.35"` — the display aspect as the server sends it, trailing zeros trimmed.
 pub(crate) fn fmt_aspect(ar: f64) -> Option<String> {
     if !(ar > 0.0) {
         return None;
@@ -1380,7 +1380,7 @@ mod tests {
         s.title = String::new();
         s.profile = "dolby digital plus + dolby atmos".into();
         assert!(has_atmos(&s));
-        // …case-insensitively, since PMS's own casing is lower and nothing promises it stays
+        // …case-insensitively, since the server's own casing is lower and nothing promises it stays
         s.profile = "Dolby Digital Plus + Dolby ATMOS".into();
         assert!(has_atmos(&s));
     }
@@ -1461,7 +1461,7 @@ mod tests {
     }
 
     /// The VIDEO and FILE columns, against the design's `streamGroups` for the same item. Each
-    /// formatter has one way of being subtly wrong and they are all here: GB is binary, a PMS
+    /// formatter has one way of being subtly wrong and they are all here: GB is binary, a server
     /// bitrate is already kbps, the resolution is the STORED frame and not the `"4k"` class, and
     /// the codec's profile is Title-Cased rather than shouted.
     #[test]

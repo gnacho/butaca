@@ -16,7 +16,7 @@ mod auth; // plex.tv login/boot flow controller (PIN/QR → discovery → who's-
 mod browse; // Library browse: per-section paged catalog (sparse store + off-thread page fetches)
 mod capture; // dev live UI capture stream: own-GLES-frame grab → MPEG1/TS or JPEG → TCP (UI plane only)
 mod checkpoint; // the transport-neutral "may I keep waiting?" seam every blocking media wait consults
-mod cbuf; // fixed NUL-terminated C-string buffer read/write (shared by pms/route/posters)
+mod cbuf; // fixed NUL-terminated C-string buffer read/write (shared by catalog/route/posters)
 mod coldstart; // retires old last-page bookmarks; authenticated cold boots now stay on Home
 mod curlio; // the HTTPS media plane: a remote file pulled by byte range over libcurl-multi (stream.rs is the plaintext-socket twin)
 mod dev; // the /tmp/butaca-* trigger surface, behind one `devtriggers` feature — read it before adding a trigger
@@ -53,7 +53,7 @@ mod person; // person/actor page data layer: the header handed in by the cast ro
 mod collection; // collection page model: tag resolution, header metadata and paged members
 mod player; // buffer-feed video engine (was playback.c) — step 5
 mod server; // typed server API layer (rust-modules/src/server/): one method per server operation (the live READ layer; playback ops still in route.rs)
-mod pms;
+mod catalog;
 mod registry; // the SERVER REGISTRY: which servers exist, which is current, and the per-slot facts, the sid vocabulary shared by every backend
 // Pure RELEASE_LINE-parsing helpers, `include!`d verbatim by build.rs so `cargo test --lib`
 // actually runs their unit tests (see the module for why). Nothing in the app itself calls
@@ -131,7 +131,7 @@ pub(crate) mod testlock {
     //! That DoD criterion scopes a bare `static mut` OUT of `screens`/`ui` engine code — it asks
     //! "does a SCREEN still own process-wide state a second instance would corrupt", and an
     //! allowlisted exception there is a debt with a name and a phase number. A store's data module
-    //! (`pms`, `metadata`, `search`) is a different question entirely: those remaining
+    //! (`catalog`, `metadata`, `search`) is a different question entirely: those remaining
     //! compatibility stores keep process-wide statics **by design** — `docs/stores-as-machines.md`
     //! §1 is explicit about that temporary shape. Browse, Person and ViewState have since moved to
     //! per-`Bridge` physical owners, and their owner gates reject a restored process global. For
@@ -154,7 +154,7 @@ pub(crate) mod testlock {
     //! installers include `metadata.rs`
     //! (`install_for_test`, `set_current_for_test`, `begin_detail_for_test`,
     //! `land_detail_for_test`), `search.rs` (`publish_shelves_for_test`,
-    //! `debounce_elapsed_for_test`) and `pms.rs`'s own eleven sites — and so does every entry point of
+    //! `debounce_elapsed_for_test`) and `catalog.rs`'s own eleven sites — and so does every entry point of
     //! the server registry a test can reach: `registry::register_with_client_id` (and the
     //! `register_lazy` seam it and its sibling test constructors share), `revoke_all`,
     //! `set_current` and `reset_for_test`. A three-run `make check` plus a ten-run
@@ -280,7 +280,7 @@ mod textinput; // the TV's own on-screen keyboard, via plain SDL_StartTextInput 
 mod ui;
 mod webos; // which webOS this set is — nyx's os_info.json, read once at boot (release + codename)
 
-/// Strip any PMS/plex.tv token from a line bound for the event log.
+/// Strip any server/plex.tv token from a line bound for the event log.
 ///
 /// **This is a backstop, not the policy.** The policy is that no call site formats a URL into a log
 /// line at all — but that policy was violated for months by one `-> {url}` in `route::retranscode`,

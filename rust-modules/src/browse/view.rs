@@ -97,7 +97,7 @@ impl ListingSnapshot {
     }
 
     #[cfg(test)]
-    pub(crate) fn with_page(mut self, start: usize, items: Vec<crate::pms::PmsMovie>) -> Self {
+    pub(crate) fn with_page(mut self, start: usize, items: Vec<crate::catalog::CatalogMovie>) -> Self {
         if let Some(data) = &mut self.data {
             for (offset, item) in items.into_iter().enumerate() {
                 data.items.set(start + offset, item);
@@ -118,7 +118,7 @@ impl ListingSnapshot {
     #[cfg(test)]
     pub(crate) fn fixture(
         sid: ServerId,
-        items: Vec<Option<crate::pms::PmsMovie>>,
+        items: Vec<Option<crate::catalog::CatalogMovie>>,
         letters: Vec<(String, i64)>,
     ) -> Self {
         Self {
@@ -201,7 +201,7 @@ impl<'a> ListingView<'a> {
     }
     /// Missing pages and out-of-range indices are None. The reference is bounded by the
     /// retained snapshot, never a fictitious 'static lifetime ending at the next pump.
-    pub(crate) fn item(self, index: usize) -> Option<&'a crate::pms::PmsMovie> {
+    pub(crate) fn item(self, index: usize) -> Option<&'a crate::catalog::CatalogMovie> {
         self.0.data.as_ref()?.items.get(index)
     }
     pub(crate) fn sorts(self) -> &'a [SortEntry] {
@@ -612,7 +612,7 @@ mod tests {
     #[test]
     fn listing_page_delta_names_only_the_replaced_immutable_page() {
         let sid = ServerId::from_raw(0);
-        let movie = |i| crate::pms::PmsMovie {
+        let movie = |i| crate::catalog::CatalogMovie {
             sid,
             rk: format!("{i}"),
             ..Default::default()

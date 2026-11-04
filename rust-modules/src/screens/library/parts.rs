@@ -27,12 +27,12 @@ pub(super) const GRID_GROUP: GroupId = GroupId(0x4c49_4201);
 pub(super) const RAIL_GROUP: GroupId = GroupId(0x4c49_4202);
 const NO_HOLES: &[(usize, usize)] = &[];
 
-pub(super) fn grid_art(item: &crate::pms::PmsMovie) -> Art<'_> {
+pub(super) fn grid_art(item: &crate::catalog::CatalogMovie) -> Art<'_> {
     if item.kind == 3 { Art::Still(Some(item)) } else { Art::Poster(Some(item)) }
 }
 
 /// One label construction for the normal and modal-lifted focused grid card.
-pub(super) fn grid_label(item: &crate::pms::PmsMovie) -> card_row::TileLabel {
+pub(super) fn grid_label(item: &crate::catalog::CatalogMovie) -> card_row::TileLabel {
     if item.kind == 3 {
         let name = if item.title.is_empty() || item.title == item.show_title {
             crate::ui::fmt::episode_address(item.season_index as i64, item.ep_index as i64).to_string()

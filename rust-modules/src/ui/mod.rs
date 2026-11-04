@@ -136,7 +136,7 @@ static GUARD_RECOVERED: std::sync::atomic::AtomicBool = std::sync::atomic::Atomi
 /// **What this does NOT protect** (do not over-trust it):
 /// - A panic on a **worker thread** — demux, load, timeline, poster/metadata/browse fetches. That
 ///   thread dies and its work silently stops; those bodies carry their own `catch_unwind`
-///   (`metadata.rs`, `browse.rs`, `pms.rs`, `img.rs`, `player/mod.rs`).
+///   (`metadata.rs`, `browse.rs`, `catalog.rs`, `img.rs`, `player/mod.rs`).
 /// - An **abort**, which `catch_unwind` cannot catch by construction: allocation failure, a double
 ///   panic (a second panic raised by a `Drop` running during *this* unwind), or a panic crossing
 ///   one of the OTHER `extern "C"` seams we hand to C — the libavformat AVIO callbacks in `ff.rs`

@@ -128,9 +128,9 @@ fn bare(_guard: &crate::testlock::Serial, sid: ServerId, rk: &str) -> DetailScre
         about_rows: about::Rows::new(),
         ground: AmbientWash::flat(theme::SURFACE_APP),
         selected: {
-            let pms_state = crate::pms::PmsState::default();
-            crate::pms::movie(&pms_state, crate::pms::index_of_rk(&pms_state, sid, rk).max(0) as usize)
-                .filter(|_| crate::pms::index_of_rk(&pms_state, sid, rk) >= 0)
+            let catalog_state = crate::catalog::CatalogState::default();
+            crate::catalog::movie(&catalog_state, crate::catalog::index_of_rk(&catalog_state, sid, rk).max(0) as usize)
+                .filter(|_| crate::catalog::index_of_rk(&catalog_state, sid, rk) >= 0)
                 .cloned()
         },
         spin_ms: 0.0,
@@ -489,7 +489,7 @@ fn a_spot_round_trips_through_the_page_it_describes() {
     let mut d = detail(sid, "show");
     d.cur_season = 1;
     d.related = (0..6)
-        .map(|i| crate::pms::PmsMovie {
+        .map(|i| crate::catalog::CatalogMovie {
             sid,
             rk: format!("r{i}"),
             ..Default::default()
@@ -655,7 +655,7 @@ fn the_related_shelf_raises_the_same_open_request() {
         "a row with no ratingKey is not a destination"
     );
     let mut d = detail(ServerId::UNSET, "show");
-    d.related = vec![crate::pms::PmsMovie {
+    d.related = vec![crate::catalog::CatalogMovie {
         sid: ServerId::UNSET,
         rk: "related".into(),
         ..Default::default()
@@ -682,7 +682,7 @@ fn the_related_shelf_raises_the_same_open_request() {
 fn an_open_request_does_not_outlive_its_page() {
     let sid = ServerId::UNSET;
     let mut d = detail(sid, "show");
-    d.related = vec![crate::pms::PmsMovie {
+    d.related = vec![crate::catalog::CatalogMovie {
         sid,
         rk: "related".into(),
         ..Default::default()
@@ -760,7 +760,7 @@ fn tracks_availability_is_detail_state_not_surface_state() {
 
     // This page is standing on a different item and its own fetch has not landed.
     let screen = DetailScreen::new(EntryId(7), ServerId::UNSET, "here".into(),
-        crate::pms::HubsSnapshot::empty_for_test().view());
+        crate::catalog::HubsSnapshot::empty_for_test().view());
     assert!(
         !screen.tracks_available(test_store().view()),
         "the page has no item of its own yet, so there is no file it can describe"
@@ -794,13 +794,13 @@ fn tracks_availability_is_detail_state_not_surface_state() {
 #[test]
 fn opening_a_catalog_row_mounts_on_it_without_blocking_on_the_fetch() {
     let _guard = crate::testlock::serial();
-    let mut pms_state = crate::pms::PmsState::default();
-    let pms_adapter = std::sync::Arc::new(crate::pms::PmsAdapter::default());
-    crate::pms::seed_for_test(&mut pms_state, &pms_adapter, 3, crate::pms::HubState::Ready);
+    let mut catalog_state = crate::catalog::CatalogState::default();
+    let catalog_adapter = std::sync::Arc::new(crate::catalog::CatalogAdapter::default());
+    crate::catalog::seed_for_test(&mut catalog_state, &catalog_adapter, 3, crate::catalog::HubState::Ready);
     test_store().run(MetadataCmd::Clear);
-    let row = crate::pms::movie(&pms_state, 1).expect("seeded catalog row");
+    let row = crate::catalog::movie(&catalog_state, 1).expect("seeded catalog row");
     let (sid, rk) = (row.sid, row.rk.clone());
-    let hubs_snap = crate::pms::hubs_snapshot(&pms_state);
+    let hubs_snap = crate::catalog::hubs_snapshot(&catalog_state);
     let mut screen = DetailScreen::new(EntryId(7), sid, rk.clone(), hubs_snap.view());
     assert_eq!((screen.sid, screen.rk.as_str()), (sid, rk.as_str()));
     assert!(

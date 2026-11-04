@@ -2,27 +2,27 @@
 //!
 //! Everything here is the Jellyfin half of a `browse.rs` idiom, shaped so the store side stays
 //! backend-blind: sections arrive as the same `(key, title, SecKind)` rows `project_sections`
-//! builds off a PMS, a page lands as the same `(Vec<PmsMovie>, total)` the Plex page worker
+//! builds off a server, a page lands as the same `(Vec<CatalogMovie>, total)` the Plex page worker
 //! lands, and the sort menu is a `Vec<SortEntry>` like any other. What could not be shared is
 //! the CLIENT (Plex's lifecycle validation reads registry state a Jellyfin client has no
 //! counterpart of), so `browse.rs` carries a narrow jellyfin lane beside each mailbox — the
-//! same split `posters.rs` and `pms.rs` already made.
+//! same split `posters.rs` and `catalog.rs` already made.
 //!
 //! ## The key side-table
 //!
-//! `BrowseSection.key` is an `i64`, because PMS section keys are integers. A Jellyfin view id is
-//! a GUID, so this module mints a synthetic key per view and remembers the pairing
-//! ([`key_for_view`] / [`view_for_key`]): the table, the toolbar and every page landing speak the
-//! integer, and only the two fetch boundaries here ever see the GUID again. Keys are 1-based and
-//! append-only for the life of the process — a view's key must never move under an in-flight
+//! `BrowseSection.key` is an `i64`, because the server section keys are integers. A Jellyfin view
+//! id is a GUID, so this module mints a synthetic key per view and remembers the pairing
+//! ([`key_for_view`] / [`view_for_key`]): the table, the toolbar and every page landing speak
+//! the integer, and only the two fetch boundaries here ever see the GUID again. Keys are 1-based
+//! and append-only for the life of the process — a view's key must never move under an in-flight
 //! page landing, which is `browse.rs`'s own append-never-rebuild rule read one level down. (A
-//! re-discovery that finds the same GUIDs hands back the SAME keys, so `append_sections`'s
-//! new-only filter keeps working.)
+//! re-discovery that finds the same GUIDs hands back the SAME keys, so `append_sections`'s new-only
+//! filter keeps working.)
 
 use super::client::{BrowseQuery, JfClient};
 use super::SERVER_ID;
 use crate::browse::{GenreEntry, LibraryType, SecKind, SortEntry};
-use crate::pms::PmsMovie;
+use crate::catalog::CatalogMovie;
 use std::sync::Mutex;
 
 /// The synthetic section keys handed out so far, 1-based: `VIEW_KEYS[i]` is the GUID of the view
@@ -161,7 +161,7 @@ pub(crate) fn fetch_page(
     sort_desc: bool,
     unwatched: bool,
     genre_ids: &str,
-) -> Option<(Vec<PmsMovie>, i64)> {
+) -> Option<(Vec<CatalogMovie>, i64)> {
     let view = view_for_key(key)?;
     if library_type == LibraryType::Collections {
         return fetch_collections(c, &view, start, limit);
@@ -181,7 +181,7 @@ pub(crate) fn fetch_page(
         unwatched,
         genre_ids,
     })?;
-    let items: Vec<PmsMovie> = res
+    let items: Vec<CatalogMovie> = res
         .items
         .iter()
         .filter_map(|it| super::convert::movie_from_dto(it, SERVER_ID, 0))
@@ -195,9 +195,9 @@ pub(crate) fn fetch_page(
 /// box set has no release date or rating of its own to sort by). Rows convert through
 /// [`super::convert::boxset_from_dto`] into `kind == collection` cards the browse grid already
 /// knows how to open.
-fn fetch_collections(c: &JfClient, view: &str, start: i64, limit: i64) -> Option<(Vec<PmsMovie>, i64)> {
+fn fetch_collections(c: &JfClient, view: &str, start: i64, limit: i64) -> Option<(Vec<CatalogMovie>, i64)> {
     let res = c.boxsets(view, start, limit)?;
-    let items: Vec<PmsMovie> = res
+    let items: Vec<CatalogMovie> = res
         .items
         .iter()
         .filter_map(|it| super::convert::boxset_from_dto(it, SERVER_ID))

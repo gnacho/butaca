@@ -45,7 +45,7 @@ pub(super) fn trk(id: i64, codec: &str, lang: &str, default: bool) -> crate::met
 }
 
 
-/// Mark a track as the server's CURRENT pick (PMS `Stream.selected`) — the flag a pick made
+/// Mark a track as the server's CURRENT pick (the server `Stream.selected`) — the flag a pick made
 /// on a phone / Plex Web / another TV arrives on.
 pub(super) fn server_selected(mut s: crate::metadata::Stream) -> crate::metadata::Stream {
     s.selected = true;
@@ -54,7 +54,7 @@ pub(super) fn server_selected(mut s: crate::metadata::Stream) -> crate::metadata
 
 
 /// A subtitle stream, spelled out because the ordinal maths depends on `index` (container
-/// order, which PMS may report out of document order) and on `external` (sidecars are not in
+/// order, which the server may report out of document order) and on `external` (sidecars are not in
 /// the container at all, so the client renderer cannot count them).
 pub(super) fn sub(id: i64, index: i64, lang: &str, external: bool) -> crate::metadata::Stream {
     crate::metadata::Stream {
@@ -76,13 +76,13 @@ pub(super) const DECLARED: bool = true;
 pub(super) const SILENT: bool = false;
 
 
-/// An ordinary non-DV file: every DOVI field absent, which is what PMS sends for one.
+/// An ordinary non-DV file: every DOVI field absent, which is what the server sends for one.
 pub(super) fn no_dv() -> Dovi {
     Dovi::default()
 }
 
 /// The four real shapes, spelled exactly as the dev server reports them (probed live
-/// 2026-08-21 by sweeping all 540 movies and episodes on the dev PMS: 28 carry Dolby Vision,
+/// 2026-08-21 by sweeping all 540 movies and episodes on the dev server: 28 carry Dolby Vision,
 /// 8 movies and 20 episodes — the numbers are not invented, and `p7`'s `bl_compat: 6` in
 /// particular is why an `== 0` test is not enough).
 pub(super) fn p5() -> Dovi {

@@ -251,7 +251,7 @@ pub(crate) fn watch_index(set: HeroSet) -> Option<usize> {
     v[..n].iter().position(|&c| c.is_watch())
 }
 
-/// Has this show been started AT ALL? PMS puts `S1E1 off=0` on deck for a show nobody has
+/// Has this show been started AT ALL? The server puts `S1E1 off=0` on deck for a show nobody has
 /// touched, so "there is something on deck" is not the same question as "this show is underway" —
 /// ported verbatim from `ui/detail.rs::show_started`.
 pub(crate) fn show_started(d: &Detail) -> bool {

@@ -13,7 +13,7 @@ fn only_current_inner_instance_can_project_remembered_selection() {
     let _g = crate::testlock::serial();
     let _sess = scratch_session("inner-remember-owner");
     let mut s = RouteSurface::new(EntryId(0), InstanceId(0), Family::Settings, SettingsPage::Root,
-        crate::pms::HubsSnapshot::empty_for_test().view());
+        crate::catalog::HubsSnapshot::empty_for_test().view());
     step(&mut s, ScreenEvent::Mount, None);
     let covered = s.inner.top().unwrap().inst.as_ref().unwrap().id;
     forwarded(&mut s, Fx::Nav(NavOp::Push(SettingsPage::Legal)));
@@ -54,7 +54,7 @@ fn a_pop_that_would_empty_the_stack_dismisses_the_surface_instead() {
         Family::Settings,
         SettingsPage::Legal,
     
-        crate::pms::HubsSnapshot::empty_for_test().view(),
+        crate::catalog::HubsSnapshot::empty_for_test().view(),
     );
     step(&mut s, ScreenEvent::Mount, None);
     assert_eq!(
@@ -94,7 +94,7 @@ fn a_pop_with_a_page_under_it_pops_the_inner_stack_and_stays_up() {
         Family::Settings,
         SettingsPage::Root,
     
-        crate::pms::HubsSnapshot::empty_for_test().view(),
+        crate::catalog::HubsSnapshot::empty_for_test().view(),
     );
     step(&mut s, ScreenEvent::Mount, None);
     let server_row = FocusKey {
@@ -155,7 +155,7 @@ fn the_remembered_seats_are_part_of_the_hash() {
         Family::Settings,
         SettingsPage::Root,
     
-        crate::pms::HubsSnapshot::empty_for_test().view(),
+        crate::catalog::HubsSnapshot::empty_for_test().view(),
     );
     step(&mut seated, ScreenEvent::Mount, None);
     step(
@@ -179,7 +179,7 @@ fn the_remembered_seats_are_part_of_the_hash() {
         Family::Settings,
         SettingsPage::Root,
     
-        crate::pms::HubsSnapshot::empty_for_test().view(),
+        crate::catalog::HubsSnapshot::empty_for_test().view(),
     );
     step(&mut unseated, ScreenEvent::Mount, None);
     step(
@@ -247,7 +247,7 @@ fn clicking_the_crumb_walks_back_to_the_settings_root() {
         InstanceId(0),
         Family::Settings,
         SettingsPage::Root,
-        crate::pms::HubsSnapshot::empty_for_test().view(),
+        crate::catalog::HubsSnapshot::empty_for_test().view(),
     );
     step(&mut s, ScreenEvent::Mount, None);
     // The Jellyfin root's first row opens the server picker: any pushed page will do, this
@@ -287,7 +287,7 @@ fn clicking_home_asks_the_application_to_retire_the_route() {
         InstanceId(0),
         Family::Settings,
         SettingsPage::Root,
-        crate::pms::HubsSnapshot::empty_for_test().view(),
+        crate::catalog::HubsSnapshot::empty_for_test().view(),
     );
     step(&mut s, ScreenEvent::Mount, None);
     let out = step(

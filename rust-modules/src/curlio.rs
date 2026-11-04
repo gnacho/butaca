@@ -1,11 +1,11 @@
 //! **The HTTPS media plane: a byte range of a remote file, pulled on demand.**
 //!
 //! [`crate::stream`] is a raw TCP socket that speaks cleartext to a host name or address of either
-//! family. It is the right transport for a plaintext PMS, but it cannot carry an HTTPS origin.
-//! LG's QA reviewers will not have a Plex Media Server on their LAN — they sign in with an account
-//! we supply and stream from a server on the public internet, over https, at a `plex.direct`
-//! hostname whose certificate is issued for that NAME. So the media plane needs a second
-//! transport, and this is it.
+//! family. It is the right transport for a plaintext server, but it cannot carry an HTTPS
+//! origin. LG's QA reviewers will not have a Plex Media Server on their LAN — they sign in with
+//! an account we supply and stream from a server on the public internet, over https, at
+//! a `plex.direct` hostname whose certificate is issued for that NAME. So the media plane needs
+//! a second transport, and this is it.
 //!
 //! # What this module IS
 //!
@@ -1731,7 +1731,7 @@ mod tests {
     /// the accept count. libcurl keeps the connection in the multi handle's cache and REUSES it.
     ///
     /// Keep-alive is likewise not a test convenience: a stand-in that closed after one request
-    /// would make our own connection reuse untestable, and a real PMS speaks HTTP/1.1.
+    /// would make our own connection reuse untestable, and a real server speaks HTTP/1.1.
     ///
     /// `range_mode` decides what it does with a `Range` header: `Honour` answers 206 with a
     /// `Content-Range`, `Ignore` answers 200 with the whole body (the corruption case gate (b) is
@@ -1857,7 +1857,7 @@ mod tests {
             }
             if mode == RangeMode::Stall {
                 // Headers, then silence — the shape `tools/netcond.py --mode stall` produces
-                // against a real PMS: the transfer is live and delivers nothing.
+                // against a real server: the transfer is live and delivers nothing.
                 let _ = w.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1048576\r\n\r\n");
                 let _ = w.flush();
                 while !stop.load(Ordering::Acquire) {

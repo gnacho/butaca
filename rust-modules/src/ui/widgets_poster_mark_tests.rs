@@ -17,7 +17,7 @@ fn a_finished_poster_wears_the_watched_disc() {
 
 #[test]
 fn a_re_watch_in_flight_outranks_the_watched_flag() {
-    // PMS reports BOTH on a finished-then-restarted item; the bar wins, so the tile never
+    // The server reports BOTH on a finished-then-restarted item; the bar wins, so the tile never
     // wears two marks — and what it says is what the viewer is actually doing.
     let m = row(true, 30 * 60 * 1000);
     assert_eq!(poster_mark(&m), PosterMark::InProgress);
@@ -65,7 +65,7 @@ fn a_show_three_episodes_in_is_not_a_watched_show() {
     // tile has an unseen episode by construction — had five posters wearing a watched disc,
     // because `!unwatched` is true for a container the moment ONE episode is played. A show is
     // marked only when it is DONE, so partly-watched sits with never-started under "no mark".
-    let mut m = PmsMovie::default();
+    let mut m = CatalogMovie::default();
     m.kind = 1; // show
     m.unwatched = false; // some episode has been played…
     m.watched = false; // …but not all of them
@@ -88,7 +88,7 @@ fn a_show_three_episodes_in_is_not_a_watched_show() {
 /// reachable from a menu in BOTH directions, so it is `InProgress` here and gets both rows.
 #[test]
 fn a_container_mid_run_is_in_the_middle_for_a_menu_though_it_wears_no_mark() {
-    let mut m = PmsMovie::default();
+    let mut m = CatalogMovie::default();
     m.kind = 1; // show
     m.unwatched = false; // some episode has been played…
     m.watched = false; // …but not all of them
@@ -114,7 +114,7 @@ fn a_container_mid_run_is_in_the_middle_for_a_menu_though_it_wears_no_mark() {
 /// the shelf menu got wrong before, offering "Mark as Watched" on a show already done.
 #[test]
 fn the_two_ends_of_the_range_answer_the_same_either_way() {
-    let mut show = PmsMovie::default();
+    let mut show = CatalogMovie::default();
     show.kind = 1;
     for (unwatched, watched, want) in [
         (true, false, PosterMark::None),
@@ -156,13 +156,13 @@ fn a_leaf_asks_the_poster_and_gets_its_answer_unchanged() {
 /// composite or custom thumb is artwork and draws as an ordinary poster, as does every other kind.
 #[test]
 fn only_a_thumbless_collection_draws_the_neutral_tile() {
-    let collection = |thumb: &str| PmsMovie {
-        kind: crate::pms::KIND_COLLECTION, title: "Empty Collection".into(), thumb: thumb.into(),
+    let collection = |thumb: &str| CatalogMovie {
+        kind: crate::catalog::KIND_COLLECTION, title: "Empty Collection".into(), thumb: thumb.into(),
         ..Default::default()
     };
     assert_eq!(neutral_collection_name(Some(&collection(""))), Some("Empty Collection"));
     assert_eq!(neutral_collection_name(Some(&collection("/library/collections/50001/composite/1"))), None);
-    assert_eq!(neutral_collection_name(Some(&PmsMovie { title: "Film".into(), ..Default::default() })), None,
+    assert_eq!(neutral_collection_name(Some(&CatalogMovie { title: "Film".into(), ..Default::default() })), None,
         "a film without art keeps the ordinary skeleton");
     assert_eq!(neutral_collection_name(None), None);
 }

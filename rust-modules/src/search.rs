@@ -10,7 +10,7 @@
 //!
 //! The Jellyfin backend answers the settled query with one flat `/Items?searchTerm=` page plus a
 //! people lookup, and `jellyfin::search` shelves it into this store's mailbox shape. Two of the
-//! constants here were measured against the PMS endpoint this store was originally built for
+//! constants here were measured against the server endpoint this store was originally built for
 //! rather than taken from a spec, and both still decide something:
 //!
 //! - **A one-character query was answered with every hub empty**, so [`MIN_QUERY`] is 2 and the
@@ -88,7 +88,7 @@
 #![allow(dead_code)]
 
 use crate::registry::ServerId;
-use crate::pms::PmsMovie;
+use crate::catalog::CatalogMovie;
 use std::panic::catch_unwind;
 use std::sync::Arc;
 
@@ -160,7 +160,7 @@ impl Kind {
 }
 
 /// A person or collection result, as `jellyfin::search` files both: a row that carries no
-/// `ratingKey`, kept distinct from [`PmsMovie`] rather than flattened into it, because the two
+/// `ratingKey`, kept distinct from [`CatalogMovie`] rather than flattened into it, because the two
 /// open different screens and a struct with half its fields permanently empty invites code that
 /// forgets which half it is holding.
 ///
@@ -202,7 +202,7 @@ pub(crate) struct TagHit {
 pub(crate) enum Item {
     /// A movie, show or episode: the ordinary card DTO, so every existing tile path draws it
     /// unchanged — resume bar, watched mark, ambient blur and all.
-    Media(PmsMovie),
+    Media(CatalogMovie),
     /// A person or collection row (see [`TagHit`]).
     Tag(TagHit),
 }
@@ -224,13 +224,13 @@ impl Item {
     /// **Is this hit from a favourite library?** — the ranking key, and the two variants answer it
     /// from different places for a reason worth knowing before "simplifying" it.
     ///
-    /// A MEDIA hit keeps its own library id (`PmsMovie::sec`) all the way through, and nothing
+    /// A MEDIA hit keeps its own library id (`CatalogMovie::sec`) all the way through, and nothing
     /// folds two of them together, so the bit is derivable at merge time from the same snapshot
     /// Home joins against. A TAG's bit is attached by the backend that built the row and carried
     /// — see [`TagHit::fav`].
     ///
     /// Unknown ranks as a FAVOURITE, in both directions (`sec == 0`, or a library the section table
-    /// has not enumerated yet), which is [`crate::pms`]'s rule at the same join and for the same
+    /// has not enumerated yet), which is [`crate::catalog`]'s rule at the same join and for the same
     /// reason: demoting what we cannot classify would push a user's own results down the shelf on
     /// the frame the app boots.
     pub(crate) fn is_fav(&self, favs: &[(ServerId, i64, bool)]) -> bool {
@@ -702,7 +702,7 @@ fn set_query_with_directory(
 }
 
 /// Flip `(sid, rk)`'s watched state in the result set — the optimistic half of a view-state write,
-/// for the Search screen's own tiles. `pms::edit_item`'s twin, for `browse::set_watched_local`'s
+/// for the Search screen's own tiles. `catalog::edit_item`'s twin, for `browse::set_watched_local`'s
 /// reason: that one reaches the HOME hubs alone, so a film marked watched from a search result's
 /// context menu kept its old mark until a refetch.
 ///
@@ -718,7 +718,7 @@ fn set_watched_local(state: &mut SearchState, sid: ServerId, rk: &str, on: bool)
     let mut flip = |it: &mut Item| {
         if let Item::Media(m) = it {
             if crate::registry::same_item((m.sid, &m.rk), (sid, rk)) {
-                crate::pms::set_watched(m, on);
+                crate::catalog::set_watched(m, on);
                 hit = true;
             }
         }

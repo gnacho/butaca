@@ -5,7 +5,7 @@
 //! BoxSet open and a search collection hit both land here.
 
 use crate::registry::ServerId;
-use crate::pms::PmsMovie;
+use crate::catalog::CatalogMovie;
 use std::panic::catch_unwind;
 use std::sync::Arc;
 
@@ -86,12 +86,12 @@ pub(crate) struct Collection {
     pub(crate) child_count: usize,
     /// The member order the header stated, if it stated one.
     pub(crate) order: Option<CollectionOrder>,
-    pub(crate) items: Vec<PmsMovie>,
+    pub(crate) items: Vec<CatalogMovie>,
     pub(crate) total: usize,
     pub(crate) status: CollectionStatus,
     pub(crate) more: bool,
     /// Server rows consumed so far — the next page's `X-Plex-Container-Start`. NOT
-    /// `items.len()`: `run_job` drops rows that are not `pms::listable` (a clip, an artist), so
+    /// `items.len()`: `run_job` drops rows that are not `catalog::listable` (a clip, an artist), so
     /// the grid can hold fewer members than the server has handed over, and paging from
     /// `items.len()` would re-request rows already seen and append them twice.
     offset: usize,
@@ -169,7 +169,7 @@ impl CollectionState {
                 let mut hit = false;
                 for item in c.items.iter_mut()
                     .filter(|item| crate::registry::same_item((item.sid, &item.rk), (sid, &rk))) {
-                    crate::pms::set_watched(item, on);
+                    crate::catalog::set_watched(item, on);
                     hit = true;
                 }
                 hit
@@ -269,7 +269,7 @@ impl CollectionState {
     pub(crate) fn generation(&self) -> u32 { self.generation }
 
     #[cfg(test)]
-    pub(crate) fn install_for_test(&mut self, items: Vec<PmsMovie>, status: CollectionStatus) {
+    pub(crate) fn install_for_test(&mut self, items: Vec<CatalogMovie>, status: CollectionStatus) {
         let Some(c) = self.current.as_mut() else { return };
         c.title = if c.id.name.is_empty() { "Collection".into() } else { c.id.name.clone() };
         c.summary = "A collection summary long enough for screen layout tests.".into();
@@ -316,7 +316,7 @@ enum Landing {
     /// The collection's header.
     Header { rk: Option<String>, head: Header },
     /// `got` is the server rows this page consumed; `items` only the listable ones among them.
-    Page { start: usize, got: usize, items: Vec<PmsMovie>, total: usize },
+    Page { start: usize, got: usize, items: Vec<CatalogMovie>, total: usize },
     Denied,
     Missing,
     Transport,
@@ -430,7 +430,7 @@ mod tests {
         adapter.land(generation, Landing::Header { rk: None, head: header("Set", 130) });
         assert!(state.take_landing_for_test(&adapter));
         assert!(matches!(state.job(), Some(Job::Children { start: 0, .. })));
-        let page = (0..PAGE_SIZE).map(|i| PmsMovie { rk: i.to_string(), ..Default::default() }).collect();
+        let page = (0..PAGE_SIZE).map(|i| CatalogMovie { rk: i.to_string(), ..Default::default() }).collect();
         adapter.land(generation, Landing::Page { start: 0, got: PAGE_SIZE, items: page, total: 130 });
         assert!(state.take_landing_for_test(&adapter));
         let c = state.view().current().unwrap();
@@ -458,7 +458,7 @@ mod tests {
         let generation = state.generation();
         adapter.land(generation, Landing::Header { rk: None, head: header("Set", 130) });
         assert!(state.take_landing_for_test(&adapter));
-        let listed = (0..PAGE_SIZE - 5).map(|i| PmsMovie { rk: i.to_string(), ..Default::default() }).collect();
+        let listed = (0..PAGE_SIZE - 5).map(|i| CatalogMovie { rk: i.to_string(), ..Default::default() }).collect();
         adapter.land(generation, Landing::Page { start: 0, got: PAGE_SIZE, items: listed, total: 130 });
         assert!(state.take_landing_for_test(&adapter));
         state.run(&adapter, CollectionCmd::Open { target: CollectionTarget {
@@ -506,7 +506,7 @@ mod tests {
         let adapter = Arc::new(CollectionAdapter::default());
         let mut state = CollectionState::default();
         state.run(&adapter, CollectionCmd::Open { target: set_target("50001", "Set") });
-        state.install_for_test(vec![PmsMovie { rk: "a".into(), unwatched: true, ..Default::default() }],
+        state.install_for_test(vec![CatalogMovie { rk: "a".into(), unwatched: true, ..Default::default() }],
             CollectionStatus::Ready);
         assert!(!state.run(&adapter, CollectionCmd::SetWatchedLocal { sid: ServerId::UNSET,
             rk: "b".into(), on: true }), "an item not on the page changes nothing");

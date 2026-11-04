@@ -18,9 +18,9 @@
 //! the parts that do transfer — and they are most of the UI work.
 //!
 //! Usage:
-//!   butaca-sim [pms-host] [pms-port]
+//!   butaca-sim [catalog-host] [catalog-port]
 //! Environment:
-//!   BUTACA_PMS_HOST / BUTACA_PMS_PORT   server to talk to (argv wins)
+//!   BUTACA_SERVER_HOST / BUTACA_SERVER_PORT   server to talk to (argv wins)
 //!   BUTACA_RUNTIME_DIR                     this instance's trigger/FIFO/log root
 //!   BUTACA_APP_DIR                         where appfont*.ttf and the icons live (repo `pkg/`)
 
@@ -34,12 +34,12 @@ const DEFAULT_PORT: u16 = 32400;
 fn main() {
     // SIGPIPE needs no handling here, unlike `src/main.c:105`: that file installs `SIG_IGN` by hand
     // precisely because a C `main` skips Rust's `std::rt::init`. This IS a Rust main, so std has
-    // already done it, and the first PMS socket closed mid-write cannot kill the process.
+    // already done it, and the first server socket closed mid-write cannot kill the process.
 
     let mut args = std::env::args().skip(1);
     let host = args
         .next()
-        .or_else(|| std::env::var("BUTACA_PMS_HOST").ok())
+        .or_else(|| std::env::var("BUTACA_SERVER_HOST").ok())
         .unwrap_or_default();
     if host == "--write-synthetic-initial" {
         use std::io::Write;
@@ -66,7 +66,7 @@ fn main() {
     }
     let port: u16 = args
         .next()
-        .or_else(|| std::env::var("BUTACA_PMS_PORT").ok())
+        .or_else(|| std::env::var("BUTACA_SERVER_PORT").ok())
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_PORT);
 
@@ -80,7 +80,7 @@ fn main() {
     if host.is_empty() {
         eprintln!(
             "butaca-sim: no PMS host given — starting the plex.tv sign-in flow.\n\
-             (pass one as `butaca-sim <numeric-ip> [port]`, or set BUTACA_PMS_HOST, to boot\n\
+             (pass one as `butaca-sim <numeric-ip> [port]`, or set BUTACA_SERVER_HOST, to boot\n\
              straight at a known server. It must be a NUMERIC IP: stream.rs speaks HTTP/1.1 over a\n\
              raw socket with no DNS resolver, on the desktop exactly as on the television.)"
         );
@@ -109,7 +109,7 @@ fn main() {
     }
 
     eprintln!(
-        "butaca-sim: pms={host}:{port} runtime={} log={}",
+        "butaca-sim: catalog={host}:{port} runtime={} log={}",
         root.display(),
         events.display()
     );

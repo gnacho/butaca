@@ -292,7 +292,7 @@ pub(crate) fn message(message: &AppMsg) -> Result<Value, &'static str> {
         },
         AppMsg::Store(command) => store(command)?,
         AppMsg::StoreWork(work) => work_value(work)?,
-        AppMsg::HubsResult(result) => crate::pms::record::encode(result),
+        AppMsg::HubsResult(result) => crate::catalog::record::encode(result),
         AppMsg::Home(command) => json!({"home_command":home_command(command)}),
         _ => return Err("unsupported Home message"),
     })

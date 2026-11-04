@@ -15,11 +15,11 @@
 //! outside this REST request façade.
 //!
 //! **TLS is now the only thing that separates them**, which `stream.rs`'s own module doc says in
-//! those words. Until this file, the PMS control plane was hard-wired to the first of the two, and
-//! that is the whole of why a reviewer with no Plex Media Server on their LAN dead-ends: an account
-//! signed in from anywhere else reaches its servers over `https://<something>.plex.direct` — a name
-//! carrying a certificate, and cleartext to the address behind it fails validation by design
-//! (`server::origin`).
+//! those words. Until this file, the server control plane was hard-wired to the first of the two,
+//! and that is the whole of why a reviewer with no Plex Media Server on their LAN dead-ends:
+//! an account signed in from anywhere else reaches its servers over
+//! `https://<something>.plex.direct` — a name carrying a certificate, and cleartext to the address
+//! behind it fails validation by design (`server::origin`).
 //!
 //! So the dispatch is on [`Origin::scheme`] and nowhere else. An [`Origin`] is parsed from a URL
 //! and never rebuilt from an address, so by the time a request reaches here the question "which
@@ -46,20 +46,20 @@
 //! ## Two asymmetries worth knowing before you read a failure
 //!
 //! **Deadlines.** Small API calls take [`net::API`] (8 s connect, 25 s total). Content-dependent
-//! PMS reads take [`net::BULK`] instead: the same connect setting, a 1-byte/s-for-30-s low-speed
-//! guard, and no whole-transfer timeout, so a healthy large library/art/subtitle response is not
-//! cut off at 25 s while a stalled body is still bounded. The connect value is not a promise over
-//! a synchronous resolver when `NOSIGNAL` is set; `net::global_init` logs the runtime's
+//! the server reads take [`net::BULK`] instead: the same connect setting, a 1-byte/s-for-30-s
+//! low-speed guard, and no whole-transfer timeout, so a healthy large library/art/subtitle response
+//! is not cut off at 25 s while a stalled body is still bounded. The connect value is not a promise
+//! over a synchronous resolver when `NOSIGNAL` is set; `net::global_init` logs the runtime's
 //! `AsynchDNS` feature bit. The plaintext arm cannot select either policy: `stream.rs` compiles in
 //! its own 2 s connect and 15 s `SO_RCVTIMEO`.
 //!
-//! **Redirects.** The plaintext transport returns a 3xx response and never follows it. The TLS
-//! arm does the same for PMS requests. This is a correctness rule and a credential boundary:
-//! every PMS path carries `X-Plex-Token` in its query string, so an automatic cross-origin follow
-//! would give libcurl permission to replay a token-bearing URL outside the origin we selected and
-//! verified. The plex.tv account wrappers also keep redirects off because their custom headers
-//! carry a token. Only the public, headerless QR-image fetch may follow one: at most five hops,
-//! HTTP(S) only, and never from HTTPS down to HTTP.
+//! **Redirects.** The plaintext transport returns a 3xx response and never follows it. The TLS arm
+//! does the same for the server requests. This is a correctness rule and a credential boundary:
+//! every server path carries `X-Plex-Token` in its query string, so an automatic cross-origin
+//! follow would give libcurl permission to replay a token-bearing URL outside the origin we
+//! selected and verified. The plex.tv account wrappers also keep redirects off because their custom
+//! headers carry a token. Only the public, headerless QR-image fetch may follow one: at most five
+//! hops, HTTP(S) only, and never from HTTPS down to HTTP.
 //!
 //! **A short body is reported on one arm only.** `stream.rs` logs a line when a response ends
 //! before its `Content-Length` (`note_short_body` — the difference between "the JSON would not
@@ -130,19 +130,21 @@ impl Reply {
     }
 }
 
-/// `Accept: application/json` as one header line, without the CRLF — see [`request`] for the
-/// framing rule. PMS answers **XML** for `Accept: */*` or no Accept and only JSON for an explicit
-/// `application/json`, and a request that forgets it silently parses to zero items rather than
-/// failing (`plex/CLAUDE.md`), so this constant is shared rather than spelled per call site.
+/// `Accept: application/json` as one header line, without the CRLF — see [`request`] for
+/// the framing rule. The server answers **XML** for `Accept: */*` or no Accept and only JSON for
+/// an explicit `application/json`, and a request that forgets it silently parses to zero items
+/// rather than failing (`plex/CLAUDE.md`), so this constant is shared rather than spelled per call
+/// site.
 pub(crate) const ACCEPT_JSON: &str = "Accept: application/json";
 
 /// **The one entry point.** One request to `origin` for `path`, over whichever transport that
 /// origin's scheme names.
 ///
-/// `path` is everything after the authority — it must already carry its query string and, for the
-/// PMS, its `X-Plex-Token` (appended by `server::client::with_token`, the one token choke point).
-/// `headers` are full `"Name: value"` lines **without** CRLF; this function adds the framing each
-/// transport wants, which is the one place the two disagree about the shape of a header.
+/// `path` is everything after the authority — it must already carry its query string and, for
+/// the server, its `X-Plex-Token` (appended by `server::client::with_token`, the one token
+/// choke point). `headers` are full `"Name: value"` lines **without** CRLF; this function adds
+/// the framing each transport wants, which is the one place the two disagree about the shape of
+/// a header.
 ///
 /// `None` is a transport failure. Anything the server actually answered — including a `401` and a
 /// `500` — comes back as `Some`.
@@ -352,7 +354,7 @@ fn plaintext(
 ) -> RequestOutcome {
     // The raw socket takes ONE `extra` blob, CRLF-terminated per line and CRLF-terminated at the
     // end — it is spliced straight into the request head. Control-plane is one-shot: send
-    // `Connection: close` so PMS does not wait for a second request on an fd we are about to
+    // `Connection: close` so the server does not wait for a second request on an fd we are about to
     // `http_close`. Media sequential GETs call `stream::http_open` directly and omit the header
     // so the demux socket can reuse. A caller that already named Connection keeps their spelling.
     let extra = {
@@ -475,8 +477,8 @@ fn tls(
     // the second shape into `CURLOPT_CUSTOMREQUEST`.
     let body: Option<&[u8]> = matches!(method, Method::Post).then_some(&[][..]);
     let (timeouts, max_body) = (crate::net::API, None);
-    // PMS redirects are responses, never instructions: the path already carries a token. Keeping
-    // `FOLLOWLOCATION` off also makes the TLS arm's 3xx semantics match the plaintext arm.
+    // The server redirects are responses, never instructions: the path already carries a token.
+    // Keeping `FOLLOWLOCATION` off also makes the TLS arm's 3xx semantics match the plaintext arm.
     match crate::net::request_result_evidence(
         &url,
         &owned,
@@ -505,7 +507,7 @@ mod tests {
     /// arm returns `None` without touching a socket, and the plaintext arm reaches
     /// `stream::http_open` and fails to connect. Both are `None`, so what this really pins is that
     /// neither one PANICS and neither one dials the other's target — the useful half on a machine
-    /// that has no PMS.
+    /// that has no server.
     /// **The control plane end to end.** An https origin whose name no resolver answers for is
     /// dialled at the pinned address: the loopback listener ACCEPTS a connection (the TLS
     /// handshake against a plaintext listener then fails, which is fine — reaching the socket is

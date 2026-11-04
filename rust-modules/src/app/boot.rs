@@ -450,7 +450,7 @@ mod replay_budget_tests {
 ///
 /// An absent trigger preserves the historical `butaca-play=<rk>` contract and uses the current
 /// server. Once an explicit slot was written, however, failure is terminal: rating keys are local
-/// to one PMS, so falling back could open a different item on another server.
+/// to one server, so falling back could open a different item on another server.
 pub(crate) fn resolve_direct_server(
     requested: Option<Result<u16, String>>,
     current: crate::registry::ServerId,
@@ -588,7 +588,7 @@ pub(super) fn activate_server_owned(
     bridge.metadata_run(crate::stores::metadata::MetadataCmd::Reset);
     let _ = bridge.hubs_run(crate::stores::hubs::HubsCmd::RefetchHubs);
     let _ = bridge.browse_discover_pump();
-    log("pms: catalog activation queued");
+    log("catalog: catalog activation queued");
 }
 /// Everything before the loop: SDL and the window, GL, text, the poster workers, the boot gate
 /// (login / token / session / picker), every dev trigger read once, and the `App` literal —
@@ -862,7 +862,7 @@ pub(crate) unsafe fn construct(
     //  2. Controlled recordings activate their injected fixture identity.
     //  3. A stored Jellyfin configuration authenticates and goes Home.
     //  4. Nothing else goes to Jellyfin sign-in. Live boot never loads a Plex session, and the
-    //     Plex dev-token world (ActivateDevBootstrap) is gone with the DevPms authority.
+    //     Plex dev-token world (ActivateDevBootstrap) is gone with the DevServer authority.
     // The destination itself is [`BootTo`], at module scope with the rest of the vocabulary.
     //
     let session = match &initial {
@@ -1251,7 +1251,7 @@ pub(crate) unsafe fn construct(
     // well as on the login path, because a single-Plex-Home-user account never meets the
     // picker at all: the two paths into Home are the picker's `take_ready` and this gate, and
     // a question asked on only one of them is a question half the accounts never see.
-    // `install_pms` above has already registered the stored roster, so "more than one source"
+    // `install_server` above has already registered the stored roster, so "more than one source"
     // has a real answer by this line. An AUTOMATED boot is exempt for the reason the picker is
     // — a harness run must land on a deterministic Home.
     //

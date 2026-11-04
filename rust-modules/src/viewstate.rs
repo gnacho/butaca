@@ -9,16 +9,16 @@
 //!
 //! With the Jellyfin-only conversion there is one backend and one server, so a write is exactly
 //! one request: the fan-out that used to repeat a watched claim across every Plex share that held
-//! the title is gone with the PMS protocol, and the item's identity is simply the `(sid, rk)`
+//! the title is gone with the server protocol, and the item's identity is simply the `(sid, rk)`
 //! pair the press carried. What remains is the discipline the queue existed for:
 //!
 //! * **The press is optimistic.** [`request`] flips what the shelves and the loaded detail item say
-//!   about the item BEFORE anything leaves the machine ([`crate::pms::edit_item`],
+//!   about the item BEFORE anything leaves the machine ([`crate::catalog::edit_item`],
 //!   [`crate::metadata::set_watched_local`]), so the tick, the veil and the resume bar all change on
 //!   the frame of the press however far away the server is. The refresh that follows the write is
 //!   the reconcile: it is the server's own answer, and it silently corrects an optimistic edit that
 //!   turned out to be wrong. A server that never answers leaves the edit standing — the same "a
-//!   failure never blanks a populated Home" rule `pms.rs` keeps for a fetch, applied to a write.
+//!   failure never blanks a populated Home" rule `catalog.rs` keeps for a fetch, applied to a write.
 //! * **One write at a time, in order.** These are not idempotent reads: a watched/unwatched pair
 //!   landing out of order leaves the server saying the opposite of what the user last asked for. So
 //!   the queue is drained strictly one worker at a time, and a second press on the SAME item
@@ -96,7 +96,7 @@ impl Write {
 }
 
 /// One queued write. Identity only — the backend's client is resolved in [`kick`], on the main
-/// thread, at the moment the worker is spawned. `pms::kick`'s rule ("capture at the spawn site")
+/// thread, at the moment the worker is spawned. `catalog::kick`'s rule ("capture at the spawn site")
 /// says the worker must never ask which server is current; resolving the client there is that
 /// rule applied to the one live backend.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -172,10 +172,10 @@ impl ViewStateState {
         !self.queue.is_empty() || self.sent.is_some()
     }
 
-/// Ask the item's server to change `(sid, rk)`'s view state, and update every surface that describes
-/// it AT ONCE. **MAIN THREAD, NON-BLOCKING.** Returns false when the write never left — the one case
-/// being a server slot that holds no client, which is a dropped PMS write and says so in the log
-/// rather than being the one that goes unrecorded.
+/// Ask the item's server to change `(sid, rk)`'s view state, and update every surface
+/// that describes it AT ONCE. **MAIN THREAD, NON-BLOCKING.** Returns false when the write never
+/// left — the one case being a server slot that holds no client, which is a dropped server write
+/// and says so in the log rather than being the one that goes unrecorded.
 ///
 /// `detail` says exactly what to re-read when the write lands: `None` for a press outside Detail,
 /// an addressed page plus kept episode for its filmstrip, and the addressed page with no episode
@@ -271,7 +271,7 @@ fn edit_local_with_owners(
             hubs(crate::stores::hubs::HubsCmd::EditItem {
                 sid,
                 rk: rk.to_string(),
-                edit: crate::pms::LocalEdit::Watched(on),
+                edit: crate::catalog::LocalEdit::Watched(on),
             }).changed;
             metadata(crate::stores::metadata::MetadataCmd::SetWatchedLocal {
                 sid,
@@ -312,7 +312,7 @@ fn edit_local_with_owners(
             hubs(crate::stores::hubs::HubsCmd::EditItem {
                 sid,
                 rk: rk.to_string(),
-                edit: crate::pms::LocalEdit::LeftTheDeck,
+                edit: crate::catalog::LocalEdit::LeftTheDeck,
             }).changed;
             // …and the LIBRARY's own deck, which is a different shelf on a different screen and is
             // where this row is now reachable from at all (the Library's section Continue Watching
@@ -337,7 +337,7 @@ impl ViewStateState {
     }
 
 /// Spend one frame of the refused-spawn ladder; true when the next attempt is due. Split out so the
-/// ladder is gradeable without a registry or a socket — `pms::retry_due`'s twin.
+/// ladder is gradeable without a registry or a socket — `catalog::retry_due`'s twin.
     fn retry_tick(&mut self) -> bool {
         let cd = self.retry_cd;
         if cd > 0 {
@@ -356,9 +356,9 @@ impl ViewStateState {
     while !self.queue.is_empty() {
         let req = self.queue.remove(0);
         // Resolved HERE, at the spawn site, and never inside the worker. A slot that has since
-        // stopped holding a client is a write with nowhere to go: dropping it silently would be the
-        // one PMS write with no line at all, which is what the request-time check above exists to
-        // prevent, so it says so here too.
+        // stopped holding a client is a write with nowhere to go: dropping it silently would be
+        // the one server write with no line at all, which is what the request-time check above
+        // exists to prevent, so it says so here too.
         let jellyfin = req.sid == crate::jellyfin::SERVER_ID;
         if jellyfin {
             let Some(c) = crate::jellyfin::client() else {
@@ -432,7 +432,7 @@ pub(crate) fn pump_with_gate(
             // The refresh is owed whether or not the server took it: on success it is the reconcile,
             // and on failure it is what puts the optimistic edit back to whatever the server really
             // says. A server that can answer neither question leaves the shelves exactly as they
-            // are — `pms.rs`'s per-source rule, unchanged.
+            // are — `catalog.rs`'s per-source rule, unchanged.
             self.want_hubs = true;
             if let Some(detail) = r.detail {
                 self.want_detail = Some(detail);
@@ -564,7 +564,7 @@ impl ViewStateState {
 }
 
 impl ViewStateState {
-/// Drop everything — the identity-change twin of `pms::reset`/`browse::reset`, called from the same
+/// Drop everything — the identity-change twin of `catalog::reset`/`browse::reset`, called from the same
 /// place. The request counter deliberately survives: identities remain monotone across reset, while
 /// the owning store rotates the adapter so an old worker has no route into the replacement owner.
 fn reset(&mut self) {
@@ -648,7 +648,7 @@ mod tests {
         ));
 
         assert!(matches!(hubs.as_slice(), [crate::stores::hubs::HubsCmd::EditItem {
-            sid: seen, rk, edit: crate::pms::LocalEdit::Watched(true)
+            sid: seen, rk, edit: crate::catalog::LocalEdit::Watched(true)
         }] if *seen == sid && rk == "7"));
         assert!(matches!(browse.as_slice(), [crate::stores::browse::BrowseCmd::SetWatchedLocal {
             sid: seen, rk, on: true

@@ -588,11 +588,11 @@ pub(crate) struct Shared {
     pub demux_io_failed: AtomicBool,
     /// WHY the demuxer found nothing to feed, when the answer is "the stream itself": the server
     /// delivered audio streams and no video stream. Issue #22's whole shape — a transcode target
-    /// the server cannot honour makes PMS drop the video track, and `ff: no video stream` alone
-    /// sent the reviewer on a full server-side investigation the app could have named in one
-    /// line. Set by the demux thread beside `demux_failed`; read on the main thread, which
-    /// combines it with `route::is_transcoding()` to word the error (an audio-only TRANSCODE is
-    /// the server's doing; an audio-only FILE is the file's).
+    /// the server cannot honour makes the server drop the video track, and `ff: no video stream`
+    /// alone sent the reviewer on a full server-side investigation the app could have named in
+    /// one line. Set by the demux thread beside `demux_failed`; read on the main thread,
+    /// which combines it with `route::is_transcoding()` to word the error (an audio-only TRANSCODE
+    /// is the server's doing; an audio-only FILE is the file's).
     pub demux_no_video: AtomicBool,
     /// `sf_load` returned 0 — the pipeline REFUSED the Load payload.
     ///
@@ -628,17 +628,17 @@ pub(crate) struct Shared {
     // client-rendered subtitles: selected track index (-1 = off) + the demuxed cues.
     // demux (D) pushes cues; main (M) reads the active one for the current playpos.
     pub desired_sub_idx: AtomicI32,
-    /// **The container's own per-track names, which PMS does not always send** (D -> M).
+    /// **The container's own per-track names, which server does not always send** (D -> M).
     ///
     /// `audio` and `subs`, each in FILE order, so position N is the N-th audio / subtitle stream of
     /// the part — the ordinal `metadata::audio_ordinal` and `metadata::sub_render_ordinal`
     /// already resolve a track-menu row to. Empty strings for a file that tags nothing, and an
     /// empty Vec until a demuxer has opened.
     ///
-    /// It exists because for an **MP4** part PMS sends no `Stream.title` at all, though the file
-    /// names every track (`"Полные Jaskier"`, `"Форс. iTunes"`). See `ff::stream_name`. So the
-    /// picker's rows are the only place this reaches, and only on DIRECT PLAY: a transcode is a
-    /// remux the server built, and its tags are whatever the server put there.
+    /// It exists because for an **MP4** part the server sends no `Stream.title` at all, though
+    /// the file names every track (`"Полные Jaskier"`, `"Форс. iTunes"`). See `ff::stream_name`. So
+    /// the picker's rows are the only place this reaches, and only on DIRECT PLAY: a transcode is
+    /// a remux the server built, and its tags are whatever the server put there.
     pub track_names: Mutex<TrackNames>,
     pub sub_cues: Mutex<Vec<SubCue>>,
     pub ass_sources: Mutex<super::ass_source::Store>,
@@ -814,8 +814,8 @@ pub(crate) struct Shared {
     /// Current Original source requirement or active HLS rung, in kbit/s.
     pub dg_abr_kbps: AtomicI64,
     /// The current HLS master declaration and the last completed segment's measured media rate.
-    /// Both are observations of what PMS actually emitted; `dg_abr_kbps` is the requested ceiling
-    /// and must never be presented as either of these.
+    /// Both are observations of what the server actually emitted; `dg_abr_kbps` is the requested
+    /// ceiling and must never be presented as either of these.
     pub dg_abr_declared_kbps: AtomicI64,
     pub dg_abr_media_kbps: AtomicI64,
     /// Latest measured body throughput and normalized content reserve. `-1` means no complete

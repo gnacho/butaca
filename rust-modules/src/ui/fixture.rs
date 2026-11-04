@@ -1812,7 +1812,7 @@ fn two_results_in_one_frame_replay_in_arrival_order() {
 #[test]
 fn the_adapter_drain_order_is_the_documented_one() {
     let ranks = super::dispatch::ADAPTER_RANKS;
-    let documented = ["auth", "pms", "browse", "search", "metadata/season", "person", "play", "metadata/detail", "viewstate", "alt_sources", "poster"];
+    let documented = ["auth", "catalog", "browse", "search", "metadata/season", "person", "play", "metadata/detail", "viewstate", "alt_sources", "poster"];
     assert_eq!(ranks, documented);
     let mut set = std::collections::HashSet::new();
     assert!(ranks.iter().all(|r| set.insert(*r)), "no adapter is named twice");
@@ -1832,7 +1832,7 @@ fn the_adapter_drain_order_is_the_documented_one() {
 // through the dispatcher's adapter drain), so a recording could pin which flags were live the way
 // it already pins HTTP and store traffic. No such kind exists: `AppFx` (`screens/registry.rs`) has
 // no `Sys` variant, `ui::dispatch::ADAPTER_RANKS` names exactly the eleven data-fetch adapters
-// (`auth, pms, browse, search, metadata/season, person, play, metadata/detail, viewstate,
+// (`auth, catalog, browse, search, metadata/season, person, play, metadata/detail, viewstate,
 // alt_sources, poster`) and no twelfth for triggers, and `dev.rs` — the one door onto `/tmp/butaca-*`
 // — is read directly at the point a boot or a screen needs a flag (`dev::flag`/`dev::read`), gated
 // on the `devtriggers` feature, never through a store or the adapter machinery (see `AGENTS.md`'s

@@ -585,7 +585,7 @@ mod tests {
     ];
 
     /// Individual codepoints link 1 must carry: the typographic punctuation the UI composes by
-    /// hand (`elide` appends U+2026; headings join with U+00B7; PMS metadata is full of curly
+    /// hand (`elide` appends U+2026; headings join with U+00B7; server metadata is full of curly
     /// quotes and en/em dashes) and the marks drawn beside ratings.
     const LINK1_CHARS: &[(&str, char)] = &[
         ("ellipsis (elide appends it)", '\u{2026}'),

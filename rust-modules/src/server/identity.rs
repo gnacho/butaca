@@ -2,10 +2,10 @@
 //!
 //! There are two independent transports here and they used to each hardcode their own identity:
 //! [`account`](super::account) talks to plex.tv over libcurl and sends `X-Plex-*` as HEADERS, while
-//! [`client`](super::client) talks to the PMS and sends them as QUERY PARAMETERS. Nothing kept the
-//! two in step, and they had drifted on every field that mattered:
+//! [`client`](super::client) talks to the server and sends them as QUERY PARAMETERS. Nothing kept
+//! the two in step, and they had drifted on every field that mattered:
 //!
-//! | field       | plex.tv said        | the PMS said     |
+//! | field       | plex.tv said        | the server said     |
 //! |-------------|---------------------|------------------|
 //! | Product     | `Plex for webOS`    | `Butaca`      |
 //! | Version     | `1.0`               | `0.1.0`          |
@@ -57,13 +57,13 @@ pub(crate) const VERSION: &str = env!("BUTACA_VERSION");
 /// The OS version — the REAL one, read off the set at boot ([`crate::webos`]), because the app
 /// runs on webOS 4 through 11 now and a literal is wrong on every set but one. This was
 /// `const … = "4.5"` while the app was packaged `>=4.0, <5.0`; the webosbrew reviewer flagged it
-/// reporting 4.5 from a 6.5.2 television (issue #22). PMS augments our named Generic profile
+/// reporting 4.5 from a 6.5.2 television (issue #22). The server augments our named Generic profile
 /// from the X-Plex-Client-Profile-Extra we send, so the version is informational today — but it
 /// is also how a server-side profile could ever distinguish firmware generations, and a false
 /// one poisons that forever. The fallback when `os_info.json` is unreadable keeps the literal
 /// this replaces — the exact claim every release so far has made — rather than inventing an
 /// empty-string case no server has ever been shown. Safe by boot order: `webos::probe()` is the
-/// first call in `butaca_run`, before SDL exists, so no PMS request can precede the read.
+/// first call in `butaca_run`, before SDL exists, so no server request can precede the read.
     #[allow(dead_code)] // frozen until the wire layer goes
 pub(crate) fn platform_version() -> &'static str {
     let r = &crate::webos::info().release;

@@ -2,7 +2,7 @@
 //! seasons/episodes, its OnDeck, its Related shelf, its intro/credits segments — projected into
 //! the ONE `metadata::Detail` the page has always drawn.
 //!
-//! This is the detail twin of `pms::fetch_source_jellyfin`: the page, its mailbox, its
+//! This is the detail twin of `catalog::fetch_source_jellyfin`: the page, its mailbox, its
 //! season-switch worker and every draw site are untouched; what differs is which server answered
 //! and how its payload parsed. The orchestration deliberately mirrors `metadata::fetch_full`'s
 //! shape — the same sequence (record → show extras → related), the same failure tolerance

@@ -58,7 +58,7 @@ pub(super) fn test_original_candidate(subtitle_ordinal: Option<i32>) -> AutoOrig
 
 // ---- the playing item's SERVER: captured once, carried by value ---------------------------
 // A ratingKey, a Part id, a Stream id, a playQueueID and a resume point are all keys on ONE
-// server. Every PMS call in this file used to find its server by asking which one was current
+// server. Every server call in this file used to find its server by asking which one was current
 // at the instant of the call, so an item borrowed from a shared source was resolved, queued,
 // PUT, stopped and — every ten seconds — reported to whichever server the user had since
 // wandered off to. None of that is observable from inside the app, which is why these exist.

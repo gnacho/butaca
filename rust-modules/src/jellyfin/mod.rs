@@ -7,13 +7,13 @@
 //!
 //! ## The adapter principle: the UI's structs are the contract
 //!
-//! The screens do not read this module's DTOs. They read the SAME internal structs they always
-//! have — `pms::PmsMovie` for grids and shelves, `metadata::Detail` for the detail page — because
-//! those structs are already backend-neutral in everything but name: a title, a year, a duration,
-//! a resume point, an image path, a watched flag. What is backend-specific is how those fields
-//! are FETCHED and PARSED, and that is the only thing this module replaces. A Jellyfin
-//! `BaseItemDto` goes in one side of [`convert::movie_from_dto`] and a `PmsMovie` comes out of
-//! the other, indistinguishable from one parsed off a PMS.
+//! The screens do not read this module's DTOs. They read the SAME internal structs they always have
+//! — `catalog::CatalogMovie` for grids and shelves, `metadata::Detail` for the detail page —
+//! because those structs are already backend-neutral in everything but name: a title, a year,
+//! a duration, a resume point, an image path, a watched flag. What is backend-specific is how those
+//! fields are FETCHED and PARSED, and that is the only thing this module replaces. A Jellyfin
+//! `BaseItemDto` goes in one side of [`convert::movie_from_dto`] and a `CatalogMovie` comes out of
+//! the other, indistinguishable from one parsed off a server.
 //!
 //! That choice is deliberate, and the alternative was considered and rejected: introducing a
 //! `trait MediaBackend` and migrating the UI onto it would have touched ~20 UI files before a
@@ -32,7 +32,7 @@
 //!
 //! ## The credential-transport rule this backend lives under
 //!
-//! Plex's `X-Plex-Token` may ride only TLS, because every PMS is reachable through a
+//! Plex's `X-Plex-Token` may ride only TLS, because every server is reachable through a
 //! `*.plex.direct` certificate. Jellyfin has no equivalent: a home Jellyfin server is plain HTTP
 //! on a LAN address in the overwhelming majority of installs, so `crate::http`'s credential gate
 //! carries a Jellyfin-only relaxation — its credential shapes (the
@@ -49,7 +49,7 @@
 //!
 //! Jellyfin measures times in **ticks of 100 ns** (`RunTimeTicks`, `PlaybackPositionTicks`); the
 //! app measures durations in NANOSECONDS and resume points in MILLISECONDS (Plex's units, baked
-//! into `PmsMovie`). The conversions live in [`convert`] — multiply ticks by 100 for `dur_ns`,
+//! into `CatalogMovie`). The conversions live in [`convert`] — multiply ticks by 100 for `dur_ns`,
 //! divide by 10_000 for `resume_ms` — and nowhere else. A tick value must never reach a struct
 //! field unconverted.
 

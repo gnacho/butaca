@@ -48,16 +48,16 @@ use shared::{
 /// It exists for the same reason `/tmp/butaca-personbio` does, and the shape of the problem is
 /// identical: the data comes from a source no automated or host run can reach, so without a seed
 /// every headless look at the screen shows the degenerate state. Here the source is the DEMUXER —
-/// `ff::track_names` publishes these when it opens a part — and the desktop simulator has no
-/// demuxer at all (the bundled FFmpeg is ARM, and `player::ffi`'s host arm has no video path), so
-/// the picker there can only ever draw what PMS sent. Which, for the MP4 this exists to fix, is a
-/// column of identical language names.
+/// `ff::track_names` publishes these when it opens a part — and the desktop simulator has
+/// no demuxer at all (the bundled FFmpeg is ARM, and `player::ffi`'s host arm has no video path),
+/// so the picker there can only ever draw what the server sent. Which, for the MP4 this exists to
+/// fix, is a column of identical language names.
 ///
 /// Pipe-separated within a list, `;` between the two lists, audio first:
 /// `Дубляж|Original;Forced|Full`. Either side may be empty (`;Forced|Full` seeds subtitles alone).
 /// An EMPTY file seeds the real nine-track sample this was built against, because that is the shape
-/// that exercises the case: six same-language rows PMS reports identically, which no shorter list
-/// demonstrates.
+/// that exercises the case: six same-language rows the server reports identically, which no shorter
+/// list demonstrates.
 ///
 /// **It seeds the real store and stubs nothing else** — the same `SHARED.track_names` the demuxer
 /// writes, read back through the same `metadata::track_label::track_name` precedence. So a seeded
@@ -69,7 +69,7 @@ pub(crate) fn seed_dev_track_names() {
     let Some(spec) = crate::dev::read("tracknames") else {
         return;
     };
-    // The real subtitle names of a nine-track MP4 whose PMS record carries none — the file this
+    // The real subtitle names of a nine-track MP4 whose server record carries none — the file this
     // whole path was written against. Audio is left empty on purpose: one list is enough to
     // demonstrate, and seeding audio too would hide the `audio_descriptor` fallback the real menu
     // still uses for a track the container does not name.
@@ -179,7 +179,7 @@ pub(crate) const ABR_WHY_RESERVE_UNKNOWN: u8 = 11;
 /// A fetch hit its runway deadline and the controller rolled back without treating its censored
 /// prefix as a capacity measurement.
 pub(crate) const ABR_WHY_DEADLINE_ROLLBACK: u8 = 12;
-/// The largest request is active but its observed PMS master/raster is smaller than the request
+/// The largest request is active but its observed server master/raster is smaller than the request
 /// can produce. It is a response state, not `AtBestRung`: a fresh session at the same actuator
 /// remains eligible after stronger completed-service evidence.
 pub(crate) const ABR_WHY_RESPONSE_LIMITED: u8 = 13;
@@ -609,7 +609,7 @@ pub(crate) enum FailureKind {
     PlaybackPolicy,
     /// Transcoding, and the server produced no video stream — it found no usable video target.
     NoVideoTranscodeTarget,
-    /// Direct playing, and the stream carries no video track, so the file disagrees with the PMS
+    /// Direct playing, and the stream carries no video track, so the file disagrees with the server
     /// metadata that made us choose direct play.
     NoVideoTrack,
     /// The producer never opened a usable media stream or produced a video access unit.
@@ -767,12 +767,12 @@ pub(crate) struct ErrorShape {
     pub panel: &'static str,
     /// the read-out's reason line — sentence case
     pub readout: &'static str,
-    /// Additional reason and recovery instructions for the viewer. A PMS verdict is preserved
+    /// Additional reason and recovery instructions for the viewer. A server verdict is preserved
     /// verbatim; local policy failures and Force recovery copy are authored by the app.
     /// Owned strings borrow from the playback session only while this shape is constructed.
     ///
     /// **It deliberately does NOT reach `panel`.** The diagnostics panel is a PHOTOGRAPH — its
-    /// module doc bans URLs, paths and item titles from it, and a PMS decision sentence is
+    /// module doc bans URLs, paths and item titles from it, and a server decision sentence is
     /// untrusted free text that can carry a filename. So the viewer's own screen quotes the
     /// server and the shared support surface names only what the app decided; the asymmetry is
     /// the redaction rule, not an oversight.
@@ -933,9 +933,9 @@ fn error_shape(
 }
 
 /// Keep the runtime diagnosis while making the active override and its recovery path visible.
-/// A failed strict-original request is a policy failure, not evidence that PMS cannot convert
-/// the file: conversion was never allowed. The mode snapshot supplies that distinction; no
-/// user-facing sentence or firmware error string is parsed to decide it.
+/// A failed strict-original request is a policy failure, not evidence that the server cannot
+/// convert the file: conversion was never allowed. The mode snapshot supplies that distinction;
+/// no user-facing sentence or firmware error string is parsed to decide it.
 fn with_forced_playback_context(mut shape: ErrorShape, forced: bool) -> ErrorShape {
     if !forced { return shape; }
     if shape.kind == FailureKind::DecisionRefused {
@@ -983,9 +983,9 @@ pub(crate) fn error_now(ps: &crate::route::PlaybackSession) -> ErrorShape {
     ), crate::route::forced_direct_play(ps))
 }
 
-/// A sample PMS refusal, for the `verdict` variant of the dev trigger below. Real wording: this is
-/// the sentence a server emits when the only encoder our profile asked for is one it does not have,
-/// which is issue #22's failure with the pre-#22 single-entry target chain.
+/// A sample server refusal, for the `verdict` variant of the dev trigger below. Real wording:
+/// this is the sentence a server emits when the only encoder our profile asked for is one it does
+/// not have, which is issue #22's failure with the pre-#22 single-entry target chain.
 const FAILTEST_VERDICT: &str =
     "Cannot convert this item. Implementation for video encoder 'hevc' not found.";
 
@@ -1415,9 +1415,9 @@ pub(crate) fn request_transcode_refresh(ps: &crate::route::PlaybackSession) {
     SHARED.sub_cues.lock().unwrap().clear(); // burned/absent in the fresh transcode
 }
 
-/// Restart the current stream at the current movie position so a fresh demux worker captures a
-/// newly-enabled adaptive controller. This mailbox does not itself mutate the route or ask PMS for
-/// another encode; the main-thread pump owns the eventual same-position restart.
+/// Restart the current stream at the current movie position so a fresh demux worker captures
+/// a newly-enabled adaptive controller. This mailbox does not itself mutate the route or ask
+/// the server for another encode; the main-thread pump owns the eventual same-position restart.
 pub(crate) fn request_adaptive_reload(ps: &crate::route::PlaybackSession) {
     crate::route::request_user_route_intent(ps, crate::route::UserRouteIntent::AdaptiveReload);
 }

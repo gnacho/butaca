@@ -1,4 +1,4 @@
-//! convert — Jellyfin `BaseItemDto` → the app's catalog row (`pms::PmsMovie`).
+//! convert — Jellyfin `BaseItemDto` → the app's catalog row (`catalog::CatalogMovie`).
 //!
 //! This is the whole "impedance match" between the two backends, and it is small precisely
 //! because the internal row was never really Plex's: it is a title, a year, a duration, a resume
@@ -7,7 +7,7 @@
 //!
 //! ## Image paths are PATHS, not URLs
 //!
-//! `PmsMovie.thumb`/`still`/`art` hold server-relative paths that the poster store later boxes
+//! `CatalogMovie.thumb`/`still`/`art` hold server-relative paths that the poster store later boxes
 //! with a size (Plex: `/photo/:/transcode?url=…`; Jellyfin: [`JfClient::image_path`]'s
 //! `fillWidth`/`fillHeight` suffix). What this module stores is therefore the UNSIZED form —
 //! `/Items/{id}/Images/Primary?tag=…` — and the tag is embedded now because it is the server's
@@ -16,7 +16,7 @@
 
 use super::dto::BaseItemDto;
 use crate::registry::ServerId;
-use crate::pms::PmsMovie;
+use crate::catalog::CatalogMovie;
 use std::os::raw::c_int;
 
 /// `None` for kinds the app has no shelf for (music, photos, box sets) — the caller skips the
@@ -26,7 +26,7 @@ use std::os::raw::c_int;
 /// are GUIDs, which do not fit, and the browse adapter already scopes every listing by
 /// `ParentId` at QUERY time, so the per-row pin the Plex layer needs (`/hubs` answers mix every
 /// library into one response) has no counterpart here. `0` is "not pinned", not a bug.
-pub(crate) fn movie_from_dto(it: &BaseItemDto, sid: ServerId, sec: i64) -> Option<PmsMovie> {
+pub(crate) fn movie_from_dto(it: &BaseItemDto, sid: ServerId, sec: i64) -> Option<CatalogMovie> {
     let kind: c_int = match it.kind.as_str() {
         "Movie" => 0,
         "Series" => 1,
@@ -70,7 +70,7 @@ pub(crate) fn movie_from_dto(it: &BaseItemDto, sid: ServerId, sec: i64) -> Optio
 
     let (vcodec, acodec) = codecs(it);
 
-    Some(PmsMovie {
+    Some(CatalogMovie {
         sid,
         sec,
         title: it.name.clone(),
@@ -129,12 +129,12 @@ fn image_path(it: &BaseItemDto, kind: &str, tag: Option<&String>) -> String {
 /// split `movie_from_dto` refuses to make, where a BoxSet would otherwise be skipped as an
 /// unshelfable kind. `ChildCount` rides the row's `child_count`, which the collection tile reads
 /// as its "N items" caption.
-pub(crate) fn boxset_from_dto(it: &BaseItemDto, sid: ServerId) -> Option<PmsMovie> {
+pub(crate) fn boxset_from_dto(it: &BaseItemDto, sid: ServerId) -> Option<CatalogMovie> {
     if it.kind != "BoxSet" {
         return None;
     }
     let thumb = image_path(it, "Primary", it.image_tags.get("Primary"));
-    Some(PmsMovie {
+    Some(CatalogMovie {
         sid,
         sec: 0,
         title: it.name.clone(),
@@ -142,7 +142,7 @@ pub(crate) fn boxset_from_dto(it: &BaseItemDto, sid: ServerId) -> Option<PmsMovi
         thumb,
         summary: it.overview.clone().unwrap_or_default(),
         rk: it.id.clone(),
-        kind: crate::pms::KIND_COLLECTION,
+        kind: crate::catalog::KIND_COLLECTION,
         child_count: it.child_count.unwrap_or(0).max(0),
         ..Default::default()
     })
@@ -253,7 +253,7 @@ mod tests {
             }], "TotalRecordCount": 1}"#,
         );
         let m = boxset_from_dto(&it, ServerId::from_raw(0)).unwrap();
-        assert_eq!(m.kind, crate::pms::KIND_COLLECTION);
+        assert_eq!(m.kind, crate::catalog::KIND_COLLECTION);
         assert_eq!(m.rk, "box1");
         assert_eq!(m.title, "The Saga");
         assert_eq!(m.thumb, "/Items/box1/Images/Primary?tag=btag");

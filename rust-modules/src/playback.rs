@@ -43,7 +43,7 @@ impl LinkPolicy {
 ///
 /// This is carried beside the request instead of inferred from its eventual URL: the capability
 /// profile, decision query, start endpoint and demux strategy are one choice and must never drift
-/// independently. Fixed HLS is deliberately a single-rendition session on the measured PMS; an
+/// independently. Fixed HLS is deliberately a single-rendition session on the measured server; an
 /// adaptive quality change primes a replacement encoder session rather than pretending that the
 /// one-entry master playlist is client-selectable ABR.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -56,10 +56,10 @@ pub enum TranscodeDelivery {
 }
 
 /// Plex Pass's per-track transcoder DSP (issue #266): dialog boost and loudness normalization.
-/// PMS accepts the two independently (`boostDialog=1`, `normalizeLoudness=1` on the transcode
-/// query — never on MDE, per M1), so they are two flags rather than one; this client always
-/// offers them together with the same gate (`route::plan::desired_audio`), but the wire and the
-/// type stay as honest about the server's contract as the server itself is.
+/// The server accepts the two independently (`boostDialog=1`, `normalizeLoudness=1` on
+/// the transcode query — never on MDE, per M1), so they are two flags rather than one; this client
+/// always offers them together with the same gate (`route::plan::desired_audio`), but the wire and
+/// the type stay as honest about the server's contract as the server itself is.
 ///
 /// `Copy`, `Default` (= [`NONE`](Self::NONE)), `Serialize`/`Deserialize` — it rides every
 /// [`EncodeContract`] built on the resolve worker and is persisted as the user's preference
@@ -113,15 +113,15 @@ pub struct EncodeContract {
     ///
     /// It exists because "we refused direct play" and "the server will re-encode" are NOT the same
     /// statement, and the gap between them shipped a fix that fixed nothing. `directStream=1`
-    /// permits a stream copy, and PMS takes it whenever the source fits the caps the query carries
-    /// — resolution, bitrate, and the profile's own limitation axes (width/height/bitDepth).
-    /// **None of those axes can express Dolby Vision**, so a Profile 5 file refused by
-    /// `route::video_direct_plays` came back `Part.decision=transcode` with the VIDEO stream's own
-    /// decision `copy`: the identical IPT-PQ bitstream, one container down, the identical wrong
-    /// colours (measured against a real server on 2026-08-21).
+    /// permits a stream copy, and the server takes it whenever the source fits the caps the query
+    /// carries — resolution, bitrate, and the profile's own limitation axes
+    /// (width/height/bitDepth). **None of those axes can express Dolby Vision**, so a Profile 5
+    /// file refused by `route::video_direct_plays` came back `Part.decision=transcode` with
+    /// the VIDEO stream's own decision `copy`: the identical IPT-PQ bitstream, one container down,
+    /// the identical wrong colours (measured against a real server on 2026-08-21).
     ///
     /// Setting it makes the ask honest, and the answer honest with it: a server that CAN convert
-    /// the file does, and a server that cannot says so (this PMS answers
+    /// the file does, and a server that cannot says so (this server answers
     /// `generalDecisionCode 2000` / *"File is unplayable. DoVi (Profile 5) color space is not
     /// supported."*), which `route::refusal` turns into the player's read-out quoting that
     /// sentence. Both beat a picture in the wrong colours with nothing on any surface to explain
@@ -156,16 +156,16 @@ impl EncodeContract {
     }
 }
 
-/// A bound a playback must come in under, in the units PMS's own params use: `maxVideoBitrate` is
-/// **kbps**, `videoResolution` is a `WxH` pair. One value rather than two scattered ints, because
-/// the two axes have to move together — a rung that halves the rate and keeps 4K asks the server
-/// for something it cannot make look like anything.
+/// A bound a playback must come in under, in the units the server's own params use:
+/// `maxVideoBitrate` is **kbps**, `videoResolution` is a `WxH` pair. One value rather than two
+/// scattered ints, because the two axes have to move together — a rung that halves the rate and
+/// keeps 4K asks the server for something it cannot make look like anything.
 ///
 /// Lives here rather than in `route` so the ladder's rungs and the query that spends them are one
 /// type: `route::Quality::ceiling` is the only constructor of a non-default one.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Ceiling {
-    /// `maxVideoBitrate`, in **kbps** (PMS's unit — not bits, not bytes).
+    /// `maxVideoBitrate`, in **kbps** (the server's unit — not bits, not bytes).
     pub max_kbps: i64,
     /// `videoResolution`, as the frame the encode may not exceed.
     pub max_w: i64,

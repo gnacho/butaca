@@ -23,9 +23,9 @@ fn tv_page(fixture: &Fixture) -> LibraryScreen {
 fn collections_fixture(total: usize) -> Fixture {
     let mut fixture = Fixture::new();
     let sid = crate::registry::ServerId::from_raw(0);
-    let rows = (0..total.min(3)).map(|i| crate::pms::PmsMovie {
+    let rows = (0..total.min(3)).map(|i| crate::catalog::CatalogMovie {
         sid, rk: format!("{}", 50_001 + i), title: format!("Collection {i}"),
-        kind: crate::pms::KIND_COLLECTION, child_count: i as i64 + 1, ..Default::default()
+        kind: crate::catalog::KIND_COLLECTION, child_count: i as i64 + 1, ..Default::default()
     }).collect();
     fixture.listing = fixture.listing.with_library_type(LibraryType::Collections).with_total(total).with_page(0, rows);
     fixture

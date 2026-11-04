@@ -414,8 +414,8 @@ pub(crate) fn session_candidates() -> Vec<PathBuf> {
     if ENV_STEERABLE {
         v.push(in_runtime_dir("auth.json"));
     }
-    // Named for THIS install, so two flavours on one television do not share one sign-in. The
-    // file holds the client identifier, the account token, every per-(user, server) PMS token and
+    // Named for THIS install, so two flavours on one television do not share one sign-in. The file
+    // holds the client identifier, the account token, every per-(user, server) access token and
     // the Plex Home roster — sharing it means a sign-out in the developer build signs you out of
     // the build you watch with, a profile switch in one decides who the other resumes as, and two
     // processes race a file whose `save()` is best-effort. The two installs are genuinely two
@@ -430,10 +430,10 @@ pub(crate) fn session_candidates() -> Vec<PathBuf> {
     // The legacy in-app-dir path is a MIGRATION source and it names the SHIPPED install's directory
     // by literal, so only the shipped install may offer it. `session::load` takes the first
     // candidate that EXISTS — so on a flavoured install, whose own three files are all absent on
-    // first boot, this entry would hand a developer build the other install's account token, every
-    // per-(user, server) PMS token and the Plex Home roster, which it would then write back under
-    // its own name. Exactly the sharing the three lines above exist to prevent, arriving through
-    // the one entry that was not made flavour-aware with them.
+    // first boot, this entry would hand a developer build the other install's account token,
+    // every per-(user, server) access token and the Plex Home roster, which it would then write
+    // back under its own name. Exactly the sharing the three lines above exist to prevent, arriving
+    // through the one entry that was not made flavour-aware with them.
     if flavour().is_none() {
         v.push(PathBuf::from(LEGACY_APP_DIR).join("auth.json"));
     }
@@ -763,8 +763,8 @@ mod tests {
     }
 
     /// Two installs must not share one sign-in. The file holds the client identifier, the account
-    /// token, every per-(user, server) PMS token and the Plex Home roster, so a shared one means a
-    /// sign-out in the developer build signs you out of the build you watch with — and two
+    /// token, every per-(user, server) access token and the Plex Home roster, so a shared one means
+    /// a sign-out in the developer build signs you out of the build you watch with — and two
     /// processes racing a best-effort `save()`.
     ///
     /// Asserted on the property (the two id's candidate lists are disjoint where it matters)

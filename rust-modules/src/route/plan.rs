@@ -3,7 +3,7 @@
 //! `SESSION`/`PLAYER_CONTROL`/`PLAY_SLOT`/`ENCODER_CLEANUP`/`SCROBBLE_JOIN`/`TIMELINE_STOP_FENCE`/
 //! `QUALITY`, or calls `task::spawn*` — that is what makes [`build_stream`] safe to run on the
 //! resolve worker. Everything else in the former `route.rs` (session state, the synchronized
-//! `PlayerControl`, PMS/native I/O, the encoder/scrobble/timeline machinery) lives in
+//! `PlayerControl`, server/native I/O, the encoder/scrobble/timeline machinery) lives in
 //! [`super::decision`]. `ci/check-deps.sh`'s `wall` gate holds this file to zero
 //! `Instant::now`/`SystemTime::now`/`.elapsed()`; a function that needs wall time is not pure and
 //! belongs in `decision.rs`.
@@ -17,7 +17,7 @@ use super::decision::{
 };
 
 /// One worker's right to observe or replace the active route. Both fields are required: `encoder`
-/// addresses PMS, while `epoch` distinguishes semantic routes which intentionally reuse that
+/// addresses the server, while `epoch` distinguishes semantic routes which intentionally reuse that
 /// exact Streaming Resource.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RouteLease {
@@ -37,7 +37,7 @@ impl RouteLease {
 /// `route` rejects same-id ABA, `engine_epoch` rejects a worker from an earlier Load,
 /// `media_epoch` rejects evidence collected before an applied seek, and `applied_revision`
 /// names the physical route contract this worker actually serves. Desired user edits deliberately
-/// do not change this ticket until their PMS/native effect commits: a refusal must leave the
+/// do not change this ticket until their server/native effect commits: a refusal must leave the
 /// unchanged worker authorized.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WorkerTicket {
@@ -137,7 +137,7 @@ pub(super) fn next_encoder_generation() -> u64 {
 /// loudness-capable or immersive just because nobody has said otherwise.
 #[derive(Clone, PartialEq, Debug)]
 pub(crate) struct CarriedAudio {
-    /// PMS `Stream.id` — the id this track is selected/burned by (`audioStreamID`,
+    /// The server `Stream.id` — the id this track is selected/burned by (`audioStreamID`,
     /// `PUT /library/parts`).
     pub(crate) sid: i64,
     /// The demuxer-facing ordinal (`metadata::Stream.index` order) — what `set_audio_track` feeds
@@ -145,8 +145,8 @@ pub(crate) struct CarriedAudio {
     pub(crate) ordinal: i32,
     pub(crate) codec: String,
     pub(crate) channels: i64,
-    /// PMS 1.43.4+ Plex Pass: can the server honor `boostDialog`/`normalizeLoudness` for this
-    /// track (issue #266; wire field is `server::Stream::can_normalize_loudness`).
+    /// A 1.43.4+ server with Plex Pass: can the server honor `boostDialog`/`normalizeLoudness` for
+    /// this track (issue #266; wire field is `server::Stream::can_normalize_loudness`).
     pub(crate) can_normalize_loudness: bool,
     /// Dolby Atmos (`metadata::Stream::has_atmos`) — the Load payload's `contents.immersive`.
     pub(crate) immersive: bool,
@@ -161,7 +161,7 @@ impl CarriedAudio {
             sid: s.id,
             ordinal,
             // Lowercased like every other codec this module compares (`audio_sel`, the payload):
-            // PMS ids are lowercase already, and a stray capital must not make a recovery's Load
+            // server ids are lowercase already, and a stray capital must not make a recovery's Load
             // payload disagree with the direct play it restores.
             codec: s.codec.to_lowercase(),
             channels: s.channels,
@@ -190,7 +190,7 @@ impl CarriedAudio {
 /// Everything needed to restore Auto's zero-video-encode state after HLS. `url` is the cold-start
 /// playback target; `probe_part` is the raw Part key used to bind runtime measurement and direct
 /// playback to the exact live HLS Streaming Resource. `direct` says whether the Part itself is
-/// playable or whether PMS must container-remux it while copying the video.
+/// playable or whether the server must container-remux it while copying the video.
 #[derive(Clone)]
 pub(super) struct AutoOriginalCandidate {
     pub(super) url: String,
@@ -418,13 +418,14 @@ pub(super) struct EnhancementFacts<'a> {
 /// - **Plex Pass `Yes` only (I1).** `Unknown` fails closed exactly like `No`: an unknown server is
 ///   not assumed to hold a subscription it may not have, and with it hidden the app's URLs are
 ///   byte-identical to a build without the feature.
-/// - **A known, capable carried track.** `canNormalizeLoudness` is PMS 1.43.4's own per-stream
+/// - **A known, capable carried track.** `canNormalizeLoudness` is 1.43.4's own
+/// per-stream
 ///   statement that it has the loudness analysis the DSP needs; absent = no.
 /// - **No Dolby Vision on the base route (I7).** A declared DV direct play needs its payload's
 ///   `DolbyHdrInfo` node, which rides the direct play and would be lost in a remux; an unusable
 ///   base layer is never copied at all (`EncodeContract::no_video_copy`).
 /// - **No subtitle on screen (I6).** M4: an enhanced remux never carries a text subtitle into the
-///   progressive MKV — PMS answers "unavailable", or re-encodes the video to burn it.
+///   progressive MKV — the server answers "unavailable", or re-encodes the video to burn it.
 /// - **Not already refused** by this playback's server, and **Direct or Remux only (I5)**.
 pub(super) fn enhancements_offered(f: &EnhancementFacts, target: RouteFamily) -> bool {
     use crate::server::serverinfo::Subscription;
@@ -454,10 +455,10 @@ pub(super) fn desired_audio(
 
 /// **Why a plan leaves without a URL on purpose**, as a typed verdict rather than a sentence.
 ///
-/// The server's own refusal is quoted verbatim ([`PlayVerdict::Server`]: PMS wrote it, in the
-/// server's language, and it may be empty). Every other arm is the APP's policy decision, so it is
-/// stored as a variant and worded only where it is read ([`PlayVerdict::text`]) — a stored sentence
-/// would freeze one language into playback state that tests, logs and replays also read.
+/// The server's own refusal is quoted verbatim ([`PlayVerdict::Server`]: the server wrote it, in
+/// the server's language, and it may be empty). Every other arm is the APP's policy decision, so it
+/// is stored as a variant and worded only where it is read ([`PlayVerdict::text`]) — a stored
+/// sentence would freeze one language into playback state that tests, logs and replays also read.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PlayVerdict {
     /// `/decision`'s own sentence, quoted and never translated. `""` when it gave none.
@@ -507,7 +508,7 @@ pub(super) fn new_sess(rk: &str) -> String {
 
 
 /// The episode queued after the one now playing — everything the Up Next control draws AND
-/// everything [`request_play`] needs to start it, so playing it costs no PMS round trip either.
+/// everything [`request_play`] needs to start it, so playing it costs no server round trip either.
 ///
 /// It comes free with the `continuous=1` PlayQueue every playback already creates (see
 /// [`crate::server::Client::create_play_queue`]); nothing here asks the server "what's next".
@@ -569,9 +570,10 @@ fn jellyfin_up_next(c: &crate::jellyfin::JfClient, series_id: &str) -> Option<Up
 /// non-atomic i64s, which on armv7 is a tearable two-word load.
 ///
 /// The `sid` is the same idea one step further out: it is not a static the worker could read, it is
-/// a *function call* — `server::client_opt()` — which is worse, because `Send` cannot see a function
-/// call and a worker that resolves its own server therefore compiles clean and passes every test.
-/// It is captured here, at the request, and every PMS call the worker makes is `client_for(sid)`.
+/// a *function call* — `server::client_opt()` — which is worse, because `Send` cannot see
+/// a function call and a worker that resolves its own server therefore compiles clean and passes
+/// every test. It is captured here, at the request, and every server call the worker makes is
+/// `client_for(sid)`.
 #[derive(Clone, Default)]
 pub(crate) struct ResolveEnv {
     /// WHICH SERVER this playback's item lives on — the scope for every server-local key the
@@ -653,9 +655,9 @@ pub(super) fn detail_describes(d: &crate::metadata::Detail, sid: ServerId, rk: &
 /// be capped at a rate its video already met.
 ///
 /// `Detail::video` is the stream's own record and carries its own bitrate; it is `None` for a show
-/// that never got an episode backfill and for an audio-only part, and PMS omits the field often
-/// enough that the whole-file fallback has to stay. Falling back is the conservative direction,
-/// which is the right one here — see [`crate::playback::Ceiling::admits`].
+/// that never got an episode backfill and for an audio-only part, and the server omits the field
+/// often enough that the whole-file fallback has to stay. Falling back is the conservative
+/// direction, which is the right one here — see [`crate::playback::Ceiling::admits`].
 pub(super) fn source_kbps(d: &crate::metadata::Detail) -> i64 {
     match d.video.as_ref().map(|v| v.bitrate) {
         Some(b) if b > 0 => b,
@@ -875,8 +877,9 @@ impl<'a> AudioLangPrefs<'a> {
 /// differently.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AudioIntent<'a> {
-    /// PMS's selection (`Stream.selected` on a stream that is NOT the file's `default`). It may be
-    /// a manual pick OR PMS's automatic account-language pick; the wire cannot distinguish them.
+    /// The server's selection (`Stream.selected` on a stream that is NOT the file's `default`). It
+    /// may be a manual pick OR the server's automatic account-language pick; the wire cannot
+    /// distinguish them.
     Selection(usize),
     /// A Plex language preference the item has a track in.
     Language(&'a str),
@@ -884,21 +887,22 @@ enum AudioIntent<'a> {
     FileDefault,
 }
 
-/// Order: a PMS per-part selection > the Plex language preferences in [`AudioLangPrefs`] order (a
-/// preference with no track in it is left out) > the file's default. A path that cannot carry an
-/// entry moves on to the NEXT one — a French DTS pick with no direct-playable French sibling
+/// Order: a server per-part selection > the Plex language preferences in [`AudioLangPrefs`] order
+/// (a preference with no track in it is left out) > the file's default. A path that cannot carry
+/// an entry moves on to the NEXT one — a French DTS pick with no direct-playable French sibling
 /// falls to the show's language before the file's default, not straight to the default.
 ///
-/// A selection must differ from the file's `default` flag, because PMS reports a selected AUDIO
-/// stream on essentially every part. Live measurement also shows PMS applying the requesting
-/// profile's `defaultAudioLanguage` to `Stream.selected`: that auto-choice and a manual choice are
-/// indistinguishable, so a selected non-default stream deliberately outranks the show preference.
-/// A selected stream that is ALSO the file default carries no extra intent and resolves through
-/// [`AudioIntent::FileDefault`] unless a more specific readable preference points elsewhere.
+/// A selection must differ from the file's `default` flag, because the server reports a selected
+/// AUDIO stream on essentially every part. Live measurement also shows the server applying
+/// the requesting profile's `defaultAudioLanguage` to `Stream.selected`: that auto-choice and
+/// a manual choice are indistinguishable, so a selected non-default stream deliberately outranks
+/// the show preference. A selected stream that is ALSO the file default carries no extra intent and
+/// resolves through [`AudioIntent::FileDefault`] unless a more specific readable preference points
+/// elsewhere.
 ///
-/// A PMS selection ranks first whatever its codec: the paths differ only in how they CARRY it (direct play
-/// takes a direct-playable sibling in its language, a re-encode encodes the track itself). A
-/// preference below it therefore never wins just because the pick is a DTS.
+/// A server selection ranks first whatever its codec: the paths differ only in how they CARRY it
+/// (direct play takes a direct-playable sibling in its language, a re-encode encodes the track
+/// itself). A preference below it therefore never wins just because the pick is a DTS.
 fn audio_intents<'a>(tracks: &[crate::metadata::Stream], prefs: AudioLangPrefs<'a>) -> Vec<AudioIntent<'a>> {
     let selection = tracks.iter().position(|s| s.selected && !s.default)
         .map(AudioIntent::Selection);
@@ -1039,7 +1043,7 @@ fn pick_dp_audio_eligible(
         return Some(pick(i));
     }
     if !tracks.iter().any(|s| s.default) {
-        // Once PMS supplied tracks, their concrete channel count outranks the codec-only
+        // Once the server supplied tracks, their concrete channel count outranks the codec-only
         // Media default. Never erase a known 8-channel refusal by rechecking it as unknown/0.
         if let Some(i) = tracks.iter().position(|s| s.codec.eq_ignore_ascii_case(default_acodec) && dp_at(s)) {
             return Some(pick(i));
@@ -1081,14 +1085,15 @@ fn embedded_subtitle_renderable(codec: &str) -> bool {
 /// This is the read-back half of `put_selection`: we have always written the user's pick to
 /// `/library/parts/…` and never consulted the one already there, so a subtitle enabled from Plex
 /// Web or a phone was dropped on the floor at every play. The ordinal is
-/// `metadata::sub_render_ordinal`, i.e. the SAME identifier space the track menu commits and the
-/// demuxer enumerates (embedded streams only, sorted on PMS `Stream.index`) — not a list position.
+/// `metadata::sub_render_ordinal`, i.e. the SAME identifier space the track menu commits and
+/// the demuxer enumerates (embedded streams only, sorted on the server `Stream.index`) — not a list
+/// position.
 ///
 /// Unlike the audio rung this carries no "is it a real pick?" gate, because subtitles do have a
 /// "nothing selected" state and use it: probed against the live server, parts carrying a
 /// `default`-flagged subtitle come back with no selection at all, so a selection is a choice even
 /// when it lands on the container default. The case that would blur it is an ACCOUNT-level
-/// subtitle mode (always-show / auto-select forced), which makes PMS select a stream nobody
+/// subtitle mode (always-show / auto-select forced), which makes the server select a stream nobody
 /// picked on this part — subtitles would then come up on every direct play of a foreign-audio
 /// item. That is self-correcting (turning them off PUTs `subtitleStreamID=0`, which is a real
 /// per-part override) and it is arguably the account setting working, but if it ever needs
@@ -1174,13 +1179,13 @@ pub(super) fn direct_play_policy(mode: DirectPlayMode, policy: crate::playback::
 /// Dolby Vision layering must ALL clear what this device and this pipeline can actually show.
 ///
 /// The codec half: h264 unconditionally (every webOS SoC decodes it), hevc only when the table
-/// lists the decoder — anything else the pipeline cannot feed at all. The resolution half is the
-/// local agreement with the profile's `*`-scoped `video.width`/`video.height` limitation: the
-/// profile makes PMS transcode a 4K source down for a 1080p-bounded SoC, but when `/decision` is
-/// unreachable the fallback never asks PMS, so without this test a 4K file with one
-/// direct-playable audio track was fed verbatim to a decoder whose table says 1920x1088 — the
-/// wrong-side failure devcaps' own doc names (issue #22's over-claim class), invisible on the
-/// dev TV, whose bound is 4096x2176.
+/// lists the decoder — anything else the pipeline cannot feed at all. The resolution half is
+/// the local agreement with the profile's `*`-scoped `video.width`/`video.height` limitation:
+/// the profile makes the server transcode a 4K source down for a 1080p-bounded SoC, but when
+/// `/decision` is unreachable the fallback never asks the server, so without this test a 4K file
+/// with one direct-playable audio track was fed verbatim to a decoder whose table says 1920x1088 —
+/// the wrong-side failure devcaps' own doc names (issue #22's over-claim class), invisible on
+/// the dev TV, whose bound is 4096x2176.
 ///
 /// **The Dolby Vision half is the same shape of bug, found the same way, and it is NOT about the
 /// decoder.** Every profile's base layer is ordinary HEVC and every one of them decodes here — so
@@ -1200,21 +1205,21 @@ pub(super) fn direct_play_policy(mode: DirectPlayMode, policy: crate::playback::
 /// [`Dovi::presentation`] — instead of being a coincidence between two functions.
 ///
 /// **Refusing here is only half the work, and the other half is not in this function.** A refusal
-/// sends the item down the transcode branch — but that branch's query grants PMS `directStream=1`,
-/// permission to COPY the video rather than encode it, and the server takes it whenever the source
-/// fits the caps: resolution, bitrate, and the profile's own limitation axes. None of those can say
-/// "Dolby Vision", so a refused Profile 5 came back `Part.decision=transcode` with the video's own
-/// decision `copy` — the same bitstream, the same wrong colours, one container down. `build_stream`
-/// therefore also sets [`crate::playback::EncodeContract::no_video_copy`], off `base_layer_unusable` and
-/// never off this gate: a COPY carries no declaration, so it stays wrong even for a profile we are
-/// happy to direct-play. That was measured against a real server rather than read from a spec: it
-/// answered with a copy decision and the bitstream unchanged. A server that cannot encode the
-/// result is then allowed to say so —
-/// this PMS answers general code 2000, *"File is unplayable. DoVi (Profile 5) color space is not
-/// supported."*, which [`DvPresentation::Refuse`] turns into the player's read-out. A read-out that
-/// names the reason is the honest end of that road; a picture in the wrong colours is not.
+/// sends the item down the transcode branch — but that branch's query grants the server
+/// `directStream=1`, permission to COPY the video rather than encode it, and the server takes it
+/// whenever the source fits the caps: resolution, bitrate, and the profile's own limitation axes.
+/// None of those can say "Dolby Vision", so a refused Profile 5 came back `Part.decision=transcode`
+/// with the video's own decision `copy` — the same bitstream, the same wrong colours, one container
+/// down. `build_stream` therefore also sets [`crate::playback::EncodeContract::no_video_copy`], off
+/// `base_layer_unusable` and never off this gate: a COPY carries no declaration, so it stays wrong
+/// even for a profile we are happy to direct-play. That was measured against a real server rather
+/// than read from a spec: it answered with a copy decision and the bitstream unchanged. A server
+/// that cannot encode the result is then allowed to say so — this server answers general code 2000,
+/// *"File is unplayable. DoVi (Profile 5) color space is not supported."*,
+/// which [`DvPresentation::Refuse`] turns into the player's read-out. A read-out that names
+/// the reason is the honest end of that road; a picture in the wrong colours is not.
 ///
-/// Unknown dimensions (0) PASS: PMS omitting a Media attribute is not evidence of 4K, and
+/// Unknown dimensions (0) PASS: the server omitting a Media attribute is not evidence of 4K, and
 /// failing open is yesterday's behavior for every file the server never measured — the same
 /// misread-degrades-to-assumed rule `devcaps::parse` applies, and `Dovi` applies it too.
 pub(super) fn video_direct_plays(
@@ -1296,7 +1301,7 @@ pub(crate) fn playback_preview_of(
 /// old mkv-only gate was measured obsolete on-device 2026-08-11). Other containers (mov/avi/…)
 /// are sent to Plex for a container remux instead of direct-play. Matches the container
 /// extension in the part-key filename; the m4v spelling is the same mov demuxer and the same
-/// `container=mp4` in PMS metadata.
+/// `container=mp4` in the server metadata.
 /// The Jellyfin flavor's whole resolve, the twin of [`build_stream`] below: no plex.tv
 /// PlayQueue, no MDE handshake, one server by construction. Direct play streams the raw file;
 /// anything else asks the server's transcoder with this set's pinned profile (H264/AAC in

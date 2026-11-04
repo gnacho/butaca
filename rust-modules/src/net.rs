@@ -2,11 +2,11 @@
 //! at runtime by the candidate list below (nothing is linked, and `stub/` — which this line named
 //! for months after it was deleted — is gone). The plain-HTTP socket in [`crate::stream`] can
 //! resolve names now, but it still cannot do TLS; this fills that gap. Every call is
-//! **blocking**, so callers must run it off the SDL main loop (the account and PMS workers).
+//! **blocking**, so callers must run it off the SDL main loop (the account and the server workers).
 //!
 //! **It is no longer the plex.tv transport alone**, and that line stood here while it was becoming
-//! untrue. A PMS reached over the public internet is an `https://…plex.direct` origin — a NAME,
-//! because that is what the certificate is issued for — so the whole PMS control plane comes
+//! untrue. A server reached over the public internet is an `https://…plex.direct` origin — a NAME,
+//! because that is what the certificate is issued for — so the whole server control plane comes
 //! through here too whenever the origin is TLS. `crate::http` is the door that decides which of
 //! the two transports a request takes; this module is only ever the https half of it. Direct
 //! callers are `server::account` and auth's public headerless QR-image fetch. It goes through
@@ -155,7 +155,7 @@ const CURLVERSION_FIRST: c_int = 0;
 const CURL_VERSION_ASYNCHDNS: c_int = 1 << 7;
 
 /// Is libcurl resolved? False on a device with no libcurl this app can bind, which means no
-/// plex.tv account calls or HTTPS PMS control — but a running app, and a log line saying why.
+/// plex.tv account calls or HTTPS server control — but a running app, and a log line saying why.
 static CURL_OK: AtomicBool = AtomicBool::new(false);
 
 /// Whether two threads may enter distinct curl handles concurrently. The media multi transport
@@ -548,7 +548,7 @@ pub fn refuses_identity(status: u16) -> bool {
 }
 
 /// Shared capped geometric delay. Neutral retry-ladder helper (formerly `server::account`'s);
-/// `pms.rs`'s hub-retry backoff is its one live consumer.
+/// `catalog.rs`'s hub-retry backoff is its one live consumer.
 pub(crate) fn backoff(misses: u32, base: Duration, ceiling: Duration) -> Duration {
     let factor = 1u32.checked_shl(misses.min(30)).unwrap_or(u32::MAX);
     base.checked_mul(factor).unwrap_or(ceiling).min(ceiling)
@@ -635,7 +635,7 @@ pub const API: Timeouts = Timeouts {
     low_speed_s: 0,
 };
 
-/// The deadlines for a PMS body whose size is content-dependent (library JSON, artwork, sidecar
+/// The deadlines for a server body whose size is content-dependent (library JSON, artwork, sidecar
 /// subtitles). A connect normally costs at most 8 s and fewer than one byte per second for 30 s
 /// ends a stalled transfer, but a healthy transfer has no wall-clock guillotine:
 /// `CURLOPT_TIMEOUT=0` is libcurl's documented disabled value. The bulk transport that read
@@ -782,7 +782,7 @@ pub(crate) mod test_ca_bundle {
 /// Making them variants means the compiler enforces what a comment used to ask for.
 pub(crate) enum Tls<'a> {
     /// CA-verified against **the television's own trust store**. The default, and what every
-    /// plex.tv and PMS call has always used — `request` is exactly this.
+    /// plex.tv and server calls have always used — `request` is exactly this.
     Ca,
     /// CA-verified against **a PEM bundle we ship**, by absolute path. Same verification, different
     /// roots: it exists so a third-party endpoint's CA rotation is not at the mercy of a store
@@ -1172,7 +1172,7 @@ pub(crate) fn tls_verify_why(rc: c_int, verify: Option<c_long>, year: Option<i64
 
 /// [`tls_verify_why`] for a handle whose transfer just failed with `rc`: reads the verify result
 /// only for the two codes that can carry one, so every other failure costs no extra call.
-/// Shared by both TLS clients to the PMS — this module's control plane and `curlio`'s media
+/// Shared by both TLS clients to the server — this module's control plane and `curlio`'s media
 /// plane — because both ride the same firmware OpenSSL and the same wrong clock.
 pub(crate) fn tls_failure_reason(easy: *mut CURL, rc: c_int) -> Option<String> {
     if !matches!(rc, 51 | 60) {
@@ -1294,14 +1294,14 @@ fn shipped_ca_bundle(dir: &std::path::Path) -> Option<String> {
 /// debugging a 400 and guessing at one.
 const TELEMETRY_MAX_REPLY: usize = 4096;
 
-/// Redirect-following HTTPS GET for a PUBLIC, credential-free resource. The QR image fetch is the
-/// only caller: at most five HTTP(S)-only redirects are followed, and an HTTPS request may never
-/// downgrade. Account/PMS requests keep redirects off because replayed headers/URLs carry tokens.
-/// The `nowan` gate shared by the three resolver doors ([`request_tls_result`],
-/// [`crate::curlio`] and [`crate::stream`]): `true` when `/tmp/butaca-nowan` is armed and
-/// `host` is a NAME rather than a literal, i.e. when a dead resolver would have refused it. The
-/// `slow` variant first spends `connect_s`, the budget a worker would have lost waiting on that
-/// resolver. `false` without the trigger, and at compile time without `devtriggers`.
+/// Redirect-following HTTPS GET for a PUBLIC, credential-free resource. The QR image fetch is
+/// the only caller: at most five HTTP(S)-only redirects are followed, and an HTTPS request may
+/// never downgrade. Account/server requests keep redirects off because replayed headers/URLs
+/// carry tokens. The `nowan` gate shared by the three resolver doors ([`request_tls_result`],
+/// [`crate::curlio`] and [`crate::stream`]): `true` when `/tmp/butaca-nowan` is armed and `host` is
+/// a NAME rather than a literal, i.e. when a dead resolver would have refused it. The `slow`
+/// variant first spends `connect_s`, the budget a worker would have lost waiting on that resolver.
+/// `false` without the trigger, and at compile time without `devtriggers`.
 pub(crate) fn refuse_name(host: &str, connect_s: c_long) -> bool {
     let Some(nw) = crate::dev::no_wan() else {
         return false;

@@ -222,11 +222,12 @@ impl TransactionModel {
     /// exists now (`docs/measurements/j3b-deadline.md` §8); closing the gap needs the plant to model
     /// the same stateful transaction rather than substitute a fixed median.
     ///
-    /// **`control_plane_ms: 6` is the FIXTURE SERVER's control plane, not a PMS's.** These captures
-    /// come from the synthetic pipeline tier, where `tests/serve_fixtures.py` answers a playlist off
-    /// local disk. A real PMS is 13-18 ms warm (`docs/measurements/p2h-pms-ladder.md` §5) and can be
-    /// far worse cold. So a simulation run on this model understates the control plane of a
-    /// deployment by roughly 2-3x, and any conclusion that turns on transaction cost has to say so.
+    /// **`control_plane_ms: 6` is the FIXTURE SERVER's control plane, not a server's.** These
+    /// captures come from the synthetic pipeline tier, where `tests/serve_fixtures.py` answers
+    /// a playlist off local disk. A real server is 13-18 ms warm
+    /// (`docs/measurements/p2h-catalog-ladder.md` §5) and can be far worse cold. So a simulation
+    /// run on this model understates the control plane of a deployment by roughly 2-3x, and
+    /// any conclusion that turns on transaction cost has to say so.
     pub(super) fn measured() -> Self {
         Self {
             up_commit: Some(TransactionCost {
@@ -266,7 +267,7 @@ pub(super) struct Plant {
     pub(super) audio_queue_bytes: u64,
     pub(super) video_lead_ms: i64,
     pub(super) audio_lead_ms: i64,
-    /// Content duration of one segment, ms. The client asks PMS for 2 s.
+    /// Content duration of one segment, ms. The client asks the server for 2 s.
     pub(super) segment_ms: i64,
 }
 

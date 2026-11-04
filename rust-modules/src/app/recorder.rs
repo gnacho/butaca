@@ -56,7 +56,7 @@
 //! Arming is at boot only (`Writer::open` refuses any other frame). The directory is the runtime
 //! root's `butaca-recordings/latest` (not `butaca-rec/`, which is the trigger FILE's own
 //! name) — private, gitignored, refused by the outbound guard; a
-//! committed fixture uses the full synthetic initializer and `tests/mock_pms.py`, then passes
+//! committed fixture uses the full synthetic initializer and `tests/mock_server.py`, then passes
 //! `tools/butaca-rec`'s closed alphabet and the actual replay gate. This is not all-domain or
 //! cross-target AppInit acceptance.
 #![allow(clippy::too_many_arguments)]
@@ -115,7 +115,7 @@ impl LogicalState for AppInit {
 /// session and adapter initial conditions still need to join this before closed replay is wired.
 struct RecordedInit<'a> {
     app: &'a AppInit,
-    hubs: &'a crate::pms::initial::Initial,
+    hubs: &'a crate::catalog::initial::Initial,
 }
 
 impl LogicalState for RecordedInit<'_> {
@@ -123,7 +123,7 @@ impl LogicalState for RecordedInit<'_> {
     fn probe(&self, out: &mut String) { self.app.probe(out); }
 }
 
-impl crate::pms::initial::Sink for Canon {
+impl crate::catalog::initial::Sink for Canon {
     fn u32(&mut self, v: u32) { Canon::u32(self, v); }
     fn u64(&mut self, v: u64) { Canon::u64(self, v); }
     fn boolean(&mut self, v: bool) { Canon::bool(self, v); }
@@ -131,8 +131,8 @@ impl crate::pms::initial::Sink for Canon {
 }
 
 #[cfg(test)]
-fn initial_header(app: &AppInit, state: &crate::pms::PmsState, adapter: &crate::pms::PmsAdapter) -> Header {
-    let hubs = crate::pms::initial::Initial::capture(state, adapter);
+fn initial_header(app: &AppInit, state: &crate::catalog::CatalogState, adapter: &crate::catalog::CatalogAdapter) -> Header {
+    let hubs = crate::catalog::initial::Initial::capture(state, adapter);
     let mut header = Header::new(state_fp(), &RecordedInit { app, hubs: &hubs });
     header.init_data = json!({"app": app, "hubs": hubs});
     header
@@ -143,7 +143,7 @@ fn initial_header(app: &AppInit, state: &crate::pms::PmsState, adapter: &crate::
 /// screen is added to (§0 criterion 5: a conversion touches `screens/<name>.rs`, the registry,
 /// `dev/scenarios.rs` and `tests/manifest.json` and nothing else, and this file used to be a
 /// fifth). These are what is left: the press machine, the input state, the frame line, the
-/// container tree, the cached Session digest, the return state, the recorded PMS fixtures and
+/// container tree, the cached Session digest, the return state, the recorded server fixtures and
 /// the app's own still-coarse init.
 ///
 /// Pinned by `the_app_shape_census_is_pinned` below, which does NOT move when a screen lands —
@@ -155,8 +155,8 @@ const APP_SHAPES: &[&str] = &[
     "AppFrameV4{route:str,overlay:str,focus:str,tree:u64,session:u64,initial:u64}",
     crate::ui::containers::STATE_SHAPE,
     crate::ui::screen::RETURN_STATE_SHAPE,
-    crate::pms::record::SHAPE,
-    crate::pms::initial::SHAPE,
+    crate::catalog::record::SHAPE,
+    crate::catalog::initial::SHAPE,
     AppInit::SHAPE,
     super::bootstrap::SHAPE,
     super::bootstrap::ADMISSION_SHAPE,
@@ -443,7 +443,7 @@ pub(crate) fn validate_controlled(recording: &Recording, initial: &super::bootst
                     result
                 }
                 Some("hubs") => (crate::stores::StoreId::Hubs,
-                    crate::pms::record::validate_binding(envelope.payload, initial.recorded_client())?),
+                    crate::catalog::record::validate_binding(envelope.payload, initial.recorded_client())?),
                 Some("discovery") => (crate::stores::StoreId::Browse,
                     crate::browse::record::validate_binding(envelope.payload, initial.recorded_client())?),
                 _ => return Err("unsupported controlled result family"),
@@ -614,7 +614,7 @@ impl crate::ui::dispatch::Tap<super::bridge::AppHost> for Recplay {
     fn result(&mut self, _frame: u64, addr: &crate::ui::machine::Addr, msg: &crate::screens::registry::AppMsg) {
         if let Self::Replaying(replay) = self {
             let payload = match msg {
-                crate::screens::registry::AppMsg::HubsResult(result) => Some(crate::pms::record::encode(result)),
+                crate::screens::registry::AppMsg::HubsResult(result) => Some(crate::catalog::record::encode(result)),
                 crate::screens::registry::AppMsg::Store(crate::stores::StoreCmd::Browse(
                     crate::stores::browse::BrowseCmd::Discovery(result))) => Some(crate::browse::record::encode(result)),
                 _ => None,
@@ -638,7 +638,7 @@ impl crate::ui::dispatch::Tap<super::bridge::AppHost> for Recplay {
         }
         let Self::Recording(rec) = self else { return };
         let payload = match msg {
-            crate::screens::registry::AppMsg::HubsResult(result) => crate::pms::record::encode(result),
+            crate::screens::registry::AppMsg::HubsResult(result) => crate::catalog::record::encode(result),
             crate::screens::registry::AppMsg::Store(crate::stores::StoreCmd::Browse(
                 crate::stores::browse::BrowseCmd::Discovery(result))) => crate::browse::record::encode(result),
             _ => { self.refuse("unsupported adapter result"); return; },
@@ -938,7 +938,7 @@ impl Recplay {
                 crate::screens::registry::AppMsg::Store(crate::stores::StoreCmd::Browse(
                     crate::stores::browse::BrowseCmd::Discovery(result)))
             } else {
-                let result = crate::pms::record::decode(envelope.payload)?;
+                let result = crate::catalog::record::decode(envelope.payload)?;
                 if result.request_id() != envelope.req { return Err("result request mismatch"); }
                 crate::screens::registry::AppMsg::HubsResult(result)
             };
@@ -2081,18 +2081,18 @@ mod tests {
     #[test]
     fn recording_header_contains_home_boot_contents_and_hashes_hidden_state() {
         let _guard = crate::testlock::serial();
-        let mut state = crate::pms::PmsState::default();
-        let adapter = std::sync::Arc::new(crate::pms::PmsAdapter::default());
-        crate::pms::seed_for_test(&mut state, &adapter, 2, crate::pms::HubState::Ready);
+        let mut state = crate::catalog::CatalogState::default();
+        let adapter = std::sync::Arc::new(crate::catalog::CatalogAdapter::default());
+        crate::catalog::seed_for_test(&mut state, &adapter, 2, crate::catalog::HubState::Ready);
         let app = AppInit { route: "home", session: false, servers: 1, consent_asked: 0,
             consent_errors: false, consent_usage: false, seed: 0 };
         let header = initial_header(&app, &state, &adapter);
         assert_eq!(header.init_data["hubs"]["catalog"]["items"].as_array().unwrap().len(), 2);
         let mut data = header.init_data["hubs"].clone();
-        let original: crate::pms::initial::Initial = serde_json::from_value(data.clone()).unwrap();
+        let original: crate::catalog::initial::Initial = serde_json::from_value(data.clone()).unwrap();
         assert_eq!(RecordedInit { app: &app, hubs: &original }.hash(), header.init_hash);
         data["sources"][0]["retry_n"] = json!(123);
-        let changed: crate::pms::initial::Initial = serde_json::from_value(data).unwrap();
+        let changed: crate::catalog::initial::Initial = serde_json::from_value(data).unwrap();
         assert_ne!(RecordedInit { app: &app, hubs: &changed }.hash(), header.init_hash);
     }
 
@@ -2102,15 +2102,15 @@ mod tests {
         use crate::ui::machine::{Addr, MachineId, RequestId};
         use crate::screens::registry::AppMsg;
         let _guard = crate::testlock::serial();
-        let mut state = crate::pms::PmsState::default();
-        let adapter = std::sync::Arc::new(crate::pms::PmsAdapter::default());
-        crate::pms::seed_for_test(&mut state, &adapter, 1, crate::pms::HubState::Ready);
-        crate::pms::queue_test_landing(&state, &adapter, Some(2));
-        crate::pms::queue_test_landing(&state, &adapter, Some(3));
-        let results = crate::pms::take_landings(&adapter);
+        let mut state = crate::catalog::CatalogState::default();
+        let adapter = std::sync::Arc::new(crate::catalog::CatalogAdapter::default());
+        crate::catalog::seed_for_test(&mut state, &adapter, 1, crate::catalog::HubState::Ready);
+        crate::catalog::queue_test_landing(&state, &adapter, Some(2));
+        crate::catalog::queue_test_landing(&state, &adapter, Some(3));
+        let results = crate::catalog::take_landings(&adapter);
         let addr = Addr { to: MachineId::Store(crate::stores::StoreId::Hubs.ord()), req: RequestId(results[0].request_id()) };
         let expected: Vec<_> = results.iter().map(|r| json!({ "f": 0, "t": "async",
-            "to": machine_name(addr.to), "req": addr.req.0, "payload": crate::pms::record::encode(r) })).collect();
+            "to": machine_name(addr.to), "req": addr.req.0, "payload": crate::catalog::record::encode(r) })).collect();
         let boot = |expected: Vec<Value>| {
             let init = AppInit { route: "home", session: false, servers: 1, consent_asked: 0,
                 consent_errors: false, consent_usage: false, seed: 0 };
@@ -2131,7 +2131,7 @@ mod tests {
         for ((got_addr, msg), expected) in decoded.iter().zip(&expected) {
             assert_eq!(*got_addr, addr);
             let AppMsg::HubsResult(result) = msg else { unreachable!() };
-            assert_eq!(crate::pms::record::encode(result), expected["payload"]);
+            assert_eq!(crate::catalog::record::encode(result), expected["payload"]);
         }
         for (key, value) in [("f", json!(1)), ("t", json!("in")), ("to", json!("store:4")),
             ("req", json!(addr.req.0 + 1)), ("unknown", json!(true)), ("payload", json!({}))] {
@@ -2196,7 +2196,7 @@ mod tests {
         rig.seed_registered_browse_for_test([own, shared]);
         assert!(!rig.browse_directory().sections().is_empty(),
             "a Bridge Hubs landing fixture requires its retained Browse bootstrap");
-        rig.seed_hubs_for_directory_test(own, 1, crate::pms::HubState::Ready);
+        rig.seed_hubs_for_directory_test(own, 1, crate::catalog::HubState::Ready);
         let init = AppInit { route: "home", session: false, servers: 1, consent_asked: 0,
             consent_errors: false, consent_usage: false, seed: 0 };
         let sink = crate::ui::rec::MemSink::default();
@@ -2218,7 +2218,7 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0]["req"], request);
         assert_eq!(results[0]["to"], "store:1");
-        let decoded = crate::pms::record::decode(results[0]["payload"].clone()).unwrap();
+        let decoded = crate::catalog::record::decode(results[0]["payload"].clone()).unwrap();
         assert_eq!(decoded.request_id(), request);
         assert_eq!(results[0]["payload"]["build"]["shelves"][0]["items"].as_array().unwrap().len(), 3);
         for event in ["mount", "enter"] {
@@ -2375,7 +2375,7 @@ mod tests {
     fn a_hubs_landing_is_delivered_on_its_recorded_frame_during_replay() {
         let _guard = crate::testlock::serial();
         let mut rig = super::super::bridge::Bridge::for_test(|| 0);
-        rig.seed_hubs_for_test(1, crate::pms::HubState::Ready);
+        rig.seed_hubs_for_test(1, crate::catalog::HubState::Ready);
         let _ = rig.take_hubs_results_for_test();
         // a recording in which Hubs landed on FRAME 2 and nowhere else
         let manifest = format!(r#"{{"schema": {}, "state_fp": {}}}"#, crate::ui::rec::SCHEMA, state_fp());
@@ -2403,7 +2403,7 @@ mod tests {
     fn a_hubs_landing_the_recording_never_saw_is_delivered_at_once_and_counted() {
         let _guard = crate::testlock::serial();
         let mut rig = super::super::bridge::Bridge::for_test(|| 0);
-        rig.seed_hubs_for_test(1, crate::pms::HubState::Ready);
+        rig.seed_hubs_for_test(1, crate::catalog::HubState::Ready);
         let _ = rig.take_hubs_results_for_test();
         rig.landgate().arm_replay(vec![]);
         rig.queue_hubs_landing_for_test(Some(4));

@@ -62,10 +62,10 @@ impl BufferSnapshot {
 /// **Can the SERVER keep up** — the resource constraint that is not the network.
 ///
 /// `ratio_pm` is per-mille of segment acquisition time over content duration, so 1000 is exactly
-/// real time: below it PMS is running ahead of playback, above it the encoder is losing ground
-/// whatever the link does. The two constraints have to be separate because they move
-/// independently — the measured 4K point costs 4% more bits and 110% more server work — and
-/// because only one of them can be fixed by asking for less picture.
+/// real time: below it the server is running ahead of playback, above it the encoder is losing
+/// ground whatever the link does. The two constraints have to be separate because they move
+/// independently — the measured 4K point costs 4% more bits and 110% more server work — and because
+/// only one of them can be fixed by asking for less picture.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ProductionEstimate {
     pub(crate) ratio_pm: u32,

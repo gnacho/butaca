@@ -148,7 +148,7 @@ fn snapshot_pins(directory: DirectoryView<'_>) -> Vec<(usize, bool)> {
 
 impl OnboardScreen {
     /// First run's page.
-    pub(crate) fn first_run(entry: EntryId, directory: DirectoryView<'_>, hubs: crate::pms::HubsView<'_>) -> Self {
+    pub(crate) fn first_run(entry: EntryId, directory: DirectoryView<'_>, hubs: crate::catalog::HubsView<'_>) -> Self {
         Self::new(entry, false, directory, super::family::pre_home_ground(hubs))
     }
     /// The Settings editor.
@@ -776,7 +776,7 @@ mod tests {
     fn the_home_sources_editor_names_one_word_in_both_mountings() {
         use crate::ui::screen::Screen;
         let directory = crate::stores::browse::DirectoryView::empty_for_test();
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog::HubsSnapshot::empty_for_test();
         let first = OnboardScreen::first_run(EntryId(0), directory, hubs_snap.view());
         let inside = OnboardScreen::settings(EntryId(0), directory);
         assert_eq!(Screen::<InnerHost>::name(&first), super::word::ONBOARD);
@@ -898,7 +898,7 @@ mod tests {
         crate::registry::reset_for_test();
         let mut browse = BrowseFixture::new();
         let sid = crate::registry::ServerId::from_raw(0);
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog::HubsSnapshot::empty_for_test();
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
         browse.stores.browse.borrow_mut().queue_discovery_for_test(sid, false);
         let _ = browse.stores.browse_discover_pump();
@@ -989,7 +989,7 @@ mod tests {
     fn the_band_expresses_forward_back_and_commit_as_distinct_states() {
         let _g = crate::testlock::serial();
         let mut browse = BrowseFixture::new();
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog::HubsSnapshot::empty_for_test();
         assert!(
             OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view()).has_band(),
             "first run always offers its commit"
@@ -1028,7 +1028,7 @@ mod tests {
         let _t = TempSession::new("draft");
         let mut browse = BrowseFixture::new();
         browse.seed_pins(&[true, true]);
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog::HubsSnapshot::empty_for_test();
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
 
         s.toggle_row(0, browse.capture());
@@ -1052,7 +1052,7 @@ mod tests {
         // rather than dropping the fresh instance and continuing with the stale one, so the toggle
         // below starts from a draft that matches the live table again rather than from the first
         // draft's already-toggled-off state (which would net the two toggles to a no-op).
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog::HubsSnapshot::empty_for_test();
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
         assert!(browse.pinned(0), "a discarded draft leaves the live pin exactly where BACK found it");
 
@@ -1275,7 +1275,7 @@ mod tests {
         let _g = crate::testlock::serial();
         let mut browse = BrowseFixture::new();
         browse.seed_pins(&[true, false]);
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog::HubsSnapshot::empty_for_test();
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
         assert!(s.draft_rows(browse.capture())[0].pinned, "section 0 starts as the only pinned library");
 
@@ -1302,7 +1302,7 @@ mod tests {
 
         let mut browse = BrowseFixture::new();
         browse.seed_pins(&[true, true]);
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog::HubsSnapshot::empty_for_test();
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
         s.toggle_row(0, browse.capture());
         let (handled, effs) = step_ev(&mut s, &key_back_down(), None, browse.capture());
@@ -1352,7 +1352,7 @@ mod tests {
         // doc is the full account of why the guard exists.
         let _t = TempSession::new("armed-verb");
         let mut browse = BrowseFixture::new();
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog::HubsSnapshot::empty_for_test();
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
         assert_eq!(s.action_kind(browse.capture()), ActionKind::Retry, "nothing discovered yet");
 
@@ -1433,7 +1433,7 @@ mod tests {
         ] {
             let _g = crate::testlock::serial();
             let mut browse = BrowseFixture::new();
-            let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+            let hubs_snap = crate::catalog::HubsSnapshot::empty_for_test();
             let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
             let (handled, effs) = step_ev(&mut s, &default_seat, None, browse.capture());
             assert_eq!(handled, Handled::Yes, "default seat shape: {label}");
@@ -1509,7 +1509,7 @@ mod tests {
         let _g = crate::testlock::serial();
         let _t = TempSession::new("no-library-yet-spinner");
         let mut browse = BrowseFixture::new();
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog::HubsSnapshot::empty_for_test();
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
         assert_eq!(s.table.n_rows(), 0, "a reset browse store starts with no rows");
         let m = crate::ui::fixture::FixtureMeasure;
@@ -1538,7 +1538,7 @@ mod tests {
         // shape — "the skip is honest precisely because it records what the screen was showing
         // rather than deferring the question to a prompt that never comes" — and that skip is
         // BACK's alone; the pill itself must never treat an empty roster as an answered question.
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog::HubsSnapshot::empty_for_test();
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
         let effs = commit_now(&mut s, browse.capture());
         assert!(
@@ -1712,7 +1712,7 @@ mod tests {
         let _g = crate::testlock::serial();
         let mut browse = BrowseFixture::new();
         browse.seed_pins(&[true, true]);
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog::HubsSnapshot::empty_for_test();
         let s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
         let m = crate::ui::fixture::FixtureMeasure;
         let cx = test_cx(&m, None, browse.capture());
@@ -1791,7 +1791,7 @@ mod tests {
         let _g = crate::testlock::serial();
         let mut browse = BrowseFixture::new();
         browse.seed_two_sources();
-        let hubs_snap = crate::pms::HubsSnapshot::empty_for_test();
+        let hubs_snap = crate::catalog::HubsSnapshot::empty_for_test();
         let mut s = OnboardScreen::first_run(EntryId(0), browse.capture(), hubs_snap.view());
         assert_eq!(s.action_kind(browse.capture()), ActionKind::Start, "two sources are seeded");
         s.armed_kind = Some(ActionKind::Start); // stands in for the pill's still-bouncing arm

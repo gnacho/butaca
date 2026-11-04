@@ -52,7 +52,7 @@ const DT_US: u32 = 16_667;
 fn tick(i: u32) -> Tick { Tick { ms: i * 16, dt_us: DT_US } }
 
 fn movie(rk: &str) -> Item {
-    Item::Media(crate::pms::PmsMovie { rk: rk.into(), title: format!("Synthetic {rk}"), ..Default::default() })
+    Item::Media(crate::catalog::CatalogMovie { rk: rk.into(), title: format!("Synthetic {rk}"), ..Default::default() })
 }
 
 /// A shelf of `n` synthetic items, addressed so two shelves never share a result identity.

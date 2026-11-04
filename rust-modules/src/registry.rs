@@ -78,14 +78,14 @@ impl Default for ServerId {
 /// the BACK trail, a play queue — has to compare the PAIR, and they all compare it here so the
 /// answer cannot drift between them.
 ///
-/// [`ServerId::UNSET`] matches only itself, and that is the pre-registry state rather than a
-/// wildcard: a row parsed before any server was installed (and every row a host test builds by
+/// [`ServerId::UNSET`] matches only itself, and that is the pre-registry state rather than
+/// a wildcard: a row parsed before any server was installed (and every row a host test builds by
 /// literal) carries UNSET, so UNSET-vs-UNSET is the single-server app behaving exactly as it did.
 /// UNSET vs a real slot is deliberately NOT a match — a "server unknown" row must not be handed to
 /// a caller asking about a specific machine, because the whole failure this rule exists to stop is
 /// a confident answer about the wrong one. Every such miss degrades safely at its call site (a
-/// catalog miss opens the page off-catalog, a playing-item miss costs one PMS fetch), which is the
-/// property that makes strict equality the safe default here.
+/// catalog miss opens the page off-catalog, a playing-item miss costs one server fetch), which is
+/// the property that makes strict equality the safe default here.
 pub fn same_item(a: (ServerId, &str), b: (ServerId, &str)) -> bool {
     a.0 == b.0 && a.1 == b.1
 }
@@ -99,13 +99,13 @@ static COUNT: AtomicUsize = AtomicUsize::new(0);
 static ACTIVE: AtomicU32 = AtomicU32::new(0);
 /// Monotone epoch of the active roster's identity. It moved when a slot appeared/disappeared or
 /// was re-pointed; nothing moves it today, but cached fan-out stores (`search`, `person`,
-/// `metadata`'s projections, `pms`'s source table) still read it as "the server set has not
+/// `metadata`'s projections, `catalog`'s source table) still read it as "the server set has not
 /// changed", and [`revoke_all`] still bumps it so a sign-out visibly retires whatever a cache
 /// projected.
 static ROSTER_GEN: AtomicU32 = AtomicU32::new(1);
 /// Monotone epoch of the published roster facts — it moved on every description commit, and on
 /// nothing else. Nothing commits descriptions today, so this stays at 1; the caches that key on
-/// it (`pms`'s facts fingerprint, `metadata`'s owner re-stamp) keep reading it unchanged.
+/// it (`catalog`'s facts fingerprint, `metadata`'s owner re-stamp) keep reading it unchanged.
 static FACTS_GEN: AtomicU32 = AtomicU32::new(1);
 /// The first slot that still belongs to the signed-in account. Raised by [`revoke_all`];
 /// everything below it is a credential of an account that has left.

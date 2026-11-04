@@ -246,7 +246,7 @@ fn retired_library_entry_seeds_its_previous_section_card_and_viewport() {
         && matches!(&cursor.at, crate::stores::browse::CursorAt::ItemKey { sid, rk, slot: 19 } if *sid == b_item.sid && rk == &b_item.rk)),
         "outgoing WillLeave must emit B's snapshot before its engine memory is retired");
     // One server now: the old cross-server rating-key-namespace assert has no subject (the
-    // multi-source namespace contract lives on in pms_multi_source_merge_tests). What must
+    // multi-source namespace contract lives on in catalog_multi_source_merge_tests). What must
     // still hold is that A and B each saved under their OWN section address.
     let saved_sections: std::collections::BTreeSet<i64> = saves.0.iter().map(|(t, _)| t.section).collect();
     assert!(saved_sections.len() >= 2, "A and B each saved under their own section");

@@ -12,7 +12,7 @@
 use std::borrow::Cow;
 use std::ffi::CString;
 
-use crate::pms::{HeroRef, HubIdentity, HubRef, HubsView, PmsMovie};
+use crate::catalog::{HeroRef, HubIdentity, HubRef, HubsView, CatalogMovie};
 use crate::stores::hubs::HubsCmd;
 use crate::stores::{StoreCmd, StoreId, StoreWork};
 use crate::ui::card_row::{self, CardRow, RowStyle};
@@ -70,8 +70,8 @@ pub(crate) const STRIP_VIDEOS_ELEM: u32 = crate::ui::dispatch::STRIP_BASE + 5;
 pub(crate) const STRIP_SEARCH_ELEM: u32 = crate::ui::dispatch::STRIP_BASE + 3;
 pub(crate) const STRIP_ACCOUNT_ELEM: u32 = crate::ui::dispatch::STRIP_BASE + 4;
 
-const MAX_HUBS: usize = crate::pms::MAX_SHELVES;
-const MAX_ITEMS: usize = crate::pms::MAX_SHELF_ITEMS;
+const MAX_HUBS: usize = crate::catalog::MAX_SHELVES;
+const MAX_ITEMS: usize = crate::catalog::MAX_SHELF_ITEMS;
 const HERO_FLIP_CD: f32 = 0.35;
 const HERO_AUTO_S: f32 = 8.0;
 const K_SLIDE: f32 = 130.0;
@@ -174,7 +174,7 @@ impl Backdrop {
         &mut self,
         hero: Option<HeroRef<'_>>,
         outgoing: Option<HeroRef<'_>>,
-        grid_item: Option<&PmsMovie>,
+        grid_item: Option<&CatalogMovie>,
         selected: Option<&(crate::registry::ServerId, String)>,
         snap: f32,
         dt: f32,
@@ -510,18 +510,18 @@ impl HomeScreen {
         }
         self.rows = rows;
         self.restored_scroll.retain(|(group, _)| {
-            view.state != crate::pms::HubState::Ready
+            view.state != crate::catalog::HubState::Ready
                 && !self.rows.iter().any(|row| row.group.0 == *group)
         });
         self.projected_generation = Some(view.generation);
         self.reconcile_carousel(view);
     }
 
-    fn identity_of(item: &PmsMovie) -> Option<(crate::registry::ServerId, String)> {
+    fn identity_of(item: &CatalogMovie) -> Option<(crate::registry::ServerId, String)> {
         (!item.rk.is_empty()).then(|| (item.sid, item.rk.clone()))
     }
 
-    fn same_item(item: &PmsMovie, identity: &(crate::registry::ServerId, String)) -> bool {
+    fn same_item(item: &CatalogMovie, identity: &(crate::registry::ServerId, String)) -> bool {
         item.sid == identity.0 && item.rk == identity.1
     }
 
@@ -658,7 +658,7 @@ impl HomeScreen {
         (row < self.rows.len()).then(|| view.hub(row)).flatten()
     }
 
-    fn item_at<'a>(&self, view: HubsView<'a>, row: usize, col: usize) -> Option<&'a PmsMovie> {
+    fn item_at<'a>(&self, view: HubsView<'a>, row: usize, col: usize) -> Option<&'a CatalogMovie> {
         self.hub(view, row)?.items.get(col)
     }
 
@@ -1149,7 +1149,7 @@ impl HomeScreen {
 
     fn draw_hero_actions(
         &self,
-        hero: &PmsMovie,
+        hero: &CatalogMovie,
         env: &Env,
         p: Painter,
         dx: f32,
@@ -1404,7 +1404,7 @@ impl HomeScreen {
         }
     }
 
-    pub(crate) fn hero_item<'a, H: HomeLike>(&self, cx: &Cx<'a, H>) -> Option<&'a PmsMovie> {
+    pub(crate) fn hero_item<'a, H: HomeLike>(&self, cx: &Cx<'a, H>) -> Option<&'a CatalogMovie> {
         self.selected_hero(H::hubs(cx)).map(|h| h.item)
     }
 
@@ -1412,7 +1412,7 @@ impl HomeScreen {
         &self,
         focus: Option<FocusKey<u32>>,
         cx: &Cx<'a, H>,
-    ) -> Option<&'a PmsMovie> {
+    ) -> Option<&'a CatalogMovie> {
         let view = H::hubs(cx);
         match self.focused_loc(focus)? {
             Located::Hero(_) => self.selected_hero(view).map(|h| h.item),
@@ -2176,15 +2176,15 @@ fn status_read(
         return None;
     }
     Some(match view.state {
-        crate::pms::HubState::Loading => {
+        crate::catalog::HubState::Loading => {
             (crate::i18n::msg::browse_home_loading_c(), StatusKind::Working, None)
         }
-        crate::pms::HubState::Failed => (
+        crate::catalog::HubState::Failed => (
             crate::i18n::msg::browse_home_failed_c(),
             StatusKind::Failed,
             Some(crate::i18n::msg::browse_action_retry_c()),
         ),
-        crate::pms::HubState::Ready => (
+        crate::catalog::HubState::Ready => (
             crate::i18n::msg::browse_home_empty_c(),
             StatusKind::Empty,
             Some(crate::i18n::msg::browse_home_refresh_c()),
@@ -2265,7 +2265,7 @@ fn shelf_top_banded(row: usize, band_row: Option<usize>) -> f32 {
     card_row::settled_top(row, band_row, card_row::ROW_PITCH_FIXED)
 }
 
-fn wash_corners(hero: Option<&PmsMovie>, grid: [[f32; 4]; 4], snap: f32) -> [[f32; 4]; 4] {
+fn wash_corners(hero: Option<&CatalogMovie>, grid: [[f32; 4]; 4], snap: f32) -> [[f32; 4]; 4] {
     let hero = hero
         .filter(|m| m.has_blur)
         .map(|m| AmbientWash::keyed(m.blur, HERO_WASH_W))
@@ -2316,7 +2316,7 @@ fn hero_art(tex: (u32, f32, f32), snap: f32, alpha: f32) -> crate::ui::widgets::
         tint: theme::with_a(theme::TINT_WHITE, alpha * (1.0 - snap)),
     }
 }
-fn hero_logo_rk(item: &PmsMovie) -> &str {
+fn hero_logo_rk(item: &CatalogMovie) -> &str {
     if item.kind == 3 && !item.show_rk.is_empty() {
         &item.show_rk
     } else {
@@ -2404,7 +2404,7 @@ fn meta_drawn_w(view: &TextView<'_>, text: &str, width: f32, measure: &dyn Measu
     }
     measure.width_str(text, theme::size::BODY, false).min(width)
 }
-fn hero_content(hero: &PmsMovie, source: &str, p: Painter, dx: f32, measure: &dyn Measure) {
+fn hero_content(hero: &CatalogMovie, source: &str, p: Painter, dx: f32, measure: &dyn Measure) {
     if !on_axis(
         MARGIN_X + dx,
         if source.is_empty() {

@@ -19,7 +19,7 @@ fn fractional_hls_duration_is_rounded_up_as_a_reserve_obligation() {
 }
 
 #[test]
-fn a_terminal_floor_response_cannot_loop_only_because_pms_exceeded_its_box() {
+fn a_terminal_floor_response_cannot_loop_only_because_server_exceeded_its_box() {
     let floor = crate::abr::Proposal {
         rung: crate::abr::Rung::P240,
         direction: Direction::Down,
@@ -216,7 +216,7 @@ fn a_latched_original_switch_preempts_an_unstarted_hls_prime() {
 }
 
 /// Device regression, 2026-09-01: the raw-Part source probe completed with `Recover`, then
-/// PMS returned 404 for every later segment under the shared Streaming Resource.  The old
+/// the server returned 404 for every later segment under the shared Streaming Resource.  The old
 /// loop copied the result into `recover_kbps`, continued, and could publish it only after one
 /// more successful HLS object — an impossible transition on that server.  A fresh verdict is
 /// already on the completed media boundary and must therefore produce `Switch` immediately.

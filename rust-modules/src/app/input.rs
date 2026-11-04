@@ -117,7 +117,7 @@ pub(crate) struct MenuPlayAwait {
 pub(crate) unsafe fn activate_card(
     ps: &mut crate::route::PlaybackSession,
     pa: &mut crate::player::adapter::PlayerAdapter,
-    mm: &crate::pms::PmsMovie,
+    mm: &crate::catalog::CatalogMovie,
     want_play: bool,
     hud_ms: u32,
     mut ret: Option<crate::ui::screen::ReturnState<u32, crate::screens::registry::PageMemory>>,
@@ -126,7 +126,7 @@ pub(crate) unsafe fn activate_card(
     menu_play_await: &mut Option<MenuPlayAwait>,
     now: u32,
 ) {
-    if mm.kind == crate::pms::KIND_COLLECTION {
+    if mm.kind == crate::catalog::KIND_COLLECTION {
         let arg = crate::screens::registry::AppArg::Content(
             collection_content_arg(mm));
         match ret.take() {
@@ -182,7 +182,7 @@ pub(crate) unsafe fn activate_card(
     }
 }
 
-fn collection_content_arg(mm: &crate::pms::PmsMovie) -> crate::screens::registry::ContentArg {
+fn collection_content_arg(mm: &crate::catalog::CatalogMovie) -> crate::screens::registry::ContentArg {
     crate::screens::registry::ContentArg::Collection(crate::collection::CollectionRef::by_rk(
         mm.sid, &mm.rk, mm.sec, &mm.title))
 }
@@ -254,7 +254,7 @@ pub(crate) unsafe fn menu_play_tick(
 /// BLOCKING fetch on the calling thread — and decided play-vs-open on the very next statement.
 /// Run against the pre-fix worktree (base `3100d981`, `activate_card`'s OLD 11-argument
 /// signature, no `menu_play_await`/`now`) with a registered-but-refused test server
-/// (`127.0.0.1:1`, `detail_panel_tests.rs`'s own established pattern — no real PMS involved):
+/// (`127.0.0.1:1`, `detail_panel_tests.rs`'s own established pattern — no real server involved):
 ///
 /// ```text
 /// d7-repro: detail_loading()=false immediately after the press call
@@ -311,7 +311,7 @@ mod activate_card_tests {
         let _cleanup = Cleanup(&mut bridge as *mut _);
         crate::registry::reset_for_test();
         let sid = crate::registry::ServerId::from_raw(0);
-        let mm = crate::pms::PmsMovie { sid, rk: "show-1".into(), kind: 1, ..Default::default() };
+        let mm = crate::catalog::CatalogMovie { sid, rk: "show-1".into(), kind: 1, ..Default::default() };
 
         unsafe {
             activate_card(&mut ps, &mut pa, &mm, true, 1000, None,
@@ -355,8 +355,8 @@ mod activate_card_tests {
         let mut pages = crate::ui::dispatch::Dispatcher::<super::bridge::AppHost>::new();
         let mut bridge = super::bridge::Bridge::for_test(|| 0);
         let mut menu_play_await = None;
-        let collection = crate::pms::PmsMovie { rk: "50001".into(),
-            kind: crate::pms::KIND_COLLECTION, ..Default::default() };
+        let collection = crate::catalog::CatalogMovie { rk: "50001".into(),
+            kind: crate::catalog::KIND_COLLECTION, ..Default::default() };
         unsafe { activate_card(&mut ps, &mut pa, &collection, false, 1000, None,
             &mut pages, &mut bridge, &mut menu_play_await, 0); }
         assert!(pages.has_pending_navigation(), "a collection must queue its own page");
@@ -392,7 +392,7 @@ impl<R: super::playback::PlaybackResources> LiveItemPlayback<'_, R> {
         &mut self,
         ps: &mut crate::route::PlaybackSession,
         pa: &mut crate::player::adapter::PlayerAdapter,
-        item: &crate::pms::PmsMovie,
+        item: &crate::catalog::CatalogMovie,
         pages: &mut crate::ui::dispatch::Dispatcher<super::bridge::AppHost>,
         bridge: &mut super::bridge::Bridge,
     ) {
@@ -507,7 +507,7 @@ pub(super) unsafe fn apply_item_action<R: super::playback::PlaybackResources>(
             // left off. That is why this is NOT the unwatched write, which throws the position
             // away (`viewstate::Write::RemoveFromDeck` -> `JfClient::clear_resume`).
             //
-            // The card leaves the deck on THIS frame (`pms::LocalEdit::LeftTheDeck` — it must
+            // The card leaves the deck on THIS frame (`catalog::LocalEdit::LeftTheDeck` — it must
             // not still sit under the user's cursor after they removed it) and the refetch
             // follows the write. The shelf is sourced from the Continue Watching deck, which is
             // the source this action actually affects.
@@ -531,7 +531,7 @@ pub(super) unsafe fn apply_item_action<R: super::playback::PlaybackResources>(
                 return;
             }
             // **The row the menu was opened ON, not a re-resolve by key.** This used to walk the
-            // HOME hub catalog (`pms::index_of_rk`), which is a lookup that only ever answers for a
+            // HOME hub catalog (`catalog::index_of_rk`), which is a lookup that only ever answers for a
             // card that is on a Home shelf — so on the Library grid, a Search result or a person's
             // filmography the arm found nothing and the press did nothing at all, silently. The
             // panel is about ONE item and captured it when it was presented; `ItemMenuArg`'s row is
@@ -870,7 +870,7 @@ mod unsupported_key_tests {
 pub(crate) fn enter_home_from_onboard(pages: &mut crate::ui::dispatch::Dispatcher<super::bridge::AppHost>) {
     // The consent pair is NOT asked here any more: it is the sign-in's decision, shared by every
     // profile on the account, and is put before the profile picker, which is upstream of this whole step. See `maybe_ask_consent`.
-    // The selection just recorded is an input to Home's merge (`pms::feeds_home`), and the merge
+    // The selection just recorded is an input to Home's merge (`catalog::feeds_home`), and the merge
     // re-runs off `browse`'s section generation — which `apply_pins` (the editor's one commit
     // write) has already bumped. Nothing to kick here; Home builds from the answer on its first
     // frame.

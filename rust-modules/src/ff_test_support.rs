@@ -44,7 +44,7 @@ pub(super) fn dovi_bytes(profile: u8, level: u8, rpu: u8, el: u8, bl: u8, compat
 // (an HttpStream, an AuQueue, two CStrings, three integers) is ordinary Rust. So long as a
 // test stays off `av_*`, the callbacks link and run here exactly as they do on the TV.
 
-/// A loopback PMS stand-in that COUNTS both accepted connections and requests served — the
+/// A loopback server stand-in that COUNTS both accepted connections and requests served — the
 /// observables that matter, since "did the callback go back to the server" is the whole
 /// question and no return value can answer it.
 ///

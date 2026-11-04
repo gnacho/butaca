@@ -32,7 +32,7 @@ impl ShowLangPrefs {
 /// Lenient i64: a JSON integer, a float (truncated), a numeric string, or null → 0. The old
 /// code read every number with `.as_i64().unwrap_or(0)`, degrading a bad value to 0 for THAT
 /// field only. serde's strict i64 would instead fail the WHOLE container parse on a
-/// string-encoded int (PMS does this: e.g. `size:"40"`, `streamType:"2"`), dropping every
+/// string-encoded int (the server does this: e.g. `size:"40"`, `streamType:"2"`), dropping every
 /// item in the response. This keeps one field's-worth of degradation (and actually recovers a
 /// stringy int rather than zeroing it). Applied to every i64 in a parsed DTO.
 pub(crate) fn de_i64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
@@ -42,7 +42,7 @@ pub(crate) fn de_i64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<i64, D::E
         I(i64),
         F(f64),
         S(String),
-        // PMS sends the flag fields (default/selected/forced/…) as JSON booleans on some
+        // The server sends the flag fields (default/selected/forced/…) as JSON booleans on some
         // endpoints (e.g. Stream inside /hubs) and as "1"/"0" strings on others. A missing bool
         // arm here fails the untagged enum → the WHOLE MediaContainer parse fails (blast radius),
         // so accept it: true→1, false→0.
@@ -71,13 +71,13 @@ where
 
 /// Lenient bool: a JSON bool, the `1`/`0` (or `"1"`/`"0"`) forms Plex also uses, or null → false.
 ///
-/// The PMS DTOs above keep their 0/1 flags as `i64` and test `!= 0`, because those fields are read
-/// once, near the wire. This adapter exists for the plex.tv **connection-policy** flags
-/// (`account.rs`'s `httpsRequired`/`publicAddressMatches`/`local`/`relay`/`IPv6`), which are read in
-/// boolean position by `probe.rs` on every candidate: folding the encodings here once beats
+/// The server DTOs above keep their 0/1 flags as `i64` and test `!= 0`, because those fields are
+/// read once, near the wire. This adapter exists for the plex.tv **connection-policy** flags
+/// (`account.rs`'s `httpsRequired`/`publicAddressMatches`/`local`/`relay`/`IPv6`), which are read
+/// in boolean position by `probe.rs` on every candidate: folding the encodings here once beats
 /// spelling `!= 0` at every branch of a policy that has to stay readable to be trusted. Leniency
-/// itself is not optional — plex.tv sends these as real JSON bools today, and a strict `bool` that
-/// meets a `"1"` fails the WHOLE resources parse, which is a silent sign-in failure.
+/// itself is not optional — plex.tv sends these as real JSON bools today, and a strict `bool`
+/// that meets a `"1"` fails the WHOLE resources parse, which is a silent sign-in failure.
 pub(super) fn de_bool<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
     #[derive(Deserialize)]
     #[serde(untagged)]

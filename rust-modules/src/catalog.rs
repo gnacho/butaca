@@ -1,4 +1,4 @@
-//! Plex library fetch/parse into the private catalog (was src/pms.c), read by the UI
+//! Plex library fetch/parse into the private catalog (was src/catalog.c), read by the UI
 //! via the retained publication (`hubs_snapshot()` → `HubsView`) and movie()/hub_item(), plus
 //! urlenc_str (shared by posters/route).
 //! The fetch + JSON parse go through the typed `crate::plex` client (serde DTOs) — no
@@ -7,10 +7,10 @@
 //! **This is the data module `stores::hubs` (`docs/stores-as-machines.md`) is a machine over** —
 //! each production `Bridge` owns a `stores::hubs::HubsStore`, whose `run`/`run_with_directory`
 //! forward each `HubsCmd` variant straight into `request_refetch_hubs`/`request_retry`/`reset`/
-//! `edit_item` here against its own `PmsState`/`Arc<PmsAdapter>`, the same relationship the owned
+//! `edit_item` here against its own `CatalogState`/`Arc<CatalogAdapter>`, the same relationship the owned
 //! `BrowseStore::run` has to Browse commands against its explicit state. **Those forwarding targets
 //! cannot be scoped narrower than `pub(crate)`, and that is a fact about Rust module topology,
-//! not an oversight**: `pms` and `stores` are both top-level children of the crate root, so
+//! not an oversight**: `catalog` and `stores` are both top-level children of the crate root, so
 //! neither is an ancestor of the other, and `pub(in path)` requires `path` to name an ancestor of
 //! the ITEM's own module. There is no visibility keyword that means "visible to `stores::hubs`
 //! and nobody else" for an item defined here. What IS enforceable, and is: (1) anything with no
@@ -21,7 +21,7 @@
 //! state those seeds still share (see `lib.rs::testlock` and D5), which is the runtime half of
 //! the same contract a compile-time visibility keyword cannot express across two sibling
 //! modules. `ci/allow/mutators.txt`'s `# count: 0` already
-//! proves no PRODUCTION line outside `pms`/`stores::hubs` spells the old direct-call form; this
+//! proves no PRODUCTION line outside `catalog`/`stores::hubs` spells the old direct-call form; this
 //! is the part that keyword-level `pub(super)` genuinely cannot add on top of that count.
 use crate::registry::ServerId;
 use std::os::raw::c_int;
@@ -34,7 +34,7 @@ pub(crate) mod initial;
 
 /// Catalog rows Home holds at most, across EVERY source. A hard ceiling on the store the whole
 /// screen indexes into, not a per-server one — see [`allot`] for how the sources divide it.
-const PMS_MAX_MOVIES: usize = 256;
+const MAX_MOVIES: usize = 256;
 
 /// Shelves Home holds at most, across every source — the number of rows the grid can actually
 /// address (the owned Home's `MAX_HUBS` is this constant, so the budget can never quietly stop matching
@@ -66,7 +66,7 @@ const HUB_FETCH_COUNT: i64 = 12;
 /// consumer remains). Fields pub(crate) so the UI / route / player read them directly.
 #[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PmsMovie {
+pub struct CatalogMovie {
     /// WHICH SERVER this row came from. Every other identity on it — `rk`, `show_rk`, `part` — is a
     /// server-local key that a second server reuses from 1 (measured on a household with a shared
     /// server), so the row is only addressable as the PAIR `(sid, rk)`; see
@@ -86,7 +86,7 @@ pub struct PmsMovie {
     pub(crate) dur_ns: i64,
     pub(crate) part: String,
     pub(crate) thumb: String,
-    /// The item's OWN thumb where [`PmsMovie::thumb`] holds a substitute — i.e. an episode's 16:9
+    /// The item's OWN thumb where [`CatalogMovie::thumb`] holds a substitute — i.e. an episode's 16:9
     /// still, empty on everything else. A landscape tile draws this; a portrait card draws `thumb`.
     pub(crate) still: String,
     pub(crate) art: String,
@@ -129,7 +129,7 @@ pub struct PmsMovie {
     pub(crate) child_count: i64,
 }
 
-impl PmsMovie {
+impl CatalogMovie {
     /// Played fraction for the amber resume bar, or None when not in progress — THE one
     /// resume-bar rule, shared by the home shelves and the Library grid (it was copy-pasted
     /// into both screens before), and the definition of `PosterMark::InProgress`.
@@ -153,15 +153,15 @@ impl PmsMovie {
 #[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct HomeCatalog {
-    items: Vec<PmsMovie>,
+    items: Vec<CatalogMovie>,
     hubs: Vec<HubRow>,
     heroes: Vec<HeroSlot>,
 }
 static EMPTY_HOME: LazyLock<Arc<HomeCatalog>> = LazyLock::new(|| Arc::new(HomeCatalog::default()));
 
 /// One Hubs owner's main-thread-only logical state (`docs/stores-as-machines.md`). Production
-/// gains one through `stores::hubs::HubsStore`; the worker-touched half is [`PmsAdapter`].
-pub(crate) struct PmsState {
+/// gains one through `stores::hubs::HubsStore`; the worker-touched half is [`CatalogAdapter`].
+pub(crate) struct CatalogState {
     published: Option<Arc<HomeCatalog>>,
     /// The source table, in display order: our own servers first, then each shared one. Main
     /// thread only, so no lock is needed once this lives per-owner rather than behind a global.
@@ -181,7 +181,7 @@ pub(crate) struct PmsState {
     pub(crate) catalog_gen: u32,
 }
 
-impl Default for PmsState {
+impl Default for CatalogState {
     fn default() -> Self {
         Self {
             published: None,
@@ -196,10 +196,10 @@ impl Default for PmsState {
 }
 
 /// The `Arc`'d worker half of one Hubs owner: the landing mailbox and the request-id minter. A
-/// worker captures a clone of the owning `Bridge`'s `Arc<PmsAdapter>` before it spawns; rotating
+/// worker captures a clone of the owning `Bridge`'s `Arc<CatalogAdapter>` before it spawns; rotating
 /// the store's live `Arc` (on `HubsCmd::Reset`) orphans that clone harmlessly — the old worker can
 /// still land, but only into a mailbox nothing reads any more.
-pub(crate) struct PmsAdapter {
+pub(crate) struct CatalogAdapter {
     results: Mutex<Vec<Landing>>,
     /// Request-id allocation, shared across sources so an addressed Hubs result has a unique
     /// request id even when two servers are both on their first fetch. Per-adapter (not
@@ -208,25 +208,25 @@ pub(crate) struct PmsAdapter {
     next_request: AtomicU32,
 }
 
-impl Default for PmsAdapter {
+impl Default for CatalogAdapter {
     fn default() -> Self {
         Self { results: Mutex::new(Vec::new()), next_request: AtomicU32::new(1) }
     }
 }
 
-fn published_home(state: &PmsState) -> &Arc<HomeCatalog> {
+fn published_home(state: &CatalogState) -> &Arc<HomeCatalog> {
     state.published.as_ref().unwrap_or(&EMPTY_HOME)
 }
 
 #[cfg(test)]
-fn catalog(state: &PmsState) -> &Vec<PmsMovie> {
+fn catalog(state: &CatalogState) -> &Vec<CatalogMovie> {
     &published_home(state).items
 }
 
 /// catalog row `i`, or None. [`commit`] is the one mutation and re-resolves the open surfaces
 /// itself.
 #[cfg(test)]
-pub(crate) fn movie(state: &PmsState, i: usize) -> Option<&PmsMovie> {
+pub(crate) fn movie(state: &CatalogState, i: usize) -> Option<&CatalogMovie> {
     catalog(state).get(i)
 }
 /// Catalog index of the row `(sid, rk)` names, or -1.
@@ -243,7 +243,7 @@ pub(crate) fn movie(state: &PmsState, i: usize) -> Option<&PmsMovie> {
 /// it was opened on (`screens::registry::ItemMenuArg`'s row), because a Library, Search or person-page tile is in no
 /// hub at all and this answered -1 for every one of them.
 #[cfg(test)]
-pub(crate) fn index_of_rk(state: &PmsState, sid: ServerId, rk: &str) -> c_int {
+pub(crate) fn index_of_rk(state: &CatalogState, sid: ServerId, rk: &str) -> c_int {
     catalog(state)
         .iter()
         .position(|m| crate::registry::same_item((m.sid, &m.rk), (sid, rk)))
@@ -279,9 +279,10 @@ struct HubRow {
     title: String,
     hub_id: String, // locale-independent hubIdentifier ("home.continue", "home.movies.recent", …)
     // Provider listing path. Part of an identified hub's identity as well as the fallback when
-    // `hubIdentifier` is absent: PMS reuses one identifier for section-specific Home rows while
-    // publishing distinct keys. Kept verbatim — observed keys carry content-defining query terms
-    // (`type`, `sectionID`, filters/sort), not the parent `/hubs?count=…` request's page size.
+    // `hubIdentifier` is absent: the server reuses one identifier for section-specific Home rows
+    // while publishing distinct keys. Kept verbatim — observed keys carry content-defining query
+    // terms (`type`, `sectionID`, filters/sort), not the parent `/hubs?count=…` request's page
+    // size.
     key: String,
     /// Which SERVER this shelf's items came from, as the owner's handle ("friend") — empty
     /// whenever the row came from the signed-in user's own server, which is every row today.
@@ -297,7 +298,7 @@ struct HubRow {
     start: usize,
     len: usize,
 }
-fn hubs(state: &PmsState) -> &Vec<HubRow> {
+fn hubs(state: &CatalogState) -> &Vec<HubRow> {
     &published_home(state).hubs
 }
 
@@ -329,7 +330,7 @@ pub(crate) struct HubsSnapshot {
     state: HubState,
 }
 
-pub(crate) fn hubs_snapshot(state: &PmsState) -> HubsSnapshot {
+pub(crate) fn hubs_snapshot(state: &CatalogState) -> HubsSnapshot {
     HubsSnapshot {
         data: Arc::clone(published_home(state)),
         generation: state.catalog_gen,
@@ -363,14 +364,14 @@ pub(crate) struct HubRef<'a> {
     pub(crate) identity: Option<HubIdentity<'a>>,
     pub(crate) title: &'a str,
     pub(crate) source: &'a str,
-    pub(crate) items: &'a [PmsMovie],
+    pub(crate) items: &'a [CatalogMovie],
 }
 
-/// Provider identities are tagged: a listing key cannot collide with an identifier that
-/// happens to contain the same bytes. An identifier is scoped by both server and its
-/// provider-published listing key: PMS reuses `home.television.recent` for section-specific rows,
-/// while a cross-section row keeps one key even when its leading item's library changes. Neither
-/// display text, item content nor position participates.
+/// Provider identities are tagged: a listing key cannot collide with an identifier that happens to
+/// contain the same bytes. An identifier is scoped by both server and its provider-published
+/// listing key: the server reuses `home.television.recent` for section-specific rows, while
+/// a cross-section row keeps one key even when its leading item's library changes. Neither display
+/// text, item content nor position participates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum HubIdentity<'a> {
     ContinueWatching,
@@ -388,7 +389,7 @@ fn hero_eligible(hub_id: &str) -> bool {
     hub_id == "home.continue" || hub_id.contains("recent") || hub_id.starts_with("jf.latest.")
 }
 
-fn stable_hub_identity<'a>(row: &'a HubRow, items: &[PmsMovie]) -> Option<HubIdentity<'a>> {
+fn stable_hub_identity<'a>(row: &'a HubRow, items: &[CatalogMovie]) -> Option<HubIdentity<'a>> {
     if row.len == 0 { return None; }
     let sid = items.get(row.start)?.sid;
     if row.hub_id == "home.continue" { Some(HubIdentity::ContinueWatching) }
@@ -401,7 +402,7 @@ fn stable_hub_identity<'a>(row: &'a HubRow, items: &[PmsMovie]) -> Option<HubIde
 
 #[derive(Clone, Copy)]
 pub(crate) struct HeroRef<'a> {
-    pub(crate) item: &'a PmsMovie,
+    pub(crate) item: &'a CatalogMovie,
     pub(crate) source: &'a str,
 }
 
@@ -424,7 +425,7 @@ impl<'a> HubsView<'a> {
 
     /// Server-scoped catalog lookup by `(sid, rk)`, over the retained publication rather than a
     /// global — see [`index_of_rk`]'s doc for why the scan must not compare `rk` alone.
-    pub(crate) fn find(self, sid: ServerId, rk: &str) -> Option<&'a PmsMovie> {
+    pub(crate) fn find(self, sid: ServerId, rk: &str) -> Option<&'a CatalogMovie> {
         self.data.items.iter().find(|m| crate::registry::same_item((m.sid, &m.rk), (sid, rk)))
     }
 }
@@ -453,20 +454,20 @@ fn own_items_first(pool: &mut Vec<HeroSlot>) {
 }
 
 /// number of home hubs
-pub(crate) fn hub_count(state: &PmsState) -> usize {
+pub(crate) fn hub_count(state: &CatalogState) -> usize {
     hubs(state).len()
 }
 /// Item count in hub `i`, read straight off the published catalog. Test-only: production reads
 /// the retained publication ([`HubsView::hub`]), and this is what other modules' store and
 /// dispatcher tests assert a landing with.
 #[cfg(test)]
-pub(crate) fn hub_len(state: &PmsState, i: usize) -> usize {
+pub(crate) fn hub_len(state: &CatalogState, i: usize) -> usize {
     hubs(state).get(i).map(|h| h.len).unwrap_or(0)
 }
 
 /// item `col` of hub `hub`, or None
 #[cfg(test)]
-pub(crate) fn hub_item(state: &PmsState, hub: usize, col: usize) -> Option<&PmsMovie> {
+pub(crate) fn hub_item(state: &CatalogState, hub: usize, col: usize) -> Option<&CatalogMovie> {
     let h = hubs(state).get(hub)?;
     if col < h.len {
         movie(state, h.start + col)
@@ -480,12 +481,12 @@ pub(crate) fn hub_item(state: &PmsState, hub: usize, col: usize) -> Option<&PmsM
 ///
 /// No reconcile call here, and none is owed anywhere: [`commit`] performs the re-selection and the
 /// repaint itself, at the only moment the catalog those surfaces index into actually moves.
-fn request_refetch_hubs_with_scope(state: &mut PmsState, adapter: &Arc<PmsAdapter>, scope: &BrowseScope,
+fn request_refetch_hubs_with_scope(state: &mut CatalogState, adapter: &Arc<CatalogAdapter>, scope: &BrowseScope,
     launch: &mut dyn FnMut(HubRequest) -> bool) {
     // A test reaching this outside `crate::testlock::serial()` races some other module's test — see
     // `lib.rs::testlock`.
     #[cfg(test)]
-    crate::testlock::assert_held("the pms hub catalog (request_refetch_hubs)");
+    crate::testlock::assert_held("the catalog hub catalog (request_refetch_hubs)");
     state.hub_gen = state.hub_gen.wrapping_add(1); // supersede every retry already in flight
     sync_roster_with_scope(state, scope);
     let gen = state.hub_gen;
@@ -527,21 +528,21 @@ pub(crate) enum LocalEdit {
 /// This is one half of a pair and is useless alone: it is what the user SEES, and the refetch the
 /// write's landing kicks is what the server SAYS. Where they disagree the refetch wins, silently.
 #[cfg(test)]
-fn edit_item(state: &mut PmsState, sid: ServerId, rk: &str, edit: LocalEdit) -> bool {
+fn edit_item(state: &mut CatalogState, sid: ServerId, rk: &str, edit: LocalEdit) -> bool {
     edit_item_with_scope(state, sid, rk, edit, &BrowseScope::standalone())
 }
 
 fn edit_item_with_scope(
-    state: &mut PmsState,
+    state: &mut CatalogState,
     sid: ServerId,
     rk: &str,
     edit: LocalEdit,
     scope: &BrowseScope,
 ) -> bool {
-    // Same test-only catalog guard as `request_refetch_hubs` — the catalog is `PmsState`, a
+    // Same test-only catalog guard as `request_refetch_hubs` — the catalog is `CatalogState`, a
     // field of the per-`Bridge` `HubsStore`, not a crate-global; see `lib.rs::testlock` and D5.
     #[cfg(test)]
-    crate::testlock::assert_held("the pms hub catalog (edit_item)");
+    crate::testlock::assert_held("the catalog hub catalog (edit_item)");
     let mut hit = false;
     for s in state.srcs.iter_mut() {
         if let Some(b) = s.last.as_mut() {
@@ -560,7 +561,7 @@ fn edit_item_with_scope(
 /// [`edit_item_with_scope`] on ONE source's projection. Pure — no statics, no I/O — so the rule is
 /// graded on the host rather than inferred from a screenshot.
 fn apply_edit(b: &mut SourceBuild, sid: ServerId, rk: &str, edit: LocalEdit) -> bool {
-    let mine = |m: &PmsMovie| crate::registry::same_item((m.sid, &m.rk), (sid, rk));
+    let mine = |m: &CatalogMovie| crate::registry::same_item((m.sid, &m.rk), (sid, rk));
     match edit {
         LocalEdit::Watched(on) => {
             let mut hit = false;
@@ -588,7 +589,7 @@ fn apply_edit(b: &mut SourceBuild, sid: ServerId, rk: &str, edit: LocalEdit) -> 
 
 /// The three fields one row's watch state is spread over, moved together.
 ///
-/// `resume_ms` goes with them, and it is the half that is easy to miss: [`PmsMovie::resume_frac`]
+/// `resume_ms` goes with them, and it is the half that is easy to miss: [`CatalogMovie::resume_frac`]
 /// takes PRECEDENCE over the watched flag at the mark (`ui::widgets::poster_mark` — a re-watch in
 /// flight outranks a finished item), so a row left holding its old `viewOffset` would wear the
 /// progress bar it had before and show no tick at all — the press would read as having done
@@ -598,14 +599,14 @@ fn apply_edit(b: &mut SourceBuild, sid: ServerId, rk: &str, edit: LocalEdit) -> 
 /// `pub(crate)` because the hub catalog stopped being the only store an optimistic edit reaches:
 /// `browse`, `search` and `person` each hold their own rows and each flips them the same way, and
 /// three copies of "which three fields" is three chances for one of them to leave the resume bar on.
-pub(crate) fn set_watched(m: &mut PmsMovie, on: bool) {
+pub(crate) fn set_watched(m: &mut CatalogMovie, on: bool) {
     m.watched = on;
     m.unwatched = !on;
     m.resume_ms = 0;
 }
 
 /// The catalog/hubs/pool triple the merge produces, before it is committed.
-type HubBuild = (Vec<PmsMovie>, Vec<HubRow>, Vec<HeroSlot>);
+type HubBuild = (Vec<CatalogMovie>, Vec<HubRow>, Vec<HeroSlot>);
 
 // ---- one source's contribution -----------------------------------------------------------------
 
@@ -617,7 +618,7 @@ type HubBuild = (Vec<PmsMovie>, Vec<HubRow>, Vec<HeroSlot>);
 #[serde(deny_unknown_fields)]
 struct CwItem {
     last_viewed_at: i64,
-    m: PmsMovie,
+    m: CatalogMovie,
 }
 
 /// One shelf as a source projected it: rows already parsed, filtered and stamped with the server
@@ -628,7 +629,7 @@ struct Shelf {
     title: String,
     hub_id: String,
     key: String,
-    items: Vec<PmsMovie>,
+    items: Vec<CatalogMovie>,
     /// Every item the hub's listing holds (`server::Hub::total`) — a collection shelf's "· N".
     #[serde(default)]
     total: usize,
@@ -682,7 +683,7 @@ fn fetch_source_jellyfin(c: &'static crate::jellyfin::JfClient, sid: ServerId) -
     // committed above and the Latest shelves below are independent — the same one-shelf
     // isolation the Latest arm documents.
     if let Some(next) = c.next_up_all(HUB_FETCH_COUNT) {
-        let items: Vec<PmsMovie> = next.items.iter().filter_map(keep).collect();
+        let items: Vec<CatalogMovie> = next.items.iter().filter_map(keep).collect();
         if !items.is_empty() {
             out.shelves.push(Shelf {
                 title: crate::i18n::msg::browse_jellyfin_next_up().to_string(),
@@ -708,7 +709,7 @@ fn fetch_source_jellyfin(c: &'static crate::jellyfin::JfClient, sid: ServerId) -
         let Some(latest) = c.latest(&v.id, HUB_FETCH_COUNT) else {
             continue;
         };
-        let items: Vec<PmsMovie> = latest.items.iter().filter_map(keep).collect();
+        let items: Vec<CatalogMovie> = latest.items.iter().filter_map(keep).collect();
         if items.is_empty() {
             continue;
         }
@@ -790,7 +791,7 @@ fn merge_with_scope(srcs: &[Src], scope: &BrowseScope) -> HubBuild {
         .filter_map(|s| s.last.as_ref().map(|b| (s.handle.as_str(), b)))
         .collect();
 
-    let mut new_cat: Vec<PmsMovie> = Vec::new();
+    let mut new_cat: Vec<CatalogMovie> = Vec::new();
     let mut new_hubs: Vec<HubRow> = Vec::new();
     // Parallel to `new_cat`: the HANDLE of the source each row came from. The hero pool is the only
     // reader, and it needs the fact per ITEM rather than per shelf — the merged deck's own `source`
@@ -833,7 +834,7 @@ fn merge_with_scope(srcs: &[Src], scope: &BrowseScope) -> HubBuild {
         .map(|(_, b)| b.shelves.iter().map(|s| s.items.len()).sum())
         .collect();
     let shelves_for = allot(MAX_SHELVES - new_hubs.len(), &shelf_want);
-    let rows_for = allot(PMS_MAX_MOVIES - new_cat.len(), &row_want);
+    let rows_for = allot(MAX_MOVIES - new_cat.len(), &row_want);
 
     for (i, (handle, b)) in live.iter().enumerate() {
         let mut rows_left = rows_for[i];
@@ -1013,7 +1014,7 @@ impl Src {
     }
 }
 
-// The source table and the roster fingerprint (SRCS/SEEN/SEEN_FACTS) live as `PmsState` fields
+// The source table and the roster fingerprint (SRCS/SEEN/SEEN_FACTS) live as `CatalogState` fields
 // now — `state.srcs`/`state.seen`/`state.seen_facts` — rebuilt from the roster by
 // `sync_roster_with_scope`; main-thread only, so no lock is needed.
 
@@ -1072,7 +1073,7 @@ impl Landing {
 }
 
 /// The retained Browse directory's semantic pin fingerprint as of the last merge. The field keeps
-/// its historical name because `pms::initial` records and restores it, but an owner-local section
+/// its historical name because `catalog::initial` records and restores it, but an owner-local section
 /// generation alone aliases independent Browse stores. Zero remains the empty standalone scope.
 /// The backoff ladder's ends. A TV parked on a sleeping server must keep trying — that IS the
 /// feature — without ever becoming a request loop, so the wait doubles from `MIN` to a `MAX`
@@ -1093,11 +1094,11 @@ pub(crate) fn backoff_secs(fails: u32) -> f32 {
 /// case where every one of them failed. That is the whole point of the fold: "Can't reach your Plex
 /// server", drawn because a friend's machine is asleep, is a lie about the library that is working.
 /// No source at all (before the first install) is Loading — nothing to show is not an answer.
-// Only `hubs_snapshot` and this module's own tests read the fold; nothing outside `pms.rs` names
+// Only `hubs_snapshot` and this module's own tests read the fold; nothing outside `catalog.rs` names
 // it, so it stays module-private — the D3 hardening this file's other mutators cannot get (a
 // sibling of `stores`, not a child of it, so `pub(crate)` is the tightest visibility Rust allows
 // them; see the doc above `edit_item`/`reset`/`tick` et al.).
-fn hub_state(state: &PmsState) -> HubState {
+fn hub_state(state: &CatalogState) -> HubState {
     let s = &state.srcs;
     if s.iter().any(|x| x.state == HubState::Ready) {
         HubState::Ready
@@ -1160,7 +1161,7 @@ impl BrowseScope {
 /// library the section table has not enumerated yet, both pass. The pin is a decision about
 /// libraries we know about, and the alternative — hiding what we cannot classify — empties Home on
 /// the frame it boots, which is the same mistake [`feeds_home`] documents one level up.
-fn item_pinned(pins: &[(ServerId, i64, bool)], m: &PmsMovie) -> bool {
+fn item_pinned(pins: &[(ServerId, i64, bool)], m: &CatalogMovie) -> bool {
     if m.sec == 0 {
         return true; // the server said nothing about this row's library
     }
@@ -1215,23 +1216,23 @@ fn roster_key_with_scope(scope: &BrowseScope) -> u64 {
 }
 
 #[cfg(test)]
-fn remember_roster(state: &mut PmsState, scope: &BrowseScope) {
+fn remember_roster(state: &mut CatalogState, scope: &BrowseScope) {
     state.seen = roster_key_with_scope(scope);
 }
 
 #[allow(dead_code)] // Retained for symmetry with `remember_roster`; no production caller today.
-fn forget_roster(state: &mut PmsState) {
+fn forget_roster(state: &mut CatalogState) {
     state.seen = u64::MAX;
 }
 
-fn browse_scope_moved(state: &mut PmsState, scope: &BrowseScope) -> bool {
+fn browse_scope_moved(state: &mut CatalogState, scope: &BrowseScope) -> bool {
     let key = scope.cache_key();
     let moved = state.last_sections_gen != key;
     state.last_sections_gen = key;
     moved
 }
 
-fn adopt_browse_scope(state: &mut PmsState, scope: &BrowseScope) {
+fn adopt_browse_scope(state: &mut CatalogState, scope: &BrowseScope) {
     state.last_sections_gen = scope.cache_key();
 }
 
@@ -1251,11 +1252,11 @@ fn facts_key() -> u32 {
 /// (its state, its backoff, and the build it last answered with), a new one arrives Loading and is
 /// picked up by the next [`pump`], and one that has left takes its shelves with it.
 #[allow(dead_code)] // Standalone Home fixtures have no retained Browse directory.
-fn sync_roster(state: &mut PmsState) {
+fn sync_roster(state: &mut CatalogState) {
     sync_roster_with_scope(state, &BrowseScope::standalone());
 }
 
-fn sync_roster_with_scope(state: &mut PmsState, scope: &BrowseScope) {
+fn sync_roster_with_scope(state: &mut CatalogState, scope: &BrowseScope) {
     let (k, fk) = (roster_key_with_scope(scope), facts_key());
     let scope_moved = browse_scope_moved(state, scope);
     // Both, and both swapped every time: a frame on which only one moved must still record the
@@ -1325,7 +1326,7 @@ fn sync_roster_with_scope(state: &mut PmsState, scope: &BrowseScope) {
 ///
 /// MAIN THREAD, and callers release the [`SRCS`] guard first: the re-selection re-enters this
 /// module ([`index_of_rk`]) to walk the catalog just replaced.
-fn commit(state: &mut PmsState, build: HubBuild) -> c_int {
+fn commit(state: &mut CatalogState, build: HubBuild) -> c_int {
     let (new_cat, new_hubs, new_pool) = build;
     let n = new_cat.len();
     state.published = Some(Arc::new(HomeCatalog { items: new_cat, hubs: new_hubs, heroes: new_pool }));
@@ -1382,7 +1383,7 @@ fn retry_due(s: &mut Src, dt: f32) -> bool {
 /// loop would draw no frames while the loading spinner is supposed to be visible.
 /// Keep request admission/state identical when another adapter holds the request instead of
 /// launching a worker. The returned admission decision still controls latch release/backoff.
-fn kick_with(gen: u32, adapter: &PmsAdapter, s: &mut Src, launch: impl FnOnce(HubRequest) -> bool) {
+fn kick_with(gen: u32, adapter: &CatalogAdapter, s: &mut Src, launch: impl FnOnce(HubRequest) -> bool) {
     if s.fetching {
         return; // one in flight already — its spinner is the honest answer
     }
@@ -1420,7 +1421,7 @@ fn kick_with(gen: u32, adapter: &PmsAdapter, s: &mut Src, launch: impl FnOnce(Hu
 
 /// The live worker adapter. Replay must replace this operation, not skip `begin_request` and
 /// thereby leave its recorded result with no matching in-flight state.
-pub(crate) fn spawn_fetch(adapter: &Arc<PmsAdapter>, request: HubRequest) -> bool {
+pub(crate) fn spawn_fetch(adapter: &Arc<CatalogAdapter>, request: HubRequest) -> bool {
     #[cfg(test)]
     if REFUSE_FETCH_FOR_TEST.with(|flag| flag.get()) { return false; }
     let worker_adapter = Arc::clone(adapter);
@@ -1438,7 +1439,7 @@ thread_local! {
     static REFUSE_FETCH_FOR_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-fn retry_now_with(gen: u32, adapter: &PmsAdapter, s: &mut Src, launch: &mut dyn FnMut(HubRequest) -> bool) {
+fn retry_now_with(gen: u32, adapter: &CatalogAdapter, s: &mut Src, launch: &mut dyn FnMut(HubRequest) -> bool) {
     s.retry_n = 0;
     s.retry_s = 0.0;
     kick_with(gen, adapter, s, launch)
@@ -1447,11 +1448,11 @@ fn retry_now_with(gen: u32, adapter: &PmsAdapter, s: &mut Src, launch: &mut dyn 
 /// The Retry control's kick: try every source again NOW, from the bottom of the ladder — a person
 /// who asks for it should never be made to sit out a 30-second automatic wait. A no-op for any
 /// source whose fetch is already in flight.
-fn request_retry(state: &mut PmsState, adapter: &Arc<PmsAdapter>) {
-    // Same test-only catalog guard as `request_refetch_hubs` — the catalog is `PmsState`, a
+fn request_retry(state: &mut CatalogState, adapter: &Arc<CatalogAdapter>) {
+    // Same test-only catalog guard as `request_refetch_hubs` — the catalog is `CatalogState`, a
     // field of the per-`Bridge` `HubsStore`, not a crate-global; see `lib.rs::testlock` and D5.
     #[cfg(test)]
-    crate::testlock::assert_held("the pms hub catalog (request_retry)");
+    crate::testlock::assert_held("the catalog hub catalog (request_retry)");
     let gen = state.hub_gen;
     let mut srcs = std::mem::take(&mut state.srcs);
     let mut launch = |r| spawn_fetch(adapter, r);
@@ -1462,20 +1463,20 @@ fn request_retry(state: &mut PmsState, adapter: &Arc<PmsAdapter>) {
 }
 
 /// Move the worker mailbox into one owned batch. No source or catalog state changes here.
-pub(crate) fn take_landings(adapter: &PmsAdapter) -> Vec<Landing> {
+pub(crate) fn take_landings(adapter: &CatalogAdapter) -> Vec<Landing> {
     std::mem::take(&mut *adapter.results.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
 /// The owned store's tick never consumes the worker mailbox. Arrivals are delivered separately
 /// by the dispatcher; a worker finishing during its drain belongs to the next frame's ingest.
 pub(crate) fn tick_with_directory(
-    state: &mut PmsState,
-    adapter: &Arc<PmsAdapter>,
+    state: &mut CatalogState,
+    adapter: &Arc<CatalogAdapter>,
     dt: f32,
     directory: crate::stores::browse::DirectoryView<'_>,
 ) {
     #[cfg(test)]
-    crate::testlock::assert_held("the pms hub catalog (owned tick)");
+    crate::testlock::assert_held("the catalog hub catalog (owned tick)");
     let mut launch = |r| spawn_fetch(adapter, r);
     step_landings_with_scope(state, adapter, Some(dt), Vec::new, &BrowseScope::retained(directory),
         &mut launch)
@@ -1483,8 +1484,8 @@ pub(crate) fn tick_with_directory(
 
 /// Apply one addressed landing under the same retained directory policy the frame publishes.
 pub(crate) fn land_with_directory(
-    state: &mut PmsState,
-    adapter: &Arc<PmsAdapter>,
+    state: &mut CatalogState,
+    adapter: &Arc<CatalogAdapter>,
     landing: &Landing,
     directory: crate::stores::browse::DirectoryView<'_>,
 ) -> crate::stores::StoreOutcome {
@@ -1499,7 +1500,7 @@ pub(crate) fn land_with_directory(
 /// the match used to live in `stores/hubs.rs::run`, calling four `pub(crate)` mutators across the
 /// module boundary. Relocating the match here is what lets those four go private.
 #[cfg(test)]
-pub(crate) fn run(state: &mut PmsState, adapter: &Arc<PmsAdapter>, cmd: crate::stores::hubs::HubsCmd) -> crate::stores::StoreOutcome {
+pub(crate) fn run(state: &mut CatalogState, adapter: &Arc<CatalogAdapter>, cmd: crate::stores::hubs::HubsCmd) -> crate::stores::StoreOutcome {
     use crate::stores::hubs::HubsCmd;
     match cmd {
         HubsCmd::RefetchHubs | HubsCmd::Reset =>
@@ -1509,8 +1510,8 @@ pub(crate) fn run(state: &mut PmsState, adapter: &Arc<PmsAdapter>, cmd: crate::s
 }
 
 pub(crate) fn run_with_directory(
-    state: &mut PmsState,
-    adapter: &Arc<PmsAdapter>,
+    state: &mut CatalogState,
+    adapter: &Arc<CatalogAdapter>,
     cmd: crate::stores::hubs::HubsCmd,
     directory: crate::stores::browse::DirectoryView<'_>,
 ) -> crate::stores::StoreOutcome {
@@ -1518,8 +1519,8 @@ pub(crate) fn run_with_directory(
 }
 
 fn run_with_scope(
-    state: &mut PmsState,
-    adapter: &Arc<PmsAdapter>,
+    state: &mut CatalogState,
+    adapter: &Arc<CatalogAdapter>,
     cmd: crate::stores::hubs::HubsCmd,
     scope: &BrowseScope,
 ) -> crate::stores::StoreOutcome {
@@ -1540,7 +1541,7 @@ fn run_with_scope(
     }
 }
 
-fn run_without_browse(state: &mut PmsState, adapter: &Arc<PmsAdapter>, cmd: crate::stores::hubs::HubsCmd) -> crate::stores::StoreOutcome {
+fn run_without_browse(state: &mut CatalogState, adapter: &Arc<CatalogAdapter>, cmd: crate::stores::hubs::HubsCmd) -> crate::stores::StoreOutcome {
     use crate::stores::hubs::HubsCmd;
     match cmd {
         HubsCmd::Retry => {
@@ -1560,18 +1561,18 @@ fn run_without_browse(state: &mut PmsState, adapter: &Arc<PmsAdapter>, cmd: crat
 
 /// Test-only compatibility shape for bootstrap fixtures that do not retain a directory.
 #[cfg(test)]
-pub(crate) fn controlled_work(state: &mut PmsState, adapter: &Arc<PmsAdapter>, cmd: Option<crate::stores::hubs::HubsCmd>, dt: f32,
+pub(crate) fn controlled_work(state: &mut CatalogState, adapter: &Arc<CatalogAdapter>, cmd: Option<crate::stores::hubs::HubsCmd>, dt: f32,
     launch: &mut dyn FnMut(HubRequest) -> bool) -> crate::stores::StoreOutcome {
     controlled_work_with_scope(state, adapter, cmd, dt, &BrowseScope::standalone(), launch)
 }
 
-pub(crate) fn controlled_work_with_directory(state: &mut PmsState, adapter: &Arc<PmsAdapter>, cmd: Option<crate::stores::hubs::HubsCmd>, dt: f32,
+pub(crate) fn controlled_work_with_directory(state: &mut CatalogState, adapter: &Arc<CatalogAdapter>, cmd: Option<crate::stores::hubs::HubsCmd>, dt: f32,
     directory: crate::stores::browse::DirectoryView<'_>,
     launch: &mut dyn FnMut(HubRequest) -> bool) -> crate::stores::StoreOutcome {
     controlled_work_with_scope(state, adapter, cmd, dt, &BrowseScope::retained(directory), launch)
 }
 
-fn controlled_work_with_scope(state: &mut PmsState, adapter: &Arc<PmsAdapter>, cmd: Option<crate::stores::hubs::HubsCmd>, dt: f32,
+fn controlled_work_with_scope(state: &mut CatalogState, adapter: &Arc<CatalogAdapter>, cmd: Option<crate::stores::hubs::HubsCmd>, dt: f32,
     scope: &BrowseScope,
     launch: &mut dyn FnMut(HubRequest) -> bool) -> crate::stores::StoreOutcome {
     use crate::stores::hubs::HubsCmd;
@@ -1596,7 +1597,7 @@ fn controlled_work_with_scope(state: &mut PmsState, adapter: &Arc<PmsAdapter>, c
     crate::stores::StoreOutcome { changed: command || before != state.catalog_gen }
 }
 
-fn step_landings_with_scope(state: &mut PmsState, adapter: &PmsAdapter, dt: Option<f32>, take: impl FnOnce() -> Vec<Landing>,
+fn step_landings_with_scope(state: &mut CatalogState, adapter: &CatalogAdapter, dt: Option<f32>, take: impl FnOnce() -> Vec<Landing>,
     scope: &BrowseScope,
     launch: &mut dyn FnMut(HubRequest) -> bool) {
     sync_roster_with_scope(state, scope);
@@ -1695,10 +1696,10 @@ fn build_test(n: usize) -> SourceBuild {
             hub_id: "home.continue".into(),
             key: String::new(),
             items: (0..n)
-                .map(|i| PmsMovie {
+                .map(|i| CatalogMovie {
                     rk: (i + 1).to_string(),
                     art: "/art".into(),
-                    ..PmsMovie::default()
+                    ..CatalogMovie::default()
                 })
                 .collect(),
             total: 0,
@@ -1710,8 +1711,8 @@ fn build_test(n: usize) -> SourceBuild {
 /// rows in one shelf. Home's read-out is a pure projection of that pair, and the states a host test
 /// cannot reach for real (a live server answering, or refusing) are exactly the ones worth pinning.
 #[cfg(test)]
-pub(crate) fn seed_for_test(state: &mut PmsState, adapter: &Arc<PmsAdapter>, items: usize, hub_state: HubState) {
-    crate::testlock::assert_held("the pms hub catalog (seed_for_test)");
+pub(crate) fn seed_for_test(state: &mut CatalogState, adapter: &Arc<CatalogAdapter>, items: usize, hub_state: HubState) {
+    crate::testlock::assert_held("the catalog hub catalog (seed_for_test)");
     seed_with_scope_for_test(state, adapter, ServerId::UNSET, items, hub_state, &BrowseScope::standalone());
 }
 
@@ -1719,14 +1720,14 @@ pub(crate) fn seed_for_test(state: &mut PmsState, adapter: &Arc<PmsAdapter>, ite
 /// this instead of installing an `UNSET` source that owner-scoped roster reconciliation must drop.
 #[cfg(test)]
 pub(crate) fn seed_for_directory_test(
-    state: &mut PmsState,
-    adapter: &Arc<PmsAdapter>,
+    state: &mut CatalogState,
+    adapter: &Arc<CatalogAdapter>,
     sid: ServerId,
     items: usize,
     hub_state: HubState,
     directory: crate::stores::browse::DirectoryView<'_>,
 ) {
-    crate::testlock::assert_held("the pms hub catalog (seed_for_directory_test)");
+    crate::testlock::assert_held("the catalog hub catalog (seed_for_directory_test)");
     assert!(directory.sections().iter().any(|section| section.sid == Some(sid)),
         "a directory-scoped Hubs fixture requires its server in the retained Browse directory");
     seed_with_scope_for_test(state, adapter, sid, items, hub_state, &BrowseScope::retained(directory));
@@ -1736,17 +1737,17 @@ pub(crate) fn seed_for_directory_test(
 /// in the source projection; the retained directory alone decides which one is published.
 #[cfg(test)]
 pub(crate) fn seed_two_library_home_for_test(
-    state: &mut PmsState,
+    state: &mut CatalogState,
     sid: ServerId,
     directory: crate::stores::browse::DirectoryView<'_>,
 ) {
-    crate::testlock::assert_held("the two-library pms home fixture");
+    crate::testlock::assert_held("the two-library catalog home fixture");
     let sections = directory.sections();
     assert!(
         sections.len() >= 2 && sections[..2].iter().all(|section| section.sid == Some(sid)),
         "the two-library Home fixture requires two sections on its server"
     );
-    let item = |section: &crate::stores::browse::SectionView, rk: &str| PmsMovie {
+    let item = |section: &crate::stores::browse::SectionView, rk: &str| CatalogMovie {
         sid,
         sec: section.key,
         rk: rk.into(),
@@ -1778,7 +1779,7 @@ pub(crate) fn seed_two_library_home_for_test(
 }
 
 #[cfg(test)]
-fn seed_with_scope_for_test(state: &mut PmsState, adapter: &Arc<PmsAdapter>, sid: ServerId, items: usize, hub_state: HubState, scope: &BrowseScope) {
+fn seed_with_scope_for_test(state: &mut CatalogState, adapter: &Arc<CatalogAdapter>, sid: ServerId, items: usize, hub_state: HubState, scope: &BrowseScope) {
     reset_with_scope(state, adapter, scope);
     // The roster credit went with the describers (#166): a fixture source carries no handle.
     let handle = String::new();
@@ -1813,18 +1814,18 @@ fn seed_with_scope_for_test(state: &mut PmsState, adapter: &Arc<PmsAdapter>, sid
 /// Private since D3's follow-up: `app/bridge.rs` and `app/recorder.rs` (nine `#[cfg(test)] mod
 /// tests` call sites between them) were the last two direct callers, both now routed through
 /// `HubsStore::run`/`run_with_directory` (`HubsCmd::Reset`) — `HubsCmd` already had the variant
-/// and `pms::run` already matched it, so closing this was a caller-site swap alone, no new enum
+/// and `catalog::run` already matched it, so closing this was a caller-site swap alone, no new enum
 /// surface.
 #[cfg(test)]
-fn reset(state: &mut PmsState, adapter: &Arc<PmsAdapter>) {
+fn reset(state: &mut CatalogState, adapter: &Arc<CatalogAdapter>) {
     reset_with_scope(state, adapter, &BrowseScope::standalone());
 }
 
-fn reset_with_scope(state: &mut PmsState, adapter: &Arc<PmsAdapter>, scope: &BrowseScope) {
-    // Same test-only catalog guard as `request_refetch_hubs` — the catalog is `PmsState`, a
+fn reset_with_scope(state: &mut CatalogState, adapter: &Arc<CatalogAdapter>, scope: &BrowseScope) {
+    // Same test-only catalog guard as `request_refetch_hubs` — the catalog is `CatalogState`, a
     // field of the per-`Bridge` `HubsStore`, not a crate-global; see `lib.rs::testlock` and D5.
     #[cfg(test)]
-    crate::testlock::assert_held("the pms hub catalog (reset)");
+    crate::testlock::assert_held("the catalog hub catalog (reset)");
     let _ = adapter; // every HubsStore command path rotates before applying `HubsCmd::Reset`
     state.hub_gen = state.hub_gen.wrapping_add(1); // a worker still running belongs to the old identity
     state.srcs = Vec::new();
@@ -1840,8 +1841,8 @@ fn reset_with_scope(state: &mut PmsState, adapter: &Arc<PmsAdapter>, scope: &Bro
 }
 // ---------------------------------------------------------------------------------------
 #[cfg(test)]
-pub(crate) fn queue_test_landing(state: &PmsState, adapter: &PmsAdapter, items: Option<usize>) -> u32 {
-    crate::testlock::assert_held("the pms hub catalog (queue_test_landing)");
+pub(crate) fn queue_test_landing(state: &CatalogState, adapter: &CatalogAdapter, items: Option<usize>) -> u32 {
+    crate::testlock::assert_held("the catalog hub catalog (queue_test_landing)");
     let source = &state.srcs[0];
     let seq = source.seq;
     let landing = Landing {
@@ -1853,8 +1854,8 @@ pub(crate) fn queue_test_landing(state: &PmsState, adapter: &PmsAdapter, items: 
 }
 
 #[cfg(test)]
-pub(crate) fn reverse_test_shelves(state: &mut PmsState) {
-    crate::testlock::assert_held("the pms hub catalog (reverse_test_shelves)");
+pub(crate) fn reverse_test_shelves(state: &mut CatalogState) {
+    crate::testlock::assert_held("the catalog hub catalog (reverse_test_shelves)");
     for source in state.srcs.iter_mut() {
         if let Some(build) = source.last.as_mut() {
             for shelf in &mut build.shelves { shelf.items.reverse(); }
@@ -1865,8 +1866,8 @@ pub(crate) fn reverse_test_shelves(state: &mut PmsState) {
 }
 
 #[cfg(test)]
-pub(crate) fn seed_grid_for_test(state: &mut PmsState, adapter: &Arc<PmsAdapter>, rows: usize, items: usize) {
-    crate::testlock::assert_held("the pms hub catalog (seed_grid_for_test)");
+pub(crate) fn seed_grid_for_test(state: &mut CatalogState, adapter: &Arc<CatalogAdapter>, rows: usize, items: usize) {
+    crate::testlock::assert_held("the catalog hub catalog (seed_grid_for_test)");
     seed_for_test(state, adapter, items, HubState::Ready);
     let source = state.srcs[0].last.as_mut().unwrap();
     source.shelves = (0..rows).map(|row| {
@@ -1879,8 +1880,8 @@ pub(crate) fn seed_grid_for_test(state: &mut PmsState, adapter: &Arc<PmsAdapter>
 }
 
 #[cfg(test)]
-pub(crate) fn reverse_test_hubs(state: &mut PmsState) {
-    crate::testlock::assert_held("the pms hub catalog (reverse_test_hubs)");
+pub(crate) fn reverse_test_hubs(state: &mut CatalogState) {
+    crate::testlock::assert_held("the catalog hub catalog (reverse_test_hubs)");
     for source in state.srcs.iter_mut() {
         if let Some(build) = source.last.as_mut() { build.shelves.reverse(); }
     }
@@ -1889,8 +1890,8 @@ pub(crate) fn reverse_test_hubs(state: &mut PmsState) {
 }
 
 #[cfg(test)]
-pub(crate) fn remove_test_item(state: &mut PmsState, rk: &str) {
-    crate::testlock::assert_held("the pms hub catalog (remove_test_item)");
+pub(crate) fn remove_test_item(state: &mut CatalogState, rk: &str) {
+    crate::testlock::assert_held("the catalog hub catalog (remove_test_item)");
     for source in state.srcs.iter_mut() {
         if let Some(build) = source.last.as_mut() {
             for shelf in &mut build.shelves { shelf.items.retain(|item| item.rk != rk); }
@@ -1901,28 +1902,28 @@ pub(crate) fn remove_test_item(state: &mut PmsState, rk: &str) {
 }
 
 #[cfg(test)]
-#[path = "pms_test_support.rs"]
+#[path = "catalog_test_support.rs"]
 mod test_support;
 
 #[cfg(test)]
-#[path = "pms_catalog_commit_tests.rs"]
+#[path = "catalog_commit_tests.rs"]
 mod catalog_commit_tests;
 
 #[cfg(test)]
-#[path = "pms_local_edit_tests.rs"]
+#[path = "catalog_local_edit_tests.rs"]
 mod local_edit_tests;
 
 #[cfg(test)]
-#[path = "pms_hero_pool_tests.rs"]
+#[path = "catalog_hero_pool_tests.rs"]
 mod hero_pool_tests;
 
 #[cfg(test)]
-#[path = "pms_jellyfin_fetch_tests.rs"]
+#[path = "catalog_jellyfin_fetch_tests.rs"]
 mod jellyfin_fetch_tests;
 
 /// The library's tile abstraction (restructure spec §10) over a catalog row: the one place a
-/// `PmsMovie` becomes a `Tile`, so a widget that draws a tile asks the trait and never this type.
-impl crate::ui::tile::Tile for PmsMovie {
+/// `CatalogMovie` becomes a `Tile`, so a widget that draws a tile asks the trait and never this type.
+impl crate::ui::tile::Tile for CatalogMovie {
     fn title(&self) -> &str {
         &self.title
     }

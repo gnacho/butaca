@@ -31,12 +31,12 @@
 //! ## Every entry point names a SERVER, and none of them assumes one
 //!
 //! Artwork is per-server in the strongest sense: `/photo/:/transcode?url=…` is a path on ONE
-//! PMS, its `url=` is that server's own thumb key, and the token baked into it is that server's
-//! grant. With a friend's shared server merged into one Home, "the current server" is the wrong
-//! host for half the tiles on screen — so a [`ServerId`] rides every call, sits in the slot as
-//! the other half of its identity, and is what the worker dials. Nothing in this file reads
-//! `server::client()`; a caller that genuinely means "the server I am browsing" says so by passing
-//! `server::current_server()`, at the call site, where it is visible.
+//! server, its `url=` is that server's own thumb key, and the token baked into it is
+//! that server's grant. With a friend's shared server merged into one Home, "the current server" is
+//! the wrong host for half the tiles on screen — so a [`ServerId`] rides every call, sits in
+//! the slot as the other half of its identity, and is what the worker dials. Nothing in this file
+//! reads `server::client()`; a caller that genuinely means "the server I am browsing" says so by
+//! passing `server::current_server()`, at the call site, where it is visible.
 //!
 //! The server is a FIELD on the slot, not a prefix on the key, deliberately: keys already run
 //! ~140 bytes (an ordinary relative thumb) to ~177 (an absolute headshot — see [`built_key`])
@@ -1476,7 +1476,7 @@ pub(crate) fn shutdown() {
     let handles = std::mem::take(&mut store().workers);
     for h in handles {
         // these park in `stream::http_get`, whose socket nothing outside the call can reach —
-        // so an app exit against a stalled PMS waits out SO_RCVTIMEO here. Measured, not fixed.
+        // so an app exit against a stalled server waits out SO_RCVTIMEO here. Measured, not fixed.
         crate::task::join("poster", h);
     }
     // free pending decodes, then every resident texture (main thread for GL); workers are joined
@@ -1923,7 +1923,7 @@ mod tests {
         tex::reset_for_test(16 * 1024 * 1024);
         store().slots = [Pslot::ZERO; PT_CAP];
         let rect = crate::ui::Rect::new(0.0, 0.0, 250.0, 375.0);
-        let mut item = crate::pms::PmsMovie::default();
+        let mut item = crate::catalog::CatalogMovie::default();
         item.sid = sid;
         item.thumb = "/library/metadata/42/thumb".into();
         item.still = "/library/metadata/42/still".into();

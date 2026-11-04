@@ -284,7 +284,7 @@ pub(crate) fn start_playback(
 /// return state: acceptance cannot invent where a session returns to.
 pub(super) trait PlaybackResources {
     fn request_movie(&mut self, ps: &mut crate::route::PlaybackSession,
-        meta: &mut crate::stores::metadata::MetadataStore, item: &crate::pms::PmsMovie) -> bool;
+        meta: &mut crate::stores::metadata::MetadataStore, item: &crate::catalog::CatalogMovie) -> bool;
     fn request_episode(&mut self, ps: &mut crate::route::PlaybackSession,
         meta: &mut crate::stores::metadata::MetadataStore, rk: &str) -> bool;
     fn describe_movie(&mut self, meta: &mut crate::stores::metadata::MetadataStore,
@@ -297,7 +297,7 @@ pub(super) struct LivePlaybackResources;
 
 impl PlaybackResources for LivePlaybackResources {
     fn request_movie(&mut self, ps: &mut crate::route::PlaybackSession,
-        meta: &mut crate::stores::metadata::MetadataStore, item: &crate::pms::PmsMovie) -> bool {
+        meta: &mut crate::stores::metadata::MetadataStore, item: &crate::catalog::CatalogMovie) -> bool {
         crate::route::request_play_movie(ps, meta, item)
     }
     fn request_episode(&mut self, ps: &mut crate::route::PlaybackSession,
@@ -860,7 +860,7 @@ pub(crate) fn play_up_next(
 pub(crate) unsafe fn play_item_now(
     ps: &mut crate::route::PlaybackSession,
     pa: &mut crate::player::adapter::PlayerAdapter,
-    mm: &crate::pms::PmsMovie,
+    mm: &crate::catalog::CatalogMovie,
     from_start: bool,
     from: Origin,
     hud_ms: u32,
@@ -876,7 +876,7 @@ pub(crate) unsafe fn play_item_now(
 pub(super) fn play_item_now_with<R: PlaybackResources>(
     ps: &mut crate::route::PlaybackSession,
     pa: &mut crate::player::adapter::PlayerAdapter,
-    mm: &crate::pms::PmsMovie,
+    mm: &crate::catalog::CatalogMovie,
     from_start: bool,
     from: Origin,
     hud_ms: u32,

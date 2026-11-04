@@ -1,7 +1,7 @@
 use super::*;
 
 /// End-to-end delivery observations. The source and HLS estimators are deliberately separate:
-/// a source probe and an HLS segment exercise different PMS work, but each can seed the other
+/// a source probe and an HLS segment exercise different server work, but each can seed the other
 /// only as an explicitly labelled weak prior, never as an interchangeable measurement.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct CapacityEstimate {
@@ -124,7 +124,7 @@ impl CapacityEstimate {
     /// are listed here because "why is confidence being thrown away" is the question a reader of a
     /// surprising decision asks first:
     ///
-    /// * **A bootstrap source probe seeding steady-state HLS.** Different request, different PMS
+    /// * **A bootstrap source probe seeding steady-state HLS.** Different request, different server
     ///   work, same link — evidence, but not an interchangeable measurement (see
     ///   [`bootstrap`]).
     /// * **A path change.** Local to Remote, Remote to Relay, a different server address: the
@@ -459,7 +459,7 @@ impl SegmentSample {
     ///
     /// Declaring it incomplete discards the prefix from both capacity estimation and the completed
     /// acquisition bag. The terminal/deadline event still reaches the controller as a censored
-    /// transaction result, but its bytes cannot identify path capacity in either direction: PMS
+    /// transaction result, but its bytes cannot identify path capacity in either direction: server
     /// production, response pacing and network service are mixed until the response completes.
     ///
     /// Production now builds abandoned samples with [`Self::abandoned_acquisition`] directly (it
@@ -498,7 +498,7 @@ impl SegmentSample {
     }
 
     /// **What this segment actually WAS, on the wire** — delivered bytes over its content
-    /// duration, not what the rung asked PMS for. `kbps` is bits per millisecond, so
+    /// duration, not what the rung asked the server for. `kbps` is bits per millisecond, so
     /// `bits / duration_ms` is already kbps and there is no scale factor here.
     ///
     /// It exists because the reachable buffer ceiling is `queue_bytes / media_rate` (plus the feed
@@ -533,7 +533,7 @@ impl SegmentSample {
         self.bytes
     }
 
-    /// Per-mille total acquisition time / content duration. This includes PMS JIT production and
+    /// Per-mille total acquisition time / content duration. This includes server JIT production and
     /// TTFB; a two-second segment arriving in 1.9 seconds has almost no production headroom even
     /// if its response body crosses the LAN quickly.
     pub(crate) fn production_ratio_pm(self) -> u32 {
@@ -549,7 +549,7 @@ impl SegmentSample {
 /// It is a free function rather than a method because the two valid complete/bounded observations
 /// hold the same numbers in different shapes: `SegmentSample` (a completed segment) and
 /// `OriginalRecovery` (a delta between two progress readings). An incomplete HLS prefix is
-/// deliberately absent: PMS production and network service are not identifiable before that
+/// deliberately absent: server production and network service are not identifiable before that
 /// response completes.
 ///
 /// `us` is clamped to 1: a zero divisor is a caller that has measured nothing, and every caller

@@ -105,7 +105,7 @@ pub(crate) struct Credit {
 }
 
 /// The item a credit is FOR — a **Discover** row, not a library one. Its `rating_key` is a plex.tv
-/// id and its `thumb` an `image.tmdb.org` URL, so neither addresses anything on a PMS; what does
+/// id and its `thumb` an `image.tmdb.org` URL, so neither addresses anything on a server; what does
 /// cross is [`guid`](CreditItem::guid), which is the metadata provider's global id and the key both
 /// sides of the availability join speak (`server::Metadata::guid` on the library side).
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -114,31 +114,31 @@ pub(crate) struct CreditItem {
     pub kind: String,
     #[serde(default)]
     pub title: String,
-    /// `0` is the ONLY absent value PMS and the provider have for a year, so "announced" and "the
-    /// metadata is missing" are the same wire fact. The screen states neither: an undated credit
-    /// reads as an em dash and sorts to the bottom.
+    /// `0` is the ONLY absent value the server and the provider have for a year, so "announced" and
+    /// "the metadata is missing" are the same wire fact. The screen states neither: an undated
+    /// credit reads as an em dash and sorts to the bottom.
     #[serde(default, deserialize_with = "de_i64")]
     pub year: i64,
     /// **THE join key, and it is NOT a guid** — a bare catalog ID, `5d7768295af944001f1f7477`.
     ///
     /// This endpoint carries **no `guid` field at all** (measured 2026-09-06; the item's whole key
     /// set is `art`/`key`/`originallyAvailableAt`/`publicPagesURL`/`ratingKey`/`slug`/`thumb`/
-    /// `title`/`type`/`year`). PMS states the same identity as `plex://movie/<this>`, so the join
-    /// is against the TAIL of a local row's guid — `person::guid_tail`. A `guid: String` was
-    /// modelled here at first, defaulted to empty on every row, and the availability join it fed
-    /// therefore matched NOTHING while every count around it looked healthy: `joinable=5`, 544 rows
-    /// drawn, not one of them markable. If a `guid` ever does appear on this wire, prefer it —
+    /// `title`/`type`/`year`). The server states the same identity as `plex://movie/<this>`, so
+    /// the join is against the TAIL of a local row's guid — `person::guid_tail`. A `guid: String`
+    /// was modelled here at first, defaulted to empty on every row, and the availability join it
+    /// fed therefore matched NOTHING while every count around it looked healthy: `joinable=5`, 544
+    /// rows drawn, not one of them markable. If a `guid` ever does appear on this wire, prefer it —
     /// but do not model it again without a response in front of you.
     #[serde(rename = "ratingKey", default)]
     pub rating_key: String,
     /// **An ABSOLUTE URL on somebody else's host** — `https://image.tmdb.org/…` or
-    /// `https://metadata-static.plex.tv/…`, never a PMS path. That is not a reason to skip the
-    /// artwork: `app::adapters::poster::built_key` URL-encodes exactly such a URL into a
-    /// `/photo/:/transcode?url=…` request and the SERVER fetches it, which is the same path the
-    /// Search screen's `actor` headshots already take (`app/adapters/poster.rs`'s own tests pin it).
-    /// This module's first draft asserted the opposite in a comment — "a tmdb URL no PMS transcoder
-    /// will serve" — and hard-coded an empty plate on the strength of it, which is why the
-    /// Filmography shipped with no posters at all. Nothing was measured before that claim was
+    /// `https://metadata-static.plex.tv/…`, never a server path. That is not a reason to skip
+    /// the artwork: `app::adapters::poster::built_key` URL-encodes exactly such a URL into
+    /// a `/photo/:/transcode?url=…` request and the SERVER fetches it, which is the same path
+    /// the Search screen's `actor` headshots already take (`app/adapters/poster.rs`'s own tests pin
+    /// it). This module's first draft asserted the opposite in a comment — "a tmdb URL no server
+    /// transcoder will serve" — and hard-coded an empty plate on the strength of it, which is why
+    /// the Filmography shipped with no posters at all. Nothing was measured before that claim was
     /// written down.
     #[serde(default)]
     pub thumb: String,

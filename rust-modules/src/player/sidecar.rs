@@ -2,7 +2,7 @@
 //!
 //! The demuxer only ever sees the streams INSIDE the container it opened, so a sidecar was
 //! unreachable on direct play and the track menu hid it. This is the missing
-//! producer: fetch the whole file from PMS once. Plain captions answer [`active`]; ASS/SSA
+//! producer: fetch the whole file from the server once. Plain captions answer [`active`]; ASS/SSA
 //! keeps its complete script for [`ass_source`] and the native styled renderer. Styles,
 //! overlapping events, drawings and embedded fonts must never pass through plain-text parsing.
 //!
@@ -589,8 +589,8 @@ mod tests {
         );
     }
 
-    /// PMS is asked for SubRip but may answer in whatever it has. WebVTT differs in three ways
-    /// that matter — a header, `.` before the milliseconds with the hours optional, and cue
+    /// The server is asked for SubRip but may answer in whatever it has. WebVTT differs in three
+    /// ways that matter — a header, `.` before the milliseconds with the hours optional, and cue
     /// settings after the end time — and none of them may cost a cue or reach the text.
     #[test]
     fn a_webvtt_file_parses_through_the_same_reader() {

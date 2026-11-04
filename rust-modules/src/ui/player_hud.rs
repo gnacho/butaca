@@ -1992,7 +1992,7 @@ mod tests {
             _ => unreachable!(),
         };
         assert_eq!(mid, SkipAction::Seek(2_000 * 1_000_000));
-        // …as does an intro, `final` flag or not (PMS only sets it on credits)
+        // …as does an intro, `final` flag or not (the server only sets it on credits)
         let intro = match slot_for(Some(marker(MarkerKind::Intro, true)), false) {
             ControlSlot::Skip(p) => p.action,
             _ => unreachable!(),

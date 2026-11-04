@@ -26,9 +26,9 @@
 //! # Opt-in: the CLOCK SINK (`butaca-clocksink`)
 //!
 //! **It accepts access units, throws them away, and advances a presentation clock at real time.**
-//! Nothing decodes and nothing is displayed. What it makes runnable on a Mac is everything
-//! upstream of the decoder: the PMS decision, HLS parsing, the AVIO transport, `ff.rs`'s demux, the
-//! AU queues and their byte-cap backpressure, the feed-ahead throttle, the ABR controller's
+//! Nothing decodes and nothing is displayed. What it makes runnable on a Mac is everything upstream
+//! of the decoder: the server decision, HLS parsing, the AVIO transport, `ff.rs`'s demux, the AU
+//! queues and their byte-cap backpressure, the feed-ahead throttle, the ABR controller's
 //! transactions, seek and PTS rebase.
 //!
 //! **Why that is worth having, stated as what it can and cannot decide.** The reachable reserve is

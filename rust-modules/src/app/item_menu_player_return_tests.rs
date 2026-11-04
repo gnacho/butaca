@@ -38,7 +38,7 @@ impl playback::PlaybackResources for Resources {
         &mut self,
         _: &mut crate::route::PlaybackSession,
         _: &mut crate::stores::metadata::MetadataStore,
-        item: &crate::pms::PmsMovie,
+        item: &crate::catalog::CatalogMovie,
     ) -> bool {
         self.calls.push(ResourceCall::Movie {
             sid: item.sid,
@@ -110,7 +110,7 @@ fn chain(host: AppArg, episode: bool, accept_request: bool, accept_start: bool) 
     let entry = d.nav.top_page().unwrap().id;
     let instance = d.nav.top_page().unwrap().inst.as_ref().unwrap().id;
     // The played item differs from the host's identity, including Related on Detail.
-    let row = crate::pms::PmsMovie {
+    let row = crate::catalog::CatalogMovie {
         sid: SID,
         rk: "played-3".into(),
         part: "/library/parts/3/file.mkv".into(),

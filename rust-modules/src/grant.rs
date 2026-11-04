@@ -74,7 +74,7 @@
 //! [`credential_allowed`] and [`allowed_under`] are the backend-neutral transport authority used
 //! by both Plex and Jellyfin. The consent lifecycle below is still Plex-specific: discovery
 //! evidence comes from `crate::server::probe`, consent persistence uses `crate::server::session`, and
-//! registry invalidation goes through `crate::plex`. [`UpgradeRetry`] also shares `crate::pms`'s
+//! registry invalidation goes through `crate::plex`. [`UpgradeRetry`] also shares `crate::catalog`'s
 //! backoff. Those dependencies remain unchanged until B2 rewires the Plex lifecycle.
 //! `Session::owner_identity` stays in Plex session storage.
 #![allow(dead_code)]

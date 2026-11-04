@@ -203,7 +203,7 @@ fn duplicate_across_pages_keeps_full_projection_recovery_metadata() {
     let _guard = crate::testlock::serial();
     let mut fixture = Fixture::new();
     let sid = crate::registry::ServerId::from_raw(0);
-    let movie = |i| crate::pms::PmsMovie { sid, rk: format!("duplicate-test-{i}"), ..Default::default() };
+    let movie = |i| crate::catalog::CatalogMovie { sid, rk: format!("duplicate-test-{i}"), ..Default::default() };
     let mut items = (0..120).map(movie).collect::<Vec<_>>();
     items[85] = items[5].clone();
     fixture.listing = crate::browse::view::ListingSnapshot::fixture(sid,
@@ -274,7 +274,7 @@ fn large_listing_publication_work_is_bounded_by_initial_slots_then_changed_page(
     const PAGE: usize = 60;
     let mut fixture = Fixture::new();
     let sid = crate::registry::ServerId::from_raw(0);
-    let movies = |start: usize| (start..start + PAGE).map(|i| crate::pms::PmsMovie {
+    let movies = |start: usize| (start..start + PAGE).map(|i| crate::catalog::CatalogMovie {
         sid, rk: format!("large-{i}"), title: format!("Large {i}"), ..Default::default()
     }).collect::<Vec<_>>();
     fixture.listing = crate::browse::view::ListingSnapshot::fixture(
@@ -343,7 +343,7 @@ fn down_from_a_missing_final_row_column_clamps_to_the_last_item() {
     let mut fixture = Fixture::new();
     let sid = crate::registry::ServerId::from_raw(0);
     fixture.listing = crate::browse::view::ListingSnapshot::fixture(sid,
-        (0..8).map(|i| Some(crate::pms::PmsMovie { sid, rk: format!("{i}"), ..Default::default() })).collect(),
+        (0..8).map(|i| Some(crate::catalog::CatalogMovie { sid, rk: format!("{i}"), ..Default::default() })).collect(),
         Vec::new());
     let mut page = fixture.screen();
     let mut engine = FocusEngine::new();
@@ -402,7 +402,7 @@ fn owned_rail_keeps_the_fixed_legacy_origin_and_short_window() {
         let mut fixture = Fixture::new();
         let sid = crate::registry::ServerId::from_raw(0);
         fixture.listing = crate::browse::view::ListingSnapshot::fixture(sid,
-            (0..36).map(|i| Some(crate::pms::PmsMovie { sid, rk: format!("{i}"), ..Default::default() })).collect(),
+            (0..36).map(|i| Some(crate::catalog::CatalogMovie { sid, rk: format!("{i}"), ..Default::default() })).collect(),
             (0..n).map(|i| (format!("{i}"), 1)).collect());
         let page = fixture.screen();
         let mut groups = Vec::new();
@@ -852,7 +852,7 @@ impl Fixture {
     pub(super) fn new() -> Self {
         let sid = crate::registry::ServerId::from_raw(0);
         let listing = crate::browse::view::ListingSnapshot::fixture(sid, (0..36).map(|i|
-            Some(crate::pms::PmsMovie { sid, rk: format!("{}", i + 1), title: format!("s{i:04x}"), ..Default::default() })).collect(),
+            Some(crate::catalog::CatalogMovie { sid, rk: format!("{}", i + 1), title: format!("s{i:04x}"), ..Default::default() })).collect(),
             vec![("A".into(), 18), ("Z".into(), 18)]);
         let directory = crate::browse::view::DirectorySnapshot::fixture(1, 0, vec![
             crate::browse::view::SectionView { sid: Some(sid), key: 1, kind: SecKind::Movie,
@@ -1000,7 +1000,7 @@ fn removed_grid_key_keeps_its_typed_master_detail_reconciliation_path() {
     let original = page.key(page.pair.detail.elem_at(17).unwrap());
     let sid = crate::registry::ServerId::from_raw(0);
     fixture.listing = crate::browse::view::ListingSnapshot::fixture(sid,
-        (0..35).map(|i| Some(crate::pms::PmsMovie { sid, rk: format!("{}", i + 100), ..Default::default() })).collect(),
+        (0..35).map(|i| Some(crate::catalog::CatalogMovie { sid, rk: format!("{}", i + 100), ..Default::default() })).collect(),
         vec![("A".into(), 18), ("Z".into(), 17)]);
     page.sync(&fixture.cx(Some(original)));
     assert_eq!(<LibraryScreen as Focusable<HostFixture>>::group_of(&page, &original.elem, &fixture.cx(Some(original))), None);

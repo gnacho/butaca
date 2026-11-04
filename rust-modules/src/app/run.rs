@@ -1662,7 +1662,7 @@ pub(crate) unsafe fn playback_tick(app: &mut App, fr: &mut Frame) {
 }
 
 /// Results and requests that land BEFORE nav commit: the OK arm and the press machine, the
-/// person / detail open requests, the login and profiles landings (`install_pms`), the glass
+/// person / detail open requests, the login and profiles landings (`install_server`), the glass
 /// load, and the nav oscillator.
 pub(crate) unsafe fn land_results(app: &mut App, fr: &mut Frame) {
         if app.ok_armed {

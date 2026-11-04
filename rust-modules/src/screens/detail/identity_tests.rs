@@ -126,7 +126,7 @@ fn item(rk: &str, reverse: bool) -> Detail {
             title: format!("Season {i}"), leaf_count: 2, viewed_leaf_count: 0 });
         d.episodes.push(crate::metadata::Episode { rk: format!("e{i}"), index: i,
             season: 1, title: format!("Episode {i}"), ..Default::default() });
-        d.related.push(crate::pms::PmsMovie { sid: ServerId::UNSET, rk: format!("r{i}"), ..Default::default() });
+        d.related.push(crate::catalog::CatalogMovie { sid: ServerId::UNSET, rk: format!("r{i}"), ..Default::default() });
         d.cast.push(crate::metadata::Cast { id: i, tag: format!("Person {i}"),
             role: "Actor".into(), tag_key: format!("plex://person/{i}"), thumb: String::new() });
     }
@@ -343,7 +343,7 @@ fn a_live_return_does_not_rewind_ids_minted_after_its_request_snapshot() {
     let (mut d, mut rig) = boot();
     let saved = d.return_state().memory;
     let mut newer = item("a", false);
-    newer.related.push(crate::pms::PmsMovie { sid: ServerId::UNSET, rk: "r3".into(), ..Default::default() });
+    newer.related.push(crate::catalog::CatalogMovie { sid: ServerId::UNSET, rk: "r3".into(), ..Default::default() });
     land(&mut d, &mut rig, newer, 32);
     let third_key = screen(&d).key_of(Located::Related(2)).unwrap();
     let counter = screen(&d).next_elem;

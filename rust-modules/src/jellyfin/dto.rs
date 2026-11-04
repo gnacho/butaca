@@ -49,7 +49,7 @@ pub(crate) struct QuickConnectResult {
     pub(crate) code: String,
 }
 
-/// `GET /Users/{userId}/Views` — the library list (Jellyfin's counterpart of PMS
+/// `GET /Users/{userId}/Views` — the library list (Jellyfin's counterpart of the server
 /// `/library/sections`). Each view is one browsable library; its `Id` is the `ParentId` a
 /// section listing is scoped by.
 #[derive(Debug, Deserialize)]

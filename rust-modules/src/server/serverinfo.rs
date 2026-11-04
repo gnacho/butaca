@@ -35,7 +35,7 @@ use std::sync::atomic::{AtomicU8, Ordering::Relaxed};
 use std::sync::Mutex;
 
 /// Does the server's owner hold a Plex Pass? A TRISTATE, not a bool with a default: `Unknown`
-/// (never fetched, fetch failed, or a PMS old enough not to say) must stay distinguishable from
+/// (never fetched, fetch failed, or a server old enough not to say) must stay distinguishable from
 /// a real "no" — the error wording in `player::error_shape` blames a missing Pass only on a
 /// known-free server, never on one we merely haven't heard from.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -139,7 +139,7 @@ fn store(id: ServerId, sub: Subscription, version: &str) {
 ///
 /// [`store`] is this module's private seam, and the suites that need it are the ones grading its
 /// READERS — `route`'s Pass-gated audio-enhancement offering and `app::diagnostics`' stats Server
-/// row, neither of which can reach a real PMS on the host. Callers must
+/// row, neither of which can reach a real server on the host. Callers must
 /// hold `crate::testlock::serial()`: the slot arrays are crate globals, and they deliberately
 /// outlive `servers::reset_for_test` (they are keyed on the SLOT, not on the client), so a test
 /// must seed every slot it reads rather than assume a boot state.
