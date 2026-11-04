@@ -81,8 +81,8 @@ class SessionPlan:
             for key, value in (
                 ("legacy_query", self.legacy),
                 ("canonical_query", self.canonical),
-                ("x_plex_query", self.query_x),
-                ("x_plex_header", self.header),
+                ("sid_query", self.query_x),
+                ("sid_header", self.header),
             )
             if value
         }
@@ -172,12 +172,12 @@ def _token() -> str:
 
 def _overlay(item: str):
     doc = json.loads(OVERLAY.read_text())
-    pms = doc.get("pms") or {}
+    srv = doc.get("server") or {}
     rk = (doc.get("items") or {}).get(item)
-    if not pms.get("host") or not rk:
-        raise SystemExit(f"{OVERLAY} needs pms.host and items.{item}")
+    if not srv.get("host") or not rk:
+        raise SystemExit(f"{OVERLAY} needs server.host and items.{item}")
     test_user = doc.get("test_user") or {}
-    return str(pms["host"]), int(pms.get("port") or 32400), str(rk), test_user.get("id")
+    return str(srv["host"]), int(srv.get("port") or 32400), str(rk), test_user.get("id")
 
 
 def _managed_token(owner_token: str, host: str, port: int, user_id, client_id: str = CID) -> str:

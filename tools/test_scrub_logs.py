@@ -116,8 +116,8 @@ class TheSameAddressInOtherShapes(unittest.TestCase):
 class VersionStringsAreNotAddresses(unittest.TestCase):
     """A dotted quad followed by more digits is a version, and every log is full of them."""
 
-    def test_pms_version_survives_intact(self):
-        text = "pms: server 0 version=1.43.3.10896-cb3ebc72d plexPass=true"
+    def test_server_version_line_survives_intact(self):
+        text = "server: server 0 version=1.43.3.10896-cb3ebc72d plexPass=true"
         out, _ = scrub(text)
         self.assertEqual(out, text)
 

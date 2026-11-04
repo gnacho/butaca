@@ -38,7 +38,7 @@ python3 "$ROOT/tests/serve_fixtures.py" --root "$(dirname "$CLIP")" --port "$MED
 MEDIA_PID=$!
 # …and a synthetic server, only so the boot lands on HOME. The autoplay arm that reads `playurl` is
 # skipped on `Route::Login`, so a boot with no session never reaches the player at all.
-python3 "$ROOT/tests/mock_server.py" --port "$SERVER_PORT" --seed 1 > "$OUT/pms.log" 2>&1 &
+python3 "$ROOT/tests/mock_server.py" --port "$SERVER_PORT" --seed 1 > "$OUT/server.log" 2>&1 &
 SERVER_PID=$!
 cleanup() {
   [ -n "${SIM_PID:-}" ] && kill "$SIM_PID" 2>/dev/null || true

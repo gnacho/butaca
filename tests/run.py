@@ -10,7 +10,7 @@ test user. load_manifest merges them and fails with the missing key if the overl
 The matrix is a SUPERSET of what any one library can exercise, so an `item` key the overlay
 cannot resolve -- absent, or left as the example's `<ratingKey>` placeholder -- SKIPS the cases
 and fps scenes that need it and runs the rest, printing what it gave up. Only the values no run
-of any size can proceed without (pms.host, tv, test_user.id, a malformed shared_server) are still
+of any size can proceed without (server.host, tv, test_user.id, a malformed shared_server) are
 fatal. Before 2026-08-22 a single unmappable shape killed all 21 cases, which meant the suite ran
 for exactly one library in the world -- see tests/README.md, "Running it against your own library".
 
@@ -179,7 +179,7 @@ TYPE43_SPAM = re.compile(r"smp_cb type=43 num=0 str=\s*$")
 def _die_no_overlay(extra=""):
     sys.exit(f"missing test configuration: {MANIFEST_LOCAL}\n"
              f"  This file is gitignored — it maps the manifest's symbolic item keys to the\n"
-             f"  ratingKeys on YOUR server, and carries the PMS host, TV address and test user.\n"
+             f"  ratingKeys on YOUR server, and carries the server host, TV address, test user.\n"
              f"  Create it with:  cp {MANIFEST_LOCAL_EXAMPLE} {MANIFEST_LOCAL}\n"
              f"  then replace every <placeholder> in it.{extra}")
 
@@ -271,7 +271,7 @@ def load_manifest(pipeline_only=False, tv_override=None, for_listing=False):
             manifest["flavour"] = local["flavour"]
         return manifest
 
-    for field in ("pms", "tv"):
+    for field in ("server", "tv"):
         if field not in local:
             if for_listing:
                 continue    # nothing downstream of a listing dials either of them
@@ -332,7 +332,7 @@ def load_manifest(pipeline_only=False, tv_override=None, for_listing=False):
     # the `_die_no_overlay` calls above are what guarantee that, which is why this stays a lookup
     # and not a second requirement check.
     stray = [f"{k}={v}" for k, v in
-             [("pms.host", manifest.get("pms", {}).get("host")), ("tv", manifest.get("tv"))]
+             [("server.host", manifest.get("server", {}).get("host")), ("tv", manifest.get("tv"))]
              + ([("test_user.id", manifest["test_user"].get("id"))] if "test_user" in manifest else [])
              + [(f"shared_server.{k}", ss.get(k)) for k in ("machine_id", "name", "host")]
              if isinstance(v, str) and v.startswith("<")]
@@ -363,7 +363,7 @@ def read_token():
             txt = f.read()
     except OSError as e:
         sys.exit(f"cannot read {CONFIG_LOCAL_H}: {e}\n"
-                 f"(this file is gitignored and holds the PMS token; create it locally)")
+                 f"(this file is gitignored and holds the server token; create it locally)")
     m = re.search(r'#define\s+SERVER_TOKEN\s+"([^"]+)"', txt)
     if not m:
         sys.exit(f"no SERVER_TOKEN macro found in {CONFIG_LOCAL_H}")
@@ -373,7 +373,7 @@ def read_token():
 CID = "butaca-test-harness"  # stable X-Plex-Client-Identifier for the account calls below
 
 
-def _pms_machine_id(host, port, admin_token):
+def _server_machine_id(host, port, admin_token):
     """The server's machineIdentifier (needed to look up its shared_servers remotely)."""
     url = f"http://{host}:{port}/?X-Plex-Token={admin_token}"
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
@@ -387,7 +387,7 @@ def fetch_managed_user_token(admin_token, host, port, user_id):
     history never touches the owner's real account. Uses only the admin token already on hand --
     no new secret is stored. Returns the token string (never printed) or exits on failure."""
     import xml.etree.ElementTree as ET
-    mid = _pms_machine_id(host, port, admin_token)
+    mid = _server_machine_id(host, port, admin_token)
     url = f"https://plex.tv/api/servers/{mid}/shared_servers"
     req = urllib.request.Request(url, headers={
         "X-Plex-Token": admin_token, "X-Plex-Client-Identifier": CID})
@@ -415,7 +415,7 @@ def fetch_managed_user_token(admin_token, host, port, user_id):
 # owner's account token, which the harness already reads from src/config.local.h for everything
 # else, and each entry carries that account's accessToken for that server. Same bargain as
 # fetch_managed_user_token: one secret in one gitignored place, everything else derived at runtime.
-def _plextv_resources(admin_token):
+def _account_resources(admin_token):
     """Every server this account can reach — owned AND shared with it — from the account service."""
     url = "https://plex.tv/api/v2/resources?includeHttps=1&includeRelay=1&includeIPv6=1"
     req = urllib.request.Request(url, headers={
@@ -485,7 +485,7 @@ def primary_ipv6_server(admin_token, machine_id=""):
     pinned uri as the https host, and the advertised address as the `pin` the app dials it
     at with no resolver. Refuses with the reason when the account service advertises no such connection: an
     IPv6 case that quietly ran over v4 would grade nothing about v6."""
-    owned = [r for r in _server_resources(_plextv_resources(admin_token)) if r.get("owned")]
+    owned = [r for r in _server_resources(_account_resources(admin_token)) if r.get("owned")]
     if machine_id:
         owned = [r for r in owned if r.get("clientIdentifier") == machine_id]
     for hit in owned:
@@ -499,7 +499,7 @@ def primary_ipv6_server(admin_token, machine_id=""):
                     "host": host, "port": int(c.get("port") or 32400), "scheme": "https",
                     "tier": "local", "token": hit.get("accessToken") or admin_token, "pin": addr}
     sys.exit("primary_ipv6: the account service advertises no local IPv6 pinned connection for an owned "
-             "server (is the server's host on a v6 LAN, and does PMS see it?)")
+             "server (is the server's host on a v6 LAN, and does the server see it?)")
 
 
 def resolve_shared_server(admin_token, spec):
@@ -513,7 +513,7 @@ def resolve_shared_server(admin_token, spec):
     """
     want_mid, want_name = spec.get("machine_id"), spec.get("name")
     try:
-        res = _server_resources(_plextv_resources(admin_token))
+        res = _server_resources(_account_resources(admin_token))
     except Exception as e:
         sys.exit(f"cannot resolve the second server: the account service's /resources failed ({e})\n"
                  f"  (this call needs internet; the rest of the harness is LAN-only)")
@@ -868,7 +868,7 @@ def resolve_flavour(args, manifest):
     return FLAVOUR
 
 
-def pms_unscrobble(host, port, rk, token):
+def server_unscrobble(host, port, rk, token):
     """Clear an item's resume point (and watched flag) via /:/unscrobble. Token never printed.
 
     This is the ONLY thing that actually resets a viewOffset. `PUT /:/progress?time=0` looks like
@@ -891,7 +891,7 @@ def pms_unscrobble(host, port, rk, token):
         return False
 
 
-def pms_put_progress(host, port, rk, time_ms, token):
+def server_put_progress(host, port, rk, time_ms, token):
     """Seed an item's resume point (viewOffset) via PUT /:/progress. Token never printed."""
     q = urllib.parse.urlencode({
         "key": rk,
@@ -1212,7 +1212,7 @@ RE_TOKEN = re.compile(r"(X-Plex-Token=)[^&\s]+")
 
 
 def redact(s):
-    """Never let the PMS token reach stdout: replace any token argument's value with <token>."""
+    """Never let the server token reach stdout: replace any token argument's value with <token>."""
     return RE_TOKEN.sub(r"\1<token>", s)
 
 
@@ -1519,7 +1519,7 @@ def a_play_rate(lines, floor_pm):
 
 
 def a_timeline_post(lines):
-    """At least one /:/timeline progress report reached PMS.
+    """At least one /:/timeline progress report reached the server.
 
     a_timeline_climb reads the 1Hz heartbeat now, so this is what keeps the SERVER-side
     reporting path (threads::timeline_thread -> route::report_timeline -> viewOffset and
@@ -1528,8 +1528,8 @@ def a_timeline_post(lines):
     """
     ts = timeline_secs(lines)
     if not ts:
-        return False, "no `timeline playing t=` line — progress never reported to PMS"
-    return True, f"{len(ts)} timeline report(s) to PMS, last t={ts[-1][0]}s"
+        return False, "no `timeline playing t=` line - progress never reported to the server"
+    return True, f"{len(ts)} timeline report(s) to the server, last t={ts[-1][0]}s"
 
 
 # ---- pipeline-tier assertions ----
@@ -1880,7 +1880,7 @@ def _parsed(pattern, fields, lines, numeric=True):
 CONFIG_LOCAL_H = os.path.join(REPO_ROOT, "src", "config.local.h")
 
 
-def compiled_pms_endpoint():
+def compiled_server_endpoint():
     """`(host, port)` the deployed binary talks to, or `(None, None)`.
 
     Read from the gitignored `src/config.local.h`, which is the ONLY statement of it — `app.h`
@@ -1923,7 +1923,7 @@ class LinkConditioner:
 
     def start(self):
         if self.listen is None:
-            self.why = ("the deployed binary names no PMS port — src/config.local.h is missing "
+            self.why = ("the deployed binary names no server port - src/config.local.h is missing "
                         "or has no SERVER_PORT")
             return
         # netcond binds 0.0.0.0, so "direct" is decided by the PORT alone: the compiled host IS
@@ -3408,7 +3408,7 @@ def op_seek_rapid(lines, final_s):
     resumed (the historical rapid-back-tap bug was 10+ s of post-burst silence).
 
     DO NOT go back to counting `seek(in-place)` lines. That is what this assertion used to do
-    (">= 2 fired, so coalescing was exercised") and it measured PMS latency, not merging:
+    (">= 2 fired, so coalescing was exercised") and it measured server latency, not merging:
 
       * a tap that arrives mid-seek is applied by the next pump tick after the in-flight seek
         anchors — which logs `seek(in-place)`;
@@ -4135,7 +4135,7 @@ def check_install(lines, cfg):
             raise SystemExit(
                 f"RELEASE BUILD on {got}: its boot line says features={feats}, so the whole "
                 f"`devtriggers` surface was compiled out and it reads NOTHING under {RUNDIR} — not "
-                f"the injected PMS token, not one trigger this harness wrote. It boots to the "
+                f"the injected server token, not one trigger this harness wrote. It boots to the "
                 f"who's-watching picker and plays nothing, and every case would burn its full cap "
                 f"failing as if the player were broken. Ship a dev build to this install: "
                 f"`make FLAVOR={FLAVOUR} deploy` without RELEASE=1.\n"
@@ -4510,17 +4510,18 @@ def run_case(case, cfg, token, verbose, cond=None):
 
     # 2. establish the resume point AFTER the close. Reset first, ALWAYS: unscrobble is the only
     # call that actually clears a viewOffset (a time=0 progress PUT returns 200 and changes
-    # nothing -- see pms_unscrobble), and resetting even before a seed keeps the starting state a
+    # nothing -- see server_unscrobble), and resetting even before a seed keeps the starting state a
     # function of the manifest alone rather than of whatever was there before.
-    pms_unscrobble(cfg["pms"]["host"], cfg["pms"]["port"], case["rk"], token)
+    server_unscrobble(cfg["server"]["host"], cfg["server"]["port"], case["rk"], token)
     if offset_ms > 0:
-        pms_put_progress(cfg["pms"]["host"], cfg["pms"]["port"], case["rk"], offset_ms, token)
+        server_put_progress(cfg["server"]["host"], cfg["server"]["port"], case["rk"],
+                            offset_ms, token)
     # A case that AUTO-ADVANCES plays a second item this run, and that item's resume point is
     # server state exactly like the first one's -- left alone, the successor starts wherever a
     # previous run stopped it, which is the same history-dependence `setup.viewOffset_ms` exists
     # to kill. Declared per case rather than inferred, so the manifest still says what it starts from.
     for rk in setup.get("also_reset", []):
-        pms_unscrobble(cfg["pms"]["host"], cfg["pms"]["port"], rk, token)
+        server_unscrobble(cfg["server"]["host"], cfg["server"]["port"], rk, token)
 
     # 3. clear + set triggers, and inject the effective server token in the SAME round-trip.
     # The token rides `extra=` rather than `files` so its value never reaches stdout — the only
@@ -4867,7 +4868,7 @@ def save_case_log(cfg, name, lines):
 
 
 def run_pipeline_case(case, cfg, srv, url_base, verbose):
-    """One pipeline case. A sibling of `run_case` with every PMS step removed.
+    """One pipeline case. A sibling of `run_case` with every server step removed.
 
     Kept from it: the `make kill` that opens (the app is a singleton on the television, and the
     previous case's is still up), `apply_triggers`' single round-trip that recreates the runtime
@@ -6060,7 +6061,7 @@ def main():
                     help="run the SERVER tier instead of the default synthetic one: the 21 "
                          "library-backed cases driven through the whole server chain (account-service auth, "
                          "/decision, direct-play vs transcode, markers, resume, timeline). Needs a "
-                         "PMS, a token and a filled-in manifest.local.json")
+                         "a server, a token and a filled-in manifest.local.json")
     ap.add_argument("--pipeline", action="store_true",
                     help="run the synthetic pipeline tier — the DEFAULT, so this flag is a no-op "
                          "kept for the recipes that name it")
@@ -6089,8 +6090,8 @@ def main():
             sys.exit("no test_user in manifest.local.json -- nothing to resolve as a guest "
                      "identity (add a test_user block, see manifest.local.json.example; or boot "
                      "as the owner explicitly instead of asking for a guest)")
-        pms = manifest["pms"]
-        token = fetch_managed_user_token(read_token(), pms["host"], pms["port"], test_user["id"])
+        srv = manifest["server"]
+        token = fetch_managed_user_token(read_token(), srv["host"], srv["port"], test_user["id"])
         print(token)
         return 0
     if args.graphics_profile and not (args.fps or args.fps_player):
@@ -6130,7 +6131,7 @@ def main():
         "tv": args.tv or manifest.get("tv", ""),
         # server-tier only: the synthetic tier talks to no server and `load_manifest` does not
         # synthesize the key for it.
-        "pms": manifest.get("pms", {}),
+        "server": manifest.get("server", {}),
         "no_early": args.no_early,
         "save_logs": args.save_logs,
         "extra_triggers": [tuple(t.split("=", 1)) if "=" in t else (t, None) for t in args.extra_trigger],
@@ -6175,7 +6176,7 @@ def main():
             print(f"{c['name']:30s} {decl:22s} {size:11s} {ops:8s} {c.get('fixture','?')}{mark}")
         print(f"\nfixtures: {root}")
         print(f"install:  {APPID} [{FLAVOUR}] — triggers and log under {RUNDIR}")
-        print("\nThe pipeline tier needs no PMS, no token and no manifest.local.json — only a TV "
+        print("\nThe pipeline tier needs no server, no token, no manifest.local.json - only a TV "
               "address and\na pack built by `make fixtures-pipeline`.")
         return 0
 
@@ -6233,8 +6234,8 @@ def main():
             sys.exit("--suite selects among the SERVER tier's cases; pass --server with it. "
                      "(The synthetic tier is the default and has no logic/codec split.)")
         if args.owner or args.shared_server:
-            sys.exit("--owner / --shared-server are identities on a PMS; the default tier talks to "
-                     "no server. Pass --server if you meant the library-backed cases.")
+            sys.exit("--owner/--shared-server are identities on a server; the default tier "
+                     "talks to no server. Pass --server if you meant the library-backed cases.")
         root, pcases = fixtures_root, pipeline_cases
         if args.filter:
             pcases = [c for c in pcases if args.filter in c["name"]]
@@ -6304,8 +6305,8 @@ def main():
             if args.owner or not test_user:
                 token, cfg["inject_token"] = admin_token, True  # no baked token in the binary
             else:
-                token = fetch_managed_user_token(admin_token, cfg["pms"]["host"],
-                                                 cfg["pms"]["port"], test_user["id"])
+                token = fetch_managed_user_token(admin_token, cfg["server"]["host"],
+                                                 cfg["server"]["port"], test_user["id"])
                 cfg["inject_token"] = True
         print(f"install: {APPID} [{FLAVOUR}] — triggers and log under {RUNDIR}")
         acquire_tv_lock(cfg["tv"], f"tests/run.py --fps ({len(scenes)} scenes) [{FLAVOUR}]")
@@ -6341,7 +6342,7 @@ def main():
             print("NOTE: no test_user in manifest.local.json -> running as OWNER "
                   "(history WILL be affected)")
     else:
-        token = fetch_managed_user_token(admin_token, cfg["pms"]["host"], cfg["pms"]["port"],
+        token = fetch_managed_user_token(admin_token, cfg["server"]["host"], cfg["server"]["port"],
                                          test_user["id"])
         cfg["user_label"] = f'{test_user.get("title", "managed")} (id={test_user["id"]})'
         cfg["inject_token"] = True
@@ -6384,14 +6385,14 @@ def main():
     # The link conditioner, started ONCE for the tier — the binary points at its port for every
     # case, conditioned or not, so it cannot be a per-case resource. `usable` decides whether a
     # case that names a `link_profile` runs or skips; nothing else changes.
-    _host, listen = compiled_pms_endpoint()
-    cond = LinkConditioner(listen, (cfg["pms"]["host"], cfg["pms"]["port"]), cfg["tv"])
+    _host, listen = compiled_server_endpoint()
+    cond = LinkConditioner(listen, (cfg["server"]["host"], cfg["server"]["port"]), cfg["tv"])
     cond.start()
     atexit.register(cond.close)
     shaped, link_skipped = [c for c in cases if c.get("link_profile")], []
     if shaped:
         if cond.usable:
-            print(f"link conditioner: :{listen} -> PMS, {len(shaped)} shaped case(s)")
+            print(f"link conditioner: :{listen} -> server, {len(shaped)} shaped case(s)")
         else:
             print(f"link conditioner UNAVAILABLE — {cond.why}")
             for c in shaped:

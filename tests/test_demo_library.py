@@ -343,7 +343,7 @@ class Qr(unittest.TestCase):
         self.assertEqual(word >> 13, 0b00, "ECC level M")
 
     def test_the_styled_png_is_white_modules_on_a_transparent_ground(self):
-        w, h, colour, raw = decode_png(qr.png(self.m, scale=2, border=0, plex_style=True))
+        w, h, colour, raw = decode_png(qr.png(self.m, scale=2, border=0, account_style=True))
         self.assertEqual((w, h, colour), (50, 50, 4))
         stride = 1 + 2 * w
         px = lambda x, y: raw[y * stride + 1 + 2 * x: y * stride + 3 + 2 * x]
@@ -362,21 +362,21 @@ class AccountServiceStandIn(unittest.TestCase):
     """`butaca-plextv` points the sign-in at the mock: the pin never links."""
 
     def setUp(self):
-        self.pms = mock_server.MockServer(mock_server.Library())
+        self.srv = mock_server.MockServer(mock_server.Library())
 
     def test_a_pin_is_minted_with_the_demo_code_and_stays_pending(self):
-        status, _, body = self.pms.handle("POST", "/api/v2/pins?strong=false")
+        status, _, body = self.srv.handle("POST", "/api/v2/pins?strong=false")
         self.assertEqual(status, 201)
         pin = json.loads(body)
         self.assertEqual((pin["id"], pin["code"], pin["authToken"]), (mock_server.DEMO_PIN_ID, "DEMO", None))
-        status, _, body = self.pms.handle("GET", f"/api/v2/pins/{mock_server.DEMO_PIN_ID}")
+        status, _, body = self.srv.handle("GET", f"/api/v2/pins/{mock_server.DEMO_PIN_ID}")
         self.assertEqual((status, json.loads(body)["authToken"]), (200, None))
 
     def test_the_qr_is_a_styled_png(self):
-        status, ctype, body = self.pms.handle("GET", "/api/v2/pins/qr/DEMO")
+        status, ctype, body = self.srv.handle("GET", "/api/v2/pins/qr/DEMO")
         self.assertEqual((status, ctype), (200, "image/png"))
         self.assertEqual(decode_png(body)[2], 4)
-        self.assertEqual(body, self.pms.handle("GET", "/api/v2/pins/qr/DEMO")[2])
+        self.assertEqual(body, self.srv.handle("GET", "/api/v2/pins/qr/DEMO")[2])
 
 
 class SceneManifest(unittest.TestCase):
@@ -447,11 +447,11 @@ class Catalog(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.lib = mock_server.CatalogLibrary(CATALOG)
-        cls.pms = mock_server.MockServer(cls.lib)
+        cls.srv = mock_server.MockServer(cls.lib)
         cls.catalog = json.loads(CATALOG.read_text())
 
-    def get(self, path, pms=None):
-        status, ctype, data = (pms or self.pms).handle("GET", path)
+    def get(self, path, srv=None):
+        status, ctype, data = (srv or self.srv).handle("GET", path)
         self.assertEqual((status, ctype), (200, "application/json"), path)
         return json.loads(data)["MediaContainer"]
 
@@ -546,7 +546,7 @@ class Catalog(unittest.TestCase):
         with_art = [r for r in rows if r.get("thumb")]
         self.assertTrue(with_art and any(not r.get("thumb") for r in rows))
         url = urllib.parse.quote(with_art[0]["thumb"], safe="")
-        status, ctype, data = self.pms.handle("GET", f"/photo/:/transcode?width=250&height=375&minSize=1&url={url}")
+        status, ctype, data = self.srv.handle("GET", f"/photo/:/transcode?width=250&height=375&minSize=1&url={url}")
         self.assertEqual((status, ctype), (200, "image/jpeg"))
         self.assertTrue(data.startswith(b"\xff\xd8"))
 
@@ -559,24 +559,24 @@ class Catalog(unittest.TestCase):
 
     def test_artwork_is_served_and_a_missing_image_is_a_404(self):
         rk = self.lib.by_slug[self.catalog["hero"]]
-        status, ctype, data = self.pms.handle(
+        status, ctype, data = self.srv.handle(
             "GET", f"/photo/:/transcode?url=/library/metadata/{rk}/thumb/1&width=300&height=450&minSize=1")
         self.assertEqual((status, ctype), (200, "image/jpeg"))
         self.assertEqual(data[:2], b"\xff\xd8")
-        status, _, _ = self.pms.handle("GET", "/photo/:/transcode?url=/library/metadata/99999/thumb/1&width=10&height=10")
+        status, _, _ = self.srv.handle("GET", "/photo/:/transcode?url=/library/metadata/99999/thumb/1&width=10&height=10")
         self.assertEqual(status, 404)
 
     def test_a_clear_logo_is_served_as_a_transparent_png(self):
         # The path the app asks for (`ui/hero_logo.rs`), through the photo transcoder.
         ask = "/photo/:/transcode?url=/library/metadata/{}/clearLogo&width=600&height=240&minSize=1"
         rk = self.lib.by_slug[self.catalog["hero"]]
-        status, ctype, data = self.pms.handle("GET", ask.format(rk))
+        status, ctype, data = self.srv.handle("GET", ask.format(rk))
         self.assertEqual((status, ctype), (200, "image/png"))
         w, h = struct.unpack(">II", data[16:24])
         self.assertEqual(data[25], 6, "colour type 6 is RGBA")
         self.assertTrue(w >= 600 and h >= 240, (w, h))
         bare = next(k for k in self.lib.items if "clearLogo" not in self.lib.images.get(k, {}))
-        self.assertEqual(self.pms.handle("GET", ask.format(bare))[0], 404)
+        self.assertEqual(self.srv.handle("GET", ask.format(bare))[0], 404)
 
     def search(self, query, limit=12):
         # 12 is what the app asks for (`search::LIMIT`).
@@ -635,7 +635,7 @@ class Catalog(unittest.TestCase):
         for path in ("/hubs?count=12", "/library/sections/1/all?sort=titleSort:asc", "/hubs/search?query=the",
                      f"/library/metadata/{self.lib.by_slug[self.catalog['hero']]}"):
             with self.subTest(path=path):
-                self.assertEqual(self.pms.handle("GET", path), other.handle("GET", path))
+                self.assertEqual(self.srv.handle("GET", path), other.handle("GET", path))
 
     def test_nothing_reads_the_wall_clock(self):
         now = self.catalog["now"]

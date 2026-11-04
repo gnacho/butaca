@@ -198,7 +198,7 @@ PY
   kill -0 "$SIM_PID" 2>/dev/null || alive=0
   kill "$SIM_PID" 2>/dev/null || true; wait "$SIM_PID" 2>/dev/null || true; SIM_PID=""
   {
-    echo "# focusfp flow $n $name — pms=$SERVER_HOST:$SERVER_PORT seed=$SEED triggers=[$triggers] tokens=[$tokens]"
+    echo "# focusfp flow $n $name - server=$SERVER_HOST:$SERVER_PORT seed=$SEED triggers=[$triggers] tokens=[$tokens]"
     # fingerprints, and every heartbeat whose route word CHANGED — the two lines the harness reads
     awk '/^focus / {print; next}
          match($0, /route=[a-z]+( overlay=[a-z-]+)?/) { r=substr($0, RSTART, RLENGTH); if (r != last) { print "hb " r; last=r } }' "$log"
@@ -291,11 +291,13 @@ fi
 record_flow 11 pointer-stops "" "ck:960,92 sleep:1 ck:133,92 sleep:1 back sleep:1 ck:220,960 sleep:1 ck:1850,960 sleep:1 ck:960,540" 'hubs: landed'
 # 12 Phase-7 adoption: Filmography owns its own focus scope. A library-matched credit opens Detail, BACK
 # restores the Filmography entry and the next BACK dismisses it to its Person host. `nowan`: the
-# person page's F_PROFILE/F_CREDITS mailboxes still dial discover.provider.plex.tv for real (the
+# person page's F_PROFILE/F_CREDITS mailboxes used to dial the catalogue provider's `discover`
+# host over the WAN for real (the
 # `personcredits` seed only stands in for a landing, it does not suppress the fetch `pump` already
-# sent before the seed runs), and against the injected token that call 401s — so this flow's
-# stability otherwise depends on the internet answering that 401 promptly. `nowan` makes the name
-# refuse locally and at once, the same offline reproduction `docs/agent-reference.md` documents.
+# sent before the seed runs), and against the injected token that call 401s - so this flow's
+# stability otherwise depended on the internet answering that 401 promptly. That provider is gone
+# with the wire, and `nowan` is kept anyway: it makes the name refuse locally and at once, the same
+# offline reproduction `docs/agent-reference.md` documents.
 # Controlled recording instead captures that offline policy in the typed initial input and
 # produces the failed provider replies without a WAN call. Replay supplies every recorded reply
 # and admission with the mock off and resource execution denied.

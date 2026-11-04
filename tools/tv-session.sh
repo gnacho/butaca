@@ -453,7 +453,7 @@ resolve_identity() {
     if resolve_guest_token; then
       push_guest=1
       if [ "${mock:-0}" = 1 ]; then
-        identity_desc="guest — synthetic mock PMS (no account or account token)"
+        identity_desc="guest — synthetic mock server (no account or account token)"
       else
       identity_desc="guest — the manifest's managed test user (token via tests/run.py, value not printed)"
       fi
@@ -1035,7 +1035,7 @@ cmd_selftest() {
     local mock_dry
     mock_dry=$(cmd_up --guest --mock --dry-run 2>&1) || _identity_rc=1
     case "$mock_dry" in
-      *"identity: guest — synthetic mock PMS"*) ;;
+      *"identity: guest — synthetic mock server"*) ;;
       *) bad "mock guest dry run did not select a synthetic identity"; _identity_rc=1 ;;
     esac
     if (cmd_up --mock --dry-run) >/dev/null 2>&1; then
@@ -1303,7 +1303,7 @@ CUT
       cmd_wan status
       ;;
     status)
-      local chain since pms
+      local chain since srv
       chain=$(tvq "iptables -S OUTPUT 2>/dev/null | grep -c BUTACAWAN; ip -6 route show 2>/dev/null | grep -c '^unreachable 2000::/3'" | tr '\n' '/')
       since=$(tvq "cat $WAN_MARK 2>/dev/null")
       if [ -n "$since" ]; then
@@ -1314,8 +1314,8 @@ CUT
       # Measured from the SET, which is the only place the answer is about: the server on the Mac
       # over the LAN, and a public name through the router's resolver. The server host comes from
       # the gitignored config, when this checkout has one; a lane without it skips that line.
-      pms=${SERVER_HOST:-$(sed -n 's/.*SERVER_HOST *"\([^"]*\)".*/\1/p' "$REPO/src/config.local.h" 2>/dev/null)}
-      [ -n "$pms" ] && info "from the TV: LAN PMS /identity -> $(tvq "wget -q -T 5 -O - http://$pms:32400/identity >/dev/null 2>&1 && echo ok || echo FAIL")"
+      srv=${SERVER_HOST:-$(sed -n 's/.*SERVER_HOST *"\([^"]*\)".*/\1/p' "$REPO/src/config.local.h" 2>/dev/null)}
+      [ -n "$srv" ] && info "from the TV: LAN server /identity -> $(tvq "wget -q -T 5 -O - http://$srv:32400/identity >/dev/null 2>&1 && echo ok || echo FAIL")"
       info "from the TV: resolve plex.tv -> $(tvq "nslookup plex.tv >/dev/null 2>&1 && echo ok || echo FAIL")"
       ;;
   esac

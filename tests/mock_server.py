@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A SYNTHETIC media server — enough of the PMS REST surface for the app to boot to Home,
+"""A SYNTHETIC media server - enough of the server REST surface for the app to boot to Home,
 browse a library, open a detail page, a season, a person, search, mark watched, and start a play,
 with NOT ONE household byte anywhere in it.
 
@@ -130,9 +130,9 @@ read-out; the consent flow itself needs the TV and a real LAN address.
 Issue #266 (Boost Dialog / Normalize Loudness) fixtures and flags, every one default-off except
 the loudness attribute itself:
 
-`--no-plex-pass` answers `/` and `/identity` with `myPlexSubscription=false` (the version string
-is untouched — `tools/mock-guest.py` keys off it). Every generated and verification audio stream
-otherwise carries `canNormalizeLoudness="1"` (PMS string-encodes booleans on the wire); pass
+`--no-paid-tier` answers `/` and `/identity` with `myPlexSubscription=false` (the version string
+is untouched - `tools/mock-guest.py` keys off it). Every generated and verification audio stream
+otherwise carries `canNormalizeLoudness="1"` (the server string-encodes booleans on the wire); pass
 `--no-loudness-analysis` to omit the key entirely, modelling a server that never ran loudness
 analysis on the source.
 
@@ -145,8 +145,8 @@ like measured server 1.43.4 with the paid tier (M1/M2 in the design plan): the P
 server-refusal shape (`generalDecisionCode=2000`, a `transcodeDecisionCode`/`transcodeDecisionText`
 naming the enhancement, `route/plan.rs::refusal` reads this). `--ignore-enhancements` accepts the
 params but leaves the audio decision "copy" (an old server that does not act on them). Both can
-also be flipped live, mid-run, with `POST /_mock/config` — JSON body
-`{"refuse_enhancements": true, "ignore_enhancements": false, "plex_pass": false}` — so one test
+also be flipped live, mid-run, with `POST /_mock/config` - JSON body
+`{"refuse_enhancements": true, "ignore_enhancements": false, "paid_tier": false}` - so one test
 case can resolve once, then refuse only from the next decision on.
 
 Five fixed fixture movies (own section id 3, so ordinary section/rail counts and hashes over
@@ -162,7 +162,7 @@ and fallback rules:
 `GET /_mock/requests` returns every request `handle()` routed — `{"method", "path", "query",
 "session"}`, with any query key containing "token" stripped — as a JSON array, in arrival order;
 `DELETE /_mock/requests` clears it. (Raw ranged media-byte GETs under `/library/parts/<id>`
-bypass `handle()`, as before, and stay on the older `pms.requests` list only.)
+bypass `handle()`, as before, and stay on the older `srv.requests` list only.)
 
 `--transcode-fixture PATH` serves that file, with the same Range/206 handling as `--media`'s part
 bytes, for every `/video/:/transcode/universal/start...` request in place of the 404 a session
@@ -245,11 +245,11 @@ def search_matcher(query):
     """What `/hubs/search` counts as a hit: every word of the query begins a word of the name.
     "sp" finds "Spring" and "Sprite Fright"; "in" finds neither "Spring" nor "Sintel".
 
-    The WORD-PREFIX rule is an assumption, not a measurement: docs/pms-api.md §3b probed the
-    response shape, not the matching, and the spec only says PMS "looks for partial matches" and
-    spell-checks. It is the conservative reading — a mid-word match would make figures show hits a
-    real server may not return. Spell-checking is not modelled; the related results are, in
-    `Library.search`."""
+    The WORD-PREFIX rule is an assumption, not a measurement: the design notes for the retired wire
+    recorded the response shape, not the matching, and the spec only says the server "looks for
+    partial matches" and spell-checks. It is the conservative reading — a mid-word match would make
+    figures show hits a real server may not return. Spell-checking is not modelled; the related
+    results are, in `Library.search`."""
     want = search_words(query)
     if len(query.strip()) < SEARCH_MIN_QUERY or not want:
         return lambda name: False
@@ -361,15 +361,15 @@ class Library:
             detail = getattr(e, "output", b"").decode("utf-8", "replace").strip()
             raise ValueError(f"ffprobe failed for {path}: {detail or e}") from e
 
-    # The container a real the server would name, and the wire Content-Type for it. Only the two
+    # The container a real server would name, and the wire Content-Type for it. Only the two
     # containers this fixture set ever deals in — extend here, never with a per-caller default.
     _CONTAINER_CONTENT_TYPE = {"mkv": "video/x-matroska", "mp4": "video/mp4"}
 
     @staticmethod
     def _resolution_label(width, height):
-        """The (videoResolution, displayTitle-prefix) pair PMS derives from the DECODED frame
+        """The (videoResolution, displayTitle-prefix) pair a server derives from the DECODED frame
         size — e.g. `("4k", "4K")` — never a hardcoded 1080p regardless of the source file.
-        Thresholds follow PMS's own videoResolution buckets (sd/720/1080/4k)."""
+        Thresholds follow the server's own videoResolution buckets (sd/720/1080/4k)."""
         if width >= 3800 or height >= 2000:
             return "4k", "4K"
         if height >= 1000:
@@ -380,8 +380,8 @@ class Library:
 
     @staticmethod
     def _dovi_wire(stream):
-        """The eight `DOVI*` keys (docs/pms-api.md; spellings verified live against a real PMS
-        2026-08-21), derived from ffprobe's "DOVI configuration record" side-data entry on this
+        """The eight `DOVI*` keys (spellings verified live against a real server 2026-08-21),
+        derived from ffprobe's "DOVI configuration record" side-data entry on this
         VIDEO stream. Returns {} — sending none of the keys — when no such side-data is present,
         which is the shape `metadata::Dovi`'s never-convict-on-silence rule expects from an
         ordinary HDR10/SDR file; DOVIPresent is the only key the app actually gates on, so it is
@@ -576,7 +576,7 @@ class Library:
         return out
 
     def _maybe_loudness(self, audio):
-        """PMS string-encodes this boolean on the wire (#266)."""
+        """The server string-encodes this boolean on the wire (#266)."""
         if self.loudness_analysis:
             audio["canNormalizeLoudness"] = "1"
         return audio
@@ -918,8 +918,8 @@ class Library:
 
     def search(self, query, limit=3, include_collections=False):
         """`/hubs/search` as hubs. Each hub holds at most `limit` rows and its `size` is the number
-        it holds, as measured (docs/pms-api.md: "`limit` caps each hub separately", 3 when absent,
-        and `Hub.size` is the rows returned).
+        it holds, as measured (the retired wire's notes: "`limit` caps each hub separately", 3 when
+        absent, and `Hub.size` is the rows returned).
 
         The movie hub also carries RELATED results, which the spec documents for this endpoint:
         "for a genre match, it may return movies in that genre, or for an actor match, movies with
@@ -931,9 +931,9 @@ class Library:
         are ordered "based on quality", which the mock does not try to model. Shows, episodes and
         the other hubs hold direct hits only.
 
-        `include_collections` is `includeCollections=1`, measured live (docs/pms-api.md §2b): the
-        collection hub's rows move from tag-shaped `Directory[]` rows (tag `id`, `count`, `key`; no
-        ratingKey, no thumb) to the collections' full `Metadata[]` rows — the same rows
+        `include_collections` is `includeCollections=1`, measured live (the retired wire's notes):
+        the collection hub's rows move from tag-shaped `Directory[]` rows (tag `id`, `count`,
+        `key`; no ratingKey, no thumb) to the collections' full `Metadata[]` rows — the same rows
         `/library/sections/{s}/collections` lists, plus a `score`."""
         hits = search_matcher(query)
         limit = max(1, int(limit))
@@ -982,11 +982,12 @@ class Library:
 DEMO_PIN_ID = 1790000001
 DEMO_PIN_CODE = "DEMO"
 # The account token `--authorize-after` links the demo code with: synthetic, in the harness's own
-# token alphabet (`ALPHABET_TOKEN`), and accepted — never checked — by every endpoint here.
-DEMO_ACCOUNT_TOKEN = "s" + hashlib.sha1(b"mock-pms-demo-account").hexdigest()[:8]
-# What the demo sign-in QR encodes: the page a person types a code into. A scan of a screenshot
-# lands on the account service's own link page, which asks for a code this server invented.
-DEMO_QR_TEXT = b"https://plex.tv/link"
+# token alphabet (`ALPHABET_TOKEN`), and accepted (never checked) by every endpoint here.
+DEMO_ACCOUNT_TOKEN = "s" + hashlib.sha1(b"mock-server-demo-account").hexdigest()[:8]
+# What the demo sign-in QR encodes: a link page that asks for a code this server invented. The host
+# is reserved and does not resolve, on purpose: the capture is a QR image, and a scan of it must not
+# lead anywhere real.
+DEMO_QR_TEXT = b"https://demo.invalid/x"
 
 
 def demo_cache_dir():
@@ -1192,9 +1193,9 @@ class CatalogLibrary(Library):
 
     @staticmethod
     def _chapters(marks, duration, slug):
-        """`[{"start": "m:ss", "title": …}, …]` from the catalog → PMS's `Chapter[]`: each chapter
-        ends where the next begins, the last at the end of the file. The first must start at 0:00
-        and the starts must rise, as they do on a real file."""
+        """`[{"start": "m:ss", "title": …}, …]` from the catalog → the server's `Chapter[]`: each
+        chapter ends where the next begins, the last at the end of the file. The first must start
+        at 0:00 and the starts must rise, as they do on a real file."""
         def ms(stamp):
             m, s = stamp.split(":")
             return (int(m) * 60 + int(s)) * 1000
@@ -1208,7 +1209,7 @@ class CatalogLibrary(Library):
     @staticmethod
     def _blur_of(path):
         """The four UltraBlur corner colours the server would compute, taken from the backdrop itself: a
-        2×2 area-average of the image, darkened the way PMS's own colours are."""
+        2×2 area-average of the image, darkened the way the server's own colours are."""
         raw = subprocess.check_output(["ffmpeg", "-v", "error", "-i", str(path), "-vf",
                                        "scale=2:2:flags=area", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
         px = [tuple(int(c * 0.55) for c in raw[i:i + 3]) for i in range(0, 12, 3)]
@@ -1271,7 +1272,7 @@ class CatalogLibrary(Library):
                 it.setdefault("Collection", []).append({"tag": tag, "id": cid})
 
     def collection_metadata(self, section):
-        """The base listing, plus each collection's member order as PMS states it
+        """The base listing, plus each collection's member order as the server states it
         (`collectionSort`: 0 release date, 2 custom) — custom where the catalog orders it."""
         orders = getattr(self, "catalog", {}).get("collection_order", {})
         return [dict(row, collectionSort="2" if row["title"] in orders else "0")
@@ -1396,7 +1397,7 @@ def open_insecure_fail_listener(fail_mode):
                 return  # the listener was closed under us: shutting down, not a bug
             conn.close()
 
-    threading.Thread(target=accept_and_drop, name="mock-pms-insecure-fail", daemon=True).start()
+    threading.Thread(target=accept_and_drop, name="mock-insecure-fail", daemon=True).start()
     return port, listener
 
 
@@ -1407,7 +1408,7 @@ def plaintext_only_lan_resources(lib, ip, http_port, fail_port, access_token):
     `rust-modules/src/server/`'s `Resource`/`Connection` deserialise (`clientIdentifier`,
     `provides`, `owned`, `accessToken`, `httpsRequired`, `publicAddressMatches`,
     `connections[{protocol,address,port,uri,local,relay,IPv6}]`); the top-level shape is a bare
-    JSON array, not a `MediaContainer` — the account service's envelope, not a PMS one."""
+    JSON array, not a `MediaContainer` — the account service's envelope, not a media server's."""
     dashed = ip.replace(".", "-")
     https_uri = f"https://{dashed}.{PLEX_DIRECT_HASH}.plex.direct:{fail_port}"
     return [{
@@ -1451,9 +1452,9 @@ class MockServer:
         self.user_profile = {"autoSelectAudio": True, "defaultAudioLanguage": "en",
                              "defaultSubtitleLanguage": "en", "autoSelectSubtitle": 1,
                              "defaultSubtitleForced": 0, "defaultSubtitleAccessibility": 0}
-        # #266: myPlexSubscription on `/`/`/identity`; `serve(plex_pass=False)` or
-        # `POST /_mock/config {"plex_pass": false}` flips it live.
-        self.plex_pass = True
+        # #266: myPlexSubscription on `/`/`/identity`; `serve(paid_tier=False)` or
+        # `POST /_mock/config {"paid_tier": false}` flips it live.
+        self.paid_tier = True
         # #266: `/decision` behaviour for a live boostDialog/normalizeLoudness param — both
         # runtime-togglable through `POST /_mock/config`, so one test case can resolve once and
         # only then start refusing/ignoring.
@@ -1543,7 +1544,7 @@ class MockServer:
                 return j({"error": "invalid JSON body"}, 400)
             if not isinstance(patch, dict):
                 return j({"error": "body must be a JSON object"}, 400)
-            allowed = {"refuse_enhancements", "ignore_enhancements", "plex_pass"}
+            allowed = {"refuse_enhancements", "ignore_enhancements", "paid_tier"}
             unknown = set(patch) - allowed
             if unknown:
                 return j({"error": f"unknown config key(s): {sorted(unknown)}"}, 400)
@@ -1582,7 +1583,8 @@ class MockServer:
                       "authToken": DEMO_ACCOUNT_TOKEN if linked else None})
         if p == f"/api/v2/pins/qr/{DEMO_PIN_CODE}":
             import demo_library.qr as qr
-            return (200, "image/png", qr.png(qr.encode(DEMO_QR_TEXT, "M"), scale=8, border=0, plex_style=True))
+            art = qr.png(qr.encode(DEMO_QR_TEXT, "M"), scale=8, border=0, account_style=True)
+            return (200, "image/png", art)
         if p == "/api/v2/user":
             with self.lock:
                 profile = dict(self.user_profile)
@@ -1629,7 +1631,7 @@ class MockServer:
         if p == "/" or p == "/identity":
             return j(self.container(machineIdentifier=lib.machine, friendlyName=lib.friendly,
                                     version="1.41.0.0000-synthetic",
-                                    myPlexSubscription=self.plex_pass,
+                                    myPlexSubscription=self.paid_tier,
                                     platform="Linux", myPlex=True))
         if p == "/library/sections":
             return j(self.container(Directory=[dict(s, agent="tv.plex.agents.movie",
@@ -1766,7 +1768,7 @@ class MockServer:
                 hubs[0]["title"] = "Continue Watching"
                 hubs[1]["title"] = "Recently Added Movies" if kind == "movie" else "Recently Added TV"
                 # A real server lists the library's collections as shelves of their own after
-                # these (docs/pms-api.md, 3a), so the catalog's do the same.
+                # these (the retired wire's notes, 3a), so the catalog's do the same.
                 hubs += lib.section_collection_hubs(int(key), kind)
             return j(self.container(Hub=hubs))
         if p == "/hubs/search":
@@ -1918,7 +1920,7 @@ class MockServer:
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "MockPMS/0"
+    server_version = "MockServer/0"
 
     def log_message(self, fmt, *args):
         pass  # _do logs a redacted request path; BaseHTTPRequestHandler would log tokens.
@@ -1979,41 +1981,41 @@ class Handler(BaseHTTPRequestHandler):
         if len(segs) < 3 or segs[:2] != ["library", "parts"] or not segs[2].isdigit():
             return False
         part_id = int(segs[2])
-        path = getattr(self.server.pms.lib, "media_files", {}).get(part_id)
+        path = getattr(self.server.srv.lib, "media_files", {}).get(part_id)
         if path is None:
             return False
-        content_type = getattr(self.server.pms.lib, "media_content_type", {}).get(
+        content_type = getattr(self.server.srv.lib, "media_content_type", {}).get(
             part_id, "video/x-matroska")
         status = self._serve_file_ranged(method, path, content_type)
-        with self.server.pms.lock:
-            self.server.pms.requests.append((self.path, status))
+        with self.server.srv.lock:
+            self.server.srv.requests.append((self.path, status))
         return True
 
     def _transcode_fixture(self, method):
         u = urllib.parse.urlsplit(self.path)
         if not u.path.startswith("/video/:/transcode/universal/start"):
             return False
-        path = getattr(self.server.pms, "transcode_fixture", None)
+        path = getattr(self.server.srv, "transcode_fixture", None)
         if path is None:
             return False
         container = path.suffix.lstrip(".").lower()
         content_type = Library._CONTAINER_CONTENT_TYPE.get(container, "video/x-matroska")
         status = self._serve_file_ranged(method, path, content_type)
-        with self.server.pms.lock:
-            self.server.pms.requests.append((self.path, status))
+        with self.server.srv.lock:
+            self.server.srv.requests.append((self.path, status))
         return True
 
     def _do(self, method):
         if self.server.verbose:
-            print(f"mock_server: REQUEST {method} {self.server.pms.safe_path(self.path)}",
+            print(f"mock_server: REQUEST {method} {self.server.srv.safe_path(self.path)}",
                   file=sys.stderr, flush=True)
         if method in ("GET", "HEAD") and (self._media(method) or self._transcode_fixture(method)):
             return
         n = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(n) if n else b""
-        status, ctype, data = self.server.pms.handle(method, self.path, body, self.headers)
-        with self.server.pms.lock:
-            self.server.pms.requests.append((self.path, status))
+        status, ctype, data = self.server.srv.handle(method, self.path, body, self.headers)
+        with self.server.srv.lock:
+            self.server.srv.requests.append((self.path, status))
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
@@ -2053,26 +2055,27 @@ class Server(ThreadingHTTPServer):
 def serve(port, seed=1, host="127.0.0.1", verbose=False, movies=48, rail_fixture=False,
           media=None, extra_media=None, catalog=None, catalog_cache=None, hero=None,
           plaintext_only_lan=False, advertise_ip=None, insecure_fail_mode="handshake",
-          authorize_after=None, plex_pass=True, loudness_analysis=True,
+          authorize_after=None, paid_tier=True, loudness_analysis=True,
           refuse_enhancements=False, ignore_enhancements=False, transcode_fixture=None):
-    """Start a mock PMS in a daemon thread; returns (server, pms). Loopback only by default: the
-    app on the simulator is on this machine, and a LAN-facing listener would be one more thing
-    the outbound guard has to reason about. `catalog` serves the demo library instead of a seed.
+    """Start a mock media server in a daemon thread; returns (httpd, srv). Loopback only by
+    default: the app on the simulator is on this machine, and a LAN-facing listener would be one
+    more thing the outbound guard has to reason about. `catalog` serves the demo library instead of
+    a seed.
 
     `plaintext_only_lan=True` additionally answers `/api/v2/resources` (BUTACA-10; see the
     module doc) and opens the failing-HTTPS listener `insecure_fail_mode` names. `advertise_ip`
     picks the LAN address that resources row carries; `None` tries `detect_lan_ip()` and falls
     back to `"127.0.0.1"` with a stderr warning if nothing routes. The chosen address and the
-    fail listener's port end up on `pms.plaintext_only_lan`; the fail listener itself (`None` for
-    `insecure_fail_mode="unreachable"`) is on `srv.insecure_fail_listener`, for the caller to
-    `.close()` alongside `srv.shutdown()`.
+    fail listener's port end up on `srv.plaintext_only_lan`; the fail listener itself (`None` for
+    `insecure_fail_mode="unreachable"`) is on `httpd.insecure_fail_listener`, for the caller to
+    `.close()` alongside `httpd.shutdown()`.
 
     `authorize_after=N` links the QR sign-in's demo code on the Nth pin poll (`None`: never, except
     that `plaintext_only_lan` implies 2 so its reproduction signs in by itself).
 
-    #266: `plex_pass=False`/`loudness_analysis=False` set the starting state of
-    `pms.plex_pass`/`Library.loudness_analysis`; `refuse_enhancements`/`ignore_enhancements` set
-    the starting state of the same-named `pms.*` flags — all four are still flippable afterwards,
+    #266: `paid_tier=False`/`loudness_analysis=False` set the starting state of
+    `srv.paid_tier`/`Library.loudness_analysis`; `refuse_enhancements`/`ignore_enhancements` set
+    the starting state of the same-named `srv.*` flags - all four are still flippable afterwards,
     live, through `POST /_mock/config`. `transcode_fixture` is the file every
     `/video/:/transcode/universal/start*` request serves instead of the plain 404, Range/206
     included; `None` (default) leaves that endpoint unchanged."""
@@ -2084,21 +2087,21 @@ def serve(port, seed=1, host="127.0.0.1", verbose=False, movies=48, rail_fixture
     else:
         lib = Library(seed=seed, movies=movies, rail_fixture=rail_fixture, media=media,
                       extra_media=extra_media, loudness_analysis=loudness_analysis)
-    pms = MockServer(lib)
-    pms.plex_pass = plex_pass
-    pms.refuse_enhancements = refuse_enhancements
-    pms.ignore_enhancements = ignore_enhancements
-    pms.transcode_fixture = pathlib.Path(transcode_fixture) if transcode_fixture else None
+    srv = MockServer(lib)
+    srv.paid_tier = paid_tier
+    srv.refuse_enhancements = refuse_enhancements
+    srv.ignore_enhancements = ignore_enhancements
+    srv.transcode_fixture = pathlib.Path(transcode_fixture) if transcode_fixture else None
     if authorize_after is None and plaintext_only_lan:
         authorize_after = 2
-    pms.authorize_after = authorize_after
-    srv = Server((host, port), Handler)
-    srv.pms = pms
-    srv.verbose = verbose
-    srv.insecure_fail_listener = None
+    srv.authorize_after = authorize_after
+    httpd = Server((host, port), Handler)
+    httpd.srv = srv
+    httpd.verbose = verbose
+    httpd.insecure_fail_listener = None
     account_ip = advertise_ip or ("127.0.0.1" if host in ("0.0.0.0", "::") else host)
-    account_port = srv.server_address[1]
-    pms.account_resource = {
+    account_port = httpd.server_address[1]
+    srv.account_resource = {
         "name": lib.friendly, "clientIdentifier": lib.machine, "provides": "server",
         "owned": True, "home": False, "ownerId": 1, "presence": True,
         "accessToken": "s" + hashlib.sha1(lib.machine.encode()).hexdigest()[:8],
@@ -2119,15 +2122,15 @@ def serve(port, seed=1, host="127.0.0.1", verbose=False, movies=48, rail_fixture
                       "trigger against this fallback. Pass --advertise-ip with a real LAN "
                       "address.", file=sys.stderr, flush=True)
         fail_port, listener = open_insecure_fail_listener(insecure_fail_mode)
-        srv.insecure_fail_listener = listener
-        pms.plaintext_only_lan = {
-            "ip": ip, "http_port": srv.server_address[1], "fail_port": fail_port,
+        httpd.insecure_fail_listener = listener
+        srv.plaintext_only_lan = {
+            "ip": ip, "http_port": httpd.server_address[1], "fail_port": fail_port,
             "fail_mode": insecure_fail_mode,
             "access_token": "s" + hashlib.sha1(lib.machine.encode()).hexdigest()[:8],
         }
-    t = threading.Thread(target=srv.serve_forever, name="mock-pms", daemon=True)
+    t = threading.Thread(target=httpd.serve_forever, name="mock-server", daemon=True)
     t.start()
-    return srv, pms
+    return httpd, srv
 
 
 # ---------------------------------------------------------------- selftest ----------------
@@ -2139,8 +2142,8 @@ def selftest():
     import re
     import tempfile
     import urllib.request
-    srv, pms = serve(0, seed=7)
-    port = srv.server_address[1]
+    httpd, srv = serve(0, seed=7)
+    port = httpd.server_address[1]
     base = f"http://127.0.0.1:{port}"
 
     def get(path):
@@ -2153,7 +2156,7 @@ def selftest():
         return json.loads(b)["MediaContainer"]
 
     resources = json.loads(get("/api/v2/resources")[2])
-    assert len(resources) == 1 and resources[0]["clientIdentifier"] == pms.lib.machine
+    assert len(resources) == 1 and resources[0]["clientIdentifier"] == srv.lib.machine
     assert resources[0]["connections"][0]["uri"] == base
     users = json.loads(get("/api/v2/home/users")[2])["users"]
     user = json.loads(get("/api/v2/user")[2])
@@ -2175,7 +2178,7 @@ def selftest():
     assert changed["defaultSubtitleForced"] == 3
     assert changed["defaultSubtitleLanguage"] == profile["defaultSubtitleLanguage"]
     assert json.loads(get("/api/v2/user")[2])["profile"] == changed
-    assert pms.writes[-1][0] == "PUT" and pms.writes[-1][2] == b""
+    assert srv.writes[-1][0] == "PUT" and srv.writes[-1][2] == b""
 
     secs = jget("/library/sections")["Directory"]
     assert [s["key"] for s in secs] == ["1", "2"]
@@ -2211,7 +2214,7 @@ def selftest():
     assert "viewCount" not in jget(f"/library/metadata/{rk}")["Metadata"][0]
     # the closed alphabet: every title-shaped string obeys it
     tok = re.compile(f"^{ALPHABET_TOKEN}$")
-    for it in pms.lib.items.values():
+    for it in srv.lib.items.values():
         for k in ("title", "titleSort", "studio"):
             if it.get(k):
                 assert tok.match(it[k]), (k, it[k])
@@ -2221,16 +2224,16 @@ def selftest():
             assert tok.match(t["tag"]) and tok.match(t["role"]) and tok.match(t["tagKey"])
     # determinism: two FRESH servers with one seed answer byte-identically (the first server above
     # has been scrobbled, so it is compared to nothing — a write is supposed to change its answer)
-    srv2, pms2 = serve(0, seed=7)
-    srv4, _ = serve(0, seed=7)
-    p2 = srv2.server_address[1]
+    httpd2, srv2 = serve(0, seed=7)
+    httpd4, _ = serve(0, seed=7)
+    p2 = httpd2.server_address[1]
     with urllib.request.urlopen(f"http://127.0.0.1:{p2}/library/sections/1/all", timeout=5) as r:
         b2 = r.read()
-    with urllib.request.urlopen(f"http://127.0.0.1:{srv4.server_address[1]}/library/sections/1/all", timeout=5) as r:
+    with urllib.request.urlopen(f"http://127.0.0.1:{httpd4.server_address[1]}/library/sections/1/all", timeout=5) as r:
         assert r.read() == b2
     # a different seed is a different library
-    srv3, _ = serve(0, seed=8)
-    with urllib.request.urlopen(f"http://127.0.0.1:{srv3.server_address[1]}/library/sections/1/all", timeout=5) as r:
+    httpd3, _ = serve(0, seed=8)
+    with urllib.request.urlopen(f"http://127.0.0.1:{httpd3.server_address[1]}/library/sections/1/all", timeout=5) as r:
         assert r.read() != b2
 
     # Opt-in verification surface. Tiny valid files keep this endpoint test quick; the fixture
@@ -2257,8 +2260,8 @@ def selftest():
         "-c:s", "srt", "-metadata:s:a:0", "language=eng", "-disposition:a:0", "default",
         "-metadata:s:s:0", "language=eng", "-disposition:s:0", "0", "-t", "2",
         str(media / "mockverify-v2.mkv")])
-    media_srv, media_pms = serve(0, seed=7, media=media)
-    media_base = f"http://127.0.0.1:{media_srv.server_address[1]}"
+    media_httpd, media_srv = serve(0, seed=7, media=media)
+    media_base = f"http://127.0.0.1:{media_httpd.server_address[1]}"
     prefs = json.load(urllib.request.urlopen(
         media_base + f"/library/metadata/{VERIFY_SHOW_RK}?includePreferences=1"))
     assert prefs["MediaContainer"]["Metadata"][0]["Preferences"]["Setting"] == VERIFY_PREFS
@@ -2282,10 +2285,10 @@ def selftest():
         media_base + f"/library/parts/{VERIFY_PARTS[V2_RATING_KEY]}?allParts=1&subtitleStreamID=0",
         method="PUT")
     urllib.request.urlopen(put).read()
-    assert media_pms.writes and media_pms.writes[-1][0] == "PUT"
-    assert not pms.unknown, pms.unknown
-    assert not media_pms.unknown, media_pms.unknown
-    for s_ in (srv, srv2, srv3, srv4, media_srv):
+    assert media_srv.writes and media_srv.writes[-1][0] == "PUT"
+    assert not srv.unknown, srv.unknown
+    assert not media_srv.unknown, media_srv.unknown
+    for s_ in (httpd, httpd2, httpd3, httpd4, media_httpd):
         s_.shutdown()
         s_.server_close()
     tmp.cleanup()
@@ -2294,11 +2297,11 @@ def selftest():
     print("mock_server selftest: ok")
 
 
-def _teardown(srv):
-    srv.shutdown()
-    srv.server_close()
-    if srv.insecure_fail_listener is not None:
-        srv.insecure_fail_listener.close()
+def _teardown(httpd):
+    httpd.shutdown()
+    httpd.server_close()
+    if httpd.insecure_fail_listener is not None:
+        httpd.insecure_fail_listener.close()
 
 
 def _selftest_plaintext_only_lan():
@@ -2309,10 +2312,10 @@ def _selftest_plaintext_only_lan():
     testing the mock's wire shapes, not the app's loopback-ineligibility rule."""
     import ssl
 
-    srv, pms = serve(0, seed=7, plaintext_only_lan=True, advertise_ip="127.0.0.1")
+    httpd, srv = serve(0, seed=7, plaintext_only_lan=True, advertise_ip="127.0.0.1")
     try:
-        cfg = pms.plaintext_only_lan
-        http_port = srv.server_address[1]
+        cfg = srv.plaintext_only_lan
+        http_port = httpd.server_address[1]
         assert cfg["ip"] == "127.0.0.1" and cfg["http_port"] == http_port
 
         with urllib.request.urlopen(f"http://127.0.0.1:{http_port}/api/v2/resources", timeout=5) as r:
@@ -2320,7 +2323,7 @@ def _selftest_plaintext_only_lan():
         assert isinstance(resources, list) and len(resources) == 1, resources
         res = resources[0]
         assert res["provides"] == "server" and res["owned"] is True
-        assert res["clientIdentifier"] == pms.lib.machine
+        assert res["clientIdentifier"] == srv.lib.machine
         assert res["httpsRequired"] is False and res["publicAddressMatches"] is True
         conns = res["connections"]
         assert len(conns) == 2, conns
@@ -2352,7 +2355,7 @@ def _selftest_plaintext_only_lan():
         # the plaintext local connection answers /identity tokenless.
         with urllib.request.urlopen(f"http://127.0.0.1:{http_port}/identity", timeout=5) as r:
             identity = json.loads(r.read())["MediaContainer"]
-        assert identity["machineIdentifier"] == pms.lib.machine
+        assert identity["machineIdentifier"] == srv.lib.machine
 
         # the mode signs in by itself: the demo code links on the 2nd poll, with the synthetic
         # account token (T2 — the reproduction needs no real account).
@@ -2364,14 +2367,14 @@ def _selftest_plaintext_only_lan():
         assert poll() == DEMO_ACCOUNT_TOKEN
         assert re.fullmatch(ALPHABET_TOKEN, DEMO_ACCOUNT_TOKEN)
     finally:
-        _teardown(srv)
+        _teardown(httpd)
 
     # the selectable "unreachable" fail mode: nothing is listening on the advertised port at all.
-    srv2, pms2 = serve(0, seed=7, plaintext_only_lan=True, advertise_ip="127.0.0.1",
+    httpd2, srv2 = serve(0, seed=7, plaintext_only_lan=True, advertise_ip="127.0.0.1",
                        insecure_fail_mode="unreachable")
     try:
-        assert srv2.insecure_fail_listener is None
-        fail_port = pms2.plaintext_only_lan["fail_port"]
+        assert httpd2.insecure_fail_listener is None
+        fail_port = srv2.plaintext_only_lan["fail_port"]
         try:
             socket.create_connection(("127.0.0.1", fail_port), timeout=5).close()
             raised = False
@@ -2379,7 +2382,7 @@ def _selftest_plaintext_only_lan():
             raised = True
         assert raised, "an unreachable fail port must refuse or time out, never accept"
     finally:
-        _teardown(srv2)
+        _teardown(httpd2)
 
 
 def main():
@@ -2427,12 +2430,12 @@ def main():
     ap.add_argument("--authorize-after", type=int, metavar="N",
                     help="link the QR sign-in's demo code on the Nth pin poll with a synthetic "
                          "account token (default: never; --plaintext-only-lan implies 2)")
-    ap.add_argument("--no-plex-pass", action="store_true",
+    ap.add_argument("--no-paid-tier", action="store_true",
                     help="#266: / and /identity answer myPlexSubscription=false (the version "
                          "string is untouched — tools/mock-guest.py depends on it)")
     ap.add_argument("--no-loudness-analysis", action="store_true",
                     help="#266: omit canNormalizeLoudness from every audio stream — by default "
-                         "it is sent as \"1\" (PMS string-encodes it), modelling a server that "
+                         "it is sent as \"1\" (the server string-encodes it), modelling a server that "
                          "never analysed the source for loudness")
     ap.add_argument("--refuse-enhancements", action="store_true",
                     help="#266: a live boostDialog=1/normalizeLoudness=1 on /decision gets the "
@@ -2460,12 +2463,12 @@ def main():
         selftest()
         return
     try:
-        srv, pms = serve(a.port, seed=a.seed, host=a.host, verbose=a.verbose,
+        httpd, srv = serve(a.port, seed=a.seed, host=a.host, verbose=a.verbose,
                          movies=a.movies, rail_fixture=a.rail_fixture, media=a.media,
                          extra_media=a.extra_media, catalog=a.catalog, catalog_cache=a.catalog_cache,
                          hero=a.hero, plaintext_only_lan=a.plaintext_only_lan,
                          advertise_ip=a.advertise_ip, insecure_fail_mode=a.insecure_fail_mode,
-                         authorize_after=a.authorize_after, plex_pass=not a.no_plex_pass,
+                         authorize_after=a.authorize_after, paid_tier=not a.no_paid_tier,
                          loudness_analysis=not a.no_loudness_analysis,
                          refuse_enhancements=a.refuse_enhancements,
                          ignore_enhancements=a.ignore_enhancements,
@@ -2473,20 +2476,20 @@ def main():
     except ValueError as e:
         ap.error(str(e))
     what = f"catalog={a.catalog}" if a.catalog else f"seed={a.seed}"
-    print(f"mock_server: serving {what} on http://{a.host}:{srv.server_address[1]}", flush=True)
+    print(f"mock_server: serving {what} on http://{a.host}:{httpd.server_address[1]}", flush=True)
     if a.media is not None:
-        trigger = {"name": pms.lib.friendly, "machine_id": pms.lib.machine,
-                   "host": "<TV-REACHABLE-HOST>", "port": srv.server_address[1],
-                   "token": "mock-pms", "v1_rating_key": str(V1_RATING_KEY),
+        trigger = {"name": srv.lib.friendly, "machine_id": srv.lib.machine,
+                   "host": "<TV-REACHABLE-HOST>", "port": httpd.server_address[1],
+                   "token": "mock-server", "v1_rating_key": str(V1_RATING_KEY),
                    "v2_rating_key": str(V2_RATING_KEY)}
         print(json.dumps(trigger, separators=(",", ":")), flush=True)
     if a.plaintext_only_lan:
-        cfg = pms.plaintext_only_lan
-        print(f"mock_server: plaintext-only-lan resources: machine={pms.lib.machine} "
+        cfg = srv.plaintext_only_lan
+        print(f"mock_server: plaintext-only-lan resources: machine={srv.lib.machine} "
               f"https(fails, {cfg['fail_mode']})=https://<dashed-ip>.{PLEX_DIRECT_HASH}"
               f".plex.direct:{cfg['fail_port']} http(answers)=http://{cfg['ip']}:{cfg['http_port']}",
               flush=True)
-    for rk, path in sorted(getattr(pms.lib, "extra_media_files", {}).items()):
+    for rk, path in sorted(getattr(srv.lib, "extra_media_files", {}).items()):
         print(f"mock_server: extra-media rk={rk} file={path}", flush=True)
     try:
         while True:
@@ -2494,11 +2497,11 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        srv.shutdown()
-        if srv.insecure_fail_listener is not None:
-            srv.insecure_fail_listener.close()
-        if pms.unknown:
-            print("mock_server: unknown paths seen: " + ", ".join(sorted(set(pms.unknown))), file=sys.stderr)
+        httpd.shutdown()
+        if httpd.insecure_fail_listener is not None:
+            httpd.insecure_fail_listener.close()
+        if srv.unknown:
+            print("mock_server: unknown paths seen: " + ", ".join(sorted(set(srv.unknown))), file=sys.stderr)
 
 
 if __name__ == "__main__":

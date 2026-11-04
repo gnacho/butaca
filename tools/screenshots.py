@@ -175,8 +175,8 @@ def clean_env(rt, shot, scene, defaults):
 
 def capture(binary, scene, defaults, hero, keep):
     """Boot one scene and return (png bytes, log text). Raises RuntimeError on any failure."""
-    srv, pms = mock_server.serve(0, catalog=CATALOG, hero=hero)
-    port = srv.server_address[1]
+    httpd, srv = mock_server.serve(0, catalog=CATALOG, hero=hero)
+    port = httpd.server_address[1]
     rt = pathlib.Path(tempfile.mkdtemp(prefix=f"butaca-shot-{scene['name']}-"))
     try:
         triggers = {"plextv": f"http://127.0.0.1:{port}", "stillclock": str(defaults["stillclock_ms"])}
@@ -213,8 +213,8 @@ def capture(binary, scene, defaults, hero, keep):
             hits = [l for l in log.splitlines() if bad in l]
             if hits:
                 problems.append(f"{bad}: {hits[0]}")
-        if pms.unknown:
-            problems.append(f"the mock could not answer: {sorted(set(pms.unknown))[:5]}")
+        if srv.unknown:
+            problems.append(f"the mock could not answer: {sorted(set(srv.unknown))[:5]}")
         if problems:
             tail = "\n    ".join(log.splitlines()[-15:])
             raise RuntimeError("; ".join(problems) + f"\n  instance root: {rt}\n  log tail:\n    {tail}")

@@ -64,7 +64,7 @@ def _manifest():
 
 def _overlay(items):
     """A minimal, syntactically complete overlay carrying `items` and nothing optional."""
-    return {"pms": {"host": "10.0.0.2", "port": 32400}, "tv": "10.0.0.3", "items": items}
+    return {"server": {"host": "10.0.0.2", "port": 32400}, "tv": "10.0.0.3", "items": items}
 
 
 class _Overlay:
@@ -1541,7 +1541,7 @@ class LoadManifest(unittest.TestCase):
     def test_placeholders_outside_items_are_still_fatal(self):
         """No run of any size can proceed without these, so they keep the loud death."""
         local = _overlay({})
-        local["pms"]["host"] = "<pms-host>"
+        local["server"]["host"] = "<server-host>"
         with self.assertRaises(SystemExit):
             self._load(local)
 
@@ -2325,7 +2325,7 @@ class AutoNetworkProfile(unittest.TestCase):
         self.assertFalse(run.a_abr_shape(recovering[:-1], {"settle_min_kbps": 8000})[0],
                          "a run that ended on the floor did not recover, whatever it reached before")
 
-    def test_a_requested_rung_cannot_substitute_for_the_picture_pms_returned(self):
+    def test_a_requested_rung_cannot_substitute_for_the_picture_the_server_returned(self):
         """The reported regression is request=22 Mbps/4K but decoded=720p.
 
         A rung floor alone calls that run recovered because it reads the actuator sent to the server.

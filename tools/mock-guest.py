@@ -22,7 +22,7 @@ def configured_origin(config):
     if not host or not port or not re.fullmatch(r"[A-Za-z0-9.-]+", host[1]):
         raise ValueError("mock guest requires explicit SERVER_HOST and SERVER_PORT in config.local.h")
     if not 1 <= int(port[1]) <= 65535:
-        raise ValueError("invalid mock PMS port")
+        raise ValueError("invalid mock server port")
     return f"http://{host[1]}:{int(port[1])}"
 
 
@@ -42,7 +42,7 @@ def resolve(config):
     user = get("/api/v2/user")
     if (identity.get("version") != "1.41.0.0000-synthetic"
             or user.get("uuid") != "demo-user" or user.get("username") != "demo"):
-        raise ValueError("configured server is not the synthetic mock PMS")
+        raise ValueError("configured server is not the synthetic mock server")
     # This value is fabricated, never an account or per-server access token. The mock accepts
     # arbitrary nonempty tokens; a real server cannot authenticate it even if misconfigured later.
     return MOCK_TOKEN
