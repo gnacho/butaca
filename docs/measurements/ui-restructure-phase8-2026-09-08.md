@@ -379,7 +379,7 @@ erase negative zero, NaN payloads or infinities. The payload version is explicit
 missing optional fields are refused rather than being silently interpreted as null.
 
 Client resources are represented by immutable logical instance generations, NOT pointers,
-origins, tokens or Plex device identifiers. The live landing still carries its original client
+origins, tokens or device identifiers. The live landing still carries its original client
 reference and uses the unchanged pointer/token guard. The decoder requires an explicit mapping
 from recorded client id to the corresponding client resource, including superseded instances;
 it refuses unresolved ids and wrong-server mappings and preserves stale token tags verbatim.

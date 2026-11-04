@@ -517,7 +517,7 @@ any caller needs a per-site flag to fit, A's over-build argument is live again.*
 **Step 5 is a fork, not a formality.** Measure `serde_json::from_slice`. If it exceeds ~8ms on
 common payloads, the hub refresh needs a decode worker, and any future readiness-reactor idea is
 definitively the wrong axis — record the number and close E's file. If recv dominates *and* a
-keep-alive or `plex.direct` TLS transport ever lands, E's poll-set becomes live again and `Job`
+keep-alive or a pinned-name TLS transport ever lands, E's poll-set becomes live again and `Job`
 can be re-implemented over it without touching a caller.
 
 **Signals D was right.** A third cross-thread reader of route's state appearing anywhere, or any

@@ -217,7 +217,7 @@ Nothing. A release build compiles out the whole `/tmp` trigger surface, the remo
 
 Films and television from a Jellyfin server you can reach. No music, no photos, no live television, no DVR.
 
-Unlike the Plex flavour described below, the server address **is** typed on the television, because there is no account service that already knows your servers.
+The server address **is** typed on the television, because there is no account service that already knows your servers.
 
 ## The bundled FFmpeg
 
@@ -235,12 +235,12 @@ Full licence text travels inside the package, in `THIRD-PARTY-NOTICES.md` and `l
 
 The bundled build is configured with `--disable-network` and `file` as its only protocol, so it cannot open a URL at all; everything it demuxes arrives through the app's own transport.
 
-## If you build the Plex flavour
+## The flavour that is no longer built
 
-The same source builds a Plex client when it is compiled with the Plex flavour instead. It differs from everything above in the ways that matter for installing and for privacy:
+The same source used to build a client for the retired vendor's wire when it was compiled with that flavour. The flavour was removed in #201 and #202, so nothing here builds it today. While it existed it differed from everything above in the ways that matter for installing and for privacy:
 
-- **Sign-in is a QR code** tied to your Plex account, followed by a choice of Plex Home profile when the account has one. No password is typed on the television and no server address is either: the account already knows which servers it can reach.
-- **It reaches `plex.tv` and `discover.provider.plex.tv`** over TLS, because sign-in and cast biographies come from there, plus the servers your account can reach.
+- **Sign-in is a QR code** tied to that account, followed by a choice of household profile when the account had one. No password is typed on the television and no server address is either: the account already knows which servers it can reach.
+- **It reached the account service and its discovery host** over TLS, because sign-in and cast biographies came from there, plus the servers your account can reach.
 - **A server that only answers in the clear** can be accepted on request, offered only for a numeric private address on the television's own network, and only after every secure route has failed. The permission is never stored and ends when you sign in or out or bring the app back from the background.
 - **The session is protected with the platform key manager** where the firmware offers a usable AES-GCM service, and falls back to an app-owned mode-0600 file where it does not.
 

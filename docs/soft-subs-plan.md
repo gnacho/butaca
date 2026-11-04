@@ -3,14 +3,14 @@
 > **SUPERSEDED — kept as history only (do not implement).** The premise below was refuted
 > on-device: the WebVTT sidecar delivers **0 bytes** on our progressive-MKV pipeline and
 > `/library/streams/{id}.vtt` is 501, so **burn is the only transcode option** and the real
-> subtitle path is client rendering on direct-play — see `rust-modules/src/plex/CLAUDE.md`
+> subtitle path is client rendering on direct-play — see `rust-modules/src/server/CLAUDE.md`
 > ("Subtitles: assume client rendering") and the player subtitle renderer. The
 > "landed, tested parser (`webvtt.rs`)" referenced below was deleted in 77c5af6.
 
 **Goal.** When the user selects a subtitle track *while the item is transcoding*, render it
 **client-side as soft text** — the same GLES text overlay direct-play already uses — instead
-of asking Plex to **burn** it into the H264 video plane. We do this by opening a **second HTTP
-connection on the same transcode session** to Plex's soft-subtitle endpoint, which returns
+of asking the server to **burn** it into the H264 video plane. We do this by opening a **second HTTP
+connection on the same transcode session** to the server's soft-subtitle endpoint, which returns
 WebVTT streamed in lock-step with the video transcode, parsing it incrementally, and pushing
 the cues into the **existing `SHARED.sub_cues` store** so `ui::player_hud::draw_subtitles` is
 reused unchanged.
@@ -66,7 +66,7 @@ Key existing anchors (all verified):
   `stream.rs:88,217,290,356`; close-to-interrupt handles `hs_ptr`/`hs2_ptr` — `shared.rs:75`.
 - Transcode session/base/seek: `route::transcode_session/transcode_base/transcode_seek/
   retranscode/switch_audio` — `route.rs:56,155,114,308,336`.
-- The dead-but-ready URL builder: `plex::transcode_subtitles_url` — `plex/transcoder.rs:71`.
+- The dead-but-ready URL builder: `transcode_subtitles_url`, in the retired `transcoder.rs:71`.
 
 ---
 
@@ -96,7 +96,7 @@ reset in `reset_session()` (same three). No `subs_seek` integer is needed — a 
 re-open always uses a fresh URL (never a byte Range), so `subs_next_url.is_some()` *is* the
 re-open signal (simpler than the demux path, which multiplexes byte-Range vs URL seeks).
 
-The **desired** track is expressed as a Plex stream id the main thread owns:
+The **desired** track is expressed as a server stream id the main thread owns:
 
 ```rust
 // desired soft-sub sid for the CURRENT transcode; 0 = none/off. Set by track_menu,
@@ -323,7 +323,7 @@ pub(crate) fn transcode_subtitles_url(sub_sid: i64, offset_secs: i64) -> Option<
 }
 ```
 
-The dead `plex::transcode_subtitles_url` (`plex/transcoder.rs:71`) is a ready reference, but its
+The dead `transcode_subtitles_url` (the retired `transcoder.rs:71`) is a ready reference, but its
 `transcode_query` still appends `&subtitles=burn` when `subtitle_stream_id>0`
 (`transcoder.rs:33-38`); that burn param **must not** leak into the subtitles request. The
 helper above sidesteps it by building from the burn-free `TBASE` and setting `subtitles=auto`
@@ -451,7 +451,7 @@ trigger with the soft-subs request:
          addr_of_mut!(ACTIVE_SUB).write(sel - 1);              // row 0 = Off = -1
 -        // direct-play: client-render the selected track from the demuxer (instant)
 -        crate::player::request_subtitle(active_sub());
--        // transcode: remember the Plex sub stream id to BURN into any transcode of this item;
+-        // transcode: remember the server's sub stream id to BURN into any transcode of this item;
 -        // if we're transcoding right now, re-burn immediately at the current pos.
 -        crate::route::set_subtitle(sub_stream_id());
 -        if !crate::route::transcode_session().is_empty() {
@@ -516,8 +516,8 @@ the pump (`pump.rs:29` swap + the `refresh` half of the `asid >= 0 || refresh` a
 is retained as a compile path — then gate.) The audio-switch arm stays; it legitimately
 re-transcodes video, and §2.4 re-opens the subs stream on the new offset.
 
-**Why Plex will now emit soft, not burn.** The advertised client profile
-(`X-Plex-Client-Profile-Extra`, `route.rs:156-158`) declares only a video transcode target and
+**Why the server would now emit soft, not burn.** The advertised client profile
+(the client-profile header, `route.rs:156-158`) declares only a video transcode target and
 no soft-sub capability, so PMS defaults an *attached-to-the-video* subtitle to burn. With (b)+(c)
 the video request carries no subtitle at all, and the explicit `/subtitles?…&subtitles=auto`
 call asks specifically for the sidecar text stream — the endpoint that returns `text/vtt`.
@@ -559,7 +559,7 @@ Either way the soft path is the default; burn is the escape hatch, not the norm.
 **The load-bearing risk.** `engine.rs:183-184` deliberately **skips the cue preflight for a
 transcode** — "a 2nd conn cuts the stream": a concurrent second connection raced/killed the
 primary MKV transcode stream. The subtitles sidecar is a *different* kind of second connection —
-same `session=` id, an endpoint Plex designed to stream **alongside** the video — so it should
+same `session=` id, an endpoint the vendor designed to stream **alongside** the video — so it should
 be tolerated where an independent second full stream was not. **Validate this on-device before
 relying on it:** select a sub mid-transcode and confirm (a) `/tmp/butaca-events.log` shows
 `subs:` cues flowing *and* the video `feed v#…` cadence continuing uninterrupted, and (b) the

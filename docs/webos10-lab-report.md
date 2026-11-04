@@ -162,7 +162,7 @@ curlio: bound libcurl.so.4 curl_multi_* (7 symbols)
 ```
 
 The SONAME candidate list picked `.so.4` — the flip `dynlib.rs` exists for. Both tables bound: the
-`net.rs` one for plex.tv and PMS control, and `curlio.rs`'s separate seven-symbol multi table,
+`net.rs` one for the account service and server control, and `curlio.rs`'s separate seven-symbol multi table,
 frozen to the oldest supported set, which resolved here on a stack four major versions newer.
 
 **And `CURLOPT_PINNEDPUBLICKEY` worked against OpenSSL 3.0.13.** `docs/lab-diagnostics.md` §11 lists
@@ -197,7 +197,7 @@ auth: switch '<name>' -> ok (per-user server token)
 hubs: landed — 54 items, 6 shelves
 ```
 
-The registry of `rust-modules/src/plex/CLAUDE.md` held two servers with separate tokens — the
+The registry of `rust-modules/src/server/CLAUDE.md` held two servers with separate tokens — the
 owner's (PMS 1.43.3) and a shared one (PMS 1.43.4) — and the who's-watching picker, the managed
 profile switch and the per-user server token all worked. A managed profile's PIN keypad was
 exercised twice (§4.2 is about what that put in the log).
@@ -459,9 +459,9 @@ Run 1, from `auth: authorized` to both servers reachable — **15 977 ms**:
 
 ```
 151247  auth: authorized — discovering server
-152625  plex: server slot 0 registered at <addr>
+152625  server: slot 0 registered at <addr>
 157208  auth: '<name>' probe timed out at <addr>
-158223  plex: server slot 0 re-pointed to https://<host>
+158223  server: slot 0 re-pointed to https://<host>
 162319  stream: GET /identity DNS FAILED host=…
 167223  auth: '<name>' probe timed out at <addr>
 167224  auth: 2 server(s) reached, primary '<name>'
@@ -489,9 +489,9 @@ what a redactor missed is the same leak by a shorter route, which is why
 `stream: GET /identity DNS FAILED host=<the hostname verbatim>`. It appeared once per run — three
 of the ten uploads carry a household's PMS hostname in the clear. The scrubber cannot see it:
 `scrub_authority` only rewrites what follows `://`, `scrub_addresses` only matches numeric
-addresses, and the hostname is a custom domain rather than a `plex.direct` name, so the one
+addresses, and the hostname is a custom domain rather than a pinned-name origin, so the one
 hostname special-case does not apply either. **Strictly, §6 does not promise to catch this** — its
-layers are tokens, credential headers, credential query params, `plex.direct`, `scheme://host`,
+layers are tokens, credential headers, credential query params, pinned-name origins, `scheme://host`,
 bare addresses, and known household identities. A bare hostname in a `host=` field is outside every
 one of them. That makes it a design gap rather than a broken guarantee, and the call site's own
 comment shows how it got there:

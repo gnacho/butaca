@@ -3,7 +3,7 @@
 **Found 2026-08-29**, while investigating a playback failure the maintainer hit by hand: a seek
 during Auto, then `warmup_unreachable`, then a run of `curlio: status=404`, then
 `hls: demux failed: HLS segment was not produced in time`. Every visible symptom points at the
-Plex Media Server. None of them was the server.
+media server. None of them was the server.
 
 ## 1. The mechanism
 

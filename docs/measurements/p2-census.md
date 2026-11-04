@@ -2,7 +2,7 @@
 
 **Device session 2026-08-27.** LG 49SM9000PLA, webOS 4.10.0, `com.butaca.debug`, panel off
 (`tools/tv-session.sh screen off` — a panel state, not an app state; it delivers no SDL background
-event and does not suspend the buffer-feed). Pipeline tier: no Plex, no PMS, a static fixture
+event and does not suspend the buffer-feed). Pipeline tier: no server, a static fixture
 server on the dev Mac. Seven `pipe_abr_pin_*` cases, all `--no-early`. Scrubbed logs in
 `p2-logs/` beside this file.
 

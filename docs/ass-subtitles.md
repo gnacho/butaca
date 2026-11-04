@@ -70,7 +70,7 @@ The native host test checks actual libass pixels; ordinary host tests check sour
 selection/seek fencing, overlap, bounds and download policy. Neither proves TV performance.
 Boot the fixture with `tools/tv-session.sh up --guest --mock --screen player=990001`.
 `--mock` verifies the configured server’s synthetic identity and supplies a fabricated guest token;
-it never resolves a real Plex account. Configure and build the developer app against that mock first.
+it never resolves a real account. Configure and build the developer app against that mock first.
 
 Device checks must hold the TV lease and keep both the panel and sound off. Release the lease
 while building or reviewing captures. Compare the unchanged

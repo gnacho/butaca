@@ -53,7 +53,7 @@ and 51 segments went by.
 At 500 kbps the bottom rung is itself unaffordable (320 video + ~192 audio), so *some* slowness is
 required — but a 47 s stall at 14 000 kbps is not that. This is squarely the emergency/admission
 law the plan sequences as **I5** (N3 + N4 + N5), and it is now reproducible on demand, on a tier
-that needs no Plex and no library.
+that needs no server and no library.
 
 ## 3. What the four bounds should become
 

@@ -228,19 +228,19 @@ draws rather than cutting to it. (LG's guidance is explicit that the splash shou
 
 Reached automatically when there is no usable session, and on demand from the account menu. It shows
 a **QR code** and a **four-character link code**, with the instruction to scan it or go to
-`plex.tv/link` and enter the code. A spinner reads *"Waiting for you to sign in…"* and the screen
+the account service's link page and enter the code. A spinner reads *"Waiting for you to sign in…"* and the screen
 advances by itself the moment the account is linked. Nothing needs pressing; after a minute with no
 answer the spinner's line becomes *"Still waiting — press OK for a new code"*, and OK mints a fresh
 code without leaving the screen.
 
-*The code in the figure, DEMO, and its QR are the mock server's stand-in for plex.tv's pin
-service (§9); a real code is a one-time, short-lived claim code that names no account.*
+*The code in the figure, DEMO, and its QR are the mock server's stand-in for the account service's
+pin service (§9); a real code is a one-time, short-lived claim code that names no account.*
 
-Account **creation** happens on plex.tv, not in the app.
+Account **creation** happens on the account service, not in the app.
 
 ### 5.3 Who's watching
 
-Shown after sign-in when the Plex Home roster holds more than one profile.
+Shown after sign-in when the household roster holds more than one profile.
 
 Centred title **"Who's watching?"**, a horizontal row of **circular profile avatars** with each
 name beneath, and a **Sign out** pill centred below them.
@@ -315,8 +315,8 @@ walks a shelf, OK opens the item's detail page. ▲ from the field reaches the t
 first pill reaches the profile chip. **BACK returns to Home** — Search is a peer, not a page (§2.2).
 
 The line beside the field names the **scope** — which server or servers are being searched. Search
-covers the user's own servers and any shared with the account; Plex Discover / Watchlist catalog
-results are deliberately out of scope, by decision rather than by omission.
+covers the user's own servers and any shared with the account; the vendor's Discover / Watchlist
+catalog results are deliberately out of scope, by decision rather than by omission.
 
 *The figure searches the demo library's mock server, so its scope line names that server,
 "Demo Library".*
@@ -656,10 +656,10 @@ is held up, so the countdown is never invisible.
 Up Next deliberately outranks Skip Credits: with somewhere to go, "next episode" is the better
 offer.
 
-**Credits detection is a Plex Pass server feature, and where the server has none the app synthesizes
+**Credits detection was a paid-tier server feature, and where the server had none the app synthesized
 a 30 s tail — but only when there is a next episode to offer.** So the synthesized tail always
 raises Up Next and can never raise a Skip pill: a movie's tail must not grow a *Skip Credits* button
-pointing nowhere. The practical consequence for a bench test is that on a Pass-less server **Skip
+pointing nowhere. The practical consequence for a bench test is that on a server without the paid tier **Skip
 Credits is unreachable**, and only *Skip Intro* and *Up Next* can be exercised.
 
 At the end of an item with nothing queued, the player simply exits to the page it came from. **There
@@ -747,7 +747,7 @@ Where the four deferring items are answered, and the neighbouring items this doc
 Every figure in this document was taken from the **desktop simulator**, which runs the same
 application core at the authored 1920×1080, against the **mock server's demo library** — openly
 licensed and public-domain films (`tests/demo_library/`, credited in
-`docs/screenshots/CREDITS.md`) — and never against a real Plex account. `make screenshots`
+`docs/screenshots/CREDITS.md`) — and never against a real account. `make screenshots`
 regenerates all of them from the scene manifest `tests/screenshots/scenes.json`, which names the
 state each figure shows and the dev triggers that reach it. Layout, focus, navigation and the whole
 data layer are identical to the television's.

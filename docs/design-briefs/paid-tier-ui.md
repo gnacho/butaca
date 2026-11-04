@@ -1,13 +1,19 @@
-# Design brief — Plex Pass awareness in the player UI
+# Design brief: paid-tier awareness in the player UI
 
-> **Resolution (2026-08-11, owner's directive): the design is the VISUAL baseline; the logic
-> follows Plex's own Pass documentation.** The design's second revision cut deliverable B's
-> third state on a premise the docs contradict ("a server without Plex Pass cannot convert at
-> all" — h264 software encoding is free; only HEVC/hardware transcode and HDR tone mapping are
-> Pass-gated). So: the HDR→SDR warning STANDS (chip + capsule, `detail.rs::hdr_degrades` is
-> the docs-derived truth table), the two quiet states stand, and the mock's C-variant wording
-> ("cannot encode video without PLEX PASS") was not adopted — the read-out keeps the causally
-> honest reason with the capsule as a separately stated fact.
+> **Resolution (2026-08-11, owner's directive): the design is the VISUAL baseline, and the logic
+> followed the retired vendor's own paid-tier documentation.** The design's second revision cut
+> deliverable B's third state on a premise the docs contradict ("a server without the paid tier
+> cannot convert at all": h264 software encoding was free, and only HEVC/hardware transcode and
+> HDR tone mapping were tier-gated). So: the HDR→SDR warning STOOD (chip + capsule,
+> `detail.rs::hdr_degrades` was the docs-derived truth table), the two quiet states stood, and
+> the mock's C-variant wording ("cannot encode video without the paid tier") was not adopted,
+> because the read-out keeps the causally honest reason with the capsule as a separately stated
+> fact.
+
+> **Superseded 2026-11-03 (#208):** the paid tier, its capsule and the HDR→SDR warning left the
+> tree with the retired client, and a Jellyfin server has no subscription to report. The brief
+> stays as the record of how the visual language was decided. `detail.rs::hdr_degrades` no
+> longer exists.
 
 Paste this whole brief into the Claude Design project. Deliverables come back as preview cards
 (HTML mockups + a short spec each) so they can be pulled into the codebase via design-sync, the
@@ -15,7 +21,7 @@ same flow the Continue Watching cards used.
 
 ## Product context (read first)
 
-**Butaca** — a native, unofficial Plex client for LG webOS televisions. 10-foot UI in the
+**Butaca** — a native, unofficial Jellyfin client for LG webOS televisions. 10-foot UI in the
 Apple TV design language: near-black grounds, rounded-rect cards, focus shown by scale + soft
 glow (spring-animated), generous spacing. Authored on a fixed **1920x1080** canvas. Input is a
 D-pad plus LG's Magic Remote pointer — every interactive element needs a focus state, but two of
@@ -29,27 +35,28 @@ Existing pieces these designs must sit beside, not fight:
 - The detail page already has a **filled badge row** (e.g. a `4K` version badge) in the facts
   line under the title — deliverable B extends this row.
 - Menus are **popover + table view**, never full-screen sheets.
-- The theme already carries a warm amber `#fab82e` (Continue Watching progress fill). The Plex
-  Pass brand gold is `#e5a00d`. Decide deliberately: share one amber or introduce the second as
+- The theme already carries a warm amber `#fab82e` (Continue Watching progress fill). The retired vendor's paid
+  tier used `#e5a00d`, its brand gold. Decide deliberately: share one amber or introduce the second as
   its own token — do not let two near-misses coexist by accident.
 
 ## Why these designs exist
 
-The app now knows two things it never knew before: whether **the user's Plex server has a Plex
-Pass** (some server abilities — HEVC encoding, HDR tone-mapping — exist only with one), and how
-an item will actually reach the TV (direct play vs server conversion). One real situation cannot
-be fixed in code and must be communicated instead: **on a server without Plex Pass, an HDR film
-the TV cannot decode natively gets converted without tone-mapping — washed-out, gray-ish
-colors.** The user should learn this *before* pressing Play, and in Plex's own visual language:
-the official apps mark subscription-gated features with a Plex Pass badge.
+The app now knows two things it never knew before: whether **the user's server had the paid
+tier** (some server abilities existed only with it, HEVC encoding and HDR tone-mapping among
+them), and how an item will actually reach the TV (direct play vs server conversion). One real
+situation could not be fixed in code and had to be communicated instead: **on a server without the
+paid tier, an HDR film the TV could not decode natively was converted without tone-mapping,
+washed-out and gray-ish.**
+The user should learn this *before* pressing Play, in the vendor's own visual language: its
+official apps marked subscription-gated features with a badge.
 
 **Trademark constraint, non-negotiable:** we are an unofficial client and must NOT reproduce the
-Plex Pass *logo artwork*. The badge is a **text capsule reading "PLEX PASS"** — referential use
-of the name only. Color may reference the brand gold.
+paid tier's *logo artwork*. The badge is a **text capsule carrying the tier's name** as
+referential use only. Color may reference the brand gold.
 
-## Deliverable A — the "PLEX PASS" capsule (component)
+## Deliverable A — the paid-tier capsule (component)
 
-A small text capsule: the word pair "PLEX PASS", likely CAPTION-size or smaller-cap styling,
+A small text capsule: the tier's two-word name, likely CAPTION-size or smaller-cap styling,
 gold treatment on the near-black ground. Design:
 - geometry (corner radius, padding, letter-spacing; all-caps?);
 - fill vs outline treatment, and ink color on the gold if filled;
@@ -63,8 +70,8 @@ Extends the existing badge row on the detail page. Three states, only ever one s
 
 1. **Direct Play** — neutral fact, quiet. (Most content on most setups.)
 2. **Converts on server** — neutral fact, quiet. Not a warning: conversion usually just works.
-3. **HDR → SDR** + the PLEX PASS capsule — the one warning state: "this HDR item will be
-   converted without tone-mapping on this server; proper HDR conversion needs Plex Pass."
+3. **HDR → SDR** + the paid-tier capsule, the one warning state: "this HDR item will be
+   converted without tone-mapping on this server, and proper HDR conversion needs the paid tier."
    Warning *tone*, not error tone — the film still plays.
 
 Design the row's wording (short — it shares a line with year/runtime/rating facts), the visual
@@ -78,11 +85,11 @@ Today a failed playback shows one centered caption line over black. The app now 
 needed — the ground IS black), composed of:
 - a failure glyph (we have an icon set; describe the shape, e.g. a triangle/exclaim);
 - the verdict line (TITLE or BODY weight — pick): "Playback failed";
-- the reason line (BODY/CAPTION): e.g. "The server sent audio only — it cannot encode video
-  without Plex Pass" — this variant includes the PLEX PASS capsule inline;
+- the reason line (BODY/CAPTION): e.g. "The server sent audio only, it cannot encode video
+  without the paid tier", and this variant carries the paid-tier capsule inline;
 - a quiet action hint: "Press BACK to return".
 
-Variants to show: (1) generic failure, no reason; (2) audio-only / no Plex Pass, with capsule;
+Variants to show: (1) generic failure, no reason; (2) audio-only / no paid tier, with capsule;
 (3) "This file has no video track". Must be legible from a couch (10 ft) and survive a phone
 photograph — high luminance contrast, no hue-only signals.
 
@@ -107,5 +114,5 @@ this is purely presentational. Not required.
 ## Out of scope
 
 The diagnostics ("Stats for nerds") panel — deliberately undesigned, debug surface. Server rows
-in menus — covered by the existing popover/table idiom. Any use of Plex's logo assets — see the
+in menus — covered by the existing popover/table idiom. Any use of the vendor's logo assets, see the
 trademark constraint.

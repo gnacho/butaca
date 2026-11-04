@@ -67,9 +67,9 @@ and unchanged canonical state. Stack samples also included a Wayland poll wait u
 - Device captures were opened and inspected, including tile 1,027 during the image-disabled
   warm run. The fixture uses unique source keys and JPEG bytes with shared raster art, so it
   tests cache cardinality rather than 1,200 different decoder encodings.
-- Real Plex browsing was also checked visually: ordinary posters, Home backdrops and transparent
+- Real browsing against the live server was also checked visually: ordinary posters, Home backdrops and transparent
   title artwork. The original debug cache was preserved for the stress run and restored before
-  this check; the stable installation was not modified. A further real-Plex process restart
+  this check; the stable installation was not modified. A further restart against the live server
   recorded 15 disk hits and zero image fetches while displaying Home artwork.
 - Host tests cover byte/count eviction, corrupt/oversized files, atomic write failure, legacy
   avatar migration, freshness versus recency, account-generation races, GPU eviction reload,

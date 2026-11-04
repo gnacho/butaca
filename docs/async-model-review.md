@@ -52,7 +52,7 @@ Per keypress, in order:
 `load_detail`'s own doc comment already admits it: *"Blocks on several HTTP round-trips… called
 synchronously when opening the detail page"* (`metadata.rs:470-471`).
 
-Every one of these bottoms out in `plex/client.rs:100/116/121` → `stream.rs`'s blocking raw
+Every one of these bottoms out in the retired `client.rs:100/116/121` → `stream.rs`'s blocking raw
 socket, and **each control-plane request opens a brand-new TCP connection** (`crate::http`
 allocates a fresh `HttpStream` and `http_close`s it). Media sequential GETs reuse the demux
 socket; that keep-alive is not this main-thread freeze.

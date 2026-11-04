@@ -5,15 +5,15 @@ coding agents. The concise, always-loaded project contract is `AGENTS.md`; Claud
 
 ## What this is
 
-A **real, native Plex client for LG webOS 4.5 TVs** — built toward production quality, not a
+A **real, native Jellyfin client for LG webOS 4.5 TVs** — built toward production quality, not a
 throwaway. **Build proper, reusable, well-factored components and finish them** — a shortcut is
 never justified by "it's only a demo." See `rust-modules/src/ui/CLAUDE.md` for how the UI is
 expected to be built. It's cross-compiled and sideloaded onto a rooted 32-bit ARM TV,
-renders an Apple-TV-style gallery/shelf UI with SDL2 + OpenGL ES 2, and plays video from a Plex
-Media Server (PMS) entirely in-app.
+renders an Apple-TV-style gallery/shelf UI with SDL2 + OpenGL ES 2, and plays video from a
+Jellyfin server entirely in-app.
 
 **Almost everything is Rust** in `rust-modules/src/` (UI, event loop, input, player orchestration,
-the streaming/demux pipeline, and the Plex data layer), compiled to a static lib and linked in
+the streaming/demux pipeline, and the server data layer), compiled to a static lib and linked in
 (see the Makefile). Only two things stay C: `src/main.c` — a small **boot shim** (the event-log
 handle, stderr capture, process bring-up) that then calls the Rust `butaca_run()` — and
 `src/starfish.c`, the **StarfishMediaAPIs C++/ACB seam**. Two more `.c` files sit beside them:
@@ -41,10 +41,10 @@ the pinned Sentry Native cross-build), and `sshpass` (Homebrew, for deploy/run).
 
 - `make setup-env` — download + extract + `relocate-sdk.sh` the webOS NDK into `$(WEBOS_SDK)`
   (default `~/webos-ndk/…`). One-time; re-run `relocate-sdk.sh` if you move the SDK.
-- `tools/sim.ps1 setup|build|run|shot|send` — Windows 11 UI/Plex simulator through the existing
+- `tools/sim.ps1 setup|build|run|shot|send` — Windows 11 UI/server simulator through the existing
   Ubuntu 22.04 WSLg runtime. It uses GPU-accelerated desktop OpenGL, keeps build/runtime state on
   WSL's Linux filesystem, and stages fonts, their notice and the bundled ASS renderer into an isolated app directory. Its `make sim-wsl`
-  build is optimized and deliberately skips host FFmpeg, so it covers UI, sign-in, Plex browsing,
+  build is optimized and deliberately skips host FFmpeg, so it covers UI, sign-in, media browsing,
   screenshots and remote commands but not demux/clock-sink playback. WSLg's non-blocking GLX swap
   is capped at 60 Hz in the Linux host build. The launcher also refuses WSLg's `use_gfxredir=0`
   copy fallback, where GL swaps can remain at 60 while the Windows surface updates at only a few
@@ -238,7 +238,7 @@ the pinned Sentry Native cross-build), and `sshpass` (Homebrew, for deploy/run).
   `Cargo.toml` plus a present `RELEASE_LINE` reports `0.6.1-dev` rather than `0.7.0-dev`. The file's
   absence is unconditionally the trunk behaviour above — nothing about a `main` checkout changes.
   It also makes the semver ordering mean something — `0.7.0-dev` precedes `0.7.0`. That is the string every
-  surface reports (X-Plex-Version, the Sentry release, PostHog's `app_version`, the lab snapshot, the
+  surface reports (the version header, the Sentry release, PostHog's `app_version`, the lab snapshot, the
   photographed diagnostics panel); before it, a release commit left the whole tree claiming to BE the
   release it had just cut, and nothing downstream could separate a working tree from the shipped
   artifact. The suffix never reaches `pkg/appinfo.json` or the control file — LG takes three integers
@@ -332,7 +332,7 @@ kills the process at `exec()` — before `main`, before the event log exists. So
   wrappers; moving it *before* the ellipsis is a different CALLING CONVENTION, because **one ABI
   passes variadic arguments on the stack** while named ones go in registers. ARM32 and x86-64 pass
   both ways identically, so this compiles, passes `make check`, runs on the television — and
-  SIGSEGVs inside libcurl's `strlen` on a desktop, at the first plex.tv call. It was the shape the
+  SIGSEGVs inside libcurl's `strlen` on a desktop, at the first account-service call. It was the shape the
   macro emitted until 2026-08-16.
 
 **FFmpeg is a third unlinked family, and it is no longer a version question at all: the app BUNDLES
@@ -424,9 +424,9 @@ and call it settled.
   but often the only public statement of a signature.
 - Also worth searching, in roughly this order of authority: **LG's own published docs**;
   **source of other clients that drive the same API** (Kodi's webOS port is the closest analogue —
-  it drives StarfishMediaAPIs in the same `BUFFERSTREAM` mode; jellyfin-webos and Plex's own webOS
-  app are NOT analogues, they hand the TV a URL, which is a different pipeline and their results
-  do not transfer); **vendor specs** for formats (Dolby, ITU, RFC); the **openlgtv / webosbrew**
+  it drives StarfishMediaAPIs in the same `BUFFERSTREAM` mode; jellyfin-webos and the retired
+  vendor's own webOS app are NOT analogues, they hand the TV a URL, which is a different
+  pipeline and their results do not transfer); **vendor specs** for formats (Dolby, ITU, RFC); the **openlgtv / webosbrew**
   community; and the FFmpeg source we vendor.
 - **Grade what you find.** Vendor doc, a spec, or source you can read beats a forum post, which
   beats a recollection. Say which tier a claim came from. And prefer the `find-docs` skill / `ctx7`
@@ -461,10 +461,10 @@ pipeline. Two worker threads (demux, media/load) sit beside the main loop, which
 ACB/Starfish control calls. **That GET has TWO transports and the part URL's SCHEME picks one**,
 once, in `ff::demux`: `http` reads through `stream.rs`'s raw socket, `https` through
 **`curlio.rs`** — libcurl's *multi* interface behind a `read`/`seek`/`size`/`status`/`abort` pull
-source, so `ff.rs` never learns curl-multi mechanics. It exists because LG's reviewers have no PMS
+source, so `ff.rs` never learns curl-multi mechanics. It exists because LG's reviewers have no server
 on their LAN and stream from the public internet, which `stream.rs` cannot reach: it speaks
-cleartext. So **libcurl is used by two modules for two jobs** — `net.rs` for plex.tv plus HTTPS PMS
-control calls, `curlio.rs` for the media bytes — and each binds its own `dynlib!` table,
+cleartext. So **libcurl is used by two modules for two jobs** — `net.rs` for the account service plus HTTPS
+server control calls, `curlio.rs` for the media bytes — and each binds its own `dynlib!` table,
 which the linking section explains is load-bearing rather than tidy.
 
 ## Key files
@@ -515,7 +515,7 @@ which the linking section explains is load-bearing rather than tidy.
   the hand-rolled `mkv.rs` demuxer they fed is retired — `ff.rs` is the only demux path.)
 - `rust-modules/src/diag/` — **the redaction pass and the diagnostic plumbing every off-device
   report shares**. `scrub.rs` is the one that matters and it is **UNGATED**: `crate::log` runs
-  `scrub_local` on every line in every build, so credentials, hosts, bare addresses, Plex GUIDs,
+  `scrub_local` on every line in every build, so credentials, hosts, bare addresses, catalog ids,
   search queries and this household's names are rewritten **before the write**, not on the way out.
   **Two exits, differing in exactly one respect** — `scrub` (network) may DROP a line it cannot
   make safe; `scrub_local` (disk) may only rewrite one, because a line silently vanishing from the
@@ -527,7 +527,7 @@ which the linking section explains is load-bearing rather than tidy.
   the mechanism for viewing content is that call sites do not write it, pinned by a test that greps
   the tree — see `no_log_call_site_interpolates_viewing_content`. Adding a `log(&format!(…))` that
   interpolates an item title, a search query or subtitle text will fail `make check`.
-  Identities come from `plex::session::publish_identities`, PUSHED on load/save; the scrubber must
+  Identities come from `server::session::publish_identities`, PUSHED on load/save; the scrubber must
   never call `session::peek()` from the log path — it is now cache-served, with a refresh queued to
   `storage_worker` and no direct file I/O, but worker startup holds `storage_worker::SHARED` across
   `task::spawn`, whose refusal logs. A `peek()` that schedules a refresh from that log tries to take
@@ -646,8 +646,9 @@ which the linking section explains is load-bearing rather than tidy.
   17.5 Mbps — are one scripted run instead of four launches, and #14's degrading link is
   measurable rather than anecdotal. `tools/netcond.py --selftest`
   proves the shaper against a loopback transfer with no television in the room. Point the app at it by editing `PMS_PORT` in the gitignored `src/config.local.h` and
-  `make deploy` (host/port are compiled into `main.c`). **Pick a port Plex is not already on** — it
-  binds `127.0.0.1:32401` itself, and the more specific bind wins, so the proxy is silently bypassed.
+  `make deploy` (host/port are compiled into `main.c`). **Pick a port the media server is not already
+  on**: a server binds a loopback port of its own (the retired vendor's took `127.0.0.1:32401`), and
+  the more specific bind wins, so the proxy is silently bypassed.
   **And the desktop application firewall silently drops the TV's connections to the ad-hoc python
   listener** (verified 2026-08-11: netcond up, mode armed, zero requests logged, the TV's probe gets
   an empty read) — the "allow incoming connections?" GUI prompt must be clicked once per python
@@ -695,16 +696,18 @@ which the linking section explains is load-bearing rather than tidy.
   `"wan": "off"`, restores in the case's `finally` and again in `teardown()`. Two more case
   attributes came with it: `"session": "stored"` boots from the install's OWN sign-in instead of
   the injected token (the injected path installs a plaintext origin and never touches the
-  `plex.direct` name a real sign-in persists, so an offline case through it is a false pass by
+  address-derived origin name a real sign-in persists, so an offline case through it is a false pass by
   construction; the case refuses when the install holds no sign-in), and `"primary_ipv6": true`
-  re-points the primary onto its IPv6 `plex.direct` origin read off plex.tv, with its `pin`.
+  re-points the primary onto its IPv6 address-derived origin read off the account service, with its
+  `pin`.
   `offline_play` and `offline_play_v6` are the cases, and `expect.resolve_pin` /
   `expect.offline` are their assertions (the latter keyed on the slot the play was dispatched
-  on, requiring that slot's `hubs: source N ok`, with the negative control being any plex.tv
-  refusal the app logged OR — when a managed profile is active and the boot makes no plex.tv
-  call at all — the tool's own `resolve plex.tv -> FAIL` probe from the set; the former, for `v6`, also requires the v6
+  on, requiring that slot's `hubs: source N ok`, with the negative control being any account-service
+  refusal the app logged OR, when a managed profile is active and the boot makes no
+  account-service call at all, the tool's own `resolve ... -> FAIL` probe from the set. The
+  former, for `v6`, also requires the v6
   re-point line to PRECEDE the play start, since the scrubber turns every host into `<host>`
-  and the pin line itself names only the family — a dashed `plex.direct` label is a LAN
+  and the pin line itself names only the family, because a dashed origin label is a LAN
   address spelled sideways and is never logged). Both PASSED on the dev build, real cut,
   2026-09-05 (`docs/measurements/offline-wan-cut-tv-2026-09-05.log`). **The release build
   cannot be a harness case** — `run.py` refuses a release binary and its key injection needs
@@ -713,10 +716,10 @@ which the linking section explains is load-bearing rather than tidy.
   physical remote, browse, play, then read `tv-session.sh log 'resolves|hubs: source|curl rc'`
   and `wan on`. **Done 2026-09-06 by the owner, with the router's uplink really down — and it
   FAILED at the picker**: the origin was pinned and the roster restored, but every profile pick
-  went to plex.tv's `/switch` and timed out (`docs/measurements/offline-picker-red-tv-2026-09-06.log`;
+  went to the account service's `/switch` and timed out (`docs/measurements/offline-picker-red-tv-2026-09-06.log`;
   the active profile is the PIN-protected admin, which the one no-network shortcut excluded).
   The fix caches each profile's credentials at its ONLINE seating (`Session::profiles`, a PIN as
-  a local verifier) and seats from that when plex.tv does not answer — `plex/CLAUDE.md` has the
+  a local verifier) and seats from that when the account service does not answer: `server/CLAUDE.md` has the
   mechanism, `offline_pick_cached` is the harness case (its `prime_online` step seats the tile
   once with the link up, so the cache is the case's own doing), and the PIN half is proven on
   the simulator (`offline-picker-sim-green-2026-09-06.log`) because the harness cannot type a
@@ -796,7 +799,7 @@ which the linking section explains is load-bearing rather than tidy.
 
 - **This repository is PUBLIC, and some of the data in this working copy is not the maintainer's
   to publish.** Several paths are gitignored for that reason — `.tv-host`, `.tv-mac`,
-  `src/config.local.h` (a live Plex token), `tests/manifest.local.json` and `pkg/auth.json` among
+  `src/config.local.h` (a live access token), `tests/manifest.local.json` and `pkg/auth.json` among
   them; the LIST is `PRIVATE_FILES` in `.claude/hooks/outbound-guard.py`, not this sentence, which
   is why no count is given here. The rule for anything leaving the machine is **placeholders,
   always** — a PR body, an issue comment, a release note, a commit message — and the table at the
@@ -1211,7 +1214,7 @@ you get without waking a television. What it covers today, by module:
   **Since 2026-09-10 the lock also records WHICH THREAD holds it, and the stores ASSERT it.** A
   mutex nobody is obliged to take is a convention, and a convention broken by one test in two
   thousand does not fail — it hands some other module's test a wiped store, at a rate that reads
-  as flakiness. Browse's owned reset path (`BrowseCmd::Reset`), `plex::servers::reset_for_test`
+  as flakiness. Browse's owned reset path (`BrowseCmd::Reset`), `registry::reset_for_test`
   and the whole app frame
   (`app::bridge::frame_with_results`, which drains the aggregate notices and pumps every store)
   call `testlock::assert_held`, so an unguarded write is now a deterministic panic in
@@ -1233,7 +1236,7 @@ triggers, is driven by the same remote-FIFO tokens, and screenshots itself. **Th
 harness jobs kill each other — while N simulators run side by side, each pointed at its own
 instance root (`BUTACA_RUNTIME_DIR`, which is where the triggers, FIFO and event log now come
 from; unset it and everything resolves to `/tmp` exactly as before). It answers layout, focus,
-navigation, every screen, and the whole Plex data layer.
+navigation, every screen, and the whole server data layer.
 The simulator deliberately omits FFmpeg and stops at the host no-video seam, so the streaming
 half of the pipeline — real HTTP, real demux, real HLS, the real adaptive controller — stays
 device-only. Arm `butaca-clocksink` (`player/ffi_host.rs` — AUs accepted and discarded, a
@@ -1305,8 +1308,8 @@ resolves every key and so never enters the path. The full on-device suite is `./
 (count it with `--list --server`, never from here; `--fps` for the perf gates), and `make test` = `deploy` + `run`.
 
 **Tier 2 is TWO SUITES on one television, and since 2026-08-22 the DEFAULT IS THE SYNTHETIC ONE.**
-A bare **`./tests/run.py`** now runs the SYNTHETIC tier (generated clips, no Plex — take the count
-yourself with `./tests/run.py --list`, which is the only census that cannot rot; the number written
+A bare **`./tests/run.py`** now runs the SYNTHETIC tier (generated clips, no media server, and you
+take the count yourself with `./tests/run.py --list`, which is the only census that cannot rot; the number written
 here went stale inside the branch that wrote it, in one commit); the
 library-backed cases everything above describes are **`./tests/run.py --server`**, and `--fps` /
 `--fps-player` imply `--server` because those scenes navigate a real signed-in Home. `--pipeline`
@@ -1316,9 +1319,9 @@ be the thing that runs for everybody, needs no credentials, touches nobody's wat
 answers "is the PLAYER broken" — charging a PMS, a token and a filled-in overlay for typing
 `./tests/run.py` meant most people could not type it at all. **Never ship on the default alone**
 (what it cannot see is three paragraphs down). The server tier is still the right shape for what it
-grades — SELECTION: `/decision`, direct-play vs transcode, track menus from PMS metadata, markers,
+grades — SELECTION: `/decision`, direct-play vs transcode, track menus from server metadata, markers,
 resume, the `/:/timeline` reporter — which is also why it needs somebody's library.
-**The synthetic tier is the PLAYER PIPELINE, with no Plex anywhere.** A generated clip (`make fixtures-pipeline`, ~0.9 GB flat in
+**The synthetic tier is the PLAYER PIPELINE, with no media server anywhere.** A generated clip (`make fixtures-pipeline`, ~0.9 GB flat in
 `$FIXTURES_OUT/pipeline`) is served off the dev Mac by `tests/serve_fixtures.py` and played through
 **`/tmp/butaca-playurl`**, one JSON object carrying the URL *and the Load payload declaration*.
 It needs a TV address and nothing else — no token, no ratingKey, no `manifest.local.json`, no
@@ -1625,7 +1628,7 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   suppresses the who's-watching picker, silently changing which screen you boot to. The
   **`tv-session` skill** drives all of this (clear → arm → launch → assert) and owns the
   screen-to-trigger recipes. **`/tmp/butaca-storepolicy`** gives a developer build the STORE's
-  credential policy (`CredentialPolicy::HttpsOnly`, `plex/origin.rs`) for the whole launch: every
+  credential policy (`CredentialPolicy::HttpsOnly`, `origin.rs`) for the whole launch: every
   `devtriggers` build otherwise lets a token ride plaintext, so the BUTACA-10 "Connect without
   encryption?" flow — reachable only when plaintext needs a consented grant — cannot be reached in
   the sim or on the TV without it. It only tightens, and a store build has no trigger to read. The
@@ -1701,11 +1704,12 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   `final` credits marker, the whole finish → Up Next → auto-advance chain, without playing 50
   minutes of episode first),
   **`/tmp/butaca-nowan[=slow]`** (the OFFLINE reproduction: every name that would have gone
-  to a resolver — plex.tv, discover, an UNPINNED `plex.direct` origin — fails as it does on a LAN
-  whose uplink is down, while a literal or a pinned name is untouched; `slow` first spends the
-  connect budget a dead resolver would have cost. It is how `plex::ResolvePin`, the fix that dials
-  the household's own `plex.direct` name at the address plex.tv advertised beside it, is shown red
-  and green on the simulator with a stored session; pair a `/tmp/butaca-servers` entry's
+  to a resolver, the account service, discovery and an UNPINNED address-derived origin, fails as
+  it does on a LAN whose uplink is down, while a literal or a pinned name is untouched; `slow`
+  first spends the connect budget a dead resolver would have cost. It is how `origin::ResolvePin`,
+  the fix that dials the household's own origin name at the address the account service advertised
+  beside it, is shown red and green on the simulator with a stored session; pair a
+  `/tmp/butaca-servers` entry's
   `"scheme":"https"` with its new `"pin":"<address>"` field to put a pinned TLS origin through the
   registry headlessly),
   `/tmp/butaca-failtest[=verdict|audio|novideo|stream|connection|tv|jail|none]` (force one
@@ -1715,8 +1719,8 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   swaps the frame at once; `stream`, `connection`, and `tv` exercise the runtime media-source,
   interrupted-transfer, and native-pipeline reasons; `jail` forces the missing-`/dev/rtkmem`
   read-out regardless of the real device probe, since most dev machines are not an affected SoC;
-  pair `audio` with
-  `/tmp/butaca-nopass` for the PLEX PASS capsule line. Every arm but `jail` feeds the real
+  the `audio` arm used to pair with `/tmp/butaca-nopass` for the paid-tier capsule line, and both
+  went when that line did. Every arm but `jail` feeds the real
   `player::error_shape` (`jail` is the one `ErrorShape` `error_shape` never produces, so it calls
   the sibling `jail_error_shape` directly instead), and forces the STATE only at
   `player_hud::busy` — never at `player::state()`, which the pump acts on),
@@ -1868,5 +1872,5 @@ path. Never run only this one before a release. `tests/README.md` has the tier t
   entry is the **television's own keyboard**, raised by plain `SDL_StartTextInput` — the backend is
   in LG's Wayland driver, not the webOS extension API, which is why `SDL_webOS.h` looks like it has
   no keyboard. The field, shelves, test seams and every trap in that path are documented in
-  **`docs/search.md`**. Search is **server-only** by decision — Plex
-  Discover / Watchlist catalog results are out of scope.
+  **`docs/search.md`**. Search is **server-only** by decision: the retired
+  vendor's Discover / Watchlist catalog results are out of scope.

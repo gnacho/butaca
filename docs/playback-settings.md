@@ -1,8 +1,8 @@
 # Playback settings
 
 Settings has **Video & playback** and **Audio & subtitles** pages. Quality and Direct Play
-are saved on this television; language preferences are saved to the active Plex profile and
-are shared with other Plex clients.
+are saved on this television; language preferences are saved to the active account profile and
+are shared with other clients.
 
 ## Quality and Direct Play
 
@@ -24,12 +24,12 @@ Disabled needs no confirmation.
 
 Audio passthrough remains the television's Digital Sound Output setting.
 
-## Plex account preferences
+## Account preferences
 
-The screen loads and saves the active profile using its own plex.tv credential. A save sends
-only changed keys to `PUT https://clients.plex.tv/api/v2/user/profile`, with query parameters and
-an empty body. Saving does not create a television-only language preference. Confirmed values
-remain authoritative if a save fails; the screen provides Retry. Responses for an old profile
+The screen loads and saves the active profile using its own account-service credential. A save sends
+only changed keys to `PUT /api/v2/user/profile` on the account service's clients host, with query
+parameters and an empty body. Saving does not create a television-only language preference.
+Confirmed values remain authoritative if a save fails; the screen provides Retry. Responses for an old profile
 or an obsolete preference revision cannot replace newer settings.
 
 Audio **Original** clears the preferred language while enabling automatic selection. Subtitle
@@ -43,17 +43,17 @@ this delay, and the resolver does not guess that an old-language selection was a
 
 ### Language catalog provenance
 
-Both pickers bundle the complete account-picker catalog verified in **Plex Web 4.160.0**,
-build **75ddd7b**: 190 entries with native display names and exact language codes. This data is
+Both pickers bundle the complete account-picker catalog verified in the vendor's web app
+**4.160.0**, build **75ddd7b**: 190 entries with native display names and exact language codes. This data is
 local; the application does not download JavaScript to populate the menu. The choices are
 independent of which languages happen to occur in the current library or item.
 
 Sources inspected:
 
-- [Language catalog, module 12060](https://app.plex.tv/desktop/js/main-8792-79c4e04db2360a62e838-plex-4.160.0-75ddd7b.js).
-- [Audio & Subtitle Settings picker](https://app.plex.tv/desktop/js/chunk-4030-108232e3535fafc4f3ac-plex-4.160.0-75ddd7b.js).
+- Language catalog, module 12060, in that web app's main bundle.
+- Audio & Subtitle Settings picker, in its chunk 4030 bundle.
 
-Plex sorts native names with `localeCompare`, excludes `xx` and `xn`, and restricts this picker
+That web app sorts native names with `localeCompare`, excludes `xx` and `xn`, and restricts this picker
 to codes of length two or five. Its broader catalog includes `es-419`, but that value is not
 an offered account-picker option. Existing account values outside the offered list remain
 visible and are preserved. Regional codes are not rewritten on save.
@@ -96,5 +96,5 @@ this change does not advertise all DTS-HD streams as directly playable.
   malformed packet guard remains intact. The sample media is not distributed in this repository.
 
 The television remained muted with its panel off. These results do not claim audible output
-verification, and no real Plex account language preferences were written. The throwaway-account
+verification, and no real account language preferences were written. The throwaway-account
 PMS propagation measurement is still outstanding.

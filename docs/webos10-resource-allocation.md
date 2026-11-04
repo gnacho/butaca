@@ -60,7 +60,7 @@ not the link, the server, the content or the hour.
 
 ## Why this is a ship-blocker rather than an edge case
 
-Every Plex server transcode targets H.264 (or falls back to it). So on webOS 10:
+Every server transcode targets H.264 (or falls back to it). So on webOS 10:
 
 - **HEVC direct play** — fine.
 - **Every transcode** — refused at Load, before a frame, before the video plane binds.

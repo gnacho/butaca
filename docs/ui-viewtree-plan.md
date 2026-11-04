@@ -166,7 +166,7 @@ migration must keep them as thin wrappers.
 14. **Detail spring phase**: `card_scale.jump(1.0)` on every LEFT/RIGHT + UP/DOWN change
     (detail.rs:215,228); entering tabs lands on `cur_season` (:230-235); ep_hscroll pins the focused
     card to the 2nd slot (:243-250). `on_ok` sets `last_resume_ns=0` at entry (:682) then applies the
-    Plex skip-<10s/>95% rule (:670-677); app.rs reads `last_resume_ns()` ONLY after `on_ok()==true`.
+    the retired client's skip-<10s/>95% rule (:670-677); app.rs reads `last_resume_ns()` ONLY after `on_ok()==true`.
 15. **Detail reset order** in `open` (detail.rs:178-193): `track_menu::reset()` → set
     selected/section=0/col=0 → `scroll.jump(0.0)` → `load_detail` (blocking). `open_rk`/`open_rk_season`
     reset selected/section=0/col=0 + `scroll.jump(0.0)` then load (detail.rs:725-745). `close`:

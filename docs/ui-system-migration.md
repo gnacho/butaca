@@ -107,7 +107,7 @@ invisible until on-TV capture; each is gated behind its own `make` + capture che
 | `RAIL_TRACK` | `[1.0, 1.0, 1.0, 0.20]` | ProgressBar track `widgets.rs:367`; scrubber track `player_hud.rs:214` (merge 0.24 near-dup) |
 | `RAIL_BUFFERED` | `[1.0, 1.0, 1.0, 0.28]` | ProgressBar buffered `widgets.rs:385`; home resume track `home.rs:67`; detail ep resume track `detail.rs:520` |
 | `RAIL_FILL` | `[1.0, 1.0, 1.0, 0.95]` | ProgressBar fill `widgets.rs:367`; detail ep resume fill `detail.rs:521` |
-| `RESUME_FILL` | `[0.98, 0.72, 0.18, 0.95]` | warm amber Continue-Watching fill `home.rs:68` (unique Plex-progress accent; no player equivalent — hosted so `Card`/`ProgressBar.fill` can import it) |
+| `RESUME_FILL` | `[0.98, 0.72, 0.18, 0.95]` | warm amber Continue-Watching fill `home.rs:68` (the retired client's unique progress accent; no player equivalent — hosted so `Card`/`ProgressBar.fill` can import it) |
 | `HAIRLINE` | `[1.0, 1.0, 1.0, 0.10]` | section divider `table.rs:243` |
 | `OVERLAY_FOCUS_PILL` | `[1.0, 1.0, 1.0, 0.14]` | detail hand-rolled tab focus pill `detail.rs:481` (becomes `ACCENT` when `TabPill` is adopted — kept as a token until then) |
 | `OVERLAY_FOCUS_SOFT` | `[1.0, 1.0, 1.0, 0.07]` | About selection panel `detail.rs:876` |

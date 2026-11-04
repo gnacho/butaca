@@ -82,7 +82,7 @@ scripts requiring shaping or bidirectional layout need renderer work before bein
 ## Runtime behavior
 
 Settings → Language defaults to the television's UI language. Explicit English, Spanish and
-Belarusian choices apply the next time the app starts. The running UI and Plex request language
+Belarusian choices apply the next time the app starts. The running UI and server request language
 remain unchanged until then; playback is not interrupted. The contribution action displays this
 guide's URL and QR code for opening on another device.
 
@@ -92,7 +92,7 @@ languages use English. Missing formatting settings use the resolved UI language'
 default. Numeric Gregorian dates and numbers use the formatting locale; playback clocks remain
 durations. Locale data and catalogs are bundled, so translating the UI requires no network.
 
-Plex requests carry the resolved UI language in `X-Plex-Language`. Servers may still return their
+Server requests carry the resolved UI language in the language header. Servers may still return their
 own stored language. This preference does not change media audio/subtitle selection or library
 sorting. Launcher metadata follows webOS's system language independently of the app override.
 
@@ -118,4 +118,4 @@ questions, disclosure scrolling and the contribution page. The QR code decoded t
 The device preference was restored to System default afterward.
 
 These checks cover localization and UI behavior. They do not replace decoder/playback tests,
-and a Plex server may still return metadata in its own stored language.
+and a media server may still return metadata in its own stored language.

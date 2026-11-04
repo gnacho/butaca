@@ -235,7 +235,7 @@ could have revealed it except asking.
 > sequence ran — created, `windowId` spliced into the Load payload, placed `rv=1`, VDEC/ADEC
 > allocated, fed to EOS with clean teardown. Six of eight playbacks worked: H.264 1080p, H.264
 > 4K, HEVC, AAC and AC3, episodes, end-of-file. The two failures were server-side and
-> firmware-independent (an HEVC-only transcode target on a server without Plex Pass — fixed the
+> firmware-independent (an HEVC-only transcode target on a server without the paid tier, fixed the
 > same day). Items 4 and 5 are implicitly settled by the same report — the reviewer browsed,
 > navigated and played with the UI composited over live video. The `UNTESTED PATH` log banners
 > are gone. Note the verification is one firmware (6.5.2): 5.x and 10/11 remain start-verified

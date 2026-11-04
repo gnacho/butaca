@@ -52,7 +52,7 @@ landing_hero.rs, detail_layout.rs}}`), `cargo test --lib` (default + `hostsim`) 
   `LogoRung::lerp`'s endpoint/monotonic/clamp tests, the BACK+DOWN collapse test. **Not added**: a
   `DetailScreen`-level integration test driving `reconcile`/`valid` against a genuinely live
   `player::preview::Machine` with `view().picture == true`. That would mean driving process-wide
-  singleton state coupled to on-disk session I/O (`plex::session::peek()`) from a fast host test —
+  singleton state coupled to on-disk session I/O (`server::session::peek()`) from a fast host test —
   a worse trade than the pure-function coverage already in place, which exercises the exact logic
   gap the review found (`hero::focusable`) exhaustively and deterministically. Also not added: the
   `preview_tick` full-state-table test and the dwell-trigger test from §5's "test-review
@@ -973,7 +973,7 @@ disc control (`hero::disc_verb`, `hero.rs:292-301`) is a different playback path
 `player` module, not `player::preview`'s background machine) and shares no suppression state with
 this fix — pressing the Trailer control still plays the trailer on demand, every time, as today.
 
-**Considered and deferred (eng review, outside-voice finding #3 — overcomplexity):** moving this
+**Considered and deferred (eng review, outside-voice finding #3, overcomplexity):** moving this
 detection into `player::preview::Machine` itself as a one-shot `just_finished` flag, set at
 the `Machine::eos` transition before `Machine::stopped` wipes the session's key (the `note_eos()`/`note_stopped()` of this record's time), would eliminate this fix's ordering
 fragility at the source rather than patching around it, and would benefit any future consumer of
@@ -1325,7 +1325,7 @@ JSONL artifact: `~/.gstack/projects/MrcRjs-butaca/tasks-eng-review-20260915-1443
 - Failure modes: 0 critical gaps flagged (2 lower-severity edge cases noted, judged acceptable)
 - Outside voice: ran (Claude subagent fallback — Codex not installed) — 2 real bugs found and fixed, 1 alternative deferred to TODOS.md
 - Parallelization: 1 lane, sequential (all tasks touch `screens/detail/`)
-- Lake Score: 2/2 — both decisions comparing a complete option against a shortcut (issue 1B: single-slot vs. history; the outside-voice EOS-detection fix: screen-local patch vs. Machine-level refactor) chose the option scoped correctly for this PR's size, not the more complex one, and the incomplete option (Machine-level flag) was captured as a TODO rather than dropped
+- Lake Score: 2/2 — both decisions comparing a complete option against a shortcut (issue 1B: single-slot vs. history; the outside-voice EOS-detection fix: screen-local patch vs. Machine-level refactor) chose the option scoped correctly for this PR's size, not the heavier one, and the incomplete option (Machine-level flag) was captured as a TODO rather than dropped
 - Unresolved decisions: 0
 
 NO UNRESOLVED DECISIONS

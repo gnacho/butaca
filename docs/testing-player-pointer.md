@@ -32,7 +32,7 @@ record HUD visibility; this is a reproduced mechanism, not proof of that histori
 ## Device protocol
 
 Use `tv-lock` and `tv-session`, keeping the panel **off** and sound **off**. Run only against a
-synthetic fixture URL or mock PMS; no household Plex playback. Boot with `--guest` and verify the
+synthetic fixture URL or mock server; no household playback. Boot with `--guest` and verify the
 identity and synthetic URL in the log before input. Use the baseline
 `pipe_h264_ac3_1080p.mkv` at its full fixture duration, without autoseek or pause triggers. Let the
 video bind and advance before starting. Keep each click/drag on the same app instance; collect

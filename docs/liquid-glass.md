@@ -306,7 +306,7 @@ popup menu is too pixelated" was, 2026-08-20 to 2026-08-21.
   still clear 3:1 — floored at the design's `--glass-track-top` and capped at the flat capsule's own
   `.72`. Measured on the set: a dark hero leaves it at the floor, a bright cyan one takes it to .562.
   The readback is why the rate is low — it stalls a tiler — and the frame rate is unchanged at it.
-  **Do not read the ground from `UltraBlurColors`.** That is Plex's derived palette for an ambient
+  **Do not read the ground from `UltraBlurColors`.** That is the retired vendor's derived palette for an ambient
   wash, not the top of the picture: for the hero that measures (0.00, 0.68, 0.91) on the panel it
   reports (0.30, 0.23, 0.18), and the bar sits at its floor while the labels drown.
 

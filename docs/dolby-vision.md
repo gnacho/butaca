@@ -98,7 +98,7 @@ Neither half of this is guessable and a wrong one is silent, so both were read o
   **libpf validates nothing**, so the value cannot be inferred from libpf.
 - The value therefore has to come from whoever fills it, and **the bare literal `ATMOS` exists in
   exactly ONE library on this television: `libcbe.so`** — Chromium's media backend, the path LG's
-  own web apps (Plex's included) take. In its string pool that literal sits immediately after
+  own web apps (the retired vendor's included) take. In its string pool that literal sits immediately after
   `immersive` and in the same run as `externalStreamingInfo`, `esInfo`, `seperatedPTS`, `provider`,
   `DolbyHdrInfo`, `encryptionType`, `profileId` and `contents` — our payload, key for key.
 

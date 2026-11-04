@@ -29,7 +29,7 @@ normal build.
 Five pieces of this feature already exist, and the design is mostly wiring them together.
 
 * **One log sink.** Every diagnostic line in the app goes through `crate::log(&str)` in `lib.rs`,
-  which is also where `redact_tokens` already strips `X-Plex-Token=…`. A ring buffer tapped there
+  which is also where `redact_tokens` already strips the access-token header value. A ring buffer tapped there
   sees *everything* the app knows and inherits the redaction that is already the shipped policy.
 * **One structured state snapshot, already audited for secrets.** `player::Diag` (`player/mod.rs`,
   ~50 fields) is the exact list this ask enumerates — playback stage, load payload video/audio
@@ -266,9 +266,9 @@ buys nothing once the channel is confidential and endpoint-authenticated.
    applied to a second consumer, and it is enforced the same way: the envelope is built in one
    file, so adding a field is a deliberate edit to the file that carries the rule.
 3. **At snapshot time** — `snapshot::scrub` runs over every ring record before it is serialised:
-   the token backstop again, plus `Authorization:` / `Cookie:` / `Set-Cookie:` / `X-Plex-Token:`
+   the token backstop again, plus `Authorization:` / `Cookie:` / `Set-Cookie:` / the access-token header:
    *header-shaped* lines, `?…token=`/`password=`/`access_token=` query parameters, and any
-   `plex.direct` hostname (which encodes a household's LAN address). Pure function, host-tested
+   pinned-name hostname (which encodes a household's LAN address). Pure function, host-tested
    with the real shapes as fixtures — the same test style `redact_tests` already uses.
 
 If a record cannot be scrubbed confidently it is dropped and counted, not sent. `dropped` in the

@@ -61,7 +61,8 @@ carry a 10 Mbps source.
 
 ## 3. The prose that says the opposite
 
-`plex/probe.rs`'s `configured_tier` doc argues that guessing `Local` from an address is affordable:
+The retired `configured_tier` doc (it lived in `probe.rs`) argued that guessing `Local` from an
+address was affordable:
 
 > a wrong `Local` starts Original, and `OriginalModeController` measures the very first 750 ms
 > window and leaves on the starvation horizon — the mechanism that exists for a link which turns
